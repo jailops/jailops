@@ -1,34 +1,51 @@
-# One grouped pull request per ecosystem and week instead of one per dependency. Major versions are left to a person
-# (they can break the wire types, the embedded web consoles or the go.work setup), security updates still arrive on their own.
+# Weekly dependency updates, grouped so a week costs few PRs (and few CI runs).
+# Majors come as separate PRs: they need reading. Every PR runs the full CI (ci.yml).
 version: 2
 updates:
   - package-ecosystem: gomod
     directory: /
-    schedule: { interval: weekly, day: monday }
-    open-pull-requests-limit: 3
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(go)"
     groups:
-      go-minor-and-patch: { update-types: [minor, patch] }
-    ignore:
-      - { dependency-name: "*", update-types: ["version-update:semver-major"] }
+      go-minor-patch:
+        update-types: [minor, patch]
+
   - package-ecosystem: gomod
     directory: /sdk
-    schedule: { interval: weekly, day: monday }
-    open-pull-requests-limit: 2
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(sdk)"
     groups:
-      sdk-minor-and-patch: { update-types: [minor, patch] }
-    ignore:
-      - { dependency-name: "*", update-types: ["version-update:semver-major"] }
+      sdk-minor-patch:
+        update-types: [minor, patch]
+
   - package-ecosystem: npm
     directory: /web
-    schedule: { interval: weekly, day: monday }
-    open-pull-requests-limit: 3
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(web)"
     groups:
-      web-minor-and-patch: { update-types: [minor, patch] }
-    ignore:
-      - { dependency-name: "*", update-types: ["version-update:semver-major"] }
+      web-minor-patch:
+        update-types: [minor, patch]
+
   - package-ecosystem: github-actions
-    directory: /
-    schedule: { interval: monthly }
-    open-pull-requests-limit: 2
+    directories: ["/"]
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(actions)"
     groups:
-      actions: { patterns: ["*"] }
+      actions:
+        patterns: ["*"]

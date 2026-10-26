@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -105,8 +106,10 @@ func TestOperatorCertificateIsServedAndReloaded(t *testing.T) {
 	dir := t.TempDir()
 	crt, key := filepath.Join(dir, "own.crt"), filepath.Join(dir, "own.key")
 	writeCert(t, crt, key, "first.example.test")
-	clock := time.Now()
-	e := dtest.New(t, dtest.Options{Listen: true, Now: func() time.Time { return clock }, Mutate: func(c *daemon.Config) {
+	// the daemon's goroutines read the clock while the test moves it: an atomic, not a plain variable
+	var clock atomic.Int64
+	clock.Store(time.Now().UnixNano())
+	e := dtest.New(t, dtest.Options{Listen: true, Now: func() time.Time { return time.Unix(0, clock.Load()) }, Mutate: func(c *daemon.Config) {
 		c.Listen.HTTPS.Cert, c.Listen.HTTPS.Key = crt, key
 	}})
 	if got := serverName(t, e.D.HTTPSAddr()); got != "first.example.test" {
@@ -117,7 +120,7 @@ func TestOperatorCertificateIsServedAndReloaded(t *testing.T) {
 	if got := serverName(t, e.D.HTTPSAddr()); got != "first.example.test" {
 		t.Fatalf("reloaded before the interval: %q", got)
 	}
-	clock = clock.Add(time.Minute)
+	clock.Add(int64(time.Minute))
 	if got := serverName(t, e.D.HTTPSAddr()); got != "second.example.test" {
 		t.Fatalf("not reloaded: %q", got)
 	}
@@ -125,7 +128,7 @@ func TestOperatorCertificateIsServedAndReloaded(t *testing.T) {
 	if err := os.WriteFile(crt, []byte("garbage"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	clock = clock.Add(time.Minute)
+	clock.Add(int64(time.Minute))
 	if got := serverName(t, e.D.HTTPSAddr()); got != "second.example.test" {
 		t.Fatalf("a broken renewal replaced the certificate: %q", got)
 	}
