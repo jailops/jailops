@@ -67,11 +67,6 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - name: Wire types are current
-        run: go run ./scripts/gen-ts -check
       - name: Install, typecheck, unit tests
         run: |
           cd web
@@ -85,7 +80,7 @@ jobs:
           npm run e2e:all
 
   lint:
-    name: Go (format, vet, build, SDK, fuzz)
+    name: Go (format, vet, build, types, SDK)
     needs: web-build
     runs-on: ubuntu-latest
     env:
@@ -109,6 +104,8 @@ jobs:
           if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
       - run: go vet ./...
       - run: go build ./...
+      - name: Wire types are current
+        run: go run ./scripts/gen-ts -check
       - name: The race shards cover every package exactly once
         run: bash scripts/ci-race.sh --check
       - name: SDK module (stdlib only, outside the go.work workspace so that only its own go.mod counts)
@@ -119,7 +116,28 @@ jobs:
           go vet ./...
           CGO_ENABLED=1 go test ./... -race -count=1
           test -z "$(go list -m all | tail -n +2)" || { echo "the SDK must have no dependencies"; go list -m all; exit 1; }
-      - name: Fuzz the parsers (go allows one fuzz target per run; longer on the nightly run)
+
+  # Fuzzing beside the other Go jobs (go allows one fuzz target per run; longer on the nightly run).
+  fuzz:
+    name: Go fuzz
+    needs: web-build
+    runs-on: ubuntu-latest
+    env:
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v8
+        with:
+          name: console-dist
+          path: ${{ runner.temp }}/console
+      - name: Unpack the built consoles
+        run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
+      - name: Fuzz the parsers
         env:
           FUZZ_TIME: ${{ github.event_name == 'schedule' && '90s' || '5s' }}
         run: |
@@ -191,8 +209,7 @@ jobs:
           path: ${{ runner.temp }}/console
       - name: Unpack the built consoles
         run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
-      - run: go build ./...
-      - run: go vet ./...
+      - run: go vet ./...   # compiles everything, so no separate go build
       - name: Binaries
         run: |
           mkdir -p dist
@@ -208,8 +225,9 @@ jobs:
   # The tests on the real target. A FreeBSD VM runs the unit tests natively (pty, jail(2), sysctl and the other
   # FreeBSD-only code paths execute here, not just compile) and then the scripted end-to-end flow on a file-backed
   # ZFS pool: image build, jail create/start/exec, backup to a node and restore.
-  # Two VMs side by side: the Go tests on real FreeBSD, and the product end to end (scripts/ci-freebsd-e2e.sh). They do
-  # not depend on each other, so the run takes the longer one, not the sum.
+  # Three VMs side by side: the Go tests on real FreeBSD, the product end to end, and the packet filter test with real
+  # traffic (scripts/ci-freebsd-e2e.sh, JAILOPS_E2E_PART). They do not depend on each other, so the run takes the
+  # longest one, not the sum.
   freebsd:
     name: FreeBSD VM (${{ matrix.part }})
     needs: web-build
@@ -217,7 +235,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        part: [go, e2e]
+        part: [go, e2e, pf]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -228,14 +246,14 @@ jobs:
           path: ${{ runner.temp }}/console
       - name: Unpack the built consoles
         run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
-      # The e2e VM gets the binaries built here (cross-compiled in about a minute) instead of building them inside the VM, and
+      # The e2e and pf VMs get the binaries built here (cross-compiled in about a minute) instead of building them inside the VM, and
       # the forged-frame tool for phase 0e of the PF matrix.
       - uses: actions/setup-go@v7
-        if: matrix.part == 'e2e'
+        if: matrix.part != 'go'
         with:
           go-version-file: go.mod
       - name: Build the binaries for the e2e VM
-        if: matrix.part == 'e2e'
+        if: matrix.part != 'go'
         env:
           CGO_ENABLED: "0"
           GOOS: freebsd
@@ -255,6 +273,7 @@ jobs:
           PART: ${{ matrix.part }}
         with:
           envs: PART
+          cache-after-prepare: true
           release: "15.1"
           usesh: true
           sync: rsync
@@ -267,8 +286,8 @@ jobs:
             export CGO_ENABLED=0 GOTOOLCHAIN=auto GOFLAGS=-buildvcs=false
             kldload pf 2>/dev/null || true   # pfctl(8) of FreeBSD 15 talks to the kernel through netlink: the module must be loaded
             go version
-            if [ "$PART" = e2e ]; then
-              JAILOPS_BIN_DIR="$PWD/vm-bin" FORGE_BIN="$PWD/vm-bin/forge-freebsd-amd64" sh scripts/ci-freebsd-e2e.sh
+            if [ "$PART" != go ]; then
+              JAILOPS_E2E_PART="$PART" JAILOPS_BIN_DIR="$PWD/vm-bin" FORGE_BIN="$PWD/vm-bin/forge-freebsd-amd64" sh scripts/ci-freebsd-e2e.sh
               exit
             fi
             # the Go tests need a PostgreSQL (embedded-postgres has no FreeBSD build): start the packaged one
@@ -277,5 +296,4 @@ jobs:
             service postgresql onestart
             n=0; until su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && { echo "postgresql does not answer"; exit 1; }; sleep 1; done
             export JAILOPS_TEST_DATABASE_URL="postgres://postgres@127.0.0.1:5432/postgres?sslmode=disable"
-            go vet ./...
-            go test ./... -count=1
+            go test ./... -count=1   # go vet runs in the cross-build job on the same GOOS and files

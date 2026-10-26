@@ -112,7 +112,7 @@ snapshot() { for a in jailops/pfa/a jailops/pfa/b jailops/pfa/c jailops/pfb/o ja
 PRE=$(snapshot)
 settle() {
 	t=0; cur=$(snapshot)
-	while [ "$cur" = "$PRE" ] && [ $t -lt 60 ]; do sleep 1; t=$((t + 1)); cur=$(snapshot); done
+	while [ "$cur" = "$PRE" ] && [ $t -lt "${SETTLE_WAIT:-60}" ]; do sleep 1; t=$((t + 1)); cur=$(snapshot); done
 	same=0
 	while [ $same -lt 3 ] && [ $t -lt 90 ]; do
 		sleep 1; t=$((t + 1)); n=$(snapshot)
@@ -460,7 +460,8 @@ PRE=$(snapshot)
 policy pfa open 'default_in: allow
 default_out: allow'
 $J config set b firewall.policy open --project pfa </dev/null >/dev/null || die "attach open"
-settle 10
+# this action is meant to change nothing (the project floor wins): anchors converge in about 4s elsewhere, so 15s is plenty
+SETTLE_WAIT=15 settle 10
 # b has its own policy 'open' (default allow) but the project says default deny in: still denied
 for ver in 4 6; do
 	if [ $ver = 4 ]; then b=$B4; else b=$B6; fi

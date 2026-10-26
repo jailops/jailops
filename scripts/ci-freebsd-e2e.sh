@@ -7,12 +7,15 @@
 #
 # JAILOPS_BIN_DIR   use these binaries instead of building them (jailops, jailopsd, ... as `just build-freebsd` names
 #                   them, with or without the -freebsd-<arch> suffix)
+# JAILOPS_E2E_PART   all (default), e2e (everything but the packet filter test) or pf (only the packet filter test)
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
 set -eu
 
 cd "$(dirname "$0")/.."
 root=$(pwd)
 pool=jopsci
+part=${JAILOPS_E2E_PART:-all}
+case $part in all | e2e | pf) ;; *) echo "JAILOPS_E2E_PART must be all, e2e or pf" >&2; exit 2 ;; esac
 poolfile=/tmp/$pool.img
 work=/tmp/jailops-e2e
 mount=/jopsci
@@ -115,6 +118,13 @@ sleep 2
 $J doctor || true
 if $J doctor 2>&1 | grep -E ' FAIL '; then fail "doctor reports a failing check"; fi
 
+run_pf() {
+	step "the packet filter, with real traffic (scripts/ci-freebsd-pf.sh)"
+	# the full matrix takes minutes of waiting in its last phases; the quick form still covers every rule path
+	# FORGE_BIN (set by the caller) runs phase 0e, the forged-frame probes; without it phase 0e is skipped
+	PF_FAST=1 FORGE_BIN="${FORGE_BIN:-}" sh "$root/scripts/ci-freebsd-pf.sh" || fail "the packet filter test failed"
+}
+
 step "image, network, project"
 uplink=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
 [ -n "$uplink" ] || uplink=$(ifconfig -l | tr ' ' '\n' | grep -v -E '^(lo0|pflog0)$' | head -1)
@@ -124,6 +134,11 @@ check "image build" $J image build freebsd
 check "network create" $J network create lan --bridge jo7 --ipv4 10.77.0.1/24 --uplink "$uplink" --nat
 check "project create" $J project create demo
 check "project grant" $J project set demo --network lan --storage default
+if [ "$part" = pf ]; then # its own VM in CI: the packet filter test builds its jails from the image above
+	run_pf
+	echo "OK: the packet filter test passed"
+	exit 0
+fi
 
 step "a jail"
 check "create" $J create web --project demo --image freebsd@stable --network lan --storage default
@@ -208,10 +223,7 @@ sleep 2
 expect "the file came back" 'ci-marker' $J exec --project demo web-restored -- cat /root/marker
 expect "its own address" '10\.77\.0\.' $J exec --project demo web-restored -- ifconfig -a
 
-step "the packet filter, with real traffic (scripts/ci-freebsd-pf.sh)"
-# the full matrix takes minutes of waiting in its last phases; the quick form still covers every rule path
-# FORGE_BIN (set by the caller) runs phase 0e, the forged-frame probes; without it phase 0e is skipped
-PF_FAST=1 FORGE_BIN="${FORGE_BIN:-}" sh "$root/scripts/ci-freebsd-pf.sh" || fail "the packet filter test failed"
+[ "$part" = e2e ] || run_pf
 
 step "cleanup"
 $J stop web-restored --project demo >/dev/null 2>&1 || true
