@@ -1,0 +1,141 @@
+$ jailops create web --image freebsd-15#g1 --network lan --storage default
+jail/web created
+
+$ jailops create db --image freebsd-15#g1 --network lan --storage default
+jail/db created
+
+$ jailops start web
+jail/web started
+
+$ jailops start db
+jail/db started
+
+$ jailops update list
+! No resources found.
+
+$ jailops update check
+! usage: name the jails to update, or use --all for every jail of the project
+! hint: run 'jailops update check --help' for usage
+[exit 2]
+
+$ jailops update check web --all
+! usage: name jails or use --all, not both
+! hint: run 'jailops update check --help' for usage
+[exit 2]
+
+$ jailops update check web
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
+web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
+
+$ jailops update list
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
+web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
+
+$ jailops update check --all -o json
+[
+  {
+    "jail": "db",
+    "project": "main",
+    "os": {
+      "from": "freebsd-15#g1",
+      "to": "freebsd-15#g2"
+    },
+    "available": true,
+    "checked_at": "2026-03-01T09:00:00Z"
+  },
+  {
+    "jail": "web",
+    "project": "main",
+    "packages": [
+      {
+        "name": "nginx",
+        "from": "1.24",
+        "to": "1.26"
+      },
+      {
+        "name": "curl",
+        "from": "8.0",
+        "to": "8.1"
+      }
+    ],
+    "os": {
+      "from": "freebsd-15#g1",
+      "to": "freebsd-15#g2"
+    },
+    "available": true,
+    "checked_at": "2026-03-01T09:00:00Z"
+  }
+]
+
+$ jailops --dry-run update apply web
+dry-run: would apply updates to 1 of 1 jails in project main
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
+web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
+
+$ jailops --dry-run update apply --all
+dry-run: would apply updates to 2 of 2 jails in project main
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
+db     main      -      yes         os freebsd-15#g1 -> freebsd-15#g2               3h
+web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
+
+$ jailops update apply
+! usage: name the jails to update, or use --all for every jail of the project
+! hint: run 'jailops update apply --help' for usage
+[exit 2]
+
+$ jailops update apply web
+! Apply updates to web in project main? [y/N]: 
+! usage: confirmation required
+! hint: answer on standard input, or pass -y
+[exit 2]
+
+$ jailops update apply web
+! Apply updates to web in project main? [y/N]: aborted: not confirmed, nothing was changed
+[exit 1]
+
+$ jailops update apply web -y --packages
+ID             JAIL   KIND       RESULT   CHANGE       SNAPSHOT        AGE
+upd-<id>   web    packages   ok       2 packages   update-<id>   3h
+
+$ jailops update history web
+ID             JAIL   KIND       RESULT   CHANGE       SNAPSHOT        AGE
+upd-<id>   web    packages   ok       2 packages   update-<id>   3h
+
+$ jailops update apply --all
+! This applies updates to every jail of project "main" that has any, one after the other.
+! Type the name "main" to confirm: aborted: the name did not match, nothing was changed
+[exit 1]
+
+$ jailops update check --all
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES                             CHECKED
+db     main      -      yes         os freebsd-15#g1 -> freebsd-15#g2   3h
+web    main      -      yes         os freebsd-15#g1 -> freebsd-15#g2   3h
+
+$ jailops update apply --all
+ID             JAIL   KIND   RESULT   CHANGE                           SNAPSHOT                AGE
+upd-<id>   db     os     ok       freebsd-15#g1 -> freebsd-15#g2   jo-pre-upgrade-<id>   3h
+upd-<id>   web    os     ok       freebsd-15#g1 -> freebsd-15#g2   jo-pre-upgrade-<id>   3h
+! This applies updates to every jail of project "main" that has any, one after the other.
+! Type the name "main" to confirm: 
+
+$ jailops update check web
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES      CHECKED
+web    main      -      yes         1 packages   3h
+
+$ jailops update apply web -y
+ID             JAIL   KIND       RESULT   CHANGE       SNAPSHOT        AGE
+upd-<id>   web    packages   failed   1 packages   update-<id>   3h
+! error: 1 of 1 updates failed
+! hint: 'jailops update history JAIL' shows what happened and the snapshot that was taken
+[exit 1]
+
+$ jailops update history web -o name
+upd-<id>
+upd-<id>
+upd-<id>
+
+$ jailops update history ghost
+! not_found: jail "ghost" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+

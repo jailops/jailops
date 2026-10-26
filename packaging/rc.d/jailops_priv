@@ -1,0 +1,58 @@
+#!/bin/sh
+#
+# PROVIDE: jailops_priv
+# REQUIRE: zfs
+# BEFORE: jailopsd
+# KEYWORD: shutdown
+#
+# Add to /etc/rc.conf:
+#   jailops_priv_enable="YES"
+# Configuration: /usr/local/etc/jailops/priv.conf (see priv.conf.sample): storage-root,
+# state-dir, allow-user. Storage roots registered at run time live in
+# /usr/local/etc/jailops/priv.d/storage.conf.
+#   service jailops_priv checkconfig   validate the configuration, print the effective roots
+#   service jailops_priv reload        reread the storage file and verify every root (SIGHUP)
+# Run on FreeBSD 15.1 (design 18.2).
+
+. /etc/rc.subr
+
+name="jailops_priv"
+rcvar="jailops_priv_enable"
+desc="JailOps privileged helper"
+
+pidfile="/var/run/jailops/priv.pid"
+supervisor_pidfile="/var/run/jailops/priv-daemon.pid"
+procname="/usr/local/libexec/jailops-priv"
+command="/usr/sbin/daemon"
+
+extra_commands="checkconfig reload"
+sig_reload="HUP"
+checkconfig_cmd="jailops_priv_checkconfig"
+start_precmd="jailops_priv_precmd"
+
+jailops_priv_checkconfig()
+{
+	${procname} -config ${jailops_priv_config} check-config
+}
+
+jailops_priv_precmd()
+{
+	# the daemon (user jailops) creates its socket here; the sticky bit keeps it from removing the helper's
+	install -d -m 1771 -o root -g jailops /var/run/jailops
+	install -d -m 0700 /usr/local/etc/jailops/priv.d
+	# refuse to start with a configuration that does not validate
+	${procname} -config ${jailops_priv_config} check-config >/dev/null || return 1
+}
+
+# rc.conf may set jailops_priv_config: read it before anything is derived from it
+load_rc_config $name
+: ${jailops_priv_enable:="NO"}
+: ${jailops_priv_config:="/usr/local/etc/jailops/priv.conf"}
+
+# -p: pid of the helper itself (rc status, stop and the reload signal use it);
+# -P: pid of the daemon(8) supervisor, which exits when the helper exits.
+# -log syslog: the audit lines of the helper (one per request of the daemon) go to syslog; under daemon(8) -f stderr is /dev/null.
+command_args="-f -p ${pidfile} -P ${supervisor_pidfile} ${procname} -log syslog -config ${jailops_priv_config}"
+required_files="${jailops_priv_config}"
+
+run_rc_command "$1"

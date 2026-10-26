@@ -1,0 +1,194 @@
+$ jailops firewall address-set create office --address 192.0.2.0/24 --address 198.51.100.7
+address set/office created
+
+$ jailops firewall address-set create empty
+! usage: give at least one --address or --include (or use -f FILE)
+! hint: run 'jailops firewall address-set create --help' for usage
+[exit 2]
+
+$ jailops firewall policy create web --default-in deny --default-out allow --rule allow in tcp port 80,443 --rule allow in tcp from @office port 22 log --rule allow in tcp port 8080 rdr 8080:80
+firewall policy/web created
+
+$ jailops firewall policy create bad --rule allow
+! usage: rule "allow" needs at least ACTION and DIRECTION
+! hint: run 'jailops firewall policy create --help' for usage
+[exit 2]
+
+$ jailops firewall policy create bad2 --rule allow in tcp bogus 1
+! usage: rule "allow in tcp bogus 1": unknown word "bogus"
+! hint: run 'jailops firewall policy create --help' for usage
+[exit 2]
+
+$ jailops firewall policy list
+NAME   DEFAULT-IN   DEFAULT-OUT   RULES   RAW
+web    deny         allow         3       no
+
+$ jailops firewall policy show web
+metadata:
+  name: web
+  uuid: <uuid>
+  project: main
+  scope: fleet
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  default_in: deny
+  default_out: allow
+  rules:
+    - action: allow
+      direction: in
+      proto: tcp
+      ports:
+        - "80"
+        - "443"
+    - action: allow
+      direction: in
+      proto: tcp
+      from:
+        - '@office'
+      ports:
+        - "22"
+      log: true
+    - action: allow
+      direction: in
+      proto: tcp
+      ports:
+        - "8080"
+      redirect:
+        host_port: 8080
+        jail_port: 80
+
+$ jailops firewall address-set list
+NAME     ADDRESSES   INCLUDES
+office   2           -
+
+$ jailops firewall address-set show office -o json
+{
+  "metadata": {
+    "name": "office",
+    "uuid": "<uuid>",
+    "project": "main",
+    "scope": "fleet",
+    "generation": 1,
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z"
+  },
+  "spec": {
+    "addresses": [
+      "192.0.2.0/24",
+      "198.51.100.7"
+    ]
+  }
+}
+
+$ jailops firewall validate -f <dir>/good.yaml
+valid: 2 documents checked
+
+$ jailops firewall validate -f <dir>/good.yaml --offline
+valid: 2 documents checked
+
+$ jailops firewall validate -f <dir>/bad.yaml
+DOCUMENT        LEVEL     PROBLEM
+policy/p2       error     default_in must be allow or deny, not "maybe"
+policy/p2       error     rules[0]: action must be allow or deny, not "permit"
+policy/p2       error     rules[0]: direction must be in or out, not "sideways"
+policy/p2       error     rules[0]: invalid port "99999"
+policy/p2       error     rules[0]: invalid address "300.1.1.1"
+policy/p2       error     rules[0]: unknown address set "nowhere"
+policy/p2       error     rules[1]: ports need proto tcp or udp
+policy/p2       error     rules[2]: a redirect is allowed on inbound rules only
+policy/p2       warning   raw PF needs the admin role; the server checks it with pfctl -n when applied
+address-set/a   error     invalid address "nope"
+address-set/a   error     include cycle: a -> b -> a
+address-set/b   error     include cycle: b -> a -> b
+! invalid: 11 problem(s) found in <dir>/bad.yaml
+! hint: fix the listed rules and run validate again
+[exit 2]
+
+$ jailops firewall validate -f <dir>/bad.yaml -o json
+[
+  {
+    "document": "policy/p2",
+    "level": "error",
+    "message": "default_in must be allow or deny, not \"maybe\""
+  },
+  {
+    "document": "policy/p2",
+    "level": "error",
+    "message": "rules[0]: action must be allow or deny, not \"permit\""
+  },
+  {
+    "document": "policy/p2",
+    "level": "error",
+    "message": "rules[0]: direction must be in or out, not \"sideways\""
+  },
+  {
+    "document": "policy/p2",
+    "level": "error",
+    "message": "rules[0]: invalid port \"99999\""
+  },
+  {
+    "document": "policy/p2",
+    "level": "error",
+    "message": "rules[0]: invalid address \"300.1.1.1\""
+  },
+  {
+    "document": "policy/p2",
+    "level": "error",
+    "message": "rules[0]: unknown address set \"nowhere\""
+  },
+  {
+    "document": "policy/p2",
+    "level": "error",
+    "message": "rules[1]: ports need proto tcp or udp"
+  },
+  {
+    "document": "policy/p2",
+    "level": "error",
+    "message": "rules[2]: a redirect is allowed on inbound rules only"
+  },
+  {
+    "document": "policy/p2",
+    "level": "warning",
+    "message": "raw PF needs the admin role; the server checks it with pfctl -n when applied"
+  },
+  {
+    "document": "address-set/a",
+    "level": "error",
+    "message": "invalid address \"nope\""
+  },
+  {
+    "document": "address-set/a",
+    "level": "error",
+    "message": "include cycle: a -> b -> a"
+  },
+  {
+    "document": "address-set/b",
+    "level": "error",
+    "message": "include cycle: b -> a -> b"
+  }
+]
+! invalid: 11 problem(s) found in <dir>/bad.yaml
+! hint: fix the listed rules and run validate again
+[exit 2]
+
+$ jailops firewall validate
+! usage: -f FILE is required
+! hint: run 'jailops firewall validate --help' for usage
+[exit 2]
+
+$ jailops firewall validate -f <dir>/j.yaml
+! usage: validate handles FirewallPolicy and AddressSet documents, not "Jail"
+! hint: run 'jailops firewall validate --help' for usage
+[exit 2]
+
+$ jailops firewall policy edit web -f <dir>/p.yaml
+firewall policy/web updated
+
+$ jailops firewall policy delete -y web
+firewall policy/web deleted
+
+$ jailops firewall address-set delete -y office
+address set/office deleted
+

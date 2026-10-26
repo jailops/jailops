@@ -1,0 +1,10 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: apps
+spec:
+  hosts: [self]
+  networks: [{network: apps}]
+  storage: [{storage: default, quota: 20G}]
+  quotas: {jails: 5, memory: 2G}
+  firewall: floor

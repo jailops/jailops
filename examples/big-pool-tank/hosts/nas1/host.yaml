@@ -1,0 +1,6 @@
+apiVersion: jailops/v1
+kind: Host
+metadata:
+  name: nas1
+spec:
+  socket: /var/run/jailops/jailops.sock

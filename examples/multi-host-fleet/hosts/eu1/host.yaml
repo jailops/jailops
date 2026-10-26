@@ -1,0 +1,10 @@
+apiVersion: jailops/v1
+kind: Host
+metadata:
+  name: eu1
+  labels: {role: web, env: prod, region: eu}
+spec:
+  url: https://eu1.example.org:8443
+  fingerprint: 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+  # One age-encrypted API token per host: secrets/eu1-token.age (`jailops-sync secrets set eu1-token`).
+  token_secret: eu1-token

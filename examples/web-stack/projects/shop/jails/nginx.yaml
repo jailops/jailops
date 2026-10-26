@@ -1,0 +1,21 @@
+apiVersion: jailops/v1
+kind: Jail
+hosts: [app1]
+start: true
+metadata:
+  name: nginx
+  labels: {tier: web}
+spec:
+  image: freebsd-15@stable
+  storage: default
+  network:
+    - {name: eth0, network: shop, ipv4: "10.60.0.10"}
+  firewall: {policy: nginx}
+  resources: {cpu: 1, memory: 512M}
+  boot: {autostart: true, priority: 30, depends: [app]}
+  proxy:
+    - {name: http, listen: ":80", jail_port: 80}
+    - {name: https, listen: ":443", jail_port: 443}
+  provision:
+    packages: [nginx]
+    services: {enable: [nginx], start: [nginx]}

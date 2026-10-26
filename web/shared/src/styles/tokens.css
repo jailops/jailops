@@ -1,0 +1,97 @@
+/* Design tokens. Components use only these variables. ONE accent (JailOps blue on navy);
+   status colours are separate hues so a red button never reads as an error. */
+:root {
+  --font-sans: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --bg: #f4f6fa;
+  --surface: #ffffff;
+  --surface-2: #edf0f6;
+  --surface-3: #e1e6ef;
+  --border: #d5dbe6;
+  --border-strong: #aab4c5;
+  --text: #0f1a2b;
+  --text-2: #445064;
+  --text-3: #5f6b7f;
+
+  --accent: #1f4fb4;
+  --accent-hover: #173f92;
+  --accent-text: #ffffff;
+  --accent-soft: #e3ebfb;
+  --focus: #0b6bd3;
+
+  --ok: #1b7a43;
+  --ok-bg: #e3f3e9;
+  --warn: #8a5a00;
+  --warn-bg: #fbefd0;
+  --danger: #b8300f;
+  --danger-bg: #fbe5de;
+  --info: #0e7490;
+  --info-bg: #dff3f7;
+  --idle: #566074;
+  --idle-bg: #e6eaf1;
+
+  --radius: 4px;
+  --radius-lg: 6px;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.08), 0 4px 16px rgb(0 0 0 / 0.1);
+  --sidebar-w: 216px;
+  --gutter: 16px;
+  --dur: 120ms;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) {
+    --bg: #0a1220;
+    --surface: #101a2d;
+    --surface-2: #16213a;
+    --surface-3: #1e2b48;
+    --border: #22304d;
+    --border-strong: #3a4b70;
+    --text: #e8eefb;
+    --text-2: #aab6cf;
+    --text-3: #8593b0;
+    --accent: #5b9bff;
+    --accent-hover: #7db1ff;
+    --accent-text: #04101f;
+    --accent-soft: #16294d;
+    --focus: #8bbcff;
+    --ok: #55c07f;
+    --ok-bg: #16301f;
+    --warn: #e1ad45;
+    --warn-bg: #352a10;
+    --danger: #f0836a;
+    --danger-bg: #3b1d15;
+    --info: #4fc3dc;
+    --info-bg: #0f2c38;
+    --idle: #9aa7c2;
+    --idle-bg: #1b2740;
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 4px 16px rgb(0 0 0 / 0.5);
+  }
+}
+:root[data-theme='dark'] {
+  --bg: #0a1220;
+  --surface: #101a2d;
+  --surface-2: #16213a;
+  --surface-3: #1e2b48;
+  --border: #22304d;
+  --border-strong: #3a4b70;
+  --text: #e8eefb;
+  --text-2: #aab6cf;
+  --text-3: #8593b0;
+  --accent: #5b9bff;
+  --accent-hover: #7db1ff;
+  --accent-text: #04101f;
+  --accent-soft: #16294d;
+  --focus: #8bbcff;
+  --ok: #55c07f;
+  --ok-bg: #16301f;
+  --warn: #e1ad45;
+  --warn-bg: #352a10;
+  --danger: #f0836a;
+  --danger-bg: #3b1d15;
+  --info: #4fc3dc;
+  --info-bg: #0f2c38;
+  --idle: #9aa7c2;
+  --idle-bg: #1b2740;
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 4px 16px rgb(0 0 0 / 0.5);
+}

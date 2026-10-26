@@ -1,0 +1,103 @@
+//go:build !noweb
+
+package webui
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"testing/fstest"
+)
+
+func get(t *testing.T, h http.Handler, method, p string) *httptest.ResponseRecorder {
+	t.Helper()
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, httptest.NewRequest(method, p, nil))
+	return w
+}
+
+func testFS() fstest.MapFS {
+	return fstest.MapFS{
+		"index.html":                 {Data: []byte("<!doctype html><html><body>app</body></html>")},
+		"favicon.svg":                {Data: []byte("<svg/>")},
+		"assets/index-abc123.js":     {Data: []byte("export {}")},
+		"assets/index-abc123.css":    {Data: []byte("body{}")},
+		"assets/plex-abc.woff2":      {Data: []byte("wOF2")},
+		"assets/mod/engine-abc.wasm": {Data: []byte("\x00asm\x01\x00\x00\x00")},
+	}
+}
+
+func TestSPAFallback(t *testing.T) {
+	h := handlerFS(testFS())
+	for _, p := range []string{"/", "/jails", "/jails/web.example.com", "/backups/restore", "/index.html"} {
+		w := get(t, h, "GET", p)
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "<html") {
+			t.Fatalf("%s: want the app, got %d", p, w.Code)
+		}
+		if cc := w.Header().Get("Cache-Control"); cc != "no-cache" {
+			t.Fatalf("%s: Cache-Control %q, want no-cache", p, cc)
+		}
+	}
+}
+
+func TestMissingAssetsAre404(t *testing.T) {
+	h := handlerFS(testFS())
+	for _, p := range []string{"/assets/missing-abc.js", "/missing.css", "/favicon-old.ico", "/assets/x", "/assets/"} {
+		if w := get(t, h, "GET", p); w.Code != 404 {
+			t.Fatalf("%s: want 404, got %d", p, w.Code)
+		}
+	}
+}
+
+func TestAPIPathNeverGetsHTML(t *testing.T) {
+	h := handlerFS(testFS())
+	for _, p := range []string{"/1.0", "/1.0/jails", "/1.0/jails/web"} {
+		if w := get(t, h, "GET", p); w.Code != 404 || strings.Contains(w.Body.String(), "<html") {
+			t.Fatalf("%s: want plain 404, got %d", p, w.Code)
+		}
+	}
+}
+
+func TestTypesAndCaching(t *testing.T) {
+	h := handlerFS(testFS())
+	for p, want := range map[string]string{
+		"/assets/index-abc123.js":     "text/javascript",
+		"/assets/index-abc123.css":    "text/css",
+		"/assets/plex-abc.woff2":      "font/woff2",
+		"/assets/mod/engine-abc.wasm": "application/wasm",
+	} {
+		w := get(t, h, "GET", p)
+		if w.Code != 200 {
+			t.Fatalf("%s: status %d", p, w.Code)
+		}
+		if ct := w.Header().Get("Content-Type"); !strings.HasPrefix(ct, want) {
+			t.Fatalf("%s: Content-Type %q, want %s", p, ct, want)
+		}
+		if cc := w.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
+			t.Fatalf("%s: Cache-Control %q, want immutable", p, cc)
+		}
+	}
+	w := get(t, h, "GET", "/favicon.svg")
+	if cc := w.Header().Get("Cache-Control"); cc != "no-cache" || w.Header().Get("Content-Type") != "image/svg+xml" {
+		t.Fatalf("favicon: %q %q", cc, w.Header().Get("Content-Type"))
+	}
+}
+
+func TestMethods(t *testing.T) {
+	h := handlerFS(testFS())
+	if w := get(t, h, "POST", "/jails"); w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST: %d", w.Code)
+	}
+	if w := get(t, h, "HEAD", "/"); w.Code != 200 {
+		t.Fatalf("HEAD: %d", w.Code)
+	}
+}
+
+func TestUnbuiltEmbedStillServes(t *testing.T) {
+	// Only .gitkeep is tracked: the embedded handler must not panic before the UI is built.
+	h := Handler()
+	if w := get(t, h, "GET", "/jails"); w.Code != 200 && w.Code != 404 {
+		t.Fatalf("unexpected %d", w.Code)
+	}
+}

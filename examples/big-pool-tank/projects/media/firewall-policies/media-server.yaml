@@ -1,0 +1,9 @@
+apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: media-server
+spec:
+  default_in: deny
+  default_out: allow
+  rules:
+    - {name: plex, action: allow, direction: in, proto: tcp, ports: ["32400"], from: ["192.168.1.0/24"]}

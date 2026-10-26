@@ -1,0 +1,16 @@
+apiVersion: jailops/v1
+kind: Jail
+metadata:
+  name: postgres
+  labels: {tier: db, backup: nightly}
+hosts: [web1]
+spec:
+  image: freebsd-15@stable
+  profiles: [small]
+  storage: fast
+  network:
+    - {name: eth0, network: br-db, ipv4: auto}
+  firewall: {policy: base}
+  resources: {memory: 4G, cpu: 2, disk: 100G}
+  volumes:
+    - {name: data, mount: /var/db/postgres, quota: 80G}

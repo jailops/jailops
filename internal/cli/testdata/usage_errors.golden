@@ -1,0 +1,55 @@
+$ jailops nonsense
+! usage: unknown command "nonsense" for "jailops"
+! hint: run 'jailops --help' for usage
+[exit 2]
+
+$ jailops jail bogus
+! usage: unknown command "bogus" for "jailops jail"
+! hint: run 'jailops jail --help' for usage
+[exit 2]
+
+$ jailops jail list --nope
+! usage: unknown flag: --nope
+! hint: run 'jailops jail list --help' for usage
+[exit 2]
+
+$ jailops jail show
+! usage: accepts 1 arg(s), received 0
+! hint: run 'jailops jail show --help' for usage
+[exit 2]
+
+$ jailops jail show a b
+! usage: accepts 1 arg(s), received 2
+! hint: run 'jailops jail show --help' for usage
+[exit 2]
+
+$ jailops -o bogus jail list
+! usage: unknown output format "bogus" (use table, json, yaml or name)
+! hint: run 'jailops jail list --help' for usage
+[exit 2]
+
+$ jailops jail list -l novalue
+! usage: label "novalue" must be key=value
+! hint: run 'jailops jail list --help' for usage
+[exit 2]
+
+$ jailops jail create
+! usage: NAME is required (or use -f FILE)
+! hint: run 'jailops jail create --help' for usage
+[exit 2]
+
+$ jailops explain a b
+! usage: accepts at most 1 arg(s), received 2
+! hint: run 'jailops explain --help' for usage
+[exit 2]
+
+$ jailops completion powershell
+! usage: unknown shell "powershell" (use bash, zsh or fish)
+! hint: run 'jailops completion --help' for usage
+[exit 2]
+
+$ jailops completion
+! usage: accepts 1 arg(s), received 0
+! hint: run 'jailops completion --help' for usage
+[exit 2]
+

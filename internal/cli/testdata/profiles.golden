@@ -1,0 +1,149 @@
+$ jailops profile create base --description defaults --set limits.memory=1G --set boot.autostart=true
+profile/base created
+
+$ jailops profile create web --set limits.memory=4G --set nic.eth1=lan
+profile/web created
+
+$ jailops profile create bad --set hostname=x
+! invalid: hostname cannot be set in a profile
+! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
+[exit 2]
+
+$ jailops profile create bad2 --set nonsense=1
+! usage: "nonsense" is not a configuration key (see 'jailops config keys')
+! hint: run 'jailops profile create --help' for usage
+[exit 2]
+
+$ jailops profile create bad3 --set limits.memory
+! usage: --set "limits.memory" must be KEY=VALUE
+! hint: run 'jailops profile create --help' for usage
+[exit 2]
+
+$ jailops profile list
+NAME   KEYS   DESCRIPTION
+base   2      defaults
+web    2      -
+
+$ jailops profile show web
+metadata:
+  name: web
+  uuid: <uuid>
+  project: main
+  scope: fleet
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  config:
+    limits.memory: 4G
+    nic.eth1: lan
+
+$ jailops create nginx --image freebsd-15@stable --network lan --storage default --profile base --profile web
+jail/nginx created
+
+$ jailops config set nginx limits.memory 8G
+jail/nginx configuration updated
+restart required for: limits.memory
+the jail was not restarted: run 'jailops restart nginx' when it suits you, or repeat with --restart
+
+$ jailops config show nginx --expanded
+KEY                VALUE               SOURCE
+boot.autostart     true                base
+hostname           nginx               jail
+image              freebsd-15@stable   jail
+limits.memory      8G                  jail
+nic.eth0           lan                 jail
+nic.eth0.ipv4      10.20.0.10          jail
+nic.eth0.network   lan                 jail
+nic.eth1           lan                 web
+nic.eth1.network   lan                 web
+profiles           base,web            jail
+storage            default             jail
+
+$ jailops config show nginx
+KEY                VALUE
+hostname           nginx
+image              freebsd-15@stable
+limits.memory      8G
+nic.eth0           lan
+nic.eth0.ipv4      10.20.0.10
+nic.eth0.network   lan
+profiles           base,web
+storage            default
+
+$ jailops profile edit base -f <dir>/p.yaml
+profile/base updated
+
+$ jailops config show nginx --expanded -o json
+[
+  {
+    "key": "boot.priority",
+    "value": "5",
+    "source": "base"
+  },
+  {
+    "key": "hostname",
+    "value": "nginx",
+    "source": "jail"
+  },
+  {
+    "key": "image",
+    "value": "freebsd-15@stable",
+    "source": "jail"
+  },
+  {
+    "key": "limits.memory",
+    "value": "8G",
+    "source": "jail"
+  },
+  {
+    "key": "nic.eth0",
+    "value": "lan",
+    "source": "jail"
+  },
+  {
+    "key": "nic.eth0.ipv4",
+    "value": "10.20.0.10",
+    "source": "jail"
+  },
+  {
+    "key": "nic.eth0.network",
+    "value": "lan",
+    "source": "jail"
+  },
+  {
+    "key": "nic.eth1",
+    "value": "lan",
+    "source": "web"
+  },
+  {
+    "key": "nic.eth1.network",
+    "value": "lan",
+    "source": "web"
+  },
+  {
+    "key": "profiles",
+    "value": "base,web",
+    "source": "jail"
+  },
+  {
+    "key": "storage",
+    "value": "default",
+    "source": "jail"
+  }
+]
+
+$ jailops profile delete -y base
+! busy: profile "base" is used by jail "nginx"
+! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+[exit 5]
+
+$ jailops delete -y nginx
+jail/nginx deleted
+
+$ jailops profile delete -y base
+profile/base deleted
+
+$ jailops --project host profile list
+! No resources found.
+

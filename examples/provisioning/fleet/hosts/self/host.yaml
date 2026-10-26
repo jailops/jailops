@@ -1,0 +1,7 @@
+apiVersion: jailops/v1
+kind: Host
+metadata:
+  name: self
+spec:
+  # The VM manages itself through the local socket: root is a global admin there, so no token, no certificate.
+  socket: /var/run/jailops/jailops.sock

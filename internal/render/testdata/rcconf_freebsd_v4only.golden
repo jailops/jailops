@@ -1,0 +1,6 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+hostname="db"
+ifconfig_epair0b="inet 192.168.1.5 netmask 255.255.255.128"
+ipv6_network_interfaces="none"
+rtsold_enable="NO"
+defaultrouter="192.168.1.1"

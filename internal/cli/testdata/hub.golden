@@ -1,0 +1,26 @@
+$ jailops jail list
+NAME     STATE     IMAGE        GEN   ADDRESSES   AGE
+on-hub   stopped   freebsd-15   g1    -           3h
+
+$ jailops --host host-b jail list
+NAME   STATE     IMAGE        GEN   ADDRESSES   AGE
+on-b   stopped   freebsd-15   g1    -           0s
+
+$ jailops --host host-b jail start on-b
+jail/on-b started
+
+$ jailops jail list -o name
+on-b
+
+$ jailops --host nowhere jail list
+! not_found: unknown host "nowhere"
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops host list
+NAME     ADDRESS                 ONLINE   VERSION   LAST SEEN
+host-b   https://10.0.0.2:8443   yes      0.1.0     3h
+
+$ jailops host show host-b -o name
+host-b
+

@@ -1,0 +1,27 @@
+$ jailops set web shell /usr/local/bin/bash
+jail/web configuration updated
+
+$ jailops config get web shell
+/usr/local/bin/bash
+
+$ jailops shell web
+echo from the shell
+
+$ jailops shell web --shell /bin/tcsh
+
+$ jailops shell web --shell bash
+! usage: the shell must be one absolute path inside the jail, not "bash"
+! hint: run 'jailops shell --help' for usage
+[exit 2]
+
+$ jailops config unset web shell
+jail/web configuration updated
+
+$ jailops shell web --shell /usr/local/bin/zsh
+! not_found: shell /usr/local/bin/zsh does not exist in jail web
+! hint: install it, or pick another with --shell
+[exit 4]
+
+$ jailops shell web
+exit
+

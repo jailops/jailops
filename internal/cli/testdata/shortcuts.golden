@@ -1,0 +1,53 @@
+$ jailops create nginx --image freebsd-15@stable --storage default --network lan
+jail/nginx created
+
+$ jailops list
+NAME    STATE     IMAGE               GEN   ADDRESSES    AGE
+nginx   stopped   freebsd-15@stable   g1    10.20.0.10   3h
+
+$ jailops start nginx
+jail/nginx started
+
+$ jailops restart nginx
+jail/nginx restarted
+
+$ jailops stop nginx
+jail/nginx stopped
+
+$ jailops exec nginx -- echo hi
+! busy: jail "nginx" is not running
+! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+[exit 5]
+
+$ jailops exec nginx -- /bin/ls
+! busy: jail "nginx" is not running
+! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+[exit 5]
+
+$ jailops shell nginx
+! busy: jail "nginx" is not running
+! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+[exit 5]
+
+$ jailops shell nginx --shell bash
+! usage: the shell must be one absolute path inside the jail, not "bash"
+! hint: run 'jailops shell --help' for usage
+[exit 2]
+
+$ jailops shell nginx --shell /usr/local/bin/bash
+! busy: jail "nginx" is not running
+! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+[exit 5]
+
+$ jailops delete -y nginx
+jail/nginx deleted
+
+$ jailops jail create web --image freebsd-15@stable --network lan --storage default
+jail/web created
+
+$ jailops jail list -o name
+web
+
+$ jailops jails list -o name
+web
+

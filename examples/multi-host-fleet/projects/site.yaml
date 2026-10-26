@@ -1,0 +1,12 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: site
+spec:
+  # One project, defined once, spanning two hosts (same UUID on both). Each host implements the network and the
+  # storage named here locally and enforces its own copy.
+  hosts: ["@prod"]
+  networks: [{network: web}]
+  storage: [{storage: default, quota: 200G}]
+  quotas: {jails: 20}
+  firewall: floor

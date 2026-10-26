@@ -1,0 +1,14 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: intra
+spec:
+  description: Internal tools. Nothing in this project is reachable from the internet.
+  hosts: [cloud1]
+  networks:
+    - {network: intra}
+  storage:
+    - {storage: default, quota: 100G}
+  quotas: {jails: 10, memory: 8G, addresses: 50}
+  firewall: floor
+  images: [freebsd-15]

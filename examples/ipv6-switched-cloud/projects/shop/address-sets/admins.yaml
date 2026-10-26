@@ -1,0 +1,7 @@
+apiVersion: jailops/v1
+kind: AddressSet
+metadata:
+  name: admins
+spec:
+  # Where administrators connect from (documentation addresses: replace them).
+  addresses: [203.0.113.7, "2001:db8:ffff::/48"]

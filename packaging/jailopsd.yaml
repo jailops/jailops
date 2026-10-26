@@ -1,0 +1,97 @@
+# jailopsd.yaml, installed as /usr/local/etc/jailops/jailopsd.yaml
+# Unknown keys are an error. Every uncommented value below is the default except `pool`,
+# which has none and must be set. Commented keys show the optional ones.
+
+role: host            # the only role of jailopsd; the backup node is a separate daemon
+hub: false            # true: keep a registry of remotes and forward ?host= requests over pinned mTLS
+
+pool: tank
+# dataset: tank/jailops          # default <pool>/jailops
+# mount_base: /jailops
+# state_dir: /var/db/jailops/state   # default <data_dir>/state; outside the storage root, where "jailops-priv init" mounts it
+# data_dir: /var/db/jailops      # SQLite database, seal key, TLS material, operation journal
+# conf_dir: /usr/local/etc/jailops/jails   # must equal conf_dir of jailops-priv
+# work_dir: /var/tmp/jailops
+
+listen:
+  unix:
+    path: /var/run/jailops/jailops.sock
+    mode: 0666                  # safe: only root (uid 0) is recognised on the socket, as the host's recovery access; every
+                                # other local user is anonymous, exactly like an unauthenticated remote client, and signs
+                                # in with a JailOps user, API token or client certificate. Unix users and groups map to nothing.
+  https:
+    address: ""                 # for example ":8443"; empty disables the network listener. Always TLS 1.3; there is no plain-http TCP listener
+    # names: [jail1.example.org, 192.0.2.10]   # extra names of the generated certificate
+    # cert: /etc/ssl/jailops/fullchain.pem     # your certificate (give cert and key together; must exist, never generated over).
+    # key: /etc/ssl/jailops/privkey.pem        # a renewed pair is picked up without a restart (checked at most every 15s)
+    #                                          # default <data_dir>/tls/server.{crt,key}: self-signed, generated on first start
+
+web:
+  enabled: true                 # false: the embedded web console is not served; the API is unaffected
+
+priv:
+  socket: /var/run/jailops/priv.sock
+
+log:
+  level: info                   # debug, info, warn, error
+  format: text                  # text (key=value lines for syslog) or json
+
+reconcile:
+  interval: 60s
+  autostart: true               # start jails with boot.autostart on the first pass
+
+zfs:
+  compat_file: ""               # for example openzfs-2.2-freebsd; empty skips the compatibility check
+  # compat_dir: /usr/share/zfs/compatibility.d
+
+limits:
+  max_body_bytes: 4194304
+  request_timeout: 60s
+  # exec_sessions_per_jail: 8
+  # exec_idle: 30m
+  # exec_max: 12h
+  # auth_failure_threshold: 5     # failed authentications from one source before it is locked out
+
+network:
+  # Set at runtime through the helper and re-asserted by the reconcile loop;
+  # never written to /etc/sysctl.conf. Only these three keys, 0 or 1.
+  sysctl:
+    net.link.bridge.pfil_member: 1
+    net.link.bridge.pfil_bridge: 0
+    net.link.bridge.pfil_onlyip: 1
+
+# Dedicated networks for `jailops project create NAME --new-network`: each project gets a subnet carved from this pool.
+# Without a pool that option answers "unsupported".
+projects:
+  # network_pool: 10.64.0.0/12    # an IPv4 prefix
+  # network_bits: 24              # size of each project subnet
+  # uplink: em0                   # uplink and NAT of those networks
+  # nat: true
+
+# Managed updates: how often update schedules are evaluated. Updates stay off for a jail until its update mode is set.
+updates:
+  # tick: 1m
+  # project_files_dir: /var/db/jailops/state/project-files   # provisioning files, one directory per project
+
+# The paths of a thin jail that survive a switch to a newer image generation, each in its own dataset. Empty keeps the
+# built-in list (/etc, /usr/local, /var/db, /var/log, /var/mail, /var/spool, /home, /root). Setting it replaces the list.
+lifecycle:
+  persistent: []
+  # - {dataset: etc, path: /etc, class: system, merge: true}
+  # - {dataset: local, path: /usr/local, class: data, no_seed: false}   # no_seed: do not copy the image's files into the new dataset
+
+# Host-side backups (docs/backup-restore.md). Absent, every backup call answers "unsupported".
+# backup:
+#   key_path: /var/db/jailops/backup.key
+#   passphrase_file: ""           # wraps the key file; empty relies on the file mode, which unattended schedules need
+#   node:
+#     name: backup1
+#     address: backup1.example.org:8444
+#     fingerprint: ""             # hex SHA-256 of the node's certificate: it is pinned
+#     cert_file: /var/db/jailops/backup-client.crt
+#     key_file: /var/db/jailops/backup-client.key
+#   recovery_recipients: []       # age public keys the backup key is escrowed to
+#   allow_unescrowed: false       # run backups while the key is not escrowed (not recommended)
+#   concurrency: 2
+#   scratch_dir: ""               # where restore tests restore
+#   scratch_dataset: ""

@@ -1,0 +1,128 @@
+$ jailops --dry-run jail create x --image freebsd-15@stable --network lan --storage default
+dry-run: would create jail x
+apiVersion: jailops/v1
+kind: Jail
+metadata:
+  name: x
+spec:
+  image: freebsd-15@stable
+  storage: default
+  network:
+    - network: lan
+
+$ jailops --dry-run jail start web
+dry-run: would start jail web
+
+$ jailops --dry-run jail stop web
+dry-run: would stop jail web
+
+$ jailops --dry-run jail restart web
+dry-run: would restart jail web
+
+$ jailops --dry-run jail delete -y web
+dry-run: would delete jail web
+
+$ jailops --dry-run jail snapshot create web s2
+dry-run: would snapshot jail web
+comment: ""
+name: s2
+
+$ jailops --dry-run jail snapshot delete -y web s1
+dry-run: would delete snapshot s1 of jail web
+
+$ jailops --dry-run jail rollback web --all --snapshot s1
+Rolling back all of jail web to snapshot s1 (taken 3h ago).
+0 B written since then would be discarded.
+dry-run: would roll back jail web
+scope: all
+snapshot: s1
+confirm_data_loss: true
+
+$ jailops --dry-run jail copy web w2
+dry-run: would copy jail web to w2
+apiVersion: jailops/v1
+kind: Jail
+metadata:
+  name: w2
+spec:
+  image: freebsd-15@stable
+  storage: default
+  layout: thin
+  hostname: web
+  network:
+    - network: lan
+      ipv4: auto
+
+$ jailops --dry-run network create n2 --subnet 10.1.0.0/24 --gateway 10.1.0.1 --range 10.1.0.5-10.1.0.9
+dry-run: would create network n2
+apiVersion: jailops/v1
+kind: Network
+metadata:
+  name: n2
+spec:
+  ipv4:
+    subnet: 10.1.0.0/24
+    gateway: 10.1.0.1
+    range: 10.1.0.5-10.1.0.9
+
+$ jailops --dry-run network delete -y lan
+dry-run: would delete network lan
+
+$ jailops --dry-run image alias set freebsd-15 x
+dry-run: would point alias x of image freebsd-15 at the newest generation
+
+$ jailops --dry-run image alias delete -y freebsd-15 x
+dry-run: would delete alias x of image freebsd-15
+
+$ jailops --dry-run image delete-generation -y freebsd-15 1
+dry-run: would delete generation freebsd-15#g1
+
+$ jailops --dry-run firewall address-set create s --address 10.0.0.0/8
+dry-run: would create address set s
+apiVersion: jailops/v1
+kind: AddressSet
+metadata:
+  name: s
+spec:
+  addresses:
+    - 10.0.0.0/8
+
+$ jailops --dry-run token create t1 --global
+dry-run: would create token t1
+metadata:
+  name: t1
+spec:
+  permission: readonly
+  global: true
+
+$ jailops --dry-run user create bob --global
+dry-run: would create user bob
+metadata:
+  name: bob
+spec:
+  permission: readonly
+  global: true
+
+$ jailops --dry-run user disable bob
+dry-run: would disable user bob
+spec:
+  disabled: true
+
+$ jailops --dry-run op cancel abc
+dry-run: would cancel operation abc
+
+$ jailops --dry-run backup run p
+dry-run: would run backup policy p
+
+$ jailops --dry-run remote remove t
+dry-run: would remove remote t
+
+$ jailops --dry-run remote switch local
+dry-run: would switch to remote local
+
+$ jailops --dry-run -o json jail start web
+{
+  "action": "start jail web",
+  "dry_run": true
+}
+

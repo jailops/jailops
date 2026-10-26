@@ -1,0 +1,10 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: demo
+spec:
+  hosts: [self]
+  networks: [{network: lan}]
+  storage: [{storage: default, quota: 50G}]
+  quotas: {jails: 5, memory: 4G}
+  firewall: floor

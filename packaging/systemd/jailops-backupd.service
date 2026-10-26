@@ -1,0 +1,34 @@
+[Unit]
+Description=JailOps backup node
+Documentation=https://jailops.net/docs/
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=jailops-backup
+Group=jailops-backup
+ExecStart=/usr/bin/jailops-backupd -c /etc/jailops/backupd.yaml serve
+Restart=on-failure
+RestartSec=5
+RuntimeDirectory=jailops-backupd
+StateDirectory=jailops-backup
+ConfigurationDirectory=jailops
+# The node holds no key and needs no privileges.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/jailops-backup
+
+[Install]
+WantedBy=multi-user.target

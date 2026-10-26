@@ -1,0 +1,10 @@
+apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: web
+spec:
+  default_in: deny
+  default_out: allow
+  rules:
+    - {name: http, action: allow, direction: in, proto: tcp, ports: ["80", "443"]}
+    - {name: ping6, action: allow, direction: in, proto: icmp6}

@@ -1,0 +1,10 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+# device mountpoint fstype options dump pass
+devfs /jailops/jails/alpine1/root/dev devfs rw,late,ruleset=7123 0 0
+fdescfs /jailops/jails/alpine1/root/dev/fd fdescfs rw,late,linrdlnk 0 0
+/jailops/jails/alpine1/root /jailops/jails/alpine1/root/compat/linux nullfs rw,late 0 0
+tmpfs /jailops/jails/alpine1/root/compat/linux/dev/shm tmpfs rw,late,size=536870912,mode=1777 0 0
+linprocfs /jailops/jails/alpine1/root/proc linprocfs rw,late 0 0
+linsysfs /jailops/jails/alpine1/root/sys linsysfs rw,late 0 0
+/jailops/jails/alpine1/data/db /jailops/jails/alpine1/root/var/lib/db nullfs rw 0 0
+/jailops/jails/alpine1/data/ro /jailops/jails/alpine1/root/srv/ro nullfs ro 0 0

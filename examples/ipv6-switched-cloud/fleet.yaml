@@ -1,0 +1,2 @@
+# The fleet id is the ownership marker "managed_by: sync:switched-cloud" on everything jailops-sync creates.
+id: switched-cloud

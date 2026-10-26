@@ -1,0 +1,46 @@
+# backupd.yaml, installed as /usr/local/etc/jailops/backupd.yaml (jailops-backupd, the backup node).
+# Unknown keys are an error. Create the database and the repository once, then start the daemon:
+#   jailops-backupd -c /usr/local/etc/jailops/backupd.yaml init --admin alice
+# `init` prints the fingerprint of the node's certificate: hosts pin it (backup.node.fingerprint).
+
+hostname: vault.example.net
+listen: ":8444"                       # backup hosts connect here (mutual TLS, pinned fingerprints)
+admin_socket: /var/run/jailops-backupd/admin.sock   # mode 0600: only root may use it
+
+tls:
+  cert_file: /var/db/jailops-backup/backupd.crt   # `init` creates a self-signed one when missing
+  key_file: /var/db/jailops-backup/backupd.key
+
+database:                             # the PostgreSQL control plane
+  dsn_file: /usr/local/etc/jailops/backupd.dsn    # one line: postgres://user:password@host/db?sslmode=verify-full
+
+datastore:
+  kind: directory                     # directory or s3
+  directory: /var/db/jailops-backup/repository
+  # s3:
+  #   endpoint: s3.example.net
+  #   region: eu-1
+  #   bucket: jailops-backups
+  #   prefix: vault/
+  #   credentials_file: /usr/local/etc/jailops/backupd.s3
+
+web:                                  # the management API and web console
+  enabled: true
+  listen: 127.0.0.1:8445
+
+grace: 24h                            # garbage collection grace period (minimum 12h)
+deletion_delay: 72h                   # default delay of a deletion request
+
+retention:                            # the default policy for groups without their own
+  daily: 14
+  weekly: 8
+  monthly: 12
+  timezone: UTC
+
+schedule:                             # five-field cron expressions
+  retention: "30 3 * * *"
+  gc: "30 4 * * 0"
+  verify_new: "0 5 * * *"
+  verify_stale: "0 6 * * 0"
+  stale_days: 30
+  timezone: UTC

@@ -1,0 +1,15 @@
+$ jailops jail create web --image freebsd-15@stable --network lan --storage default
+! pool_exhausted: no addresses left
+! hint: widen the range
+[exit 5]
+
+$ jailops jail create slow --image freebsd-15@stable --network lan --storage default --no-wait -o name
+<uuid>
+
+$ jailops op cancel <uuid>
+operation/<uuid> cancelled
+
+$ jailops op wait <uuid>
+! cancelled: jailops: operation cancelled: <uuid>
+[exit 1]
+

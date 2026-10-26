@@ -1,0 +1,11 @@
+apiVersion: jailops/v1
+kind: Host
+metadata:
+  name: app1
+  labels: {env: prod}
+spec:
+  url: https://app1.example.org:8443
+  # Hex SHA-256 of the host's certificate (`jailopsd` prints it at start; a placeholder here).
+  fingerprint: 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+  # secrets/app1-token.age holds an API token of a global admin (`jailops-sync secrets set app1-token`).
+  token_secret: app1-token

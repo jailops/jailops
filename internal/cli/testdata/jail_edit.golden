@@ -1,0 +1,53 @@
+$ jailops jail create web --image freebsd-15@stable --network lan --storage default
+jail/web created
+
+$ jailops jail edit web
+jail/web unchanged
+
+$ jailops jail edit web
+! Edit cancelled: the file is empty.
+
+$ jailops jail edit web
+! usage: unknown field "hostnme"
+! hint: run 'jailops jail edit --help' for usage
+[exit 2]
+
+$ jailops jail edit web
+! usage: invalid YAML: yaml: line 14: did not find expected ',' or ']'
+! hint: run 'jailops jail edit --help' for usage
+[exit 2]
+
+$ jailops jail edit web
+! usage: the document is named "other" but the command line says "web"
+! hint: run 'jailops jail edit --help' for usage
+[exit 2]
+
+$ jailops jail edit web
+! error: editor "<dir>/ed-fail.sh" failed: exit status 3
+! hint: your text is in <tmp>/jailops-jail-web-N.yaml
+[exit 1]
+
+$ jailops jail edit web --dry-run
+dry-run: would update jail web
+apiVersion: jailops/v1
+kind: Jail
+metadata:
+  name: web
+spec:
+  image: freebsd-15@stable
+  storage: default
+  layout: thin
+  hostname: edited
+  network:
+    - network: lan
+      ipv4: 10.20.0.10
+
+$ jailops jail edit web
+jail/web updated
+
+$ jailops jail edit web -f <dir>/new.yaml
+jail/web updated
+
+$ jailops jail edit web
+jail/web unchanged
+

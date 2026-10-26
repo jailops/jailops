@@ -1,0 +1,10 @@
+apiVersion: jailops/v1
+kind: Storage
+metadata:
+  name: bulk
+spec:
+  # JailOps's own data on the 16 TB spinning pool `tank`. The dataset must exist (`zfs create tank/bulk`) and may not
+  # overlap another storage's dataset (the built-in "default" lives on the SSD pool, in zroot/jailops).
+  dataset: tank/bulk
+  description: 16 TB HDD pool for bulk jail data
+  compression: zstd

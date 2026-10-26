@@ -1,0 +1,90 @@
+$ jailops remote add lab https://<addr> --token-stdin -y
+! The server at <addr> presented a certificate that no trusted authority signed.
+!   Subject:  O=Acme Co
+!   Issuer:   O=Acme Co
+!   Expires:  2084-01-29
+!   SHA-256:  <fingerprint>
+! Compare this fingerprint with the one the server reports ('jailops server info' there) before trusting it.
+! Pin this certificate for remote "lab"? [y/N]: 
+! usage: confirmation required
+! hint: answer on standard input, or pass --fingerprint after checking it with the server's administrator
+[exit 2]
+
+$ jailops remote add lab https://<addr> --token-stdin
+! The server at <addr> presented a certificate that no trusted authority signed.
+!   Subject:  O=Acme Co
+!   Issuer:   O=Acme Co
+!   Expires:  2084-01-29
+!   SHA-256:  <fingerprint>
+! Compare this fingerprint with the one the server reports ('jailops server info' there) before trusting it.
+! Pin this certificate for remote "lab"? [y/N]: aborted: the certificate was not trusted; the remote was not added
+[exit 1]
+
+$ jailops remote add lab https://<addr> --token-stdin
+remote/lab added (now the current remote)
+connected to tls-host (version fake), seen as trusted
+! The server at <addr> presented a certificate that no trusted authority signed.
+!   Subject:  O=Acme Co
+!   Issuer:   O=Acme Co
+!   Expires:  2084-01-29
+!   SHA-256:  <fingerprint>
+! Compare this fingerprint with the one the server reports ('jailops server info' there) before trusting it.
+! Pin this certificate for remote "lab"? [y/N]: 
+
+$ jailops remote list
+    NAME    TARGET                               AUTH           HOST   SOURCE
+    local   unix:/var/run/jailops/jailops.sock   root only      -      built-in
+*   lab     https://<addr>              token+pinned   -      user
+
+$ jailops remote add wrong https://<addr> --token tok --fingerprint <sha256>
+! error: the certificate of <addr> does not match the fingerprint you gave
+!   expected: <fingerprint>
+!   presented: <fingerprint>
+! hint: do not pin it unless you know why it changed; ask the server's administrator
+[exit 1]
+
+$ jailops remote add known https://<addr> --token tok --fingerprint <fingerprint>
+remote/known added (now the current remote)
+connected to tls-host (version fake), seen as trusted
+
+$ jailops remote add sock unix:/run/other.sock --switch
+remote/sock added (now the current remote)
+! warning: saved, but the server could not be reached: Get "http://jailops.local/1.0": dial unix /run/other.sock: connect: no such file or directory
+
+$ jailops remote list
+    NAME    TARGET                               AUTH           HOST   SOURCE
+    local   unix:/var/run/jailops/jailops.sock   root only      -      built-in
+    known   https://<addr>              token+pinned   -      user
+*   sock    unix:/run/other.sock                 root only      -      user
+
+$ jailops remote switch known
+now using remote known
+
+$ jailops jail list
+! No resources found.
+
+$ jailops remote switch nowhere
+! usage: unknown remote "nowhere"
+! hint: run 'jailops remote switch --help' for usage
+[exit 2]
+
+$ jailops remote add local https://<addr>
+! usage: "local" is not a valid remote name
+! hint: run 'jailops remote add --help' for usage
+[exit 2]
+
+$ jailops remote remove sock
+remote/sock removed
+
+$ jailops remote remove sock
+! usage: remote "sock" is not in <dir>/user.yaml
+! hint: run 'jailops remote remove --help' for usage
+[exit 2]
+
+$ jailops remote switch local
+now using remote local
+
+$ jailops remote list -o name
+local
+known
+

@@ -1,0 +1,69 @@
+$ jailops remote add <addr> --token <trust-token>
+! usage: the trust token is malformed: jailops: malformed trust token
+! hint: run 'jailops remote add --help' for usage
+[exit 2]
+
+$ jailops remote add <addr> --token <trust-token> --dry-run
+dry-run: would redeem a trust token at https://<addr> and add remote 127-0-0-1
+pinned: <fingerprint>
+
+$ jailops remote add <addr> --token <trust-token> --name trusting
+remote/trusting added: trusted as laptop (operator, web), server pinned 46:81:74:fd:18:ae:99:0a...; now the current remote
+connected to trusting (version fake), seen as trusted
+
+$ jailops whoami
+User:        cert:laptop
+Kind:        certificate
+Role:        operator
+Scope:       web
+Remote:      trusting (https://<addr>)
+Project:     
+
+$ jailops whoami -o json
+{
+  "user": "cert:laptop",
+  "kind": "certificate",
+  "permission": "operator",
+  "projects": [
+    "web"
+  ],
+  "remote": "trusting",
+  "project": ""
+}
+
+$ jailops remote list
+    NAME       TARGET                               AUTH          HOST   SOURCE
+    local      unix:/var/run/jailops/jailops.sock   root only     -      built-in
+*   trusting   https://<addr>              mtls+pinned   -      user
+
+$ jailops remote add <addr> --token <trust-token> --name again
+! unauthorized: invalid trust token
+! hint: Check the token with 'jailops remote list' and 'jailops doctor'; create a new token on the server if needed. (jailops explain unauthorized)
+[exit 3]
+
+$ jailops project create other
+! forbidden: the operator role cannot call POST /1.0/projects
+! hint: Ask an administrator for a token with a higher role (operator for lifecycle, admin for configuration). (jailops explain forbidden)
+[exit 3]
+
+$ jailops list --project web
+! No resources found.
+
+$ jailops list --project default
+! not_found: project "default" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops whoami
+User:        cert:laptop
+Kind:        certificate
+Role:        readonly
+Scope:       web
+Remote:      trusting (https://<addr>)
+Project:     
+
+$ jailops whoami
+! unauthorized: missing or invalid token
+! hint: Check the token with 'jailops remote list' and 'jailops doctor'; create a new token on the server if needed. (jailops explain unauthorized)
+[exit 3]
+

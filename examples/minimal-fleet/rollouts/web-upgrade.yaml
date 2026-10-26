@@ -1,0 +1,12 @@
+apiVersion: jailops/v1
+kind: Rollout
+metadata:
+  name: web-upgrade
+spec:
+  description: Move the web project's jails to the newest image generation.
+  project: web
+  selector: {tier: web}
+  canary: 1
+  batch_size: 2
+  pause: 30s
+  health_gate: {timeout: 2m, interval: 5s}

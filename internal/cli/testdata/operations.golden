@@ -1,0 +1,62 @@
+$ jailops jail create web --image freebsd-15@stable --network lan --storage default --no-wait -o name
+<uuid>
+
+$ jailops op wait <uuid>
+ID                                     STATUS    DESCRIPTION
+<uuid>   success   Creating jail web
+
+$ jailops op list
+ID                                     STATUS    PROGRESS   AGE   DESCRIPTION
+<uuid>   success   100%       3h    Creating jail web
+
+$ jailops op list --active
+! No resources found.
+
+$ jailops op show <uuid> -o yaml
+id: <uuid>
+description: Creating jail web
+status: success
+resources:
+  jails:
+    - /1.0/jails/web
+metadata:
+  metadata:
+    name: web
+    uuid: <uuid>
+    project: main
+    host: <uuid>
+    scope: host
+    generation: 1
+    created_at: "2026-03-01T09:00:00Z"
+    updated_at: "2026-03-01T09:00:00Z"
+  spec:
+    image: freebsd-15@stable
+    storage: default
+    layout: thin
+    hostname: web
+    network:
+      - network: lan
+        ipv4: 10.20.0.10
+  status:
+    power: stopped
+    generation: g1
+project: main
+may_cancel: false
+created_at: "2026-03-01T09:00:00Z"
+updated_at: "2026-03-01T09:00:00Z"
+progress: 100
+
+$ jailops op show nonexistent
+! not_found: operation "nonexistent" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops jail create w2 --image freebsd-15@stable --network lan --storage default --no-wait
+OPERATION                              STATUS    DESCRIPTION
+<uuid>   pending   Creating jail w2
+
+$ jailops jail start web --timeout 100ms
+! error: timed out after 100ms waiting for operation <uuid>
+! hint: the operation keeps running; follow it with 'jailops op wait <uuid>'
+[exit 1]
+

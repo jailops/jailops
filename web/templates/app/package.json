@@ -1,0 +1,7 @@
+{
+  "name": "@jailops/__APP__",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "dependencies": { "@jailops/shared": "*" }
+}

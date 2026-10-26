@@ -1,0 +1,36 @@
+em0: flags=8963<UP,BROADCAST,RUNNING,PROMISC,SIMPLEX,MULTICAST> metric 0 mtu 1500
+	options=4e524bb<RXCSUM,TXCSUM,VLAN_MTU,VLAN_HWTAGGING,JUMBO_MTU,VLAN_HWCSUM,LRO,VLAN_HWFILTER,VLAN_HWTSO,RXCSUM_IPV6,TXCSUM_IPV6,NOMAP>
+	ether 52:54:00:12:34:56
+	inet 192.168.1.10 netmask 0xffffff00 broadcast 192.168.1.255
+	inet6 fe80::5054:ff:fe12:3456%em0 prefixlen 64 scopeid 0x1
+	inet6 2001:db8:1::10 prefixlen 64
+	media: Ethernet autoselect (1000baseT <full-duplex>)
+	status: active
+	nd6 options=23<PERFORMNUD,ACCEPT_RTADV,AUTO_LINKLOCAL>
+lo0: flags=1008049<UP,LOOPBACK,RUNNING,MULTICAST,LOWER_UP> metric 0 mtu 16384
+	options=680003<RXCSUM,TXCSUM,LINKSTATE,RXCSUM_IPV6,TXCSUM_IPV6>
+	inet6 ::1 prefixlen 128
+	inet 127.0.0.1 netmask 0xff000000
+	groups: lo
+jo0: flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+	description: jailops:net-lan office bridge
+	ether 58:9c:fc:10:ff:aa
+	inet 10.77.0.1 netmask 0xffffff00 broadcast 10.77.0.255
+	inet6 fe80::1%jo0 prefixlen 64 scopeid 0x4
+	id 00:00:00:00:00:00 priority 32768 hellotime 2 fwddelay 15
+	maxage 20 holdcnt 6 proto rstp maxaddr 2000 timeout 1200
+	root id 00:00:00:00:00:00 priority 32768 ifcost 0 port 0
+	member: joweba flags=143<LEARNING,DISCOVER,AUTOEGRESS,STP,PRIVATE>
+	        ifmaxaddr 0 port 7 priority 128 path cost 2000
+	member: jodbea flags=143<LEARNING,DISCOVER,AUTOEGRESS>
+	        ifmaxaddr 0 port 8 priority 128 path cost 2000
+	groups: bridge
+	nd6 options=9<PERFORMNUD,IFDISABLED>
+joweba: flags=1008943<UP,BROADCAST,RUNNING,PROMISC,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500
+	options=8<VLAN_MTU>
+	ether 02:aa:bb:cc:dd:0a
+	groups: epair
+	media: Ethernet 10Gbase-T (10Gbase-T <full-duplex>)
+	status: active
+epair99: this is not a header we trust ??
+	ether 00:11:22:33:44:55

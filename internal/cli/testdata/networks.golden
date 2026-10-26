@@ -1,0 +1,155 @@
+$ jailops network create dmz --subnet 10.30.0.0/24 --gateway 10.30.0.1 --range 10.30.0.10-10.30.0.12 --nat --dns 10.30.0.1 --uplink em1
+network/dmz created
+
+$ jailops network create bad --subnet nonsense --gateway 10.30.0.1 --range a-b
+! invalid: invalid subnet "nonsense"
+! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
+[exit 2]
+
+$ jailops network create short
+! usage: give --ipv4 and/or --ipv6, or --subnet, --gateway and --range (or use -f FILE)
+! hint: run 'jailops network create --help' for usage
+[exit 2]
+
+$ jailops network list
+NAME   BRIDGE   IPV4           GATEWAY     RANGE                   USED   FREE   UPLINK
+dmz    -        10.30.0.0/24   10.30.0.1   10.30.0.10-10.30.0.12   0      3      em1
+lan    -        10.20.0.0/24   10.20.0.1   10.20.0.10-10.20.0.20   0      11     em0
+
+$ jailops network grant dmz --project main
+network/dmz granted to project main
+
+$ jailops network grant lan --project other
+! not_found: project "other" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops jail create web --image freebsd-15@stable --storage default --network dmz
+jail/web created
+
+$ jailops jail create db --image freebsd-15@stable --storage default --network dmz
+jail/db created
+
+$ jailops network leases dmz
+ADDRESS      JAIL   NETWORK
+10.30.0.11   db     dmz
+10.30.0.10   web    dmz
+
+$ jailops network leases dmz -o json
+[
+  {
+    "address": "10.30.0.11",
+    "jail": "db",
+    "network": "dmz"
+  },
+  {
+    "address": "10.30.0.10",
+    "jail": "web",
+    "network": "dmz"
+  }
+]
+
+$ jailops network show dmz -o yaml
+metadata:
+  name: dmz
+  uuid: <uuid>
+  scope: fleet
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  uplink: em1
+  ipv4:
+    subnet: 10.30.0.0/24
+    gateway: 10.30.0.1
+    range: 10.30.0.10-10.30.0.12
+    nat: true
+  dns:
+    - 10.30.0.1
+status:
+  allocated: 2
+  free: 1
+
+$ jailops network create solo --subnet 10.50.0.0/24 --gateway 10.50.0.1 --range 10.50.0.5-10.50.0.9
+network/solo created
+
+$ jailops network grant solo --project main
+network/solo granted to project main
+
+$ jailops jail create only --image freebsd-15@stable --storage default --network solo
+jail/only created
+
+$ jailops network delete -y solo
+! busy: network "solo" is granted to project "main"
+! hint: remove the grant first
+[exit 5]
+
+$ jailops network delete -y lan
+! busy: network "lan" is granted to project "main"
+! hint: remove the grant first
+[exit 5]
+
+$ jailops network revoke lan --project main
+network/lan revoked from project main
+
+$ jailops network delete -y lan
+network/lan deleted
+
+$ jailops network create -f <dir>/net.yaml
+network/viafile created
+
+$ jailops network edit viafile -f <dir>/net2.yaml
+network/viafile updated
+
+$ jailops network show viafile
+metadata:
+  name: viafile
+  uuid: <uuid>
+  scope: fleet
+  generation: 2
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  ipv4:
+    subnet: 10.40.0.0/24
+    gateway: 10.40.0.1
+    range: 10.40.0.5-10.40.0.30
+  mtu: 1400
+status:
+  free: 26
+
+$ jailops network create sw --ipv4 10.94.0.1/24 --uplink em0 --ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy
+network/sw created
+
+$ jailops network show sw -o yaml
+metadata:
+  name: sw
+  uuid: <uuid>
+  scope: fleet
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  uplink: em0
+  ipv4:
+    subnet: 10.94.0.0/24
+    gateway: 10.94.0.1
+    range: 10.94.0.2-10.94.0.254
+  ipv6:
+    mode: proxy
+    subnet: 2001:db8:1:2:100::/80
+    gateway: fe80::1
+    range: 2001:db8:1:2:100::10-2001:db8:1:2:100:0:1:e
+status:
+  free: 253
+
+$ jailops network create badmode --ipv4 10.95.0.1/24 --ipv6 2001:db8:1:2:200::/80 --ipv6-mode bogus
+! usage: --ipv6-mode "bogus" must be routed or proxy
+! hint: run 'jailops network create --help' for usage
+[exit 2]
+
+$ jailops network create nomode --ipv4 10.96.0.1/24 --ipv6-mode proxy
+! usage: --ipv6-mode needs --ipv6
+! hint: run 'jailops network create --help' for usage
+[exit 2]
+

@@ -1,0 +1,32 @@
+{
+  "image_generation": "freebsd-15.0#g3",
+  "image_manifest": "sha256:abc",
+  "networks": [
+    {
+      "uplink": "em0"
+    }
+  ],
+  "secret_refs": [
+    "s1"
+  ],
+  "spec": {
+    "boot": {},
+    "env": {
+      "A": "1",
+      "B": "2"
+    },
+    "firewall": {},
+    "image": "freebsd-15.0@stable",
+    "network": [
+      {
+        "ipv4": "10.20.0.10",
+        "network": "lan"
+      }
+    ],
+    "resources": {},
+    "update": {}
+  },
+  "volumes": [
+    "data"
+  ]
+}

@@ -1,0 +1,4 @@
+# The fleet id becomes the ownership marker "managed_by: sync:minimal" on every
+# object jailops-sync creates. Only objects with that marker are ever changed
+# or deleted.
+id: minimal

@@ -1,0 +1,101 @@
+$ jailops create -f <dir>/p.yaml
+jail/web created
+
+$ jailops jail show web
+Name:        web
+UUID:        <uuid>
+Generation:  1
+Age:         3h
+Provisioned: no (run 'jailops provision web')
+
+SPEC                        STATUS
+----                        ------
+image: freebsd-15@stable    power: stopped
+storage: default            generation: g1
+layout: thin
+hostname: web
+network:
+  - network: lan
+    ipv4: 10.20.0.10
+provision:
+  packages:
+    - nginx
+  services:
+    enable:
+      - nginx
+    start:
+      - nginx
+  commands:
+    - - echo
+      - done
+
+$ jailops provision web
+! busy: jail "web" is not running; provisioning runs inside it
+! hint: start it first
+[exit 5]
+
+$ jailops start web
+jail/web started
+
+$ jailops provision web
+jail/web provisioned (4 steps)
+  packages
+  enable nginx
+  start nginx
+  run echo done
+
+$ jailops jail show web
+Name:        web
+UUID:        <uuid>
+Generation:  1
+Age:         3h
+Provisioned: 3h ago
+
+SPEC                        STATUS
+----                        ------
+image: freebsd-15@stable    power: running
+storage: default            jid: 1
+layout: thin                generation: g1
+hostname: web               addresses:
+network:                      - 10.20.0.10
+  - network: lan            started_at: "2026-03-01T09:00:00Z"
+    ipv4: 10.20.0.10        provisioned_at: "2026-03-01T09:00:00Z"
+provision:
+  packages:
+    - nginx
+  services:
+    enable:
+      - nginx
+    start:
+      - nginx
+  commands:
+    - - echo
+      - done
+
+$ jailops provision web
+! already_exists: jail "web" was provisioned at 2026-03-01T09:00:00Z
+! hint: changing the declaration does nothing until you ask: provision --again
+[exit 5]
+
+$ jailops provision web --again
+! Run the provisioning of "web" again? [y/N]: 
+! usage: confirmation required
+! hint: answer on standard input, or pass -y
+[exit 2]
+
+$ jailops provision web --again -y
+jail/web provisioned (4 steps)
+  packages
+  enable nginx
+  start nginx
+  run echo done
+
+$ jailops --dry-run provision web
+dry-run: would provision jail web
+again: false
+
+$ jailops provision ghost
+! not_found: jail "ghost" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+

@@ -1,0 +1,174 @@
+$ jailops jail list -o yaml
+- metadata:
+    name: web
+    uuid: <uuid>
+    project: main
+    host: <uuid>
+    scope: host
+    generation: 1
+    labels:
+      env: prod
+    created_at: "2026-03-01T09:00:00Z"
+    updated_at: "2026-03-01T09:00:00Z"
+  spec:
+    image: freebsd-15@stable
+    storage: default
+    layout: thin
+    hostname: web
+    network:
+      - network: lan
+        ipv4: 10.20.0.10
+  status:
+    power: stopped
+    generation: g1
+
+$ jailops jail list -o json
+[
+  {
+    "metadata": {
+      "name": "web",
+      "uuid": "<uuid>",
+      "project": "main",
+      "host": "<uuid>",
+      "scope": "host",
+      "generation": 1,
+      "labels": {
+        "env": "prod"
+      },
+      "created_at": "2026-03-01T09:00:00Z",
+      "updated_at": "2026-03-01T09:00:00Z"
+    },
+    "spec": {
+      "image": "freebsd-15@stable",
+      "storage": "default",
+      "layout": "thin",
+      "hostname": "web",
+      "update": {},
+      "resources": {},
+      "network": [
+        {
+          "network": "lan",
+          "ipv4": "10.20.0.10"
+        }
+      ],
+      "firewall": {},
+      "boot": {}
+    },
+    "status": {
+      "power": "stopped",
+      "generation": "g1"
+    }
+  }
+]
+
+$ jailops jail list -o name
+web
+
+$ jailops jail show web
+{
+  "metadata": {
+    "name": "web",
+    "uuid": "<uuid>",
+    "project": "main",
+    "host": "<uuid>",
+    "scope": "host",
+    "generation": 1,
+    "labels": {
+      "env": "prod"
+    },
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z"
+  },
+  "spec": {
+    "image": "freebsd-15@stable",
+    "storage": "default",
+    "layout": "thin",
+    "hostname": "web",
+    "update": {},
+    "resources": {},
+    "network": [
+      {
+        "network": "lan",
+        "ipv4": "10.20.0.10"
+      }
+    ],
+    "firewall": {},
+    "boot": {}
+  },
+  "status": {
+    "power": "stopped",
+    "generation": "g1"
+  }
+}
+
+$ jailops jail show web -o table
+Name:        web
+UUID:        <uuid>
+Generation:  1
+Age:         3h
+Labels:      env=prod
+
+SPEC                        STATUS
+----                        ------
+image: freebsd-15@stable    power: stopped
+storage: default            generation: g1
+layout: thin
+hostname: web
+network:
+  - network: lan
+    ipv4: 10.20.0.10
+
+$ jailops jail create x --image freebsd-15@stable --network lan --storage default -o json
+{
+  "metadata": {
+    "name": "x",
+    "uuid": "<uuid>",
+    "project": "main",
+    "host": "<uuid>",
+    "scope": "host",
+    "generation": 1,
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z"
+  },
+  "spec": {
+    "image": "freebsd-15@stable",
+    "storage": "default",
+    "layout": "thin",
+    "hostname": "x",
+    "update": {},
+    "resources": {},
+    "network": [
+      {
+        "network": "lan",
+        "ipv4": "10.20.0.11"
+      }
+    ],
+    "firewall": {},
+    "boot": {}
+  },
+  "status": {
+    "power": "stopped",
+    "generation": "g1"
+  }
+}
+
+$ jailops jail delete -y x -o json
+{
+  "id": "<uuid>",
+  "description": "Deleting jail x",
+  "status": "success",
+  "resources": {
+    "jails": [
+      "/1.0/jails/x"
+    ]
+  },
+  "project": "main",
+  "may_cancel": false,
+  "created_at": "2026-03-01T09:00:00Z",
+  "updated_at": "2026-03-01T09:00:00Z",
+  "progress": 100
+}
+
+$ jailops jail start web -o name
+web
+

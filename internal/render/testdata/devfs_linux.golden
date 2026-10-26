@@ -1,0 +1,18 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+[jailops_devfs_37885=37885]
+add hide
+add path 'null' unhide
+add path 'zero' unhide
+add path 'full' unhide
+add path 'random' unhide
+add path 'urandom' unhide
+add path 'tty' unhide
+add path 'ptmx' unhide
+add path 'pts' unhide
+add path 'pts/*' unhide
+add path 'fd' unhide
+add path 'fd/*' unhide
+add path 'stdin' unhide
+add path 'stdout' unhide
+add path 'stderr' unhide
+add path 'console' unhide

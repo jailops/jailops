@@ -1,0 +1,24 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+# anchor jailops/alpha/web
+table <jail_addrs> persist { 10.20.0.10, 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 }
+block in quick on joe1a inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }
+pass in quick on joe1a inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol label "jo-f5191988cb09"
+block in quick on joe1a from ! <jail_addrs> to any
+block in quick on joe1a inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv
+pass in quick on joe1a inet6 proto icmp6 from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { neighbrsol, neighbradv } label "jo-0b2bfbe47b93"
+pass in quick on joe1a inet6 proto icmp6 from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to ff02::/16 icmp6-type { listenrep, listendone, 143 } label "jo-e8ccd51232a6"
+pass in quick on joe1a inet6 proto icmp6 from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-3fecd63216b9"
+block out quick on joe1a inet6 proto icmp6 from any to any icmp6-type { redir, routeradv }
+pass out quick on joe1a inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2, ff02::1:ff00:100, ff02::1:ff88:fcd2 } icmp6-type { neighbrsol, neighbradv } label "jo-dbfa124e523e"
+pass out quick on joe1a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-9018ced50445"
+block drop out quick on joe1a from any to ! <jail_addrs>
+block drop out quick on joe1a inet proto icmp from any to any icmp-type redir
+# defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
+block drop out quick on joe1a all
+block drop in quick on joe1a all
+# into the jail from the host and from routed networks
+block drop out quick on jo0gb inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }
+pass out quick on jo0gb inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2, ff02::1:ff00:100, ff02::1:ff88:fcd2 } icmp6-type { neighbrsol, neighbradv } label "jo-cba8793572ee"
+pass out quick on jo0gb inet6 proto icmp6 from any to 2001:db8:1::100 icmp6-type { unreach, toobig, timex, paramprob } label "jo-8be74b7f5785"
+block drop out quick on jo0gb inet from any to 10.20.0.10
+block drop out quick on jo0gb inet6 from any to 2001:db8:1::100

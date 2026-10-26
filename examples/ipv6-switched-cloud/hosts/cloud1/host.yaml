@@ -1,0 +1,8 @@
+apiVersion: jailops/v1
+kind: Host
+metadata:
+  name: cloud1
+spec:
+  # Run jailops-sync on the host itself (or over `ssh -L`): the local socket needs no token.
+  # For a remote host use `url:`, `fingerprint:` and `token_secret:` instead (see examples/multi-host-fleet).
+  socket: /var/run/jailops/jailops.sock

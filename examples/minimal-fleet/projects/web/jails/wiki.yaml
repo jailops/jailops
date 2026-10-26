@@ -1,0 +1,10 @@
+apiVersion: jailops/v1
+kind: Jail
+metadata:
+  name: wiki
+  labels: {tier: web}
+hosts: [web2]
+spec:
+  image: freebsd-15@stable
+  profiles: [small, web]
+  env: {LOG_LEVEL: info}

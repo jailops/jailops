@@ -1,0 +1,12 @@
+apiVersion: jailops/v1
+kind: BackupPolicy
+metadata:
+  name: nightly
+spec:
+  # A policy selects jails by label: every jail labelled backup=nightly. An empty selector matches none.
+  selector: {backup: nightly}
+  targets: [vault]
+  schedule: "17 2 * * *"                  # five-field cron, host time
+  retention: {daily: 14, weekly: 8, monthly: 12}   # applied on the node, the only place backups are deleted
+  verify_schedule: "30 4 * * 0"           # weekly restore test, on a host that holds the key
+  verify_mode: extract

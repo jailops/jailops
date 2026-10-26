@@ -1,0 +1,15 @@
+apiVersion: jailops/v1
+kind: Jail
+hosts: [nas1]
+start: true
+metadata:
+  name: scratch
+spec:
+  image: freebsd-15@stable
+  storage: bulk
+  network:
+    - {name: eth0, network: media, ipv4: auto}
+  firewall: {policy: closed}
+  resources: {cpu: 2, memory: 4G}
+  volumes:
+    - {name: work, mount: /work, quota: 4T}

@@ -1,0 +1,11 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: shop
+spec:
+  hosts: [app1]
+  networks: [{network: shop}]
+  storage: [{storage: default, quota: 300G}]
+  quotas: {jails: 10, memory: 16G}
+  firewall: floor
+  images: [freebsd-15]

@@ -1,0 +1,30 @@
+$ jailops jail create web --image freebsd-15#g1 --network lan --storage default
+jail/web created
+
+$ jailops jail upgrade web --dry-run
+dry-run: would upgrade jail web from g1 to g2
+
+$ jailops jail upgrade web
+jail/web upgraded to g2
+
+$ jailops jail upgrade web
+! invalid: jail "web" is already on generation g2
+! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
+[exit 2]
+
+$ jailops jail show web
+Name:        web
+UUID:        <uuid>
+Generation:  2
+Age:         3h
+
+SPEC                    STATUS
+----                    ------
+image: freebsd-15#g2    power: stopped
+storage: default        generation: g2
+layout: thin
+hostname: web
+network:
+  - network: lan
+    ipv4: 10.20.0.10
+

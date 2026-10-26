@@ -1,0 +1,85 @@
+//go:build !noweb
+
+package webui
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"testing/fstest"
+)
+
+// appName is the key of this package's console in web/apps.json.
+const appName = "host"
+
+type regApp struct {
+	Title        string `json:"title"`
+	Binary       string `json:"binary"`
+	EmbedPackage string `json:"embedPackage"`
+	Dist         string `json:"dist"`
+}
+
+func registry(t *testing.T) map[string]regApp {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("..", "..", "web", "apps.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var r struct {
+		Apps map[string]regApp `json:"apps"`
+	}
+	if err := json.Unmarshal(b, &r); err != nil {
+		t.Fatal(err)
+	}
+	return r.Apps
+}
+
+// The registry must say that this package embeds this app, from this dist directory.
+func TestRegistryMatchesThisPackage(t *testing.T) {
+	app, ok := registry(t)[appName]
+	if !ok {
+		t.Fatalf("web/apps.json has no app %q", appName)
+	}
+	wd, _ := os.Getwd()
+	pkg := "internal/" + filepath.Base(wd)
+	if app.EmbedPackage != pkg || app.Dist != pkg+"/dist" {
+		t.Fatalf("registry says %s / %s, this package is %s", app.EmbedPackage, app.Dist, pkg)
+	}
+	if _, err := os.Stat(filepath.Join("dist", ".gitkeep")); err != nil {
+		t.Fatalf("dist/.gitkeep must exist so go:embed compiles before the UI is built: %v", err)
+	}
+}
+
+// The embedded console, when built, is this app's and no other: its index names this app and role,
+// and carries no other app's identity.
+func TestEmbeddedIndexIsOwnApp(t *testing.T) {
+	reg := registry(t)
+	w := get(t, Handler(), "GET", "/")
+	if w.Code == 404 { // not built: nothing embedded, nothing to confuse
+		return
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `<meta name="jailops-app" content="`+appName+`"`) {
+		t.Fatalf("index.html does not declare app %q", appName)
+	}
+	if !strings.Contains(body, "<title>"+reg[appName].Title+"</title>") {
+		t.Fatalf("index.html title is not %q", reg[appName].Title)
+	}
+	for name, other := range reg {
+		if name != appName && (strings.Contains(body, `<meta name="jailops-app" content="`+name+`"`) || strings.Contains(body, other.Title)) {
+			t.Fatalf("index.html of %s mentions app %s", appName, name)
+		}
+	}
+}
+
+// A handler never serves files outside its own file system, and a foreign index is never reachable.
+func TestHandlerStaysInsideItsFS(t *testing.T) {
+	h := handlerFS(fstest.MapFS{"index.html": {Data: []byte("<html>own</html>")}})
+	for _, p := range []string{"/../apps.json", "/..%2f..%2fweb/apps.json", "/%2e%2e/%2e%2e/go.mod"} {
+		if w := get(t, h, "GET", p); strings.Contains(w.Body.String(), `"apps"`) || strings.Contains(w.Body.String(), "module ") {
+			t.Fatalf("%s leaked a file outside the embedded dist", p)
+		}
+	}
+}

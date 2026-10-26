@@ -1,0 +1,14 @@
+apiVersion: jailops/v1
+kind: Jail
+hosts: [cloud1]
+start: true
+metadata:
+  name: wiki
+  labels: {tier: tools}
+spec:
+  image: freebsd-15@stable
+  storage: default
+  network:
+    - {name: eth0, network: intra, ipv4: auto, ipv6: auto}
+  firewall: {policy: lan-only}
+  resources: {memory: 1G}

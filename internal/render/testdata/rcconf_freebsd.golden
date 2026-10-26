@@ -1,0 +1,9 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+hostname="web.example.org"
+ifconfig_jo0123456789a0b="inet 10.20.0.10 netmask 255.255.255.0 mtu 1500"
+ifconfig_jo0123456789a0b_ipv6="inet6 2001:db8:1::10 prefixlen 64 -accept_rtadv"
+ifconfig_jo0123456789a1b="inet 10.30.0.10 netmask 255.255.0.0"
+ipv6_network_interfaces="jo0123456789a0b"
+rtsold_enable="NO"
+defaultrouter="10.20.0.1"
+ipv6_defaultrouter="fe80::1%jo0123456789a0b"

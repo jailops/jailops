@@ -1,0 +1,81 @@
+{
+  "$comment": "The registry of web consoles. Tooling (build, test, e2e, dev, new-app), the boundary tests and the Go embed tests are driven by this file only. Prefixes are the first path segment after /1.0 that the app's API module may call.",
+  "apps": {
+    "host": {
+      "title": "JailOps host console",
+      "binary": "jailopsd",
+      "embedPackage": "internal/webui",
+      "dist": "internal/webui/dist",
+      "role": "host",
+      "serverRoles": [
+        "host"
+      ],
+      "prefixes": [
+        "",
+        "auth",
+        "resources",
+        "doctor",
+        "tokens",
+        "jails",
+        "images",
+        "networks",
+        "firewall",
+        "backup-targets",
+        "backup-policies",
+        "backups",
+        "restores",
+        "remotes",
+        "operations",
+        "events",
+        "audit",
+        "users",
+        "certificates",
+        "projects",
+        "storage",
+        "trust",
+        "sessions",
+        "profiles",
+        "updates",
+        "backup"
+      ],
+      "devPort": 5173,
+      "previewPort": 4173,
+      "proxy": {
+        "env": "JAILOPS_API",
+        "default": "http://127.0.0.1:8099"
+      }
+    },
+    "backup": {
+      "title": "JailOps backup node console",
+      "binary": "jailops-backupd",
+      "embedPackage": "internal/backupui",
+      "dist": "internal/backupui/dist",
+      "role": "backup",
+      "serverRoles": [
+        "backup"
+      ],
+      "prefixes": [
+        "",
+        "auth",
+        "repository",
+        "certificate",
+        "hosts",
+        "groups",
+        "sessions",
+        "jobs",
+        "maintenance",
+        "quarantine",
+        "retention-policies",
+        "audit",
+        "users",
+        "tokens"
+      ],
+      "devPort": 5174,
+      "previewPort": 4174,
+      "proxy": {
+        "env": "JAILOPS_BACKUP_API",
+        "default": "http://127.0.0.1:8098"
+      }
+    }
+  }
+}

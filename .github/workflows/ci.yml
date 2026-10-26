@@ -1,0 +1,161 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # The consoles are embedded in the binaries, so they are built first and handed to the Go jobs.
+  web:
+    name: Web consoles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: extractions/setup-just@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Wire types are current
+        run: go run ./scripts/gen-ts -check
+      - name: Install, typecheck, unit tests, build
+        run: |
+          cd web
+          npm ci
+          npm run typecheck
+          npm run test:all
+          npm run build:all
+      - name: End-to-end tests (demo mode, real Chromium)
+        run: |
+          cd web
+          npx playwright install --with-deps chromium
+          npm run e2e:all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: console-dist
+          path: |
+            internal/webui/dist
+            internal/backupui/dist
+          retention-days: 7
+
+  go:
+    name: Go (Linux)
+    needs: web
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+    env:
+      JAILOPS_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres?sslmode=disable
+      CGO_ENABLED: "0"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: console-dist
+          path: .
+      - name: gofmt
+        run: |
+          out=$(gofmt -l cmd internal sdk scripts)
+          if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
+      - run: go vet ./...
+      - run: go build ./...
+      - name: Tests with the race detector
+        env:
+          CGO_ENABLED: "1"
+        run: go test ./... -race -count=1
+      - name: SDK module (stdlib only)
+        working-directory: sdk
+        run: |
+          go vet ./...
+          go test ./... -race -count=1
+          test -z "$(go list -m all | tail -n +2)" || { echo "the SDK must have no dependencies"; go list -m all; exit 1; }
+      - name: Fuzz the parsers briefly
+        run: go test ./internal/sys/zfs -run '^$' -fuzz FuzzParse -fuzztime 20s
+      - name: Fuzz the helper's command allow-list briefly
+        run: go test ./internal/priv -run '^$' -fuzz FuzzCheckCommand -fuzztime 20s
+
+  cross:
+    name: Cross-build (FreeBSD)
+    needs: web
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    env:
+      CGO_ENABLED: "0"
+      GOOS: freebsd
+      GOARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@v4
+        with:
+          name: console-dist
+          path: .
+      - run: go build ./...
+      - run: go vet ./...
+      - name: Binaries
+        run: |
+          mkdir -p dist
+          for b in jailops jailopsd jailops-priv jailops-sync jailops-backupd; do
+            go build -trimpath -ldflags="-s -w -X main.version=$(tr -d '[:space:]' < version.txt)" -o dist/$b-freebsd-${{ matrix.arch }} ./cmd/$b
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-${{ matrix.arch }}
+          path: dist
+          retention-days: 7
+
+  # The tests on the real target. A FreeBSD VM runs the unit tests natively (pty, jail(2), sysctl and the other
+  # FreeBSD-only code paths execute here, not just compile) and then the scripted end-to-end flow on a file-backed
+  # ZFS pool: image build, jail create/start/exec, backup to a node and restore.
+  freebsd:
+    name: FreeBSD VM
+    needs: web
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: console-dist
+          path: .
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          release: "15.1"
+          usesh: true
+          sync: rsync
+          prepare: |
+            pkg install -y go postgresql17-server bash curl rsync
+          run: |
+            set -eu
+            export CGO_ENABLED=0
+            go version
+            go vet ./...
+            go test ./... -count=1
+            sh scripts/ci-freebsd-e2e.sh

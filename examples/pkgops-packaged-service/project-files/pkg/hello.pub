@@ -1,0 +1,3 @@
+-----BEGIN PUBLIC KEY-----
+REPLACE-WITH-THE-CONTENT-OF-repo.pub-THAT-pkgops-key-generate-WROTE
+-----END PUBLIC KEY-----

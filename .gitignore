@@ -1,0 +1,25 @@
+/bin/
+/dist/
+/web/node_modules/
+/internal/*/dist/*
+!/internal/*/dist/.gitkeep
+*.test
+*.out
+.env
+/web/e2e/.results/
+/web/test-results/
+temp
+/temp/
+/pkg-keys/
+
+# stray binaries from a plain `go build ./cmd/...` (the real build goes to bin/ with `just build`)
+/jailops
+/jailopsd
+/jailops-priv
+/jailops-sync
+/jailops-backupd
+/cmd/jailops/jailops
+/cmd/jailopsd/jailopsd
+/cmd/jailops-priv/jailops-priv
+/cmd/jailops-sync/jailops-sync
+/cmd/jailops-backupd/jailops-backupd

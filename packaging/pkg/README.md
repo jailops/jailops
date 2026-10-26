@@ -1,0 +1,42 @@
+# FreeBSD packages
+
+The packages on `pkg.jailops.net` are built, signed and published by
+[jailops-packages](https://github.com/jailops/jailops-packages) with [PkgOps](https://github.com/jailops/jailops-pkgops): no FreeBSD
+machine is needed, Go cross-compiles on Linux. That repository holds the package definitions of the three packages below
+(`main/jailops-client`, `main/jailops`, `main/jailops-backupd`) and the install instructions for a host.
+
+The rest of this file describes the **old path**, kept for a transition: `scripts/pkg-build.sh` makes the packages from
+binaries cross-built on any machine (`goreleaser` or `just build-freebsd`) and `scripts/pkg-repo.sh` turns a directory of
+packages into a signed repository. Both run on FreeBSD, because they use `pkg(8)`. They can be removed once the first
+JailOps packages have been published from jailops-packages.
+
+Three packages come out of one build:
+
+| package | holds |
+|---|---|
+| `jailops-client` | `jailops`, `jailops-sync` (any machine that talks to a daemon) |
+| `jailops` | `jailopsd`, `jailops-priv`, the rc.d scripts and sample configuration; depends on `jailops-client` |
+| `jailops-backupd` | the backup node, its rc.d script and sample configuration |
+
+JailOps targets FreeBSD 15.1 and later, so packages are built for the 15 ABI only (`FreeBSD:15:amd64`,
+`FreeBSD:15:aarch64`); `jailops doctor` fails on an older release.
+
+## The repository
+
+    pkg.jailops.net/<ABI>/latest/All/*.pkg
+    pkg.jailops.net/<ABI>/latest/{meta.conf,packagesite.pkg,data.pkg,...}   (written by pkg repo)
+
+The repository is signed with an RSA key. The private key lives only in the release environment (the
+`PKG_REPO_KEY` secret of the release workflow); `just pkg-keygen` makes a pair, and the public key is published at
+`https://pkg.jailops.net/jailops.pub`.
+
+A host uses it with `/usr/local/etc/pkg/repos/jailops.conf`:
+
+    jailops: {
+      url: "https://pkg.jailops.net/${ABI}/latest",
+      signature_type: "pubkey",
+      pubkey: "/usr/local/etc/pkg/keys/jailops.pub",
+      enabled: yes
+    }
+
+Then `pkg update && pkg install jailops`, and `jailops-priv init -pool tank` once.

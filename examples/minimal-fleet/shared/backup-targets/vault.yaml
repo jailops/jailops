@@ -1,0 +1,8 @@
+apiVersion: jailops/v1
+kind: BackupTarget
+metadata:
+  name: vault
+spec:
+  kind: node
+  address: https://backup.example.test:8443
+  fingerprint: ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100

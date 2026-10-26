@@ -1,0 +1,601 @@
+package daemon
+
+import (
+	"context"
+	"crypto/tls"
+	"errors"
+	"fmt"
+	"io"
+	"jailops.net/jailops/internal/priv"
+	"log/slog"
+	"net"
+	"net/http"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"sync"
+	"time"
+
+	"jailops.net/jailops/internal/auth"
+	"jailops.net/jailops/internal/hostbackup"
+	"jailops.net/jailops/internal/lifecycle"
+	"jailops.net/jailops/internal/ndproxy"
+	"jailops.net/jailops/internal/reconcile"
+	"jailops.net/jailops/internal/server"
+	"jailops.net/jailops/internal/service"
+	"jailops.net/jailops/internal/service/zfsadapt"
+	"jailops.net/jailops/internal/state"
+	"jailops.net/jailops/internal/store"
+	"jailops.net/jailops/internal/sys/ifconfig"
+	"jailops.net/jailops/internal/sys/run"
+	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/sdk/api"
+)
+
+// Options are the inputs of Start that are not in the configuration file.
+type Options struct {
+	// Config is used as is when set; otherwise ConfigPath is read.
+	Config     *Config
+	ConfigPath string
+	// Dev runs the privileged operations in process as root.
+	Dev     bool
+	Version string
+	// LogOutput receives the log (default os.Stderr).
+	LogOutput io.Writer
+	// Clients builds the operating system clients (default DefaultClients).
+	Clients ClientFactory
+	// Clock and Now are injectable for tests.
+	Now func() time.Time
+	// Hostname overrides os.Hostname.
+	Hostname string
+	// Env overrides the environment reported by GET /1.0.
+	Env *api.Environment
+	// NoListen skips opening listeners (tests use Handler directly).
+	NoListen bool
+	// Backups wires a host-side backup backend.
+	Backups service.Backups
+	// Execer replaces how commands run in jails (tests; by default the helper
+	// client, else jexec in process under --dev).
+	Execer service.JailExecer
+	// Registrar replaces how storage datasets are registered with the root
+	// helper (tests; by default the helper client itself, else in process).
+	Registrar service.StorageRegistrar
+	// BackupTLS replaces the pinned node certificate and the client
+	// certificate files of the backup section, and BackupMounter replaces how
+	// dataset snapshots are read (tests).
+	BackupTLS     *tls.Config
+	BackupMounter hostbackup.Mounter
+}
+
+// Daemon is a running jailopsd.
+type Daemon struct {
+	cfg  Config
+	log  *slog.Logger
+	opts Options
+
+	state   *state.Store
+	db      *store.Store
+	clients *Clients
+	svc     *service.Service
+	backups *hostBackups
+	rec     *reconcile.Reconciler
+	srv     *server.Server
+
+	unixLn, httpsLn net.Listener
+	servers         []*http.Server
+	cert            tls.Certificate
+	certs           *certReloader
+
+	cancel context.CancelFunc
+	wg     sync.WaitGroup
+	once   sync.Once
+	failed chan error
+}
+
+// Run starts the daemon, waits for ctx to end and shuts down gracefully.
+func Run(ctx context.Context, opts Options) error {
+	d, err := Start(ctx, opts)
+	if err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+	case err := <-d.failed:
+		sctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		_ = d.Shutdown(sctx)
+		return err
+	}
+	sctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return d.Shutdown(sctx)
+}
+
+func parseLevel(s string) slog.Level {
+	switch s {
+	case "debug":
+		return slog.LevelDebug
+	case "warn":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	}
+	return slog.LevelInfo
+}
+
+// Start runs the start order: configuration, state (flock), store and
+// migrations, operating system clients, service, route verification, then the
+// listeners and background loops. Any failure undoes what was opened.
+func Start(ctx context.Context, opts Options) (*Daemon, error) {
+	var cfg Config
+	switch {
+	case opts.Config != nil:
+		var err error
+		if cfg, err = opts.Config.finish(); err != nil {
+			return nil, err
+		}
+	default:
+		path := opts.ConfigPath
+		if path == "" {
+			path = DefaultConfigPath
+		}
+		var err error
+		if cfg, err = Load(path); err != nil {
+			return nil, err
+		}
+	}
+	if opts.LogOutput == nil {
+		opts.LogOutput = os.Stderr
+	}
+	if opts.Now == nil {
+		opts.Now = time.Now
+	}
+	if opts.Clients == nil {
+		opts.Clients = DefaultClients
+	}
+	log := server.NewLogger(opts.LogOutput, cfg.Log.Format, parseLevel(cfg.Log.Level))
+	d := &Daemon{cfg: cfg, log: log, opts: opts, failed: make(chan error, 4)}
+	bg, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	d.cancel = cancel
+	ok := false
+	defer func() {
+		if !ok {
+			d.teardown()
+		}
+	}()
+
+	for _, dir := range []string{cfg.DataDir, filepath.Join(cfg.DataDir, "journal"), filepath.Join(cfg.DataDir, "tls"), cfg.WorkDir} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return nil, fmt.Errorf("daemon: %w", err)
+		}
+	}
+	// 1. Operating system clients and the dataset layout.
+	clients, err := opts.Clients(ctx, &cfg, opts.Dev)
+	if err != nil {
+		return nil, err
+	}
+	d.clients = clients
+	if err := ensureLayout(ctx, clients.ZFS, cfg); err != nil {
+		return nil, err
+	}
+	// 2. State, with the single-writer flock.
+	st, err := state.Open(cfg.StateDir, state.Options{Hooks: state.Hooks{BeforeDestructive: d.snapshotState}})
+	if err != nil {
+		return nil, fmt.Errorf("daemon: opening state %s: %w", cfg.StateDir, err)
+	}
+	d.state = st
+	// 3. Operational store and its migrations.
+	db, err := store.Open(filepath.Join(cfg.DataDir, "jailops.db"), store.Options{Now: opts.Now})
+	if err != nil {
+		return nil, fmt.Errorf("daemon: opening database: %w", err)
+	}
+	d.db = db
+	hostUUID, err := hostIdentity(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	sealKey, err := loadOrCreateKey(filepath.Join(cfg.DataDir, "seal.key"))
+	if err != nil {
+		return nil, err
+	}
+	secretsID, err := loadOrCreateSecretsKey(filepath.Join(cfg.DataDir, "secrets.key"))
+	if err != nil {
+		return nil, err
+	}
+	hostname := opts.Hostname
+	if hostname == "" {
+		hostname, _ = os.Hostname()
+	}
+	certPath := firstNonEmpty(cfg.Listen.HTTPS.Cert, filepath.Join(cfg.DataDir, "tls", "server.crt"))
+	keyPath := firstNonEmpty(cfg.Listen.HTTPS.Key, filepath.Join(cfg.DataDir, "tls", "server.key"))
+	d.cert, err = loadOrCreateCert(certPath, keyPath, cfg.Listen.HTTPS.Cert != "", hostname, cfg.Listen.HTTPS.Names, opts.Now())
+	if err != nil {
+		return nil, err
+	}
+	d.certs = newCertReloader(certPath, keyPath, d.cert, log, opts.Now)
+	// 4. Service.
+	env := api.Environment{OS: "FreeBSD", Arch: goArch(), Pool: cfg.Pool, PF: true}
+	if opts.Env != nil {
+		env = *opts.Env
+	}
+	zad := zfsadapt.New(clients.ZFS, clients.Runner)
+	zad.MountFn, zad.UnmountFn = clients.Mount, clients.Unmount
+	deps := service.Deps{
+		Now: opts.Now, Log: log, Version: opts.Version, Hostname: hostname, HostUUID: hostUUID, Role: api.RoleHost, Hub: cfg.Hub, Env: env,
+		Pool: cfg.Pool, Root: cfg.Dataset, MountBase: cfg.MountBase, ConfDir: cfg.ConfDir, StateDir: cfg.StateDir,
+		WorkDir: cfg.WorkDir, JournalDir: filepath.Join(cfg.DataDir, "journal"),
+		State: st, DB: db, SealKey: sealKey, SecretsIdentity: secretsID, SecretsRecipient: secretsID.Recipient().String(),
+		ZFS: zad, ImageZFS: zad, Exec: runExec{clients.Runner}, Files: clients.Files, Jails: clients.Jails,
+		PF: clients.PF, Net: clients.Net, Run: clients.Runner, Sysctl: clients.Sysctl, ZClient: clients.ZFS,
+		CompatFile: cfg.ZFS.CompatFile, CompatDir: cfg.ZFS.CompatDir, Backups: opts.Backups,
+		NetworkPool: cfg.Projects.NetworkPool, NetworkPoolBits: cfg.Projects.NetworkBits, NetworkUplink: cfg.Projects.Uplink, NetworkNAT: cfg.Projects.NAT,
+		ServerFingerprint: fingerprintOf(d.cert),
+	}
+	switch {
+	case opts.Execer != nil:
+		deps.Execer = opts.Execer
+	case func() bool { _, ok := any(clients.Host).(service.JailExecer); return ok && clients.Host != nil }():
+		deps.Execer = any(clients.Host).(service.JailExecer)
+	case opts.Dev:
+		deps.Execer = service.LocalExecer{Prefix: []string{"jexec", "-l"}}
+	}
+	deps.NetSysctl = cfg.Network.Sysctl
+	for _, p := range cfg.Lifecycle.Persistent {
+		deps.Persistent = append(deps.Persistent, lifecycle.PersistentPath{Dataset: p.Dataset, Path: p.Path, Class: lifecycle.Class(p.Class), Merge: p.Merge, NoSeed: p.NoSeed})
+	}
+	deps.UpdateTick, deps.ProjectFilesDir = cfg.Updates.Tick.Std(), cfg.Updates.ProjectFilesDir
+	deps.ExecLimits = service.ExecLimits{PerJail: cfg.Limits.ExecSessionsPerJail, Idle: cfg.Limits.ExecIdle.Std(), Max: cfg.Limits.ExecMax.Std()}
+	if opts.Registrar != nil {
+		deps.Registrar = opts.Registrar
+	} else if r, ok := any(clients.Host).(service.StorageRegistrar); ok && clients.Host != nil {
+		deps.Registrar = r
+	}
+	if cfg.Hub {
+		prober := &server.SDKProber{Cert: &d.cert}
+		deps.Remotes = prober
+		deps.Dial = prober.Dial
+	}
+	if deps.Backups == nil {
+		var agents hostbackup.Agents
+		if !opts.Dev && clients.Host != nil {
+			agents = privAgents{clients.Host} // not root: files are read and written by agents of the helper
+		}
+		hb, err := buildHostBackups(cfg, hostUUID, clients.ZFS, log, opts, agents)
+		if err != nil {
+			return nil, err
+		}
+		if hb != nil {
+			d.backups = hb
+			deps.Backups = hb.svc
+			deps.BackupAdmin = backupAdmin{hb.svc}
+		}
+	}
+	svc, err := service.New(deps)
+	if err != nil {
+		return nil, err
+	}
+	d.svc = svc
+	if d.backups != nil {
+		d.backups.late.s = svc
+	}
+	// 5. Reconciler.
+	autostart := cfg.Reconcile.Autostart != nil && *cfg.Reconcile.Autostart
+	rcfg := reconcile.Config{Interval: cfg.Reconcile.Interval.Std(), Autostart: autostart, NDP: d.ndpFactory()}
+	trigger := make(chan struct{}, 1)
+	d.rec = reconcile.New(rcfg, reconcile.Env{Source: svc, Sink: svc, Actions: svc, Net: clients.Net, PF: clients.PF, Jails: clients.Jails,
+		Run: clients.Runner, Sysctl: clients.Sysctl, HostRoutes: func(context.Context) (map[netip.Addr]string, error) { return priv.ReadHostRoutes() },
+		HostNeighbors: func(context.Context) ([]ifconfig.Neighbor, error) { return priv.ReadStaticNeighbors() },
+		Log:           log, Trigger: trigger})
+	svc.SetReconciler(d.rec)
+	// 6. Routes are verified against the permission table here.
+	srv, err := server.New(server.Config{
+		Svc: svc, Log: log, ClientCert: &d.cert, NoUI: !cfg.UI(),
+		MaxBody: cfg.Limits.MaxBodyBytes, RequestTimeout: cfg.Limits.RequestTimeout.Std(),
+		Lockout: auth.LockoutConfig{Threshold: cfg.Limits.AuthFailureThreshold, Now: opts.Now},
+	})
+	if err != nil {
+		return nil, err
+	}
+	d.srv = srv
+	// Found on FreeBSD: startup work (registering the default storage) and the reconcile loop act for the
+	// host administrator who configured the daemon; the helper needs the admin assertion for them.
+	if err := svc.Start(priv.WithAdmin(ctx, systemActor)); err != nil {
+		return nil, err
+	}
+	// 7. Listeners.
+	if !opts.NoListen {
+		if err := d.listen(); err != nil {
+			return nil, err
+		}
+	}
+	// 8. Background work.
+	d.go_(func() { _ = d.rec.Run(priv.WithAdmin(bg, systemActor)) })
+	d.go_(func() { d.bridgeStateEvents(bg, trigger) })
+	d.go_(func() { d.housekeeping(bg) })
+	if d.backups != nil {
+		d.go_(func() { d.backupLoop(priv.WithAdmin(bg, systemActor)) })
+	}
+	if cfg.Hub {
+		d.go_(func() { d.probeLoop(bg) })
+		d.go_(func() { d.fleetLoop(bg) })
+	}
+	ok = true
+	log.Info("jailopsd started", "version", opts.Version, "host", hostUUID, "pool", cfg.Pool, "hub", cfg.Hub,
+		"unix", d.UnixPath(), "https", d.HTTPSAddr(), "fingerprint", fingerprintOf(d.cert))
+	return d, nil
+}
+
+// backupLoop rebuilds the catalog from the repository when it is empty and
+// the host holds a key (a new host restoring), then runs the scheduler until
+// the daemon stops.
+func (d *Daemon) backupLoop(ctx context.Context) {
+	hb := d.backups.svc
+	if l, err := hb.List(ctx); err == nil && len(l) == 0 {
+		if st, err := d.backups.admin().KeyStatus(ctx); err == nil && st.Status != "none" {
+			if n, err := hb.Reindex(ctx, ""); err != nil {
+				d.log.Warn("backup: the catalog could not be rebuilt from the repository", "err", err)
+			} else if n > 0 {
+				d.log.Info("backup: the catalog was rebuilt from the repository", "backups", n)
+			}
+		}
+	}
+	if err := hb.Run(ctx); err != nil && ctx.Err() == nil {
+		d.log.Error("backup scheduler stopped", "err", err)
+	}
+}
+
+func (h *hostBackups) admin() backupAdmin { return backupAdmin{h.svc} }
+
+func (d *Daemon) go_(f func()) {
+	d.wg.Add(1)
+	go func() { defer d.wg.Done(); f() }()
+}
+
+// Handler returns the full HTTP handler (for tests that do not listen).
+func (d *Daemon) Handler() http.Handler { return d.srv.Handler() }
+
+// Server returns the API server.
+func (d *Daemon) Server() *server.Server { return d.srv }
+
+// Service returns the service layer.
+func (d *Daemon) Service() *service.Service { return d.svc }
+
+// Reconciler returns the reconcile loop.
+func (d *Daemon) Reconciler() *reconcile.Reconciler { return d.rec }
+
+// Fingerprint is the pin of the server certificate.
+func (d *Daemon) Fingerprint() string { return fingerprintOf(d.cert) }
+
+// Certificate is the server (and hub client) certificate.
+func (d *Daemon) Certificate() tls.Certificate { return d.cert }
+
+// UnixPath is the socket path, "" when not listening.
+func (d *Daemon) UnixPath() string {
+	if d.unixLn == nil {
+		return ""
+	}
+	return d.unixLn.Addr().String()
+}
+
+// HTTPSAddr is the address of the HTTPS listener, "" when not listening.
+func (d *Daemon) HTTPSAddr() string {
+	if d.httpsLn == nil {
+		return ""
+	}
+	return d.httpsLn.Addr().String()
+}
+
+// Shutdown stops accepting, drains requests, cancels operations (the plan
+// executor rolls the running step back through its journal) and closes the
+// stores.
+func (d *Daemon) Shutdown(ctx context.Context) error {
+	var err error
+	d.once.Do(func() {
+		d.log.Info("jailopsd stopping")
+		for _, s := range d.servers {
+			if e := s.Shutdown(ctx); e != nil {
+				_ = s.Close()
+				err = errors.Join(err, e)
+			}
+		}
+		d.teardown()
+		d.log.Info("jailopsd stopped")
+	})
+	return err
+}
+
+func (d *Daemon) teardown() {
+	if d.cancel != nil {
+		d.cancel()
+	}
+	if d.svc != nil {
+		d.svc.Close()
+	}
+	d.wg.Wait()
+	if d.backups != nil {
+		d.backups.svc.Close()
+	}
+	if d.rec != nil {
+		d.rec.Close()
+	}
+	for _, l := range []net.Listener{d.unixLn, d.httpsLn} {
+		if l != nil {
+			_ = l.Close()
+		}
+	}
+	if d.unixLn != nil {
+		_ = os.Remove(d.cfg.Listen.Unix.Path)
+	}
+	if d.clients != nil && d.clients.Closer != nil {
+		_ = d.clients.Closer.Close()
+	}
+	if d.db != nil {
+		_ = d.db.Close()
+	}
+	if d.state != nil {
+		_ = d.state.Close()
+	}
+}
+
+// snapshotState takes a ZFS snapshot of the state dataset before a delete,
+// when that dataset exists.
+func (d *Daemon) snapshotState(kind api.Kind, name string) error {
+	if d.clients == nil || d.clients.ZFS == nil {
+		return nil
+	}
+	ds := d.cfg.Dataset + "/state"
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if ok, err := d.clients.ZFS.Exists(ctx, ds); err != nil || !ok {
+		return nil
+	}
+	snap := fmt.Sprintf("%s@jo-pre-delete-%d", ds, d.opts.Now().UnixNano())
+	if err := d.clients.ZFS.Snapshot(ctx, zfs.SnapshotOpts{Names: []string{snap}, Props: map[string]string{"jailops:comment": "before deleting " + string(kind) + " " + name}}); err != nil {
+		return fmt.Errorf("snapshot of the state dataset before deleting %s %s: %w", kind, name, err)
+	}
+	return nil
+}
+
+func (d *Daemon) bridgeStateEvents(ctx context.Context, trigger chan<- struct{}) {
+	ch, cancel := d.state.Watch(64)
+	defer cancel()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-ch:
+			if !ok {
+				return
+			}
+			select {
+			case trigger <- struct{}{}:
+			default:
+			}
+		}
+	}
+}
+
+// fleetLoop applies fleet projects to their hosts: when a project changes and
+// every FleetInterval, which is how a host that was offline catches up.
+func (d *Daemon) fleetLoop(ctx context.Context) {
+	t := time.NewTicker(service.FleetInterval)
+	defer t.Stop()
+	for {
+		d.svc.FleetReconcile(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-d.svc.FleetKicks():
+		}
+	}
+}
+
+func (d *Daemon) probeLoop(ctx context.Context) {
+	t := time.NewTicker(30 * time.Second)
+	defer t.Stop()
+	for {
+		d.svc.ProbeRemotes(ctx)
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// housekeeping purges expired sessions and tokens, prunes old operations and
+// copies the database with VACUUM INTO daily (users, tokens and the audit log
+// are the only rows that cannot be rebuilt).
+func (d *Daemon) housekeeping(ctx context.Context) {
+	run := func() {
+		_, _ = d.db.Sessions.PurgeExpired(ctx)
+		_, _ = d.db.Tokens.DeleteExpired(ctx)
+		_, _ = d.db.Operations.Prune(ctx, d.opts.Now().Add(-30*24*time.Hour))
+		d.backupDB(ctx)
+		d.svc.Housekeeping(ctx)
+	}
+	run()
+	t := time.NewTicker(time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			run()
+		}
+	}
+}
+
+func (d *Daemon) backupDB(ctx context.Context) {
+	dir := filepath.Join(d.cfg.DataDir, "backups")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return
+	}
+	name := filepath.Join(dir, "jailops-"+d.opts.Now().UTC().Format("20060102")+".db")
+	if _, err := os.Stat(name); err == nil {
+		return
+	}
+	if err := d.db.VacuumInto(ctx, name); err != nil {
+		d.log.Warn("database backup failed", "err", err)
+		return
+	}
+	// Keep the newest seven.
+	ents, _ := os.ReadDir(dir)
+	for i := 0; i < len(ents)-7; i++ {
+		_ = os.Remove(filepath.Join(dir, ents[i].Name()))
+	}
+}
+
+// ndpFactory builds the neighbor discovery proxy. In production it works through the root helper: the
+// helper hands over a locked, read-only capture of the uplink and sends the advertisements itself, for the prefixes the
+// operator approved in priv.conf (ndp-proxy). With --dev it runs in process as root.
+func (d *Daemon) ndpFactory() reconcile.NDPFactory {
+	return func(uplink string) (reconcile.NDP, error) {
+		if !d.opts.Dev {
+			if d.clients == nil || d.clients.Host == nil {
+				return nil, api.Errorf(api.CodeUnsupported, "the IPv6 proxy needs the root helper")
+			}
+			return newHelperNDP(d.clients.Host, d.clients.Net, uplink, func(format string, args ...any) { d.log.Warn(fmt.Sprintf(format, args...)) })
+		}
+		bpf := ndproxy.NewBPF(uplink)
+		p, err := ndproxy.New(ndproxy.Config{Uplink: uplink}, ndproxy.Deps{
+			Capture: bpf, Injector: bpf, Routes: ndproxy.RouteManager{Exec: ndExec{run.NewExec()}},
+			Joiner: ndproxy.NewMulticastJoiner(), Clock: reconcile.SystemClock{},
+		})
+		if err != nil {
+			return nil, err
+		}
+		return p, nil
+	}
+}
+
+type ndExec struct{ r run.Runner }
+
+func (e ndExec) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	res, err := e.r.Run(ctx, run.Cmd{Name: name, Args: args, Timeout: 20 * time.Second})
+	return append(res.Stdout, res.Stderr...), err
+}
+
+// runExec adapts run.Runner to the Exec interfaces of the lifecycle and the
+// image builder.
+type runExec struct{ r run.Runner }
+
+func (e runExec) Run(ctx context.Context, argv []string) ([]byte, error) {
+	if len(argv) == 0 {
+		return nil, errors.New("empty command")
+	}
+	res, err := e.r.Run(ctx, run.Cmd{Name: argv[0], Args: argv[1:], Timeout: 30 * time.Minute})
+	return append(res.Stdout, res.Stderr...), err
+}
+
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
+}
+
+// systemActor names the daemon itself in the helper's audit log for work it starts on its own.
+const systemActor = "jailopsd"

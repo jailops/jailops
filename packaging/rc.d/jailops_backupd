@@ -1,0 +1,41 @@
+#!/bin/sh
+#
+# PROVIDE: jailops_backupd
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+#
+# Add to /etc/rc.conf:
+#   jailops_backupd_enable="YES"
+# The backup node runs as the unprivileged user jailops-backup. Configuration:
+# /usr/local/etc/jailops/backupd.yaml. First run `jailops-backupd -c <config> init` (as that user).
+# Output goes to syslog (tag jailops-backupd).
+
+. /etc/rc.subr
+
+name="jailops_backupd"
+rcvar="jailops_backupd_enable"
+desc="JailOps backup node"
+
+pidfile="/var/run/jailops-backupd/backupd.pid"
+supervisor_pidfile="/var/run/jailops-backupd/backupd-daemon.pid"
+procname="/usr/local/sbin/jailops-backupd"
+command="/usr/sbin/daemon"
+
+start_precmd="jailops_backupd_precmd"
+
+jailops_backupd_precmd()
+{
+	install -d -m 0750 -o ${jailops_backupd_runas} -g ${jailops_backupd_runas} /var/run/jailops-backupd
+}
+
+# (not jailops_backupd_user: rc.subr would run the whole command as that user with su)
+# rc.conf may set jailops_backupd_config and jailops_backupd_runas: read them before anything is derived from them
+load_rc_config $name
+: ${jailops_backupd_enable:="NO"}
+: ${jailops_backupd_config:="/usr/local/etc/jailops/backupd.yaml"}
+: ${jailops_backupd_runas:="jailops-backup"}
+
+command_args="-f -S -T jailops-backupd -u ${jailops_backupd_runas} -p ${pidfile} -P ${supervisor_pidfile} ${procname} -c ${jailops_backupd_config} serve"
+required_files="${jailops_backupd_config}"
+
+run_rc_command "$1"

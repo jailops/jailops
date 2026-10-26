@@ -1,0 +1,9 @@
+apiVersion: jailops/v1
+kind: Host
+metadata:
+  name: web2
+  labels: {role: web, env: staging}
+spec:
+  url: https://web2.example.test:8443
+  fingerprint: 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff
+  token_secret: fleet-token

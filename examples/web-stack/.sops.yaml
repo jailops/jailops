@@ -1,0 +1,18 @@
+# Who can decrypt the SOPS files of this fleet: the age public keys below.
+# The key of this example is the throwaway identity in examples/example-identity.txt; replace it with your own
+# (`age-keygen`, or an age plugin identity for a hardware token) and run `jailops-sync vault add-recipient`.
+keys:
+  - &example_operator age1lqp7xcnt4qaugajyxtsnlntvj6asghmpn6r80aggchmd9tzuksvq9h3vyp
+creation_rules:
+  # hosts/<host>/remote.sops.yaml: url and server_fingerprint stay readable in git,
+  # only the client certificate and key are encrypted.
+  - path_regex: hosts/.*/remote\.sops\.yaml$
+    encrypted_regex: '^(client_key|client_cert)$'
+    key_groups:
+      - age:
+          - *example_operator
+  # Every other SOPS file (shared/secrets.sops.yaml): all values encrypted.
+  - path_regex: \.sops\.ya?ml$
+    key_groups:
+      - age:
+          - *example_operator

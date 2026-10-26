@@ -1,0 +1,154 @@
+name: Release
+
+# A tag v* makes the GitHub release (archives, Linux packages). The FreeBSD packages come from jailops-packages (PkgOps); the old VM pipeline below runs only by hand.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Deploy the repository to pkg.jailops.net"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: GitHub release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: gofmt and vet on the tagged commit (the tests run in ci.yml on every push to master)
+        env:
+          GOTOOLCHAIN: auto
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+          go vet ./...
+          (cd sdk && go vet ./...)
+      - uses: goreleaser/goreleaser-action@v6
+        with:
+          version: "~> v2"
+          args: release --clean ${{ github.ref_type == 'tag' && '' || '--snapshot' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # The jobs below (binaries, pkg, repo) are the OLD FreeBSD package pipeline. It is kept for a transition and runs
+  # only when started by hand (workflow_dispatch): the packages are built and published by github.com/jailops/
+  # jailops-packages with PkgOps, which needs no FreeBSD VM. Remove these jobs once that repository has published.
+  #
+  # FreeBSD binaries cross-built on Linux; the VM jobs below only package them.
+  binaries:
+    name: FreeBSD binaries
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - uses: extractions/setup-just@v2
+      - run: just web-all
+      - run: just build-freebsd ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bin-${{ matrix.arch }}
+          path: bin/*-freebsd-${{ matrix.arch }}
+
+  pkg:
+    name: FreeBSD packages (${{ matrix.arch }})
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: binaries
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: bin-${{ matrix.arch }}
+          path: bin
+      - name: Version
+        id: v
+        run: echo "version=$(tr -d '[:space:]' < version.txt)" >> "$GITHUB_OUTPUT"
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          release: "15.1"
+          arch: ${{ matrix.arch == 'arm64' && 'aarch64' || 'x86_64' }}
+          usesh: true
+          sync: rsync
+          copyback: true
+          run: |
+            set -eu
+            sh scripts/pkg-build.sh "${{ steps.v.outputs.version }}" "${{ matrix.arch }}" bin out 15
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-${{ matrix.arch }}
+          path: out
+
+  repo:
+    name: Signed pkg repository
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    needs: pkg
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: pkg-*
+          path: repo
+          merge-multiple: true
+      - name: pkg repo with the signing key
+        uses: vmactions/freebsd-vm@v1
+        env:
+          PKG_REPO_KEY: ${{ secrets.PKG_REPO_KEY }}
+        with:
+          release: "15.1"
+          usesh: true
+          sync: rsync
+          copyback: true
+          envs: PKG_REPO_KEY
+          run: |
+            set -eu
+            if [ -z "${PKG_REPO_KEY:-}" ]; then echo "PKG_REPO_KEY is not set: the repository is not signed, nothing is published"; exit 0; fi
+            umask 077
+            printf '%s\n' "$PKG_REPO_KEY" > /tmp/repo.key
+            sh scripts/pkg-repo.sh repo /tmp/repo.key
+            rm -f /tmp/repo.key
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pkg-repository
+          path: repo
+      - name: Deploy to pkg.jailops.net
+        if: ${{ github.ref_type == 'tag' || inputs.publish }}
+        env:
+          DEPLOY_KEY: ${{ secrets.PKG_DEPLOY_KEY }}
+          DEPLOY_TARGET: ${{ secrets.PKG_DEPLOY_TARGET }}   # user@host:/path/to/pkg.jailops.net
+          KNOWN_HOSTS: ${{ secrets.PKG_DEPLOY_KNOWN_HOSTS }}
+        run: |
+          if [ -z "$DEPLOY_KEY" ] || [ -z "$DEPLOY_TARGET" ]; then echo "no deploy secrets: not publishing"; exit 0; fi
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/id_deploy && chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          # one ABI at a time and never --delete: old packages stay available to the catalogues that name them
+          rsync -a -e "ssh -i ~/.ssh/id_deploy" repo/ "$DEPLOY_TARGET/"

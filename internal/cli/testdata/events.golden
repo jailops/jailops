@@ -1,0 +1,31 @@
+$ jailops events --since-id 0 --type lifecycle --count 3
+09:00:00  lifecycle jail-created /1.0/jails/web by fake
+09:00:00  lifecycle jail-created /1.0/jails/db by fake
+09:00:00  lifecycle jail-started /1.0/jails/web by fake
+
+$ jailops events --since-id 0 --type lifecycle --jail web --count 2 -o json
+{"type":"lifecycle","timestamp":"2026-03-01T09:00:00Z","host":"<uuid>","metadata":{"action":"jail-created","source":"/1.0/jails/web","requestor":"fake","project":"main"}}
+{"type":"lifecycle","timestamp":"2026-03-01T09:00:00Z","host":"<uuid>","metadata":{"action":"jail-started","source":"/1.0/jails/web","requestor":"fake","project":"main"}}
+
+$ jailops events --since-id 0 --type lifecycle --count 1 -o name
+/1.0/jails/web
+
+$ jailops events --since-id 0 --type operation --count 1
+09:00:00  operation <uuid> pending Creating jail web
+
+$ jailops events --since-id 0 --type lifecycle --count 1 -o yaml
+---
+type: lifecycle
+timestamp: "2026-03-01T09:00:00Z"
+host: <uuid>
+metadata:
+  action: jail-created
+  source: /1.0/jails/web
+  requestor: fake
+  project: main
+
+$ jailops events --type bogus
+! usage: unknown event type "bogus" (use lifecycle, operation or logging)
+! hint: run 'jailops events --help' for usage
+[exit 2]
+

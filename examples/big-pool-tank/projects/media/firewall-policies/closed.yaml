@@ -1,0 +1,8 @@
+apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: closed
+spec:
+  # Nothing in; everything out. For jails that only compute.
+  default_in: deny
+  default_out: allow

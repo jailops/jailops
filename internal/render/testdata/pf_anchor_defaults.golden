@@ -1,0 +1,9 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+# anchor jailops/alpha/web
+# tags: tier-1 web
+table <jail_addrs> persist { 10.20.0.10, fe80::/10 }
+block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
+block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir
+# defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
+pass out quick on jo0123456789a0a all label "jo-71f8c0984dae"
+block drop in quick on jo0123456789a0a all

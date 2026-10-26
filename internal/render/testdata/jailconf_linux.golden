@@ -1,0 +1,17 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+alpha_alpine1 {
+	path = "/jailops/projects/alpha/jails/web/root";
+	host.hostname = "web.example.org";
+	vnet;
+	vnet.interface = "jo0123456789a0b";
+	devfs_ruleset = 4;
+	mount.fstab = "/jailops/projects/alpha/jails/alpine1/fstab";
+	exec.clean;
+	exec.prestart = "/usr/local/libexec/jailops-priv hook prestart ${name}";
+	exec.poststart = "/usr/local/libexec/jailops-priv hook poststart ${name}";
+	exec.prestop = "/usr/local/libexec/jailops-priv hook prestop ${name}";
+	exec.poststop = "/usr/local/libexec/jailops-priv hook poststop ${name}";
+	enforce_statfs = 2;
+	allow.socket_af;
+	persist;
+}

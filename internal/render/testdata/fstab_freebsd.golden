@@ -1,0 +1,3 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+# device mountpoint fstype options dump pass
+/jailops/jails/web/data/www /jailops/jails/web/root/usr/local/www nullfs rw 0 0

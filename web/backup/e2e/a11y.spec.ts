@@ -1,0 +1,20 @@
+import { test, expect } from '@playwright/test'
+import { audit } from '../../shared/a11y'
+
+const routes = ['/', '/hosts', '/snapshots', '/deletions', '/retention', '/maintenance', '/audit', '/access']
+
+for (const scheme of ['light', 'dark'] as const) {
+  test.describe(`a11y ${scheme}`, () => {
+    test.use({ colorScheme: scheme })
+    for (const r of routes) {
+      test(`${r}: names, labels, ids, landmarks and AA contrast`, async ({ page }) => {
+        await page.goto('/?demo')
+        await page.waitForSelector('.shell')
+        if (r !== '/') await page.evaluate((p) => { history.pushState({}, '', p); dispatchEvent(new PopStateEvent('popstate')) }, r)
+        await page.waitForLoadState('networkidle')
+        await expect(page.locator('main h1').first()).toBeVisible()
+        expect(await audit(page)).toEqual([])
+      })
+    }
+  })
+}

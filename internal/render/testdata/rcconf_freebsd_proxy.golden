@@ -1,0 +1,7 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+hostname="p"
+ifconfig_jo0123456789a0b="up"
+ifconfig_jo0123456789a0b_ipv6="inet6 2001:db8:2::5 prefixlen 128 -accept_rtadv"
+ipv6_network_interfaces="jo0123456789a0b"
+rtsold_enable="NO"
+ipv6_defaultrouter="fe80::1%jo0123456789a0b"

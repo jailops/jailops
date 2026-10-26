@@ -1,0 +1,7 @@
+apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: floor
+spec:
+  default_in: deny
+  default_out: allow

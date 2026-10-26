@@ -1,0 +1,18 @@
+apiVersion: jailops/v1
+kind: Jail
+metadata:
+  name: blog
+  labels: {tier: web}
+# A jail is declared on one named host.
+hosts: [web1]
+start: true
+spec:
+  image: freebsd-15@stable
+  profiles: [small, web]
+  resources: {memory: 2G}
+  network:
+    - {name: eth0, mtu: 1400} # overrides one key of the profile's eth0
+  env:
+    # A value of shared/secrets.sops.yaml: sent to the host sealed, never in clear.
+    DB_PASSWORD: secret:blog.db_password
+    MODE: production

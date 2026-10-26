@@ -1,0 +1,11 @@
+apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: app-private
+spec:
+  default_in: deny
+  default_out: allow
+  rules:
+    # Only the web jail may reach the app; administrators may log in.
+    - {name: from-web, action: allow, direction: in, proto: tcp, ports: ["8080"], from: ["@web_tier"]}
+    - {name: ssh-admins, action: allow, direction: in, proto: tcp, ports: ["22"], from: ["@admins"]}

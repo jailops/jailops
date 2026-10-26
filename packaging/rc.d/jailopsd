@@ -1,0 +1,57 @@
+#!/bin/sh
+#
+# PROVIDE: jailopsd
+# REQUIRE: jailops_priv NETWORKING pf
+# KEYWORD: shutdown
+#
+# "pf" is required even when pf_enable is NO (rcorder only orders the scripts; a disabled service still runs and
+# exits at once): without it, rcorder gives no guarantee that pf.conf (with the three anchor lines of the setup
+# guide) is loaded before jailopsd creates bridges and starts jails, and an anchor call that resolves to nothing
+# yet falls through to whatever the administrator's own ruleset does next (design 18, the boot-time audit).
+#
+# Add to /etc/rc.conf:
+#   jailopsd_enable="YES"
+# jailopsd runs as the unprivileged user jailops; everything that needs root is done by jailops_priv.
+# Configuration: /usr/local/etc/jailops/jailopsd.yaml
+#   service jailopsd checkconfig   validate the configuration
+# Output goes to syslog (tag jailopsd).
+
+. /etc/rc.subr
+
+name="jailopsd"
+rcvar="jailopsd_enable"
+desc="JailOps daemon"
+
+pidfile="/var/run/jailops/jailopsd.pid"
+supervisor_pidfile="/var/run/jailops/jailopsd-daemon.pid"
+procname="/usr/local/sbin/jailopsd"
+command="/usr/sbin/daemon"
+
+extra_commands="checkconfig"
+checkconfig_cmd="jailopsd_checkconfig"
+start_precmd="jailopsd_precmd"
+
+jailopsd_checkconfig()
+{
+	su -m ${jailopsd_runas} -c "${procname} -config ${jailopsd_config} -check-config"
+}
+
+jailopsd_precmd()
+{
+	install -d -m 1771 -o root -g jailops /var/run/jailops
+	# refuse to start with a configuration that does not validate
+	jailopsd_checkconfig >/dev/null || return 1
+}
+
+# (not jailopsd_user: rc.subr would run the whole command as that user with su)
+# rc.conf may set jailopsd_config and jailopsd_runas: read them before anything is derived from them
+load_rc_config $name
+: ${jailopsd_enable:="NO"}
+: ${jailopsd_config:="/usr/local/etc/jailops/jailopsd.yaml"}
+: ${jailopsd_runas:="jailops"}
+
+# -p: pid of jailopsd itself (rc status and stop use it); -P: the supervisor, which exits with it.
+command_args="-f -S -T jailopsd -u ${jailopsd_runas} -p ${pidfile} -P ${supervisor_pidfile} ${procname} -config ${jailopsd_config}"
+required_files="${jailopsd_config}"
+
+run_rc_command "$1"

@@ -1,0 +1,69 @@
+$ jailops jail create web --image freebsd-15@stable --storage default --network lan --memory 2G --label env=prod --autostart
+jail/web created
+
+$ jailops jail create db --image freebsd-15@stable --storage default --network lan --volume data:/var/db:ro --env A=1
+jail/db created
+
+$ jailops jail list
+NAME   STATE     IMAGE               GEN   ADDRESSES    AGE
+db     stopped   freebsd-15@stable   g1    10.20.0.11   3h
+web    stopped   freebsd-15@stable   g1    10.20.0.10   3h
+
+$ jailops jail start web
+jail/web started
+
+$ jailops jail list
+NAME   STATE     IMAGE               GEN   ADDRESSES    AGE
+db     stopped   freebsd-15@stable   g1    10.20.0.11   3h
+web    running   freebsd-15@stable   g1    10.20.0.10   3h
+
+$ jailops jail list --state running -o name
+web
+
+$ jailops jail list -l env=prod --no-headers
+web    running   freebsd-15@stable   g1    10.20.0.10   3h
+
+$ jailops jail list --network other
+! No resources found.
+
+$ jailops jail show web
+Name:        web
+UUID:        <uuid>
+Generation:  1
+Age:         3h
+Labels:      env=prod
+
+SPEC                        STATUS
+----                        ------
+image: freebsd-15@stable    power: running
+storage: default            jid: 1
+layout: thin                generation: g1
+hostname: web               addresses:
+resources:                    - 10.20.0.10
+  memory: 2G                started_at: "2026-03-01T09:00:00Z"
+network:
+  - network: lan
+    ipv4: 10.20.0.10
+boot:
+  autostart: true
+
+$ jailops jail restart web --grace 5
+jail/web restarted
+
+$ jailops jail stop web --force
+jail/web stopped
+
+$ jailops jail delete -y db
+jail/db deleted
+
+$ jailops jail delete web
+! Delete jail "web"? [y/N]: 
+! usage: confirmation required
+! hint: answer on standard input, or pass -y
+[exit 2]
+
+$ jailops jail show db
+! not_found: jail "db" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+

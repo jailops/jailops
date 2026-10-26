@@ -1,0 +1,43 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+# anchor jailops/web/nginx
+# tags: tier-1 web
+table <s_office> persist { 198.51.100.7, 2001:db8:ffff::/48, 203.0.113.0/24 }
+table <t_admin> persist { 10.20.0.4, 10.20.0.5 }
+# rdr rule 5: forward
+rdr on em0 inet proto tcp from any to (em0) port 8080 -> 10.20.0.10 port 80
+rdr on em0 inet6 proto tcp from any to (em0) port 8080 -> 2001:db8:1::100 port 80
+table <jail_addrs> persist { 10.20.0.10, 2001:db8:1::100, fe80::/10 }
+block in quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }
+pass in quick on jo0123456789a0a inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol label "jo-97b616017bc4"
+block in quick on jo0123456789a0a from ! <jail_addrs> to any
+block in quick on jo0123456789a0a inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv
+pass in quick on jo0123456789a0a inet6 proto icmp6 from { 2001:db8:1::100, fe80::/10 } to any icmp6-type { neighbrsol, neighbradv } label "jo-f11361891798"
+pass in quick on jo0123456789a0a inet6 proto icmp6 from { 2001:db8:1::100, fe80::/10 } to ff02::/16 icmp6-type { listenrep, listendone, 143 } label "jo-7f36da0137f4"
+pass in quick on jo0123456789a0a inet6 proto icmp6 from { 2001:db8:1::100, fe80::/10 } to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-aa7e22b9b90c"
+block out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { redir, routeradv }
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-8a6c0d69bb4d"
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-5fca00b1ab2e"
+block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
+block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir
+# rule 1: ssh from office
+pass out log quick on jo0123456789a0a inet proto tcp from { <s_office>, <t_admin> } to 10.20.0.10 port 22 label "jo-6c661e7cf076"
+pass out log quick on jo0123456789a0a inet6 proto tcp from { <s_office>, <t_admin> } to 2001:db8:1::100 port 22 label "jo-50ef30090750"
+# rule 2: web
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port { 80, 8000:8100 } label "jo-d112f04f023e"
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port { 80, 8000:8100 } label "jo-2efbe7938e39"
+# rule 3: ping
+pass out quick on jo0123456789a0a inet proto icmp from any to 10.20.0.10 label "jo-0e3cc4615eec"
+# rule 4: ping6
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to 2001:db8:1::100 label "jo-f8dd294dfb18"
+# rule 5: forward
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80 label "jo-f53c0af79ac6"
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-c8b2df860bef"
+# rule 6: no smtp
+block drop in quick on jo0123456789a0a inet proto tcp from 10.20.0.10 to any port 25
+block drop in quick on jo0123456789a0a inet6 proto tcp from 2001:db8:1::100 to any port 25
+# rule 7: dns
+pass in quick on jo0123456789a0a inet proto udp from 10.20.0.10 to 9.9.9.9 port 53 label "jo-c18ec15209b2"
+pass in quick on jo0123456789a0a inet6 proto udp from 2001:db8:1::100 to 2620:fe::fe port 53 label "jo-c60f4ef7f24b"
+# defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
+block drop out quick on jo0123456789a0a all
+pass in quick on jo0123456789a0a all label "jo-8b90c248b7f9"

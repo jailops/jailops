@@ -1,0 +1,193 @@
+$ jailops network create br-web --ipv4 10.50.0.1/24 --ipv6 fd50::1/64
+network/br-web created
+
+$ jailops network create bad --ipv4 10.50.0.1/24 --subnet 10.1.0.0/24
+! usage: --ipv4 replaces --subnet, --gateway and --range: use one form
+! hint: run 'jailops network create --help' for usage
+[exit 2]
+
+$ jailops network create bad --ipv4 nonsense
+! usage: --ipv4 "nonsense" must look like 10.50.0.1/24
+! hint: run 'jailops network create --help' for usage
+[exit 2]
+
+$ jailops network show br-web -o yaml
+metadata:
+  name: br-web
+  uuid: <uuid>
+  scope: fleet
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  ipv4:
+    subnet: 10.50.0.0/24
+    gateway: 10.50.0.1
+    range: 10.50.0.2-10.50.0.254
+  ipv6:
+    mode: routed
+    subnet: fd50::/64
+    gateway: fd50::1
+    range: fd50::2-fd50::1:0
+status:
+  free: 253
+
+$ jailops storage create fast --dataset tank/fast --compression zstd
+storage/fast created
+
+$ jailops storage create nodataset
+! usage: --dataset is required (or use -f FILE)
+! hint: run 'jailops storage create --help' for usage
+[exit 2]
+
+$ jailops storage create bad --dataset nodash
+! invalid: dataset "nodash" must look like pool/dataset
+! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
+[exit 2]
+
+$ jailops storage list
+NAME      DATASET        POOL   HEALTH   USED      AVAILABLE
+default   tank/jailops   tank   ONLINE   1.0 GiB   1023.0 GiB
+fast      tank/fast      tank   ONLINE   1.0 GiB   1023.0 GiB
+
+$ jailops storage show fast -o name
+fast
+
+$ jailops project create web --description front end
+project/web created
+
+$ jailops project set web --network br-web --storage fast=500G --max-jails 2 --max-memory 8G
+project/web updated
+
+$ jailops project set web --network br-web=10.50.0.100-10.50.0.150
+! usage: --network "br-web=10.50.0.100-10.50.0.150": a network is granted whole; ranges are not reserved any more
+! hint: run 'jailops project set --help' for usage
+[exit 2]
+
+$ jailops project show web
+metadata:
+  name: web
+  uuid: <uuid>
+  host: <uuid>
+  scope: host
+  generation: 2
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  description: front end
+  networks:
+    - network: br-web
+  storage:
+    - storage: fast
+      quota: 500G
+  quotas:
+    jails: 2
+    memory: 8G
+status:
+  jails: 0
+  cpu: 0
+  memory_used: 0
+  disk_used: 0
+  addresses: 0
+
+$ jailops project list
+    NAME   HOSTS   NETWORKS   STORAGE   JAILS   DESCRIPTION
+*   main   -       lan        default   0       -
+    web    -       br-web     fast      0/2     front end
+
+$ jailops network grant lan --project web
+! conflict: network lan is already granted to project main
+! hint: Read it again and repeat the change; 'jailops <kind> edit' does this for you. (jailops explain conflict)
+[exit 5]
+
+$ jailops network grant lan
+! usage: --project is required
+! hint: run 'jailops network grant --help' for usage
+[exit 2]
+
+$ jailops network revoke br-web --project web
+network/br-web revoked from project web
+
+$ jailops network grant br-web --project web
+network/br-web granted to project web
+
+$ jailops project set web --revoke-storage fast
+project/web updated
+
+$ jailops project set web --storage fast=500G
+project/web updated
+
+$ jailops create nginx --project web --image freebsd-15@stable --memory 1G --cpu 1 --network br-web --storage fast
+jail/nginx created
+
+$ jailops list --project web
+NAME    STATE     IMAGE               GEN   ADDRESSES           AGE
+nginx   stopped   freebsd-15@stable   g1    10.50.0.2,fd50::2   3h
+
+$ jailops list
+! No resources found.
+
+$ jailops list --project nowhere
+! not_found: project "nowhere" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops project show web -o json
+{
+  "metadata": {
+    "name": "web",
+    "uuid": "<uuid>",
+    "host": "<uuid>",
+    "scope": "host",
+    "generation": 6,
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z"
+  },
+  "spec": {
+    "description": "front end",
+    "networks": [
+      {
+        "network": "br-web"
+      }
+    ],
+    "storage": [
+      {
+        "storage": "fast",
+        "quota": "500G"
+      }
+    ],
+    "quotas": {
+      "jails": 2,
+      "memory": "8G"
+    }
+  },
+  "status": {
+    "jails": 1,
+    "cpu": 1,
+    "memory_used": 1073741824,
+    "disk_used": 0,
+    "addresses": 2
+  }
+}
+
+$ jailops create n2 --project web --image freebsd-15@stable --memory 1G --cpu 1 --network br-web --storage fast
+jail/n2 created
+
+$ jailops create n3 --project web --image freebsd-15@stable --memory 1G --cpu 1 --network br-web --storage fast
+! quota_exceeded: project "web" would exceed its jails quota (3 of 2)
+! hint: See the usage with 'jailops project show NAME', free something up, or ask a global admin to raise the quota with 'jailops project set NAME --max-...'. (jailops explain quota_exceeded)
+[exit 5]
+
+$ jailops project delete -y web
+! busy: project "web" is not empty
+! hint: delete its jails, policies, address sets and backup policies first
+[exit 5]
+
+$ jailops project delete -y default
+! not_found: project "default" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops project create shop --new-network --hosts h1,h2 --storage fast
+project/shop created
+

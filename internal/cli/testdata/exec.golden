@@ -1,0 +1,37 @@
+$ jailops exec web -- echo hello world
+hello world
+
+$ jailops exec web -- cat
+piped input
+
+$ jailops exec web -- exit 3
+[exit 3]
+
+$ jailops exec web -- stderr oops
+! oops
+
+$ jailops exec web -- nosuchprogram
+[exit 127]
+
+$ jailops exec ghost -- echo x
+! not_found: jail "ghost" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops exec web
+! usage: requires at least 2 arg(s), only received 1
+! hint: run 'jailops exec --help' for usage
+[exit 2]
+
+$ jailops --dry-run exec web -- rm -rf /
+dry-run: would run a command in jail web
+argv:
+  - rm
+  - -rf
+  - /
+shell: false
+shell_path: ""
+
+$ jailops exec -t web -- echo plain
+plain
+

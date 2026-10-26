@@ -1,0 +1,67 @@
+# /usr/local/etc/jailops/priv.conf: configuration of jailops-priv, the privileged helper.
+#
+# One "key = value" per line; keys are the command line flags without the dash.
+# Lists (storage-root, allow-user, ...) may be repeated or comma separated.
+# Owner root, mode 0600 or 0644; the helper refuses a file others can write.
+# Check it with:  jailops-priv check-config
+# Reload storage roots after editing the storage file:  service jailops_priv reload
+
+# --- storage roots -----------------------------------------------------------
+# A storage root is a ZFS dataset that exists, is on an imported pool and carries
+# jailops:managed=on set locally (zfs create -o jailops:managed=on tank/jailops).
+# Everything the helper does with ZFS, mounts and files stays below one of them.
+# Layout below a root: projects/<project>/jails/<name>, images/<image>/g<N>.
+# Roots listed here are fixed. More are added at run time with storage.register
+# (admin only) and persisted in storage-file; they are reread on SIGHUP.
+storage-root = tank/jailops
+#storage-root = fast/jailops
+storage-file = /usr/local/etc/jailops/priv.d/storage.conf
+# A pool's top dataset as a root is refused unless you say so.
+#allow-pool-root = false
+
+# --- directories ---------------------------------------------------------------
+conf-dir = /usr/local/etc/jailops/jails
+# state-dir has no default unless mount-base is set (then <mount-base>/state).
+state-dir = /var/db/jailops/state
+work-dir = /var/tmp/jailops
+#mount-base = /jailops
+helper-path = /usr/local/libexec/jailops-priv
+
+# --- who may talk to the helper ----------------------------------------------
+socket = /var/run/jailops/priv.sock
+group = jailops
+mode = 0660
+allow-user = jailops
+#allow-group = some-group
+
+# --- networking ------------------------------------------------------------------
+if-prefix = jo
+# The IPv6 proxy mode (a switched /64 where the upstream treats the jails' addresses as on-link) answers neighbor
+# solicitations on the uplink. It works only for what is approved here: the uplink and the prefixes the jails'
+# addresses come from. Without this line the helper refuses every request of the proxy. One line per uplink.
+#ndp-proxy = em0=2001:db8:1:2:100::/80
+# Extra sysctls readable through the helper (the built-in list covers kern.osrelease,
+# the bridge pfil switches, the forwarding switches, hw.ncpu and a few more).
+#sysctl = hw.model
+
+# --- what an API admin may unlock (empty means nothing) -------------------------
+# An admin who may set these is root on the host; keep the lists short.
+#admin-raw-param = cpuset
+#admin-allow-flag = mount.zfs
+#admin-devfs-ruleset = 10
+# Directories an admin may mount into a jail with `jailops create --host-mount SOURCE:TARGET[:ro]`, for example an
+# archive dataset of a pool JailOps does not manage. The source must be below one of these.
+#admin-host-mount = /tank/archive
+#admin-zfs-prop = compression
+#admin-routes = false
+#admin-raw-pf = false
+#admin-resume-send = false
+
+# --- image building ---------------------------------------------------------------
+# Hosts the helper's fetch rule may download from, over https only (default:
+# dl-cdn.alpinelinux.org and pkg.freebsd.org). Repeat or comma separate.
+#fetch-host = dl-cdn.alpinelinux.org
+#fetch-host = pkg.freebsd.org
+# Directories fs.read_file may read besides the storage roots (a local mirror of
+# image archives). /etc/sysctl.conf and /etc/resolv.conf are always readable.
+#image-mirror = /var/db/jailops/mirror

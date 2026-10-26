@@ -1,0 +1,8 @@
+apiVersion: jailops/v1
+kind: Storage
+metadata:
+  name: fast
+spec:
+  # Must exist on the host (ZFS only).
+  dataset: tank/jailops-fast
+  compression: zstd

@@ -1,0 +1,16 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+auto lo
+iface lo inet loopback
+
+auto jo0123456789a0b
+iface jo0123456789a0b inet static
+	address 10.20.0.10/24
+	gateway 10.20.0.1
+	mtu 1500
+iface jo0123456789a0b inet6 static
+	address 2001:db8:1::10/64
+	gateway fe80::1
+
+auto jo0123456789a1b
+iface jo0123456789a1b inet static
+	address 10.30.0.10/16

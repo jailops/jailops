@@ -1,0 +1,4 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+search example.org
+nameserver 9.9.9.9
+nameserver 2620:fe::fe

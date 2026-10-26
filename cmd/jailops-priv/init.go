@@ -1,0 +1,278 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"os/user"
+	"path/filepath"
+	"strconv"
+	"strings"
+)
+
+// initCmd is `jailops-priv init -pool tank`: the one-time setup of a host. It makes what the daemon cannot make
+// for itself, because it is not root: the user and groups, the storage root dataset and the state dataset
+// (owned by the daemon's user), and the two configuration files. Everything is idempotent; nothing that exists
+// is changed except to say so.
+type initOptions struct {
+	pool, dataset, mount  string
+	user, group           string
+	etc                   string // /usr/local/etc/jailops
+	dbDir                 string // /var/db/jailops
+	dryRun                bool
+	root                  string // prefix of every path (tests)
+	run                   func(name string, args ...string) (string, error)
+	lookupUser, lookupGrp func(string) (uid, gid int, err error)
+	chown                 func(path string, uid, gid int) error
+}
+
+func defaultRun(name string, args ...string) (string, error) {
+	var out bytes.Buffer
+	c := exec.Command(name, args...)
+	c.Stdout, c.Stderr = &out, &out
+	err := c.Run()
+	return strings.TrimSpace(out.String()), err
+}
+
+func initMain(args []string, stdout, stderr io.Writer, euid int) int {
+	o := &initOptions{run: defaultRun, chown: os.Chown}
+	fs := flag.NewFlagSet("init", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	fs.StringVar(&o.pool, "pool", "", "the ZFS pool JailOps lives on (required)")
+	fs.StringVar(&o.dataset, "dataset", "", "the storage root dataset (default <pool>/jailops)")
+	fs.StringVar(&o.mount, "mount", "/jailops", "where the storage root is mounted")
+	fs.StringVar(&o.user, "user", "jailops", "the unprivileged user jailopsd runs as")
+	fs.StringVar(&o.group, "group", "jailops", "the group of that user, which may talk to the helper")
+	fs.StringVar(&o.etc, "etc", "/usr/local/etc/jailops", "configuration directory")
+	fs.StringVar(&o.dbDir, "data-dir", "/var/db/jailops", "the daemon's data directory")
+	fs.BoolVar(&o.dryRun, "dry-run", false, "say what would be done and do nothing")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if euid != 0 && !o.dryRun {
+		fmt.Fprintln(stderr, "jailops-priv init: must run as root")
+		return 1
+	}
+	if err := o.do(stdout); err != nil {
+		fmt.Fprintf(stderr, "jailops-priv init: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func (o *initOptions) path(p string) string { return filepath.Join(o.root, p) }
+
+func (o *initOptions) say(w io.Writer, format string, a ...any) { fmt.Fprintf(w, format+"\n", a...) }
+
+func (o *initOptions) do(w io.Writer) error {
+	if o.pool == "" || strings.ContainsAny(o.pool, "/ @#") {
+		return errors.New("-pool names the pool (for example -pool tank), not a dataset")
+	}
+	if o.dataset == "" {
+		o.dataset = o.pool + "/jailops"
+	}
+	if !strings.HasPrefix(o.dataset, o.pool+"/") {
+		return fmt.Errorf("dataset %s is not in pool %s", o.dataset, o.pool)
+	}
+	if !filepath.IsAbs(o.mount) || filepath.Clean(o.mount) != o.mount || o.mount == "/" {
+		return fmt.Errorf("mount %q must be a clean absolute path other than /", o.mount)
+	}
+	if out, err := o.run("zpool", "list", "-H", "-o", "name", o.pool); err != nil || strings.TrimSpace(out) != o.pool {
+		return fmt.Errorf("pool %s does not exist or is not imported (%s)", o.pool, out)
+	}
+	// the user and the group
+	for _, g := range []string{o.group} {
+		if _, err := o.lookupGroup(g); err != nil {
+			o.say(w, "creating group %s", g)
+			if !o.dryRun {
+				if out, err := o.run("pw", "groupadd", g); err != nil {
+					return fmt.Errorf("pw groupadd %s: %v: %s", g, err, out)
+				}
+			}
+		}
+	}
+	if _, err := o.lookupUserName(o.user); err != nil {
+		o.say(w, "creating user %s", o.user)
+		if !o.dryRun {
+			if out, err := o.run("pw", "useradd", o.user, "-g", o.group, "-d", o.dbDir, "-s", "/usr/sbin/nologin", "-c", "JailOps daemon"); err != nil {
+				return fmt.Errorf("pw useradd %s: %v: %s", o.user, err, out)
+			}
+		}
+	}
+	// the datasets
+	managed := func(ds string) (string, error) {
+		return o.run("zfs", "get", "-H", "-o", "value,source", "jailops:managed", ds)
+	}
+	if _, err := o.run("zfs", "list", "-H", "-o", "name", o.dataset); err != nil {
+		o.say(w, "creating dataset %s (mounted at %s)", o.dataset, o.mount)
+		if !o.dryRun {
+			if out, err := o.run("zfs", "create", "-o", "mountpoint="+o.mount, "-o", "jailops:managed=on", o.dataset); err != nil {
+				return fmt.Errorf("zfs create %s: %v: %s", o.dataset, err, out)
+			}
+		}
+	} else if v, _ := managed(o.dataset); !strings.HasPrefix(v, "on\tlocal") && !strings.HasPrefix(v, "on local") {
+		return fmt.Errorf("dataset %s exists but is not marked jailops:managed=on; mark it yourself if it is meant for JailOps: zfs set jailops:managed=on %s", o.dataset, o.dataset)
+	}
+	// The state dataset is mounted outside the storage root: the daemon owns it, and a directory the daemon can
+	// modify must not sit inside a tree the helper (root) walks.
+	state := o.dataset + "/state"
+	stateDir := filepath.Join(o.dbDir, "state")
+	if _, err := o.run("zfs", "list", "-H", "-o", "name", state); err != nil {
+		o.say(w, "creating dataset %s (mounted at %s)", state, stateDir)
+		if !o.dryRun {
+			if out, err := o.run("zfs", "create", "-o", "mountpoint="+stateDir, "-o", "jailops:managed=on", state); err != nil {
+				return fmt.Errorf("zfs create %s: %v: %s", state, err, out)
+			}
+		}
+	}
+	uid, gid, err := o.owner()
+	if err != nil && !o.dryRun {
+		return err
+	}
+	for _, d := range []struct {
+		p    string
+		mode os.FileMode
+	}{{o.dbDir, 0o750}, {stateDir, 0o750}} {
+		o.say(w, "directory %s: owner %s, mode %04o", d.p, o.user, d.mode)
+		if o.dryRun {
+			continue
+		}
+		if err := os.MkdirAll(o.path(d.p), d.mode); err != nil {
+			return err
+		}
+		if err := os.Chmod(o.path(d.p), d.mode); err != nil {
+			return err
+		}
+		if err := o.chown(o.path(d.p), uid, gid); err != nil {
+			return err
+		}
+	}
+	// The storage root belongs to root alone (the helper reads and writes below it); the scratch directory too.
+	for _, d := range []struct {
+		p    string
+		mode os.FileMode
+	}{{o.mount, 0o700}, {"/var/tmp/jailops", 0o755}} {
+		o.say(w, "directory %s: owner root, mode %04o", d.p, d.mode)
+		if o.dryRun {
+			continue
+		}
+		if err := os.MkdirAll(o.path(d.p), d.mode); err != nil {
+			return err
+		}
+		if err := os.Chmod(o.path(d.p), d.mode); err != nil {
+			return err
+		}
+		if err := o.chown(o.path(d.p), 0, 0); err != nil {
+			return err
+		}
+	}
+	// the configuration, never overwritten; the directory of the rendered jail.conf files too
+	if !o.dryRun {
+		for _, d := range []string{o.etc, filepath.Join(o.etc, "jails")} {
+			if err := os.MkdirAll(o.path(d), 0o755); err != nil {
+				return err
+			}
+		}
+	}
+	files := []struct {
+		name string
+		mode os.FileMode
+		gid  int
+		body string
+	}{
+		{"priv.conf", 0o600, 0, o.privConf()},
+		{"jailopsd.yaml", 0o640, gid, o.daemonYAML()},
+	}
+	for _, f := range files {
+		p := filepath.Join(o.etc, f.name)
+		if _, err := os.Stat(o.path(p)); err == nil {
+			o.say(w, "%s exists, left as it is", p)
+			continue
+		}
+		o.say(w, "writing %s", p)
+		if o.dryRun {
+			continue
+		}
+		if err := os.WriteFile(o.path(p), []byte(f.body), f.mode); err != nil {
+			return err
+		}
+		if err := o.chown(o.path(p), 0, f.gid); err != nil {
+			return err
+		}
+	}
+	o.say(w, "\nDone. Enable and start the services:")
+	o.say(w, "  sysrc jailops_priv_enable=YES jailopsd_enable=YES")
+	o.say(w, "  service jailops_priv start && service jailopsd start")
+	o.say(w, "Create the first administrator (root reaches the socket as the host's recovery access):")
+	o.say(w, "  jailops user create admin --admin --password-prompt")
+	o.say(w, "PF needs the line `anchor \"jailops/*\"` (see `jailops doctor`).")
+	return nil
+}
+
+func (o *initOptions) lookupGroup(name string) (int, error) {
+	if o.lookupGrp != nil {
+		_, g, err := o.lookupGrp(name)
+		return g, err
+	}
+	g, err := user.LookupGroup(name)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(g.Gid)
+}
+
+func (o *initOptions) lookupUserName(name string) (int, error) {
+	if o.lookupUser != nil {
+		u, _, err := o.lookupUser(name)
+		return u, err
+	}
+	u, err := user.Lookup(name)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(u.Uid)
+}
+
+func (o *initOptions) owner() (uid, gid int, err error) {
+	if uid, err = o.lookupUserName(o.user); err != nil {
+		return 0, 0, err
+	}
+	gid, err = o.lookupGroup(o.group)
+	return uid, gid, err
+}
+
+func (o *initOptions) privConf() string {
+	return fmt.Sprintf(`# jailops-priv.conf, written by "jailops-priv init". See priv.conf.sample for everything it can say.
+storage-root = %s
+conf-dir = /usr/local/etc/jailops/jails
+mount-base = %s
+state-dir = %s
+work-dir = /var/tmp/jailops
+helper-path = /usr/local/libexec/jailops-priv
+socket = /var/run/jailops/priv.sock
+group = %s
+mode = 0660
+allow-user = %s
+`, o.dataset, o.mount, filepath.Join(o.dbDir, "state"), o.group, o.user)
+}
+
+func (o *initOptions) daemonYAML() string {
+	return fmt.Sprintf(`# jailopsd.yaml, written by "jailops-priv init". See jailopsd.yaml in the packaging directory for every key.
+role: host
+pool: %s
+dataset: %s
+mount_base: %s
+data_dir: %s
+state_dir: %s
+listen:
+  unix:
+    path: /var/run/jailops/jailops.sock
+    mode: 0666
+priv:
+  socket: /var/run/jailops/priv.sock
+`, o.pool, o.dataset, o.mount, o.dbDir, filepath.Join(o.dbDir, "state"))
+}

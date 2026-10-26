@@ -1,0 +1,11 @@
+$ jailops sessions list
+   ID   USER    FROM        AGE   LAST SEEN   EXPIRES
+   s1   alice   192.0.2.5   3h    3h          2026-03-02 09:00
+   s2   bob     -           3h    3h          2026-03-02 09:00
+
+$ jailops sessions revoke -y s1
+session/s1 revoked
+
+$ jailops sessions list -o name
+s2
+

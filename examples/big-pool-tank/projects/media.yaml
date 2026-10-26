@@ -1,0 +1,13 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: media
+spec:
+  hosts: [nas1]
+  networks: [{network: media}]
+  storage:
+    # The root of a jail stays on the fast SSD pool; bulk data lives on the big pool, capped for the project.
+    - {storage: default, quota: 100G}
+    - {storage: bulk, quota: 12T}
+  quotas: {jails: 10, memory: 24G}
+  firewall: floor

@@ -1,0 +1,9 @@
+apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: mx
+spec:
+  default_in: deny
+  default_out: allow
+  rules:
+    - {name: smtp, action: allow, direction: in, proto: tcp, ports: ["25", "465", "587"]}

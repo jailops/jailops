@@ -1,0 +1,14 @@
+01 ifconfig epair create; rename ends to joe49a245eed00a and joe49a245eed00b
+02 ifconfig joe49a245eed00a ether 0a:7e:5e:ec:da:6d
+03 ifconfig joe49a245eed00b ether ca:64:60:d0:bb:57
+04 ifconfig joe49a245eed00a description jailops:j-1
+05 ifconfig joe49a245eed00a mtu 1500
+06 ifconfig joe49a245eed00b mtu 1500
+07 ifconfig jo0 addm joe49a245eed00a
+08 ifconfig jo0 static joe49a245eed00a ca:64:60:d0:bb:57
+09 ifconfig jo0 private joe49a245eed00a
+10 ifconfig joe49a245eed00a up
+11 ifconfig jo0gb staticarp
+12 ndp -s 10.20.0.10 ca:64:60:d0:bb:57   (on jo0gb)
+13 ndp -s 2001:db8:1::100 ca:64:60:d0:bb:57   (on jo0gb)
+14 ndp -s fe80::c864:60ff:fed0:bb57 ca:64:60:d0:bb:57   (on jo0gb)

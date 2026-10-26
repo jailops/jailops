@@ -1,0 +1,12 @@
+apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: public-web
+spec:
+  default_in: deny
+  default_out: allow
+  rules:
+    # The public web jail: HTTP and HTTPS from anywhere (the one deliberate "from anywhere" of this fleet).
+    - {name: http, action: allow, direction: in, proto: tcp, ports: ["80", "443"]}
+    - {name: ssh-admins, action: allow, direction: in, proto: tcp, ports: ["22"], from: ["@admins"]}
+    - {name: ping6, action: allow, direction: in, proto: icmp6}

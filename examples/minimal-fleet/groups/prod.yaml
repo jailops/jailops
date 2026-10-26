@@ -1,0 +1,6 @@
+apiVersion: jailops/v1
+kind: HostGroup
+metadata:
+  name: prod
+spec:
+  selector: {env: prod}

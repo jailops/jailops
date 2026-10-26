@@ -1,0 +1,17 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: web
+spec:
+  # The project is defined once here and applied to every host it lists, with
+  # the same UUID. Each host must have the networks and storage named below;
+  # a missing one is a plan error before anything is applied.
+  hosts: [web1, web2]
+  # A network belongs to one project; this one is web's alone.
+  networks:
+    - {network: br-web}
+  storage:
+    - {storage: fast, quota: 200G}
+  quotas: {jails: 20}
+  firewall: base
+  images: [freebsd-15]

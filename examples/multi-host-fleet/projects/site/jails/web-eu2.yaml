@@ -1,0 +1,13 @@
+apiVersion: jailops/v1
+kind: Jail
+# A jail is declared on exactly one named host: there is no scheduler.
+hosts: [eu2]
+start: true
+metadata:
+  name: web-eu2
+  labels: {tier: web}
+spec:
+  profiles: [small, web]
+  env:
+    NODE: eu2
+    API_KEY: secret:site.api_key

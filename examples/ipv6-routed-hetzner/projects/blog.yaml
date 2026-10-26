@@ -1,0 +1,10 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: blog
+spec:
+  hosts: [hz1]
+  networks: [{network: blog}]
+  storage: [{storage: default, quota: 100G}]
+  quotas: {jails: 5, memory: 8G}
+  firewall: floor

@@ -1,0 +1,9 @@
+apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: floor
+spec:
+  # Closed by default, in both directions across projects: another project's jails are never reachable
+  # unless a rule you write opens it.
+  default_in: deny
+  default_out: allow

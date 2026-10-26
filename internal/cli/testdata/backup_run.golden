@@ -1,0 +1,54 @@
+$ jailops create web --image freebsd-15@stable --network lan --storage default --label env=prod
+jail/web created
+
+$ jailops backup target create usb --kind pool --path tank/backup
+backup target/usb created
+
+$ jailops backup policy create nightly --selector env=prod --target usb --schedule 0 2 * * *
+backup policy/nightly created
+
+$ jailops backup run nightly
+! plaintext_denied: this host holds no backup key; nothing leaves the host unencrypted
+! hint: Enable backup encryption, or set allow_plaintext on the target if that is intended. (jailops explain plaintext_denied)
+[exit 2]
+
+$ jailops backup key create --recipient age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
+<recovery-key>
+! warning: the recovery key is shown only once and is stored nowhere; write it down now.
+
+$ jailops backup run nightly
+JAIL   TARGET   KIND     RESULT   SNAPSHOT                  SIZE   NEW   DETAIL
+web    usb      backup   ok       <snapshot-id>   0 B    0 B   -
+
+$ jailops backup list -o name
+<snapshot-id>
+
+$ jailops backup verify <snapshot-id>
+JAIL   TARGET   KIND    RESULT   SNAPSHOT                  SIZE   NEW   DETAIL
+web    -        drill   ok       <snapshot-id>   0 B    0 B   -
+
+$ jailops backup verify <snapshot-id> --depth extract
+JAIL   TARGET   KIND    RESULT   SNAPSHOT                  SIZE   NEW   DETAIL
+web    -        drill   ok       <snapshot-id>   0 B    0 B   -
+
+$ jailops --dry-run backup run nightly
+dry-run: would run backup policy nightly
+
+$ jailops backup run ghost
+! not_found: backup policy "ghost" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops project create restored --storage default
+project/restored created
+
+$ jailops backup restore <snapshot-id> --project restored --as web-r -y
+Preflight: restore backup <snapshot-id> (jail web) as web-r
+Changes:
+  + create jail web-r
+Result: ok
+jail/web-r restored
+
+$ jailops --project restored list -o name
+web-r
+

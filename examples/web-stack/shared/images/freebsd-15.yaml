@@ -1,0 +1,15 @@
+apiVersion: jailops/v1
+kind: Image
+metadata:
+  name: freebsd-15
+# build: true builds the first generation on a host that has none (a fresh host has none, and a jail cannot be
+# created from an image without one). It is never repeated once a generation exists.
+build: true
+spec:
+  os: freebsd
+  release: 15.1-RELEASE
+  arch: amd64
+  source:
+    type: pkgbase
+    sets: [FreeBSD-set-minimal-jail]
+  aliases: [stable]

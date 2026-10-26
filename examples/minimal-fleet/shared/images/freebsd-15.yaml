@@ -1,0 +1,12 @@
+apiVersion: jailops/v1
+kind: Image
+metadata:
+  name: freebsd-15
+spec:
+  os: freebsd
+  release: 15.1-RELEASE
+  arch: amd64
+  source:
+    type: pkgbase
+    sets: [FreeBSD-set-minimal-jail]
+  aliases: [stable]

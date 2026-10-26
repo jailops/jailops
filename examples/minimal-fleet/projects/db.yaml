@@ -1,0 +1,13 @@
+apiVersion: jailops/v1
+kind: Project
+metadata:
+  name: db
+spec:
+  hosts: [web1, web2]
+  networks:
+    - {network: br-db}
+  storage:
+    - {storage: fast, quota: 500G}
+  quotas: {jails: 4}
+  firewall: base
+  images: [freebsd-15]

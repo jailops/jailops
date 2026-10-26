@@ -1,0 +1,32 @@
+{
+  "apiVersion": "jailops/v1",
+  "kind": "Jail",
+  "metadata": {
+    "created_at": "2026-01-02T02:04:05Z",
+    "generation": 3,
+    "labels": {
+      "a": "<2>",
+      "z": "1"
+    },
+    "name": "web",
+    "scope": "host",
+    "uuid": "u-1"
+  },
+  "spec": {
+    "boot": {},
+    "env": {
+      "A": "1",
+      "B": "2"
+    },
+    "firewall": {},
+    "image": "freebsd-15.0@stable",
+    "network": [
+      {
+        "ipv4": "10.20.0.10",
+        "network": "lan"
+      }
+    ],
+    "resources": {},
+    "update": {}
+  }
+}

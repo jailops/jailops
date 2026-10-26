@@ -1,0 +1,30 @@
+$ jailops backup key status
+STATUS   DOMAIN   PATH
+none     -        -
+
+$ jailops backup key create --recipient notakey
+! usage: recipient "notakey" is not an age public key (it starts with age1)
+! hint: run 'jailops backup key create --help' for usage
+[exit 2]
+
+$ jailops backup key create --recipient age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
+<recovery-key>
+! warning: the recovery key is shown only once and is stored nowhere; write it down now.
+
+$ jailops backup key create
+! already_exists: a backup key already exists
+! hint: rotating the key means a new repository
+[exit 5]
+
+$ jailops backup key escrow --recipient age1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq
+STATUS     DOMAIN         PATH
+escrowed   dom-<id>   /var/db/jailops/backup.key
+
+$ jailops backup key status
+STATUS     DOMAIN         PATH
+escrowed   dom-<id>   /var/db/jailops/backup.key
+
+$ jailops --dry-run backup key create
+dry-run: would create the backup key
+recipients: null
+
