@@ -37,7 +37,7 @@ jobs:
           test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
           go vet ./...
           (cd sdk && go vet ./...)
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean ${{ github.ref_type == 'tag' && '' || '--snapshot' }}
