@@ -92,6 +92,7 @@ type Env struct {
 	tokens   map[api.Permission]string
 	sysmu    sync.Mutex
 	sysOver  map[string]string
+	sysHist  map[string][]string // every value ever set, in order
 	// Loaded lists the modules the daemon loaded with kldload.
 	Loaded []string
 }
@@ -104,6 +105,18 @@ func (e *Env) SetSysctl(name, value string) {
 		e.sysOver = map[string]string{}
 	}
 	e.sysOver[name] = value
+	if e.sysHist == nil {
+		e.sysHist = map[string][]string{}
+	}
+	e.sysHist[name] = append(e.sysHist[name], value)
+}
+
+// SysctlHistory lists every value set for a sysctl on the fake host, oldest first. A test that must know a value was
+// set at some point reads this: the reconcile loop runs beside the test and may already have given the value back.
+func (e *Env) SysctlHistory(name string) []string {
+	e.sysmu.Lock()
+	defer e.sysmu.Unlock()
+	return append([]string(nil), e.sysHist[name]...)
 }
 
 // SysctlValue reads a sysctl of the fake host.

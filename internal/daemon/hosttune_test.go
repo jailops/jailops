@@ -20,9 +20,16 @@ func TestLinuxJailManagesTheFallbackBrandAndModules(t *testing.T) {
 		t.Fatalf("the brand was set without a Linux jail: %s", v)
 	}
 	e.SeedLinux()
-	// The image build sets the brand for its own jail; the daemon only gives back what it set itself.
-	if v := e.SysctlValue("kern.elf64.fallback_brand"); v != "3" {
-		t.Fatalf("the Alpine build did not set the brand: %s", v)
+	// The image build sets the brand for its own jail. Once the build is over nothing needs it, and the reconcile loop
+	// (which runs beside this test, kicked by the finished build) may give it back at any moment: so ask whether it was
+	// ever set, not what it is now.
+	hist := e.SysctlHistory("kern.elf64.fallback_brand")
+	set := false
+	for _, v := range hist {
+		set = set || v == "3"
+	}
+	if !set {
+		t.Fatalf("the Alpine build did not set the brand: %v", hist)
 	}
 	e.SetSysctl("kern.elf64.fallback_brand", "-1")
 	op, err := e.Admin.Jails().Create(ctx, dtest.AlpineJail("alp1"))

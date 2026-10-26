@@ -168,9 +168,11 @@ func TestRolloutResumeAttachesToRunningOperation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
-		// Cancel once the first upgrade has been requested.
-		for i := 0; i < 400; i++ {
-			if upgradeCalls(e, "a") > 0 {
+		// Cancel once the executor has recorded the operation of the first upgrade. The host counting the request is not
+		// enough: the answer with the operation id may still be on its way, and a cancel then fails the request itself
+		// (the state says failed and has no operation to attach to).
+		for i := 0; i < 2000; i++ {
+			if st, err := ex.Store.Load("web-upgrade"); err == nil && len(st.Items) > 0 && st.Items[0].State == rollout.ItemUpgrading && st.Items[0].Op != "" {
 				cancel()
 				return
 			}
