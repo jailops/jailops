@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0 - 2026-10-26
+
 This is the first release, so the list below is ordered by area, not by date: what changes behaviour first, then
 networking, security, fleets, packaging, and the groundwork.
 
