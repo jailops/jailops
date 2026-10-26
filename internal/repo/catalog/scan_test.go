@@ -682,7 +682,10 @@ func TestSkippedMetadataIsReportedNotHidden(t *testing.T) {
 	if (&Skips{}).Summary() != "" {
 		t.Fatal("empty summary")
 	}
-	// the Linux attribute implementation reports what it cannot apply
+	// the Linux attribute implementation reports what it cannot apply (the FreeBSD one has its own names)
+	if runtime.GOOS != "linux" {
+		return
+	}
 	skips2 := &Skips{}
 	tree := &Tree{Root: &Entry{Kind: KDir, Mode: 0o755, Children: []*Entry{
 		{Kind: KFile, Name: "a", Mode: 0o644, Attrs: []Attr{{Name: "freebsd:extattr:user:x", Value: []byte("1")}, {Name: "linux:xattr:security.capability", Value: []byte("c")}, {Name: "linux:xattr:user.ok", Value: []byte("v")}}}}}, Count: 2}

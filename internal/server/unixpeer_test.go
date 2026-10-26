@@ -173,9 +173,13 @@ func TestRealSocketPeerIsAnonymousUntilItAuthenticates(t *testing.T) {
 		t.Fatal(err)
 	}
 	hc := jarClient(t)
-	hc.Transport = &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-		return (&net.Dialer{}).DialContext(ctx, "unix", e.D.UnixPath())
+	// the socket path is read once: a dial that outlives the test must not touch the daemon after its cleanup
+	sock := e.D.UnixPath()
+	tr := &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
+		return (&net.Dialer{}).DialContext(ctx, "unix", sock)
 	}}
+	hc.Transport = tr
+	t.Cleanup(tr.CloseIdleConnections)
 	hc.Timeout = 5 * time.Second
 	resp, err := hc.Post("http://unix/1.0/auth/login", "application/json", strings.NewReader(`{"username":"ann","password":"correct horse battery staple 9"}`))
 	if err != nil {

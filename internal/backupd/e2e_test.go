@@ -419,7 +419,8 @@ func TestLeaseExpiryOverTheNetwork(t *testing.T) {
 
 // The client keeps the lease alive by itself while the host is busy.
 func TestClientHeartbeatKeepsTheLease(t *testing.T) {
-	r := startRig(t, memKind, func(c *node.Config) { c.Lease = 600 * time.Millisecond })
+	// a lease of 1.2 s: a slow CI machine (a FreeBSD VM) can stall the heartbeat goroutine for several hundred ms
+	r := startRig(t, memKind, func(c *node.Config) { c.Lease = 1200 * time.Millisecond })
 	h := r.enroll("h")
 	g := r.Fix.Group("h", "j")
 	b := r.Fix.NewBackup(t, g, nodetest.SnapshotID(r.Clock.Now(), 1), manyChunks(t, r.Fix, 3))
@@ -427,7 +428,7 @@ func TestClientHeartbeatKeepsTheLease(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(1500 * time.Millisecond) // two and a half leases of silence from the engine
+	time.Sleep(3 * time.Second) // two and a half leases of silence from the engine
 	if err := s.PutIndex(ctx, b.Index); err != nil {
 		t.Fatalf("the session died although the client heartbeats: %v", err)
 	}

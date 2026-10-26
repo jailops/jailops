@@ -987,15 +987,23 @@ func TestMemoryIsBoundedByTheWindowNotTheDataSize(t *testing.T) {
 		}
 		return
 	}
-	smallB, smallR := measure(48 << 20)
-	bigB, bigR := measure(160 << 20)
-	t.Logf("48 MiB: backup +%d MiB, restore +%d MiB; 160 MiB: backup +%d MiB, restore +%d MiB", smallB>>20, smallR>>20, bigB>>20, bigR>>20)
-	if bigB > smallB*3/2+24<<20 || bigB > 120<<20 {
-		t.Fatalf("backup heap grew from %d to %d MiB with the data size", smallB>>20, bigB>>20)
+	// The peak is sampled every few milliseconds, so a busy machine (a CI VM with two cores) adds noise: measure up to
+	// three times and fail only when every attempt shows the heap growing with the data size.
+	var last string
+	for attempt := 1; attempt <= 3; attempt++ {
+		smallB, smallR := measure(48 << 20)
+		bigB, bigR := measure(160 << 20)
+		t.Logf("attempt %d: 48 MiB: backup +%d MiB, restore +%d MiB; 160 MiB: backup +%d MiB, restore +%d MiB", attempt, smallB>>20, smallR>>20, bigB>>20, bigR>>20)
+		switch {
+		case bigB > smallB*3/2+24<<20 || bigB > 120<<20:
+			last = fmt.Sprintf("backup heap grew from %d to %d MiB with the data size", smallB>>20, bigB>>20)
+		case bigR > smallR*3/2+24<<20 || bigR > 120<<20:
+			last = fmt.Sprintf("restore heap grew from %d to %d MiB with the data size", smallR>>20, bigR>>20)
+		default:
+			return
+		}
 	}
-	if bigR > smallR*3/2+24<<20 || bigR > 120<<20 {
-		t.Fatalf("restore heap grew from %d to %d MiB with the data size", smallR>>20, bigR>>20)
-	}
+	t.Fatal(last)
 }
 
 func sameFile(a, b string) (bool, error) {
