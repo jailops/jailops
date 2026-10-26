@@ -19,13 +19,13 @@ jobs:
     name: GitHub release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
@@ -37,7 +37,7 @@ jobs:
           test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
           go vet ./...
           (cd sdk && go vet ./...)
-      - uses: goreleaser/goreleaser-action@v6
+      - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"
           args: release --clean ${{ github.ref_type == 'tag' && '' || '--snapshot' }}
@@ -57,19 +57,19 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: extractions/setup-just@v2
+      - uses: extractions/setup-just@v4
       - run: just web-all
       - run: just build-freebsd ${{ matrix.arch }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: bin-${{ matrix.arch }}
           path: bin/*-freebsd-${{ matrix.arch }}
@@ -83,8 +83,8 @@ jobs:
       matrix:
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: bin-${{ matrix.arch }}
           path: bin
@@ -101,7 +101,7 @@ jobs:
           run: |
             set -eu
             sh scripts/pkg-build.sh "${{ steps.v.outputs.version }}" "${{ matrix.arch }}" bin out 15
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-${{ matrix.arch }}
           path: out
@@ -112,8 +112,8 @@ jobs:
     needs: pkg
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           pattern: pkg-*
           path: repo
@@ -135,7 +135,7 @@ jobs:
             printf '%s\n' "$PKG_REPO_KEY" > /tmp/repo.key
             sh scripts/pkg-repo.sh repo /tmp/repo.key
             rm -f /tmp/repo.key
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pkg-repository
           path: repo

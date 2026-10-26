@@ -19,14 +19,14 @@ jobs:
     name: Web consoles
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - uses: extractions/setup-just@v2
-      - uses: actions/setup-go@v5
+      - uses: extractions/setup-just@v4
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: Wire types are current
@@ -43,7 +43,7 @@ jobs:
           cd web
           npx playwright install --with-deps chromium
           npm run e2e:all
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: console-dist
           path: |
@@ -68,11 +68,11 @@ jobs:
       JAILOPS_TEST_DATABASE_URL: postgres://postgres@localhost:5432/postgres?sslmode=disable
       CGO_ENABLED: "0"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: console-dist
           path: .
@@ -109,11 +109,11 @@ jobs:
       GOOS: freebsd
       GOARCH: ${{ matrix.arch }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: console-dist
           path: .
@@ -125,7 +125,7 @@ jobs:
           for b in jailops jailopsd jailops-priv jailops-sync jailops-backupd; do
             go build -trimpath -ldflags="-s -w -X main.version=$(tr -d '[:space:]' < version.txt)" -o dist/$b-freebsd-${{ matrix.arch }} ./cmd/$b
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: freebsd-${{ matrix.arch }}
           path: dist
@@ -140,8 +140,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
         with:
           name: console-dist
           path: .
