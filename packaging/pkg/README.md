@@ -26,9 +26,10 @@ JailOps targets FreeBSD 15.1 and later, so packages are built for the 15 ABI onl
     pkg.jailops.net/<ABI>/latest/All/*.pkg
     pkg.jailops.net/<ABI>/latest/{meta.conf,packagesite.pkg,data.pkg,...}   (written by pkg repo)
 
-The repository is signed with an RSA key. The private key lives only in the release environment (the
-`PKG_REPO_KEY` secret of the release workflow); `just pkg-keygen` makes a pair, and the public key is published at
-`https://pkg.jailops.net/jailops.pub`.
+The repository is signed with an RSA key. The private key lives only in the `signing` environment of the
+[jailops-packages](https://github.com/jailops/jailops-packages) repository (the `PKG_REPO_KEY` secret, made by its
+`scripts/keygen.sh`), never in this repository or in any workflow here; the public key is published at
+`https://pkg.jailops.net/jailops.pub` and its fingerprint is in that README.
 
 A host uses it with `/usr/local/etc/pkg/repos/jailops.conf`:
 

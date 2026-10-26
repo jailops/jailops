@@ -43,11 +43,17 @@ jobs:
 
   web-test:
     name: Web consoles (types, unit tests, end-to-end)
+    needs: web-build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      # the end-to-end tests run `vite preview` on the built consoles (web/host/playwright.config.ts: "build first")
+      - uses: actions/download-artifact@v8
+        with:
+          name: console-dist
+          path: .
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -95,8 +101,10 @@ jobs:
       - run: go build ./...
       - name: The race shards cover every package exactly once
         run: bash scripts/ci-race.sh --check
-      - name: SDK module (stdlib only)
+      - name: SDK module (stdlib only, outside the go.work workspace so that only its own go.mod counts)
         working-directory: sdk
+        env:
+          GOWORK: "off"
         run: |
           go vet ./...
           CGO_ENABLED=1 go test ./... -race -count=1

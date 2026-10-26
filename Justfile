@@ -85,13 +85,6 @@ test-freebsd:
 snapshot:
     goreleaser release --snapshot --clean --skip=before
 
-# A key pair for signing the pkg repository: the private key stays with the release environment only
-# (the PKG_REPO_KEY secret), the public one is published as https://pkg.jailops.net/jailops.pub.
-pkg-keygen DIR="pkg-keys":
-    mkdir -p {{DIR}} && umask 077 && openssl genrsa -out {{DIR}}/jailops-repo.key 4096
-    openssl rsa -in {{DIR}}/jailops-repo.key -pubout -out {{DIR}}/jailops.pub
-    @echo "keep {{DIR}}/jailops-repo.key secret; publish {{DIR}}/jailops.pub"
-
 # Short fuzz run over the parsers.
 fuzz seconds="20":
     go test ./internal/sys/zfs -run '^$' -fuzz FuzzParse -fuzztime {{seconds}}s
