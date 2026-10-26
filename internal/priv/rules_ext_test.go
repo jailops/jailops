@@ -425,9 +425,17 @@ func TestReadFileAllowList(t *testing.T) {
 	}
 	// the fixed files, when they exist on this host
 	for _, p := range ReadOnlyFiles {
-		if _, err := os.Stat(p); err != nil {
+		st, err := os.Lstat(p)
+		if err != nil {
 			if _, err := l.ReadFile(ctx, p); !api.IsCode(err, api.CodeNotFound) {
 				t.Errorf("%s (absent): %v", p, err)
+			}
+			continue
+		}
+		if st.Mode()&os.ModeSymlink != 0 {
+			// e.g. /etc/resolv.conf on a systemd host points into /run: a link out of /etc is refused on purpose
+			if _, err := l.ReadFile(ctx, p); err != nil && !api.IsCode(err, api.CodeForbidden) {
+				t.Errorf("%s (a symlink): %v", p, err)
 			}
 			continue
 		}

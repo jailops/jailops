@@ -33,12 +33,15 @@ jobs:
           cd web
           npm ci
           npm run build:all
+      # one tar file: with several paths upload-artifact roots them at their common parent, and they would unpack to
+      # webui/dist instead of internal/webui/dist
+      - name: Pack the built consoles
+        run: tar -cf "$RUNNER_TEMP/console-dist.tar" internal/webui/dist internal/backupui/dist
       - uses: actions/upload-artifact@v7
         with:
           name: console-dist
-          path: |
-            internal/webui/dist
-            internal/backupui/dist
+          path: ${{ runner.temp }}/console-dist.tar
+          compression-level: 0
           retention-days: 7
 
   web-test:
@@ -53,7 +56,9 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
-          path: .
+          path: ${{ runner.temp }}/console
+      - name: Unpack the built consoles
+        run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
       - uses: actions/setup-node@v7
         with:
           node-version: 24
@@ -92,7 +97,9 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
-          path: .
+          path: ${{ runner.temp }}/console
+      - name: Unpack the built consoles
+        run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
       - name: gofmt
         run: |
           out=$(gofmt -l cmd internal sdk scripts)
@@ -109,10 +116,13 @@ jobs:
           go vet ./...
           CGO_ENABLED=1 go test ./... -race -count=1
           test -z "$(go list -m all | tail -n +2)" || { echo "the SDK must have no dependencies"; go list -m all; exit 1; }
-      - name: Fuzz the parsers briefly
-        run: go test ./internal/sys/zfs -run '^$' -fuzz FuzzParse -fuzztime 20s
+      - name: Fuzz the parsers briefly (go allows one fuzz target per run)
+        run: |
+          for f in $(go test ./internal/sys/zfs -list '^Fuzz' | grep '^Fuzz'); do
+            go test ./internal/sys/zfs -run '^$' -fuzz "^${f}\$" -fuzztime 5s
+          done
       - name: Fuzz the helper's command allow-list briefly
-        run: go test ./internal/priv -run '^$' -fuzz FuzzCheckCommand -fuzztime 20s
+        run: go test ./internal/priv -run '^$' -fuzz '^FuzzCheckCommand$' -fuzztime 20s
 
   # The tests with the race detector, in four parallel shards (scripts/ci-race.sh: split by measured run time).
   race:
@@ -145,7 +155,9 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
-          path: .
+          path: ${{ runner.temp }}/console
+      - name: Unpack the built consoles
+        run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
       - name: go test -race (shard ${{ matrix.shard }})
         run: bash scripts/ci-race.sh ${{ matrix.shard }}
 
@@ -170,7 +182,9 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
-          path: .
+          path: ${{ runner.temp }}/console
+      - name: Unpack the built consoles
+        run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
       - run: go build ./...
       - run: go vet ./...
       - name: Binaries
@@ -200,18 +214,26 @@ jobs:
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
-          path: .
+          path: ${{ runner.temp }}/console
+      - name: Unpack the built consoles
+        run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
       - uses: vmactions/freebsd-vm@v1
         with:
           release: "15.1"
           usesh: true
           sync: rsync
           prepare: |
-            pkg install -y go postgresql17-server bash curl rsync
+            pkg install -y go git-lite postgresql17-server bash curl rsync
           run: |
             set -eu
             export CGO_ENABLED=0 GOTOOLCHAIN=auto   # go.mod names a newer Go than the package: fetch it
             go version
+            # the Go tests need a PostgreSQL (embedded-postgres has no FreeBSD build): start the packaged one
+            sysrc postgresql_enable=YES >/dev/null
+            service postgresql oneinitdb >/dev/null 2>&1 || true
+            service postgresql onestart
+            n=0; until su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && { echo "postgresql does not answer"; exit 1; }; sleep 1; done
+            export JAILOPS_TEST_DATABASE_URL="postgres://postgres@127.0.0.1:5432/postgres?sslmode=disable"
             go vet ./...
             go test ./... -count=1
             sh scripts/ci-freebsd-e2e.sh

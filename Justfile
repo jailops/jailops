@@ -87,7 +87,7 @@ snapshot:
 
 # Short fuzz run over the parsers.
 fuzz seconds="20":
-    go test ./internal/sys/zfs -run '^$' -fuzz FuzzParse -fuzztime {{seconds}}s
+    for f in $(go test ./internal/sys/zfs -list '^Fuzz' | grep '^Fuzz'); do go test ./internal/sys/zfs -run '^$' -fuzz "^$f\$" -fuzztime {{seconds}}s; done
 
 # Regenerate / verify the TypeScript wire types from sdk/api.
 gen-ts:
