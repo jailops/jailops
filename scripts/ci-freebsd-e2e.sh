@@ -26,7 +26,10 @@ esac
 release=$(freebsd-version -u | sed 's/-p[0-9]*$//')
 J=/usr/local/bin/jailops
 
-step() { printf '\n== %s\n' "$*"; }
+# set -e ends the script without a word: say which step it was
+current=start
+trap 'rc=$?; [ $rc -eq 0 ] || echo "FAILED (exit $rc) in step: $current" >&2' EXIT
+step() { current=$*; printf '\n== %s\n' "$*"; }
 fail() {
 	echo "FAILED: $*" >&2
 	echo "--- last messages" >&2
@@ -131,12 +134,14 @@ check "a file in the jail" $J exec --project demo web -- sh -c 'echo ci-marker >
 expect "labels" 'backup=yes' $J label --project demo web backup=yes
 
 step "backup node (PostgreSQL, the node, this host enrolled)"
-pkg install -y postgresql17-server >/dev/null 2>&1 || pkg install -y postgresql16-server >/dev/null || fail "postgresql"
-sysrc postgresql_enable=YES >/dev/null
-service postgresql oneinitdb >/dev/null 2>&1 || true
-service postgresql onestart >/dev/null 2>&1 || { tail -n 20 /var/db/postgres/data*/postgresql.log /var/db/postgres/*.log 2>/dev/null >&2; fail "postgresql does not start"; }
-n=0; until su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "postgresql does not answer"; sleep 1; done
-su -m postgres -c "createdb jopsnode" || true
+if ! su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; then # the CI VM has it running already
+	pkg install -y postgresql17-server >/dev/null 2>&1 || pkg install -y postgresql16-server >/dev/null || fail "postgresql"
+	sysrc postgresql_enable=YES >/dev/null
+	service postgresql oneinitdb >/dev/null 2>&1 || true
+	service postgresql onestart >/dev/null 2>&1 || { tail -n 20 /var/db/postgres/data*/postgresql.log /var/db/postgres/*.log 2>/dev/null >&2; fail "postgresql does not start"; }
+	n=0; until su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "postgresql does not answer"; sleep 1; done
+fi
+su -m postgres -c "dropdb --if-exists jopsnode; createdb jopsnode" || fail "createdb"
 data=/var/db/jailops-backup
 cat > /usr/local/etc/jailops/backupd.yaml <<YAML
 hostname: ci-vault

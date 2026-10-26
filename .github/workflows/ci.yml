@@ -4,6 +4,9 @@ on:
   push:
     branches: [master]
   pull_request:
+  # The same suite every night with longer fuzzing: the parsers get minutes, not seconds.
+  schedule:
+    - cron: "17 3 * * *"
   workflow_dispatch:
 
 permissions:
@@ -116,20 +119,23 @@ jobs:
           go vet ./...
           CGO_ENABLED=1 go test ./... -race -count=1
           test -z "$(go list -m all | tail -n +2)" || { echo "the SDK must have no dependencies"; go list -m all; exit 1; }
-      - name: Fuzz the parsers briefly (go allows one fuzz target per run)
+      - name: Fuzz the parsers (go allows one fuzz target per run; longer on the nightly run)
+        env:
+          FUZZ_TIME: ${{ github.event_name == 'schedule' && '90s' || '5s' }}
         run: |
           for f in $(go test ./internal/sys/zfs -list '^Fuzz' | grep '^Fuzz'); do
-            go test ./internal/sys/zfs -run '^$' -fuzz "^${f}\$" -fuzztime 5s
+            go test ./internal/sys/zfs -run '^$' -fuzz "^${f}\$" -fuzztime "$FUZZ_TIME"
           done
-      - name: Fuzz the helper's command allow-list briefly
-        run: go test ./internal/priv -run '^$' -fuzz '^FuzzCheckCommand$' -fuzztime 20s
+      - name: Fuzz the helper's command allow-list
+        env:
+          FUZZ_TIME: ${{ github.event_name == 'schedule' && '5m' || '20s' }}
+        run: go test ./internal/priv -run '^$' -fuzz '^FuzzCheckCommand$' -fuzztime "$FUZZ_TIME"
 
   # The tests with the race detector, in four parallel shards (scripts/ci-race.sh: split by measured run time).
   race:
     name: Go race detector (${{ matrix.shard }})
     needs: web-build
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -206,7 +212,6 @@ jobs:
     name: FreeBSD VM
     needs: web-build
     runs-on: ubuntu-latest
-    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
         with:

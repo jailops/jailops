@@ -159,6 +159,10 @@ release VERSION:
     grep -Eq '^## \[?{{VERSION}}\]?( |$)' CHANGELOG.md || \
         { echo "x CHANGELOG.md has no section for {{VERSION}}"; exit 1; }
     git rev-parse "v{{VERSION}}" >/dev/null 2>&1 && { echo "x tag v{{VERSION}} already exists"; exit 1; }
+    # The whole suite already ran on master: the release does not run it again, it needs it green on exactly this commit.
+    ci=$(gh run list --workflow CI --commit "$(git rev-parse HEAD)" --limit 1 --json status,conclusion --jq '.[0] | "\(.status)/\(.conclusion)"' 2>/dev/null || true)
+    [ "$ci" = "completed/success" ] || \
+        { echo "x CI is not green on $(git rev-parse --short HEAD) (${ci:-no run found}): wait for it: gh run watch"; exit 1; }
     git tag -s "v{{VERSION}}" -m "v{{VERSION}}"
     git push origin "v{{VERSION}}"
     echo "v{{VERSION}} tagged: CI builds the release: gh run watch"
