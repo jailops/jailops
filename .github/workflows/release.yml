@@ -35,6 +35,7 @@ jobs:
       - uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean ${{ github.ref_type == 'tag' && '' || '--snapshot' }}
+          # an empty string is false in an expression, so `tag && '' || '--snapshot'` always chose --snapshot and nothing was published
+          args: release --clean ${{ github.ref_type != 'tag' && '--snapshot' || '' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
