@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"net"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -165,7 +167,11 @@ func TestScanLayout(t *testing.T) {
 		t.Fatal("dangling symlink target")
 	}
 	e, _ := tree.Lookup("etc/rc.conf")
-	if len(e.Attrs) != 1 || e.Attrs[0].Name != "linux:xattr:user.note" || string(e.Attrs[0].Value) != "kept" {
+	wantAttr := "linux:xattr:user.note"
+	if runtime.GOOS == "freebsd" {
+		wantAttr = "freebsd:extattr:user:note"
+	}
+	if len(e.Attrs) != 1 || e.Attrs[0].Name != wantAttr || string(e.Attrs[0].Value) != "kept" {
 		t.Fatalf("attrs %+v", e.Attrs)
 	}
 	if e.MtimeNs != time.Date(2020, 1, 2, 3, 4, 5, 123456789, time.UTC).UnixNano() {
@@ -670,7 +676,7 @@ func TestSkippedMetadataIsReportedNotHidden(t *testing.T) {
 	if err := f.res.Tree.Extract(t.TempDir(), f.payload(), ExtractOptions{Skips: skips, Attrs: fa}); err != nil {
 		t.Fatal(err)
 	}
-	if skips.Count != 1 || !strings.Contains(skips.Summary(), "user.note") {
+	if skips.Count != 1 || !strings.Contains(skips.Summary(), "note") { // user.note on Linux, user:note on FreeBSD
 		t.Fatalf("skips: %+v", skips)
 	}
 	if (&Skips{}).Summary() != "" {
@@ -725,9 +731,12 @@ func TestScanErrors(t *testing.T) {
 	}
 	// a socket is skipped, not an error
 	root := t.TempDir()
-	if err := unix.Mknod(filepath.Join(root, "sock"), unix.S_IFSOCK|0o600, 0); err != nil {
+	// a listening unix socket: mknod(2) cannot create one on FreeBSD
+	ln, err := net.Listen("unix", filepath.Join(root, "sock"))
+	if err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(func() { ln.Close() })
 	write(t, root, "f", []byte("x"))
 	res, err := Scan(root, ScanOptions{})
 	if err != nil {

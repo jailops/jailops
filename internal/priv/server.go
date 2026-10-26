@@ -67,6 +67,7 @@ type Server struct {
 	mu     sync.Mutex
 	ln     net.Listener
 	conns  map[*fdConn]struct{}
+	closed bool // set by Shutdown under mu: no connection is added to wg after that
 	wg     sync.WaitGroup
 	nextID atomic.Uint64
 	slots  chan struct{}
@@ -110,7 +111,16 @@ func (s *Server) Serve(ln net.Listener) error {
 			uc.Close()
 			continue
 		}
+		// wg.Add must not run concurrently with the wg.Wait of Shutdown: both happen under mu, and Shutdown sets closed first
+		s.mu.Lock()
+		if s.closed {
+			s.mu.Unlock()
+			<-s.slots
+			uc.Close()
+			return nil
+		}
 		s.wg.Add(1)
+		s.mu.Unlock()
 		go func() {
 			defer s.wg.Done()
 			defer func() { <-s.slots }()
@@ -124,6 +134,7 @@ func (s *Server) Serve(ln net.Listener) error {
 func (s *Server) Shutdown(ctx context.Context) error {
 	s.stop()
 	s.mu.Lock()
+	s.closed = true
 	if s.ln != nil {
 		s.ln.Close()
 	}

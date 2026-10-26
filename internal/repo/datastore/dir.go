@@ -182,6 +182,9 @@ func (b *DirBackend) Put(ctx context.Context, key string, r io.Reader, size int6
 	} else {
 		if err := os.Rename(tmp, dst); err != nil {
 			cleanup()
+			if errors.Is(err, syscall.ENAMETOOLONG) {
+				return fmt.Errorf("%w: the path of %q is longer than this system allows (PATH_MAX)", ErrInvalidKey, key)
+			}
 			return err
 		}
 		if err := b.hook("put:linked", key); err != nil {

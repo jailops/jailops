@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -101,6 +102,7 @@ func FuzzDecodeArgs(f *testing.F) {
 // binary and every path argument is inside the base.
 func FuzzCheckCommand(f *testing.F) {
 	f.Add("pkg\x00-r\x00/jailops/jails/a/root\x00install\x00nginx")
+	f.Add("pkg\x00-r\x00/jailops/0\x00install\x00-r\x000") // found by the fuzzer: -r after the subcommand names a repository
 	f.Add("etcupdate\x00-D\x00/x")
 	f.Add("sh\x00-c\x00id")
 	f.Add("sysctl\x00-n\x00net.inet.ip.forwarding")
@@ -135,7 +137,21 @@ func FuzzCheckCommand(f *testing.F) {
 				}
 			}
 		}
-		for i, a := range out {
+		// pkg: only the -r before the subcommand is the jail root. After it, `-r NAME` selects a configured repository by
+		// name (the rest arguments are checked by rePkgName), which is not a path.
+		end := len(out)
+		for _, r := range CommandRules {
+			if r.Binary != "/usr/sbin/pkg" || out[0] != r.Binary {
+				continue
+			}
+			for i := 1; i < len(out); i++ {
+				if slices.Contains(r.Subcommands, out[i]) {
+					end = i
+					break
+				}
+			}
+		}
+		for i, a := range out[:end] {
 			if (a == "-r" || a == "-D" || a == "-b") && i+1 < len(out) {
 				if !strings.HasPrefix(out[i+1], "/jailops/") || strings.Contains(out[i+1], "..") {
 					t.Fatalf("path %q accepted in %q", out[i+1], out)

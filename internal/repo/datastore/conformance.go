@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"math/rand"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -613,8 +614,13 @@ func confInvalidKeys(t T, b Backend) {
 	if len(long) != MaxKeyLen {
 		t.Fatalf("test bug: %d", len(long))
 	}
-	mustPut(t, b, long, []byte("max"), PutOptions{})
-	if got := get(t, b, long); string(got) != "max" {
+	if err := put(t, b, long, []byte("max"), PutOptions{}); err != nil {
+		// a directory backend on a system with PATH_MAX 1024 (FreeBSD) cannot hold a 1024-byte key below its root:
+		// it must refuse it cleanly as an invalid key, never with a raw OS error
+		if !errors.Is(err, ErrInvalidKey) || runtime.GOOS == "linux" {
+			t.Fatalf("put of the longest key: %v", err)
+		}
+	} else if got := get(t, b, long); string(got) != "max" {
 		t.Fatal("longest key round trip")
 	}
 	if err := put(t, b, strings.Repeat("c", MaxComponentLen+1), []byte("x"), PutOptions{}); err == nil {

@@ -226,7 +226,10 @@ jobs:
             pkg install -y go git-lite postgresql17-server bash curl rsync
           run: |
             set -eu
-            export CGO_ENABLED=0 GOTOOLCHAIN=auto   # go.mod names a newer Go than the package: fetch it
+            # go.mod names a newer Go than the package: fetch it; the tests that build binaries must not ask git for a
+            # VCS stamp (the synced tree is not a clone)
+            export CGO_ENABLED=0 GOTOOLCHAIN=auto GOFLAGS=-buildvcs=false
+            kldload pf 2>/dev/null || true   # pfctl(8) of FreeBSD 15 talks to the kernel through netlink: the module must be loaded
             go version
             # the Go tests need a PostgreSQL (embedded-postgres has no FreeBSD build): start the packaged one
             sysrc postgresql_enable=YES >/dev/null
