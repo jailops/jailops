@@ -46,6 +46,14 @@ tcp()   { run_from "$1" nc -z -w2 "$2" "$3" >/dev/null 2>&1; }
 expect() {
 	want=$1; desc=$2; shift 2
 	if "$@"; then got=allow; else got=deny; fi
+	# An allowed probe that fails once is a lost packet or a slow start more often than a rule: look again, twice, and say
+	# so (the note keeps it visible). A denied probe is never repeated: one answer through a rule that must deny is a leak.
+	if [ "$want" = allow ] && [ "$got" = deny ]; then
+		for try in 2 3; do
+			sleep 1
+			if "$@"; then got=allow; printf 'NOTE  %s: allowed on attempt %s\n' "$desc" "$try"; break; fi
+		done
+	fi
 	if [ "$got" = "$want" ]; then pass "$desc ($want)"; else bad "$desc: expected $want, got $got"; fi
 }
 
