@@ -9,6 +9,7 @@
 # The tag push starts .github/workflows/release.yml (GoReleaser -> GitHub release). Run by a person, never by an agent.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export GOTOOLCHAIN=auto   # go.mod names the Go it needs: fetch it instead of failing on an older local Go
 
 DRY=${DRY:-0}
 TAG=${1:-}

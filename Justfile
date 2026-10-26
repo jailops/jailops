@@ -2,6 +2,9 @@
 
 set shell := ["bash", "-euo", "pipefail", "-c"]
 
+# go.mod names the Go it needs: let the go command fetch that toolchain instead of failing on an older local Go
+export GOTOOLCHAIN := "auto"
+
 bins := "jailops jailopsd jailops-priv jailops-sync jailops-backupd"
 ldflags := "-s -w -X main.version=$(tr -d '[:space:]' < version.txt)"
 
