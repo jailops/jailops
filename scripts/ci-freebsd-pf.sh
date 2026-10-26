@@ -20,7 +20,8 @@ passes=0
 work=$(mktemp -d /tmp/jailops-pf.XXXXXX)
 trap 'cleanup; exit 1' INT TERM
 
-say()  { printf '\n== %s\n' "$*"; }
+t0=$(date +%s)
+say()  { printf '\n== %s  [+%ss]\n' "$*" "$(($(date +%s) - t0))"; }
 pass() { passes=$((passes + 1)); printf 'PASS  %s\n' "$*"; }
 bad()  { fails=$((fails + 1)); printf 'FAIL  %s\n' "$*"; }
 die()  { printf 'ABORT %s\n' "$*" >&2; cleanup; exit 2; }
@@ -63,6 +64,7 @@ retry() { # retry TRIES COMMAND...: stop at the first success (a stopping jail n
 	n=$1; shift
 	while [ "$n" -gt 0 ]; do
 		"$@" >/dev/null 2>&1 && return 0
+		[ $? -eq 4 ] && return 0 # exit code 4 is "not found": there is nothing to remove, waiting would only burn time
 		n=$((n - 1)); sleep 3
 	done
 	return 1

@@ -208,10 +208,16 @@ jobs:
   # The tests on the real target. A FreeBSD VM runs the unit tests natively (pty, jail(2), sysctl and the other
   # FreeBSD-only code paths execute here, not just compile) and then the scripted end-to-end flow on a file-backed
   # ZFS pool: image build, jail create/start/exec, backup to a node and restore.
+  # Two VMs side by side: the Go tests on real FreeBSD, and the product end to end (scripts/ci-freebsd-e2e.sh). They do
+  # not depend on each other, so the run takes the longer one, not the sum.
   freebsd:
-    name: FreeBSD VM
+    name: FreeBSD VM (${{ matrix.part }})
     needs: web-build
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        part: [go, e2e]
     steps:
       - uses: actions/checkout@v7
         with:
@@ -222,8 +228,33 @@ jobs:
           path: ${{ runner.temp }}/console
       - name: Unpack the built consoles
         run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
-      - uses: vmactions/freebsd-vm@v1
+      # The e2e VM gets the binaries built here (cross-compiled in about a minute) instead of building them inside the VM, and
+      # the forged-frame tool for phase 0e of the PF matrix.
+      - uses: actions/setup-go@v7
+        if: matrix.part == 'e2e'
         with:
+          go-version-file: go.mod
+      - name: Build the binaries for the e2e VM
+        if: matrix.part == 'e2e'
+        env:
+          CGO_ENABLED: "0"
+          GOOS: freebsd
+          GOARCH: amd64
+        run: |
+          mkdir -p vm-bin
+          for b in jailops jailopsd jailops-priv jailops-sync jailops-backupd; do
+            go build -trimpath -ldflags="-s -w -X main.version=$(tr -d '[:space:]' < version.txt)" -o vm-bin/$b-freebsd-amd64 ./cmd/$b
+          done
+          go build -o vm-bin/forge-freebsd-amd64 ./scripts/forge
+      - name: KVM must be there (without it QEMU falls back to software emulation, which is far too slow)
+        run: |
+          test -e /dev/kvm || { echo "::error::no /dev/kvm on this runner: the VM would run on TCG"; exit 1; }
+          nproc; ls -l /dev/kvm
+      - uses: vmactions/freebsd-vm@v1
+        env:
+          PART: ${{ matrix.part }}
+        with:
+          envs: PART
           release: "15.1"
           usesh: true
           sync: rsync
@@ -236,6 +267,10 @@ jobs:
             export CGO_ENABLED=0 GOTOOLCHAIN=auto GOFLAGS=-buildvcs=false
             kldload pf 2>/dev/null || true   # pfctl(8) of FreeBSD 15 talks to the kernel through netlink: the module must be loaded
             go version
+            if [ "$PART" = e2e ]; then
+              JAILOPS_BIN_DIR="$PWD/vm-bin" FORGE_BIN="$PWD/vm-bin/forge-freebsd-amd64" sh scripts/ci-freebsd-e2e.sh
+              exit
+            fi
             # the Go tests need a PostgreSQL (embedded-postgres has no FreeBSD build): start the packaged one
             sysrc postgresql_enable=YES >/dev/null
             service postgresql oneinitdb >/dev/null 2>&1 || true
@@ -244,4 +279,3 @@ jobs:
             export JAILOPS_TEST_DATABASE_URL="postgres://postgres@127.0.0.1:5432/postgres?sslmode=disable"
             go vet ./...
             go test ./... -count=1
-            sh scripts/ci-freebsd-e2e.sh

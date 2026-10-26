@@ -49,6 +49,8 @@ expect() { # expect DESCRIPTION PATTERN COMMAND...: the output must match
 
 rm -rf "$work"; mkdir -p "$work"
 
+# CI logs show how fast this machine is (a VM without KVM acceleration is several times slower)
+echo "machine: $(sysctl -n kern.vm_guest hw.ncpu hw.model | tr '\n' ' ')"
 step "binaries"
 bin=${JAILOPS_BIN_DIR:-}
 if [ -z "$bin" ]; then
