@@ -19,8 +19,8 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// Version is the daemon version, set at build time.
-var Version = "0.1.0-dev"
+// Version is the daemon version: cmd/jailops-backupd sets it from the build's -X main.version.
+var Version = "dev"
 
 // Server is a running backup node: the node library plus its listeners.
 type Server struct {
