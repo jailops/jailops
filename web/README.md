@@ -4,12 +4,12 @@ One repository, several small consoles. Each console is an app in its own direct
 `shared/`, talks to one kind of server, and is embedded in one Go binary. `apps.json` is the registry;
 the build tooling, the architecture tests and the Go embed tests are all driven by it.
 
-| App | Binary | Embed package | Dist directory | API role | URL prefixes it may call (under `/1.0`) |
+| App | Binary | Embed package | Dist directory | API role | URL prefixes it may call (under `/api/v1`) |
 |---|---|---|---|---|---|
 | `host` | `jailopsd` | `internal/webui` | `internal/webui/dist` | host (also hub) | jails, projects, storage, trust, sessions, profiles, updates, images, networks, firewall, backup-targets, backup-policies, backups, restores, remotes, operations, events, audit, users, certificates, resources, plus the shared set |
 | `backup` | `jailops-backupd` | `internal/backupui` | `internal/backupui/dist` | backup | repo, hosts, enrolment, snapshots, retention, gc, verify, quarantine, maintenance, deletions, operations, events, audit, plus the shared set |
 
-The shared set (`shared/src/api/core.ts`) is the server info at `/1.0`, `auth`, `doctor` and `tokens`.
+The shared set (`shared/src/api/core.ts`) is the server info at `/api/v1`, `auth`, `doctor` and `tokens`.
 The host console shows only the host side of backup (targets, policies, snapshots, last runs, restore);
 the backup console has no jail, image, network or firewall code.
 
@@ -34,7 +34,7 @@ web/scripts/        app.mjs (build, dev, typecheck, e2e) and new-app.mjs
 |---|---|
 | `npm ci` | install all workspaces |
 | `npm run build -- --app host` / `npm run build:all` | build into the app's registered dist directory |
-| `npm run dev -- --app backup` | dev server on the app's port; `/1.0` is proxied to the env var named in the registry (`JAILOPS_API`, `JAILOPS_BACKUP_API`) |
+| `npm run dev -- --app backup` | dev server on the app's port; `/api/v1` is proxied to the env var named in the registry (`JAILOPS_API`, `JAILOPS_BACKUP_API`) |
 | `npm run typecheck` | vue-tsc for every app (shared is compiled with each) |
 | `npm test` / `npm run test:all` | vitest for every app, shared and the architecture tests |
 | `npm run e2e -- --app host` / `npm run e2e:all` | Playwright in demo mode against the built app (build first) |

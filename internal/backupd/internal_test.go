@@ -35,7 +35,7 @@ func TestAdminSocketRefusesOtherUsers(t *testing.T) {
 		{"root", &auth.Cred{UID: 0, GID: 0}, 200},
 	} {
 		called = false
-		req := httptest.NewRequest("POST", "/1.0/repo/admin/gc", nil)
+		req := httptest.NewRequest("POST", "/api/v1/repo/admin/gc", nil)
 		if c.cred != nil {
 			req = req.WithContext(context.WithValue(req.Context(), credKey{}, *c.cred))
 		}

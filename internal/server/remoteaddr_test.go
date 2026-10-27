@@ -24,7 +24,7 @@ func TestRemoteAddrSeparatesLocalUsers(t *testing.T) {
 		{"tcp peer v6", "[2001:db8::7]:51234", nil, "2001:db8::7"},
 	}
 	for _, c := range cases {
-		r := httptest.NewRequest("GET", "/1.0", nil)
+		r := httptest.NewRequest("GET", "/api/v1", nil)
 		r.RemoteAddr = c.addr
 		if c.cred != nil {
 			r = r.WithContext(WithPeerCred(r.Context(), *c.cred))

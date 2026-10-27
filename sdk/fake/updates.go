@@ -179,9 +179,9 @@ func (s *Server) applyTo(j *api.Jail, req api.UpdateApplyRequest) []api.UpdateRe
 		s.updHistory[s.updKey(j)] = append(s.updHistory[s.updKey(j)], r)
 		recs = append(recs, r)
 		if r.Result == api.UpdateOK {
-			s.emitIn(j.Metadata.Project, "update.applied", "/1.0/jails/"+j.Metadata.Name+"/updates")
+			s.emitIn(j.Metadata.Project, "update.applied", "/api/v1/jails/"+j.Metadata.Name+"/updates")
 		} else {
-			s.emitIn(j.Metadata.Project, "update.failed", "/1.0/jails/"+j.Metadata.Name+"/updates")
+			s.emitIn(j.Metadata.Project, "update.failed", "/api/v1/jails/"+j.Metadata.Name+"/updates")
 		}
 	}
 	both := !req.Packages && !req.OS
@@ -256,7 +256,7 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 			return reply{err: api.Errorf(api.CodeAlreadyExists, "jail %q was provisioned at %s", name, j.Status.ProvisionedAt.Format(time.RFC3339)).
 				WithHint("changing the declaration does nothing until you ask: provision --again")}
 		}
-		op := s.startOp(rc.project, "jails.provision", "Provision jail "+name, map[string][]string{"jails": {"/1.0/jails/" + name}}, func() (any, *api.Error) {
+		op := s.startOp(rc.project, "jails.provision", "Provision jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			j := s.jails.items[jk]
 			if j == nil {
 				return nil, notFound("jail", name)
@@ -282,7 +282,7 @@ func (s *Server) handleProvision(w http.ResponseWriter, r *http.Request) {
 				steps = append(steps, "run "+strings.Join(c, " "))
 			}
 			j.Status.ProvisionedAt = s.now()
-			s.emitIn(rc.project, "jail-provisioned", "/1.0/jails/"+name)
+			s.emitIn(rc.project, "jail-provisioned", "/api/v1/jails/"+name)
 			return api.ProvisionResult{Jail: name, ProvisionedAt: j.Status.ProvisionedAt, Steps: steps}, nil
 		})
 		return reply{op: &op}

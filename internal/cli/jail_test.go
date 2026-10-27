@@ -185,7 +185,7 @@ func TestJailRollbackConfirmation(t *testing.T) {
 		t.Fatalf("typed: %d %v %s", code, rolled(), out)
 	}
 	var rb api.JailRollback
-	if err := json.Unmarshal(h.lastBody("POST", "/1.0/jails/web/rollback"), &rb); err != nil {
+	if err := json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/rollback"), &rb); err != nil {
 		t.Fatal(err)
 	}
 	if rb.Scope != api.RollbackData || rb.Snapshot != "newer" || !rb.ConfirmDataLoss {
@@ -220,7 +220,7 @@ func TestJailUpgrade(t *testing.T) {
 		t.Fatalf("dry-run upgraded the jail: %+v", j.Status)
 	}
 	var up api.JailUpgrade
-	_ = json.Unmarshal(h.lastBody("POST", "/1.0/jails/web/upgrade"), &up)
+	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/upgrade"), &up)
 	if !up.DryRun || len(h.mutations()) != before+1 {
 		t.Fatalf("dry-run request: %+v %v", up, h.mutations())
 	}

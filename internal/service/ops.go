@@ -42,7 +42,7 @@ type OpSpec struct {
 	// Project is the project the operation works in; empty for host-level
 	// operations (networks, images, storage), which only global identities see.
 	Project string
-	// Resources lists the affected objects by kind, e.g. {"jails": {"/1.0/jails/web"}}.
+	// Resources lists the affected objects by kind, e.g. {"jails": {"/api/v1/jails/web"}}.
 	Resources map[string][]string
 	// Locks are taken all at once at submit time; busy resources fail the
 	// submit with api.CodeBusy.

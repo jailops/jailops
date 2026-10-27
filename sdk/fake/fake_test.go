@@ -36,32 +36,32 @@ func TestWireContract(t *testing.T) {
 	s := fake.New()
 	defer s.Close()
 	webProject(s)
-	if w, env := do(t, s, "GET", "/1.0/firewall/address-sets", "", nil); w.Code != 400 || env.Error.Code != api.CodeInvalid || !strings.Contains(env.Error.Message, "a project is required") {
+	if w, env := do(t, s, "GET", "/api/v1/firewall/address-sets", "", nil); w.Code != 400 || env.Error.Code != api.CodeInvalid || !strings.Contains(env.Error.Message, "a project is required") {
 		t.Fatalf("no project: %d %s", w.Code, w.Body)
 	}
-	w, env := do(t, s, "POST", "/1.0/firewall/address-sets?project=web", `{"metadata":{"name":"office"},"spec":{"addresses":["10.0.0.0/8"]}}`, nil)
+	w, env := do(t, s, "POST", "/api/v1/firewall/address-sets?project=web", `{"metadata":{"name":"office"},"spec":{"addresses":["10.0.0.0/8"]}}`, nil)
 	if w.Code != 201 || env.Type != api.ResponseSync {
 		t.Fatalf("create: %d %s", w.Code, w.Body)
 	}
-	w, _ = do(t, s, "GET", "/1.0/firewall/address-sets/office?project=web", "", nil)
+	w, _ = do(t, s, "GET", "/api/v1/firewall/address-sets/office?project=web", "", nil)
 	if w.Header().Get("ETag") != `"1"` {
 		t.Fatalf("etag %q", w.Header().Get("ETag"))
 	}
 	body := `{"metadata":{"name":"office"},"spec":{"addresses":["10.1.0.0/16"]}}`
-	w, env = do(t, s, "PUT", "/1.0/firewall/address-sets/office?project=web", body, map[string]string{"If-Match": `"7"`})
+	w, env = do(t, s, "PUT", "/api/v1/firewall/address-sets/office?project=web", body, map[string]string{"If-Match": `"7"`})
 	if w.Code != 412 || env.Type != api.ResponseError || env.Error.Code != api.CodeConflict {
 		t.Fatalf("stale put: %d %s", w.Code, w.Body)
 	}
-	w, _ = do(t, s, "PUT", "/1.0/firewall/address-sets/office?project=web", body, map[string]string{"If-Match": `"1"`})
+	w, _ = do(t, s, "PUT", "/api/v1/firewall/address-sets/office?project=web", body, map[string]string{"If-Match": `"1"`})
 	if w.Code != 200 || w.Header().Get("ETag") != `"2"` {
 		t.Fatalf("put: %d %s", w.Code, w.Body)
 	}
 	// An identical PUT changes nothing and keeps the generation.
-	w, _ = do(t, s, "PUT", "/1.0/firewall/address-sets/office?project=web", body, nil)
+	w, _ = do(t, s, "PUT", "/api/v1/firewall/address-sets/office?project=web", body, nil)
 	if w.Header().Get("ETag") != `"2"` {
 		t.Fatalf("no-op put bumped the generation: %s", w.Header().Get("ETag"))
 	}
-	w, env = do(t, s, "GET", "/1.0/nothing", "", nil)
+	w, env = do(t, s, "GET", "/api/v1/nothing", "", nil)
 	if w.Code != 404 || env.Error.Code != api.CodeNotFound {
 		t.Fatal(w.Body)
 	}
@@ -72,8 +72,8 @@ func TestAsyncEnvelope(t *testing.T) {
 	defer s.Close()
 	webProject(s)
 	s.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "img"}})
-	w, env := do(t, s, "POST", "/1.0/jails?project=web", `{"metadata":{"name":"web"},"spec":{"image":"img","storage":"default","network":[{"network":"lan"}]}}`, nil)
-	if w.Code != 202 || env.Type != api.ResponseAsync || !strings.HasPrefix(env.Operation, "/1.0/operations/") ||
+	w, env := do(t, s, "POST", "/api/v1/jails?project=web", `{"metadata":{"name":"web"},"spec":{"image":"img","storage":"default","network":[{"network":"lan"}]}}`, nil)
+	if w.Code != 202 || env.Type != api.ResponseAsync || !strings.HasPrefix(env.Operation, "/api/v1/operations/") ||
 		w.Header().Get("Location") != env.Operation {
 		t.Fatalf("%d %s", w.Code, w.Body)
 	}

@@ -1,6 +1,6 @@
 // Package api defines the wire types of the JailOps management API.
 //
-// These types are the single source of truth for the REST API (/1.0), the
+// These types are the single source of truth for the REST API (/api/v1), the
 // declarative YAML used by jailops-sync, the JSON written to the state
 // dataset, and the Go SDK. The package depends on the standard library only.
 //
@@ -12,7 +12,7 @@ package api
 
 import "time"
 
-// Version is the API version served under /1.0.
+// Version is the API version served under /api/v1.
 const Version = "1.0"
 
 // APIVersion is the apiVersion string used in declarative documents.

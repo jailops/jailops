@@ -159,7 +159,7 @@ stops when its rule goes.
   jail stops; the stale-route collection also removes the entries of jails that no longer exist), so it never asks the
   jail where it is. Nobody needs an answer from a jail, so **every neighbour advertisement from a jail is blocked**
   (its solicitations for the gateway, and DAD, still work), and a redirect from the host is not passed to it. Verified
-  with forged packets: in proxy mode on darius and in routed mode on jailbe, unicast and multicast advertisements
+  with forged packets: in proxy mode on the amd64 host and in routed mode on the arm64 host, unicast and multicast advertisements
   for another jail's address or for the gateway, sent to the host, to `ff02::1` and to the other jail, were all dropped by
   pf, and neither the host's entries nor the other jail's entry for the gateway changed; host to jail, jail to jail
   (ping and tcp, through the host), jail to internet and internet to jail kept working, in proxy mode also across 20
@@ -169,7 +169,7 @@ stops when its rule goes.
   interface is `staticarp` (the host never ARPs for an address that has no entry), every jail port is a private bridge
   member and the bridge has a static forwarding entry for the jail's MAC address on its port. pf `ether` rules did not
   work on this path (a rule on the jail's port had no effect), so this is the design, not a filter on ARP.
-  Verified on darius with forged frames written from inside the jail: an ARP reply to another jail claiming the gateway,
+  Verified on the amd64 host with forged frames written from inside the jail: an ARP reply to another jail claiming the gateway,
   a broadcast request claiming another jail's address, and a reply to the host claiming another jail's address all
   left the jail's port and changed nothing (the other jail's cache and the host's entry were as before);
   a jail that set another jail's MAC address on its interface took none of its traffic; an extra IPv4 address was reached

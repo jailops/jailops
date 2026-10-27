@@ -4,7 +4,7 @@ import type { Operation, Error as ApiErrorBody, Event as ApiEvent } from './type
 export * from './types.gen'
 export type { Operation, ApiEvent, ApiErrorBody }
 
-/** A web-session login (POST /1.0/auth/login). The backup node ignores totp. */
+/** A web-session login (POST /api/v1/auth/login). The backup node ignores totp. */
 export interface LoginRequest {
   username: string
   password: string

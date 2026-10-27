@@ -82,7 +82,14 @@ func newBackend(t *testing.T, kind backendKind, clock *nodetest.Clock) (datastor
 	return b, srv
 }
 
+// startRig starts a node with the management API and the console on (they share the host listener).
 func startRig(t *testing.T, kind backendKind, tune func(*node.Config)) *rig {
+	t.Helper()
+	return startRigWeb(t, kind, true, tune)
+}
+
+// startRigWeb starts a node with the management API and the console switched on or off.
+func startRigWeb(t *testing.T, kind backendKind, web bool, tune func(*node.Config)) *rig {
 	t.Helper()
 	ctx := context.Background()
 	r := &rig{t: t, Clock: nodetest.NewClock(), Fix: nodetest.NewFixture(t, 99)}
@@ -108,9 +115,9 @@ admin_socket: %s
 tls: {cert_file: %s, key_file: %s}
 database: {dsn: "postgres://unused"}
 datastore: {kind: directory, directory: %s}
-web: {enabled: true, listen: 127.0.0.1:0}
+web: {enabled: %t}
 grace: 12h
-`, filepath.Join(dir, "s"), filepath.Join(dir, "c.crt"), filepath.Join(dir, "c.key"), dir)
+`, filepath.Join(dir, "s"), filepath.Join(dir, "c.crt"), filepath.Join(dir, "c.key"), dir, web)
 	cfg, err := backupd.ParseConfig([]byte(yaml))
 	if err != nil {
 		t.Fatal(err)

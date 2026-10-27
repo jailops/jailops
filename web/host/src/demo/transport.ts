@@ -79,7 +79,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       startedAt: Date.now(), duration: duration / speed, onDone: apply, metadataFinal: metadata,
     }
     db.ops.unshift(op)
-    return { status: 202, envelope: { type: 'async', status: 'Operation created', status_code: 100, operation: `/1.0/operations/${op.id}`, metadata: view(op) } }
+    return { status: 202, envelope: { type: 'async', status: 'Operation created', status_code: 100, operation: `/api/v1/operations/${op.id}`, metadata: view(op) } }
   }
   function view(o: DemoOp): Operation {
     if (!o.done && o.status !== 'cancelled') {
@@ -161,7 +161,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (seg[2] === 'generations' && m === 'POST') {
           const img = db.images.find((i) => i.metadata.name === seg[1])
           if (!img) return fail(404, { code: 'not_found', message: `Image ${seg[1]} not found` })
-          return startOp(`Build ${seg[1]}#g${(img.status.generations?.length ?? 0) + 1}`, { images: [`/1.0/images/${seg[1]}`] }, 4000, () => {
+          return startOp(`Build ${seg[1]}#g${(img.status.generations?.length ?? 0) + 1}`, { images: [`/api/v1/images/${seg[1]}`] }, 4000, () => {
             const n = Math.max(...(img.status.generations ?? []).map((g) => g.number)) + 1
             img.status.generations!.push({ number: n, name: `${seg[1]}#g${n}`, parent: n - 1, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: 222, created_at: new Date().toISOString(), refs: [] })
           })
@@ -229,7 +229,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (db.tokens.some((t) => t.metadata.name === body.metadata?.name)) return fail(409, { code: 'already_exists', message: `Token ${body.metadata.name} already exists` })
           const t: Token = { metadata: { ...body.metadata, scope: 'fleet', created_at: new Date().toISOString() }, spec: body.spec }
           db.tokens.push(t)
-          emit('token-created', `/1.0/tokens/${t.metadata.name}`)
+          emit('token-created', `/api/v1/tokens/${t.metadata.name}`)
           return ok({ ...t, secret: 'jot_' + Array.from({ length: 40 }, () => 'abcdefghijklmnopqrstuvwxyz0123456789'[Math.floor(Math.random() * 36)]).join('') })
         }
         if (m === 'DELETE') {
@@ -272,13 +272,13 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       if (db.jails.some((x) => x.metadata.name === name && inProject(x))) return fail(409, { code: 'already_exists', message: `Jail ${name} already exists.` })
       const project = url.searchParams.get('project') ?? ''
       const jail: Jail = { metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), ...(project ? { project } : {}) }, spec: body.spec, status: { power: 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] } }
-      return startOp(`Create jail ${name}`, { jails: [`/1.0/jails/${name}`] }, 800, () => { db.jails.push(jail) }, undefined, false)
+      return startOp(`Create jail ${name}`, { jails: [`/api/v1/jails/${name}`] }, 800, () => { db.jails.push(jail) }, undefined, false)
     }
     if (seg.length === 1) return ok(db.jails.filter(inProject))
     const j = jailOr404(seg[1])
     if (!j || !inProject(j)) return fail(404, { code: 'not_found', message: `Jail ${seg[1]} not found` })
     const name = j.metadata.name
-    const src = `/1.0/jails/${name}`
+    const src = `/api/v1/jails/${name}`
     if (seg.length === 2 && url.searchParams.get('expanded') === 'true') {
       const profs = [...db.profiles.project, ...db.profiles.host].filter((p) => (j.spec.profiles ?? []).includes(p.metadata.name))
       let merged = JSON.parse(JSON.stringify(j.spec)) as Jail['spec']
@@ -378,10 +378,10 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         for (const a of r.from ?? []) if (a.startsWith('@') && !db.sets.some((s) => s.metadata.name === a.slice(1))) return fail(400, { code: 'invalid', message: `rules[${i}]: unknown address set ${a}`, hint: 'Create the address set first.', detail: { [`rules[${i}].from`]: `unknown address set ${a}` } })
       }
     }
-    return startOp(`Save ${seg[2]}`, { firewall: [`/1.0/firewall/${seg[1]}/${seg[2]}`] }, 700, () => {
+    return startOp(`Save ${seg[2]}`, { firewall: [`/api/v1/firewall/${seg[1]}/${seg[2]}`] }, 700, () => {
       item.spec = (body as FirewallPolicy).spec as never
       item.metadata.generation = (item.metadata.generation ?? 0) + 1
-      emit('firewall-updated', `/1.0/firewall/${seg[1]}/${seg[2]}`)
+      emit('firewall-updated', `/api/v1/firewall/${seg[1]}/${seg[2]}`)
     }, undefined, false)
   }
 
@@ -390,7 +390,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       const pol = db.bpol.find((p) => p.metadata.name === body.policy)
       if (!pol) return fail(404, { code: 'not_found', message: `Backup policy ${body.policy} not found` })
       const run = { id: 'run-' + ++seq, kind: 'backup', policy: pol.metadata.name, jail: 'web', started: new Date().toISOString(), finished: new Date().toISOString(), ok: true }
-      return startOp(`Run policy ${pol.metadata.name}`, {}, 2000, () => emit('backup-run', '/1.0/backups/run'), [run], true)
+      return startOp(`Run policy ${pol.metadata.name}`, {}, 2000, () => emit('backup-run', '/api/v1/backups/run'), [run], true)
     }
     if (seg.length === 1) return ok(db.backups)
     const b = db.backups.find((x) => x.metadata.name === seg[1])
@@ -422,8 +422,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const report: RestorePreflight = { ok: !missing.length && !errors.length, missing, changes, errors }
     if (body.dry_run) return ok(report)
     if (!report.ok) return fail(409, { code: 'invalid', message: 'The restore preflight failed.', hint: 'Run the preflight and fix what it lists.' })
-    return startOp(`Restore ${target}`, { jails: [`/1.0/jails/${target}`] }, 4000, () => {
-      emit('jail-restored', `/1.0/jails/${target}`)
+    return startOp(`Restore ${target}`, { jails: [`/api/v1/jails/${target}`] }, 4000, () => {
+      emit('jail-restored', `/api/v1/jails/${target}`)
     })
   }
 
@@ -452,7 +452,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           created.spec = spec
           created.status = { jails: 0, cpu: 0, memory_used: 0, disk_used: 0, addresses: 0 }
           db.projects.push(created)
-          emit('project-created', `/1.0/projects/${body.metadata.name}`)
+          emit('project-created', `/api/v1/projects/${body.metadata.name}`)
           return startOp(`Create project ${body.metadata.name}`, { projects: [] }, 500, () => undefined, undefined, false)
         }
         const p = db.projects.find((x) => x.metadata.name === name)
@@ -534,7 +534,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           const recs: import('@jailops/shared/api/types').UpdateRecord[] = targets.filter((u) => u.available).map((u) => ({ id: 'u' + ++seq, jail: u.jail, project, kind: u.os ? 'os' : 'packages', result: 'ok', started: new Date().toISOString(), finished: new Date().toISOString(), snapshot: 'pre-update-' + Date.now().toString(36), packages: u.packages }))
           return startOp(`Update ${names.join(', ')}`, {}, 2500, () => {
             for (const r of recs) { (db.history[r.jail] ??= []).unshift(r); const u = db.updates.find((x) => x.jail === r.jail)!; u.available = false; u.packages = undefined; u.os = undefined }
-            emit('update-applied', '/1.0/updates')
+            emit('update-applied', '/api/v1/updates')
           }, recs)
         }
         return undefined
@@ -550,7 +550,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       case 'jails': {
         const j = db.jails.find((x) => x.metadata.name === name && (x.metadata.project ?? '') === project)
         if (!j || !seg[2]) return undefined
-        const src = `/1.0/jails/${name}`
+        const src = `/api/v1/jails/${name}`
         if (seg[2] === 'updates' && m === 'GET') return ok(db.history[name] ?? [])
         if (seg[2] === 'provision' && m === 'POST') {
           if (j.status.provisioned_at && !body.again) return fail(409, { code: 'already_exists', message: 'Provisioning has run before.', hint: 'Use again to run it again.' })

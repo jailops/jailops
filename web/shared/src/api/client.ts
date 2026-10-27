@@ -2,7 +2,7 @@
 // demo mode swaps the transport and the rest of the UI cannot tell the difference.
 import type { MutationResult, Operation, ApiEvent, ApiErrorBody } from './types'
 
-const BASE = '/1.0'
+const BASE = '/api/v1'
 
 /** An API failure: the server's api.Error plus the HTTP status. */
 export class ApiError extends Error {
@@ -51,7 +51,7 @@ export interface StreamHandlers {
   onRetry?(ms: number): void
 }
 
-/** What a transport must do. HttpTransport talks to /1.0; the demo transport is in-process. */
+/** What a transport must do. HttpTransport talks to /api/v1; the demo transport is in-process. */
 export interface Transport {
   request(req: RawRequest): Promise<RawResponse>
   stream(path: string, handlers: StreamHandlers): EventStream

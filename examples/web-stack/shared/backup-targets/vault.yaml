@@ -6,5 +6,5 @@ spec:
   # A backup node (jailops-backupd). It stores encrypted chunks and holds no key: a stolen node leaks sizes and
   # timestamps, never data. The fingerprint pins the node's certificate (printed by `jailops-backupd init`).
   kind: node
-  address: https://vault.example.org:8444
+  address: https://vault.example.org:39111
   fingerprint: ffeeddccbbaa99887766554433221100ffeeddccbbaa99887766554433221100

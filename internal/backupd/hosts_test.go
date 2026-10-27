@@ -1,7 +1,6 @@
 package backupd_test
 
 import (
-	"crypto/tls"
 	"net"
 	"testing"
 	"time"
@@ -13,34 +12,25 @@ import (
 )
 
 func TestHostAuthentication(t *testing.T) {
-	r := startRig(t, memKind, nil)
+	r := startRigWeb(t, memKind, false, nil) // console off: the host API is the same
 	h := r.enroll("h")
 	g := r.Fix.Group("h", "j")
 	if _, err := h.C.Info(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// a certificate nobody enrolled is refused in the handshake
+	// a certificate nobody enrolled is no host: the host API refuses it
 	stranger, _, _, _ := auth.GenerateCertificate(auth.CertOptions{CommonName: "stranger"})
 	if _, err := r.clientFor(stranger).Info(ctx); err == nil {
 		t.Fatal("an unenrolled certificate was accepted")
 	}
-	// no certificate at all
-	conn, err := tls.Dial("tcp", r.Srv.HostAddr(), &tls.Config{InsecureSkipVerify: true, MinVersion: tls.VersionTLS13})
-	if err == nil {
-		// TLS 1.3: the handshake completes on the client side before the server verifies; the first read fails
-		conn.SetDeadline(time.Now().Add(2 * time.Second))
-		_, werr := conn.Write([]byte("GET /1.0/repo HTTP/1.1\r\nHost: x\r\n\r\n"))
-		buf := make([]byte, 10)
-		_, rerr := conn.Read(buf)
-		conn.Close()
-		if werr == nil && rerr == nil {
-			t.Fatal("a client without a certificate was served")
-		}
+	// no certificate at all: the handshake completes (a browser has none), the host API refuses the request
+	if code, body := status(t, r.plainClient(), "GET", "https://"+r.Srv.HostAddr()+"/api/v1/repo", ""); code != 401 {
+		t.Fatalf("a client without a certificate on the host API: %d %s", code, body)
 	}
 	// plain HTTP on the TLS port gets nothing
 	if c, err := net.Dial("tcp", r.Srv.HostAddr()); err == nil {
 		c.SetDeadline(time.Now().Add(time.Second))
-		_, _ = c.Write([]byte("GET /1.0/repo HTTP/1.1\r\nHost: x\r\n\r\n"))
+		_, _ = c.Write([]byte("GET /api/v1/repo HTTP/1.1\r\nHost: x\r\n\r\n"))
 		buf := make([]byte, 20)
 		n, _ := c.Read(buf)
 		c.Close()

@@ -435,9 +435,9 @@ func (a *app) hostCmd() *cobra.Command {
 		`On a hub, a host is a daemon the hub manages over mTLS. Once added, address it
 with the global --host flag on any command. (The 'remote' commands, in contrast,
 configure where this client connects.)`,
-		"jailops host list\njailops host add host-b --address https://10.0.0.2:8443 --fingerprint ab12...\njailops --host host-b jail list", "hosts")
+		"jailops host list\njailops host add host-b --address https://10.0.0.2:39110 --fingerprint ab12...\njailops --host host-b jail list", "hosts")
 	crudCommands(a, hc, d, "Add a host to the hub. The fingerprint pins the host's certificate.",
-		"jailops host create host-b --address https://10.0.0.2:8443 --fingerprint ab12...",
+		"jailops host create host-b --address https://10.0.0.2:39110 --fingerprint ab12...",
 		func(cmd *cobra.Command) func(string) (api.Remote, error) {
 			var addr, fp, uuid string
 			cmd.Flags().StringVar(&addr, "address", "", "https://host:port of the host (required without -f)")

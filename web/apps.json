@@ -1,5 +1,5 @@
 {
-  "$comment": "The registry of web consoles. Tooling (build, test, e2e, dev, new-app), the boundary tests and the Go embed tests are driven by this file only. Prefixes are the first path segment after /1.0 that the app's API module may call.",
+  "$comment": "The registry of web consoles. Tooling (build, test, e2e, dev, new-app), the boundary tests and the Go embed tests are driven by this file only. Prefixes are the first path segment after /api/v1 that the app's API module may call.",
   "apps": {
     "host": {
       "title": "JailOps host console",

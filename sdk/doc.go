@@ -15,14 +15,14 @@
 //
 // The full contract is in PROTOCOL.md next to this file. In short:
 //
-//   - Base path /1.0. Every reply is an api.Response envelope of type sync,
+//   - Base path /api/v1. Every reply is an api.Response envelope of type sync,
 //     async (HTTP 202, operation URL, the operation in metadata) or error.
 //   - Lists return metadata as a JSON array of full objects; filters are
-//     ?label=k=v (repeatable). Items live at /1.0/<resource>/<name>. GET
+//     ?label=k=v (repeatable). Items live at /api/v1/<resource>/<name>. GET
 //     returns an ETag (the quoted generation); PUT replaces and takes
 //     If-Match; PATCH applies a JSON merge patch.
 //   - Hub forwarding uses the query parameter ?host=<uuid-or-name> on any
-//     path, including /1.0/events.
+//     path, including /api/v1/events.
 //   - Authentication is "Authorization: Bearer <token>", mTLS, or the unix
 //     socket's file permissions.
 //

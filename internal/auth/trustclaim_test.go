@@ -89,7 +89,7 @@ func TestNewTrustTokenValidation(t *testing.T) {
 
 func claimFor(now time.Time) RequestorClaim {
 	return RequestorClaim{Version: 1, Name: "ann", Kind: "user", Role: api.PermOperator, Projects: []string{"web"},
-		IssuedAt: now.Unix(), Expires: now.Add(30 * time.Second).Unix(), Audience: "host-1", Method: "GET", Path: "/1.0/jails"}
+		IssuedAt: now.Unix(), Expires: now.Add(30 * time.Second).Unix(), Audience: "host-1", Method: "GET", Path: "/api/v1/jails"}
 }
 
 func TestRequestorClaim(t *testing.T) {
@@ -100,7 +100,7 @@ func TestRequestorClaim(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := RequestorExpect{Audience: "host-1", Method: "GET", Path: "/1.0/jails", Now: now.Add(10 * time.Second)}
+	want := RequestorExpect{Audience: "host-1", Method: "GET", Path: "/api/v1/jails", Now: now.Add(10 * time.Second)}
 	c, err := VerifyRequestor(hubLeaf, hdr, want)
 	if err != nil || c.Name != "ann" || c.Projects[0] != "web" {
 		t.Fatalf("%v %+v", err, c)
@@ -112,11 +112,11 @@ func TestRequestorClaim(t *testing.T) {
 		leaf bool
 	}{
 		{"wrong key", hdr, want, false},
-		{"expired", hdr, RequestorExpect{Audience: "host-1", Method: "GET", Path: "/1.0/jails", Now: now.Add(31 * time.Second)}, true},
-		{"replay long after", hdr, RequestorExpect{Audience: "host-1", Method: "GET", Path: "/1.0/jails", Now: now.Add(time.Hour)}, true},
-		{"wrong audience", hdr, RequestorExpect{Audience: "host-2", Method: "GET", Path: "/1.0/jails", Now: now}, true},
-		{"wrong method", hdr, RequestorExpect{Audience: "host-1", Method: "DELETE", Path: "/1.0/jails", Now: now}, true},
-		{"wrong path", hdr, RequestorExpect{Audience: "host-1", Method: "GET", Path: "/1.0/users", Now: now}, true},
+		{"expired", hdr, RequestorExpect{Audience: "host-1", Method: "GET", Path: "/api/v1/jails", Now: now.Add(31 * time.Second)}, true},
+		{"replay long after", hdr, RequestorExpect{Audience: "host-1", Method: "GET", Path: "/api/v1/jails", Now: now.Add(time.Hour)}, true},
+		{"wrong audience", hdr, RequestorExpect{Audience: "host-2", Method: "GET", Path: "/api/v1/jails", Now: now}, true},
+		{"wrong method", hdr, RequestorExpect{Audience: "host-1", Method: "DELETE", Path: "/api/v1/jails", Now: now}, true},
+		{"wrong path", hdr, RequestorExpect{Audience: "host-1", Method: "GET", Path: "/api/v1/users", Now: now}, true},
 		{"garbage", "abc", want, true},
 		{"empty", "", want, true},
 		{"bad sig encoding", strings.Split(hdr, ".")[0] + ".!!", want, true},
@@ -132,7 +132,7 @@ func TestRequestorClaim(t *testing.T) {
 	}
 	// Future-dated claim.
 	fut, _ := SignRequestor(hub, claimFor(now.Add(time.Minute)))
-	if _, err := VerifyRequestor(hubLeaf, fut, RequestorExpect{Audience: "host-1", Method: "GET", Path: "/1.0/jails", Now: now}); err == nil {
+	if _, err := VerifyRequestor(hubLeaf, fut, RequestorExpect{Audience: "host-1", Method: "GET", Path: "/api/v1/jails", Now: now}); err == nil {
 		t.Error("future-dated claim accepted")
 	}
 	// Too long a lifetime.

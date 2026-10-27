@@ -56,6 +56,9 @@ func TestEmbeddedIndexIsOwnApp(t *testing.T) {
 	reg := registry(t)
 	w := get(t, Handler(), "GET", "/")
 	if w.Code == 404 { // not built: nothing embedded, nothing to confuse
+		if os.Getenv("JAILOPS_REQUIRE_CONSOLE") != "" { // CI: the consoles are always built before the Go jobs
+			t.Fatal("the console is not embedded (JAILOPS_REQUIRE_CONSOLE is set)")
+		}
 		return
 	}
 	body := w.Body.String()

@@ -58,6 +58,7 @@ step "binaries"
 bin=${JAILOPS_BIN_DIR:-}
 if [ -z "$bin" ]; then
 	command -v go >/dev/null || fail "go is needed to build (or set JAILOPS_BIN_DIR)"
+	[ -s internal/webui/dist/index.html ] && [ -s internal/backupui/dist/index.html ] || fail "the web consoles are not built (just web-all): the binaries would have none embedded"
 	bin=$work/bin; mkdir -p "$bin"
 	CGO_ENABLED=0 go build -trimpath -ldflags="-s -w -X main.version=$version" -o "$bin/" ./cmd/jailops ./cmd/jailopsd ./cmd/jailops-priv ./cmd/jailops-sync ./cmd/jailops-backupd
 fi
@@ -162,7 +163,7 @@ su -m postgres -c "dropdb --if-exists jopsnode; createdb jopsnode" || fail "crea
 data=/var/db/jailops-backup
 cat > /usr/local/etc/jailops/backupd.yaml <<YAML
 hostname: ci-vault
-listen: "127.0.0.1:8444"
+listen: "127.0.0.1:39111"
 admin_socket: /var/run/jailops-backupd/admin.sock
 tls:
   cert_file: $data/backupd.crt
@@ -196,7 +197,7 @@ cat >> /usr/local/etc/jailops/jailopsd.yaml <<YAML
 backup:
   node:
     name: ci-vault
-    address: 127.0.0.1:8444
+    address: 127.0.0.1:39111
     fingerprint: $nodefp
     cert_file: /var/db/jailops/backup-client.crt
     key_file: /var/db/jailops/backup-client.key
@@ -205,7 +206,7 @@ YAML
 check "restart jailopsd" service jailopsd restart
 n=0; until $J backup key status >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
 expect "key created" 'JOR1-' $J backup key create
-check "target" $J backup target create vault --address https://127.0.0.1:8444 --fingerprint "$nodefp"
+check "target" $J backup target create vault --address https://127.0.0.1:39111 --fingerprint "$nodefp"
 check "policy" $J backup policy create nightly --project demo --schedule "0 3 * * *" --selector backup=yes --target vault --keep-last 3
 expect "the backup runs" ' ok ' $J backup run --project demo nightly
 id=$($J backup list --project demo -o name | head -1)

@@ -330,7 +330,7 @@ func TestSessionAndCSRF(t *testing.T) {
 
 func TestCheckOrigin(t *testing.T) {
 	mk := func(method, host string, hdr map[string]string) *http.Request {
-		r := httptest.NewRequest(method, "https://"+host+"/1.0/jails", nil)
+		r := httptest.NewRequest(method, "https://"+host+"/api/v1/jails", nil)
 		for k, v := range hdr {
 			r.Header.Set(k, v)
 		}

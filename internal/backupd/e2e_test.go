@@ -209,7 +209,7 @@ func endToEnd(t *testing.T, kind backendKind) {
 
 	// admin: status, verify, GC
 	var st node.RepositoryStatus
-	if err := r.admin().Call(ctx, "GET", "/1.0/repo/admin/status", nil, &st); err != nil {
+	if err := r.admin().Call(ctx, "GET", "/api/v1/repo/admin/status", nil, &st); err != nil {
 		t.Fatal(err)
 	}
 	if st.Snapshots != 3 || st.Groups != 2 || st.Mode != "online" || st.Backend != string(kind) && !(kind == s3Kind && st.Backend == "s3") && !(kind == dirKind && st.Backend == "directory") {
@@ -249,7 +249,7 @@ func endToEnd(t *testing.T, kind backendKind) {
 func adminJob[T any](t *testing.T, r *rig, path string, body any) *T {
 	t.Helper()
 	var j ctl.Job
-	if err := r.admin().Call(ctx, "POST", "/1.0/repo/admin"+path+"?wait=1", body, &j); err != nil {
+	if err := r.admin().Call(ctx, "POST", "/api/v1/repo/admin"+path+"?wait=1", body, &j); err != nil {
 		t.Fatalf("%s: %v", path, err)
 	}
 	if j.State != ctl.JobSucceeded {
@@ -277,7 +277,7 @@ func TestHostileHostOverTheNetwork(t *testing.T) {
 	}
 
 	// the host listener speaks HTTP/2
-	if resp, err := r.httpFor(evil.Cert).Get("https://" + r.Srv.HostAddr() + "/1.0/repo"); err != nil || resp.ProtoMajor != 2 {
+	if resp, err := r.httpFor(evil.Cert).Get("https://" + r.Srv.HostAddr() + "/api/v1/repo"); err != nil || resp.ProtoMajor != 2 {
 		t.Fatalf("protocol: %v %v", resp, err)
 	} else {
 		resp.Body.Close()
@@ -289,7 +289,7 @@ func TestHostileHostOverTheNetwork(t *testing.T) {
 	}
 	other := f.NewChunk(t)
 	hc := r.httpFor(evil.Cert)
-	req, _ := http.NewRequest("PUT", "https://"+r.Srv.HostAddr()+"/1.0/repo/sessions/"+s.ID()+"/chunks/"+vict[0].ID.String(), bytes.NewReader(other.Blob))
+	req, _ := http.NewRequest("PUT", "https://"+r.Srv.HostAddr()+"/api/v1/repo/sessions/"+s.ID()+"/chunks/"+vict[0].ID.String(), bytes.NewReader(other.Blob))
 	req.ContentLength = int64(len(other.Blob))
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -312,17 +312,17 @@ func TestHostileHostOverTheNetwork(t *testing.T) {
 
 	// 2. delete: there is no way. Every method/path a host could try is refused.
 	for _, c := range []struct{ method, path string }{
-		{"DELETE", "/1.0/repo/chunks/" + vict[0].ID.String()},
-		{"DELETE", "/1.0/repo/groups/" + gGood + "/snapshots/" + bg.Snapshot},
-		{"POST", "/1.0/repo/admin/gc"},
-		{"POST", "/1.0/repo/admin/retention"},
-		{"PUT", "/1.0/repo/admin/maintenance"},
-		{"DELETE", "/1.0/repo/admin/groups/" + gGood + "/snapshots/" + bg.Snapshot + "/deletion"},
-		{"PUT", "/1.0/repo/chunks/" + vict[0].ID.String()},
-		{"PUT", "/1.0/repo/groups/" + gGood + "/snapshots/" + bg.Snapshot + "/index"},
-		{"GET", "/1.0/repo/admin/status"},
-		{"GET", "/1.0/hosts"},
-		{"GET", "/1.0/users"},
+		{"DELETE", "/api/v1/repo/chunks/" + vict[0].ID.String()},
+		{"DELETE", "/api/v1/repo/groups/" + gGood + "/snapshots/" + bg.Snapshot},
+		{"POST", "/api/v1/repo/admin/gc"},
+		{"POST", "/api/v1/repo/admin/retention"},
+		{"PUT", "/api/v1/repo/admin/maintenance"},
+		{"DELETE", "/api/v1/repo/admin/groups/" + gGood + "/snapshots/" + bg.Snapshot + "/deletion"},
+		{"PUT", "/api/v1/repo/chunks/" + vict[0].ID.String()},
+		{"PUT", "/api/v1/repo/groups/" + gGood + "/snapshots/" + bg.Snapshot + "/index"},
+		{"GET", "/api/v1/repo/admin/status"},
+		{"GET", "/api/v1/hosts"},
+		{"GET", "/api/v1/users"},
 	} {
 		req, _ := http.NewRequest(c.method, "https://"+r.Srv.HostAddr()+c.path, nil)
 		resp, err := hc.Do(req)
@@ -396,23 +396,23 @@ func TestLeaseExpiryOverTheNetwork(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
-	st, body := post("/1.0/repo/sessions", fmt.Sprintf(`{"group":%q,"snapshot":%q}`, g, nodetest.SnapshotID(r.Clock.Now(), 1)))
+	st, body := post("/api/v1/repo/sessions", fmt.Sprintf(`{"group":%q,"snapshot":%q}`, g, nodetest.SnapshotID(r.Clock.Now(), 1)))
 	if st != 201 {
 		t.Fatalf("%d %s", st, body)
 	}
 	sid := body[strings.Index(body, `"id":"`)+6:]
 	sid = sid[:strings.Index(sid, `"`)]
 	time.Sleep(400 * time.Millisecond)
-	st, body = post("/1.0/repo/sessions/"+sid+"/heartbeat", "")
+	st, body = post("/api/v1/repo/sessions/"+sid+"/heartbeat", "")
 	if st != 410 || !strings.Contains(body, "lease_expired") {
 		t.Fatalf("a heartbeat after the lease: %d %s", st, body)
 	}
-	st, body = post("/1.0/repo/sessions/"+sid+"/commit", "{}")
+	st, body = post("/api/v1/repo/sessions/"+sid+"/commit", "{}")
 	if st != 410 {
 		t.Fatalf("a commit after the lease: %d %s", st, body)
 	}
 	// the group is free again
-	if st, body = post("/1.0/repo/sessions", fmt.Sprintf(`{"group":%q,"snapshot":%q}`, g, nodetest.SnapshotID(r.Clock.Now(), 2))); st != 201 {
+	if st, body = post("/api/v1/repo/sessions", fmt.Sprintf(`{"group":%q,"snapshot":%q}`, g, nodetest.SnapshotID(r.Clock.Now(), 2))); st != 201 {
 		t.Fatalf("%d %s", st, body)
 	}
 }

@@ -148,7 +148,7 @@ type RestoreBundle struct {
 	SecretRefs []string `json:"secret_refs,omitempty"`
 }
 
-// RestoreRequest is the body of POST /1.0/restores.
+// RestoreRequest is the body of POST /api/v1/restores.
 type RestoreRequest struct {
 	Backup string `json:"backup"`
 	// Host is the UUID of the host to restore on; empty means this host.
@@ -176,7 +176,7 @@ type RestorePreflight struct {
 	Errors  []string `json:"errors,omitempty"`  // address conflicts, version skew
 }
 
-// BackupKeyStatus is the reply of GET /1.0/backup/key. Status is "none" (no
+// BackupKeyStatus is the reply of GET /api/v1/backup/key. Status is "none" (no
 // key on this host), "present" (a key, not escrowed) or "escrowed".
 type BackupKeyStatus struct {
 	Status string `json:"status"`
@@ -186,16 +186,16 @@ type BackupKeyStatus struct {
 	Path string `json:"path,omitempty"`
 }
 
-// BackupKeyCreate is the body of POST /1.0/backup/key. Recipients are age
+// BackupKeyCreate is the body of POST /api/v1/backup/key. Recipients are age
 // public keys the key is escrowed to; empty uses the daemon's configuration.
 type BackupKeyCreate struct {
 	Recipients []string `json:"recipients,omitempty"`
 }
 
-// BackupKeyCreated is the reply of POST /1.0/backup/key. RecoveryKey is
+// BackupKeyCreated is the reply of POST /api/v1/backup/key. RecoveryKey is
 // shown once: the daemon keeps it nowhere and never logs it, and nothing can
 // show it again. Escrowed is false, with EscrowError set, when the key was
-// created but could not be uploaded; POST /1.0/backup/key/escrow retries.
+// created but could not be uploaded; POST /api/v1/backup/key/escrow retries.
 type BackupKeyCreated struct {
 	Domain      string `json:"domain"`
 	RecoveryKey string `json:"recovery_key"`
@@ -203,18 +203,18 @@ type BackupKeyCreated struct {
 	EscrowError string `json:"escrow_error,omitempty"`
 }
 
-// BackupKeyEscrow is the body of POST /1.0/backup/key/escrow.
+// BackupKeyEscrow is the body of POST /api/v1/backup/key/escrow.
 type BackupKeyEscrow struct {
 	Recipients []string `json:"recipients,omitempty"`
 }
 
-// BackupRunRequest is the body of POST /1.0/backups/run: run a backup policy
+// BackupRunRequest is the body of POST /api/v1/backups/run: run a backup policy
 // now for every jail it selects.
 type BackupRunRequest struct {
 	Policy string `json:"policy"`
 }
 
-// BackupVerifyRequest is the body of POST /1.0/backups/{id}/verify. Depth is
+// BackupVerifyRequest is the body of POST /api/v1/backups/{id}/verify. Depth is
 // "deep" (read and check every chunk), "extract" (restore into a scratch
 // directory) or "full" (restore and start the jail isolated); the default is
 // "deep".

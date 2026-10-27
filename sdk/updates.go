@@ -7,7 +7,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// UpdateClient accesses managed updates (design 8.4): /1.0/updates and the
+// UpdateClient accesses managed updates (design 8.4): /api/v1/updates and the
 // per-jail history. It needs the "updates" extension.
 type UpdateClient struct{ c *Client }
 
@@ -19,7 +19,7 @@ func (u *UpdateClient) List(ctx context.Context) ([]api.UpdateReport, error) {
 	if err := u.c.need("updates"); err != nil {
 		return nil, err
 	}
-	v, _, err := get[[]api.UpdateReport](ctx, u.c, "/1.0/updates", nil)
+	v, _, err := get[[]api.UpdateReport](ctx, u.c, "/api/v1/updates", nil)
 	return v, err
 }
 
@@ -30,7 +30,7 @@ func (u *UpdateClient) Check(ctx context.Context, jails ...string) (*Operation[[
 	if err := u.c.need("updates"); err != nil {
 		return nil, err
 	}
-	op, _, err := sendOp[[]api.UpdateReport](ctx, u.c, request{method: http.MethodPost, path: "/1.0/updates/check",
+	op, _, err := sendOp[[]api.UpdateReport](ctx, u.c, request{method: http.MethodPost, path: "/api/v1/updates/check",
 		body: api.UpdateCheckRequest{Jails: jails, All: len(jails) == 0}}, nil)
 	return op, err
 }
@@ -46,7 +46,7 @@ func (u *UpdateClient) Apply(ctx context.Context, req api.UpdateApplyRequest) (*
 	if len(req.Jails) == 0 {
 		req.All = true
 	}
-	op, _, err := sendOp[[]api.UpdateRecord](ctx, u.c, request{method: http.MethodPost, path: "/1.0/updates/apply", body: req}, nil)
+	op, _, err := sendOp[[]api.UpdateRecord](ctx, u.c, request{method: http.MethodPost, path: "/api/v1/updates/apply", body: req}, nil)
 	return op, err
 }
 

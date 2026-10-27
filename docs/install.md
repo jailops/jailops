@@ -60,9 +60,9 @@ Two things to know about a host that already has a firewall:
   `pfctl -s rules` prints, `scrub in all fragment reassemble`.
 - **NAT and `set state-policy`.** On a host whose `pf.conf` blocks by default and NATs the jails' IPv4 (`nat on` the uplink),
   forwarded packets of a jail were translated early by pf's floating state (the bridge passes them through pf on the jail's
-  port first) and then dropped by the host: five of six pings never left (darius, FreeBSD 15.1). `set state-policy if-bound`
+  port first) and then dropped by the host: five of six pings never left (the amd64 host, FreeBSD 15.1). `set state-policy if-bound`
   at the top of `pf.conf` fixed it (6 of 6, and the PF matrix still passes). A host whose `pf.conf` starts with `pass all`
-  (the jailbe test host) did not show it.
+  (the arm64 host) did not show it.
 - **Traffic from the internet into a jail** is stopped by a host whose `pf.conf` blocks inbound traffic on the uplink by
   default. JailOps does not open the uplink for you: admit the addresses of the jails, and only the ports you want,
   with a rule of your own. The jail's anchor still applies afterwards (its policy decides what reaches the jail), so
@@ -138,11 +138,11 @@ the one the daemon creates on its first start (dataset `<pool>/jailops`). IPv6, 
 ## Remote access
 
 By default only the unix socket listens. To manage a host from another machine set `listen.https.address` in
-`jailopsd.yaml` (for example `":8443"`), restart `jailopsd`, then on the host create a single-use trust token and use
+`jailopsd.yaml` (for example `":39110"`), restart `jailopsd`, then on the host create a single-use trust token and use
 it on the client (a token is valid for one hour by default):
 
     jailops trust add --name laptop --projects web                     # on the host: prints a single-use token
-    jailops remote add myhost https://host.example:8443 --token-stdin  # on the client: paste the token
+    jailops remote add myhost https://host.example:39110 --token-stdin  # on the client: paste the token
 
 The client pins the server fingerprint from the token (there is no trust on first use). The web consoles are served by
 the same listener.

@@ -122,7 +122,7 @@ func (s *Server) publish(t api.EventType, meta json.RawMessage) {
 	s.notify = make(chan struct{})
 }
 
-// EventStreams reports how many /1.0/events responses are open, so tests can
+// EventStreams reports how many /api/v1/events responses are open, so tests can
 // wait for a subscriber before causing events.
 func (s *Server) EventStreams() int {
 	s.mu.Lock()

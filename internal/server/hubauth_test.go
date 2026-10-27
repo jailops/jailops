@@ -76,7 +76,7 @@ func TestHubForwardsTheCallersScope(t *testing.T) {
 	entries, _ := host.Global().Audit(ctx, 100)
 	found := false
 	for _, a := range entries {
-		if strings.HasPrefix(a.Action, "POST /1.0/jails") && a.Project == "web" && strings.HasPrefix(a.Requestor, "i-admin") && strings.Contains(a.SourceIP, "via hub:hub") {
+		if strings.HasPrefix(a.Action, "POST /api/v1/jails") && a.Project == "web" && strings.HasPrefix(a.Requestor, "i-admin") && strings.Contains(a.SourceIP, "via hub:hub") {
 			found = true
 		}
 	}
@@ -92,7 +92,7 @@ func TestHubForwardsTheCallersScope(t *testing.T) {
 	}
 	// A caller with neither is stopped at the hub.
 	tok := hub.ScopelessToken(api.PermAdmin)
-	if code, _ := hub.Raw("GET", "/1.0/jails?host=h1&project=alpha", tok, ""); code != 403 {
+	if code, _ := hub.Raw("GET", "/api/v1/jails?host=h1&project=alpha", tok, ""); code != 403 {
 		t.Fatalf("%d", code)
 	}
 }
@@ -125,8 +125,8 @@ func TestHubCertificateLimitsTheClaim(t *testing.T) {
 		method, path string
 		want         int
 	}{
-		{"GET", "/1.0/projects", 200}, {"GET", "/1.0/networks", 200}, {"POST", "/1.0/networks", 403}, {"GET", "/1.0/users", 403},
-		{"GET", "/1.0/jails?project=db", 404}, {"GET", "/1.0/jails?project=web", 200},
+		{"GET", "/api/v1/projects", 200}, {"GET", "/api/v1/networks", 200}, {"POST", "/api/v1/networks", 403}, {"GET", "/api/v1/users", 403},
+		{"GET", "/api/v1/jails?project=db", 404}, {"GET", "/api/v1/jails?project=web", 200},
 	} {
 		code, body := hubTLS(tc.method, tc.path, "", nil)
 		if code != tc.want {
@@ -177,7 +177,7 @@ func TestHubClaimForgeryIsRejected(t *testing.T) {
 	send := dialHost(t, host, hub)
 	now := time.Now()
 	good := auth.RequestorClaim{Version: 1, Name: "alice", Kind: "user", Role: api.PermAdmin, Projects: []string{"web"},
-		IssuedAt: now.Unix(), Expires: now.Add(30 * time.Second).Unix(), Audience: host.D.Service().HostUUID(), Method: "GET", Path: "/1.0/jails"}
+		IssuedAt: now.Unix(), Expires: now.Add(30 * time.Second).Unix(), Audience: host.D.Service().HostUUID(), Method: "GET", Path: "/api/v1/jails"}
 	sign := func(c auth.RequestorClaim, cert tls.Certificate) string {
 		h, err := auth.SignRequestor(cert, c)
 		if err != nil {
@@ -186,10 +186,10 @@ func TestHubClaimForgeryIsRejected(t *testing.T) {
 		return h
 	}
 	// The genuine claim works, in its project and not outside it.
-	if code, body := send("GET", "/1.0/jails?project=web", sign(good, hubCert), nil); code != 200 {
+	if code, body := send("GET", "/api/v1/jails?project=web", sign(good, hubCert), nil); code != 200 {
 		t.Fatalf("control: %d %s", code, body)
 	}
-	if code, _ := send("GET", "/1.0/jails?project=db", sign(good, hubCert), nil); code != 404 {
+	if code, _ := send("GET", "/api/v1/jails?project=db", sign(good, hubCert), nil); code != 404 {
 		t.Fatalf("a claim for web read db: %d", code)
 	}
 	// Altered projects: the payload changed, the signature did not.
@@ -201,38 +201,38 @@ func TestHubClaimForgeryIsRejected(t *testing.T) {
 	m["projects"] = []string{"web", "db"}
 	m["global"] = true
 	altered, _ := json.Marshal(m)
-	if code, _ := send("GET", "/1.0/jails?project=db", base64.RawURLEncoding.EncodeToString(altered)+"."+sig, nil); code != 401 {
+	if code, _ := send("GET", "/api/v1/jails?project=db", base64.RawURLEncoding.EncodeToString(altered)+"."+sig, nil); code != 401 {
 		t.Fatalf("altered projects: %d", code)
 	}
 	// Expired.
 	old := good
 	old.IssuedAt, old.Expires = now.Add(-2*time.Minute).Unix(), now.Add(-time.Minute).Unix()
-	if code, _ := send("GET", "/1.0/jails?project=alpha", sign(old, hubCert), nil); code != 401 {
+	if code, _ := send("GET", "/api/v1/jails?project=alpha", sign(old, hubCert), nil); code != 401 {
 		t.Fatalf("expired: %d", code)
 	}
 	// Valid for too long.
 	long := good
 	long.Expires = now.Add(time.Hour).Unix()
-	if code, _ := send("GET", "/1.0/jails?project=alpha", sign(long, hubCert), nil); code != 401 {
+	if code, _ := send("GET", "/api/v1/jails?project=alpha", sign(long, hubCert), nil); code != 401 {
 		t.Fatalf("long lived: %d", code)
 	}
 	// Signed by another key.
 	other := newClientCert(t, "mallory")
-	if code, _ := send("GET", "/1.0/jails?project=alpha", sign(good, other), nil); code != 401 {
+	if code, _ := send("GET", "/api/v1/jails?project=alpha", sign(good, other), nil); code != 401 {
 		t.Fatalf("wrong signature: %d", code)
 	}
 	// Bound to another request, and to another host.
-	if code, _ := send("DELETE", "/1.0/jails/x?project=alpha", sign(good, hubCert), nil); code != 401 {
+	if code, _ := send("DELETE", "/api/v1/jails/x?project=alpha", sign(good, hubCert), nil); code != 401 {
 		t.Fatalf("method and path replay: %d", code)
 	}
 	wrongHost := good
 	wrongHost.Audience = "00000000-0000-4000-8000-000000000000"
-	if code, _ := send("GET", "/1.0/jails?project=alpha", sign(wrongHost, hubCert), nil); code != 401 {
+	if code, _ := send("GET", "/api/v1/jails?project=alpha", sign(wrongHost, hubCert), nil); code != 401 {
 		t.Fatalf("audience: %d", code)
 	}
 	// Garbage.
 	for _, g := range []string{"x", "a.b", strings.Repeat("A", 40) + "." + strings.Repeat("B", 40)} {
-		if code, _ := send("GET", "/1.0/jails?project=alpha", g, nil); code != 401 {
+		if code, _ := send("GET", "/api/v1/jails?project=alpha", g, nil); code != 401 {
 			t.Fatalf("garbage %q: %d", g, code)
 		}
 	}
@@ -244,25 +244,25 @@ func TestHubClaimForgeryIsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	plain := dialHostAs(t, host, &cl)
-	if code, _ := plain("GET", "/1.0/jails?project=alpha", sign(good, cl), nil); code != 403 {
+	if code, _ := plain("GET", "/api/v1/jails?project=alpha", sign(good, cl), nil); code != 403 {
 		t.Fatalf("a client certificate carried a claim: %d", code)
 	}
 	// A claim next to a token, and on the unix socket.
 	tok := host.Token(api.PermAdmin)
-	if code, _ := send("GET", "/1.0/jails?project=alpha", sign(good, hubCert), map[string]string{"Authorization": "Bearer " + tok}); code == 200 {
+	if code, _ := send("GET", "/api/v1/jails?project=alpha", sign(good, hubCert), map[string]string{"Authorization": "Bearer " + tok}); code == 200 {
 		// the hub certificate wins over the token; the claim is honoured as a claim
 		t.Log("claim and token together: the certificate decides")
 	}
-	if code, _ := host.Raw("GET", "/1.0/jails?project=alpha", tok, ""); code != 200 {
+	if code, _ := host.Raw("GET", "/api/v1/jails?project=alpha", tok, ""); code != 200 {
 		t.Fatal(code)
 	}
-	if code, _ := host.RawHdr("GET", "/1.0/jails?project=alpha", tok, "", map[string]string{auth.RequestorHeader: sign(good, hubCert)}); code != 403 {
+	if code, _ := host.RawHdr("GET", "/api/v1/jails?project=alpha", tok, "", map[string]string{auth.RequestorHeader: sign(good, hubCert)}); code != 403 {
 		t.Fatalf("a claim with a token: %d", code)
 	}
 	uc := &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
 		return (&net.Dialer{}).DialContext(ctx, "unix", host.D.UnixPath())
 	}}, Timeout: 5 * time.Second}
-	req, _ := http.NewRequest("GET", "http://unix/1.0/jails", nil)
+	req, _ := http.NewRequest("GET", "http://unix/api/v1/jails", nil)
 	req.Header.Set(auth.RequestorHeader, sign(good, hubCert))
 	resp, err := uc.Do(req)
 	if err != nil {
@@ -289,7 +289,7 @@ func TestAHubCannotReachAuthenticationEndpoints(t *testing.T) {
 	host, hub := hubPair(t, api.CertificateSpec{Permission: api.PermAdmin, Global: true})
 	send := dialHost(t, host, hub)
 	now := time.Now()
-	for _, tc := range [][2]string{{"GET", "/1.0/auth/session"}, {"POST", "/1.0/auth/password"}, {"GET", "/1.0/sessions"}} {
+	for _, tc := range [][2]string{{"GET", "/api/v1/auth/session"}, {"POST", "/api/v1/auth/password"}, {"GET", "/api/v1/sessions"}} {
 		method, path := tc[0], tc[1]
 		h, err := auth.SignRequestor(hub.D.Certificate(), auth.RequestorClaim{Version: 1, Name: "alice", Kind: "user", Role: api.PermAdmin, Global: true,
 			IssuedAt: now.Unix(), Expires: now.Add(30 * time.Second).Unix(), Audience: host.D.Service().HostUUID(), Method: method, Path: path})

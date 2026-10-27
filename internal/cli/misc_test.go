@@ -32,7 +32,7 @@ func TestErrorFormatAndExitCodes(t *testing.T) {
 		t.Run(string(code), func(t *testing.T) {
 			h := newHarness(t, fake.WithClock(func() time.Time { return clock }))
 			// A 5xx would be retried by the SDK; the fake only fails the first call anyway.
-			h.srv.FailRequests("GET", "/1.0/jails", api.Errorf(code, "boom %s", code).WithHint("do the thing"), -1)
+			h.srv.FailRequests("GET", "/api/v1/jails", api.Errorf(code, "boom %s", code).WithHint("do the thing"), -1)
 			out, errs, got := h.run("", "jail", "list")
 			if got != exit || out != "" {
 				t.Fatalf("exit %d (want %d), stdout %q", got, exit, out)
@@ -293,7 +293,7 @@ func TestManPageHelp(t *testing.T) {
 func TestServerInfoVersionDoctor(t *testing.T) {
 	wrap := func(s *fake.Server) http.Handler {
 		mux := http.NewServeMux()
-		mux.HandleFunc("GET /1.0/doctor", func(w http.ResponseWriter, r *http.Request) {
+		mux.HandleFunc("GET /api/v1/doctor", func(w http.ResponseWriter, r *http.Request) {
 			rep := api.DoctorReport{Status: api.DoctorWarn, Checks: []api.DoctorCheck{
 				{Name: "zfs.pool", Status: api.DoctorOK, Message: "pool tank is online"},
 				{Name: "kernel.module.if_bridge", Status: api.DoctorWarn, Message: "not loaded", Hint: "kldload if_bridge"},
@@ -302,8 +302,8 @@ func TestServerInfoVersionDoctor(t *testing.T) {
 			raw, _ := json.Marshal(rep)
 			_ = json.NewEncoder(w).Encode(api.Response{Type: api.ResponseSync, StatusCode: 200, Metadata: raw})
 		})
-		mux.HandleFunc("GET /1.0/audit", func(w http.ResponseWriter, r *http.Request) {
-			raw, _ := json.Marshal([]api.AuditEntry{{ID: "1", Timestamp: clock, Requestor: "alice", Action: "POST /1.0/jails", Resource: "web", Result: "ok"}})
+		mux.HandleFunc("GET /api/v1/audit", func(w http.ResponseWriter, r *http.Request) {
+			raw, _ := json.Marshal([]api.AuditEntry{{ID: "1", Timestamp: clock, Requestor: "alice", Action: "POST /api/v1/jails", Resource: "web", Result: "ok"}})
 			_ = json.NewEncoder(w).Encode(api.Response{Type: api.ResponseSync, StatusCode: 200, Metadata: raw})
 		})
 		mux.Handle("/", s)

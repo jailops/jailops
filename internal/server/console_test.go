@@ -71,7 +71,7 @@ func TestConsoleSessionOverHTTP(t *testing.T) {
 	e := seeded(t)
 	startedWeb(t, e)
 	tok := e.Token(api.PermAdmin)
-	code, body := e.Raw("POST", "/1.0/jails/web/console?project=alpha", tok, `{"argv":["cat"]}`)
+	code, body := e.Raw("POST", "/api/v1/jails/web/console?project=alpha", tok, `{"argv":["cat"]}`)
 	if code != 200 {
 		t.Fatalf("%d %s", code, body)
 	}
@@ -82,7 +82,7 @@ func TestConsoleSessionOverHTTP(t *testing.T) {
 		t.Fatalf("%v %s", err, body)
 	}
 	id := open.Metadata.ID
-	base := "/1.0/jails/web/console/" + id
+	base := "/api/v1/jails/web/console/" + id
 	out := openOutput(t, e.HTTP.URL, base+"/output?project=alpha", tok, "")
 
 	if code, b := e.Raw("POST", base+"/input?project=alpha", tok, `{"data":"hello console\n"}`); code != 200 {
@@ -116,7 +116,7 @@ func TestConsoleSessionOverHTTP(t *testing.T) {
 	if code, _ := e.Raw("POST", base+"/input?project=alpha", other, `{"data":"x"}`); code != 404 {
 		t.Fatalf("another identity: %d", code)
 	}
-	if code, _ := e.Raw("POST", "/1.0/jails/db/console/"+id+"/input?project=alpha", tok, `{"data":"x"}`); code != 404 {
+	if code, _ := e.Raw("POST", "/api/v1/jails/db/console/"+id+"/input?project=alpha", tok, `{"data":"x"}`); code != 404 {
 		t.Fatalf("another jail: %d", code)
 	}
 	if code, _ := e.Raw("POST", base+"/input?project=alpha", "", `{"data":"x"}`); code != 401 {
@@ -151,14 +151,14 @@ func TestConsoleOfAStoppedJailAndOfTheWrongProject(t *testing.T) {
 	e := seeded(t)
 	mustJail(t, e, "web") // not started
 	tok := e.Token(api.PermAdmin)
-	if code, body := e.Raw("POST", "/1.0/jails/web/console?project=alpha", tok, `{"argv":["cat"]}`); code == 200 {
+	if code, body := e.Raw("POST", "/api/v1/jails/web/console?project=alpha", tok, `{"argv":["cat"]}`); code == 200 {
 		t.Fatalf("a console in a stopped jail: %s", body)
 	}
-	if code, _ := e.Raw("POST", "/1.0/jails/nope/console?project=alpha", tok, `{}`); code != 404 {
+	if code, _ := e.Raw("POST", "/api/v1/jails/nope/console?project=alpha", tok, `{}`); code != 404 {
 		t.Fatalf("an unknown jail: %d", code)
 	}
 	// a readonly identity may not open one
-	if code, _ := e.Raw("POST", "/1.0/jails/web/console?project=alpha", e.Token(api.PermReadonly), `{}`); code != 403 {
+	if code, _ := e.Raw("POST", "/api/v1/jails/web/console?project=alpha", e.Token(api.PermReadonly), `{}`); code != 403 {
 		t.Fatalf("readonly: %d", code)
 	}
 }

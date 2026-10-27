@@ -451,7 +451,7 @@ func (s *Service) ConfigureJail(ctx context.Context, name string, ch api.ConfigC
 	nlocks := s.netLocksEff(p.Meta.Name, pre.Spec)
 	return s.Submit(ctx, OpSpec{
 		Description: "Configure jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + name}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			cur, err := s.jailSnapshot(key)
 			if err != nil {
@@ -489,7 +489,7 @@ func (s *Service) ConfigureJail(ctx context.Context, name string, ch api.ConfigC
 					return nil, err
 				}
 				res.Restarted = true
-				s.emitIn(ctx, p.Meta.Name, "jail-restarted", "/1.0/jails/"+name)
+				s.emitIn(ctx, p.Meta.Name, "jail-restarted", "/api/v1/jails/"+name)
 			}
 			res.Jail, _ = s.getByKey(ctx, key)
 			return res, nil

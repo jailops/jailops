@@ -372,7 +372,7 @@ func (s *Service) SetImageAlias(ctx context.Context, image, alias string, gen in
 			return api.Image{}, err
 		}
 	}
-	s.emit(ctx, "image-alias-set", "/1.0/images/"+image)
+	s.emit(ctx, "image-alias-set", "/api/v1/images/"+image)
 	return s.imageToAPI(ctx, o), nil
 }
 
@@ -408,7 +408,7 @@ func (s *Service) DeleteImageAlias(ctx context.Context, image, alias string) (ap
 			return api.Image{}, err
 		}
 	}
-	s.emit(ctx, "image-alias-deleted", "/1.0/images/"+image)
+	s.emit(ctx, "image-alias-deleted", "/api/v1/images/"+image)
 	return s.imageToAPI(ctx, o), nil
 }
 
@@ -476,7 +476,7 @@ func (s *Service) BuildGeneration(ctx context.Context, image string, req api.Ima
 	}
 	return s.Submit(ctx, OpSpec{
 		Description: "Build image " + image, Locks: []string{imageLock(image)},
-		Resources: map[string][]string{"images": {"/1.0/images/" + image}},
+		Resources: map[string][]string{"images": {"/api/v1/images/" + image}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			if max, err := mgr.MaxNumber(ctx, image); err == nil && !req.DryRun {
 				_ = h.Bind("image-build/"+image+"/g"+strconv.Itoa(max+1), nil)
@@ -501,7 +501,7 @@ func (s *Service) BuildGeneration(ctx context.Context, image string, req api.Ima
 						}
 					}
 				}
-				s.emit(ctx, "image-generation-created", "/1.0/images/"+image+"/generations/"+strconv.Itoa(res.Generation.Number))
+				s.emit(ctx, "image-generation-created", "/api/v1/images/"+image+"/generations/"+strconv.Itoa(res.Generation.Number))
 			}
 			return BuildResult{ImageGeneration: res.Generation, Plan: res.Plan, DryRun: res.DryRun}, nil
 		},
@@ -528,7 +528,7 @@ func (s *Service) DeleteGeneration(ctx context.Context, image string, n int) (ap
 	}
 	return s.Submit(ctx, OpSpec{
 		Description: "Delete generation " + g.Name, Locks: []string{imageLock(image)},
-		Resources: map[string][]string{"images": {"/1.0/images/" + image + "/generations/" + strconv.Itoa(n)}},
+		Resources: map[string][]string{"images": {"/api/v1/images/" + image + "/generations/" + strconv.Itoa(n)}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			var firstErr error
 			deleted := false
@@ -547,7 +547,7 @@ func (s *Service) DeleteGeneration(ctx context.Context, image string, n int) (ap
 				deleted = true
 			}
 			if deleted {
-				s.emit(ctx, "image-generation-deleted", "/1.0/images/"+image+"/generations/"+strconv.Itoa(n))
+				s.emit(ctx, "image-generation-deleted", "/api/v1/images/"+image+"/generations/"+strconv.Itoa(n))
 			}
 			return nil, firstErr
 		},

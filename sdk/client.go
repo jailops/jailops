@@ -130,7 +130,7 @@ type transport struct {
 	streamHC   *http.Client
 }
 
-// Connect opens a client and fetches GET /1.0 to learn the server's extensions.
+// Connect opens a client and fetches GET /api/v1 to learn the server's extensions.
 func Connect(ctx context.Context, target Target, opts ...Option) (*Client, error) {
 	cfg := config{
 		maxBody: defaultMaxBody, retries: 3, backoff: 100 * time.Millisecond,
@@ -305,9 +305,9 @@ func (c *Client) Close() error {
 	return nil
 }
 
-// Info fetches GET /1.0 and caches the result for Has.
+// Info fetches GET /api/v1 and caches the result for Has.
 func (c *Client) Info(ctx context.Context) (api.ServerInfo, error) {
-	info, _, err := get[api.ServerInfo](ctx, c, "/1.0", nil)
+	info, _, err := get[api.ServerInfo](ctx, c, "/api/v1", nil)
 	if err != nil {
 		return info, err
 	}

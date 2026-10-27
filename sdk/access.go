@@ -7,7 +7,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// TokenClient accesses /1.0/tokens. Create returns the secret once, in
+// TokenClient accesses /api/v1/tokens. Create returns the secret once, in
 // Token.Secret; it is never returned again.
 type TokenClient struct {
 	*Resource[api.Token]
@@ -15,27 +15,27 @@ type TokenClient struct {
 
 // Tokens returns the tokens client.
 func (c *Client) Tokens() *TokenClient {
-	return &TokenClient{newResource[api.Token](c, "/1.0/tokens")}
+	return &TokenClient{newResource[api.Token](c, "/api/v1/tokens")}
 }
 
-// Certificates accesses /1.0/certificates.
+// Certificates accesses /api/v1/certificates.
 func (c *Client) Certificates() *Resource[api.Certificate] {
-	return newResource[api.Certificate](c, "/1.0/certificates")
+	return newResource[api.Certificate](c, "/api/v1/certificates")
 }
 
-// Remotes accesses /1.0/remotes.
+// Remotes accesses /api/v1/remotes.
 func (c *Client) Remotes() *Resource[api.Remote] {
-	return newResource[api.Remote](c, "/1.0/remotes")
+	return newResource[api.Remote](c, "/api/v1/remotes")
 }
 
-// UserClient accesses /1.0/users.
+// UserClient accesses /api/v1/users.
 type UserClient struct {
 	*Resource[api.User]
 }
 
 // Users returns the users client.
 func (c *Client) Users() *UserClient {
-	return &UserClient{newResource[api.User](c, "/1.0/users")}
+	return &UserClient{newResource[api.User](c, "/api/v1/users")}
 }
 
 // Create creates a user. With an empty password the server generates one

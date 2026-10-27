@@ -3,9 +3,9 @@ package backupd
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,31 +65,22 @@ func (r *hostResolver) forget() {
 	r.mu.Unlock()
 }
 
-// hostTLS is the server side of the host listener: TLS 1.3, a client certificate
-// is required, its fingerprint must belong to an enrolled, non-revoked host.
+// hostTLS is the server side of the one listener (TLS 1.3). It asks for a client certificate and admits every client, with or
+// without one, whatever the certificate is: who the client is gets decided per request, by what the path needs.
+//
+//   - the host API (hostAuth) needs a certificate that is valid and belongs to an enrolled, non-revoked host, and says 401
+//     to anything else;
+//   - the management API and the console (users, tokens, sessions) take no identity from a certificate at all, so an
+//     administrator whose browser offers some other certificate, or none, is not turned away by it.
+//
+// The two ways of proving who you are do not depend on each other. (TLS still checks that a presented certificate's key is
+// held by the client: that is part of the handshake whatever is asked.)
 func (r *hostResolver) hostTLS(cert tls.Certificate) *tls.Config {
 	return &tls.Config{
 		MinVersion:   tls.VersionTLS13,
 		Certificates: []tls.Certificate{cert},
 		NextProtos:   []string{"h2", "http/1.1"},
-		ClientAuth:   tls.RequireAnyClientCert,
-		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
-			if len(raw) == 0 {
-				return errors.New("no client certificate")
-			}
-			leaf, err := x509.ParseCertificate(raw[0])
-			if err != nil {
-				return err
-			}
-			now := time.Now()
-			if now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
-				return errors.New("client certificate is outside its validity period")
-			}
-			if _, ok := r.lookup(context.Background(), auth.Fingerprint(raw[0])); !ok {
-				return errors.New("client certificate is not an enrolled host")
-			}
-			return nil
-		},
+		ClientAuth:   tls.RequestClientCert,
 	}
 }
 
@@ -107,13 +98,33 @@ func (s *Server) hostHandler() http.Handler {
 	return mux
 }
 
+// listenerHandler is what the one listener serves: the host API under node.Base, reached with an enrolled host's
+// certificate, and everything else is the management API (and the console, when it is enabled), which wants a token or a
+// session and ignores the certificate.
+func (s *Server) listenerHandler() http.Handler {
+	host := s.hostHandler()
+	web := s.mgmt.Handler()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == node.Base || strings.HasPrefix(r.URL.Path, node.Base+"/") {
+			host.ServeHTTP(w, r)
+			return
+		}
+		web.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) hostAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
 			writeError(w, api.Errorf(api.CodeUnauthorized, "a client certificate is required"))
 			return
 		}
-		h, ok := s.hosts.lookup(r.Context(), auth.CertFingerprint(r.TLS.PeerCertificates[0]))
+		leaf := r.TLS.PeerCertificates[0]
+		if now := time.Now(); now.Before(leaf.NotBefore) || now.After(leaf.NotAfter) {
+			writeError(w, api.Errorf(api.CodeUnauthorized, "the client certificate is outside its validity period"))
+			return
+		}
+		h, ok := s.hosts.lookup(r.Context(), auth.CertFingerprint(leaf))
 		if !ok {
 			writeError(w, api.Errorf(api.CodeUnauthorized, "the host is not enrolled or was revoked"))
 			return

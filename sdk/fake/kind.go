@@ -15,7 +15,7 @@ import "jailops.net/jailops/sdk/api"
 type kind[T any] struct {
 	s      *Server
 	plural string // "jails"
-	base   string // "/1.0/jails"
+	base   string // "/api/v1/jails"
 	action string // "jail" in lifecycle actions
 	scope  api.Scope
 	items  map[string]*T
@@ -92,7 +92,7 @@ func (k *kind[T]) proj(obj *T) string {
 }
 
 func newKind[T any](s *Server, plural, action string, scope api.Scope, meta func(*T) *api.ObjectMeta) *kind[T] {
-	return &kind[T]{s: s, plural: plural, base: "/1.0/" + plural, action: action, scope: scope, items: map[string]*T{}, meta: meta}
+	return &kind[T]{s: s, plural: plural, base: "/api/v1/" + plural, action: action, scope: scope, items: map[string]*T{}, meta: meta}
 }
 
 func clone[T any](v *T) T {
@@ -121,9 +121,9 @@ func (s *Server) respond(w http.ResponseWriter, r reply) {
 		writeErr(w, r.err)
 	case r.op != nil:
 		raw, _ := json.Marshal(r.op)
-		w.Header().Set("Location", "/1.0/operations/"+r.op.ID)
+		w.Header().Set("Location", "/api/v1/operations/"+r.op.ID)
 		writeJSON(w, http.StatusAccepted, api.Response{Type: api.ResponseAsync, Status: "Operation created",
-			StatusCode: 202, Operation: "/1.0/operations/" + r.op.ID, Metadata: raw})
+			StatusCode: 202, Operation: "/api/v1/operations/" + r.op.ID, Metadata: raw})
 	default:
 		writeSync(w, r.status, r.meta)
 	}

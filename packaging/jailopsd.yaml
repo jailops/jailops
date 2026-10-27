@@ -20,14 +20,14 @@ listen:
                                 # other local user is anonymous, exactly like an unauthenticated remote client, and signs
                                 # in with a JailOps user, API token or client certificate. Unix users and groups map to nothing.
   https:
-    address: ""                 # for example ":8443"; empty disables the network listener. Always TLS 1.3; there is no plain-http TCP listener
+    address: ""                 # for example ":39110"; empty disables the network listener. Always TLS 1.3; there is no plain-http TCP listener
     # names: [jail1.example.org, 192.0.2.10]   # extra names of the generated certificate
     # cert: /etc/ssl/jailops/fullchain.pem     # your certificate (give cert and key together; must exist, never generated over).
     # key: /etc/ssl/jailops/privkey.pem        # a renewed pair is picked up without a restart (checked at most every 15s)
     #                                          # default <data_dir>/tls/server.{crt,key}: self-signed, generated on first start
 
 web:
-  enabled: true                 # false: the embedded web console is not served; the API is unaffected
+  enabled: false                # true: serve the embedded web console on the listeners (it is always in the binary); the API is the same either way
 
 priv:
   socket: /var/run/jailops/priv.sock
@@ -86,7 +86,7 @@ lifecycle:
 #   passphrase_file: ""           # wraps the key file; empty relies on the file mode, which unattended schedules need
 #   node:
 #     name: backup1
-#     address: backup1.example.org:8444
+#     address: backup1.example.org:39111
 #     fingerprint: ""             # hex SHA-256 of the node's certificate: it is pinned
 #     cert_file: /var/db/jailops/backup-client.crt
 #     key_file: /var/db/jailops/backup-client.key

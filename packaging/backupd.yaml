@@ -4,7 +4,7 @@
 # `init` prints the fingerprint of the node's certificate: hosts pin it (backup.node.fingerprint).
 
 hostname: vault.example.net
-listen: ":8444"                       # backup hosts connect here (mutual TLS, pinned fingerprints)
+listen: ":39111"                       # the one port: backup hosts connect here (mutual TLS, pinned fingerprints), and the console when web.enabled
 admin_socket: /var/run/jailops-backupd/admin.sock   # mode 0600: only root may use it
 
 tls:
@@ -24,9 +24,8 @@ datastore:
   #   prefix: vault/
   #   credentials_file: /usr/local/etc/jailops/backupd.s3
 
-web:                                  # the management API and web console
-  enabled: true
-  listen: 127.0.0.1:8445
+web:                                  # the management API and web console: in the binary, off until you enable it
+  enabled: false                      # true: served on the same port as the host API (listen above), with tokens and sessions
 
 grace: 24h                            # garbage collection grace period (minimum 12h)
 deletion_delay: 72h                   # default delay of a deletion request

@@ -12,6 +12,10 @@ on:
 permissions:
   contents: read
 
+# the Go jobs always get the built consoles: a test fails when one is missing from the binary
+env:
+  JAILOPS_REQUIRE_CONSOLE: "1"
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -279,7 +283,7 @@ jobs:
         env:
           PART: ${{ matrix.part }}
         with:
-          envs: PART
+          envs: PART JAILOPS_REQUIRE_CONSOLE
           cache-after-prepare: true
           release: "15.1"
           usesh: true

@@ -49,7 +49,7 @@ connected to tls-host (version fake), seen as trusted
 
 $ jailops remote add sock unix:/run/other.sock --switch
 remote/sock added (now the current remote)
-! warning: saved, but the server could not be reached: Get "http://jailops.local/1.0": dial unix /run/other.sock: connect: no such file or directory
+! warning: saved, but the server could not be reached: Get "http://jailops.local/api/v1": dial unix /run/other.sock: connect: no such file or directory
 
 $ jailops remote list
     NAME    TARGET                               AUTH           HOST   SOURCE

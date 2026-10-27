@@ -265,17 +265,17 @@ func New(d Deps) (*Service, error) {
 		login: auth.NewLockout(withClock(d.Lockout, d.Now)), trustLim: auth.NewLockout(withClock(d.Lockout, d.Now)), storages: map[string]*storageInfo{}, placed: map[string]string{},
 		pending: map[string]pendingJail{}, execN: map[string]int{}, localReg: NewLocalRegistrar()}
 	s.baseCtx, s.cancel = context.WithCancel(context.Background())
-	s.imgKind = newKindStore[api.ImageSpec](s, api.KindImage, api.ScopeFleet, "image", "/1.0/images")
-	s.netKind = newKindStore[api.NetworkSpec](s, api.KindNetwork, api.ScopeFleet, "network", "/1.0/networks")
-	s.polKind = newProjectKindStore[api.FirewallPolicySpec](s, api.KindFirewallPolicy, api.ScopeFleet, "firewall-policy", "/1.0/firewall/policies")
-	s.setKind = newProjectKindStore[api.AddressSetSpec](s, api.KindAddressSet, api.ScopeFleet, "address-set", "/1.0/firewall/address-sets")
-	s.tgtKind = newKindStore[api.BackupTargetSpec](s, api.KindBackupTarget, api.ScopeFleet, "backup-target", "/1.0/backup-targets")
-	s.bpolKind = newProjectKindStore[api.BackupPolicySpec](s, api.KindBackupPolicy, api.ScopeFleet, "backup-policy", "/1.0/backup-policies")
-	s.remKind = newKindStore[api.RemoteSpec](s, api.KindRemote, api.ScopeFleet, "remote", "/1.0/remotes")
-	s.certKind = newKindStore[api.CertificateSpec](s, api.KindCertificate, api.ScopeFleet, "certificate", "/1.0/certificates")
-	s.projKind = newKindStore[api.ProjectSpec](s, api.KindProject, api.ScopeHost, "project", "/1.0/projects")
-	s.stoKind = newKindStore[api.StorageSpec](s, api.KindStorage, api.ScopeHost, "storage", "/1.0/storage")
-	s.profKind = newProjectKindStore[api.ProfileSpec](s, api.KindProfile, api.ScopeFleet, "profile", "/1.0/profiles")
+	s.imgKind = newKindStore[api.ImageSpec](s, api.KindImage, api.ScopeFleet, "image", "/api/v1/images")
+	s.netKind = newKindStore[api.NetworkSpec](s, api.KindNetwork, api.ScopeFleet, "network", "/api/v1/networks")
+	s.polKind = newProjectKindStore[api.FirewallPolicySpec](s, api.KindFirewallPolicy, api.ScopeFleet, "firewall-policy", "/api/v1/firewall/policies")
+	s.setKind = newProjectKindStore[api.AddressSetSpec](s, api.KindAddressSet, api.ScopeFleet, "address-set", "/api/v1/firewall/address-sets")
+	s.tgtKind = newKindStore[api.BackupTargetSpec](s, api.KindBackupTarget, api.ScopeFleet, "backup-target", "/api/v1/backup-targets")
+	s.bpolKind = newProjectKindStore[api.BackupPolicySpec](s, api.KindBackupPolicy, api.ScopeFleet, "backup-policy", "/api/v1/backup-policies")
+	s.remKind = newKindStore[api.RemoteSpec](s, api.KindRemote, api.ScopeFleet, "remote", "/api/v1/remotes")
+	s.certKind = newKindStore[api.CertificateSpec](s, api.KindCertificate, api.ScopeFleet, "certificate", "/api/v1/certificates")
+	s.projKind = newKindStore[api.ProjectSpec](s, api.KindProject, api.ScopeHost, "project", "/api/v1/projects")
+	s.stoKind = newKindStore[api.StorageSpec](s, api.KindStorage, api.ScopeHost, "storage", "/api/v1/storage")
+	s.profKind = newProjectKindStore[api.ProfileSpec](s, api.KindProfile, api.ScopeFleet, "profile", "/api/v1/profiles")
 	s.locks = newLockSet()
 	s.events = newEventBus(d.DB, d.HostUUID)
 	jd, err := newFileJournal(d.JournalDir)
@@ -424,7 +424,7 @@ func (s *Service) Extensions() []string {
 	return out
 }
 
-// Info answers GET /1.0. auth is "trusted" or "untrusted".
+// Info answers GET /api/v1. auth is "trusted" or "untrusted".
 func (s *Service) Info(auth string) api.ServerInfo {
 	return api.ServerInfo{
 		APIVersion: api.Version, APIExtensions: s.Extensions(), Version: s.d.Version,

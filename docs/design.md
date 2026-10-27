@@ -161,7 +161,7 @@ question is open: how `/var/db/pkg` behaves after a root swap.
    generation that only aliases point at moves each alias to the newest remaining generation, or removes it
    when none remains. Deleting an image removes all its generations and aliases, and is refused (`image_in_use`,
    naming the jails) while any jail references one of them. Aliases are managed explicitly with
-   `PUT|DELETE /1.0/images/{name}/aliases/{alias}` (`jailops image alias set|delete`, extension `image_aliases`, admin).
+   `PUT|DELETE /api/v1/images/{name}/aliases/{alias}` (`jailops image alias set|delete`, extension `image_aliases`, admin).
 
 ### 4.4 Rollback scopes
 
@@ -347,8 +347,8 @@ initial commands; leaving the cluster exports them back.
 
 ## 8. API
 
-REST under `/1.0`: sync and async responses, an operations resource with
-`wait`, `ETag`/`If-Match` on updates, `/1.0/events` as Server-Sent Events (the SDK is standard library only, and a websocket needs a third-party package; exec uses an HTTP upgrade; the browser console uses a session of POST requests and server-sent events), capability negotiation by
+REST under `/api/v1`: sync and async responses, an operations resource with
+`wait`, `ETag`/`If-Match` on updates, `/api/v1/events` as Server-Sent Events (the SDK is standard library only, and a websocket needs a third-party package; exec uses an HTTP upgrade; the browser console uses a session of POST requests and server-sent events), capability negotiation by
 `api_extensions` strings instead of version numbers. Types are in
 `sdk/api`; the TypeScript types of the web consoles are generated from them (`just gen-ts`). There is no OpenAPI document and no JSON Schema file today (planned); the Go types and `sdk/PROTOCOL.md` are the specification.
 
@@ -484,7 +484,7 @@ Rules:
      effect on the next request. Certificates may carry an expiry.
 - The unix socket: root (uid 0) is a global admin, the host's break-glass and recovery access (`sudo jailops user create NAME --admin`,
   `user set-password`, `user set-role`). Every other local peer is anonymous: it reaches what an unauthenticated remote client reaches
-  (`GET /1.0`, `GET /healthz`, login, trust redemption, the static console) and may authenticate with a token or a login over the
+  (`GET /api/v1`, `GET /healthz`, login, trust redemption, the static console) and may authenticate with a token or a login over the
   socket. The socket is mode 0666 because connecting confers nothing. A test requires the same answer for every route from an
   anonymous remote and an anonymous local caller. `jailops-priv` keeps Unix peer credentials: it is a service boundary.
 - **Hub forwarding:** the hub authenticates and authorizes the caller (role and projects), then forwards
@@ -908,9 +908,9 @@ Open:
 | Native ZFS encryption (`--encrypted`) | Not implemented: safe key handling (a root-owned key file in a helper-approved directory, loaded at start through the helper) is unbuilt, so the flags were removed from `jailops jail create` and `jailops storage create`. `spec.encrypted` / `storage.spec.encrypted` in a file or API call answer `unsupported` ("native ZFS encryption of jails is not implemented" / "encrypted storage is not implemented") with the manual alternative in the hint |
 | Packages at creation (`--package`, `spec.packages`) | Not implemented: the flag was removed; the field answers `unsupported` ("installing packages at creation (spec.packages) is not implemented"). Use the provisioning `packages` step (8.5), which runs once at the first start |
 | Jail freeze | Removed. FreeBSD has no jail freeze; the `freeze` action no longer exists in the SDK, the fake or the service (an unknown action answers `invalid`) |
-| Volumes of an existing jail | `GET/POST /1.0/jails/<n>/volumes` and `DELETE .../volumes/<v>` answer `unsupported` ("volume management is not part of this version"); `jailops config` on `disk.<name>` keys of an existing jail answers `unsupported` ("changing volumes of an existing jail is not implemented"). Declare volumes at creation |
+| Volumes of an existing jail | `GET/POST /api/v1/jails/<n>/volumes` and `DELETE .../volumes/<v>` answer `unsupported` ("volume management is not part of this version"); `jailops config` on `disk.<name>` keys of an existing jail answers `unsupported` ("changing volumes of an existing jail is not implemented"). Declare volumes at creation |
 | `inplace` update strategy for thin jails | `jailops jail upgrade` answers `unsupported` ("update strategy inplace is not implemented for thin jails"); thick and Linux jails are updated through managed updates, not rebased ("rebase upgrades apply to thin jails; ... jails update in place, which is not implemented") |
-| Routes that answer `unsupported` | `PUT /1.0/server`, `GET /1.0/server/config`, cluster, `GET .../console` (listing sessions), `.../logs`, `.../files/<path>`, `POST .../move`, `.../snapshots/<s>` (rename), `.../bundle`, jail templates, groups, rollouts and the backup transport routes. Each answers 501 `unsupported` ("<feature> is not part of this version"); the list is `unsupportedRoutes` in `internal/server/routes.go` and `sdk/PROTOCOL.md` |
+| Routes that answer `unsupported` | `PUT /api/v1/server`, `GET /api/v1/server/config`, cluster, `GET .../console` (listing sessions), `.../logs`, `.../files/<path>`, `POST .../move`, `.../snapshots/<s>` (rename), `.../bundle`, jail templates, groups, rollouts and the backup transport routes. Each answers 501 `unsupported` ("<feature> is not part of this version"); the list is `unsupportedRoutes` in `internal/server/routes.go` and `sdk/PROTOCOL.md` |
 | `/var/db/pkg` after a root swap | A dedicated experiment with a genuine package change |
 | Ethernet-level spoofing | `ether` rules did not evaluate on the test host; ARP, NDP and MAC spoofing are not blocked below IP |
 | amd64 beyond the proxy host | The clean-install end-to-end run passes on amd64; Linux jails, backups and most prototypes ran on arm64 only |
@@ -1004,8 +1004,8 @@ This first run used dev mode (in-process helper), so the helper socket, `kldstat
 
 ### 18.2 Helper socket mode, exec with a terminal, rc.d
 
-`jailops-priv` ran as root on its socket (`group = claude`, `mode = 0660`: the helper refuses a mode that gives
-"others" access) and `jailopsd` ran as the unprivileged user `claude`, not in dev mode. List, stop, start,
+`jailops-priv` ran as root on its socket (`group = operator`, `mode = 0660`: the helper refuses a mode that gives
+"others" access) and `jailopsd` ran as the unprivileged user `operator`, not in dev mode. List, stop, start,
 `exec` and `shell` worked in a FreeBSD and in an Alpine jail through it, and the `rc.d/jailops_priv` script's
 `checkconfig`, `start`, `status`, `reload` and `stop` worked. It found:
 
@@ -1145,7 +1145,7 @@ resumable receive need the admin assertion; while `pkg` runs, the repository dir
 changed through the helper.
 
 Browsers cannot perform the `jailops-exec/1` HTTP upgrade, so the web console uses a bridge: a session created with
-`POST /1.0/jails/{name}/console`, input by POST, output as server-sent events (API extension `jail_console`). The
+`POST /api/v1/jails/{name}/console`, input by POST, output as server-sent events (API extension `jail_console`). The
 session is owned by the creating actor and ends with the process or after an idle period.
 
 **Mounts, links and the start-time recheck (October 2026 audit).** `mount(8)` runs on the host and resolves symbolic links
@@ -1199,7 +1199,7 @@ A jail's `env` is stored in the spec and, until now, nothing used it. It now rea
 the jail (`jailops exec`, `shell`, console sessions); a value the caller names on the command line wins over the jail's.
 A value that starts with `sealed:age:` is an age ciphertext (base64) sealed to the host: the daemon creates an age
 identity in `<data_dir>/secrets.key` (mode 0600) on first start and publishes the public half as `secrets_recipient` in
-`GET /1.0`, with the API extension `sealed_secrets`. Admission refuses a sealed value this host cannot open (another
+`GET /api/v1`, with the API extension `sealed_secrets`. Admission refuses a sealed value this host cannot open (another
 host's key, bad base64). The API returns the ciphertext, never the plaintext; the daemon opens it only when it starts a
 process, and the plaintext lives in the argument list of that call only. `jailops-sync secrets add-hosts` reads the
 recipients from the hosts and lists them in `secrets/recipients.txt`. Services started by the jail's own rc scripts do
@@ -1374,8 +1374,8 @@ Audit of the generated PF rules for neighbour-cache poisoning, checked with forg
   stale-entry collection remove the entries. Every neighbour advertisement from a jail is blocked, as are router
   advertisements and redirects (also from the host towards a jail, on the gateway interface). pf `ether` rules did
   not work on the bridge path here (a block rule for ARP on the jail's port had no effect), so none is used.
-- **Verified** with forged frames sent from inside the jails (a small raw-socket/bpf tool, `temp/nasend`) on darius
-  (proxy mode) and jailbe (routed mode): neighbour advertisements for another jail's address or the gateway, ARP
+- **Verified** with forged frames sent from inside the jails (a small raw-socket/bpf tool, `temp/nasend`) on the amd64 host
+  (proxy mode) and the arm64 host (routed mode): neighbour advertisements for another jail's address or the gateway, ARP
   replies and requests claiming another jail's address or the gateway, a router advertisement with an autonomous prefix
   towards a jail, a DHCP discover, an extra IPv4 or IPv6 address and another jail's MAC address on a jail's interface.
   None changed any cache, none configured an address, none took another jail's traffic; host to jail, jail to jail
@@ -1415,12 +1415,12 @@ to `packaging/rc.d/jailopsd`'s `REQUIRE` line (`REQUIRE: jailops_priv NETWORKING
 runs its rc script and exits at once, so this adds no delay when pf is not used, and guarantees the ordering when it
 is.
 
-**Measured (October 2026, darius).** Two genuine power-cycle reboots were run, each with a test jail whose `exec.start`
+**Measured (October 2026, the amd64 host).** Two genuine power-cycle reboots were run, each with a test jail whose `exec.start`
 sends, from the instant the jail starts, a continuous loop of spoofed-source pings (bind fails every time: a jail
 cannot bind a raw socket to an address it does not own, `PRIV_NETINET_BINDANY` is not granted inside a jail, so this
 particular vector never even leaves the kernel) and forged ARP requests (via `/dev/bpf`, which does leave the jail),
-observed from jailbe's uplink (filtered on the marker address and on darius's own address) and from a local capture on
-darius itself. **Both reboots lost the test host's own ZFS pool** (`jopsci`, a loopback-file pool created by
+observed from the arm64 host's uplink (filtered on the marker address and on the amd64 host's own address) and from a local capture on
+the amd64 host itself. **Both reboots lost the test host's own ZFS pool** (`jopsci`, a loopback-file pool created by
 `scripts/ci-freebsd-e2e.sh` under `/tmp` for disposable CI runs): the first time because FreeBSD's default
 `clear_tmp_enable` wipes `/tmp` at every boot (the backing file was gone); moving it to `/var/tmp` (not cleared) fixed
 that but exposed the next layer: `zpool import -a`, what `/etc/rc.d/zfs` runs at boot, only scans `/dev`, never
@@ -1438,8 +1438,8 @@ boot does from `jailops_priv`'s start onward (host pass, network pass, the jail'
 private flag, `jail -c` running the jail's full `exec.start`, then `hookPostStart` loading its anchor) — everything
 *after* pool import, which is the part this section and the `pf` ordering fix are actually about. The daemon came back
 and the spoofing jail's `exec.start` loop was running about 4 seconds after `jailopsd` started. Result: **zero packets
-with the spoofed source or the forged ARP reached either capture** (darius's own uplink or jailbe's), and a
-continuous ping of the production jail from jailbe (95 of 95 during this window) showed **no downtime**. UNVERIFIED:
+with the spoofed source or the forged ARP reached either capture** (the amd64 host's own uplink or the arm64 host's), and a
+continuous ping of the production jail from the arm64 host (95 of 95 during this window) showed **no downtime**. UNVERIFIED:
 the literal power-cycle case (blocked by the test harness, above) and whether a cold boot's much longer window before
 `jailopsd` starts (BIOS, loader, kernel, mounting, `zfs_enable`) changes anything; nothing in that window runs any
 JailOps code or has network interfaces up at all, so there is no additional exposure reasoned, but it was not measured.
@@ -1478,13 +1478,13 @@ about FreeBSD 16, whose plans are thin: 16.0 is targeted for December 2027.
 How the daemon implements sections 5, 6, 8 and 9. Section 16 is the register of what is proven. Everything marked
 UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
 
-- **Configuration registry, devices, profiles (8.3).** `sdk/api` holds the registry (`GET /1.0/config-keys`);
-  `POST /1.0/jails/<n>/config` applies keys atomically and returns `restart_required`; a jail is restarted only with
+- **Configuration registry, devices, profiles (8.3).** `sdk/api` holds the registry (`GET /api/v1/config-keys`);
+  `POST /api/v1/jails/<n>/config` applies keys atomically and returns `restart_required`; a jail is restarted only with
   `?restart=true`. Devices are named (`nic` MTU and rate limits, `disk`, `devfs` from an allow-list, `proxy`);
   profiles are project-level or host-level (`?project=host`). The effective spec (jail over profiles) is computed
   where it is used: render, admission, quotas, locks. Rate limits are stored and reported as a `RateLimit` condition;
   no shaper enforces them yet. UNVERIFIED: loading the devfs ruleset by the helper, proxy redirects on the uplink.
-- **Exec (8.3).** `POST /1.0/jails/<n>/exec` upgrades to a framed stream (`PROTOCOL.md`, Exec). The daemon takes the
+- **Exec (8.3).** `POST /api/v1/jails/<n>/exec` upgrades to a framed stream (`PROTOCOL.md`, Exec). The daemon takes the
   backend as `service.JailExecer`; the helper client provides it, `--dev` uses `jexec -l` in process. Limits per
   jail, idle and total time are configuration (`limits.exec_*`). The helper side and TTY handling ran on FreeBSD 15.1 (18.2).
 - **Host tuning (5, 6).** The reconcile loop loads the modules it needs (if_bridge, if_epair, pf; linux64, linprocfs,
@@ -1516,7 +1516,7 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   generations swapped. `/var/db` in the persistent list is UNVERIFIED: pkg database persistence.
 - **Backups (9).** With a `backup:` section the daemon builds `internal/hostbackup` and passes it to the service
   layer. The key routes are global-admin only; the recovery key is in the creation reply once and nowhere else.
-  `POST /1.0/backups/run` and `/verify` are operations. A restore names the project it goes into (there is no
+  `POST /api/v1/backups/run` and `/verify` are operations. A restore names the project it goes into (there is no
   default), is admitted like a new jail, and the adopt step writes `spec.json` and `bundle.json` itself.
 - **Updates and provisioning (8.4, 8.5).** Off for every jail until `updates.mode` is set. A check runs `pkg update`
   and `pkg upgrade -n` (`apk update`, `apk upgrade --simulate` on Alpine) inside the jail and compares the image
@@ -1530,7 +1530,7 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   state directory. UNVERIFIED: the exact output of the dry runs and every command as run through `jexec`.
 - **Authentication hardening.** A TOTP step is accepted once: the read of the last accepted step, the validation and
   the write are one critical section. Verifying a secret for a signed-in user (current password, TOTP confirmation)
-  is rate-limited like a login. A hub never forwards `/1.0/auth/*` or `/1.0/sessions*`, and a requestor claim must
+  is rate-limited like a login. A hub never forwards `/api/v1/auth/*` or `/api/v1/sessions*`, and a requestor claim must
   name its audience. Client certificates are checked for validity period and key usage after pinning. Request
   bodies must be `application/json`; the session cookie is the `__Host-` one over TLS and the plain one over plain
   HTTP, never the other; responses carry `base-uri 'none'` and `form-action 'self'`, HSTS over TLS. On the backup

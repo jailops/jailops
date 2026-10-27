@@ -362,7 +362,7 @@ func (l *Local) confFileFor(name string) (string, bool) {
 // ReadOnlyFiles are host files fs.read_file may read besides the allowed
 // roots: the configuration an image build copies or checks, and /etc/rc.conf, which doctor's persistence check reads
 // for `gateway_enable` and `ipv6_gateway_enable` (without it the check could never see them and always warned, even
-// on a host where they were set: found live on darius, October 2026).
+// on a host where they were set: found live on the amd64 host, October 2026).
 var ReadOnlyFiles = []string{"/etc/sysctl.conf", "/etc/resolv.conf", "/etc/rc.conf"}
 
 // resolveRead is resolve for reading: the allowed roots, the fixed files of

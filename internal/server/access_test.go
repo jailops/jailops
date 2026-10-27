@@ -49,10 +49,10 @@ func TestTokens(t *testing.T) {
 	_, err = e.Admin.Tokens().Create(c, api.Token{Spec: api.TokenSpec{Permission: api.PermReadonly, Global: true, AllowFrom: []string{"not an ip"}}})
 	wantCode(t, err, api.CodeInvalid)
 	// An operator token works as an operator and no more.
-	if code, _ := e.Raw("PUT", "/1.0/jails/x/state?project=alpha", tok.Secret, `{"action":"start"}`); code != 404 {
+	if code, _ := e.Raw("PUT", "/api/v1/jails/x/state?project=alpha", tok.Secret, `{"action":"start"}`); code != 404 {
 		t.Fatalf("operator: %d", code)
 	}
-	if code, _ := e.Raw("POST", "/1.0/networks", tok.Secret, `{}`); code != 403 {
+	if code, _ := e.Raw("POST", "/api/v1/networks", tok.Secret, `{}`); code != 403 {
 		t.Fatalf("operator created a network: %d", code)
 	}
 	// An operator cannot hand out an admin token.
@@ -61,14 +61,14 @@ func TestTokens(t *testing.T) {
 	wantCode(t, err, api.CodeForbidden)
 	// A token restricted to another address is refused.
 	lim, _ := e.Admin.Tokens().Create(c, api.Token{Spec: api.TokenSpec{Permission: api.PermReadonly, Global: true, AllowFrom: []string{"192.0.2.0/24"}}})
-	if code, _ := e.Raw("GET", "/1.0/jails?project=alpha", lim.Secret, ""); code != 403 {
+	if code, _ := e.Raw("GET", "/api/v1/jails?project=alpha", lim.Secret, ""); code != 403 {
 		t.Fatalf("allow_from: %d", code)
 	}
 	// Revocation takes effect at once.
 	if err := e.Admin.Tokens().Delete(c, "ci"); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := e.Raw("GET", "/1.0/jails?project=alpha", tok.Secret, ""); code != 401 {
+	if code, _ := e.Raw("GET", "/api/v1/jails?project=alpha", tok.Secret, ""); code != 401 {
 		t.Fatalf("revoked token: %d", code)
 	}
 }
@@ -136,7 +136,7 @@ func TestSetUserPassword(t *testing.T) {
 	if code, _ := login(t, e, nil, "ann", next, ""); code != 200 {
 		t.Fatalf("the new password does not work: %d", code)
 	}
-	resp, err := hc.Get(e.HTTP.URL + "/1.0/auth/session")
+	resp, err := hc.Get(e.HTTP.URL + "/api/v1/auth/session")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -217,7 +217,7 @@ func login(t *testing.T, e *dtest.Env, hc *http.Client, user, pw, totp string) (
 		hc = jarClient(t)
 	}
 	body, _ := json.Marshal(map[string]string{"username": user, "password": pw, "totp": totp})
-	resp, err := hc.Post(e.HTTP.URL+"/1.0/auth/login", "application/json", strings.NewReader(string(body)))
+	resp, err := hc.Post(e.HTTP.URL+"/api/v1/auth/login", "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,36 +274,36 @@ func TestSessionLoginCSRFAndLogout(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode
 	}
-	if code := do("GET", "/1.0/projects", "", nil); code != 200 {
+	if code := do("GET", "/api/v1/projects", "", nil); code != 200 {
 		t.Fatalf("session read: %d", code)
 	}
 	info, _ := e.Anonymous().Info(c)
 	_ = info
 	// Mutations need the CSRF header and a same-origin Origin.
 	origin := map[string]string{"Origin": e.HTTP.URL}
-	if code := do("POST", "/1.0/networks", "{}", origin); code != 403 {
+	if code := do("POST", "/api/v1/networks", "{}", origin); code != 403 {
 		t.Fatalf("no CSRF header: %d", code)
 	}
-	if code := do("POST", "/1.0/networks", "{}", map[string]string{"X-CSRF-Token": csrf}); code != 403 {
+	if code := do("POST", "/api/v1/networks", "{}", map[string]string{"X-CSRF-Token": csrf}); code != 403 {
 		t.Fatalf("no Origin: %d", code)
 	}
-	if code := do("POST", "/1.0/networks", "{}", map[string]string{"X-CSRF-Token": csrf, "Origin": "http://evil.example"}); code != 403 {
+	if code := do("POST", "/api/v1/networks", "{}", map[string]string{"X-CSRF-Token": csrf, "Origin": "http://evil.example"}); code != 403 {
 		t.Fatalf("foreign Origin: %d", code)
 	}
-	if code := do("POST", "/1.0/networks", "{}", map[string]string{"X-CSRF-Token": "wrong", "Origin": e.HTTP.URL}); code != 403 {
+	if code := do("POST", "/api/v1/networks", "{}", map[string]string{"X-CSRF-Token": "wrong", "Origin": e.HTTP.URL}); code != 403 {
 		t.Fatalf("wrong CSRF token: %d", code)
 	}
-	if code := do("POST", "/1.0/networks", `{"metadata":{"name":"n1"}}`, map[string]string{"X-CSRF-Token": csrf, "Origin": e.HTTP.URL}); code != 400 {
+	if code := do("POST", "/api/v1/networks", `{"metadata":{"name":"n1"}}`, map[string]string{"X-CSRF-Token": csrf, "Origin": e.HTTP.URL}); code != 400 {
 		t.Fatalf("authorised mutation reached the handler: %d", code)
 	}
-	if code := do("GET", "/1.0/auth/session", "", nil); code != 200 {
+	if code := do("GET", "/api/v1/auth/session", "", nil); code != 200 {
 		t.Fatalf("session info: %d", code)
 	}
-	if code := do("POST", "/1.0/auth/logout", "", map[string]string{"X-CSRF-Token": csrf, "Origin": e.HTTP.URL}); code != 200 {
+	if code := do("POST", "/api/v1/auth/logout", "", map[string]string{"X-CSRF-Token": csrf, "Origin": e.HTTP.URL}); code != 200 {
 		t.Fatalf("logout: %d", code)
 	}
 	// The cookie is dead server side, not merely cleared in the browser.
-	raw, _ := http.NewRequest("GET", e.HTTP.URL+"/1.0/projects", nil)
+	raw, _ := http.NewRequest("GET", e.HTTP.URL+"/api/v1/projects", nil)
 	raw.AddCookie(sessionCookie)
 	resp, err := http.DefaultClient.Do(raw)
 	if err != nil {
@@ -324,10 +324,10 @@ func TestSessionLoginCSRFAndLogout(t *testing.T) {
 		}
 	}
 	h2 := map[string]string{"X-CSRF-Token": csrf2, "Origin": e.HTTP.URL}
-	if code := do("POST", "/1.0/auth/password", `{"current":"wrong","new":"An0ther-Good-pw!"}`, h2); code != 401 {
+	if code := do("POST", "/api/v1/auth/password", `{"current":"wrong","new":"An0ther-Good-pw!"}`, h2); code != 401 {
 		t.Fatalf("%d", code)
 	}
-	if code := do("POST", "/1.0/auth/password", `{"current":"`+goodPassword+`","new":"An0ther-Good-pw!"}`, h2); code != 200 {
+	if code := do("POST", "/api/v1/auth/password", `{"current":"`+goodPassword+`","new":"An0ther-Good-pw!"}`, h2); code != 200 {
 		t.Fatalf("%d", code)
 	}
 	if code, _ := login(t, e, nil, "ann", goodPassword, ""); code != 401 {
@@ -367,7 +367,7 @@ func TestTOTPEnrollmentAndLogin(t *testing.T) {
 		_ = json.NewDecoder(resp.Body).Decode(&env)
 		return resp.StatusCode, env
 	}
-	code, env := post("/1.0/auth/totp", "")
+	code, env := post("/api/v1/auth/totp", "")
 	var enr struct{ Secret, URI string }
 	_ = json.Unmarshal(env.Metadata, &enr)
 	if code != 200 || enr.Secret == "" || !strings.HasPrefix(enr.URI, "otpauth://") {
@@ -377,10 +377,10 @@ func TestTOTPEnrollmentAndLogin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := post("/1.0/auth/totp", `{"code":"000000"}`); code != 401 {
+	if code, _ := post("/api/v1/auth/totp", `{"code":"000000"}`); code != 401 {
 		t.Fatalf("a wrong code enabled TOTP: %d", code)
 	}
-	code, env = post("/1.0/auth/totp", `{"code":"`+auth.TOTPCode(secret, time.Now(), auth.TOTPConfig{})+`"}`)
+	code, env = post("/api/v1/auth/totp", `{"code":"`+auth.TOTPCode(secret, time.Now(), auth.TOTPConfig{})+`"}`)
 	var rec struct {
 		RecoveryCodes []string `json:"recovery_codes"`
 	}
@@ -423,7 +423,7 @@ func TestLoginLockoutAnd429(t *testing.T) {
 	var retry string
 	for i := 0; i < 8; i++ {
 		body := `{"username":"ann","password":"wrong-password-` + string(rune('a'+i)) + `"}`
-		resp, err := http.Post(e.HTTP.URL+"/1.0/auth/login", "application/json", strings.NewReader(body))
+		resp, err := http.Post(e.HTTP.URL+"/api/v1/auth/login", "application/json", strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -444,7 +444,7 @@ func TestLoginLockoutAnd429(t *testing.T) {
 		t.Fatalf("%d %v", st, out)
 	}
 	// The envelope carries the stable code.
-	resp, _ := http.Post(e.HTTP.URL+"/1.0/auth/login", "application/json", strings.NewReader(`{"username":"ann","password":"x"}`))
+	resp, _ := http.Post(e.HTTP.URL+"/api/v1/auth/login", "application/json", strings.NewReader(`{"username":"ann","password":"x"}`))
 	var env api.Response
 	_ = json.NewDecoder(resp.Body).Decode(&env)
 	resp.Body.Close()
@@ -458,7 +458,7 @@ func TestBadTokenLockout(t *testing.T) {
 	bad := "jot_" + strings.Repeat("a", 52)
 	var last int
 	for i := 0; i < 10; i++ {
-		last, _ = e.Raw("GET", "/1.0/jails?project=alpha", bad, "")
+		last, _ = e.Raw("GET", "/api/v1/jails?project=alpha", bad, "")
 		if last == 429 {
 			break
 		}
@@ -503,7 +503,7 @@ func enrolled(t *testing.T) (*dtest.Env, []byte, func(method, path, body string)
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		if path == "/1.0/auth/totp" && body == "" {
+		if path == "/api/v1/auth/totp" && body == "" {
 			var env api.Response
 			_ = json.NewDecoder(resp.Body).Decode(&env)
 			var enr struct{ Secret string }
@@ -512,14 +512,14 @@ func enrolled(t *testing.T) (*dtest.Env, []byte, func(method, path, body string)
 		}
 		return resp.StatusCode
 	}
-	if send("POST", "/1.0/auth/totp", "") != 200 {
+	if send("POST", "/api/v1/auth/totp", "") != 200 {
 		t.Fatal("enrollment")
 	}
 	secret, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(enrolledSecret))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if send("POST", "/1.0/auth/totp", `{"code":"`+auth.TOTPCode(secret, time.Now(), auth.TOTPConfig{})+`"}`) != 200 {
+	if send("POST", "/api/v1/auth/totp", `{"code":"`+auth.TOTPCode(secret, time.Now(), auth.TOTPConfig{})+`"}`) != 200 {
 		t.Fatal("confirm")
 	}
 	return e, secret, send
@@ -551,7 +551,7 @@ func TestSecretCheckingEndpointsLockOut(t *testing.T) {
 	_, _, send := enrolled(t)
 	var last int
 	for i := 0; i < 12; i++ {
-		last = send("POST", "/1.0/auth/password", `{"current":"wrong-`+strconv.Itoa(i)+`","new":"another-long-password-1"}`)
+		last = send("POST", "/api/v1/auth/password", `{"current":"wrong-`+strconv.Itoa(i)+`","new":"another-long-password-1"}`)
 		if last == 429 {
 			break
 		}
@@ -566,7 +566,7 @@ func TestBodiesMustBeJSON(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	tok := e.ScopelessToken(api.PermAdmin)
 	for _, ct := range []string{"", "text/plain", "application/x-www-form-urlencoded"} {
-		req, _ := http.NewRequest("POST", e.HTTP.URL+"/1.0/auth/login", strings.NewReader(`{"username":"a","password":"b"}`))
+		req, _ := http.NewRequest("POST", e.HTTP.URL+"/api/v1/auth/login", strings.NewReader(`{"username":"a","password":"b"}`))
 		if ct != "" {
 			req.Header.Set("Content-Type", ct)
 		}

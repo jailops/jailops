@@ -24,7 +24,7 @@ describe('Client', () => {
     expect(hit).toBe(1)
   })
   it('returns the operation of an async reply and sends If-Match', async () => {
-    const { t, calls } = fake(() => ({ status: 202, envelope: { type: 'async', operation: '/1.0/operations/o1', metadata: { id: 'o1', status: 'running' } } }))
+    const { t, calls } = fake(() => ({ status: 202, envelope: { type: 'async', operation: '/api/v1/operations/o1', metadata: { id: 'o1', status: 'running' } } }))
     const r = await new Client(t).mutate('PUT', '/firewall/policies/p', {}, { etag: '"3"' })
     expect(r.kind === 'async' && r.op.id).toBe('o1')
     expect(calls[0].headers?.['If-Match']).toBe('"3"')

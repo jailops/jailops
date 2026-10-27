@@ -48,7 +48,7 @@ func (s *Server) handleConfigKeys(w http.ResponseWriter, r *http.Request) {
 	writeSync(w, 200, api.ConfigKeys())
 }
 
-// jailExpanded is what GET /1.0/jails/<n>?expanded=true answers. s.mu is held.
+// jailExpanded is what GET /api/v1/jails/<n>?expanded=true answers. s.mu is held.
 func (s *Server) jailExpanded(j *api.Jail) any {
 	eff, src := api.ExpandedConfig(j.Spec, s.profilesFor(j.Metadata.Project, j.Spec.Profiles))
 	out := *j
@@ -62,7 +62,7 @@ type configResult struct {
 	Restarted       bool     `json:"restarted,omitempty"`
 }
 
-// jailConfig implements POST /1.0/jails/<n>/config. Like the daemon, it never
+// jailConfig implements POST /api/v1/jails/<n>/config. Like the daemon, it never
 // restarts a jail unless the request says restart=true.
 func (s *Server) jailConfig(w http.ResponseWriter, r *http.Request) {
 	ch, e := decode[api.ConfigChange](r)
@@ -88,7 +88,7 @@ func (s *Server) jailConfig(w http.ResponseWriter, r *http.Request) {
 		if _, err := api.ApplyConfig(&spec, ch.Set, ch.Unset); err != nil {
 			return reply{err: err.(*api.Error)}
 		}
-		op := s.startOp(rc.project, "jails.config", "Configure jail "+name, map[string][]string{"jails": {"/1.0/jails/" + name}}, func() (any, *api.Error) {
+		op := s.startOp(rc.project, "jails.config", "Configure jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			cur := s.jails.items[key]
 			if cur == nil {
 				return nil, notFound("jail", name)
@@ -102,7 +102,7 @@ func (s *Server) jailConfig(w http.ResponseWriter, r *http.Request) {
 				cur.Spec = spec
 				cur.Metadata.Generation++
 				cur.Metadata.UpdatedAt = s.now()
-				s.emit("jail-updated", "/1.0/jails/"+name)
+				s.emit("jail-updated", "/api/v1/jails/"+name)
 			}
 			res := configResult{RestartRequired: keys}
 			if res.RestartRequired == nil {

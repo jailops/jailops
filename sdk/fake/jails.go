@@ -149,7 +149,7 @@ func (s *Server) jailAction(w http.ResponseWriter, r *http.Request) {
 		default:
 			return reply{err: api.Errorf(api.CodeInvalid, "unknown action %q", act.Action)}
 		}
-		op := s.startOp(rc.project, "jails."+act.Action, act.Action+" jail "+name, map[string][]string{"jails": {"/1.0/jails/" + name}}, func() (any, *api.Error) {
+		op := s.startOp(rc.project, "jails."+act.Action, act.Action+" jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			j := s.jails.items[jk]
 			if j == nil {
 				return nil, notFound("jail", name)
@@ -169,7 +169,7 @@ func (s *Server) jailAction(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			s.emitIn(rc.project, "jail-"+map[string]string{"start": "started", "stop": "stopped", "restart": "restarted"}[act.Action], "/1.0/jails/"+name)
+			s.emitIn(rc.project, "jail-"+map[string]string{"start": "started", "stop": "stopped", "restart": "restarted"}[act.Action], "/api/v1/jails/"+name)
 			return clone(j), nil
 		})
 		return reply{op: &op}
@@ -245,7 +245,7 @@ func (s *Server) snapCreate(w http.ResponseWriter, r *http.Request) {
 		if s.findSnap(jk, name) != nil {
 			return reply{err: api.Errorf(api.CodeAlreadyExists, "snapshot %q already exists", name)}
 		}
-		op := s.startOp(rc.project, "jails.snapshot", "Snapshot "+jail, map[string][]string{"jails": {"/1.0/jails/" + jail}}, func() (any, *api.Error) {
+		op := s.startOp(rc.project, "jails.snapshot", "Snapshot "+jail, map[string][]string{"jails": {"/api/v1/jails/" + jail}}, func() (any, *api.Error) {
 			if s.jails.items[jk] == nil {
 				return nil, notFound("jail", jail)
 			}
@@ -254,7 +254,7 @@ func (s *Server) snapCreate(w http.ResponseWriter, r *http.Request) {
 				Spec:     api.JailSnapshotSpec{Jail: jail, Comment: req.Spec.Comment},
 			}
 			s.snapshots[jk] = append(s.snapshots[jk], sn)
-			s.emitIn(rc.project, "jail-snapshot-created", "/1.0/jails/"+jail+"/snapshots/"+name)
+			s.emitIn(rc.project, "jail-snapshot-created", "/api/v1/jails/"+jail+"/snapshots/"+name)
 			return clone(sn), nil
 		})
 		return reply{op: &op}
@@ -277,7 +277,7 @@ func (s *Server) snapDelete(w http.ResponseWriter, r *http.Request) {
 			for i, sn := range l {
 				if sn.Metadata.Name == snap {
 					s.snapshots[jk] = append(l[:i:i], l[i+1:]...)
-					s.emitIn(rc.project, "jail-snapshot-deleted", "/1.0/jails/"+jail+"/snapshots/"+snap)
+					s.emitIn(rc.project, "jail-snapshot-deleted", "/api/v1/jails/"+jail+"/snapshots/"+snap)
 					return nil, nil
 				}
 			}
@@ -329,7 +329,7 @@ func (s *Server) jailRollback(w http.ResponseWriter, r *http.Request) {
 		default:
 			return reply{err: api.Errorf(api.CodeInvalid, "unknown rollback scope %q", rb.Scope)}
 		}
-		op := s.startOp(rc.project, "jails.rollback", "Rollback "+name, map[string][]string{"jails": {"/1.0/jails/" + name}}, func() (any, *api.Error) {
+		op := s.startOp(rc.project, "jails.rollback", "Rollback "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			j := s.jails.items[jk]
 			if j == nil {
 				return nil, notFound("jail", name)
@@ -345,7 +345,7 @@ func (s *Server) jailRollback(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
-			s.emitIn(rc.project, "jail-rolled-back", "/1.0/jails/"+name)
+			s.emitIn(rc.project, "jail-rolled-back", "/api/v1/jails/"+name)
 			return clone(j), nil
 		})
 		return reply{op: &op}
@@ -380,7 +380,7 @@ func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 		if target == genNumber(j.Status.Generation) {
 			return reply{err: api.Errorf(api.CodeInvalid, "jail %q is already on generation g%d", name, target)}
 		}
-		op := s.startOp(rc.project, "jails.upgrade", "Upgrade "+name, map[string][]string{"jails": {"/1.0/jails/" + name}}, func() (any, *api.Error) {
+		op := s.startOp(rc.project, "jails.upgrade", "Upgrade "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			j := s.jails.items[jk]
 			if j == nil {
 				return nil, notFound("jail", name)
@@ -391,7 +391,7 @@ func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 					j.Spec.Image = j.Spec.Image[:i+1] + j.Status.Generation
 					j.Metadata.Generation++
 				}
-				s.emitIn(rc.project, "jail-upgraded", "/1.0/jails/"+name)
+				s.emitIn(rc.project, "jail-upgraded", "/api/v1/jails/"+name)
 			}
 			return clone(j), nil
 		})
@@ -715,7 +715,7 @@ func (s *Server) genBuild(w http.ResponseWriter, r *http.Request) {
 		if b.FromGeneration < 0 || (b.FromGeneration > 0 && s.findGen(name, b.FromGeneration) == nil) {
 			return reply{err: api.Errorf(api.CodeInvalid, "generation g%d does not exist", b.FromGeneration)}
 		}
-		op := s.startOp("", "images.build", "Build "+name, map[string][]string{"images": {"/1.0/images/" + name}}, func() (any, *api.Error) {
+		op := s.startOp("", "images.build", "Build "+name, map[string][]string{"images": {"/api/v1/images/" + name}}, func() (any, *api.Error) {
 			if s.images.items[name] == nil {
 				return nil, notFound("image", name)
 			}
@@ -729,7 +729,7 @@ func (s *Server) genBuild(w http.ResponseWriter, r *http.Request) {
 				s.gens[name] = append(s.gens[name], g)
 				s.genMax[name] = n
 				s.followAliases(name, n)
-				s.emit("image-generation-created", "/1.0/images/"+name+"/generations/"+strconv.Itoa(n))
+				s.emit("image-generation-created", "/api/v1/images/"+name+"/generations/"+strconv.Itoa(n))
 			}
 			return clone(g), nil
 		})

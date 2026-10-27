@@ -62,7 +62,7 @@ func (w *web) do(method, path string, body any) (int, api.Response, string) {
 
 func (w *web) login(user, pw string) int {
 	w.t.Helper()
-	st, env, _ := w.do("POST", "/1.0/auth/login", map[string]string{"username": user, "password": pw})
+	st, env, _ := w.do("POST", "/api/v1/auth/login", map[string]string{"username": user, "password": pw})
 	if st == 200 {
 		var s backupd.SessionBody
 		_ = json.Unmarshal(env.Metadata, &s)
@@ -85,7 +85,7 @@ func TestManagementAPI(t *testing.T) {
 
 	// unauthenticated: public routes only
 	anon := r.web()
-	if st, env, _ := anon.do("GET", "/1.0", nil); st != 200 {
+	if st, env, _ := anon.do("GET", "/api/v1", nil); st != 200 {
 		t.Fatalf("server info: %d", st)
 	} else {
 		var si api.ServerInfo
@@ -94,12 +94,12 @@ func TestManagementAPI(t *testing.T) {
 			t.Fatalf("%+v", si)
 		}
 	}
-	for _, p := range []string{"/1.0/repository", "/1.0/hosts", "/1.0/jobs", "/1.0/audit", "/1.0/users", "/1.0/groups"} {
+	for _, p := range []string{"/api/v1/repository", "/api/v1/hosts", "/api/v1/jobs", "/api/v1/audit", "/api/v1/users", "/api/v1/groups"} {
 		if st, _, _ := anon.do("GET", p, nil); st != 401 {
 			t.Errorf("GET %s without credentials: %d", p, st)
 		}
 	}
-	if st, _, _ := anon.do("GET", "/1.0/nonexistent", nil); st != 404 {
+	if st, _, _ := anon.do("GET", "/api/v1/nonexistent", nil); st != 404 {
 		t.Errorf("unknown route: %d", st)
 	}
 	// login failures
@@ -121,7 +121,7 @@ func TestManagementAPI(t *testing.T) {
 	}
 
 	root := &web{t: t, h: r.Srv.WebHandler()}
-	root.do("GET", "/1.0", nil)
+	root.do("GET", "/api/v1", nil)
 	// log in from another address to avoid the lockout of 192.0.2.1
 	ops, eye := r.web2("192.0.2.2"), r.web2("192.0.2.3")
 	rootW := r.web2("192.0.2.4")
@@ -137,38 +137,38 @@ func TestManagementAPI(t *testing.T) {
 			t.Errorf("%s %s: %d, want %d: %s", method, path, st, want, b)
 		}
 	}
-	check(eye, "GET", "/1.0/repository", nil, 200)
-	check(eye, "GET", "/1.0/groups", nil, 200)
-	check(eye, "GET", "/1.0/hosts", nil, 200)
-	check(eye, "GET", "/1.0/audit", nil, 403)
-	check(eye, "GET", "/1.0/users", nil, 403)
-	check(eye, "POST", "/1.0/jobs/gc", node.GCRequest{DryRun: true}, 403)
-	check(eye, "PUT", "/1.0/maintenance", node.ModeBody{Mode: "read-only"}, 403)
-	check(ops, "POST", "/1.0/jobs/gc", node.GCRequest{DryRun: true}, 202)
-	check(ops, "GET", "/1.0/audit", nil, 403)
-	check(ops, "POST", "/1.0/hosts", backupd.HostBody{Name: "x", Fingerprint: strings.Repeat("a", 64)}, 403)
-	check(rootW, "GET", "/1.0/audit", nil, 200)
-	check(rootW, "GET", "/1.0/users", nil, 200)
+	check(eye, "GET", "/api/v1/repository", nil, 200)
+	check(eye, "GET", "/api/v1/groups", nil, 200)
+	check(eye, "GET", "/api/v1/hosts", nil, 200)
+	check(eye, "GET", "/api/v1/audit", nil, 403)
+	check(eye, "GET", "/api/v1/users", nil, 403)
+	check(eye, "POST", "/api/v1/jobs/gc", node.GCRequest{DryRun: true}, 403)
+	check(eye, "PUT", "/api/v1/maintenance", node.ModeBody{Mode: "read-only"}, 403)
+	check(ops, "POST", "/api/v1/jobs/gc", node.GCRequest{DryRun: true}, 202)
+	check(ops, "GET", "/api/v1/audit", nil, 403)
+	check(ops, "POST", "/api/v1/hosts", backupd.HostBody{Name: "x", Fingerprint: strings.Repeat("a", 64)}, 403)
+	check(rootW, "GET", "/api/v1/audit", nil, 200)
+	check(rootW, "GET", "/api/v1/users", nil, 200)
 	// a response never carries a password hash
-	if _, _, b := rootW.do("GET", "/1.0/users", nil); strings.Contains(b, "argon2") || strings.Contains(b, "password_hash") {
+	if _, _, b := rootW.do("GET", "/api/v1/users", nil); strings.Contains(b, "argon2") || strings.Contains(b, "password_hash") {
 		t.Fatalf("the user list leaks hashes: %s", b)
 	}
 	// CSRF: a session without the header cannot change anything
 	rootW2 := &web{t: t, h: rootW.h, cookie: rootW.cookie}
-	check(rootW2, "POST", "/1.0/hosts", backupd.HostBody{Name: "csrf", Fingerprint: strings.Repeat("b", 64)}, 403)
+	check(rootW2, "POST", "/api/v1/hosts", backupd.HostBody{Name: "csrf", Fingerprint: strings.Repeat("b", 64)}, 403)
 	rootW3 := &web{t: t, h: rootW.h, cookie: rootW.cookie, csrf: "wrong"}
-	check(rootW3, "POST", "/1.0/hosts", backupd.HostBody{Name: "csrf", Fingerprint: strings.Repeat("b", 64)}, 403)
+	check(rootW3, "POST", "/api/v1/hosts", backupd.HostBody{Name: "csrf", Fingerprint: strings.Repeat("b", 64)}, 403)
 
 	// hosts
-	check(rootW, "POST", "/1.0/hosts", backupd.HostBody{Name: "newhost", Fingerprint: strings.Repeat("c", 64), Scopes: []string{"backup-push"}}, 201)
-	check(rootW, "POST", "/1.0/hosts", backupd.HostBody{Name: "newhost", Fingerprint: strings.Repeat("d", 64)}, 409)
-	check(rootW, "POST", "/1.0/hosts", backupd.HostBody{Name: "bad", Fingerprint: strings.Repeat("e", 64), Scopes: []string{"backup-admin"}}, 400) // administration is not a host scope
-	check(rootW, "PUT", "/1.0/hosts/newhost", map[string]any{"scopes": []string{"backup-pull"}}, 200)
-	check(rootW, "DELETE", "/1.0/hosts/newhost", nil, 200)
-	check(rootW, "DELETE", "/1.0/hosts/nohost", nil, 404)
+	check(rootW, "POST", "/api/v1/hosts", backupd.HostBody{Name: "newhost", Fingerprint: strings.Repeat("c", 64), Scopes: []string{"backup-push"}}, 201)
+	check(rootW, "POST", "/api/v1/hosts", backupd.HostBody{Name: "newhost", Fingerprint: strings.Repeat("d", 64)}, 409)
+	check(rootW, "POST", "/api/v1/hosts", backupd.HostBody{Name: "bad", Fingerprint: strings.Repeat("e", 64), Scopes: []string{"backup-admin"}}, 400) // administration is not a host scope
+	check(rootW, "PUT", "/api/v1/hosts/newhost", map[string]any{"scopes": []string{"backup-pull"}}, 200)
+	check(rootW, "DELETE", "/api/v1/hosts/newhost", nil, 200)
+	check(rootW, "DELETE", "/api/v1/hosts/nohost", nil, 404)
 
 	// tokens: the secret is shown once and works as a bearer credential
-	st, env, b := rootW.do("POST", "/1.0/tokens", backupd.TokenBody{Name: "ci", Role: "readonly"})
+	st, env, b := rootW.do("POST", "/api/v1/tokens", backupd.TokenBody{Name: "ci", Role: "readonly"})
 	if st != 201 {
 		t.Fatalf("%d %s", st, b)
 	}
@@ -177,44 +177,44 @@ func TestManagementAPI(t *testing.T) {
 	if !strings.HasPrefix(tk.Secret, "jot_") {
 		t.Fatalf("%s", b)
 	}
-	if _, _, b := rootW.do("GET", "/1.0/tokens", nil); strings.Contains(b, tk.Secret) {
+	if _, _, b := rootW.do("GET", "/api/v1/tokens", nil); strings.Contains(b, tk.Secret) {
 		t.Fatal("the token list shows a secret")
 	}
 	tw := &web{t: t, h: rootW.h, token: tk.Secret}
-	check(tw, "GET", "/1.0/repository", nil, 200)
-	check(tw, "POST", "/1.0/jobs/gc", node.GCRequest{DryRun: true}, 403)
-	if st, _, _ := (&web{t: t, h: rootW.h, token: "jot_" + strings.Repeat("a", 52)}).do("GET", "/1.0/repository", nil); st != 401 {
+	check(tw, "GET", "/api/v1/repository", nil, 200)
+	check(tw, "POST", "/api/v1/jobs/gc", node.GCRequest{DryRun: true}, 403)
+	if st, _, _ := (&web{t: t, h: rootW.h, token: "jot_" + strings.Repeat("a", 52)}).do("GET", "/api/v1/repository", nil); st != 401 {
 		t.Fatalf("an unknown token: %d", st)
 	}
-	check(rootW, "DELETE", "/1.0/tokens/ci", nil, 200)
-	check(tw, "GET", "/1.0/repository", nil, 401)
+	check(rootW, "DELETE", "/api/v1/tokens/ci", nil, 200)
+	check(tw, "GET", "/api/v1/repository", nil, 401)
 
 	// users: the last administrator is protected
-	check(rootW, "PUT", "/1.0/users/root", backupd.UserBody{Role: "readonly"}, 409)
-	check(rootW, "DELETE", "/1.0/users/root", nil, 409)
-	check(rootW, "PUT", "/1.0/users/eye", backupd.UserBody{Role: "readonly", Disabled: true}, 200)
-	check(eye, "GET", "/1.0/repository", nil, 401) // a disabled account loses its session at once
+	check(rootW, "PUT", "/api/v1/users/root", backupd.UserBody{Role: "readonly"}, 409)
+	check(rootW, "DELETE", "/api/v1/users/root", nil, 409)
+	check(rootW, "PUT", "/api/v1/users/eye", backupd.UserBody{Role: "readonly", Disabled: true}, 200)
+	check(eye, "GET", "/api/v1/repository", nil, 401) // a disabled account loses its session at once
 
 	// maintenance through the management API stops hosts
 	h := r.enroll("h")
-	check(ops, "PUT", "/1.0/maintenance", node.ModeBody{Mode: "read-only"}, 200)
+	check(ops, "PUT", "/api/v1/maintenance", node.ModeBody{Mode: "read-only"}, 200)
 	g := r.Fix.Group("h", "j")
 	if _, err := h.C.Begin(ctx, g, nodetest.SnapshotID(r.Clock.Now(), 1), ""); code(err) != api.CodeMaintenance {
 		t.Fatalf("a host during maintenance: %v", err)
 	}
-	check(ops, "PUT", "/1.0/maintenance", node.ModeBody{Mode: "online"}, 200)
+	check(ops, "PUT", "/api/v1/maintenance", node.ModeBody{Mode: "online"}, 200)
 	if s, err := h.C.Begin(ctx, g, nodetest.SnapshotID(r.Clock.Now(), 1), ""); err != nil {
 		t.Fatal(err)
 	} else {
 		_ = s.Abort(ctx)
 	}
 	// logout ends the session
-	check(rootW, "POST", "/1.0/auth/logout", nil, 200)
-	check(rootW, "GET", "/1.0/repository", nil, 401)
+	check(rootW, "POST", "/api/v1/auth/logout", nil, 200)
+	check(rootW, "GET", "/api/v1/repository", nil, 401)
 	// the audit log recorded the administrative actions
 	rw := r.web2("192.0.2.9")
 	rw.login("root", pw)
-	_, env, _ = rw.do("GET", "/1.0/audit?limit=500", nil)
+	_, env, _ = rw.do("GET", "/api/v1/audit?limit=500", nil)
 	var entries []struct{ Action, Actor string }
 	_ = json.Unmarshal(env.Metadata, &entries)
 	seen := map[string]bool{}
@@ -299,7 +299,7 @@ func TestLoginHardening(t *testing.T) {
 	// A browser login from another site is refused.
 	w := r.web2("192.0.2.60")
 	b, _ := json.Marshal(map[string]string{"username": "root", "password": pw})
-	req := httptest.NewRequest("POST", "https://node.test/1.0/auth/login", bytes.NewReader(b))
+	req := httptest.NewRequest("POST", "https://node.test/api/v1/auth/login", bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Origin", "https://evil.test")
 	rec := httptest.NewRecorder()
@@ -308,7 +308,7 @@ func TestLoginHardening(t *testing.T) {
 		t.Fatalf("cross-origin login: %d", rec.Code)
 	}
 	// A body that is not declared as JSON is refused.
-	req = httptest.NewRequest("POST", "https://node.test/1.0/auth/login", bytes.NewReader(b))
+	req = httptest.NewRequest("POST", "https://node.test/api/v1/auth/login", bytes.NewReader(b))
 	req.Header.Set("Content-Type", "text/plain")
 	rec = httptest.NewRecorder()
 	w.h.ServeHTTP(rec, req)
@@ -321,19 +321,19 @@ func TestLoginHardening(t *testing.T) {
 	if one.login("root", pw) != 200 || two.login("root", pw) != 200 {
 		t.Fatal("login")
 	}
-	if st, _, body := one.do("POST", "/1.0/auth/password", map[string]string{"current": pw, "new": "another long passphrase 42"}); st != 200 {
+	if st, _, body := one.do("POST", "/api/v1/auth/password", map[string]string{"current": pw, "new": "another long passphrase 42"}); st != 200 {
 		t.Fatalf("%d %s", st, body)
 	}
-	if st, _, _ := two.do("GET", "/1.0/auth/session", nil); st != 401 {
+	if st, _, _ := two.do("GET", "/api/v1/auth/session", nil); st != 401 {
 		t.Fatalf("the other session survived a password change: %d", st)
 	}
-	if st, _, _ := one.do("GET", "/1.0/auth/session", nil); st != 200 {
+	if st, _, _ := one.do("GET", "/api/v1/auth/session", nil); st != 200 {
 		t.Fatalf("the session that changed the password ended: %d", st)
 	}
 	// Guessing the current password is limited.
 	limited := false
 	for range 12 {
-		if st, _, _ := one.do("POST", "/1.0/auth/password", map[string]string{"current": "wrong guess number one", "new": "yet another passphrase 43"}); st == 429 {
+		if st, _, _ := one.do("POST", "/api/v1/auth/password", map[string]string{"current": "wrong guess number one", "new": "yet another passphrase 43"}); st == 429 {
 			limited = true
 		}
 	}
@@ -346,7 +346,7 @@ func TestLoginHardening(t *testing.T) {
 	bad.token = "jot_" + strings.Repeat("a", 52)
 	got429 := false
 	for range 15 {
-		if st, _, _ := bad.do("GET", "/1.0/repository", nil); st == 429 {
+		if st, _, _ := bad.do("GET", "/api/v1/repository", nil); st == 429 {
 			got429 = true
 		}
 	}

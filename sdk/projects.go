@@ -15,7 +15,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// ProjectClient accesses /1.0/projects.
+// ProjectClient accesses /api/v1/projects.
 type ProjectClient struct {
 	*Resource[api.Project]
 }
@@ -23,19 +23,19 @@ type ProjectClient struct {
 // Projects returns the projects client. Projects are host-level objects: the
 // request's project parameter is not needed.
 func (c *Client) Projects() *ProjectClient {
-	return &ProjectClient{newResource[api.Project](c, "/1.0/projects")}
+	return &ProjectClient{newResource[api.Project](c, "/api/v1/projects")}
 }
 
 // Aggregate asks a hub for the definition of a fleet project and its state on
-// every host it lists (GET /1.0/projects/<name>?host=all).
+// every host it lists (GET /api/v1/projects/<name>?host=all).
 func (p *ProjectClient) Aggregate(ctx context.Context, name string) (api.ProjectAggregate, error) {
 	v, _, err := get[api.ProjectAggregate](ctx, p.c, p.item(name), url.Values{"host": {"all"}})
 	return v, err
 }
 
-// Storage accesses /1.0/storage.
+// Storage accesses /api/v1/storage.
 func (c *Client) Storage() *Resource[api.Storage] {
-	return newResource[api.Storage](c, "/1.0/storage")
+	return newResource[api.Storage](c, "/api/v1/storage")
 }
 
 // TrustClient accesses the trust workflow.
@@ -47,11 +47,11 @@ func (c *Client) Trust() *TrustClient { return &TrustClient{c} }
 // CreateToken creates a single-use trust token (global admin). The token is
 // returned once.
 func (t *TrustClient) CreateToken(ctx context.Context, req api.TrustTokenRequest) (api.TrustToken, error) {
-	out, _, err := send[api.TrustToken](ctx, t.c, request{method: http.MethodPost, path: "/1.0/trust/tokens", body: req})
+	out, _, err := send[api.TrustToken](ctx, t.c, request{method: http.MethodPost, path: "/api/v1/trust/tokens", body: req})
 	return out, err
 }
 
-// SessionClient accesses /1.0/sessions.
+// SessionClient accesses /api/v1/sessions.
 type SessionClient struct{ c *Client }
 
 // Sessions returns the sessions client.
@@ -59,18 +59,18 @@ func (c *Client) Sessions() *SessionClient { return &SessionClient{c} }
 
 // List iterates the caller's sessions (all of them for a global admin).
 func (s *SessionClient) List(ctx context.Context) iter.Seq2[api.Session, error] {
-	return list[api.Session](ctx, s.c, "/1.0/sessions", nil)
+	return list[api.Session](ctx, s.c, "/api/v1/sessions", nil)
 }
 
 // Revoke ends a session; it takes effect on the session's next request.
 func (s *SessionClient) Revoke(ctx context.Context, id string) error {
-	_, _, err := send[None](ctx, s.c, request{method: http.MethodDelete, path: "/1.0/sessions/" + esc(id)})
+	_, _, err := send[None](ctx, s.c, request{method: http.MethodDelete, path: "/api/v1/sessions/" + esc(id)})
 	return err
 }
 
-// Whoami returns the caller as the server sees it (GET /1.0/auth/session).
+// Whoami returns the caller as the server sees it (GET /api/v1/auth/session).
 func (c *Client) Whoami(ctx context.Context) (api.Identity, error) {
-	v, _, err := get[api.Identity](ctx, c, "/1.0/auth/session", nil)
+	v, _, err := get[api.Identity](ctx, c, "/api/v1/auth/session", nil)
 	return v, err
 }
 
@@ -131,7 +131,7 @@ func RedeemTrustToken(ctx context.Context, serverURL, token string, cert tls.Cer
 	defer c.Close()
 	body := api.TrustClientRequest{Token: token,
 		Certificate: string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: cert.Certificate[0]}))}
-	out, _, err := send[api.Certificate](ctx, c, request{method: http.MethodPost, path: "/1.0/trust/clients", body: body})
+	out, _, err := send[api.Certificate](ctx, c, request{method: http.MethodPost, path: "/api/v1/trust/clients", body: body})
 	if err != nil {
 		return res, err
 	}
@@ -139,14 +139,14 @@ func RedeemTrustToken(ctx context.Context, serverURL, token string, cert tls.Cer
 	return res, nil
 }
 
-// Profiles accesses /1.0/profiles of the client's project (?project=host
+// Profiles accesses /api/v1/profiles of the client's project (?project=host
 // selects the host-level profiles).
 func (c *Client) Profiles() *Resource[api.Profile] {
-	return newResource[api.Profile](c, "/1.0/profiles")
+	return newResource[api.Profile](c, "/api/v1/profiles")
 }
 
 // ConfigKeys returns the registry of configuration keys of the server.
 func (c *Client) ConfigKeys(ctx context.Context) ([]api.ConfigKey, error) {
-	out, _, err := get[[]api.ConfigKey](ctx, c, "/1.0/config-keys", nil)
+	out, _, err := get[[]api.ConfigKey](ctx, c, "/api/v1/config-keys", nil)
 	return out, err
 }

@@ -10,7 +10,7 @@ import (
 // Exec runs a command in a running jail over one HTTP connection that is
 // upgraded to a framed, bidirectional stream (design 8.3):
 //
-//	POST /1.0/jails/<n>/exec
+//	POST /api/v1/jails/<n>/exec
 //	Connection: Upgrade
 //	Upgrade: jailops-exec/1
 //	<ExecRequest as JSON>
@@ -42,7 +42,7 @@ const (
 	FrameExit   FrameType = 6
 )
 
-// ExecRequest is the body of POST /1.0/jails/<n>/exec.
+// ExecRequest is the body of POST /api/v1/jails/<n>/exec.
 type ExecRequest struct {
 	// Argv is the command, one element per argument; it is never run by a shell.
 	Argv []string `json:"argv,omitempty"`

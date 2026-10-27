@@ -30,7 +30,7 @@ type reqInfo struct {
 	kind    string // token, certificate, anonymous
 	authed  bool
 	project string
-	// aggregate marks GET /1.0/projects/<n>?host=all on a hub.
+	// aggregate marks GET /api/v1/projects/<n>?host=all on a hub.
 	aggregate bool
 }
 
@@ -79,43 +79,43 @@ func classify(pattern string) (api.Permission, string) {
 		return api.PermAdmin, scope
 	}
 	switch {
-	case pattern == "GET /1.0", pattern == "POST /1.0/trust/clients":
+	case pattern == "GET /api/v1", pattern == "POST /api/v1/trust/clients":
 		return "", scopePublic
-	case path == "/1.0/auth/session":
+	case path == "/api/v1/auth/session":
 		return api.PermReadonly, scopeSelf
-	case path == "/1.0/config-keys":
+	case path == "/api/v1/config-keys":
 		return api.PermReadonly, scopeSelf
-	case strings.HasPrefix(path, "/1.0/sessions"):
+	case strings.HasPrefix(path, "/api/v1/sessions"):
 		return api.PermReadonly, scopeSelf
-	case path == "/1.0/trust/tokens", strings.HasPrefix(path, "/1.0/users"), strings.HasPrefix(path, "/1.0/tokens"),
-		strings.HasPrefix(path, "/1.0/certificates"):
+	case path == "/api/v1/trust/tokens", strings.HasPrefix(path, "/api/v1/users"), strings.HasPrefix(path, "/api/v1/tokens"),
+		strings.HasPrefix(path, "/api/v1/certificates"):
 		return api.PermAdmin, scopeGlobal
-	case strings.HasPrefix(path, "/1.0/remotes"), strings.HasPrefix(path, "/1.0/backup-targets"):
+	case strings.HasPrefix(path, "/api/v1/remotes"), strings.HasPrefix(path, "/api/v1/backup-targets"):
 		return rw(scopeGlobal)
-	case strings.HasPrefix(path, "/1.0/networks"), strings.HasPrefix(path, "/1.0/images"),
-		strings.HasPrefix(path, "/1.0/storage"), strings.HasPrefix(path, "/1.0/projects"):
+	case strings.HasPrefix(path, "/api/v1/networks"), strings.HasPrefix(path, "/api/v1/images"),
+		strings.HasPrefix(path, "/api/v1/storage"), strings.HasPrefix(path, "/api/v1/projects"):
 		return rw(scopeHost)
-	case path == "/1.0/events", path == "/1.0/updates":
+	case path == "/api/v1/events", path == "/api/v1/updates":
 		return api.PermReadonly, scopeList
-	case path == "/1.0/updates/check", path == "/1.0/updates/apply":
+	case path == "/api/v1/updates/check", path == "/api/v1/updates/apply":
 		return api.PermOperator, scopeProject
-	case strings.HasPrefix(path, "/1.0/operations"):
+	case strings.HasPrefix(path, "/api/v1/operations"):
 		if method == http.MethodDelete {
 			return api.PermOperator, scopeList
 		}
 		return api.PermReadonly, scopeList
-	case strings.HasPrefix(path, "/1.0/backup/key"), path == "/1.0/backups/run":
+	case strings.HasPrefix(path, "/api/v1/backup/key"), path == "/api/v1/backups/run":
 		return api.PermAdmin, scopeGlobal
-	case strings.HasPrefix(path, "/1.0/backups/") && strings.HasSuffix(path, "/verify"):
+	case strings.HasPrefix(path, "/api/v1/backups/") && strings.HasSuffix(path, "/verify"):
 		return api.PermOperator, scopeList
-	case strings.HasPrefix(path, "/1.0/backups"):
+	case strings.HasPrefix(path, "/api/v1/backups"):
 		if method == http.MethodDelete {
 			return api.PermBackupAdmin, scopeList
 		}
 		return rw(scopeList)
-	case path == "/1.0/restores":
+	case path == "/api/v1/restores":
 		return api.PermRestore, scopeProject
-	case strings.HasPrefix(path, "/1.0/jails/"):
+	case strings.HasPrefix(path, "/api/v1/jails/"):
 		switch {
 		case strings.HasSuffix(path, "/console"), strings.Contains(path, "/console/"):
 			return api.PermOperator, scopeProject
@@ -241,7 +241,7 @@ func (s *Server) authorize(rc *reqInfo, pattern string, r *http.Request, authErr
 	}
 	switch scope {
 	case scopeProject:
-		if rc.project == api.HostProfileProject && strings.HasPrefix(r.URL.Path, "/1.0/profiles") {
+		if rc.project == api.HostProfileProject && strings.HasPrefix(r.URL.Path, "/api/v1/profiles") {
 			if r.Method != http.MethodGet && !rc.id.Global {
 				return api.Errorf(api.CodeForbidden, "host-level profiles need a global admin")
 			}

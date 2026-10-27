@@ -147,15 +147,16 @@ type Projects struct {
 	NAT    bool   `yaml:"nat"`
 }
 
-// Web configures the embedded web console of the host. The console is optional: with enabled false the daemon serves the
-// API only, every path outside /1.0 and /healthz answers 404, and nothing else changes.
+// Web configures the embedded web console of the host. The console is always in the binary and off until the operator
+// turns it on: with enabled false (the default) the daemon serves the API only, every path outside /api/v1 and /healthz
+// answers 404, and nothing else changes.
 type Web struct {
-	// Enabled defaults to true.
+	// Enabled defaults to false.
 	Enabled *bool `yaml:"enabled"`
 }
 
 // UI reports whether the embedded console is served.
-func (c Config) UI() bool { return c.Web.Enabled == nil || *c.Web.Enabled }
+func (c Config) UI() bool { return c.Web.Enabled != nil && *c.Web.Enabled }
 
 // Listen configures the listeners.
 type Listen struct {
@@ -351,7 +352,7 @@ func (c Config) finish() (Config, error) {
 	if a := c.Listen.HTTPS.Address; a != "" {
 		host, port, err := net.SplitHostPort(a)
 		if err != nil {
-			return c, fmt.Errorf("config: listen.https.address %q must be host:port or :port (for example \":8443\" or \"127.0.0.1:8443\"): %v", a, err)
+			return c, fmt.Errorf("config: listen.https.address %q must be host:port or :port (for example \":39110\" or \"127.0.0.1:39110\"): %v", a, err)
 		}
 		if n, err := strconv.Atoi(port); err != nil || n < 0 || n > 65535 {
 			return c, fmt.Errorf("config: listen.https.address %q has an invalid port", a)

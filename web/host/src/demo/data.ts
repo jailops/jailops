@@ -200,20 +200,20 @@ export function remotes(): Remote[] {
 }
 
 export function operations(): Operation[] {
-  const o = (id: string, d: string, status: Operation['status'], age: number, extra: Partial<Operation> = {}): Operation => ({ id, description: d, status, resources: { jails: ['/1.0/jails/web'] }, may_cancel: false, created_at: ago(age), updated_at: ago(age - 5), ...extra })
+  const o = (id: string, d: string, status: Operation['status'], age: number, extra: Partial<Operation> = {}): Operation => ({ id, description: d, status, resources: { jails: ['/api/v1/jails/web'] }, may_cancel: false, created_at: ago(age), updated_at: ago(age - 5), ...extra })
   return [
     o('op-1001', 'Snapshot web', 'success', 3600 * 9),
-    o('op-1002', 'Upgrade db to freebsd-15#g4', 'failure', 3600 * 3, { resources: { jails: ['/1.0/jails/db'] }, error: { code: 'busy', message: 'Replication is running on jail db.', hint: 'Wait for the send to finish or pause the backup policy db-hourly.' } }),
-    o('op-1003', 'Build freebsd-15#g5', 'running', 140, { may_cancel: true, progress: 62, resources: { images: ['/1.0/images/freebsd-15'] } }),
-    o('op-1004', 'Start cache', 'success', 90, { resources: { jails: ['/1.0/jails/cache'] } }),
+    o('op-1002', 'Upgrade db to freebsd-15#g4', 'failure', 3600 * 3, { resources: { jails: ['/api/v1/jails/db'] }, error: { code: 'busy', message: 'Replication is running on jail db.', hint: 'Wait for the send to finish or pause the backup policy db-hourly.' } }),
+    o('op-1003', 'Build freebsd-15#g5', 'running', 140, { may_cancel: true, progress: 62, resources: { images: ['/api/v1/images/freebsd-15'] } }),
+    o('op-1004', 'Start cache', 'success', 90, { resources: { jails: ['/api/v1/jails/cache'] } }),
   ]
 }
 
 export function audit(): AuditEntry[] {
   const a = (i: number, who: string, action: string, res: string, age: number, result = 'ok'): AuditEntry => ({ id: 'a' + i, timestamp: ago(age), requestor: who, action, resource: res, result, source_ip: who === 'ci' ? '198.51.100.20' : '203.0.113.5' })
   return [
-    a(1, 'alice', 'jail.start', '/1.0/jails/cache', 90), a(2, 'alice', 'login', 'session', 400), a(3, 'ci', 'jail.snapshot', '/1.0/jails/web', 3600 * 9),
-    a(4, 'bob', 'POST /1.0/jails/{name}/upgrade', '/1.0/jails/db', 3600 * 3, 'error'), a(5, 'alice', 'token.create', '/1.0/tokens/ci', 86400 * 5), a(6, 'alice', 'firewall.update', '/1.0/firewall/policies/web-default', 86400 * 6),
+    a(1, 'alice', 'jail.start', '/api/v1/jails/cache', 90), a(2, 'alice', 'login', 'session', 400), a(3, 'ci', 'jail.snapshot', '/api/v1/jails/web', 3600 * 9),
+    a(4, 'bob', 'POST /api/v1/jails/{name}/upgrade', '/api/v1/jails/db', 3600 * 3, 'error'), a(5, 'alice', 'token.create', '/api/v1/tokens/ci', 86400 * 5), a(6, 'alice', 'firewall.update', '/api/v1/firewall/policies/web-default', 86400 * 6),
   ]
 }
 

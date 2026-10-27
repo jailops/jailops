@@ -93,7 +93,7 @@ func (s *Server) createTrustToken(w http.ResponseWriter, r *http.Request) {
 		payload, _ := json.Marshal(trustClaims{V: 1, ID: id, Name: req.Name, FP: s.serverFP, Exp: exp.Unix(), Sec: randHex(16)})
 		p := b64.EncodeToString(payload)
 		tok := "joc_" + p + "." + b64.EncodeToString(s.trustMAC(p))
-		s.emit("trust-token-created", "/1.0/trust/tokens/"+req.Name)
+		s.emit("trust-token-created", "/api/v1/trust/tokens/"+req.Name)
 		return reply{status: 201, meta: api.TrustToken{Name: req.Name, Token: tok, ExpiresAt: exp}}
 	}()
 	s.mu.Unlock()
@@ -214,7 +214,7 @@ func (s *Server) revokeSession(w http.ResponseWriter, r *http.Request) {
 	ok := sess != nil && (rc.id.Global || sess.User == rc.id.Name)
 	if ok {
 		delete(s.sessions, id)
-		s.emit("session-revoked", "/1.0/sessions/"+id)
+		s.emit("session-revoked", "/api/v1/sessions/"+id)
 	}
 	s.mu.Unlock()
 	if !ok {

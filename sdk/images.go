@@ -9,14 +9,14 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// ImageClient accesses /1.0/images.
+// ImageClient accesses /api/v1/images.
 type ImageClient struct {
 	*Resource[api.Image]
 }
 
 // Images returns the images client.
 func (c *Client) Images() *ImageClient {
-	return &ImageClient{newResource[api.Image](c, "/1.0/images")}
+	return &ImageClient{newResource[api.Image](c, "/api/v1/images")}
 }
 
 // Generations iterates the generations of an image.
@@ -60,14 +60,14 @@ func (i *ImageClient) DeleteAlias(ctx context.Context, image, alias string) (api
 	return out, err
 }
 
-// NetworkClient accesses /1.0/networks.
+// NetworkClient accesses /api/v1/networks.
 type NetworkClient struct {
 	*Resource[api.Network]
 }
 
 // Networks returns the networks client.
 func (c *Client) Networks() *NetworkClient {
-	return &NetworkClient{newResource[api.Network](c, "/1.0/networks")}
+	return &NetworkClient{newResource[api.Network](c, "/api/v1/networks")}
 }
 
 // Leases iterates the addresses allocated on a network.
@@ -81,12 +81,12 @@ type FirewallClient struct{ c *Client }
 // Firewall returns the firewall client.
 func (c *Client) Firewall() *FirewallClient { return &FirewallClient{c} }
 
-// Policies accesses /1.0/firewall/policies.
+// Policies accesses /api/v1/firewall/policies.
 func (f *FirewallClient) Policies() *Resource[api.FirewallPolicy] {
-	return newResource[api.FirewallPolicy](f.c, "/1.0/firewall/policies")
+	return newResource[api.FirewallPolicy](f.c, "/api/v1/firewall/policies")
 }
 
-// AddressSets accesses /1.0/firewall/address-sets.
+// AddressSets accesses /api/v1/firewall/address-sets.
 func (f *FirewallClient) AddressSets() *Resource[api.AddressSet] {
-	return newResource[api.AddressSet](f.c, "/1.0/firewall/address-sets")
+	return newResource[api.AddressSet](f.c, "/api/v1/firewall/address-sets")
 }

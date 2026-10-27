@@ -198,7 +198,7 @@ func TestEventsReconnectWithLastEventID(t *testing.T) {
 		}
 	}
 	mk("a")
-	if got := <-out; got != "/1.0/firewall/address-sets/a" {
+	if got := <-out; got != "/api/v1/firewall/address-sets/a" {
 		t.Fatal(got)
 	}
 	srv.DisconnectEventStreams()
@@ -264,7 +264,7 @@ func TestErrorMappingAndRetries(t *testing.T) {
 		409: api.CodeAlreadyExists, 412: api.CodeConflict, 501: api.CodeUnsupported, 500: api.CodeInternal,
 	} {
 		srv.ClearFailures()
-		srv.FailStatus("POST", "/1.0/networks", status, -1)
+		srv.FailStatus("POST", "/api/v1/networks", status, -1)
 		_, err := c.Networks().Create(ctxT(t), api.Network{Metadata: api.ObjectMeta{Name: "x"}})
 		if !api.IsCode(err, code) {
 			t.Errorf("status %d: got %v want %s", status, err, code)
@@ -275,7 +275,7 @@ func TestErrorMappingAndRetries(t *testing.T) {
 	}
 	srv.ClearFailures()
 	// Idempotent GET is retried through 503.
-	srv.FailStatus("GET", "/1.0/jails", 503, 2)
+	srv.FailStatus("GET", "/api/v1/jails", 503, 2)
 	n := 0
 	for _, err := range c.Jails().List(ctxT(t)) {
 		if err != nil {
@@ -285,7 +285,7 @@ func TestErrorMappingAndRetries(t *testing.T) {
 	}
 	count := func(method string) (k int) {
 		for _, r := range srv.Requests() {
-			if r.Method == method && r.Path == "/1.0/jails" {
+			if r.Method == method && r.Path == "/api/v1/jails" {
 				k++
 			}
 		}
@@ -295,13 +295,13 @@ func TestErrorMappingAndRetries(t *testing.T) {
 		t.Fatalf("GET attempts: %d", count("GET"))
 	}
 	// POST is never retried.
-	srv.FailStatus("POST", "/1.0/jails", 503, 1)
+	srv.FailStatus("POST", "/api/v1/jails", 503, 1)
 	_, err := c.Jails().Create(ctxT(t), sdk.NewJail("web", webSpec()))
 	if !api.IsCode(err, api.CodeBusy) || count("POST") != 1 {
 		t.Fatalf("err=%v posts=%d", err, count("POST"))
 	}
 	// Structured server errors keep code, hint and add the request id.
-	srv.FailRequests("GET", "/1.0/jails/web", &api.Error{Code: api.CodeNoQuorum, Message: "no quorum", Hint: "wait"}, -1)
+	srv.FailRequests("GET", "/api/v1/jails/web", &api.Error{Code: api.CodeNoQuorum, Message: "no quorum", Hint: "wait"}, -1)
 	_, err = c.Jails().Get(ctxT(t), "web")
 	var ae *api.Error
 	if !errors.As(err, &ae) || ae.Hint != "wait" || ae.Detail["request_id"] == "" {

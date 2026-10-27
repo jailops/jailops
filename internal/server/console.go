@@ -18,7 +18,7 @@ import (
 )
 
 // The browser console. The exec protocol is an HTTP upgrade, which a browser cannot open, so the web console
-// uses a session instead: POST /1.0/jails/<n>/console starts a command with a terminal and returns an id,
+// uses a session instead: POST /api/v1/jails/<n>/console starts a command with a terminal and returns an id,
 // GET .../console/<id>/output streams what it prints as server-sent events, POST .../input, POST .../resize and
 // DELETE do the rest. The session is the same service.StartExec as the upgrade route (same project rules, same
 // per-jail limits, same audit entries) and belongs to the identity that opened it.
@@ -134,7 +134,7 @@ func (s *Server) consoleFor(c *rc) (*consoleSession, error) {
 	return cs, nil
 }
 
-// handleConsoleOpen implements POST /1.0/jails/<n>/console.
+// handleConsoleOpen implements POST /api/v1/jails/<n>/console.
 func (s *Server) handleConsoleOpen(c *rc) error {
 	var req api.ExecRequest
 	if err := c.decodeOptional(&req); err != nil {
@@ -145,7 +145,7 @@ func (s *Server) handleConsoleOpen(c *rc) error {
 		req.Shell = true
 	}
 	name := c.pathArg("name")
-	c.object = "/1.0/jails/" + name
+	c.object = "/api/v1/jails/" + name
 	// the session outlives this request
 	ctx, cancel := context.WithCancel(context.WithoutCancel(c.r.Context()))
 	st, err := s.svc.StartExec(ctx, name, req)
@@ -228,7 +228,7 @@ loop:
 	time.AfterFunc(2*time.Minute, func() { s.consoles.remove(cs.id) })
 }
 
-// handleConsoleOutput implements GET /1.0/jails/<n>/console/<id>/output: the output as server-sent events whose
+// handleConsoleOutput implements GET /api/v1/jails/<n>/console/<id>/output: the output as server-sent events whose
 // metadata is {"data": <base64>} or {"exit": <status>}. Last-Event-ID resumes after a reconnect.
 func (s *Server) handleConsoleOutput(c *rc) error {
 	cs, err := s.consoleFor(c)
@@ -313,7 +313,7 @@ func (s *Server) handleConsoleOutput(c *rc) error {
 	}
 }
 
-// handleConsoleInput implements POST /1.0/jails/<n>/console/<id>/input: {"data": "<utf-8 text>"}.
+// handleConsoleInput implements POST /api/v1/jails/<n>/console/<id>/input: {"data": "<utf-8 text>"}.
 func (s *Server) handleConsoleInput(c *rc) error {
 	cs, err := s.consoleFor(c)
 	if err != nil {
@@ -337,7 +337,7 @@ func (s *Server) handleConsoleInput(c *rc) error {
 	return nil
 }
 
-// handleConsoleResize implements POST /1.0/jails/<n>/console/<id>/resize: {"cols": n, "rows": n}.
+// handleConsoleResize implements POST /api/v1/jails/<n>/console/<id>/resize: {"cols": n, "rows": n}.
 func (s *Server) handleConsoleResize(c *rc) error {
 	cs, err := s.consoleFor(c)
 	if err != nil {
@@ -359,7 +359,7 @@ func (s *Server) handleConsoleResize(c *rc) error {
 	return nil
 }
 
-// handleConsoleClose implements DELETE /1.0/jails/<n>/console/<id>.
+// handleConsoleClose implements DELETE /api/v1/jails/<n>/console/<id>.
 func (s *Server) handleConsoleClose(c *rc) error {
 	cs, err := s.consoleFor(c)
 	if err != nil {

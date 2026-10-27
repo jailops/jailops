@@ -15,21 +15,21 @@ func TestProjectLevelRoutesNeedAProject(t *testing.T) {
 	e := seeded(t)
 	tok := e.Token(api.PermAdmin)
 	for _, rt := range [][2]string{
-		{"GET", "/1.0/jails"}, {"POST", "/1.0/jails"}, {"GET", "/1.0/jails/web"}, {"GET", "/1.0/profiles"}, {"GET", "/1.0/firewall/policies"},
-		{"GET", "/1.0/firewall/address-sets"}, {"GET", "/1.0/backup-policies"}, {"POST", "/1.0/restores"},
+		{"GET", "/api/v1/jails"}, {"POST", "/api/v1/jails"}, {"GET", "/api/v1/jails/web"}, {"GET", "/api/v1/profiles"}, {"GET", "/api/v1/firewall/policies"},
+		{"GET", "/api/v1/firewall/address-sets"}, {"GET", "/api/v1/backup-policies"}, {"POST", "/api/v1/restores"},
 	} {
 		code, body := e.Raw(rt[0], rt[1], tok, "{}")
 		if code != 400 || !strings.Contains(body, `"code":"invalid"`) || !strings.Contains(body, "a project is required") || !strings.Contains(body, "--project NAME") {
 			t.Errorf("%s %s without a project: %d %s", rt[0], rt[1], code, body)
 		}
 	}
-	for _, p := range []string{"/1.0/networks", "/1.0/images", "/1.0/projects", "/1.0/storage", "/1.0/profiles?project=host"} {
+	for _, p := range []string{"/api/v1/networks", "/api/v1/images", "/api/v1/projects", "/api/v1/storage", "/api/v1/profiles?project=host"} {
 		if code, body := e.Raw("GET", p, tok, ""); code != 200 {
 			t.Errorf("GET %s: %d %s", p, code, body)
 		}
 	}
 	// Authorization comes first: a caller who may not read does not learn what a missing project would say.
-	if code, _ := e.Raw("GET", "/1.0/jails", "", ""); code != 401 {
+	if code, _ := e.Raw("GET", "/api/v1/jails", "", ""); code != 401 {
 		t.Errorf("anonymous: %d", code)
 	}
 	// A client with no project says so without sending anything.

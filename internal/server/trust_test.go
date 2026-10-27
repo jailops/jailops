@@ -138,11 +138,11 @@ func TestTrustWorkflow(t *testing.T) {
 	var issued, redeemed, denied bool
 	for _, a := range entries {
 		switch {
-		case strings.Contains(a.Action, "POST /1.0/trust/tokens") && a.Result == "ok":
+		case strings.Contains(a.Action, "POST /api/v1/trust/tokens") && a.Result == "ok":
 			issued = true
-		case strings.Contains(a.Action, "POST /1.0/trust/clients") && a.Result == "ok":
+		case strings.Contains(a.Action, "POST /api/v1/trust/clients") && a.Result == "ok":
 			redeemed = true
-		case strings.Contains(a.Action, "POST /1.0/trust/clients") && a.Result == "denied":
+		case strings.Contains(a.Action, "POST /api/v1/trust/clients") && a.Result == "denied":
 			denied = true
 		}
 	}
@@ -276,7 +276,7 @@ func TestTrustRedemptionIsRateLimited(t *testing.T) {
 	entries, _ := e.Admin.Audit(c, 500)
 	n := 0
 	for _, a := range entries {
-		if strings.Contains(a.Action, "/1.0/trust/clients") && a.Result == "denied" {
+		if strings.Contains(a.Action, "/api/v1/trust/clients") && a.Result == "denied" {
 			n++
 		}
 	}
@@ -301,8 +301,8 @@ func TestIdentityWithNeitherProjectsNorGlobalCanDoNothing(t *testing.T) {
 	// One that is stored anyway gets nothing: not even reads.
 	tok := e.ScopelessToken(api.PermAdmin)
 	for _, rt := range []struct{ method, path string }{
-		{"GET", "/1.0/jails"}, {"GET", "/1.0/networks"}, {"GET", "/1.0/projects"}, {"GET", "/1.0/images"}, {"GET", "/1.0/operations"},
-		{"GET", "/1.0/audit"}, {"GET", "/1.0/storage"}, {"POST", "/1.0/jails"}, {"GET", "/1.0/users"}, {"GET", "/1.0/events"},
+		{"GET", "/api/v1/jails"}, {"GET", "/api/v1/networks"}, {"GET", "/api/v1/projects"}, {"GET", "/api/v1/images"}, {"GET", "/api/v1/operations"},
+		{"GET", "/api/v1/audit"}, {"GET", "/api/v1/storage"}, {"POST", "/api/v1/jails"}, {"GET", "/api/v1/users"}, {"GET", "/api/v1/events"},
 	} {
 		code, body := e.Raw(rt.method, rt.path, tok, "{}")
 		if code != 403 {
@@ -310,7 +310,7 @@ func TestIdentityWithNeitherProjectsNorGlobalCanDoNothing(t *testing.T) {
 		}
 	}
 	// Its own session information is still readable, and says what it is.
-	code, body := e.Raw("GET", "/1.0/auth/session", tok, "")
+	code, body := e.Raw("GET", "/api/v1/auth/session", tok, "")
 	if code != 200 || !strings.Contains(body, `"permission":"admin"`) || strings.Contains(body, `"global":true`) {
 		t.Fatalf("%d %s", code, body)
 	}

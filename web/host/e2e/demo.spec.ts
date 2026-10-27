@@ -320,7 +320,7 @@ test('backup run and verify go through the async flow', async ({ page }) => {
 test('a first visit has no project: the project pages say so and nothing project-level is requested', async ({ page }) => {
   const problems = watch(page)
   const projectLevel: string[] = []
-  page.on('request', (r) => { if (/\/1\.0\/(jails|profiles|firewall|updates)/.test(r.url())) projectLevel.push(r.url()) })
+  page.on('request', (r) => { if (/\/api\/v1\/(jails|profiles|firewall|updates)/.test(r.url())) projectLevel.push(r.url()) })
   await page.goto('/?demo=fresh')
   await page.waitForSelector('.shell')
   await page.evaluate(() => { history.pushState({}, '', '/jails'); dispatchEvent(new PopStateEvent('popstate')) })

@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// ServerInfo is returned by GET /1.0.
+// ServerInfo is returned by GET /api/v1.
 type ServerInfo struct {
 	APIVersion string `json:"api_version"`
 	// APIExtensions lists capability names. Clients use them instead of
@@ -23,6 +23,13 @@ type ServerInfo struct {
 	Environment Environment `json:"environment"`
 	// SecretsRecipient is the age public key sealed environment values are encrypted to ("sealed_secrets").
 	SecretsRecipient string `json:"secrets_recipient,omitempty"`
+}
+
+// ForUntrusted is what a caller that proved nothing is told: the API version, the role (so a console can tell a host from a
+// backup node) and that it is untrusted. No software version, host name, host id or environment: those are for callers
+// with an identity, and a console asks again after it signed in.
+func (i ServerInfo) ForUntrusted() ServerInfo {
+	return ServerInfo{APIVersion: i.APIVersion, APIExtensions: []string{}, Role: i.Role, Auth: i.Auth}
 }
 
 // Environment is the observed host environment.
@@ -79,7 +86,7 @@ type Operation struct {
 	Description string          `json:"description"`
 	Status      OperationStatus `json:"status"`
 	// Resources lists affected objects by kind, for example
-	// {"jails": ["/1.0/jails/web"]}.
+	// {"jails": ["/api/v1/jails/web"]}.
 	Resources map[string][]string `json:"resources,omitempty"`
 	Metadata  json.RawMessage     `json:"metadata,omitempty"`
 	// Project is the project the operation belongs to; empty for host-level
@@ -102,7 +109,7 @@ const (
 	EventLogging   EventType = "logging"
 )
 
-// Event is delivered on /1.0/events.
+// Event is delivered on /api/v1/events.
 type Event struct {
 	Type      EventType       `json:"type"`
 	Timestamp time.Time       `json:"timestamp"`
@@ -113,7 +120,7 @@ type Event struct {
 // LifecycleEvent is the metadata of an EventLifecycle event.
 type LifecycleEvent struct {
 	Action string `json:"action"` // jail-started, jail-created, network-updated, ...
-	Source string `json:"source"` // /1.0/jails/web
+	Source string `json:"source"` // /api/v1/jails/web
 	// Requestor identifies who caused the event.
 	Requestor string `json:"requestor,omitempty"`
 	// Project is the project of the object; empty for host-level objects,

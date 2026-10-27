@@ -104,7 +104,7 @@ func New(cfg Config) (*Server, error) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, "ok\n")
 	})
-	s.mux.HandleFunc("/1.0/", s.fallback)
+	s.mux.HandleFunc("/api/v1/", s.fallback)
 	if !cfg.NoUI {
 		s.mux.Handle("/", webui.Handler())
 	}
@@ -230,7 +230,7 @@ func (s *Server) authenticate(r *http.Request) (authResult, error) {
 			}
 			// A hub forwards what a requestor may do to resources, never a login, a credential change or a session:
 			// those belong to the host's own users, and a forwarded claim has no password or second factor.
-			if strings.HasPrefix(r.URL.Path, "/1.0/auth/") || strings.HasPrefix(r.URL.Path, "/1.0/sessions") {
+			if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") || strings.HasPrefix(r.URL.Path, "/api/v1/sessions") {
 				return res, api.Errorf(api.CodeForbidden, "%s cannot be reached through a hub", r.URL.Path)
 			}
 			key := "claim|" + remote
@@ -263,7 +263,7 @@ func (s *Server) authenticate(r *http.Request) (authResult, error) {
 		} else {
 			return res, api.Errorf(api.CodeUnauthorized, "unsupported authorization scheme")
 		}
-	} else if r.Method == http.MethodGet && r.URL.Path == "/1.0/events" {
+	} else if r.Method == http.MethodGet && r.URL.Path == "/api/v1/events" {
 		// EventSource cannot set headers; the UI passes the token in the query.
 		bearer = r.URL.Query().Get("access_token")
 	}

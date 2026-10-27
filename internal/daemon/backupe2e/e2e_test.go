@@ -147,10 +147,10 @@ func TestKeyRunRestoreAcrossProjects(t *testing.T) {
 		assertNoSecret("an operation", fmt.Sprintf("%+v", op))
 	}
 	// The key routes are admin only and global only.
-	if code, _ := e.Raw("GET", "/1.0/backup/key", e.Token(api.PermOperator), ""); code != 403 {
+	if code, _ := e.Raw("GET", "/api/v1/backup/key", e.Token(api.PermOperator), ""); code != 403 {
 		t.Fatalf("operator read the key status: %d", code)
 	}
-	if code, _ := e.Raw("POST", "/1.0/backup/key", e.Token(api.PermOperator), "{}"); code != 403 {
+	if code, _ := e.Raw("POST", "/api/v1/backup/key", e.Token(api.PermOperator), "{}"); code != 403 {
 		t.Fatalf("operator created a key: %d", code)
 	}
 	scoped := e.Scoped(api.PermAdmin, dtest.SeedProject)

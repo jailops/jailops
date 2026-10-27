@@ -8,7 +8,8 @@ register of what is settled and what is open.
 |---|---|
 | [install.md](install.md) | A new host: packages, `jailops-priv init`, the three `pf.conf` lines, forwarding, the first jail |
 | [configuration.md](configuration.md) | Every key of `jailopsd.yaml`, `priv.conf`, `backupd.yaml` and the client file |
-| [exposure.md](exposure.md) | Exposing the API: local only, behind a proxy or Cloudflare, direct with TLS and mTLS; certificates; the optional web console |
+| [exposure.md](exposure.md) | Exposing the API: local only, behind a proxy or Cloudflare, direct with TLS and mTLS; certificates; the web console, off by default |
+| [ports.md](ports.md) | Every port and socket of the family (39110 to 39112): which process, what for, what to open |
 | [security-model.md](security-model.md) | What the unprivileged daemon and the root helper may and may not do, and what you decide |
 | [networking-ipv6.md](networking-ipv6.md) | Networks, routed and switched IPv6, the NDP proxy, the PF isolation |
 | [storage.md](storage.md) | Storages on big pools, volumes, host mounts, quotas, what is and is not backed up |

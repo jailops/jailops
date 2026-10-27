@@ -145,7 +145,7 @@ func TestFleetProjectIsAppliedToItsHosts(t *testing.T) {
 		return err
 	}(), api.CodeNotFound)
 	// host=all is for this route only.
-	if code, _ := hub.Raw("GET", "/1.0/jails?host=all&project=web", hub.Token(api.PermAdmin), ""); code != 400 {
+	if code, _ := hub.Raw("GET", "/api/v1/jails?host=all&project=web", hub.Token(api.PermAdmin), ""); code != 400 {
 		t.Fatalf("%d", code)
 	}
 }

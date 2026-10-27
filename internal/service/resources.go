@@ -25,7 +25,7 @@ type kindStore[S any] struct {
 	kind   api.Kind
 	scope  api.Scope
 	action string // "network" in "network-created"
-	path   string // "/1.0/networks"
+	path   string // "/api/v1/networks"
 	// projectLevel kinds (firewall policies, address sets, backup policies)
 	// are unique per project: names are scoped by project.
 	projectLevel bool

@@ -52,7 +52,7 @@ func TestMissingAssetsAre404(t *testing.T) {
 
 func TestAPIPathNeverGetsHTML(t *testing.T) {
 	h := handlerFS(testFS())
-	for _, p := range []string{"/1.0", "/1.0/jails", "/1.0/jails/web"} {
+	for _, p := range []string{"/api", "/api/v1", "/api/v1/jails", "/api/v1/jails/web", "/api/v2/jails"} {
 		if w := get(t, h, "GET", p); w.Code != 404 || strings.Contains(w.Body.String(), "<html") {
 			t.Fatalf("%s: want plain 404, got %d", p, w.Code)
 		}

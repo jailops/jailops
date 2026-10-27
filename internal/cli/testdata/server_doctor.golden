@@ -70,6 +70,6 @@ server: kernel.module.if_bridge   WARN     not loaded (kldload if_bridge)
 server: pf.enabled                WARN     cannot tell without FreeBSD
 
 $ jailops audit
-TIME                  REQUESTOR   ACTION            RESOURCE   RESULT
-2026-03-01 09:00:00   alice       POST /1.0/jails   web        ok
+TIME                  REQUESTOR   ACTION               RESOURCE   RESULT
+2026-03-01 09:00:00   alice       POST /api/v1/jails   web        ok
 

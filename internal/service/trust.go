@@ -88,11 +88,11 @@ func (s *Service) CreateTrustToken(ctx context.Context, req api.TrustTokenReques
 	if err := s.d.DB.TrustTokens.Create(ctx, rec); err != nil {
 		return api.TrustToken{}, internal(err)
 	}
-	s.emit(ctx, "trust-token-created", "/1.0/trust/tokens/"+name)
+	s.emit(ctx, "trust-token-created", "/api/v1/trust/tokens/"+name)
 	return api.TrustToken{Name: name, Token: tok, ExpiresAt: rec.ExpiresAt}, nil
 }
 
-// RedeemTrustToken is POST /1.0/trust/clients: the caller is not
+// RedeemTrustToken is POST /api/v1/trust/clients: the caller is not
 // authenticated, the token is the only credential. Every failure of the token
 // is the same unauthorized answer, failures are counted per source and
 // locked out, and the token is consumed atomically, so it works once.
@@ -151,8 +151,8 @@ func (s *Service) RedeemTrustToken(ctx context.Context, req api.TrustClientReque
 		return api.Certificate{}, err
 	}
 	s.warmCerts()
-	s.Audit(sys, store.AuditEntry{Actor: "trust:" + grant.Name, ActorKind: "certificate", Method: "POST", Route: "/1.0/trust/clients",
-		Object: "/1.0/certificates/" + grant.Name, Result: "ok", Remote: remote, Detail: "trust token consumed for " + fp[:12]})
+	s.Audit(sys, store.AuditEntry{Actor: "trust:" + grant.Name, ActorKind: "certificate", Method: "POST", Route: "/api/v1/trust/clients",
+		Object: "/api/v1/certificates/" + grant.Name, Result: "ok", Remote: remote, Detail: "trust token consumed for " + fp[:12]})
 	return certToAPI(o), nil
 }
 
@@ -210,7 +210,7 @@ func (s *Service) RevokeSession(ctx context.Context, id string) error {
 		if _, err := s.d.DB.Sessions.DeleteByRef(ctx, id); err != nil {
 			return internal(err)
 		}
-		s.emit(ctx, "session-revoked", "/1.0/sessions/"+id)
+		s.emit(ctx, "session-revoked", "/api/v1/sessions/"+id)
 		return nil
 	}
 	return notFound("session", id)

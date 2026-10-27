@@ -52,9 +52,9 @@ func isAssetExt(ext string) bool {
 
 // handlerFS serves files from files. A path that names a file is served as that
 // file; a path that does not name an asset (by its extension) that is neither under /assets/ nor under
-// /1.0 gets index.html so that the UI's router can handle it. A missing file
+// /api/v1 gets index.html so that the UI's router can handle it. A missing file
 // (an asset extension, or anything under /assets/) is a 404, never the
-// app shell, and /1.0 is never answered with HTML.
+// app shell, and /api/v1 is never answered with HTML.
 func handlerFS(files fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -63,7 +63,7 @@ func handlerFS(files fs.FS) http.Handler {
 			return
 		}
 		p := path.Clean("/" + r.URL.Path)
-		if p == "/1.0" || strings.HasPrefix(p, "/1.0/") {
+		if p == "/api" || strings.HasPrefix(p, "/api/") {
 			http.NotFound(w, r)
 			return
 		}

@@ -159,7 +159,7 @@ $ jailops jail delete -y x -o json
   "status": "success",
   "resources": {
     "jails": [
-      "/1.0/jails/x"
+      "/api/v1/jails/x"
     ]
   },
   "project": "main",
