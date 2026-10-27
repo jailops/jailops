@@ -92,7 +92,7 @@ func TestExecStreamsAuditsAndRespectsProjects(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A plain request without the upgrade is refused.
-	if code, _ := e.Raw("POST", "/1.0/jails/web/exec?project=alpha", e.Token(api.PermAdmin), `{"argv":["ls"]}`); code != 400 {
+	if code, _ := e.Raw("POST", "/api/v1/jails/web/exec?project=alpha", e.Token(api.PermAdmin), `{"argv":["ls"]}`); code != 400 {
 		t.Fatalf("%d", code)
 	}
 

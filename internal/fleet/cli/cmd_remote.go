@@ -67,7 +67,7 @@ func (a *app) remoteBootstrap() *cobra.Command {
 	var global, force bool
 	var life time.Duration
 	c := &cobra.Command{
-		Use:   "bootstrap HOST --url https://HOST:8443 --fingerprint SHA256",
+		Use:   "bootstrap HOST --url https://HOST:39110 --fingerprint SHA256",
 		Short: "Make a client certificate for a host, store it encrypted, print the command that trusts it",
 		Long: `Generates an ECDSA P-256 client certificate and key, writes them with the url and
 the pinned server fingerprint to hosts/HOST/remote.sops.yaml encrypted under the
@@ -81,7 +81,7 @@ from the network: there is no trust on first use.
 The certificate PEM goes to standard output, everything else to standard error,
 so the certificate can be piped to the host:
 
-  jailops-sync remote bootstrap web1 --url https://web1:8443 --fingerprint 3f9a... \
+  jailops-sync remote bootstrap web1 --url https://web1:39110 --fingerprint 3f9a... \
       | ssh admin@web1 'cat > /tmp/sync.pem && jailops cert create sync-prod --pem /tmp/sync.pem --permission admin --global'
 
 Needs a key that is a recipient of the matching creation_rule.`,

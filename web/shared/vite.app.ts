@@ -39,7 +39,7 @@ export function appConfig(name: string, appDir: string) {
     server: {
       port: e.devPort,
       proxy: {
-        '/1.0': {
+        '/api/v1': {
           target,
           secure: false, // a development server often has a self-signed certificate
           // The daemon rejects a state-changing request whose Origin host differs from its Host

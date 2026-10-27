@@ -14,7 +14,7 @@ func NewJail(name string, spec api.JailSpec) api.Jail {
 	return api.Jail{Metadata: api.ObjectMeta{Name: name}, Spec: spec}
 }
 
-// JailClient accesses /1.0/jails.
+// JailClient accesses /api/v1/jails.
 type JailClient struct {
 	c *Client
 	r *Resource[api.Jail]
@@ -22,7 +22,7 @@ type JailClient struct {
 
 // Jails returns the jails client.
 func (c *Client) Jails() *JailClient {
-	return &JailClient{c, newResource[api.Jail](c, "/1.0/jails")}
+	return &JailClient{c, newResource[api.Jail](c, "/api/v1/jails")}
 }
 
 // List iterates jails.

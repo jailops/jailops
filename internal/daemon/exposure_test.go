@@ -16,36 +16,64 @@ import (
 	"jailops.net/jailops/internal/webui"
 )
 
-func TestWebConsoleIsOptional(t *testing.T) {
-	cfg, err := daemon.Decode(strings.NewReader("pool: tank\n"))
-	if err != nil || !cfg.UI() {
-		t.Fatalf("the console is on by default: %v %v", cfg.UI(), err)
+// consoleServed reports whether GET / of the daemon answers with the console (a page, or "not built" in a checkout
+// without the consoles), as opposed to the plain 404 of a daemon without one.
+func consoleServed(t *testing.T, e *dtest.Env) bool {
+	t.Helper()
+	code, body := e.Raw("GET", "/", "", "")
+	if !webui.Enabled { // a noweb build has none, whatever is asked
+		if code != 404 || !strings.Contains(body, "no web console") {
+			t.Fatalf("a noweb build: %d %q", code, body)
+		}
+		return false
 	}
-	cfg, err = daemon.Decode(strings.NewReader("pool: tank\nweb:\n  enabled: false\n"))
+	switch {
+	case code != 404 && strings.Contains(body, "<html"):
+		return true
+	case code == 404 && strings.Contains(body, "web UI not built"):
+		return true
+	case code == 404 && !strings.Contains(body, "web UI") && !strings.Contains(body, "<html"):
+		return false
+	}
+	t.Fatalf("GET /: %d %q", code, body)
+	return false
+}
+
+// The console is always in the binary and off until the operator turns it on.
+func TestWebConsoleIsOffUntilEnabled(t *testing.T) {
+	cfg, err := daemon.Decode(strings.NewReader("pool: tank\n"))
 	if err != nil || cfg.UI() {
-		t.Fatalf("web.enabled false must switch the console off: %v %v", cfg.UI(), err)
+		t.Fatalf("the console is off by default: %v %v", cfg.UI(), err)
+	}
+	cfg, err = daemon.Decode(strings.NewReader("pool: tank\nweb:\n  enabled: true\n"))
+	if err != nil || !cfg.UI() {
+		t.Fatalf("web.enabled true must switch the console on: %v %v", cfg.UI(), err)
+	}
+
+	set := func(v bool) func(*daemon.Config) { return func(c *daemon.Config) { c.Web.Enabled = &v } }
+	byDefault := dtest.New(t, dtest.Options{})
+	enabled := dtest.New(t, dtest.Options{Mutate: set(true)})
+	flagOn := dtest.New(t, dtest.Options{ForceWeb: true})                  // -web, rc.conf jailopsd_web="YES"
+	flagOff := dtest.New(t, dtest.Options{NoWeb: true, Mutate: set(true)}) // -no-web over a configuration that enables it
+	if webui.Enabled {
+		for name, want := range map[string]bool{"default": false, "web.enabled true": true, "-web": true, "-no-web": false} {
+			e := map[string]*dtest.Env{"default": byDefault, "web.enabled true": enabled, "-web": flagOn, "-no-web": flagOff}[name]
+			if got := consoleServed(t, e); got != want {
+				t.Errorf("%s: console served = %v, want %v", name, got, want)
+			}
+		}
+	} else {
+		consoleServed(t, enabled)
 	}
 
 	// With the console off the daemon is the API and /healthz and nothing else.
-	off := dtest.New(t, dtest.Options{Mutate: func(c *daemon.Config) { f := false; c.Web.Enabled = &f }})
-	on := dtest.New(t, dtest.Options{})
-	if !webui.Enabled {
-		if code, body := on.Raw("GET", "/", "", ""); code != 404 || !strings.Contains(body, "no web console") {
-			t.Fatalf("a noweb build: %d %q", code, body)
-		}
-	} else if code, body := on.Raw("GET", "/", "", ""); code == 404 && !strings.Contains(body, "web UI not built") || code != 404 && !strings.Contains(body, "<html") {
-		t.Fatalf("console on: %d %q", code, body)
-	}
-	if code, body := off.Raw("GET", "/", "", ""); code != 404 || strings.Contains(body, "web UI") || strings.Contains(body, "<html") {
-		t.Fatalf("console off: %d %q", code, body)
-	}
-	if code, _ := off.Raw("GET", "/healthz", "", ""); code != 200 {
+	if code, _ := byDefault.Raw("GET", "/healthz", "", ""); code != 200 {
 		t.Fatalf("healthz: %d", code)
 	}
-	if code, _ := off.Raw("GET", "/1.0", "", ""); code != 200 {
+	if code, _ := byDefault.Raw("GET", "/api/v1", "", ""); code != 200 {
 		t.Fatalf("API without the console: %d", code)
 	}
-	if _, err := off.Admin.Info(t.Context()); err != nil {
+	if _, err := byDefault.Admin.Info(t.Context()); err != nil {
 		t.Fatalf("the SDK without the console: %v", err)
 	}
 }

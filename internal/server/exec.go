@@ -16,7 +16,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// handleExec implements POST /1.0/jails/<n>/exec: the request is checked like
+// handleExec implements POST /api/v1/jails/<n>/exec: the request is checked like
 // any jail route, then the connection is upgraded to the framed stream of
 // api/exec.go. Everything before the upgrade answers with an ordinary error.
 func (s *Server) handleExec(c *rc) error {
@@ -28,7 +28,7 @@ func (s *Server) handleExec(c *rc) error {
 		return api.Errorf(api.CodeInvalid, "exec needs an HTTP upgrade").WithHint("send Connection: Upgrade and Upgrade: " + api.ExecProtocol)
 	}
 	name := c.pathArg("name")
-	c.object = "/1.0/jails/" + name
+	c.object = "/api/v1/jails/" + name
 	st, err := s.svc.StartExec(c.r.Context(), name, req)
 	if err != nil {
 		return err

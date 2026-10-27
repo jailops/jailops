@@ -135,7 +135,7 @@ func waitFinal(ctx context.Context, c *Client, id string) (api.Operation, error)
 		if !poll {
 			q := url.Values{"timeout": {strconv.Itoa(int(waitChunk / time.Second))}}
 			op, _, err = send[api.Operation](ctx, c, request{
-				method: http.MethodGet, path: "/1.0/operations/" + esc(id) + "/wait",
+				method: http.MethodGet, path: "/api/v1/operations/" + esc(id) + "/wait",
 				query: q, timeout: waitChunk + 15*time.Second,
 			})
 			if err != nil && (api.IsCode(err, api.CodeNotFound) || IsUnsupported(err)) {
@@ -168,7 +168,7 @@ func waitFinal(ctx context.Context, c *Client, id string) (api.Operation, error)
 	}
 }
 
-// OperationClient accesses /1.0/operations.
+// OperationClient accesses /api/v1/operations.
 type OperationClient struct{ c *Client }
 
 // Operations returns the operations client.
@@ -176,13 +176,13 @@ func (c *Client) Operations() *OperationClient { return &OperationClient{c} }
 
 // Get fetches one operation.
 func (o *OperationClient) Get(ctx context.Context, id string) (api.Operation, error) {
-	op, _, err := get[api.Operation](ctx, o.c, "/1.0/operations/"+esc(id), nil)
+	op, _, err := get[api.Operation](ctx, o.c, "/api/v1/operations/"+esc(id), nil)
 	return op, err
 }
 
 // List iterates operations.
 func (o *OperationClient) List(ctx context.Context, opts ...ListOption) iter.Seq2[api.Operation, error] {
-	return list[api.Operation](ctx, o.c, "/1.0/operations", opts)
+	return list[api.Operation](ctx, o.c, "/api/v1/operations", opts)
 }
 
 // Wait waits for the operation to end. The record is returned even when the
@@ -197,6 +197,6 @@ func (o *OperationClient) Wait(ctx context.Context, id string) (api.Operation, e
 
 // Cancel requests cancellation.
 func (o *OperationClient) Cancel(ctx context.Context, id string) error {
-	_, _, err := send[None](ctx, o.c, request{method: http.MethodDelete, path: "/1.0/operations/" + esc(id)})
+	_, _, err := send[None](ctx, o.c, request{method: http.MethodDelete, path: "/api/v1/operations/" + esc(id)})
 	return err
 }

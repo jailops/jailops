@@ -853,23 +853,23 @@ func TestFleetProjects(t *testing.T) {
 func TestRoutePerms(t *testing.T) {
 	rp := fake.RoutePerms()
 	for k, want := range map[string]api.Permission{
-		"GET /1.0/jails":                            api.PermReadonly,
-		"POST /1.0/jails":                           api.PermAdmin,
-		"PUT /1.0/jails/{name}/state":               api.PermOperator,
-		"DELETE /1.0/operations/{id}":               api.PermOperator,
-		"POST /1.0/trust/tokens":                    api.PermAdmin,
-		"GET /1.0/users":                            api.PermAdmin,
-		"POST /1.0/projects":                        api.PermAdmin,
-		"GET /1.0/storage/{name}":                   api.PermReadonly,
-		"DELETE /1.0/sessions/{id}":                 api.PermReadonly,
-		"POST /1.0/jails/{name}/rollback":           api.PermOperator,
-		"DELETE /1.0/jails/{name}/snapshots/{snap}": api.PermOperator,
+		"GET /api/v1/jails":                            api.PermReadonly,
+		"POST /api/v1/jails":                           api.PermAdmin,
+		"PUT /api/v1/jails/{name}/state":               api.PermOperator,
+		"DELETE /api/v1/operations/{id}":               api.PermOperator,
+		"POST /api/v1/trust/tokens":                    api.PermAdmin,
+		"GET /api/v1/users":                            api.PermAdmin,
+		"POST /api/v1/projects":                        api.PermAdmin,
+		"GET /api/v1/storage/{name}":                   api.PermReadonly,
+		"DELETE /api/v1/sessions/{id}":                 api.PermReadonly,
+		"POST /api/v1/jails/{name}/rollback":           api.PermOperator,
+		"DELETE /api/v1/jails/{name}/snapshots/{snap}": api.PermOperator,
 	} {
 		if rp[k] != want {
 			t.Errorf("%s: got %q want %q", k, rp[k], want)
 		}
 	}
-	if _, ok := rp["POST /1.0/trust/clients"]; ok {
+	if _, ok := rp["POST /api/v1/trust/clients"]; ok {
 		t.Error("the public route has a role")
 	}
 	if len(rp) < 80 {

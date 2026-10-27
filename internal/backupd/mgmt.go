@@ -33,6 +33,25 @@ type Mgmt struct {
 	pp   auth.PasswordParams
 	lock *auth.Lockout
 	mux  *http.ServeMux
+	// hashSem bounds the password hashes that run at once. Every login attempt, valid user or not, costs an argon2id hash
+	// (64 MiB, several passes), and the lockout only counts a failure after the hash is done: without a bound one client
+	// could start hundreds of hashes in parallel before it is locked out.
+	hashSem chan struct{}
+}
+
+// readDeadline is how long a management request may take to arrive (a variable for the tests).
+var readDeadline = 15 * time.Second
+
+// hashSlot takes a slot for one password hash and returns what releases it; false answers the request with 429.
+func (m *Mgmt) hashSlot(w http.ResponseWriter) (func(), bool) {
+	select {
+	case m.hashSem <- struct{}{}:
+		return func() { <-m.hashSem }, true
+	default:
+		w.Header().Set("Retry-After", "1")
+		writeError(w, api.Errorf(api.CodeRateLimited, "too many sign-in attempts at once, try again in a moment"))
+		return nil, false
+	}
 }
 
 type identity struct {
@@ -48,61 +67,64 @@ func newMgmt(s *Server, ui http.Handler, pp auth.PasswordParams) *Mgmt {
 	if err != nil {
 		panic(err) // a malformed static table is a programming error caught by tests
 	}
-	m := &Mgmt{s: s, reg: reg, ui: ui, pp: pp, lock: auth.NewLockout(auth.LockoutConfig{}), mux: http.NewServeMux()}
+	m := &Mgmt{s: s, reg: reg, ui: ui, pp: pp, lock: auth.NewLockout(auth.LockoutConfig{}), mux: http.NewServeMux(),
+		hashSem: make(chan struct{}, max(1, runtime.NumCPU()))}
 	var routes []string
 	h := func(method, pattern string, fn func(http.ResponseWriter, *http.Request, *identity)) {
 		routes = append(routes, method+" "+pattern)
 		m.mux.HandleFunc(method+" "+pattern, m.wrap(method, pattern, fn))
 	}
-	h("GET", "/1.0", m.info)
-	h("POST", "/1.0/auth/login", m.login)
-	h("POST", "/1.0/auth/logout", m.logout)
-	h("GET", "/1.0/auth/session", m.session)
-	h("POST", "/1.0/auth/password", m.password)
-	h("GET", "/1.0/repository", m.repository)
-	h("GET", "/1.0/certificate", m.certificate)
-	h("GET", "/1.0/hosts", m.hostList)
-	h("POST", "/1.0/hosts", m.hostEnroll)
-	h("PUT", "/1.0/hosts/{name}", m.hostUpdate)
-	h("DELETE", "/1.0/hosts/{name}", m.hostRevoke)
-	h("GET", "/1.0/groups", m.groups)
-	h("GET", "/1.0/groups/{group}/snapshots", m.snapshots)
-	h("GET", "/1.0/groups/{group}/snapshots/{snap}", m.snapshot)
-	h("PUT", "/1.0/groups/{group}/snapshots/{snap}/protected", m.protect)
-	h("POST", "/1.0/groups/{group}/snapshots/{snap}/deletion", m.requestDeletion)
-	h("DELETE", "/1.0/groups/{group}/snapshots/{snap}/deletion", m.cancelDeletion)
-	h("POST", "/1.0/groups/{group}/snapshots/{snap}/deletion/execute", m.executeDeletion)
-	h("GET", "/1.0/sessions", m.sessions)
-	h("GET", "/1.0/jobs", m.jobs)
-	h("GET", "/1.0/jobs/{id}", m.job)
-	h("POST", "/1.0/jobs/{id}/cancel", m.cancelJob)
-	h("POST", "/1.0/jobs/gc", m.startGC)
-	h("POST", "/1.0/jobs/verify", m.startVerify)
-	h("POST", "/1.0/jobs/retention", m.startRetention)
-	h("POST", "/1.0/jobs/reconcile", m.startReconcile)
-	h("GET", "/1.0/maintenance", m.getMaintenance)
-	h("PUT", "/1.0/maintenance", m.setMaintenance)
-	h("GET", "/1.0/quarantine", m.quarantine)
-	h("POST", "/1.0/quarantine/purge", m.purgeQuarantine)
-	h("GET", "/1.0/retention-policies", m.policies)
-	h("PUT", "/1.0/retention-policies/{scope}", m.setPolicy)
-	h("DELETE", "/1.0/retention-policies/{scope}", m.deletePolicy)
-	h("GET", "/1.0/audit", m.auditLog)
-	h("GET", "/1.0/users", m.userList)
-	h("POST", "/1.0/users", m.userCreate)
-	h("PUT", "/1.0/users/{name}", m.userUpdate)
-	h("DELETE", "/1.0/users/{name}", m.userDelete)
-	h("GET", "/1.0/tokens", m.tokenList)
-	h("POST", "/1.0/tokens", m.tokenCreate)
-	h("DELETE", "/1.0/tokens/{name}", m.tokenDelete)
+	h("GET", "/api/v1", m.info)
+	h("POST", "/api/v1/auth/login", m.login)
+	h("POST", "/api/v1/auth/logout", m.logout)
+	h("GET", "/api/v1/auth/session", m.session)
+	h("POST", "/api/v1/auth/password", m.password)
+	h("GET", "/api/v1/repository", m.repository)
+	h("GET", "/api/v1/certificate", m.certificate)
+	h("GET", "/api/v1/hosts", m.hostList)
+	h("POST", "/api/v1/hosts", m.hostEnroll)
+	h("PUT", "/api/v1/hosts/{name}", m.hostUpdate)
+	h("DELETE", "/api/v1/hosts/{name}", m.hostRevoke)
+	h("GET", "/api/v1/groups", m.groups)
+	h("GET", "/api/v1/groups/{group}/snapshots", m.snapshots)
+	h("GET", "/api/v1/groups/{group}/snapshots/{snap}", m.snapshot)
+	h("PUT", "/api/v1/groups/{group}/snapshots/{snap}/protected", m.protect)
+	h("POST", "/api/v1/groups/{group}/snapshots/{snap}/deletion", m.requestDeletion)
+	h("DELETE", "/api/v1/groups/{group}/snapshots/{snap}/deletion", m.cancelDeletion)
+	h("POST", "/api/v1/groups/{group}/snapshots/{snap}/deletion/execute", m.executeDeletion)
+	h("GET", "/api/v1/sessions", m.sessions)
+	h("GET", "/api/v1/jobs", m.jobs)
+	h("GET", "/api/v1/jobs/{id}", m.job)
+	h("POST", "/api/v1/jobs/{id}/cancel", m.cancelJob)
+	h("POST", "/api/v1/jobs/gc", m.startGC)
+	h("POST", "/api/v1/jobs/verify", m.startVerify)
+	h("POST", "/api/v1/jobs/retention", m.startRetention)
+	h("POST", "/api/v1/jobs/reconcile", m.startReconcile)
+	h("GET", "/api/v1/maintenance", m.getMaintenance)
+	h("PUT", "/api/v1/maintenance", m.setMaintenance)
+	h("GET", "/api/v1/quarantine", m.quarantine)
+	h("POST", "/api/v1/quarantine/purge", m.purgeQuarantine)
+	h("GET", "/api/v1/retention-policies", m.policies)
+	h("PUT", "/api/v1/retention-policies/{scope}", m.setPolicy)
+	h("DELETE", "/api/v1/retention-policies/{scope}", m.deletePolicy)
+	h("GET", "/api/v1/audit", m.auditLog)
+	h("GET", "/api/v1/users", m.userList)
+	h("POST", "/api/v1/users", m.userCreate)
+	h("PUT", "/api/v1/users/{name}", m.userUpdate)
+	h("DELETE", "/api/v1/users/{name}", m.userDelete)
+	h("GET", "/api/v1/tokens", m.tokenList)
+	h("POST", "/api/v1/tokens", m.tokenCreate)
+	h("DELETE", "/api/v1/tokens/{name}", m.tokenDelete)
 	if err := reg.VerifyComplete(routes); err != nil {
 		panic(err)
 	}
-	// anything else under /1.0 is an API 404; everything else is the UI
-	m.mux.HandleFunc("/1.0/", func(w http.ResponseWriter, r *http.Request) {
+	// anything else under /api/v1 is an API 404; everything else is the UI
+	m.mux.HandleFunc("/api/v1/", func(w http.ResponseWriter, r *http.Request) {
 		writeError(w, api.Errorf(api.CodeNotFound, "no such endpoint"))
 	})
-	if ui != nil {
+	// the console is the only thing web.enabled switches: the management API is always served (a token, a session or a
+	// user logs in to it), and without the console "/" is a plain 404
+	if ui != nil && s.Cfg.Web.Enabled {
 		m.mux.Handle("/", ui)
 	}
 	return m
@@ -147,6 +169,9 @@ func remoteAddr(r *http.Request) netip.Addr {
 func (m *Mgmt) wrap(method, pattern string, fn func(http.ResponseWriter, *http.Request, *identity)) http.HandlerFunc {
 	e, _ := m.reg.Lookup(method, pattern)
 	return func(w http.ResponseWriter, r *http.Request) {
+		// the management API is reachable by clients that have not proved anything yet: a body that never arrives must not
+		// hold a handler for ever (the host API keeps its long uploads, it is another handler)
+		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(readDeadline))
 		r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 		if e.Public {
 			fn(w, r, nil)
@@ -249,9 +274,13 @@ func (m *Mgmt) info(w http.ResponseWriter, r *http.Request, id *identity) {
 	if _, err := m.identify(r); err == nil {
 		authState = "trusted"
 	}
-	writeJSON(w, 200, api.ServerInfo{APIVersion: "1.0", APIExtensions: []string{"backup_node", "backup_node_management", "backup_node_two_step_deletion", "backup_node_maintenance_modes"},
+	info := api.ServerInfo{APIVersion: "1.0", APIExtensions: []string{"backup_node", "backup_node_management", "backup_node_two_step_deletion", "backup_node_maintenance_modes"},
 		Version: Version, HostUUID: m.s.Node.ServerID(), Hostname: host, Role: api.RoleBackup, Auth: authState,
-		Environment: api.Environment{OS: runtime.GOOS, Arch: runtime.GOARCH}})
+		Environment: api.Environment{OS: runtime.GOOS, Arch: runtime.GOARCH}}
+	if authState != "trusted" {
+		info = info.ForUntrusted()
+	}
+	writeJSON(w, 200, info)
 }
 
 type loginRequest struct {
@@ -259,7 +288,7 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
-// SessionBody is the answer of login and of GET /1.0/auth/session.
+// SessionBody is the answer of login and of GET /api/v1/auth/session.
 type SessionBody struct {
 	User string `json:"user"`
 	Role string `json:"role"`
@@ -295,12 +324,17 @@ func (m *Mgmt) login(w http.ResponseWriter, r *http.Request, _ *identity) {
 		}
 	}
 	u, err := m.s.DB.User(r.Context(), req.Username)
+	release, ok := m.hashSlot(w)
+	if !ok {
+		return
+	}
 	valid := false
 	if err == nil && !u.Disabled {
 		valid, _ = auth.VerifyPassword(req.Password, u.PasswordHash)
 	} else {
 		auth.BurnPasswordTime(req.Password, m.pp) // the time must not tell whether the user exists
 	}
+	release()
 	if !valid {
 		for _, key := range keys {
 			_ = m.lock.Fail(key)
@@ -362,7 +396,13 @@ func (m *Mgmt) password(w http.ResponseWriter, r *http.Request, id *identity) {
 		writeError(w, api.Errorf(api.CodeRateLimited, "too many failed attempts"))
 		return
 	}
-	if ok, _ := auth.VerifyPassword(req.Current, u.PasswordHash); !ok {
+	release, slot := m.hashSlot(w)
+	if !slot {
+		return
+	}
+	ok, _ := auth.VerifyPassword(req.Current, u.PasswordHash)
+	release()
+	if !ok {
 		_ = m.lock.Fail(pwKey)
 		writeError(w, api.Errorf(api.CodeUnauthorized, "the current password is wrong"))
 		return
@@ -411,7 +451,7 @@ func (m *Mgmt) certificate(w http.ResponseWriter, r *http.Request, id *identity)
 
 // ---- hosts -----------------------------------------------------------------------------------
 
-// HostBody is the body of POST /1.0/hosts.
+// HostBody is the body of POST /api/v1/hosts.
 type HostBody struct {
 	Name        string   `json:"name"`
 	Fingerprint string   `json:"fingerprint,omitempty"`
@@ -854,7 +894,7 @@ func (m *Mgmt) auditLog(w http.ResponseWriter, r *http.Request, id *identity) {
 
 func validRole(r string) bool { _, ok := roleToPerm[r]; return ok }
 
-// UserBody is the body of POST /1.0/users and PUT /1.0/users/{name}.
+// UserBody is the body of POST /api/v1/users and PUT /api/v1/users/{name}.
 type UserBody struct {
 	Name     string `json:"name,omitempty"`
 	Password string `json:"password,omitempty"`
@@ -978,7 +1018,7 @@ func (m *Mgmt) userDelete(w http.ResponseWriter, r *http.Request, id *identity) 
 	writeJSON(w, 200, nil)
 }
 
-// TokenBody is the body of POST /1.0/tokens.
+// TokenBody is the body of POST /api/v1/tokens.
 type TokenBody struct {
 	Name      string     `json:"name"`
 	Role      string     `json:"role"`

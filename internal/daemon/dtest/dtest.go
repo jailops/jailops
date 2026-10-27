@@ -66,6 +66,8 @@ type Options struct {
 	// backup service (a Mutate that sets Config.Backup enables it).
 	BackupTLS     *tls.Config
 	BackupMounter hostbackup.Mounter
+	// ForceWeb and NoWeb are the -web and -no-web flags of the daemon: console on or off, whatever the configuration says.
+	ForceWeb, NoWeb bool
 }
 
 // Env is a running daemon with its fakes.
@@ -194,7 +196,7 @@ func (e *Env) Start() {
 	}
 	env := api.Environment{OS: "FreeBSD", Arch: "amd64", Pool: "tank", PF: true}
 	d, err := daemon.Start(context.Background(), daemon.Options{
-		Config: &cfg, Version: "test", LogOutput: out, Hostname: host, Env: &env, NoListen: !e.Opts.Listen, Registrar: e.Opts.Registrar, Now: e.Opts.Now, Backups: e.Opts.Backups, Execer: e.execer(), BackupTLS: e.Opts.BackupTLS, BackupMounter: e.Opts.BackupMounter,
+		Config: &cfg, Version: "test", ForceWeb: e.Opts.ForceWeb, NoWeb: e.Opts.NoWeb, LogOutput: out, Hostname: host, Env: &env, NoListen: !e.Opts.Listen, Registrar: e.Opts.Registrar, Now: e.Opts.Now, Backups: e.Opts.Backups, Execer: e.execer(), BackupTLS: e.Opts.BackupTLS, BackupMounter: e.Opts.BackupMounter,
 		Clients: func(ctx context.Context, c *daemon.Config, dev bool) (*daemon.Clients, error) {
 			cl := &daemon.Clients{ZFS: e.ZFS, Jails: e.Jails, PF: e.PF, Net: e.Net, Runner: e.Run, Files: e.Files,
 				Sysctl:  func(_ context.Context, name string) (string, error) { return e.sysctl(name) },

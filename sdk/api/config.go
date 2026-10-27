@@ -1001,13 +1001,13 @@ var _ = time.Second
 
 // JailExpanded is a jail whose spec has its profiles merged in, with the
 // source ("jail" or a profile name) of every key that is set
-// (GET /1.0/jails/<name>?expanded=true).
+// (GET /api/v1/jails/<name>?expanded=true).
 type JailExpanded struct {
 	Jail    Jail              `json:"jail"`
 	Sources map[string]string `json:"sources"`
 }
 
-// ConfigChange is the body of POST /1.0/jails/<name>/config.
+// ConfigChange is the body of POST /api/v1/jails/<name>/config.
 type ConfigChange struct {
 	Set   map[string]string `json:"set,omitempty"`
 	Unset []string          `json:"unset,omitempty"`

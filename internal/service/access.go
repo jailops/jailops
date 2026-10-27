@@ -152,7 +152,7 @@ func (s *Service) CreateToken(ctx context.Context, in api.Token) (api.Token, err
 	if err := s.d.DB.Tokens.Create(ctx, rec); err != nil {
 		return api.Token{}, internal(err)
 	}
-	s.emit(ctx, "token-created", "/1.0/tokens/"+name)
+	s.emit(ctx, "token-created", "/api/v1/tokens/"+name)
 	out := tokenToAPI(&rec)
 	out.Secret = secret
 	return out, nil
@@ -170,7 +170,7 @@ func (s *Service) DeleteToken(ctx context.Context, name string) error {
 	if err := s.d.DB.Tokens.Delete(ctx, t.ID); err != nil {
 		return internal(err)
 	}
-	s.emit(ctx, "token-deleted", "/1.0/tokens/"+name)
+	s.emit(ctx, "token-deleted", "/api/v1/tokens/"+name)
 	return nil
 }
 
@@ -432,7 +432,7 @@ func (s *Service) DeleteCertificate(ctx context.Context, key string, expect int6
 		return err
 	}
 	s.warmCerts()
-	s.emit(ctx, "certificate-revoked", "/1.0/certificates/"+cur.Meta.Name)
+	s.emit(ctx, "certificate-revoked", "/api/v1/certificates/"+cur.Meta.Name)
 	return nil
 }
 
@@ -538,7 +538,7 @@ func (s *Service) CreateUser(ctx context.Context, in api.UserCreate) (api.UserCr
 	if err := s.d.DB.Users.Create(ctx, u); err != nil {
 		return api.UserCreated{}, internal(err)
 	}
-	s.emit(ctx, "user-created", "/1.0/users/"+name)
+	s.emit(ctx, "user-created", "/api/v1/users/"+name)
 	out := api.UserCreated{User: userToAPI(&u)}
 	if generated {
 		out.Password = pw
@@ -600,7 +600,7 @@ func (s *Service) UpdateUser(ctx context.Context, name string, in api.User, expe
 		changed = true
 	}
 	if changed {
-		s.emit(ctx, "user-updated", "/1.0/users/"+name)
+		s.emit(ctx, "user-updated", "/api/v1/users/"+name)
 	}
 	return s.GetUser(ctx, name)
 }
@@ -632,7 +632,7 @@ func (s *Service) SetUserPassword(ctx context.Context, name, password string) (a
 	if err := s.d.DB.Users.SetPasswordHash(ctx, u.ID, hash); err != nil {
 		return api.PasswordSet{}, internal(err)
 	}
-	s.emit(ctx, "user-updated", "/1.0/users/"+name)
+	s.emit(ctx, "user-updated", "/api/v1/users/"+name)
 	return out, nil
 }
 
@@ -648,7 +648,7 @@ func (s *Service) DeleteUser(ctx context.Context, name string) error {
 	if err := s.d.DB.Users.Delete(ctx, u.ID); err != nil {
 		return internal(err)
 	}
-	s.emit(ctx, "user-deleted", "/1.0/users/"+name)
+	s.emit(ctx, "user-deleted", "/api/v1/users/"+name)
 	return nil
 }
 

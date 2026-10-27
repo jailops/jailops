@@ -1,6 +1,6 @@
 # The API, for programs
 
-JailOps is an API first: `jailops`, `jailops-sync` and the web console are clients of the same HTTP API, `/1.0/...`, JSON, with
+JailOps is an API first: `jailops`, `jailops-sync` and the web console are clients of the same HTTP API, `/api/v1/...`, JSON, with
 operations for long work and an event stream.
 
 | What | Where |
@@ -18,7 +18,7 @@ There is no OpenAPI document today.
 - **Network**: a TLS 1.3 listener you switch on, a certificate you choose, and pinned client certificates, tokens or logins. Every
   option, the recipes and what is not implemented are in [exposure.md](exposure.md).
 
-    c, err := sdk.Connect(ctx, sdk.Remote("https://host.example.org:8443",
+    c, err := sdk.Connect(ctx, sdk.Remote("https://host.example.org:39110",
         sdk.WithPinnedFingerprint(fp),          // a self-signed certificate; leave it out for a CA-signed one
         sdk.WithClientCert(cert)))              // pinned mTLS; or sdk.WithToken(token)
 

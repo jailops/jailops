@@ -123,5 +123,5 @@ func ExampleClient_Events() {
 	})
 	le := <-got
 	fmt.Println(le.Action, le.Source)
-	// Output: network-created /1.0/networks/dmz
+	// Output: network-created /api/v1/networks/dmz
 }

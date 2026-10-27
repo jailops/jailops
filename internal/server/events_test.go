@@ -40,7 +40,7 @@ func TestEventsStreamAndFilter(t *testing.T) {
 			}
 			var le api.LifecycleEvent
 			_ = json.Unmarshal(ev.Metadata, &le)
-			if le.Action == "jail-created" && le.Source == "/1.0/jails/web" {
+			if le.Action == "jail-created" && le.Source == "/api/v1/jails/web" {
 				want["jail-created"] = true
 				if le.Requestor == "" || ev.Host != e.D.Service().HostUUID() {
 					t.Fatalf("%+v %+v", le, ev)
@@ -62,7 +62,7 @@ func TestEventsReplayFromLastEventID(t *testing.T) {
 		if n >= 100 {
 			timeout = 1500 * time.Millisecond // drain what is retained, then stop
 		}
-		req, _ := http.NewRequest("GET", e.HTTP.URL+"/1.0/events?type=lifecycle", nil)
+		req, _ := http.NewRequest("GET", e.HTTP.URL+"/api/v1/events?type=lifecycle", nil)
 		req.Header.Set("Authorization", "Bearer "+tok)
 		if last != "" {
 			req.Header.Set("Last-Event-ID", last)
@@ -154,14 +154,14 @@ func contains(l []string, s string) bool {
 func TestEventsBadRequests(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	tok := e.Token(api.PermReadonly)
-	if code, _ := e.Raw("GET", "/1.0/events?type=bogus", tok, ""); code != 400 {
+	if code, _ := e.Raw("GET", "/api/v1/events?type=bogus", tok, ""); code != 400 {
 		t.Fatalf("%d", code)
 	}
-	if code, _ := e.RawHdr("GET", "/1.0/events", tok, "", map[string]string{"Last-Event-ID": "abc"}); code != 400 {
+	if code, _ := e.RawHdr("GET", "/api/v1/events", tok, "", map[string]string{"Last-Event-ID": "abc"}); code != 400 {
 		t.Fatalf("%d", code)
 	}
 	// The UI passes the token in the query: accepted on this route only.
-	req, _ := http.NewRequest("GET", e.HTTP.URL+"/1.0/events?access_token="+tok, nil)
+	req, _ := http.NewRequest("GET", e.HTTP.URL+"/api/v1/events?access_token="+tok, nil)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	resp, err := http.DefaultClient.Do(req.WithContext(ctx))
@@ -169,7 +169,7 @@ func TestEventsBadRequests(t *testing.T) {
 		t.Fatalf("%v %v", err, resp)
 	}
 	resp.Body.Close()
-	if code, _ := e.Raw("GET", "/1.0/operations?access_token="+tok, "", ""); code != 401 {
+	if code, _ := e.Raw("GET", "/api/v1/operations?access_token="+tok, "", ""); code != 401 {
 		t.Fatalf("a token in the query authenticated another route: %d", code)
 	}
 }

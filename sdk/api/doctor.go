@@ -12,7 +12,7 @@ const (
 	DoctorUnknown DoctorStatus = "unknown" // could not be determined, for example without FreeBSD
 )
 
-// DoctorCheck is one diagnostic of GET /1.0/doctor.
+// DoctorCheck is one diagnostic of GET /api/v1/doctor.
 type DoctorCheck struct {
 	// Name is a stable identifier such as "kernel.module.if_bridge".
 	Name    string       `json:"name"`
@@ -23,7 +23,7 @@ type DoctorCheck struct {
 	Detail map[string]string `json:"detail,omitempty"`
 }
 
-// DoctorReport is the reply of GET /1.0/doctor. Status is the worst status of
+// DoctorReport is the reply of GET /api/v1/doctor. Status is the worst status of
 // its checks (fail, warn, unknown, ok in that order).
 type DoctorReport struct {
 	Time   time.Time     `json:"time"`
@@ -32,7 +32,7 @@ type DoctorReport struct {
 	Checks []DoctorCheck `json:"checks"`
 }
 
-// AuditEntry is one row of GET /1.0/audit.
+// AuditEntry is one row of GET /api/v1/audit.
 type AuditEntry struct {
 	ID        string    `json:"id"`
 	Timestamp time.Time `json:"timestamp"`
@@ -49,7 +49,7 @@ type AuditEntry struct {
 	Detail string `json:"detail,omitempty"`
 }
 
-// PoolUsage is the reply of GET /1.0/resources: the capacity of the pool that
+// PoolUsage is the reply of GET /api/v1/resources: the capacity of the pool that
 // holds JailOps's datasets.
 type PoolUsage struct {
 	Name      string `json:"name"`

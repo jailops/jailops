@@ -350,7 +350,7 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 	locks = append(locks, s.imageLocks(ctx, ref, spec.Storage)...)
 	op, err := s.Submit(ctx, OpSpec{
 		Description: "Create jail " + name, Locks: locks, Project: proj,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + name}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()
 			s.place(key, spec.Storage)
@@ -379,7 +379,7 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 				return nil, err
 			}
 			ok = true
-			s.emitIn(ctx, proj, "jail-created", "/1.0/jails/"+name)
+			s.emitIn(ctx, proj, "jail-created", "/api/v1/jails/"+name)
 			s.kick()
 			return s.getByKey(ctx, key)
 		},
@@ -536,7 +536,7 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 		e.jail = nj
 	}
 	s.mu.Unlock()
-	s.emitIn(ctx, p.Meta.Name, "jail-updated", "/1.0/jails/"+name)
+	s.emitIn(ctx, p.Meta.Name, "jail-updated", "/api/v1/jails/"+name)
 	s.kick()
 	return s.getByKey(ctx, key)
 }
@@ -587,7 +587,7 @@ func (s *Service) DeleteJail(ctx context.Context, name string) (api.Operation, e
 	}
 	return s.Submit(ctx, OpSpec{
 		Description: "Delete jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + name}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			_ = h.Bind("destroy/"+key, &opRequest{Kind: "destroy", Jail: key})
 			if _, err := s.life.DestroyJail(ctx, key, false, false); err != nil {
@@ -598,7 +598,7 @@ func (s *Service) DeleteJail(ctx context.Context, name string) (api.Operation, e
 			s.forgetProvisioned(key)
 			delete(s.status, key)
 			s.mu.Unlock()
-			s.emitIn(ctx, p.Meta.Name, "jail-deleted", "/1.0/jails/"+name)
+			s.emitIn(ctx, p.Meta.Name, "jail-deleted", "/api/v1/jails/"+name)
 			s.kick()
 			return nil, nil
 		},
@@ -628,7 +628,7 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 	done := map[string]string{"start": "started", "stop": "stopped", "restart": "restarted"}[a.Action]
 	return s.Submit(ctx, OpSpec{
 		Description: strings.ToUpper(a.Action[:1]) + a.Action[1:] + " jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + name}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			if a.Timeout > 0 {
 				var cancel context.CancelFunc
@@ -652,7 +652,7 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 					return nil, err
 				}
 			}
-			s.emitIn(ctx, p.Meta.Name, "jail-"+done, "/1.0/jails/"+name)
+			s.emitIn(ctx, p.Meta.Name, "jail-"+done, "/api/v1/jails/"+name)
 			s.kick()
 			return s.getByKey(ctx, key)
 		},
@@ -674,11 +674,11 @@ func (s *Service) StartJail(ctx context.Context, key string) error {
 		res = "error"
 	}
 	s.Audit(ctx, store.AuditEntry{Actor: ActorFrom(ctx).Name, ActorKind: ActorFrom(ctx).Kind, Method: "AUTOSTART", Route: "reconcile",
-		Object: "/1.0/jails/" + name, Project: project, Result: res, Detail: "start at boot"})
+		Object: "/api/v1/jails/" + name, Project: project, Result: res, Detail: "start at boot"})
 	if err != nil {
 		return err
 	}
-	s.emitIn(ctx, project, "jail-started", "/1.0/jails/"+name)
+	s.emitIn(ctx, project, "jail-started", "/api/v1/jails/"+name)
 	return nil
 }
 
@@ -786,13 +786,13 @@ func (s *Service) CreateSnapshot(ctx context.Context, jail string, req api.JailS
 	}
 	return s.Submit(ctx, OpSpec{
 		Description: "Snapshot jail " + jail, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + jail}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + jail}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			r, err := s.life.SnapshotJail(ctx, key, name, req.Spec.Comment)
 			if err != nil {
 				return nil, err
 			}
-			s.emitIn(ctx, p.Meta.Name, "jail-snapshot-created", "/1.0/jails/"+jail+"/snapshots/"+r.Name)
+			s.emitIn(ctx, p.Meta.Name, "jail-snapshot-created", "/api/v1/jails/"+jail+"/snapshots/"+r.Name)
 			return s.snapToAPI(ctx, p.Meta.Name, key, r), nil
 		},
 	})
@@ -812,7 +812,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, jail, snap string) (api.Op
 	}
 	return s.Submit(ctx, OpSpec{
 		Description: "Delete snapshot " + snap, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + jail}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + jail}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			container := s.lcfg.ContainerDS(key)
 			ds, err := s.d.ZFS.Descendants(ctx, container)
@@ -830,7 +830,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, jail, snap string) (api.Op
 					}
 				}
 			}
-			s.emitIn(ctx, p.Meta.Name, "jail-snapshot-deleted", "/1.0/jails/"+jail+"/snapshots/"+snap)
+			s.emitIn(ctx, p.Meta.Name, "jail-snapshot-deleted", "/api/v1/jails/"+jail+"/snapshots/"+snap)
 			return nil, nil
 		},
 	})
@@ -874,7 +874,7 @@ func (s *Service) RollbackJail(ctx context.Context, name string, rb api.JailRoll
 	opts := lifecycle.RollbackOptions{JailRollback: rb, Stamp: s.stamp()}
 	return s.Submit(ctx, OpSpec{
 		Description: "Rollback jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + name}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			var ar ActionResult
 			if opts.Scope == api.RollbackRoot {
@@ -908,7 +908,7 @@ func (s *Service) RollbackJail(ctx context.Context, name string, rb api.JailRoll
 			if err := s.refreshJail(ctx, key); err != nil {
 				s.log.Warn("refresh after rollback", "jail", key, "err", err)
 			}
-			s.emitIn(ctx, p.Meta.Name, "jail-rolled-back", "/1.0/jails/"+name)
+			s.emitIn(ctx, p.Meta.Name, "jail-rolled-back", "/api/v1/jails/"+name)
 			ar.Jail, _ = s.getByKey(ctx, key)
 			return ar, nil
 		},
@@ -931,7 +931,7 @@ func (s *Service) UpgradeJail(ctx context.Context, name string, up api.JailUpgra
 	req := lifecycle.UpgradeRequest{JailUpgrade: up, Stamp: s.stamp()}
 	return s.Submit(ctx, OpSpec{
 		Description: "Upgrade jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + name}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			return s.upgradeBody(ctx, h, p.Meta.Name, name, key, up, req)
 		},
@@ -965,7 +965,7 @@ func (s *Service) upgradeBody(ctx context.Context, h *OpHandle, project, name, k
 	if err := s.refreshJail(ctx, key); err != nil {
 		s.log.Warn("refresh after upgrade", "jail", key, "err", err)
 	}
-	s.emitIn(ctx, project, "jail-upgraded", "/1.0/jails/"+name)
+	s.emitIn(ctx, project, "jail-upgraded", "/api/v1/jails/"+name)
 	s.kick()
 	j, _ = s.getByKey(ctx, key)
 	return ActionResult{Jail: j, Plan: res.Plan, Warnings: res.Warnings}, nil
@@ -1027,7 +1027,7 @@ func (s *Service) CopyJail(ctx context.Context, src string, dst api.Jail) (api.O
 	locks := append([]string{jailLock(srcKey), jailLock(key)}, s.netLocksEff(p.Meta.Name, j.Spec)...)
 	op, err := s.Submit(ctx, OpSpec{
 		Description: "Copy jail " + src + " to " + name, Locks: locks, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + src, "/1.0/jails/" + name}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + src, "/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()
 			s.place(key, j.Spec.Storage)
@@ -1064,7 +1064,7 @@ func (s *Service) CopyJail(ctx context.Context, src string, dst api.Jail) (api.O
 			}
 			s.mu.Unlock()
 			ok = true
-			s.emitIn(ctx, p.Meta.Name, "jail-created", "/1.0/jails/"+name)
+			s.emitIn(ctx, p.Meta.Name, "jail-created", "/api/v1/jails/"+name)
 			s.kick()
 			return s.getByKey(ctx, key)
 		},

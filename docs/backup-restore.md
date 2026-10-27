@@ -53,7 +53,7 @@ In `jailopsd.yaml` (see [configuration.md](configuration.md)):
     backup:
       node:
         name: vault
-        address: backup.example.net:8444
+        address: backup.example.net:39111
         fingerprint: <the node's fingerprint>
         cert_file: /var/db/jailops/backup-client.crt
         key_file: /var/db/jailops/backup-client.key
@@ -84,7 +84,7 @@ should not use outside a test.
 A policy selects jails **by label**, so label the jails first:
 
     jailops label web --project shop backup=yes
-    jailops backup target create vault --address https://backup.example.net:8444 --fingerprint <the node's fingerprint>
+    jailops backup target create vault --address https://backup.example.net:39111 --fingerprint <the node's fingerprint>
     jailops backup policy create nightly --project shop --selector backup=yes --target vault \
         --schedule "0 2 * * *" --keep-daily 14 --keep-weekly 8 --keep-monthly 12 \
         --verify-schedule "0 4 * * 0" --verify-mode extract

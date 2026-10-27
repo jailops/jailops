@@ -24,7 +24,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-const defaultPort = "8443"
+const defaultPort = "39110"
 
 func (a *app) trustCmd() *cobra.Command {
 	d := certDesc()

@@ -26,7 +26,7 @@ import (
 type Option func(*Server)
 
 // WithToken requires "Authorization: Bearer <token>" on every route except
-// GET /1.0.
+// GET /api/v1.
 // The token is a global admin.
 func WithToken(tok string) Option {
 	return func(s *Server) {
@@ -60,7 +60,7 @@ func WithExtensions(ext ...string) Option { return func(s *Server) { s.extension
 // WithSecretsRecipient sets the age public key the server publishes for sealed environment values.
 func WithSecretsRecipient(r string) Option { return func(s *Server) { s.secretsRec = r } }
 
-// WithHostName sets the hostname reported by GET /1.0.
+// WithHostName sets the hostname reported by GET /api/v1.
 func WithHostName(n string) Option { return func(s *Server) { s.hostname = n } }
 
 // WithHosts turns the server into a hub: requests carrying ?host=<name> are
@@ -223,8 +223,8 @@ func randHex(n int) string {
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	aggregate := false
 	if h := r.URL.Query().Get("host"); h == "all" {
-		if !s.hub || r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/1.0/projects/") || strings.Count(r.URL.Path, "/") != 3 {
-			writeErr(w, api.Errorf(api.CodeInvalid, "host=all is only valid on GET /1.0/projects/<name> of a hub"))
+		if !s.hub || r.Method != http.MethodGet || !strings.HasPrefix(r.URL.Path, "/api/v1/projects/") || strings.Count(r.URL.Path, "/") != 4 {
+			writeErr(w, api.Errorf(api.CodeInvalid, "host=all is only valid on GET /api/v1/projects/<name> of a hub"))
 			return
 		}
 		aggregate = true
@@ -345,7 +345,7 @@ func (s *Server) SetOperationDelay(d time.Duration) {
 	s.opDelay = d
 }
 
-// DisconnectEventStreams ends every open /1.0/events response, as a network
+// DisconnectEventStreams ends every open /api/v1/events response, as a network
 // drop would, so clients must reconnect.
 func (s *Server) DisconnectEventStreams() {
 	s.mu.Lock()

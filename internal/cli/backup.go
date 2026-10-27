@@ -62,7 +62,7 @@ one committed snapshot in a repository.
 
 Restoring always starts with a preflight that lists what is missing and what
 would change; nothing is touched until you confirm.`,
-		`jailops backup target create nightly-node --kind node --address https://backup.example.net:8443 --fingerprint ab12...
+		`jailops backup target create nightly-node --kind node --address https://backup.example.net:39110 --fingerprint ab12...
 jailops backup policy create nightly --selector env=prod --target nightly-node --schedule "0 2 * * *" --keep-daily 14
 jailops backup list --jail web
 jailops backup restore 20260101020000-ab12cd34 --as web-restored`, "backups")
@@ -70,7 +70,7 @@ jailops backup restore 20260101020000-ab12cd34 --as web-restored`, "backups")
 	tc := group("target", "Manage backup targets", "A target is a backup node or a directory that receives encrypted backups.",
 		"jailops backup target list\njailops backup target show nightly-node")
 	crudCommands(a, tc, td, "Create a backup target: a backup node reached over HTTPS (pinned by fingerprint) or a local directory.",
-		`jailops backup target create nightly-node --kind node --address https://backup.example.net:8443 --fingerprint ab12...
+		`jailops backup target create nightly-node --kind node --address https://backup.example.net:39110 --fingerprint ab12...
 jailops backup target create usb --kind directory --path /mnt/backup`,
 		func(cmd *cobra.Command) func(string) (api.BackupTarget, error) {
 			var kind, addr, fp, path string

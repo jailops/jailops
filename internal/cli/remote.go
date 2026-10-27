@@ -51,7 +51,7 @@ are kept in ~/.config/jailops/config.yaml (mode 0600). The built-in remote
 "local" is the unix socket of this host.
 
 (To manage the hosts behind a hub, see 'jailops host'.)`,
-		`jailops remote add prod https://hub.example.net:8443 --token-stdin
+		`jailops remote add prod https://hub.example.net:39110 --token-stdin
 jailops remote list
 jailops remote switch prod
 jailops remote remove old`, "remotes")
@@ -73,7 +73,7 @@ command joins the server instead: it pins the server fingerprint carried by the
 token (there is no trust-on-first-use prompt), generates a client key pair
 (the key is stored with mode 0600 next to the configuration), presents the token
 and the certificate, and saves the remote with the certificate in place of an
-API token. The default port is 8443.
+API token. The default port is 39110.
 
 If the server's certificate is not signed by a trusted authority, the command
 connects once, shows the certificate's SHA-256 fingerprint and asks whether to
@@ -86,9 +86,9 @@ The token is read from --token, from the first line of standard input with
 --token-stdin, or referenced by file with --token-file. Prefer the latter two:
 a value on the command line is visible to other users.`,
 		Example: `jailops remote add host.example --token joc_...
-jailops remote add prod https://hub.example.net:8443 --token-stdin <token.txt
-jailops remote add lab https://10.0.0.5:8443 --fingerprint ab:cd:ef:... --token-file ~/.jailops-lab
-jailops remote add edge https://edge:8443 --cert client.pem --key client.key --switch`,
+jailops remote add prod https://hub.example.net:39110 --token-stdin <token.txt
+jailops remote add lab https://10.0.0.5:39110 --fingerprint ab:cd:ef:... --token-file ~/.jailops-lab
+jailops remote add edge https://edge:39110 --cert client.pem --key client.key --switch`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 1 {

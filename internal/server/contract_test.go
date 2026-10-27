@@ -582,7 +582,7 @@ func TestOperationsListWaitCancel(t *testing.T) {
 	if err != nil || got.Status != api.OpSuccess || got.Progress != 100 || got.MayCancel || len(got.Metadata) == 0 {
 		t.Fatalf("%v %+v", err, got)
 	}
-	if got.Resources["jails"][0] != "/1.0/jails/web" {
+	if got.Resources["jails"][0] != "/api/v1/jails/web" {
 		t.Fatalf("%+v", got.Resources)
 	}
 	n := 0
@@ -610,17 +610,17 @@ func TestUnsupportedAndRouting(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
 	// Server side: 501 with api.CodeUnsupported, never success.
-	for _, p := range []string{"/1.0/cluster", "/1.0/rollouts"} {
+	for _, p := range []string{"/api/v1/cluster", "/api/v1/rollouts"} {
 		code, body := e.Raw("POST", p, e.Token(api.PermAdmin), "{}")
 		if code != 501 || !strings.Contains(body, `"unsupported"`) {
 			t.Errorf("%s: %d %s", p, code, body)
 		}
 	}
-	code, body := e.Raw("GET", "/1.0/nothing", e.Token(api.PermAdmin), "")
+	code, body := e.Raw("GET", "/api/v1/nothing", e.Token(api.PermAdmin), "")
 	if code != 404 || !strings.Contains(body, `"not_found"`) {
 		t.Fatalf("%d %s", code, body)
 	}
-	code, body = e.Raw("DELETE", "/1.0/operations", e.Token(api.PermAdmin), "")
+	code, body = e.Raw("DELETE", "/api/v1/operations", e.Token(api.PermAdmin), "")
 	if code != 501 && code != 405 {
 		t.Fatalf("%d %s", code, body)
 	}
@@ -639,7 +639,7 @@ func TestUnsupportedAndRouting(t *testing.T) {
 	if !sdk.IsUnsupported(err) {
 		t.Fatalf("%v", err)
 	}
-	if code, body := e.Raw("POST", "/1.0/restores?project=alpha", e.Token(api.PermAdmin), `{"backup":"x","dry_run":true}`); code != 501 {
+	if code, body := e.Raw("POST", "/api/v1/restores?project=alpha", e.Token(api.PermAdmin), `{"backup":"x","dry_run":true}`); code != 501 {
 		t.Fatalf("%d %s", code, body)
 	}
 }
@@ -682,20 +682,20 @@ func TestErrorsAreStructured(t *testing.T) {
 	if !errors.As(err, &ae) || ae.Code != api.CodeNotFound || ae.Message == "" {
 		t.Fatalf("%v", err)
 	}
-	code, body := e.Raw("POST", "/1.0/jails?project=alpha", e.Token(api.PermAdmin), "{not json")
+	code, body := e.Raw("POST", "/api/v1/jails?project=alpha", e.Token(api.PermAdmin), "{not json")
 	if code != 400 || !strings.Contains(body, `"invalid"`) {
 		t.Fatalf("%d %s", code, body)
 	}
 	big := `{"metadata":{"name":"x"},"spec":{"image":"` + strings.Repeat("a", 5<<20) + `"}}`
-	code, body = e.Raw("POST", "/1.0/jails?project=alpha", e.Token(api.PermAdmin), big)
+	code, body = e.Raw("POST", "/api/v1/jails?project=alpha", e.Token(api.PermAdmin), big)
 	if code != 400 || !strings.Contains(body, "larger") {
 		t.Fatalf("%d %.200s", code, body)
 	}
-	code, body = e.Raw("PUT", "/1.0/jails/ghost?project=alpha", e.Token(api.PermAdmin), `{}`)
+	code, body = e.Raw("PUT", "/api/v1/jails/ghost?project=alpha", e.Token(api.PermAdmin), `{}`)
 	if code != 404 {
 		t.Fatalf("%d %s", code, body)
 	}
-	code, _ = e.Raw("PUT", "/1.0/networks/lan", e.Token(api.PermAdmin), `{}`)
+	code, _ = e.Raw("PUT", "/api/v1/networks/lan", e.Token(api.PermAdmin), `{}`)
 	if code != 400 {
 		t.Fatalf("%d", code)
 	}
@@ -704,7 +704,7 @@ func TestErrorsAreStructured(t *testing.T) {
 func TestRequestIDs(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	req := func(id string) string {
-		r, _ := http.NewRequest("GET", e.HTTP.URL+"/1.0", nil)
+		r, _ := http.NewRequest("GET", e.HTTP.URL+"/api/v1", nil)
 		if id != "" {
 			r.Header.Set("X-Request-ID", id)
 		}
@@ -746,7 +746,7 @@ func TestHandlerPanicIsAnErrorEnvelopeNotACrash(t *testing.T) {
 	}
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-	req, _ := http.NewRequest("GET", ts.URL+"/1.0/jails?host=r&project=alpha", nil)
+	req, _ := http.NewRequest("GET", ts.URL+"/api/v1/jails?host=r&project=alpha", nil)
 	req.Header.Set("Authorization", "Bearer "+e.Token(api.PermAdmin))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -759,7 +759,7 @@ func TestHandlerPanicIsAnErrorEnvelopeNotACrash(t *testing.T) {
 		t.Fatalf("%d %+v", resp.StatusCode, env)
 	}
 	// The server still serves.
-	resp, err = http.Get(ts.URL + "/1.0")
+	resp, err = http.Get(ts.URL + "/api/v1")
 	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("%v", err)
 	}
@@ -780,7 +780,7 @@ func TestWebUIIsServedOutsideTheAPI(t *testing.T) {
 		t.Error("no CSP on the UI")
 	}
 	// An unknown API path is a JSON error, never the UI.
-	code, body := e.Raw("GET", "/1.0/definitely-not-there", e.Token(api.PermAdmin), "")
+	code, body := e.Raw("GET", "/api/v1/definitely-not-there", e.Token(api.PermAdmin), "")
 	if code != 404 || !strings.HasPrefix(strings.TrimSpace(body), "{") {
 		t.Fatalf("%d %.80s", code, body)
 	}
@@ -790,7 +790,7 @@ func TestWebUIIsServedOutsideTheAPI(t *testing.T) {
 	// The snapshot shape the UI sends is accepted.
 	e.Seed()
 	mustJail(t, e, "web")
-	if code, body := e.Raw("POST", "/1.0/jails/web/snapshots?project=alpha", e.Token(api.PermAdmin), `{"comment":"from the ui"}`); code != 202 {
+	if code, body := e.Raw("POST", "/api/v1/jails/web/snapshots?project=alpha", e.Token(api.PermAdmin), `{"comment":"from the ui"}`); code != 202 {
 		t.Fatalf("%d %s", code, body)
 	}
 	time.Sleep(100 * time.Millisecond)

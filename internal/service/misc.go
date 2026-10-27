@@ -16,7 +16,7 @@ import (
 
 // ---- remotes (hub) ----
 
-// RemoteProber asks a remote host for its GET /1.0 over pinned mTLS.
+// RemoteProber asks a remote host for its GET /api/v1 over pinned mTLS.
 type RemoteProber interface {
 	Probe(ctx context.Context, r api.Remote) (api.ServerInfo, error)
 }
@@ -532,7 +532,7 @@ func (s *Service) DeleteBackup(ctx context.Context, id string) (api.Operation, e
 		return api.Operation{}, err
 	}
 	return s.Submit(ctx, OpSpec{Description: "Delete backup " + id, Project: backupProject(b),
-		Resources: map[string][]string{"backups": {"/1.0/backups/" + id}},
+		Resources: map[string][]string{"backups": {"/api/v1/backups/" + id}},
 		Run:       func(ctx context.Context, h *OpHandle) (any, error) { return nil, s.d.Backups.Delete(ctx, id) }})
 }
 
@@ -614,7 +614,7 @@ func (s *Service) Restore(ctx context.Context, req api.RestoreRequest) (*api.Res
 		return nil, nil, err
 	}
 	op, err := s.Submit(ctx, OpSpec{Description: "Restore backup " + req.Backup, Locks: []string{jailLock(key)}, Project: target,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + name}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()
 			return s.d.Backups.Restore(ctx, req)

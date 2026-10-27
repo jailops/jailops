@@ -319,7 +319,7 @@ func TestOperationsPersistAndInterrupt(t *testing.T) {
 	s, _ := Open(path, Options{Now: clk.Now})
 	mk := func(id string, st api.OperationStatus) api.Operation {
 		return api.Operation{ID: id, Description: "d " + id, Status: st, MayCancel: true,
-			Resources: map[string][]string{"jails": {"/1.0/jails/web"}}, Metadata: json.RawMessage(`{"step":2}`),
+			Resources: map[string][]string{"jails": {"/api/v1/jails/web"}}, Metadata: json.RawMessage(`{"step":2}`),
 			CreatedAt: clk.Now(), UpdatedAt: clk.Now()}
 	}
 	for i, st := range []api.OperationStatus{api.OpPending, api.OpRunning, api.OpSuccess, api.OpFailure, api.OpRunning} {
@@ -342,7 +342,7 @@ func TestOperationsPersistAndInterrupt(t *testing.T) {
 	}
 	defer s.Close()
 	got, err := s.Operations.Get(ctx, "op2")
-	if err != nil || got.Progress != 100 || string(got.Metadata) != `{"step":2}` || got.Resources["jails"][0] != "/1.0/jails/web" {
+	if err != nil || got.Progress != 100 || string(got.Metadata) != `{"step":2}` || got.Resources["jails"][0] != "/api/v1/jails/web" {
 		t.Fatalf("%v %+v", err, got)
 	}
 	if _, err := s.Operations.Get(ctx, "zz"); !api.IsCode(err, api.CodeNotFound) {
@@ -432,7 +432,7 @@ func TestAuditAppendOnly(t *testing.T) {
 		if i%2 == 1 {
 			actor = "bob"
 		}
-		id, err := s.Audit.Append(ctx, AuditEntry{Actor: actor, ActorKind: "user", Method: "POST", Route: "/1.0/jails", Object: fmt.Sprintf("jail%d", i), Result: "ok", Status: 202})
+		id, err := s.Audit.Append(ctx, AuditEntry{Actor: actor, ActorKind: "user", Method: "POST", Route: "/api/v1/jails", Object: fmt.Sprintf("jail%d", i), Result: "ok", Status: 202})
 		if err != nil || id == 0 {
 			t.Fatal(err)
 		}

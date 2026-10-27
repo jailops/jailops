@@ -53,7 +53,7 @@ func (s *Server) handleBackupKeyEscrow(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	rp := func() reply {
 		if s.bkStatus == "" {
-			return reply{err: api.Errorf(api.CodeNotFound, "this host has no backup key").WithHint("create it with POST /1.0/backup/key")}
+			return reply{err: api.Errorf(api.CodeNotFound, "this host has no backup key").WithHint("create it with POST /api/v1/backup/key")}
 		}
 		if len(in.Recipients) == 0 {
 			return reply{err: api.Errorf(api.CodeInvalid, "escrow needs at least one recovery recipient (an age public key)")}
@@ -85,7 +85,7 @@ func (s *Server) handleBackupRun(w http.ResponseWriter, r *http.Request) {
 		if pol == nil {
 			return reply{err: notFound("backup policy", req.Policy)}
 		}
-		op := s.startOp("", "backups.run", "Run backup policy "+req.Policy, map[string][]string{"backup-policies": {"/1.0/backup-policies/" + req.Policy}}, func() (any, *api.Error) {
+		op := s.startOp("", "backups.run", "Run backup policy "+req.Policy, map[string][]string{"backup-policies": {"/api/v1/backup-policies/" + req.Policy}}, func() (any, *api.Error) {
 			// Like the daemon: a missing or unescrowed key fails the run, not the request.
 			if s.bkStatus == "" {
 				return nil, api.Errorf(api.CodePlaintextDenied, "this host holds no backup key; nothing leaves the host unencrypted")
@@ -173,7 +173,7 @@ func (s *Server) handleBackupVerify(w http.ResponseWriter, r *http.Request) {
 		default:
 			return reply{err: api.Errorf(api.CodeInvalid, "depth must be deep, extract or full")}
 		}
-		op := s.startOp(b.Metadata.Project, "backups.verify", "Verify backup "+id, map[string][]string{"backups": {"/1.0/backups/" + id}}, func() (any, *api.Error) {
+		op := s.startOp(b.Metadata.Project, "backups.verify", "Verify backup "+id, map[string][]string{"backups": {"/api/v1/backups/" + id}}, func() (any, *api.Error) {
 			now := s.now()
 			b.Status.Verified, b.Status.VerifiedAt = true, now
 			return api.BackupRun{ID: "drill-" + id, Kind: "drill", Jail: b.Spec.Jail, JailUUID: b.Spec.JailUUID, Started: now, Finished: now, OK: true, Snapshot: b.Spec.Snapshot, Depth: depth}, nil

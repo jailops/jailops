@@ -38,11 +38,11 @@ func TestAuditTrail(t *testing.T) {
 			t.Fatalf("incomplete entry %+v", en)
 		}
 		switch {
-		case en.Action == "POST /1.0/jails" && en.Result == "ok" && en.Resource == "/1.0/jails/web":
+		case en.Action == "POST /api/v1/jails" && en.Result == "ok" && en.Resource == "/api/v1/jails/web":
 			created = true
-		case en.Action == "POST /1.0/networks" && en.Result == "denied" && strings.HasPrefix(en.Requestor, "t-operator"):
+		case en.Action == "POST /api/v1/networks" && en.Result == "denied" && strings.HasPrefix(en.Requestor, "t-operator"):
 			denied = true
-		case en.Action == "POST /1.0/networks" && en.Result == "error" && strings.HasPrefix(en.Requestor, "t-admin"):
+		case en.Action == "POST /api/v1/networks" && en.Result == "error" && strings.HasPrefix(en.Requestor, "t-admin"):
 			failed = true
 		case strings.HasPrefix(en.Action, "OPERATION") && strings.Contains(en.Detail, "Create jail web") && en.Result == "ok":
 			opdone = true
@@ -56,7 +56,7 @@ func TestAuditTrail(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	for _, en := range entries {
-		if en.Action == "GET /1.0/jails" {
+		if en.Action == "GET /api/v1/jails" {
 			t.Fatalf("a read was audited: %+v", en)
 		}
 	}
@@ -93,8 +93,8 @@ func TestSecretsNeverLeak(t *testing.T) {
 	}
 	// A failed login, a bad token and a token in the query string.
 	login(t, e, nil, "ann", "wrong-password-value", "")
-	e.Raw("GET", "/1.0/jails?project=alpha", "jot_"+strings.Repeat("z", 52), "")
-	req, _ := http.NewRequest("GET", e.HTTP.URL+"/1.0/events?access_token="+tok.Secret, nil)
+	e.Raw("GET", "/api/v1/jails?project=alpha", "jot_"+strings.Repeat("z", 52), "")
+	req, _ := http.NewRequest("GET", e.HTTP.URL+"/api/v1/events?access_token="+tok.Secret, nil)
 	ectx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	if resp, err := http.DefaultClient.Do(req.WithContext(ectx)); err == nil {
 		resp.Body.Close()
@@ -104,7 +104,7 @@ func TestSecretsNeverLeak(t *testing.T) {
 
 	// Everything that can be read back.
 	var all strings.Builder
-	for _, p := range []string{"/1.0/tokens", "/1.0/tokens/leaky", "/1.0/users", "/1.0/users/ann", "/1.0/users/bob", "/1.0/audit?limit=500", "/1.0/operations", "/1.0/auth/session"} {
+	for _, p := range []string{"/api/v1/tokens", "/api/v1/tokens/leaky", "/api/v1/users", "/api/v1/users/ann", "/api/v1/users/bob", "/api/v1/audit?limit=500", "/api/v1/operations", "/api/v1/auth/session"} {
 		code, body := e.Raw("GET", p, e.Token(api.PermAdmin), "")
 		if code != 200 {
 			t.Fatalf("%s: %d %s", p, code, body)
@@ -113,7 +113,7 @@ func TestSecretsNeverLeak(t *testing.T) {
 	}
 	events := e.Raw
 	_ = events
-	code, body := e.RawHdr("GET", "/1.0/doctor", e.Token(api.PermAdmin), "", nil)
+	code, body := e.RawHdr("GET", "/api/v1/doctor", e.Token(api.PermAdmin), "", nil)
 	if code != 200 {
 		t.Fatal(code)
 	}

@@ -1,4 +1,4 @@
-// Every path the backup console calls, in one module: the management API of jailops-backupd under /1.0,
+// Every path the backup console calls, in one module: the management API of jailops-backupd under /api/v1,
 // as documented in internal/backupd/api.go. A test checks the first segments against web/apps.json.
 import { getClient } from '@jailops/shared/api/client'
 import { core } from '@jailops/shared/api/core'

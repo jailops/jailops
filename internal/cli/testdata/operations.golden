@@ -18,7 +18,7 @@ description: Creating jail web
 status: success
 resources:
   jails:
-    - /1.0/jails/web
+    - /api/v1/jails/web
 metadata:
   metadata:
     name: web

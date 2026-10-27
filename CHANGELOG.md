@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **The API is under `/api/v1/` on every service** (it was `/1.0/`), and the web console is on `/`: the same layout for `jailopsd`, `jailops-backupd` and `pkgops serve` (which already used `/api/v1/`). The old paths are gone, not aliased. The CLI, the SDK, `jailops-sync`, the consoles, the hub, the docs and the tests use the new paths; the version number in the answer (`api_version: "1.0"`) is unchanged. Nothing under `/api/` is ever answered with the console. The backup node's unauthenticated `GET /api/v1` no longer tells the host name, host id or software version.
+
+- `just build` and `just build-freebsd` always build the web consoles first, so the binaries always have everything embedded (before, you had to run `just web-all` yourself, or the daemon had no console).
+
+- **The web consoles are in every binary and off until you turn them on.** `web.enabled` defaults to `false` in `jailopsd` (it was `true`) and in the shipped `backupd.yaml`. Turn the host console on with `web.enabled: true`, `sysrc jailopsd_web=YES` or `jailopsd -web`; `jailopsd_web=NO` and `-no-web` force it off. Hosts that used the console must set one of these.
+- **Backup node, upgrading:** the node now has one TLS listener on `listen` (default `:39111`, every interface unless you bind an address). It serves the host API (mutual TLS), the management API (users, tokens, sessions; it used to be on a loopback listener of its own, `web.listen`, which is gone: delete it) and, with `web.enabled: true`, the console. `web.enabled` switches the console only. The two ways of proving who you are are independent: the host API needs a valid certificate of an enrolled, non-revoked host (401 otherwise), the management API takes no identity from a certificate (an administrator is not turned away by the certificate the browser offers, and a host certificate is never an administrator). The listener is TLS 1.3 only, password hashing is bounded to one hash per CPU at once (429 beyond that), and a management request has 15 seconds to arrive.
+- **One port per service, in a range of our own: 39110 to 39112**, documented in docs/ports.md. `jailopsd` TLS API and console 39110 (was 8443; still off until you set `listen.https.address`), `jailops-backupd` 39111 (was 8444) for the hosts **and** for its management API and console, which now share that port (the second listener, `web.listen` on 8445, is gone: setting it is an error), `pkgops serve` 39112. `jailops remote add` without a port uses 39110.
 - `jailops-backupd version`, its `/1.0` answer and its log now report the release version. The release stamp (`-X main.version`) never reached it, so the 0.1.0 binaries say `0.1.0-dev`. CI now checks that every command declares `var version`.
 - README and docs/install.md say what is true today: the JailOps packages are in the repository, and the status block is replaced by a link to the roadmap.
 
@@ -136,7 +143,7 @@ Everything below used to be reachable from the CLI, the SDK or the docs and answ
   and pins the jail's MAC address to its port with a static forwarding entry; no jail may send a neighbour
   advertisement, and router advertisements and redirects are dropped (also from the host towards a jail). Verified with
   forged ARP, neighbour advertisements and router advertisements sent from inside the jails, an extra IPv4 or IPv6
-  address, another jail's MAC address and a DHCP discover (darius, proxy mode; jailbe, routed mode). The anti-spoofing
+  address, another jail's MAC address and a DHCP discover (the amd64 host, proxy mode; the arm64 host, routed mode). The anti-spoofing
   table holds the jail's own link-local address instead of `fe80::/10`, `::` passes only as DAD, and ICMPv6 errors
   (packet too big and the rest) always pass. Existing jails get the new addressing when they are restarted.
   `doctor` checks the proxy uplink (`network.uplink`), warns about a gateway interface that is not `staticarp` yet (`network.staticarp`) and warns without a `scrub` rule.
@@ -163,7 +170,7 @@ Everything below used to be reachable from the CLI, the SDK or the docs and answ
   default-deny, while jailopsd created bridges and started jails (design 18.14). The helper's `fs.read_file` can now
   read `/etc/rc.conf` (read-only, like `/etc/sysctl.conf` and `/etc/resolv.conf` already were): `doctor`'s persistent-
   forwarding check reads it for `gateway_enable`/`ipv6_gateway_enable` and, without this, always warned even when
-  they were set (found live on darius).
+  they were set (found live on the amd64 host).
 - Boot-order audit (design 18.14): a jail's own PF anchor loads only after its `exec.start` (the guest's whole boot)
   finishes, which an anchor call that resolves to nothing falls through safely on a default-deny host with the anchor
   line placed correctly (both checked by `doctor`), but depends on pf actually being up, which the `REQUIRE: pf` fix

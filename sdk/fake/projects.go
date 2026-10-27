@@ -608,7 +608,7 @@ func (s *Server) receiveProject(p *api.Project, owner string) (status, reason, m
 			cur.Spec = cp.Spec
 			cur.Metadata.Generation++
 			cur.Metadata.UpdatedAt = s.now()
-			s.emitIn(name, "project-updated", "/1.0/projects/"+name)
+			s.emitIn(name, "project-updated", "/api/v1/projects/"+name)
 		}
 		return api.ConditionTrue, "Applied", "the project is in sync"
 	}
@@ -667,7 +667,7 @@ func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, name string) 
 			hs.HostUUID = t.uuid
 		default:
 			hs.Online, hs.HostUUID = true, t.uuid
-			req := httptest.NewRequest(http.MethodGet, "/1.0/projects/"+name, nil)
+			req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+name, nil)
 			if a := r.Header.Get("Authorization"); a != "" {
 				req.Header.Set("Authorization", a)
 			}

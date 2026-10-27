@@ -15,45 +15,45 @@ import (
 // unsupportedRoutes are routes with a permission entry whose feature is not
 // part of this version. They answer api.CodeUnsupported (501), never success.
 var unsupportedRoutes = []struct{ method, pattern, what string }{
-	{"PUT", "/1.0/server", "changing the server configuration over the API"},
-	{"GET", "/1.0/server/config", "reading the server configuration over the API"},
-	{"POST", "/1.0/cluster/join", "cluster mode"},
-	{"GET", "/1.0/cluster", "cluster mode"},
-	{"POST", "/1.0/cluster/tokens", "cluster mode"},
-	{"PUT", "/1.0/cluster", "cluster mode"},
-	{"DELETE", "/1.0/cluster/members/{name}", "cluster mode"},
-	{"GET", "/1.0/cluster/members", "cluster mode"},
-	{"GET", "/1.0/jails/{name}/console", "listing console sessions (open one with POST /1.0/jails/{name}/console)"},
-	{"GET", "/1.0/jails/{name}/logs", "jail logs"},
-	{"GET", "/1.0/jails/{name}/files/{path...}", "file access"},
-	{"PUT", "/1.0/jails/{name}/files/{path...}", "file access"},
-	{"POST", "/1.0/jails/{name}/move", "cold moves"},
-	{"POST", "/1.0/jails/{name}/snapshots/{snapshot}", "snapshot rename"},
-	{"GET", "/1.0/jails/{name}/volumes", "volume management"},
-	{"POST", "/1.0/jails/{name}/volumes", "volume management"},
-	{"DELETE", "/1.0/jails/{name}/volumes/{volume}", "volume management"},
-	{"GET", "/1.0/jails/{name}/bundle", "bundle download"},
-	{"GET", "/1.0/jail-templates", "jail templates"},
-	{"POST", "/1.0/jail-templates", "jail templates"},
-	{"GET", "/1.0/jail-templates/{name}", "jail templates"},
-	{"PUT", "/1.0/jail-templates/{name}", "jail templates"},
-	{"DELETE", "/1.0/jail-templates/{name}", "jail templates"},
-	{"POST", "/1.0/backups", "starting a backup run"},
-	{"POST", "/1.0/backups/receive", "backup transport (it is the job of the backup node)"},
-	{"GET", "/1.0/backups/{id}/stream", "backup transport (it is the job of the backup node)"},
-	{"GET", "/1.0/backups/chains", "backup transport (it is the job of the backup node)"},
-	{"POST", "/1.0/backups/{id}/restore-preflight", "restore through this route (use POST /1.0/restores)"},
-	{"POST", "/1.0/backups/{id}/restore", "restore through this route (use POST /1.0/restores)"},
-	{"GET", "/1.0/groups", "host groups"},
-	{"POST", "/1.0/groups", "host groups"},
-	{"GET", "/1.0/groups/{name}", "host groups"},
-	{"PUT", "/1.0/groups/{name}", "host groups"},
-	{"DELETE", "/1.0/groups/{name}", "host groups"},
-	{"GET", "/1.0/rollouts", "rollouts"},
-	{"POST", "/1.0/rollouts", "rollouts"},
-	{"GET", "/1.0/rollouts/{name}", "rollouts"},
-	{"PUT", "/1.0/rollouts/{name}", "rollouts"},
-	{"DELETE", "/1.0/rollouts/{name}", "rollouts"},
+	{"PUT", "/api/v1/server", "changing the server configuration over the API"},
+	{"GET", "/api/v1/server/config", "reading the server configuration over the API"},
+	{"POST", "/api/v1/cluster/join", "cluster mode"},
+	{"GET", "/api/v1/cluster", "cluster mode"},
+	{"POST", "/api/v1/cluster/tokens", "cluster mode"},
+	{"PUT", "/api/v1/cluster", "cluster mode"},
+	{"DELETE", "/api/v1/cluster/members/{name}", "cluster mode"},
+	{"GET", "/api/v1/cluster/members", "cluster mode"},
+	{"GET", "/api/v1/jails/{name}/console", "listing console sessions (open one with POST /api/v1/jails/{name}/console)"},
+	{"GET", "/api/v1/jails/{name}/logs", "jail logs"},
+	{"GET", "/api/v1/jails/{name}/files/{path...}", "file access"},
+	{"PUT", "/api/v1/jails/{name}/files/{path...}", "file access"},
+	{"POST", "/api/v1/jails/{name}/move", "cold moves"},
+	{"POST", "/api/v1/jails/{name}/snapshots/{snapshot}", "snapshot rename"},
+	{"GET", "/api/v1/jails/{name}/volumes", "volume management"},
+	{"POST", "/api/v1/jails/{name}/volumes", "volume management"},
+	{"DELETE", "/api/v1/jails/{name}/volumes/{volume}", "volume management"},
+	{"GET", "/api/v1/jails/{name}/bundle", "bundle download"},
+	{"GET", "/api/v1/jail-templates", "jail templates"},
+	{"POST", "/api/v1/jail-templates", "jail templates"},
+	{"GET", "/api/v1/jail-templates/{name}", "jail templates"},
+	{"PUT", "/api/v1/jail-templates/{name}", "jail templates"},
+	{"DELETE", "/api/v1/jail-templates/{name}", "jail templates"},
+	{"POST", "/api/v1/backups", "starting a backup run"},
+	{"POST", "/api/v1/backups/receive", "backup transport (it is the job of the backup node)"},
+	{"GET", "/api/v1/backups/{id}/stream", "backup transport (it is the job of the backup node)"},
+	{"GET", "/api/v1/backups/chains", "backup transport (it is the job of the backup node)"},
+	{"POST", "/api/v1/backups/{id}/restore-preflight", "restore through this route (use POST /api/v1/restores)"},
+	{"POST", "/api/v1/backups/{id}/restore", "restore through this route (use POST /api/v1/restores)"},
+	{"GET", "/api/v1/groups", "host groups"},
+	{"POST", "/api/v1/groups", "host groups"},
+	{"GET", "/api/v1/groups/{name}", "host groups"},
+	{"PUT", "/api/v1/groups/{name}", "host groups"},
+	{"DELETE", "/api/v1/groups/{name}", "host groups"},
+	{"GET", "/api/v1/rollouts", "rollouts"},
+	{"POST", "/api/v1/rollouts", "rollouts"},
+	{"GET", "/api/v1/rollouts/{name}", "rollouts"},
+	{"PUT", "/api/v1/rollouts/{name}", "rollouts"},
+	{"DELETE", "/api/v1/rollouts/{name}", "rollouts"},
 }
 
 // resource describes one plain CRUD collection.
@@ -182,7 +182,7 @@ func (s *Server) routeTable() []route {
 
 	// Server.
 	add(
-		route{method: "GET", pattern: "/1.0", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1", h: func(c *rc) error {
 			a := "untrusted"
 			if c.actor.Perm != "" {
 				a = "trusted"
@@ -190,11 +190,11 @@ func (s *Server) routeTable() []route {
 			c.sync(200, svc.Info(a), 0)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/doctor", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/doctor", h: func(c *rc) error {
 			c.sync(200, svc.Doctor(c.r.Context()), 0)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/resources", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/resources", h: func(c *rc) error {
 			v, err := svc.Resources(c.r.Context())
 			if err != nil {
 				return err
@@ -202,21 +202,21 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/audit", h: s.handleAudit},
-		route{method: "GET", pattern: "/1.0/events", h: s.handleEvents, long: true},
+		route{method: "GET", pattern: "/api/v1/audit", h: s.handleAudit},
+		route{method: "GET", pattern: "/api/v1/events", h: s.handleEvents, long: true},
 	)
 	add(s.authRoutes()...)
 	add(s.operationRoutes()...)
 
 	// Images.
-	add(resource[api.Image]{base: "/1.0/images", param: "name",
+	add(resource[api.Image]{base: "/api/v1/images", param: "name",
 		list:   svc.ListImages,
 		get:    func(ctx context.Context, k string) (api.Image, error) { return svc.GetImage(ctx, k) },
 		create: svc.CreateImage, put: svc.UpdateImage, patch: svc.PatchImage, del: svc.DeleteImage,
 		gen: func(v api.Image) int64 { return v.Metadata.Generation }, name: func(v api.Image) string { return v.Metadata.Name },
 	}.routes()...)
 	add(
-		route{method: "GET", pattern: "/1.0/images/{name}/generations", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/images/{name}/generations", h: func(c *rc) error {
 			v, err := svc.ListGenerations(c.r.Context(), c.pathArg("name"))
 			if err != nil {
 				return err
@@ -224,7 +224,7 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/images/{name}/generations", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/images/{name}/generations", h: func(c *rc) error {
 			var b api.ImageBuild
 			if err := c.decodeOptional(&b); err != nil {
 				return err
@@ -236,7 +236,7 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/images/{name}/generations/{gen}", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/images/{name}/generations/{gen}", h: func(c *rc) error {
 			n, err := strconv.Atoi(c.pathArg("gen"))
 			if err != nil {
 				return api.Errorf(api.CodeInvalid, "generation must be a number")
@@ -248,7 +248,7 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "DELETE", pattern: "/1.0/images/{name}/generations/{gen}", h: func(c *rc) error {
+		route{method: "DELETE", pattern: "/api/v1/images/{name}/generations/{gen}", h: func(c *rc) error {
 			n, err := strconv.Atoi(c.pathArg("gen"))
 			if err != nil {
 				return api.Errorf(api.CodeInvalid, "generation must be a number")
@@ -260,7 +260,7 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "PUT", pattern: "/1.0/images/{name}/aliases/{alias}", h: func(c *rc) error {
+		route{method: "PUT", pattern: "/api/v1/images/{name}/aliases/{alias}", h: func(c *rc) error {
 			var b api.ImageAliasSet
 			if err := c.decodeOptional(&b); err != nil {
 				return err
@@ -272,7 +272,7 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "DELETE", pattern: "/1.0/images/{name}/aliases/{alias}", h: func(c *rc) error {
+		route{method: "DELETE", pattern: "/api/v1/images/{name}/aliases/{alias}", h: func(c *rc) error {
 			v, err := svc.DeleteImageAlias(c.r.Context(), c.pathArg("name"), c.pathArg("alias"))
 			if err != nil {
 				return err
@@ -285,13 +285,13 @@ func (s *Server) routeTable() []route {
 	add(s.jailRoutes()...)
 
 	// Networks and firewall.
-	add(resource[api.Network]{base: "/1.0/networks", param: "name",
+	add(resource[api.Network]{base: "/api/v1/networks", param: "name",
 		list:   svc.ListNetworks,
 		get:    func(ctx context.Context, k string) (api.Network, error) { return svc.GetNetwork(ctx, k) },
 		create: svc.CreateNetwork, put: svc.UpdateNetwork, patch: svc.PatchNetwork, del: svc.DeleteNetwork,
 		gen: func(v api.Network) int64 { return v.Metadata.Generation }, name: func(v api.Network) string { return v.Metadata.Name },
 	}.routes()...)
-	add(route{method: "GET", pattern: "/1.0/networks/{name}/leases", h: func(c *rc) error {
+	add(route{method: "GET", pattern: "/api/v1/networks/{name}/leases", h: func(c *rc) error {
 		v, err := svc.Leases(c.r.Context(), c.pathArg("name"))
 		if err != nil {
 			return err
@@ -299,13 +299,13 @@ func (s *Server) routeTable() []route {
 		c.sync(200, v, 0)
 		return nil
 	}})
-	add(resource[api.FirewallPolicy]{base: "/1.0/firewall/policies", param: "name",
+	add(resource[api.FirewallPolicy]{base: "/api/v1/firewall/policies", param: "name",
 		list:   svc.ListPolicies,
 		get:    func(ctx context.Context, k string) (api.FirewallPolicy, error) { return svc.GetPolicy(ctx, k) },
 		create: svc.CreatePolicy, put: svc.UpdatePolicy, patch: svc.PatchPolicy, del: svc.DeletePolicy,
 		gen: func(v api.FirewallPolicy) int64 { return v.Metadata.Generation }, name: func(v api.FirewallPolicy) string { return v.Metadata.Name },
 	}.routes()...)
-	add(resource[api.AddressSet]{base: "/1.0/firewall/address-sets", param: "name",
+	add(resource[api.AddressSet]{base: "/api/v1/firewall/address-sets", param: "name",
 		list:   svc.ListAddressSets,
 		get:    func(ctx context.Context, k string) (api.AddressSet, error) { return svc.GetAddressSet(ctx, k) },
 		create: svc.CreateAddressSet, put: svc.UpdateAddressSet, patch: svc.PatchAddressSet, del: svc.DeleteAddressSet,
@@ -313,20 +313,20 @@ func (s *Server) routeTable() []route {
 	}.routes()...)
 
 	// Backup (host side).
-	add(resource[api.BackupTarget]{base: "/1.0/backup-targets", param: "name",
+	add(resource[api.BackupTarget]{base: "/api/v1/backup-targets", param: "name",
 		list:   svc.ListTargets,
 		get:    func(ctx context.Context, k string) (api.BackupTarget, error) { return svc.GetTarget(ctx, k) },
 		create: svc.CreateTarget, put: svc.UpdateTarget, patch: svc.PatchTarget, del: svc.DeleteTarget,
 		gen: func(v api.BackupTarget) int64 { return v.Metadata.Generation }, name: func(v api.BackupTarget) string { return v.Metadata.Name },
 	}.routes()...)
-	add(resource[api.BackupPolicy]{base: "/1.0/backup-policies", param: "name",
+	add(resource[api.BackupPolicy]{base: "/api/v1/backup-policies", param: "name",
 		list:   svc.ListBackupPolicies,
 		get:    func(ctx context.Context, k string) (api.BackupPolicy, error) { return svc.GetBackupPolicy(ctx, k) },
 		create: svc.CreateBackupPolicy, put: svc.UpdateBackupPolicy, patch: svc.PatchBackupPolicy, del: svc.DeleteBackupPolicy,
 		gen: func(v api.BackupPolicy) int64 { return v.Metadata.Generation }, name: func(v api.BackupPolicy) string { return v.Metadata.Name },
 	}.routes()...)
 	add(
-		route{method: "GET", pattern: "/1.0/backups", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/backups", h: func(c *rc) error {
 			l, err := c.labels()
 			if err != nil {
 				return err
@@ -338,7 +338,7 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/backups/{id}", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/backups/{id}", h: func(c *rc) error {
 			v, err := svc.GetBackup(c.r.Context(), c.pathArg("id"))
 			if err != nil {
 				return err
@@ -346,7 +346,7 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, v.Metadata.Generation)
 			return nil
 		}},
-		route{method: "DELETE", pattern: "/1.0/backups/{id}", h: func(c *rc) error {
+		route{method: "DELETE", pattern: "/api/v1/backups/{id}", h: func(c *rc) error {
 			op, err := svc.DeleteBackup(c.r.Context(), c.pathArg("id"))
 			if err != nil {
 				return err
@@ -354,7 +354,7 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/backup/key", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/backup/key", h: func(c *rc) error {
 			v, err := svc.BackupKeyStatus(c.r.Context())
 			if err != nil {
 				return err
@@ -365,7 +365,7 @@ func (s *Server) routeTable() []route {
 		// The recovery key is in this reply and nowhere else: a synchronous
 		// answer, never an operation result, and nothing of it in the audit
 		// detail or the log.
-		route{method: "POST", pattern: "/1.0/backup/key", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/backup/key", h: func(c *rc) error {
 			var in api.BackupKeyCreate
 			if err := c.decodeOptional(&in); err != nil {
 				return err
@@ -378,7 +378,7 @@ func (s *Server) routeTable() []route {
 			c.sync(201, v, 0)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/backup/key/escrow", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/backup/key/escrow", h: func(c *rc) error {
 			var in api.BackupKeyEscrow
 			if err := c.decodeOptional(&in); err != nil {
 				return err
@@ -390,7 +390,7 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/backups/run", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/backups/run", h: func(c *rc) error {
 			var in api.BackupRunRequest
 			if err := c.decode(&in); err != nil {
 				return err
@@ -402,7 +402,7 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/backups/{id}/verify", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/backups/{id}/verify", h: func(c *rc) error {
 			var in api.BackupVerifyRequest
 			if err := c.decodeOptional(&in); err != nil {
 				return err
@@ -414,7 +414,7 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/restores", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/restores", h: func(c *rc) error {
 			var req api.RestoreRequest
 			if err := c.decode(&req); err != nil {
 				return err
@@ -433,18 +433,18 @@ func (s *Server) routeTable() []route {
 	)
 
 	// Configuration keys and profiles.
-	add(resource[api.Profile]{base: "/1.0/profiles", param: "name",
+	add(resource[api.Profile]{base: "/api/v1/profiles", param: "name",
 		list:   svc.ListProfiles,
 		get:    func(ctx context.Context, k string) (api.Profile, error) { return svc.GetProfile(ctx, k) },
 		create: svc.CreateProfile, put: svc.UpdateProfile, patch: svc.PatchProfile, del: svc.DeleteProfile,
 		gen: func(v api.Profile) int64 { return v.Metadata.Generation }, name: func(v api.Profile) string { return v.Metadata.Name },
 	}.routes()...)
 	add(
-		route{method: "GET", pattern: "/1.0/config-keys", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/config-keys", h: func(c *rc) error {
 			c.sync(200, api.ConfigKeys(), 0)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/updates", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/updates", h: func(c *rc) error {
 			v, err := svc.ListUpdates(c.r.Context())
 			if err != nil {
 				return err
@@ -452,7 +452,7 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/updates/check", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/updates/check", h: func(c *rc) error {
 			var in api.UpdateCheckRequest
 			if err := c.decodeOptional(&in); err != nil {
 				return err
@@ -464,7 +464,7 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/updates/apply", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/updates/apply", h: func(c *rc) error {
 			var in api.UpdateApplyRequest
 			if err := c.decodeOptional(&in); err != nil {
 				return err
@@ -476,7 +476,7 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/jails/{name}/updates", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/jails/{name}/updates", h: func(c *rc) error {
 			v, err := svc.UpdateHistory(c.r.Context(), c.pathArg("name"))
 			if err != nil {
 				return err
@@ -484,7 +484,7 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/jails/{name}/provision", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/jails/{name}/provision", h: func(c *rc) error {
 			var in api.ProvisionRequest
 			if err := c.decodeOptional(&in); err != nil {
 				return err
@@ -496,7 +496,7 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/jails/{name}/config", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/jails/{name}/config", h: func(c *rc) error {
 			var ch api.ConfigChange
 			if err := c.decodeOptional(&ch); err != nil {
 				return err
@@ -512,25 +512,25 @@ func (s *Server) routeTable() []route {
 	)
 
 	// Projects, storage, trust and sessions.
-	add(resource[api.Project]{base: "/1.0/projects", param: "name",
+	add(resource[api.Project]{base: "/api/v1/projects", param: "name",
 		list:   svc.ListProjects,
 		get:    func(ctx context.Context, k string) (api.Project, error) { return svc.GetProject(ctx, k) },
 		create: svc.CreateProject, put: svc.UpdateProject, patch: svc.PatchProject, del: svc.DeleteProject,
 		gen: func(v api.Project) int64 { return v.Metadata.Generation }, name: func(v api.Project) string { return v.Metadata.Name },
 	}.routes()...)
-	add(resource[api.Storage]{base: "/1.0/storage", param: "name",
+	add(resource[api.Storage]{base: "/api/v1/storage", param: "name",
 		list:   svc.ListStorage,
 		get:    func(ctx context.Context, k string) (api.Storage, error) { return svc.GetStorage(ctx, k) },
 		create: svc.CreateStorage, put: svc.UpdateStorage, patch: svc.PatchStorage, del: svc.DeleteStorage,
 		gen: func(v api.Storage) int64 { return v.Metadata.Generation }, name: func(v api.Storage) string { return v.Metadata.Name },
 	}.routes()...)
 	add(
-		route{method: "POST", pattern: "/1.0/trust/tokens", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/trust/tokens", h: func(c *rc) error {
 			var req api.TrustTokenRequest
 			if err := c.decode(&req); err != nil {
 				return err
 			}
-			c.object = "/1.0/trust/tokens/" + req.Name
+			c.object = "/api/v1/trust/tokens/" + req.Name
 			out, err := svc.CreateTrustToken(c.r.Context(), req)
 			if err != nil {
 				return err
@@ -538,7 +538,7 @@ func (s *Server) routeTable() []route {
 			c.sync(201, out, 0)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/trust/clients", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/trust/clients", h: func(c *rc) error {
 			var req api.TrustClientRequest
 			if err := c.decode(&req); err != nil {
 				return err
@@ -547,12 +547,12 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.object = "/1.0/certificates/" + cert.Metadata.Name
-			c.w.Header().Set("Location", "/1.0/certificates/"+cert.Metadata.Name)
+			c.object = "/api/v1/certificates/" + cert.Metadata.Name
+			c.w.Header().Set("Location", "/api/v1/certificates/"+cert.Metadata.Name)
 			c.sync(201, cert, cert.Metadata.Generation)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/sessions", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/sessions", h: func(c *rc) error {
 			v, err := svc.ListSessions(c.r.Context())
 			if err != nil {
 				return err
@@ -560,7 +560,7 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "DELETE", pattern: "/1.0/sessions/{id}", h: func(c *rc) error {
+		route{method: "DELETE", pattern: "/api/v1/sessions/{id}", h: func(c *rc) error {
 			if err := svc.RevokeSession(c.r.Context(), c.pathArg("id")); err != nil {
 				return err
 			}
@@ -570,7 +570,7 @@ func (s *Server) routeTable() []route {
 	)
 
 	// Hub.
-	add(resource[api.Remote]{base: "/1.0/remotes", param: "name",
+	add(resource[api.Remote]{base: "/api/v1/remotes", param: "name",
 		list:   svc.ListRemotes,
 		get:    func(ctx context.Context, k string) (api.Remote, error) { return svc.GetRemote(ctx, k) },
 		create: svc.CreateRemote, put: svc.UpdateRemote, patch: svc.PatchRemote, del: svc.DeleteRemote,
@@ -578,17 +578,17 @@ func (s *Server) routeTable() []route {
 	}.routes()...)
 
 	// Identity.
-	add(resource[api.Certificate]{base: "/1.0/certificates", param: "fingerprint",
+	add(resource[api.Certificate]{base: "/api/v1/certificates", param: "fingerprint",
 		list: svc.ListCertificates, get: svc.GetCertificate,
 		create: svc.CreateCertificate, put: svc.UpdateCertificate, patch: svc.PatchCertificate, del: svc.DeleteCertificate,
 		gen: func(v api.Certificate) int64 { return v.Metadata.Generation }, name: func(v api.Certificate) string { return v.Metadata.Name },
 	}.routes()...)
-	add(resource[api.Token]{base: "/1.0/tokens", param: "name",
+	add(resource[api.Token]{base: "/api/v1/tokens", param: "name",
 		list: svc.ListTokens, get: svc.GetToken, create: svc.CreateToken,
 		del: func(ctx context.Context, k string, _ int64) error { return svc.DeleteToken(ctx, k) },
 		gen: func(v api.Token) int64 { return v.Metadata.Generation }, name: func(v api.Token) string { return v.Metadata.Name },
 	}.routes()...)
-	users := resource[api.User]{base: "/1.0/users", param: "name",
+	users := resource[api.User]{base: "/api/v1/users", param: "name",
 		list: svc.ListUsers, get: svc.GetUser, put: svc.UpdateUser,
 		patch: func(ctx context.Context, k string, p map[string]any, exp int64) (api.User, error) {
 			cur, err := svc.GetUser(ctx, k)
@@ -605,28 +605,28 @@ func (s *Server) routeTable() []route {
 		gen: func(v api.User) int64 { return v.Metadata.Generation }, name: func(v api.User) string { return v.Metadata.Name },
 	}.routes()
 	add(users...)
-	add(route{method: "POST", pattern: "/1.0/users", h: func(c *rc) error {
+	add(route{method: "POST", pattern: "/api/v1/users", h: func(c *rc) error {
 		var in api.UserCreate
 		if err := c.decode(&in); err != nil {
 			return err
 		}
-		c.object = "/1.0/users/" + in.Metadata.Name
+		c.object = "/api/v1/users/" + in.Metadata.Name
 		out, err := svc.CreateUser(c.r.Context(), in)
 		if err != nil {
 			return err
 		}
-		c.w.Header().Set("Location", "/1.0/users/"+out.User.Metadata.Name)
+		c.w.Header().Set("Location", "/api/v1/users/"+out.User.Metadata.Name)
 		c.sync(201, out, 0)
 		return nil
 	}})
 
-	add(route{method: "POST", pattern: "/1.0/users/{name}/password", h: func(c *rc) error {
+	add(route{method: "POST", pattern: "/api/v1/users/{name}/password", h: func(c *rc) error {
 		var in api.PasswordSet
 		if err := c.decodeOptional(&in); err != nil {
 			return err
 		}
 		name := c.pathArg("name")
-		c.object = "/1.0/users/" + name
+		c.object = "/api/v1/users/" + name
 		out, err := svc.SetUserPassword(c.r.Context(), name, in.Password)
 		if err != nil {
 			return err

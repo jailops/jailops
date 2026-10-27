@@ -45,7 +45,7 @@ func TestLiveConsole(t *testing.T) {
 		t.Fatal(err)
 	}
 	dir := t.TempDir()
-	yaml := fmt.Sprintf("hostname: livenode\nlisten: 127.0.0.1:0\nadmin_socket: %s\ntls: {cert_file: %s, key_file: %s}\ndatabase: {dsn: \"postgres://unused\"}\ndatastore: {kind: directory, directory: %s}\nweb: {enabled: true, listen: 127.0.0.1:0}\ngrace: 12h\n",
+	yaml := fmt.Sprintf("hostname: livenode\nlisten: 127.0.0.1:0\nadmin_socket: %s\ntls: {cert_file: %s, key_file: %s}\ndatabase: {dsn: \"postgres://unused\"}\ndatastore: {kind: directory, directory: %s}\nweb: {enabled: true}\ngrace: 12h\n",
 		filepath.Join(dir, "s"), filepath.Join(dir, "c.crt"), filepath.Join(dir, "c.key"), dir)
 	cfg, err := backupd.ParseConfig([]byte(yaml))
 	if err != nil {

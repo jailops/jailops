@@ -34,7 +34,7 @@ func handlerFS(sub fs.FS) http.Handler {
 		if p == "" {
 			p = "index.html"
 		}
-		if p == "1.0" || strings.HasPrefix(p, "1.0/") {
+		if p == "api" || strings.HasPrefix(p, "api/") { // the API is never answered with the app
 			http.NotFound(w, r)
 			return
 		}

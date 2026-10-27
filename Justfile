@@ -12,13 +12,13 @@ default: build
 
 # ── Build ────────────────────────────────────────────────────────────────
 
-# Native build of all binaries, version-stamped from version.txt.
-build:
+# Native build of all binaries with both web consoles embedded (needs Node and npm), version-stamped from version.txt.
+build: web-all
     mkdir -p bin
     for b in {{bins}}; do CGO_ENABLED=0 go build -ldflags="{{ldflags}}" -o bin/$b ./cmd/$b; done
 
 # Cross-build for FreeBSD (the real target).
-build-freebsd arch="amd64":
+build-freebsd arch="amd64": web-all
     mkdir -p bin
     for b in {{bins}}; do CGO_ENABLED=0 GOOS=freebsd GOARCH={{arch}} go build -ldflags="{{ldflags}}" -o bin/$b-freebsd-{{arch}} ./cmd/$b; done
 
@@ -44,6 +44,10 @@ web APP="host":
 
 web-all:
     cd web && npm ci && npm run build:all
+
+# Fails when the web consoles are not built (the binaries would be made with nothing embedded).
+check-web:
+    test -s internal/webui/dist/index.html && test -s internal/backupui/dist/index.html || { echo "x the web consoles are not built: just web-all"; exit 1; }
 
 web-dev APP="host":
     cd web && npm run dev -- --app {{APP}}
@@ -82,7 +86,7 @@ test-freebsd:
     go test -tags integration ./... -count=1 -run Integration
 
 # A local trial of the release (archives and Linux packages in dist/), publishing nothing.
-snapshot:
+snapshot: web-all
     goreleaser release --snapshot --clean --skip=before
 
 # Short fuzz run over the parsers.

@@ -13,7 +13,7 @@ export interface UpgradePreview {
   warnings?: string[]
 }
 
-/** Body of POST /1.0/jails/{name}/snapshots: a JailSnapshot with an optional name. */
+/** Body of POST /api/v1/jails/{name}/snapshots: a JailSnapshot with an optional name. */
 export interface SnapshotBody {
   metadata: { name?: string }
   spec: { jail: string; comment?: string }

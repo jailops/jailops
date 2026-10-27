@@ -54,7 +54,7 @@ spec:
 func upgradeCalls(e *fleettest.Env, jail string) int {
 	n := 0
 	for _, rq := range e.Hosts["web1"].Server.Requests() {
-		if rq.Method == "POST" && rq.Path == "/1.0/jails/"+jail+"/upgrade" {
+		if rq.Method == "POST" && rq.Path == "/api/v1/jails/"+jail+"/upgrade" {
 			n++
 		}
 	}

@@ -35,8 +35,8 @@ func TestPermsTableWellFormed(t *testing.T) {
 
 func TestMutatingRoutesAreNeverReadonlyExceptAccountSelfService(t *testing.T) {
 	self := map[string]bool{
-		"POST /1.0/auth/logout": true, "POST /1.0/auth/password": true, "POST /1.0/auth/totp": true,
-		"DELETE /1.0/auth/totp": true, "POST /1.0/auth/recovery-codes": true, "DELETE /1.0/sessions/{id}": true,
+		"POST /api/v1/auth/logout": true, "POST /api/v1/auth/password": true, "POST /api/v1/auth/totp": true,
+		"DELETE /api/v1/auth/totp": true, "POST /api/v1/auth/recovery-codes": true, "DELETE /api/v1/sessions/{id}": true,
 	}
 	for _, e := range Perms {
 		if e.Method != "GET" && !e.Public && e.Perm == api.PermReadonly && !self[e.Key()] {
@@ -91,12 +91,12 @@ func TestEntriesWithoutAClassAreHostLevel(t *testing.T) {
 }
 
 func TestVerifyComplete(t *testing.T) {
-	if err := VerifyComplete([]string{"GET /1.0/jails", "POST /1.0/jails/{name}/exec"}); err != nil {
+	if err := VerifyComplete([]string{"GET /api/v1/jails", "POST /api/v1/jails/{name}/exec"}); err != nil {
 		t.Fatal(err)
 	}
-	err := VerifyComplete([]string{"GET /1.0/jails", "GET /1.0/zz", "DELETE /1.0/jails"})
-	if err == nil || !strings.Contains(err.Error(), "GET /1.0/zz") || !strings.Contains(err.Error(), "DELETE /1.0/jails") ||
-		strings.Contains(err.Error(), "GET /1.0/jails;") {
+	err := VerifyComplete([]string{"GET /api/v1/jails", "GET /api/v1/zz", "DELETE /api/v1/jails"})
+	if err == nil || !strings.Contains(err.Error(), "GET /api/v1/zz") || !strings.Contains(err.Error(), "DELETE /api/v1/jails") ||
+		strings.Contains(err.Error(), "GET /api/v1/jails;") {
 		t.Fatalf("got %v", err)
 	}
 	if VerifyComplete(nil) != nil {
@@ -112,31 +112,31 @@ func TestCheck(t *testing.T) {
 		method, route string
 		want          api.Code // "" = allowed
 	}{
-		{api.PermReadonly, "GET", "/1.0/jails", ""},
-		{api.PermReadonly, "POST", "/1.0/jails", api.CodeForbidden},
-		{api.PermOperator, "PUT", "/1.0/jails/{name}/state", ""},
-		{api.PermOperator, "POST", "/1.0/jails", api.CodeForbidden},
-		{api.PermOperator, "POST", "/1.0/jails/{name}/snapshots", ""},
-		{api.PermAdmin, "POST", "/1.0/jails", ""},
-		{api.PermAdmin, "PUT", "/1.0/jails/{name}/state", ""},
-		{api.PermAdmin, "GET", "/1.0/users", ""},
-		{api.PermOperator, "GET", "/1.0/users", api.CodeForbidden},
-		{api.PermAdmin, "POST", "/1.0/backups/{id}/restore", ""},   // admin covers restore
-		{api.PermRestore, "POST", "/1.0/backups/{id}/restore", ""}, //
-		{api.PermRestore, "GET", "/1.0/jails", api.CodeForbidden},  // narrow roles are narrow
-		{api.PermBackupPush, "POST", "/1.0/backups/receive", ""},   //
-		{api.PermBackupPush, "GET", "/1.0/backups/{id}/stream", api.CodeForbidden},
-		{api.PermBackupPull, "GET", "/1.0/backups/{id}/stream", ""},
-		{api.PermBackupPull, "POST", "/1.0/backups/receive", api.CodeForbidden},
-		{api.PermAdmin, "DELETE", "/1.0/backups/{id}", api.CodeForbidden}, // only backup-admin deletes backups
-		{api.PermBackupAdmin, "DELETE", "/1.0/backups/{id}", ""},
-		{api.PermBackupAdmin, "POST", "/1.0/jails", api.CodeForbidden},
-		{"", "GET", "/1.0", ""}, // public
-		{"", "POST", "/1.0/auth/login", ""},
-		{"", "GET", "/1.0/jails", api.CodeUnauthorized},
-		{api.PermAdmin, "GET", "/1.0/unlisted", api.CodeForbidden}, // unlisted is never open
-		{api.PermAdmin, "TRACE", "/1.0/jails", api.CodeForbidden},
-		{"bogus", "GET", "/1.0/jails", api.CodeForbidden},
+		{api.PermReadonly, "GET", "/api/v1/jails", ""},
+		{api.PermReadonly, "POST", "/api/v1/jails", api.CodeForbidden},
+		{api.PermOperator, "PUT", "/api/v1/jails/{name}/state", ""},
+		{api.PermOperator, "POST", "/api/v1/jails", api.CodeForbidden},
+		{api.PermOperator, "POST", "/api/v1/jails/{name}/snapshots", ""},
+		{api.PermAdmin, "POST", "/api/v1/jails", ""},
+		{api.PermAdmin, "PUT", "/api/v1/jails/{name}/state", ""},
+		{api.PermAdmin, "GET", "/api/v1/users", ""},
+		{api.PermOperator, "GET", "/api/v1/users", api.CodeForbidden},
+		{api.PermAdmin, "POST", "/api/v1/backups/{id}/restore", ""},   // admin covers restore
+		{api.PermRestore, "POST", "/api/v1/backups/{id}/restore", ""}, //
+		{api.PermRestore, "GET", "/api/v1/jails", api.CodeForbidden},  // narrow roles are narrow
+		{api.PermBackupPush, "POST", "/api/v1/backups/receive", ""},   //
+		{api.PermBackupPush, "GET", "/api/v1/backups/{id}/stream", api.CodeForbidden},
+		{api.PermBackupPull, "GET", "/api/v1/backups/{id}/stream", ""},
+		{api.PermBackupPull, "POST", "/api/v1/backups/receive", api.CodeForbidden},
+		{api.PermAdmin, "DELETE", "/api/v1/backups/{id}", api.CodeForbidden}, // only backup-admin deletes backups
+		{api.PermBackupAdmin, "DELETE", "/api/v1/backups/{id}", ""},
+		{api.PermBackupAdmin, "POST", "/api/v1/jails", api.CodeForbidden},
+		{"", "GET", "/api/v1", ""}, // public
+		{"", "POST", "/api/v1/auth/login", ""},
+		{"", "GET", "/api/v1/jails", api.CodeUnauthorized},
+		{api.PermAdmin, "GET", "/api/v1/unlisted", api.CodeForbidden}, // unlisted is never open
+		{api.PermAdmin, "TRACE", "/api/v1/jails", api.CodeForbidden},
+		{"bogus", "GET", "/api/v1/jails", api.CodeForbidden},
 	}
 	for _, tc := range tests {
 		err := a.Check(tc.held, tc.method, tc.route)
@@ -153,17 +153,17 @@ func TestCheckPathMostSpecificWins(t *testing.T) {
 		method, path string
 		want         api.Code
 	}{
-		{api.PermBackupPush, "POST", "/1.0/backups/receive", ""},
-		{api.PermBackupPull, "GET", "/1.0/backups/chains", ""},
-		{api.PermReadonly, "GET", "/1.0/backups/abc123", ""},
-		{api.PermReadonly, "GET", "/1.0/backups/chains", api.CodeForbidden}, // literal beats {id}
-		{api.PermOperator, "GET", "/1.0/jails/web/files/etc/rc.conf", ""},
-		{api.PermReadonly, "GET", "/1.0/jails/web/files/etc/rc.conf", api.CodeForbidden},
-		{api.PermReadonly, "GET", "/1.0/jails/web/files/", api.CodeForbidden}, // empty rest does not match -> unlisted
-		{api.PermAdmin, "GET", "/1.0/jails/web/nothing", api.CodeForbidden},
-		{api.PermAdmin, "GET", "/1.0/jails/web/state/extra", api.CodeForbidden},
-		{api.PermAdmin, "GET", "/1.0/nothing", api.CodeForbidden},
-		{api.PermReadonly, "GET", "/1.0/jails/web", ""},
+		{api.PermBackupPush, "POST", "/api/v1/backups/receive", ""},
+		{api.PermBackupPull, "GET", "/api/v1/backups/chains", ""},
+		{api.PermReadonly, "GET", "/api/v1/backups/abc123", ""},
+		{api.PermReadonly, "GET", "/api/v1/backups/chains", api.CodeForbidden}, // literal beats {id}
+		{api.PermOperator, "GET", "/api/v1/jails/web/files/etc/rc.conf", ""},
+		{api.PermReadonly, "GET", "/api/v1/jails/web/files/etc/rc.conf", api.CodeForbidden},
+		{api.PermReadonly, "GET", "/api/v1/jails/web/files/", api.CodeForbidden}, // empty rest does not match -> unlisted
+		{api.PermAdmin, "GET", "/api/v1/jails/web/nothing", api.CodeForbidden},
+		{api.PermAdmin, "GET", "/api/v1/jails/web/state/extra", api.CodeForbidden},
+		{api.PermAdmin, "GET", "/api/v1/nothing", api.CodeForbidden},
+		{api.PermReadonly, "GET", "/api/v1/jails/web", ""},
 	}
 	for _, tc := range tests {
 		err := a.CheckPath(tc.held, tc.method, tc.path)
@@ -174,7 +174,7 @@ func TestCheckPathMostSpecificWins(t *testing.T) {
 }
 
 func TestForbiddenErrorNamesRequirement(t *testing.T) {
-	err := NewAuthorizer().Check(api.PermReadonly, "POST", "/1.0/jails")
+	err := NewAuthorizer().Check(api.PermReadonly, "POST", "/api/v1/jails")
 	var e *api.Error
 	if !asAPI(err, &e) || e.Detail["required"] != "admin" {
 		t.Fatalf("%v", err)
@@ -192,34 +192,34 @@ func asAPI(err error, target **api.Error) bool {
 func TestRouteClasses(t *testing.T) {
 	reg := DefaultRegistry()
 	want := map[string]Class{
-		"GET /1.0":                           ClassPublic,
-		"POST /1.0/trust/clients":            ClassPublic,
-		"POST /1.0/trust/tokens":             ClassGlobal,
-		"GET /1.0/sessions":                  ClassSelf,
-		"DELETE /1.0/sessions/{id}":          ClassSelf,
-		"POST /1.0/auth/password":            ClassSelf,
-		"GET /1.0/networks":                  ClassGranted,
-		"DELETE /1.0/projects/{name}":        ClassGranted,
-		"PUT /1.0/storage/{name}":            ClassGranted,
-		"GET /1.0/images/{name}/generations": ClassGranted,
-		"POST /1.0/jails":                    ClassProject,
-		"GET /1.0/jails/{name}/snapshots":    ClassProject,
-		"GET /1.0/firewall/policies":         ClassProject,
-		"GET /1.0/backup-policies/{name}":    ClassProject,
-		"GET /1.0/backup-targets":            ClassGlobal,
-		"GET /1.0/backups":                   ClassVisible,
-		"GET /1.0/backups/{id}":              ClassObject,
-		"DELETE /1.0/backups/{id}":           ClassObject,
-		"POST /1.0/backups/{id}/restore":     ClassProject,
-		"POST /1.0/restores":                 ClassProject,
-		"GET /1.0/operations":                ClassVisible,
-		"GET /1.0/operations/{id}/wait":      ClassObject,
-		"DELETE /1.0/operations/{id}":        ClassObject,
-		"GET /1.0/events":                    ClassVisible,
-		"GET /1.0/audit":                     ClassVisible,
-		"GET /1.0/users":                     ClassGlobal,
-		"GET /1.0/doctor":                    ClassGlobal,
-		"GET /1.0/remotes":                   ClassGlobal,
+		"GET /api/v1":                           ClassPublic,
+		"POST /api/v1/trust/clients":            ClassPublic,
+		"POST /api/v1/trust/tokens":             ClassGlobal,
+		"GET /api/v1/sessions":                  ClassSelf,
+		"DELETE /api/v1/sessions/{id}":          ClassSelf,
+		"POST /api/v1/auth/password":            ClassSelf,
+		"GET /api/v1/networks":                  ClassGranted,
+		"DELETE /api/v1/projects/{name}":        ClassGranted,
+		"PUT /api/v1/storage/{name}":            ClassGranted,
+		"GET /api/v1/images/{name}/generations": ClassGranted,
+		"POST /api/v1/jails":                    ClassProject,
+		"GET /api/v1/jails/{name}/snapshots":    ClassProject,
+		"GET /api/v1/firewall/policies":         ClassProject,
+		"GET /api/v1/backup-policies/{name}":    ClassProject,
+		"GET /api/v1/backup-targets":            ClassGlobal,
+		"GET /api/v1/backups":                   ClassVisible,
+		"GET /api/v1/backups/{id}":              ClassObject,
+		"DELETE /api/v1/backups/{id}":           ClassObject,
+		"POST /api/v1/backups/{id}/restore":     ClassProject,
+		"POST /api/v1/restores":                 ClassProject,
+		"GET /api/v1/operations":                ClassVisible,
+		"GET /api/v1/operations/{id}/wait":      ClassObject,
+		"DELETE /api/v1/operations/{id}":        ClassObject,
+		"GET /api/v1/events":                    ClassVisible,
+		"GET /api/v1/audit":                     ClassVisible,
+		"GET /api/v1/users":                     ClassGlobal,
+		"GET /api/v1/doctor":                    ClassGlobal,
+		"GET /api/v1/remotes":                   ClassGlobal,
 	}
 	for k, c := range want {
 		m, p, _ := strings.Cut(k, " ")

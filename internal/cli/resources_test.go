@@ -183,7 +183,7 @@ func TestBackup(t *testing.T) {
 	n := len(h.mutations())
 	tr.ok("backup", "restore", id, "--dry-run")
 	var rr api.RestoreRequest
-	_ = json.Unmarshal(h.lastBody("POST", "/1.0/restores"), &rr)
+	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/restores"), &rr)
 	if !rr.DryRun {
 		t.Fatalf("dry-run restore sent a real restore: %+v", rr)
 	}

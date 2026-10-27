@@ -119,7 +119,7 @@ type ProjectHostStatus struct {
 	Conditions []Condition `json:"conditions,omitempty"`
 }
 
-// ProjectAggregate is the reply of GET /1.0/projects/<name>?host=all on a
+// ProjectAggregate is the reply of GET /api/v1/projects/<name>?host=all on a
 // hub: the definition and the state on every host the project lists.
 type ProjectAggregate struct {
 	Project Project             `json:"project"`

@@ -249,7 +249,7 @@ type JailStatus struct {
 	ProvisionedAt time.Time `json:"provisioned_at,omitzero"`
 }
 
-// JailAction is the body of PUT /1.0/jails/{name}/state.
+// JailAction is the body of PUT /api/v1/jails/{name}/state.
 type JailAction struct {
 	Action  string `json:"action"` // start, stop, restart
 	Timeout int    `json:"timeout,omitempty"`
@@ -269,7 +269,7 @@ const (
 	RollbackAll  RollbackScope = "all"
 )
 
-// JailRollback is the body of POST /1.0/jails/{name}/rollback.
+// JailRollback is the body of POST /api/v1/jails/{name}/rollback.
 type JailRollback struct {
 	Scope    RollbackScope `json:"scope,omitempty"`
 	Snapshot string        `json:"snapshot,omitempty"`
@@ -277,7 +277,7 @@ type JailRollback struct {
 	ConfirmDataLoss bool `json:"confirm_data_loss,omitempty"`
 }
 
-// JailUpgrade is the body of POST /1.0/jails/{name}/upgrade.
+// JailUpgrade is the body of POST /api/v1/jails/{name}/upgrade.
 type JailUpgrade struct {
 	// Generation pins the target; empty means the newest generation of the
 	// jail's image alias.

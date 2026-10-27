@@ -248,13 +248,13 @@ func (s *Service) ProvisionJail(ctx context.Context, name string, req api.Provis
 			WithHint("changing the declaration does nothing until you ask: provision --again")
 	}
 	return s.Submit(ctx, OpSpec{Description: "Provision jail " + name, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
-		Resources: map[string][]string{"jails": {"/1.0/jails/" + name}},
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			res, err := s.runProvision(ctx, key, j)
 			if err != nil {
 				return nil, err
 			}
-			s.emitIn(ctx, p.Meta.Name, "jail-provisioned", "/1.0/jails/"+name)
+			s.emitIn(ctx, p.Meta.Name, "jail-provisioned", "/api/v1/jails/"+name)
 			return res, nil
 		}})
 }

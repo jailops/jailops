@@ -92,7 +92,7 @@ func (s *Service) RunBackups(ctx context.Context, req api.BackupRunRequest) (api
 		return api.Operation{}, err
 	}
 	return s.Submit(ctx, OpSpec{Description: "Run backup policy " + req.Policy,
-		Resources: map[string][]string{"backup-policies": {"/1.0/backup-policies/" + req.Policy}},
+		Resources: map[string][]string{"backup-policies": {"/api/v1/backup-policies/" + req.Policy}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			runs, err := a.RunPolicy(ctx, project, req.Policy)
 			return runs, err
@@ -118,7 +118,7 @@ func (s *Service) VerifyBackup(ctx context.Context, id string, req api.BackupVer
 		return api.Operation{}, invalid("depth must be deep, extract or full")
 	}
 	return s.Submit(ctx, OpSpec{Description: "Verify backup " + id, Project: backupProject(b),
-		Resources: map[string][]string{"backups": {"/1.0/backups/" + id}},
+		Resources: map[string][]string{"backups": {"/api/v1/backups/" + id}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			return a.Verify(ctx, id, req.Depth)
 		}})

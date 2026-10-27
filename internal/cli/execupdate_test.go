@@ -55,7 +55,7 @@ func TestShellChoiceAndTerminal(t *testing.T) {
 	h.run("", "start", "web")
 	last := func() api.ExecRequest {
 		var r api.ExecRequest
-		if err := json.Unmarshal(h.lastBody("POST", "/1.0/jails/web/exec"), &r); err != nil {
+		if err := json.Unmarshal(h.lastBody("POST", "/api/v1/jails/web/exec"), &r); err != nil {
 			t.Fatal(err)
 		}
 		return r
@@ -86,7 +86,7 @@ func TestShellChoiceAndTerminal(t *testing.T) {
 
 	// The shell that does not exist is the server's clear error, passed on
 	// as it came; the client does not try another one.
-	h.srv.FailRequests("POST", "/1.0/jails/web/exec", api.Errorf(api.CodeNotFound, "shell /usr/local/bin/zsh does not exist in jail web").
+	h.srv.FailRequests("POST", "/api/v1/jails/web/exec", api.Errorf(api.CodeNotFound, "shell /usr/local/bin/zsh does not exist in jail web").
 		WithHint("install it, or pick another with --shell"), 1)
 	before := len(h.srv.Requests())
 	_, errs, code = tr.do("", "shell", "web", "--shell", "/usr/local/bin/zsh")
@@ -268,7 +268,7 @@ func TestBackupRunVerifyRestoreProject(t *testing.T) {
 	tr.ok("project", "create", "restored", "--storage", "default")
 	tr.ok("backup", "restore", id, "--project", "restored", "--as", "web-r", "-y")
 	var rr api.RestoreRequest
-	if err := json.Unmarshal(h.lastBody("POST", "/1.0/restores"), &rr); err != nil || rr.Project != "restored" || rr.DryRun {
+	if err := json.Unmarshal(h.lastBody("POST", "/api/v1/restores"), &rr); err != nil || rr.Project != "restored" || rr.DryRun {
 		t.Fatalf("restore request: %+v %v", rr, err)
 	}
 	tr.ok("--project", "restored", "list", "-o", "name")

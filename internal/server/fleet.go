@@ -10,7 +10,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// aggregateProject answers GET /1.0/projects/<name>?host=all on a hub: the
+// aggregateProject answers GET /api/v1/projects/<name>?host=all on a hub: the
 // definition, and for each listed host what that host reports. The hub reads
 // each host with the caller's signed requestor claim, so every host applies
 // its own project scoping to what the caller may see.
@@ -76,7 +76,7 @@ func (s *Server) readHostProject(c *rc, name string, def api.Project, hs *api.Pr
 		hs.Error = asAPIError(err)
 		return
 	}
-	path := "/1.0/projects/" + name
+	path := "/api/v1/projects/" + name
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+addr+path, nil)
 	if err != nil {
 		hs.Error = asAPIError(err)

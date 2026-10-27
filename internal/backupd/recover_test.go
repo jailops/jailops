@@ -77,7 +77,7 @@ func TestLosingTheDatabaseCostsOnlyWhatTheRepositoryCannotHold(t *testing.T) {
 	}
 	// state that must come back: protection, a deletion request, a failed verification, the owner of each group
 	a := r.admin()
-	base := "/1.0/repo/admin"
+	base := "/api/v1/repo/admin"
 	if err := a.Call(ctx, "PUT", base+"/groups/"+ga+"/snapshots/"+all[0].Snapshot+"/protected", node.ProtectBody{Protected: true}, nil); err != nil {
 		t.Fatal(err)
 	}

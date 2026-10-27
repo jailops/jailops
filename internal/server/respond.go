@@ -39,7 +39,7 @@ func (c *rc) sync(status int, meta any, etag int64) {
 // async writes the 202 envelope of an operation.
 func (c *rc) async(op api.Operation) {
 	raw, _ := json.Marshal(op)
-	loc := "/1.0/operations/" + op.ID
+	loc := "/api/v1/operations/" + op.ID
 	c.w.Header().Set("Location", loc)
 	c.status = http.StatusAccepted
 	writeJSON(c.w, http.StatusAccepted, api.Response{Type: api.ResponseAsync, Status: "Operation created", StatusCode: 202, Operation: loc, Metadata: raw})

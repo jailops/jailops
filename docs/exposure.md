@@ -7,34 +7,40 @@ is needed to use JailOps on one host: the default is the local socket and nothin
 
 | Listener | Default | What it is |
 |---|---|---|
-| unix socket `listen.unix.path` | `/var/run/jailops/jailops.sock`, mode `0666` | the local API, one identity system with the TLS listener. The only thing the **peer's uid** decides is root (uid 0): a global admin, the host's recovery access. Every other local user is anonymous, exactly like an unauthenticated remote client (it reaches `GET /1.0`, `GET /healthz`, the login, trust-token redemption, `POST /1.0/cluster/join` (501) and the static console, nothing else) and signs in with a token or a password login. No Unix user or group maps to a role. Mode `0666` is safe for that reason |
+| unix socket `listen.unix.path` | `/var/run/jailops/jailops.sock`, mode `0666` | the local API, one identity system with the TLS listener. The only thing the **peer's uid** decides is root (uid 0): a global admin, the host's recovery access. Every other local user is anonymous, exactly like an unauthenticated remote client (it reaches `GET /api/v1`, `GET /healthz`, the login, trust-token redemption, `POST /api/v1/cluster/join` (501) and the static console, nothing else) and signs in with a token or a password login. No Unix user or group maps to a role. Mode `0666` is safe for that reason |
 | TCP `listen.https.address` | **empty: no network listener** | the same API over **TLS 1.3 only**, plus the web console |
 
 There is no plain-http TCP listener in `jailopsd`. A listener that is not TLS cannot be configured, so the daemon never
 listens without TLS on a non-loopback (or any) address; a test connects with plain http and with TLS 1.2 and both fail. `listen.https.address` is
-checked when the configuration is loaded (`":8443"` is every interface, `"127.0.0.1:8443"` and `"[::1]:8443"` are loopback only; a
+checked when the configuration is loaded (`":39110"` is every interface, `"127.0.0.1:39110"` and `"[::1]:39110"` are loopback only; a
 wrong form is an error). The SDK, in turn, refuses plain `http://` to anything but loopback.
 
 JailOps does not open ports for you: the host's `pf.conf` decides who can reach `listen.https.address`. Admit the addresses of your
 administrators and nobody else.
 
-## The web console is optional
+## The web console: built in, off until you turn it on
 
-The console is the Vue application embedded in `jailopsd`; the daemon and `jailops-sync` do not use it. Two switches:
+The console is the Vue application embedded in `jailopsd` (and the backup console in `jailops-backupd`). It is in every binary and
+package, and it is **off by default**: the daemon and `jailops-sync` do not use it. Turn it on in one of three ways:
 
-- **At run time**, `jailopsd.yaml`:
+- **In the configuration**, `jailopsd.yaml`:
 
       web:
-        enabled: false
+        enabled: true
 
-  With it, every path outside `/1.0` and `/healthz` answers 404 and the API is unchanged. The console is on by default.
-- **At build time**, `go build -tags noweb ./cmd/jailopsd` (`just build-noweb`) leaves the embedded application out of the binary.
-  `/` answers 404 "this build has no web console".
+  Without it (the default, or `enabled: false`) every path outside `/api/v1` and `/healthz` answers 404 and the API is unchanged.
+- **From rc.conf**: `sysrc jailopsd_web="YES"` (then `service jailopsd restart`) starts the daemon with `-web`, whatever
+  `web.enabled` says. `jailopsd_web="NO"` forces it off over the configuration. Unset, the configuration decides.
+- **With a flag**: `jailopsd -web` and `jailopsd -no-web`.
 
-When the console is on it is served by the same listeners (the socket and the TLS listener), under `/`, and its login routes
-(`/1.0/auth/...`) exist whether or not the console is built: a user with a password can still log in through the API. Create no users
-(`jailops user list`) if you want none. The backup node has its own switch: `web.enabled` and `web.listen` in `backupd.yaml`, which
-listens on `127.0.0.1:8445` by default.
+For a daemon that has no console at all, `go build -tags noweb ./cmd/jailopsd` (`just build-noweb`) leaves the embedded application
+out of the binary; `/` then answers 404 "this build has no web console". `just build` never does: it always builds everything in.
+
+When the console is on it is served by the same listeners (the socket and the TLS listener, default port 39110), under `/`, and its
+login routes (`/api/v1/auth/...`) exist whether or not the console is on: a user with a password can still log in through the API.
+Create no users (`jailops user list`) if you want none. The backup node has the same switch: `web.enabled` (default `false`) in
+`backupd.yaml` serves its console on the same port as the host API and the management API (39111); `web.listen` is gone. All
+ports are listed in [ports.md](ports.md).
 
 ## The server certificate
 
@@ -83,7 +89,7 @@ identity, so the identity of `jailops-sync` is one.
 Join flow for a person or a machine, pinned in both directions:
 
     jailops trust add --name laptop --role admin --global --ttl 15m --cert-expires 2160h   # on the host: prints a single-use token
-    jailops remote add myhost https://host.example.org:8443 --token-stdin                  # on the client: paste the token
+    jailops remote add myhost https://host.example.org:39110 --token-stdin                  # on the client: paste the token
 
 ## Recipe 1: local only (the default)
 
@@ -96,7 +102,7 @@ The daemon sees the peer credentials of the process that connects to its socket,
 the user who logged in (reasoned from the code; UNVERIFIED on a real host). For an ordinary user that is an anonymous peer, so the
 forwarded socket needs an API token like any remote client; logging in over ssh as root would make the forwarded socket root's,
 a global admin, so do not forward as root for routine work. For a fleet, run `jailops-sync` on the host as root, or over the
-network with a token or certificate. Also leave `web.enabled: false` if nobody uses the console.
+network with a token or certificate. Leave `web.enabled` off (the default) if nobody uses the console.
 
 ## Recipe 2: behind a reverse proxy or Cloudflare
 
@@ -106,14 +112,14 @@ proxy to trust exactly that certificate, and let the proxy hold the public certi
     # jailopsd.yaml
     listen:
       https:
-        address: "127.0.0.1:8443"          # loopback: only the proxy on this host can reach it
+        address: "127.0.0.1:39110"          # loopback: only the proxy on this host can reach it
         names: [jailops.internal]          # the name the proxy verifies
     web:
       enabled: false                       # API only, unless you want the console behind the proxy too
 
     # nginx, as one example of a proxy
     location / {
-        proxy_pass https://127.0.0.1:8443;
+        proxy_pass https://127.0.0.1:39110;
         proxy_ssl_verify on;
         proxy_ssl_trusted_certificate /var/db/jailops/tls/server.crt;   # the daemon's own certificate, as the only trust anchor
         proxy_ssl_name jailops.internal;
@@ -134,7 +140,7 @@ What changes behind a proxy, all of it following from the code:
 - **`exec`, `shell` and the console** use an HTTP `Upgrade` to a JailOps protocol (`jailops-exec/1`), not a WebSocket. A proxy that passes
   only WebSocket upgrades (a CDN, for instance) will not carry them; use ssh for shells and the proxy for the API. UNVERIFIED with any
   specific proxy or with Cloudflare; the facts above are from the code.
-- **A tunnel** (a connector that dials out from the host) has the same shape: point it at `https://127.0.0.1:8443` and give it the
+- **A tunnel** (a connector that dials out from the host) has the same shape: point it at `https://127.0.0.1:39110` and give it the
   daemon's certificate as its CA and the name above, rather than turning verification off. UNVERIFIED with `cloudflared`.
 - With a certificate for the public name on the proxy and the daemon's self-signed one behind it, **clients pin nothing**: they verify the
   proxy's public certificate, and `host.yaml` has no `fingerprint`.
@@ -148,7 +154,7 @@ The strongest setup JailOps has today: the listener on a public or private addre
 
        listen:
          https:
-           address: "203.0.113.10:8443"       # or ":8443"; bind the address you mean
+           address: "203.0.113.10:39110"       # or ":39110"; bind the address you mean
            names: [host.example.org, 203.0.113.10]     # names of the generated certificate; unused with cert and key below
            # cert: /etc/ssl/jailops/fullchain.pem
            # key:  /etc/ssl/jailops/privkey.pem
@@ -158,22 +164,22 @@ The strongest setup JailOps has today: the listener on a public or private addre
    `service jailopsd restart`, then `jailops doctor`.
 2. Let only your administrators' addresses reach it, in `pf.conf` (JailOps never opens a port):
 
-       pass in quick on vtnet0 proto tcp from { 203.0.113.7, 198.51.100.0/24 } to (vtnet0) port 8443
+       pass in quick on vtnet0 proto tcp from { 203.0.113.7, 198.51.100.0/24 } to (vtnet0) port 39110
 
 3. Give each person a pinned identity, valid for a limited time: the trust-token join flow above, with `--cert-expires`. For a fleet,
    make the client certificate of each host in the repository (`hosts/<host>/remote.sops.yaml`, encrypted; the plaintext key never
    touches the disk) and trust it on the host:
 
-       jailops-sync remote bootstrap web1 --url https://web1.example.org:8443 --fingerprint <sha256 of the server certificate>
+       jailops-sync remote bootstrap web1 --url https://web1.example.org:39110 --fingerprint <sha256 of the server certificate>
        # it prints the command to run on web1 as an administrator; run it there
 
    The connection refuses a server whose certificate does not match the fingerprint. With your own CA-signed certificate leave the
    fingerprint to the system roots instead (see "Pinning and renewal").
 4. **Take the tokens and passwords away.** The listener requests a client certificate but does not require one, so a token that
    exists works from anywhere the firewall lets in: `jailops token list` and `jailops token delete`, no `jailops user create`, and
-   no `token_secret` in `host.yaml`. A client that presents no certificate and no token reaches only the public routes: `GET /1.0` (the
-   version, the extensions, and whether it is trusted), `GET /healthz`, `POST /1.0/auth/login` (which needs a valid user and
-   password), `POST /1.0/trust/clients` (which needs a valid single-use trust token), `POST /1.0/cluster/join` (answers 501) and the
+   no `token_secret` in `host.yaml`. A client that presents no certificate and no token reaches only the public routes: `GET /api/v1` (the
+   version, the extensions, and whether it is trusted), `GET /healthz`, `POST /api/v1/auth/login` (which needs a valid user and
+   password), `POST /api/v1/trust/clients` (which needs a valid single-use trust token), `POST /api/v1/cluster/join` (answers 501) and the
    static console files. A non-root local user of the unix socket is exactly such a client.
 5. Revoke by deleting the identity: `jailops trust revoke NAME|FINGERPRINT`. There is no CRL; the trust store is the list.
 

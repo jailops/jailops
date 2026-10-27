@@ -129,7 +129,7 @@ func (s *Server) outer(next http.Handler) http.Handler {
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("X-Frame-Options", "DENY")
-		if len(r.URL.Path) >= 4 && r.URL.Path[:4] == "/1.0" {
+		if len(r.URL.Path) >= 4 && r.URL.Path[:4] == "/api/v1" {
 			h.Set("Cache-Control", "no-store")
 		} else {
 			h.Set("Content-Security-Policy", "default-src 'self'; img-src 'self' data:; font-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
@@ -290,13 +290,13 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 		}
 		if host := r.URL.Query().Get("host"); host != "" {
 			if host == "all" {
-				if rt.method == "GET" && rt.pattern == "/1.0/projects/{name}" {
+				if rt.method == "GET" && rt.pattern == "/api/v1/projects/{name}" {
 					if err := s.aggregateProject(c); err != nil {
 						c.fail(err)
 					}
 					return
 				}
-				c.fail(api.Errorf(api.CodeInvalid, "host=all is only valid for GET /1.0/projects/<name>"))
+				c.fail(api.Errorf(api.CodeInvalid, "host=all is only valid for GET /api/v1/projects/<name>"))
 				return
 			}
 			if s.forward(c, host) {
@@ -435,7 +435,7 @@ func asAPIError(err error) *api.Error {
 // which the service authorises itself: anyone with a scope reads, a global
 // admin writes.
 func hostProfiles(r *http.Request, project string) bool {
-	return project == api.HostProfileProject && strings.HasPrefix(r.URL.Path, "/1.0/profiles")
+	return project == api.HostProfileProject && strings.HasPrefix(r.URL.Path, "/api/v1/profiles")
 }
 
 // storeEntry builds an audit entry for an event inside a request.

@@ -16,17 +16,17 @@ type BackupClient struct {
 
 // Backups returns the backups client.
 func (c *Client) Backups() *BackupClient {
-	return &BackupClient{c, newResource[api.Backup](c, "/1.0/backups")}
+	return &BackupClient{c, newResource[api.Backup](c, "/api/v1/backups")}
 }
 
-// Targets accesses /1.0/backup-targets.
+// Targets accesses /api/v1/backup-targets.
 func (b *BackupClient) Targets() *Resource[api.BackupTarget] {
-	return newResource[api.BackupTarget](b.c, "/1.0/backup-targets")
+	return newResource[api.BackupTarget](b.c, "/api/v1/backup-targets")
 }
 
-// Policies accesses /1.0/backup-policies.
+// Policies accesses /api/v1/backup-policies.
 func (b *BackupClient) Policies() *Resource[api.BackupPolicy] {
-	return newResource[api.BackupPolicy](b.c, "/1.0/backup-policies")
+	return newResource[api.BackupPolicy](b.c, "/api/v1/backup-policies")
 }
 
 // List iterates backups.
@@ -52,7 +52,7 @@ func (b *BackupClient) Preflight(ctx context.Context, req api.RestoreRequest) (a
 		return api.RestorePreflight{}, err
 	}
 	req.DryRun = true
-	pf, _, err := send[api.RestorePreflight](ctx, b.c, request{method: http.MethodPost, path: "/1.0/restores", body: req})
+	pf, _, err := send[api.RestorePreflight](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/restores", body: req})
 	return pf, err
 }
 
@@ -60,12 +60,12 @@ func (b *BackupClient) Preflight(ctx context.Context, req api.RestoreRequest) (a
 // refuses a restore whose preflight is not OK.
 func (b *BackupClient) Restore(ctx context.Context, req api.RestoreRequest) (*Operation[api.Jail], error) {
 	req.DryRun = false
-	op, _, err := sendOp[api.Jail](ctx, b.c, request{method: http.MethodPost, path: "/1.0/restores", body: req}, nil)
+	op, _, err := sendOp[api.Jail](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/restores", body: req}, nil)
 	return op, err
 }
 
 // Run starts a backup policy now, outside its schedule, for every jail it
-// selects (POST /1.0/backups/run, admin only). The result lists one run per
+// selects (POST /api/v1/backups/run, admin only). The result lists one run per
 // jail and target; a failed job is a run with OK false. It needs the
 // "backup_run" extension, which a server advertises when it has a backup
 // backend.
@@ -73,12 +73,12 @@ func (b *BackupClient) Run(ctx context.Context, policy string) (*Operation[[]api
 	if err := b.c.need("backup_run"); err != nil {
 		return nil, err
 	}
-	op, _, err := sendOp[[]api.BackupRun](ctx, b.c, request{method: http.MethodPost, path: "/1.0/backups/run", body: api.BackupRunRequest{Policy: policy}}, nil)
+	op, _, err := sendOp[[]api.BackupRun](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/backups/run", body: api.BackupRunRequest{Policy: policy}}, nil)
 	return op, err
 }
 
 // Verify checks a backup by reading it back deeply (POST
-// /1.0/backups/<id>/verify); the result is the run. It needs the
+// /api/v1/backups/<id>/verify); the result is the run. It needs the
 // "backup_verify" extension.
 func (b *BackupClient) Verify(ctx context.Context, name string) (*Operation[api.BackupRun], error) {
 	return b.VerifyDepth(ctx, name, "")
@@ -94,16 +94,16 @@ func (b *BackupClient) VerifyDepth(ctx context.Context, name, depth string) (*Op
 }
 
 // KeyStatus reports whether this host has a backup key and whether it is
-// escrowed (GET /1.0/backup/key, admin only).
+// escrowed (GET /api/v1/backup/key, admin only).
 func (b *BackupClient) KeyStatus(ctx context.Context) (api.BackupKeyStatus, error) {
 	if err := b.c.need("backup_key"); err != nil {
 		return api.BackupKeyStatus{}, err
 	}
-	v, _, err := send[api.BackupKeyStatus](ctx, b.c, request{method: http.MethodGet, path: "/1.0/backup/key"})
+	v, _, err := send[api.BackupKeyStatus](ctx, b.c, request{method: http.MethodGet, path: "/api/v1/backup/key"})
 	return v, err
 }
 
-// CreateKey creates the host's backup key (POST /1.0/backup/key, admin
+// CreateKey creates the host's backup key (POST /api/v1/backup/key, admin
 // only). The reply carries the recovery key; it is shown once, so the caller
 // must show it to the operator now and store it nowhere else. recipients are
 // age public keys to escrow to; empty uses the daemon's configuration.
@@ -111,16 +111,16 @@ func (b *BackupClient) CreateKey(ctx context.Context, recipients ...string) (api
 	if err := b.c.need("backup_key"); err != nil {
 		return api.BackupKeyCreated{}, err
 	}
-	v, _, err := send[api.BackupKeyCreated](ctx, b.c, request{method: http.MethodPost, path: "/1.0/backup/key", body: api.BackupKeyCreate{Recipients: recipients}})
+	v, _, err := send[api.BackupKeyCreated](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/backup/key", body: api.BackupKeyCreate{Recipients: recipients}})
 	return v, err
 }
 
 // EscrowKey wraps the key to the recovery recipients and uploads it to the
-// node (POST /1.0/backup/key/escrow, admin only).
+// node (POST /api/v1/backup/key/escrow, admin only).
 func (b *BackupClient) EscrowKey(ctx context.Context, recipients ...string) (api.BackupKeyStatus, error) {
 	if err := b.c.need("backup_key"); err != nil {
 		return api.BackupKeyStatus{}, err
 	}
-	v, _, err := send[api.BackupKeyStatus](ctx, b.c, request{method: http.MethodPost, path: "/1.0/backup/key/escrow", body: api.BackupKeyEscrow{Recipients: recipients}})
+	v, _, err := send[api.BackupKeyStatus](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/backup/key/escrow", body: api.BackupKeyEscrow{Recipients: recipients}})
 	return v, err
 }

@@ -6,7 +6,7 @@ package wire
 import "time"
 
 // Base is the path prefix of the node API.
-const Base = "/1.0/repo"
+const Base = "/api/v1/repo"
 
 // MaxMissingBatch is the most chunk ids one missing request accepts.
 const MaxMissingBatch = 2000
@@ -23,7 +23,7 @@ type SessionInfo struct {
 	Previous string `json:"previous,omitempty"`
 }
 
-// BeginRequest is the body of POST /1.0/repo/sessions.
+// BeginRequest is the body of POST /api/v1/repo/sessions.
 type BeginRequest struct {
 	Group    string `json:"group"`
 	Snapshot string `json:"snapshot"`
@@ -126,7 +126,7 @@ type Snapshot struct {
 	PendingDeletionBy          string     `json:"pending_deletion_by,omitempty"`
 }
 
-// EscrowList is the answer of GET /1.0/repo/escrow: the key domains that have an escrow blob.
+// EscrowList is the answer of GET /api/v1/repo/escrow: the key domains that have an escrow blob.
 type EscrowList struct {
 	Domains []string `json:"domains"`
 }

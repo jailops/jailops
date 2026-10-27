@@ -36,7 +36,6 @@ type Server struct {
 	mu        sync.Mutex
 	hostLn    net.Listener
 	adminLn   net.Listener
-	webLn     net.Listener
 	servers   []*http.Server
 	ownsDB    bool
 	scheduler *Scheduler
@@ -53,7 +52,7 @@ type Options struct {
 	DB *ctl.DB
 	// Now replaces the clock of the node and the scheduler (tests).
 	Now func() time.Time
-	// WebHandler serves the UI files on the web listener (internal/backupui in production).
+	// WebHandler serves the UI files on the listener (internal/backupui in production).
 	WebHandler http.Handler
 	// Tune adjusts the node configuration after the configuration file was applied (tests).
 	Tune func(*node.Config)
@@ -115,14 +114,19 @@ func New(ctx context.Context, cfg *Config, o Options) (*Server, error) {
 	return s, nil
 }
 
-// HostAddr is the address of the host listener once Serve runs.
+// HostAddr is the address of the listener (host API, and the management API and console when enabled) once Serve runs.
 func (s *Server) HostAddr() string { return s.addr(&s.hostLn) }
 
 // AdminSocket is the path of the admin socket.
 func (s *Server) AdminSocket() string { return s.Cfg.AdminSocket }
 
-// WebAddr is the address of the management listener once Serve runs.
-func (s *Server) WebAddr() string { return s.addr(&s.webLn) }
+// WebAddr is the address the management API and the console are served on: the same as HostAddr, and empty when they are off.
+func (s *Server) WebAddr() string {
+	if !s.Cfg.Web.Enabled {
+		return ""
+	}
+	return s.addr(&s.hostLn)
+}
 
 func (s *Server) addr(l *net.Listener) string {
 	s.mu.Lock()
@@ -136,8 +140,8 @@ func (s *Server) addr(l *net.Listener) string {
 // FingerprintOfServerCert is the fingerprint hosts pin.
 func (s *Server) ServerFingerprint() string { return auth.Fingerprint(s.cert.Certificate[0]) }
 
-// Listen opens the listeners: the host listener (mutual TLS), the admin unix
-// socket and, if enabled, the management API and UI listener.
+// Listen opens the listener (TLS 1.3 on Config.Listen: one port for the host API, the management API and, when enabled, the
+// console) and the admin unix socket.
 func (s *Server) Listen() error {
 	cert, err := s.Cfg.LoadServerCert()
 	if err != nil {
@@ -153,17 +157,8 @@ func (s *Server) Listen() error {
 		hl.Close()
 		return err
 	}
-	var wl net.Listener
-	if s.Cfg.Web.Enabled {
-		wl, err = tls.Listen("tcp", s.Cfg.Web.Listen, &tls.Config{MinVersion: tls.VersionTLS12, Certificates: []tls.Certificate{cert}, NextProtos: []string{"h2", "http/1.1"}})
-		if err != nil {
-			hl.Close()
-			al.Close()
-			return fmt.Errorf("backupd: management listener: %w", err)
-		}
-	}
 	s.mu.Lock()
-	s.hostLn, s.adminLn, s.webLn = hl, al, wl
+	s.hostLn, s.adminLn = hl, al
 	s.mu.Unlock()
 	return nil
 }
@@ -197,14 +192,14 @@ func listenUnix(path string) (net.Listener, error) {
 // Serve serves until ctx ends, then shuts down gracefully. Listen must have been called.
 func (s *Server) Serve(ctx context.Context) error {
 	s.mu.Lock()
-	hl, al, wl := s.hostLn, s.adminLn, s.webLn
+	hl, al := s.hostLn, s.adminLn
 	s.mu.Unlock()
 	if hl == nil || al == nil {
 		return errors.New("backupd: Listen was not called")
 	}
 	// large HTTP/2 flow-control windows: with the default ones an upload is capped at one window per
 	// round trip, which limits throughput on a long path
-	hostSrv := &http.Server{Handler: s.hostHandler(), ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute,
+	hostSrv := &http.Server{Handler: s.listenerHandler(), ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute,
 		ErrorLog: slog.NewLogLogger(s.Log.Handler(), slog.LevelWarn),
 		HTTP2:    &http.HTTP2Config{MaxReceiveBufferPerConnection: 32 << 20, MaxReceiveBufferPerStream: 8 << 20, MaxConcurrentStreams: 256}}
 	adminSrv := &http.Server{Handler: s.adminHandler(), ReadHeaderTimeout: 10 * time.Second,
@@ -217,14 +212,9 @@ func (s *Server) Serve(ctx context.Context) error {
 			return ctx
 		}}
 	srvs := []*http.Server{hostSrv, adminSrv}
-	errc := make(chan error, 3)
+	errc := make(chan error, 2)
 	go func() { errc <- hostSrv.Serve(hl) }()
 	go func() { errc <- adminSrv.Serve(al) }()
-	if wl != nil {
-		webSrv := &http.Server{Handler: s.mgmt.Handler(), ReadHeaderTimeout: 30 * time.Second, IdleTimeout: 2 * time.Minute}
-		srvs = append(srvs, webSrv)
-		go func() { errc <- webSrv.Serve(wl) }()
-	}
 	s.mu.Lock()
 	s.servers = srvs
 	s.mu.Unlock()
@@ -255,7 +245,7 @@ func (s *Server) Close() {
 	for _, sv := range s.servers {
 		_ = sv.Close()
 	}
-	for _, l := range []net.Listener{s.hostLn, s.adminLn, s.webLn} {
+	for _, l := range []net.Listener{s.hostLn, s.adminLn} {
 		if l != nil {
 			_ = l.Close()
 		}

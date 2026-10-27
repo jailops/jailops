@@ -25,7 +25,7 @@ func (s *Server) ExecCalls() []ExecCall {
 	return append([]ExecCall(nil), s.execCalls...)
 }
 
-// jailExec implements POST /1.0/jails/<n>/exec with a few built-in programs:
+// jailExec implements POST /api/v1/jails/<n>/exec with a few built-in programs:
 // "echo ARGS", "cat" (stdin to stdout), "stderr TEXT", "exit N".
 func (s *Server) jailExec(w http.ResponseWriter, r *http.Request) {
 	req, e := decode[api.ExecRequest](r)

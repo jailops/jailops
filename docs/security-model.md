@@ -49,7 +49,7 @@ a lifetime limit and a global cap.
 By default only the unix socket listens. `listen.https.address` opens a TLS 1.3 listener (there is no plain-http TCP listener), with a
 generated self-signed certificate that clients pin or one you provide (`listen.https.cert`/`key`, reloaded without a restart, never
 generated over). Clients are pinned client certificates, API tokens, or console logins; the listener requests a client certificate and
-does not require one. The web console is optional (`web.enabled: false`, or `-tags noweb`). Three recipes (local only, behind a
+does not require one. The web console is always built in and off by default (`web.enabled: true` or `jailopsd_web="YES"` turns it on; `-tags noweb` builds `jailopsd` without it). Three recipes (local only, behind a
 proxy, direct with mTLS), what changes behind a proxy, and the **Not yet** list (ACME, a require-client-certificate mode, the caller's
 address behind a proxy) are in [exposure.md](exposure.md).
 
@@ -77,9 +77,9 @@ permission table, one scope rule and one audit trail, whether the request arrive
   root on the host can read every secret the daemon holds anyway. Root's requests are audited under its user name, with
   kind `unix`. `sudo jailops user create admin --admin` creates the first administrator; `sudo jailops user set-password`
   and `set-role` recover a lost password or a wrong role. There is no separate reset mechanism.
-- **Every other local user is anonymous**, exactly like an unauthenticated remote client. It reaches `GET /1.0`,
-  `GET /healthz`, the login (`POST /1.0/auth/login`), trust-token redemption (`POST /1.0/trust/clients`),
-  `POST /1.0/cluster/join` (answers 501) and the static web console, and nothing else. It can authenticate over the socket
+- **Every other local user is anonymous**, exactly like an unauthenticated remote client. It reaches `GET /api/v1`,
+  `GET /healthz`, the login (`POST /api/v1/auth/login`), trust-token redemption (`POST /api/v1/trust/clients`),
+  `POST /api/v1/cluster/join` (answers 501) and the static web console, and nothing else. It can authenticate over the socket
   with an API token, or with a session cookie from a password login, like any remote client. A test runs every route as an
   anonymous remote client and as an anonymous local one and requires the same answer.
 

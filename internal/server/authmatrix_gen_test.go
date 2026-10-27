@@ -143,7 +143,7 @@ func hasStr(l []string, s string) bool {
 // objectPath returns the "kind/name" of the first path parameter of a
 // granted route, the key into fixtureOwner.
 func objectPath(path string) string {
-	p := strings.TrimPrefix(path, "/1.0/")
+	p := strings.TrimPrefix(path, "/api/v1/")
 	parts := strings.Split(p, "/")
 	if len(parts) >= 2 {
 		return parts[0] + "/" + parts[1]
@@ -233,29 +233,29 @@ func TestAuthorizationMatrix(t *testing.T) {
 	// The {name} parameter depends on the family.
 	nameFor := func(pattern string) string {
 		switch {
-		case strings.HasPrefix(pattern, "/1.0/images"):
+		case strings.HasPrefix(pattern, "/api/v1/images"):
 			return "fb"
-		case strings.HasPrefix(pattern, "/1.0/networks"):
+		case strings.HasPrefix(pattern, "/api/v1/networks"):
 			return "lan"
-		case strings.HasPrefix(pattern, "/1.0/storage"):
+		case strings.HasPrefix(pattern, "/api/v1/storage"):
 			return "default"
-		case strings.HasPrefix(pattern, "/1.0/projects"):
+		case strings.HasPrefix(pattern, "/api/v1/projects"):
 			return "alpha"
-		case strings.HasPrefix(pattern, "/1.0/firewall/policies"):
+		case strings.HasPrefix(pattern, "/api/v1/firewall/policies"):
 			return "pol"
-		case strings.HasPrefix(pattern, "/1.0/firewall/address-sets"):
+		case strings.HasPrefix(pattern, "/api/v1/firewall/address-sets"):
 			return "set"
-		case strings.HasPrefix(pattern, "/1.0/profiles"):
+		case strings.HasPrefix(pattern, "/api/v1/profiles"):
 			return "prof"
-		case strings.HasPrefix(pattern, "/1.0/backup-targets"):
+		case strings.HasPrefix(pattern, "/api/v1/backup-targets"):
 			return "tgt"
-		case strings.HasPrefix(pattern, "/1.0/backup-policies"):
+		case strings.HasPrefix(pattern, "/api/v1/backup-policies"):
 			return "bp"
-		case strings.HasPrefix(pattern, "/1.0/users"):
+		case strings.HasPrefix(pattern, "/api/v1/users"):
 			return "u1"
-		case strings.HasPrefix(pattern, "/1.0/tokens"):
+		case strings.HasPrefix(pattern, "/api/v1/tokens"):
 			return "tk1"
-		case strings.HasPrefix(pattern, "/1.0/remotes"):
+		case strings.HasPrefix(pattern, "/api/v1/remotes"):
 			return "r1"
 		}
 		return "web"
@@ -276,7 +276,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 			if val == "" {
 				val = "x"
 			}
-			if strings.HasPrefix(pattern, "/1.0/backups/{id}") && key == "id" {
+			if strings.HasPrefix(pattern, "/api/v1/backups/{id}") && key == "id" {
 				val = "b-alpha"
 			}
 			out = out[:i] + val + out[i+j+1:]

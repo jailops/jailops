@@ -17,7 +17,7 @@ func TestConfigStrictAndValidated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Listen != ":8444" || c.AdminSocket != "/var/run/jailops-backupd.sock" || c.Grace != backupd.Duration(24*3600e9) {
+	if c.Listen != ":39111" || c.AdminSocket != "/var/run/jailops-backupd.sock" || c.Grace != backupd.Duration(24*3600e9) {
 		t.Fatalf("%+v", c)
 	}
 	for name, doc := range map[string]string{
@@ -65,7 +65,7 @@ func TestSampleConfigLoads(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.Datastore.Kind != "directory" || c.Listen != ":8444" || c.Retention.Daily != 14 {
+	if c.Datastore.Kind != "directory" || c.Listen != ":39111" || c.Retention.Daily != 14 {
 		t.Fatalf("%+v", c)
 	}
 }

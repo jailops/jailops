@@ -44,7 +44,7 @@ func TestRootOnTheSocketIsAGlobalAdministrator(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	e.Seed()
 	root := auth.Cred{UID: 0, GID: 0}
-	code, body := serveAs(e, root, "GET", "/1.0/auth/session", "", "")
+	code, body := serveAs(e, root, "GET", "/api/v1/auth/session", "", "")
 	if code != 200 {
 		t.Fatalf("session: %d %s", code, body)
 	}
@@ -58,8 +58,8 @@ func TestRootOnTheSocketIsAGlobalAdministrator(t *testing.T) {
 		t.Fatalf("root is %+v", id)
 	}
 	// Everything the global administrator token reads, root reads too, with the same answer.
-	for _, p := range []string{"/1.0/users", "/1.0/tokens", "/1.0/certificates", "/1.0/audit", "/1.0/projects", "/1.0/networks",
-		"/1.0/storage", "/1.0/images", "/1.0/doctor", "/1.0/resources", "/1.0/remotes", "/1.0/backup-targets", "/1.0/jails?project=alpha"} {
+	for _, p := range []string{"/api/v1/users", "/api/v1/tokens", "/api/v1/certificates", "/api/v1/audit", "/api/v1/projects", "/api/v1/networks",
+		"/api/v1/storage", "/api/v1/images", "/api/v1/doctor", "/api/v1/resources", "/api/v1/remotes", "/api/v1/backup-targets", "/api/v1/jails?project=alpha"} {
 		want, _ := e.Raw("GET", p, e.Token(api.PermAdmin), "")
 		got, b := serveAs(e, root, "GET", p, "", "")
 		if got != want || got != 200 && got != 501 {
@@ -68,9 +68,9 @@ func TestRootOnTheSocketIsAGlobalAdministrator(t *testing.T) {
 	}
 	// And writes: a host-level object, and the identity management a recovery needs.
 	for _, tc := range []struct{ method, path, body string }{
-		{"POST", "/1.0/users", `{"metadata":{"name":"recovered"},"spec":{"permission":"admin","global":true},"password":"correct horse battery staple 9"}`},
-		{"POST", "/1.0/tokens", `{"metadata":{"name":"rt"},"spec":{"permission":"readonly","global":true}}`},
-		{"DELETE", "/1.0/users/recovered", ""},
+		{"POST", "/api/v1/users", `{"metadata":{"name":"recovered"},"spec":{"permission":"admin","global":true},"password":"correct horse battery staple 9"}`},
+		{"POST", "/api/v1/tokens", `{"metadata":{"name":"rt"},"spec":{"permission":"readonly","global":true}}`},
+		{"DELETE", "/api/v1/users/recovered", ""},
 	} {
 		if code, b := serveAs(e, root, tc.method, tc.path, "", tc.body); code/100 != 2 {
 			t.Errorf("root %s %s: %d %s", tc.method, tc.path, code, b)
@@ -83,7 +83,7 @@ func TestRootOnTheSocketIsAGlobalAdministrator(t *testing.T) {
 	}
 	found := false
 	for _, a := range entries {
-		if a.Action == "POST /1.0/users" && a.Requestor != "" && a.Result == "ok" {
+		if a.Action == "POST /api/v1/users" && a.Requestor != "" && a.Result == "ok" {
 			found = true
 		}
 	}
@@ -97,23 +97,23 @@ func TestNonRootPeerIsAnonymous(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	for name, cred := range ordinaryPeers {
 		t.Run(name, func(t *testing.T) {
-			for _, p := range []string{"/1.0/auth/session", "/1.0/users", "/1.0/jails?project=alpha", "/1.0/projects", "/1.0/audit"} {
+			for _, p := range []string{"/api/v1/auth/session", "/api/v1/users", "/api/v1/jails?project=alpha", "/api/v1/projects", "/api/v1/audit"} {
 				if code, b := serveAs(e, cred, "GET", p, "", ""); code != 401 {
 					t.Errorf("GET %s: %d %s, want 401", p, code, b)
 				}
 			}
-			if code, b := serveAs(e, cred, "POST", "/1.0/users", "", `{}`); code != 401 {
-				t.Errorf("POST /1.0/users: %d %s", code, b)
+			if code, b := serveAs(e, cred, "POST", "/api/v1/users", "", `{}`); code != 401 {
+				t.Errorf("POST /api/v1/users: %d %s", code, b)
 			}
 			// What an anonymous remote client may do works.
-			for _, p := range []string{"/1.0", "/healthz"} {
+			for _, p := range []string{"/api/v1", "/healthz"} {
 				if code, b := serveAs(e, cred, "GET", p, "", ""); code != 200 {
 					t.Errorf("GET %s: %d %s", p, code, b)
 				}
 			}
-			code, b := serveAs(e, cred, "GET", "/1.0", "", "")
+			code, b := serveAs(e, cred, "GET", "/api/v1", "", "")
 			if code != 200 || !strings.Contains(b, `"untrusted"`) {
-				t.Errorf("GET /1.0 reports %s", b)
+				t.Errorf("GET /api/v1 reports %s", b)
 			}
 		})
 	}
@@ -124,22 +124,22 @@ func TestTokenOverTheSocketWorksForAnyUID(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	for name, cred := range ordinaryPeers {
 		t.Run(name, func(t *testing.T) {
-			code, b := serveAs(e, cred, "GET", "/1.0/auth/session", e.Token(api.PermReadonly), "")
+			code, b := serveAs(e, cred, "GET", "/api/v1/auth/session", e.Token(api.PermReadonly), "")
 			if code != 200 || !strings.Contains(b, `"token"`) || strings.Contains(b, `"unix"`) {
 				t.Fatalf("session with a token: %d %s", code, b)
 			}
 			// The token's role applies: readonly reads, and cannot write.
-			if code, _ := serveAs(e, cred, "GET", "/1.0/projects", e.Token(api.PermReadonly), ""); code != 200 {
+			if code, _ := serveAs(e, cred, "GET", "/api/v1/projects", e.Token(api.PermReadonly), ""); code != 200 {
 				t.Errorf("readonly token read: %d", code)
 			}
-			if code, _ := serveAs(e, cred, "POST", "/1.0/users", e.Token(api.PermReadonly), `{}`); code != 403 {
+			if code, _ := serveAs(e, cred, "POST", "/api/v1/users", e.Token(api.PermReadonly), `{}`); code != 403 {
 				t.Errorf("readonly token write: %d", code)
 			}
-			if code, _ := serveAs(e, cred, "GET", "/1.0/users", e.Token(api.PermAdmin), ""); code != 200 {
+			if code, _ := serveAs(e, cred, "GET", "/api/v1/users", e.Token(api.PermAdmin), ""); code != 200 {
 				t.Errorf("admin token over the socket: %d", code)
 			}
 			// A bad token is refused, it does not fall back to anonymous.
-			if code, _ := serveAs(e, cred, "GET", "/1.0/projects", "jot_"+strings.Repeat("A", 52), ""); code != 401 {
+			if code, _ := serveAs(e, cred, "GET", "/api/v1/projects", "jot_"+strings.Repeat("A", 52), ""); code != 401 {
 				t.Errorf("bad token: %d", code)
 			}
 		})
@@ -181,7 +181,7 @@ func TestRealSocketPeerIsAnonymousUntilItAuthenticates(t *testing.T) {
 	hc.Transport = tr
 	t.Cleanup(tr.CloseIdleConnections)
 	hc.Timeout = 5 * time.Second
-	resp, err := hc.Post("http://unix/1.0/auth/login", "application/json", strings.NewReader(`{"username":"ann","password":"correct horse battery staple 9"}`))
+	resp, err := hc.Post("http://unix/api/v1/auth/login", "application/json", strings.NewReader(`{"username":"ann","password":"correct horse battery staple 9"}`))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestRealSocketPeerIsAnonymousUntilItAuthenticates(t *testing.T) {
 	if resp.StatusCode != 200 {
 		t.Fatalf("login over the socket: %d", resp.StatusCode)
 	}
-	resp, err = hc.Get("http://unix/1.0/auth/session")
+	resp, err = hc.Get("http://unix/api/v1/auth/session")
 	if err != nil {
 		t.Fatal(err)
 	}

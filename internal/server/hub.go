@@ -16,15 +16,15 @@ import (
 )
 
 // DefaultRemotePort is added to a remote address that has none.
-const DefaultRemotePort = "8443"
+const DefaultRemotePort = "39110"
 
 type hubTransport struct {
 	tr      *http.Transport
 	created time.Time
 }
 
-// remoteHostPort turns a registry address ("host", "host:8443",
-// "https://host:8443") into host:port.
+// remoteHostPort turns a registry address ("host", "host:39110",
+// "https://host:39110") into host:port.
 func remoteHostPort(addr string) (string, error) {
 	a := strings.TrimPrefix(strings.TrimPrefix(addr, "https://"), "http://")
 	a = strings.TrimRight(a, "/")

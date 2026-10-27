@@ -40,6 +40,9 @@ type Options struct {
 	// Dev runs the privileged operations in process as root.
 	Dev     bool
 	Version string
+	// ForceWeb serves the web console and NoWeb serves none, whatever web.enabled says (the -web and -no-web flags, the
+	// rc.conf knob jailopsd_web="YES" or "NO"). Neither set: web.enabled decides, and it defaults to off.
+	ForceWeb, NoWeb bool
 	// LogOutput receives the log (default os.Stderr).
 	LogOutput io.Writer
 	// Clients builds the operating system clients (default DefaultClients).
@@ -48,7 +51,7 @@ type Options struct {
 	Now func() time.Time
 	// Hostname overrides os.Hostname.
 	Hostname string
-	// Env overrides the environment reported by GET /1.0.
+	// Env overrides the environment reported by GET /api/v1.
 	Env *api.Environment
 	// NoListen skips opening listeners (tests use Handler directly).
 	NoListen bool
@@ -143,6 +146,10 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		if cfg, err = Load(path); err != nil {
 			return nil, err
 		}
+	}
+	if opts.ForceWeb || opts.NoWeb {
+		on := opts.ForceWeb && !opts.NoWeb
+		cfg.Web.Enabled = &on
 	}
 	if opts.LogOutput == nil {
 		opts.LogOutput = os.Stderr

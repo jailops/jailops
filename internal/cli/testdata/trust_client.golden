@@ -42,7 +42,7 @@ $ jailops remote add <addr> --token <trust-token> --name again
 [exit 3]
 
 $ jailops project create other
-! forbidden: the operator role cannot call POST /1.0/projects
+! forbidden: the operator role cannot call POST /api/v1/projects
 ! hint: Ask an administrator for a token with a higher role (operator for lifecycle, admin for configuration). (jailops explain forbidden)
 [exit 3]
 

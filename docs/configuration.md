@@ -26,10 +26,10 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 | `conf_dir` | `/usr/local/etc/jailops/jails` | rendered `jail.conf` files; must equal `conf-dir` of `priv.conf` |
 | `work_dir` | `/var/tmp/jailops` | scratch |
 | `listen.unix.path`, `.mode` | `/var/run/jailops/jailops.sock`, `0666` | the local socket. Only root (uid 0) is recognised there, as a global admin; every other local user is anonymous like an unauthenticated remote client, so the mode confers nothing. An empty path disables it. The former keys `admin_group`, `user_group` and `user_projects` are removed: a configuration that still sets one stops the daemon with a message |
-| `listen.https.address` | empty | `":8443"` or `"127.0.0.1:8443"` enables the network listener: **TLS 1.3 only**, there is no plain-http TCP listener (mTLS pinning, API tokens, the web console). Checked at load |
+| `listen.https.address` | empty | `":39110"` or `"127.0.0.1:39110"` enables the network listener: **TLS 1.3 only**, there is no plain-http TCP listener (mTLS pinning, API tokens, the web console). Checked at load |
 | `listen.https.names` | none | extra DNS names and IPs of the generated certificate |
 | `listen.https.cert`, `.key` | generated | your own certificate and key, absolute paths, **both or neither**; both must exist (the daemon never generates over a configured path); a renewed pair is picked up without a restart (checked at most every 15 s, a broken one is ignored and logged). Default `<data_dir>/tls/server.{crt,key}`, generated self-signed on first start |
-| `web.enabled` | `true` | `false` serves no web console (the API is unchanged); `go build -tags noweb` leaves the console out of the binary. See [exposure.md](exposure.md) |
+| `web.enabled` | `false` | `true` serves the embedded web console on the listeners (the API is unchanged); it is always in the binary. The same switch without editing the file: `jailopsd_web="YES"` in `/etc/rc.conf`, or the `-web` flag (`"NO"` and `-no-web` force it off). `go build -tags noweb` leaves the console out of the binary. See [exposure.md](exposure.md) |
 | `priv.socket` | `/var/run/jailops/priv.sock` | where the helper listens |
 | `log.level`, `log.format` | `info`, `text` | `debug`, `info`, `warn`, `error`; `text` (key=value lines for syslog) or `json` |
 | `reconcile.interval`, `.autostart` | `60s`, `true` | the loop that makes the live host equal the desired state; start jails with `boot.autostart` on the first pass |
@@ -71,7 +71,7 @@ This file is the **operator's authority**: everything the root helper will do fo
 ## backupd.yaml
 
 The backup node. It needs PostgreSQL (its control plane), a datastore (a directory or an S3 bucket) and a certificate.
-The sample `packaging/backupd.yaml` is annotated: `hostname`, `listen` (default `:8444`), `admin_socket` (mode 0600, root only; the former `admin_group` key is removed and stops the node at start), `tls`,
+The sample `packaging/backupd.yaml` is annotated: `hostname`, `listen` (default `:39111`), `admin_socket` (mode 0600, root only; the former `admin_group` key is removed and stops the node at start), `tls`,
 `database.dsn_file`, `datastore` (`directory` or `s3`), `web`, `grace`, `deletion_delay`, `retention`, `schedule`.
 `jailops-backupd -c FILE init` creates the repository and the certificate and prints the fingerprint that hosts pin.
 

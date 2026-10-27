@@ -67,24 +67,24 @@ func TestUserScopeAndSessions(t *testing.T) {
 	mk("bob", false, "beta")
 	ann, bob, root := newSess(t, e, "ann"), newSess(t, e, "bob"), newSess(t, e, "root")
 	// The session knows who it is and what it may reach.
-	code, meta := ann.do("GET", "/1.0/auth/session")
+	code, meta := ann.do("GET", "/api/v1/auth/session")
 	var id api.Identity
 	_ = json.Unmarshal(meta, &id)
 	if code != 200 || id.User != "ann" || id.Global || strings.Join(id.Projects, ",") != "alpha" || id.Kind != "user" {
 		t.Fatalf("%d %+v", code, id)
 	}
-	if code, _ := ann.do("GET", "/1.0/jails?project=alpha"); code != 200 {
+	if code, _ := ann.do("GET", "/api/v1/jails?project=alpha"); code != 200 {
 		t.Fatalf("own project: %d", code)
 	}
-	if code, _ := ann.do("GET", "/1.0/jails?project=beta"); code != 404 {
+	if code, _ := ann.do("GET", "/api/v1/jails?project=beta"); code != 404 {
 		t.Fatalf("another project: %d", code)
 	}
-	if code, _ := ann.do("GET", "/1.0/users"); code != 403 {
+	if code, _ := ann.do("GET", "/api/v1/users"); code != 403 {
 		t.Fatalf("host-level read: %d", code)
 	}
 	// Sessions: each user lists their own, a global admin lists them all.
 	list := func(s *sess) []api.Session {
-		_, meta := s.do("GET", "/1.0/sessions")
+		_, meta := s.do("GET", "/api/v1/sessions")
 		var l []api.Session
 		_ = json.Unmarshal(meta, &l)
 		return l
@@ -105,24 +105,24 @@ func TestUserScopeAndSessions(t *testing.T) {
 		}
 	}
 	// ann cannot see or end bob's session; she learns nothing about it.
-	if code, _ := ann.do("DELETE", "/1.0/sessions/"+bobRef); code != 404 {
+	if code, _ := ann.do("DELETE", "/api/v1/sessions/"+bobRef); code != 404 {
 		t.Fatalf("revoking another user's session: %d", code)
 	}
-	if code, _ := bob.do("GET", "/1.0/auth/session"); code != 200 {
+	if code, _ := bob.do("GET", "/api/v1/auth/session"); code != 200 {
 		t.Fatalf("bob's session was ended by ann: %d", code)
 	}
 	// A global admin revokes it, and it ends at the next request.
-	if code, _ := root.do("DELETE", "/1.0/sessions/"+bobRef); code != 200 {
+	if code, _ := root.do("DELETE", "/api/v1/sessions/"+bobRef); code != 200 {
 		t.Fatalf("%d", code)
 	}
-	if code, _ := bob.do("GET", "/1.0/auth/session"); code != 401 {
+	if code, _ := bob.do("GET", "/api/v1/auth/session"); code != 401 {
 		t.Fatalf("a revoked session still works: %d", code)
 	}
 	// Users end their own.
-	if code, _ := ann.do("DELETE", "/1.0/sessions/"+al[0].ID); code != 200 {
+	if code, _ := ann.do("DELETE", "/api/v1/sessions/"+al[0].ID); code != 200 {
 		t.Fatalf("%d", code)
 	}
-	if code, _ := ann.do("GET", "/1.0/jails?project=alpha"); code != 401 {
+	if code, _ := ann.do("GET", "/api/v1/jails?project=alpha"); code != 401 {
 		t.Fatalf("%d", code)
 	}
 	// Changing a user's scope applies to the next request of a new session.
@@ -132,10 +132,10 @@ func TestUserScopeAndSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	bob = newSess(t, e, "bob")
-	if code, _ := bob.do("GET", "/1.0/jails?project=alpha"); code != 200 {
+	if code, _ := bob.do("GET", "/api/v1/jails?project=alpha"); code != 200 {
 		t.Fatalf("%d", code)
 	}
-	if code, _ := bob.do("GET", "/1.0/jails?project=beta"); code != 404 {
+	if code, _ := bob.do("GET", "/api/v1/jails?project=beta"); code != 404 {
 		t.Fatalf("%d", code)
 	}
 	// Disabling a user ends the session on the next request.
@@ -144,7 +144,7 @@ func TestUserScopeAndSessions(t *testing.T) {
 	if _, err := e.Admin.Users().Update(c, "bob", u, ""); err != nil {
 		t.Fatal(err)
 	}
-	if code, _ := bob.do("GET", "/1.0/auth/session"); code != 401 {
+	if code, _ := bob.do("GET", "/api/v1/auth/session"); code != 401 {
 		t.Fatalf("%d", code)
 	}
 }

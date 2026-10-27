@@ -16,10 +16,10 @@ func TestConfigKeysEndpointIsTheRegistry(t *testing.T) {
 		t.Fatalf("%v %d", err, len(keys))
 	}
 	// Every authenticated identity may read it, one that has no scope too.
-	if code, _ := e.Raw("GET", "/1.0/config-keys", e.ScopelessToken(api.PermReadonly), ""); code != 200 {
+	if code, _ := e.Raw("GET", "/api/v1/config-keys", e.ScopelessToken(api.PermReadonly), ""); code != 200 {
 		t.Fatal(code)
 	}
-	if code, _ := e.Raw("GET", "/1.0/config-keys", "", ""); code != 401 {
+	if code, _ := e.Raw("GET", "/api/v1/config-keys", "", ""); code != 401 {
 		t.Fatal(code)
 	}
 }

@@ -126,7 +126,7 @@ type RemoteStatus struct {
 	Extensions int       `json:"extensions,omitempty"`
 }
 
-// UserCreate is the body of POST /1.0/users. An empty Password asks the
+// UserCreate is the body of POST /api/v1/users. An empty Password asks the
 // server to generate one.
 type UserCreate struct {
 	Metadata ObjectMeta `json:"metadata"`
@@ -134,20 +134,20 @@ type UserCreate struct {
 	Password string     `json:"password,omitempty"`
 }
 
-// PasswordSet is the body and the reply of POST /1.0/users/{name}/password. In the request, Password is the new
+// PasswordSet is the body and the reply of POST /api/v1/users/{name}/password. In the request, Password is the new
 // password, or empty to ask for a generated one. In the reply it is set only when the server generated it, and shown once.
 type PasswordSet struct {
 	Password string `json:"password,omitempty"`
 }
 
-// UserCreated is the reply to POST /1.0/users. Password is set only here and
+// UserCreated is the reply to POST /api/v1/users. Password is set only here and
 // only when the server generated it.
 type UserCreated struct {
 	User     User   `json:"user"`
 	Password string `json:"password,omitempty"`
 }
 
-// TrustTokenRequest is the body of POST /1.0/trust/tokens. It creates a
+// TrustTokenRequest is the body of POST /api/v1/trust/tokens. It creates a
 // single-use token that lets a client add its certificate to the trust store.
 type TrustTokenRequest struct {
 	Name       string     `json:"name"`
@@ -172,7 +172,7 @@ type TrustToken struct {
 	ExpiresAt time.Time `json:"expires_at"`
 }
 
-// TrustClientRequest is the body of POST /1.0/trust/clients (unauthenticated,
+// TrustClientRequest is the body of POST /api/v1/trust/clients (unauthenticated,
 // authorised by the token): the client presents its certificate.
 type TrustClientRequest struct {
 	Token string `json:"token"`
@@ -181,7 +181,7 @@ type TrustClientRequest struct {
 }
 
 // Identity describes the caller as the server sees it
-// (GET /1.0/auth/session).
+// (GET /api/v1/auth/session).
 type Identity struct {
 	// User is the user name, token name, "cert:<name>" or unix account.
 	User string `json:"user"`
@@ -193,8 +193,8 @@ type Identity struct {
 	Global     bool       `json:"global,omitempty"`
 }
 
-// Session is a web session as listed by GET /1.0/sessions. The session cookie
-// value is never returned; ID is a reference that DELETE /1.0/sessions/<id>
+// Session is a web session as listed by GET /api/v1/sessions. The session cookie
+// value is never returned; ID is a reference that DELETE /api/v1/sessions/<id>
 // accepts.
 type Session struct {
 	ID        string    `json:"id"`

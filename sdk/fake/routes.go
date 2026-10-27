@@ -52,16 +52,16 @@ func (s *Server) routes() {
 		s.patterns = append(s.patterns, pattern)
 		s.mux.HandleFunc(pattern, h)
 	})
-	m("GET /1.0", s.handleInfo)
-	m("GET /1.0/events", s.handleEvents)
-	m("GET /1.0/operations", s.handleOpList)
-	m("GET /1.0/operations/{id}", s.handleOpGet)
-	m("GET /1.0/operations/{id}/wait", s.handleOpWait)
-	m("DELETE /1.0/operations/{id}", s.handleOpCancel)
-	m("POST /1.0/restores", s.handleRestore)
-	m("POST /1.0/tokens", s.createToken)
-	m("POST /1.0/users", s.createUser)
-	m("POST /1.0/users/{name}/password", s.setUserPassword)
+	m("GET /api/v1", s.handleInfo)
+	m("GET /api/v1/events", s.handleEvents)
+	m("GET /api/v1/operations", s.handleOpList)
+	m("GET /api/v1/operations/{id}", s.handleOpGet)
+	m("GET /api/v1/operations/{id}/wait", s.handleOpWait)
+	m("DELETE /api/v1/operations/{id}", s.handleOpCancel)
+	m("POST /api/v1/restores", s.handleRestore)
+	m("POST /api/v1/tokens", s.createToken)
+	m("POST /api/v1/users", s.createUser)
+	m("POST /api/v1/users/{name}/password", s.setUserPassword)
 	for _, reg := range []func(muxer){
 		s.jails.register, s.images.register, s.networks.register, s.policies.register, s.addrsets.register,
 		s.targets.register, s.bpolicies.register, s.backups.register, s.remotes.register,
@@ -69,43 +69,43 @@ func (s *Server) routes() {
 	} {
 		reg(m)
 	}
-	m("POST /1.0/trust/tokens", s.createTrustToken)
-	m("POST /1.0/trust/clients", s.redeemTrustToken)
-	m("GET /1.0/sessions", s.listSessions)
-	m("DELETE /1.0/sessions/{id}", s.revokeSession)
-	m("GET /1.0/auth/session", s.handleWhoami)
-	m("GET /1.0/config-keys", s.handleConfigKeys)
-	m("POST /1.0/jails/{name}/config", s.jailConfig)
-	m("POST /1.0/jails/{name}/exec", s.jailExec)
-	m("POST /1.0/jails/{name}/console", s.consoleOpen)
-	m("GET /1.0/jails/{name}/console/{id}/output", s.consoleOutput)
-	m("POST /1.0/jails/{name}/console/{id}/input", s.consoleInput)
-	m("POST /1.0/jails/{name}/console/{id}/resize", s.consoleResize)
-	m("DELETE /1.0/jails/{name}/console/{id}", s.consoleClose)
-	m("GET /1.0/updates", s.handleUpdatesList)
-	m("POST /1.0/updates/check", s.handleUpdatesCheck)
-	m("POST /1.0/updates/apply", s.handleUpdatesApply)
-	m("GET /1.0/jails/{name}/updates", s.handleUpdateHistory)
-	m("POST /1.0/jails/{name}/provision", s.handleProvision)
-	m("GET /1.0/backup/key", s.handleBackupKeyStatus)
-	m("POST /1.0/backup/key", s.handleBackupKeyCreate)
-	m("POST /1.0/backup/key/escrow", s.handleBackupKeyEscrow)
-	m("POST /1.0/backups/run", s.handleBackupRun)
-	m("POST /1.0/backups/{id}/verify", s.handleBackupVerify)
-	m("GET /1.0/jails/{name}/state", s.jailState)
-	m("PUT /1.0/jails/{name}/state", s.jailAction)
-	m("GET /1.0/jails/{name}/snapshots", s.snapList)
-	m("POST /1.0/jails/{name}/snapshots", s.snapCreate)
-	m("GET /1.0/jails/{name}/snapshots/{snap}", s.snapGet)
-	m("DELETE /1.0/jails/{name}/snapshots/{snap}", s.snapDelete)
-	m("POST /1.0/jails/{name}/rollback", s.jailRollback)
-	m("POST /1.0/jails/{name}/upgrade", s.jailUpgrade)
-	m("GET /1.0/images/{name}/generations", s.genList)
-	m("POST /1.0/images/{name}/generations", s.genBuild)
-	m("DELETE /1.0/images/{name}/generations/{n}", s.genDelete)
-	m("PUT /1.0/images/{name}/aliases/{alias}", s.aliasSet)
-	m("DELETE /1.0/images/{name}/aliases/{alias}", s.aliasDelete)
-	m("GET /1.0/networks/{name}/leases", s.leases)
+	m("POST /api/v1/trust/tokens", s.createTrustToken)
+	m("POST /api/v1/trust/clients", s.redeemTrustToken)
+	m("GET /api/v1/sessions", s.listSessions)
+	m("DELETE /api/v1/sessions/{id}", s.revokeSession)
+	m("GET /api/v1/auth/session", s.handleWhoami)
+	m("GET /api/v1/config-keys", s.handleConfigKeys)
+	m("POST /api/v1/jails/{name}/config", s.jailConfig)
+	m("POST /api/v1/jails/{name}/exec", s.jailExec)
+	m("POST /api/v1/jails/{name}/console", s.consoleOpen)
+	m("GET /api/v1/jails/{name}/console/{id}/output", s.consoleOutput)
+	m("POST /api/v1/jails/{name}/console/{id}/input", s.consoleInput)
+	m("POST /api/v1/jails/{name}/console/{id}/resize", s.consoleResize)
+	m("DELETE /api/v1/jails/{name}/console/{id}", s.consoleClose)
+	m("GET /api/v1/updates", s.handleUpdatesList)
+	m("POST /api/v1/updates/check", s.handleUpdatesCheck)
+	m("POST /api/v1/updates/apply", s.handleUpdatesApply)
+	m("GET /api/v1/jails/{name}/updates", s.handleUpdateHistory)
+	m("POST /api/v1/jails/{name}/provision", s.handleProvision)
+	m("GET /api/v1/backup/key", s.handleBackupKeyStatus)
+	m("POST /api/v1/backup/key", s.handleBackupKeyCreate)
+	m("POST /api/v1/backup/key/escrow", s.handleBackupKeyEscrow)
+	m("POST /api/v1/backups/run", s.handleBackupRun)
+	m("POST /api/v1/backups/{id}/verify", s.handleBackupVerify)
+	m("GET /api/v1/jails/{name}/state", s.jailState)
+	m("PUT /api/v1/jails/{name}/state", s.jailAction)
+	m("GET /api/v1/jails/{name}/snapshots", s.snapList)
+	m("POST /api/v1/jails/{name}/snapshots", s.snapCreate)
+	m("GET /api/v1/jails/{name}/snapshots/{snap}", s.snapGet)
+	m("DELETE /api/v1/jails/{name}/snapshots/{snap}", s.snapDelete)
+	m("POST /api/v1/jails/{name}/rollback", s.jailRollback)
+	m("POST /api/v1/jails/{name}/upgrade", s.jailUpgrade)
+	m("GET /api/v1/images/{name}/generations", s.genList)
+	m("POST /api/v1/images/{name}/generations", s.genBuild)
+	m("DELETE /api/v1/images/{name}/generations/{n}", s.genDelete)
+	m("PUT /api/v1/images/{name}/aliases/{alias}", s.aliasSet)
+	m("DELETE /api/v1/images/{name}/aliases/{alias}", s.aliasDelete)
+	m("GET /api/v1/networks/{name}/leases", s.leases)
 	m("/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, api.Errorf(api.CodeNotFound, "no such route %s %s", r.Method, r.URL.Path))
 	})
@@ -192,7 +192,7 @@ func (s *Server) createUser(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, rp)
 }
 
-// setUserPassword implements POST /1.0/users/{name}/password.
+// setUserPassword implements POST /api/v1/users/{name}/password.
 func (s *Server) setUserPassword(w http.ResponseWriter, r *http.Request) {
 	req, e := decodeOptional[api.PasswordSet](r)
 	if e != nil {
@@ -215,7 +215,7 @@ func (s *Server) setUserPassword(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, rp)
 }
 
-// handleRestore implements POST /1.0/restores.
+// handleRestore implements POST /api/v1/restores.
 func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 	req, e := decode[api.RestoreRequest](r)
 	if e != nil {
@@ -280,7 +280,7 @@ func (s *Server) handleRestore(w http.ResponseWriter, r *http.Request) {
 				WithDetail("missing", strings.Join(pf.Missing, "; ")).WithDetail("errors", strings.Join(pf.Errors, "; "))}
 		}
 		jail := &api.Jail{Metadata: api.ObjectMeta{Name: name, Project: rc.project, Labels: nil}, Spec: spec}
-		op := s.startOp(rc.project, "restores.create", "Restoring "+name, map[string][]string{"jails": {"/1.0/jails/" + name}}, func() (any, *api.Error) {
+		op := s.startOp(rc.project, "restores.create", "Restoring "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			delete(s.jails.items, s.jails.keyIn(rc.project, name))
 			if e := s.assignJail(jail, nil); e != nil {
 				return nil, e

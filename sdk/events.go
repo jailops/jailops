@@ -36,7 +36,7 @@ func MaxReconnects(n int) EventOption { return func(e *eventCfg) { e.maxFailing 
 
 const maxEventLine = 1 << 20
 
-// Events streams /1.0/events (Server-Sent Events). The stream reconnects
+// Events streams /api/v1/events (Server-Sent Events). The stream reconnects
 // after a drop with the Last-Event-ID of the last event delivered, so events
 // are not lost while the server retains them. The iterator ends when ctx is
 // done (yielding ctx.Err()), the client is closed, the consumer breaks, or a
@@ -112,7 +112,7 @@ func (c *Client) Events(ctx context.Context, opts ...EventOption) iter.Seq2[api.
 // streamOnce runs one connection. It returns the number of events delivered
 // (-1 when the consumer stopped), whether the error is fatal, and the error.
 func (c *Client) streamOnce(ctx context.Context, q url.Values, cfg *eventCfg, retryWait *time.Duration, yield func(api.Event, error) bool) (int, bool, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.buildURL("/1.0/events", q), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.buildURL("/api/v1/events", q), nil)
 	if err != nil {
 		return 0, true, err
 	}

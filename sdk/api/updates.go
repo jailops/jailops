@@ -33,7 +33,7 @@ type ProvisionSvc struct {
 	Start  []string `json:"start,omitempty"`
 }
 
-// ProvisionRequest is the body of POST /1.0/jails/{name}/provision.
+// ProvisionRequest is the body of POST /api/v1/jails/{name}/provision.
 type ProvisionRequest struct {
 	// Again runs provisioning although it has run before.
 	Again bool `json:"again,omitempty"`
@@ -112,14 +112,14 @@ type UpdateRecord struct {
 	Note      string `json:"note,omitempty"`
 }
 
-// UpdateCheckRequest is the body of POST /1.0/updates/check. Jails names the
+// UpdateCheckRequest is the body of POST /api/v1/updates/check. Jails names the
 // jails of the request's project; All checks every jail of the project.
 type UpdateCheckRequest struct {
 	Jails []string `json:"jails,omitempty"`
 	All   bool     `json:"all,omitempty"`
 }
 
-// UpdateApplyRequest is the body of POST /1.0/updates/apply.
+// UpdateApplyRequest is the body of POST /api/v1/updates/apply.
 type UpdateApplyRequest struct {
 	Jails []string `json:"jails,omitempty"`
 	// All applies to every jail of the project that has something to apply.

@@ -69,7 +69,7 @@ type ImageGeneration struct {
 	Storages []string `json:"storages,omitempty"`
 }
 
-// ImageBuild is the body of POST /1.0/images/{name}/generations.
+// ImageBuild is the body of POST /api/v1/images/{name}/generations.
 type ImageBuild struct {
 	// FromGeneration builds the next generation from an earlier one by
 	// upgrading its packages; zero builds from the source.
@@ -81,7 +81,7 @@ type ImageBuild struct {
 	Storage string `json:"storage,omitempty"`
 }
 
-// ImageAliasSet is the body of PUT /1.0/images/{name}/aliases/{alias}.
+// ImageAliasSet is the body of PUT /api/v1/images/{name}/aliases/{alias}.
 type ImageAliasSet struct {
 	// Generation is the generation number the alias points at; zero means the newest.
 	Generation int `json:"generation,omitempty"`

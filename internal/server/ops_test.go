@@ -84,7 +84,7 @@ func TestOperationCancelAndBusy(t *testing.T) {
 	wc, cancel := context.WithTimeout(c, time.Second)
 	defer cancel()
 	_ = wc
-	raw, body := e.Raw("GET", "/1.0/operations/"+snap.ID()+"/wait?timeout=1", e.Token(api.PermAdmin), "")
+	raw, body := e.Raw("GET", "/api/v1/operations/"+snap.ID()+"/wait?timeout=1", e.Token(api.PermAdmin), "")
 	if raw != 200 || !strings.Contains(body, `"running"`) || time.Since(start) < 900*time.Millisecond {
 		t.Fatalf("%d %s after %v", raw, body, time.Since(start))
 	}

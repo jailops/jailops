@@ -30,7 +30,7 @@ type Config struct {
 	ServerID string `yaml:"server_id"`
 	Hostname string `yaml:"hostname"`
 
-	// Listen is the address of the host listener (mutual TLS). Default ":8444".
+	// Listen is the address of the host listener (mutual TLS). Default ":39111".
 	Listen string `yaml:"listen"`
 	// AdminSocket is the unix socket of the administration API. Default /var/run/jailops-backupd.sock.
 	AdminSocket string `yaml:"admin_socket"`
@@ -98,10 +98,12 @@ type HostConfig struct {
 	Scopes      []string `yaml:"scopes"`
 }
 
-// WebConfig is the management API and UI listener.
+// WebConfig switches the web console, and nothing else. The console is served on the host listener (Config.Listen), next to
+// the host API and the management API that is always there: one port, 39111 by default. It is in the binary and off by
+// default.
 type WebConfig struct {
 	Enabled bool `yaml:"enabled"`
-	// Listen defaults to 127.0.0.1:8445.
+	// Listen was the address of a second listener. It is gone; setting it is an error that says so.
 	Listen string `yaml:"listen"`
 }
 
@@ -186,13 +188,10 @@ func ParseConfig(data []byte) (*Config, error) {
 
 func (c *Config) defaults() {
 	if c.Listen == "" {
-		c.Listen = ":8444"
+		c.Listen = ":39111"
 	}
 	if c.AdminSocket == "" {
 		c.AdminSocket = "/var/run/jailops-backupd.sock"
-	}
-	if c.Web.Listen == "" {
-		c.Web.Listen = "127.0.0.1:8445"
 	}
 	if c.TLS.CertFile == "" {
 		c.TLS.CertFile = "/usr/local/etc/jailops/backupd.crt"
@@ -222,6 +221,9 @@ func (c *Config) defaults() {
 
 // Validate checks the configuration without touching the network.
 func (c *Config) Validate() error {
+	if c.Web.Listen != "" {
+		return errors.New("backupd: web.listen was removed: the management API and the console are served on listen (default :39111), next to the host API; delete web.listen")
+	}
 	switch c.Datastore.Kind {
 	case "directory":
 		if c.Datastore.Directory == "" {

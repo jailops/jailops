@@ -18,7 +18,7 @@ import (
 
 func (s *Server) jailRoutes() []route {
 	svc := s.svc
-	jr := resource[api.Jail]{base: "/1.0/jails", param: "name",
+	jr := resource[api.Jail]{base: "/api/v1/jails", param: "name",
 		list: svc.ListJails,
 		get:  func(ctx context.Context, k string) (api.Jail, error) { return svc.GetJail(ctx, k) },
 		put:  svc.UpdateJail, patch: svc.PatchJail,
@@ -29,12 +29,12 @@ func (s *Server) jailRoutes() []route {
 		gen: func(v api.Jail) int64 { return v.Metadata.Generation }, name: func(v api.Jail) string { return v.Metadata.Name },
 	}.routes()
 	jr = append(jr,
-		route{method: "POST", pattern: "/1.0/jails", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/jails", h: func(c *rc) error {
 			var j api.Jail
 			if err := c.decode(&j); err != nil {
 				return err
 			}
-			c.object = "/1.0/jails/" + j.Metadata.Name
+			c.object = "/api/v1/jails/" + j.Metadata.Name
 			op, err := svc.CreateJail(c.r.Context(), j)
 			if err != nil {
 				return err
@@ -42,7 +42,7 @@ func (s *Server) jailRoutes() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "DELETE", pattern: "/1.0/jails/{name}", h: func(c *rc) error {
+		route{method: "DELETE", pattern: "/api/v1/jails/{name}", h: func(c *rc) error {
 			op, err := svc.DeleteJail(c.r.Context(), c.pathArg("name"))
 			if err != nil {
 				return err
@@ -50,7 +50,7 @@ func (s *Server) jailRoutes() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/jails/{name}", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/jails/{name}", h: func(c *rc) error {
 			var j api.Jail
 			if err := c.decode(&j); err != nil {
 				return err
@@ -62,14 +62,14 @@ func (s *Server) jailRoutes() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/jails/{name}/exec", long: true, h: s.handleExec},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/exec", long: true, h: s.handleExec},
 		// the browser console: a session instead of an HTTP upgrade (console.go)
-		route{method: "POST", pattern: "/1.0/jails/{name}/console", h: s.handleConsoleOpen},
-		route{method: "GET", pattern: "/1.0/jails/{name}/console/{id}/output", long: true, h: s.handleConsoleOutput},
-		route{method: "POST", pattern: "/1.0/jails/{name}/console/{id}/input", h: s.handleConsoleInput},
-		route{method: "POST", pattern: "/1.0/jails/{name}/console/{id}/resize", h: s.handleConsoleResize},
-		route{method: "DELETE", pattern: "/1.0/jails/{name}/console/{id}", h: s.handleConsoleClose},
-		route{method: "GET", pattern: "/1.0/jails/{name}/state", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/jails/{name}/console", h: s.handleConsoleOpen},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/console/{id}/output", long: true, h: s.handleConsoleOutput},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/console/{id}/input", h: s.handleConsoleInput},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/console/{id}/resize", h: s.handleConsoleResize},
+		route{method: "DELETE", pattern: "/api/v1/jails/{name}/console/{id}", h: s.handleConsoleClose},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/state", h: func(c *rc) error {
 			v, err := svc.JailState(c.r.Context(), c.pathArg("name"))
 			if err != nil {
 				return err
@@ -77,7 +77,7 @@ func (s *Server) jailRoutes() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "PUT", pattern: "/1.0/jails/{name}/state", h: func(c *rc) error {
+		route{method: "PUT", pattern: "/api/v1/jails/{name}/state", h: func(c *rc) error {
 			var a api.JailAction
 			if err := c.decode(&a); err != nil {
 				return err
@@ -89,7 +89,7 @@ func (s *Server) jailRoutes() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/jails/{name}/snapshots", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/jails/{name}/snapshots", h: func(c *rc) error {
 			v, err := svc.ListSnapshots(c.r.Context(), c.pathArg("name"))
 			if err != nil {
 				return err
@@ -97,7 +97,7 @@ func (s *Server) jailRoutes() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/jails/{name}/snapshots", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/jails/{name}/snapshots", h: func(c *rc) error {
 			// PROTOCOL.md: a JailSnapshot with an optional metadata.name. The web
 			// UI sends {"comment": "..."}, which is accepted as well.
 			var in struct {
@@ -122,7 +122,7 @@ func (s *Server) jailRoutes() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "GET", pattern: "/1.0/jails/{name}/snapshots/{snapshot}", h: func(c *rc) error {
+		route{method: "GET", pattern: "/api/v1/jails/{name}/snapshots/{snapshot}", h: func(c *rc) error {
 			v, err := svc.GetSnapshot(c.r.Context(), c.pathArg("name"), c.pathArg("snapshot"))
 			if err != nil {
 				return err
@@ -130,7 +130,7 @@ func (s *Server) jailRoutes() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		route{method: "DELETE", pattern: "/1.0/jails/{name}/snapshots/{snapshot}", h: func(c *rc) error {
+		route{method: "DELETE", pattern: "/api/v1/jails/{name}/snapshots/{snapshot}", h: func(c *rc) error {
 			op, err := svc.DeleteSnapshot(c.r.Context(), c.pathArg("name"), c.pathArg("snapshot"))
 			if err != nil {
 				return err
@@ -138,7 +138,7 @@ func (s *Server) jailRoutes() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/jails/{name}/rollback", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/jails/{name}/rollback", h: func(c *rc) error {
 			var rb api.JailRollback
 			if err := c.decodeOptional(&rb); err != nil {
 				return err
@@ -150,7 +150,7 @@ func (s *Server) jailRoutes() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/1.0/jails/{name}/upgrade", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/jails/{name}/upgrade", h: func(c *rc) error {
 			var up api.JailUpgrade
 			if err := c.decodeOptional(&up); err != nil {
 				return err
@@ -171,7 +171,7 @@ func (s *Server) jailRoutes() []route {
 func (s *Server) operationRoutes() []route {
 	svc := s.svc
 	return []route{
-		{method: "GET", pattern: "/1.0/operations", h: func(c *rc) error {
+		{method: "GET", pattern: "/api/v1/operations", h: func(c *rc) error {
 			v, err := svc.ListOperations(c.r.Context())
 			if err != nil {
 				return err
@@ -179,7 +179,7 @@ func (s *Server) operationRoutes() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		{method: "GET", pattern: "/1.0/operations/{id}", h: func(c *rc) error {
+		{method: "GET", pattern: "/api/v1/operations/{id}", h: func(c *rc) error {
 			v, err := svc.GetOperation(c.r.Context(), c.pathArg("id"))
 			if err != nil {
 				return err
@@ -187,7 +187,7 @@ func (s *Server) operationRoutes() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		{method: "GET", pattern: "/1.0/operations/{id}/wait", long: true, h: func(c *rc) error {
+		{method: "GET", pattern: "/api/v1/operations/{id}/wait", long: true, h: func(c *rc) error {
 			secs := 60
 			if t := c.r.URL.Query().Get("timeout"); t != "" {
 				n, err := strconv.Atoi(t)
@@ -203,7 +203,7 @@ func (s *Server) operationRoutes() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
-		{method: "DELETE", pattern: "/1.0/operations/{id}", h: func(c *rc) error {
+		{method: "DELETE", pattern: "/api/v1/operations/{id}", h: func(c *rc) error {
 			if err := svc.CancelOperation(c.r.Context(), c.pathArg("id")); err != nil {
 				return err
 			}
@@ -327,7 +327,7 @@ func (s *Server) authRoutes() []route {
 	svc := s.svc
 	secure := func(c *rc) bool { return c.r.TLS != nil }
 	return []route{
-		{method: "POST", pattern: "/1.0/auth/login", h: func(c *rc) error {
+		{method: "POST", pattern: "/api/v1/auth/login", h: func(c *rc) error {
 			var req struct {
 				Username string `json:"username"`
 				Password string `json:"password"`
@@ -352,7 +352,7 @@ func (s *Server) authRoutes() []route {
 				"expires_at": sess.ExpiresAt, "csrf": sess.CSRF}, 0)
 			return nil
 		}},
-		{method: "POST", pattern: "/1.0/auth/logout", h: func(c *rc) error {
+		{method: "POST", pattern: "/api/v1/auth/logout", h: func(c *rc) error {
 			if c.session != "" {
 				if err := svc.Logout(c.r.Context(), c.session); err != nil {
 					return err
@@ -363,7 +363,7 @@ func (s *Server) authRoutes() []route {
 			c.sync(200, struct{}{}, 0)
 			return nil
 		}},
-		{method: "GET", pattern: "/1.0/auth/session", h: func(c *rc) error {
+		{method: "GET", pattern: "/api/v1/auth/session", h: func(c *rc) error {
 			out := api.Identity{User: c.actor.Name, Kind: c.actor.Kind, Permission: c.actor.Perm, Projects: c.actor.Projects, Global: c.actor.Global}
 			if c.actor.Kind == "user" {
 				if info, err := svc.WhoAmI(c.r.Context(), c.actor.Name); err == nil {
@@ -373,7 +373,7 @@ func (s *Server) authRoutes() []route {
 			c.sync(200, out, 0)
 			return nil
 		}},
-		{method: "POST", pattern: "/1.0/auth/password", h: func(c *rc) error {
+		{method: "POST", pattern: "/api/v1/auth/password", h: func(c *rc) error {
 			var req struct {
 				Current string `json:"current"`
 				New     string `json:"new"`
@@ -390,7 +390,7 @@ func (s *Server) authRoutes() []route {
 			c.sync(200, struct{}{}, 0)
 			return nil
 		}},
-		{method: "POST", pattern: "/1.0/auth/totp", h: func(c *rc) error {
+		{method: "POST", pattern: "/api/v1/auth/totp", h: func(c *rc) error {
 			if c.actor.Kind != "user" {
 				return api.Errorf(api.CodeInvalid, "only user accounts have a second factor")
 			}
@@ -415,7 +415,7 @@ func (s *Server) authRoutes() []route {
 			c.sync(200, map[string]any{"recovery_codes": codes}, 0)
 			return nil
 		}},
-		{method: "DELETE", pattern: "/1.0/auth/totp", h: func(c *rc) error {
+		{method: "DELETE", pattern: "/api/v1/auth/totp", h: func(c *rc) error {
 			if c.actor.Kind != "user" {
 				return api.Errorf(api.CodeInvalid, "only user accounts have a second factor")
 			}
@@ -431,7 +431,7 @@ func (s *Server) authRoutes() []route {
 			c.sync(200, struct{}{}, 0)
 			return nil
 		}},
-		{method: "POST", pattern: "/1.0/auth/recovery-codes", h: func(c *rc) error {
+		{method: "POST", pattern: "/api/v1/auth/recovery-codes", h: func(c *rc) error {
 			if c.actor.Kind != "user" {
 				return api.Errorf(api.CodeInvalid, "only user accounts have recovery codes")
 			}

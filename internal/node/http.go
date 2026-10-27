@@ -136,7 +136,7 @@ func parseID(s string) (format.ID, error) {
 
 func (n *Node) hInfo(w http.ResponseWriter, r *http.Request, h Host) { writeJSON(w, 200, n.Info()) }
 
-// BeginRequest is the body of POST /1.0/repo/sessions.
+// BeginRequest is the body of POST /api/v1/repo/sessions.
 type BeginRequest = wire.BeginRequest
 
 func (n *Node) hBegin(w http.ResponseWriter, r *http.Request, h Host) {

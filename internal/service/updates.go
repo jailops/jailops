@@ -313,7 +313,7 @@ func (s *Service) CheckUpdates(ctx context.Context, req api.UpdateCheckRequest) 
 				out = append(out, rep)
 				h.Progress((i + 1) * 100 / len(keys))
 			}
-			s.emitIn(ctx, project, "updates-checked", "/1.0/updates")
+			s.emitIn(ctx, project, "updates-checked", "/api/v1/updates")
 			return out, nil
 		}})
 }
@@ -418,9 +418,9 @@ func (s *Service) applyJail(ctx context.Context, h *OpHandle, key string, w appl
 		s.appendHistory(r)
 		recs = append(recs, r)
 		if r.Result == api.UpdateOK {
-			s.emitIn(ctx, project, "update.applied", "/1.0/jails/"+name+"/updates")
+			s.emitIn(ctx, project, "update.applied", "/api/v1/jails/"+name+"/updates")
 		} else {
-			s.emitIn(ctx, project, "update.failed", "/1.0/jails/"+name+"/updates")
+			s.emitIn(ctx, project, "update.failed", "/api/v1/jails/"+name+"/updates")
 		}
 	}
 	// OS first: a new root first, then the packages on top of it.
@@ -608,7 +608,7 @@ func (s *Service) runScheduled(ctx context.Context, key string, j api.Jail, appl
 	s.upd.setReport(key, rep)
 	if !apply || !rep.Available {
 		if rep.Available {
-			s.emitIn(ctx, j.Metadata.Project, "update.available", "/1.0/jails/"+j.Metadata.Name+"/updates")
+			s.emitIn(ctx, j.Metadata.Project, "update.available", "/api/v1/jails/"+j.Metadata.Name+"/updates")
 		}
 		return
 	}

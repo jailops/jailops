@@ -24,6 +24,8 @@ func run(args []string) int {
 	cfgPath := fs.String("config", daemon.DefaultConfigPath, "path of the configuration file")
 	dev := fs.Bool("dev", false, "development: run the privileged operations in process (needs root)")
 	checkOnly := fs.Bool("check-config", false, "validate the configuration and exit")
+	forceWeb := fs.Bool("web", false, "serve the web console, whatever web.enabled says (it is off by default)")
+	noWeb := fs.Bool("no-web", false, "serve no web console, whatever web.enabled says (the API is unchanged)")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: jailopsd [flags]\n       jailopsd version\n\nflags:\n")
 		fs.PrintDefaults()
@@ -36,6 +38,10 @@ func run(args []string) int {
 		if err == flag.ErrHelp {
 			return 0
 		}
+		return 2
+	}
+	if *forceWeb && *noWeb {
+		fmt.Fprintln(os.Stderr, "jailopsd: -web and -no-web exclude each other")
 		return 2
 	}
 	if fs.NArg() > 0 {
@@ -54,7 +60,7 @@ func run(args []string) int {
 	defer stop()
 	// SIGHUP is ignored: the configuration is read at start.
 	signal.Ignore(syscall.SIGHUP)
-	if err := daemon.Run(ctx, daemon.Options{ConfigPath: *cfgPath, Dev: *dev, Version: version}); err != nil {
+	if err := daemon.Run(ctx, daemon.Options{ConfigPath: *cfgPath, Dev: *dev, Version: version, ForceWeb: *forceWeb, NoWeb: *noWeb}); err != nil {
 		fmt.Fprintln(os.Stderr, "jailopsd:", err)
 		return 1
 	}

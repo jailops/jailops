@@ -44,7 +44,7 @@ func list[T any](ctx context.Context, c *Client, path string, opts []ListOption)
 	}
 }
 
-// Resource is the generic client of a plain /1.0/<resource> collection.
+// Resource is the generic client of a plain /api/v1/<resource> collection.
 type Resource[T any] struct {
 	c    *Client
 	path string
