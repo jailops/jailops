@@ -142,3 +142,27 @@ func TestInitDryRunChangesNothing(t *testing.T) {
 		t.Fatalf("%s", out.String())
 	}
 }
+
+// -web writes the two settings that put the console on a browser: the TLS listener and web.enabled. Without it the
+// configuration has neither (the console is off by default).
+func TestInitWebTurnsTheConsoleOn(t *testing.T) {
+	for _, web := range []bool{false, true} {
+		r := &recorder{exist: map[string]bool{}, flag: map[string]string{}}
+		o, root := newInit(t, r)
+		o.web, o.webAddress = web, ":39110"
+		var out bytes.Buffer
+		if err := o.do(&out); err != nil {
+			t.Fatal(err)
+		}
+		cfg, err := daemon.Load(filepath.Join(root, "usr/local/etc/jailops/jailopsd.yaml"))
+		if err != nil {
+			t.Fatalf("web=%v: %v", web, err)
+		}
+		if cfg.UI() != web {
+			t.Errorf("web=%v: console served = %v", web, cfg.UI())
+		}
+		if got := cfg.Listen.HTTPS.Address; (got == ":39110") != web {
+			t.Errorf("web=%v: https address %q", web, got)
+		}
+	}
+}

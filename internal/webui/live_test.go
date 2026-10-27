@@ -23,7 +23,7 @@ func TestLiveConsole(t *testing.T) {
 	if addr == "" {
 		t.Skip("JAILOPS_LIVE_ADDR not set")
 	}
-	e := dtest.New(t, dtest.Options{})
+	e := dtest.New(t, dtest.Options{ForceWeb: true}) // the console is off by default
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		t.Fatal(err)

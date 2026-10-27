@@ -263,7 +263,8 @@ func adminJob[T any](t *testing.T, r *rig, path string, body any) *T {
 }
 
 func TestHostileHostOverTheNetwork(t *testing.T) {
-	r := startRig(t, memKind, func(c *node.Config) { c.Lease = 300 * time.Millisecond })
+	// the lease has nothing to do with this test (no step waits for it): a short one only made it fail on slow machines
+	r := startRig(t, memKind, func(c *node.Config) { c.Lease = time.Minute })
 	good, evil := r.enroll("good"), r.enroll("evil")
 	f := r.Fix
 	gGood, gEvil := f.Group("good", "web"), f.Group("evil", "x")

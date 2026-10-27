@@ -25,7 +25,7 @@ What it does, in order (each step is idempotent):
 4. adds the three `anchor "jailops/*"` lines to `pf.conf` when they are missing, checks the file with `pfctl -nf`, and enables
    pf **without restarting a running one** (a restart cuts an ssh session);
 5. turns on IPv4 and IPv6 forwarding (JailOps never does);
-6. `jailops-priv init -pool $JAILOPS_POOL`: the user and groups, the datasets, the directories, `priv.conf` and `jailopsd.yaml`;
+6. `jailops-priv init -pool $JAILOPS_POOL -web`: the user and groups, the datasets, the directories, `priv.conf` and `jailopsd.yaml`, and the web console on port 39110 (`JAILOPS_WEB=no` leaves it off);
 7. writes what the host operator approves into `priv.conf`: `JAILOPS_NDP_PROXY` (IPv6 proxy mode),
    `JAILOPS_HOST_MOUNTS` (`admin-host-mount`);
 8. starts `jailops_priv` and `jailopsd`, waits for the socket and fails if `jailops doctor` shows a `FAIL`, and creates the

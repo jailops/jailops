@@ -29,10 +29,11 @@ License: BSD-2-Clause.
 ## Install (FreeBSD)
 
     pkg install jailops                    # from pkg.jailops.net: add the repository first, see "Packages" below
-    jailops-priv init -pool tank           # the user, the datasets and the configuration
+    jailops-priv init -pool tank -web      # the user, the datasets, the configuration, and the web console on :39110
     sysrc jailops_priv_enable=YES jailopsd_enable=YES
     service jailops_priv start && service jailopsd start
     jailops doctor
+    jailops user create admin --admin --password-prompt    # then sign in at https://HOST:39110/
 
 ### Packages
 

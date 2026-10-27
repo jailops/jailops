@@ -102,8 +102,8 @@ sysctl net.inet.ip.forwarding=1 net.inet6.ip6.forwarding=1 >/dev/null
 sysrc gateway_enable=YES ipv6_gateway_enable=YES >/dev/null
 
 step "jailops-priv init"
-check "init" /usr/local/libexec/jailops-priv init -pool "$pool" -mount "$mount"
-check "init is repeatable" /usr/local/libexec/jailops-priv init -pool "$pool" -mount "$mount"
+check "init" /usr/local/libexec/jailops-priv init -pool "$pool" -mount "$mount" -web
+check "init is repeatable" /usr/local/libexec/jailops-priv init -pool "$pool" -mount "$mount" -web
 
 step "services"
 sysrc jailops_priv_enable=YES jailopsd_enable=YES >/dev/null
@@ -116,6 +116,11 @@ until [ -S /var/run/jailops/jailops.sock ]; do
 	sleep 1
 done
 sleep 2
+# -web: the quick start's console is on the TLS port, and the API is the same port (the certificate is self-signed)
+step "web console and API on port 39110"
+n=0; until curl -ks -o /dev/null https://127.0.0.1:39110/api/v1; do n=$((n + 1)); [ $n -gt 20 ] && fail "port 39110 does not answer"; sleep 1; done
+curl -ks https://127.0.0.1:39110/ | grep -qi '<html' || fail "the web console is not served on port 39110"
+curl -ks https://127.0.0.1:39110/api/v1 | grep -q '"untrusted"' || fail "the API is not served on port 39110"
 $J doctor || true
 if $J doctor 2>&1 | grep -E ' FAIL '; then fail "doctor reports a failing check"; fi
 
