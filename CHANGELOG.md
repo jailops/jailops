@@ -3,7 +3,7 @@
 ## Unreleased
 
 - `jailops-backupd version`, its `/1.0` answer and its log now report the release version. The release stamp (`-X main.version`) never reached it, so the 0.1.0 binaries say `0.1.0-dev`. CI now checks that every command declares `var version`.
-- docs/install.md: the JailOps packages are in the repository.
+- README and docs/install.md say what is true today: the JailOps packages are in the repository, and the status block is replaced by a link to the roadmap.
 
 ## 0.1.0 - 2026-10-26
 
