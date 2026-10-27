@@ -164,3 +164,35 @@ func TestOperatorCertificateIsServedAndReloaded(t *testing.T) {
 		t.Fatalf("log:\n%s", e.Log())
 	}
 }
+
+// -web asks for the console in a browser: it opens the default TLS listener when none is configured, and leaves a
+// configured one alone. -no-web switches the console off. Neither flag changes anything.
+func TestApplyWebOverride(t *testing.T) {
+	base, err := daemon.Decode(strings.NewReader("pool: tank\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := daemon.ApplyWebOverride(base, false, false); got.UI() || got.Listen.HTTPS.Address != "" {
+		t.Errorf("no flag: %v %q", got.UI(), got.Listen.HTTPS.Address)
+	}
+	if got := daemon.ApplyWebOverride(base, true, false); !got.UI() || got.Listen.HTTPS.Address != daemon.DefaultHTTPSAddress {
+		t.Errorf("-web: %v %q", got.UI(), got.Listen.HTTPS.Address)
+	}
+	withAddr, err := daemon.Decode(strings.NewReader("pool: tank\nlisten:\n  https:\n    address: \"127.0.0.1:9443\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := daemon.ApplyWebOverride(withAddr, true, false); !got.UI() || got.Listen.HTTPS.Address != "127.0.0.1:9443" {
+		t.Errorf("-web with an address of its own: %v %q", got.UI(), got.Listen.HTTPS.Address)
+	}
+	on, err := daemon.Decode(strings.NewReader("pool: tank\nweb:\n  enabled: true\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := daemon.ApplyWebOverride(on, false, true); got.UI() {
+		t.Errorf("-no-web over web.enabled: true: %v", got.UI())
+	}
+	if got := daemon.ApplyWebOverride(on, false, false); !got.UI() || got.Listen.HTTPS.Address != "" {
+		t.Errorf("web.enabled: true in the file opens no listener: %v %q", got.UI(), got.Listen.HTTPS.Address)
+	}
+}

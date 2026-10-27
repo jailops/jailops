@@ -102,11 +102,11 @@ sysctl net.inet.ip.forwarding=1 net.inet6.ip6.forwarding=1 >/dev/null
 sysrc gateway_enable=YES ipv6_gateway_enable=YES >/dev/null
 
 step "jailops-priv init"
-check "init" /usr/local/libexec/jailops-priv init -pool "$pool" -mount "$mount" -web
-check "init is repeatable" /usr/local/libexec/jailops-priv init -pool "$pool" -mount "$mount" -web
+check "init" /usr/local/libexec/jailops-priv init -pool "$pool" -mount "$mount"
+check "init is repeatable" /usr/local/libexec/jailops-priv init -pool "$pool" -mount "$mount"
 
 step "services"
-sysrc jailops_priv_enable=YES jailopsd_enable=YES >/dev/null
+sysrc jailops_priv_enable=YES jailopsd_enable=YES jailopsd_web=YES >/dev/null
 check "jailops_priv checkconfig" service jailops_priv checkconfig
 check "jailops_priv start" service jailops_priv start
 check "jailopsd start" service jailopsd start

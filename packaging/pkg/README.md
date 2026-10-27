@@ -40,4 +40,4 @@ A host uses it with `/usr/local/etc/pkg/repos/jailops.conf`:
       enabled: yes
     }
 
-Then `pkg update && pkg install jailops`, and `jailops-priv init -pool tank -web` once (`-web` also turns the web console on, port 39110).
+Then `pkg update && pkg install jailops`, and `jailops-priv init -pool zroot` once; `sysrc jailopsd_web=YES` turns the web console on (port 39110).

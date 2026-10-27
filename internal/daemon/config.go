@@ -158,6 +158,25 @@ type Web struct {
 // UI reports whether the embedded console is served.
 func (c Config) UI() bool { return c.Web.Enabled != nil && *c.Web.Enabled }
 
+// DefaultHTTPSAddress is the port of JailOps on the network (docs/ports.md).
+const DefaultHTTPSAddress = ":39110"
+
+// ApplyWebOverride is what the -web and -no-web flags (and the rc.conf knob jailopsd_web) do to a configuration. -no-web
+// switches the console off. -web switches it on, and, when no TLS listener is configured, opens the default one
+// (DefaultHTTPSAddress): asking for the console from the command line or from rc.conf means asking to see it in a
+// browser. A console switched on only in the file (web.enabled: true) opens no listener by itself.
+func ApplyWebOverride(c Config, force, no bool) Config {
+	if !force && !no {
+		return c
+	}
+	on := force && !no
+	c.Web.Enabled = &on
+	if on && c.Listen.HTTPS.Address == "" {
+		c.Listen.HTTPS.Address = DefaultHTTPSAddress
+	}
+	return c
+}
+
 // Listen configures the listeners.
 type Listen struct {
 	Unix  UnixListen  `yaml:"unix"`

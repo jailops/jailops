@@ -147,10 +147,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 			return nil, err
 		}
 	}
-	if opts.ForceWeb || opts.NoWeb {
-		on := opts.ForceWeb && !opts.NoWeb
-		cfg.Web.Enabled = &on
-	}
+	cfg = ApplyWebOverride(cfg, opts.ForceWeb, opts.NoWeb)
 	if opts.LogOutput == nil {
 		opts.LogOutput = os.Stderr
 	}

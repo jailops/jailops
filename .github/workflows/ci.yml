@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   # The consoles are embedded in the binaries, so they are built first and handed to the Go jobs. Only the build blocks
-  # them: the type checks, the unit tests and the Playwright tests run beside the Go jobs in web-test.
+  # them: the type checks, the unit tests and the Playwright tests run beside the Go jobs in web-test and web-e2e.
   web-build:
     name: Web consoles (build)
     runs-on: ubuntu-latest
@@ -52,7 +52,29 @@ jobs:
           retention-days: 7
 
   web-test:
-    name: Web consoles (types, unit tests, end-to-end)
+    name: Web consoles (types, unit tests)
+    needs: web-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install, typecheck, unit tests
+        run: |
+          cd web
+          npm ci
+          npm run typecheck
+          npm run test:all
+
+  # The end-to-end tests of the consoles in a real Chromium, in demo mode. Playwright installs the browser with its system
+  # libraries and fonts (apt), with a quick mirror, retries and the downloaded packages kept between runs.
+  web-e2e:
+    name: Web consoles (end-to-end, Chromium)
     needs: web-build
     runs-on: ubuntu-latest
     steps:
@@ -71,18 +93,31 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: web/package-lock.json
-      - name: Install, typecheck, unit tests
+      - name: Install
+        run: cd web && npm ci
+      # The runner's apt mirror (azure.archive.ubuntu.com) is sometimes served by a node that trickles at tens of KB/s for
+      # hours (actions/runner-images#14823): apt's own timeout only covers a stalled connection, never a slow one. So the
+      # mirror is chosen by measuring: a 5 second download of the package index from each of three public mirrors, and the
+      # fastest goes first in the list apt reads, the others stay as fallbacks. A download that stalls for 10 seconds is
+      # dropped and apt moves to the next mirror; failed downloads are retried.
+      - name: Fastest apt mirror, retries
         run: |
-          cd web
-          npm ci
-          npm run typecheck
-          npm run test:all
-      # Playwright's system packages (libraries and fonts) come from an apt mirror that is sometimes slow: retry, and keep the
-      # downloaded packages between runs, so the install only has to unpack them.
-      - name: Prepare apt for Playwright
-        run: |
-          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "10";\nAcquire::https::Timeout "10";\n' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
           sudo chown -R "$USER" /var/cache/apt/archives
+          list=/etc/apt/apt-mirrors.txt
+          [ -f "$list" ] || exit 0
+          . /etc/os-release
+          mirrors="http://azure.archive.ubuntu.com/ubuntu http://archive.ubuntu.com/ubuntu https://mirrors.edge.kernel.org/ubuntu"
+          best=""; bestspeed=0
+          for m in $mirrors; do
+            speed=$(curl -s -o /dev/null -w '%{speed_download}' --max-time 5 "$m/dists/$VERSION_CODENAME/main/binary-amd64/Packages.gz" || true)
+            speed=${speed%%.*}
+            echo "mirror $m: $(( ${speed:-0} / 1024 )) KB/s"
+            if [ "${speed:-0}" -gt "$bestspeed" ]; then best=$m; bestspeed=$speed; fi
+          done
+          [ -n "$best" ] || exit 0
+          { echo "$best priority:1"; for m in $mirrors; do [ "$m" = "$best" ] || echo "$m priority:2"; done; } | sudo tee "$list" >/dev/null
+          echo "using $best"
       - name: Cache the apt packages and the Playwright browser
         uses: actions/cache@v4
         with:
