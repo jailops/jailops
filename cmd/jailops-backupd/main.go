@@ -10,6 +10,10 @@ import (
 	"jailops.net/jailops/internal/backupd"
 )
 
+// version is set with -ldflags "-X main.version=..." like in the other commands.
+var version = "dev"
+
 func main() {
+	backupd.Version = version
 	os.Exit(backupd.RunCLI(context.Background(), os.Args[1:], os.Stdin, os.Stdout, os.Stderr))
 }

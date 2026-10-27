@@ -102,6 +102,11 @@ jobs:
         run: |
           out=$(gofmt -l cmd internal sdk scripts)
           if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
+      - name: Every command takes its version from -X main.version (a command without it ships as "dev")
+        run: |
+          for d in jailops jailopsd jailops-priv jailops-sync jailops-backupd; do
+            grep -q '^var version = ' "cmd/$d/main.go" || { echo "cmd/$d/main.go has no 'var version': the release stamp would not reach it"; exit 1; }
+          done
       - run: go vet ./...
       - run: go build ./...
       - name: Wire types are current

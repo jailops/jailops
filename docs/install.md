@@ -29,8 +29,8 @@ Trust the repository first, once (the steps and the key fingerprint are in the R
 [jailops-packages](https://github.com/jailops/jailops-packages)): the public key at `https://pkg.jailops.net/jailops.pub`
 and `/usr/local/etc/pkg/repos/jailops.conf` with `url: "https://pkg.jailops.net/${ABI}/latest"` and
 `signature_type: "pubkey"`. The packages are built for the FreeBSD 15 ABI only, for amd64 and aarch64, and need FreeBSD
-15.1 or later. The JailOps packages appear in the repository after each release; until the first one is published,
-build from source (`just build-freebsd`) or take the static binaries from the GitHub release archives.
+15.1 or later. The JailOps packages (`jailops`, `jailops-client`, `jailops-backupd`) appear in the repository after each
+release; you can also build from source (`just build-freebsd`) or take the static binaries from the GitHub release archives.
 
 ## 3. The firewall: three lines in `pf.conf`
 
