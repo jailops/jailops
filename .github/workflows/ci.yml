@@ -116,7 +116,7 @@ jobs:
             if [ "${speed:-0}" -gt "$bestspeed" ]; then best=$m; bestspeed=$speed; fi
           done
           [ -n "$best" ] || exit 0
-          { echo "$best priority:1"; for m in $mirrors; do [ "$m" = "$best" ] || echo "$m priority:2"; done; } | sudo tee "$list" >/dev/null
+          { printf '%s\tpriority:1\n' "$best"; for m in $mirrors; do [ "$m" = "$best" ] || printf '%s\tpriority:2\n' "$m"; done; } | sudo tee "$list" >/dev/null
           echo "using $best"
       - name: Cache the apt packages and the Playwright browser
         uses: actions/cache@v4
