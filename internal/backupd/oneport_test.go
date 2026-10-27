@@ -293,8 +293,10 @@ func TestHostCertificateNeedsItsKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	forged := tls.Certificate{Certificate: h.Cert.Certificate, PrivateKey: other}
-	// refused in the handshake itself (the server's decrypt_error alert: the signature does not match the certificate)
-	if code, body := status(t, r.httpFor(forged), "GET", base+"/api/v1/repo", ""); code != 0 || !strings.Contains(body, "tls:") {
-		t.Fatalf("the certificate of an enrolled host with another key: %d %s", code, body)
+	// refused in the handshake itself (the server's decrypt_error alert: the signature does not match the certificate), so
+	// there is no HTTP answer at all; a client with a certificate that is not enrolled gets one (401). How the client words the
+	// connection error depends on the HTTP version it negotiated, so only the absence of an answer is asserted.
+	if code, body := status(t, r.httpFor(forged), "GET", base+"/api/v1/repo", ""); code != 0 {
+		t.Fatalf("the certificate of an enrolled host with another key got an answer: %d %s", code, body)
 	}
 }

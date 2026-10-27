@@ -183,15 +183,27 @@ udp() {
 	jx pfa a grep -q "$tok" /var/tmp/udp.log 2>/dev/null
 }
 
-# the matrix of one source against jail a, both families
+# the matrix of one source against jail a, both families. The icmp and tcp probes of the two families are independent of each
+# other, so they run at the same time and their answers are printed afterwards in the usual order. The udp probes stay one at
+# a time: the logger of a jail ("nc -u -l") talks to one sender at a time, so two probes at once would disturb each other.
 matrix() { # matrix SRC ICMP T8080 T9090 T2222 UDP5353   (each allow|deny)
 	src=$1
 	for ver in 4 6; do
 		if [ $ver = 4 ]; then t=$A4; else t=$A6; fi
-		expect "$2" "$src -> a v$ver icmp" icmp "$src" "$t"
-		expect "$3" "$src -> a v$ver tcp 8080" tcp "$src" "$t" 8080
-		expect "$4" "$src -> a v$ver tcp 9090" tcp "$src" "$t" 9090
-		expect "$5" "$src -> a v$ver tcp 2222" tcp "$src" "$t" 2222
+		expect "$2" "$src -> a v$ver icmp" icmp "$src" "$t" > "$work/pm.$ver.1" 2>&1 &
+		expect "$3" "$src -> a v$ver tcp 8080" tcp "$src" "$t" 8080 > "$work/pm.$ver.2" 2>&1 &
+		expect "$4" "$src -> a v$ver tcp 9090" tcp "$src" "$t" 9090 > "$work/pm.$ver.3" 2>&1 &
+		expect "$5" "$src -> a v$ver tcp 2222" tcp "$src" "$t" 2222 > "$work/pm.$ver.4" 2>&1 &
+	done
+	wait
+	for ver in 4 6; do
+		if [ $ver = 4 ]; then t=$A4; else t=$A6; fi
+		for i in 1 2 3 4; do # the counters of a background probe were counted in its own shell: count what it printed
+			f="$work/pm.$ver.$i"
+			cat "$f"
+			passes=$((passes + $(grep -c '^PASS' "$f" || true)))
+			fails=$((fails + $(grep -c '^FAIL' "$f" || true)))
+		done
 		expect "$6" "$src -> a v$ver udp 5353" udp "$src" "$t" 5353
 	done
 }

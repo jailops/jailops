@@ -77,6 +77,19 @@ jobs:
           npm ci
           npm run typecheck
           npm run test:all
+      # Playwright's system packages (libraries and fonts) come from an apt mirror that is sometimes slow: retry, and keep the
+      # downloaded packages between runs, so the install only has to unpack them.
+      - name: Prepare apt for Playwright
+        run: |
+          echo 'Acquire::Retries "5";' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+          sudo chown -R "$USER" /var/cache/apt/archives
+      - name: Cache the apt packages and the Playwright browser
+        uses: actions/cache@v4
+        with:
+          path: |
+            /var/cache/apt/archives
+            ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-v1-${{ hashFiles('web/package-lock.json') }}
       - name: End-to-end tests (demo mode, real Chromium)
         run: |
           cd web
@@ -96,6 +109,18 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
+      # One Go build cache per job (and shard, architecture or part): setup-go's own cache has one key for all of them, so the first
+      # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
+      - name: Go build cache of this job
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
@@ -142,6 +167,18 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
+      # One Go build cache per job (and shard, architecture or part): setup-go's own cache has one key for all of them, so the first
+      # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
+      - name: Go build cache of this job
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
@@ -187,6 +224,18 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
+      # One Go build cache per job (and shard, architecture or part): setup-go's own cache has one key for all of them, so the first
+      # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
+      - name: Go build cache of this job
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
@@ -214,6 +263,18 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+          cache: false
+      # One Go build cache per job (and shard, architecture or part): setup-go's own cache has one key for all of them, so the first
+      # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
+      - name: Go build cache of this job
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
@@ -263,6 +324,19 @@ jobs:
         if: matrix.part != 'go'
         with:
           go-version-file: go.mod
+          cache: false
+      # One Go build cache per job (and shard, architecture or part): setup-go's own cache has one key for all of them, so the first
+      # job to finish saved its flavour (race, freebsd, trimpath ...) and the others restored a cache of no use to them.
+      - name: Go build cache of this job
+        if: matrix.part != 'go'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
       - name: Build the binaries for the e2e VM
         if: matrix.part != 'go'
         env:

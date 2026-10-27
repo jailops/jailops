@@ -86,13 +86,15 @@ persistent:
 
 ## 5. Set the host up
 
-    jailops-priv init -pool tank
+    jailops-priv init -pool tank -web
 
 This is the one-time setup of what the unprivileged daemon cannot make for itself. It creates the user and group `jailops`, the storage root dataset `tank/jailops` (mounted at `/jailops`, owned by root),
 the state dataset `tank/jailops/state` (mounted at `/var/db/jailops/state`, owned by the daemon's user), the
 directories, and the two configuration files `/usr/local/etc/jailops/priv.conf` and `jailopsd.yaml`. It is idempotent
 (run it twice and nothing changes) and `-dry-run` says what it would do. Options: `-dataset`, `-mount`, `-user`, `-group`,
-`-etc`, `-data-dir`.
+`-etc`, `-data-dir`, and `-web`, which also turns the web console on: it opens the TLS listener on port 39110 (all interfaces;
+`-web-address 127.0.0.1:39110` keeps it on this host) and sets `web.enabled: true`. Leave `-web` out for a host you only reach with the CLI;
+you can turn the console on later ([exposure.md](exposure.md)).
 
 ## 6. Start the services
 
@@ -108,6 +110,9 @@ other local user is anonymous until they sign in with a JailOps identity. There 
     sudo jailops user create admin --admin --password-prompt     # a global administrator; the password is asked, never an argument
     sudo jailops user set-password admin                         # recovery: root replaces a lost password, no old one needed
     sudo jailops token create ci --permission operator --projects web --expires 720h     # a token for scripts and for one person
+
+With `-web`, open `https://HOST:39110/` and sign in as `admin` (the server certificate is self-signed; open port 39110 in your firewall
+for the machines that should reach it, see [ports.md](ports.md)).
 
 Identities (users, API tokens, client certificates) have the same roles, scopes and audit over the socket and over the network.
 A person who is not root uses a token (`JAILOPS_TOKEN`, or `jailops remote add`) or signs in to the web console. Run the commands

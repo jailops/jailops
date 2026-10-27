@@ -24,6 +24,8 @@ type initOptions struct {
 	etc                   string // /usr/local/etc/jailops
 	dbDir                 string // /var/db/jailops
 	dryRun                bool
+	web                   bool   // -web: serve the web console (and open the TLS listener it needs)
+	webAddress            string // the address of that listener
 	root                  string // prefix of every path (tests)
 	run                   func(name string, args ...string) (string, error)
 	lookupUser, lookupGrp func(string) (uid, gid int, err error)
@@ -49,6 +51,8 @@ func initMain(args []string, stdout, stderr io.Writer, euid int) int {
 	fs.StringVar(&o.group, "group", "jailops", "the group of that user, which may talk to the helper")
 	fs.StringVar(&o.etc, "etc", "/usr/local/etc/jailops", "configuration directory")
 	fs.StringVar(&o.dbDir, "data-dir", "/var/db/jailops", "the daemon's data directory")
+	fs.BoolVar(&o.web, "web", false, "also turn on the web console: opens the TLS listener (-web-address) and sets web.enabled; sign in with a JailOps user")
+	fs.StringVar(&o.webAddress, "web-address", ":39110", "the address of the TLS listener that -web opens (all interfaces by default; 127.0.0.1:39110 keeps it on this host)")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "say what would be done and do nothing")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -261,6 +265,15 @@ allow-user = %s
 }
 
 func (o *initOptions) daemonYAML() string {
+	listen, web := "", ""
+	if o.web {
+		addr := o.webAddress
+		if addr == "" {
+			addr = ":39110"
+		}
+		listen = fmt.Sprintf("  https:\n    address: %q\n", addr)
+		web = "web:\n  enabled: true\n"
+	}
 	return fmt.Sprintf(`# jailopsd.yaml, written by "jailops-priv init". See jailopsd.yaml in the packaging directory for every key.
 role: host
 pool: %s
@@ -272,7 +285,7 @@ listen:
   unix:
     path: /var/run/jailops/jailops.sock
     mode: 0666
-priv:
+%s%spriv:
   socket: /var/run/jailops/priv.sock
-`, o.pool, o.dataset, o.mount, o.dbDir, filepath.Join(o.dbDir, "state"))
+`, o.pool, o.dataset, o.mount, o.dbDir, filepath.Join(o.dbDir, "state"), listen, web)
 }

@@ -11,6 +11,7 @@
 #   JAILOPS_POOL          ZFS pool that gets the JailOps dataset (default zroot)
 #   JAILOPS_PKG_DIR       directory with the built packages (jailops-client, jailops); pkg.jailops.net is not live yet.
 #                         Without it the script runs `pkg install jailops` from whatever repository you configured.
+#   JAILOPS_WEB           yes (default): also turn the web console on (TLS, port 39110); no: leave it off
 #   JAILOPS_FLEET_REPO    git URL of the fleet repository (empty: install only, apply nothing)
 #   JAILOPS_FLEET_PATH    where the clone lives (default /var/db/jailops-fleet)
 #   JAILOPS_FLEET_BRANCH  branch to follow (default: the remote's default branch)
@@ -86,7 +87,12 @@ sysrc gateway_enable=YES ipv6_gateway_enable=YES >/dev/null
 sysctl net.inet.ip.forwarding=1 net.inet6.ip6.forwarding=1 >/dev/null
 
 step "jailops-priv init: users, groups, datasets, directories, configuration"
-/usr/local/libexec/jailops-priv init -pool "$pool"
+web=${JAILOPS_WEB:-yes}
+if [ "$web" = yes ]; then
+	/usr/local/libexec/jailops-priv init -pool "$pool" -web
+else
+	/usr/local/libexec/jailops-priv init -pool "$pool"
+fi
 
 step "priv.conf: what the host operator approves"
 add_priv() { # add_priv KEY VALUE: append "KEY = VALUE" unless that exact line exists
