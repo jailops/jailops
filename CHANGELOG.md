@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- `jailops-priv init -web` turns the web console on in one step: it opens the TLS listener (`-web-address`, default `:39110`, all interfaces) and sets `web.enabled: true` in the `jailopsd.yaml` it writes. The getting-started guides and the provisioning example use it (`JAILOPS_WEB=no` leaves it off there), so a new host has the console to look at; leave it out for a host you reach with the CLI only.
+- **Getting started turns the web console on**: `sysrc jailopsd_web=YES` (or `jailopsd -web`) now also opens the TLS listener on port 39110 when `listen.https.address` is empty, so one line puts the console in a browser; `web.enabled: true` in the file alone still opens no listener. `jailops-priv init -web` writes the same two settings into the `jailopsd.yaml` it creates. The guides use the rc.conf knob and the provisioning example turns it on (`JAILOPS_WEB=no` leaves it off); leave it out for a host you reach with the CLI only.
 
 - **The API is under `/api/v1/` on every service** (it was `/1.0/`), and the web console is on `/`: the same layout for `jailopsd`, `jailops-backupd` and `pkgops serve` (which already used `/api/v1/`). The old paths are gone, not aliased. The CLI, the SDK, `jailops-sync`, the consoles, the hub, the docs and the tests use the new paths; the version number in the answer (`api_version: "1.0"`) is unchanged. Nothing under `/api/` is ever answered with the console. The backup node's unauthenticated `GET /api/v1` no longer tells the host name, host id or software version.
 

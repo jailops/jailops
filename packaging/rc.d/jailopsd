@@ -11,9 +11,10 @@
 #
 # Add to /etc/rc.conf:
 #   jailopsd_enable="YES"
-#   jailopsd_web="YES"       (optional) serve the web console on this host. It is in the binary and off by default;
-#                            the API is the same either way. "NO" forces it off over the configuration. Unset: the
-#                            configuration decides (web.enabled, default false).
+#   jailopsd_web="YES"       (optional) serve the web console on this host, in a browser: it opens the TLS listener on port
+#                            39110 unless listen.https.address is set. The console is in the binary and off by default; the
+#                            API is the same either way. "NO" forces it off over the configuration. Unset: the configuration
+#                            decides (web.enabled, default false).
 # jailopsd runs as the unprivileged user jailops; everything that needs root is done by jailops_priv.
 # Configuration: /usr/local/etc/jailops/jailopsd.yaml
 #   service jailopsd checkconfig   validate the configuration

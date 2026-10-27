@@ -30,8 +30,9 @@ package, and it is **off by default**: the daemon and `jailops-sync` do not use 
 
   Without it (the default, or `enabled: false`) every path outside `/api/v1` and `/healthz` answers 404 and the API is unchanged.
 - **From rc.conf**: `sysrc jailopsd_web="YES"` (then `service jailopsd restart`) starts the daemon with `-web`, whatever
-  `web.enabled` says. `jailopsd_web="NO"` forces it off over the configuration. Unset, the configuration decides.
-- **With a flag**: `jailopsd -web` and `jailopsd -no-web`.
+  `web.enabled` says, and opens the TLS listener on port 39110 when `listen.https.address` is empty, because asking for the
+  console is asking to see it in a browser. `jailopsd_web="NO"` forces it off over the configuration. Unset, the configuration decides.
+- **With a flag**: `jailopsd -web` (the same) and `jailopsd -no-web`.
 
 For a daemon that has no console at all, `go build -tags noweb ./cmd/jailopsd` (`just build-noweb`) leaves the embedded application
 out of the binary; `/` then answers 404 "this build has no web console". `just build` never does: it always builds everything in.

@@ -6,7 +6,7 @@ script is right.
 
 ## 1. What the host needs
 
-- A ZFS pool you are willing to give a dataset to (below: `tank`). JailOps never runs `zpool upgrade`.
+- A ZFS pool you are willing to give a dataset to (below: `zroot`, the default pool of the FreeBSD installer). JailOps never runs `zpool upgrade`.
 - Kernel modules `if_bridge`, `if_epair`, `nullfs` and `pf`. Load them now and at boot:
 
       kldload -n if_bridge if_epair nullfs pf
@@ -86,19 +86,18 @@ persistent:
 
 ## 5. Set the host up
 
-    jailops-priv init -pool tank -web
+    jailops-priv init -pool zroot
 
-This is the one-time setup of what the unprivileged daemon cannot make for itself. It creates the user and group `jailops`, the storage root dataset `tank/jailops` (mounted at `/jailops`, owned by root),
-the state dataset `tank/jailops/state` (mounted at `/var/db/jailops/state`, owned by the daemon's user), the
+This is the one-time setup of what the unprivileged daemon cannot make for itself. It creates the user and group `jailops`, the storage root dataset `zroot/jailops` (mounted at `/jailops`, owned by root),
+the state dataset `zroot/jailops/state` (mounted at `/var/db/jailops/state`, owned by the daemon's user), the
 directories, and the two configuration files `/usr/local/etc/jailops/priv.conf` and `jailopsd.yaml`. It is idempotent
 (run it twice and nothing changes) and `-dry-run` says what it would do. Options: `-dataset`, `-mount`, `-user`, `-group`,
-`-etc`, `-data-dir`, and `-web`, which also turns the web console on: it opens the TLS listener on port 39110 (all interfaces;
-`-web-address 127.0.0.1:39110` keeps it on this host) and sets `web.enabled: true`. Leave `-web` out for a host you only reach with the CLI;
-you can turn the console on later ([exposure.md](exposure.md)).
+`-etc`, `-data-dir`, and `-web`, which writes the web console's two settings (the TLS listener on port 39110 and
+`web.enabled: true`) into the configuration; the next section turns it on with one rc.conf line instead.
 
 ## 6. Start the services
 
-    sysrc jailops_priv_enable=YES jailopsd_enable=YES
+    sysrc jailops_priv_enable=YES jailopsd_enable=YES jailopsd_web=YES
     service jailops_priv checkconfig
     service jailops_priv start
     service jailopsd start
@@ -111,8 +110,9 @@ other local user is anonymous until they sign in with a JailOps identity. There 
     sudo jailops user set-password admin                         # recovery: root replaces a lost password, no old one needed
     sudo jailops token create ci --permission operator --projects web --expires 720h     # a token for scripts and for one person
 
-With `-web`, open `https://HOST:39110/` and sign in as `admin` (the server certificate is self-signed; open port 39110 in your firewall
-for the machines that should reach it, see [ports.md](ports.md)).
+`jailopsd_web=YES` turns the web console on and opens the TLS listener on port 39110: open `https://HOST:39110/` and sign in as `admin` (the
+server certificate is self-signed; open the port in your firewall for the machines that should reach it, see [ports.md](ports.md)). Leave
+the line out for a host you only reach with the CLI.
 
 Identities (users, API tokens, client certificates) have the same roles, scopes and audit over the socket and over the network.
 A person who is not root uses a token (`JAILOPS_TOKEN`, or `jailops remote add`) or signs in to the web console. Run the commands
