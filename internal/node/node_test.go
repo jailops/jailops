@@ -210,7 +210,9 @@ func TestHostileHost(t *testing.T) {
 }
 
 func TestLeaseExpiry(t *testing.T) {
-	var lease = 150 * time.Millisecond
+	// The lease runs on the wall clock: it has to leave room for a slow, loaded CI machine to stall between two
+	// heartbeats (150ms did not: a heartbeat came back lease_expired on a FreeBSD VM).
+	var lease = 600 * time.Millisecond
 	e := nodetest.NewEnv(t, nodetest.Options{Configure: func(c *node.Config) { c.Lease = lease }})
 	h := e.Host(t, "h")
 	f := nodetest.NewFixture(t, 3)
@@ -220,8 +222,8 @@ func TestLeaseExpiry(t *testing.T) {
 		t.Fatal(err)
 	}
 	// activity renews
-	for range 4 {
-		time.Sleep(lease / 2)
+	for range 4 { // 800ms in all: longer than one lease, so only the renewals keep the session alive
+		time.Sleep(lease / 3)
 		if _, err := e.Node.Heartbeat(ctx, h, si.ID); err != nil {
 			t.Fatalf("heartbeat: %v", err)
 		}

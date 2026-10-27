@@ -98,6 +98,8 @@ jobs:
           path: ${{ runner.temp }}/console
       - name: Unpack the built consoles
         run: tar -xf "$RUNNER_TEMP/console/console-dist.tar"
+      - name: No binaries in git
+        run: sh scripts/no-binaries.sh
       - name: gofmt
         run: |
           out=$(gofmt -l cmd internal sdk scripts)
