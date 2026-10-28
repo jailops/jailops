@@ -19,16 +19,7 @@ func TestEventsStreamAndFilter(t *testing.T) {
 	e := seeded(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	got := make(chan api.Event, 64)
-	go func() {
-		for ev, err := range e.Admin.Events(ctx, sdk.Types(api.EventLifecycle)) {
-			if err != nil {
-				return
-			}
-			got <- ev
-		}
-	}()
-	time.Sleep(200 * time.Millisecond) // subscribed
+	got := e.Events(ctx, e.Admin, sdk.Types(api.EventLifecycle))
 	mustJail(t, e, "web")
 	want := map[string]bool{"jail-created": false}
 	deadline := time.After(10 * time.Second)
@@ -57,17 +48,30 @@ func TestEventsStreamAndFilter(t *testing.T) {
 func TestEventsReplayFromLastEventID(t *testing.T) {
 	e := seeded(t)
 	tok := e.Token(api.PermAdmin)
-	read := func(last string, n int) ([]int64, []string) {
-		timeout := 10 * time.Second
-		if n >= 100 {
-			timeout = 1500 * time.Millisecond // drain what is retained, then stop
+	// newest is the id of the newest lifecycle event: a replay has brought everything retained once it arrives.
+	newest := func() int64 {
+		var last int64
+		for after := int64(0); ; {
+			evs, err := e.D.Service().DB().Events.Since(context.Background(), after, 1000)
+			if err != nil || len(evs) == 0 {
+				return last
+			}
+			for _, se := range evs {
+				if se.Event.Type == api.EventLifecycle {
+					last = se.ID
+				}
+			}
+			after = evs[len(evs)-1].ID
 		}
+	}
+	// read streams lifecycle events after last until n of them arrived or the one with id until did.
+	read := func(last string, n int, until int64) ([]int64, []string) {
 		req, _ := http.NewRequest("GET", e.HTTP.URL+"/api/v1/events?type=lifecycle", nil)
 		req.Header.Set("Authorization", "Bearer "+tok)
 		if last != "" {
 			req.Header.Set("Last-Event-ID", last)
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		resp, err := http.DefaultClient.Do(req.WithContext(ctx))
 		if err != nil {
@@ -81,7 +85,7 @@ func TestEventsReplayFromLastEventID(t *testing.T) {
 		var actions []string
 		sc := bufio.NewScanner(resp.Body)
 		sawRetry := false
-		for sc.Scan() && len(ids) < n {
+		for sc.Scan() && len(ids) < n && (until == 0 || len(ids) == 0 || ids[len(ids)-1] < until) {
 			l := sc.Text()
 			switch {
 			case strings.HasPrefix(l, "retry:"):
@@ -103,12 +107,12 @@ func TestEventsReplayFromLastEventID(t *testing.T) {
 		return ids, actions
 	}
 	mustJail(t, e, "a")
-	first, _ := read("0", 3) // everything retained: image and network and jail events
+	first, _ := read("0", 3, 0) // everything retained: image and network and jail events
 	if len(first) < 3 {
 		t.Fatalf("%v", first)
 	}
 	mustJail(t, e, "b")
-	ids, actions := read(strconv.FormatInt(first[0], 10), 100)
+	ids, actions := read(strconv.FormatInt(first[0], 10), 1000, newest())
 	_ = actions
 	if len(ids) == 0 {
 		t.Fatal("nothing replayed")
@@ -127,10 +131,10 @@ func TestEventsReplayFromLastEventID(t *testing.T) {
 	if !contains(actions, "jail-created") {
 		t.Fatalf("%v", actions)
 	}
-	// Starting "now" shows nothing old.
+	// Starting at the newest event shows nothing old.
 	done := make(chan []int64, 1)
-	go func() { i, _ := read("", 1); done <- i }()
-	time.Sleep(300 * time.Millisecond)
+	now := strconv.FormatInt(e.D.Service().Events().Last(), 10)
+	go func() { i, _ := read(now, 1, 0); done <- i }()
 	mustJail(t, e, "c")
 	select {
 	case i := <-done:

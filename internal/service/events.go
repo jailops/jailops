@@ -84,6 +84,13 @@ func (b *eventBus) close() {
 // EventBus is the server's view of the event bus.
 type EventBus struct{ b *eventBus }
 
+// Last is the id of the newest event (0 before the first one).
+func (e *EventBus) Last() int64 {
+	e.b.mu.Lock()
+	defer e.b.mu.Unlock()
+	return e.b.last
+}
+
 // Subscribe returns a channel of events with id greater than after (a negative
 // value means "from now"): first the retained ones, then live ones, without
 // gaps or duplicates. The channel is

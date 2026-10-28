@@ -6,7 +6,6 @@ import (
 	"errors"
 	"strings"
 	"testing"
-	"time"
 
 	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/daemon/dtest"
@@ -331,16 +330,7 @@ func TestListsEventsAndOperationsAreFiltered(t *testing.T) {
 	// Subscribe before anything happens.
 	ectx, stop := context.WithCancel(c)
 	defer stop()
-	evs := make(chan api.Event, 256)
-	go func() {
-		for ev, err := range beta.Events(ectx) {
-			if err != nil {
-				return
-			}
-			evs <- ev
-		}
-	}()
-	time.Sleep(200 * time.Millisecond)
+	evs := e.Events(ectx, beta)
 	op, err := alpha.Jails().Create(c, sdk.NewJail("web", webSpec()))
 	if err != nil {
 		t.Fatal(err)
@@ -373,24 +363,26 @@ func TestListsEventsAndOperationsAreFiltered(t *testing.T) {
 	if !seen["alpha"] || !seen["beta"] {
 		t.Fatalf("%v", seen)
 	}
-	// Events: beta's stream carries beta's events and nothing of alpha or the host.
-	time.Sleep(300 * time.Millisecond)
-	stop()
-	n := 0
-	for len(evs) > 0 {
-		ev := <-evs
+	// Events: beta's stream carries beta's events and nothing of alpha or the host. Events arrive in order, so
+	// everything up to the creation of beta's jail (alpha's and the host's events included) has been seen by then.
+	for created := false; !created; {
+		var ev api.Event
+		select {
+		case ev = <-evs:
+		case <-c.Done():
+			t.Fatal("beta's jail-created event never arrived")
+		}
 		var m struct {
 			Project string `json:"project"`
+			Action  string `json:"action"`
 		}
 		_ = json.Unmarshal(ev.Metadata, &m)
 		if ev.Type == api.EventLogging || m.Project != "beta" {
 			t.Fatalf("beta received %s %s", ev.Type, ev.Metadata)
 		}
-		n++
+		created = m.Action == "jail-created"
 	}
-	if n == 0 {
-		t.Fatal("beta received no event of its own")
-	}
+	stop()
 	// Audit: a restricted admin reads its own entries only.
 	entries, err := beta.Audit(c, 200)
 	if err != nil || len(entries) == 0 {
@@ -463,7 +455,7 @@ func TestMandatoryFirewallPolicyComesFirst(t *testing.T) {
 			t.Fatalf("%v\n%s", err, e.Log())
 		}
 	}
-	rs := string(e.Files.Data[e.Cfg.StateDir+"/rendered/pf/alpha_web.conf"])
+	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_web.conf")
 	iCorp, iOwn := strings.Index(rs, "corp-deny-telnet"), strings.Index(rs, "own-allow-web")
 	if iCorp < 0 || iOwn < 0 || iCorp > iOwn {
 		t.Fatalf("the mandatory rule must come before the jail's own:\n%s", rs)
@@ -471,7 +463,7 @@ func TestMandatoryFirewallPolicyComesFirst(t *testing.T) {
 	if !strings.Contains(rs, "# anchor jailops/alpha/web") {
 		t.Fatalf("anchor name:\n%s", rs)
 	}
-	bare := string(e.Files.Data[e.Cfg.StateDir+"/rendered/pf/alpha_bare.conf"])
+	bare := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_bare.conf")
 	if !strings.Contains(bare, "corp-deny-telnet") {
 		t.Fatalf("a jail without a policy escapes the project's:\n%s", bare)
 	}
@@ -577,7 +569,7 @@ func TestGrantRemovalAndDelegation(t *testing.T) {
 	if _, err := so.Wait(c); err != nil {
 		t.Fatal(err)
 	}
-	conf := string(e.Files.Data["/etc/jailops/jails/alpha_deleg/jail.conf"])
+	conf := e.File("/etc/jailops/jails/alpha_deleg/jail.conf")
 	if !strings.Contains(conf, "allow.mount.zfs") {
 		t.Fatalf("delegation is not rendered:\n%s", conf)
 	}
@@ -668,7 +660,7 @@ func TestTagsDoNotCrossProjects(t *testing.T) {
 	if _, err := so.Wait(c); err != nil {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
-	rs := string(e.Files.Data[e.Cfg.StateDir+"/rendered/pf/alpha_app.conf"])
+	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_app.conf")
 	if !strings.Contains(rs, adb.Spec.Network[0].IPv4) {
 		t.Fatalf("alpha's db (%s) is not in the table:\n%s", adb.Spec.Network[0].IPv4, rs)
 	}
@@ -712,9 +704,9 @@ func TestHostMountsAreAGlobalAdminsDecision(t *testing.T) {
 		t.Fatal(err)
 	}
 	var fstab string
-	for k, v := range e.Files.Data {
+	for _, k := range e.Files.Paths() {
 		if strings.Contains(k, "alpha_media") && strings.HasSuffix(k, "fstab") {
-			fstab = string(v)
+			fstab = e.File(k)
 		}
 	}
 	for _, want := range []string{"/tank/media ", "/mnt/media nullfs ro 0 0", "/tank/archive ", "/mnt/archive nullfs rw 0 0"} {

@@ -40,8 +40,8 @@ func TestProjectsAreIsolatedWithoutAnyPolicy(t *testing.T) {
 	startJailIn(t, e.Admin, dtest.WebJailOn("a1", "lan"))
 	startJailIn(t, beta, dtest.WebJailOn("b1", net))
 
-	ra := string(e.Files.Data[e.Cfg.StateDir+"/rendered/pf/alpha_a1.conf"])
-	rb := string(e.Files.Data[e.Cfg.StateDir+"/rendered/pf/beta_b1.conf"])
+	ra := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_a1.conf")
+	rb := e.File(e.Cfg.StateDir + "/rendered/pf/beta_b1.conf")
 	if ra == "" || rb == "" {
 		t.Fatalf("a jail without a policy has no anchor:\nalpha=%q\nbeta=%q", ra, rb)
 	}
@@ -81,7 +81,7 @@ func TestAProjectsDefaultDenyIsAFloor(t *testing.T) {
 	j := dtest.WebJailOn("w1", "lan")
 	j.Spec.Firewall.Policy = "open"
 	startJailIn(t, e.Admin, j)
-	rs := string(e.Files.Data[e.Cfg.StateDir+"/rendered/pf/alpha_w1.conf"])
+	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_w1.conf")
 	i := strings.Index(rs, "# defaults")
 	if i < 0 || !strings.Contains(rs[i:], "block drop out quick on") || strings.Contains(rs[i:], "pass out quick on") && strings.Index(rs[i:], "pass out quick on") < strings.Index(rs[i:], "block drop out quick on") {
 		t.Fatalf("the jail's own default allow overrode the project's default deny:\n%s", rs)

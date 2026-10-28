@@ -136,16 +136,7 @@ func TestHubForwarding(t *testing.T) {
 	// Events are forwarded too.
 	ectx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	got := make(chan api.Event, 16)
-	go func() {
-		for ev, err := range hc.Events(ectx, sdk.Types(api.EventLifecycle)) {
-			if err != nil {
-				return
-			}
-			got <- ev
-		}
-	}()
-	time.Sleep(500 * time.Millisecond)
+	got := remote.Events(ectx, hc, sdk.Types(api.EventLifecycle))
 	so, _ := hc.Jails().Start(ctx, "web")
 	if _, err := so.Wait(ctx); err != nil {
 		t.Fatal(err)

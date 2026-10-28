@@ -28,6 +28,7 @@ func TestABusyUnmountIsTriedAgain(t *testing.T) {
 		t.Fatalf("calls=%d err=%v", calls, err)
 	}
 	// busy for good: the error comes back after the tries
+	defer func(n int) { unmountTries = n }(unmountTries)
 	unmountTries, calls = 3, 0
 	a.UnmountFn = func(context.Context, string) error { calls++; return api.Errorf(api.CodeBusy, "busy") }
 	if err := a.Unmount(context.Background(), "tank/x"); !api.IsCode(err, api.CodeBusy) || calls != 3 {

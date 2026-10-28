@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -134,6 +135,34 @@ func (s *syncBuf) String() string              { s.mu.Lock(); defer s.mu.Unlock(
 
 // Log returns everything the daemon logged.
 func (e *Env) Log() string { return e.logbuf.String() }
+
+// File returns a file of the fake host ("" when there is none).
+func (e *Env) File(p string) string { b, _ := e.Files.Get(p); return string(b) }
+
+// HasFile reports whether the fake host has the file.
+func (e *Env) HasFile(p string) bool { _, ok := e.Files.Get(p); return ok }
+
+// Events streams this daemon's events through c, from the newest event at the time of the call on: what the test does
+// next is seen even when the stream connects later, so no sleep is needed. The channel closes when ctx ends.
+func (e *Env) Events(ctx context.Context, c *sdk.Client, opts ...sdk.EventOption) <-chan api.Event {
+	last := e.D.Service().Events().Last()
+	opts = append(append([]sdk.EventOption(nil), opts...), sdk.FromID(strconv.FormatInt(last, 10)))
+	ch := make(chan api.Event, 256)
+	go func() {
+		defer close(ch)
+		for ev, err := range c.Events(ctx, opts...) {
+			if err != nil {
+				return
+			}
+			select {
+			case ch <- ev:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch
+}
 
 // New builds and starts an Env. The daemon is stopped when the test ends.
 func New(t testing.TB, o Options) *Env {
@@ -266,9 +295,9 @@ func (e *Env) script() {
 		root := argv[2]
 		switch argv[9] {
 		case "install", "upgrade":
-			e.Files.Data[root+"/bin/sh"] = []byte("x")
-			e.Files.Data[root+"/libexec/ld-elf.so.1"] = []byte("x")
-			e.Files.Data[root+"/.pkgs"] = []byte("FreeBSD-runtime 15.0p1\nFreeBSD-utilities 15.0p1\n")
+			e.Files.Put(root+"/bin/sh", []byte("x"))
+			e.Files.Put(root+"/libexec/ld-elf.so.1", []byte("x"))
+			e.Files.Put(root+"/.pkgs", []byte("FreeBSD-runtime 15.0p1\nFreeBSD-utilities 15.0p1\n"))
 		case "query":
 			b, _ := e.Files.ReadFile(context.Background(), root+"/.pkgs")
 			var sb strings.Builder
@@ -296,9 +325,9 @@ func (e *Env) script() {
 		dst, url := c.Args[1], c.Args[2]
 		switch {
 		case strings.HasSuffix(url, ".sha256"):
-			e.Files.Data[dst] = []byte(AlpineTarballDigest + "  alpine.tar.gz\n")
+			e.Files.Put(dst, []byte(AlpineTarballDigest+"  alpine.tar.gz\n"))
 		default:
-			e.Files.Data[dst] = []byte(AlpineTarball)
+			e.Files.Put(dst, []byte(AlpineTarball))
 		}
 		return run.Result{}, nil
 	}})
@@ -307,11 +336,11 @@ func (e *Env) script() {
 			return run.Result{}, nil
 		}
 		root := c.Args[1]
-		e.Files.Data[root+"/bin/busybox"] = []byte("x")
-		e.Files.Data[root+"/lib/apk/db/installed"] = []byte("P:busybox\nV:1.37\n\nP:musl\nV:1.2\n\n")
+		e.Files.Put(root+"/bin/busybox", []byte("x"))
+		e.Files.Put(root+"/lib/apk/db/installed", []byte("P:busybox\nV:1.37\n\nP:musl\nV:1.2\n\n"))
 		return run.Result{}, nil
 	}})
-	e.Files.Data["/etc/resolv.conf"] = []byte("nameserver 192.0.2.53\n")
+	e.Files.Put("/etc/resolv.conf", []byte("nameserver 192.0.2.53\n"))
 	for _, n := range []string{"etcupdate", "uname", "pfctl", "ifconfig", "kldstat", "cp", "jexec", "mount", "umount", "jail", "devfs", "pwd_mkdb", "chmod"} {
 		e.Run.Add(run.Rule{Name: n, Args: []string{run.RestArgs}})
 	}

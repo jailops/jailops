@@ -107,14 +107,14 @@ func TestProfilesDevicesAndRendering(t *testing.T) {
 	if _, err := so.Wait(c); err != nil {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
-	conf := string(e.Files.Data["/etc/jailops/jails/alpha_web/jail.conf"])
+	conf := e.File("/etc/jailops/jails/alpha_web/jail.conf")
 	if !strings.Contains(conf, "devfs_ruleset") || strings.Contains(conf, "devfs_ruleset = 4;") {
 		t.Fatalf("jail.conf:\n%s", conf)
 	}
-	if rules := string(e.Files.Data["/etc/jailops/jails/alpha_web/devfs.rules"]); !strings.Contains(rules, "add path 'tun*' unhide") {
+	if rules := e.File("/etc/jailops/jails/alpha_web/devfs.rules"); !strings.Contains(rules, "add path 'tun*' unhide") {
 		t.Fatalf("devfs.rules: %q", rules)
 	}
-	rs := string(e.Files.Data[e.Cfg.StateDir+"/rendered/pf/alpha_web.conf"])
+	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_web.conf")
 	if !strings.Contains(rs, "port 8080 -> "+j.Spec.Network[0].IPv4+" port 80") {
 		t.Fatalf("the proxy device is not an rdr rule:\n%s", rs)
 	}
