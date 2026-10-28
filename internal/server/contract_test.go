@@ -116,10 +116,10 @@ func TestJailLifecycle(t *testing.T) {
 	if _, ok, _ := e.Jails.Get(c, "alpha_web"); !ok {
 		t.Fatal("jail is not running in the runtime")
 	}
-	if _, ok := e.Files.Data["/etc/jailops/jails/alpha_web/jail.conf"]; !ok {
+	if !e.HasFile("/etc/jailops/jails/alpha_web/jail.conf") {
 		t.Fatalf("jail.conf was not rendered: %v", e.Files.Paths())
 	}
-	if rc := string(e.Files.Data["/jailops/projects/alpha/jails/web/root/etc/rc.conf.local"]); !strings.Contains(rc, "10.20.0.10") {
+	if rc := e.File("/jailops/projects/alpha/jails/web/root/etc/rc.conf.local"); !strings.Contains(rc, "10.20.0.10") {
 		t.Fatalf("rc.conf.local: %q", rc)
 	}
 	st, err := e.Admin.Jails().State(c, "web")
@@ -463,7 +463,7 @@ func TestFirewall(t *testing.T) {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
 	// The anchor is rendered for the start hook and loaded by the reconciler.
-	rs := string(e.Files.Data[e.Cfg.StateDir+"/rendered/pf/alpha_web.conf"])
+	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_web.conf")
 	if !strings.Contains(rs, "203.0.113.0/24") || !strings.Contains(rs, "10.20.0.10") {
 		t.Fatalf("anchor file: %q", rs)
 	}
@@ -790,10 +790,19 @@ func TestWebUIIsServedOutsideTheAPI(t *testing.T) {
 	// The snapshot shape the UI sends is accepted.
 	e.Seed()
 	mustJail(t, e, "web")
-	if code, body := e.Raw("POST", "/api/v1/jails/web/snapshots?project=alpha", e.Token(api.PermAdmin), `{"comment":"from the ui"}`); code != 202 {
+	code, body = e.Raw("POST", "/api/v1/jails/web/snapshots?project=alpha", e.Token(api.PermAdmin), `{"comment":"from the ui"}`)
+	if code != 202 {
 		t.Fatalf("%d %s", code, body)
 	}
-	time.Sleep(100 * time.Millisecond)
+	var accepted struct {
+		Metadata api.Operation `json:"metadata"`
+	}
+	if err := json.Unmarshal([]byte(body), &accepted); err != nil || accepted.Metadata.ID == "" {
+		t.Fatalf("%v %s", err, body)
+	}
+	if _, err := e.Admin.Operations().Wait(ctxT(t), accepted.Metadata.ID); err != nil {
+		t.Fatal(err)
+	}
 	for s, err := range e.Admin.Jails().Snapshots("web").List(ctxT(t)) {
 		if err != nil || s.Spec.Comment != "from the ui" {
 			t.Fatalf("%v %+v", err, s)

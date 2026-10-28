@@ -198,7 +198,7 @@ func TestOverlappingNetworkIsRefused(t *testing.T) {
 func TestJailAnchorHoldsTheJailsOwnLinkLocalAddress(t *testing.T) {
 	e := seeded(t)
 	startJailIn(t, e.Admin, dtest.WebJailOn("ll1", "lan"))
-	rs := string(e.Files.Data[e.Cfg.StateDir+"/rendered/pf/alpha_ll1.conf"])
+	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_ll1.conf")
 	m := regexp.MustCompile(`table <jail_addrs> persist \{ ([^}]*) \}`).FindStringSubmatch(rs)
 	if m == nil {
 		t.Fatalf("no table:\n%s", rs)

@@ -95,7 +95,7 @@ func TestPackageUpdatePipeline(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	e.Seed()
 	sj := &scriptedJails{pkgs: pkgDryRun}
-	e.Jails.ExecFn = sj.fn
+	e.Jails.SetExecFn(sj.fn)
 	runningWeb(t, e)
 	ctx := context.Background()
 
@@ -157,16 +157,7 @@ func TestPackageUpdatePipeline(t *testing.T) {
 	var events []string
 	evctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	ch := make(chan api.Event, 64)
-	go func() {
-		for ev, err := range e.Admin.Events(evctx) {
-			if err != nil {
-				return
-			}
-			ch <- ev
-		}
-	}()
-	time.Sleep(50 * time.Millisecond)
+	ch := e.Events(evctx, e.Admin)
 	aop, _ = e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, Packages: true})
 	recs, err = aop.Wait(ctx)
 	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateFailed || !strings.Contains(recs[0].Error, "health check") || !strings.Contains(recs[0].Note, "--scope all") {
@@ -209,7 +200,7 @@ loop:
 func TestOSUpdateRootSwapAndAutomaticRollback(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	e.Seed()
-	e.Jails.ExecFn = (&scriptedJails{}).fn
+	e.Jails.SetExecFn((&scriptedJails{}).fn)
 	runningWeb(t, e)
 	ctx := context.Background()
 	// Build a newer generation of the image.
@@ -237,7 +228,7 @@ func TestOSUpdateRootSwapAndAutomaticRollback(t *testing.T) {
 	// A third generation whose health check fails: the root is swapped back by the plan.
 	bop, _ = e.Admin.Images().Build(ctx, "fb", api.ImageBuild{})
 	_, _ = bop.Wait(ctx)
-	e.Jails.ExecFn = (&scriptedJails{failHC: true}).fn
+	e.Jails.SetExecFn((&scriptedJails{failHC: true}).fn)
 	aop, _ = e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, OS: true})
 	recs, err = aop.Wait(ctx)
 	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateRolledBack || !recs[0].RootRolledBack || !strings.Contains(recs[0].Note, "application data was not touched") {
@@ -258,7 +249,7 @@ func TestScheduledUpdatesAreOffByDefaultAndFollowTheMode(t *testing.T) {
 	e := dtest.New(t, dtest.Options{Now: clock, Mutate: func(c *daemon.Config) { c.Updates.Tick = daemon.Duration(20 * time.Millisecond) }})
 	e.Seed()
 	sj := &scriptedJails{pkgs: pkgDryRun}
-	e.Jails.ExecFn = sj.fn
+	e.Jails.SetExecFn(sj.fn)
 	runningWeb(t, e)
 	ctx := context.Background()
 	advance := func(d time.Duration) { now.Lock(); now.t = now.t.Add(d); now.Unlock() }
@@ -320,7 +311,7 @@ func TestProvisioningRunsOnceAndAgainOnRequest(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
 	e.Seed()
 	sj := &scriptedJails{}
-	e.Jails.ExecFn = sj.fn
+	e.Jails.SetExecFn(sj.fn)
 	ctx := context.Background()
 	// The project's files directory holds the template.
 	dir := filepath.Join(e.Cfg.StateDir, "project-files", "alpha", "templates")

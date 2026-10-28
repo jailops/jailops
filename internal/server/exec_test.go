@@ -112,7 +112,8 @@ func TestExecStreamsAuditsAndRespectsProjects(t *testing.T) {
 func TestExecLimits(t *testing.T) {
 	e := dtest.New(t, dtest.Options{Mutate: func(c *daemon.Config) {
 		c.Limits.ExecSessionsPerJail = 1
-		c.Limits.ExecIdle = daemon.Duration(300 * time.Millisecond)
+		// The idle clock starts when the session opens: it must outlast the second Exec below on a loaded machine.
+		c.Limits.ExecIdle = daemon.Duration(2 * time.Second)
 	}})
 	e.Seed()
 	c := ctxT(t)
@@ -132,16 +133,16 @@ func TestExecLimits(t *testing.T) {
 		if code == 0 {
 			t.Fatal("idle session ended cleanly")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(15 * time.Second):
 		t.Fatal("the idle timeout did not end the session")
 	}
 	// The slot is free again (the server releases it a moment after the client saw the end).
-	for i := 0; ; i++ {
+	for deadline := time.Now().Add(10 * time.Second); ; {
 		s, err = e.Admin.Jails().Exec(c, "web", []string{"echo", "x"}, sdk.ExecOptions{})
 		if err == nil {
 			break
 		}
-		if i > 50 || !api.IsCode(err, api.CodeBusy) {
+		if time.Now().After(deadline) || !api.IsCode(err, api.CodeBusy) {
 			t.Fatal(err)
 		}
 		time.Sleep(20 * time.Millisecond)

@@ -33,6 +33,13 @@ var _ Jails = (*Fake)(nil)
 // NewFake returns an empty Fake.
 func NewFake() *Fake { return &Fake{jails: map[string]Jail{}, next: 1} }
 
+// SetExecFn replaces ExecFn while the runtime may be in use.
+func (f *Fake) SetExecFn(fn func(name string, o ExecOpts) (run.Result, error)) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ExecFn = fn
+}
+
 // Calls returns the recorded calls.
 func (f *Fake) Calls() []FakeCall {
 	f.mu.Lock()

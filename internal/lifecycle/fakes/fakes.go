@@ -145,6 +145,22 @@ func (f *Files) SHA256(_ context.Context, p string) (string, error) {
 	return hex.EncodeToString(h[:]), nil
 }
 
+// Put stores a file the way a scripted tool does, under the lock the daemon's
+// goroutines take.
+func (f *Files) Put(p string, data []byte) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Data[p] = append([]byte(nil), data...)
+}
+
+// Get reads a stored file.
+func (f *Files) Get(p string) ([]byte, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	d, ok := f.Data[p]
+	return append([]byte(nil), d...), ok
+}
+
 // Paths lists stored file paths, sorted.
 func (f *Files) Paths() []string {
 	f.mu.Lock()

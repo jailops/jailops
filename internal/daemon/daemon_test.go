@@ -102,6 +102,7 @@ func TestLayoutIsCreatedOnce(t *testing.T) {
 func TestStartFailsOnUnreachablePriv(t *testing.T) {
 	cfg := daemon.Defaults()
 	cfg.Pool = "tank"
+	defer func(d time.Duration) { daemon.PrivConnectWait = d }(daemon.PrivConnectWait)
 	daemon.PrivConnectWait = 200 * time.Millisecond
 	cfg.Priv.Socket = filepath.Join(t.TempDir(), "none.sock")
 	cfg.StateDir = t.TempDir()
@@ -178,8 +179,7 @@ func TestDoctor(t *testing.T) {
 		t.Errorf("%+v", c)
 	}
 	// A sysctl the networks need but the host lacks fails with a hint.
-	dtest.Sysctls["net.inet.ip.forwarding"] = "0"
-	defer func() { dtest.Sysctls["net.inet.ip.forwarding"] = "1" }()
+	e.SetSysctl("net.inet.ip.forwarding", "0")
 	rep, _ = e.Admin.Doctor(context.Background())
 	for _, c := range rep.Checks {
 		if c.Name == "sysctl.net.inet.ip.forwarding" && (c.Status != api.DoctorFail || !strings.Contains(c.Hint, "sysctl.conf")) {

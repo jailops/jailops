@@ -96,28 +96,27 @@ jobs:
       - name: Install
         run: cd web && npm ci
       # The runner's apt mirror (azure.archive.ubuntu.com) is sometimes served by a node that trickles at tens of KB/s for
-      # hours (actions/runner-images#14823): apt's own timeout only covers a stalled connection, never a slow one. So the
-      # mirror is chosen by measuring: a 5 second download of the package index from each of three public mirrors, and the
-      # fastest goes first in the list apt reads, the others stay as fallbacks. A download that stalls for 10 seconds is
-      # dropped and apt moves to the next mirror; failed downloads are retried.
+      # hours (actions/runner-images#14823): apt's own timeout only covers a stalled connection, never a slow one. So four
+      # trustworthy mirrors (Canonical's three and kernel.org's edge mirror, all serving Ubuntu-signed indexes) download the
+      # package index for 5 seconds at once, and the list apt reads is rewritten in speed order with every mirror kept as a
+      # fallback: a download that stalls for 10 seconds is dropped and apt moves to the next mirror; failed downloads are
+      # retried. The retry file keeps the image's own name, as apt.conf.d files sort and the later one wins.
       - name: Fastest apt mirror, retries
         run: |
-          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "10";\nAcquire::https::Timeout "10";\n' | sudo tee /etc/apt/apt.conf.d/80-retries >/dev/null
+          printf 'Acquire::Retries "5";\nAcquire::http::Timeout "10";\nAcquire::https::Timeout "10";\n' | sudo tee /etc/apt/apt.conf.d/zz-retries >/dev/null
           sudo chown -R "$USER" /var/cache/apt/archives
           list=/etc/apt/apt-mirrors.txt
           [ -f "$list" ] || exit 0
           . /etc/os-release
-          mirrors="http://azure.archive.ubuntu.com/ubuntu http://archive.ubuntu.com/ubuntu https://mirrors.edge.kernel.org/ubuntu"
-          best=""; bestspeed=0
+          mirrors="http://azure.archive.ubuntu.com/ubuntu/ https://archive.ubuntu.com/ubuntu/ https://security.ubuntu.com/ubuntu/ https://mirrors.edge.kernel.org/ubuntu/"
+          speeds=$(mktemp)
           for m in $mirrors; do
-            speed=$(curl -s -o /dev/null -w '%{speed_download}' --max-time 5 "$m/dists/$VERSION_CODENAME/main/binary-amd64/Packages.gz" || true)
-            speed=${speed%%.*}
-            echo "mirror $m: $(( ${speed:-0} / 1024 )) KB/s"
-            if [ "${speed:-0}" -gt "$bestspeed" ]; then best=$m; bestspeed=$speed; fi
+            curl -sf -o /dev/null --max-time 5 -w "%{speed_download} $m\n" "${m}dists/$VERSION_CODENAME/main/binary-amd64/Packages.gz" >>"$speeds" &
           done
-          [ -n "$best" ] || exit 0
-          { printf '%s\tpriority:1\n' "$best"; for m in $mirrors; do [ "$m" = "$best" ] || printf '%s\tpriority:2\n' "$m"; done; } | sudo tee "$list" >/dev/null
-          echo "using $best"
+          wait
+          sort -rn "$speeds" | awk '{ printf "%6d KB/s  %s\n", $1 / 1024, $2 }'
+          grep -qv '^0' "$speeds" || exit 0
+          sort -rn "$speeds" | awk '{ printf "%s\tpriority:%d\n", $2, NR }' | sudo tee "$list" >/dev/null
       - name: Cache the apt packages and the Playwright browser
         uses: actions/cache@v4
         with:
@@ -125,11 +124,10 @@ jobs:
             /var/cache/apt/archives
             ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-v1-${{ hashFiles('web/package-lock.json') }}
+      - name: Chromium and its system libraries and fonts
+        run: cd web && npx playwright install --with-deps chromium
       - name: End-to-end tests (demo mode, real Chromium)
-        run: |
-          cd web
-          npx playwright install --with-deps chromium
-          npm run e2e:all
+        run: cd web && npm run e2e:all
 
   lint:
     name: Go (format, vet, build, types, SDK)
