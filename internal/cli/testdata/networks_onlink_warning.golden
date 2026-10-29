@@ -1,0 +1,15 @@
+$ jailops network create sw --ipv4 10.94.0.1/24 --uplink em0 --ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy
+network/sw created
+! warning: net.inet6.icmp6.nd6_onlink_ns_rfc4861 is 0: the routers of a shared IPv6 segment probe the host's address from their global addresses and FreeBSD drops those solicitations as off-link, so the host (and its jails) is unreachable over IPv6 for minutes every few hours; run `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` and add `net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` to /etc/sysctl.conf (JailOps never sets it)
+
+$ jailops network create -f <dir>/sw2.yaml
+network/sw2 created
+! warning: net.inet6.icmp6.nd6_onlink_ns_rfc4861 is 0: the routers of a shared IPv6 segment probe the host's address from their global addresses and FreeBSD drops those solicitations as off-link, so the host (and its jails) is unreachable over IPv6 for minutes every few hours; run `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` and add `net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` to /etc/sysctl.conf (JailOps never sets it)
+
+$ jailops apply -f <dir>/sw3.yaml
+network/sw3 created
+! warning: net.inet6.icmp6.nd6_onlink_ns_rfc4861 is 0: the routers of a shared IPv6 segment probe the host's address from their global addresses and FreeBSD drops those solicitations as off-link, so the host (and its jails) is unreachable over IPv6 for minutes every few hours; run `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` and add `net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` to /etc/sysctl.conf (JailOps never sets it)
+
+$ jailops network create rt --ipv6 2001:db8:1:2:1::1/80
+network/rt created
+

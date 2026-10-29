@@ -63,6 +63,17 @@ func WithSecretsRecipient(r string) Option { return func(s *Server) { s.secretsR
 // WithHostName sets the hostname reported by GET /api/v1.
 func WithHostName(n string) Option { return func(s *Server) { s.hostname = n } }
 
+// WithSysctl sets a sysctl of the fake host. The fake looks at net.inet6.icmp6.nd6_onlink_ns_rfc4861 when a
+// proxy-mode network is created: "0" makes the answer carry the warning of the real daemon.
+func WithSysctl(name, value string) Option {
+	return func(s *Server) {
+		if s.sysctls == nil {
+			s.sysctls = map[string]string{}
+		}
+		s.sysctls[name] = value
+	}
+}
+
 // WithArch sets the architecture reported by GET /api/v1 (default amd64; ""
 // reports none, as a server that could not tell would).
 func WithArch(arch string) Option { return func(s *Server) { s.arch = arch } }
@@ -135,6 +146,7 @@ type Server struct {
 	// usage is what GET .../usage answers per jail (SeedJailUsage); a jail
 	// without an entry gets fixed numbers.
 	usage     map[string]api.JailUsage
+	sysctls   map[string]string // WithSysctl
 	images    *kind[api.Image]
 	networks  *kind[api.Network]
 	policies  *kind[api.FirewallPolicy]

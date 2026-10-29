@@ -94,6 +94,19 @@ persistent:
     sysrc gateway_enable=YES ipv6_gateway_enable=YES
     sysctl net.inet.ip.forwarding=1 net.inet6.ip6.forwarding=1
 
+A host with a switched IPv6 network (`--ipv6-mode proxy`, a `/64` on a segment shared with other customers) must also
+answer the neighbor solicitations its routers send from off-link addresses, or the routers drop it for minutes at a
+time (see [networking-ipv6.md](networking-ipv6.md)). `jailops doctor` checks it too, and JailOps never sets it:
+
+    sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1
+
+and in `/etc/sysctl.conf`, so it survives a reboot:
+
+    net.inet6.icmp6.nd6_onlink_ns_rfc4861=1
+
+Optional: `kern.racct.enable=1` in `/boot/loader.conf` (it takes a reboot) turns the kernel's resource accounting on,
+which `jailops jail info` needs for a jail's usage and resource limits need for enforcement.
+
 ## 5. Set the host up
 
     jailops-priv init -pool zroot
@@ -128,8 +141,9 @@ Identities (users, API tokens, client certificates) have the same roles, scopes 
 A person who is not root uses a token (`JAILOPS_TOKEN`, or `jailops remote add`) or signs in to the web console. Run the commands
 below as root (`sudo`) or with such a token.
 
-`jailops doctor` should show no `FAIL`. A `WARN` for `sysctl.persistent` means forwarding is on but will not survive a
-reboot until you set the `rc.conf` lines of section 4. Section "doctor checks" of [troubleshooting.md](troubleshooting.md)
+`jailops doctor` should show no `FAIL`. A `WARN` for `sysctl.persistent` means forwarding (or, with a switched IPv6
+network, `net.inet6.icmp6.nd6_onlink_ns_rfc4861`) is on but will not survive a reboot until you set the `rc.conf` or
+`sysctl.conf` lines of section 4. Section "doctor checks" of [troubleshooting.md](troubleshooting.md)
 explains each check.
 
 ## 7. The first jail

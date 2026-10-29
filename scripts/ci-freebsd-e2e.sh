@@ -157,6 +157,19 @@ expect "the jail reaches the host" '1 packets received' $J exec --project demo w
 check "a file in the jail" $J exec --project demo web -- sh -c 'echo ci-marker > /root/marker'
 expect "labels" 'backup=yes' $J label --project demo web backup=yes
 
+step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
+check "create a second jail" $J create up --project demo --image freebsd@stable --network lan --storage default --start
+check "a second generation of the image" $J image build freebsd --from g1
+check "a file that must survive" $J exec --project demo up -- sh -c 'echo ci-keep > /root/keep'
+expect "dry run" 'g1 to g2' $J jail upgrade up --project demo --dry-run
+check "upgrade to the newer generation" $J jail upgrade up --project demo --generation g2
+expect "the jail is on the second generation" 'up +running.*#g2' $J jail list --project demo
+expect "the jail still runs" 'FreeBSD' $J exec --project demo up -- uname -s
+expect "its data survived the swap" 'ci-keep' $J exec --project demo up -- cat /root/keep
+check "root rollback" $J jail rollback up --project demo
+expect "back on the first generation" 'up +running.*#g1' $J jail list --project demo
+check "stop the second jail" $J stop up --project demo
+
 step "backup node (PostgreSQL, the node, this host enrolled)"
 if ! su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; then # the CI VM has it running already
 	pkg install -y postgresql17-server >/dev/null 2>&1 || pkg install -y postgresql16-server >/dev/null || fail "postgresql"

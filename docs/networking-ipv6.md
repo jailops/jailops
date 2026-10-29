@@ -120,7 +120,28 @@ JailOps answers it itself.
    There is no switch for it in `jailopsd.yaml`: it runs for every network in `proxy` mode.
 
 4. **Check it:** `jailops doctor` fails `network.ndproxy` with the `priv.conf` line to add when a proxy network is not
-   answering; `jailops network show web` has an `NDPProxy` condition (`Answering`, `StartFailed` and so on).
+   answering; `jailops network show web` has an `NDPProxy` condition (`Answering`, `StartFailed` and so on). In the
+   first minutes after `jailopsd` starts the condition is `Starting` (the capture of the uplink is being opened) and
+   the doctor warns instead of failing; it opens on its own.
+
+#### Recommended on the host
+
+    sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1          # now
+    echo 'net.inet6.icmp6.nd6_onlink_ns_rfc4861=1' >> /etc/sysctl.conf   # after a reboot
+
+The routers of a shared segment check that the host's own address is still there with unicast neighbor solicitations
+sent from their global addresses. The host holds its address as a `/128` and no router advertisement describes the
+`/64`, so for FreeBSD the sender is not an on-link neighbour and, with the default `0`, the solicitation is dropped and
+counted as bad. The router then marks the host unreachable for minutes at a time, every few hours, and the jails
+behind it with it. With `1` every probe is answered (the packet must still arrive with hop limit 255). JailOps never
+sets it: `jailops doctor` warns about `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` while a proxy-mode network exists and
+`sysctl.persistent` warns until the line is in `/etc/sysctl.conf`; `network create` says the same in its answer.
+To see the problem: `netstat -s -p icmp6 | grep bad` counts the dropped solicitations, and
+
+    tcpdump -n -e -i vtnet0 'icmp6 and ip6[40] == 135 and ip6 dst host 2001:db8:1:2::2'
+
+shows the probes for the host's address (`2001:db8:1:2::2`) arriving from the routers' global addresses; without
+the sysctl no advertisement (`ip6[40] == 136`) follows them.
 
 **Verified** on FreeBSD 15.1 **amd64** with a shared switched `/64`, the jails in a `/80`: the upstream routers were answered
 at once; a jail pinged the internet for 50 minutes (3,000 packets, none lost) and another machine pinged the jail for 50

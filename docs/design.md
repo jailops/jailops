@@ -281,6 +281,11 @@ computes addresses by hand:
 - The host must forward (`net.inet6.ip6.forwarding=1`, `net.inet.ip.forwarding=1`). **JailOps never sets forwarding**:
   the administrator enables `gateway_enable` and `ipv6_gateway_enable` in `rc.conf`, and `jailops doctor` checks that
   forwarding is on and persistent. (The daemon sets only the bridge `pfil_*` sysctls and `kern.elf64.fallback_brand`.)
+- A host with a proxy-mode network should answer the unicast neighbor solicitations the segment's routers send from
+  their global, off-link addresses (`net.inet6.icmp6.nd6_onlink_ns_rfc4861=1`; the default drops them and the router
+  marks the host unreachable for minutes at a time). JailOps never sets it either: `jailops doctor` warns (the setting is recommended)
+  about `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` while a proxy-mode network exists, `sysctl.persistent` warns until it
+  is in `/etc/sysctl.conf`, and the answer of `network create` carries the same warning.
 - Verified on a cloud test host: the provider routes the whole `/64` to the host, and a source address taken from
   a second `/80` makes a round trip.
 
@@ -1501,8 +1506,9 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   at runtime (`network.sysctl`, defaults `pfil_member=1`, `pfil_bridge=0`, `pfil_onlyip=1`; `pfil_member` must stay
   1, the configuration refuses 0) and `kern.elf64.fallback_brand=3` while a Linux jail exists, and re-asserts
   them on every pass. It never writes `/etc/sysctl.conf`. The brand goes back to -1 only when this daemon set it.
-  `doctor` reports modules, the sysctls against the configuration, forwarding that is not persistent in
-  `/etc/sysctl.conf` (a warning), and private networks.
+  `doctor` reports modules, the sysctls against the configuration, forwarding (and, with a proxy-mode network,
+  `net.inet6.icmp6.nd6_onlink_ns_rfc4861`) that is not persistent in `/etc/sysctl.conf` (a warning), and private
+  networks.
 - **PF (5).** Rules stand on the jail's own port (the host-side epair end) and on the network's gateway interface
   (see 18.9). Per-jail source enforcement is `table <jail_addrs> persist { addrs, fe80::/10 }`,
   `pass in quick on <epair> inet6 from :: to ff02::/16` (the unspecified address cannot be a table member: pf accepts

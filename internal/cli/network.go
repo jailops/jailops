@@ -40,6 +40,7 @@ func networkDesc() *kindDesc[api.Network] {
 		},
 	}
 	d.show = func(a *app, n api.Network) error { return a.showObject(n.Metadata, nil, n.Spec, n.Status) }
+	d.warnings = func(n api.Network) []string { return n.Status.Warnings }
 	return &d
 }
 

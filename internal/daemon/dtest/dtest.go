@@ -285,7 +285,7 @@ func (e *Env) Stop() {
 
 // Sysctls are the values the fake host reports.
 var Sysctls = map[string]string{
-	"net.inet6.ip6.forwarding": "1", "net.inet.ip.forwarding": "1", "kern.racct.enable": "1",
+	"net.inet6.ip6.forwarding": "1", "net.inet.ip.forwarding": "1", "kern.racct.enable": "1", "net.inet6.icmp6.nd6_onlink_ns_rfc4861": "1",
 	"net.link.bridge.pfil_member": "1", "net.link.bridge.pfil_bridge": "0", "net.link.bridge.pfil_onlyip": "1", "kern.elf64.fallback_brand": "-1", "kern.osrelease": "15.1-RELEASE-p1",
 }
 

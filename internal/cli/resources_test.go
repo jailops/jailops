@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"jailops.net/jailops/sdk/api"
+	"jailops.net/jailops/sdk/fake"
 )
 
 func TestImages(t *testing.T) {
@@ -284,4 +285,20 @@ func TestBackupExtensions(t *testing.T) {
 	if code != 4 || out != "" || !strings.HasPrefix(errs, "not_found:") {
 		t.Fatalf("%d %q %q", code, out, errs)
 	}
+}
+
+// A proxy-mode network on a host that drops the off-link probes of its segment's routers: the server warns in its
+// answer and the client prints it, for a network from flags, from a file and through apply.
+func TestNetworkCreateWarnsAboutOnlinkNS(t *testing.T) {
+	h := newHarness(t, fake.WithSysctl("net.inet6.icmp6.nd6_onlink_ns_rfc4861", "0"))
+	h.seed()
+	tr := h.transcript()
+	tr.ok("network", "create", "sw", "--ipv4", "10.94.0.1/24", "--uplink", "em0", "--ipv6", "2001:db8:1:2:100::/80", "--ipv6-mode", "proxy")
+	f := writeFile(t, h.dir, "sw2.yaml", "kind: Network\nmetadata: {name: sw2}\nspec:\n  uplink: em0\n  ipv6: {mode: proxy, subnet: \"2001:db8:1:2:200::/80\", gateway: \"fe80::1\", range: \"2001:db8:1:2:200::10-2001:db8:1:2:200::ff\"}\n", 0o644)
+	tr.ok("network", "create", "-f", f)
+	f = writeFile(t, h.dir, "sw3.yaml", "kind: Network\nmetadata: {name: sw3}\nspec:\n  uplink: em0\n  ipv6: {mode: proxy, subnet: \"2001:db8:1:2:300::/80\", gateway: \"fe80::1\", range: \"2001:db8:1:2:300::10-2001:db8:1:2:300::ff\"}\n", 0o644)
+	tr.ok("apply", "-f", f)
+	// A routed network does not depend on it.
+	tr.ok("network", "create", "rt", "--ipv6", "2001:db8:1:2:1::1/80")
+	tr.golden("networks_onlink_warning")
 }

@@ -117,6 +117,33 @@ func TestFetchRule(t *testing.T) {
 	}
 }
 
+func TestTarRuleCreatesOnlyTheMergeArchives(t *testing.T) {
+	r := newRuleEnv(t)
+	merge := filepath.Join(r.root, ".merge-1793281905")
+	os.MkdirAll(merge, 0o755)
+	old, new_ := filepath.Join(merge, "old-etc.tar"), filepath.Join(merge, "new-etc.tar")
+	r.ok(t, "tar", "-C", r.root, "-cf", old, "./etc")
+	r.ok(t, "tar", "-C", r.root, "-cf", new_, "./etc")
+	for _, a := range [][]string{
+		{"-C", r.root, "-cf", filepath.Join(merge, "x.tar"), "./etc"},              // another name
+		{"-C", r.root, "-cf", filepath.Join(r.root, "old-etc.tar"), "./etc"},       // not in a .merge-* directory
+		{"-C", r.root, "-cf", old, "./root"},                                       // another member
+		{"-C", r.root, "-cf", old, "./etc", "./root"},                              // more members
+		{"-C", r.root, "-cf", old, "etc"},                                          // not the exact member
+		{"-C", "/", "-cf", old, "./etc"},                                           // outside the storage roots
+		{"-C", "/etc", "-cf", old, "./etc"},                                        //
+		{"-C", r.cfg.MountBase, "-cf", old, "./etc"},                               // the storage root itself
+		{"-C", r.root, "-cf", "/etc/passwd", "./etc"},                              // a file outside
+		{"-C", r.root, "-cf", "/var/tmp/.merge-1/old-etc.tar", "./etc"},            // outside the roots
+		{"-C", r.root, "-chf", old, "./etc"}, {"-C", r.root, "-czf", old, "./etc"}, // other flags
+		{"-C", r.root, "-cf", old, "--absolute-paths", "./etc"}, //
+		{"-C", r.root, "-cf", old, "./etc", "--to-command=sh"},  //
+		{"-cf", old, "./etc"}, {"-C", r.root, "-cf", old}, // missing parts
+	} {
+		r.bad(t, append([]string{"tar"}, a...)...)
+	}
+}
+
 func TestTarRuleListsBeforeExtracting(t *testing.T) {
 	r := newRuleEnv(t)
 	ctx := context.Background()

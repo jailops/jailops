@@ -61,6 +61,23 @@ func TestDoctorReportsAProxyNetworkThatIsNotAnswering(t *testing.T) {
 	if len(c.list) != 1 || c.list[0].Status != api.DoctorOK {
 		t.Fatalf("%+v", c.list)
 	}
+	// A capture that is still being opened (the daemon just started) is a warning, not a failure.
+	s.NetworkStatus("sw", api.NetworkStatus{Conditions: []api.Condition{{Type: "NDPProxy", Status: api.ConditionFalse, Reason: "Starting", Message: "the capture of vtnet0 is being opened"}}})
+	c = &checkSet{}
+	s.doctorNDPProxy(c)
+	if len(c.list) != 1 || c.list[0].Status != api.DoctorWarn || !strings.Contains(c.list[0].Message, "the capture of vtnet0 is being opened") ||
+		!strings.Contains(c.list[0].Message, "within a few minutes after the daemon starts") {
+		t.Fatalf("%+v", c.list)
+	}
+	// A capture that cannot be opened stays a failure.
+	for _, reason := range []string{"NoCapture", "SyncFailed", "Stopped"} {
+		s.NetworkStatus("sw", api.NetworkStatus{Conditions: []api.Condition{{Type: "NDPProxy", Status: api.ConditionFalse, Reason: reason, Message: "x"}}})
+		c = &checkSet{}
+		s.doctorNDPProxy(c)
+		if len(c.list) != 1 || c.list[0].Status != api.DoctorFail {
+			t.Fatalf("%s: %+v", reason, c.list)
+		}
+	}
 }
 
 func TestNetworksWithOverlappingSubnetsAreRefused(t *testing.T) {

@@ -12,13 +12,15 @@ example without FreeBSD), with a hint on the next line when there is one. `jailo
 | `host.release` | the running FreeBSD release | `fail` below 15.1: JailOps targets 15.1 and later; upgrade the host |
 | `kernel.module.<name>` | `if_bridge`, `if_epair`, `pf`, `zfs` (and `linux64`, `linprocfs`, `linsysfs`, `fdescfs` while a Linux jail exists) | `kldload <name>` and add it to `/boot/loader.conf` |
 | `sysctl.<name>` | the bridge `pfil_*` switches against `network.sysctl`; `kern.elf64.fallback_brand` for Linux jails | the daemon sets them at run time through the helper; check that the helper allows them |
-| `sysctl.persistent` | forwarding on and persistent | `warn`: set `gateway_enable=YES` and `ipv6_gateway_enable=YES` in `rc.conf` (JailOps never edits it) |
+| `sysctl.net.inet.ip.forwarding`, `sysctl.net.inet6.ip6.forwarding` | forwarding, while a network needs it | `fail`: `sysctl <name>=1` and the `rc.conf` lines of [install.md](install.md) (JailOps never sets forwarding) |
+| `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` | the host answers the off-link probes of a shared IPv6 segment's routers, while a `proxy`-mode network exists | `warn` (recommended): `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` and the line in `/etc/sysctl.conf`; see below |
+| `sysctl.persistent` | forwarding (and the sysctl above) on and persistent | `warn`: set `gateway_enable=YES` and `ipv6_gateway_enable=YES` in `rc.conf`, `net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` in `sysctl.conf` (JailOps never edits them) |
 | `zfs.pool`, `zfs.pool.<storage>` | the pools are `ONLINE` | `zpool status <pool>` |
 | `zfs.compat` | pool features against `zfs.compat_file` | `fail`: replication to an older host would fail; JailOps never runs `zpool upgrade` |
 | `pf.anchors` | the three anchor lines are in the loaded ruleset | add them to `pf.conf` in the right order and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `network.epairs` | epairs without a jail | `warn`: the reconcile loop removes them on its next pass |
-| `network.ndproxy` | every `proxy`-mode network has an answering proxy | `fail`: add `ndp-proxy = <uplink>=<prefix>` to `priv.conf` and restart `jailops_priv`; see the network's `NDPProxy` condition |
+| `network.ndproxy` | every `proxy`-mode network has an answering proxy | `fail`: add `ndp-proxy = <uplink>=<prefix>` to `priv.conf` and restart `jailops_priv`; see the network's `NDPProxy` condition. `warn` in the first minutes after `jailopsd` starts: the capture of the uplink is being opened; run the doctor again |
 | `jails.health` | datasets and records of every jail | `warn` names the damaged jails |
 | `reconcile` | the last reconcile pass | `fail` shows the error; `warn` lists drift (rendered and live state differ) |
 | `render` | every configuration renders | `warn` says which one does not |
@@ -65,6 +67,17 @@ solicitation for the jail's address and an advertisement from the host's MAC wit
 jail can wait a few seconds for the router's own timers (the proxy announces the address, which usually avoids it). If the
 solicitation never arrives, the provider may be filtering by MAC or not delegating the prefix to you: this is the case the proxy
 cannot fix (design section 16).
+
+**Host is unreachable from a monitor every few hours on a shared IPv6 segment.** The host's own IPv6 address (not only
+the jails') is unreachable for a few minutes at a time, a few times a day; `jailops doctor` fails
+`sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`. The provider's routers probe the host's address with unicast neighbor
+solicitations sent from their global addresses; the host holds a `/128` and no router advertisement describes the
+`/64`, so FreeBSD's default drops them as off-link and the router marks the host unreachable. Check:
+`netstat -s -p icmp6 | grep bad` (the counter of bad neighbor solicitations grows) and
+`tcpdump -n -e -i <uplink> 'icmp6 and ip6[40] == 135 and ip6 dst host <host address>'` (probes arrive, no
+advertisement follows). Fix: `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` now and the line
+`net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` in `/etc/sysctl.conf`; JailOps never sets it. See
+[networking-ipv6.md](networking-ipv6.md).
 
 **Jail deletion or unmount reports `busy`.** Stopping a jail retries a busy unmount for a few seconds; if it persists, something
 inside still holds a file open (`fstat -f /jailops/projects/...`).
