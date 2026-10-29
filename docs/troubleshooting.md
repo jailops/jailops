@@ -106,3 +106,8 @@ The hint says which.
 (`priv.request`, with the operation, the outcome and the user id; the daemon's pid is not recorded). `jailops audit` shows the
 daemon's own audit log, and `jailops op list` / `jailops events` show operations and events. Set `log.level: debug` in
 `jailopsd.yaml` for more.
+
+`jailops-backupd` logs to syslog under the tag `jailops-backupd` when it runs under rc. `jailops-backupd status` shows
+the repository (mode, snapshots, chunks, open sessions, quarantined chunks, last GC and verify), `jailops-backupd jobs`
+the recent jobs and `jailops-backupd jobs ID` one job with its result or error. Both talk to the running daemon through
+its admin socket, so they need root; `jailops-backupd check-config` validates the configuration without the daemon.

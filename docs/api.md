@@ -1,7 +1,7 @@
 # The API, for programs
 
 JailOps is an API first: `jailops`, `jailops-sync` and the web console are clients of the same HTTP API, `/api/v1/...`, JSON, with
-operations for long work and an event stream.
+operations for long work (a jail create, an image build, an image upgrade that also moves the jails) and an event stream.
 
 | What | Where |
 |---|---|

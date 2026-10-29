@@ -30,6 +30,10 @@ func (a *app) cmdSync() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "sync",
 		Short: "Plan, and with --apply make the hosts match the repository",
+		Example: `jailops-sync sync
+jailops-sync sync --apply
+jailops-sync sync --apply --host web1 --host @edge
+jailops-sync sync --apply --prune --force`,
 		Long: `Without --apply, sync prints the plan and changes nothing. With --apply it
 takes the fleet lock, plans again, and executes the plan through the API.
 

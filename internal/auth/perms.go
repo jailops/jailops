@@ -200,6 +200,7 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/images/{name}/generations", ad),
 	r("GET", "/api/v1/images/{name}/generations/{gen}", ro),
 	r("DELETE", "/api/v1/images/{name}/generations/{gen}", ad),
+	r("POST", "/api/v1/images/{name}/upgrade", ad),
 	r("PUT", "/api/v1/images/{name}/aliases/{alias}", ad),
 	r("DELETE", "/api/v1/images/{name}/aliases/{alias}", ad),
 
@@ -212,6 +213,7 @@ var Perms = classifyAll([]Entry{
 	r("DELETE", "/api/v1/jails/{name}", ad),
 	r("POST", "/api/v1/jails/{name}", ad), // rename, copy
 	r("GET", "/api/v1/jails/{name}/state", ro),
+	r("GET", "/api/v1/jails/{name}/usage", ro),
 	r("PUT", "/api/v1/jails/{name}/state", op),
 	r("POST", "/api/v1/jails/{name}/exec", op),
 	r("GET", "/api/v1/jails/{name}/console", op),

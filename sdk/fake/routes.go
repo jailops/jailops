@@ -93,6 +93,7 @@ func (s *Server) routes() {
 	m("POST /api/v1/backups/run", s.handleBackupRun)
 	m("POST /api/v1/backups/{id}/verify", s.handleBackupVerify)
 	m("GET /api/v1/jails/{name}/state", s.jailState)
+	m("GET /api/v1/jails/{name}/usage", s.jailUsage)
 	m("PUT /api/v1/jails/{name}/state", s.jailAction)
 	m("GET /api/v1/jails/{name}/snapshots", s.snapList)
 	m("POST /api/v1/jails/{name}/snapshots", s.snapCreate)
@@ -103,6 +104,7 @@ func (s *Server) routes() {
 	m("GET /api/v1/images/{name}/generations", s.genList)
 	m("POST /api/v1/images/{name}/generations", s.genBuild)
 	m("DELETE /api/v1/images/{name}/generations/{n}", s.genDelete)
+	m("POST /api/v1/images/{name}/upgrade", s.imageUpgrade)
 	m("PUT /api/v1/images/{name}/aliases/{alias}", s.aliasSet)
 	m("DELETE /api/v1/images/{name}/aliases/{alias}", s.aliasDelete)
 	m("GET /api/v1/networks/{name}/leases", s.leases)
@@ -120,7 +122,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	info := api.ServerInfo{
 		APIVersion: api.Version, APIExtensions: slices.Clone(s.extensions), Version: "fake",
 		HostUUID: s.uuid, Hostname: s.hostname, Role: api.RoleHost, Hub: s.hub, Auth: auth,
-		Environment: api.Environment{OS: "FreeBSD", Arch: "amd64", Pool: "tank"}, SecretsRecipient: s.secretsRec,
+		Environment: api.Environment{OS: "FreeBSD", Arch: s.arch, Pool: "tank"}, SecretsRecipient: s.secretsRec,
 	}
 	s.mu.Unlock()
 	writeSync(w, 200, info)

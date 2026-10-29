@@ -79,6 +79,7 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 			f.StringVar(&addr, "address", "", "node address, https://host:port")
 			f.StringVar(&fp, "fingerprint", "", "SHA-256 fingerprint pinning the node's certificate")
 			f.StringVar(&path, "path", "", "directory path (kind directory)")
+			enumFlag(cmd, "kind", "node", "directory")
 			return func(name string) (api.BackupTarget, error) {
 				return api.BackupTarget{Metadata: api.ObjectMeta{Name: name}, Spec: api.BackupTargetSpec{Kind: kind, Address: addr, Fingerprint: fp, Path: path}}, nil
 			}
@@ -107,6 +108,10 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 			f.IntVar(&fullEvery, "full-every", 0, "force a full read every N days")
 			f.StringVar(&vsched, "verify-schedule", "", "cron expression for restore tests")
 			f.StringVar(&vmode, "verify-mode", "", "verification depth: deep, extract or full")
+			enumFlag(cmd, "verify-mode", "deep", "extract", "full")
+			a.completeFlag(cmd, "target", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
+				return namesOf(c.Backups().Targets().List(ctx), func(t api.BackupTarget) string { return t.Metadata.Name })
+			}))
 			return func(name string) (api.BackupPolicy, error) {
 				if schedule == "" || len(targets) == 0 {
 					return api.BackupPolicy{}, usagef("--schedule and at least one --target are required (or use -f FILE)")
@@ -198,6 +203,9 @@ func (a *app) backupList() *cobra.Command {
 	}
 	cmd.Flags().StringVar(&jail, "jail", "", "only backups of this jail")
 	cmd.Flags().StringVar(&target, "target", "", "only backups stored on this target")
+	a.completeFlag(cmd, "target", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
+		return namesOf(c.Backups().Targets().List(ctx), func(t api.BackupTarget) string { return t.Metadata.Name })
+	}))
 	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable)")
 	return cmd
 }
@@ -347,9 +355,7 @@ host that runs the check. The exit status is 1 when the check found problems.`,
 		},
 	}
 	cmd.Flags().StringVar(&depth, "depth", "", "deep (default), extract or full")
-	_ = cmd.RegisterFlagCompletionFunc("depth", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		return []string{"deep", "extract", "full"}, cobra.ShellCompDirectiveNoFileComp
-	})
+	enumFlag(cmd, "depth", "deep", "extract", "full")
 	return cmd
 }
 
@@ -503,7 +509,7 @@ node may delay it on purpose. The command asks for confirmation unless -y is giv
 }
 
 func (a *app) backupRestore() *cobra.Command {
-	var as, hostUUID string
+	var as, toHost string
 	var replace, keepIP, confirmLoss bool
 	var maps []string
 	cmd := &cobra.Command{
@@ -520,13 +526,16 @@ it, so you must type its name or pass --confirm-data-loss.
 
 With --project the jail is restored into that project (the caller needs access
 to it; its grants and quotas apply); otherwise into the project of the backup.
+On a hub, --to-host names the host to restore on (its name or UUID); without it
+the restore goes to the host the request is scoped to (--host), else this host.
 
 By default the restored jail gets a new UUID and fresh addresses; --keep-ip
 keeps the fixed addresses of the backup, and --map moves its networks.`,
 		Example: `jailops backup restore 20260101020000-ab12cd34 --dry-run
 jailops backup restore 20260101020000-ab12cd34 --as web-restored
 jailops backup restore 20260101020000-ab12cd34 --map lan=dmz --keep-ip
-jailops backup restore 20260101020000-ab12cd34 --replace`,
+jailops backup restore 20260101020000-ab12cd34 --replace
+jailops --remote hub backup restore 20260101020000-ab12cd34 --to-host host-b`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.completeBackups(),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -535,7 +544,12 @@ jailops backup restore 20260101020000-ab12cd34 --replace`,
 			if err != nil {
 				return err
 			}
-			req := api.RestoreRequest{Backup: args[0], Host: hostUUID, As: as, Replace: replace, KeepIP: keepIP, Project: a.project}
+			req := api.RestoreRequest{Backup: args[0], As: as, Replace: replace, KeepIP: keepIP, Project: a.project}
+			if toHost != "" {
+				if req.Host, err = a.hostUUID(ctx, c, toHost); err != nil {
+					return err
+				}
+			}
 			if len(maps) > 0 {
 				req.NetworkMap = map[string]string{}
 				for _, m := range maps {
@@ -586,7 +600,8 @@ jailops backup restore 20260101020000-ab12cd34 --replace`,
 	}
 	f := cmd.Flags()
 	f.StringVar(&as, "as", "", "restore under this jail name")
-	f.StringVar(&hostUUID, "to-host", "", "UUID of the host to restore on (default: this host)")
+	f.StringVar(&toHost, "to-host", "", "host to restore on, by name or UUID (default: the host of the request)")
+	_ = cmd.RegisterFlagCompletionFunc("to-host", a.completeHosts())
 	f.BoolVar(&replace, "replace", false, "replace an existing jail of that name")
 	f.BoolVar(&keepIP, "keep-ip", false, "keep the fixed addresses of the backup")
 	f.StringArrayVar(&maps, "map", nil, "map a network of the backup to a local one, OLD=NEW (repeatable)")

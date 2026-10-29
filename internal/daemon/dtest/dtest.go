@@ -96,6 +96,7 @@ type Env struct {
 	sysmu    sync.Mutex
 	sysOver  map[string]string
 	sysHist  map[string][]string // every value ever set, in order
+	repoVer  string              // the package version the fake repository serves (SetRepoVersion)
 	// Loaded lists the modules the daemon loaded with kldload.
 	Loaded []string
 }
@@ -124,6 +125,24 @@ func (e *Env) SysctlHistory(name string) []string {
 
 // SysctlValue reads a sysctl of the fake host.
 func (e *Env) SysctlValue(name string) string { v, _ := e.sysctl(name); return v }
+
+// SetRepoVersion sets the version of every package the fake repository
+// serves (default 15.0p1): a build from a parent with the same version
+// changes no package, a newer one upgrades them all.
+func (e *Env) SetRepoVersion(v string) {
+	e.sysmu.Lock()
+	defer e.sysmu.Unlock()
+	e.repoVer = v
+}
+
+func (e *Env) repoVersion() string {
+	e.sysmu.Lock()
+	defer e.sysmu.Unlock()
+	if e.repoVer == "" {
+		return "15.0p1"
+	}
+	return e.repoVer
+}
 
 type syncBuf struct {
 	mu sync.Mutex
@@ -297,7 +316,8 @@ func (e *Env) script() {
 		case "install", "upgrade":
 			e.Files.Put(root+"/bin/sh", []byte("x"))
 			e.Files.Put(root+"/libexec/ld-elf.so.1", []byte("x"))
-			e.Files.Put(root+"/.pkgs", []byte("FreeBSD-runtime 15.0p1\nFreeBSD-utilities 15.0p1\n"))
+			v := e.repoVersion()
+			e.Files.Put(root+"/.pkgs", []byte("FreeBSD-runtime "+v+"\nFreeBSD-utilities "+v+"\n"))
 		case "query":
 			b, _ := e.Files.ReadFile(context.Background(), root+"/.pkgs")
 			var sb strings.Builder

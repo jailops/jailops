@@ -260,6 +260,18 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
+		route{method: "POST", pattern: "/api/v1/images/{name}/upgrade", h: func(c *rc) error {
+			var u api.ImageUpgrade
+			if err := c.decodeOptional(&u); err != nil {
+				return err
+			}
+			op, err := svc.UpgradeImage(c.r.Context(), c.pathArg("name"), u)
+			if err != nil {
+				return err
+			}
+			c.async(op)
+			return nil
+		}},
 		route{method: "PUT", pattern: "/api/v1/images/{name}/aliases/{alias}", h: func(c *rc) error {
 			var b api.ImageAliasSet
 			if err := c.decodeOptional(&b); err != nil {

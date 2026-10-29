@@ -68,7 +68,9 @@ names such a value; a name without a dot names secrets/<name>.age.`,
 		&cobra.Command{
 			Use:   "set <name>",
 			Short: "Encrypt a value read from stdin (or a hidden prompt) to secrets/<name>.age",
-			Args:  cobra.ExactArgs(1),
+			Example: `jailops-sync secrets set db-password
+printf '%s' "$TOKEN" | jailops-sync secrets set api-token`,
+			Args: cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				if err := checkSecretName(args[0]); err != nil {
 					return err

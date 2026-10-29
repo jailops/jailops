@@ -23,6 +23,10 @@ function build(img: Image): void {
   runOp(`${s.images.build}: ${img.metadata.name}`, () => api.images.build(img.metadata.name, { from_generation: last || undefined })).catch(() => undefined)
 }
 
+function upgrade(img: Image): void {
+  runOp(`${s.images.upgrade}: ${img.metadata.name}`, () => api.images.upgrade(img.metadata.name, {})).catch(() => undefined)
+}
+
 const pinning = ref<{ image: string; generation: number } | null>(null)
 const aliasName = ref('')
 const removingAlias = ref<{ image: string; alias: string } | null>(null)
@@ -52,7 +56,10 @@ const removeAlias = () => runOp(s.images.deleteAliasTitle(removingAlias.value!.a
               <span class="faint mono">{{ img.spec.os }} {{ img.spec.release }} {{ img.spec.arch }}</span>
               <span v-for="(g, a) in img.status.aliases" :key="a" class="pill info">{{ a }} = g{{ g }}<button v-if="can('image_aliases')" class="btn btn-sm" type="button" :title="s.images.deleteAlias" :aria-label="s.images.deleteAlias" :data-test="`delete-alias-${a}`" style="margin-left: 4px" @click="removingAlias = { image: img.metadata.name, alias: String(a) }"><Icon name="x" /></button></span>
             </div>
-            <button v-if="can('generations')" class="btn btn-sm" type="button" @click="build(img)"><Icon name="plus" />{{ s.images.build }}</button>
+            <div class="row">
+              <button v-if="can('generations')" class="btn btn-sm" type="button" @click="build(img)"><Icon name="plus" />{{ s.images.build }}</button>
+              <button v-if="can('image_upgrade')" class="btn btn-sm" type="button" :title="s.images.upgradeHint" :data-test="`upgrade-${img.metadata.name}`" @click="upgrade(img)"><Icon name="play" />{{ s.images.upgrade }}</button>
+            </div>
           </header>
           <div class="body muted">
             {{ s.images.source }}: <span class="mono">{{ img.spec.source.type }}</span><span v-if="img.spec.source.repo" class="mono"> {{ img.spec.source.repo }}</span>

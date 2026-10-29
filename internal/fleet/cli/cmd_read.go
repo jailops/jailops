@@ -100,7 +100,10 @@ func (a *app) cmdPlan() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "plan",
 		Short: "Show what sync would change (reads hosts, writes nothing)",
-		Args:  cobra.NoArgs,
+		Example: `jailops-sync plan
+jailops-sync plan --host web1 --all
+jailops-sync -C /srv/fleet plan`,
+		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			f, err := a.load()
 			if err != nil {
@@ -127,6 +130,8 @@ func (a *app) cmdDrift() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "drift",
 		Short: "Exit non-zero when live hosts differ from the repository (for CI and cron)",
+		Example: `jailops-sync drift
+jailops-sync drift --host @prod || echo "the fleet has drifted"`,
 		Long: `Computes the plan and prints only what differs. Exit status: 0 the live
 fleet matches the repository, 1 it differs (create, update, delete of an
 owned object, or an object this fleet may not touch), 2 the check itself

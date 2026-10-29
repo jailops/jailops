@@ -119,6 +119,9 @@ func TestJailSnapshotAndCopy(t *testing.T) {
 	tr.ok("jail", "snapshot", "create", "web", "s2")
 	h.srv.SetSnapshotWritten("main", "web", "s2", 3<<20)
 	tr.ok("jail", "snapshot", "list", "web")
+	tr.ok("jail", "snapshot", "show", "web", "s2")
+	tr.ok("jail", "snapshot", "show", "web", "s1", "-o", "yaml")
+	tr.do("", "jail", "snapshot", "show", "web", "nope")
 	tr.do("", "jail", "snapshot", "delete", "web", "s1") // no -y, no stdin
 	tr.ok("jail", "snapshot", "delete", "-y", "web", "s1")
 	tr.do("y\n", "jail", "snapshot", "delete", "web", "s2")

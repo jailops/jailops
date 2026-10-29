@@ -25,3 +25,9 @@ $ jailops shell web --shell /usr/local/bin/zsh
 $ jailops shell web
 exit
 
+$ jailops exec web -- echo auto
+auto
+
+$ jailops exec -T web -- echo plain
+plain
+

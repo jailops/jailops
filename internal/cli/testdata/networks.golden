@@ -102,21 +102,18 @@ $ jailops network edit viafile -f <dir>/net2.yaml
 network/viafile updated
 
 $ jailops network show viafile
-metadata:
-  name: viafile
-  uuid: <uuid>
-  scope: fleet
-  generation: 2
-  created_at: "2026-03-01T09:00:00Z"
-  updated_at: "2026-03-01T09:00:00Z"
-spec:
-  ipv4:
-    subnet: 10.40.0.0/24
-    gateway: 10.40.0.1
-    range: 10.40.0.5-10.40.0.30
-  mtu: 1400
-status:
-  free: 26
+Name:        viafile
+UUID:        <uuid>
+Generation:  2
+Age:         3h
+
+SPEC                             STATUS
+----                             ------
+ipv4:                            free: 26
+  subnet: 10.40.0.0/24
+  gateway: 10.40.0.1
+  range: 10.40.0.5-10.40.0.30
+mtu: 1400
 
 $ jailops network create sw --ipv4 10.94.0.1/24 --uplink em0 --ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy
 network/sw created

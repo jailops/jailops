@@ -34,7 +34,7 @@ scope (--projects a,b, or --global). An empty scope grants nothing.
 
 Adding a client takes no trust on first use and no copying of certificates:
 
-  1. A global admin runs 'jailops trust add --name laptop --role operator --projects web'.
+  1. A global admin runs 'jailops trust add --name laptop --permission operator --projects web'.
      The server answers with a single-use trust token that carries its own
      certificate fingerprint.
   2. On the client, 'jailops remote add HOST --token TOKEN' pins that fingerprint,
@@ -44,7 +44,7 @@ Adding a client takes no trust on first use and no copying of certificates:
 
 'trust list', 'trust revoke' and 'trust edit' manage the store. A revocation
 takes effect on the next request.`,
-		`jailops trust add --name laptop --role operator --projects web
+		`jailops trust add --name laptop --permission operator --projects web
 jailops trust list
 jailops trust revoke laptop`, "trusted")
 	tc.AddCommand(a.trustAdd())
@@ -94,7 +94,7 @@ func (a *app) trustAdd() *cobra.Command {
 	var ttl, certExpires time.Duration
 	var scope func() ([]string, bool, error)
 	cmd := &cobra.Command{
-		Use:   "add --name NAME --role ROLE (--projects a,b | --global)",
+		Use:   "add --name NAME --permission ROLE (--projects a,b | --global)",
 		Short: "Create a single-use trust token for a new client",
 		Long: `Create a trust token that lets one new client add itself to the trust store.
 The token is printed once, on standard output, and a warning on standard error;
@@ -104,9 +104,9 @@ client pins the server without trusting it on first use.
 
 The identity needs a scope: --projects a,b or --global (global admins only).
 --cert-expires limits how long the trust itself lasts once the token is used.`,
-		Example: `jailops trust add --name laptop --role operator --projects web
-jailops trust add --name ops --role admin --global --ttl 15m
-jailops trust add --name ci --role operator --projects web,db --cert-expires 2160h`,
+		Example: `jailops trust add --name laptop --permission operator --projects web
+jailops trust add --name ops --permission admin --global --ttl 15m
+jailops trust add --name ci --permission operator --projects web,db --cert-expires 2160h`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if name == "" {
@@ -141,13 +141,12 @@ jailops trust add --name ci --role operator --projects web,db --cert-expires 216
 		},
 	}
 	cmd.Flags().StringVar(&name, "name", "", "name of the new client (required)")
-	cmd.Flags().StringVar(&role, "role", "readonly", "role: readonly, operator, admin, backup-push, backup-pull, restore or backup-admin")
+	permFlag(cmd, &role, "readonly")
+	cmd.Flags().StringVar(&role, "role", "readonly", "the former name of --permission")
+	_ = cmd.Flags().MarkHidden("role")
 	cmd.Flags().DurationVar(&ttl, "ttl", 0, "how long the token can be redeemed (default 1h)")
 	cmd.Flags().DurationVar(&certExpires, "cert-expires", 0, "how long the client's trust lasts after redemption (default: no expiry)")
 	scope = scopeFlags(cmd)
-	_ = cmd.RegisterFlagCompletionFunc("role", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		return []string{"readonly", "operator", "admin", "backup-push", "backup-pull", "restore", "backup-admin"}, cobra.ShellCompDirectiveNoFileComp
-	})
 	a.completeFlag(cmd, "projects", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Projects().List(ctx), projName) }))
 	return cmd
 }
@@ -270,7 +269,7 @@ func (a *app) addByTrustToken(cmd *cobra.Command, name, address, token string, s
 	if current {
 		msg += "; now the current remote"
 	}
-	fprintln(a.env.Stdout, msg)
+	a.say("%s\n", msg)
 	a.probeRemote(cmd.Context(), rc)
 	return nil
 }

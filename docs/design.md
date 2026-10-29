@@ -155,6 +155,12 @@ question is open: how `/var/db/pkg` behaves after a root swap.
    never guessed.
 7. `zfs rename` swaps `root` and `root.new`.
 8. Start and run the health check. On failure swap back and start the old root.
+   `POST /api/v1/images/{name}/upgrade` (`jailops image upgrade`, extension `image_upgrade`, global admin) does steps 1 to 8
+   for a whole image: it builds the next generation from the newest one (keeping nothing when the package set did not
+   change), then moves every thin jail that uses the image, in every project or one named project, one at a time through
+   the OS update of 8.4, and stops at the first jail that fails or needs a human, so a bad generation is not rolled across
+   the host. Pinned jails, thick jails and strategies other than `rebase` are skipped and listed; a stopped jail is moved and
+   left stopped.
 9. A retired root is parked as `root.stale` until the upgrade has succeeded, then destroyed after the retention period (`root.old` during the upgrade). A generation is destroyed only when no jail
    references it; until then it is renamed into `deleted/` if clones exist, and its origin is
    garbage-collected when the last clone goes. Aliases (`stable`, `latest`) are not references: deleting a
@@ -438,7 +444,7 @@ they are kept apart by mechanisms that exist in the system:
 |---|---|
 | Network | A network belongs to one project. Its jails never exchange frames: every jail port is a private bridge member and every flow goes through the host (design 18.13). Each jail's anchor binds its addresses (anti-spoofing), and the host pins the jail's MAC address, ARP and neighbor entries, so a jail cannot take another's address. A project's mandatory policy is rendered before the jail's own. Cross-project traffic is denied unless a policy allows it. |
 | Storage | Each project has its own dataset under the storage root with a quota; each jail a quota and optionally a reservation. ZFS delegation (`zfs_delegation`) is never granted to project users unless a global admin allows it per jail, and the helper does not hand datasets over yet (section 4.6). |
-| Compute | Per-jail limits through jail parameters and rctl; project quotas are checked before creation. |
+| Compute | Per-jail limits through jail parameters and rctl; project quotas are checked before creation. What a jail uses is measured when asked (`GET /api/v1/jails/<n>/usage`, `jailops jail info`): processes, CPU time and memory from racct through `rctl -u jail:<key>` (a read-only form on the helper's command allow-list, for managed jails only; "racct is off" when `kern.racct.enable` is not 1), and the space of its datasets from ZFS `used`/`referenced`. Nothing of it is stored, and the jail list does not carry it. |
 | Identity | Section 8.2. |
 
 A separate dataset is **not** a full security boundary. Jails share the host kernel, the sysctl state, device
@@ -503,13 +509,14 @@ The CLI is small and predictable, and it is the same for one host and a fleet:
 
 ```
 jailops project switch web          # client-side: the current project of the current remote
-jailops list
-jailops create nginx --image freebsd@stable --network br-web --storage fast
-jailops start nginx
+jailops list                        # also: list 'web*' -c name,state --sort age, -o csv, -o compact
+jailops create nginx --image freebsd@stable --network br-web --storage fast --start
+jailops stop -l env=prod            # by label selector; --all for every jail of the project
 jailops exec nginx -- /bin/sh       # also: jailops shell nginx
 jailops config show nginx
 jailops config set nginx limits.memory 2G limits.cpu 2
 jailops network list ; jailops storage list
+jailops apply -f site.yaml          # create or update every document of a file
 ```
 
 - **Client-side state.** `project switch` sets the current project of the current remote in the client
@@ -566,7 +573,8 @@ updates:
 - The update pipeline is always: policy, schedule, atomic ZFS snapshot, update, health check, result and history,
   with automatic root rollback when the health check fails and an `update.failed` event.
 - Commands: `jailops update list`, `update check [--all|--project p|jail]`, `update apply <jail>...|--project p`,
-  `update history <jail>`. Fleet rollouts (section 12) apply updates in batches with a health gate; a project is
+  `update history <jail>`. `jailops image upgrade IMAGE` (4.3) runs the OS update of every thin jail of an image after
+  building its next generation. Fleet rollouts (section 12) apply updates in batches with a health gate; a project is
   the natural batch.
 - `jailops-sync` can declare the policy. A policy is part of the jail spec and shows as drift when changed by hand.
 
@@ -920,6 +928,7 @@ Open:
 | Upgrades between JailOps versions | Not tried |
 | Rate-limit shaper | Limits are stored and reported; nothing enforces them, and no error says so |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
+| Jail usage (`rctl -u`) | The parser follows the `resource=amount` format of rctl(8) (`maxproc`, `cputime`, `memoryuse`) and the helper rule is tested with fakes; neither has run against a host with `kern.racct.enable=1`. Interface counters are not reported: FreeBSD's `ifconfig` prints none, and `netstat -I` would need a rule of its own |
 | Proxy (port-forward) redirects on the uplink | Rendered; not verified |
 | `zfs_delegation` | Accepted (global admin only) and rendered into `jail.conf`; the helper does not hand datasets over, so the jail does not see them and no error says so |
 | Helper audit pid | The helper's audit lines do not carry the daemon's pid (`pid: 0`) |
@@ -947,7 +956,7 @@ proxy and the amd64 clean-install run on amd64). Everything not listed here is u
 | Prototype | Result |
 |---|---|
 | 1 jail API | `jail_set`, `jail_get` and `jail_remove` work from pure Go through `unix.Syscall` with `SYS_JAIL_SET/GET/REMOVE` from `x/sys`; `persist` is a zero-length value; results equal `jls`; enumeration with `lastjid` equals `jls`; `LOCAL_PEERCRED` works through `GetsockoptXucred`. Lowering a jail's `securelevel` from the host is not refused by the kernel (do not rely on it). |
-| 2 thin upgrade | **The thin-jail design works on FreeBSD 15.1.** `pkg -r <dir> install FreeBSD-set-minimal-jail` builds a usable userland in an empty ZFS dataset, provided the signing key directories (`/usr/share/keys/pkgbase-<major>`) are copied into the new root first, because `pkg -r` resolves fingerprint paths inside the root. The repository for a RELEASE is `pkg+https://pkg.FreeBSD.org/${ABI}/base_release_${VERSION_MINOR}` (`base_latest` is for -STABLE and -CURRENT), the ABI comes from `pkg config abi` (`FreeBSD:15:aarch64` on arm64), and the keys path from `pkgbase-${VERSION_MAJOR}`. A thin jail whose root is a clone of `g1@ro` with persistent datasets (`/etc`, `/usr/local`, `/var/db`, `/var/log`, `/var/mail`, `/var/spool`, `/home`, `/root`) seeded from the image starts, runs `pkg install` and passes a health check. `etcupdate` works on pkgbase generations through tarballs: `etcupdate extract -d <work> -t <old-etc.tar> -D <jail root>` then `etcupdate -d <work> -t <new-etc.tar> -D <jail root> -L <log>`, where each tarball holds `./etc` of a generation; it prints `M <path>` for merged and `C <path>` for conflicting files and exits non-zero on conflict. Disjoint edits merge cleanly. Swapping roots with `zfs rename` and starting on the new generation works. **Root rollback keeps data written after the upgrade; `all` rollback restores root and every persistent dataset from the single atomic snapshot and discards the data written since (`zfs get written` reports it).** Writes outside the persistent paths vanish with the root. |
+| 2 thin upgrade | **The thin-jail design works on FreeBSD 15.1.** `pkg -r <dir> install FreeBSD-set-minimal-jail` builds a usable userland in an empty ZFS dataset, provided the signing key directories (`/usr/share/keys/pkgbase-<major>`) are copied into the new root first, because `pkg -r` resolves fingerprint paths inside the root. The repository for a RELEASE is `pkg+https://pkg.FreeBSD.org/${ABI}/base_release_<minor>` (the minor of the image's release is written out: pkg expands `${VERSION_MINOR}` from an ABI that has no minor and answers 0) (`base_latest` is for -STABLE and -CURRENT), the ABI comes from `pkg config abi` (`FreeBSD:15:aarch64` on arm64), and the keys path from `pkgbase-${VERSION_MAJOR}`. A thin jail whose root is a clone of `g1@ro` with persistent datasets (`/etc`, `/usr/local`, `/var/db`, `/var/log`, `/var/mail`, `/var/spool`, `/home`, `/root`) seeded from the image starts, runs `pkg install` and passes a health check. `etcupdate` works on pkgbase generations through tarballs: `etcupdate extract -d <work> -t <old-etc.tar> -D <jail root>` then `etcupdate -d <work> -t <new-etc.tar> -D <jail root> -L <log>`, where each tarball holds `./etc` of a generation; it prints `M <path>` for merged and `C <path>` for conflicting files and exits non-zero on conflict. Disjoint edits merge cleanly. Swapping roots with `zfs rename` and starting on the new generation works. **Root rollback keeps data written after the upgrade; `all` rollback restores root and every persistent dataset from the single atomic snapshot and discards the data written since (`zfs get written` reports it).** Writes outside the persistent paths vanish with the root. |
 | 3 PF anchors | Anchors load, replace and flush without touching the administrator's ruleset. Replacement is atomic (200 reloads under sampling, never empty or mixed). A syntax error is rejected by `pfctl -n` and by the load, and the old ruleset stays. **Not** rejected: a rule that uses an undefined table. Tables are anchor-local and runtime entries are lost on reload. |
 | 4 ZFS replication | A plain send of a clone is self-contained. `send -R` of a tree recreates the clone relationship. A bookmark works as the incremental base after the source snapshot is destroyed. Guid comparison detects forks. `recv` refuses an existing destination without `-F` and an incremental from a forked base. **An incremental on top of a receiver that has a newer snapshot is accepted without `-F`**, so JailOps must enforce guid continuity itself and never rely on `recv` to refuse. `zfs hold` blocks destroy and `destroy -d` defers. Resume tokens (`recv -s`, `send -t`, `recv -A`) work. A raw send of an encrypted dataset needs no key on the receiver and the key can be loaded later. A non-raw send of an encrypted dataset arrives as plaintext. ZFS is 2.4.2. |
 | 6 Alpine | **Alpine runs as a jail on FreeBSD 15.1 arm64.** The Linuxulator reports Linux 5.15.0. With the minirootfs (v3.22, aarch64, musl) as the jail root: `apk update` and `apk add openssh nginx` work, nginx serves a page and sshd answers with its banner to the host, and ZFS snapshot, breaking the root and `zfs rollback` restores a working system (`apk --version` works again). Details that shape the design: (1) **ELF branding.** Alpine's binaries are built for musl and carry no Linux note; busybox happens to be branded Linux but `apk`, `nginx`, `sshd` and others carry OS/ABI 0. The kernel refuses unbranded binaries, and `execvp` then falls back to `/bin/sh`, which is busybox, hence the confusing `applet not found` and `Exec format error`. Branding files at build time is not enough, because `apk add` installs new unbranded binaries at any time. **JailOps therefore manages `kern.elf64.fallback_brand=3`** (unbranded ELF runs as Linux) whenever a Linux jail exists, and `doctor` checks it. Native FreeBSD binaries carry a FreeBSD brand and are unaffected (verified on the host). A pure-Go equivalent of `brandelf -t Linux` exists as a fallback for build time. (2) **`/dev/shm` and the emulation path.** devfs refuses to create `/dev/shm`. The Linuxulator resolves paths through `/compat/linux` first, and as soon as that directory exists in the jail root a file create below it fails with `ENOENT` (apk could not lock its database). The working layout mounts a **nullfs mirror of the jail root on `<root>/compat/linux`**, creates `dev/shm` through the mirror and mounts a tmpfs there. Mount order: devfs (with a private ruleset), fdescfs, the nullfs mirror, tmpfs on `compat/linux/dev/shm`, linprocfs, linsysfs. (3) **Network.** A Linux userland has no netlink-based tooling that works here; the host configures the jail: `ifconfig -j <jail> <if> inet <addr>/<n> up`, `ifconfig -j <jail> <if> inet6 <addr> prefixlen <n>` and `route -j <jail> add default <gw>`. Linux sees the interface as `eth0` (names are mapped, `compat.linux.use_real_ifnames=0`) with the right address. (4) **Bridges and epairs are created under generic names and renamed**: `ifconfig bridge create` then `ifconfig bridgeN name <name>`; `ifconfig <name> create` fails with `Invalid argument`. (5) `inet6` takes `<addr> prefixlen <n>`; `inet6 <addr>/<n>` in the same command as `inet` was rejected. Not yet verified: amd64 (the test host is arm64), glibc distributions (Debian), `apk` running as a provisioning step from the host, behaviour under load. |

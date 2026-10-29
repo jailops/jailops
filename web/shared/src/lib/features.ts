@@ -1,7 +1,7 @@
 // Capability negotiation: a UI feature is shown only when the server lists its extension.
 
 export type Feature =
-  | 'jails' | 'snapshots' | 'rollback_scopes' | 'images' | 'generations' | 'image_aliases' | 'networks' | 'firewall'
+  | 'jails' | 'snapshots' | 'rollback_scopes' | 'images' | 'generations' | 'image_aliases' | 'image_upgrade' | 'networks' | 'firewall'
   | 'backups' | 'restore' | 'audit' | 'events' | 'operations' | 'resources' | 'doctor'
   | 'projects' | 'project_quotas' | 'storage' | 'trust_tokens' | 'sessions' | 'fleet_projects' | 'exec' | 'profiles' | 'config_keys' | 'devices'
 
@@ -12,6 +12,7 @@ const need: Record<Feature, string> = {
   images: 'images_pkgbase',
   generations: 'image_generations',
   image_aliases: 'image_aliases',
+  image_upgrade: 'image_upgrade',
   networks: 'networks_vnet',
   firewall: 'firewall_anchors',
   backups: 'backup_policies',

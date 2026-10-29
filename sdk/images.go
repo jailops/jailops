@@ -36,6 +36,17 @@ func (i *ImageClient) Build(ctx context.Context, image string, b api.ImageBuild)
 	return op, err
 }
 
+// Upgrade builds the next generation of an image from its newest one and
+// moves the thin jails that use the image to it, one at a time, stopping at
+// the first jail that fails. The result says what happened to each jail.
+func (i *ImageClient) Upgrade(ctx context.Context, image string, u api.ImageUpgrade) (*Operation[api.ImageUpgradeResult], error) {
+	if err := i.c.need("image_upgrade"); err != nil {
+		return nil, err
+	}
+	op, _, err := sendOp[api.ImageUpgradeResult](ctx, i.c, request{method: http.MethodPost, path: i.item(image) + "/upgrade", body: u}, nil)
+	return op, err
+}
+
 // DeleteGeneration deletes an unreferenced generation.
 func (i *ImageClient) DeleteGeneration(ctx context.Context, image string, number int) (*Operation[None], error) {
 	op, _, err := sendOp[None](ctx, i.c, request{method: http.MethodDelete, path: i.item(image) + "/generations/" + strconv.Itoa(number)}, nil)

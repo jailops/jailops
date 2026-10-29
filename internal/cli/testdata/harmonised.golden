@@ -1,0 +1,42 @@
+$ jailops trust add --name laptop --permission operator --projects main -o json
+{
+  "name": "laptop",
+  "token": "<trust-token>",
+  "expires_at": "2026-03-01T10:00:00Z"
+}
+! warning: this trust token is shown only once and works only once; hand it to the new client now.
+! trust for laptop (operator, main) can be claimed until 2026-03-01 10:00:00 UTC
+
+$ jailops trust add --name old --role admin --global -o json
+{
+  "name": "old",
+  "token": "<trust-token>",
+  "expires_at": "2026-03-01T10:00:00Z"
+}
+! warning: this trust token is shown only once and works only once; hand it to the new client now.
+! trust for old (admin, global) can be claimed until 2026-03-01 10:00:00 UTC
+
+$ jailops remote create lab unix:/run/lab.sock
+remote/lab added
+! warning: saved, but the server could not be reached: Get "http://jailops.local/api/v1": dial unix /run/lab.sock: connect: no such file or directory
+
+$ jailops remote delete lab
+remote/lab removed
+
+$ jailops backup restore 20260101020000-ab12cd34 --to-host host-b --dry-run
+Preflight: restore backup 20260101020000-ab12cd34 (jail web) as web
+Changes:
+  + create jail web
+Result: ok
+
+$ jailops backup restore 20260101020000-ab12cd34 --to-host <uuid> --dry-run
+Preflight: restore backup 20260101020000-ab12cd34 (jail web) as web
+Changes:
+  + create jail web
+Result: ok
+
+$ jailops backup restore 20260101020000-ab12cd34 --to-host nowhere --dry-run
+! not_found: host "nowhere" not found
+! hint: 'jailops host list' names the hosts of the hub; a UUID is accepted as well
+[exit 4]
+

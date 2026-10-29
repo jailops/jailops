@@ -65,30 +65,22 @@ $ jailops project set web --network br-web=10.50.0.100-10.50.0.150
 [exit 2]
 
 $ jailops project show web
-metadata:
-  name: web
-  uuid: <uuid>
-  host: <uuid>
-  scope: host
-  generation: 2
-  created_at: "2026-03-01T09:00:00Z"
-  updated_at: "2026-03-01T09:00:00Z"
-spec:
-  description: front end
-  networks:
-    - network: br-web
-  storage:
-    - storage: fast
-      quota: 500G
-  quotas:
-    jails: 2
-    memory: 8G
-status:
-  jails: 0
-  cpu: 0
-  memory_used: 0
-  disk_used: 0
-  addresses: 0
+Name:        web
+UUID:        <uuid>
+Generation:  2
+Age:         3h
+
+SPEC                      STATUS
+----                      ------
+description: front end    jails: 0
+networks:                 cpu: 0
+  - network: br-web       memory_used: 0
+storage:                  disk_used: 0
+  - storage: fast         addresses: 0
+    quota: 500G
+quotas:
+  jails: 2
+  memory: 8G
 
 $ jailops project list
     NAME   HOSTS   NETWORKS   STORAGE   JAILS   DESCRIPTION

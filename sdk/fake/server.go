@@ -63,6 +63,10 @@ func WithSecretsRecipient(r string) Option { return func(s *Server) { s.secretsR
 // WithHostName sets the hostname reported by GET /api/v1.
 func WithHostName(n string) Option { return func(s *Server) { s.hostname = n } }
 
+// WithArch sets the architecture reported by GET /api/v1 (default amd64; ""
+// reports none, as a server that could not tell would).
+func WithArch(arch string) Option { return func(s *Server) { s.arch = arch } }
+
 // WithHosts turns the server into a hub: requests carrying ?host=<name> are
 // served by the given server (matched by name or host UUID).
 func WithHosts(hosts map[string]*Server) Option {
@@ -111,6 +115,7 @@ type Server struct {
 	extensions  []string
 	secretsRec  string
 	hostname    string
+	arch        string
 	hub         bool
 	hosts       map[string]*Server
 
@@ -127,22 +132,26 @@ type Server struct {
 	updFail            map[string]bool
 	updReports         map[string]api.UpdateReport
 	updHistory         map[string][]api.UpdateRecord
-	images             *kind[api.Image]
-	networks           *kind[api.Network]
-	policies           *kind[api.FirewallPolicy]
-	addrsets           *kind[api.AddressSet]
-	targets            *kind[api.BackupTarget]
-	bpolicies          *kind[api.BackupPolicy]
-	backups            *kind[api.Backup]
-	remotes            *kind[api.Remote]
-	tokens             *kind[api.Token]
-	certs              *kind[api.Certificate]
-	users              *kind[api.User]
+	// usage is what GET .../usage answers per jail (SeedJailUsage); a jail
+	// without an entry gets fixed numbers.
+	usage     map[string]api.JailUsage
+	images    *kind[api.Image]
+	networks  *kind[api.Network]
+	policies  *kind[api.FirewallPolicy]
+	addrsets  *kind[api.AddressSet]
+	targets   *kind[api.BackupTarget]
+	bpolicies *kind[api.BackupPolicy]
+	backups   *kind[api.Backup]
+	remotes   *kind[api.Remote]
+	tokens    *kind[api.Token]
+	certs     *kind[api.Certificate]
+	users     *kind[api.User]
 
 	snapshots map[string][]*api.JailSnapshot // by jail
 	gens      map[string][]*api.ImageGeneration
 	genMax    map[string]int            // highest generation number ever used per image: numbers are never reused
 	aliases   map[string]map[string]int // image -> alias -> generation number
+	imgSame   map[string]bool           // images whose upgrade finds nothing to upgrade (SeedImageCurrent)
 	nextJID   int
 	streams   int
 
@@ -166,7 +175,7 @@ type Server struct {
 // New creates an empty server.
 func New(opts ...Option) *Server {
 	s := &Server{
-		now: time.Now, uuid: newUUID(), hostname: "fake-host",
+		now: time.Now, uuid: newUUID(), hostname: "fake-host", arch: "amd64",
 		extensions: slices.Clone(api.Extensions),
 		snapshots:  map[string][]*api.JailSnapshot{},
 		identities: map[string]Identity{}, trustTokens: map[string]*trustRec{}, trustFails: map[string]int{},
@@ -175,6 +184,7 @@ func New(opts ...Option) *Server {
 		gens:    map[string][]*api.ImageGeneration{},
 		genMax:  map[string]int{},
 		aliases: map[string]map[string]int{},
+		imgSame: map[string]bool{},
 		ops:     map[string]*opState{}, opFail: map[string][]*api.Error{},
 		notify: make(chan struct{}), drop: make(chan struct{}), closed: make(chan struct{}),
 	}
@@ -331,7 +341,7 @@ func (s *Server) ClearFailures() {
 // FailOperation makes the next operation with the given key fail with err.
 // Keys: "jails.create", "jails.delete", "jails.start", "jails.stop",
 // "jails.restart", "jails.rollback", "jails.upgrade", "jails.snapshot",
-// "images.build", "restores.create".
+// "images.build", "images.upgrade", "restores.create".
 func (s *Server) FailOperation(key string, err *api.Error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

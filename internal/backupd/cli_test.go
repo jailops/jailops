@@ -85,8 +85,9 @@ deletion_delay: 48h
 		t.Fatalf("init output:\n%s", out)
 	}
 	nodeFP := m[1]
-	if st, _, errs := c.run("", "init"); st == 0 || !strings.Contains(errs, "already holds a repository") {
-		t.Fatalf("a second init: %d %s", st, errs)
+	// a second init is not an error: it reports the repository and its owner
+	if out := c.must("", "init"); !strings.Contains(out, "already initialised (owner node-") || !strings.Contains(out, nodeFP) {
+		t.Fatalf("a second init:\n%s", out)
 	}
 	// the secret file rule
 	_ = os.Chmod(dsnFile, 0o644)
@@ -160,6 +161,9 @@ deletion_delay: 48h
 
 	if out := c.must("", "status"); !strings.Contains(out, "snapshots 1 in 1 groups") || !strings.Contains(out, "mode online") {
 		t.Fatalf("status:\n%s", out)
+	}
+	if out := c.must("", "status", "--json"); !strings.Contains(out, `"snapshots": 1`) {
+		t.Fatalf("status --json:\n%s", out)
 	}
 	if out := c.must("", "gc", "--dry-run"); !strings.Contains(out, "succeeded") || !strings.Contains(out, `"dry_run": true`) {
 		t.Fatalf("gc:\n%s", out)

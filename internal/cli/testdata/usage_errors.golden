@@ -24,7 +24,7 @@ $ jailops jail show a b
 [exit 2]
 
 $ jailops -o bogus jail list
-! usage: unknown output format "bogus" (use table, json, yaml or name)
+! usage: unknown output format "bogus" (use table, wide, compact, json, yaml, name or csv)
 ! hint: run 'jailops jail list --help' for usage
 [exit 2]
 

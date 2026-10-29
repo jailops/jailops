@@ -129,6 +129,9 @@ type InitOptions struct {
 	KeyDomain string
 }
 
+// ErrInitialised is returned by Init when the datastore already holds a repository.
+var ErrInitialised = errors.New("node: the datastore already holds a repository")
+
 // Init creates a repository on the backend (which must not hold one) and claims it.
 func Init(ctx context.Context, b datastore.Backend, o InitOptions) (*Meta, error) {
 	if o.KeyDomain != "" && !format.ValidDomainID(o.KeyDomain) {
@@ -139,7 +142,7 @@ func Init(ctx context.Context, b datastore.Backend, o InitOptions) (*Meta, error
 	m := &Meta{Format: 1, ID: hex.EncodeToString(r[:]), Created: time.Now().UTC().Truncate(time.Second), KeyDomain: o.KeyDomain}
 	if err := putJSON(ctx, b, metaKey, m, true); err != nil {
 		if errors.Is(err, datastore.ErrExists) {
-			return nil, errors.New("node: the datastore already holds a repository")
+			return nil, ErrInitialised
 		}
 		return nil, err
 	}

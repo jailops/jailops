@@ -14,9 +14,9 @@ $ jailops update list
 ! No resources found.
 
 $ jailops update check
-! usage: name the jails to update, or use --all for every jail of the project
-! hint: run 'jailops update check --help' for usage
-[exit 2]
+JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
+db     main      -      yes         os freebsd-15#g1 -> freebsd-15#g2               3h
+web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
 
 $ jailops update check web --all
 ! usage: name jails or use --all, not both
@@ -29,6 +29,7 @@ web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g
 
 $ jailops update list
 JAIL   PROJECT   MODE   AVAILABLE   UPDATES                                         CHECKED
+db     main      -      yes         os freebsd-15#g1 -> freebsd-15#g2               3h
 web    main      -      yes         2 packages, os freebsd-15#g1 -> freebsd-15#g2   3h
 
 $ jailops update check --all -o json

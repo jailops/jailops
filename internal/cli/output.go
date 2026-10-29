@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,27 +17,51 @@ type format string
 
 const (
 	fmtTable format = "table"
-	fmtJSON  format = "json"
-	fmtYAML  format = "yaml"
-	fmtName  format = "name"
+	// fmtWide is a table with every column, on a terminal too; it is parsed
+	// into fmtTable plus app.wide, so every other command treats it as table.
+	fmtWide format = "wide"
+	// fmtCompact is the plain table of a pipe (space-aligned, no borders,
+	// every column) on a terminal too; it is parsed into fmtTable plus
+	// app.compact.
+	fmtCompact format = "compact"
+	fmtJSON    format = "json"
+	fmtYAML    format = "yaml"
+	fmtName    format = "name"
+	fmtCSV     format = "csv"
 )
+
+var formatNames = []string{"table", "wide", "compact", "json", "yaml", "name", "csv"}
 
 func parseFormat(s string) (format, error) {
 	switch format(s) {
 	case "", fmtTable:
 		return fmtTable, nil
-	case fmtJSON, fmtYAML, fmtName:
+	case fmtWide, fmtCompact, fmtJSON, fmtYAML, fmtName, fmtCSV:
 		return format(s), nil
 	}
-	return "", usagef("unknown output format %q (use table, json, yaml or name)", s)
+	return "", usagef("unknown output format %q (use table, wide, compact, json, yaml, name or csv)", s)
 }
 
 // styleFn returns an ANSI SGR code ("32") for a table cell, or "" for none.
 type styleFn func(col int, val string) string
 
+// pretty reports whether tables are drawn for a person reading a terminal:
+// with borders, and in their short form unless -o wide asks for every column.
+// Anything else (a pipe, a file, --no-headers, -o compact) gets the plain
+// form that scripts cut and the golden tests expect.
+func (a *app) pretty() bool {
+	return a.format == fmtTable && !a.noHeaders && !a.compact && a.env.IsTTY(a.env.Stdout)
+}
+
 // emit prints v in the selected format. table builds the human form and names
 // the list of names for -o name; either may be nil.
 func (a *app) emit(v any, style styleFn, table func() ([]string, [][]string), names func() []string) error {
+	return a.emitList(v, style, table, nil, names)
+}
+
+// emitList is emit for a table that may lose columns on a narrow terminal:
+// drop lists them, least important first.
+func (a *app) emitList(v any, style styleFn, table func() ([]string, [][]string), drop []int, names func() []string) error {
 	w := a.env.Stdout
 	switch a.format {
 	case fmtJSON:
@@ -59,6 +84,20 @@ func (a *app) emit(v any, style styleFn, table func() ([]string, [][]string), na
 		for _, n := range names() {
 			fprintln(w, n)
 		}
+	case fmtCSV:
+		if table == nil {
+			return usagef("-o csv is not available for this command")
+		}
+		h, rows := table()
+		cw := csv.NewWriter(w)
+		if !a.noHeaders {
+			_ = cw.Write(h)
+		}
+		for _, r := range rows {
+			_ = cw.Write(r)
+		}
+		cw.Flush()
+		return cw.Error()
 	default:
 		if table == nil {
 			b, err := toYAML(v)
@@ -73,9 +112,114 @@ func (a *app) emit(v any, style styleFn, table func() ([]string, [][]string), na
 			fprintln(a.env.Stderr, "No resources found.")
 			return nil
 		}
+		if a.pretty() {
+			a.printBoxed(w, h, rows, style, drop)
+			return nil
+		}
 		a.printTable(w, h, rows, style)
 	}
 	return nil
+}
+
+// printBoxed draws a table with thin borders for a terminal. A cell may hold
+// several lines; its row grows as tall as the cell. When the terminal is
+// narrower than the table, the columns named in drop are left out, first
+// first, until it fits; a cell is never cut.
+func (a *app) printBoxed(w io.Writer, head []string, rows [][]string, style styleFn, drop []int) {
+	color := style != nil && a.colorOn(w)
+	for i := range rows {
+		for len(rows[i]) < len(head) {
+			rows[i] = append(rows[i], "")
+		}
+	}
+	lines := func(cell string) []string { return strings.Split(cell, "\n") }
+	width := make([]int, len(head))
+	for i, h := range head {
+		width[i] = utf8.RuneCountInString(h)
+	}
+	for _, r := range rows {
+		for i, c := range r {
+			for _, l := range lines(c) {
+				width[i] = max(width[i], utf8.RuneCountInString(l))
+			}
+		}
+	}
+	keep := make([]bool, len(head))
+	for i := range keep {
+		keep[i] = true
+	}
+	total := func() int {
+		n := 1
+		for i, w := range width {
+			if keep[i] {
+				n += w + 3
+			}
+		}
+		return n
+	}
+	if _, cols, ok := a.env.TermSize(w); ok && cols > 0 {
+		for _, d := range drop {
+			if total() <= int(cols) {
+				break
+			}
+			if d >= 0 && d < len(keep) {
+				keep[d] = false
+			}
+		}
+	}
+	rule := func(l, m, r string) {
+		var b strings.Builder
+		b.WriteString(l)
+		first := true
+		for i, wd := range width {
+			if !keep[i] {
+				continue
+			}
+			if !first {
+				b.WriteString(m)
+			}
+			first = false
+			b.WriteString(strings.Repeat("─", wd+2))
+		}
+		b.WriteString(r)
+		fprintln(w, b.String())
+	}
+	line := func(cells []string, hdr bool) {
+		height := 1
+		for i, c := range cells {
+			if keep[i] {
+				height = max(height, len(lines(c)))
+			}
+		}
+		for n := range height {
+			var b strings.Builder
+			b.WriteString("│")
+			for i, c := range cells {
+				if !keep[i] {
+					continue
+				}
+				text := ""
+				if ls := lines(c); n < len(ls) {
+					text = ls[n]
+				}
+				pad := width[i] - utf8.RuneCountInString(text)
+				if color && !hdr {
+					if code := style(i, text); code != "" {
+						text = "\x1b[" + code + "m" + text + "\x1b[0m"
+					}
+				}
+				b.WriteString(" " + text + strings.Repeat(" ", pad) + " │")
+			}
+			fprintln(w, b.String())
+		}
+	}
+	rule("┌", "┬", "┐")
+	line(head, true)
+	rule("├", "┼", "┤")
+	for _, r := range rows {
+		line(r, false)
+	}
+	rule("└", "┴", "┘")
 }
 
 func (a *app) printTable(w io.Writer, head []string, rows [][]string, style styleFn) {
@@ -265,3 +409,26 @@ func dash(s string) string {
 }
 
 func joinOrDash(s []string) string { return dash(strings.Join(s, ",")) }
+
+// linesOrDash puts each value on a line of its own, for a cell of a boxed table.
+func linesOrDash(s []string) string { return dash(strings.Join(s, "\n")) }
+
+// imageWithGen names an image reference with the generation a jail runs, "freebsd-15@stable (g3)";
+// a reference pinned to that generation is left alone.
+func imageWithGen(ref, gen string) string {
+	if gen == "" || strings.HasSuffix(ref, "#"+gen) {
+		return ref
+	}
+	return ref + " (" + gen + ")"
+}
+
+// paint wraps s in the colour of a table cell when colour is on for w.
+func (a *app) paint(w io.Writer, style styleFn, s string) string {
+	if !a.colorOn(w) {
+		return s
+	}
+	if code := style(0, s); code != "" {
+		return "\x1b[" + code + "m" + s + "\x1b[0m"
+	}
+	return s
+}

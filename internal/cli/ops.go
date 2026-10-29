@@ -62,8 +62,8 @@ follow.`,
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List operations",
-		Long:    "List the operations the server remembers, with the ones still running first in --active mode.",
-		Example: "jailops op list\njailops op list --active",
+		Long:    "List the operations the server remembers; --active keeps only the ones still running.\nWithout a project every operation you may see is listed, host-level ones included; --project narrows the list to one project.",
+		Example: "jailops op list\njailops op list --active\njailops op list --project web",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := a.connect(cmd.Context())
@@ -190,10 +190,12 @@ output each event is one line; with -o json each event is one JSON object per
 line, and with -o yaml a stream of documents.
 
 The stream reconnects after a drop and resumes from the last event it saw.
---type and --jail filter; --since-id replays events the server still retains;
---count stops after that many events.`,
+--type, --jail and --project filter (without a project every event you may see
+is streamed, host-level ones included); --since-id replays events the server
+still retains; --count stops after that many events.`,
 		Example: `jailops events
 jailops events --type lifecycle,operation --jail web
+jailops events --project web
 jailops events -o json --count 10 --since-id 0`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -216,6 +218,10 @@ jailops events -o json --count 10 --since-id 0`,
 	cmd.Flags().StringVar(&jail, "jail", "", "only events about this jail")
 	cmd.Flags().StringVar(&since, "since-id", "", "resume after this event id")
 	cmd.Flags().IntVar(&count, "count", 0, "stop after this many events")
+	enumFlag(cmd, "type", string(api.EventLifecycle), string(api.EventOperation), string(api.EventLogging))
+	a.completeFlag(cmd, "jail", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
+		return namesOf(c.Jails().List(ctx), func(j api.Jail) string { return j.Metadata.Name })
+	}))
 	return cmd
 }
 

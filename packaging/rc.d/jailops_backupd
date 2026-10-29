@@ -6,9 +6,14 @@
 #
 # Add to /etc/rc.conf:
 #   jailops_backupd_enable="YES"
+#   jailops_backupd_config="/usr/local/etc/jailops/backupd.yaml"   (optional) the configuration file
+#   jailops_backupd_runas="jailops-backup"                         (optional) the unprivileged user it runs as
 # The backup node runs as the unprivileged user jailops-backup. Configuration:
-# /usr/local/etc/jailops/backupd.yaml. First run `jailops-backupd -c <config> init` (as that user).
-# Output goes to syslog (tag jailops-backupd).
+# /usr/local/etc/jailops/backupd.yaml (the daemon also reads $JAILOPS_BACKUPD_CONFIG, when set, in place
+# of its default path; this script always passes the file explicitly). First run
+# `jailops-backupd -c <config> init` (as that user).
+#   service jailops_backupd checkconfig   validate the configuration and the files it names
+# There is no reload: a change of the configuration needs a restart. Output goes to syslog (tag jailops-backupd).
 
 . /etc/rc.subr
 
@@ -21,11 +26,20 @@ supervisor_pidfile="/var/run/jailops-backupd/backupd-daemon.pid"
 procname="/usr/local/sbin/jailops-backupd"
 command="/usr/sbin/daemon"
 
+extra_commands="checkconfig"
+checkconfig_cmd="jailops_backupd_checkconfig"
 start_precmd="jailops_backupd_precmd"
+
+jailops_backupd_checkconfig()
+{
+	su -m ${jailops_backupd_runas} -c "${procname} -c ${jailops_backupd_config} check-config"
+}
 
 jailops_backupd_precmd()
 {
 	install -d -m 0750 -o ${jailops_backupd_runas} -g ${jailops_backupd_runas} /var/run/jailops-backupd
+	# refuse to start with a configuration that does not validate
+	jailops_backupd_checkconfig >/dev/null || return 1
 }
 
 # (not jailops_backupd_user: rc.subr would run the whole command as that user with su)

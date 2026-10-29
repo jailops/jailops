@@ -151,6 +151,7 @@ check "create" $J create web --project demo --image freebsd@stable --network lan
 check "start" $J start web --project demo
 sleep 2
 expect "the jail runs FreeBSD" 'FreeBSD' $J exec --project demo web -- uname -s
+expect "the jail's userland is the host's release" "^$(uname -U)\$" $J exec --project demo web -- uname -U
 expect "the jail has its address" '10\.77\.0\.' $J exec --project demo web -- ifconfig -a
 expect "the jail reaches the host" '1 packets received' $J exec --project demo web -- ping -c1 -t3 10.77.0.1
 check "a file in the jail" $J exec --project demo web -- sh -c 'echo ci-marker > /root/marker'

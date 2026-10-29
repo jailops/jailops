@@ -29,8 +29,8 @@ const defaultOut = "web/shared/src/api/types.gen.ts"
 // roots are the types the UI uses directly. Everything they reference is emitted too.
 var roots = []any{
 	api.ServerInfo{}, api.Response{}, api.Operation{}, api.Event{}, api.LifecycleEvent{}, api.Error{},
-	api.Jail{}, api.JailAction{}, api.JailRollback{}, api.JailUpgrade{}, api.JailSnapshot{},
-	api.Image{}, api.ImageBuild{}, api.ImageAliasSet{},
+	api.Jail{}, api.JailAction{}, api.JailRollback{}, api.JailUpgrade{}, api.JailSnapshot{}, api.JailUsage{},
+	api.Image{}, api.ImageBuild{}, api.ImageUpgrade{}, api.ImageUpgradeResult{}, api.ImageAliasSet{},
 	api.Network{}, api.Lease{},
 	api.FirewallPolicy{}, api.AddressSet{},
 	api.BackupTarget{}, api.BackupPolicy{}, api.Backup{}, api.RestoreRequest{}, api.RestorePreflight{},

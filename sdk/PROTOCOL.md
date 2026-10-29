@@ -47,6 +47,7 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `/api/v1/jails` GET, POST | `Jail` | list; POST async, result `Jail` |
 | `/api/v1/jails/<n>` GET, PUT, PATCH, DELETE | | `Jail`; DELETE async |
 | `GET /api/v1/jails/<n>/state` | | `JailStatus` |
+| `GET /api/v1/jails/<n>/usage` | | `JailUsage`, measured for this reply and never stored: `accounting` (processes, `cpu_seconds`, `memory_bytes` from racct through `rctl -u`) only while the jail runs, with `error` instead of numbers when racct is off; `disk` (`root_bytes` and `root_referenced_bytes` of the root dataset, `data_bytes` of the persistent datasets and volumes) always, with `error` when a dataset cannot be read. Readonly; the jail list does not carry it (`jail_usage`) |
 | `PUT /api/v1/jails/<n>/state` | `JailAction` (start, stop, restart) | async, result `Jail` |
 | `/api/v1/jails/<n>/snapshots` GET, POST | `JailSnapshot` (name optional) | list; POST async, result `JailSnapshot` |
 | `/api/v1/jails/<n>/snapshots/<s>` GET, DELETE | | `JailSnapshot`; DELETE async |
@@ -65,6 +66,7 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `/api/v1/images` and `/<n>` | `Image` | CRUD |
 | `/api/v1/images/<n>/generations` GET, POST | `ImageBuild` | list of `ImageGeneration`; POST async, result `ImageGeneration` |
 | `DELETE /api/v1/images/<n>/generations/<number>` | | async; `image_in_use` while referenced |
+| `POST /api/v1/images/<n>/upgrade` | `ImageUpgrade` (`no_jails`, `project`, `dry_run`, `storage`) | async, result `ImageUpgradeResult`: the next generation built from the newest one (none, `unchanged`, when the package set did not change), then every thin jail of the image moved to it one at a time through the OS update of the update pipeline (history records, `update.applied`/`update.failed` events), stopping at the first jail that fails; `jails` lists each with `upgraded`, `skipped`, `failed`, `not_attempted` or `planned` (dry run). Global admin; `not_found` with a hint when the image has no generation yet (`image_upgrade`) |
 | `/api/v1/networks` and `/<n>` | `Network` | CRUD; `GET /api/v1/networks/<n>/leases` returns `[]Lease` |
 | `/api/v1/firewall/policies`, `/api/v1/firewall/address-sets` and `/<n>` | | CRUD |
 | `/api/v1/backup-targets`, `/api/v1/backup-policies` and `/<n>` | | CRUD |
@@ -290,6 +292,8 @@ lists the name, and otherwise reports `unsupported`.
 | `sealed_secrets` | `secrets_recipient` in `ServerInfo` | the age public key of the host; a jail `env` value `sealed:age:<base64>` is opened by the daemon only when it starts a process in the jail (design 18.8) |
 | `audit_log`, `doctor`, `resources` | `GET /api/v1/audit`, `/api/v1/doctor`, `/api/v1/resources` | see Routes |
 | `jail_copy` | `POST /api/v1/jails/<n>` | copy or rename |
+| `image_upgrade` | `POST /api/v1/images/<n>/upgrade` | build the next generation and move the jails that use the image; see Routes |
+| `jail_usage` | `GET /api/v1/jails/<n>/usage` | what a jail uses now; `jailops jail info` reads it; see Routes |
 | `backup_pull`, `backup_push` | the backup transport permissions of the backup node | not routes of the host daemon (see above) |
 
 Update and provisioning keys of the registry: `shell`, `updates.mode` (manual, notify, managed),

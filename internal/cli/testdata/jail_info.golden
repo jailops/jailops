@@ -1,0 +1,176 @@
+$ jailops jail info web
+Jail web
+  Project:      main
+  Hostname:     web
+  State:        running (jid 1)
+  Type:         thin jail
+  Image:        freebsd-15@stable, generation g1
+  Storage:      default
+  Created:      2026-03-01 09:00 UTC (3h ago)
+  Started:      2026-03-01 09:00 UTC (3h ago)
+  UUID:         <uuid>
+
+Resources
+  Limits:       cpu 2, memory 2G
+  Usage:        processes 23, cpu 2h13m, memory 388.2 MiB of 2G
+  Disk:         root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB
+
+Network
+  eth0:         network lan, mac derived by the server, mtu network default, up
+    10.20.0.10                                 ipv4 global, configured
+
+Snapshots
+  Count:        0
+
+Update policy
+  Strategy:     -, mode manual
+  Last:         no update yet
+
+Labels
+  env:          prod
+
+$ jailops jail info db
+Jail db
+  Project:      main
+  Hostname:     db
+  State:        stopped
+  Type:         thin jail
+  Image:        freebsd-15@stable, generation g1
+  Storage:      default
+  Created:      2026-03-01 09:00 UTC (3h ago)
+  UUID:         <uuid>
+
+Resources
+  Limits:       none
+  Usage:        - (the jail is not running)
+  Disk:         root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB
+  Volume data:  /var/db
+
+Network
+  eth0:         network lan, mac derived by the server, mtu network default, down
+    10.20.0.11                                 ipv4 global
+  eth1:         network sw, mac derived by the server, mtu network default, down
+    10.94.0.2                                  ipv4 global
+    2001:db8:1:2:100::10                       ipv6 global
+
+Snapshots
+  Count:        2
+  Newest:       after (3h ago)
+
+Update policy
+  Strategy:     -, mode manual
+  Last:         no update yet
+
+$ jailops info db -o yaml
+name: db
+project: main
+uuid: <uuid>
+hostname: db
+state: stopped
+layout: thin
+image: freebsd-15@stable
+generation: g1
+storage: default
+created_at: "2026-03-01T09:00:00Z"
+resources:
+  usage:
+    jail: db
+    power: stopped
+    measured_at: "2026-03-01T09:00:00Z"
+    disk:
+      root_bytes: 268435456
+      root_referenced_bytes: 1610612736
+      data_bytes: 73400320
+interfaces:
+  - name: eth0
+    network: lan
+    state: down
+    addresses:
+      - address: 10.20.0.11
+        family: ipv4
+        scope: global
+        configured: false
+  - name: eth1
+    network: sw
+    state: down
+    addresses:
+      - address: 10.94.0.2
+        family: ipv4
+        scope: global
+        configured: false
+      - address: 2001:db8:1:2:100::10
+        family: ipv6
+        scope: global
+        configured: false
+volumes:
+  - name: data
+    mount: /var/db
+snapshots:
+  count: 2
+  newest: after
+  newest_at: "2026-03-01T09:00:00Z"
+
+$ jailops jail info web -o json
+{
+  "name": "web",
+  "project": "main",
+  "uuid": "<uuid>",
+  "hostname": "web",
+  "state": "running",
+  "jid": 1,
+  "layout": "thin",
+  "image": "freebsd-15@stable",
+  "generation": "g1",
+  "storage": "default",
+  "created_at": "2026-03-01T09:00:00Z",
+  "started_at": "2026-03-01T09:00:00Z",
+  "resources": {
+    "limits": {
+      "cpu": 2,
+      "memory": "2G"
+    },
+    "usage": {
+      "jail": "web",
+      "power": "running",
+      "measured_at": "2026-03-01T09:00:00Z",
+      "accounting": {
+        "processes": 23,
+        "cpu_seconds": 8013,
+        "memory_bytes": 407048192
+      },
+      "disk": {
+        "root_bytes": 268435456,
+        "root_referenced_bytes": 1610612736,
+        "data_bytes": 73400320
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "name": "eth0",
+      "network": "lan",
+      "state": "up",
+      "addresses": [
+        {
+          "address": "10.20.0.10",
+          "family": "ipv4",
+          "scope": "global",
+          "configured": true
+        }
+      ]
+    }
+  ],
+  "snapshots": {
+    "count": 0
+  },
+  "update": {},
+  "labels": {
+    "env": "prod"
+  }
+}
+
+$ jailops jail info nope
+! not_found: jail "nope" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+

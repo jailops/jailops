@@ -64,7 +64,9 @@ func defaultResizeSignal() (<-chan struct{}, func()) {
 }
 
 type execOpts struct {
-	tty       bool // ask for a terminal when stdin and stdout are terminals
+	// noTTY runs without a pseudo-terminal even when stdin and stdout are
+	// terminals, which is when one is allocated otherwise.
+	noTTY     bool
 	shell     bool
 	shellPath string
 	env       []string
@@ -87,7 +89,7 @@ func (a *app) runExec(ctx context.Context, jail string, argv []string, o execOpt
 	if err != nil {
 		return err
 	}
-	useTTY := o.tty && a.env.IsTTY(a.env.Stdin) && a.env.IsTTY(a.env.Stdout)
+	useTTY := !o.noTTY && a.env.IsTTY(a.env.Stdin) && a.env.IsTTY(a.env.Stdout)
 	so := sdk.ExecOptions{TTY: useTTY, Shell: o.shell, ShellPath: o.shellPath, Env: o.env, User: o.user}
 	if useTTY {
 		if r, cl, ok := a.env.TermSize(a.env.Stdout); ok {
@@ -199,15 +201,16 @@ status of jailops is the exit status of the command. It works locally and
 through a hub (--host) under the same trust and project rules, needs no SSH
 server in the jail, and is audited.
 
-With -t and a terminal on both ends the command gets a pseudo-terminal: the
-local terminal is switched to raw mode for the session and window size changes
-are forwarded.`,
+With a terminal on both ends the command gets a pseudo-terminal: the local
+terminal is switched to raw mode for the session and window size changes are
+forwarded. -T runs without one (what a pipe gets anyway); -t names the default.`,
 		Example: `jailops exec nginx -- ls -l /var/log
-jailops exec -t nginx -- top
+jailops exec nginx -- top
+jailops exec -T nginx -- cat /var/log/messages > messages
 jailops exec --user www nginx -- id
 jailops --host host-b exec nginx -- service nginx status`,
 		Args:              cobra.MinimumNArgs(2),
-		ValidArgsFunction: completeKind(a, d),
+		ValidArgsFunction: completeArgs(completeKind(a, d), completeFiles),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			argv := args[1:]
 			if len(argv) > 0 && argv[0] == "--" { // kept by cobra after the name
@@ -219,8 +222,10 @@ jailops --host host-b exec nginx -- service nginx status`,
 			return a.runExec(cmd.Context(), args[0], argv, o)
 		},
 	}
+	var tty bool
 	cmd.Flags().SetInterspersed(false)
-	cmd.Flags().BoolVarP(&o.tty, "tty", "t", false, "allocate a pseudo-terminal (needs a terminal on stdin and stdout)")
+	cmd.Flags().BoolVarP(&tty, "tty", "t", false, "allocate a pseudo-terminal when stdin and stdout are terminals (the default)")
+	cmd.Flags().BoolVarP(&o.noTTY, "no-tty", "T", false, "never allocate a pseudo-terminal")
 	cmd.Flags().StringArrayVarP(&o.env, "env", "e", nil, "add NAME=value to the environment (repeatable)")
 	cmd.Flags().StringVarP(&o.user, "user", "u", "", "run as this user of the jail")
 	return cmd
@@ -247,7 +252,7 @@ which is what a pipe such as 'echo id | jailops shell web' needs.`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			o.tty, o.shell = true, true
+			o.shell = true
 			return a.runExec(cmd.Context(), args[0], nil, o)
 		},
 	}

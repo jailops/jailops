@@ -1,0 +1,89 @@
+$ jailops --dry-run apply -f <dir>/site.yaml
+dry-run: would create network dmz
+apiVersion: jailops/v1
+kind: Network
+metadata:
+  name: dmz
+spec:
+  ipv4:
+    subnet: 10.30.0.0/24
+    gateway: 10.30.0.1
+    range: 10.30.0.10-10.30.0.20
+dry-run: would create jail web
+apiVersion: jailops/v1
+kind: Jail
+metadata:
+  name: web
+  labels:
+    env: prod
+spec:
+  image: freebsd-15@stable
+  storage: default
+  layout: thin
+  hostname: web
+  network:
+    - network: lan
+      ipv4: 10.20.0.15
+dry-run: would create image alpine-3
+apiVersion: jailops/v1
+kind: Image
+metadata:
+  name: alpine-3
+spec:
+  os: linux
+  release: "3.22"
+  arch: amd64
+  source:
+    type: minirootfs
+
+$ jailops apply -f <dir>/site.yaml
+network/dmz created
+jail/web created
+image/alpine-3 created
+
+$ jailops apply -f <dir>/site.yaml
+network/dmz unchanged
+jail/web unchanged
+image/alpine-3 unchanged
+
+$ jailops apply -f <dir>/site2.yaml
+network/dmz updated
+jail/web unchanged
+image/alpine-3 unchanged
+
+$ jailops apply -f <dir>/site2.yaml -o name
+network/dmz unchanged
+jail/web unchanged
+image/alpine-3 unchanged
+
+$ jailops apply -f <dir>/nokind.yaml
+! usage: document 1 has no kind: apply needs the envelope (apiVersion, kind, metadata, spec)
+! hint: run 'jailops apply --help' for usage
+[exit 2]
+
+$ jailops apply -f <dir>/badkind.yaml
+! usage: document 1: apply does not handle kind "Rollout"
+! hint: run 'jailops apply --help' for usage
+[exit 2]
+
+$ jailops apply -f <dir>/typo.yaml
+! usage: document 1 (Network): unknown field "mtuu"
+! hint: run 'jailops apply --help' for usage
+[exit 2]
+
+$ jailops apply
+! usage: -f FILE is required
+! hint: run 'jailops apply --help' for usage
+[exit 2]
+
+$ jailops apply -f -
+image/viastdin created
+
+$ jailops apply -f <dir>/site.yaml
+! invalid: a project is required
+! hint: name one with --project NAME, or choose one with 'jailops project switch NAME' (list them with 'jailops project list'; create one with 'jailops project create NAME --new-network')
+[exit 2]
+
+$ jailops apply -f <dir>/img.yaml
+image/alpine-3 unchanged
+

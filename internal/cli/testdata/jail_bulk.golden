@@ -1,0 +1,101 @@
+$ jailops create web --image freebsd-15@stable --network lan --storage default --label env=prod --start
+jail/web created
+jail/web started
+
+$ jailops create db --image freebsd-15@stable --network lan --storage default --label env=prod --label tier=data
+jail/db created
+
+$ jailops create tmp --image freebsd-15@stable --network lan --storage default --label env=test
+jail/tmp created
+
+$ jailops list -c name,state
+NAME   STATE
+db     stopped
+tmp    stopped
+web    running
+
+$ jailops stop -l env=prod
+jail/db stopped
+jail/web stopped
+
+$ jailops start --all
+jail/db started
+jail/tmp started
+jail/web started
+
+$ jailops list --state running -o name
+db
+tmp
+web
+
+$ jailops stop web -l env=prod
+! usage: name jails or select them with -l or --all, not both
+! hint: run 'jailops stop --help' for usage
+[exit 2]
+
+$ jailops stop
+! usage: name the jails, or select them with -l key=value or --all
+! hint: run 'jailops stop --help' for usage
+[exit 2]
+
+$ jailops stop --all -l env=prod
+! usage: use -l or --all, not both
+! hint: run 'jailops stop --help' for usage
+[exit 2]
+
+$ jailops restart -l env=nothing
+! No jails match.
+
+$ jailops restart -l env=prod,tier=data --grace 1m30s
+jail/db restarted
+
+$ jailops restart db --grace soon
+! usage: --grace must be a number of seconds or a duration such as 30s, not "soon"
+! hint: run 'jailops restart --help' for usage
+[exit 2]
+
+$ jailops stop db --grace 5
+jail/db stopped
+
+$ jailops delete -l env=test
+! This deletes 1 jail of project "main": tmp. It cannot be undone.
+! Type the name "main" to confirm: 
+! usage: confirmation required
+! hint: type the name on standard input, or pass -y
+[exit 2]
+
+$ jailops delete -l env=test
+! This deletes 1 jail of project "main": tmp. It cannot be undone.
+! Type the name "main" to confirm: aborted: the name did not match, nothing was changed
+[exit 1]
+
+$ jailops delete -l env=test
+! This deletes 1 jail of project "main": tmp. It cannot be undone.
+! Type the name "main" to confirm: busy: jail "tmp" is running
+! hint: stop it first
+[exit 5]
+
+$ jailops delete -l env=test --force -y
+jail/tmp stopped
+jail/tmp deleted
+
+$ jailops delete web
+! Delete jail "web"? [y/N]: 
+! usage: confirmation required
+! hint: answer on standard input, or pass -y
+[exit 2]
+
+$ jailops --dry-run delete --force web
+dry-run: would stop jail web when it is running
+dry-run: would delete jail web
+
+$ jailops delete --force -y web
+jail/web stopped
+jail/web deleted
+
+$ jailops delete --all -y
+jail/db deleted
+
+$ jailops list
+! No resources found.
+

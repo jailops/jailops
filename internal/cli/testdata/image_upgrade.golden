@@ -1,0 +1,95 @@
+$ jailops jail create web --image freebsd-15@stable --network lan --storage default
+jail/web created
+
+$ jailops jail create pin --image freebsd-15#g1 --network lan --storage default
+jail/pin created
+
+$ jailops image upgrade freebsd-15 --dry-run
+dry-run: would build the next generation of freebsd-15 from freebsd-15#g1 and move 2 of 3 jails
+JAIL   PROJECT   STATUS    FROM            TO              REASON
+pin    main      skipped   freebsd-15#g1   -               pinned to freebsd-15#g1
+web    main      planned   freebsd-15#g1   freebsd-15#g2   -
+api    shop      planned   freebsd-15#g1   freebsd-15#g2   -
+
+$ jailops image upgrade freebsd-15
+generation/freebsd-15#g2 built from freebsd-15#g1
+JAIL   PROJECT   STATUS     FROM            TO              REASON
+pin    main      skipped    freebsd-15#g1   -               pinned to freebsd-15#g1
+web    main      upgraded   freebsd-15#g1   freebsd-15#g2   -
+api    shop      upgraded   freebsd-15#g1   freebsd-15#g2   -
+
+$ jailops image upgrade freebsd-15 --project shop -o json
+{
+  "from": "freebsd-15#g2",
+  "generation": {
+    "number": 3,
+    "name": "freebsd-15#g3",
+    "parent": 2,
+    "manifest": "sha256:<hex>",
+    "packages": 120,
+    "dataset": "tank/jailops/images/freebsd-15/g3",
+    "created_at": "2026-03-01T09:00:00Z"
+  },
+  "plan": [
+    "zfs clone tank/jailops/images/freebsd-15/g2@ro tank/jailops/images/freebsd-15/staging-g3",
+    "pkg -r /jailops/images/freebsd-15/staging-g3 upgrade -y -r jailops"
+  ],
+  "jails": [
+    {
+      "jail": "api",
+      "project": "shop",
+      "status": "upgraded",
+      "from": "freebsd-15#g2",
+      "to": "freebsd-15#g3",
+      "record": "upd-<id>"
+    }
+  ]
+}
+
+$ jailops image upgrade freebsd-15 --no-jails
+generation/freebsd-15#g4 built from freebsd-15#g3
+JAIL   PROJECT   STATUS          FROM            TO   REASON
+pin    main      skipped         freebsd-15#g1   -    pinned to freebsd-15#g1
+web    main      not_attempted   freebsd-15#g2   -    no_jails was set
+api    shop      not_attempted   freebsd-15#g3   -    no_jails was set
+
+$ jailops image upgrade freebsd-15
+image/freebsd-15 unchanged: freebsd-15#g4 already has the current package set; nothing to upgrade
+JAIL   PROJECT   STATUS    FROM            TO   REASON
+pin    main      skipped   freebsd-15#g1   -    pinned to freebsd-15#g1
+web    main      skipped   freebsd-15#g2   -    the package set did not change
+api    shop      skipped   freebsd-15#g3   -    the package set did not change
+
+$ jailops image upgrade freebsd-15
+generation/freebsd-15#g5 built from freebsd-15#g4
+JAIL   PROJECT   STATUS          FROM            TO              REASON
+pin    main      skipped         freebsd-15#g1   -               pinned to freebsd-15#g1
+web    main      failed          freebsd-15#g2   freebsd-15#g5   health check failed (the jail was swapped back to freebsd-15#g2; application data was not touched)
+api    shop      not_attempted   freebsd-15#g3   -               stopped after main/web failed
+! error: jail web failed; the jails after it were not attempted
+! hint: 'jailops update history web --project main' shows what happened; run the upgrade again once it is resolved
+[exit 1]
+
+$ jailops image upgrade freebsd-15 --project nope
+! not_found: project "nope" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops image upgrade nope
+! not_found: image "nope" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops image upgrade freebsd-15 --no-wait --no-jails
+OPERATION                              STATUS    DESCRIPTION
+<uuid>   pending   Upgrade image freebsd-15
+
+$ jailops image generations freebsd-15
+NAME            NUMBER   PARENT   PACKAGES   MANIFEST              AGE   USED BY
+freebsd-15#g1   1        -        0          sha256:<hex>   3h    pin
+freebsd-15#g2   2        g1       120        sha256:<hex>   3h    web
+freebsd-15#g3   3        g2       120        sha256:<hex>   3h    api
+freebsd-15#g4   4        g3       120        sha256:<hex>   3h    -
+freebsd-15#g5   5        g4       120        sha256:<hex>   3h    -
+freebsd-15#g6   6        g5       120        sha256:<hex>   3h    -
+

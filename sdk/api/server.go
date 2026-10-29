@@ -170,4 +170,6 @@ var Extensions = []string{
 	"provisioning",
 	"sealed_secrets",
 	"image_aliases",
+	"image_upgrade",
+	"jail_usage",
 }

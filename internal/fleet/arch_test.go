@@ -16,7 +16,8 @@ func TestImportsAreRestricted(t *testing.T) {
 		"github.com/spf13/cobra", "gopkg.in/yaml.v3", "filippo.io/age", "golang.org/x/term",
 		"github.com/getsops/sops",
 	}
-	own := []string{"jailops.net/jailops/internal/fleet", "jailops.net/jailops/sdk"}
+	// internal/manpage writes the man pages from the command tree; it links nothing of the daemon
+	own := []string{"jailops.net/jailops/internal/fleet", "jailops.net/jailops/sdk", "jailops.net/jailops/internal/manpage"}
 	roots := []string{"../../cmd/jailops-sync", "."}
 	fset := token.NewFileSet()
 	n := 0

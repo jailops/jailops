@@ -46,6 +46,14 @@ func (s *Server) SeedGeneration(image string) api.ImageGeneration {
 	return *g
 }
 
+// SeedImageCurrent makes an upgrade of the image find nothing to upgrade: it
+// keeps no generation and moves no jail (current false restores the default).
+func (s *Server) SeedImageCurrent(image string, current bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.imgSame[image] = current
+}
+
 // SeedNetwork stores a network.
 func (s *Server) SeedNetwork(n api.Network) {
 	s.mu.Lock()

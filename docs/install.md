@@ -32,6 +32,16 @@ and `/usr/local/etc/pkg/repos/jailops.conf` with `url: "https://pkg.jailops.net/
 15.1 or later. The JailOps packages (`jailops`, `jailops-client`, `jailops-backupd`) appear in the repository after each
 release; you can also build from source (`just build-freebsd`) or take the static binaries from the GitHub release archives.
 
+The client package installs shell completion for `jailops` and `jailops-sync` where the shells look for it:
+`/usr/local/share/bash-completion/completions/`, `/usr/local/share/zsh/site-functions/` and
+`/usr/local/share/fish/vendor_completions.d/`. Bash needs the `bash-completion` package (`pkg install bash-completion`
+and its line in `.bashrc`), zsh needs `compinit`; fish finds it by itself. Commands and flags complete offline; names of
+jails, images, networks and projects are asked of the server, and without one the shell just gets no names. For a
+binary installed by hand, `jailops completion bash|zsh|fish` prints the script (`jailops completion --help` says where
+to put it). The packages also install man pages: `man jailops`, `man jailops-jail-list` and so on for every command of
+`jailops` and `jailops-sync` (client package), `man jailopsd` and `man jailops-priv` (host package), `man jailops-backupd`
+(backup node package, which installs the completion of `jailops-backupd` too).
+
 ## 3. The firewall: three lines in `pf.conf`
 
 JailOps never owns `/etc/pf.conf`. It loads one anchor per jail, per project and per network below `jailops/`, and you
@@ -132,11 +142,12 @@ There is no default project, network or storage: you name them.
     jailops project create web
     jailops project set web --network lan --storage default
     jailops project switch web
-    jailops create nginx --image freebsd-15@stable --network lan --storage default
-    jailops start nginx
+    jailops create nginx --image freebsd-15@stable --network lan --storage default --start
     jailops exec nginx -- uname -a
 
-Without `project switch` pass `--project web` (or set `JAILOPS_PROJECT`) on every jail command. The storage `default` is
+Without `project switch` pass `--project web` (or set `JAILOPS_PROJECT`) on every jail command. `--start` starts the jail
+once it is created (`jailops start nginx` does the same later). Several objects at once come from a file:
+`jailops apply -f site.yaml` creates what is missing and updates what differs, document by document. The storage `default` is
 the one the daemon creates on its first start (dataset `<pool>/jailops`). IPv6, big pools and backups continue in
 [networking-ipv6.md](networking-ipv6.md), [storage.md](storage.md) and [backup-restore.md](backup-restore.md).
 

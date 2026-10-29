@@ -69,6 +69,16 @@ func (j *JailClient) State(ctx context.Context, name string) (api.JailStatus, er
 	return st, err
 }
 
+// Usage measures what a jail uses now: processes, CPU time and memory while it
+// runs, and the space of its datasets always (extension jail_usage).
+func (j *JailClient) Usage(ctx context.Context, name string) (api.JailUsage, error) {
+	if err := j.c.need("jail_usage"); err != nil {
+		return api.JailUsage{}, err
+	}
+	u, _, err := get[api.JailUsage](ctx, j.c, j.r.item(name)+"/usage", nil)
+	return u, err
+}
+
 // ActionOption tunes a state action.
 type ActionOption func(*api.JailAction)
 

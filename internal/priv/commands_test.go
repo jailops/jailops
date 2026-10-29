@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/run"
@@ -29,7 +30,7 @@ func TestCommandRulesAreDocumentedAndFixed(t *testing.T) {
 			t.Errorf("rule %s: timeout %d", r.Name, r.MaxTimeoutSeconds)
 		}
 	}
-	for _, n := range []string{"pkg", "etcupdate", "freebsd-update", "sysctl", "kldstat", "kldload", "pfctl", "uname"} {
+	for _, n := range []string{"pkg", "etcupdate", "freebsd-update", "sysctl", "kldstat", "kldload", "pfctl", "uname", "rctl"} {
 		if !seen[n] {
 			t.Errorf("no rule for %s", n)
 		}
@@ -111,6 +112,20 @@ func TestExtendedCommandRules(t *testing.T) {
 	for _, a := range [][]string{{"-a"}, {"-rm"}, {"-r", "-m"}, {}, {"-n"}, {"-p"}, {"-s", "x"}} {
 		bad(ctx, api.CodeForbidden, append([]string{"uname"}, a...)...)
 	}
+	// rctl: the usage of one jail by its key, nothing else
+	ok(ctx, "/usr/bin/rctl", "rctl", "-u", "jail:alpha_web")
+	ok(ctx, "/usr/bin/rctl", "rctl", "-u", "jail:shop_api-v2")
+	for _, a := range [][]string{
+		{}, {"-u"}, {"-u", "jail:"}, {"-u", "alpha_web"}, {"-u", "jail:web"}, {"-u", "jail:alpha_web", "x"}, {"-hu", "jail:alpha_web"},
+		{"-u", "-h", "jail:alpha_web"}, {"-u", "jail:alpha_web\n"}, {"-u", "jail:alpha_web;id"}, {"-u", "jail:alpha_web/x"}, {"-u", "jail:a_b_c"},
+		{"-u", "process:1"}, {"-u", "user:0"}, {"-u", "loginclass:default"}, {"-u", ":"}, {"-u", "jail:Alpha_web"}, {"-u", "jail:1"},
+		{"-l", "jail:alpha_web"}, {"-r", "jail:alpha_web"}, {"-a", "jail:alpha_web:maxproc:deny=10"}, {"-e", "jail:alpha_web"},
+	} {
+		_, _, err := c.CheckCommandCtx(adm, append([]string{"rctl"}, a...))
+		if err == nil {
+			t.Errorf("rctl %q accepted", a)
+		}
+	}
 	// pfctl: read-only, jailops anchors only
 	ok(ctx, "/sbin/pfctl", "pfctl", "-s", "info")
 	ok(ctx, "/sbin/pfctl", "pfctl", "-a", "jailops/web/nginx", "-s", "rules")
@@ -169,6 +184,33 @@ func TestRunnerRunsExtendedRulesWithFixedBinaries(t *testing.T) {
 	for _, c := range e.runner.Calls() {
 		if !filepath.IsAbs(c.Cmd.Name) {
 			t.Errorf("relative binary %q reached the runner", c.Cmd.Name)
+		}
+	}
+}
+
+// rctl reads the usage of a jail JailOps configured; a key without a conf
+// file never reaches the runner.
+func TestRunnerReadsUsageOfManagedJailsOnly(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	r := e.local.Runner()
+	const out = "maxproc=3\ncputime=7\nmemoryuse=4096\n"
+	e.runner.On("/usr/bin/rctl", []string{"-u", run.AnyArg}, out)
+	if _, err := r.Run(ctx, run.Cmd{Name: "rctl", Args: []string{"-u", "jail:alpha_ghost"}}); !api.IsCode(err, api.CodeForbidden) {
+		t.Errorf("unmanaged jail: %v", err)
+	}
+	e.conf(t, "alpha_web")
+	res, err := r.Run(ctx, run.Cmd{Name: "rctl", Args: []string{"-u", "jail:alpha_web"}, Timeout: time.Hour})
+	if err != nil || string(res.Stdout) != out {
+		t.Fatalf("%q %v", res.Stdout, err)
+	}
+	calls := e.runner.Calls()
+	if last := calls[len(calls)-1].Cmd; last.Name != "/usr/bin/rctl" || last.Timeout != 10*time.Second {
+		t.Errorf("ran %+v", last)
+	}
+	for _, c := range calls {
+		if strings.Contains(strings.Join(c.Cmd.Args, " "), "ghost") {
+			t.Errorf("an unmanaged jail reached the runner: %+v", c.Cmd)
 		}
 	}
 }

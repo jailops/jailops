@@ -1,0 +1,177 @@
+.\" jailopsd.8, installed as /usr/local/share/man/man8/jailopsd.8
+.Dd October 29, 2026
+.Dt JAILOPSD 8
+.Os
+.Sh NAME
+.Nm jailopsd
+.Nd the JailOps daemon
+.Sh SYNOPSIS
+.Nm
+.Op Fl config Ar file
+.Op Fl dev
+.Op Fl web | Fl no-web
+.Nm
+.Fl check-config
+.Op Fl config Ar file
+.Nm
+.Cm version
+.Sh DESCRIPTION
+.Nm
+is the per-host daemon of JailOps, a ZFS-native platform for
+.Fx
+jails.
+It serves the REST API and, when enabled, the web console; it keeps the
+desired state of jails, images, networks and firewall policies in a SQLite
+database and reconciles the host against it.
+It runs unprivileged, as the user
+.Sy jailops ,
+and reaches the system (ZFS, jail(8), pf(4), interfaces) only through the
+privileged helper
+.Xr jailops-priv 8
+over its unix socket.
+.Pp
+The configuration file is YAML; unknown keys are an error.
+The sample installed next to it lists every key.
+By default the API is served on the unix socket
+.Pa /var/run/jailops/jailops.sock ;
+a TLS listener (TLS 1.3 only) is opened when
+.Sy listen.https.address
+is set, and the console when
+.Sy web.enabled
+is true.
+Only root (uid 0) is recognised on the unix socket, as the host's recovery
+access; every other client signs in with a JailOps user, an API token or a
+client certificate.
+.Pp
+The options are:
+.Bl -tag -width Ds
+.It Fl config Ar file
+The configuration file.
+The default is
+.Pa /usr/local/etc/jailops/jailopsd.yaml .
+.It Fl check-config
+Validate the configuration and exit.
+.It Fl web
+Serve the web console whatever
+.Sy web.enabled
+says, and open the TLS listener on port 39110 when none is configured.
+.It Fl no-web
+Serve no web console whatever
+.Sy web.enabled
+says.
+The API is unchanged.
+.Fl web
+and
+.Fl no-web
+exclude each other.
+.It Fl dev
+Development: run the privileged operations in the daemon's own process.
+Needs root; never used by the rc.d script.
+.It Cm version
+Print the version and exit.
+.Fl -version
+does the same.
+.El
+.Sh RC.CONF
+The rc.d script
+.Pa /usr/local/etc/rc.d/jailopsd
+runs the daemon under
+.Xr daemon 8
+as the user
+.Sy jailops
+and sends its output to syslog with the tag
+.Sy jailopsd .
+It requires
+.Sy jailops_priv ,
+.Sy NETWORKING
+and
+.Sy pf .
+.Bl -tag -width jailopsd_config
+.It Va jailopsd_enable
+Set to
+.Dq YES
+to start the daemon at boot.
+.It Va jailopsd_config
+The configuration file.
+Default
+.Pa /usr/local/etc/jailops/jailopsd.yaml .
+.It Va jailopsd_runas
+The unprivileged user.
+Default
+.Sy jailops .
+.It Va jailopsd_web
+.Dq YES
+passes
+.Fl web ,
+.Dq NO
+passes
+.Fl no-web ;
+unset, the configuration decides.
+.El
+.Pp
+The configuration is validated as the daemon's user with
+.Dl service jailopsd checkconfig
+and a start refuses a configuration that does not validate.
+There is no
+.Cm reload :
+the configuration is read at start.
+.Sh SIGNALS
+.Bl -tag -width SIGTERM
+.It Dv SIGTERM , Dv SIGINT
+Stop: the listeners close and running operations are cancelled.
+.It Dv SIGHUP
+Ignored by design.
+A renewed TLS certificate and key are picked up without a restart (the files
+are checked at most every fifteen seconds).
+.El
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa /usr/local/etc/jailops/jailopsd.yaml
+The configuration; the installed sample is
+.Pa jailopsd.yaml.sample .
+.It Pa /var/run/jailops/jailops.sock
+The API socket.
+.It Pa /var/run/jailops/jailopsd.pid
+The pid of the daemon under rc.d.
+.It Pa /var/db/jailops
+The data directory: database, seal key, TLS material, operation journal
+.Pq Sy data_dir .
+.It Pa /var/db/jailops/state
+The state dataset, mounted outside the storage root
+.Pq Sy state_dir .
+.It Pa /usr/local/etc/jailops/jails
+The rendered jail.conf files
+.Pq Sy conf_dir ,
+shared with the helper.
+.It Pa /var/run/jailops/priv.sock
+The socket of
+.Xr jailops-priv 8 .
+.El
+.Sh EXIT STATUS
+.Bl -tag -width Ds -compact
+.It 0
+Success, or a valid configuration with
+.Fl check-config .
+.It 1
+The configuration does not load, or the daemon could not start or failed
+while running.
+.It 2
+Usage: an unknown flag, an unexpected argument, or
+.Fl web
+together with
+.Fl no-web .
+.El
+.Sh SEE ALSO
+.Xr jailops 1 ,
+.Xr jailops-sync 1 ,
+.Xr rc.conf 5 ,
+.Xr daemon 8 ,
+.Xr jailops-backupd 8 ,
+.Xr jailops-priv 8
+.Pp
+The design and the guides are installed under
+.Pa /usr/local/share/doc/jailops .
+.Sh SETUP
+A first-time host is set up with
+.Dl jailops-priv init -pool POOL
+which creates the user, the datasets and both configuration files.

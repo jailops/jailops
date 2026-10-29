@@ -34,12 +34,30 @@ error but does nothing is exactly what the read-back and that test exist to catc
 ## Jails
 
 A thin jail's root is a clone of an **image generation**: an immutable pkgbase userland. Upgrading moves the jail to a newer
-generation and keeps its data.
+generation and keeps its data. One command does it for the whole image:
+
+    jailops image upgrade freebsd-15 --dry-run           # the build plan, and which jails would move
+    jailops image upgrade freebsd-15                     # build the next generation, then move every thin jail to it
+
+`image upgrade` builds the next generation from the newest one (its packages upgraded; minutes), then moves every thin jail
+that uses the image, in every project, one at a time, exactly as `jail upgrade` does (below), writing the same update history
+and events as `update apply`. It **stops at the first jail that fails or needs a human**: the jails after it are listed as not
+attempted, so a bad generation is not rolled across the host; fix the jail (its history says what happened) and run the
+command again. When the package set did not change, nothing is kept and no jail is touched; the command says so. A stopped
+jail is moved too: it is started for the health check and stopped again. Thick jails, Linux jails (always thick), jails with an
+update strategy other than `rebase` and jails pinned to a generation (`freebsd-15#g3`) are skipped and listed. `--project P`
+moves one project's jails, `--no-jails` builds the generation only, and `jailops image generations freebsd-15` shows who is
+where afterwards.
+
+The same in two steps, one jail at a time:
 
     jailops image build freebsd-15                       # build the next generation (minutes)
     jailops jail upgrade web --dry-run --project shop    # what would change
     jailops jail upgrade web --project shop              # snapshot, new root, /etc merge, swap, health check
     jailops jail rollback web --project shop             # root only: back to the previous generation, data untouched
+
+A generation is written `gN` wherever a command takes one (`image build --from g2`, `jail upgrade --generation g4`,
+`image alias set freebsd-15 stable g2`, `image delete-generation freebsd-15 g1`); a bare number is accepted too.
 
 The upgrade takes one atomic snapshot of all the jail's datasets (the rollback point), clones the new generation, merges
 `/etc` three ways (the account databases `passwd`, `master.passwd` and `group` are merged by JailOps itself by user and group
@@ -65,7 +83,7 @@ rebased; they are updated in place, and a debootstrap (Debian) generation cannot
 Updates are **off for every jail** until you set its update mode:
 
     jailops set web updates.mode=notify updates.schedule="0 3 * * 0" updates.packages=true updates.os=true --project shop
-    jailops update check --project shop         # lists what could change; changes nothing
+    jailops update check --project shop         # every jail of the project: lists what could change, changes nothing
     jailops update apply --project shop web     # snapshot first, update, health check, record
     jailops update history web --project shop
 
