@@ -235,7 +235,15 @@ func (s *Service) CreateNetwork(ctx context.Context, n api.Network) (api.Network
 		return api.Network{}, err
 	}
 	s.kick()
-	return s.networkToAPI(ctx, o), nil
+	out := s.networkToAPI(ctx, o)
+	// A proxy-mode network needs the host to answer the off-link probes of the segment's routers; the administrator
+	// sets that, so say it now and not only in the doctor.
+	if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy {
+		if w := s.onlinkNSWarning(ctx); w != "" {
+			out.Status.Warnings = append(out.Status.Warnings, w)
+		}
+	}
+	return out, nil
 }
 
 // UpdateNetwork replaces a network.

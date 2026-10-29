@@ -696,6 +696,7 @@ export interface NetworkStatus {
   free?: number
   orphans?: string[]
   conditions?: Condition[]
+  warnings?: string[]
 }
 
 export interface OSUpdate {

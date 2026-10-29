@@ -47,6 +47,9 @@ type kindDesc[T any] struct {
 	brief *listView[T]
 	// show prints the human form of one object; nil prints YAML.
 	show func(a *app, x T) error
+	// warnings are what the server said about a created object (nil for a kind that has none); each is printed
+	// on standard error after the confirmation.
+	warnings func(x T) []string
 	// filters registers extra list flags and returns the function that checks
 	// them once they are parsed and gives the predicate.
 	filters func(cmd *cobra.Command) func() (func(x T) bool, error)
@@ -562,6 +565,7 @@ documents; each one is created in order.`,
 				if err := a.finishOp(cmd.Context(), h, d.noun, name, "created", out); err != nil {
 					return err
 				}
+				createWarnings(a, d, out)
 			}
 			if after != nil {
 				if err := after(cmd.Context(), name); err != nil {
@@ -572,6 +576,16 @@ documents; each one is created in order.`,
 		return nil
 	}
 	parent.AddCommand(cmd)
+}
+
+// createWarnings prints what the server warned about a created object, on standard error, after the confirmation.
+func createWarnings[T any](a *app, d *kindDesc[T], x T) {
+	if d.warnings == nil {
+		return
+	}
+	for _, w := range d.warnings(x) {
+		fprintf(a.env.Stderr, "warning: %s\n", w)
+	}
 }
 
 // delete -------------------------------------------------------------------

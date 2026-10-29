@@ -171,7 +171,7 @@ type Config struct {
 var DefaultSysctls = []string{
 	"kern.osrelease", "kern.osreldate", "kern.ostype", "kern.version",
 	"kern.features.vimage", "net.link.bridge.pfil_member", "net.link.bridge.pfil_bridge", "net.link.bridge.pfil_onlyip",
-	"net.inet.ip.forwarding", "net.inet6.ip6.forwarding", "security.jail.jailed",
+	"net.inet.ip.forwarding", "net.inet6.ip6.forwarding", "net.inet6.icmp6.nd6_onlink_ns_rfc4861", "security.jail.jailed",
 	"security.jail.vnet", "kern.racct.enable", "hw.ncpu", "hw.physmem",
 }
 

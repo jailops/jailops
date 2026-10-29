@@ -27,6 +27,7 @@ type kind[T any] struct {
 	beforeDelete func(obj *T) *api.Error
 	onDelete     func(obj *T)
 	decorate     func(obj *T) // fills computed status on copies
+	created      func(obj *T) // fills what only the answer of a create carries (warnings), on that copy
 
 	asyncCreate, asyncDelete bool
 	readonly, noCreate       bool
@@ -327,6 +328,9 @@ func (k *kind[T]) doCreate(r *http.Request, obj *T) reply {
 		c := clone(obj)
 		if k.decorate != nil {
 			k.decorate(&c)
+		}
+		if k.created != nil {
+			k.created(&c)
 		}
 		return c, nil
 	}

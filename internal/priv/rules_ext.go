@@ -95,10 +95,27 @@ func customFetch(c Config, _ bool, args []string) error {
 
 // ---- tar ----
 
-// customTar accepts "tar -tzf <file>" and "tar -C <root> -xpzf <file>"; the
-// second is verified by listing the archive first (verifyTar).
+// customTar accepts "tar -tzf <file>" and "tar -C <root> -xpzf <file>" (the
+// second is verified by listing the archive first, verifyTar), and the one
+// archive a generation switch makes: "tar -C <root> -cf <work>/old-etc.tar|
+// new-etc.tar ./etc" with the archive inside a ".merge-*" directory below a
+// storage root, the baseline and the target /etc of the three-way merge.
 func customTar(c Config, _ bool, args []string) error {
 	switch {
+	case len(args) == 5 && args[0] == "-C" && args[2] == "-cf" && args[4] == "./etc":
+		if err := c.checkRulePath(pathJailTree, args[1]); err != nil {
+			return err
+		}
+		if err := c.checkRulePath(pathState, args[3]); err != nil {
+			return err
+		}
+		if b := filepath.Base(args[3]); b != "old-etc.tar" && b != "new-etc.tar" {
+			return forbidden("tar: the archive of a merge is old-etc.tar or new-etc.tar, not %q", b)
+		}
+		if !strings.HasPrefix(filepath.Base(filepath.Dir(args[3])), ".merge-") {
+			return forbidden("tar: the archive of a merge goes in a .merge-* directory")
+		}
+		return nil
 	case len(args) == 2 && args[0] == "-tzf":
 		return c.checkRulePath(pathState, args[1])
 	case len(args) == 4 && args[0] == "-C" && args[2] == "-xpzf":
@@ -107,7 +124,7 @@ func customTar(c Config, _ bool, args []string) error {
 		}
 		return c.checkRulePath(pathState, args[3])
 	}
-	return forbidden("tar: only -tzf <file> and -C <root> -xpzf <file> are accepted")
+	return forbidden("tar: only -tzf <file>, -C <root> -xpzf <file> and -C <root> -cf <merge dir>/old-etc.tar|new-etc.tar ./etc are accepted")
 }
 
 // checkMember refuses an archive member that is absolute or climbs out.

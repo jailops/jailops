@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **The OS upgrade of a jail works through the privileged helper**: the `/etc` merge of `jail upgrade`, `update apply` and `image upgrade` makes two archives with `tar -cf`, which the helper refused (only listing and extracting were allowed), so the upgrade stopped at the merge step on a real host and rolled the jail back. The helper now accepts exactly `tar -C <root> -cf <.merge-*>/old-etc.tar|new-etc.tar ./etc`. The FreeBSD end-to-end test now upgrades a jail to a new generation, checks that its data survived and rolls the root back.
+
+- `jailops doctor` checks `net.inet6.icmp6.nd6_onlink_ns_rfc4861` (`sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`) while a network in IPv6 proxy mode exists: the routers of a shared segment probe the host's address from their global addresses, FreeBSD's default drops those solicitations as off-link, and the router marks the host unreachable for minutes every few hours. The check warns that the setting is recommended, with the command and the `/etc/sysctl.conf` line; `sysctl.persistent` warns until the line is there. JailOps never sets it. The helper's read allow-list has the new name.
+
+- `network.ndproxy` warns instead of failing while the capture of the uplink is being opened (`Starting`, the first minutes after `jailopsd` starts); a capture that cannot be opened, a failed sync or a stopped proxy still fail. The reconcile loop looks at a proxy it just started once more after the debounce instead of a whole interval later.
+
+- `jailops network create --ipv6-mode proxy` (and from a file, and `apply`) warns, in the answer and on the client's standard error, when the sysctl above is 0 on the host. The warning is in `status.warnings` of the answer only; it is never stored.
+
 ## 0.2.1 - 2026-10-29
 
 - **Images are built from the packages of their own release**: the base repository of a RELEASE image was written as `base_release_${VERSION_MINOR}` and pkg expanded the minor from the ABI it was given, which has none, so every image came from `base_release_0`: a 15.1-RELEASE image had a 15.0 userland (`uname -U` 1500068 against 1501000 on the host), and `pkg` in its jails refused newer packages. The minor of the image's release is now written into the URL, and the end-to-end test checks that a jail's userland matches the host's. Images built before this keep their 15.0 userland until the next generation is built from them (`jailops image build NAME --from gN`), which now reads the right repository.

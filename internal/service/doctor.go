@@ -149,7 +149,7 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 		}
 	}
 	s.mu.RUnlock()
-	check := func(name, want string, needed bool, why string) {
+	check := func(name, want string, needed bool, why, hint string) {
 		got, err := s.sysctl(ctx, name)
 		switch {
 		case err != nil:
@@ -157,14 +157,22 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 		case got == want:
 			c.add("sysctl."+name, api.DoctorOK, name+"="+got, "")
 		case needed:
-			c.add("sysctl."+name, api.DoctorFail, name+" is "+got+", JailOps needs "+want+" ("+why+")", "sysctl "+name+"="+want+" and add it to /etc/sysctl.conf")
+			if hint == "" {
+				hint = "sysctl " + name + "=" + want + " and add it to /etc/sysctl.conf"
+			}
+			if name == SysctlOnlinkNS { // recommended, not needed to work: a segment whose routers do not probe from off-link addresses is fine without it
+				c.add("sysctl."+name, api.DoctorWarn, name+" is "+got+", JailOps recommends "+want+" ("+why+")", hint)
+				break
+			}
+			c.add("sysctl."+name, api.DoctorFail, name+" is "+got+", JailOps needs "+want+" ("+why+")", hint)
 		default:
 			c.add("sysctl."+name, api.DoctorOK, name+"="+got+" (not needed now)", "")
 		}
 	}
-	check("net.inet6.ip6.forwarding", "1", v6, "jails reach IPv6 through the host")
-	check("net.inet.ip.forwarding", "1", v4, "jails reach IPv4 through the host")
-	check("kern.racct.enable", "1", racct, "resource limits use rctl; set it in /boot/loader.conf")
+	check("net.inet6.ip6.forwarding", "1", v6, "jails reach IPv6 through the host", "")
+	check("net.inet.ip.forwarding", "1", v4, "jails reach IPv4 through the host", "")
+	check("kern.racct.enable", "1", racct, "resource limits use rctl; set it in /boot/loader.conf", "")
+	check(SysctlOnlinkNS, "1", s.hasProxyNetwork(), "the routers of a shared IPv6 segment probe the host from off-link addresses", onlinkNSHint)
 }
 
 func (s *Service) doctorZFS(ctx context.Context, c *checkSet) {
@@ -395,9 +403,10 @@ func quickPassesBeforeAnchor(rules string) []string {
 }
 
 // doctorNDPProxy reports the networks in IPv6 proxy mode whose proxy is not answering: the upstream router then cannot
-// find their jails, and nothing else says so.
+// find their jails, and nothing else says so. A proxy whose capture is still being opened (the reconcile loop started it
+// a moment ago) is a warning, not a failure: it opens on its own.
 func (s *Service) doctorNDPProxy(c *checkSet) {
-	var bad []string
+	var bad, starting []string
 	proxied := 0
 	nets, _ := s.netKind.list()
 	s.mu.RLock()
@@ -407,13 +416,17 @@ func (s *Service) doctorNDPProxy(c *checkSet) {
 		}
 		proxied++
 		answering := false
-		msg := "no status yet"
+		reason, msg := "", "no status yet"
 		for _, cd := range s.netStat[o.Meta.Name].Conditions {
 			if cd.Type == "NDPProxy" {
-				answering, msg = cd.Status == api.ConditionTrue, cd.Message
+				answering, reason, msg = cd.Status == api.ConditionTrue, cd.Reason, cd.Message
 			}
 		}
-		if !answering {
+		switch {
+		case answering:
+		case reason == "Starting":
+			starting = append(starting, o.Meta.Name+": "+msg)
+		default:
 			bad = append(bad, o.Meta.Name+": "+msg)
 		}
 	}
@@ -422,8 +435,11 @@ func (s *Service) doctorNDPProxy(c *checkSet) {
 	case proxied == 0:
 		return
 	case len(bad) > 0:
-		c.add("network.ndproxy", api.DoctorFail, "the IPv6 proxy is not answering for "+strings.Join(bad, "; "),
+		c.add("network.ndproxy", api.DoctorFail, "the IPv6 proxy is not answering for "+strings.Join(append(bad, starting...), "; "),
 			"approve the uplink and the prefix of the jails' addresses with `ndp-proxy = <uplink>=<prefix>` in priv.conf and restart jailops-priv")
+	case len(starting) > 0:
+		c.add("network.ndproxy", api.DoctorWarn, "the IPv6 proxy is not answering yet for "+strings.Join(starting, "; ")+"; it opens within a few minutes after the daemon starts",
+			"run jailops doctor again in a few minutes; see the network's NDPProxy condition")
 	default:
 		c.add("network.ndproxy", api.DoctorOK, "the IPv6 proxy answers for every proxy-mode network", "")
 	}

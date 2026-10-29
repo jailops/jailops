@@ -58,7 +58,11 @@ func applyWith[T any](a *app, d *kindDesc[T]) applier {
 			if err != nil {
 				return err
 			}
-			return a.finishOp(ctx, h, d.noun, name, "created", out)
+			if err := a.finishOp(ctx, h, d.noun, name, "created", out); err != nil {
+				return err
+			}
+			createWarnings(a, d, out)
+			return nil
 		}
 		next := cur
 		d.setSpec(&next, x)

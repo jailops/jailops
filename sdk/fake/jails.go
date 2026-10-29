@@ -447,6 +447,14 @@ func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 func (s *Server) setupNetworks() {
 	k := s.networks
 	k.keep = func(dst, old *api.Network) { dst.Status = old.Status }
+	// The real daemon warns, in the answer of a create, when the host does not answer the off-link neighbor
+	// solicitations a shared IPv6 segment's routers send (the sysctl is 0; see WithSysctl).
+	k.created = func(n *api.Network) {
+		const oid = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
+		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy && s.sysctls[oid] == "0" {
+			n.Status.Warnings = append(n.Status.Warnings, oid+" is 0: the routers of a shared IPv6 segment probe the host's address from their global addresses and FreeBSD drops those solicitations as off-link, so the host (and its jails) is unreachable over IPv6 for minutes every few hours; run `sysctl "+oid+"=1` and add `"+oid+"=1` to /etc/sysctl.conf (JailOps never sets it)")
+		}
+	}
 	k.validate = func(n, _ *api.Network) *api.Error {
 		if n.Spec.IPv4 == nil && n.Spec.IPv6 == nil {
 			return api.Errorf(api.CodeInvalid, "a network needs ipv4 or ipv6")

@@ -66,6 +66,10 @@ func TestExtendedCommandRules(t *testing.T) {
 	ok(ctx, "/sbin/sysctl", "sysctl", "-n", "kern.osrelease")
 	ok(ctx, "/sbin/sysctl", "sysctl", "-n", "net.link.bridge.pfil_onlyip")
 	ok(ctx, "/sbin/sysctl", "sysctl", "-n", "hw.ncpu")
+	// The doctor reads the answer-off-link-probes switch of a shared IPv6 segment; nobody writes it through the helper.
+	ok(ctx, "/sbin/sysctl", "sysctl", "-n", "net.inet6.icmp6.nd6_onlink_ns_rfc4861")
+	bad(adm, api.CodeForbidden, "sysctl", "net.inet6.icmp6.nd6_onlink_ns_rfc4861=1")
+	bad(adm, api.CodeForbidden, "sysctl", "-w", "net.inet6.icmp6.nd6_onlink_ns_rfc4861=1")
 	for _, a := range [][]string{
 		{"-n", "kern.securelevel"}, {"-n"}, {}, {"kern.osrelease"}, {"-a"}, {"-n", "kern.osrelease", "hw.ncpu"}, {"-n", "kern.osrelease=1"},
 		{"-n", "../kern"}, {"-N", "kern.osrelease"}, {"-w", "net.inet.ip.forwarding=1"}, {"-n", ""}, {"-n", "kern.osrelease\n"},

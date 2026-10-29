@@ -686,3 +686,50 @@ func privateRunner() run.Runner {
 	f.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
 	return f
 }
+
+// A proxy that was just started reports "Starting" for the pass that started it (its capture opens in its own
+// goroutine). The loop looks again after the debounce instead of waiting a whole interval.
+func TestAJustStartedProxyGetsASecondLookBeforeTheInterval(t *testing.T) {
+	ndp := &fakeNDP{run: make(chan struct{}), shut: true}
+	w := newWorld(t, reconcile.Config{Interval: time.Minute, Debounce: time.Second, NDP: func(string) (reconcile.NDP, error) { return ndp, nil }})
+	w.des = reconcile.Desired{Networks: []reconcile.NetworkDesired{proxyNet()}}
+	ctx, cancel := context.WithCancel(bg)
+	done := make(chan struct{})
+	go func() { w.R.Run(ctx); close(done) }()
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		for i := 0; i < 400; i++ {
+			if cond() {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("timed out: %s", what)
+	}
+	waitFor("first pass", func() bool { return !w.R.Last().At.IsZero() && w.clock.Pending() > 0 })
+	first := w.R.Last().At
+	w.mu.Lock()
+	cond := w.netSt["lan"].Conditions
+	w.mu.Unlock()
+	if len(cond) == 0 || cond[len(cond)-1].Reason != "Starting" {
+		t.Fatalf("%+v", cond)
+	}
+	// The capture opens; the debounce timer, not the interval, brings the next pass.
+	ndp.mu.Lock()
+	ndp.shut = false
+	ndp.mu.Unlock()
+	w.clock.Advance(time.Second)
+	waitFor("second pass", func() bool { return w.R.Last().At.After(first) })
+	w.mu.Lock()
+	cond = w.netSt["lan"].Conditions
+	w.mu.Unlock()
+	if len(cond) == 0 || cond[len(cond)-1].Reason != "Answering" {
+		t.Fatalf("%+v", cond)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the loop did not stop")
+	}
+}

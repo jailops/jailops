@@ -129,3 +129,94 @@ func TestDoctorWarnsWhenForwardingIsNotPersistent(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+// proxyNet is a network in IPv6 proxy mode (a shared switched segment behind em0).
+func proxyNet() api.Network {
+	return api.Network{Metadata: api.ObjectMeta{Name: "sw"}, Spec: api.NetworkSpec{Uplink: "em0",
+		IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80", Gateway: "fe80::1", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"}}}
+}
+
+func doctorCheck(t *testing.T, e *dtest.Env, name string) api.DoctorCheck {
+	t.Helper()
+	rep, err := e.Admin.Doctor(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range rep.Checks {
+		if c.Name == name {
+			return c
+		}
+	}
+	t.Fatalf("no check %s in %+v", name, rep.Checks)
+	return api.DoctorCheck{}
+}
+
+// The routers of a shared IPv6 segment probe the host from off-link addresses; FreeBSD drops the probes unless
+// net.inet6.icmp6.nd6_onlink_ns_rfc4861 is 1. The doctor asks for it once a proxy-mode network exists, and for it
+// to be persistent; JailOps never sets it.
+func TestDoctorChecksOnlinkNSForProxyNetworks(t *testing.T) {
+	const oid = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
+	e := dtest.New(t, dtest.Options{})
+	e.Seed()
+	ctx := context.Background()
+	e.SetSysctl(oid, "0")
+	// No proxy network: the value does not matter.
+	if c := doctorCheck(t, e, "sysctl."+oid); c.Status != api.DoctorOK || !strings.Contains(c.Message, "not needed now") {
+		t.Fatalf("%+v", c)
+	}
+	if _, err := e.Admin.Networks().Create(ctx, proxyNet()); err != nil {
+		t.Fatal(err)
+	}
+	c := doctorCheck(t, e, "sysctl."+oid)
+	if c.Status != api.DoctorWarn || !strings.Contains(c.Hint, "sysctl "+oid+"=1") || !strings.Contains(c.Hint, "/etc/sysctl.conf") || !strings.Contains(c.Hint, "unreachable") {
+		t.Fatalf("%+v", c)
+	}
+	e.SetSysctl(oid, "1")
+	if c := doctorCheck(t, e, "sysctl."+oid); c.Status != api.DoctorOK || c.Message != oid+"=1" {
+		t.Fatalf("%+v", c)
+	}
+	// Persistence: forwarding alone is not enough once a proxy network exists.
+	e.Files.Data["/etc/rc.conf"] = []byte("ipv6_gateway_enable=\"YES\"\n")
+	e.Files.Data["/etc/sysctl.conf"] = []byte("# nothing\n")
+	c = doctorCheck(t, e, "sysctl.persistent")
+	if c.Status != api.DoctorWarn || !strings.Contains(c.Message, oid) || strings.Contains(c.Message, "forwarding") || !strings.Contains(c.Hint, oid+"=1 to /etc/sysctl.conf") {
+		t.Fatalf("%+v", c)
+	}
+	e.Files.Data["/etc/sysctl.conf"] = []byte(oid + "=1\n")
+	if c := doctorCheck(t, e, "sysctl.persistent"); c.Status != api.DoctorOK || !strings.Contains(c.Message, oid) {
+		t.Fatalf("%+v", c)
+	}
+}
+
+// Creating a proxy-mode network on a host whose sysctl is 0 says so in the answer; a routed network and a host
+// with the sysctl on say nothing.
+func TestCreatingAProxyNetworkWarnsAboutOnlinkNS(t *testing.T) {
+	const oid = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
+	e := dtest.New(t, dtest.Options{})
+	e.Seed()
+	ctx := context.Background()
+	e.SetSysctl(oid, "0")
+	n, err := e.Admin.Networks().Create(ctx, proxyNet())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Status.Warnings) != 1 || !strings.Contains(n.Status.Warnings[0], "sysctl "+oid+"=1") || !strings.Contains(n.Status.Warnings[0], "/etc/sysctl.conf") {
+		t.Fatalf("%+v", n.Status.Warnings)
+	}
+	// The warning is for the answer of the create only, never stored (a network is visible to the host-wide client
+	// before a project is granted it).
+	if got, err := e.Global().Networks().Get(ctx, "sw"); err != nil || len(got.Status.Warnings) != 0 {
+		t.Fatalf("%v %+v", err, got.Status.Warnings)
+	}
+	routed := api.Network{Metadata: api.ObjectMeta{Name: "rt"}, Spec: api.NetworkSpec{
+		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1:2:1::/80", Gateway: "2001:db8:1:2:1::1", Range: "2001:db8:1:2:1::10-2001:db8:1:2:1::ff"}}}
+	if n, err := e.Admin.Networks().Create(ctx, routed); err != nil || len(n.Status.Warnings) != 0 {
+		t.Fatalf("%v %+v", err, n.Status.Warnings)
+	}
+	e.SetSysctl(oid, "1")
+	p := proxyNet()
+	p.Metadata.Name, p.Spec.IPv6.Subnet, p.Spec.IPv6.Range = "sw2", "2001:db8:1:2:200::/80", "2001:db8:1:2:200::10-2001:db8:1:2:200::ff"
+	if n, err := e.Admin.Networks().Create(ctx, p); err != nil || len(n.Status.Warnings) != 0 {
+		t.Fatalf("%v %+v", err, n.Status.Warnings)
+	}
+}

@@ -79,6 +79,10 @@ type NetworkStatus struct {
 	// Orphans are epair interfaces without a jail.
 	Orphans    []string    `json:"orphans,omitempty"`
 	Conditions []Condition `json:"conditions,omitempty"`
+	// Warnings are set in the answer of a create only: what the host lacks for
+	// this network (a sysctl the administrator has to set). They are never
+	// stored; jailops doctor reports the same things.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // Lease is one allocated address. Leases are derived from jail specs and are

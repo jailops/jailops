@@ -83,6 +83,9 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 				h.err = ndp.Run(pctx)
 			}()
 			r.proxies[uplink] = h
+			// The capture opens in the proxy's own goroutine, a moment from now; the condition below says "Starting"
+			// for this pass. Without another look it would say so until the next pass, a whole interval later.
+			r.Kick()
 		}
 		select {
 		case <-h.done:
