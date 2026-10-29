@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0 - 2026-10-29
+
 - **The logs of a jail are read through the API**: `jailops jail logs NAME` lists the files below `/var/log` of the jail's root (rotated copies included; compressed ones are listed but not readable) and `jailops jail logs NAME FILE` prints the last lines of one as plain text, with `--tail N`, `--since 15m` (lines whose timestamp is not older; a line without one belongs to the preceding line), `--grep TEXT` (a plain substring) and `-f` to follow, which continues at the server's `next_offset` and starts over when the file is rotated; `-o json` prints the reply. The top-level `jailops logs NAME [FILE]` is the same command. It works for a running jail and for a stopped one whose root is mounted; otherwise it answers `busy: jail "x" is not mounted` with the dataset to mount. New routes `GET /api/v1/jails/{name}/logs` and `GET .../logs/{file}` (extension `jail_logs`, `Jails().Logs` and `Jails().Log` in the SDK and the fake), operator role (logs hold secrets; the role that may exec), audited once per identity, jail and file every five minutes. The helper gained two read-only operations, `fs.list_logs` and `fs.tail_file`, that accept only the log directory of a jail root and plain names below it, follow no symlink below the jail root, read regular files only and at most 1 MiB per call.
 
 - `jailops jail logs NAME` used to stream the log events the server publishes; that is now `jailops jail logs NAME --events` (with `--since-id` and `--count` as before).
