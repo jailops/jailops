@@ -55,8 +55,12 @@ func TestManPages(t *testing.T) {
 			t.Errorf("%s: %s", name, msg)
 		}
 		if mandoc == nil {
-			if out, err := exec.Command("mandoc", "-Tlint", "-Wall", p).CombinedOutput(); err != nil || len(out) > 0 {
-				t.Errorf("mandoc -Tlint %s: %v\n%s", p, err, out)
+			// the pages are not installed while the tests run, so references to other manuals cannot be found
+			out, _ := exec.Command("mandoc", "-Tlint", "-Wall", p).CombinedOutput()
+			for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+				if l != "" && !strings.Contains(l, "referenced manual not found") {
+					t.Errorf("mandoc -Tlint %s: %s", p, l)
+				}
 			}
 		}
 	}

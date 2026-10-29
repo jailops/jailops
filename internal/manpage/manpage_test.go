@@ -190,7 +190,15 @@ func lint(t *testing.T, path string) {
 	if _, err := exec.LookPath("mandoc"); err != nil {
 		return
 	}
-	if out, err := exec.Command("mandoc", "-Tlint", "-Wall", path).CombinedOutput(); err != nil || len(out) > 0 {
-		t.Errorf("mandoc -Tlint %s: %v\n%s", path, err, out)
+	// the pages are not installed while the tests run, so references to other manuals cannot be found
+	out, _ := exec.Command("mandoc", "-Tlint", "-Wall", path).CombinedOutput()
+	var rest []string
+	for _, l := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if l != "" && !strings.Contains(l, "referenced manual not found") {
+			rest = append(rest, l)
+		}
+	}
+	if len(rest) > 0 {
+		t.Errorf("mandoc -Tlint %s:\n%s", path, strings.Join(rest, "\n"))
 	}
 }
