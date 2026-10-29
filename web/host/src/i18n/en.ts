@@ -600,6 +600,8 @@ export const en = {
     dataset: 'Dataset',
     build: 'Build next generation',
     buildDry: 'Dry run',
+    upgrade: 'Upgrade image and jails',
+    upgradeHint: 'Build the next generation, then move every thin jail that uses the image to it, one at a time; the first jail that fails stops it.',
     setAlias: 'Set alias',
     setAliasTitle: (n: number) => `Point an alias at g${n}`,
     aliasName: 'Alias',

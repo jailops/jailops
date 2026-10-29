@@ -130,6 +130,47 @@ func (s *Server) jailState(w http.ResponseWriter, r *http.Request) {
 	writeSync(w, 200, st)
 }
 
+// SeedJailUsage sets what GET /api/v1/jails/{name}/usage answers for a jail;
+// power and the jail name are filled in from the jail when the reply is
+// built. Without it a running jail reports fixed numbers and a stopped jail
+// only its disk.
+func (s *Server) SeedJailUsage(project, name string, u api.JailUsage) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.usage == nil {
+		s.usage = map[string]api.JailUsage{}
+	}
+	s.usage[project+"/"+name] = u
+}
+
+func (s *Server) jailUsage(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	key, j := s.jails.find(r, r.PathValue("name"))
+	var u api.JailUsage
+	if j != nil {
+		seeded, ok := s.usage[key]
+		switch {
+		case ok:
+			u = seeded
+		case j.Status.Power == api.PowerRunning:
+			u = api.JailUsage{Accounting: &api.JailAccounting{Processes: 23, CPUSeconds: 8013, MemoryBytes: 407048192}}
+		}
+		if !ok {
+			u.Disk = api.JailDiskUsage{RootBytes: 268435456, RootReferencedBytes: 1610612736, DataBytes: 73400320}
+		}
+		u.Jail, u.Power, u.MeasuredAt = j.Metadata.Name, j.Status.Power, s.now().UTC()
+		if u.Power != api.PowerRunning {
+			u.Accounting = nil
+		}
+	}
+	s.mu.Unlock()
+	if j == nil {
+		writeErr(w, notFound("jail", r.PathValue("name")))
+		return
+	}
+	writeSync(w, 200, u)
+}
+
 func (s *Server) jailAction(w http.ResponseWriter, r *http.Request) {
 	act, e := decode[api.JailAction](r)
 	if e != nil {
@@ -732,6 +773,115 @@ func (s *Server) genBuild(w http.ResponseWriter, r *http.Request) {
 				s.emit("image-generation-created", "/api/v1/images/"+name+"/generations/"+strconv.Itoa(n))
 			}
 			return clone(g), nil
+		})
+		return reply{op: &op}
+	}()
+	s.mu.Unlock()
+	s.respond(w, rp)
+}
+
+// imageUpgrade implements POST /api/v1/images/{name}/upgrade: the next
+// generation from the newest one, then every thin jail of the image through
+// the OS update of applyTo, stopping at the first failure. An image seeded
+// with SeedImageCurrent has nothing to upgrade: no generation, no moves.
+func (s *Server) imageUpgrade(w http.ResponseWriter, r *http.Request) {
+	u, e := decodeOptional[api.ImageUpgrade](r)
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	name := r.PathValue("name")
+	rc := s.info(r)
+	s.mu.Lock()
+	rp := func() reply {
+		if s.images.items[name] == nil {
+			return reply{err: notFound("image", name)}
+		}
+		if u.Project != "" && (s.projects.items[u.Project] == nil || !rc.canProject(u.Project)) {
+			return reply{err: notFound("project", u.Project)}
+		}
+		from := 0
+		for _, g := range s.gens[name] {
+			from = max(from, g.Number)
+		}
+		if from == 0 {
+			return reply{err: api.Errorf(api.CodeNotFound, "image %q has no generation to upgrade", name).
+				WithHint("build the first one with 'jailops image build " + name + "'")}
+		}
+		var keys []string
+		for k, j := range s.jails.items {
+			if imageName(j.Spec.Image) == name && rc.canProject(j.Metadata.Project) && (u.Project == "" || j.Metadata.Project == u.Project) {
+				keys = append(keys, k)
+			}
+		}
+		sort.Strings(keys)
+		res := map[string][]string{"images": {"/api/v1/images/" + name}}
+		op := s.startOp("", "images.upgrade", "Upgrade image "+name, res, func() (any, *api.Error) {
+			if s.images.items[name] == nil {
+				return nil, notFound("image", name)
+			}
+			out := api.ImageUpgradeResult{From: fmt.Sprintf("%s#g%d", name, from), DryRun: u.DryRun, Unchanged: s.imgSame[name], Jails: []api.ImageUpgradeJail{}}
+			n := s.nextGen(name)
+			out.Plan = []string{fmt.Sprintf("zfs clone tank/jailops/images/%s/g%d@ro tank/jailops/images/%s/staging-g%d", name, from, name, n),
+				fmt.Sprintf("pkg -r /jailops/images/%s/staging-g%d upgrade -y -r jailops", name, n)}
+			if !u.DryRun && !out.Unchanged {
+				g := &api.ImageGeneration{Number: n, Name: fmt.Sprintf("%s#g%d", name, n), Parent: from,
+					Manifest: "sha256:" + randHex(16), Packages: 120, CreatedAt: s.now(), Dataset: fmt.Sprintf("tank/jailops/images/%s/g%d", name, n)}
+				s.gens[name] = append(s.gens[name], g)
+				s.genMax[name] = n
+				s.followAliases(name, n)
+				s.emit("image-generation-created", "/api/v1/images/"+name+"/generations/"+strconv.Itoa(n))
+				c := clone(g)
+				out.Generation = &c
+			}
+			stopped := ""
+			for _, k := range keys {
+				j := s.jails.items[k]
+				if j == nil {
+					continue
+				}
+				o := api.ImageUpgradeJail{Jail: j.Metadata.Name, Project: j.Metadata.Project, From: name + "#" + j.Status.Generation}
+				switch {
+				case j.Spec.OS == api.OSLinux:
+					o.Status, o.Reason = api.ImageUpgradeSkipped, "a Linux jail is thick and is updated in place"
+				case j.Spec.Layout == api.LayoutThick:
+					o.Status, o.Reason = api.ImageUpgradeSkipped, "a thick jail is updated in place"
+				case j.Spec.Update.Strategy == api.UpdateInPlace || j.Spec.Update.Strategy == api.UpdateManual:
+					o.Status, o.Reason = api.ImageUpgradeSkipped, "update strategy "+string(j.Spec.Update.Strategy)
+				case strings.IndexByte(j.Spec.Image, '#') >= 0:
+					o.Status, o.Reason = api.ImageUpgradeSkipped, "pinned to "+j.Spec.Image
+				case out.Unchanged:
+					o.Status, o.Reason = api.ImageUpgradeSkipped, "the package set did not change"
+				case u.DryRun:
+					o.Status, o.To = api.ImageUpgradePlanned, fmt.Sprintf("%s#g%d", name, n)
+				case u.NoJails:
+					o.Status, o.Reason = api.ImageUpgradeNotAttempted, "no_jails was set"
+				case stopped != "":
+					o.Status, o.Reason = api.ImageUpgradeNotAttempted, "stopped after "+stopped+" failed"
+				default:
+					recs := s.applyTo(j, api.UpdateApplyRequest{OS: true})
+					if len(recs) == 0 {
+						o.Status, o.Reason = api.ImageUpgradeSkipped, "already on "+o.From
+						break
+					}
+					rec := recs[0]
+					o.From, o.To, o.Record = rec.From, rec.To, rec.ID
+					if rec.Result == api.UpdateOK {
+						o.Status = api.ImageUpgradeUpgraded
+						break
+					}
+					o.Status, o.Reason = api.ImageUpgradeFailed, rec.Error
+					if rec.Note != "" {
+						o.Reason += " (" + rec.Note + ")"
+					}
+					stopped = j.Metadata.Project + "/" + j.Metadata.Name
+				}
+				out.Jails = append(out.Jails, o)
+			}
+			if !u.DryRun && !out.Unchanged {
+				s.emit("image-upgraded", "/api/v1/images/"+name)
+			}
+			return out, nil
 		})
 		return reply{op: &op}
 	}()

@@ -16,17 +16,17 @@ jail/nginx stopped
 
 $ jailops exec nginx -- echo hi
 ! busy: jail "nginx" is not running
-! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+! hint: start it first
 [exit 5]
 
 $ jailops exec nginx -- /bin/ls
 ! busy: jail "nginx" is not running
-! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+! hint: start it first
 [exit 5]
 
 $ jailops shell nginx
 ! busy: jail "nginx" is not running
-! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+! hint: start it first
 [exit 5]
 
 $ jailops shell nginx --shell bash
@@ -36,7 +36,7 @@ $ jailops shell nginx --shell bash
 
 $ jailops shell nginx --shell /usr/local/bin/bash
 ! busy: jail "nginx" is not running
-! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+! hint: start it first
 [exit 5]
 
 $ jailops delete -y nginx

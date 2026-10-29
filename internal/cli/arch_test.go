@@ -15,11 +15,13 @@ const modulePath = "jailops.net/jailops"
 // The client may import the SDK, the standard library and the few
 // third-party packages allowed for it, and nothing else of JailOps.
 var allowedImports = map[string]bool{
-	modulePath + "/sdk":      true,
-	modulePath + "/sdk/api":  true,
-	"github.com/spf13/cobra": true,
-	"gopkg.in/yaml.v3":       true,
-	"golang.org/x/term":      true,
+	modulePath + "/sdk":     true,
+	modulePath + "/sdk/api": true,
+	// writes the man pages from the command tree; it links nothing of the daemon
+	modulePath + "/internal/manpage": true,
+	"github.com/spf13/cobra":         true,
+	"gopkg.in/yaml.v3":               true,
+	"golang.org/x/term":              true,
 }
 
 // Tests may also use the in-memory server and the package under test.

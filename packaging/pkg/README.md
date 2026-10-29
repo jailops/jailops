@@ -14,9 +14,9 @@ Three packages come out of one build:
 
 | package | holds |
 |---|---|
-| `jailops-client` | `jailops`, `jailops-sync` (any machine that talks to a daemon) |
-| `jailops` | `jailopsd`, `jailops-priv`, the rc.d scripts and sample configuration; depends on `jailops-client` |
-| `jailops-backupd` | the backup node, its rc.d script and sample configuration |
+| `jailops-client` | `jailops`, `jailops-sync` (any machine that talks to a daemon), their bash, zsh and fish completion and their man pages (`man1`, one page per command) under `share/`, generated from the binaries at build time (`scripts/gen-share.sh`; `just build` leaves them in `bin/share`) |
+| `jailops` | `jailopsd`, `jailops-priv`, the rc.d scripts, sample configuration and the man pages `jailopsd(8)` and `jailops-priv(8)` (hand-written, `packaging/man/`); depends on `jailops-client` |
+| `jailops-backupd` | the backup node, its rc.d script, sample configuration, completion scripts and `jailops-backupd(8)` |
 
 JailOps targets FreeBSD 15.1 and later, so packages are built for the 15 ABI only (`FreeBSD:15:amd64`,
 `FreeBSD:15:aarch64`); `jailops doctor` fails on an older release.

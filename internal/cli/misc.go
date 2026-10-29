@@ -229,13 +229,21 @@ func (a *app) completionCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "completion bash|zsh|fish",
 		Short: "Generate a shell completion script",
-		Long: `Print a completion script for a shell. Names of jails, images, networks,
-backups and operations are completed from the server you are connected to.
+		Long: `Print a completion script for a shell. Commands and flags complete on their
+own; names of jails, images, networks, projects, backups and operations are
+completed from the server you are connected to, and when no server answers the
+shell simply gets no names.
+
+The packages install the scripts, so a packaged client needs nothing from this
+command: /usr/local/share/bash-completion/completions/jailops,
+/usr/local/share/zsh/site-functions/_jailops and
+/usr/local/share/fish/vendor_completions.d/jailops.fish (bash needs the
+bash-completion package; zsh needs compinit). For a binary installed by hand:
 
 bash:  source <(jailops completion bash)       (or save it under /usr/local/share/bash-completion/completions/jailops)
 zsh:   jailops completion zsh > "${fpath[1]}/_jailops"
 fish:  jailops completion fish > ~/.config/fish/completions/jailops.fish`,
-		Example:   "jailops completion bash > /usr/local/share/bash-completion/completions/jailops\njailops completion zsh > ~/.zfunc/_jailops",
+		Example:   "source <(jailops completion bash)\njailops completion zsh > ~/.zfunc/_jailops",
 		Args:      cobra.ExactArgs(1),
 		ValidArgs: []string{"bash", "zsh", "fish"},
 		RunE: func(cmd *cobra.Command, args []string) error {

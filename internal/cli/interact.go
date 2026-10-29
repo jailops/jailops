@@ -260,7 +260,7 @@ func (a *app) finishOp(ctx context.Context, h opHandle, noun, name, verb string,
 		}
 	}
 	if a.format == fmtTable {
-		fprintf(a.env.Stdout, "%s/%s %s\n", noun, name, verb)
+		a.say("%s/%s %s\n", noun, name, verb)
 		return nil
 	}
 	return a.emit(v, nil, nil, func() []string { return []string{name} })

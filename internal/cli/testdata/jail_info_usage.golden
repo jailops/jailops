@@ -1,0 +1,102 @@
+$ jailops jail info web
+Jail web
+  Project:      main
+  Hostname:     web
+  State:        running (jid 1)
+  Type:         thin jail
+  Image:        freebsd-15@stable, generation g1
+  Storage:      default
+  Created:      2026-03-01 09:00 UTC (3h ago)
+  Started:      2026-03-01 09:00 UTC (3h ago)
+  UUID:         <uuid>
+
+Resources
+  Limits:       cpu 2, memory 2G
+  Usage:        - (racct is off: set kern.racct.enable=1 in /boot/loader.conf and reboot)
+  Disk:         not available: cannot open 'tank/jailops/projects/main/jails/web': dataset does not exist
+
+Network
+  eth0:         network lan, mac derived by the server, mtu network default, up
+    10.20.0.10                                 ipv4 global, configured
+
+Snapshots
+  Count:        0
+
+Update policy
+  Strategy:     -, mode manual
+  Last:         no update yet
+
+Labels
+  env:          prod
+
+$ jailops jail info db -o json
+{
+  "name": "db",
+  "project": "main",
+  "uuid": "<uuid>",
+  "hostname": "db",
+  "state": "stopped",
+  "layout": "thin",
+  "image": "freebsd-15@stable",
+  "generation": "g1",
+  "storage": "default",
+  "created_at": "2026-03-01T09:00:00Z",
+  "resources": {
+    "limits": {},
+    "usage": {
+      "jail": "db",
+      "power": "stopped",
+      "measured_at": "2026-03-01T09:00:00Z",
+      "disk": {
+        "root_bytes": 1536,
+        "root_referenced_bytes": 1536,
+        "data_bytes": 0
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "name": "eth0",
+      "network": "lan",
+      "state": "down",
+      "addresses": [
+        {
+          "address": "10.20.0.11",
+          "family": "ipv4",
+          "scope": "global",
+          "configured": false
+        }
+      ]
+    },
+    {
+      "name": "eth1",
+      "network": "sw",
+      "state": "down",
+      "addresses": [
+        {
+          "address": "10.94.0.2",
+          "family": "ipv4",
+          "scope": "global",
+          "configured": false
+        },
+        {
+          "address": "2001:db8:1:2:100::10",
+          "family": "ipv6",
+          "scope": "global",
+          "configured": false
+        }
+      ]
+    }
+  ],
+  "volumes": [
+    {
+      "name": "data",
+      "mount": "/var/db"
+    }
+  ],
+  "snapshots": {
+    "count": 0
+  },
+  "update": {}
+}
+

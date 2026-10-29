@@ -11,6 +11,8 @@ before:
     # the consoles are embedded in the binaries
     - go run ./scripts/gen-ts -check
     - sh -c 'cd web && npm ci && npm run build:all'
+    # the shell completion scripts and man pages of the tools, generated from the source being released
+    - sh scripts/gen-share.sh bin/share
 
 builds:
   - id: jailops
@@ -57,7 +59,31 @@ archives:
     ids: [jailops, jailops-sync]
     name_template: "jailops-client_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
-    files: [LICENSE.md, README.md]
+    files:
+      - LICENSE.md
+      - README.md
+      # shell completion and man pages, laid out as share/ under the prefix
+      - src: bin/share/bash-completion/completions/jailops
+        dst: share/bash-completion/completions
+        strip_parent: true
+      - src: bin/share/bash-completion/completions/jailops-sync
+        dst: share/bash-completion/completions
+        strip_parent: true
+      - src: bin/share/zsh/site-functions/_jailops
+        dst: share/zsh/site-functions
+        strip_parent: true
+      - src: bin/share/zsh/site-functions/_jailops-sync
+        dst: share/zsh/site-functions
+        strip_parent: true
+      - src: bin/share/fish/vendor_completions.d/jailops.fish
+        dst: share/fish/vendor_completions.d
+        strip_parent: true
+      - src: bin/share/fish/vendor_completions.d/jailops-sync.fish
+        dst: share/fish/vendor_completions.d
+        strip_parent: true
+      - src: bin/share/man/man1/*
+        dst: share/man/man1
+        strip_parent: true
   - id: host
     ids: [jailopsd, jailops-priv]
     name_template: "jailops-host_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
@@ -71,6 +97,12 @@ archives:
         dst: etc/jailopsd.yaml.sample
       - src: packaging/priv.conf.sample
         dst: etc/priv.conf.sample
+      - src: packaging/man/jailopsd.8
+        dst: share/man/man8
+        strip_parent: true
+      - src: packaging/man/jailops-priv.8
+        dst: share/man/man8
+        strip_parent: true
   - id: backupd
     ids: [jailops-backupd]
     name_template: "jailops-backupd_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
@@ -83,6 +115,18 @@ archives:
         dst: rc.d/jailops_backupd
       - src: packaging/systemd/jailops-backupd.service
         dst: systemd/jailops-backupd.service
+      - src: bin/share/bash-completion/completions/jailops-backupd
+        dst: share/bash-completion/completions
+        strip_parent: true
+      - src: bin/share/zsh/site-functions/_jailops-backupd
+        dst: share/zsh/site-functions
+        strip_parent: true
+      - src: bin/share/fish/vendor_completions.d/jailops-backupd.fish
+        dst: share/fish/vendor_completions.d
+        strip_parent: true
+      - src: packaging/man/jailops-backupd.8
+        dst: share/man/man8
+        strip_parent: true
 
 nfpms:
   - id: jailops-client
@@ -95,6 +139,21 @@ nfpms:
     description: The jailops command line client and jailops-sync, the declarative fleet tool.
     license: BSD-2-Clause
     bindir: /usr/bin
+    contents:
+      - src: bin/share/bash-completion/completions/jailops
+        dst: /usr/share/bash-completion/completions/jailops
+      - src: bin/share/bash-completion/completions/jailops-sync
+        dst: /usr/share/bash-completion/completions/jailops-sync
+      - src: bin/share/zsh/site-functions/_jailops
+        dst: /usr/share/zsh/site-functions/_jailops
+      - src: bin/share/zsh/site-functions/_jailops-sync
+        dst: /usr/share/zsh/site-functions/_jailops-sync
+      - src: bin/share/fish/vendor_completions.d/jailops.fish
+        dst: /usr/share/fish/vendor_completions.d/jailops.fish
+      - src: bin/share/fish/vendor_completions.d/jailops-sync.fish
+        dst: /usr/share/fish/vendor_completions.d/jailops-sync.fish
+      - src: bin/share/man/man1/*
+        dst: /usr/share/man/man1/
   - id: jailops-backupd
     package_name: jailops-backupd
     ids: [jailops-backupd]
@@ -113,6 +172,14 @@ nfpms:
       - src: packaging/systemd/jailops-backupd.service
         dst: /lib/systemd/system/jailops-backupd.service
         file_info: {mode: 0644}
+      - src: bin/share/bash-completion/completions/jailops-backupd
+        dst: /usr/share/bash-completion/completions/jailops-backupd
+      - src: bin/share/zsh/site-functions/_jailops-backupd
+        dst: /usr/share/zsh/site-functions/_jailops-backupd
+      - src: bin/share/fish/vendor_completions.d/jailops-backupd.fish
+        dst: /usr/share/fish/vendor_completions.d/jailops-backupd.fish
+      - src: packaging/man/jailops-backupd.8
+        dst: /usr/share/man/man8/jailops-backupd.8
     scripts:
       preinstall: packaging/linux-backupd-preinstall.sh
     overrides:

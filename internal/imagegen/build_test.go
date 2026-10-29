@@ -86,6 +86,41 @@ func TestBuildDryRunTouchesNothing(t *testing.T) {
 	}
 }
 
+func TestUpgradeKeepsNothingWhenThePackageSetDidNotChange(t *testing.T) {
+	w := newWorld(t)
+	if _, err := w.M.Build(bg, "fb", api.ImageBuild{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.M.Upgrade(bg, "fb", api.ImageBuild{}); !api.IsCode(err, api.CodeInvalid) {
+		t.Fatalf("an upgrade without a parent: %v", err)
+	}
+	before := w.state()
+	// The repository serves the same versions: pkg upgrade exits cleanly and changes nothing.
+	r, err := w.M.Upgrade(bg, "fb", api.ImageBuild{FromGeneration: 1})
+	if err != nil || !r.Unchanged || r.Generation.Number != 0 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	if after := w.state(); after != before {
+		t.Fatalf("an unchanged upgrade left something behind\nbefore:\n%s\nafter:\n%s", before, after)
+	}
+	if len(w.J.Recs) != 0 {
+		t.Fatalf("journal not cleaned: %v", w.J.Recs)
+	}
+	if o, _ := w.M.Observe(bg, "fb"); len(o.Status.Generations) != 1 || o.MaxNumber != 1 || o.Status.Aliases["latest"] != 1 {
+		t.Fatalf("%+v", o)
+	}
+	// A newer package set is kept as the next generation.
+	w.repoVersion = "15.0p2"
+	r, err = w.M.Upgrade(bg, "fb", api.ImageBuild{FromGeneration: 1})
+	if err != nil || r.Unchanged || r.Generation.Number != 2 || r.Generation.Parent != 1 {
+		t.Fatalf("%+v %v", r, err)
+	}
+	// Build keeps an identical generation: only Upgrade refuses one.
+	if r, err := w.M.Build(bg, "fb", api.ImageBuild{FromGeneration: 2}); err != nil || r.Generation.Number != 3 {
+		t.Fatalf("%+v %v", r, err)
+	}
+}
+
 func TestBuildFailureSweepFirst(t *testing.T) {
 	sweep(t, newWorld, func(w *world) error {
 		_, err := w.M.Build(bg, "fb", api.ImageBuild{})

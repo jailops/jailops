@@ -27,12 +27,14 @@ var clock = time.Date(2026, 3, 1, 9, 0, 0, 0, time.UTC)
 
 // harness runs the CLI in-process against a fake server over httptest.
 type harness struct {
-	t       *testing.T
-	srv     *fake.Server
-	ts      *httptest.Server
-	dir     string
-	env     map[string]string
-	tty     bool
+	t   *testing.T
+	srv *fake.Server
+	ts  *httptest.Server
+	dir string
+	env map[string]string
+	tty bool
+	// cols is the terminal width tables see; zero leaves it unknown
+	cols    uint16
 	probe   func(ctx context.Context, hp string) (*cli.CertProbe, error)
 	cfgFile string
 	// terminal hooks, nil for the defaults
@@ -123,6 +125,9 @@ func (h *harness) environ(stdin string, out, errb *bytes.Buffer) *cli.Env {
 		e.RawTerminal = h.rawTerm
 		e.TermSize = func(any) (uint16, uint16, bool) { return 24, 80, true }
 		e.ResizeSignal = func() (<-chan struct{}, func()) { return h.resize, func() {} }
+	}
+	if h.cols > 0 {
+		e.TermSize = func(any) (uint16, uint16, bool) { return 24, h.cols, true }
 	}
 	return e
 }

@@ -54,7 +54,23 @@ func initMain(args []string, stdout, stderr io.Writer, euid int) int {
 	fs.BoolVar(&o.web, "web", false, "also turn on the web console: opens the TLS listener (-web-address) and sets web.enabled; sign in with a JailOps user")
 	fs.StringVar(&o.webAddress, "web-address", ":39110", "the address of the TLS listener that -web opens (all interfaces by default; 127.0.0.1:39110 keeps it on this host)")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "say what would be done and do nothing")
+	fs.Usage = func() {
+		fmt.Fprint(fs.Output(), "usage: jailops-priv init -pool POOL [flags]\n\nThe one-time setup of a host: the user and group, the storage root and state datasets, and the two\nconfiguration files. Everything is idempotent; what exists is left as it is.\n\nflags:\n")
+		fs.PrintDefaults()
+	}
+	for _, a := range args {
+		if a == "-h" || a == "-help" || a == "--help" {
+			fs.SetOutput(stdout)
+			fs.Usage()
+			return 0
+		}
+	}
 	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	// the arguments are checked before the root check, so a mistake is reported to anyone
+	if err := o.validate(); err != nil {
+		fmt.Fprintf(stderr, "jailops-priv init: %v\n%s", err, synopsis)
 		return 2
 	}
 	if euid != 0 && !o.dryRun {
@@ -72,7 +88,8 @@ func (o *initOptions) path(p string) string { return filepath.Join(o.root, p) }
 
 func (o *initOptions) say(w io.Writer, format string, a ...any) { fmt.Fprintf(w, format+"\n", a...) }
 
-func (o *initOptions) do(w io.Writer) error {
+// validate checks the arguments without touching the system.
+func (o *initOptions) validate() error {
 	if o.pool == "" || strings.ContainsAny(o.pool, "/ @#") {
 		return errors.New("-pool names the pool (for example -pool tank), not a dataset")
 	}
@@ -84,6 +101,13 @@ func (o *initOptions) do(w io.Writer) error {
 	}
 	if !filepath.IsAbs(o.mount) || filepath.Clean(o.mount) != o.mount || o.mount == "/" {
 		return fmt.Errorf("mount %q must be a clean absolute path other than /", o.mount)
+	}
+	return nil
+}
+
+func (o *initOptions) do(w io.Writer) error {
+	if err := o.validate(); err != nil {
+		return err
 	}
 	if out, err := o.run("zpool", "list", "-H", "-o", "name", o.pool); err != nil || strings.TrimSpace(out) != o.pool {
 		return fmt.Errorf("pool %s does not exist or is not imported (%s)", o.pool, out)

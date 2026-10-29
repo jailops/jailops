@@ -2,6 +2,7 @@ package imagegen
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -18,6 +19,9 @@ type BuildResult struct {
 	Generation api.ImageGeneration
 	// Status is the image status recorded after the build.
 	Status api.ImageStatus
+	// Unchanged is set by Upgrade when the package set equals the parent's:
+	// the staging dataset was destroyed and no generation was kept.
+	Unchanged bool
 }
 
 type buildState struct {
@@ -27,7 +31,14 @@ type buildState struct {
 	imageMade bool
 	oldAlias  string
 	hadAlias  bool
+	// requireChange stops the plan, keeping nothing, when the package set
+	// equals the parent's.
+	requireChange bool
 }
+
+// errUnchanged stops an upgrade whose package set equals the parent's. The
+// plan rolls back as for any failure, so nothing is left behind.
+var errUnchanged = errors.New("the package set did not change")
 
 // Build builds the next generation of an image: a staging clone of the parent
 // (or an empty dataset for the first one), install or upgrade through the
@@ -35,6 +46,22 @@ type buildState struct {
 // rename is the commit point; a failure before it leaves no generation and no
 // leaked dataset. DryRun returns the exact plan without touching anything.
 func (m *Manager) Build(ctx context.Context, image string, req api.ImageBuild) (BuildResult, error) {
+	return m.build(ctx, image, req, false)
+}
+
+// Upgrade is Build from an earlier generation (req.FromGeneration, required)
+// that keeps the result only when the package set changed: the package
+// manager exits cleanly when there is nothing to upgrade, which would leave a
+// generation identical to its parent. The result then says Unchanged and
+// holds no generation.
+func (m *Manager) Upgrade(ctx context.Context, image string, req api.ImageBuild) (BuildResult, error) {
+	if req.FromGeneration <= 0 {
+		return BuildResult{}, api.Errorf(api.CodeInvalid, "an upgrade needs the generation to build from")
+	}
+	return m.build(ctx, image, req, true)
+}
+
+func (m *Manager) build(ctx context.Context, image string, req api.ImageBuild, requireChange bool) (BuildResult, error) {
 	var res BuildResult
 	if m.Specs == nil {
 		return res, api.Errorf(api.CodeInternal, "image manager has no spec provider")
@@ -87,7 +114,7 @@ func (m *Manager) Build(ctx context.Context, image string, req api.ImageBuild) (
 	if err != nil {
 		return res, err
 	}
-	st := &buildState{}
+	st := &buildState{requireChange: requireChange}
 	p := m.buildPlan(b, src, srcSteps, st)
 	res.Plan = p.Describe()
 	if req.DryRun {
@@ -95,6 +122,11 @@ func (m *Manager) Build(ctx context.Context, image string, req api.ImageBuild) (
 		return res, nil
 	}
 	if err := m.executor().Run(ctx, fmt.Sprintf("image-build/%s/g%d", image, n), p); err != nil {
+		var pe *plan.Error
+		if errors.Is(err, errUnchanged) && (!errors.As(err, &pe) || len(pe.UndoErrs) == 0) {
+			res.Unchanged = true
+			return res, nil
+		}
 		return res, err
 	}
 	after, err := m.Observe(ctx, image)
@@ -194,6 +226,17 @@ func (m *Manager) buildPlan(b *Build, src Source, srcSteps []plan.Step, st *buil
 			st.pkgs, st.manifest = pk, ManifestHash(pk)
 			return nil
 		}})
+	if st.requireChange && b.Parent > 0 {
+		parentDS := m.Layout.GenDS(b.Image, b.Parent)
+		p.Add(plan.Step{
+			Name: "require-change", Describe: "stop, keeping nothing, when the package set equals that of " + GenerationName(b.Image, b.Parent),
+			Do: func(ctx context.Context) error {
+				if v, _ := z.Get(ctx, parentDS, PropManifest); v == st.manifest {
+					return errUnchanged
+				}
+				return nil
+			}})
+	}
 	p.Add(src.Check(b)...)
 	p.Add(plan.Step{
 		Name: "validate-paths", Describe: fmt.Sprintf("require %v under %s", src.RequiredPaths(), b.Root),

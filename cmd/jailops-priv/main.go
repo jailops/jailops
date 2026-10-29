@@ -6,7 +6,8 @@
 //	jailops-priv [flags]                     serve
 //	jailops-priv [flags] hook <phase> <jail> run one jail hook and exit
 //	jailops-priv [flags] check-config        validate the configuration, print the effective roots and allow-lists
-//	jailops-priv version
+//	jailops-priv init -pool POOL [-dry-run]  one-time setup of a host (init.go)
+//	jailops-priv version | --version
 //
 // SIGHUP rereads the storage file and verifies every storage root again.
 package main
@@ -37,6 +38,8 @@ import (
 var version = "dev"
 
 const defaultConfig = "/usr/local/etc/jailops/priv.conf"
+
+const synopsis = "usage: jailops-priv [flags] | version | check-config | init -pool POOL [-dry-run] | hook PHASE JAIL\n"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Geteuid()))
@@ -107,6 +110,10 @@ type options struct {
 func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs := flag.NewFlagSet("jailops-priv", flag.ContinueOnError)
 	fs.SetOutput(errw)
+	fs.Usage = func() {
+		fmt.Fprintf(fs.Output(), "%s\nWithout a command the helper serves on its socket. PHASE is prestart, poststart, prestop or poststop.\n\nflags (also keys of the configuration file):\n", synopsis)
+		fs.PrintDefaults()
+	}
 	fs.StringVar(&o.config, "config", defaultConfig, "configuration file (key = value lines named like these flags)")
 	fs.StringVar(&o.socket, "socket", priv.DefaultSocket, "unix socket path")
 	fs.StringVar(&o.group, "group", "jailops", "group that owns the socket (mode 0660)")
@@ -208,6 +215,18 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 	}
 	var o options
 	fs := newFlags(&o, stderr)
+	// help and the version need no configuration
+	for _, a := range args {
+		switch a {
+		case "-h", "-help", "--help":
+			fs.SetOutput(stdout)
+			fs.Usage()
+			return 0
+		case "-version", "--version":
+			printVersion(stdout)
+			return 0
+		}
+	}
 	// -config is needed before the file can be read.
 	for i, a := range args {
 		if (a == "-config" || a == "--config") && i+1 < len(args) {
@@ -232,12 +251,17 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 	}
 	rest := fs.Args()
 	if len(rest) > 0 && rest[0] == "version" {
-		fmt.Fprintf(stdout, "jailops-priv %s (protocol %d)\n", version, priv.ProtocolVersion)
+		printVersion(stdout)
 		return 0
 	}
 	cfg := o.privConfig()
 	if len(rest) > 0 && rest[0] == "check-config" {
 		return checkConfig(&o, cfg, stdout, stderr)
+	}
+	// the command is checked before root is required
+	if len(rest) > 0 && (rest[0] != "hook" || len(rest) != 3) {
+		fmt.Fprint(stderr, synopsis)
+		return 2
 	}
 	if euid != 0 && !o.dev {
 		fmt.Fprintln(stderr, "jailops-priv: must run as root (use --dev for development)")
@@ -253,14 +277,14 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 			return 2
 		}
 	}
-	switch {
-	case len(rest) == 0:
+	if len(rest) == 0 {
 		return serve(&o, cfg, stderr)
-	case rest[0] == "hook" && len(rest) == 3:
-		return hook(&o, cfg, rest[1], rest[2], stderr)
 	}
-	fmt.Fprintln(stderr, "usage: jailops-priv [flags] | version | check-config | init -pool POOL | hook prestart|poststart|prestop|poststop <jail>")
-	return 2
+	return hook(&o, cfg, rest[1], rest[2], stderr)
+}
+
+func printVersion(w io.Writer) {
+	fmt.Fprintf(w, "jailops-priv %s (protocol %d)\n", version, priv.ProtocolVersion)
 }
 
 func newAuditor(o *options, daemon bool, stderr io.Writer) *priv.Auditor {

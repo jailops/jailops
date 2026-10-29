@@ -429,6 +429,35 @@ func hostDesc() *kindDesc[api.Remote] {
 	return &d
 }
 
+// completeHosts completes the name of a host behind a hub.
+func (a *app) completeHosts() completer {
+	return a.completeNames(func(ctx context.Context, c *sdk.Client) ([]string, error) {
+		items, err := collect(c.Remotes().List(ctx))
+		var n []string
+		for _, h := range items {
+			n = append(n, h.Metadata.Name)
+		}
+		return n, err
+	})
+}
+
+// hostUUID resolves a host of a hub given by name or UUID to its UUID.
+func (a *app) hostUUID(ctx context.Context, c *sdk.Client, nameOrUUID string) (string, error) {
+	if len(nameOrUUID) == 36 && strings.Count(nameOrUUID, "-") == 4 {
+		return nameOrUUID, nil
+	}
+	hosts, err := collect(c.Remotes().List(ctx))
+	if err != nil {
+		return "", err
+	}
+	for _, h := range hosts {
+		if h.Metadata.Name == nameOrUUID && h.Spec.HostUUID != "" {
+			return h.Spec.HostUUID, nil
+		}
+	}
+	return "", api.Errorf(api.CodeNotFound, "host %q not found", nameOrUUID).WithHint("'jailops host list' names the hosts of the hub; a UUID is accepted as well")
+}
+
 func (a *app) hostCmd() *cobra.Command {
 	d := hostDesc()
 	hc := group("host", "Manage the hosts a hub controls",

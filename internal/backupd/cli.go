@@ -15,6 +15,8 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"golang.org/x/term"
+
 	"jailops.net/jailops/internal/auth"
 	"jailops.net/jailops/internal/backupui"
 	"jailops.net/jailops/internal/node"
@@ -31,6 +33,7 @@ Daemon:
   init [--admin NAME] [--key-domain ID]
                                    create the repository, probe the datastore, migrate the database,
                                    create the server certificate, optionally create the first admin
+  check-config                     validate the configuration and the files it names, without the network
   version
 
 Administration (through the admin socket of the running daemon; root or the admin group):
@@ -48,10 +51,66 @@ Administration (through the admin socket of the running daemon; root or the admi
 Database (direct):
   hosts enroll NAME (--fingerprint FP | --cert FILE) [--scopes backup-push,backup-pull] [--note TEXT]
   hosts list | hosts revoke NAME
-  users add NAME ROLE [--password-file FILE] | users list | users delete NAME
+  users add NAME ROLE [--password-file FILE | --password-prompt] | users list | users delete NAME
 
-Options: -c FILE (default ` + DefaultConfigPath + `, or $JAILOPS_BACKUPD_CONFIG), --json for raw answers.
+Shell:
+  completion bash|zsh|fish         print a completion script
+
+Options, before or after the command: -c FILE or --config FILE (default ` + DefaultConfigPath + `, or
+$JAILOPS_BACKUPD_CONFIG), --json for raw answers. <command> --help describes one command and its flags.
 `
+
+// verb is one row of the command table: the synopsis and the line `<command> --help` prints, and what the completion
+// scripts offer after it (positional words, and flags written as "--name" or "--name VALUE"; a FILE value completes
+// file names). A row named "verb subverb" describes that form alone.
+type verb struct {
+	name  string
+	syn   string
+	desc  string
+	words []string
+	flags []string
+}
+
+var verbs = []verb{
+	{"serve", "serve [--adopt]", "run the node: host listener, admin socket, management API and console", nil, []string{"--adopt"}},
+	{"init", "init [--admin NAME] [--password-file FILE | --password-prompt] [--key-domain ID]",
+		"create the repository, probe the datastore, migrate the database, create the server certificate and, with --admin, the first administrator; a second run reports the existing repository",
+		nil, []string{"--admin NAME", "--password-file FILE", "--password-prompt", "--key-domain ID"}},
+	{"check-config", "check-config", "load the configuration, read the database secret and look for the TLS files; the network is not touched", nil, nil},
+	{"version", "version", "print the version and the database schema version", nil, nil},
+	{"status", "status", "repository status", nil, nil},
+	{"gc", "gc [--grace 36h] [--dry-run]", "garbage collection", nil, []string{"--grace DURATION", "--dry-run"}},
+	{"verify", "verify [all|new|stale] [--no-quarantine]", "keyless verification (default new)", []string{"all", "new", "stale"}, []string{"--no-quarantine"}},
+	{"retention", "retention [--dry-run]", "apply the retention policies", nil, []string{"--dry-run"}},
+	{"maintenance", "maintenance [online|read-only|offline]", "show or set the maintenance mode", []string{"online", "read-only", "offline"}, nil},
+	{"protect", "protect GROUP SNAPSHOT", "protect a snapshot from deletion and retention", nil, nil},
+	{"unprotect", "unprotect GROUP SNAPSHOT", "remove the protection of a snapshot", nil, nil},
+	{"delete", "delete request|cancel|execute GROUP SNAPSHOT", "deletion of a snapshot: requested, cancelled, or executed once the delay has passed", []string{"request", "cancel", "execute"}, nil},
+	{"delete request", "delete request GROUP SNAPSHOT [--delay 72h]", "request the deletion of a snapshot", nil, []string{"--delay DURATION"}},
+	{"quarantine", "quarantine list", "list the chunks verification moved aside", []string{"list"}, nil},
+	{"reconcile", "reconcile", "rebuild the snapshot index from the repository", nil, nil},
+	{"jobs", "jobs [ID]", "recent jobs, or one job with its result", nil, nil},
+	{"hosts", "hosts enroll|list|revoke", "the backup hosts enrolled in the database", []string{"enroll", "list", "revoke"}, nil},
+	{"hosts enroll", "hosts enroll NAME (--fingerprint FP | --cert FILE) [--scopes backup-push,backup-pull] [--note TEXT]",
+		"enroll a host by the fingerprint of its certificate", nil, []string{"--fingerprint FP", "--cert FILE", "--scopes SCOPES", "--note TEXT"}},
+	{"users", "users add|list|delete", "the users of the management API and console", []string{"add", "list", "delete"}, nil},
+	{"users add", "users add NAME ROLE [--password-file FILE | --password-prompt]", "create a user (role readonly, backup-admin or admin); the password comes from the file, the prompt or standard input",
+		nil, []string{"--password-file FILE", "--password-prompt"}},
+	{"completion", "completion bash|zsh|fish", "print a completion script for the shell", []string{"bash", "zsh", "fish"}, nil},
+}
+
+// lookupVerb returns the row named name, or nil.
+func lookupVerb(name string) *verb {
+	for i := range verbs {
+		if verbs[i].name == name {
+			return &verbs[i]
+		}
+	}
+	return nil
+}
+
+// errHelp is returned by a command that printed its help: exit 0, nothing more to say.
+var errHelp = errors.New("help")
 
 type cli struct {
 	cfgPath string
@@ -67,47 +126,78 @@ func RunCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	if v := os.Getenv("JAILOPS_BACKUPD_CONFIG"); v != "" {
 		c.cfgPath = v
 	}
-	// global options come first
-	for len(args) > 0 && strings.HasPrefix(args[0], "-") {
+	// the global options may come before or after the command
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		a := args[i]
 		switch {
-		case args[0] == "-c" && len(args) > 1:
-			c.cfgPath, args = args[1], args[2:]
-		case strings.HasPrefix(args[0], "-c="):
-			c.cfgPath, args = strings.TrimPrefix(args[0], "-c="), args[1:]
-		case args[0] == "--json":
-			c.json, args = true, args[1:]
-		case args[0] == "-h" || args[0] == "--help":
+		case (a == "-c" || a == "--config") && i+1 < len(args):
+			c.cfgPath = args[i+1]
+			i++
+		case strings.HasPrefix(a, "-c="):
+			c.cfgPath = strings.TrimPrefix(a, "-c=")
+		case strings.HasPrefix(a, "--config="):
+			c.cfgPath = strings.TrimPrefix(a, "--config=")
+		case a == "--json":
+			c.json = true
+		case len(rest) > 0:
+			rest = append(rest, a)
+		case a == "-h" || a == "--help":
 			fmt.Fprint(stdout, usage)
 			return 0
-		default:
-			fmt.Fprintf(stderr, "unknown option %s\n\n%s", args[0], usage)
+		case a == "--version" || a == "-version":
+			c.version()
+			return 0
+		case strings.HasPrefix(a, "-"):
+			fmt.Fprintf(stderr, "unknown option %s\n\n%s", a, usage)
 			return 2
+		default:
+			rest = append(rest, a)
 		}
 	}
-	if len(args) == 0 {
+	if len(rest) == 0 {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
-	cmd, rest := args[0], args[1:]
+	cmd, rest := rest[0], rest[1:]
+	// `<command> --help`: commands with flags answer it themselves, with the flags; the others here
+	if v := lookupVerb(cmd); v != nil && wantsHelp(rest) {
+		if len(rest) > 0 {
+			if sub := lookupVerb(cmd + " " + rest[0]); sub != nil {
+				v = sub
+			}
+		}
+		if len(v.flags) == 0 {
+			c.help(v.name, nil)
+			return 0
+		}
+	}
 	var err error
 	switch cmd {
 	case "version":
-		fmt.Fprintf(stdout, "jailops-backupd %s (schema %s)\n", Version, ctl.SchemaVersion())
+		c.version()
 	case "serve":
 		err = c.serve(ctx, rest)
 	case "init":
 		err = c.init(ctx, rest)
+	case "check-config":
+		err = c.checkConfig()
 	case "hosts":
 		err = c.hosts(ctx, rest)
 	case "users":
 		err = c.users(ctx, rest)
 	case "status", "gc", "verify", "retention", "maintenance", "protect", "unprotect", "delete", "quarantine", "reconcile", "jobs":
 		err = c.admin(ctx, cmd, rest)
+	case "completion":
+		err = c.completion(rest)
 	case "help":
 		fmt.Fprint(stdout, usage)
 	default:
 		fmt.Fprintf(stderr, "unknown command %q\n\n%s", cmd, usage)
 		return 2
+	}
+	if errors.Is(err, errHelp) {
+		return 0
 	}
 	if err != nil {
 		var ae *api.Error
@@ -121,17 +211,49 @@ func RunCLI(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	return 0
 }
 
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *cli) version() {
+	fmt.Fprintf(c.out, "jailops-backupd %s (schema %s)\n", Version, ctl.SchemaVersion())
+}
+
+// help prints the synopsis and the description of one command, and its flags when it has a flag set.
+func (c *cli) help(name string, fs *flag.FlagSet) {
+	v := lookupVerb(name)
+	if v == nil {
+		fmt.Fprint(c.out, usage)
+		return
+	}
+	fmt.Fprintf(c.out, "usage: jailops-backupd [-c FILE] [--json] %s\n\n  %s\n", v.syn, v.desc)
+	if fs != nil {
+		fmt.Fprintln(c.out, "\nflags:")
+		fs.SetOutput(c.out)
+		fs.PrintDefaults()
+	}
+}
+
 func (c *cli) loadConfig() (*Config, error) { return LoadConfig(c.cfgPath) }
 
 func (c *cli) flags(name string, args []string, setup func(*flag.FlagSet)) ([]string, error) {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
-	fs.SetOutput(c.err)
+	fs.SetOutput(io.Discard)
 	setup(fs)
 	// flags may follow positional arguments: parse in rounds
 	var pos []string
 	for {
 		if err := fs.Parse(args); err != nil {
-			return nil, err
+			if errors.Is(err, flag.ErrHelp) {
+				c.help(name, fs)
+				return nil, errHelp
+			}
+			return nil, fmt.Errorf("%s: %w (see jailops-backupd %s --help)", name, err, name)
 		}
 		if fs.NArg() == 0 {
 			return pos, nil
@@ -146,7 +268,7 @@ func (c *cli) print(v any) {
 	fmt.Fprintln(c.out, string(b))
 }
 
-// ---- serve and init -----------------------------------------------------------------------
+// ---- serve, init and check-config ---------------------------------------------------------
 
 func (c *cli) serve(ctx context.Context, args []string) error {
 	var adopt bool
@@ -178,12 +300,17 @@ func (c *cli) serve(ctx context.Context, args []string) error {
 
 func (c *cli) init(ctx context.Context, args []string) error {
 	var admin, pwFile, keyDomain string
+	var pwPrompt bool
 	if _, err := c.flags("init", args, func(fs *flag.FlagSet) {
 		fs.StringVar(&keyDomain, "key-domain", "", "the 16 hex digit key domain id of the hosts' master key; hosts with another key are refused")
-		fs.StringVar(&admin, "admin", "", "create this administrator (the password comes from --password-file or stdin)")
+		fs.StringVar(&admin, "admin", "", "create this administrator (the password comes from --password-file, --password-prompt or stdin)")
 		fs.StringVar(&pwFile, "password-file", "", "file holding the administrator's password")
+		fs.BoolVar(&pwPrompt, "password-prompt", false, "ask for the administrator's password on the terminal")
 	}); err != nil {
 		return err
+	}
+	if pwFile != "" && pwPrompt {
+		return errPasswordSources
 	}
 	cfg, err := c.loadConfig()
 	if err != nil {
@@ -220,10 +347,24 @@ func (c *cli) init(ctx context.Context, args []string) error {
 		}
 	}
 	meta, err := node.Init(ctx, be, node.InitOptions{ServerID: sid, Host: cfg.Hostname, KeyDomain: keyDomain})
-	if err != nil {
+	switch {
+	case errors.Is(err, node.ErrInitialised):
+		// a second init is not a mistake: report the repository and go on with the parts that are idempotent
+		if meta, err = node.ReadMeta(ctx, be); err != nil {
+			return err
+		}
+		owner := "none"
+		if o, err := node.ReadOwner(ctx, be); err != nil {
+			return err
+		} else if o != nil {
+			owner = o.ServerID
+		}
+		fmt.Fprintf(c.out, "repository %s already initialised (owner %s)\n", meta.ID, owner)
+	case err != nil:
 		return err
+	default:
+		fmt.Fprintf(c.out, "repository %s created (owner %s)\n", meta.ID, sid)
 	}
-	fmt.Fprintf(c.out, "repository %s created (owner %s)\n", meta.ID, sid)
 	fp, created, err := cfg.EnsureServerCert()
 	if err != nil {
 		return err
@@ -236,7 +377,7 @@ func (c *cli) init(ctx context.Context, args []string) error {
 		return err
 	}
 	if admin != "" {
-		pw, err := c.readPassword(pwFile)
+		pw, err := c.readPassword(pwFile, pwPrompt)
 		if err != nil {
 			return err
 		}
@@ -248,6 +389,33 @@ func (c *cli) init(ctx context.Context, args []string) error {
 	return nil
 }
 
+// checkConfig loads the configuration and the files it names (the database secret, the S3 credentials, the TLS
+// files) without touching the network or the datastore. The rc.d script runs it before a start.
+func (c *cli) checkConfig() error {
+	cfg, err := c.loadConfig()
+	if err != nil {
+		return err
+	}
+	if _, err := cfg.DSN(); err != nil {
+		return err
+	}
+	if cfg.Datastore.Kind == "s3" {
+		if _, err := ReadCredentialsFile(cfg.Datastore.S3.CredentialsFile); err != nil {
+			return err
+		}
+	}
+	for _, f := range []string{cfg.TLS.CertFile, cfg.TLS.KeyFile} {
+		switch _, err := os.Stat(f); {
+		case errors.Is(err, os.ErrNotExist):
+			fmt.Fprintf(c.out, "%s: missing (init creates it)\n", f)
+		case err != nil:
+			return fmt.Errorf("backupd: %w", err)
+		}
+	}
+	fmt.Fprintln(c.out, "configuration is valid")
+	return nil
+}
+
 func newServerID() (string, error) {
 	var r [8]byte
 	if _, err := io.ReadFull(randReader, r[:]); err != nil {
@@ -256,12 +424,24 @@ func newServerID() (string, error) {
 	return fmt.Sprintf("node-%x", r), nil
 }
 
-func (c *cli) readPassword(file string) (string, error) {
+var errPasswordSources = errors.New("--password-file and --password-prompt exclude each other")
+
+// readPassword takes the password from the file, from the terminal (without echo) or from standard input.
+func (c *cli) readPassword(file string, prompt bool) (string, error) {
 	var b []byte
 	var err error
-	if file != "" {
+	switch {
+	case file != "":
 		b, err = ReadSecretFile(file)
-	} else {
+	case prompt:
+		f, ok := c.in.(*os.File)
+		if !ok || !term.IsTerminal(int(f.Fd())) {
+			return "", errors.New("--password-prompt needs a terminal on standard input (use --password-file or a pipe)")
+		}
+		fmt.Fprint(c.err, "Password: ")
+		b, err = term.ReadPassword(int(f.Fd()))
+		fmt.Fprintln(c.err)
+	default:
 		b, err = io.ReadAll(io.LimitReader(c.in, 1024))
 	}
 	if err != nil {
@@ -276,19 +456,13 @@ func (c *cli) hosts(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("hosts: enroll, list or revoke")
 	}
-	cfg, err := c.loadConfig()
-	if err != nil {
-		return err
-	}
-	db, err := cfg.OpenDB(ctx)
-	if err != nil {
-		return err
-	}
-	defer db.Close()
+	// flags are parsed before the database is opened, so --help needs neither
+	var fp, certFile, scopes, note string
+	var pos []string
 	switch args[0] {
 	case "enroll":
-		var fp, certFile, scopes, note string
-		pos, err := c.flags("hosts enroll", args[1:], func(fs *flag.FlagSet) {
+		var err error
+		pos, err = c.flags("hosts enroll", args[1:], func(fs *flag.FlagSet) {
 			fs.StringVar(&fp, "fingerprint", "", "SHA-256 fingerprint of the host's certificate")
 			fs.StringVar(&certFile, "cert", "", "the host's certificate (PEM) instead of the fingerprint")
 			fs.StringVar(&scopes, "scopes", "", "comma separated: backup-push, backup-pull, restore (default backup-push,backup-pull)")
@@ -300,6 +474,25 @@ func (c *cli) hosts(ctx context.Context, args []string) error {
 		if len(pos) != 1 {
 			return errors.New("hosts enroll NAME (--fingerprint FP | --cert FILE)")
 		}
+	case "list":
+	case "revoke":
+		if len(args) != 2 {
+			return errors.New("hosts revoke NAME")
+		}
+	default:
+		return fmt.Errorf("hosts: unknown subcommand %q", args[0])
+	}
+	cfg, err := c.loadConfig()
+	if err != nil {
+		return err
+	}
+	db, err := cfg.OpenDB(ctx)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	switch args[0] {
+	case "enroll":
 		b := HostBody{Name: pos[0], Fingerprint: fp, Note: note}
 		if scopes != "" {
 			b.Scopes = strings.Split(scopes, ",")
@@ -347,17 +540,12 @@ func (c *cli) hosts(ctx context.Context, args []string) error {
 		}
 		return tw.Flush()
 	case "revoke":
-		if len(args) != 2 {
-			return errors.New("hosts revoke NAME")
-		}
 		h, err := db.RevokeHost(ctx, args[1])
 		if err != nil {
 			return notFoundOr(err, "no such host")
 		}
 		_ = db.Audit(ctx, "cli", "host.revoke", h.Name, map[string]any{"fingerprint": h.Fingerprint}, "")
 		fmt.Fprintf(c.out, "host %s revoked; its open sessions are aborted and the daemon stops accepting it within seconds\n", h.Name)
-	default:
-		return fmt.Errorf("hosts: unknown subcommand %q", args[0])
 	}
 	return nil
 }
@@ -365,6 +553,33 @@ func (c *cli) hosts(ctx context.Context, args []string) error {
 func (c *cli) users(ctx context.Context, args []string) error {
 	if len(args) == 0 {
 		return errors.New("users: add, list or delete")
+	}
+	var pwFile string
+	var pwPrompt bool
+	var pos []string
+	switch args[0] {
+	case "add":
+		var err error
+		pos, err = c.flags("users add", args[1:], func(fs *flag.FlagSet) {
+			fs.StringVar(&pwFile, "password-file", "", "file holding the password (default: stdin)")
+			fs.BoolVar(&pwPrompt, "password-prompt", false, "ask for the password on the terminal")
+		})
+		if err != nil {
+			return err
+		}
+		if len(pos) != 2 {
+			return errors.New("users add NAME ROLE (readonly, backup-admin or admin)")
+		}
+		if pwFile != "" && pwPrompt {
+			return errPasswordSources
+		}
+	case "list":
+	case "delete":
+		if len(args) != 2 {
+			return errors.New("users delete NAME")
+		}
+	default:
+		return fmt.Errorf("users: unknown subcommand %q", args[0])
 	}
 	cfg, err := c.loadConfig()
 	if err != nil {
@@ -377,17 +592,7 @@ func (c *cli) users(ctx context.Context, args []string) error {
 	defer db.Close()
 	switch args[0] {
 	case "add":
-		var pwFile string
-		pos, err := c.flags("users add", args[1:], func(fs *flag.FlagSet) {
-			fs.StringVar(&pwFile, "password-file", "", "file holding the password (default: stdin)")
-		})
-		if err != nil {
-			return err
-		}
-		if len(pos) != 2 {
-			return errors.New("users add NAME ROLE (readonly, backup-admin or admin)")
-		}
-		pw, err := c.readPassword(pwFile)
+		pw, err := c.readPassword(pwFile, pwPrompt)
 		if err != nil {
 			return err
 		}
@@ -412,16 +617,11 @@ func (c *cli) users(ctx context.Context, args []string) error {
 		}
 		return tw.Flush()
 	case "delete":
-		if len(args) != 2 {
-			return errors.New("users delete NAME")
-		}
 		if err := db.DeleteUser(ctx, args[1]); err != nil {
 			return notFoundOr(err, "no such user")
 		}
 		_ = db.Audit(ctx, "cli", "user.delete", args[1], nil, "")
 		fmt.Fprintf(c.out, "user %s deleted\n", args[1])
-	default:
-		return fmt.Errorf("users: unknown subcommand %q", args[0])
 	}
 	return nil
 }
@@ -429,6 +629,42 @@ func (c *cli) users(ctx context.Context, args []string) error {
 // ---- administration through the socket --------------------------------------------------------
 
 func (c *cli) admin(ctx context.Context, cmd string, args []string) error {
+	// flags are parsed before the configuration is read, so --help needs none
+	var grace, delay string
+	var dry, noq bool
+	mode := node.VerifyNew
+	var err error
+	switch cmd {
+	case "gc":
+		_, err = c.flags("gc", args, func(fs *flag.FlagSet) {
+			fs.StringVar(&grace, "grace", "", "grace period (default from the configuration, minimum 12h)")
+			fs.BoolVar(&dry, "dry-run", false, "report what would be removed")
+		})
+	case "verify":
+		var pos []string
+		pos, err = c.flags("verify", args, func(fs *flag.FlagSet) {
+			fs.BoolVar(&noq, "no-quarantine", false, "report corrupt chunks without moving them aside")
+		})
+		if err == nil && len(pos) > 1 {
+			err = errors.New("verify [all|new|stale]")
+		}
+		if err == nil && len(pos) == 1 {
+			mode = pos[0]
+		}
+	case "retention":
+		_, err = c.flags("retention", args, func(fs *flag.FlagSet) { fs.BoolVar(&dry, "dry-run", false, "show the plan, delete nothing") })
+	case "delete":
+		if len(args) > 0 && args[0] == "request" {
+			var rest []string
+			rest, err = c.flags("delete request", args[1:], func(fs *flag.FlagSet) {
+				fs.StringVar(&delay, "delay", "", "wait before it may be executed (default from the configuration)")
+			})
+			args = append([]string{"request"}, rest...)
+		}
+	}
+	if err != nil {
+		return err
+	}
 	cfg, err := c.loadConfig()
 	if err != nil {
 		return err
@@ -448,35 +684,10 @@ func (c *cli) admin(ctx context.Context, cmd string, args []string) error {
 		fmt.Fprintf(c.out, "repository %s (%s), mode %s\nsnapshots %d in %d groups (%d failed, %d protected, %d pending deletion)\nchunks %d, %d bytes\nopen sessions %d, quarantined %d\nlast GC %s, last verify %s\n",
 			st.ID, st.Backend, st.Mode, st.Snapshots, st.Groups, st.Failed, st.Protected, st.PendingDeletion, st.Chunks, st.Bytes, st.OpenSessions, st.Quarantined, since(st.LastGC), since(st.LastVerify))
 	case "gc":
-		var grace string
-		var dry bool
-		if _, err := c.flags("gc", args, func(fs *flag.FlagSet) {
-			fs.StringVar(&grace, "grace", "", "grace period (default from the configuration, minimum 12h)")
-			fs.BoolVar(&dry, "dry-run", false, "report what would be removed")
-		}); err != nil {
-			return err
-		}
 		return c.job(ctx, ac, "POST", base+"/gc?wait=1", node.GCRequest{Grace: grace, DryRun: dry})
 	case "verify":
-		mode, noq := node.VerifyNew, false
-		pos, err := c.flags("verify", args, func(fs *flag.FlagSet) {
-			fs.BoolVar(&noq, "no-quarantine", false, "report corrupt chunks without moving them aside")
-		})
-		if err != nil {
-			return err
-		}
-		if len(pos) > 1 {
-			return errors.New("verify [all|new|stale]")
-		}
-		if len(pos) == 1 {
-			mode = pos[0]
-		}
 		return c.job(ctx, ac, "POST", base+"/verify?wait=1", node.VerifyOptions{Mode: mode, Quarantine: !noq})
 	case "retention":
-		var dry bool
-		if _, err := c.flags("retention", args, func(fs *flag.FlagSet) { fs.BoolVar(&dry, "dry-run", false, "show the plan, delete nothing") }); err != nil {
-			return err
-		}
 		return c.job(ctx, ac, "POST", base+"/retention?wait=1", node.RetentionOptions{DryRun: dry})
 	case "reconcile":
 		return c.job(ctx, ac, "POST", base+"/reconcile?wait=1", nil)
@@ -503,7 +714,7 @@ func (c *cli) admin(ctx context.Context, cmd string, args []string) error {
 		}
 		fmt.Fprintf(c.out, "%sed %s/%s\n", cmd, args[0], args[1])
 	case "delete":
-		return c.deleteCmd(ctx, ac, base, args)
+		return c.deleteCmd(ctx, ac, base, args, delay)
 	case "quarantine":
 		if len(args) != 1 || args[0] != "list" {
 			return errors.New("quarantine list")
@@ -557,20 +768,15 @@ func snapPath(base, group, snap string) string {
 	return base + "/groups/" + group + "/snapshots/" + snap
 }
 
-func (c *cli) deleteCmd(ctx context.Context, ac *AdminClient, base string, args []string) error {
-	if len(args) < 3 {
+// deleteCmd runs delete request|cancel|execute; the flags of request were parsed by admin.
+func (c *cli) deleteCmd(ctx context.Context, ac *AdminClient, base string, args []string, delay string) error {
+	if len(args) != 3 {
 		return errors.New("delete request|cancel|execute GROUP SNAPSHOT")
 	}
 	sub, group, snap := args[0], args[1], args[2]
 	p := snapPath(base, group, snap) + "/deletion"
 	switch sub {
 	case "request":
-		var delay string
-		if _, err := c.flags("delete request", args[3:], func(fs *flag.FlagSet) {
-			fs.StringVar(&delay, "delay", "", "wait before it may be executed (default from the configuration)")
-		}); err != nil {
-			return err
-		}
 		var d node.Deletion
 		if err := ac.Call(ctx, "POST", p, node.DeletionBody{Delay: delay}, &d); err != nil {
 			return err

@@ -46,7 +46,7 @@ type configRow struct {
 }
 
 func (a *app) configCmd() *cobra.Command {
-	d := jailDesc()
+	d := a.jailDesc()
 	cc := group("config", "Show and change the configuration keys of a jail",
 		`Configuration keys are dotted names such as limits.memory, boot.autostart,
 nic.eth0.mtu or shell. Each maps to one field of the jail specification; the

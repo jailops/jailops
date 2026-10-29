@@ -47,6 +47,51 @@ func TestImages(t *testing.T) {
 	}
 }
 
+func TestImageUpgrade(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	// A second project with a jail on the same image: an image upgrade moves the jails of every project.
+	h.srv.SeedProject(api.Project{Metadata: api.ObjectMeta{Name: "shop"}, Spec: api.ProjectSpec{
+		Networks: []api.ProjectNetwork{{Network: "lan"}}, Storage: []api.ProjectStorage{{Storage: "default"}}}})
+	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "api", Project: "shop"}, Spec: api.JailSpec{Image: "freebsd-15@stable", Storage: "default"}})
+	tr := h.transcript()
+	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "create", "pin", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
+	before := len(h.mutations())
+	tr.ok("image", "upgrade", "freebsd-15", "--dry-run")
+	var u api.ImageUpgrade
+	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/images/freebsd-15/upgrade"), &u)
+	if !u.DryRun || u.Project != "" || len(h.mutations()) != before+1 {
+		t.Fatalf("dry-run request: %+v %v", u, h.mutations())
+	}
+	if j, _ := h.srv.JailIn("main", "web"); j.Status.Generation != "g1" {
+		t.Fatalf("dry-run moved the jail: %+v", j.Status)
+	}
+	tr.ok("image", "upgrade", "freebsd-15")
+	if j, _ := h.srv.JailIn("shop", "api"); j.Status.Generation != "g2" {
+		t.Fatalf("the other project's jail did not move: %+v", j.Status)
+	}
+	tr.ok("image", "upgrade", "freebsd-15", "--project", "shop", "-o", "json")
+	_ = json.Unmarshal(h.lastBody("POST", "/api/v1/images/freebsd-15/upgrade"), &u)
+	if u.Project != "shop" {
+		t.Fatalf("request: %+v", u)
+	}
+	if j, _ := h.srv.JailIn("main", "web"); j.Status.Generation != "g2" {
+		t.Fatalf("--project shop moved a jail of main: %+v", j.Status)
+	}
+	tr.ok("image", "upgrade", "freebsd-15", "--no-jails")
+	h.srv.SeedImageCurrent("freebsd-15", true)
+	tr.ok("image", "upgrade", "freebsd-15")
+	h.srv.SeedImageCurrent("freebsd-15", false)
+	h.srv.SeedUpdateFailure("main", "web", true)
+	tr.do("", "image", "upgrade", "freebsd-15") // web fails: the jails after it are not attempted, exit 1
+	tr.do("", "image", "upgrade", "freebsd-15", "--project", "nope")
+	tr.do("", "image", "upgrade", "nope")
+	tr.ok("image", "upgrade", "freebsd-15", "--no-wait", "--no-jails")
+	tr.ok("image", "generations", "freebsd-15")
+	tr.golden("image_upgrade")
+}
+
 func collectImages(t *testing.T, h *harness) ([]api.Image, bool) {
 	out, _, code := h.run("", "image", "list", "-o", "json")
 	if code != 0 {

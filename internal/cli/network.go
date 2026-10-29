@@ -24,6 +24,22 @@ func networkDesc() *kindDesc[api.Network] {
 		return []string{n.Metadata.Name, dash(n.Spec.Bridge), sub, gw, rng,
 			fmt.Sprint(n.Status.Allocated), fmt.Sprint(n.Status.Free), dash(n.Spec.Uplink)}
 	}
+	// On a terminal: both address families, and the range on its own line under the subnet.
+	d.brief = &listView[api.Network]{
+		head: []string{"NAME", "IPV4", "IPV6", "USED", "FREE", "UPLINK"},
+		drop: []int{5, 4, 3, 2},
+		row: func(_ time.Time, n api.Network) []string {
+			v4, v6 := "-", "-"
+			if a := n.Spec.IPv4; a != nil {
+				v4 = a.Subnet + "\n" + a.Range
+			}
+			if a := n.Spec.IPv6; a != nil && a.Mode != api.IPv6None {
+				v6 = a.Subnet + " (" + string(a.Mode) + ")\n" + a.Range
+			}
+			return []string{n.Metadata.Name, v4, v6, fmt.Sprint(n.Status.Allocated), fmt.Sprint(n.Status.Free), dash(n.Spec.Uplink)}
+		},
+	}
+	d.show = func(a *app, n api.Network) error { return a.showObject(n.Metadata, nil, n.Spec, n.Status) }
 	return &d
 }
 
@@ -60,6 +76,7 @@ jailops network create -f lan.yaml`,
 			f.BoolVar(&nat, "nat", false, "masquerade traffic leaving through the uplink")
 			f.StringArrayVar(&dns, "dns", nil, "DNS server handed to jails (repeatable)")
 			f.IntVar(&mtu, "mtu", 0, "MTU of the bridge and its members")
+			enumFlag(cmd, "ipv6-mode", "routed", "proxy")
 			return func(name string) (api.Network, error) {
 				spec := api.NetworkSpec{Bridge: bridge, Uplink: uplink, DNS: dns, MTU: mtu}
 				switch {

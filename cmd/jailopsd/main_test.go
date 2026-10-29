@@ -7,8 +7,10 @@ import (
 )
 
 func TestVersionAndCheckConfig(t *testing.T) {
-	if run([]string{"version"}) != 0 {
-		t.Fatal("version")
+	for _, a := range []string{"version", "--version", "-version"} {
+		if run([]string{a}) != 0 {
+			t.Fatal(a)
+		}
 	}
 	if run([]string{"-check-config", "-config", "../../packaging/jailopsd.yaml"}) != 0 {
 		t.Fatal("the sample configuration does not pass")

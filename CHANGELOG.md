@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+- **Images are built from the packages of their own release**: the base repository of a RELEASE image was written as `base_release_${VERSION_MINOR}` and pkg expanded the minor from the ABI it was given, which has none, so every image came from `base_release_0`: a 15.1-RELEASE image had a 15.0 userland (`uname -U` 1500068 against 1501000 on the host), and `pkg` in its jails refused newer packages. The minor of the image's release is now written into the URL, and the end-to-end test checks that a jail's userland matches the host's. Images built before this keep their 15.0 userland until the next generation is built from them (`jailops image build NAME --from gN`), which now reads the right repository.
+
+- **An image can be upgraded as a whole**: `jailops image upgrade IMAGE` builds the next generation from the newest one and
+  then moves every thin jail that uses the image to it, one jail at a time, through the same steps as `jail upgrade`
+  (snapshot, new root, `/etc` merge, swap, health check, automatic root rollback), writing the same update history and
+  events as `update apply`. It stops at the first jail that fails or needs a human, so a bad generation is not rolled across
+  the host; the jails after it are listed as not attempted. When the package set did not change, no generation is kept and
+  no jail is touched. Thick jails, Linux jails, other update strategies and pinned jails are skipped and listed; a stopped jail
+  is moved and left stopped. `--project P` narrows it to one project, `--no-jails` builds only, `--dry-run` plans and lists.
+  New route `POST /api/v1/images/{name}/upgrade` (global admin, extension `image_upgrade`), `Images().Upgrade` in the SDK
+  and the fake, and an "Upgrade" button in the web console.
+
+- **The `jailops` client acts on several jails at once**: `start`, `stop`, `restart` and `delete` take `-l key=value` (the labels of `list -l`) or `--all` instead of names; a bulk delete asks for the project name to be typed (or `-y`). `create --start` starts the new jail at once, `delete --force` stops a running jail first, and `--grace` takes a duration (`30s`, `1m30s`) as well as seconds.
+
+- `jailops list` takes name patterns (`list 'web*'`), `-c name,state` chooses the columns, `--sort COLUMN` orders the rows, `-o csv` prints the table as CSV and `-o compact` the plain borderless table on a terminal too. The output of a pipe is unchanged. `list --state` refuses a state that does not exist and completes the real ones.
+
+- `jailops apply -f FILE` creates or updates every document of a YAML or JSON file (jails, images, networks, projects, storage, firewall policies, address sets, backup targets and policies, profiles, hosts), leaves unchanged objects alone and supports `--dry-run`.
+
+- `-q/--quiet` leaves out confirmations such as `jail/web started`; errors and requested output still print.
+
+- `jailops exec` allocates a pseudo-terminal on its own when stdin and stdout are terminals; `-T` runs without one (`-t` names the default).
+
+- `jailops image create` takes the architecture from the server when `--arch` is not given (an arm64 host no longer gets amd64 images) and fails with a hint when the server cannot tell.
+
+- One generation notation: `gN` wherever a command takes a generation (`image build --from`, `jail upgrade --generation`, `image alias set`, `image delete-generation`); a bare number and `IMAGE#gN` are accepted too.
+
+- `jailops jail snapshot show JAIL SNAPSHOT`; `jailops image|network|project show` print a short human form (header, specification next to status) instead of raw YAML, as `jail show` does; `-o yaml` and `-o json` are unchanged.
+
+- `jailops update check` with no names checks every jail of the project (`--all` says the same).
+
+- Shell completion continues after the first name (`jailops stop web <TAB>`, `delete a b <TAB>`), completes snapshot names, image aliases and generations, and the values of `--state`, `--layout`, `--update-strategy`, `--os`, `--arch`, `--source-type`, `--ipv6-mode`, `--compression`, `--kind`, `--verify-mode`, `--type`, `--host`, `--remote`, `--profile`, `--firewall-policy`, `--depends`, `--target` and `--to-host`.
+
+- Flag names line up: `jailops trust add --permission` (as `token create` and `user create`; `--role` still works, unlisted), `remote create` and `remote delete` next to `add` and `remove`, `backup restore --to-host` by host name or UUID, `jailops jail label` next to `jailops label`; `--project` is documented on `events` and `op list`, which it narrows.
+
+- Generated help says "Create an image" and "an address set" instead of "a image"; the fake server answers `exec` and `shell` on a stopped jail with the hint of the real daemon ("start it first").
+
+- **Lists read better on a terminal.** `jailops jail list` (and every other list) is a short boxed table when standard output is a terminal: for jails NAME, STATE, IPV4, IPV6, IMAGE (with the generation) and AGE, every address of a jail on its own line with its network, long IPv6 addresses never cut; a narrow terminal loses the least important columns first. `-o wide` shows every column as before; a pipe, a file, `--no-headers` and `-o json|yaml|name` print exactly what they did, so scripts are unaffected. `network list` on a terminal shows both address families.
+
+- `jailops jail info NAME` (also `jailops info NAME`): a short report on one jail for a person: state and JID, type, image and generation, storage, dates, limits and usage, every interface with all its addresses (family and scope), snapshots, the update policy with the last update, labels and problems. `-o json|yaml` gives the same data structured. A part the server cannot give is said to be missing, never guessed. `show` is unchanged.
+
+- **A jail's resource usage is measured on request**: `GET /api/v1/jails/{name}/usage` (readonly, extension `jail_usage`, `Jails().Usage` in the SDK and the fake) answers what the jail uses now: processes, CPU time and resident memory from the kernel's resource accounting (`rctl -u jail:<key>`, a new read-only form on the helper's command allow-list, accepted for managed jails only) while it runs, and the space of its datasets (`used` and `referenced` of the root, `used` of the persistent datasets and volumes) always. Nothing is stored and the jail list stays as cheap as before. When racct is off (`kern.racct.enable`), when `rctl` fails or when a dataset cannot be read, the reply carries the reason instead of zeros, and `jail info` prints it (`Usage: - (racct is off: ...)`); otherwise it prints `processes 23, cpu 2h13m, memory 388.2 MiB of 2G` and `Disk: root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB`. Interface counters are not part of it. UNVERIFIED on a host: the rctl output format is implemented from rctl(8).
+
+- **Shell completion is installed by the packages**: the FreeBSD client package and the Linux packages carry the bash, zsh and fish scripts of `jailops` and `jailops-sync` under `share/` (`/usr/local/share/bash-completion/completions/`, `.../zsh/site-functions/`, `.../fish/vendor_completions.d/`), generated from the built binaries at package build time (`scripts/gen-share.sh`); the release archives of the client carry them too. Completing names against a server that does not answer gives up after a moment and prints nothing.
+
+- **Man pages**: the packages and release archives install them the usual FreeBSD way. `jailops` and `jailops-sync` have one mdoc page per command (`man jailops-jail-list`), generated from the command tree at package build time by the hidden `man DIR` command of each tool (deterministic, `SOURCE_DATE_EPOCH` honoured); `jailopsd(8)`, `jailops-priv(8)` and `jailops-backupd(8)` are written by hand in `packaging/man/`. `scripts/gen-share.sh` replaces `gen-completions.sh` and produces completion scripts and man pages together into `bin/share`.
+
+- `jailops-backupd`: `<command> --help` prints the synopsis, a description and the flags on standard output and exits 0 (it used to print `flag: help requested` and exit 1); `-c FILE`, `--config FILE` and `--json` are accepted after the command too (`status --json`); `--version` is an alias of `version` in every tool (`jailopsd`, `jailops-priv`, `jailops-backupd`, `jailops-sync`, `jailops`); `check-config` validates the configuration and the files it names without the network, and the rc.d script runs it (`service jailops_backupd checkconfig`) and refuses to start with a bad configuration; a second `init` reports the existing repository and its owner and exits 0; `init --admin NAME --password-prompt` (and `users add --password-prompt`) ask for the password on the terminal; `completion bash|zsh|fish` prints a completion script, which the backup node package installs.
+
+- `jailops-priv`: `-h` prints a synopsis before the flags, `init --help` works and exits 0, and `init` checks its arguments (`-pool`) before it asks for root.
+
+- `jailops-sync`: an unknown command or flag, or the wrong arguments, exits 2 like the other tools (it was 1) and points at `--help`; `sync`, `plan`, `drift`, `doctor`, `secrets set` and `remote bootstrap` have examples in their help.
+
+- The rc.d header of `jailopsd` says there is no `reload` (SIGHUP is ignored by design; a renewed certificate is picked up on its own), and docs/troubleshooting.md tells where the backup node logs and how to read its status and jobs.
+
 ## 0.2.0 - 2026-10-27
 
 - **Getting started turns the web console on**: `sysrc jailopsd_web=YES` (or `jailopsd -web`) now also opens the TLS listener on port 39110 when `listen.https.address` is empty, so one line puts the console in a browser; `web.enabled: true` in the file alone still opens no listener. `jailops-priv init -web` writes the same two settings into the `jailopsd.yaml` it creates. The guides use the rc.conf knob and the provisioning example turns it on (`JAILOPS_WEB=no` leaves it off); leave it out for a host you reach with the CLI only.

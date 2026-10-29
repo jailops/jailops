@@ -7,6 +7,10 @@ import (
 	"iter"
 	"os"
 	"os/exec"
+	"path"
+	"slices"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,14 +42,52 @@ type kindDesc[T any] struct {
 	head  []string
 	row   func(now time.Time, x T) []string
 	style styleFn
+	// brief is the short form of the list on a terminal; nil shows head and
+	// row there too. -o wide always shows head and row.
+	brief *listView[T]
 	// show prints the human form of one object; nil prints YAML.
 	show func(a *app, x T) error
-	// filters registers extra list flags and returns the predicate that uses
-	// them (evaluated on the client after the flags are parsed).
-	filters func(cmd *cobra.Command) func(x T) bool
+	// filters registers extra list flags and returns the function that checks
+	// them once they are parsed and gives the predicate.
+	filters func(cmd *cobra.Command) func() (func(x T) bool, error)
+	// afterCreate registers extra flags of "create" and returns what runs
+	// once an object is created (nil for nothing).
+	afterCreate func(cmd *cobra.Command) func(ctx context.Context, name string) error
+	// beforeDelete registers extra flags of "delete" and returns what runs
+	// before an object is deleted (nil for nothing).
+	beforeDelete func(cmd *cobra.Command) func(ctx context.Context, name string) error
+	// targets registers the selector flags of a command that acts on several
+	// objects and returns the resolver of the names: the arguments, or the
+	// objects a selector matches (bulk). nil means the arguments only.
+	targets func(cmd *cobra.Command) func(ctx context.Context, args []string) (names []string, bulk bool, err error)
 }
 
 func (d *kindDesc[T]) name(x T) string { return d.meta(&x).Name }
+
+// listView is one tabular form of a list. A cell of row may hold several
+// lines ("\n"); the boxed table of a terminal grows the row, the plain form
+// is never given such a view.
+type listView[T any] struct {
+	head  []string
+	row   func(now time.Time, x T) []string
+	style styleFn
+	// drop names the columns to leave out, least important first, when a
+	// terminal is too narrow for the whole table.
+	drop []int
+}
+
+// view picks the form of the list for the current output.
+func (d *kindDesc[T]) view(a *app) listView[T] {
+	if d.brief != nil && !a.wide && a.pretty() {
+		return *d.brief
+	}
+	return d.full()
+}
+
+// full is the form with every column, the one -o wide shows.
+func (d *kindDesc[T]) full() listView[T] {
+	return listView[T]{head: d.head, row: d.row, style: d.style}
+}
 
 // newDesc builds the parts of a descriptor that follow from the types.
 func newDesc[T, S any](noun, plural string, kind api.Kind, meta func(*T) *api.ObjectMeta, spec func(*T) *S) kindDesc[T] {
@@ -110,24 +152,45 @@ func labelOpts(labels []string) ([]sdk.ListOption, error) {
 	return out, nil
 }
 
-func (a *app) completeNames(list func(ctx context.Context, c *sdk.Client) ([]string, error)) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+// article is "a" or "an" for a noun, as in "Create an image".
+func article(noun string) string {
+	if noun != "" && strings.ContainsRune("aeiou", rune(noun[0])) {
+		return "an"
+	}
+	return "a"
+}
+
+// completion ---------------------------------------------------------------
+
+type completer = func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective)
+
+// completeWith completes an argument from a list on the server, which may
+// depend on the arguments already given. A shell is waiting: a server that
+// does not answer within a moment, or any error, just yields no names and
+// never a message. Names already on the line are left out.
+func (a *app) completeWith(list func(ctx context.Context, c *sdk.Client, args []string) ([]string, error)) completer {
 	return func(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
-		if len(args) > 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		c, err := a.connect(cmd.Context())
+		ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+		defer cancel()
+		c, err := a.connect(ctx)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		names, err := list(cmd.Context(), c)
+		names, err := list(ctx, c, args)
 		if err != nil {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
+		names = slices.DeleteFunc(names, func(n string) bool { return slices.Contains(args, n) })
 		return names, cobra.ShellCompDirectiveNoFileComp
 	}
 }
 
-func completeKind[T any](a *app, d *kindDesc[T]) func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+// completeNames completes every argument from one list on the server.
+func (a *app) completeNames(list func(ctx context.Context, c *sdk.Client) ([]string, error)) completer {
+	return a.completeWith(func(ctx context.Context, c *sdk.Client, _ []string) ([]string, error) { return list(ctx, c) })
+}
+
+func completeKind[T any](a *app, d *kindDesc[T]) completer {
 	return a.completeNames(func(ctx context.Context, c *sdk.Client) ([]string, error) {
 		items, err := collect(d.list(ctx, c))
 		var n []string
@@ -138,23 +201,147 @@ func completeKind[T any](a *app, d *kindDesc[T]) func(*cobra.Command, []string, 
 	})
 }
 
+// completeArgs gives each positional argument its own completion; the last
+// one serves every further argument.
+func completeArgs(fns ...completer) completer {
+	return func(cmd *cobra.Command, args []string, p string) ([]string, cobra.ShellCompDirective) {
+		return fns[min(len(args), len(fns)-1)](cmd, args, p)
+	}
+}
+
+// completeNone offers nothing, not even files.
+func completeNone(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
+// completeFiles leaves the argument to the shell's own file completion.
+func completeFiles(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+	return nil, cobra.ShellCompDirectiveDefault
+}
+
+// enumFlag completes a flag from a fixed list of values.
+func enumFlag(cmd *cobra.Command, name string, values ...string) {
+	_ = cmd.RegisterFlagCompletionFunc(name, func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+		return values, cobra.ShellCompDirectiveNoFileComp
+	})
+}
+
+// list ---------------------------------------------------------------------
+
+// columnName is the name a column is addressed by: "last-seen" for "LAST SEEN".
+func columnName(head string) string {
+	return strings.ReplaceAll(strings.ToLower(head), " ", "-")
+}
+
+func columnNames(head []string) []string {
+	var out []string
+	for _, h := range head {
+		if h != "" {
+			out = append(out, columnName(h))
+		}
+	}
+	return out
+}
+
+func columnIndex(head []string, name string) (int, error) {
+	for i, h := range head {
+		if h != "" && columnName(h) == strings.ToLower(strings.TrimSpace(name)) {
+			return i, nil
+		}
+	}
+	return 0, usagef("unknown column %q (columns: %s)", name, strings.Join(columnNames(head), ", "))
+}
+
+// cellLess orders two cells of a table: numbers and ages ("3h", "10d") by
+// value, everything else by text.
+func cellLess(x, y string) bool {
+	if a, ok := cellValue(x); ok {
+		if b, ok := cellValue(y); ok && a != b {
+			return a < b
+		}
+	}
+	return x < y
+}
+
+func cellValue(s string) (float64, bool) {
+	if n, err := strconv.ParseFloat(s, 64); err == nil {
+		return n, true
+	}
+	unit := map[byte]float64{'s': 1, 'm': 60, 'h': 3600, 'd': 86400}
+	if l := len(s); l > 1 {
+		if m, ok := unit[s[l-1]]; ok {
+			if n, err := strconv.Atoi(s[:l-1]); err == nil {
+				return float64(n) * m, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func matchesAny(patterns []string, name string) bool {
+	if len(patterns) == 0 {
+		return true
+	}
+	for _, p := range patterns {
+		if ok, _ := path.Match(p, name); ok {
+			return true
+		}
+	}
+	return false
+}
+
 // addList adds "list".
 func addList[T any](a *app, parent *cobra.Command, d *kindDesc[T], extraExample string) {
-	var labels []string
-	var keep func(T) bool
+	var labels, columns []string
+	var sortBy string
+	var keep func() (func(T) bool, error)
 	cmd := &cobra.Command{
-		Use:     "list",
+		Use:     "list [PATTERN...]",
 		Aliases: []string{"ls"},
 		Short:   "List " + d.plural,
-		Long:    "List " + d.plural + " known to the server, optionally filtered by label.\nThe default output is a table; -o json and -o yaml print the full objects, -o name the names only.",
-		Example: "jailops " + "@P@" + " list\njailops " + "@P@" + " list -l env=prod -o name" + extraExample,
-		Args:    cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			c, err := a.connect(cmd.Context())
+		Long: "List " + d.plural + ` known to the server, optionally filtered by label or by name patterns
+such as 'web*'. The default output is a table: -c picks its columns (named as -o wide
+shows them) and --sort orders its rows. -o json and -o yaml print the full objects,
+-o name the names only, -o csv the table as CSV.`,
+		Example:           "jailops " + "@P@" + " list\njailops " + "@P@" + " list 'web*' -c name,age --sort age\njailops " + "@P@" + " list -l env=prod -o name" + extraExample,
+		Args:              cobra.ArbitraryArgs,
+		ValidArgsFunction: completeKind(a, d),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			for _, p := range args {
+				if _, err := path.Match(p, ""); err != nil {
+					return usagef("bad name pattern %q", p)
+				}
+			}
+			var pred func(T) bool
+			if keep != nil {
+				var err error
+				if pred, err = keep(); err != nil {
+					return err
+				}
+			}
+			opts, err := labelOpts(labels)
 			if err != nil {
 				return err
 			}
-			opts, err := labelOpts(labels)
+			v := d.view(a)
+			if len(columns) > 0 || sortBy != "" {
+				v = d.full() // every column can be chosen and sorted by
+			}
+			sortCol := -1
+			if sortBy != "" {
+				if sortCol, err = columnIndex(v.head, sortBy); err != nil {
+					return err
+				}
+			}
+			var pick []int
+			for _, c := range columns {
+				i, err := columnIndex(v.head, c)
+				if err != nil {
+					return err
+				}
+				pick = append(pick, i)
+			}
+			c, err := a.connect(cmd.Context())
 			if err != nil {
 				return err
 			}
@@ -162,22 +349,48 @@ func addList[T any](a *app, parent *cobra.Command, d *kindDesc[T], extraExample 
 			if err != nil {
 				return err
 			}
-			if keep != nil {
-				kept := items[:0]
-				for _, it := range items {
-					if keep(it) {
-						kept = append(kept, it)
-					}
+			kept := items[:0]
+			for _, it := range items {
+				if (pred == nil || pred(it)) && matchesAny(args, d.name(it)) {
+					kept = append(kept, it)
 				}
-				items = kept
 			}
-			return a.emit(nonNil(items), d.style, func() ([]string, [][]string) {
-				rows := make([][]string, len(items))
-				for i, it := range items {
-					rows[i] = d.row(a.env.Now(), it)
+			items = kept
+			rows := make([][]string, len(items))
+			for i, it := range items {
+				rows[i] = v.row(a.env.Now(), it)
+			}
+			if sortCol >= 0 {
+				order := make([]int, len(items))
+				for i := range order {
+					order[i] = i
 				}
-				return d.head, rows
-			}, func() []string {
+				sort.SliceStable(order, func(i, j int) bool { return cellLess(rows[order[i]][sortCol], rows[order[j]][sortCol]) })
+				sortedItems, sortedRows := make([]T, len(items)), make([][]string, len(rows))
+				for i, o := range order {
+					sortedItems[i], sortedRows[i] = items[o], rows[o]
+				}
+				items, rows = sortedItems, sortedRows
+			}
+			head, style, drop := v.head, v.style, v.drop
+			if len(pick) > 0 {
+				head = make([]string, len(pick))
+				for i, p := range pick {
+					head[i] = v.head[p]
+				}
+				for r, row := range rows {
+					cells := make([]string, len(pick))
+					for i, p := range pick {
+						cells[i] = row[p]
+					}
+					rows[r] = cells
+				}
+				drop = nil
+				if v.style != nil {
+					style = func(col int, val string) string { return v.style(pick[col], val) }
+				}
+			}
+			return a.emitList(nonNil(items), style, func() ([]string, [][]string) { return head, rows }, drop, func() []string {
 				var n []string
 				for _, it := range items {
 					n = append(n, d.name(it))
@@ -187,6 +400,10 @@ func addList[T any](a *app, parent *cobra.Command, d *kindDesc[T], extraExample 
 		},
 	}
 	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable)")
+	cmd.Flags().StringSliceVarP(&columns, "columns", "c", nil, "columns of the table, comma separated (named as -o wide shows them)")
+	cmd.Flags().StringVar(&sortBy, "sort", "", "order the rows by this column")
+	enumFlag(cmd, "columns", columnNames(d.head)...)
+	enumFlag(cmd, "sort", columnNames(d.head)...)
 	if d.filters != nil {
 		keep = d.filters(cmd)
 	}
@@ -199,6 +416,8 @@ func nonNil[T any](s []T) []T {
 	}
 	return s
 }
+
+// show ---------------------------------------------------------------------
 
 // addShow adds "show".
 func addShow[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
@@ -228,13 +447,47 @@ func addShow[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 	})
 }
 
+// showObject prints the human form of one object: a short header (with the
+// extra lines a kind adds), then the specification next to the observed
+// status.
+func (a *app) showObject(m api.ObjectMeta, extra []string, spec, status any) error {
+	w := a.env.Stdout
+	fprintf(w, "Name:        %s\n", m.Name)
+	fprintf(w, "UUID:        %s\n", dash(m.UUID))
+	fprintf(w, "Generation:  %d\n", m.Generation)
+	fprintf(w, "Age:         %s\n", age(a.env.Now(), m.CreatedAt))
+	for _, l := range extra {
+		fprintln(w, l)
+	}
+	if len(m.Labels) > 0 {
+		var l []string
+		for _, k := range sortedKeys(m.Labels) {
+			l = append(l, k+"="+m.Labels[k])
+		}
+		fprintf(w, "Labels:      %s\n", strings.Join(l, ", "))
+	}
+	fprintln(w)
+	sb, err := toYAML(spec)
+	if err != nil {
+		return err
+	}
+	st, err := toYAML(status)
+	if err != nil {
+		return err
+	}
+	sideBySide(w, "SPEC", string(sb), "STATUS", string(st))
+	return nil
+}
+
+// create -------------------------------------------------------------------
+
 // addCreate adds "create". flagBuild registers flags and returns the builder
 // used when no file is given; it may be nil when only -f is supported.
 func addCreate[T any](a *app, parent *cobra.Command, d *kindDesc[T], long, example string, flagBuild func(*cobra.Command) func(name string) (T, error)) {
 	var file string
 	cmd := &cobra.Command{
 		Use:   "create [NAME]",
-		Short: "Create a " + d.noun,
+		Short: "Create " + article(d.noun) + " " + d.noun,
 		Long: long + `
 
 With -f the object comes from a YAML or JSON file ("-" reads standard input).
@@ -247,6 +500,10 @@ documents; each one is created in order.`,
 	var build func(string) (T, error)
 	if flagBuild != nil {
 		build = flagBuild(cmd)
+	}
+	var after func(context.Context, string) error
+	if d.afterCreate != nil {
+		after = d.afterCreate(cmd)
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "create from this YAML or JSON file, or - for standard input")
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
@@ -279,7 +536,7 @@ documents; each one is created in order.`,
 				return usagef("NAME is required (or use -f FILE)")
 			}
 			if build == nil {
-				return usagef("a %s is created from a file: use -f FILE", d.noun)
+				return usagef("%s %s is created from a file: use -f FILE", article(d.noun), d.noun)
 			}
 			x, err := build(nameArg)
 			if err != nil {
@@ -293,17 +550,104 @@ documents; each one is created in order.`,
 				if err != nil {
 					return err
 				}
+			} else {
+				c, err := a.connect(cmd.Context())
+				if err != nil {
+					return err
+				}
+				h, out, err := d.create(cmd.Context(), c, x)
+				if err != nil {
+					return err
+				}
+				if err := a.finishOp(cmd.Context(), h, d.noun, name, "created", out); err != nil {
+					return err
+				}
+			}
+			if after != nil {
+				if err := after(cmd.Context(), name); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	parent.AddCommand(cmd)
+}
+
+// delete -------------------------------------------------------------------
+
+// addDelete adds "delete".
+func addDelete[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
+	path := "@P@"
+	cmd := &cobra.Command{
+		Use:               "delete NAME...",
+		Aliases:           []string{"rm"},
+		Short:             "Delete " + d.plural,
+		Long:              "Delete one or more " + d.plural + ". The server refuses when another object still uses them.\nThe command asks for confirmation unless -y is given.",
+		Example:           "jailops " + path + " delete NAME\njailops " + path + " delete -y NAME1 NAME2",
+		Args:              cobra.MinimumNArgs(1),
+		ValidArgsFunction: completeKind(a, d),
+	}
+	var before func(context.Context, string) error
+	if d.beforeDelete != nil {
+		before = d.beforeDelete(cmd)
+	}
+	var resolve func(context.Context, []string) ([]string, bool, error)
+	if d.targets != nil {
+		resolve = d.targets(cmd)
+		cmd.Args = cobra.ArbitraryArgs
+		cmd.Long += "\nWith -l or --all the " + d.plural + " are selected by label instead of named; that is a batch, and you type the project name to confirm it (or pass -y)."
+		cmd.Example += "\njailops " + path + " delete -l env=test"
+	}
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		names, bulk := args, false
+		if resolve != nil {
+			var err error
+			if names, bulk, err = resolve(cmd.Context(), args); err != nil {
+				return err
+			}
+			if bulk && len(names) == 0 {
+				fprintf(a.env.Stderr, "No %s match.\n", d.plural)
+				return nil
+			}
+		}
+		if bulk && !a.dryRun {
+			project := a.conn.CurrentProject()
+			what := d.plural
+			if len(names) == 1 {
+				what = d.noun
+			}
+			warn := fmt.Sprintf("This deletes %d %s of project %q: %s. It cannot be undone.", len(names), what, project, strings.Join(names, ", "))
+			if err := a.confirmTyped(warn, project, a.yes, "-y"); err != nil {
+				return err
+			}
+		}
+		for _, name := range names {
+			if before != nil {
+				if err := before(cmd.Context(), name); err != nil {
+					return err
+				}
+			}
+			if ok, err := a.dry("delete "+d.noun+" "+name, nil); ok || err != nil {
+				if err != nil {
+					return err
+				}
 				continue
+			}
+			if !bulk {
+				if err := a.confirm(fmt.Sprintf("Delete %s %q?", d.noun, name)); err != nil {
+					return err
+				}
 			}
 			c, err := a.connect(cmd.Context())
 			if err != nil {
 				return err
 			}
-			h, out, err := d.create(cmd.Context(), c, x)
+			h, err := d.del(cmd.Context(), c, name)
 			if err != nil {
 				return err
 			}
-			if err := a.finishOp(cmd.Context(), h, d.noun, name, "created", out); err != nil {
+			if err := a.finishOp(cmd.Context(), h, d.noun, name, "deleted", nil); err != nil {
 				return err
 			}
 		}
@@ -312,44 +656,7 @@ documents; each one is created in order.`,
 	parent.AddCommand(cmd)
 }
 
-// addDelete adds "delete".
-func addDelete[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
-	path := "@P@"
-	parent.AddCommand(&cobra.Command{
-		Use:               "delete NAME...",
-		Aliases:           []string{"rm"},
-		Short:             "Delete " + d.plural,
-		Long:              "Delete one or more " + d.plural + ". The server refuses when another object still uses them.\nThe command asks for confirmation unless -y is given.",
-		Example:           "jailops " + path + " delete NAME\njailops " + path + " delete -y NAME1 NAME2",
-		Args:              cobra.MinimumNArgs(1),
-		ValidArgsFunction: completeKind(a, d),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			for _, name := range args {
-				if ok, err := a.dry("delete "+d.noun+" "+name, nil); ok || err != nil {
-					if err != nil {
-						return err
-					}
-					continue
-				}
-				if err := a.confirm(fmt.Sprintf("Delete %s %q?", d.noun, name)); err != nil {
-					return err
-				}
-				c, err := a.connect(cmd.Context())
-				if err != nil {
-					return err
-				}
-				h, err := d.del(cmd.Context(), c, name)
-				if err != nil {
-					return err
-				}
-				if err := a.finishOp(cmd.Context(), h, d.noun, name, "deleted", nil); err != nil {
-					return err
-				}
-			}
-			return nil
-		},
-	})
-}
+// edit ---------------------------------------------------------------------
 
 // addEdit adds "edit": an editor session on the YAML document, written back
 // with the ETag read at the start so a concurrent change is detected.
@@ -357,8 +664,8 @@ func addEdit[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 	var file string
 	cmd := &cobra.Command{
 		Use:   "edit NAME",
-		Short: "Edit a " + d.noun + " in your editor",
-		Long: `Open the specification of a ` + d.noun + ` as YAML in $JAILOPS_EDITOR, $VISUAL or $EDITOR
+		Short: "Edit " + article(d.noun) + " " + d.noun + " in your editor",
+		Long: `Open the specification of ` + article(d.noun) + ` ` + d.noun + ` as YAML in $JAILOPS_EDITOR, $VISUAL or $EDITOR
 (default vi), and send it back when the editor exits. The update carries the
 ETag of the version you started from: if somebody else changed the object in
 the meantime the server answers "conflict" and nothing is overwritten; your
@@ -367,7 +674,7 @@ text stays in a temporary file whose path is printed.
 Saving without a change, or an empty file, cancels. Only the specification and
 the labels can be changed; server-owned fields are not shown. With -f the
 document is read from a file instead of an editor, which is how scripts replace
-a ` + d.noun + `. With --dry-run the edited document is validated and printed,
+` + article(d.noun) + ` ` + d.noun + `. With --dry-run the edited document is validated and printed,
 not sent.`,
 		Example:           "EDITOR=nano jailops @P@ edit NAME\njailops @P@ edit NAME -f NAME.yaml",
 		Args:              cobra.ExactArgs(1),
@@ -454,7 +761,7 @@ func editObject[T any](a *app, ctx context.Context, d *kindDesc[T], name, file, 
 	}
 	if strip(edited) == strip(orig) {
 		cleanup()
-		fprintf(a.env.Stdout, "%s/%s unchanged\n", d.noun, name)
+		a.say("%s/%s unchanged\n", d.noun, name)
 		return nil
 	}
 	fail := func(err error) error {

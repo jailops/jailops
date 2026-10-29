@@ -215,8 +215,10 @@ func TestPkgBaseCopiesKeysAndUsesTheVerifiedConf(t *testing.T) {
 func TestPkgBaseRepoConfText(t *testing.T) {
 	w := newWorld(t)
 	for _, c := range []struct{ rel, url string }{
-		{"15.0-RELEASE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_${VERSION_MINOR}"},
-		{"15.0-RELEASE-p1", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_${VERSION_MINOR}"},
+		{"15.0-RELEASE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_0"},
+		{"15.0-RELEASE-p1", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_0"},
+		{"15.1-RELEASE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_1"},
+		{"15.1-RELEASE-p6", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_1"},
 		{"15.0-STABLE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest"},
 	} {
 		b := &Build{M: w.M, Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: c.rel, Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}, Work: "/w"}

@@ -302,3 +302,46 @@ type JailSnapshotStatus struct {
 	// snapshot, which is what a data rollback would discard.
 	Written int64 `json:"written,omitempty"`
 }
+
+// JailUsage is what one jail uses, measured when it is asked for
+// (GET /api/v1/jails/{name}/usage). It is never part of the Jail document, so
+// listing jails stays cheap. A part that could not be measured carries the
+// reason instead of zeros.
+type JailUsage struct {
+	Jail       string     `json:"jail"`
+	Power      PowerState `json:"power"`
+	MeasuredAt time.Time  `json:"measured_at"`
+	// Accounting is the kernel's resource accounting of the jail (racct);
+	// nil while the jail is not running.
+	Accounting *JailAccounting `json:"accounting,omitempty"`
+	Disk       JailDiskUsage   `json:"disk"`
+}
+
+// JailAccounting is the running jail's share of the host as racct counts it.
+type JailAccounting struct {
+	// Error says why nothing was measured ("racct is off: ..."); the numbers
+	// are zero then and mean nothing.
+	Error string `json:"error,omitempty"`
+	// Processes is the number of processes in the jail.
+	Processes int `json:"processes"`
+	// CPUSeconds is the CPU time the jail consumed since it started, in
+	// seconds, all cores added up.
+	CPUSeconds int64 `json:"cpu_seconds"`
+	// MemoryBytes is the resident memory of the jail's processes.
+	MemoryBytes int64 `json:"memory_bytes"`
+}
+
+// JailDiskUsage is the space of the jail's datasets, running or not.
+type JailDiskUsage struct {
+	// Error says why nothing was measured.
+	Error string `json:"error,omitempty"`
+	// RootBytes is `used` of the root dataset: what the root takes on the
+	// pool by itself (a thin jail's root shares the rest with its image).
+	RootBytes int64 `json:"root_bytes"`
+	// RootReferencedBytes is `referenced` of the root: the size of the root's
+	// tree, shared blocks included.
+	RootReferencedBytes int64 `json:"root_referenced_bytes"`
+	// DataBytes is `used` of the data datasets (persistent paths and
+	// volumes) together, their snapshots included.
+	DataBytes int64 `json:"data_bytes"`
+}

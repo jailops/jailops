@@ -114,10 +114,12 @@ type app struct {
 
 	remote, host, output, configPath, project string
 	dryRun, wait, noWait, yes                 bool
-	noHeaders                                 bool
+	noHeaders, quiet                          bool
 	timeout                                   time.Duration
 
 	format  format
+	wide    bool // -o wide: every column of a list, on a terminal too
+	compact bool // -o compact: the plain table of a pipe, on a terminal too
 	started bool // a command body began: later errors are not usage errors
 	cmdPath string
 	cl      *sdk.Client
@@ -140,6 +142,9 @@ func Execute(ctx context.Context, env *Env, args []string) int {
 	root := a.newRoot()
 	if args == nil {
 		args = []string{} // nil would make cobra read os.Args
+	}
+	if len(args) > 0 && args[0] == "--version" { // the version of this client, no server asked
+		args = append([]string{"version", "--client"}, args[1:]...)
 	}
 	root.SetArgs(args)
 	root.SetOut(env.Stdout)
@@ -187,6 +192,15 @@ type abortError struct{ msg string }
 func (e *abortError) Error() string { return e.msg }
 
 var errNotConfirmed = errors.New("confirmation required")
+
+// say prints a confirmation such as "jail/web started" on standard output,
+// unless -q asked for silence. Errors never go through here.
+func (a *app) say(format string, args ...any) {
+	if a.quiet {
+		return
+	}
+	fprintf(a.env.Stdout, format, args...)
+}
 
 // colour support -----------------------------------------------------------
 

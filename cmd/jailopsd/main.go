@@ -27,10 +27,10 @@ func run(args []string) int {
 	forceWeb := fs.Bool("web", false, "serve the web console, whatever web.enabled says (it is off by default); with no TLS listener configured it opens :39110")
 	noWeb := fs.Bool("no-web", false, "serve no web console, whatever web.enabled says (the API is unchanged)")
 	fs.Usage = func() {
-		fmt.Fprintf(fs.Output(), "usage: jailopsd [flags]\n       jailopsd version\n\nflags:\n")
+		fmt.Fprintf(fs.Output(), "usage: jailopsd [flags]\n       jailopsd version | --version\n\nflags:\n")
 		fs.PrintDefaults()
 	}
-	if len(args) > 0 && args[0] == "version" {
+	if len(args) > 0 && (args[0] == "version" || args[0] == "--version" || args[0] == "-version") {
 		fmt.Println("jailopsd", version)
 		return 0
 	}

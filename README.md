@@ -42,7 +42,8 @@ License: BSD-2-Clause.
 explains how to trust it (`/usr/local/etc/pkg/repos/jailops.conf` and the public key, checked against the fingerprint in
 that README). The JailOps packages (`jailops-client`, `jailops`, `jailops-backupd`) are published there after each
 release, signed, for amd64 and arm64. You can also build from source (`just build-freebsd`), or take the static
-binaries from the GitHub releases page.
+binaries from the GitHub releases page. The client package ships bash, zsh and fish completion for `jailops` and
+`jailops-sync` under `/usr/local/share`; a hand-installed binary prints it with `jailops completion SHELL`.
 
 ## Read next
 

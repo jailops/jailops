@@ -10,7 +10,7 @@ import (
 
 // labelCmd is 'jailops label JAIL KEY=VALUE... KEY-': labels select jails for backup policies and rollouts.
 func (a *app) labelCmd() *cobra.Command {
-	d := jailDesc()
+	d := a.jailDesc()
 	return &cobra.Command{
 		Use:   "label JAIL KEY=VALUE... | KEY-",
 		Short: "Set or remove labels of a jail",
@@ -19,7 +19,7 @@ label, and so do rollouts. Write KEY=VALUE to set a label and KEY- to remove it;
 given at once and are applied together. With no label, the command lists the labels of the jail.`,
 		Example:           "jailops label web backup=yes tier=frontend\njailops label web tier-\njailops label web",
 		Args:              cobra.MinimumNArgs(1),
-		ValidArgsFunction: completeKind(a, d),
+		ValidArgsFunction: completeArgs(completeKind(a, d), completeNone),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name, changes := args[0], args[1:]
 			set := map[string]string{}

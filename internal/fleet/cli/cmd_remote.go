@@ -69,6 +69,9 @@ func (a *app) remoteBootstrap() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "bootstrap HOST --url https://HOST:39110 --fingerprint SHA256",
 		Short: "Make a client certificate for a host, store it encrypted, print the command that trusts it",
+		Example: `jailops-sync remote bootstrap web1 --url https://web1:39110 --fingerprint 3f9a... > sync.pem
+jailops-sync remote bootstrap web1 --url https://web1:39110 --fingerprint 3f9a... --projects web,mail
+jailops-sync remote bootstrap web1 --url https://web1:39110 --fingerprint 3f9a... --force`,
 		Long: `Generates an ECDSA P-256 client certificate and key, writes them with the url and
 the pinned server fingerprint to hosts/HOST/remote.sops.yaml encrypted under the
 repository's .sops.yaml (the plaintext key never touches the disk), and prints the

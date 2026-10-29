@@ -63,6 +63,38 @@ func TestVersion(t *testing.T) {
 	}
 }
 
+// Help and the version flag answer on standard output with exit 0 and read no configuration; init checks its
+// arguments before it asks for root.
+func TestHelpAndVersionFlags(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing.conf")
+	for _, args := range [][]string{{"-h"}, {"--help"}, {"-config", missing, "-help"}} {
+		code, out, errs := runArgs(t, 1000, args...)
+		if code != 0 || errs != "" || !strings.Contains(out, "usage: jailops-priv [flags] | version | check-config | init -pool POOL") || !strings.Contains(out, "-storage-root") {
+			t.Errorf("%v: %d %q %q", args, code, out, errs)
+		}
+	}
+	for _, args := range [][]string{{"--version"}, {"-version", "-config", missing}} {
+		if code, out, _ := runArgs(t, 1000, args...); code != 0 || !strings.HasPrefix(out, "jailops-priv ") {
+			t.Errorf("%v: %d %q", args, code, out)
+		}
+	}
+	code, out, errs := runArgs(t, 1000, "init", "--help")
+	if code != 0 || errs != "" || !strings.Contains(out, "usage: jailops-priv init -pool POOL") || !strings.Contains(out, "-dry-run") {
+		t.Errorf("init --help: %d %q %q", code, out, errs)
+	}
+	for _, args := range [][]string{{"init"}, {"init", "-pool", "tank/x"}, {"init", "-pool", "tank", "-mount", "relative"}} {
+		if code, _, errs := runArgs(t, 1000, args...); code != 2 || strings.Contains(errs, "must run as root") || !strings.Contains(errs, "usage:") {
+			t.Errorf("%v: %d %q", args, code, errs)
+		}
+	}
+	if code, _, errs := runArgs(t, 1000, "init", "-pool", "tank"); code != 1 || !strings.Contains(errs, "must run as root") {
+		t.Errorf("init as a user: %d %q", code, errs)
+	}
+	if code, _, errs := runArgs(t, 0, "-config", emptyConfig(t), "frobnicate"); code != 2 || !strings.Contains(errs, "usage: jailops-priv [flags]") {
+		t.Errorf("unknown command: %d %q", code, errs)
+	}
+}
+
 func TestRefusesToRunWithoutRoot(t *testing.T) {
 	dir := t.TempDir()
 	args := []string{"-config", emptyConfig(t), "-storage-root", "tank/jailops", "-mount-base", dir}

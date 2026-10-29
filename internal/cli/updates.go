@@ -45,15 +45,7 @@ func (a *app) emitReports(reports []api.UpdateReport) error {
 }
 
 func (a *app) emitRecords(recs []api.UpdateRecord) error {
-	return a.emit(nonNil(recs), func(col int, v string) string {
-		switch v {
-		case api.UpdateOK:
-			return "32"
-		case api.UpdateFailed, api.UpdateRolledBack:
-			return "31"
-		}
-		return ""
-	}, func() ([]string, [][]string) {
+	return a.emit(nonNil(recs), updateStyle, func() ([]string, [][]string) {
 		var rows [][]string
 		for _, r := range recs {
 			change := dash(r.From)
@@ -80,7 +72,7 @@ func (a *app) emitRecords(recs []api.UpdateRecord) error {
 }
 
 func (a *app) updateCmd() *cobra.Command {
-	d := jailDesc()
+	d := a.jailDesc()
 	uc := group("update", "Check for and apply updates of jails",
 		`Managed updates: a check lists what could change (packages inside the jail,
 a newer image generation for the root) and changes nothing; an apply takes a
@@ -92,7 +84,7 @@ Everything acts in the current project (--project, JAILOPS_PROJECT or
 'project switch'). Which jails update on their own is a matter of each jail's
 update policy; these commands are the manual side.`,
 		`jailops update list
-jailops update check --all
+jailops update check
 jailops update apply web --dry-run
 jailops update apply web
 jailops update history web`, "updates")
@@ -119,16 +111,16 @@ jailops update history web`, "updates")
 
 	var checkAll bool
 	check := &cobra.Command{
-		Use:   "check [JAIL...] [--all]",
+		Use:   "check [JAIL...]",
 		Short: "Check what could be updated, without changing anything",
 		Long: `Ask jails what could be updated: packages and a newer image generation. Name
-the jails, or use --all for every jail of the project (--project selects it).
-A stopped jail cannot be asked about its packages and shows an error in the
-result.`,
-		Example:           "jailops update check web\njailops update check --all\njailops update check --all --project shop",
+the jails; without names every jail of the project is checked (--project selects
+it, --all says the same). A stopped jail cannot be asked about its packages and
+shows an error in the result.`,
+		Example:           "jailops update check web\njailops update check\njailops update check --project shop",
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			names, err := updateTargets(args, checkAll)
+			names, err := updateTargets(args, checkAll || len(args) == 0)
 			if err != nil {
 				return err
 			}
@@ -151,7 +143,7 @@ result.`,
 			return a.emitReports(rs)
 		},
 	}
-	check.Flags().BoolVar(&checkAll, "all", false, "check every jail of the project")
+	check.Flags().BoolVar(&checkAll, "all", false, "check every jail of the project (the default without names)")
 
 	var applyAll, pkgs, osOnly bool
 	apply := &cobra.Command{
@@ -282,7 +274,7 @@ func updateTargets(args []string, all bool) ([]string, error) {
 
 func (a *app) provisionCmd() *cobra.Command {
 	var again bool
-	d := jailDesc()
+	d := a.jailDesc()
 	cmd := &cobra.Command{
 		Use:   "provision JAIL [--again]",
 		Short: "Run the provisioning declared in a jail's specification",

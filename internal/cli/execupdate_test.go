@@ -120,6 +120,15 @@ func TestShellChoiceAndTerminal(t *testing.T) {
 	if raw != 1 || restored != 1 {
 		t.Fatalf("raw mode entered %d, restored %d", raw, restored)
 	}
+	// exec gets a terminal on its own when both ends are terminals; -T never does.
+	tr.ok("exec", "web", "--", "echo", "auto")
+	if r := last(); !r.TTY || r.Rows != 24 {
+		t.Fatalf("automatic terminal: %+v", r)
+	}
+	tr.ok("exec", "-T", "web", "--", "echo", "plain")
+	if r := last(); r.TTY {
+		t.Fatalf("-T requested a terminal: %+v", r)
+	}
 	h.tty = false
 	tr.golden("shell")
 }

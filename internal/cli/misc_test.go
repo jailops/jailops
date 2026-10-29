@@ -143,17 +143,23 @@ func TestColourOnlyOnTTY(t *testing.T) {
 	if !strings.Contains(coloured, "\x1b[32mrunning\x1b[0m") || !strings.Contains(coloured, "\x1b[90mstopped\x1b[0m") {
 		t.Fatalf("no state colour on a terminal: %q", coloured)
 	}
-	if got := ansiRe.ReplaceAllString(coloured, ""); got != plain {
-		t.Fatalf("colour breaks alignment:\n%q\n%q", got, plain)
+	// A terminal gets the boxed table; the colour must not move anything.
+	boxed := ansiRe.ReplaceAllString(coloured, "")
+	if boxed == plain || !strings.Contains(boxed, "┌") {
+		t.Fatalf("no boxed table on a terminal:\n%s", boxed)
 	}
 	h.env["NO_COLOR"] = "1"
-	if out, _, _ := h.run("", "jail", "list"); out != plain {
-		t.Fatalf("NO_COLOR ignored: %q", out)
+	if out, _, _ := h.run("", "jail", "list"); out != boxed {
+		t.Fatalf("NO_COLOR ignored, or colour breaks alignment:\n%q\n%q", out, boxed)
 	}
 	delete(h.env, "NO_COLOR")
 	h.env["TERM"] = "dumb"
-	if out, _, _ := h.run("", "jail", "list"); out != plain {
+	if out, _, _ := h.run("", "jail", "list"); out != boxed {
 		t.Fatalf("TERM=dumb ignored: %q", out)
+	}
+	// --no-headers keeps the script form even on a terminal.
+	if out, _, _ := h.run("", "jail", "list", "--no-headers"); ansiRe.MatchString(out) || strings.Contains(out, "│") {
+		t.Fatalf("--no-headers on a terminal: %q", out)
 	}
 	// Machine formats never carry colour.
 	h.env["TERM"] = "xterm"

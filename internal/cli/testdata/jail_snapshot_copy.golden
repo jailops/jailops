@@ -12,6 +12,36 @@ NAME   WRITTEN   AGE   COMMENT
 s1     0 B       3h    first
 s2     3.0 MiB   3h    -
 
+$ jailops jail snapshot show web s2
+Name:        s2
+UUID:        <uuid>
+Generation:  1
+Age:         3h
+Written:     3.0 MiB
+
+SPEC         STATUS
+----         ------
+jail: web    written: 3145728
+
+$ jailops jail snapshot show web s1 -o yaml
+metadata:
+  name: s1
+  uuid: <uuid>
+  project: main
+  host: <uuid>
+  scope: host
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  jail: web
+  comment: first
+
+$ jailops jail snapshot show web nope
+! not_found: snapshot "nope" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
 $ jailops jail snapshot delete web s1
 ! Delete snapshot "s1" of jail "web"? [y/N]: 
 ! usage: confirmation required
@@ -84,11 +114,11 @@ $ jailops jail copy web web2
 
 $ jailops jail exec web -- ls
 ! busy: jail "web" is not running
-! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+! hint: start it first
 [exit 5]
 
 $ jailops jail console web
 ! busy: jail "web" is not running
-! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
+! hint: start it first
 [exit 5]
 

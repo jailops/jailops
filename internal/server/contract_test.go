@@ -17,6 +17,7 @@ import (
 	"jailops.net/jailops/internal/daemon/dtest"
 	"jailops.net/jailops/internal/server"
 	"jailops.net/jailops/internal/service"
+	"jailops.net/jailops/internal/sys/zfs"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
@@ -161,6 +162,55 @@ func TestJailLifecycle(t *testing.T) {
 	if ok, _ := e.ZFS.Exists(c, "tank/jailops/projects/alpha/jails/web"); ok {
 		t.Fatal("datasets were not destroyed")
 	}
+}
+
+// GET .../usage is a read of the jail: readonly may ask, the reply names what
+// could not be measured, and nothing is stored on the jail.
+func TestJailUsageOverHTTP(t *testing.T) {
+	e := seeded(t)
+	c := ctxT(t)
+	mustJail(t, e, "web")
+	ro := e.Client(api.PermReadonly)
+	u, err := ro.Jails().Usage(c, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Jail != "web" || u.Power != api.PowerStopped || u.Accounting != nil || u.Disk.Error == "" {
+		t.Fatalf("%+v", u)
+	}
+	const container = "tank/jailops/projects/alpha/jails/web"
+	rows, err := e.ZFS.List(c, zfs.ListOpts{Root: container, Recursive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range rows {
+		e.ZFS.SetSpace(r.Name, 1000, 1000)
+	}
+	e.ZFS.SetSpace(container+"/root", 4096, 1<<30)
+	e.Run.On("rctl", []string{"-u", "jail:alpha_web"}, "maxproc=5\ncputime=61\nmemoryuse=1048576\n")
+	op, err := e.Admin.Jails().Start(c, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := op.Wait(c); err != nil {
+		t.Fatalf("%v\n%s", err, e.Log())
+	}
+	u, err = ro.Jails().Usage(c, "web")
+	if err != nil || u.Power != api.PowerRunning || u.Accounting == nil {
+		t.Fatalf("%v %+v", err, u)
+	}
+	if a := u.Accounting; a.Error != "" || a.Processes != 5 || a.CPUSeconds != 61 || a.MemoryBytes != 1048576 {
+		t.Fatalf("%+v", a)
+	}
+	if u.Disk.Error != "" || u.Disk.RootBytes != 4096 || u.Disk.RootReferencedBytes != 1<<30 || u.Disk.DataBytes == 0 || u.Disk.DataBytes%1000 != 0 {
+		t.Fatalf("%+v", u.Disk)
+	}
+	j, _ := e.Admin.Jails().Get(c, "web")
+	if j.Metadata.Generation != 1 {
+		t.Fatalf("measuring changed the jail: %+v", j.Metadata)
+	}
+	_, err = ro.Jails().Usage(c, "ghost")
+	wantCode(t, err, api.CodeNotFound)
 }
 
 func TestSnapshotsRollbackUpgrade(t *testing.T) {
@@ -562,6 +612,84 @@ func TestImagesAndGenerations(t *testing.T) {
 	}
 	_, err = e.Admin.Images().Build(c, "nope", api.ImageBuild{})
 	wantCode(t, err, api.CodeNotFound)
+}
+
+func TestImageUpgradeBuildsAndMovesTheJails(t *testing.T) {
+	e := seeded(t)
+	c := ctxT(t)
+	mustJail(t, e, "web")
+	so, _ := e.Admin.Jails().Start(c, "web")
+	if _, err := so.Wait(c); err != nil {
+		t.Fatalf("%v\n%s", err, e.Log())
+	}
+	// Only a global admin: a project admin is forbidden, and so is a global operator (the role of image builds).
+	_, err := e.Scoped(api.PermAdmin, dtest.SeedProject).Images().Upgrade(c, "fb", api.ImageUpgrade{})
+	wantCode(t, err, api.CodeForbidden)
+	_, err = e.Client(api.PermOperator).Images().Upgrade(c, "fb", api.ImageUpgrade{})
+	wantCode(t, err, api.CodeForbidden)
+	_, err = e.Admin.Images().Upgrade(c, "nope", api.ImageUpgrade{})
+	wantCode(t, err, api.CodeNotFound)
+	// The repository has nothing newer: no generation is kept and the jail stays.
+	op, err := e.Admin.Images().Upgrade(c, "fb", api.ImageUpgrade{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := op.Wait(c)
+	if err != nil || !res.Unchanged || res.Generation != nil || len(res.Jails) != 1 || res.Jails[0].Status != api.ImageUpgradeSkipped {
+		t.Fatalf("%+v %v\n%s", res, err, e.Log())
+	}
+	if im, _ := e.Admin.Images().Get(c, "fb"); len(im.Status.Generations) != 1 {
+		t.Fatalf("%+v", im.Status)
+	}
+	// A newer package set: the generation is built, the jail moves, the history and the events are those of an OS update.
+	e.SetRepoVersion("15.0p2")
+	evctx, cancel := context.WithCancel(c)
+	defer cancel()
+	events := e.Events(evctx, e.Global())
+	op, err = e.Admin.Images().Upgrade(c, "fb", api.ImageUpgrade{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info := op.Info(); info.Project != "" || info.Resources["images"][0] != "/api/v1/images/fb" || info.Resources["jails"][0] != "/api/v1/jails/web" {
+		t.Fatalf("%+v", info)
+	}
+	res, err = op.Wait(c)
+	if err != nil || res.Unchanged || res.Generation == nil || res.Generation.Number != 2 || res.From != "fb#g1" {
+		t.Fatalf("%+v %v\n%s", res, err, e.Log())
+	}
+	if j := res.Jails[0]; j.Jail != "web" || j.Project != dtest.SeedProject || j.Status != api.ImageUpgradeUpgraded || j.From != "fb#g1" || j.To != "fb#g2" || j.Record == "" {
+		t.Fatalf("%+v", j)
+	}
+	after, _ := e.Admin.Jails().Get(c, "web")
+	if after.Status.Generation != "fb#g2" || after.Status.Power != api.PowerRunning {
+		t.Fatalf("%+v", after.Status)
+	}
+	h, err := e.Admin.Jails().UpdateHistory(c, "web")
+	if err != nil || len(h) != 1 || h[0].ID != res.Jails[0].Record || h[0].Kind != api.UpdateKindOS || h[0].Result != api.UpdateOK {
+		t.Fatalf("%+v %v", h, err)
+	}
+	seen := map[string]bool{}
+	for !seen["image-generation-created"] || !seen["update.applied"] || !seen["image-upgraded"] {
+		select {
+		case ev := <-events:
+			var l api.LifecycleEvent
+			if ev.Type == api.EventLifecycle && json.Unmarshal(ev.Metadata, &l) == nil {
+				seen[l.Action] = true
+			}
+		case <-c.Done():
+			t.Fatalf("events not seen: %v", seen)
+		}
+	}
+	// A dry run lists what would move and changes nothing.
+	e.SetRepoVersion("15.0p3")
+	op, _ = e.Admin.Images().Upgrade(c, "fb", api.ImageUpgrade{DryRun: true})
+	res, err = op.Wait(c)
+	if err != nil || !res.DryRun || res.Generation != nil || len(res.Plan) == 0 || res.Jails[0].Status != api.ImageUpgradePlanned || res.Jails[0].To != "fb#g3" {
+		t.Fatalf("%+v %v", res, err)
+	}
+	if im, _ := e.Admin.Images().Get(c, "fb"); len(im.Status.Generations) != 2 {
+		t.Fatalf("a dry run built: %+v", im.Status)
+	}
 }
 
 func TestOperationsListWaitCancel(t *testing.T) {

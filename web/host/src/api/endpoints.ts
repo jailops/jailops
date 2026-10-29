@@ -3,7 +3,7 @@
 import { getClient } from '@jailops/shared/api/client'
 import { core } from '@jailops/shared/api/core'
 import type {
-  Jail, JailAction, JailRollback, JailUpgrade, JailSnapshot, Image, ImageBuild, Network, Lease,
+  Jail, JailAction, JailRollback, JailUpgrade, JailSnapshot, Image, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, Token,
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult,
@@ -37,6 +37,7 @@ export const api = {
   images: {
     list: () => c().list<Image>('/images'),
     build: (n: string, b: ImageBuild) => c().mutate('POST', `/images/${e(n)}/generations`, b),
+    upgrade: (n: string, u: ImageUpgrade) => c().mutate('POST', `/images/${e(n)}/upgrade`, u),
     setAlias: (n: string, alias: string, generation: number) => c().mutate<Image>('PUT', `/images/${e(n)}/aliases/${e(alias)}`, { generation }),
     deleteAlias: (n: string, alias: string) => c().mutate<Image>('DELETE', `/images/${e(n)}/aliases/${e(alias)}`),
   },

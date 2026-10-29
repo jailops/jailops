@@ -76,7 +76,7 @@ func (s *Server) consoleOpen(w http.ResponseWriter, r *http.Request) {
 	case j == nil:
 		perr = notFound("jail", name)
 	case j.Status.Power != api.PowerRunning:
-		perr = api.Errorf(api.CodeBusy, "jail %q is not running", name)
+		perr = api.Errorf(api.CodeBusy, "jail %q is not running", name).WithHint("start it first")
 	}
 	if perr != nil {
 		s.mu.Unlock()

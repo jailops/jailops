@@ -45,6 +45,7 @@ func (a *app) projectDesc() *kindDesc[api.Project] {
 		}
 		return []string{mark, p.Metadata.Name, joinOrDash(p.Spec.Hosts), joinOrDash(nets), joinOrDash(stor), jails, dash(p.Spec.Description)}
 	}
+	d.show = func(a *app, p api.Project) error { return a.showObject(p.Metadata, nil, p.Spec, p.Status) }
 	return &d
 }
 
@@ -333,7 +334,7 @@ client has none: there is no default project.`,
 			if err := saveConfig(path, cfg); err != nil {
 				return err
 			}
-			fprintf(a.env.Stdout, "remote %s now uses project %s\n", keyOf(conn.Name), name)
+			a.say("remote %s now uses project %s\n", keyOf(conn.Name), name)
 			if conn.Sources["project"] == "env JAILOPS_PROJECT" || conn.Sources["project"] == "flag --project" {
 				fprintf(a.env.Stderr, "note: %s still overrides it for this shell or command\n", conn.Sources["project"])
 			}
@@ -418,6 +419,7 @@ or a jail uses it. Only global admins write storage.`,
 			cmd.Flags().StringVar(&dataset, "dataset", "", "ZFS dataset, for example tank/jailops (required without -f)")
 			cmd.Flags().StringVar(&desc, "description", "", "what the storage is for")
 			cmd.Flags().StringVar(&comp, "compression", "", "compression for new datasets: zstd or lz4")
+			enumFlag(cmd, "compression", "zstd", "lz4")
 			return func(name string) (api.Storage, error) {
 				if dataset == "" {
 					return api.Storage{}, usagef("--dataset is required (or use -f FILE)")

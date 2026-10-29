@@ -225,16 +225,24 @@ func isRelease(rel string) bool {
 	return strings.Contains(strings.ToUpper(rel), "-RELEASE")
 }
 
-// repoConf writes the private repository file. ${ABI}, ${VERSION_MAJOR} and
-// ${VERSION_MINOR} are left for pkg to expand. A RELEASE reads base_release_<minor>;
-// anything else (STABLE, CURRENT) reads base_latest.
+// repoConf writes the private repository file. ${ABI} and ${VERSION_MAJOR} are
+// left for pkg to expand. A RELEASE reads base_release_<minor> with the minor
+// of the image's release written out: pkg expands ${VERSION_MINOR} from the
+// ABI it was given, which carries no minor, so it answered 0 and a 15.1 image
+// was built from the 15.0 packages. Anything else (STABLE, CURRENT) reads
+// base_latest.
 func (p PkgBase) repoConf(b *Build) plan.Step {
 	m := b.M
 	file := path.Join(b.Work, "repos", "jailops.conf")
 	url := b.Spec.Source.Repo
 	if url == "" {
 		if isRelease(b.Spec.Release) {
-			url = "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_${VERSION_MINOR}"
+			_, minor, err := parseRelease(b.Spec.Release)
+			if err != nil {
+				return plan.Step{Name: "write-repo-conf", Describe: "write the repository file",
+					Do: func(context.Context) error { return api.Errorf(api.CodeInvalid, "%v", err) }}
+			}
+			url = fmt.Sprintf("pkg+https://pkg.FreeBSD.org/${ABI}/base_release_%d", minor)
 		} else {
 			url = "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest"
 		}

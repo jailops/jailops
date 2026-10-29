@@ -1,0 +1,230 @@
+.\" jailops-backupd.8, installed as /usr/local/share/man/man8/jailops-backupd.8
+.Dd October 29, 2026
+.Dt JAILOPS-BACKUPD 8
+.Os
+.Sh NAME
+.Nm jailops-backupd
+.Nd the JailOps backup node
+.Sh SYNOPSIS
+.Nm
+.Op Fl c Ar file | Fl -config Ar file
+.Op Fl -json
+.Ar command
+.Op Ar arguments
+.Nm
+.Ar command
+.Fl -help
+.Sh DESCRIPTION
+.Nm
+is the backup node of JailOps: a server that stores the encrypted,
+deduplicated backups of jails on a directory or an S3 bucket, with its control
+plane in PostgreSQL.
+It is keyless: it holds no key and never decrypts anything.
+Backup hosts connect to one TLS listener (default port 39111) with a client
+certificate whose fingerprint was enrolled; the management API and, when
+enabled, the web console are served on the same port.
+Administration happens through a unix socket that only root may use.
+.Pp
+The options may come before or after the command:
+.Bl -tag -width Ds
+.It Fl c Ar file , Fl -config Ar file
+The configuration file (YAML; unknown keys are an error).
+Default
+.Pa /usr/local/etc/jailops/backupd.yaml ,
+or the value of
+.Ev JAILOPS_BACKUPD_CONFIG .
+.It Fl -json
+Print raw JSON answers instead of text.
+.It Fl -help , Fl -version
+Print the usage, or the version, and exit.
+.El
+.Pp
+The daemon:
+.Bl -tag -width Ds
+.It Cm serve Op Fl -adopt
+Run the node: the host listener, the admin socket, the management API and the
+console.
+.Fl -adopt
+takes over a repository owned by another node that is gone for good.
+.It Xo
+.Cm init
+.Op Fl -admin Ar name
+.Op Fl -password-file Ar file | Fl -password-prompt
+.Op Fl -key-domain Ar id
+.Xc
+Create the repository, probe the datastore, migrate the database, create the
+server certificate (self-signed, when the files are missing) and print its
+fingerprint, which the hosts pin.
+With
+.Fl -admin
+the first administrator is created; the password comes from the file, from a
+prompt on the terminal, or from standard input.
+A second
+.Cm init
+reports the existing repository and its owner and exits 0.
+.It Cm check-config
+Load the configuration, read the database secret file (and the S3
+credentials), and look for the TLS files; the network and the datastore are
+not touched.
+.It Cm version
+Print the version and the database schema version.
+.El
+.Pp
+Administration, through the admin socket of the running daemon:
+.Bl -tag -width Ds
+.It Cm status
+The repository status.
+.It Cm gc Oo Fl -grace Ar duration Oc Op Fl -dry-run
+Garbage collection.
+The grace period defaults to the configuration and is at least 12 hours.
+.It Cm verify Oo Cm all | new | stale Oc Op Fl -no-quarantine
+Keyless verification of the chunks (default
+.Cm new ) .
+Corrupt chunks are moved aside unless
+.Fl -no-quarantine
+is given.
+.It Cm retention Op Fl -dry-run
+Apply the retention policies.
+.It Cm maintenance Op Cm online | read-only | offline
+Show or set the maintenance mode.
+.It Cm protect Ar group snapshot , Cm unprotect Ar group snapshot
+Protect a snapshot from deletion and retention, or stop protecting it.
+.It Cm delete request Ar group snapshot Op Fl -delay Ar duration
+.It Cm delete cancel Ar group snapshot
+.It Cm delete execute Ar group snapshot
+Request the deletion of a snapshot, cancel the request, or execute it once the
+delay (default from the configuration) has passed.
+.It Cm quarantine list
+List the chunks verification moved aside.
+.It Cm reconcile
+Rebuild the snapshot index from the repository.
+.It Cm jobs Op Ar id
+Recent jobs, or one job with its result.
+.El
+.Pp
+The database, directly:
+.Bl -tag -width Ds
+.It Xo
+.Cm hosts enroll Ar name
+.Pq Fl -fingerprint Ar fp | Fl -cert Ar file
+.Op Fl -scopes Ar list
+.Op Fl -note Ar text
+.Xc
+Enroll a backup host by the SHA-256 fingerprint of its certificate.
+The scopes are
+.Cm backup-push ,
+.Cm backup-pull
+and
+.Cm restore
+(default
+.Cm backup-push,backup-pull ) ;
+administration is never a host scope.
+.It Cm hosts list , Cm hosts revoke Ar name
+List the hosts, or revoke one: its open sessions are aborted and the daemon
+stops accepting it within seconds.
+.It Xo
+.Cm users add Ar name role
+.Op Fl -password-file Ar file | Fl -password-prompt
+.Xc
+.It Cm users list , Cm users delete Ar name
+The users of the management API and console; the role is
+.Cm readonly ,
+.Cm backup-admin
+or
+.Cm admin .
+.El
+.Pp
+.Cm completion Cm bash | zsh | fish
+prints a completion script for the shell; the package installs them under
+.Pa /usr/local/share .
+.Sh RC.CONF
+The rc.d script
+.Pa /usr/local/etc/rc.d/jailops_backupd
+runs
+.Cm serve
+under
+.Xr daemon 8
+as the user
+.Sy jailops-backup
+and sends its output to syslog with the tag
+.Sy jailops-backupd .
+.Bl -tag -width jailops_backupd_config
+.It Va jailops_backupd_enable
+Set to
+.Dq YES
+to start the node at boot.
+.It Va jailops_backupd_config
+The configuration file.
+Default
+.Pa /usr/local/etc/jailops/backupd.yaml .
+.It Va jailops_backupd_runas
+The unprivileged user.
+Default
+.Sy jailops-backup .
+.El
+.Pp
+The configuration is validated as that user with
+.Dl service jailops_backupd checkconfig
+and a start refuses a configuration that does not validate.
+There is no
+.Cm reload .
+.Sh ENVIRONMENT
+.Bl -tag -width JAILOPS_BACKUPD_CONFIG
+.It Ev JAILOPS_BACKUPD_CONFIG
+The configuration file when
+.Fl c
+is not given.
+.El
+.Sh SIGNALS
+.Bl -tag -width SIGTERM
+.It Dv SIGTERM , Dv SIGINT
+Stop: the listeners close, open sessions end and running jobs are cancelled.
+.It Dv SIGHUP
+Not handled: there is no reload, and the process ends as with any signal it
+does not catch.
+A change of the configuration needs a restart.
+.El
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa /usr/local/etc/jailops/backupd.yaml
+The configuration; the installed sample is
+.Pa backupd.yaml.sample .
+.It Pa /usr/local/etc/jailops/backupd.dsn
+The database connection string, as the sample names it
+.Pq Sy database.dsn_file ;
+it must be readable by its owner only.
+.It Pa /var/run/jailops-backupd.sock
+The admin socket, mode 0600, root only
+.Pq Sy admin_socket ;
+the sample puts it at
+.Pa /var/run/jailops-backupd/admin.sock .
+.It Pa /var/run/jailops-backupd/backupd.pid
+The pid of the daemon under rc.d.
+.It Pa /usr/local/etc/jailops/backupd.crt
+.It Pa /usr/local/etc/jailops/backupd.key
+The server certificate and key
+.Pq Sy tls ;
+the sample keeps them under
+.Pa /var/db/jailops-backup .
+.It Pa /var/db/jailops-backup/repository
+The repository, with the directory datastore of the sample.
+.El
+.Sh EXIT STATUS
+.Bl -tag -width Ds -compact
+.It 0
+Success.
+.It 1
+The command failed: the configuration does not load, the daemon or the
+database cannot be reached, a job failed, or a command was given a bad flag or
+the wrong arguments.
+.It 2
+Usage: no command, an unknown command, or an unknown option before the
+command.
+.El
+.Sh SEE ALSO
+.Xr jailops 1 ,
+.Xr rc.conf 5 ,
+.Xr daemon 8 ,
+.Xr jailopsd 8
+.Pp
+The backup and restore guide is part of the JailOps documentation.

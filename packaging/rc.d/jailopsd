@@ -18,7 +18,8 @@
 # jailopsd runs as the unprivileged user jailops; everything that needs root is done by jailops_priv.
 # Configuration: /usr/local/etc/jailops/jailopsd.yaml
 #   service jailopsd checkconfig   validate the configuration
-# Output goes to syslog (tag jailopsd).
+# There is no reload: the configuration is read at start (SIGHUP is ignored by design) and a renewed TLS
+# certificate is picked up without a restart. Output goes to syslog (tag jailopsd).
 
 . /etc/rc.subr
 

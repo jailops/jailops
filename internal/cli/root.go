@@ -69,7 +69,10 @@ the user file ~/.config/jailops/config.yaml, the host file
 /usr/local/etc/jailops/client.yaml, and last the default socket
 /var/run/jailops/jailops.sock.
 
-Output is a table for people. Use -o json, -o yaml or -o name in scripts. Errors
+Output is a table for people: short, with borders, on a terminal (-o wide shows
+every column, -o compact the plain form), plain and one line per row anywhere
+else. Use -o json, -o yaml, -o name or -o csv in scripts; -q leaves out the
+confirmations such as "jail/web started". Errors
 print as "code: message" with a hint on the next line; 'jailops explain CODE' tells
 more. Exit codes: 0 ok, 1 failure, 2 usage or invalid, 3 auth, 4 not found,
 5 conflict, 6 unsupported, 7 internal. Colour is used on a terminal only and
@@ -96,6 +99,12 @@ jailops events --type lifecycle -o json`,
 				a.started = false
 				return err
 			}
+			switch f {
+			case fmtWide: // a table like any other, with every column
+				f, a.wide = fmtTable, true
+			case fmtCompact: // the plain table, on a terminal too
+				f, a.compact = fmtTable, true
+			}
 			a.format = f
 			if projectScoped(cmd) {
 				if err := a.requireProject(); err != nil {
@@ -112,7 +121,7 @@ jailops events --type lifecycle -o json`,
 	pf.StringVar(&a.remote, "remote", "", "named remote, or an https URL, to talk to (default: the current remote, else the local socket)")
 	pf.StringVar(&a.host, "host", "", "scope requests to this host (name or UUID) behind a hub")
 	pf.StringVar(&a.project, "project", "", "project to act in (default: the current project of the remote, chosen with 'project switch'; there is no default project)")
-	pf.StringVarP(&a.output, "output", "o", "table", "output format: table, json, yaml or name")
+	pf.StringVarP(&a.output, "output", "o", "table", "output format: table, wide, compact, json, yaml, name or csv")
 	pf.BoolVar(&a.dryRun, "dry-run", false, "show what would change and send nothing that changes state")
 	pf.BoolVar(&a.wait, "wait", true, "wait for asynchronous operations to finish")
 	pf.BoolVar(&a.noWait, "no-wait", false, "do not wait; print the operation id")
@@ -120,18 +129,18 @@ jailops events --type lifecycle -o json`,
 	pf.BoolVarP(&a.yes, "yes", "y", false, "answer yes to confirmations (never to data-loss confirmations)")
 	pf.StringVar(&a.configPath, "config", "", "user configuration file (default ~/.config/jailops/config.yaml)")
 	pf.BoolVar(&a.noHeaders, "no-headers", false, "omit table headers")
-	_ = root.RegisterFlagCompletionFunc("output", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
-		return []string{"table", "json", "yaml", "name"}, cobra.ShellCompDirectiveNoFileComp
-	})
-
+	pf.BoolVarP(&a.quiet, "quiet", "q", false, "print no confirmations (errors and requested output still print)")
+	enumFlag(root, "output", formatNames...)
 	_ = root.RegisterFlagCompletionFunc("project", a.completeProjects())
+	_ = root.RegisterFlagCompletionFunc("remote", a.remoteNames())
+	_ = root.RegisterFlagCompletionFunc("host", a.completeHosts())
 	root.AddCommand(
 		a.jailCmd(), a.imageCmd(), a.networkCmd(), a.firewallCmd(), a.backupCmd(),
 		a.projectCmd(), a.storageCmd(), a.trustCmd(), a.sessionsCmd(), a.whoamiCmd(), a.opCmd(), a.eventsCmd(), a.tokenCmd(), a.certCmd(), a.userCmd(), a.hostCmd(),
-		a.remoteCmd(), a.auditCmd(), a.doctorCmd(), a.serverCmd(), a.explainCmd(), a.completionCmd(), a.versionCmd(),
+		a.remoteCmd(), a.auditCmd(), a.doctorCmd(), a.serverCmd(), a.explainCmd(), a.completionCmd(), a.versionCmd(), a.manCmd(),
 	)
 	a.addJailShortcuts(root)
-	root.AddCommand(a.configCmd(), a.profileCmd(), a.updateCmd(), a.setAlias(jailDesc()))
+	root.AddCommand(a.configCmd(), a.profileCmd(), a.updateCmd(), a.setAlias(a.jailDesc()), a.applyCmd())
 	markProjectScoped(root)
 	expandExamples(root)
 	return root
@@ -173,7 +182,7 @@ func seconds(d time.Duration) int {
 // project was chosen: there is no default project. Host-level commands (images, networks, storage, projects,
 // trust, backup targets and keys, the server) are not here.
 var projectScopedCommands = []string{
-	"jail", "create", "delete", "list", "start", "stop", "restart", "exec", "shell", "label", "provision", "set",
+	"jail", "create", "delete", "list", "info", "start", "stop", "restart", "exec", "shell", "label", "provision", "set",
 	"firewall", "profile", "update", "config", "backup policy", "backup restore",
 }
 

@@ -61,6 +61,7 @@ type app struct {
 	identity  string
 	red       *secrets.Redactor
 	out, err  io.Writer
+	started   bool // a command body began: an error before that is a usage error
 }
 
 func (e Env) getenv(k string) string {
@@ -84,6 +85,9 @@ func Run(env Env, args []string) int {
 	}
 	a := &app{env: env, red: secrets.NewRedactor()}
 	a.out, a.err = a.red.Writer(env.Stdout), a.red.Writer(env.Stderr)
+	if len(args) > 0 && args[0] == "--version" {
+		args = append([]string{"version"}, args[1:]...)
+	}
 	root := a.root()
 	root.SetArgs(args)
 	root.SetOut(a.out)
@@ -103,6 +107,11 @@ func Run(env Env, args []string) int {
 		return ee.Code
 	}
 	fmt.Fprintln(a.err, "Error:", err)
+	if !a.started {
+		// an unknown command or flag, or the wrong arguments: the check itself failed, nothing was done
+		fmt.Fprintln(a.err, "run 'jailops-sync --help' for usage")
+		return ExitFatal
+	}
 	return ExitFailure
 }
 
@@ -121,6 +130,9 @@ $` + secrets.EnvIdentityFile + ` (a file) or $` + secrets.EnvKey + `. The SOPS f
 reads from SOPS_AGE_KEY, SOPS_AGE_KEY_FILE or SOPS_AGE_KEY_CMD.`,
 		SilenceUsage:  true,
 		SilenceErrors: true,
+		PersistentPreRun: func(*cobra.Command, []string) {
+			a.started = true
+		},
 	}
 	pf := root.PersistentFlags()
 	pf.StringVarP(&a.fleetPath, "fleet-path", "C", "", "fleet repository (default $"+EnvFleetPath+" or the current directory)")
@@ -146,7 +158,7 @@ reads from SOPS_AGE_KEY, SOPS_AGE_KEY_FILE or SOPS_AGE_KEY_CMD.`,
 	add("setup", a.cmdDoctor(), a.cmdValidate(), a.cmdSecrets(), a.cmdVault(), a.cmdRemote())
 	add("read", a.cmdRender(), a.cmdPlan(), a.cmdDrift(), a.cmdPruneCheck(), a.cmdAdopt())
 	add("write", a.cmdSync(), a.cmdRollout(), a.cmdWatch())
-	root.AddCommand(a.cmdVersion())
+	root.AddCommand(a.cmdVersion(), a.cmdMan())
 	return root
 }
 

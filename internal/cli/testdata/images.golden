@@ -12,29 +12,20 @@ alpine-3     linux     3.22           amd64   0             latest
 freebsd-15   freebsd   15.0-RELEASE   amd64   1             stable
 
 $ jailops image show freebsd-15
-metadata:
-  name: freebsd-15
-  uuid: <uuid>
-  scope: fleet
-  generation: 1
-  created_at: "2026-03-01T09:00:00Z"
-  updated_at: "2026-03-01T09:00:00Z"
-spec:
-  os: freebsd
-  release: 15.0-RELEASE
-  arch: amd64
-  source:
-    type: pkgbase
-  aliases:
-    - stable
-status:
-  generations:
-    - number: 1
-      name: freebsd-15#g1
-      manifest: sha256:<hex>
-      created_at: "2026-03-01T09:00:00Z"
-  aliases:
-    stable: 1
+Name:        freebsd-15
+UUID:        <uuid>
+Generation:  1
+Age:         3h
+
+SPEC                     STATUS
+----                     ------
+os: freebsd              generations:
+release: 15.0-RELEASE      - number: 1
+arch: amd64                  name: freebsd-15#g1
+source:                      manifest: sha256:<hex>
+  type: pkgbase              created_at: "2026-03-01T09:00:00Z"
+aliases:                 aliases:
+  - stable                 stable: 1
 
 $ jailops image build freebsd-15
 generation/freebsd-15#g2 built
@@ -51,7 +42,7 @@ $ jailops image build freebsd-15 --from g1
 generation/freebsd-15#g3 built
 
 $ jailops image build freebsd-15 --from x
-! usage: --from must be a generation such as g2
+! usage: --from must be a generation such as g2, not "x"
 ! hint: run 'jailops image build --help' for usage
 [exit 2]
 
@@ -72,7 +63,7 @@ $ jailops image alias set freebsd-15 stable 9
 [exit 4]
 
 $ jailops image alias set freebsd-15 stable x
-! usage: GENERATION must be a generation number such as 2
+! usage: GENERATION must be a generation such as g2, not "x"
 ! hint: run 'jailops image alias set --help' for usage
 [exit 2]
 
@@ -159,39 +150,29 @@ $ jailops image delete-generation -y freebsd-15 3
 generation/freebsd-15#g3 deleted
 
 $ jailops image show freebsd-15
-metadata:
-  name: freebsd-15
-  uuid: <uuid>
-  scope: fleet
-  generation: 4
-  created_at: "2026-03-01T09:00:00Z"
-  updated_at: "2026-03-01T09:00:00Z"
-spec:
-  os: freebsd
-  release: 15.0-RELEASE
-  arch: amd64
-  source:
-    type: pkgbase
-  aliases:
-    - stable
-    - latest
-status:
-  generations:
-    - number: 1
-      name: freebsd-15#g1
-      manifest: sha256:<hex>
-      created_at: "2026-03-01T09:00:00Z"
-      refs:
-        - web
-    - number: 2
-      name: freebsd-15#g2
-      manifest: sha256:<hex>
-      packages: 120
-      dataset: tank/jailops/images/freebsd-15/g2
-      created_at: "2026-03-01T09:00:00Z"
-  aliases:
-    latest: 2
-    stable: 1
+Name:        freebsd-15
+UUID:        <uuid>
+Generation:  4
+Age:         3h
+
+SPEC                     STATUS
+----                     ------
+os: freebsd              generations:
+release: 15.0-RELEASE      - number: 1
+arch: amd64                  name: freebsd-15#g1
+source:                      manifest: sha256:<hex>
+  type: pkgbase              created_at: "2026-03-01T09:00:00Z"
+aliases:                     refs:
+  - stable                     - web
+  - latest                 - number: 2
+                             name: freebsd-15#g2
+                             manifest: sha256:<hex>
+                             packages: 120
+                             dataset: tank/jailops/images/freebsd-15/g2
+                             created_at: "2026-03-01T09:00:00Z"
+                         aliases:
+                           latest: 2
+                           stable: 1
 
 $ jailops image delete -y freebsd-15
 ! image_in_use: image "freebsd-15" is used by jail "web"

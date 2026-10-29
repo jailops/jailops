@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"iter"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -14,7 +15,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-func jailDesc() *kindDesc[api.Jail] {
+func (a *app) jailDesc() *kindDesc[api.Jail] {
 	d := newDesc("jail", "jails", api.KindJail,
 		func(j *api.Jail) *api.ObjectMeta { return &j.Metadata },
 		func(j *api.Jail) *api.JailSpec { return &j.Spec })
@@ -50,57 +51,174 @@ func jailDesc() *kindDesc[api.Jail] {
 		return []string{j.Metadata.Name, dash(string(j.Status.Power)), j.Spec.Image, dash(j.Status.Generation),
 			joinOrDash(addrs), age(now, j.Metadata.CreatedAt)}
 	}
-	d.filters = func(cmd *cobra.Command) func(api.Jail) bool {
+	// On a terminal: one address per line with its network, the generation
+	// next to the image, and no column a long IPv6 address would crowd out.
+	d.brief = &listView[api.Jail]{
+		head:  []string{"NAME", "STATE", "IPV4", "IPV6", "IMAGE", "AGE"},
+		style: stateStyle(1),
+		drop:  []int{5, 4, 3, 2},
+		row: func(now time.Time, j api.Jail) []string {
+			var v4, v6 []string
+			for _, n := range j.Spec.Network {
+				if a := fixedAddr(n.IPv4); a != "" {
+					v4 = append(v4, a+" ("+n.Network+")")
+				}
+				if a := fixedAddr(n.IPv6); a != "" {
+					v6 = append(v6, a+" ("+n.Network+")")
+				}
+			}
+			return []string{j.Metadata.Name, dash(string(j.Status.Power)), linesOrDash(v4), linesOrDash(v6),
+				imageWithGen(j.Spec.Image, j.Status.Generation), age(now, j.Metadata.CreatedAt)}
+		},
+	}
+	d.filters = func(cmd *cobra.Command) func() (func(api.Jail) bool, error) {
 		var state, image, network string
-		cmd.Flags().StringVar(&state, "state", "", "only jails in this state (running, stopped, error, ...)")
+		cmd.Flags().StringVar(&state, "state", "", "only jails in this state: "+strings.Join(powerStates, ", "))
 		cmd.Flags().StringVar(&image, "image", "", "only jails whose image reference starts with this")
 		cmd.Flags().StringVar(&network, "network", "", "only jails attached to this network")
-		return func(j api.Jail) bool {
-			if state != "" && string(j.Status.Power) != state {
-				return false
+		enumFlag(cmd, "state", powerStates...)
+		a.completeFlag(cmd, "image", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Images().List(ctx), imageName2) }))
+		a.completeFlag(cmd, "network", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Networks().List(ctx), netName) }))
+		return func() (func(api.Jail) bool, error) {
+			if state != "" && !slices.Contains(powerStates, state) {
+				return nil, usagef("unknown state %q (use %s)", state, strings.Join(powerStates, ", "))
 			}
-			if image != "" && !strings.HasPrefix(j.Spec.Image, image) {
-				return false
-			}
-			if network != "" && !slices.ContainsFunc(j.Spec.Network, func(n api.NetworkAttach) bool { return n.Network == network }) {
-				return false
-			}
-			return true
+			return func(j api.Jail) bool {
+				if state != "" && string(j.Status.Power) != state {
+					return false
+				}
+				if image != "" && !strings.HasPrefix(j.Spec.Image, image) {
+					return false
+				}
+				if network != "" && !slices.ContainsFunc(j.Spec.Network, func(n api.NetworkAttach) bool { return n.Network == network }) {
+					return false
+				}
+				return true
+			}, nil
 		}
 	}
 	d.show = func(a *app, j api.Jail) error {
-		w := a.env.Stdout
-		m := j.Metadata
-		fprintf(w, "Name:        %s\n", m.Name)
-		fprintf(w, "UUID:        %s\n", dash(m.UUID))
-		fprintf(w, "Generation:  %d\n", m.Generation)
-		fprintf(w, "Age:         %s\n", age(a.env.Now(), m.CreatedAt))
+		var extra []string
 		switch {
 		case !j.Status.ProvisionedAt.IsZero():
-			fprintf(w, "Provisioned: %s ago\n", age(a.env.Now(), j.Status.ProvisionedAt))
+			extra = append(extra, fmt.Sprintf("Provisioned: %s ago", age(a.env.Now(), j.Status.ProvisionedAt)))
 		case j.Spec.Provision != nil:
-			fprintf(w, "Provisioned: no (run 'jailops provision %s')\n", m.Name)
+			extra = append(extra, fmt.Sprintf("Provisioned: no (run 'jailops provision %s')", j.Metadata.Name))
 		}
-		if len(m.Labels) > 0 {
-			var l []string
-			for _, k := range sortedKeys(m.Labels) {
-				l = append(l, k+"="+m.Labels[k])
-			}
-			fprintf(w, "Labels:      %s\n", strings.Join(l, ", "))
+		return a.showObject(j.Metadata, extra, j.Spec, j.Status)
+	}
+	d.afterCreate = a.jailStartFlag
+	d.beforeDelete = a.jailForceFlag
+	d.targets = a.jailTargets
+	return &d
+}
+
+// powerStates are the states 'list --state' accepts.
+var powerStates = []string{string(api.PowerStopped), string(api.PowerStarting), string(api.PowerRunning), string(api.PowerStopping), string(api.PowerError)}
+
+// jailStartFlag registers --start on create and starts the new jail when it
+// was given.
+func (a *app) jailStartFlag(cmd *cobra.Command) func(ctx context.Context, name string) error {
+	var start bool
+	cmd.Flags().BoolVar(&start, "start", false, "start the jail once it is created")
+	return func(ctx context.Context, name string) error {
+		if !start {
+			return nil
 		}
-		fprintln(w)
-		spec, err := toYAML(j.Spec)
+		if ok, err := a.dry("start jail "+name, nil); ok || err != nil {
+			return err
+		}
+		c, err := a.connect(ctx)
 		if err != nil {
 			return err
 		}
-		status, err := toYAML(j.Status)
+		h, err := handle(c.Jails().Start(ctx, name))
 		if err != nil {
 			return err
 		}
-		sideBySide(w, "SPEC", string(spec), "STATUS", string(status))
+		return a.finishOp(ctx, h, "jail", name, "started", nil)
+	}
+}
+
+// jailForceFlag registers --force on delete and stops a running jail before
+// it is deleted when the flag was given.
+func (a *app) jailForceFlag(cmd *cobra.Command) func(ctx context.Context, name string) error {
+	var force bool
+	cmd.Flags().BoolVar(&force, "force", false, "stop the jail first when it is running")
+	cmd.Long += "\nA running jail is refused unless --force is given, which stops it first."
+	cmd.Example += "\njailops @P@ delete --force web"
+	return func(ctx context.Context, name string) error {
+		if !force {
+			return nil
+		}
+		if ok, err := a.dry("stop jail "+name+" when it is running", nil); ok || err != nil {
+			return err
+		}
+		c, err := a.connect(ctx)
+		if err != nil {
+			return err
+		}
+		j, err := c.Jails().Get(ctx, name)
+		if err != nil {
+			return err
+		}
+		if j.Status.Power == api.PowerStopped {
+			return nil
+		}
+		h, err := handle(c.Jails().Stop(ctx, name))
+		if err != nil {
+			return err
+		}
+		if _, _, err := a.await(ctx, h); err != nil {
+			return err
+		}
+		a.say("jail/%s stopped\n", name)
 		return nil
 	}
-	return &d
+}
+
+// jailTargets registers -l/--selector and --all on a command that acts on
+// several jails and returns the resolver of the names: the arguments, or the
+// jails the selector matches (a bulk action).
+func (a *app) jailTargets(cmd *cobra.Command) func(ctx context.Context, args []string) ([]string, bool, error) {
+	var selectors []string
+	var all bool
+	cmd.Flags().StringArrayVarP(&selectors, "selector", "l", nil, "act on the jails carrying these labels, key=value (comma separated or repeated), instead of naming them")
+	cmd.Flags().BoolVar(&all, "all", false, "act on every jail of the project")
+	return func(ctx context.Context, args []string) ([]string, bool, error) {
+		switch {
+		case !all && len(selectors) == 0:
+			if len(args) == 0 {
+				return nil, false, usagef("name the jails, or select them with -l key=value or --all")
+			}
+			return args, false, nil
+		case len(args) > 0:
+			return nil, false, usagef("name jails or select them with -l or --all, not both")
+		case all && len(selectors) > 0:
+			return nil, false, usagef("use -l or --all, not both")
+		}
+		var labels []string
+		for _, s := range selectors {
+			labels = append(labels, strings.Split(s, ",")...)
+		}
+		opts, err := labelOpts(labels)
+		if err != nil {
+			return nil, false, err
+		}
+		c, err := a.connect(ctx)
+		if err != nil {
+			return nil, false, err
+		}
+		jails, err := collect(c.Jails().List(ctx, opts...))
+		if err != nil {
+			return nil, false, err
+		}
+		var names []string
+		for _, j := range jails {
+			names = append(names, j.Metadata.Name)
+		}
+		return names, true, nil
+	}
 }
 
 // sideBySide prints two blocks of text in two columns.
@@ -130,7 +248,7 @@ func sideBySide(w interface{ Write([]byte) (int, error) }, lh, left, rh, right s
 }
 
 func (a *app) jailCmd() *cobra.Command {
-	d := jailDesc()
+	d := a.jailDesc()
 	jc := group("jail", "Create, inspect and control jails",
 		`A jail is a FreeBSD jail on a ZFS-backed root cloned from an image generation,
 with its own VNET network stack. These commands manage the specification
@@ -143,9 +261,19 @@ jailops jail create web --image freebsd-15@stable --network lan --memory 2G
 jailops jail show web
 jailops jail start web`, "jails")
 	crudCommands(a, jc, d, jailCreateLong, jailCreateExample, a.jailFlagBuild)
+	jc.AddCommand(a.jailInfo(d))
 	jc.AddCommand(a.jailLifecycleSet(d)...)
-	jc.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailCopy(d), a.jailLogs(d))
+	jc.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailCopy(d), a.jailLogs(d))
 	return jc
+}
+
+// fixedAddr returns an address of a network attachment, or "" when there is
+// none ("none") or the server has not allocated one yet ("auto").
+func fixedAddr(s string) string {
+	if s == "none" || s == "auto" {
+		return ""
+	}
+	return s
 }
 
 const jailCreateLong = `Create a jail from flags or from a file. A jail needs a project, a network and a
@@ -154,7 +282,7 @@ The project is --project, JAILOPS_PROJECT or the one chosen with 'project switch
 The server allocates "auto" addresses from the network and writes them back into
 the specification.`
 
-const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15@stable --network lan --storage default
+const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15@stable --network lan --storage default --start
 jailops @P@ create db --project web --image freebsd-15@stable --network lan=10.20.0.50 --storage default --volume data:/var/db --memory 4G --autostart
 jailops @P@ create nginx --project web --image freebsd-15@stable --profile web
 jailops @P@ create -f web.yaml --project web`
@@ -176,10 +304,11 @@ func (a *app) jailLifecycleSet(d *kindDesc[api.Jail]) []*cobra.Command {
 // addJailShortcuts puts the everyday jail commands at the top level, as in
 // 'jailops list' and 'jailops start web'. The 'jail' group keeps them too.
 func (a *app) addJailShortcuts(root *cobra.Command) {
-	d := jailDesc()
+	d := a.jailDesc()
 	addList(a, root, d, "")
 	addCreate(a, root, d, jailCreateLong, jailCreateExample, a.jailFlagBuild)
 	addDelete(a, root, d)
+	root.AddCommand(a.jailInfo(d))
 	root.AddCommand(a.jailLifecycleSet(d)...)
 	root.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd())
 }
@@ -216,6 +345,17 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	a.completeFlag(cmd, "image", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Images().List(ctx), imageName2) }))
 	a.completeFlag(cmd, "network", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Networks().List(ctx), netName) }))
 	a.completeFlag(cmd, "storage", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Storage().List(ctx), storName) }))
+	a.completeFlag(cmd, "profile", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
+		return namesOf(c.Profiles().List(ctx), func(p api.Profile) string { return p.Metadata.Name })
+	}))
+	a.completeFlag(cmd, "firewall-policy", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
+		return namesOf(c.Firewall().Policies().List(ctx), func(p api.FirewallPolicy) string { return p.Metadata.Name })
+	}))
+	a.completeFlag(cmd, "depends", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
+		return namesOf(c.Jails().List(ctx), func(j api.Jail) string { return j.Metadata.Name })
+	}))
+	enumFlag(cmd, "layout", string(api.LayoutThin), string(api.LayoutThick))
+	enumFlag(cmd, "update-strategy", string(api.UpdateRebase), string(api.UpdateInPlace), string(api.UpdateManual))
 	return func(name string) (api.Jail, error) {
 		if image == "" {
 			return api.Jail{}, usagef("--image is required (or use -f FILE)")
@@ -288,50 +428,76 @@ type lifecycleFn func(c *sdk.Client, ctx context.Context, name string, o ...sdk.
 
 func (a *app) jailLifecycle(verb, past, short string, fn lifecycleFn, d *kindDesc[api.Jail]) *cobra.Command {
 	var force bool
-	var grace int
+	var grace string
 	cmd := &cobra.Command{
-		Use:   verb + " NAME...",
+		Use:   verb + " NAME... | -l KEY=VALUE | --all",
 		Short: short,
 		Long: strings.ToUpper(verb[:1]) + verb[1:] + ` one or more jails and wait for the operation to finish (--no-wait returns at once).
---force skips the graceful shutdown; --grace sets how many seconds the jail gets.`,
-		Example:           "jailops jail " + verb + " web\njailops jail " + verb + " web db --no-wait\njailops --host host-b jail " + verb + " web",
-		Args:              cobra.MinimumNArgs(1),
+The jails are named, or selected by label with -l (the same key=value labels as
+'list -l') or --all for every jail of the project.`,
+		Example:           "jailops jail " + verb + " web\njailops jail " + verb + " web db --no-wait\njailops jail " + verb + " -l env=prod\njailops --host host-b jail " + verb + " web",
+		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeKind(a, d),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			var opts []sdk.ActionOption
-			if force {
-				opts = append(opts, sdk.Force())
+	}
+	resolve := a.jailTargets(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		var opts []sdk.ActionOption
+		if force {
+			opts = append(opts, sdk.Force())
+		}
+		if grace != "" {
+			secs, err := parseGrace(grace)
+			if err != nil {
+				return err
 			}
-			if grace > 0 {
-				opts = append(opts, sdk.ActionTimeout(grace))
-			}
-			for _, name := range args {
-				if ok, err := a.dry(verb+" jail "+name, nil); ok || err != nil {
-					if err != nil {
-						return err
-					}
-					continue
-				}
-				c, err := a.connect(cmd.Context())
-				if err != nil {
-					return err
-				}
-				h, err := fn(c, cmd.Context(), name, opts...)
-				if err != nil {
-					return err
-				}
-				if err := a.finishOp(cmd.Context(), h, "jail", name, past, nil); err != nil {
-					return err
-				}
-			}
+			opts = append(opts, sdk.ActionTimeout(secs))
+		}
+		names, bulk, err := resolve(cmd.Context(), args)
+		if err != nil {
+			return err
+		}
+		if bulk && len(names) == 0 {
+			fprintln(a.env.Stderr, "No jails match.")
 			return nil
-		},
+		}
+		for _, name := range names {
+			if ok, err := a.dry(verb+" jail "+name, nil); ok || err != nil {
+				if err != nil {
+					return err
+				}
+				continue
+			}
+			c, err := a.connect(cmd.Context())
+			if err != nil {
+				return err
+			}
+			h, err := fn(c, cmd.Context(), name, opts...)
+			if err != nil {
+				return err
+			}
+			if err := a.finishOp(cmd.Context(), h, "jail", name, past, nil); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	if verb != "start" {
+		cmd.Long += "\n--force skips the graceful shutdown; --grace sets how long the jail gets to shut down."
 		cmd.Flags().BoolVar(&force, "force", false, "do not wait for a graceful shutdown")
-		cmd.Flags().IntVar(&grace, "grace", 0, "seconds the jail gets to shut down")
+		cmd.Flags().StringVar(&grace, "grace", "", "time the jail gets to shut down: seconds, or a duration such as 30s")
 	}
 	return cmd
+}
+
+// parseGrace reads --grace: whole seconds, or a duration such as 1m30s.
+func parseGrace(s string) (int, error) {
+	if n, err := strconv.Atoi(s); err == nil && n > 0 {
+		return n, nil
+	}
+	if d, err := time.ParseDuration(s); err == nil && d > 0 {
+		return seconds(d), nil
+	}
+	return 0, usagef("--grace must be a number of seconds or a duration such as 30s, not %q", s)
 }
 
 func (a *app) jailConsole(d *kindDesc[api.Jail]) *cobra.Command {
@@ -366,14 +532,16 @@ Ctrl-D (end of input) is sent when it ends.`,
 }
 
 func (a *app) jailSnapshotCmd(d *kindDesc[api.Jail]) *cobra.Command {
-	sc := group("snapshot", "Create, list and delete jail snapshots",
+	sc := group("snapshot", "Create, list, show and delete jail snapshots",
 		`A snapshot is a consistent ZFS snapshot across all datasets of a jail. It is the
 target of 'jailops jail rollback --data' and the source of backups. Snapshots
 cost almost nothing until data changes; the written column shows how much has
 changed since each one.`,
 		`jailops jail snapshot create web before-upgrade -m "before 15.1"
 jailops jail snapshot list web
+jailops jail snapshot show web before-upgrade
 jailops jail snapshot delete web before-upgrade`, "snap", "snapshots")
+	jailThenSnapshot := completeArgs(completeKind(a, d), a.completeSnapshots())
 	var comment string
 	create := &cobra.Command{
 		Use:               "create JAIL [SNAPSHOT]",
@@ -381,7 +549,7 @@ jailops jail snapshot delete web before-upgrade`, "snap", "snapshots")
 		Long:              "Take a snapshot of all datasets of a jail. Without SNAPSHOT the server chooses a name.",
 		Example:           "jailops jail snapshot create web\njailops jail snapshot create web before-upgrade -m \"before 15.1\"",
 		Args:              cobra.RangeArgs(1, 2),
-		ValidArgsFunction: completeKind(a, d),
+		ValidArgsFunction: completeArgs(completeKind(a, d), completeNone),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := ""
 			if len(args) == 2 {
@@ -443,6 +611,29 @@ jailops jail snapshot delete web before-upgrade`, "snap", "snapshots")
 			})
 		},
 	}
+	show := &cobra.Command{
+		Use:               "show JAIL SNAPSHOT",
+		Aliases:           []string{"get"},
+		Short:             "Show one snapshot of a jail",
+		Long:              "Show one snapshot of a jail: when it was taken, its comment and the bytes written to the data datasets since.\n-o json and -o yaml print the complete object.",
+		Example:           "jailops jail snapshot show web before-upgrade\njailops jail snapshot show web before-upgrade -o yaml",
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: jailThenSnapshot,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			c, err := a.connect(cmd.Context())
+			if err != nil {
+				return err
+			}
+			sn, err := c.Jails().Snapshots(args[0]).Get(cmd.Context(), args[1])
+			if err != nil {
+				return err
+			}
+			if a.format == fmtTable {
+				return a.showObject(sn.Metadata, []string{"Written:     " + humanBytes(sn.Status.Written)}, sn.Spec, sn.Status)
+			}
+			return a.emit(sn, nil, nil, func() []string { return []string{sn.Metadata.Name} })
+		},
+	}
 	del := &cobra.Command{
 		Use:               "delete JAIL SNAPSHOT...",
 		Aliases:           []string{"rm"},
@@ -450,7 +641,7 @@ jailops jail snapshot delete web before-upgrade`, "snap", "snapshots")
 		Long:              "Delete snapshots of a jail after confirmation (-y skips it). A rollback to a deleted snapshot is no longer possible.",
 		Example:           "jailops jail snapshot delete web before-upgrade\njailops jail snapshot delete -y web old1 old2",
 		Args:              cobra.MinimumNArgs(2),
-		ValidArgsFunction: completeKind(a, d),
+		ValidArgsFunction: jailThenSnapshot,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			for _, sn := range args[1:] {
 				if ok, err := a.dry("delete snapshot "+sn+" of jail "+args[0], nil); ok || err != nil {
@@ -477,14 +668,29 @@ jailops jail snapshot delete web before-upgrade`, "snap", "snapshots")
 			return nil
 		},
 	}
-	sc.AddCommand(create, list, del)
+	sc.AddCommand(create, list, show, del)
 	return sc
+}
+
+// completeSnapshots completes a snapshot name of the jail named first.
+func (a *app) completeSnapshots() completer {
+	return a.completeWith(func(ctx context.Context, c *sdk.Client, args []string) ([]string, error) {
+		if len(args) == 0 {
+			return nil, nil
+		}
+		items, err := collect(c.Jails().Snapshots(args[0]).List(ctx))
+		var n []string
+		for _, s := range items {
+			n = append(n, s.Metadata.Name)
+		}
+		return n, err
+	})
 }
 
 // emitOne prints one finished result, as finishOp does for a synchronous reply.
 func (a *app) emitOne(v any, noun, name, verb string) error {
 	if a.format == fmtTable {
-		fprintf(a.env.Stdout, "%s/%s %s\n", noun, name, verb)
+		a.say("%s/%s %s\n", noun, name, verb)
 		return nil
 	}
 	return a.emit(v, nil, nil, func() []string { return []string{name} })
@@ -572,6 +778,7 @@ jailops jail rollback web --data --dry-run`,
 	f.BoolVar(&data, "data", false, "roll the data datasets back to a snapshot, discarding newer writes")
 	f.BoolVar(&all, "all", false, "roll back root and data")
 	f.StringVar(&snapshot, "snapshot", "", "snapshot to roll back to (default: the latest)")
+	_ = cmd.RegisterFlagCompletionFunc("snapshot", a.completeSnapshots())
 	f.BoolVar(&confirmLoss, "confirm-data-loss", false, "confirm that data written since the snapshot may be destroyed")
 	return cmd
 }
@@ -623,14 +830,23 @@ the jail's image is used.`,
 			if err != nil {
 				return err
 			}
-			target := gen
-			if target == "" {
+			target := ""
+			if gen != "" {
+				n, err := parseGeneration("--generation", gen, imageBase(j.Spec.Image))
+				if err != nil {
+					return err
+				}
+				target = fmt.Sprintf("g%d", n)
+			} else {
 				gens, err := collect(c.Images().Generations(ctx, imageBase(j.Spec.Image)))
 				if err == nil && len(gens) > 0 {
 					target = fmt.Sprintf("g%d", gens[len(gens)-1].Number)
 				}
 			}
-			up := api.JailUpgrade{Generation: gen, DryRun: a.dryRun}
+			up := api.JailUpgrade{DryRun: a.dryRun}
+			if gen != "" {
+				up.Generation = target
+			}
 			h, err := handle(c.Jails().Upgrade(ctx, name, up))
 			if err != nil {
 				return err
@@ -644,8 +860,24 @@ the jail's image is used.`,
 			return a.finishOp(ctx, h, "jail", name, "upgraded to "+dash(target), nil)
 		},
 	}
-	cmd.Flags().StringVar(&gen, "generation", "", "target generation, for example g4 (default: the newest)")
+	cmd.Flags().StringVar(&gen, "generation", "", "target generation, gN (default: the newest)")
+	_ = cmd.RegisterFlagCompletionFunc("generation", a.completeJailGenerations())
 	return cmd
+}
+
+// completeJailGenerations completes a generation of the image of the jail
+// named first.
+func (a *app) completeJailGenerations() completer {
+	return a.completeWith(func(ctx context.Context, c *sdk.Client, args []string) ([]string, error) {
+		if len(args) == 0 {
+			return nil, nil
+		}
+		j, err := c.Jails().Get(ctx, args[0])
+		if err != nil {
+			return nil, err
+		}
+		return generationNames(ctx, c, imageBase(j.Spec.Image))
+	})
 }
 
 // preview prints a dry-run result the server has already checked.
@@ -671,7 +903,7 @@ copy data, snapshot or back up the source and restore it under a new name with
 'jailops backup restore --as'.`,
 		Example:           "jailops jail copy web web2\njailops --host host-b jail copy web web-b",
 		Args:              cobra.ExactArgs(2),
-		ValidArgsFunction: completeKind(a, d),
+		ValidArgsFunction: completeArgs(completeKind(a, d), completeNone),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			c, err := a.connect(ctx)

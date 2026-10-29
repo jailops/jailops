@@ -64,8 +64,9 @@ func (a *app) remoteAdd() *cobra.Command {
 	var tokenStdin, sw bool
 	var remoteName string
 	cmd := &cobra.Command{
-		Use:   "add NAME URL | ADDRESS --token TRUST-TOKEN",
-		Short: "Add a remote",
+		Use:     "add NAME URL | ADDRESS --token TRUST-TOKEN",
+		Aliases: []string{"create"},
+		Short:   "Add a remote",
 		Long: `Add a named remote. URL is https://host:port, or unix:/path for a socket.
 
 With a single argument and a trust token (joc_...) from 'jailops trust add', the
@@ -148,7 +149,7 @@ jailops remote add edge https://edge:39110 --cert client.pem --key client.key --
 			if current {
 				msg += " (now the current remote)"
 			}
-			fprintln(a.env.Stdout, msg)
+			a.say("%s\n", msg)
 			a.probeRemote(cmd.Context(), r)
 			return nil
 		},
@@ -240,7 +241,7 @@ func (a *app) probeRemote(ctx context.Context, r RemoteConfig) {
 	if err != nil {
 		return
 	}
-	fprintf(a.env.Stdout, "connected to %s (version %s), seen as %s\n", info.Hostname, info.Version, info.Auth)
+	a.say("connected to %s (version %s), seen as %s\n", info.Hostname, info.Version, info.Auth)
 }
 
 func (a *app) remoteList() *cobra.Command {
@@ -321,7 +322,7 @@ func (a *app) remoteNames() func(*cobra.Command, []string, string) ([]string, co
 func (a *app) remoteRemove() *cobra.Command {
 	return &cobra.Command{
 		Use:               "remove NAME",
-		Aliases:           []string{"rm"},
+		Aliases:           []string{"rm", "delete"},
 		Short:             "Remove a remote from the user configuration",
 		Long:              "Remove a remote from ~/.config/jailops/config.yaml. A remote defined only in the host-wide file cannot be removed here.",
 		Example:           "jailops remote remove old",
@@ -346,7 +347,7 @@ func (a *app) remoteRemove() *cobra.Command {
 			if err := saveConfig(path, cfg); err != nil {
 				return err
 			}
-			fprintf(a.env.Stdout, "remote/%s removed\n", args[0])
+			a.say("remote/%s removed\n", args[0])
 			return nil
 		},
 	}
@@ -377,7 +378,7 @@ func (a *app) remoteSwitch() *cobra.Command {
 			if err := saveConfig(a.userConfigPath(), user); err != nil {
 				return err
 			}
-			fprintf(a.env.Stdout, "now using remote %s\n", args[0])
+			a.say("now using remote %s\n", args[0])
 			return nil
 		},
 	}

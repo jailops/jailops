@@ -20,6 +20,9 @@ func (a *app) cmdDoctor() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check the tool, the repository, the identity and every host",
+		Example: `jailops-sync doctor
+jailops-sync doctor --deep
+jailops-sync doctor --host web1`,
 		Long: `Runs a series of checks and prints ok or FAIL for each: the repository loads
 and validates, the age identity is configured, every host answers and
 trusts the credential, and git is available. With --deep it also decrypts

@@ -97,6 +97,19 @@ func putJSON(ctx context.Context, b datastore.Backend, key string, v any, ifAbse
 	return datastore.PutBytes(ctx, b, key, data, datastore.PutOptions{IfAbsent: ifAbsent})
 }
 
+// ReadMeta returns datastore.json, or ErrNotRepository when there is none.
+func ReadMeta(ctx context.Context, b datastore.Backend) (*Meta, error) {
+	var m Meta
+	err := readJSON(ctx, b, metaKey, &m)
+	if errors.Is(err, datastore.ErrNotFound) {
+		return nil, ErrNotRepository
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &m, nil
+}
+
 // ReadOwner returns owner.json, or nil when the repository has no owner yet.
 func ReadOwner(ctx context.Context, b datastore.Backend) (*Owner, error) {
 	var o Owner

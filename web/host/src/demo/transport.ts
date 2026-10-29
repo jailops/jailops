@@ -166,6 +166,14 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
             img.status.generations!.push({ number: n, name: `${seg[1]}#g${n}`, parent: n - 1, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: 222, created_at: new Date().toISOString(), refs: [] })
           })
         }
+        if (seg[2] === 'upgrade' && m === 'POST') {
+          const img = db.images.find((i) => i.metadata.name === seg[1])
+          if (!img) return fail(404, { code: 'not_found', message: `Image ${seg[1]} not found` })
+          return startOp(`Upgrade image ${seg[1]}`, { images: [`/api/v1/images/${seg[1]}`] }, 6000, () => {
+            const n = Math.max(...(img.status.generations ?? []).map((g) => g.number)) + 1
+            img.status.generations!.push({ number: n, name: `${seg[1]}#g${n}`, parent: n - 1, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: 222, created_at: new Date().toISOString(), refs: [] })
+          })
+        }
         if (seg[2] === 'aliases' && seg[3] && (m === 'PUT' || m === 'DELETE')) {
           const img = db.images.find((i) => i.metadata.name === seg[1])
           if (!img) return fail(404, { code: 'not_found', message: `Image ${seg[1]} not found` })

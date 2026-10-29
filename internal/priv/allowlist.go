@@ -161,6 +161,19 @@ func customUname(_ Config, _ bool, args []string) error {
 	return nil
 }
 
+// customRctl accepts only "-u jail:<key>": the resource usage of one jail
+// named by its key. Rules (-a, -r, -l) and other subjects are refused.
+func customRctl(_ Config, _ bool, args []string) error {
+	if len(args) != 2 || args[0] != "-u" || !strings.HasPrefix(args[1], "jail:") {
+		return forbidden("rctl: only -u jail:<jail> is accepted")
+	}
+	return ValidJailName(strings.TrimPrefix(args[1], "jail:"))
+}
+
+func verifyRctl(_ context.Context, l *Local, args []string) error {
+	return jailGuard{l}.managed(strings.TrimPrefix(args[1], "jail:"))
+}
+
 // customPfctl accepts the read-only forms "-s info" and
 // "-a <jailops anchor> -s rules|nat|Anchors|Tables|info", flags in any order.
 func customPfctl(_ Config, _ bool, args []string) error {
@@ -363,6 +376,10 @@ var CommandRules = []Rule{
 	{
 		Name: "uname", Binary: "/usr/bin/uname", MaxTimeoutSeconds: 5, Custom: customUname,
 		Reason: "report the running release, architecture and kernel name",
+	},
+	{
+		Name: "rctl", Binary: "/usr/bin/rctl", MaxTimeoutSeconds: 10, Custom: customRctl, Verify: verifyRctl,
+		Reason: "read the resource accounting (processes, cpu time, memory) of a managed jail; rules are neither read nor set",
 	},
 	{
 		Name: "pkg", Binary: "/usr/sbin/pkg", Reason: "install and update packages inside a jail root from the outside",

@@ -19,6 +19,9 @@ type fakeDS struct {
 	origin  string
 	written uint64
 	guid    uint64
+	// space is set by SetSpace; until then used and referenced read as "-".
+	space            bool
+	used, referenced uint64
 }
 
 type fakeSnap struct {
@@ -68,6 +71,16 @@ func (f *Fake) SetWritten(dataset string, n uint64) {
 	defer f.mu.Unlock()
 	if d := f.ds[dataset]; d != nil {
 		d.written = n
+	}
+}
+
+// SetSpace sets what `used` and `referenced` report for a dataset (test
+// helper); without it they read as "-" like any other unknown native.
+func (f *Fake) SetSpace(dataset string, used, referenced uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if d := f.ds[dataset]; d != nil {
+		d.space, d.used, d.referenced = true, used, referenced
 	}
 }
 
@@ -231,6 +244,14 @@ func (f *Fake) getProp(name, prop string) (Prop, bool) {
 		return unset, true
 	case "written":
 		return Prop{strconv.FormatUint(d.written, 10), "-"}, true
+	case "used", "referenced":
+		if d.space { // else: a value a test set as a plain property, or "-"
+			v := d.used
+			if prop == "referenced" {
+				v = d.referenced
+			}
+			return Prop{strconv.FormatUint(v, 10), "-"}, true
+		}
 	}
 	if strings.HasPrefix(prop, "written@") {
 		if f.snaps[name+"@"+strings.TrimPrefix(prop, "written@")] == nil {

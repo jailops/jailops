@@ -1,0 +1,230 @@
+.\" jailops-priv.8, installed as /usr/local/share/man/man8/jailops-priv.8
+.Dd October 29, 2026
+.Dt JAILOPS-PRIV 8
+.Os
+.Sh NAME
+.Nm jailops-priv
+.Nd the privileged helper of JailOps
+.Sh SYNOPSIS
+.Nm
+.Op Ar flags
+.Nm
+.Op Ar flags
+.Cm check-config
+.Nm
+.Op Ar flags
+.Cm hook Ar phase jail
+.Nm
+.Cm init Fl pool Ar pool
+.Op Fl dry-run
+.Op Ar flags
+.Nm
+.Cm version
+.Sh DESCRIPTION
+.Nm
+runs as root and performs, for
+.Xr jailopsd 8 ,
+a fixed list of typed operations: ZFS datasets and snapshots below the storage
+roots, jails, interfaces and bridges, pf anchors, a few sysctls, downloads of
+images and the files the daemon may read.
+Everything else is refused, and every request is written to the audit log.
+The daemon connects over a unix socket owned by root and the group
+.Sy jailops ,
+mode 0660; only the configured users and groups may connect.
+.Pp
+Without a command the helper serves on its socket.
+.Bl -tag -width Ds
+.It Cm check-config
+Validate the configuration and the storage file, print the effective storage
+roots (with the reason a root is inactive), the directories, the interface
+prefixes, the admin policy, the fixed binaries and every allow-list.
+Inactive roots are warnings: a pool may not be imported yet.
+.It Cm hook Ar phase jail
+Run one jail hook and exit.
+The rendered jail.conf files call this from their exec.* lines;
+.Ar phase
+is
+.Cm prestart , poststart , prestop
+or
+.Cm poststop .
+.It Cm init Fl pool Ar pool
+The one-time setup of a host: the user and group, the storage root dataset
+.Pa pool/jailops
+mounted at
+.Pa /jailops ,
+the state dataset mounted at
+.Pa /var/db/jailops/state
+and owned by the daemon's user, the directories, and the two configuration
+files.
+Everything is idempotent; what exists is left as it is and said so.
+Flags:
+.Fl dataset ,
+.Fl mount ,
+.Fl user ,
+.Fl group ,
+.Fl etc ,
+.Fl data-dir ,
+.Fl web
+(turn the web console on in the daemon's configuration),
+.Fl web-address
+(its TLS listener, default :39110) and
+.Fl dry-run
+(say what would be done and do nothing; needs no root).
+.It Cm version
+Print the version and the protocol version.
+.Fl -version
+does the same.
+.El
+.Pp
+The flags, which are also the keys of the configuration file:
+.Bl -tag -width Ds
+.It Fl config Ar file
+The configuration file: lines of
+.Ar key No = Ar value
+named like the flags.
+Default
+.Pa /usr/local/etc/jailops/priv.conf ;
+a missing default file is not an error.
+The file must be owned by root and not writable by group or others.
+.It Fl socket Ar path
+The unix socket, default
+.Pa /var/run/jailops/priv.sock .
+.It Fl group Ar name , Fl mode Ar octal
+The group that owns the socket (default
+.Sy jailops )
+and its mode (default 0660; others may have no access).
+.It Fl allow-user Ar name , Fl allow-group Ar name
+A user (the daemon's) or a group allowed to connect.
+Repeatable, comma separated.
+At least one is required to serve.
+.It Fl storage-root Ar dataset
+A storage root dataset fixed in the file, for example
+.Pa tank/jailops
+(repeatable); more are registered at run time and kept in the storage file.
+A pool's top dataset is refused unless
+.Fl allow-pool-root
+is set.
+.It Fl storage-file Ar path
+The file that persists the storage roots registered at run time, default
+.Pa /usr/local/etc/jailops/priv.d/storage.conf
+(root-owned, mode 0600).
+.It Xo
+.Fl mount-base Ar dir , Fl state-dir Ar dir ,
+.Fl conf-dir Ar dir , Fl work-dir Ar dir
+.Xc
+The mount point the storage roots are checked against, the state directory
+(required; by default
+.Pa mount-base/state ) ,
+the directory of the rendered jail.conf files (default
+.Pa /usr/local/etc/jailops/jails )
+and the daemon's scratch directory for image builds.
+.It Fl helper-path Ar path
+The path the jail.conf hooks call, default
+.Pa /usr/local/libexec/jailops-priv .
+.It Fl if-prefix Ar prefix
+An interface name prefix owned by JailOps (default
+.Sy jo ) .
+.It Fl ndp-proxy Ar uplink=prefix,...
+An uplink the IPv6 proxy may use and the prefixes it may answer for
+(repeatable).
+.It Fl sysctl Ar name , Fl fetch-host Ar host , Fl image-mirror Ar dir
+An extra sysctl readable through the helper, a host images may be fetched
+from over https, a local directory of image archives.
+.It Xo
+.Fl admin-raw-param , Fl admin-allow-flag , Fl admin-devfs-ruleset ,
+.Fl admin-host-mount , Fl admin-zfs-prop , Fl admin-routes ,
+.Fl admin-raw-pf , Fl admin-resume-send
+.Xc
+The admin policy: what an administrator of the daemon may set beyond the
+built-in rules.
+.It Fl log Ar stderr | syslog
+The audit log destination.
+Default stderr, or syslog with
+.Fl daemon .
+.It Fl pidfile Ar path
+Write the process id here.
+.It Fl daemon
+Detach from the terminal.
+The rc.d script uses
+.Xr daemon 8
+instead.
+.It Fl dev
+Development: do not require root, allow the invoking user.
+.El
+.Sh RC.CONF
+The rc.d script
+.Pa /usr/local/etc/rc.d/jailops_priv
+runs the helper under
+.Xr daemon 8
+with
+.Fl log Ar syslog ;
+it requires
+.Sy zfs
+and runs before
+.Sy jailopsd .
+.Bl -tag -width jailops_priv_config
+.It Va jailops_priv_enable
+Set to
+.Dq YES
+to start the helper at boot.
+.It Va jailops_priv_config
+The configuration file.
+Default
+.Pa /usr/local/etc/jailops/priv.conf .
+.El
+.Pp
+The configuration is validated, and the effective roots printed, with
+.Dl service jailops_priv checkconfig
+and a start refuses a configuration that does not validate.
+The storage file is reread with
+.Dl service jailops_priv reload
+which sends
+.Dv SIGHUP .
+.Sh SIGNALS
+.Bl -tag -width SIGTERM
+.It Dv SIGHUP
+Reread the storage file and verify every storage root again.
+.It Dv SIGTERM , Dv SIGINT
+Stop: the server shuts down and the socket and pidfile are removed.
+.It Dv SIGPIPE
+Ignored.
+.El
+.Sh FILES
+.Bl -tag -width Ds -compact
+.It Pa /usr/local/etc/jailops/priv.conf
+The configuration; the installed sample is
+.Pa priv.conf.sample .
+.It Pa /usr/local/etc/jailops/priv.d/storage.conf
+The storage roots registered at run time.
+.It Pa /var/run/jailops/priv.sock
+The socket.
+.It Pa /var/run/jailops/priv.pid
+The pid of the helper under rc.d.
+.It Pa /usr/local/etc/jailops/jails
+The rendered jail.conf files.
+.It Pa /usr/local/libexec/jailops-priv
+The binary, called by the jail.conf hooks.
+.El
+.Sh EXIT STATUS
+.Bl -tag -width Ds -compact
+.It 0
+Success.
+.Cm check-config
+exits 0 with a valid configuration even when a storage root is inactive.
+.It 1
+Not root (without
+.Fl dev ) ,
+the socket or pidfile could not be made, another helper is listening, or a
+hook failed.
+.It 2
+Usage, an invalid configuration file or storage file, no allowed peer, a
+socket mode others may use, or
+.Cm init
+with bad arguments.
+.El
+.Sh SEE ALSO
+.Xr jailops 1 ,
+.Xr jail.conf 5 ,
+.Xr rc.conf 5 ,
+.Xr daemon 8 ,
+.Xr jailopsd 8
