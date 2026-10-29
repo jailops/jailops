@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.1 - 2026-10-29
+
 - **Images are built from the packages of their own release**: the base repository of a RELEASE image was written as `base_release_${VERSION_MINOR}` and pkg expanded the minor from the ABI it was given, which has none, so every image came from `base_release_0`: a 15.1-RELEASE image had a 15.0 userland (`uname -U` 1500068 against 1501000 on the host), and `pkg` in its jails refused newer packages. The minor of the image's release is now written into the URL, and the end-to-end test checks that a jail's userland matches the host's. Images built before this keep their 15.0 userland until the next generation is built from them (`jailops image build NAME --from gN`), which now reads the right repository.
 
 - **An image can be upgraded as a whole**: `jailops image upgrade IMAGE` builds the next generation from the newest one and
