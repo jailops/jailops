@@ -9,8 +9,10 @@ import type {
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
+  AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
 } from '@jailops/shared/api/types'
 import type { SnapshotBody, ExecSessionInfo, ConfigResult } from '../types'
+import { logQuery, type LogQuery } from '@/lib/logs'
 
 const e = encodeURIComponent
 const c = () => getClient()
@@ -33,6 +35,19 @@ export const api = {
     snapshot: (n: string, b: SnapshotBody) => c().mutate('POST', `/jails/${e(n)}/snapshots`, b),
     rollback: (n: string, r: JailRollback) => c().mutate('POST', `/jails/${e(n)}/rollback`, r),
     upgrade: (n: string, r: JailUpgrade) => c().mutate('POST', `/jails/${e(n)}/upgrade`, r),
+  },
+  apps: {
+    /** Extension apps: the catalog is readable by any identity, it belongs to no project. */
+    list: () => c().list<AppSummary>('/apps'),
+    get: (n: string) => c().get<AppDetail>(`/apps/${e(n)}`),
+    /** Extension app_install: async, operator in the project. The project travels in the query like every project request. */
+    install: (n: string, b: AppInstall, project: string) => c().mutate<AppInstallResult>('POST', `/apps/${e(n)}/install${project ? `?project=${e(project)}` : ''}`, b),
+  },
+  logs: {
+    /** Extension jail_logs: the files below /var/log of the jail (operator in the project). */
+    list: (n: string) => c().list<JailLogFile>(`/jails/${e(n)}/logs`),
+    /** A file name may hold one directory ("nginx/access.log"): each segment is encoded on its own. */
+    read: (n: string, file: string, q: LogQuery = {}) => c().get<JailLogRead>(`/jails/${e(n)}/logs/${file.split('/').map(e).join('/')}${logQuery(q)}`),
   },
   images: {
     list: () => c().list<Image>('/images'),
@@ -131,6 +146,8 @@ export const api = {
   operations: {
     list: () => c().list<Operation>('/operations'),
     cancel: (id: string) => c().cancelOperation(id),
+    /** One long poll of an operation, for dialogs that follow its progress themselves. */
+    wait: (id: string) => c().getOperation(id),
   },
   audit: { list: (limit = 200) => c().list<AuditEntry>(`/audit?limit=${limit}`) },
   access: {

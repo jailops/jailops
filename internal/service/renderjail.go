@@ -241,10 +241,9 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 		}
 		in.DevfsRuleset, b.devfsRules = n, rules
 	}
+	// Volumes are ZFS datasets mounted straight at their path in the root (like the persistent ones), so only
+	// host directories need a nullfs line.
 	var vols []render.FstabVolume
-	for _, v := range j.Spec.Volumes {
-		vols = append(vols, render.FstabVolume{Source: path.Join(s.jailMount(name), "data", v.Name), Target: v.Mount, ReadOnly: v.ReadOnly})
-	}
 	for _, m := range j.Spec.HostMounts {
 		vols = append(vols, render.FstabVolume{Source: m.Source, Target: m.Target, ReadOnly: m.ReadOnly})
 	}

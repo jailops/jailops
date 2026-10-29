@@ -29,7 +29,7 @@ const defaultOut = "web/shared/src/api/types.gen.ts"
 // roots are the types the UI uses directly. Everything they reference is emitted too.
 var roots = []any{
 	api.ServerInfo{}, api.Response{}, api.Operation{}, api.Event{}, api.LifecycleEvent{}, api.Error{},
-	api.Jail{}, api.JailAction{}, api.JailRollback{}, api.JailUpgrade{}, api.JailSnapshot{}, api.JailUsage{},
+	api.Jail{}, api.JailAction{}, api.JailRollback{}, api.JailUpgrade{}, api.JailSnapshot{}, api.JailUsage{}, api.JailLogFile{}, api.JailLogRead{},
 	api.Image{}, api.ImageBuild{}, api.ImageUpgrade{}, api.ImageUpgradeResult{}, api.ImageAliasSet{},
 	api.Network{}, api.Lease{},
 	api.FirewallPolicy{}, api.AddressSet{},
@@ -40,6 +40,7 @@ var roots = []any{
 	api.Provision{}, api.ProvisionRequest{}, api.ProvisionResult{}, api.ExecRequest{}, api.BackupRun{}, api.BackupRunRequest{}, api.BackupVerifyRequest{},
 	api.BackupKeyStatus{}, api.BackupKeyCreate{}, api.BackupKeyCreated{}, api.BackupKeyEscrow{},
 	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
+	api.AppSummary{}, api.AppDetail{}, api.AppInstall{}, api.AppInstallResult{},
 }
 
 // enums lists the typed string constants. Keep in sync with sdk/api.
@@ -61,6 +62,8 @@ var enums = map[reflect.Type][]string{
 	reflect.TypeFor[api.UpdateReboot]():    {string(api.RebootManual), string(api.RebootAuto)},
 	reflect.TypeFor[api.DoctorStatus]():    {string(api.DoctorOK), string(api.DoctorWarn), string(api.DoctorFail), string(api.DoctorUnknown)},
 	reflect.TypeFor[api.Scope]():           {string(api.ScopeHost), string(api.ScopeFleet)},
+	reflect.TypeFor[api.JailLogKind]():     {string(api.JailLogActive), string(api.JailLogRotated)},
+	reflect.TypeFor[api.AppCategory]():     {string(api.AppDatabase), string(api.AppWeb), string(api.AppTools), string(api.AppDevops), string(api.AppStorage), string(api.AppMonitoring), string(api.AppCommunication), string(api.AppOther)},
 }
 
 type gen struct {

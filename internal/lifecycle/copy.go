@@ -76,7 +76,7 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 		volParent = &item{s.Cfg.at(src).volumesDS(), s.Cfg.at(dst).volumesDS(), map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, PropKind: KindVolumes, PropManaged: "on", "canmount": "off", "mountpoint": "none"}}
 	}
 	for _, v := range st.Volumes {
-		items = append(items, item{v.DS, s.Cfg.at(dst).volumeDS(strings.TrimPrefix(v.DS, s.Cfg.at(src).volumesDS()+"/")), map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": dstRoot + v.Path}})
+		items = append(items, item{v.DS, s.Cfg.at(dst).volumeDS(strings.TrimPrefix(v.DS, s.Cfg.at(src).volumesDS()+"/")), map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": dstRoot + v.Path, "canmount": "noauto"}})
 	}
 
 	srcSnaps := make([]string, len(st.all()))

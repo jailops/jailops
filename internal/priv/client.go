@@ -458,6 +458,18 @@ func (c *Client) RemoveAll(ctx context.Context, path string) error {
 	return callNone(ctx, c, OpFSRemoveAll, RemoveReq{Path: path})
 }
 
+// ListLogs implements Host.
+func (c *Client) ListLogs(ctx context.Context, dir string) ([]api.JailLogFile, bool, error) {
+	r, err := callJSON[ListLogsRes](ctx, c, OpFSListLogs, listLogsArgs{Dir: dir}, callOpts{})
+	return r.Files, r.Truncated, err
+}
+
+// TailFile implements Host.
+func (c *Client) TailFile(ctx context.Context, path string, offset, limit int64) ([]byte, int64, int64, error) {
+	r, err := callJSON[TailFileRes](ctx, c, OpFSTailFile, TailFileReq{Path: path, Offset: offset, Max: limit}, callOpts{})
+	return r.Data, r.Start, r.Size, err
+}
+
 // Mount implements Host.
 func (c *Client) Mount(ctx context.Context, dataset string) error {
 	return callNone(ctx, c, OpZFSMount, nameArgs{dataset})

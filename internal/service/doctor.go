@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -31,6 +32,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorSysctl(ctx, c)
 	s.doctorHost(ctx, c)
 	s.doctorZFS(ctx, c)
+	s.doctorVolumes(ctx, c)
 	s.doctorPF(ctx, c)
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)
@@ -243,6 +245,43 @@ func (s *Service) doctorZFS(ctx context.Context, c *checkSet) {
 			c.add("zfs.compat", api.DoctorUnknown, "the compatibility file "+s.d.CompatFile+" was not found", "")
 		}
 	}
+}
+
+// doctorVolumes finds the volume datasets of jails made before volumes were
+// created with canmount=noauto: one with canmount=on is mounted by the boot's
+// zfs mount -a, before the jail root it lies in.
+func (s *Service) doctorVolumes(ctx context.Context, c *checkSet) {
+	if s.d.ZClient == nil {
+		return
+	}
+	var keys []string
+	s.mu.RLock()
+	for k, e := range s.jails {
+		if len(e.jail.Spec.Volumes) > 0 {
+			keys = append(keys, k)
+		}
+	}
+	s.mu.RUnlock()
+	sort.Strings(keys)
+	var fixes []string
+	for _, k := range keys {
+		parent := s.lcfg.ContainerDS(k) + "/data"
+		l, err := s.d.ZClient.List(ctx, zfs.ListOpts{Root: parent, Depth: 1, Types: []string{"filesystem"}, Props: []string{"canmount"}})
+		if err != nil {
+			continue
+		}
+		for _, d := range l {
+			if d.Name != parent && d.Props["canmount"] == "on" {
+				fixes = append(fixes, "zfs set canmount=noauto "+d.Name)
+			}
+		}
+	}
+	if len(fixes) == 0 {
+		c.add("jail.volumes", api.DoctorOK, "the volume datasets of the jails are mounted with their jails (canmount=noauto)", "")
+		return
+	}
+	c.add("jail.volumes", api.DoctorWarn, fmt.Sprintf("%d volume dataset(s) have canmount=on, so the boot mounts them before the jail root they lie in", len(fixes)),
+		strings.Join(fixes, "; "))
 }
 
 func (s *Service) doctorPF(ctx context.Context, c *checkSet) {

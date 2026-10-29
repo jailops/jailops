@@ -1,0 +1,6 @@
+# the jail's rc.conf
+hostname="db"
+postgresql_enable="YES"
+sshd_enable="YES"
+postgresql_initdb_flags="--encoding=utf-8 --data-checksums \"quoted\" \$HOME \`id\` back\\slash"
+nginx_enable="YES"

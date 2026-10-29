@@ -19,6 +19,7 @@ register of what is settled and what is open.
 | [linux-jails.md](linux-jails.md) | Alpine and Debian jails under the Linuxulator: limits and prerequisites |
 | [fleet-sync.md](fleet-sync.md) | A git repository of YAML across hosts, what it can declare, secrets with age and SOPS, rollouts |
 | [provisioning.md](provisioning.md) | A fresh VM to a running fleet; the `provision:` step of a jail |
+| [apps.md](apps.md) | The application catalog: signed definitions of jails that run packages, the format, and how an installation will work |
 | [api.md](api.md) | The API for programs: the SDK, authentication, and where the protocol is written down |
 | [../examples/README.md](../examples/README.md) | Runnable fleets: IPv6, a web stack with backups, a big pool, two hosts, provisioning |
 | [design.md](design.md) | The contract: principles, layout, networking, API, backup, fleets, and the verification log |

@@ -21,6 +21,10 @@ Three packages come out of one build:
 JailOps targets FreeBSD 15.1 and later, so packages are built for the 15 ABI only (`FreeBSD:15:amd64`,
 `FreeBSD:15:aarch64`); `jailops doctor` fails on an older release.
 
+A fourth package, `jailops-apps`, installs the application catalog ([docs/apps.md](../../docs/apps.md)): the files of
+`packaging/apps/` under `/usr/local/share/jailops/apps/`. It holds data only, depends on nothing, and its signature is what
+makes the catalog trusted; the daemon never fetches one.
+
 ## The repository
 
     pkg.jailops.net/<ABI>/latest/All/*.pkg

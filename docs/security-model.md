@@ -66,6 +66,14 @@ Every identity (a user of the web console, an API token, a client certificate) h
 - Dangerous parameters (raw jail parameters, host mounts, device nodes, ZFS delegation, raw PF, provisioning commands)
   need `admin` or a global admin, are allow-listed by `priv.conf`, and are audited.
 - Every route has a permission entry in the code, or the daemon refuses to start.
+- Jail logs (`GET /api/v1/jails/<n>/logs`, `jailops jail logs`) need `operator`, not `readonly`: what a service prints
+  often holds tokens, passwords in error messages or other people's data, and an operator may already read all of it by
+  running a shell in the jail. The read goes through two helper operations that accept only the log directory of a jail
+  root (`/var/log` and one directory below, plain names, regular files, no symlink followed below the jail root; a
+  listing reads at most 4097 entries of a directory and 64 subdirectories and says when it was cut), so the daemon cannot
+  turn it into a read of anything else, and it is audited (one entry per identity, jail and file every five minutes,
+  since a client following a file asks every second). A compressed rotated copy is listed, and the daemon refuses to
+  read it; the helper itself does not tell compressed files apart and would return its bytes like any other log file.
 
 ### One identity system, over every transport
 
@@ -99,6 +107,17 @@ anything. The client then sends its own certificate, and the server stores it wi
 A hub forwards requests to hosts over pinned mTLS with a signed claim of the caller's role and scope that a host only
 accepts from a certificate of kind `hub` and limits by that certificate's own entry. Failed authentications are rate
 limited per source and audited.
+
+## Installing an app runs package scripts as root
+
+`jailops app install` installs the packages from the host with `pkg -r <jail root> install`, through the helper, while
+the jail runs (an `operator` may install). The packages' install scripts run as root on the host, chrooted into the jail
+root. Whoever can run commands in the jail could change that tree while `pkg` works on it, so that window is closed:
+while the installation holds the jail, the daemon refuses every exec, shell and console session into it (`busy`, "the
+app is being installed"), and the app's services are not running yet (they are enabled and started only afterwards);
+what runs in the new jail is the base system of its image. What remains is what the packages themselves do: a package
+from a repository the host trusts runs its scripts with root's rights inside that chroot, as it would for an image
+build. The helper does not refuse `pkg -r` against a running jail; the installation depends on it.
 
 ## Projects are not a security boundary against the kernel
 

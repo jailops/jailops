@@ -1,0 +1,66 @@
+# nginx from the FreeBSD packages (www/nginx). Format: docs/apps.md.
+version: 1
+name: nginx
+title: nginx
+summary: Web server and reverse proxy, serving /usr/local/www.
+description: |
+  nginx is a small, fast web server and reverse proxy. The package installs the
+  server with its dynamic modules and a default site under /usr/local/www/nginx-dist,
+  which this definition copies to /usr/local/www/nginx, the root of the default
+  configuration; the configuration lives in /usr/local/etc/nginx/nginx.conf and is checked
+  (nginx -t) before every start and reload.
+category: web
+homepage: https://nginx.org/
+license: BSD-2-Clause
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: nginx
+    repo: ports
+    version: "1.30.6,3"
+services:
+  - name: nginx
+    start: true
+ports:
+  - name: http
+    port: 80
+    proto: tcp
+    description: HTTP, the default site.
+    expose: true
+  - name: https
+    port: 443
+    proto: tcp
+    description: HTTPS; not configured until a certificate and a server block are added.
+    expose: false
+data:
+  - path: /usr/local/www
+    description: The sites; the default site is nginx, copied from nginx-dist.
+config:
+  - path: /usr/local/etc/nginx/nginx.conf
+    description: The server configuration; 'service nginx reload' applies most changes without a restart.
+    restart: nginx
+logs:
+  - name: access
+    path: /var/log/nginx/access.log
+    description: One line per request.
+  - name: error
+    path: /var/log/nginx/error.log
+    description: Errors and warnings of the server.
+setup:
+  - [/bin/mkdir, -p, /usr/local/www/nginx]
+  - [/bin/cp, -Rn, /usr/local/www/nginx-dist/., /usr/local/www/nginx/]
+health:
+  http:
+    port: 80
+    path: /
+    status: 200
+  wait_seconds: 30
+resources:
+  memory: 256M
+  disk: 2G
+  cpu: "1"
+notes: |
+  Put the site under /usr/local/www and its server block in
+  /usr/local/etc/nginx/nginx.conf; run 'service nginx reload' inside the jail to
+  apply a change. Add a certificate before enabling the https port.

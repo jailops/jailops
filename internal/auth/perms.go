@@ -73,7 +73,9 @@ func classify(e Entry) Class {
 	switch {
 	case e.Public:
 		return ClassPublic
-	case has("/api/v1/auth"), has("/api/v1/sessions"), p == "/api/v1/config-keys":
+	case p == "/api/v1/apps/{name}/install":
+		return ClassProject
+	case has("/api/v1/auth"), has("/api/v1/sessions"), p == "/api/v1/config-keys", has("/api/v1/apps"):
 		return ClassSelf
 	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates":
 		return ClassVisible
@@ -175,6 +177,13 @@ var Perms = classifyAll([]Entry{
 	r("PATCH", "/api/v1/profiles/{name}", ad),
 	r("DELETE", "/api/v1/profiles/{name}", ad),
 
+	// The application catalog: local definition files, readable by any authenticated identity. Installing one creates
+	// a jail in the project of the request and is its own entry: operator, because it creates nothing the definition
+	// does not say.
+	r("GET", "/api/v1/apps", ro),
+	r("GET", "/api/v1/apps/{name}", ro),
+	r("POST", "/api/v1/apps/{name}/install", op),
+
 	// Projects and storage.
 	r("GET", "/api/v1/projects", ro),
 	r("POST", "/api/v1/projects", ad),
@@ -222,7 +231,9 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/jails/{name}/console/{id}/input", op),
 	r("POST", "/api/v1/jails/{name}/console/{id}/resize", op),
 	r("DELETE", "/api/v1/jails/{name}/console/{id}", op),
-	r("GET", "/api/v1/jails/{name}/logs", ro),
+	// Logs hold what services print (tokens, passwords in error messages): the role that may exec into the jail.
+	r("GET", "/api/v1/jails/{name}/logs", op),
+	r("GET", "/api/v1/jails/{name}/logs/{file...}", op),
 	r("GET", "/api/v1/jails/{name}/files/{path...}", op),
 	r("PUT", "/api/v1/jails/{name}/files/{path...}", op),
 	r("POST", "/api/v1/jails/{name}/upgrade", op),

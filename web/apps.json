@@ -36,7 +36,8 @@
         "sessions",
         "profiles",
         "updates",
-        "backup"
+        "backup",
+        "apps"
       ],
       "devPort": 5173,
       "previewPort": 4173,

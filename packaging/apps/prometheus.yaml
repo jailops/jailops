@@ -1,0 +1,60 @@
+# Prometheus from the FreeBSD packages (net-mgmt/prometheus3). Format: docs/apps.md.
+version: 1
+name: prometheus
+title: Prometheus
+summary: Metrics collection, storage and alerting with PromQL.
+description: |
+  Prometheus scrapes metrics from HTTP endpoints, stores them as time series
+  and evaluates alerting rules. The package installs the current major release
+  with a configuration that scrapes Prometheus itself; scrape targets and rule
+  files are added to /usr/local/etc/prometheus.yml.
+
+  The time series database lives under /var/db/prometheus. The web interface
+  and the API are on port 9090.
+category: monitoring
+homepage: https://prometheus.io/
+license: Apache-2.0
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: prometheus3
+    repo: ports
+    version: "3.15.0_2"
+services:
+  - name: prometheus
+    start: true
+ports:
+  - name: http
+    port: 9090
+    proto: tcp
+    description: The web interface, the query API and /metrics.
+    expose: false
+data:
+  - path: /var/db/prometheus
+    description: The time series database (storage.tsdb.path).
+config:
+  - path: /usr/local/etc/prometheus.yml
+    description: Scrape targets, rule files and alertmanagers; 'service prometheus reload' applies a change.
+    restart: prometheus
+logs:
+  - name: syslog
+    path: /var/log/daemon.log
+    description: The server log; daemon(8) sends it to syslog as daemon.info.
+setup:
+  - [/usr/sbin/chown, "prometheus:prometheus", /var/db/prometheus]
+health:
+  http:
+    port: 9090
+    path: /-/healthy
+    status: 200
+  wait_seconds: 60
+resources:
+  memory: 1G
+  disk: 20G
+  cpu: "1"
+notes: |
+  Add scrape targets under scrape_configs in /usr/local/etc/prometheus.yml and
+  run 'service prometheus reload' inside the jail. Retention defaults to 15
+  days; set prometheus_args="--storage.tsdb.retention.time=90d" in the jail's
+  rc.conf to change it.

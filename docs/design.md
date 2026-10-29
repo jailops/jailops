@@ -372,7 +372,8 @@ daemon refuse to start.
 
 Resources: server, projects, storage, images and generations, jails, snapshots, volumes, networks, firewall
 policies and address sets, backup targets, policies and backups, operations, events, remotes,
-tokens, trust tokens, certificates, users, storage, groups and rollouts.
+tokens, trust tokens, certificates, users, storage, groups, rollouts and the application catalog (read-only;
+section 8.7).
 
 ### 8.1 Projects, networks and storage
 
@@ -550,6 +551,15 @@ jailops apply -f site.yaml          # create or update every document of a file
   with a pseudo-terminal when requested, over a framed stream carried on an HTTP upgrade (the SDK is
   standard library only). It works locally and through a hub with the same trust and project rules, and it
   needs no SSH server inside the jail. Exec is audited.
+- **Logs.** `GET /api/v1/jails/<n>/logs` lists the files below `/var/log` of a jail root (one directory deep;
+  rotated copies included, compressed ones listed but not readable; at most 4096 files from 64 subdirectories, and the
+  header `X-Jailops-Truncated: true` when the listing was cut) and `GET .../logs/<file>` reads the end of one
+  (`tail`, `since`, `grep`, `offset` for following; at most 1 MiB per request), running or stopped, through two
+  read-only helper operations (`fs.list_logs`, `fs.tail_file`) that accept only the log directory of a jail root
+  and plain names below it, follow no symlink below the jail root and read regular files only. A stopped jail's
+  root is mounted only while it runs, so its logs answer `busy` ("not mounted") with the dataset to mount. Logs
+  hold what services print, so reading them needs the operator role (the one that may exec) and is audited;
+  `jailops jail logs NAME [FILE]` (also `jailops logs`) is the client, `-f` follows. Extension `jail_logs`.
 - **Manual changes and GitOps.** `config set` on an object that `jailops-sync` owns is allowed and audited,
   and `jailops-sync plan` reports it as drift and reverts it on apply when the repository declares that key. Only
   what the repository declares is compared (verified on the real host: a changed `hostname` that the file declares is
@@ -616,6 +626,21 @@ have no shared layer 2, and CARP restarts no jails and moves no data. JailOps th
 CARP; it may offer CARP as an optional networking feature later. Failure recovery is designed around explicit
 health, placement and fencing rules, and no automatic promotion of stateful workloads happens without fencing. This
 is a direction under discussion, not a capability.
+
+### 8.7 The application catalog
+
+An **app** is a definition of a jail that runs packages: which packages (FreeBSD repository or `pkg.jailops.net`),
+which rc.d services and knobs, which ports, where the data, the configuration and the logs live, how to check that it
+runs, what to tell the person afterwards. The catalog is a directory of strict YAML files installed by the signed
+`jailops-apps` package (`apps.catalog_dir`, default `/usr/local/share/jailops/apps`); **the daemon reads local files and
+never fetches a catalog.** An invalid definition is listed with its reason and is never installable. `GET /api/v1/apps`
+and `/api/v1/apps/<name>` are readable by any authenticated identity (route class `self`). The format, the rules and the
+installation (`POST /api/v1/apps/<name>/install`, operator in the project, extension `app_install`: one operation,
+a thin jail from `freebsd@stable` with the data paths as volumes, `pkg -r` from the host through the helper, rc.conf
+written through the helper's file operations, setup commands and services through the in-jail exec, health check,
+snapshot `app-installed`, labels `jailops.app`, `jailops.app.hash`, `jailops.app.version`; a failure after the first
+start keeps the jail stopped for inspection) are in [apps.md](apps.md). UNVERIFIED on FreeBSD: the installation
+itself; the end-to-end test has an nginx step for it.
 
 ## 9. Backup
 
@@ -923,7 +948,7 @@ Open:
 | Jail freeze | Removed. FreeBSD has no jail freeze; the `freeze` action no longer exists in the SDK, the fake or the service (an unknown action answers `invalid`) |
 | Volumes of an existing jail | `GET/POST /api/v1/jails/<n>/volumes` and `DELETE .../volumes/<v>` answer `unsupported` ("volume management is not part of this version"); `jailops config` on `disk.<name>` keys of an existing jail answers `unsupported` ("changing volumes of an existing jail is not implemented"). Declare volumes at creation |
 | `inplace` update strategy for thin jails | `jailops jail upgrade` answers `unsupported` ("update strategy inplace is not implemented for thin jails"); thick and Linux jails are updated through managed updates, not rebased ("rebase upgrades apply to thin jails; ... jails update in place, which is not implemented") |
-| Routes that answer `unsupported` | `PUT /api/v1/server`, `GET /api/v1/server/config`, cluster, `GET .../console` (listing sessions), `.../logs`, `.../files/<path>`, `POST .../move`, `.../snapshots/<s>` (rename), `.../bundle`, jail templates, groups, rollouts and the backup transport routes. Each answers 501 `unsupported` ("<feature> is not part of this version"); the list is `unsupportedRoutes` in `internal/server/routes.go` and `sdk/PROTOCOL.md` |
+| Routes that answer `unsupported` | `PUT /api/v1/server`, `GET /api/v1/server/config`, cluster, `GET .../console` (listing sessions), `.../files/<path>`, `POST .../move`, `.../snapshots/<s>` (rename), `.../bundle`, jail templates, groups, rollouts and the backup transport routes. Each answers 501 `unsupported` ("<feature> is not part of this version"); the list is `unsupportedRoutes` in `internal/server/routes.go` and `sdk/PROTOCOL.md` |
 | `/var/db/pkg` after a root swap | A dedicated experiment with a genuine package change |
 | Ethernet-level spoofing | `ether` rules did not evaluate on the test host; ARP, NDP and MAC spoofing are not blocked below IP |
 | amd64 beyond the proxy host | The clean-install end-to-end run passes on amd64; Linux jails, backups and most prototypes ran on arm64 only |
@@ -933,6 +958,7 @@ Open:
 | Upgrades between JailOps versions | Not tried |
 | Rate-limit shaper | Limits are stored and reported; nothing enforces them, and no error says so |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
+| Jail logs through the helper | `fs.list_logs` and `fs.tail_file` are tested against real directories, symlinks and a fifo on the development host and over the socket; reading a running jail's `/var/log/messages` on a FreeBSD host, a stopped jail (unmounted root: `busy`), a jail with `/var` on its own persistent dataset, and a rotation under `-f` have not been run there |
 | Jail usage (`rctl -u`) | The parser follows the `resource=amount` format of rctl(8) (`maxproc`, `cputime`, `memoryuse`) and the helper rule is tested with fakes; neither has run against a host with `kern.racct.enable=1`. Interface counters are not reported: FreeBSD's `ifconfig` prints none, and `netstat -I` would need a rule of its own |
 | Proxy (port-forward) redirects on the uplink | Rendered; not verified |
 | `zfs_delegation` | Accepted (global admin only) and rendered into `jail.conf`; the helper does not hand datasets over, so the jail does not see them and no error says so |

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/service"
 )
 
@@ -65,6 +66,16 @@ type Config struct {
 	Backup *BackupConf `yaml:"backup"`
 	// Updates configures the update scheduler.
 	Updates UpdatesConf `yaml:"updates"`
+	// Apps configures the application catalog (docs/apps.md).
+	Apps AppsConf `yaml:"apps"`
+}
+
+// AppsConf configures the application catalog: definitions the daemon reads
+// from local files, installed by the jailops-apps package.
+type AppsConf struct {
+	// CatalogDir holds the *.yaml definitions (default
+	// /usr/local/share/jailops/apps). A missing directory is an empty catalog.
+	CatalogDir string `yaml:"catalog_dir"`
 }
 
 // UpdatesConf configures managed updates (design 8.4). Updates are off for
@@ -275,6 +286,7 @@ func Defaults() Config {
 		Log:       Log{Level: "info", Format: "text"},
 		Reconcile: Reconcile{Interval: Duration(60 * time.Second), Autostart: &t},
 		Limits:    Limits{MaxBodyBytes: 4 << 20, RequestTimeout: Duration(60 * time.Second)},
+		Apps:      AppsConf{CatalogDir: apps.DefaultDir},
 	}
 }
 
@@ -359,8 +371,11 @@ func (c Config) finish() (Config, error) {
 	default:
 		return c, fmt.Errorf("config: log.format %q must be text or json", c.Log.Format)
 	}
+	if c.Apps.CatalogDir == "" {
+		c.Apps.CatalogDir = apps.DefaultDir
+	}
 	for name, p := range map[string]string{"mount_base": c.MountBase, "state_dir": c.StateDir, "data_dir": c.DataDir, "conf_dir": c.ConfDir,
-		"work_dir": c.WorkDir, "listen.unix.path": c.Listen.Unix.Path, "priv.socket": c.Priv.Socket} {
+		"work_dir": c.WorkDir, "listen.unix.path": c.Listen.Unix.Path, "priv.socket": c.Priv.Socket, "apps.catalog_dir": c.Apps.CatalogDir} {
 		if name == "listen.unix.path" && p == "" {
 			continue // the socket is disabled
 		}

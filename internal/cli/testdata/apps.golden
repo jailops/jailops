@@ -1,0 +1,179 @@
+$ jailops app list
+NAME         CATEGORY   VERSION    STATUS    SUMMARY
+broken       -          -          invalid   title: is required
+nginx        web        1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
+postgresql   database   18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database   9.1.2      valid     In-memory key-value store, the BSD-licensed successor of Redis.
+
+$ jailops app list -o wide
+NAME         CATEGORY   VERSION    STATUS    SUMMARY
+broken       -          -          invalid   title: is required
+nginx        web        1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
+postgresql   database   18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database   9.1.2      valid     In-memory key-value store, the BSD-licensed successor of Redis.
+
+$ jailops app list --category database
+NAME         CATEGORY   VERSION   STATUS   SUMMARY
+postgresql   database   18.6      valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database   9.1.2     valid    In-memory key-value store, the BSD-licensed successor of Redis.
+
+$ jailops app list --category games
+! usage: unknown category "games" (categories: database, web, tools, devops, storage, monitoring, communication, other)
+! hint: run 'jailops app list --help' for usage
+[exit 2]
+
+$ jailops app list post* val*
+NAME         CATEGORY   VERSION   STATUS   SUMMARY
+postgresql   database   18.6      valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database   9.1.2     valid    In-memory key-value store, the BSD-licensed successor of Redis.
+
+$ jailops app list -c name,version --sort version
+NAME         VERSION
+broken       -
+nginx        1.30.6,3
+postgresql   18.6
+valkey       9.1.2
+
+$ jailops app list -o name
+broken
+nginx
+postgresql
+valkey
+
+$ jailops app list -o csv
+NAME,CATEGORY,VERSION,STATUS,SUMMARY
+broken,-,-,invalid,title: is required
+nginx,web,"1.30.6,3",valid,"Web server and reverse proxy, serving /usr/local/www."
+postgresql,database,18.6,valid,"Relational database server, PostgreSQL 18 from the FreeBSD packages."
+valkey,database,9.1.2,valid,"In-memory key-value store, the BSD-licensed successor of Redis."
+
+$ jailops app info postgresql
+App postgresql: PostgreSQL
+  Summary:    Relational database server, PostgreSQL 18 from the FreeBSD packages.
+  Category:   database
+  License:    PostgreSQL
+  Homepage:   https://www.postgresql.org/
+  Image:      FreeBSD 15.1 or later, thin jail
+  File:       postgresql.yaml (sha256:<sha256>)
+
+Description
+  PostgreSQL is a relational database with transactions, replication and extensions.
+
+  The cluster listens on localhost only until changed.
+
+Packages
+  postgresql18-server  ports  18.6
+
+Services
+  postgresql  started after the installation  rc.conf: postgresql_enable=YES
+
+Ports
+  NAME      PORT      EXPOSED  DESCRIPTION
+  postgres  5432/tcp  no       The SQL port.
+
+Data
+  /var/db/postgres  The cluster (data18).
+
+Configuration
+  /var/db/postgres/data18/postgresql.conf  restart postgresql  Server settings.
+  /var/db/postgres/data18/pg_hba.conf      restart postgresql  Who may connect.
+
+Logs
+  server  /var/log/messages  The port logs to syslog.
+
+Setup
+  /usr/sbin/chown postgres:postgres /var/db/postgres
+  /usr/sbin/service postgresql initdb
+
+Health
+  /usr/local/bin/pg_isready -U postgres exits 0, within 60s
+
+Resources
+  memory 1G, disk 10G, cpu 1 (hints, not limits)
+
+Notes
+  Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql
+
+$ jailops app info nginx -o yaml
+definition:
+  version: 1
+  name: nginx
+  title: nginx
+  summary: Web server and reverse proxy, serving /usr/local/www.
+  description: nginx is a small, fast web server and reverse proxy.
+  category: web
+  homepage: https://nginx.org/
+  license: BSD-2-Clause
+  image:
+    os: freebsd
+    release_min: "15.1"
+  packages:
+    - name: nginx
+      repo: ports
+      version: 1.30.6,3
+  services:
+    - name: nginx
+      start: true
+  ports:
+    - name: http
+      port: 80
+      proto: tcp
+      description: HTTP, the default site.
+      expose: true
+  data:
+    - path: /usr/local/www
+      description: The sites.
+  config:
+    - path: /usr/local/etc/nginx/nginx.conf
+      description: The server configuration.
+      restart: nginx
+  logs:
+    - name: access
+      path: /var/log/nginx/access.log
+      description: One line per request.
+    - name: error
+      path: /var/log/nginx/error.log
+  health:
+    http:
+      port: 80
+      path: /
+      status: 200
+    wait_seconds: 30
+  resources:
+    memory: 256M
+    disk: 2G
+    cpu: "1"
+  notes: Put the site under /usr/local/www.
+hash: sha256:<sha256>
+file: nginx.yaml
+
+$ jailops app info broken
+! invalid: app "broken": the definition broken.yaml is invalid: title: is required
+! hint: fix the file in the catalog directory, or reinstall the jailops-apps package
+[exit 2]
+
+$ jailops app info missing
+! not_found: app "missing" is not in the catalog
+! hint: jailops app list shows the catalog
+[exit 4]
+
+$ jailops app list
+┌────────────┬──────────┬──────────────────────────────────────────────────────────────────────┐
+│ NAME       │ CATEGORY │ SUMMARY                                                              │
+├────────────┼──────────┼──────────────────────────────────────────────────────────────────────┤
+│ broken     │ -        │ invalid: title: is required                                          │
+│ nginx      │ web      │ Web server and reverse proxy, serving /usr/local/www.                │
+│ postgresql │ database │ Relational database server, PostgreSQL 18 from the FreeBSD packages. │
+│ valkey     │ database │ In-memory key-value store, the BSD-licensed successor of Redis.      │
+└────────────┴──────────┴──────────────────────────────────────────────────────────────────────┘
+
+$ jailops app list
+┌────────────┬──────────────────────────────────────────────────────────────────────┐
+│ NAME       │ SUMMARY                                                              │
+├────────────┼──────────────────────────────────────────────────────────────────────┤
+│ broken     │ invalid: title: is required                                          │
+│ nginx      │ Web server and reverse proxy, serving /usr/local/www.                │
+│ postgresql │ Relational database server, PostgreSQL 18 from the FreeBSD packages. │
+│ valkey     │ In-memory key-value store, the BSD-licensed successor of Redis.      │
+└────────────┴──────────────────────────────────────────────────────────────────────┘
+

@@ -6,6 +6,8 @@ import type { EventStream, RawRequest, RawResponse, StreamHandlers, Transport } 
 import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolicy, AddressSet, Token, Backup, Jail, JailRollback, JailUpgrade, PowerState } from '@jailops/shared/api/types'
 import * as d from './data'
 import * as d2 from './data2'
+import * as da from './apps'
+import { volumeName } from '@/lib/apps'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
 import { loadChoice, saveChoice } from '@/lib/projectScope'
 
@@ -15,6 +17,8 @@ interface DemoOp extends Operation {
   onDone?: () => void
   done?: boolean
   metadataFinal?: unknown
+  /** Ends the operation with this error instead of success (the demo's failed installation). */
+  failure?: ApiErrorBody
 }
 
 const GiB = 1024 ** 3
@@ -59,6 +63,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   db.projects = d2.projects(countByProject())
   if (typeof location !== 'undefined' && location.search.includes('empty')) db.projects = []
   const shells = new Map<string, { h: StreamHandlers; line: string; jail: string }>()
+  const logs = da.demoLogs()
   for (const o of d.operations()) db.ops.push({ ...o, startedAt: Date.parse(o.created_at), duration: o.status === 'running' ? 600_000 : 0, done: o.status !== 'running' })
   const subs = new Set<StreamHandlers>()
   const pending: Array<{ jail: string; to: PowerState; at: number }> = []
@@ -84,7 +89,12 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   function view(o: DemoOp): Operation {
     if (!o.done && o.status !== 'cancelled') {
       const t = Date.now() - o.startedAt
-      if (t >= o.duration) {
+      if (t >= o.duration && o.failure) {
+        o.done = true
+        o.status = 'failure'
+        o.error = o.failure
+        o.onDone?.()
+      } else if (t >= o.duration) {
         o.done = true
         o.status = 'success'
         o.progress = 100
@@ -96,7 +106,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       }
       o.updated_at = new Date().toISOString()
     }
-    const { startedAt: _s, duration: _d, onDone: _o, done: _x, metadataFinal: _m, ...pub } = o
+    const { startedAt: _s, duration: _d, onDone: _o, done: _x, metadataFinal: _m, failure: _f, ...pub } = o
     return pub
   }
   function settleJails(): void {
@@ -447,6 +457,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   function extraRoutes(seg: string[], m: string, body: Record<string, any>, url: URL, req: RawRequest, project: string): RawResponse | undefined {
     const name = seg[1]
     switch (seg[0]) {
+      case 'apps': return appsRoute(seg, m, body, project)
       case 'projects': {
         if (seg.length === 1 && m === 'GET') return ok(db.projects)
         if (seg.length === 1 && m === 'POST') {
@@ -560,6 +571,17 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (!j || !seg[2]) return undefined
         const src = `/api/v1/jails/${name}`
         if (seg[2] === 'updates' && m === 'GET') return ok(db.history[name] ?? [])
+        if (seg[2] === 'logs' && m === 'GET') {
+          const app = j.metadata.labels?.[da.LABEL] ?? ''
+          // A stopped jail's root is not mounted: the server answers busy and says how to mount it.
+          if (j.status.power === 'stopped') return fail(409, { code: 'busy', message: `jail "${name}" is not mounted`, hint: `start the jail, or mount its root dataset on the host: zfs mount tank/jailops/${project}/${name}/root` })
+          if (seg.length === 3) return ok(logs.list(name, app))
+          const file = seg.slice(3).join('/')
+          const r = logs.read(name, app, file, url.searchParams)
+          if (r === 'missing') return fail(404, { code: 'not_found', message: `jail "${name}" has no log file "${file}"`, hint: `list them with GET /api/v1/jails/${name}/logs` })
+          if (r === 'compressed') return fail(400, { code: 'invalid', message: `${file} is not readable (compressed)`, hint: 'read the plain rotated copies, or the file from inside the jail' })
+          return ok(r)
+        }
         if (seg[2] === 'provision' && m === 'POST') {
           if (j.status.provisioned_at && !body.again) return fail(409, { code: 'already_exists', message: 'Provisioning has run before.', hint: 'Use again to run it again.' })
           return startOp(`Provision ${name}`, { jails: [src] }, 1500, () => { j.status.provisioned_at = new Date().toISOString() }, { jail: name, provisioned_at: new Date().toISOString(), steps: ['packages', 'files', 'services'] })
@@ -584,6 +606,70 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
     void req
     return undefined
+  }
+
+  function appsRoute(seg: string[], m: string, body: Record<string, any>, project: string): RawResponse {
+    const name = seg[1]
+    if (seg.length === 1 && m === 'GET') return ok(da.catalog())
+    const det = name ? da.detail(name) : undefined
+    if (det === 'invalid') return fail(400, { code: 'invalid', message: `app ${name} is invalid: ${da.invalidApp.error}`, hint: 'fix the file in the catalog directory, or reinstall the jailops-apps package', detail: { file: `/usr/local/share/jailops/apps/${name}.yaml` } })
+    if (!det) return fail(404, { code: 'not_found', message: `app ${name} is not in the catalog`, hint: 'jailops app list shows the catalog' })
+    if (seg.length === 2 && m === 'GET') return ok(det)
+    if (seg[2] !== 'install' || m !== 'POST') return fail(404, { code: 'not_found', message: 'No such route' })
+    if (!project) return fail(400, { code: 'invalid', message: 'a project is required', hint: "name one with --project NAME (list them with 'jailops project list')" })
+    const p = db.projects.find((x) => x.metadata.name === project)
+    if (!p) return fail(404, { code: 'not_found', message: `project ${project} not found` })
+    if (body.project && body.project !== project) return fail(400, { code: 'invalid', message: `the body names project ${body.project}, the request ${project}` })
+    const jail = String(body.jail || name)
+    if (!/^[a-z][a-z0-9-]{0,62}$/.test(jail)) return fail(400, { code: 'invalid', message: `jail name "${jail}" is not a name`, hint: 'lower-case letters, digits and dashes, starting with a letter' })
+    if (db.jails.some((x) => x.metadata.name === jail && (x.metadata.project ?? '') === project)) return fail(409, { code: 'already_exists', message: `jail ${jail} exists in project ${project}`, hint: 'name the jail with --name, or delete the jail first' })
+    const nets = (p.spec.networks ?? []).map((g) => g.network)
+    const net = String(body.network || (nets.length === 1 ? nets[0] : ''))
+    if (!net) return fail(400, { code: 'invalid', message: `no network named and project ${project} is granted ${nets.length ? 'several' : 'none'}`, hint: `jailops project show ${project} lists the grants` })
+    if (!nets.includes(net)) return fail(403, { code: 'forbidden', message: `network ${net} is not granted to project ${project}`, hint: `jailops project show ${project} lists the grants` })
+    const stoGrants = (p.spec.storage ?? []).map((g) => g.storage)
+    const stos = stoGrants.includes('*') ? db.storage.map((x) => x.metadata.name) : stoGrants
+    const sto = String(body.storage || (stos.length === 1 ? stos[0] : ''))
+    if (!sto) return fail(400, { code: 'invalid', message: `no storage named and project ${project} is granted ${stos.length ? 'several' : 'none'}`, hint: `jailops project show ${project} lists the grants` })
+    if (!stos.includes(sto)) return fail(403, { code: 'forbidden', message: `storage ${sto} is not granted to project ${project}`, hint: `jailops project show ${project} lists the grants` })
+    const a = det.definition
+    const image = String(body.image || 'freebsd-15@stable')
+    const steps = da.installSteps(a, jail, project, image)
+    const subnet = db.networks.find((x) => x.metadata.name === net)?.spec.ipv4?.subnet ?? '10.20.0.0/24'
+    const addr = subnet.replace(/\.\d+\/\d+$/, '') + '.' + (40 + db.jails.length)
+    const limits = { memory: body.limits?.memory ?? a.resources?.memory, disk: body.limits?.disk ?? a.resources?.disk, cpu: Number(body.limits?.cpu ?? a.resources?.cpu ?? 1) }
+    const version = a.packages[0]?.version ?? ''
+    const src = `/api/v1/jails/${jail}`
+    const j: Jail = {
+      metadata: { name: jail, scope: 'host', project, generation: 1, created_at: new Date().toISOString(), labels: { [da.LABEL]: a.name, [`${da.LABEL}.hash`]: det.hash, [`${da.LABEL}.version`]: version } },
+      spec: { image, storage: sto, layout: 'thin', network: [{ network: net, ipv4: addr }], volumes: (a.data ?? []).map((x) => ({ name: volumeName(x.path), mount: x.path })), resources: limits, boot: { autostart: true } },
+      status: { power: 'running', jid: 120 + db.jails.length, generation: 'freebsd-15#g4', addresses: [`${addr}/${subnet.split('/')[1] ?? '24'}`], started_at: new Date().toISOString(), conditions: [{ type: 'Reconciled', status: 'True' }] },
+    }
+    const result = {
+      app: a.name, hash: det.hash, version, jail: j, addresses: j.status.addresses, ports: (a.ports ?? []).map((x) => ({ ...x, endpoint: `${addr}:${x.port}` })),
+      data: a.data, config: a.config, logs: a.logs, notes: a.notes, snapshot: 'app-installed', steps,
+    }
+    if (body.dry_run) return startOp(`Install app ${a.name} as jail ${jail} (dry run)`, {}, 300, () => undefined, { ...result, jail: { metadata: { name: jail }, spec: { image }, status: { power: 'stopped' } }, version: undefined, addresses: undefined, ports: undefined, snapshot: undefined, dry_run: true }, false)
+    // A jail name that starts with "fail" makes the demo fail at the health check and keep the jail, stopped.
+    if (jail.startsWith('fail')) {
+      const r = startOp(`Install app ${a.name} as jail ${jail}`, { jails: [src] }, 3500, () => {
+        j.status = { power: 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] }
+        db.jails.push(j)
+        emit('app.install.failed', src)
+      }, undefined, false)
+      const op = db.ops[0]
+      op.failure = {
+        code: 'internal', message: `installing app ${a.name} as jail ${jail} failed at step health-check: no answer within ${a.health?.wait_seconds ?? 60} attempts`,
+        hint: `the jail was left stopped for inspection: look inside it with \`jailops shell ${jail}\` after \`jailops start ${jail}\`, and delete it with \`jailops delete ${jail}\` before trying again`,
+        detail: { jail, step: 'health-check', jail_kept: 'true' },
+      } as ApiErrorBody
+      return r
+    }
+    return startOp(`Install app ${a.name} as jail ${jail}`, { jails: [src] }, 5000, () => {
+      db.jails.push(j)
+      db.snaps[jail] = [{ metadata: { name: 'app-installed', scope: 'host', created_at: new Date().toISOString() }, spec: { jail, comment: `installation of ${a.name}` }, status: { written: 0 } }]
+      for (const ev of ['jail-created', 'jail-started', 'jail-snapshot-created', 'app.installed']) emit(ev, src)
+    }, result, false)
   }
 
   const PROMPT = '\x1b[32mroot@jail\x1b[0m:\x1b[34m~\x1b[0m# '

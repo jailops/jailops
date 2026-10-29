@@ -418,7 +418,7 @@ func TestEventStreamEndsOnInterrupt(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
-	for _, args := range [][]string{{"events"}, {"jail", "logs", "web"}} {
+	for _, args := range [][]string{{"events"}, {"jail", "logs", "web", "--events"}} {
 		for h.srv.EventStreams() != 0 { // the previous stream is still closing
 			time.Sleep(5 * time.Millisecond)
 		}

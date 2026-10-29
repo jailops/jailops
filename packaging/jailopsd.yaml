@@ -73,6 +73,11 @@ updates:
   # tick: 1m
   # project_files_dir: /var/db/jailops/state/project-files   # provisioning files, one directory per project
 
+# The application catalog (docs/apps.md): one YAML definition per file, installed by the jailops-apps package. The daemon
+# reads these local files only and never fetches anything; a missing directory is an empty catalog.
+apps:
+  # catalog_dir: /usr/local/share/jailops/apps
+
 # The paths of a thin jail that survive a switch to a newer image generation, each in its own dataset. Empty keeps the
 # built-in list (/etc, /usr/local, /var/db, /var/log, /var/mail, /var/spool, /home, /root). Setting it replaces the list.
 lifecycle:

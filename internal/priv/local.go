@@ -35,6 +35,10 @@ type Host interface {
 	Remove(ctx context.Context, path string) error
 	// RemoveAll removes a tree where that is allowed (see Config.recursiveRemovable), else it is Remove.
 	RemoveAll(ctx context.Context, path string) error
+	// ListLogs lists the log files of a jail (dir is <jail root>/var/log) and
+	// TailFile reads a window from the end of one; see logs.go.
+	ListLogs(ctx context.Context, dir string) (files []api.JailLogFile, truncated bool, err error)
+	TailFile(ctx context.Context, path string, offset, limit int64) (data []byte, start, size int64, err error)
 
 	// Mount and Unmount mount a JailOps dataset (zfs mount, zfs unmount).
 	Mount(ctx context.Context, dataset string) error

@@ -83,7 +83,9 @@ func classify(pattern string) (api.Permission, string) {
 		return "", scopePublic
 	case path == "/api/v1/auth/session":
 		return api.PermReadonly, scopeSelf
-	case path == "/api/v1/config-keys":
+	case strings.HasPrefix(path, "/api/v1/apps/") && strings.HasSuffix(path, "/install"):
+		return api.PermOperator, scopeProject
+	case path == "/api/v1/config-keys", strings.HasPrefix(path, "/api/v1/apps"):
 		return api.PermReadonly, scopeSelf
 	case strings.HasPrefix(path, "/api/v1/sessions"):
 		return api.PermReadonly, scopeSelf
@@ -118,6 +120,9 @@ func classify(pattern string) (api.Permission, string) {
 	case strings.HasPrefix(path, "/api/v1/jails/"):
 		switch {
 		case strings.HasSuffix(path, "/console"), strings.Contains(path, "/console/"):
+			return api.PermOperator, scopeProject
+		case strings.HasSuffix(path, "/logs"), strings.Contains(path, "/logs/"):
+			// logs hold secrets: the role that may exec into the jail
 			return api.PermOperator, scopeProject
 		case read:
 			return api.PermReadonly, scopeProject

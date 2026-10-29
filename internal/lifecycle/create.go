@@ -295,7 +295,10 @@ func (s *Service) PlanCreate(ctx context.Context, j api.Jail, recovering bool) (
 		for _, v := range j.Spec.Volumes {
 			v := v
 			ds := s.Cfg.at(name).volumeDS(v.Name)
-			props := base(KindVolume, map[string]string{PropClass: string(ClassData), PropPath: v.Mount, "mountpoint": rootMP + v.Mount})
+			// canmount=noauto: the dataset is mounted by mountTree after the root and the persistent datasets. Created
+			// mounted, it would land in the container's directory below the root before the root is mounted, and the
+			// root would then hide it (a start would find it mounted already and the jail would write underneath).
+			props := base(KindVolume, map[string]string{PropClass: string(ClassData), PropPath: v.Mount, "mountpoint": rootMP + v.Mount, "canmount": "noauto"})
 			if v.Quota != "" {
 				props["quota"] = v.Quota
 			}

@@ -1,0 +1,128 @@
+$ jailops jail create web --image freebsd-15@stable --network lan --storage default
+jail/web created
+
+$ jailops jail logs web
+! No resources found.
+
+$ jailops jail logs web
+FILE              SIZE    MODIFIED   KIND
+messages          214 B   3h         active
+messages.0        9 B     3h         rotated
+messages.1.gz     2 B     3h         rotated (compressed)
+nginx/error.log   37 B    3h         active
+
+$ jailops jail logs web -o name
+messages
+messages.0
+messages.1.gz
+nginx/error.log
+
+$ jailops jail logs web -o json
+[
+  {
+    "name": "messages",
+    "size": 214,
+    "modified_at": "2026-03-01T09:00:00Z",
+    "kind": "active"
+  },
+  {
+    "name": "messages.0",
+    "size": 9,
+    "modified_at": "2026-03-01T09:00:00Z",
+    "kind": "rotated"
+  },
+  {
+    "name": "messages.1.gz",
+    "size": 2,
+    "modified_at": "2026-03-01T09:00:00Z",
+    "kind": "rotated",
+    "compressed": true
+  },
+  {
+    "name": "nginx/error.log",
+    "size": 37,
+    "modified_at": "2026-03-01T09:00:00Z",
+    "kind": "active"
+  }
+]
+
+$ jailops jail logs web messages
+Oct 29 11:00:00 web sshd[1]: Accepted publickey
+Oct 29 11:30:00 web cron[2]: (root) CMD (job)
+  continued from cron
+Oct 29 11:50:00 web nginx[3]: Error: upstream timed out
+Oct 29 11:55:00 web sshd[1]: Disconnected
+
+$ jailops jail logs web messages --tail 2
+Oct 29 11:50:00 web nginx[3]: Error: upstream timed out
+Oct 29 11:55:00 web sshd[1]: Disconnected
+
+$ jailops jail logs web messages --grep SSHD
+Oct 29 11:00:00 web sshd[1]: Accepted publickey
+Oct 29 11:55:00 web sshd[1]: Disconnected
+
+$ jailops jail logs web messages -n 1 -o json
+{
+  "jail": "web",
+  "file": "messages",
+  "lines": [
+    {
+      "n": 5,
+      "text": "Oct 29 11:55:00 web sshd[1]: Disconnected"
+    }
+  ],
+  "next_offset": 214,
+  "truncated": true
+}
+
+$ jailops logs web nginx/error.log
+2026/03/01 08:59:00 [error] upstream
+
+$ jailops logs web messages.0
+old line
+
+$ jailops jail logs web messages.1.gz
+! invalid: messages.1.gz is not readable (compressed)
+! hint: read the plain rotated copies, or the file from inside the jail
+[exit 2]
+
+$ jailops jail logs web nope
+! not_found: jail "web" has no log file "nope"
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops jail logs web ../etc/passwd
+! invalid: log file "../etc/passwd": at most one directory below /var/log
+! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
+[exit 2]
+
+$ jailops jail logs web messages --tail 0
+! usage: --tail takes between 1 and 5000 lines
+! hint: run 'jailops jail logs --help' for usage
+[exit 2]
+
+$ jailops jail logs web messages --since yesterday
+! usage: --since takes an RFC 3339 time or a duration such as 15m, 2h or 1d
+! hint: run 'jailops jail logs --help' for usage
+[exit 2]
+
+$ jailops jail logs web --events messages
+! usage: --events streams the events of the jail; it takes no file
+! hint: run 'jailops jail logs --help' for usage
+[exit 2]
+
+$ jailops jail logs ghost
+! not_found: jail "ghost" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops jail logs web
+! busy: jail "web" is not mounted
+! hint: the root of a stopped jail is mounted while it runs: start it, or mount its root dataset on the host
+[exit 5]
+
+$ jailops jail logs web messages
+! busy: jail "web" is not mounted
+! hint: the root of a stopped jail is mounted while it runs: start it, or mount its root dataset on the host
+[exit 5]
+

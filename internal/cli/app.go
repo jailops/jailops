@@ -47,6 +47,8 @@ type Env struct {
 	ResizeSignal func() (<-chan struct{}, func())
 	// SDKOptions are added to every connection (tests use short backoffs).
 	SDKOptions []sdk.Option
+	// PollInterval is how often 'logs -f' asks for more (default one second).
+	PollInterval time.Duration
 }
 
 // DefaultSystemConfig is the host-wide client configuration file.
@@ -104,6 +106,9 @@ func (e *Env) fill() {
 	}
 	if e.ReadSecret == nil {
 		e.ReadSecret = func(prompt string) (string, error) { return readSecretFromTerminal(e, prompt) }
+	}
+	if e.PollInterval <= 0 {
+		e.PollInterval = time.Second
 	}
 }
 
