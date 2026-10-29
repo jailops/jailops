@@ -1,0 +1,67 @@
+# Forgejo from the FreeBSD packages (www/forgejo16). Format: docs/apps.md.
+version: 1
+name: forgejo
+title: Forgejo
+summary: Self-hosted git forge with issues, pull requests and CI hooks.
+description: |
+  Forgejo is a compact, self-hosted software forge: git hosting, issues, pull
+  requests, wikis, packages and a web interface. The package runs it as the git
+  user under /var/db/forgejo with the configuration in
+  /usr/local/etc/forgejo/conf/app.ini.
+
+  The installation leaves the configuration to the web installer: the first
+  visit to port 3000 asks for the database (SQLite under /var/db/forgejo works
+  out of the box) and the first account, which becomes the administrator.
+category: devops
+homepage: https://forgejo.org/
+license: MIT
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: forgejo16
+    repo: ports
+    version: "16.0.6_1"
+services:
+  - name: forgejo
+    rc:
+      forgejo_configcheck_enable: "NO"
+    start: true
+ports:
+  - name: http
+    port: 3000
+    proto: tcp
+    description: The web interface and the HTTP git endpoint.
+    expose: true
+data:
+  - path: /var/db/forgejo
+    description: Repositories, the SQLite database, attachments, indexes and sessions.
+config:
+  - path: /usr/local/etc/forgejo/conf/app.ini
+    description: The configuration the web installer writes; secrets included, keep it private.
+    restart: forgejo
+logs:
+  - name: app
+    path: /var/log/forgejo
+    description: Log files, when the [log] section writes files.
+  - name: syslog
+    path: /var/log/daemon.log
+    description: What the service prints; daemon(8) sends it to syslog as daemon.info.
+setup:
+  - [/bin/rm, -f, /usr/local/etc/forgejo/conf/app.ini]
+  - [/usr/sbin/chown, -R, "git:git", /usr/local/etc/forgejo]
+  - [/usr/sbin/chown, -R, "git:git", /var/db/forgejo, /var/log/forgejo]
+health:
+  tcp: 3000
+  wait_seconds: 60
+resources:
+  memory: 1G
+  disk: 10G
+  cpu: "1"
+notes: |
+  Open http://ADDRESS:3000/ to finish the setup in the browser: choose SQLite3
+  with /var/db/forgejo/forgejo.db, keep the repository root
+  /var/db/forgejo/forgejo-repositories, set the server domain and base URL to
+  the address you reach the jail by, and register the first user, who becomes
+  the administrator. The installer writes app.ini; later changes to it need
+  'service forgejo restart' inside the jail.

@@ -1,0 +1,56 @@
+# Valkey from the FreeBSD packages (databases/valkey). Format: docs/apps.md.
+version: 1
+name: valkey
+title: Valkey
+summary: In-memory key-value store, the BSD-licensed successor of Redis.
+description: |
+  Valkey is a high-performance data structure server that serves key/value
+  workloads, compatible with the Redis protocol and clients. The package ships
+  the server, the command line client and a sentinel; this definition runs the
+  server with the configuration the package installs.
+
+  The server binds 127.0.0.1 and ::1 with protected mode on until
+  /usr/local/etc/valkey.conf is changed.
+category: database
+homepage: https://valkey.io/
+license: BSD-3-Clause
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: valkey
+    repo: ports
+    version: "9.1.2"
+services:
+  - name: valkey
+    start: true
+ports:
+  - name: valkey
+    port: 6379
+    proto: tcp
+    description: The protocol port; bound to localhost until bind is changed.
+    expose: false
+data:
+  - path: /var/db/valkey
+    description: Snapshots and the append-only file.
+config:
+  - path: /usr/local/etc/valkey.conf
+    description: The server configuration (bind, protected-mode, persistence).
+    restart: valkey
+logs:
+  - name: server
+    path: /var/log/valkey/valkey.log
+    description: The server log.
+setup:
+  - [/usr/sbin/chown, "valkey:valkey", /var/db/valkey]
+health:
+  exec: [/usr/local/bin/valkey-cli, ping]
+  wait_seconds: 30
+resources:
+  memory: 512M
+  disk: 2G
+  cpu: "1"
+notes: |
+  Talk to it from inside the jail with: jailops exec NAME -- valkey-cli
+  To reach it from other jails, set bind and requirepass in valkey.conf and
+  restart the service.

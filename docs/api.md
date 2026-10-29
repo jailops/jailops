@@ -5,7 +5,7 @@ operations for long work (a jail create, an image build, an image upgrade that a
 
 | What | Where |
 |---|---|
-| The Go SDK (`jailops.net/jailops/sdk`): typed clients for jails, networks, storage, projects, images, firewall, backups, tokens | `sdk/` and its `doc.go` |
+| The Go SDK (`jailops.net/jailops/sdk`): typed clients for jails, networks, storage, projects, images, firewall, backups, tokens, the application catalog and its installation | `sdk/` and its `doc.go` |
 | The wire types (`sdk/api`) and the protocol, route by route, with error codes | [../sdk/PROTOCOL.md](../sdk/PROTOCOL.md) |
 | An in-memory server with the same routes, for tests | `sdk/fake` |
 | Error codes and what to do | `jailops explain CODE` |

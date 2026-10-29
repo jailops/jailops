@@ -229,7 +229,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		Pool: cfg.Pool, Root: cfg.Dataset, MountBase: cfg.MountBase, ConfDir: cfg.ConfDir, StateDir: cfg.StateDir,
 		WorkDir: cfg.WorkDir, JournalDir: filepath.Join(cfg.DataDir, "journal"),
 		State: st, DB: db, SealKey: sealKey, SecretsIdentity: secretsID, SecretsRecipient: secretsID.Recipient().String(),
-		ZFS: zad, ImageZFS: zad, Exec: runExec{clients.Runner}, Files: clients.Files, Jails: clients.Jails,
+		ZFS: zad, ImageZFS: zad, Exec: runExec{clients.Runner}, Files: clients.Files, Logs: clients.Logs, Jails: clients.Jails,
 		PF: clients.PF, Net: clients.Net, Run: clients.Runner, Sysctl: clients.Sysctl, ZClient: clients.ZFS,
 		CompatFile: cfg.ZFS.CompatFile, CompatDir: cfg.ZFS.CompatDir, Backups: opts.Backups,
 		NetworkPool: cfg.Projects.NetworkPool, NetworkPoolBits: cfg.Projects.NetworkBits, NetworkUplink: cfg.Projects.Uplink, NetworkNAT: cfg.Projects.NAT,
@@ -248,6 +248,8 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		deps.Persistent = append(deps.Persistent, lifecycle.PersistentPath{Dataset: p.Dataset, Path: p.Path, Class: lifecycle.Class(p.Class), Merge: p.Merge, NoSeed: p.NoSeed})
 	}
 	deps.UpdateTick, deps.ProjectFilesDir = cfg.Updates.Tick.Std(), cfg.Updates.ProjectFilesDir
+	deps.AppsDir = cfg.Apps.CatalogDir
+	deps.DialJail = clients.Dial
 	deps.ExecLimits = service.ExecLimits{PerJail: cfg.Limits.ExecSessionsPerJail, Idle: cfg.Limits.ExecIdle.Std(), Max: cfg.Limits.ExecMax.Std()}
 	if opts.Registrar != nil {
 		deps.Registrar = opts.Registrar

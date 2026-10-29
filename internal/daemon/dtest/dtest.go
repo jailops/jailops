@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"jailops.net/jailops/internal/hostbackup"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -99,6 +100,37 @@ type Env struct {
 	repoVer  string              // the package version the fake repository serves (SetRepoVersion)
 	// Loaded lists the modules the daemon loaded with kldload.
 	Loaded []string
+	// DialFn answers the host-to-jail connections of an app installation's
+	// health check; nil refuses them (there is no network in tests).
+	DialFn func(ctx context.Context, network, address string) (net.Conn, error)
+	// PkgInstallErr makes the fake pkg fail an app's package installation.
+	PkgInstallErr error
+	// Installed lists what the fake pkg installed into jail roots, "root name".
+	Installed []string
+}
+
+// SetDial replaces DialFn while the daemon may be running.
+func (e *Env) SetDial(fn func(ctx context.Context, network, address string) (net.Conn, error)) {
+	e.sysmu.Lock()
+	defer e.sysmu.Unlock()
+	e.DialFn = fn
+}
+
+// SetPkgInstallErr sets PkgInstallErr while the daemon may be running.
+func (e *Env) SetPkgInstallErr(err error) {
+	e.sysmu.Lock()
+	defer e.sysmu.Unlock()
+	e.PkgInstallErr = err
+}
+
+func (e *Env) dial(ctx context.Context, network, address string) (net.Conn, error) {
+	e.sysmu.Lock()
+	fn := e.DialFn
+	e.sysmu.Unlock()
+	if fn == nil {
+		return nil, fmt.Errorf("dial %s %s: no network in tests", network, address)
+	}
+	return fn(ctx, network, address)
 }
 
 // SetSysctl is what `sysctl name=value` does on the fake host.
@@ -246,10 +278,11 @@ func (e *Env) Start() {
 	d, err := daemon.Start(context.Background(), daemon.Options{
 		Config: &cfg, Version: "test", ForceWeb: e.Opts.ForceWeb, NoWeb: e.Opts.NoWeb, LogOutput: out, Hostname: host, Env: &env, NoListen: !e.Opts.Listen, Registrar: e.Opts.Registrar, Now: e.Opts.Now, Backups: e.Opts.Backups, Execer: e.execer(), BackupTLS: e.Opts.BackupTLS, BackupMounter: e.Opts.BackupMounter,
 		Clients: func(ctx context.Context, c *daemon.Config, dev bool) (*daemon.Clients, error) {
-			cl := &daemon.Clients{ZFS: e.ZFS, Jails: e.Jails, PF: e.PF, Net: e.Net, Runner: e.Run, Files: e.Files,
+			cl := &daemon.Clients{ZFS: e.ZFS, Jails: e.Jails, PF: e.PF, Net: e.Net, Runner: e.Run, Files: e.Files, Logs: fileLogs{e.Files},
 				Sysctl:  func(_ context.Context, name string) (string, error) { return e.sysctl(name) },
 				Mount:   func(context.Context, string) error { return nil },
-				Unmount: func(context.Context, string) error { return nil }}
+				Unmount: func(context.Context, string) error { return nil },
+				Dial:    e.dial}
 			if e.Opts.Clients != nil {
 				e.Opts.Clients(cl)
 			}
@@ -311,14 +344,56 @@ func (e *Env) script() {
 		if len(argv) > 2 && argv[1] == "config" && argv[2] == "abi" {
 			return run.Result{Stdout: []byte("FreeBSD:15:amd64\n")}, nil
 		}
-		root := argv[2]
-		switch argv[9] {
+		// pkg -r <root> [-o k=v]... <sub> [args]: the image builder passes -o
+		// options and installs a whole base, the app installer names packages.
+		root, i, options := "", 1, false
+		for i < len(argv) && (argv[i] == "-r" || argv[i] == "-o") {
+			if argv[i] == "-r" {
+				root = argv[i+1]
+			} else {
+				options = true
+			}
+			i += 2
+		}
+		if i >= len(argv) || root == "" {
+			return run.Result{ExitCode: 1, Stderr: []byte("pkg: usage\n")}, nil
+		}
+		sub, rest := argv[i], argv[i+1:]
+		switch sub {
 		case "install", "upgrade":
-			e.Files.Put(root+"/bin/sh", []byte("x"))
-			e.Files.Put(root+"/libexec/ld-elf.so.1", []byte("x"))
-			v := e.repoVersion()
-			e.Files.Put(root+"/.pkgs", []byte("FreeBSD-runtime "+v+"\nFreeBSD-utilities "+v+"\n"))
+			if options {
+				e.Files.Put(root+"/bin/sh", []byte("x"))
+				e.Files.Put(root+"/libexec/ld-elf.so.1", []byte("x"))
+				v := e.repoVersion()
+				e.Files.Put(root+"/.pkgs", []byte("FreeBSD-runtime "+v+"\nFreeBSD-utilities "+v+"\n"))
+				return run.Result{}, nil
+			}
+			e.sysmu.Lock()
+			failErr := e.PkgInstallErr
+			e.sysmu.Unlock()
+			if failErr != nil {
+				return run.Result{ExitCode: 1, Stderr: []byte(failErr.Error() + "\n")}, failErr
+			}
+			for j := 0; j < len(rest); j++ {
+				if rest[j] == "-r" { // the repository name follows
+					j++
+					continue
+				}
+				if !strings.HasPrefix(rest[j], "-") {
+					e.sysmu.Lock()
+					e.Installed = append(e.Installed, root+" "+rest[j])
+					e.sysmu.Unlock()
+					e.Files.Put(root+"/.app-pkgs/"+rest[j], []byte(rest[j]+" "+e.repoVersion()+"\n"))
+				}
+			}
 		case "query":
+			if len(rest) == 2 && rest[0] == "%v" { // the version of one package
+				if b, ok := e.Files.Get(root + "/.app-pkgs/" + rest[1]); ok {
+					_, v, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
+					return run.Result{Stdout: []byte(v + "\n")}, nil
+				}
+				return run.Result{ExitCode: 1, Stderr: []byte("pkg: " + rest[1] + " is not installed\n")}, fmt.Errorf("pkg query: %s is not installed", rest[1])
+			}
 			b, _ := e.Files.ReadFile(context.Background(), root+"/.pkgs")
 			var sb strings.Builder
 			for _, l := range strings.Split(strings.TrimSpace(string(b)), "\n") {

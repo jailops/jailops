@@ -1,0 +1,102 @@
+$ jailops app installed
+! No resources found.
+
+$ jailops app install nginx --image freebsd-151@stable --dry-run
+Dry run: nothing was created. Installing app nginx as jail nginx would do:
+  01 create-jail: create thin jail nginx from freebsd-151@stable
+  02 start-jail: start nginx
+  03 install-packages-ports: pkg -r <root> install -y nginx
+  04 record-version: pkg -r <root> query %v nginx, then label jailops.app.version
+  05 write-rc-conf: set the services' rc.conf variables in <root>/etc/rc.conf
+  06 start-service-nginx: in the jail: /usr/sbin/service nginx start
+  07 health-check: the health check of the definition
+  08 snapshot: snapshot every dataset of nginx as app-installed
+
+$ jailops app install nginx --image freebsd-151@stable
+App nginx installed as jail nginx (running)
+  Version:   1.30.6,3
+  Addresses: 10.20.0.10
+  Ports:     http 80/tcp at 10.20.0.10:80 (expose: forwarding is not set up yet; reachable from the jail's network) HTTP, the default site.
+  Data:      /usr/local/www The sites.
+  Config:    /usr/local/etc/nginx/nginx.conf (restart nginx) The server configuration.
+  Logs:      access /var/log/nginx/access.log One line per request.
+             error /var/log/nginx/error.log
+  Snapshot:  app-installed (jailops jail rollback nginx --scope all --snapshot app-installed goes back to it)
+  Steps:     8 done
+Notes:
+  Put the site under /usr/local/www.
+
+$ jailops app install postgresql --name db --image freebsd-151@stable --network lan --storage default --memory 2G --disk 20G --cpu 2
+App postgresql installed as jail db (running)
+  Version:   18.6
+  Addresses: 10.20.0.11
+  Ports:     postgres 5432/tcp at 10.20.0.11:5432 The SQL port.
+  Data:      /var/db/postgres The cluster (data18).
+  Config:    /var/db/postgres/data18/postgresql.conf (restart postgresql) Server settings.
+             /var/db/postgres/data18/pg_hba.conf (restart postgresql) Who may connect.
+  Logs:      server /var/log/messages The port logs to syslog.
+  Snapshot:  app-installed (jailops jail rollback db --scope all --snapshot app-installed goes back to it)
+  Steps:     10 done
+Notes:
+  Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql
+
+$ jailops app install valkey --image freebsd-151@stable --no-wait
+OPERATION                              STATUS    DESCRIPTION
+<uuid>   pending   Install app valkey as jail valkey
+
+$ jailops app installed
+JAIL     APP          VERSION    STATE     ADDRESSES    PORTS
+db       postgresql   18.6       running   10.20.0.11   5432/tcp
+nginx    nginx        1.30.6,3   running   10.20.0.10   80/tcp
+valkey   valkey       9.1.2      running   10.20.0.12   6379/tcp
+
+$ jailops app installed ng*
+JAIL    APP     VERSION    STATE     ADDRESSES    PORTS
+nginx   nginx   1.30.6,3   running   10.20.0.10   80/tcp
+
+$ jailops app installed -o name
+db
+nginx
+valkey
+
+$ jailops list
+NAME     STATE     IMAGE                GEN   ADDRESSES    AGE
+db       running   freebsd-151@stable   g1    10.20.0.11   3h
+nginx    running   freebsd-151@stable   g1    10.20.0.10   3h
+valkey   running   freebsd-151@stable   g1    10.20.0.12   3h
+
+$ jailops app install nginx --image freebsd-151@stable
+! already_exists: jail "nginx" already exists
+! hint: name the jail with --name, or delete the jail first
+[exit 5]
+
+$ jailops app install nginx --name web2
+! not_found: image "freebsd" not found
+! hint: create or import the image first
+[exit 4]
+
+$ jailops app install nginx --name web2 --image freebsd-15@stable
+! invalid: image "freebsd-15" is release 15.0-RELEASE; app nginx needs 15.1 or later
+! hint: create an image of a newer release and name it with --image
+[exit 2]
+
+$ jailops app install missing
+! not_found: app "missing" is not in the catalog
+! hint: jailops app list shows the catalog
+[exit 4]
+
+$ jailops app install broken
+! invalid: app "broken": the definition broken.yaml is invalid and cannot be installed: title: is required
+! hint: fix the file in the catalog directory, or reinstall the jailops-apps package
+[exit 2]
+
+$ jailops app install nginx --name web2 --image freebsd-151@stable --network other
+! forbidden: network "other" is not granted to project "main"
+! hint: an administrator grants networks with `jailops project set`
+[exit 3]
+
+$ jailops app install
+! usage: accepts 1 arg(s), received 0
+! hint: run 'jailops app install --help' for usage
+[exit 2]
+

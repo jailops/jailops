@@ -56,9 +56,14 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `GET /api/v1/jails/<n>?expanded=true` | | `JailExpanded`: the jail with its profiles merged in (`spec` is the effective spec) and `sources`, the origin of every key (`jail` or `profile:<name>`) |
 | `POST /api/v1/jails/<n>/config?restart=true` | `ConfigChange` (`set`, `unset`) | async, result `{...Jail, restart_required: [keys], restarted}`; **never restarts the jail unless `restart=true`**, and then only when a changed key needs it |
 | `POST /api/v1/jails/<n>/exec` | `ExecRequest` | upgrade to a framed stream, see Exec |
+| `GET /api/v1/jails/<n>/logs` | | `[]JailLogFile`: the regular files below `/var/log` of the jail root, one directory deep (`name`, `size`, `modified_at`, `kind` active or rotated, `compressed`), sorted by name; running or stopped, `busy` ("jail not mounted", the hint names the dataset) while the root of a stopped jail is not mounted. Operator (`jail_logs`) |
+| `GET /api/v1/jails/<n>/logs/<file>?tail=N&since=T&grep=S&offset=O` | | `JailLogRead`: the last `tail` lines (default 200, at most 5000) of the file (a name below `/var/log`, segments `[A-Za-z0-9._-]+` not starting with a dot, at most two), read from at most 1 MiB before its end; `since` (RFC 3339 or a duration such as `15m`) keeps the lines whose timestamp is not older, a line without one belonging to the preceding line; `grep` (plain substring, case-insensitive, at most 128 bytes) keeps the lines containing it; `offset` continues from `next_offset` of a previous reply. `lines` are `{n, text}` (`n` when the reply starts at the beginning of the file), `next_offset` the size when read, `rotated` when the file was shorter than `offset` (the reply then starts over), `truncated` when a limit left lines out. A compressed rotated copy is `invalid` ("not readable (compressed)"). Operator; audited (`jail_logs`) |
 | `GET /api/v1/jails/<n>/updates` | | `[]UpdateRecord`, newest first (`updates`) |
 | `POST /api/v1/jails/<n>/provision` | `ProvisionRequest` (`again`) | async, result `ProvisionResult`; `already_exists` when it ran before and `again` is not set (`provisioning`) |
 | `GET /api/v1/config-keys` | | `[]ConfigKey`: the key registry (name, type, values, description, example, `restart_required`, `profile`, `admin`, `path` into the spec); any authenticated identity |
+| `GET /api/v1/apps` | | `[]AppSummary`: the application catalog (docs/apps.md), every definition sorted by name, invalid ones with `valid: false` and `error`; any authenticated identity (`apps`) |
+| `GET /api/v1/apps/<n>` | | `AppDetail`: the `definition` with defaults filled in, `hash` (`sha256:<hex>` of the file), `file` and `icon` (a data URI); `invalid` with the reason for an invalid definition, `not_found` for an unknown name (`apps`) |
+| `POST /api/v1/apps/<n>/install` | `AppInstall` (`jail`, `network`, `storage`, `image`, `limits`, `dry_run`; optional `project`, which must be the request's) | async, result `AppInstallResult` (`jail`, `version`, `addresses`, `ports` with `endpoint`, `data`, `config`, `logs`, `notes`, `snapshot`, `steps`): one operation that creates a thin jail with the app's data paths as volumes and the labels `jailops.app`, `jailops.app.hash`, `jailops.app.version`, installs the packages from the host, writes rc.conf, runs the setup commands and the services, checks the health and snapshots the result as `app-installed`; operator in the project. A failure after the jail's first start leaves it stopped: the error carries `detail.step`, `detail.jail` and `detail.jail_kept`. `not_found` for an unknown app, `invalid` for an invalid definition or an image older than `release_min`, `already_exists` for a jail of that name (`app_install`) |
 | `/api/v1/profiles` and `/<n>` | `Profile` | CRUD; project-level, or host-level with `?project=host` (admin writes) |
 | `GET /api/v1/updates` | | `[]UpdateReport`: the latest check of every visible jail |
 | `POST /api/v1/updates/check` | `UpdateCheckRequest` (`jails`, `all`) | async, result `[]UpdateReport`; changes nothing but the package catalog in the jail |
@@ -116,7 +121,7 @@ in-process daemon only; a run on a real FreeBSD host is UNVERIFIED.
 
 These routes have a permission entry but their feature is not in this version, so they answer `unsupported` (501),
 never success: `PUT /api/v1/server` and `GET /api/v1/server/config`; `/api/v1/cluster` and its sub-routes (cluster mode);
-`GET /api/v1/jails/<n>/console` (list), `.../logs`, `.../files/<path>`, `POST .../move`, `.../volumes`, `.../bundle`;
+`GET /api/v1/jails/<n>/console` (list), `.../files/<path>`, `POST .../move`, `.../volumes`, `.../bundle`;
 `POST .../snapshots/<s>` (rename); `/api/v1/jail-templates`; `/api/v1/groups`; `/api/v1/rollouts` (rollouts are a
 `jailops-sync` feature); `POST /api/v1/backups`, `POST /api/v1/backups/<id>/restore` and `.../restore-preflight` (use
 `POST /api/v1/restores`); and the backup transport routes `POST /api/v1/backups/receive`, `GET /api/v1/backups/<id>/stream`,
@@ -266,7 +271,8 @@ data: <api.Event as one line of JSON>
 `?type=` filters. A client that reconnects sends `Last-Event-ID`; the server replays retained events
 with a larger id, then continues live. Without it the stream starts at "now". A `retry:` field sets
 the reconnect delay. Lines beginning with `:` are comments (keep-alives). Lifecycle metadata is
-`api.LifecycleEvent` with actions like `jail-created`, `jail-started`, `network-updated`.
+`api.LifecycleEvent` with actions like `jail-created`, `jail-started`, `network-updated`, and `app.installed` or
+`app.install.failed` (source `/api/v1/jails/<jail>`) at the end of an app installation.
 
 ## Auth failures and TLS
 
@@ -294,6 +300,9 @@ lists the name, and otherwise reports `unsupported`.
 | `jail_copy` | `POST /api/v1/jails/<n>` | copy or rename |
 | `image_upgrade` | `POST /api/v1/images/<n>/upgrade` | build the next generation and move the jails that use the image; see Routes |
 | `jail_usage` | `GET /api/v1/jails/<n>/usage` | what a jail uses now; `jailops jail info` reads it; see Routes |
+| `jail_logs` | `GET /api/v1/jails/<n>/logs`, `GET .../logs/<file>` | the log files of a jail root and the end of one; `jailops jail logs` reads them; see Routes |
+| `apps` | `GET /api/v1/apps`, `/api/v1/apps/<n>` | the application catalog: local definition files the daemon reads and never fetches; see Routes and docs/apps.md |
+| `app_install` | `POST /api/v1/apps/<n>/install` | installing an app of the catalog as a jail, one operation; events `app.installed` and `app.install.failed`; see Routes and docs/apps.md |
 | `backup_pull`, `backup_push` | the backup transport permissions of the backup node | not routes of the host daemon (see above) |
 
 Update and provisioning keys of the registry: `shell`, `updates.mode` (manual, notify, managed),

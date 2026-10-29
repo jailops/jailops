@@ -2,6 +2,18 @@
 // Fields with omitempty or omitzero are optional. Go encodes a nil slice or map without
 // omitempty as null: the API client normalises those to empty values.
 
+export type AppCategory =
+  | "database"
+  | "web"
+  | "tools"
+  | "devops"
+  | "storage"
+  | "monitoring"
+  | "communication"
+  | "other"
+
+export const AppCategoryValues: readonly AppCategory[] = ['database', 'web', 'tools', 'devops', 'storage', 'monitoring', 'communication', 'other']
+
 export type Code =
   | "invalid"
   | "not_found"
@@ -54,6 +66,12 @@ export type IPv6Mode =
   | "none"
 
 export const IPv6ModeValues: readonly IPv6Mode[] = ['routed', 'proxy', 'none']
+
+export type JailLogKind =
+  | "active"
+  | "rotated"
+
+export const JailLogKindValues: readonly JailLogKind[] = ['active', 'rotated']
 
 export type Kind =
   | "Jail"
@@ -175,6 +193,142 @@ export interface AddressSet {
 export interface AddressSetSpec {
   addresses: string[]
   includes?: string[]
+}
+
+export interface App {
+  version: number
+  name: string
+  title: string
+  summary: string
+  description?: string
+  category: AppCategory
+  homepage?: string
+  license?: string
+  icon?: string
+  image: AppImage
+  packages: AppPackage[]
+  services?: AppService[]
+  ports?: AppPort[]
+  data?: AppPath[]
+  config?: AppConfig[]
+  logs?: AppLog[]
+  setup?: string[][]
+  health?: AppHealth
+  resources?: AppResources
+  notes?: string
+}
+
+export interface AppConfig {
+  path: string
+  description?: string
+  restart?: string
+}
+
+export interface AppDetail {
+  definition: App
+  hash: string
+  file: string
+  icon?: string
+}
+
+export interface AppHTTPCheck {
+  port: number
+  path: string
+  status?: number
+}
+
+export interface AppHealth {
+  tcp?: number
+  http?: AppHTTPCheck
+  exec?: string[]
+  wait_seconds?: number
+}
+
+export interface AppImage {
+  os: string
+  release_min: string
+}
+
+export interface AppInstall {
+  jail?: string
+  project?: string
+  network?: string
+  storage?: string
+  image?: string
+  limits?: Resources
+  dry_run?: boolean
+}
+
+export interface AppInstallResult {
+  app: string
+  hash: string
+  version?: string
+  jail: Jail
+  addresses?: string[]
+  ports?: AppInstalledPort[]
+  data?: AppPath[]
+  config?: AppConfig[]
+  logs?: AppLog[]
+  notes?: string
+  snapshot?: string
+  steps: string[]
+  dry_run?: boolean
+}
+
+export interface AppInstalledPort {
+  name: string
+  port: number
+  proto: string
+  endpoint?: string
+  expose: boolean
+  description?: string
+}
+
+export interface AppLog {
+  name: string
+  path: string
+  description?: string
+}
+
+export interface AppPackage {
+  name: string
+  repo: string
+  version?: string
+}
+
+export interface AppPath {
+  path: string
+  description?: string
+}
+
+export interface AppPort {
+  name: string
+  port: number
+  proto: string
+  description?: string
+  expose: boolean
+}
+
+export interface AppResources {
+  memory?: string
+  disk?: string
+  cpu?: string
+}
+
+export interface AppService {
+  name: string
+  rc?: Record<string, string>
+  start?: boolean
+}
+
+export interface AppSummary {
+  name: string
+  title?: string
+  summary?: string
+  category?: AppCategory
+  version?: string
+  valid: boolean
+  error?: string
 }
 
 export interface AuditEntry {
@@ -578,6 +732,28 @@ export interface JailDiskUsage {
 export interface JailExpanded {
   jail: Jail
   sources: Record<string, string>
+}
+
+export interface JailLogFile {
+  name: string
+  size: number
+  modified_at: string
+  kind: JailLogKind
+  compressed?: boolean
+}
+
+export interface JailLogLine {
+  n?: number
+  text: string
+}
+
+export interface JailLogRead {
+  jail: string
+  file: string
+  lines: JailLogLine[]
+  next_offset: number
+  rotated?: boolean
+  truncated?: boolean
 }
 
 export interface JailRollback {
@@ -1519,4 +1695,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install']

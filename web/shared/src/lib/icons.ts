@@ -46,10 +46,25 @@ import searchCheck from 'lucide-static/icons/search-check.svg'
 import clock from 'lucide-static/icons/clock.svg'
 import activity from 'lucide-static/icons/activity.svg'
 import users from 'lucide-static/icons/users.svg'
+import pkg from 'lucide-static/icons/package.svg'
+import search from 'lucide-static/icons/search.svg'
+import download from 'lucide-static/icons/download.svg'
+import externalLink from 'lucide-static/icons/external-link.svg'
+import fileText from 'lucide-static/icons/file-text.svg'
+import store from 'lucide-static/icons/store.svg'
+import cpu from 'lucide-static/icons/cpu.svg'
+import memoryStick from 'lucide-static/icons/memory-stick.svg'
+import heartPulse from 'lucide-static/icons/heart-pulse.svg'
+import folder from 'lucide-static/icons/folder.svg'
+import fileCog from 'lucide-static/icons/file-cog.svg'
+import wrapText from 'lucide-static/icons/wrap-text.svg'
+import arrowDownToLine from 'lucide-static/icons/arrow-down-to-line.svg'
+import plug from 'lucide-static/icons/plug.svg'
 
 export const icons = {
   play, square, rotateCw, layoutDashboard, box, layers, network, shield, archive, server, listChecks, radio,
   scrollText, keyRound, sun, moon, monitor, menu, x, alertTriangle, alertCircle, checkCircle, circle, info, copy, check,
   camera, undo, hardDrive, database, wrench, shieldCheck, broom, searchCheck, clock, activity, users, arrowUp, arrowDown, plus, trash, lock, logOut, chevronLeft, terminal, link, pause,
+  pkg, search, download, externalLink, fileText, store, cpu, memoryStick, heartPulse, folder, fileCog, wrapText, arrowDownToLine, plug,
 } as const
 export type IconName = keyof typeof icons

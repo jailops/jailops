@@ -88,6 +88,10 @@ const (
 	OpFSMkdir     = "fs.mkdir"
 	OpFSRemove    = "fs.remove"
 	OpFSRemoveAll = "fs.remove_all"
+	// fs.list_logs and fs.tail_file read the log directory of a jail root
+	// (logs.go); nothing else, and nothing is written.
+	OpFSListLogs = "fs.list_logs"
+	OpFSTailFile = "fs.tail_file"
 
 	OpNetSetMTU = "net.set_mtu"
 
@@ -584,6 +588,14 @@ func init() {
 	})
 	register(OpFSRemove, false, func(ctx context.Context, h Host, a RemoveReq, _ *callIO) (any, error) {
 		return empty{}, h.Remove(ctx, a.Path)
+	})
+	register(OpFSListLogs, false, func(ctx context.Context, h Host, a listLogsArgs, _ *callIO) (any, error) {
+		files, truncated, err := h.ListLogs(ctx, a.Dir)
+		return ListLogsRes{Files: files, Truncated: truncated}, err
+	})
+	register(OpFSTailFile, false, func(ctx context.Context, h Host, a TailFileReq, _ *callIO) (any, error) {
+		data, start, size, err := h.TailFile(ctx, a.Path, a.Offset, a.Max)
+		return TailFileRes{Data: data, Start: start, Size: size}, err
 	})
 
 	register(OpSysctl, false, func(ctx context.Context, h Host, a nameArgs, _ *callIO) (any, error) {

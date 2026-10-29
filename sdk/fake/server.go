@@ -132,6 +132,7 @@ type Server struct {
 
 	jails     *kind[api.Jail]
 	profiles  *kind[api.Profile]
+	apps      map[string]*appEntry
 	execCalls []ExecCall
 	// consoles are the sessions of the console protocol (console.go).
 	consoles     map[string]*fakeConsole
@@ -145,7 +146,13 @@ type Server struct {
 	updHistory         map[string][]api.UpdateRecord
 	// usage is what GET .../usage answers per jail (SeedJailUsage); a jail
 	// without an entry gets fixed numbers.
-	usage     map[string]api.JailUsage
+	usage map[string]api.JailUsage
+	// logs are the log files of each jail (SeedJailLog), by jail key and
+	// name below /var/log; a jail without an entry has none. unmounted
+	// marks jails whose root cannot be read (SeedJailUnmounted).
+	logs      map[string]map[string][]byte
+	unmounted map[string]bool
+	logReads  int
 	sysctls   map[string]string // WithSysctl
 	images    *kind[api.Image]
 	networks  *kind[api.Network]

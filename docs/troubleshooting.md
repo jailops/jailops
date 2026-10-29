@@ -17,6 +17,7 @@ example without FreeBSD), with a hint on the next line when there is one. `jailo
 | `sysctl.persistent` | forwarding (and the sysctl above) on and persistent | `warn`: set `gateway_enable=YES` and `ipv6_gateway_enable=YES` in `rc.conf`, `net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` in `sysctl.conf` (JailOps never edits them) |
 | `zfs.pool`, `zfs.pool.<storage>` | the pools are `ONLINE` | `zpool status <pool>` |
 | `zfs.compat` | pool features against `zfs.compat_file` | `fail`: replication to an older host would fail; JailOps never runs `zpool upgrade` |
+| `jail.volumes` | the volume datasets of the jails have `canmount=noauto` | `warn`: a volume made before that has `canmount=on` and is mounted at boot before the jail root it lies in; run the `zfs set canmount=noauto <dataset>` the hint lists |
 | `pf.anchors` | the three anchor lines are in the loaded ruleset | add them to `pf.conf` in the right order and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `network.epairs` | epairs without a jail | `warn`: the reconcile loop removes them on its next pass |
@@ -119,6 +120,14 @@ The hint says which.
 (`priv.request`, with the operation, the outcome and the user id; the daemon's pid is not recorded). `jailops audit` shows the
 daemon's own audit log, and `jailops op list` / `jailops events` show operations and events. Set `log.level: debug` in
 `jailopsd.yaml` for more.
+
+The logs of a jail itself are read with `jailops jail logs NAME` (the files below its `/var/log`, rotated copies included)
+and `jailops jail logs NAME FILE` (the last 200 lines; `--tail`, `--since 15m`, `--grep TEXT`, `-f` to follow, `-o json`
+for the server's reply), running or stopped, through the server: no shell in the jail is needed, the operator role is, and
+every read is audited. A stopped jail's root is mounted only while it runs, so its logs answer `busy: jail "x" is not mounted`
+with the dataset to `zfs mount` on the host. A compressed rotated copy (`messages.1.gz`) is listed but answers
+`not readable (compressed)`: read it from inside the jail. The log events the server publishes (not a file) are
+`jailops jail logs NAME --events`.
 
 `jailops-backupd` logs to syslog under the tag `jailops-backupd` when it runs under rc. `jailops-backupd status` shows
 the repository (mode, snapshots, chunks, open sessions, quarantined chunks, last GC and verify), `jailops-backupd jobs`

@@ -5,6 +5,7 @@ import type {
   Remote, Token, User, Certificate, AuditEntry, Operation, ServerInfo, PoolUsage, PowerState,
 } from '@jailops/shared/api/types'
 import { knownExtensions } from '@jailops/shared/api/types'
+import { appHash } from './apps'
 
 const now = Date.now()
 const ago = (sec: number) => new Date(now - sec * 1000).toISOString()
@@ -52,8 +53,8 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
 
 export function jails(): Jail[] {
   return [
-    jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ name: 'content', mount: '/usr/local/www', quota: '10G' }], labels: { role: 'web', tier: 'frontend' } }),
-    jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ name: 'pgdata', mount: '/var/db/postgres', quota: '200G' }, { name: 'wal', mount: '/var/db/wal', quota: '40G', read_only: false }], labels: { role: 'db' } }),
+    jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ name: 'content', mount: '/usr/local/www', quota: '10G' }], labels: { role: 'web', tier: 'frontend', 'jailops.app': 'nginx', 'jailops.app.version': '1.30.6,3', 'jailops.app.hash': appHash('nginx') } }),
+    jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ name: 'pgdata', mount: '/var/db/postgres', quota: '200G' }, { name: 'wal', mount: '/var/db/wal', quota: '40G', read_only: false }], labels: { role: 'db', 'jailops.app': 'postgresql', 'jailops.app.version': '18.5', 'jailops.app.hash': appHash('postgresql-previous') } }),
     jail('mail', 'error', { image: 'freebsd-15#g3', gen: 'freebsd-15#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Reconciled', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ name: 'spool', mount: '/var/spool', quota: '50G' }] }),
     jail('build', 'stopped', { autostart: false, labels: { role: 'ci' } }),
     jail('proxy', 'running', { net: 'edge', ipv4: '192.0.2.10', ipv6: 'auto', labels: { role: 'proxy' } }),

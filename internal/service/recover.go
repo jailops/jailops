@@ -1,8 +1,10 @@
 package service
 
 import (
+	"cmp"
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -35,6 +37,11 @@ func (s *Service) recoverInterrupted(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	// An installation is resolved after the runs of its steps (the start of
+	// its jail rolls back first), so it sees what they left.
+	slices.SortStableFunc(recs, func(a, b plan.Record) int {
+		return cmp.Compare(boolInt(strings.HasPrefix(a.ID, "app-install/")), boolInt(strings.HasPrefix(b.ID, "app-install/")))
+	})
 	var outcomes []RecoveryOutcome
 	for _, rec := range recs {
 		out := s.recoverRun(ctx, rec)
@@ -163,6 +170,33 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 	case "destroy":
 		out.Action, out.Detail = "dropped", "the destroy was interrupted; delete the jail again to finish"
 		return out
+	case "app-install":
+		// app-install/<key>: the jail is deleted while its start never
+		// completed (the create's own run rolls a half-made jail back, the
+		// start's own run a half-made start), stopped and kept afterwards, as
+		// a failed installation leaves it.
+		if _, ok, _ := s.journal.Get(ctx, "create/"+rest); ok {
+			out.Action, out.Detail = "dropped", "the create of the jail is rolled back by its own run"
+			return out
+		}
+		if ok, err := s.d.ZFS.Exists(ctx, s.lcfg.ContainerDS(rest)); err != nil {
+			return fail(err)
+		} else if !ok {
+			out.Action, out.Detail = "dropped", "nothing was created"
+			return out
+		}
+		if rec.Done < 2 { // create-jail and start-jail are the first two steps
+			if _, err := s.life.DestroyJail(ctx, rest, true, false); err != nil {
+				return fail(err)
+			}
+			out.Action, out.Detail = "rolled-back", "the jail of the interrupted installation never completed a start and was deleted"
+			return out
+		}
+		if err := s.life.StopJail(ctx, rest); err != nil {
+			return fail(err)
+		}
+		out.Action, out.Detail = "completed", "the jail of the interrupted installation was stopped and kept for inspection; delete it to install again"
+		return out
 	case "image-build", "image-receive":
 		// image-build/<image>/g<N>: remove the staging dataset of the run on
 		// every pool (a receive stages on the pool that receives).
@@ -187,6 +221,13 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		return out
 	}
 	return fail(fmt.Errorf("unknown run kind %q", kind))
+}
+
+func boolInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 var _ = lifecycle.PropGen

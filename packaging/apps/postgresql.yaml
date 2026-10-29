@@ -1,0 +1,60 @@
+# PostgreSQL from the FreeBSD packages (databases/postgresql18-server). Format: docs/apps.md.
+version: 1
+name: postgresql
+title: PostgreSQL
+summary: Relational database server, PostgreSQL 18 from the FreeBSD packages.
+description: |
+  PostgreSQL is a relational database with transactions, replication and a large
+  extension ecosystem. This definition installs the server package of the current
+  major release, initialises a cluster under /var/db/postgres/data18 with UTF-8 and
+  the C collation (the port's defaults) and starts it.
+
+  The cluster listens on localhost only until listen_addresses in postgresql.conf
+  and the client rules in pg_hba.conf are changed. The port logs to syslog.
+category: database
+homepage: https://www.postgresql.org/
+license: PostgreSQL
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: postgresql18-server
+    repo: ports
+    version: "18.6"
+services:
+  - name: postgresql
+    start: true
+ports:
+  - name: postgres
+    port: 5432
+    proto: tcp
+    description: The SQL port; listens on localhost until listen_addresses is set.
+    expose: false
+data:
+  - path: /var/db/postgres
+    description: The cluster (data18) and the home of the postgres user.
+config:
+  - path: /var/db/postgres/data18/postgresql.conf
+    description: Server settings, including listen_addresses and logging.
+    restart: postgresql
+  - path: /var/db/postgres/data18/pg_hba.conf
+    description: Who may connect from where, and how they authenticate.
+    restart: postgresql
+logs:
+  - name: server
+    path: /var/log/messages
+    description: The port logs to syslog by default (log_destination in postgresql.conf).
+setup:
+  - [/usr/sbin/chown, "postgres:postgres", /var/db/postgres]
+  - [/usr/sbin/service, postgresql, initdb]
+health:
+  exec: [/usr/local/bin/pg_isready, -U, postgres]
+  wait_seconds: 60
+resources:
+  memory: 1G
+  disk: 10G
+  cpu: "1"
+notes: |
+  Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql
+  To accept connections from the network, set listen_addresses = '*' in
+  postgresql.conf, add a host rule to pg_hba.conf and restart the service.

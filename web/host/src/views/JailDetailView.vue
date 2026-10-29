@@ -20,6 +20,7 @@ import JailConfigTab from '@/components/JailConfigTab.vue'
 import JailDevicesTab from '@/components/JailDevicesTab.vue'
 import JailExecTab from '@/components/JailExecTab.vue'
 import JailUpdatesTab from '@/components/JailUpdatesTab.vue'
+import JailLogsTab from '@/components/JailLogsTab.vue'
 import ProvisionPanel from '@/components/ProvisionPanel.vue'
 import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
 import { shortAddr } from '@jailops/shared/lib/format'
@@ -43,15 +44,18 @@ const jail = computed<Jail | undefined>(() => l.data.value?.jail)
 const snaps = computed(() => [...(l.data.value?.snaps ?? [])].sort((a, b) => (b.metadata.created_at ?? '').localeCompare(a.metadata.created_at ?? '')))
 const maxWritten = computed(() => Math.max(1, ...snaps.value.map((x) => x.status.written ?? 0)))
 
-type Tab = 'overview' | 'config' | 'devices' | 'updates' | 'console'
-const tab = ref<Tab>('overview')
+type Tab = 'overview' | 'config' | 'devices' | 'updates' | 'logs' | 'console'
 const tabs = computed(() => ([
   ['overview', s.jail.overview, true],
   ['config', s.config.tab, true],
   ['devices', s.devices.tab, true],
   ['updates', s.updates.tab, hasExt('updates')],
+  ['logs', s.logs.tab, hasExt('jail_logs')],
   ['console', s.exec.tab, true],
 ] as Array<[Tab, string, boolean]>).filter((t) => t[2]))
+// ?tab=logs&file=nginx/access.log opens a tab directly (the app pages link to a jail's log viewer).
+const tab = ref<Tab>(tabs.value.some((t) => t[0] === route.query.tab) ? (route.query.tab as Tab) : 'overview')
+const logFile = typeof route.query.file === 'string' ? route.query.file : ''
 const rollbackOpen = ref(false)
 const rollbackSnap = ref<string | undefined>()
 const upgradeOpen = ref(false)
@@ -136,6 +140,7 @@ const attentionItems = computed(() => {
         <JailConfigTab v-if="tab === 'config'" :jail="jail" :sources="l.data.value?.sources ?? {}" @saved="l.reload" />
         <JailDevicesTab v-else-if="tab === 'devices'" :jail="jail" :sources="l.data.value?.sources ?? {}" @saved="l.reload" />
         <JailUpdatesTab v-else-if="tab === 'updates'" :jail="jail" @saved="l.reload" />
+        <JailLogsTab v-else-if="tab === 'logs'" :jail="jail" :file="logFile" />
         <JailExecTab v-else-if="tab === 'console'" :jail="jail" />
         <template v-else>
         <section class="panel" aria-labelledby="svs">

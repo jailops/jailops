@@ -75,7 +75,15 @@ func (s *Service) StopJail(ctx context.Context, name string) error {
 		plan.Step{Name: "teardown", Describe: "remove runtime state of " + name,
 			Do: func(ctx context.Context) error { return s.Hooks.PostStop(ctx, name) }},
 		plan.Step{Name: "unmount", Describe: "zfs unmount the tree of " + name,
-			Do: func(ctx context.Context) error { return s.unmountTree(ctx, name) }})
+			Do: func(ctx context.Context) error {
+				// The jail is gone. A root that stays busy for a while after its processes died (seen right after an
+				// app install) is not a failed stop: the datasets stay mounted until the next start or stop, which
+				// are idempotent, and the helper has logged the refusal.
+				if err := s.unmountTree(ctx, name); err != nil && !api.IsCode(err, api.CodeBusy) {
+					return err
+				}
+				return nil
+			}})
 	return s.run(ctx, "stop", name, p)
 }
 

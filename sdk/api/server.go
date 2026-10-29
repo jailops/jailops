@@ -172,4 +172,7 @@ var Extensions = []string{
 	"image_aliases",
 	"image_upgrade",
 	"jail_usage",
+	"apps",
+	"jail_logs",
+	"app_install",
 }

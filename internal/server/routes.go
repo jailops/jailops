@@ -24,7 +24,6 @@ var unsupportedRoutes = []struct{ method, pattern, what string }{
 	{"DELETE", "/api/v1/cluster/members/{name}", "cluster mode"},
 	{"GET", "/api/v1/cluster/members", "cluster mode"},
 	{"GET", "/api/v1/jails/{name}/console", "listing console sessions (open one with POST /api/v1/jails/{name}/console)"},
-	{"GET", "/api/v1/jails/{name}/logs", "jail logs"},
 	{"GET", "/api/v1/jails/{name}/files/{path...}", "file access"},
 	{"PUT", "/api/v1/jails/{name}/files/{path...}", "file access"},
 	{"POST", "/api/v1/jails/{name}/move", "cold moves"},
@@ -515,6 +514,38 @@ func (s *Server) routeTable() []route {
 			}
 			restart := c.r.URL.Query().Get("restart") == "true"
 			op, err := svc.ConfigureJail(c.r.Context(), c.pathArg("name"), ch, restart)
+			if err != nil {
+				return err
+			}
+			c.async(op)
+			return nil
+		}},
+	)
+
+	// The application catalog.
+	add(
+		route{method: "GET", pattern: "/api/v1/apps", h: func(c *rc) error {
+			v, err := svc.ListApps(c.r.Context())
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/apps/{name}", h: func(c *rc) error {
+			v, err := svc.GetApp(c.r.Context(), c.pathArg("name"))
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/apps/{name}/install", h: func(c *rc) error {
+			var in api.AppInstall
+			if err := c.decodeOptional(&in); err != nil {
+				return err
+			}
+			op, err := svc.InstallApp(c.r.Context(), c.pathArg("name"), in)
 			if err != nil {
 				return err
 			}

@@ -6,7 +6,7 @@ the build tooling, the architecture tests and the Go embed tests are all driven 
 
 | App | Binary | Embed package | Dist directory | API role | URL prefixes it may call (under `/api/v1`) |
 |---|---|---|---|---|---|
-| `host` | `jailopsd` | `internal/webui` | `internal/webui/dist` | host (also hub) | jails, projects, storage, trust, sessions, profiles, updates, images, networks, firewall, backup-targets, backup-policies, backups, restores, remotes, operations, events, audit, users, certificates, resources, plus the shared set |
+| `host` | `jailopsd` | `internal/webui` | `internal/webui/dist` | host (also hub) | jails, projects, storage, trust, sessions, profiles, updates, images, apps, networks, firewall, backup-targets, backup-policies, backups, restores, remotes, operations, events, audit, users, certificates, resources, plus the shared set |
 | `backup` | `jailops-backupd` | `internal/backupui` | `internal/backupui/dist` | backup | repo, hosts, enrolment, snapshots, retention, gc, verify, quarantine, maintenance, deletions, operations, events, audit, plus the shared set |
 
 The shared set (`shared/src/api/core.ts`) is the server info at `/api/v1`, `auth`, `doctor` and `tokens`.
@@ -41,6 +41,17 @@ web/scripts/        app.mjs (build, dev, typecheck, e2e) and new-app.mjs
 | `npm run new-app -- <name> [--role host\|hub\|backup] [--title T] [--label L] [--binary B] [--prefixes a,b]` | scaffold a console |
 
 Append `?demo` to any URL to run a console on canned data without a server (`?demo=login` starts signed out).
+
+## Apps and logs (host console)
+
+`/apps` is the app catalog and its Installed tab, `/apps/:name` one definition with the install dialog
+(`src/views/AppsView.vue`, `AppDetailView.vue`, `src/components/AppInstallDialog.vue`). The install follows the
+operation like every other dialog (`runOp`), with a poll that also reads the operation's progress: the server sets it
+after each step, so `lib/apps.ts` maps it onto the step list of the dry run. The jail's Logs tab
+(`src/components/JailLogsTab.vue`) reads `/jails/{name}/logs`; following polls once a second from `next_offset`.
+`lib/logs.ts` holds the follow state and strips terminal control characters; log lines are only ever rendered as
+text. The demo serves a catalog, installations and growing log files (`src/demo/apps.ts`); `?demo` jail names that
+start with `fail` show a failed installation.
 
 ## Rules, enforced by `web/tests/architecture.test.ts`
 

@@ -24,6 +24,7 @@ type pathKind int
 const (
 	pathJailTree pathKind = iota + 1 // below a storage root's mountpoint, not the mountpoint itself
 	pathState                        // below the work directory or a storage root's mountpoint
+	pathJailLog                      // the log directory of a jail root, or a plain name at most two levels below it (logs.go)
 )
 
 // flagRule describes one flag.
@@ -434,6 +435,11 @@ func (c Config) checkRulePath(kind pathKind, p string) error {
 		return forbidden("path %q is not a clean absolute path", p)
 	}
 	switch kind {
+	case pathJailLog:
+		// Lexical only: the read opens the directory as a root of its own and
+		// refuses every symlink below the jail root itself.
+		_, err := c.logRef(p)
+		return err
 	case pathJailTree:
 		if c.isMountRoot(p) || !c.inMounts(p) {
 			return forbidden("path %q is not below %s", p, c.mountBaseDesc())

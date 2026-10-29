@@ -79,6 +79,39 @@ func (j *JailClient) Usage(ctx context.Context, name string) (api.JailUsage, err
 	return u, err
 }
 
+// Logs lists the log files below /var/log of a jail (extension jail_logs).
+func (j *JailClient) Logs(ctx context.Context, name string) ([]api.JailLogFile, error) {
+	if err := j.c.need("jail_logs"); err != nil {
+		return nil, err
+	}
+	l, _, err := get[[]api.JailLogFile](ctx, j.c, j.r.item(name)+"/logs", nil)
+	if l == nil && err == nil {
+		l = []api.JailLogFile{}
+	}
+	return l, err
+}
+
+// Log reads the end of one log file of a jail; file is relative to /var/log
+// ("messages", "nginx/error.log"). Send NextOffset of the reply as q.Offset
+// to follow the file.
+func (j *JailClient) Log(ctx context.Context, name, file string, q api.JailLogQuery) (api.JailLogRead, error) {
+	if err := j.c.need("jail_logs"); err != nil {
+		return api.JailLogRead{}, err
+	}
+	if err := api.ValidLogFileName(file); err != nil {
+		return api.JailLogRead{}, err
+	}
+	q, err := q.Normalize()
+	if err != nil {
+		return api.JailLogRead{}, err
+	}
+	r, _, err := get[api.JailLogRead](ctx, j.c, j.r.item(name)+"/logs/"+file, q.Values())
+	if r.Lines == nil {
+		r.Lines = []api.JailLogLine{}
+	}
+	return r, err
+}
+
 // ActionOption tunes a state action.
 type ActionOption func(*api.JailAction)
 

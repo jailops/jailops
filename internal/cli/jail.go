@@ -310,7 +310,7 @@ func (a *app) addJailShortcuts(root *cobra.Command) {
 	addDelete(a, root, d)
 	root.AddCommand(a.jailInfo(d))
 	root.AddCommand(a.jailLifecycleSet(d)...)
-	root.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd())
+	root.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailLogs(d))
 }
 
 func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
@@ -939,27 +939,5 @@ copy data, snapshot or back up the source and restore it under a new name with
 		},
 	}
 	cmd.Flags().BoolVar(&keepIP, "keep-ip", false, "keep fixed addresses instead of allocating new ones")
-	return cmd
-}
-
-func (a *app) jailLogs(d *kindDesc[api.Jail]) *cobra.Command {
-	var count int
-	var since string
-	cmd := &cobra.Command{
-		Use:   "logs NAME",
-		Short: "Follow the log events of a jail",
-		Long: `Stream the log events the server publishes for a jail until interrupted.
-
-The server keeps no log history for this command: it shows events from now on,
-or from an event id with --since-id when the server still retains them.`,
-		Example:           "jailops jail logs web\njailops jail logs web --since-id 120 --count 50",
-		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeKind(a, d),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return a.streamEvents(cmd.Context(), []api.EventType{api.EventLogging}, args[0], since, count)
-		},
-	}
-	cmd.Flags().IntVar(&count, "count", 0, "stop after this many events")
-	cmd.Flags().StringVar(&since, "since-id", "", "resume after this event id")
 	return cmd
 }

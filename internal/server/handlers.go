@@ -85,6 +85,29 @@ func (s *Server) jailRoutes() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/logs", h: func(c *rc) error {
+			v, truncated, err := svc.JailLogs(c.r.Context(), c.pathArg("name"))
+			if err != nil {
+				return err
+			}
+			if truncated {
+				c.w.Header().Set(api.HeaderTruncated, "true")
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/logs/{file...}", h: func(c *rc) error {
+			q, err := api.ParseLogQuery(c.r.URL.Query())
+			if err != nil {
+				return err
+			}
+			v, err := svc.JailLog(c.r.Context(), c.pathArg("name"), c.pathArg("file"), q)
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
 		route{method: "PUT", pattern: "/api/v1/jails/{name}/state", h: func(c *rc) error {
 			var a api.JailAction
 			if err := c.decode(&a); err != nil {

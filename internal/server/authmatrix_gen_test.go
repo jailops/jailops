@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
 	"time"
 
 	"jailops.net/jailops/internal/auth"
+	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/daemon/dtest"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
@@ -161,7 +164,13 @@ func TestAuthorizationMatrix(t *testing.T) {
 		"b-alpha": {Metadata: api.ObjectMeta{Name: "b-alpha", Project: "alpha"}},
 		"b-beta":  {Metadata: api.ObjectMeta{Name: "b-beta", Project: "beta"}},
 	}}
-	e := dtest.New(t, dtest.Options{Hub: true, Backups: bk})
+	// The catalog holds an app named like the jails of the fixture, so an allowed install request reaches the
+	// service and is refused there as already_exists, never as not_found.
+	catalog := t.TempDir()
+	if err := os.WriteFile(filepath.Join(catalog, "web.yaml"), []byte(strings.ReplaceAll(appDemo, "name: demo", "name: web")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e := dtest.New(t, dtest.Options{Hub: true, Backups: bk, Mutate: func(c *daemon.Config) { c.Apps.CatalogDir = catalog }})
 	e.Seed()
 	c := ctxT(t)
 	// Fixture: two projects (alpha from Seed holds lan, beta holds lan-beta); the same jail name in both.
@@ -228,7 +237,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	if _, err := e.Admin.Remotes().Create(c, api.Remote{Metadata: api.ObjectMeta{Name: "r1"}, Spec: api.RemoteSpec{Address: "127.0.0.1:1", Fingerprint: strings.Repeat("ab", 32)}}); err != nil {
 		t.Fatal(err)
 	}
-	params := map[string]string{"name": "web", "snapshot": "s1", "volume": "db", "gen": "1", "path...": "etc/x", "id": opAlpha,
+	params := map[string]string{"name": "web", "snapshot": "s1", "volume": "db", "gen": "1", "path...": "etc/x", "file...": "messages", "id": opAlpha,
 		"fingerprint": fp, "member": "m"}
 	// The {name} parameter depends on the family.
 	nameFor := func(pattern string) string {

@@ -170,6 +170,33 @@ check "root rollback" $J jail rollback up --project demo
 expect "back on the first generation" 'up +running.*#g1' $J jail list --project demo
 check "stop the second jail" $J stop up --project demo
 
+step "an app from the catalog (nginx: thin jail, pkg -r from the host, rc.conf, service, health check, snapshot)"
+# the catalog is a directory of local files: the repository's starter catalog, copied where the daemon may read it
+appdir=$work/apps
+rm -rf "$appdir"; cp -R packaging/apps "$appdir"; chmod -R a+rX "$appdir"
+cat >> /usr/local/etc/jailops/jailopsd.yaml <<YAML
+apps:
+  catalog_dir: $appdir
+YAML
+check "restart jailopsd with the catalog" service jailopsd restart
+n=0; until $J app list >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
+expect "the catalog lists nginx as valid" '^nginx .*valid' $J app list -o wide
+expect "a dry run lists the steps" 'install-packages-ports: pkg -r .* install -y nginx' $J app install nginx --project demo --network lan --storage default --dry-run
+check "install nginx" $J app install nginx --project demo --network lan --storage default
+expect "the jail runs and carries the labels" 'jailops.app=nginx' $J label --project demo nginx
+expect "the app is listed as installed" 'nginx +nginx +[^ ]+ +running' $J app installed --project demo
+addr=$($J app installed --project demo | awk '$1 == "nginx" {print $5}' | head -1 | cut -d, -f1)
+[ -n "$addr" ] || fail "no address for the nginx jail"
+expect "nginx answers from the host" 'Welcome to nginx' curl -s --max-time 10 "http://$addr/"
+expect "the service is enabled in the jail's rc.conf" 'nginx_enable="YES"' $J exec --project demo nginx -- cat /etc/rc.conf
+expect "the snapshot of the fresh installation exists" 'app-installed' $J jail snapshot list nginx --project demo
+if ! $J stop nginx --project demo >"$work/stop.out" 2>&1; then # show what holds the root when the unmount stays busy
+	cat "$work/stop.out" >&2
+	echo "--- holders of the jail root:" >&2; fstat -f /jopsci/projects/demo/jails/nginx/root >&2 2>&1 || true
+	echo "--- processes:" >&2; ps -axo pid,jid,etimes,command | grep -E 'nginx|syslogd|cron|jexec' | grep -v grep >&2 || true
+	fail "stop the app jail"
+fi
+
 step "backup node (PostgreSQL, the node, this host enrolled)"
 if ! su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; then # the CI VM has it running already
 	pkg install -y postgresql17-server >/dev/null 2>&1 || pkg install -y postgresql16-server >/dev/null || fail "postgresql"

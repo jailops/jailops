@@ -15,6 +15,7 @@ const items = computed<NavItem[]>(() => ([
   { to: '/projects', label: s.nav.projects, icon: 'users', show: can('projects') },
   { to: '/storage', label: s.nav.storage, icon: 'hardDrive', show: can('storage') },
   { to: '/images', label: s.nav.images, icon: 'layers', show: can('images') },
+  { to: '/apps', label: s.nav.apps, icon: 'store', show: can('apps') },
   { to: '/networks', label: s.nav.networks, icon: 'network', show: can('networks') },
   { to: '/firewall', label: s.nav.firewall, icon: 'shield', show: can('firewall') },
   { to: '/profiles', label: s.nav.profiles, icon: 'wrench', show: can('jails') },

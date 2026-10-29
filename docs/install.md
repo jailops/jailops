@@ -159,6 +159,14 @@ There is no default project, network or storage: you name them.
     jailops create nginx --image freebsd-15@stable --network lan --storage default --start
     jailops exec nginx -- uname -a
 
+An application from the catalog is one command more: `pkg install jailops-apps` puts the definitions under
+`/usr/local/share/jailops/apps` (`jailops app list` shows them, `jailops app info nginx` describes one), and
+`jailops app install nginx --network lan --storage default` creates a jail named `nginx`, installs the package into it
+from the FreeBSD repository, enables and starts the service, checks that it answers, snapshots the fresh installation as
+`app-installed` and prints where the site, the configuration and the logs are. `jailops app installed` lists the jails
+that came from the catalog. What the installation does step by step, and what it leaves behind when a step fails, is in
+[apps.md](apps.md).
+
 Without `project switch` pass `--project web` (or set `JAILOPS_PROJECT`) on every jail command. `--start` starts the jail
 once it is created (`jailops start nginx` does the same later). Several objects at once come from a file:
 `jailops apply -f site.yaml` creates what is missing and updates what differs, document by document. The storage `default` is
