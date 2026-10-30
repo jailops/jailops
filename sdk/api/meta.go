@@ -44,6 +44,7 @@ const (
 	KindProject         Kind = "Project"
 	KindStorage         Kind = "Storage"
 	KindWireGuard       Kind = "WireGuard"
+	KindHostIdentity    Kind = "HostIdentity" // the singleton host identity object
 )
 
 // Scope says who is authoritative for an object.

@@ -23,9 +23,6 @@ const (
 // HostModules lists the modules this version can manage.
 var HostModules = []string{HostModuleIdentity}
 
-// KindHostIdentity is the singleton host identity object.
-const KindHostIdentity Kind = "HostIdentity"
-
 // Limits of the identity module.
 const (
 	MaxHostnameLen     = 253
