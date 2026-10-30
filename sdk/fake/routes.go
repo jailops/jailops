@@ -100,6 +100,7 @@ func (s *Server) routes() {
 	m("GET /api/v1/jails/{name}/usage", s.jailUsage)
 	m("GET /api/v1/jails/{name}/logs", s.jailLogs)
 	m("GET /api/v1/jails/{name}/logs/{file...}", s.jailLog)
+	m("GET /api/v1/jails/{name}/app-draft", s.handleAppDraft)
 	m("PUT /api/v1/jails/{name}/state", s.jailAction)
 	m("GET /api/v1/jails/{name}/snapshots", s.snapList)
 	m("POST /api/v1/jails/{name}/snapshots", s.snapCreate)

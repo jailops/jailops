@@ -146,6 +146,10 @@ type Deps struct {
 	// AppsDir is the application catalog directory (default apps.DefaultDir);
 	// a missing directory is an empty catalog.
 	AppsDir string
+	// AppsLocalDir holds the operator's own definitions, read with the
+	// catalog (default apps.DefaultLocalDir); a local definition wins over a
+	// packaged one of the same name.
+	AppsLocalDir string
 	// DialJail opens a connection from the host to a jail (the tcp and http
 	// health checks of an app installation); nil uses the network.
 	DialJail func(ctx context.Context, network, address string) (net.Conn, error)

@@ -47,7 +47,7 @@ const invalid = computed(() => l.error.value?.code === 'invalid')
         <section class="panel app-hero">
           <AppIcon :name="app.name" :title="app.title" :icon="l.data.value.icon" :size="72" />
           <div class="grow app-hero-main">
-            <div class="row"><h1>{{ app.title }}</h1><span class="faint mono">{{ app.name }}</span></div>
+            <div class="row"><h1>{{ app.title }}</h1><span class="faint mono">{{ app.name }}</span><span v-if="l.data.value.source === 'local'" class="badge info" :title="l.data.value.overrides ? s.apps.overridesTitle : s.apps.localTitle" data-test="app-local">{{ l.data.value.overrides ? s.apps.overrides : s.apps.local }}</span></div>
             <p class="app-hero-sum">{{ app.summary }}</p>
             <div class="row app-hero-meta">
               <span class="chip">{{ s.apps.category[app.category] ?? app.category }}</span>

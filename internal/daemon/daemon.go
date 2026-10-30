@@ -249,6 +249,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	}
 	deps.UpdateTick, deps.ProjectFilesDir = cfg.Updates.Tick.Std(), cfg.Updates.ProjectFilesDir
 	deps.AppsDir = cfg.Apps.CatalogDir
+	deps.AppsLocalDir = cfg.Apps.LocalDir
 	deps.DialJail = clients.Dial
 	deps.ExecLimits = service.ExecLimits{PerJail: cfg.Limits.ExecSessionsPerJail, Idle: cfg.Limits.ExecIdle.Std(), Max: cfg.Limits.ExecMax.Std()}
 	if opts.Registrar != nil {

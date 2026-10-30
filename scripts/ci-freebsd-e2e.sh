@@ -218,6 +218,13 @@ addr=$($J app installed --project demo | awk '$1 == "nginx" {print $5}' | head -
 expect_retry "nginx answers from the host" 'Welcome to nginx' curl -sS --max-time 5 "http://$addr/"
 expect "the service is enabled in the jail's rc.conf" 'nginx_enable="YES"' $J exec --project demo nginx -- cat /etc/rc.conf
 expect "the snapshot of the fresh installation exists" 'app-installed' $J jail snapshot list nginx --project demo
+# the authoring path: a draft of the running jail has its package, its service and its port, and still carries TODO markers
+$J app export nginx --project demo -o "$work/nginx-draft.yaml" >"$work/export.out" 2>&1 || { cat "$work/export.out" >&2; fail "export a draft of the nginx jail"; }
+grep -q 'name: nginx' "$work/nginx-draft.yaml" || { cat "$work/nginx-draft.yaml" >&2; fail "the draft names the nginx package"; }
+grep -q 'port: 80' "$work/nginx-draft.yaml" || { cat "$work/nginx-draft.yaml" >&2; fail "the draft has port 80"; }
+grep -q 'TODO' "$work/nginx-draft.yaml" || fail "the draft has TODO markers"
+if $J app validate "$work/nginx-draft.yaml" >"$work/validate.out" 2>&1; then fail "validate accepts a draft with TODO markers"; fi
+grep -q 'replace TODO' "$work/validate.out" || { cat "$work/validate.out" >&2; fail "validate names the TODO lines"; }
 if ! $J stop nginx --project demo >"$work/stop.out" 2>&1; then # show what holds the root when the unmount stays busy
 	cat "$work/stop.out" >&2
 	echo "--- holders of the jail root:" >&2; fstat -f /jopsci/projects/demo/jails/nginx/root >&2 2>&1 || true

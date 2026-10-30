@@ -119,6 +119,17 @@ what runs in the new jail is the base system of its image. What remains is what 
 from a repository the host trusts runs its scripts with root's rights inside that chroot, as it would for an image
 build. The helper does not refuse `pkg -r` against a running jail; the installation depends on it.
 
+## Drafting an app from a jail reads, never writes
+
+`jailops app export` (`GET /api/v1/jails/<n>/app-draft`) needs `operator`, the role that may exec into the jail,
+because it runs commands there: `sockstat`, `find` and `stat` through the in-jail exec, as root in the jail, so what
+they print is the jail's word and is parsed as untrusted text (bounded counts, paths checked against the catalog's
+rules). On the host it runs one exact form, `pkg -r <jail root> query -e "%a = 0" "%n %v %R %w"`, which the helper's
+allow-list accepts as it is and in no other shape, and it reads the jail's `/etc/rc.conf` through the helper's file
+operations. It never reads a configuration file, leaves out an rc.conf knob whose name looks like a secret or whose
+value holds a shell expansion, and is audited with counts only. A jail's owner can make the draft say anything; the
+person who sends it to the catalog reviews it.
+
 ## Projects are not a security boundary against the kernel
 
 A project separates names, quotas, networks and firewall policy. Jails share the host kernel. A high-security tenant needs

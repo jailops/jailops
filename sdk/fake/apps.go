@@ -22,6 +22,20 @@ type appEntry struct {
 	err    string // the reason when the definition is invalid
 }
 
+func (e *appEntry) summary(name string) api.AppSummary {
+	sum := api.AppSummary{Name: name, Valid: e.err == "", Source: e.detail.Source, Overrides: e.detail.Overrides}
+	if e.err != "" {
+		sum.Error = e.err
+		return sum
+	}
+	d := e.detail.Definition
+	sum.Title, sum.Summary, sum.Category = d.Title, d.Summary, d.Category
+	if len(d.Packages) > 0 {
+		sum.Version = d.Packages[0].Version
+	}
+	return sum
+}
+
 // seedApps fills the catalog every fake starts with: six valid definitions,
 // shortened from the catalog (the reference copy is internal/apps/testdata/catalog).
 func (s *Server) seedApps() {
@@ -117,22 +131,83 @@ func (s *Server) seedApps() {
 	}
 }
 
-// SeedApp puts a valid definition into the catalog, replacing one of the
-// same name. The hash is derived from the definition.
-func (s *Server) SeedApp(a api.App) {
+// SeedApp puts a valid definition into the packaged catalog, replacing one
+// of the same name. The hash is derived from the definition.
+func (s *Server) SeedApp(a api.App) { s.seedApp(a, api.AppSourceCatalog) }
+
+// SeedLocalApp puts a valid definition into the local directory
+// (apps.local_dir). It hides a packaged one of the same name, which it then
+// says in overrides, as the daemon does.
+func (s *Server) SeedLocalApp(a api.App) { s.seedApp(a, api.AppSourceLocal) }
+
+func (s *Server) seedApp(a api.App, src api.AppSource) {
 	raw, _ := json.Marshal(a)
 	sum := sha256.Sum256(raw)
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.apps[a.Name] = &appEntry{detail: api.AppDetail{Definition: a, Hash: "sha256:" + hex.EncodeToString(sum[:]), File: a.Name + ".yaml"}}
+	det := api.AppDetail{Definition: a, Hash: "sha256:" + hex.EncodeToString(sum[:]), File: a.Name + ".yaml", Source: src}
+	if old := s.apps[a.Name]; src == api.AppSourceLocal && old != nil && old.detail.Source == api.AppSourceCatalog {
+		det.Overrides = api.AppSourceCatalog
+	}
+	s.apps[a.Name] = &appEntry{detail: det}
 }
 
-// SeedInvalidApp puts an invalid definition into the catalog: listed with
-// the reason, never served whole.
+// SeedInvalidApp puts an invalid definition into the packaged catalog:
+// listed with the reason, never served whole.
 func (s *Server) SeedInvalidApp(name, reason string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.apps[name] = &appEntry{err: reason, detail: api.AppDetail{File: name + ".yaml"}}
+	s.apps[name] = &appEntry{err: reason, detail: api.AppDetail{File: name + ".yaml", Source: api.AppSourceCatalog}}
+}
+
+// SeedAppDraft sets what GET /api/v1/jails/{name}/app-draft answers for a
+// jail of a project. Without one the fake answers a draft built from the
+// jail's record only (its name and volumes), as a daemon that found nothing
+// inside it would.
+func (s *Server) SeedAppDraft(project, jail string, d api.AppDraft) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.drafts == nil {
+		s.drafts = map[string]api.AppDraft{}
+	}
+	s.drafts[project+"/"+jail] = d
+}
+
+// handleAppDraft implements GET /api/v1/jails/{name}/app-draft for a running
+// jail of the project.
+func (s *Server) handleAppDraft(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	s.mu.Lock()
+	key, j := s.jails.find(r, name)
+	var jail api.Jail
+	if j != nil {
+		jail = *j
+	}
+	d, seeded := s.drafts[key]
+	s.mu.Unlock()
+	switch {
+	case j == nil:
+		writeErr(w, notFound("jail", name))
+		return
+	case jail.Spec.OS == api.OSLinux:
+		writeErr(w, api.Errorf(api.CodeInvalid, "jail %q is a Linux jail; an app definition describes a FreeBSD jail", name))
+		return
+	case jail.Status.Power != api.PowerRunning:
+		writeErr(w, api.Errorf(api.CodeBusy, "jail %q is not running", name).
+			WithHint("start it first: jailops start "+name+"; the draft reads the sockets the app listens on"))
+		return
+	}
+	if !seeded {
+		d = api.AppDraft{Jail: name, Findings: []string{"nothing of an app was found in the jail"},
+			Todo: map[string]string{"packages": "name the packages", "health": "add a check that the app answers: tcp, http or exec"},
+			Definition: api.App{Version: 1, Name: name, Title: name, Summary: "TODO: what it is and what it is for, in one line.",
+				Category: api.AppOther, License: "TODO", Image: api.AppImage{OS: "freebsd", ReleaseMin: "15.1"},
+				Packages: []api.AppPackage{{Name: "TODO", Repo: "ports"}}, Notes: "TODO: the first-run steps.\n"}}
+		for _, v := range jail.Spec.Volumes {
+			d.Definition.Data = append(d.Definition.Data, api.AppPath{Path: v.Mount})
+		}
+	}
+	writeSync(w, 200, d)
 }
 
 // ClearApps empties the catalog.
@@ -151,18 +226,7 @@ func (s *Server) handleAppsList(w http.ResponseWriter, r *http.Request) {
 	sort.Strings(names)
 	out := make([]api.AppSummary, 0, len(names))
 	for _, n := range names {
-		e := s.apps[n]
-		sum := api.AppSummary{Name: n, Valid: e.err == ""}
-		if e.err != "" {
-			sum.Error = e.err
-		} else {
-			d := e.detail.Definition
-			sum.Title, sum.Summary, sum.Category = d.Title, d.Summary, d.Category
-			if len(d.Packages) > 0 {
-				sum.Version = d.Packages[0].Version
-			}
-		}
-		out = append(out, sum)
+		out = append(out, s.apps[n].summary(n))
 	}
 	s.mu.Unlock()
 	writeSync(w, 200, out)

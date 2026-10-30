@@ -1,0 +1,89 @@
+$ jailops app new memcached --package memcached --service memcached --port 11211/tcp --category database --dir <dir>/apps
+Wrote <dir>/apps/memcached.yaml with 9 line(s) marked TODO, and <dir>/apps/memcached.svg (a placeholder icon).
+Next:
+  1. Fill in each line marked TODO; 'jailops app validate <dir>/apps/memcached.yaml' lists the ones left.
+  2. On a FreeBSD host, copy both files into /usr/local/etc/jailops/apps and run 'jailops app install memcached'.
+  3. Send them to the packages repository (main/jailops-apps/apps/): docs/apps.md, "Write your own app".
+
+$ jailops app validate <dir>/apps/memcached.yaml
+<dir>/apps/memcached.yaml: line 16: replace TODO
+<dir>/apps/memcached.yaml: line 20: replace TODO
+<dir>/apps/memcached.yaml: line 27: replace TODO
+<dir>/apps/memcached.yaml: line 31: replace TODO
+<dir>/apps/memcached.yaml: line 66: replace TODO
+<dir>/apps/memcached.yaml: line 71: replace TODO
+<dir>/apps/memcached.yaml: line 77: replace TODO
+<dir>/apps/memcached.yaml: line 87: replace TODO
+<dir>/apps/memcached.yaml: line 108: replace TODO
+! invalid: 9 problem(s) in 1 definition(s) checked
+! hint: fix the files listed and run 'jailops app validate' again; docs/apps.md has the format
+[exit 2]
+
+$ jailops app new memcached --dir <dir>/apps
+! already_exists: <dir>/apps/memcached.yaml exists
+! hint: keep it, or write over it with --force
+[exit 5]
+
+$ jailops app new memcached --package memcached,libevent --port 11211 --port 11211/udp --dir <dir>/apps --force
+Wrote <dir>/apps/memcached.yaml with 11 line(s) marked TODO, and <dir>/apps/memcached.svg (there already).
+Next:
+  1. Fill in each line marked TODO; 'jailops app validate <dir>/apps/memcached.yaml' lists the ones left.
+  2. On a FreeBSD host, copy both files into /usr/local/etc/jailops/apps and run 'jailops app install memcached'.
+  3. Send them to the packages repository (main/jailops-apps/apps/): docs/apps.md, "Write your own app".
+
+$ jailops app new tool --dir <dir>/apps -o json
+{
+  "file": "<dir>/apps/tool.yaml",
+  "icon": "<dir>/apps/tool.svg",
+  "icon_written": true,
+  "todo": [
+    16,
+    20,
+    24,
+    28,
+    32,
+    45,
+    47,
+    54,
+    59,
+    64,
+    69,
+    74,
+    84,
+    93,
+    104
+  ]
+}
+
+$ jailops app new quiet --dir <dir>/apps -q
+
+$ jailops app new Bad_Name --dir <dir>/apps
+! usage: "Bad_Name" is not an app name: lower case letters, digits and dashes, starting with a letter, at most 63 characters
+! hint: run 'jailops app new --help' for usage
+[exit 2]
+
+$ jailops app new x --port http --dir <dir>/apps
+! usage: port "http" must be N or N/tcp or N/udp, with N from 1 to 65535
+! hint: run 'jailops app new --help' for usage
+[exit 2]
+
+$ jailops app new x --category games --dir <dir>/apps
+! usage: unknown category "games" (categories: database, web, tools, devops, storage, monitoring, communication, network, security, other)
+! hint: run 'jailops app new --help' for usage
+[exit 2]
+
+$ jailops app new x --dir <dir>/missing
+! not_found: directory <dir>/missing does not exist
+! hint: create it, or name another with --dir
+[exit 4]
+
+$ jailops app new x --dir <dir>/apps -o csv
+! usage: app new prints a table, json or yaml
+! hint: run 'jailops app new --help' for usage
+[exit 2]
+
+$ jailops app new
+! usage: accepts 1 arg(s), received 0
+! hint: run 'jailops app new --help' for usage
+[exit 2]
+

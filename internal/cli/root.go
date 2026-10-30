@@ -183,7 +183,7 @@ func seconds(d time.Duration) int {
 // trust, backup targets and keys, the server) are not here.
 var projectScopedCommands = []string{
 	"jail", "create", "delete", "list", "info", "start", "stop", "restart", "exec", "shell", "label", "provision", "set", "logs",
-	"firewall", "profile", "update", "config", "backup policy", "backup restore",
+	"firewall", "profile", "update", "config", "backup policy", "backup restore", "app export",
 }
 
 const projectAnnotation = "jailops/project"

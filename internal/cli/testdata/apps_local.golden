@@ -1,0 +1,63 @@
+$ jailops app list --source local
+NAME        CATEGORY   VERSION   SOURCE                     STATUS   SUMMARY
+memcached   database   1.6.39    local                      valid    Distributed in-memory object cache.
+valkey      database   -         local, overrides catalog   valid    Our own Valkey.
+
+$ jailops app list --source catalog --category database
+NAME         CATEGORY   VERSION   SOURCE    STATUS   SUMMARY
+postgresql   database   18.6      catalog   valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
+
+$ jailops app list --source elsewhere
+! usage: unknown source "elsewhere" (sources: catalog, local)
+! hint: run 'jailops app list --help' for usage
+[exit 2]
+
+$ jailops app info valkey
+App valkey: Valkey (ours)
+  Summary:    Our own Valkey.
+  Category:   database
+  License:    -
+  Homepage:   -
+  Image:      FreeBSD 15.1 or later, thin jail
+  File:       valkey.yaml (sha256:<sha256>)
+  Source:     local (the host's apps.local_dir); it overrides the catalog's definition of the same name
+
+Packages
+  valkey  ports  -
+
+Services
+  none
+
+Ports
+  none
+
+Data
+  none
+
+Configuration
+  none
+
+Logs
+  none
+
+Health
+  none declared: the services must report running
+
+$ jailops app list -o wide
+NAME         CATEGORY        VERSION    SOURCE                     STATUS   SUMMARY
+isms         security        0.8.1      catalog                    valid    Information security management platform with git-native documents; needs PostgreSQL.
+mail         communication   3.10       catalog                    valid    A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.
+memcached    database        1.6.39     local                      valid    Distributed in-memory object cache.
+nginx        web             1.30.6,3   catalog                    valid    Web server and reverse proxy, serving /usr/local/www.
+nsd          network         4.15       catalog                    valid    Authoritative DNS server for your own zones, as a primary or a secondary.
+postgresql   database        18.6       catalog                    valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database        -          local, overrides catalog   valid    Our own Valkey.
+
+$ jailops app list --source local
+┌───────────┬──────────┬─────────────────────────────────────────────┐
+│ NAME      │ CATEGORY │ SUMMARY                                     │
+├───────────┼──────────┼─────────────────────────────────────────────┤
+│ memcached │ database │ (local) Distributed in-memory object cache. │
+│ valkey    │ database │ (local) Our own Valkey.                     │
+└───────────┴──────────┴─────────────────────────────────────────────┘
+

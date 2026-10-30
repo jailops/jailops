@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"jailops.net/jailops/sdk/api"
@@ -29,8 +30,11 @@ type CheckResult struct {
 // daemon's own rules: a directory is read as the list reads it (Load), and
 // the icon of every valid definition as a single read does (Find). It needs
 // no daemon and no network. A path that cannot be read, a directory without
-// definitions and a file that is not a .yaml are problems too. File names in
-// the problems are path joined with the file name; reasons are one line.
+// definitions and a file that is not a .yaml are problems too, and so is
+// every line that still holds a TODO marker of a starter file (the daemon
+// does not look for them, so a draft installs while it is being written).
+// File names in the problems are path joined with the file name; reasons are
+// one line.
 func Check(path string) CheckResult {
 	var r CheckResult
 	bad := func(file string, err error) {
@@ -69,11 +73,36 @@ func Check(path string) CheckResult {
 			r.Icons++
 			_, e.Err = loadIcon(dir, e.App.Icon)
 		}
+		file := filepath.Join(dir, e.File)
 		if e.Err != nil {
-			bad(filepath.Join(dir, e.File), e.Err)
+			bad(file, e.Err)
+		}
+		if fi, err := os.Lstat(file); err == nil && fi.Mode().IsRegular() {
+			if data, err := readBounded(file, MaxFileBytes); err == nil {
+				for _, n := range TodoLines(data) {
+					r.Problems = append(r.Problems, Problem{File: file, Reason: fmt.Sprintf("line %d: replace TODO", n)})
+				}
+			}
 		}
 	}
 	return r
+}
+
+// TodoMarker is what 'jailops app new' and 'jailops app export' leave where
+// a person has to decide; Check reports every line that holds one.
+const TodoMarker = "TODO"
+
+var todoRE = regexp.MustCompile(`\b` + TodoMarker + `\b`)
+
+// TodoLines returns the numbers (from 1) of the lines that hold a TODO marker.
+func TodoLines(data []byte) []int {
+	var out []int
+	for i, l := range strings.Split(string(data), "\n") {
+		if todoRE.MatchString(l) {
+			out = append(out, i+1)
+		}
+	}
+	return out
 }
 
 // reason is an error as one line: the message of a validation error without

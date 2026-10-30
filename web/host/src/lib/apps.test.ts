@@ -5,7 +5,7 @@ import {
 } from './apps'
 import type { AppSummary, Jail, Project } from '@jailops/shared/api/types'
 
-const app = (name: string, category: AppSummary['category'], extra: Partial<AppSummary> = {}): AppSummary => ({ name, title: name[0].toUpperCase() + name.slice(1), summary: `${name} summary`, category, valid: true, ...extra })
+const app = (name: string, category: AppSummary['category'], extra: Partial<AppSummary> = {}): AppSummary => ({ name, title: name[0].toUpperCase() + name.slice(1), summary: `${name} summary`, category, valid: true, source: 'catalog', ...extra })
 const list = [app('nginx', 'web', { summary: 'Web server and reverse proxy' }), app('postgresql', 'database'), app('valkey', 'database', { summary: 'key-value store' }), app('wiki', 'tools', { valid: false, error: 'bad' })]
 
 describe('catalog search and categories', () => {
@@ -120,5 +120,19 @@ describe('installed apps', () => {
     expect(openLinks(jails[0], ports).map((l) => l.url)).toEqual(['http://10.20.0.40/', 'https://10.20.0.40/'])
     expect(openLinks(jail('v6', {}, 'running', ['2001:db8::5/64']), [{ name: 'http', port: 3000, proto: 'tcp', expose: true }]).map((l) => l.url)).toEqual(['http://[2001:db8::5]:3000/'])
     expect(openLinks(jails[4], ports)).toEqual([])
+  })
+})
+
+describe('demo catalog sources', () => {
+  it('lists every entry with its source and one local definition, read from apps.local_dir', async () => {
+    const demo = await import('@/demo/apps')
+    const list = demo.catalog()
+    expect(list.every((a) => a.source === 'catalog' || a.source === 'local')).toBe(true)
+    expect(list.filter((a) => a.source === 'local').map((a) => a.name)).toEqual(['memcached'])
+    const d = demo.detail('memcached')
+    expect(d && d !== 'invalid' && d.source).toBe('local')
+    expect(d && d !== 'invalid' && d.file).toBe('/usr/local/etc/jailops/apps/memcached.yaml')
+    const n = demo.detail('nginx')
+    expect(n && n !== 'invalid' && n.source).toBe('catalog')
   })
 })

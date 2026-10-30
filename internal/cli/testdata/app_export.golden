@@ -1,0 +1,258 @@
+$ jailops app export cache
+# cache: an app definition for the JailOps catalog, format version 1 (docs/apps.md).
+# Fill in what is marked; 'jailops app validate cache.yaml' lists each marked line left.
+# To try it on a host, copy cache.yaml and its icon into /usr/local/etc/jailops/apps and run
+# 'jailops app install cache'.
+# Drafted from the jail cache with 'jailops app export'. What the jail showed:
+# - packages: memcached (installed on purpose; their dependencies come with them)
+# - services: memcached (enabled in /etc/rc.conf)
+# - ports: 11211/tcp (listening now)
+# - ports of the base system left out: 22/tcp of sshd
+# - data: /var/db/memcached (the jail's volumes)
+# - setup: the owners were read from the jail (pkg -r leaves the directories of a package's user to root)
+
+# Format version of the definition; 1.
+version: 1
+
+# The app name: a jail name (^[a-z][a-z0-9-]{0,62}$), equal to the file name without .yaml.
+name: cache
+
+# One line, at most 80 characters.
+title: cache
+
+# One line, at most 140 characters: what it is and what it is for.
+summary: "TODO: what it is and what it is for, in one line."
+
+# Plain text paragraphs, no markup, at most 2000 characters.
+description: |
+  TODO: a few short paragraphs of plain text: what the software does, what this
+  definition sets up and what is left to the operator.
+
+# One of database, web, tools, devops, storage, monitoring, communication, network, security, other.
+# TODO: choose the category
+category: other
+
+# The software's https homepage.
+homepage: https://memcached.org/
+
+# The software's license, as its SPDX name (BSD-2-Clause, MIT, Apache-2.0, ...).
+license: TODO
+
+# A .svg or .png next to this file, at most 64 KB; leave it out for none.
+icon: ""
+
+# FreeBSD only, 15.1 or later.
+image:
+  os: freebsd
+  release_min: "15.1"
+
+# Installed from the host with pkg -r into the jail root: repo ports (the FreeBSD
+# repository, the default) or jailops (pkg.jailops.net). version is what you tested
+# against, not a pin. The installer runs ldconfig in the jail afterwards itself.
+packages:
+  - name: memcached
+    repo: ports
+    version: "1.6.39"
+
+# rc.d scripts, in start order. The installer writes <name>_enable="YES" itself; rc holds
+# the other rc.conf knobs. start: false enables a service without starting it. A start
+# runs through a wrapper that detaches the output, so an rc script that leaves a
+# daemon(8) supervisor behind does not hang the installation.
+services:
+  - name: memcached
+    rc:
+      memcached_flags: "-l 0.0.0.0 -m 64"
+    start: true
+
+# What the services listen on, declared honestly (proto tcp or udp; say so when a port
+# listens on localhost only). expose: true asks for forwarding, which is not done yet.
+ports:
+  - name: memcached
+    port: 11211
+    proto: tcp
+    description: Listened on by memcached.
+    expose: false
+
+# Every directory that holds state. Each becomes a volume of its own (snapshotted, backed
+# up, kept across upgrades), created empty and owned by root: chown it in setup.
+# TODO: every directory that holds state needs a data path: only the jail's volumes were found
+data:
+  - path: /var/db/memcached
+
+# Files a person edits, and the service to restart after a change.
+# TODO: keep the files a person edits, with the service each one restarts
+config: []
+
+# Log files or directories, below /var/log, /var/db or /usr/local.
+# TODO: no log file of the app was found; name where it logs (many log to /var/log/messages), or [] for none
+logs: []
+
+# Run once in the jail after the packages and rc.conf, before the services: argv with
+# an absolute program path, no shell, no network. pkg -r installs from the host, where
+# the package's user does not exist, so the directories a package gives to its user
+# come out owned by root: mkdir -p and chown them here, the data volumes too.
+# TODO: check the owners and add what else must happen once before the first start
+setup:
+  - [/bin/mkdir, -p, /var/run/memcached]
+  - [/usr/sbin/chown, "nobody:nobody", /var/db/memcached, /var/run/memcached]
+
+# true only for a server that needs System V shared memory, semaphores or message
+# queues (PostgreSQL's initdb does); the jail then gets namespaces of its own.
+sysvipc: false
+
+# How the installer checks that it runs: exactly one of tcp: PORT, http: {port, path,
+# status} or exec: [argv in the jail], retried for wait_seconds (at most 300). null only
+# for an app that starts none of its services; say why in the description.
+# TODO: check that this test fits: a tcp connection says only that something listens; http or exec can say more
+health:
+  tcp: 11211
+  wait_seconds: 60
+
+# Hints for the jail's limits (memory and disk sizes, cpu a count), not limits.
+resources:
+  memory: 256M
+  disk: 2G
+  cpu: "1"
+
+# Shown after the installation: the first-run steps and how to connect.
+notes: |
+  TODO: what to do after the installation: the first-run steps, how to connect.
+
+$ jailops app export cache -o <dir>/cache.yaml
+Wrote <dir>/cache.yaml, drafted from jail cache, with 10 line(s) marked TODO.
+Next: fill in the marked lines and run 'jailops app validate <dir>/cache.yaml'.
+
+$ jailops app validate <dir>/cache.yaml
+<dir>/cache.yaml: line 23: replace TODO
+<dir>/cache.yaml: line 27: replace TODO
+<dir>/cache.yaml: line 31: replace TODO
+<dir>/cache.yaml: line 38: replace TODO
+<dir>/cache.yaml: line 77: replace TODO
+<dir>/cache.yaml: line 82: replace TODO
+<dir>/cache.yaml: line 86: replace TODO
+<dir>/cache.yaml: line 93: replace TODO
+<dir>/cache.yaml: line 105: replace TODO
+<dir>/cache.yaml: line 118: replace TODO
+! invalid: 10 problem(s) in 1 definition(s) checked
+! hint: fix the files listed and run 'jailops app validate' again; docs/apps.md has the format
+[exit 2]
+
+$ jailops app export cache -o <dir>/cache.yaml
+! already_exists: <dir>/cache.yaml exists
+! hint: keep it, or write over it with --force
+[exit 5]
+
+$ jailops app export cache -o <dir>/other.yaml
+Wrote <dir>/other.yaml, drafted from jail cache, with 10 line(s) marked TODO.
+The definition is named cache: rename the file to cache.yaml, or change name: to match the file name.
+Next: fill in the marked lines and run 'jailops app validate <dir>/other.yaml'.
+
+$ jailops app export cache --output <dir>/cache.yaml --force -q
+
+$ jailops app export plain
+# plain: an app definition for the JailOps catalog, format version 1 (docs/apps.md).
+# Fill in what is marked; 'jailops app validate plain.yaml' lists each marked line left.
+# To try it on a host, copy plain.yaml and its icon into /usr/local/etc/jailops/apps and run
+# 'jailops app install plain'.
+# Drafted from the jail plain with 'jailops app export'. What the jail showed:
+# - nothing of an app was found in the jail
+
+# Format version of the definition; 1.
+version: 1
+
+# The app name: a jail name (^[a-z][a-z0-9-]{0,62}$), equal to the file name without .yaml.
+name: plain
+
+# One line, at most 80 characters.
+title: plain
+
+# One line, at most 140 characters: what it is and what it is for.
+summary: "TODO: what it is and what it is for, in one line."
+
+# Plain text paragraphs, no markup, at most 2000 characters.
+description: ""
+
+# One of database, web, tools, devops, storage, monitoring, communication, network, security, other.
+category: other
+
+# The software's https homepage.
+homepage: ""
+
+# The software's license, as its SPDX name (BSD-2-Clause, MIT, Apache-2.0, ...).
+license: TODO
+
+# A .svg or .png next to this file, at most 64 KB; leave it out for none.
+icon: ""
+
+# FreeBSD only, 15.1 or later.
+image:
+  os: freebsd
+  release_min: "15.1"
+
+# Installed from the host with pkg -r into the jail root: repo ports (the FreeBSD
+# repository, the default) or jailops (pkg.jailops.net). version is what you tested
+# against, not a pin. The installer runs ldconfig in the jail afterwards itself.
+# TODO: name the packages
+packages:
+  - name: TODO
+    repo: ports
+
+# rc.d scripts, in start order. The installer writes <name>_enable="YES" itself; rc holds
+# the other rc.conf knobs. start: false enables a service without starting it. A start
+# runs through a wrapper that detaches the output, so an rc script that leaves a
+# daemon(8) supervisor behind does not hang the installation.
+services: []
+
+# What the services listen on, declared honestly (proto tcp or udp; say so when a port
+# listens on localhost only). expose: true asks for forwarding, which is not done yet.
+ports: []
+
+# Every directory that holds state. Each becomes a volume of its own (snapshotted, backed
+# up, kept across upgrades), created empty and owned by root: chown it in setup.
+data:
+  - path: /var/db/plain
+
+# Files a person edits, and the service to restart after a change.
+config: []
+
+# Log files or directories, below /var/log, /var/db or /usr/local.
+logs: []
+
+# Run once in the jail after the packages and rc.conf, before the services: argv with
+# an absolute program path, no shell, no network. pkg -r installs from the host, where
+# the package's user does not exist, so the directories a package gives to its user
+# come out owned by root: mkdir -p and chown them here, the data volumes too.
+setup: []
+
+# true only for a server that needs System V shared memory, semaphores or message
+# queues (PostgreSQL's initdb does); the jail then gets namespaces of its own.
+sysvipc: false
+
+# How the installer checks that it runs: exactly one of tcp: PORT, http: {port, path,
+# status} or exec: [argv in the jail], retried for wait_seconds (at most 300). null only
+# for an app that starts none of its services; say why in the description.
+# TODO: add a check that the app answers: tcp, http or exec
+health: null
+
+# Hints for the jail's limits (memory and disk sizes, cpu a count), not limits.
+resources: {}
+
+# Shown after the installation: the first-run steps and how to connect.
+notes: |
+  TODO: the first-run steps.
+
+$ jailops app export off
+! busy: jail "off" is not running
+! hint: start it first: jailops start off; the draft reads the sockets the app listens on
+[exit 5]
+
+$ jailops app export missing
+! not_found: jail "missing" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops app export
+! usage: accepts 1 arg(s), received 0
+! hint: run 'jailops app export --help' for usage
+[exit 2]
+

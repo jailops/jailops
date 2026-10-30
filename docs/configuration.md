@@ -41,6 +41,7 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 | `projects.network_pool`, `.network_bits`, `.uplink`, `.nat` | none | the IPv4 pool `project create NAME --new-network` carves a `/24` from; without it that option answers `unsupported` |
 | `updates.tick`, `.project_files_dir` | `1m`, `<state_dir>/project-files` | how often update schedules run; where provisioning files live, one directory per project |
 | `apps.catalog_dir` | `/usr/local/share/jailops/apps` | the application catalog ([apps.md](apps.md)): one YAML definition per file, installed by the `jailops-apps` package. Read on each request, never fetched; a missing directory is an empty catalog |
+| `apps.local_dir` | `/usr/local/etc/jailops/apps` | the host's own app definitions ([apps.md](apps.md), "Write your own app"): `NAME.yaml` and its icon, read with the catalog on each request; a definition here wins over a packaged one of the same name and is listed with `source: local`. A missing directory is empty; it must be readable by the user `jailops` |
 | `lifecycle.persistent` | the built-in list | the paths of a thin jail that survive a generation switch, each in its own dataset (`dataset`, `path`, `class` system or data, `merge`, `no_seed`). The default is `/etc`, `/usr/local`, `/var/db`, `/var/log`, `/var/mail`, `/var/spool`, `/home`, `/root`. **Setting it replaces the list** |
 | `backup.*` | absent | host-side backups; absent, every backup call answers `unsupported`. See [backup-restore.md](backup-restore.md) |
 

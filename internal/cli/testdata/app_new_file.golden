@@ -1,0 +1,104 @@
+# tool: an app definition for the JailOps catalog, format version 1 (docs/apps.md).
+# Fill in what is marked; 'jailops app validate tool.yaml' lists each marked line left.
+# To try it on a host, copy tool.yaml and its icon into /usr/local/etc/jailops/apps and run
+# 'jailops app install tool'.
+
+# Format version of the definition; 1.
+version: 1
+
+# The app name: a jail name (^[a-z][a-z0-9-]{0,62}$), equal to the file name without .yaml.
+name: tool
+
+# One line, at most 80 characters.
+title: Tool
+
+# One line, at most 140 characters: what it is and what it is for.
+summary: "TODO: what it is and what it is for, in one line."
+
+# Plain text paragraphs, no markup, at most 2000 characters.
+description: |
+  TODO: a few short paragraphs of plain text: what the software does, what this
+  definition sets up and what is left to the operator.
+
+# One of database, web, tools, devops, storage, monitoring, communication, network, security, other.
+# TODO: choose the category
+category: other
+
+# The software's https homepage.
+# TODO: the software's homepage
+homepage: https://example.com/
+
+# The software's license, as its SPDX name (BSD-2-Clause, MIT, Apache-2.0, ...).
+license: TODO
+
+# A .svg or .png next to this file, at most 64 KB; leave it out for none.
+icon: tool.svg
+
+# FreeBSD only, 15.1 or later.
+image:
+  os: freebsd
+  release_min: "15.1"
+
+# Installed from the host with pkg -r into the jail root: repo ports (the FreeBSD
+# repository, the default) or jailops (pkg.jailops.net). version is what you tested
+# against, not a pin. The installer runs ldconfig in the jail afterwards itself.
+# TODO: the package names, as 'pkg search' shows them
+packages:
+  - name: TODO
+    repo: ports
+
+# rc.d scripts, in start order. The installer writes <name>_enable="YES" itself; rc holds
+# the other rc.conf knobs. start: false enables a service without starting it. A start
+# runs through a wrapper that detaches the output, so an rc script that leaves a
+# daemon(8) supervisor behind does not hang the installation.
+# TODO: the rc.d scripts the packages install (ls /usr/local/etc/rc.d in a jail that has them); [] for none
+services: []
+
+# What the services listen on, declared honestly (proto tcp or udp; say so when a port
+# listens on localhost only). expose: true asks for forwarding, which is not done yet.
+# TODO: the ports the services listen on (sockstat -l -4 -6 in the jail); [] for none
+ports: []
+
+# Every directory that holds state. Each becomes a volume of its own (snapshotted, backed
+# up, kept across upgrades), created empty and owned by root: chown it in setup.
+# TODO: the directories that hold the state; [] for none
+data:
+  - path: /var/db/tool
+
+# Files a person edits, and the service to restart after a change.
+# TODO: the files a person edits, and the service each one restarts; [] for none
+config:
+  - path: /usr/local/etc/tool.conf
+
+# Log files or directories, below /var/log, /var/db or /usr/local.
+# TODO: where the services log (many log to /var/log/messages through syslog); [] for none
+logs:
+  - name: server
+    path: /var/log/tool.log
+
+# Run once in the jail after the packages and rc.conf, before the services: argv with
+# an absolute program path, no shell, no network. pkg -r installs from the host, where
+# the package's user does not exist, so the directories a package gives to its user
+# come out owned by root: mkdir -p and chown them here, the data volumes too.
+setup:
+  - [/usr/sbin/chown, "TODO:TODO", /var/db/tool]
+
+# true only for a server that needs System V shared memory, semaphores or message
+# queues (PostgreSQL's initdb does); the jail then gets namespaces of its own.
+sysvipc: false
+
+# How the installer checks that it runs: exactly one of tcp: PORT, http: {port, path,
+# status} or exec: [argv in the jail], retried for wait_seconds (at most 300). null only
+# for an app that starts none of its services; say why in the description.
+# TODO: a check that the app answers (tcp, http or exec)
+health: null
+
+# Hints for the jail's limits (memory and disk sizes, cpu a count), not limits.
+resources:
+  memory: 256M
+  disk: 2G
+  cpu: "1"
+
+# Shown after the installation: the first-run steps and how to connect.
+notes: |
+  TODO: what to do after the installation: the first-run steps, how to connect.

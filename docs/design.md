@@ -662,6 +662,17 @@ that sends the rc script's output to a temporary file in the jail, so a daemon t
 the in-jail exec's pipes. UNVERIFIED on FreeBSD: the installation of the apps other than nginx; the end-to-end test
 installs nginx, and the others when `JAILOPS_E2E_APPS` names them.
 
+The host's own definitions live in a second directory, `apps.local_dir` (default `/usr/local/etc/jailops/apps`),
+read with the catalog on each request: a local definition is listed with `source: local` and wins over a packaged one
+of the same name (`overrides: catalog`), so an author tries an app on a host without a package. Two tools help write
+one (apps.md, "Write your own app"): `jailops app new` writes a commented starter offline, and `jailops app export`
+reads `GET /api/v1/jails/<name>/app-draft` (operator, extension `app_draft`, audited), a draft made from a running
+jail: the packages installed on purpose (`pkg -r <root> query -e "%a = 0" "%n %v %R %w"` on the host, one exact form
+on the helper's allow-list, `RestExact` of the `pkg` rule), the services and knobs of its `rc.conf`, and, through the
+in-jail exec, `sockstat`, the names of files below `/usr/local/etc` and `/var/log` newer than pkg's database (`find`)
+and the owners of the app's directories (`stat`). It never reads a configuration file and leaves a secret-looking
+rc.conf knob out. Both write files that validate, with `TODO` markers that `jailops app validate` reports per line.
+
 ## 9. Backup
 
 First-class and a release gate for 1.0. Backup and replication are different features with different
@@ -984,6 +995,7 @@ Open:
 | `zfs_delegation` | Accepted (global admin only) and rendered into `jail.conf`; the helper does not hand datasets over, so the jail does not see them and no error says so |
 | `sysvipc` and the console log | `sysvmsg/sysvsem/sysvshm = new` and `exec.consolelog` are rendered, accepted by the helper and tested against fakes; PostgreSQL's `initdb` in a jail with them, and a forgejo start (daemon(8) without `-f`) no longer holding `jail -c`, have not been run on a host |
 | App service start wrapper and package ownership | The `/bin/sh -c` start wrapper is tested with a real `sh` on the development host, not in a jail; the `chown` setup lines of the catalog (`pkg -r` leaves the directories of a package's user root-owned) are written from the ports' layout and not yet run |
+| App drafts (`jailops app export`) | The parsers of `sockstat -4 -6 -l -q`, `find ... -newer /var/db/pkg/local.sqlite`, `stat -f "%Su:%Sg %N"` and `pkg query -e "%a = 0" "%n %v %R %w"` (that `%R` is the repository a `pkg -r` installation recorded) are tested on written samples and the helper rule against the real allow-list; none of them has run in a jail on a host. The worked example of apps.md (memcached: the `memcached_flags` knob and the pid directory `/var/run/memcached` given to `nobody`) has not been installed on a host |
 | Catalog apps `isms`, `nsd`, `mail` | Validated by the catalog test (on the reference copy) and dry-run against the daemon with fakes; never installed on a host. isms: port 8080 and its answer, and an install from the `jailops` repository with `pkg -r`; nsd: package paths, rc.d name and the starter configuration; mail: package paths, Dovecot 2.4 syntax, PAM logins, Postfix's `set-permissions` after `pkg -r` (docs/apps.md, the catalog) |
 | Helper audit pid | The helper's audit lines do not carry the daemon's pid (`pid: 0`) |
 | Generic `zfs send`/`receive` through the helper socket | About 0.4 MB/s; cause not found, bypassed by `zfs.replicate` |

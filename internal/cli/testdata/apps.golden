@@ -1,27 +1,27 @@
 $ jailops app list
-NAME         CATEGORY        VERSION    STATUS    SUMMARY
-broken       -               -          invalid   title: is required
-isms         security        0.8.1      valid     Information security management platform with git-native documents; needs PostgreSQL.
-mail         communication   3.10       valid     A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.
-nginx        web             1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
-nsd          network         4.15       valid     Authoritative DNS server for your own zones, as a primary or a secondary.
-postgresql   database        18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database        9.1.2      valid     In-memory key-value store under the BSD license.
+NAME         CATEGORY        VERSION    SOURCE    STATUS    SUMMARY
+broken       -               -          catalog   invalid   title: is required
+isms         security        0.8.1      catalog   valid     Information security management platform with git-native documents; needs PostgreSQL.
+mail         communication   3.10       catalog   valid     A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.
+nginx        web             1.30.6,3   catalog   valid     Web server and reverse proxy, serving /usr/local/www.
+nsd          network         4.15       catalog   valid     Authoritative DNS server for your own zones, as a primary or a secondary.
+postgresql   database        18.6       catalog   valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database        9.1.2      catalog   valid     In-memory key-value store under the BSD license.
 
 $ jailops app list -o wide
-NAME         CATEGORY        VERSION    STATUS    SUMMARY
-broken       -               -          invalid   title: is required
-isms         security        0.8.1      valid     Information security management platform with git-native documents; needs PostgreSQL.
-mail         communication   3.10       valid     A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.
-nginx        web             1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
-nsd          network         4.15       valid     Authoritative DNS server for your own zones, as a primary or a secondary.
-postgresql   database        18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database        9.1.2      valid     In-memory key-value store under the BSD license.
+NAME         CATEGORY        VERSION    SOURCE    STATUS    SUMMARY
+broken       -               -          catalog   invalid   title: is required
+isms         security        0.8.1      catalog   valid     Information security management platform with git-native documents; needs PostgreSQL.
+mail         communication   3.10       catalog   valid     A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.
+nginx        web             1.30.6,3   catalog   valid     Web server and reverse proxy, serving /usr/local/www.
+nsd          network         4.15       catalog   valid     Authoritative DNS server for your own zones, as a primary or a secondary.
+postgresql   database        18.6       catalog   valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database        9.1.2      catalog   valid     In-memory key-value store under the BSD license.
 
 $ jailops app list --category database
-NAME         CATEGORY   VERSION   STATUS   SUMMARY
-postgresql   database   18.6      valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database   9.1.2     valid    In-memory key-value store under the BSD license.
+NAME         CATEGORY   VERSION   SOURCE    STATUS   SUMMARY
+postgresql   database   18.6      catalog   valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database   9.1.2     catalog   valid    In-memory key-value store under the BSD license.
 
 $ jailops app list --category games
 ! usage: unknown category "games" (categories: database, web, tools, devops, storage, monitoring, communication, network, security, other)
@@ -29,9 +29,9 @@ $ jailops app list --category games
 [exit 2]
 
 $ jailops app list post* val*
-NAME         CATEGORY   VERSION   STATUS   SUMMARY
-postgresql   database   18.6      valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database   9.1.2     valid    In-memory key-value store under the BSD license.
+NAME         CATEGORY   VERSION   SOURCE    STATUS   SUMMARY
+postgresql   database   18.6      catalog   valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database   9.1.2     catalog   valid    In-memory key-value store under the BSD license.
 
 $ jailops app list -c name,version --sort version
 NAME         VERSION
@@ -53,14 +53,14 @@ postgresql
 valkey
 
 $ jailops app list -o csv
-NAME,CATEGORY,VERSION,STATUS,SUMMARY
-broken,-,-,invalid,title: is required
-isms,security,0.8.1,valid,Information security management platform with git-native documents; needs PostgreSQL.
-mail,communication,3.10,valid,"A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot."
-nginx,web,"1.30.6,3",valid,"Web server and reverse proxy, serving /usr/local/www."
-nsd,network,4.15,valid,"Authoritative DNS server for your own zones, as a primary or a secondary."
-postgresql,database,18.6,valid,"Relational database server, PostgreSQL 18 from the FreeBSD packages."
-valkey,database,9.1.2,valid,In-memory key-value store under the BSD license.
+NAME,CATEGORY,VERSION,SOURCE,STATUS,SUMMARY
+broken,-,-,catalog,invalid,title: is required
+isms,security,0.8.1,catalog,valid,Information security management platform with git-native documents; needs PostgreSQL.
+mail,communication,3.10,catalog,valid,"A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot."
+nginx,web,"1.30.6,3",catalog,valid,"Web server and reverse proxy, serving /usr/local/www."
+nsd,network,4.15,catalog,valid,"Authoritative DNS server for your own zones, as a primary or a secondary."
+postgresql,database,18.6,catalog,valid,"Relational database server, PostgreSQL 18 from the FreeBSD packages."
+valkey,database,9.1.2,catalog,valid,In-memory key-value store under the BSD license.
 
 $ jailops app info postgresql
 App postgresql: PostgreSQL
@@ -70,6 +70,7 @@ App postgresql: PostgreSQL
   Homepage:   https://www.postgresql.org/
   Image:      FreeBSD 15.1 or later, thin jail
   File:       postgresql.yaml (sha256:<sha256>)
+  Source:     catalog
 
 Description
   PostgreSQL is a relational database with transactions, replication and extensions.
@@ -161,6 +162,7 @@ definition:
   notes: Put the site under /usr/local/www.
 hash: sha256:<sha256>
 file: nginx.yaml
+source: catalog
 
 $ jailops app info broken
 ! invalid: app "broken": the definition broken.yaml is invalid: title: is required

@@ -150,6 +150,18 @@ type AppResources struct {
 	CPU    string `json:"cpu,omitempty" yaml:"cpu"`
 }
 
+// AppSource says which directory of the host a definition was read from.
+type AppSource string
+
+// Sources of a definition.
+const (
+	// AppSourceCatalog is the packaged catalog (apps.catalog_dir, installed by jailops-apps).
+	AppSourceCatalog AppSource = "catalog"
+	// AppSourceLocal is the host's own directory (apps.local_dir), for definitions an
+	// operator writes; a local definition wins over a packaged one of the same name.
+	AppSourceLocal AppSource = "local"
+)
+
 // AppSummary is one row of GET /api/v1/apps. An invalid definition is listed
 // with Valid false and the reason, under the name of its file.
 type AppSummary struct {
@@ -162,6 +174,10 @@ type AppSummary struct {
 	Valid   bool   `json:"valid"`
 	// Error says why the definition is invalid.
 	Error string `json:"error,omitempty"`
+	// Source is where the definition was read from: catalog or local.
+	Source AppSource `json:"source"`
+	// Overrides is "catalog" when a local definition hides the packaged one of the same name.
+	Overrides AppSource `json:"overrides,omitempty"`
 }
 
 // AppDetail is GET /api/v1/apps/<name>: the definition, the hash of its file
@@ -174,6 +190,10 @@ type AppDetail struct {
 	File string `json:"file"`
 	// Icon is the icon as a data URI (image/png or image/svg+xml); empty without one.
 	Icon string `json:"icon,omitempty"`
+	// Source is where the definition was read from: catalog or local.
+	Source AppSource `json:"source"`
+	// Overrides is "catalog" when a local definition hides the packaged one of the same name.
+	Overrides AppSource `json:"overrides,omitempty"`
 }
 
 // Labels the installer puts on the jail of an app.
@@ -241,4 +261,21 @@ type AppInstallResult struct {
 	// Steps describes the plan: every step of the installation, in order.
 	Steps  []string `json:"steps"`
 	DryRun bool     `json:"dry_run,omitempty"`
+}
+
+// AppDraft is GET /api/v1/jails/<name>/app-draft: a definition drafted from a
+// running jail, for a person to complete and send to the catalog. It holds
+// what the jail shows (the packages installed on purpose, the services enabled
+// in rc.conf and their knobs, the listening sockets, the volumes, the names of
+// configuration files and logs written since the packages were installed, the
+// owners of those directories) and TODO markers for what it cannot know. It
+// never holds the content of a configuration file.
+type AppDraft struct {
+	// Jail is the jail the draft was made from.
+	Jail       string `json:"jail"`
+	Definition App    `json:"definition"`
+	// Todo maps a top-level key of the definition to what is left to do there.
+	Todo map[string]string `json:"todo,omitempty"`
+	// Findings say what was found and what was left out, one line each.
+	Findings []string `json:"findings"`
 }

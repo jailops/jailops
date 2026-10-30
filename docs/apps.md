@@ -14,7 +14,16 @@ The catalog is delivered as an ordinary signed package, `jailops-apps`, from `pk
 YAML file per app under `/usr/local/share/jailops/apps/` (`apps.catalog_dir` of `jailopsd.yaml`, see
 [configuration.md](configuration.md)). The signature of the package is the root of trust: the daemon **reads local
 files only and never fetches anything**, so a catalog cannot change without a package operation on the host.
-An operator may drop a definition of their own into the directory; it is read like any other.
+
+The host's own definitions go into a second directory, `apps.local_dir` (default `/usr/local/etc/jailops/apps`),
+which the daemon reads with the catalog on each request, so a definition dropped there (`NAME.yaml` and its icon) is
+listed and installable at once, without a package. A local definition is listed with `source: local`; one whose name
+is also in the packaged catalog **wins** and says so (`overrides: catalog`), and the packaged one is back as soon as
+the local file is removed. A local definition is checked like a packaged one; an invalid one is listed as invalid with
+the reason, and it still hides a packaged one of the same name. The directory must be readable by the user `jailops`
+the daemon runs as (`0755` for the directory, `0644` for the files, owned by root); `jailops doctor` reports
+`apps.local_dir` when the directory exists (how many definitions, how many invalid, or that it cannot be read, which
+makes the whole listing fail). Nothing writes into it but you.
 
 The catalog is not part of the JailOps source or its releases. Its definitions live in the packages repository
 (`main/jailops-apps/apps/` of `jailops/jailops-packages`), and `jailops-apps` is a package with a version of its own:
@@ -122,8 +131,9 @@ Defaults are filled in when the definition is read, so the API always answers a 
 
 | Route | Reply |
 |---|---|
-| `GET /api/v1/apps` | `[]AppSummary`: `name`, `title`, `summary`, `category`, `version` (of the first package, when the definition states one), `valid`, `error` |
-| `GET /api/v1/apps/<name>` | `AppDetail`: `definition` (the `App`), `hash`, `file`, `icon` (a data URI, `image/png` or `image/svg+xml`, when the definition has one); `invalid` for an invalid definition, `not_found` for an unknown name |
+| `GET /api/v1/apps` | `[]AppSummary`: `name`, `title`, `summary`, `category`, `version` (of the first package, when the definition states one), `valid`, `error`, `source` (`catalog` or `local`), `overrides` (`catalog` for a local definition that hides a packaged one) |
+| `GET /api/v1/apps/<name>` | `AppDetail`: `definition` (the `App`), `hash`, `file`, `icon` (a data URI, `image/png` or `image/svg+xml`, when the definition has one), `source`, `overrides`; the local definition when both directories have the name; `invalid` for an invalid definition, `not_found` for an unknown name |
+| `GET /api/v1/jails/<name>/app-draft` | `AppDraft`: `jail`, `definition` (a draft made from the running jail, valid as it is, with `TODO` markers), `todo` (a top-level key and what is left to do there), `findings` (what was found and left out); see [Write your own app](#write-your-own-app). Operator in the project, audited, extension `app_draft` |
 
 | `POST /api/v1/apps/<name>/install` | body `AppInstall`: `jail` (default: the app name), `network`, `storage` (each defaults to the project's only grant of its kind), `image` (default: the only FreeBSD image with the alias `stable`, as `NAME@stable`; none or several is `invalid`), `limits` (replaces the resource hints), `dry_run`; async, result `AppInstallResult`: `jail`, `version`, `addresses`, `ports` (with `endpoint`), `data`, `config`, `logs`, `notes`, `snapshot`, `steps` |
 
@@ -135,6 +145,11 @@ server of `sdk/fake` starts with six definitions (nginx, postgresql, valkey, ism
 [--image I] [--memory M] [--disk D] [--cpu N] [--project P] [--dry-run] [--no-wait]` and
 `jailops app installed [PATTERN...] [-o json|yaml|name|csv]` (columns `JAIL`, `APP`, `VERSION`, `STATE`,
 `ADDRESSES`, `PORTS`; the list is the project's jail list narrowed on the client to the label, no route of its own).
+`jailops app list --source local` (or `catalog`) narrows the list to one directory; the full table has a `SOURCE`
+column (`catalog`, `local`, `local, overrides catalog`), the short one on a terminal marks a local definition with
+`(local)`, and `app info` has a `Source:` line. `jailops app new NAME` and `jailops app export JAIL` write
+definitions ([Write your own app](#write-your-own-app)); the SDK has `Jails().AppDraft`, and the fake server answers
+it for a running jail (`SeedAppDraft` sets the answer, `SeedLocalApp` adds a local definition).
 `jailops app validate PATH... [-o json|yaml]` checks definition files on the machine it runs on, without a server
 ([Adding or changing an app](#adding-or-changing-an-app)); it is the one command of the client that links the daemon's
 catalog validator (`internal/apps`, which imports nothing that runs commands or touches state; a test keeps it so).
@@ -149,7 +164,7 @@ roles (`delete` is admin, `start` and `stop` are operator).
 
 ## Console
 
-The host console has an **Apps** page (`/apps`): the catalog as cards with a search over name, title and summary and category filters; an invalid definition is shown with its reason and cannot be installed. `/apps/NAME` shows a definition in full (packages, services and their `rc.conf` knobs, ports and whether they are exposed, the data paths with the volume each becomes, the configuration files and the service each one restarts, the log files, the health check, the resource hints, the notes and the definition's hash). **Install** opens a dialog with the jail name (the app name by default), the network and storage among the project's grants (preset when there is one of a kind) and the limits prefilled from the hints; *Preview steps* runs the dry run and lists the steps, and the installation then follows the operation: the step list is ticked off from the operation's progress (the server sets it after each step) and ends in a report with the jail, its addresses, the port endpoints, where the data, configuration and logs are, the notes and the `app-installed` snapshot with the rollback command, or with the error, its hint and a link to the jail when it was kept. The button is disabled, with the reason, for an identity below operator in the project and for a project without a network or storage grant. The **Installed** tab lists the project's jails that carry `jailops.app`, with their version, state, addresses and ports, and an *Open* link for the exposed `http` and `https` ports. The log files of a definition link to the **Logs** tab of the jail they were installed as, which reads the jail logs API (tail, since, text filter, follow).
+The host console has an **Apps** page (`/apps`): the catalog as cards (a local definition carries a small **local** chip, here, on its page, where it also says when it overrides the catalog's definition, and in the Installed tab) with a search over name, title and summary and category filters; an invalid definition is shown with its reason and cannot be installed. `/apps/NAME` shows a definition in full (packages, services and their `rc.conf` knobs, ports and whether they are exposed, the data paths with the volume each becomes, the configuration files and the service each one restarts, the log files, the health check, the resource hints, the notes and the definition's hash). **Install** opens a dialog with the jail name (the app name by default), the network and storage among the project's grants (preset when there is one of a kind) and the limits prefilled from the hints; *Preview steps* runs the dry run and lists the steps, and the installation then follows the operation: the step list is ticked off from the operation's progress (the server sets it after each step) and ends in a report with the jail, its addresses, the port endpoints, where the data, configuration and logs are, the notes and the `app-installed` snapshot with the rollback command, or with the error, its hint and a link to the jail when it was kept. The button is disabled, with the reason, for an identity below operator in the project and for a project without a network or storage grant. The **Installed** tab lists the project's jails that carry `jailops.app`, with their version, state, addresses and ports, and an *Open* link for the exposed `http` and `https` ports. The log files of a definition link to the **Logs** tab of the jail they were installed as, which reads the jail logs API (tail, since, text filter, follow).
 
 ## How the installation works
 
@@ -282,6 +297,148 @@ definition has no parameters, and what needs a value is a `config` file the pers
 - **Fetching catalogs**: the catalog comes with a package, signed, or from the operator's own files. The daemon makes
   no request for it.
 
+## Write your own app
+
+An app usually starts on a host: you make a jail, install the packages, enable the services, fix what does not work,
+and end with a jail that runs the software well. A definition is that work written down, so that `jailops app install`
+repeats it on any host. The loop:
+
+1. **Start a definition**, either from scratch or from the jail that runs it:
+
+   ```sh
+   jailops app new memcached --package memcached --service memcached --port 11211/tcp --category database
+   jailops app export cache -o cache.yaml       # from the running jail "cache" of the current project
+   ```
+
+   `jailops app new NAME [--package PKG[,PKG...]] [--service NAME] [--port N[/proto]] [--category C] [--dir DIR]`
+   needs no server. It writes `DIR/NAME.yaml` (`DIR` is `.` by default) with every key of the format, a short comment
+   on each (what it does, and the traps: `pkg -r` installs from the host and leaves the directories of a package's
+   user to root, the installer runs `ldconfig` and starts services through a wrapper itself, `sysvipc` is for servers
+   that need it) and the values the flags give; `--package`, `--service` and `--port` repeat or take commas. It also
+   writes `NAME.svg`, a neutral placeholder icon (a rounded square with the first letter), unless an icon of that name
+   is there. It refuses to write over an existing `NAME.yaml` without `--force`.
+
+   `jailops app export JAIL [--project P] [-o FILE]` asks the daemon for a draft of a running FreeBSD jail and writes
+   it to `FILE` or the standard output (here `-o` names the file, it is not an output format; `--force` writes over
+   an existing file). The draft is read, nothing in the jail changes: the packages installed on purpose (their
+   dependencies come with them; `pkg -r <root> query` on the host), the services enabled in the jail's `/etc/rc.conf`
+   and their knobs, the ports something listens on now (`sockstat` in the jail; a port bound to localhost only says
+   so), the jail's volumes as `data` paths, the names of the files below `/usr/local/etc` and `/var/log` that changed
+   after the last package operation (`find -newer /var/db/pkg/local.sqlite`) as `config` and `logs`, and `setup` lines
+   that give the volumes, the log directories and `/var/run/<service>` the owners they have in the jail (`stat`). What
+   belongs to the base system (sshd, syslogd, cron, base log files) is left out. **It never holds a secret**:
+   configuration files are listed by name and never read, a knob whose name looks like a secret (`pass`, `secret`,
+   `token`, `key`, `cred`) is written as `TODO`, and a knob with a shell expansion is left out. The comment at the top
+   of the file lists what was found and what was left out. The jail's state that is not on a volume (a database under
+   the jail's own `/var/db`) is not found: give it a `data` path. Operator role; the request is audited; a stopped jail
+   is refused (`busy`).
+
+2. **Edit it.** Both commands mark with `TODO` what a person has to decide: the summary, the description, the license,
+   the health check (a draft proposes a tcp check on the first port that is not on localhost), the notes, and the
+   sections that are guesses. The file parses and validates as it is, so you can install it before it is finished.
+
+3. **Check it**: `jailops app validate NAME.yaml` runs the daemon's parser and validator offline and reports, besides
+   every problem, **each line that still holds a `TODO` marker** as `FILE: line N: replace TODO` (a marker in a
+   comment counts too: delete the comment once it is done). Only `validate` looks for the markers; the daemon does not,
+   which is what lets a draft install while you work on it.
+
+4. **Try it on a host**: copy `NAME.yaml` and its icon into `/usr/local/etc/jailops/apps` (`apps.local_dir`) and run
+   `jailops app list --source local`, then `jailops app install NAME`. A local definition of the same name as a
+   packaged one replaces it on that host, which is how you test a change to a packaged app.
+
+5. **Iterate**: `jailops delete NAME`, edit the file in place, `jailops app install NAME` again. A failed installation
+   keeps the jail stopped for inspection (`jailops start NAME`, `jailops shell NAME`); the error names the step.
+
+6. **Validate again**, until `jailops app validate NAME.yaml` prints `valid: 1 definition(s), 1 icon(s)`.
+
+7. **Send it**: add `NAME.yaml` and `NAME.svg` to `main/jailops-apps/apps/` of the packages repository in a pull
+   request ([Adding or changing an app](#adding-or-changing-an-app); its `CONTRIBUTING.md` has the review checklist
+   and `scripts/new-app.sh NAME` runs `jailops app new` in the right directory).
+
+### A worked example: memcached
+
+memcached (`databases/memcached`) is small: one package, one rc.d service, one TCP port, no state on disk. Start with
+
+```sh
+jailops app new memcached --package memcached --service memcached --port 11211/tcp --category database
+```
+
+and fill in the marked lines. memcached keeps nothing on disk, so `data`, `config` and `logs` become `[]` (it logs
+nothing by default); its rc script runs it as `nobody`, which writes its pid file into `/var/run/memcached`, a
+directory `pkg -r` leaves to root, so the setup creates it and gives it to `nobody`. The finished file (it is
+`internal/apps/testdata/authoring/memcached.yaml`, with the icon `app new` wrote, and a test checks that it validates
+with no marker left):
+
+```yaml
+version: 1
+name: memcached
+title: memcached
+summary: Distributed in-memory object cache, memcached from the FreeBSD packages.
+description: |
+  memcached keeps objects in memory for other programs and forgets them when it
+  restarts. It has no authentication: anything that reaches the port can read and
+  write the cache, so it listens on the jail's network only.
+category: database
+homepage: https://memcached.org/
+license: BSD-3-Clause
+icon: memcached.svg
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: memcached
+    repo: ports
+    version: "1.6.39"
+services:
+  - name: memcached
+    rc:
+      memcached_flags: "-l 0.0.0.0 -m 64"
+    start: true
+ports:
+  - name: memcached
+    port: 11211
+    proto: tcp
+    description: The memcached protocol, without authentication.
+    expose: false
+# memcached keeps nothing on disk
+data: []
+config: []
+logs: []
+# The rc script runs memcached as nobody, which writes its pid file into
+# /var/run/memcached; pkg -r leaves that directory to root, if it creates it at all.
+setup:
+  - [/bin/mkdir, -p, /var/run/memcached]
+  - [/usr/sbin/chown, "nobody:nobody", /var/run/memcached]
+sysvipc: false
+health:
+  tcp: 11211
+  wait_seconds: 30
+resources:
+  memory: 128M
+  disk: 1G
+  cpu: "1"
+notes: |
+  memcached listens on port 11211 of the jail's address, 64 MB of cache.
+  Change the size or the address with memcached_flags in the jail's
+  /etc/rc.conf (jailops exec NAME -- sysrc memcached_flags="-l 0.0.0.0 -m 256"),
+  then jailops exec NAME -- service memcached restart.
+```
+
+Then on a FreeBSD 15.1 host:
+
+```sh
+cp memcached.yaml memcached.svg /usr/local/etc/jailops/apps/
+jailops app validate /usr/local/etc/jailops/apps/memcached.yaml   # valid: 1 definition(s), 1 icon(s)
+jailops app list --source local
+jailops app install memcached
+```
+
+**UNVERIFIED**: this example has not been installed on a FreeBSD host. What a first run there must confirm: that the
+rc script reads `memcached_flags` and runs the server as `nobody` with its pid file in `/var/run/memcached`, that the
+health check passes on 11211, and that the version is the one of the quarterly packages. `jailops app export` has not
+run against a real jail either: the output of `sockstat`, `find` and `stat` in a jail and the repository `pkg query %R`
+reports for a package `pkg -r` installed are parsed as their manual pages describe them.
+
 ## Adding or changing an app
 
 The definitions and their icons are in `main/jailops-apps/apps/` of the packages repository
@@ -297,7 +454,8 @@ pull request there:
    jailops app validate main/jailops-apps/apps
    ```
 
-   It runs the daemon's own parser and validator on every `*.yaml`, reads the icon each definition names, prints every
+   It runs the daemon's own parser and validator on every `*.yaml`, reads the icon each definition names, reports every
+   line that still holds a `TODO` marker of `app new` or `app export` (`FILE: line N: replace TODO`), prints every
    problem as `FILE: reason` and exits 2 when there is one; otherwise it prints one line
    (`valid: 8 definition(s), 3 icon(s)`). `-o json` gives the counts and the problems. It also takes single files and
    several paths, and `jailops app validate /usr/local/share/jailops/apps` checks what a host has.

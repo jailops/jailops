@@ -63,6 +63,10 @@ type Rule struct {
 	// Exact lists whole argument vectors (after the command name) accepted
 	// as they are, besides what the flag rules describe.
 	Exact [][]string
+	// RestExact lists argument vectors after the flags (subcommand and its
+	// arguments) accepted as they are once the flags passed their rules: a
+	// read-only form whose arguments the generic Rest pattern does not take.
+	RestExact [][]string
 	// Reason says why the host tool is reachable at all.
 	Reason string
 	// Env, when set, is the whole environment the command runs with (the caller's is never used). A tool
@@ -389,8 +393,10 @@ var CommandRules = []Rule{
 		Flags:         []flagRule{{Flag: "-r", Path: pathJailTree}, {Flag: "-o", Check: checkPkgOption, Many: true}},
 		RequiredFlags: []string{"-r"},
 		Exact:         [][]string{{"config", "abi"}},
-		Subcommands:   []string{"install", "upgrade", "update", "delete", "remove", "autoremove", "info", "audit", "lock", "unlock", "fetch", "clean", "check", "version", "bootstrap", "query"},
-		Rest:          rePkgName, MaxRest: 64, RestFlags: []string{"-y", "-q", "-n", "-f", "-a", "-U", "-F", "-x", "-r", "-d"},
+		// the packages installed on purpose, for an app draft (internal/apps.PkgLeavesArgv)
+		RestExact:   [][]string{{"query", "-e", "%a = 0", "%n %v %R %w"}},
+		Subcommands: []string{"install", "upgrade", "update", "delete", "remove", "autoremove", "info", "audit", "lock", "unlock", "fetch", "clean", "check", "version", "bootstrap", "query"},
+		Rest:        rePkgName, MaxRest: 64, RestFlags: []string{"-y", "-q", "-n", "-f", "-a", "-U", "-F", "-x", "-r", "-d"},
 		MaxTimeoutSeconds: 3600,
 	},
 	{
@@ -573,6 +579,11 @@ func (c Config) CheckCommandCtx(ctx context.Context, argv []string) (*Rule, []st
 		}
 	}
 	rest := args[i:]
+	for _, ex := range r.RestExact {
+		if slices.Equal(ex, rest) {
+			return r, append([]string{r.Binary}, args...), nil
+		}
+	}
 	if len(rest) == 0 {
 		if !r.SubcommandOptional {
 			return nil, nil, invalid("%s needs a subcommand", r.Name)

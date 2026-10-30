@@ -175,4 +175,5 @@ var Extensions = []string{
 	"apps",
 	"jail_logs",
 	"app_install",
+	"app_draft",
 }

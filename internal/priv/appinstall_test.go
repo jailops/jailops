@@ -157,3 +157,63 @@ func TestAppInstallThroughTheHelper(t *testing.T) {
 		t.Error("a jail name with a shell character was accepted")
 	}
 }
+
+// What an app draft asks of the helper: the one pkg query of the packages
+// installed on purpose, exactly as internal/apps builds it, and read-only
+// commands in a managed jail through the jail guard. Every other form of
+// pkg query -e is refused.
+func TestAppDraftThroughTheHelper(t *testing.T) {
+	e := newEnv(t)
+	c := e.cfg
+	ctx := context.Background()
+	root := filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "cache", "root")
+	if err := os.MkdirAll(filepath.Join(root, "etc"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	argv := apps.PkgLeavesArgv(root)
+	if _, out, err := c.CheckCommandCtx(ctx, argv); err != nil || out[0] != "/usr/sbin/pkg" || !slices.Equal(out[1:], argv[1:]) {
+		t.Fatalf("%q: %q %v", argv, out, err)
+	}
+	bad := func(code api.Code, argv ...string) {
+		t.Helper()
+		if _, _, err := c.CheckCommandCtx(WithAdmin(ctx, "a"), argv); !api.IsCode(err, code) {
+			t.Errorf("%q: %v (want %s)", argv, err, code)
+		}
+	}
+	for _, rest := range [][]string{
+		{"query", "-e", "%a = 1", "%n %v %R %w"},
+		{"query", "-e", "%a = 0", "%n %v %R %w", "extra"},
+		{"query", "-e", "%a = 0", "%n %v %R %w %M"},
+		{"query", "-e", "%a = 0"},
+		{"query", "-e", "%a = 0 || %n ~ *", "%n"},
+		{"query", "-e", "%a = 0", "%n %v %R %w", "-x"},
+		{"rquery", "-e", "%a = 0", "%n %v %R %w"},
+		{"query", "-a", "-e", "%a = 0", "%n %v %R %w"},
+	} {
+		bad(api.CodeForbidden, append([]string{"pkg", "-r", root}, rest...)...)
+	}
+	// the exact form still needs a jail root
+	bad(api.CodeInvalid, "pkg", "query", "-e", apps.PkgLeavesQuery, apps.PkgLeavesFormat)
+	bad(api.CodeForbidden, apps.PkgLeavesArgv("/usr/local")...)
+	bad(api.CodeForbidden, apps.PkgLeavesArgv(e.cfg.MountBase)...)
+	bad(api.CodeForbidden, apps.PkgLeavesArgv(root+"/../../../../../..")...)
+	bad(api.CodeForbidden, "pkg", "-o", "REPOS_DIR=/etc", "-r", root, "query", "-e", apps.PkgLeavesQuery, apps.PkgLeavesFormat)
+
+	// the in-jail reads run in a managed jail only, as argv
+	reads := [][]string{apps.SockstatArgv(), apps.FindNewerArgv("/usr/local/etc"), apps.FindNewerArgv("/var/log"), apps.StatOwnerArgv([]string{"/var/db/memcached", "/var/run/memcached"})}
+	jails := e.local.Jails()
+	for _, argv := range reads {
+		if _, err := jails.Exec(ctx, "alpha_ghost", jailosExec(argv...)); !api.IsCode(err, api.CodeForbidden) {
+			t.Errorf("%q in an unmanaged jail: %v", argv, err)
+		}
+	}
+	e.conf(t, "alpha_cache")
+	if err := e.jails.Create(ctx, filepath.Join(e.cfg.ConfDir, "alpha_cache.conf"), "alpha_cache"); err != nil {
+		t.Fatal(err)
+	}
+	for _, argv := range reads {
+		if _, err := jails.Exec(ctx, "alpha_cache", jailosExec(argv...)); err != nil {
+			t.Errorf("%q: %v", argv, err)
+		}
+	}
+}
