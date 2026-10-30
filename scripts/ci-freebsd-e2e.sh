@@ -9,10 +9,12 @@
 #                   them, with or without the -freebsd-<arch> suffix)
 # JAILOPS_E2E_PART   all (default), e2e (everything but the packet filter test) or pf (only the packet filter test)
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
-# JAILOPS_E2E_APPS   more apps of the starter catalog to install after nginx, space separated: postgresql, valkey,
+# JAILOPS_E2E_APPS   more apps of the catalog to install after nginx, space separated: postgresql, valkey,
 #                   prometheus, forgejo, nsd, mail, isms (default none; CI does not set it). Each one is installed,
 #                   checked in its own way, its logs listed, and stopped. isms needs the jailops package repository in
 #                   the host's pkg configuration (docs/install.md) and installs a postgresql jail of its own, isms-db.
+# JAILOPS_E2E_CATALOG  the catalog directory to install from (default: the reference copy internal/apps/testdata/catalog;
+#                   for a change of the catalog itself, main/jailops-apps/apps of a packages repository checkout)
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -195,9 +197,11 @@ expect "back on the first generation" 'up +running.*#g1' $J jail list --project 
 check "stop the second jail" $J stop up --project demo
 
 step "an app from the catalog (nginx: thin jail, pkg -r from the host, rc.conf, service, health check, snapshot)"
-# the catalog is a directory of local files: the repository's starter catalog, copied where the daemon may read it
+# the catalog is a directory of local files: the reference copy (or JAILOPS_E2E_CATALOG), copied where the daemon may read it
 appdir=$work/apps
-rm -rf "$appdir"; cp -R packaging/apps "$appdir"; chmod -R a+rX "$appdir"
+catalog=${JAILOPS_E2E_CATALOG:-internal/apps/testdata/catalog}
+[ -d "$catalog" ] || fail "JAILOPS_E2E_CATALOG: $catalog is not a directory"
+rm -rf "$appdir"; cp -R "$catalog" "$appdir"; chmod -R a+rX "$appdir"
 cat >> /usr/local/etc/jailops/jailopsd.yaml <<YAML
 apps:
   catalog_dir: $appdir

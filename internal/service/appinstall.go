@@ -430,7 +430,11 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 				if err != nil && !errors.Is(err, os.ErrNotExist) && !api.IsCode(err, api.CodeNotFound) {
 					return fmt.Errorf("read %s: %w", path, err)
 				}
-				next, err := render.RcConfSet(string(cur), vars)
+				rv := make([]render.RcVar, len(vars))
+				for i, v := range vars {
+					rv[i] = render.RcVar(v)
+				}
+				next, err := render.RcConfSet(string(cur), rv)
 				if err != nil {
 					return err
 				}

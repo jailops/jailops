@@ -90,7 +90,11 @@ func TestAppInstallThroughTheHelper(t *testing.T) {
 	}
 
 	// rc.conf: written and read below the jail root through the file operations
-	content, err := render.RcConfSet("hostname=\"web\"\n", apps.RcVars([]api.AppService{{Name: "nginx"}, {Name: "postgresql", RC: map[string]string{"postgresql_initdb_flags": "--encoding=utf-8"}}}))
+	var vars []render.RcVar
+	for _, v := range apps.RcVars([]api.AppService{{Name: "nginx"}, {Name: "postgresql", RC: map[string]string{"postgresql_initdb_flags": "--encoding=utf-8"}}}) {
+		vars = append(vars, render.RcVar(v))
+	}
+	content, err := render.RcConfSet("hostname=\"web\"\n", vars)
 	if err != nil {
 		t.Fatal(err)
 	}

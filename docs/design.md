@@ -70,7 +70,7 @@ supported. `jailops doctor` fails on anything older than 15.1.
 ## 2. Components
 
 ```
-jailops          CLI (cobra). Uses only sdk/api and sdk.
+jailops          CLI (cobra). Uses only sdk/api and sdk, plus internal/apps (the pure catalog validator) for `app validate`.
 jailopsd         API daemon. Unprivileged. API, auth, state, reconcile, operations.
 jailops-priv     Root helper. Typed RPC over a unix socket. No shell, no free-form commands.
 jailops-sync     Fleet sync. Uses only sdk/api and sdk.
@@ -645,7 +645,12 @@ An **app** is a definition of a jail that runs packages: which packages (FreeBSD
 which rc.d services and knobs, which ports, where the data, the configuration and the logs live, how to check that it
 runs, what to tell the person afterwards. The catalog is a directory of strict YAML files installed by the signed
 `jailops-apps` package (`apps.catalog_dir`, default `/usr/local/share/jailops/apps`); **the daemon reads local files and
-never fetches a catalog.** An invalid definition is listed with its reason and is never installable. `GET /api/v1/apps`
+never fetches a catalog.** An invalid definition is listed with its reason and is never installable; that includes a
+definition written for a newer daemon (an unknown key, format version or category). The definitions are not in this
+repository: they live in the packages repository (`main/jailops-apps/apps/`), and `jailops-apps` has a version of its own,
+released by a pull request there without a JailOps release; `jailops` depends on it by name, any version. That CI checks
+them with `jailops app validate`, the daemon's validator run offline by the client. A reference copy for the tests is in
+`internal/apps/testdata/catalog/`. `GET /api/v1/apps`
 and `/api/v1/apps/<name>` are readable by any authenticated identity (route class `self`). The format, the rules and the
 installation (`POST /api/v1/apps/<name>/install`, operator in the project, extension `app_install`: one operation,
 a thin jail from the only FreeBSD image with the alias `stable` unless one is named, with the data paths as volumes, `pkg -r` from the host through the helper, rc.conf
@@ -978,8 +983,8 @@ Open:
 | Proxy (port-forward) redirects on the uplink | Rendered; not verified |
 | `zfs_delegation` | Accepted (global admin only) and rendered into `jail.conf`; the helper does not hand datasets over, so the jail does not see them and no error says so |
 | `sysvipc` and the console log | `sysvmsg/sysvsem/sysvshm = new` and `exec.consolelog` are rendered, accepted by the helper and tested against fakes; PostgreSQL's `initdb` in a jail with them, and a forgejo start (daemon(8) without `-f`) no longer holding `jail -c`, have not been run on a host |
-| App service start wrapper and package ownership | The `/bin/sh -c` start wrapper is tested with a real `sh` on the development host, not in a jail; the `chown` setup lines of the starter catalog (`pkg -r` leaves the directories of a package's user root-owned) are written from the ports' layout and not yet run |
-| Starter apps `isms`, `nsd`, `mail` | Validated by the catalog test and dry-run against the daemon with fakes; never installed on a host. isms: port 8080 and its answer, and an install from the `jailops` repository with `pkg -r`; nsd: package paths, rc.d name and the starter configuration; mail: package paths, Dovecot 2.4 syntax, PAM logins, Postfix's `set-permissions` after `pkg -r` (docs/apps.md, the starter catalog) |
+| App service start wrapper and package ownership | The `/bin/sh -c` start wrapper is tested with a real `sh` on the development host, not in a jail; the `chown` setup lines of the catalog (`pkg -r` leaves the directories of a package's user root-owned) are written from the ports' layout and not yet run |
+| Catalog apps `isms`, `nsd`, `mail` | Validated by the catalog test (on the reference copy) and dry-run against the daemon with fakes; never installed on a host. isms: port 8080 and its answer, and an install from the `jailops` repository with `pkg -r`; nsd: package paths, rc.d name and the starter configuration; mail: package paths, Dovecot 2.4 syntax, PAM logins, Postfix's `set-permissions` after `pkg -r` (docs/apps.md, the catalog) |
 | Helper audit pid | The helper's audit lines do not carry the daemon's pid (`pid: 0`) |
 | Generic `zfs send`/`receive` through the helper socket | About 0.4 MB/s; cause not found, bypassed by `zfs.replicate` |
 | `pkg.jailops.net` | The repository host is not live; packages were installed from a local repository |

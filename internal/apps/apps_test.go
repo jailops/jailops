@@ -458,9 +458,12 @@ func TestIcons(t *testing.T) {
 	}
 }
 
-// The starter catalog the jailops-apps package installs is valid as shipped.
-func TestStarterCatalog(t *testing.T) {
-	dir := filepath.Join("..", "..", "packaging", "apps")
+// referenceCatalog is the copy of the catalog the tests read (testdata/catalog/README.md).
+var referenceCatalog = filepath.Join("testdata", "catalog")
+
+// The reference copy of the catalog the jailops-apps package installs is valid.
+func TestReferenceCatalog(t *testing.T) {
+	dir := referenceCatalog
 	es, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)

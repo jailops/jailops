@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -36,7 +35,7 @@ func TestInstallCommands(t *testing.T) {
 		t.Errorf("%v %v", ports, jo)
 	}
 	vars := RcVars([]api.AppService{{Name: "php-fpm"}, {Name: "postgresql", RC: map[string]string{"postgresql_initdb_flags": "--encoding=utf-8", "postgresql_data": "/var/db/postgres/data18"}}})
-	want := []render.RcVar{{Name: "php_fpm_enable", Value: "YES"}, {Name: "postgresql_enable", Value: "YES"}, {Name: "postgresql_data", Value: "/var/db/postgres/data18"}, {Name: "postgresql_initdb_flags", Value: "--encoding=utf-8"}}
+	want := []RcVar{{Name: "php_fpm_enable", Value: "YES"}, {Name: "postgresql_enable", Value: "YES"}, {Name: "postgresql_data", Value: "/var/db/postgres/data18"}, {Name: "postgresql_initdb_flags", Value: "--encoding=utf-8"}}
 	if !slices.Equal(vars, want) {
 		t.Errorf("%v", vars)
 	}

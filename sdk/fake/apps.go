@@ -23,7 +23,7 @@ type appEntry struct {
 }
 
 // seedApps fills the catalog every fake starts with: six valid definitions,
-// shortened from packaging/apps.
+// shortened from the catalog (the reference copy is internal/apps/testdata/catalog).
 func (s *Server) seedApps() {
 	s.apps = map[string]*appEntry{}
 	t, f := true, false

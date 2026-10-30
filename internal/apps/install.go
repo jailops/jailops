@@ -7,7 +7,6 @@ import (
 	"strconv"
 	"strings"
 
-	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -72,14 +71,20 @@ func ServiceStartArgv(service string) ([]string, error) {
 // RcConfPath is the rc.conf of a jail root.
 func RcConfPath(root string) string { return root + "/etc/rc.conf" }
 
+// RcVar is one rc.conf variable; it converts to render.RcVar. The package
+// does not import the renderer, so the client can link the validator.
+type RcVar struct {
+	Name, Value string
+}
+
 // RcVars lists what the installer writes into rc.conf: <name>_enable=YES
 // and the knobs of every service, in the order of the definition.
-func RcVars(svcs []api.AppService) []render.RcVar {
-	var out []render.RcVar
+func RcVars(svcs []api.AppService) []RcVar {
+	var out []RcVar
 	for _, s := range svcs {
-		out = append(out, render.RcVar{Name: rcName(s.Name) + "_enable", Value: "YES"})
+		out = append(out, RcVar{Name: rcName(s.Name) + "_enable", Value: "YES"})
 		for _, k := range sortedKeys(s.RC) {
-			out = append(out, render.RcVar{Name: k, Value: s.RC[k]})
+			out = append(out, RcVar{Name: k, Value: s.RC[k]})
 		}
 	}
 	return out
