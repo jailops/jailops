@@ -21,6 +21,7 @@ const items = computed<NavItem[]>(() => ([
   { to: '/profiles', label: s.nav.profiles, icon: 'wrench', show: can('jails') },
   { to: '/updates', label: s.nav.updates, icon: 'arrowUp', show: hasExt('updates') },
   { to: '/backups', label: s.nav.backups, icon: 'archive', show: can('backups') },
+  { to: '/host', label: s.nav.host, icon: 'monitor', show: hasExt('host_identity') },
   { to: '/hosts', label: s.nav.hosts, icon: 'server', show: isHub.value },
   { to: '/operations', label: s.nav.operations, icon: 'listChecks', show: can('operations') },
   { to: '/events', label: s.nav.events, icon: 'radio', show: can('events') },

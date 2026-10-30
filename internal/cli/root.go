@@ -135,7 +135,7 @@ jailops events --type lifecycle -o json`,
 	_ = root.RegisterFlagCompletionFunc("remote", a.remoteNames())
 	_ = root.RegisterFlagCompletionFunc("host", a.completeHosts())
 	root.AddCommand(
-		a.jailCmd(), a.imageCmd(), a.appCmd(), a.networkCmd(), a.firewallCmd(), a.backupCmd(),
+		a.jailCmd(), a.imageCmd(), a.appCmd(), a.networkCmd(), a.wireguardCmd(), a.firewallCmd(), a.backupCmd(),
 		a.projectCmd(), a.storageCmd(), a.trustCmd(), a.sessionsCmd(), a.whoamiCmd(), a.opCmd(), a.eventsCmd(), a.tokenCmd(), a.certCmd(), a.userCmd(), a.hostCmd(),
 		a.remoteCmd(), a.auditCmd(), a.doctorCmd(), a.serverCmd(), a.explainCmd(), a.completionCmd(), a.versionCmd(), a.manCmd(),
 	)

@@ -192,7 +192,7 @@ func TestAppInstall(t *testing.T) {
 	if len(res.Data) != 2 || len(res.Config) != 1 || len(res.Logs) != 1 || !strings.Contains(res.Notes, "/usr/local/www/web") {
 		t.Fatalf("%+v", res)
 	}
-	wantSteps := []string{"create-jail", "start-jail", "install-packages-ports", "install-packages-jailops", "refresh-library-cache", "record-version", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "snapshot"}
+	wantSteps := []string{"create-jail", "start-jail", "install-packages-ports", "install-packages-jailops", "refresh-library-cache", "record-version", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot"}
 	var steps []string
 	for _, s := range res.Steps {
 		_, rest, _ := strings.Cut(s, " ")
@@ -320,7 +320,7 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := op.Wait(c)
-	if err != nil || !res.DryRun || len(res.Steps) != 7 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
+	if err != nil || !res.DryRun || len(res.Steps) != 8 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
 		t.Fatalf("%v %+v", err, res)
 	}
 	if !strings.Contains(res.Steps[0], "fb151@stable") || !strings.Contains(res.Steps[5], "/usr/local/bin/tool --ping") {
@@ -851,7 +851,7 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 		if c2.health {
 			want = append(want, "health-check")
 		}
-		want = append(want, "snapshot")
+		want = append(want, "close-firewall", "snapshot")
 		if got := names(res.Steps); !slices.Equal(got, want) {
 			t.Errorf("%s: steps %v, want %v", c2.app, res.Steps, want)
 		}

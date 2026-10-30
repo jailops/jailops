@@ -40,9 +40,11 @@ it (a package that does not install, a health check that does not pass) leaves
 the jail stopped for inspection, with its labels, and the error says so.
 --dry-run asks the server for the steps and creates nothing. After a
 successful installation the report says how to reach the app, where its data,
-configuration and logs are, and the notes of the definition. Ports marked
-expose in the definition are listed; forwarding them is a later feature, so
-every port is reachable from the jail's network only.`,
+configuration and logs are, and the notes of the definition. The new jail is
+closed: its firewall policy app-NAME lets nothing in until 'jailops app allow
+NAME from SOURCE' allows a source (the health check runs before it closes).
+Ports marked expose in the definition are listed; forwarding them is a later
+feature.`,
 		Example: `jailops app install nginx --project web
 jailops app install postgresql --project web --name db --network lan --storage default
 jailops app install nginx --project web --image freebsd-15@stable --memory 512M
@@ -123,12 +125,15 @@ func (a *app) printAppInstalled(w io.Writer, name, jail string, res api.AppInsta
 			line += " at " + p.Endpoint
 		}
 		if p.Expose {
-			line += " (expose: forwarding is not set up yet; reachable from the jail's network)"
+			line += " (expose: forwarding is not set up yet)"
 		}
 		if p.Description != "" {
 			line += " " + p.Description
 		}
 		fprintf(w, "  %-10s %s\n", k, line)
+	}
+	if len(res.Ports) > 0 {
+		kv("Access", "closed: nothing reaches it until jailops app allow "+j.Metadata.Name+" from SOURCE")
 	}
 	listed := func(k string, rows []string) {
 		if len(rows) == 0 {

@@ -176,4 +176,8 @@ var Extensions = []string{
 	"jail_logs",
 	"app_install",
 	"app_draft",
+	"host_identity",
+	"wireguard",
+	"interface_descriptions",
+	"app_access",
 }

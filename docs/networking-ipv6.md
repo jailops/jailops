@@ -18,6 +18,12 @@
 - A network **belongs to one project**; a project is granted whole networks. Storage may be shared. A jail names its network
   and storage explicitly (or a profile does); nothing is filled in.
 - JailOps never modifies a bridge it did not create. The host must forward (see [install.md](install.md)).
+- **`ifconfig` says what each interface is.** The bridge carries `description: jailops net=<network> bridge`, the gateway
+  pair `jailops net=<network> gateway (bridge side)` and `(host side)`, a jail's epair `jailops jail=<project>/<jail>
+  net=<network> (host side)` on the host and `(jail side)` inside the jail, a WireGuard tunnel `jailops wireguard=<name>`
+  ([wireguard.md](wireguard.md)). The reconcile loop puts a missing or changed description back on an interface it owns
+  (`jailops doctor`: `net.descriptions`) and touches no other; a bridge without a description is not taken as its own.
+  Interfaces made by releases before 0.4.0 carry `jailops:<id>` and get the readable text on the first pass.
 - A jail attached with plain `--network NAME` gets one address of every family the network has, the default route, and
   `resolv.conf` from the network's `dns`.
 

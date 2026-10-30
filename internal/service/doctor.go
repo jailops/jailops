@@ -33,6 +33,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorKernel(ctx, c)
 	s.doctorSysctl(ctx, c)
 	s.doctorHost(ctx, c)
+	s.doctorHostIdentity(ctx, c)
 	s.doctorZFS(ctx, c)
 	s.doctorVolumes(ctx, c)
 	s.doctorPF(ctx, c)
@@ -41,9 +42,13 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorStaticARP(ctx, c)
 	s.doctorDNS(c)
 	s.doctorRuntime(ctx, c)
+	s.doctorDescriptions(ctx, c)
+	s.doctorWireGuard(ctx, c)
 	s.doctorAppsLocal(c)
+	s.doctorAppsAccess(ctx, c)
+	s.doctorRateLimits(c)
 	rep := api.DoctorReport{Time: s.now().UTC(), Host: s.d.Hostname, Checks: c.list, Status: api.DoctorOK}
-	rank := map[api.DoctorStatus]int{api.DoctorOK: 0, api.DoctorUnknown: 1, api.DoctorWarn: 2, api.DoctorFail: 3}
+	rank := map[api.DoctorStatus]int{api.DoctorOK: 0, api.DoctorInfo: 0, api.DoctorUnknown: 1, api.DoctorWarn: 2, api.DoctorFail: 3}
 	for _, ch := range c.list {
 		if rank[ch.Status] > rank[rep.Status] {
 			rep.Status = ch.Status
@@ -343,10 +348,14 @@ func (s *Service) doctorRuntime(ctx context.Context, c *checkSet) {
 	}
 	// Stale epairs.
 	if s.d.Net != nil {
-		known := map[string]bool{}
+		known := map[string]bool{}     // jail ids (the marker of earlier releases)
+		knownBase := map[string]bool{} // the jail part of epair names
 		s.mu.RLock()
 		for _, e := range s.jails {
 			known[e.jail.Metadata.UUID] = true
+			if h, _, err := ipam.EpairNames(e.jail.Metadata.UUID, 0); err == nil {
+				knownBase[h[:len(h)-3]] = true
+			}
 		}
 		s.mu.RUnlock()
 		ifs, err := s.d.Net.List(ctx)
@@ -355,9 +364,14 @@ func (s *Service) doctorRuntime(ctx context.Context, c *checkSet) {
 		} else {
 			var stale []string
 			for _, i := range ifs {
-				if ipam.IsEpairName(i.Name) && strings.HasPrefix(i.Description, "jailops:") && !known[strings.TrimPrefix(i.Description, "jailops:")] {
-					stale = append(stale, i.Name)
+				if !ipam.IsEpairName(i.Name) || !render.IsJailOpsDesc(i.Description) || strings.HasPrefix(i.Description, "jailops net=") {
+					continue
 				}
+				id, legacy := strings.CutPrefix(i.Description, "jailops:")
+				if knownBase[i.Name[:len(i.Name)-3]] || legacy && known[id] {
+					continue
+				}
+				stale = append(stale, i.Name)
 			}
 			if len(stale) > 0 {
 				c.add("network.epairs", api.DoctorWarn, "epairs without a jail: "+strings.Join(stale, ", "), "the reconciler removes them on its next pass")

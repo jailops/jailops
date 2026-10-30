@@ -14,6 +14,7 @@ import (
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/internal/wireguard"
 )
 
 // Clients is everything jailopsd needs from the operating system. In
@@ -36,6 +37,10 @@ type Clients struct {
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
 	// Host is the helper (nil in tests); the NDP proxy opens BPF through it.
 	Host priv.Host
+	// HostSystem changes the host itself (host management; the helper in production, nil: unsupported).
+	HostSystem service.HostSystem
+	// WG configures WireGuard interfaces (the helper; nil means unsupported).
+	WG wireguard.Host
 	// Closer releases the connection.
 	Closer io.Closer
 }
@@ -46,7 +51,7 @@ type ClientFactory func(ctx context.Context, cfg *Config, dev bool) (*Clients, e
 
 func fromHost(h priv.Host, files service.FS) *Clients {
 	return &Clients{ZFS: h.ZFS(), Jails: h.Jails(), PF: h.PF(), Net: h.Net(), Runner: h.Runner(), Files: files, Logs: h,
-		Sysctl: h.Sysctl, Mount: h.Mount, Unmount: h.Unmount, Host: h}
+		Sysctl: h.Sysctl, Mount: h.Mount, Unmount: h.Unmount, Host: h, HostSystem: h, WG: h}
 }
 
 func privConfig(cfg *Config) priv.Config {

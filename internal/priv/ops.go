@@ -107,6 +107,13 @@ const (
 
 	OpExecSession = "jail.session"
 
+	// Host management, module identity (host.go): read needs nothing, apply and restore the admin assertion and
+	// host-manage = identity in priv.conf.
+	OpHostIdentityRead    = "host.identity.read"
+	OpHostIdentityApply   = "host.identity.apply"
+	OpHostSnapshotList    = "host.snapshot.list"
+	OpHostSnapshotRestore = "host.snapshot.restore"
+
 	OpSysctl    = "sys.sysctl"
 	OpNDPOpen   = "ndp.open"
 	OpNDPAnswer = "ndp.answer"

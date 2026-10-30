@@ -66,6 +66,12 @@ supported. `jailops doctor` fails on anything older than 15.1.
    A feature that is not implemented returns `unsupported`, it does not pretend.
 8. **Pure Go.** `CGO_ENABLED=0`. The one place CGO may be admitted is the Raft library
    decision (section 11), isolated behind a build tag.
+9. **The host belongs to its administrator, unless they hand a part of it over.** By default JailOps manages jails
+   and never edits the host's own configuration (`pf.conf`, `rc.conf`, `resolv.conf`). Appliance mode is the explicit,
+   per-module exception: a module (identity, firewall, network, updates, system, storage) is managed only when both
+   `jailopsd.yaml` (`host.manage.modules`) and `priv.conf` (`host-manage`) list it, and then it owns an exact list of
+   files and variables, previews every change as a diff, snapshots what it touches and reports hand edits as drift.
+   See [appliance.md](appliance.md); only the identity module is built.
 
 ## 2. Components
 
@@ -219,7 +225,7 @@ debootstrap (Debian) generation, which is refused.
 One model: **managed VNET bridges with deterministic address allocation**.
 
 - Every jail uses VNET and one or more epair interfaces on a bridge that JailOps created
-  (`jo<n>`, description `jailops:<id>`). Shared-IP and host-networked jails are not supported.
+  (`jo<n>`, description `jailops net=<network> bridge`). Shared-IP and host-networked jails are not supported.
 - A network defines subnets, a **gateway that is a real address owned by the host**, and an allocation **range**.
   The gateway lives on the host end (`<bridge>gb`) of a gateway epair whose other end (`<bridge>ga`) is a port of
   the bridge; the bridge itself carries no address (section 18.9 explains why: the host's pf sees a jail's traffic
@@ -231,6 +237,19 @@ One model: **managed VNET bridges with deterministic address allocation**.
 - Epair names derive from the jail id, MAC addresses derive from the jail UUID. Reconcile
   removes epairs that belong to no jail.
 - JailOps never modifies a bridge it did not create.
+- **Every interface JailOps makes says what it is** in its description (`ifconfig` shows `description: TEXT`), one
+  short line of at most 64 characters of `A-Za-z0-9 ._:/=()-`, built from names only (`render/ifdesc.go`, golden-tested):
+  `jailops net=<network> bridge`, `jailops net=<network> gateway (bridge side)` and `(host side)` for the gateway pair,
+  `jailops jail=<project>/<jail> net=<network> (host side)` and `(jail side)` for the two ends of a jail's epair, and
+  `jailops wireguard=<name>` (section 5.3). A name that does not fit is cut and ends in `..`, the same way every time.
+  The description is set when the interface is made; the jail end is described from the host with
+  `ifconfig -j <jail> <if> description ...` once it is in the jail's vnet (the jail's poststart hook, then the reconcile
+  loop). The loop repairs a missing or different description of an interface JailOps owns and touches no other:
+  a network's bridge and gateway pair are its own when they carry the network's text or the `jailops:<uuid>` marker of
+  releases before 0.4.0 (which the loop replaces); a jail's epairs are named after the jail's id, so the name alone
+  makes them the jail's (the jail end is checked once per start of the jail); a WireGuard interface is the one the helper
+  recorded creating. A bridge without any description is not taken (it may be anybody's). `jailops doctor` reports
+  `net.descriptions`. The helper writes only descriptions that start with `jailops` and fit the character set.
 
 IPv6 has two modes:
 
@@ -298,7 +317,42 @@ the renderer proves that every referenced table is defined. Runtime table entrie
 reloaded, so contents are rendered into the anchor. The
 administrator adds three lines to `pf.conf` once (`nat-anchor`, `rdr-anchor`, `anchor`). pf insists on an order: `nat-anchor` and `rdr-anchor` belong with the translation rules, before the first `block` or `pass` rule, and `anchor` among the filter rules (appending all three to the end of a file that already has filter rules fails with "Rules must be in order"; found on a host with a real ruleset). Reload with `pfctl -f /etc/pf.conf`. JailOps
 never owns `pf.conf`. A ruleset is rendered, validated with `pfctl -n`, loaded in one operation
-and read back. There is no read-modify-write. Raw PF requires `admin`.
+and read back. There is no read-modify-write. Raw PF requires `admin`. The one exception is the planned host firewall module of
+appliance mode ([appliance.md](appliance.md)): when an administrator enables it in both configuration files, and only
+then, JailOps renders `pf.conf` around the same jail anchors. It is not built.
+
+### 5.3 WireGuard tunnels
+
+A `WireGuard` object (`/api/v1/wireguard/{name}`, extension `wireguard`; operator reads, admin changes) is a tunnel of
+the host: a **server** with a listen port and enrolled peers, or a **client** made from a join token
+([wireguard.md](wireguard.md)). The spec holds public parts only (addresses, port, endpoint, the pool or the routed
+prefixes, peers' public keys and addresses, the JailOps networks a server's peers may reach); the status adds the
+interface's public key and what `wg show <if> dump` reports per peer.
+
+- **Keys** are made and kept by the helper (`wg genkey`, `wg genpsk`, `wg pubkey` with the key on standard input) in
+  `<wireguard-dir>/<name>/` (default `/var/db/jailops-priv/wireguard`, root, 0700; files 0600), a directory outside
+  everything the daemon writes. The configuration reaches the kernel through `wg syncconf <if> <0600 file in that
+  directory>`, removed afterwards. Private and preshared keys never reach a command line, the API, the audit log or
+  a log. Enrollment (`peer add`) returns the peer's private key and preshared key once, inside a join token
+  (`jwg1.<base64url(JSON)>`), and keeps only the public key and the preshared key.
+- **Interfaces** are created by the helper (`ifconfig wg create`, renamed to `wg-<name>`), recorded as its own, described
+  `jailops wireguard=<name>`, and recreated by the reconcile loop like bridges (nothing in `rc.conf`). An interface of
+  that name the helper did not create is refused. `if_wg` is loaded through the module list of the host pass.
+- **pf**: a server with networks gets the anchor `jailops/wg.<name>` (a dot, like `jailops/net.<name>`, so it never meets
+  a project's anchor), which passes the tunnel's subnets to those networks and nothing else. The host's `pf.conf` needs
+  one rule for the listen port; JailOps prints it and `jailops doctor` checks for it (`wireguard.firewall`), with
+  `wireguard.tools` (the wg program, the module) and `wireguard.forwarding`.
+- The helper's WireGuard operations (`wg.keys`, `wg.peer_keys`, `wg.import`, `wg.apply`, `wg.remove`, `wg.show`,
+  `wg.tools`) are typed; `wg` is not on the command allow-list. Every one that changes something needs the admin
+  assertion.
+
+A jail's anchor holds, in this order: the project's mandatory policy, the jail's **managed access policy** when it has
+one, the jail's own policy, the isolation of projects and the defaults. The managed policy `app-<jail>` (`managed_by:
+app-access`) is written only by `jailops app allow` and `deny` (8.7, apps.md "Who may connect"); the firewall routes
+refuse to change or delete it. An app's jail gets it, denying by default, when the installation ends: the default of the
+anchor is then deny whatever the jail's own policy says, and each grant is a `quick` allow rule for one source. A jail
+that is the source of a grant in another project gets one too, without a default, holding the outbound rule that its
+project's isolation would otherwise block.
 
 ## 6. Jails, Linuxulator and Alpine
 
@@ -673,6 +727,18 @@ in-jail exec, `sockstat`, the names of files below `/usr/local/etc` and `/var/lo
 and the owners of the app's directories (`stat`). It never reads a configuration file and leaves a secret-looking
 rc.conf knob out. Both write files that validate, with `TODO` markers that `jailops app validate` reports per line.
 
+**Who may connect** (apps.md, extension `app_access`). An installed app is closed: its installation ends by creating the
+managed firewall policy `app-<jail>` (5.2), denying by default. `jailops app allow APP from SOURCE` (`POST
+/api/v1/jails/<n>/access`, operator in the project, audited, answered at once and never kept as an operation result)
+adds an allow rule for one source (`@jail`, `@project/jail`, `@address-set`, an address or prefix, `host`) and, for a
+definition with the optional `access:` block (`type: postgresql`), makes a role and a database with `psql` run as
+`postgres` in the jail with the statements on stdin, sends the server only a SCRAM-SHA-256 verifier of a generated
+password, writes a managed block of `pg_hba.conf` through the helper's file operations, sets `listen_addresses` once and
+returns the connection string once. `deny` takes it back; a role is never changed or dropped unless the registry (state
+kind `AppAccess`) says JailOps made it, and no password is stored anywhere. `GET .../access` and doctor's `apps.access`
+show each grant with its rules, rendered anchor lines and `pg_hba.conf` lines, and what is missing on the host.
+UNVERIFIED on FreeBSD until the `postgresql-access` block of the end-to-end test has run.
+
 ## 9. Backup
 
 First-class and a release gate for 1.0. Backup and replication are different features with different
@@ -987,12 +1053,13 @@ Open:
 | The `zfs diff` accelerator | Not built (L1 capture); the stat walk is used |
 | Replication between hosts | The primitives work (`internal/replicate` is a library); no API route or CLI command exists, so nothing a user can type replicates a jail |
 | Upgrades between JailOps versions | Not tried |
-| Rate-limit shaper | Limits are stored and reported; nothing enforces them, and no error says so |
+| Rate-limit shaper | Limits are stored and reported, and nothing enforces them: the jail says so (`status.warnings`, the `RateLimit` condition, a warning after `config set`) and doctor reports `jails.rate_limits` as `info` ("not enforced yet"). No shaper is built |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
 | Jail logs through the helper | `fs.list_logs` and `fs.tail_file` are tested against real directories, symlinks and a fifo on the development host and over the socket; reading a running jail's `/var/log/messages` on a FreeBSD host, a stopped jail (unmounted root: `busy`), a jail with `/var` on its own persistent dataset, and a rotation under `-f` have not been run there |
 | Jail usage (`rctl -u`) | The parser follows the `resource=amount` format of rctl(8) (`maxproc`, `cputime`, `memoryuse`) and the helper rule is tested with fakes; neither has run against a host with `kern.racct.enable=1`. Interface counters are not reported: FreeBSD's `ifconfig` prints none, and `netstat -I` would need a rule of its own |
-| Proxy (port-forward) redirects on the uplink | Rendered; not verified |
+| Proxy (port-forward) redirects on the uplink | Rendered, and covered by phase 11 of `scripts/ci-freebsd-pf.sh`: a network's uplink is one end of an epair whose other end sits in a plain VNET jail that stands for a client on the uplink's network; its connection to the uplink address on the forwarded port reaches the jail through `rdr-anchor "jailops/*"`, the project anchor and the jail anchor, and a port that is not forwarded stays closed. The host cannot test a forward against itself (what it sends to its own address never arrives on an interface). Not covered: a physical uplink with a real remote machine. UNVERIFIED until the phase has run on a FreeBSD host |
 | `zfs_delegation` | Accepted (global admin only) and rendered into `jail.conf`; the helper does not hand datasets over, so the jail does not see them and no error says so |
+| Access to installed apps (`jailops app allow`, `deny`) | Built and tested against fakes of the jail runtime, pf and the file system, the helper's real checks for the psql, chown, chmod and restart vectors and the `pg_hba.conf` write, and the SCRAM verifier against RFC 7677. Not run on a host: an app closed by its managed policy (and the host's own connections refused), the rule of a grant in the loaded anchor, psql as postgres with the statements on stdin in a jail, the restart for `listen_addresses`, a client connecting with the printed string (the `postgresql-access` block of `scripts/ci-freebsd-e2e.sh`); cross-project grants and IPv6 sources are not in that block |
 | `sysvipc` and the console log | `sysvmsg/sysvsem/sysvshm = new` and `exec.consolelog` are rendered, accepted by the helper and tested against fakes; PostgreSQL's `initdb` in a jail with them, and a forgejo start (daemon(8) without `-f`) no longer holding `jail -c`, have not been run on a host |
 | App service start wrapper and package ownership | The `/bin/sh -c` start wrapper is tested with a real `sh` on the development host, not in a jail; the `chown` setup lines of the catalog (`pkg -r` leaves the directories of a package's user root-owned) are written from the ports' layout and not yet run |
 | App drafts (`jailops app export`) | The parsers of `sockstat -4 -6 -l -q`, `find ... -newer /var/db/pkg/local.sqlite`, `stat -f "%Su:%Sg %N"` and `pkg query -e "%a = 0" "%n %v %R %w"` (that `%R` is the repository a `pkg -r` installation recorded) are tested on written samples and the helper rule against the real allow-list; none of them has run in a jail on a host. The worked example of apps.md (memcached: the `memcached_flags` knob and the pid directory `/var/run/memcached` given to `nobody`) has not been installed on a host |
@@ -1006,6 +1073,10 @@ Open:
 | Fleet examples on a real host | `examples/` are applied to in-memory hosts and checked with the daemon's validators; no example has been applied to a real host. `build: true` (first image build through `jailops-sync`) and an IPv6 network created by sync are fake-tested only |
 | `examples/provisioning/bootstrap.sh`, `nuageinit` user-data | Syntax-checked; not run on a fresh VM or a cloud provider. Provisioning `pkg install` inside a pkgbase jail is unverified, and the fixed order packages, files, services, commands means a private pkg repository must be installed with commands |
 | Unix socket identity (root = global admin, other peers anonymous) | Tested in process with fabricated peer credentials and a real socket as a non-root user. Not yet run on FreeBSD: the uid that `LOCAL_PEERCRED` reports for `sudo jailops ...`, for a non-root user, and for an ssh-forwarded socket; `temp/verify-identity.sh` is the prepared check |
+| Appliance mode, module 1 (identity) | Built and tested against real files in temporary directories, the helper's rules over its socket and fake commands; never run on FreeBSD. Open: `sysrc -f /etc/rc.conf` on a stock file, `service ntpd onestop` when ntpd is not running, the `ntpq -pn` output on 15.1, `hostname(1)`, and a restore putting the originals back byte for byte. `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_HOST=1` (it changes the host's name and resolvers). `resolvconf(8)` on DHCP hosts rewrites `resolv.conf` (reported as drift); `rc.conf.local` is not read ([appliance.md](appliance.md)) |
+| Appliance mode, modules 2 to 6 | Not built: host firewall, network, updates, system, storage overview, commit confirmed (the helper's revert timer and the boot-time revert), boot environments before a change, the first-boot wizard and the installer image are design only ([appliance.md](appliance.md)) |
+| Interface descriptions | Rendered, golden-tested and applied through fakes, the helper rules tested against the real allow-list; not run on a host: that a description set on an epair end survives its move into a vnet (JailOps sets the jail end from the host after the move anyway), `ifconfig -j <jail> <if> description` and `ifconfig -j <jail> <if>` from the host, and the end-to-end block of `scripts/ci-freebsd-e2e.sh` |
+| WireGuard | The helper's operations are tested over the socket with a stand-in for `wg` and `ifconfig`, the token, the configuration file, the `wg show dump` parser and the allocator with unit tests; nothing has run on a host: `ifconfig wg create` and a rename with `-`, `wg syncconf` and the dump format of FreeBSD's `wg`, whether 15.1 has `wg` in the base system, a pf rule naming `wg-office`, a handshake over the loopback (the end-to-end block skips without `if_wg` or `wg`), traffic from a peer into a jail through `jailops/wg.<name>` |
 | API exposure on a real network | TLS 1.3 only, certificate reload, a configured certificate never generated over and the web switch are tested in process; a public listener, a CA-signed certificate with renewal, and a proxy or Cloudflare tunnel in front are not tried. ACME, a require-client-certificate mode and the caller's address behind a proxy are not implemented (docs/exposure.md) |
 
 ## 17. Acknowledgements
@@ -1203,6 +1274,9 @@ The daemon is untrusted by the helper. Consequences that the code now enforces:
 - Inputs that root-run tools read later (pkg repository files, jail fstabs, devfs rules) are validated when they are
   written or just before use, with allow-lists rather than deny-lists.
 - File agents are chrooted children with a lifetime limit and a global cap.
+- WireGuard keys live in the helper's own directory (`wireguard-dir`, default `/var/db/jailops-priv/wireguard`), outside
+  the daemon's data directory: the helper checks that it and its parent belong to root and that nobody else may write
+  them, opens it as a root of its own (no link leads out), and writes keys with mode 0600 (section 5.3).
 
 **What the helper does not defend against.** The helper takes the admin assertion of a request from the request itself:
 the daemon states which authenticated API user an operation is for, and the helper cannot check that, because the
@@ -1557,8 +1631,10 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   `POST /api/v1/jails/<n>/config` applies keys atomically and returns `restart_required`; a jail is restarted only with
   `?restart=true`. Devices are named (`nic` MTU and rate limits, `disk`, `devfs` from an allow-list, `proxy`);
   profiles are project-level or host-level (`?project=host`). The effective spec (jail over profiles) is computed
-  where it is used: render, admission, quotas, locks. Rate limits are stored and reported as a `RateLimit` condition;
-  no shaper enforces them yet. UNVERIFIED: loading the devfs ruleset by the helper, proxy redirects on the uplink.
+  where it is used: render, admission, quotas, locks. Rate limits are stored and reported as a `RateLimit` condition,
+  as a warning on the jail (`status.warnings`, printed by `config set`) and as the `info` check `jails.rate_limits` of
+  doctor; no shaper enforces them yet. UNVERIFIED: loading the devfs ruleset by the helper; proxy redirects on the
+  uplink are covered by phase 11 of `scripts/ci-freebsd-pf.sh`, which has not run on a host yet.
 - **Exec (8.3).** `POST /api/v1/jails/<n>/exec` upgrades to a framed stream (`PROTOCOL.md`, Exec). The daemon takes the
   backend as `service.JailExecer`; the helper client provides it, `--dev` uses `jexec -l` in process. Limits per
   jail, idle and total time are configuration (`limits.exec_*`). The helper side and TTY handling ran on FreeBSD 15.1 (18.2).

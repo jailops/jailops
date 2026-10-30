@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { s } from '@/i18n'
-import { can } from '@jailops/shared/composables/session'
+import { can, hasExt } from '@jailops/shared/composables/session'
 import { projectState } from '@/composables/project'
 import { LABEL_APP, LABEL_HASH, LABEL_VERSION, openLinks } from '@/lib/apps'
 import type { ApiError } from '@jailops/shared/api/client'
@@ -58,6 +58,7 @@ const appOf = (j: Jail) => j.metadata.labels?.[LABEL_APP] ?? ''
                 <td class="hide-sm"><span v-for="p in details[appOf(j)]?.definition.ports ?? []" :key="p.port + p.proto" class="chip mono" :title="p.description">{{ p.name }} {{ p.port }}/{{ p.proto }}</span></td>
                 <td class="nowrap">
                   <a v-for="o in openLinks(j, details[appOf(j)]?.definition.ports)" :key="o.url" class="btn btn-sm" :href="o.url" target="_blank" rel="noopener noreferrer" :title="s.apps.openTitle(o.url)" :aria-label="s.apps.openTitle(o.url)" :data-test="`open-${j.metadata.name}`"><Icon name="externalLink" />{{ s.apps.open }}</a>
+                  <router-link v-if="hasExt('app_access')" class="btn btn-sm btn-ghost" :to="{ path: `/jails/${j.metadata.name}`, query: { tab: 'access' } }" :data-test="`access-${j.metadata.name}`"><Icon name="shield" />{{ s.appAccess.tab }}</router-link>
                   <router-link class="btn btn-sm btn-ghost" :to="{ path: `/jails/${j.metadata.name}`, query: { tab: 'logs' } }"><Icon name="fileText" />{{ s.logs.tab }}</router-link>
                 </td>
               </tr>

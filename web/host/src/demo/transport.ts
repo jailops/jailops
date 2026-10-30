@@ -7,6 +7,10 @@ import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolic
 import * as d from './data'
 import * as d2 from './data2'
 import * as da from './apps'
+import * as dh from './host'
+import { validDNSName } from '@/lib/host'
+import * as dw from './wireguard'
+import { demoAccess } from './access'
 import { volumeName } from '@/lib/apps'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
 import { loadChoice, saveChoice } from '@/lib/projectScope'
@@ -42,6 +46,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     remotes: d.remotes(), audit: d.audit(), tokens: d.tokens(), users: d.users(), certs: d.certificates(),
     ops: [] as DemoOp[],
     storage: d2.storages(), sessions: d2.sessions(), certs2: d2.certificates(), profiles: d2.profiles(), updates: [] as import('@jailops/shared/api/types').UpdateReport[], history: {} as Record<string, import('@jailops/shared/api/types').UpdateRecord[]>, projects: [] as ReturnType<typeof d2.projects>,
+    host: dh.hostState(),
+    wireguard: dw.tunnels(),
     key: { status: 'present' as 'none' | 'present' | 'escrowed', domain: 'kd-7f3a91', path: '/var/db/jailops/backup.key' },
   }
   for (const j of db.jails) {
@@ -57,13 +63,14 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     // A host that was just installed: nothing is configured yet (`?demo=empty`).
     db.jails = []; db.snaps = {} as typeof db.snaps; db.images = []; db.networks = []; db.leases = {} as typeof db.leases
     db.storage = []; db.profiles = { project: [], host: [] } as typeof db.profiles; db.updates = []; db.policies = []; db.sets = []
-    db.targets = []; db.bpol = []; db.backups = []; db.remotes = []
+    db.targets = []; db.bpol = []; db.backups = []; db.remotes = []; db.wireguard = []
   }
   const countByProject = () => { const c: Record<string, number> = {}; for (const j of db.jails) c[j.metadata.project ?? ''] = (c[j.metadata.project ?? ''] ?? 0) + 1; return c }
   db.projects = d2.projects(countByProject())
   if (typeof location !== 'undefined' && location.search.includes('empty')) db.projects = []
   const shells = new Map<string, { h: StreamHandlers; line: string; jail: string }>()
   const logs = da.demoLogs()
+  const access = demoAccess(() => db.jails, () => db.sets, (app) => { const x = da.detail(app); return x && x !== 'invalid' ? x.definition : undefined })
   for (const o of d.operations()) db.ops.push({ ...o, startedAt: Date.parse(o.created_at), duration: o.status === 'running' ? 600_000 : 0, done: o.status !== 'running' })
   const subs = new Set<StreamHandlers>()
   const pending: Array<{ jail: string; to: PowerState; at: number }> = []
@@ -224,6 +231,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         { name: 'pf.anchor.mail', status: 'fail', message: 'anchor jailops/mail is not loaded', hint: 'Fix the syntax error at line 14 of the policy mail-edge, then run jailops reconcile.', detail: { policy: 'mail-edge', line: '14' } },
         { name: 'linuxulator', status: 'warn', message: 'linprocfs is not mounted', hint: 'Add linprocfs to /etc/fstab.' },
         { name: 'jail.kernel.vimage', status: 'unknown', message: 'could not be determined on this platform' },
+        { name: 'apps.access', status: 'ok', message: '2 grant(s); every firewall rule and pg_hba.conf line is in place' },
+        { name: 'jails.rate_limits', status: 'info', message: '1 jail(s) set a rate limit, which is not enforced yet: web/web', hint: 'the limits are stored and reported; traffic is not shaped until a later version wires a shaper' },
       ] })
       case 'restores': return restore(body)
       case 'remotes': return ok(db.remotes)
@@ -454,10 +463,84 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
     return undefined
   }
+  function hostRoute(seg: string[], m: string, body: Record<string, any>): RawResponse | undefined {
+    if (seg[1] === 'identity' && m === 'GET') return ok(dh.identity(db.host))
+    if (seg[1] === 'identity' && m === 'PUT') {
+      const spec = body.spec ?? {}
+      if (spec.hostname && !validDNSName(spec.hostname)) return fail(400, { code: 'invalid', message: `hostname "${spec.hostname}" is not a valid host name` })
+      const r = dh.applyIdentity(db.host, spec, !!body.dry_run)
+      if (!r.dry_run && r.changed) emit('host-identity-updated', '/api/v1/host/identity')
+      return ok(r)
+    }
+    if (seg[1] === 'snapshots' && seg.length === 2 && m === 'GET') return ok(dh.snapshots(db.host))
+    if (seg[1] === 'snapshots' && seg[3] === 'restore' && m === 'POST') {
+      const r = dh.restoreSnapshot(db.host, seg[2], !!body.dry_run)
+      return r ? ok(r) : fail(404, { code: 'not_found', message: `snapshot ${seg[2]} not found` })
+    }
+    return undefined
+  }
+
+  function wireguardRoute(seg: string[], m: string, body: Record<string, any>): RawResponse {
+    const wg = (n: string) => db.wireguard.find((w) => w.metadata.name === n)
+    const missing = (n: string) => fail(404, { code: 'not_found', message: `wireguard "${n}" not found` })
+    const touch = (w: import('@jailops/shared/api/types').WireGuard) => { w.metadata.generation = (w.metadata.generation ?? 0) + 1; w.metadata.updated_at = new Date().toISOString(); emit('wireguard-updated', `/api/v1/wireguard/${w.metadata.name}`) }
+    if (seg.length === 1 && m === 'GET') return ok(db.wireguard.map(dw.observe))
+    if (seg.length === 1 && m === 'POST') {
+      const name = String(body.metadata?.name ?? '')
+      if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9-]{0,62}$` })
+      if (wg(name)) return fail(409, { code: 'already_exists', message: `wireguard "${name}" already exists` })
+      const port = body.spec?.listen_port ?? 51820
+      if (db.wireguard.some((w) => w.spec.listen_port === port)) return fail(409, { code: 'already_exists', message: `listen port ${port} is used by another tunnel` })
+      const addr: string[] = body.spec?.address ?? []
+      const w = {
+        metadata: { name, scope: 'fleet' as const, generation: 1, created_at: new Date().toISOString() },
+        spec: { ...body.spec, interface: `wg-${name}`, listen_port: port, allowed_ips: addr.map((a) => (a.includes(':') ? a.replace(/::[0-9a-f]*\//, '::/') : a.replace(/\.\d+\/(\d+)$/, '.0/$1'))), endpoint: body.spec?.endpoint || `vpn.example.com:${port}`, peers: [] },
+        status: { public_key: dw.demoKey(), interface: `wg-${name}`, up: true, listen_port: port, firewall_rule: `pass in on $ext_if proto udp to port ${port}`, peers: [], conditions: [] },
+      }
+      db.wireguard.push(w)
+      emit('wireguard-created', `/api/v1/wireguard/${name}`)
+      return { ...ok(dw.observe(w)), status: 201 }
+    }
+    if (seg[1] === 'join' && m === 'POST') {
+      const w = dw.fromToken(String(body.token ?? ''), body.name)
+      if (!w) return fail(400, { code: 'invalid', message: 'not a WireGuard join token', hint: 'copy the whole token that `jailops wireguard peer add` printed; it starts with jwg1.' })
+      if (wg(w.metadata.name)) return fail(409, { code: 'already_exists', message: `wireguard "${w.metadata.name}" already exists` })
+      db.wireguard.push(w)
+      emit('wireguard-created', `/api/v1/wireguard/${w.metadata.name}`)
+      return { ...ok(dw.observe(w)), status: 201 }
+    }
+    const w = wg(seg[1])
+    if (!w) return missing(seg[1])
+    if (seg.length === 2 && m === 'GET') return ok(dw.observe(w))
+    if (seg.length === 2 && m === 'DELETE') { db.wireguard = db.wireguard.filter((x) => x !== w); emit('wireguard-deleted', `/api/v1/wireguard/${w.metadata.name}`); return ok({}) }
+    if (seg[2] === 'peers' && m === 'POST' && seg.length === 3) {
+      if (w.spec.mode !== 'server') return fail(400, { code: 'invalid', message: `wireguard "${w.metadata.name}" is a client; peers are added on the server` })
+      const name = String(body.name ?? '')
+      if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9-]{0,62}$` })
+      if ((w.spec.peers ?? []).some((p) => p.name === name)) return fail(409, { code: 'already_exists', message: `peer "${name}" of wireguard "${w.metadata.name}" already exists`, hint: 'remove it first to issue a new token' })
+      const out = dw.enroll(w, name, body.address)
+      touch(w)
+      return { ...ok(out), status: 201 }
+    }
+    if (seg[2] === 'peers' && m === 'DELETE' && seg[3]) {
+      if (!(w.spec.peers ?? []).some((p) => p.name === seg[3])) return fail(404, { code: 'not_found', message: `peer "${seg[3]}" not found` })
+      w.spec.peers = (w.spec.peers ?? []).filter((p) => p.name !== seg[3])
+      touch(w)
+      return ok(dw.observe(w))
+    }
+    if ((seg[2] === 'up' || seg[2] === 'down') && m === 'POST') { w.spec.down = seg[2] === 'down'; touch(w); return ok(dw.observe(w)) }
+    if (seg[2] === 'rotate-keys' && m === 'POST') {
+      w.status.public_key = dw.demoKey()
+      return ok({ public_key: w.status.public_key, warning: w.spec.mode === 'server' ? 'every peer must be given the new public key: issue new tokens (jailops wireguard peer remove, then peer add)' : 'the server of this client must be given the new public key: remove the peer there and enroll it again' })
+    }
+    return fail(404, { code: 'not_found', message: `No such route: ${m} /wireguard/${seg.slice(1).join('/')}` })
+  }
   function extraRoutes(seg: string[], m: string, body: Record<string, any>, url: URL, req: RawRequest, project: string): RawResponse | undefined {
     const name = seg[1]
     switch (seg[0]) {
       case 'apps': return appsRoute(seg, m, body, project)
+      case 'host': return hostRoute(seg, m, body)
+      case 'wireguard': return wireguardRoute(seg, m, body)
       case 'projects': {
         if (seg.length === 1 && m === 'GET') return ok(db.projects)
         if (seg.length === 1 && m === 'POST') {
@@ -571,6 +654,14 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (!j || !seg[2]) return undefined
         const src = `/api/v1/jails/${name}`
         if (seg[2] === 'updates' && m === 'GET') return ok(db.history[name] ?? [])
+        if (seg[2] === 'access') {
+          if (!j.metadata.labels?.[da.LABEL]) return fail(400, { code: 'invalid', message: `jail "${name}" was not installed from the catalog (it has no label jailops.app)` })
+          if (seg.length === 3 && m === 'GET') return ok(access.get(j))
+          const r = seg.length === 3 && m === 'POST' ? access.allow(j, body as never) : seg[3] === 'deny' && m === 'POST' ? access.deny(j, body as never) : undefined
+          if (!r) return undefined
+          if ('ok' in r) return ok(r.ok)
+          return fail(r.status, { code: r.code, message: r.message, hint: r.hint } as ApiErrorBody)
+        }
         if (seg[2] === 'logs' && m === 'GET') {
           const app = j.metadata.labels?.[da.LABEL] ?? ''
           // A stopped jail's root is not mounted: the server answers busy and says how to mount it.
@@ -667,6 +758,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
     return startOp(`Install app ${a.name} as jail ${jail}`, { jails: [src] }, 5000, () => {
       db.jails.push(j)
+      access.install(jail)
       db.snaps[jail] = [{ metadata: { name: 'app-installed', scope: 'host', created_at: new Date().toISOString() }, spec: { jail, comment: `installation of ${a.name}` }, status: { written: 0 } }]
       for (const ev of ['jail-created', 'jail-started', 'jail-snapshot-created', 'app.installed']) emit(ev, src)
     }, result, false)

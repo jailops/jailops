@@ -13,6 +13,7 @@ import (
 
 	"jailops.net/jailops/internal/ndproxy"
 	"jailops.net/jailops/internal/render"
+	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -21,6 +22,8 @@ import (
 type Desired struct {
 	Networks []NetworkDesired
 	Jails    []JailDesired
+	// WireGuard are the tunnels; the loop recreates their interfaces (after a reboot) and keeps them configured.
+	WireGuard []WireGuardDesired
 	// Host is the kernel state JailOps manages: modules, then sysctls.
 	Host HostDesired
 }
@@ -73,6 +76,9 @@ type JailDesired struct {
 	Bridges []string
 	// Epairs are the host-side interface names the jail should have while it runs.
 	Epairs []string
+	// JailSide are the jail-phase description steps of the jail ends of the epairs: what ifconfig shows inside the
+	// jail's vnet. The loop checks them once per start of the jail (per JID) and repairs a missing or different one.
+	JailSide []render.Step
 	// AnchorName and Ruleset are the PF anchor of the jail; Ruleset is empty
 	// when the jail has no firewall.
 	AnchorName string
@@ -84,6 +90,21 @@ type JailDesired struct {
 	// Proxy lists IPv6 addresses to answer for while the jail runs.
 	Proxy []ProxyAddr
 	// Problem is set when the jail's configuration could not be rendered.
+	Problem string
+}
+
+// WireGuardDesired is one WireGuard tunnel.
+type WireGuardDesired struct {
+	Name  string
+	Iface string
+	// Down: the interface must not exist (the keys stay).
+	Down bool
+	// Apply is what the helper configures (public parts only).
+	Apply wireguard.ApplyReq
+	// Anchor and Ruleset are the pf anchor of a server (jailops/wg.<name>); an empty ruleset flushes it.
+	Anchor  string
+	Ruleset string
+	// Problem is set when the tunnel could not be rendered.
 	Problem string
 }
 

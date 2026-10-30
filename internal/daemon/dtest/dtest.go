@@ -33,6 +33,7 @@ import (
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
@@ -70,6 +71,9 @@ type Options struct {
 	BackupMounter hostbackup.Mounter
 	// ForceWeb and NoWeb are the -web and -no-web flags of the daemon: console on or off, whatever the configuration says.
 	ForceWeb, NoWeb bool
+	// HostManage is host-manage of the simulated helper's priv.conf (the daemon's own list is
+	// Config.Host.Manage.Modules, set with Mutate).
+	HostManage []string
 }
 
 // Env is a running daemon with its fakes.
@@ -85,6 +89,8 @@ type Env struct {
 	Jails *jailos.Fake
 	Run   *run.Fake
 	Files *fakes.Files
+	// WG is the WireGuard part of the helper.
+	WG    *wireguard.Fake
 	Fault *fault.Injector
 	// FakeExec is the exec backend unless Options.Execer replaces it.
 	FakeExec *service.FakeExecer
@@ -107,6 +113,8 @@ type Env struct {
 	PkgInstallErr error
 	// Installed lists what the fake pkg installed into jail roots, "root name".
 	Installed []string
+	// Host is the simulated host of host management.
+	Host *HostSim
 }
 
 // SetDial replaces DialFn while the daemon may be running.
@@ -225,7 +233,7 @@ func New(t testing.TB, o Options) *Env {
 	}
 	if o.Reuse != nil {
 		r := o.Reuse
-		e.ZFS, e.PF, e.Net, e.Jails, e.Run, e.Files, e.Fault = r.ZFS, r.PF, r.Net, r.Jails, r.Run, r.Files, r.Fault
+		e.ZFS, e.PF, e.Net, e.Jails, e.Run, e.Files, e.Fault, e.WG = r.ZFS, r.PF, r.Net, r.Jails, r.Run, r.Files, r.Fault, r.WG
 		e.Dir = r.Dir
 		e.proj = r.proj
 	} else {
@@ -236,7 +244,13 @@ func New(t testing.TB, o Options) *Env {
 		e.Jails = jailos.NewFake()
 		e.Files = fakes.NewFiles(e.Fault)
 		e.Run = run.NewFake()
+		e.WG = wireguard.NewFake()
 		e.script()
+	}
+	if o.Reuse != nil && o.Reuse.Host != nil {
+		e.Host = o.Reuse.Host
+	} else {
+		e.Host = newHostSim(t, filepath.Join(e.Dir, "host"), o.HostManage)
 	}
 	e.Cfg = daemon.Defaults()
 	e.Cfg.Pool = "tank"
@@ -284,7 +298,7 @@ func (e *Env) Start() {
 				Sysctl:  func(_ context.Context, name string) (string, error) { return e.sysctl(name) },
 				Mount:   func(context.Context, string) error { return nil },
 				Unmount: func(context.Context, string) error { return nil },
-				Dial:    e.dial}
+				Dial:    e.dial, HostSystem: e.Host.Local, WG: e.WG}
 			if e.Opts.Clients != nil {
 				e.Opts.Clients(cl)
 			}

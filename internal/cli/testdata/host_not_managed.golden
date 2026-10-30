@@ -1,0 +1,25 @@
+$ jailops host show
+SETTING       VALUE
+hostname      fake-host
+nameservers   198.51.100.1  /etc/resolv.conf
+search        example.org
+ntp servers   -  (the jailops block of /etc/ntp.conf)
+ntpd          enabled
+time          synchronised to 192.0.2.123
+
+Managed:     no
+
+JailOps does not change this host. To let it manage the identity, add to
+/usr/local/etc/jailops/jailopsd.yaml:
+  host:
+    manage:
+      modules: [identity]
+and to /usr/local/etc/jailops/priv.conf:
+  host-manage = identity
+then: service jailops_priv restart && service jailopsd restart
+
+$ jailops host identity set --hostname web1.example.org
+! not_managed: JailOps does not manage the host's identity
+! hint: add `host: {manage: {modules: [identity]}}` to jailopsd.yaml and `host-manage = identity` to priv.conf
+[exit 3]
+

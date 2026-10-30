@@ -12,6 +12,7 @@ JailOps never edits `pf.conf`.
 | `jailops-priv` | `/var/run/jailops/priv.sock` | the small root helper of `jailopsd` | on | nobody, never the network |
 | `jailops-backupd` | **39111**/tcp (`listen`, default `:39111`) | JailOps Backup: backup hosts back up and restore here (mutual TLS, pinned fingerprints) the management API (users, tokens, sessions) and, when `web.enabled`, the backup console | on while the node runs; the console is off (`web.enabled: false`) | the backup hosts, and your admin machines |
 | `jailops-backupd` | `/var/run/jailops-backupd/admin.sock` | the node's admin CLI (root only, mode 0600) | on | nobody |
+| `jailopsd` (a WireGuard server you create) | **51820**/udp, or the tunnel's `listen_port` | the tunnel's peers ([wireguard.md](wireguard.md)) | only while such a tunnel exists | the peers; add `pass in on $ext_if proto udp to port 51820` |
 | `pkgops serve` | **39112**/tcp on `127.0.0.1` (`--listen`) | PkgOps: a package repository, the upload API of the registry and, with `--ui`, its web UI | only while you run `serve` | the hosts that `pkg install` from it and the CI that uploads |
 
 One port per service, and the web UI of each is in the binary and off until you turn it on.

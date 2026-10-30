@@ -78,6 +78,15 @@ func ParseIfconfig(out string) []Iface {
 	return res
 }
 
+// listedName accepts the names ifconfig lists: those ValidateIfName takes, and names with '-' (a WireGuard
+// interface renamed to wg-<name>). Changing an interface still needs ValidateIfName or a validator of its own.
+func listedName(n string) bool {
+	if ValidateIfName(n) == nil {
+		return true
+	}
+	return ValidateIfName(strings.ReplaceAll(n, "-", "_")) == nil
+}
+
 // bracket returns the comma separated words inside the first <...>.
 func bracket(s string) []string {
 	i := strings.IndexByte(s, '<')
@@ -98,7 +107,7 @@ func bracket(s string) []string {
 // parseHeader reads "em0: flags=8843<UP,...> metric 0 mtu 1500".
 func parseHeader(line string) (Iface, bool) {
 	name, rest, ok := strings.Cut(line, ": ")
-	if !ok || name == "" || strings.ContainsAny(name, " \t") || ValidateIfName(name) != nil {
+	if !ok || name == "" || strings.ContainsAny(name, " \t") || !listedName(name) {
 		return Iface{}, false
 	}
 	if !strings.HasPrefix(rest, "flags=") {

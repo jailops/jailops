@@ -151,6 +151,9 @@ type Config struct {
 	StateDir string
 	// WorkDir is the daemon's scratch directory (image builds). Empty: none.
 	WorkDir string
+	// WireGuardDir holds the keys of WireGuard interfaces, one directory per object (default
+	// DefaultWireGuardDir). It belongs to root with mode 0700 and lies outside every directory the daemon writes.
+	WireGuardDir string
 	// noOwnerCheck skips the check that the helper's own directories belong to root (tests).
 	noOwnerCheck bool
 	// HelperPath is the path jail.conf hooks call; only the exact hook
@@ -161,6 +164,12 @@ type Config struct {
 	NDPProxy []NDPUplink
 	// Sysctls extends the read allow-list.
 	Sysctls []string
+	// HostManage lists the host management modules the helper changes (host-manage; docs/appliance.md). Empty:
+	// the host operations only read.
+	HostManage []string
+	// HostDir holds the snapshots of host files and the record of what was applied (default DefaultHostDir). It
+	// belongs to root, mode 0700: the daemon can neither read nor change it.
+	HostDir string
 	Admin   AdminPolicy
 	Limits  Limits
 
@@ -251,6 +260,17 @@ func (c Config) Normalize() (Config, error) {
 			return c, api.Errorf(api.CodeInvalid, "fetch host %q is not a lower case host name", h)
 		}
 	}
+	if c.WireGuardDir == "" {
+		c.WireGuardDir = DefaultWireGuardDir
+	}
+	if !filepath.IsAbs(c.WireGuardDir) || filepath.Clean(c.WireGuardDir) != c.WireGuardDir || filepath.Dir(c.WireGuardDir) == "/" {
+		return c, api.Errorf(api.CodeInvalid, "wireguard directory %q must be a clean absolute path at least two levels deep", c.WireGuardDir)
+	}
+	for _, d := range []string{c.StateDir, c.ConfDir, c.WorkDir, c.MountBase} {
+		if d != "" && (within(d, c.WireGuardDir) || within(c.WireGuardDir, d)) {
+			return c, api.Errorf(api.CodeInvalid, "wireguard directory %q must not overlap %s", c.WireGuardDir, d)
+		}
+	}
 	c.ImageMirrors = append([]string(nil), c.ImageMirrors...)
 	for i, m := range c.ImageMirrors {
 		if !filepath.IsAbs(m) || filepath.Clean(m) == "/" {
@@ -265,6 +285,17 @@ func (c Config) Normalize() (Config, error) {
 		}
 		c.Admin.HostMountRoots[i] = filepath.Clean(r)
 	}
+	if err := c.checkHostManage(); err != nil {
+		return c, err
+	}
+	c.HostManage = append([]string(nil), c.HostManage...)
+	if c.HostDir == "" {
+		c.HostDir = DefaultHostDir
+	}
+	if !filepath.IsAbs(c.HostDir) || filepath.Clean(c.HostDir) == "/" {
+		return c, api.Errorf(api.CodeInvalid, "host directory %q must be an absolute path other than /", c.HostDir)
+	}
+	c.HostDir = filepath.Clean(c.HostDir)
 	c.Limits = c.Limits.fill()
 	return c, nil
 }

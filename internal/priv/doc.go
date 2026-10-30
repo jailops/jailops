@@ -35,6 +35,10 @@
 // solicited-node multicast group of an address needs no helper operation: it is an ordinary IPV6_JOIN_GROUP on a
 // UDP socket the daemon opens itself (unprivileged on FreeBSD; checked on FreeBSD 15.1).
 //
+// Host management (host.go, docs/appliance.md). The identity module's four operations read the host name, resolvers
+// and NTP settings, and, for an admin and only when priv.conf lists the module (host-manage), render and write them
+// from validated fields, keeping copies of the files they change in host-dir, a directory of root's own.
+//
 // Verified on FreeBSD 15.1 (design section 18): peer checks, descriptor passing of the neighbor discovery capture,
 // and the commands the Local implementation runs; what is not yet verified is listed in section 16.
 package priv

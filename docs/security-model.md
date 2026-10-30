@@ -8,7 +8,7 @@ are in [design.md](design.md) section 18.6; this page is what an operator needs.
 | | `jailopsd` | `jailops-priv` |
 |---|---|---|
 | Runs as | the unprivileged user `jailops` | root |
-| Does | the API, authentication, the database, the reconcile loop, the web consoles | the privileged operations: `zfs`, `jail`, `pfctl`, `ifconfig`, `route`, mounts, packet capture for the IPv6 proxy, file access inside jails |
+| Does | the API, authentication, the database, the reconcile loop, the web consoles | the privileged operations: `zfs`, `jail`, `pfctl`, `ifconfig`, `route`, `wg`, mounts, packet capture for the IPv6 proxy, file access inside jails, the keys of WireGuard tunnels |
 | Trusts | its clients, as far as their role and project scope allow | **the daemon not at all** |
 | Configured by | `jailopsd.yaml` | `priv.conf`, owned by root |
 
@@ -41,8 +41,20 @@ a lifetime limit and a global cap.
 | `admin-raw-param`, `admin-allow-flag`, `admin-devfs-ruleset`, `admin-zfs-prop` | set these raw `jail.conf` parameters, `allow.*` flags, devfs rulesets or ZFS properties | nothing |
 | `admin-routes`, `admin-raw-pf`, `admin-resume-send` | change routes, load raw PF, resume a ZFS send | off |
 | `fetch-host` | download from these hosts, over https | the Alpine CDN and `pkg.freebsd.org` |
+| `wireguard-dir` | where the helper keeps the keys of WireGuard tunnels (root, 0700; outside the daemon's directories) | `/var/db/jailops-priv/wireguard` |
 
 **An admin who may set these is root on the host.** Keep the lists short, and write nothing you would not give root.
+
+## Host management (appliance mode)
+
+By default JailOps never changes the host's own configuration. Appliance mode lets it manage parts of the host (so
+far the host name, resolvers and NTP) one module at a time, and only when **both** `jailopsd.yaml`
+(`host.manage.modules`) and `priv.conf` (`host-manage`) list the module: the `priv.conf` line is the boundary, so a
+compromised daemon cannot opt itself in. A module's helper operations take validated fields, never a file body, touch
+an exact list of files and `rc.conf` variables, and need the admin assertion; snapshots are kept in a root-only
+directory (`host-dir`) so a restore can only put back what the helper itself copied. Enable a module only if you would
+let your API admins change what it owns. The details, and the threat model, are in the security section of
+[appliance.md](appliance.md#security).
 
 ## What listens, and how to expose it
 
@@ -130,6 +142,27 @@ operations. It never reads a configuration file, leaves out an rc.conf knob whos
 value holds a shell expansion, and is audited with counts only. A jail's owner can make the draft say anything; the
 person who sends it to the catalog reviews it.
 
+## Who may connect to an app
+
+An installed app is closed: its managed firewall policy denies every inbound connection, the host's included, until
+`jailops app allow` lets a source in (`operator` in the project; for a jail of another project, `operator` there too,
+because that jail's policy gets the outbound rule). The managed policies are written by app access only; the firewall
+routes refuse to change them, so a person cannot widen a grant behind the registry's back, and a jail's own policy
+cannot reopen the closed default. Deleting a jail that is the source of a grant removes the grant's rule at once,
+because its address may be given to another jail.
+
+For a database app, `psql` runs as `postgres` in the jail through the helper's in-jail exec with the statements on its
+standard input: no statement is in an argument vector. The daemon generates the password (32 characters, about 190 bits),
+computes its SCRAM-SHA-256 verifier and sends only the verifier, so the password reaches no statement, server log or
+history; it is in the one answer to the allow and nowhere else (not the registry, the operation journal, the audit log
+or the daemon log). Whoever reads that answer holds the role's password: treat the terminal or the console where it is
+shown accordingly. Database names are checked against `^[a-z][a-z0-9_]{0,62}$` and PostgreSQL's reserved names before
+any SQL is built, and JailOps never alters or drops a role or a database that its registry does not say it made.
+`pg_hba.conf` is written through the helper's file operations below the jail root (they refuse a path outside it and a
+file that is not a regular file) and given back to `postgres` in the jail; the lines it writes always require
+`scram-sha-256`. What a jail's root does to its own PostgreSQL afterwards (another `trust` line above the block) is the
+jail's own business, as before.
+
 ## Projects are not a security boundary against the kernel
 
 A project separates names, quotas, networks and firewall policy. Jails share the host kernel. A high-security tenant needs
@@ -151,3 +184,10 @@ ports JailOps did not create is not covered. A bridge is not a full security bou
 - The backup key is a file on the host; the recovery key is shown once and kept nowhere. The backup node never holds a key.
   See [backup-restore.md](backup-restore.md).
 - Do not put tokens on a command line (visible to other users); use `--token-stdin` or `token_file`.
+- WireGuard: private and preshared keys are made and kept by the helper in `wireguard-dir` (files 0600) and never reach
+  a command line, the API, the audit log or a log. A join token holds a peer's private key and is shown once by
+  `jailops wireguard peer add`; the server keeps only the peer's public key and the preshared key. `jailops wireguard
+  join -` reads a token from standard input. Reading tunnels needs the operator role, changing them a global admin.
+  See [wireguard.md](wireguard.md).
+- Interface descriptions are built from names only and checked by the helper (`jailops ...`, at most 64 characters of
+  `A-Za-z0-9 ._:/=()-`): nothing a user types reaches `ifconfig` as free text.

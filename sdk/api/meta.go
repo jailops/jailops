@@ -43,6 +43,7 @@ const (
 	KindOperation       Kind = "Operation"
 	KindProject         Kind = "Project"
 	KindStorage         Kind = "Storage"
+	KindWireGuard       Kind = "WireGuard"
 )
 
 // Scope says who is authoritative for an object.

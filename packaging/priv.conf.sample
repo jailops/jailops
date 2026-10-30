@@ -26,6 +26,9 @@ state-dir = /var/db/jailops/state
 work-dir = /var/tmp/jailops
 #mount-base = /jailops
 helper-path = /usr/local/libexec/jailops-priv
+# Keys of WireGuard interfaces, one directory per tunnel (root only, mode 0700; created when needed). It must lie
+# outside the daemon's directories.
+#wireguard-dir = /var/db/jailops-priv/wireguard
 
 # --- who may talk to the helper ----------------------------------------------
 socket = /var/run/jailops/priv.sock
@@ -65,3 +68,10 @@ if-prefix = jo
 # Directories fs.read_file may read besides the storage roots (a local mirror of
 # image archives). /etc/sysctl.conf and /etc/resolv.conf are always readable.
 #image-mirror = /var/db/jailops/mirror
+
+# --- host management (appliance mode, docs/appliance.md) ------------------------
+# Modules the helper may change on the host itself. Empty (the default): the host is only read. "identity" is the host
+# name, /etc/resolv.conf, the jailops block of /etc/ntp.conf and ntpd_enable; jailopsd.yaml must list it too
+# (host.manage.modules). Copies of every changed file are kept in host-dir (root only).
+#host-manage = identity
+#host-dir = /var/db/jailops-priv/host

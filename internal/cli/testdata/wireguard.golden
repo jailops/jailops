@@ -1,0 +1,107 @@
+$ jailops wireguard create office --address 10.99.0.1/24 --network lan --endpoint vpn.example.com:51820
+wireguard/office created
+
+$ jailops wireguard create bad --mode client --address 10.98.0.2/32
+! usage: a client is made from a join token: jailops wireguard join TOKEN
+! hint: run 'jailops wireguard create --help' for usage
+[exit 2]
+
+$ jailops --dry-run wireguard peer add office laptop
+dry-run: would enroll peer laptop of wireguard office
+name: laptop
+
+$ jailops wireguard peer add office laptop
+jwg1.eyJhZGRyZXNzIjpbIjEwLjk5LjAuMi8zMiJdLCJhbGxvd2VkX2lwcyI6WyIxMC45OS4wLjAvMjQiXSwiZW5kcG9pbnQiOiJ2cG4uZXhhbXBsZS5jb206NTE4MjAiLCJrZWVwYWxpdmUiOjI1LCJuYW1lIjoibGFwdG9wIiwicHJlc2hhcmVkX2tleSI6IllTSlV6ZHZvWW53UElzTFllZzRBVlJTdzE5d1Rxbk96NzNkaGptUER2REU9IiwicHJpdmF0ZV9rZXkiOiIrMERiOGMyTlhBT0tjRFpUaWVLT0oxQkF0cUtUaWNvZnk4V2NpWit5ZFAwPSIsInNlcnZlcl9wdWJsaWNfa2V5IjoidDZtUFFLRE5XOHI0empCUXdhdXU1eS9GclQ4Zm5FU28xVGd1SktPYmV6VT0ifQ
+! Peer laptop of wireguard office enrolled with 10.99.0.2/32.
+! warning: this token holds the peer's private key and the preshared key: it is shown once, is not stored on this host, and gives whoever holds it access to the tunnel; pass it on over a channel you trust
+
+$ jailops wireguard peer add office phone --format conf
+# WireGuard configuration of phone, made by JailOps. It holds a private key: keep it secret.
+[Interface]
+PrivateKey = ePQ8tHj7djA5k1i94pL6GW1Gc2vSRN/2GKva/NPWu3Y=
+Address = 10.99.0.3/32
+
+[Peer]
+PublicKey = t6mPQKDNW8r4zjBQwauu5y/FrT8fnESo1TguJKObezU=
+PresharedKey = adnTB63yEVgABt2axJ1/O+TtroQtsLQwDAlKRh6Rb2w=
+Endpoint = vpn.example.com:51820
+AllowedIPs = 10.99.0.0/24
+PersistentKeepalive = 25
+! Peer phone of wireguard office enrolled with 10.99.0.3/32.
+! warning: this token holds the peer's private key and the preshared key: it is shown once, is not stored on this host, and gives whoever holds it access to the tunnel; pass it on over a channel you trust
+
+$ jailops wireguard peer add office laptop
+! already_exists: peer "laptop" of wireguard "office" already exists
+! hint: Pick another name, or edit the existing object. (jailops explain already_exists)
+[exit 5]
+
+$ jailops wireguard peer list office
+NAME     ADDRESS        HANDSHAKE   PUBLIC KEY                                     AGE
+laptop   10.99.0.2/32   3h ago      YS3yTNOAXDXzNanMbZST0cuDRljSaFbN2hKs7a5pTy0=   3h
+phone    10.99.0.3/32   never       D9DicRrD0JwVsLx45lTVWlPAK4+jR1cUD+jcNgfxXWE=   3h
+
+$ jailops wireguard peer show office phone
+Name:        phone
+Server:      office
+Public key:  D9DicRrD0JwVsLx45lTVWlPAK4+jR1cUD+jcNgfxXWE=
+Address:     10.99.0.3/32
+Handshake:   never
+Transfer:    0 B received, 0 B sent
+Endpoint:    -
+Preshared:   yes
+Age:         3h
+
+$ jailops wireguard peer show office ghost
+! not_found: peer "ghost" of wireguard "office" not found
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops wireguard status office
+PEER     ADDRESS        HANDSHAKE   RECEIVED / SENT     ENDPOINT
+laptop   10.99.0.2/32   3h ago      1.0 MiB / 3.0 MiB   198.51.100.7:41000
+phone    10.99.0.3/32   never       0 B / 0 B           -
+
+$ jailops --dry-run wireguard join jwg1.eyJhZGRyZXNzIjpbIjEwLjk5LjAuMi8zMiJdLCJhbGxvd2VkX2lwcyI6WyIxMC45OS4wLjAvMjQiXSwiZW5kcG9pbnQiOiJ2cG4uZXhhbXBsZS5jb206NTE4MjAiLCJrZWVwYWxpdmUiOjI1LCJuYW1lIjoibGFwdG9wIiwicHJlc2hhcmVkX2tleSI6IllTSlV6ZHZvWW53UElzTFllZzRBVlJTdzE5d1Rxbk96NzNkaGptUER2REU9IiwicHJpdmF0ZV9rZXkiOiIrMERiOGMyTlhBT0tjRFpUaWVLT0oxQkF0cUtUaWNvZnk4V2NpWit5ZFAwPSIsInNlcnZlcl9wdWJsaWNfa2V5IjoidDZtUFFLRE5XOHI0empCUXdhdXU1eS9GclQ4Zm5FU28xVGd1SktPYmV6VT0ifQ
+dry-run: would join a wireguard server
+token: (token, not shown)
+
+$ jailops wireguard join jwg1.eyJhZGRyZXNzIjpbIjEwLjk5LjAuMi8zMiJdLCJhbGxvd2VkX2lwcyI6WyIxMC45OS4wLjAvMjQiXSwiZW5kcG9pbnQiOiJ2cG4uZXhhbXBsZS5jb206NTE4MjAiLCJrZWVwYWxpdmUiOjI1LCJuYW1lIjoibGFwdG9wIiwicHJlc2hhcmVkX2tleSI6IllTSlV6ZHZvWW53UElzTFllZzRBVlJTdzE5d1Rxbk96NzNkaGptUER2REU9IiwicHJpdmF0ZV9rZXkiOiIrMERiOGMyTlhBT0tjRFpUaWVLT0oxQkF0cUtUaWNvZnk4V2NpWit5ZFAwPSIsInNlcnZlcl9wdWJsaWNfa2V5IjoidDZtUFFLRE5XOHI0empCUXdhdXU1eS9GclQ4Zm5FU28xVGd1SktPYmV6VT0ifQ --name home --endpoint 203.0.113.10:51820
+wireguard/home joined
+
+$ jailops wireguard join not-a-token
+! invalid: not a WireGuard join token
+! hint: copy the whole token that `jailops wireguard peer add` printed; it starts with jwg1.
+[exit 2]
+
+$ jailops wireguard list
+NAME     MODE     INTERFACE   ADDRESS        PORT    ENDPOINT                PEERS   STATE   PUBLIC KEY
+home     client   wg-home     10.99.0.2/32   -       203.0.113.10:51820      -       up      26hS8nHo4/g+r89O+hFa/j36dyxzPtGXfoXIHTav9Pg=
+office   server   wg-office   10.99.0.1/24   51820   vpn.example.com:51820   2       up      t6mPQKDNW8r4zjBQwauu5y/FrT8fnESo1TguJKObezU=
+
+$ jailops wireguard status home
+PEER       ADDRESS        HANDSHAKE   RECEIVED / SENT     ENDPOINT
+(server)   10.99.0.0/24   3h ago      4.0 KiB / 8.0 KiB   203.0.113.10:51820
+
+$ jailops wireguard down home
+wireguard/home is down
+
+$ jailops wireguard up home
+wireguard/home is up
+
+$ jailops -y wireguard rotate-keys office
+PUBLIC KEY
+OAMuS96pCxbu52J/Cip4LvJDdT06Mz5xOzzXobqWml4=
+! warning: every peer must be given the new public key: issue new tokens (jailops wireguard peer remove, then peer add)
+
+$ jailops -y wireguard peer remove office laptop
+peer/office/laptop removed
+
+$ jailops wireguard peer list office -o name
+phone
+
+$ jailops -y wireguard delete home
+wireguard/home deleted
+
+$ jailops wireguard list -o name
+office
+

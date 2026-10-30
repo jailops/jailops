@@ -67,6 +67,11 @@ var sectionComments = map[string][]string{
 		"status} or exec: [argv in the jail], retried for wait_seconds (at most 300). null only",
 		"for an app that starts none of its services; say why in the description.",
 	},
+	"access": {
+		"What jailops app allow does in the jail besides the firewall rule: type postgresql makes",
+		"a role and a database per grant and a line in a managed block of hba_file. Leave the key",
+		"out otherwise; a daemon before 0.4.0 lists a definition that has it as invalid.",
+	},
 	"resources": {"Hints for the jail's limits (memory and disk sizes, cpu a count), not limits."},
 	"notes":     {"Shown after the installation: the first-run steps and how to connect."},
 }
@@ -235,6 +240,11 @@ func (d Draft) YAML() []byte {
 	}
 	if a.Health != nil && a.Health.WaitSeconds != 0 {
 		w("  wait_seconds: %d\n", a.Health.WaitSeconds)
+	}
+
+	if ac := a.Access; ac != nil {
+		key("access")
+		w("\n  type: %s\n  port: %s\n  service: %s\n  hba_file: %s\n", scalar(ac.Type), scalar(ac.Port), scalar(ac.Service), scalar(ac.HBAFile))
 	}
 
 	key("resources")

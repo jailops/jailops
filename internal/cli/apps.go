@@ -114,7 +114,9 @@ that does not validate is listed as invalid with the reason. See docs/apps.md
 for the format.
 
 'install' creates a jail that runs an app, as one operation; 'installed' lists
-the jails that came from the catalog. 'new' writes a starter definition and
+the jails that came from the catalog. An installed app is closed to every
+source until 'allow' lets one in; 'deny' takes it back and 'access' shows who
+may connect. 'new' writes a starter definition and
 'export' drafts one from a running jail; 'validate' checks definition files on
 this machine, without a server.`,
 		`jailops app list
@@ -125,9 +127,12 @@ jailops app install nginx --project web
 jailops app installed --project web
 jailops app new memcached --package memcached --service memcached --port 11211/tcp
 jailops app export cache -o cache.yaml
-jailops app validate ./apps`, "apps")
+jailops app validate ./apps
+jailops app allow db from @web
+jailops app access db`, "apps")
 	addList(a, ac, d, "\njailops app list --category database\njailops app list --source local")
-	ac.AddCommand(a.appInfo(d), a.appInstall(d), a.appInstalled(), a.appValidate(), a.appNew(), a.appExport())
+	ac.AddCommand(a.appInfo(d), a.appInstall(d), a.appInstalled(), a.appValidate(), a.appNew(), a.appExport(),
+		a.appAllow(), a.appDeny(), a.appAccessCmd())
 	return ac
 }
 
@@ -373,6 +378,11 @@ func (a *app) printAppInfo(w io.Writer, det api.AppDetail) {
 		fprintf(w, "  http port %d %s answers %d, within %ds\n", h.HTTP.Port, h.HTTP.Path, h.HTTP.Status, h.WaitSeconds)
 	default:
 		fprintf(w, "  %s exits 0, within %ds\n", strings.Join(h.Exec, " "), h.WaitSeconds)
+	}
+
+	if ac := d.Access; ac != nil {
+		section("Access")
+		fprintf(w, "  %s: jailops app allow makes a role and a database per grant and a line in %s (port %s, service %s)\n", ac.Type, ac.HBAFile, ac.Port, ac.Service)
 	}
 
 	var hints []string

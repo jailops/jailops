@@ -34,6 +34,7 @@ import (
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
@@ -92,6 +93,8 @@ type Deps struct {
 	Run      run.Runner
 	// Sysctl reads one sysctl value; when nil the runner is used.
 	Sysctl func(ctx context.Context, name string) (string, error)
+	// WG is the WireGuard part of the helper; nil means WireGuard is unsupported here.
+	WG wireguard.Host
 	// ZClient is optional: it feeds pool usage and the ZFS compatibility check.
 	ZClient zfs.Client
 	// CompatFile is the OpenZFS compatibility file name for the target release
@@ -160,6 +163,10 @@ type Deps struct {
 	// ServerFingerprint is the pin of the server certificate; trust tokens
 	// carry it.
 	ServerFingerprint string
+	// Host changes the host itself (the helper in production); nil answers unsupported.
+	Host HostSystem
+	// HostModules are the host management modules jailopsd.yaml enables (host.manage.modules).
+	HostModules []string
 }
 
 // Service implements the business logic.
@@ -196,6 +203,7 @@ type Service struct {
 	projKind kindStore[api.ProjectSpec]
 	stoKind  kindStore[api.StorageSpec]
 	profKind kindStore[api.ProfileSpec]
+	wgKind   kindStore[api.WireGuardSpec]
 
 	// storages is the registry of storage (dataset roots and their image
 	// pools); placed maps the key of a jail that is being created to its
@@ -209,6 +217,10 @@ type Service struct {
 	pending map[string]pendingJail
 
 	fleet fleetState
+
+	// accMu serialises the changes of app access (appaccess.go): a grant touches the app's policy, its
+	// registry and, for a source in another project, that jail's policy.
+	accMu sync.Mutex
 
 	execMu sync.Mutex
 	execN  map[string]int
@@ -228,6 +240,9 @@ type Service struct {
 	status      map[string]jailRuntime
 	recovered   []RecoveryOutcome
 	netStat     map[string]api.NetworkStatus
+	// wgErr is the latest failure to apply a tunnel; wgPub the public key the helper reported.
+	wgErr map[string]string
+	wgPub map[string]string
 
 	certMu    sync.Mutex
 	certCache map[string]certInfo
@@ -294,6 +309,7 @@ func New(d Deps) (*Service, error) {
 	s.projKind = newKindStore[api.ProjectSpec](s, api.KindProject, api.ScopeHost, "project", "/api/v1/projects")
 	s.stoKind = newKindStore[api.StorageSpec](s, api.KindStorage, api.ScopeHost, "storage", "/api/v1/storage")
 	s.profKind = newProjectKindStore[api.ProfileSpec](s, api.KindProfile, api.ScopeFleet, "profile", "/api/v1/profiles")
+	s.wgKind = newKindStore[api.WireGuardSpec](s, api.KindWireGuard, api.ScopeFleet, "wireguard", "/api/v1/wireguard")
 	s.locks = newLockSet()
 	s.events = newEventBus(d.DB, d.HostUUID)
 	jd, err := newFileJournal(d.JournalDir)
@@ -434,6 +450,10 @@ func (s *Service) Extensions() []string {
 			}
 		case "backup_key", "backup_run", "backup_verify":
 			if s.d.BackupAdmin == nil {
+				continue
+			}
+		case "host_identity":
+			if s.d.Host == nil {
 				continue
 			}
 		}

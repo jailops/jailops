@@ -91,7 +91,7 @@ var (
 )
 
 // KldModules are the kernel modules kldload and kldstat accept.
-var KldModules = []string{"pf", "if_bridge", "if_epair", "linux", "linux64", "linprocfs", "linsysfs", "fdescfs", "nullfs", "tmpfs", "zfs"}
+var KldModules = []string{"pf", "if_bridge", "if_epair", "if_wg", "linux", "linux64", "linprocfs", "linsysfs", "fdescfs", "nullfs", "tmpfs", "zfs"}
 
 // SysctlWrites are the only sysctls a write is accepted for, each with the
 // pattern its value must match. Writing needs the admin assertion.

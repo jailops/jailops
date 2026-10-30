@@ -255,6 +255,7 @@ func (l *Local) planJail(ctx context.Context, name JailName) ([]attachment, erro
 		}
 		in := render.AttachInput{
 			JailID: rec.Metadata.UUID, JailUUID: rec.Metadata.UUID, Index: i,
+			Project: name.Project, Jail: name.Name, Network: att.Network,
 			Bridge: nw.Spec.Bridge, MAC: att.MAC, MTU: nw.Spec.MTU, Uplink: nw.Spec.Uplink, Private: nw.Spec.Private,
 			HostConfigured: rec.Spec.OS == api.OSLinux,
 		}
@@ -601,6 +602,11 @@ func (l *Local) applyJail(ctx context.Context, jail string, s render.Step) error
 			verb = "down"
 		}
 		cmd, args = "ifconfig", []string{"-j", jail, s.Iface, verb}
+	case render.OpSetDescription:
+		if s.Arg == "" || !render.ValidIfaceDesc(s.Arg) {
+			return invalid("invalid interface description %q", s.Arg)
+		}
+		cmd, args = "ifconfig", []string{"-j", jail, s.Iface, "description", s.Arg}
 	case render.OpAddGatewayLink, render.OpDelGatewayLink:
 		a, err := netip.ParseAddr(s.Arg)
 		if err != nil || !a.Is4() {

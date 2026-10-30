@@ -6,7 +6,8 @@ configuration and the logs live, how to check that it runs. The catalog is the s
 `jailops app list` shows it and `jailops app info NAME` describes one entry.
 
 This page is the contract of the catalog and of the installation: `jailops app install NAME` creates a jail that runs
-an app as one operation, `jailops app installed` lists the jails that came from the catalog.
+an app as one operation, `jailops app installed` lists the jails that came from the catalog, and `jailops app allow`
+and `deny` say who may connect to an installed app ([Who may connect](#who-may-connect)).
 
 ## Trust model
 
@@ -90,6 +91,11 @@ health:                          # optional; exactly one of tcp, http, exec; wai
 resources: {memory: 1G, disk: 10G, cpu: "1"}   # hints for the jail's limits, not limits
 notes: |                         # shown after the installation, at most 2000 characters
   ...
+access:                          # optional (0.4.0): what jailops app allow does in the jail besides the firewall rule
+  type: postgresql               # the one type there is: a role and a database per grant, made with psql
+  port: postgres                 # a name of ports (tcp): the port a grant opens
+  service: postgresql            # a name of services: restarted once when listen_addresses changes
+  hba_file: /var/db/postgres/data18/pg_hba.conf   # one of the config paths: the managed block goes here
 ```
 
 Rules the validator enforces, besides the sizes above:
@@ -115,6 +121,12 @@ Rules the validator enforces, besides the sizes above:
   catalog does so only for an app that starts none of its services (`isms`: nothing runs to check until the
   operator has configured it).
 - `resources.memory` and `.disk` are sizes (`512M`, `10G`); `cpu` is a number.
+- `access` is optional and strict like the rest: `type` must be `postgresql`, `port` a tcp port of `ports`, `service` one
+  of `services`, `hba_file` one of the `config` paths; any other key is invalid. The key is new in 0.4.0, so a daemon
+  before it lists a definition that has it as invalid (see the trust model). The reference copy of `postgresql` in
+  `internal/apps/testdata/catalog/` has the block; the definition that hosts install lives in the packages repository
+  and gets it there, by a pull request of its own, once 0.4.0 is the release that repository builds against. What the
+  block makes JailOps do is in [Who may connect](#who-may-connect).
 - `sysvipc` is a boolean (`true` or `false`, nothing else). A jail has no System V shared memory, semaphores or message
   queues unless its parameters allow them, and a server that needs them fails: PostgreSQL's `initdb` stops at
   `shmget(...)` "Failed system call". `sysvipc: true` sets the jail spec's `sysvipc`, which renders
@@ -135,9 +147,13 @@ Defaults are filled in when the definition is read, so the API always answers a 
 | `GET /api/v1/apps/<name>` | `AppDetail`: `definition` (the `App`), `hash`, `file`, `icon` (a data URI, `image/png` or `image/svg+xml`, when the definition has one), `source`, `overrides`; the local definition when both directories have the name; `invalid` for an invalid definition, `not_found` for an unknown name |
 | `GET /api/v1/jails/<name>/app-draft` | `AppDraft`: `jail`, `definition` (a draft made from the running jail, valid as it is, with `TODO` markers), `todo` (a top-level key and what is left to do there), `findings` (what was found and left out); see [Write your own app](#write-your-own-app). Operator in the project, audited, extension `app_draft` |
 
+| `GET /api/v1/jails/<jail>/access` | `AppAccess` of an installed app: `jail`, `project`, `app`, `type` (the definition's access type), `policy` (`app-<jail>`), `closed`, `ports`, `grants`, `warnings`; see [Who may connect](#who-may-connect). Readonly in the project |
+| `POST /api/v1/jails/<jail>/access` | body `AppAllow` (`source`, `ports`, `database`, `rotate`, `dry_run`); answers `AppAllowResult` at once (`grant`, `changed`, `connection_string` once, `sql` without the password, `steps`, `notes`). Operator in the project, audited, extension `app_access` |
+| `POST /api/v1/jails/<jail>/access/deny` | body `AppDeny` (`source`, `drop_role`, `dry_run`); answers `AppDenyResult` (`removed`, `changed`, `sql`, `steps`, `notes`). Operator, audited |
 | `POST /api/v1/apps/<name>/install` | body `AppInstall`: `jail` (default: the app name), `network`, `storage` (each defaults to the project's only grant of its kind), `image` (default: the only FreeBSD image with the alias `stable`, as `NAME@stable`; none or several is `invalid`), `limits` (replaces the resource hints), `dry_run`; async, result `AppInstallResult`: `jail`, `version`, `addresses`, `ports` (with `endpoint`), `data`, `config`, `logs`, `notes`, `snapshot`, `steps` |
 
-Extensions `apps` (the catalog) and `app_install` (the installation). The Go SDK has `Apps().List`, `Apps().Get`,
+Extensions `apps` (the catalog), `app_install` (the installation) and `app_access` (who may connect; the SDK has
+`Apps().Access`, `Apps().Allow` and `Apps().Deny`, and the fake answers them with grants it keeps in memory). The Go SDK has `Apps().List`, `Apps().Get`,
 `Apps().Install` and `Apps().Installed` (the jails of the project that carry the label `jailops.app`); the in-memory
 server of `sdk/fake` starts with six definitions (nginx, postgresql, valkey, isms, nsd, mail, shortened) and installs them as running jails. The CLI:
 `jailops app list [PATTERN...] [--category C] [-c COLS] [--sort COL] [-o wide|json|yaml|name|csv]`,
@@ -165,6 +181,8 @@ roles (`delete` is admin, `start` and `stop` are operator).
 ## Console
 
 The host console has an **Apps** page (`/apps`): the catalog as cards (a local definition carries a small **local** chip, here, on its page, where it also says when it overrides the catalog's definition, and in the Installed tab) with a search over name, title and summary and category filters; an invalid definition is shown with its reason and cannot be installed. `/apps/NAME` shows a definition in full (packages, services and their `rc.conf` knobs, ports and whether they are exposed, the data paths with the volume each becomes, the configuration files and the service each one restarts, the log files, the health check, the resource hints, the notes and the definition's hash). **Install** opens a dialog with the jail name (the app name by default), the network and storage among the project's grants (preset when there is one of a kind) and the limits prefilled from the hints; *Preview steps* runs the dry run and lists the steps, and the installation then follows the operation: the step list is ticked off from the operation's progress (the server sets it after each step) and ends in a report with the jail, its addresses, the port endpoints, where the data, configuration and logs are, the notes and the `app-installed` snapshot with the rollback command, or with the error, its hint and a link to the jail when it was kept. The button is disabled, with the reason, for an identity below operator in the project and for a project without a network or storage grant. The **Installed** tab lists the project's jails that carry `jailops.app`, with their version, state, addresses and ports, and an *Open* link for the exposed `http` and `https` ports. The log files of a definition link to the **Logs** tab of the jail they were installed as, which reads the jail logs API (tail, since, text filter, follow).
+
+The page of a jail that came from the catalog has an **Access** tab (when the server offers `app_access`). It says whether the app is closed by its managed policy `app-JAIL` or still open to its network, and lists every grant with its source, ports, database and role, who made it and when, and any drift the server found; each grant's firewall rules, anchor lines and `pg_hba.conf` lines are in an expandable block. **Allow...** opens a dialog to pick the source: a jail of the project from a searchable list, an address set, an address or prefix (checked as you type), or the host; it takes optional ports and, for an app with an access block, a database name (the source jail's name by default). *Preview* shows the rule, the `pg_hba.conf` lines and the SQL without the password. After allowing a postgresql source the connection string is shown once with a copy button and forgotten when the dialog closes. **Deny** asks for confirmation and can also drop the role JailOps made. Both buttons are disabled, with the reason, for an identity below operator in the project. The Installed tab of the Apps page links to each app's Access tab.
 
 ## How the installation works
 
@@ -236,12 +254,16 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    the path there (plain HTTP) and expects the status, `exec` runs the command in the jail; the check is retried once a
    second until it passes or `wait_seconds` have passed. Each attempt is given at most 5 seconds, and never more than
    the time left, so the step ends within `wait_seconds` and one attempt.
-7. **Take the snapshot `app-installed`** of all the jail's datasets: the point to roll back to before the first
+7. **Close the jail** (`close-firewall`): the firewall policy `app-<jail>` is created, managed by app access, with
+   `default_in: deny` and no rule. From the next reconcile pass (a few seconds) nothing reaches the jail, neither its
+   network nor the host, until `jailops app allow` lets a source in ([Who may connect](#who-may-connect)). It comes after
+   the health check, which connects from the host; the services have run only for the time of that check before. A
+   policy of that name that app access does not manage refuses the installation before it starts (`conflict`).
+8. **Take the snapshot `app-installed`** of all the jail's datasets: the point to roll back to before the first
    change (`jailops jail rollback JAIL --all --snapshot app-installed`).
-8. **Say how to reach it**: the jail's addresses with the `ports` (`endpoint` is `<first address>:<port>`), the
+9. **Say how to reach it**: the jail's addresses with the `ports` (`endpoint` is `<first address>:<port>`), the
    `data`, `config` and `logs` paths, and the `notes`. Ports marked `expose: true` are recorded as such and nothing
-   more: forwarding them through the jail's PF anchor (`proxy` devices) is a later feature, so every port is reachable
-   from the jail's network only.
+   more: forwarding them through the jail's PF anchor (`proxy` devices) is a later feature.
 
 The events `app.installed` and `app.install.failed` (source `/api/v1/jails/<jail>`) end it, after the ordinary
 `jail-created`, `jail-started` and `jail-snapshot-created` of the steps.
@@ -274,9 +296,121 @@ was started is stopped and kept.
 | the image is not FreeBSD, or its release is below `release_min` | `invalid` |
 | a project quota would be exceeded | `quota_exceeded` |
 | the role is below operator, or the identity has no project scope | `forbidden` |
+| a firewall policy `app-<jail>` exists that app access does not manage | `conflict` |
 
-Generated secrets (a database password written into a configuration file) are **not in this version**: a
-definition has no parameters, and what needs a value is a `config` file the person edits, as `notes` says.
+A definition has no parameters: what needs a value is a `config` file the person edits, as `notes` says. The one
+generated secret is the password of a database role, made by `jailops app allow` and shown once
+([Who may connect](#who-may-connect)).
+
+## Who may connect
+
+An installed app is **closed**: the installation's last firewall step gives the jail the policy `app-<jail>`, which
+denies every inbound connection, from the jail's network, from other jails and from the host. Nothing but the jail
+itself reaches it until a source is allowed. Three verbs, all in the project of the request:
+
+```sh
+jailops app allow APP from SOURCE [--port N[/proto]]... [--db NAME] [--rotate] [--dry-run] [--project P]
+jailops app deny  APP from SOURCE [--drop-role] [--dry-run] [--project P]
+jailops app access [APP] [-o json|yaml]       # who may connect; without APP, every installed app of the project
+```
+
+`APP` is the jail the app was installed as (`--name` of the installation), not the catalog name. `SOURCE` is one of:
+
+| Source | What it stands for | In the firewall rule | In `pg_hba.conf` |
+|---|---|---|---|
+| `@JAIL` | a jail of the same project | its addresses, as they are when the grant is made | one line per address (`/32`, `/128`) |
+| `@PROJECT/JAIL` | a jail of another project the identity may use (`@` + its own project is the same as `@JAIL`) | its addresses; its own managed policy `app-<jail>` in that project gets the rule that lets it out to the app, because projects are closed to each other | as above |
+| `@SET` | an address set of the project (`jailops firewall address-set`) | `@SET`, so the rule follows the set | one line per member, as the set is when the grant is made |
+| an address or a prefix | `192.0.2.7`, `192.0.2.0/24`, `2001:db8::/48` | the prefix | the prefix |
+| `host` | the host itself: the gateway addresses of the jail's networks, which the host connects from (IPv4, and IPv6 of a routed network; a proxy-mode network has a link-local gateway and is left out) | those addresses | those addresses |
+
+A bare `@name` that is both a jail and an address set is refused (`invalid`): write the jail as `@PROJECT/JAIL`. The
+shell completes `APP`, the word `from` and `SOURCE` (the jails of the project and its address sets as `@name`, the jails
+of another project after `@PROJECT/`, and `host`).
+
+**The default scope is the project.** A grant lives with the app, in the app's project. A source in another project
+needs an identity that may use that project too (otherwise `not_found`), and the grant writes into that project's
+managed policy of the source jail: the role is operator, as for the installation, in each project. Deleting the
+cross-project grant removes that rule again, and the policy when it is empty.
+
+**What one allow does.**
+
+1. **The firewall rule**: one rule per protocol in the managed policy `app-<jail>`, `allow in <proto> from <source>
+   to port <ports>`, named `access <source>`. The ports are the definition's (for an app with an access block, the
+   block's port only) unless `--port` names others. The policy is an ordinary firewall policy that `jailops firewall
+   policy show app-<jail>` displays, with `managed_by: app-access`; changing or deleting it through the firewall routes
+   is `forbidden` ("managed by app access"). Its rules are rendered into the jail's anchor after the project's mandatory
+   policy and before the jail's own policy, and a jail's own policy cannot turn the closed default back into allow. Like
+   every policy change, it takes effect at the next reconcile pass, within seconds.
+2. **In the jail, for an app with an access block** (`type: postgresql`):
+   - `psql` runs as `postgres` in the jail (`/usr/local/bin/psql -X -q -A -t -v ON_ERROR_STOP=1 -d postgres`) with the
+     statements on **standard input**, through the helper's in-jail exec: nothing of them is in an argument vector or
+     a process list. It first asks whether the role and the database exist and what `listen_addresses` is.
+   - The **role and the database** are named `--db` (default: the source jail's name with `-` turned into `_`;
+     required for any other source) and must match `^[a-z][a-z0-9_]{0,62}$`, not `postgres`, `public`, `template0`,
+     `template1` or `pg_*`, so no quoting is ever needed (identifiers are quoted anyway). `CREATE ROLE "db" LOGIN
+     PASSWORD '<verifier>'` and `CREATE DATABASE "db" OWNER "db"`. The password is 32 characters of `[A-Za-z0-9]` from
+     the system's random source; the daemon computes its SCRAM-SHA-256 verifier (4096 iterations, a random salt) and the
+     server gets **the verifier, never the password**, so the password is in no statement, log or history of the
+     server. A role or a database of that name that JailOps did not make is refused (`conflict`): JailOps never changes
+     or drops a role it did not make.
+   - `listen_addresses` is set once, with `ALTER SYSTEM`, to what it was plus the jail's addresses (`*` is left as it
+     is), and the service named in the block is restarted through the same detached wrapper as a start; later grants
+     find it set and only reload.
+   - The **managed block** of the `hba_file` (between `# jailops access begin: ...` and `# jailops access end`, appended
+     at the end of the file the first time) holds one line per grant and address, `host DB ROLE PREFIX
+     scram-sha-256`, sorted; every other line of the file stays as it is, byte for byte. The file is written through
+     the helper's file operations below the jail root, then given back to `postgres:postgres` with mode `0600` in the
+     jail, and the server reads it again (`SELECT pg_reload_conf()`). A block whose markers are broken is refused, never
+     guessed at. A person's line above the block that matches the same client first (a `reject` for all) wins, as
+     PostgreSQL reads the file top down.
+   - The answer carries the **connection string once**: `postgres://ROLE:PASSWORD@HOST:5432/DB?sslmode=disable`, with
+     `HOST` the app jail's first IPv4 address. It is printed by the CLI and shown once with a copy button in the console,
+     and stored nowhere: not in the grant, the operation journal, the audit log (which records the source, the ports
+     and the database name) or the daemon log. `jailops app access` never shows it. `--rotate` gives the role a new
+     password (`ALTER ROLE ... PASSWORD`) and prints the new string; allowing again without it changes nothing and says
+     that the role exists.
+3. **For an app without an access block** (nginx, valkey, prometheus, forgejo, nsd, mail, isms) an allow is the
+   firewall rule only. The app itself must listen on the jail's address and accept the client: the answer says so, and
+   for valkey also that it binds `127.0.0.1` with `protected-mode yes` until `bind` and `protected-mode` in
+   `/usr/local/etc/valkey.conf` are changed, and that `requirepass` should be set first.
+
+**What one deny does.** The rule leaves the policy at once (the firewall first, so nothing new gets in), a
+cross-project source's outbound rule leaves its policy, the grant's lines leave the managed block and the server reloads.
+The role JailOps made for it loses its login and its password (`ALTER ROLE ... NOLOGIN PASSWORD NULL`) and its open
+sessions are ended; its database and data stay, and a later allow with the same name gives it a login and a new password
+again. `--drop-role` drops it instead: in its database `REASSIGN OWNED BY` the role `TO postgres` and `DROP OWNED`, then
+`DROP ROLE`; the database is kept and belongs to postgres afterwards. A role another grant uses, or one JailOps did not
+make, is left as it is. Denying a source that has no grant changes nothing (`changed: false`).
+
+**The registry.** The grants of an app are an object of kind `AppAccess` in the state store, named after the jail: per
+grant the source, what it resolved to, the ports, the database and the lines written, who made it and when; per app the
+access block as it was at the first grant (so a deny works after the definition changed) and the roles JailOps made,
+with whether their database was made too and whether they may log in. It never holds a password. Deleting the app's jail
+deletes its policy and its registry; deleting a jail that is the source of a grant removes the grant's firewall rule at
+once (its addresses may be given to another jail) and leaves the grant, marked, for a deny to take the rest back.
+
+**Transparency.** `jailops app access APP` lists each grant with its typed rules, the lines of the jail's rendered
+anchor they became (the state labels left out), its `pg_hba.conf` lines, who made it, and the **problems**: a rule
+missing from the policy, a line missing from the file (read through the helper while the jail runs), a source jail
+that is gone. `jailops doctor` reports the same as `apps.access` (warn) for every app of the host. Allowing the same
+source again writes what is missing back.
+
+**Idempotent, audited, dry run.** Allow and deny of the apps of a host run one at a time and under the jail's lock; both
+answer at once, not as an operation (an operation's result is kept, and the connection string must not be). Both are
+audited with the source. `--dry-run` resolves the source and asks the server (read-only) what exists, then prints the
+rule, the `pg_hba.conf` lines, the SQL with `<generated, shown once>` for the password, and the steps, and changes
+nothing; the jail must run for an app with an access block (`busy` otherwise, also for a real allow or deny).
+
+**Apps installed before 0.4.0** have no policy and are open to their network. `jailops app access` says so, and their
+first allow closes them to every other source (the answer says that too).
+
+**Fleet sync** declares apps and their grants too (kinds `App` and `AppAccess`, [fleet-sync.md](fleet-sync.md)).
+
+**UNVERIFIED on a FreeBSD host** until the end-to-end test has run it: the `postgresql-access` block of
+`scripts/ci-freebsd-e2e.sh` installs PostgreSQL, allows a second jail, connects from it with the printed string and runs
+`select 1`, checks that a jail that was not allowed cannot, and checks the closure after a deny. Not covered by it: the
+restart of a server whose `listen_addresses` was already set by hand, IPv6 sources, address sets, cross-project grants.
 
 ## Logs, updates, upgrades
 
@@ -292,7 +426,9 @@ definition has no parameters, and what needs a value is a `config` file the pers
 
 - **Parameters** beyond generated secrets: a definition has no variables and no templates. What needs a choice (a
   domain, a port, a password policy) is a `config` file the person edits, and `notes` says so.
-- **Dependencies between apps** (a forge that needs a database): each app is one jail; connect them by hand.
+- **Dependencies between apps** (a forge that needs a database): each app is one jail. `jailops app allow DB from
+  @FORGE` makes the database's side (role, database, `pg_hba.conf`, firewall) and prints the connection string; writing
+  it into the consumer's configuration is the person's step, as its `notes` say.
 - **Multi-jail apps**: one definition, one jail.
 - **Fetching catalogs**: the catalog comes with a package, signed, or from the operator's own files. The daemon makes
   no request for it.
@@ -496,8 +632,9 @@ PostgreSQL database, and its master secret `ISMS_SECRET` is empty until the oper
 without it). The setup only gives the data directory, the key directory and `server.env` back to `isms` with the modes
 the package intends. Its `notes` are the manual steps: a role and a database in a `postgresql` jail with a `pg_hba.conf`
 rule for the isms jail's address, `DATABASE_URL`, `ISMS_BASE_URL`, `ISMS_SIGNING_EMAIL` and the secret in `server.env`,
-the signing key, `isms server migrate` as `isms`, then `service isms start`. Connecting two apps by hand is the current
-state; the coming `jailops app allow` flow is meant to make the role, the password and `DATABASE_URL` itself. The end-to-end test installs it, runs these steps
+the signing key, `isms server migrate` as `isms`, then `service isms start`. The database's side is one command,
+`jailops app allow ISMS-DB from @ISMS --db isms`, which makes the role, the database, the `pg_hba.conf` line and the
+firewall rule and prints the connection string for `DATABASE_URL`; the rest stays the person's. The end-to-end test installs it, runs these steps
 against a `postgresql` jail and sees port 8080 answer with a 2xx or 3xx status. **UNVERIFIED**: what exactly the program
 answers there, and therefore the health path, which the definition leaves out (8080 is the default of `isms server
 serve`; the FreeBSD service passes no `--addr`). Until `server.env` is complete, a restart of the jail starts the
@@ -550,14 +687,20 @@ supervisor of its rc script held the pipes of the in-jail `service forgejo start
 Verified on a FreeBSD host with the end-to-end test: PostgreSQL with `sysvipc`, Valkey with its setup lines, forgejo with
 the start wrapper and the console log, and `isms`, `nsd` and `mail` as far as stated above. The end-to-end test
 (`scripts/ci-freebsd-e2e.sh`) installs nginx, fetches its default page from the host and stops it; with
-`JAILOPS_E2E_APPS="postgresql valkey prometheus forgejo nsd mail isms"` (or any of them) it then installs each named
+`JAILOPS_E2E_APPS="postgresql valkey prometheus forgejo nsd mail isms postgresql-access"` (or any of them) it then installs each named
 app in its own block and checks it: `select 1` through `psql` as `postgres`, `valkey-cli ping` answering `PONG`,
 Prometheus' `/-/ready`, forgejo's port 3000 answering 200 or a redirect to its installer; for `nsd`, `drill` from the
 host asks the jail for the SOA of `example.com` over UDP and over TCP and `nsd-checkconf` passes in the jail; for `mail`,
 Postfix's `220` greeting on port 25 and Dovecot's `* OK` on port 143 (`nc` that sends `QUIT` or `LOGOUT` one second after connecting, because Postfix refuses commands that arrive before its greeting) and the
 `sendmail` line of `mailer.conf`; for `isms`, the steps of its notes with a `postgresql` jail of its own (`isms-db`):
-role, database, `listen_addresses`, a `pg_hba.conf` rule, `server.env`, the secret, the signing key, `isms server
-migrate`, `service isms start`, and port 8080 answering a 2xx or 3xx status (curl retries while the program starts).
+`jailops app allow isms-db from @isms --db isms` for the role, the database, `listen_addresses`, the `pg_hba.conf` line
+and the connection string, then `server.env`, the secret, the signing key, `isms server migrate`, `service isms start`,
+and port 8080 answering a 2xx or 3xx status (curl retries while the program starts). Every app is closed after its
+installation, so each check that connects from the host first runs `jailops app allow APP from host`; the nginx block
+also checks that the page does **not** answer before that. `postgresql-access` in the list is a block of its own: a
+`postgresql` jail and two plain jails with the PostgreSQL client, `allow` from the first (the dry run first), `select 1`
+with the printed connection string from it and a refusal from the second, `app access`, a second `allow` that changes
+nothing, then `deny` and the first refused too.
 None of these checks reaches the internet. `isms` needs the `jailops` repository in the host's pkg configuration; the
 script refuses to start (exit 2) with the reason when it is missing. Then it lists the jail's log files and stops the
 jail. CI does not set the variable.

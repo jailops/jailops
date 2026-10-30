@@ -86,7 +86,8 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 		if err != nil {
 			return nil, err
 		}
-		in := render.AttachInput{JailID: id, JailUUID: id, Index: i, Bridge: n.Spec.Bridge, MAC: a.MAC, MTU: attachMTU(a, n.Spec.MTU),
+		in := render.AttachInput{JailID: id, JailUUID: id, Index: i, Project: project, Jail: j.Metadata.Name, Network: a.Network,
+			Bridge: n.Spec.Bridge, MAC: a.MAC, MTU: attachMTU(a, n.Spec.MTU),
 			Uplink: n.Spec.Uplink, Private: n.Spec.Private, HostConfigured: osf == api.OSLinux}
 		nif := render.NetIface{Name: jailEnd, MTU: attachMTU(a, n.Spec.MTU)}
 		if ad, ok := parseAddr(a.IPv4); ok && n.Spec.IPv4 != nil {
@@ -111,8 +112,11 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 		}
 		var hostSteps []render.Step
 		for _, st := range steps {
-			if st.Phase == render.PhaseHost {
+			switch {
+			case st.Phase == render.PhaseHost:
 				hostSteps = append(hostSteps, st)
+			case st.Op == render.OpSetDescription:
+				d.JailSide = append(d.JailSide, st)
 			}
 		}
 		d.Attach = append(d.Attach, hostSteps)
@@ -204,7 +208,13 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 					in.TagMembers[t] = append(in.TagMembers[t], m...)
 				}
 			}
-			in.Policy.Rules = append(append([]api.FirewallRule(nil), in.Policy.Rules...), proxyRules...)
+			// The grants of app access (the managed policy app-<jail>) come after the project's policy and before
+			// the jail's own rules; an app's jail it closes stays closed whatever the jail's own policy says.
+			accRules, accClosed := s.accessRulesFor(project, j.Metadata.Name)
+			if accClosed {
+				in.Policy.DefaultIn = "deny"
+			}
+			in.Policy.Rules = append(append(append([]api.FirewallRule(nil), accRules...), in.Policy.Rules...), proxyRules...)
 			rs, err := render.PFAnchor(in)
 			if err != nil {
 				return nil, err
@@ -304,6 +314,7 @@ func containsAddr(l []netip.Addr, a netip.Addr) bool {
 func (s *Service) Desired(ctx context.Context) (reconcile.Desired, error) {
 	var out reconcile.Desired
 	out.Host = s.hostDesired()
+	out.WireGuard = s.wireguardDesired()
 	nets, err := s.netKind.list()
 	if err != nil {
 		return out, err
@@ -450,7 +461,7 @@ func (s *Service) ensureNetwork(ctx context.Context, name string, obs *reconcile
 	if err != nil {
 		return err
 	}
-	if i, ok := obs.Ifaces[n.Spec.Bridge]; ok && i.Description != render.BridgeDescription(n.Meta.UUID) {
+	if i, ok := obs.Ifaces[n.Spec.Bridge]; ok && !render.OwnsIface(i.Description, n.Meta.UUID, render.NetBridgeDesc(name)) {
 		return api.Errorf(api.CodeConflict, "interface %s exists and is not managed by JailOps", n.Spec.Bridge)
 	}
 	unlock, err := s.locks.lockPatient(ctx, "prepare network "+name, networkLock(name))

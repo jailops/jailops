@@ -157,3 +157,55 @@ func TestNamesFollowTheDaemonRules(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func wgFleet(t *testing.T, files map[string]string) error {
+	t.Helper()
+	d := t.TempDir()
+	write(t, d, "fleet.yaml", "id: f\n")
+	write(t, d, "hosts/a/host.yaml", host("a", ""))
+	write(t, d, "shared/networks/lan.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: lan\nspec:\n  ipv4: {subnet: 10.20.0.0/24, gateway: 10.20.0.1, range: 10.20.0.2-10.20.0.9}\n")
+	for p, c := range files {
+		write(t, d, p, c)
+	}
+	f, err := Load(d)
+	if err != nil {
+		return err
+	}
+	return f.Check()
+}
+
+func wgDoc(name, spec string) string {
+	return "apiVersion: jailops/v1\nkind: WireGuard\nmetadata:\n  name: " + name + "\nspec:\n" + spec
+}
+
+func TestWireGuardIsCheckedOffline(t *testing.T) {
+	key1, key2 := "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=", "AgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgI="
+	ok := "  mode: server\n  address: [10.99.0.1/24]\n  networks: [lan]\n  peers:\n    - {name: laptop, public_key: " + key1 + ", allowed_ips: [10.99.0.2/32]}\n"
+	if err := wgFleet(t, map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", ok)}); err != nil {
+		t.Fatalf("a valid server: %v", err)
+	}
+	for name, tc := range map[string]struct {
+		files map[string]string
+		want  string
+	}{
+		"client":        {map[string]string{"hosts/a/wireguard/c.yaml": wgDoc("c", "  mode: client\n  address: [10.99.0.2/32]\n  endpoint: vpn.example.com:51820\n  peer_public_key: "+key1+"\n  allowed_ips: [10.99.0.0/24]\n")}, "cannot be declared"},
+		"private key":   {map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", ok+"  private_key: "+key2+"\n")}, "private_key"},
+		"shared":        {map[string]string{"shared/wireguard/office.yaml": wgDoc("office", ok)}, ""},
+		"bad key":       {map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", strings.Replace(ok, key1, "not-a-key", 1))}, "not a WireGuard public key"},
+		"no address":    {map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", strings.Replace(ok, "  address: [10.99.0.1/24]\n", "", 1))}, "spec.address"},
+		"own address":   {map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", strings.Replace(ok, "10.99.0.2/32", "10.99.0.1/32", 1))}, "server's own address"},
+		"default route": {map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", strings.Replace(ok, "10.99.0.2/32", "0.0.0.0/0", 1))}, "not a peer address"},
+		"no network":    {map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", strings.Replace(ok, "[lan]", "[dmz]", 1))}, "unknown Network \"dmz\""},
+		"long name":     {map[string]string{"hosts/a/wireguard/headquarters-a.yaml": wgDoc("headquarters-a", ok)}, "set spec.interface"},
+		"same port": {map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", ok),
+			"hosts/a/wireguard/lab.yaml": wgDoc("lab", "  mode: server\n  address: [10.98.0.1/24]\n")}, "listen port 51820"},
+		"overlap": {map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", ok),
+			"hosts/a/wireguard/lab.yaml": wgDoc("lab", "  mode: server\n  listen_port: 51821\n  address: [10.99.0.129/25]\n")}, "overlaps tunnel"},
+		"twice": {map[string]string{"hosts/a/wireguard/office.yaml": wgDoc("office", ok+"    - {name: laptop, public_key: "+key2+", allowed_ips: [10.99.0.3/32]}\n")}, "listed twice"},
+	} {
+		err := wgFleet(t, tc.files)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%s: want %q, got %v", name, tc.want, err)
+		}
+	}
+}

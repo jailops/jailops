@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import NetworkForm from '@/components/NetworkForm.vue'
+import NetTabs from '@/components/NetTabs.vue'
 import { isGlobalAdmin } from '@/composables/project'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
@@ -40,6 +41,7 @@ function used(n: Network): number {
 <template>
   <div>
     <div class="page-head"><h1>{{ s.networks.title }}</h1><button class="btn btn-primary" type="button" :disabled="!canWrite" data-test="new-network" @click="creating = true"><Icon name="plus" />{{ s.networks.create }}</button></div>
+    <NetTabs />
     <LoadState :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
       <p v-if="!l.data.value?.nets.length" class="empty">{{ s.networks.empty }}</p>
       <div class="stack">

@@ -199,7 +199,8 @@ func DescribePlan(steps []Step) string {
 
 // NetworkInput is the input of NetworkPlan.
 type NetworkInput struct {
-	// ID is the network's UUID, written into the bridge description.
+	// ID is the network's UUID; interfaces that carry the marker of earlier releases (LegacyIfaceDesc) are
+	// recognised by it.
 	ID   string
 	Name string
 	// Bridge is the bridge name; spec.Bridge is used when empty.
@@ -207,13 +208,10 @@ type NetworkInput struct {
 	Spec   api.NetworkSpec
 }
 
-// BridgeDescription is the ownership marker written on bridges and epairs.
-func BridgeDescription(id string) string { return "jailops:" + id }
-
 // NetworkPlan returns the ordered steps that create a network's bridge and
 // host-side configuration. It does not look at the system; reconcile diffs
-// against what it observes and must never touch a bridge whose description
-// is not BridgeDescription(ID).
+// against what it observes and must never touch a bridge it does not own
+// (OwnsIface).
 func NetworkPlan(in NetworkInput) ([]Step, error) {
 	if err := validate.Name("network", in.Name); err != nil {
 		return nil, err
@@ -259,10 +257,10 @@ func NetworkPlan(in NetworkInput) ([]Step, error) {
 	gwep.Arg2 = gl3
 	out = append(out,
 		with(step(OpBridgeCreate, br, ""), step(OpBridgeDestroy, br, "")),
-		with(step(OpSetDescription, br, BridgeDescription(in.ID)), step(OpSetDescription, br, "")),
+		with(step(OpSetDescription, br, NetBridgeDesc(in.Name)), step(OpSetDescription, br, "")),
 		with(gwep, step(OpEpairDestroy, gm, "")),
-		with(step(OpSetDescription, gm, BridgeDescription(in.ID)), step(OpSetDescription, gm, "")),
-		with(step(OpSetDescription, gl3, BridgeDescription(in.ID)), step(OpSetDescription, gl3, "")),
+		with(step(OpSetDescription, gm, NetGatewayDesc(in.Name, false)), step(OpSetDescription, gm, "")),
+		with(step(OpSetDescription, gl3, NetGatewayDesc(in.Name, true)), step(OpSetDescription, gl3, "")),
 	)
 	if s.MTU != 0 {
 		for _, i := range []string{br, gm, gl3} {
@@ -317,10 +315,12 @@ func validateID(id string) error {
 
 // AttachInput is the input of AttachPlan: one attachment of one jail.
 type AttachInput struct {
-	JailID   string // used for epair names and the ownership marker
+	JailID   string // used for epair names
 	JailUUID string // used to derive MAC addresses
-	Index    int    // attachment index within the jail
-	Bridge   string
+	// Project, Jail and Network name the attachment in the interface descriptions.
+	Project, Jail, Network string
+	Index                  int // attachment index within the jail
+	Bridge                 string
 	// MAC of the jail end; derived from JailUUID when empty.
 	MAC     string
 	MTU     int
@@ -389,7 +389,7 @@ func AttachPlan(in AttachInput) ([]Step, error) {
 	ep.Arg2 = jail
 	out = append(out, with(ep, step(OpEpairDestroy, host, "")))
 	out = append(out, step(OpSetMAC, host, hmac), step(OpSetMAC, jail, jmac))
-	out = append(out, with(step(OpSetDescription, host, BridgeDescription(in.JailID)), step(OpSetDescription, host, "")))
+	out = append(out, with(step(OpSetDescription, host, JailIfaceDesc(in.Project, in.Jail, in.Network, true)), step(OpSetDescription, host, "")))
 	if in.MTU != 0 {
 		out = append(out, step(OpSetMTU, host, fmt.Sprint(in.MTU)), step(OpSetMTU, jail, fmt.Sprint(in.MTU)))
 	}
@@ -437,8 +437,11 @@ func AttachPlan(in AttachInput) ([]Step, error) {
 			out = append(out, with(set, del))
 		}
 	}
+	j := func(op Op, iface, arg string) Step { s := step(op, iface, arg); s.Phase = PhaseJail; return s }
+	// The jail end is described from the host once it is in the jail's vnet (ifconfig -j). Destroying the epair
+	// removes it, so the step has no inverse.
+	out = append(out, j(OpSetDescription, jail, JailIfaceDesc(in.Project, in.Jail, in.Network, false)))
 	if in.HostConfigured {
-		j := func(op Op, iface, arg string) Step { s := step(op, iface, arg); s.Phase = PhaseJail; return s }
 		for _, p := range []netip.Prefix{in.IPv4, in.IPv6} {
 			if p.IsValid() {
 				out = append(out, with(j(OpAddAddr, jail, p.String()), j(OpRemoveAddr, jail, p.String())))
@@ -484,6 +487,8 @@ func (s Step) describeJail() string {
 			return fmt.Sprintf("%sifconfig -j <jail> %s inet %s up", pre, s.Iface, p)
 		}
 		return fmt.Sprintf("%sifconfig -j <jail> %s inet %s %s", pre, s.Iface, p, verb)
+	case OpSetDescription:
+		return pre + "ifconfig -j <jail> " + s.Iface + " description " + s.Arg
 	case OpIfaceUp:
 		return pre + "ifconfig -j <jail> " + s.Iface + " up"
 	case OpIfaceDown:

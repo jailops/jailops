@@ -123,6 +123,20 @@ func Run(ctx context.Context, s *plan.Session, p *plan.Plan, opt Options) (Resul
 			if err := ctx.Err(); err != nil {
 				return res, err
 			}
+			if ch, ok := it.Spec.(plan.AppChange); ok {
+				once, err := applyApp(ctx, s, it, ch)
+				if err != nil {
+					res.add(opt, it, "failed", err)
+					stopped = true
+					continue
+				}
+				res.add(opt, it, "ok", nil)
+				for _, l := range once {
+					// to the person running sync only: never to the apply log
+					fmt.Fprintln(opt.Out, l)
+				}
+				continue
+			}
 			if err := applyItem(ctx, s, it, me); err != nil {
 				res.add(opt, it, "failed", err)
 				stopped = true
@@ -309,4 +323,46 @@ func afterCreate(ctx context.Context, c *sdk.Client, it plan.Item) error {
 		}
 	}
 	return nil
+}
+
+// applyApp installs an app or changes who may reach it. The lines it returns
+// are for the person running sync and nothing else: a connection string with
+// the password of a new database role, which the host keeps nowhere and sync
+// writes nowhere.
+func applyApp(ctx context.Context, s *plan.Session, it plan.Item, ch plan.AppChange) ([]string, error) {
+	c, err := s.Client(ctx, it.Host)
+	if err != nil {
+		return nil, err
+	}
+	c = c.Project(it.Project)
+	switch {
+	case ch.Install != nil:
+		op, err := c.Apps().Install(ctx, ch.App, *ch.Install)
+		if err == nil {
+			_, err = op.Wait(ctx)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("install app %s as jail %s: %w", ch.App, ch.Jail, err)
+		}
+		return nil, nil
+	case ch.Allow != nil:
+		allow := *ch.Allow
+		allow.Rotate, allow.DryRun = false, false // re-applying never makes a new password
+		r, err := c.Apps().Allow(ctx, ch.Jail, allow)
+		if err != nil {
+			return nil, err
+		}
+		if r.ConnectionString == "" {
+			return nil, nil
+		}
+		return []string{
+			fmt.Sprintf("    connection string for %s on %s/%s (shown once, stored nowhere; `jailops app allow %s from %s --rotate` makes a new one):",
+				allow.Source, it.Project, ch.Jail, ch.Jail, allow.Source),
+			"      " + r.ConnectionString,
+		}, nil
+	case ch.Deny != nil:
+		_, err := c.Apps().Deny(ctx, ch.Jail, *ch.Deny)
+		return nil, err
+	}
+	return nil, fmt.Errorf("nothing to do for %s", it.Ref())
 }

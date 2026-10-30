@@ -101,6 +101,7 @@ func newProjectEnv(t *testing.T, project, name string) *hookEnv {
 		t.Fatal(err)
 	}
 	e.runner.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
+	e.runner.Add(run.Rule{Name: "/sbin/ifconfig", Args: []string{"-j", internal, run.AnyArg, "description", run.AnyArg}})
 	return h
 }
 

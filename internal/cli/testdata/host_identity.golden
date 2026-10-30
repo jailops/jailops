@@ -1,0 +1,148 @@
+$ jailops host show
+SETTING       VALUE
+hostname      fake-host
+nameservers   198.51.100.1  /etc/resolv.conf
+search        example.org
+ntp servers   -  (the jailops block of /etc/ntp.conf)
+ntpd          enabled
+time          synchronised to 192.0.2.123
+
+Managed:     yes (module identity)
+
+$ jailops --dry-run host identity set --hostname web1.example.org --nameserver 192.0.2.53 --nameserver 2001:db8::53
+--- host
++++ host
+-hostname fake-host
++hostname web1.example.org
+-nameservers 198.51.100.1
++nameservers 192.0.2.53 2001:db8::53
+dry-run: would
+  set hostname to web1.example.org
+  set nameservers to 192.0.2.53 2001:db8::53
+
+$ jailops host identity set --hostname web1.example.org --nameserver 192.0.2.53 --search example.org
+--- host
++++ host
+-hostname fake-host
++hostname web1.example.org
+-nameservers 198.51.100.1
++nameservers 192.0.2.53
+  set hostname to web1.example.org
+  set nameservers to 192.0.2.53
+host identity: done; undo with: jailops host restore 20260301T090000Z-1
+
+$ jailops host identity set --ntp-server 192.0.2.123 --ntp enable
+--- host
++++ host
+-ntp servers (none)
++ntp servers 192.0.2.123
+  set ntp servers to 192.0.2.123
+host identity: done; undo with: jailops host restore 20260301T090000Z-2
+
+$ jailops host identity set --hostname web1.example.org
+host identity: the host already has it, nothing to do
+
+$ jailops host identity set --nameserver 192.0.2.300
+! invalid: nameserver "192.0.2.300" is not an IPv4 or IPv6 address
+! hint: a literal such as 192.0.2.53 or 2001:db8::53, without a zone
+[exit 2]
+
+$ jailops host identity set --ntp sometimes
+! usage: --ntp is enable or disable, not "sometimes"
+! hint: run 'jailops host identity set --help' for usage
+[exit 2]
+
+$ jailops host identity set
+! invalid: the identity names nothing to change
+! hint: give a hostname, resolvers or ntp
+[exit 2]
+
+$ jailops host snapshots
+NAME                 MODULE     REASON   FILES                                         AGE
+20260301T090000Z-2   identity   apply    /etc/resolv.conf /etc/ntp.conf /etc/rc.conf   3h
+20260301T090000Z-1   identity   apply    /etc/resolv.conf /etc/ntp.conf /etc/rc.conf   3h
+
+$ jailops host show -o json
+{
+  "kind": "HostIdentity",
+  "spec": {
+    "hostname": "web1.example.org",
+    "resolvers": {
+      "nameservers": [
+        "192.0.2.53"
+      ],
+      "search": [
+        "example.org"
+      ]
+    },
+    "ntp": {
+      "servers": [
+        "192.0.2.123"
+      ],
+      "enable": true
+    }
+  },
+  "status": {
+    "managed": true,
+    "config_enabled": true,
+    "helper_enabled": true,
+    "applied": {
+      "hostname": "web1.example.org",
+      "resolvers": {
+        "nameservers": [
+          "192.0.2.53"
+        ],
+        "search": [
+          "example.org"
+        ]
+      },
+      "ntp": {
+        "servers": [
+          "192.0.2.123"
+        ],
+        "enable": true
+      }
+    },
+    "rc_hostname": "web1.example.org",
+    "resolv_conf_managed": true,
+    "ntp_block": true,
+    "ntp_sync": {
+      "synchronised": true,
+      "peer": "192.0.2.123"
+    }
+  }
+}
+
+$ jailops host restore --dry-run
+--- host
++++ host
+-ntp servers 192.0.2.123
++ntp servers (none)
+dry-run: would
+  set ntp servers to (none)
+
+$ jailops -y host restore
+--- host
++++ host
+-ntp servers 192.0.2.123
++ntp servers (none)
+  set ntp servers to (none)
+host restore: done; undo with: jailops host restore 20260301T090000Z-3
+
+$ jailops -y host restore ../etc
+! invalid: invalid snapshot name "../etc"
+! hint: use a name from GET /api/v1/host/snapshots, or latest
+[exit 2]
+
+$ jailops host show
+SETTING       VALUE
+hostname      web1.example.org
+nameservers   192.0.2.53  /etc/resolv.conf (managed by jailops)
+search        example.org
+ntp servers   -  (the jailops block of /etc/ntp.conf)
+ntpd          enabled
+time          synchronised to 192.0.2.123
+
+Managed:     yes (module identity)
+Drift:       none
+

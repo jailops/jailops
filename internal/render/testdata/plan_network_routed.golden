@@ -1,10 +1,10 @@
 01 require sysctl net.inet.ip.forwarding=1
 02 require sysctl net.inet6.ip6.forwarding=1
 03 ifconfig bridge create name jo0
-04 ifconfig jo0 description jailops:n-123
+04 ifconfig jo0 description jailops net=lan bridge
 05 ifconfig epair create; rename ends to jo0ga and jo0gb
-06 ifconfig jo0ga description jailops:n-123
-07 ifconfig jo0gb description jailops:n-123
+06 ifconfig jo0ga description jailops net=lan gateway (bridge side)
+07 ifconfig jo0gb description jailops net=lan gateway (host side)
 08 ifconfig jo0 mtu 1500
 09 ifconfig jo0ga mtu 1500
 10 ifconfig jo0gb mtu 1500

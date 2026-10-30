@@ -8,11 +8,11 @@ import LoadState from '@jailops/shared/components/LoadState.vue'
 import type { DoctorStatus } from '@jailops/shared/api/types'
 
 const l = useLoad(() => api.doctor())
-const order: Record<DoctorStatus, number> = { fail: 0, warn: 1, unknown: 2, ok: 3 }
-const tone: Record<DoctorStatus, string> = { fail: 'danger', warn: 'warn', unknown: 'info', ok: 'ok' }
+const order: Record<DoctorStatus, number> = { fail: 0, warn: 1, unknown: 2, info: 3, ok: 4 }
+const tone: Record<DoctorStatus, string> = { fail: 'danger', warn: 'warn', unknown: 'info', info: 'info', ok: 'ok' }
 const checks = computed(() => [...(l.data.value?.checks ?? [])].sort((a, b) => order[a.status] - order[b.status] || a.name.localeCompare(b.name)))
 const counts = computed(() => {
-  const c: Record<DoctorStatus, number> = { fail: 0, warn: 0, unknown: 0, ok: 0 }
+  const c: Record<DoctorStatus, number> = { fail: 0, warn: 0, unknown: 0, info: 0, ok: 0 }
   for (const k of l.data.value?.checks ?? []) c[k.status]++
   return c
 })
@@ -28,7 +28,7 @@ const counts = computed(() => {
       <div v-if="l.data.value" class="stack">
         <div class="row">
           <span class="pill" :class="tone[l.data.value.status]" data-test="doctor-status">{{ s.doctor.status[l.data.value.status] }}</span>
-          <span class="muted">{{ s.doctor.summary(counts.fail, counts.warn, counts.unknown, counts.ok) }}</span>
+          <span class="muted">{{ s.doctor.summary(counts.fail, counts.warn, counts.unknown, counts.ok, counts.info) }}</span>
           <span class="faint">{{ stamp(l.data.value.time) }}</span>
         </div>
         <div class="panel">

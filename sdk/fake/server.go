@@ -130,11 +130,14 @@ type Server struct {
 	hub         bool
 	hosts       map[string]*Server
 
+	hostSt   fakeHost // host management (host.go)
 	jails    *kind[api.Jail]
 	profiles *kind[api.Profile]
 	apps     map[string]*appEntry
 	// drafts are what GET /api/v1/jails/{name}/app-draft answers (SeedAppDraft), by jail key
-	drafts    map[string]api.AppDraft
+	drafts map[string]api.AppDraft
+	// access are the grants of installed apps (appaccess.go), by jail key
+	access    map[string]*fakeAccess
 	execCalls []ExecCall
 	// consoles are the sessions of the console protocol (console.go).
 	consoles     map[string]*fakeConsole
@@ -167,6 +170,8 @@ type Server struct {
 	tokens    *kind[api.Token]
 	certs     *kind[api.Certificate]
 	users     *kind[api.User]
+	wireguard *kind[api.WireGuard]
+	wgKeys    int // keys handed out by the WireGuard fake
 
 	snapshots map[string][]*api.JailSnapshot // by jail
 	gens      map[string][]*api.ImageGeneration
@@ -198,7 +203,7 @@ func New(opts ...Option) *Server {
 	s := &Server{
 		now: time.Now, uuid: newUUID(), hostname: "fake-host", arch: "amd64",
 		extensions: slices.Clone(api.Extensions),
-		snapshots:  map[string][]*api.JailSnapshot{},
+		snapshots:  map[string][]*api.JailSnapshot{}, access: map[string]*fakeAccess{},
 		identities: map[string]Identity{}, trustTokens: map[string]*trustRec{}, trustFails: map[string]int{},
 		sessions: map[string]*api.Session{}, storageStat: map[string]api.StorageStatus{},
 		offline: map[string]bool{}, fleetConds: map[string][]api.Condition{},

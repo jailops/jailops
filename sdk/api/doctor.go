@@ -10,6 +10,9 @@ const (
 	DoctorWarn    DoctorStatus = "warn"
 	DoctorFail    DoctorStatus = "fail"
 	DoctorUnknown DoctorStatus = "unknown" // could not be determined, for example without FreeBSD
+	// DoctorInfo is a fact the administrator should know that is not a fault (a setting that is stored and
+	// not enforced yet); it counts like ok for the status of the report.
+	DoctorInfo DoctorStatus = "info"
 )
 
 // DoctorCheck is one diagnostic of GET /api/v1/doctor.

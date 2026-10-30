@@ -204,6 +204,11 @@ func JailStepArgv(st render.Step, jail string) ([]string, error) {
 			w = []string{"inet", p.String(), "up"} // sets the first address and brings the link up
 		}
 		return append([]string{"ifconfig", "-j", jail, st.Iface}, w...), nil
+	case render.OpSetDescription:
+		if !render.ValidIfaceDesc(st.Arg) || st.Arg == "" {
+			return nil, validate.Invalid("description", "bad interface description %q", st.Arg)
+		}
+		return []string{"ifconfig", "-j", jail, st.Iface, "description", st.Arg}, nil
 	case render.OpIfaceUp:
 		return []string{"ifconfig", "-j", jail, st.Iface, "up"}, nil
 	case render.OpIfaceDown:

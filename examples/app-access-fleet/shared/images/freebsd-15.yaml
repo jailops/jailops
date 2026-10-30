@@ -1,0 +1,14 @@
+apiVersion: jailops/v1
+kind: Image
+metadata:
+  name: freebsd-15
+# Apps are installed from a FreeBSD image of release 15.1 or later; build: true builds its first generation.
+build: true
+spec:
+  os: freebsd
+  release: 15.1-RELEASE
+  arch: amd64
+  source:
+    type: pkgbase
+    sets: [FreeBSD-set-minimal-jail]
+  aliases: [stable]

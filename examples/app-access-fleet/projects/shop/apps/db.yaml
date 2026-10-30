@@ -1,0 +1,13 @@
+apiVersion: jailops/v1
+kind: App
+metadata:
+  name: db
+# An app is installed once, as `jailops app install postgresql --name db` would; sync never
+# reinstalls, changes or deletes it afterwards.
+hosts: [db1]
+spec:
+  app: postgresql
+  network: shop
+  storage: default
+  image: freebsd-15@stable
+  limits: {memory: 2G, disk: 20G, cpu: 2}

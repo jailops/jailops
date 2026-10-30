@@ -60,6 +60,10 @@ type App struct {
 	Resources AppResources `json:"resources,omitempty" yaml:"resources"`
 	// Notes is shown after the installation.
 	Notes string `json:"notes,omitempty" yaml:"notes"`
+	// Access is optional: what an allow does inside the jail besides the
+	// firewall rule (docs/apps.md, "Who may connect"). A daemon older than
+	// the key lists a definition that has it as invalid.
+	Access *AppAccessDef `json:"access,omitempty" yaml:"access"`
 }
 
 // AppImage says what the jail is built from.
@@ -235,8 +239,8 @@ type AppInstalledPort struct {
 	// Endpoint is "<first address of the jail>:<port>".
 	Endpoint string `json:"endpoint,omitempty"`
 	// Expose says whether the definition asks for the port to be forwarded; the
-	// installer records it and forwards nothing yet, so every port is reachable
-	// from the jail's network only.
+	// installer records it and forwards nothing yet. Every port is closed until
+	// a source is allowed (POST /api/v1/jails/<name>/access).
 	Expose      bool   `json:"expose"`
 	Description string `json:"description,omitempty"`
 }

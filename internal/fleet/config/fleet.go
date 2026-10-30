@@ -659,7 +659,7 @@ func (f *Fleet) loadShared() error {
 }
 
 func dirKind(dir string) (model.KindInfo, bool) {
-	for _, ki := range model.Kinds {
+	for _, ki := range append(slices.Clone(model.Kinds), model.AppKinds...) {
 		if ki.Dir == dir && !ki.NoDir {
 			return ki, true
 		}
@@ -846,6 +846,9 @@ func (f *Fleet) loadObjectDir(dir string, ki model.KindInfo, scope, project stri
 		if ki.Kind == api.KindJail && !isProjectDir {
 			return fmt.Errorf("%s: a jail belongs to a project: put it under projects/<project>/jails/ and name its host with `hosts: [<host>]`", f.rel(p))
 		}
+		if (ki.Kind == model.KindApp || ki.Kind == api.KindAppAccess) && !isProjectDir {
+			return fmt.Errorf("%s: an %s belongs to a project: put it under projects/<project>/%s/ and name its host with `hosts: [<host>]`", f.rel(p), ki.Kind, ki.Dir)
+		}
 		if !isProjectDir && scope != "shared" && len(doc.Hosts) > 0 {
 			return fmt.Errorf("%s: hosts: is only allowed under shared/ and projects/ (this file already belongs to host %s)", f.rel(p), scope)
 		}
@@ -887,6 +890,11 @@ func (f *Fleet) loadObjectDir(dir string, ki model.KindInfo, scope, project stri
 		spec, err := model.DecodeSpec(ki.Kind, raw)
 		if err != nil {
 			return fmt.Errorf("%s: spec: %w", f.rel(p), err)
+		}
+		if as, ok := spec.(model.AppAccessSpec); ok {
+			if err := as.Validate(proj); err != nil {
+				return fmt.Errorf("%s: spec: %w", f.rel(p), err)
+			}
 		}
 		o.Spec = spec
 		if js, ok := spec.(api.JailSpec); ok {
@@ -1006,6 +1014,9 @@ func (f *Fleet) resolveTargets() error {
 			}
 			if o.Kind == api.KindJail && len(o.Hosts) != 1 {
 				return fmt.Errorf("%s: a jail is declared on exactly one named host (got %d); give `hosts:` one host", o.Origin, len(o.Hosts))
+			}
+			if (o.Kind == model.KindApp || o.Kind == api.KindAppAccess) && len(o.Hosts) != 1 {
+				return fmt.Errorf("%s: an %s is declared on exactly one named host (got %d); give `hosts:` one host", o.Origin, o.Kind, len(o.Hosts))
 			}
 			if o.Project != "" {
 				pdef := f.Projects[o.Project]

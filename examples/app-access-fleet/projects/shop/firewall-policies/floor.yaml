@@ -1,0 +1,9 @@
+apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: floor
+spec:
+  # The project's mandatory policy. The apps' own policies (app-db, app-web) are written by the
+  # grants of app-access/ and are not declared here.
+  default_in: deny
+  default_out: allow

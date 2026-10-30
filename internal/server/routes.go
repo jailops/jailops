@@ -310,6 +310,7 @@ func (s *Server) routeTable() []route {
 		c.sync(200, v, 0)
 		return nil
 	}})
+	add(s.wireguardRoutes()...)
 	add(resource[api.FirewallPolicy]{base: "/api/v1/firewall/policies", param: "name",
 		list:   svc.ListPolicies,
 		get:    func(ctx context.Context, k string) (api.FirewallPolicy, error) { return svc.GetPolicy(ctx, k) },
@@ -553,6 +554,63 @@ func (s *Server) routeTable() []route {
 			return nil
 		}},
 	)
+
+	// Host management.
+	add(
+		route{method: "GET", pattern: "/api/v1/host/identity", h: func(c *rc) error {
+			v, err := svc.HostIdentity(c.r.Context())
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "PUT", pattern: "/api/v1/host/identity", h: func(c *rc) error {
+			var in api.HostIdentityApply
+			if err := c.decode(&in); err != nil {
+				return err
+			}
+			if in.DryRun {
+				c.detail = "dry_run"
+			}
+			v, err := svc.ApplyHostIdentity(c.r.Context(), in)
+			if err != nil {
+				return err
+			}
+			if v.Snapshot != "" {
+				c.detail = "snapshot=" + v.Snapshot
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/host/snapshots", h: func(c *rc) error {
+			v, err := svc.HostSnapshots(c.r.Context())
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/host/snapshots/{name}/restore", h: func(c *rc) error {
+			var in api.HostRestore
+			if err := c.decodeOptional(&in); err != nil {
+				return err
+			}
+			if in.DryRun {
+				c.detail = "dry_run"
+			}
+			v, err := svc.RestoreHostSnapshot(c.r.Context(), c.pathArg("name"), in)
+			if err != nil {
+				return err
+			}
+			if v.Snapshot != "" {
+				c.detail = "snapshot=" + v.Snapshot
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+	)
+	add(s.appAccessRoutes()...)
 
 	// Projects, storage, trust and sessions.
 	add(resource[api.Project]{base: "/api/v1/projects", param: "name",

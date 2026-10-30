@@ -52,11 +52,19 @@ setup:
 health:
   exec: [/usr/local/bin/pg_isready, -U, postgres]
   wait_seconds: 60
+# jailops app allow: a role and a database per grant, made with psql as postgres, and a
+# line per source address in a managed block of pg_hba.conf (docs/apps.md, "Who may connect")
+access:
+  type: postgresql
+  port: postgres
+  service: postgresql
+  hba_file: /var/db/postgres/data18/pg_hba.conf
 resources:
   memory: 1G
   disk: 10G
   cpu: "1"
 notes: |
   Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql
-  To accept connections from the network, set listen_addresses = '*' in
-  postgresql.conf, add a host rule to pg_hba.conf and restart the service.
+  The jail accepts no connection from outside until you allow one:
+  jailops app allow NAME from @web makes a role and a database for the jail
+  web, lets its address in and prints the connection string once.

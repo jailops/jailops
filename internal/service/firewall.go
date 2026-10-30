@@ -134,8 +134,13 @@ func (s *Service) CreatePolicy(ctx context.Context, in api.FirewallPolicy) (api.
 }
 
 // protectedPolicy reports whether the policy is the project's mandatory
-// firewall policy, which only a global administrator may change.
+// firewall policy, which only a global administrator may change, or one that
+// app access manages, which only app allow and deny change.
 func (s *Service) protectedPolicy(ctx context.Context, p project, name string) error {
+	if o, err := s.polKind.p(p.Meta.Name).get(name); err == nil && o.Meta.ManagedBy == api.AppAccessManagedBy {
+		return api.Errorf(api.CodeForbidden, "firewall policy %q is managed by app access", name).
+			WithHint("jailops app allow and jailops app deny change it; jailops app access shows its grants")
+	}
 	if p.Spec.Firewall == name && !ActorFrom(ctx).Global {
 		return api.Errorf(api.CodeForbidden, "firewall policy %q is the mandatory policy of project %q; a global administrator manages it", name, p.Meta.Name)
 	}

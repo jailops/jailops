@@ -251,6 +251,9 @@ type JailStatus struct {
 	// ProvisionedAt is when the jail's provisioning last completed; zero when
 	// it has not run (or the jail has none).
 	ProvisionedAt time.Time `json:"provisioned_at,omitzero"`
+	// Warnings say what the spec asks for and the host does not do (rate
+	// limits are stored and not enforced yet).
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // JailAction is the body of PUT /api/v1/jails/{name}/state.

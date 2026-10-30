@@ -100,7 +100,7 @@ func TestExtendedCommandRules(t *testing.T) {
 		ok(ctx, "/sbin/kldstat", "kldstat", "-n", m)
 		ok(ctx, "/sbin/kldload", "kldload", m)
 	}
-	if len(KldModules) != 11 {
+	if len(KldModules) != 12 {
 		t.Errorf("module list changed: %v", KldModules)
 	}
 	for _, a := range [][]string{{"-n", "vmm"}, {"-n", "pf.ko"}, {"-n", "../pf"}, {"-n", "/boot/kernel/pf.ko"}, {"-m", "pf"}, {"-v"}, {}, {"-n"}, {"-n", "pf", "zfs"}, {"-q", "-q", "-n", "pf"}, {"-n", "-q", "pf"}, {"-n", "pf\n"}, {"-n", "PF"}} {

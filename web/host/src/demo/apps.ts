@@ -56,7 +56,8 @@ export const definitions: App[] = [
     setup: [['/usr/sbin/chown', 'postgres:postgres', '/var/db/postgres'], ['/usr/sbin/service', 'postgresql', 'initdb']],
     health: { exec: ['/usr/local/bin/pg_isready', '-U', 'postgres'], wait_seconds: 60 },
     resources: { memory: '1G', disk: '10G', cpu: '1' },
-    notes: "Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql\nTo accept connections from the network, set listen_addresses = '*' in\npostgresql.conf, add a host rule to pg_hba.conf and restart the service.\n",
+    access: { type: 'postgresql', port: 'postgres', service: 'postgresql', hba_file: '/var/db/postgres/data18/pg_hba.conf' },
+    notes: "Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql\nThe jail accepts no connection from outside until you allow one:\njailops app allow NAME from @web makes a role and a database for the jail\nweb, lets its address in and prints the connection string once.\n",
   },
   {
     version: 1, name: 'valkey', title: 'Valkey', summary: 'In-memory key-value store under the BSD license.',
@@ -257,6 +258,7 @@ export function installSteps(a: App, jail: string, project: string, image: strin
   ]
   const h = a.health
   if (h) out.push(['health-check', h.http ? `GET http://<first address>:${h.http.port}${h.http.path} until it answers ${h.http.status ?? 200}, at most ${h.wait_seconds ?? 60} attempts` : h.tcp ? `connect to <first address>:${h.tcp} until it accepts, at most ${h.wait_seconds ?? 60} attempts` : `in the jail: ${h.exec?.join(' ')} until it exits 0, at most ${h.wait_seconds ?? 60} attempts`])
+  out.push(['close-firewall', `firewall policy app-${jail} (managed by app access): deny every inbound connection until jailops app allow ${jail} from SOURCE`])
   out.push(['snapshot', `snapshot every dataset of ${jail} as app-installed`])
   return out.map(([n, d], i) => `${String(i + 1).padStart(2, '0')} ${n}: ${d}`)
 }

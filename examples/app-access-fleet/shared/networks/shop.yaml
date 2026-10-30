@@ -1,0 +1,6 @@
+apiVersion: jailops/v1
+kind: Network
+metadata:
+  name: shop
+spec:
+  ipv4: {subnet: 10.70.0.0/24, gateway: 10.70.0.1, range: 10.70.0.10-10.70.0.250}
