@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/zfs"
 	"jailops.net/jailops/sdk/api"
@@ -461,6 +462,20 @@ func TestConfDirContent(t *testing.T) {
 	if err := w(ctx, "alpha_web.conf", e.goodConf()); err != nil {
 		t.Fatalf("the renderer's output was refused: %v", err)
 	}
+	// what the renderer writes for a jail with System V IPC, FreeBSD and Linux, passes as it is
+	for _, osf := range []api.OS{api.OSFreeBSD, api.OSLinux} {
+		jc, err := render.JailConf(render.JailConfInput{Name: "alpha_web", Path: filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "web", "root"),
+			Hostname: "web.example.org", OS: osf, Interfaces: []string{"jo0123456789a0b"}, SysVIPC: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(jc, "sysvshm = new;") || !strings.Contains(jc, "exec.consolelog") {
+			t.Fatalf("not rendered:\n%s", jc)
+		}
+		if err := w(ctx, "alpha_web.conf", jc); err != nil {
+			t.Errorf("%s: the renderer's output with sysvipc was refused: %v", osf, err)
+		}
+	}
 	if err := w(ctx, "notes.txt", "x"); !api.IsCode(err, api.CodeForbidden) {
 		t.Errorf("other file in the conf dir: %v", err)
 	}
@@ -469,28 +484,35 @@ func TestConfDirContent(t *testing.T) {
 	}
 	mut := func(old, new string) string { return strings.Replace(e.goodConf(), old, new, 1) }
 	hostile := map[string]string{
-		"path outside":        mut(`path = "`+filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "web", "root")+`"`, `path = "/"`),
-		"path traversal":      mut(`"`+filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "web", "root")+`"`, `"`+e.cfg.MountBase+`/../../etc"`),
-		"no vnet":             mut("\tvnet;\n", ""),
-		"allow flag":          mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tallow.mount.zfs;\n"),
-		"raw param":           mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tcpuset = \"0\";\n"),
-		"devfs ruleset":       mut("devfs_ruleset = 4", "devfs_ruleset = 1"),
-		"enforce_statfs 0":    mut("enforce_statfs = 2", "enforce_statfs = 0"),
-		"securelevel -1":      mut("securelevel = 2", "securelevel = -1"),
-		"exec hook swapped":   mut(`exec.prestart = "/usr/local/libexec/jailops-priv hook prestart ${name}"`, `exec.prestart = "/tmp/evil ${name}"`),
-		"hook with shell":     mut(`hook prestart ${name}"`, `hook prestart ${name}; id"`),
-		"exec.start custom":   mut(`"/bin/sh /etc/rc"`, `"/bin/sh -c id"`),
-		"variable in value":   mut(`host.hostname = "web.example.org"`, `host.hostname = "${x}"`),
-		"foreign interface":   mut(`"jo0123456789a0b"`, `"em0"`),
-		"second block":        e.goodConf() + "evil {\n\tpath = \"/\";\n}\n",
-		"text after block":    e.goodConf() + "exec.start = \"id\";\n",
-		"include":             "include \"/etc/jail.conf\";\n" + e.goodConf(),
-		"no block":            "# nothing\n",
-		"semicolon injection": mut(`host.hostname = "web.example.org";`, `host.hostname = "a"; exec.start = "id";`),
-		"multi value list":    mut(`vnet.interface = "jo0123456789a0b"`, `vnet.interface = "jo0123456789a0b", "em0"`),
-		"quote in string":     mut(`"web.example.org"`, `"a\"b"`),
-		"mount.fstab outside": mut("\tmount.devfs;\n", "\tmount.fstab = \"/etc/fstab\";\n"),
-		"nul":                 mut("vnet;", "vnet;\x00"),
+		"path outside":         mut(`path = "`+filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "web", "root")+`"`, `path = "/"`),
+		"path traversal":       mut(`"`+filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "web", "root")+`"`, `"`+e.cfg.MountBase+`/../../etc"`),
+		"no vnet":              mut("\tvnet;\n", ""),
+		"allow flag":           mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tallow.mount.zfs;\n"),
+		"raw param":            mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tcpuset = \"0\";\n"),
+		"devfs ruleset":        mut("devfs_ruleset = 4", "devfs_ruleset = 1"),
+		"enforce_statfs 0":     mut("enforce_statfs = 2", "enforce_statfs = 0"),
+		"securelevel -1":       mut("securelevel = 2", "securelevel = -1"),
+		"exec hook swapped":    mut(`exec.prestart = "/usr/local/libexec/jailops-priv hook prestart ${name}"`, `exec.prestart = "/tmp/evil ${name}"`),
+		"hook with shell":      mut(`hook prestart ${name}"`, `hook prestart ${name}; id"`),
+		"exec.start custom":    mut(`"/bin/sh /etc/rc"`, `"/bin/sh -c id"`),
+		"variable in value":    mut(`host.hostname = "web.example.org"`, `host.hostname = "${x}"`),
+		"foreign interface":    mut(`"jo0123456789a0b"`, `"em0"`),
+		"second block":         e.goodConf() + "evil {\n\tpath = \"/\";\n}\n",
+		"text after block":     e.goodConf() + "exec.start = \"id\";\n",
+		"include":              "include \"/etc/jail.conf\";\n" + e.goodConf(),
+		"no block":             "# nothing\n",
+		"semicolon injection":  mut(`host.hostname = "web.example.org";`, `host.hostname = "a"; exec.start = "id";`),
+		"multi value list":     mut(`vnet.interface = "jo0123456789a0b"`, `vnet.interface = "jo0123456789a0b", "em0"`),
+		"quote in string":      mut(`"web.example.org"`, `"a\"b"`),
+		"mount.fstab outside":  mut("\tmount.devfs;\n", "\tmount.fstab = \"/etc/fstab\";\n"),
+		"nul":                  mut("vnet;", "vnet;\x00"),
+		"consolelog elsewhere": mut(`"/var/log/jail_${name}_console.log"`, `"/etc/rc.conf"`),
+		"consolelog variable":  mut(`"/var/log/jail_${name}_console.log"`, `"/var/log/jail_${path}_console.log"`),
+		"consolelog bare":      mut(`exec.consolelog = "/var/log/jail_${name}_console.log";`, `exec.consolelog;`),
+		"sysvshm inherit":      mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvshm = inherit;\n"),
+		"sysvsem quoted":       mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvsem = \"new\";\n"),
+		"sysvmsg bare":         mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvmsg;\n"),
+		"sysvmsg disable then": mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvmsg = new; exec.start = \"id\";\n"),
 	}
 	for name, c := range hostile {
 		if err := w(ctx, "alpha_web.conf", c); err == nil {

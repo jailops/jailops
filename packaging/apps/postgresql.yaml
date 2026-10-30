@@ -44,6 +44,8 @@ logs:
   - name: server
     path: /var/log/messages
     description: The port logs to syslog by default (log_destination in postgresql.conf).
+# the server needs System V shared memory and semaphores, which a jail has none of by default
+sysvipc: true
 setup:
   - [/usr/sbin/chown, "postgres:postgres", /var/db/postgres]
   - [/usr/sbin/service, postgresql, initdb]

@@ -55,8 +55,8 @@ export const definitions: App[] = [
     notes: "Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql\nTo accept connections from the network, set listen_addresses = '*' in\npostgresql.conf, add a host rule to pg_hba.conf and restart the service.\n",
   },
   {
-    version: 1, name: 'valkey', title: 'Valkey', summary: 'In-memory key-value store, the BSD-licensed successor of Redis.',
-    description: 'Valkey is a high-performance data structure server that serves key/value\nworkloads, compatible with the Redis protocol and clients. The package ships\nthe server, the command line client and a sentinel; this definition runs the\nserver with the configuration the package installs.\n\nThe server binds 127.0.0.1 and ::1 with protected mode on until\n/usr/local/etc/valkey.conf is changed.\n',
+    version: 1, name: 'valkey', title: 'Valkey', summary: 'In-memory key-value store under the BSD license.',
+    description: 'Valkey is a high-performance data structure server for key/value\nworkloads. The package ships\nthe server, the command line client and a sentinel; this definition runs the\nserver with the configuration the package installs.\n\nThe server binds 127.0.0.1 and ::1 with protected mode on until\n/usr/local/etc/valkey.conf is changed.\n',
     category: 'database', homepage: 'https://valkey.io/', license: 'BSD-3-Clause', image: IMAGE,
     packages: [{ name: 'valkey', repo: 'ports', version: '9.1.2' }],
     services: [{ name: 'valkey', start: true }],

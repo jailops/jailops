@@ -399,6 +399,15 @@ func buildRegistry() []ckey {
 			},
 			unset: func(s *JailSpec, _ string) { *get(s) = false }})
 	}
+	add(ckey{ConfigKey: ConfigKey{Name: "sysvipc", Type: "bool", Example: "true", RestartRequired: true, Profile: true, Path: "sysvipc",
+		Description: "System V message queues, semaphores and shared memory of the jail's own (separate from the host's); some servers, PostgreSQL among them, need them."},
+		get: func(s *JailSpec, _ string) (string, bool) { return "true", s.SysVIPC },
+		set: func(s *JailSpec, _, v string) error {
+			b, err := parseBool("sysvipc", v)
+			s.SysVIPC = b
+			return err
+		},
+		unset: func(s *JailSpec, _ string) { s.SysVIPC = false }})
 	boolKey("updates.packages", "update.packages", "Update the packages inside the jail (pkg or apk, from the host).", func(s *JailSpec) *bool { return &s.Update.Packages })
 	boolKey("updates.os", "update.os", "Move the jail to a newer image generation (root swap).", func(s *JailSpec) *bool { return &s.Update.OS })
 	add(ckey{ConfigKey: ConfigKey{Name: "updates.reboot", Type: "enum", Values: []string{"manual", "auto"}, Profile: true, Path: "update.reboot",

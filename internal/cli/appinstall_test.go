@@ -2,9 +2,12 @@ package cli_test
 
 import (
 	"encoding/json"
+	"fmt"
+	"regexp"
 	"strings"
 	"testing"
 
+	"jailops.net/jailops/internal/cli"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -75,5 +78,68 @@ func TestAppInstall(t *testing.T) {
 		if code != 0 || !strings.Contains(out, c.want) {
 			t.Errorf("complete %v: %d %q", c.args, code, out)
 		}
+	}
+}
+
+// commandAccepted parses a command line the way the real command tree would,
+// without running it: the command must exist, its flags must be known and its
+// arguments must fit. It returns the path of the command found.
+func commandAccepted(line string) (string, error) {
+	f := strings.Fields(line)
+	if len(f) == 0 || f[0] != "jailops" {
+		return "", fmt.Errorf("%q does not start with jailops", line)
+	}
+	root := cli.NewRootCommand(&cli.Env{})
+	cmd, rest, err := root.Find(f[1:])
+	if err != nil {
+		return "", err
+	}
+	if cmd == root || !cmd.Runnable() {
+		return "", fmt.Errorf("%q names no command", line)
+	}
+	if err := cmd.ParseFlags(rest); err != nil {
+		return "", err
+	}
+	if err := cmd.ValidateArgs(cmd.Flags().Args()); err != nil {
+		return "", err
+	}
+	return cmd.CommandPath(), nil
+}
+
+// The rollback command the install report prints must be one the CLI accepts.
+func TestAppInstallRollbackCommandIsReal(t *testing.T) {
+	if _, err := commandAccepted("jailops jail rollback web --scope all --snapshot app-installed"); err == nil {
+		t.Fatal("the checker accepted an unknown flag")
+	}
+	h := newHarness(t)
+	h.seed()
+	h.srv.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "freebsd-151"},
+		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}})
+	h.srv.SeedGeneration("freebsd-151")
+	out, errs, code := h.run("", "app", "install", "nginx", "--image", "freebsd-151@stable")
+	if code != 0 {
+		t.Fatal(out, errs)
+	}
+	m := regexp.MustCompile(`\((jailops [^)]*) goes back to it\)`).FindStringSubmatch(out)
+	if m == nil {
+		t.Fatalf("no rollback command in the report:\n%s", out)
+	}
+	path, err := commandAccepted(m[1])
+	if err != nil || path != "jailops jail rollback" {
+		t.Fatalf("%q: %q %v", m[1], path, err)
+	}
+	if !strings.Contains(m[1], " --all ") || !strings.HasSuffix(m[1], " --snapshot app-installed") {
+		t.Fatalf("the command must restore root and data from the install snapshot: %q", m[1])
+	}
+}
+
+// Without --image the install takes the only FreeBSD image with the alias
+// stable, here the quick start's freebsd-15 (too old for the definition).
+func TestAppInstallDefaultImage(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	_, errs, code := h.run("", "app", "install", "nginx")
+	if code != 2 || !strings.Contains(errs, `image "freebsd-15" is release 15.0-RELEASE`) {
+		t.Fatalf("%d %s", code, errs)
 	}
 }

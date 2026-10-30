@@ -27,6 +27,25 @@ func TestExecBasics(t *testing.T) {
 	}
 }
 
+// A command that exits while a process it started still holds its output
+// (an rc script that starts a daemon) ends WaitDelay after its exit, with
+// its own status.
+func TestExecLeftoverHoldsOutput(t *testing.T) {
+	ctx := context.Background()
+	e := NewExec()
+	res, err := e.Run(ctx, Cmd{Name: "sh", Args: []string{"-c", "sleep 5 & echo started"}, Timeout: 30 * time.Second})
+	if err != nil || string(res.Stdout) != "started\n" || !res.Truncated {
+		t.Fatalf("success: %q %v %+v", res.Stdout, err, res)
+	}
+	if res.Duration >= 5*time.Second {
+		t.Fatalf("waited for the leftover process: %s", res.Duration)
+	}
+	_, err = e.Run(ctx, Cmd{Name: "sh", Args: []string{"-c", "sleep 5 & exit 4"}, Timeout: 30 * time.Second})
+	if ee, ok := IsExit(err); !ok || ee.Code != 4 {
+		t.Fatalf("failure: %v", err)
+	}
+}
+
 func TestExecStdinStdout(t *testing.T) {
 	var out bytes.Buffer
 	_, err := NewExec().Run(context.Background(), Cmd{Name: "cat", Stdin: strings.NewReader("stream"), Stdout: &out})

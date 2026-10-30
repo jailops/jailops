@@ -36,6 +36,25 @@ func TestJailConfGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "jailconf_linux", s)
+	v := baseConf()
+	v.Allow, v.SysVIPC = []string{"raw_sockets"}, true
+	s, err = JailConf(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "jailconf_sysvipc", s)
+	// separate namespaces, never the host's
+	for _, want := range []string{"\tsysvmsg = new;\n", "\tsysvsem = new;\n", "\tsysvshm = new;\n", "\texec.consolelog = \"/var/log/jail_${name}_console.log\";\n"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(s, "inherit") || strings.Contains(s, "allow.sysvipc") {
+		t.Errorf("the host's IPC is shared:\n%s", s)
+	}
+	if a, _ := JailConf(baseConf()); strings.Contains(a, "sysvshm") {
+		t.Error("System V IPC without asking for it")
+	}
 }
 
 func TestJailConfExecFixed(t *testing.T) {
@@ -74,6 +93,7 @@ func TestJailConfErrors(t *testing.T) {
 		{"allow", func(i *JailConfInput) { i.Allow = []string{"mount.fusefs"} }},
 		{"allow inject", func(i *JailConfInput) { i.Allow = []string{"x; exec.start=\"y\""} }},
 		{"allow dup", func(i *JailConfInput) { i.Allow = []string{"sysvipc", "sysvipc"} }},
+		{"sysvipc and allow.sysvipc", func(i *JailConfInput) { i.Allow, i.SysVIPC = []string{"sysvipc"}, true }},
 		{"statfs", func(i *JailConfInput) { i.EnforceStatfs = intp(3) }},
 		{"securelevel", func(i *JailConfInput) { i.SecureLevel = intp(9) }},
 		{"devfs", func(i *JailConfInput) { i.DevfsRuleset = 70000 }},

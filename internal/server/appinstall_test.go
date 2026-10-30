@@ -54,6 +54,7 @@ logs:
 setup:
   - [/usr/sbin/chown, "www:www", /var/db/web]
   - [/usr/local/bin/web-init, --once]
+sysvipc: true
 health:
   http: {port: 8080, path: /ready, status: 204}
   wait_seconds: 2
@@ -235,8 +236,20 @@ func TestAppInstall(t *testing.T) {
 		t.Fatal("rc.conf.local was not rendered")
 	}
 	// The library cache was refreshed, then the setup commands and the services with start: true ran in the jail, in order, as argv.
-	if got := execArgvs(e, "alpha_web"); !slices.Equal(got, []string{"/sbin/ldconfig -m /usr/local/lib", "/usr/sbin/chown www:www /var/db/web", "/usr/local/bin/web-init --once", "/usr/sbin/service web start"}) {
+	// A service starts through the fixed wrapper, the name as its last argument (internal/priv checks the same vector).
+	start, _ := apps.ServiceStartArgv("web")
+	if got := execArgvs(e, "alpha_web"); !slices.Equal(got, []string{"/sbin/ldconfig -m /usr/local/lib", "/usr/sbin/chown www:www /var/db/web", "/usr/local/bin/web-init --once", strings.Join(start, " ")}) {
 		t.Fatalf("exec %q", got)
+	}
+	if start[0] != "/bin/sh" || start[1] != "-c" || start[2] != apps.ServiceStartScript || start[4] != "web" {
+		t.Fatalf("start %q", start)
+	}
+	// The definition asked for System V IPC: the jail has it, in namespaces of its own; the output of the jail's
+	// rc goes to its console log.
+	conf := e.File("/etc/jailops/jails/alpha_web/jail.conf")
+	if !j.Spec.SysVIPC || !strings.Contains(conf, "\tsysvshm = new;\n") || !strings.Contains(conf, "\tsysvsem = new;\n") || !strings.Contains(conf, "\tsysvmsg = new;\n") ||
+		!strings.Contains(conf, "\texec.consolelog = \"/var/log/jail_${name}_console.log\";\n") {
+		t.Fatalf("sysvipc %v, jail.conf:\n%s", j.Spec.SysVIPC, conf)
 	}
 	// The http check went to the jail's first address from the host.
 	if !slices.Equal(seen, []string{"tcp 10.20.0.10:8080", "GET /ready"}) {
@@ -343,6 +356,31 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 	}
 }
 
+// Without an image the installation takes the only FreeBSD image with the
+// alias stable, whatever it is called.
+func TestAppInstallDefaultImage(t *testing.T) {
+	e, c := appEnv(t, map[string]string{"tool": appExecCheck})
+	if _, err := e.Admin.Images().DeleteAlias(c, "fb", "stable"); err != nil {
+		t.Fatal(err)
+	}
+	op, err := e.Admin.Apps().Install(c, "tool", api.AppInstall{DryRun: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := op.Wait(c)
+	if err != nil || !res.DryRun || !strings.Contains(res.Steps[0], "from fb151@stable") {
+		t.Fatalf("%v %+v", err, res)
+	}
+	if _, err := e.Admin.Images().DeleteAlias(c, "fb151", "stable"); err != nil {
+		t.Fatal(err)
+	}
+	_, err = e.Admin.Apps().Install(c, "tool", api.AppInstall{DryRun: true})
+	wantCode(t, err, api.CodeInvalid)
+	if !strings.Contains(err.Error(), "no FreeBSD image has the alias stable") || !strings.Contains(err.Error(), "your images: fb, fb151") {
+		t.Fatalf("%v", err)
+	}
+}
+
 // What is refused before the operation starts.
 func TestAppInstallRefusals(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"web": appWeb, "broken": "version: 1\nname: broken\n"})
@@ -359,9 +397,12 @@ func TestAppInstallRefusals(t *testing.T) {
 	if !strings.Contains(err.Error(), "15.0-RELEASE") || !strings.Contains(err.Error(), "15.1") {
 		t.Fatalf("%v", err)
 	}
-	// the default image does not exist here
+	// no default image: two FreeBSD images have the alias stable here
 	_, err = e.Admin.Apps().Install(c, "web", api.AppInstall{Network: "lan", Storage: "default"})
-	wantCode(t, err, api.CodeNotFound)
+	wantCode(t, err, api.CodeInvalid)
+	if !strings.Contains(err.Error(), "(fb, fb151)") || !strings.Contains(err.Error(), "name an image with --image, for example fb@stable; your images: fb, fb151") {
+		t.Fatalf("%v", err)
+	}
 	bad := req
 	bad.Jail = "Bad Name"
 	_, err = e.Admin.Apps().Install(c, "web", bad)
@@ -479,7 +520,7 @@ func TestAppInstallFailures(t *testing.T) {
 	if ok, _ := e.ZFS.Exists(c, "tank/jailops/projects/alpha/jails/web@app-installed"); ok {
 		t.Fatal("a snapshot of a failed installation was taken")
 	}
-	if !slices.Contains(execArgvs(e, "alpha_web"), "/usr/sbin/service web start") {
+	if !slices.ContainsFunc(execArgvs(e, "alpha_web"), func(a string) bool { return strings.HasSuffix(a, " jailops-start web") }) {
 		t.Fatal("the service was not started")
 	}
 	// a wrong status is a failure too
@@ -489,6 +530,22 @@ func TestAppInstallFailures(t *testing.T) {
 	op, _ = e.Admin.Apps().Install(c, "web", req)
 	_, err = op.Wait(c)
 	if !errors.As(err, &ae) || ae.Detail["step"] != "health-check" || !strings.Contains(ae.Message, "answered 500, not 204") {
+		t.Fatalf("%v", err)
+	}
+	// 4. the service does not start: the error names the service command, not the wrapper's script, with what
+	// the rc script printed
+	dop, _ = e.Admin.Jails().Delete(c, "web")
+	dop.Wait(c)
+	e.Jails.SetExecFn(func(_ string, o jailos.ExecOpts) (run.Result, error) {
+		if o.Argv[0] == "/bin/sh" && o.Argv[len(o.Argv)-1] == "web" {
+			return run.Result{ExitCode: 1, Stdout: []byte("web does not start: Permission denied\n")}, errors.New("exit 1")
+		}
+		return run.Result{}, nil
+	})
+	op, _ = e.Admin.Apps().Install(c, "web", req)
+	_, err = op.Wait(c)
+	if !errors.As(err, &ae) || ae.Detail["step"] != "start-service-web" || ae.Detail["jail_kept"] != "true" ||
+		!strings.Contains(ae.Message, "/usr/sbin/service web start") || !strings.Contains(ae.Message, "Permission denied") || strings.Contains(ae.Message, "mktemp") {
 		t.Fatalf("%v", err)
 	}
 }

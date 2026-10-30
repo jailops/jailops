@@ -44,7 +44,16 @@ type JailConfInput struct {
 	Allow       []string
 	// FstabPath, when set, becomes mount.fstab.
 	FstabPath string
+	// SysVIPC gives the jail System V IPC namespaces of its own (sysvmsg,
+	// sysvsem, sysvshm = new); never inherit, which would share the host's.
+	SysVIPC bool
 }
+
+// ConsoleLog is where jail(8) sends the output of the exec.* commands of a
+// jail, instead of the pipes of whoever ran jail -c or jail -r: a daemon an rc
+// script starts keeps its descriptors open, and the caller would wait for the
+// end of that output for ever. ${name} is the jail's name.
+const ConsoleLog = "/var/log/jail_${name}_console.log"
 
 // JailConf renders the jail.conf of one jail.
 func JailConf(in JailConfInput) (string, error) {
@@ -100,6 +109,9 @@ func JailConf(in JailConfInput) (string, error) {
 		if i > 0 && allow[i-1] == a {
 			return "", fmt.Errorf("render: duplicate allow.%s", a)
 		}
+		if a == "sysvipc" && in.SysVIPC {
+			return "", fmt.Errorf("render: allow.sysvipc shares the host's System V IPC and contradicts sysvipc")
+		}
 	}
 	path, err := quoted("path", in.Path)
 	if err != nil {
@@ -139,6 +151,7 @@ func JailConf(in JailConfInput) (string, error) {
 	b.line("\texec.poststart = \"%s poststart ${name}\";", HelperCommand)
 	b.line("\texec.prestop = \"%s prestop ${name}\";", HelperCommand)
 	b.line("\texec.poststop = \"%s poststop ${name}\";", HelperCommand)
+	b.line("\texec.consolelog = \"%s\";", ConsoleLog)
 	if !linux {
 		b.line("\texec.start = \"/bin/sh /etc/rc\";")
 		b.line("\texec.stop = \"/bin/sh /etc/rc.shutdown jail\";")
@@ -156,6 +169,12 @@ func JailConf(in JailConfInput) (string, error) {
 	}
 	for _, a := range allow {
 		b.line("\tallow.%s;", a)
+	}
+	if in.SysVIPC {
+		// UNVERIFIED on FreeBSD: that a server (PostgreSQL) in a vnet jail runs with these.
+		b.line("\tsysvmsg = new;")
+		b.line("\tsysvsem = new;")
+		b.line("\tsysvshm = new;")
 	}
 	if linux {
 		// UNVERIFIED: a Linux jail has no FreeBSD init, so it must persist

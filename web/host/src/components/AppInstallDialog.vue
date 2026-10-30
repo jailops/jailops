@@ -52,7 +52,7 @@ const failedStep = computed(() => error.value?.detail?.step ?? '')
 const kept = computed(() => error.value?.detail?.jail_kept === 'true')
 const current = computed(() => parsed.value[Math.min(done.value, parsed.value.length - 1)])
 const links = computed(() => (result.value ? openLinks(result.value.jail, result.value.ports ?? []) : []))
-const rollbackCmd = computed(() => `jailops jail rollback ${result.value?.jail.metadata.name ?? f.jail} --scope all --snapshot ${result.value?.snapshot || INSTALL_SNAPSHOT}`)
+const rollbackCmd = computed(() => `jailops jail rollback ${result.value?.jail.metadata.name ?? f.jail} --all --snapshot ${result.value?.snapshot || INSTALL_SNAPSHOT}`)
 
 watch(() => props.open, (o) => {
   if (!o || !app.value) return

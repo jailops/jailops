@@ -218,7 +218,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 	if host == "" {
 		host = j.Metadata.Name
 	}
-	in := render.JailConfInput{Name: name, Path: s.rootMount(name), Hostname: host, OS: osf, Interfaces: b.ifaces}
+	in := render.JailConfInput{Name: name, Path: s.rootMount(name), Hostname: host, OS: osf, Interfaces: b.ifaces, SysVIPC: j.Spec.SysVIPC}
 	if j.Spec.Delegate {
 		// UNVERIFIED: a jail that may mount ZFS needs allow.mount.zfs and
 		// enforce_statfs=1; handing the datasets over (jailed=on, zfs jail) is

@@ -62,6 +62,7 @@ logs:                            # files or directories; reading them is a separ
 setup:                           # run once in the jail after the packages, before the services: argv, no shell
   - [/usr/sbin/chown, "postgres:postgres", /var/db/postgres]
   - [/usr/sbin/service, postgresql, initdb]
+sysvipc: true                    # optional, default false: System V IPC of the jail's own (see below)
 health:                          # exactly one of tcp, http, exec; wait_seconds at most 300 (default 60)
   exec: [/usr/local/bin/pg_isready, -U, postgres]
   wait_seconds: 60
@@ -91,6 +92,14 @@ Rules the validator enforces, besides the sizes above:
 - Names of ports and logs are short slugs (`^[a-z][a-z0-9-]{0,31}$`); a port is unique per `port/proto`.
 - `health.http.path` is an absolute request path; `status` defaults to 200.
 - `resources.memory` and `.disk` are sizes (`512M`, `10G`); `cpu` is a number.
+- `sysvipc` is a boolean (`true` or `false`, nothing else). A jail has no System V shared memory, semaphores or message
+  queues unless its parameters allow them, and a server that needs them fails: PostgreSQL's `initdb` stops at
+  `shmget(...)` "Failed system call". `sysvipc: true` sets the jail spec's `sysvipc`, which renders
+  `sysvmsg = new; sysvsem = new; sysvshm = new;` into the jail's `jail.conf`: namespaces of the jail's own, separate
+  from the host's and from every other jail's (never `inherit`, which would share the host's). The objects still count
+  against the host's `kern.ipc` limits. The key is an ordinary key of the jail too (`jailops config set NAME
+  sysvipc=true`, a restart applies it; a profile may carry it). **UNVERIFIED** on a FreeBSD host until PostgreSQL has
+  been installed with it (`JAILOPS_E2E_APPS=postgresql`, below).
 
 Defaults are filled in when the definition is read, so the API always answers a complete object: `repo: ports`,
 `proto: tcp`, `start: true`, `health.wait_seconds: 60`, `health.http.status: 200`.
@@ -102,7 +111,7 @@ Defaults are filled in when the definition is read, so the API always answers a 
 | `GET /api/v1/apps` | `[]AppSummary`: `name`, `title`, `summary`, `category`, `version` (of the first package, when the definition states one), `valid`, `error` |
 | `GET /api/v1/apps/<name>` | `AppDetail`: `definition` (the `App`), `hash`, `file`, `icon` (a data URI, `image/png` or `image/svg+xml`, when the definition has one); `invalid` for an invalid definition, `not_found` for an unknown name |
 
-| `POST /api/v1/apps/<name>/install` | body `AppInstall`: `jail` (default: the app name), `network`, `storage` (each defaults to the project's only grant of its kind), `image` (default `freebsd@stable`), `limits` (replaces the resource hints), `dry_run`; async, result `AppInstallResult`: `jail`, `version`, `addresses`, `ports` (with `endpoint`), `data`, `config`, `logs`, `notes`, `snapshot`, `steps` |
+| `POST /api/v1/apps/<name>/install` | body `AppInstall`: `jail` (default: the app name), `network`, `storage` (each defaults to the project's only grant of its kind), `image` (default: the only FreeBSD image with the alias `stable`, as `NAME@stable`; none or several is `invalid`), `limits` (replaces the resource hints), `dry_run`; async, result `AppInstallResult`: `jail`, `version`, `addresses`, `ports` (with `endpoint`), `data`, `config`, `logs`, `notes`, `snapshot`, `steps` |
 
 Extensions `apps` (the catalog) and `app_install` (the installation). The Go SDK has `Apps().List`, `Apps().Get`,
 `Apps().Install` and `Apps().Installed` (the jails of the project that carry the label `jailops.app`); the in-memory
@@ -131,9 +140,11 @@ The host console has an **Apps** page (`/apps`): the catalog as cards with a sea
 journal: `POST /api/v1/apps/NAME/install` answers `202` with the operation, and the client waits for it. The steps, in
 this order, each a step of the operation's plan (`--dry-run` returns them and does nothing):
 
-1. **Create a thin jail** from `freebsd@stable` (or `--image`; the image must be a FreeBSD image whose release is at
-   least `image.release_min`, compared major.minor), in the project, on the network and storage named (the project's only
-   grant of a kind is the default), with the `data` paths as **volumes** of the jail: one dataset each, named after the
+1. **Create a thin jail** from the image `--image` names, or else from the only FreeBSD image with the alias `stable`
+   (the quick start's `freebsd-15@stable`; with none or several the request is refused before the operation and the
+   hint lists the images: name one with `--image`). The image must be a FreeBSD image whose release is at least
+   `image.release_min`, compared major.minor. The jail is created in the project, on the network and storage named
+   (the project's only grant of a kind is the default), with the `data` paths as **volumes** of the jail: one dataset each, named after the
    path (`/var/db/postgres` becomes the volume `var-db-postgres`), class data, mounted at the path, snapshotted,
    rolled back and backed up with the jail, and untouched by a generation switch like `/usr/local` and `/var/db`. The
    datasets start empty and root-owned; the definition's `setup` chowns them. The labels `jailops.app=<name>` and
@@ -145,6 +156,18 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    `pkg` configuration, the one [install.md](install.md) sets up). `pkg -r` does not run the jail's library trigger, so the
    library cache of the running jail is refreshed with `/sbin/ldconfig -m /usr/local/lib` in the jail. The version that was installed is read with
    `pkg -r <root> query %v <first package>` and becomes the label `jailops.app.version`.
+
+   **Ownership.** `pkg -r` extracts the files from the host. A package that creates a user in its install script and
+   lists directories owned by that user (`/var/log/valkey`, `/var/run/valkey` belong to `valkey`) gets them
+   **root-owned** in the jail, or owned by a number that is the host's idea of that user, depending on the package,
+   because the user exists only in the jail's password file. Restoring the owners generically is not possible from what
+   the packages leave behind: pkg's local database records the paths and checksums of files and the paths of
+   directories, not their owners or modes, so `pkg query` cannot report them and `pkg check` has nothing to re-apply.
+   A definition therefore gives the directories its services write to their user in `setup`, with `mkdir -p` first for
+   a directory that may not exist and `chown` (the starter catalog: `valkey:valkey` on `/var/db/valkey`, `/var/log/valkey`
+   and `/var/run/valkey`; `git:git` on `/usr/local/etc/forgejo`, `/var/db/forgejo` and `/var/log/forgejo`;
+   `postgres:postgres` on `/var/db/postgres`; `prometheus:prometheus` on `/var/db/prometheus`). The `data` volumes start
+   root-owned anyway (step 1).
 3. **Enable the services**: `<service>_enable="YES"` and the `rc` knobs are written into the jail's `/etc/rc.conf`
    (read and written through the helper's file operations, below the jail root; a line that already sets a variable is
    replaced, the others are kept). Every value is written double-quoted with `\`, `"`, `$` and the backquote escaped,
@@ -153,13 +176,28 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
 4. **Run the `setup` commands** in the jail, in order, with the in-jail exec of the helper (`jexec`, argv only, no
    shell, 30 minutes each at most); the first failure ends the installation.
 5. **Start the services** with `/usr/sbin/service <name> start` in the jail, in the order of the definition, those
-   with `start: true`.
+   with `start: true`. The command runs through a fixed wrapper, `/bin/sh -c '<script>' jailops-start <name>`, whose
+   script is a constant and takes the service name as its positional parameter, never as text:
+
+   ```sh
+   out=$(/usr/bin/mktemp -t jailops) || exit 1; /usr/sbin/service "$1" start </dev/null >"$out" 2>&1; rc=$?; [ $rc -eq 0 ] || /bin/cat "$out"; /bin/rm -f "$out"; exit $rc
+   ```
+
+   An rc script that starts its daemon through daemon(8) without `-f` (forgejo's) leaves a supervisor that keeps the
+   descriptors it was given; given the pipes of the in-jail exec, it would keep them open and the step would wait for
+   the end of an output that never comes. With the wrapper the rc script and everything it starts write to a temporary
+   file in the jail; when the start fails, the file is printed and the error names `/usr/sbin/service <name> start` with
+   that output. The service name is checked against `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` before the command is built.
+   The provisioning `services.start` step of a FreeBSD jail uses the same wrapper. `setup` and `health.exec` commands
+   stay plain argv: they are the definition's own commands, without a shell. The jail's own start (`jail -c` running
+   `/etc/rc`) is detached the same way by `exec.consolelog` in its `jail.conf`: the output of `/etc/rc` goes to
+   `/var/log/jail_<project>_<jail>_console.log` on the host (design section 6).
 6. **Run the health check**: `tcp` connects from the host to the port on the jail's first address, `http` requests
    the path there (plain HTTP) and expects the status, `exec` runs the command in the jail; the check is retried once a
    second until it passes or `wait_seconds` have passed. Each attempt is given at most 5 seconds, and never more than
    the time left, so the step ends within `wait_seconds` and one attempt.
 7. **Take the snapshot `app-installed`** of all the jail's datasets: the point to roll back to before the first
-   change (`jailops jail rollback JAIL --scope all --snapshot app-installed`).
+   change (`jailops jail rollback JAIL --all --snapshot app-installed`).
 8. **Say how to reach it**: the jail's addresses with the `ports` (`endpoint` is `<first address>:<port>`), the
    `data`, `config` and `logs` paths, and the `notes`. Ports marked `expose: true` are recorded as such and nothing
    more: forwarding them through the jail's PF anchor (`proxy` devices) is a later feature, so every port is reachable
@@ -192,6 +230,7 @@ was started is stopped and kept.
 | no network or storage named and the project is granted none or several | `invalid` |
 | the network or storage is not granted to the project | `forbidden` |
 | the image does not exist, or the project does not allow it | `not_found` |
+| no image named, and no FreeBSD image or more than one has the alias `stable` | `invalid` |
 | the image is not FreeBSD, or its release is below `release_min` | `invalid` |
 | a project quota would be exceeded | `quota_exceeded` |
 | the role is below operator, or the identity has no project scope | `forbidden` |
@@ -207,7 +246,7 @@ definition has no parameters, and what needs a value is a `config` file the pers
   `updates.packages` upgrades them with `pkg upgrade` inside the jail, `updates.os` moves the jail to a newer image
   generation with the data datasets untouched. There is no separate app update; the catalog's `version` is what the
   definition was written against, not a pin.
-- **Rollback.** `jailops jail rollback JAIL --scope all --snapshot app-installed` is the way back to the fresh installation.
+- **Rollback.** `jailops jail rollback JAIL --all --snapshot app-installed` is the way back to the fresh installation.
 
 ## Deliberately out of scope
 
@@ -232,7 +271,15 @@ builders' output instead. The fake log reader keeps the helper's path rules (a j
 most) but not its symlink and file-type checks, which `internal/priv` tests on a real file system. The ZFS fake does not
 model a dataset mounted under an unmounted parent; the tests assert `canmount=noauto` on the volume datasets instead.
 
-**UNVERIFIED:** an installation on a FreeBSD host: that
-`pkg -r` into a running thin jail installs and runs the packages' scripts as the host's `pkg` does for an image build,
-that the services start from the written `rc.conf`, and the `nginx` step of the FreeBSD end-to-end test
-(`scripts/ci-freebsd-e2e.sh`), which installs the app, fetches its default page from the host and stops it.
+**What ran on a FreeBSD 15.1 host:** `nginx` and `prometheus` installed and ran. That run found the three problems
+this version addresses: PostgreSQL's `initdb` failed without System V shared memory (`sysvipc`), Valkey could not open
+its log file in a root-owned `/var/log/valkey` (the `setup` lines above), and forgejo failed because the daemon(8)
+supervisor of its rc script held the pipes of the in-jail `service forgejo start` and, at the next start, of `jail -c`
+(the start wrapper and the console log).
+
+**UNVERIFIED** until run on a host: PostgreSQL with `sysvipc`, Valkey with its new setup lines, forgejo with the start
+wrapper and the console log. The end-to-end test (`scripts/ci-freebsd-e2e.sh`) installs nginx, fetches its default
+page from the host and stops it; with `JAILOPS_E2E_APPS="postgresql valkey prometheus forgejo"` (or any of them) it
+then installs each named app in its own block and checks it: `select 1` through `psql` as `postgres`, `valkey-cli ping`
+answering `PONG`, Prometheus' `/-/ready`, forgejo's port 3000 answering 200 or a redirect to its installer; then it
+lists the jail's log files and stops the jail. CI does not set the variable.

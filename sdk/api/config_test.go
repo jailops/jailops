@@ -199,3 +199,25 @@ func TestConfigValuesRoundTrip(t *testing.T) {
 		t.Fatalf("%v\n%v\n%v", err, ConfigValues(t2), ConfigValues(s))
 	}
 }
+
+func TestSysVIPCKey(t *testing.T) {
+	var s JailSpec
+	restart, err := ApplyConfig(&s, map[string]string{"sysvipc": "true"}, nil)
+	if err != nil || !s.SysVIPC || !reflect.DeepEqual(restart, []string{"sysvipc"}) {
+		t.Fatalf("%v %v %+v", err, restart, s)
+	}
+	if v := ConfigValues(s); v["sysvipc"] != "true" {
+		t.Fatalf("%v", v)
+	}
+	if _, err := ApplyConfig(&s, map[string]string{"sysvipc": "inherit"}, nil); err == nil || !s.SysVIPC {
+		t.Fatalf("not a boolean: %v %+v", err, s)
+	}
+	if _, err := ApplyConfig(&s, nil, []string{"sysvipc"}); err != nil || s.SysVIPC {
+		t.Fatalf("unset: %v %+v", err, s)
+	}
+	// a profile may carry it
+	eff, src := ExpandedConfig(JailSpec{}, []Profile{{Metadata: ObjectMeta{Name: "db"}, Spec: ProfileSpec{Config: map[string]string{"sysvipc": "true"}}}})
+	if !eff.SysVIPC || src["sysvipc"] != "db" {
+		t.Fatalf("%+v %v", eff, src)
+	}
+}

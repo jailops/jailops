@@ -2,6 +2,7 @@ package jailos
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"testing"
 
@@ -72,6 +73,24 @@ func FuzzParseJLSNamed(f *testing.F) {
 			}
 		}
 	})
+}
+
+// A failing exec.* command is reported by jail(8) with its name only; its
+// output went to the console log, which the hint names.
+func TestCommandCreateFailureNamesConsoleLog(t *testing.T) {
+	ctx := context.Background()
+	f := run.NewFake()
+	f.OnFail("jail", []string{"-f", "/etc/jail.d/alpha_web.conf", "-c", "alpha_web"}, 1, "jail: alpha_web: /bin/sh /etc/rc: failed\n")
+	f.OnFail("jail", []string{"-f", "/etc/jail.d/alpha_db.conf", "-c", "alpha_db"}, 1, "jail: alpha_db: already exists\n")
+	c := NewCommand(f)
+	err := c.Create(ctx, "/etc/jail.d/alpha_web.conf", "alpha_web")
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.Code != api.CodeInternal || ae.Hint != "what the jail's start and stop commands printed is in /var/log/jail_alpha_web_console.log on the host" {
+		t.Fatalf("%#v", err)
+	}
+	if err := c.Create(ctx, "/etc/jail.d/alpha_db.conf", "alpha_db"); !errors.As(err, &ae) || ae.Code != api.CodeAlreadyExists || ae.Hint != "" {
+		t.Fatalf("%#v", err)
+	}
 }
 
 func TestCommandControl(t *testing.T) {

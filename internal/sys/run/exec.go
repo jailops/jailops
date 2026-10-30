@@ -104,6 +104,12 @@ func (Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 		Duration:  time.Since(start),
 		Truncated: stdout.truncated || stderr.truncated,
 	}
+	if errors.Is(err, exec.ErrWaitDelay) && cmd.ProcessState != nil && cmd.ProcessState.Success() {
+		// The command succeeded, but a process it left behind (a daemon it
+		// started) still holds its output open. The pipes were closed
+		// WaitDelay after the exit; what was written later is lost.
+		err, res.Truncated = nil, true
+	}
 	if c.Stdout == nil {
 		res.Stdout = stdout.buf.Bytes()
 	}
