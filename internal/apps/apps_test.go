@@ -460,11 +460,12 @@ func TestIcons(t *testing.T) {
 
 // The starter catalog the jailops-apps package installs is valid as shipped.
 func TestStarterCatalog(t *testing.T) {
-	es, err := Load(filepath.Join("..", "..", "packaging", "apps"))
+	dir := filepath.Join("..", "..", "packaging", "apps")
+	es, err := Load(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"forgejo", "nginx", "postgresql", "prometheus", "valkey"}
+	want := []string{"forgejo", "isms", "mail", "nginx", "nsd", "postgresql", "prometheus", "valkey"}
 	if len(es) != len(want) {
 		t.Fatalf("%d entries, want %v", len(es), want)
 	}
@@ -478,18 +479,32 @@ func TestStarterCatalog(t *testing.T) {
 		}
 		a := e.App
 		if a.Image.ReleaseMin != "15.1" || len(a.Packages) == 0 || len(a.Services) == 0 || len(a.Ports) == 0 || len(a.Data) == 0 ||
-			len(a.Config) == 0 || len(a.Logs) == 0 || a.Health == nil || a.Homepage == "" || a.License == "" || a.Notes == "" ||
+			len(a.Config) == 0 || len(a.Logs) == 0 || a.Homepage == "" || a.License == "" || a.Notes == "" ||
 			a.Resources.Memory == "" || a.Packages[0].Version == "" {
 			t.Errorf("%s: a starter definition fills every section: %+v", e.File, a)
 		}
+		// a health check, unless no service is started: then nothing runs to check
+		starts := slices.ContainsFunc(a.Services, func(s api.AppService) bool { return *s.Start })
+		if (a.Health != nil) != starts {
+			t.Errorf("%s: health %+v with a service started %v", e.File, a.Health, starts)
+		}
 		if a.SysVIPC != (a.Name == "postgresql") {
 			t.Errorf("%s: sysvipc %v", e.File, a.SysVIPC)
+		}
+		// an icon next to the definition is read and served
+		if a.Icon != "" {
+			f, ok, err := Find(dir, e.Name)
+			if err != nil || !ok || f.Err != nil || !strings.HasPrefix(f.Icon, "data:image/svg+xml;base64,") {
+				t.Errorf("%s: icon %s: %v %v %v", e.File, a.Icon, ok, err, f.Err)
+			}
 		}
 	}
 	// pkg -r leaves the directories of a package's user root-owned and the volumes start root-owned: the setup gives
 	// them to the user the service runs as
 	owners := map[string]map[string][]string{
 		"forgejo":    {"git:git": {"/usr/local/etc/forgejo", "/var/db/forgejo", "/var/log/forgejo"}},
+		"isms":       {"isms:isms": {"/var/db/isms", "/var/db/isms/private", "/usr/local/etc/isms/server.env"}},
+		"nsd":        {"nsd:nsd": {"/var/db/nsd", "/var/run/nsd"}},
 		"postgresql": {"postgres:postgres": {"/var/db/postgres"}},
 		"prometheus": {"prometheus:prometheus": {"/var/db/prometheus"}},
 		"valkey":     {"valkey:valkey": {"/var/db/valkey", "/var/log/valkey", "/var/run/valkey"}},
@@ -504,6 +519,44 @@ func TestStarterCatalog(t *testing.T) {
 				}
 			}
 		}
+	}
+	byName := map[string]api.App{}
+	for _, e := range es {
+		byName[e.Name] = e.App
+	}
+	// isms comes from the JailOps repository, the others from the FreeBSD one
+	for _, e := range es {
+		for _, p := range e.App.Packages {
+			wantRepo := "ports"
+			if e.Name == "isms" && p.Name == "isms" { // its other package (ssh-keygen) is a FreeBSD one
+				wantRepo = JailopsRepo
+			}
+			if p.Repo != wantRepo {
+				t.Errorf("%s: package %s from %s, want %s", e.Name, p.Name, p.Repo, wantRepo)
+			}
+		}
+	}
+	// isms is not started: it needs a database and a secret the operator sets first
+	if s := byName["isms"].Services; len(s) != 1 || *s[0].Start {
+		t.Errorf("isms services %+v", s)
+	}
+	// DNS answers on UDP and TCP
+	var dns []string
+	for _, p := range byName["nsd"].Ports {
+		dns = append(dns, fmt.Sprintf("%d/%s", p.Port, p.Proto))
+	}
+	if !slices.Equal(dns, []string{"53/udp", "53/tcp"}) {
+		t.Errorf("nsd ports %v", dns)
+	}
+	// postfix replaces the base system's mailer: sendmail off, and mailer.conf points at postfix
+	mail := byName["mail"]
+	if len(mail.Services) != 2 || mail.Services[0].Name != "postfix" || mail.Services[0].RC["sendmail_enable"] != "NONE" || mail.Services[1].Name != "dovecot" {
+		t.Errorf("mail services %+v", mail.Services)
+	}
+	if !slices.ContainsFunc(mail.Setup, func(argv []string) bool {
+		return strings.Contains(strings.Join(argv, " "), "/usr/local/etc/mail/mailer.conf")
+	}) {
+		t.Errorf("mail: no setup command writes mailer.conf")
 	}
 }
 

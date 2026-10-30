@@ -10,8 +10,9 @@
 # JAILOPS_E2E_PART   all (default), e2e (everything but the packet filter test) or pf (only the packet filter test)
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
 # JAILOPS_E2E_APPS   more apps of the starter catalog to install after nginx, space separated: postgresql, valkey,
-#                   prometheus, forgejo (default none; CI does not set it). Each one is installed, checked in its own
-#                   way, its logs listed, and stopped.
+#                   prometheus, forgejo, nsd, mail, isms (default none; CI does not set it). Each one is installed,
+#                   checked in its own way, its logs listed, and stopped. isms needs the jailops package repository in
+#                   the host's pkg configuration (docs/install.md) and installs a postgresql jail of its own, isms-db.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -21,7 +22,12 @@ part=${JAILOPS_E2E_PART:-all}
 case $part in all | e2e | pf) ;; *) echo "JAILOPS_E2E_PART must be all, e2e or pf" >&2; exit 2 ;; esac
 e2e_apps=${JAILOPS_E2E_APPS:-}
 for a in $e2e_apps; do
-	case $a in postgresql | valkey | prometheus | forgejo) ;; *) echo "JAILOPS_E2E_APPS: no check for $a (postgresql, valkey, prometheus, forgejo)" >&2; exit 2 ;; esac
+	case $a in postgresql | valkey | prometheus | forgejo | nsd | mail | isms) ;; *) echo "JAILOPS_E2E_APPS: no check for $a (postgresql, valkey, prometheus, forgejo, nsd, mail, isms)" >&2; exit 2 ;; esac
+	# isms is installed with pkg -r ROOT install -r jailops: say so now, not after the setup of the whole machine
+	if [ "$a" = isms ] && ! pkg -vv | grep -Eq '^[[:space:]]+jailops:[[:space:]]*\{'; then
+		echo "JAILOPS_E2E_APPS: isms comes from the jailops package repository, which the pkg configuration of this host does not have (docs/install.md)" >&2
+		exit 2
+	fi
 done
 poolfile=/tmp/$pool.img
 work=/tmp/jailops-e2e
@@ -222,7 +228,38 @@ app_check() { # app_check NAME ADDRESS
 	valkey) expect "valkey answers" '^PONG$' $J exec --project demo valkey -- /usr/local/bin/valkey-cli ping ;;
 	prometheus) expect_retry "prometheus is ready" 'Ready' curl -sS --max-time 5 "http://$2:9090/-/ready" ;;
 	forgejo) expect_retry "forgejo answers (the web installer or a redirect to it)" '^(200|302|303)$' curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "http://$2:3000/" ;;
+	nsd) # the starter zone, from the host, over UDP and TCP
+		expect "nsd answers for example.com over UDP" 'IN[[:space:]]+SOA[[:space:]]+ns1\.example\.com\.' drill @"$2" example.com SOA
+		expect "nsd answers for example.com over TCP" 'IN[[:space:]]+SOA[[:space:]]+ns1\.example\.com\.' drill -t @"$2" example.com SOA
+		check "the configuration passes nsd-checkconf" $J exec --project demo nsd -- /usr/local/sbin/nsd-checkconf /usr/local/etc/nsd/nsd.conf ;;
+	mail) # the greetings: the command is sent after a second, Postfix refuses commands that arrive before its greeting
+		expect "postfix greets on port 25" '^220 ' sh -c "(sleep 1; printf 'QUIT\r\n') | nc -w 5 $2 25"
+		expect "dovecot greets on port 143" '^\* OK' sh -c "(sleep 1; printf 'a1 LOGOUT\r\n') | nc -w 5 $2 143"
+		expect "mailer.conf hands /usr/sbin/sendmail to postfix" '^sendmail[[:space:]]+/usr/local/sbin/sendmail$' $J exec --project demo mail -- cat /usr/local/etc/mail/mailer.conf ;;
+	isms) isms_check "$2" ;;
 	esac
+}
+isms_check() { # isms_check ADDRESS: the steps of the definition's notes with a postgresql jail of its own, then HTTP
+	check "install postgresql for isms" $J app install postgresql --name isms-db --project demo --network lan --storage default
+	db=$($J app installed --project demo | awk '$1 == "isms-db" {print $5}' | head -1 | cut -d, -f1)
+	[ -n "$db" ] || fail "no address for the isms-db jail"
+	pw=e2e$(openssl rand -hex 12)
+	check "a role and a database for isms" $J exec --project demo isms-db -- su -l postgres -c "psql -c \"CREATE ROLE isms LOGIN PASSWORD '$pw'\" -c 'CREATE DATABASE isms OWNER isms'"
+	check "postgresql listens on its address" $J exec --project demo isms-db -- su -l postgres -c "psql -c \"ALTER SYSTEM SET listen_addresses = '*'\""
+	check "isms may connect" $J exec --project demo isms-db -- sh -c "echo 'host isms isms $1/32 scram-sha-256' >> /var/db/postgres/data18/pg_hba.conf"
+	check "restart postgresql" $J exec --project demo isms-db -- service postgresql restart
+	env=/usr/local/etc/isms/server.env
+	check "server.env: database, base URL, signing address" $J exec --project demo isms -- sh -c "sed -i '' \
+		-e 's|^DATABASE_URL=.*|DATABASE_URL=\"postgres://isms:$pw@$db:5432/isms?sslmode=disable\"|' \
+		-e 's|^ISMS_BASE_URL=.*|ISMS_BASE_URL=http://$1:8080|' -e 's|^ISMS_SIGNING_EMAIL=.*|ISMS_SIGNING_EMAIL=e2e@example.com|' $env"
+	check "server.env: the master secret" $J exec --project demo isms -- sh -c "sed -i '' \"s|^ISMS_SECRET=.*|ISMS_SECRET=\$(openssl rand -hex 32)|\" $env"
+	check "server.env: owner and mode" $J exec --project demo isms -- sh -c "chown isms:isms $env && chmod 600 $env"
+	check "the signing key" $J exec --project demo isms -- su -m isms -c '/usr/local/bin/ssh-keygen -q -t ed25519 -N "" -C e2e@example.com -f /var/db/isms/private/isms_key'
+	check "the schema" $J exec --project demo isms -- env ISMS_SERVER_ENV=$env su -m isms -c '/usr/local/bin/isms server migrate'
+	check "start isms" $J exec --project demo isms -- service isms start
+	# UNVERIFIED: port 8080 and what / answers; curl retries while the program starts
+	expect "isms answers on port 8080" '^[23][0-9][0-9]$' curl -s -o /dev/null -w '%{http_code}' --retry 30 --retry-connrefused --retry-delay 1 "http://$1:8080/"
+	check "stop isms-db" $J stop isms-db --project demo
 }
 for a in $e2e_apps; do
 	step "the app $a from the catalog"

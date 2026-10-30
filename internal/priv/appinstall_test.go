@@ -48,6 +48,8 @@ func TestAppInstallThroughTheHelper(t *testing.T) {
 	ok(apps.PkgInstallArgv(root, "ports", []string{"nginx"})...)
 	ok(apps.PkgInstallArgv(root, "ports", []string{"postgresql18-server", "postgresql18-contrib"})...)
 	ok(apps.PkgInstallArgv(root, "jailops", []string{"jailops-tool"})...)
+	ok(apps.PkgInstallArgv(root, "jailops", []string{"isms"})...)
+	ok(apps.PkgInstallArgv(root, "ports", []string{"postfix", "dovecot"})...)
 	ok(apps.PkgVersionArgv(root, "nginx")...)
 	ok(apps.PkgVersionArgv(root, "py311-prometheus_client")...)
 	// not a jail root: the storage root itself, outside it, climbing out, relative

@@ -979,6 +979,7 @@ Open:
 | `zfs_delegation` | Accepted (global admin only) and rendered into `jail.conf`; the helper does not hand datasets over, so the jail does not see them and no error says so |
 | `sysvipc` and the console log | `sysvmsg/sysvsem/sysvshm = new` and `exec.consolelog` are rendered, accepted by the helper and tested against fakes; PostgreSQL's `initdb` in a jail with them, and a forgejo start (daemon(8) without `-f`) no longer holding `jail -c`, have not been run on a host |
 | App service start wrapper and package ownership | The `/bin/sh -c` start wrapper is tested with a real `sh` on the development host, not in a jail; the `chown` setup lines of the starter catalog (`pkg -r` leaves the directories of a package's user root-owned) are written from the ports' layout and not yet run |
+| Starter apps `isms`, `nsd`, `mail` | Validated by the catalog test and dry-run against the daemon with fakes; never installed on a host. isms: port 8080 and its answer, and an install from the `jailops` repository with `pkg -r`; nsd: package paths, rc.d name and the starter configuration; mail: package paths, Dovecot 2.4 syntax, PAM logins, Postfix's `set-permissions` after `pkg -r` (docs/apps.md, the starter catalog) |
 | Helper audit pid | The helper's audit lines do not carry the daemon's pid (`pid: 0`) |
 | Generic `zfs send`/`receive` through the helper socket | About 0.4 MB/s; cause not found, bypassed by `zfs.replicate` |
 | `pkg.jailops.net` | The repository host is not live; packages were installed from a local repository |

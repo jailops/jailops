@@ -12,11 +12,13 @@ const (
 	AppStorage       AppCategory = "storage"
 	AppMonitoring    AppCategory = "monitoring"
 	AppCommunication AppCategory = "communication"
+	AppNetwork       AppCategory = "network"
+	AppSecurity      AppCategory = "security"
 	AppOther         AppCategory = "other"
 )
 
 // AppCategories lists every category, in the order the console shows them.
-var AppCategories = []AppCategory{AppDatabase, AppWeb, AppTools, AppDevops, AppStorage, AppMonitoring, AppCommunication, AppOther}
+var AppCategories = []AppCategory{AppDatabase, AppWeb, AppTools, AppDevops, AppStorage, AppMonitoring, AppCommunication, AppNetwork, AppSecurity, AppOther}
 
 // App is one definition of the application catalog (docs/apps.md): a jail
 // that runs one or more packages, with what an operator needs to know to run

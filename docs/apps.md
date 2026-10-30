@@ -40,7 +40,7 @@ title: PostgreSQL                # one line, at most 80 characters
 summary: Relational database server, PostgreSQL 18 from the FreeBSD packages.   # one line, at most 140
 description: |                   # plain text paragraphs, no markup, at most 2000 characters
   ...
-category: database               # database, web, tools, devops, storage, monitoring, communication, other
+category: database               # database, web, tools, devops, storage, monitoring, communication, network, security, other
 homepage: https://www.postgresql.org/    # an https URL
 license: PostgreSQL              # free text, at most 64 characters
 icon: postgresql.svg             # optional: a .png or .svg next to the definition, at most 64 KB
@@ -63,7 +63,7 @@ setup:                           # run once in the jail after the packages, befo
   - [/usr/sbin/chown, "postgres:postgres", /var/db/postgres]
   - [/usr/sbin/service, postgresql, initdb]
 sysvipc: true                    # optional, default false: System V IPC of the jail's own (see below)
-health:                          # exactly one of tcp, http, exec; wait_seconds at most 300 (default 60)
+health:                          # optional; exactly one of tcp, http, exec; wait_seconds at most 300 (default 60)
   exec: [/usr/local/bin/pg_isready, -U, postgres]
   wait_seconds: 60
 resources: {memory: 1G, disk: 10G, cpu: "1"}   # hints for the jail's limits, not limits
@@ -90,7 +90,9 @@ Rules the validator enforces, besides the sizes above:
 - `setup` and `health.exec` commands are argv with an absolute program path; there is no shell, no search path, no
   pipe. At most 32 setup commands.
 - Names of ports and logs are short slugs (`^[a-z][a-z0-9-]{0,31}$`); a port is unique per `port/proto`.
-- `health.http.path` is an absolute request path; `status` defaults to 200.
+- `health.http.path` is an absolute request path; `status` defaults to 200. A definition may leave `health` out; the
+  starter catalog does so only for an app that starts none of its services (`isms`: nothing runs to check until the
+  operator has configured it).
 - `resources.memory` and `.disk` are sizes (`512M`, `10G`); `cpu` is a number.
 - `sysvipc` is a boolean (`true` or `false`, nothing else). A jail has no System V shared memory, semaphores or message
   queues unless its parameters allow them, and a server that needs them fails: PostgreSQL's `initdb` stops at
@@ -98,8 +100,8 @@ Rules the validator enforces, besides the sizes above:
   `sysvmsg = new; sysvsem = new; sysvshm = new;` into the jail's `jail.conf`: namespaces of the jail's own, separate
   from the host's and from every other jail's (never `inherit`, which would share the host's). The objects still count
   against the host's `kern.ipc` limits. The key is an ordinary key of the jail too (`jailops config set NAME
-  sysvipc=true`, a restart applies it; a profile may carry it). **UNVERIFIED** on a FreeBSD host until PostgreSQL has
-  been installed with it (`JAILOPS_E2E_APPS=postgresql`, below).
+  sysvipc=true`, a restart applies it; a profile may carry it). The FreeBSD end-to-end test (below) installs PostgreSQL
+  with it and runs a query.
 
 Defaults are filled in when the definition is read, so the API always answers a complete object: `repo: ports`,
 `proto: tcp`, `start: true`, `health.wait_seconds: 60`, `health.http.status: 200`.
@@ -115,7 +117,7 @@ Defaults are filled in when the definition is read, so the API always answers a 
 
 Extensions `apps` (the catalog) and `app_install` (the installation). The Go SDK has `Apps().List`, `Apps().Get`,
 `Apps().Install` and `Apps().Installed` (the jails of the project that carry the label `jailops.app`); the in-memory
-server of `sdk/fake` starts with three definitions and installs them as running jails. The CLI:
+server of `sdk/fake` starts with six definitions (nginx, postgresql, valkey, isms, nsd, mail, shortened) and installs them as running jails. The CLI:
 `jailops app list [PATTERN...] [--category C] [-c COLS] [--sort COL] [-o wide|json|yaml|name|csv]`,
 `jailops app info NAME [-o json|yaml]`, `jailops app install NAME [--name JAIL] [--network N] [--storage S]
 [--image I] [--memory M] [--disk D] [--cpu N] [--project P] [--dry-run] [--no-wait]` and
@@ -153,7 +155,11 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
 2. **Install the packages from the host** with `pkg -r <root> install -y <names>` through the privileged helper, from
    the FreeBSD repository (`repo: ports`, the host's own repository configuration) or from `pkg.jailops.net`
    (`repo: jailops`: `pkg -r <root> install -y -r jailops <names>`, the repository named `jailops` in the host's
-   `pkg` configuration, the one [install.md](install.md) sets up). `pkg -r` does not run the jail's library trigger, so the
+   `pkg` configuration, the one [install.md](install.md) sets up). `-r jailops` limits the whole installation to that
+   repository, dependencies included: a JailOps package that needs packages from the FreeBSD repository installs only if
+   the definition lists them as `repo: ports` packages too, which go in first (the `ports` group is installed before
+   the `jailops` group). The installer assumes the repository exists on the host and does not check it beforehand; a
+   host without it fails at this step with pkg's own message, and the jail is kept stopped. `pkg -r` does not run the jail's library trigger, so the
    library cache of the running jail is refreshed with `/sbin/ldconfig -m /usr/local/lib` in the jail. The version that was installed is read with
    `pkg -r <root> query %v <first package>` and becomes the label `jailops.app.version`.
 
@@ -166,8 +172,12 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    A definition therefore gives the directories its services write to their user in `setup`, with `mkdir -p` first for
    a directory that may not exist and `chown` (the starter catalog: `valkey:valkey` on `/var/db/valkey`, `/var/log/valkey`
    and `/var/run/valkey`; `git:git` on `/usr/local/etc/forgejo`, `/var/db/forgejo` and `/var/log/forgejo`;
-   `postgres:postgres` on `/var/db/postgres`; `prometheus:prometheus` on `/var/db/prometheus`). The `data` volumes start
-   root-owned anyway (step 1).
+   `postgres:postgres` on `/var/db/postgres`; `prometheus:prometheus` on `/var/db/prometheus`; `isms:isms` on
+   `/var/db/isms`, `/var/db/isms/private` and `/usr/local/etc/isms/server.env`; `nsd:nsd` on `/var/db/nsd` and
+   `/var/run/nsd`). The `data` volumes start root-owned anyway (step 1). What a package's install message leaves to the
+   person is the definition's to do as well: the `mail` definition writes `/usr/local/etc/mail/mailer.conf` itself, and
+   runs `postfix set-permissions` to give Postfix's programs and queue the owners, groups and setgid bits its own
+   file list names.
 3. **Enable the services**: `<service>_enable="YES"` and the `rc` knobs are written into the jail's `/etc/rc.conf`
    (read and written through the helper's file operations, below the jail root; a line that already sets a variable is
    replaced, the others are kept). Every value is written double-quoted with `\`, `"`, `$` and the backquote escaped,
@@ -257,9 +267,67 @@ definition has no parameters, and what needs a value is a `config` file the pers
 - **Fetching catalogs**: the catalog comes with a package, signed, or from the operator's own files. The daemon makes
   no request for it.
 
-The starter catalog (`packaging/apps/`): `postgresql`, `nginx`, `valkey`, `forgejo` and `prometheus`, written against
-the FreeBSD 15 quarterly packages of October 2026. Package names, rc.d names, rc.conf knobs, ports and paths were taken
-from the packages themselves. The catalog itself is validated by a test on every build, and the installation is tested
+## The starter catalog
+
+`packaging/apps/` holds eight definitions. The first five were written against the FreeBSD 15 quarterly packages of
+October 2026: package names, rc.d names, rc.conf knobs, ports and paths were taken from the packages themselves. The
+three later ones were not: their sources are named in the table and below, and what could not be checked is marked.
+
+| App | Category | Packages (repository) | Ports | Health check | Source of the facts |
+|---|---|---|---|---|---|
+| `postgresql` | database | `postgresql18-server` (ports) | 5432/tcp | `pg_isready` | the package |
+| `nginx` | web | `nginx` (ports) | 80/tcp, 443/tcp | HTTP `/` | the package; ran on a host |
+| `valkey` | database | `valkey` (ports) | 6379/tcp | `valkey-cli ping` | the package |
+| `forgejo` | devops | `forgejo16` (ports) | 3000/tcp | tcp 3000 | the package |
+| `prometheus` | monitoring | `prometheus3` (ports) | 9090/tcp | HTTP `/-/healthy` | the package; ran on a host |
+| `isms` | security | `isms` (jailops), `openssh-portable` (ports) | 8080/tcp (UNVERIFIED) | none: not started | the package recipe of the JailOps repository, its `server.env.sample` and install message |
+| `nsd` | network | `nsd` (ports) | 53/udp, 53/tcp | tcp 53 | NSD's documented configuration; the FreeBSD package not inspected |
+| `mail` | communication | `postfix`, `dovecot` (ports) | 25, 587, 143, 993 (tcp) | tcp 25 | Postfix's and Dovecot 2.3's documented configuration and the Postfix package's install message; the packages not inspected |
+
+**isms** (featured: the platform's own information security management system) installs the package `isms` from the
+JailOps package repository (and `openssh-portable` from the FreeBSD packages, because the thin image has no `ssh-keygen`, which the signing key needs): `pkg -r ROOT install -y -r jailops isms`, which assumes the host's pkg configuration has the
+repository named `jailops` (the one [install.md](install.md) sets up for JailOps itself). The package has no
+dependencies. The paths (`/usr/local/bin/isms`, data `/var/db/isms`, `/var/db/isms/private` for the signing key,
+`/usr/local/etc/isms/server.env` mode 0600 owner `isms`, log `/var/log/isms.log`), the user `isms`, the rc.d service
+`isms` (daemon(8), restarted 5 seconds after it exits) and the first-run steps come from the package recipe and its
+install message. The definition enables the service but does not start it, and generates nothing: isms needs a
+PostgreSQL database, and its master secret `ISMS_SECRET` is empty until the operator sets it (isms refuses to start
+without it). The setup only gives the data directory, the key directory and `server.env` back to `isms` with the modes
+the package intends. Its `notes` are the manual steps: a role and a database in a `postgresql` jail with a `pg_hba.conf`
+rule for the isms jail's address, `DATABASE_URL`, `ISMS_BASE_URL`, `ISMS_SIGNING_EMAIL` and the secret in `server.env`,
+the signing key, `isms server migrate` as `isms`, then `service isms start`. Connecting two apps by hand is the current
+state; the coming `jailops app allow` flow is meant to make the role, the password and `DATABASE_URL` itself. The end-to-end test installs it, runs these steps
+against a `postgresql` jail and sees port 8080 answer with a 2xx or 3xx status. **UNVERIFIED**: what exactly the program
+answers there, and therefore the health path, which the definition leaves out (8080 is the default of `isms server
+serve`; the FreeBSD service passes no `--addr`). Until `server.env` is complete, a restart of the jail starts the
+service, which exits and is restarted by daemon(8) every 5 seconds with the reason in `/var/log/isms.log`.
+
+**nsd** is the authoritative DNS server NSD (`dns/nsd`), chosen because one program is both a primary (it sends NOTIFY
+and answers zone transfers) and a secondary (it requests them) with a short configuration. The setup writes a starter
+`nsd.conf` and one zone, `example.com`, under `/var/db/nsd/zones` (the package's sample configuration is replaced, a zone file that exists stays), with the state files
+on the volume, no database file and no remote control; it gives `/var/db/nsd` and `/var/run/nsd` to `nsd`, then runs
+`nsd-checkconf` and `nsd-checkzone`, so a configuration the packaged release rejects ends the installation at that
+step. The ports are 53/udp and 53/tcp; the definition format has had `proto: udp` since version 1, and ports are recorded
+only (forwarding is a later feature), so nothing else changes for UDP. The `notes` give the lines for a primary
+(`notify`, `provide-xfr`) and a secondary (`allow-notify`, `request-xfr`) and recommend a TSIG key. The end-to-end test
+installs it, runs `nsd-checkconf` and asks the jail for the SOA of `example.com` over UDP and over TCP. **UNVERIFIED**:
+that NSD logs to syslog facility daemon (`/var/log/daemon.log`) and a zone transfer between two jails.
+
+**mail** is a starting point, said so in its summary: Postfix (SMTP 25, submission 587) and Dovecot 2.3 (IMAP 143; 993
+disabled until a certificate is configured) for one domain, `example.com` until changed, with system users whose homes
+lie on the volume `/home/mail` (mail goes to `~/Maildir`), the queue on the volume `/var/spool/postfix`, and no TLS,
+spam filter, DKIM signing or webmail. `sendmail_enable="NONE"` keeps the base system's MTA off; the setup copies
+`main.cf` and `master.cf` from their samples when missing, sets the domain and Dovecot authentication for submission
+with `postconf -e`, `-M` and `-P`, runs `postfix set-permissions` and then `postfix check`, builds the aliases with
+`postalias`, writes `/usr/local/etc/mail/mailer.conf` so that `/usr/sbin/sendmail` is Postfix's, writes `dovecot.conf`
+when absent and checks it with `doveconf -n`. The `notes` add a user, set the domain, add TLS to both servers, and list
+the DNS records (A/AAAA and PTR, MX, SPF, DMARC; DKIM needs a signing service this app does not include). The end-to-end test installs it
+(the packaged Dovecot is 2.3, so the starter configuration uses its syntax; `doveconf -n` fails the installation if it
+is not), starts both services and reads the Postfix `220` and Dovecot `* OK` greetings. **UNVERIFIED**: PAM
+authentication of system users through `/etc/pam.d/other`, delivering a message to a local user and reading it over
+IMAP, and TLS.
+
+The catalog itself is validated by a test on every build, and the installation is tested
 end to end against in-memory fakes of ZFS, the jail runtime and `pkg`. What is checked against the privileged helper's
 real rules: the argument vectors the builders of `internal/apps` make (`pkg -r ... install`, `pkg -r ... query`), the
 rc.conf path and the in-jail commands, in `internal/priv`; the install tests assert that the service sends exactly those
@@ -277,9 +345,17 @@ its log file in a root-owned `/var/log/valkey` (the `setup` lines above), and fo
 supervisor of its rc script held the pipes of the in-jail `service forgejo start` and, at the next start, of `jail -c`
 (the start wrapper and the console log).
 
-**UNVERIFIED** until run on a host: PostgreSQL with `sysvipc`, Valkey with its new setup lines, forgejo with the start
-wrapper and the console log. The end-to-end test (`scripts/ci-freebsd-e2e.sh`) installs nginx, fetches its default
-page from the host and stops it; with `JAILOPS_E2E_APPS="postgresql valkey prometheus forgejo"` (or any of them) it
-then installs each named app in its own block and checks it: `select 1` through `psql` as `postgres`, `valkey-cli ping`
-answering `PONG`, Prometheus' `/-/ready`, forgejo's port 3000 answering 200 or a redirect to its installer; then it
-lists the jail's log files and stops the jail. CI does not set the variable.
+Verified on a FreeBSD host with the end-to-end test: PostgreSQL with `sysvipc`, Valkey with its setup lines, forgejo with
+the start wrapper and the console log, and `isms`, `nsd` and `mail` as far as stated above. The end-to-end test
+(`scripts/ci-freebsd-e2e.sh`) installs nginx, fetches its default page from the host and stops it; with
+`JAILOPS_E2E_APPS="postgresql valkey prometheus forgejo nsd mail isms"` (or any of them) it then installs each named
+app in its own block and checks it: `select 1` through `psql` as `postgres`, `valkey-cli ping` answering `PONG`,
+Prometheus' `/-/ready`, forgejo's port 3000 answering 200 or a redirect to its installer; for `nsd`, `drill` from the
+host asks the jail for the SOA of `example.com` over UDP and over TCP and `nsd-checkconf` passes in the jail; for `mail`,
+Postfix's `220` greeting on port 25 and Dovecot's `* OK` on port 143 (`nc` that sends `QUIT` or `LOGOUT` one second after connecting, because Postfix refuses commands that arrive before its greeting) and the
+`sendmail` line of `mailer.conf`; for `isms`, the steps of its notes with a `postgresql` jail of its own (`isms-db`):
+role, database, `listen_addresses`, a `pg_hba.conf` rule, `server.env`, the secret, the signing key, `isms server
+migrate`, `service isms start`, and port 8080 answering a 2xx or 3xx status (curl retries while the program starts).
+None of these checks reaches the internet. `isms` needs the `jailops` repository in the host's pkg configuration; the
+script refuses to start (exit 2) with the reason when it is missing. Then it lists the jail's log files and stops the
+jail. CI does not set the variable.

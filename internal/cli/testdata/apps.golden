@@ -1,16 +1,22 @@
 $ jailops app list
-NAME         CATEGORY   VERSION    STATUS    SUMMARY
-broken       -          -          invalid   title: is required
-nginx        web        1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
-postgresql   database   18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database   9.1.2      valid     In-memory key-value store under the BSD license.
+NAME         CATEGORY        VERSION    STATUS    SUMMARY
+broken       -               -          invalid   title: is required
+isms         security        0.8.1      valid     Information security management platform with git-native documents; needs PostgreSQL.
+mail         communication   3.10       valid     A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.
+nginx        web             1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
+nsd          network         4.15       valid     Authoritative DNS server for your own zones, as a primary or a secondary.
+postgresql   database        18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database        9.1.2      valid     In-memory key-value store under the BSD license.
 
 $ jailops app list -o wide
-NAME         CATEGORY   VERSION    STATUS    SUMMARY
-broken       -          -          invalid   title: is required
-nginx        web        1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
-postgresql   database   18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database   9.1.2      valid     In-memory key-value store under the BSD license.
+NAME         CATEGORY        VERSION    STATUS    SUMMARY
+broken       -               -          invalid   title: is required
+isms         security        0.8.1      valid     Information security management platform with git-native documents; needs PostgreSQL.
+mail         communication   3.10       valid     A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.
+nginx        web             1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
+nsd          network         4.15       valid     Authoritative DNS server for your own zones, as a primary or a secondary.
+postgresql   database        18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
+valkey       database        9.1.2      valid     In-memory key-value store under the BSD license.
 
 $ jailops app list --category database
 NAME         CATEGORY   VERSION   STATUS   SUMMARY
@@ -18,7 +24,7 @@ postgresql   database   18.6      valid    Relational database server, PostgreSQ
 valkey       database   9.1.2     valid    In-memory key-value store under the BSD license.
 
 $ jailops app list --category games
-! usage: unknown category "games" (categories: database, web, tools, devops, storage, monitoring, communication, other)
+! usage: unknown category "games" (categories: database, web, tools, devops, storage, monitoring, communication, network, security, other)
 ! hint: run 'jailops app list --help' for usage
 [exit 2]
 
@@ -30,20 +36,29 @@ valkey       database   9.1.2     valid    In-memory key-value store under the B
 $ jailops app list -c name,version --sort version
 NAME         VERSION
 broken       -
+isms         0.8.1
 nginx        1.30.6,3
+mail         3.10
+nsd          4.15
 postgresql   18.6
 valkey       9.1.2
 
 $ jailops app list -o name
 broken
+isms
+mail
 nginx
+nsd
 postgresql
 valkey
 
 $ jailops app list -o csv
 NAME,CATEGORY,VERSION,STATUS,SUMMARY
 broken,-,-,invalid,title: is required
+isms,security,0.8.1,valid,Information security management platform with git-native documents; needs PostgreSQL.
+mail,communication,3.10,valid,"A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot."
 nginx,web,"1.30.6,3",valid,"Web server and reverse proxy, serving /usr/local/www."
+nsd,network,4.15,valid,"Authoritative DNS server for your own zones, as a primary or a secondary."
 postgresql,database,18.6,valid,"Relational database server, PostgreSQL 18 from the FreeBSD packages."
 valkey,database,9.1.2,valid,In-memory key-value store under the BSD license.
 
@@ -158,22 +173,28 @@ $ jailops app info missing
 [exit 4]
 
 $ jailops app list
-┌────────────┬──────────┬──────────────────────────────────────────────────────────────────────┐
-│ NAME       │ CATEGORY │ SUMMARY                                                              │
-├────────────┼──────────┼──────────────────────────────────────────────────────────────────────┤
-│ broken     │ -        │ invalid: title: is required                                          │
-│ nginx      │ web      │ Web server and reverse proxy, serving /usr/local/www.                │
-│ postgresql │ database │ Relational database server, PostgreSQL 18 from the FreeBSD packages. │
-│ valkey     │ database │ In-memory key-value store under the BSD license.                     │
-└────────────┴──────────┴──────────────────────────────────────────────────────────────────────┘
+┌────────────┬───────────────┬────────────────────────────────────────────────────────────────────────────────────────────┐
+│ NAME       │ CATEGORY      │ SUMMARY                                                                                    │
+├────────────┼───────────────┼────────────────────────────────────────────────────────────────────────────────────────────┤
+│ broken     │ -             │ invalid: title: is required                                                                │
+│ isms       │ security      │ Information security management platform with git-native documents; needs PostgreSQL.      │
+│ mail       │ communication │ A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot. │
+│ nginx      │ web           │ Web server and reverse proxy, serving /usr/local/www.                                      │
+│ nsd        │ network       │ Authoritative DNS server for your own zones, as a primary or a secondary.                  │
+│ postgresql │ database      │ Relational database server, PostgreSQL 18 from the FreeBSD packages.                       │
+│ valkey     │ database      │ In-memory key-value store under the BSD license.                                           │
+└────────────┴───────────────┴────────────────────────────────────────────────────────────────────────────────────────────┘
 
 $ jailops app list
-┌────────────┬──────────────────────────────────────────────────────────────────────┐
-│ NAME       │ SUMMARY                                                              │
-├────────────┼──────────────────────────────────────────────────────────────────────┤
-│ broken     │ invalid: title: is required                                          │
-│ nginx      │ Web server and reverse proxy, serving /usr/local/www.                │
-│ postgresql │ Relational database server, PostgreSQL 18 from the FreeBSD packages. │
-│ valkey     │ In-memory key-value store under the BSD license.                     │
-└────────────┴──────────────────────────────────────────────────────────────────────┘
+┌────────────┬────────────────────────────────────────────────────────────────────────────────────────────┐
+│ NAME       │ SUMMARY                                                                                    │
+├────────────┼────────────────────────────────────────────────────────────────────────────────────────────┤
+│ broken     │ invalid: title: is required                                                                │
+│ isms       │ Information security management platform with git-native documents; needs PostgreSQL.      │
+│ mail       │ A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot. │
+│ nginx      │ Web server and reverse proxy, serving /usr/local/www.                                      │
+│ nsd        │ Authoritative DNS server for your own zones, as a primary or a secondary.                  │
+│ postgresql │ Relational database server, PostgreSQL 18 from the FreeBSD packages.                       │
+│ valkey     │ In-memory key-value store under the BSD license.                                           │
+└────────────┴────────────────────────────────────────────────────────────────────────────────────────────┘
 

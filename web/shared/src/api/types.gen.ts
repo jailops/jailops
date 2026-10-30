@@ -10,9 +10,11 @@ export type AppCategory =
   | "storage"
   | "monitoring"
   | "communication"
+  | "network"
+  | "security"
   | "other"
 
-export const AppCategoryValues: readonly AppCategory[] = ['database', 'web', 'tools', 'devops', 'storage', 'monitoring', 'communication', 'other']
+export const AppCategoryValues: readonly AppCategory[] = ['database', 'web', 'tools', 'devops', 'storage', 'monitoring', 'communication', 'network', 'security', 'other']
 
 export type Code =
   | "invalid"

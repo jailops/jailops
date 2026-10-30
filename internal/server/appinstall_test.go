@@ -786,3 +786,108 @@ func TestDoctorLegacyVolumes(t *testing.T) {
 		t.Fatalf("%+v", ch)
 	}
 }
+
+// The starter catalog as shipped plans the steps its definitions describe:
+// isms from the jailops repository and not started (so nothing to check),
+// nsd and mail with their setup, services and health check. isms installs
+// through the fakes without starting anything.
+func TestAppInstallStarterCatalog(t *testing.T) {
+	src := filepath.Join("..", "..", "packaging", "apps")
+	defs := map[string]string{}
+	for _, n := range []string{"isms", "nsd", "mail"} {
+		b, err := os.ReadFile(filepath.Join(src, n+".yaml"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		// the icon file is not copied here; internal/apps reads the shipped ones
+		defs[n] = strings.Replace(string(b), "icon: "+n+".svg\n", "", 1)
+	}
+	e, c := appEnv(t, defs)
+	names := func(steps []string) []string {
+		var out []string
+		for _, s := range steps {
+			_, rest, _ := strings.Cut(s, " ")
+			name, _, _ := strings.Cut(rest, ":")
+			out = append(out, name)
+		}
+		return out
+	}
+	setup := func(n int) []string {
+		var out []string
+		for i := range n {
+			out = append(out, fmt.Sprintf("setup-%d", i+1))
+		}
+		return out
+	}
+	for _, c2 := range []struct {
+		app      string
+		services []string
+		health   bool
+	}{
+		{"isms", nil, false},
+		{"nsd", []string{"start-service-nsd"}, true},
+		{"mail", []string{"start-service-postfix", "start-service-dovecot"}, true},
+	} {
+		def, err := apps.Parse(c2.app, []byte(defs[c2.app]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		op, err := e.Admin.Apps().Install(c, c2.app, api.AppInstall{Image: "fb151@stable", DryRun: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := op.Wait(c)
+		if err != nil {
+			t.Fatalf("%s: %v", c2.app, err)
+		}
+		repos := []string{"install-packages-ports"}
+		if c2.app == "isms" { // openssh-portable from the FreeBSD packages, then isms from the JailOps repository
+			repos = append(repos, "install-packages-jailops")
+		}
+		want := append([]string{"create-jail", "start-jail"}, repos...)
+		want = append(want, "refresh-library-cache", "record-version", "write-rc-conf")
+		want = append(want, setup(len(def.Setup))...)
+		want = append(want, c2.services...)
+		if c2.health {
+			want = append(want, "health-check")
+		}
+		want = append(want, "snapshot")
+		if got := names(res.Steps); !slices.Equal(got, want) {
+			t.Errorf("%s: steps %v, want %v", c2.app, res.Steps, want)
+		}
+	}
+
+	op, err := e.Admin.Apps().Install(c, "isms", api.AppInstall{Image: "fb151@stable"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := op.Wait(c)
+	if err != nil {
+		t.Fatalf("%v\n%s", err, e.Log())
+	}
+	root := "/jailops/projects/alpha/jails/isms/root"
+	if !slices.Contains(e.Installed, root+" isms") {
+		t.Fatalf("installed %v", e.Installed)
+	}
+	var pkgCalls []string
+	for _, call := range e.Run.Calls() {
+		if call.Cmd.Name == "pkg" && slices.Contains(call.Cmd.Args, "install") {
+			pkgCalls = append(pkgCalls, strings.Join(call.Cmd.Args, " "))
+		}
+	}
+	if !slices.Contains(pkgCalls, "-r "+root+" install -y -r jailops isms") {
+		t.Fatalf("pkg calls %q", pkgCalls)
+	}
+	// enabled in rc.conf, never started: the setup ran, no service start
+	if rc := e.File(root + "/etc/rc.conf"); !strings.Contains(rc, "isms_enable=\"YES\"\n") {
+		t.Fatalf("rc.conf %q", rc)
+	}
+	for _, argv := range execArgvs(e, "alpha_isms") {
+		if strings.HasPrefix(argv, "/bin/sh -c") {
+			t.Errorf("a service was started: %q", argv)
+		}
+	}
+	if res.Snapshot != "app-installed" || len(res.Ports) != 1 || res.Ports[0].Port != 8080 {
+		t.Fatalf("%+v", res)
+	}
+}

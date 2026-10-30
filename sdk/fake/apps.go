@@ -22,10 +22,11 @@ type appEntry struct {
 	err    string // the reason when the definition is invalid
 }
 
-// seedApps fills the catalog every fake starts with: three valid definitions.
+// seedApps fills the catalog every fake starts with: six valid definitions,
+// shortened from packaging/apps.
 func (s *Server) seedApps() {
 	s.apps = map[string]*appEntry{}
-	t := true
+	t, f := true, false
 	for _, a := range []api.App{
 		{Version: 1, Name: "nginx", Title: "nginx", Summary: "Web server and reverse proxy, serving /usr/local/www.",
 			Description: "nginx is a small, fast web server and reverse proxy.", Category: api.AppWeb, Homepage: "https://nginx.org/", License: "BSD-2-Clause",
@@ -67,6 +68,50 @@ func (s *Server) seedApps() {
 			Health:    &api.AppHealth{Exec: []string{"/usr/local/bin/valkey-cli", "ping"}, WaitSeconds: 30},
 			Resources: api.AppResources{Memory: "512M", Disk: "2G", CPU: "1"},
 			Notes:     "Talk to it from inside the jail with: jailops exec NAME -- valkey-cli"},
+		{Version: 1, Name: "isms", Title: "isms", Summary: "Information security management platform with git-native documents; needs PostgreSQL.",
+			Description: "isms keeps policies, controls and evidence as git-native documents.\n\nThe installation does not configure or start it.",
+			Category:    api.AppSecurity, Homepage: "https://github.com/unidoc/isms", License: "Apache-2.0", Icon: "isms.svg",
+			Image:     api.AppImage{OS: "freebsd", ReleaseMin: "15.1"},
+			Packages:  []api.AppPackage{{Name: "isms", Repo: "jailops", Version: "0.8.1"}, {Name: "openssh-portable", Repo: "ports"}},
+			Services:  []api.AppService{{Name: "isms", Start: &f}},
+			Ports:     []api.AppPort{{Name: "http", Port: 8080, Proto: "tcp", Description: "The web interface and the API.", Expose: true}},
+			Data:      []api.AppPath{{Path: "/var/db/isms", Description: "Git repositories, blobs and the signing key."}},
+			Config:    []api.AppConfig{{Path: "/usr/local/etc/isms/server.env", Description: "KEY=VALUE settings; mode 0600, owner isms.", Restart: "isms"}},
+			Logs:      []api.AppLog{{Name: "server", Path: "/var/log/isms.log"}},
+			Setup:     [][]string{{"/usr/sbin/chown", "isms:isms", "/var/db/isms", "/usr/local/etc/isms/server.env"}},
+			Resources: api.AppResources{Memory: "1G", Disk: "10G", CPU: "1"},
+			Notes:     "Create the database in a postgresql jail, fill in server.env, run the migrations, then service isms start."},
+		{Version: 1, Name: "nsd", Title: "NSD", Summary: "Authoritative DNS server for your own zones, as a primary or a secondary.",
+			Description: "NSD answers for the zones it is given and does no recursion.", Category: api.AppNetwork,
+			Homepage: "https://nlnetlabs.nl/projects/nsd/about/", License: "BSD-3-Clause", Icon: "nsd.svg",
+			Image:    api.AppImage{OS: "freebsd", ReleaseMin: "15.1"},
+			Packages: []api.AppPackage{{Name: "nsd", Repo: "ports", Version: "4.15"}},
+			Services: []api.AppService{{Name: "nsd", Start: &t}},
+			Ports: []api.AppPort{{Name: "dns", Port: 53, Proto: "udp", Description: "DNS queries over UDP.", Expose: true},
+				{Name: "dns-tcp", Port: 53, Proto: "tcp", Description: "DNS over TCP and zone transfers.", Expose: true}},
+			Data:      []api.AppPath{{Path: "/var/db/nsd", Description: "Zone files and transfer state."}},
+			Config:    []api.AppConfig{{Path: "/usr/local/etc/nsd/nsd.conf", Restart: "nsd"}},
+			Logs:      []api.AppLog{{Name: "daemon", Path: "/var/log/daemon.log"}},
+			Setup:     [][]string{{"/usr/sbin/chown", "-R", "nsd:nsd", "/var/db/nsd"}, {"/usr/local/sbin/nsd-checkconf", "/usr/local/etc/nsd/nsd.conf"}},
+			Health:    &api.AppHealth{TCP: 53, WaitSeconds: 30},
+			Resources: api.AppResources{Memory: "256M", Disk: "2G", CPU: "1"},
+			Notes:     "Put your zones under /var/db/nsd/zones and name them in nsd.conf."},
+		{Version: 1, Name: "mail", Title: "Mail (Postfix and Dovecot)", Summary: "A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.",
+			Description: "Postfix receives mail for one domain; Dovecot serves the mailboxes over IMAP.", Category: api.AppCommunication,
+			Homepage: "https://www.postfix.org/", License: "EPL-2.0 OR IPL-1.0 (Postfix), MIT and LGPL-2.1 (Dovecot)", Icon: "mail.svg",
+			Image:    api.AppImage{OS: "freebsd", ReleaseMin: "15.1"},
+			Packages: []api.AppPackage{{Name: "postfix", Repo: "ports", Version: "3.10"}, {Name: "dovecot", Repo: "ports", Version: "2.3"}},
+			Services: []api.AppService{{Name: "postfix", RC: map[string]string{"sendmail_enable": "NONE"}, Start: &t}, {Name: "dovecot", Start: &t}},
+			Ports: []api.AppPort{{Name: "smtp", Port: 25, Proto: "tcp", Description: "Mail from other servers.", Expose: true},
+				{Name: "submission", Port: 587, Proto: "tcp", Description: "Mail from your users, with TLS.", Expose: true},
+				{Name: "imap", Port: 143, Proto: "tcp", Description: "IMAP.", Expose: true}},
+			Data:      []api.AppPath{{Path: "/home/mail", Description: "The mail users' homes."}, {Path: "/var/spool/postfix", Description: "The Postfix queue."}},
+			Config:    []api.AppConfig{{Path: "/usr/local/etc/postfix/main.cf", Restart: "postfix"}, {Path: "/usr/local/etc/dovecot/dovecot.conf", Restart: "dovecot"}},
+			Logs:      []api.AppLog{{Name: "maillog", Path: "/var/log/maillog"}},
+			Setup:     [][]string{{"/usr/local/sbin/postfix", "set-permissions"}, {"/usr/local/sbin/postfix", "check"}},
+			Health:    &api.AppHealth{TCP: 25, WaitSeconds: 60},
+			Resources: api.AppResources{Memory: "512M", Disk: "20G", CPU: "1"},
+			Notes:     "A starting point: set the domain, add users, add TLS and the DNS records."},
 	} {
 		s.SeedApp(a)
 	}
@@ -258,11 +303,21 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 			steps = append(steps, fmt.Sprintf("%02d %s: %s", n, name, what))
 			n++
 		}
-		var pkgs []string
+		// one step per repository, the FreeBSD one first, as the daemon does
+		var ports, jailops []string
 		for _, p := range app.Packages {
-			pkgs = append(pkgs, p.Name)
+			if p.Repo == "jailops" {
+				jailops = append(jailops, p.Name)
+			} else {
+				ports = append(ports, p.Name)
+			}
 		}
-		step("install-packages-ports", "pkg -r <root> install -y "+strings.Join(pkgs, " "))
+		if len(ports) > 0 {
+			step("install-packages-ports", "pkg -r <root> install -y "+strings.Join(ports, " "))
+		}
+		if len(jailops) > 0 {
+			step("install-packages-jailops", "pkg -r <root> install -y -r jailops "+strings.Join(jailops, " "))
+		}
 		step("record-version", "pkg -r <root> query %v "+app.Packages[0].Name+", then label "+api.LabelAppVersion)
 		if len(app.Services) > 0 {
 			step("write-rc-conf", "set the services' rc.conf variables in <root>/etc/rc.conf")
