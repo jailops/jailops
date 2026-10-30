@@ -40,7 +40,7 @@ var roots = []any{
 	api.Provision{}, api.ProvisionRequest{}, api.ProvisionResult{}, api.ExecRequest{}, api.BackupRun{}, api.BackupRunRequest{}, api.BackupVerifyRequest{},
 	api.BackupKeyStatus{}, api.BackupKeyCreate{}, api.BackupKeyCreated{}, api.BackupKeyEscrow{},
 	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
-	api.AppSummary{}, api.AppDetail{}, api.AppInstall{}, api.AppInstallResult{},
+	api.AppSummary{}, api.AppDetail{}, api.AppInstall{}, api.AppInstallResult{}, api.AppDraft{},
 }
 
 // enums lists the typed string constants. Keep in sync with sdk/api.
@@ -64,6 +64,7 @@ var enums = map[reflect.Type][]string{
 	reflect.TypeFor[api.Scope]():           {string(api.ScopeHost), string(api.ScopeFleet)},
 	reflect.TypeFor[api.JailLogKind]():     {string(api.JailLogActive), string(api.JailLogRotated)},
 	reflect.TypeFor[api.AppCategory]():     {string(api.AppDatabase), string(api.AppWeb), string(api.AppTools), string(api.AppDevops), string(api.AppStorage), string(api.AppMonitoring), string(api.AppCommunication), string(api.AppNetwork), string(api.AppSecurity), string(api.AppOther)},
+	reflect.TypeFor[api.AppSource]():       {string(api.AppSourceCatalog), string(api.AppSourceLocal)},
 }
 
 type gen struct {

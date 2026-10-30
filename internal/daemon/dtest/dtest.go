@@ -246,6 +246,8 @@ func New(t testing.TB, o Options) *Env {
 	e.Cfg.DataDir = filepath.Join(e.Dir, "data")
 	e.Cfg.ConfDir = "/etc/jailops/jails"
 	e.Cfg.WorkDir = filepath.Join(e.Dir, "work")
+	// the host's own app definitions: none unless a test puts some there
+	e.Cfg.Apps.LocalDir = filepath.Join(e.Dir, "apps-local")
 	e.Cfg.Hub = o.Hub
 	e.Cfg.Listen.Unix.Path = ""
 	if o.Listen {
@@ -393,6 +395,20 @@ func (e *Env) script() {
 					return run.Result{Stdout: []byte(v + "\n")}, nil
 				}
 				return run.Result{ExitCode: 1, Stderr: []byte("pkg: " + rest[1] + " is not installed\n")}, fmt.Errorf("pkg query: %s is not installed", rest[1])
+			}
+			if len(rest) == 3 && rest[0] == "-e" && rest[1] == "%a = 0" { // the packages an app installed, for a draft
+				var sb strings.Builder
+				e.sysmu.Lock()
+				installed := append([]string(nil), e.Installed...)
+				e.sysmu.Unlock()
+				for _, in := range installed {
+					if r, name, _ := strings.Cut(in, " "); r == root {
+						b, _ := e.Files.Get(root + "/.app-pkgs/" + name)
+						_, v, _ := strings.Cut(strings.TrimSpace(string(b)), " ")
+						sb.WriteString(name + " " + v + " FreeBSD https://example.com/" + name + "\n")
+					}
+				}
+				return run.Result{Stdout: []byte(sb.String())}, nil
 			}
 			b, _ := e.Files.ReadFile(context.Background(), root+"/.pkgs")
 			var sb strings.Builder

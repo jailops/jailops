@@ -96,10 +96,9 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 	if err := bodyProject(proj, req.Project); err != nil {
 		return api.Operation{}, err
 	}
-	e, ok, err := apps.Find(s.appsDir(), name)
+	e, ok, err := s.findApp(name)
 	if err != nil {
-		return api.Operation{}, api.Errorf(api.CodeInternal, "read the application catalog: %v", err).
-			WithHint("check apps.catalog_dir in jailopsd.yaml")
+		return api.Operation{}, err
 	}
 	if !ok {
 		return api.Operation{}, api.Errorf(api.CodeNotFound, "app %q is not in the catalog", name).
@@ -115,8 +114,7 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 	}
 	if e.Err != nil {
 		return api.Operation{}, api.Errorf(api.CodeInvalid, "app %q: the definition %s is invalid and cannot be installed: %v", name, e.File, e.Err).
-			WithHint("fix the file in the catalog directory, or reinstall the jailops-apps package").
-			WithDetail("file", e.File)
+			WithHint(s.invalidHint(e)).WithDetail("file", e.File)
 	}
 	app := e.App
 	jail := req.Jail

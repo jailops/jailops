@@ -234,6 +234,8 @@ var Perms = classifyAll([]Entry{
 	// Logs hold what services print (tokens, passwords in error messages): the role that may exec into the jail.
 	r("GET", "/api/v1/jails/{name}/logs", op),
 	r("GET", "/api/v1/jails/{name}/logs/{file...}", op),
+	// a definition drafted from a running jail: it runs read-only commands in the jail, like exec
+	r("GET", "/api/v1/jails/{name}/app-draft", op),
 	r("GET", "/api/v1/jails/{name}/files/{path...}", op),
 	r("PUT", "/api/v1/jails/{name}/files/{path...}", op),
 	r("POST", "/api/v1/jails/{name}/upgrade", op),

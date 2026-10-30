@@ -108,6 +108,14 @@ func (s *Server) jailRoutes() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/app-draft", h: func(c *rc) error {
+			v, err := svc.AppDraft(c.r.Context(), c.pathArg("name"))
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
 		route{method: "PUT", pattern: "/api/v1/jails/{name}/state", h: func(c *rc) error {
 			var a api.JailAction
 			if err := c.decode(&a); err != nil {

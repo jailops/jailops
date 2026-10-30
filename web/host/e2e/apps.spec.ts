@@ -23,15 +23,19 @@ test('the store filters by search and category and shows an invalid definition w
   const problems = watch(page)
   await open(page, '/apps')
   const cards = page.locator('[data-test="app-grid"] [data-app]')
-  await expect(cards).toHaveCount(9)
+  await expect(cards).toHaveCount(10)
   await expect(page.locator('[data-app="wiki"]')).toContainText('Invalid')
   await expect(page.locator('[data-app="wiki"]').getByTestId('invalid-reason')).toContainText('base system')
   await expect(page.locator('[data-app="wiki"]').getByRole('button', { name: 'Install' })).toHaveCount(0)
   await expect(page.locator('[data-app="nginx"]')).toContainText('80/tcp')
+  // a definition of the host's own directory carries the local chip, the packaged ones do not
+  await expect(page.locator('[data-app="memcached"]').getByTestId('app-local')).toHaveText('local')
+  await expect(page.locator('[data-app="nginx"]').getByTestId('app-local')).toHaveCount(0)
+  await expect(page.locator('[data-app="memcached"]')).toContainText('11211/tcp')
 
   await page.locator('[data-category="database"]').click()
   await expect(page.locator('[data-category="database"]')).toHaveAttribute('aria-pressed', 'true')
-  await expect(cards).toHaveCount(2)
+  await expect(cards).toHaveCount(3)
   await expect(page.locator('[data-app="postgresql"]')).toBeVisible()
   await page.getByTestId('apps-search').fill('key-value')
   await expect(cards).toHaveCount(1)
@@ -39,7 +43,7 @@ test('the store filters by search and category and shows an invalid definition w
   await page.getByTestId('apps-search').fill('nothing matches this')
   await expect(page.getByTestId('apps-nomatch')).toBeVisible()
   await page.getByRole('button', { name: 'Clear the search' }).click()
-  await expect(cards).toHaveCount(9)
+  await expect(cards).toHaveCount(10)
   // DNS on UDP and TCP; the categories added with nsd and isms
   await page.locator('[data-category="network"]').click()
   await expect(cards).toHaveCount(1)
@@ -49,7 +53,7 @@ test('the store filters by search and category and shows an invalid definition w
   await expect(cards).toHaveCount(1)
   await expect(page.locator('[data-app="isms"]')).toContainText('Security')
   await page.locator('[data-category="security"]').click()
-  await expect(cards).toHaveCount(9)
+  await expect(cards).toHaveCount(10)
 
   // the card is a link to the detail, reachable by keyboard
   await page.locator('[data-app="forgejo"] a').focus()
@@ -197,4 +201,16 @@ test('an app detail links its log files to the log viewer of the jail it is inst
   await expect(page.locator('main h1')).toHaveText('web')
   await expect(page.locator('[data-file="nginx/access.log"]')).toHaveAttribute('aria-current', 'true')
   await expect(page.getByTestId('log-view')).toContainText('HTTP/1.1')
+})
+
+test('a local definition says so on its page', async ({ page }) => {
+  const problems = watch(page)
+  await open(page, '/apps/memcached')
+  await expect(page.locator('main h1')).toHaveText('memcached')
+  await expect(page.getByTestId('app-local')).toHaveText('local')
+  await expect(page.getByTestId('app-local')).toHaveAttribute('title', /apps\.local_dir/)
+  await open(page, '/apps/nginx')
+  await expect(page.locator('main h1')).toHaveText('nginx')
+  await expect(page.getByTestId('app-local')).toHaveCount(0)
+  expect(problems).toEqual([])
 })

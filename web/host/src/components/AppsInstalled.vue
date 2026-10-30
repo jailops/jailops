@@ -46,6 +46,7 @@ const appOf = (j: Jail) => j.metadata.labels?.[LABEL_APP] ?? ''
                     <AppIcon :name="appOf(j)" :title="details[appOf(j)]?.definition.title" :icon="details[appOf(j)]?.icon" :size="28" />
                     <div>
                       <router-link :to="`/apps/${appOf(j)}`">{{ details[appOf(j)]?.definition.title || appOf(j) }}</router-link>
+                      <span v-if="details[appOf(j)]?.source === 'local'" class="badge info inst-changed" :title="s.apps.localTitle" data-test="app-local">{{ s.apps.local }}</span>
                       <span v-if="details[appOf(j)] && j.metadata.labels?.[LABEL_HASH] && j.metadata.labels[LABEL_HASH] !== details[appOf(j)].hash" class="badge warn inst-changed" :title="s.apps.changedTitle">{{ s.apps.changed }}</span>
                     </div>
                   </div>

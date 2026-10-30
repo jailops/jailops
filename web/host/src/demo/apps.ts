@@ -1,6 +1,6 @@
-// Canned catalog and jail logs for `?demo`. The five definitions follow the catalog (internal/apps/testdata/catalog); a sixth
-// one is invalid so the catalog shows that state. Logs get timestamps relative to now and
-// grow while they are followed.
+// Canned catalog and jail logs for `?demo`. The definitions follow the catalog (internal/apps/testdata/catalog); one more,
+// memcached, is a definition of the host's own directory (source local), and one is invalid so the catalog shows that
+// state. Logs get timestamps relative to now and grow while they are followed.
 import type { App, AppDetail, AppSummary, JailLogFile, JailLogRead } from '@jailops/shared/api/types'
 
 const hash = (name: string) => 'sha256:' + Array.from({ length: 64 }, (_, i) => '0123456789abcdef'[(name.charCodeAt(i % name.length) * (i + 7)) % 16]).join('')
@@ -193,17 +193,37 @@ export const definitions: App[] = [
     resources: { memory: "512M", disk: "20G", cpu: "1" },
     notes: "A starting point: example.com, no TLS. In the jail (jailops shell NAME):\n- Domain: postconf -e 'mydomain = YOUR.DOMAIN' 'myhostname = mail.YOUR.DOMAIN',\n  then postfix reload.\n- A user: pw useradd -n alice -d /home/mail/alice -m -s /usr/sbin/nologin,\n  then passwd alice. Mail to alice@YOUR.DOMAIN lands in ~alice/Maildir.\n- TLS: put a certificate and key in the jail, then postconf -e\n  'smtpd_tls_cert_file = CERT' 'smtpd_tls_key_file = KEY'\n  'smtpd_tls_security_level = may' and postfix reload; in dovecot.conf set\n  ssl = required, ssl_cert = <CERT, ssl_key = <KEY,\n  delete the port = 0 line of the imaps listener and service dovecot restart. Then clients use 587 and 993 with a login.\nDNS for YOUR.DOMAIN (the jail's public address must be reachable on 25):\n- A/AAAA: mail.YOUR.DOMAIN -> the address; PTR of the address back to\n  mail.YOUR.DOMAIN (set by whoever owns the address).\n- MX: YOUR.DOMAIN -> 10 mail.YOUR.DOMAIN\n- SPF: TXT on YOUR.DOMAIN \"v=spf1 mx -all\"\n- DKIM: needs a signing service, which this app does not include; without\n  it, large providers may file your mail as spam.\n- DMARC: TXT on _dmarc.YOUR.DOMAIN \"v=DMARC1; p=none; rua=mailto:postmaster@YOUR.DOMAIN\"\nMany networks block outgoing port 25; check before relying on it.\n",
   },
+  {
+    version: 1, name: 'memcached', title: 'memcached', summary: 'Distributed in-memory object cache; a local example definition.',
+    description: 'memcached keeps objects in memory for the applications that ask it, to spare a database\nthe same queries. This definition is the worked example of docs/apps.md ("Write your own\napp"): it lives in the host\'s own directory, apps.local_dir.\n',
+    category: 'database', homepage: 'https://memcached.org/', license: 'BSD-3-Clause', image: IMAGE,
+    packages: [{ name: 'memcached', repo: 'ports', version: '1.6.39' }],
+    services: [{ name: 'memcached', rc: { memcached_flags: '-l 0.0.0.0 -m 64' }, start: true }],
+    ports: [{ name: 'memcached', port: 11211, proto: 'tcp', description: 'The memcached protocol; no authentication, keep it on the jail network.', expose: false }],
+    data: [],
+    config: [],
+    logs: [],
+    setup: [['/bin/mkdir', '-p', '/var/run/memcached'], ['/usr/sbin/chown', 'nobody:nobody', '/var/run/memcached']],
+    health: { tcp: 11211, wait_seconds: 30 },
+    resources: { memory: '128M', disk: '1G', cpu: '1' },
+    notes: 'The cache is empty after every start. Point the applications at <address>:11211;\nanyone on the jail network can read and write it.\n',
+  },
 ]
+
+/** The definitions read from the host's own directory (apps.local_dir) instead of the packaged catalog. */
+const LOCAL = new Set(['memcached'])
+const sourceOf = (name: string) => (LOCAL.has(name) ? 'local' : 'catalog') as AppSummary['source']
+const fileOf = (name: string) => `${LOCAL.has(name) ? '/usr/local/etc/jailops/apps' : '/usr/local/share/jailops/apps'}/${name}.yaml`
 
 /** An operator's own definition that fails validation: listed with the reason, never installable. */
 const broken: AppSummary = {
-  name: 'wiki', title: 'Team wiki', summary: 'A definition dropped into the catalog directory by hand.', category: 'tools', valid: false,
+  name: 'wiki', title: 'Team wiki', summary: 'A definition dropped into the catalog directory by hand.', category: 'tools', valid: false, source: 'catalog',
   error: 'wiki.yaml: data[0].path "/etc/wiki" lies under the base system; data paths lie below /var, /usr/local or /home',
 }
 
 export function catalog(): AppSummary[] {
   return [
-    ...definitions.map((a) => ({ name: a.name, title: a.title, summary: a.summary, category: a.category, version: a.packages[0]?.version, valid: true })),
+    ...definitions.map((a) => ({ name: a.name, title: a.title, summary: a.summary, category: a.category, version: a.packages[0]?.version, valid: true, source: sourceOf(a.name) })),
     broken,
   ]
 }
@@ -212,7 +232,7 @@ export function detail(name: string): AppDetail | 'invalid' | undefined {
   if (name === broken.name) return 'invalid'
   const a = definitions.find((x) => x.name === name)
   if (!a) return undefined
-  return { definition: structuredClone(a), hash: hash(a.name), file: `/usr/local/share/jailops/apps/${a.name}.yaml`, ...(ICONS[a.name] ? { icon: ICONS[a.name] } : {}) }
+  return { definition: structuredClone(a), hash: hash(a.name), file: fileOf(a.name), source: sourceOf(a.name), ...(ICONS[a.name] ? { icon: ICONS[a.name] } : {}) }
 }
 export const appHash = hash
 export const LABEL = 'jailops.app'

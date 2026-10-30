@@ -124,6 +124,9 @@ func classify(pattern string) (api.Permission, string) {
 		case strings.HasSuffix(path, "/logs"), strings.Contains(path, "/logs/"):
 			// logs hold secrets: the role that may exec into the jail
 			return api.PermOperator, scopeProject
+		case strings.HasSuffix(path, "/app-draft"):
+			// it runs commands in the jail: the role that may exec
+			return api.PermOperator, scopeProject
 		case read:
 			return api.PermReadonly, scopeProject
 		case strings.HasSuffix(path, "/state"), strings.HasSuffix(path, "/snapshots"), strings.Contains(path, "/snapshots/"),

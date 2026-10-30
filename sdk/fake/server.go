@@ -130,9 +130,11 @@ type Server struct {
 	hub         bool
 	hosts       map[string]*Server
 
-	jails     *kind[api.Jail]
-	profiles  *kind[api.Profile]
-	apps      map[string]*appEntry
+	jails    *kind[api.Jail]
+	profiles *kind[api.Profile]
+	apps     map[string]*appEntry
+	// drafts are what GET /api/v1/jails/{name}/app-draft answers (SeedAppDraft), by jail key
+	drafts    map[string]api.AppDraft
 	execCalls []ExecCall
 	// consoles are the sessions of the console protocol (console.go).
 	consoles     map[string]*fakeConsole

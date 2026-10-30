@@ -93,6 +93,7 @@ function onTabKey(e: KeyboardEvent): void {
                   <h2 class="app-card-title"><router-link class="app-card-link" :to="`/apps/${a.name}`">{{ a.title || a.name }}</router-link></h2>
                   <div class="faint mono app-card-name">{{ a.name }}<span v-if="a.version"> · {{ a.version }}</span></div>
                 </div>
+                <span v-if="a.source === 'local'" class="badge info" :title="a.overrides ? s.apps.overridesTitle : s.apps.localTitle" data-test="app-local">{{ s.apps.local }}</span>
                 <span v-if="!a.valid" class="pill danger">{{ s.apps.invalid }}</span>
               </div>
               <p class="app-card-sum">{{ a.summary }}</p>

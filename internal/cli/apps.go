@@ -45,13 +45,13 @@ func appDesc() *kindDesc[api.AppSummary] {
 			}
 		}
 	}
-	d.head = []string{"NAME", "CATEGORY", "VERSION", "STATUS", "SUMMARY"}
+	d.head = []string{"NAME", "CATEGORY", "VERSION", "SOURCE", "STATUS", "SUMMARY"}
 	d.row = func(_ time.Time, s api.AppSummary) []string {
 		status, text := "valid", s.Summary
 		if !s.Valid {
 			status, text = "invalid", s.Error
 		}
-		return []string{s.Name, dash(string(s.Category)), dash(s.Version), status, dash(text)}
+		return []string{s.Name, dash(string(s.Category)), dash(s.Version), appSource(s.Source, s.Overrides), status, dash(text)}
 	}
 	d.brief = &listView[api.AppSummary]{head: []string{"NAME", "CATEGORY", "SUMMARY"}, drop: []int{1},
 		row: func(_ time.Time, s api.AppSummary) []string {
@@ -59,23 +59,45 @@ func appDesc() *kindDesc[api.AppSummary] {
 			if !s.Valid {
 				text = "invalid: " + s.Error
 			}
+			if s.Source == api.AppSourceLocal {
+				text = "(local) " + text
+			}
 			return []string{s.Name, dash(string(s.Category)), dash(text)}
 		}}
 	d.filters = func(cmd *cobra.Command) func() (func(api.AppSummary) bool, error) {
-		var category string
+		var category, source string
+		sources := []string{string(api.AppSourceCatalog), string(api.AppSourceLocal)}
 		cmd.Flags().StringVar(&category, "category", "", "only apps of this category: "+strings.Join(appCategoryNames(), ", "))
+		cmd.Flags().StringVar(&source, "source", "", "only apps read from this directory: catalog (the jailops-apps package) or local (apps.local_dir)")
 		enumFlag(cmd, "category", appCategoryNames()...)
+		enumFlag(cmd, "source", sources...)
 		return func() (func(api.AppSummary) bool, error) {
-			if category == "" {
-				return nil, nil
-			}
-			if !slices.Contains(appCategoryNames(), category) {
+			if category != "" && !slices.Contains(appCategoryNames(), category) {
 				return nil, usagef("unknown category %q (categories: %s)", category, strings.Join(appCategoryNames(), ", "))
 			}
-			return func(s api.AppSummary) bool { return string(s.Category) == category }, nil
+			if source != "" && !slices.Contains(sources, source) {
+				return nil, usagef("unknown source %q (sources: %s)", source, strings.Join(sources, ", "))
+			}
+			if category == "" && source == "" {
+				return nil, nil
+			}
+			return func(s api.AppSummary) bool {
+				return (category == "" || string(s.Category) == category) && (source == "" || string(s.Source) == source)
+			}, nil
 		}
 	}
 	return &d
+}
+
+// appSource says where a definition was read from, for a person.
+func appSource(src, overrides api.AppSource) string {
+	switch {
+	case src == "":
+		return "-"
+	case overrides != "":
+		return string(src) + ", overrides " + string(overrides)
+	}
+	return string(src)
 }
 
 func (a *app) appCmd() *cobra.Command {
@@ -85,21 +107,27 @@ func (a *app) appCmd() *cobra.Command {
 FreeBSD repository or the JailOps repository: which packages, which services,
 which ports, where the data, the configuration and the logs live, and how to
 check that it runs. The catalog is a set of local files on the host, installed
-by the jailops-apps package (/usr/local/share/jailops/apps); the daemon never
-fetches it. A definition that does not validate is listed as invalid with the
-reason. See docs/apps.md for the format.
+by the jailops-apps package (/usr/local/share/jailops/apps), and the host's own
+definitions in /usr/local/etc/jailops/apps (apps.local_dir), which win over a
+packaged one of the same name; the daemon never fetches anything. A definition
+that does not validate is listed as invalid with the reason. See docs/apps.md
+for the format.
 
 'install' creates a jail that runs an app, as one operation; 'installed' lists
-the jails that came from the catalog. 'validate' checks definition files on
+the jails that came from the catalog. 'new' writes a starter definition and
+'export' drafts one from a running jail; 'validate' checks definition files on
 this machine, without a server.`,
 		`jailops app list
 jailops app list --category database
+jailops app list --source local
 jailops app info postgresql
 jailops app install nginx --project web
 jailops app installed --project web
+jailops app new memcached --package memcached --service memcached --port 11211/tcp
+jailops app export cache -o cache.yaml
 jailops app validate ./apps`, "apps")
-	addList(a, ac, d, "\njailops app list --category database")
-	ac.AddCommand(a.appInfo(d), a.appInstall(d), a.appInstalled(), a.appValidate())
+	addList(a, ac, d, "\njailops app list --category database\njailops app list --source local")
+	ac.AddCommand(a.appInfo(d), a.appInstall(d), a.appInstalled(), a.appValidate(), a.appNew(), a.appExport())
 	return ac
 }
 
@@ -231,6 +259,15 @@ func (a *app) printAppInfo(w io.Writer, det api.AppDetail) {
 	kv("Homepage", dash(d.Homepage))
 	kv("Image", fmt.Sprintf("FreeBSD %s or later, thin jail", d.Image.ReleaseMin))
 	kv("File", fmt.Sprintf("%s (%s)", det.File, det.Hash))
+	if det.Source == api.AppSourceLocal {
+		src := "local (the host's apps.local_dir)"
+		if det.Overrides != "" {
+			src += "; it overrides the catalog's definition of the same name"
+		}
+		kv("Source", src)
+	} else if det.Source != "" {
+		kv("Source", string(det.Source))
+	}
 	if det.Icon != "" {
 		kv("Icon", d.Icon)
 	}

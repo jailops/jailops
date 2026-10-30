@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 	"time"
 
+	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/plan"
 	"jailops.net/jailops/internal/render"
@@ -39,6 +41,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorStaticARP(ctx, c)
 	s.doctorDNS(c)
 	s.doctorRuntime(ctx, c)
+	s.doctorAppsLocal(c)
 	rep := api.DoctorReport{Time: s.now().UTC(), Host: s.d.Hostname, Checks: c.list, Status: api.DoctorOK}
 	rank := map[api.DoctorStatus]int{api.DoctorOK: 0, api.DoctorUnknown: 1, api.DoctorWarn: 2, api.DoctorFail: 3}
 	for _, ch := range c.list {
@@ -506,4 +509,32 @@ func (s *Service) doctorRelease(ctx context.Context, c *checkSet) {
 		return
 	}
 	c.add("host.release", api.DoctorOK, "FreeBSD "+r, "")
+}
+
+// doctorAppsLocal checks the host's own app definitions (apps.local_dir)
+// when the directory exists: the daemon must be able to read it, or the
+// whole catalog listing fails.
+func (s *Service) doctorAppsLocal(c *checkSet) {
+	dir := s.appsLocalDir()
+	if _, err := os.Stat(dir); errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	es, err := apps.Load(dir)
+	if err != nil {
+		c.add("apps.local_dir", api.DoctorFail, fmt.Sprintf("%s cannot be read: %v", dir, err),
+			"the daemon runs as the user jailops: chmod 0755 "+dir+" and 0644 its files")
+		return
+	}
+	bad := 0
+	for _, e := range es {
+		if e.Err != nil {
+			bad++
+		}
+	}
+	if bad > 0 {
+		c.add("apps.local_dir", api.DoctorWarn, fmt.Sprintf("%d of %d definition(s) in %s are invalid", bad, len(es), dir),
+			"jailops app list --source local shows the reasons; jailops app validate "+dir+" checks them")
+		return
+	}
+	c.add("apps.local_dir", api.DoctorOK, fmt.Sprintf("%d definition(s) in %s", len(es), dir), "")
 }

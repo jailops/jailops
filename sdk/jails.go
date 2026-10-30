@@ -112,6 +112,22 @@ func (j *JailClient) Log(ctx context.Context, name, file string, q api.JailLogQu
 	return r, err
 }
 
+// AppDraft drafts an app definition from a running FreeBSD jail (extension
+// app_draft): the packages installed on purpose, the services enabled in
+// rc.conf, the listening ports, the volumes, the names of the configuration
+// and log files and the owners of the app's directories, with TODO markers
+// for what a jail cannot tell. Nothing in the jail changes.
+func (j *JailClient) AppDraft(ctx context.Context, name string) (api.AppDraft, error) {
+	if err := j.c.need("app_draft"); err != nil {
+		return api.AppDraft{}, err
+	}
+	d, _, err := get[api.AppDraft](ctx, j.c, j.r.item(name)+"/app-draft", nil)
+	if d.Findings == nil && err == nil {
+		d.Findings = []string{}
+	}
+	return d, err
+}
+
 // ActionOption tunes a state action.
 type ActionOption func(*api.JailAction)
 

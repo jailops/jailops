@@ -16,6 +16,12 @@ export type AppCategory =
 
 export const AppCategoryValues: readonly AppCategory[] = ['database', 'web', 'tools', 'devops', 'storage', 'monitoring', 'communication', 'network', 'security', 'other']
 
+export type AppSource =
+  | "catalog"
+  | "local"
+
+export const AppSourceValues: readonly AppSource[] = ['catalog', 'local']
+
 export type Code =
   | "invalid"
   | "not_found"
@@ -232,6 +238,15 @@ export interface AppDetail {
   hash: string
   file: string
   icon?: string
+  source: AppSource
+  overrides?: AppSource
+}
+
+export interface AppDraft {
+  jail: string
+  definition: App
+  todo?: Record<string, string>
+  findings: string[]
 }
 
 export interface AppHTTPCheck {
@@ -332,6 +347,8 @@ export interface AppSummary {
   version?: string
   valid: boolean
   error?: string
+  source: AppSource
+  overrides?: AppSource
 }
 
 export interface AuditEntry {
@@ -1708,4 +1725,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft']

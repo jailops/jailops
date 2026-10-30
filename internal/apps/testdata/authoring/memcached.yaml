@@ -1,0 +1,55 @@
+# memcached: the worked example of docs/apps.md ("Write your own app"), started with
+# jailops app new memcached --package memcached --service memcached --port 11211/tcp --category database
+# and completed by hand. UNVERIFIED on a FreeBSD host: the rc.conf knob and the pid directory.
+version: 1
+name: memcached
+title: memcached
+summary: Distributed in-memory object cache, memcached from the FreeBSD packages.
+description: |
+  memcached keeps objects in memory for other programs and forgets them when it
+  restarts. It has no authentication: anything that reaches the port can read and
+  write the cache, so it listens on the jail's network only.
+category: database
+homepage: https://memcached.org/
+license: BSD-3-Clause
+icon: memcached.svg
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: memcached
+    repo: ports
+    version: "1.6.39"
+services:
+  - name: memcached
+    rc:
+      memcached_flags: "-l 0.0.0.0 -m 64"
+    start: true
+ports:
+  - name: memcached
+    port: 11211
+    proto: tcp
+    description: The memcached protocol, without authentication.
+    expose: false
+# memcached keeps nothing on disk
+data: []
+config: []
+logs: []
+# The rc script runs memcached as nobody, which writes its pid file into
+# /var/run/memcached; pkg -r leaves that directory to root, if it creates it at all.
+setup:
+  - [/bin/mkdir, -p, /var/run/memcached]
+  - [/usr/sbin/chown, "nobody:nobody", /var/run/memcached]
+sysvipc: false
+health:
+  tcp: 11211
+  wait_seconds: 30
+resources:
+  memory: 128M
+  disk: 1G
+  cpu: "1"
+notes: |
+  memcached listens on port 11211 of the jail's address, 64 MB of cache.
+  Change the size or the address with memcached_flags in the jail's
+  /etc/rc.conf (jailops exec NAME -- sysrc memcached_flags="-l 0.0.0.0 -m 256"),
+  then jailops exec NAME -- service memcached restart.

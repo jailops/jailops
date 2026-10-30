@@ -64,11 +64,15 @@ type Entry struct {
 	// Icon is the icon as a data URI; empty without one.
 	Icon string
 	Err  error
+	// Source is the directory the entry was read from (LoadAll, FindAll).
+	Source api.AppSource
+	// Overrides is AppSourceCatalog for a local entry that hides a packaged one.
+	Overrides api.AppSource
 }
 
 // Summary is the entry as the list reports it.
 func (e Entry) Summary() api.AppSummary {
-	s := api.AppSummary{Name: e.Name, Valid: e.Err == nil}
+	s := api.AppSummary{Name: e.Name, Valid: e.Err == nil, Source: e.Source, Overrides: e.Overrides}
 	if e.Err != nil {
 		s.Error = e.Err.Error()
 	}
@@ -83,7 +87,7 @@ func (e Entry) Summary() api.AppSummary {
 
 // Detail is the entry as GET /api/v1/apps/<name> reports it.
 func (e Entry) Detail() api.AppDetail {
-	return api.AppDetail{Definition: e.App, Hash: e.Hash, File: e.File, Icon: e.Icon}
+	return api.AppDetail{Definition: e.App, Hash: e.Hash, File: e.File, Icon: e.Icon, Source: e.Source, Overrides: e.Overrides}
 }
 
 // Load reads the *.yaml of dir, sorted by name, without their icons (Find

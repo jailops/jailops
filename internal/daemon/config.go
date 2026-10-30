@@ -76,6 +76,10 @@ type AppsConf struct {
 	// CatalogDir holds the *.yaml definitions (default
 	// /usr/local/share/jailops/apps). A missing directory is an empty catalog.
 	CatalogDir string `yaml:"catalog_dir"`
+	// LocalDir holds the operator's own definitions (default
+	// /usr/local/etc/jailops/apps), read with the catalog; one of the same
+	// name as a packaged one wins. A missing directory is empty.
+	LocalDir string `yaml:"local_dir"`
 }
 
 // UpdatesConf configures managed updates (design 8.4). Updates are off for
@@ -286,7 +290,7 @@ func Defaults() Config {
 		Log:       Log{Level: "info", Format: "text"},
 		Reconcile: Reconcile{Interval: Duration(60 * time.Second), Autostart: &t},
 		Limits:    Limits{MaxBodyBytes: 4 << 20, RequestTimeout: Duration(60 * time.Second)},
-		Apps:      AppsConf{CatalogDir: apps.DefaultDir},
+		Apps:      AppsConf{CatalogDir: apps.DefaultDir, LocalDir: apps.DefaultLocalDir},
 	}
 }
 
@@ -374,8 +378,12 @@ func (c Config) finish() (Config, error) {
 	if c.Apps.CatalogDir == "" {
 		c.Apps.CatalogDir = apps.DefaultDir
 	}
+	if c.Apps.LocalDir == "" {
+		c.Apps.LocalDir = apps.DefaultLocalDir
+	}
 	for name, p := range map[string]string{"mount_base": c.MountBase, "state_dir": c.StateDir, "data_dir": c.DataDir, "conf_dir": c.ConfDir,
-		"work_dir": c.WorkDir, "listen.unix.path": c.Listen.Unix.Path, "priv.socket": c.Priv.Socket, "apps.catalog_dir": c.Apps.CatalogDir} {
+		"work_dir": c.WorkDir, "listen.unix.path": c.Listen.Unix.Path, "priv.socket": c.Priv.Socket, "apps.catalog_dir": c.Apps.CatalogDir,
+		"apps.local_dir": c.Apps.LocalDir} {
 		if name == "listen.unix.path" && p == "" {
 			continue // the socket is disabled
 		}
