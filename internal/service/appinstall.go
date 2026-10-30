@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -36,6 +38,43 @@ type installState struct {
 	started  bool
 	version  string
 	snapshot string
+}
+
+// defaultAppImage is the image an app is installed from when the request names
+// none: the only FreeBSD image the caller may use that has the alias stable,
+// as NAME@stable. None or several is refused with the images there are.
+func (s *Service) defaultAppImage(ctx context.Context) (string, error) {
+	objs, err := s.imgKind.list()
+	if err != nil {
+		return "", err
+	}
+	var all, found []string
+	for _, o := range objs {
+		if !s.imageVisible(ctx, o.Meta.Name) {
+			continue
+		}
+		all = append(all, o.Meta.Name)
+		if o.Spec.OS == api.OSFreeBSD && slices.Contains(o.Spec.Aliases, apps.DefaultAlias) {
+			found = append(found, o.Meta.Name)
+		}
+	}
+	if len(found) == 1 {
+		return found[0] + "@" + apps.DefaultAlias, nil
+	}
+	sort.Strings(all)
+	sort.Strings(found)
+	example, yours := "freebsd-15@"+apps.DefaultAlias, "you have no images"
+	if len(found) > 1 {
+		example = found[0] + "@" + apps.DefaultAlias
+	}
+	if len(all) > 0 {
+		yours = "your images: " + strings.Join(all, ", ")
+	}
+	msg := fmt.Sprintf("no image named, and no FreeBSD image has the alias %s to default to", apps.DefaultAlias)
+	if len(found) > 1 {
+		msg = fmt.Sprintf("no image named, and %d FreeBSD images have the alias %s (%s), so there is no default", len(found), apps.DefaultAlias, strings.Join(found, ", "))
+	}
+	return "", invalid("%s", msg).WithHint("name an image with --image, for example " + example + "; " + yours)
 }
 
 // InstallApp answers POST /api/v1/apps/<name>/install. Everything that can
@@ -115,7 +154,9 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 	}
 	image := req.Image
 	if image == "" {
-		image = apps.DefaultImage
+		if image, err = s.defaultAppImage(ctx); err != nil {
+			return api.Operation{}, err
+		}
 	}
 	limits := apps.Limits(app.Resources)
 	if req.Limits != nil {
@@ -126,6 +167,7 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		Network:   []api.NetworkAttach{{Network: network}},
 		Volumes:   apps.Volumes(app.Data),
 		Resources: limits,
+		SysVIPC:   app.SysVIPC,
 	}
 	im, ref, err := s.imageFor(spec)
 	if err != nil {
@@ -407,11 +449,20 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 		if svc.Start != nil && !*svc.Start {
 			continue
 		}
-		argv := apps.ServiceArgv(svc.Name, "start")
-		pl.Add(plan.Step{Name: "start-service-" + svc.Name, Describe: "in the jail: " + strings.Join(argv, " "),
+		// the description says what is started; the step runs it through the fixed wrapper that keeps a daemon
+		// the rc script starts off the exec's pipes
+		desc := strings.Join(apps.ServiceArgv(svc.Name, "start"), " ")
+		pl.Add(plan.Step{Name: "start-service-" + svc.Name, Describe: "in the jail: " + desc,
 			Do: func(ctx context.Context) error {
-				_, err := s.runInJail(ctx, key, 10*time.Minute, argv...)
-				return err
+				argv, err := apps.ServiceStartArgv(svc.Name)
+				if err != nil {
+					return err
+				}
+				if out, err := s.runInJail(ctx, key, 10*time.Minute, argv...); err != nil {
+					// the wrapper's script is noise in the message: name the command it stands for
+					return fmt.Errorf("%s: %w: %s", desc, errors.Unwrap(err), tailOf(out))
+				}
+				return nil
 			}})
 	}
 	if app.Health != nil {

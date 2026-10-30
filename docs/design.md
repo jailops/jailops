@@ -302,7 +302,19 @@ and read back. There is no read-modify-write. Raw PF requires `admin`.
 
 ## 6. Jails, Linuxulator and Alpine
 
-`jail(8)` creates and removes jails from a rendered per-jail `jail.conf` (every value escaped).
+`jail(8)` creates and removes jails from a rendered per-jail `jail.conf` (every value escaped). Besides the path,
+the hostname, the vnet interfaces, devfs and the hook commands, every `jail.conf` sets
+`exec.consolelog = "/var/log/jail_${name}_console.log"` (a file on the host, FreeBSD and Linux jails alike): jail(8)
+then sends the output of the `exec.*` commands (the hooks, `/etc/rc` and `/etc/rc.shutdown`) to that file instead of the
+pipes of the helper that ran `jail -c` or `jail -r`. Without it a daemon that an rc script starts and that keeps its
+descriptors (daemon(8) without `-f`) holds the helper's pipes open after `jail -c` has exited, and the start fails or
+hangs waiting for the end of that output. The command runner also treats a command that exited successfully while a
+leftover process still held its output as a success (the output after its exit is dropped). The file is not rotated
+and stays when the jail is deleted. A jail with `sysvipc` (a key of the jail spec, set by an app definition that asks for
+it) gets `sysvmsg = new; sysvsem = new; sysvshm = new;`: System V message queues, semaphores and shared memory of its
+own, separate from the host's and every other jail's (never `inherit`, which would share the host's; `allow.sysvipc`,
+which means the same, stays an admin allow-list flag and is refused together with `sysvipc`). The helper accepts
+exactly these lines and nothing else for those parameters. **[UNVERIFIED on FreeBSD: both, see section 16]**
 Running state is read with `jail_get(2)` **[unverified from pure Go: SYS_JAIL_GET in x/sys]**.
 
 Linux jails use the Linuxulator. Alpine is the first Linux target, Debian follows. What runs in them is bounded by
@@ -636,11 +648,14 @@ runs, what to tell the person afterwards. The catalog is a directory of strict Y
 never fetches a catalog.** An invalid definition is listed with its reason and is never installable. `GET /api/v1/apps`
 and `/api/v1/apps/<name>` are readable by any authenticated identity (route class `self`). The format, the rules and the
 installation (`POST /api/v1/apps/<name>/install`, operator in the project, extension `app_install`: one operation,
-a thin jail from `freebsd@stable` with the data paths as volumes, `pkg -r` from the host through the helper, rc.conf
+a thin jail from the only FreeBSD image with the alias `stable` unless one is named, with the data paths as volumes, `pkg -r` from the host through the helper, rc.conf
 written through the helper's file operations, setup commands and services through the in-jail exec, health check,
 snapshot `app-installed`, labels `jailops.app`, `jailops.app.hash`, `jailops.app.version`; a failure after the first
-start keeps the jail stopped for inspection) are in [apps.md](apps.md). UNVERIFIED on FreeBSD: the installation
-itself; the end-to-end test has an nginx step for it.
+start keeps the jail stopped for inspection) are in [apps.md](apps.md). A definition may ask for System V IPC
+(`sysvipc: true`, carried onto the jail spec, section 6); a service is started through a fixed `/bin/sh -c` wrapper
+that sends the rc script's output to a temporary file in the jail, so a daemon the script leaves behind does not hold
+the in-jail exec's pipes. UNVERIFIED on FreeBSD: the installation of the apps other than nginx; the end-to-end test
+installs nginx, and the others when `JAILOPS_E2E_APPS` names them.
 
 ## 9. Backup
 
@@ -962,6 +977,8 @@ Open:
 | Jail usage (`rctl -u`) | The parser follows the `resource=amount` format of rctl(8) (`maxproc`, `cputime`, `memoryuse`) and the helper rule is tested with fakes; neither has run against a host with `kern.racct.enable=1`. Interface counters are not reported: FreeBSD's `ifconfig` prints none, and `netstat -I` would need a rule of its own |
 | Proxy (port-forward) redirects on the uplink | Rendered; not verified |
 | `zfs_delegation` | Accepted (global admin only) and rendered into `jail.conf`; the helper does not hand datasets over, so the jail does not see them and no error says so |
+| `sysvipc` and the console log | `sysvmsg/sysvsem/sysvshm = new` and `exec.consolelog` are rendered, accepted by the helper and tested against fakes; PostgreSQL's `initdb` in a jail with them, and a forgejo start (daemon(8) without `-f`) no longer holding `jail -c`, have not been run on a host |
+| App service start wrapper and package ownership | The `/bin/sh -c` start wrapper is tested with a real `sh` on the development host, not in a jail; the `chown` setup lines of the starter catalog (`pkg -r` leaves the directories of a package's user root-owned) are written from the ports' layout and not yet run |
 | Helper audit pid | The helper's audit lines do not carry the daemon's pid (`pid: 0`) |
 | Generic `zfs send`/`receive` through the helper socket | About 0.4 MB/s; cause not found, bypassed by `zfs.replicate` |
 | `pkg.jailops.net` | The repository host is not live; packages were installed from a local repository |
@@ -1563,7 +1580,7 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   and `pkg upgrade -n` (`apk update`, `apk upgrade --simulate` on Alpine) inside the jail and compares the image
   generation; apply takes one atomic snapshot, updates, health-checks and records the result. A failed OS update is
   swapped back by the root-swap plan. A failed package update is **not** rolled back by itself: package files live
-  in the jail's datasets, a root rollback does not undo them, and the way back is `rollback --scope all` to the
+  in the jail's datasets, a root rollback does not undo them, and the way back is `jail rollback --all` to the
   recorded snapshot, which discards what the jail wrote since. The record says so. The schedule is evaluated by the
   daemon (`updates.tick`); a jail that is busy is tried again at the next tick. Provisioning files come from
   `<state_dir>/project-files/<project>/` (a symlink that leaves it is refused), run in the declared order, once per

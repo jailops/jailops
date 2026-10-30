@@ -56,6 +56,16 @@ func TestValidFillsDefaults(t *testing.T) {
 	}
 }
 
+func TestSysVIPC(t *testing.T) {
+	app, err := Parse("demo", []byte(marshalWith(t, "sysvipc", true)))
+	if err != nil || !app.SysVIPC {
+		t.Fatalf("%v %+v", err, app)
+	}
+	if app, err := Parse("demo", marshal(t, good())); err != nil || app.SysVIPC {
+		t.Fatalf("on without asking: %v", err)
+	}
+}
+
 func TestInvalidDefinitions(t *testing.T) {
 	long := strings.Repeat("x", 3000)
 	cases := []struct {
@@ -208,6 +218,8 @@ func TestParseRejectsBadDocuments(t *testing.T) {
 		{"syntax", "version: 1\nname: [\n", "did not find expected"},
 		{"name mismatch", string(marshal(t, good())), "name \"demo\" does not match the file name other.yaml"},
 		{"binary", "\x00\x01\x02", "control characters are not allowed"},
+		{"sysvipc not a boolean", marshalWith(t, "sysvipc", "inherit"), "cannot unmarshal"},
+		{"sysvipc a list", marshalWith(t, "sysvipc", []string{"shm"}), "cannot unmarshal"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -469,6 +481,28 @@ func TestStarterCatalog(t *testing.T) {
 			len(a.Config) == 0 || len(a.Logs) == 0 || a.Health == nil || a.Homepage == "" || a.License == "" || a.Notes == "" ||
 			a.Resources.Memory == "" || a.Packages[0].Version == "" {
 			t.Errorf("%s: a starter definition fills every section: %+v", e.File, a)
+		}
+		if a.SysVIPC != (a.Name == "postgresql") {
+			t.Errorf("%s: sysvipc %v", e.File, a.SysVIPC)
+		}
+	}
+	// pkg -r leaves the directories of a package's user root-owned and the volumes start root-owned: the setup gives
+	// them to the user the service runs as
+	owners := map[string]map[string][]string{
+		"forgejo":    {"git:git": {"/usr/local/etc/forgejo", "/var/db/forgejo", "/var/log/forgejo"}},
+		"postgresql": {"postgres:postgres": {"/var/db/postgres"}},
+		"prometheus": {"prometheus:prometheus": {"/var/db/prometheus"}},
+		"valkey":     {"valkey:valkey": {"/var/db/valkey", "/var/log/valkey", "/var/run/valkey"}},
+	}
+	for _, e := range es {
+		for owner, paths := range owners[e.Name] {
+			for _, p := range paths {
+				if !slices.ContainsFunc(e.App.Setup, func(argv []string) bool {
+					return argv[0] == "/usr/sbin/chown" && slices.Contains(argv, owner) && slices.Contains(argv, p)
+				}) {
+					t.Errorf("%s: no setup command gives %s to %s", e.Name, p, owner)
+				}
+			}
 		}
 	}
 }

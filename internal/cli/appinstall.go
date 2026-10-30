@@ -20,12 +20,15 @@ func (a *app) appInstall(d *kindDesc[api.AppSummary]) *cobra.Command {
 		Use:   "install NAME",
 		Short: "Install an app of the catalog as a new jail",
 		Long: `Create a jail that runs an app of the catalog, as one operation on the server:
-a thin jail from the image (freebsd@stable unless --image says otherwise) with
-the app's data paths as persistent datasets, started, the packages installed
-from the host with pkg -r, the services enabled in rc.conf, the setup commands
-and the services run in the jail, the health check, and a snapshot named
-app-installed of the fresh installation. The jail carries the labels
-jailops.app, jailops.app.hash and jailops.app.version.
+a thin jail from the image with the app's data paths as persistent datasets,
+started, the packages installed from the host with pkg -r, the services enabled
+in rc.conf, the setup commands and the services run in the jail, the health
+check, and a snapshot named app-installed of the fresh installation. The jail
+carries the labels jailops.app, jailops.app.hash and jailops.app.version.
+
+The image is the one --image names. Without it the server takes the only
+FreeBSD image with the alias stable, such as freebsd-15@stable from the quick
+start; when there is none or there are several it refuses and asks for --image.
 
 The jail is named after the app unless --name says otherwise, and goes into the
 project of the request; --network and --storage name what it is created with
@@ -79,7 +82,7 @@ jailops app install nginx --project web --dry-run`,
 	f.StringVar(&jail, "name", "", "name of the jail (default: the app name)")
 	f.StringVar(&network, "network", "", "network the jail is attached to, one granted to the project (default: the project's only network)")
 	f.StringVar(&storage, "storage", "", "storage the jail is created on, one granted to the project (default: the project's only storage)")
-	f.StringVar(&image, "image", "", "image reference, NAME@alias or NAME#gN (default freebsd@stable); its release must be at least the app's release_min")
+	f.StringVar(&image, "image", "", "image reference, NAME@alias or NAME#gN (default: the only FreeBSD image with the alias stable); its release must be at least the app's release_min")
 	f.StringVar(&memory, "memory", "", "memory limit, for example 512M (replaces the definition's hints)")
 	f.StringVar(&disk, "disk", "", "disk quota, for example 10G (replaces the definition's hints)")
 	f.IntVar(&cpu, "cpu", 0, "CPU limit in cores (replaces the definition's hints)")
@@ -160,7 +163,7 @@ func (a *app) printAppInstalled(w io.Writer, name, jail string, res api.AppInsta
 	}
 	listed("Logs", rows)
 	if res.Snapshot != "" {
-		kv("Snapshot", res.Snapshot+" (jailops jail rollback "+j.Metadata.Name+" --scope all --snapshot "+res.Snapshot+" goes back to it)")
+		kv("Snapshot", res.Snapshot+" (jailops jail rollback "+j.Metadata.Name+" --all --snapshot "+res.Snapshot+" goes back to it)")
 	}
 	kv("Steps", strconv.Itoa(len(res.Steps))+" done")
 	if res.Notes != "" {

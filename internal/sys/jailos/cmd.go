@@ -2,6 +2,7 @@ package jailos
 
 import (
 	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -54,7 +55,17 @@ func (c *Command) Create(ctx context.Context, confPath, name string) error {
 		t = 120 * time.Second
 	}
 	_, err := c.R.Run(ctx, run.Cmd{Name: "jail", Args: []string{"-f", confPath, "-c", name}, Timeout: t})
-	return mapJailErr(name, err)
+	return withConsoleLog(name, mapJailErr(name, err))
+}
+
+// withConsoleLog points at the file the jail's exec.* commands wrote to
+// (exec.consolelog in jail.conf): jail(8) itself reports only which one failed.
+func withConsoleLog(name string, err error) error {
+	var ae *api.Error
+	if err == nil || !errors.As(err, &ae) || ae.Hint != "" || ae.Code != api.CodeInternal {
+		return err
+	}
+	return ae.WithHint("what the jail's start and stop commands printed is in /var/log/jail_" + name + "_console.log on the host")
 }
 
 // Remove implements Controller.
@@ -66,7 +77,7 @@ func (c *Command) Remove(ctx context.Context, confPath, name string) error {
 		return err
 	}
 	_, err := c.R.Run(ctx, run.Cmd{Name: "jail", Args: []string{"-f", confPath, "-r", name}, Timeout: 120 * time.Second})
-	return mapJailErr(name, err)
+	return withConsoleLog(name, mapJailErr(name, err))
 }
 
 // Exec implements Controller.

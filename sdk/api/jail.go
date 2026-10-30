@@ -82,6 +82,10 @@ type JailSpec struct {
 	// datasets over yet. Only a global admin may set it, and a project is not a security boundary for a jail that
 	// has it.
 	Delegate bool `json:"zfs_delegation,omitempty"`
+	// SysVIPC gives the jail System V message queues, semaphores and shared memory of its own (sysvmsg, sysvsem
+	// and sysvshm = new in jail.conf): separate from the host's and from every other jail's. Some servers
+	// (PostgreSQL) need it. Changing it takes effect at the next start.
+	SysVIPC bool `json:"sysvipc,omitempty"`
 }
 
 // UpdateStrategy selects how a jail follows its image.

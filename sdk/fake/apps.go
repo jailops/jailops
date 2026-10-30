@@ -50,11 +50,12 @@ func (s *Server) seedApps() {
 			Config:    []api.AppConfig{{Path: "/var/db/postgres/data18/postgresql.conf", Description: "Server settings.", Restart: "postgresql"}, {Path: "/var/db/postgres/data18/pg_hba.conf", Description: "Who may connect.", Restart: "postgresql"}},
 			Logs:      []api.AppLog{{Name: "server", Path: "/var/log/messages", Description: "The port logs to syslog."}},
 			Setup:     [][]string{{"/usr/sbin/chown", "postgres:postgres", "/var/db/postgres"}, {"/usr/sbin/service", "postgresql", "initdb"}},
+			SysVIPC:   true,
 			Health:    &api.AppHealth{Exec: []string{"/usr/local/bin/pg_isready", "-U", "postgres"}, WaitSeconds: 60},
 			Resources: api.AppResources{Memory: "1G", Disk: "10G", CPU: "1"},
 			Notes:     "Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql"},
-		{Version: 1, Name: "valkey", Title: "Valkey", Summary: "In-memory key-value store, the BSD-licensed successor of Redis.",
-			Description: "Valkey serves key/value workloads over the Redis protocol.", Category: api.AppDatabase, Homepage: "https://valkey.io/", License: "BSD-3-Clause",
+		{Version: 1, Name: "valkey", Title: "Valkey", Summary: "In-memory key-value store under the BSD license.",
+			Description: "Valkey serves key/value workloads.", Category: api.AppDatabase, Homepage: "https://valkey.io/", License: "BSD-3-Clause",
 			Image:     api.AppImage{OS: "freebsd", ReleaseMin: "15.1"},
 			Packages:  []api.AppPackage{{Name: "valkey", Repo: "ports", Version: "9.1.2"}},
 			Services:  []api.AppService{{Name: "valkey", Start: &t}},
@@ -62,7 +63,7 @@ func (s *Server) seedApps() {
 			Data:      []api.AppPath{{Path: "/var/db/valkey", Description: "Snapshots and the append-only file."}},
 			Config:    []api.AppConfig{{Path: "/usr/local/etc/valkey.conf", Restart: "valkey"}},
 			Logs:      []api.AppLog{{Name: "server", Path: "/var/log/valkey/valkey.log"}},
-			Setup:     [][]string{{"/usr/sbin/chown", "valkey:valkey", "/var/db/valkey"}},
+			Setup:     [][]string{{"/bin/mkdir", "-p", "/var/log/valkey", "/var/run/valkey"}, {"/usr/sbin/chown", "valkey:valkey", "/var/db/valkey", "/var/log/valkey", "/var/run/valkey"}},
 			Health:    &api.AppHealth{Exec: []string{"/usr/local/bin/valkey-cli", "ping"}, WaitSeconds: 30},
 			Resources: api.AppResources{Memory: "512M", Disk: "2G", CPU: "1"},
 			Notes:     "Talk to it from inside the jail with: jailops exec NAME -- valkey-cli"},
@@ -202,7 +203,32 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 		}
 		image := req.Image
 		if image == "" {
-			image = "freebsd@stable"
+			// the only FreeBSD image with the alias stable, as the server does
+			var all, found []string
+			for n, im := range s.images.items {
+				all = append(all, n)
+				if im.Spec.OS == api.OSFreeBSD && slices.Contains(im.Spec.Aliases, "stable") {
+					found = append(found, n)
+				}
+			}
+			if len(found) != 1 {
+				slices.Sort(all)
+				slices.Sort(found)
+				example := "freebsd-15@stable"
+				if len(found) > 1 {
+					example = found[0] + "@stable"
+				}
+				yours := "you have no images"
+				if len(all) > 0 {
+					yours = "your images: " + strings.Join(all, ", ")
+				}
+				msg := "no image named, and no FreeBSD image has the alias stable to default to"
+				if len(found) > 1 {
+					msg = fmt.Sprintf("no image named, and %d FreeBSD images have the alias stable (%s), so there is no default", len(found), strings.Join(found, ", "))
+				}
+				return reply{err: api.Errorf(api.CodeInvalid, "%s", msg).WithHint("name an image with --image, for example " + example + "; " + yours)}
+			}
+			image = found[0] + "@stable"
 		}
 		im := s.images.items[imageName(image)]
 		if im == nil {
@@ -225,7 +251,7 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 		}
 		j := &api.Jail{Metadata: api.ObjectMeta{Name: jail, Project: rc.project, Labels: map[string]string{api.LabelApp: name, api.LabelAppHash: entry.detail.Hash}},
 			Spec: api.JailSpec{Image: image, OS: api.OSFreeBSD, Storage: storage, Hostname: jail, Layout: api.LayoutThin,
-				Network: []api.NetworkAttach{{Network: network}}, Volumes: vols, Resources: limits}}
+				Network: []api.NetworkAttach{{Network: network}}, Volumes: vols, Resources: limits, SysVIPC: app.SysVIPC}}
 		steps := []string{"01 create-jail: create thin jail " + jail + " from " + image, "02 start-jail: start " + jail}
 		n := 3
 		step := func(name, what string) {

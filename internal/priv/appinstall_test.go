@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -112,8 +113,12 @@ func TestAppInstallThroughTheHelper(t *testing.T) {
 
 	// in-jail commands: the jail guard runs them in a managed jail only, as argv
 	setup := []string{"/usr/sbin/chown", "postgres:postgres", "/var/db/postgres"}
+	start, err := apps.ServiceStartArgv("nginx")
+	if err != nil {
+		t.Fatal(err)
+	}
 	jails := e.local.Jails()
-	for _, argv := range [][]string{setup, apps.ServiceArgv("nginx", "start"), {"/usr/local/bin/pg_isready", "-U", "postgres"}} {
+	for _, argv := range [][]string{setup, apps.ServiceArgv("nginx", "start"), {"/usr/local/bin/pg_isready", "-U", "postgres"}, start} {
 		if _, err := jails.Exec(ctx, "alpha_ghost", jailosExec(argv...)); !api.IsCode(err, api.CodeForbidden) {
 			t.Errorf("%q in an unmanaged jail: %v", argv, err)
 		}
@@ -122,18 +127,21 @@ func TestAppInstallThroughTheHelper(t *testing.T) {
 	if err := e.jails.Create(ctx, filepath.Join(e.cfg.ConfDir, "alpha_web.conf"), "alpha_web"); err != nil {
 		t.Fatal(err)
 	}
-	for _, argv := range [][]string{setup, apps.ServiceArgv("nginx", "start"), {"/usr/local/bin/pg_isready", "-U", "postgres"}} {
+	// the service start wrapper (/bin/sh -c with the fixed script, the name as an argument) is an ordinary in-jail
+	// command: the jail guard passes it as it is
+	for _, argv := range [][]string{setup, apps.ServiceArgv("nginx", "start"), {"/usr/local/bin/pg_isready", "-U", "postgres"}, start} {
 		if _, err := jails.Exec(ctx, "alpha_web", jailosExec(argv...)); err != nil {
 			t.Errorf("%q: %v", argv, err)
 		}
 	}
-	var ran []string
+	var ran [][]string
 	for _, call := range e.jails.Calls() {
 		if call.Op == "exec" {
-			ran = append(ran, strings.Join(call.Argv, " "))
+			ran = append(ran, call.Argv)
 		}
 	}
-	if len(ran) != 3 || ran[0] != strings.Join(setup, " ") || ran[1] != "/usr/sbin/service nginx start" {
+	if len(ran) != 4 || strings.Join(ran[0], " ") != strings.Join(setup, " ") || strings.Join(ran[1], " ") != "/usr/sbin/service nginx start" ||
+		!slices.Equal(ran[3], []string{"/bin/sh", "-c", apps.ServiceStartScript, "jailops-start", "nginx"}) {
 		t.Errorf("%q", ran)
 	}
 	if _, err := jails.Exec(ctx, "alpha_web", jailosExec("/bin/sh", "-c", "id\x00")); !api.IsCode(err, api.CodeInvalid) {

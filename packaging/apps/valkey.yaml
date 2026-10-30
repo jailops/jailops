@@ -2,10 +2,10 @@
 version: 1
 name: valkey
 title: Valkey
-summary: In-memory key-value store, the BSD-licensed successor of Redis.
+summary: In-memory key-value store under the BSD license.
 description: |
-  Valkey is a high-performance data structure server that serves key/value
-  workloads, compatible with the Redis protocol and clients. The package ships
+  Valkey is a high-performance data structure server for key/value
+  workloads. The package ships
   the server, the command line client and a sentinel; this definition runs the
   server with the configuration the package installs.
 
@@ -41,8 +41,11 @@ logs:
   - name: server
     path: /var/log/valkey/valkey.log
     description: The server log.
+# pkg -r installs from the host, where the valkey user does not exist: the package's own
+# directories come out root-owned, and the server could not write its log or pid file.
 setup:
-  - [/usr/sbin/chown, "valkey:valkey", /var/db/valkey]
+  - [/bin/mkdir, -p, /var/log/valkey, /var/run/valkey]
+  - [/usr/sbin/chown, "valkey:valkey", /var/db/valkey, /var/log/valkey, /var/run/valkey]
 health:
   exec: [/usr/local/bin/valkey-cli, ping]
   wait_seconds: 30

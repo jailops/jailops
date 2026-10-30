@@ -491,13 +491,13 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 	rec.Snapshot = snap.Name
 	if _, err := s.runInJail(ctx, key, 60*time.Minute, up...); err != nil {
 		rec.Result, rec.Error = api.UpdateFailed, err.Error()
-		rec.Note = "restore the snapshot with `jailops rollback " + j.Metadata.Name + " " + snap.Name + " --scope all` to undo it; that discards what the jail wrote since"
+		rec.Note = "restore the snapshot with `jailops jail rollback " + j.Metadata.Name + " --all --snapshot " + snap.Name + "` to undo it; that discards what the jail wrote since"
 		return rec
 	}
 	if err := s.healthCheck(ctx, key, j); err != nil {
 		rec.Result, rec.Error = api.UpdateFailed, err.Error()
 		rec.Note = "the packages stay updated: package files live in the jail's own datasets, and a root rollback does not undo them. " +
-			"`jailops rollback " + j.Metadata.Name + " " + snap.Name + " --scope all` does, and discards what the jail wrote since"
+			"`jailops jail rollback " + j.Metadata.Name + " --all --snapshot " + snap.Name + "` does, and discards what the jail wrote since"
 		return rec
 	}
 	rec.Result = api.UpdateOK

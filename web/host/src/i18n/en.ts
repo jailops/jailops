@@ -719,7 +719,7 @@ export const en = {
     endpoint: 'Endpoint',
     where: 'Where things are',
     rollbackTitle: 'Back to the fresh installation',
-    rollbackText: (snap: string) => `Every dataset of the jail was snapshotted as ${snap}. Roll back to it from the jail page (scope all), or with:`,
+    rollbackText: (snap: string) => `Every dataset of the jail was snapshotted as ${snap}. Roll back to it from the jail page (scope "Root and data"), or with:`,
     failTitle: 'The installation failed',
     kept: (j: string) => `The jail ${j} was kept, stopped, for inspection. Start it and open a shell to look inside; delete it before trying again.`,
     notKept: 'Nothing was left behind: the jail was deleted again.',

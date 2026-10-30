@@ -3,19 +3,19 @@ NAME         CATEGORY   VERSION    STATUS    SUMMARY
 broken       -          -          invalid   title: is required
 nginx        web        1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
 postgresql   database   18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database   9.1.2      valid     In-memory key-value store, the BSD-licensed successor of Redis.
+valkey       database   9.1.2      valid     In-memory key-value store under the BSD license.
 
 $ jailops app list -o wide
 NAME         CATEGORY   VERSION    STATUS    SUMMARY
 broken       -          -          invalid   title: is required
 nginx        web        1.30.6,3   valid     Web server and reverse proxy, serving /usr/local/www.
 postgresql   database   18.6       valid     Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database   9.1.2      valid     In-memory key-value store, the BSD-licensed successor of Redis.
+valkey       database   9.1.2      valid     In-memory key-value store under the BSD license.
 
 $ jailops app list --category database
 NAME         CATEGORY   VERSION   STATUS   SUMMARY
 postgresql   database   18.6      valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database   9.1.2     valid    In-memory key-value store, the BSD-licensed successor of Redis.
+valkey       database   9.1.2     valid    In-memory key-value store under the BSD license.
 
 $ jailops app list --category games
 ! usage: unknown category "games" (categories: database, web, tools, devops, storage, monitoring, communication, other)
@@ -25,7 +25,7 @@ $ jailops app list --category games
 $ jailops app list post* val*
 NAME         CATEGORY   VERSION   STATUS   SUMMARY
 postgresql   database   18.6      valid    Relational database server, PostgreSQL 18 from the FreeBSD packages.
-valkey       database   9.1.2     valid    In-memory key-value store, the BSD-licensed successor of Redis.
+valkey       database   9.1.2     valid    In-memory key-value store under the BSD license.
 
 $ jailops app list -c name,version --sort version
 NAME         VERSION
@@ -45,7 +45,7 @@ NAME,CATEGORY,VERSION,STATUS,SUMMARY
 broken,-,-,invalid,title: is required
 nginx,web,"1.30.6,3",valid,"Web server and reverse proxy, serving /usr/local/www."
 postgresql,database,18.6,valid,"Relational database server, PostgreSQL 18 from the FreeBSD packages."
-valkey,database,9.1.2,valid,"In-memory key-value store, the BSD-licensed successor of Redis."
+valkey,database,9.1.2,valid,In-memory key-value store under the BSD license.
 
 $ jailops app info postgresql
 App postgresql: PostgreSQL
@@ -164,7 +164,7 @@ $ jailops app list
 │ broken     │ -        │ invalid: title: is required                                          │
 │ nginx      │ web      │ Web server and reverse proxy, serving /usr/local/www.                │
 │ postgresql │ database │ Relational database server, PostgreSQL 18 from the FreeBSD packages. │
-│ valkey     │ database │ In-memory key-value store, the BSD-licensed successor of Redis.      │
+│ valkey     │ database │ In-memory key-value store under the BSD license.                     │
 └────────────┴──────────┴──────────────────────────────────────────────────────────────────────┘
 
 $ jailops app list
@@ -174,6 +174,6 @@ $ jailops app list
 │ broken     │ invalid: title: is required                                          │
 │ nginx      │ Web server and reverse proxy, serving /usr/local/www.                │
 │ postgresql │ Relational database server, PostgreSQL 18 from the FreeBSD packages. │
-│ valkey     │ In-memory key-value store, the BSD-licensed successor of Redis.      │
+│ valkey     │ In-memory key-value store under the BSD license.                     │
 └────────────┴──────────────────────────────────────────────────────────────────────┘
 

@@ -213,6 +213,7 @@ export interface App {
   config?: AppConfig[]
   logs?: AppLog[]
   setup?: string[][]
+  sysvipc?: boolean
   health?: AppHealth
   resources?: AppResources
   notes?: string
@@ -799,6 +800,7 @@ export interface JailSpec {
   proxy?: ProxyDevice[]
   encrypted?: boolean
   zfs_delegation?: boolean
+  sysvipc?: boolean
 }
 
 export interface JailStatus {
@@ -1604,6 +1606,15 @@ export const configKeys: readonly ConfigKey[] = [
     "restart_required": true,
     "profile": true,
     "path": "storage"
+  },
+  {
+    "name": "sysvipc",
+    "type": "bool",
+    "description": "System V message queues, semaphores and shared memory of the jail's own (separate from the host's); some servers, PostgreSQL among them, need them.",
+    "example": "true",
+    "restart_required": true,
+    "profile": true,
+    "path": "sysvipc"
   },
   {
     "name": "update.healthcheck",

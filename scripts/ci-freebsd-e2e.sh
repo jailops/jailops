@@ -9,6 +9,9 @@
 #                   them, with or without the -freebsd-<arch> suffix)
 # JAILOPS_E2E_PART   all (default), e2e (everything but the packet filter test) or pf (only the packet filter test)
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
+# JAILOPS_E2E_APPS   more apps of the starter catalog to install after nginx, space separated: postgresql, valkey,
+#                   prometheus, forgejo (default none; CI does not set it). Each one is installed, checked in its own
+#                   way, its logs listed, and stopped.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -16,6 +19,10 @@ root=$(pwd)
 pool=jopsci
 part=${JAILOPS_E2E_PART:-all}
 case $part in all | e2e | pf) ;; *) echo "JAILOPS_E2E_PART must be all, e2e or pf" >&2; exit 2 ;; esac
+e2e_apps=${JAILOPS_E2E_APPS:-}
+for a in $e2e_apps; do
+	case $a in postgresql | valkey | prometheus | forgejo) ;; *) echo "JAILOPS_E2E_APPS: no check for $a (postgresql, valkey, prometheus, forgejo)" >&2; exit 2 ;; esac
+done
 poolfile=/tmp/$pool.img
 work=/tmp/jailops-e2e
 mount=/jopsci
@@ -196,6 +203,26 @@ if ! $J stop nginx --project demo >"$work/stop.out" 2>&1; then # show what holds
 	echo "--- processes:" >&2; ps -axo pid,jid,etimes,command | grep -E 'nginx|syslogd|cron|jexec' | grep -v grep >&2 || true
 	fail "stop the app jail"
 fi
+
+# one block per app of JAILOPS_E2E_APPS: install, the app's own check, the logs, stop
+app_check() { # app_check NAME ADDRESS
+	case $1 in
+	postgresql) expect "postgresql answers a query" '^1$' $J exec --project demo postgresql -- su -l postgres -c "psql -tA -c 'select 1'" ;;
+	valkey) expect "valkey answers" '^PONG$' $J exec --project demo valkey -- /usr/local/bin/valkey-cli ping ;;
+	prometheus) expect "prometheus is ready" 'Ready' curl -s --max-time 10 "http://$2:9090/-/ready" ;;
+	forgejo) expect "forgejo answers (the web installer or a redirect to it)" '^(200|302|303)$' curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://$2:3000/" ;;
+	esac
+}
+for a in $e2e_apps; do
+	step "the app $a from the catalog"
+	check "install $a" $J app install "$a" --project demo --network lan --storage default
+	expect "$a is listed as installed" "^$a +$a +[^ ]+ +running" $J app installed --project demo
+	addr=$($J app installed --project demo | awk -v a="$a" '$1 == a {print $5}' | head -1 | cut -d, -f1)
+	[ -n "$addr" ] || fail "no address for the $a jail"
+	app_check "$a" "$addr"
+	expect "the log files of $a are listed" 'messages' $J jail logs "$a" --project demo
+	check "stop $a" $J stop "$a" --project demo
+done
 
 step "backup node (PostgreSQL, the node, this host enrolled)"
 if ! su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; then # the CI VM has it running already

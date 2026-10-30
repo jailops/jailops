@@ -11,6 +11,7 @@ alpha_alpine1 {
 	exec.poststart = "/usr/local/libexec/jailops-priv hook poststart ${name}";
 	exec.prestop = "/usr/local/libexec/jailops-priv hook prestop ${name}";
 	exec.poststop = "/usr/local/libexec/jailops-priv hook poststop ${name}";
+	exec.consolelog = "/var/log/jail_${name}_console.log";
 	enforce_statfs = 2;
 	allow.socket_af;
 	persist;

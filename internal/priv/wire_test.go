@@ -174,7 +174,7 @@ func FuzzJailConf(f *testing.F) {
 		// accepted text has no variable expansion other than the hooks and
 		// no command separators outside quoted hook lines
 		for _, l := range strings.Split(s, "\n") {
-			if strings.Contains(l, "${") && !strings.Contains(l, "hook ") {
+			if strings.Contains(l, "${") && !strings.Contains(l, "hook ") && strings.TrimLeft(l, "\t") != `exec.consolelog = "/var/log/jail_${name}_console.log";` {
 				t.Fatalf("accepted a variable: %q", l)
 			}
 		}

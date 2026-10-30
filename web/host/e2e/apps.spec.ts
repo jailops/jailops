@@ -79,7 +79,7 @@ test('install end to end: preview the steps, install, success report, listed und
   await expect(page.getByTestId('install-steps').locator('[data-state="done"]')).toHaveCount(await page.getByTestId('install-steps').locator('li').count())
   await expect(page.getByTestId('install-ports')).toContainText(':6379')
   await expect(page.getByTestId('install-rollback')).toContainText('app-installed')
-  await expect(page.getByLabel('Rollback command')).toHaveValue('jailops jail rollback cache-kv --scope all --snapshot app-installed')
+  await expect(page.getByLabel('Rollback command')).toHaveValue('jailops jail rollback cache-kv --all --snapshot app-installed')
   await page.getByTestId('install-close').click()
 
   await expect(page.getByTestId('installed-as')).toContainText('cache-kv')

@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"jailops.net/jailops/internal/cli"
 	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/daemon/dtest"
 	"jailops.net/jailops/internal/sys/jailos"
@@ -160,9 +161,10 @@ func TestPackageUpdatePipeline(t *testing.T) {
 	ch := e.Events(evctx, e.Admin)
 	aop, _ = e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, Packages: true})
 	recs, err = aop.Wait(ctx)
-	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateFailed || !strings.Contains(recs[0].Error, "health check") || !strings.Contains(recs[0].Note, "--scope all") {
+	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateFailed || !strings.Contains(recs[0].Error, "health check") || !strings.Contains(recs[0].Note, "--all --snapshot ") {
 		t.Fatalf("%+v %v", recs, err)
 	}
+	assertRealCommand(t, recs[0].Note)
 	deadline := time.After(3 * time.Second)
 loop:
 	for {
@@ -349,7 +351,7 @@ func TestProvisioningRunsOnceAndAgainOnRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{"pkg install -y bash nginx", "chown root:wheel /usr/local/etc/nginx/nginx.conf", "chmod 0644 /usr/local/etc/nginx/nginx.conf",
-		"sysrc nginx_enable=YES", "service nginx start", "/usr/bin/touch /var/db/done"}
+		"sysrc nginx_enable=YES", "jailops-start nginx", "/usr/bin/touch /var/db/done"}
 	for _, w := range want {
 		if !sj.ran(w) {
 			t.Errorf("provisioning did not run %q: %v", w, sj.cmds)
@@ -363,7 +365,7 @@ func TestProvisioningRunsOnceAndAgainOnRequest(t *testing.T) {
 		}
 		return -1
 	}
-	if !(ord("pkg install") < ord("chown") && ord("chown") < ord("sysrc") && ord("sysrc") < ord("service nginx start") && ord("service nginx start") < ord("/usr/bin/touch")) {
+	if !(ord("pkg install") < ord("chown") && ord("chown") < ord("sysrc") && ord("sysrc") < ord("jailops-start nginx") && ord("jailops-start nginx") < ord("/usr/bin/touch")) {
 		t.Errorf("steps out of order: %v", sj.cmds)
 	}
 	if data, ok := e.Files.Data["/jailops/projects/alpha/jails/web/root/usr/local/etc/nginx/nginx.conf"]; !ok || string(data) != "worker_processes 1;\n" {
@@ -408,5 +410,31 @@ func TestProvisioningRunsOnceAndAgainOnRequest(t *testing.T) {
 	j3.Spec.Provision = &api.Provision{Files: []api.ProvisionFile{{Source: "/etc/passwd", Destination: "/etc/x"}}}
 	if _, err := e.Admin.Jails().Create(ctx, j3); !api.IsCode(err, api.CodeInvalid) {
 		t.Fatalf("%v", err)
+	}
+}
+
+// assertRealCommand checks that the command quoted in backticks in note is
+// one the CLI accepts: the command exists and knows every flag given.
+func assertRealCommand(t *testing.T, note string) {
+	t.Helper()
+	_, rest, ok := strings.Cut(note, "`")
+	line, _, ok2 := strings.Cut(rest, "`")
+	f := strings.Fields(line)
+	if !ok || !ok2 || len(f) < 2 || f[0] != "jailops" {
+		t.Fatalf("no jailops command in %q", note)
+	}
+	root := cli.NewRootCommand(&cli.Env{})
+	cmd, args, err := root.Find(f[1:])
+	if err == nil && cmd == root {
+		err = errors.New("no such command")
+	}
+	if err == nil {
+		err = cmd.ParseFlags(args)
+	}
+	if err == nil {
+		err = cmd.ValidateArgs(cmd.Flags().Args())
+	}
+	if err != nil {
+		t.Fatalf("%q is not a command the CLI accepts: %v", line, err)
 	}
 }

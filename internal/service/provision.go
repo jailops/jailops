@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
@@ -158,7 +159,13 @@ func provisionSteps(p api.Provision, linux bool) []provStep {
 		if linux {
 			out = append(out, provStep{name: "start " + svc, argv: []string{"rc-service", svc, "start"}})
 		} else {
-			out = append(out, provStep{name: "start " + svc, argv: []string{"service", svc, "start"}})
+			// through the fixed wrapper that keeps a daemon the rc script starts off the exec's pipes; the name was
+			// validated with the declaration
+			argv, err := apps.ServiceStartArgv(svc)
+			if err != nil {
+				argv = []string{"service", svc, "start"}
+			}
+			out = append(out, provStep{name: "start " + svc, argv: argv})
 		}
 	}
 	for _, c := range p.Commands {

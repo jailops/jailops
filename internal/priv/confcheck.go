@@ -262,6 +262,18 @@ func (c Config) checkJailParam(ctx context.Context, name, key, val string, hasVa
 			return c.rawParam(admin, key)
 		}
 		return nil
+	case "exec.consolelog":
+		// the output of the exec.* commands goes to this host file, not to the pipes of jail(8)'s caller
+		if val != `"`+render.ConsoleLog+`"` {
+			return forbidden("%s must be exactly %q", key, render.ConsoleLog)
+		}
+		return nil
+	case "sysvmsg", "sysvsem", "sysvshm":
+		// new: System V IPC of the jail's own; inherit (the host's) is for the allow-list
+		if val != "new" {
+			return c.rawParam(admin, key)
+		}
+		return nil
 	}
 	if flag, ok := strings.CutPrefix(key, "allow."); ok {
 		if err := bare(); err != nil {
