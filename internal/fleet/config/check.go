@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -34,6 +35,9 @@ func (f *Fleet) Check() error {
 	}
 	warn := func(o *Object, format string, args ...any) {
 		f.Warnings = append(f.Warnings, fmt.Sprintf("RISK: %s: %s", o.Origin, fmt.Sprintf(format, args...)))
+	}
+	note := func(o *Object, format string, args ...any) {
+		f.Warnings = append(f.Warnings, fmt.Sprintf("%s: %s", o.Origin, fmt.Sprintf(format, args...)))
 	}
 
 	// Every SOPS file needs a creation_rule, or nobody knows who may decrypt it.
@@ -117,7 +121,7 @@ func (f *Fleet) Check() error {
 	for _, o := range f.Objects {
 		// The daemon's name rules are narrower than the repository's file-name rule: a name it refuses fails at apply time.
 		switch o.Kind {
-		case api.KindJail, api.KindNetwork, api.KindFirewallPolicy:
+		case api.KindJail, api.KindNetwork, api.KindFirewallPolicy, api.KindWireGuard, model.KindApp, api.KindAppAccess:
 			if !daemonNameRE.MatchString(o.Name) {
 				add(o, "%s name %q must match %s (lowercase letters, digits and '-', starting with a letter)", o.Kind, o.Name, daemonNameRE)
 			}
@@ -191,6 +195,52 @@ func (f *Fleet) Check() error {
 					missing(h, api.KindJail, o.Project, d, o, "boot.depends")
 				}
 			}
+		case model.AppSpec:
+			pdef := f.Projects[o.Project]
+			for _, h := range o.Hosts {
+				if _, dup := tables[h][Key{api.KindJail, o.Project, o.Name}]; dup {
+					add(o, "a jail %q is declared too: an app is installed as its own jail", o.Name)
+				}
+				if s.Image != "" {
+					missing(h, api.KindImage, "", ImageName(s.Image), o, "image")
+				}
+				if s.Network != "" {
+					missing(h, api.KindNetwork, "", s.Network, o, "network")
+					if pdef != nil && !grantsNetwork(pdef.Spec, s.Network) {
+						add(o, "network %q is not granted to project %s", s.Network, o.Project)
+					}
+				}
+				if s.Storage != "" && s.Storage != "default" {
+					missing(h, api.KindStorage, "", s.Storage, o, "storage")
+				}
+				if pdef != nil && s.Storage != "" && !grantsStorage(pdef.Spec, s.Storage) {
+					add(o, "storage %q is not granted to project %s", s.Storage, o.Project)
+				}
+			}
+		case model.AppAccessSpec:
+			for _, h := range o.Hosts {
+				if _, ok := tables[h][Key{model.KindApp, o.Project, o.Name}]; !ok {
+					note(o, "no App %q is declared for host %s: the grants apply only if it was installed there", o.Name, h)
+				}
+				for _, g := range s.Grants {
+					c, _ := model.CanonicalSource(o.Project, g.Source)
+					name, ok := strings.CutPrefix(c, "@")
+					if !ok {
+						continue
+					}
+					proj := o.Project
+					if pp, j, cross := strings.Cut(name, "/"); cross {
+						proj, name = pp, j
+					}
+					t := tables[h]
+					_, jail := t[Key{api.KindJail, proj, name}]
+					_, app := t[Key{model.KindApp, proj, name}]
+					_, set := t[Key{api.KindAddressSet, proj, name}]
+					if !jail && !app && !set {
+						note(o, "source %s is neither a jail, an app nor an address set declared for host %s: it must exist there", c, h)
+					}
+				}
+			}
 		case api.FirewallPolicySpec:
 			checkPolicy(o, s, add, warn)
 			for _, h := range o.Hosts {
@@ -223,6 +273,13 @@ func (f *Fleet) Check() error {
 			}
 		case api.NetworkSpec:
 			checkNetwork(o, s, add, warn)
+		case api.WireGuardSpec:
+			checkWireGuard(o, s, add)
+			for _, h := range o.Hosts {
+				for _, n := range s.Networks {
+					missing(h, api.KindNetwork, "", n, o, "networks")
+				}
+			}
 		case api.StorageSpec:
 			if s.Dataset == "" || strings.HasPrefix(s.Dataset, "/") || !strings.Contains(s.Dataset, "/") {
 				add(o, "spec.dataset is required and names a ZFS dataset such as tank/jailops")
@@ -285,6 +342,34 @@ func (f *Fleet) Check() error {
 					for _, pb := range networkPrefixes(b.Spec.(api.NetworkSpec)) {
 						if pa.Overlaps(pb) {
 							errs = append(errs, fmt.Errorf("%s: network %s (%s) overlaps network %s (%s) on host %s: subnets may not overlap", b.Origin, b.Name, pb, a.Name, pa, h))
+						}
+					}
+				}
+			}
+		}
+	}
+	// Tunnels of one host may not share an interface, a listen port or overlapping addresses: the daemon refuses the second.
+	for _, h := range f.HostNames() {
+		var wgs []*Object
+		for _, o := range f.ObjectsFor(h) {
+			if o.Kind == api.KindWireGuard {
+				wgs = append(wgs, o)
+			}
+		}
+		for i, a := range wgs {
+			sa := a.Spec.(api.WireGuardSpec)
+			for _, b := range wgs[i+1:] {
+				sb := b.Spec.(api.WireGuardSpec)
+				if wgIface(a.Name, sa) == wgIface(b.Name, sb) {
+					errs = append(errs, fmt.Errorf("%s: tunnel %s uses interface %s like tunnel %s on host %s", b.Origin, b.Name, wgIface(b.Name, sb), a.Name, h))
+				}
+				if wgPort(sa) != 0 && wgPort(sa) == wgPort(sb) {
+					errs = append(errs, fmt.Errorf("%s: tunnel %s uses listen port %d like tunnel %s on host %s", b.Origin, b.Name, wgPort(sb), a.Name, h))
+				}
+				for _, pa := range wgPrefixes(sa.Address) {
+					for _, pb := range wgPrefixes(sb.Address) {
+						if pa.Overlaps(pb) {
+							errs = append(errs, fmt.Errorf("%s: tunnel %s (%s) overlaps tunnel %s (%s) on host %s", b.Origin, b.Name, pb, a.Name, pa, h))
 						}
 					}
 				}
@@ -632,5 +717,137 @@ func checkRange(o *Object, what, r string, sub netip.Prefix, add func(*Object, s
 	}
 	if !sub.Contains(lo) || !sub.Contains(hi) {
 		add(o, "%s %q is outside %s", what, r, sub)
+	}
+}
+
+// wgIfaceRE is the daemon's rule for a tunnel's interface name.
+var wgIfaceRE = regexp.MustCompile(`^wg[A-Za-z0-9_.-]{1,13}$`)
+
+func wgIface(name string, s api.WireGuardSpec) string {
+	if s.Interface != "" {
+		return s.Interface
+	}
+	return "wg-" + name
+}
+
+func wgPort(s api.WireGuardSpec) int {
+	if s.Mode == api.WireGuardServer && s.ListenPort == 0 {
+		return api.DefaultWireGuardPort
+	}
+	return s.ListenPort
+}
+
+// wgPrefixes parses a tunnel's addresses (with their prefix) as networks; what does not parse is reported elsewhere.
+func wgPrefixes(l []string) []netip.Prefix {
+	var out []netip.Prefix
+	for _, a := range l {
+		if p, err := netip.ParsePrefix(a); err == nil {
+			out = append(out, p.Masked())
+		}
+	}
+	return out
+}
+
+// wgKey reports whether s is a WireGuard public key: standard base64 of 32 bytes.
+func wgKey(s string) bool {
+	b, err := base64.StdEncoding.DecodeString(s)
+	return err == nil && len(b) == 32 && len(s) == 44
+}
+
+// checkWireGuard checks a tunnel offline the way the daemon will. Only servers are declarable: a client's private key
+// comes from a join token on its own host and cannot be reproduced from a file. Private and preshared keys are never
+// fields of a spec, so a file cannot carry one.
+func checkWireGuard(o *Object, s api.WireGuardSpec, add func(*Object, string, ...any)) {
+	switch s.Mode {
+	case api.WireGuardServer:
+	case api.WireGuardClient:
+		add(o, "a WireGuard client cannot be declared: its private key comes from a join token on its own host (jailops wireguard join TOKEN); declare the server and enroll the client with jailops wireguard peer add")
+		return
+	default:
+		add(o, "spec.mode must be server (clients are made with jailops wireguard join)")
+		return
+	}
+	if !wgIfaceRE.MatchString(wgIface(o.Name, s)) {
+		add(o, "interface %q must start with \"wg\" and have at most 15 letters, digits, '_', '.' or '-' (set spec.interface for a long name)", wgIface(o.Name, s))
+	}
+	if s.PeerPublicKey != "" {
+		add(o, "spec.peer_public_key is for a client; a server lists spec.peers")
+	}
+	if s.ListenPort < 0 || s.ListenPort > 65535 {
+		add(o, "spec.listen_port %d is not a port", s.ListenPort)
+	}
+	if s.Keepalive < 0 || s.Keepalive > 3600 {
+		add(o, "spec.keepalive must be 0 to 3600 seconds")
+	}
+	addrs := map[bool]int{}
+	if len(s.Address) == 0 {
+		add(o, "spec.address needs the tunnel's address with its prefix, for example 10.99.0.1/24")
+	}
+	var own []netip.Prefix
+	for _, a := range s.Address {
+		p, err := netip.ParsePrefix(a)
+		if err != nil || p.Addr().Zone() != "" {
+			add(o, "spec.address %q is not an address with a prefix length", a)
+			continue
+		}
+		own = append(own, p)
+		addrs[p.Addr().Is4()]++
+	}
+	if addrs[true] > 1 || addrs[false] > 1 {
+		add(o, "spec.address holds at most one IPv4 and one IPv6 address")
+	}
+	for _, a := range s.AllowedIPs {
+		if p, err := netip.ParsePrefix(a); err != nil || p != p.Masked() {
+			add(o, "spec.allowed_ips %q must be a network (the pool peer addresses come from)", a)
+		}
+	}
+	for _, d := range s.DNS {
+		if _, err := netip.ParseAddr(d); err != nil {
+			add(o, "spec.dns %q is not an address", d)
+		}
+	}
+	names, keys := map[string]bool{}, map[string]bool{}
+	var used []netip.Prefix
+	for i, p := range s.Peers {
+		f := fmt.Sprintf("spec.peers[%d]", i)
+		if !daemonNameRE.MatchString(p.Name) {
+			add(o, "%s.name %q must match %s", f, p.Name, daemonNameRE)
+		}
+		if names[p.Name] {
+			add(o, "%s: peer %q is listed twice", f, p.Name)
+		}
+		names[p.Name] = true
+		if !wgKey(p.PublicKey) {
+			add(o, "%s.public_key is not a WireGuard public key (base64 of 32 bytes)", f)
+		} else if keys[p.PublicKey] {
+			add(o, "%s: peer %q has the public key of another peer", f, p.Name)
+		}
+		keys[p.PublicKey] = true
+		if len(p.AllowedIPs) == 0 {
+			add(o, "%s.allowed_ips needs the peer's tunnel address, for example 10.99.0.2/32", f)
+		}
+		for _, a := range p.AllowedIPs {
+			x, err := netip.ParsePrefix(a)
+			if err != nil {
+				if ad, aerr := netip.ParseAddr(a); aerr == nil {
+					x, err = netip.PrefixFrom(ad, ad.BitLen()), nil
+				}
+			}
+			if err != nil || x.Bits() == 0 {
+				add(o, "%s.allowed_ips %q is not a peer address", f, a)
+				continue
+			}
+			for _, u := range used {
+				if u.Overlaps(x) {
+					add(o, "%s.allowed_ips %s overlaps the address of another peer", f, x)
+				}
+			}
+			for _, a := range own {
+				if x.Contains(a.Addr()) {
+					add(o, "%s.allowed_ips %s holds the server's own address", f, x)
+				}
+			}
+			used = append(used, x)
+		}
 	}
 }

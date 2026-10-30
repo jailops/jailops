@@ -25,6 +25,7 @@ func (s *Server) routes() {
 	s.projects = newKind(s, "projects", "project", api.ScopeHost, func(v *api.Project) *api.ObjectMeta { return &v.Metadata })
 	s.storages = newKind(s, "storage", "storage", api.ScopeHost, func(v *api.Storage) *api.ObjectMeta { return &v.Metadata })
 	s.users = newKind(s, "users", "user", api.ScopeFleet, func(v *api.User) *api.ObjectMeta { return &v.Metadata })
+	s.wireguard = newKind(s, "wireguard", "wireguard", api.ScopeFleet, func(v *api.WireGuard) *api.ObjectMeta { return &v.Metadata })
 
 	s.profiles = newKind(s, "profiles", "profile", api.ScopeFleet, func(v *api.Profile) *api.ObjectMeta { return &v.Metadata })
 	s.profiles.scoped = true
@@ -37,6 +38,7 @@ func (s *Server) routes() {
 	s.setupJails()
 	s.setupImages()
 	s.setupNetworks()
+	s.setupWireGuard()
 	s.backups.readonly = true
 	s.tokens.noCreate = true
 	s.tokens.noUpdate = true
@@ -66,6 +68,7 @@ func (s *Server) routes() {
 		s.jails.register, s.images.register, s.networks.register, s.policies.register, s.addrsets.register,
 		s.targets.register, s.bpolicies.register, s.backups.register, s.remotes.register,
 		s.profiles.register, s.tokens.register, s.certs.register, s.users.register, s.projects.register, s.storages.register,
+		s.wireguard.register,
 	} {
 		reg(m)
 	}
@@ -91,6 +94,10 @@ func (s *Server) routes() {
 	m("POST /api/v1/updates/apply", s.handleUpdatesApply)
 	m("GET /api/v1/jails/{name}/updates", s.handleUpdateHistory)
 	m("POST /api/v1/jails/{name}/provision", s.handleProvision)
+	m("GET /api/v1/host/identity", s.handleHostIdentity)
+	m("PUT /api/v1/host/identity", s.handleHostIdentityPut)
+	m("GET /api/v1/host/snapshots", s.handleHostSnapshots)
+	m("POST /api/v1/host/snapshots/{name}/restore", s.handleHostRestore)
 	m("GET /api/v1/backup/key", s.handleBackupKeyStatus)
 	m("POST /api/v1/backup/key", s.handleBackupKeyCreate)
 	m("POST /api/v1/backup/key/escrow", s.handleBackupKeyEscrow)
@@ -101,6 +108,9 @@ func (s *Server) routes() {
 	m("GET /api/v1/jails/{name}/logs", s.jailLogs)
 	m("GET /api/v1/jails/{name}/logs/{file...}", s.jailLog)
 	m("GET /api/v1/jails/{name}/app-draft", s.handleAppDraft)
+	m("GET /api/v1/jails/{name}/access", s.handleAppAccess)
+	m("POST /api/v1/jails/{name}/access", s.handleAppAllow)
+	m("POST /api/v1/jails/{name}/access/deny", s.handleAppDeny)
 	m("PUT /api/v1/jails/{name}/state", s.jailAction)
 	m("GET /api/v1/jails/{name}/snapshots", s.snapList)
 	m("POST /api/v1/jails/{name}/snapshots", s.snapCreate)
@@ -115,6 +125,12 @@ func (s *Server) routes() {
 	m("PUT /api/v1/images/{name}/aliases/{alias}", s.aliasSet)
 	m("DELETE /api/v1/images/{name}/aliases/{alias}", s.aliasDelete)
 	m("GET /api/v1/networks/{name}/leases", s.leases)
+	m("POST /api/v1/wireguard/join", s.wgJoin)
+	m("POST /api/v1/wireguard/{name}/peers", s.wgPeerAdd)
+	m("DELETE /api/v1/wireguard/{name}/peers/{peer}", s.wgPeerRemove)
+	m("POST /api/v1/wireguard/{name}/up", s.wgSetDown(false))
+	m("POST /api/v1/wireguard/{name}/down", s.wgSetDown(true))
+	m("POST /api/v1/wireguard/{name}/rotate-keys", s.wgRotate)
 	m("/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, api.Errorf(api.CodeNotFound, "no such route %s %s", r.Method, r.URL.Path))
 	})

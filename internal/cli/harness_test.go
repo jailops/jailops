@@ -167,6 +167,7 @@ func normalize(s string) string {
 	s = regexp.MustCompile(`dom-[0-9a-f]{8}`).ReplaceAllString(s, "dom-<id>")
 	s = regexp.MustCompile(`20260301090000-[0-9a-f]{8}`).ReplaceAllString(s, "<snapshot-id>")
 	s = pwRe.ReplaceAllString(s, "<password>")
+	s = regexp.MustCompile(`(postgres://[a-z0-9_]+:)[A-Za-z0-9]{32}@`).ReplaceAllString(s, "$1<password>@")
 	s = regexp.MustCompile(`([0-9a-f]{2}:){31}[0-9a-f]{2}`).ReplaceAllString(s, "<fingerprint>")
 	s = regexp.MustCompile(`sha256:[0-9a-f]{12,32}`).ReplaceAllString(s, "sha256:<hex>")
 	s = tmpRe.ReplaceAllString(s, "<tmp>/$1")

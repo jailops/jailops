@@ -26,6 +26,7 @@ key_not_escrowed        2      A raw backup was refused because its key has no r
 maintenance             5      The backup node is read-only or offline for maintenance.                                                                          Retry later; 'jailops backup target list' shows which target is affected.
 missing_chunks          5      A backup commit refers to chunks the repository does not have.                                                                    Run the backup again so the missing chunks are uploaded; this is normal after an interrupted run.
 lease_expired           5      The backup session timed out or was closed by the node before it finished.                                                        Run the backup again; a slow link may need a longer session on the node.
+not_managed             3      JailOps does not manage this part of the host: jailopsd.yaml or priv.conf does not enable the module.                             Add the lines the hint names and restart both services, or change the host by hand (docs/appliance.md).
 plaintext_denied        2      A backup node target would receive unencrypted data and the policy does not allow plaintext.                                      Enable backup encryption, or set allow_plaintext on the target if that is intended.
 
 $ jailops explain data_loss_unconfirmed

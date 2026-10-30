@@ -402,7 +402,7 @@ func (s *Service) teardownNetwork(ctx context.Context, o object[api.NetworkSpec]
 	}
 	gm, _, _ := ipam.GatewayNames(o.Spec.Bridge)
 	for _, i := range ifs {
-		if i.Name != o.Spec.Bridge || i.Description != render.BridgeDescription(o.Meta.UUID) {
+		if i.Name != o.Spec.Bridge || !render.OwnsIface(i.Description, o.Meta.UUID, render.NetBridgeDesc(o.Meta.Name)) {
 			continue
 		}
 		// the gateway port is the host's own; any other port is a jail's, and the bridge stays while one is left
@@ -416,7 +416,7 @@ func (s *Service) teardownNetwork(ctx context.Context, o object[api.NetworkSpec]
 			continue
 		}
 		for _, g := range ifs {
-			if g.Name == gm && g.Description == render.BridgeDescription(o.Meta.UUID) {
+			if g.Name == gm && render.OwnsIface(g.Description, o.Meta.UUID, render.NetGatewayDesc(o.Meta.Name, false)) {
 				if err := s.d.Net.EpairDestroy(ctx, gm); err != nil { // destroying one end removes both
 					s.log.Warn("destroying the gateway interface of a deleted network failed", "interface", gm, "err", err)
 				}

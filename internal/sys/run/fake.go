@@ -1,6 +1,7 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -128,6 +129,7 @@ func (f *Fake) Run(ctx context.Context, c Cmd) (Result, error) {
 			return Result{}, err
 		}
 		call.StdinData = b
+		c.Stdin = bytes.NewReader(b) // a rule's Fn may read it too
 	}
 	f.mu.Lock()
 	f.calls = append(f.calls, call)

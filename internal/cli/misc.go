@@ -13,7 +13,7 @@ import (
 
 type check struct {
 	Name   string `json:"check"`
-	Status string `json:"status"` // PASS, WARN, FAIL
+	Status string `json:"status"` // PASS, INFO, WARN, FAIL
 	Detail string `json:"detail"`
 }
 
@@ -21,7 +21,8 @@ func (a *app) doctorCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doctor",
 		Short: "Check the connection and the server",
-		Long: `Run a series of checks and print PASS, WARN or FAIL for each: which
+		Long: `Run a series of checks and print PASS, WARN or FAIL for each (INFO for a fact the
+server reports that is not a fault, such as a setting it stores and does not enforce yet): which
 configuration is used, whether the server answers, how it sees you, whether the
 API versions and extensions match, and what the host reports about ZFS and PF.
 The exit status is 1 when a check failed.`,
@@ -107,7 +108,7 @@ The exit status is 1 when a check failed.`,
 								add("server diagnostics", "WARN", "not available: "+derr.Error())
 							default:
 								for _, sc := range rep.Checks {
-									st := map[api.DoctorStatus]string{api.DoctorOK: "PASS", api.DoctorFail: "FAIL"}[sc.Status]
+									st := map[api.DoctorStatus]string{api.DoctorOK: "PASS", api.DoctorFail: "FAIL", api.DoctorInfo: "INFO"}[sc.Status]
 									if st == "" {
 										st = "WARN"
 									}

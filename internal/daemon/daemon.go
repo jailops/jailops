@@ -230,7 +230,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		WorkDir: cfg.WorkDir, JournalDir: filepath.Join(cfg.DataDir, "journal"),
 		State: st, DB: db, SealKey: sealKey, SecretsIdentity: secretsID, SecretsRecipient: secretsID.Recipient().String(),
 		ZFS: zad, ImageZFS: zad, Exec: runExec{clients.Runner}, Files: clients.Files, Logs: clients.Logs, Jails: clients.Jails,
-		PF: clients.PF, Net: clients.Net, Run: clients.Runner, Sysctl: clients.Sysctl, ZClient: clients.ZFS,
+		PF: clients.PF, Net: clients.Net, Run: clients.Runner, Sysctl: clients.Sysctl, ZClient: clients.ZFS, WG: clients.WG,
 		CompatFile: cfg.ZFS.CompatFile, CompatDir: cfg.ZFS.CompatDir, Backups: opts.Backups,
 		NetworkPool: cfg.Projects.NetworkPool, NetworkPoolBits: cfg.Projects.NetworkBits, NetworkUplink: cfg.Projects.Uplink, NetworkNAT: cfg.Projects.NAT,
 		ServerFingerprint: fingerprintOf(d.cert),
@@ -249,6 +249,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	}
 	deps.UpdateTick, deps.ProjectFilesDir = cfg.Updates.Tick.Std(), cfg.Updates.ProjectFilesDir
 	deps.AppsDir = cfg.Apps.CatalogDir
+	deps.Host, deps.HostModules = clients.HostSystem, cfg.Host.Manage.Modules
 	deps.AppsLocalDir = cfg.Apps.LocalDir
 	deps.DialJail = clients.Dial
 	deps.ExecLimits = service.ExecLimits{PerJail: cfg.Limits.ExecSessionsPerJail, Idle: cfg.Limits.ExecIdle.Std(), Max: cfg.Limits.ExecMax.Std()}
@@ -292,7 +293,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	d.rec = reconcile.New(rcfg, reconcile.Env{Source: svc, Sink: svc, Actions: svc, Net: clients.Net, PF: clients.PF, Jails: clients.Jails,
 		Run: clients.Runner, Sysctl: clients.Sysctl, HostRoutes: func(context.Context) (map[netip.Addr]string, error) { return priv.ReadHostRoutes() },
 		HostNeighbors: func(context.Context) ([]ifconfig.Neighbor, error) { return priv.ReadStaticNeighbors() },
-		Log:           log, Trigger: trigger})
+		Log:           log, Trigger: trigger, WG: clients.WG})
 	svc.SetReconciler(d.rec)
 	// 6. Routes are verified against the permission table here.
 	srv, err := server.New(server.Config{

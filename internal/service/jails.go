@@ -151,6 +151,7 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 		if nd.Ingress != "" || nd.Egress != "" {
 			st.Conditions = append(st.Conditions, api.Condition{Type: "RateLimit", Status: api.ConditionFalse, Reason: "NotEnforced",
 				Message: "rate limits are stored but no shaper enforces them yet (UNVERIFIED)", Since: s.now().UTC()})
+			st.Warnings = append(st.Warnings, rateLimitWarning)
 			break
 		}
 	}
@@ -599,6 +600,7 @@ func (s *Service) DeleteJail(ctx context.Context, name string) (api.Operation, e
 			delete(s.status, key)
 			s.mu.Unlock()
 			s.emitIn(ctx, p.Meta.Name, "jail-deleted", "/api/v1/jails/"+name)
+			s.accessJailGone(ctx, p.Meta.Name, name)
 			s.kick()
 			return nil, nil
 		},

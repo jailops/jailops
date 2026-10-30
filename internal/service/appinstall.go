@@ -135,6 +135,12 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		return api.Operation{}, api.Errorf(api.CodeAlreadyExists, "jail %q already exists", jail).
 			WithHint("name the jail with --name, or delete the jail first")
 	}
+	if _, _, err := s.accessPolicy(proj, jail); err != nil {
+		return api.Operation{}, err
+	}
+	if err := validate.Name("policy", apps.AccessPolicyName(jail)); err != nil {
+		return api.Operation{}, invalid("jail name %q is too long: its firewall policy %s must be a name too", jail, apps.AccessPolicyName(jail))
+	}
 	network, storage := req.Network, req.Storage
 	if network == "" && len(p.Spec.Networks) == 1 {
 		network = p.Spec.Networks[0].Network
@@ -471,6 +477,10 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 		pl.Add(plan.Step{Name: "health-check", Describe: healthDescribe(app.Health),
 			Do: func(ctx context.Context) error { return s.appHealth(ctx, key, app.Health) }})
 	}
+	// Default closed: from here on nothing reaches the jail until a source is allowed (docs/apps.md, "Who may
+	// connect"). It comes after the health check, which connects from the host.
+	pl.Add(plan.Step{Name: "close-firewall", Describe: "firewall policy " + apps.AccessPolicyName(jail) + " (managed by app access): deny every inbound connection until jailops app allow " + jail + " from SOURCE",
+		Do: func(ctx context.Context) error { return s.closeApp(ctx, proj, jail) }})
 	pl.Add(plan.Step{Name: "snapshot", Describe: "snapshot every dataset of " + jail + " as " + apps.SnapshotName,
 		Do: func(ctx context.Context) error {
 			r, err := s.life.SnapshotJail(ctx, key, apps.SnapshotName, "app "+app.Name+" as installed")

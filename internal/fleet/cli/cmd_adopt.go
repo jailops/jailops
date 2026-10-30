@@ -95,6 +95,11 @@ them, because it does not own them.`,
 								fmt.Fprintf(w, "skip   %s %s: managed_by %q\n", h, ref, l.Meta.ManagedBy)
 								continue
 							}
+							if ws, ok := l.Spec.(api.WireGuardSpec); ok && ws.Mode == api.WireGuardClient {
+								// its key came from a join token on this host and cannot be reproduced from a file
+								fmt.Fprintf(w, "skip   %s %s: a WireGuard client is made with `jailops wireguard join`, not from a file\n", h, ref)
+								continue
+							}
 							claimWith := func(spec any, user map[string]string, withHash bool) error {
 								labels := map[string]string{}
 								for k, v := range user {

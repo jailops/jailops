@@ -50,16 +50,18 @@ export type Code =
   | "maintenance"
   | "missing_chunks"
   | "lease_expired"
+  | "not_managed"
 
-export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'conflict', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'not_leader', 'no_quorum', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired']
+export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'conflict', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'not_leader', 'no_quorum', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed']
 
 export type DoctorStatus =
   | "ok"
   | "warn"
   | "fail"
   | "unknown"
+  | "info"
 
-export const DoctorStatusValues: readonly DoctorStatus[] = ['ok', 'warn', 'fail', 'unknown']
+export const DoctorStatusValues: readonly DoctorStatus[] = ['ok', 'warn', 'fail', 'unknown', 'info']
 
 export type EventType =
   | "lifecycle"
@@ -101,10 +103,10 @@ export type Kind =
   | "JailSnapshot"
   | "Backup"
   | "Operation"
-  | "Project"
-  | "Storage"
+  | "HostIdentity"
+  | "WireGuard"
 
-export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'Project', 'Storage']
+export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'HostIdentity', 'WireGuard']
 
 export type Layout =
   | "thin"
@@ -193,6 +195,12 @@ export type UpdateStrategy =
 
 export const UpdateStrategyValues: readonly UpdateStrategy[] = ['rebase', 'inplace', 'manual']
 
+export type WireGuardMode =
+  | "server"
+  | "client"
+
+export const WireGuardModeValues: readonly WireGuardMode[] = ['server', 'client']
+
 export interface AddressSet {
   metadata: ObjectMeta
   spec: AddressSetSpec
@@ -225,12 +233,86 @@ export interface App {
   health?: AppHealth
   resources?: AppResources
   notes?: string
+  access?: AppAccessDef
+}
+
+export interface AppAccess {
+  jail: string
+  project: string
+  app: string
+  type?: string
+  policy: string
+  closed: boolean
+  ports: string[]
+  grants: AppAccessGrant[]
+  warnings?: string[]
+}
+
+export interface AppAccessDef {
+  type: string
+  port: string
+  service: string
+  hba_file: string
+}
+
+export interface AppAccessGrant {
+  source: string
+  source_kind: string
+  source_project?: string
+  addresses?: string[]
+  ports: string[]
+  database?: string
+  role?: string
+  role_created?: boolean
+  database_created?: boolean
+  rules: string[]
+  pf?: string[]
+  hba?: string[]
+  created_at: string
+  updated_at?: string
+  created_by?: string
+  problems?: string[]
+}
+
+export interface AppAllow {
+  source: string
+  ports?: string[]
+  database?: string
+  rotate?: boolean
+  dry_run?: boolean
+}
+
+export interface AppAllowResult {
+  jail: string
+  grant: AppAccessGrant
+  changed: boolean
+  connection_string?: string
+  sql?: string[]
+  steps?: string[]
+  notes?: string[]
+  dry_run?: boolean
 }
 
 export interface AppConfig {
   path: string
   description?: string
   restart?: string
+}
+
+export interface AppDeny {
+  source: string
+  drop_role?: boolean
+  dry_run?: boolean
+}
+
+export interface AppDenyResult {
+  jail: string
+  removed: AppAccessGrant
+  changed: boolean
+  sql?: string[]
+  steps?: string[]
+  notes?: string[]
+  dry_run?: boolean
 }
 
 export interface AppDetail {
@@ -612,10 +694,76 @@ export interface FirewallRule {
   redirect?: Redirect
 }
 
+export interface HostChange {
+  dry_run?: boolean
+  changed: boolean
+  diff?: string
+  actions: string[]
+  snapshot?: string
+}
+
+export interface HostIdentity {
+  kind: Kind
+  spec: HostIdentitySpec
+  status: HostIdentityStatus
+}
+
+export interface HostIdentityApply {
+  spec: HostIdentitySpec
+  dry_run?: boolean
+}
+
+export interface HostIdentitySpec {
+  hostname?: string
+  resolvers?: HostResolvers
+  ntp?: HostNTP
+}
+
+export interface HostIdentityStatus {
+  managed: boolean
+  config_enabled: boolean
+  helper_enabled: boolean
+  drift?: string[]
+  applied?: HostIdentitySpec
+  applied_at?: string
+  rc_hostname?: string
+  resolv_conf_managed: boolean
+  ntp_block: boolean
+  ntp_sync?: HostNTPSync
+}
+
 export interface HostMount {
   source: string
   target: string
   read_only?: boolean
+}
+
+export interface HostNTP {
+  servers: string[]
+  enable: boolean
+}
+
+export interface HostNTPSync {
+  synchronised: boolean
+  peer?: string
+  detail?: string
+}
+
+export interface HostResolvers {
+  nameservers: string[]
+  search?: string[]
+}
+
+export interface HostRestore {
+  dry_run?: boolean
+}
+
+export interface HostSnapshot {
+  name: string
+  module: string
+  time: string
+  files: string[]
+  reason?: string
 }
 
 export interface IPv4Net {
@@ -831,6 +979,7 @@ export interface JailStatus {
   drift?: string[]
   conditions?: Condition[]
   provisioned_at?: string
+  warnings?: string[]
 }
 
 export interface JailUpgrade {
@@ -1314,6 +1463,84 @@ export interface VolumeMount {
   read_only?: boolean
 }
 
+export interface WireGuard {
+  metadata: ObjectMeta
+  spec: WireGuardSpec
+  status: WireGuardStatus
+}
+
+export interface WireGuardJoin {
+  token: string
+  name?: string
+  interface?: string
+  endpoint?: string
+  address?: string[]
+  allowed_ips?: string[]
+}
+
+export interface WireGuardKeys {
+  public_key: string
+  warning?: string
+}
+
+export interface WireGuardPeer {
+  name: string
+  public_key: string
+  allowed_ips: string[]
+  keepalive?: number
+  created?: string
+}
+
+export interface WireGuardPeerAdd {
+  name: string
+  address?: string[]
+  keepalive?: number
+}
+
+export interface WireGuardPeerCreated {
+  peer: WireGuardPeer
+  token: string
+  config: string
+  warning: string
+}
+
+export interface WireGuardPeerStatus {
+  name?: string
+  public_key: string
+  endpoint?: string
+  allowed_ips?: string[]
+  latest_handshake?: string
+  rx_bytes: number
+  tx_bytes: number
+  preshared_key?: boolean
+}
+
+export interface WireGuardSpec {
+  mode: WireGuardMode
+  interface?: string
+  address: string[]
+  listen_port?: number
+  endpoint?: string
+  peer_public_key?: string
+  allowed_ips?: string[]
+  dns?: string[]
+  keepalive?: number
+  peers?: WireGuardPeer[]
+  networks?: string[]
+  down?: boolean
+}
+
+export interface WireGuardStatus {
+  public_key?: string
+  interface?: string
+  up?: boolean
+  listen_port?: number
+  peers?: WireGuardPeerStatus[]
+  firewall_rule?: string
+  conditions?: Condition[]
+  warnings?: string[]
+}
+
 /** The config key registry of sdk/api (api.ConfigKeys): the console builds its editor from it. */
 export const configKeys: readonly ConfigKey[] = [
   {
@@ -1725,4 +1952,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'wireguard', 'interface_descriptions', 'app_access']

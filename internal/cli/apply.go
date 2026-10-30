@@ -21,6 +21,7 @@ func (a *app) appliers() map[api.Kind]applier {
 		api.KindNetwork:        applyWith(a, networkDesc()),
 		api.KindProject:        applyWith(a, a.projectDesc()),
 		api.KindStorage:        applyWith(a, storageDesc()),
+		api.KindWireGuard:      applyWith(a, wireguardDesc()),
 		api.KindFirewallPolicy: applyWith(a, policyDesc()),
 		api.KindAddressSet:     applyWith(a, addrSetDesc()),
 		api.KindBackupTarget:   applyWith(a, targetDesc()),

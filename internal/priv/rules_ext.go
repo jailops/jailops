@@ -630,7 +630,9 @@ func parseBits(s string, max int) error {
 //
 //	ifconfig bridge create | ifconfig epair create
 //	ifconfig bridgeN name <owned name> | ifconfig epairNa|epairNb name <owned name>
+//	ifconfig -j <jail> <owned iface>
 //	ifconfig -j <jail> <owned iface> up|down
+//	ifconfig -j <jail> <owned iface> description <JailOps description>
 //	ifconfig -j <jail> <owned iface> mtu <n>
 //	ifconfig -j <jail> <owned iface> inet <addr>[/<n>] [prefixlen <n>|netmask <mask>] [up] [alias|-alias]
 //	ifconfig -j <jail> <owned iface> inet6 <addr> [prefixlen <n>] [alias|-alias]
@@ -640,6 +642,12 @@ func customIfconfig(c Config, _ bool, args []string) error {
 		return nil
 	case len(args) == 3 && reIfCreate.MatchString(args[0]) && args[1] == "name":
 		return c.ifOwned(args[2])
+	case len(args) == 3 && args[0] == "-j":
+		// read-only: the state of one interface in the jail's vnet (its description is repaired from it)
+		if err := ValidJailName(args[1]); err != nil {
+			return err
+		}
+		return c.checkJailIface(args[2])
 	case len(args) >= 4 && args[0] == "-j":
 		if err := ValidJailName(args[1]); err != nil {
 			return err
@@ -657,6 +665,8 @@ func checkIfconfigJail(r []string) error {
 	switch {
 	case len(r) == 1 && (r[0] == "up" || r[0] == "down"):
 		return nil
+	case len(r) == 2 && r[0] == "description":
+		return checkIfaceDesc(r[1], false)
 	case len(r) == 2 && r[0] == "mtu":
 		n, err := strconv.Atoi(r[1])
 		if err != nil || !reNumber.MatchString(r[1]) || n < MinMTU || n > MaxMTU {

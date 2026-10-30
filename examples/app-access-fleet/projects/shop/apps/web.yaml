@@ -1,0 +1,10 @@
+apiVersion: jailops/v1
+kind: App
+metadata:
+  name: web
+hosts: [db1]
+spec:
+  app: nginx
+  network: shop
+  storage: default
+  image: freebsd-15@stable

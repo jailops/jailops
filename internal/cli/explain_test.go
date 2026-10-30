@@ -70,7 +70,7 @@ func TestExplainCoversEveryCode(t *testing.T) {
 func TestExitCodesPerAPICode(t *testing.T) {
 	want := map[api.Code]int{
 		api.CodeInvalid: ExitUsage, api.CodeDataLoss: ExitUsage, api.CodeKeyNotEscrowed: ExitUsage, api.CodePlaintextDenied: ExitUsage,
-		api.CodeUnauthorized: ExitAuth, api.CodeForbidden: ExitAuth, api.CodeRateLimited: ExitAuth,
+		api.CodeUnauthorized: ExitAuth, api.CodeForbidden: ExitAuth, api.CodeRateLimited: ExitAuth, api.CodeNotManaged: ExitAuth,
 		api.CodeNotFound:      ExitNotFound,
 		api.CodeAlreadyExists: ExitConflict, api.CodeConflict: ExitConflict, api.CodeBusy: ExitConflict, api.CodeIPConflict: ExitConflict,
 		api.CodeQuotaExceeded: ExitConflict, api.CodeMaintenance: ExitConflict, api.CodeMissingChunks: ExitConflict, api.CodeLeaseExpired: ExitConflict,

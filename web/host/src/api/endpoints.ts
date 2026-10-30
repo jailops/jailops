@@ -10,6 +10,9 @@ import type {
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
   AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
+  HostIdentity, HostIdentityApply, HostChange, HostSnapshot, HostRestore,
+  WireGuard, WireGuardJoin, WireGuardKeys, WireGuardPeerAdd, WireGuardPeerCreated,
+  AppAccess, AppAllow, AppAllowResult, AppDeny, AppDenyResult,
 } from '@jailops/shared/api/types'
 import type { SnapshotBody, ExecSessionInfo, ConfigResult } from '../types'
 import { logQuery, type LogQuery } from '@/lib/logs'
@@ -43,6 +46,21 @@ export const api = {
     /** Extension app_install: async, operator in the project. The project travels in the query like every project request. */
     install: (n: string, b: AppInstall, project: string) => c().mutate<AppInstallResult>('POST', `/apps/${e(n)}/install${project ? `?project=${e(project)}` : ''}`, b),
   },
+  host: {
+    /** Extension host_identity: the values read from the host and the management state (readable when not managed). */
+    identity: () => c().get<HostIdentity>('/host/identity'),
+    /** Global admin. With dry_run the reply is the diff and the actions, and nothing changes. */
+    apply: (b: HostIdentityApply) => c().mutate<HostChange>('PUT', '/host/identity', b),
+    snapshots: () => c().list<HostSnapshot>('/host/snapshots'),
+    restore: (name: string, b: HostRestore = {}) => c().mutate<HostChange>('POST', `/host/snapshots/${e(name)}/restore`, b),
+  },
+  appAccess: {
+    /** Extension app_access: who may connect to an installed app (readonly in the project). */
+    get: (n: string) => c().get<AppAccess>(`/jails/${e(n)}/access`),
+    /** Operator in the project; answered at once, not as an operation: a connection string is in this answer only. */
+    allow: (n: string, b: AppAllow) => c().mutate<AppAllowResult>('POST', `/jails/${e(n)}/access`, b),
+    deny: (n: string, b: AppDeny) => c().mutate<AppDenyResult>('POST', `/jails/${e(n)}/access/deny`, b),
+  },
   logs: {
     /** Extension jail_logs: the files below /var/log of the jail (operator in the project). */
     list: (n: string) => c().list<JailLogFile>(`/jails/${e(n)}/logs`),
@@ -60,6 +78,18 @@ export const api = {
     list: () => c().list<Network>('/networks'),
     leases: (n: string) => c().list<Lease>(`/networks/${e(n)}/leases`),
     create: (n: Pick<Network, 'metadata' | 'spec'>) => c().mutate('POST', '/networks', n),
+  },
+  wireguard: {
+    /** Extension wireguard: an operator reads, an admin changes. Keys never come back except in a peer's token, once. */
+    list: () => c().list<WireGuard>('/wireguard'),
+    create: (w: Pick<WireGuard, 'metadata' | 'spec'>) => c().mutate<WireGuard>('POST', '/wireguard', w),
+    remove: (n: string) => c().mutate('DELETE', `/wireguard/${e(n)}`),
+    join: (j: WireGuardJoin) => c().mutate<WireGuard>('POST', '/wireguard/join', j),
+    addPeer: (n: string, p: WireGuardPeerAdd) => c().mutate<WireGuardPeerCreated>('POST', `/wireguard/${e(n)}/peers`, p),
+    removePeer: (n: string, peer: string) => c().mutate<WireGuard>('DELETE', `/wireguard/${e(n)}/peers/${e(peer)}`),
+    up: (n: string) => c().mutate<WireGuard>('POST', `/wireguard/${e(n)}/up`),
+    down: (n: string) => c().mutate<WireGuard>('POST', `/wireguard/${e(n)}/down`),
+    rotateKeys: (n: string) => c().mutate<WireGuardKeys>('POST', `/wireguard/${e(n)}/rotate-keys`),
   },
   firewall: {
     policies: () => c().list<FirewallPolicy>('/firewall/policies'),

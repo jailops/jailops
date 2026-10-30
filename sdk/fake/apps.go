@@ -68,6 +68,7 @@ func (s *Server) seedApps() {
 			SysVIPC:   true,
 			Health:    &api.AppHealth{Exec: []string{"/usr/local/bin/pg_isready", "-U", "postgres"}, WaitSeconds: 60},
 			Resources: api.AppResources{Memory: "1G", Disk: "10G", CPU: "1"},
+			Access:    &api.AppAccessDef{Type: api.AppAccessTypePostgreSQL, Port: "postgres", Service: "postgresql", HBAFile: "/var/db/postgres/data18/pg_hba.conf"},
 			Notes:     "Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql"},
 		{Version: 1, Name: "valkey", Title: "Valkey", Summary: "In-memory key-value store under the BSD license.",
 			Description: "Valkey serves key/value workloads.", Category: api.AppDatabase, Homepage: "https://valkey.io/", License: "BSD-3-Clause",
@@ -397,6 +398,7 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 		if app.Health != nil {
 			step("health-check", "the health check of the definition")
 		}
+		step("close-firewall", "firewall policy app-"+jail+" (managed by app access): deny every inbound connection until jailops app allow "+jail+" from SOURCE")
 		step("snapshot", "snapshot every dataset of "+jail+" as app-installed")
 		res := api.AppInstallResult{App: name, Hash: entry.detail.Hash, Data: app.Data, Config: app.Config, Logs: app.Logs, Notes: app.Notes, Steps: steps, DryRun: req.DryRun}
 		desc := "Install app " + name + " as jail " + jail
@@ -443,6 +445,7 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 				}
 				res.Ports = append(res.Ports, ip)
 			}
+			s.access[jk] = &fakeAccess{closed: true, roles: map[string]bool{}}
 			s.emitIn(rc.project, "app.installed", "/api/v1/jails/"+jail)
 			return res, nil
 		})

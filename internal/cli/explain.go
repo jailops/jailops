@@ -45,6 +45,7 @@ var explanations = []Explanation{
 	{api.CodeMaintenance, "The backup node is read-only or offline for maintenance.", "Retry later; 'jailops backup target list' shows which target is affected."},
 	{api.CodeMissingChunks, "A backup commit refers to chunks the repository does not have.", "Run the backup again so the missing chunks are uploaded; this is normal after an interrupted run."},
 	{api.CodeLeaseExpired, "The backup session timed out or was closed by the node before it finished.", "Run the backup again; a slow link may need a longer session on the node."},
+	{api.CodeNotManaged, "JailOps does not manage this part of the host: jailopsd.yaml or priv.conf does not enable the module.", "Add the lines the hint names and restart both services, or change the host by hand (docs/appliance.md)."},
 	{api.CodePlaintextDenied, "A backup node target would receive unencrypted data and the policy does not allow plaintext.", "Enable backup encryption, or set allow_plaintext on the target if that is intended."},
 }
 

@@ -104,6 +104,9 @@ Setup
 Health
   /usr/local/bin/pg_isready -U postgres exits 0, within 60s
 
+Access
+  postgresql: jailops app allow makes a role and a database per grant and a line in /var/db/postgres/data18/pg_hba.conf (port postgres, service postgresql)
+
 Resources
   memory 1G, disk 10G, cpu 1 (hints, not limits)
 

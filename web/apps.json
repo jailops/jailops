@@ -37,7 +37,9 @@
         "profiles",
         "updates",
         "backup",
-        "apps"
+        "apps",
+        "host",
+        "wireguard"
       ],
       "devPort": 5173,
       "previewPort": 4173,

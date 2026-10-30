@@ -1,0 +1,12 @@
+# WireGuard configuration of laptop, made by JailOps. It holds a private key: keep it secret.
+[Interface]
+PrivateKey = Os7c57qxX1Mv8DuoA6+2ho0mOnRyvyxDdApHZZx+Fas=
+Address = 10.99.0.2/32, fd99::2/128
+DNS = 10.20.0.1
+
+[Peer]
+PublicKey = dYhVk8lyMM22kCFBz7kQhhpwQ0yHemv4AazpATatgsU=
+PresharedKey = NU1c5X/1SaLVzWGll62L8OFl+v0an658KIajS30O0Gw=
+Endpoint = vpn.example.com:51820
+AllowedIPs = 10.99.0.0/24, fd99::/64, 10.20.0.0/24
+PersistentKeepalive = 25

@@ -312,6 +312,9 @@ func Validate(app *api.App) error {
 	if err := validateResources(app.Resources); err != nil {
 		return err
 	}
+	if err := validateAccess(app); err != nil {
+		return err
+	}
 	return text("notes", app.Notes, maxText)
 }
 

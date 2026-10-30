@@ -40,6 +40,7 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 | `network.sysctl` | the three below | the bridge sysctls the daemon sets at run time through the helper and re-asserts: `net.link.bridge.pfil_member: 1` (must stay 1), `pfil_bridge: 0`, `pfil_onlyip: 1`. Never written to `/etc/sysctl.conf` |
 | `projects.network_pool`, `.network_bits`, `.uplink`, `.nat` | none | the IPv4 pool `project create NAME --new-network` carves a `/24` from; without it that option answers `unsupported` |
 | `updates.tick`, `.project_files_dir` | `1m`, `<state_dir>/project-files` | how often update schedules run; where provisioning files live, one directory per project |
+| `host.manage.modules` | `[]` | host management ([appliance.md](appliance.md)): the modules JailOps may change on the host itself. Empty, JailOps never changes the host and the host routes only read. `identity` is the host name, `/etc/resolv.conf`, the jailops block of `/etc/ntp.conf` and `ntpd_enable`. The helper must allow the same module (`host-manage` in `priv.conf`): with only one of the two, changes answer `not_managed`. Unknown modules and duplicates are an error at load |
 | `apps.catalog_dir` | `/usr/local/share/jailops/apps` | the application catalog ([apps.md](apps.md)): one YAML definition per file, installed by the `jailops-apps` package. Read on each request, never fetched; a missing directory is an empty catalog |
 | `apps.local_dir` | `/usr/local/etc/jailops/apps` | the host's own app definitions ([apps.md](apps.md), "Write your own app"): `NAME.yaml` and its icon, read with the catalog on each request; a definition here wins over a packaged one of the same name and is listed with `source: local`. A missing directory is empty; it must be readable by the user `jailops` |
 | `lifecycle.persistent` | the built-in list | the paths of a thin jail that survive a generation switch, each in its own dataset (`dataset`, `path`, `class` system or data, `merge`, `no_seed`). The default is `/etc`, `/usr/local`, `/var/db`, `/var/log`, `/var/mail`, `/var/spool`, `/home`, `/root`. **Setting it replaces the list** |
@@ -64,11 +65,14 @@ This file is the **operator's authority**: everything the root helper will do fo
 | `conf-dir`, `state-dir`, `work-dir`, `mount-base`, `helper-path` | directories; `state-dir` has no default unless `mount-base` is set |
 | `socket`, `group`, `mode`, `allow-user`, `allow-group` | who may talk to the helper: the unix socket, its group and mode (`0660`), and the users and groups it accepts by peer credentials |
 | `if-prefix` | `jo`; the prefix of the interfaces JailOps creates (`jo7`, `jo7ga`, `jo7gb`, epairs) |
+| `wireguard-dir` | `/var/db/jailops-priv/wireguard`; the keys of WireGuard tunnels, one directory per tunnel (root, 0700, created when needed). It must lie outside `state-dir`, `conf-dir`, `work-dir` and `mount-base` ([wireguard.md](wireguard.md)) |
 | `ndp-proxy` | `<uplink>=<prefix>[,<prefix>...]`, one line per uplink, prefixes between /48 and /120. The only thing that lets the IPv6 proxy through. Without it the helper answers `forbidden` with the line to add |
 | `sysctl` | extra sysctls readable through the helper (the built-in list covers `kern.osrelease`, the bridge `pfil_*` switches, forwarding, `hw.ncpu` and a few more) |
 | `admin-raw-param`, `admin-allow-flag`, `admin-devfs-ruleset`, `admin-host-mount`, `admin-zfs-prop`, `admin-routes`, `admin-raw-pf`, `admin-resume-send` | what a global admin may unlock; empty or off by default. **An admin who may set these is root on the host**: keep the lists short |
 | `fetch-host` | the hosts the download rule may fetch from, https only (default `dl-cdn.alpinelinux.org`, `pkg.freebsd.org`) |
 | `image-mirror` | directories `fs.read_file` may read besides the storage roots (a local mirror of image archives) |
+| `host-manage` | empty; the host management modules the helper may change (`identity`). Empty, the host operations only read. The operator's own switch: `host.manage.modules` of `jailopsd.yaml` cannot enable anything the helper does not ([appliance.md](appliance.md)) |
+| `host-dir` | `/var/db/jailops-priv/host`; where the helper keeps the snapshots of host files (the last 20) and the record of what it applied. Created root-owned with mode 0700 and refused otherwise: the daemon can neither read nor change it |
 
 ## backupd.yaml
 

@@ -131,6 +131,15 @@ func init() {
 		func(m api.ObjectMeta, s any) api.Network { return api.Network{Metadata: m, Spec: s.(api.NetworkSpec)} },
 		resCreate(networks), resDelete(networks)))
 
+	// A tunnel's keys are made by the host when the object is created; files carry public parts only.
+	wgs := func(c *sdk.Client) *sdk.Resource[api.WireGuard] { return c.WireGuard().Resource }
+	reg(build(info(api.KindWireGuard), asRes(wgs),
+		func(v *api.WireGuard) *api.ObjectMeta { return &v.Metadata }, func(v *api.WireGuard) any { return v.Spec },
+		func(m api.ObjectMeta, s any) api.WireGuard {
+			return api.WireGuard{Metadata: m, Spec: s.(api.WireGuardSpec)}
+		},
+		resCreate(wgs), resDelete(wgs)))
+
 	pols := func(c *sdk.Client) *sdk.Resource[api.FirewallPolicy] { return c.Firewall().Policies() }
 	reg(build(info(api.KindFirewallPolicy), asRes(pols),
 		func(v *api.FirewallPolicy) *api.ObjectMeta { return &v.Metadata }, func(v *api.FirewallPolicy) any { return v.Spec },

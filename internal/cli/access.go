@@ -484,5 +484,6 @@ configure where this client connects.)`,
 			c.Aliases = append(c.Aliases, "add")
 		}
 	}
+	a.addHostManagement(hc)
 	return hc
 }

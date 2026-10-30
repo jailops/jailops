@@ -166,11 +166,11 @@ func TestNetworkPassCreatesAndConverges(t *testing.T) {
 	}
 	ifs, _ := w.Net.List(bg)
 	br, ok := find(ifs, "jo0")
-	if !ok || !br.Up() || br.Description != "jailops:"+netID || len(br.Inet) != 0 || len(br.Members) != 1 || br.Members[0].Name != "jo0ga" {
+	if !ok || !br.Up() || br.Description != "jailops net=lan bridge" || len(br.Inet) != 0 || len(br.Members) != 1 || br.Members[0].Name != "jo0ga" {
 		t.Fatalf("the bridge carries no address and has the gateway port as its only member: %+v", br)
 	}
 	gw, ok := find(ifs, "jo0gb")
-	if !ok || !gw.Up() || gw.Description != "jailops:"+netID || len(gw.Inet) != 1 || gw.Inet[0].String() != "10.20.0.1/24" {
+	if !ok || !gw.Up() || gw.Description != "jailops net=lan gateway (host side)" || len(gw.Inet) != 1 || gw.Inet[0].String() != "10.20.0.1/24" {
 		t.Fatalf("the gateway addresses are on the l3 end of the gateway pair: %+v", gw)
 	}
 	if ga, ok := find(ifs, "jo0ga"); !ok || !ga.Up() {

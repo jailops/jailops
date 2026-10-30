@@ -19,6 +19,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/service"
+	"jailops.net/jailops/sdk/api"
 )
 
 // DefaultConfigPath is where jailopsd looks for its configuration.
@@ -68,6 +69,19 @@ type Config struct {
 	Updates UpdatesConf `yaml:"updates"`
 	// Apps configures the application catalog (docs/apps.md).
 	Apps AppsConf `yaml:"apps"`
+	// Host configures host management (docs/appliance.md).
+	Host HostConf `yaml:"host"`
+}
+
+// HostConf configures host management: JailOps changes the host itself only for the modules listed here (and in
+// host-manage of priv.conf).
+type HostConf struct {
+	Manage HostManage `yaml:"manage"`
+}
+
+// HostManage lists the modules JailOps manages. Empty (the default): none.
+type HostManage struct {
+	Modules []string `yaml:"modules"`
 }
 
 // AppsConf configures the application catalog: definitions the daemon reads
@@ -462,6 +476,16 @@ func (c Config) finish() (Config, error) {
 		if p.Class != "system" && p.Class != "data" {
 			return c, fmt.Errorf("config: lifecycle.persistent[%d].class must be system or data", i)
 		}
+	}
+	var seenMod []string
+	for _, m := range c.Host.Manage.Modules {
+		if !slices.Contains(api.HostModules, m) {
+			return c, fmt.Errorf("config: host.manage.modules: %q is not a module (known: %s)", m, strings.Join(api.HostModules, ", "))
+		}
+		if slices.Contains(seenMod, m) {
+			return c, fmt.Errorf("config: host.manage.modules lists %q twice", m)
+		}
+		seenMod = append(seenMod, m)
 	}
 	if c.Reconcile.Interval.Std() < time.Second {
 		return c, fmt.Errorf("config: reconcile.interval must be at least 1s")

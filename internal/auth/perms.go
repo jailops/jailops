@@ -102,7 +102,7 @@ func classify(e Entry) Class {
 		return ClassProject
 	case has("/api/v1/trust"), has("/api/v1/users"), has("/api/v1/tokens"), has("/api/v1/certificates"), has("/api/v1/remotes"),
 		has("/api/v1/groups"), has("/api/v1/rollouts"), has("/api/v1/cluster"), has("/api/v1/server"), has("/api/v1/doctor"),
-		has("/api/v1/resources"), has("/api/v1/backup-targets"):
+		has("/api/v1/resources"), has("/api/v1/backup-targets"), has("/api/v1/host"), has("/api/v1/wireguard"):
 		return ClassGlobal
 	}
 	panic("auth: no route class for " + e.Key())
@@ -236,6 +236,11 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/jails/{name}/logs/{file...}", op),
 	// a definition drafted from a running jail: it runs read-only commands in the jail, like exec
 	r("GET", "/api/v1/jails/{name}/app-draft", op),
+	// who may connect to an installed app: reading it is readonly; allow and deny change the jail's firewall and,
+	// for a database, roles in it, as an installation does (operator)
+	r("GET", "/api/v1/jails/{name}/access", ro),
+	r("POST", "/api/v1/jails/{name}/access", op),
+	r("POST", "/api/v1/jails/{name}/access/deny", op),
 	r("GET", "/api/v1/jails/{name}/files/{path...}", op),
 	r("PUT", "/api/v1/jails/{name}/files/{path...}", op),
 	r("POST", "/api/v1/jails/{name}/upgrade", op),
@@ -264,6 +269,21 @@ var Perms = classifyAll([]Entry{
 	r("PATCH", "/api/v1/networks/{name}", ad),
 	r("DELETE", "/api/v1/networks/{name}", ad),
 	r("GET", "/api/v1/networks/{name}/leases", ro),
+
+	// WireGuard tunnels: an operator reads their state (public keys, peers, handshakes; never a secret), an admin
+	// changes them.
+	r("GET", "/api/v1/wireguard", op),
+	r("POST", "/api/v1/wireguard", ad),
+	r("POST", "/api/v1/wireguard/join", ad),
+	r("GET", "/api/v1/wireguard/{name}", op),
+	r("PUT", "/api/v1/wireguard/{name}", ad),
+	r("PATCH", "/api/v1/wireguard/{name}", ad),
+	r("DELETE", "/api/v1/wireguard/{name}", ad),
+	r("POST", "/api/v1/wireguard/{name}/peers", ad),
+	r("DELETE", "/api/v1/wireguard/{name}/peers/{peer}", ad),
+	r("POST", "/api/v1/wireguard/{name}/up", ad),
+	r("POST", "/api/v1/wireguard/{name}/down", ad),
+	r("POST", "/api/v1/wireguard/{name}/rotate-keys", ad),
 	r("GET", "/api/v1/firewall/policies", ro),
 	r("POST", "/api/v1/firewall/policies", ad),
 	r("GET", "/api/v1/firewall/policies/{name}", ro),
@@ -298,6 +318,11 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/backups/{id}/restore-preflight", api.PermRestore),
 	r("POST", "/api/v1/backups/{id}/restore", api.PermRestore),
 	r("POST", "/api/v1/restores", api.PermRestore),
+	// Host management (docs/appliance.md): reading is harmless, changing the host needs an admin.
+	r("GET", "/api/v1/host/identity", ro),
+	r("PUT", "/api/v1/host/identity", ad),
+	r("GET", "/api/v1/host/snapshots", ro),
+	r("POST", "/api/v1/host/snapshots/{name}/restore", ad),
 	r("GET", "/api/v1/backup/key", ad),
 	r("POST", "/api/v1/backup/key", ad),
 	r("POST", "/api/v1/backup/key/escrow", ad),

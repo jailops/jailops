@@ -372,6 +372,9 @@ func TestIfconfigRules(t *testing.T) {
 	r.ok(t, "ifconfig", "epair3b", "name", i+"b")
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "up")
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "down")
+	r.ok(t, "ifconfig", "-j", "shop_web", i)
+	r.ok(t, "ifconfig", "-j", "shop_web", i, "description", "jailops jail=shop/web net=lan (jail side)")
+	r.ok(t, "ifconfig", "-j", "shop_web", i, "description", "jailops:0b0e7f3e-5c4b-4f6e-9d3e-111111111111")
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "mtu", "1400")
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "inet", "10.20.0.12/24", "up")
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "inet", "10.20.0.12", "prefixlen", "24")
@@ -385,7 +388,10 @@ func TestIfconfigRules(t *testing.T) {
 		{"bridge0", "name", "jo"}, {"bridge0", "name", "-x"}, {"bridge0", "name", "jo0", "extra"}, {"em0", "name", "jo0"}, {"bridge", "name", "jo0"}, {"epair3", "name", "jo0"}, {"epair3c", "name", "jo0"},
 		{"bridge0", "addm", "em0"}, {"em0", "up"}, {"em0", "inet", "10.0.0.1/24"}, {"-a"}, {"-l"}, {}, {"jo0", "mtu", "1400"}, {"jo0", "up"},
 		// -j forms
-		{"-j", "ghost", i, "up"}, {"-j", "shop_web", "em0", "up"}, {"-j", "shop_web", "lo0", "up"}, {"-j", "shop_web", "-x", "up"}, {"-j", "shop_web", i}, {"-j", "shop_web", i, "destroy"},
+		{"-j", "ghost", i, "up"}, {"-j", "shop_web", "em0", "up"}, {"-j", "shop_web", "lo0", "up"}, {"-j", "shop_web", "-x", "up"}, {"-j", "shop_web", i, "destroy"},
+		{"-j", "shop_web", "em0"}, {"-j", "ghost", i}, {"-j", "shop_web", i, "description"}, {"-j", "shop_web", i, "description", ""},
+		{"-j", "shop_web", i, "description", "my text"}, {"-j", "shop_web", i, "description", "jailops a;b"}, {"-j", "shop_web", i, "description", "jailops a\nb"},
+		{"-j", "shop_web", i, "description", "jailops " + strings.Repeat("x", 60)}, {"-j", "shop_web", i, "description", "jailops ok", "up"}, {"-j", "shop_web", i, "-description"},
 		{"-j", "shop_web", i, "mtu", "100"}, {"-j", "shop_web", i, "mtu", "99999"}, {"-j", "shop_web", i, "mtu", "x"}, {"-j", "shop_web", i, "mtu"}, {"-j", "shop_web", i, "up", "down"},
 		{"-j", "shop_web", i, "vnet", "x"}, {"-j", "shop_web", i, "-vnet", "x"}, {"-j", "shop_web", i, "ether", "00:00:00:00:00:01"}, {"-j", "shop_web", i, "name", "jo9"},
 		{"-j", "shop_web", i, "inet", "10.20.0.12/33"}, {"-j", "shop_web", i, "inet", "10.20.0.12/-1"}, {"-j", "shop_web", i, "inet", "fd00::1/64"}, {"-j", "shop_web", i, "inet", "x"},

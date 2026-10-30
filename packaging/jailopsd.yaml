@@ -81,6 +81,13 @@ apps:
   # catalog_dir: /usr/local/share/jailops/apps
   # local_dir: /usr/local/etc/jailops/apps
 
+# Host management (appliance mode, docs/appliance.md): the parts of the host JailOps itself changes. Empty (the
+# default): JailOps never changes the host, and GET /api/v1/host/identity only reads. "identity" is the host name, the
+# resolvers and NTP; priv.conf must list it too (host-manage = identity).
+host:
+  manage:
+    modules: []
+
 # The paths of a thin jail that survive a switch to a newer image generation, each in its own dataset. Empty keeps the
 # built-in list (/etc, /usr/local, /var/db, /var/log, /var/mail, /var/spool, /home, /root). Setting it replaces the list.
 lifecycle:

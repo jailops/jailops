@@ -432,3 +432,59 @@ func TestARolloutNamesItsProject(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+// Apps and their grants belong to a project and one host, and an app is its
+// own jail: a Jail of the same name is an error.
+func TestAppDocuments(t *testing.T) {
+	appDoc := func(kind, name, hosts, spec string) string {
+		return "apiVersion: jailops/v1\nkind: " + kind + "\nmetadata:\n  name: " + name + "\nhosts: " + hosts + "\nspec:\n" + spec
+	}
+	d := base(t)
+	project(t, d, "shop", "[a, b]", "  networks: [{network: lan}]\n  storage: [{storage: default}]\n")
+	write(t, d, "shared/networks/lan.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: lan\nspec:\n  ipv4: {subnet: 10.70.0.0/24, gateway: 10.70.0.1, range: 10.70.0.10-10.70.0.250}\n")
+	write(t, d, "projects/shop/apps/db.yaml", appDoc("App", "db", "[a]", "  app: postgresql\n  network: lan\n"))
+	write(t, d, "projects/shop/app-access/db.yaml", appDoc("AppAccess", "db", "[a]", "  grants:\n    - {source: \"@web\", database: shop}\n"))
+	f, err := Load(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Check(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(f.Warnings, "\n"), "source @web is neither a jail") {
+		t.Fatalf("warnings %v", f.Warnings)
+	}
+	if objs := f.ObjectsFor("a"); objs[len(objs)-1].Kind != "AppAccess" {
+		t.Fatalf("an AppAccess is not ordered last: %v", objs[len(objs)-1].Kind)
+	}
+
+	for name, c := range map[string]struct{ rel, doc, want string }{
+		"two hosts":   {"projects/shop/apps/db.yaml", appDoc("App", "db", "[a, b]", "  app: postgresql\n"), "exactly one named host"},
+		"bad source":  {"projects/shop/app-access/db.yaml", appDoc("AppAccess", "db", "[a]", "  grants:\n    - {source: everyone}\n"), "is not an address"},
+		"unknown key": {"projects/shop/apps/db.yaml", appDoc("App", "db", "[a]", "  app: postgresql\n  rotate: true\n"), "unknown field"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			d := base(t)
+			project(t, d, "shop", "[a, b]", "")
+			write(t, d, c.rel, c.doc)
+			if _, err := Load(d); err == nil || !strings.Contains(err.Error(), c.want) {
+				t.Fatalf("%v, want %q", err, c.want)
+			}
+		})
+	}
+	// outside a project
+	d2 := base(t)
+	write(t, d2, "hosts/a/apps/db.yaml", appDoc("App", "db", "[a]", "  app: postgresql\n"))
+	if _, err := Load(d2); err == nil || !strings.Contains(err.Error(), "belongs to a project") {
+		t.Fatalf("%v", err)
+	}
+	// an App and a Jail of the same name
+	write(t, d, "projects/shop/jails/db.yaml", "apiVersion: jailops/v1\nkind: Jail\nmetadata:\n  name: db\nhosts: [a]\nspec:\n  image: x\n  storage: default\n  network: [{network: lan}]\n")
+	f, err = Load(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.Check(); err == nil || !strings.Contains(err.Error(), "an app is installed as its own jail") {
+		t.Fatalf("%v", err)
+	}
+}

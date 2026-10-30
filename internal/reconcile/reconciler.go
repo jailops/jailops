@@ -18,6 +18,7 @@ import (
 	"jailops.net/jailops/internal/sys/jailos"
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/run"
+	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -54,6 +55,8 @@ type Env struct {
 	HostNeighbors func(ctx context.Context) ([]ifconfig.Neighbor, error)
 	// Trigger is an optional extra trigger (state watch events).
 	Trigger <-chan struct{}
+	// WG configures WireGuard interfaces (optional: without it tunnels are reported as not applied).
+	WG wireguard.Host
 }
 
 // Report summarises one pass; tests and `doctor` read it.
@@ -89,6 +92,8 @@ type Reconciler struct {
 	proxies  map[string]*proxyHandle
 	// setSysctl records the sysctls this daemon changed, for Release.
 	setSysctl map[string]bool
+	// jailSideOK maps a jail to the JID whose jail-side descriptions were found right (checked once per start).
+	jailSideOK map[string]int
 }
 
 // New builds a Reconciler.
@@ -106,7 +111,8 @@ func New(cfg Config, env Env) *Reconciler {
 		env.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	return &Reconciler{cfg: cfg, env: env, log: env.Log, kick: make(chan struct{}, 1),
-		bootCond: map[string]api.Condition{}, proxies: map[string]*proxyHandle{}, setSysctl: map[string]bool{}}
+		bootCond: map[string]api.Condition{}, proxies: map[string]*proxyHandle{}, setSysctl: map[string]bool{},
+		jailSideOK: map[string]int{}}
 }
 
 // Kick asks for a pass soon. It never blocks.
@@ -205,6 +211,7 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 		r.bootDone = true
 	}
 	r.proxyPass(ctx, des, obs, netStatus, &rep, now)
+	r.wireguardPass(ctx, des, &rep)
 	for _, n := range des.Networks {
 		if st := netStatus[n.Name]; st != nil && r.env.Sink != nil {
 			r.env.Sink.NetworkStatus(n.Name, *st)
@@ -238,7 +245,7 @@ func (r *Reconciler) networkPass(ctx context.Context, n NetworkDesired, obs *Obs
 	}
 	gwMember, gwL3, _ := ipam.GatewayNames(n.Bridge)
 	for _, name := range []string{n.Bridge, gwMember, gwL3} {
-		if i, ok := obs.Ifaces[name]; ok && name != "" && !owned(i, n.ID) {
+		if i, ok := obs.Ifaces[name]; ok && name != "" && !ownedBy(i, n.ID, n.Steps) {
 			if i.Description == "" || !ours(i) {
 				return fail("ForeignBridge", fmt.Sprintf("interface %s exists and is not managed by JailOps; it is left untouched", name))
 			}
@@ -277,7 +284,7 @@ func (r *Reconciler) networkPass(ctx context.Context, n NetworkDesired, obs *Obs
 	// gateway's pf rules).
 	for _, name := range []string{n.Bridge, gwL3} {
 		i, ok := obs.Ifaces[name]
-		if !ok || !owned(i, n.ID) {
+		if !ok || !ownedBy(i, n.ID, n.Steps) {
 			continue
 		}
 		want := map[netip.Prefix]bool{}
@@ -382,6 +389,7 @@ func (r *Reconciler) jailPass(ctx context.Context, j JailDesired, obs *Observed,
 		}
 		_ = i
 	}
+	drift = append(drift, r.jailSidePass(ctx, j, obs, ex, rep)...)
 	// Firewall anchor, and the parent anchors that lead to it.
 	if j.Ruleset != "" && r.env.PF != nil {
 		for _, an := range sortedAnchors(j.ParentAnchors) {
@@ -422,6 +430,115 @@ func (r *Reconciler) jailPass(ctx context.Context, j JailDesired, obs *Observed,
 			cond(CondDrift, false, "Drift", strings.Join(drift, "; "), now)}
 	}
 	return []api.Condition{cond(CondReady, true, "Running", "the jail is running", now), cond(CondDrift, true, "InSync", "rendered and live state agree", now)}
+}
+
+// jailSidePass checks the description of every jail end of a running jail from the host (ifconfig -j <jail> <if>)
+// and sets the wanted one where it is missing or different. The jail ends are the jail's own (their names derive
+// from its id), so nothing foreign is touched. Once all are right for a JID, the jail is not asked again until it is
+// started anew.
+func (r *Reconciler) jailSidePass(ctx context.Context, j JailDesired, obs *Observed, ex *NetExec, rep *Report) []string {
+	rj, up := obs.Running[j.Name]
+	if !up || len(j.JailSide) == 0 || r.env.Run == nil {
+		return nil
+	}
+	r.mu.Lock()
+	done := r.jailSideOK[j.Name] == rj.JID && rj.JID != 0
+	r.mu.Unlock()
+	if done {
+		return nil
+	}
+	var drift []string
+	ok := true
+	for _, s := range j.JailSide {
+		if s.Op != render.OpSetDescription || s.Phase != render.PhaseJail {
+			continue
+		}
+		res, err := r.env.Run.Run(ctx, jailIfaceRead(j.Name, s.Iface))
+		if err != nil {
+			ok = false // the interface may still be moving into the jail; try again next pass
+			continue
+		}
+		ifs := ifconfig.ParseIfconfig(string(res.Stdout))
+		if len(ifs) == 1 && ifs[0].Description == s.Arg {
+			continue
+		}
+		unlock, err := r.env.Actions.TryLock("reconcile "+j.Name, "jail/"+j.Name)
+		if err != nil {
+			ok = false
+			continue
+		}
+		if err := ex.Exec(ctx, s, j.Name); err != nil {
+			drift = append(drift, fmt.Sprintf("%s: %v", s.Describe(), err))
+			ok = false
+		} else {
+			rep.Applied = append(rep.Applied, s.Describe())
+		}
+		unlock()
+	}
+	if ok {
+		r.mu.Lock()
+		r.jailSideOK[j.Name] = rj.JID
+		r.mu.Unlock()
+	}
+	return drift
+}
+
+// jailIfaceRead is the read of one interface inside a jail's vnet.
+func jailIfaceRead(jail, iface string) run.Cmd {
+	return run.Cmd{Name: "ifconfig", Args: []string{"-j", jail, iface}, Timeout: 20 * time.Second}
+}
+
+// wireguardPass keeps every tunnel applied: the helper creates a missing interface (after a reboot), repairs its
+// description, addresses and configuration, and changes nothing that matches. A tunnel that is down has no
+// interface. The pf anchor of a server is loaded when it differs.
+func (r *Reconciler) wireguardPass(ctx context.Context, des Desired, rep *Report) {
+	for _, w := range des.WireGuard {
+		key := "wireguard/" + w.Name
+		if w.Problem != "" {
+			rep.Failures[key] = w.Problem
+			continue
+		}
+		if r.env.WG == nil {
+			rep.Failures[key] = "no WireGuard support (helper) in this daemon"
+			continue
+		}
+		unlock, err := r.env.Actions.TryLock("reconcile "+w.Name, key)
+		if err != nil {
+			continue // an operation is changing it
+		}
+		if w.Down {
+			if err := r.env.WG.WGRemove(ctx, wireguard.RemoveReq{Name: w.Name, Iface: w.Iface}); err != nil {
+				rep.Failures[key] = err.Error()
+			}
+			unlock()
+			continue
+		}
+		res, err := r.env.WG.WGApply(ctx, w.Apply)
+		if err != nil {
+			rep.Failures[key] = err.Error()
+			unlock()
+			continue
+		}
+		for _, c := range res.Changed {
+			rep.Applied = append(rep.Applied, "wireguard "+w.Name+": "+c)
+		}
+		if r.env.PF != nil {
+			if w.Ruleset != "" {
+				if d := r.anchorDrift(ctx, JailDesired{AnchorName: w.Anchor, Ruleset: w.Ruleset}); d != "" {
+					if err := r.loadAnchor(ctx, w.Anchor, w.Ruleset); err != nil {
+						rep.Failures[key] = fmt.Sprintf("anchor %s: %v", w.Anchor, err)
+					} else {
+						rep.Applied = append(rep.Applied, "pfctl -a "+w.Anchor+" -f <rendered>")
+					}
+				}
+			} else if live, err := r.env.PF.Read(ctx, w.Anchor); err == nil && len(pfctl.RuleLines(live)) > 0 {
+				if err := r.env.PF.Flush(ctx, w.Anchor); err == nil {
+					rep.Applied = append(rep.Applied, "pfctl -a "+w.Anchor+" -F all")
+				}
+			}
+		}
+		unlock()
+	}
 }
 
 // verifyLoaded reads the anchor back (pfctl -a <anchor> -sr) after a load and
@@ -513,13 +630,29 @@ func (r *Reconciler) orphanPass(ctx context.Context, des Desired, obs *Observed,
 	for _, n := range des.Networks {
 		bridgeNet[n.Bridge] = n.Name
 	}
+	// An epair is a jail's when its name carries the jail's prefix (ipam.EpairNames); the description says only
+	// that it is JailOps's (either format).
+	byBase := map[string]JailDesired{}
+	for _, j := range des.Jails {
+		if h, _, err := ipam.EpairNames(j.ID, 0); err == nil {
+			byBase[h[:len(h)-3]] = j
+		}
+	}
+	gateways := map[string]bool{}
+	for _, n := range des.Networks {
+		if gm, gl3, err := ipam.GatewayNames(n.Bridge); err == nil {
+			gateways[gm], gateways[gl3] = true, true
+		}
+	}
 	for _, name := range sortedIfaces(obs) {
 		i := obs.Ifaces[name]
-		if !ipam.IsEpairName(name) || !ours(i) || !strings.HasSuffix(name, "a") {
+		if !ipam.IsEpairName(name) || !ours(i) || !strings.HasSuffix(name, "a") || gateways[name] {
 			continue
 		}
-		id := strings.TrimPrefix(i.Description, "jailops:")
-		j, known := byID[id]
+		j, known := byBase[name[:len(name)-3]]
+		if id, legacy := strings.CutPrefix(i.Description, "jailops:"); legacy {
+			j, known = byID[id]
+		}
 		orphan := !known
 		if known {
 			if _, up := obs.Running[j.Name]; !up && !r.env.Actions.IsLocked("jail/"+j.Name) {

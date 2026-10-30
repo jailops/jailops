@@ -39,6 +39,7 @@ const (
 	CodeMaintenance     Code = "maintenance"      // the backup node is read-only or offline (HTTP 503); retry later
 	CodeMissingChunks   Code = "missing_chunks"   // a commit references chunks the repository lacks (HTTP 409); upload them and retry
 	CodeLeaseExpired    Code = "lease_expired"    // the backup session timed out or was closed (HTTP 410)
+	CodeNotManaged      Code = "not_managed"      // a host management module is not enabled (HTTP 403); the hint names the lines to add
 )
 
 // Error is the error body of the API and the error type of the SDK.
@@ -105,7 +106,7 @@ func (c Code) HTTPStatus() int {
 		return http.StatusPreconditionFailed
 	case CodeUnauthorized:
 		return http.StatusUnauthorized
-	case CodeForbidden:
+	case CodeForbidden, CodeNotManaged:
 		return http.StatusForbidden
 	case CodeUnsupported, CodeUnverified:
 		return http.StatusNotImplemented

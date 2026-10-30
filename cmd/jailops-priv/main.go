@@ -89,6 +89,7 @@ type options struct {
 	stateDir    string
 	workDir     string
 	helperPath  string
+	wgDir       string
 	ifPrefix    list
 	allowUser   list
 	allowGroup  list
@@ -96,6 +97,8 @@ type options struct {
 	sysctl      list
 	fetchHost   list
 	mirror      list
+	hostManage  list
+	hostDir     string
 
 	adminRawParam list
 	adminAllow    list
@@ -131,6 +134,7 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.StringVar(&o.workDir, "work-dir", "", "daemon scratch directory for image builds (optional)")
 	fs.StringVar(&o.stateDir, "state-dir", "", "state directory (default <mount-base>/state)")
 	fs.StringVar(&o.helperPath, "helper-path", priv.DefaultHelperPath, "path jail.conf hooks call")
+	fs.StringVar(&o.wgDir, "wireguard-dir", priv.DefaultWireGuardDir, "directory of the WireGuard keys (root only, mode 0700; outside the daemon's directories)")
 	fs.Var(&o.ifPrefix, "if-prefix", "interface name prefix owned by JailOps (default jo)")
 	fs.Var(&o.allowUser, "allow-user", "user allowed to connect (jailopsd's user)")
 	fs.Var(&o.allowGroup, "allow-group", "group allowed to connect")
@@ -138,6 +142,8 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.Var(&o.sysctl, "sysctl", "extra sysctl name readable through the helper")
 	fs.Var(&o.fetchHost, "fetch-host", "host fetch may download from over https (default dl-cdn.alpinelinux.org and pkg.freebsd.org)")
 	fs.Var(&o.mirror, "image-mirror", "directory fs.read_file may read (a local mirror of image archives)")
+	fs.Var(&o.hostManage, "host-manage", "host management module the helper may change (identity); empty: the host is only read (docs/appliance.md)")
+	fs.StringVar(&o.hostDir, "host-dir", priv.DefaultHostDir, "root-owned directory of the host snapshots and the applied record")
 	fs.Var(&o.adminRawParam, "admin-raw-param", "jail.conf parameter an admin may set")
 	fs.Var(&o.adminAllow, "admin-allow-flag", "allow.* flag an admin may set (without prefix)")
 	fs.Var(&o.adminDevfs, "admin-devfs-ruleset", "devfs ruleset number an admin may use")
@@ -184,8 +190,9 @@ func (o *options) privConfig() priv.Config {
 	c := priv.Config{
 		StorageRoots: append([]string(nil), o.storage...), StorageFile: o.storageFile, AllowPoolRoot: o.poolRoot,
 		IfPrefixes: o.ifPrefix, MountBase: o.mountBase,
-		ConfDir: o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath,
+		ConfDir: o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir,
 		NDPProxy: o.ndpProxy, Sysctls: o.sysctl, FetchHosts: o.fetchHost, ImageMirrors: o.mirror,
+		HostManage: o.hostManage, HostDir: o.hostDir,
 		Admin: priv.AdminPolicy{
 			RawJailParams: o.adminRawParam, AllowFlags: o.adminAllow, HostMountRoots: o.adminMounts,
 			ZFSProps: o.adminZFSProp, Routes: o.adminRoutes, RawPF: o.adminRawPF, ResumeSend: o.adminResume,
@@ -568,6 +575,11 @@ func checkConfig(o *options, cfg priv.Config, stdout, stderr io.Writer) int {
 	w("fetch hosts:    %s\n", strings.Join(c.EffectiveFetchHosts(), ", "))
 	w("image mirrors:  %s\n", strings.Join(c.ImageMirrors, ", "))
 	w("readable files: %s\n", strings.Join(priv.ReadOnlyFiles, ", "))
+	if len(c.HostManage) == 0 {
+		w("host manage:    none (the host is only read)\n")
+	} else {
+		w("host manage:    %s (snapshots in %s)\n", strings.Join(c.HostManage, ", "), c.HostDir)
+	}
 	w("kernel modules: %s\n", strings.Join(priv.KldModules, ", "))
 	var reads, writes []string
 	reads = append(append(reads, priv.DefaultSysctls...), c.Sysctls...)

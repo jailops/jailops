@@ -257,7 +257,7 @@ func (g netGuard) SetDescription(ctx context.Context, iface, desc string) error 
 	if err := g.owned(iface); err != nil {
 		return err
 	}
-	if err := ifconfig.ValidateDescription(desc); err != nil {
+	if err := checkIfaceDesc(desc, true); err != nil {
 		return err
 	}
 	return g.l.d.Net.SetDescription(ctx, iface, desc)

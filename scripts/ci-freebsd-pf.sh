@@ -10,7 +10,8 @@
 #
 # Every line is a probe with an expected outcome: "allow" (the connection or packet arrives) or "deny" (it does not).
 # A probe that gives the wrong answer is a FAIL; the script goes on and exits non-zero at the end if any failed.
-# It creates and removes its own projects (pfa, pfb), networks, jails, policies and address sets.
+# It creates and removes its own projects (pfa, pfb), networks, jails, policies and address sets, and for the port
+# forward of phase 11 an epair pair (pfupa, pfupb) and a plain VNET jail (pfrdr) that stands for a machine on the uplink.
 set -u
 
 J=${JAILOPS:-/usr/local/bin/jailops}
@@ -78,12 +79,14 @@ retry() { # retry TRIES COMMAND...: stop at the first success (a stopping jail n
 	return 1
 }
 remove_all() {
+	jail -r pfrdr >/dev/null 2>&1
+	ifconfig pfupa destroy >/dev/null 2>&1
 	for f in "${TMPDIR:-/tmp}"/jailops-pf.*/h4.pid "${TMPDIR:-/tmp}"/jailops-pf.*/h6.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null; done
 	pkill -x nc 2>/dev/null
-	for pn in pfa:a pfa:b pfa:c pfa:d pfb:o; do
+	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfb:o; do
 		$J stop "${pn#*:}" --project "${pn%%:*}" </dev/null >/dev/null 2>&1
 	done
-	for pn in pfa:a pfa:b pfa:c pfa:d pfb:o; do
+	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfb:o; do
 		retry 6 $J delete -y "${pn#*:}" --project "${pn%%:*}" </dev/null
 	done
 	for p in pfa pfb; do
@@ -96,7 +99,7 @@ remove_all() {
 		done
 		retry 3 $J project delete -y $p </dev/null
 	done
-	for n in pfa-net pfa-net2 pfb-net; do retry 3 $J network delete -y $n </dev/null; done
+	for n in pfa-net pfa-net2 pfa-up pfb-net; do retry 3 $J network delete -y $n </dev/null; done
 }
 
 policy() { # policy PROJECT NAME YAML-BODY: create or replace
@@ -116,7 +119,7 @@ EOF
 # The reconciler loads anchors on its own schedule. settle waits until the anchors have changed after the action that
 # came before it and have then stopped changing, and says how long that took (the time is a measurement of the product,
 # not a pause that has to be long enough).
-snapshot() { for a in jailops/pfa/a jailops/pfa/b jailops/pfa/c jailops/pfb/o jailops/pfa/d jailops/net.pfa-net; do pfctl -a "$a" -sr 2>/dev/null; pfctl -a "$a" -sn 2>/dev/null; done | cksum; }
+snapshot() { for a in jailops/pfa/a jailops/pfa/b jailops/pfa/c jailops/pfb/o jailops/pfa/d jailops/pfa/r jailops/net.pfa-net; do pfctl -a "$a" -sr 2>/dev/null; pfctl -a "$a" -sn 2>/dev/null; done | cksum; }
 PRE=$(snapshot)
 settle() {
 	t=0; cur=$(snapshot)
@@ -591,5 +594,42 @@ if [ -z "${PF_FAST:-}" ]; then
 	expect deny "host -> a v6 icmp after two minutes (no rule)" icmp host "$A6"
 	expect deny "b -> a v6 tcp 2222 after two minutes" tcp pfa:b "$A6" 2222
 fi
+say "phase 11: a port forward (a redirect rule of a policy) brings a connection that arrives on the uplink into the jail"
+# A redirect is rendered as "rdr on <uplink> ... to (<uplink>) port H -> <jail> port J" and applies only to packets that
+# arrive on the uplink. The host cannot test it against itself: what it sends to its own address never arrives on an
+# interface. So the uplink of this network is one end of an epair (pfupa, 198.51.100.1/24) whose other end (pfupb,
+# 198.51.100.2/24) is moved into a plain VNET jail (pfrdr, not a JailOps jail) that stands for a client on the
+# uplink's network: its packets to 198.51.100.1 arrive on the uplink exactly as a remote client's would. What this does
+# not cover is a physical uplink with a real remote machine (the NIC, the provider's network); the rule and the anchor
+# path (rdr-anchor "jailops/*", the project anchor, the jail anchor) are the same.
+PRE=$(snapshot)
+ep=$(ifconfig epair create 2>/dev/null) || die "epair create"
+ifconfig "$ep" name pfupa >/dev/null || die "rename $ep"
+ifconfig "${ep%a}b" name pfupb >/dev/null || die "rename ${ep%a}b"
+ifconfig pfupa inet 198.51.100.1/24 up || die "address on pfupa"
+jail -c name=pfrdr persist vnet vnet.interface=pfupb path=/ host.hostname=pfrdr >/dev/null || die "vnet jail pfrdr"
+jexec pfrdr ifconfig pfupb inet 198.51.100.2/24 up || die "address in pfrdr"
+jexec pfrdr ifconfig lo0 up >/dev/null 2>&1
+$J network create pfa-up --bridge jo24 --ipv4 10.94.0.1/24 --uplink pfupa </dev/null >/dev/null || die "network pfa-up"
+$J project set pfa --network pfa-net --network pfa-net2 --network pfa-up --storage default </dev/null >/dev/null || die "grant pfa-up"
+$J create r --project pfa --image freebsd@stable --network pfa-up --storage default </dev/null >/dev/null || die "create r"
+policy pfa fwd "default_in: deny
+default_out: allow
+rules:
+  - {name: forward-18080, action: allow, direction: in, proto: tcp, redirect: {host_port: 18080, jail_port: 8080}}"
+$J config set r firewall.policy fwd --project pfa </dev/null >/dev/null || die "attach fwd"
+$J start r --project pfa </dev/null >/dev/null || die "start r"
+t=0; until jx pfa r true >/dev/null 2>&1; do t=$((t + 1)); [ $t -gt 60 ] && break; sleep 1; done
+R4=$(addr4 pfa r)
+[ -n "$R4" ] || die "r has no address"
+jx pfa r daemon -f nc -k -l "$R4" 8080 || die "nc server in r"
+settle 10
+fwd_has() { pfctl -a jailops/pfa/r -sn 2>/dev/null | grep -q "$1"; }
+expect allow "r's anchor carries the redirect on the uplink" fwd_has "rdr on pfupa inet proto tcp .* port = 18080 -> $R4 port 8080"
+expect allow "a client on the uplink reaches r through the forwarded port 18080" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 18080"
+expect deny "a client on the uplink does not reach a port that is not forwarded (18081)" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 18081"
+jail -r pfrdr >/dev/null 2>&1
+ifconfig pfupa destroy >/dev/null 2>&1
+
 cleanup
 [ "$fails" -eq 0 ]

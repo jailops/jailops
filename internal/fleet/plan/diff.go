@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 
@@ -173,6 +174,23 @@ func dangers(kind api.Kind, live, want any) []string {
 		if l.IPv6 != nil && w.IPv6 != nil && l.IPv6.Subnet != w.IPv6.Subnet {
 			out = append(out, fmt.Sprintf("ipv6 subnet changes from %s to %s (renumbers jails)", l.IPv6.Subnet, w.IPv6.Subnet))
 		}
+	case api.KindWireGuard:
+		l := live.(api.WireGuardSpec)
+		if del {
+			return []string{"deleting a WireGuard tunnel removes its interface and its keys: every peer must be enrolled again"}
+		}
+		w := want.(api.WireGuardSpec)
+		for _, p := range l.Peers {
+			if !hasPeer(w, p.PublicKey) {
+				out = append(out, fmt.Sprintf("peer %q (%s) would be removed from the tunnel", p.Name, p.PublicKey))
+			}
+		}
+		if w.ListenPort != 0 && l.ListenPort != 0 && w.ListenPort != l.ListenPort {
+			out = append(out, fmt.Sprintf("listen port changes from %d to %d (every peer's endpoint changes)", l.ListenPort, w.ListenPort))
+		}
+		if len(w.Address) > 0 && !slices.Equal(w.Address, l.Address) {
+			out = append(out, fmt.Sprintf("tunnel address changes from %v to %v", l.Address, w.Address))
+		}
 	case api.KindProject:
 		l := live.(api.ProjectSpec)
 		if del {
@@ -239,6 +257,15 @@ func imageBase(ref string) string {
 func hasNetworkGrant(p api.ProjectSpec, n string) bool {
 	for _, g := range p.Networks {
 		if g.Network == n || g.Network == "*" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasPeer(w api.WireGuardSpec, key string) bool {
+	for _, p := range w.Peers {
+		if p.PublicKey == key {
 			return true
 		}
 	}

@@ -1,0 +1,8 @@
+apiVersion: jailops/v1
+kind: Host
+metadata:
+  name: db1
+spec:
+  url: https://db1.example.com:8443
+  # Hex SHA-256 of the host's certificate (`jailopsd` prints it at start; a placeholder here).
+  fingerprint: 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff

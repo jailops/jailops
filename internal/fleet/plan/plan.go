@@ -246,6 +246,7 @@ func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
 	}
 
 	var work, deletes []Item
+	installed := appJails(s.Fleet, host)
 	for _, ki := range model.Kinds {
 		var want []*config.Object
 		for _, o := range s.Fleet.ObjectsFor(host) {
@@ -283,6 +284,9 @@ func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
 		})
 		for _, k := range keys {
 			l := live[k]
+			if installed[k] {
+				continue // declared as an App: its own item says what it is
+			}
 			if isBuiltin(k) && l.Meta.ManagedBy != me {
 				// The daemon creates the storage named "default" at its
 				// first start. They belong to the host: sync neither claims
@@ -301,7 +305,9 @@ func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
 			deletes = append(deletes, it)
 		}
 	}
-	items = append(items, work...)
+	appWork, appDeletes := planApps(ctx, s, c, host, live)
+	items = append(append(items, work...), appWork...)
+	deletes = append(deletes, appDeletes...)
 	protectProjects(deletes, live, me)
 	// Deletes run last and in reverse dependency order.
 	sort.SliceStable(deletes, func(i, j int) bool {

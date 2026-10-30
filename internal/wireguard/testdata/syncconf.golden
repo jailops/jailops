@@ -1,0 +1,14 @@
+[Interface]
+PrivateKey = dYhVk8lyMM22kCFBz7kQhhpwQ0yHemv4AazpATatgsU=
+ListenPort = 51820
+
+[Peer]
+PublicKey = Os7c57qxX1Mv8DuoA6+2ho0mOnRyvyxDdApHZZx+Fas=
+PresharedKey = NU1c5X/1SaLVzWGll62L8OFl+v0an658KIajS30O0Gw=
+AllowedIPs = 10.99.0.2/32, fd99::2/128
+
+[Peer]
+PublicKey = 9SgSPqJyykY1Z3jMpbGeQfd+6RNp8151gMUhmlEcXpI=
+AllowedIPs = 10.99.0.3/32
+Endpoint = 198.51.100.7:51820
+PersistentKeepalive = 25

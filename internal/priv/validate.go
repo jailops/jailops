@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/zfs"
@@ -199,6 +200,18 @@ func (c Config) ifOwned(name string) error {
 		}
 	}
 	return forbidden("interface %q is not managed by JailOps (prefix %s)", name, strings.Join(c.IfPrefixes, ","))
+}
+
+// checkIfaceDesc accepts only a description JailOps writes: "jailops ..." (or the "jailops:<id>" marker of earlier
+// releases) of at most 64 letters, digits and " ._:/=()-". Clearing (empty) is accepted where allowClear is set.
+func checkIfaceDesc(d string, allowClear bool) error {
+	if d == "" && allowClear {
+		return nil
+	}
+	if !render.ValidIfaceDesc(d) || !render.IsJailOpsDesc(d) {
+		return invalid("interface description %q is not one JailOps writes (\"jailops ...\", at most %d of A-Z a-z 0-9 and %q)", d, render.IfaceDescMax, render.IfaceDescCharset)
+	}
+	return nil
 }
 
 var macRE = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`)

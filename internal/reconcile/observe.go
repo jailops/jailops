@@ -2,8 +2,8 @@ package reconcile
 
 import (
 	"context"
-	"strings"
 
+	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/jailos"
 )
@@ -40,10 +40,21 @@ func Observe(ctx context.Context, n ifconfig.Client, j jailos.Observer) (*Observ
 	return o, nil
 }
 
-// owned reports whether an interface carries the ownership marker of id.
-func owned(i ifconfig.Iface, id string) bool {
-	return i.Description == "jailops:"+id
+// ownedBy reports whether an interface whose name the network or jail derives may be treated as its own (see
+// render.OwnsIface): the wanted text, the marker of earlier releases for id, or no description.
+func ownedBy(i ifconfig.Iface, id string, steps []render.Step) bool {
+	return render.OwnsIface(i.Description, id, WantDesc(steps, i.Name))
 }
 
-// ours reports whether the description marks any JailOps object.
-func ours(i ifconfig.Iface) bool { return strings.HasPrefix(i.Description, "jailops:") }
+// WantDesc returns the description the steps give iface, "" when they give none.
+func WantDesc(steps []render.Step, iface string) string {
+	for _, s := range steps {
+		if s.Op == render.OpSetDescription && s.Iface == iface && s.Arg != "" {
+			return s.Arg
+		}
+	}
+	return ""
+}
+
+// ours reports whether the description is one JailOps writes, in either format.
+func ours(i ifconfig.Iface) bool { return render.IsJailOpsDesc(i.Description) }

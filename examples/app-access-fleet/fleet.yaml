@@ -1,0 +1,3 @@
+# The fleet id becomes the ownership marker "managed_by: sync:apps" on every
+# object jailops-sync creates.
+id: apps

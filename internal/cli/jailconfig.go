@@ -250,9 +250,16 @@ func (a *app) changeConfig(ctx context.Context, c *sdk.Client, name string, set 
 	}
 	res, _ := v.(sdk.ConfigResult)
 	if a.format != fmtTable {
-		return a.emit(map[string]any{"jail": name, "restart_required": nonNil(res.RestartRequired), "restarted": res.Restarted, "config": api.ConfigValues(res.Jail.Spec)}, nil, nil, func() []string { return []string{name} })
+		out := map[string]any{"jail": name, "restart_required": nonNil(res.RestartRequired), "restarted": res.Restarted, "config": api.ConfigValues(res.Jail.Spec)}
+		if w := res.Jail.Status.Warnings; len(w) > 0 {
+			out["warnings"] = w
+		}
+		return a.emit(out, nil, nil, func() []string { return []string{name} })
 	}
 	fprintf(a.env.Stdout, "jail/%s configuration updated\n", name)
+	for _, w := range res.Jail.Status.Warnings {
+		fprintf(a.env.Stderr, "warning: %s\n", w)
+	}
 	switch {
 	case len(res.RestartRequired) == 0:
 	case res.Restarted:

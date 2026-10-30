@@ -111,7 +111,7 @@ func TestHookLifecycleFreeBSD(t *testing.T) {
 	}
 	list, _ := h.net.List(ctx)
 	for _, i := range list {
-		if i.Name == h.host && (i.Description != "jailops:"+hookUUID || !i.Up()) {
+		if i.Name == h.host && (i.Description != "jailops jail=alpha/web net=lan (host side)" || !i.Up()) {
 			t.Errorf("host end %+v", i)
 		}
 	}
@@ -217,6 +217,7 @@ func TestHookConfiguresLinuxJailFromTheHost(t *testing.T) {
 		}
 	}
 	want := []string{
+		"/sbin/ifconfig -j alpha_web " + h.jail + " description jailops jail=alpha/web net=lan (jail side)",
 		"/sbin/ifconfig -j alpha_web " + h.jail + " inet 10.20.0.12/32 up",
 		"/sbin/ifconfig -j alpha_web " + h.jail + " inet6 fd00:20::12 prefixlen 128",
 		"/sbin/ifconfig -j alpha_web " + h.jail + " up",

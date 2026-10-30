@@ -11,17 +11,22 @@ import (
 	"sync"
 	"time"
 
+	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/jailos"
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk/api"
 )
 
 // Host is everything the helper offers. Local implements it in process and
 // Client implements it over the socket, so callers do not care which they hold.
 type Host interface {
+	// WireGuard interfaces and their keys (wireguard.go).
+	wireguard.Host
+
 	ZFS() zfs.Client
 	Jails() jailos.Jails
 	PF() pfctl.Client
@@ -80,6 +85,12 @@ type Host interface {
 	// through an interface JailOps owns (IPv6 proxy mode).
 	NDPRouteAdd(ctx context.Context, addr netip.Addr, iface string) error
 	NDPRouteDelete(ctx context.Context, addr netip.Addr, iface string) error
+
+	// Host management (host.go): the identity of the host and the snapshots taken before each change.
+	HostIdentityRead(ctx context.Context) (service.HostIdentityState, error)
+	HostIdentityApply(ctx context.Context, spec api.HostIdentitySpec, dryRun bool) (api.HostChange, error)
+	HostSnapshots(ctx context.Context) ([]api.HostSnapshot, error)
+	HostSnapshotRestore(ctx context.Context, name string, dryRun bool) (api.HostChange, error)
 }
 
 // Deps are the raw (unvalidated) implementations Local guards.
@@ -100,6 +111,14 @@ type Deps struct {
 	// KeysDir is the host keys directory SeedKeys copies (default
 	// HostKeysDir); tests substitute one.
 	KeysDir string
+	// Etc is the directory host management reads and writes (default /etc); tests substitute one. There is no
+	// configuration for it.
+	Etc string
+	// Now is the clock of host snapshot names (default time.Now).
+	Now func() time.Time
+	// WGLocate returns the wg program (default: the first of wireguard.Binaries that is root's); tests substitute
+	// their own.
+	WGLocate func() string
 }
 
 // Local runs the helper's operations in process behind the validation rules.
@@ -122,8 +141,12 @@ type Local struct {
 
 	ndp ndpState
 
+	hostMu sync.Mutex // one host management request at a time
+
 	frozenMu sync.Mutex
 	frozen   map[string]int // directories a running command reads its configuration from: no writes meanwhile
+
+	wgMu sync.Mutex // one WireGuard operation at a time
 }
 
 var _ Host = (*Local)(nil)

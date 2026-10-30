@@ -27,7 +27,7 @@ func exitForCode(c api.Code) int {
 	switch c {
 	case api.CodeInvalid, api.CodeDataLoss, api.CodeKeyNotEscrowed, api.CodePlaintextDenied:
 		return ExitUsage
-	case api.CodeUnauthorized, api.CodeForbidden, api.CodeRateLimited:
+	case api.CodeUnauthorized, api.CodeForbidden, api.CodeRateLimited, api.CodeNotManaged:
 		return ExitAuth
 	case api.CodeNotFound:
 		return ExitNotFound

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"jailops.net/jailops/internal/reconcile"
+	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -107,8 +108,12 @@ func hostModules(linux bool) []string {
 // then the sysctls (which only exist once their module is loaded).
 func (s *Service) hostDesired() reconcile.HostDesired {
 	linux := s.hasLinuxJail()
+	mods := hostModules(linux)
+	if s.hasWireGuard() {
+		mods = append(mods, wireguard.Module)
+	}
 	h := reconcile.HostDesired{
-		Modules: hostModules(linux),
+		Modules: mods,
 		Sysctls: s.NetSysctl(),
 		Release: map[string]string{SysctlFallbackBrand: fallbackBrandOff},
 	}

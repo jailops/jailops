@@ -338,7 +338,7 @@ func TestPlansGolden(t *testing.T) {
 		}
 	}
 
-	a := AttachInput{JailID: "j-1", JailUUID: "0b0e7f3e-5c4b-4f6e-9d3e-111111111111", Index: 0, Bridge: "jo0", MTU: 1500, Private: true,
+	a := AttachInput{JailID: "j-1", JailUUID: "0b0e7f3e-5c4b-4f6e-9d3e-111111111111", Index: 0, Project: "web", Jail: "nginx", Network: "lan", Bridge: "jo0", MTU: 1500, Private: true,
 		IPv4: pfx("10.20.0.10/24"), IPv6: pfx("2001:db8:1::100/64"), Gateway4: ip("10.20.0.1"), Gateway6: ip("fe80::1")}
 	steps, err = AttachPlan(a)
 	if err != nil {
