@@ -103,10 +103,12 @@ export type Kind =
   | "JailSnapshot"
   | "Backup"
   | "Operation"
+  | "Project"
+  | "Storage"
   | "HostIdentity"
   | "WireGuard"
 
-export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'HostIdentity', 'WireGuard']
+export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'Project', 'Storage', 'HostIdentity', 'WireGuard']
 
 export type Layout =
   | "thin"
