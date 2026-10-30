@@ -57,6 +57,17 @@ expect() { # expect DESCRIPTION PATTERN COMMAND...: the output must match
 	printf '%s\n' "$out"
 }
 
+expect_retry() { # expect_retry DESCRIPTION PATTERN COMMAND...: like expect, tried for up to 30 s (the firewall of a new jail settles a few seconds after it starts)
+	desc=$1; pat=$2; shift 2
+	n=0
+	until out=$("$@" 2>&1) && printf '%s\n' "$out" | grep -E -q "$pat"; do
+		n=$((n + 1))
+		[ $n -ge 15 ] && { echo "$out" >&2; fail "$desc (no match for $pat after 30 s)"; }
+		sleep 2
+	done
+	printf '%s\n' "$out"
+}
+
 rm -rf "$work"; mkdir -p "$work"
 
 # CI logs show how fast this machine is (a VM without KVM acceleration is several times slower)
@@ -194,7 +205,7 @@ expect "the jail runs and carries the labels" 'jailops.app=nginx' $J label --pro
 expect "the app is listed as installed" 'nginx +nginx +[^ ]+ +running' $J app installed --project demo
 addr=$($J app installed --project demo | awk '$1 == "nginx" {print $5}' | head -1 | cut -d, -f1)
 [ -n "$addr" ] || fail "no address for the nginx jail"
-expect "nginx answers from the host" 'Welcome to nginx' curl -s --max-time 10 "http://$addr/"
+expect_retry "nginx answers from the host" 'Welcome to nginx' curl -sS --max-time 5 "http://$addr/"
 expect "the service is enabled in the jail's rc.conf" 'nginx_enable="YES"' $J exec --project demo nginx -- cat /etc/rc.conf
 expect "the snapshot of the fresh installation exists" 'app-installed' $J jail snapshot list nginx --project demo
 if ! $J stop nginx --project demo >"$work/stop.out" 2>&1; then # show what holds the root when the unmount stays busy
@@ -209,8 +220,8 @@ app_check() { # app_check NAME ADDRESS
 	case $1 in
 	postgresql) expect "postgresql answers a query" '^1$' $J exec --project demo postgresql -- su -l postgres -c "psql -tA -c 'select 1'" ;;
 	valkey) expect "valkey answers" '^PONG$' $J exec --project demo valkey -- /usr/local/bin/valkey-cli ping ;;
-	prometheus) expect "prometheus is ready" 'Ready' curl -s --max-time 10 "http://$2:9090/-/ready" ;;
-	forgejo) expect "forgejo answers (the web installer or a redirect to it)" '^(200|302|303)$' curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://$2:3000/" ;;
+	prometheus) expect_retry "prometheus is ready" 'Ready' curl -sS --max-time 5 "http://$2:9090/-/ready" ;;
+	forgejo) expect_retry "forgejo answers (the web installer or a redirect to it)" '^(200|302|303)$' curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "http://$2:3000/" ;;
 	esac
 }
 for a in $e2e_apps; do
