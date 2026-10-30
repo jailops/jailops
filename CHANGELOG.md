@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-10-30
+
 - The rollback command that the app install report, the console's install dialog and a failed package update show is now one the CLI accepts: `jailops jail rollback NAME --all --snapshot SNAPSHOT`. It used to say `--scope all`, which is not a flag. A test parses the printed command with the real command tree.
 - The Valkey definition's summary is now "In-memory key-value store under the BSD license.", and its description no longer names another project.
 - `jailops app install NAME` without `--image` uses the only FreeBSD image with the alias `stable`, as `NAME@stable`. It used to use `freebsd@stable`, which does not exist on a host that followed the quick start (`freebsd-15`). With no such image, or more than one, the request is refused before the operation, and the hint lists your images and says to name one with `--image`.
