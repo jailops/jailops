@@ -10,6 +10,10 @@ const svg = (body: string) => 'data:image/svg+xml;base64,' + btoa(`<svg xmlns="h
 const ICONS: Record<string, string> = {
   nginx: svg('<path d="M32 4 56 18v28L32 60 8 46V18z" fill="#1f8f4e"/><path d="M23 44V20l18 24V20" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>'),
   prometheus: svg('<circle cx="32" cy="32" r="28" fill="#d8572a"/><path d="M20 40h24M22 46h20M32 14c6 8 10 12 6 22h-12c-4-10 0-14 6-22z" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/>'),
+  // the icons packaging/apps ships with these three
+  isms: svg('<path d="M32 4 54 12v18c0 14-9 24-22 30C19 54 10 44 10 30V12z" fill="#2d5f8b"/><path d="M22 32l7 7 13-15" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>'),
+  nsd: svg('<circle cx="32" cy="32" r="28" fill="#3b6e8f"/><path d="M32 4v56M4 32h56M32 4c-10 8-14 18-14 28s4 20 14 28M32 4c10 8 14 18 14 28s-4 20-14 28" fill="none" stroke="#fff" stroke-width="3"/>'),
+  mail: svg('<rect x="6" y="14" width="52" height="36" rx="5" fill="#8b5a2d"/><path d="M8 17l24 19 24-19" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>'),
 }
 
 const IMAGE = { os: 'freebsd', release_min: '15.1' }
@@ -102,6 +106,93 @@ export const definitions: App[] = [
     resources: { memory: '1G', disk: '20G', cpu: '1' },
     notes: 'Add scrape targets under scrape_configs in /usr/local/etc/prometheus.yml and\nrun \'service prometheus reload\' inside the jail. Retention defaults to 15\ndays; set prometheus_args="--storage.tsdb.retention.time=90d" in the jail\'s\nrc.conf to change it.\n',
   },
+  {
+    version: 1, name: "isms", title: "isms", summary: "Information security management platform with git-native documents; needs PostgreSQL.",
+    description: "isms is an information security management system: policies, controls and\nevidence kept as git-native documents, collaboration through PostgreSQL, one\nbinary with the web interface embedded. The package comes from the JailOps\npackage repository and runs as the isms user with its data under\n/var/db/isms and its settings in /usr/local/etc/isms/server.env.\n\nThe installation does not configure or start it: isms needs a PostgreSQL\ndatabase, which this app does not contain, and a master secret that only the\noperator should create. The notes list the steps; the postgresql app of this\ncatalog provides the database.\n",
+    category: "security", homepage: "https://github.com/unidoc/isms", license: "Apache-2.0", icon: "isms.svg", image: IMAGE,
+    packages: [{ name: "isms", repo: "jailops", version: "0.8.1" }, { name: "openssh-portable", repo: "ports" }],
+    services: [{ name: "isms", start: false }],
+    ports: [{ name: "http", port: 8080, proto: "tcp", description: "The web interface and the API (UNVERIFIED port); put a TLS proxy in front.", expose: true }],
+    data: [{ path: "/var/db/isms", description: "The per-organisation git repositories, file blobs, templates and the signing key." }],
+    config: [{ path: "/usr/local/etc/isms/server.env", description: "KEY=VALUE settings with the database URL and the master secret; mode 0600, owner isms.", restart: "isms" }],
+    logs: [{ name: "server", path: "/var/log/isms.log", description: "What the program prints, written by daemon(8)." }],
+    setup: [
+      ["/bin/mkdir", "-p", "/var/db/isms/private"],
+      ["/usr/sbin/chown", "isms:isms", "/var/db/isms", "/var/db/isms/private", "/usr/local/etc/isms/server.env"],
+      ["/bin/chmod", "0750", "/var/db/isms"],
+      ["/bin/chmod", "0700", "/var/db/isms/private"],
+      ["/bin/chmod", "0600", "/usr/local/etc/isms/server.env"],
+    ],
+    resources: { memory: "1G", disk: "10G", cpu: "1" },
+    notes: "isms is enabled but not started. Until server.env is complete, a restart of\nthe jail starts it and it exits again every 5 seconds; /var/log/isms.log says\nwhy. Do these steps once (DB is a postgresql jail, ADDR this jail's address):\n1. In DB: jailops shell DB, then su -l postgres -c psql and run\n   CREATE ROLE isms LOGIN PASSWORD 'PW'; CREATE DATABASE isms OWNER isms;\n   Set listen_addresses = '*' in postgresql.conf, add to pg_hba.conf\n   host isms isms ADDR/32 scram-sha-256\n   and run service postgresql restart.\n2. In this jail (jailops shell NAME), edit /usr/local/etc/isms/server.env:\n   DATABASE_URL=\"postgres://isms:PW@DB_ADDRESS:5432/isms?sslmode=disable\",\n   ISMS_BASE_URL (the https URL users open) and ISMS_SIGNING_EMAIL.\n3. Set the master secret once and back it up; never change it later:\n   sed -i '' \"s|^ISMS_SECRET=.*|ISMS_SECRET=$(openssl rand -hex 32)|\" /usr/local/etc/isms/server.env\n4. Create the signing key (your ISMS_SIGNING_EMAIL as the comment):\n   su -m isms -c 'ssh-keygen -q -t ed25519 -N \"\" -C you@example.com -f /var/db/isms/private/isms_key'\n5. Apply the schema:\n   env ISMS_SERVER_ENV=/usr/local/etc/isms/server.env su -m isms -c '/usr/local/bin/isms server migrate'\n6. service isms start\nThe web interface is on port 8080 (UNVERIFIED); serve it over https through\nthe nginx app. A coming version wires apps together with jailops app allow\n(role, password and DATABASE_URL made for you); until then, these steps.\n",
+  },
+  {
+    version: 1, name: "nsd", title: "NSD", summary: "Authoritative DNS server for your own zones, as a primary or a secondary.",
+    description: "NSD is an authoritative-only DNS server: it answers for the zones it is\ngiven and does no recursion. It serves zone files, sends NOTIFY and\nprovides zone transfers to secondaries, and as a secondary requests the\nzones from a primary.\n\nThis definition writes a starter configuration with one example zone,\nexample.com, under /var/db/nsd/zones, checks it with nsd-checkconf and\nnsd-checkzone and starts the server on port 53, UDP and TCP. Replace the\nexample with your zones; the notes show the lines for a primary and for a\nsecondary.\n",
+    category: "network", homepage: "https://nlnetlabs.nl/projects/nsd/about/", license: "BSD-3-Clause", icon: "nsd.svg", image: IMAGE,
+    packages: [{ name: "nsd", repo: "ports", version: "4.15" }],
+    services: [{ name: "nsd", start: true }],
+    ports: [
+      { name: "dns", port: 53, proto: "udp", description: "DNS queries over UDP.", expose: true },
+      { name: "dns-tcp", port: 53, proto: "tcp", description: "DNS over TCP, large answers and zone transfers.", expose: true },
+    ],
+    data: [{ path: "/var/db/nsd", description: "Zone files (zones/), transferred zones and the state of the transfer daemon." }],
+    config: [{ path: "/usr/local/etc/nsd/nsd.conf", description: "Server and zone settings; check with nsd-checkconf before a restart.", restart: "nsd" }],
+    logs: [{ name: "daemon", path: "/var/log/daemon.log", description: "NSD logs to syslog (facility daemon) unless logfile is set." }],
+    setup: [
+      ["/bin/mkdir", "-p", "/var/db/nsd/zones", "/var/run/nsd"],
+      ["/bin/sh", "-c", "f=/usr/local/etc/nsd/nsd.conf; [ -e $f ] || printf '%s\\n' '# Starter configuration of the nsd app; see its notes.' 'server:' '    username: nsd' '    database: \"\"' '    zonesdir: \"/var/db/nsd/zones\"' '    zonelistfile: \"/var/db/nsd/zone.list\"' '    xfrdfile: \"/var/db/nsd/xfrd.state\"' '    xfrdir: \"/var/db/nsd\"' '    hide-version: yes' '' 'remote-control:' '    control-enable: no' '' 'zone:' '    name: \"example.com\"' '    zonefile: \"example.com.zone\"' > $f"],
+      ["/bin/sh", "-c", "f=/var/db/nsd/zones/example.com.zone; [ -e $f ] || printf '%s\\n' '$ORIGIN example.com.' '$TTL 3600' '@    IN SOA ns1.example.com. hostmaster.example.com. ( 2026103001 3600 900 1209600 300 )' '@    IN NS  ns1.example.com.' 'ns1  IN A   192.0.2.53' 'www  IN A   192.0.2.80' > $f"],
+      ["/usr/sbin/chown", "-R", "nsd:nsd", "/var/db/nsd", "/var/run/nsd"],
+      ["/usr/local/sbin/nsd-checkconf", "/usr/local/etc/nsd/nsd.conf"],
+      ["/usr/local/sbin/nsd-checkzone", "example.com", "/var/db/nsd/zones/example.com.zone"],
+    ],
+    health: { tcp: 53, wait_seconds: 30 },
+    resources: { memory: "256M", disk: "2G", cpu: "1" },
+    notes: "The server answers for example.com from /var/db/nsd/zones/example.com.zone.\nPut your zone files there, name each in a zone: block of\n/usr/local/etc/nsd/nsd.conf, run nsd-checkconf /usr/local/etc/nsd/nsd.conf\nand service nsd restart. Raise the SOA serial with every change.\n\nPrimary (this jail 192.0.2.53, the secondary 198.51.100.53), in the zone:\nblock:\n  notify: 198.51.100.53 NOKEY\n  provide-xfr: 198.51.100.53 NOKEY\n\nSecondary (the primary 192.0.2.53), in the zone: block, after deleting the\nstarter zone file (the transfer writes it):\n  allow-notify: 192.0.2.53 NOKEY\n  request-xfr: 192.0.2.53 NOKEY\n\nUse a TSIG key instead of NOKEY across untrusted networks: a key: block\nwith name, algorithm hmac-sha256 and secret, the same on both sides, and its\nname in place of NOKEY. Delegate the zone at its parent to both servers.\n",
+  },
+  {
+    version: 1, name: "mail", title: "Mail (Postfix and Dovecot)", summary: "A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.",
+    description: "Postfix receives mail for one domain on port 25 and takes mail from your\nusers on the submission port 587; Dovecot serves the mailboxes over IMAP.\nMail users are system users of the jail with their homes under /home/mail,\nand mail is delivered to Maildir/ in each home.\n\nThis is a starting point: the domain is example.com until you change it,\nthere is no TLS until you add a certificate (so clients cannot log in from\nother machines yet), and there is no spam filter, no DKIM signing and no\nwebmail. The notes list the next steps and the DNS records.\n",
+    category: "communication", homepage: "https://www.postfix.org/", license: "EPL-2.0 OR IPL-1.0 (Postfix), MIT and LGPL-2.1 (Dovecot)", icon: "mail.svg", image: IMAGE,
+    packages: [{ name: "postfix", repo: "ports", version: "3.10" }, { name: "dovecot", repo: "ports", version: "2.3" }],
+    services: [
+      { name: "postfix", rc: {"sendmail_enable": "NONE"}, start: true },
+      { name: "dovecot", start: true },
+    ],
+    ports: [
+      { name: "smtp", port: 25, proto: "tcp", description: "Mail from other servers to your domain.", expose: true },
+      { name: "submission", port: 587, proto: "tcp", description: "Mail from your users; needs TLS and a login, so not usable until a certificate is set.", expose: true },
+      { name: "imap", port: 143, proto: "tcp", description: "IMAP; logins are refused without TLS except from the jail itself.", expose: true },
+      { name: "imaps", port: 993, proto: "tcp", description: "IMAP over TLS; not listening until a certificate is configured.", expose: false },
+    ],
+    data: [
+      { path: "/home/mail", description: "The mail users' homes and their Maildir mailboxes." },
+      { path: "/var/spool/postfix", description: "The Postfix queue." },
+    ],
+    config: [
+      { path: "/usr/local/etc/postfix/main.cf", description: "Postfix settings (domain, TLS); 'postfix reload' applies a change.", restart: "postfix" },
+      { path: "/usr/local/etc/postfix/master.cf", description: "The Postfix services, including submission on 587.", restart: "postfix" },
+      { path: "/usr/local/etc/dovecot/dovecot.conf", description: "Dovecot settings (written at the installation for Dovecot 2.3).", restart: "dovecot" },
+    ],
+    logs: [{ name: "maillog", path: "/var/log/maillog", description: "Both servers log to syslog, facility mail." }],
+    setup: [
+      ["/bin/sh", "-c", "cd /usr/local/etc/postfix && for f in main.cf master.cf; do [ -e $f ] || cp $f.sample $f; done"],
+      ["/usr/local/sbin/postconf", "-e", "mydomain = example.com", "myhostname = mail.example.com", "myorigin = $mydomain", "mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain", "inet_interfaces = all", "home_mailbox = Maildir/", "alias_maps = $default_database_type:/etc/mail/aliases", "alias_database = $default_database_type:/etc/mail/aliases", "smtpd_sasl_type = dovecot", "smtpd_sasl_path = private/auth"],
+      ["/usr/local/sbin/postconf", "-M", "submission/inet=submission inet n - n - - smtpd"],
+      ["/usr/local/sbin/postconf", "-P", "submission/inet/syslog_name=postfix/submission", "submission/inet/smtpd_tls_security_level=encrypt", "submission/inet/smtpd_sasl_auth_enable=yes", "submission/inet/smtpd_client_restrictions=permit_sasl_authenticated,reject"],
+      ["/usr/local/sbin/postfix", "check"],
+      ["/usr/local/sbin/postfix", "set-permissions"],
+      ["/usr/local/sbin/postalias", "/etc/mail/aliases"],
+      ["/bin/mkdir", "-p", "/usr/local/etc/mail"],
+      ["/bin/sh", "-c", "printf '%s\\t%s\\n' sendmail /usr/local/sbin/sendmail send-mail /usr/local/sbin/sendmail mailq /usr/local/sbin/sendmail newaliases /usr/local/sbin/sendmail > /usr/local/etc/mail/mailer.conf"],
+      ["/bin/sh", "-c", "f=/usr/local/etc/dovecot/dovecot.conf; [ -e $f ] || printf '%s\\n' '# Starter configuration of the mail app (Dovecot 2.3); see its notes.' 'protocols = imap' 'ssl = no' 'disable_plaintext_auth = no' 'mail_location = maildir:~/Maildir' 'passdb {' '  driver = pam' '}' 'userdb {' '  driver = passwd' '}' 'service auth {' '  unix_listener /var/spool/postfix/private/auth {' '    mode = 0660' '    user = postfix' '    group = postfix' '  }' '}' 'service imap-login {' '  inet_listener imaps {' '    port = 0' '  }' '}' > $f"],
+      ["/usr/local/bin/doveconf", "-n"],
+    ],
+    health: { tcp: 25, wait_seconds: 60 },
+    resources: { memory: "512M", disk: "20G", cpu: "1" },
+    notes: "A starting point: example.com, no TLS. In the jail (jailops shell NAME):\n- Domain: postconf -e 'mydomain = YOUR.DOMAIN' 'myhostname = mail.YOUR.DOMAIN',\n  then postfix reload.\n- A user: pw useradd -n alice -d /home/mail/alice -m -s /usr/sbin/nologin,\n  then passwd alice. Mail to alice@YOUR.DOMAIN lands in ~alice/Maildir.\n- TLS: put a certificate and key in the jail, then postconf -e\n  'smtpd_tls_cert_file = CERT' 'smtpd_tls_key_file = KEY'\n  'smtpd_tls_security_level = may' and postfix reload; in dovecot.conf set\n  ssl = required, ssl_cert = <CERT, ssl_key = <KEY,\n  delete the port = 0 line of the imaps listener and service dovecot restart. Then clients use 587 and 993 with a login.\nDNS for YOUR.DOMAIN (the jail's public address must be reachable on 25):\n- A/AAAA: mail.YOUR.DOMAIN -> the address; PTR of the address back to\n  mail.YOUR.DOMAIN (set by whoever owns the address).\n- MX: YOUR.DOMAIN -> 10 mail.YOUR.DOMAIN\n- SPF: TXT on YOUR.DOMAIN \"v=spf1 mx -all\"\n- DKIM: needs a signing service, which this app does not include; without\n  it, large providers may file your mail as spam.\n- DMARC: TXT on _dmarc.YOUR.DOMAIN \"v=DMARC1; p=none; rua=mailto:postmaster@YOUR.DOMAIN\"\nMany networks block outgoing port 25; check before relying on it.\n",
+  },
 ]
 
 /** An operator's own definition that fails validation: listed with the reason, never installable. */
@@ -133,7 +224,11 @@ export function installSteps(a: App, jail: string, project: string, image: strin
   const out: Array<[string, string]> = [
     ['create-jail', `create thin jail ${jail} from ${image} with ${a.data?.length ?? 0} data volume(s) and the labels jailops.app, jailops.app.hash`],
     ['start-jail', `start ${jail}`],
-    ['install-packages-ports', `pkg -r ${root} install -y ${a.packages.map((p) => p.name).join(' ')}`],
+    // one step per repository, the FreeBSD one first, as the server does
+    ...(['ports', 'jailops'] as const).flatMap((repo): Array<[string, string]> => {
+      const names = a.packages.filter((p) => (p.repo ?? 'ports') === repo).map((p) => p.name)
+      return names.length ? [[`install-packages-${repo}`, `pkg -r ${root} install -y ${repo === 'jailops' ? '-r jailops ' : ''}${names.join(' ')}`]] : []
+    }),
     ['refresh-library-cache', 'in the jail: /sbin/ldconfig -m /usr/local/lib'],
     ['record-version', `pkg -r ${root} query %v ${a.packages[0].name}, then label jailops.app.version`],
     ['write-rc-conf', `set ${(a.services ?? []).flatMap((s) => [`${s.name}_enable`, ...Object.keys(s.rc ?? {})]).join(', ')} in ${root}/etc/rc.conf`],

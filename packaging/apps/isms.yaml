@@ -1,0 +1,89 @@
+# isms from the JailOps package repository (jailops-packages main/isms). Format: docs/apps.md.
+# The package recipe, its server.env.sample and its install message are the source of the paths, the user and the
+# first-run steps. UNVERIFIED: the port (8080 is the default of `isms server serve` as the earlier service
+# configuration of the same program states it; the FreeBSD service passes no --addr) and that the program answers
+# HTTP there; the recipe states neither a port nor a health path.
+version: 1
+name: isms
+title: isms
+summary: Information security management platform with git-native documents; needs PostgreSQL.
+description: |
+  isms is an information security management system: policies, controls and
+  evidence kept as git-native documents, collaboration through PostgreSQL, one
+  binary with the web interface embedded. The package comes from the JailOps
+  package repository and runs as the isms user with its data under
+  /var/db/isms and its settings in /usr/local/etc/isms/server.env.
+
+  The installation does not configure or start it: isms needs a PostgreSQL
+  database, which this app does not contain, and a master secret that only the
+  operator should create. The notes list the steps; the postgresql app of this
+  catalog provides the database.
+category: security
+homepage: https://github.com/unidoc/isms
+license: Apache-2.0
+icon: isms.svg
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: isms
+    repo: jailops
+    version: "0.8.1"
+  # the thin image has no ssh-keygen, which isms needs for its signing key
+  - name: openssh-portable
+    repo: ports
+services:
+  # enabled but not started: it exits until server.env holds a database, a base URL and a secret
+  - name: isms
+    start: false
+ports:
+  - name: http
+    port: 8080
+    proto: tcp
+    description: The web interface and the API (UNVERIFIED port); put a TLS proxy in front.
+    expose: true
+data:
+  - path: /var/db/isms
+    description: The per-organisation git repositories, file blobs, templates and the signing key.
+config:
+  - path: /usr/local/etc/isms/server.env
+    description: KEY=VALUE settings with the database URL and the master secret; mode 0600, owner isms.
+    restart: isms
+logs:
+  - name: server
+    path: /var/log/isms.log
+    description: What the program prints, written by daemon(8).
+# pkg -r installs from the host: the directories and the settings file the package gives to isms come out
+# root-owned. The volume starts empty and root-owned too.
+setup:
+  - [/bin/mkdir, -p, /var/db/isms/private]
+  - [/usr/sbin/chown, "isms:isms", /var/db/isms, /var/db/isms/private, /usr/local/etc/isms/server.env]
+  - [/bin/chmod, "0750", /var/db/isms]
+  - [/bin/chmod, "0700", /var/db/isms/private]
+  - [/bin/chmod, "0600", /usr/local/etc/isms/server.env]
+resources:
+  memory: 1G
+  disk: 10G
+  cpu: "1"
+notes: |
+  isms is enabled but not started. Until server.env is complete, a restart of
+  the jail starts it and it exits again every 5 seconds; /var/log/isms.log says
+  why. Do these steps once (DB is a postgresql jail, ADDR this jail's address):
+  1. In DB: jailops shell DB, then su -l postgres -c psql and run
+     CREATE ROLE isms LOGIN PASSWORD 'PW'; CREATE DATABASE isms OWNER isms;
+     Set listen_addresses = '*' in postgresql.conf, add to pg_hba.conf
+     host isms isms ADDR/32 scram-sha-256
+     and run service postgresql restart.
+  2. In this jail (jailops shell NAME), edit /usr/local/etc/isms/server.env:
+     DATABASE_URL="postgres://isms:PW@DB_ADDRESS:5432/isms?sslmode=disable",
+     ISMS_BASE_URL (the https URL users open) and ISMS_SIGNING_EMAIL.
+  3. Set the master secret once and back it up; never change it later:
+     sed -i '' "s|^ISMS_SECRET=.*|ISMS_SECRET=$(openssl rand -hex 32)|" /usr/local/etc/isms/server.env
+  4. Create the signing key (your ISMS_SIGNING_EMAIL as the comment):
+     su -m isms -c 'ssh-keygen -q -t ed25519 -N "" -C you@example.com -f /var/db/isms/private/isms_key'
+  5. Apply the schema:
+     env ISMS_SERVER_ENV=/usr/local/etc/isms/server.env su -m isms -c '/usr/local/bin/isms server migrate'
+  6. service isms start
+  The web interface is on port 8080 (UNVERIFIED); serve it over https through
+  the nginx app. A coming version wires apps together with jailops app allow
+  (role, password and DATABASE_URL made for you); until then, these steps.

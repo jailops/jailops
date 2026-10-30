@@ -1,0 +1,121 @@
+# Postfix and Dovecot from the FreeBSD packages (mail/postfix, mail/dovecot). Format: docs/apps.md.
+# A starting point, not a finished mail system: one domain, system users, no TLS until a certificate is added.
+# UNVERIFIED until installed on a FreeBSD host: the packaged paths (main.cf.sample, /usr/local/sbin/postconf,
+# /usr/local/bin/doveconf), the Dovecot 2.3 settings below and that the two services start with them.
+version: 1
+name: mail
+title: Mail (Postfix and Dovecot)
+summary: A starting point for a single-domain mail server, SMTP with Postfix and IMAP with Dovecot.
+description: |
+  Postfix receives mail for one domain on port 25 and takes mail from your
+  users on the submission port 587; Dovecot serves the mailboxes over IMAP.
+  Mail users are system users of the jail with their homes under /home/mail,
+  and mail is delivered to Maildir/ in each home.
+
+  This is a starting point: the domain is example.com until you change it,
+  there is no TLS until you add a certificate (so clients cannot log in from
+  other machines yet), and there is no spam filter, no DKIM signing and no
+  webmail. The notes list the next steps and the DNS records.
+category: communication
+homepage: https://www.postfix.org/
+license: EPL-2.0 OR IPL-1.0 (Postfix), MIT and LGPL-2.1 (Dovecot)
+icon: mail.svg
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: postfix
+    repo: ports
+    version: "3.10"
+  - name: dovecot
+    repo: ports
+    version: "2.3"
+services:
+  # the base system's MTA stays off; postfix starts first, it makes the directory of dovecot's auth socket
+  - name: postfix
+    rc:
+      sendmail_enable: "NONE"
+    start: true
+  - name: dovecot
+    start: true
+ports:
+  - name: smtp
+    port: 25
+    proto: tcp
+    description: Mail from other servers to your domain.
+    expose: true
+  - name: submission
+    port: 587
+    proto: tcp
+    description: Mail from your users; needs TLS and a login, so not usable until a certificate is set.
+    expose: true
+  - name: imap
+    port: 143
+    proto: tcp
+    description: IMAP; logins are refused without TLS except from the jail itself.
+    expose: true
+  - name: imaps
+    port: 993
+    proto: tcp
+    description: IMAP over TLS; not listening until a certificate is configured.
+    expose: false
+data:
+  - path: /home/mail
+    description: The mail users' homes and their Maildir mailboxes.
+  - path: /var/spool/postfix
+    description: The Postfix queue.
+config:
+  - path: /usr/local/etc/postfix/main.cf
+    description: Postfix settings (domain, TLS); 'postfix reload' applies a change.
+    restart: postfix
+  - path: /usr/local/etc/postfix/master.cf
+    description: The Postfix services, including submission on 587.
+    restart: postfix
+  - path: /usr/local/etc/dovecot/dovecot.conf
+    description: Dovecot settings (written at the installation for Dovecot 2.3).
+    restart: dovecot
+logs:
+  - name: maillog
+    path: /var/log/maillog
+    description: Both servers log to syslog, facility mail.
+setup:
+  - [/bin/sh, -c, "cd /usr/local/etc/postfix && for f in main.cf master.cf; do [ -e $f ] || cp $f.sample $f; done"]
+  - [/usr/local/sbin/postconf, -e, "mydomain = example.com", "myhostname = mail.example.com", "myorigin = $mydomain", "mydestination = $myhostname, localhost.$mydomain, localhost, $mydomain", "inet_interfaces = all", "home_mailbox = Maildir/", "alias_maps = $default_database_type:/etc/mail/aliases", "alias_database = $default_database_type:/etc/mail/aliases", "smtpd_sasl_type = dovecot", "smtpd_sasl_path = private/auth"]
+  - [/usr/local/sbin/postconf, -M, "submission/inet=submission inet n - n - - smtpd"]
+  - [/usr/local/sbin/postconf, -P, "submission/inet/syslog_name=postfix/submission", "submission/inet/smtpd_tls_security_level=encrypt", "submission/inet/smtpd_sasl_auth_enable=yes", "submission/inet/smtpd_client_restrictions=permit_sasl_authenticated,reject"]
+  # pkg -r leaves the setgid programs and the queue to root: Postfix's own tools put back what postfix-files says
+  - [/usr/local/sbin/postfix, set-permissions]
+  - [/usr/local/sbin/postfix, check]
+  - [/usr/local/sbin/postalias, /etc/mail/aliases]
+  # /usr/sbin/sendmail of the jail hands mail to Postfix; the package's install message leaves this to the person
+  - [/bin/mkdir, -p, /usr/local/etc/mail]
+  - [/bin/sh, -c, "printf '%s\\t%s\\n' sendmail /usr/local/sbin/sendmail send-mail /usr/local/sbin/sendmail mailq /usr/local/sbin/sendmail newaliases /usr/local/sbin/sendmail > /usr/local/etc/mail/mailer.conf"]
+  - [/bin/sh, -c, "f=/usr/local/etc/dovecot/dovecot.conf; [ -e $f ] || printf '%s\\n' '# Starter configuration of the mail app (Dovecot 2.3); see its notes.' 'protocols = imap' 'ssl = no' 'disable_plaintext_auth = no' 'mail_location = maildir:~/Maildir' 'passdb {' '  driver = pam' '}' 'userdb {' '  driver = passwd' '}' 'service auth {' '  unix_listener /var/spool/postfix/private/auth {' '    mode = 0660' '    user = postfix' '    group = postfix' '  }' '}' 'service imap-login {' '  inet_listener imaps {' '    port = 0' '  }' '}' > $f"]
+  - [/usr/local/bin/doveconf, -n]
+health:
+  tcp: 25
+  wait_seconds: 60
+resources:
+  memory: 512M
+  disk: 20G
+  cpu: "1"
+notes: |
+  A starting point: example.com, no TLS. In the jail (jailops shell NAME):
+  - Domain: postconf -e 'mydomain = YOUR.DOMAIN' 'myhostname = mail.YOUR.DOMAIN',
+    then postfix reload.
+  - A user: pw useradd -n alice -d /home/mail/alice -m -s /usr/sbin/nologin,
+    then passwd alice. Mail to alice@YOUR.DOMAIN lands in ~alice/Maildir.
+  - TLS: put a certificate and key in the jail, then postconf -e
+    'smtpd_tls_cert_file = CERT' 'smtpd_tls_key_file = KEY'
+    'smtpd_tls_security_level = may' and postfix reload; in dovecot.conf set
+    ssl = required, ssl_cert = <CERT, ssl_key = <KEY,
+    delete the port = 0 line of the imaps listener and service dovecot restart. Then clients use 587 and 993 with a login.
+  DNS for YOUR.DOMAIN (the jail's public address must be reachable on 25):
+  - A/AAAA: mail.YOUR.DOMAIN -> the address; PTR of the address back to
+    mail.YOUR.DOMAIN (set by whoever owns the address).
+  - MX: YOUR.DOMAIN -> 10 mail.YOUR.DOMAIN
+  - SPF: TXT on YOUR.DOMAIN "v=spf1 mx -all"
+  - DKIM: needs a signing service, which this app does not include; without
+    it, large providers may file your mail as spam.
+  - DMARC: TXT on _dmarc.YOUR.DOMAIN "v=DMARC1; p=none; rua=mailto:postmaster@YOUR.DOMAIN"
+  Many networks block outgoing port 25; check before relying on it.

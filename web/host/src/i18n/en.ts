@@ -597,7 +597,7 @@ export const en = {
     all: 'All',
     category: {
       database: 'Database', web: 'Web', tools: 'Tools', devops: 'DevOps', storage: 'Storage',
-      monitoring: 'Monitoring', communication: 'Communication', other: 'Other',
+      monitoring: 'Monitoring', communication: 'Communication', network: 'Network', security: 'Security', other: 'Other',
     } as Record<string, string>,
     empty: 'The catalog is empty. It comes with the jailops-apps package; its directory is apps.catalog_dir of jailopsd.yaml.',
     noMatch: 'No app matches the search.',

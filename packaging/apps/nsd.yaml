@@ -1,0 +1,89 @@
+# NSD from the FreeBSD packages (dns/nsd). Format: docs/apps.md.
+# UNVERIFIED until installed on a FreeBSD host: the package's paths (/usr/local/sbin/nsd-checkconf, the nsd user, the
+# rc.d script nsd) and that the starter configuration below passes nsd-checkconf of the packaged release.
+version: 1
+name: nsd
+title: NSD
+summary: Authoritative DNS server for your own zones, as a primary or a secondary.
+description: |
+  NSD is an authoritative-only DNS server: it answers for the zones it is
+  given and does no recursion. It serves zone files, sends NOTIFY and
+  provides zone transfers to secondaries, and as a secondary requests the
+  zones from a primary.
+
+  This definition writes a starter configuration with one example zone,
+  example.com, under /var/db/nsd/zones, checks it with nsd-checkconf and
+  nsd-checkzone and starts the server on port 53, UDP and TCP. Replace the
+  example with your zones; the notes show the lines for a primary and for a
+  secondary.
+category: network
+homepage: https://nlnetlabs.nl/projects/nsd/about/
+license: BSD-3-Clause
+icon: nsd.svg
+image:
+  os: freebsd
+  release_min: "15.1"
+packages:
+  - name: nsd
+    repo: ports
+    version: "4.15"
+services:
+  - name: nsd
+    start: true
+ports:
+  - name: dns
+    port: 53
+    proto: udp
+    description: DNS queries over UDP.
+    expose: true
+  - name: dns-tcp
+    port: 53
+    proto: tcp
+    description: DNS over TCP, large answers and zone transfers.
+    expose: true
+data:
+  - path: /var/db/nsd
+    description: Zone files (zones/), transferred zones and the state of the transfer daemon.
+config:
+  - path: /usr/local/etc/nsd/nsd.conf
+    description: Server and zone settings; check with nsd-checkconf before a restart.
+    restart: nsd
+logs:
+  - name: daemon
+    path: /var/log/daemon.log
+    description: NSD logs to syslog (facility daemon) unless logfile is set.
+# The starter configuration replaces the package's sample file at the install (setup runs only then); the starter zone is written only when absent. The state
+# files are kept on the volume; no database file ("" turns it off), no remote control (it needs keys).
+setup:
+  - [/bin/mkdir, -p, /var/db/nsd/zones, /var/run/nsd]
+  - [/bin/sh, -c, "f=/usr/local/etc/nsd/nsd.conf; grep -q 'Starter configuration of the nsd app' $f 2>/dev/null || printf '%s\\n' '# Starter configuration of the nsd app; see its notes.' 'server:' '    username: nsd' '    database: \"\"' '    zonesdir: \"/var/db/nsd/zones\"' '    zonelistfile: \"/var/db/nsd/zone.list\"' '    xfrdfile: \"/var/db/nsd/xfrd.state\"' '    xfrdir: \"/var/db/nsd\"' '    hide-version: yes' '' 'remote-control:' '    control-enable: no' '' 'zone:' '    name: \"example.com\"' '    zonefile: \"example.com.zone\"' > $f"]
+  - [/bin/sh, -c, "f=/var/db/nsd/zones/example.com.zone; [ -e $f ] || printf '%s\\n' '$ORIGIN example.com.' '$TTL 3600' '@    IN SOA ns1.example.com. hostmaster.example.com. ( 2026103001 3600 900 1209600 300 )' '@    IN NS  ns1.example.com.' 'ns1  IN A   192.0.2.53' 'www  IN A   192.0.2.80' > $f"]
+  - [/usr/sbin/chown, -R, "nsd:nsd", /var/db/nsd, /var/run/nsd]
+  - [/usr/local/sbin/nsd-checkconf, /usr/local/etc/nsd/nsd.conf]
+  - [/usr/local/sbin/nsd-checkzone, example.com, /var/db/nsd/zones/example.com.zone]
+health:
+  tcp: 53
+  wait_seconds: 30
+resources:
+  memory: 256M
+  disk: 2G
+  cpu: "1"
+notes: |
+  The server answers for example.com from /var/db/nsd/zones/example.com.zone.
+  Put your zone files there, name each in a zone: block of
+  /usr/local/etc/nsd/nsd.conf, run nsd-checkconf /usr/local/etc/nsd/nsd.conf
+  and service nsd restart. Raise the SOA serial with every change.
+
+  Primary (this jail 192.0.2.53, the secondary 198.51.100.53), in the zone:
+  block:
+    notify: 198.51.100.53 NOKEY
+    provide-xfr: 198.51.100.53 NOKEY
+
+  Secondary (the primary 192.0.2.53), in the zone: block, after deleting the
+  starter zone file (the transfer writes it):
+    allow-notify: 192.0.2.53 NOKEY
+    request-xfr: 192.0.2.53 NOKEY
+
+  Use a TSIG key instead of NOKEY across untrusted networks: a key: block
+  with name, algorithm hmac-sha256 and secret, the same on both sides, and its
+  name in place of NOKEY. Delegate the zone at its parent to both servers.

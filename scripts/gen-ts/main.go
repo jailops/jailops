@@ -63,7 +63,7 @@ var enums = map[reflect.Type][]string{
 	reflect.TypeFor[api.DoctorStatus]():    {string(api.DoctorOK), string(api.DoctorWarn), string(api.DoctorFail), string(api.DoctorUnknown)},
 	reflect.TypeFor[api.Scope]():           {string(api.ScopeHost), string(api.ScopeFleet)},
 	reflect.TypeFor[api.JailLogKind]():     {string(api.JailLogActive), string(api.JailLogRotated)},
-	reflect.TypeFor[api.AppCategory]():     {string(api.AppDatabase), string(api.AppWeb), string(api.AppTools), string(api.AppDevops), string(api.AppStorage), string(api.AppMonitoring), string(api.AppCommunication), string(api.AppOther)},
+	reflect.TypeFor[api.AppCategory]():     {string(api.AppDatabase), string(api.AppWeb), string(api.AppTools), string(api.AppDevops), string(api.AppStorage), string(api.AppMonitoring), string(api.AppCommunication), string(api.AppNetwork), string(api.AppSecurity), string(api.AppOther)},
 }
 
 type gen struct {
