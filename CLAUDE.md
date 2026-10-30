@@ -33,7 +33,8 @@ reached only through `GOOS=freebsd` cross builds and a FreeBSD VM for integratio
   belongs to exactly one binary and one API role, may import only web/shared and may call only its registered URL
   prefixes (enforced by tests). More apps will follow: add them with the scaffold script, never by extending another app.
 - `cmd/jailops` and `cmd/jailops-sync` import only `sdk` and `sdk/api` (enforced by
-  `internal/archtest`).
+  `internal/archtest`). Exceptions: `internal/manpage`, and `internal/apps` in the client for `app validate`
+  (kept free of daemon code by `internal/cli/arch_test.go`).
 - Never delete or modify objects JailOps does not own (`jailops:managed=on`, `managed_by`).
 - Error codes in `sdk/api/errors.go` are stable; add, never rename.
 - Memory is bounded: streams are streamed, never read whole into memory.

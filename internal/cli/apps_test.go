@@ -2,6 +2,8 @@ package cli_test
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -64,5 +66,50 @@ func TestAppsNeedTheExtension(t *testing.T) {
 	_, errs, code := h.run("", "app", "list")
 	if code != 6 || !strings.Contains(errs, "unsupported") {
 		t.Fatalf("%d %s", code, errs)
+	}
+}
+
+// app validate checks definition files on this machine with the daemon's
+// rules: no server is configured here, so any request would fail.
+func TestAppValidate(t *testing.T) {
+	h := newHarness(t)
+	h.env["JAILOPS_CONFIG"] = filepath.Join(h.dir, "none.yaml")
+	ref := filepath.Join("..", "apps", "testdata", "catalog")
+	tr := h.transcript()
+	tr.ok("app", "validate", ref)
+	tr.ok("app", "validate", filepath.Join(ref, "nginx.yaml"), filepath.Join(ref, "nsd.yaml"))
+	tr.ok("app", "validate", ref, "-o", "json")
+
+	bad := filepath.Join(h.dir, "apps")
+	if err := os.Mkdir(bad, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	nginx, err := os.ReadFile(filepath.Join(ref, "nginx.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nsd, err := os.ReadFile(filepath.Join(ref, "nsd.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, bad, "nginx.yaml", string(nginx), 0o644)
+	writeFile(t, bad, "web.yaml", string(nginx), 0o644)
+	writeFile(t, bad, "nsd.yaml", string(nsd), 0o644) // its icon is not copied
+	writeFile(t, bad, "newer.yaml", strings.Replace(string(nginx), "name: nginx\n", "name: newer\nreplicas: 2\n", 1), 0o644)
+	tr.do("", "app", "validate", bad, filepath.Join(h.dir, "missing"))
+	tr.do("", "app", "validate", filepath.Join(bad, "web.yaml"), "-o", "json")
+	tr.do("", "app", "validate", writeFile(t, bad, "notes.txt", "not a definition", 0o644))
+	tr.do("", "app", "validate")
+	tr.do("", "app", "validate", ref, "-o", "name")
+	tr.golden("app_validate")
+
+	out, _, code := h.run("", "app", "validate", bad, "-o", "json")
+	var rep struct {
+		Definitions int
+		Icons       int
+		Problems    []struct{ File, Reason string }
+	}
+	if code != 2 || json.Unmarshal([]byte(out), &rep) != nil || rep.Definitions != 4 || rep.Icons != 1 || len(rep.Problems) != 3 {
+		t.Fatalf("%d %+v\n%s", code, rep, out)
 	}
 }

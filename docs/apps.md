@@ -16,6 +16,17 @@ YAML file per app under `/usr/local/share/jailops/apps/` (`apps.catalog_dir` of 
 files only and never fetches anything**, so a catalog cannot change without a package operation on the host.
 An operator may drop a definition of their own into the directory; it is read like any other.
 
+The catalog is not part of the JailOps source or its releases. Its definitions live in the packages repository
+(`main/jailops-apps/apps/` of `jailops/jailops-packages`), and `jailops-apps` is a package with a version of its own:
+a new or changed app is one pull request there and a new `jailops-apps` version, with no JailOps release. The
+`jailops` package depends on `jailops-apps` by name, so any version satisfies it and `pkg upgrade` brings the newest
+catalog. See [Adding or changing an app](#adding-or-changing-an-app).
+
+**Older daemons, newer definitions.** A definition is checked against the format this daemon knows. One written for a
+newer daemon (a key it does not know, a `version` other than 1, a category it does not know) is **listed as invalid with
+the reason** and cannot be installed; the other definitions are unaffected. Since a catalog update can reach a host
+before the JailOps update it needs, such an app stays invalid on that host until `jailops` is upgraded.
+
 Every definition is validated when it is read (on each request; the directory is small). A definition that fails is
 **listed as invalid with the reason** (`jailops app list` shows it, `GET /api/v1/apps` carries `valid: false` and
 `error`) and `GET /api/v1/apps/NAME` answers `invalid`; it can never be installed. The other definitions are not
@@ -31,7 +42,8 @@ Each definition carries the hash of its file (`sha256:<hex>`); an installed jail
 
 One YAML document per file, strict: an unknown key is an error, like every other configuration file of JailOps.
 The file name is the app name with `.yaml` (`postgresql.yaml` holds `name: postgresql`; a mismatch is invalid, so two
-files cannot claim one name). The starter catalog in `packaging/apps/` is the reference.
+files cannot claim one name). The catalog in the packages repository is the reference; a copy of it is the test data of
+`internal/apps` (`internal/apps/testdata/catalog/`).
 
 ```yaml
 version: 1                       # required, 1
@@ -91,7 +103,7 @@ Rules the validator enforces, besides the sizes above:
   pipe. At most 32 setup commands.
 - Names of ports and logs are short slugs (`^[a-z][a-z0-9-]{0,31}$`); a port is unique per `port/proto`.
 - `health.http.path` is an absolute request path; `status` defaults to 200. A definition may leave `health` out; the
-  starter catalog does so only for an app that starts none of its services (`isms`: nothing runs to check until the
+  catalog does so only for an app that starts none of its services (`isms`: nothing runs to check until the
   operator has configured it).
 - `resources.memory` and `.disk` are sizes (`512M`, `10G`); `cpu` is a number.
 - `sysvipc` is a boolean (`true` or `false`, nothing else). A jail has no System V shared memory, semaphores or message
@@ -123,6 +135,9 @@ server of `sdk/fake` starts with six definitions (nginx, postgresql, valkey, ism
 [--image I] [--memory M] [--disk D] [--cpu N] [--project P] [--dry-run] [--no-wait]` and
 `jailops app installed [PATTERN...] [-o json|yaml|name|csv]` (columns `JAIL`, `APP`, `VERSION`, `STATE`,
 `ADDRESSES`, `PORTS`; the list is the project's jail list narrowed on the client to the label, no route of its own).
+`jailops app validate PATH... [-o json|yaml]` checks definition files on the machine it runs on, without a server
+([Adding or changing an app](#adding-or-changing-an-app)); it is the one command of the client that links the daemon's
+catalog validator (`internal/apps`, which imports nothing that runs commands or touches state; a test keeps it so).
 
 **Permissions.** The catalog is readable by **any authenticated identity**, whatever its role and project scope
 (route class `self`, like the configuration key registry): it is documentation of what the host can run, not an object
@@ -170,7 +185,7 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    the packages leave behind: pkg's local database records the paths and checksums of files and the paths of
    directories, not their owners or modes, so `pkg query` cannot report them and `pkg check` has nothing to re-apply.
    A definition therefore gives the directories its services write to their user in `setup`, with `mkdir -p` first for
-   a directory that may not exist and `chown` (the starter catalog: `valkey:valkey` on `/var/db/valkey`, `/var/log/valkey`
+   a directory that may not exist and `chown` (the catalog: `valkey:valkey` on `/var/db/valkey`, `/var/log/valkey`
    and `/var/run/valkey`; `git:git` on `/usr/local/etc/forgejo`, `/var/db/forgejo` and `/var/log/forgejo`;
    `postgres:postgres` on `/var/db/postgres`; `prometheus:prometheus` on `/var/db/prometheus`; `isms:isms` on
    `/var/db/isms`, `/var/db/isms/private` and `/usr/local/etc/isms/server.env`; `nsd:nsd` on `/var/db/nsd` and
@@ -267,9 +282,37 @@ definition has no parameters, and what needs a value is a `config` file the pers
 - **Fetching catalogs**: the catalog comes with a package, signed, or from the operator's own files. The daemon makes
   no request for it.
 
-## The starter catalog
+## Adding or changing an app
 
-`packaging/apps/` holds eight definitions. The first five were written against the FreeBSD 15 quarterly packages of
+The definitions and their icons are in `main/jailops-apps/apps/` of the packages repository
+(`jailops/jailops-packages`); its `README.md` and `docs/ADD-A-PACKAGE.md` have the details. A new or changed app is one
+pull request there:
+
+1. Add or edit `NAME.yaml` (and its icon) in `main/jailops-apps/apps/`, following the format above.
+2. Raise `version:` in `main/jailops-apps/pkgops.yaml` by hand (`0.4.0` to `0.5.0` for a new app, `0.4.1` for a fix). A
+   published version is never rebuilt, so a change without a new version is refused by the repository's checks.
+3. Check it locally with the client, which needs no server, no network and no root:
+
+   ```sh
+   jailops app validate main/jailops-apps/apps
+   ```
+
+   It runs the daemon's own parser and validator on every `*.yaml`, reads the icon each definition names, prints every
+   problem as `FILE: reason` and exits 2 when there is one; otherwise it prints one line
+   (`valid: 8 definition(s), 3 icon(s)`). `-o json` gives the counts and the problems. It also takes single files and
+   several paths, and `jailops app validate /usr/local/share/jailops/apps` checks what a host has.
+4. Open the pull request. Its CI builds `jailops` at the release the repository packages (the version of
+   `main/jailops/pkgops.yaml`) and runs the same command on the directory before it builds the package, so a
+   definition must be valid for the daemon that hosts actually run. Merging to `master` publishes the new
+   `jailops-apps`; no JailOps release or tag is involved.
+
+A definition that needs a newer daemon (a new key or category) is listed as invalid on older hosts (see the trust model),
+so it waits for the JailOps release that understands it. When the format itself changes, refresh the reference copy in
+`internal/apps/testdata/catalog/` in the same JailOps change.
+
+## The catalog
+
+The catalog holds eight definitions. The first five were written against the FreeBSD 15 quarterly packages of
 October 2026: package names, rc.d names, rc.conf knobs, ports and paths were taken from the packages themselves. The
 three later ones were not: their sources are named in the table and below, and what could not be checked is marked.
 
@@ -327,7 +370,8 @@ is not), starts both services and reads the Postfix `220` and Dovecot `* OK` gre
 authentication of system users through `/etc/pam.d/other`, delivering a message to a local user and reading it over
 IMAP, and TLS.
 
-The catalog itself is validated by a test on every build, and the installation is tested
+The reference copy of the catalog (`internal/apps/testdata/catalog/`) is validated by a test on every build, the
+catalog itself by `jailops app validate` in the CI of the packages repository, and the installation is tested
 end to end against in-memory fakes of ZFS, the jail runtime and `pkg`. What is checked against the privileged helper's
 real rules: the argument vectors the builders of `internal/apps` make (`pkg -r ... install`, `pkg -r ... query`), the
 rc.conf path and the in-jail commands, in `internal/priv`; the install tests assert that the service sends exactly those

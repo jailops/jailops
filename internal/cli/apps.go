@@ -12,6 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
@@ -89,15 +90,74 @@ fetches it. A definition that does not validate is listed as invalid with the
 reason. See docs/apps.md for the format.
 
 'install' creates a jail that runs an app, as one operation; 'installed' lists
-the jails that came from the catalog.`,
+the jails that came from the catalog. 'validate' checks definition files on
+this machine, without a server.`,
 		`jailops app list
 jailops app list --category database
 jailops app info postgresql
 jailops app install nginx --project web
-jailops app installed --project web`, "apps")
+jailops app installed --project web
+jailops app validate ./apps`, "apps")
 	addList(a, ac, d, "\njailops app list --category database")
-	ac.AddCommand(a.appInfo(d), a.appInstall(d), a.appInstalled())
+	ac.AddCommand(a.appInfo(d), a.appInstall(d), a.appInstalled(), a.appValidate())
 	return ac
+}
+
+// appValidateReport is the -o json and -o yaml answer of app validate.
+type appValidateReport struct {
+	Definitions int            `json:"definitions"`
+	Icons       int            `json:"icons"`
+	Problems    []apps.Problem `json:"problems"`
+}
+
+func (a *app) appValidate() *cobra.Command {
+	return &cobra.Command{
+		Use:   "validate PATH...",
+		Short: "Check catalog definitions offline, with the daemon's rules",
+		Long: `Check app definitions as the daemon reads them, on this machine: no server,
+no network and no root are needed. A PATH is a catalog directory (every *.yaml
+in it, as 'app list' reads them) or one definition file. Each definition is
+parsed and validated with the daemon's own code, and the icon it names must be
+next to it and readable.
+
+Every problem is printed as FILE: reason. The exit status is 2 when there is
+one, 0 with a one-line summary otherwise. -o json and -o yaml print the counts
+and the problems.`,
+		Example: "jailops app validate /usr/local/share/jailops/apps\njailops app validate main/jailops-apps/apps -o json\njailops app validate nginx.yaml postgresql.yaml",
+		Args:    cobra.MinimumNArgs(1),
+		ValidArgsFunction: func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+			return nil, cobra.ShellCompDirectiveDefault
+		},
+		RunE: func(_ *cobra.Command, args []string) error {
+			if a.format != fmtTable && a.format != fmtJSON && a.format != fmtYAML {
+				return usagef("app validate prints a table, json or yaml")
+			}
+			rep := appValidateReport{Problems: []apps.Problem{}}
+			for _, p := range args {
+				r := apps.Check(p)
+				rep.Definitions += r.Definitions
+				rep.Icons += r.Icons
+				rep.Problems = append(rep.Problems, r.Problems...)
+			}
+			if a.format != fmtTable {
+				if err := a.emit(rep, nil, nil, nil); err != nil {
+					return err
+				}
+			} else {
+				for _, p := range rep.Problems {
+					fprintf(a.env.Stdout, "%s: %s\n", p.File, p.Reason)
+				}
+				if len(rep.Problems) == 0 {
+					fprintf(a.env.Stdout, "valid: %d definition(s), %d icon(s)\n", rep.Definitions, rep.Icons)
+				}
+			}
+			if n := len(rep.Problems); n > 0 {
+				return api.Errorf(api.CodeInvalid, "%d problem(s) in %d definition(s) checked", n, rep.Definitions).
+					WithHint("fix the files listed and run 'jailops app validate' again; docs/apps.md has the format")
+			}
+			return nil
+		},
+	}
 }
 
 func (a *app) appInfo(d *kindDesc[api.AppSummary]) *cobra.Command {

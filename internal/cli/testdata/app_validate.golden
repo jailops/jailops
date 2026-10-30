@@ -1,0 +1,53 @@
+$ jailops app validate ../apps/testdata/catalog
+valid: 8 definition(s), 3 icon(s)
+
+$ jailops app validate ../apps/testdata/catalog/nginx.yaml ../apps/testdata/catalog/nsd.yaml
+valid: 2 definition(s), 1 icon(s)
+
+$ jailops app validate ../apps/testdata/catalog -o json
+{
+  "definitions": 8,
+  "icons": 3,
+  "problems": []
+}
+
+$ jailops app validate <dir>/apps <dir>/missing
+<dir>/apps/newer.yaml: unmarshal errors: line 4: field replicas not found in type api.App
+<dir>/apps/nsd.yaml: icon: lstat <dir>/apps/nsd.svg: no such file or directory
+<dir>/apps/web.yaml: name: name "nginx" does not match the file name web.yaml
+<dir>/missing: stat <dir>/missing: no such file or directory
+! invalid: 4 problem(s) in 4 definition(s) checked
+! hint: fix the files listed and run 'jailops app validate' again; docs/apps.md has the format
+[exit 2]
+
+$ jailops app validate <dir>/apps/web.yaml -o json
+{
+  "definitions": 1,
+  "icons": 0,
+  "problems": [
+    {
+      "file": "<dir>/apps/web.yaml",
+      "reason": "name: name \"nginx\" does not match the file name web.yaml"
+    }
+  ]
+}
+! invalid: 1 problem(s) in 1 definition(s) checked
+! hint: fix the files listed and run 'jailops app validate' again; docs/apps.md has the format
+[exit 2]
+
+$ jailops app validate <dir>/apps/notes.txt
+<dir>/apps/notes.txt: a definition is a .yaml file
+! invalid: 1 problem(s) in 0 definition(s) checked
+! hint: fix the files listed and run 'jailops app validate' again; docs/apps.md has the format
+[exit 2]
+
+$ jailops app validate
+! usage: requires at least 1 arg(s), only received 0
+! hint: run 'jailops app validate --help' for usage
+[exit 2]
+
+$ jailops app validate ../apps/testdata/catalog -o name
+! usage: app validate prints a table, json or yaml
+! hint: run 'jailops app validate --help' for usage
+[exit 2]
+

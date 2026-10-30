@@ -1,4 +1,4 @@
-// Canned catalog and jail logs for `?demo`. The five definitions follow packaging/apps/*.yaml; a sixth
+// Canned catalog and jail logs for `?demo`. The five definitions follow the catalog (internal/apps/testdata/catalog); a sixth
 // one is invalid so the catalog shows that state. Logs get timestamps relative to now and
 // grow while they are followed.
 import type { App, AppDetail, AppSummary, JailLogFile, JailLogRead } from '@jailops/shared/api/types'
@@ -10,7 +10,7 @@ const svg = (body: string) => 'data:image/svg+xml;base64,' + btoa(`<svg xmlns="h
 const ICONS: Record<string, string> = {
   nginx: svg('<path d="M32 4 56 18v28L32 60 8 46V18z" fill="#1f8f4e"/><path d="M23 44V20l18 24V20" fill="none" stroke="#fff" stroke-width="5" stroke-linejoin="round"/>'),
   prometheus: svg('<circle cx="32" cy="32" r="28" fill="#d8572a"/><path d="M20 40h24M22 46h20M32 14c6 8 10 12 6 22h-12c-4-10 0-14 6-22z" fill="none" stroke="#fff" stroke-width="4" stroke-linecap="round"/>'),
-  // the icons packaging/apps ships with these three
+  // the icons the catalog ships with these three
   isms: svg('<path d="M32 4 54 12v18c0 14-9 24-22 30C19 54 10 44 10 30V12z" fill="#2d5f8b"/><path d="M22 32l7 7 13-15" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>'),
   nsd: svg('<circle cx="32" cy="32" r="28" fill="#3b6e8f"/><path d="M32 4v56M4 32h56M32 4c-10 8-14 18-14 28s4 20 14 28M32 4c10 8 14 18 14 28s-4 20-14 28" fill="none" stroke="#fff" stroke-width="3"/>'),
   mail: svg('<rect x="6" y="14" width="52" height="36" rx="5" fill="#8b5a2d"/><path d="M8 17l24 19 24-19" fill="none" stroke="#fff" stroke-width="4" stroke-linejoin="round"/>'),

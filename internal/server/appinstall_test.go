@@ -787,19 +787,19 @@ func TestDoctorLegacyVolumes(t *testing.T) {
 	}
 }
 
-// The starter catalog as shipped plans the steps its definitions describe:
+// The reference catalog plans the steps its definitions describe:
 // isms from the jailops repository and not started (so nothing to check),
 // nsd and mail with their setup, services and health check. isms installs
 // through the fakes without starting anything.
-func TestAppInstallStarterCatalog(t *testing.T) {
-	src := filepath.Join("..", "..", "packaging", "apps")
+func TestAppInstallReferenceCatalog(t *testing.T) {
+	src := filepath.Join("..", "apps", "testdata", "catalog")
 	defs := map[string]string{}
 	for _, n := range []string{"isms", "nsd", "mail"} {
 		b, err := os.ReadFile(filepath.Join(src, n+".yaml"))
 		if err != nil {
 			t.Fatal(err)
 		}
-		// the icon file is not copied here; internal/apps reads the shipped ones
+		// the icon file is not copied here; internal/apps reads the reference ones
 		defs[n] = strings.Replace(string(b), "icon: "+n+".svg\n", "", 1)
 	}
 	e, c := appEnv(t, defs)
