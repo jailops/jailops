@@ -974,10 +974,14 @@ func TestMemoryIsBoundedByTheWindowNotTheDataSize(t *testing.T) {
 		}
 		b.NoSync = true
 		e := newEnvOn(t, b)
-		backup = measurePeak(func() { e.backup(e.opts(Stream{Name: "data", Root: src})) })
+		// A small window, so that both sizes fill it whatever the speed of the disk: with the default window of eight chunks
+		// the small file fits in it and the large one does not, and a slow writer (a CI VM) then shows growth that is the window.
+		bo := e.opts(Stream{Name: "data", Root: src})
+		bo.Window = 2
+		backup = measurePeak(func() { e.backup(bo) })
 		dest := t.TempDir()
 		restore = measurePeak(func() {
-			if err := e.restore("", "data", dest, nil); err != nil {
+			if err := e.restore("", "data", dest, func(o *RestoreOptions) { o.Window = 2 }); err != nil {
 				t.Fatal(err)
 			}
 		})
