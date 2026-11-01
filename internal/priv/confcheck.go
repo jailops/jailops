@@ -365,7 +365,9 @@ func (c Config) checkFstab(ctx context.Context, text, existing string) error {
 }
 
 func cleanAbs(p string) bool {
-	return filepath.IsAbs(p) && filepath.Clean(p) == p && !strings.ContainsAny(p, "\x00\n\t ")
+	// no path the helper is asked about holds two dots in a row, even inside a name (a clean path has no ".." element, and
+	// this keeps the rule simple to audit)
+	return filepath.IsAbs(p) && filepath.Clean(p) == p && !strings.ContainsAny(p, "\x00\n\t ") && !strings.Contains(p, "..")
 }
 
 var (

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("/usr/sbin/pkg\x00-r\x00/jailops/0..\x00install")
