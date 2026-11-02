@@ -10,6 +10,9 @@ import * as da from './apps'
 import * as dh from './host'
 import { validDNSName } from '@/lib/host'
 import * as dw from './wireguard'
+import * as dc from './cert'
+import { DEMO_SETUP_TOKEN, DEMO_CLIENT_ADDRESS } from './setupToken'
+import { passwordProblem, validUserName, cleanToken } from '@/lib/setup'
 import { demoForward, unifiedRead, type DemoReply } from './logs'
 import { demoAccess } from './access'
 import { volumeName } from '@/lib/apps'
@@ -38,9 +41,15 @@ const sleep0 = () => Promise.resolve()
 
 export function demoTransport(opts: DemoOptions = {}): Transport {
   // Like a user who has already chosen a project (`project switch web`); `?demo=fresh` is a first visit with none.
-  if (typeof location !== 'undefined' && !location.search.includes('fresh') && !location.search.includes('empty')) { if (!loadChoice()) saveChoice('web') }
+  // `?demo=setup` is a host that was just installed and has no administrator yet: the first-run wizard.
+  const setupMode = typeof location !== 'undefined' && location.search.includes('demo=setup')
+  const emptyMode = typeof location !== 'undefined' && (location.search.includes('empty') || setupMode)
+  if (typeof location !== 'undefined' && !location.search.includes('fresh') && !emptyMode) { if (!loadChoice()) saveChoice('web') }
   const speed = opts.speed ?? 1
-  let authed = !opts.signedOut
+  let authed = !opts.signedOut && !setupMode
+  // the first administrator: needed until the wizard made one; wrong tokens are counted like the daemon counts them
+  const setup = { required: setupMode, fails: 0, until: 0 }
+  let signedInAs = ''
   const db = {
     jails: [...d.jails(), ...d2.stagingJails()], snaps: d.snapshots(), images: d.images(), networks: d.networks(), leases: d.leases(),
     policies: d.policies(), sets: d.addressSets(), targets: d.targets(), bpol: d.backupPolicies(), backups: d.backups(),
@@ -51,6 +60,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     fw: dh.loadFirewall() ?? dh.firewallState(typeof location !== 'undefined' && location.search.includes('pending')),
     wireguard: dw.tunnels(),
     key: { status: 'present' as 'none' | 'present' | 'escrowed', domain: 'kd-7f3a91', path: '/var/db/jailops/backup.key' },
+    cert: dc.certState(),
   }
   for (const j of db.jails) {
     j.spec.provision = d2.provisionSpec(j.metadata.name)
@@ -61,7 +71,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   }
   db.updates = d2.updateReports(db.jails)
   for (const j of db.jails) db.history[j.metadata.name] = d2.updateHistory(j.metadata.name)
-  if (typeof location !== 'undefined' && location.search.includes('empty')) {
+  if (emptyMode) {
     // A host that was just installed: nothing is configured yet (`?demo=empty`).
     db.jails = []; db.snaps = {} as typeof db.snaps; db.images = []; db.networks = []; db.leases = {} as typeof db.leases
     db.storage = []; db.profiles = { project: [], host: [] } as typeof db.profiles; db.updates = []; db.policies = []; db.sets = []
@@ -69,7 +79,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   }
   const countByProject = () => { const c: Record<string, number> = {}; for (const j of db.jails) c[j.metadata.project ?? ''] = (c[j.metadata.project ?? ''] ?? 0) + 1; return c }
   db.projects = d2.projects(countByProject())
-  if (typeof location !== 'undefined' && location.search.includes('empty')) db.projects = []
+  if (emptyMode) db.projects = []
   const shells = new Map<string, { h: StreamHandlers; line: string; jail: string }>()
   const logs = da.demoLogs()
   const forward = demoForward('bsd01.example.net')
@@ -156,12 +166,14 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const body = (req.body === undefined ? {} : JSON.parse(JSON.stringify(req.body))) as Record<string, any> // the wire is JSON: never keep the caller's reactive objects
 
     if (path === '' && m === 'GET') return ok({ ...d.server(), auth: authed ? 'trusted' : 'untrusted' })
+    if (seg[0] === 'setup') return setupRoute(seg, m, body)
     if (seg[0] === 'auth') {
-      if (seg[1] === 'session') return authed ? ok({ ...d2.identity(), csrf: 'demo-csrf' }) : fail(401, { code: 'unauthorized', message: 'No session.' })
+      if (seg[1] === 'session') return authed ? ok({ ...d2.identity(), ...(signedInAs ? { user: signedInAs } : {}), csrf: 'demo-csrf' }) : fail(401, { code: 'unauthorized', message: 'No session.' })
       if (seg[1] === 'login') {
         if (!body.username) return fail(400, { code: 'invalid', message: 'username is required' })
         if (body.username === 'alice' && !body.totp) return fail(401, { code: 'unauthorized', message: 'A one-time code is required.', hint: 'Enter the six digits from your authenticator.', detail: { totp: 'required' } })
         authed = true
+        if (setupMode) signedInAs = String(body.username)
         return ok({ user: body.username, permission: 'admin', csrf: 'demo-csrf' })
       }
       authed = false
@@ -520,6 +532,28 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
     return undefined
   }
+  function setupRoute(seg: string[], m: string, body: Record<string, any>): RawResponse {
+    const gone = fail(404, { code: 'not_found', message: 'the host has an administrator: setup is complete', hint: 'sign in' })
+    if (!setup.required) return gone
+    if (seg.length === 1 && m === 'GET') return ok({ required: true, token_issued: true, expires_at: new Date(Date.now() + 20 * 3600_000).toISOString() })
+    if (seg.length !== 1 || m !== 'POST') return fail(404, { code: 'not_found', message: 'No such route' })
+    if (Date.now() < setup.until) return fail(429, { code: 'rate_limited', message: 'too many failed attempts', hint: `try again in ${Math.ceil((setup.until - Date.now()) / 1000)} seconds`, detail: { retry_after: String(Math.ceil((setup.until - Date.now()) / 1000)) } })
+    if (cleanToken(String(body.token ?? '')) !== DEMO_SETUP_TOKEN) {
+      if (++setup.fails >= 5) { setup.fails = 0; setup.until = Date.now() + 30_000 }
+      return fail(401, { code: 'unauthorized', message: 'the setup token is not valid', hint: 'use the token the host printed on its console, or print a new one with jailops-priv setup-token (as root)' })
+    }
+    const name = String(body.name ?? '')
+    if (!validUserName(name)) return fail(400, { code: 'invalid', message: `invalid name "${name}"`, hint: "use lowercase letters, digits, '-', '_' and '.'" })
+    const pw = passwordProblem(String(body.password ?? ''), name)
+    if (pw) return fail(400, { code: 'invalid', message: `password: ${pw}` })
+    setup.required = false
+    setup.fails = 0
+    const u = { metadata: { name, scope: 'fleet' as const, created_at: new Date().toISOString() }, spec: { permission: 'admin' as const, global: true } }
+    db.users.push(u)
+    emit('user-created', `/api/v1/users/${name}`, name)
+    return ok({ user: u, client_address: DEMO_CLIENT_ADDRESS })
+  }
+
   function hostRoute(seg: string[], m: string, body: Record<string, any>): RawResponse | undefined {
     const r = hostAnswer(seg, m, body)
     if (seg[1] === 'firewall' || seg[1] === 'pending') dh.saveFirewall(db.fw)
@@ -527,6 +561,16 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   }
   function hostAnswer(seg: string[], m: string, body: Record<string, any>): RawResponse | undefined {
     if (seg[1] === 'identity' && m === 'GET') return ok(dh.identity(db.host))
+    if (seg[1] === 'certificate') {
+      const a = m === 'GET' && seg.length === 2 ? dc.certificate(db.cert)
+        : m === 'PUT' && seg.length === 2 ? dc.upload(db.cert, body)
+        : m === 'POST' && seg[2] === 'acme' ? dc.useAcme(db.cert, body as never, speed)
+        : m === 'POST' && seg[2] === 'self-signed' ? dc.useSelfSigned(db.cert) : null
+      if (!a) return fail(404, { code: 'not_found', message: 'No such route' })
+      if ('error' in a) return fail(a.status, a.error)
+      if (m !== 'GET') emit('host-certificate-updated', '/api/v1/host/certificate')
+      return ok(a)
+    }
     if (seg[1] === 'firewall' && m === 'GET') return ok(dh.firewall(db.fw))
     if (seg[1] === 'pending' && seg.length === 2 && m === 'GET') return ok(dh.pendingState(db.fw))
     if (seg[1] === 'pending' && (seg[2] === 'confirm' || seg[2] === 'revert') && m === 'POST') {

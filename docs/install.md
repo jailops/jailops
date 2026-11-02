@@ -4,6 +4,48 @@ JailOps needs **FreeBSD 15.1 or later**, a ZFS pool, and a firewall that is `pf`
 whole sequence below on a clean machine, and it is what the CI job runs; if a step here and that script disagree, the
 script is right.
 
+## The appliance path
+
+For a host you run from the web console: install FreeBSD (on ZFS, as the installer offers), then five commands as root.
+
+    pkg install jailops
+    sysrc jailops_priv_enable=YES jailopsd_enable=YES jailopsd_web=YES jailops_appliance=YES    # jailops_pool=zroot to name the pool
+    service jailops_priv start && service jailopsd start
+    jailops-priv setup-token                                     # or read the token and the address on the system console
+    # open https://HOST:39110/ in a browser and enter the token
+
+(Trust the package repository first, as section 2 says.) What happens: `jailops_appliance="YES"` hands host management
+to JailOps ([appliance.md](appliance.md): the host name, resolvers and NTP, and the host's firewall) in both programs at
+once, without editing `priv.conf` or `jailopsd.yaml`. The first start of `jailops_priv` finds no `priv.conf` and sets the
+host up (`jailops-priv appliance-init`: the user, the datasets on `jailops_pool` or the pool of the root file system, the
+configuration files; every command it runs is in syslog). The start of `jailopsd` prints a **one-time setup token** and
+the console's addresses on the system console (and in `/var/log/auth.log`); `jailops-priv setup-token` prints a new one,
+valid for 24 hours. The console opens a wizard: the first administrator (with the token), the host name, the
+certificate, the host firewall (ssh only from your address, reverted unless you confirm), storage and a network, and a
+link to the app catalog (`pkg install jailops-apps` installs it). `jailops doctor` should then report `appliance` ok.
+
+The kernel modules, forwarding and the other host settings of sections 1 and 4 still apply; `jailops doctor` names what
+is missing. The browser warns about the self-signed certificate until you replace it, one of two ways:
+
+### Internet facing: ACME
+
+When the host's DNS name points at it from the internet, let the daemon obtain a certificate from a public CA and renew
+it: in the wizard's certificate step or the Host page (Certificates, Request with ACME), give the names, agree to the CA's
+terms, and choose http-01 (port 80) or tls-alpn-01 (port 443). The daemon is not root, so the host redirects that port to
+it: with the firewall module (on with `jailops_appliance`), apply the host firewall once more after turning ACME on and
+JailOps adds the redirect; otherwise add the two `rdr pass` lines the page shows to `/etc/pf.conf`. Clients then trust the
+certificate through their roots and pin nothing. Wildcard names are not possible (no dns-01). Details:
+[exposure.md](exposure.md#acme-a-certificate-from-a-public-ca).
+
+### Inside a network: your own certificate
+
+On a private network, upload a certificate of your own CA in the wizard or on the Host page (Certificates, Upload): the
+PEM chain, its key and the host name clients use. It is checked, written to `/var/db/jailops/tls`, and served from the
+next connection on; nothing renews it, so upload the next one before it expires (`jailops doctor` warns 14 days before).
+Or keep the self-signed certificate: clients pin its fingerprint (the page shows the `jailops remote add` command).
+
+The rest of this page is the manual path, which the appliance path does for you.
+
 ## 1. What the host needs
 
 - A ZFS pool you are willing to give a dataset to (below: `zroot`, the default pool of the FreeBSD installer). JailOps never runs `zpool upgrade`.

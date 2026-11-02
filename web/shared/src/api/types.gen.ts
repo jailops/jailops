@@ -2,6 +2,12 @@
 // Fields with omitempty or omitzero are optional. Go encodes a nil slice or map without
 // omitempty as null: the API client normalises those to empty values.
 
+export type ACMEChallenge =
+  | "http-01"
+  | "tls-alpn-01"
+
+export const ACMEChallengeValues: readonly ACMEChallenge[] = ['http-01', 'tls-alpn-01']
+
 export type AppCategory =
   | "database"
   | "web"
@@ -21,6 +27,14 @@ export type AppSource =
   | "local"
 
 export const AppSourceValues: readonly AppSource[] = ['catalog', 'local']
+
+export type CertificateSource =
+  | "self-signed"
+  | "configured"
+  | "uploaded"
+  | "acme"
+
+export const CertificateSourceValues: readonly CertificateSource[] = ['self-signed', 'configured', 'uploaded', 'acme']
 
 export type Code =
   | "invalid"
@@ -111,8 +125,9 @@ export type Kind =
   | "WireGuard"
   | "LogForward"
   | "HostFirewall"
+  | "HostCertificate"
 
-export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'Project', 'Storage', 'HostIdentity', 'WireGuard', 'LogForward', 'HostFirewall']
+export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'Project', 'Storage', 'HostIdentity', 'WireGuard', 'LogForward', 'HostFirewall', 'HostCertificate']
 
 export type Layout =
   | "thin"
@@ -213,6 +228,34 @@ export type WireGuardMode =
   | "client"
 
 export const WireGuardModeValues: readonly WireGuardMode[] = ['server', 'client']
+
+export interface ACMERedirect {
+  managed: boolean
+  applied: boolean
+  lines?: string[]
+}
+
+export interface ACMESpec {
+  enabled: boolean
+  email?: string
+  domains: string[]
+  directory_url?: string
+  challenge?: ACMEChallenge
+  accept_tos: boolean
+}
+
+export interface ACMEStatus {
+  spec: ACMESpec
+  state: string
+  last_attempt?: string
+  last_success?: string
+  last_error?: string
+  failures?: number
+  next_attempt?: string
+  renew_at?: string
+  challenge_port: number
+  terms_url?: string
+}
 
 export interface AddressSet {
   metadata: ObjectMeta
@@ -582,6 +625,18 @@ export interface Certificate {
   spec: CertificateSpec
 }
 
+export interface CertificateInfo {
+  subject: string
+  issuer: string
+  names: string[]
+  not_before: string
+  not_after: string
+  days_left: number
+  fingerprint: string
+  self_signed: boolean
+  public_ca: boolean
+}
+
 export interface CertificateSpec {
   fingerprint: string
   permission: Permission
@@ -707,6 +762,26 @@ export interface FirewallRule {
   redirect?: Redirect
 }
 
+export interface HostCertificate {
+  kind: Kind
+  source: CertificateSource
+  current: CertificateInfo
+  acme?: ACMEStatus
+  redirect?: ACMERedirect
+  configured: boolean
+  stored?: boolean
+  listener: boolean
+  port?: number
+  remote_add?: string
+  warnings?: string[]
+}
+
+export interface HostCertificateUpload {
+  certificate: string
+  key: string
+  hostname: string
+}
+
 export interface HostChange {
   dry_run?: boolean
   changed: boolean
@@ -722,6 +797,11 @@ export interface HostFirewall {
   kind: Kind
   spec: HostFirewallSpec
   status: HostFirewallStatus
+}
+
+export interface HostFirewallACME {
+  challenge: ACMEChallenge
+  port: number
 }
 
 export interface HostFirewallAllow {
@@ -772,6 +852,7 @@ export interface HostFirewallSpec {
   icmp: boolean
   logging?: boolean
   nat?: string
+  acme?: HostFirewallACME
 }
 
 export interface HostFirewallStatus {
@@ -1551,6 +1632,30 @@ export interface Session {
   current?: boolean
 }
 
+export interface SetupRequest {
+  token: string
+  name: string
+  password: string
+}
+
+export interface SetupResult {
+  user: User
+  client_address?: string
+}
+
+export interface SetupStatus {
+  required: boolean
+  token_issued: boolean
+  expires_at?: string
+}
+
+export interface SetupToken {
+  token: string
+  expires_at: string
+  urls: string[]
+  hint?: string
+}
+
 export interface Storage {
   metadata: ObjectMeta
   spec: StorageSpec
@@ -2181,4 +2286,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock', 'setup', 'host_certificate']

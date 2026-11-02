@@ -104,7 +104,7 @@ func classify(e Entry) Class {
 		return ClassProject
 	case has("/api/v1/trust"), has("/api/v1/users"), has("/api/v1/tokens"), has("/api/v1/certificates"), has("/api/v1/remotes"),
 		has("/api/v1/groups"), has("/api/v1/rollouts"), has("/api/v1/cluster"), has("/api/v1/server"), has("/api/v1/doctor"),
-		has("/api/v1/resources"), has("/api/v1/backup-targets"), has("/api/v1/host"), has("/api/v1/wireguard"):
+		has("/api/v1/resources"), has("/api/v1/backup-targets"), has("/api/v1/host"), has("/api/v1/wireguard"), has("/api/v1/setup"):
 		return ClassGlobal
 	}
 	panic("auth: no route class for " + e.Key())
@@ -342,6 +342,16 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/host/pending", ro),
 	r("POST", "/api/v1/host/pending/confirm", ad),
 	r("POST", "/api/v1/host/pending/revert", ad),
+	// The console's certificate (docs/exposure.md).
+	r("GET", "/api/v1/host/certificate", ro),
+	r("PUT", "/api/v1/host/certificate", ad),
+	r("POST", "/api/v1/host/certificate/acme", ad),
+	r("POST", "/api/v1/host/certificate/self-signed", ad),
+	// First-run setup (docs/appliance.md): the token is the credential; both routes answer not_found once an
+	// administrator exists. Root issues the token over the socket.
+	pub("GET", "/api/v1/setup"),
+	pub("POST", "/api/v1/setup"),
+	r("POST", "/api/v1/setup/token", ad),
 	r("GET", "/api/v1/backup/key", ad),
 	r("POST", "/api/v1/backup/key", ad),
 	r("POST", "/api/v1/backup/key/escrow", ad),

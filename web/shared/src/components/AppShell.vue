@@ -24,7 +24,7 @@ watch(() => session.authed, (a) => {
   if (a && props.events) startEvents()
   else {
     stopEvents()
-    if (!a && route.name !== 'login') void router.replace('/login?next=' + encodeURIComponent(route.fullPath))
+    if (!a && !route.meta.public) void router.replace('/login?next=' + encodeURIComponent(route.fullPath))
   }
 }, { immediate: true })
 watch(() => route.fullPath, () => (menuOpen.value = false))
@@ -37,7 +37,8 @@ async function out(): Promise<void> {
 
 <template>
   <a class="skip" href="#main">{{ s.app.skip }}</a>
-  <slot v-if="route.name === 'login'" />
+  <!-- a public page (the login, a first-run wizard) stands alone, without the navigation -->
+  <slot v-if="route.meta.public" />
   <div v-else class="shell" :class="{ 'menu-open': menuOpen }">
     <header class="topbar">
       <button class="btn btn-ghost btn-icon menu-btn" type="button" :aria-label="s.app.menu" :aria-expanded="menuOpen" aria-controls="sidebar" @click="menuOpen = !menuOpen"><Icon name="menu" /></button>

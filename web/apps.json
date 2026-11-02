@@ -40,7 +40,8 @@
         "apps",
         "host",
         "wireguard",
-        "logs"
+        "logs",
+        "setup"
       ],
       "devPort": 5173,
       "previewPort": 4173,

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/sdk/api"
@@ -670,6 +671,80 @@ func (s *Server) routeTable() []route {
 			}
 			if v.Last != nil {
 				c.detail = "pending=" + v.Last.ID + " " + v.Last.Outcome
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+	)
+	add(
+		route{method: "GET", pattern: "/api/v1/host/certificate", h: func(c *rc) error {
+			v, err := svc.HostCertificate(c.r.Context())
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "PUT", pattern: "/api/v1/host/certificate", h: func(c *rc) error {
+			var in api.HostCertificateUpload
+			if err := c.decode(&in); err != nil {
+				return err
+			}
+			v, err := svc.UploadHostCertificate(c.r.Context(), in)
+			if err != nil {
+				return err
+			}
+			c.detail = "uploaded fingerprint=" + v.Current.Fingerprint
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/host/certificate/acme", h: func(c *rc) error {
+			var in api.ACMESpec
+			if err := c.decode(&in); err != nil {
+				return err
+			}
+			v, err := svc.UseACMECertificate(c.r.Context(), in)
+			if err != nil {
+				return err
+			}
+			c.detail = "acme " + strings.Join(in.Domains, ",")
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/host/certificate/self-signed", h: func(c *rc) error {
+			v, err := svc.UseSelfSignedCertificate(c.r.Context())
+			if err != nil {
+				return err
+			}
+			c.detail = "self-signed fingerprint=" + v.Current.Fingerprint
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/setup", h: func(c *rc) error {
+			v, err := svc.SetupStatus(c.r.Context())
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/setup", h: func(c *rc) error {
+			var in api.SetupRequest
+			if err := c.decode(&in); err != nil {
+				return err
+			}
+			v, err := svc.Setup(c.r.Context(), in, c.remote())
+			if err != nil {
+				return err
+			}
+			c.object = "/api/v1/users/" + v.User.Metadata.Name
+			c.sync(201, v, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/setup/token", h: func(c *rc) error {
+			v, err := svc.IssueSetupToken(c.r.Context())
+			if err != nil {
+				return err
 			}
 			c.sync(200, v, 0)
 			return nil

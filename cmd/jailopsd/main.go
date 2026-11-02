@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 
 	"jailops.net/jailops/internal/daemon"
@@ -19,6 +20,19 @@ var version = "dev"
 
 func main() { os.Exit(run(os.Args[1:])) }
 
+// modList is a repeatable, comma separated flag.
+type modList []string
+
+func (l *modList) String() string { return strings.Join(*l, ",") }
+func (l *modList) Set(v string) error {
+	for _, p := range strings.Split(v, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			*l = append(*l, p)
+		}
+	}
+	return nil
+}
+
 func run(args []string) int {
 	fs := flag.NewFlagSet("jailopsd", flag.ContinueOnError)
 	cfgPath := fs.String("config", daemon.DefaultConfigPath, "path of the configuration file")
@@ -26,6 +40,8 @@ func run(args []string) int {
 	checkOnly := fs.Bool("check-config", false, "validate the configuration and exit")
 	forceWeb := fs.Bool("web", false, "serve the web console, whatever web.enabled says (it is off by default); with no TLS listener configured it opens :39110")
 	noWeb := fs.Bool("no-web", false, "serve no web console, whatever web.enabled says (the API is unchanged)")
+	var appliance modList
+	fs.Var(&appliance, "appliance-modules", "host management modules rc.conf turns on (jailops_appliance; the rc script passes it), added to host.manage.modules; \"all\" is every module. The helper's own list decides what it changes")
 	fs.Usage = func() {
 		fmt.Fprintf(fs.Output(), "usage: jailopsd [flags]\n       jailopsd version | --version\n\nflags:\n")
 		fs.PrintDefaults()
@@ -49,7 +65,14 @@ func run(args []string) int {
 		return 2
 	}
 	if *checkOnly {
-		if _, err := daemon.Load(*cfgPath); err != nil {
+		cfg, err := daemon.Load(*cfgPath)
+		if err == nil {
+			cfg, err = daemon.ApplyAppliance(daemon.ApplyWebOverride(cfg, *forceWeb, *noWeb), appliance)
+		}
+		if err == nil {
+			err = cfg.CheckListeners()
+		}
+		if err != nil {
 			fmt.Fprintln(os.Stderr, "jailopsd:", err)
 			return 1
 		}
@@ -60,7 +83,7 @@ func run(args []string) int {
 	defer stop()
 	// SIGHUP is ignored: the configuration is read at start.
 	signal.Ignore(syscall.SIGHUP)
-	if err := daemon.Run(ctx, daemon.Options{ConfigPath: *cfgPath, Dev: *dev, Version: version, ForceWeb: *forceWeb, NoWeb: *noWeb}); err != nil {
+	if err := daemon.Run(ctx, daemon.Options{ConfigPath: *cfgPath, Dev: *dev, Version: version, ForceWeb: *forceWeb, NoWeb: *noWeb, ApplianceModules: appliance}); err != nil {
 		fmt.Fprintln(os.Stderr, "jailopsd:", err)
 		return 1
 	}

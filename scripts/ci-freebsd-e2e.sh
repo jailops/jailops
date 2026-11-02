@@ -33,6 +33,13 @@
 #                   checks it byte for byte and that pf runs the original rules. On any failure the EXIT trap puts
 #                   the original pf.conf and rc.conf back, reloads pf and restores the configuration. Off by default;
 #                   CI does not set it: JAILOPS_E2E_HOSTFW=1 sh scripts/ci-freebsd-e2e.sh
+# JAILOPS_E2E_APPLIANCE  1 runs the appliance block (docs/appliance.md, docs/exposure.md) on the test configuration this
+#                   script made: it sets jailops_appliance in /etc/rc.conf with sysrc, restarts both services, checks
+#                   check-config and doctor appliance, runs the setup token flow with curl (a wrong token refused, the
+#                   right one creating the administrator e2e-admin, a second attempt not found), uploads a certificate
+#                   made with openssl and checks that the TLS listener serves it (openssl s_client), checks that wrong
+#                   ACME settings are refused (no CA is contacted), and puts rc.conf, the certificate and the user back.
+#                   It changes no pf.conf. Off by default; CI does not set it: JAILOPS_E2E_APPLIANCE=1 sh scripts/ci-freebsd-e2e.sh
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -351,6 +358,88 @@ if [ "${JAILOPS_E2E_HOSTFW:-}" = 1 ]; then
 	pf_same
 fi
 
+# Appliance mode from rc.conf, the setup token and the console's certificate: only with JAILOPS_E2E_APPLIANCE=1, on the
+# test configuration above, and always put back.
+if [ "${JAILOPS_E2E_APPLIANCE:-}" = 1 ]; then
+	step "appliance mode (JAILOPS_E2E_APPLIANCE=1: the rc.conf switch, the setup token, a certificate upload, ACME refusals)"
+	aorig=$work/appliance-orig
+	rm -rf "$aorig"; mkdir -p "$aorig"
+	cp -p /etc/rc.conf "$aorig/rc.conf"
+	tlsdir=/var/db/jailops/tls
+	api() { # api METHOD PATH [BODY]: a request as root on the daemon's socket; prints the status, a space and the body
+		curl -s --unix-socket /var/run/jailops/jailops.sock -o "$work/api.out" -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' \
+			${3:+-d "$3"} "http://jailops.local$2"
+		printf ' '; cat "$work/api.out"
+	}
+	anon() { # anon METHOD PATH [BODY]: the same, anonymous, on the TLS listener
+		curl -ks -o "$work/anon.out" -w '%{http_code}' -X "$1" -H 'Content-Type: application/json' ${3:+-d "$3"} "https://127.0.0.1:39110$2"
+		printf ' '; cat "$work/anon.out"
+	}
+	appliance_cleanup() { # rc.conf, the certificate and the user as they were
+		[ -n "${appliance_dirty:-}" ] || return 0
+		echo "putting rc.conf, the certificate and the users back" >&2
+		cp -p "$aorig/rc.conf" /etc/rc.conf
+		$J -y user delete e2e-admin >/dev/null 2>&1 || true
+		rm -f "$tlsdir/choice.json" "$tlsdir/uploaded.crt" "$tlsdir/uploaded.key"
+		service jailops_priv restart >/dev/null 2>&1; service jailopsd restart >/dev/null 2>&1
+		appliance_dirty=
+	}
+	host_cleanup() { appliance_cleanup; }
+	appliance_dirty=1
+	expect "doctor: appliance off" 'appliance +PASS' sh -c "$J doctor 2>&1; true"
+	sysrc jailops_appliance=YES jailops_appliance_modules="identity firewall" >/dev/null
+	expect "check-config lists the modules" '^host manage: +identity, firewall' service jailops_priv checkconfig
+	expect "check-config says they come from rc.conf" '^appliance: +on: rc.conf' service jailops_priv checkconfig
+	check "restart jailops_priv" service jailops_priv restart
+	started=$(service jailopsd restart 2>&1) || { echo "$started" >&2; fail "restart jailopsd"; }
+	n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
+	expect "doctor: the daemon and the helper agree" 'appliance +PASS +.*identity, firewall' sh -c "$J doctor 2>&1; true"
+	expect "the identity module is managed" 'Managed: +yes' $J host show
+	# the setup token: on the console and in auth.log at the start, and again from jailops-priv setup-token
+	printf '%s\n' "$started" | grep -q 'Setup token:' || { echo "$started" >&2; fail "the start of jailopsd printed no setup token"; }
+	expect_retry "auth.log has the token" 'Setup token:' tail -n 300 /var/log/auth.log
+	if grep -q 'Setup token:' /var/log/messages; then fail "the setup token is in /var/log/messages"; fi
+	tok=$(/usr/local/libexec/jailops-priv setup-token | awk '/Setup token:/ { print $3 }')
+	[ -n "$tok" ] || fail "jailops-priv setup-token printed no token"
+	pw='e2e passphrase for the appliance'
+	expect "setup is required" '^200 .*"required":true' anon GET /api/v1/setup
+	expect "a wrong token is refused" '^401 ' anon POST /api/v1/setup "{\"token\":\"AAAA$tok\",\"name\":\"e2e-admin\",\"password\":\"$pw\"}"
+	expect "the right token creates the administrator" '^201 .*"name":"e2e-admin"' anon POST /api/v1/setup "{\"token\":\"$tok\",\"name\":\"e2e-admin\",\"password\":\"$pw\"}"
+	expect "a second attempt is not found" '^404 ' anon POST /api/v1/setup "{\"token\":\"$tok\",\"name\":\"e2e-two\",\"password\":\"$pw\"}"
+	expect "the setup status is not found" '^404 ' anon GET /api/v1/setup
+	expect "setup-token says the setup is complete" 'setup is complete' sh -c '/usr/local/libexec/jailops-priv setup-token 2>&1; true'
+	expect "the administrator signs in" '^200 ' anon POST /api/v1/auth/login "{\"username\":\"e2e-admin\",\"password\":\"$pw\"}"
+	# a certificate of a test CA, uploaded through the API and served by the TLS listener
+	cd "$work"
+	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 120 -subj /CN=e2e-ca -keyout ca.key -out ca.crt \
+		-addext basicConstraints=critical,CA:TRUE -addext keyUsage=critical,keyCertSign >/dev/null 2>&1 || fail "openssl: the test CA"
+	openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -subj /CN=e2e.example.com -keyout srv.key -out srv.csr >/dev/null 2>&1 || fail "openssl: the request"
+	printf 'subjectAltName=DNS:e2e.example.com\nextendedKeyUsage=serverAuth\n' > srv.ext
+	openssl x509 -req -in srv.csr -CA ca.crt -CAkey ca.key -CAcreateserial -days 90 -extfile srv.ext -out srv.crt >/dev/null 2>&1 || fail "openssl: the certificate"
+	cd "$root"
+	jpem() { awk 'BEGIN { ORS = "" } { print $0 "\\n" }' "$1"; } # a PEM file as one JSON string
+	upload() { printf '{"certificate":"%s%s","key":"%s","hostname":"%s"}' "$(jpem "$work/srv.crt")" "$(jpem "$work/ca.crt")" "$(jpem "$work/srv.key")" "$1"; }
+	expect "a certificate for another name is refused" '^400 .*not valid for www\.example\.com' api PUT /api/v1/host/certificate "$(upload www.example.com)"
+	expect "the upload" '^200 .*"source":"uploaded"' api PUT /api/v1/host/certificate "$(upload e2e.example.com)"
+	expect "the files are 0600" '^-rw------- ' ls -l "$tlsdir/uploaded.key"
+	expect "the TLS listener serves it" 'CN *= *e2e\.example\.com' sh -c "openssl s_client -connect 127.0.0.1:39110 -servername e2e.example.com </dev/null 2>/dev/null | openssl x509 -noout -subject"
+	expect "it verifies against the test CA" 'Verify return code: 0' sh -c "openssl s_client -connect 127.0.0.1:39110 -servername e2e.example.com -CAfile $work/ca.crt -verify_hostname e2e.example.com </dev/null 2>&1"
+	expect "doctor: tls.certificate" 'tls\.certificate +PASS +uploaded' sh -c "$J doctor 2>&1; true"
+	# ACME settings that cannot work are refused before a CA is asked
+	expect "ACME without the terms" '^400 .*accept_tos' api POST /api/v1/host/certificate/acme '{"domains":["e2e.example.com"]}'
+	expect "ACME with a wildcard" '^501 .*dns-01' api POST /api/v1/host/certificate/acme '{"domains":["*.example.com"],"accept_tos":true}'
+	expect "ACME with an address" '^400 .*is an address' api POST /api/v1/host/certificate/acme '{"domains":["192.0.2.10"],"accept_tos":true}'
+	expect "ACME with a bad email" '^400 .*not an email' api POST /api/v1/host/certificate/acme '{"domains":["e2e.example.com"],"email":"root","accept_tos":true}'
+	expect "ACME over plain http" '^400 .*https' api POST /api/v1/host/certificate/acme '{"domains":["e2e.example.com"],"directory_url":"http://ca.example.com/dir","accept_tos":true}'
+	expect "still the uploaded certificate" '"source":"uploaded"' api GET /api/v1/host/certificate
+	expect "the self-signed certificate again" '^200 .*"source":"self-signed"' api POST /api/v1/host/certificate/self-signed '{}'
+	expect "the TLS listener serves it" 'CN *= *' sh -c "openssl s_client -connect 127.0.0.1:39110 </dev/null 2>/dev/null | openssl x509 -noout -subject"
+	appliance_cleanup
+	n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
+	expect "doctor: appliance off again" 'appliance +PASS +off' sh -c "$J doctor 2>&1; true"
+	cmp -s "$aorig/rc.conf" /etc/rc.conf || fail "/etc/rc.conf is not the original"
+fi
+
 run_pf() {
 	step "the packet filter, with real traffic (scripts/ci-freebsd-pf.sh)"
 	# the full matrix takes minutes of waiting in its last phases; the quick form still covers every rule path
@@ -431,7 +520,9 @@ else
 	# the server on the loopback address
 	check "a client from the token" $J wireguard join "$token" --name home --endpoint 127.0.0.1:51820 --address 10.97.0.2/32 --allowed-ips 10.97.1.0/24
 	expect "the client's interface says what it is" 'description: jailops wireguard=home' ifconfig wg-home
-	# a handshake starts with the first packet into the tunnel: send one (it gets no answer, which does not matter) each try
+	# a handshake starts with the first packet into the tunnel (or at the first keepalive, 25 s later): route the allowed
+	# network into the client's interface (the route goes with the interface) and send a packet each try; no answer is needed
+	route -n add -net 10.97.1.0/24 -interface wg-home >/dev/null 2>&1 || true
 	expect_retry "a handshake between the two" '[[:space:]][1-9][0-9]+$' sh -c "ping -c 1 -t 1 10.97.1.1 >/dev/null 2>&1; $wgbin show wg-home latest-handshakes"
 	expect "the server reports it" 'laptop .* ago' $J wireguard status office
 	if $J doctor 2>&1 | grep -E ' FAIL '; then fail "doctor reports a failing check with tunnels"; fi

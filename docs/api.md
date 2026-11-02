@@ -127,3 +127,32 @@ of the pending change in `detail.pending`. In Go:
     fw, err := c.HostSystem().Firewall().Get(ctx)
     ch, err := c.HostSystem().Firewall().Apply(ctx, api.HostFirewallApply{Spec: spec, ConfirmWithin: 300})
     p, err := c.HostSystem().Confirm(ctx, ch.Pending.ID) // or Revert, or Pending
+
+While the console's certificate comes from ACME, the spec has `acme` (`{"challenge": "http-01", "port": 39080}`), filled
+in by the daemon like `console.port` (a value a client sends is replaced): the helper renders the `rdr` of port 80 (or
+443 for `tls-alpn-01`) to that port on `127.0.0.1` and `::1`, and its `pass` rule ([exposure.md](exposure.md#acme-a-certificate-from-a-public-ca)).
+
+### The console's certificate
+
+Extension `host_certificate` ([exposure.md](exposure.md)):
+
+| Route | Role | What |
+|---|---|---|
+| `GET /api/v1/host/certificate` | readonly, global | kind `HostCertificate`: `source` (`self-signed`, `configured`, `uploaded`, `acme`), `current` (`subject`, `issuer`, `names`, `not_before`, `not_after`, `days_left`, `fingerprint`, `self_signed`, `public_ca`), `acme` (`spec`, `state` idle, requesting, valid or error, `last_attempt`, `last_success`, `last_error`, `failures`, `next_attempt`, `renew_at`, `challenge_port`, `terms_url`), `redirect` (`managed`, `applied`, `lines`), `configured`, `stored`, `listener`, `port`, `remote_add`, `warnings` |
+| `PUT /api/v1/host/certificate` | admin, global | body `{"certificate": "PEM chain, leaf first", "key": "PEM", "hostname": "console.example.com"}`; `invalid` with the reason when it cannot work; `conflict` when `jailopsd.yaml` names the files |
+| `POST /api/v1/host/certificate/acme` | admin, global | body `ACMESpec` (`domains`, `email`, `directory_url`, `challenge`, `accept_tos`); answers at once, the request to the CA runs in the background (follow `acme.state`); a wildcard is `unsupported` |
+| `POST /api/v1/host/certificate/self-signed` | admin, global | the generated certificate again |
+
+In Go: `c.HostSystem().Certificate().Get(ctx)`, `.Upload(ctx, in)`, `.UseACME(ctx, spec)`, `.UseSelfSigned(ctx)`.
+
+### First-run setup
+
+Extension `setup` ([appliance.md](appliance.md#the-first-boot-wizard-built)). While no global administrator exists:
+
+| Route | Role | What |
+|---|---|---|
+| `GET /api/v1/setup` | public | `SetupStatus`: `required`, `token_issued`, `expires_at` |
+| `POST /api/v1/setup` | public | body `{"token": "...", "name": "admin", "password": "..."}`; 201 `SetupResult` (`user`, `client_address`); `unauthorized` for a wrong, expired or missing token (locked out per source after 5, `rate_limited`), `invalid` for the name or the password |
+| `POST /api/v1/setup/token` | admin, global (root on the socket) | `SetupToken`: `token` (shown once), `expires_at`, `urls`, `hint` |
+
+All three answer `not_found` once an administrator exists. In Go: `c.SetupStatus(ctx)`, `c.Setup(ctx, req)`, `c.SetupToken(ctx)`.

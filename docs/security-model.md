@@ -56,6 +56,29 @@ directory (`host-dir`) so a restore can only put back what the helper itself cop
 let your API admins change what it owns. The details, and the threat model, are in the security section of
 [appliance.md](appliance.md#security).
 
+**One switch in `rc.conf`.** `jailops_appliance="YES"` in `/etc/rc.conf` (with `jailops_appliance_modules`, default all
+modules) turns the same modules on in both programs without editing the two files: the rc script of `jailops_priv`
+passes them to the helper when it starts (`-appliance-modules`; the helper manages `host-manage` of `priv.conf` and these
+together), and the rc script of `jailopsd` passes them to the daemon. This is no weaker than the two files: `rc.conf`
+belongs to root like `priv.conf`, the helper reads the list once at its start from its own command line and never from
+the daemon, and whoever can write `rc.conf` is root and could edit `priv.conf` as well. The daemon still cannot switch
+itself on: what it lists and the helper does not answers `not_managed`, and `jailops doctor` (check `appliance`) warns
+when the two lists differ. A first start in appliance mode also runs `jailops-priv appliance-init` (the setup `init`
+does) when `priv.conf` does not exist yet, on `jailops_pool` or the pool of the root file system, and never on a pool
+that holds another JailOps dataset; every command it runs goes to syslog.
+
+## The first administrator: the setup token
+
+A host without an administrator accepts one request that creates the first one, `POST /api/v1/setup`, with a one-time
+setup token. Only root issues the token (`POST /api/v1/setup/token` over the socket, which `jailops-priv setup-token`
+and, in appliance mode, the rc script of `jailopsd` call); it is 32 random bytes (base32), valid for 24 hours, replaced
+by the next one, stored only as its SHA-256 (`<state_dir>/setup/token.json`, 0600) and used up by the administrator it
+creates. The rc script shows it on the system console and logs it with the facility `authpriv` (on FreeBSD
+`/var/log/auth.log`, readable by root only), never in the daemon's own log (`/var/log/messages` is readable by
+everyone). Wrong, expired and missing tokens get the same answer and count toward a lockout per source, like failed
+logins. A host reachable from the network before its setup therefore cannot be taken over without what is printed on its
+console. Once any global administrator exists, every setup route answers `not_found` and a new token cannot be issued.
+
 ## Log forwarding
 
 `jailopsd` can send the jails' logs and its audit log to syslog servers and webhooks ([logging.md](logging.md)). It reads
@@ -76,12 +99,23 @@ validated fields, which is the power the `priv.conf` line grants.
 
 ## What listens, and how to expose it
 
-By default only the unix socket listens. `listen.https.address` opens a TLS 1.3 listener (there is no plain-http TCP listener), with a
-generated self-signed certificate that clients pin or one you provide (`listen.https.cert`/`key`, reloaded without a restart, never
-generated over). Clients are pinned client certificates, API tokens, or console logins; the listener requests a client certificate and
-does not require one. The web console is always built in and off by default (`web.enabled: true` or `jailopsd_web="YES"` turns it on; `-tags noweb` builds `jailopsd` without it). Three recipes (local only, behind a
-proxy, direct with mTLS), what changes behind a proxy, and the **Not yet** list (ACME, a require-client-certificate mode, the caller's
-address behind a proxy) are in [exposure.md](exposure.md).
+By default only the unix socket listens. `listen.https.address` opens a TLS 1.3 listener, with a generated self-signed
+certificate that clients pin, one you provide (`listen.https.cert`/`key`, reloaded without a restart, never generated over),
+one an administrator uploads, or one the daemon obtains with ACME. The only plain-http TCP listener is the ACME challenge
+listener (`listen.https.acme.challenge_address`, default `:39080`, open only while ACME with http-01 is the source): it
+answers `/.well-known/acme-challenge/<token>` for the tokens of a running order and 404 for everything else. Clients are
+pinned client certificates, API tokens, or console logins; the listener requests a client certificate and does not require
+one. The web console is always built in and off by default (`web.enabled: true` or `jailopsd_web="YES"` turns it on;
+`-tags noweb` builds `jailopsd` without it). Three recipes (local only, behind a proxy, direct with mTLS), ACME and its
+limits, what changes behind a proxy, and the **Not yet** list (DNS-01 and wildcard certificates, a require-client-certificate
+mode, the caller's address behind a proxy) are in [exposure.md](exposure.md).
+
+The ACME account key and the certificate's key live in `<data_dir>/tls/acme` (0700, files 0600), the daemon's own
+directory: they are the daemon's secrets like its seal key, and a compromised daemon holds them anyway. The redirect of
+the CA's port (80 or 443) to the daemon's unprivileged port is pf's: rendered by the helper when the firewall module
+manages `/etc/pf.conf` (two `rdr` rules to the loopback addresses and one `pass`, from two validated numbers), otherwise
+two lines the administrator adds. Changing the certificate (upload, ACME, self-signed again) needs a global admin and
+is audited.
 
 ## Roles and scopes of API users
 
@@ -117,7 +151,8 @@ permission table, one scope rule and one audit trail, whether the request arrive
   and `set-role` recover a lost password or a wrong role. There is no separate reset mechanism.
 - **Every other local user is anonymous**, exactly like an unauthenticated remote client. It reaches `GET /api/v1`,
   `GET /healthz`, the login (`POST /api/v1/auth/login`), trust-token redemption (`POST /api/v1/trust/clients`),
-  `POST /api/v1/cluster/join` (answers 501) and the static web console, and nothing else. It can authenticate over the socket
+  `POST /api/v1/cluster/join` (answers 501), the first-run setup (`GET` and `POST /api/v1/setup`, which need the setup
+  token and answer `not_found` once an administrator exists) and the static web console, and nothing else. It can authenticate over the socket
   with an API token, or with a session cookie from a password login, like any remote client. A test runs every route as an
   anonymous remote client and as an anonymous local one and requires the same answer.
 
@@ -134,6 +169,10 @@ administrator; every other local user is refused. The former `admin_group` key i
 There is no trust on first use. An admin creates a single-use token bound to a name, with an expiry (one hour by
 default); the token carries the server certificate's fingerprint, so the new client pins the server before it sends
 anything. The client then sends its own certificate, and the server stores it with the role and scope the token asked for.
+The fingerprint is that of the certificate served when the token is issued. With a certificate a public CA signed (ACME),
+which is replaced at every renewal, a pin breaks: use an API token instead and let the client verify the certificate with
+its trusted roots; the console's Host page and `GET /api/v1/host/certificate` (`remote_add`) give the command without a
+fingerprint then.
 A hub forwards requests to hosts over pinned mTLS with a signed claim of the caller's role and scope that a host only
 accepts from a certificate of kind `hub` and limits by that certificate's own entry. Failed authentications are rate
 limited per source and audited.

@@ -4,7 +4,7 @@ import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
 import { runOp } from '@jailops/shared/composables/ops'
-import { session } from '@jailops/shared/composables/session'
+import { session, hasExt } from '@jailops/shared/composables/session'
 import { ApiError } from '@jailops/shared/api/client'
 import { stamp } from '@jailops/shared/lib/format'
 import Icon from '@jailops/shared/components/Icon.vue'
@@ -17,6 +17,7 @@ import TokenManager, { type TokenForm } from '@jailops/shared/components/TokenMa
 import ScopePicker from '@/components/ScopePicker.vue'
 import { isGlobalAdmin } from '@/composables/project'
 import { remoteAddCommand } from '@/lib/trust'
+import { publicRemoteAddCommand } from '@/lib/setup'
 import type { Certificate, Permission, TrustToken, User } from '@jailops/shared/api/types'
 
 type Tab = 'tokens' | 'trust' | 'certs' | 'users' | 'sessions' | 'whoami'
@@ -57,6 +58,11 @@ async function createTrust(): Promise<void> {
   }
 }
 const command = computed(() => (issued.value ? remoteAddCommand(location.host, issued.value.token) : ''))
+// A certificate a public CA signed is renewed every few weeks: a trust token pins the one served now, so the client
+// breaks at the renewal. With such a certificate an API token and the host's trusted roots are the way in.
+const cert = useLoad(async () => (hasExt('host_certificate') && admin.value ? api.host.certificate().catch(() => undefined) : undefined))
+const publicCA = computed(() => !!cert.data.value?.current.public_ca)
+const publicCommand = computed(() => publicRemoteAddCommand(location.hostname.split('.')[0] || 'host', location.host))
 
 // ---- users ----
 const nu = reactive({ name: '', role: 'operator' as Permission, projects: [] as string[], global: false, password: '' })
@@ -261,6 +267,10 @@ const scopeText = (x: { projects?: string[]; global?: boolean }) => (x.global ? 
       <Callout tone="warn">{{ s.trust.shownOnce }}</Callout>
       <div class="field" style="margin-top: 12px"><span class="label">{{ s.trust.token }}</span><CopyField :value="issued?.token ?? ''" :label="s.trust.token" /></div>
       <div class="field"><span class="label">{{ s.trust.command }}</span><CopyField :value="command" label="command" /></div>
+      <template v-if="publicCA">
+        <Callout tone="info" data-test="public-ca">{{ s.trust.publicCA }}</Callout>
+        <div class="field" style="margin-top: 12px"><span class="label">{{ s.trust.publicCommand }}</span><CopyField :value="publicCommand" label="public-command" /></div>
+      </template>
       <p v-if="issued" class="faint">{{ s.trust.expiresAt(stamp(issued.expires_at)) }}</p>
       <template #footer><button class="btn btn-primary" type="button" data-test="secret-done" @click="issued = null; l.reload()">{{ s.access.done }}</button></template>
     </Modal>

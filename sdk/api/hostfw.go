@@ -82,6 +82,17 @@ type HostFirewallSpec struct {
 	Logging bool `json:"logging,omitempty" yaml:"logging,omitempty"`
 	// NAT is "none" (or empty): the module renders no NAT of its own.
 	NAT string `json:"nat,omitempty" yaml:"nat,omitempty"`
+	// ACME is the redirect of the CA's challenge port to the daemon, set by the daemon while the console's certificate
+	// comes from ACME (docs/exposure.md); nil renders none.
+	ACME *HostFirewallACME `json:"acme,omitempty" yaml:"acme,omitempty"`
+}
+
+// HostFirewallACME redirects the port an ACME challenge arrives on (80 for http-01, 443 for tls-alpn-01) to the
+// daemon's unprivileged port on the loopback addresses. The helper renders it from these two values only.
+type HostFirewallACME struct {
+	Challenge ACMEChallenge `json:"challenge" yaml:"challenge"`
+	// Port is the daemon's challenge listener (http-01) or its TLS listener (tls-alpn-01), 1024 to 65535.
+	Port int `json:"port" yaml:"port"`
 }
 
 // HostFirewallSSH is the ssh door of the host.
@@ -443,9 +454,38 @@ func (s HostFirewallSpec) Validate() error {
 			return Errorf(CodeInvalid, "%s: %s", what, err.(*Error).Message)
 		}
 	}
+	if err := s.validACME(); err != nil {
+		return err
+	}
 	if t == HostFirewallOpen && ((s.SSH != nil && len(s.SSH.AllowFrom) > 0) || (s.Console != nil && len(s.Console.AllowFrom) > 0)) {
 		return Errorf(CodeInvalid, "the open template passes everything: ssh and console sources would have no effect").
 			WithHint("use the default or custom-rules template to narrow ssh and the console")
+	}
+	return nil
+}
+
+// validACME checks the redirect of an ACME challenge: a known challenge, an unprivileged port that is no other door,
+// and for tls-alpn-01 the console's own port.
+func (s HostFirewallSpec) validACME() error {
+	a := s.ACME
+	if a == nil {
+		return nil
+	}
+	if a.Challenge != ACMEHTTP01 && a.Challenge != ACMETLSALPN01 {
+		return Errorf(CodeInvalid, "acme challenge %q is not http-01 or tls-alpn-01", a.Challenge)
+	}
+	if a.Port < 1024 || a.Port > 65535 {
+		return Errorf(CodeInvalid, "acme port %d is not an unprivileged port (1024-65535)", a.Port)
+	}
+	console := 0
+	if s.Console != nil {
+		console = s.Console.Port
+	}
+	if a.Challenge == ACMETLSALPN01 && a.Port != console {
+		return Errorf(CodeInvalid, "tls-alpn-01 redirects port 443 to the console's port (%d), not to %d", console, a.Port)
+	}
+	if a.Challenge == ACMEHTTP01 && (a.Port == console || (s.SSH != nil && slices.Contains(s.SSH.Ports, a.Port))) {
+		return Errorf(CodeInvalid, "acme port %d is already the port of ssh or the console", a.Port)
 	}
 	return nil
 }
@@ -480,6 +520,10 @@ func (s HostFirewallSpec) Canonical() HostFirewallSpec {
 		con = HostFirewallConsole{Port: s.Console.Port, AllowFrom: canon(s.Console.AllowFrom)}
 	}
 	out.Console = &con
+	if s.ACME != nil {
+		a := *s.ACME
+		out.ACME = &a
+	}
 	for _, a := range s.Allow {
 		out.Allow = append(out.Allow, HostFirewallAllow{Proto: a.Proto, Ports: slices.Clone(a.Ports), From: canon(a.From), Comment: strings.TrimSpace(a.Comment)})
 	}
@@ -611,6 +655,9 @@ func (s HostFirewallSpec) Warnings() []string {
 	if s.Template == HostFirewallOpen {
 		w = append(w, "the open template passes everything to the host; use it only behind another firewall")
 	}
+	if s.ACME != nil && s.ACME.Challenge == ACMETLSALPN01 && s.Template != HostFirewallOpen {
+		w = append(w, "port 443 leads to the console from any address (the CA's addresses are not known): console allow_from does not narrow it")
+	}
 	return w
 }
 
@@ -652,6 +699,10 @@ func (s HostFirewallSpec) Rules() []HostFirewallRule {
 		fixed("pass", "in", "icmp6", "", "neighbour discovery and router advertisements"),
 		fixed("pass", "in", "icmp, icmp6", "", "path MTU discovery and ICMP errors"),
 	)
+	if a := s.ACME; a != nil {
+		out = append(out, HostFirewallRule{Action: "pass", Direction: "in", Proto: "tcp", Ports: strconv.Itoa(ACMEChallengePort(a.Challenge)), From: "any",
+			Comment: fmt.Sprintf("ACME %s challenges, redirected to the daemon's port %d", a.Challenge, a.Port)})
+	}
 	if s.Template == HostFirewallOpen {
 		return out
 	}

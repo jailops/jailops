@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -77,6 +78,13 @@ type Options struct {
 	HostManage []string
 	// LogForwardTune adjusts the log forwarder (poll interval, file check).
 	LogForwardTune func(*logfwd.Env)
+	// ApplianceModules is the -appliance-modules flag (jailops_appliance in rc.conf).
+	ApplianceModules []string
+	// ACMEHTTPClient, TLSRoots and ListenChallenge are the daemon's options of the same names.
+	ACMEHTTPClient  *http.Client
+	TLSRoots        *x509.CertPool
+	ListenChallenge func(addr string) (net.Listener, error)
+	ACMEAttempted   func(error)
 }
 
 // Env is a running daemon with its fakes.
@@ -299,6 +307,7 @@ func (e *Env) Start() {
 	env := api.Environment{OS: "FreeBSD", Arch: "amd64", Pool: "tank", PF: true}
 	d, err := daemon.Start(context.Background(), daemon.Options{
 		Config: &cfg, Version: "test", ForceWeb: e.Opts.ForceWeb, NoWeb: e.Opts.NoWeb, LogOutput: out, Hostname: host, Env: &env, NoListen: !e.Opts.Listen, Registrar: e.Opts.Registrar, Now: e.Opts.Now, Backups: e.Opts.Backups, Execer: e.execer(), BackupTLS: e.Opts.BackupTLS, BackupMounter: e.Opts.BackupMounter, LogForwardTune: e.Opts.LogForwardTune,
+		ApplianceModules: e.Opts.ApplianceModules, ACMEHTTPClient: e.Opts.ACMEHTTPClient, TLSRoots: e.Opts.TLSRoots, ListenChallenge: e.Opts.ListenChallenge, ACMEAttempted: e.Opts.ACMEAttempted,
 		Clients: func(ctx context.Context, c *daemon.Config, dev bool) (*daemon.Clients, error) {
 			cl := &daemon.Clients{ZFS: e.ZFS, Jails: e.Jails, PF: e.PF, Net: e.Net, Runner: e.Run, Files: e.Files, Logs: fileLogs{e.Files},
 				Sysctl:  func(_ context.Context, name string) (string, error) { return e.sysctl(name) },

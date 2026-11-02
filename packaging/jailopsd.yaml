@@ -25,6 +25,17 @@ listen:
     # cert: /etc/ssl/jailops/fullchain.pem     # your certificate (give cert and key together; must exist, never generated over).
     # key: /etc/ssl/jailops/privkey.pem        # a renewed pair is picked up without a restart (checked at most every 15s)
     #                                          # default <data_dir>/tls/server.{crt,key}: self-signed, generated on first start
+    # A certificate from a public CA with ACME (docs/exposure.md), obtained and renewed by the daemon; not together
+    # with cert and key. A choice made on the console's Host page (stored in <data_dir>/tls/choice.json) replaces it.
+    acme:
+      enabled: false
+      # email: admin@example.com             # optional contact of the account
+      # domains: [console.example.com]       # DNS names that point at this host; no wildcards (they need dns-01)
+      # directory_url: https://acme-v02.api.letsencrypt.org/directory
+      #                                      # staging, for trying: https://acme-staging-v02.api.letsencrypt.org/directory
+      # challenge: http-01                   # or tls-alpn-01; the host redirects port 80 (or 443) to the daemon
+      # accept_tos: false                    # must be true: you agree to the CA's terms of service
+      # challenge_address: ":39080"          # the plain-http listener of http-01 challenges (it serves nothing else)
 
 web:
   enabled: false                # true: serve the embedded web console on the listeners (it is always in the binary); the API is the same either way
@@ -84,7 +95,8 @@ apps:
 # Host management (appliance mode, docs/appliance.md): the parts of the host JailOps itself changes. Empty (the
 # default): JailOps never changes the host, and GET /api/v1/host/identity only reads. "identity" is the host name, the
 # resolvers and NTP; "firewall" is /etc/pf.conf, written whole, and every change of it reverts unless confirmed.
-# priv.conf must list the same modules (host-manage = identity, firewall).
+# priv.conf must list the same modules (host-manage = identity, firewall). jailops_appliance="YES" in /etc/rc.conf adds
+# the modules of jailops_appliance_modules (default all) to this list and to the helper's (docs/appliance.md).
 host:
   manage:
     modules: []

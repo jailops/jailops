@@ -9,7 +9,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"golang.org/x/crypto/acme"
 )
 
 func (d *Daemon) listen() error {
@@ -24,11 +27,12 @@ func (d *Daemon) listen() error {
 	}
 	if a := cfg.Listen.HTTPS.Address; a != "" {
 		tc := &tls.Config{
-			GetCertificate: d.certs.GetCertificate, MinVersion: tls.VersionTLS13,
+			GetCertificate: d.certMgr.GetCertificate, MinVersion: tls.VersionTLS13,
 			// Client certificates are optional: a pinned one authenticates a
 			// host or hub, everybody else uses a token or the UI login.
 			ClientAuth: tls.RequestClientCert,
-			NextProtos: []string{"h2", "http/1.1"},
+			// acme-tls/1 is the tls-alpn-01 challenge: answered with the challenge's certificate only
+			NextProtos: []string{"h2", "http/1.1", acme.ALPNProto},
 		}
 		ln, err := tls.Listen("tcp", a, tc)
 		if err != nil {
@@ -89,4 +93,42 @@ func listenUnix(path string, mode os.FileMode) (net.Listener, error) {
 		return nil, err
 	}
 	return ln, nil
+}
+
+// consoleURLs are the addresses of the console, for the setup token: the listener's own address when it names one,
+// else the host name (when it is qualified) and the host's unicast addresses, loopback and link-local left out.
+func consoleURLs(addr, hostname string, ifaddrs func() ([]net.Addr, error)) []string {
+	if addr == "" {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil
+	}
+	url := func(h string) string { return "https://" + net.JoinHostPort(h, port) + "/" }
+	if ip := net.ParseIP(host); host != "" && (ip == nil || !ip.IsUnspecified()) {
+		return []string{url(host)}
+	}
+	var out []string
+	if strings.Contains(hostname, ".") {
+		out = append(out, url(hostname))
+	}
+	addrs, _ := ifaddrs()
+	var v4, v6 []string
+	for _, a := range addrs {
+		n, ok := a.(*net.IPNet)
+		if !ok || n.IP.IsLoopback() || n.IP.IsLinkLocalUnicast() || n.IP.IsUnspecified() || n.IP.IsMulticast() {
+			continue
+		}
+		if n.IP.To4() != nil {
+			v4 = append(v4, url(n.IP.String()))
+		} else if host != "0.0.0.0" {
+			v6 = append(v6, url(n.IP.String()))
+		}
+	}
+	out = append(append(out, v4...), v6...)
+	if len(out) > 8 {
+		out = out[:8]
+	}
+	return out
 }

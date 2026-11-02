@@ -1,5 +1,5 @@
 .\" jailopsd.8, installed as /usr/local/share/man/man8/jailopsd.8
-.Dd October 29, 2026
+.Dd November 2, 2026
 .Dt JAILOPSD 8
 .Os
 .Sh NAME
@@ -10,9 +10,12 @@
 .Op Fl config Ar file
 .Op Fl dev
 .Op Fl web | Fl no-web
+.Op Fl appliance-modules Ar list
 .Nm
 .Fl check-config
 .Op Fl config Ar file
+.Op Fl web | Fl no-web
+.Op Fl appliance-modules Ar list
 .Nm
 .Cm version
 .Sh DESCRIPTION
@@ -64,6 +67,19 @@ The API is unchanged.
 and
 .Fl no-web
 exclude each other.
+.It Fl appliance-modules Ar list
+The host management modules
+.Va jailops_appliance
+of
+.Pa /etc/rc.conf
+turns on, comma separated, or
+.Sy all :
+added to
+.Sy host.manage.modules .
+What the helper changes is decided by its own list
+.Pq Xr jailops-priv 8 ;
+a module only the daemon lists answers
+.Sy not_managed .
 .It Fl dev
 Development: run the privileged operations in the daemon's own process.
 Needs root; never used by the rc.d script.
@@ -83,9 +99,10 @@ and sends its output to syslog with the tag
 .Sy jailopsd .
 It requires
 .Sy jailops_priv ,
-.Sy NETWORKING
+.Sy NETWORKING ,
+.Sy pf
 and
-.Sy pf .
+.Sy syslogd .
 .Bl -tag -width jailopsd_config
 .It Va jailopsd_enable
 Set to
@@ -107,6 +124,17 @@ passes
 passes
 .Fl no-web ;
 unset, the configuration decides.
+.It Va jailops_appliance
+.Dq YES
+passes
+.Fl appliance-modules
+with
+.Va jailops_appliance_modules
+(default: all modules), and, after every start while no administrator exists,
+prints a new setup token and the console's addresses on
+.Pa /dev/console
+and to syslog
+.Pq Cm jailops-priv setup-token .
 .El
 .Pp
 The configuration is validated as the daemon's user with
@@ -174,4 +202,12 @@ The design and the guides are installed under
 .Sh SETUP
 A first-time host is set up with
 .Dl jailops-priv init -pool POOL
-which creates the user, the datasets and both configuration files.
+which creates the user, the datasets and both configuration files; with
+.Va jailops_appliance
+the first start of
+.Sy jailops_priv
+does it.
+The first administrator is created with the setup token in the web console
+.Pq Li POST /api/v1/setup
+or as root with
+.Dl jailops user create NAME --admin --password-prompt

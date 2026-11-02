@@ -14,7 +14,7 @@ import { initTheme } from '@jailops/shared/composables/theme'
 initTheme()
 const router = makeRouter()
 
-void boot({ role: 'host', loadDemo: async (o) => (await import('./demo/transport')).demoTransport(o) }).then(async () => {
+void boot({ role: 'host', loadDemo: async (o) => (await import('./demo/transport')).demoTransport({ ...o, signedOut: o.signedOut || new URLSearchParams(location.search).get('demo') === 'setup' }) }).then(async () => {
   const app = createApp(App)
   app.use(router)
   await router.isReady()

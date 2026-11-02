@@ -3,6 +3,8 @@ import { guard } from '@jailops/shared/router'
 
 export const routes: RouteRecordRaw[] = [
   { path: '/login', name: 'login', component: () => import('@/views/LoginView.vue'), meta: { public: true, title: 'Sign in' } },
+  // The first-run wizard, while the host has no administrator (the login view sends there).
+  { path: '/setup', name: 'setup', component: () => import('@/views/SetupView.vue'), meta: { public: true, title: 'Set up' } },
   { path: '/', name: 'overview', component: () => import('@/views/OverviewView.vue'), meta: { title: 'Overview' } },
   { path: '/jails', name: 'jails', component: () => import('@/views/JailsView.vue'), meta: { project: true, feature: 'jails', title: 'Jails' } },
   { path: '/jails/:name', name: 'jail', component: () => import('@/views/JailDetailView.vue'), meta: { project: true, feature: 'jails', title: 'Jail' } },

@@ -27,6 +27,7 @@ type initOptions struct {
 	web                   bool   // -web: serve the web console (and open the TLS listener it needs)
 	webAddress            string // the address of that listener
 	root                  string // prefix of every path (tests)
+	appliance             bool   // run by appliance-init: the rc scripts start the services and print the setup token
 	run                   func(name string, args ...string) (string, error)
 	lookupUser, lookupGrp func(string) (uid, gid int, err error)
 	chown                 func(path string, uid, gid int) error
@@ -231,6 +232,10 @@ func (o *initOptions) do(w io.Writer) error {
 		if err := o.chown(o.path(p), 0, f.gid); err != nil {
 			return err
 		}
+	}
+	if o.appliance {
+		o.say(w, "\nDone. jailopsd prints the setup token of the first administrator on the console when it starts.")
+		return nil
 	}
 	o.say(w, "\nDone. Enable and start the services:")
 	o.say(w, "  sysrc jailops_priv_enable=YES jailopsd_enable=YES")

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +46,9 @@ type Options struct {
 	// ForceWeb serves the web console and NoWeb serves none, whatever web.enabled says (the -web and -no-web flags, the
 	// rc.conf knob jailopsd_web="YES" or "NO"). Neither set: web.enabled decides, and it defaults to off.
 	ForceWeb, NoWeb bool
+	// ApplianceModules are the modules rc.conf turns on (jailops_appliance, the -appliance-modules flag): added to
+	// host.manage.modules. The helper's own list decides what it changes.
+	ApplianceModules []string
 	// LogOutput receives the log (default os.Stderr).
 	LogOutput io.Writer
 	// Clients builds the operating system clients (default DefaultClients).
@@ -71,6 +76,13 @@ type Options struct {
 	BackupMounter hostbackup.Mounter
 	// LogForwardTune adjusts the log forwarder (tests: poll interval, file check).
 	LogForwardTune func(*logfwd.Env)
+	// ACMEHTTPClient talks to the ACME CA (tests: a CA of their own); TLSRoots decide whether a certificate comes
+	// from a public CA (nil: the host's roots); ListenChallenge opens the http-01 listener (tests: a free port).
+	ACMEHTTPClient  *http.Client
+	TLSRoots        *x509.CertPool
+	ListenChallenge func(addr string) (net.Listener, error)
+	// ACMEAttempted hears how each ACME request ended (tests).
+	ACMEAttempted func(error)
 }
 
 // Daemon is a running jailopsd.
@@ -91,6 +103,7 @@ type Daemon struct {
 	servers         []*http.Server
 	cert            tls.Certificate
 	certs           *certReloader
+	certMgr         *certManager
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -151,6 +164,13 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		}
 	}
 	cfg = ApplyWebOverride(cfg, opts.ForceWeb, opts.NoWeb)
+	cfg, err := ApplyAppliance(cfg, opts.ApplianceModules)
+	if err != nil {
+		return nil, err
+	}
+	if err := cfg.CheckListeners(); err != nil {
+		return nil, err
+	}
 	if opts.LogOutput == nil {
 		opts.LogOutput = os.Stderr
 	}
@@ -220,6 +240,10 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		return nil, err
 	}
 	d.certs = newCertReloader(certPath, keyPath, d.cert, log, opts.Now)
+	d.certMgr = &certManager{tlsDir: filepath.Join(cfg.DataDir, "tls"), identity: d.certs, configured: cfg.Listen.HTTPS.Cert != "",
+		https: cfg.Listen.HTTPS.Address, fileACME: cfg.Listen.HTTPS.ACME, log: log, now: opts.Now, roots: opts.TLSRoots,
+		acmeHTTP: opts.ACMEHTTPClient, listenChallenge: opts.ListenChallenge, tlsAddr: d.HTTPSAddr, onAttempt: opts.ACMEAttempted}
+	d.certMgr.begin(bg)
 	// 4. Service.
 	env := api.Environment{OS: "FreeBSD", Arch: goArch(), Pool: cfg.Pool, PF: true}
 	if opts.Env != nil {
@@ -254,6 +278,10 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	deps.AppsDir = cfg.Apps.CatalogDir
 	deps.Host, deps.HostModules = clients.HostSystem, cfg.Host.Manage.Modules
 	deps.ConsolePort = consolePort(cfg.Listen.HTTPS.Address)
+	deps.Certificates, deps.ApplianceModules = d.certMgr, cfg.Appliance
+	deps.ConsoleURLs = func() []string {
+		return consoleURLs(firstNonEmpty(d.HTTPSAddr(), cfg.Listen.HTTPS.Address), hostname, net.InterfaceAddrs)
+	}
 	deps.AppsLocalDir = cfg.Apps.LocalDir
 	deps.LogForward, deps.LogForwardTune = cfg.Logging.Forward, opts.LogForwardTune
 	deps.DialJail = clients.Dial
@@ -333,6 +361,12 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		d.go_(func() { d.fleetLoop(bg) })
 	}
 	ok = true
+	if st, err := svc.SetupStatus(ctx); err == nil && st.Required {
+		log.Info("no administrator yet: the console asks for the setup token, which `jailops-priv setup-token` (as root) prints")
+	}
+	if len(cfg.Appliance) > 0 {
+		log.Info("appliance mode: rc.conf turns host management on", "modules", strings.Join(cfg.Appliance, ","), "managed", strings.Join(cfg.Host.Manage.Modules, ","))
+	}
 	log.Info("jailopsd started", "version", opts.Version, "host", hostUUID, "pool", cfg.Pool, "hub", cfg.Hub,
 		"unix", d.UnixPath(), "https", d.HTTPSAddr(), "fingerprint", fingerprintOf(d.cert))
 	return d, nil
@@ -420,6 +454,9 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 func (d *Daemon) teardown() {
 	if d.cancel != nil {
 		d.cancel()
+	}
+	if d.certMgr != nil {
+		d.certMgr.end()
 	}
 	if d.svc != nil {
 		d.svc.Close()
