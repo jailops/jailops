@@ -20,8 +20,10 @@ function recorded(): { sent: RawRequest[] } {
   return { sent }
 }
 
-async function settle(): Promise<void> {
-  for (let i = 0; i < 20; i++) {
+/** Let the pending promises and timers run, and wait until `until` holds (up to five seconds: a loaded CI machine is slow). */
+async function settle(until?: () => boolean): Promise<void> {
+  const deadline = Date.now() + 5000
+  for (let i = 0; i < 20 || (until && !until() && Date.now() < deadline); i++) {
     await flushPromises()
     await new Promise((r) => setTimeout(r, 5))
   }
@@ -54,7 +56,7 @@ describe('UnlockDialog', () => {
 
     await input().setValue(WRONG)
     await w.get('form').trigger('submit')
-    await settle()
+    await settle(() => w.find('[data-test="unlock-error"]').exists())
     expect(w.get('[data-test="unlock-error"]').text()).toBe('The passphrase is not correct.')
     expect(w.html()).not.toContain(WRONG)
     expect((input().element as HTMLInputElement).value).toBe('')
@@ -65,7 +67,7 @@ describe('UnlockDialog', () => {
     await input().setValue(demoVaultPassphrase)
     await w.get('[data-test="unlock-start"]').setValue(true)
     await w.get('form').trigger('submit')
-    await settle()
+    await settle(() => !!w.emitted('done'))
     expect(sent.filter((r) => r.path.includes('/unlock')).at(-1)?.body).toEqual({ passphrase: demoVaultPassphrase, start: true })
     expect(w.emitted('done')).toBeTruthy()
     expect(w.emitted('close')).toBeTruthy()
@@ -92,7 +94,7 @@ describe('UnlockDialog', () => {
     for (let i = 0; i < 6; i++) {
       await w.get('[data-test="unlock-pass"]').setValue(WRONG)
       await w.get('form').trigger('submit')
-      await settle()
+      await settle(() => i < 5 || (w.find('[data-test="unlock-error"]').exists() && w.get('[data-test="unlock-error"]').text().includes('Too many')))
     }
     const t = w.get('[data-test="unlock-error"]').text()
     expect(t).toContain('Too many wrong passphrases')
