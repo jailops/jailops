@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.1 - 2026-11-02
+
 - **The privileged helper no longer crashes on frames out of order.** A data frame after the end of a request's stream
   (while the request still ran) made `jailops-priv` panic with "send on closed channel" in its connection loop, outside
   the recovery around operations: one bad peer of the helper's socket stopped all jail management on the host. The
