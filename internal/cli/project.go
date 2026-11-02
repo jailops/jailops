@@ -448,7 +448,7 @@ func (a *app) networkGrantCmds(nd *kindDesc[api.Network]) []*cobra.Command {
 		return conn.CurrentProject(), nil
 	}
 	grant := &cobra.Command{
-		Use:   "grant NETWORK [--project PROJECT]",
+		Use:   "grant NETWORK",
 		Short: "Grant a network to a project",
 		Long: `Grant a network to a project: --project, JAILOPS_PROJECT or the current project
 ('project switch'). A network belongs to one project: it is used whole by that
@@ -481,7 +481,7 @@ project already holds. Only global admins change projects.`,
 		},
 	}
 	revoke := &cobra.Command{
-		Use:   "revoke NETWORK [--project PROJECT]",
+		Use:   "revoke NETWORK",
 		Short: "Withdraw a network grant from a project",
 		Long: `Withdraw the grant of a network from a project: --project, JAILOPS_PROJECT or the
 current project. The server refuses while a jail of the project still uses the network.`,
