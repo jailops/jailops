@@ -4,8 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
+
+	"jailops.net/jailops/internal/priv"
 )
 
 // rcHeader is the rcorder(8) header of a script: PROVIDE, REQUIRE and BEFORE.
@@ -147,5 +150,135 @@ func TestRevertPendingCommand(t *testing.T) {
 	}
 	if code, _, _ := runArgs(t, 1000, "-config", conf, "revert-pending"); code != 1 {
 		t.Errorf("not root: %d", code)
+	}
+}
+
+// daemon(8) writes the pid files of every packaged service as root. None of them may lie in a directory that a
+// service's unprivileged user can write to (a directory a script makes with install -d for another owner, or
+// writable by a group), or that user could leave a symlink there and have root write through it.
+func TestRCDPidfilesInRootOnlyDirectories(t *testing.T) {
+	dir := filepath.Join("..", "..", "packaging", "rc.d")
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type script struct{ pidfiles, unsafe []string }
+	all := map[string]script{}
+	for _, e := range ents {
+		b, err := os.ReadFile(filepath.Join(dir, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var s script
+		for _, ln := range strings.Split(string(b), "\n") {
+			ln = strings.TrimSpace(ln)
+			for _, key := range []string{"pidfile=", "supervisor_pidfile="} {
+				if v, ok := strings.CutPrefix(ln, key); ok {
+					s.pidfiles = append(s.pidfiles, strings.Trim(v, `"`))
+				}
+			}
+			// install -d -m MODE [-o OWNER] [-g GROUP] DIR
+			f := strings.Fields(ln)
+			if len(f) < 3 || f[0] != "install" || f[1] != "-d" {
+				continue
+			}
+			mode, owner, group := "", "root", "wheel"
+			for i := 2; i+1 < len(f); i++ {
+				switch f[i] {
+				case "-m":
+					mode = f[i+1]
+				case "-o":
+					owner = f[i+1]
+				case "-g":
+					group = f[i+1]
+				}
+			}
+			m, err := strconv.ParseUint(mode, 8, 32)
+			if err != nil {
+				t.Fatalf("%s: install -d without an octal mode: %s", e.Name(), ln)
+			}
+			if owner != "root" || (m&0o020 != 0 && group != "wheel") || m&0o002 != 0 {
+				s.unsafe = append(s.unsafe, f[len(f)-1])
+			}
+		}
+		all[e.Name()] = s
+	}
+	var unsafe []string
+	for _, s := range all {
+		unsafe = append(unsafe, s.unsafe...)
+	}
+	if !slices.Contains(unsafe, "/var/run/jailops") || !slices.Contains(unsafe, "/var/run/jailops-backupd") {
+		t.Fatalf("the parse missed the run directories: %v", unsafe)
+	}
+	n := 0
+	for name, s := range all {
+		for _, p := range s.pidfiles {
+			n++
+			if !strings.HasPrefix(p, "/var/run/") || strings.Contains(strings.TrimPrefix(p, "/var/run/"), "/") {
+				t.Errorf("%s: pid file %s is not directly in /var/run", name, p)
+			}
+			for _, d := range unsafe {
+				if strings.HasPrefix(p, strings.TrimSuffix(d, "/")+"/") {
+					t.Errorf("%s: pid file %s is in %s, which a service user may write to", name, p, d)
+				}
+			}
+		}
+	}
+	if n != 6 {
+		t.Errorf("found %d pid files, want 6 (two per daemon(8) service)", n)
+	}
+}
+
+// The helper's own -pidfile does not write through a symlink.
+func TestPidfileDoesNotFollowASymlink(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "target")
+	if err := os.WriteFile(target, []byte("keep\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "priv.pid")
+	if err := os.Symlink(target, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := writePidfile(link); err == nil {
+		t.Fatal("wrote the pid through a symlink")
+	}
+	if b, _ := os.ReadFile(target); string(b) != "keep\n" {
+		t.Fatalf("target changed: %q", b)
+	}
+	plain := filepath.Join(dir, "plain.pid")
+	if err := writePidfile(plain); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(plain); string(b) != strconv.Itoa(os.Getpid())+"\n" {
+		t.Fatalf("%q", b)
+	}
+}
+
+// The helper's socket lives in a directory only root writes: the daemon's user, a member of the group, may reach the
+// socket but cannot put a file or a socket of its own at its name before the helper starts. The former path, in the
+// daemon's directory, is read as the new one.
+func TestHelperSocketDirectoryIsRoots(t *testing.T) {
+	dir := filepath.Dir(priv.DefaultSocket)
+	if dir == "/var/run/jailops" || dir == filepath.Dir(priv.LegacySocket) {
+		t.Fatalf("the helper's socket is in the daemon's directory %s", dir)
+	}
+	b, err := os.ReadFile(filepath.Join("..", "..", "packaging", "rc.d", "jailops_priv"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "install -d -m 0710 -o root -g jailops "+dir+"\n") {
+		t.Errorf("the rc script does not make %s as root's, mode 0710", dir)
+	}
+	if helperSocket(priv.LegacySocket) != priv.DefaultSocket || helperSocket("/x/y.sock") != "/x/y.sock" {
+		t.Error("the former socket path is not mapped")
+	}
+	// outside development, a directory that is not root's is refused (this test does not run as root)
+	if os.Geteuid() != 0 {
+		sock := filepath.Join(t.TempDir(), "priv.sock")
+		if ln, err := listen(sock, "", 0o660, false); err == nil {
+			ln.Close()
+			t.Error("a socket in a directory of another user was opened")
+		}
 	}
 }

@@ -491,6 +491,16 @@ func (c Config) checkRulePath(kind pathKind, p string) error {
 		if kind == pathJailTree && slices.Contains(mountReal, real) {
 			return forbidden("path %q resolves to a storage root", p)
 		}
+		// below a jail's tree, the target stays in that tree (a jail's symlink cannot point a command at another jail)
+		if r := c.inJailTree(c.mountRel(p)); r.base != "" {
+			tr := r.root
+			if t, err := filepath.EvalSymlinks(tr); err == nil {
+				tr = t
+			}
+			if !within(tr, real) {
+				return forbidden("path %q resolves outside the jail's tree %s", p, r.root)
+			}
+		}
 	}
 	return nil
 }

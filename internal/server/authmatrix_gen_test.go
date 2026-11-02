@@ -425,6 +425,11 @@ func TestAuthorizationMatrix(t *testing.T) {
 			if got == allowed && code == 404 && strings.Contains(body, "console session") {
 				continue
 			}
+			// The setup routes answer not_found once a global administrator exists (the matrix's admin tokens are):
+			// the request passed authorization.
+			if got == allowed && code == 404 && strings.Contains(body, "setup is complete") {
+				continue
+			}
 			// A destructive route answers not_found to whoever comes after the first success.
 			if got == allowed && code == 404 && (deleted || ent.Class == auth.ClassSelf || ent.Class == auth.ClassGlobal) {
 				continue

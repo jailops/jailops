@@ -16,7 +16,7 @@ func TestHostFirewallCommands(t *testing.T) {
 	h.seed()
 	tr := h.transcript()
 	tr.ok("host", "firewall", "show")
-	if _, errs, code := tr.do("", "host", "firewall", "set", "--ssh-from", "192.0.2.0/24"); code != 3 || !strings.Contains(errs, "not_managed") {
+	if _, errs, code := tr.do("", "host", "firewall", "set", "--ssh-from", "192.0.2.0/24"); code != 6 || !strings.Contains(errs, "not_managed") {
 		t.Fatalf("not managed: %d %s", code, errs)
 	}
 	tr.golden("host_firewall_not_managed")

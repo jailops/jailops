@@ -50,9 +50,23 @@ is the `Jail`. A locked jail has `status.power` `locked` and `status.locked` (th
         sdk.WithClientCert(cert)))              // pinned mTLS; or sdk.WithToken(token)
 
 Every request about something a project owns names the project (`?project=`, `sdk.WithProject`); there is no default project.
+
+Request bodies are read strictly: a member the request type does not have (a misspelled `dry_run`, say), a member spelled
+with other cases, a member twice and anything after the JSON value answer `invalid` (400) with a message that names the
+member. The `status` of an object read and sent back is ignored; maps such as `labels` and merge patches (`PATCH`) take any
+key. Answers are `Cache-Control: no-store`. An anonymous `GET /api/v1` tells the API version, the extensions and the role
+only. The credential goes in the `Authorization` header; a token in the query string authenticates nothing.
 The SDK refuses plain `http://` to anything but loopback.
 
 Declarative management of everything the API can create is `jailops-sync` ([fleet-sync.md](fleet-sync.md)).
+
+## Liveness and readiness
+
+`GET /healthz` (liveness: `ok`, always 200) and `GET /readyz` (readiness: `ok` with 200 once start-up finished and the
+helper and the database answer, else 503 `not ready: CLASS` with CLASS `starting`, `stopping`, `helper`, `storage` or
+`store`, cached for 2 seconds) are plain text and public, for load balancers and monitors
+([exposure.md](exposure.md#load-balancers-and-monitors)). The state of the host itself is `GET /api/v1/doctor`, which
+needs a global identity ([operations.md](operations.md#what-to-monitor)).
 
 ## Host management
 

@@ -1,9 +1,6 @@
 package cli
 
 import (
-	"os"
-	"strings"
-
 	"github.com/spf13/cobra"
 
 	"jailops.net/jailops/sdk/api"
@@ -21,24 +18,9 @@ func hasEncryptedVolume(sp api.JailSpec) bool {
 	return false
 }
 
-// readPassphraseFile reads a passphrase from the first line of a file. A file others may read is warned about.
+// readPassphraseFile reads a passphrase from the first line of a file, or of standard input for "-".
 func (a *app) readPassphraseFile(path string) (string, error) {
-	if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o077 != 0 {
-		fprintf(a.env.Stderr, "warning: %s can be read by other users; keep a passphrase file at mode 0600\n", path)
-	}
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return "", usagef("reading the passphrase file: %v", err)
-	}
-	line, rest, _ := strings.Cut(string(b), "\n")
-	line = strings.TrimSuffix(line, "\r")
-	if strings.TrimSpace(rest) != "" {
-		return "", usagef("the passphrase file %s must hold one line", path)
-	}
-	if line == "" {
-		return "", usagef("the passphrase file %s is empty", path)
-	}
-	return line, nil
+	return a.readSecretFile("passphrase", path)
 }
 
 // promptPassphrase asks on the terminal without echo; a pipe is refused.

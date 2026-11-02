@@ -233,7 +233,8 @@ func (s *Service) readmitProfile(ctx context.Context, proj, name string, spec ap
 		}
 		for _, nd := range eff.Network {
 			if _, ok := specGrantsNetwork(po.Spec, nd.Network); !ok && nd.Network != "" {
-				return api.Errorf(api.CodeForbidden, "jail %q would attach network %q, which project %q was not granted", who, nd.Network, j.Metadata.Project)
+				return api.Errorf(api.CodeForbidden, "jail %q would attach network %q, which project %q was not granted", who, nd.Network, j.Metadata.Project).
+					WithHint(fmt.Sprintf("a global admin grants it: jailops network grant %s --project %s", nd.Network, j.Metadata.Project))
 			}
 		}
 		if len(eff.Devfs) > 0 && len(j.Spec.Devfs) == 0 && !ActorFrom(ctx).Perm.Satisfies(api.PermAdmin) {

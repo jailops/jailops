@@ -148,7 +148,6 @@ Note: role shop is dropped; what it owned now belongs to postgres and database s
 
 $ jailops app allow db from 192.0.2.0/24
 ! invalid: name the database of this grant with --db NAME (a source that is not a jail has no default)
-! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
 [exit 2]
 
 $ jailops app allow db from @nobody
@@ -168,6 +167,6 @@ $ jailops app allow db
 
 $ jailops app allow missing from @web
 ! not_found: jail "missing" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
 [exit 4]
 

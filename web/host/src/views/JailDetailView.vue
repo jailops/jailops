@@ -1,18 +1,22 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { computed, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
 import { ApiError } from '@jailops/shared/api/client'
 import { useLoad } from '@jailops/shared/composables/load'
 import { can, hasExt } from '@jailops/shared/composables/session'
-import { lifecycle, lockJail, encryptedVolumes, isLocked, type Lifecycle } from '@/composables/jailActions'
+import { askLifecycle, askDelete, lockJail, encryptedVolumes, isLocked, type Lifecycle } from '@/composables/jailActions'
+import { useTabQuery } from '@jailops/shared/composables/tabs'
+import TabBar from '@jailops/shared/components/TabBar.vue'
+import TimeStamp from '@jailops/shared/components/TimeStamp.vue'
+import { codeText } from '@jailops/shared/lib/describe'
 import UnlockDialog from '@/components/UnlockDialog.vue'
 import PassphraseDialog from '@/components/PassphraseDialog.vue'
 import LockChip from '@/components/LockChip.vue'
 import ConfirmDialog from '@jailops/shared/components/ConfirmDialog.vue'
 import { runOp } from '@jailops/shared/composables/ops'
-import { bytes, stamp, ago } from '@jailops/shared/lib/format'
+import { bytes, sentence, snapshotLabel } from '@jailops/shared/lib/format'
 import StatePill from '@/components/StatePill.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import Callout from '@jailops/shared/components/Callout.vue'
@@ -34,6 +38,7 @@ import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import type { Jail, Lease, JailSnapshot } from '@jailops/shared/api/types'
 
 const route = useRoute()
+const router = useRouter()
 const name = computed(() => String(route.params.name))
 
 const l = useLoad(async () => {
@@ -51,7 +56,7 @@ const snaps = computed(() => [...(l.data.value?.snaps ?? [])].sort((a, b) => (b.
 const maxWritten = computed(() => Math.max(1, ...snaps.value.map((x) => x.status.written ?? 0)))
 
 type Tab = 'overview' | 'config' | 'devices' | 'updates' | 'logs' | 'access' | 'console'
-const tabs = computed(() => ([
+const tabList = computed(() => ([
   ['overview', s.jail.overview, true],
   ['config', s.config.tab, true],
   ['devices', s.devices.tab, true],
@@ -60,11 +65,10 @@ const tabs = computed(() => ([
   // who may connect: for the jails an app installation made
   ['access', s.appAccess.tab, hasExt('app_access') && isInstalledApp(jail.value)],
   ['console', s.exec.tab, true],
-] as Array<[Tab, string, boolean]>).filter((t) => t[2]))
-// ?tab=logs&file=nginx/access.log opens a tab directly (the app pages link to a jail's log viewer).
-const tab = ref<Tab>(tabs.value.some((t) => t[0] === route.query.tab) ? (route.query.tab as Tab) : 'overview')
-// the jail arrives after the first render: a link to ?tab=access opens the tab once it is known to be an app
-watch(jail, () => { if (route.query.tab === 'access' && tab.value === 'overview' && tabs.value.some((t) => t[0] === 'access')) tab.value = 'access' })
+] as Array<[Tab, string, boolean]>).filter((t) => t[2]).map(([key, label]) => ({ key, label })))
+// ?tab=logs&file=nginx/access.log opens a tab directly (the app pages link to a jail's log viewer). The Access tab
+// appears once the jail is known to be an app; a ?tab=access waits for it.
+const { tab } = useTabQuery<Tab>(() => tabList.value.map((t) => t.key), 'overview')
 const logFile = typeof route.query.file === 'string' ? route.query.file : ''
 const rollbackOpen = ref(false)
 const rollbackSnap = ref<string | undefined>()
@@ -81,18 +85,23 @@ function openRollback(snap?: string): void {
   rollbackSnap.value = snap
   rollbackOpen.value = true
 }
-async function act(a: Lifecycle): Promise<void> {
+function act(a: Lifecycle): void {
   actionError.value = null
-  try {
-    await lifecycle(name.value, a)
-  } catch (e) {
-    actionError.value = e instanceof ApiError ? e : null
-  }
+  if (jail.value) askLifecycle(name.value, a, jail.value.status.power, l.reload)
 }
+/** Delete the jail (typed name), or uninstall it when it is an app (named, with what is lost). */
+function remove(): void {
+  if (jail.value) askDelete(jail.value, snaps.value, () => void router.push('/jails'))
+}
+const isApp = computed(() => isInstalledApp(jail.value))
+const hasDrift = computed(() => !!jail.value?.status.drift?.length)
+/** A failed apply with its next step: the jail's firewall policy when pf refused the rules, else the doctor. */
+const applyFailed = computed(() => (jail.value?.status.conditions ?? []).filter((c) => c.status === 'False' && c.reason === 'ApplyFailed'))
+const pfProblem = (msg = '') => /\bpf|anchor|firewall/i.test(msg)
 async function snapshot(): Promise<void> {
   actionError.value = null
   try {
-    await runOp(`${s.jail.snapshotNow} ${name.value}`, () => api.jails.snapshot(name.value, { metadata: {}, spec: { jail: name.value, comment: snapComment.value || undefined } }))
+    await runOp(s.jail.snapshotTaken(name.value), () => api.jails.snapshot(name.value, { metadata: {}, spec: { jail: name.value, comment: snapComment.value || undefined } }))
     snapComment.value = ''
   } catch (e) {
     actionError.value = e instanceof ApiError ? e : null
@@ -119,24 +128,26 @@ const rows = computed(() => {
 const attentionItems = computed(() => {
   const j = jail.value
   if (!j) return []
-  return (j.status.conditions ?? []).filter((c) => c.status === 'False')
+  return (j.status.conditions ?? []).filter((c) => c.status === 'False' && c.reason !== 'ApplyFailed')
 })
 </script>
 
 <template>
   <div>
     <router-link class="back" to="/jails"><Icon name="chevronLeft" />{{ s.jail.back }}</router-link>
-    <p v-if="l.error.value?.code === 'not_found'" class="empty">{{ s.jail.notFound }}</p>
+    <template v-if="l.error.value?.code === 'not_found'">
+      <div class="page-head"><h1 class="mono">{{ name }}</h1></div>
+      <p class="empty panel">{{ s.jail.notFound }}</p>
+    </template>
     <LoadState :loading="l.loading.value" :error="l.error.value?.code === 'not_found' ? null : l.error.value" :has-data="!!jail" @retry="l.reload">
       <div v-if="jail" class="stack">
         <div class="page-head">
           <div class="row">
             <h1 class="mono">{{ jail.metadata.name }}</h1>
             <StatePill :state="jail.status.power" />
-            <LockChip v-if="jail.status.locked?.length" :volumes="jail.status.locked" :jail="jail.metadata.name" />
             <span v-if="jail.status.jid" class="faint mono">jid {{ jail.status.jid }}</span>
           </div>
-          <div class="row">
+          <div class="row-actions">
             <button v-if="locked" class="btn btn-primary" type="button" data-test="unlock" @click="unlockOpen = true"><Icon name="lockOpen" />{{ s.keys.unlock }}</button>
             <button v-else-if="jail.status.power !== 'running'" class="btn" type="button" @click="act('start')"><Icon name="play" />{{ s.jails.start }}</button>
             <template v-else>
@@ -149,16 +160,22 @@ const attentionItems = computed(() => {
               <button class="btn" type="button" data-test="lock" @click="lockOpen = true"><Icon name="lock" />{{ s.keys.lock }}</button>
               <button class="btn" type="button" data-test="change-pass" @click="passOpen = true"><Icon name="keyRound" />{{ s.keys.change }}</button>
             </template>
+            <button class="btn btn-danger" type="button" data-test="jail-delete" @click="remove"><Icon name="trash" />{{ isApp ? s.jails.uninstall : s.jails.delete }}</button>
           </div>
         </div>
         <ErrorPanel v-if="actionError" :error="actionError" />
-        <Callout v-if="locked" tone="warn" data-test="locked-callout">{{ s.keys.lockedHint }}</Callout>
+        <Callout v-if="locked" tone="warn" data-test="locked-callout">{{ s.keys.lockedHint }} <LockChip v-if="jail.status.locked?.length" :volumes="jail.status.locked" :jail="jail.metadata.name" /></Callout>
 
-        <Callout v-for="c in attentionItems" :key="c.type" tone="danger"><strong>{{ c.type }}</strong>{{ c.reason ? ` (${c.reason})` : '' }}: {{ c.message }}</Callout>
+        <Callout v-for="c in applyFailed" :key="c.type" tone="danger" data-test="apply-failed">
+          <p><strong>{{ s.jail.applyFailed }}</strong>: <span class="mono">{{ c.message }}</span></p>
+          <p v-if="pfProblem(c.message) && jail.spec.firewall?.policy">{{ s.jail.applyFailedPf(jail.spec.firewall.policy) }} <router-link to="/firewall" data-test="apply-next">{{ s.jail.openPolicy(jail.spec.firewall.policy) }}</router-link></p>
+          <p v-else>{{ s.jail.applyFailedOther }} <router-link to="/doctor" data-test="apply-next">{{ s.jail.openDoctor }}</router-link></p>
+          <p class="muted" style="margin: 0">{{ s.jail.noReconcile }}</p>
+        </Callout>
+        <Callout v-for="c in attentionItems" :key="c.type" tone="danger"><strong>{{ c.reason ? codeText(c.reason) : sentence(c.type) }}</strong>{{ c.message ? ': ' + c.message : '' }}</Callout>
 
-        <div class="tabs" role="tablist" :aria-label="s.jail.sections">
-          <button v-for="[k, label] in tabs" :key="k" type="button" role="tab" :aria-selected="tab === k" :data-tab="k" @click="tab = k">{{ label }}</button>
-        </div>
+        <TabBar v-model="tab" :tabs="tabList" :label="s.jail.sections" id="jail" />
+        <div id="jail-panel" role="tabpanel" :aria-labelledby="`jail-tab-${tab}`">
         <JailConfigTab v-if="tab === 'config'" :jail="jail" :sources="l.data.value?.sources ?? {}" @saved="l.reload" />
         <JailDevicesTab v-else-if="tab === 'devices'" :jail="jail" :sources="l.data.value?.sources ?? {}" @saved="l.reload" />
         <JailUpdatesTab v-else-if="tab === 'updates'" :jail="jail" @saved="l.reload" />
@@ -169,13 +186,13 @@ const attentionItems = computed(() => {
         <section class="panel" aria-labelledby="svs">
           <header><h2 id="svs">{{ s.jail.specVsStatus }}</h2></header>
           <div class="table-wrap">
-            <table data-test="spec-status">
+            <table class="rtable" data-test="spec-status">
               <thead><tr><th>&nbsp;</th><th>{{ s.jail.spec }}</th><th>{{ s.jail.status }}</th></tr></thead>
               <tbody>
-                <tr v-for="r in rows" :key="r.field" :class="{ drift: r.diff }" :data-drift="r.diff">
+                <tr v-for="r in rows" :key="r.field" :class="{ drift: r.diff && hasDrift }" :data-drift="r.diff && hasDrift">
                   <th scope="row">{{ r.field }}</th>
                   <td class="mono" :data-label="s.jail.spec">{{ r.spec }}</td>
-                  <td class="mono" :data-label="s.jail.status">{{ r.status }}<span v-if="r.diff" class="pill warn" style="margin-left: 8px">{{ s.jails.drift }}</span></td>
+                  <td class="mono" :data-label="s.jail.status">{{ r.status }}<span v-if="r.diff && hasDrift" class="pill warn" style="margin-left: 8px">{{ s.jails.drift }}</span></td>
                 </tr>
                 <tr><th scope="row">{{ s.jail.layout }}</th><td :data-label="s.jail.spec">{{ jail.spec.layout || 'thin' }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr><th scope="row">{{ s.jail.hostname }}</th><td class="mono" :data-label="s.jail.spec">{{ jail.spec.hostname || jail.metadata.name }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
@@ -185,7 +202,7 @@ const attentionItems = computed(() => {
                   <td class="mono" :data-label="s.jail.spec">{{ [jail.spec.resources?.cpu ? `cpu ${jail.spec.resources.cpu}` : '', jail.spec.resources?.memory ? `mem ${jail.spec.resources.memory}` : '', jail.spec.resources?.disk ? `disk ${jail.spec.resources.disk}` : '', jail.spec.resources?.pids ? `pids ${jail.spec.resources.pids}` : ''].filter(Boolean).join(' · ') || '-' }}</td>
                   <td class="faint" :data-label="s.jail.status">-</td>
                 </tr>
-                <tr><th scope="row">{{ s.jail.boot }}</th><td :data-label="s.jail.spec">{{ jail.spec.boot?.autostart ? s.jail.autostart : '-' }}<span v-if="jail.spec.encrypted" class="badge info" style="margin-left: 8px">{{ s.jail.encrypted }}</span></td><td class="faint" :data-label="s.jail.status">{{ jail.status.started_at && jail.status.power === 'running' ? ago(jail.status.started_at) : '-' }}</td></tr>
+                <tr><th scope="row">{{ s.jail.boot }}</th><td :data-label="s.jail.spec">{{ jail.spec.boot?.autostart ? s.jail.autostart : '-' }}<span v-if="jail.spec.encrypted" class="badge info" style="margin-left: 8px">{{ s.jail.encrypted }}</span></td><td class="faint" :data-label="s.jail.status"><TimeStamp v-if="jail.status.power === 'running'" :ts="jail.status.started_at" /><span v-else>-</span></td></tr>
               </tbody>
             </table>
           </div>
@@ -198,7 +215,7 @@ const attentionItems = computed(() => {
             <template v-if="jail.status.conditions?.length">
               <h3 style="margin-top: 12px">{{ s.jail.conditions }}</h3>
               <ul class="plain">
-                <li v-for="c in jail.status.conditions" :key="c.type"><span class="pill" :class="c.status === 'True' ? 'ok' : c.status === 'False' ? 'danger' : ''">{{ c.type }}</span> <span class="muted">{{ c.message }}</span></li>
+                <li v-for="c in jail.status.conditions" :key="c.type"><span class="pill" :class="c.status === 'True' ? 'ok' : c.status === 'False' ? 'danger' : ''">{{ c.reason && c.status === 'False' ? codeText(c.reason) : sentence(c.type) }}</span> <span class="muted">{{ c.message }}</span></li>
               </ul>
             </template>
           </div>
@@ -207,7 +224,7 @@ const attentionItems = computed(() => {
         <section v-if="can('snapshots')" class="panel" aria-labelledby="snaps">
           <header>
             <h2 id="snaps">{{ s.jail.snapshots }}</h2>
-            <form class="row" @submit.prevent="snapshot">
+            <form class="row-actions" @submit.prevent="snapshot">
               <input v-model="snapComment" type="text" :placeholder="s.jail.snapshotComment" :aria-label="s.jail.snapshotComment" style="width: 200px" />
               <button class="btn btn-sm" type="submit"><Icon name="camera" />{{ s.jail.snapshotNow }}</button>
             </form>
@@ -216,8 +233,8 @@ const attentionItems = computed(() => {
           <ol v-else class="timeline" data-test="timeline">
             <li v-for="x in snaps" :key="x.metadata.name">
               <div class="tl-main">
-                <span class="mono">{{ x.metadata.name }}</span>
-                <span class="faint">{{ stamp(x.metadata.created_at) }}</span>
+                <span class="tl-name" :title="x.metadata.name">{{ snapshotLabel(x.metadata.name) }}</span>
+                <TimeStamp v-if="snapshotLabel(x.metadata.name) === x.metadata.name" class="faint" :ts="x.metadata.created_at" />
                 <span v-if="x.spec.comment" class="muted">{{ x.spec.comment }}</span>
               </div>
               <div class="tl-written" :title="s.jail.writtenHint">
@@ -282,6 +299,7 @@ const attentionItems = computed(() => {
 
         <ProvisionPanel v-if="hasExt('provisioning')" :jail="jail" @done="l.reload" />
         </template>
+        </div>
         <RollbackDialog :open="rollbackOpen" :jail="jail.metadata.name" :snapshots="snaps" :initial="rollbackSnap" @close="rollbackOpen = false" @done="l.reload" />
         <UpgradeDialog :open="upgradeOpen" :jail="jail" @close="upgradeOpen = false" @done="l.reload" />
         <UnlockDialog :open="unlockOpen" :jail="jail.metadata.name" @close="unlockOpen = false" @done="l.reload" />
@@ -299,19 +317,10 @@ tr.drift td, tr.drift th { background: var(--warn-bg); }
 .timeline { list-style: none; margin: 0; padding: 0 12px; }
 .timeline li { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: 12px; align-items: center; padding: 8px 0 8px 16px; border-left: 2px solid var(--border-strong); position: relative; }
 .timeline li::before { content: ''; position: absolute; left: -5px; top: 16px; width: 8px; height: 8px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border-strong); }
+.tl-name { font-weight: 500; }
+[data-test='spec-status'] tbody th { font-weight: 600; }
 .tl-main { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; min-width: 0; }
 .tl-written { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; font-size: 12px; }
 .tl-written .meter { grid-column: 1 / -1; height: 4px; margin-top: 2px; }
 @media (max-width: 800px) { .timeline li { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
-</style>
-
-<style>
-/* spec-status-css: on a phone each row becomes a card, so no column is clipped or needs sideways scrolling */
-@media (max-width: 600px) {
-  [data-test='spec-status'] thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  [data-test='spec-status'], [data-test='spec-status'] tbody, [data-test='spec-status'] tr, [data-test='spec-status'] th, [data-test='spec-status'] td { display: block; width: 100%; }
-  [data-test='spec-status'] tr { padding: 8px 12px; border-bottom: 1px solid var(--border); }
-  [data-test='spec-status'] th, [data-test='spec-status'] td { border: 0; padding: 2px 0; overflow-wrap: anywhere; background: none; }
-  [data-test='spec-status'] td::before { content: attr(data-label) ': '; color: var(--text-2); font-family: var(--font, inherit); font-size: 12px; }
-}
 </style>

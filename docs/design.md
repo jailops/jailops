@@ -525,7 +525,7 @@ they are kept apart by mechanisms that exist in the system:
 | Identity | Section 8.2. |
 
 A separate dataset is **not** a full security boundary. Jails share the host kernel, the sysctl state, device
-rulesets and pool I/O. For a high-security tenant use a dedicated pool, a dedicated host, or both; the
+rulesets and pool I/O. For a high-security tenant use a dedicated host: a dedicated pool splits storage and operations, not the kernel. The
 documentation states the isolation levels plainly.
 
 ZFS layout: `<storage root>/projects/<project>/jails/<name>`. PF anchors are
@@ -567,7 +567,7 @@ Rules:
      effect on the next request. Certificates may carry an expiry.
 - The unix socket: root (uid 0) is a global admin, the host's break-glass and recovery access (`sudo jailops user create NAME --admin`,
   `user set-password`, `user set-role`). Every other local peer is anonymous: it reaches what an unauthenticated remote client reaches
-  (`GET /api/v1`, `GET /healthz`, login, trust redemption, the static console) and may authenticate with a token or a login over the
+  (`GET /api/v1`, `GET /healthz`, `GET /readyz`, login, trust redemption, the static console) and may authenticate with a token or a login over the
   socket. The socket is mode 0666 because connecting confers nothing. A test requires the same answer for every route from an
   anonymous remote and an anonymous local caller. `jailops-priv` keeps Unix peer credentials: it is a service boundary.
 - **Hub forwarding:** the hub authenticates and authorizes the caller (role and projects), then forwards
@@ -607,6 +607,12 @@ jailops apply -f site.yaml          # create or update every document of a file
 - **Declarative.** `config set` updates the desired state through the API and the daemon enforces it. If a
   change needs a restart the operation says so (`restart_required`) and the CLI prints it; JailOps never
   restarts a jail silently, and `--restart` is an explicit request.
+- **Confirmations.** `-y` answers yes/no questions only. Destroying data (deleting a jail, with its root,
+  volumes and snapshots; a data rollback; a restore over a jail) first shows what goes, read from the server
+  (sizes, snapshot count), and needs the typed name, or `--confirm-data-loss` in a script. `--i-know` accepts a
+  risk that is not data loss (a host firewall change whose lock-out check cannot run, replacing a public
+  certificate). Old flag spellings stay accepted as hidden aliases (`--permission` for `--role`, `--ttl` for
+  `--expires`, `--selector` and `--label` for `-l`), so scripts do not break.
 - **Devices.** A jail's hardware-like attachments are named devices with their own configuration:
   `nic` (a network attachment: network, addresses, MAC, MTU, optional rate limit), `disk` (a volume mount
   of a ZFS dataset, quota, read-only; host path mounts need admin), `devfs` (exposure of selected device
@@ -1071,8 +1077,12 @@ Open:
 | amd64 beyond the proxy host | The clean-install end-to-end run passes on amd64; Linux jails, backups and most prototypes ran on arm64 only |
 | FreeBSD 15.2 and later | Each new minor release must pass the PF traffic matrix and the clean-install run before it is called supported |
 | The `zfs diff` accelerator | Not built (L1 capture); the stat walk is used |
+| Chunk poisoning within a key domain | The node checks a blob's unkeyed trailer only and stores chunks create-only, so a host of the key domain can plant a self-consistent blob under the id of another host's chunk; hosts find it in a deep verify or a restore, and an administrator of the node removes it (`jailops-backupd quarantine add`). A node that refuses it itself needs a format change (a per-chunk proof the node can check without the key, or a chunk namespace per host): designed only, not built ([backup-restore.md](backup-restore.md#who-trusts-whom-hosts-that-share-a-node)) |
 | Replication between hosts | The primitives work (`internal/replicate` is a library); no API route or CLI command exists, so nothing a user can type replicates a jail |
+| Size of the SOPS dependency | `internal/fleet/vault` opens SOPS files with the `getsops/sops/v3` module, which brings about 200 packages of cloud key services (AWS, GCP, Azure, Vault and others) into `jailops-sync`, though JailOps uses age keys only; `jailops`, `jailopsd`, `jailops-priv` and `jailops-backupd` link none of them. Open: reading the SOPS file format with `filippo.io/age` alone (the age recipients, the MAC and the per-value AES-GCM of the format), which would drop them; not started |
 | Upgrades between JailOps versions | Not tried |
+| Hardening after the review of the appliance release | Tested on Linux against the real allow-lists and stand-ins; UNVERIFIED on FreeBSD: file operations below a jail's tree opened at the tree (a ZFS mount) one directory at a time (the app access and log blocks of `scripts/ci-freebsd-e2e.sh`), the pid files in `/var/run` with the real `rc.subr` and `daemon(8)` (the services block checks them), `sysrc -x` when a host restore removes a variable it did not find set (the host blocks), `route -n get -inet default` read for the gateway of the WireGuard route checks (the WireGuard block) |
+| Hardening after the external audit of November 2026 | Tested on Linux through the helper's real guards, its socket and a stand-in for `zfs`: no dataset mounted on a storage root's directory, the root's directory set to root 0700 at start, reload and registration, root mountpoints refused on, above or inside system directories and the helper's own, `devices=off` on every root and never on through a request, `zfs receive` with `-x` for `mountpoint`, `sharenfs`, `sharesmb`, `jailed`, `keylocation`, `devices`, `setuid` and `exec`, write agents that make device nodes and setuid files only in a jail's root, the helper's socket in `/var/run/jailops-priv` (root, 0710). UNVERIFIED on FreeBSD: that `zfs set devices=off` and `zfs receive -x devices -x setuid -x exec` are accepted by the FreeBSD 15.1 ZFS (an unknown name would make every receive fail; `shareiscsi` is not on the list for that reason), what `devices=off` changes there (FreeBSD makes device nodes in devfs only), and the steps of `scripts/ci-freebsd-e2e.sh` that check the socket directory, the root's mode and `devices` |
 | Rate-limit shaper | Limits are stored and reported, and nothing enforces them: the jail says so (`status.warnings`, the `RateLimit` condition, a warning after `config set`) and doctor reports `jails.rate_limits` as `info` ("not enforced yet"). No shaper is built |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
 | Jail logs through the helper | `fs.list_logs` and `fs.tail_file` are tested against real directories, symlinks and a fifo on the development host and over the socket; reading a running jail's `/var/log/messages` on a FreeBSD host, a stopped jail (unmounted root: `busy`), a jail with `/var` on its own persistent dataset, and a rotation under `-f` have not been run there |
@@ -1094,7 +1104,7 @@ Open:
 | Fleet examples on a real host | `examples/` are applied to in-memory hosts and checked with the daemon's validators; no example has been applied to a real host. `build: true` (first image build through `jailops-sync`) and an IPv6 network created by sync are fake-tested only |
 | `examples/provisioning/bootstrap.sh`, `nuageinit` user-data | Syntax-checked; not run on a fresh VM or a cloud provider. Provisioning `pkg install` inside a pkgbase jail is unverified, and the fixed order packages, files, services, commands means a private pkg repository must be installed with commands |
 | Unix socket identity (root = global admin, other peers anonymous) | Tested in process with fabricated peer credentials and a real socket as a non-root user. Not yet run on FreeBSD: the uid that `LOCAL_PEERCRED` reports for `sudo jailops ...`, for a non-root user, and for an ssh-forwarded socket; `temp/verify-identity.sh` is the prepared check |
-| Appliance mode, module 1 (identity) | Built and tested against real files in temporary directories, the helper's rules over its socket and fake commands; never run on FreeBSD. Open: `sysrc -f /etc/rc.conf` on a stock file, `service ntpd onestop` when ntpd is not running, the `ntpq -pn` output on 15.1, `hostname(1)`, and a restore putting the originals back byte for byte. `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_HOST=1` (it changes the host's name and resolvers). `resolvconf(8)` on DHCP hosts rewrites `resolv.conf` (reported as drift); `rc.conf.local` is not read ([appliance.md](appliance.md)) |
+| Appliance mode, module 1 (identity) | Built and tested against real files in temporary directories, the helper's rules over its socket and fake commands; never run on FreeBSD. Open: `sysrc -f /etc/rc.conf` on a stock file, `service ntpd onestop` when ntpd is not running, the `ntpq -pn` output on 15.1, `hostname(1)`, and a restore putting back `resolv.conf` byte for byte, the block of `ntp.conf` and the module's three `rc.conf` variables (`sysrc -x` for one that was not set). `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_HOST=1` (it changes the host's name and resolvers). `resolvconf(8)` on DHCP hosts rewrites `resolv.conf` (reported as drift); `rc.conf.local` is not read ([appliance.md](appliance.md)) |
 | Appliance mode, module 2 (host firewall) and commit confirmed | Built and tested with a fake `pfctl`, real files in temporary directories, the helper's rules over its socket and an injected clock and timer; never run on FreeBSD. Open: the rendered `pf.conf` with the real `pfctl` (`(self)`, `set state-policy if-bound`, the ICMPv6 lists), `pfctl -s info` reading, a host whose pf was disabled before the first apply, IPv6 sources from a real client, and the boot order of the rc.d script `jailops_revert` (`BEFORE: netif pf jailops_priv`; checked as header text only) with a real reboot while a change is pending. `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_HOSTFW=1` ([appliance.md](appliance.md)) |
 | Appliance mode, modules 3 to 6 | Not built: network, updates, system, storage overview, boot environments before a change and the installer image are design only ([appliance.md](appliance.md)) |
 | Appliance mode from rc.conf, first start, setup token, first-run wizard | Built: `jailops_appliance` passed by the rc scripts to both programs (`-appliance-modules`), `jailops-priv appliance-init`, the setup token (`POST /api/v1/setup`, `jailops-priv setup-token`), doctor `appliance`, the console's `/setup` wizard. Tested: the rc scripts run by `sh` against a stand-in of `rc.subr`, their headers sorted like `rcorder` (with `syslogd`), the setup routes against in-process daemons, the wizard in demo mode. Not run on FreeBSD: the real `rc.subr`, `/dev/console`, the `authpriv` line in `/var/log/auth.log`, `zfs list -H -o name /` on a root pool, a first boot. `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_APPLIANCE=1` |
@@ -1246,9 +1256,14 @@ and starts. It passed on the FreeBSD 15.1 arm64 test host. What it and the trial
 - The helper's file operations must reach the daemon's work directory (image builds write their repository
   configuration there), and removing a build's tree is a recursive `fs.remove_all` that the helper allows only for
   scratch trees (below the work directory, and `.seed-*` and `.merge-*` directories of a jail container).
-- `/var/run/jailops` is shared by the helper's socket (group only) and the daemon's (anyone may connect; the
-  daemon decides by peer credentials): mode 1771, group `jailops`, the sticky bit keeps the daemon from touching the
-  helper's files.
+- The two sockets have a directory each. The helper's is `/var/run/jailops-priv/priv.sock` in a directory of root
+  (mode 0710, group `jailops`: the daemon passes through to the socket and can create nothing there); before, it
+  shared `/var/run/jailops` (mode 1771, group `jailops`) with the daemon's socket, so the daemon's user could put a
+  file or a socket of its own at `priv.sock` while the helper was stopped and keep it from starting. The daemon's
+  socket stays in `/var/run/jailops` (anyone may connect; the daemon decides by peer credentials). The pid files
+  daemon(8) writes as root are in `/var/run` (`jailops-priv.pid`, `jailopsd.pid` and their `-daemon.pid`
+  supervisors), so the daemon cannot leave a symlink there for root to write through. A configuration that still
+  names `/var/run/jailops/priv.sock` means the new path, in both programs.
 - The snapshot directory of a dataset is not looked at by the unprivileged daemon (a jail's `/root` is closed to
   it); the agent opens it.
 - `init` creates the jail.conf directory.
@@ -1709,7 +1724,11 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   is rate-limited like a login. A hub never forwards `/api/v1/auth/*` or `/api/v1/sessions*`, and a requestor claim must
   name its audience. Client certificates are checked for validity period and key usage after pinning. Request
   bodies must be `application/json`; the session cookie is the `__Host-` one over TLS and the plain one over plain
-  HTTP, never the other; responses carry `base-uri 'none'` and `form-action 'self'`, HSTS over TLS. On the backup
+  HTTP, never the other; responses carry `base-uri 'none'` and `form-action 'self'` and a `Permissions-Policy` that turns
+  off camera, microphone, location and the other device features; `Strict-Transport-Security` (one year, without
+  `includeSubDomains` or `preload`) only while the served certificate comes from ACME or was uploaded or configured
+  and verifies against the host's roots, never with the self-signed one, which a browser that remembered the header
+  would refuse without a way to click through (the backup node, self-signed and pinned, never sends it). On the backup
   node a login is limited per user and source and per source, a browser login must come from the site itself, bad
   bearer tokens are limited per source, and a changed password ends the user's other sessions. UNVERIFIED /
   format changes left for a later format version: a distinct key for GroupID derivation and a keyed gear table for

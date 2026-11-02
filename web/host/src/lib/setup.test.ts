@@ -97,10 +97,11 @@ describe('the wizard', () => {
     expect(setupFirewall('203.0.113.5')).toEqual({ template: 'default', ssh: { ports: [22], allow_from: ['203.0.113.5'] }, console: {}, icmp: true })
     expect(setupFirewall('').ssh).toEqual({ ports: [22] })
   })
-  it('proposes a /24 network with NAT through the uplink', () => {
+  it('proposes a network with NAT through the uplink, for any prefix the server takes', () => {
     expect(setupNetwork('10.77.0.0/24', 'em0')).toEqual({ uplink: 'em0', ipv4: { subnet: '10.77.0.0/24', gateway: '10.77.0.1', range: '10.77.0.2-10.77.0.254', nat: true } })
     expect(setupNetwork('10.77.0.0/24', '')?.ipv4?.nat).toBe(false)
-    expect(setupNetwork('10.77.0.0/16', 'em0')).toBeNull()
+    expect(setupNetwork('10.77.0.0/16', 'em0')?.ipv4?.range).toBe('10.77.0.2-10.77.255.254')
+    expect(setupNetwork('10.77.0.0/31', 'em0')).toBeNull()
     expect(setupNetwork('nonsense', '')).toBeNull()
   })
 })

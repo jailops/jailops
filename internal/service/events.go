@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -170,12 +171,21 @@ func (s *Service) emit(ctx context.Context, action, source string) {
 
 // emitIn publishes a lifecycle event of an object of project.
 func (s *Service) emitIn(ctx context.Context, project, action, source string) {
+	for _, p := range []string{"/api/v1/tokens/", "/api/v1/users/", "/api/v1/certificates/", "/api/v1/sessions/"} {
+		if strings.HasPrefix(source, p) {
+			s.credGen.Add(1)
+		}
+	}
 	s.events.publish(api.EventLifecycle, api.LifecycleEvent{Action: action, Source: source, Requestor: ActorFrom(ctx).Name, Project: project}, s.now())
 }
 
 func (s *Service) emitOperation(op api.Operation) {
 	s.events.publish(api.EventOperation, op, s.now())
 }
+
+// CredentialGeneration changes whenever a token, user, certificate or session changes or goes away: a long stream
+// that saw another value checks its credential again before it sends anything more.
+func (s *Service) CredentialGeneration() int64 { return s.credGen.Load() }
 
 // Log publishes a logging event (used for dry-run plans and warnings).
 func (s *Service) logEvent(level, msg string, fields map[string]string) {

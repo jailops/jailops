@@ -6,8 +6,9 @@ import { ApiError } from '@jailops/shared/api/client'
 import { runOp } from '@jailops/shared/composables/ops'
 import { projectState } from '@/composables/project'
 import { useInstallGate } from '@/composables/apps'
-import { initialForm, installBody, paragraphs, parseStep, stepState, stepsDone, validateInstall, openLinks, INSTALL_SNAPSHOT, type InstallForm } from '@/lib/apps'
+import { initialForm, installBody, parseStep, stepState, stepsDone, validateInstall, openLinks, INSTALL_SNAPSHOT, type InstallForm } from '@/lib/apps'
 import { logFileOf } from '@/lib/logs'
+import { nameHint, nameProblem } from '@jailops/shared/lib/names'
 import Modal from '@jailops/shared/components/Modal.vue'
 import Callout from '@jailops/shared/components/Callout.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
@@ -15,6 +16,7 @@ import CopyField from '@jailops/shared/components/CopyField.vue'
 import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import StatePill from '@/components/StatePill.vue'
+import NotesText from '@/components/NotesText.vue'
 import type { AppDetail, AppInstallResult } from '@jailops/shared/api/types'
 
 const props = defineProps<{ open: boolean; detail: AppDetail | null }>()
@@ -38,9 +40,17 @@ const result = ref<AppInstallResult | null>(null)
 
 const issues = computed(() => validateInstall(f, { networks: gate.granted.value.networks, storage: gate.granted.value.storage, taken: taken.value }))
 const valid = computed(() => !Object.keys(issues.value).length)
-const issueText = (k: keyof InstallForm): string => {
+const say = (k: keyof InstallForm): string => {
   const i = issues.value[k]
-  return i && (touched.value || k === 'jail' || k === 'memory' || k === 'disk' || k === 'cpu') ? s.install[i] : ''
+  return !i ? '' : i === 'nameInvalid' ? nameProblem(f.jail) : s.install[i]
+}
+const issueText = (k: keyof InstallForm): string => (touched.value || k === 'jail' || k === 'memory' || k === 'disk' || k === 'cpu' ? say(k) : '')
+// the first problem, named next to the Install button; a submit focuses its field
+const fieldIds: Record<keyof InstallForm, string> = { jail: 'inst-jail', network: 'inst-net', storage: 'inst-sto', memory: 'inst-mem', disk: 'inst-disk', cpu: 'inst-cpu' }
+const firstIssue = computed(() => (Object.keys(fieldIds) as Array<keyof InstallForm>).find((k) => issues.value[k]))
+const why = computed(() => (firstIssue.value ? s.form.fixFirst(say(firstIssue.value)) : ''))
+function focusFirst(): void {
+  if (firstIssue.value) void Promise.resolve().then(() => document.getElementById(fieldIds[firstIssue.value!])?.focus())
 }
 const body = (dry = false) => installBody(f, app.value?.resources, dry)
 const key = computed(() => JSON.stringify(body()))
@@ -71,7 +81,10 @@ watch(() => props.open, (o) => {
 /** The dry run: the server answers with the exact steps it would take, and does nothing. */
 async function preview(): Promise<boolean> {
   touched.value = true
-  if (!valid.value || !app.value) return false
+  if (!valid.value || !app.value) {
+    focusFirst()
+    return false
+  }
   busy.value = true
   error.value = null
   try {
@@ -91,7 +104,10 @@ async function preview(): Promise<boolean> {
 
 async function install(): Promise<void> {
   touched.value = true
-  if (!valid.value || !app.value) return
+  if (!valid.value || !app.value) {
+    focusFirst()
+    return
+  }
   // The step list comes from the dry run, so a progress figure can be shown against named steps.
   if (!fresh.value && !(await preview())) return
   busy.value = true
@@ -135,27 +151,27 @@ function back(): void {
         <p v-else-if="projectState.current" class="muted">{{ s.install.lead(projectState.current) }}</p>
         <form id="inst" class="inst-form" novalidate @submit.prevent="install">
           <div class="field inst-wide">
-            <label for="inst-jail">{{ s.install.jail }}</label>
+            <label for="inst-jail">{{ s.install.jail }} <span class="req" aria-hidden="true">*</span></label>
             <input id="inst-jail" v-model.trim="f.jail" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!issueText('jail')" :aria-describedby="issueText('jail') ? 'inst-jail-err' : 'inst-jail-hint'" />
             <span v-if="issueText('jail')" id="inst-jail-err" class="field-error" role="alert">{{ issueText('jail') }}</span>
-            <span v-else id="inst-jail-hint" class="hint">{{ s.install.jailHint }}</span>
+            <span v-else id="inst-jail-hint" class="hint">{{ nameHint() }}</span>
           </div>
           <div class="field">
-            <label for="inst-net">{{ s.install.network }}</label>
+            <label for="inst-net">{{ s.install.network }} <span class="req" aria-hidden="true">*</span></label>
             <select id="inst-net" v-model="f.network" :aria-invalid="!!issueText('network')" :aria-describedby="issueText('network') ? 'inst-net-err' : undefined" data-test="install-network">
               <option v-if="gate.granted.value.networks.length !== 1" value="">{{ s.install.choose }}</option>
               <option v-for="n in gate.granted.value.networks" :key="n" :value="n">{{ n }}</option>
             </select>
-            <span v-if="issueText('network')" id="inst-net-err" class="field-error">{{ issueText('network') }}</span>
+            <span v-if="issueText('network')" id="inst-net-err" class="field-error" role="alert">{{ issueText('network') }}</span>
             <span v-else-if="gate.granted.value.networks.length === 1" class="hint">{{ s.install.onlyGrant }}</span>
           </div>
           <div class="field">
-            <label for="inst-sto">{{ s.install.storage }}</label>
+            <label for="inst-sto">{{ s.install.storage }} <span class="req" aria-hidden="true">*</span></label>
             <select id="inst-sto" v-model="f.storage" :aria-invalid="!!issueText('storage')" :aria-describedby="issueText('storage') ? 'inst-sto-err' : undefined" data-test="install-storage">
               <option v-if="gate.granted.value.storage.length !== 1" value="">{{ s.install.choose }}</option>
               <option v-for="n in gate.granted.value.storage" :key="n" :value="n">{{ n }}</option>
             </select>
-            <span v-if="issueText('storage')" id="inst-sto-err" class="field-error">{{ issueText('storage') }}</span>
+            <span v-if="issueText('storage')" id="inst-sto-err" class="field-error" role="alert">{{ issueText('storage') }}</span>
             <span v-else-if="gate.granted.value.storage.length === 1" class="hint">{{ s.install.onlyGrant }}</span>
           </div>
           <fieldset class="inst-limits inst-wide">
@@ -222,7 +238,7 @@ function back(): void {
           </section>
           <section v-if="result.notes" aria-labelledby="inst-notes-h">
             <h3 id="inst-notes-h">{{ s.apps.notes }}</h3>
-            <div class="inst-notes"><p v-for="(p, i) in paragraphs(result.notes)" :key="i">{{ p }}</p></div>
+            <NotesText class="inst-notes" :text="result.notes" />
           </section>
           <section aria-labelledby="inst-rb-h" data-test="install-rollback">
             <h3 id="inst-rb-h">{{ s.install.rollbackTitle }}</h3>
@@ -250,9 +266,11 @@ function back(): void {
     </div>
     <template #footer>
       <template v-if="phase === 'form'">
+        <span v-if="gate.block.value" class="why-disabled" data-test="install-why">{{ s.install.blocked }}</span>
+        <span v-else-if="why" class="why-disabled" data-test="install-why">{{ why }}</span>
         <button class="btn" type="button" @click="emit('close')">{{ s.app.cancel }}</button>
-        <button class="btn" type="button" :disabled="busy || !!gate.block.value" data-test="install-preview" @click="preview">{{ busy ? s.install.previewing : s.install.preview }}</button>
-        <button class="btn btn-primary" type="submit" form="inst" :disabled="busy || !valid || !!gate.block.value" data-test="install-go"><Icon name="pkg" />{{ s.install.go }}</button>
+        <button class="btn" type="button" :disabled="busy || !!gate.block.value" :aria-disabled="!valid" data-test="install-preview" @click="preview">{{ busy ? s.install.previewing : s.install.preview }}</button>
+        <button class="btn btn-primary" type="submit" form="inst" :disabled="busy || !!gate.block.value" :aria-disabled="!valid" data-test="install-go"><Icon name="pkg" />{{ s.install.go }}</button>
       </template>
       <template v-else-if="phase === 'running'">
         <button class="btn" type="button" @click="emit('close')">{{ s.install.close }}</button>

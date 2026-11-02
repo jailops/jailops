@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -59,6 +60,24 @@ func (l *ndpList) Set(v string) error {
 		return err
 	}
 	*l = append(*l, u)
+	return nil
+}
+
+// prefixList is a list of networks (wireguard-routes), each without host bits.
+type prefixList []netip.Prefix
+
+func (l *prefixList) String() string { return fmt.Sprint(len(*l), " network(s)") }
+func (l *prefixList) Set(v string) error {
+	for _, s := range strings.Split(v, ",") {
+		if s = strings.TrimSpace(s); s == "" {
+			continue
+		}
+		p, err := netip.ParsePrefix(s)
+		if err != nil || p != p.Masked() || p.Addr().Zone() != "" {
+			return fmt.Errorf("%q is not a network without host bits", s)
+		}
+		*l = append(*l, p)
+	}
 	return nil
 }
 
@@ -111,6 +130,7 @@ type options struct {
 	adminMounts   list
 	adminZFSProp  list
 	adminRoutes   bool
+	wgRoutes      prefixList
 	adminRawPF    bool
 	adminResume   bool
 }
@@ -156,6 +176,7 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.Var(&o.adminMounts, "admin-host-mount", "host directory an admin may mount into a jail")
 	fs.Var(&o.adminZFSProp, "admin-zfs-prop", "native zfs property an admin may set")
 	fs.BoolVar(&o.adminRoutes, "admin-routes", false, "admin may add routes through a gateway")
+	fs.Var(&o.wgRoutes, "wireguard-routes", "network a WireGuard tunnel may route into itself although it is wider than a /8 (/16 for IPv6) or covers the host's addresses, gateway or resolvers (repeatable)")
 	fs.BoolVar(&o.adminRawPF, "admin-raw-pf", false, "admin may load raw pf rulesets")
 	fs.BoolVar(&o.adminResume, "admin-resume-send", false, "admin may resume a zfs send from a token")
 	return fs
@@ -200,7 +221,8 @@ func (o *options) privConfig() priv.Config {
 		StorageRoots: append([]string(nil), o.storage...), StorageFile: o.storageFile, AllowPoolRoot: o.poolRoot,
 		IfPrefixes: o.ifPrefix, MountBase: o.mountBase,
 		ConfDir: o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir,
-		NDPProxy: o.ndpProxy, Sysctls: o.sysctl, FetchHosts: o.fetchHost, ImageMirrors: o.mirror,
+		WireGuardRoutes: o.wgRoutes,
+		NDPProxy:        o.ndpProxy, Sysctls: o.sysctl, FetchHosts: o.fetchHost, ImageMirrors: o.mirror,
 		HostManage: unionModules(o.hostManage, o.applianceModules()), HostDir: o.hostDir,
 		Admin: priv.AdminPolicy{
 			RawJailParams: o.adminRawParam, AllowFlags: o.adminAllow, HostMountRoots: o.adminMounts,
@@ -281,6 +303,7 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 		}
 		return 2
 	}
+	o.socket = helperSocket(o.socket)
 	rest := fs.Args()
 	if len(rest) > 0 && rest[0] == "version" {
 		printVersion(stdout)
@@ -411,10 +434,33 @@ func resolvePeers(o *options) (priv.PeerPolicy, error) {
 	return p, nil
 }
 
+// writePidfile writes the pid without following a symlink at the file's own name: root must not truncate a file
+// someone else linked there.
+func writePidfile(path string) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW, 0o644)
+	if err != nil {
+		return err
+	}
+	if _, err := f.WriteString(strconv.Itoa(os.Getpid()) + "\n"); err != nil {
+		f.Close()
+		return err
+	}
+	return f.Close()
+}
+
+// helperSocket maps the socket path of releases before the helper had a directory of its own to the new one: the
+// directory of the old path is the daemon's, whose user could put a file or a socket there before the helper starts.
+func helperSocket(p string) string {
+	if p == priv.LegacySocket {
+		return priv.DefaultSocket
+	}
+	return p
+}
+
 // listen creates the socket with mode and group set before anyone can connect.
 func listen(path, group string, mode os.FileMode, dev bool) (net.Listener, error) {
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o751); err != nil {
+	if err := os.MkdirAll(dir, 0o710); err != nil {
 		return nil, err
 	}
 	gid := -1
@@ -427,11 +473,25 @@ func listen(path, group string, mode os.FileMode, dev bool) (net.Listener, error
 		}
 	}
 	if gid >= 0 {
-		// The directory also holds the daemon's own socket (jailopsd runs as a member of the group and makes it
-		// here), so: group may create (the sticky bit keeps it from touching the helper's files), everybody may
-		// pass through (the sockets decide who may connect; this one is group only).
-		_ = os.Chown(dir, -1, gid)
-		_ = os.Chmod(dir, os.ModeSticky|0o771)
+		// The directory is the helper's alone: root writes it, the group may only pass through to the socket. In a
+		// directory the daemon's user could write, it could put a file or a socket of its own at this name before
+		// the helper starts.
+		if err := os.Chown(dir, 0, gid); err != nil && !dev {
+			return nil, err
+		}
+		if err := os.Chmod(dir, 0o710); err != nil {
+			return nil, err
+		}
+	}
+	if !dev {
+		st, err := os.Lstat(dir)
+		if err != nil {
+			return nil, err
+		}
+		sys, ok := st.Sys().(*syscall.Stat_t)
+		if !st.IsDir() || !ok || sys.Uid != 0 || st.Mode().Perm()&0o022 != 0 {
+			return nil, fmt.Errorf("%s must be a directory of root that only root can write (mode 0710, group %s)", dir, group)
+		}
 	}
 	if st, err := os.Lstat(path); err == nil {
 		if st.Mode()&os.ModeSocket == 0 {
@@ -499,7 +559,7 @@ func serve(o *options, cfg priv.Config, stderr io.Writer) int {
 		return 1
 	}
 	if o.pidfile != "" {
-		if err := os.WriteFile(o.pidfile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+		if err := writePidfile(o.pidfile); err != nil {
 			fmt.Fprintf(stderr, "jailops-priv: pidfile: %v\n", err)
 			ln.Close()
 			return 1

@@ -2,7 +2,7 @@ $ jailops wireguard create office --address 10.99.0.1/24 --network lan --endpoin
 wireguard/office created
 
 $ jailops wireguard create bad --mode client --address 10.98.0.2/32
-! usage: a client is made from a join token: jailops wireguard join TOKEN
+! usage: a client is made from a join token: jailops wireguard join - < TOKEN-FILE
 ! hint: run 'jailops wireguard create --help' for usage
 [exit 2]
 
@@ -64,11 +64,23 @@ phone    10.99.0.3/32   never       0 B / 0 B           -
 $ jailops --dry-run wireguard join jwg1.eyJhZGRyZXNzIjpbIjEwLjk5LjAuMi8zMiJdLCJhbGxvd2VkX2lwcyI6WyIxMC45OS4wLjAvMjQiXSwiZW5kcG9pbnQiOiJ2cG4uZXhhbXBsZS5jb206NTE4MjAiLCJrZWVwYWxpdmUiOjI1LCJuYW1lIjoibGFwdG9wIiwicHJlc2hhcmVkX2tleSI6IllTSlV6ZHZvWW53UElzTFllZzRBVlJTdzE5d1Rxbk96NzNkaGptUER2REU9IiwicHJpdmF0ZV9rZXkiOiIrMERiOGMyTlhBT0tjRFpUaWVLT0oxQkF0cUtUaWNvZnk4V2NpWit5ZFAwPSIsInNlcnZlcl9wdWJsaWNfa2V5IjoidDZtUFFLRE5XOHI0empCUXdhdXU1eS9GclQ4Zm5FU28xVGd1SktPYmV6VT0ifQ
 dry-run: would join a wireguard server
 token: (token, not shown)
+! warning: the token holds a private key, and on the command line other users of this host can read it and the shell keeps it in its history; use 'jailops wireguard join -' or --token-file
+
+$ jailops --dry-run wireguard join --token-file <dir>/wg.token
+dry-run: would join a wireguard server
+token: (token, not shown)
+
+$ jailops wireguard join
+! usage: name the token: jailops wireguard join - (standard input) or --token-file FILE
+! hint: run 'jailops wireguard join --help' for usage
+[exit 2]
 
 $ jailops wireguard join jwg1.eyJhZGRyZXNzIjpbIjEwLjk5LjAuMi8zMiJdLCJhbGxvd2VkX2lwcyI6WyIxMC45OS4wLjAvMjQiXSwiZW5kcG9pbnQiOiJ2cG4uZXhhbXBsZS5jb206NTE4MjAiLCJrZWVwYWxpdmUiOjI1LCJuYW1lIjoibGFwdG9wIiwicHJlc2hhcmVkX2tleSI6IllTSlV6ZHZvWW53UElzTFllZzRBVlJTdzE5d1Rxbk96NzNkaGptUER2REU9IiwicHJpdmF0ZV9rZXkiOiIrMERiOGMyTlhBT0tjRFpUaWVLT0oxQkF0cUtUaWNvZnk4V2NpWit5ZFAwPSIsInNlcnZlcl9wdWJsaWNfa2V5IjoidDZtUFFLRE5XOHI0empCUXdhdXU1eS9GclQ4Zm5FU28xVGd1SktPYmV6VT0ifQ --name home --endpoint 203.0.113.10:51820
 wireguard/home joined
+! warning: the token holds a private key, and on the command line other users of this host can read it and the shell keeps it in its history; use 'jailops wireguard join -' or --token-file
 
 $ jailops wireguard join not-a-token
+! warning: the token holds a private key, and on the command line other users of this host can read it and the shell keeps it in its history; use 'jailops wireguard join -' or --token-file
 ! invalid: not a WireGuard join token
 ! hint: copy the whole token that `jailops wireguard peer add` printed; it starts with jwg1.
 [exit 2]

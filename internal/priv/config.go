@@ -1,6 +1,7 @@
 package priv
 
 import (
+	"net/netip"
 	"path/filepath"
 	"slices"
 	"time"
@@ -11,7 +12,12 @@ import (
 
 // Default locations on a FreeBSD host.
 const (
-	DefaultSocket     = "/var/run/jailops/priv.sock"
+	// DefaultSocket is the helper's socket. Its directory belongs to root (mode 0710, group jailops): the daemon may
+	// reach the socket but cannot put anything in its place.
+	DefaultSocket = "/var/run/jailops-priv/priv.sock"
+	// LegacySocket is where releases before it lived, in the directory the daemon writes. A configuration that
+	// still names it means DefaultSocket.
+	LegacySocket      = "/var/run/jailops/priv.sock"
 	DefaultConfDir    = "/usr/local/etc/jailops/jails"
 	DefaultHelperPath = "/usr/local/libexec/jailops-priv"
 	// DefaultStorageFile persists the storage roots registered at run time.
@@ -154,6 +160,9 @@ type Config struct {
 	// WireGuardDir holds the keys of WireGuard interfaces, one directory per object (default
 	// DefaultWireGuardDir). It belongs to root with mode 0700 and lies outside every directory the daemon writes.
 	WireGuardDir string
+	// WireGuardRoutes are networks a WireGuard tunnel may route into itself although they are wider than a /8 or /16,
+	// or cover an address of the host, its gateway, a resolver, loopback, link-local or multicast (wireguard-routes).
+	WireGuardRoutes []netip.Prefix
 	// noOwnerCheck skips the check that the helper's own directories belong to root (tests).
 	noOwnerCheck bool
 	// HelperPath is the path jail.conf hooks call; only the exact hook

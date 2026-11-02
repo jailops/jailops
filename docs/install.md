@@ -6,13 +6,15 @@ script is right.
 
 ## The appliance path
 
-For a host you run from the web console: install FreeBSD (on ZFS, as the installer offers), then five commands as root.
+For a host you run from the web console: install FreeBSD (on ZFS, as the installer offers), then four commands as root,
+and a browser.
 
     pkg install jailops
     sysrc jailops_priv_enable=YES jailopsd_enable=YES jailopsd_web=YES jailops_appliance=YES    # jailops_pool=zroot to name the pool
     service jailops_priv start && service jailopsd start
     jailops-priv setup-token                                     # or read the token and the address on the system console
-    # open https://HOST:39110/ in a browser and enter the token
+
+Then open `https://HOST:39110/` in a browser and enter the token.
 
 (Trust the package repository first, as section 2 says.) What happens: `jailops_appliance="YES"` hands host management
 to JailOps ([appliance.md](appliance.md): the host name, resolvers and NTP, and the host's firewall) in both programs at
@@ -43,19 +45,22 @@ On a private network, upload a certificate of your own CA in the wizard or on th
 PEM chain, its key and the host name clients use. It is checked, written to `/var/db/jailops/tls`, and served from the
 next connection on; nothing renews it, so upload the next one before it expires (`jailops doctor` warns 14 days before).
 Or keep the self-signed certificate: clients pin its fingerprint (the page shows the `jailops remote add` command).
+From the command line, `jailops host certificate show|acme|upload|self-signed` does the same as the Host page.
 
 The rest of this page is the manual path, which the appliance path does for you.
 
 ## 1. What the host needs
 
 - A ZFS pool you are willing to give a dataset to (below: `zroot`, the default pool of the FreeBSD installer). JailOps never runs `zpool upgrade`.
-- Kernel modules `if_bridge`, `if_epair`, `nullfs` and `pf`. Load them now and at boot:
+- Kernel modules `if_bridge`, `if_epair`, `pf` and `zfs`: the four `jailops doctor` checks (`zfs` is loaded already
+  on a FreeBSD installed on ZFS). Load them now and at boot:
 
-      kldload -n if_bridge if_epair nullfs pf
-      sysrc -f /boot/loader.conf if_bridge_load=YES if_epair_load=YES nullfs_load=YES pf_load=YES
+      kldload -n if_bridge if_epair pf zfs
+      sysrc -f /boot/loader.conf if_bridge_load=YES if_epair_load=YES pf_load=YES zfs_load=YES
 
   (Linux jails also need `linux64`, `linprocfs`, `linsysfs` and `fdescfs`; the daemon loads those itself while a Linux
-  jail exists.) `jailops doctor` reports a missing module with the command to load it.
+  jail exists. `nullfs`, which host mounts use, is loaded by `mount` when it is first needed.) `jailops doctor` reports
+  a missing module with the command to load it.
 - Network access to `pkg.freebsd.org` for building images from pkgbase. The helper's download rule allows only the
   hosts in `fetch-host` of `priv.conf` (default `dl-cdn.alpinelinux.org` and `pkg.freebsd.org`), over https.
 
@@ -131,8 +136,8 @@ Then `sysrc pf_enable=YES`, and start pf only if it is not running (`service pf 
 
 ## 4. Forwarding
 
-JailOps never changes forwarding. The administrator enables it, and `jailops doctor` checks that it is on and
-persistent:
+JailOps turns forwarding on at run time when a network needs it, but it does not make it persistent: you do, and
+`jailops doctor` checks that it is on and persistent:
 
     sysrc gateway_enable=YES ipv6_gateway_enable=YES
     sysctl net.inet.ip.forwarding=1 net.inet6.ip6.forwarding=1
@@ -163,18 +168,23 @@ directories, and the two configuration files `/usr/local/etc/jailops/priv.conf` 
 
 ## 6. Start the services
 
+Run these as root. FreeBSD has no `sudo` in the base system: log in as root, use `su -m root -c '...'` (or `su -`), or
+install `doas` or `sudo` from packages; the examples below write the commands as root runs them.
+
     sysrc jailops_priv_enable=YES jailopsd_enable=YES jailopsd_web=YES
     service jailops_priv checkconfig
     service jailops_priv start
     service jailopsd start
-    sudo jailops doctor
+    jailops doctor
 
 Then create the first administrator. On the host, **root is the global administrator of the unix socket** (the recovery access); every
 other local user is anonymous until they sign in with a JailOps identity. There is no Unix group that grants a role.
 
-    sudo jailops user create admin --admin --password-prompt     # a global administrator; the password is asked, never an argument
-    sudo jailops user set-password admin                         # recovery: root replaces a lost password, no old one needed
-    sudo jailops token create ci --permission operator --projects web --expires 720h     # a token for scripts and for one person
+    jailops user create admin --admin --password-prompt     # a global administrator; the password is asked, never an argument
+    jailops user set-password admin                         # recovery: root replaces a lost password, no old one needed
+
+Tokens for scripts come after the first project exists (section 7), because a token is scoped to projects:
+`jailops token create ci --role operator --projects web --expires 720h`.
 
 `jailopsd_web=YES` turns the web console on and opens the TLS listener on port 39110: open `https://HOST:39110/` and sign in as `admin` (the
 server certificate is self-signed; open the port in your firewall for the machines that should reach it, see [ports.md](ports.md)). Leave
@@ -182,7 +192,7 @@ the line out for a host you only reach with the CLI.
 
 Identities (users, API tokens, client certificates) have the same roles, scopes and audit over the socket and over the network.
 A person who is not root uses a token (`JAILOPS_TOKEN`, or `jailops remote add`) or signs in to the web console. Run the commands
-below as root (`sudo`) or with such a token.
+below as root or with such a token.
 
 `jailops doctor` should show no `FAIL`. A `WARN` for `sysctl.persistent` means forwarding (or, with a switched IPv6
 network, `net.inet6.icmp6.nd6_onlink_ns_rfc4861`) is on but will not survive a reboot until you set the `rc.conf` or
@@ -191,16 +201,24 @@ explains each check.
 
 ## 7. The first jail
 
-There is no default project, network or storage: you name them.
+There is no default project or network: you create them and name them. There is one storage from the start: `default`,
+which the daemon creates on its first start for the dataset `<pool>/jailops` that section 5 made (`jailops storage list`
+shows it). A project is granted the networks and storages its jails may use.
 
     jailops image create freebsd-15 --release 15.1-RELEASE --alias stable
     jailops image build freebsd-15
-    jailops network create lan --bridge jo7 --ipv4 10.77.0.1/24 --uplink em0 --nat
+    jailops network create lan --bridge jo7 --ipv4 10.77.0.1/24 --uplink vtnet0 --nat    # vtnet0: the host's uplink, see below
     jailops project create web
     jailops project set web --network lan --storage default
     jailops project switch web
     jailops create nginx --image freebsd-15@stable --network lan --storage default --start
     jailops exec nginx -- uname -a
+    jailops token create ci --role operator --projects web --expires 720h    # a token for scripts, now that web exists
+
+`--uplink` is the host's interface towards the outside: `vtnet0` on most virtual machines, `em0`, `igb0` or `ix0` on
+real hardware (`ifconfig -l` lists them). The project of a jail grants exactly one network and one storage here, so
+`jailops create nginx --image freebsd-15@stable --start` would take `lan` and `default` by itself (and say so); naming
+them keeps the command right when the project has more.
 
 An application from the catalog is one command more: `pkg install jailops-apps` puts the definitions under
 `/usr/local/share/jailops/apps` (`jailops app list` shows them, `jailops app info nginx` describes one), and
@@ -210,10 +228,9 @@ from the FreeBSD repository, enables and starts the service, checks that it answ
 that came from the catalog. What the installation does step by step, and what it leaves behind when a step fails, is in
 [apps.md](apps.md).
 
-Without `project switch` pass `--project web` (or set `JAILOPS_PROJECT`) on every jail command. `--start` starts the jail
+Without `project switch` pass `--project web` (or set `JAILOPS_PROJECT=web`) on every jail command. `--start` starts the jail
 once it is created (`jailops start nginx` does the same later). Several objects at once come from a file:
-`jailops apply -f site.yaml` creates what is missing and updates what differs, document by document. The storage `default` is
-the one the daemon creates on its first start (dataset `<pool>/jailops`). IPv6, big pools and backups continue in
+`jailops apply -f site.yaml` creates what is missing and updates what differs, document by document. IPv6, big pools and backups continue in
 [networking-ipv6.md](networking-ipv6.md), [storage.md](storage.md) and [backup-restore.md](backup-restore.md).
 
 ## Remote access
@@ -222,8 +239,10 @@ By default only the unix socket listens. To manage a host from another machine s
 `jailopsd.yaml` (for example `":39110"`), restart `jailopsd`, then on the host create a single-use trust token and use
 it on the client (a token is valid for one hour by default):
 
-    jailops trust add --name laptop --projects web                     # on the host: prints a single-use token
-    jailops remote add myhost https://host.example:39110 --token-stdin  # on the client: paste the token
+    jailops trust add --name laptop --role operator --projects web          # on the host: prints a single-use token
+    jailops remote add host.example.org --token-stdin --name myhost         # on the client: paste the token, then Enter
 
-The client pins the server fingerprint from the token (there is no trust on first use). The web consoles are served by
-the same listener.
+`remote add` takes one argument here, the host's address (`host` or `host:port`, port 39110 by default): that is the
+form that redeems a trust token. The client pins the server fingerprint from the token (there is no trust on first use),
+makes a key pair and is trusted with the role and projects of the token. (`remote add NAME URL` with two arguments is for
+an API token, `jot_...`.) The web consoles are served by the same listener.

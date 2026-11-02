@@ -65,8 +65,12 @@ func TestInfoAndExtensions(t *testing.T) {
 	if info.Auth != "untrusted" || info.APIVersion != "1.0" || info.Role != api.RoleHost || info.Hub {
 		t.Fatalf("%+v", info)
 	}
-	if info.HostUUID == "" || info.Hostname != "testhost" || info.Version != "test" {
+	// an anonymous caller learns no host name, id, software version or environment
+	if info.HostUUID != "" || info.Hostname != "" || info.Version != "" || info.Environment.Pool != "" {
 		t.Fatalf("%+v", info)
+	}
+	if ti, err := e.Admin.Info(ctxT(t)); err != nil || ti.HostUUID == "" || ti.Hostname != "testhost" || ti.Version != "test" {
+		t.Fatalf("%+v %v", ti, err)
 	}
 	for _, want := range []string{"operations", "etag", "events", "jails", "doctor", "audit_log"} {
 		if !slices.Contains(info.APIExtensions, want) {

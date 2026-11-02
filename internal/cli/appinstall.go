@@ -90,7 +90,7 @@ jailops app install nginx --project web --dry-run`,
 	f.IntVar(&cpu, "cpu", 0, "CPU limit in cores (replaces the definition's hints)")
 	a.completeFlag(cmd, "network", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Networks().List(ctx), netName) }))
 	a.completeFlag(cmd, "storage", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Storage().List(ctx), storName) }))
-	a.completeFlag(cmd, "image", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Images().List(ctx), imageName2) }))
+	a.completeFlag(cmd, "image", imageRefs)
 	return cmd
 }
 

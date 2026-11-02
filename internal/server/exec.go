@@ -50,7 +50,7 @@ func (s *Server) handleExec(c *rc) error {
 		_ = st.Session.Signal(9)
 		return nil
 	}
-	code := s.pump(conn, brw.Reader, st, s.svc.ExecLimitsOf())
+	code := s.pump(conn, brw.Reader, st, s.svc.ExecLimitsOf(), func() bool { return s.stillAuthorized(c) })
 	c.detail += fmt.Sprintf(" exit=%d", code)
 	return nil
 }
@@ -68,8 +68,9 @@ func headerHasToken(h http.Header, key, token string) bool {
 
 // pump moves frames between the connection and the session until the command
 // ends, the client goes away, the stream idles or the session lives too long.
-// It returns the exit status (-1 when the session was cut off).
-func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, lim service.ExecLimits) int {
+// It returns the exit status (-1 when the session was cut off). still is asked at every keepalive tick whether the
+// caller's credential still holds; a revoked one ends the session.
+func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, lim service.ExecLimits, still func() bool) int {
 	sess := st.Session
 	var wmu sync.Mutex
 	write := func(t api.FrameType, p []byte) error {
@@ -96,6 +97,8 @@ func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, li
 	go func() {
 		t := time.NewTicker(lim.Idle/4 + time.Millisecond)
 		defer t.Stop()
+		ka := time.NewTicker(s.cfg.KeepAlive)
+		defer ka.Stop()
 		for {
 			select {
 			case <-done:
@@ -103,6 +106,11 @@ func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, li
 			case <-t.C:
 				if time.Since(time.Unix(0, last.Load())) > lim.Idle {
 					kill("the session was idle too long")
+					return
+				}
+			case <-ka.C:
+				if still != nil && !still() {
+					kill("the credential of this session was revoked")
 					return
 				}
 			}

@@ -62,15 +62,15 @@ func JailSpec(name string, s api.JailSpec) error {
 		}
 	}
 	if s.Resources.CPU < 0 || s.Resources.CPU > 4096 {
-		return Invalid("resources.cpu", "cpu must be between 0 and 4096")
+		return Invalid("resources.cpu", "the CPU limit must be between 0 and 4096 cores (--cpu)")
 	}
 	if s.Resources.PIDs < 0 {
-		return Invalid("resources.pids", "pids must not be negative")
+		return Invalid("resources.pids", "the process limit must not be negative (--pids)")
 	}
-	for f, v := range map[string]string{"resources.memory": s.Resources.Memory, "resources.disk": s.Resources.Disk} {
-		if v != "" {
-			if _, err := ParseSize(v); err != nil {
-				return Invalid(f, "%s %q is not a size such as 512M or 2G", f, v)
+	for _, r := range []struct{ field, flag, v string }{{"resources.memory", "memory", s.Resources.Memory}, {"resources.disk", "disk", s.Resources.Disk}} {
+		if r.v != "" {
+			if _, err := ParseSize(r.v); err != nil {
+				return Invalid(r.field, "%s %q is not a size such as 512M or 2G (--%s)", r.flag, r.v, r.flag)
 			}
 		}
 	}

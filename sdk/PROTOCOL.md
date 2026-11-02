@@ -21,7 +21,13 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 ## Conventions
 
 - `GET /api/v1` returns `api.ServerInfo` (allowed unauthenticated; `auth` says how the caller was seen).
-  `api_extensions` drives `Client.Has`.
+  `api_extensions` drives `Client.Has`. An `untrusted` caller gets `api_version`, `api_extensions`, `role` and
+  `auth` only; the software version, host name, host UUID, environment and secrets recipient need an identity.
+- Request bodies are strict: a member the request type does not have (a misspelled option), a member in other
+  cases, a member twice and anything after the JSON value are `invalid` (400), and the message names the member.
+  The `status` of an object sent back with it is ignored. Maps (`labels`, configuration keys) and merge patches
+  take any key.
+- Every API answer carries `Cache-Control: no-store` (and `Pragma: no-cache`).
 - Lists: `GET /api/v1/<resource>` returns `metadata` as an array of full objects (never URLs). Optional
   `?label=k=v` (repeatable, AND) and `?recursion=n` (reserved).
 - Items: `/api/v1/<resource>/<name>`. `GET` sends `ETag: "<generation>"`.
@@ -44,6 +50,8 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | Method and path | Request | Reply |
 |---|---|---|
 | `GET /api/v1` | | `ServerInfo` |
+| `GET /healthz` | | `ok`, plain text, always 200: liveness, the process answers. Public, not in the access log |
+| `GET /readyz` | | plain text, `ok` (200) or `not ready: CLASS` (503), CLASS one of `starting`, `stopping`, `helper`, `storage`, `store`: start-up finished, the helper answers a read-only call (the JailOps dataset exists), the database answers a query. Cached for 2 s; `?host=` is not forwarded. Public, not in the access log |
 | `/api/v1/jails` GET, POST | `Jail`; POST also `JailCreate` (`volume_passphrase` for volumes with `encrypted: true`, never returned) | list; POST async, result `Jail` |
 | `/api/v1/jails/<n>` GET, PUT, PATCH, DELETE | | `Jail`; DELETE async |
 | `GET /api/v1/jails/<n>/state` | | `JailStatus` |
@@ -263,7 +271,7 @@ call the `/api/v1/auth/*` self-service routes and the public routes. Creating an
 (`forbidden`) and then the object's project (`not_found`). Host-level writes need a global admin
 (`forbidden` otherwise). Unix socket: the peer uid 0 (root) is a global admin (kind `unix`, the host's recovery
 access); every other local peer is anonymous, exactly like an unauthenticated remote client, and reaches only the public
-routes (`GET /api/v1`, `GET /healthz`, `POST /api/v1/auth/login`, `POST /api/v1/trust/clients`, `POST /api/v1/cluster/join`, the static
+routes (`GET /api/v1`, `GET /healthz`, `GET /readyz`, `POST /api/v1/auth/login`, `POST /api/v1/trust/clients`, `POST /api/v1/cluster/join`, the static
 console) until it authenticates with a token or a session cookie. No Unix user or group maps to a role.
 
 - `GET /api/v1/auth/session` returns `Identity` (`user`, `kind`, `permission`, `projects`, `global`).
@@ -285,8 +293,11 @@ console) until it authenticates with a token or a session cookie. No Unix user o
   cannot exceed its permission and the claimed scope must lie inside its `projects` (or it needs `global`).
   The header is rejected (`forbidden`) on the unix socket, with a token, with a session and with a
   non-hub certificate. Without a claim a hub certificate acts with the rights of its own entry only.
-- `GET /api/v1/sessions` lists the caller's sessions (a global admin sees all); `DELETE /api/v1/sessions/<id>`
-  revokes one (own sessions, or any for a global admin). Revocation ends the session on its next request.
+- `GET /api/v1/sessions` lists the caller's sessions (a global admin sees all; a global identity with a lower role
+  only its own); `DELETE /api/v1/sessions/<id>` revokes one (own sessions, or any for a global admin). Revocation ends
+  the session on its next request, and its event streams, console outputs and exec sessions at the next keepalive.
+- `POST /api/v1/auth/totp` starts an enrolment with `{"password": ...}` and confirms it with `{"code": ...}`;
+  `POST /api/v1/auth/recovery-codes` takes `{"password": ...}`. A missing or wrong password is `unauthorized`.
 - Failed authentication (bad token, unknown or revoked certificate on a non-public route, bad trust token)
   is rate limited per source and audited as `denied`.
 
@@ -301,7 +312,9 @@ data: <api.Event as one line of JSON>
 
 ```
 
-`?type=` filters. A client that reconnects sends `Last-Event-ID`; the server replays retained events
+`?type=` filters. The credential travels in the `Authorization` header (a token in the query string is not
+accepted). One identity holds at most 16 streams (`rate_limited`, 429, beyond); a stream ends when its credential
+is deleted, disabled or changed. A client that reconnects sends `Last-Event-ID`; the server replays retained events
 with a larger id, then continues live. Without it the stream starts at "now". A `retry:` field sets
 the reconnect delay. Lines beginning with `:` are comments (keep-alives). Lifecycle metadata is
 `api.LifecycleEvent` with actions like `jail-created`, `jail-started`, `network-updated`, and `app.installed` or

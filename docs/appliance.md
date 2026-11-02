@@ -27,7 +27,7 @@ in the table below; everything that has not run on a FreeBSD host is marked UNVE
 | Opt-in switches (`host.manage.modules` in `jailopsd.yaml`, `host-manage` in `priv.conf`) | Built, for `identity` and `firewall` |
 | One switch in `rc.conf` (`jailops_appliance`, `jailops_appliance_modules`, `jailops_pool`) | Built: the rc scripts pass the modules to both programs, the first start sets the host up (`jailops-priv appliance-init`), doctor check `appliance`. Tested with the rc scripts run against a stand-in of `rc.subr` and their headers sorted like `rcorder`, and on FreeBSD 15.1 by the block `JAILOPS_E2E_APPLIANCE=1` of `scripts/ci-freebsd-e2e.sh` (the switch on a test configuration, `check-config`, doctor `appliance`). UNVERIFIED: a true first boot (root pool detection, `appliance-init` on a fresh install) |
 | Setup token of the first administrator | Built: `POST /api/v1/setup`, `jailops-priv setup-token`, printed by the rc script of `jailopsd`. Verified on FreeBSD 15.1: the token on the start of `jailopsd` and in `/var/log/auth.log` (not in `/var/log/messages`), a wrong token refused, the right one creating the first administrator, a second attempt answering 404. UNVERIFIED: `/dev/console` on a real console |
-| Module 1, identity: host name, resolvers, NTP | Built: API, helper operations, CLI, doctor checks, console page. Verified on FreeBSD 15.1 by the end-to-end block of `scripts/ci-freebsd-e2e.sh` (off unless `JAILOPS_E2E_HOST=1`): hostname, resolvers and NTP applied, the files and `sysrc` values checked, drift detected after a hand edit, and the restore putting the originals back byte for byte. Not verified: a host where DHCP or resolvconf rewrites `resolv.conf` |
+| Module 1, identity: host name, resolvers, NTP | Built: API, helper operations, CLI, doctor checks, console page. Verified on FreeBSD 15.1 by the end-to-end block of `scripts/ci-freebsd-e2e.sh` (off unless `JAILOPS_E2E_HOST=1`): hostname, resolvers and NTP applied, the files and `sysrc` values checked, drift detected after a hand edit, and the restore putting the originals back byte for byte. A restore now puts back the module's three `rc.conf` variables and its block of `ntp.conf` only (no longer the whole files); the block checks that a line root adds to `rc.conf` after the snapshot survives the restore: UNVERIFIED until it runs again. Not verified: a host where DHCP or resolvconf rewrites `resolv.conf` |
 | Snapshots before a change, restore | Built for modules 1 and 2 |
 | Commit confirmed (automatic revert) | Built in the helper (the pending record, its timer, the re-arm at start, the boot script `jailops_revert`), used by module 2. Verified on FreeBSD 15.1: a change that is not confirmed reverts by itself after the window and a confirmed one stays. UNVERIFIED: the boot ordering has been checked as text only (a test sorts the rc.d headers), a real reboot with a pending change has not been run |
 | Boot environment before a risky change | Design only (the firewall module does not create one) |
@@ -111,7 +111,7 @@ writes it; the rc script runs as root and hands the list to the helper on its co
 **The first start.** With `jailops_appliance="YES"` and no `priv.conf` yet, the rc script of `jailops_priv` runs
 `jailops-priv appliance-init` before the helper starts: the one-time setup of `jailops-priv init` (the user and group, the
 datasets `POOL/jailops` and `POOL/jailops/state`, the two configuration files) on `jailops_pool`, or on the pool of the root
-file system (`zfs list -H -o name /`). It refuses a pool that already holds a dataset with `jailops:managed=on` other than
+file system (`zfs list -H -o name /`); a name that starts with `-` is refused, by the rc script and by the helper. It refuses a pool that already holds a dataset with `jailops:managed=on` other than
 `POOL/jailops` (another setup's), does nothing once `priv.conf` exists, and logs every command it runs and every file it
 writes to syslog (tag `jailops-priv`). The rc script of `jailopsd` then asks the daemon for a setup token (below) after
 every start, while no administrator exists.
@@ -167,11 +167,17 @@ Each module follows the same pattern, so that what is learned on one applies to 
 - **Dry run.** Every change accepts `dry_run`. The reply is the same as for a real change: a unified diff of the files
   the module renders, and the list of actions in order (commands that would run, services that would restart). Nothing
   is written. The console shows this as Preview before Apply.
-- **Snapshot of exactly the touched files.** Before a change, the helper copies each file that will change into a new
-  snapshot directory with a manifest (module, time, reason, each file's path, mode, owner, and whether it existed). The
-  apply's reply names the snapshot. `jailops host restore [SNAPSHOT]` (default: the latest) puts the files back byte for
-  byte, removes a file that did not exist before, and re-runs what makes the files take effect. A restore first takes a
-  snapshot of its own (reason `restore`), so a restore can be undone too. The last 20 snapshots are kept.
+- **Snapshot of exactly what the module owns.** Before a change, the helper keeps what will change in a new snapshot
+  directory with a manifest (module, time, reason, each file's path, mode, owner, and whether it existed): a copy of a
+  file the module owns whole (`resolv.conf`, `pf.conf`), a copy of `ntp.conf` of which only the jailops block is ever
+  used, and, for `rc.conf`, only the values of the module's own variables (set or not set), never a copy of the file.
+  The apply's reply names the snapshot. `jailops host restore [SNAPSHOT]` (default: the latest) puts a whole file back
+  byte for byte (or removes it when it did not exist before), puts the jailops block of `ntp.conf` back in place of the
+  current one, sets or removes (`sysrc -x`) the module's `rc.conf` variables, and re-runs what makes them take effect.
+  Every other line of `rc.conf` and `ntp.conf` stays as it is now, and the diff names only the module's variables and
+  block. A revert of commit confirmed and the revert at boot do the same. A snapshot of an earlier version, which holds
+  a copy of `rc.conf`, gives only the module's variables from that copy. A restore first takes a snapshot of its own
+  (reason `restore`), so a restore can be undone too. The last 20 snapshots are kept.
 - **A boot environment first, for risky modules (design).** Modules that change what the host boots (updates) or that
   can make it unreachable after a reboot (network, firewall) create a boot environment with
   `bectl create jailops-<module>-<time>` before the change, and name it in the reply. Falling back to it is the last
@@ -313,10 +319,13 @@ informational level), warns on drift, and is ok when managed without drift. `hos
 - The running host name and the one in `rc.conf` can differ; the status shows both (`spec.hostname` and
   `status.rc_hostname`) and drift covers both.
 - The daemon's generated TLS certificate and anything else that was made with the old name keep it.
-- A restore puts whole files back. A change made to `/etc/rc.conf` (or `/etc/ntp.conf`) after the snapshot, to a line the
-  module does not own, is undone too; `jailops host restore --dry-run` shows it, and the restore's own snapshot keeps it.
+- A restore puts back what the module owns and nothing else: `resolv.conf` whole, the jailops block of `ntp.conf`, and
+  `hostname`, `ntpd_enable` and `ntpd_sync_on_start` of `rc.conf` (set to the recorded value, or removed when they were
+  not set). A change root made after the snapshot to any other line of `rc.conf` or `ntp.conf` stays. `sysrc` writes a
+  value it puts back in its own quoting (`name="value"`).
 - Verified on FreeBSD 15.1 by the end-to-end block: `sysrc -f` on the host's `rc.conf`, the `ntpq -pn` output, and the restore putting the
-  originals back byte for byte. Not verified: a host where DHCP or resolvconf rewrites `resolv.conf`.
+  originals back byte for byte (before a restore set only the module's variables; that, and `sysrc -x`, are UNVERIFIED
+  until the block runs again). Not verified: a host where DHCP or resolvconf rewrites `resolv.conf`.
 
 ### 2. Host firewall (built)
 
@@ -374,11 +383,13 @@ out takes its default, not the value applied before (one rendered file; this dif
   (`--i-know`), and the confirmation window still applies. A dry run reports both as warnings. The guard runs on every
   apply, not only the first.
 
-Then the snapshot (`/etc/pf.conf`, its absence included, and `/etc/rc.conf` when a variable changes; reason `adopt` for
+Then the snapshot (`/etc/pf.conf`, its absence included, and the values of `pf_enable` and `pf_rules` when one changes;
+reason `adopt` for
 the first apply, which keeps the administrator's own file, `apply` after), the pending record, the file, `sysrc`,
 `pfctl -f /etc/pf.conf`, `pfctl -e` when pf did not run, and a read-back that `pfctl -s rules` calls the anchor
-`jailops/*`. On a confirmation the file stays; at the deadline, or with `jailops host revert`, the snapshot goes back
-byte for byte (or the file is removed when there was none), is loaded, and pf is turned off again if it was off.
+`jailops/*`. On a confirmation the file stays; at the deadline, or with `jailops host revert`, the snapshot goes back:
+`pf.conf` byte for byte (or the file is removed when there was none) and the two variables as they were (nothing else
+of `rc.conf`), the file is loaded, and pf is turned off again if it was off.
 Applying the same spec again changes nothing and arms nothing.
 
 **Drift and the dry run.** `<host-dir>/firewall.json` records the spec and the SHA-256 of the file written. A hand edit
@@ -489,13 +500,18 @@ With `jailops_appliance`, a fresh host starts without any user. Three parts make
   to `/dev/console` (and to the terminal of `service jailopsd start`) and logged with the facility `authpriv` (on FreeBSD
   `/var/log/auth.log`, root only). The daemon's own log says only that a token was issued: `/var/log/messages` is readable
   by everyone. The motd is not touched. `jailops-priv setup-token` as root prints a new one at any time; once an
-  administrator exists it answers that the setup is complete (exit 3).
+  administrator exists it answers that the setup is complete (exit 3). It trusts nothing of the daemon's answer: it
+  prints only a token of 52 base32 characters (another answer is an error), only addresses of the form
+  `https://HOST:PORT/` in printable ASCII, and the hint with control, bidirectional and zero-width characters replaced,
+  so a compromised daemon cannot send escape sequences to root's terminal or the system console.
 - **The setup route.** `GET /api/v1/setup` (anyone) says that an administrator is missing and whether a token is valid;
   `POST /api/v1/setup` with the token, a name and a password creates the first **global administrator**, uses the token up,
   and answers with the address the request came from. The password follows the rules of every password (12 characters at
   least, 5 distinct, not a common one, not containing the name). Wrong, expired and missing tokens get one answer
   (`unauthorized`) and count toward a lockout per source like failed logins (5 tries, then a growing wait); once any global
-  administrator exists every setup route answers `not_found`.
+  administrator exists (a user, or an API token or client certificate that has not expired) every setup route answers
+  `not_found` and a token issued before is removed. The last global administrator cannot be deleted or demoted while
+  no other exists; root on the socket recovers in every case.
 - **The wizard** in the console (`/setup`), shown instead of the login while the setup route answers. Every step uses
   the existing API, and every step but the first can be skipped:
   1. **Account**: the token, the name, the password twice. Then the console signs in.
@@ -561,7 +577,7 @@ confirmed):
 | `host.identity.read` | no | no | reads `/etc/resolv.conf`, `/etc/ntp.conf`, `/etc/rc.conf`, runs `/bin/hostname` and `/usr/bin/ntpq -pn`; writes nothing |
 | `host.identity.apply` | yes | `identity` | writes `/etc/resolv.conf` (whole) and the jailops block of `/etc/ntp.conf`; `sysrc -f /etc/rc.conf` for `hostname`, `ntpd_enable`, `ntpd_sync_on_start` only; `/bin/hostname <name>`; `service ntpd restart` or `onestop`; the snapshot directory and `identity.json` under `host-dir`. With `dry_run` it writes nothing |
 | `host.snapshot.list` | no | no | reads the snapshot manifests under `host-dir` |
-| `host.snapshot.restore` | yes | the module of the snapshot | the same files as that module's apply, from a snapshot under `host-dir`; only the paths the module owns are ever restored, whatever a manifest says (a manifest of an unknown module or naming another file is refused); then what makes them take effect (ntpd and the host name, or `pfctl -f`/`-e`/`-d`). Refused (`busy`) while a change waits for its confirmation |
+| `host.snapshot.restore` | yes | the module of the snapshot | what that module's apply touches, from a snapshot under `host-dir`: a file it owns whole, its block of `ntp.conf`, and its own `rc.conf` variables through `sysrc -f /etc/rc.conf NAME=VALUE` or `sysrc -f /etc/rc.conf -x NAME` (a value of letters, digits and `._/:+-` only, else refused); nothing else of `rc.conf` or `ntp.conf`, whatever a manifest says (a manifest of an unknown module or naming another file is refused); then what makes them take effect (ntpd and the host name, or `pfctl -f`/`-e`/`-d`). Refused (`busy`) while a change waits for its confirmation |
 | `host.firewall.read` | no | no | reads `/etc/pf.conf` (only whether it exists, carries the header and its digest leave the helper) and `/etc/rc.conf`, runs `pfctl -s info`; writes nothing |
 | `host.firewall.apply` | yes | `firewall` | renders `/etc/pf.conf` (whole) from validated fields, with, while the console's certificate comes from ACME, two `rdr` rules of port 80 (http-01) or 443 (tls-alpn-01) to the loopback addresses and one `pass` rule, from the challenge and a port of 1024 to 65535 only; `pfctl -n -f -` of that text; `sysrc -f /etc/rc.conf` for `pf_enable` (`YES` only) and `pf_rules` (`/etc/pf.conf` only); `pfctl -f /etc/pf.conf`, `pfctl -e`, `pfctl -s rules`; the snapshot directory, `pending.json` and `firewall.json` under `host-dir`. Refused when the caller's address would be shut out, and while another change waits. With `dry_run` it writes nothing |
 | `host.pending.read` | no | no | reads `pending.json` and `pending.last.json` |
@@ -585,6 +601,9 @@ The helper keeps snapshots and its records in its **own** directory, `host-dir` 
 was taken (and whether pf ran), so a restore puts the record back with the files. A pending record is read only when it
 names a known module and a snapshot name of the helper's own form.
 
+The helper never keeps a copy of `rc.conf`: a snapshot records the values of the module's own variables, so a restore
+cannot undo what root changed in the rest of the file (services, interfaces) since.
+
 They are not in the daemon's state directory, although that would be the obvious place. The helper never writes in a
 directory the daemon can write (the daemon could swap a path component for a symlink between a check and the write).
 More importantly, a restore copies files back into `/etc` as root. If the copies lived where the daemon can write, a
@@ -599,8 +618,8 @@ by the helper. With a module on, it gains exactly that module's operations, with
 - module 1: it can set a wrong host name, point the resolvers at a server it controls, change the NTP servers and
   stop ntpd. That is a real power (resolvers decide where names resolve, and time matters for certificates), and it is
   why the module is opt-in in `priv.conf`. It cannot write any other line into those files, any other `rc.conf`
-  variable, or any file outside the list; it cannot run a command of its choosing; it cannot restore content it wrote
-  itself.
+  variable, or any file outside the list, not even by restoring an old snapshot (a restore sets only the module's
+  variables and block); it cannot run a command of its choosing; it cannot restore content it wrote itself.
 - firewall (built): it can open or close the host's firewall within the templates and the validated fields: open
   ssh, the console and up to 64 ports to chosen sources, or close them, and turn pf on. With the ACME redirect it can
   also send port 80 or 443 to a loopback port of its choosing (1024 or more), so a service that listens only on the

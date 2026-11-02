@@ -367,7 +367,13 @@ func TestTOTPEnrollmentAndLogin(t *testing.T) {
 		_ = json.NewDecoder(resp.Body).Decode(&env)
 		return resp.StatusCode, env
 	}
-	code, env := post("/api/v1/auth/totp", "")
+	if code, _ := post("/api/v1/auth/totp", ""); code != 401 {
+		t.Fatalf("enrolment without the password: %d", code)
+	}
+	if code, _ := post("/api/v1/auth/totp", `{"password":"wrong-password-1"}`); code != 401 {
+		t.Fatalf("enrolment with a wrong password: %d", code)
+	}
+	code, env := post("/api/v1/auth/totp", `{"password":"`+goodPassword+`"}`)
 	var enr struct{ Secret, URI string }
 	_ = json.Unmarshal(env.Metadata, &enr)
 	if code != 200 || enr.Secret == "" || !strings.HasPrefix(enr.URI, "otpauth://") {
@@ -410,6 +416,15 @@ func TestTOTPEnrollmentAndLogin(t *testing.T) {
 	}
 	if st, _ := login(t, e, nil, "ann", goodPassword, code6); st != 401 {
 		t.Fatalf("totp replay: %d", st)
+	}
+	// New recovery codes need the password again.
+	if code, _ := post("/api/v1/auth/recovery-codes", ""); code != 401 {
+		t.Fatalf("recovery codes without the password: %d", code)
+	}
+	code, env = post("/api/v1/auth/recovery-codes", `{"password":"`+goodPassword+`"}`)
+	_ = json.Unmarshal(env.Metadata, &rec)
+	if code != 200 || len(rec.RecoveryCodes) != 10 {
+		t.Fatalf("%d %s", code, env.Metadata)
 	}
 }
 
@@ -503,7 +518,7 @@ func enrolled(t *testing.T) (*dtest.Env, []byte, func(method, path, body string)
 			t.Fatal(err)
 		}
 		defer resp.Body.Close()
-		if path == "/api/v1/auth/totp" && body == "" {
+		if path == "/api/v1/auth/totp" && strings.Contains(body, "password") {
 			var env api.Response
 			_ = json.NewDecoder(resp.Body).Decode(&env)
 			var enr struct{ Secret string }
@@ -512,7 +527,7 @@ func enrolled(t *testing.T) (*dtest.Env, []byte, func(method, path, body string)
 		}
 		return resp.StatusCode
 	}
-	if send("POST", "/api/v1/auth/totp", "") != 200 {
+	if send("POST", "/api/v1/auth/totp", `{"password":"`+goodPassword+`"}`) != 200 {
 		t.Fatal("enrollment")
 	}
 	secret, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(enrolledSecret))

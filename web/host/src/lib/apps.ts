@@ -1,5 +1,6 @@
 // The catalog pages' pure parts: search and categories, the install form, the step list of an
 // installation, the jails that came from the catalog and the links to their web ports.
+import { nameRules, validName } from '@jailops/shared/lib/names'
 import { AppCategoryValues } from '@jailops/shared/api/types'
 import type { AppCategory, AppInstall, AppPort, AppResources, AppSummary, Jail, Project } from '@jailops/shared/api/types'
 
@@ -43,8 +44,8 @@ export function paragraphs(text: string | undefined): string[] {
   return (text ?? '').split(/\n\s*\n/).map((p) => p.replace(/\s*\n\s*/g, ' ').trim()).filter(Boolean)
 }
 
-/** A jail name as the server checks it on an installation. */
-export const JAIL_NAME = /^[a-z][a-z0-9-]{0,62}$/
+/** A jail name as the server checks it on an installation: the shared object name rule. */
+export const JAIL_NAME = nameRules.object.re
 const SIZE = /^\d+(?:\.\d+)?[KMGT]?$/i
 
 export interface InstallForm { jail: string; network: string; storage: string; memory: string; disk: string; cpu: string }
@@ -53,7 +54,7 @@ export type InstallIssue = 'nameInvalid' | 'nameTaken' | 'needNetwork' | 'needSt
 /** Field -> problem. Empty when the form may be sent. */
 export function validateInstall(f: InstallForm, ctx: { networks: string[]; storage: string[]; taken: string[] }): Partial<Record<keyof InstallForm, InstallIssue>> {
   const out: Partial<Record<keyof InstallForm, InstallIssue>> = {}
-  if (!JAIL_NAME.test(f.jail)) out.jail = 'nameInvalid'
+  if (!validName(f.jail)) out.jail = 'nameInvalid'
   else if (ctx.taken.includes(f.jail)) out.jail = 'nameTaken'
   if (ctx.networks.length && !ctx.networks.includes(f.network)) out.network = 'needNetwork'
   if (ctx.storage.length && !ctx.storage.includes(f.storage)) out.storage = 'needStorage'
@@ -172,4 +173,77 @@ export function installBlock(o: { ext: boolean; needProject: boolean; project: s
   if (o.known && !o.networks.length) return 'noNetwork'
   if (o.known && !o.storage.length) return 'noStorage'
   return ''
+}
+
+/** A part of a note line: plain words or a command. */
+export interface NotePart { code: boolean; text: string }
+/** A block of a note: a paragraph (or list item) of parts, or lines to copy as they are. */
+export type NoteBlock = { kind: 'p'; parts: NotePart[] } | { kind: 'pre'; text: string }
+
+const CMD = /^(jailops|service|sysrc|pkg|postconf|postfix|pw|passwd|su|env|sed|openssl|nsd-checkconf|psql|ssh-keygen|CREATE|ALTER|GRANT|DROP)\b/
+
+/** Inline commands of a prose line: a quoted command ('service nginx reload') or a command after a colon. */
+function inline(line: string): NotePart[] {
+  const out: NotePart[] = []
+  const push = (code: boolean, text: string) => { if (text) out.push({ code, text }) }
+  const colon = /^(.*?:\s+)(\S.*)$/.exec(line)
+  if (colon && CMD.test(colon[2]) && !colon[2].includes(', ')) {
+    push(false, colon[1])
+    push(true, colon[2])
+    return out
+  }
+  // a quoted command, or "jailops <verb> <ARG>" inside a sentence
+  const re = /'([^']*\s[^']*)'|\b(jailops(?: [a-z][a-z-]*){1,2}(?: [A-Z][A-Z_]*)?)/
+  let rest = line
+  for (let m = re.exec(rest); m; m = re.exec(rest)) {
+    push(false, rest.slice(0, m.index))
+    push(true, m[1] ?? m[2])
+    rest = rest.slice(m.index + m[0].length)
+  }
+  push(false, rest)
+  return out
+}
+
+/**
+ * The notes of a definition laid out for reading: blank lines separate paragraphs, "- " and "1. " start list items,
+ * indented lines after a line that ends with a colon (and SQL or shell lines) are kept as code, and commands inside
+ * a sentence are marked as code instead of running into the prose.
+ */
+export function noteBlocks(text: string | undefined): NoteBlock[] {
+  const out: NoteBlock[] = []
+  let para: NotePart[] | null = null
+  let pre: string[] | null = null
+  let prevColon = false
+  const flushP = () => { if (para?.length) out.push({ kind: 'p', parts: para }); para = null }
+  const flushPre = () => { if (pre?.length) out.push({ kind: 'pre', text: pre.join('\n') }); pre = null }
+  for (const raw of (text ?? '').split('\n')) {
+    const line = raw.replace(/\s+$/, '')
+    const indented = /^\s{2,}\S/.test(line)
+    const t = line.trim()
+    if (!t) { flushP(); flushPre(); prevColon = false; continue }
+    if (indented && (prevColon || pre || CMD.test(t))) {
+      flushP()
+      ;(pre ??= []).push(t)
+      continue
+    }
+    flushPre()
+    const item = /^(- |\d+\.\s)(.*)$/.exec(t)
+    if (item) flushP()
+    // a list item that is one command ("6. service isms start") ends there
+    if (item && CMD.test(item[2]) && !item[2].includes(', ')) {
+      out.push({ kind: 'p', parts: [{ code: false, text: item[1] }, { code: true, text: item[2] }] })
+      prevColon = false
+      continue
+    }
+    const parts = inline(t)
+    if (para) {
+      const last = para[para.length - 1]
+      if (last && !last.code && parts[0] && !parts[0].code) { last.text += ' ' + parts[0].text; para.push(...parts.slice(1)) }
+      else para.push({ code: false, text: ' ' }, ...parts)
+    } else para = parts
+    prevColon = t.endsWith(':')
+  }
+  flushP()
+  flushPre()
+  return out
 }

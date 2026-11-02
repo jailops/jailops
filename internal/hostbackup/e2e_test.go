@@ -421,7 +421,7 @@ func TestReplaceParksTheOldJail(t *testing.T) {
 func TestHostPinsTheNodesKeyDomain(t *testing.T) {
 	env, nc := nodeServer(t)
 	foreign := "0123456789abcdef"
-	blob := []byte("age-encryption.org/v1 blob")
+	blob := []byte("age-encryption.org/v1\n-> X25519 stanza\nblob")
 	if err := env.Node.PutEscrow(bg, env.Host(t, "stranger"), foreign, bytes.NewReader(blob), int64(len(blob))); err != nil {
 		t.Fatal(err)
 	}

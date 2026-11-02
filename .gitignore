@@ -7,6 +7,7 @@
 *.out
 .env
 /web/e2e/.results/
+/web/*/e2e/.results/
 /web/test-results/
 temp
 /temp/
@@ -23,3 +24,4 @@ temp
 /cmd/jailops-priv/jailops-priv
 /cmd/jailops-sync/jailops-sync
 /cmd/jailops-backupd/jailops-backupd
+/web/*/.demo-dist/

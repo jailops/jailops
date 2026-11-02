@@ -51,6 +51,9 @@ type Options struct {
 	Mutate func(*daemon.Config)
 	// Listen opens the real listeners (unix socket, HTTPS on loopback).
 	Listen bool
+	// NoAdmin makes no global administrator token: a host before its first administrator (Admin is nil; the
+	// tokens of other roles are made as usual).
+	NoAdmin bool
 	// Clients wraps or replaces the fake clients.
 	Clients func(c *daemon.Clients)
 	// Dir of an earlier Env to restart on top of the same state.
@@ -78,6 +81,8 @@ type Options struct {
 	HostManage []string
 	// LogForwardTune adjusts the log forwarder (poll interval, file check).
 	LogForwardTune func(*logfwd.Env)
+	// KeepAlive and ReadTimeout replace the keepalive interval of long requests and the listeners' read timeout.
+	KeepAlive, ReadTimeout time.Duration
 	// ApplianceModules is the -appliance-modules flag (jailops_appliance in rc.conf).
 	ApplianceModules []string
 	// ACMEHTTPClient, TLSRoots and ListenChallenge are the daemon's options of the same names.
@@ -306,7 +311,7 @@ func (e *Env) Start() {
 	}
 	env := api.Environment{OS: "FreeBSD", Arch: "amd64", Pool: "tank", PF: true}
 	d, err := daemon.Start(context.Background(), daemon.Options{
-		Config: &cfg, Version: "test", ForceWeb: e.Opts.ForceWeb, NoWeb: e.Opts.NoWeb, LogOutput: out, Hostname: host, Env: &env, NoListen: !e.Opts.Listen, Registrar: e.Opts.Registrar, Now: e.Opts.Now, Backups: e.Opts.Backups, Execer: e.execer(), BackupTLS: e.Opts.BackupTLS, BackupMounter: e.Opts.BackupMounter, LogForwardTune: e.Opts.LogForwardTune,
+		Config: &cfg, Version: "test", ForceWeb: e.Opts.ForceWeb, NoWeb: e.Opts.NoWeb, LogOutput: out, Hostname: host, Env: &env, NoListen: !e.Opts.Listen, Registrar: e.Opts.Registrar, Now: e.Opts.Now, Backups: e.Opts.Backups, Execer: e.execer(), BackupTLS: e.Opts.BackupTLS, BackupMounter: e.Opts.BackupMounter, LogForwardTune: e.Opts.LogForwardTune, KeepAlive: e.Opts.KeepAlive, ReadTimeout: e.Opts.ReadTimeout,
 		ApplianceModules: e.Opts.ApplianceModules, ACMEHTTPClient: e.Opts.ACMEHTTPClient, TLSRoots: e.Opts.TLSRoots, ListenChallenge: e.Opts.ListenChallenge, ACMEAttempted: e.Opts.ACMEAttempted,
 		Clients: func(ctx context.Context, c *daemon.Config, dev bool) (*daemon.Clients, error) {
 			cl := &daemon.Clients{ZFS: e.ZFS, Jails: e.Jails, PF: e.PF, Net: e.Net, Runner: e.Run, Files: e.Files, Logs: fileLogs{e.Files},
@@ -327,7 +332,9 @@ func (e *Env) Start() {
 	t.Cleanup(func() { e.Stop() })
 	e.HTTP = httptest.NewServer(d.Handler())
 	t.Cleanup(e.HTTP.Close)
-	e.Admin = e.Client(api.PermAdmin)
+	if !e.Opts.NoAdmin {
+		e.Admin = e.Client(api.PermAdmin)
+	}
 }
 
 // Stop shuts the daemon down.

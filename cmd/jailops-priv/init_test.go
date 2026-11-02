@@ -86,6 +86,10 @@ func TestInitCreatesWhatTheDaemonCannot(t *testing.T) {
 	if fi, err := os.Stat(filepath.Join(root, "usr/local/etc/jailops/priv.conf")); err != nil || fi.Mode().Perm() != 0o600 {
 		t.Fatalf("priv.conf mode: %v %v", fi, err)
 	}
+	// the directory of the files of API log sinks (logging.secrets_dir): root's, the group reads
+	if fi, err := os.Stat(filepath.Join(root, "usr/local/etc/jailops/sinks")); err != nil || !fi.IsDir() || fi.Mode().Perm() != 0o750 {
+		t.Fatalf("sinks directory: %v %v", fi, err)
+	}
 }
 
 func TestInitIsIdempotentAndNeverOverwrites(t *testing.T) {

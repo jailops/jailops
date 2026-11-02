@@ -121,7 +121,9 @@ func (a *app) appExport() *cobra.Command {
 		Short: "Draft an app definition from a running jail",
 		Long: `Ask the server to draft an app definition from a running FreeBSD jail of the
 project, one you set up by hand until the app worked, and write it as a
-commented definition to FILE (-o) or to the standard output.
+commented definition to FILE (--to) or to the standard output. -o json and
+-o yaml print the server's draft as data instead (the definition with its
+TODO list), for programs.
 
 The draft holds what the jail shows: the packages installed on purpose (their
 dependencies come with them), the services enabled in its rc.conf and their
@@ -140,14 +142,26 @@ marked line until it is replaced. Nothing in the jail changes; the server runs
 read-only commands in it, which needs the operator role.
 
 The file is named after the jail: write it as JAIL.yaml, or change name: to
-match the file name.`,
-		Example: `jailops app export cache -o cache.yaml
+match the file name. (-o FILE.yaml, the former spelling of --to, still writes the
+file, with a warning.)`,
+		Example: `jailops app export cache --to cache.yaml
 jailops app export web --project shop
-jailops app export cache -o ./apps/cache.yaml --force`,
+jailops app export cache --to ./apps/cache.yaml --force
+jailops app export cache -o json`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, a.jailDesc()),
+		Annotations:       map[string]string{outputFileAnnotation: "1"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			if a.outputFile != "" {
+				if out != "" && out != a.outputFile {
+					return usagef("-o %s and --to %s name two files: use --to", a.outputFile, out)
+				}
+				out = a.outputFile
+			}
+			if a.format != fmtTable && a.format != fmtJSON && a.format != fmtYAML {
+				return usagef("-o %s is not available here: the draft is YAML (the default), -o json or -o yaml", a.format)
+			}
 			if out != "" && out != "-" && !force {
 				if _, err := os.Lstat(out); err == nil {
 					return api.Errorf(api.CodeAlreadyExists, "%s exists", out).WithHint("keep it, or write over it with --force")
@@ -160,6 +174,9 @@ jailops app export cache -o ./apps/cache.yaml --force`,
 			d, err := c.Jails().AppDraft(ctx, args[0])
 			if err != nil {
 				return err
+			}
+			if a.format != fmtTable && out == "" {
+				return a.emit(d, nil, nil, nil)
 			}
 			data := apps.Draft{App: d.Definition, Todo: d.Todo, Header: apps.ExportHeader(d)}.YAML()
 			if out == "" || out == "-" {
@@ -177,9 +194,8 @@ jailops app export cache -o ./apps/cache.yaml --force`,
 			return nil
 		},
 	}
-	// -o names the file here, not an output format
-	cmd.Flags().StringVarP(&out, "output", "o", "", "file to write the definition to (default: the standard output)")
+	cmd.Flags().StringVar(&out, "to", "", "file to write the definition to (default: the standard output)")
 	cmd.Flags().BoolVar(&force, "force", false, "write over an existing FILE")
-	_ = cmd.MarkFlagFilename("output", "yaml")
+	_ = cmd.MarkFlagFilename("to", "yaml", "yml")
 	return cmd
 }

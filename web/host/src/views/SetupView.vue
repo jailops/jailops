@@ -18,7 +18,8 @@ import { setPending } from '@/composables/pending'
 import { refreshProjects } from '@/composables/project'
 import { enableLines, RESTART, validDNSName, hostAddr } from '@/lib/host'
 import { words } from '@/lib/hostfw'
-import { STEPS, nextStep, skippable, passwordProblem, validUserName, cleanToken, setupFirewall, setupNetwork, SETUP_CONFIRM_WITHIN, type Step } from '@/lib/setup'
+import { STEPS, nextStep, skippable, passwordProblem, validUserName, cleanToken, setupFirewall, setupNetwork, v4Plan, SETUP_CONFIRM_WITHIN, type Step } from '@/lib/setup'
+import { nameProblem } from '@jailops/shared/lib/names'
 import { DEMO_SETUP_TOKEN } from '@/demo/setupToken'
 import type { HostFirewall, HostIdentity, HostPendingChange } from '@jailops/shared/api/types'
 
@@ -92,6 +93,10 @@ const idProblems = computed(() => {
   return e
 })
 const idDone = ref(false)
+// The name the host was just given: the daemon keeps reporting the one it started with until it restarts, so the
+// header, the certificate step and its client command use this one.
+const newHost = ref('')
+const hostName = computed(() => newHost.value || session.info?.hostname || '')
 async function applyIdentity(): Promise<void> {
   if (Object.keys(idProblems.value).length) return
   busy.value = true
@@ -99,12 +104,37 @@ async function applyIdentity(): Promise<void> {
   try {
     await runOp(s.host.applyTitle, () => api.host.apply({ spec: { ...(idf.hostname ? { hostname: idf.hostname } : {}), resolvers: { nameservers: words(idf.nameservers) }, ntp: { servers: words(idf.ntp), enable: idf.ntpEnable } } }))
     idDone.value = true
+    if (idf.hostname && idf.hostname !== session.info?.hostname) newHost.value = idf.hostname
     next()
   } catch (e) {
     error.value = asError(e)
   } finally {
     busy.value = false
   }
+}
+
+// ---- 3: certificate ----
+// Continue carries out the chosen way (it opens that dialog); Skip keeps the self-signed certificate and says so.
+const certPanel = ref<InstanceType<typeof CertificatePanel> | null>(null)
+const certWay = ref<'acme' | 'upload'>('acme')
+const certChanged = ref('')
+const certSkipped = ref(false)
+function certContinue(): void {
+  if (certChanged.value) return next()
+  if (certWay.value === 'acme') certPanel.value?.openAcme()
+  else certPanel.value?.openUpload()
+}
+function onCertChanged(): void {
+  const src = certPanel.value?.source() ?? ''
+  if (src && src !== 'self-signed') {
+    certChanged.value = s.cert.sources[src] ?? src
+    certSkipped.value = false
+    next()
+  }
+}
+function certSkip(): void {
+  certSkipped.value = !certChanged.value
+  next()
 }
 
 // ---- 4: firewall ----
@@ -144,17 +174,21 @@ async function confirmFirewall(): Promise<void> {
 
 // ---- 5: storage, project and network ----
 const have = reactive({ loaded: false, storage: 0, projects: 0, networks: 0 })
+// what this step makes, fixed when it loads: the fields stay on screen (disabled) while the objects are created
+const make = reactive({ storage: false, project: false, network: false })
+const creatingWhat = ref('')
 const df = reactive({ project: 'main', network: 'lan', subnet: '10.77.0.0/24', uplink: '' })
 const pool = computed(() => session.info?.environment.pool ?? '')
 const dfProblems = computed(() => {
   const e: Record<string, string> = {}
-  if (!have.projects && !validUserName(df.project)) e.project = s.setup.objectName
-  if (!have.networks && !validUserName(df.network)) e.network = s.setup.objectName
-  if (!have.networks && !setupNetwork(df.subnet, df.uplink)) e.subnet = s.setup.subnetRule
+  if (make.project && nameProblem(df.project, 'project')) e.project = nameProblem(df.project, 'project')
+  if (make.network && nameProblem(df.network)) e.network = nameProblem(df.network)
+  if (make.network && !setupNetwork(df.subnet, df.uplink)) e.subnet = s.setup.subnetRule
   if (df.uplink && !/^[a-z][a-z0-9_.]{0,14}$/.test(df.uplink)) e.uplink = s.setup.uplinkRule
   return e
 })
 const dfDone = ref<string[]>([])
+const subnetPlan = computed(() => v4Plan(df.subnet))
 async function createDefaults(): Promise<void> {
   if (Object.keys(dfProblems.value).length) return
   busy.value = true
@@ -163,6 +197,7 @@ async function createDefaults(): Promise<void> {
     let storage = ''
     if (!have.storage) {
       storage = 'default'
+      creatingWhat.value = s.setup.storageTitle(storage)
       await runOp(s.setup.storageTitle(storage), () => api.storage.create({ metadata: { name: storage }, spec: { dataset: `${pool.value}/jailops` } }))
       dfDone.value.push(s.setup.madeStorage(storage, `${pool.value}/jailops`))
       have.storage = 1
@@ -170,12 +205,14 @@ async function createDefaults(): Promise<void> {
     let network = ''
     if (!have.networks) {
       network = df.network
+      creatingWhat.value = s.setup.networkTitle(network)
       await runOp(s.setup.networkTitle(network), () => api.networks.create({ metadata: { name: network }, spec: setupNetwork(df.subnet, df.uplink)! }))
       dfDone.value.push(s.setup.madeNetwork(network, df.subnet))
       have.networks = 1
     }
     if (!have.projects) {
       const p = df.project
+      creatingWhat.value = s.setup.projectTitle(p)
       await runOp(s.setup.projectTitle(p), () => api.projects.create({ metadata: { name: p }, spec: { ...(network ? { networks: [{ network }] } : {}), storage: [{ storage: storage || '*' }] } }))
       dfDone.value.push(s.setup.madeProject(p))
       have.projects = 1
@@ -186,6 +223,7 @@ async function createDefaults(): Promise<void> {
     error.value = asError(e)
   } finally {
     busy.value = false
+    creatingWhat.value = ''
   }
 }
 
@@ -200,6 +238,7 @@ async function loadStep(): Promise<void> {
     } else if (step.value === 'defaults') {
       const [st, pr, nw] = await Promise.all([api.storage.list(), api.projects.list(), api.networks.list()])
       Object.assign(have, { loaded: true, storage: st.length, projects: pr.length, networks: nw.length })
+      Object.assign(make, { storage: !st.length, project: !pr.length, network: !nw.length })
     }
   } catch (e) {
     error.value = asError(e)
@@ -207,13 +246,13 @@ async function loadStep(): Promise<void> {
 }
 const enable = computed(() => (ident.value ? enableLines(ident.value) : {}))
 const fwManaged = computed(() => !!fw.value?.status.managed)
-const nothingToMake = computed(() => have.loaded && have.storage > 0 && have.projects > 0 && have.networks > 0)
+const nothingToMake = computed(() => have.loaded && !make.storage && !make.project && !make.network)
 </script>
 
 <template>
   <main id="main" class="setup">
     <section class="panel setup-card" data-test="setup">
-      <header><h1>{{ s.setup.title }}</h1><span class="faint mono">{{ session.info?.hostname }}</span></header>
+      <header><h1>{{ s.setup.title }}</h1><span class="faint mono" data-test="setup-host">{{ hostName }}</span></header>
       <div class="body stack">
         <ol class="setup-steps" :aria-label="s.setup.progress">
           <li v-for="(x, i) in STEPS" :key="x" :class="{ active: x === step, done: i + 1 < index }" :aria-current="x === step ? 'step' : undefined">{{ s.setup.steps[x] }}</li>
@@ -267,17 +306,24 @@ const nothingToMake = computed(() => have.loaded && have.storage > 0 && have.pro
 
         <!-- 3: the certificate -->
         <div v-else-if="step === 'certificate'" class="stack">
+          <Callout v-if="newHost" tone="ok" data-test="setup-renamed">{{ s.setup.renamed(newHost) }}</Callout>
           <p class="muted">{{ s.setup.certLead }}</p>
-          <ul class="setup-list"><li>{{ s.setup.certInternet }}</li><li>{{ s.setup.certInside }}</li></ul>
-          <CertificatePanel />
+          <fieldset class="field plain-set" data-test="setup-cert-way">
+            <legend class="label">{{ s.setup.certChoice }}</legend>
+            <label class="check"><input v-model="certWay" type="radio" value="acme" name="su-cert" data-test="setup-cert-acme" />{{ s.setup.certAcme }}</label>
+            <label class="check"><input v-model="certWay" type="radio" value="upload" name="su-cert" data-test="setup-cert-upload" />{{ s.setup.certUpload }}</label>
+          </fieldset>
+          <CertificatePanel ref="certPanel" :hostname="hostName" @changed="onCertChanged" />
           <div class="row setup-nav">
-            <button class="btn btn-primary" type="button" data-test="setup-next" @click="next">{{ s.setup.continue }}</button>
-            <button class="btn btn-ghost" type="button" data-test="setup-skip" @click="next">{{ s.setup.skip }}</button>
+            <button class="btn btn-primary" type="button" data-test="setup-next" @click="certContinue">{{ certChanged ? s.setup.continue : certWay === 'acme' ? s.setup.continueAcme : s.setup.continueUpload }}</button>
+            <button class="btn btn-ghost" type="button" data-test="setup-skip" @click="certSkip">{{ s.setup.skipCert }}</button>
           </div>
         </div>
 
         <!-- 4: the host firewall -->
         <div v-else-if="step === 'firewall'" class="stack">
+          <Callout v-if="certSkipped" tone="warn" data-test="setup-cert-skipped">{{ s.setup.certSkipped }}</Callout>
+          <Callout v-else-if="certChanged" tone="ok" data-test="setup-cert-now">{{ s.setup.certNow(certChanged) }}</Callout>
           <p class="muted">{{ s.setup.fwLead }}</p>
           <Callout v-if="fw && !fwManaged" tone="info" data-test="setup-fw-not-managed">{{ s.setup.fwNotManaged }}</Callout>
           <template v-else-if="fw">
@@ -307,19 +353,20 @@ const nothingToMake = computed(() => have.loaded && have.storage > 0 && have.pro
         <form v-else-if="step === 'defaults'" novalidate @submit.prevent="createDefaults">
           <p class="muted">{{ s.setup.defaultsLead }}</p>
           <Callout v-if="nothingToMake" tone="ok" data-test="setup-defaults-exist">{{ s.setup.defaultsExist }}</Callout>
-          <template v-else-if="have.loaded">
-            <p v-if="!have.storage" data-test="setup-make-storage">{{ s.setup.makeStorage(`${pool}/jailops`) }}</p>
-            <div v-if="!have.projects" class="field"><label for="su-proj">{{ s.setup.projectName }}</label><input id="su-proj" v-model="df.project" class="mono" type="text" autocomplete="off" :aria-invalid="!!dfProblems.project" data-test="setup-project" />
+          <fieldset v-else-if="have.loaded" class="plain-set" :disabled="busy">
+            <p v-if="make.storage" data-test="setup-make-storage">{{ s.setup.makeStorage(`${pool}/jailops`) }}</p>
+            <div v-if="make.project" class="field"><label for="su-proj">{{ s.setup.projectName }}</label><input id="su-proj" v-model="df.project" class="mono" type="text" autocomplete="off" :aria-invalid="!!dfProblems.project" data-test="setup-project" />
               <span v-if="dfProblems.project" class="err">{{ dfProblems.project }}</span></div>
-            <template v-if="!have.networks">
+            <template v-if="make.network">
               <div class="field"><label for="su-net">{{ s.setup.networkName }}</label><input id="su-net" v-model="df.network" class="mono" type="text" autocomplete="off" :aria-invalid="!!dfProblems.network" data-test="setup-network" />
                 <span v-if="dfProblems.network" class="err">{{ dfProblems.network }}</span></div>
-              <div class="field"><label for="su-sub">{{ s.setup.subnet }}</label><input id="su-sub" v-model="df.subnet" class="mono" type="text" autocomplete="off" :aria-invalid="!!dfProblems.subnet" data-test="setup-subnet" />
-                <span v-if="dfProblems.subnet" class="err">{{ dfProblems.subnet }}</span><span v-else class="hint">{{ s.setup.subnetHint }}</span></div>
+              <div class="field"><label for="su-sub">{{ s.setup.subnet }}</label><input id="su-sub" v-model="df.subnet" class="mono" type="text" autocomplete="off" :aria-invalid="!!dfProblems.subnet" aria-describedby="su-sub-h" data-test="setup-subnet" />
+                <span v-if="dfProblems.subnet" id="su-sub-h" class="err">{{ dfProblems.subnet }}</span><span v-else id="su-sub-h" class="hint" data-test="setup-subnet-plan">{{ s.setup.subnetHint }} {{ subnetPlan ? s.setup.subnetPlan(subnetPlan.gateway, subnetPlan.range) : '' }}</span></div>
               <div class="field"><label for="su-up">{{ s.setup.uplink }}</label><input id="su-up" v-model="df.uplink" class="mono" type="text" autocomplete="off" placeholder="em0" :aria-invalid="!!dfProblems.uplink" data-test="setup-uplink" />
                 <span v-if="dfProblems.uplink" class="err">{{ dfProblems.uplink }}</span><span v-else class="hint">{{ s.setup.uplinkHint }}</span></div>
             </template>
-          </template>
+            <ul v-if="busy || dfDone.length" class="setup-list" role="status" data-test="setup-progress"><li v-for="d in dfDone" :key="d">{{ d }}</li><li v-if="creatingWhat">{{ s.setup.creating(creatingWhat) }}</li></ul>
+          </fieldset>
           <ErrorPanel v-if="error" :error="error" />
           <div class="row setup-nav">
             <button v-if="have.loaded && !nothingToMake" class="btn btn-primary" type="submit" :disabled="busy || Object.keys(dfProblems).length > 0" data-test="setup-make">{{ s.setup.make }}</button>

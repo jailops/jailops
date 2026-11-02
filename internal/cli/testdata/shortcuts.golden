@@ -39,7 +39,7 @@ $ jailops shell nginx --shell /usr/local/bin/bash
 ! hint: start it first
 [exit 5]
 
-$ jailops delete -y nginx
+$ jailops delete --confirm-data-loss nginx
 jail/nginx deleted
 
 $ jailops jail create web --image freebsd-15@stable --network lan --storage default

@@ -1,9 +1,13 @@
 package cli_test
 
 import (
+	"context"
 	"encoding/json"
+	"io"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"jailops.net/jailops/sdk/api"
 	"jailops.net/jailops/sdk/fake"
@@ -304,5 +308,41 @@ func TestJailConsole(t *testing.T) {
 	_, errs, code = h.run("", "jail", "console", "web", "--shell", "bash")
 	if code == 0 || !strings.Contains(errs, "absolute path") {
 		t.Fatalf("relative shell: %d %q", code, errs)
+	}
+}
+
+// A signal (SIGINT, SIGTERM, SIGHUP end the command's context) ends a session that waits for input, and the terminal
+// leaves raw mode before the command exits.
+func TestExecEndsAndRestoresTheTerminalOnASignal(t *testing.T) {
+	for _, args := range [][]string{{"exec", "web", "--", "cat"}, {"shell", "web"}} {
+		h := newHarness(t)
+		h.seed()
+		h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+		h.run("", "start", "web")
+		var raw, restored atomic.Int32
+		h.rawTerm = func(any) (func(), error) { raw.Add(1); return func() { restored.Add(1) }, nil }
+		h.resize = make(chan struct{})
+		h.tty = true
+		pr, pw := io.Pipe() // input that never comes
+		defer pw.Close()
+		h.stdin = pr
+		ctx, cancel := context.WithCancel(context.Background())
+		h.ctx = ctx
+		go func() {
+			for raw.Load() == 0 {
+				time.Sleep(10 * time.Millisecond)
+			}
+			cancel()
+		}()
+		done := make(chan int, 1)
+		go func() { _, _, code := h.run("", args...); done <- code }()
+		select {
+		case code := <-done:
+			if code == 0 || restored.Load() != 1 {
+				t.Errorf("%v: exit %d, terminal restored %d times", args, code, restored.Load())
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatalf("%v: the session ignored the signal", args)
+		}
 	}
 }

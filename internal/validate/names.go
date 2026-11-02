@@ -149,6 +149,9 @@ type ImageRef struct {
 // ParseImageRef parses "name", "name@alias" or "name#g<N>".
 func ParseImageRef(s string) (ImageRef, error) {
 	const f = "image"
+	if s == "" {
+		return ImageRef{}, Invalid(f, "an image is required: name one with --image NAME@alias")
+	}
 	if i := strings.IndexByte(s, '#'); i >= 0 {
 		name, gen := s[:i], s[i+1:]
 		if !imageNmRE.MatchString(name) {
@@ -165,7 +168,7 @@ func ParseImageRef(s string) (ImageRef, error) {
 	}
 	name, alias, has := strings.Cut(s, "@")
 	if !imageNmRE.MatchString(name) {
-		return ImageRef{}, Invalid(f, "image reference %q is invalid", s)
+		return ImageRef{}, Invalid(f, "image reference %q is invalid (--image NAME, NAME@alias or NAME#gN)", s)
 	}
 	if has && !aliasRE.MatchString(alias) {
 		return ImageRef{}, Invalid(f, "image alias %q is invalid", alias)

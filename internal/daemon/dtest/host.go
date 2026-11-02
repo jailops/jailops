@@ -79,6 +79,23 @@ func newHostSim(t testing.TB, dir string, modules []string) *HostSim {
 		}
 		return run.Result{}, os.WriteFile(c.Args[1], []byte(strings.Join(lines, "\n")+"\n"), 0o644)
 	}})
+	h.Run.Add(run.Rule{Name: "/usr/sbin/sysrc", Args: []string{"-f", run.AnyArg, "-x", run.AnyArg}, Fn: func(c run.Cmd) (run.Result, error) {
+		b, err := os.ReadFile(c.Args[1])
+		if err != nil {
+			return run.Result{ExitCode: 1}, &run.ExitError{Name: c.Name, Code: 1}
+		}
+		var keep []string
+		for _, l := range strings.Split(strings.TrimSuffix(string(b), "\n"), "\n") {
+			if len(b) > 0 && !strings.HasPrefix(l, c.Args[3]+"=") {
+				keep = append(keep, l)
+			}
+		}
+		out := strings.Join(keep, "\n")
+		if len(keep) > 0 {
+			out += "\n"
+		}
+		return run.Result{}, os.WriteFile(c.Args[1], []byte(out), 0o644)
+	}})
 	h.Run.Add(run.Rule{Name: "/usr/sbin/service", Args: []string{"ntpd", run.AnyArg}, Fn: func(run.Cmd) (run.Result, error) {
 		h.mu.Lock()
 		defer h.mu.Unlock()

@@ -23,6 +23,7 @@ import (
 
 	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/daemon/dtest"
+	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
@@ -460,7 +461,7 @@ func TestDoctorAppliance(t *testing.T) {
 // production), wrong tokens refused and locked out per source, the right one creating the first administrator once,
 // and every setup route answering not_found afterwards.
 func TestSetupFlow(t *testing.T) {
-	e := dtest.New(t, dtest.Options{Listen: true})
+	e := dtest.New(t, dtest.Options{Listen: true, NoAdmin: true})
 	code, body := e.Raw("GET", "/api/v1/setup", "", "")
 	if code != 200 || !strings.Contains(body, `"required":true`) || !strings.Contains(body, `"token_issued":false`) {
 		t.Fatalf("%d %s", code, body)
@@ -468,7 +469,7 @@ func TestSetupFlow(t *testing.T) {
 	if code, _ := e.Raw("POST", "/api/v1/setup/token", e.Token(api.PermOperator), "{}"); code != 403 {
 		t.Errorf("operator: %d", code)
 	}
-	tok, err := e.Admin.SetupToken(ctx30(t))
+	tok, err := rootSetupToken(e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,15 +531,60 @@ func TestSetupFlow(t *testing.T) {
 			t.Errorf("%s after setup: %d", r[0], code)
 		}
 	}
-	if _, err := e.Admin.SetupToken(ctx30(t)); !api.IsCode(err, api.CodeNotFound) {
+	if _, err := rootSetupToken(e); !api.IsCode(err, api.CodeNotFound) {
 		t.Errorf("a token after setup: %v", err)
 	}
+	// neither the token nor the password is in anything the daemon wrote: the audit log, the events, the database,
+	// the state directory, its log
+	pw := "a long enough passphrase 42"
+	if strings.Contains(e.Log(), pw) || strings.Contains(e.Log(), tok.Token) {
+		t.Error("the daemon's log holds the token or the password")
+	}
+	audit, err := e.D.Service().ListAudit(rootActor(), service.AuditQuery{Limit: 1000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ab, _ := json.Marshal(audit)
+	if strings.Contains(string(ab), pw) || strings.Contains(string(ab), tok.Token[:26]) {
+		t.Errorf("the audit log holds a secret: %s", ab)
+	}
+	if !slices.ContainsFunc(audit, func(a api.AuditEntry) bool { return a.Requestor == "setup" && a.Resource == "/api/v1/users/admin" }) {
+		t.Errorf("the setup is not audited: %+v", audit)
+	}
+	// the events (kept in the database) are searched with everything else the daemon wrote below
+	sawAudit := false // the walk reaches the database: the audit entry of the setup is in it
+	_ = filepath.WalkDir(e.Dir, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() {
+			return nil
+		}
+		b, _ := os.ReadFile(p)
+		sawAudit = sawAudit || strings.Contains(string(b), "first administrator created with the setup token")
+		for _, secret := range []string{pw, tok.Token, strings.ToLower(tok.Token)} {
+			if strings.Contains(string(b), secret) {
+				t.Errorf("%s holds a secret of the setup", p)
+			}
+		}
+		return nil
+	})
+	if !sawAudit {
+		t.Error("the search did not reach the database")
+	}
+}
+
+// rootActor is root on the socket: the daemon's recovery access, a global administrator that is no stored identity.
+func rootActor() context.Context {
+	return service.WithActor(context.Background(), service.Actor{Name: "root", Kind: "unix", Perm: api.PermAdmin, Global: true})
+}
+
+// rootSetupToken asks for a setup token as root on the socket does (jailops-priv setup-token).
+func rootSetupToken(e *dtest.Env) (api.SetupToken, error) {
+	return e.D.Service().IssueSetupToken(rootActor())
 }
 
 // Two people with the right token at once: exactly one becomes the first administrator.
 func TestSetupRace(t *testing.T) {
-	e := dtest.New(t, dtest.Options{})
-	tok, err := e.Admin.SetupToken(ctx30(t))
+	e := dtest.New(t, dtest.Options{NoAdmin: true})
+	tok, err := rootSetupToken(e)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -572,8 +618,8 @@ func TestSetupRace(t *testing.T) {
 func TestSetupTokenExpires(t *testing.T) {
 	var mu sync.Mutex
 	now := time.Now()
-	e := dtest.New(t, dtest.Options{Now: func() time.Time { mu.Lock(); defer mu.Unlock(); return now }})
-	tok, err := e.Admin.SetupToken(ctx30(t))
+	e := dtest.New(t, dtest.Options{NoAdmin: true, Now: func() time.Time { mu.Lock(); defer mu.Unlock(); return now }})
+	tok, err := rootSetupToken(e)
 	if err != nil {
 		t.Fatal(err)
 	}

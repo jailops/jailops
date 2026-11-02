@@ -3,6 +3,7 @@ package priv
 import (
 	"context"
 	"io"
+	"maps"
 	"net/netip"
 	"os"
 	"regexp"
@@ -162,6 +163,10 @@ type Local struct {
 	frozen   map[string]int // directories a running command reads its configuration from: no writes meanwhile
 
 	wgMu sync.Mutex // one WireGuard operation at a time
+
+	keyLim keyLimiter // wrong passphrases of encrypted volumes
+
+	hostDirUID uint32 // the owner host-dir must have: root; the test user under WithoutChown
 }
 
 var _ Host = (*Local)(nil)
@@ -171,7 +176,9 @@ type LocalOption func(*Local)
 
 // WithoutChown makes failing chown calls non-fatal. For tests run as an
 // ordinary user.
-func WithoutChown() LocalOption { return func(l *Local) { l.noChown = true } }
+func WithoutChown() LocalOption {
+	return func(l *Local) { l.noChown, l.hostDirUID = true, uint32(os.Getuid()) }
+}
 
 // NewLocal returns a Local over the given dependencies.
 func NewLocal(cfg Config, d Deps, opts ...LocalOption) (*Local, error) {
@@ -242,6 +249,23 @@ func (g zfsGuard) notRoot(name string) error {
 	return nil
 }
 
+// rootMountProps are the properties that decide where and whether a storage root is mounted, and what it lets
+// through: the helper verified the root's directory (root, mode 0700) and keeps it that way, so neither the root's
+// mountpoint nor its mounting is changed through the helper.
+var rootMountProps = []string{"mountpoint", "canmount", "devices"}
+
+func (g zfsGuard) rootProps(name string, props []string) error {
+	if !g.l.cfg.isRootDataset(dsPart(name)) {
+		return nil
+	}
+	for _, p := range props {
+		if slices.Contains(rootMountProps, p) {
+			return forbidden("%s of a storage root cannot be changed through the helper", p)
+		}
+	}
+	return nil
+}
+
 var zfsTypes = []string{"filesystem", "volume", "snapshot", "bookmark"}
 
 func (g zfsGuard) List(ctx context.Context, o zfs.ListOpts) ([]zfs.Dataset, error) {
@@ -303,6 +327,9 @@ func (g zfsGuard) Set(ctx context.Context, name string, props map[string]string)
 	if err := g.l.cfg.zfsProps(ctx, props); err != nil {
 		return err
 	}
+	if err := g.rootProps(name, slices.Collect(maps.Keys(props))); err != nil {
+		return err
+	}
 	if err := g.managed(ctx, name); err != nil {
 		return err
 	}
@@ -329,6 +356,9 @@ func (g zfsGuard) Inherit(ctx context.Context, name string, props ...string) err
 		if neverProps[p] {
 			return forbidden("property %s cannot be changed through the helper", p)
 		}
+	}
+	if err := g.rootProps(name, props); err != nil {
+		return err
 	}
 	if err := g.managed(ctx, name); err != nil {
 		return err
@@ -569,8 +599,12 @@ func (g zfsGuard) Send(ctx context.Context, o zfs.SendOpts, w io.Writer) error {
 }
 
 // neverReceived are properties a received stream must not carry: a stream
-// from another host could set a mountpoint over a host directory.
-var neverReceived = []string{"mountpoint", "sharenfs", "sharesmb", "jailed", "keylocation"}
+// from another host could set a mountpoint over a host directory, export the
+// data, or turn on device nodes, setuid or exec where the storage root has
+// them off. Excluded, they are inherited from the dataset's parent (devices
+// off from the root). The list holds only properties this ZFS knows: an
+// unknown name makes zfs receive fail.
+var neverReceived = []string{"mountpoint", "sharenfs", "sharesmb", "jailed", "keylocation", "devices", "setuid", "exec"}
 
 func (g zfsGuard) Receive(ctx context.Context, o zfs.ReceiveOpts, r io.Reader) error {
 	c := g.l.cfg
@@ -672,6 +706,10 @@ func (l *Local) Unmount(ctx context.Context, dataset string) error {
 
 func (l *Local) mountOp(ctx context.Context, verb, dataset string) error {
 	if err := l.cfg.zfsDataset(dataset); err != nil {
+		return err
+	}
+	// unmounted, a root would leave its datasets to be mounted below a directory the helper did not check
+	if err := (zfsGuard{l}).notRoot(dataset); err != nil {
 		return err
 	}
 	if err := (zfsGuard{l}).managed(ctx, dataset); err != nil {

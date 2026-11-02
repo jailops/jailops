@@ -99,7 +99,7 @@ func TestUnreachableSocket(t *testing.T) {
 	h.env["JAILOPS_PROJECT"] = "main"
 	h.env["JAILOPS_SOCKET"] = filepath.Join(h.dir, "missing.sock")
 	_, errs, code := h.run("", "jail", "list")
-	if code != 1 || !strings.HasPrefix(errs, "error: ") || !strings.Contains(errs, "hint: the socket does not exist") {
+	if code != 1 || !strings.HasPrefix(errs, "unavailable: cannot reach jailopsd at "+h.env["JAILOPS_SOCKET"]) || !strings.Contains(errs, "hint: is jailopsd running? Check with 'service jailopsd status'") {
 		t.Fatalf("%d %q", code, errs)
 	}
 }
@@ -121,7 +121,7 @@ func TestOutputFormats(t *testing.T) {
 	tr.ok("jail", "show", "web", "-o", "table") // the flag wins over the environment
 	h.env["JAILOPS_OUTPUT"] = ""
 	tr.ok("jail", "create", "x", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "-o", "json")
-	tr.ok("jail", "delete", "-y", "x", "-o", "json")
+	tr.ok("jail", "delete", "--confirm-data-loss", "x", "-o", "json")
 	tr.ok("jail", "start", "web", "-o", "name")
 	tr.golden("output_formats")
 }

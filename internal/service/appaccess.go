@@ -47,6 +47,9 @@ type accessRole struct {
 	DatabaseCreated bool   `json:"database_created,omitempty"`
 	// Login is false after a deny that kept the role.
 	Login bool `json:"login"`
+	// Unfinished: the allow that set its password stopped before the end, so the password was never shown. The
+	// role is in the registry from the moment psql made it; the next allow sets a new password and finishes.
+	Unfinished bool `json:"unfinished,omitempty"`
 }
 
 type accessGrant struct {
@@ -539,6 +542,7 @@ func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (
 	if !t.has {
 		rec = accessRecord{}
 	}
+	has := t.has // the registry object exists (it is saved once psql made a role)
 	var st []apps.Statement
 	var password string
 	needRestart := false
@@ -583,7 +587,7 @@ func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (
 		case pr.Role && ri < 0:
 			return res, api.Errorf(api.CodeConflict, "role %q exists in the database server and was not made by JailOps", db).
 				WithHint("JailOps never changes a role it did not make: choose another name with --db")
-		case !pr.Role || !role.Login || req.Rotate:
+		case !pr.Role || !role.Login || role.Unfinished || req.Rotate:
 			if password, err = apps.NewPassword(accessRand); err != nil {
 				return res, internal(err)
 			}
@@ -690,12 +694,18 @@ func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (
 				role, ri := rec.role(db)
 				created := slices.ContainsFunc(main, func(x apps.Statement) bool { return strings.HasPrefix(x.SQL, "CREATE DATABASE") })
 				if ri < 0 {
-					rec.Roles = append(rec.Roles, accessRole{Name: db, DatabaseCreated: created, Login: true})
+					rec.Roles = append(rec.Roles, accessRole{Name: db, DatabaseCreated: created, Login: true, Unfinished: password != ""})
 				} else {
 					role.Login, role.DatabaseCreated = true, role.DatabaseCreated || created
+					role.Unfinished = role.Unfinished || password != ""
 					rec.Roles[ri] = role
 				}
 				changed = true
+				// the registry knows the role before anything else can fail: a retry finds it as JailOps's own
+				if err := s.saveAccess(ctx, proj, jail, has, rec); err != nil {
+					return res, err
+				}
+				has = true
 			}
 			if len(listenSt) > 0 {
 				if _, err := s.psql(ctx, t.key, "postgres", listenSt); err != nil {
@@ -768,7 +778,10 @@ func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (
 		} else {
 			rec.Grants = append(rec.Grants, g)
 		}
-		if err := s.saveAccess(ctx, proj, jail, t.has, rec); err != nil {
+		if _, ri := rec.role(g.Database); ri >= 0 {
+			rec.Roles[ri].Unfinished = false // the password is in this answer
+		}
+		if err := s.saveAccess(ctx, proj, jail, has, rec); err != nil {
 			return res, err
 		}
 	} else {

@@ -62,7 +62,7 @@ async function go(): Promise<void> {
     <form id="unlock-form" autocomplete="off" data-test="unlock-form" @submit.prevent="go">
       <p class="muted">{{ s.keys.unlockLead }}</p>
       <div class="field">
-        <label for="unlock-pass">{{ s.keys.passphrase }}</label>
+        <label for="unlock-pass">{{ s.keys.passphrase }} <span class="req" aria-hidden="true">*</span></label>
         <div class="row pass-row">
           <input id="unlock-pass" v-model="pass" class="grow" :type="show ? 'text' : 'password'" autocomplete="off" spellcheck="false" autocapitalize="off" required data-test="unlock-pass" />
           <button class="btn btn-icon" type="button" :aria-label="show ? s.keys.hide : s.keys.show" :aria-pressed="show" data-test="unlock-show" @click="show = !show"><Icon :name="show ? 'eyeOff' : 'eye'" /></button>
@@ -72,6 +72,7 @@ async function go(): Promise<void> {
       <p v-if="error" class="field-error" role="alert" data-test="unlock-error">{{ error }}<template v-if="hint"> {{ hint }}</template></p>
     </form>
     <template #footer>
+      <span v-if="!pass && !error" class="why-disabled">{{ s.jails.passphraseNeeded }}</span>
       <button class="btn" type="button" @click="close">{{ s.app.cancel }}</button>
       <button class="btn btn-primary" type="submit" form="unlock-form" :disabled="busy || !pass" data-test="unlock-go"><Icon name="lockOpen" />{{ busy ? s.keys.unlocking : s.keys.unlock }}</button>
     </template>

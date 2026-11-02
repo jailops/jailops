@@ -64,8 +64,13 @@ test('the wizard creates the administrator, then every later step', async ({ pag
   // the defaults of a host that has none
   await expect(step).toHaveText('Step 5 of 6: Storage and network')
   await expect(page.getByTestId('setup-make-storage')).toContainText('tank/jailops')
-  await page.getByTestId('setup-subnet').fill('10.77.0.0/16')
+  // any prefix the server takes (/8 to /30, no host bits); the gateway and range are shown before anything is made
+  await page.getByTestId('setup-subnet').fill('10.77.0.1/24')
   await expect(page.getByTestId('setup-make')).toBeDisabled()
+  await page.getByTestId('setup-subnet').fill('10.77.0.0/31')
+  await expect(page.getByTestId('setup-make')).toBeDisabled()
+  await page.getByTestId('setup-subnet').fill('10.77.0.0/16')
+  await expect(page.getByTestId('setup-subnet-plan')).toContainText('Gateway 10.77.0.1, jail addresses 10.77.0.2-10.77.255.254')
   await page.getByTestId('setup-subnet').fill('10.77.0.0/24')
   await page.getByTestId('setup-uplink').fill('em0')
   await page.getByTestId('setup-make').click()

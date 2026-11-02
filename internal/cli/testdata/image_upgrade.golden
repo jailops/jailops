@@ -72,12 +72,12 @@ api    shop      not_attempted   freebsd-15#g3   -               stopped after m
 
 $ jailops image upgrade freebsd-15 --project nope
 ! not_found: project "nope" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops project list'; check --project, --host and --remote too
 [exit 4]
 
 $ jailops image upgrade nope
 ! not_found: image "nope" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops image list'; check --project, --host and --remote too
 [exit 4]
 
 $ jailops image upgrade freebsd-15 --no-wait --no-jails

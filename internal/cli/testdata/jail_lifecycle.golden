@@ -24,7 +24,7 @@ $ jailops jail list -l env=prod --no-headers
 web    running   freebsd-15@stable   g1    10.20.0.10   3h
 
 $ jailops jail list --network other
-! No resources found.
+! No jails in project main match.
 
 $ jailops jail show web
 Name:        web
@@ -54,16 +54,35 @@ $ jailops jail stop web --force
 jail/web stopped
 
 $ jailops jail delete -y db
+! This deletes 1 jail of project "main" and destroys its data; it cannot be undone:
+!   db (stopped): root 256.0 MiB, data 70.0 MiB (volumes data), 0 snapshots
+! Type the name "db" to confirm: 
+! usage: confirmation required: standard input is not a terminal and gave no answer
+! hint: type the name on standard input, or pass --confirm-data-loss (-y does not answer this question)
+[exit 2]
+
+$ jailops jail delete db
+! This deletes 1 jail of project "main" and destroys its data; it cannot be undone:
+!   db (stopped): root 256.0 MiB, data 70.0 MiB (volumes data), 0 snapshots
+! Type the name "db" to confirm: aborted: the name did not match, nothing was changed
+[exit 1]
+
+$ jailops jail delete db
 jail/db deleted
+! This deletes 1 jail of project "main" and destroys its data; it cannot be undone:
+!   db (stopped): root 256.0 MiB, data 70.0 MiB (volumes data), 0 snapshots
+! Type the name "db" to confirm: 
 
 $ jailops jail delete web
-! Delete jail "web"? [y/N]: 
-! usage: confirmation required
-! hint: answer on standard input, or pass -y
+! This deletes 1 jail of project "main" and destroys its data; it cannot be undone:
+!   web (stopped): root 256.0 MiB, data 70.0 MiB, 0 snapshots
+! Type the name "web" to confirm: 
+! usage: confirmation required: standard input is not a terminal and gave no answer
+! hint: type the name on standard input, or pass --confirm-data-loss (-y does not answer this question)
 [exit 2]
 
 $ jailops jail show db
 ! not_found: jail "db" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
 [exit 4]
 

@@ -766,7 +766,7 @@ func checkWireGuard(o *Object, s api.WireGuardSpec, add func(*Object, string, ..
 	switch s.Mode {
 	case api.WireGuardServer:
 	case api.WireGuardClient:
-		add(o, "a WireGuard client cannot be declared: its private key comes from a join token on its own host (jailops wireguard join TOKEN); declare the server and enroll the client with jailops wireguard peer add")
+		add(o, "a WireGuard client cannot be declared: its private key comes from a join token on its own host (jailops wireguard join - < TOKEN-FILE); declare the server and enroll the client with jailops wireguard peer add")
 		return
 	default:
 		add(o, "spec.mode must be server (clients are made with jailops wireguard join)")

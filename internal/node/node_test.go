@@ -457,14 +457,14 @@ func TestKeyDomainAndEscrow(t *testing.T) {
 		t.Fatal("the key domain is not reported")
 	}
 	// escrow: create-only, same bytes again is fine, other bytes are refused, other domains are refused
-	blob := []byte("age-encryption.org/v1 wrapped key")
+	blob := []byte("age-encryption.org/v1\n-> X25519 stanza\nwrapped key")
 	if err := e.Node.PutEscrow(ctx, h, "0123456789abcdef", bytes.NewReader(blob), int64(len(blob))); err != nil {
 		t.Fatal(err)
 	}
 	if err := e.Node.PutEscrow(ctx, h, "0123456789abcdef", bytes.NewReader(blob), int64(len(blob))); err != nil {
 		t.Fatalf("the same bytes again: %v", err)
 	}
-	other := []byte("a different wrapped key")
+	other := []byte("age-encryption.org/v1\n-> X25519 stanza\na different wrapped key")
 	if err := e.Node.PutEscrow(ctx, h, "0123456789abcdef", bytes.NewReader(other), int64(len(other))); code(err) != api.CodeAlreadyExists {
 		t.Fatalf("replacing an escrow blob: %v", err)
 	}

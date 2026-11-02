@@ -295,7 +295,7 @@ func (s *Service) CreateWireGuard(ctx context.Context, w api.WireGuard) (api.Wir
 		return api.WireGuard{}, err
 	}
 	if w.Spec.Mode == api.WireGuardClient && w.Spec.PeerPublicKey != "" {
-		return api.WireGuard{}, invalid("a client is made from a join token").WithHint("jailops wireguard join TOKEN")
+		return api.WireGuard{}, invalid("a client is made from a join token").WithHint("jailops wireguard join - < TOKEN-FILE")
 	}
 	wireguard.Defaults(name, s.d.Hostname, &w.Spec)
 	for i := range w.Spec.Peers {

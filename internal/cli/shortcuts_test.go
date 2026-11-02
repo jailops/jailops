@@ -27,7 +27,7 @@ func TestTopLevelShortcuts(t *testing.T) {
 	if code != 5 || !strings.HasPrefix(errs, "busy:") {
 		t.Fatalf("a stopped jail must answer busy, never fall back: %d %s", code, errs)
 	}
-	tr.ok("delete", "-y", "nginx")
+	tr.ok("delete", "--confirm-data-loss", "nginx")
 	// The jail group keeps every form as an alias.
 	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
 	tr.ok("jail", "list", "-o", "name")
@@ -184,7 +184,7 @@ func TestProfiles(t *testing.T) {
 	tr.ok("profile", "edit", "base", "-f", writeFile(t, h.dir, "p.yaml", "description: defaults\nconfig:\n  limits.memory: 2G\n  boot.priority: \"5\"\n", 0o644))
 	tr.ok("config", "show", "nginx", "--expanded", "-o", "json")
 	tr.do("", "profile", "delete", "-y", "base") // in use
-	tr.ok("delete", "-y", "nginx")
+	tr.ok("delete", "--confirm-data-loss", "nginx")
 	tr.ok("profile", "delete", "-y", "base")
 	tr.ok("--project", "host", "profile", "list")
 	tr.golden("profiles")

@@ -46,6 +46,15 @@ The daemon connects over a unix socket owned by root and the group
 .Sy jailops ,
 mode 0660; only the configured users and groups may connect.
 .Pp
+Flags are written with one dash, as in
+.Fl pool ;
+two dashes
+.Pq Fl -pool
+are read the same.
+This differs from
+.Xr jailops 1 ,
+whose long flags take two dashes.
+.Pp
 Without a command the helper serves on its socket.
 .Bl -tag -width Ds
 .It Cm check-config
@@ -169,7 +178,12 @@ a missing default file is not an error.
 The file must be owned by root and not writable by group or others.
 .It Fl socket Ar path
 The unix socket, default
-.Pa /var/run/jailops/priv.sock .
+.Pa /var/run/jailops-priv/priv.sock .
+Its directory belongs to root, mode 0710 with the group of the socket,
+so the daemon can reach the socket but put nothing in its place.
+The former default
+.Pa /var/run/jailops/priv.sock
+is read as this path.
 .It Fl group Ar name , Fl mode Ar octal
 The group that owns the socket (default
 .Sy jailops )
@@ -218,6 +232,13 @@ from over https, a local directory of image archives.
 .Xc
 The admin policy: what an administrator of the daemon may set beyond the
 built-in rules.
+.It Fl wireguard-routes Ar cidr
+A network a WireGuard tunnel may route into itself although the route is
+wider than a /8 (/16 for IPv6) or covers an address of the host, its default
+gateway, a resolver, loopback, link-local or multicast (repeatable).
+Without it, or
+.Fl admin-routes ,
+such routes are refused.
 .It Fl log Ar stderr | syslog
 The audit log destination.
 Default stderr, or syslog with
@@ -327,9 +348,9 @@ The configuration; the installed sample is
 .Pa priv.conf.sample .
 .It Pa /usr/local/etc/jailops/priv.d/storage.conf
 The storage roots registered at run time.
-.It Pa /var/run/jailops/priv.sock
+.It Pa /var/run/jailops-priv/priv.sock
 The socket.
-.It Pa /var/run/jailops/priv.pid
+.It Pa /var/run/jailops-priv.pid
 The pid of the helper under rc.d.
 .It Pa /usr/local/etc/jailops/jails
 The rendered jail.conf files.

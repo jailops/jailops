@@ -46,7 +46,7 @@ export function certificate(st: CertState, now = Date.now()): HostCertificate {
     out.redirect = { managed: true, applied: false }
   }
   if (st.source === 'uploaded') out.stored = true
-  if (st.current.self_signed) out.warnings = ['browsers warn about a self-signed certificate until it is trusted or replaced']
+  if (st.current.self_signed) out.warnings = ['the certificate is self-signed: browsers warn, and clients pin its fingerprint']
   return out
 }
 

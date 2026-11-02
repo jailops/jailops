@@ -49,6 +49,10 @@ type Config struct {
 	Lockout auth.LockoutConfig
 	// NoUI leaves the embedded web UI out.
 	NoUI bool
+	// HSTS reports whether the certificate served now is one a browser trusts by itself (ACME, or an uploaded or
+	// configured certificate that verifies against the host's roots). Only then is Strict-Transport-Security sent:
+	// a browser that remembered it would refuse the self-signed certificate without a way to click through. Nil: never.
+	HSTS func() bool
 }
 
 // Server is the HTTP handler of one daemon.
@@ -68,7 +72,9 @@ type Server struct {
 	hubMu sync.Mutex
 	hubTr map[string]*hubTransport
 
-	consoles consoleRegistry
+	consoles  consoleRegistry
+	streams   streamCounter
+	lockedAud lockedAudit
 }
 
 // New builds a Server and verifies that every route has a permission entry.
@@ -100,6 +106,7 @@ func New(cfg Config) (*Server, error) {
 	for _, r := range s.routes {
 		s.mux.HandleFunc(r.method+" "+r.pattern, s.wrap(r))
 	}
+	// GET /healthz is liveness: the process answers HTTP. It checks nothing else (GET /readyz does).
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, "ok\n")
@@ -233,7 +240,7 @@ func (s *Server) authenticate(r *http.Request) (authResult, error) {
 			if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") || strings.HasPrefix(r.URL.Path, "/api/v1/sessions") {
 				return res, api.Errorf(api.CodeForbidden, "%s cannot be reached through a hub", r.URL.Path)
 			}
-			key := "claim|" + remote
+			key := "claim|" + auth.SourceKey(remote)
 			if err := s.tokLim.Check(key); err != nil {
 				return res, err
 			}
@@ -263,12 +270,9 @@ func (s *Server) authenticate(r *http.Request) (authResult, error) {
 		} else {
 			return res, api.Errorf(api.CodeUnauthorized, "unsupported authorization scheme")
 		}
-	} else if r.Method == http.MethodGet && r.URL.Path == "/api/v1/events" {
-		// EventSource cannot set headers; the UI passes the token in the query.
-		bearer = r.URL.Query().Get("access_token")
 	}
 	if bearer != "" {
-		key := "tok|" + remote
+		key := "tok|" + auth.SourceKey(remote)
 		if err := s.tokLim.Check(key); err != nil {
 			return res, err
 		}

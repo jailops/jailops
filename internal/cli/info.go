@@ -257,7 +257,7 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	kv("Hostname", dash(info.Hostname))
 	state := a.paint(w, stateStyle(0), string(info.State))
 	if info.JID > 0 {
-		state += fmt.Sprintf(" (jid %d)", info.JID)
+		state += colored(fmt.Sprintf(" (jid %d)", info.JID))
 	}
 	kv("State", state)
 	kind := []string{}
@@ -360,7 +360,7 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		if ifc.MAC != "" {
 			mac = ifc.MAC
 		}
-		kv(ifc.Name, fmt.Sprintf("network %s, mac %s, mtu %s, %s", ifc.Network, mac, mtu, a.paint(w, stateStyle(0), ifc.State)))
+		kv(ifc.Name, colored(fmt.Sprintf("network %s, mac %s, mtu %s, %s", termText(ifc.Network, false), termText(mac, false), termText(mtu, false), a.paint(w, stateStyle(0), ifc.State))))
 		if len(ifc.Addresses) == 0 {
 			fprintln(w, "    no addresses")
 		}
@@ -401,14 +401,14 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	case u.Last == nil:
 		kv("Last", "no update yet")
 	default:
-		res := u.Last.Kind + " " + a.paint(w, updateStyle, u.Last.Result)
+		res := colored(termText(u.Last.Kind, false)) + " " + a.paint(w, updateStyle, u.Last.Result)
 		if u.Last.RootRolledBack {
 			res += " (root rolled back)"
 		}
 		if u.Last.To != "" {
-			res += ", " + dash(u.Last.From) + " -> " + u.Last.To
+			res += colored(termText(", "+dash(u.Last.From)+" -> "+u.Last.To, false))
 		}
-		res += ", " + age(now, u.Last.Started) + " ago"
+		res += colored(", " + age(now, u.Last.Started) + " ago")
 		kv("Last", res)
 	}
 

@@ -63,6 +63,16 @@ type kindDesc[T any] struct {
 	// objects and returns the resolver of the names: the arguments, or the
 	// objects a selector matches (bulk). nil means the arguments only.
 	targets func(cmd *cobra.Command) func(ctx context.Context, args []string) (names []string, bulk bool, err error)
+	// loss is set for a kind whose delete destroys data: it says what deleting one object destroys, read from
+	// the server before anything is deleted, or refuses a delete that cannot go ahead. Such a delete needs the
+	// typed name or --confirm-data-loss; -y does not answer it.
+	loss func(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name string) (string, error)
+	// prepare fills in what the server can tell before an object built from flags is created, such as the
+	// defaults of a jail (nil for nothing).
+	prepare func(ctx context.Context, c *sdk.Client, x *T) error
+	// emptyHint is the command that creates the first object, for the message of an empty list ("" for the
+	// kind's create NAME, when it has one).
+	emptyHint string
 }
 
 func (d *kindDesc[T]) name(x T) string { return d.meta(&x).Name }
@@ -293,6 +303,60 @@ func matchesAny(patterns []string, name string) bool {
 	return false
 }
 
+// columns are the names of the columns a list of the kind has, in -o wide order, then those only its short form
+// on a terminal has.
+func (d *kindDesc[T]) columns() []string {
+	out := columnNames(d.head)
+	if d.brief != nil {
+		for _, c := range columnNames(d.brief.head) {
+			if !slices.Contains(out, c) {
+				out = append(out, c)
+			}
+		}
+	}
+	return out
+}
+
+// viewFor picks the form of the list that has every column asked for: the one -o wide shows, else the short one.
+func (d *kindDesc[T]) viewFor(names []string) (listView[T], error) {
+	has := func(head []string) bool {
+		for _, n := range names {
+			if _, err := columnIndex(head, n); err != nil {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	case has(d.head):
+		return d.full(), nil
+	case d.brief != nil && has(d.brief.head):
+		return *d.brief, nil
+	}
+	for _, n := range names {
+		if !slices.Contains(d.columns(), strings.ToLower(strings.TrimSpace(n))) {
+			return listView[T]{}, usagef("unknown column %q (columns: %s)", n, strings.Join(d.columns(), ", "))
+		}
+	}
+	return listView[T]{}, usagef("columns %s are not in one table (columns of -o wide: %s)", strings.Join(names, ", "), strings.Join(columnNames(d.head), ", "))
+}
+
+// listExample is the example of -c and --sort, with columns the kind has.
+func listExample(head []string) string {
+	cols := columnNames(head)
+	if slices.Contains(cols, "age") {
+		return "-c name,age --sort age"
+	}
+	other := "name"
+	for _, c := range cols {
+		if c != "name" {
+			other = c
+			break
+		}
+	}
+	return "-c name," + other + " --sort name"
+}
+
 // addList adds "list".
 func addList[T any](a *app, parent *cobra.Command, d *kindDesc[T], extraExample string) {
 	var labels, columns []string
@@ -302,11 +366,11 @@ func addList[T any](a *app, parent *cobra.Command, d *kindDesc[T], extraExample 
 		Use:     "list [PATTERN...]",
 		Aliases: []string{"ls"},
 		Short:   "List " + d.plural,
-		Long: "List " + d.plural + ` known to the server, optionally filtered by label or by name patterns
-such as 'web*'. The default output is a table: -c picks its columns (named as -o wide
-shows them) and --sort orders its rows. -o json and -o yaml print the full objects,
--o name the names only, -o csv the table as CSV.`,
-		Example:           "jailops " + "@P@" + " list\njailops " + "@P@" + " list 'web*' -c name,age --sort age\njailops " + "@P@" + " list -l env=prod -o name" + extraExample,
+		Long: "List " + d.plural + ` known to the server, optionally filtered by label (-l, also
+--selector) or by name patterns such as 'web*'. The default output is a table: -c
+picks its columns and --sort orders its rows (columns: ` + strings.Join(d.columns(), ", ") + `).
+-o json and -o yaml print the full objects, -o name the names only, -o csv the table as CSV.`,
+		Example:           "jailops " + "@P@" + " list\njailops " + "@P@" + " list 'web*' " + listExample(d.head) + "\njailops " + "@P@" + " list -l env=prod -o name" + extraExample,
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -328,7 +392,13 @@ shows them) and --sort orders its rows. -o json and -o yaml print the full objec
 			}
 			v := d.view(a)
 			if len(columns) > 0 || sortBy != "" {
-				v = d.full() // every column can be chosen and sorted by
+				asked := slices.Clone(columns)
+				if sortBy != "" {
+					asked = append(asked, sortBy)
+				}
+				if v, err = d.viewFor(asked); err != nil {
+					return err
+				}
 			}
 			sortCol := -1
 			if sortBy != "" {
@@ -352,6 +422,7 @@ shows them) and --sort orders its rows. -o json and -o yaml print the full objec
 			if err != nil {
 				return err
 			}
+			total := len(items)
 			kept := items[:0]
 			for _, it := range items {
 				if (pred == nil || pred(it)) && matchesAny(args, d.name(it)) {
@@ -393,6 +464,9 @@ shows them) and --sort orders its rows. -o json and -o yaml print the full objec
 					style = func(col int, val string) string { return v.style(pick[col], val) }
 				}
 			}
+			if len(items) == 0 {
+				a.empty = emptyMessage(cmd, d.plural, d.emptyHint, total > 0 || len(args) > 0 || len(labels) > 0, a)
+			}
 			return a.emitList(nonNil(items), style, func() ([]string, [][]string) { return head, rows }, drop, func() []string {
 				var n []string
 				for _, it := range items {
@@ -402,15 +476,38 @@ shows them) and --sort orders its rows. -o json and -o yaml print the full objec
 			})
 		},
 	}
-	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable)")
-	cmd.Flags().StringSliceVarP(&columns, "columns", "c", nil, "columns of the table, comma separated (named as -o wide shows them)")
+	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable; --selector is the same)")
+	aliasFlags(cmd, map[string]string{"selector": "label"})
+	cmd.Flags().StringSliceVarP(&columns, "columns", "c", nil, "columns of the table, comma separated: "+strings.Join(d.columns(), ", "))
 	cmd.Flags().StringVar(&sortBy, "sort", "", "order the rows by this column")
-	enumFlag(cmd, "columns", columnNames(d.head)...)
-	enumFlag(cmd, "sort", columnNames(d.head)...)
+	enumFlag(cmd, "columns", d.columns()...)
+	enumFlag(cmd, "sort", d.columns()...)
 	if d.filters != nil {
 		keep = d.filters(cmd)
 	}
 	parent.AddCommand(cmd)
+}
+
+// emptyMessage is what an empty list says: the kind, the project for a kind that lives in one, and the command
+// that creates the first one. filtered is true when patterns or filters left everything out.
+func emptyMessage(cmd *cobra.Command, plural, hint string, filtered bool, a *app) string {
+	where := ""
+	if projectScoped(cmd) && a.conn != nil {
+		where = " in project " + a.conn.CurrentProject()
+	}
+	if filtered {
+		return "No " + plural + where + " match."
+	}
+	if hint == "" {
+		if c, _, err := cmd.Parent().Find([]string{"create"}); err == nil && c != cmd.Parent() {
+			hint = c.CommandPath() + " NAME"
+		}
+	}
+	msg := "No " + plural + where + "."
+	if hint != "" {
+		msg += " Create one with: " + hint
+	}
+	return msg
 }
 
 func nonNil[T any](s []T) []T {
@@ -545,6 +642,15 @@ documents; each one is created in order.`,
 			if err != nil {
 				return err
 			}
+			if d.prepare != nil {
+				c, err := a.connect(cmd.Context())
+				if err != nil {
+					return err
+				}
+				if err := d.prepare(cmd.Context(), c, &x); err != nil {
+					return err
+				}
+			}
 			objs = append(objs, x)
 		}
 		for _, x := range objs {
@@ -602,6 +708,18 @@ func addDelete[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeKind(a, d),
 	}
+	var confirmLoss bool
+	if d.loss != nil {
+		cmd.Long = "Delete one or more " + d.plural + ` with everything they hold. This destroys data: the root,
+the volumes and the snapshots go with the ` + d.noun + `, and nothing brings them back.
+Before anything is deleted the command shows what each delete destroys (the
+sizes and the number of snapshots, read from the server) and asks you to type
+the name (the project name for several); -y does not answer it. Scripts pass
+--confirm-data-loss once they have decided. --dry-run shows the same summary
+and deletes nothing.`
+		cmd.Example = "jailops " + path + " delete NAME\njailops " + path + " delete --dry-run NAME\njailops " + path + " delete --confirm-data-loss NAME1 NAME2"
+		cmd.Flags().BoolVar(&confirmLoss, "confirm-data-loss", false, "confirm that the data of the "+d.plural+" is destroyed, without typing the name")
+	}
 	var before func(context.Context, string) error
 	if d.beforeDelete != nil {
 		before = d.beforeDelete(cmd)
@@ -610,14 +728,19 @@ func addDelete[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 	if d.targets != nil {
 		resolve = d.targets(cmd)
 		cmd.Args = cobra.ArbitraryArgs
-		cmd.Long += "\nWith -l or --all the " + d.plural + " are selected by label instead of named; that is a batch, and you type the project name to confirm it (or pass -y)."
+		if d.loss != nil {
+			cmd.Long += "\nWith -l or --all the " + d.plural + " are selected by label instead of named; you type the project name to confirm (or pass --confirm-data-loss)."
+		} else {
+			cmd.Long += "\nWith -l or --all the " + d.plural + " are selected by label instead of named; that is a batch, and you type the project name to confirm it (or pass -y)."
+		}
 		cmd.Example += "\njailops " + path + " delete -l env=test"
 	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		ctx := cmd.Context()
 		names, bulk := args, false
 		if resolve != nil {
 			var err error
-			if names, bulk, err = resolve(cmd.Context(), args); err != nil {
+			if names, bulk, err = resolve(ctx, args); err != nil {
 				return err
 			}
 			if bulk && len(names) == 0 {
@@ -625,12 +748,56 @@ func addDelete[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 				return nil
 			}
 		}
-		if bulk && !a.dryRun {
-			project := a.conn.CurrentProject()
-			what := d.plural
-			if len(names) == 1 {
-				what = d.noun
+		what := d.plural
+		if len(names) == 1 {
+			what = d.noun
+		}
+		// What would go, read before anything changes: a missing object is an error, also in a dry run.
+		var summary []string
+		if d.loss != nil || a.dryRun {
+			c, err := a.connect(ctx)
+			if err != nil {
+				return err
 			}
+			for _, name := range names {
+				if d.loss != nil {
+					line, err := d.loss(cmd, ctx, c, name)
+					if err != nil {
+						return err
+					}
+					summary = append(summary, line)
+				} else if d.get != nil {
+					if _, _, err := d.get(ctx, c, name); err != nil {
+						return err
+					}
+				}
+			}
+		}
+		if a.dryRun && d.loss != nil {
+			if a.format == fmtJSON || a.format == fmtYAML {
+				return a.emit(map[string]any{"dry_run": true, "action": "delete " + what, "destroys": summary}, nil, nil, nil)
+			}
+			for _, l := range summary {
+				fprintf(a.env.Stdout, "dry-run: would delete %s %s\n", d.noun, l)
+			}
+			return nil
+		}
+		project := ""
+		if a.conn != nil {
+			project = a.conn.CurrentProject()
+		}
+		switch {
+		case a.dryRun:
+		case d.loss != nil:
+			typed := names[0]
+			if bulk || len(names) > 1 {
+				typed = project
+			}
+			warn := fmt.Sprintf("This deletes %d %s of project %q and destroys its data; it cannot be undone:\n  %s", len(names), what, project, strings.Join(summary, "\n  "))
+			if err := a.confirmTyped(warn, typed, confirmLoss, "--confirm-data-loss"); err != nil {
+				return err
+			}
+		case bulk:
 			warn := fmt.Sprintf("This deletes %d %s of project %q: %s. It cannot be undone.", len(names), what, project, strings.Join(names, ", "))
 			if err := a.confirmTyped(warn, project, a.yes, "-y"); err != nil {
 				return err
@@ -638,7 +805,7 @@ func addDelete[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 		}
 		for _, name := range names {
 			if before != nil {
-				if err := before(cmd.Context(), name); err != nil {
+				if err := before(ctx, name); err != nil {
 					return err
 				}
 			}
@@ -648,20 +815,20 @@ func addDelete[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 				}
 				continue
 			}
-			if !bulk {
+			if !bulk && d.loss == nil {
 				if err := a.confirm(fmt.Sprintf("Delete %s %q?", d.noun, name)); err != nil {
 					return err
 				}
 			}
-			c, err := a.connect(cmd.Context())
+			c, err := a.connect(ctx)
 			if err != nil {
 				return err
 			}
-			h, err := d.del(cmd.Context(), c, name)
+			h, err := d.del(ctx, c, name)
 			if err != nil {
 				return err
 			}
-			if err := a.finishOp(cmd.Context(), h, d.noun, name, "deleted", nil); err != nil {
+			if err := a.finishOp(ctx, h, d.noun, name, "deleted", nil); err != nil {
 				return err
 			}
 		}

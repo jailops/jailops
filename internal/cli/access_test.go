@@ -197,7 +197,7 @@ func TestUserIdentityManagement(t *testing.T) {
 	if _, _, code := h.run("", "user", "set-password", "ghost", "--generate"); code == 0 {
 		t.Fatal("unknown user")
 	}
-	// set-role replaces role and scope
+	// set-role replaces what it is given (--permission is the former name of --role)
 	if _, errs, code := h.run("", "user", "set-role", "carol", "--permission", "admin", "--global"); code != 0 {
 		t.Fatalf("set-role: %d %q", code, errs)
 	}
@@ -205,15 +205,26 @@ func TestUserIdentityManagement(t *testing.T) {
 	if !strings.Contains(shown, "permission: admin") || !strings.Contains(shown, "global: true") || strings.Contains(shown, "main") {
 		t.Fatalf("carol: %s", shown)
 	}
-	if _, errs, code := h.run("", "user", "set-role", "carol", "--permission", "readonly", "--projects", "main"); code != 0 {
+	if _, errs, code := h.run("", "user", "set-role", "carol", "--role", "readonly", "--projects", "main"); code != 0 {
 		t.Fatalf("set-role back: %d %q", code, errs)
 	}
 	shown, _, _ = h.run("", "user", "show", "carol", "-o", "yaml")
 	if !strings.Contains(shown, "permission: readonly") || strings.Contains(shown, "global: true") || !strings.Contains(shown, "main") {
 		t.Fatalf("carol again: %s", shown)
 	}
-	if _, _, code := h.run("", "user", "set-role", "carol", "--permission", "operator"); code == 0 {
-		t.Fatal("set-role without a scope accepted")
+	// what is left out stays: the role alone keeps the scope, the scope alone keeps the role
+	if out, errs, code := h.run("", "user", "set-role", "carol", "--role", "operator"); code != 0 || !strings.Contains(out, "readonly, main -> operator, main") {
+		t.Fatalf("set-role --role: %d %q %q", code, out, errs)
+	}
+	if out, errs, code := h.run("", "user", "set-role", "carol", "--global"); code != 0 || !strings.Contains(out, "operator, main -> operator, global") {
+		t.Fatalf("set-role --global: %d %q %q", code, out, errs)
+	}
+	shown, _, _ = h.run("", "user", "show", "carol", "-o", "yaml")
+	if !strings.Contains(shown, "permission: operator") || !strings.Contains(shown, "global: true") {
+		t.Fatalf("carol kept: %s", shown)
+	}
+	if _, errs, code := h.run("", "user", "set-role", "carol"); code != 2 || !strings.Contains(errs, "give --role") {
+		t.Fatalf("set-role without anything: %d %q", code, errs)
 	}
 	// revoke is the token delete
 	h.run("", "token", "create", "ci", "--global")

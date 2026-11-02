@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -76,6 +77,9 @@ type Options struct {
 	BackupMounter hostbackup.Mounter
 	// LogForwardTune adjusts the log forwarder (tests: poll interval, file check).
 	LogForwardTune func(*logfwd.Env)
+	// KeepAlive and ReadTimeout replace the keepalive interval of long requests (15s) and the read timeout of the
+	// listeners (2m) (tests).
+	KeepAlive, ReadTimeout time.Duration
 	// ACMEHTTPClient talks to the ACME CA (tests: a CA of their own); TLSRoots decide whether a certificate comes
 	// from a public CA (nil: the host's roots); ListenChallenge opens the http-01 listener (tests: a free port).
 	ACMEHTTPClient  *http.Client
@@ -283,7 +287,12 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		return consoleURLs(firstNonEmpty(d.HTTPSAddr(), cfg.Listen.HTTPS.Address), hostname, net.InterfaceAddrs)
 	}
 	deps.AppsLocalDir = cfg.Apps.LocalDir
-	deps.LogForward, deps.LogForwardTune = cfg.Logging.Forward, opts.LogForwardTune
+	deps.LogForward, deps.LogForwardTune, deps.LogSecretsDir = cfg.Logging.Forward, opts.LogForwardTune, cfg.Logging.SecretsDir
+	deps.LogOwnPorts = func() []int {
+		// the console's listener (the port it got when it was 0) and the ACME challenge listener
+		ports := []int{consolePort(firstNonEmpty(d.HTTPSAddr(), cfg.Listen.HTTPS.Address)), consolePort(firstNonEmpty(cfg.Listen.HTTPS.ACME.ChallengeAddress, DefaultChallengeAddress))}
+		return slices.DeleteFunc(ports, func(p int) bool { return p == 0 })
+	}
 	deps.DialJail = clients.Dial
 	deps.ExecLimits = service.ExecLimits{PerJail: cfg.Limits.ExecSessionsPerJail, Idle: cfg.Limits.ExecIdle.Std(), Max: cfg.Limits.ExecMax.Std()}
 	if opts.Registrar != nil {
@@ -331,8 +340,9 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	// 6. Routes are verified against the permission table here.
 	srv, err := server.New(server.Config{
 		Svc: svc, Log: log, ClientCert: &d.cert, NoUI: !cfg.UI(),
-		MaxBody: cfg.Limits.MaxBodyBytes, RequestTimeout: cfg.Limits.RequestTimeout.Std(),
+		MaxBody: cfg.Limits.MaxBodyBytes, RequestTimeout: cfg.Limits.RequestTimeout.Std(), KeepAlive: opts.KeepAlive,
 		Lockout: auth.LockoutConfig{Threshold: cfg.Limits.AuthFailureThreshold, Now: opts.Now},
+		HSTS:    d.certMgr.HSTS,
 	})
 	if err != nil {
 		return nil, err
@@ -361,6 +371,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		d.go_(func() { d.fleetLoop(bg) })
 	}
 	ok = true
+	svc.MarkStarted() // GET /readyz answers from here on
 	if st, err := svc.SetupStatus(ctx); err == nil && st.Required {
 		log.Info("no administrator yet: the console asks for the setup token, which `jailops-priv setup-token` (as root) prints")
 	}
@@ -439,6 +450,9 @@ func (d *Daemon) Shutdown(ctx context.Context) error {
 	var err error
 	d.once.Do(func() {
 		d.log.Info("jailopsd stopping")
+		if d.svc != nil {
+			d.svc.MarkStopping()
+		}
 		for _, s := range d.servers {
 			if e := s.Shutdown(ctx); e != nil {
 				_ = s.Close()
@@ -558,10 +572,19 @@ func (d *Daemon) probeLoop(ctx context.Context) {
 // copies the database with VACUUM INTO daily (users, tokens and the audit log
 // are the only rows that cannot be rebuilt).
 func (d *Daemon) housekeeping(ctx context.Context) {
+	var audited time.Time
 	run := func() {
 		_, _ = d.db.Sessions.PurgeExpired(ctx)
 		_, _ = d.db.Tokens.DeleteExpired(ctx)
 		_, _ = d.db.Operations.Prune(ctx, d.opts.Now().Add(-30*24*time.Hour))
+		if now := d.opts.Now(); now.Sub(audited) >= 24*time.Hour {
+			audited = now
+			if n, err := d.PruneAudit(ctx); err != nil {
+				d.log.Warn("audit log: pruning failed", "err", err)
+			} else if n > 0 {
+				d.log.Info("audit log: old entries deleted", "entries", n, "retention", d.cfg.Audit.Retention.Std().String(), "max_entries", d.cfg.Audit.MaxEntries)
+			}
+		}
 		d.backupDB(ctx)
 		d.svc.Housekeeping(ctx)
 	}
@@ -576,6 +599,19 @@ func (d *Daemon) housekeeping(ctx context.Context) {
 			run()
 		}
 	}
+}
+
+// PruneAudit deletes the audit entries that audit.retention and audit.max_entries no longer keep (never one of the
+// newest 1000) and returns how many it deleted. The daemon runs it once a day.
+func (d *Daemon) PruneAudit(ctx context.Context) (int64, error) {
+	keep, rows := d.cfg.Audit.Retention.Std(), d.cfg.Audit.MaxEntries
+	if keep <= 0 {
+		keep = 90 * 24 * time.Hour
+	}
+	if rows <= 0 {
+		rows = 1000000
+	}
+	return d.db.Audit.Prune(ctx, d.opts.Now().Add(-keep), rows)
 }
 
 func (d *Daemon) backupDB(ctx context.Context) {

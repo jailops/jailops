@@ -24,6 +24,7 @@
 # jailopsd runs as the unprivileged user jailops; everything that needs root is done by jailops_priv.
 # Configuration: /usr/local/etc/jailops/jailopsd.yaml
 #   service jailopsd checkconfig   validate the configuration
+#   service jailopsd status        the process runs; GET /readyz says whether it can serve (docs/operations.md)
 # There is no reload: the configuration is read at start (SIGHUP is ignored by design) and a renewed TLS
 # certificate is picked up without a restart. Output goes to syslog (tag jailopsd).
 
@@ -33,8 +34,10 @@ name="jailopsd"
 rcvar="jailopsd_enable"
 desc="JailOps daemon"
 
-pidfile="/var/run/jailops/jailopsd.pid"
-supervisor_pidfile="/var/run/jailops/jailopsd-daemon.pid"
+# daemon(8) writes both pid files as root, before it runs jailopsd as jailops: they live in /var/run, not in
+# /var/run/jailops, which jailops may write to.
+pidfile="/var/run/jailopsd.pid"
+supervisor_pidfile="/var/run/jailopsd-daemon.pid"
 procname="/usr/local/sbin/jailopsd"
 command="/usr/sbin/daemon"
 jailopsd_helper="/usr/local/libexec/jailops-priv"

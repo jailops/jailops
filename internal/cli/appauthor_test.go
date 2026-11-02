@@ -92,11 +92,14 @@ func TestAppExport(t *testing.T) {
 	out := filepath.Join(h.dir, "cache.yaml")
 	tr := h.transcript()
 	tr.ok("app", "export", "cache")
-	tr.ok("app", "export", "cache", "-o", out)
+	tr.ok("app", "export", "cache", "--to", out)
 	tr.do("", "app", "validate", out)
-	tr.do("", "app", "export", "cache", "-o", out)
-	tr.ok("app", "export", "cache", "-o", filepath.Join(h.dir, "other.yaml"))
-	tr.ok("app", "export", "cache", "--output", out, "--force", "-q")
+	tr.do("", "app", "export", "cache", "--to", out)
+	tr.ok("app", "export", "cache", "--to", filepath.Join(h.dir, "other.yaml"))
+	tr.ok("app", "export", "cache", "-o", out, "--force", "-q") // the former spelling: a file, with a warning
+	tr.do("", "app", "export", "cache", "-o", out, "--to", filepath.Join(h.dir, "third.yaml"))
+	tr.ok("app", "export", "cache", "-o", "json")
+	tr.do("", "app", "export", "cache", "-o", "csv")
 	tr.ok("app", "export", "plain")
 	tr.do("", "app", "export", "off")
 	tr.do("", "app", "export", "missing")
@@ -110,17 +113,14 @@ func TestAppExport(t *testing.T) {
 	if _, err := apps.Parse("cache", data); err != nil {
 		t.Fatalf("%v\n%s", err, data)
 	}
-	// -o is the file here, never an output format
+	// -o is the output format, as everywhere: -o json prints the draft as data and writes no file named json
 	t.Chdir(h.dir)
-	if _, errs, code := h.run("", "app", "export", "cache", "-o", "json", "--force"); code != 0 {
-		t.Fatal(errs)
+	out2, errs, code := h.run("", "app", "export", "cache", "-o", "json")
+	if code != 0 || !strings.Contains(out2, `"definition"`) {
+		t.Fatalf("%d %q %s", code, out2, errs)
 	}
-	if b, err := os.ReadFile("json"); err == nil {
-		if !strings.Contains(string(b), "name: cache") {
-			t.Errorf("%s", b)
-		}
-	} else {
-		t.Error(err)
+	if _, err := os.Stat("json"); err == nil {
+		t.Error("-o json wrote a file")
 	}
 }
 

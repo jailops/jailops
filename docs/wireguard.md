@@ -17,7 +17,7 @@ On the server host:
 
 `peer add` prints a **join token** once (`jwg1.` followed by base64url). On another JailOps host:
 
-    jailops wireguard join jwg1.eyJu...            # or: jailops wireguard join - < token.txt
+    jailops wireguard join - < token.txt           # or --token-file token.txt
 
 The client is created, its keys go to the helper of that host, and the tunnel comes up. For a phone or a laptop
 without JailOps, print a configuration file instead and import it into the WireGuard app:
@@ -85,7 +85,8 @@ fake server used by tests never carry a private or preshared key.
 endpoint, the peer's addresses, the routes, DNS and the keepalive, as base64url of JSON. It is a secret: whoever holds
 it can be that peer. It is printed once, by `peer add`, and is not stored anywhere on the server, which keeps only the
 peer's public key and the preshared key. The `--format conf` file is the same secret in the format of the WireGuard
-apps. Pass it on over a channel you trust; `join -` reads it from standard input so it stays out of shell history.
+apps. Pass it on over a channel you trust; `join -` reads it from standard input and `--token-file` from a file, so it
+stays out of shell history and the process list (a token given as an argument still works, with a warning).
 A lost token is replaced by removing the peer and adding it again.
 
 **Who may do what.** Reading tunnels and their state (public keys, peers, handshakes) needs the operator role; creating,
@@ -117,6 +118,17 @@ tunnel's subnet.
 
 **A client** routes its `allowed_ips` into the tunnel (`route add -net ... -interface wg-<name>`); a default route
 (`0.0.0.0/0`, `::/0`) is refused.
+
+**Which routes the helper adds.** The routes reach the host's own routing table, so the helper checks them itself,
+whatever the daemon asks: every route lies inside the allowed IPs of a peer of its tunnel, and, unless `priv.conf`
+says otherwise, is at least a /8 (IPv4) or a /16 (IPv6) and stays clear of loopback, link-local and multicast, of the
+host's own addresses (the tunnel's excepted), of its default gateways and of the resolvers in `/etc/resolv.conf`. So a
+tunnel cannot take over the host's traffic with two halves of the address space (`0.0.0.0/1`, `128.0.0.0/1`) or with
+the /32 of its resolver. A network you do want to route that way goes in `priv.conf`, one line per network:
+`wireguard-routes = 0.0.0.0/1` (a route inside a listed network skips the checks above, but not the one of the
+allowed IPs); `admin-routes = true` lifts them for every route. What the helper cannot know (the address of a backup
+node or an ACME CA the host talks to) is not checked: a route to one of them inside a peer's allowed IPs is the
+power the tunnel's admin has.
 
 ## The wg program and the module
 

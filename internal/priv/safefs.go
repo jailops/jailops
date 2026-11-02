@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -48,10 +49,58 @@ type RemoveReq struct {
 const maxPath = 4096
 
 // resolved is a path split into the allow-listed root that holds it and the
-// slash-free relative name inside that root.
+// slash-free relative name inside that root. For a path inside a tree a jail
+// controls (see jailTreeDepth), root is that tree and base the storage mount above it.
 type resolved struct {
 	root string // real path of the root (symlinks evaluated at startup)
 	rel  string // clean, relative, no ".."; "." is the root itself
+	base string // the storage mount root lies in, when root is a jail tree
+}
+
+var reImageGen = regexp.MustCompile(`^(staging-)?g[0-9]+$`)
+
+// jailTreeDepth returns how many segments of rel (relative to a storage mount) name a tree whose content a jail or an
+// image build controls: a jail root and its update siblings (projects/<p>/jails/<j>/root, root.new, root.old,
+// root.stale), a jail's volume (projects/<p>/jails/<j>/data/<v>) and an image generation (images/<i>/g<N>,
+// staging-g<N>). 0 for anything else. Root in a jail can make symlinks in its own tree; opened at the storage mount, a
+// relative one would lead the helper into another jail of the same mount.
+func jailTreeDepth(rel string) int {
+	s := strings.Split(rel, "/")
+	switch {
+	case len(s) >= 5 && s[0] == "projects" && s[2] == "jails" && slices.Contains([]string{"root", "root.new", "root.old", "root.stale"}, s[4]):
+		return 5
+	case len(s) >= 6 && s[0] == "projects" && s[2] == "jails" && s[4] == "data":
+		return 6
+	case len(s) >= 3 && s[0] == "images" && reImageGen.MatchString(s[2]):
+		return 3
+	}
+	return 0
+}
+
+// mountRel splits p into the storage mount that holds it and the rest (root "" when none does).
+func (c Config) mountRel(p string) resolved {
+	for _, m := range c.reg.mounts() {
+		if within(m, p) {
+			rel, _ := filepath.Rel(m, p)
+			return resolved{root: m, rel: rel}
+		}
+	}
+	return resolved{}
+}
+
+// inJailTree narrows a path strictly below a jail tree of a storage mount to that tree, so that os.Root confines
+// every symlink to it. The tree itself (rel equal to it) stays relative to the mount.
+func (c Config) inJailTree(r resolved) resolved {
+	if r.base != "" || r.root == "" || !c.isMountRoot(r.root) {
+		return r
+	}
+	n := jailTreeDepth(r.rel)
+	s := strings.Split(r.rel, "/")
+	if n == 0 || len(s) <= n {
+		return r
+	}
+	tree := strings.Join(s[:n], "/")
+	return resolved{root: filepath.Join(r.root, tree), rel: strings.Join(s[n:], "/"), base: r.root}
 }
 
 func (c Config) resolve(path string) (resolved, error) {
@@ -70,7 +119,7 @@ func (c Config) resolve(path string) (resolved, error) {
 				return resolved{}, err
 			}
 			rel, _ := filepath.Rel(r, p)
-			return resolved{root: r, rel: rel}, nil
+			return c.inJailTree(resolved{root: r, rel: rel}), nil
 		}
 	}
 	return resolved{}, forbidden("path %q is outside the allowed roots", path)
@@ -78,9 +127,68 @@ func (c Config) resolve(path string) (resolved, error) {
 
 // openRoot opens the root directory without following a symlink at its last
 // component beyond what the operator configured: the root itself may be a
-// symlink the operator set up, everything below it may not escape.
+// symlink the operator set up, everything below it may not escape. A jail
+// tree is opened from its storage mount one plain directory at a time.
 func (r resolved) openRoot() (*os.Root, error) {
-	return os.OpenRoot(r.root)
+	if r.base == "" {
+		return os.OpenRoot(r.root)
+	}
+	m, err := os.OpenRoot(r.base)
+	if err != nil {
+		return nil, err
+	}
+	defer m.Close()
+	rel, err := filepath.Rel(r.base, r.root)
+	if err != nil {
+		return nil, err
+	}
+	return openBelow(m, rel)
+}
+
+// openBelowHook runs between the check of a segment and its open (tests swap the segment there).
+var openBelowHook func(seg string)
+
+// openBelow opens the directory rel below r as a root of its own, one segment at a time, following no symlink:
+// each segment must be a plain directory, and once opened it must still be the directory that was checked (device
+// and inode), so a segment swapped for a symlink between the check and the open is refused as well.
+func openBelow(r *os.Root, rel string) (*os.Root, error) {
+	cur := r
+	done := func(next *os.Root) {
+		if cur != r {
+			cur.Close()
+		}
+		cur = next
+	}
+	for _, seg := range strings.Split(rel, "/") {
+		st, err := cur.Lstat(seg)
+		if err != nil {
+			done(nil)
+			return nil, err
+		}
+		if !st.IsDir() {
+			done(nil)
+			return nil, forbidden("%s is not a plain directory", rel)
+		}
+		if openBelowHook != nil {
+			openBelowHook(seg)
+		}
+		next, err := cur.OpenRoot(seg)
+		if err != nil {
+			done(nil)
+			return nil, err
+		}
+		got, err := next.Stat(".")
+		if err != nil || !os.SameFile(st, got) {
+			next.Close()
+			done(nil)
+			if err != nil {
+				return nil, err
+			}
+			return nil, forbidden("%s changed while it was opened", rel)
+		}
+		done(next)
+	}
+	return cur, nil
 }
 
 func mapFSErr(err error) error {
