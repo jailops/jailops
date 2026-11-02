@@ -260,11 +260,11 @@ func TestHostIdentityRefusals(t *testing.T) {
 	}
 }
 
-// Only the three allow-listed rc.conf variables can be set, and only with plain values.
+// Only the allow-listed rc.conf variables can be set, and only with plain values.
 func TestHostSysrcAllowList(t *testing.T) {
 	e, _ := newHostEnv(t, "identity")
 	ctx := context.Background()
-	for _, name := range []string{"sshd_enable", "ifconfig_em0", "pf_rules", "hostname;reboot", ""} {
+	for _, name := range []string{"sshd_enable", "ifconfig_em0", "pflog_enable", "hostname;reboot", ""} {
 		if err := e.local.sysrcSet(ctx, name, "YES"); !api.IsCode(err, api.CodeForbidden) {
 			t.Errorf("%q: %v", name, err)
 		}

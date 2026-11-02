@@ -19,6 +19,8 @@ type Recovered struct {
 	Notes []string
 	// FromBundle is true when spec.json was unusable and bundle.json supplied the spec.
 	FromBundle bool
+	// Locked names the encrypted volumes whose key is not loaded.
+	Locked []string
 }
 
 // Rebuild reconstructs the registry entry of one jail from its datasets and
@@ -84,6 +86,11 @@ func (s *Service) Rebuild(ctx context.Context, name string) (Recovered, error) {
 	}
 	for _, e := range st.Extra {
 		out.Notes = append(out.Notes, "leftover "+e[strings.LastIndex(e, "/")+1:])
+	}
+	if l, err := s.lockedVolumes(ctx, st); err != nil {
+		out.Problems = append(out.Problems, "key status: "+err.Error())
+	} else {
+		out.Locked = names(l)
 	}
 	up, _ := s.Jails.Running(ctx, name)
 	power := api.PowerStopped

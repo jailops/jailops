@@ -56,7 +56,8 @@ Because the specs are the wire types of the API (decoded strictly: a misspelled 
 declarable the day it exists. `validate` also checks, offline, what the daemon would refuse at apply time: the name rules of
 jails, networks, policies, address sets and WireGuard tunnels, overlapping subnets and storage datasets, the IPv6 proxy and routed prefix limits,
 the proxy gateway and uplink, reserved fields (`encrypted`, `packages`), and that a **profile cannot carry `host_mounts` or
-`zfs_delegation`**.
+`zfs_delegation`**. It warns about a volume with `encrypted: true`: its passphrase is typed by a person, so create that jail
+with `jailops jail create` ([storage.md](storage.md#encrypted-volumes)); sync manages it from then on.
 
 **IPv6, CLI flags and YAML.** `--ipv6-mode routed` and `--ipv6-mode proxy` fill in what a file spells out:
 

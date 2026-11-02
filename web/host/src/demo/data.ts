@@ -60,7 +60,18 @@ export function jails(): Jail[] {
     jail('proxy', 'running', { net: 'edge', ipv4: '192.0.2.10', ipv6: 'auto', labels: { role: 'proxy' } }),
     jail('cache', 'starting', { ipv4: '10.20.0.14' }),
     jail('alpine-app', 'running', { image: 'alpine-3.22@stable', gen: 'alpine-3.22#g1', ipv4: 'auto', drift: ['address 10.20.0.30 configured, spec says auto (allocation pending write-back)'] }),
+    vault(),
   ]
+}
+
+/** The passphrase of the demo jail vault's encrypted volume (unlock it with this in `?demo`). */
+export const demoVaultPassphrase = 'demo-vault-passphrase'
+
+/** A jail with an encrypted volume, locked as a host boot leaves it. */
+function vault(): Jail {
+  const j = jail('vault', 'locked', { ipv4: '10.20.0.16', vols: [{ name: 'secrets', mount: '/var/db/secrets', quota: '5G', encrypted: true }], labels: { role: 'secrets' } })
+  j.status.locked = ['secrets']
+  return j
 }
 
 export function snapshots(): Record<string, JailSnapshot[]> {

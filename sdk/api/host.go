@@ -18,10 +18,11 @@ import (
 // Host management modules.
 const (
 	HostModuleIdentity = "identity"
+	HostModuleFirewall = "firewall"
 )
 
 // HostModules lists the modules this version can manage.
-var HostModules = []string{HostModuleIdentity}
+var HostModules = []string{HostModuleIdentity, HostModuleFirewall}
 
 // Limits of the identity module.
 const (
@@ -127,6 +128,12 @@ type HostChange struct {
 	// Snapshot names the copy of the touched files taken before the change (restore it with
 	// POST /api/v1/host/snapshots/{name}/restore).
 	Snapshot string `json:"snapshot,omitempty"`
+	// Pending is set when the change waits for its confirmation (commit confirmed): it reverts at its deadline.
+	Pending *HostPendingChange `json:"pending,omitempty"`
+	// Rules are the rules of a firewall change in plain words (module firewall).
+	Rules []HostFirewallRule `json:"rules,omitempty"`
+	// Warnings are remarks that did not stop the change.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // HostSnapshot is a copy of the host files one module touched, taken before a change.
@@ -137,7 +144,8 @@ type HostSnapshot struct {
 	Time   time.Time `json:"time"`
 	// Files are the host paths it holds.
 	Files []string `json:"files"`
-	// Reason is "apply" or "restore" (the state before a restore).
+	// Reason is "apply", "adopt" (the first apply of a module: the file the administrator wrote) or "restore"
+	// (the state before a restore).
 	Reason string `json:"reason,omitempty"`
 }
 

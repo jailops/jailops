@@ -4,7 +4,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
-import { lifecycle, lifecycleMany, matches, type Lifecycle } from '@/composables/jailActions'
+import { lifecycle, lifecycleMany, matches, isLocked, type Lifecycle } from '@/composables/jailActions'
+import UnlockDialog from '@/components/UnlockDialog.vue'
+import LockChip from '@/components/LockChip.vue'
 import { ago, shortAddr } from '@jailops/shared/lib/format'
 import JailCreateForm from '@/components/JailCreateForm.vue'
 import { currentProject } from '@/composables/project'
@@ -27,7 +29,8 @@ function openCreate(): void {
 const q = ref(typeof route.query.q === 'string' ? route.query.q : '')
 const state = ref<PowerState | ''>((typeof route.query.state === 'string' ? route.query.state : '') as PowerState | '')
 const sel = ref<Set<string>>(new Set())
-const filters: Array<PowerState | ''> = ['', 'running', 'stopped', 'starting', 'stopping', 'error']
+const filters: Array<PowerState | ''> = ['', 'running', 'stopped', 'starting', 'stopping', 'error', 'locked']
+const unlocking = ref('')
 
 watch([q, state], () => void router.replace({ query: { ...(q.value ? { q: q.value } : {}), ...(state.value ? { state: state.value } : {}) } }))
 
@@ -90,13 +93,14 @@ function one(n: string, a: Lifecycle): void {
               <tr v-for="j in shown" :key="j.metadata.name">
                 <td><input type="checkbox" :checked="sel.has(j.metadata.name)" :aria-label="s.jails.selectRow(j.metadata.name)" @change="toggle(j.metadata.name)" /></td>
                 <td><router-link class="mono" :to="`/jails/${j.metadata.name}`">{{ j.metadata.name }}</router-link></td>
-                <td><StatePill :state="j.status.power" /></td>
+                <td><StatePill :state="j.status.power" /><LockChip v-if="j.status.locked?.length" :volumes="j.status.locked" :jail="j.metadata.name" /></td>
                 <td class="mono hide-sm">{{ j.spec.image }}<span v-if="j.status.generation" class="faint">{{ '\u00a0' + j.status.generation }}</span></td>
                 <td class="mono hide-sm">{{ (j.status.addresses ?? []).map(shortAddr).join(', ') || '-' }}</td>
                 <td><span v-if="j.status.drift?.length" class="pill warn">{{ s.overview.drift(j.status.drift.length) }}</span><span v-else class="faint">{{ s.jails.inSync }}</span></td>
                 <td class="faint hide-sm nowrap">{{ j.status.power === 'running' ? ago(j.status.started_at) : '-' }}</td>
                 <td class="nowrap">
-                  <button v-if="j.status.power !== 'running'" class="btn btn-sm" type="button" @click="one(j.metadata.name, 'start')"><Icon name="play" />{{ s.jails.start }}</button>
+                  <button v-if="isLocked(j)" class="btn btn-sm" type="button" :data-unlock="j.metadata.name" :aria-label="s.jails.actionTitle(s.keys.unlock, j.metadata.name)" @click="unlocking = j.metadata.name"><Icon name="lockOpen" />{{ s.keys.unlock }}</button>
+                  <button v-else-if="j.status.power !== 'running'" class="btn btn-sm" type="button" @click="one(j.metadata.name, 'start')"><Icon name="play" />{{ s.jails.start }}</button>
                   <template v-else>
                     <button class="btn btn-sm" type="button" @click="one(j.metadata.name, 'stop')"><Icon name="square" />{{ s.jails.stop }}</button>
                     <button class="btn btn-sm btn-ghost btn-icon" type="button" :aria-label="s.jails.actionTitle(s.jails.restart, j.metadata.name)" @click="one(j.metadata.name, 'restart')"><Icon name="rotateCw" /></button>
@@ -108,6 +112,7 @@ function one(n: string, a: Lifecycle): void {
         </div>
       </div>
     </LoadState>
+    <UnlockDialog :open="!!unlocking" :jail="unlocking" @close="unlocking = ''" @done="l.reload" />
     <JailCreateForm :open="creating" :project="currentProject" :images="lookups.data.value?.images ?? []" :storage="lookups.data.value?.storage ?? []" :networks="lookups.data.value?.networks ?? []" @close="creating = false" @done="l.reload" />
   </div>
 </template>

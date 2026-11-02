@@ -203,24 +203,36 @@ func (s *Service) RestoreHostSnapshot(ctx context.Context, name string, in api.H
 	if err := api.ValidHostSnapshotName(name); err != nil {
 		return api.HostChange{}, err
 	}
-	h, err := s.hostChangeAllowed(ctx, api.HostModuleIdentity, "restoring host files")
+	// The snapshot's module decides which switch the restore needs (identity when it cannot be read).
+	module := api.HostModuleIdentity
+	if err := requireGlobal(ctx, "restoring host files"); err == nil && s.d.Host != nil {
+		if snaps, err := s.d.Host.HostSnapshots(ctx); err == nil {
+			for _, sn := range snaps {
+				if sn.Name == name || name == api.HostSnapshotLatest {
+					module = sn.Module
+					break
+				}
+			}
+		}
+	}
+	h, err := s.hostChangeAllowed(ctx, module, "restoring host files")
 	if err != nil {
 		return api.HostChange{}, err
 	}
-	unlock, err := s.locks.tryLock("host restore", "host/identity")
+	unlock, err := s.locks.tryLock("host restore", "host/"+module)
 	if err != nil {
 		return api.HostChange{}, err
 	}
 	defer unlock()
 	res, err := h.HostSnapshotRestore(ctx, name, in.DryRun)
 	if err != nil {
-		return api.HostChange{}, notManagedByHelper(err, api.HostModuleIdentity)
+		return api.HostChange{}, notManagedByHelper(err, module)
 	}
 	if res.Actions == nil {
 		res.Actions = []string{}
 	}
 	if !in.DryRun && res.Changed {
-		s.emit(ctx, "host-identity-restored", "/api/v1/host/snapshots/"+name)
+		s.emit(ctx, "host-"+module+"-restored", "/api/v1/host/snapshots/"+name)
 	}
 	return res, nil
 }

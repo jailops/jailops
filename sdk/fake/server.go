@@ -130,7 +130,9 @@ type Server struct {
 	hub         bool
 	hosts       map[string]*Server
 
-	hostSt   fakeHost // host management (host.go)
+	hostSt   fakeHost     // host management (host.go)
+	fwSt     fakeFirewall // the firewall module and commit confirmed (hostfw.go)
+	vol      fakeVolumes  // encrypted volumes (volkeys.go)
 	jails    *kind[api.Jail]
 	profiles *kind[api.Profile]
 	apps     map[string]*appEntry
@@ -158,6 +160,7 @@ type Server struct {
 	logs      map[string]map[string][]byte
 	unmounted map[string]bool
 	logReads  int
+	fwd       fakeForward
 	sysctls   map[string]string // WithSysctl
 	images    *kind[api.Image]
 	networks  *kind[api.Network]
@@ -301,7 +304,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.Body = readCloser(body)
 	}
 	s.mu.Lock()
-	s.requests = append(s.requests, RecordedRequest{r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone(), body})
+	s.requests = append(s.requests, RecordedRequest{r.Method, r.URL.Path, r.URL.RawQuery, r.Header.Clone(), redactBody(body)})
 	if len(s.requests) > 2000 {
 		s.requests = s.requests[1:]
 	}

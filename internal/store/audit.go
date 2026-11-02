@@ -62,6 +62,9 @@ type AuditFilter struct {
 	// then returns nothing.
 	ProjectFilter bool
 	Projects      []string
+
+	// AfterID keeps the entries with a larger id and returns them oldest first (the log forwarder's cursor).
+	AfterID int64
 }
 
 // List returns entries newest first.
@@ -83,6 +86,10 @@ func (r *Audit) List(ctx context.Context, f AuditFilter) ([]AuditEntry, error) {
 		q += " AND id < ?"
 		args = append(args, f.BeforeID)
 	}
+	if f.AfterID > 0 {
+		q += " AND id > ?"
+		args = append(args, f.AfterID)
+	}
 	if f.ProjectFilter {
 		if len(f.Projects) == 0 {
 			return nil, nil
@@ -92,7 +99,11 @@ func (r *Audit) List(ctx context.Context, f AuditFilter) ([]AuditEntry, error) {
 			args = append(args, p)
 		}
 	}
-	q += " ORDER BY id DESC LIMIT ?"
+	if f.AfterID > 0 {
+		q += " ORDER BY id ASC LIMIT ?"
+	} else {
+		q += " ORDER BY id DESC LIMIT ?"
+	}
 	args = append(args, f.Limit)
 	rows, err := r.s.r.QueryContext(ctx, q, args...)
 	if err != nil {

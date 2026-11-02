@@ -4,7 +4,7 @@ import { s } from '@/i18n'
 import type { PowerState } from '@jailops/shared/api/types'
 
 const props = defineProps<{ state: PowerState | string }>()
-const tone = computed(() => ({ running: 'ok', stopped: '', starting: 'info pulse', stopping: 'warn pulse', error: 'danger' })[props.state] ?? '')
+const tone = computed(() => ({ running: 'ok', stopped: '', starting: 'info pulse', stopping: 'warn pulse', error: 'danger', locked: 'warn' })[props.state] ?? '')
 const label = computed(() => (s.state as Record<string, string>)[props.state] ?? props.state)
 </script>
 

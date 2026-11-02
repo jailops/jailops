@@ -103,6 +103,11 @@ func Preflight(b api.Backup, req api.RestoreRequest, h HostState) api.RestorePre
 			fail("bundle lacks volume %q", v.Name)
 		}
 	}
+	for _, v := range spec.Volumes {
+		if v.Encrypted {
+			chg("volume %q was encrypted; it is restored as a plain volume (a restore into an encrypted volume is not built)", v.Name)
+		}
+	}
 
 	// network_map must reference real names on both sides.
 	inSpec := map[string]int{}

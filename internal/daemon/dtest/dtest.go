@@ -26,6 +26,7 @@ import (
 	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/lifecycle/fakes"
 	"jailops.net/jailops/internal/lifecycle/fault"
+	"jailops.net/jailops/internal/logfwd"
 	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/internal/store"
 	"jailops.net/jailops/internal/sys/ifconfig"
@@ -74,6 +75,8 @@ type Options struct {
 	// HostManage is host-manage of the simulated helper's priv.conf (the daemon's own list is
 	// Config.Host.Manage.Modules, set with Mutate).
 	HostManage []string
+	// LogForwardTune adjusts the log forwarder (poll interval, file check).
+	LogForwardTune func(*logfwd.Env)
 }
 
 // Env is a running daemon with its fakes.
@@ -115,6 +118,8 @@ type Env struct {
 	Installed []string
 	// Host is the simulated host of host management.
 	Host *HostSim
+	// Keys are the key operations of encrypted volumes.
+	Keys *FakeKeys
 }
 
 // SetDial replaces DialFn while the daemon may be running.
@@ -233,7 +238,7 @@ func New(t testing.TB, o Options) *Env {
 	}
 	if o.Reuse != nil {
 		r := o.Reuse
-		e.ZFS, e.PF, e.Net, e.Jails, e.Run, e.Files, e.Fault, e.WG = r.ZFS, r.PF, r.Net, r.Jails, r.Run, r.Files, r.Fault, r.WG
+		e.ZFS, e.PF, e.Net, e.Jails, e.Run, e.Files, e.Fault, e.WG, e.Keys = r.ZFS, r.PF, r.Net, r.Jails, r.Run, r.Files, r.Fault, r.WG, r.Keys
 		e.Dir = r.Dir
 		e.proj = r.proj
 	} else {
@@ -245,6 +250,7 @@ func New(t testing.TB, o Options) *Env {
 		e.Files = fakes.NewFiles(e.Fault)
 		e.Run = run.NewFake()
 		e.WG = wireguard.NewFake()
+		e.Keys = NewFakeKeys(e.ZFS)
 		e.script()
 	}
 	if o.Reuse != nil && o.Reuse.Host != nil {
@@ -292,13 +298,13 @@ func (e *Env) Start() {
 	}
 	env := api.Environment{OS: "FreeBSD", Arch: "amd64", Pool: "tank", PF: true}
 	d, err := daemon.Start(context.Background(), daemon.Options{
-		Config: &cfg, Version: "test", ForceWeb: e.Opts.ForceWeb, NoWeb: e.Opts.NoWeb, LogOutput: out, Hostname: host, Env: &env, NoListen: !e.Opts.Listen, Registrar: e.Opts.Registrar, Now: e.Opts.Now, Backups: e.Opts.Backups, Execer: e.execer(), BackupTLS: e.Opts.BackupTLS, BackupMounter: e.Opts.BackupMounter,
+		Config: &cfg, Version: "test", ForceWeb: e.Opts.ForceWeb, NoWeb: e.Opts.NoWeb, LogOutput: out, Hostname: host, Env: &env, NoListen: !e.Opts.Listen, Registrar: e.Opts.Registrar, Now: e.Opts.Now, Backups: e.Opts.Backups, Execer: e.execer(), BackupTLS: e.Opts.BackupTLS, BackupMounter: e.Opts.BackupMounter, LogForwardTune: e.Opts.LogForwardTune,
 		Clients: func(ctx context.Context, c *daemon.Config, dev bool) (*daemon.Clients, error) {
 			cl := &daemon.Clients{ZFS: e.ZFS, Jails: e.Jails, PF: e.PF, Net: e.Net, Runner: e.Run, Files: e.Files, Logs: fileLogs{e.Files},
 				Sysctl:  func(_ context.Context, name string) (string, error) { return e.sysctl(name) },
 				Mount:   func(context.Context, string) error { return nil },
 				Unmount: func(context.Context, string) error { return nil },
-				Dial:    e.dial, HostSystem: e.Host.Local, WG: e.WG}
+				Dial:    e.dial, HostSystem: e.Host.Local, WG: e.WG, Keys: e.Keys}
 			if e.Opts.Clients != nil {
 				e.Opts.Clients(cl)
 			}

@@ -45,6 +45,8 @@ const (
 	KindStorage         Kind = "Storage"
 	KindWireGuard       Kind = "WireGuard"
 	KindHostIdentity    Kind = "HostIdentity" // the singleton host identity object
+	KindLogForward      Kind = "LogForward"   // the singleton list of log sinks
+	KindHostFirewall    Kind = "HostFirewall" // the singleton host firewall object
 )
 
 // Scope says who is authoritative for an object.

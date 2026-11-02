@@ -1,0 +1,31 @@
+$ jailops host firewall show
+ACTION   DIR   PROTO         PORTS   FROM   WHAT
+pass     in    -             -       any    loopback (lo0 is not filtered) (always)
+pass     in    -             -       any    the jails' own anchors (jailops/*) come first (always)
+block    in    -             -       any    everything not passed below (always)
+pass     out   -             -       any    everything the host sends, and the replies to it (always)
+pass     in    icmp6         -       any    neighbour discovery and router advertisements (always)
+pass     in    icmp, icmp6   -       any    path MTU discovery and ICMP errors (always)
+pass     in    tcp           22      any    ssh
+pass     in    tcp           39110   any    JailOps console and API
+pass     in    icmp, icmp6   -       any    ping (echo requests)
+
+Managed:     no
+Template:    default
+pf:          running
+pf.conf:     the administrator's
+
+JailOps does not touch /etc/pf.conf. To let it manage the firewall, add to
+/usr/local/etc/jailops/jailopsd.yaml:
+  host:
+    manage:
+      modules: [firewall]
+and to /usr/local/etc/jailops/priv.conf:
+  host-manage = firewall
+then: service jailops_priv restart && service jailopsd restart
+
+$ jailops host firewall set --ssh-from 192.0.2.0/24
+! not_managed: JailOps does not manage the host's firewall
+! hint: add `host: {manage: {modules: [firewall]}}` to jailopsd.yaml and `host-manage = firewall` to priv.conf
+[exit 3]
+

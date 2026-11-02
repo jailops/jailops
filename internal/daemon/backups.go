@@ -146,7 +146,11 @@ func (a *backupAdapters) Jails(ctx context.Context) ([]hostbackup.JailRecord, er
 		rec := hostbackup.JailRecord{Name: j.Name, UUID: j.UUID, Project: j.Project, Labels: j.Labels, Spec: j.Spec,
 			Container: j.Layout.Container, Image: j.Image}
 		for _, d := range j.Layout.Datasets {
-			rec.Datasets = append(rec.Datasets, hostbackup.Dataset{Name: d.Name, Kind: d.Kind, Mountpoint: d.Mountpoint, Props: d.Props})
+			hd := hostbackup.Dataset{Name: d.Name, Kind: d.Kind, Mountpoint: d.Mountpoint, Props: d.Props}
+			if d.Locked {
+				hd.Skip = hostbackup.SkipLocked
+			}
+			rec.Datasets = append(rec.Datasets, hd)
 		}
 		out = append(out, rec)
 	}

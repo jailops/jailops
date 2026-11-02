@@ -276,7 +276,17 @@ func TestScheduledUpdatesAreOffByDefaultAndFollowTheMode(t *testing.T) {
 		t.Fatal("notify applied updates")
 	}
 	// managed: applies on the schedule.
-	op, _ = e.Admin.Jails().Config(ctx, "web", map[string]string{"updates.mode": "managed"}, nil, false)
+	// the check the clock just triggered may still hold the jail ("busy"): ask again until the change is accepted
+	var cerr error
+	for i := 0; i < 500; i++ {
+		if op, cerr = e.Admin.Jails().Config(ctx, "web", map[string]string{"updates.mode": "managed"}, nil, false); cerr == nil {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if cerr != nil {
+		t.Fatalf("switching to managed: %v", cerr)
+	}
 	if _, err := op.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}

@@ -482,3 +482,17 @@ func TestReverter(t *testing.T) {
 		t.Fatal("steps ran twice")
 	}
 }
+
+func TestPreflightSaysAnEncryptedVolumeComesBackPlain(t *testing.T) {
+	sp := jailSpec()
+	sp.Volumes[0].Encrypted = true
+	bd, err := BuildBundle(sp, gen3, sourceObjects(), []string{"db-pass"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := api.Backup{Spec: api.BackupSpec{Jail: "web", JailUUID: "u-1", HostUUID: "h1", Snapshot: "20250101000000-aabbccdd", KeyDomain: "d1", Bundle: bd}}
+	r := Preflight(b, api.RestoreRequest{Backup: "web@20250101000000-aabbccdd"}, emptyHost())
+	if !has(r.Changes, `volume "db" was encrypted; it is restored as a plain volume`) {
+		t.Fatalf("%v", r.Changes)
+	}
+}

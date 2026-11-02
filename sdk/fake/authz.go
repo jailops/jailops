@@ -104,6 +104,11 @@ func classify(pattern string) (api.Permission, string) {
 		return rw(scopeHost)
 	case path == "/api/v1/events", path == "/api/v1/updates":
 		return api.PermReadonly, scopeList
+	case path == "/api/v1/logs":
+		// the logs of many jails: the role that may read one jail's
+		return api.PermOperator, scopeList
+	case strings.HasPrefix(path, "/api/v1/logs/forward"):
+		return api.PermAdmin, scopeGlobal
 	case path == "/api/v1/updates/check", path == "/api/v1/updates/apply":
 		return api.PermOperator, scopeProject
 	case strings.HasPrefix(path, "/api/v1/operations"):
@@ -136,7 +141,8 @@ func classify(pattern string) (api.Permission, string) {
 			return api.PermReadonly, scopeProject
 		case strings.HasSuffix(path, "/state"), strings.HasSuffix(path, "/snapshots"), strings.Contains(path, "/snapshots/"),
 			strings.HasSuffix(path, "/rollback"), strings.HasSuffix(path, "/upgrade"), strings.HasSuffix(path, "/config"), strings.HasSuffix(path, "/exec"),
-			strings.HasSuffix(path, "/access"), strings.HasSuffix(path, "/access/deny"):
+			strings.HasSuffix(path, "/access"), strings.HasSuffix(path, "/access/deny"),
+			strings.HasSuffix(path, "/unlock"), strings.HasSuffix(path, "/lock"):
 			return api.PermOperator, scopeProject
 		}
 		return api.PermAdmin, scopeProject

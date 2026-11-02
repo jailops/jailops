@@ -12,6 +12,8 @@ const props = defineProps<{ open: boolean; project: Project | undefined; images:
 const emit = defineEmits<{ close: []; done: [] }>()
 
 const f = reactive({ name: '', image: '', storage: '', network: '' })
+// one optional volume; an encrypted one needs a passphrase, typed twice, sent once and then forgotten
+const vol = reactive({ name: '', mount: '', encrypted: false, pass: '', again: '' })
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 
@@ -36,6 +38,18 @@ const netNames = computed(() => {
 })
 const nameOk = computed(() => /^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$/.test(f.name))
 const nameError = computed(() => (f.name && !nameOk.value ? s.jails.nameInvalid : ''))
+const volUsed = computed(() => !!(vol.name || vol.mount || vol.encrypted))
+const volError = computed(() => (volUsed.value && !(/^[a-z0-9][a-z0-9_-]{0,63}$/.test(vol.name) && /^\/[^\s]*[^/\s]$/.test(vol.mount)) ? s.jails.volumeInvalid : ''))
+const passError = computed(() => {
+  if (!vol.encrypted) return ''
+  if (vol.pass && vol.pass.length < 12) return s.keys.tooShort
+  if (vol.again && vol.pass !== vol.again) return s.keys.mismatch
+  return ''
+})
+const volOk = computed(() => !volUsed.value || (!volError.value && (!vol.encrypted || (vol.pass.length >= 12 && vol.pass === vol.again))))
+function clearVolume(): void {
+  Object.assign(vol, { name: '', mount: '', encrypted: false, pass: '', again: '' })
+}
 const missing = computed(() => (!imageRefs.value.length ? s.jails.needImage : !stoNames.value.length ? s.jails.needStorage : ''))
 
 watch(() => props.open, (o) => {
@@ -43,14 +57,20 @@ watch(() => props.open, (o) => {
   error.value = null
   Object.assign(f, { name: '', image: imageRefs.value[0] ?? '', storage: stoNames.value[0] ?? '', network: netNames.value[0] ?? '' })
 })
+watch(() => props.open, (o) => { if (!o) clearVolume() })
+watch(() => vol.encrypted, (e) => { if (!e) Object.assign(vol, { pass: '', again: '' }) })
 
 async function save(): Promise<void> {
   busy.value = true
   error.value = null
+  const volumes = volUsed.value ? [{ name: vol.name, mount: vol.mount, ...(vol.encrypted ? { encrypted: true } : {}) }] : []
+  const passphrase = vol.encrypted ? vol.pass : ''
+  Object.assign(vol, { pass: '', again: '' })
   try {
     await runOp(s.jails.createTitle + ': ' + f.name, () =>
-      api.jails.create({ metadata: { name: f.name }, spec: { image: f.image, storage: f.storage, ...(f.network ? { network: [{ network: f.network, ipv4: 'auto' }] } : {}) } }),
+      api.jails.create({ metadata: { name: f.name }, spec: { image: f.image, storage: f.storage, ...(f.network ? { network: [{ network: f.network, ipv4: 'auto' }] } : {}), ...(volumes.length ? { volumes } : {}) }, ...(passphrase ? { volume_passphrase: passphrase } : {}) }),
     )
+    clearVolume()
     emit('done')
     emit('close')
   } catch (e) {
@@ -77,11 +97,29 @@ async function save(): Promise<void> {
         <select id="jc-net" v-model="f.network"><option value="">{{ s.jails.noNetwork }}</option><option v-for="x in netNames" :key="x" :value="x">{{ x }}</option></select>
         <span class="hint">{{ s.jails.networkHint }}</span>
       </div>
+      <fieldset class="vol-set">
+        <legend>{{ s.jails.volume }}</legend>
+        <div class="field"><label for="jc-vol">{{ s.jails.volumeName }}</label><input id="jc-vol" v-model="vol.name" class="mono" type="text" autocomplete="off" /></div>
+        <div class="field"><label for="jc-mount">{{ s.jails.volumeMount }}</label><input id="jc-mount" v-model="vol.mount" class="mono" type="text" autocomplete="off" placeholder="/var/db/app" /></div>
+        <label class="check"><input v-model="vol.encrypted" type="checkbox" data-test="jc-encrypted" aria-describedby="jc-enc-hint" /> {{ s.jails.volumeEncrypted }}</label>
+        <span id="jc-enc-hint" class="hint">{{ s.jails.volumeEncryptedHint }}</span>
+        <template v-if="vol.encrypted">
+          <div class="field"><label for="jc-pass">{{ s.jails.passphrase }}</label><input id="jc-pass" v-model="vol.pass" type="password" autocomplete="new-password" /></div>
+          <div class="field"><label for="jc-pass2">{{ s.jails.passphraseRepeat }}</label><input id="jc-pass2" v-model="vol.again" type="password" autocomplete="new-password" /></div>
+        </template>
+        <span v-if="volError || passError" class="field-error" role="alert" data-test="jc-vol-error">{{ volError || passError }}</span>
+      </fieldset>
       <ErrorPanel v-if="error" :error="error" />
     </form>
     <template #footer>
       <button class="btn" type="button" @click="emit('close')">{{ s.app.cancel }}</button>
-      <button v-if="!missing" class="btn btn-primary" type="submit" form="jc" :disabled="busy || !nameOk || !f.image || !f.storage" data-test="jail-create-go">{{ s.jails.create }}</button>
+      <button v-if="!missing" class="btn btn-primary" type="submit" form="jc" :disabled="busy || !nameOk || !f.image || !f.storage || !volOk" data-test="jail-create-go">{{ s.jails.create }}</button>
     </template>
   </Modal>
 </template>
+
+<style>
+.vol-set { border: 1px solid var(--border); border-radius: var(--radius); padding: 8px 12px; margin: 0 0 12px; }
+.vol-set legend { padding: 0 4px; font-size: 13px; color: var(--text-2); }
+.vol-set .check { display: flex; gap: 8px; align-items: center; }
+</style>

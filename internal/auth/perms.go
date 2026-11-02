@@ -77,8 +77,10 @@ func classify(e Entry) Class {
 		return ClassProject
 	case has("/api/v1/auth"), has("/api/v1/sessions"), p == "/api/v1/config-keys", has("/api/v1/apps"):
 		return ClassSelf
-	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates":
+	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates", p == "/api/v1/logs":
 		return ClassVisible
+	case has("/api/v1/logs/forward"):
+		return ClassGlobal
 	case p == "/api/v1/updates/check", p == "/api/v1/updates/apply":
 		return ClassProject
 	case p == "/api/v1/operations":
@@ -234,6 +236,13 @@ var Perms = classifyAll([]Entry{
 	// Logs hold what services print (tokens, passwords in error messages): the role that may exec into the jail.
 	r("GET", "/api/v1/jails/{name}/logs", op),
 	r("GET", "/api/v1/jails/{name}/logs/{file...}", op),
+	// the logs of many jails at once, merged: the same reads, over the projects the caller may use
+	r("GET", "/api/v1/logs", op),
+	// where the host forwards its logs: names receivers and files of the host
+	r("GET", "/api/v1/logs/forward", ad),
+	r("PUT", "/api/v1/logs/forward", ad),
+	r("DELETE", "/api/v1/logs/forward", ad),
+	r("POST", "/api/v1/logs/forward/test", ad),
 	// a definition drafted from a running jail: it runs read-only commands in the jail, like exec
 	r("GET", "/api/v1/jails/{name}/app-draft", op),
 	// who may connect to an installed app: reading it is readonly; allow and deny change the jail's firewall and,
@@ -245,6 +254,11 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/jails/{name}/files/{path...}", op),
 	r("POST", "/api/v1/jails/{name}/upgrade", op),
 	r("POST", "/api/v1/jails/{name}/rollback", op),
+	// encrypted volumes: whoever may start and stop the jail may unlock and lock it; changing the passphrase is
+	// an administrator's task
+	r("POST", "/api/v1/jails/{name}/unlock", op),
+	r("POST", "/api/v1/jails/{name}/lock", op),
+	r("POST", "/api/v1/jails/{name}/passphrase", ad),
 	r("POST", "/api/v1/jails/{name}/move", ad),
 	r("GET", "/api/v1/jails/{name}/snapshots", ro),
 	r("POST", "/api/v1/jails/{name}/snapshots", op),
@@ -323,6 +337,11 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/host/identity", ad),
 	r("GET", "/api/v1/host/snapshots", ro),
 	r("POST", "/api/v1/host/snapshots/{name}/restore", ad),
+	r("GET", "/api/v1/host/firewall", ro),
+	r("PUT", "/api/v1/host/firewall", ad),
+	r("GET", "/api/v1/host/pending", ro),
+	r("POST", "/api/v1/host/pending/confirm", ad),
+	r("POST", "/api/v1/host/pending/revert", ad),
 	r("GET", "/api/v1/backup/key", ad),
 	r("POST", "/api/v1/backup/key", ad),
 	r("POST", "/api/v1/backup/key/escrow", ad),

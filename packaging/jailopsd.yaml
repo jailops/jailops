@@ -83,10 +83,39 @@ apps:
 
 # Host management (appliance mode, docs/appliance.md): the parts of the host JailOps itself changes. Empty (the
 # default): JailOps never changes the host, and GET /api/v1/host/identity only reads. "identity" is the host name, the
-# resolvers and NTP; priv.conf must list it too (host-manage = identity).
+# resolvers and NTP; "firewall" is /etc/pf.conf, written whole, and every change of it reverts unless confirmed.
+# priv.conf must list the same modules (host-manage = identity, firewall).
 host:
   manage:
     modules: []
+
+# Log forwarding (docs/logging.md): send the jails' logs, and the audit log when asked, to syslog servers (RFC 5424
+# over udp, tcp or tls) or https webhooks. This list is in force until an administrator stores one with
+# 'jailops logs forward' or the console, which then replaces it (delete that with 'jailops logs forward reset').
+# A sink starts at the end of the files: it sends what is written from now on. Files the daemon reads (ca_file,
+# token_file) must be owned by root and not writable by others; the token file 0640 root:jailops.
+logging:
+  forward: []
+  # - name: central
+  #   type: syslog
+  #   to: tls://logs.example.com:6514   # udp://HOST[:514], tcp://HOST[:514] or tls://HOST[:6514]
+  #   facility: local3                  # local0 (default) to local7
+  #   ca_file: /usr/local/etc/jailops/logs-ca.pem   # verify the receiver with this CA; default: the host's roots
+  #   queue: 10000                      # lines held while the receiver is away; the oldest are dropped beyond it
+  #   sources:
+  #     projects: [web]                 # all projects when empty
+  #     jails: []                       # all jails when empty
+  #     labels: {tier: front}           # jails with all of these labels
+  #     exclude_jails: [scratch]
+  #     exclude_labels: {logs: "off"}
+  #     files: [messages]               # below /var/log of every jail (default: messages)
+  #     no_app_logs: false              # true: leave out the logs installed apps declare
+  #     no_jails: false                 # true: no jail logs (with audit: the audit log only)
+  #     audit: false                    # true: add the daemon's audit log
+  # - name: alerts
+  #   type: webhook
+  #   to: https://hooks.example.com/jailops
+  #   token_file: /usr/local/etc/jailops/hook.token   # the bearer token, first line; never the token itself here
 
 # The paths of a thin jail that survive a switch to a newer image generation, each in its own dataset. Empty keeps the
 # built-in list (/etc, /usr/local, /var/db, /var/log, /var/mail, /var/spool, /home, /root). Setting it replaces the list.

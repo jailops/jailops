@@ -23,9 +23,10 @@ The dataset must exist; it must be empty or already owned by JailOps (`jailops:m
 registers it with the root helper, which then allows its operations below that root and nowhere else. `--compression` applies to
 new datasets.
 
-**Not yet: native ZFS encryption.** There is no `--encrypted` flag; a storage or jail spec with `encrypted: true` is
-refused with `unsupported` ("encrypted storage is not implemented" / "native ZFS encryption of jails is not
-implemented"). The manual alternative is to make the dataset itself an encryption root before you register it:
+**Not yet: encrypted storages and whole encrypted jails.** A storage or jail spec with `encrypted: true` is refused with
+`unsupported` ("encrypted storage is not implemented" / "native ZFS encryption of jails is not implemented"). What is
+built is an **encrypted volume** inside a jail ([below](#encrypted-volumes)). The manual alternative for a whole
+storage is to make the dataset itself an encryption root before you register it:
 
     zfs create -o encryption=on -o keyformat=passphrase hdd/jailops
     jailops storage create secure --dataset hdd/jailops
@@ -61,11 +62,106 @@ A volume is a dataset JailOps creates under the jail and mounts at a path:
         --volume data:/var/db/postgres:4T
     jailops create web2 ... --volume www:/usr/local/www:ro
 
-Syntax `NAME:MOUNT[:ro][:QUOTA]`. Volumes are snapshotted, rolled back, copied and backed up with the jail; a `data` or
+Syntax `NAME:MOUNT[:ro][:encrypted][:QUOTA]` (`encrypted`: see [Encrypted volumes](#encrypted-volumes)). Volumes are snapshotted, rolled back, copied and backed up with the jail; a `data` or
 `all` rollback restores them. They cannot be added to or removed from an existing jail yet: the volume routes answer `unsupported` ("volume
 management is not part of this version") and changing a `disk.<name>` key of an existing jail answers `unsupported`
 ("changing volumes of an existing jail is not implemented"); declare them at creation. The same thing as configuration keys: `disk.<name>`, `disk.<name>.mount`,
 `.quota`, `.read_only` (`jailops config --help`).
+
+## Encrypted volumes
+
+A volume can be encrypted at rest with native ZFS encryption. You choose it when you create the jail, and you type its
+passphrase after every boot of the host:
+
+    jailops jail create vault --project web --image freebsd-15@stable --network lan --storage default \
+        --volume secrets:/var/db/secrets:encrypted:20G
+    The encrypted volumes need a passphrase. It is asked for after every host boot and cannot be recovered when lost.
+    Passphrase for the encrypted volumes:
+    Repeat the passphrase:
+    jail/vault created
+
+`encrypted: true` on a volume does the same in a file (`jailops jail create -f`). The volume becomes its own ZFS
+encryption root: `encryption=aes-256-gcm`, `keyformat=passphrase`, `keylocation=prompt`, the key derived from the
+passphrase with PBKDF2 (ZFS's default). Nothing else of the jail is encrypted: its root, `/etc`, `/usr/local`, the `/var`
+datasets, `/home` and its other volumes stay as they are. Put what must be protected (a database directory, a key store)
+on the encrypted volume.
+
+**The passphrase.** One passphrase per jail, for all its encrypted volumes: 12 to 512 bytes, one line. `jailops` asks for it
+twice without echo and refuses a pipe; a script gives a file with `--passphrase-file FILE` (its first line; keep it at
+mode 0600, `jailops` warns otherwise). There is no `--passphrase VALUE`: a value on the command line ends up in the shell
+history and in `ps`. Over the API the passphrase is `volume_passphrase` in the body of the creation (`POST /api/v1/jails`)
+and `passphrase` in the body of an unlock, over TLS or the local socket. The daemon hands it to the privileged helper on
+the request stream of the operation and drops it; the helper gives it to `zfs` on standard input. It is never stored, and
+never in an answer, an operation, the journal, the audit log, a log line or a command line.
+
+**After the creation** the volume's key is loaded: the jail starts at once, like any other.
+
+**After every boot of the host** the keys are not loaded. The jail is **locked**: its state is `locked`, `status.locked`
+names the volumes, and a start or restart is refused with `locked` (HTTP 409, hint `jailops jail unlock NAME`). The boot
+skips a locked jail that has `boot.autostart` (its `Autostart` condition says `Locked`, the audit log says `skipped`) and
+remembers that it was due. Unlock it:
+
+    jailops jail unlock vault            # asks for the passphrase; --passphrase-file FILE for scripts
+    jailops jail unlock vault --start    # and start it
+
+The unlock loads the keys (`zfs load-key`) and nothing else; the start mounts the root first and the volumes over it. A jail
+the boot wanted to start starts right after its unlock, without `--start`. That wish lives in the daemon's memory only: a
+restart of the daemon forgets it, and the restarted daemon's own boot pass derives it again from `boot.autostart`. A jail
+that depends on a locked jail (`boot.depends`) is not started at boot; start it after the unlock.
+
+A wrong passphrase answers `bad_passphrase` (HTTP 403) and says nothing else. After five wrong passphrases in a row a jail
+refuses unlocks (and passphrase changes) for 30 seconds (`rate_limited`); a right one resets the count. The count is in the
+daemon's memory. `jailops doctor` lists the locked jails (`volumes.locked`, info) and checks that each pool of a storage can
+hold encrypted volumes (`volumes.encryption`: the pool feature `feature@encryption` must be `enabled` or `active`; JailOps
+never changes pool features).
+
+**Lock** a jail when its data should be unreadable again without a reboot:
+
+    jailops jail lock vault
+
+It stops the jail, unmounts its datasets and unloads the keys (`zfs unload-key`).
+
+**Change the passphrase** of an unlocked jail:
+
+    jailops jail passphrase vault        # the current passphrase once, the new one twice
+
+The helper checks the current passphrase (`zfs load-key -n`) and then runs `zfs change-key` on every encrypted volume of the
+jail; if one fails, the volumes already changed are changed back. Only the key that wraps the data key changes: the data is
+not encrypted again, so a copy of the dataset taken before the change (a raw replica, an old disk) still opens with the old
+passphrase. Changing the passphrase needs the admin role; unlock and lock need operator.
+
+**What is protected, and what is not.** Protected at rest: the volume's blocks on the disks, in a pool image, in a raw send
+or replica, on a disk that leaves the building or a host that is stolen while powered off or locked. Not protected:
+
+- the data while the jail runs or the volume is unlocked: the jail, and root on the host, read the files as plain files;
+- the key itself while it is loaded: it is in the kernel's memory until the lock or the next shutdown (and pages of the jail's
+  processes may reach swap: use encrypted swap, `.eli` in `/etc/fstab`);
+- what ZFS leaves readable on an encrypted dataset: dataset and snapshot names, sizes, properties, the dedup table;
+- everything of the jail that is not on the encrypted volume.
+
+**A forgotten passphrase means the data is lost.** There is no recovery key, by design: JailOps keeps no copy and no escrow
+of a volume passphrase. Keep it in a password manager, and keep backups (below).
+
+**Copies, snapshots, backups.**
+
+- `jailops jail copy` sends an encrypted volume raw (`zfs send -w`): the copy stays encrypted, has the same passphrase and
+  starts locked.
+- A backup reads the files of an atomic snapshot of the mounted datasets, so it needs the volume unlocked. A locked volume is
+  left out and the run says `skipped: locked: volume NAME` among its warnings; the rest of the jail is backed up. The backup
+  of an unlocked volume holds its files, encrypted again on the host with the repository key before they leave it (design
+  9.3); the backup node never sees them. A restore makes a plain volume: the preflight says so ("restored as a plain
+  volume"), and the restored jail's spec no longer claims `encrypted`. To have the data encrypted again, create a new jail
+  with an encrypted volume and copy the data in. A restore into an encrypted volume is not built.
+- Replication between hosts (design 9.8) uses raw sends, which keep encrypted datasets encrypted; it has no command yet.
+
+**Not in this version:** encrypting a volume of an existing jail or a volume in place (`encrypted` cannot change later: the
+update is refused with a hint), adding a volume to an existing jail, key files or any unattended unlock at boot, encrypted
+storages or whole jails, a restore into an encrypted volume.
+
+**UNVERIFIED on FreeBSD** until the `encrypted-volume` block of `scripts/ci-freebsd-e2e.sh` has run on a host: that `zfs create`,
+`zfs load-key` and `zfs change-key` read the passphrase as one line from a standard input that is not a terminal, that
+`zfs load-key -n` checks a passphrase while the key is loaded, the error texts JailOps maps (`Incorrect key`, `already
+loaded`), a raw receive of an encryption root with `-o keylocation=prompt`, and snapshots and rollbacks of a locked volume.
 
 ## Existing data: host mounts
 
@@ -103,7 +199,7 @@ admin only) and rendered into `jail.conf`, but the helper does not hand the data
 ## What is backed up
 
 A JailOps backup of a jail contains its spec and restore bundle, its persistent datasets and its volumes, read from an atomic
-snapshot. The root of a thin jail is **not** copied: it is rebuilt from the image generation on restore. **Not** in the
+snapshot (an encrypted volume only while it is unlocked, see above). The root of a thin jail is **not** copied: it is rebuilt from the image generation on restore. **Not** in the
 backup: host mounts, images (they are rebuilt from pkgbase), and the host's state unless the policy sets `--include-state`.
 Replicate or snapshot an archive dataset with ZFS itself; JailOps backups cover what JailOps owns.
 See [backup-restore.md](backup-restore.md).

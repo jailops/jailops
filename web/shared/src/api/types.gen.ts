@@ -51,8 +51,10 @@ export type Code =
   | "missing_chunks"
   | "lease_expired"
   | "not_managed"
+  | "locked"
+  | "bad_passphrase"
 
-export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'conflict', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'not_leader', 'no_quorum', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed']
+export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'conflict', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'not_leader', 'no_quorum', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase']
 
 export type DoctorStatus =
   | "ok"
@@ -107,14 +109,22 @@ export type Kind =
   | "Storage"
   | "HostIdentity"
   | "WireGuard"
+  | "LogForward"
+  | "HostFirewall"
 
-export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'Project', 'Storage', 'HostIdentity', 'WireGuard']
+export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'Project', 'Storage', 'HostIdentity', 'WireGuard', 'LogForward', 'HostFirewall']
 
 export type Layout =
   | "thin"
   | "thick"
 
 export const LayoutValues: readonly Layout[] = ['thin', 'thick']
+
+export type LogSinkType =
+  | "syslog"
+  | "webhook"
+
+export const LogSinkTypeValues: readonly LogSinkType[] = ['syslog', 'webhook']
 
 export type OS =
   | "freebsd"
@@ -148,8 +158,9 @@ export type PowerState =
   | "running"
   | "stopping"
   | "error"
+  | "locked"
 
-export const PowerStateValues: readonly PowerState[] = ['stopped', 'starting', 'running', 'stopping', 'error']
+export const PowerStateValues: readonly PowerState[] = ['stopped', 'starting', 'running', 'stopping', 'error', 'locked']
 
 export type ResponseType =
   | "sync"
@@ -702,6 +713,81 @@ export interface HostChange {
   diff?: string
   actions: string[]
   snapshot?: string
+  pending?: HostPendingChange
+  rules?: HostFirewallRule[]
+  warnings?: string[]
+}
+
+export interface HostFirewall {
+  kind: Kind
+  spec: HostFirewallSpec
+  status: HostFirewallStatus
+}
+
+export interface HostFirewallAllow {
+  proto: string
+  ports: string[]
+  from?: string[]
+  comment?: string
+}
+
+export interface HostFirewallApply {
+  spec: HostFirewallSpec
+  dry_run?: boolean
+  confirm_within?: number
+  i_know?: boolean
+}
+
+export interface HostFirewallConsole {
+  port?: number
+  allow_from?: string[]
+}
+
+export interface HostFirewallRule {
+  action: string
+  direction: string
+  proto?: string
+  ports?: string
+  from?: string
+  comment?: string
+  fixed?: boolean
+}
+
+export interface HostFirewallSSH {
+  ports?: number[]
+  allow_from?: string[]
+}
+
+export interface HostFirewallSet {
+  name: string
+  members: string[]
+}
+
+export interface HostFirewallSpec {
+  template: string
+  ssh?: HostFirewallSSH
+  console?: HostFirewallConsole
+  allow?: HostFirewallAllow[]
+  sets?: HostFirewallSet[]
+  icmp: boolean
+  logging?: boolean
+  nat?: string
+}
+
+export interface HostFirewallStatus {
+  managed: boolean
+  config_enabled: boolean
+  helper_enabled: boolean
+  file_exists: boolean
+  file_managed: boolean
+  drift?: string[]
+  applied?: HostFirewallSpec
+  applied_at?: string
+  pf_enabled?: boolean
+  rules: HostFirewallRule[]
+  warnings?: string[]
+  pending?: HostPendingChange
+  console_port: number
 }
 
 export interface HostIdentity {
@@ -748,6 +834,34 @@ export interface HostNTP {
 export interface HostNTPSync {
   synchronised: boolean
   peer?: string
+  detail?: string
+}
+
+export interface HostPending {
+  pending?: HostPendingChange
+  last?: HostPendingOutcome
+}
+
+export interface HostPendingAction {
+  id?: string
+}
+
+export interface HostPendingChange {
+  id: string
+  module: string
+  snapshot: string
+  created: string
+  deadline: string
+  seconds_left: number
+  confirm_within: number
+}
+
+export interface HostPendingOutcome {
+  id: string
+  module: string
+  snapshot?: string
+  outcome: string
+  time: string
   detail?: string
 }
 
@@ -892,6 +1006,12 @@ export interface JailAction {
   force?: boolean
 }
 
+export interface JailCreate {
+  metadata: ObjectMeta
+  spec: JailSpec
+  volume_passphrase?: string
+}
+
 export interface JailDiskUsage {
   error?: string
   root_bytes: number
@@ -924,6 +1044,11 @@ export interface JailLogRead {
   next_offset: number
   rotated?: boolean
   truncated?: boolean
+}
+
+export interface JailPassphraseChange {
+  old_passphrase: string
+  new_passphrase: string
 }
 
 export interface JailRollback {
@@ -982,6 +1107,12 @@ export interface JailStatus {
   conditions?: Condition[]
   provisioned_at?: string
   warnings?: string[]
+  locked?: string[]
+}
+
+export interface JailUnlock {
+  passphrase: string
+  start?: boolean
 }
 
 export interface JailUpgrade {
@@ -1008,6 +1139,101 @@ export interface LifecycleEvent {
   source: string
   requestor?: string
   project?: string
+}
+
+export interface LogEntry {
+  time?: string
+  project: string
+  jail: string
+  app?: string
+  file: string
+  line: string
+}
+
+export interface LogForward {
+  kind: Kind
+  spec: LogForwardSpec
+  status: LogForwardStatus
+}
+
+export interface LogForwardSpec {
+  sinks: LogSink[]
+}
+
+export interface LogForwardStatus {
+  origin: string
+  generation: number
+  updated_at?: string
+  sinks: LogSinkStatus[]
+}
+
+export interface LogForwardTest {
+  sink: string
+}
+
+export interface LogForwardTestResult {
+  sink: string
+  ok: boolean
+  line: string
+  error?: string
+  millis: number
+}
+
+export interface LogSink {
+  name: string
+  type: LogSinkType
+  to: string
+  facility?: string
+  ca_file?: string
+  token_file?: string
+  queue?: number
+  sources?: LogSinkSource
+}
+
+export interface LogSinkSource {
+  projects?: string[]
+  jails?: string[]
+  labels?: Record<string, string>
+  exclude_jails?: string[]
+  exclude_labels?: Record<string, string>
+  files?: string[]
+  no_app_logs?: boolean
+  no_jails?: boolean
+  audit?: boolean
+}
+
+export interface LogSinkStatus {
+  name: string
+  type: LogSinkType
+  to: string
+  sources: number
+  sent: number
+  queued: number
+  dropped: number
+  skipped_bytes?: number
+  last_success?: string
+  failing_since?: string
+  last_error?: string
+  warning?: string
+}
+
+export interface LogSource {
+  key: string
+  project: string
+  jail: string
+  app?: string
+  file: string
+  next_offset: number
+  rotated?: boolean
+  truncated?: boolean
+  error?: Error
+}
+
+export interface LogsRead {
+  lines: LogEntry[]
+  sources: LogSource[]
+  next: Record<string, number>
+  truncated?: boolean
 }
 
 export interface Network {
@@ -1463,6 +1689,7 @@ export interface VolumeMount {
   mount: string
   quota?: string
   read_only?: boolean
+  encrypted?: boolean
 }
 
 export interface WireGuard {
@@ -1954,4 +2181,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'wireguard', 'interface_descriptions', 'app_access']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock']

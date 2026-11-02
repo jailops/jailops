@@ -71,6 +71,14 @@ type Config struct {
 	Apps AppsConf `yaml:"apps"`
 	// Host configures host management (docs/appliance.md).
 	Host HostConf `yaml:"host"`
+	// Logging configures log forwarding (docs/logging.md).
+	Logging LoggingConf `yaml:"logging"`
+}
+
+// LoggingConf configures where the logs of the jails go. Forward is the
+// sink list in force until an administrator stores one through the API.
+type LoggingConf struct {
+	Forward []api.LogSink `yaml:"forward"`
 }
 
 // HostConf configures host management: JailOps changes the host itself only for the modules listed here (and in
@@ -486,6 +494,9 @@ func (c Config) finish() (Config, error) {
 			return c, fmt.Errorf("config: host.manage.modules lists %q twice", m)
 		}
 		seenMod = append(seenMod, m)
+	}
+	if err := (api.LogForwardSpec{Sinks: c.Logging.Forward}).Validate(); err != nil {
+		return c, fmt.Errorf("config: logging.forward: %v", err)
 	}
 	if c.Reconcile.Interval.Std() < time.Second {
 		return c, fmt.Errorf("config: reconcile.interval must be at least 1s")

@@ -7,8 +7,10 @@ import (
 	"net"
 	"time"
 
+	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/priv"
 	"jailops.net/jailops/internal/service"
+	"jailops.net/jailops/internal/service/zfsadapt"
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/jailos"
 	"jailops.net/jailops/internal/sys/pfctl"
@@ -41,6 +43,8 @@ type Clients struct {
 	HostSystem service.HostSystem
 	// WG configures WireGuard interfaces (the helper; nil means unsupported).
 	WG wireguard.Host
+	// Keys handles encrypted volumes (the helper; nil means unsupported).
+	Keys lifecycle.Keys
 	// Closer releases the connection.
 	Closer io.Closer
 }
@@ -51,7 +55,7 @@ type ClientFactory func(ctx context.Context, cfg *Config, dev bool) (*Clients, e
 
 func fromHost(h priv.Host, files service.FS) *Clients {
 	return &Clients{ZFS: h.ZFS(), Jails: h.Jails(), PF: h.PF(), Net: h.Net(), Runner: h.Runner(), Files: files, Logs: h,
-		Sysctl: h.Sysctl, Mount: h.Mount, Unmount: h.Unmount, Host: h, HostSystem: h, WG: h}
+		Sysctl: h.Sysctl, Mount: h.Mount, Unmount: h.Unmount, Host: h, HostSystem: h, WG: h, Keys: &zfsadapt.Keys{H: h, C: h.ZFS()}}
 }
 
 func privConfig(cfg *Config) priv.Config {

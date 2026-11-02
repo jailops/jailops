@@ -45,7 +45,8 @@ func (a *app) addHostManagement(hc *cobra.Command) {
 			return a.hostShow(cmd.Context())
 		}
 	}
-	hc.AddCommand(a.hostIdentityCmd(), a.hostSnapshotsCmd(), a.hostRestoreCmd())
+	hc.AddCommand(a.hostIdentityCmd(), a.hostSnapshotsCmd(), a.hostRestoreCmd(), a.hostFirewallCmd())
+	hc.AddCommand(a.hostPendingCmds()...)
 }
 
 func (a *app) hostShow(ctx context.Context) error {
@@ -143,7 +144,15 @@ func (a *app) printHostChange(what string, ch api.HostChange) error {
 	for _, s := range ch.Actions {
 		fprintf(w, "  %s\n", s)
 	}
-	if !ch.DryRun {
+	for _, s := range ch.Warnings {
+		a.say("warning: %s\n", s)
+	}
+	switch {
+	case ch.DryRun:
+	case ch.Pending != nil:
+		a.say("%s: applied; it REVERTS at %s (in %d s) unless you confirm it: jailops host confirm --id %s\n",
+			what, ch.Pending.Deadline.UTC().Format("15:04:05Z"), ch.Pending.SecondsLeft, ch.Pending.ID)
+	default:
 		a.say("%s: done; undo with: jailops host restore %s\n", what, ch.Snapshot)
 	}
 	return nil

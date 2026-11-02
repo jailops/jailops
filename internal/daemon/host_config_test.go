@@ -19,7 +19,7 @@ func TestHostManageConfig(t *testing.T) {
 		t.Fatalf("%v %v", err, cfg.Host.Manage.Modules)
 	}
 	for in, want := range map[string]string{
-		"pool: tank\nhost:\n  manage:\n    modules: [firewall]\n":           `"firewall" is not a module`,
+		"pool: tank\nhost:\n  manage:\n    modules: [network]\n":            `"network" is not a module`,
 		"pool: tank\nhost:\n  manage:\n    modules: [identity, identity]\n": "twice",
 		"pool: tank\nhost:\n  manage: identity\n":                           "HostManage",
 		"pool: tank\nhost:\n  modules: [identity]\n":                        "modules",

@@ -6,7 +6,7 @@ the build tooling, the architecture tests and the Go embed tests are all driven 
 
 | App | Binary | Embed package | Dist directory | API role | URL prefixes it may call (under `/api/v1`) |
 |---|---|---|---|---|---|
-| `host` | `jailopsd` | `internal/webui` | `internal/webui/dist` | host (also hub) | jails, projects, storage, trust, sessions, profiles, updates, images, apps, networks, firewall, backup-targets, backup-policies, backups, restores, remotes, operations, events, audit, users, certificates, resources, plus the shared set |
+| `host` | `jailopsd` | `internal/webui` | `internal/webui/dist` | host (also hub) | jails, projects, storage, trust, sessions, profiles, updates, images, apps, networks, firewall, backup-targets, backup-policies, backups, restores, remotes, operations, events, audit, users, certificates, resources, logs, plus the shared set |
 | `backup` | `jailops-backupd` | `internal/backupui` | `internal/backupui/dist` | backup | repo, hosts, enrolment, snapshots, retention, gc, verify, quarantine, maintenance, deletions, operations, events, audit, plus the shared set |
 
 The shared set (`shared/src/api/core.ts`) is the server info at `/api/v1`, `auth`, `doctor` and `tokens`.
@@ -52,6 +52,11 @@ after each step, so `lib/apps.ts` maps it onto the step list of the dry run. The
 `lib/logs.ts` holds the follow state and strips terminal control characters; log lines are only ever rendered as
 text. The demo serves a catalog, installations and growing log files (`src/demo/apps.ts`); `?demo` jail names that
 start with `fail` show a failed installation.
+
+`/logs` (`src/views/LogsView.vue`) reads `GET /logs`: the ends of many jails' files merged by time, filtered from the
+address (`?jail=web&since=1h`, `project=*` for every project) and followed every two seconds with the reply's `next` map as
+the cursor (`lib/logs.ts`). Its Forwarding tab, for a global admin, edits the sink list of `/logs/forward`
+(`lib/logforward.ts` checks the form); the demo serves both from `src/demo/logs.ts`.
 
 ## Rules, enforced by `web/tests/architecture.test.ts`
 

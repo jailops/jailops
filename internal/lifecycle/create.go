@@ -83,8 +83,20 @@ func (s *Service) validateCreate(j *api.Jail) error {
 		if v.Quota != "" && !sizeRe.MatchString(v.Quota) {
 			return api.Errorf(api.CodeInvalid, "volume %q has a bad quota %q", v.Name, v.Quota)
 		}
+		if v.Encrypted && s.Keys == nil {
+			return api.Errorf(api.CodeUnsupported, "volume %q is encrypted and this host has no key operations", v.Name)
+		}
 	}
 	return nil
+}
+
+func hasEncrypted(sp api.JailSpec) bool {
+	for _, v := range sp.Volumes {
+		if v.Encrypted {
+			return true
+		}
+	}
+	return false
 }
 
 // CreateJail creates a jail from an image generation. Thin jails get a clone
@@ -92,7 +104,13 @@ func (s *Service) validateCreate(j *api.Jail) error {
 // copy. The whole jail lives below one container dataset, so undoing the
 // first step removes everything a failed creation made.
 func (s *Service) CreateJail(ctx context.Context, j api.Jail, dryRun bool) (CreateResult, error) {
-	p, res, err := s.PlanCreate(ctx, j, false)
+	return s.CreateJailKeyed(ctx, j, dryRun, nil)
+}
+
+// CreateJailKeyed is CreateJail for a jail with encrypted volumes: passphrase is their passphrase. It is used by the
+// creating step and then dropped: no record, journal entry or plan description holds it.
+func (s *Service) CreateJailKeyed(ctx context.Context, j api.Jail, dryRun bool, passphrase []byte) (CreateResult, error) {
+	p, res, err := s.planCreate(ctx, j, false, passphrase)
 	if err != nil {
 		return res, err
 	}
@@ -111,9 +129,26 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail, dryRun bool) (Crea
 // set, the existence checks are skipped so the plan can be rebuilt after a
 // crash to roll the interrupted creation back; j must be the same request.
 func (s *Service) PlanCreate(ctx context.Context, j api.Jail, recovering bool) (*plan.Plan, CreateResult, error) {
+	return s.planCreate(ctx, j, recovering, nil)
+}
+
+func (s *Service) planCreate(ctx context.Context, j api.Jail, recovering bool, passphrase []byte) (*plan.Plan, CreateResult, error) {
 	var res CreateResult
 	if err := s.validateCreate(&j); err != nil {
 		return nil, res, err
+	}
+	// A rebuilt plan only rolls back: it never creates a volume and needs no passphrase.
+	if !recovering {
+		switch enc := hasEncrypted(j.Spec); {
+		case enc && len(passphrase) == 0:
+			return nil, res, api.Errorf(api.CodeInvalid, "a jail with an encrypted volume needs a passphrase")
+		case !enc && len(passphrase) > 0:
+			return nil, res, api.Errorf(api.CodeInvalid, "a passphrase was given but no volume is encrypted")
+		case enc:
+			if err := api.CheckPassphrase(string(passphrase)); err != nil {
+				return nil, res, err
+			}
+		}
 	}
 	key, _ := KeyOf(j)
 	name, id := key, j.Metadata.UUID
@@ -304,6 +339,13 @@ func (s *Service) PlanCreate(ctx context.Context, j api.Jail, recovering bool) (
 			}
 			if v.ReadOnly {
 				props["readonly"] = "on"
+			}
+			if v.Encrypted {
+				// The key stays loaded after the creation: the new jail starts without an unlock.
+				props[PropEncrypted] = "on"
+				pl.Add(plan.Step{Name: "create-volume-" + v.Name, Describe: "zfs create -o encryption=aes-256-gcm -o keyformat=passphrase -o keylocation=prompt " + ds,
+					Do: func(ctx context.Context) error { return s.Keys.CreateEncrypted(ctx, ds, props, passphrase) }})
+				continue
 			}
 			pl.Add(plan.Step{Name: "create-volume-" + v.Name, Describe: "zfs create " + ds,
 				Do: func(ctx context.Context) error { return z.Create(ctx, ds, props) }})

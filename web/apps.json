@@ -39,7 +39,8 @@
         "backup",
         "apps",
         "host",
-        "wireguard"
+        "wireguard",
+        "logs"
       ],
       "devPort": 5173,
       "previewPort": 4173,

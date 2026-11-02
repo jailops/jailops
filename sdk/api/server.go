@@ -177,7 +177,12 @@ var Extensions = []string{
 	"app_install",
 	"app_draft",
 	"host_identity",
+	"host_firewall",
+	"host_pending",
 	"wireguard",
 	"interface_descriptions",
 	"app_access",
+	"logs_unified",
+	"log_forward",
+	"volume_unlock",
 }

@@ -16,7 +16,8 @@ checked when the configuration is loaded (`":39110"` is every interface, `"127.0
 wrong form is an error). The SDK, in turn, refuses plain `http://` to anything but loopback.
 
 JailOps does not open ports for you: the host's `pf.conf` decides who can reach `listen.https.address`. Admit the addresses of your
-administrators and nobody else.
+administrators and nobody else. (With the host firewall module of [appliance.md](appliance.md) enabled, JailOps writes
+`pf.conf` itself: `console.allow_from` of `jailops host firewall set --console-from` then decides who reaches the port.)
 
 ## The web console: built in, off until you turn it on
 

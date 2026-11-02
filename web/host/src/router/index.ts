@@ -20,6 +20,7 @@ export const routes: RouteRecordRaw[] = [
   { path: '/backups', name: 'backups', component: () => import('@/views/BackupsView.vue'), meta: { project: true, feature: 'backups', title: 'Backups' } },
   { path: '/host', name: 'host', component: () => import('@/views/HostView.vue'), meta: { ext: 'host_identity', title: 'Host' } },
   { path: '/hosts', name: 'hosts', component: () => import('@/views/HostsView.vue'), meta: { hub: true, title: 'Hosts' } },
+  { path: '/logs', name: 'logs', component: () => import('@/views/LogsView.vue'), meta: { title: 'Logs' } },
   { path: '/operations', name: 'operations', component: () => import('@/views/OperationsView.vue'), meta: { feature: 'operations', title: 'Operations' } },
   { path: '/events', name: 'events', component: () => import('@/views/EventsView.vue'), meta: { feature: 'events', title: 'Events' } },
   { path: '/doctor', name: 'doctor', component: () => import('@/views/DoctorView.vue'), meta: { feature: 'doctor', title: 'Doctor' } },

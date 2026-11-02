@@ -219,7 +219,12 @@ func ParseLogSince(s string, now time.Time) (time.Time, error) {
 // ("[29/Oct/2026:12:34:56 +0000]"). Forms without a zone are read in now's.
 func LogLineTime(line string, now time.Time) (time.Time, bool) {
 	loc := now.Location()
-	if i := strings.IndexByte(line, ' '); i >= 19 {
+	line = strip5424Head(line)
+	i := strings.IndexByte(line, ' ')
+	if i < 0 {
+		i = len(line) // a line that is only a timestamp
+	}
+	if i >= 19 {
 		if t, err := time.Parse(time.RFC3339Nano, line[:i]); err == nil {
 			return t, true
 		}
@@ -250,6 +255,27 @@ func LogLineTime(line string, now time.Time) (time.Time, bool) {
 		}
 	}
 	return time.Time{}, false
+}
+
+// strip5424Head drops the "<PRI>1 " that starts a syslog line kept in the
+// RFC 5424 form, so its timestamp is read like any other.
+func strip5424Head(line string) string {
+	if len(line) < 4 || line[0] != '<' {
+		return line
+	}
+	j := strings.IndexByte(line, '>')
+	if j < 2 || j > 4 {
+		return line
+	}
+	for _, c := range line[1:j] {
+		if c < '0' || c > '9' {
+			return line
+		}
+	}
+	if rest, ok := strings.CutPrefix(line[j+1:], "1 "); ok {
+		return rest
+	}
+	return line
 }
 
 // LogWindowStart is where a read of a file of size bytes begins: at offset,

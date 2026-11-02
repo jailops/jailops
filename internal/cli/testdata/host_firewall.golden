@@ -1,0 +1,173 @@
+$ jailops host firewall show
+ACTION   DIR   PROTO         PORTS   FROM   WHAT
+pass     in    -             -       any    loopback (lo0 is not filtered) (always)
+pass     in    -             -       any    the jails' own anchors (jailops/*) come first (always)
+block    in    -             -       any    everything not passed below (always)
+pass     out   -             -       any    everything the host sends, and the replies to it (always)
+pass     in    icmp6         -       any    neighbour discovery and router advertisements (always)
+pass     in    icmp, icmp6   -       any    path MTU discovery and ICMP errors (always)
+pass     in    tcp           22      any    ssh
+pass     in    tcp           39110   any    JailOps console and API
+pass     in    icmp, icmp6   -       any    ping (echo requests)
+
+Managed:     yes (module firewall)
+Template:    default
+pf:          running
+pf.conf:     the administrator's
+Warning:     ssh is open to the world: narrow ssh allow_from to the addresses you administer from
+
+$ jailops --dry-run host firewall set --ssh-from 192.0.2.0/24 --ssh-from 2001:db8:a::/48 --confirm-within 5m
+--- /etc/pf.conf
++++ /etc/pf.conf
+-(the administrator's own pf.conf)
++pass in from any  # loopback (lo0 is not filtered)
++pass in from any  # the jails' own anchors (jailops/*) come first
++block in from any  # everything not passed below
++pass out from any  # everything the host sends, and the replies to it
++pass in icmp6 from any  # neighbour discovery and router advertisements
++pass in icmp, icmp6 from any  # path MTU discovery and ICMP errors
++pass in tcp 22 from 192.0.2.0/24, 2001:db8:a::/48  # ssh
++pass in tcp 39110 from any  # JailOps console and API
++pass in icmp, icmp6 from any  # ping (echo requests)
+dry-run: would
+  check the rendered file with pfctl -n
+  write /etc/pf.conf
+  pfctl -f /etc/pf.conf
+  revert in 300 seconds unless confirmed
+
+$ jailops host firewall set --ssh-port 0
+! invalid: ssh port 0 is not a port (1-65535)
+! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
+[exit 2]
+
+$ jailops host firewall set --allow tcp 80 comment web
+! invalid: allow rows need the template custom-rules, not default
+! hint: set template to custom-rules, or leave allow out
+[exit 2]
+
+$ jailops host firewall set --template custom-rules --allow tcp
+! usage: --allow is "PROTO PORTS [from SOURCE,...] [comment TEXT]", for example "tcp 80,443 from 192.0.2.0/24 comment web", not "tcp"
+! hint: run 'jailops host firewall set --help' for usage
+[exit 2]
+
+$ jailops host firewall set --confirm-within 5
+! usage: --confirm-within is 10 to 1800 seconds, not "5"
+! hint: run 'jailops host firewall set --help' for usage
+[exit 2]
+
+$ jailops host firewall set --icmp sometimes
+! usage: --icmp is enable or disable, not "sometimes"
+! hint: run 'jailops host firewall set --help' for usage
+[exit 2]
+
+$ jailops host firewall set --template custom-rules --set admins=192.0.2.0/24,2001:db8:a::/48 --ssh-from @admins --allow tcp 80,443 comment web --allow udp 51820 from 2001:db8:1::/56 --confirm-within 90s
+--- /etc/pf.conf
++++ /etc/pf.conf
+-(the administrator's own pf.conf)
++pass in from any  # loopback (lo0 is not filtered)
++pass in from any  # the jails' own anchors (jailops/*) come first
++block in from any  # everything not passed below
++pass out from any  # everything the host sends, and the replies to it
++pass in icmp6 from any  # neighbour discovery and router advertisements
++pass in icmp, icmp6 from any  # path MTU discovery and ICMP errors
++pass in tcp 22 from @admins  # ssh
++pass in tcp 39110 from any  # JailOps console and API
++pass in tcp 80, 443 from any  # web
++pass in udp 51820 from 2001:db8:1::/56
++pass in icmp, icmp6 from any  # ping (echo requests)
+  check the rendered file with pfctl -n
+  write /etc/pf.conf
+  pfctl -f /etc/pf.conf
+  revert in 90 seconds unless confirmed
+host firewall: applied; it REVERTS at 09:01:30Z (in 90 s) unless you confirm it: jailops host confirm --id 00000000f00d0001
+
+$ jailops host pending
+Pending:     firewall change 00000000f00d0001 (snapshot 20260301T090000Z-901)
+Reverts at:  2026-03-01 09:01:30Z, in 90 s, unless confirmed: jailops host confirm --id 00000000f00d0001
+
+$ jailops host firewall set --icmp disable
+! busy: a firewall change (id 00000000f00d0001) waits for its confirmation
+! hint: confirm it with `jailops host confirm`, or undo it with `jailops host revert`, then try again
+[exit 5]
+
+$ jailops host confirm --id nothex
+! invalid: invalid pending change id "nothex"
+! hint: use the id GET /api/v1/host/pending shows
+[exit 2]
+
+$ jailops --dry-run host confirm
+dry-run: would confirm the firewall change 00000000f00d0001
+
+$ jailops host confirm
+Pending:     nothing waits for a confirmation
+Last:        firewall change 00000000f00d0001 was confirmed at 2026-03-01 09:00:00Z
+
+$ jailops host firewall show
+ACTION   DIR   PROTO         PORTS     FROM              WHAT
+pass     in    -             -         any               loopback (lo0 is not filtered) (always)
+pass     in    -             -         any               the jails' own anchors (jailops/*) come first (always)
+block    in    -             -         any               everything not passed below (always)
+pass     out   -             -         any               everything the host sends, and the replies to it (always)
+pass     in    icmp6         -         any               neighbour discovery and router advertisements (always)
+pass     in    icmp, icmp6   -         any               path MTU discovery and ICMP errors (always)
+pass     in    tcp           22        @admins           ssh
+pass     in    tcp           39110     any               JailOps console and API
+pass     in    tcp           80, 443   any               web
+pass     in    udp           51820     2001:db8:1::/56   -
+pass     in    icmp, icmp6   -         any               ping (echo requests)
+
+Managed:     yes (module firewall)
+Template:    custom-rules
+pf:          running
+pf.conf:     managed by jailops
+Drift:       none
+
+$ jailops host firewall diff
+host firewall: /etc/pf.conf is what JailOps would write
+
+$ jailops host firewall apply -f <dir>/fw.yaml --confirm-within 120
+--- /etc/pf.conf
++++ /etc/pf.conf
+-pass in from any  # loopback (lo0 is not filtered)
+-pass in from any  # the jails' own anchors (jailops/*) come first
+-block in from any  # everything not passed below
+-pass out from any  # everything the host sends, and the replies to it
+-pass in icmp6 from any  # neighbour discovery and router advertisements
+-pass in icmp, icmp6 from any  # path MTU discovery and ICMP errors
+-pass in tcp 22 from @admins  # ssh
+-pass in tcp 39110 from any  # JailOps console and API
+-pass in tcp 80, 443 from any  # web
+-pass in udp 51820 from 2001:db8:1::/56
+-pass in icmp, icmp6 from any  # ping (echo requests)
++pass in from any  # loopback (lo0 is not filtered)
++pass in from any  # the jails' own anchors (jailops/*) come first
++pass in from any  # everything (open template)
++pass out from any  # everything the host sends, and the replies to it
++pass in icmp6 from any  # neighbour discovery and router advertisements
++pass in icmp, icmp6 from any  # path MTU discovery and ICMP errors
+  check the rendered file with pfctl -n
+  write /etc/pf.conf
+  pfctl -f /etc/pf.conf
+  revert in 120 seconds unless confirmed
+warning: ssh is open to the world: narrow ssh allow_from to the addresses you administer from
+warning: the open template passes everything to the host; use it only behind another firewall
+host firewall: applied; it REVERTS at 09:02:00Z (in 120 s) unless you confirm it: jailops host confirm --id 00000000f00d0002
+
+$ jailops -y host revert
+Pending:     nothing waits for a confirmation
+Last:        firewall change 00000000f00d0002 was reverted at 2026-03-01 09:00:00Z (reverted on request)
+
+$ jailops host pending
+Pending:     nothing waits for a confirmation
+Last:        firewall change 00000000f00d0002 was reverted at 2026-03-01 09:00:00Z (reverted on request)
+
+$ jailops host revert -y
+! not_found: no host change waits for a confirmation
+! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+[exit 4]
+
+$ jailops host firewall apply -f <dir>/fw.yaml
+! usage: unknown field "sshh"
+! hint: run 'jailops host firewall apply --help' for usage
+[exit 2]
+

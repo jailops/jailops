@@ -492,6 +492,11 @@ func (f *Fleet) checkJail(o *Object, s api.JailSpec, add func(*Object, string, .
 	if len(s.Packages) > 0 {
 		add(o, "spec.packages is reserved and the daemon refuses it: install packages with spec.provision.packages")
 	}
+	for _, v := range s.Volumes {
+		if v.Encrypted {
+			warn(o, "volume %s is encrypted: its passphrase is typed by a person, so jailops-sync cannot create this jail; create it with 'jailops jail create' and sync manages it from then on", v.Name)
+		}
+	}
 	targets := map[string]bool{}
 	for i, m := range s.HostMounts {
 		if !strings.HasPrefix(m.Source, "/") || !strings.HasPrefix(m.Target, "/") || m.Target == "/" {

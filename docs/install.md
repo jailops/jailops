@@ -44,7 +44,8 @@ to put it). The packages also install man pages: `man jailops`, `man jailops-jai
 
 ## 3. The firewall: three lines in `pf.conf`
 
-JailOps never owns `/etc/pf.conf`. It loads one anchor per jail, per project and per network below `jailops/`, and you
+JailOps never owns `/etc/pf.conf` (unless you hand it over with the firewall module of [appliance.md](appliance.md)).
+It loads one anchor per jail, per project and per network below `jailops/`, and you
 add three lines **once**. pf insists on an order: the translation anchors belong with the translation rules, before the
 first `block` or `pass` rule, and `anchor` among the filter rules.
 

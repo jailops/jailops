@@ -25,6 +25,7 @@ import (
 	"jailops.net/jailops/internal/auth"
 	"jailops.net/jailops/internal/imagegen"
 	"jailops.net/jailops/internal/lifecycle"
+	"jailops.net/jailops/internal/logfwd"
 	"jailops.net/jailops/internal/plan"
 	"jailops.net/jailops/internal/reconcile"
 	"jailops.net/jailops/internal/state"
@@ -95,6 +96,8 @@ type Deps struct {
 	Sysctl func(ctx context.Context, name string) (string, error)
 	// WG is the WireGuard part of the helper; nil means WireGuard is unsupported here.
 	WG wireguard.Host
+	// Keys handles encrypted volumes (the helper); nil refuses them as unsupported.
+	Keys lifecycle.Keys
 	// ZClient is optional: it feeds pool usage and the ZFS compatibility check.
 	ZClient zfs.Client
 	// CompatFile is the OpenZFS compatibility file name for the target release
@@ -167,6 +170,12 @@ type Deps struct {
 	Host HostSystem
 	// HostModules are the host management modules jailopsd.yaml enables (host.manage.modules).
 	HostModules []string
+	// LogForward is logging.forward of jailopsd.yaml: the sinks in force while no list is stored.
+	LogForward []api.LogSink
+	// LogForwardTune adjusts the forwarder's environment (tests: dialer, file check, clock).
+	LogForwardTune func(*logfwd.Env)
+	// ConsolePort is the port of the TLS listener (listen.https.address), 0 without one; the host firewall opens it.
+	ConsolePort int
 }
 
 // Service implements the business logic.
@@ -204,6 +213,12 @@ type Service struct {
 	stoKind  kindStore[api.StorageSpec]
 	profKind kindStore[api.ProfileSpec]
 	wgKind   kindStore[api.WireGuardSpec]
+	fwdKind  kindStore[api.LogForwardSpec]
+
+	// fwd forwards logs; fwdMu serialises changes of its sink list.
+	fwd      *logfwd.Forwarder
+	fwdMu    sync.Mutex
+	fwdCheck func(path string, secret bool) error
 
 	// storages is the registry of storage (dataset roots and their image
 	// pools); placed maps the key of a jail that is being created to its
@@ -232,6 +247,9 @@ type Service struct {
 	upd     updateState
 	prov    provMarks
 	histMem histMemory
+	// keys holds the failed unlocks of each jail and the jails a boot wanted to start while they were locked
+	// (volkeys.go). Memory only: a restart forgets both.
+	keys keyState
 
 	mu sync.RWMutex
 	// linuxBuilds counts Linux image builds in progress; the host keeps the Linux kernel state while one runs.
@@ -257,6 +275,8 @@ type Service struct {
 type jailEntry struct {
 	jail     api.Jail
 	problems []string
+	// locked names the encrypted volumes whose key is not loaded.
+	locked []string
 }
 
 // jailRuntime is the observed, in-memory part of a jail's status.
@@ -310,6 +330,8 @@ func New(d Deps) (*Service, error) {
 	s.stoKind = newKindStore[api.StorageSpec](s, api.KindStorage, api.ScopeHost, "storage", "/api/v1/storage")
 	s.profKind = newProjectKindStore[api.ProfileSpec](s, api.KindProfile, api.ScopeFleet, "profile", "/api/v1/profiles")
 	s.wgKind = newKindStore[api.WireGuardSpec](s, api.KindWireGuard, api.ScopeFleet, "wireguard", "/api/v1/wireguard")
+	s.fwdKind = newKindStore[api.LogForwardSpec](s, api.KindLogForward, api.ScopeHost, "log-forward", "/api/v1/logs/forward")
+	s.fwd = s.newForwarder()
 	s.locks = newLockSet()
 	s.events = newEventBus(d.DB, d.HostUUID)
 	jd, err := newFileJournal(d.JournalDir)
@@ -333,7 +355,7 @@ func New(d Deps) (*Service, error) {
 		}
 		s.lcfg = lc
 		s.life = &lifecycle.Service{Cfg: lc, ZFS: d.ZFS, Exec: d.Exec, Jails: &jailRuntimeAdapter{s: s}, Files: d.Files,
-			Hooks: &hooks{s: s}, Images: &imageAdapter{s: s}, Executor: s.planExec}
+			Hooks: &hooks{s: s}, Images: &imageAdapter{s: s}, Executor: s.planExec, Keys: d.Keys}
 	}
 	if d.Root != "" {
 		s.addStorage(DefaultStorage, api.StorageSpec{Dataset: d.Root}, d.Root, d.MountBase)
@@ -364,6 +386,7 @@ func (s *Service) Start(ctx context.Context) error {
 		s.log.Error("recovering interrupted operations failed", "err", err)
 	}
 	s.warmCerts()
+	s.startLogForward()
 	if s.life != nil {
 		s.wg.Add(1)
 		go func() { defer s.wg.Done(); s.updateLoop(s.baseCtx) }()
@@ -377,6 +400,7 @@ func (s *Service) Close() {
 		s.cancel()
 		s.events.close()
 	})
+	s.fwd.Wait()
 	s.wg.Wait()
 }
 
@@ -452,7 +476,7 @@ func (s *Service) Extensions() []string {
 			if s.d.BackupAdmin == nil {
 				continue
 			}
-		case "host_identity":
+		case "host_identity", "host_firewall", "host_pending":
 			if s.d.Host == nil {
 				continue
 			}

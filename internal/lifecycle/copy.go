@@ -66,6 +66,8 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 		from, to string
 		props    map[string]string
 	}
+	// raw names the encrypted volumes, copied as stored: the copy stays encrypted, with the same passphrase, and locked.
+	raw := map[string]bool{}
 	items := []item{{st.Container, dc, map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": dstMP, PropComplete: "off"}}}
 	items = append(items, item{st.Root, dc + "/root", map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": dstRoot}})
 	for _, d := range st.Persist {
@@ -76,7 +78,16 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 		volParent = &item{s.Cfg.at(src).volumesDS(), s.Cfg.at(dst).volumesDS(), map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, PropKind: KindVolumes, PropManaged: "on", "canmount": "off", "mountpoint": "none"}}
 	}
 	for _, v := range st.Volumes {
-		items = append(items, item{v.DS, s.Cfg.at(dst).volumeDS(strings.TrimPrefix(v.DS, s.Cfg.at(src).volumesDS()+"/")), map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": dstRoot + v.Path, "canmount": "noauto"}})
+		it := item{v.DS, s.Cfg.at(dst).volumeDS(strings.TrimPrefix(v.DS, s.Cfg.at(src).volumesDS()+"/")), map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": dstRoot + v.Path, "canmount": "noauto"}}
+		if v.Encrypted {
+			if s.Keys == nil {
+				return nil, res, api.Errorf(api.CodeUnsupported, "volume %s is encrypted and this host has no key operations", volumeName(v.DS))
+			}
+			// UNVERIFIED: a raw receive of an encryption root with -o keylocation=prompt.
+			raw[it.to] = true
+			it.props[PropEncrypted], it.props["keylocation"] = "on", "prompt"
+		}
+		items = append(items, it)
 	}
 
 	srcSnaps := make([]string, len(st.all()))
@@ -99,8 +110,12 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 		Undo: s.destroySnaps(srcSnaps)})
 	for i, it := range items {
 		it := it
+		send := "zfs send -p"
+		if raw[it.to] {
+			send = "zfs send -w"
+		}
 		pl.Add(plan.Step{Name: "send-" + it.to[strings.LastIndex(it.to, "/")+1:],
-			Describe: fmt.Sprintf("zfs send -p %s@%s | zfs receive %s", it.from, snap, it.to),
+			Describe: fmt.Sprintf("%s %s@%s | zfs receive %s", send, it.from, snap, it.to),
 			Do: func(ctx context.Context) error {
 				// UNVERIFIED: send of a clone gives a full, independent stream.
 				if volParent != nil && strings.HasPrefix(it.to, volParent.to+"/") {
@@ -109,6 +124,9 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 							return err
 						}
 					}
+				}
+				if raw[it.to] {
+					return s.Keys.ReplicateRaw(ctx, it.from+"@"+snap, it.to, it.props)
 				}
 				return z.Replicate(ctx, it.from+"@"+snap, it.to, it.props)
 			},

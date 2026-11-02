@@ -19,6 +19,7 @@ import (
 	"jailops.net/jailops/internal/auth"
 	"jailops.net/jailops/internal/hostbackup"
 	"jailops.net/jailops/internal/lifecycle"
+	"jailops.net/jailops/internal/logfwd"
 	"jailops.net/jailops/internal/ndproxy"
 	"jailops.net/jailops/internal/reconcile"
 	"jailops.net/jailops/internal/server"
@@ -68,6 +69,8 @@ type Options struct {
 	// dataset snapshots are read (tests).
 	BackupTLS     *tls.Config
 	BackupMounter hostbackup.Mounter
+	// LogForwardTune adjusts the log forwarder (tests: poll interval, file check).
+	LogForwardTune func(*logfwd.Env)
 }
 
 // Daemon is a running jailopsd.
@@ -231,7 +234,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		State: st, DB: db, SealKey: sealKey, SecretsIdentity: secretsID, SecretsRecipient: secretsID.Recipient().String(),
 		ZFS: zad, ImageZFS: zad, Exec: runExec{clients.Runner}, Files: clients.Files, Logs: clients.Logs, Jails: clients.Jails,
 		PF: clients.PF, Net: clients.Net, Run: clients.Runner, Sysctl: clients.Sysctl, ZClient: clients.ZFS, WG: clients.WG,
-		CompatFile: cfg.ZFS.CompatFile, CompatDir: cfg.ZFS.CompatDir, Backups: opts.Backups,
+		CompatFile: cfg.ZFS.CompatFile, CompatDir: cfg.ZFS.CompatDir, Backups: opts.Backups, Keys: clients.Keys,
 		NetworkPool: cfg.Projects.NetworkPool, NetworkPoolBits: cfg.Projects.NetworkBits, NetworkUplink: cfg.Projects.Uplink, NetworkNAT: cfg.Projects.NAT,
 		ServerFingerprint: fingerprintOf(d.cert),
 	}
@@ -250,7 +253,9 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	deps.UpdateTick, deps.ProjectFilesDir = cfg.Updates.Tick.Std(), cfg.Updates.ProjectFilesDir
 	deps.AppsDir = cfg.Apps.CatalogDir
 	deps.Host, deps.HostModules = clients.HostSystem, cfg.Host.Manage.Modules
+	deps.ConsolePort = consolePort(cfg.Listen.HTTPS.Address)
 	deps.AppsLocalDir = cfg.Apps.LocalDir
+	deps.LogForward, deps.LogForwardTune = cfg.Logging.Forward, opts.LogForwardTune
 	deps.DialJail = clients.Dial
 	deps.ExecLimits = service.ExecLimits{PerJail: cfg.Limits.ExecSessionsPerJail, Idle: cfg.Limits.ExecIdle.Std(), Max: cfg.Limits.ExecMax.Std()}
 	if opts.Registrar != nil {

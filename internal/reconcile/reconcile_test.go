@@ -447,6 +447,33 @@ func TestAutostartOnFirstPassOnly(t *testing.T) {
 	}
 }
 
+func TestAutostartSkipsALockedJail(t *testing.T) {
+	w := newWorld(t, reconcile.Config{Autostart: true})
+	w.des = reconcile.Desired{Jails: []reconcile.JailDesired{jd("vault", 0), jd("app", 0, "vault"), jd("cache", 5)}}
+	w.fail["vault"] = api.Errorf(api.CodeLocked, "jail \"vault\" is locked").WithHint("jailops jail unlock vault")
+	rep := w.R.Pass(bg)
+	if _, failed := rep.Failures["jail/vault"]; failed {
+		t.Fatalf("a locked jail is skipped, not failed: %+v", rep.Failures)
+	}
+	if len(rep.Started) != 1 || rep.Started[0] != "cache" {
+		t.Fatalf("%+v", rep)
+	}
+	var c api.Condition
+	for _, x := range w.jailSt["vault"] {
+		if x.Type == reconcile.CondBoot {
+			c = x
+		}
+	}
+	if c.Reason != "Locked" || !strings.Contains(c.Message, "jailops jail unlock") {
+		t.Fatalf("%+v", c)
+	}
+	for _, x := range w.jailSt["app"] {
+		if x.Type == reconcile.CondBoot && x.Reason != "DependencyFailed" {
+			t.Fatalf("a dependent of a locked jail waits too: %+v", x)
+		}
+	}
+}
+
 type fakeNDP struct {
 	mu      sync.Mutex
 	entries [][]ndproxy.Entry

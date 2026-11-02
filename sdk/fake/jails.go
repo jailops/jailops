@@ -17,6 +17,7 @@ import (
 func (s *Server) setupJails() {
 	k := s.jails
 	k.asyncCreate, k.asyncDelete = true, true
+	k.noCreate = true // POST is jailCreate (volkeys.go): the body may carry a passphrase
 	k.keep = func(dst, old *api.Jail) { dst.Status = old.Status }
 	k.expand = func(j *api.Jail) any { return s.jailExpanded(j) }
 	k.validate = func(j, old *api.Jail) *api.Error {
@@ -202,6 +203,10 @@ func (s *Server) jailAction(w http.ResponseWriter, r *http.Request) {
 		case "start", "stop", "restart":
 		default:
 			return reply{err: api.Errorf(api.CodeInvalid, "unknown action %q", act.Action)}
+		}
+		if l := s.jails.items[jk].Status.Locked; act.Action != "stop" && len(l) > 0 {
+			return reply{err: api.Errorf(api.CodeLocked, "jail %q is locked: the encrypted volume(s) %s wait for a passphrase", name, strings.Join(l, ", ")).
+				WithHint("jailops jail unlock " + name)}
 		}
 		op := s.startOp(rc.project, "jails."+act.Action, act.Action+" jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			j := s.jails.items[jk]

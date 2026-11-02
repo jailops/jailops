@@ -24,3 +24,18 @@ export function matches(j: { metadata: { name: string; labels?: Record<string, s
   const hay = [j.metadata.name, j.spec.image, ...(j.status.addresses ?? []), ...Object.entries(j.metadata.labels ?? {}).map(([k, v]) => `${k}=${v}`)]
   return hay.some((h) => h.toLowerCase().includes(needle))
 }
+
+/** The names of a jail's encrypted volumes (empty for a jail without). */
+export function encryptedVolumes(j: { spec: { volumes?: Array<{ name: string; encrypted?: boolean }> } }): string[] {
+  return (j.spec.volumes ?? []).filter((v) => v.encrypted).map((v) => v.name)
+}
+
+/** A jail whose encrypted volumes wait for their passphrase. */
+export function isLocked(j: { status: { power: string; locked?: string[] } }): boolean {
+  return j.status.power === 'locked' || (j.status.locked?.length ?? 0) > 0
+}
+
+/** Lock: stop the jail and unload the keys of its encrypted volumes. */
+export function lockJail(name: string): Promise<unknown> {
+  return runOp(s.keys.lockTitle(name), () => api.jails.lock(name))
+}

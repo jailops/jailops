@@ -35,6 +35,9 @@ type dataset struct {
 	files   map[string]string
 	cum     int64 // cumulative bytes written
 	mounted bool
+	// pass is the passphrase of an encryption root ("" when not encrypted); keyLoaded says whether its key is loaded.
+	pass      string
+	keyLoaded bool
 }
 
 // Model is the in-memory pool set. It is safe for concurrent use.
@@ -595,6 +598,9 @@ func (m *Model) Mount(_ context.Context, name string) error {
 	if d.props["canmount"] == "off" {
 		return fmt.Errorf("cannot mount '%s': canmount is off", name)
 	}
+	if d.pass != "" && !d.keyLoaded {
+		return fmt.Errorf("cannot mount '%s': encryption key not loaded", name)
+	}
 	d.mounted = true
 	return nil
 }
@@ -720,6 +726,9 @@ func (m *Model) Dump() string {
 	for _, n := range names {
 		d := m.ds[n]
 		fmt.Fprintf(&b, "%s origin=%s mounted=%v cum=%d props{%s} files{%s}\n", n, d.origin, d.mounted, d.cum, kv(d.props), kv(d.files))
+		if d.pass != "" {
+			fmt.Fprintf(&b, "  encrypted key=%v\n", d.keyLoaded)
+		}
 		for _, s := range d.snaps {
 			var h []string
 			for t := range s.holds {

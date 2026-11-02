@@ -6,6 +6,7 @@ import (
 )
 
 var (
-	_ lifecycle.ZFS = (*Adapter)(nil)
-	_ imagegen.ZFS  = (*Adapter)(nil)
+	_ lifecycle.ZFS  = (*Adapter)(nil)
+	_ imagegen.ZFS   = (*Adapter)(nil)
+	_ lifecycle.Keys = (*Keys)(nil)
 )
