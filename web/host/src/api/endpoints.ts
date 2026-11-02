@@ -3,7 +3,7 @@
 import { getClient } from '@jailops/shared/api/client'
 import { core } from '@jailops/shared/api/core'
 import type {
-  Jail, JailAction, JailRollback, JailUpgrade, JailSnapshot, Image, ImageBuild, ImageUpgrade, Network, Lease,
+  Jail, JailAction, JailCreate, JailUnlock, JailPassphraseChange, JailRollback, JailUpgrade, JailSnapshot, Image, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, Token,
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult,
@@ -11,8 +11,10 @@ import type {
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
   AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
   HostIdentity, HostIdentityApply, HostChange, HostSnapshot, HostRestore,
+  HostFirewall, HostFirewallApply, HostPending,
   WireGuard, WireGuardJoin, WireGuardKeys, WireGuardPeerAdd, WireGuardPeerCreated,
   AppAccess, AppAllow, AppAllowResult, AppDeny, AppDenyResult,
+  LogsRead, LogForward, LogForwardSpec, LogForwardTestResult,
 } from '@jailops/shared/api/types'
 import type { SnapshotBody, ExecSessionInfo, ConfigResult } from '../types'
 import { logQuery, type LogQuery } from '@/lib/logs'
@@ -30,9 +32,14 @@ export const api = {
     remove: (n: string) => c().mutate('DELETE', `/tokens/${e(n)}`),
   },
   jails: {
-    list: () => c().list<Jail>('/jails'),
+    /** The current project's jails, or those of another project named here (the Logs page of all projects). */
+    list: (project?: string) => c().list<Jail>(project ? `/jails?project=${e(project)}` : '/jails'),
     get: (n: string) => c().get<Jail>(`/jails/${e(n)}`),
-    create: (j: Pick<Jail, 'metadata' | 'spec'>) => c().mutate('POST', '/jails', j),
+    create: (j: Pick<Jail, 'metadata' | 'spec'> | JailCreate) => c().mutate('POST', '/jails', j),
+    // encrypted volumes (volume_unlock): the passphrase is in the body only
+    unlock: (n: string, b: JailUnlock) => c().mutate<Jail>('POST', `/jails/${e(n)}/unlock`, b),
+    lock: (n: string) => c().mutate<Jail>('POST', `/jails/${e(n)}/lock`),
+    passphrase: (n: string, b: JailPassphraseChange) => c().mutate<Jail>('POST', `/jails/${e(n)}/passphrase`, b),
     action: (n: string, a: JailAction) => c().mutate('PUT', `/jails/${e(n)}/state`, a),
     snapshots: (n: string) => c().list<JailSnapshot>(`/jails/${e(n)}/snapshots`),
     snapshot: (n: string, b: SnapshotBody) => c().mutate('POST', `/jails/${e(n)}/snapshots`, b),
@@ -53,6 +60,14 @@ export const api = {
     apply: (b: HostIdentityApply) => c().mutate<HostChange>('PUT', '/host/identity', b),
     snapshots: () => c().list<HostSnapshot>('/host/snapshots'),
     restore: (name: string, b: HostRestore = {}) => c().mutate<HostChange>('POST', `/host/snapshots/${e(name)}/restore`, b),
+    /** Extension host_firewall: the last applied spec (or the default one) and the management state. */
+    firewall: () => c().get<HostFirewall>('/host/firewall'),
+    /** Global admin. A real apply waits for its confirmation (reply.pending) and reverts itself without one. */
+    applyFirewall: (b: HostFirewallApply) => c().mutate<HostChange>('PUT', '/host/firewall', b),
+    /** Extension host_pending: the change that waits for its confirmation, and how the last one ended. */
+    pending: () => c().get<HostPending>('/host/pending'),
+    confirm: (id?: string) => c().mutate<HostPending>('POST', '/host/pending/confirm', id ? { id } : {}),
+    revert: (id?: string) => c().mutate<HostPending>('POST', '/host/pending/revert', id ? { id } : {}),
   },
   appAccess: {
     /** Extension app_access: who may connect to an installed app (readonly in the project). */
@@ -66,6 +81,17 @@ export const api = {
     list: (n: string) => c().list<JailLogFile>(`/jails/${e(n)}/logs`),
     /** A file name may hold one directory ("nginx/access.log"): each segment is encoded on its own. */
     read: (n: string, file: string, q: LogQuery = {}) => c().get<JailLogRead>(`/jails/${e(n)}/logs/${file.split('/').map(e).join('/')}${logQuery(q)}`),
+    /** Extension logs_unified: the ends of many jails' files merged by time (operator). The query names the project
+     *  or all_projects itself (unifiedQuery), so the project filter leaves it alone. */
+    unified: (query: string) => c().get<LogsRead>(`/logs${query}`),
+    /** Extension log_forward (global admin): the sinks, where the list comes from, and how each one is doing. */
+    forward: () => c().getWithEtag<LogForward>('/logs/forward'),
+    /** Stores the list, which then replaces logging.forward of jailopsd.yaml; If-Match is the generation read. */
+    putForward: (spec: LogForwardSpec, etag?: string) => c().mutate<LogForward>('PUT', '/logs/forward', spec, { etag }),
+    /** Deletes the stored list: the file's list is in force again. */
+    resetForward: () => c().mutate<LogForward>('DELETE', '/logs/forward'),
+    /** Sends one tagged line; a failed send is a result with ok false. */
+    testForward: (sink: string) => c().mutate<LogForwardTestResult>('POST', '/logs/forward/test', { sink }),
   },
   images: {
     list: () => c().list<Image>('/images'),

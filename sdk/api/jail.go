@@ -187,6 +187,10 @@ type VolumeMount struct {
 	Mount    string `json:"mount"`
 	Quota    string `json:"quota,omitempty"`
 	ReadOnly bool   `json:"read_only,omitempty"`
+	// Encrypted makes the volume a ZFS encryption root (aes-256-gcm, a passphrase typed by a person). It is set
+	// when the jail is created and never changes. The passphrase is entered after every host boot
+	// (POST /api/v1/jails/{name}/unlock); until then the jail is locked and does not start.
+	Encrypted bool `json:"encrypted,omitempty"`
 }
 
 // HostMount is an existing directory of the host mounted into the jail.
@@ -233,6 +237,8 @@ const (
 	PowerRunning  PowerState = "running"
 	PowerStopping PowerState = "stopping"
 	PowerError    PowerState = "error"
+	// PowerLocked is a stopped jail whose encrypted volumes wait for their passphrase.
+	PowerLocked PowerState = "locked"
 )
 
 // JailStatus is the observed state of a jail on its host.
@@ -254,6 +260,8 @@ type JailStatus struct {
 	// Warnings say what the spec asks for and the host does not do (rate
 	// limits are stored and not enforced yet).
 	Warnings []string `json:"warnings,omitempty"`
+	// Locked names the encrypted volumes whose key is not loaded: the jail does not start until it is unlocked.
+	Locked []string `json:"locked,omitempty"`
 }
 
 // JailAction is the body of PUT /api/v1/jails/{name}/state.
@@ -261,6 +269,49 @@ type JailAction struct {
 	Action  string `json:"action"` // start, stop, restart
 	Timeout int    `json:"timeout,omitempty"`
 	Force   bool   `json:"force,omitempty"`
+}
+
+// JailCreate is the body of POST /api/v1/jails: a Jail and, when a volume is encrypted, the passphrase of its
+// encrypted volumes. The passphrase is used once to create them; it is never stored, logged or returned.
+type JailCreate struct {
+	Metadata ObjectMeta `json:"metadata"`
+	Spec     JailSpec   `json:"spec"`
+	// VolumePassphrase is between MinPassphrase and MaxPassphrase bytes, without line breaks.
+	VolumePassphrase string `json:"volume_passphrase,omitempty"`
+}
+
+// JailUnlock is the body of POST /api/v1/jails/{name}/unlock (extension volume_unlock).
+type JailUnlock struct {
+	Passphrase string `json:"passphrase"`
+	// Start starts the jail once its volumes are unlocked.
+	Start bool `json:"start,omitempty"`
+}
+
+// JailPassphraseChange is the body of POST /api/v1/jails/{name}/passphrase (extension volume_unlock): the
+// passphrase of every encrypted volume of the jail changes from Old to New. The jail must be unlocked.
+type JailPassphraseChange struct {
+	Old string `json:"old_passphrase"`
+	New string `json:"new_passphrase"`
+}
+
+// Passphrase limits of encrypted volumes. ZFS itself accepts 8 to 512 bytes; JailOps asks for at least 12.
+const (
+	MinPassphrase = 12
+	MaxPassphrase = 512
+)
+
+// CheckPassphrase reports whether p is acceptable as a new passphrase: its length, and no line break or NUL
+// (ZFS reads the passphrase as one line).
+func CheckPassphrase(p string) error {
+	if len(p) < MinPassphrase || len(p) > MaxPassphrase {
+		return Errorf(CodeInvalid, "the passphrase must be between %d and %d bytes long", MinPassphrase, MaxPassphrase)
+	}
+	for i := 0; i < len(p); i++ {
+		if p[i] == '\n' || p[i] == '\r' || p[i] == 0 {
+			return Errorf(CodeInvalid, "the passphrase must not contain a line break or a NUL byte")
+		}
+	}
+	return nil
 }
 
 // RollbackScope selects what a rollback restores.

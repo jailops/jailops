@@ -72,6 +72,9 @@ if-prefix = jo
 # --- host management (appliance mode, docs/appliance.md) ------------------------
 # Modules the helper may change on the host itself. Empty (the default): the host is only read. "identity" is the host
 # name, /etc/resolv.conf, the jailops block of /etc/ntp.conf and ntpd_enable; jailopsd.yaml must list it too
-# (host.manage.modules). Copies of every changed file are kept in host-dir (root only).
+# (host.manage.modules). "firewall" is /etc/pf.conf, written whole, with pf_enable and pf_rules; every change of it
+# reverts at its deadline unless it is confirmed (the timer is the helper's own). Copies of every changed file and the
+# record of a change that waits for its confirmation are kept in host-dir (root only).
 #host-manage = identity
+#host-manage = firewall
 #host-dir = /var/db/jailops-priv/host

@@ -1,0 +1,32 @@
+#!/bin/sh
+#
+# PROVIDE: jailops_revert
+# REQUIRE: FILESYSTEMS zfs
+# BEFORE: netif pf jailops_priv
+# KEYWORD: nojail
+#
+# Commit confirmed of host management (docs/appliance.md): a host change that waits for its confirmation (a record
+# in host-dir, pending.json) when the host boots was never confirmed. This script puts its snapshot back before the
+# network and pf start, so they start with the old configuration and a reboot never makes such a change permanent.
+# Only the files go back here; netif and pf, which come after, load them. Without a pending change it does nothing.
+# It runs whenever jailops_priv_enable is YES and needs no line of its own in rc.conf.
+#   service jailops_revert start   the same by hand (the running helper reverts on its own at the deadline)
+
+. /etc/rc.subr
+
+name="jailops_revert"
+rcvar="jailops_priv_enable"
+desc="JailOps: undo an unconfirmed host change at boot"
+start_cmd="jailops_revert_start"
+stop_cmd=":"
+
+jailops_revert_start()
+{
+	/usr/local/libexec/jailops-priv -log syslog -config ${jailops_priv_config} revert-pending
+}
+
+load_rc_config $name
+: ${jailops_priv_enable:="NO"}
+: ${jailops_priv_config:="/usr/local/etc/jailops/priv.conf"}
+
+run_rc_command "$1"

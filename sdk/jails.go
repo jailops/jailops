@@ -57,6 +57,50 @@ func (j *JailClient) Create(ctx context.Context, jail api.Jail) (*Operation[api.
 	return op, err
 }
 
+// CreateWithPassphrase creates a jail whose encrypted volumes get passphrase (extension volume_unlock). The
+// passphrase travels in this request only; the server never stores or returns it.
+func (j *JailClient) CreateWithPassphrase(ctx context.Context, jail api.Jail, passphrase string) (*Operation[api.Jail], error) {
+	if err := j.c.need("volume_unlock"); err != nil {
+		return nil, err
+	}
+	body := api.JailCreate{Metadata: jail.Metadata, Spec: jail.Spec, VolumePassphrase: passphrase}
+	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.path, body: body},
+		func(ctx context.Context) (api.Jail, error) { return j.Get(ctx, jail.Metadata.Name) })
+	return op, err
+}
+
+// Unlock loads the keys of a jail's encrypted volumes with their passphrase and, with start set, starts the jail
+// (extension volume_unlock). A wrong passphrase fails the operation with bad_passphrase; after five in a row the
+// jail answers rate_limited for 30 seconds.
+func (j *JailClient) Unlock(ctx context.Context, name, passphrase string, start bool) (*Operation[api.Jail], error) {
+	if err := j.c.need("volume_unlock"); err != nil {
+		return nil, err
+	}
+	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/unlock", body: api.JailUnlock{Passphrase: passphrase, Start: start}},
+		func(ctx context.Context) (api.Jail, error) { return j.Get(ctx, name) })
+	return op, err
+}
+
+// Lock stops a jail and unloads the keys of its encrypted volumes (extension volume_unlock).
+func (j *JailClient) Lock(ctx context.Context, name string) (*Operation[api.Jail], error) {
+	if err := j.c.need("volume_unlock"); err != nil {
+		return nil, err
+	}
+	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/lock"},
+		func(ctx context.Context) (api.Jail, error) { return j.Get(ctx, name) })
+	return op, err
+}
+
+// ChangePassphrase changes the passphrase of every encrypted volume of an unlocked jail (extension volume_unlock).
+func (j *JailClient) ChangePassphrase(ctx context.Context, name, oldPass, newPass string) (*Operation[api.Jail], error) {
+	if err := j.c.need("volume_unlock"); err != nil {
+		return nil, err
+	}
+	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/passphrase", body: api.JailPassphraseChange{Old: oldPass, New: newPass}},
+		func(ctx context.Context) (api.Jail, error) { return j.Get(ctx, name) })
+	return op, err
+}
+
 // Delete deletes a jail.
 func (j *JailClient) Delete(ctx context.Context, name string) (*Operation[None], error) {
 	op, _, err := sendOp[None](ctx, j.c, request{method: http.MethodDelete, path: j.r.item(name)}, nil)

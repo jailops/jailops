@@ -274,7 +274,7 @@ func stateStyle(col int) styleFn {
 			return "32"
 		case "stopped", "pending", "offline":
 			return "90"
-		case "starting", "stopping", "running...", "WARN":
+		case "starting", "stopping", "running...", "WARN", "locked":
 			return "33"
 		case "error", "failure", "FAIL":
 			return "31"

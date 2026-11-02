@@ -377,6 +377,11 @@ func (s *Service) RestoreEnsureObjects(ctx context.Context, project string, b ap
 // RestoreAdopt writes spec.json and bundle.json of a restored jail and
 // registers it. The undo forgets it again (the restore removes the datasets).
 func (s *Service) RestoreAdopt(ctx context.Context, key string, j api.Jail, gen api.ImageGeneration) (func(context.Context) error, error) {
+	// A restored volume is a plain dataset (the preflight says so): the spec must not claim otherwise.
+	j.Spec.Volumes = append([]api.VolumeMount(nil), j.Spec.Volumes...)
+	for i := range j.Spec.Volumes {
+		j.Spec.Volumes[i].Encrypted = false
+	}
 	if err := s.life.WriteRecords(ctx, key, j, gen); err != nil {
 		return nil, err
 	}

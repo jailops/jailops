@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { applyFollow, emptyFollow, logFileOf, logQuery, pickFile, plainText, sortFiles, startFrom, stripControls } from './logs'
-import type { JailLogFile, JailLogRead } from '@jailops/shared/api/types'
+import { applyFollow, applyUnified, emptyFollow, filterFromQuery, filterToQuery, jailColour, jailHue, lineTime, logFileOf, logQuery, pickFile, plainText, sortFiles, sourceLabel, startFrom, startUnified, stripControls, unifiedQuery, unifiedText } from './logs'
+import type { JailLogFile, JailLogRead, LogsRead } from '@jailops/shared/api/types'
 
 const read = (lines: string[], next: number, extra: Partial<JailLogRead> = {}): JailLogRead => ({ jail: 'web', file: 'messages', lines: lines.map((text) => ({ text })), next_offset: next, ...extra })
 
@@ -82,5 +82,76 @@ describe('files', () => {
     expect(logFileOf('/var/log/nginx/access.log')).toBe('nginx/access.log')
     expect(logFileOf('/var/log/forgejo')).toBe('forgejo')
     expect(logFileOf('/var/db/app/log.txt')).toBe('')
+  })
+})
+
+describe('unified view', () => {
+  const ur = (lines: Array<[string, string, string?]>, next: Record<string, number>, extra: Partial<LogsRead> = {}): LogsRead => ({
+    lines: lines.map(([jail, line, time]) => ({ project: 'web', jail, file: 'messages', line, ...(time ? { time } : {}) })), sources: [], next, ...extra,
+  })
+
+  it('reads the filters from the query string, with the current project and defaults', () => {
+    expect(filterFromQuery({}, 'web')).toEqual({ project: 'web', all: false, jails: [], app: '', grep: '', since: '1h', file: 'messages', appLogs: false })
+    expect(filterFromQuery({}, '')).toMatchObject({ all: true, project: '' })
+    expect(filterFromQuery({ project: '*', jail: ['web', 'db', 'web'], since: '', grep: 'x', file: 'auth.log', app_logs: 'true' }, 'web'))
+      .toEqual({ project: '', all: true, jails: ['web', 'db'], app: '', grep: 'x', since: '', file: 'auth.log', appLogs: true })
+    expect(filterFromQuery({ jail: 'web,db', since: 'yesterday', project: 'shop' }, 'web')).toMatchObject({ project: 'shop', jails: ['web', 'db'], since: '1h' })
+  })
+
+  it('writes the filters back without the defaults, so a link round-trips', () => {
+    const f = filterFromQuery({ jail: 'web', since: '15m' }, 'web')
+    expect(filterToQuery(f, 'web')).toEqual({ jail: ['web'], since: '15m' })
+    expect(filterFromQuery(filterToQuery(f, 'web'), 'web')).toEqual(f)
+    const all = filterFromQuery({ project: '*', app: 'nginx', app_logs: '1', file: 'cron' }, 'web')
+    expect(filterToQuery(all, 'web')).toEqual({ project: '*', app: 'nginx', app_logs: 'true', file: 'cron' })
+    expect(filterToQuery(filterFromQuery({ project: 'shop' }, 'web'), 'web')).toEqual({ project: 'shop' })
+  })
+
+  it('builds the server query, with the cursor of a follow', () => {
+    const f = filterFromQuery({ jail: ['web', 'db'], grep: 'GET /a' }, 'web')
+    expect(unifiedQuery(f)).toBe('?project=web&jail=web&jail=db&since=1h&grep=GET+%2Fa')
+    const all = { ...f, all: true, project: '', jails: [], grep: '', since: '', appLogs: true, file: 'auth.log' }
+    expect(unifiedQuery(all, { 'web/web/messages': 120 }, 5000)).toBe('?all_projects=true&app_logs=true&file=auth.log&tail=5000&cursor=%7B%22web%2Fweb%2Fmessages%22%3A120%7D')
+    expect(unifiedQuery({ ...all, all: false, appLogs: false, file: 'messages' }, {})).toBe('')
+  })
+
+  it('starts from a read, keeps the failed sources and the cursors', () => {
+    const st = startUnified(ur([['web', '\x1b[31mred\x1b[0m', '2026-03-01T08:58:00Z'], ['db', '  continued']], { 'web/web/messages': 10, 'web/db/messages': 4 }, {
+      truncated: true, sources: [{ key: 'web/build/messages', project: 'web', jail: 'build', file: 'messages', next_offset: 0, error: { code: 'busy', message: 'jail "build" is not mounted' } }],
+    }))
+    expect(st.lines.map((l) => [l.jail, l.text, l.time])).toEqual([['web', 'red', '2026-03-01T08:58:00Z'], ['db', '  continued', undefined]])
+    expect(st.next).toEqual({ 'web/web/messages': 10, 'web/db/messages': 4 })
+    expect(st.failed.map((x) => x.jail)).toEqual(['build'])
+    expect(st.truncated).toBe(true)
+  })
+
+  it('appends a follow read, merges the cursors and keeps at most max lines', () => {
+    let st = startUnified(ur([['web', 'a'], ['db', 'b']], { 'web/web/messages': 2, 'web/db/messages': 2 }))
+    st = applyUnified(st, ur([['web', 'c'], ['web', 'd']], { 'web/web/messages': 6 }), false, 3)
+    expect(st.lines.map((l) => l.text)).toEqual(['b', 'c', 'd'])
+    expect(st.next).toEqual({ 'web/web/messages': 6, 'web/db/messages': 2 })
+    expect(st.unseen).toBe(2)
+    expect(st.truncated).toBe(true)
+    expect(new Set(st.lines.map((l) => l.id)).size).toBe(3)
+    st = applyUnified(st, ur([['db', 'e']], {}), true, 3)
+    expect(st.unseen).toBe(0)
+    expect(st.lines.map((l) => l.text)).toEqual(['c', 'd', 'e'])
+  })
+
+  it('gives every jail a stable colour', () => {
+    expect(jailColour('web')).toBe(jailColour('web'))
+    expect(jailHue('db')).toBe(jailHue('db'))
+    const names = ['web', 'db', 'mail', 'build', 'proxy', 'cache', 'alpine-app', 'shop']
+    for (const n of names) expect(jailColour(n)).toBeGreaterThanOrEqual(0)
+    expect(new Set(names.map(jailColour)).size).toBeGreaterThan(3)
+  })
+
+  it('labels and times a line', () => {
+    expect(sourceLabel({ project: 'web', jail: 'db', file: 'messages' }, false)).toBe('db/messages')
+    expect(sourceLabel({ project: 'web', jail: 'db', file: 'messages' }, true)).toBe('web/db/messages')
+    expect(lineTime(undefined)).toBe('')
+    expect(lineTime('nonsense')).toBe('')
+    expect(lineTime('2026-03-01T08:58:00Z')).toMatch(/^2026-03-0[12] \d\d:58:00$/)
+    expect(unifiedText([{ id: 1, project: 'web', jail: 'db', file: 'messages', text: 'x' }])).toBe('db/messages x\n')
   })
 })

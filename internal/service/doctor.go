@@ -34,8 +34,10 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorSysctl(ctx, c)
 	s.doctorHost(ctx, c)
 	s.doctorHostIdentity(ctx, c)
+	s.doctorHostFirewall(ctx, c)
 	s.doctorZFS(ctx, c)
 	s.doctorVolumes(ctx, c)
+	s.doctorEncryption(ctx, c)
 	s.doctorPF(ctx, c)
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)
@@ -47,6 +49,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorAppsLocal(c)
 	s.doctorAppsAccess(ctx, c)
 	s.doctorRateLimits(c)
+	s.doctorLogForward(c)
 	rep := api.DoctorReport{Time: s.now().UTC(), Host: s.d.Hostname, Checks: c.list, Status: api.DoctorOK}
 	rank := map[api.DoctorStatus]int{api.DoctorOK: 0, api.DoctorInfo: 0, api.DoctorUnknown: 1, api.DoctorWarn: 2, api.DoctorFail: 3}
 	for _, ch := range c.list {

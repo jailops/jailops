@@ -66,7 +66,7 @@ stage() { # stage NAME: install the files of one package under $work/NAME
 		install -d "$root/usr/local/sbin" "$root/usr/local/libexec" "$root/usr/local/etc/rc.d" "$root/usr/local/etc/jailops" "$root/usr/local/share/doc/jailops"
 		install -m 755 "$(bin jailopsd)" "$root/usr/local/sbin/jailopsd"
 		install -m 755 "$(bin jailops-priv)" "$root/usr/local/libexec/jailops-priv"
-		install -m 555 "$pk/rc.d/jailopsd" "$pk/rc.d/jailops_priv" "$root/usr/local/etc/rc.d/"
+		install -m 555 "$pk/rc.d/jailopsd" "$pk/rc.d/jailops_priv" "$pk/rc.d/jailops_revert" "$root/usr/local/etc/rc.d/"
 		install -m 644 "$pk/jailopsd.yaml" "$root/usr/local/etc/jailops/jailopsd.yaml.sample"
 		install -m 644 "$pk/priv.conf.sample" "$root/usr/local/etc/jailops/priv.conf.sample"
 		install -m 644 "$here/README.md" "$here/LICENSE.md" "$here/docs/design.md" "$root/usr/local/share/doc/jailops/"

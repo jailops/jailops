@@ -10,6 +10,7 @@ import * as da from './apps'
 import * as dh from './host'
 import { validDNSName } from '@/lib/host'
 import * as dw from './wireguard'
+import { demoForward, unifiedRead, type DemoReply } from './logs'
 import { demoAccess } from './access'
 import { volumeName } from '@/lib/apps'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
@@ -47,6 +48,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     ops: [] as DemoOp[],
     storage: d2.storages(), sessions: d2.sessions(), certs2: d2.certificates(), profiles: d2.profiles(), updates: [] as import('@jailops/shared/api/types').UpdateReport[], history: {} as Record<string, import('@jailops/shared/api/types').UpdateRecord[]>, projects: [] as ReturnType<typeof d2.projects>,
     host: dh.hostState(),
+    fw: dh.loadFirewall() ?? dh.firewallState(typeof location !== 'undefined' && location.search.includes('pending')),
     wireguard: dw.tunnels(),
     key: { status: 'present' as 'none' | 'present' | 'escrowed', domain: 'kd-7f3a91', path: '/var/db/jailops/backup.key' },
   }
@@ -70,8 +72,12 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   if (typeof location !== 'undefined' && location.search.includes('empty')) db.projects = []
   const shells = new Map<string, { h: StreamHandlers; line: string; jail: string }>()
   const logs = da.demoLogs()
+  const forward = demoForward('bsd01.example.net')
   const access = demoAccess(() => db.jails, () => db.sets, (app) => { const x = da.detail(app); return x && x !== 'invalid' ? x.definition : undefined })
   for (const o of d.operations()) db.ops.push({ ...o, startedAt: Date.parse(o.created_at), duration: o.status === 'running' ? 600_000 : 0, done: o.status !== 'running' })
+  // encrypted volumes: the passphrase of each jail with some, and the wrong ones counted as the daemon counts them
+  const volPass: Record<string, string> = { vault: d.demoVaultPassphrase }
+  const volFails: Record<string, { n: number; until: number }> = {}
   const subs = new Set<StreamHandlers>()
   const pending: Array<{ jail: string; to: PowerState; at: number }> = []
   let seq = 2000
@@ -298,6 +304,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       const name = String(body.metadata?.name ?? '')
       if (db.jails.some((x) => x.metadata.name === name && inProject(x))) return fail(409, { code: 'already_exists', message: `Jail ${name} already exists.` })
       const project = url.searchParams.get('project') ?? ''
+      const enc = ((body.spec?.volumes ?? []) as Array<{ encrypted?: boolean }>).some((v) => v.encrypted)
+      const pass = typeof body.volume_passphrase === 'string' ? body.volume_passphrase : ''
+      if (enc && (pass.length < 12 || pass.length > 512 || /[\r\n]/.test(pass))) return fail(400, { code: 'invalid', message: pass ? 'the passphrase must be between 12 and 512 bytes long' : 'a jail with an encrypted volume needs volume_passphrase' })
+      if (!enc && pass) return fail(400, { code: 'invalid', message: 'volume_passphrase was given but no volume is encrypted' })
+      if (enc) volPass[name] = pass
       const jail: Jail = { metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), ...(project ? { project } : {}) }, spec: body.spec, status: { power: 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] } }
       return startOp(`Create jail ${name}`, { jails: [`/api/v1/jails/${name}`] }, 800, () => { db.jails.push(jail) }, undefined, false)
     }
@@ -353,8 +364,10 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           ;(db.snaps[name] ??= []).push({ metadata: { name: n, scope: 'host', created_at: new Date().toISOString() }, spec: { jail: name, comment: body.spec?.comment }, status: { written: 0 } })
           emit('jail-snapshot-created', src)
         }, undefined, false)
+      case 'unlock': case 'lock': case 'passphrase': return keysRoute(seg[2], j, body)
       case 'state': {
         const a = body.action as string
+        if (a !== 'stop' && j.status.power === 'locked') return fail(409, { code: 'locked', message: `jail "${name}" is locked: the encrypted volume(s) ${(j.status.locked ?? []).join(', ')} wait for a passphrase`, hint: `jailops jail unlock ${name}` })
         if (a === 'start' && j.status.power === 'running') return fail(409, { code: 'busy', message: `Jail ${name} is already running.` })
         if (a === 'start' && name === 'mail') return fail(500, { code: 'internal', message: 'jail: mail: exec.prestart failed', hint: 'Run jailops doctor on the host, then retry.', detail: { exit_code: '1' } })
         const to: PowerState = a === 'stop' ? 'stopped' : 'running'
@@ -387,6 +400,50 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       }
     }
     return fail(404, { code: 'not_found', message: 'No such route' })
+  }
+
+  function keysRoute(what: string, j: Jail, body: Record<string, any>): RawResponse {
+    const name = j.metadata.name
+    const src = `/api/v1/jails/${name}`
+    const enc = (j.spec.volumes ?? []).filter((v) => v.encrypted).map((v) => v.name)
+    if (!enc.length) return fail(400, { code: 'invalid', message: `jail "${name}" has no encrypted volume` })
+    const f = (volFails[name] ??= { n: 0, until: 0 })
+    if (what !== 'lock' && Date.now() < f.until) return fail(429, { code: 'rate_limited', message: 'too many wrong passphrases for this jail', hint: `wait ${Math.ceil((f.until - Date.now()) / 1000)}s and try again` })
+    // a wrong passphrase fails the operation, as on a real host; five in a row lock unlocks out for 30 seconds
+    const check = (p: unknown): ApiErrorBody | undefined => {
+      if (p === volPass[name]) { f.n = 0; return undefined }
+      if (++f.n >= 5) { f.n = 0; f.until = Date.now() + 30_000 }
+      return { code: 'bad_passphrase', message: 'the passphrase is not correct' }
+    }
+    if (what === 'lock') {
+      return startOp(`Lock jail ${name}`, { jails: [src] }, 900, () => {
+        Object.assign(j.status, { power: 'locked', locked: enc, jid: undefined, addresses: [], started_at: undefined })
+        emit('jail-locked', src)
+      })
+    }
+    if (what === 'passphrase') {
+      if (j.status.power === 'locked') return fail(409, { code: 'locked', message: `jail "${name}" is locked`, hint: `jailops jail unlock ${name}` })
+      const next = String(body.new_passphrase ?? '')
+      if (next.length < 12 || next.length > 512) return fail(400, { code: 'invalid', message: 'the passphrase must be between 12 and 512 bytes long' })
+      const err = check(body.old_passphrase)
+      const r = startOp(`Change the volume passphrase of jail ${name}`, { jails: [src] }, 900, () => { if (!err) volPass[name] = next }, undefined, false)
+      if (err) db.ops[0].failure = err
+      return r
+    }
+    if (!body.passphrase) return fail(400, { code: 'invalid', message: 'passphrase must be 1 to 512 bytes without a line break' })
+    const err = check(body.passphrase)
+    const r = startOp(`Unlock jail ${name}`, { jails: [src] }, 900, () => {
+      if (err) return
+      j.status.locked = undefined
+      if (j.status.power === 'locked') j.status.power = 'stopped'
+      emit('jail-unlocked', src)
+      if (body.start) {
+        j.status.power = 'starting'
+        pending.push({ jail: name, to: 'running', at: Date.now() })
+      }
+    }, undefined, false)
+    if (err) db.ops[0].failure = err
+    return r
   }
 
   function firewallRoute(seg: string[], m: string, body: Record<string, any>, req: RawRequest): RawResponse {
@@ -464,7 +521,32 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     return undefined
   }
   function hostRoute(seg: string[], m: string, body: Record<string, any>): RawResponse | undefined {
+    const r = hostAnswer(seg, m, body)
+    if (seg[1] === 'firewall' || seg[1] === 'pending') dh.saveFirewall(db.fw)
+    return r
+  }
+  function hostAnswer(seg: string[], m: string, body: Record<string, any>): RawResponse | undefined {
     if (seg[1] === 'identity' && m === 'GET') return ok(dh.identity(db.host))
+    if (seg[1] === 'firewall' && m === 'GET') return ok(dh.firewall(db.fw))
+    if (seg[1] === 'pending' && seg.length === 2 && m === 'GET') return ok(dh.pendingState(db.fw))
+    if (seg[1] === 'pending' && (seg[2] === 'confirm' || seg[2] === 'revert') && m === 'POST') {
+      const r = dh.endPending(db.fw, seg[2], body.id)
+      if (r === 'none') return fail(404, { code: 'not_found', message: 'no change is waiting for a confirmation' })
+      if (r === 'other') return fail(409, { code: 'conflict', message: `the pending change is not ${body.id}` })
+      emit(seg[2] === 'confirm' ? 'host-change-confirmed' : 'host-change-reverted', '/api/v1/host/pending')
+      return ok(r)
+    }
+    // one change waits for its confirmation at a time, and no other host change is made meanwhile
+    dh.settleFirewall(db.fw)
+    const waiting = db.fw.pending?.change
+    if (waiting && m !== 'GET' && !body.dry_run) return fail(409, { code: 'busy', message: `a ${waiting.module} change is waiting for its confirmation (id ${waiting.id})`, hint: 'confirm it with jailops host confirm, or undo it with jailops host revert' })
+    if (seg[1] === 'firewall' && m === 'PUT') {
+      const within = body.confirm_within ?? 120
+      if (!Number.isInteger(within) || within < 10 || within > 1800) return fail(400, { code: 'invalid', message: `the confirmation window is 10 to 1800 seconds, not ${within}` })
+      const r = dh.applyFirewall(db.fw, body.spec ?? {}, !!body.dry_run, within)
+      if (!r.dry_run && r.changed) emit('host-firewall-updated', '/api/v1/host/firewall')
+      return ok(r)
+    }
     if (seg[1] === 'identity' && m === 'PUT') {
       const spec = body.spec ?? {}
       if (spec.hostname && !validDNSName(spec.hostname)) return fail(400, { code: 'invalid', message: `hostname "${spec.hostname}" is not a valid host name` })
@@ -535,12 +617,24 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
     return fail(404, { code: 'not_found', message: `No such route: ${m} /wireguard/${seg.slice(1).join('/')}` })
   }
+  function logsRoute(seg: string[], m: string, body: Record<string, any>, url: URL, req: RawRequest): RawResponse {
+    const answer = (r: DemoReply): RawResponse => ('ok' in r ? ok(r.ok, r.etag) : fail(r.status, r.error))
+    if (seg.length === 1 && m === 'GET') return answer(unifiedRead(db.jails, logs, url.searchParams))
+    if (seg[1] === 'forward' && seg.length === 2) {
+      if (m === 'GET') return answer(forward.get())
+      if (m === 'PUT') return answer(forward.put(body as never, req.headers?.['If-Match']))
+      if (m === 'DELETE') return answer(forward.reset())
+    }
+    if (seg[1] === 'forward' && seg[2] === 'test' && m === 'POST') return answer(forward.test(String(body.sink ?? '')))
+    return fail(404, { code: 'not_found', message: `No such route: ${m} /${seg.join('/')}` })
+  }
   function extraRoutes(seg: string[], m: string, body: Record<string, any>, url: URL, req: RawRequest, project: string): RawResponse | undefined {
     const name = seg[1]
     switch (seg[0]) {
       case 'apps': return appsRoute(seg, m, body, project)
       case 'host': return hostRoute(seg, m, body)
       case 'wireguard': return wireguardRoute(seg, m, body)
+      case 'logs': return logsRoute(seg, m, body, url, req)
       case 'projects': {
         if (seg.length === 1 && m === 'GET') return ok(db.projects)
         if (seg.length === 1 && m === 'POST') {

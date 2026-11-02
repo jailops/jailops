@@ -294,6 +294,7 @@ func (s *Server) routeTable() []route {
 	)
 
 	add(s.jailRoutes()...)
+	add(s.logRoutes()...)
 
 	// Networks and firewall.
 	add(resource[api.Network]{base: "/api/v1/networks", param: "name",
@@ -605,6 +606,70 @@ func (s *Server) routeTable() []route {
 			}
 			if v.Snapshot != "" {
 				c.detail = "snapshot=" + v.Snapshot
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/host/firewall", h: func(c *rc) error {
+			v, err := svc.HostFirewall(c.r.Context())
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "PUT", pattern: "/api/v1/host/firewall", h: func(c *rc) error {
+			var in api.HostFirewallApply
+			if err := c.decode(&in); err != nil {
+				return err
+			}
+			if in.DryRun {
+				c.detail = "dry_run"
+			}
+			v, err := svc.ApplyHostFirewall(c.r.Context(), in)
+			if err != nil {
+				return err
+			}
+			if v.Pending != nil {
+				c.detail = "snapshot=" + v.Snapshot + " pending=" + v.Pending.ID
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/host/pending", h: func(c *rc) error {
+			v, err := svc.HostPending(c.r.Context())
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/host/pending/confirm", h: func(c *rc) error {
+			var in api.HostPendingAction
+			if err := c.decodeOptional(&in); err != nil {
+				return err
+			}
+			v, err := svc.ConfirmHostPending(c.r.Context(), in)
+			if err != nil {
+				return err
+			}
+			if v.Last != nil {
+				c.detail = "pending=" + v.Last.ID + " " + v.Last.Outcome
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/host/pending/revert", h: func(c *rc) error {
+			var in api.HostPendingAction
+			if err := c.decodeOptional(&in); err != nil {
+				return err
+			}
+			v, err := svc.RevertHostPending(c.r.Context(), in)
+			if err != nil {
+				return err
+			}
+			if v.Last != nil {
+				c.detail = "pending=" + v.Last.ID + " " + v.Last.Outcome
 			}
 			c.sync(200, v, 0)
 			return nil

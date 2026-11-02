@@ -50,6 +50,13 @@ func (s *Service) StartJail(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	// Refused here, not in PlanStart: the plan is rebuilt to roll an interrupted start back after a reboot, when the
+	// keys are not loaded.
+	if st, err := s.observe(ctx, name); err != nil {
+		return err
+	} else if err := s.refuseLocked(ctx, st); err != nil {
+		return err
+	}
 	if up, err := s.Jails.Running(ctx, name); err != nil {
 		return err
 	} else if up {

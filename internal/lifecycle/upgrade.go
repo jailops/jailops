@@ -116,6 +116,12 @@ func (s *Service) PlanUpgrade(ctx context.Context, name string, req UpgradeReque
 	if err != nil {
 		return nil, res, err
 	}
+	// the move ends with a start and a health check: a locked jail cannot have either (a rebuilt plan only rolls back)
+	if req.Resume == nil {
+		if err := s.refuseLocked(ctx, st); err != nil {
+			return nil, res, err
+		}
+	}
 	rec, err := s.readRecord(ctx, name)
 	if err != nil {
 		return nil, res, fmt.Errorf("read spec.json: %w", err)

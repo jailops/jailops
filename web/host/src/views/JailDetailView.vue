@@ -6,7 +6,11 @@ import { api } from '@/api/endpoints'
 import { ApiError } from '@jailops/shared/api/client'
 import { useLoad } from '@jailops/shared/composables/load'
 import { can, hasExt } from '@jailops/shared/composables/session'
-import { lifecycle, type Lifecycle } from '@/composables/jailActions'
+import { lifecycle, lockJail, encryptedVolumes, isLocked, type Lifecycle } from '@/composables/jailActions'
+import UnlockDialog from '@/components/UnlockDialog.vue'
+import PassphraseDialog from '@/components/PassphraseDialog.vue'
+import LockChip from '@/components/LockChip.vue'
+import ConfirmDialog from '@jailops/shared/components/ConfirmDialog.vue'
 import { runOp } from '@jailops/shared/composables/ops'
 import { bytes, stamp, ago } from '@jailops/shared/lib/format'
 import StatePill from '@/components/StatePill.vue'
@@ -65,6 +69,11 @@ const logFile = typeof route.query.file === 'string' ? route.query.file : ''
 const rollbackOpen = ref(false)
 const rollbackSnap = ref<string | undefined>()
 const upgradeOpen = ref(false)
+const unlockOpen = ref(false)
+const lockOpen = ref(false)
+const passOpen = ref(false)
+const encrypted = computed(() => (jail.value ? encryptedVolumes(jail.value) : []))
+const locked = computed(() => !!jail.value && isLocked(jail.value))
 const snapComment = ref('')
 const actionError = ref<ApiError | null>(null)
 
@@ -124,19 +133,26 @@ const attentionItems = computed(() => {
           <div class="row">
             <h1 class="mono">{{ jail.metadata.name }}</h1>
             <StatePill :state="jail.status.power" />
+            <LockChip v-if="jail.status.locked?.length" :volumes="jail.status.locked" :jail="jail.metadata.name" />
             <span v-if="jail.status.jid" class="faint mono">jid {{ jail.status.jid }}</span>
           </div>
           <div class="row">
-            <button v-if="jail.status.power !== 'running'" class="btn" type="button" @click="act('start')"><Icon name="play" />{{ s.jails.start }}</button>
+            <button v-if="locked" class="btn btn-primary" type="button" data-test="unlock" @click="unlockOpen = true"><Icon name="lockOpen" />{{ s.keys.unlock }}</button>
+            <button v-else-if="jail.status.power !== 'running'" class="btn" type="button" @click="act('start')"><Icon name="play" />{{ s.jails.start }}</button>
             <template v-else>
               <button class="btn" type="button" @click="act('stop')"><Icon name="square" />{{ s.jails.stop }}</button>
               <button class="btn" type="button" @click="act('restart')"><Icon name="rotateCw" />{{ s.jails.restart }}</button>
             </template>
             <button v-if="can('snapshots')" class="btn" type="button" @click="openRollback()" :disabled="!snaps.length"><Icon name="undo" />{{ s.jail.rollback }}</button>
             <button class="btn" type="button" @click="upgradeOpen = true"><Icon name="arrowUp" />{{ s.jail.upgrade }}</button>
+            <template v-if="encrypted.length && hasExt('volume_unlock') && !locked">
+              <button class="btn" type="button" data-test="lock" @click="lockOpen = true"><Icon name="lock" />{{ s.keys.lock }}</button>
+              <button class="btn" type="button" data-test="change-pass" @click="passOpen = true"><Icon name="keyRound" />{{ s.keys.change }}</button>
+            </template>
           </div>
         </div>
         <ErrorPanel v-if="actionError" :error="actionError" />
+        <Callout v-if="locked" tone="warn" data-test="locked-callout">{{ s.keys.lockedHint }}</Callout>
 
         <Callout v-for="c in attentionItems" :key="c.type" tone="danger"><strong>{{ c.type }}</strong>{{ c.reason ? ` (${c.reason})` : '' }}: {{ c.message }}</Callout>
 
@@ -256,7 +272,7 @@ const attentionItems = computed(() => {
                 <tbody>
                   <tr v-for="v in jail.spec.volumes" :key="v.name">
                     <td class="mono">{{ v.name }}</td><td class="mono">{{ v.mount }}</td>
-                    <td class="mono">{{ v.quota || '-' }}<span v-if="v.read_only" class="badge info" style="margin-left: 6px">{{ s.jail.readOnly }}</span></td>
+                    <td class="mono">{{ v.quota || '-' }}<span v-if="v.read_only" class="badge info" style="margin-left: 6px">{{ s.jail.readOnly }}</span><span v-if="v.encrypted" class="badge warn" style="margin-left: 6px" :data-encrypted="v.name">{{ s.keys.encrypted }}</span></td>
                   </tr>
                 </tbody>
               </table>
@@ -268,6 +284,9 @@ const attentionItems = computed(() => {
         </template>
         <RollbackDialog :open="rollbackOpen" :jail="jail.metadata.name" :snapshots="snaps" :initial="rollbackSnap" @close="rollbackOpen = false" @done="l.reload" />
         <UpgradeDialog :open="upgradeOpen" :jail="jail" @close="upgradeOpen = false" @done="l.reload" />
+        <UnlockDialog :open="unlockOpen" :jail="jail.metadata.name" @close="unlockOpen = false" @done="l.reload" />
+        <PassphraseDialog :open="passOpen" :jail="jail.metadata.name" @close="passOpen = false" @done="l.reload" />
+        <ConfirmDialog :open="lockOpen" :title="s.keys.lockTitle(jail.metadata.name)" :confirm-label="s.keys.lock" danger :run="() => lockJail(jail!.metadata.name)" @close="lockOpen = false" @done="l.reload"><Callout tone="warn">{{ s.keys.lockText }}</Callout></ConfirmDialog>
       </div>
     </LoadState>
   </div>

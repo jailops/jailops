@@ -29,6 +29,17 @@ func (a *app) jailDesc() *kindDesc[api.Jail] {
 		return c.Jails().Update(ctx, n, v, etag)
 	}
 	d.create = func(ctx context.Context, c *sdk.Client, v api.Jail) (opHandle, api.Jail, error) {
+		if hasEncryptedVolume(v.Spec) {
+			pass, err := a.newVolumePassphrase()
+			if err != nil {
+				return nil, api.Jail{}, err
+			}
+			h, err := handle(c.Jails().CreateWithPassphrase(ctx, v, pass))
+			return h, api.Jail{}, err
+		}
+		if a.passFile != "" {
+			return nil, api.Jail{}, usagef("--passphrase-file is given but no volume is encrypted (--volume NAME:MOUNT:encrypted)")
+		}
 		h, err := handle(c.Jails().Create(ctx, v))
 		return h, api.Jail{}, err
 	}
@@ -114,7 +125,7 @@ func (a *app) jailDesc() *kindDesc[api.Jail] {
 }
 
 // powerStates are the states 'list --state' accepts.
-var powerStates = []string{string(api.PowerStopped), string(api.PowerStarting), string(api.PowerRunning), string(api.PowerStopping), string(api.PowerError)}
+var powerStates = []string{string(api.PowerStopped), string(api.PowerStarting), string(api.PowerRunning), string(api.PowerStopping), string(api.PowerError), string(api.PowerLocked)}
 
 // jailStartFlag registers --start on create and starts the new jail when it
 // was given.
@@ -264,6 +275,7 @@ jailops jail start web`, "jails")
 	jc.AddCommand(a.jailInfo(d))
 	jc.AddCommand(a.jailLifecycleSet(d)...)
 	jc.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailCopy(d), a.jailLogs(d))
+	jc.AddCommand(a.jailUnlock(d), a.jailLock(d), a.jailPassphrase(d))
 	return jc
 }
 
@@ -280,10 +292,16 @@ const jailCreateLong = `Create a jail from flags or from a file. A jail needs a 
 storage, and none of them is guessed: name them, or use a profile that carries them.
 The project is --project, JAILOPS_PROJECT or the one chosen with 'project switch'.
 The server allocates "auto" addresses from the network and writes them back into
-the specification.`
+the specification.
+
+A volume marked encrypted (--volume NAME:MOUNT:encrypted, or encrypted: true in a
+file) is encrypted with ZFS (aes-256-gcm) under a passphrase you type twice; scripts
+give it with --passphrase-file. The passphrase is needed again after every host boot
+('jailops jail unlock'). A forgotten passphrase cannot be recovered.`
 
 const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15@stable --network lan --storage default --start
 jailops @P@ create db --project web --image freebsd-15@stable --network lan=10.20.0.50 --storage default --volume data:/var/db --memory 4G --autostart
+jailops @P@ create vault --project web --image freebsd-15@stable --network lan --storage default --volume secrets:/var/db/secrets:encrypted
 jailops @P@ create nginx --project web --image freebsd-15@stable --profile web
 jailops @P@ create -f web.yaml --project web`
 
@@ -310,7 +328,7 @@ func (a *app) addJailShortcuts(root *cobra.Command) {
 	addDelete(a, root, d)
 	root.AddCommand(a.jailInfo(d))
 	root.AddCommand(a.jailLifecycleSet(d)...)
-	root.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailLogs(d))
+	root.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.logsCmd(d))
 }
 
 func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
@@ -331,7 +349,8 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringVar(&memory, "memory", "", "memory limit, for example 2G")
 	f.StringVar(&disk, "disk", "", "disk quota, for example 20G")
 	f.IntVar(&pids, "pids", 0, "process limit")
-	f.StringArrayVar(&volumes, "volume", nil, "data volume NAME:MOUNT[:ro][:QUOTA] (repeatable)")
+	f.StringArrayVar(&volumes, "volume", nil, "data volume NAME:MOUNT[:ro][:encrypted][:QUOTA] (repeatable); encrypted asks for a passphrase")
+	f.StringVar(&a.passFile, "passphrase-file", "", "read the passphrase of the encrypted volumes from this file (its first line) instead of asking")
 	f.StringArrayVar(&hostMounts, "host-mount", nil, "mount an existing host directory SOURCE:TARGET[:ro] (repeatable; global administrators only, and the host operator must have approved the directory)")
 	f.StringVar(&fwPolicy, "firewall-policy", "", "firewall policy to apply")
 	f.StringArrayVar(&tags, "tag", nil, "firewall tag of this jail (repeatable)")
@@ -380,13 +399,16 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 		for _, v := range volumes {
 			p := strings.Split(v, ":")
 			if len(p) < 2 {
-				return api.Jail{}, usagef("volume %q must be NAME:MOUNT[:ro][:QUOTA]", v)
+				return api.Jail{}, usagef("volume %q must be NAME:MOUNT[:ro][:encrypted][:QUOTA]", v)
 			}
 			vm := api.VolumeMount{Name: p[0], Mount: p[1]}
 			for _, extra := range p[2:] {
-				if extra == "ro" {
+				switch extra {
+				case "ro":
 					vm.ReadOnly = true
-				} else {
+				case "encrypted":
+					vm.Encrypted = true
+				default:
 					vm.Quota = extra
 				}
 			}

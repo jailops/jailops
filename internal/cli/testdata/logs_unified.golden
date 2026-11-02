@@ -1,0 +1,55 @@
+$ jailops logs
+web/messages  Mar  1 08:50:00 web sshd[1]: Accepted publickey
+db/messages   Mar  1 08:52:00 db postgres[9]: checkpoint starting
+db/messages     DETAIL: no time of its own
+web/messages  Mar  1 08:55:00 web nginx[3]: upstream timed out
+db/messages   Mar  1 08:56:00 db postgres[9]: checkpoint complete
+! jailops: cache/messages: jail "cache" is not mounted (the root of a stopped jail is mounted while it runs: start it, or mount its root dataset on the host)
+
+$ jailops logs --jail web --jail db --since 7m
+web/messages  Mar  1 08:55:00 web nginx[3]: upstream timed out
+db/messages   Mar  1 08:56:00 db postgres[9]: checkpoint complete
+
+$ jailops logs -l tier=front --grep UPSTREAM
+web/messages  Mar  1 08:55:00 web nginx[3]: upstream timed out
+
+$ jailops logs --app postgresql --tail 1
+db/messages  Mar  1 08:56:00 db postgres[9]: checkpoint complete
+
+$ jailops logs --jail db -o json
+{"time":"2026-03-01T08:52:00Z","project":"main","jail":"db","app":"postgresql","file":"messages","line":"Mar  1 08:52:00 db postgres[9]: checkpoint starting"}
+{"project":"main","jail":"db","app":"postgresql","file":"messages","line":"  DETAIL: no time of its own"}
+{"time":"2026-03-01T08:56:00Z","project":"main","jail":"db","app":"postgresql","file":"messages","line":"Mar  1 08:56:00 db postgres[9]: checkpoint complete"}
+
+$ jailops logs --all-projects --jail web
+main/web/messages  Mar  1 08:50:00 web sshd[1]: Accepted publickey
+main/web/messages  Mar  1 08:55:00 web nginx[3]: upstream timed out
+
+$ jailops logs web messages --tail 1
+Mar  1 08:55:00 web nginx[3]: upstream timed out
+
+$ jailops logs web --jail db
+! usage: a jail name and --jail, --label, --app, --app-logs, --all-projects or --file do not go together: name the jails with --jail
+! hint: run 'jailops logs --help' for usage
+[exit 2]
+
+$ jailops logs --tail 0
+! usage: --tail takes between 1 and 5000 lines
+! hint: run 'jailops logs --help' for usage
+[exit 2]
+
+$ jailops logs -l tier
+! usage: --label takes KEY=VALUE, not "tier"
+! hint: run 'jailops logs --help' for usage
+[exit 2]
+
+$ jailops logs --file ../x
+! usage: log file "../x": a name is letters, digits, dot, underscore and dash, and does not start with a dot
+! hint: run 'jailops logs --help' for usage
+[exit 2]
+
+$ jailops logs --events
+! usage: --events needs a jail name
+! hint: run 'jailops logs --help' for usage
+[exit 2]
+

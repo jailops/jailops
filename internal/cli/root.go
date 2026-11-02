@@ -181,8 +181,9 @@ func seconds(d time.Duration) int {
 // projectScopedCommands are the commands that act inside a project. They stop before anything is sent when no
 // project was chosen: there is no default project. Host-level commands (images, networks, storage, projects,
 // trust, backup targets and keys, the server) are not here.
+// 'logs' checks for a project itself: with --all-projects it needs none.
 var projectScopedCommands = []string{
-	"jail", "create", "delete", "list", "info", "start", "stop", "restart", "exec", "shell", "label", "provision", "set", "logs",
+	"jail", "create", "delete", "list", "info", "start", "stop", "restart", "exec", "shell", "label", "provision", "set",
 	"firewall", "profile", "update", "config", "backup policy", "backup restore", "app export",
 }
 

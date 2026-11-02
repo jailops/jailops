@@ -63,6 +63,9 @@ var HostRCVars = map[string]*regexp.Regexp{
 	"hostname":           regexp.MustCompile(`^[A-Za-z0-9.-]{1,253}$`),
 	"ntpd_enable":        regexp.MustCompile(`^(YES|NO)$`),
 	"ntpd_sync_on_start": regexp.MustCompile(`^(YES|NO)$`),
+	// module firewall; pf_rules is only ever set to the pf.conf the module writes (sysrcSet checks it)
+	"pf_enable": regexp.MustCompile(`^YES$`),
+	"pf_rules":  regexp.MustCompile(`^/[A-Za-z0-9._/-]{1,250}$`),
 }
 
 // hostIdentityFiles are the files of /etc the identity module touches, by name below the etc directory.
@@ -105,7 +108,13 @@ type hostManifest struct {
 	Hostname string         `json:"hostname"` // the running host name before the change
 	Files    []hostSnapFile `json:"files"`
 	Applied  *hostApplied   `json:"applied,omitempty"`
+	// Firewall is the record of the firewall module when the snapshot was taken, PFEnabled whether pf ran.
+	Firewall  *hostFirewallRecord `json:"firewall,omitempty"`
+	PFEnabled *bool               `json:"pf_enabled,omitempty"`
 }
+
+// hostModuleFiles are the files of /etc each module touches; a manifest naming another file is refused.
+var hostModuleFiles = map[string][]string{api.HostModuleIdentity: hostIdentityFiles, api.HostModuleFirewall: hostFirewallFiles}
 
 // hostFile is a file of /etc as it is now.
 type hostFile struct {
@@ -282,6 +291,9 @@ func (l *Local) sysrcSet(ctx context.Context, name, value string) error {
 	}
 	if !re.MatchString(value) {
 		return invalid("invalid value %q for rc.conf %s", value, name)
+	}
+	if name == "pf_rules" && value != l.etcPath("pf.conf") {
+		return forbidden("rc.conf pf_rules is only set to %s", l.etcPath("pf.conf"))
 	}
 	_, err := l.hostRun(ctx, sysrcBin, "-f", l.etcPath("rc.conf"), name+"="+value)
 	return err
@@ -725,6 +737,11 @@ func (l *Local) HostIdentityApply(ctx context.Context, spec api.HostIdentitySpec
 	spec = spec.Canonical()
 	l.hostMu.Lock()
 	defer l.hostMu.Unlock()
+	if p, err := l.readPending(); err != nil {
+		return api.HostChange{}, err
+	} else if p != nil && !dryRun {
+		return api.HostChange{}, l.busyPending(*p)
+	}
 	f, err := l.readIdentity(ctx)
 	if err != nil {
 		return api.HostChange{}, err
@@ -817,6 +834,13 @@ var reSnapDir = regexp.MustCompile(`^[0-9]{8}T[0-9]{6}Z(-[0-9]{1,3})?$`)
 
 // takeSnapshot keeps a copy of the named files of f (only those) with the record of what was applied.
 func (l *Local) takeSnapshot(f identityFiles, names []string, reason string, applied *hostApplied) (string, error) {
+	return l.keepSnapshot(hostManifest{Module: api.HostModuleIdentity, Reason: reason, Hostname: f.hostname, Applied: applied}, f.files, names)
+}
+
+func snapFilePath(snap, name string) string { return filepath.Join("snapshots", snap, name) }
+
+// keepSnapshot keeps a copy of the named files (only those) with the manifest m; it sets the time and the list.
+func (l *Local) keepSnapshot(m hostManifest, files map[string]hostFile, names []string) (string, error) {
 	root, err := l.hostDir()
 	if err != nil {
 		return "", err
@@ -839,9 +863,9 @@ func (l *Local) takeSnapshot(f identityFiles, names []string, reason string, app
 		name = fmt.Sprintf("%s-%d", base, i)
 	}
 	dir := filepath.Join(l.cfg.HostDir, "snapshots", name)
-	m := hostManifest{Module: api.HostModuleIdentity, Time: now, Reason: reason, Hostname: f.hostname, Applied: applied}
+	m.Time, m.Files = now, nil
 	for _, n := range names {
-		hf := f.files[n]
+		hf := files[n]
 		sf := hostSnapFile{Name: n, Exists: hf.exists}
 		if hf.exists {
 			sf.Mode, sf.UID, sf.GID = uint32(hf.mode), hf.uid, hf.gid
@@ -919,9 +943,13 @@ func (l *Local) readManifest(root *os.Root, name string) (hostManifest, error) {
 	if err := json.Unmarshal(b, &m); err != nil {
 		return m, fmt.Errorf("snapshot %s: %w", name, err)
 	}
+	allowed, ok := hostModuleFiles[m.Module]
+	if !ok {
+		return m, forbidden("snapshot %s is of module %q, which the helper does not know", name, m.Module)
+	}
 	for _, f := range m.Files {
-		if !slices.Contains(hostIdentityFiles, f.Name) {
-			return m, forbidden("snapshot %s names %q, which the identity module does not touch", name, f.Name)
+		if !slices.Contains(allowed, f.Name) {
+			return m, forbidden("snapshot %s names %q, which the %s module does not touch", name, f.Name, m.Module)
 		}
 	}
 	return m, nil
@@ -959,39 +987,79 @@ func (l *Local) HostSnapshots(ctx context.Context) ([]api.HostSnapshot, error) {
 }
 
 // HostSnapshotRestore implements Host.
+// The module of the snapshot decides which entry of host-manage the restore needs.
 func (l *Local) HostSnapshotRestore(ctx context.Context, name string, dryRun bool) (api.HostChange, error) {
-	if err := l.hostAllowed(ctx, api.HostModuleIdentity); err != nil {
-		return api.HostChange{}, err
+	if !isAdmin(ctx) {
+		return api.HostChange{}, forbidden("restoring host files needs the admin assertion")
 	}
 	if err := api.ValidHostSnapshotName(name); err != nil {
 		return api.HostChange{}, err
 	}
 	l.hostMu.Lock()
 	defer l.hostMu.Unlock()
-	return l.restore(ctx, name, dryRun, true)
+	module := api.HostModuleIdentity
+	if _, err := os.Lstat(l.cfg.HostDir); err == nil {
+		root, err := l.hostDir()
+		if err != nil {
+			return api.HostChange{}, err
+		}
+		if n, err := l.resolveSnapshot(root, name); err == nil {
+			if m, err := l.readManifest(root, n); err == nil {
+				module = m.Module
+			}
+		}
+		root.Close()
+	}
+	if err := l.hostAllowed(ctx, module); err != nil {
+		return api.HostChange{}, err
+	}
+	if p, err := l.readPending(); err != nil {
+		return api.HostChange{}, err
+	} else if p != nil && !dryRun {
+		return api.HostChange{}, l.busyPending(*p)
+	}
+	return l.restoreSnapshot(ctx, name, dryRun, true, true, false)
 }
 
-// restore puts the files of a snapshot back. With keep it first takes a snapshot of what it replaces, so a restore
-// can be undone too; the undo of a failed apply does not.
+// resolveSnapshot turns "latest" into the newest snapshot's name.
+func (l *Local) resolveSnapshot(root *os.Root, name string) (string, error) {
+	if name != api.HostSnapshotLatest {
+		return name, nil
+	}
+	names, err := l.snapshotNames(root)
+	if err != nil {
+		return "", err
+	}
+	if len(names) == 0 {
+		return "", api.Errorf(api.CodeNotFound, "there is no host snapshot")
+	}
+	return names[0], nil
+}
+
+// restore puts the files of a snapshot back and makes them take effect. With keep it first takes a snapshot of
+// what it replaces, so a restore can be undone too; the undo of a failed apply does not.
 func (l *Local) restore(ctx context.Context, name string, dryRun, keep bool) (api.HostChange, error) {
+	return l.restoreSnapshot(ctx, name, dryRun, keep, true, true)
+}
+
+// restoreSnapshot puts a snapshot of any module back. effective makes the files take effect (ntpd, the host name,
+// pfctl); without it only the files go back (at boot). force makes a firewall restore reload pf even when no file
+// differs.
+func (l *Local) restoreSnapshot(ctx context.Context, name string, dryRun, keep, effective, force bool) (api.HostChange, error) {
 	root, err := l.hostDir()
 	if err != nil {
 		return api.HostChange{}, err
 	}
 	defer root.Close()
-	if name == api.HostSnapshotLatest {
-		names, err := l.snapshotNames(root)
-		if err != nil {
-			return api.HostChange{}, err
-		}
-		if len(names) == 0 {
-			return api.HostChange{}, api.Errorf(api.CodeNotFound, "there is no host snapshot")
-		}
-		name = names[0]
+	if name, err = l.resolveSnapshot(root, name); err != nil {
+		return api.HostChange{}, err
 	}
 	m, err := l.readManifest(root, name)
 	if err != nil {
 		return api.HostChange{}, err
+	}
+	if m.Module == api.HostModuleFirewall {
+		return l.restoreFirewall(ctx, root, name, m, dryRun, keep, effective, force)
 	}
 	f, err := l.readIdentity(ctx)
 	if err != nil {
@@ -1001,7 +1069,7 @@ func (l *Local) restore(ctx context.Context, name string, dryRun, keep bool) (ap
 	for _, sf := range m.Files {
 		data := ""
 		if sf.Exists {
-			b, err := root.ReadFile(filepath.Join("snapshots", name, sf.Name))
+			b, err := root.ReadFile(snapFilePath(name, sf.Name))
 			if err != nil {
 				return api.HostChange{}, mapFSErr(err)
 			}

@@ -6,6 +6,7 @@
 //	jailops-priv [flags]                     serve
 //	jailops-priv [flags] hook <phase> <jail> run one jail hook and exit
 //	jailops-priv [flags] check-config        validate the configuration, print the effective roots and allow-lists
+//	jailops-priv [flags] revert-pending      put back the snapshot of an unconfirmed host change (rc.d, at boot)
 //	jailops-priv init -pool POOL [-dry-run]  one-time setup of a host (init.go)
 //	jailops-priv version | --version
 //
@@ -39,7 +40,7 @@ var version = "dev"
 
 const defaultConfig = "/usr/local/etc/jailops/priv.conf"
 
-const synopsis = "usage: jailops-priv [flags] | version | check-config | init -pool POOL [-dry-run] | hook PHASE JAIL\n"
+const synopsis = "usage: jailops-priv [flags] | version | check-config | init -pool POOL [-dry-run] | hook PHASE JAIL | revert-pending\n"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Geteuid()))
@@ -142,7 +143,7 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.Var(&o.sysctl, "sysctl", "extra sysctl name readable through the helper")
 	fs.Var(&o.fetchHost, "fetch-host", "host fetch may download from over https (default dl-cdn.alpinelinux.org and pkg.freebsd.org)")
 	fs.Var(&o.mirror, "image-mirror", "directory fs.read_file may read (a local mirror of image archives)")
-	fs.Var(&o.hostManage, "host-manage", "host management module the helper may change (identity); empty: the host is only read (docs/appliance.md)")
+	fs.Var(&o.hostManage, "host-manage", "host management module the helper may change (identity, firewall); empty: the host is only read (docs/appliance.md)")
 	fs.StringVar(&o.hostDir, "host-dir", priv.DefaultHostDir, "root-owned directory of the host snapshots and the applied record")
 	fs.Var(&o.adminRawParam, "admin-raw-param", "jail.conf parameter an admin may set")
 	fs.Var(&o.adminAllow, "admin-allow-flag", "allow.* flag an admin may set (without prefix)")
@@ -266,7 +267,7 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 		return checkConfig(&o, cfg, stdout, stderr)
 	}
 	// the command is checked before root is required
-	if len(rest) > 0 && (rest[0] != "hook" || len(rest) != 3) {
+	if len(rest) > 0 && (rest[0] != "hook" || len(rest) != 3) && (rest[0] != "revert-pending" || len(rest) != 1) {
 		fmt.Fprint(stderr, synopsis)
 		return 2
 	}
@@ -286,6 +287,9 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 	}
 	if len(rest) == 0 {
 		return serve(&o, cfg, stderr)
+	}
+	if rest[0] == "revert-pending" {
+		return revertPending(&o, cfg, stdout, stderr)
 	}
 	return hook(&o, cfg, rest[1], rest[2], stderr)
 }
@@ -326,6 +330,27 @@ func hook(o *options, cfg priv.Config, phase, jail string, stderr io.Writer) int
 	}
 	ev.Outcome = "ok"
 	aud.Log(ev)
+	return 0
+}
+
+// revertPending is run by the rc.d script jailops_revert at boot, before netif and pf: an unconfirmed host change
+// is put back (only the files; the scripts that follow load them), so a reboot never makes it permanent.
+func revertPending(o *options, cfg priv.Config, stdout, stderr io.Writer) int {
+	l, err := newSystem(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "jailops-priv: %v\n", err)
+		return 2
+	}
+	aud := newAuditor(o, true, stderr)
+	l.SetHostNote(aud.Note)
+	out, err := l.RevertPendingAtBoot(context.Background())
+	if out != nil {
+		fmt.Fprintf(stdout, "jailops-priv: the unconfirmed %s change %s was %s (snapshot %s)\n", out.Module, out.ID, strings.ReplaceAll(out.Outcome, "_", " "), out.Snapshot)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "jailops-priv: revert-pending: %v\n", err)
+		return 1
+	}
 	return 0
 }
 
@@ -428,6 +453,12 @@ func serve(o *options, cfg priv.Config, stderr io.Writer) int {
 		return 2
 	}
 	aud := newAuditor(o, o.daemon, stderr)
+	// A host change that waits for its confirmation is re-armed, or reverted when its deadline passed while the
+	// helper was not running, before the first request is accepted.
+	l.SetHostNote(aud.Note)
+	if _, err := l.ResumePending(context.Background()); err != nil {
+		aud.Note("priv.pending_resume_failed", "error", err.Error())
+	}
 	srv := priv.NewServer(l, priv.ServerOptions{Peers: peers, Audit: aud, Version: version})
 	ln, err := listen(o.socket, o.group, os.FileMode(mode), o.dev)
 	if err != nil {

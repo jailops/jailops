@@ -1,6 +1,7 @@
 package server_test
 
 import (
+	"io"
 	"net/http"
 	"slices"
 	"strings"
@@ -49,7 +50,12 @@ func TestAuthMatrix(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s %s: %v", method, path, err)
 		}
+		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
+		// not_managed (a host module that is off here) answers 403 after the caller was authorized
+		if resp.StatusCode == 403 && strings.Contains(string(b), `"code":"not_managed"`) {
+			return 200
+		}
 		return resp.StatusCode
 	}
 	keys := e.D.Server().RouteKeys()

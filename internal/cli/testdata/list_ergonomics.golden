@@ -36,7 +36,7 @@ $ jailops list --sort bogus
 [exit 2]
 
 $ jailops list --state foo
-! usage: unknown state "foo" (use stopped, starting, running, stopping, error)
+! usage: unknown state "foo" (use stopped, starting, running, stopping, error, locked)
 ! hint: run 'jailops list --help' for usage
 [exit 2]
 

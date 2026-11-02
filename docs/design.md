@@ -71,7 +71,9 @@ supported. `jailops doctor` fails on anything older than 15.1.
    per-module exception: a module (identity, firewall, network, updates, system, storage) is managed only when both
    `jailopsd.yaml` (`host.manage.modules`) and `priv.conf` (`host-manage`) list it, and then it owns an exact list of
    files and variables, previews every change as a diff, snapshots what it touches and reports hand edits as drift.
-   See [appliance.md](appliance.md); only the identity module is built.
+   See [appliance.md](appliance.md); the identity and firewall modules are built. The firewall module is the one case
+   where JailOps writes `pf.conf`: only with `firewall` in both files, as a whole file the helper renders around the
+   same three anchor lines (5.2), and every change of it reverts unless it is confirmed.
 
 ## 2. Components
 
@@ -200,8 +202,9 @@ A host usually has more than one pool. Three things, with different owners:
 - **Storage on the big pool.** A dataset of the pool is registered as a storage (`jailops storage create bulk --dataset
   tank/jailops`), granted to a project, and a jail is created on it (`--storage bulk`). Roots, snapshots, clones,
   backups and rollback work as everywhere, under the project's own subtree and quota.
-- **Volumes.** A dataset JailOps creates under the jail (`--volume NAME:MOUNT[:ro][:QUOTA]`), snapshotted, rolled back,
-  copied and backed up with the jail.
+- **Volumes.** A dataset JailOps creates under the jail (`--volume NAME:MOUNT[:ro][:encrypted][:QUOTA]`), snapshotted, rolled back,
+  copied and backed up with the jail. An `encrypted` volume is a ZFS encryption root with a passphrase typed at creation
+  and after every boot; the jail is `locked` until then ([storage.md](storage.md#encrypted-volumes), section 16).
 - **Host mounts.** Data that already exists and that JailOps does not own: `host_mounts` in the jail spec
   (`--host-mount SOURCE:TARGET[:ro]`), mounted with nullfs from a host directory. Only a global administrator may set
   them; the helper writes a jail fstab only when every nullfs source lies below an `admin-host-mount` directory the
@@ -319,7 +322,9 @@ administrator adds three lines to `pf.conf` once (`nat-anchor`, `rdr-anchor`, `a
 never owns `pf.conf`. A ruleset is rendered, validated with `pfctl -n`, loaded in one operation
 and read back. There is no read-modify-write. Raw PF requires `admin`. The one exception is the planned host firewall module of
 appliance mode ([appliance.md](appliance.md)): when an administrator enables it in both configuration files, and only
-then, JailOps renders `pf.conf` around the same jail anchors. It is not built.
+then, the helper renders the whole `pf.conf` around the same jail anchors (the two translation anchors with the
+translation rules, `anchor "jailops/*"` first among the filter rules), checks it with `pfctl -n`, loads it with `pfctl -f`
+and reverts it unless the change is confirmed. Without the module JailOps never touches `pf.conf`.
 
 ### 5.3 WireGuard tunnels
 
@@ -626,6 +631,18 @@ jailops apply -f site.yaml          # create or update every document of a file
   root is mounted only while it runs, so its logs answer `busy` ("not mounted") with the dataset to mount. Logs
   hold what services print, so reading them needs the operator role (the one that may exec) and is audited;
   `jailops jail logs NAME [FILE]` (also `jailops logs`) is the client, `-f` follows. Extension `jail_logs`.
+- **All logs at once, and forwarding.** `GET /api/v1/logs` (extension `logs_unified`, operator in every project read)
+  takes the same per-jail reads for up to 50 files (default `messages` of every jail of the project, or of every
+  project the caller may use; the logs installed apps declare on request) and merges them by the timestamp each line
+  starts with; a line without one keeps its place in its file; per-file offsets (`next`, sent back as `cursor`) let a
+  client follow; at most 2000 lines. `jailops logs` and the console's Logs page are the clients. The daemon forwards the
+  same files, and its audit log on request, to sinks (`internal/logfwd`): RFC 5424 syslog over udp, tcp or tls
+  (octet-counted, TLS always verified) and https webhooks of JSON lines (bearer token from a root-owned file). One
+  loop per sink reads through `fs.tail_file` only, keeps a bounded queue (oldest dropped and counted), retries with
+  backoff and jitter, and saves per-file offsets in the database after delivery: at least once, duplicates after a
+  restart. The sinks are `logging.forward` of `jailopsd.yaml` unless a global admin stored a `LogForward` object
+  (`/api/v1/logs/forward`, extension `log_forward`), which replaces them. Doctor: `logs.forward`.
+  [logging.md](logging.md) is the full description.
 - **Manual changes and GitOps.** `config set` on an object that `jailops-sync` owns is allowed and audited,
   and `jailops-sync plan` reports it as drift and reverts it on apply when the repository declares that key. Only
   what the repository declares is compared (verified on the real host: a changed `hostname` that the file declares is
@@ -828,6 +845,9 @@ datasets of the jail and garbage collection and the receipt stay single-object.
 6. The catalog (per entry: kind, name, mode, owner, times, inode, extended attributes and ACLs, size,
    payload offset and SHA-256) is chunked and encrypted like data. It drives change detection, browsing,
    single-file restore and per-file hash checks.
+
+An encrypted volume whose key is not loaded cannot be read: it is left out of the run, which reports
+`skipped: locked: volume NAME`; the files of an unlocked one are read like any other and encrypted here like all data.
 
 FreeBSD specifics are written here, not borrowed: extended attributes through `extattr_*`, NFSv4 ACLs,
 file flags. Whether ctime and inode are stable across ZFS snapshots is **[unverified]** and decides how far L0
@@ -1040,7 +1060,7 @@ Open:
 
 | Item | What is missing |
 |---|---|
-| Native ZFS encryption (`--encrypted`) | Not implemented: safe key handling (a root-owned key file in a helper-approved directory, loaded at start through the helper) is unbuilt, so the flags were removed from `jailops jail create` and `jailops storage create`. `spec.encrypted` / `storage.spec.encrypted` in a file or API call answer `unsupported` ("native ZFS encryption of jails is not implemented" / "encrypted storage is not implemented") with the manual alternative in the hint |
+| Native ZFS encryption | **Encrypted volumes are built** ([storage.md](storage.md#encrypted-volumes)): a volume declared `encrypted` at creation is its own encryption root (aes-256-gcm, `keyformat=passphrase`, `keylocation=prompt`), with a passphrase a person types at creation and after every boot (`jailops jail unlock`, `lock`, `passphrase`; extension `volume_unlock`; state `locked`, error codes `locked` and `bad_passphrase`; the boot skips a locked jail and starts it after its unlock; five wrong passphrases lock unlocks out for 30 seconds). The helper's five operations (`zfs.create_encrypted`, `zfs.load_key`, `zfs.unload_key`, `zfs.change_key` take the passphrase on the request stream, never in arguments; `zfs.feature_state` reads `feature@encryption` for doctor) and the raw copy (`zfs.replicate` with `raw`) are tested against the real allow-list with stand-ins for `zfs`; the service, the lifecycle (an in-memory model of keys), the CLI and the console against fakes. UNVERIFIED on FreeBSD: that `zfs create`, `load-key` and `change-key` read one line from a stdin that is not a terminal, `zfs load-key -n` with the key loaded, the mapped error texts, a raw receive of an encryption root with `-o keylocation=prompt`, snapshots and rollbacks of a locked volume (the `encrypted-volume` block of `scripts/ci-freebsd-e2e.sh`). Not implemented: whole encrypted jails and storages (`spec.encrypted` / `storage.spec.encrypted` answer `unsupported` with the manual alternative in the hint), key files and unattended unlocks, encrypting an existing volume, a restore into an encrypted volume (a restore makes a plain volume and says so) |
 | Packages at creation (`--package`, `spec.packages`) | Not implemented: the flag was removed; the field answers `unsupported` ("installing packages at creation (spec.packages) is not implemented"). Use the provisioning `packages` step (8.5), which runs once at the first start |
 | Jail freeze | Removed. FreeBSD has no jail freeze; the `freeze` action no longer exists in the SDK, the fake or the service (an unknown action answers `invalid`) |
 | Volumes of an existing jail | `GET/POST /api/v1/jails/<n>/volumes` and `DELETE .../volumes/<v>` answer `unsupported` ("volume management is not part of this version"); `jailops config` on `disk.<name>` keys of an existing jail answers `unsupported` ("changing volumes of an existing jail is not implemented"). Declare volumes at creation |
@@ -1056,6 +1076,7 @@ Open:
 | Rate-limit shaper | Limits are stored and reported, and nothing enforces them: the jail says so (`status.warnings`, the `RateLimit` condition, a warning after `config set`) and doctor reports `jails.rate_limits` as `info` ("not enforced yet"). No shaper is built |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
 | Jail logs through the helper | `fs.list_logs` and `fs.tail_file` are tested against real directories, symlinks and a fifo on the development host and over the socket; reading a running jail's `/var/log/messages` on a FreeBSD host, a stopped jail (unmounted root: `busy`), a jail with `/var` on its own persistent dataset, and a rotation under `-f` have not been run there |
+| Unified logs and forwarding | The merge, the timestamp forms, cursors, the forwarder's offsets, rotation, queue, backoff and the senders (udp, tcp, tls with a test CA, https) are tested in process, and the forwarder against the real helper checks on the development host. Not run on a FreeBSD host: a jail's `messages` written by its `syslogd` and forwarded (the block of `scripts/ci-freebsd-e2e.sh`), a rotation by newsyslog under forwarding, FreeBSD's `syslogd` as a receiver of RFC 5424 with structured data ([logging.md](logging.md)) |
 | Jail usage (`rctl -u`) | The parser follows the `resource=amount` format of rctl(8) (`maxproc`, `cputime`, `memoryuse`) and the helper rule is tested with fakes; neither has run against a host with `kern.racct.enable=1`. Interface counters are not reported: FreeBSD's `ifconfig` prints none, and `netstat -I` would need a rule of its own |
 | Proxy (port-forward) redirects on the uplink | Rendered, and covered by phase 11 of `scripts/ci-freebsd-pf.sh`: a network's uplink is one end of an epair whose other end sits in a plain VNET jail that stands for a client on the uplink's network; its connection to the uplink address on the forwarded port reaches the jail through `rdr-anchor "jailops/*"`, the project anchor and the jail anchor, and a port that is not forwarded stays closed. The host cannot test a forward against itself (what it sends to its own address never arrives on an interface). Not covered: a physical uplink with a real remote machine. UNVERIFIED until the phase has run on a FreeBSD host |
 | `zfs_delegation` | Accepted (global admin only) and rendered into `jail.conf`; the helper does not hand datasets over, so the jail does not see them and no error says so |
@@ -1074,7 +1095,8 @@ Open:
 | `examples/provisioning/bootstrap.sh`, `nuageinit` user-data | Syntax-checked; not run on a fresh VM or a cloud provider. Provisioning `pkg install` inside a pkgbase jail is unverified, and the fixed order packages, files, services, commands means a private pkg repository must be installed with commands |
 | Unix socket identity (root = global admin, other peers anonymous) | Tested in process with fabricated peer credentials and a real socket as a non-root user. Not yet run on FreeBSD: the uid that `LOCAL_PEERCRED` reports for `sudo jailops ...`, for a non-root user, and for an ssh-forwarded socket; `temp/verify-identity.sh` is the prepared check |
 | Appliance mode, module 1 (identity) | Built and tested against real files in temporary directories, the helper's rules over its socket and fake commands; never run on FreeBSD. Open: `sysrc -f /etc/rc.conf` on a stock file, `service ntpd onestop` when ntpd is not running, the `ntpq -pn` output on 15.1, `hostname(1)`, and a restore putting the originals back byte for byte. `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_HOST=1` (it changes the host's name and resolvers). `resolvconf(8)` on DHCP hosts rewrites `resolv.conf` (reported as drift); `rc.conf.local` is not read ([appliance.md](appliance.md)) |
-| Appliance mode, modules 2 to 6 | Not built: host firewall, network, updates, system, storage overview, commit confirmed (the helper's revert timer and the boot-time revert), boot environments before a change, the first-boot wizard and the installer image are design only ([appliance.md](appliance.md)) |
+| Appliance mode, module 2 (host firewall) and commit confirmed | Built and tested with a fake `pfctl`, real files in temporary directories, the helper's rules over its socket and an injected clock and timer; never run on FreeBSD. Open: the rendered `pf.conf` with the real `pfctl` (`(self)`, `set state-policy if-bound`, the ICMPv6 lists), `pfctl -s info` reading, a host whose pf was disabled before the first apply, IPv6 sources from a real client, and the boot order of the rc.d script `jailops_revert` (`BEFORE: netif pf jailops_priv`; checked as header text only) with a real reboot while a change is pending. `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_HOSTFW=1` ([appliance.md](appliance.md)) |
+| Appliance mode, modules 3 to 6 | Not built: network, updates, system, storage overview, boot environments before a change, the first-boot wizard and the installer image are design only ([appliance.md](appliance.md)) |
 | Interface descriptions | Rendered, golden-tested and applied through fakes, the helper rules tested against the real allow-list; not run on a host: that a description set on an epair end survives its move into a vnet (JailOps sets the jail end from the host after the move anyway), `ifconfig -j <jail> <if> description` and `ifconfig -j <jail> <if>` from the host, and the end-to-end block of `scripts/ci-freebsd-e2e.sh` |
 | WireGuard | The helper's operations are tested over the socket with a stand-in for `wg` and `ifconfig`, the token, the configuration file, the `wg show dump` parser and the allocator with unit tests; nothing has run on a host: `ifconfig wg create` and a rename with `-`, `wg syncconf` and the dump format of FreeBSD's `wg`, whether 15.1 has `wg` in the base system, a pf rule naming `wg-office`, a handshake over the loopback (the end-to-end block skips without `if_wg` or `wg`), traffic from a peer into a jail through `jailops/wg.<name>` |
 | API exposure on a real network | TLS 1.3 only, certificate reload, a configured certificate never generated over and the web switch are tested in process; a public listener, a CA-signed certificate with renewal, and a proxy or Cloudflare tunnel in front are not tried. ACME, a require-client-certificate mode and the caller's address behind a proxy are not implemented (docs/exposure.md) |

@@ -47,7 +47,7 @@ func (s *Service) RefreshJails(ctx context.Context) error {
 		if j.Spec.Storage == "" {
 			j.Spec.Storage = f.Storage.Name
 		}
-		m[f.Key] = &jailEntry{jail: j, problems: r.Problems}
+		m[f.Key] = &jailEntry{jail: j, problems: r.Problems, locked: r.Locked}
 	}
 	s.mu.Lock()
 	s.jails = m
@@ -68,7 +68,7 @@ func (s *Service) refreshJail(ctx context.Context, key string) error {
 		}
 	}
 	s.mu.Lock()
-	s.jails[key] = &jailEntry{jail: j, problems: r.Problems}
+	s.jails[key] = &jailEntry{jail: j, problems: r.Problems, locked: r.Locked}
 	s.mu.Unlock()
 	s.unplace(key)
 	return nil
@@ -163,6 +163,15 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 			Message: strings.Join(e.problems, "; "), Since: s.now().UTC()})
 		if !up {
 			st.Power = api.PowerError
+		}
+	}
+	s.mu.RLock()
+	locked := append([]string(nil), e.locked...)
+	s.mu.RUnlock()
+	if !up && len(locked) > 0 {
+		st.Locked = locked
+		if st.Power == api.PowerStopped {
+			st.Power = api.PowerLocked
 		}
 	}
 	j.Status = st
@@ -292,7 +301,18 @@ func (s *Service) imageLocks(ctx context.Context, ref validate.ImageRef, storage
 // result is the Jail. Grants, the image allow-list and the quotas are checked
 // before anything is created.
 func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, error) {
+	return s.CreateJailWith(ctx, api.JailCreate{Metadata: j.Metadata, Spec: j.Spec})
+}
+
+// CreateJailWith is CreateJail with the passphrase of the jail's encrypted volumes. The passphrase is handed to
+// the creation step and dropped; the operation, its journal and the jail never hold it.
+func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Operation, error) {
+	j := api.Jail{Metadata: in.Metadata, Spec: in.Spec}
 	if err := s.requireHost("jails"); err != nil {
+		return api.Operation{}, err
+	}
+	pass, err := s.creationPassphrase(j.Spec, in.VolumePassphrase)
+	if err != nil {
 		return api.Operation{}, err
 	}
 	p, err := s.access(ctx)
@@ -373,7 +393,9 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 			if err := h.Bind("create/"+key, &opRequest{Kind: "create", Jail: key, Create: &nj}); err != nil {
 				return nil, err
 			}
-			if _, err := s.life.CreateJail(ctx, nj, false); err != nil {
+			_, err := s.life.CreateJailKeyed(ctx, nj, false, pass)
+			wipe(pass)
+			if err != nil {
 				return nil, err
 			}
 			if err := s.refreshJail(ctx, key); err != nil {
@@ -387,6 +409,8 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 	})
 	if err == nil {
 		submitted = true
+	} else {
+		wipe(pass)
 	}
 	return op, err
 }
@@ -478,6 +502,10 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	case spec.Storage != old.Spec.Storage:
 		return api.Jail{}, invalid("the storage of a jail cannot change").WithHint("copy the jail to move it")
 	}
+	if v, changed := encryptionChanged(spec.Volumes, old.Spec.Volumes); changed {
+		return api.Jail{}, invalid("the encryption of volume %q cannot change", v).
+			WithHint("a volume is encrypted when it is created: create a new jail with --volume NAME:MOUNT:encrypted and copy the data into it")
+	}
 	if !volumesEqual(spec.Volumes, old.Spec.Volumes) {
 		return api.Jail{}, api.Errorf(api.CodeUnsupported, "changing volumes of an existing jail is not implemented")
 	}
@@ -542,6 +570,20 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	return s.getByKey(ctx, key)
 }
 
+// encryptionChanged names a volume whose encryption a new spec changes.
+func encryptionChanged(spec, old []api.VolumeMount) (string, bool) {
+	was := map[string]bool{}
+	for _, v := range old {
+		was[v.Name] = v.Encrypted
+	}
+	for _, v := range spec {
+		if e, ok := was[v.Name]; ok && e != v.Encrypted {
+			return v.Name, true
+		}
+	}
+	return "", false
+}
+
 func volumesEqual(a, b []api.VolumeMount) bool {
 	return jsonEq(a, b) || (len(a) == 0 && len(b) == 0)
 }
@@ -599,6 +641,7 @@ func (s *Service) DeleteJail(ctx context.Context, name string) (api.Operation, e
 			s.forgetProvisioned(key)
 			delete(s.status, key)
 			s.mu.Unlock()
+			s.forgetKeys(key)
 			s.emitIn(ctx, p.Meta.Name, "jail-deleted", "/api/v1/jails/"+name)
 			s.accessJailGone(ctx, p.Meta.Name, name)
 			s.kick()
@@ -627,6 +670,9 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 	if a.Timeout < 0 {
 		return api.Operation{}, invalid("timeout must not be negative")
 	}
+	if l := s.lockedOf(key); a.Action != "stop" && len(l) > 0 {
+		return api.Operation{}, lifecycle.LockedError(key, l)
+	}
 	done := map[string]string{"start": "started", "stop": "stopped", "restart": "restarted"}[a.Action]
 	return s.Submit(ctx, OpSpec{
 		Description: strings.ToUpper(a.Action[:1]) + a.Action[1:] + " jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
@@ -646,8 +692,13 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 			if a.Action != "stop" {
 				_ = h.Bind("start/"+key, &opRequest{Kind: "start", Jail: key})
 				if err := s.life.StartJail(ctx, key); err != nil {
+					if api.IsCode(err, api.CodeLocked) {
+						s.observeLocked(ctx, key)
+					}
 					return nil, err
 				}
+				s.setLocked(key, nil)
+				s.markStartDue(key, false)
 				// A jail that declares provisioning is provisioned at its first start.
 				if err := s.provisionPending(ctx, key); err != nil {
 					s.kick()
@@ -671,6 +722,15 @@ func (s *Service) StartJail(ctx context.Context, key string) error {
 	defer unlock()
 	project, name := validate.SplitQualified(key)
 	err = s.life.StartJail(ctx, key)
+	if api.IsCode(err, api.CodeLocked) {
+		// Skipped, not failed: the unlock starts it (volkeys.go).
+		s.observeLocked(ctx, key)
+		s.bootLocked(ctx, key, err)
+		return err
+	}
+	if err == nil {
+		s.setLocked(key, nil)
+	}
 	res := "ok"
 	if err != nil {
 		res = "error"

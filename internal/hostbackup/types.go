@@ -34,7 +34,13 @@ type Dataset struct {
 	// restore (for example jailops:path, jailops:class, quota, readonly). The
 	// mountpoint is recorded separately, relative to the container.
 	Props map[string]string
+	// Skip says why the dataset is left out of this capture: SkipLocked for an encrypted volume whose key is not
+	// loaded (its files cannot be read). The run reports it as a warning.
+	Skip string
 }
+
+// SkipLocked is Dataset.Skip of a locked encrypted volume.
+const SkipLocked = "locked"
 
 // JailRecord is what the daemon knows about one jail, taken from its record
 // (not from guesses about the dataset layout): this package never builds a

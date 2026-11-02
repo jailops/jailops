@@ -19,13 +19,17 @@
 .Op Fl dry-run
 .Op Ar flags
 .Nm
+.Op Ar flags
+.Cm revert-pending
+.Nm
 .Cm version
 .Sh DESCRIPTION
 .Nm
 runs as root and performs, for
 .Xr jailopsd 8 ,
 a fixed list of typed operations: ZFS datasets and snapshots below the storage
-roots, jails, interfaces and bridges, pf anchors, a few sysctls, downloads of
+roots and the keys of encrypted jail volumes (the passphrase on standard input),
+jails, interfaces and bridges, pf anchors, a few sysctls, downloads of
 images and the files the daemon may read.
 Everything else is refused, and every request is written to the audit log.
 The daemon connects over a unix socket owned by root and the group
@@ -70,6 +74,20 @@ Flags:
 (its TLS listener, default :39110) and
 .Fl dry-run
 (say what would be done and do nothing; needs no root).
+.It Cm revert-pending
+Put back the snapshot of a host change that waits for its confirmation
+(commit confirmed of host management, docs/appliance.md), files only, and end
+its record; do nothing when no change waits.
+The rc.d script
+.Pa jailops_revert
+runs it at boot, before
+.Sy netif
+and
+.Sy pf ,
+so an unconfirmed change never survives a reboot.
+When the helper serves, it does the same on its own: it re-arms the timer of a
+pending change at start, or reverts at once when the deadline passed while it
+was not running.
 .It Cm version
 Print the version and the protocol version.
 .Fl -version
@@ -160,8 +178,24 @@ with
 .Fl log Ar syslog ;
 it requires
 .Sy zfs
+and
+.Sy jailops_revert
 and runs before
 .Sy jailopsd .
+The rc.d script
+.Pa /usr/local/etc/rc.d/jailops_revert
+runs
+.Cm revert-pending
+once at boot, after
+.Sy FILESYSTEMS
+and before
+.Sy netif ,
+.Sy pf
+and
+.Sy jailops_priv ,
+whenever
+.Va jailops_priv_enable
+is set.
 .Bl -tag -width jailops_priv_config
 .It Va jailops_priv_enable
 Set to

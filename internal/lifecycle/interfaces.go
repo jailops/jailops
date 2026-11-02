@@ -44,6 +44,19 @@ type ZFS interface {
 	Replicate(ctx context.Context, snapshot, dst string, props map[string]string) error
 }
 
+// Keys is the native ZFS encryption of jail volumes: helper operations that take a passphrase on their request
+// stream (internal/priv/volkeys.go). A passphrase is never put into a plan description, a journal or an error.
+// KeyStatus answers "available", "unavailable", or "" for a dataset that is not encrypted. ReplicateRaw is
+// Replicate with a raw send: the copy stays encrypted with the same passphrase, and its key is not loaded.
+type Keys interface {
+	CreateEncrypted(ctx context.Context, name string, props map[string]string, passphrase []byte) error
+	LoadKey(ctx context.Context, dataset string, passphrase []byte) error
+	UnloadKey(ctx context.Context, dataset string) error
+	ChangeKey(ctx context.Context, dataset string, oldPass, newPass []byte) error
+	KeyStatus(ctx context.Context, dataset string) (string, error)
+	ReplicateRaw(ctx context.Context, snapshot, dst string, props map[string]string) error
+}
+
 // Exec runs one host command (argv only). It returns output even on failure.
 type Exec interface {
 	Run(ctx context.Context, argv []string) ([]byte, error)

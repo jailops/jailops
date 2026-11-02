@@ -10,10 +10,13 @@ import Icon from '@jailops/shared/components/Icon.vue'
 import Callout from '@jailops/shared/components/Callout.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import type { Jail, JailLogFile } from '@jailops/shared/api/types'
+import { projectState } from '@/composables/project'
 
 const props = defineProps<{ jail: Jail; file?: string }>()
 const name = computed(() => props.jail.metadata.name)
 const available = computed(() => hasExt('jail_logs'))
+/** The Logs page with this jail chosen, where it can be read next to the others. */
+const allLogs = computed(() => ({ path: '/logs', query: { jail: name.value, ...((props.jail.metadata.project ?? projectState.current) ? { project: props.jail.metadata.project ?? projectState.current } : {}) } }))
 
 const files = ref<JailLogFile[]>([])
 const filesError = ref<ApiError | null>(null)
@@ -166,6 +169,7 @@ onBeforeUnmount(() => {
   <div data-test="logs-tab">
     <Callout v-if="!available" tone="info">{{ s.logs.unavailable }}</Callout>
     <template v-else>
+      <p v-if="hasExt('logs_unified')" class="logs-all"><router-link :to="allLogs" data-test="logs-open-all"><Icon name="fileText" />{{ s.logs.openAll }}</router-link></p>
       <div v-if="filesError" class="stack" data-test="logs-error">
         <Callout v-if="filesError.code === 'busy'" tone="warn" data-test="logs-not-mounted">{{ s.logs.notMounted }}</Callout>
         <Callout v-else-if="filesError.code === 'forbidden'" tone="warn" data-test="logs-forbidden">{{ s.logs.forbidden }}</Callout>
@@ -227,6 +231,8 @@ onBeforeUnmount(() => {
 </template>
 
 <style>
+.logs-all { margin: 0 0 8px; display: flex; justify-content: flex-end; }
+.logs-all a { display: inline-flex; gap: 6px; align-items: center; }
 .logs-layout { display: grid; gap: 12px; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); align-items: start; }
 .log-file-list { list-style: none; margin: 0; padding: 6px; display: grid; gap: 2px; max-height: 560px; overflow-y: auto; }
 .log-file { display: grid; gap: 2px; width: 100%; text-align: left; padding: 6px 8px; border: 1px solid transparent; border-radius: var(--radius); background: none; cursor: pointer; color: var(--text); }

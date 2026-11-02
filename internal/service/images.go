@@ -567,6 +567,8 @@ func (s *Service) imageUpgradeTargets(ctx context.Context, image, project string
 			t.skip = "update strategy " + string(j.Spec.Update.Strategy)
 		case ref.Pinned:
 			t.skip = "pinned to " + j.Spec.Image
+		case len(s.jails[k].locked) > 0:
+			t.skip = "locked: its encrypted volumes wait for a passphrase (jailops jail unlock)"
 		}
 		out = append(out, t)
 	}

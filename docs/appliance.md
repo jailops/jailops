@@ -9,19 +9,19 @@ name, its addresses, its firewall, its updates) can hand JailOps one area of the
 **module**, and each module is off until it is listed by name in two configuration files. Nothing changes for a host that
 does not opt in: the light, command-line use stays the default.
 
-This page is the design of all modules and the description of the one that is built. What is built and what is not is
+This page is the design of all modules and the description of the two that are built. What is built and what is not is
 in the table below; everything that has not run on a FreeBSD host is marked UNVERIFIED.
 
 ## Status
 
 | Part | State |
 |---|---|
-| Opt-in switches (`host.manage.modules` in `jailopsd.yaml`, `host-manage` in `priv.conf`) | Built, for `identity` |
+| Opt-in switches (`host.manage.modules` in `jailopsd.yaml`, `host-manage` in `priv.conf`) | Built, for `identity` and `firewall` |
 | Module 1, identity: host name, resolvers, NTP | Built: API, helper operations, CLI, doctor checks, console page. UNVERIFIED on FreeBSD: tested against real files in temporary directories and fake commands on the development host; the end-to-end block of `scripts/ci-freebsd-e2e.sh` (off unless `JAILOPS_E2E_HOST=1`) has not run on a host yet |
-| Snapshots before a change, restore | Built for module 1 |
-| Commit confirmed (automatic revert) | Design only |
-| Boot environment before a risky change | Design only |
-| Module 2, host firewall | Design only |
+| Snapshots before a change, restore | Built for modules 1 and 2 |
+| Commit confirmed (automatic revert) | Built in the helper (the pending record, its timer, the re-arm at start, the boot script `jailops_revert`), used by module 2. UNVERIFIED on FreeBSD: the boot ordering has been checked as text only (a test sorts the rc.d headers), a real reboot with a pending change has not been run |
+| Boot environment before a risky change | Design only (the firewall module does not create one) |
+| Module 2, host firewall | Built: API, helper operations, CLI, doctor check, console section and pending banner. UNVERIFIED on FreeBSD: tested with fake `pfctl` on the development host; the end-to-end block of `scripts/ci-freebsd-e2e.sh` (off unless `JAILOPS_E2E_HOSTFW=1`) has not run on a host yet. Not verified either: a host whose pf was disabled before the first apply, and IPv6 sources from a real client |
 | Module 3, network | Design only |
 | Module 4, updates | Design only |
 | Module 5, system | Design only |
@@ -94,7 +94,7 @@ A module owns an exact list of files, blocks inside files, and `rc.conf` variabl
 helper's code. It never touches anything else. Two ways of marking:
 
 - **A whole file** the module renders starts with the header line `# managed by jailops`, followed by one line of
-  explanation. Module 1 owns `/etc/resolv.conf` this way.
+  explanation. Module 1 owns `/etc/resolv.conf` this way, module 2 `/etc/pf.conf`.
 - **A managed block** inside a file the administrator also edits sits between `# jailops begin` and `# jailops end`.
   Everything outside the markers is left byte for byte as it was. Module 1 owns such a block in `/etc/ntp.conf`. A file
   whose markers are broken (a begin without an end, two blocks, an end before the begin) is refused: the helper never
@@ -120,7 +120,7 @@ Each module follows the same pattern, so that what is learned on one applies to 
 - **A declarative singleton object.** Each module is one object of a `Host*` kind under `/api/v1/host/...`
   (`HostIdentity` at `/api/v1/host/identity`). `GET` returns the values read from the host as `spec` and the management
   state as `status` (managed, drift, what was last applied). `PUT` with a spec asks for that state; a part left out of
-  the spec is not changed.
+  the spec is not changed (the firewall is the exception: its spec is one rendered file and is applied whole).
 - **Dry run.** Every change accepts `dry_run`. The reply is the same as for a real change: a unified diff of the files
   the module renders, and the list of actions in order (commands that would run, services that would restart). Nothing
   is written. The console shows this as Preview before Apply.
@@ -129,10 +129,12 @@ Each module follows the same pattern, so that what is learned on one applies to 
   apply's reply names the snapshot. `jailops host restore [SNAPSHOT]` (default: the latest) puts the files back byte for
   byte, removes a file that did not exist before, and re-runs what makes the files take effect. A restore first takes a
   snapshot of its own (reason `restore`), so a restore can be undone too. The last 20 snapshots are kept.
-- **A boot environment first, for risky modules.** Modules that change what the host boots (updates) or that can make it
-  unreachable after a reboot (network, firewall) create a boot environment with `bectl create jailops-<module>-<time>`
-  before the change, and name it in the reply. Falling back to it is the last resort when everything else fails; the
-  loader menu offers it. UNVERIFIED: `bectl` on the root pool layouts `bsdinstall` creates on 15.1.
+- **A boot environment first, for risky modules (design).** Modules that change what the host boots (updates) or that
+  can make it unreachable after a reboot (network, firewall) create a boot environment with
+  `bectl create jailops-<module>-<time>` before the change, and name it in the reply. Falling back to it is the last
+  resort when everything else fails; the loader menu offers it. Not built: the firewall module relies on commit
+  confirmed (an unconfirmed change never survives a reboot) and on its snapshots. UNVERIFIED: `bectl` on the root pool
+  layouts `bsdinstall` creates on 15.1.
 - **Audit.** Every `PUT` and `POST` under `/api/v1/host` is in the audit log like any other change (dry runs too, with
   `dry_run` in the detail), and the helper's own audit log records each of its operations.
 - **Roles.** Changing the host needs the `admin` role and a global identity. `operator` is not enough: these are not
@@ -146,40 +148,58 @@ Each module follows the same pattern, so that what is learned on one applies to 
 - **A failed change rolls back.** When a step fails after the snapshot was taken, the helper puts the snapshot back (best
   effort) and the error says whether that worked and which snapshot to restore by hand otherwise.
 
-### Commit confirmed (network and firewall; design)
+### Commit confirmed (built; firewall now, network later)
 
 A change to the host's addresses, routes or firewall can cut off the administrator who made it, and with them the
 console that would undo it. Such modules use **commit confirmed**: the change is applied, and it reverts itself after a
-time unless it is confirmed.
+time unless it is confirmed. The mechanism is generic, in the helper; the firewall module is its first user.
 
-1. The administrator applies with a confirmation window, for example `jailops host network set ... --confirm-within 120s`
-   (default 120 seconds, at most 30 minutes). The reply says the change is pending.
-2. The helper writes a **pending change record** in its own directory (`<host-dir>/pending.json`: module, snapshot
-   name, deadline, boot environment if any) and syncs it before it touches anything. Then it applies the change.
-3. The helper arms a **timer in its own process**. When the deadline passes without a confirmation, the helper restores
-   the snapshot (and re-runs what makes it take effect: `service netif restart`, `pfctl -f`), removes the record and
-   audits the revert.
-4. The administrator confirms with `jailops host confirm` or the Confirm button the console shows with a countdown. The
-   daemon calls the helper's `host.confirm` operation, which removes the record and disarms the timer. A confirmation
-   that arrives through the new configuration proves the administrator can still reach the host; that is the point.
+1. The administrator applies with a confirmation window, for example
+   `jailops host firewall set ... --confirm-within 120` (seconds, or `90s`, `5m`; default 120 seconds, 10 at least, at
+   most 30 minutes; `confirm_within` in the API). The reply says the change is pending, with its id and deadline.
+2. The helper takes the snapshot, then writes the **pending change record** `<host-dir>/pending.json` (a random id, the
+   module, the snapshot to put back, the time it was made, the deadline, the window) and syncs it (the file and its
+   directory) **before** it touches anything of the host. Then it applies the change. When a step of the apply fails,
+   the snapshot goes back at once and the record ends as `reverted`.
+3. The helper arms a **timer in its own process**. When the deadline passes without a confirmation, the helper puts
+   the snapshot back and makes it take effect (`pfctl -f /etc/pf.conf`, and `pfctl -e` or `-d` to put pf's state
+   back as the snapshot recorded it; `service netif restart` for the network module), removes the record and keeps how
+   it ended in `<host-dir>/pending.last.json` (`timed_out`; `revert_failed` with the snapshot to restore by hand if
+   putting it back failed). The helper's audit log has a line for each of these.
+4. The administrator confirms with `jailops host confirm [--id ID]`, the Confirm button of the console's banner, or
+   `POST /api/v1/host/pending/confirm`. The daemon passes it to the helper's `host.pending.confirm` operation, which
+   stops the timer, removes the record and keeps the outcome `confirmed`. A confirmation that arrives through the new
+   configuration proves the administrator can still reach the host; that is the point. `jailops host revert`, the
+   Revert button or `POST /api/v1/host/pending/revert` put the snapshot back at once (`reverted`), and
+   `jailops host pending` or `GET /api/v1/host/pending` show the module, the deadline, the seconds left and how the
+   last change ended. An id, when given, must name the pending change.
 
 Why the timer lives in the helper and not in the daemon: the daemon may be the thing that is unreachable, may be
 restarted, or may be the compromised party. The helper is root, starts before the daemon and is the only process that
 can revert the files anyway. A console that the change locked out cannot prevent the revert, because nothing has to
-reach the host for it to happen.
+reach the host for it to happen. The daemon and the console only read the record: the console polls
+`GET /api/v1/host/pending` and shows a banner with a countdown and Confirm and Revert on every page, also after a reload.
 
 What survives what:
 
 - **The daemon restarts**: nothing changes; the record and the timer are in the helper.
-- **The helper restarts**: at start the helper reads `pending.json`. If the deadline has passed it reverts at once;
-  otherwise it re-arms the timer for the time left.
-- **The host reboots before the deadline**: an rc.d script of the helper package, ordered before `netif` and `pf`,
-  checks for `pending.json` at boot. An unconfirmed record is reverted before the network comes up (the snapshot is put
-  back, so the network starts with the old configuration), the record is moved aside and the revert is logged. A reboot
-  therefore never makes an unconfirmed change permanent.
-- **Two pending changes**: refused. One change waits for its confirmation at a time.
+- **The helper restarts**: at start, before it accepts a request, the helper reads `pending.json`. If the deadline has
+  passed it reverts at once; otherwise it re-arms the timer for the time left.
+- **The host reboots before the deadline**: the rc.d script `jailops_revert` of the helper package
+  (`REQUIRE: FILESYSTEMS zfs`, `BEFORE: netif pf jailops_priv`; it runs whenever `jailops_priv_enable` is set) runs
+  `jailops-priv revert-pending`. An unconfirmed record is reverted before the network and pf come up: only the files
+  go back (the snapshot), and the `netif` and `pf` scripts that follow load them, so the network starts with the old
+  configuration. The record is removed, the outcome is kept as `reverted_at_boot` and logged. A reboot therefore never
+  makes an unconfirmed change permanent. Scripts of `/usr/local/etc/rc.d` are ordered together with the base scripts
+  after `FILESYSTEMS`, which is what makes `BEFORE: netif` possible. UNVERIFIED: a test checks the order the headers ask
+  for against the headers of the 15.1 base scripts; a real reboot with a pending change has not been run.
+- **Two pending changes**: refused. One change waits for its confirmation at a time, and while it waits every other
+  change of the host (any module's apply, a restore) answers `busy` with the id of the pending change in
+  `detail.pending`. A dry run still works.
 
-Commit confirmed is design only. Module 1 does not need it: a wrong host name or resolver does not cut off the console.
+Corrections to the earlier design: the record is removed rather than "moved aside" (how it ended is kept in
+`pending.last.json`, which the API returns as `last`); the operation is `host.pending.confirm`, not `host.confirm`; and
+the boot step puts back files only, because pf and the network are not up yet when it runs.
 
 ## The modules, in build order
 
@@ -256,35 +276,103 @@ informational level), warns on drift, and is ok when managed without drift. `hos
   `rc.conf`, `service ntpd onestop` when ntpd is not running, the `ntpq -pn` output on 15.1, and the restore putting the
   originals back byte for byte.
 
-### 2. Host firewall (design)
+### 2. Host firewall (built)
 
-Scope: the host's own packet filter: what may reach the host itself (ssh, the console, the API), not the jails.
+Scope: the host's own packet filter: what may reach the host itself (ssh, the console, the API), not the jails. Kind
+`HostFirewall`, extension `host_firewall`; every change goes through commit confirmed (extension `host_pending`).
 
-Today JailOps never owns `pf.conf`: the administrator adds three anchor lines and JailOps loads only its anchors
-(`jailops/...`). With the firewall module enabled, and only then, **JailOps owns `/etc/pf.conf`** (whole-file, with the
-header) and the `rc.conf` variables `pf_enable` and `pf_rules`. The rendered file contains, in pf's required order:
+Without the module JailOps never owns `pf.conf`: the administrator adds three anchor lines and JailOps loads only its
+anchors (`jailops/...`); that stays exactly so on a host that does not enable `firewall`. With the module enabled in
+both files, and only then, **JailOps owns `/etc/pf.conf`** (whole-file, with the header) and the `rc.conf` variables
+`pf_enable` (set to `YES`) and `pf_rules` (set to `/etc/pf.conf` only when it names another file).
 
-1. options and normalisation;
-2. the translation anchors JailOps already needs (`nat-anchor "jailops/*"`, `rdr-anchor "jailops/*"`);
-3. the host policy from a template;
-4. the filter anchor `anchor "jailops/*"` for the jails, unchanged.
+**What the helper renders.** The daemon sends a validated spec, never a file; the helper validates it again and renders
+the whole file itself, in pf's required order:
 
-The jail anchors keep working exactly as now; the module only writes the part around them that the administrator used
-to write. Templates:
+1. the address sets, as `table <jo_hf_NAME> const { ... }`;
+2. options and normalisation: `set skip on lo0` (loopback), `set state-policy if-bound` (the jails' NAT needs it, see
+   [install.md](install.md)), `scrub in all fragment reassemble`;
+3. the translation anchors of design 5.2, exactly: `nat-anchor "jailops/*"` and `rdr-anchor "jailops/*"`;
+4. the filter anchor `anchor "jailops/*"`, **first** among the filter rules;
+5. the host policy: `block in all` (`block log in all` with `logging`), `pass out all keep state` (replies to what the
+   host sends match its state), always neighbour discovery and router advertisements (`icmp6-type { neighbrsol,
+   neighbradv, routersol, routeradv }`), path MTU discovery and ICMP errors (`toobig`, `unreach`, `timex`,
+   `paramprob`, and IPv4 `unreach code needfrag`), then ssh on its ports from its sources, the console and API on the
+   daemon's TLS port from its sources, the `allow` rows, and echo requests when `icmp` is on. Every pass names
+   `to (self)`, the host's own addresses.
 
-- **default**: block inbound to the host; pass ssh (22) and the console/API port (`listen.https.address`, 39110 by
-  default); pass ICMP and ICMPv6 needed for path MTU and neighbor discovery; pass all outbound with state.
-- **open**: pass everything to the host (for a host behind another firewall).
+Correction to the earlier design, which placed the filter anchor after the host policy: it comes first. The jails'
+anchors are final (`quick`) for the jails' own interfaces and do not depend on what follows, while a broad rule of the
+host before them would decide for them; `jailops doctor`'s `pf.order` check asks for exactly this order.
 
-An allow list from the console narrows ssh and the console to address sets (`HostFirewall.spec.admin_sources`). The
-rendered ruleset is checked with `pfctl -n` before it is loaded, loaded with `pfctl -f`, and read back, the same way the
-jail anchors are. Every change uses commit confirmed. Before the first enable, the module refuses unless the address
-the request came from is admitted by the new ruleset (a guard against the obvious lock-out), and still uses the
-confirmation window.
+**Templates and the spec** (`GET`/`PUT /api/v1/host/firewall`):
 
-Risks: a lock-out (mitigated by commit confirmed and the guard); an existing hand-written `pf.conf` with rules the
-template lacks (the first apply shows it in the diff, and the snapshot keeps it); pf syntax changes between releases
-(the PF traffic matrix is the acceptance test).
+- `default`: block inbound to the host; pass ssh (port 22 unless `ssh.ports` says otherwise, at most 4 ports) and the
+  console/API port (`listen.https.address`, 39110 by default; filled in by the daemon, no rule when the daemon has no TLS
+  listener); the always-on rules above; ping when `icmp` is on.
+- `open`: pass everything to the host (for a host behind another firewall). Sources for ssh or the console are refused
+  with it, since they would have no effect.
+- `custom-rules`: `default` plus `allow`, at most 64 rows of `proto` (`tcp` or `udp`), `ports` (`N` or `N-M`, at most 16),
+  `from` (sources) and a `comment` (at most 80 characters, no line break, quote or backslash), rendered as a comment line.
+
+Sources (`ssh.allow_from`, `console.allow_from`, `allow[].from`; empty means anywhere) are addresses, prefixes without
+host bits or `@name` of a set in `sets` (at most 16 sets of 1 to 256 members). The design named one list,
+`admin_sources`, and project address sets: the built spec has one list per door, and the sets are defined in the spec
+itself, because the project address sets belong to projects, change without the host firewall knowing, and would make
+the helper render from data it cannot check. `nat` is `none` (another value is `unsupported`; the jails' NAT is in their
+networks' anchors). `logging` logs what the final block rule drops (to `pflog0`). The spec is applied whole: a part left
+out takes its default, not the value applied before (one rendered file; this differs from the identity module).
+
+**Before anything is written:**
+
+- the rendered text is checked with `pfctl -n -f -` (on standard input; never a file the daemon names);
+- the **lock-out guard**: the daemon passes the address the request came from, as its listener saw it. When that address
+  could reach neither an ssh port nor the console port under the new rules, the apply is refused (`forbidden`, detail
+  `guard: lockout`). When the address is unknown (the unix socket, a request through a hub), the apply needs `i_know`
+  (`--i-know`), and the confirmation window still applies. A dry run reports both as warnings. The guard runs on every
+  apply, not only the first.
+
+Then the snapshot (`/etc/pf.conf`, its absence included, and `/etc/rc.conf` when a variable changes; reason `adopt` for
+the first apply, which keeps the administrator's own file, `apply` after), the pending record, the file, `sysrc`,
+`pfctl -f /etc/pf.conf`, `pfctl -e` when pf did not run, and a read-back that `pfctl -s rules` calls the anchor
+`jailops/*`. On a confirmation the file stays; at the deadline, or with `jailops host revert`, the snapshot goes back
+byte for byte (or the file is removed when there was none), is loaded, and pf is turned off again if it was off.
+Applying the same spec again changes nothing and arms nothing.
+
+**Drift and the dry run.** `<host-dir>/firewall.json` records the spec and the SHA-256 of the file written. A hand edit
+of `/etc/pf.conf` (or `pf_enable` that is not `YES`, or `pf_rules` naming another file) is drift: `jailops doctor` warns
+(`host.firewall`), `jailops host firewall show` names it, the console shows a badge, and `jailops host firewall diff`
+shows the difference. A dry run (`--dry-run`, Preview in the console) prints the unified diff of the file and the
+`rc.conf` variables, the rules in plain words, the actions and the warnings (ssh open to the world, the open template,
+a refusal the apply would meet).
+
+**CLI and console.** `jailops host firewall show|set [flags]|apply -f FILE|diff [-f FILE]`, `jailops host pending`,
+`jailops host confirm [--id ID]`, `jailops host revert [--id ID]`; `--dry-run` everywhere, `--confirm-within` and
+`--i-know` on the changes. The console's Host page has a Firewall section (the rules, an editor for the template, the
+ssh and console sources, the allow rows and the sets with inline validation, Preview with the diff, Apply with the
+window explained, a warning chip while ssh is open to the world), and every page shows the pending banner.
+
+**Doctor:** `host.firewall` is ok "not managed" when the module is off, warns when it is enabled on one side only,
+while a change waits for its confirmation, and on drift.
+
+**The helper's pfctl forms**, its own allow-list (not part of `run.exec`, which the daemon cannot use for any of them):
+`pfctl -n -f -`, `pfctl -f /etc/pf.conf`, `pfctl -e`, `pfctl -d`, `pfctl -s info`, `pfctl -s rules`.
+
+Risks and limits:
+
+- A lock-out: mitigated by the guard and by commit confirmed, which reverts without anything reaching the host. A
+  confirmed change that locks out a later session (an address that changes) is not reverted; the console of the host or
+  `jailops host restore` from a local shell put a snapshot back.
+- An existing hand-written `pf.conf` with rules the template lacks (NAT of the host's own, queues, other anchors): the
+  first apply shows them in the diff, and the `adopt` snapshot keeps the file.
+- The rules apply to the host only (`to (self)`); traffic to the jails is decided by their anchors and, on the uplink,
+  by `block in all`: as on a host that follows the install guide, inbound traffic to jails needs a rule of its own,
+  which this module does not render (`allow` rows open the host, not the jails).
+- UNVERIFIED on FreeBSD 15.1 until the end-to-end block has run: the rendered syntax (`(self)`, `set state-policy`,
+  the `scrub` line, the ICMPv6 lists) with the real `pfctl`; `pfctl -s info` reading; a host whose pf was disabled before
+  the first apply (`pfctl -e` after the load, `pfctl -d` on the revert) and one where the pf module is not loaded at all
+  (the apply fails and is undone; the module does not load `pf.ko`); IPv6 sources from a real client; the boot order of
+  `jailops_revert`.
 
 ### 3. Network (design)
 
@@ -389,16 +477,25 @@ or by hand.
 ### What the helper may touch
 
 The helper's operations for appliance mode are typed, take structured fields, and work only when `priv.conf` lists the
-module (`host-manage`). Changing operations also need the admin assertion. Built (module 1):
+module (`host-manage`). Changing operations also need the admin assertion. Built (modules 1 and 2, and commit
+confirmed):
 
 | Operation | Admin | Needs `host-manage` | What it may touch |
 |---|---|---|---|
 | `host.identity.read` | no | no | reads `/etc/resolv.conf`, `/etc/ntp.conf`, `/etc/rc.conf`, runs `/bin/hostname` and `/usr/bin/ntpq -pn`; writes nothing |
 | `host.identity.apply` | yes | `identity` | writes `/etc/resolv.conf` (whole) and the jailops block of `/etc/ntp.conf`; `sysrc -f /etc/rc.conf` for `hostname`, `ntpd_enable`, `ntpd_sync_on_start` only; `/bin/hostname <name>`; `service ntpd restart` or `onestop`; the snapshot directory and `identity.json` under `host-dir`. With `dry_run` it writes nothing |
 | `host.snapshot.list` | no | no | reads the snapshot manifests under `host-dir` |
-| `host.snapshot.restore` | yes | `identity` | the same files as apply, from a snapshot under `host-dir`; only the paths the module owns are ever restored, whatever a manifest says |
+| `host.snapshot.restore` | yes | the module of the snapshot | the same files as that module's apply, from a snapshot under `host-dir`; only the paths the module owns are ever restored, whatever a manifest says (a manifest of an unknown module or naming another file is refused); then what makes them take effect (ntpd and the host name, or `pfctl -f`/`-e`/`-d`). Refused (`busy`) while a change waits for its confirmation |
+| `host.firewall.read` | no | no | reads `/etc/pf.conf` (only whether it exists, carries the header and its digest leave the helper) and `/etc/rc.conf`, runs `pfctl -s info`; writes nothing |
+| `host.firewall.apply` | yes | `firewall` | renders `/etc/pf.conf` (whole) from validated fields; `pfctl -n -f -` of that text; `sysrc -f /etc/rc.conf` for `pf_enable` (`YES` only) and `pf_rules` (`/etc/pf.conf` only); `pfctl -f /etc/pf.conf`, `pfctl -e`, `pfctl -s rules`; the snapshot directory, `pending.json` and `firewall.json` under `host-dir`. Refused when the caller's address would be shut out, and while another change waits. With `dry_run` it writes nothing |
+| `host.pending.read` | no | no | reads `pending.json` and `pending.last.json` |
+| `host.pending.confirm` | yes | the module of the pending change | removes `pending.json`, writes `pending.last.json`, stops the timer |
+| `host.pending.revert` | yes | no (undoing is always allowed) | puts the snapshot of the pending change back as `host.snapshot.restore` does, then removes the record |
 
-Planned, per module: firewall: `/etc/pf.conf` and `pf_enable`, `pf_rules`; network: the `rc.conf` variables listed
+The timer, the re-arm at start and `jailops-priv revert-pending` (the boot script) act without a request; they do only
+what `host.pending.revert` does, and log it.
+
+Planned, per module: network: the `rc.conf` variables listed
 above for named interfaces; updates: `pkg` and `bectl` with fixed arguments; system: `shutdown` with two fixed forms, a
 managed block of `/etc/sysctl.conf` with an allow-list, managed blocks of `authorized_keys`, `pw` with fixed forms;
 storage: a managed block of `/etc/periodic.conf`. Each is added as its own operations with refusal tests, like module 1.
@@ -406,9 +503,11 @@ storage: a managed block of `/etc/periodic.conf`. Each is added as its own opera
 ### Where snapshots live, and why
 
 The helper keeps snapshots and its records in its **own** directory, `host-dir` in `priv.conf` (default
-`/var/db/jailops-priv/host`, owned by root, mode 0700): `snapshots/<name>/` with the copies and a manifest, and
-`identity.json`, the last applied identity. A snapshot also carries the record that was current when it was taken, so a
-restore puts the record back with the files.
+`/var/db/jailops-priv/host`, owned by root, mode 0700): `snapshots/<name>/` with the copies and a manifest,
+`identity.json`, the last applied identity, `firewall.json`, the last applied firewall and the digest of the file, and
+`pending.json` and `pending.last.json` of commit confirmed. A snapshot also carries the record that was current when it
+was taken (and whether pf ran), so a restore puts the record back with the files. A pending record is read only when it
+names a known module and a snapshot name of the helper's own form.
 
 They are not in the daemon's state directory, although that would be the obvious place. The helper never writes in a
 directory the daemon can write (the daemon could swap a path component for a symlink between a check and the write).
@@ -426,9 +525,14 @@ by the helper. With a module on, it gains exactly that module's operations, with
   why the module is opt-in in `priv.conf`. It cannot write any other line into those files, any other `rc.conf`
   variable, or any file outside the list; it cannot run a command of its choosing; it cannot restore content it wrote
   itself.
-- firewall and network (planned): it can open or close the host's firewall and change addresses, within the template
-  and the validated fields. Commit confirmed does not protect against a compromised daemon (it can confirm); it
-  protects the administrator against mistakes.
+- firewall (built): it can open or close the host's firewall within the templates and the validated fields: open
+  ssh, the console and up to 64 ports to chosen sources, or close them, and turn pf on. It cannot write a pf rule of its
+  own (there is no raw text; every value is an address, a prefix, a port or a set name), cannot load another file, flush
+  states or tables or disable pf except to put back the state a snapshot recorded. The lock-out guard takes the caller's
+  address from the daemon, so a compromised daemon can defeat it; it is a guard against mistakes.
+- network (planned): it can change addresses, within the validated fields. Commit confirmed does not protect against a
+  compromised daemon (it can confirm, or revert); it protects the administrator against mistakes. It cannot extend a
+  deadline: the deadline is written by the helper.
 
 An API admin with a module enabled can change what that module owns; that is the purpose. As with the other `priv.conf`
 allow-lists, enable only the modules you would let your API admins change.

@@ -46,6 +46,7 @@ type Fake struct {
 	snaps    map[string]*fakeSnap
 	bms      map[string]*fakeBM
 	features map[string][]string
+	states   map[string]string // pool@feature -> state, see SetFeatureState
 	clock    func() time.Time
 }
 

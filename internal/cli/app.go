@@ -130,6 +130,8 @@ type app struct {
 	cl      *sdk.Client
 	parent  *sdk.Client
 	conn    *Connection
+	// passFile is --passphrase-file of a jail creation (volkeys.go).
+	passFile string
 }
 
 // NewRootCommand returns the command tree for env. It exists for tests and

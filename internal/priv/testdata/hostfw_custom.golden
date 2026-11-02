@@ -1,0 +1,34 @@
+# managed by jailops
+# Rendered from `jailops host firewall`; a change made here is reported as drift and replaced by the next apply.
+
+# address sets
+table <jo_hf_admins> const { 192.0.2.0/24, 2001:db8:a::/48, 198.51.100.7 }
+table <jo_hf_monitoring> const { 2001:db8:f::5 }
+
+# options: loopback is not filtered; states are bound to their interface (the jails' NAT needs it)
+set skip on lo0
+set state-policy if-bound
+scrub in all fragment reassemble
+
+# translation: the NAT and the port forwards of the jails' networks
+nat-anchor "jailops/*"
+rdr-anchor "jailops/*"
+
+# filtering: the jails' own anchors first
+anchor "jailops/*"
+block log in all
+pass out all keep state
+# neighbour discovery, router advertisements, path MTU discovery and ICMP errors: always passed
+pass in inet6 proto icmp6 icmp6-type { neighbrsol, neighbradv, routersol, routeradv } no state
+pass in inet6 proto icmp6 icmp6-type { toobig, unreach, timex, paramprob } no state
+pass in inet proto icmp icmp-type unreach code needfrag no state
+# ssh
+pass in proto tcp from { <jo_hf_admins>, 203.0.113.9, 2001:db8:ff::/64 } to (self) port { 22, 2222 }
+# the JailOps console and API
+pass in proto tcp from <jo_hf_admins> to (self) port 8443
+# allow 1: web
+pass in proto tcp from any to (self) port { 80, 443 }
+# allow 2: wireguard for the branch office
+pass in proto udp from 2001:db8:1::/56 to (self) port 51820
+# allow 3
+pass in proto tcp from { <jo_hf_monitoring>, 192.0.2.77 } to (self) port 9100:9110

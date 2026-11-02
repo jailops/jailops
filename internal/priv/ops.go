@@ -113,6 +113,14 @@ const (
 	OpHostIdentityApply   = "host.identity.apply"
 	OpHostSnapshotList    = "host.snapshot.list"
 	OpHostSnapshotRestore = "host.snapshot.restore"
+	// Module firewall and commit confirmed (hostfw.go, hostpending.go): the reads need nothing; apply needs the
+	// admin assertion and host-manage = firewall, confirm the assertion and the module of the pending change, revert
+	// the assertion only.
+	OpHostFirewallRead   = "host.firewall.read"
+	OpHostFirewallApply  = "host.firewall.apply"
+	OpHostPendingRead    = "host.pending.read"
+	OpHostPendingConfirm = "host.pending.confirm"
+	OpHostPendingRevert  = "host.pending.revert"
 
 	OpSysctl    = "sys.sysctl"
 	OpNDPOpen   = "ndp.open"
@@ -126,6 +134,8 @@ type zfsReplicateArgs struct {
 	Snapshot string            `json:"snapshot"`
 	Dst      string            `json:"dst"`
 	Props    map[string]string `json:"props,omitempty"`
+	// Raw sends the snapshot as stored (zfs send -w): an encrypted volume stays encrypted.
+	Raw bool `json:"raw,omitempty"`
 }
 
 // replicator is what a ZFS client offers when it can copy a snapshot into a new dataset without the stream passing
@@ -414,6 +424,9 @@ func init() {
 		return empty{}, h.ZFS().Receive(ctx, a, c.In)
 	})
 	register(OpZFSReplicate, false, func(ctx context.Context, h Host, a zfsReplicateArgs, _ *callIO) (any, error) {
+		if a.Raw {
+			return empty{}, h.ReplicateRaw(ctx, a.Snapshot, a.Dst, a.Props)
+		}
 		r, ok := h.ZFS().(replicator)
 		if !ok {
 			return nil, invalid("this host cannot replicate")

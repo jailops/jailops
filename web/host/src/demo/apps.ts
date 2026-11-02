@@ -266,6 +266,8 @@ export function installSteps(a: App, jail: string, project: string, image: strin
 // ---- jail logs ---------------------------------------------------------------------------------------
 
 interface Line { text: string; ts: number }
+/** A read of the demo with the time each line was written. */
+export type DemoRead = Omit<JailLogRead, 'lines'> & { entries: Array<{ text: string; ts: number; n?: number }> }
 interface File { lines: Line[]; size: number; grows: boolean; last: number; rotations: number; next: () => string }
 
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
@@ -293,6 +295,9 @@ function generator(kind: string, jail: string): (t: number, i: number) => string
     case 'daemon':
       // One line carries terminal escape sequences, as a careless service would print them: the viewer must show them inert.
       return (t, i) => i % 9 === 4 ? `${sys(t)} ${host} prometheus[2231]: \x1b[31mlevel=WARN\x1b[0m msg="Error on ingesting samples" err="out of order sample"\x07` : `${sys(t)} ${host} prometheus[2231]: time=${new Date(t).toISOString()} level=INFO source=head.go msg="Head GC completed" duration=${(1.2 + (i % 7) * 0.4).toFixed(1)}ms`
+    case 'pg':
+      // ISO timestamps, and a DETAIL line now and then that has none of its own (it belongs to the line before).
+      return (t, i) => i % 6 === 5 ? `\tDETAIL:  Key (id)=(${4100 + i}) already exists.` : `${new Date(t).toISOString()} [${2400 + (i % 5)}] ${i % 6 === 4 ? 'ERROR:  duplicate key value violates unique constraint "orders_pkey"' : `LOG:  checkpoint complete: wrote ${12 + (i % 40)} buffers`}`
     case 'valkey':
       return (t, i) => `2231:M ${new Date(t).getDate()} ${MON[new Date(t).getMonth()]} ${new Date(t).getFullYear()} ${new Date(t).toTimeString().slice(0, 8)}.${String(i % 1000).padStart(3, '0')} * ${i % 4 ? '100 changes in 300 seconds. Saving...' : 'Background saving terminated with success'}`
     default:
@@ -322,6 +327,7 @@ function layout(jail: string, app: string): Layout[] {
   ]
   if (app === 'nginx' || jail === 'web' || jail === 'proxy') base.push({ name: 'nginx/access.log', kind: 'access', count: 400, grows: true, rotated: 1 }, { name: 'nginx/error.log', kind: 'error', count: 40, grows: false })
   if (app === 'valkey') base.push({ name: 'valkey/valkey.log', kind: 'valkey', count: 80, grows: true })
+  if (app === 'postgresql') base.push({ name: 'postgresql/postgresql.log', kind: 'pg', count: 80, grows: true })
   if (app === 'forgejo') base.push({ name: 'forgejo/forgejo.log', kind: 'messages', count: 50, grows: true })
   return base
 }
@@ -389,12 +395,19 @@ export function demoLogs() {
       })
     },
     read(jail: string, app: string, file: string, q: URLSearchParams): JailLogRead | 'missing' | 'compressed' {
+      const r = this.entries(jail, app, file, q)
+      if (typeof r === 'string') return r
+      const { entries, ...out } = r
+      return { ...out, lines: entries.map((l) => ({ text: l.text, ...(l.n ? { n: l.n } : {}) })) }
+    },
+    /** A read as the server makes it, with the time each line was written (the unified view merges by it). */
+    entries(jail: string, app: string, file: string, q: URLSearchParams): DemoRead | 'missing' | 'compressed' {
       const f = filesOf(jail, app).get(file)
       if (!f) return 'missing'
       if (/\.(gz|bz2|xz)$/.test(file)) return 'compressed'
       let offset = Number(q.get('offset') ?? 0)
       if (offset > 0) grow(f)
-      const out: JailLogRead = { jail, file, lines: [], next_offset: f.size }
+      const out: DemoRead = { jail, file, entries: [], next_offset: f.size }
       if (offset > f.size) { out.rotated = true; offset = 0 }
       const sinceRaw = q.get('since') ?? ''
       const m = /^(\d+)([mhd])$/.exec(sinceRaw)
@@ -408,9 +421,9 @@ export function demoLogs() {
         if (start < offset) return
         if (since && l.ts < since) return
         if (grep && !l.text.toLowerCase().includes(grep)) return
-        out.lines.push({ text: l.text, ...(offset === 0 ? { n: i + 1 } : {}) })
+        out.entries.push({ text: l.text, ts: l.ts, ...(offset === 0 ? { n: i + 1 } : {}) })
       })
-      if (out.lines.length > tail) { out.lines = out.lines.slice(-tail); out.truncated = true }
+      if (out.entries.length > tail) { out.entries = out.entries.slice(-tail); out.truncated = true }
       return out
     },
   }

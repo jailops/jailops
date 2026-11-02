@@ -412,6 +412,8 @@ func TestAuthorizationMatrix(t *testing.T) {
 				got = allowed // a public route checks its own credential (login)
 			case code == 401:
 				got = unauthorized
+			case code == 403 && errorCode(body) == "not_managed":
+				got = allowed // a host module that is off here: the caller was authorized
 			case code == 403:
 				got = forbidden
 			case code == 404 && pr.want == notFound:

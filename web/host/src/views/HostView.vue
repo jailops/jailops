@@ -13,6 +13,8 @@ import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import ConfirmDialog from '@jailops/shared/components/ConfirmDialog.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
 import { isGlobalAdmin } from '@/composables/project'
+import { hasExt } from '@jailops/shared/composables/session'
+import HostFirewallPanel from '@/components/HostFirewallPanel.vue'
 import { formOf, specOf, specKey, validateForm, diffLines, enableLines, RESTART, MAX_NAMESERVERS, MAX_SEARCH, MAX_NTP, type HostForm } from '@/lib/host'
 import type { HostChange, HostSnapshot } from '@jailops/shared/api/types'
 
@@ -189,6 +191,8 @@ const lines = computed(() => diffLines(preview.value?.change.diff ?? ''))
             </div>
           </form>
         </section>
+
+        <HostFirewallPanel v-if="hasExt('host_firewall')" @applied="snaps.reload()" />
 
         <section class="panel" data-test="host-snapshots">
           <header><h2>{{ s.host.snapshots }}</h2></header>

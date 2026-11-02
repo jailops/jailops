@@ -25,6 +25,14 @@
 #                   and ntpd_enable of THIS machine, then restores them through 'jailops host restore' and checks that
 #                   the files are back byte for byte (and puts them back from its own copies if anything fails on the
 #                   way). Off by default; CI does not set it. A wrapper enables it with: JAILOPS_E2E_HOST=1 sh scripts/ci-freebsd-e2e.sh
+# JAILOPS_E2E_HOSTFW  1 runs the host firewall block (docs/appliance.md): it enables the module and rewrites
+#                   /etc/pf.conf of THIS machine, always with --confirm-within 20 and always keeping the ssh port open
+#                   (the port sshd listens on, from sockstat -4l, to the address in SSH_CLIENT; to anywhere when
+#                   SSH_CLIENT is not set). It first applies and does NOT confirm, and waits for the helper to put the
+#                   original back; then applies and confirms; then restores the original through the snapshot and
+#                   checks it byte for byte and that pf runs the original rules. On any failure the EXIT trap puts
+#                   the original pf.conf and rc.conf back, reloads pf and restores the configuration. Off by default;
+#                   CI does not set it: JAILOPS_E2E_HOSTFW=1 sh scripts/ci-freebsd-e2e.sh
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -249,6 +257,100 @@ if [ "${JAILOPS_E2E_HOST:-}" = 1 ]; then
 	host_same
 fi
 
+# The host firewall module rewrites this machine's /etc/pf.conf: only with JAILOPS_E2E_HOSTFW=1, always with a
+# confirmation window, never closing the ssh port this script is reached through, and always put back.
+if [ "${JAILOPS_E2E_HOSTFW:-}" = 1 ]; then
+	step "host firewall (JAILOPS_E2E_HOSTFW=1: this machine's /etc/pf.conf, with commit confirmed, then restored)"
+	forig=$work/hostfw-orig
+	rm -rf "$forig"; mkdir -p "$forig"
+	cp -p /etc/pf.conf "$forig/pf.conf"
+	cp -p /etc/rc.conf "$forig/rc.conf"
+	cp -p /usr/local/etc/jailops/priv.conf /usr/local/etc/jailops/jailopsd.yaml "$forig/"
+	pfctl -s rules > "$forig/rules" 2>/dev/null || true
+	# the ssh port sshd listens on, and the address this session comes from: exactly these stay open
+	sshport=$(sockstat -4l | awk '$2 == "sshd" { n = split($6, a, ":"); print a[n]; exit }')
+	[ -n "$sshport" ] || sshport=22
+	src=${SSH_CLIENT:-}; src=${src%% *}
+	if [ -n "$src" ]; then
+		set -- --ssh-port "$sshport" --ssh-from "$src" --console-from "$src"
+		echo "keeping ssh port $sshport open to $src (from SSH_CLIENT)"
+	else
+		set -- --ssh-port "$sshport"
+		echo "SSH_CLIENT is not set (not over ssh, or sudo dropped it): ssh port $sshport stays open to anywhere"
+	fi
+	set -- "$@" --template custom-rules --allow "tcp 9 from 192.0.2.1 comment e2e" --confirm-within 20 --i-know
+	hostfw_cleanup() { # what a failure in this block leaves behind: the original pf.conf, loaded, and the configuration
+		[ -n "${hostfw_dirty:-}" ] || return 0
+		echo "putting /etc/pf.conf back from $forig" >&2
+		$J -y host revert >/dev/null 2>&1 || true
+		cp -p "$forig/pf.conf" /etc/pf.conf; cp -p "$forig/rc.conf" /etc/rc.conf
+		pfctl -f /etc/pf.conf || echo "WARNING: pfctl -f /etc/pf.conf failed; load it by hand" >&2
+		cp -p "$forig/priv.conf" /usr/local/etc/jailops/priv.conf; cp -p "$forig/jailopsd.yaml" /usr/local/etc/jailops/jailopsd.yaml
+		service jailops_priv restart >/dev/null 2>&1; service jailopsd restart >/dev/null 2>&1
+		hostfw_dirty=
+	}
+	host_cleanup() { hostfw_cleanup; }
+	pf_same() { # pf_same: /etc/pf.conf is the original, byte for byte, and pf runs its rules
+		cmp -s "$forig/pf.conf" /etc/pf.conf || { diff "$forig/pf.conf" /etc/pf.conf >&2; fail "/etc/pf.conf is not the original"; }
+		pfctl -s rules > "$work/rules.now" 2>/dev/null
+		cmp -s "$forig/rules" "$work/rules.now" || { diff "$forig/rules" "$work/rules.now" >&2; fail "pf does not run the original rules"; }
+	}
+	hostfw_dirty=1
+	expect "not managed by default" 'Managed: +no' $J host firewall show
+	expect "changing is refused while the module is off" 'not_managed' sh -c "$J host firewall set --i-know 2>&1; true"
+	pf_same
+	echo 'host-manage = firewall' >> /usr/local/etc/jailops/priv.conf
+	printf 'host:\n  manage:\n    modules: [firewall]\n' >> /usr/local/etc/jailops/jailopsd.yaml
+	check "jailops_priv checkconfig with host-manage" service jailops_priv checkconfig
+	check "restart jailops_priv" service jailops_priv restart
+	check "restart jailopsd" service jailopsd restart
+	n=0; until $J host firewall show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
+	expect "managed now" 'Managed: +yes' $J host firewall show
+	expect "the unix socket has no address: the lock-out check needs --i-know" 'i-know' sh -c "$J host firewall set --ssh-port $sshport --confirm-within 20 2>&1; true"
+	expect "the dry run shows the diff" '^\+block in all$' $J --dry-run host firewall set "$@"
+	pf_same
+
+	# 1. the revert path: apply, do NOT confirm, and the helper's timer puts the original back
+	expect "apply" 'REVERTS at' $J host firewall set "$@"
+	expect "pf.conf is the managed file" '^# managed by jailops$' head -1 /etc/pf.conf
+	expect "pf runs it, with the jails' anchor" 'anchor "jailops/\*"' pfctl -s rules
+	# pfctl prints a port by its name in /etc/services when it has one
+	sshsvc=$(awk -v p="$sshport/tcp" '$2 == p { print $1; exit }' /etc/services)
+	expect "pf passes ssh on port $sshport" "port = ($sshport|${sshsvc:-$sshport})( |$)" pfctl -s rules
+	expect "it waits for its confirmation" 'Reverts at:' $J host pending
+	expect "doctor says so" 'host\.firewall +WARN' sh -c "$J doctor 2>&1; true"
+	expect_retry "the change reverts by itself after 20 s" 'was timed out' $J host pending
+	pf_same
+	expect "nothing waits any more" 'nothing waits' $J host pending
+
+	# 2. apply and confirm: the change stays past its deadline
+	expect "apply again" 'REVERTS at' $J host firewall set "$@"
+	expect "confirm" 'was confirmed' $J host confirm
+	sleep 22 # past the deadline of the confirmed change: nothing may revert it
+	expect "still the managed file" '^# managed by jailops$' head -1 /etc/pf.conf
+	expect "doctor: managed, no drift" 'host\.firewall +PASS' sh -c "$J doctor 2>&1; true"
+	cp -p /etc/pf.conf "$work/pf.managed"
+	echo '# a hand edit' >> /etc/pf.conf
+	expect "a hand edit is drift" 'Drift: +pf\.conf' $J host firewall show
+	expect "and doctor says so" 'host\.firewall +WARN' sh -c "$J doctor 2>&1; true"
+	expect "the diff shows it" '^-# a hand edit$' $J host firewall diff
+	cp -p "$work/pf.managed" /etc/pf.conf
+
+	# 3. the snapshot taken before the first apply puts the original back, byte for byte, and loads it
+	snap=$($J host snapshots | awk '$2 == "firewall" && $3 == "adopt" { print $1; exit }')
+	[ -n "$snap" ] || fail "no snapshot of the original pf.conf"
+	expect "the restore dry run" '^\+# managed by jailops$|^-# managed by jailops$' $J --dry-run host restore "$snap"
+	check "restore" $J -y host restore "$snap"
+	pf_same
+	cmp -s "$forig/rc.conf" /etc/rc.conf || fail "/etc/rc.conf is not the original"
+	cp -p "$forig/priv.conf" /usr/local/etc/jailops/priv.conf; cp -p "$forig/jailopsd.yaml" /usr/local/etc/jailops/jailopsd.yaml
+	check "restart jailops_priv" service jailops_priv restart
+	check "restart jailopsd" service jailopsd restart
+	n=0; until $J host firewall show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
+	hostfw_dirty=
+	pf_same
+fi
+
 run_pf() {
 	step "the packet filter, with real traffic (scripts/ci-freebsd-pf.sh)"
 	# the full matrix takes minutes of waiting in its last phases; the quick form still covers every rule path
@@ -289,6 +391,24 @@ expect "the host end of the jail's epair" 'description: jailops jail=demo/web ne
 expect "the jail end, inside the jail" 'description: jailops jail=demo/web net=lan \(jail side\)' $J exec --project demo web -- ifconfig -a
 expect "doctor finds every description" 'net.descriptions +PASS' $J doctor
 
+step "logs of all jails, and forwarding them to a syslog listener (tcp on the host)"
+marker="ci-forward-$$"
+# a plain tcp listener on the loopback stands for the syslog server; it ends by itself after five minutes
+timeout 300 nc -lk 127.0.0.1 15514 > "$work/syslog.out" 2>/dev/null &
+ncpid=$!
+check "add a syslog sink over tcp" $J logs forward add syslog --to tcp://127.0.0.1:15514 --name ci-tcp --facility local3 --from-project demo
+expect "the sink is listed" '^ci-tcp +syslog +tcp://127\.0\.0\.1:15514 +local3' $J logs forward list
+# the sink starts at the end of the files: log the line again until one arrives
+expect_retry "a line logged in the jail arrives with the jail in the structured data" \
+	"\\[jailops project=\"demo\" jail=\"web\" app=\"\" file=\"messages\"\\] .*$marker" \
+	sh -c "$J exec --project demo web -- logger -t citest $marker >/dev/null 2>&1; grep -a -o '<15[0-9]>1 [^<]*$marker' '$work/syslog.out'"
+expect "the unified view shows it as web/messages" "^web/messages +.*$marker" $J logs --project demo --grep "$marker"
+expect "-o json carries the jail" "\"jail\":\"web\".*$marker" $J logs --project demo --jail web --grep "$marker" -o json
+expect "the sink delivers" '^ci-tcp +ok ' $J logs forward status
+check "remove the sink" $J logs forward remove ci-tcp
+check "back to the list of jailopsd.yaml" $J logs forward reset
+kill "$ncpid" 2>/dev/null || true
+
 step "WireGuard (a server, a peer enrolled on it, and a client made from the token on the same host)"
 # FreeBSD has the if_wg driver; the wg program comes with the base system or with the package wireguard-tools. A CI
 # image without either skips this block and says what is missing.
@@ -311,7 +431,8 @@ else
 	# the server on the loopback address
 	check "a client from the token" $J wireguard join "$token" --name home --endpoint 127.0.0.1:51820 --address 10.97.0.2/32 --allowed-ips 10.97.1.0/24
 	expect "the client's interface says what it is" 'description: jailops wireguard=home' ifconfig wg-home
-	expect_retry "a handshake between the two" '[[:space:]][1-9][0-9]+$' "$wgbin" show wg-home latest-handshakes
+	# a handshake starts with the first packet into the tunnel: send one (it gets no answer, which does not matter) each try
+	expect_retry "a handshake between the two" '[[:space:]][1-9][0-9]+$' sh -c "ping -c 1 -t 1 10.97.1.1 >/dev/null 2>&1; $wgbin show wg-home latest-handshakes"
 	expect "the server reports it" 'laptop .* ago' $J wireguard status office
 	if $J doctor 2>&1 | grep -E ' FAIL '; then fail "doctor reports a failing check with tunnels"; fi
 	check "delete the client" $J wireguard delete -y home
@@ -319,6 +440,47 @@ else
 	if ifconfig wg-home >/dev/null 2>&1 || ifconfig wg-office >/dev/null 2>&1; then fail "a tunnel interface is still there"; fi
 	[ ! -e /var/db/jailops-priv/wireguard/office ] || fail "the keys of a deleted tunnel are still there"
 fi
+
+step "an encrypted volume (passphrase from a file, lock, a refused start, a wrong and the right passphrase)"
+# The volume is a ZFS encryption root; its passphrase goes from the file to the daemon and the helper and reaches zfs on
+# standard input. A pool without the encryption feature skips this block and says so.
+enc_state=$(zpool get -H -o value feature@encryption "$pool" 2>/dev/null || true)
+case $enc_state in
+enabled | active)
+	(umask 077; printf '%s\n' 'ci-passphrase-0123' >"$work/vault.pass"; printf '%s\n' 'ci-wrong-passphrase' >"$work/wrong.pass"
+		printf '%s\n' 'ci-new-passphrase-4567' >"$work/new.pass")
+	check "a jail with an encrypted volume" $J create vault --project demo --image freebsd@stable --network lan --storage default \
+		--volume secrets:/var/db/secrets:encrypted --passphrase-file "$work/vault.pass" --start
+	vds=$(zfs list -H -o name -r "$pool" | grep '/jails/vault/data/secrets$') || fail "no dataset for the encrypted volume"
+	keystatus() { zfs get -H -o value keystatus "$vds"; }
+	expect "the key is loaded after the creation" '^available$' keystatus
+	expect "aes-256-gcm under a passphrase typed at a prompt" '^aes-256-gcm,passphrase,prompt$' sh -c "zfs get -H -o value encryption,keyformat,keylocation $vds | paste -s -d , -"
+	expect "the volume is its own encryption root" "^$vds\$" zfs get -H -o value encryptionroot "$vds"
+	check "a file on the encrypted volume" $J exec --project demo vault -- sh -c 'echo ci-secret > /var/db/secrets/s'
+	check "stop" $J stop vault --project demo
+	check "lock" $J jail lock vault --project demo
+	expect "the key is unloaded" '^unavailable$' keystatus
+	expect "the jail is locked" 'vault +locked' $J jail list --project demo
+	expect "a start is refused with locked" '(^|[^_])locked' sh -c "$J start vault --project demo 2>&1; true"
+	expect_refused "the start failed" $J start vault --project demo
+	expect "a wrong passphrase is refused" 'bad_passphrase' sh -c "$J jail unlock vault --project demo --passphrase-file $work/wrong.pass 2>&1; true"
+	expect "still locked" '^unavailable$' keystatus
+	check "unlock with the right passphrase" $J jail unlock vault --project demo --passphrase-file "$work/vault.pass"
+	expect "the key is loaded" '^available$' keystatus
+	check "start" $J start vault --project demo
+	expect "the file is read back" '^ci-secret$' $J exec --project demo vault -- cat /var/db/secrets/s
+	check "change the passphrase" $J jail passphrase vault --project demo --passphrase-file "$work/vault.pass" --new-passphrase-file "$work/new.pass"
+	check "lock again" $J jail lock vault --project demo
+	expect_refused "the old passphrase opens it no more" $J jail unlock vault --project demo --passphrase-file "$work/vault.pass"
+	check "the new one does" $J jail unlock vault --project demo --passphrase-file "$work/new.pass"
+	expect "doctor checks the pool feature" 'volumes.encryption +PASS' $J doctor
+	if grep -rq 'ci-passphrase-0123\|ci-new-passphrase-4567' /var/log/messages /var/db/jailops 2>/dev/null; then fail "a passphrase reached a log or the daemon's files"; fi
+	check "delete the jail" $J delete -y vault --project demo
+	if zfs list "$vds" >/dev/null 2>&1; then fail "the encrypted volume is still there"; fi
+	rm -f "$work/vault.pass" "$work/wrong.pass" "$work/new.pass"
+	;;
+*) echo "SKIP: encrypted volume: feature@encryption of pool $pool is ${enc_state:-unknown}, not enabled or active" ;;
+esac
 
 step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
 check "create a second jail" $J create up --project demo --image freebsd@stable --network lan --storage default --start

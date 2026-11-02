@@ -15,6 +15,7 @@ example without FreeBSD), with a hint on the next line when there is one. `jailo
 | `sysctl.net.inet.ip.forwarding`, `sysctl.net.inet6.ip6.forwarding` | forwarding, while a network needs it | `fail`: `sysctl <name>=1` and the `rc.conf` lines of [install.md](install.md) (JailOps never sets forwarding) |
 | `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` | the host answers the off-link probes of a shared IPv6 segment's routers, while a `proxy`-mode network exists | `warn` (recommended): `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` and the line in `/etc/sysctl.conf`; see below |
 | `host.identity` | host management, module identity ([appliance.md](appliance.md)) | `ok` "not managed" while the module is off (the doctor has no info level); `warn` when only one of `jailopsd.yaml` and `priv.conf` enables it, or on drift: the host name, `/etc/resolv.conf` or the NTP block was changed outside JailOps since it applied them (`jailops host show` names the part; apply again or `jailops host restore`) |
+| `host.firewall` | host management, module firewall ([appliance.md](appliance.md)) | `ok` "not managed" while the module is off; `warn` when only one of `jailopsd.yaml` and `priv.conf` enables it, while a change waits for its confirmation (`jailops host confirm` or `jailops host revert`), or on drift: `/etc/pf.conf`, `pf_enable` or `pf_rules` changed outside JailOps (`jailops host firewall diff` shows it; apply again or `jailops host restore`) |
 | `host.ntp` | `ntpd_enable` and what `ntpq -pn` reports | `warn` when ntpd is not enabled or has no system peer yet; `unknown` when ntpq does not answer |
 | `sysctl.persistent` | forwarding (and the sysctl above) on and persistent | `warn`: set `gateway_enable=YES` and `ipv6_gateway_enable=YES` in `rc.conf`, `net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` in `sysctl.conf` (JailOps never edits them) |
 | `zfs.pool`, `zfs.pool.<storage>` | the pools are `ONLINE` | `zpool status <pool>` |
@@ -27,6 +28,7 @@ example without FreeBSD), with a hint on the next line when there is one. `jailo
 | `wireguard.tools` | only with a WireGuard tunnel: the wg program (`/usr/bin/wg` or `/usr/local/bin/wg`) and the module `if_wg` | `warn`: `pkg install wireguard-tools`; the loop loads `if_wg` (`if_wg_load="YES"` in `/boot/loader.conf` for boot) |
 | `wireguard.forwarding` | a tunnel serves JailOps networks and forwarding is off | `warn`: `gateway_enable=YES` and `sysctl net.inet.ip.forwarding=1` (JailOps never sets forwarding) |
 | `wireguard.firewall` | a loaded pf rule of the host mentions each server's listen port | `warn`: add the rule the hint prints to `pf.conf` and reload it |
+| `logs.forward` | only with log sinks ([logging.md](logging.md)): whether each delivers | `warn`: a sink has failed for more than five minutes (`jailops logs forward status` shows the error, `jailops logs forward test NAME` tries again); `info`: a plain udp or tcp sink goes to a remote address |
 | `network.ndproxy` | every `proxy`-mode network has an answering proxy | `fail`: add `ndp-proxy = <uplink>=<prefix>` to `priv.conf` and restart `jailops_priv`; see the network's `NDPProxy` condition. `warn` in the first minutes after `jailopsd` starts: the capture of the uplink is being opened; run the doctor again |
 | `jails.health` | datasets and records of every jail | `warn` names the damaged jails |
 | `reconcile` | the last reconcile pass | `fail` shows the error; `warn` lists drift (rendered and live state differ) |
@@ -118,6 +120,8 @@ The hint says which.
 | `key_not_escrowed` | a raw backup was refused because the key has no escrow | `jailops backup key escrow` |
 | `rate_limited` | too many failed authentications from this source | wait and use the right credential |
 | `not_managed` | JailOps does not manage that part of the host: `host.manage.modules` of `jailopsd.yaml` or `host-manage` of `priv.conf` does not list the module | add the lines the hint names and restart both services, or change the host by hand ([appliance.md](appliance.md)) |
+| `locked` | an encrypted volume of the jail waits for its passphrase (after a boot or a lock); the jail does not start | `jailops jail unlock NAME [--start]` ([storage.md](storage.md#encrypted-volumes)) |
+| `bad_passphrase` | the passphrase of the encrypted volumes is wrong (five in a row: `rate_limited` for 30 seconds) | type it again; a lost passphrase cannot be recovered |
 | `maintenance`, `missing_chunks`, `lease_expired`, `plaintext_denied` | backup node states | `jailops explain CODE` |
 | `not_leader`, `no_quorum`, `version_skew` | cluster and version states (cluster mode is not built) | `jailops explain CODE` |
 

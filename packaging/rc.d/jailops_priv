@@ -1,7 +1,7 @@
 #!/bin/sh
 #
 # PROVIDE: jailops_priv
-# REQUIRE: zfs
+# REQUIRE: zfs jailops_revert
 # BEFORE: jailopsd
 # KEYWORD: shutdown
 #

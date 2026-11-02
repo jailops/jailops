@@ -1,0 +1,27 @@
+# managed by jailops
+# Rendered from `jailops host firewall`; a change made here is reported as drift and replaced by the next apply.
+
+# options: loopback is not filtered; states are bound to their interface (the jails' NAT needs it)
+set skip on lo0
+set state-policy if-bound
+scrub in all fragment reassemble
+
+# translation: the NAT and the port forwards of the jails' networks
+nat-anchor "jailops/*"
+rdr-anchor "jailops/*"
+
+# filtering: the jails' own anchors first
+anchor "jailops/*"
+block in all
+pass out all keep state
+# neighbour discovery, router advertisements, path MTU discovery and ICMP errors: always passed
+pass in inet6 proto icmp6 icmp6-type { neighbrsol, neighbradv, routersol, routeradv } no state
+pass in inet6 proto icmp6 icmp6-type { toobig, unreach, timex, paramprob } no state
+pass in inet proto icmp icmp-type unreach code needfrag no state
+# ssh
+pass in proto tcp from any to (self) port 22
+# the JailOps console and API
+pass in proto tcp from any to (self) port 39110
+# ping
+pass in inet proto icmp icmp-type echoreq
+pass in inet6 proto icmp6 icmp6-type echoreq

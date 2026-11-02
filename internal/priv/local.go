@@ -50,6 +50,14 @@ type Host interface {
 	Unmount(ctx context.Context, dataset string) error
 	// Sysctl reads one value from the allow-list.
 	Sysctl(ctx context.Context, name string) (string, error)
+
+	// Encrypted volumes of jails (volkeys.go). A passphrase travels on the request stream, never in arguments.
+	CreateEncrypted(ctx context.Context, o zfs.CreateOpts, passphrase []byte) error
+	LoadKey(ctx context.Context, dataset string, passphrase []byte) error
+	UnloadKey(ctx context.Context, dataset string) error
+	ChangeKey(ctx context.Context, dataset string, oldPass, newPass []byte) error
+	// ReplicateRaw copies a snapshot into a new dataset with a raw send (an encrypted volume stays encrypted).
+	ReplicateRaw(ctx context.Context, snapshot, dst string, props map[string]string) error
 	// NDPOpen returns a read-only, locked packet capture of an approved uplink that delivers neighbor discovery
 	// frames only. The caller owns the descriptor.
 	NDPOpen(ctx context.Context, uplink string, promisc bool) (*os.File, error)
@@ -91,6 +99,8 @@ type Host interface {
 	HostIdentityApply(ctx context.Context, spec api.HostIdentitySpec, dryRun bool) (api.HostChange, error)
 	HostSnapshots(ctx context.Context) ([]api.HostSnapshot, error)
 	HostSnapshotRestore(ctx context.Context, name string, dryRun bool) (api.HostChange, error)
+	// The firewall module and commit confirmed (hostfw.go, hostpending.go).
+	service.HostFirewallSystem
 }
 
 // Deps are the raw (unvalidated) implementations Local guards.
@@ -114,8 +124,11 @@ type Deps struct {
 	// Etc is the directory host management reads and writes (default /etc); tests substitute one. There is no
 	// configuration for it.
 	Etc string
-	// Now is the clock of host snapshot names (default time.Now).
+	// Now is the clock of host snapshot names and of the deadline of a pending change (default time.Now).
 	Now func() time.Time
+	// AfterFunc arms the timer of a pending change and returns its stop function (default time.AfterFunc); tests
+	// substitute a timer they fire themselves.
+	AfterFunc func(d time.Duration, f func()) (stop func() bool)
 	// WGLocate returns the wg program (default: the first of wireguard.Binaries that is root's); tests substitute
 	// their own.
 	WGLocate func() string
@@ -141,7 +154,9 @@ type Local struct {
 
 	ndp ndpState
 
-	hostMu sync.Mutex // one host management request at a time
+	hostMu   sync.Mutex                 // one host management request at a time
+	pendStop func() bool                // stops the timer of the pending change (hostMu)
+	hostNote func(msg string, a ...any) // logs what the timer and a restart do with a pending change
 
 	frozenMu sync.Mutex
 	frozen   map[string]int // directories a running command reads its configuration from: no writes meanwhile
@@ -596,6 +611,10 @@ func (g zfsGuard) Receive(ctx context.Context, o zfs.ReceiveOpts, r io.Reader) e
 // Replicate is zfs send | zfs receive with the same checks as each of them, over a kernel pipe: the data never
 // passes through this process or the caller.
 func (g zfsGuard) Replicate(ctx context.Context, snapshot, dst string, props map[string]string) error {
+	return g.replicate(ctx, snapshot, dst, props, false)
+}
+
+func (g zfsGuard) replicate(ctx context.Context, snapshot, dst string, props map[string]string, raw bool) error {
 	pr, pw, err := os.Pipe()
 	if err != nil {
 		return err
@@ -605,7 +624,7 @@ func (g zfsGuard) Replicate(ctx context.Context, snapshot, dst string, props map
 	defer cancel()
 	sent := make(chan error, 1)
 	go func() {
-		err := g.Send(ctx, zfs.SendOpts{Snapshot: snapshot}, pw)
+		err := g.Send(ctx, zfs.SendOpts{Snapshot: snapshot, Raw: raw}, pw)
 		pw.Close()
 		sent <- err
 	}()

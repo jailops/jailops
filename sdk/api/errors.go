@@ -40,6 +40,8 @@ const (
 	CodeMissingChunks   Code = "missing_chunks"   // a commit references chunks the repository lacks (HTTP 409); upload them and retry
 	CodeLeaseExpired    Code = "lease_expired"    // the backup session timed out or was closed (HTTP 410)
 	CodeNotManaged      Code = "not_managed"      // a host management module is not enabled (HTTP 403); the hint names the lines to add
+	CodeLocked          Code = "locked"           // an encrypted volume waits for its passphrase (HTTP 409); unlock the jail first
+	CodeBadPassphrase   Code = "bad_passphrase"   // the passphrase of an encrypted volume is wrong (HTTP 403); nothing else is said
 )
 
 // Error is the error body of the API and the error type of the SDK.
@@ -114,8 +116,10 @@ func (c Code) HTTPStatus() int {
 		return http.StatusConflict
 	case CodeNotLeader, CodeNoQuorum, CodeVersionSkew, CodeMaintenance:
 		return http.StatusServiceUnavailable
-	case CodeMissingChunks:
+	case CodeMissingChunks, CodeLocked:
 		return http.StatusConflict
+	case CodeBadPassphrase:
+		return http.StatusForbidden
 	case CodeLeaseExpired:
 		return http.StatusGone
 	}

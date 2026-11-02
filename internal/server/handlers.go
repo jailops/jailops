@@ -30,12 +30,13 @@ func (s *Server) jailRoutes() []route {
 	}.routes()
 	jr = append(jr,
 		route{method: "POST", pattern: "/api/v1/jails", h: func(c *rc) error {
-			var j api.Jail
+			// a Jail, with the passphrase of its encrypted volumes when it has some (api.JailCreate)
+			var j api.JailCreate
 			if err := c.decode(&j); err != nil {
 				return err
 			}
 			c.object = "/api/v1/jails/" + j.Metadata.Name
-			op, err := svc.CreateJail(c.r.Context(), j)
+			op, err := svc.CreateJailWith(c.r.Context(), j)
 			if err != nil {
 				return err
 			}
@@ -122,6 +123,39 @@ func (s *Server) jailRoutes() []route {
 				return err
 			}
 			op, err := svc.JailAction(c.r.Context(), c.pathArg("name"), a)
+			if err != nil {
+				return err
+			}
+			c.async(op)
+			return nil
+		}},
+		// encrypted volumes (volume_unlock): the passphrase is in the body and nowhere else
+		route{method: "POST", pattern: "/api/v1/jails/{name}/unlock", h: func(c *rc) error {
+			var u api.JailUnlock
+			if err := c.decode(&u); err != nil {
+				return err
+			}
+			op, err := svc.UnlockJail(c.r.Context(), c.pathArg("name"), u)
+			if err != nil {
+				return err
+			}
+			c.async(op)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/lock", h: func(c *rc) error {
+			op, err := svc.LockJail(c.r.Context(), c.pathArg("name"))
+			if err != nil {
+				return err
+			}
+			c.async(op)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/passphrase", h: func(c *rc) error {
+			var pc api.JailPassphraseChange
+			if err := c.decode(&pc); err != nil {
+				return err
+			}
+			op, err := svc.ChangeJailPassphrase(c.r.Context(), c.pathArg("name"), pc)
 			if err != nil {
 				return err
 			}

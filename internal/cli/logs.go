@@ -28,6 +28,12 @@ type logOpts struct {
 }
 
 func (a *app) jailLogs(d *kindDesc[api.Jail]) *cobra.Command {
+	cmd, _ := a.jailLogsCmd(d)
+	return cmd
+}
+
+// jailLogsCmd builds 'jail logs' and returns its flags, which 'logs' shares.
+func (a *app) jailLogsCmd(d *kindDesc[api.Jail]) (*cobra.Command, *logOpts) {
 	var o logOpts
 	cmd := &cobra.Command{
 		Use:   "logs NAME [FILE]",
@@ -79,7 +85,7 @@ jailops jail logs web --events --since-id 120 --count 50`,
 	f.BoolVar(&o.events, "events", false, "stream the log events the server publishes for the jail instead of reading files")
 	f.IntVar(&o.count, "count", 0, "with --events: stop after this many events")
 	f.StringVar(&o.sinceID, "since-id", "", "with --events: resume after this event id")
-	return cmd
+	return cmd, &o
 }
 
 // completeLogFiles completes the FILE argument from the server's listing.

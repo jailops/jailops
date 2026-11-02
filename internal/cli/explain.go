@@ -47,6 +47,8 @@ var explanations = []Explanation{
 	{api.CodeLeaseExpired, "The backup session timed out or was closed by the node before it finished.", "Run the backup again; a slow link may need a longer session on the node."},
 	{api.CodeNotManaged, "JailOps does not manage this part of the host: jailopsd.yaml or priv.conf does not enable the module.", "Add the lines the hint names and restart both services, or change the host by hand (docs/appliance.md)."},
 	{api.CodePlaintextDenied, "A backup node target would receive unencrypted data and the policy does not allow plaintext.", "Enable backup encryption, or set allow_plaintext on the target if that is intended."},
+	{api.CodeLocked, "An encrypted volume of the jail waits for its passphrase (after a host boot or a lock); a locked jail does not start.", "Run 'jailops jail unlock NAME' (add --start to start it at once); a jail due for autostart starts after its unlock."},
+	{api.CodeBadPassphrase, "The passphrase of the encrypted volumes is wrong; after five wrong ones in a row unlocks are refused for 30 seconds.", "Type the passphrase again. A forgotten passphrase cannot be recovered: the data of the volume is lost (docs/storage.md)."},
 }
 
 func explainFor(c api.Code) (Explanation, bool) {

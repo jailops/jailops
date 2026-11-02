@@ -13,6 +13,7 @@ import LoadState from '@jailops/shared/components/LoadState.vue'
 import type { PowerState, Jail } from '@jailops/shared/api/types'
 import { projectState } from '@/composables/project'
 import Icon from '@jailops/shared/components/Icon.vue'
+import { isLocked } from '@/composables/jailActions'
 
 const safe = <T,>(p: Promise<T>): Promise<T | undefined> => p.catch(() => undefined)
 
@@ -48,12 +49,15 @@ const steps = computed(() => {
   return list.every((x) => x.done) ? [] : list
 })
 const nextStep = computed(() => steps.value.find((x) => !x.done)?.key)
-const states: PowerState[] = ['running', 'starting', 'stopping', 'stopped', 'error']
+const baseStates: PowerState[] = ['running', 'starting', 'stopping', 'stopped', 'error']
 const counts = computed(() => {
   const c: Record<string, number> = { running: 0, starting: 0, stopping: 0, stopped: 0, error: 0 }
   for (const j of l.data.value?.jails ?? []) c[j.status.power] = (c[j.status.power] ?? 0) + 1
   return c
 })
+// jails whose encrypted volumes wait for a passphrase: each is unlocked on its own page, with its own passphrase
+const locked = computed(() => (l.data.value?.jails ?? []).filter(isLocked).map((j) => j.metadata.name).sort())
+const states = computed<PowerState[]>(() => (locked.value.length ? [...baseStates, 'locked'] : baseStates))
 const items = computed(() => (l.data.value ? attention(l.data.value) : []))
 const recent = computed(() => [...(l.data.value?.ops ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 8))
 const pool = computed(() => l.data.value?.pool)
@@ -82,6 +86,10 @@ const poolPct = computed(() => (pool.value ? percent(pool.value.allocated, pool.
           </div>
         </section>
         <Callout v-if="!projectState.current && can('projects') && projectState.projects.length" tone="info" data-test="overview-no-project">{{ s.project.noneChosenText }} <router-link to="/projects">{{ s.project.goProjects }}</router-link></Callout>
+        <Callout v-if="locked.length" tone="warn" data-test="locked-banner">
+          <strong>{{ s.keys.banner(locked.length) }}.</strong> {{ s.keys.bannerLead }}
+          <template v-for="(n, i) in locked" :key="n"><router-link class="mono" :to="`/jails/${n}`" :data-locked-link="n">{{ n }}</router-link>{{ i < locked.length - 1 ? ', ' : '' }}</template>
+        </Callout>
         <section aria-labelledby="att">
           <h2 id="att" class="sr-only">{{ s.overview.attention }}</h2>
           <Callout v-if="!items.length" tone="ok">{{ s.overview.allClear }}</Callout>

@@ -113,6 +113,30 @@ func capturable(j JailRecord) ([]Dataset, error) {
 	return out, nil
 }
 
+// withoutSkipped leaves out the datasets that cannot be captured now and says which, as run warnings
+// ("skipped: locked: volume db ...").
+func withoutSkipped(j JailRecord) (JailRecord, []string) {
+	var keep []Dataset
+	var warnings []string
+	for _, d := range j.Datasets {
+		if d.Skip == "" {
+			keep = append(keep, d)
+			continue
+		}
+		what := relName(j.Container, d.Name)
+		if d.Kind == KindVolume {
+			what = "volume " + strings.TrimPrefix(what, "data/")
+		}
+		w := "skipped: " + d.Skip + ": " + what
+		if d.Skip == SkipLocked {
+			w += " (encrypted and waiting for its passphrase; unlock the jail and back it up again)"
+		}
+		warnings = append(warnings, w)
+	}
+	j.Datasets = keep
+	return j, warnings
+}
+
 func containerMountpoint(j JailRecord) string {
 	for _, d := range j.Datasets {
 		if d.Name == j.Container {
@@ -220,6 +244,7 @@ func (s *Service) BackupJail(ctx context.Context, j JailRecord, o CaptureOptions
 		remotes[i] = r
 	}
 	key := s.currentKey()
+	j, skipped := withoutSkipped(j)
 	sets, err := capturable(j)
 	if err != nil {
 		return nil, err
@@ -284,7 +309,7 @@ func (s *Service) BackupJail(ctx context.Context, j JailRecord, o CaptureOptions
 	if serr != nil {
 		return nil, fmt.Errorf("snapshotting %s: %w", j.Name, serr)
 	}
-	var warnings []string
+	warnings := skipped
 	if postErr != nil {
 		warnings = append(warnings, "the post-backup hook failed: "+postErr.Error())
 	}

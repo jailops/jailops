@@ -27,13 +27,13 @@ func exitForCode(c api.Code) int {
 	switch c {
 	case api.CodeInvalid, api.CodeDataLoss, api.CodeKeyNotEscrowed, api.CodePlaintextDenied:
 		return ExitUsage
-	case api.CodeUnauthorized, api.CodeForbidden, api.CodeRateLimited, api.CodeNotManaged:
+	case api.CodeUnauthorized, api.CodeForbidden, api.CodeRateLimited, api.CodeNotManaged, api.CodeBadPassphrase:
 		return ExitAuth
 	case api.CodeNotFound:
 		return ExitNotFound
 	case api.CodeAlreadyExists, api.CodeConflict, api.CodeBusy, api.CodeIPConflict,
 		api.CodePoolExhausted, api.CodeImageInUse, api.CodeMergeConflict, api.CodeChainBroken,
-		api.CodeQuotaExceeded, api.CodeMaintenance, api.CodeMissingChunks, api.CodeLeaseExpired:
+		api.CodeQuotaExceeded, api.CodeMaintenance, api.CodeMissingChunks, api.CodeLeaseExpired, api.CodeLocked:
 		return ExitConflict
 	case api.CodeUnsupported, api.CodeUnverified, api.CodeZFSIncompatible, api.CodeVersionSkew:
 		return ExitUnsupported

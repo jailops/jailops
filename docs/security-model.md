@@ -48,13 +48,31 @@ a lifetime limit and a global cap.
 ## Host management (appliance mode)
 
 By default JailOps never changes the host's own configuration. Appliance mode lets it manage parts of the host (so
-far the host name, resolvers and NTP) one module at a time, and only when **both** `jailopsd.yaml`
+far the host name, resolvers and NTP, and the host's own `/etc/pf.conf`) one module at a time, and only when **both** `jailopsd.yaml`
 (`host.manage.modules`) and `priv.conf` (`host-manage`) list the module: the `priv.conf` line is the boundary, so a
 compromised daemon cannot opt itself in. A module's helper operations take validated fields, never a file body, touch
 an exact list of files and `rc.conf` variables, and need the admin assertion; snapshots are kept in a root-only
 directory (`host-dir`) so a restore can only put back what the helper itself copied. Enable a module only if you would
 let your API admins change what it owns. The details, and the threat model, are in the security section of
 [appliance.md](appliance.md#security).
+
+## Log forwarding
+
+`jailopsd` can send the jails' logs and its audit log to syslog servers and webhooks ([logging.md](logging.md)). It reads
+the files through the helper's two read-only log operations and needs nothing new from the helper. TLS receivers are
+always verified (there is no switch to turn that off); a plain udp or tcp sink to a remote address is reported as a
+warning. A webhook's token stays in a root-owned file the daemon reads (`0640 root:jailops`), never in the
+configuration, the API or the audit log. Only a global admin may read or change the sink list, which names receivers
+and files of the host; reading many jails' logs at once needs the operator role, as one jail's does. Log lines are
+data: escaped, cut at 8 KiB, never interpreted.
+The firewall module is the one exception to "JailOps never edits `pf.conf`": with `firewall` in both files the helper
+writes the whole file, rendered by itself from validated fields (no rule text from the daemon), checked with `pfctl -n`
+and loaded with `pfctl -f` through six fixed `pfctl` forms of its own, none of which `run.exec` accepts. Every change
+waits for a confirmation and is reverted by the helper's own timer (and, after a reboot, by the boot script
+`jailops_revert` before `netif` and `pf`) unless it is confirmed; the deadline is the helper's, the daemon can confirm or
+revert but not move it. A change that would shut out the address the request came from is refused. Both are guards
+against mistakes: a compromised daemon with the module enabled can open or close the host's firewall within the
+validated fields, which is the power the `priv.conf` line grants.
 
 ## What listens, and how to expose it
 
@@ -163,6 +181,25 @@ file that is not a regular file) and given back to `postgres` in the jail; the l
 `scram-sha-256`. What a jail's root does to its own PostgreSQL afterwards (another `trust` line above the block) is the
 jail's own business, as before.
 
+## Encrypted volumes
+
+An encrypted volume ([storage.md](storage.md#encrypted-volumes)) protects data **at rest**: on the disks, in a raw copy,
+on a host that is powered off or has the volume locked. It does not protect data from the running jail, from root on the
+host while the volume is unlocked, or from anyone who can read the kernel's memory. ZFS keeps dataset names, sizes and
+properties readable.
+
+The passphrase passes through the daemon: it arrives in the body of a creation or an unlock (over TLS or the local
+socket), goes to the helper on the request stream of the operation, and from the helper to `zfs` on standard input. It is
+in no argument vector, answer, operation record, journal, audit entry or log line, and the tests search all of them for
+it. **A compromised daemon sees every passphrase typed while it is compromised**, and can unload keys (stop and lock jails)
+like an operator. What it cannot do through the helper: run `zfs load-key`, `unload-key` or `change-key` on any dataset
+but an encrypted volume of a JailOps jail (managed, of kind `volume`, below a `volumes` parent, its own encryption root
+with `keyformat=passphrase`), give a key file or another key location, change the cipher or the key derivation of a new
+volume (the helper sets `aes-256-gcm`, `keyformat=passphrase`, `keylocation=prompt` itself), or change a passphrase
+without the current one (the helper checks it with `zfs load-key -n` first). Unlocking needs the operator role in the
+jail's project, changing the passphrase the admin role; five wrong passphrases in a row lock a jail's unlocks out for
+30 seconds. There is no recovery key: a lost passphrase is lost data.
+
 ## Projects are not a security boundary against the kernel
 
 A project separates names, quotas, networks and firewall policy. Jails share the host kernel. A high-security tenant needs
@@ -189,5 +226,7 @@ ports JailOps did not create is not covered. A bridge is not a full security bou
   `jailops wireguard peer add`; the server keeps only the peer's public key and the preshared key. `jailops wireguard
   join -` reads a token from standard input. Reading tunnels needs the operator role, changing them a global admin.
   See [wireguard.md](wireguard.md).
+- The passphrase of encrypted volumes is typed (`jailops` asks without echo) or read from a file you name
+  (`--passphrase-file`); it is never a command line argument and never stored by JailOps. See above.
 - Interface descriptions are built from names only and checked by the helper (`jailops ...`, at most 64 characters of
   `A-Za-z0-9 ._:/=()-`): nothing a user types reaches `ifconfig` as free text.

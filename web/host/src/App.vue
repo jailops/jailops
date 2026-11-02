@@ -7,6 +7,7 @@ import ProjectSwitcher from '@/components/ProjectSwitcher.vue'
 import { initProjects, projectState } from '@/composables/project'
 import { useRoute } from 'vue-router'
 import NoProject from '@/components/NoProject.vue'
+import PendingBanner from '@/components/PendingBanner.vue'
 import AppShell, { type NavItem } from '@jailops/shared/components/AppShell.vue'
 
 const items = computed<NavItem[]>(() => ([
@@ -23,6 +24,7 @@ const items = computed<NavItem[]>(() => ([
   { to: '/backups', label: s.nav.backups, icon: 'archive', show: can('backups') },
   { to: '/host', label: s.nav.host, icon: 'monitor', show: hasExt('host_identity') },
   { to: '/hosts', label: s.nav.hosts, icon: 'server', show: isHub.value },
+  { to: '/logs', label: s.nav.logs, icon: 'fileText', show: hasExt('logs_unified') || hasExt('log_forward') },
   { to: '/operations', label: s.nav.operations, icon: 'listChecks', show: can('operations') },
   { to: '/events', label: s.nav.events, icon: 'radio', show: can('events') },
   { to: '/doctor', label: s.nav.doctor, icon: 'activity', show: can('doctor') },
@@ -38,6 +40,7 @@ watch(() => session.authed, (a) => { if (a && can('projects')) void initProjects
 <template>
   <AppShell :brand="s.app.name" :subtitle="s.app.role" :items="items" :events="can('events')">
     <template v-if="can('projects')" #header><ProjectSwitcher /></template>
+    <PendingBanner v-if="session.authed && hasExt('host_pending')" />
     <NoProject v-if="needsProject" />
     <router-view v-else />
   </AppShell>

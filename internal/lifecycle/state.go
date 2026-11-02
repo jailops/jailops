@@ -33,6 +33,8 @@ const (
 	PropPath         = "jailops:path"
 	PropCleanupAfter = "jailops:cleanup_after"
 	PropComment      = "jailops:comment"
+	// PropEncrypted marks a volume JailOps created as an encryption root with a passphrase.
+	PropEncrypted = "jailops:encrypted"
 	// Properties of image generation datasets that the lifecycle reads. The
 	// strings are the same as in internal/imagegen.
 	PropOSRelease = "jailops:osrelease"
@@ -64,6 +66,8 @@ type Service struct {
 	Hooks    Hooks
 	Images   Images
 	Executor *plan.Executor
+	// Keys encrypts volumes; nil refuses encrypted volumes (unsupported).
+	Keys Keys
 }
 
 func (s *Service) executor() *plan.Executor {
@@ -99,6 +103,8 @@ type dsInfo struct {
 	Path  string // mount path inside the jail
 	Merge bool
 	MP    string // absolute mountpoint
+	// Encrypted is set on a volume that is its own encryption root (jailops:encrypted=on).
+	Encrypted bool
 }
 
 // jailState is what the datasets say about a jail.
@@ -217,7 +223,7 @@ func (s *Service) observe(ctx context.Context, name string) (*jailState, error) 
 
 func (s *Service) info(ctx context.Context, ds, kind string) dsInfo {
 	return dsInfo{DS: ds, Kind: kind, Class: Class(s.prop(ctx, ds, PropClass)), Path: s.prop(ctx, ds, PropPath),
-		Merge: s.prop(ctx, ds, PropMerge) == "on", MP: s.prop(ctx, ds, "mountpoint")}
+		Merge: s.prop(ctx, ds, PropMerge) == "on", MP: s.prop(ctx, ds, "mountpoint"), Encrypted: kind == KindVolume && s.prop(ctx, ds, PropEncrypted) == "on"}
 }
 
 func (s *Service) mergeDatasets(st *jailState) []string {
@@ -259,6 +265,9 @@ func (s *Service) systemDatasets(st *jailState) []string {
 func (s *Service) mountTree(ctx context.Context, name string) error {
 	st, err := s.observe(ctx, name)
 	if err != nil {
+		return err
+	}
+	if err := s.refuseLocked(ctx, st); err != nil {
 		return err
 	}
 	if err := s.ZFS.Mount(ctx, st.Root); err != nil {

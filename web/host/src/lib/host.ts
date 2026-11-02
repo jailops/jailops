@@ -17,13 +17,13 @@ export interface HostForm {
 
 const label = /^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/
 
-function ipv4(s: string): boolean {
+export function ipv4(s: string): boolean {
   const p = s.split('.')
   return p.length === 4 && p.every((x) => /^(0|[1-9][0-9]{0,2})$/.test(x) && Number(x) <= 255)
 }
 
 /** Expands an IPv6 literal to eight groups, or null. No zone, no IPv4-mapped form. */
-function ipv6Groups(s: string): number[] | null {
+export function ipv6Groups(s: string): number[] | null {
   if (!s.includes(':') || s.includes('%') || /[^0-9A-Fa-f:.]/.test(s)) return null
   let body = s
   const lastColon = s.lastIndexOf(':')
