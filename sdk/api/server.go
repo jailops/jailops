@@ -185,4 +185,6 @@ var Extensions = []string{
 	"logs_unified",
 	"log_forward",
 	"volume_unlock",
+	"setup",
+	"host_certificate",
 }

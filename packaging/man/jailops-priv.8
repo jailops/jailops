@@ -1,5 +1,5 @@
 .\" jailops-priv.8, installed as /usr/local/share/man/man8/jailops-priv.8
-.Dd October 29, 2026
+.Dd November 2, 2026
 .Dt JAILOPS-PRIV 8
 .Os
 .Sh NAME
@@ -21,6 +21,16 @@
 .Nm
 .Op Ar flags
 .Cm revert-pending
+.Nm
+.Cm appliance-init
+.Op Fl pool Ar pool
+.Op Fl config Ar file
+.Op Fl dry-run
+.Nm
+.Cm setup-token
+.Op Fl socket Ar path
+.Op Fl wait Ar duration
+.Op Fl syslog
 .Nm
 .Cm version
 .Sh DESCRIPTION
@@ -88,14 +98,67 @@ so an unconfirmed change never survives a reboot.
 When the helper serves, it does the same on its own: it re-arms the timer of a
 pending change at start, or reverts at once when the deadline passed while it
 was not running.
+.It Cm appliance-init
+The first start of an appliance (docs/appliance.md): run by the rc.d script
+when
+.Va jailops_appliance
+is set and the configuration file does not exist.
+It does what
+.Cm init
+does, on
+.Fl pool
+(from
+.Va jailops_pool )
+or, without it, on the pool of the root file system
+.Pq Ql zfs list -H -o name / .
+It refuses a pool that already holds a dataset with
+.Sy jailops:managed=on
+other than
+.Pa pool/jailops ,
+and does nothing when the configuration file exists.
+Every command it runs and every file it writes is logged to syslog.
+.It Cm setup-token
+Ask the daemon, over its unix socket and as root, for a new one-time setup
+token of the first administrator, and print it with the addresses of the web
+console.
+The token replaces the one before, is valid for 24 hours and is used up by
+the first administrator it creates.
+.Fl wait
+waits for the socket of a daemon that is starting;
+.Fl syslog
+also logs the token and the addresses with the facility
+.Sy authpriv
+(on
+.Fx
+.Pa /var/log/auth.log ,
+readable by root only).
+The rc.d script of
+.Xr jailopsd 8
+runs it after every start in appliance mode and writes its output to
+.Pa /dev/console .
 .It Cm version
 Print the version and the protocol version.
 .Fl -version
 does the same.
 .El
 .Pp
-The flags, which are also the keys of the configuration file:
+The flags, which are also the keys of the configuration file
+.Po except
+.Fl appliance-modules ,
+which only the rc.d script passes
+.Pc :
 .Bl -tag -width Ds
+.It Fl appliance-modules Ar list
+The host management modules
+.Va jailops_appliance
+of
+.Pa /etc/rc.conf
+turns on, comma separated, or
+.Sy all .
+They are added to
+.Sy host-manage ;
+.Cm check-config
+prints both lists.
 .It Fl config Ar file
 The configuration file: lines of
 .Ar key No = Ar value
@@ -205,7 +268,41 @@ to start the helper at boot.
 The configuration file.
 Default
 .Pa /usr/local/etc/jailops/priv.conf .
+.It Va jailops_appliance
+.Dq YES
+turns appliance mode on: the script passes
+.Fl appliance-modules
+with the modules of
+.Va jailops_appliance_modules ,
+which the helper changes besides those
+.Sy host-manage
+of the configuration file lists, and at the first start, without the
+configuration file, it runs
+.Cm appliance-init .
+.Xr jailopsd 8
+reads the same variables.
+.It Va jailops_appliance_modules
+The host management modules of appliance mode, separated by spaces.
+Default: all modules of this version
+.Pq Sy identity firewall .
+.It Va jailops_pool
+The pool
+.Cm appliance-init
+sets up.
+Default: the pool of the root file system.
 .El
+.Pp
+.Va jailops_appliance
+is no weaker than
+.Sy host-manage
+in
+.Pa priv.conf :
+.Pa /etc/rc.conf
+belongs to root like
+.Pa priv.conf ,
+it is read when the helper starts and never by the daemon, and whoever can
+write it is root already.
+The daemon cannot switch appliance mode on.
 .Pp
 The configuration is validated, and the effective roots printed, with
 .Dl service jailops_priv checkconfig
@@ -252,9 +349,14 @@ the socket or pidfile could not be made, another helper is listening, or a
 hook failed.
 .It 2
 Usage, an invalid configuration file or storage file, no allowed peer, a
-socket mode others may use, or
+socket mode others may use, an unknown module in
+.Fl appliance-modules ,
+or
 .Cm init
 with bad arguments.
+.It 3
+.Cm setup-token :
+an administrator exists, there is nothing to set up.
 .El
 .Sh SEE ALSO
 .Xr jailops 1 ,

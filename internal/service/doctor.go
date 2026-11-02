@@ -35,6 +35,8 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorHost(ctx, c)
 	s.doctorHostIdentity(ctx, c)
 	s.doctorHostFirewall(ctx, c)
+	s.doctorAppliance(ctx, c)
+	s.doctorTLS(ctx, c)
 	s.doctorZFS(ctx, c)
 	s.doctorVolumes(ctx, c)
 	s.doctorEncryption(ctx, c)

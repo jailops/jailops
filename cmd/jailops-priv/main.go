@@ -8,6 +8,8 @@
 //	jailops-priv [flags] check-config        validate the configuration, print the effective roots and allow-lists
 //	jailops-priv [flags] revert-pending      put back the snapshot of an unconfirmed host change (rc.d, at boot)
 //	jailops-priv init -pool POOL [-dry-run]  one-time setup of a host (init.go)
+//	jailops-priv appliance-init [-pool POOL] the same at the first start of an appliance, unless set up (appliance.go)
+//	jailops-priv setup-token                 a new one-time token for the first administrator (appliance.go)
 //	jailops-priv version | --version
 //
 // SIGHUP rereads the storage file and verifies every storage root again.
@@ -40,7 +42,7 @@ var version = "dev"
 
 const defaultConfig = "/usr/local/etc/jailops/priv.conf"
 
-const synopsis = "usage: jailops-priv [flags] | version | check-config | init -pool POOL [-dry-run] | hook PHASE JAIL | revert-pending\n"
+const synopsis = "usage: jailops-priv [flags] | version | check-config | init -pool POOL [-dry-run] | hook PHASE JAIL | revert-pending | appliance-init [-pool POOL] | setup-token\n"
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr, os.Geteuid()))
@@ -100,6 +102,8 @@ type options struct {
 	mirror      list
 	hostManage  list
 	hostDir     string
+	// appliance is what rc.conf turns on (jailops_appliance, passed by the rc script); never read from priv.conf.
+	appliance list
 
 	adminRawParam list
 	adminAllow    list
@@ -145,6 +149,7 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.Var(&o.mirror, "image-mirror", "directory fs.read_file may read (a local mirror of image archives)")
 	fs.Var(&o.hostManage, "host-manage", "host management module the helper may change (identity, firewall); empty: the host is only read (docs/appliance.md)")
 	fs.StringVar(&o.hostDir, "host-dir", priv.DefaultHostDir, "root-owned directory of the host snapshots and the applied record")
+	fs.Var(&o.appliance, applianceFlag, "modules rc.conf turns on (jailops_appliance; the rc script passes it): added to host-manage; \"all\" is every module. Not a key of the configuration file")
 	fs.Var(&o.adminRawParam, "admin-raw-param", "jail.conf parameter an admin may set")
 	fs.Var(&o.adminAllow, "admin-allow-flag", "allow.* flag an admin may set (without prefix)")
 	fs.Var(&o.adminDevfs, "admin-devfs-ruleset", "devfs ruleset number an admin may use")
@@ -180,6 +185,9 @@ func loadConfigFile(fs *flag.FlagSet, path string, required bool) error {
 		if fs.Lookup(k) == nil {
 			return fmt.Errorf("%s:%d: unknown key %q", path, n, k)
 		}
+		if k == applianceFlag {
+			return fmt.Errorf("%s:%d: %s is not a key of this file: set jailops_appliance in /etc/rc.conf, or list the modules with host-manage", path, n, k)
+		}
 		if err := fs.Set(k, v); err != nil {
 			return fmt.Errorf("%s:%d: %w", path, n, err)
 		}
@@ -193,7 +201,7 @@ func (o *options) privConfig() priv.Config {
 		IfPrefixes: o.ifPrefix, MountBase: o.mountBase,
 		ConfDir: o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir,
 		NDPProxy: o.ndpProxy, Sysctls: o.sysctl, FetchHosts: o.fetchHost, ImageMirrors: o.mirror,
-		HostManage: o.hostManage, HostDir: o.hostDir,
+		HostManage: unionModules(o.hostManage, o.applianceModules()), HostDir: o.hostDir,
 		Admin: priv.AdminPolicy{
 			RawJailParams: o.adminRawParam, AllowFlags: o.adminAllow, HostMountRoots: o.adminMounts,
 			ZFSProps: o.adminZFSProp, Routes: o.adminRoutes, RawPF: o.adminRawPF, ResumeSend: o.adminResume,
@@ -210,6 +218,15 @@ func (o *options) privConfig() priv.Config {
 	return c
 }
 
+// applianceFlag is the flag the rc script passes from jailops_appliance_modules.
+const applianceFlag = "appliance-modules"
+
+// applianceModules are the modules rc.conf turns on; checked by run before it is used.
+func (o *options) applianceModules() []string {
+	m, _ := expandAppliance(o.appliance)
+	return m
+}
+
 // newSystem builds the real helper; tests replace it.
 var newSystem = func(cfg priv.Config) (*priv.Local, error) { return priv.NewSystem(cfg) }
 
@@ -218,8 +235,15 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 	if len(args) > 0 && args[0] == priv.AgentSubcommand {
 		return agentMain(args[1:], stderr, euid)
 	}
-	if len(args) > 0 && args[0] == "init" {
-		return initMain(args[1:], stdout, stderr, euid)
+	if len(args) > 0 {
+		switch args[0] {
+		case "init":
+			return initMain(args[1:], stdout, stderr, euid)
+		case "appliance-init":
+			return applianceInitMain(args[1:], stdout, stderr, euid)
+		case "setup-token":
+			return setupTokenMain(args[1:], stdout, stderr, euid)
+		}
 	}
 	var o options
 	fs := newFlags(&o, stderr)
@@ -262,6 +286,10 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 		printVersion(stdout)
 		return 0
 	}
+	if _, err := expandAppliance(o.appliance); err != nil {
+		fmt.Fprintf(stderr, "jailops-priv: %v\n", err)
+		return 2
+	}
 	cfg := o.privConfig()
 	if len(rest) > 0 && rest[0] == "check-config" {
 		return checkConfig(&o, cfg, stdout, stderr)
@@ -274,6 +302,11 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 	if euid != 0 && !o.dev {
 		fmt.Fprintln(stderr, "jailops-priv: must run as root (use --dev for development)")
 		return 1
+	}
+	if rest := fs.Args(); len(rest) > 0 && rest[0] == "revert-pending" {
+		if _, err := os.Stat(o.config); errors.Is(err, os.ErrNotExist) {
+			return 0 // nothing is set up yet (an appliance's first boot): nothing can wait for a confirmation
+		}
 	}
 	if _, err := cfg.Normalize(); err != nil {
 		fmt.Fprintf(stderr, "jailops-priv: configuration: %v\n", err)
@@ -519,6 +552,13 @@ func noteRoots(aud *priv.Auditor, l *priv.Local) {
 	}
 }
 
+func orNone(l []string) string {
+	if len(l) == 0 {
+		return "none"
+	}
+	return strings.Join(l, ", ")
+}
+
 // checkFileSafety refuses a configuration file others can write.
 func checkFileSafety(path string) error {
 	st, err := os.Stat(path)
@@ -610,6 +650,11 @@ func checkConfig(o *options, cfg priv.Config, stdout, stderr io.Writer) int {
 		w("host manage:    none (the host is only read)\n")
 	} else {
 		w("host manage:    %s (snapshots in %s)\n", strings.Join(c.HostManage, ", "), c.HostDir)
+	}
+	if rc := o.applianceModules(); len(rc) > 0 {
+		w("appliance:      on: rc.conf (jailops_appliance) adds %s to host-manage of priv.conf (%s)\n", strings.Join(rc, ", "), orNone(o.hostManage))
+	} else {
+		w("appliance:      off (jailops_appliance is not YES in rc.conf); host-manage of priv.conf alone decides\n")
 	}
 	w("kernel modules: %s\n", strings.Join(priv.KldModules, ", "))
 	var reads, writes []string

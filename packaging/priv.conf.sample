@@ -75,6 +75,9 @@ if-prefix = jo
 # (host.manage.modules). "firewall" is /etc/pf.conf, written whole, with pf_enable and pf_rules; every change of it
 # reverts at its deadline unless it is confirmed (the timer is the helper's own). Copies of every changed file and the
 # record of a change that waits for its confirmation are kept in host-dir (root only).
+# jailops_appliance="YES" in /etc/rc.conf adds the modules of jailops_appliance_modules (default: all) to this list
+# when the helper starts (the rc script passes -appliance-modules; it is not a key of this file). rc.conf is root's file
+# like this one; check-config prints both lists.
 #host-manage = identity
 #host-manage = firewall
 #host-dir = /var/db/jailops-priv/host

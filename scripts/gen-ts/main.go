@@ -46,6 +46,8 @@ var roots = []any{
 	api.HostFirewall{}, api.HostFirewallApply{}, api.HostPending{}, api.HostPendingAction{},
 	api.AppAccess{}, api.AppAllow{}, api.AppAllowResult{}, api.AppDeny{}, api.AppDenyResult{},
 	api.LogsRead{}, api.LogForward{}, api.LogForwardTest{}, api.LogForwardTestResult{},
+	api.HostCertificate{}, api.HostCertificateUpload{}, api.ACMESpec{},
+	api.SetupStatus{}, api.SetupRequest{}, api.SetupResult{}, api.SetupToken{},
 }
 
 // enums lists the typed string constants. Keep in sync with sdk/api.
@@ -63,7 +65,7 @@ var enums = map[reflect.Type][]string{
 	reflect.TypeFor[api.ResponseType]():    {string(api.ResponseSync), string(api.ResponseAsync), string(api.ResponseError)},
 	reflect.TypeFor[api.OperationStatus](): {string(api.OpPending), string(api.OpRunning), string(api.OpSuccess), string(api.OpFailure), string(api.OpCancelled)},
 	reflect.TypeFor[api.EventType]():       {string(api.EventLifecycle), string(api.EventOperation), string(api.EventLogging)},
-	reflect.TypeFor[api.Kind]():            {string(api.KindJail), string(api.KindImage), string(api.KindNetwork), string(api.KindFirewallPolicy), string(api.KindAddressSet), string(api.KindBackupPolicy), string(api.KindBackupTarget), string(api.KindHostGroup), string(api.KindRollout), string(api.KindJailTemplate), string(api.KindRemote), string(api.KindUser), string(api.KindToken), string(api.KindCertificate), string(api.KindHost), string(api.KindImageGeneration), string(api.KindJailSnapshot), string(api.KindBackup), string(api.KindOperation), "Project", "Storage", string(api.KindHostIdentity), string(api.KindWireGuard), string(api.KindLogForward), string(api.KindHostFirewall)},
+	reflect.TypeFor[api.Kind]():            {string(api.KindJail), string(api.KindImage), string(api.KindNetwork), string(api.KindFirewallPolicy), string(api.KindAddressSet), string(api.KindBackupPolicy), string(api.KindBackupTarget), string(api.KindHostGroup), string(api.KindRollout), string(api.KindJailTemplate), string(api.KindRemote), string(api.KindUser), string(api.KindToken), string(api.KindCertificate), string(api.KindHost), string(api.KindImageGeneration), string(api.KindJailSnapshot), string(api.KindBackup), string(api.KindOperation), "Project", "Storage", string(api.KindHostIdentity), string(api.KindWireGuard), string(api.KindLogForward), string(api.KindHostFirewall), string(api.KindHostCertificate)},
 	reflect.TypeFor[api.UpdateMode]():      {string(api.UpdateModeManual), string(api.UpdateModeNotify), string(api.UpdateModeManaged)},
 	reflect.TypeFor[api.UpdateReboot]():    {string(api.RebootManual), string(api.RebootAuto)},
 	reflect.TypeFor[api.DoctorStatus]():    {string(api.DoctorOK), string(api.DoctorWarn), string(api.DoctorFail), string(api.DoctorUnknown), string(api.DoctorInfo)},
@@ -72,6 +74,10 @@ var enums = map[reflect.Type][]string{
 	reflect.TypeFor[api.AppCategory]():     {string(api.AppDatabase), string(api.AppWeb), string(api.AppTools), string(api.AppDevops), string(api.AppStorage), string(api.AppMonitoring), string(api.AppCommunication), string(api.AppNetwork), string(api.AppSecurity), string(api.AppOther)},
 	reflect.TypeFor[api.AppSource]():       {string(api.AppSourceCatalog), string(api.AppSourceLocal)},
 	reflect.TypeFor[api.LogSinkType]():     {string(api.LogSinkSyslog), string(api.LogSinkWebhook)},
+
+	// the certificate of the console (host_certificate)
+	reflect.TypeFor[api.CertificateSource](): {string(api.CertSourceSelfSigned), string(api.CertSourceConfigured), string(api.CertSourceUploaded), string(api.CertSourceACME)},
+	reflect.TypeFor[api.ACMEChallenge]():     {string(api.ACMEHTTP01), string(api.ACMETLSALPN01)},
 }
 
 type gen struct {

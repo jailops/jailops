@@ -237,6 +237,23 @@ func TestHostFWRenderGolden(t *testing.T) {
 	noConsole := api.DefaultHostFirewall(0)
 	noConsole.SSH.AllowFrom = []string{"192.0.2.10"}
 	fwGolden(t, "hostfw_no_console", renderHostPF(noConsole.Canonical()))
+	// ACME: the redirect of the CA's port to the daemon, after the jails' translation anchors, and its pass rule
+	acmeHTTP := api.DefaultHostFirewall(39110)
+	acmeHTTP.SSH.AllowFrom = []string{"192.0.2.10"}
+	acmeHTTP.ACME = &api.HostFirewallACME{Challenge: api.ACMEHTTP01, Port: 39080}
+	fwGolden(t, "hostfw_acme_http", renderHostPF(acmeHTTP.Canonical()))
+	acmeALPN := api.HostFirewallSpec{Template: api.HostFirewallOpen, Console: &api.HostFirewallConsole{Port: 39110},
+		ACME: &api.HostFirewallACME{Challenge: api.ACMETLSALPN01, Port: 39110}}
+	if err := acmeALPN.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	fwGolden(t, "hostfw_acme_alpn_open", renderHostPF(acmeALPN.Canonical()))
+	for _, s := range []api.HostFirewallSpec{acmeHTTP.Canonical(), acmeALPN.Canonical()} {
+		out := renderHostPF(s)
+		if r, x := strings.Index(out, "\nrdr-anchor \"jailops/*\"\n"), strings.Index(out, "\nrdr inet proto tcp"); r < 0 || x < r || x > strings.Index(out, "\nanchor \"jailops/*\"\n") {
+			t.Errorf("the redirect is not among the translation rules after the anchor:\n%s", out)
+		}
+	}
 	// every rendering has the three anchor lines of design 5.2, in pf's order
 	for _, s := range []api.HostFirewallSpec{def, custom.Canonical(), api.HostFirewallSpec{Template: api.HostFirewallOpen}.Canonical()} {
 		out := renderHostPF(s)
@@ -381,6 +398,18 @@ func TestHostFWRefusalsOverTheWire(t *testing.T) {
 		}()},
 		"open with sources": {Template: api.HostFirewallOpen, SSH: &api.HostFirewallSSH{AllowFrom: []string{"192.0.2.1"}}},
 		"open with rows":    {Template: api.HostFirewallOpen, Allow: rows(1)},
+		// the ACME redirect: only the two values, each checked
+		"acme challenge":         {ACME: &api.HostFirewallACME{Challenge: "dns-01", Port: 39080}},
+		"acme challenge newline": {ACME: &api.HostFirewallACME{Challenge: "http-01\nrdr pass all", Port: 39080}},
+		"acme port 0":            {ACME: &api.HostFirewallACME{Challenge: api.ACMEHTTP01}},
+		"acme port 80":           {ACME: &api.HostFirewallACME{Challenge: api.ACMEHTTP01, Port: 80}},
+		"acme port 1023":         {ACME: &api.HostFirewallACME{Challenge: api.ACMEHTTP01, Port: 1023}},
+		"acme port 65536":        {ACME: &api.HostFirewallACME{Challenge: api.ACMEHTTP01, Port: 65536}},
+		"acme port negative":     {ACME: &api.HostFirewallACME{Challenge: api.ACMEHTTP01, Port: -39080}},
+		"acme port is ssh":       {SSH: &api.HostFirewallSSH{Ports: []int{2222}}, ACME: &api.HostFirewallACME{Challenge: api.ACMEHTTP01, Port: 2222}},
+		"acme port is console":   {Console: &api.HostFirewallConsole{Port: 39110}, ACME: &api.HostFirewallACME{Challenge: api.ACMEHTTP01, Port: 39110}},
+		"alpn not the console":   {Console: &api.HostFirewallConsole{Port: 39110}, ACME: &api.HostFirewallACME{Challenge: api.ACMETLSALPN01, Port: 39080}},
+		"alpn without console":   {ACME: &api.HostFirewallACME{Challenge: api.ACMETLSALPN01, Port: 39110}},
 	}
 	for name, spec := range cases {
 		if _, err := c.HostFirewallApply(admin(), service.HostFirewallRequest{Spec: spec, DryRun: true, Peer: "192.0.2.10"}); !api.IsCode(err, api.CodeInvalid) {
@@ -420,6 +449,58 @@ func TestHostFWRefusalsOverTheWire(t *testing.T) {
 	}
 	if readFile(t, filepath.Join(f.etc, "pf.conf")) != origPF {
 		t.Error("a refused or dry request changed pf.conf")
+	}
+}
+
+// The ACME redirect goes through the real allow-list and the wire: the helper renders it from the two numbers, checks
+// it with pfctl -n, loads it with the pending record like every change, and a revert takes it away again.
+func TestHostFWACMERedirectOverTheWire(t *testing.T) {
+	f := newFWEnv(t, "firewall")
+	c := hostWire(t, f.env)
+	spec := fwSpec()
+	spec.ACME = &api.HostFirewallACME{Challenge: api.ACMEHTTP01, Port: 39080}
+	dry, err := c.HostFirewallApply(admin(), fwReq(spec, true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"+rdr inet proto tcp from any to (self) port 80 -> 127.0.0.1 port 39080",
+		"+rdr inet6 proto tcp from any to (self) port 80 -> ::1 port 39080", "+pass in proto tcp from any to { 127.0.0.1, ::1 } port 39080"} {
+		if !strings.Contains(dry.Diff, want) {
+			t.Errorf("the diff lacks %q:\n%s", want, dry.Diff)
+		}
+	}
+	if !slices.ContainsFunc(dry.Rules, func(r api.HostFirewallRule) bool { return r.Ports == "80" && strings.Contains(r.Comment, "port 39080") }) {
+		t.Errorf("rules: %+v", dry.Rules)
+	}
+	res, err := c.HostFirewallApply(admin(), fwReq(spec, false))
+	if err != nil || res.Pending == nil {
+		t.Fatalf("%v %+v", err, res)
+	}
+	if _, loaded, _ := f.pf.state(); !strings.Contains(loaded, "-> 127.0.0.1 port 39080") {
+		t.Errorf("not loaded:\n%s", loaded)
+	}
+	// every pfctl call was an allow-listed form
+	for _, call := range f.runner.Calls() {
+		if call.Cmd.Name == pfctlBin {
+			if err := checkHostPfctl(f.etc, call.Cmd.Args); err != nil {
+				t.Errorf("pfctl %v: %v", call.Cmd.Args, err)
+			}
+		}
+	}
+	if _, err := c.HostPendingRevert(admin(), res.Pending.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, loaded, _ := f.pf.state(); strings.Contains(loaded, "39080") {
+		t.Errorf("the revert kept the redirect:\n%s", loaded)
+	}
+	// the redirect cannot target a port below 1024 or name a challenge of its own, whatever the daemon sends
+	bad := fwSpec()
+	bad.ACME = &api.HostFirewallACME{Challenge: api.ACMEHTTP01, Port: 22}
+	if _, err := c.HostFirewallApply(admin(), fwReq(bad, false)); !api.IsCode(err, api.CodeInvalid) {
+		t.Errorf("port 22: %v", err)
+	}
+	if readFile(t, filepath.Join(f.etc, "pf.conf")) != origPF {
+		t.Error("pf.conf is not the administrator's again")
 	}
 }
 

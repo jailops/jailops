@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,6 +16,10 @@ type recorder struct {
 	cmds  []string
 	exist map[string]bool // datasets that exist
 	flag  map[string]string
+	// root is the dataset mounted at / (rootErr: none); managed is what a recursive zfs get of jailops:managed prints
+	root    string
+	rootErr bool
+	managed string
 }
 
 func (r *recorder) run(name string, args ...string) (string, error) {
@@ -23,6 +28,13 @@ func (r *recorder) run(name string, args ...string) (string, error) {
 	switch {
 	case name == "zpool":
 		return args[len(args)-1], nil
+	case name == "zfs" && args[0] == "list" && args[len(args)-1] == "/":
+		if r.rootErr || r.root == "" {
+			return "cannot open '/': not a ZFS file system", fmt.Errorf("exit 1")
+		}
+		return r.root, nil
+	case name == "zfs" && args[0] == "get" && slices.Contains(args, "-r"):
+		return r.managed, nil
 	case name == "zfs" && args[0] == "list":
 		ds := args[len(args)-1]
 		if r.exist[ds] {

@@ -176,6 +176,14 @@ type Deps struct {
 	LogForwardTune func(*logfwd.Env)
 	// ConsolePort is the port of the TLS listener (listen.https.address), 0 without one; the host firewall opens it.
 	ConsolePort int
+	// ConsoleURLs are the addresses of the console (https://HOST:PORT/) a setup token is printed with; nil without a
+	// TLS listener.
+	ConsoleURLs func() []string
+	// ApplianceModules are the modules rc.conf turned on (jailops_appliance); they are part of HostModules too.
+	ApplianceModules []string
+	// Certificates is the certificate of the TLS listener (self-signed, the operator's files, uploaded or ACME); nil
+	// answers unsupported.
+	Certificates CertificateManager
 }
 
 // Service implements the business logic.
@@ -196,6 +204,9 @@ type Service struct {
 	totpMu sync.Mutex
 	// trustLim rate limits failed redemptions of trust tokens per source.
 	trustLim *auth.Lockout
+	// setupLim rate limits wrong setup tokens per source; setupMu makes checking and consuming the token one step.
+	setupLim *auth.Lockout
+	setupMu  sync.Mutex
 
 	planExec *plan.Executor
 	lcfg     lifecycle.Config
@@ -315,7 +326,7 @@ func New(d Deps) (*Service, error) {
 	}
 	s := &Service{d: d, log: d.Log, now: d.Now,
 		jails: map[string]*jailEntry{}, status: map[string]jailRuntime{}, netStat: map[string]api.NetworkStatus{},
-		login: auth.NewLockout(withClock(d.Lockout, d.Now)), trustLim: auth.NewLockout(withClock(d.Lockout, d.Now)), storages: map[string]*storageInfo{}, placed: map[string]string{},
+		login: auth.NewLockout(withClock(d.Lockout, d.Now)), trustLim: auth.NewLockout(withClock(d.Lockout, d.Now)), setupLim: auth.NewLockout(withClock(d.Lockout, d.Now)), storages: map[string]*storageInfo{}, placed: map[string]string{},
 		pending: map[string]pendingJail{}, execN: map[string]int{}, installing: map[string]bool{}, localReg: NewLocalRegistrar()}
 	s.baseCtx, s.cancel = context.WithCancel(context.Background())
 	s.imgKind = newKindStore[api.ImageSpec](s, api.KindImage, api.ScopeFleet, "image", "/api/v1/images")
@@ -478,6 +489,10 @@ func (s *Service) Extensions() []string {
 			}
 		case "host_identity", "host_firewall", "host_pending":
 			if s.d.Host == nil {
+				continue
+			}
+		case "host_certificate":
+			if s.d.Certificates == nil {
 				continue
 			}
 		}

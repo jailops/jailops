@@ -145,6 +145,13 @@ func renderHostPF(s api.HostFirewallSpec) string {
 	w("# translation: the NAT and the port forwards of the jails' networks")
 	w(`nat-anchor "jailops/*"`)
 	w(`rdr-anchor "jailops/*"`)
+	if a := s.ACME; a != nil {
+		// after the jails' anchors: a port forward of a jail on the same port wins over the challenge
+		from := api.ACMEChallengePort(a.Challenge)
+		w("# ACME %s challenges of the console's certificate: port %d to the daemon's unprivileged port %d", a.Challenge, from, a.Port)
+		w("rdr inet proto tcp from any to (self) port %d -> 127.0.0.1 port %d", from, a.Port)
+		w("rdr inet6 proto tcp from any to (self) port %d -> ::1 port %d", from, a.Port)
+	}
 	w("")
 	w("# filtering: the jails' own anchors first")
 	w(`anchor "jailops/*"`)
@@ -164,6 +171,10 @@ func renderHostPF(s api.HostFirewallSpec) string {
 	w("pass in inet proto icmp icmp-type unreach code needfrag no state")
 	if s.Template == api.HostFirewallOpen {
 		return b.String()
+	}
+	if a := s.ACME; a != nil {
+		w("# the ACME challenges redirected above: the CA's addresses are not known, so from any")
+		w("pass in proto tcp from any to { 127.0.0.1, ::1 } port %d", a.Port)
 	}
 	if s.SSH != nil && len(s.SSH.Ports) > 0 {
 		ports := make([]string, len(s.SSH.Ports))

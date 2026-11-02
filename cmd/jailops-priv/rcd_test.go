@@ -94,6 +94,8 @@ func TestRCDOrdering(t *testing.T) {
 		"routing":     {provide: []string{"routing"}, require: []string{"faith", "netif", "ppp", "stf"}},
 		"pf":          {provide: []string{"pf"}, require: []string{"FILESYSTEMS", "netif", "pflog", "pfsync", "routing"}},
 		"NETWORKING":  {provide: []string{"NETWORKING", "NETWORK"}, require: []string{"netif", "netwait", "routing", "ppp", "stf"}},
+		"syslogd":     {provide: []string{"syslogd"}, require: []string{"mountcritremote", "FILESYSTEMS", "newsyslog"}, before: []string{"SERVERS"}},
+		"SERVERS":     {provide: []string{"SERVERS"}, require: []string{"mountcritremote", "abi", "ldconfig", "savecore", "watchdogd"}},
 	}
 	for _, n := range []string{"jailops_revert", "jailops_priv", "jailopsd"} {
 		scripts[n] = readRCHeader(t, filepath.Join(dir, n))
@@ -108,6 +110,8 @@ func TestRCDOrdering(t *testing.T) {
 	for _, pair := range [][2]string{
 		{"FILESYSTEMS", "jailops_revert"}, {"jailops_revert", "netif"}, {"jailops_revert", "pf"}, {"jailops_revert", "jailops_priv"},
 		{"jailops_priv", "jailopsd"}, {"pf", "jailopsd"}, {"NETWORKING", "jailopsd"},
+		// appliance mode: the first-start setup (zfs, pw) after the file systems; the setup token after syslogd
+		{"FILESYSTEMS", "jailops_priv"}, {"zfs", "jailops_priv"}, {"syslogd", "jailopsd"},
 	} {
 		if pos(pair[0]) >= pos(pair[1]) {
 			t.Errorf("%s does not come before %s: %v", pair[0], pair[1], order)

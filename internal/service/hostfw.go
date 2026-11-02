@@ -86,6 +86,7 @@ func (s *Service) HostFirewall(ctx context.Context) (api.HostFirewall, error) {
 
 func (s *Service) hostFirewallView(st HostFirewallState) api.HostFirewall {
 	spec := api.DefaultHostFirewall(s.d.ConsolePort)
+	spec.ACME = s.acmeRedirect()
 	if st.Applied != nil {
 		spec = *st.Applied
 	}
@@ -102,6 +103,14 @@ func (s *Service) hostFirewallView(st HostFirewallState) api.HostFirewall {
 		out.Status.Warnings = spec.Warnings()
 	}
 	return out
+}
+
+// acmeRedirect is the challenge redirect the certificate needs, nil without ACME.
+func (s *Service) acmeRedirect() *api.HostFirewallACME {
+	if s.d.Certificates == nil {
+		return nil
+	}
+	return s.d.Certificates.Redirect()
 }
 
 // peerOf is the address of the caller as the listener saw it; unknown for the unix socket and through a hub (the
@@ -132,6 +141,8 @@ func (s *Service) ApplyHostFirewall(ctx context.Context, in api.HostFirewallAppl
 		spec.Console = &c
 	}
 	spec.Console.Port = s.d.ConsolePort
+	// the redirect of an ACME challenge is the daemon's to fill in: what a client sends is replaced
+	spec.ACME = s.acmeRedirect()
 	if err := spec.Validate(); err != nil {
 		return api.HostChange{}, err
 	}

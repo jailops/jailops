@@ -7,11 +7,19 @@
 #
 # Add to /etc/rc.conf:
 #   jailops_priv_enable="YES"
+#   jailops_appliance="YES"        (optional) appliance mode (docs/appliance.md): JailOps manages the host from the
+#                                  console. The helper manages the modules below besides host-manage of priv.conf,
+#                                  and at the first start, without priv.conf, it sets the host up (appliance-init).
+#                                  jailopsd reads the same two variables.
+#   jailops_appliance_modules="identity firewall"   (optional) the modules; default: all of this version
+#   jailops_pool="zroot"           (optional) the pool of the first-start setup; default: the pool of the root
+#                                  file system
 # Configuration: /usr/local/etc/jailops/priv.conf (see priv.conf.sample): storage-root,
 # state-dir, allow-user. Storage roots registered at run time live in
 # /usr/local/etc/jailops/priv.d/storage.conf.
-#   service jailops_priv checkconfig   validate the configuration, print the effective roots
+#   service jailops_priv checkconfig   validate the configuration, print the effective roots and modules
 #   service jailops_priv reload        reread the storage file and verify every root (SIGHUP)
+# rc.conf is read at start only: a change of jailops_appliance needs a restart of both services.
 # Run on FreeBSD 15.1 (design 18.2).
 
 . /etc/rc.subr
@@ -30,18 +38,40 @@ sig_reload="HUP"
 checkconfig_cmd="jailops_priv_checkconfig"
 start_precmd="jailops_priv_precmd"
 
+# jailops_appliance_args prints the flag that passes jailops_appliance_modules on, nothing when appliance mode is off.
+jailops_appliance_args()
+{
+	case "${jailops_appliance:-NO}" in
+	[Yy][Ee][Ss]|[Tt][Rr][Uu][Ee]|[Oo][Nn]|1) ;;
+	*) return 0 ;;
+	esac
+	_mods=$(echo ${jailops_appliance_modules:-all} | tr ' ' ',')
+	case "${_mods}" in
+	""|*[!a-z,]*) echo "jailops_appliance_modules: module names only (identity firewall), not \"${jailops_appliance_modules}\"" >&2; return 1 ;;
+	esac
+	echo "-appliance-modules ${_mods}"
+}
+
 jailops_priv_checkconfig()
 {
-	${procname} -config ${jailops_priv_config} check-config
+	${procname} -config ${jailops_priv_config} ${jailops_priv_appliance} check-config
 }
 
 jailops_priv_precmd()
 {
+	# appliance mode, first start: set the host up, which also makes the group jailops (once; every command it runs
+	# goes to syslog)
+	if [ -n "${jailops_priv_appliance}" ] && [ ! -f "${jailops_priv_config}" ]; then
+		case "${jailops_pool:-}" in
+		*[!A-Za-z0-9_.:-]*) echo "jailops_pool: \"${jailops_pool}\" is not a pool name" >&2; return 1 ;;
+		esac
+		${procname} appliance-init -config ${jailops_priv_config} ${jailops_pool:+-pool ${jailops_pool}} || return 1
+	fi
 	# the daemon (user jailops) creates its socket here; the sticky bit keeps it from removing the helper's
 	install -d -m 1771 -o root -g jailops /var/run/jailops
 	install -d -m 0700 /usr/local/etc/jailops/priv.d
 	# refuse to start with a configuration that does not validate
-	${procname} -config ${jailops_priv_config} check-config >/dev/null || return 1
+	${procname} -config ${jailops_priv_config} ${jailops_priv_appliance} check-config >/dev/null || return 1
 }
 
 # rc.conf may set jailops_priv_config: read it before anything is derived from it
@@ -49,10 +79,13 @@ load_rc_config $name
 : ${jailops_priv_enable:="NO"}
 : ${jailops_priv_config:="/usr/local/etc/jailops/priv.conf"}
 
+jailops_priv_appliance=$(jailops_appliance_args) || err 1 "invalid jailops_appliance_modules"
+
 # -p: pid of the helper itself (rc status, stop and the reload signal use it);
 # -P: pid of the daemon(8) supervisor, which exits when the helper exits.
 # -log syslog: the audit lines of the helper (one per request of the daemon) go to syslog; under daemon(8) -f stderr is /dev/null.
-command_args="-f -p ${pidfile} -P ${supervisor_pidfile} ${procname} -log syslog -config ${jailops_priv_config}"
-required_files="${jailops_priv_config}"
+command_args="-f -p ${pidfile} -P ${supervisor_pidfile} ${procname} -log syslog -config ${jailops_priv_config} ${jailops_priv_appliance}"
+# in appliance mode the first start writes priv.conf itself
+[ -n "${jailops_priv_appliance}" ] || required_files="${jailops_priv_config}"
 
 run_rc_command "$1"

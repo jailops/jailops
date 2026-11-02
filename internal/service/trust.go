@@ -69,7 +69,8 @@ func (s *Service) CreateTrustToken(ctx context.Context, req api.TrustTokenReques
 	if ttl > auth.MaxTrustTTL {
 		return api.TrustToken{}, invalid("a trust token lives at most %s", auth.MaxTrustTTL)
 	}
-	if s.d.ServerFingerprint == "" {
+	fp := s.servingFingerprint()
+	if fp == "" {
 		return api.TrustToken{}, api.Errorf(api.CodeUnsupported, "this daemon has no server certificate to pin")
 	}
 	if s.certKind.exists(name) {
@@ -79,7 +80,7 @@ func (s *Service) CreateTrustToken(ctx context.Context, req api.TrustTokenReques
 	if err != nil {
 		return api.TrustToken{}, err
 	}
-	tok, claims, err := auth.NewTrustToken(key, name, s.d.ServerFingerprint, ttl, now)
+	tok, claims, err := auth.NewTrustToken(key, name, fp, ttl, now)
 	if err != nil {
 		return api.TrustToken{}, err
 	}

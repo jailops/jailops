@@ -15,6 +15,7 @@ import type {
   WireGuard, WireGuardJoin, WireGuardKeys, WireGuardPeerAdd, WireGuardPeerCreated,
   AppAccess, AppAllow, AppAllowResult, AppDeny, AppDenyResult,
   LogsRead, LogForward, LogForwardSpec, LogForwardTestResult,
+  HostCertificate, HostCertificateUpload, ACMESpec, SetupStatus, SetupRequest, SetupResult,
 } from '@jailops/shared/api/types'
 import type { SnapshotBody, ExecSessionInfo, ConfigResult } from '../types'
 import { logQuery, type LogQuery } from '@/lib/logs'
@@ -68,6 +69,18 @@ export const api = {
     pending: () => c().get<HostPending>('/host/pending'),
     confirm: (id?: string) => c().mutate<HostPending>('POST', '/host/pending/confirm', id ? { id } : {}),
     revert: (id?: string) => c().mutate<HostPending>('POST', '/host/pending/revert', id ? { id } : {}),
+    /** Extension host_certificate: the certificate the TLS listener serves and where it comes from. */
+    certificate: () => c().get<HostCertificate>('/host/certificate'),
+    /** Global admin: serve this chain and key from the next handshake on. */
+    uploadCertificate: (b: HostCertificateUpload) => c().mutate<HostCertificate>('PUT', '/host/certificate', b),
+    /** Global admin: ACME on; the CA is asked in the background (poll certificate() until acme.state is valid or error). */
+    useAcme: (b: ACMESpec) => c().mutate<HostCertificate>('POST', '/host/certificate/acme', b),
+    useSelfSigned: () => c().mutate<HostCertificate>('POST', '/host/certificate/self-signed', {}),
+  },
+  /** Extension setup: the first administrator. Public while none exists; not_found afterwards. */
+  setup: {
+    status: () => c().get<SetupStatus>('/setup'),
+    run: (b: SetupRequest) => c().mutate<SetupResult>('POST', '/setup', b),
   },
   appAccess: {
     /** Extension app_access: who may connect to an installed app (readonly in the project). */

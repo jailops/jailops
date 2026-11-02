@@ -73,6 +73,9 @@ type Config struct {
 	Host HostConf `yaml:"host"`
 	// Logging configures log forwarding (docs/logging.md).
 	Logging LoggingConf `yaml:"logging"`
+
+	// Appliance are the modules rc.conf turned on (ApplyAppliance); never read from the file.
+	Appliance []string `yaml:"-"`
 }
 
 // LoggingConf configures where the logs of the jails go. Forward is the
@@ -239,6 +242,31 @@ type HTTPSListen struct {
 	Key  string `yaml:"key"`
 	// Names are extra DNS names and IPs for a generated certificate.
 	Names []string `yaml:"names"`
+	// ACME obtains and renews the certificate from a public CA (docs/exposure.md). A choice made through the API
+	// (POST /api/v1/host/certificate/...) replaces it.
+	ACME ACMEConf `yaml:"acme"`
+}
+
+// ACMEConf is listen.https.acme: api.ACMESpec and the address of the challenge listener.
+type ACMEConf struct {
+	Enabled      bool     `yaml:"enabled"`
+	Email        string   `yaml:"email"`
+	Domains      []string `yaml:"domains"`
+	DirectoryURL string   `yaml:"directory_url"`
+	Challenge    string   `yaml:"challenge"`
+	AcceptTOS    bool     `yaml:"accept_tos"`
+	// ChallengeAddress is the plain-http listener that answers http-01 challenges and nothing else (default
+	// DefaultChallengeAddress); port 80 is redirected to it, on the loopback addresses.
+	ChallengeAddress string `yaml:"challenge_address"`
+}
+
+// DefaultChallengeAddress is the listener of http-01 challenges (docs/ports.md).
+const DefaultChallengeAddress = ":39080"
+
+// Spec is the setting as the API sees it.
+func (a ACMEConf) Spec() api.ACMESpec {
+	return api.ACMESpec{Enabled: a.Enabled, Email: a.Email, Domains: a.Domains, DirectoryURL: a.DirectoryURL,
+		Challenge: api.ACMEChallenge(a.Challenge), AcceptTOS: a.AcceptTOS}.Canonical()
 }
 
 // Priv says how jailopsd reaches the root helper.
@@ -427,6 +455,9 @@ func (c Config) finish() (Config, error) {
 			}
 		}
 	}
+	if err := c.checkACME(); err != nil {
+		return c, err
+	}
 	if (c.Listen.HTTPS.Cert == "") != (c.Listen.HTTPS.Key == "") {
 		return c, fmt.Errorf("config: listen.https.cert and listen.https.key go together: give both (your certificate) or neither (a generated, self-signed one)")
 	}
@@ -505,6 +536,91 @@ func (c Config) finish() (Config, error) {
 		t := true
 		c.Reconcile.Autostart = &t
 	}
+	return c, nil
+}
+
+// checkACME validates listen.https.acme: the setting itself, the challenge listener, and that it does not meet
+// certificate files of the operator. That a TLS listener exists is checked after the -web flag (CheckListeners).
+func (c *Config) checkACME() error {
+	a := &c.Listen.HTTPS.ACME
+	if a.ChallengeAddress == "" {
+		a.ChallengeAddress = DefaultChallengeAddress
+	}
+	if err := a.Spec().Validate(); err != nil {
+		return fmt.Errorf("config: listen.https.acme: %v", err)
+	}
+	if _, err := redirectTarget(a.ChallengeAddress); err != nil {
+		return fmt.Errorf("config: listen.https.acme.challenge_address: %v", err)
+	}
+	if a.Enabled && c.Listen.HTTPS.Cert != "" {
+		return fmt.Errorf("config: listen.https.acme and listen.https.cert exclude each other: give your certificate files or let ACME obtain one")
+	}
+	return nil
+}
+
+// CheckListeners checks what depends on the listeners after the flags changed them: ACME needs the TLS listener,
+// and with tls-alpn-01 the redirect of port 443 reaches it on the loopback addresses.
+func (c Config) CheckListeners() error {
+	a := c.Listen.HTTPS.ACME
+	if !a.Enabled {
+		return nil
+	}
+	if c.Listen.HTTPS.Address == "" {
+		return fmt.Errorf("config: listen.https.acme needs the TLS listener: set listen.https.address, or jailopsd_web=\"YES\" in /etc/rc.conf")
+	}
+	if a.Spec().Challenge == api.ACMETLSALPN01 {
+		if _, err := redirectTarget(c.Listen.HTTPS.Address); err != nil {
+			return fmt.Errorf("config: listen.https.address with tls-alpn-01: %v", err)
+		}
+	}
+	return nil
+}
+
+// redirectTarget checks a listener the host redirects a challenge port to: host:port with a port of 1024 or more, on
+// all addresses or on a loopback address (the redirect targets 127.0.0.1 and ::1). It returns the port.
+func redirectTarget(addr string) (int, error) {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return 0, fmt.Errorf("%q must be host:port or :port", addr)
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || (n != 0 && n < 1024) || n > 65535 {
+		return 0, fmt.Errorf("%q: the port must be 1024 to 65535 (the daemon is not root; the host redirects the CA's port to it)", addr)
+	}
+	if host != "" {
+		ip, err := netip.ParseAddr(strings.Trim(host, "[]"))
+		if err != nil || !(ip.IsUnspecified() || ip.IsLoopback()) {
+			return 0, fmt.Errorf("%q: listen on all addresses or a loopback address: the redirect of the CA's port targets 127.0.0.1 and ::1", addr)
+		}
+	}
+	return n, nil
+}
+
+// ApplyAppliance adds the modules rc.conf turns on (jailops_appliance, the -appliance-modules flag) to
+// host.manage.modules: the daemon manages the union. "all" is every module. The helper decides with its own list.
+func ApplyAppliance(c Config, mods []string) (Config, error) {
+	var add []string
+	for _, m := range mods {
+		names := []string{m}
+		if m == "all" {
+			names = api.HostModules
+		} else if !slices.Contains(api.HostModules, m) {
+			return c, fmt.Errorf("jailops_appliance_modules: %q is not a module (known: %s, or all)", m, strings.Join(api.HostModules, ", "))
+		}
+		for _, n := range names {
+			if !slices.Contains(add, n) {
+				add = append(add, n)
+			}
+		}
+	}
+	out := slices.Clone(c.Host.Manage.Modules)
+	for _, m := range add {
+		if !slices.Contains(out, m) {
+			out = append(out, m)
+		}
+	}
+	c.Host.Manage.Modules = out
+	c.Appliance = add
 	return c, nil
 }
 

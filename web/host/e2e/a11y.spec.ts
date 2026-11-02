@@ -31,3 +31,13 @@ for (const scheme of ['light', 'dark'] as const) {
     expect(await audit(page)).toEqual([])
   })
 }
+
+// The first-run wizard of a host without an administrator (`?demo=setup`).
+for (const scheme of ['light', 'dark'] as const) {
+  test(`a11y ${scheme}: /setup`, async ({ page }) => {
+    await page.emulateMedia({ colorScheme: scheme })
+    await page.goto('/?demo=setup')
+    await expect(page.getByTestId('setup-step')).toBeVisible()
+    expect(await audit(page)).toEqual([])
+  })
+}

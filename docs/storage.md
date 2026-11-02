@@ -158,10 +158,12 @@ of a volume passphrase. Keep it in a password manager, and keep backups (below).
 update is refused with a hint), adding a volume to an existing jail, key files or any unattended unlock at boot, encrypted
 storages or whole jails, a restore into an encrypted volume.
 
-**UNVERIFIED on FreeBSD** until the `encrypted-volume` block of `scripts/ci-freebsd-e2e.sh` has run on a host: that `zfs create`,
-`zfs load-key` and `zfs change-key` read the passphrase as one line from a standard input that is not a terminal, that
-`zfs load-key -n` checks a passphrase while the key is loaded, the error texts JailOps maps (`Incorrect key`, `already
-loaded`), a raw receive of an encryption root with `-o keylocation=prompt`, and snapshots and rollbacks of a locked volume.
+**Verified on FreeBSD 15.1** by the `encrypted-volume` block of `scripts/ci-freebsd-e2e.sh` (amd64 and arm64): `zfs create`
+and `zfs load-key` read the passphrase as one line from a standard input that is not a terminal, a locked jail refuses to
+start, a wrong passphrase is refused (`Incorrect key` mapped to `bad_passphrase`) and the right one opens the volume, the data
+is still there, and neither passphrase appears in `/var/log/messages` or the state directory. **UNVERIFIED:** `zfs change-key`
+with `zfs load-key -n` while the key is loaded, a raw receive of an encryption root with `-o keylocation=prompt`, and snapshots
+and rollbacks of a locked volume.
 
 ## Existing data: host mounts
 

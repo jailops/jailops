@@ -9,9 +9,11 @@ is needed to use JailOps on one host: the default is the local socket and nothin
 |---|---|---|
 | unix socket `listen.unix.path` | `/var/run/jailops/jailops.sock`, mode `0666` | the local API, one identity system with the TLS listener. The only thing the **peer's uid** decides is root (uid 0): a global admin, the host's recovery access. Every other local user is anonymous, exactly like an unauthenticated remote client (it reaches `GET /api/v1`, `GET /healthz`, the login, trust-token redemption, `POST /api/v1/cluster/join` (501) and the static console, nothing else) and signs in with a token or a password login. No Unix user or group maps to a role. Mode `0666` is safe for that reason |
 | TCP `listen.https.address` | **empty: no network listener** | the same API over **TLS 1.3 only**, plus the web console |
+| TCP `listen.https.acme.challenge_address` | `:39080`, **only while ACME with http-01 is the source** | plain http that answers `/.well-known/acme-challenge/<token>` for the tokens of a running order, and 404 to everything else: no API, no console. The host redirects port 80 to it (below) |
 
-There is no plain-http TCP listener in `jailopsd`. A listener that is not TLS cannot be configured, so the daemon never
-listens without TLS on a non-loopback (or any) address; a test connects with plain http and with TLS 1.2 and both fail. `listen.https.address` is
+Apart from the ACME challenge listener there is no plain-http TCP listener in `jailopsd`, and that one serves nothing but
+challenge tokens. An API listener that is not TLS cannot be configured, so the daemon never serves the API without TLS on
+a non-loopback (or any) address; a test connects with plain http and with TLS 1.2 and both fail. `listen.https.address` is
 checked when the configuration is loaded (`":39110"` is every interface, `"127.0.0.1:39110"` and `"[::1]:39110"` are loopback only; a
 wrong form is an error). The SDK, in turn, refuses plain `http://` to anything but loopback.
 
@@ -49,8 +51,15 @@ ports are listed in [ports.md](ports.md).
 | Option | Configuration | What happens |
 |---|---|---|
 | **Self-signed, pinned** (default) | nothing | on first start `jailopsd` generates an ECDSA P-256 certificate valid for **ten years**, with the host name and the entries of `listen.https.names` as names, into `<data_dir>/tls/server.{crt,key}` (key mode 0600). Clients **pin its SHA-256 fingerprint** (there is no trust on first use: a trust token carries it). It is not rotated by expiry |
-| **Your certificate** | `listen.https.cert` and `listen.https.key`, absolute paths, both or neither | served as given (a file with the chain is fine). If a file is missing or only one of the two exists the daemon **refuses to start**: it never generates or overwrites a certificate you configured |
-| **ACME** | not implemented | see Not yet; use `certbot`, `acme.sh` or `lego` and point the two keys at the files they keep current |
+| **Your certificate** | `listen.https.cert` and `listen.https.key`, absolute paths, both or neither | served as given (a file with the chain is fine). If a file is missing or only one of the two exists the daemon **refuses to start**: it never generates or overwrites a certificate you configured. The console cannot replace these files |
+| **Uploaded** | the console's Host page (Certificates, Upload) or `PUT /api/v1/host/certificate` (global admin) | a PEM chain (leaf first) and its PEM key, checked before anything is written: every certificate parses and is signed by the next, the key belongs to the leaf and is not encrypted, the leaf is valid now, for server authentication, and for the host name you give. Written by the daemon to `<data_dir>/tls/uploaded.{crt,key}` (0600, each to a temporary file that is synced and renamed) and served from the next handshake on; replacing those two files by hand is picked up like a renewal. Nothing renews it: the doctor warns 14 days before it expires |
+| **ACME** | `listen.https.acme` in `jailopsd.yaml`, or the console (Request with ACME) / `POST /api/v1/host/certificate/acme` | the daemon obtains a certificate for your DNS names from a CA (Let's Encrypt production by default) and renews it, below |
+
+Going back: **Use self-signed again** in the console (`POST /api/v1/host/certificate/self-signed`) serves the generated
+certificate once more; browsers warn again and clients have to pin it. A choice made in the console or the API is kept in
+`<data_dir>/tls/choice.json` and wins over `listen.https.acme` of the file (delete it and restart to let the file decide
+again); `listen.https.cert`/`key` win over both. Whatever is served, the generated pair stays the daemon's own identity,
+the client certificate a hub presents to its hosts.
 
 The fingerprint is in the start log line (`jailopsd started ... fingerprint=`) and can be read from the file:
 
@@ -63,10 +72,85 @@ file must be readable by the daemon's user (`jailops`): for example `chown root:
 
 **Pinning and renewal do not mix.** A client pins the leaf certificate's fingerprint, so a certificate that renews every 60 to 90
 days breaks every pin. With a certificate a public CA signed, **do not pin**: leave `fingerprint` out of `jailops remote add`
-(the client trusts a certificate the system roots verify, and pins only when none does) and out of `host.yaml` of a fleet. With the
-self-signed default, replacing the certificate by hand (remove the two files, restart) changes the fingerprint and every client has to
-pin the new one. Trust tokens carry the fingerprint the daemon read **at start**: after replacing a certificate, restart `jailopsd`
-before you issue new trust tokens.
+(the client trusts a certificate the system roots verify, and pins only when none does) and out of `host.yaml` of a fleet. The
+console's Host page shows the right command (`remote_add` of `GET /api/v1/host/certificate`): without a fingerprint when the
+served chain verifies against the host's trusted roots, with it otherwise. With the self-signed default, replacing the
+certificate by hand (remove the two files, restart) changes the fingerprint and every client has to pin the new one. A trust
+token carries the fingerprint of the certificate served when it is issued, so it pins a renewed ACME certificate too: with a
+public certificate, give clients an API token instead.
+
+## ACME: a certificate from a public CA
+
+The daemon is its own ACME client (RFC 8555). It needs:
+
+- **DNS names that point at this host** from the internet (`domains`, at most 20; no addresses, no wildcards).
+- **The CA's terms of service**: `accept_tos: true` (the console has a checkbox with the terms' address, which the status
+  shows as `terms_url` after the first request).
+- **A way in for the CA's check**, the challenge. The daemon is not root and cannot listen on ports 80 or 443, so the host
+  redirects them to its unprivileged ports:
+  - `http-01` (the default): the CA fetches `http://NAME/.well-known/acme-challenge/TOKEN` on **port 80**, which is
+    redirected to the challenge listener (`challenge_address`, default `:39080`).
+  - `tls-alpn-01`: the CA opens TLS with the protocol `acme-tls/1` on **port 443**, which is redirected to the console's
+    TLS listener; the daemon answers such a handshake with the challenge's certificate and refuses it when no challenge
+    runs. Port 443 then leads to the console from any address (the CA's addresses are not known), so `console.allow_from`
+    of the host firewall does not narrow it.
+
+**The redirect.** With the host firewall module of [appliance.md](appliance.md) managing `/etc/pf.conf`, the daemon adds the
+redirect to the firewall's spec while ACME is the source (`acme` of `GET /api/v1/host/firewall`, filled in by the daemon;
+what a client sends is replaced), and the helper renders it, after the jails' translation anchors (a jail that forwards the
+same port wins), with a pass rule for the redirected port:
+
+    rdr inet proto tcp from any to (self) port 80 -> 127.0.0.1 port 39080
+    rdr inet6 proto tcp from any to (self) port 80 -> ::1 port 39080
+    pass in proto tcp from any to { 127.0.0.1, ::1 } port 39080
+
+Apply the host firewall once after turning ACME on (the change waits for its confirmation like every firewall change);
+the certificate's status says `redirect.applied` and `jailops doctor` warns until then. Without the module JailOps never
+edits `pf.conf`: the status and the console print the two lines to add to its translation section, here for http-01:
+
+    rdr pass inet proto tcp from any to (self) port 80 -> 127.0.0.1 port 39080
+    rdr pass inet6 proto tcp from any to (self) port 80 -> ::1 port 39080
+
+The redirect targets the loopback addresses, so the challenge listener (and, with tls-alpn-01, the TLS listener) must
+listen on all addresses or on a loopback address; the configuration is refused otherwise. UNVERIFIED: these rules have
+not been loaded on a FreeBSD host; the IPv6 redirect to `::1` in particular (FreeBSD may drop a packet to a loopback
+address that arrives on another interface).
+
+**Requests and renewal.** Turning ACME on (in the file, at start, or in the console, at once) runs one order for all names:
+the account (key P-256, created once), an authorization per name, the challenge, the CSR, the chain. The chain and its key
+are written to `<data_dir>/tls/acme` (directory 0700, files 0600, each to a temporary file that is synced and renamed) and
+served from the next handshake on, without a restart; until the first certificate arrives the self-signed one is served.
+Once a day, with up to an hour of jitter, the daemon checks the certificate and renews it **30 days before it expires**. A
+failed request is retried after 1 hour, then 2, 4, 8 and 16 hours, then once a day: never a burst of retries. The console's
+Request button asks again at once, at most once a minute. The status (`GET /api/v1/host/certificate`, the console's
+Certificates panel) shows the state (`requesting`, `valid`, `error`), the last error, the failures in a row, the next
+attempt and the renewal date. `jailops doctor` has two checks: `tls.certificate` (what is served, its days left) and
+`tls.acme` (warns about the last error, a missing redirect, and when the daemon cannot reach its own challenge listener:
+it fetches a probe token from it, or completes an `acme-tls/1` handshake; this proves the listener answers, not that the CA
+reaches it through your router and DNS).
+
+**Limits.** Only `http-01` and `tls-alpn-01`: there is **no `dns-01`**, so **no wildcard certificates** (and no names the CA
+cannot reach). The next step for those is a `dns-01` challenge through a DNS provider's API; until then obtain such a
+certificate elsewhere and upload it, or point `listen.https.cert`/`key` at the files your tool keeps current. One
+certificate per daemon; no external account binding; no revocation from JailOps.
+
+**Tested how.** The tests run the whole flow against a CA written in the tests (`internal/daemon/dtest/acmeca.go`): the
+directory and its terms, nonces, signed requests checked, the account, an order for two names, both challenges validated
+against the daemon's real listeners, finalize with the CSR's names checked, the chain served on the TLS listener, a
+restart that serves the cached certificate, a refused validation with its backoff. Not covered there: DNS, the CA's rate
+limits, ports 80 and 443 behind pf. **UNVERIFIED: issuance by a real CA.** A person verifies it once against the staging
+directory, on a host whose DNS name points at it and whose port 80 reaches it:
+
+    # as root on the host, through the daemon's socket
+    curl -s --unix-socket /var/run/jailops/jailops.sock -H 'Content-Type: application/json' \
+      -d '{"domains":["console.example.com"],"directory_url":"https://acme-staging-v02.api.letsencrypt.org/directory","accept_tos":true}' \
+      http://jailops.local/api/v1/host/certificate/acme
+    curl -s --unix-socket /var/run/jailops/jailops.sock http://jailops.local/api/v1/host/certificate    # until "state":"valid"
+    openssl s_client -connect console.example.com:39110 -servername console.example.com </dev/null 2>/dev/null | openssl x509 -noout -issuer -dates
+    jailops doctor                                                                                         # tls.acme ok
+
+The issuer is the CA's staging intermediate. Then switch to production (the same request without `directory_url`) or back
+with `POST /api/v1/host/certificate/self-signed`.
 
 ## How a caller proves who it is
 
@@ -192,12 +276,15 @@ client certificates and the join flow, the web console switched off.
 
 ## Not yet
 
-- **ACME** (automatic certificates). Use an external client and `listen.https.cert`/`key`; reload makes renewal work without a restart.
+- **ACME with `dns-01`, and wildcard certificates.** Only `http-01` and `tls-alpn-01` are built (above); upload a wildcard
+  certificate obtained elsewhere, or point `listen.https.cert`/`key` at files another tool renews.
 - **Requiring a client certificate** (an mTLS-only mode): the listener requests but never requires one, so tokens and logins that
   exist keep working. Client certificates are trusted one by one by fingerprint; there is no client CA, no CRL, no OCSP.
 - **The caller's address behind a proxy** (`X-Forwarded-For`, the PROXY protocol): the lockout and `--allow-from` see the proxy.
 - **A plain-http listener on loopback** for a proxy (the listener is TLS only, so the proxy needs `https://` upstream).
 - **Separate listeners** for the API and the console, or a console switch per listener: `web.enabled` is for the daemon.
-- **Trust tokens that follow a reloaded certificate**: they carry the fingerprint read at start; restart after replacing it.
-- A hub that presents a CA-signed certificate as its client identity: the hub reuses the server certificate for its client
-  connections to hosts, which is meant for the self-signed one. Run a hub with the default certificate.
+- **Trust tokens that follow a renewed certificate**: a token pins the certificate served when it is issued; with a public
+  certificate use an API token.
+- A hub that presents a CA-signed certificate as its client identity: a hub with `listen.https.cert`/`key` reuses that
+  certificate for its client connections to hosts, which is meant for the self-signed one. Run a hub with the default
+  certificate (an uploaded or ACME certificate is fine: the generated pair stays the hub's client identity).

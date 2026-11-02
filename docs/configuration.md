@@ -10,6 +10,8 @@ Four files. Each rejects keys it does not know, so a typo is an error, not a sil
 | `/usr/local/etc/jailops/backupd.yaml` | the backup node `jailops-backupd` | see [backup-restore.md](backup-restore.md) |
 | `~/.config/jailops/config.yaml`, `/usr/local/etc/jailops/client.yaml` | the `jailops` client | the user; keep it private, it can hold tokens |
 
+And a few variables of `/etc/rc.conf`, read by the rc scripts (below).
+
 ## jailopsd.yaml
 
 Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
@@ -29,6 +31,8 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 | `listen.https.address` | empty | `":39110"` or `"127.0.0.1:39110"` enables the network listener: **TLS 1.3 only**, there is no plain-http TCP listener (mTLS pinning, API tokens, the web console). Checked at load |
 | `listen.https.names` | none | extra DNS names and IPs of the generated certificate |
 | `listen.https.cert`, `.key` | generated | your own certificate and key, absolute paths, **both or neither**; both must exist (the daemon never generates over a configured path); a renewed pair is picked up without a restart (checked at most every 15 s, a broken one is ignored and logged). Default `<data_dir>/tls/server.{crt,key}`, generated self-signed on first start |
+| `listen.https.acme.enabled`, `.email`, `.domains`, `.directory_url`, `.challenge`, `.accept_tos` | off; `https://acme-v02.api.letsencrypt.org/directory`; `http-01` | a certificate from a public CA with ACME ([exposure.md](exposure.md#acme-a-certificate-from-a-public-ca)): DNS names (1 to 20, no addresses, no wildcards), an optional contact address, the CA's directory (https; the staging one is `https://acme-staging-v02.api.letsencrypt.org/directory`), `http-01` or `tls-alpn-01`, and `accept_tos: true`, which is required. Needs the TLS listener; excludes `cert`/`key`. Checked at load. A choice made in the console replaces it |
+| `listen.https.acme.challenge_address` | `":39080"` | the plain-http listener of http-01 challenges (it answers nothing else); port 1024 or more, on all addresses or a loopback address, because the host redirects port 80 to it on `127.0.0.1` and `::1` |
 | `web.enabled` | `false` | `true` serves the embedded web console on the listeners (the API is unchanged); it is always in the binary. The same switch without editing the file: `jailopsd_web="YES"` in `/etc/rc.conf`, or the `-web` flag, which also opens the TLS listener on 39110 when none is configured (`"NO"` and `-no-web` force it off). `go build -tags noweb` leaves the console out of the binary. See [exposure.md](exposure.md) |
 | `priv.socket` | `/var/run/jailops/priv.sock` | where the helper listens |
 | `log.level`, `log.format` | `info`, `text` | `debug`, `info`, `warn`, `error`; `text` (key=value lines for syslog) or `json` |
@@ -40,7 +44,7 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 | `network.sysctl` | the three below | the bridge sysctls the daemon sets at run time through the helper and re-asserts: `net.link.bridge.pfil_member: 1` (must stay 1), `pfil_bridge: 0`, `pfil_onlyip: 1`. Never written to `/etc/sysctl.conf` |
 | `projects.network_pool`, `.network_bits`, `.uplink`, `.nat` | none | the IPv4 pool `project create NAME --new-network` carves a `/24` from; without it that option answers `unsupported` |
 | `updates.tick`, `.project_files_dir` | `1m`, `<state_dir>/project-files` | how often update schedules run; where provisioning files live, one directory per project |
-| `host.manage.modules` | `[]` | host management ([appliance.md](appliance.md)): the modules JailOps may change on the host itself. Empty, JailOps never changes the host and the host routes only read. `identity` is the host name, `/etc/resolv.conf`, the jailops block of `/etc/ntp.conf` and `ntpd_enable`; `firewall` is the whole of `/etc/pf.conf` with `pf_enable` and `pf_rules`, every change of it reverting unless confirmed (the console rule opens the port of `listen.https.address`). The helper must allow the same module (`host-manage` in `priv.conf`): with only one of the two, changes answer `not_managed`. Unknown modules and duplicates are an error at load |
+| `host.manage.modules` | `[]` | host management ([appliance.md](appliance.md)): the modules JailOps may change on the host itself. Empty, JailOps never changes the host and the host routes only read. `identity` is the host name, `/etc/resolv.conf`, the jailops block of `/etc/ntp.conf` and `ntpd_enable`; `firewall` is the whole of `/etc/pf.conf` with `pf_enable` and `pf_rules`, every change of it reverting unless confirmed (the console rule opens the port of `listen.https.address`). The helper must allow the same module (`host-manage` in `priv.conf`): with only one of the two, changes answer `not_managed`. Unknown modules and duplicates are an error at load. `jailops_appliance="YES"` in `rc.conf` adds its modules to this list (and to the helper's) |
 | `apps.catalog_dir` | `/usr/local/share/jailops/apps` | the application catalog ([apps.md](apps.md)): one YAML definition per file, installed by the `jailops-apps` package. Read on each request, never fetched; a missing directory is an empty catalog |
 | `apps.local_dir` | `/usr/local/etc/jailops/apps` | the host's own app definitions ([apps.md](apps.md), "Write your own app"): `NAME.yaml` and its icon, read with the catalog on each request; a definition here wins over a packaged one of the same name and is listed with `source: local`. A missing directory is empty; it must be readable by the user `jailops` |
 | `lifecycle.persistent` | the built-in list | the paths of a thin jail that survive a generation switch, each in its own dataset (`dataset`, `path`, `class` system or data, `merge`, `no_seed`). The default is `/etc`, `/usr/local`, `/var/db`, `/var/log`, `/var/mail`, `/var/spool`, `/home`, `/root`. **Setting it replaces the list** |
@@ -72,8 +76,22 @@ This file is the **operator's authority**: everything the root helper will do fo
 | `admin-raw-param`, `admin-allow-flag`, `admin-devfs-ruleset`, `admin-host-mount`, `admin-zfs-prop`, `admin-routes`, `admin-raw-pf`, `admin-resume-send` | what a global admin may unlock; empty or off by default. **An admin who may set these is root on the host**: keep the lists short |
 | `fetch-host` | the hosts the download rule may fetch from, https only (default `dl-cdn.alpinelinux.org`, `pkg.freebsd.org`) |
 | `image-mirror` | directories `fs.read_file` may read besides the storage roots (a local mirror of image archives) |
-| `host-manage` | empty; the host management modules the helper may change (`identity`, `firewall`; one per line or comma separated). Empty, the host operations only read. The operator's own switch: `host.manage.modules` of `jailopsd.yaml` cannot enable anything the helper does not ([appliance.md](appliance.md)) |
+| `host-manage` | empty; the host management modules the helper may change (`identity`, `firewall`; one per line or comma separated). Empty, the host operations only read. The operator's own switch: `host.manage.modules` of `jailopsd.yaml` cannot enable anything the helper does not ([appliance.md](appliance.md)). `jailops_appliance="YES"` in `rc.conf` adds its modules when the helper starts (`check-config` prints both lists); `appliance-modules` is not a key of this file |
 | `host-dir` | `/var/db/jailops-priv/host`; where the helper keeps the snapshots of host files (the last 20), the record of what it applied, and the record of a change that waits for its confirmation (`pending.json`, read again when the helper starts and by the boot script `jailops_revert`). Created root-owned with mode 0700 and refused otherwise: the daemon can neither read nor change it |
+
+## rc.conf
+
+The rc scripts read these from `/etc/rc.conf` (set them with `sysrc`); a change needs a restart of the service.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `jailops_priv_enable`, `jailopsd_enable` | `NO` | start the helper and the daemon at boot |
+| `jailops_priv_config`, `jailopsd_config` | the files above | another configuration file |
+| `jailopsd_runas` | `jailops` | the daemon's user |
+| `jailopsd_web` | unset | `YES` serves the web console (and opens the TLS listener on 39110 when none is set), `NO` forces it off; unset, `web.enabled` decides |
+| `jailops_appliance` | unset | `YES`: appliance mode ([appliance.md](appliance.md)). Both programs manage the modules of `jailops_appliance_modules` besides their own lists; the first start of `jailops_priv` without `priv.conf` sets the host up (`jailops-priv appliance-init`); every start of `jailopsd` without an administrator prints a setup token on the system console |
+| `jailops_appliance_modules` | all modules | the modules of appliance mode, separated by spaces (`identity firewall`) |
+| `jailops_pool` | the pool of `/` | the pool the first start of appliance mode sets up |
 
 ## backupd.yaml
 
