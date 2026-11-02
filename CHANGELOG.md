@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.5.0 - 2026-11-02
+
 - **The logs of all jails, and forwarding them** ([docs/logging.md](docs/logging.md)).
   - `jailops logs` without a jail merges the end of `messages` (or `--file`) of every jail of the project into one stream ordered by the timestamp each line starts with (RFC 3339, RFC 5424, `YYYY-MM-DD HH:MM:SS`, `Mon DD HH:MM:SS` in the current year or the one before, the bracketed web form); a line without one keeps its place after the line before it. Each line starts with `jail/file`, coloured per jail on a terminal; `--jail` and `-l KEY=VALUE` (repeatable), `--app`, `--app-logs` (the files installed apps declare below `/var/log`), `--all-projects`, `--tail`, `--since`, `--grep` per file, `-f` follows all of them, `-o json` prints one `{time, project, jail, app, file, line}` per line. A file that cannot be read (a jail that is not mounted) is named on standard error. `jailops logs NAME [FILE]` is still the one jail's logs; a jail named `forward` is read with `jailops jail logs forward`.
   - New route `GET /api/v1/logs` (extension `logs_unified`, operator in every project read, audited once per identity and selection every five minutes): the per-jail reads of up to 50 files, merged, at most 2000 lines, with a `next` map of offsets per file sent back as `cursor` to follow. Types `LogsQuery`, `LogsRead`, `LogEntry`, `LogSource`; `c.Logs().Read` in the SDK and the fake.
