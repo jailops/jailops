@@ -230,7 +230,7 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 		t.Fatal("the password is in the daemon log")
 	}
 	_, body := e.Raw("GET", "/api/v1/audit", e.Token(api.PermAdmin), "")
-	if strings.Contains(body, password) || !strings.Contains(body, "allow source=@web-api") {
+	if strings.Contains(body, password) || !strings.Contains(body, `allow source=\"@web-api\"`) {
 		t.Fatalf("audit: %s", body)
 	}
 
@@ -499,5 +499,47 @@ func TestRateLimitNotEnforced(t *testing.T) {
 	i := slices.IndexFunc(rep.Checks, func(ch api.DoctorCheck) bool { return ch.Name == "jails.rate_limits" })
 	if i < 0 || rep.Checks[i].Status != api.DoctorInfo || !strings.Contains(rep.Checks[i].Message, "alpha/web") {
 		t.Fatalf("%+v", rep.Checks)
+	}
+}
+
+// An allow that fails after psql made the role (here: pg_hba.conf is not there yet) leaves the role in the
+// registry, so a retry finishes it: a new password, shown once, and no conflict over a role "not made by JailOps".
+func TestAppAccessAllowFinishesAfterAFailure(t *testing.T) {
+	e, c := appEnv(t, map[string]string{"db": appDB, "tool": appExecCheck})
+	pg := newFakePG()
+	e.Jails.SetExecFn(pg.exec)
+	oper := e.Scoped(api.PermOperator, dtest.SeedProject)
+	installApp(t, oper, "db", "db")
+	installApp(t, oper, "tool", "web-api")
+	hbaPath := "/jailops/projects/alpha/jails/db/root/var/db/postgres/data18/pg_hba.conf"
+	if _, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "@web-api"}); err == nil || !strings.Contains(e.Log(), "does not exist in the jail") {
+		t.Fatalf("the first allow: %v\n%s", err, e.Log())
+	}
+	pg.mu.Lock()
+	made := pg.roles["web_api"]
+	pg.mu.Unlock()
+	if !made {
+		t.Fatal("the failure was not injected after CREATE ROLE")
+	}
+	acc, err := oper.Apps().Access(c, "db")
+	if err != nil || len(acc.Grants) != 0 {
+		t.Fatalf("a grant of a failed allow: %v %+v", err, acc)
+	}
+	pg.take()
+	e.Files.Put(hbaPath, []byte(hbaStock))
+	res, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "@web-api"})
+	if err != nil {
+		t.Fatalf("the retry: %v\n%s", err, e.Log())
+	}
+	if m := connRE.FindStringSubmatch(res.ConnectionString); m == nil || !res.Grant.RoleCreated || !res.Changed {
+		t.Fatalf("%+v", res)
+	}
+	if all := strings.Join(pg.take(), "\n"); !strings.Contains(all, `ALTER ROLE "web_api"`) || strings.Contains(all, "CREATE ROLE") {
+		t.Fatalf("the retry did not set a new password on the role it made: %s", all)
+	}
+	// finished: another allow changes nothing and makes no password
+	again, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "@web-api"})
+	if err != nil || again.Changed || again.ConnectionString != "" {
+		t.Fatalf("%v %+v", err, again)
 	}
 }

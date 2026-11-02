@@ -281,8 +281,8 @@ installation (they are enabled and started only afterwards). See [security-model
 made, and the start) undoes the creation: the jail and its datasets are deleted again, nothing is left. A failure after the start (a package that does
 not install, a setup command or a service that fails, a health check that does not pass within `wait_seconds`) ends the
 operation with the jail **stopped and kept** for inspection, with its labels (`jailops.app.version` once the packages
-went in): look inside it with `jailops start JAIL` and `jailops shell JAIL`, and `jailops delete JAIL` before trying
-again. The error of the operation names the step (`detail.step`), the jail (`detail.jail`) and whether it was kept
+went in): look inside it with `jailops start JAIL` and `jailops shell JAIL`, and `jailops delete JAIL` (it asks you to
+type the name, since it destroys the jail's data; `--confirm-data-loss` in a script) before trying again. The error of the operation names the step (`detail.step`), the jail (`detail.jail`) and whether it was kept
 (`detail.jail_kept`), and its hint says what to do. A daemon restart in the middle of an installation does the same from
 the journal: a jail whose start never completed is deleted (a start that was cut short is rolled back first), one that
 was started is stopped and kept.
@@ -364,7 +364,8 @@ cross-project grant removes that rule again, and the policy when it is empty.
    - The **managed block** of the `hba_file` (between `# jailops access begin: ...` and `# jailops access end`, appended
      at the end of the file the first time) holds one line per grant and address, `host DB ROLE PREFIX
      scram-sha-256`, sorted; every other line of the file stays as it is, byte for byte. The file is written through
-     the helper's file operations below the jail root, then given back to `postgres:postgres` with mode `0600` in the
+     the helper's file operations, which open the jail root as their root (a symlink of the jail cannot lead them into
+     another jail; an absolute one is refused), then given back to `postgres:postgres` with mode `0600` in the
      jail, and the server reads it again (`SELECT pg_reload_conf()`). A block whose markers are broken is refused, never
      guessed at. A person's line above the block that matches the same client first (a `reject` for all) wins, as
      PostgreSQL reads the file top down.
@@ -447,7 +448,7 @@ repeats it on any host. The loop:
 
    ```sh
    jailops app new memcached --package memcached --service memcached --port 11211/tcp --category database
-   jailops app export cache -o cache.yaml       # from the running jail "cache" of the current project
+   jailops app export cache --to cache.yaml     # from the running jail "cache" of the current project
    ```
 
    `jailops app new NAME [--package PKG[,PKG...]] [--service NAME] [--port N[/proto]] [--category C] [--dir DIR]`
@@ -458,9 +459,10 @@ repeats it on any host. The loop:
    writes `NAME.svg`, a neutral placeholder icon (a rounded square with the first letter), unless an icon of that name
    is there. It refuses to write over an existing `NAME.yaml` without `--force`.
 
-   `jailops app export JAIL [--project P] [-o FILE]` asks the daemon for a draft of a running FreeBSD jail and writes
-   it to `FILE` or the standard output (here `-o` names the file, it is not an output format; `--force` writes over
-   an existing file). The draft is read, nothing in the jail changes: the packages installed on purpose (their
+   `jailops app export JAIL [--project P] [--to FILE]` asks the daemon for a draft of a running FreeBSD jail and writes
+   it to `FILE` or the standard output (`--force` writes over an existing file; `-o json` or `-o yaml` prints the
+   draft as data instead, `-o` being the output format as everywhere else; `-o FILE.yaml`, the former spelling of
+   `--to`, still writes the file, with a warning). The draft is read, nothing in the jail changes: the packages installed on purpose (their
    dependencies come with them; `pkg -r <root> query` on the host), the services enabled in the jail's `/etc/rc.conf`
    and their knobs, the ports something listens on now (`sockstat` in the jail; a port bound to localhost only says
    so), the jail's volumes as `data` paths, the names of the files below `/usr/local/etc` and `/var/log` that changed
@@ -486,7 +488,7 @@ repeats it on any host. The loop:
    `jailops app list --source local`, then `jailops app install NAME`. A local definition of the same name as a
    packaged one replaces it on that host, which is how you test a change to a packaged app.
 
-5. **Iterate**: `jailops delete NAME`, edit the file in place, `jailops app install NAME` again. A failed installation
+5. **Iterate**: `jailops delete --force NAME` (type the name to confirm), edit the file in place, `jailops app install NAME` again. A failed installation
    keeps the jail stopped for inspection (`jailops start NAME`, `jailops shell NAME`); the error names the step.
 
 6. **Validate again**, until `jailops app validate NAME.yaml` prints `valid: 1 definition(s), 1 icon(s)`.

@@ -16,6 +16,7 @@ register of what is settled and what is open.
 | [storage.md](storage.md) | Storages on big pools, volumes, host mounts, quotas, what is and is not backed up |
 | [backup-restore.md](backup-restore.md) | The backup node, the key and its escrow, policies, verification, restoring |
 | [upgrade.md](upgrade.md) | Upgrading JailOps, upgrading and rolling back jails, managed updates |
+| [operations.md](operations.md) | Runbooks (lost admin access, a stolen credential, a compromised daemon, a lost backup key, a new host, a firewall lock-out, going back one version), recovery objectives, and what to monitor (`/readyz`, doctor) |
 | [troubleshooting.md](troubleshooting.md) | `jailops doctor` checks by id, `jailops explain` codes, common failures |
 | [linux-jails.md](linux-jails.md) | Alpine and Debian jails under the Linuxulator: limits and prerequisites |
 | [fleet-sync.md](fleet-sync.md) | A git repository of YAML across hosts, what it can declare, secrets with age and SOPS, rollouts |
@@ -25,6 +26,7 @@ register of what is settled and what is open.
 | [appliance.md](appliance.md) | Optional host management from the console (appliance mode), module by module: off by default; host name, resolvers and NTP, and the host firewall with commit confirmed are built, the rest is design |
 | [api.md](api.md) | The API for programs: the SDK, authentication, and where the protocol is written down |
 | [../examples/README.md](../examples/README.md) | Runnable fleets: IPv6, a web stack with backups, a big pool, two hosts, provisioning |
+| [ci-supply-chain.md](ci-supply-chain.md) | For maintainers: the third-party actions the workflows run, their rights, and how to pin them to commits |
 | [design.md](design.md) | The contract: principles, layout, networking, API, backup, fleets, and the verification log |
 | [../sdk/PROTOCOL.md](../sdk/PROTOCOL.md) | The wire protocol the SDK, the fake server and the daemon implement |
 

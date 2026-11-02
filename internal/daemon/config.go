@@ -18,6 +18,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"jailops.net/jailops/internal/apps"
+	"jailops.net/jailops/internal/priv"
 	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/sdk/api"
 )
@@ -73,16 +74,33 @@ type Config struct {
 	Host HostConf `yaml:"host"`
 	// Logging configures log forwarding (docs/logging.md).
 	Logging LoggingConf `yaml:"logging"`
+	// Audit configures how long the audit log keeps its entries.
+	Audit AuditConf `yaml:"audit"`
 
 	// Appliance are the modules rc.conf turned on (ApplyAppliance); never read from the file.
 	Appliance []string `yaml:"-"`
+}
+
+// AuditConf bounds the audit log. Once a day the daemon deletes the entries older than Retention and the oldest
+// beyond MaxEntries; the newest 1000 entries are never deleted.
+type AuditConf struct {
+	// Retention is how long an entry is kept (default 90d; at least 1d).
+	Retention Duration `yaml:"retention"`
+	// MaxEntries bounds the number of entries (default 1000000; at least 1000).
+	MaxEntries int `yaml:"max_entries"`
 }
 
 // LoggingConf configures where the logs of the jails go. Forward is the
 // sink list in force until an administrator stores one through the API.
 type LoggingConf struct {
 	Forward []api.LogSink `yaml:"forward"`
+	// SecretsDir is the only directory the CA and token files of a sink set through the API may lie in (default
+	// DefaultLogSecretsDir; root-owned, 0750 root:jailops). The files of Forward may lie anywhere.
+	SecretsDir string `yaml:"secrets_dir"`
 }
+
+// DefaultLogSecretsDir is the default of logging.secrets_dir.
+const DefaultLogSecretsDir = "/usr/local/etc/jailops/sinks"
 
 // HostConf configures host management: JailOps changes the host itself only for the modules listed here (and in
 // host-manage of priv.conf).
@@ -318,6 +336,15 @@ func (d *Duration) UnmarshalYAML(n *yaml.Node) error {
 	if err := n.Decode(&s); err != nil {
 		return err
 	}
+	// whole days are written "90d"
+	if n, ok := strings.CutSuffix(s, "d"); ok {
+		days, err := strconv.Atoi(n)
+		if err != nil || days < 0 {
+			return fmt.Errorf("invalid duration %q", s)
+		}
+		*d = Duration(time.Duration(days) * 24 * time.Hour)
+		return nil
+	}
 	v, err := time.ParseDuration(s)
 	if err != nil {
 		return fmt.Errorf("invalid duration %q", s)
@@ -336,11 +363,13 @@ func Defaults() Config {
 		Role: "host", MountBase: "/jailops", DataDir: "/var/db/jailops",
 		ConfDir: "/usr/local/etc/jailops/jails", WorkDir: "/var/tmp/jailops",
 		Listen:    Listen{Unix: UnixListen{Path: "/var/run/jailops/jailops.sock", Mode: 0o666}},
-		Priv:      Priv{Socket: "/var/run/jailops/priv.sock"},
+		Priv:      Priv{Socket: priv.DefaultSocket},
 		Log:       Log{Level: "info", Format: "text"},
 		Reconcile: Reconcile{Interval: Duration(60 * time.Second), Autostart: &t},
 		Limits:    Limits{MaxBodyBytes: 4 << 20, RequestTimeout: Duration(60 * time.Second)},
 		Apps:      AppsConf{CatalogDir: apps.DefaultDir, LocalDir: apps.DefaultLocalDir},
+		Audit:     AuditConf{Retention: Duration(90 * 24 * time.Hour), MaxEntries: 1000000},
+		Logging:   LoggingConf{SecretsDir: DefaultLogSecretsDir},
 	}
 }
 
@@ -415,6 +444,15 @@ func (c Config) finish() (Config, error) {
 	if c.StateDir == "" {
 		c.StateDir = filepath.Join(c.DataDir, "state")
 	}
+	if c.Audit.Retention == 0 {
+		c.Audit.Retention = Duration(90 * 24 * time.Hour)
+	}
+	if c.Audit.MaxEntries == 0 {
+		c.Audit.MaxEntries = 1000000
+	}
+	if c.Audit.Retention.Std() < 24*time.Hour || c.Audit.MaxEntries < 1000 {
+		return c, fmt.Errorf("config: audit.retention must be at least 1d and audit.max_entries at least 1000")
+	}
 	switch c.Log.Level {
 	case "debug", "info", "warn", "error":
 	default:
@@ -424,6 +462,9 @@ func (c Config) finish() (Config, error) {
 	case "text", "json":
 	default:
 		return c, fmt.Errorf("config: log.format %q must be text or json", c.Log.Format)
+	}
+	if c.Priv.Socket == priv.LegacySocket {
+		c.Priv.Socket = priv.DefaultSocket // the helper reads the former path as this one too
 	}
 	if c.Apps.CatalogDir == "" {
 		c.Apps.CatalogDir = apps.DefaultDir
@@ -528,6 +569,9 @@ func (c Config) finish() (Config, error) {
 	}
 	if err := (api.LogForwardSpec{Sinks: c.Logging.Forward}).Validate(); err != nil {
 		return c, fmt.Errorf("config: logging.forward: %v", err)
+	}
+	if d := c.Logging.SecretsDir; d == "" || !filepath.IsAbs(d) || filepath.Clean(d) != d || d == "/" {
+		return c, fmt.Errorf("config: logging.secrets_dir %q must be a clean absolute path other than /", d)
 	}
 	if c.Reconcile.Interval.Std() < time.Second {
 		return c, fmt.Errorf("config: reconcile.interval must be at least 1s")

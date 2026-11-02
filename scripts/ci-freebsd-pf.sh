@@ -87,7 +87,7 @@ remove_all() {
 		$J stop "${pn#*:}" --project "${pn%%:*}" </dev/null >/dev/null 2>&1
 	done
 	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfb:o; do
-		retry 6 $J delete -y "${pn#*:}" --project "${pn%%:*}" </dev/null
+		retry 6 $J delete --confirm-data-loss "${pn#*:}" --project "${pn%%:*}" </dev/null
 	done
 	for p in pfa pfb; do
 		$J project set $p --firewall "" </dev/null >/dev/null 2>&1

@@ -42,7 +42,6 @@ $ jailops storage create nodataset
 
 $ jailops storage create bad --dataset nodash
 ! invalid: dataset "nodash" must look like pool/dataset
-! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
 [exit 2]
 
 $ jailops storage list
@@ -65,22 +64,21 @@ $ jailops project set web --network br-web=10.50.0.100-10.50.0.150
 [exit 2]
 
 $ jailops project show web
-Name:        web
-UUID:        <uuid>
-Generation:  2
-Age:         3h
+Project web
+  Description: front end
+  Hosts:       this host
+  Networks:    br-web
+  Storage:     fast (quota 500G)
+  Firewall:    none
+  Images:      any
+  Age:         3h
 
-SPEC                      STATUS
-----                      ------
-description: front end    jails: 0
-networks:                 cpu: 0
-  - network: br-web       memory_used: 0
-storage:                  disk_used: 0
-  - storage: fast         addresses: 0
-    quota: 500G
-quotas:
-  jails: 2
-  memory: 8G
+Usage
+  Jails:       0 of 2
+  CPU:         0 cores (no quota)
+  Memory:      0 B of 8G
+  Disk:        0 B
+  Addresses:   0 (no quota)
 
 $ jailops project list
     NAME   HOSTS   NETWORKS   STORAGE   JAILS   DESCRIPTION
@@ -89,13 +87,10 @@ $ jailops project list
 
 $ jailops network grant lan --project web
 ! conflict: network lan is already granted to project main
-! hint: Read it again and repeat the change; 'jailops <kind> edit' does this for you. (jailops explain conflict)
 [exit 5]
 
 $ jailops network grant lan
-! usage: --project is required
-! hint: run 'jailops network grant --help' for usage
-[exit 2]
+network/lan granted to project main
 
 $ jailops network revoke br-web --project web
 network/br-web revoked from project web
@@ -117,11 +112,11 @@ NAME    STATE     IMAGE               GEN   ADDRESSES           AGE
 nginx   stopped   freebsd-15@stable   g1    10.50.0.2,fd50::2   3h
 
 $ jailops list
-! No resources found.
+! No jails in project main. Create one with: jailops jail create NAME --image IMAGE@ALIAS --network NETWORK --storage STORAGE
 
 $ jailops list --project nowhere
 ! not_found: project "nowhere" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops project list'; check --project, --host and --remote too
 [exit 4]
 
 $ jailops project show web -o json
@@ -177,7 +172,7 @@ $ jailops project delete -y web
 
 $ jailops project delete -y default
 ! not_found: project "default" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops project list'; check --project, --host and --remote too
 [exit 4]
 
 $ jailops project create shop --new-network --hosts h1,h2 --storage fast

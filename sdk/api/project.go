@@ -32,6 +32,24 @@ type ProjectSpec struct {
 	NewNetwork bool `json:"new_network,omitempty"`
 }
 
+// SoleNetwork is the network a jail of the project is attached to when it names none: the project's only network
+// grant, or "" when the project has none or several.
+func (s ProjectSpec) SoleNetwork() string {
+	if len(s.Networks) == 1 {
+		return s.Networks[0].Network
+	}
+	return ""
+}
+
+// SoleStorage is the storage a jail of the project is placed on when it names none: the project's only storage
+// grant, or "" when the project has none, several, or the grant of every storage ("*").
+func (s ProjectSpec) SoleStorage() string {
+	if len(s.Storage) == 1 && s.Storage[0].Storage != "*" {
+		return s.Storage[0].Storage
+	}
+	return ""
+}
+
 // ProjectNetwork grants a network to a project. A network belongs to at most
 // one project: it is used whole by the project it is granted to, and is never
 // shared.

@@ -153,6 +153,9 @@ func (k kindStore[S]) create(ctx context.Context, meta api.ObjectMeta, spec S) (
 	if k.projectLevel && k.project == "" {
 		return object[S]{}, ErrProjectRequired()
 	}
+	if err := api.ValidLabels(meta.Labels); err != nil {
+		return object[S]{}, err
+	}
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return object[S]{}, internal(err)
@@ -199,6 +202,12 @@ func (k kindStore[S]) update(ctx context.Context, name string, expect int64, lab
 	}
 	if equalJSON(raw, old.Spec) && labelsEqual(labels, old.Metadata.Labels) && mb == old.Metadata.ManagedBy {
 		return decodeObject[S](old)
+	}
+	if !labelsEqual(labels, old.Metadata.Labels) {
+		// labels stored before the rules existed stay until they are changed
+		if err := api.ValidLabels(labels); err != nil {
+			return object[S]{}, err
+		}
 	}
 	res, err := k.s.d.State.Apply(state.Command{
 		Version: state.CommandVersion, ID: state.NewUUID(), Time: k.s.now().UTC(), Op: state.OpPut,

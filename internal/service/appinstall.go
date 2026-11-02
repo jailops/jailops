@@ -142,11 +142,11 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		return api.Operation{}, invalid("jail name %q is too long: its firewall policy %s must be a name too", jail, apps.AccessPolicyName(jail))
 	}
 	network, storage := req.Network, req.Storage
-	if network == "" && len(p.Spec.Networks) == 1 {
-		network = p.Spec.Networks[0].Network
+	if network == "" {
+		network = p.Spec.SoleNetwork()
 	}
-	if storage == "" && len(p.Spec.Storage) == 1 && p.Spec.Storage[0].Storage != "*" {
-		storage = p.Spec.Storage[0].Storage
+	if storage == "" {
+		storage = p.Spec.SoleStorage()
 	}
 	if network == "" {
 		return api.Operation{}, invalid("name the network the jail is attached to (--network NAME); project %q is granted %s", proj, grantedNames(p.Spec)).

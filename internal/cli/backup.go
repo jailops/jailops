@@ -95,7 +95,8 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 			var last, hourly, daily, weekly, monthly, yearly, fullEvery int
 			var includeState bool
 			f := cmd.Flags()
-			f.StringArrayVar(&selector, "selector", nil, "label selector KEY=VALUE (repeatable)")
+			f.StringArrayVarP(&selector, "selector", "l", nil, "label selector KEY=VALUE (repeatable; --label is the same)")
+			aliasFlags(cmd, map[string]string{"label": "selector"})
 			f.StringArrayVar(&targets, "target", nil, "backup target name (repeatable)")
 			f.StringVar(&schedule, "schedule", "", "five-field cron expression (required without -f)")
 			f.IntVar(&last, "keep-last", 0, "keep the last N backups")
@@ -206,7 +207,8 @@ func (a *app) backupList() *cobra.Command {
 	a.completeFlag(cmd, "target", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
 		return namesOf(c.Backups().Targets().List(ctx), func(t api.BackupTarget) string { return t.Metadata.Name })
 	}))
-	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable)")
+	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable; --selector is the same)")
+	aliasFlags(cmd, map[string]string{"selector": "label"})
 	return cmd
 }
 

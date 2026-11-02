@@ -63,7 +63,7 @@ func (a *app) wireguardCmd() *cobra.Command {
 		`A WireGuard tunnel is a server that peers join, or a client of a server. The
 keys are made on the host and stay there (root only); the API never shows a
 private key. A server enrolls a peer with one command, which prints a join
-token once: on another JailOps host 'jailops wireguard join TOKEN' makes the
+token once: on another JailOps host 'jailops wireguard join - < TOKEN-FILE' makes the
 client and brings it up, and --format conf prints the same as a configuration
 file for phones and laptops.
 
@@ -73,7 +73,7 @@ Forwarding and the pf rule for the listen port stay with the administrator.`,
 		`jailops wireguard create office --address 10.99.0.1/24 --network web
 jailops wireguard peer add office laptop
 jailops wireguard peer add office phone --format conf > phone.conf
-jailops wireguard join jwg1.eyJu...
+jailops wireguard join - < token.txt
 jailops wireguard status office`, "wireguard tunnels", "wg")
 	crudCommands(a, wc, d, `Create a WireGuard server: an interface (default wg-NAME) with the
 given address, listening on --listen-port (default 51820). Peers get addresses from
@@ -100,7 +100,7 @@ jailops wireguard create -f office.yaml`,
 			_ = cmd.RegisterFlagCompletionFunc("network", completeKind(a, networkDesc()))
 			return func(name string) (api.WireGuard, error) {
 				if mode != string(api.WireGuardServer) {
-					return api.WireGuard{}, usagef("a client is made from a join token: jailops wireguard join TOKEN")
+					return api.WireGuard{}, usagef("a client is made from a join token: jailops wireguard join - < TOKEN-FILE")
 				}
 				if len(addr) == 0 {
 					return api.WireGuard{}, usagef("--address is required, for example --address 10.99.0.1/24")
@@ -238,30 +238,45 @@ a client's server must enroll the client again. Asks for confirmation unless -y.
 }
 
 func (a *app) wgJoinCmd() *cobra.Command {
-	var name, iface, endpoint string
+	var name, iface, endpoint, tokenFile string
 	var addr, allowed []string
 	cmd := &cobra.Command{
-		Use:   "join TOKEN",
+		Use:   "join [TOKEN|-]",
 		Short: "Join a WireGuard server with a token",
 		Long: `Make a client tunnel from a join token ('jailops wireguard peer add' on the
 server prints it) and bring it up. The token holds the client's private key and
 the preshared key: they go to this host's helper and are not kept anywhere
-else. Read the token from standard input with "-" to keep it out of your shell
-history. The overrides replace what the token says: --endpoint when this host
+else. Read the token from standard input with "-", or from a file with
+--token-file: on the command line other users of the host can read it, and the
+shell keeps it in its history (a token given there is accepted with a warning).
+The overrides replace what the token says: --endpoint when this host
 reaches the server under another address, --address and --allowed-ips when the
 token's addresses do not fit here.`,
-		Example: `jailops wireguard join jwg1.eyJu...
-jailops wireguard join - --name office < token.txt
-jailops wireguard join jwg1.eyJu... --endpoint 203.0.113.10:51820`,
-		Args: cobra.ExactArgs(1),
+		Example: `jailops wireguard join - --name office < token.txt
+jailops wireguard join --token-file token.txt --endpoint 203.0.113.10:51820`,
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			tok := args[0]
-			if tok == "-" {
+			var tok string
+			switch {
+			case len(args) == 1 && tokenFile != "":
+				return usagef("give the token as an argument, with -, or with --token-file, not twice")
+			case tokenFile != "":
+				b, err := a.readInput(tokenFile)
+				if err != nil {
+					return err
+				}
+				tok = strings.TrimSpace(string(b))
+			case len(args) == 0:
+				return usagef("name the token: jailops wireguard join - (standard input) or --token-file FILE")
+			case args[0] == "-":
 				b, err := a.readInput("-")
 				if err != nil {
 					return err
 				}
 				tok = strings.TrimSpace(string(b))
+			default:
+				tok = args[0]
+				fprintf(a.env.Stderr, "warning: the token holds a private key, and on the command line other users of this host can read it and the shell keeps it in its history; use 'jailops wireguard join -' or --token-file\n")
 			}
 			q := api.WireGuardJoin{Token: tok, Name: name, Interface: iface, Endpoint: endpoint, Address: addr, AllowedIPs: allowed}
 			if a.dryRun {
@@ -288,6 +303,8 @@ jailops wireguard join jwg1.eyJu... --endpoint 203.0.113.10:51820`,
 		},
 	}
 	f := cmd.Flags()
+	f.StringVar(&tokenFile, "token-file", "", "read the token from this file")
+	_ = cmd.RegisterFlagCompletionFunc("token-file", completeFiles)
 	f.StringVar(&name, "name", "", "name of the tunnel on this host (default the name in the token)")
 	f.StringVar(&iface, "interface", "", "interface name (default wg-NAME)")
 	f.StringVar(&endpoint, "endpoint", "", "host:port of the server, instead of the token's")
@@ -367,7 +384,7 @@ jailops wireguard peer add office ci --address 10.99.0.50 --keepalive 0`,
 			}
 			fprintf(a.env.Stderr, "Peer %s of wireguard %s enrolled with %s.\nwarning: %s\n", res.Peer.Name, args[0], strings.Join(res.Peer.AllowedIPs, ", "), res.Warning)
 			if format == "conf" {
-				_, err = fmt.Fprint(a.env.Stdout, res.Config)
+				_, err = fmt.Fprint(a.env.Stdout, termText(res.Config, true))
 				return err
 			}
 			fprintln(a.env.Stdout, res.Token)

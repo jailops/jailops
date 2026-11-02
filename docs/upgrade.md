@@ -22,6 +22,19 @@ What protects your data across an upgrade:
 - Back up `<data_dir>/secrets.key` (the age identity that opens sealed secrets), `backup.key` and your TLS material with your
   own tools; they are not in a JailOps backup.
 
+**The helper's socket moved** to `/var/run/jailops-priv/priv.sock` (a directory of root, mode 0710, group `jailops`).
+Upgrading from a release that used `/var/run/jailops/priv.sock`, stop both services before `pkg upgrade` and start them
+after it, the helper first:
+
+    service jailopsd stop && service jailops_priv stop
+    pkg upgrade jailops jailops-client
+    service jailops_priv start && service jailopsd start
+
+`priv.conf` and `jailopsd.yaml` that still name the old path keep working: both programs read it as the new one. A
+daemon of the old release left running would look for the helper at the old path. At its first start the new helper
+also gives the directory of every storage root to root with mode 0700 and sets `devices=off` on the root dataset
+([security-model.md](security-model.md#two-programs-one-boundary)); `jailops-priv check-config` shows a root it refuses.
+
 Read [CHANGELOG.md](../CHANGELOG.md) before upgrading. A configuration key that was removed is an error, because the files
 reject unknown keys: the daemon names the key and does not start until you remove it (for example `experimental:` from an
 early build). **UNVERIFIED:** upgrades between released versions of JailOps; there has been no release yet, and nothing

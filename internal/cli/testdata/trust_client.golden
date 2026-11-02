@@ -43,15 +43,15 @@ $ jailops remote add <addr> --token <trust-token> --name again
 
 $ jailops project create other
 ! forbidden: the operator role cannot call POST /api/v1/projects
-! hint: Ask an administrator for a token with a higher role (operator for lifecycle, admin for configuration). (jailops explain forbidden)
+! hint: your role or scope does not allow this: ask an administrator ('jailops whoami' shows yours)
 [exit 3]
 
 $ jailops list --project web
-! No resources found.
+! No jails in project web. Create one with: jailops jail create NAME --image IMAGE@ALIAS --network NETWORK --storage STORAGE
 
 $ jailops list --project default
 ! not_found: project "default" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops project list'; check --project, --host and --remote too
 [exit 4]
 
 $ jailops whoami

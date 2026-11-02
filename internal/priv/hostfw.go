@@ -595,7 +595,7 @@ func (l *Local) restoreFirewall(ctx context.Context, root *os.Root, name string,
 	if effective && !pfAfter && nowOn && (m.PFEnabled == nil || *m.PFEnabled) {
 		p.actions = append(p.actions, "note: the snapshot has no pf.conf; pf keeps the ruleset it has loaded")
 	}
-	res := api.HostChange{DryRun: dryRun, Changed: len(p.files) > 0 || reload || toggle != "", Diff: p.diff.String(), Actions: p.actions}
+	res := api.HostChange{DryRun: dryRun, Changed: p.changed() || reload || toggle != "", Diff: p.diff.String(), Actions: p.actions}
 	if res.Actions == nil {
 		res.Actions = []string{}
 	}
@@ -638,19 +638,22 @@ func (l *Local) restoreFirewall(ctx context.Context, root *os.Root, name string,
 	return res, l.writeFirewallRecord(m.Firewall)
 }
 
-// planRestoreFiles plans putting the files of a snapshot back, with the mode and owner each one had.
+// planRestoreFiles plans putting the files of a snapshot back, with the mode and owner each one had; of rc.conf only
+// the module's variables.
 func (l *Local) planRestoreFiles(root *os.Root, name string, m hostManifest, cur map[string]hostFile) (*hostPlan, error) {
 	p := &hostPlan{}
 	for _, sf := range m.Files {
-		data := ""
-		if sf.Exists {
-			b, err := root.ReadFile(snapFilePath(name, sf.Name))
-			if err != nil {
-				return nil, mapFSErr(err)
-			}
-			data = string(b)
-		}
 		c := cur[sf.Name]
+		if sf.Name == "rc.conf" {
+			if _, err := l.planRestoreRC(p, root, name, m, sf, c); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		data, err := readSnapCopy(root, name, sf)
+		if err != nil {
+			return nil, err
+		}
 		before := len(p.files)
 		l.planFile(p, c, data, sf.Exists, "")
 		if len(p.files) > before && sf.Exists {

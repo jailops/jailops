@@ -132,6 +132,7 @@ type Server struct {
 
 	hostSt   fakeHost     // host management (host.go)
 	fwSt     fakeFirewall // the firewall module and commit confirmed (hostfw.go)
+	certSt   fakeCert     // the certificate of the console (hostcert.go)
 	vol      fakeVolumes  // encrypted volumes (volkeys.go)
 	jails    *kind[api.Jail]
 	profiles *kind[api.Profile]

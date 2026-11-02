@@ -42,6 +42,8 @@ export const api = {
     lock: (n: string) => c().mutate<Jail>('POST', `/jails/${e(n)}/lock`),
     passphrase: (n: string, b: JailPassphraseChange) => c().mutate<Jail>('POST', `/jails/${e(n)}/passphrase`, b),
     action: (n: string, a: JailAction) => c().mutate('PUT', `/jails/${e(n)}/state`, a),
+    /** Async: the jail, its volumes and their snapshots are destroyed (an installed app is uninstalled this way). */
+    remove: (n: string) => c().mutate('DELETE', `/jails/${e(n)}`),
     snapshots: (n: string) => c().list<JailSnapshot>(`/jails/${e(n)}/snapshots`),
     snapshot: (n: string, b: SnapshotBody) => c().mutate('POST', `/jails/${e(n)}/snapshots`, b),
     rollback: (n: string, r: JailRollback) => c().mutate('POST', `/jails/${e(n)}/rollback`, r),
@@ -117,6 +119,11 @@ export const api = {
     list: () => c().list<Network>('/networks'),
     leases: (n: string) => c().list<Lease>(`/networks/${e(n)}/leases`),
     create: (n: Pick<Network, 'metadata' | 'spec'>) => c().mutate('POST', '/networks', n),
+    get: (n: string) => c().getWithEtag<Network>(`/networks/${e(n)}`),
+    /** PUT replaces the spec; If-Match carries the generation read, so a concurrent edit is a 412. */
+    put: (n: Pick<Network, 'metadata' | 'spec'>, etag?: string) => c().mutate<Network>('PUT', `/networks/${e(n.metadata.name)}`, n, { etag }),
+    /** Refused while a jail is attached or a project grants it. */
+    remove: (n: string) => c().mutate('DELETE', `/networks/${e(n)}`),
   },
   wireguard: {
     /** Extension wireguard: an operator reads, an admin changes. Keys never come back except in a peer's token, once. */
@@ -138,6 +145,8 @@ export const api = {
     /** PUT replaces the object; If-Match carries the generation so a concurrent edit is a 412. */
     putPolicy: (p: FirewallPolicy, etag?: string) => c().mutate('PUT', `/firewall/policies/${e(p.metadata.name)}`, p, { etag }),
     putAddressSet: (a: AddressSet, etag?: string) => c().mutate('PUT', `/firewall/address-sets/${e(a.metadata.name)}`, a, { etag }),
+    createPolicy: (p: Pick<FirewallPolicy, 'metadata' | 'spec'>) => c().mutate<FirewallPolicy>('POST', '/firewall/policies', p),
+    deletePolicy: (n: string) => c().mutate('DELETE', `/firewall/policies/${e(n)}`),
   },
   backups: {
     targets: () => c().list<BackupTarget>('/backup-targets'),
@@ -209,7 +218,7 @@ export const api = {
     input: (n: string, id: string, data: string) => c().mutate('POST', `/jails/${e(n)}/console/${e(id)}/input`, { data }),
     resize: (n: string, id: string, cols: number, rows: number) => c().mutate('POST', `/jails/${e(n)}/console/${e(id)}/resize`, { cols, rows }),
     close: (n: string, id: string) => c().mutate('DELETE', `/jails/${e(n)}/console/${e(id)}`),
-    output: (n: string, id: string, h: import('@jailops/shared/api/client').StreamHandlers) => c().transport.stream(`/jails/${e(n)}/console/${e(id)}/output`, h),
+    output: (n: string, id: string, h: import('@jailops/shared/api/client').StreamHandlers) => c().stream(`/jails/${e(n)}/console/${e(id)}/output`, h),
   },
   remotes: { list: () => c().list<Remote>('/remotes') },
   operations: {

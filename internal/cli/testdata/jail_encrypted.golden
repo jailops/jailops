@@ -58,7 +58,7 @@ $ jailops jail unlock vault2 --passphrase-file <dir>/vault.pass
 jail/vault2 unlocked
 
 $ jailops jail list --state locked
-! No resources found.
+! No jails in project main match.
 
 $ jailops jail list
 ┌────────┬─────────┬──────────────────┬──────┬────────────────────────┬─────┐

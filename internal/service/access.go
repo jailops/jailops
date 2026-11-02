@@ -167,6 +167,9 @@ func (s *Service) DeleteToken(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	if err := s.keepAdmin(ctx, "token:"+t.Name); err != nil {
+		return err
+	}
 	if err := s.d.DB.Tokens.Delete(ctx, t.ID); err != nil {
 		return internal(err)
 	}
@@ -395,6 +398,11 @@ func (s *Service) UpdateCertificate(ctx context.Context, key string, c api.Certi
 	if err := s.checkCert(ctx, &c, cur.Meta.Name); err != nil {
 		return api.Certificate{}, err
 	}
+	if c.Spec.Permission != api.PermAdmin || !c.Spec.Global || (!c.Spec.ExpiresAt.IsZero() && !s.now().Before(c.Spec.ExpiresAt)) {
+		if err := s.keepAdmin(ctx, "certificate:"+cur.Meta.Name); err != nil {
+			return api.Certificate{}, err
+		}
+	}
 	o, err := s.certKind.update(ctx, cur.Meta.Name, expect, c.Metadata.Labels, &c.Metadata.ManagedBy, c.Spec)
 	if err != nil {
 		return api.Certificate{}, err
@@ -426,6 +434,9 @@ func (s *Service) DeleteCertificate(ctx context.Context, key string, expect int6
 	}
 	cur, err := s.findCert(key)
 	if err != nil {
+		return err
+	}
+	if err := s.keepAdmin(ctx, "certificate:"+cur.Meta.Name); err != nil {
 		return err
 	}
 	if err := s.certKind.delete(ctx, cur.Meta.Name, expect); err != nil {
@@ -574,6 +585,11 @@ func (s *Service) UpdateUser(ctx context.Context, name string, in api.User, expe
 	if err != nil {
 		return api.User{}, err
 	}
+	if in.Spec.Permission != api.PermAdmin || !sc.Global {
+		if err := s.keepAdmin(ctx, "user:"+u.Name); err != nil {
+			return api.User{}, err
+		}
+	}
 	changed := false
 	if sc.Global != u.Global || !slices.Equal(sc.Projects, u.Projects) {
 		if err := s.d.DB.Users.SetScope(ctx, u.ID, sc.Projects, sc.Global); err != nil {
@@ -645,6 +661,9 @@ func (s *Service) DeleteUser(ctx context.Context, name string) error {
 	if err != nil {
 		return notFound("user", name)
 	}
+	if err := s.keepAdmin(ctx, "user:"+u.Name); err != nil {
+		return err
+	}
 	if err := s.d.DB.Users.Delete(ctx, u.ID); err != nil {
 		return internal(err)
 	}
@@ -667,25 +686,48 @@ type Session struct {
 }
 
 func (s *Service) loginKeys(user, remote string) []string {
-	return []string{"u|" + strings.ToLower(user) + "|" + remote, "ip|" + remote}
+	src := auth.SourceKey(remote)
+	return []string{"u|" + strings.ToLower(user) + "|" + src, "ip|" + src}
 }
 
 var errBadLogin = api.Errorf(api.CodeUnauthorized, "invalid user name or password")
 
 // Login verifies a password (and TOTP when enrolled) and opens a session.
-// Failed attempts count toward an exponential lockout per user and source; a
-// locked key returns *auth.LockedError.
+// Every attempt counts toward an exponential lockout per user and source (an IPv6 source is its /64) before the
+// password is derived, so a locked source costs no derivation and attempts sent at once cannot pass the threshold
+// together; a locked key returns *auth.LockedError. Guesses for one account from many sources are slowed down
+// (auth.AccountDelay), and at most auth.DeriveSlots derivations run at once.
 func (s *Service) Login(ctx context.Context, user, password, totp, remote string) (Session, error) {
 	keys := s.loginKeys(user, remote)
-	for _, k := range keys {
-		if err := s.login.Check(k); err != nil {
+	for i, k := range keys {
+		if err := s.login.Begin(k); err != nil {
+			for _, b := range keys[:i] {
+				s.login.Abort(b)
+			}
 			return Session{}, err
 		}
 	}
+	decided := false
+	defer func() {
+		if !decided {
+			for _, k := range keys {
+				s.login.Abort(k)
+			}
+		}
+	}()
+	if err := auth.AdmitDerivation(); err != nil {
+		return Session{}, err
+	}
+	endAcct, err := s.acct.Begin(ctx, strings.ToLower(user))
+	if err != nil {
+		return Session{}, err
+	}
 	fail := func() error {
+		decided = true
+		endAcct(false)
 		var locked error
 		for _, k := range keys {
-			if err := s.login.Fail(k); err != nil && locked == nil {
+			if err := s.login.End(k, false); err != nil && locked == nil {
 				locked = err
 			}
 		}
@@ -705,14 +747,18 @@ func (s *Service) Login(ctx context.Context, user, password, totp, remote string
 	}
 	if u.TOTPEnabled {
 		if strings.TrimSpace(totp) == "" {
+			// the password was right: not a failure, and the account is not slowed for it
+			endAcct(true)
 			return Session{}, api.Errorf(api.CodeUnauthorized, "a second factor is required").WithDetail("totp", "required")
 		}
 		if !s.checkSecondFactor(ctx, u, totp) {
 			return Session{}, fail()
 		}
 	}
+	decided = true
+	endAcct(true)
 	for _, k := range keys {
-		s.login.Success(k)
+		_ = s.login.End(k, true)
 	}
 	_ = s.d.DB.Users.TouchLogin(ctx, u.ID)
 	if auth.NeedsRehash(u.PasswordHash, s.d.PasswordParams) {
@@ -773,6 +819,7 @@ func (s *Service) AuthenticateSession(ctx context.Context, id, remote string) (A
 
 // Logout ends a session.
 func (s *Service) Logout(ctx context.Context, id string) error {
+	defer s.credGen.Add(1)
 	return internal(s.d.DB.Sessions.Delete(ctx, auth.HashSessionID(id)))
 }
 
@@ -834,6 +881,7 @@ func (s *Service) ChangePassword(ctx context.Context, user, current, next string
 	if err != nil {
 		return internal(err)
 	}
+	defer s.credGen.Add(1) // the user's other sessions end
 	return internal(s.d.DB.Users.SetPasswordHash(ctx, u.ID, h))
 }
 
@@ -844,13 +892,16 @@ type TOTPEnrollment struct {
 }
 
 // StartTOTP creates a pending TOTP secret for the user.
-func (s *Service) StartTOTP(ctx context.Context, user string) (TOTPEnrollment, error) {
+func (s *Service) StartTOTP(ctx context.Context, user, password string) (TOTPEnrollment, error) {
 	if len(s.d.SealKey) != auth.SealKeySize {
 		return TOTPEnrollment{}, api.Errorf(api.CodeUnsupported, "two-factor authentication needs a seal key")
 	}
 	u, err := s.d.DB.Users.GetByName(ctx, user)
 	if err != nil {
 		return TOTPEnrollment{}, notFound("user", user)
+	}
+	if err := s.confirmPassword(u, password); err != nil {
+		return TOTPEnrollment{}, err
 	}
 	if u.TOTPEnabled {
 		return TOTPEnrollment{}, api.Errorf(api.CodeAlreadyExists, "two-factor authentication is already enabled")
@@ -916,13 +967,16 @@ func (s *Service) newRecoveryCodes(ctx context.Context, id string) ([]string, er
 }
 
 // RecoveryCodes replaces the recovery codes of a user with TOTP enabled.
-func (s *Service) RecoveryCodes(ctx context.Context, user string) ([]string, error) {
+func (s *Service) RecoveryCodes(ctx context.Context, user, password string) ([]string, error) {
 	u, err := s.d.DB.Users.GetByName(ctx, user)
 	if err != nil {
 		return nil, notFound("user", user)
 	}
 	if !u.TOTPEnabled {
 		return nil, invalid("recovery codes need two-factor authentication")
+	}
+	if err := s.confirmPassword(u, password); err != nil {
+		return nil, err
 	}
 	return s.newRecoveryCodes(ctx, u.ID)
 }
@@ -933,7 +987,19 @@ func (s *Service) DisableTOTP(ctx context.Context, user, password string) error 
 	if err != nil {
 		return notFound("user", user)
 	}
-	done, err := s.guard("pw", user)
+	if err := s.confirmPassword(u, password); err != nil {
+		return err
+	}
+	return internal(s.d.DB.Users.SetTOTP(ctx, u.ID, nil, false))
+}
+
+// confirmPassword asks a signed-in user for the password again before a change of the second factor, so that a
+// session someone else holds cannot change it. Wrong passwords count toward the user's lockout.
+func (s *Service) confirmPassword(u *store.User, password string) error {
+	if password == "" {
+		return api.Errorf(api.CodeUnauthorized, "the password is required").WithDetail("password", "required")
+	}
+	done, err := s.guard("pw", u.Name)
 	if err != nil {
 		return err
 	}
@@ -944,7 +1010,7 @@ func (s *Service) DisableTOTP(ctx context.Context, user, password string) error 
 		}
 		return api.Errorf(api.CodeUnauthorized, "the password is wrong")
 	}
-	return internal(s.d.DB.Users.SetTOTP(ctx, u.ID, nil, false))
+	return nil
 }
 
 // ---- audit ----

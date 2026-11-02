@@ -2,8 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -183,11 +181,30 @@ func (s *Server) routeTable() []route {
 	// Server.
 	add(
 		route{method: "GET", pattern: "/api/v1", h: func(c *rc) error {
-			a := "untrusted"
-			if c.actor.Perm != "" {
-				a = "trusted"
+			if c.actor.Perm == "" {
+				// a caller that proved nothing learns what a client negotiates with, not the host's name, id,
+				// software version or pool
+				i := svc.Info("untrusted")
+				c.sync(200, api.ServerInfo{APIVersion: i.APIVersion, APIExtensions: i.APIExtensions, Role: i.Role, Auth: i.Auth}, 0)
+				return nil
 			}
-			c.sync(200, svc.Info(a), 0)
+			c.sync(200, svc.Info("trusted"), 0)
+			return nil
+		}},
+		// Readiness for load balancers and monitors: a fixed class only, never an error text.
+		route{method: "GET", pattern: "/readyz", local: true, h: func(c *rc) error {
+			reason := svc.Ready(c.r.Context())
+			h := c.w.Header()
+			h.Set("Content-Type", "text/plain; charset=utf-8")
+			h.Set("Cache-Control", "no-store")
+			if reason != "" {
+				c.status = http.StatusServiceUnavailable
+				c.w.WriteHeader(c.status)
+				_, _ = io.WriteString(c.w, "not ready: "+reason+"\n")
+				return nil
+			}
+			c.status = http.StatusOK
+			_, _ = io.WriteString(c.w, "ok\n")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/doctor", h: func(c *rc) error {
@@ -707,7 +724,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.detail = "acme " + strings.Join(in.Domains, ",")
+			c.detail = "acme " + auditValue(strings.Join(in.Domains, ","))
 			c.sync(200, v, 0)
 			return nil
 		}},
@@ -892,15 +909,7 @@ func (c *rc) decodeOptional(v any) error {
 			return err
 		}
 	}
-	err := json.NewDecoder(c.r.Body).Decode(v)
-	if err == nil || errors.Is(err, io.EOF) {
-		return nil
-	}
-	var mb *http.MaxBytesError
-	if errors.As(err, &mb) {
-		return err
-	}
-	return api.Errorf(api.CodeInvalid, "invalid request body: %v", err)
+	return c.decodeBody(v, true)
 }
 
 var _ = http.StatusOK

@@ -45,7 +45,7 @@ restoring on a new host from the recovery key alone is **not usable from the CLI
     jailops backup run --project shop nightly        # now, instead of at 02:17
 
 `hosts/app1/host.yaml` reaches the host over https with a pinned fingerprint and an API token of a **global admin**
-(creating networks, images and projects needs one): `jailops token create sync --permission admin --global --expires 2160h
+(creating networks, images and projects needs one): `jailops token create sync --role admin --global --expires 2160h
 --allow-from <your address>`, then `jailops-sync secrets set app1-token`. To take the token out of the picture use a client
 certificate instead (`jailops-sync remote bootstrap`, see [multi-host-fleet](../multi-host-fleet)).
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"strconv"
+	"time"
 
 	"jailops.net/jailops/sdk/api"
 )
@@ -17,11 +18,32 @@ func (c *Client) Doctor(ctx context.Context) (api.DoctorReport, error) {
 	return r, err
 }
 
-// Audit returns the newest audit entries (GET /api/v1/audit?limit=).
+// Audit returns the newest audit entries, newest first (GET /api/v1/audit?limit=).
 func (c *Client) Audit(ctx context.Context, limit int) ([]api.AuditEntry, error) {
+	return c.AuditFiltered(ctx, AuditFilter{Limit: limit})
+}
+
+// AuditFilter narrows the audit entries the server returns. Zero fields match everything.
+type AuditFilter struct {
+	// Limit is the number of entries, at most (the server's default is 200, its maximum 1000).
+	Limit int
+	// Actor keeps the entries of one requestor: a user, a token name or a certificate fingerprint.
+	Actor string
+	// Since keeps the entries from this time on.
+	Since time.Time
+}
+
+// AuditFiltered returns the newest audit entries that match f, newest first (GET /api/v1/audit?limit=&actor=&since=).
+func (c *Client) AuditFiltered(ctx context.Context, f AuditFilter) ([]api.AuditEntry, error) {
 	q := url.Values{}
-	if limit > 0 {
-		q.Set("limit", strconv.Itoa(limit))
+	if f.Limit > 0 {
+		q.Set("limit", strconv.Itoa(f.Limit))
+	}
+	if f.Actor != "" {
+		q.Set("actor", f.Actor)
+	}
+	if !f.Since.IsZero() {
+		q.Set("since", f.Since.UTC().Format(time.RFC3339))
 	}
 	r, _, err := get[[]api.AuditEntry](ctx, c, "/api/v1/audit", q)
 	return r, err

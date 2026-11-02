@@ -91,7 +91,8 @@ func (o *initOptions) say(w io.Writer, format string, a ...any) { fmt.Fprintf(w,
 
 // validate checks the arguments without touching the system.
 func (o *initOptions) validate() error {
-	if o.pool == "" || strings.ContainsAny(o.pool, "/ @#") {
+	// a leading "-" would reach zfs and zpool as an option
+	if o.pool == "" || strings.ContainsAny(o.pool, "/ @#") || strings.HasPrefix(o.pool, "-") {
 		return errors.New("-pool names the pool (for example -pool tank), not a dataset")
 	}
 	if o.dataset == "" {
@@ -207,6 +208,20 @@ func (o *initOptions) do(w io.Writer) error {
 			}
 		}
 	}
+	// the files of log sinks set through the API (logging.secrets_dir): root writes them, the daemon's group reads
+	sinks := filepath.Join(o.etc, "sinks")
+	o.say(w, "directory %s: owner root, group %s, mode 0750", sinks, o.group)
+	if !o.dryRun {
+		if err := os.MkdirAll(o.path(sinks), 0o750); err != nil {
+			return err
+		}
+		if err := os.Chmod(o.path(sinks), 0o750); err != nil {
+			return err
+		}
+		if err := o.chown(o.path(sinks), 0, gid); err != nil {
+			return err
+		}
+	}
 	files := []struct {
 		name string
 		mode os.FileMode
@@ -286,7 +301,7 @@ mount-base = %s
 state-dir = %s
 work-dir = /var/tmp/jailops
 helper-path = /usr/local/libexec/jailops-priv
-socket = /var/run/jailops/priv.sock
+socket = /var/run/jailops-priv/priv.sock
 group = %s
 mode = 0660
 allow-user = %s
@@ -315,6 +330,6 @@ listen:
     path: /var/run/jailops/jailops.sock
     mode: 0666
 %s%spriv:
-  socket: /var/run/jailops/priv.sock
+  socket: /var/run/jailops-priv/priv.sock
 `, o.pool, o.dataset, o.mount, o.dbDir, filepath.Join(o.dbDir, "state"), listen, web)
 }

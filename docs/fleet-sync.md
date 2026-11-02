@@ -142,7 +142,7 @@ command's flags name:
 `plan` shows `create` when the jail does not exist, and `sync --apply` installs it and waits for the installation. After
 that sync **never reinstalls, changes or deletes** it: the jail is the app's data, an installation is not repeatable as an
 update, and the API gives an installed jail no ownership marker, so `--prune` never applies to apps (remove one with
-`jailops delete`). A jail of that name that was not installed from the catalog, or runs another app, is a refusal (the
+`jailops delete`, which shows what it destroys and asks for the name). A jail of that name that was not installed from the catalog, or runs another app, is a refusal (the
 label `jailops.app` differs) and nothing is applied. An App and a Jail document of the same name are a `validate` error. The
 `limits`, `network` and the rest are read only at the installation; a later change of the document is not drift.
 

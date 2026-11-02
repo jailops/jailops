@@ -174,6 +174,11 @@ type Deps struct {
 	LogForward []api.LogSink
 	// LogForwardTune adjusts the forwarder's environment (tests: dialer, file check, clock).
 	LogForwardTune func(*logfwd.Env)
+	// LogSecretsDir is logging.secrets_dir: the only directory a sink set through the API may name files in.
+	LogSecretsDir string
+	// LogOwnPorts are the ports this daemon listens on: a sink set through the API may not send to them on an
+	// address of this host.
+	LogOwnPorts func() []int
 	// ConsolePort is the port of the TLS listener (listen.https.address), 0 without one; the host firewall opens it.
 	ConsolePort int
 	// ConsoleURLs are the addresses of the console (https://HOST:PORT/) a setup token is printed with; nil without a
@@ -199,6 +204,9 @@ type Service struct {
 	journal *fileJournal
 	nx      *reconcile.NetExec
 	login   *auth.Lockout
+	acct    *auth.AccountDelay
+	// credGen counts changes of credentials (tokens, users, certificates, sessions) so long streams check theirs again.
+	credGen atomic.Int64
 	// totpMu makes "read the last accepted step, validate, record the new one" one step: two logins presenting
 	// the same code at once must not both succeed.
 	totpMu sync.Mutex
@@ -261,6 +269,8 @@ type Service struct {
 	// keys holds the failed unlocks of each jail and the jails a boot wanted to start while they were locked
 	// (volkeys.go). Memory only: a restart forgets both.
 	keys keyState
+	// ready is what GET /readyz answers (ready.go).
+	ready readyState
 
 	mu sync.RWMutex
 	// linuxBuilds counts Linux image builds in progress; the host keeps the Linux kernel state while one runs.
@@ -326,7 +336,7 @@ func New(d Deps) (*Service, error) {
 	}
 	s := &Service{d: d, log: d.Log, now: d.Now,
 		jails: map[string]*jailEntry{}, status: map[string]jailRuntime{}, netStat: map[string]api.NetworkStatus{},
-		login: auth.NewLockout(withClock(d.Lockout, d.Now)), trustLim: auth.NewLockout(withClock(d.Lockout, d.Now)), setupLim: auth.NewLockout(withClock(d.Lockout, d.Now)), storages: map[string]*storageInfo{}, placed: map[string]string{},
+		login: auth.NewLockout(withClock(d.Lockout, d.Now)), acct: auth.NewAccountDelay(auth.AccountDelayConfig{Now: d.Now}), trustLim: auth.NewLockout(withClock(d.Lockout, d.Now)), setupLim: auth.NewLockout(withClock(d.Lockout, d.Now)), storages: map[string]*storageInfo{}, placed: map[string]string{},
 		pending: map[string]pendingJail{}, execN: map[string]int{}, installing: map[string]bool{}, localReg: NewLocalRegistrar()}
 	s.baseCtx, s.cancel = context.WithCancel(context.Background())
 	s.imgKind = newKindStore[api.ImageSpec](s, api.KindImage, api.ScopeFleet, "image", "/api/v1/images")

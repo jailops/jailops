@@ -208,7 +208,7 @@ func (a *app) hostFirewallSetCmd() *cobra.Command {
 	var af fwApplyFlags
 	cmd := &cobra.Command{
 		Use:   "set [flags]",
-		Short: "Change the host firewall from flags (admin)",
+		Short: "Change the host firewall from flags",
 		Long: `Start from what was applied last (or the default) and change what the flags
 name: --template, --ssh-port and --ssh-from, --console-from (sources are
 addresses, prefixes or @set; "any" means anywhere), --allow rows for
@@ -216,7 +216,7 @@ custom-rules ("PROTO PORTS [from SOURCE,...] [comment TEXT]"; the flag replaces
 all rows, --clear-allow removes them), --set NAME=MEMBER,... (replaces all sets),
 --icmp and --logging. --dry-run shows the diff of /etc/pf.conf and the rules.
 The change reverts itself unless 'jailops host confirm' follows within
---confirm-within.`,
+--confirm-within. It needs the admin role.`,
 		Example: `jailops host firewall set --ssh-from 192.0.2.0/24 --ssh-from 2001:db8:a::/48 --dry-run
 jailops host firewall set --template custom-rules --allow "tcp 80,443 comment web" --confirm-within 5m
 jailops host firewall set --set admins=192.0.2.0/24,2001:db8:a::/48 --ssh-from @admins --console-from @admins`,
@@ -311,11 +311,11 @@ func (a *app) hostFirewallApplyCmd() *cobra.Command {
 	var af fwApplyFlags
 	cmd := &cobra.Command{
 		Use:   "apply -f FILE",
-		Short: "Apply a host firewall from a YAML or JSON file (admin)",
+		Short: "Apply a host firewall from a YAML or JSON file",
 		Long: `Apply the HostFirewallSpec in FILE (a spec, or a document with a spec key such as
 'jailops host firewall show -o yaml' prints). The whole spec is applied: a part
 left out takes its default. The change reverts itself unless 'jailops host
-confirm' follows within --confirm-within.`,
+confirm' follows within --confirm-within. It needs the admin role.`,
 		Example: "jailops host firewall show -o yaml > fw.yaml\njailops host firewall apply -f fw.yaml --dry-run\njailops host firewall apply -f fw.yaml --confirm-within 300",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -522,12 +522,12 @@ the revert.`,
 		return cmd
 	}
 	return []*cobra.Command{pending,
-		act("confirm [--id ID]", "Keep the host change that waits for its confirmation (admin)",
+		act("confirm [--id ID]", "Keep the host change that waits for its confirmation",
 			`Keep the pending change: the helper stops its timer and the change stays. Send it
 through the new configuration (over the new firewall rules), which proves that
-you can still reach the host.`, "confirm", true),
-		act("revert [--id ID]", "Undo the host change that waits for its confirmation, now (admin)",
+you can still reach the host. It needs the admin role.`, "confirm", true),
+		act("revert [--id ID]", "Undo the host change that waits for its confirmation, now",
 			`Put the snapshot of the pending change back now instead of at its deadline, and
-make it take effect (pfctl -f).`, "revert", false),
+make it take effect (pfctl -f). It needs the admin role.`, "revert", false),
 	}
 }

@@ -4,7 +4,7 @@ file   syslog   udp://127.0.0.1   local0     messages+apps of all jails
 ! jailops: the list of jailopsd.yaml (logging.forward) is in force
 
 $ jailops logs forward add syslog --to tls://logs.example.com:6514 --facility local3 --jail web -l tier=front
-log sink logs added (syslog tls://logs.example.com:6514)
+log-sink/logs added (syslog tls://logs.example.com:6514)
 
 $ jailops --dry-run logs forward add webhook --to https://hooks.example.com/jailops --token-file /usr/local/etc/jailops/hook.token --audit-only
 dry-run: would add log sink
@@ -17,10 +17,10 @@ sources:
   audit: true
 
 $ jailops logs forward add webhook --to https://hooks.example.com/jailops --token-file /usr/local/etc/jailops/hook.token --audit-only
-log sink hooks added (webhook https://hooks.example.com/jailops)
+log-sink/hooks added (webhook https://hooks.example.com/jailops)
 
 $ jailops logs forward add syslog --to udp://192.0.2.10 --name lan
-log sink lan added (syslog udp://192.0.2.10)
+log-sink/lan added (syslog udp://192.0.2.10)
 ! warning: plain udp to 192.0.2.10:514 sends the logs in the clear; use tls://
 
 $ jailops logs forward list
@@ -32,7 +32,7 @@ lan     syslog    udp://192.0.2.10                    local0     messages+apps o
 ! jailops: the list stored through the API is in force (generation 3); 'logs forward reset' returns to jailopsd.yaml
 
 $ jailops logs forward edit logs --facility local5 --file messages --file auth.log
-log sink logs changed
+log-sink/logs updated
 
 $ jailops logs forward list -o yaml
 - name: file
@@ -81,7 +81,18 @@ $ jailops logs forward remove lan --dry-run
 dry-run: would remove log sink lan
 
 $ jailops logs forward remove lan
-log sink lan removed
+! Remove log sink lan? Its queued lines are dropped. [y/N]: 
+! usage: confirmation required: standard input is not a terminal and gave no answer
+! hint: answer y on standard input, or pass -y to confirm without a question
+[exit 2]
+
+$ jailops logs forward remove lan
+! Remove log sink lan? Its queued lines are dropped. [y/N]: aborted: not confirmed, nothing was changed
+[exit 1]
+
+$ jailops logs forward remove lan
+log-sink/lan removed
+! Remove log sink lan? Its queued lines are dropped. [y/N]: 
 
 $ jailops logs forward add syslog --to https://logs.example.com
 ! usage: sink "syslog": a syslog sink is udp://, tcp:// or tls://HOST[:PORT], not "https://"
@@ -114,7 +125,13 @@ $ jailops logs forward edit logs
 [exit 2]
 
 $ jailops logs forward reset
-log sinks of jailopsd.yaml in force (1)
+! Delete the stored list of 3 log sinks and return to jailopsd.yaml? [y/N]: 
+! usage: confirmation required: standard input is not a terminal and gave no answer
+! hint: answer y on standard input, or pass -y to confirm without a question
+[exit 2]
+
+$ jailops logs forward reset -y
+log-forward reset: jailopsd.yaml is in force again (1 sink)
 
 $ jailops logs forward list
 NAME   TYPE     TO                FACILITY   SOURCES

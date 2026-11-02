@@ -60,6 +60,10 @@ func newEnv(t *testing.T) *env {
 			t.Fatal(err)
 		}
 	}
+	// a storage root's directory has mode 0700 (checkRootDir)
+	if err := os.Chmod(e.cfg.MountBase, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	e.jexec = filepath.Join(dir, "jexec")
 	// A stand-in for jexec(8): it records its arguments and runs the command
 	// (after the optional -U user and the jail name) in this process tree.

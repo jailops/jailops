@@ -84,6 +84,9 @@ func ProjectSpec(name string, s api.ProjectSpec) error {
 	if err := ProjectName(name); err != nil {
 		return err
 	}
+	if err := api.ValidFreeText("description", s.Description, true); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for i, n := range s.Networks {
 		f := fmt.Sprintf("networks[%d]", i)
@@ -160,6 +163,9 @@ var (
 // StorageSpec validates the shape of a storage.
 func StorageSpec(name string, s api.StorageSpec) error {
 	if err := Name("name", name); err != nil {
+		return err
+	}
+	if err := api.ValidFreeText("description", s.Description, true); err != nil {
 		return err
 	}
 	d := s.Dataset

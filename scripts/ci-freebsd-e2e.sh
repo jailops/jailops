@@ -184,6 +184,22 @@ until [ -S /var/run/jailops/jailops.sock ]; do
 	sleep 1
 done
 sleep 2
+step "pid files: root writes them in /var/run, never in /var/run/jailops (the daemon may write there)"
+for f in /var/run/jailops-priv.pid /var/run/jailops-priv-daemon.pid /var/run/jailopsd.pid /var/run/jailopsd-daemon.pid; do
+	[ -s "$f" ] || fail "$f is missing"
+done
+[ -z "$(find /var/run/jailops -type f)" ] || fail "regular files in /var/run/jailops: $(find /var/run/jailops -type f)"
+step "the helper's socket is in a directory only root writes; the daemon's user can put nothing there"
+expect "the helper's socket directory" '^root:jailops 710$' stat -f '%Su:%Sg %Lp' /var/run/jailops-priv
+[ -S /var/run/jailops-priv/priv.sock ] || fail "no socket at /var/run/jailops-priv/priv.sock"
+[ ! -e /var/run/jailops/priv.sock ] || fail "a priv.sock is left in the daemon's directory"
+expect_refused "the daemon's user cannot create a file there" su -m jailops -c 'touch /var/run/jailops-priv/x'
+step "storage root: root's directory, mode 0700, devices off"
+expect "the storage root's directory" '^root 700$' stat -f '%Su %Lp' "$mount"
+expect "devices is off on the storage root" '^off	local$' zfs get -H -o value,source devices "$pool/jailops"
+expect_refused "the daemon's user cannot enter the storage root" su -m jailops -c "ls $mount"
+check "jailops_priv status" service jailops_priv status
+check "jailopsd status" service jailopsd status
 # -web: the quick start's console is on the TLS port, and the API is the same port (the certificate is self-signed)
 step "web console and API on port 39110"
 n=0; until curl -ks -o /dev/null https://127.0.0.1:39110/api/v1; do n=$((n + 1)); [ $n -gt 20 ] && fail "port 39110 does not answer"; sleep 1; done
@@ -191,6 +207,16 @@ curl -ks https://127.0.0.1:39110/ | grep -qi '<html' || fail "the web console is
 curl -ks https://127.0.0.1:39110/api/v1 | grep -q '"untrusted"' || fail "the API is not served on port 39110"
 $J doctor || true
 if $J doctor 2>&1 | grep -E ' FAIL '; then fail "doctor reports a failing check"; fi
+# GET /readyz (docs/operations.md): no credentials, a fixed answer, cached for 2 s; the helper stopped makes it 503
+step "readiness: GET /readyz without credentials, and with the helper stopped"
+readyz() { curl -ks -o "$work/readyz.out" -w '%{http_code} ' https://127.0.0.1:39110/readyz; cat "$work/readyz.out"; }
+expect_retry "readyz answers 200 without credentials" '^200 ok$' readyz
+expect "an ordinary local user gets the same over the socket" '^ok$' su -m nobody -c 'curl -s --unix-socket /var/run/jailops/jailops.sock http://jailops.local/readyz'
+check "jailops_priv stop" service jailops_priv stop
+expect_retry "readyz says the helper is down, and nothing more" '^503 not ready: helper$' readyz
+expect "healthz is liveness and stays ok" '^ok$' curl -ks https://127.0.0.1:39110/healthz
+check "jailops_priv start" service jailops_priv start
+expect_retry "readyz is 200 again once the helper is back" '^200 ok$' readyz
 
 # The host identity module changes this machine itself: only with JAILOPS_E2E_HOST=1, and always put back.
 if [ "${JAILOPS_E2E_HOST:-}" = 1 ]; then
@@ -212,10 +238,18 @@ if [ "${JAILOPS_E2E_HOST:-}" = 1 ]; then
 		service jailops_priv restart >/dev/null 2>&1; service jailopsd restart >/dev/null 2>&1
 		host_dirty=
 	}
-	host_same() { # host_same: every file and the host name are the originals, byte for byte
-		for f in resolv.conf ntp.conf rc.conf; do
+	host_same() { # host_same: resolv.conf and ntp.conf are the originals byte for byte, rc.conf has the original
+		# lines besides the module's three variables and their original values (sysrc may quote a value it puts back
+		# its own way), and the host name is the original
+		for f in resolv.conf ntp.conf; do
 			if [ -f "$horig/$f" ]; then cmp -s "$horig/$f" /etc/$f || fail "/etc/$f is not the original"
 			else [ ! -e /etc/$f ] || fail "/etc/$f exists and did not before"; fi
+		done
+		rcvars='^(hostname|ntpd_enable|ntpd_sync_on_start)='
+		grep -Ev "$rcvars" "$horig/rc.conf" > "$work/rc.orig.rest"; grep -Ev "$rcvars" /etc/rc.conf > "$work/rc.now.rest"
+		cmp -s "$work/rc.orig.rest" "$work/rc.now.rest" || { diff "$work/rc.orig.rest" "$work/rc.now.rest" >&2; fail "rc.conf changed outside the module's variables"; }
+		for v in hostname ntpd_enable ntpd_sync_on_start; do
+			[ "$(sysrc -f "$horig/rc.conf" -qn $v 2>/dev/null)" = "$(sysrc -qn $v 2>/dev/null)" ] || fail "rc.conf $v is not the original"
 		done
 		[ "$(hostname)" = "$orig_hostname" ] || fail "the host name is $(hostname), not $orig_hostname"
 	}
@@ -253,7 +287,12 @@ if [ "${JAILOPS_E2E_HOST:-}" = 1 ]; then
 	expect "and doctor says so" 'host\.identity +WARN' sh -c "$J doctor 2>&1; true"
 	expect "the hand edit is not overwritten" '^nameserver 192\.0\.2\.54$' cat /etc/resolv.conf
 	expect "the restore dry run" '^-nameserver 192\.0\.2\.54$' $J --dry-run host restore "$snap"
+	# a line root adds to rc.conf after the snapshot is not the module's: the restore leaves it, and does not show it
+	echo 'jailops_e2e_marker="kept"' >> /etc/rc.conf
+	if $J --dry-run host restore "$snap" 2>&1 | grep -q jailops_e2e_marker; then fail "the restore diff shows a line of rc.conf the module does not own"; fi
 	check "restore" $J -y host restore "$snap"
+	expect "the restore kept root's own rc.conf line" '^kept$' sysrc -n jailops_e2e_marker
+	sysrc -x jailops_e2e_marker >/dev/null
 	host_same
 	expect "the restore kept a snapshot of its own" ' +identity +restore ' $J host snapshots
 	cp -p "$horig/priv.conf" /usr/local/etc/jailops/priv.conf; cp -p "$horig/jailopsd.yaml" /usr/local/etc/jailops/jailopsd.yaml
@@ -347,9 +386,17 @@ if [ "${JAILOPS_E2E_HOSTFW:-}" = 1 ]; then
 	snap=$($J host snapshots | awk '$2 == "firewall" && $3 == "adopt" { print $1; exit }')
 	[ -n "$snap" ] || fail "no snapshot of the original pf.conf"
 	expect "the restore dry run" '^\+# managed by jailops$|^-# managed by jailops$' $J --dry-run host restore "$snap"
+	echo 'jailops_e2e_marker="kept"' >> /etc/rc.conf
 	check "restore" $J -y host restore "$snap"
 	pf_same
-	cmp -s "$forig/rc.conf" /etc/rc.conf || fail "/etc/rc.conf is not the original"
+	expect "the restore kept root's own rc.conf line" '^kept$' sysrc -n jailops_e2e_marker
+	sysrc -x jailops_e2e_marker >/dev/null
+	# rc.conf: the original lines, and pf_enable and pf_rules as they were (sysrc may quote a value it puts back)
+	grep -Ev '^(pf_enable|pf_rules)=' "$forig/rc.conf" > "$work/rc.orig.rest"; grep -Ev '^(pf_enable|pf_rules)=' /etc/rc.conf > "$work/rc.now.rest"
+	cmp -s "$work/rc.orig.rest" "$work/rc.now.rest" || fail "/etc/rc.conf changed outside pf_enable and pf_rules"
+	for v in pf_enable pf_rules; do
+		[ "$(sysrc -f "$forig/rc.conf" -qn $v 2>/dev/null)" = "$(sysrc -qn $v 2>/dev/null)" ] || fail "rc.conf $v is not the original"
+	done
 	cp -p "$forig/priv.conf" /usr/local/etc/jailops/priv.conf; cp -p "$forig/jailopsd.yaml" /usr/local/etc/jailops/jailopsd.yaml
 	check "restart jailops_priv" service jailops_priv restart
 	check "restart jailopsd" service jailopsd restart
@@ -420,7 +467,11 @@ if [ "${JAILOPS_E2E_APPLIANCE:-}" = 1 ]; then
 	jpem() { awk 'BEGIN { ORS = "" } { print $0 "\\n" }' "$1"; } # a PEM file as one JSON string
 	upload() { printf '{"certificate":"%s%s","key":"%s","hostname":"%s"}' "$(jpem "$work/srv.crt")" "$(jpem "$work/ca.crt")" "$(jpem "$work/srv.key")" "$1"; }
 	expect "a certificate for another name is refused" '^400 .*not valid for www\.example\.com' api PUT /api/v1/host/certificate "$(upload www.example.com)"
-	expect "the upload" '^200 .*"source":"uploaded"' api PUT /api/v1/host/certificate "$(upload e2e.example.com)"
+	cat "$work/srv.crt" "$work/ca.crt" > "$work/chain.pem"
+	expect "the CLI refuses it too" 'not valid for www\.example\.com' sh -c "$J host certificate upload --cert $work/chain.pem --key $work/srv.key --hostname www.example.com 2>&1; true"
+	expect "the upload (jailops host certificate upload)" '^host-certificate/uploaded for e2e\.example\.com' $J host certificate upload --cert "$work/chain.pem" --key "$work/srv.key"
+	expect "show says where it comes from" 'Certificate of this host: uploaded' $J host certificate show
+	expect "show names the remote add command" 'jailops remote add [^ ]+ https://[^ ]+:39110 ' $J host certificate show
 	expect "the files are 0600" '^-rw------- ' ls -l "$tlsdir/uploaded.key"
 	expect "the TLS listener serves it" 'CN *= *e2e\.example\.com' sh -c "openssl s_client -connect 127.0.0.1:39110 -servername e2e.example.com </dev/null 2>/dev/null | openssl x509 -noout -subject"
 	expect "it verifies against the test CA" 'Verify return code: 0' sh -c "openssl s_client -connect 127.0.0.1:39110 -servername e2e.example.com -CAfile $work/ca.crt -verify_hostname e2e.example.com </dev/null 2>&1"
@@ -432,7 +483,9 @@ if [ "${JAILOPS_E2E_APPLIANCE:-}" = 1 ]; then
 	expect "ACME with a bad email" '^400 .*not an email' api POST /api/v1/host/certificate/acme '{"domains":["e2e.example.com"],"email":"root","accept_tos":true}'
 	expect "ACME over plain http" '^400 .*https' api POST /api/v1/host/certificate/acme '{"domains":["e2e.example.com"],"directory_url":"http://ca.example.com/dir","accept_tos":true}'
 	expect "still the uploaded certificate" '"source":"uploaded"' api GET /api/v1/host/certificate
-	expect "the self-signed certificate again" '^200 .*"source":"self-signed"' api POST /api/v1/host/certificate/self-signed '{}'
+	expect "replacing the uploaded certificate needs its name typed" 'confirmation required' sh -c "$J host certificate self-signed -y </dev/null 2>&1; true"
+	expect "the self-signed certificate again" 'self-signed served' $J host certificate self-signed --i-know
+	expect "the API agrees" '"source":"self-signed"' api GET /api/v1/host/certificate
 	expect "the TLS listener serves it" 'CN *= *' sh -c "openssl s_client -connect 127.0.0.1:39110 </dev/null 2>/dev/null | openssl x509 -noout -subject"
 	appliance_cleanup
 	n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
@@ -471,6 +524,11 @@ expect "the jail's userland is the host's release" "^$(uname -U)\$" $J exec --pr
 expect "the jail has its address" '10\.77\.0\.' $J exec --project demo web -- ifconfig -a
 expect "the jail reaches the host" '1 packets received' $J exec --project demo web -- ping -c1 -t3 10.77.0.1
 check "a file in the jail" $J exec --project demo web -- sh -c 'echo ci-marker > /root/marker'
+expect "the jail's root inherits devices=off" '^off$' zfs get -H -o value devices "$pool/jailops/projects/demo/jails/web/root"
+expect "setuid stays on for a jail's root" '^on$' zfs get -H -o value setuid "$pool/jailops/projects/demo/jails/web/root"
+expect "su in the jail keeps its setuid bit" '^-r-sr-xr-x' $J exec --project demo web -- ls -l /usr/bin/su
+expect "exec reads flags after the jail name, up to --" 'FreeBSD' $J exec web --project demo -- uname -s
+expect "without --, a flag after the jail name is refused" 'would be the command' sh -c "JAILOPS_PROJECT=demo $J exec web --project demo uname 2>&1; true"
 expect "labels" 'backup=yes' $J label --project demo web backup=yes
 
 step "interface descriptions (ifconfig shows what JailOps made)"
@@ -485,7 +543,19 @@ marker="ci-forward-$$"
 # a plain tcp listener on the loopback stands for the syslog server; it ends by itself after five minutes
 timeout 300 nc -lk 127.0.0.1 15514 > "$work/syslog.out" 2>/dev/null &
 ncpid=$!
-check "add a syslog sink over tcp" $J logs forward add syslog --to tcp://127.0.0.1:15514 --name ci-tcp --facility local3 --from-project demo
+# A receiver on this host is root's to configure (jailopsd.yaml): the API refuses loopback and link-local receivers.
+cp -p /usr/local/etc/jailops/jailopsd.yaml "$work/jailopsd.yaml.logfwd"
+cat >> /usr/local/etc/jailops/jailopsd.yaml <<YAML
+logging:
+  forward:
+    - name: ci-tcp
+      type: syslog
+      to: tcp://127.0.0.1:15514
+      facility: local3
+      sources: {projects: [demo]}
+YAML
+check "restart jailopsd with a sink in jailopsd.yaml" service jailopsd restart
+n=0; until $J logs forward list >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
 expect "the sink is listed" '^ci-tcp +syslog +tcp://127\.0\.0\.1:15514 +local3' $J logs forward list
 # the sink starts at the end of the files: log the line again until one arrives
 expect_retry "a line logged in the jail arrives with the jail in the structured data" \
@@ -494,8 +564,24 @@ expect_retry "a line logged in the jail arrives with the jail in the structured 
 expect "the unified view shows it as web/messages" "^web/messages +.*$marker" $J logs --project demo --grep "$marker"
 expect "-o json carries the jail" "\"jail\":\"web\".*$marker" $J logs --project demo --jail web --grep "$marker" -o json
 expect "the sink delivers" '^ci-tcp +ok ' $J logs forward status
-check "remove the sink" $J logs forward remove ci-tcp
-check "back to the list of jailopsd.yaml" $J logs forward reset
+expect "a list through the API may not keep the loopback sink of the file" 'target refused' sh -c "$J logs forward edit ci-tcp --facility local4 2>&1; true"
+check "an empty list through the API replaces the file's" $J logs forward remove -y ci-tcp
+expect "the API refuses a loopback receiver" 'target refused' sh -c "$J logs forward add syslog --to tcp://127.0.0.1:15515 --name ci-lo 2>&1; true"
+expect "the API refuses a link-local receiver" 'target refused' sh -c "$J logs forward add webhook --to https://169.254.169.254/x --name ci-md 2>&1; true"
+expect "the API refuses a token file outside logging.secrets_dir" 'not a file directly in' \
+	sh -c "$J logs forward add webhook --to https://hooks.example.com/ci --token-file /usr/local/etc/jailops/priv.conf --name ci-wh 2>&1; true"
+expect "init made the secrets directory" '^root:jailops 750$' stat -f '%Su:%Sg %Lp' /usr/local/etc/jailops/sinks
+printf 'ci-token\n' > "$work/ci.token"
+check "a token file in the secrets directory" install -m 0640 -o root -g jailops "$work/ci.token" /usr/local/etc/jailops/sinks/ci.token
+check "the API accepts a token file there" $J logs forward add webhook --to https://hooks.example.com/ci --token-file /usr/local/etc/jailops/sinks/ci.token --name ci-wh --audit-only
+expect "the forward test answers a class, not the receiver's words" '(dns lookup failed|connection refused|timeout|unreachable|HTTP [0-9]+|tls handshake failed|certificate not trusted|send failed)' sh -c "$J logs forward test ci-wh 2>&1; true"
+expect "removing a sink asks first" 'confirmation required' sh -c "$J logs forward remove ci-wh </dev/null 2>&1; true"
+check "remove the sink" $J logs forward remove -y ci-wh
+check "back to the list of jailopsd.yaml" $J logs forward reset -y
+rm -f /usr/local/etc/jailops/sinks/ci.token
+cp -p "$work/jailopsd.yaml.logfwd" /usr/local/etc/jailops/jailopsd.yaml
+check "restart jailopsd without the sink" service jailopsd restart
+n=0; until $J logs forward list >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
 kill "$ncpid" 2>/dev/null || true
 
 step "WireGuard (a server, a peer enrolled on it, and a client made from the token on the same host)"
@@ -518,7 +604,8 @@ else
 	expect "the peer is configured" 'laptop' $J wireguard peer list office
 	# the same host: the client gets its own addresses and routes (they must not overlap the server's), and dials
 	# the server on the loopback address
-	check "a client from the token" $J wireguard join "$token" --name home --endpoint 127.0.0.1:51820 --address 10.97.0.2/32 --allowed-ips 10.97.1.0/24
+	# the token holds a private key: from standard input, never as an argument
+	check "a client from the token" sh -c 'printf "%s\n" "$1" | '"$J"' wireguard join - --name home --endpoint 127.0.0.1:51820 --address 10.97.0.2/32 --allowed-ips 10.97.1.0/24' sh "$token"
 	expect "the client's interface says what it is" 'description: jailops wireguard=home' ifconfig wg-home
 	# a handshake starts with the first packet into the tunnel (or at the first keepalive, 25 s later): route the allowed
 	# network into the client's interface (the route goes with the interface) and send a packet each try; no answer is needed
@@ -566,7 +653,10 @@ enabled | active)
 	check "the new one does" $J jail unlock vault --project demo --passphrase-file "$work/new.pass"
 	expect "doctor checks the pool feature" 'volumes.encryption +PASS' $J doctor
 	if grep -rq 'ci-passphrase-0123\|ci-new-passphrase-4567' /var/log/messages /var/db/jailops 2>/dev/null; then fail "a passphrase reached a log or the daemon's files"; fi
-	check "delete the jail" $J delete -y vault --project demo
+	expect "a delete shows the sizes and the snapshots read from ZFS" 'vault \([a-z]+\): root [0-9.]+ [KMGT]?i?B, data [0-9.]+ [KMGT]?i?B \(volumes secrets\), [0-9]+ snapshots?' $J --dry-run delete vault --project demo
+	expect "-y does not answer the data-loss question" 'confirmation required' sh -c "$J delete -y vault --project demo </dev/null 2>&1; true"
+	zfs list "$vds" >/dev/null 2>&1 || fail "a delete without the name typed destroyed the volume"
+	check "delete the jail" $J delete --confirm-data-loss vault --project demo
 	if zfs list "$vds" >/dev/null 2>&1; then fail "the encrypted volume is still there"; fi
 	rm -f "$work/vault.pass" "$work/wrong.pass" "$work/new.pass"
 	;;
@@ -574,7 +664,7 @@ enabled | active)
 esac
 
 step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
-check "create a second jail" $J create up --project demo --image freebsd@stable --network lan --storage default --start
+expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image freebsd@stable --start
 check "a second generation of the image" $J image build freebsd --from g1
 check "a file that must survive" $J exec --project demo up -- sh -c 'echo ci-keep > /root/keep'
 expect "dry run" 'g1 to g2' $J jail upgrade up --project demo --dry-run
@@ -614,7 +704,8 @@ expect "the grant is listed" '^host \(host\)' $J app access nginx --project demo
 expect "the service is enabled in the jail's rc.conf" 'nginx_enable="YES"' $J exec --project demo nginx -- cat /etc/rc.conf
 expect "the snapshot of the fresh installation exists" 'app-installed' $J jail snapshot list nginx --project demo
 # the authoring path: a draft of the running jail has its package, its service and its port, and still carries TODO markers
-$J app export nginx --project demo -o "$work/nginx-draft.yaml" >"$work/export.out" 2>&1 || { cat "$work/export.out" >&2; fail "export a draft of the nginx jail"; }
+$J app export nginx --project demo --to "$work/nginx-draft.yaml" >"$work/export.out" 2>&1 || { cat "$work/export.out" >&2; fail "export a draft of the nginx jail"; }
+expect "-o json prints the draft as data" '"definition"' $J app export nginx --project demo -o json
 grep -q 'name: nginx' "$work/nginx-draft.yaml" || { cat "$work/nginx-draft.yaml" >&2; fail "the draft names the nginx package"; }
 grep -q 'port: 80' "$work/nginx-draft.yaml" || { cat "$work/nginx-draft.yaml" >&2; fail "the draft has port 80"; }
 grep -q 'TODO' "$work/nginx-draft.yaml" || fail "the draft has TODO markers"
@@ -752,6 +843,8 @@ su -m jailops-backup -c "/usr/local/sbin/jailops-backupd -c /usr/local/etc/jailo
 sysrc jailops_backupd_enable=YES >/dev/null
 check "backupd start" service jailops_backupd start
 sleep 3
+[ -s /var/run/jailops-backupd.pid ] || fail "the backup node's pid file is not in /var/run"
+[ -z "$(find /var/run/jailops-backupd -type f)" ] || fail "regular files in /var/run/jailops-backupd"
 
 step "the host backs up to the node"
 cat >> /usr/local/etc/jailops/jailopsd.yaml <<YAML

@@ -18,12 +18,11 @@ $ jailops trust add --role operator --global
 
 $ jailops trust add --name ghost --role operator --projects nope
 ! invalid: project "nope" does not exist
-! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
 [exit 2]
 
 $ jailops trust list
-NAME     KIND     PERMISSION   SCOPE   EXPIRES   FINGERPRINT
-laptop   client   operator     web     never     <fingerprint>
+NAME     KIND     ROLE       SCOPE   EXPIRES   FINGERPRINT
+laptop   client   operator   web     never     <fingerprint>
 
 $ jailops trust show laptop
 metadata:
@@ -53,19 +52,19 @@ Project:
 
 $ jailops trust revoke laptop
 ! Revoke trust of "laptop"? [y/N]: 
-! usage: confirmation required
-! hint: answer on standard input, or pass -y
+! usage: confirmation required: standard input is not a terminal and gave no answer
+! hint: answer y on standard input, or pass -y to confirm without a question
 [exit 2]
 
 $ jailops trust revoke -y laptop
 certificate/laptop revoked
 
 $ jailops trust list
-! No resources found.
+! No certificates.
 
 $ jailops trust revoke -y laptop
 ! not_found: certificate "laptop" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops cert list'; check --project, --host and --remote too
 [exit 4]
 
 $ jailops sessions list
@@ -73,6 +72,6 @@ $ jailops sessions list
 
 $ jailops sessions revoke -y nosuch
 ! not_found: session "nosuch" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops sessions list'; check --project, --host and --remote too
 [exit 4]
 

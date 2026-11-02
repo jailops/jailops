@@ -1,9 +1,11 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"strconv"
@@ -72,17 +74,32 @@ func (c *rc) fail(err error) {
 	writeJSON(c.w, st, api.Response{Type: api.ResponseError, Status: "Failure", StatusCode: st, Error: ae})
 }
 
-// decode reads one JSON value from the body.
+// decode reads one JSON value from the body, strictly (strictjson.go).
 func (c *rc) decode(v any) error {
 	if err := c.jsonBody(); err != nil {
 		return err
 	}
-	dec := json.NewDecoder(c.r.Body)
-	if err := dec.Decode(v); err != nil {
+	return c.decodeBody(v, false)
+}
+
+// decodeBody reads the body (bounded by the request's MaxBytesReader) and decodes it into v after the strict check.
+// An empty body is io.EOF when optional is set.
+func (c *rc) decodeBody(v any, optional bool) error {
+	data, err := io.ReadAll(c.r.Body)
+	if err != nil {
 		var mb *http.MaxBytesError
 		if errors.As(err, &mb) {
 			return err
 		}
+		return api.Errorf(api.CodeInvalid, "invalid request body: %v", err)
+	}
+	if optional && len(bytes.TrimSpace(data)) == 0 {
+		return nil
+	}
+	if err := checkStrict(data, v); err != nil {
+		return api.Errorf(api.CodeInvalid, "invalid request body: %v", err)
+	}
+	if err := json.Unmarshal(data, v); err != nil {
 		return api.Errorf(api.CodeInvalid, "invalid request body: %v", err)
 	}
 	return nil

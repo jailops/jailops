@@ -2,8 +2,10 @@ package cli
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -50,9 +52,12 @@ The exit status is 1 when a check failed.`,
 				}
 				var c *sdk.Client
 				if c, err = a.connect(ctx); err != nil {
-					add("connection", "FAIL", err.Error())
-					if h := transportHint(err); h != "" {
+					if isTransport(err) {
+						msg, h := a.unreachable(err)
+						add("connection", "FAIL", msg)
 						add("hint", "WARN", h)
+					} else {
+						add("connection", "FAIL", err.Error())
 					}
 				} else {
 					info, ierr := c.Info(ctx)
@@ -263,16 +268,30 @@ fish:  jailops completion fish > ~/.config/fish/completions/jailops.fish`,
 
 func (a *app) auditCmd() *cobra.Command {
 	var limit int
-	return &cobra.Command{
+	var since time.Duration
+	var user, action string
+	cmd := &cobra.Command{
 		Use:   "audit",
 		Short: "Show the newest audit log entries of the server",
 		Long: `Show who changed what: the newest entries of the server's audit log, newest
-last. Every state change is audited with the requestor (user, token name or
+first. Every state change is audited with the requestor (user, token name or
 certificate fingerprint), the action and the result. Reading the log needs the
-admin role.`,
-		Example: "jailops audit\njailops audit --limit 200 -o json",
+admin role.
+
+--limit (default 200, at most 1000), --since and --user are applied by the
+server. --action is a pattern matched by this client against the action
+("POST /api/v1/jails/{name}/start"; * matches anything, case is ignored): the
+server then sends its 1000 newest entries that pass the other filters, and the
+client keeps the --limit newest that match.`,
+		Example: "jailops audit\njailops audit --limit 50 -o json\njailops audit --since 24h --user alice\njailops audit --action 'DELETE *'",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if limit < 0 || limit > 1000 {
+				return usagef("--limit must be between 1 and 1000")
+			}
+			if since < 0 {
+				return usagef("--since must be a positive duration such as 24h")
+			}
 			c, err := a.connect(cmd.Context())
 			if err != nil {
 				return err
@@ -280,10 +299,34 @@ admin role.`,
 			if err := c.Require(cmd.Context(), "audit_log"); err != nil {
 				return err
 			}
-			items, err := c.Audit(cmd.Context(), limit)
+			f := sdk.AuditFilter{Limit: limit, Actor: user}
+			if since > 0 {
+				f.Since = a.env.Now().Add(-since)
+			}
+			if action != "" {
+				f.Limit = 1000
+			}
+			items, err := c.AuditFiltered(cmd.Context(), f)
 			if err != nil {
 				return err
 			}
+			if action != "" {
+				kept := items[:0]
+				for _, e := range items {
+					if globMatch(action, e.Action) {
+						kept = append(kept, e)
+					}
+				}
+				items = kept
+				keep := limit
+				if keep == 0 {
+					keep = 200 // the server's default
+				}
+				if len(items) > keep {
+					items = items[:keep]
+				}
+			}
+			a.empty = "No audit entries match."
 			return a.emit(nonNil(items), nil, func() ([]string, [][]string) {
 				var rows [][]string
 				for _, e := range items {
@@ -299,4 +342,29 @@ admin role.`,
 			})
 		},
 	}
+	f := cmd.Flags()
+	f.IntVar(&limit, "limit", 0, "the number of entries, at most 1000 (default 200)")
+	f.DurationVar(&since, "since", 0, "only the entries of this last period, for example 24h")
+	f.StringVar(&user, "user", "", "only the entries of this requestor: a user, a token name or a certificate fingerprint")
+	f.StringVar(&action, "action", "", "only the actions that match this pattern, for example 'DELETE *' (matched by the client)")
+	return cmd
+}
+
+// globMatch matches s against a pattern where * is any text and ? one character, ignoring case.
+func globMatch(pattern, s string) bool {
+	var b strings.Builder
+	b.WriteString("(?is)^")
+	for _, r := range pattern {
+		switch r {
+		case '*':
+			b.WriteString(".*")
+		case '?':
+			b.WriteString(".")
+		default:
+			b.WriteString(regexp.QuoteMeta(string(r)))
+		}
+	}
+	b.WriteString("$")
+	re, err := regexp.Compile(b.String())
+	return err == nil && re.MatchString(s)
 }

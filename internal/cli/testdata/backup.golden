@@ -94,8 +94,8 @@ Changes:
   + create jail web
 Result: ok
 ! Restore backup 20260101020000-ab12cd34 as jail "web"? [y/N]: 
-! usage: confirmation required
-! hint: answer on standard input, or pass -y
+! usage: confirmation required: standard input is not a terminal and gave no answer
+! hint: answer y on standard input, or pass -y to confirm without a question
 [exit 2]
 
 $ jailops backup restore 20260101020000-ab12cd34
@@ -148,8 +148,8 @@ Changes:
 Result: ok
 ! --replace destroys the existing jail "web" and everything in it.
 ! Type the name "web" to confirm: 
-! usage: confirmation required
-! hint: type the name on standard input, or pass --confirm-data-loss
+! usage: confirmation required: standard input is not a terminal and gave no answer
+! hint: type the name on standard input, or pass --confirm-data-loss (-y does not answer this question)
 [exit 2]
 
 $ jailops backup restore 20260101020000-ab12cd34 --replace
@@ -163,7 +163,7 @@ jail/web restored
 
 $ jailops backup restore nope --dry-run
 ! not_found: backup "nope" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
+! hint: list them with 'jailops backup list'; check --project, --host and --remote too
 [exit 4]
 
 $ jailops backup delete -y 20260101020000-ab12cd34

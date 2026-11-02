@@ -109,7 +109,11 @@ func (a *app) emitList(v any, style styleFn, table func() ([]string, [][]string)
 		}
 		h, rows := table()
 		if len(rows) == 0 {
-			fprintln(a.env.Stderr, "No resources found.")
+			msg := "No resources found."
+			if a.empty != "" {
+				msg = a.empty
+			}
+			fprintln(a.env.Stderr, msg)
 			return nil
 		}
 		if a.pretty() {
@@ -130,6 +134,11 @@ func (a *app) printBoxed(w io.Writer, head []string, rows [][]string, style styl
 	for i := range rows {
 		for len(rows[i]) < len(head) {
 			rows[i] = append(rows[i], "")
+		}
+	}
+	for _, r := range rows {
+		for i, c := range r {
+			r[i] = termText(c, true)
 		}
 	}
 	lines := func(cell string) []string { return strings.Split(cell, "\n") }
@@ -210,7 +219,7 @@ func (a *app) printBoxed(w io.Writer, head []string, rows [][]string, style styl
 				}
 				b.WriteString(" " + text + strings.Repeat(" ", pad) + " │")
 			}
-			fprintln(w, b.String())
+			fprintln(w, colored(b.String()))
 		}
 	}
 	rule("┌", "┬", "┐")
@@ -224,6 +233,11 @@ func (a *app) printBoxed(w io.Writer, head []string, rows [][]string, style styl
 
 func (a *app) printTable(w io.Writer, head []string, rows [][]string, style styleFn) {
 	color := style != nil && a.colorOn(w)
+	for _, r := range rows {
+		for i, c := range r {
+			r[i] = termText(c, true)
+		}
+	}
 	width := make([]int, len(head))
 	for i, h := range head {
 		width[i] = utf8.RuneCountInString(h)
@@ -250,7 +264,7 @@ func (a *app) printTable(w io.Writer, head []string, rows [][]string, style styl
 				b.WriteString(strings.Repeat(" ", pad+3))
 			}
 		}
-		fprintln(w, b.String())
+		fprintln(w, colored(b.String()))
 	}
 	if !a.noHeaders {
 		line(head, true)
@@ -422,13 +436,14 @@ func imageWithGen(ref, gen string) string {
 	return ref + " (" + gen + ")"
 }
 
-// paint wraps s in the colour of a table cell when colour is on for w.
-func (a *app) paint(w io.Writer, style styleFn, s string) string {
+// paint wraps s, cleaned, in the colour of a table cell when colour is on for w.
+func (a *app) paint(w io.Writer, style styleFn, s string) colored {
+	s = termText(s, false)
 	if !a.colorOn(w) {
-		return s
+		return colored(s)
 	}
 	if code := style(0, s); code != "" {
-		return "\x1b[" + code + "m" + s + "\x1b[0m"
+		return colored("\x1b[" + code + "m" + s + "\x1b[0m")
 	}
-	return s
+	return colored(s)
 }

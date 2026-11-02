@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
 import { ApiError } from '@jailops/shared/api/client'
 import { useLoad } from '@jailops/shared/composables/load'
 import { runOp } from '@jailops/shared/composables/ops'
 import { blankRule, detailToRuleErrors, splitList, validateRules, type RuleErrors } from '@/lib/firewall'
+import { confirmAction } from '@jailops/shared/composables/confirm'
+import { useTabQuery } from '@jailops/shared/composables/tabs'
+import { useFormCheck } from '@jailops/shared/composables/form'
+import { nameHint } from '@jailops/shared/lib/names'
+import { nameError } from '@/lib/nameField'
+import TabBar from '@jailops/shared/components/TabBar.vue'
+import Modal from '@jailops/shared/components/Modal.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
@@ -16,7 +24,10 @@ const l = useLoad(async () => {
   return { policies, sets, jails }
 })
 
-const tab = ref<'policies' | 'sets'>('policies')
+const route = useRoute()
+const { tab } = useTabQuery(() => ['policies', 'sets'] as const, 'policies')
+let wantDone = false
+const tabItems = computed(() => [{ key: 'policies' as const, label: s.firewall.policies }, { key: 'sets' as const, label: s.firewall.sets }])
 const selected = ref('')
 const draft = ref<FirewallPolicy | null>(null)
 const original = ref('')
@@ -35,7 +46,11 @@ const setError = ref<ApiError | null>(null)
 
 watch(() => l.data.value, (d) => {
   if (!d) return
-  if (!selected.value && d.policies.length) void pick(d.policies[0].metadata.name)
+  // ?policy=NAME (a link from the operations or a jail page) opens that policy
+  const want = !wantDone && typeof route.query.policy === 'string' && d.policies.some((p) => p.metadata.name === route.query.policy) ? route.query.policy : ''
+  if (want) { wantDone = true; void pick(want) }
+  else if ((!selected.value || !d.policies.some((p) => p.metadata.name === selected.value)) && d.policies.length) void pick(d.policies[0].metadata.name)
+  else if (!d.policies.length) { selected.value = ''; draft.value = null }
   if (!setSel.value && d.sets.length) void pickSet(d.sets[0].metadata.name)
 }, { immediate: true })
 
@@ -95,9 +110,15 @@ function clean(p: FirewallPolicy): FirewallPolicy {
   if (!c.spec.raw) delete c.spec.raw
   return c
 }
+/** Why Save does nothing yet, next to the button. */
+const saveWhy = computed(() => (!dirty.value ? s.firewall.noChange : Object.keys(validateRules(rules.value, s.firewall)).length ? s.firewall.fixRules : ''))
 async function save(): Promise<void> {
-  if (!draft.value) return
+  if (!draft.value || !dirty.value) return
   fieldErrors.value = validateRules(rules.value, s.firewall)
+  if (Object.keys(fieldErrors.value).length) {
+    const k = Object.keys(fieldErrors.value)[0].split('.')
+    document.querySelector<HTMLElement>(`[data-rule="${k[0]}"] input, [data-rule="${k[0]}"] select`)?.focus()
+  }
   apiError.value = null
   if (Object.keys(fieldErrors.value).length) return
   saving.value = true
@@ -145,18 +166,52 @@ async function saveSet(): Promise<void> {
   }
 }
 const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
+
+// create a policy: a name and the two defaults; rules are added in the editor afterwards
+const creating = ref(false)
+const nf = reactive({ name: '', in: 'deny', out: 'allow' })
+const createError = ref<ApiError | null>(null)
+const createCheck = useFormCheck(() => ({ 'fwp-name': nameError(nf.name) || ((l.data.value?.policies ?? []).some((p) => p.metadata.name === nf.name) ? s.firewall.exists : '') }))
+function openCreate(): void {
+  Object.assign(nf, { name: '', in: 'deny', out: 'allow' })
+  createError.value = null
+  createCheck.reset()
+  creating.value = true
+}
+const create = () => createCheck.submit(async () => {
+  createError.value = null
+  try {
+    await runOp(s.firewall.createTitle + ': ' + nf.name, () => api.firewall.createPolicy({ metadata: { name: nf.name }, spec: { default_in: nf.in, default_out: nf.out, rules: [] } }))
+    creating.value = false
+    selected.value = ''
+    await l.reload()
+    await pick(nf.name)
+  } catch (e) {
+    createError.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
+  }
+})
+// Tier 3 while jails use the policy (they fall back to the host default), tier 2 otherwise.
+function removePolicy(): void {
+  const name = selected.value
+  const jails = attached.value
+  confirmAction({
+    title: s.firewall.deleteTitle(name), confirmLabel: s.firewall.delete, danger: true,
+    text: jails.length ? `${s.firewall.deleteText} ${s.firewall.deleteAttached(jails.length)}` : s.firewall.deleteText,
+    items: jails, itemsLabel: s.firewall.attachedJails, typeName: jails.length ? name : undefined,
+    run: () => runOp(s.firewall.deleteTitle(name), () => api.firewall.deletePolicy(name)),
+    done: () => { selected.value = ''; draft.value = null; void l.reload() },
+  })
+}
 </script>
 
 <template>
   <div>
-    <div class="page-head"><h1>{{ s.firewall.title }}</h1></div>
-    <div class="tabs" role="tablist">
-      <button type="button" role="tab" :aria-selected="tab === 'policies'" @click="tab = 'policies'">{{ s.nav.firewall }}</button>
-      <button type="button" role="tab" :aria-selected="tab === 'sets'" @click="tab = 'sets'">{{ s.firewall.sets }}</button>
-    </div>
+    <div class="page-head"><h1>{{ s.firewall.title }}</h1><button v-if="tab === 'policies'" class="btn btn-primary" type="button" data-test="new-policy" @click="openCreate"><Icon name="plus" />{{ s.firewall.create }}</button></div>
+    <TabBar v-model="tab" :tabs="tabItems" :label="s.firewall.sections" id="fw" />
+    <div id="fw-panel" role="tabpanel" :aria-labelledby="`fw-tab-${tab}`">
     <LoadState :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
       <div v-if="tab === 'policies'" class="fw-layout">
-        <ul class="plain picker" aria-label="Policies">
+        <ul class="plain picker" :aria-label="s.firewall.policies">
           <li v-for="p in l.data.value?.policies" :key="p.metadata.name">
             <button type="button" class="btn btn-ghost mono" :class="{ sel: selected === p.metadata.name }" :aria-current="selected === p.metadata.name" @click="pick(p.metadata.name)">{{ p.metadata.name }}</button>
           </li>
@@ -165,14 +220,16 @@ const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
         <section v-if="draft" class="panel" data-test="policy-editor">
           <header>
             <div class="row"><h2 class="mono">{{ draft.metadata.name }}</h2><span v-if="dirty" class="pill warn">{{ s.firewall.unsaved }}</span></div>
-            <div class="row">
+            <div class="row-actions">
+              <span v-if="saveWhy" class="why-disabled" data-test="save-why">{{ saveWhy }}</span>
+              <button class="btn btn-danger" type="button" data-test="delete-policy" @click="removePolicy">{{ s.firewall.delete }}</button>
               <button class="btn" type="button" :disabled="!dirty" @click="revert">{{ s.firewall.revert }}</button>
-              <button class="btn btn-primary" type="button" :disabled="!dirty || saving" data-test="save-policy" @click="save">{{ s.firewall.save }}</button>
+              <button class="btn btn-primary" type="button" :disabled="saving" :aria-disabled="!!saveWhy" data-test="save-policy" @click="save">{{ s.firewall.save }}</button>
             </div>
           </header>
           <div class="body stack">
             <ErrorPanel v-if="apiError" :error="apiError" />
-            <p v-if="attached.length" class="muted">{{ s.firewall.usedBy }}: <template v-for="(n, i) in attached" :key="n"><span v-if="i">, </span><router-link :to="`/jails/${n}`" class="mono refl">{{ n }}</router-link></template></p>
+            <p v-if="attached.length" class="muted">{{ s.firewall.usedBy }}: <template v-for="(n, i) in attached" :key="n">{{ i ? ', ' : '' }}<router-link :to="`/jails/${n}`" class="mono">{{ n }}</router-link></template></p>
             <div class="row">
               <div class="field" style="min-width: 160px"><label for="din">{{ s.firewall.defaultIn }}</label>
                 <select id="din" v-model="draft.spec.default_in"><option value="">-</option><option>allow</option><option>deny</option></select></div>
@@ -194,7 +251,7 @@ const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
                 <div class="rule-grid">
                   <div class="field"><label :for="`a${i}`">{{ s.firewall.action }}</label><select :id="`a${i}`" v-model="r.action"><option>allow</option><option>deny</option></select></div>
                   <div class="field"><label :for="`d${i}`">{{ s.firewall.direction }}</label><select :id="`d${i}`" v-model="r.direction"><option>in</option><option>out</option></select></div>
-                  <div class="field"><label :for="`p${i}`">{{ s.firewall.proto }}</label><select :id="`p${i}`" v-model="r.proto"><option value="">any</option><option>tcp</option><option>udp</option><option>icmp</option><option>icmp6</option></select></div>
+                  <div class="field"><label :for="`p${i}`">{{ s.firewall.proto }}</label><select :id="`p${i}`" v-model="r.proto"><option value="">{{ s.firewall.any }}</option><option>tcp</option><option>udp</option><option>icmp</option><option>icmp6</option></select></div>
                   <div class="field"><label :for="`f${i}`">{{ s.firewall.from }}</label><input :id="`f${i}`" class="mono" type="text" :value="(r.from ?? []).join(', ')" :placeholder="s.firewall.any" @input="list(r, 'from', ($event.target as HTMLInputElement).value)" /></div>
                   <div class="field"><label :for="`t${i}`">{{ s.firewall.to }}</label><input :id="`t${i}`" class="mono" type="text" :value="(r.to ?? []).join(', ')" :placeholder="s.firewall.any" @input="list(r, 'to', ($event.target as HTMLInputElement).value)" /></div>
                   <div class="field">
@@ -209,7 +266,7 @@ const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
                   <label class="check"><input type="checkbox" :checked="!!r.redirect" @change="toggleRedirect(r, ($event.target as HTMLInputElement).checked)" />{{ s.firewall.redirect }}</label>
                   <template v-if="r.redirect">
                     <input v-model.number="r.redirect.host_port" type="number" min="1" max="65535" :aria-label="s.firewall.hostPort" style="width: 90px" />
-                    <span class="faint">to</span>
+                    <span class="faint">{{ s.firewall.to2 }}</span>
                     <input v-model.number="r.redirect.jail_port" type="number" min="1" max="65535" :aria-label="s.firewall.jailPort" style="width: 90px" />
                   </template>
                   <span v-if="err(i, 'redirect')" class="err" data-test="field-error">{{ err(i, 'redirect') }}</span>
@@ -226,7 +283,7 @@ const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
       </div>
 
       <div v-else class="fw-layout">
-        <ul class="plain picker" aria-label="Address sets">
+        <ul class="plain picker" :aria-label="s.firewall.sets">
           <li v-for="a in l.data.value?.sets" :key="a.metadata.name"><button type="button" class="btn btn-ghost mono" :class="{ sel: setSel === a.metadata.name }" @click="pickSet(a.metadata.name)">@{{ a.metadata.name }}</button></li>
           <li v-if="!l.data.value?.sets.length" class="muted">{{ s.firewall.emptySets }}</li>
         </ul>
@@ -243,6 +300,25 @@ const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
         </section>
       </div>
     </LoadState>
+    </div>
+    <Modal :open="creating" :title="s.firewall.createTitle" @close="creating = false">
+      <form id="fwp" novalidate @submit.prevent="create">
+        <div class="field"><label for="fwp-name">{{ s.firewall.name }} <span class="req" aria-hidden="true">*</span></label>
+          <input id="fwp-name" v-model="nf.name" class="mono" type="text" autocomplete="off" :aria-invalid="!!createCheck.err('fwp-name')" aria-describedby="fwp-name-h fwp-name-e" @input="createCheck.touch('fwp-name')" />
+          <span id="fwp-name-h" class="hint">{{ nameHint() }}</span>
+          <span id="fwp-name-e" class="field-error" role="alert">{{ createCheck.err('fwp-name') }}</span></div>
+        <div class="form-2">
+          <div class="field"><label for="fwp-in">{{ s.firewall.defaultIn }}</label><select id="fwp-in" v-model="nf.in"><option>deny</option><option>allow</option></select></div>
+          <div class="field"><label for="fwp-out">{{ s.firewall.defaultOut }}</label><select id="fwp-out" v-model="nf.out"><option>allow</option><option>deny</option></select></div>
+        </div>
+        <ErrorPanel v-if="createError" :error="createError" />
+      </form>
+      <template #footer>
+        <span v-if="createCheck.reason.value" class="why-disabled">{{ s.firewall.name }}: {{ createCheck.reason.value }}</span>
+        <button class="btn" type="button" @click="creating = false">{{ s.app.cancel }}</button>
+        <button class="btn btn-primary" type="submit" form="fwp" :aria-disabled="!createCheck.ok.value" data-test="policy-create-go">{{ s.firewall.createGo }}</button>
+      </template>
+    </Modal>
   </div>
 </template>
 

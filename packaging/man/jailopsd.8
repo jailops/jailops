@@ -46,6 +46,21 @@ Only root (uid 0) is recognised on the unix socket, as the host's recovery
 access; every other client signs in with a JailOps user, an API token or a
 client certificate.
 .Pp
+Two routes answer without credentials, for monitors and load balancers:
+.Pa /healthz
+is liveness (the process answers HTTP) and always says
+.Dq ok ;
+.Pa /readyz
+answers 200
+.Dq ok
+only when start-up has finished, the helper answers a read-only call and the
+database answers a query, and 503
+.Dq not ready: Ar class
+otherwise, where
+.Ar class
+is starting, stopping, helper, storage or store.
+The answer is cached for two seconds.
+.Pp
 The options are:
 .Bl -tag -width Ds
 .It Fl config Ar file
@@ -159,7 +174,7 @@ The configuration; the installed sample is
 .Pa jailopsd.yaml.sample .
 .It Pa /var/run/jailops/jailops.sock
 The API socket.
-.It Pa /var/run/jailops/jailopsd.pid
+.It Pa /var/run/jailopsd.pid
 The pid of the daemon under rc.d.
 .It Pa /var/db/jailops
 The data directory: database, seal key, TLS material, operation journal
@@ -171,9 +186,13 @@ The state dataset, mounted outside the storage root
 The rendered jail.conf files
 .Pq Sy conf_dir ,
 shared with the helper.
-.It Pa /var/run/jailops/priv.sock
+.It Pa /var/run/jailops-priv/priv.sock
 The socket of
-.Xr jailops-priv 8 .
+.Xr jailops-priv 8
+.Pq Sy priv.socket ;
+the former
+.Pa /var/run/jailops/priv.sock
+means this path.
 .El
 .Sh EXIT STATUS
 .Bl -tag -width Ds -compact

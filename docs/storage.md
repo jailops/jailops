@@ -21,7 +21,11 @@ start. Register another, for example on the big pool:
 
 The dataset must exist; it must be empty or already owned by JailOps (`jailops:managed=on`). Registering a storage also
 registers it with the root helper, which then allows its operations below that root and nowhere else. `--compression` applies to
-new datasets.
+new datasets. The helper gives the root's directory (its mountpoint) to root with mode 0700 and sets `devices=off` on the
+dataset, at the registration and at every start: jails keep setuid programs below it, and only that mode keeps every
+other user of the host away from them. A root may not be mounted on, above or inside a system directory (`/etc`,
+`/boot`, `/root`, `/usr/local/etc`, `/var/db`, ...); `/usr/jails` or `/hdd/jailops` are fine
+([security-model.md](security-model.md#two-programs-one-boundary)).
 
 **Not yet: encrypted storages and whole encrypted jails.** A storage or jail spec with `encrypted: true` is refused with
 `unsupported` ("encrypted storage is not implemented" / "native ZFS encryption of jails is not implemented"). What is
@@ -111,7 +115,9 @@ that depends on a locked jail (`boot.depends`) is not started at boot; start it 
 
 A wrong passphrase answers `bad_passphrase` (HTTP 403) and says nothing else. After five wrong passphrases in a row a jail
 refuses unlocks (and passphrase changes) for 30 seconds (`rate_limited`); a right one resets the count. The count is in the
-daemon's memory. `jailops doctor` lists the locked jails (`volumes.locked`, info) and checks that each pool of a storage can
+daemon's memory. The privileged helper keeps a count of its own, which a daemon cannot skip: after five wrong passphrases
+for a volume (twenty for all volumes together) every try waits, 30 seconds at first and twice as long after each further
+wrong one, at most an hour, without running `zfs`; a right one resets it, and so does a restart of the helper. `jailops doctor` lists the locked jails (`volumes.locked`, info) and checks that each pool of a storage can
 hold encrypted volumes (`volumes.encryption`: the pool feature `feature@encryption` must be `enabled` or `active`; JailOps
 never changes pool features).
 
@@ -153,6 +159,15 @@ of a volume passphrase. Keep it in a password manager, and keep backups (below).
   volume"), and the restored jail's spec no longer claims `encrypted`. To have the data encrypted again, create a new jail
   with an encrypted volume and copy the data in. A restore into an encrypted volume is not built.
 - Replication between hosts (design 9.8) uses raw sends, which keep encrypted datasets encrypted; it has no command yet.
+
+**How the helper knows a volume.** The key operations accept a dataset only when it is named
+`<container>/data/<volume>` below a registered storage root, its own encryption root with `keyformat=passphrase`, and
+carries the user properties `jailops:managed=on` (set locally) and `jailops:kind=volume` below a parent of kind `volumes`.
+These properties are the mark of ownership, and anyone who may set user properties on the pool (root, or a user with
+`zfs allow` there) can set them on a dataset of their own under that name: the helper then treats it as a volume of the
+jail and loads, unloads or changes its key on request. It never changes the encryption settings it did not set, and a
+change needs the current passphrase. Do not delegate `zfs allow` of a storage root to anybody you would not let manage
+its jails.
 
 **Not in this version:** encrypting a volume of an existing jail or a volume in place (`encrypted` cannot change later: the
 update is refused with a hint), adding a volume to an existing jail, key files or any unattended unlock at boot, encrypted

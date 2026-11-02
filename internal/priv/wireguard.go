@@ -461,6 +461,9 @@ func (l *Local) WGApply(ctx context.Context, q wireguard.ApplyReq) (wireguard.Ap
 		}
 		return ifconfig.Iface{}, false
 	}
+	if err := l.checkWGRoutes(ctx, t, q, ifs); err != nil {
+		return wireguard.ApplyRes{}, err
+	}
 	var res wireguard.ApplyRes
 	// The object's interface was renamed in its spec: the one the helper made under the old name goes.
 	if record != "" && record != q.Iface {
@@ -563,6 +566,88 @@ func (l *Local) WGApply(ctx context.Context, q wireguard.ApplyReq) (wireguard.Ap
 	}
 	res.PublicKey = pub
 	return res, nil
+}
+
+// wgSpecial are the ranges no tunnel route may touch without admin-routes or wireguard-routes: loopback, this
+// network, link-local and multicast.
+var wgSpecial = []netip.Prefix{
+	netip.MustParsePrefix("0.0.0.0/8"), netip.MustParsePrefix("127.0.0.0/8"), netip.MustParsePrefix("169.254.0.0/16"),
+	netip.MustParsePrefix("224.0.0.0/4"), netip.MustParsePrefix("::/128"), netip.MustParsePrefix("::1/128"),
+	netip.MustParsePrefix("fe80::/10"), netip.MustParsePrefix("ff00::/8"),
+}
+
+// inside reports whether the prefix r lies within p.
+func inside(r, p netip.Prefix) bool {
+	return p.Addr().Is4() == r.Addr().Is4() && p.Bits() <= r.Bits() && p.Contains(r.Addr())
+}
+
+// checkWGRoutes keeps the routes of a tunnel to the networks behind it. Every route lies inside the allowed IPs of
+// one of its peers. Without admin-routes (and the admin assertion), a route that is not inside a prefix of
+// wireguard-routes must also be at least a /8 (IPv4) or /16 (IPv6) and stay clear of loopback, link-local and
+// multicast, of the host's own addresses (the tunnel's excepted), of its default gateways and of its resolvers:
+// otherwise a tunnel could take over the host's own traffic, which priv.conf did not allow.
+func (l *Local) checkWGRoutes(ctx context.Context, t wgtool.Tool, q wireguard.ApplyReq, ifs []ifconfig.Iface) error {
+	if len(q.Routes) == 0 {
+		return nil
+	}
+	for _, r := range q.Routes {
+		covered := false
+		for _, p := range q.Peers {
+			covered = covered || slices.ContainsFunc(p.AllowedIPs, func(a netip.Prefix) bool { return inside(r, a.Masked()) })
+		}
+		if !covered {
+			return forbidden("route %s is not inside the allowed IPs of a peer of the tunnel", r)
+		}
+	}
+	if isAdmin(ctx) && l.cfg.Admin.Routes {
+		return nil
+	}
+	type held struct {
+		addr netip.Addr
+		what string
+	}
+	var host []held
+	for _, i := range ifs {
+		if i.Name == q.Iface {
+			continue
+		}
+		for _, p := range slices.Concat(i.Inet, i.Inet6) {
+			if !slices.Contains(q.Addresses, p) {
+				host = append(host, held{p.Addr().WithZone(""), "an address of " + i.Name})
+			}
+		}
+	}
+	for _, g := range t.DefaultGateways(ctx) {
+		host = append(host, held{g, "the default gateway"})
+	}
+	if b, err := os.ReadFile(l.etcPath("resolv.conf")); err == nil {
+		ns, _, _ := parseResolv(string(b))
+		for _, n := range ns {
+			if a, err := netip.ParseAddr(n); err == nil {
+				host = append(host, held{a.WithZone(""), "a resolver"})
+			}
+		}
+	}
+	for _, r := range q.Routes {
+		if slices.ContainsFunc(l.cfg.WireGuardRoutes, func(p netip.Prefix) bool { return inside(r, p) }) {
+			continue
+		}
+		hint := "; priv.conf allows it with wireguard-routes or admin-routes"
+		if min := map[bool]int{true: 8, false: 16}[r.Addr().Is4()]; r.Bits() < min {
+			return forbidden("route %s is wider than /%d%s", r, min, hint)
+		}
+		for _, s := range wgSpecial {
+			if r.Overlaps(s) {
+				return forbidden("route %s overlaps %s (loopback, link-local or multicast)%s", r, s, hint)
+			}
+		}
+		for _, h := range host {
+			if r.Contains(h.addr) {
+				return forbidden("route %s covers %s, %s of the host%s", r, h.addr, h.what, hint)
+			}
+		}
+	}
+	return nil
 }
 
 // wgSync writes the configuration to a file of the object's directory (mode 0600), has `wg syncconf` read it, and

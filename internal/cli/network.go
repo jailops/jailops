@@ -39,7 +39,8 @@ func networkDesc() *kindDesc[api.Network] {
 			return []string{n.Metadata.Name, v4, v6, fmt.Sprint(n.Status.Allocated), fmt.Sprint(n.Status.Free), dash(n.Spec.Uplink)}
 		},
 	}
-	d.show = func(a *app, n api.Network) error { return a.showObject(n.Metadata, nil, n.Spec, n.Status) }
+	d.show = func(a *app, n api.Network) error { return a.showNetwork(n) }
+	d.emptyHint = "jailops network create NAME --ipv4 10.50.0.1/24 --uplink IFACE --nat"
 	d.warnings = func(n api.Network) []string { return n.Status.Warnings }
 	return &d
 }

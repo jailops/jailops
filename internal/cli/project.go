@@ -45,7 +45,8 @@ func (a *app) projectDesc() *kindDesc[api.Project] {
 		}
 		return []string{mark, p.Metadata.Name, joinOrDash(p.Spec.Hosts), joinOrDash(nets), joinOrDash(stor), jails, dash(p.Spec.Description)}
 	}
-	d.show = func(a *app, p api.Project) error { return a.showObject(p.Metadata, nil, p.Spec, p.Status) }
+	d.show = func(a *app, p api.Project) error { return a.showProject(p) }
+	d.emptyHint = "jailops project create NAME --new-network"
 	return &d
 }
 
@@ -400,6 +401,8 @@ func storageDesc() *kindDesc[api.Storage] {
 		return []string{s.Metadata.Name, s.Spec.Dataset, dash(s.Status.Pool), dash(s.Status.Health), humanBytes(s.Status.Used), humanBytes(s.Status.Available)}
 	}
 	d.style = stateStyle(3)
+	d.show = func(a *app, s api.Storage) error { return a.showStorage(s) }
+	d.emptyHint = "jailops storage create NAME --dataset POOL/jailops"
 	return &d
 }
 
@@ -433,72 +436,79 @@ or a jail uses it. Only global admins write storage.`,
 // network additions: grants -----------------------------------------------------
 
 func (a *app) networkGrantCmds(nd *kindDesc[api.Network]) []*cobra.Command {
-	var project string
+	// project is the project to change: the global --project, JAILOPS_PROJECT or the current project.
+	project := func() (string, error) {
+		if err := a.requireProject(); err != nil {
+			return "", err
+		}
+		conn, err := a.resolveConnection()
+		if err != nil {
+			return "", err
+		}
+		return conn.CurrentProject(), nil
+	}
 	grant := &cobra.Command{
-		Use:   "grant NETWORK --project PROJECT",
+		Use:   "grant NETWORK [--project PROJECT]",
 		Short: "Grant a network to a project",
-		Long: `Grant a network to a project. A network belongs to one project: it is used whole by
-that project and is never shared, so the server refuses to grant a network that another
+		Long: `Grant a network to a project: --project, JAILOPS_PROJECT or the current project
+('project switch'). A network belongs to one project: it is used whole by that
+project and is never shared, so the server refuses to grant a network that another
 project already holds. Only global admins change projects.`,
-		Example:           "jailops network grant br-web --project web",
+		Example:           "jailops network grant br-web --project web\njailops network grant br-web",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, nd),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if project == "" {
-				return usagef("--project is required")
+			p, err := project()
+			if err != nil {
+				return err
 			}
-			if ok, err := a.dry("grant network "+args[0]+" to project "+project, nil); ok || err != nil {
+			if ok, err := a.dry("grant network "+args[0]+" to project "+p, nil); ok || err != nil {
 				return err
 			}
 			c, err := a.connect(cmd.Context())
 			if err != nil {
 				return err
 			}
-			err = sdk.Modify(cmd.Context(), c.Projects(), project, func(p *api.Project) {
-				if !slices.ContainsFunc(p.Spec.Networks, func(x api.ProjectNetwork) bool { return x.Network == args[0] }) {
-					p.Spec.Networks = append(p.Spec.Networks, api.ProjectNetwork{Network: args[0]})
+			err = sdk.Modify(cmd.Context(), c.Projects(), p, func(pr *api.Project) {
+				if !slices.ContainsFunc(pr.Spec.Networks, func(x api.ProjectNetwork) bool { return x.Network == args[0] }) {
+					pr.Spec.Networks = append(pr.Spec.Networks, api.ProjectNetwork{Network: args[0]})
 				}
 			})
 			if err != nil {
 				return err
 			}
-			return a.finishOp(cmd.Context(), nil, "network", args[0], "granted to project "+project, nil)
+			return a.finishOp(cmd.Context(), nil, "network", args[0], "granted to project "+p, nil)
 		},
 	}
-	grant.Flags().StringVar(&project, "project", "", "the project to grant to (required)")
-	a.completeFlag(grant, "project", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Projects().List(ctx), projName) }))
-
-	var rproject string
 	revoke := &cobra.Command{
-		Use:               "revoke NETWORK --project PROJECT",
-		Short:             "Withdraw a network grant from a project",
-		Long:              "Withdraw the grant of a network from a project. The server refuses while a jail of the project still uses the network.",
+		Use:   "revoke NETWORK [--project PROJECT]",
+		Short: "Withdraw a network grant from a project",
+		Long: `Withdraw the grant of a network from a project: --project, JAILOPS_PROJECT or the
+current project. The server refuses while a jail of the project still uses the network.`,
 		Example:           "jailops network revoke br-web --project web",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, nd),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if rproject == "" {
-				return usagef("--project is required")
+			p, err := project()
+			if err != nil {
+				return err
 			}
-			if ok, err := a.dry("revoke network "+args[0]+" from project "+rproject, nil); ok || err != nil {
+			if ok, err := a.dry("revoke network "+args[0]+" from project "+p, nil); ok || err != nil {
 				return err
 			}
 			c, err := a.connect(cmd.Context())
 			if err != nil {
 				return err
 			}
-			err = sdk.Modify(cmd.Context(), c.Projects(), rproject, func(p *api.Project) {
-				p.Spec.Networks = slices.DeleteFunc(p.Spec.Networks, func(x api.ProjectNetwork) bool { return x.Network == args[0] })
+			err = sdk.Modify(cmd.Context(), c.Projects(), p, func(pr *api.Project) {
+				pr.Spec.Networks = slices.DeleteFunc(pr.Spec.Networks, func(x api.ProjectNetwork) bool { return x.Network == args[0] })
 			})
 			if err != nil {
 				return err
 			}
-			return a.finishOp(cmd.Context(), nil, "network", args[0], "revoked from project "+rproject, nil)
+			return a.finishOp(cmd.Context(), nil, "network", args[0], "revoked from project "+p, nil)
 		},
 	}
-	revoke.Flags().StringVar(&rproject, "project", "", "the project to withdraw from (required)")
-	a.completeFlag(revoke, "project", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Projects().List(ctx), projName) }))
-
 	return []*cobra.Command{grant, revoke}
 }
 

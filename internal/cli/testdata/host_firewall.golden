@@ -37,7 +37,6 @@ dry-run: would
 
 $ jailops host firewall set --ssh-port 0
 ! invalid: ssh port 0 is not a port (1-65535)
-! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
 [exit 2]
 
 $ jailops host firewall set --allow tcp 80 comment web

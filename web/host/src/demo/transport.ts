@@ -236,12 +236,33 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         }
         if (seg.length === 1) return ok(db.networks)
         if (seg[2] === 'leases') return ok(db.leases[seg[1]] ?? [])
+        if (seg.length === 2) {
+          const net = db.networks.find((n) => n.metadata.name === seg[1])
+          if (!net) return fail(404, { code: 'not_found', message: `Network ${seg[1]} not found` })
+          if (m === 'GET') return ok(net, etagOf(net.metadata.generation))
+          if (m === 'PUT') {
+            if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(net.metadata.generation)) return fail(412, { code: 'conflict', message: 'The network changed since you loaded it.', hint: 'Reload and apply your change again.' })
+            const sp = body.spec as import('@jailops/shared/api/types').Network['spec']
+            if (sp.ipv6?.mode === 'proxy' && !/^fe80:/i.test(sp.ipv6.gateway)) return fail(400, { code: 'invalid', message: 'in proxy mode the gateway must be the bridge\'s link-local address', hint: 'use a gateway such as fe80::1' })
+            return startOp(`Save network ${seg[1]}`, { networks: [`/api/v1/networks/${seg[1]}`] }, 500, () => { net.spec = { ...sp, bridge: net.spec.bridge }; net.metadata.generation = (net.metadata.generation ?? 0) + 1 }, undefined, false)
+          }
+          if (m === 'DELETE') {
+            const by = db.projects.find((p) => (p.spec.networks ?? []).some((g) => g.network === seg[1]))
+            if (by) return fail(409, { code: 'conflict', message: `Network ${seg[1]} is granted to project ${by.metadata.name}.`, hint: `Remove the grant on the page of project ${by.metadata.name} first.` })
+            return startOp(`Delete network ${seg[1]}`, { networks: [`/api/v1/networks/${seg[1]}`] }, 500, () => {
+              db.networks = db.networks.filter((n) => n !== net)
+              delete db.leases[seg[1]]
+              emit('network-deleted', `/api/v1/networks/${seg[1]}`)
+            }, undefined, false)
+          }
+        }
         break
-      case 'firewall': return firewallRoute(seg, m, body, req)
-      case 'backups': return backupsRoute(seg, m, body)
+      case 'firewall': return firewallRoute(seg, m, body, req, project)
+      case 'backups': return backupsRoute(seg, m, body, project)
       case 'backup-targets': return ok(db.targets)
       case 'backup-policies':
-        return ok(db.bpol)
+        // the canned policies are the web project's; another project has none of them
+        return ok(db.bpol.filter((p) => (p.metadata.project ?? 'web') === project))
       case 'doctor': return ok({ time: new Date().toISOString(), host: 'bsd01.example.net', status: 'fail', checks: [
         { name: 'zfs.pool', status: 'ok', message: 'pool tank is ONLINE' },
         { name: 'kernel.module.if_bridge', status: 'ok', message: 'loaded' },
@@ -249,8 +270,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         { name: 'pf.anchor.mail', status: 'fail', message: 'anchor jailops/mail is not loaded', hint: 'Fix the syntax error at line 14 of the policy mail-edge, then run jailops reconcile.', detail: { policy: 'mail-edge', line: '14' } },
         { name: 'linuxulator', status: 'warn', message: 'linprocfs is not mounted', hint: 'Add linprocfs to /etc/fstab.' },
         { name: 'jail.kernel.vimage', status: 'unknown', message: 'could not be determined on this platform' },
-        { name: 'apps.access', status: 'ok', message: '2 grant(s); every firewall rule and pg_hba.conf line is in place' },
-        { name: 'jails.rate_limits', status: 'info', message: '1 jail(s) set a rate limit, which is not enforced yet: web/web', hint: 'the limits are stored and reported; traffic is not shaped until a later version wires a shaper' },
+        { name: 'apps.access', status: 'ok', message: '2 grants; every firewall rule and pg_hba.conf line is in place' },
+        { name: 'jails.rate_limits', status: 'info', message: '1 jail sets a rate limit, which is not enforced yet: web/web', hint: 'the limits are stored and reported; traffic is not shaped until a later version wires a shaper' },
       ] })
       case 'restores': return restore(body)
       case 'remotes': return ok(db.remotes)
@@ -367,6 +388,14 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       emit('jail-updated', src)
       return startOp(`Configure ${name}`, { jails: [src] }, 300, () => undefined, { ...j, restart_required: restart.sort(), restarted: false }, false)
     }
+    if (seg.length === 2 && m === 'DELETE') {
+      // the jail, its volumes and their snapshots go; a running jail is stopped first, as on the server
+      return startOp(`Delete jail ${name}`, { jails: [src] }, 900, () => {
+        db.jails = db.jails.filter((x) => x !== j)
+        delete db.snaps[name]
+        emit('jail-deleted', src)
+      }, undefined, false)
+    }
     if (seg.length === 2) return ok(j, etagOf(j.metadata.generation))
     switch (seg[2]) {
       case 'snapshots':
@@ -458,13 +487,31 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     return r
   }
 
-  function firewallRoute(seg: string[], m: string, body: Record<string, any>, req: RawRequest): RawResponse {
+  function firewallRoute(seg: string[], m: string, body: Record<string, any>, req: RawRequest, project: string): RawResponse {
     const isSet = seg[1] === 'address-sets'
-    const list = (isSet ? db.sets : db.policies) as Array<FirewallPolicy | AddressSet>
+    // policies and address sets belong to a project like jails; the canned ones are the web project's
+    const all = (isSet ? db.sets : db.policies) as Array<FirewallPolicy | AddressSet>
+    const list = all.filter((x) => (x.metadata.project ?? 'web') === project)
+    if (seg.length === 2 && m === 'POST' && !isSet) {
+      const name = String(body.metadata?.name ?? '')
+      if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9-]{0,62}$`, detail: { field: 'name' } })
+      if (list.some((x) => x.metadata.name === name)) return fail(409, { code: 'already_exists', message: `Policy ${name} already exists.` })
+      const pol: FirewallPolicy = { metadata: { name, project, scope: 'host', generation: 1, created_at: new Date().toISOString() }, spec: { default_in: body.spec?.default_in ?? 'deny', default_out: body.spec?.default_out ?? 'allow', rules: body.spec?.rules ?? [] } }
+      db.policies.push(pol)
+      emit('firewall-created', `/api/v1/firewall/policies/${name}`)
+      return ok(pol)
+    }
     if (seg.length === 2) return ok(list)
     const item = list.find((x) => x.metadata.name === seg[2])
     if (!item) return fail(404, { code: 'not_found', message: `${seg[2]} not found` })
     if (m === 'GET') return ok(item, etagOf(item.metadata.generation))
+    if (m === 'DELETE' && !isSet) {
+      return startOp(`Delete policy ${seg[2]}`, { firewall: [`/api/v1/firewall/policies/${seg[2]}`] }, 500, () => {
+        db.policies = db.policies.filter((x) => x !== item)
+        for (const j of db.jails) if (j.spec.firewall?.policy === seg[2] && (j.metadata.project ?? '') === project) delete j.spec.firewall.policy
+        emit('firewall-deleted', `/api/v1/firewall/policies/${seg[2]}`)
+      }, undefined, false)
+    }
     if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(item.metadata.generation)) return fail(412, { code: 'conflict', message: 'The object changed since you loaded it.', hint: 'Reload and apply your change again.' })
     if (!isSet) {
       const rules = ((body as FirewallPolicy).spec.rules ?? [])
@@ -481,14 +528,15 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }, undefined, false)
   }
 
-  function backupsRoute(seg: string[], m: string, body: Record<string, any> = {}): RawResponse {
+  function backupsRoute(seg: string[], m: string, body: Record<string, any> = {}, project = ''): RawResponse {
     if (seg[1] === 'run' && m === 'POST') {
       const pol = db.bpol.find((p) => p.metadata.name === body.policy)
       if (!pol) return fail(404, { code: 'not_found', message: `Backup policy ${body.policy} not found` })
       const run = { id: 'run-' + ++seq, kind: 'backup', policy: pol.metadata.name, jail: 'web', started: new Date().toISOString(), finished: new Date().toISOString(), ok: true }
       return startOp(`Run policy ${pol.metadata.name}`, {}, 2000, () => emit('backup-run', '/api/v1/backups/run'), [run], true)
     }
-    if (seg.length === 1) return ok(db.backups)
+    // the backups of the project's jails only
+    if (seg.length === 1) return ok(db.backups.filter((b) => (db.jails.find((j) => j.metadata.name === b.spec.jail)?.metadata.project ?? 'web') === project))
     const b = db.backups.find((x) => x.metadata.name === seg[1])
     if (!b) return fail(404, { code: 'not_found', message: `Backup ${seg[1]} not found` })
     if (seg[2] === 'verify') return startOp(`Verify ${b.spec.snapshot}`, {}, 1500, () => { b.status.verified = true; b.status.failed = false }, { id: 'run-' + ++seq, kind: 'drill', jail: b.spec.jail, depth: body.depth ?? 'deep', ok: true, started: new Date().toISOString(), finished: new Date().toISOString() }, true)

@@ -121,7 +121,93 @@ func (a *app) jailDesc() *kindDesc[api.Jail] {
 	d.afterCreate = a.jailStartFlag
 	d.beforeDelete = a.jailForceFlag
 	d.targets = a.jailTargets
+	d.loss = jailLoss
+	d.emptyHint = "jailops jail create NAME --image IMAGE@ALIAS --network NETWORK --storage STORAGE"
+	d.prepare = a.jailDefaults
 	return &d
+}
+
+// jailLoss says what deleting a jail destroys: the sizes of its root and data, its volumes and the number of its
+// snapshots, as the server reports them now. A running jail without --force is refused here, before any question.
+func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name string) (string, error) {
+	j, err := c.Jails().Get(ctx, name)
+	if err != nil {
+		return "", err
+	}
+	force, _ := cmd.Flags().GetBool("force")
+	running := j.Status.Power == api.PowerRunning
+	if running && !force {
+		return "", api.Errorf(api.CodeConflict, "jail %q is running", name).
+			WithHint("stop it first ('jailops stop " + name + "'), or pass --force to stop it before the delete")
+	}
+	var parts []string
+	var vols []string
+	for _, v := range j.Spec.Volumes {
+		vols = append(vols, v.Name)
+	}
+	u, err := c.Jails().Usage(ctx, name)
+	switch {
+	case err != nil:
+		parts = append(parts, "sizes unknown (the server does not report them)")
+	case u.Disk.Error != "":
+		parts = append(parts, "sizes unknown ("+u.Disk.Error+")")
+	default:
+		parts = append(parts, "root "+humanBytes(u.Disk.RootBytes))
+		data := "data " + humanBytes(u.Disk.DataBytes)
+		if len(vols) > 0 {
+			data += " (volumes " + strings.Join(vols, ", ") + ")"
+		}
+		parts = append(parts, data)
+	}
+	if err != nil || u.Disk.Error != "" {
+		if len(vols) > 0 {
+			parts = append(parts, "volumes "+strings.Join(vols, ", "))
+		}
+	}
+	if snaps, err := collect(c.Jails().Snapshots(name).List(ctx)); err != nil {
+		parts = append(parts, "snapshots unknown")
+	} else {
+		parts = append(parts, count(len(snaps), "snapshot", "snapshots"))
+	}
+	line := fmt.Sprintf("%s (%s): %s", name, dash(string(j.Status.Power)), strings.Join(parts, ", "))
+	if running {
+		line += "; --force stops it first"
+	}
+	return line, nil
+}
+
+// jailDefaults gives a jail without a network or a storage (and without a profile, which may carry them) the
+// project's only grant of that kind, as app install does, and says which it took.
+func (a *app) jailDefaults(ctx context.Context, c *sdk.Client, j *api.Jail) error {
+	if len(j.Spec.Profiles) > 0 || (len(j.Spec.Network) > 0 && j.Spec.Storage != "") {
+		return nil
+	}
+	project := a.conn.CurrentProject()
+	p, err := c.Projects().Get(ctx, project)
+	if err != nil {
+		return err
+	}
+	if len(j.Spec.Network) == 0 {
+		if n := p.Spec.SoleNetwork(); n != "" {
+			j.Spec.Network = []api.NetworkAttach{{Network: n}}
+			fprintf(a.env.Stderr, "network %s: the only network of project %s\n", n, project)
+		}
+	}
+	if j.Spec.Storage == "" {
+		if s := p.Spec.SoleStorage(); s != "" {
+			j.Spec.Storage = s
+			fprintf(a.env.Stderr, "storage %s: the only storage of project %s\n", s, project)
+		}
+	}
+	return nil
+}
+
+// count is "1 snapshot", "3 snapshots".
+func count(n int, one, many string) string {
+	if n == 1 {
+		return "1 " + one
+	}
+	return strconv.Itoa(n) + " " + many
 }
 
 // powerStates are the states 'list --state' accepts.
@@ -155,9 +241,9 @@ func (a *app) jailStartFlag(cmd *cobra.Command) func(ctx context.Context, name s
 // it is deleted when the flag was given.
 func (a *app) jailForceFlag(cmd *cobra.Command) func(ctx context.Context, name string) error {
 	var force bool
-	cmd.Flags().BoolVar(&force, "force", false, "stop the jail first when it is running")
-	cmd.Long += "\nA running jail is refused unless --force is given, which stops it first."
-	cmd.Example += "\njailops @P@ delete --force web"
+	cmd.Flags().BoolVar(&force, "force", false, "stop the jail first when it is running (the data-loss confirmation is still needed)")
+	cmd.Long += "\nA running jail is refused unless --force is given, which stops it first; --force does not\nconfirm the data loss."
+	cmd.Example += "\njailops @P@ delete --force --confirm-data-loss web"
 	return func(ctx context.Context, name string) error {
 		if !force {
 			return nil
@@ -194,7 +280,8 @@ func (a *app) jailForceFlag(cmd *cobra.Command) func(ctx context.Context, name s
 func (a *app) jailTargets(cmd *cobra.Command) func(ctx context.Context, args []string) ([]string, bool, error) {
 	var selectors []string
 	var all bool
-	cmd.Flags().StringArrayVarP(&selectors, "selector", "l", nil, "act on the jails carrying these labels, key=value (comma separated or repeated), instead of naming them")
+	cmd.Flags().StringArrayVarP(&selectors, "selector", "l", nil, "act on the jails carrying these labels, key=value (comma separated or repeated), instead of naming them (--label is the same)")
+	aliasFlags(cmd, map[string]string{"label": "selector"})
 	cmd.Flags().BoolVar(&all, "all", false, "act on every jail of the project")
 	return func(ctx context.Context, args []string) ([]string, bool, error) {
 		switch {
@@ -254,7 +341,7 @@ func sideBySide(w interface{ Write([]byte) (int, error) }, lh, left, rh, right s
 		if b != "" {
 			line = a + strings.Repeat(" ", width-len([]rune(a))+4) + b
 		}
-		_, _ = fmt.Fprintln(w, strings.TrimRight(line, " "))
+		fprintln(w, strings.TrimRight(line, " "))
 	}
 }
 
@@ -289,7 +376,9 @@ func fixedAddr(s string) string {
 }
 
 const jailCreateLong = `Create a jail from flags or from a file. A jail needs a project, a network and a
-storage, and none of them is guessed: name them, or use a profile that carries them.
+storage. Name them, or use a profile that carries them; without either, a project
+that is granted exactly one network (or one storage) gives the jail that one, and
+the command says so on standard error. Several grants are never guessed from.
 The project is --project, JAILOPS_PROJECT or the one chosen with 'project switch'.
 The server allocates "auto" addresses from the network and writes them back into
 the specification.
@@ -340,11 +429,11 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	)
 	f := cmd.Flags()
 	f.StringVar(&image, "image", "", "image reference: NAME@alias or NAME#gN (required without -f)")
-	f.StringVar(&storage, "storage", "", "storage to place the jail on, one granted to the project (required unless a profile supplies it)")
+	f.StringVar(&storage, "storage", "", "storage to place the jail on, one granted to the project (default: the project's only storage, unless a profile supplies it)")
 	f.StringArrayVar(&profiles, "profile", nil, "profile to apply, later ones override earlier ones (repeatable)")
 	f.StringVar(&layout, "layout", "", "root layout: thin or thick (default depends on the image)")
 	f.StringVar(&hostname, "hostname", "", "hostname inside the jail (default: the jail name)")
-	f.StringArrayVar(&networks, "network", nil, "attach a network granted to the project (repeatable; required unless a profile supplies one): NET (an address of every family it has), NET=IPV4 or NET=IPV4,IPV6 (an address, auto or none)")
+	f.StringArrayVar(&networks, "network", nil, "attach a network granted to the project (repeatable; default: the project's only network, unless a profile supplies one): NET (an address of every family it has), NET=IPV4 or NET=IPV4,IPV6 (an address, auto or none)")
 	f.IntVar(&cpu, "cpu", 0, "CPU limit in cores")
 	f.StringVar(&memory, "memory", "", "memory limit, for example 2G")
 	f.StringVar(&disk, "disk", "", "disk quota, for example 20G")
@@ -361,7 +450,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringArrayVar(&labels, "label", nil, "label KEY=VALUE (repeatable)")
 	f.StringVar(&strategy, "update-strategy", "", "how the jail follows its image: rebase, inplace or manual")
 	f.StringVar(&window, "update-window", "", "update window, for example \"sun 03:00\"")
-	a.completeFlag(cmd, "image", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Images().List(ctx), imageName2) }))
+	a.completeFlag(cmd, "image", imageRefs)
 	a.completeFlag(cmd, "network", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Networks().List(ctx), netName) }))
 	a.completeFlag(cmd, "storage", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Storage().List(ctx), storName) }))
 	a.completeFlag(cmd, "profile", listNames(func(ctx context.Context, c *sdk.Client) iterNames {

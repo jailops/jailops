@@ -21,9 +21,9 @@ $ jailops token create j --global -o json
 ! warning: this secret is shown only once and cannot be retrieved again; store it now.
 
 $ jailops token list
-NAME   PERMISSION   SCOPE    EXPIRES      ALLOW-FROM   AGE
-ci     operator     main     2026-03-31   10.0.0.0/8   3h
-j      readonly     global   never        -            3h
+NAME   ROLE       SCOPE    EXPIRES      ALLOW-FROM   AGE
+ci     operator   main     2026-03-31   10.0.0.0/8   3h
+j      readonly   global   never        -            3h
 
 $ jailops token list -o json
 [
@@ -96,12 +96,10 @@ $ jailops token create both --global --projects main
 
 $ jailops token create ghost --projects nope
 ! invalid: project "nope" does not exist
-! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
 [exit 2]
 
 $ jailops token create weird --permission  --global
 ! invalid: token permission is required
-! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
 [exit 2]
 
 $ jailops token delete -y ci j
@@ -125,9 +123,9 @@ $ jailops cert create noscope --fingerprint <sha256>
 [exit 2]
 
 $ jailops cert list
-NAME     KIND     PERMISSION   SCOPE    EXPIRES   FINGERPRINT
-hostb    host     admin        global   never     <fingerprint>
-laptop   client   operator     main     never     <fingerprint>
+NAME     KIND     ROLE       SCOPE    EXPIRES   FINGERPRINT
+hostb    host     admin      global   never     <fingerprint>
+laptop   client   operator   main     never     <fingerprint>
 
 $ jailops cert delete -y hostb
 certificate/hostb deleted
@@ -137,8 +135,8 @@ $ jailops user create alice --permission operator --projects main
 ! warning: this secret is shown only once and cannot be retrieved again; store it now.
 
 $ jailops user list
-NAME    PERMISSION   SCOPE   TOTP   DISABLED
-alice   operator     main    no     no
+NAME    ROLE       SCOPE   TOTP   DISABLED
+alice   operator   main    no     no
 
 $ jailops user create bob --password-stdin --global
 ! 
@@ -153,9 +151,9 @@ $ jailops user disable bob
 user/bob disabled
 
 $ jailops user list
-NAME    PERMISSION   SCOPE    TOTP   DISABLED
-alice   operator     main     no     no
-bob     readonly     global   no     yes
+NAME    ROLE       SCOPE    TOTP   DISABLED
+alice   operator   main     no     no
+bob     readonly   global   no     yes
 
 $ jailops user enable bob
 user/bob enabled

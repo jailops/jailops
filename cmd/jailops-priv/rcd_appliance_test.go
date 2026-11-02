@@ -101,7 +101,7 @@ func TestRCDApplianceSwitch(t *testing.T) {
 		!strings.Contains(first.log, "-appliance-modules all check-config") {
 		t.Errorf("first start:\n%s\n%s", first.out, first.log)
 	}
-	if i, j := strings.Index(first.log, "appliance-init"), strings.Index(first.log, "install -d -m 1771 -o root -g jailops"); i < 0 || j < i {
+	if i, j := strings.Index(first.log, "appliance-init"), strings.Index(first.log, "install -d -m 0710 -o root -g jailops /var/run/jailops-priv"); i < 0 || j < i {
 		t.Errorf("the group is used before appliance-init makes it:\n%s", first.log)
 	}
 	if noPool := runRC(t, "jailops_priv", `jailops_appliance="YES"`, "start", false); strings.Contains(noPool.log, "-pool") || !strings.Contains(noPool.log, "appliance-init") {
@@ -112,6 +112,9 @@ func TestRCDApplianceSwitch(t *testing.T) {
 	}
 	if odd := runRC(t, "jailops_priv", "jailops_appliance=\"YES\"\njailops_pool=\"tank;reboot\"", "start", false); !strings.Contains(odd.out, "is not a pool name") || strings.Contains(odd.log, "appliance-init") {
 		t.Errorf("a pool name with a semicolon:\n%s\n%s", odd.out, odd.log)
+	}
+	if dash := runRC(t, "jailops_priv", "jailops_appliance=\"YES\"\njailops_pool=\"-dataset\"", "start", false); !strings.Contains(dash.out, "is not a pool name") || strings.Contains(dash.log, "appliance-init") {
+		t.Errorf("a pool name with a leading dash:\n%s\n%s", dash.out, dash.log)
 	}
 	again := runRC(t, "jailops_priv", "jailops_appliance=\"YES\"\njailops_pool=\"tank\"", "start", true)
 	if strings.Contains(again.log, "appliance-init") {

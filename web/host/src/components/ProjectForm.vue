@@ -9,6 +9,9 @@ import { session, isHub } from '@jailops/shared/composables/session'
 import Modal from '@jailops/shared/components/Modal.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
+import { useFormCheck } from '@jailops/shared/composables/form'
+import { nameHint } from '@jailops/shared/lib/names'
+import { nameError } from '@/lib/nameField'
 import type { Project, ProjectNetwork, ProjectStorage, Network, Storage } from '@jailops/shared/api/types'
 
 const props = defineProps<{ open: boolean; project: Project | null; etag?: string; networks: Network[]; storage: Storage[] }>()
@@ -24,11 +27,14 @@ const f = reactive<Form>(blank())
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 const editing = computed(() => !!props.project)
+// the project rule of the server: the object rule, and "all" and "host" are reserved
+const check = useFormCheck(() => ({ 'pf-name': editing.value ? '' : nameError(f.name, 'project') }))
 const split = (v: string) => v.split(/[\s,]+/).map((x) => x.trim()).filter(Boolean)
 
 watch(() => props.open, (o) => {
   if (!o) return
   error.value = null
+  check.reset()
   Object.assign(f, blank())
   const p = props.project
   if (p) {
@@ -60,7 +66,7 @@ function body(): Pick<Project, 'metadata' | 'spec'> {
   }
 }
 
-async function save(): Promise<void> {
+const save = () => check.submit(async () => {
   busy.value = true
   error.value = null
   try {
@@ -74,7 +80,7 @@ async function save(): Promise<void> {
   } finally {
     busy.value = false
   }
-}
+})
 const addNet = () => f.networks.push({ network: props.networks[0]?.metadata.name ?? '' })
 const addSto = () => f.storage.push({ storage: props.storage[0]?.metadata.name ?? '*' })
 const netNames = computed(() => props.networks.map((n) => n.metadata.name))
@@ -84,9 +90,12 @@ void session
 
 <template>
   <Modal :open="open" :title="editing ? s.projects.editTitle(f.name) : s.projects.createTitle" wide @close="emit('close')">
-    <form id="pf" @submit.prevent="save">
-      <div class="grid-2">
-        <div class="field"><label for="pf-name">{{ s.projects.name }}</label><input id="pf-name" v-model="f.name" class="mono" type="text" required pattern="[a-z0-9._\-]+" :disabled="editing" /></div>
+    <form id="pf" novalidate @submit.prevent="save">
+      <div class="form-2">
+        <div class="field"><label for="pf-name">{{ s.projects.name }} <span v-if="!editing" class="req" aria-hidden="true">*</span></label>
+          <input id="pf-name" v-model="f.name" class="mono" type="text" autocomplete="off" :readonly="editing" :aria-invalid="!!check.err('pf-name')" aria-describedby="pf-name-h pf-name-e" @input="check.touch('pf-name')" />
+          <span id="pf-name-h" class="hint">{{ editing ? s.projects.nameFixed : nameHint('project') }}</span>
+          <span id="pf-name-e" class="field-error" role="alert">{{ check.err('pf-name') }}</span></div>
         <div class="field"><label for="pf-desc">{{ s.projects.description }}</label><input id="pf-desc" v-model="f.description" type="text" /></div>
       </div>
       <label v-if="!editing" class="check" style="margin-bottom: 4px"><input v-model="f.newNetwork" type="checkbox" data-test="new-network" />{{ s.projects.newNetwork }}</label>
@@ -95,7 +104,7 @@ void session
       <h3 style="margin: 12px 0 6px">{{ s.projects.grantNetworks }}</h3>
       <div v-for="(n, i) in f.networks" :key="'n' + i" class="grant-row">
         <select v-model="n.network" :aria-label="s.projects.network"><option v-for="x in netNames" :key="x" :value="x">{{ x }}</option></select>
-        <button class="btn btn-sm btn-icon btn-danger" type="button" :aria-label="s.firewall.removeRule" @click="f.networks.splice(i, 1)"><Icon name="trash" /></button>
+        <button class="btn btn-sm btn-icon btn-danger" type="button" :aria-label="s.projects.removeGrant" @click="f.networks.splice(i, 1)"><Icon name="trash" /></button>
       </div>
       <button class="btn btn-sm" type="button" @click="addNet"><Icon name="plus" />{{ s.projects.addNetwork }}</button>
 
@@ -103,7 +112,7 @@ void session
       <div v-for="(x, i) in f.storage" :key="'s' + i" class="grant-row grant-sto">
         <select v-model="x.storage" :aria-label="s.projects.storage"><option v-for="n in stoNames" :key="n" :value="n">{{ n === '*' ? s.projects.wildcard : n }}</option></select>
         <input v-model="x.quota" class="mono" type="text" :placeholder="s.projects.quotaField + ' (500G)'" :aria-label="s.projects.quotaField" />
-        <button class="btn btn-sm btn-icon btn-danger" type="button" :aria-label="s.firewall.removeRule" @click="f.storage.splice(i, 1)"><Icon name="trash" /></button>
+        <button class="btn btn-sm btn-icon btn-danger" type="button" :aria-label="s.projects.removeGrant" @click="f.storage.splice(i, 1)"><Icon name="trash" /></button>
       </div>
       <button class="btn btn-sm" type="button" @click="addSto"><Icon name="plus" />{{ s.projects.addStorage }}</button>
 
@@ -123,8 +132,9 @@ void session
       <ErrorPanel v-if="error" :error="error" />
     </form>
     <template #footer>
+      <span v-if="check.reason.value" class="why-disabled">{{ s.projects.name }}: {{ check.reason.value }}</span>
       <button class="btn" type="button" @click="emit('close')">{{ s.app.cancel }}</button>
-      <button class="btn btn-primary" type="submit" form="pf" :disabled="busy || !f.name" data-test="project-save">{{ s.projects.save }}</button>
+      <button class="btn btn-primary" type="submit" form="pf" :disabled="busy" :aria-disabled="!check.ok.value" data-test="project-save">{{ s.projects.save }}</button>
     </template>
   </Modal>
 </template>

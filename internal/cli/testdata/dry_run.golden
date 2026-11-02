@@ -20,7 +20,7 @@ $ jailops --dry-run jail restart web
 dry-run: would restart jail web
 
 $ jailops --dry-run jail delete -y web
-dry-run: would delete jail web
+dry-run: would delete jail web (stopped): root 256.0 MiB, data 70.0 MiB, 1 snapshot
 
 $ jailops --dry-run jail snapshot create web s2
 dry-run: would snapshot jail web

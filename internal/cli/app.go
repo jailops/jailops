@@ -132,6 +132,10 @@ type app struct {
 	conn    *Connection
 	// passFile is --passphrase-file of a jail creation (volkeys.go).
 	passFile string
+	// empty is what an empty list says instead of the generic "No resources found."
+	empty string
+	// outputFile is the file a deprecated -o FILE named (app export).
+	outputFile string
 }
 
 // NewRootCommand returns the command tree for env. It exists for tests and
@@ -153,6 +157,7 @@ func Execute(ctx context.Context, env *Env, args []string) int {
 	if len(args) > 0 && args[0] == "--version" { // the version of this client, no server asked
 		args = append([]string{"version", "--client"}, args[1:]...)
 	}
+	execFlags(root, args)
 	root.SetArgs(args)
 	root.SetOut(env.Stdout)
 	root.SetErr(env.Stderr)
@@ -189,8 +194,14 @@ type usageError struct {
 func (e *usageError) Error() string { return e.err.Error() }
 func (e *usageError) Unwrap() error { return e.err }
 
-func usagef(format string, args ...any) error {
+func usagef(format string, args ...any) *usageError {
 	return &usageError{err: fmt.Errorf(format, args...)}
+}
+
+// withHint replaces the generic "run --help" hint of a usage error.
+func (e *usageError) withHint(h string) *usageError {
+	e.hint = h
+	return e
 }
 
 // abortError means the user declined or mistyped a confirmation.

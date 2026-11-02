@@ -78,7 +78,7 @@ var nativeProps = map[string]bool{
 	"mountpoint": true, "volblocksize": true, "checksum": true, "encryption": true,
 	"keyformat": true, "keylocation": true, "setuid": true, "exec": true,
 	"volmode": true, "normalization": true, "utf8only": true, "casesensitivity": true,
-	"pbkdf2iters": true, "volsize": true, "special_small_blocks": true,
+	"pbkdf2iters": true, "volsize": true, "special_small_blocks": true, "devices": true,
 }
 
 // neverProps can never be set through the helper: they export data to the
@@ -147,6 +147,16 @@ func (c Config) zfsProps(ctx context.Context, m map[string]string) error {
 				if !filepath.IsAbs(v) || filepath.Clean(v) != v || !c.inMounts(v) {
 					return forbidden("mountpoint %q is outside %s", v, c.mountBaseDesc())
 				}
+				// mounted over a root's own directory, a dataset would replace its mode 0700 with its own: the
+				// jails' setuid programs below would be in reach of every user of the host
+				if c.isMountRoot(v) {
+					return forbidden("mountpoint %q is the mountpoint of a storage root", v)
+				}
+			}
+		case "devices":
+			// device nodes are made by devfs; a dataset never serves them
+			if v != "off" {
+				return forbidden("devices=%s: datasets of JailOps keep devices=off", v)
 			}
 		case "keylocation":
 			if v != "prompt" {

@@ -59,6 +59,14 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 			rep.Status = ch.Status
 		}
 	}
+	if !isGlobalAdmin(ActorFrom(ctx)) {
+		// what a failing check says can be a raw error with paths and command lines of the host: for administrators
+		for i := range rep.Checks {
+			if ch := &rep.Checks[i]; ch.Status != api.DoctorOK && ch.Status != api.DoctorInfo {
+				ch.Message, ch.Hint, ch.Detail = "details are shown to global administrators", "", nil
+			}
+		}
+	}
 	return rep
 }
 

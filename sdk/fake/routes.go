@@ -100,6 +100,10 @@ func (s *Server) routes() {
 	m("POST /api/v1/host/snapshots/{name}/restore", s.handleHostRestore)
 	m("GET /api/v1/host/firewall", s.handleHostFirewall)
 	m("PUT /api/v1/host/firewall", s.handleHostFirewallPut)
+	m("GET /api/v1/host/certificate", s.handleHostCertificate)
+	m("PUT /api/v1/host/certificate", s.handleHostCertificateUpload)
+	m("POST /api/v1/host/certificate/acme", s.handleHostCertificateACME)
+	m("POST /api/v1/host/certificate/self-signed", s.handleHostCertificateSelfSigned)
 	m("GET /api/v1/host/pending", s.handleHostPending)
 	m("POST /api/v1/host/pending/confirm", s.handleHostPendingAction(true))
 	m("POST /api/v1/host/pending/revert", s.handleHostPendingAction(false))
@@ -162,6 +166,10 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		Environment: api.Environment{OS: "FreeBSD", Arch: s.arch, Pool: "tank"}, SecretsRecipient: s.secretsRec,
 	}
 	s.mu.Unlock()
+	if auth == "untrusted" {
+		// as the daemon: a caller that proved nothing learns what a client negotiates with, nothing about the host
+		info = api.ServerInfo{APIVersion: info.APIVersion, APIExtensions: info.APIExtensions, Role: info.Role, Auth: auth}
+	}
 	writeSync(w, 200, info)
 }
 

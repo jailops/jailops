@@ -153,7 +153,8 @@ func init() {
 		if err != nil {
 			os.Exit(2)
 		}
-		err = fsagent.Serve(conn, fsagent.Config{Mode: fsagent.Mode(os.Args[3]), Root: os.Args[5]})
+		special := len(os.Args) > 6 && os.Args[6] == AgentSpecialFlag
+		err = fsagent.Serve(conn, fsagent.Config{Mode: fsagent.Mode(os.Args[3]), Root: os.Args[5], Special: special})
 		if err != nil {
 			os.Exit(1)
 		}

@@ -326,6 +326,9 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 	if err := s.validateJail(proj, name, j.Spec); err != nil {
 		return api.Operation{}, err
 	}
+	if err := api.ValidLabels(j.Metadata.Labels); err != nil {
+		return api.Operation{}, err
+	}
 	key, err := validate.QualifiedName(proj, name)
 	if err != nil {
 		return api.Operation{}, err
@@ -550,6 +553,11 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	}
 	if jsonEq(spec, old.Spec) && labelsEqual(in.Metadata.Labels, old.Metadata.Labels) && mb == old.Metadata.ManagedBy {
 		return s.getByKey(ctx, key)
+	}
+	if !labelsEqual(in.Metadata.Labels, old.Metadata.Labels) {
+		if err := api.ValidLabels(in.Metadata.Labels); err != nil {
+			return api.Jail{}, err
+		}
 	}
 	nj := old
 	nj.Spec, nj.Status = spec, api.JailStatus{}
@@ -837,6 +845,9 @@ func (s *Service) CreateSnapshot(ctx context.Context, jail string, req api.JailS
 	if _, err := s.getByKey(ctx, key); err != nil {
 		return api.Operation{}, err
 	}
+	if err := api.ValidFreeText("comment", req.Spec.Comment, false); err != nil {
+		return api.Operation{}, err
+	}
 	name := req.Metadata.Name
 	if name != "" {
 		if err := ValidObjectName(name); err != nil {
@@ -1044,6 +1055,9 @@ func (s *Service) CopyJail(ctx context.Context, src string, dst api.Jail) (api.O
 		return api.Operation{}, err
 	}
 	if err := bodyProject(p.Meta.Name, dst.Metadata.Project); err != nil {
+		return api.Operation{}, err
+	}
+	if err := api.ValidLabels(dst.Metadata.Labels); err != nil {
 		return api.Operation{}, err
 	}
 	j, err := s.jailSnapshot(srcKey)

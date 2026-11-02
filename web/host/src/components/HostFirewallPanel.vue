@@ -5,6 +5,7 @@ import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
 import { ApiError } from '@jailops/shared/api/client'
 import Icon from '@jailops/shared/components/Icon.vue'
+import { sentence } from '@jailops/shared/lib/format'
 import Callout from '@jailops/shared/components/Callout.vue'
 import CopyField from '@jailops/shared/components/CopyField.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
@@ -120,7 +121,7 @@ const ruleFrom = (r: HostFirewallRule) => (!r.from || r.from === 'any' ? s.hostf
       </div>
     </header>
     <LoadState :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
-      <div v-if="l.data.value" class="body stack">
+      <div v-if="l.data.value" class="panel-body stack">
         <p class="muted">{{ s.hostfw.lead }}</p>
         <p>{{ managed ? s.hostfw.managedText : s.hostfw.notManagedText }}</p>
         <template v-if="!managed">
@@ -135,15 +136,15 @@ const ruleFrom = (r: HostFirewallRule) => (!r.from || r.from === 'any' ? s.hostf
 
         <h3>{{ s.hostfw.rules }}</h3>
         <p class="muted">{{ s.hostfw.rulesText }}</p>
-        <div class="table-wrap"><table data-test="fw-rules">
-          <thead><tr><th>{{ s.hostfw.action }}</th><th class="hide-sm">{{ s.hostfw.direction }}</th><th>{{ s.hostfw.proto }}</th><th>{{ s.hostfw.ports }}</th><th>{{ s.hostfw.from }}</th><th class="hide-sm">{{ s.hostfw.comment }}</th></tr></thead>
+        <div class="table-wrap"><table class="rtable" data-test="fw-rules">
+          <thead><tr><th>{{ s.hostfw.action }}</th><th class="hide-sm">{{ s.hostfw.direction }}</th><th>{{ s.hostfw.proto }}</th><th>{{ s.hostfw.ports }}</th><th>{{ s.hostfw.from }}</th><th>{{ s.hostfw.comment }}</th></tr></thead>
           <tbody><tr v-for="(r, i) in l.data.value.status.rules" :key="i" :class="{ 'fw-fixed': r.fixed }" data-rule>
-            <td><span class="pill" :class="r.action === 'block' ? 'danger' : 'ok'">{{ r.action }}</span></td>
-            <td class="hide-sm">{{ r.direction }}</td>
-            <td class="mono">{{ r.proto || '-' }}</td>
-            <td class="mono">{{ r.ports || '-' }}</td>
-            <td class="mono fw-wrap">{{ ruleFrom(r) }}</td>
-            <td class="hide-sm">{{ r.comment }} <span v-if="r.fixed" class="chip">{{ s.hostfw.fixed }}</span></td>
+            <td :data-label="s.hostfw.action"><span class="pill" :class="r.action === 'block' ? 'danger' : 'ok'">{{ sentence(r.action) }}</span></td>
+            <td class="hide-sm" :data-label="s.hostfw.direction">{{ r.direction }}</td>
+            <td class="mono" :data-label="s.hostfw.proto">{{ r.proto || '-' }}</td>
+            <td class="mono" :data-label="s.hostfw.ports">{{ r.ports || '-' }}</td>
+            <td class="mono fw-wrap" :data-label="s.hostfw.from">{{ ruleFrom(r) }}</td>
+            <td :data-label="s.hostfw.comment">{{ r.comment }} <span v-if="r.fixed" class="chip">{{ s.hostfw.fixed }}</span></td>
           </tr></tbody>
         </table></div>
       </div>
@@ -264,7 +265,10 @@ const ruleFrom = (r: HostFirewallRule) => (!r.from || r.from === 'any' ? s.hostf
         <button class="btn" type="submit" :disabled="!canWrite || busy || errors.length > 0 || !windowOk" data-test="fw-preview-btn">{{ s.hostfw.preview }}</button>
         <button class="btn btn-primary" type="button" :disabled="!canWrite || busy || !previewCurrent || !preview?.change.changed || (needIKnow && !iKnow)" data-test="fw-apply" @click="apply">{{ s.hostfw.apply }}</button>
         <button v-if="dirty" class="btn btn-ghost" type="button" @click="reset">{{ s.app.cancel }}</button>
-        <span v-if="canWrite && !previewCurrent" class="faint">{{ s.hostfw.previewFirst }}</span>
+        <span v-if="canWrite && errors.length" class="why-disabled" data-test="fw-why">{{ s.form.fixFirst(errors[0].message) }}</span>
+        <span v-else-if="canWrite && !windowOk" class="why-disabled">{{ s.form.fixFirst(s.hostfw.confirmWithinHint) }}</span>
+        <span v-else-if="canWrite && needIKnow && !iKnow && previewCurrent" class="why-disabled">{{ s.hostfw.iKnowFirst }}</span>
+        <span v-else-if="canWrite && !previewCurrent" class="why-disabled">{{ s.hostfw.previewFirst }}</span>
       </div>
     </form>
   </section>

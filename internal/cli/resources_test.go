@@ -39,7 +39,7 @@ func TestImages(t *testing.T) {
 	tr.do("", "image", "delete", "-y", "freebsd-15") // in use by web
 	tr.ok("image", "delete", "-y", "alpine-3")
 	// an image with generations and aliases is deleted as a whole once no jail uses it
-	tr.ok("jail", "delete", "-y", "web")
+	tr.ok("jail", "delete", "--confirm-data-loss", "web")
 	tr.ok("image", "delete", "-y", "freebsd-15")
 	tr.ok("image", "list", "-o", "name")
 	tr.golden("images")

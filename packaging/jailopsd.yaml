@@ -41,7 +41,7 @@ web:
   enabled: false                # true: serve the embedded web console on the listeners (it is always in the binary); the API is the same either way
 
 priv:
-  socket: /var/run/jailops/priv.sock
+  socket: /var/run/jailops-priv/priv.sock   # the helper's socket; the former /var/run/jailops/priv.sock means this path
 
 log:
   level: info                   # debug, info, warn, error
@@ -101,12 +101,20 @@ host:
   manage:
     modules: []
 
+# The audit log (docs/security-model.md): once a day the daemon deletes the entries older than the retention and the
+# oldest beyond max_entries. The newest 1000 entries are never deleted.
+audit:
+  retention: 90d        # at least 1d; whole days as "90d", or hours as "2160h"
+  max_entries: 1000000  # at least 1000
+
 # Log forwarding (docs/logging.md): send the jails' logs, and the audit log when asked, to syslog servers (RFC 5424
 # over udp, tcp or tls) or https webhooks. This list is in force until an administrator stores one with
 # 'jailops logs forward' or the console, which then replaces it (delete that with 'jailops logs forward reset').
 # A sink starts at the end of the files: it sends what is written from now on. Files the daemon reads (ca_file,
-# token_file) must be owned by root and not writable by others; the token file 0640 root:jailops.
+# token_file) must be owned by root and not writable by others; the token file 0640 root:jailops. A list stored
+# through the API may name files only directly in secrets_dir, and no receiver on this host or the link-local network.
 logging:
+  secrets_dir: /usr/local/etc/jailops/sinks   # root:jailops 0750
   forward: []
   # - name: central
   #   type: syslog
@@ -127,7 +135,7 @@ logging:
   # - name: alerts
   #   type: webhook
   #   to: https://hooks.example.com/jailops
-  #   token_file: /usr/local/etc/jailops/hook.token   # the bearer token, first line; never the token itself here
+  #   token_file: /usr/local/etc/jailops/sinks/hook.token   # the bearer token, first line; never the token itself here
 
 # The paths of a thin jail that survive a switch to a newer image generation, each in its own dataset. Empty keeps the
 # built-in list (/etc, /usr/local, /var/db, /var/log, /var/mail, /var/spool, /home, /root). Setting it replaces the list.

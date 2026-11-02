@@ -52,6 +52,7 @@ are kept in ~/.config/jailops/config.yaml (mode 0600). The built-in remote
 
 (To manage the hosts behind a hub, see 'jailops host'.)`,
 		`jailops remote add prod https://hub.example.net:39110 --token-stdin
+jailops remote add host.example.org --token-stdin --name myhost
 jailops remote list
 jailops remote switch prod
 jailops remote remove old`, "remotes")
@@ -64,13 +65,14 @@ func (a *app) remoteAdd() *cobra.Command {
 	var tokenStdin, sw bool
 	var remoteName string
 	cmd := &cobra.Command{
-		Use:     "add NAME URL | ADDRESS --token TRUST-TOKEN",
+		Use:     "add NAME URL | ADDRESS --token-stdin",
 		Aliases: []string{"create"},
 		Short:   "Add a remote",
 		Long: `Add a named remote. URL is https://host:port, or unix:/path for a socket.
 
-With a single argument and a trust token (joc_...) from 'jailops trust add', the
-command joins the server instead: it pins the server fingerprint carried by the
+With a single argument, the server's address (host or host:port), and a trust
+token (joc_...) from 'jailops trust add', the command joins the server instead
+(--name names the remote): it pins the server fingerprint carried by the
 token (there is no trust-on-first-use prompt), generates a client key pair
 (the key is stored with mode 0600 next to the configuration), presents the token
 and the certificate, and saves the remote with the certificate in place of an
@@ -84,15 +86,27 @@ fingerprint, pass --fingerprint: the command checks it against what the server
 presents and refuses on a mismatch.
 
 The token is read from --token, from the first line of standard input with
---token-stdin, or referenced by file with --token-file. Prefer the latter two:
-a value on the command line is visible to other users.`,
-		Example: `jailops remote add host.example --token joc_...
+--token-stdin (or --token-file -), or referenced by file with --token-file (an
+API token: the path is stored, not the token). Prefer standard input or a file:
+a value on the command line is visible to other users. A trust token belongs
+to the one-argument form; the two-argument form with one is refused.`,
+		Example: `jailops remote add host.example.org --token-stdin --name myhost <trust-token.txt
 jailops remote add prod https://hub.example.net:39110 --token-stdin <token.txt
 jailops remote add lab https://10.0.0.5:39110 --fingerprint ab:cd:ef:... --token-file ~/.jailops-lab
 jailops remote add edge https://edge:39110 --cert client.pem --key client.key --switch`,
 		Args: cobra.RangeArgs(1, 2),
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if r.TokenFile == "-" { // standard input, like --token-stdin
+				r.TokenFile, tokenStdin = "", true
+			}
 			if len(args) == 1 {
+				if r.TokenFile != "" {
+					tok, err := a.readSecretFile("token", r.TokenFile)
+					if err != nil {
+						return err
+					}
+					r.Token, r.TokenFile = tok, ""
+				}
 				if tokenStdin {
 					line, err := a.readLine()
 					if err != nil || line == "" {
@@ -101,7 +115,7 @@ jailops remote add edge https://edge:39110 --cert client.pem --key client.key --
 					r.Token = line
 				}
 				if !strings.HasPrefix(r.Token, sdk.TrustTokenPrefix) {
-					return usagef("one argument is the address of a server to join with a trust token: pass --token joc_... (or NAME URL for an API token)")
+					return usagef("one argument is the address of a server to join with a trust token: give the joc_... token with --token-stdin (or NAME URL for an API token)")
 				}
 				return a.addByTrustToken(cmd, remoteName, args[0], r.Token, sw)
 			}
@@ -115,6 +129,10 @@ jailops remote add edge https://edge:39110 --cert client.pem --key client.key --
 					return usagef("--token-stdin needs the token on the first line of standard input")
 				}
 				r.Token = line
+			}
+			if strings.HasPrefix(r.Token, sdk.TrustTokenPrefix) {
+				return usagef("%s... is a trust token from 'jailops trust add': it joins with the one-argument form", sdk.TrustTokenPrefix).
+					withHint(fmt.Sprintf("jailops remote add %s --token-stdin --name %s", strings.TrimPrefix(target, "https://"), name))
 			}
 			if sock, ok := strings.CutPrefix(target, "unix:"); ok {
 				r.Socket = sock
@@ -157,7 +175,7 @@ jailops remote add edge https://edge:39110 --cert client.pem --key client.key --
 	f := cmd.Flags()
 	f.StringVar(&r.Token, "token", "", "API token (visible in the process list; prefer --token-stdin)")
 	f.BoolVar(&tokenStdin, "token-stdin", false, "read the token from the first line of standard input")
-	f.StringVar(&r.TokenFile, "token-file", "", "file holding the token; the path is stored, not the token")
+	f.StringVar(&r.TokenFile, "token-file", "", "file holding the token; the path is stored, not the token (- reads standard input like --token-stdin)")
 	f.StringVar(&r.Fingerprint, "fingerprint", "", "SHA-256 fingerprint of the server certificate to pin")
 	f.StringVar(&r.Cert, "cert", "", "client certificate file for mTLS")
 	f.StringVar(&r.Key, "key", "", "client key file for mTLS")
@@ -197,9 +215,12 @@ func (a *app) pinCertificate(ctx context.Context, name string, r *RemoteConfig) 
 		return nil // a trusted authority signed it; no pin needed
 	}
 	w := a.env.Stderr
+	// The fingerprint comes first, on its own line; the subject and issuer are the server's text and are quoted, so
+	// that no character of theirs can paint over the fingerprint or the question.
 	fprintf(w, "The server at %s presented a certificate that no trusted authority signed.\n", hp)
-	fprintf(w, "  Subject:  %s\n  Issuer:   %s\n  Expires:  %s\n  SHA-256:  %s\n",
-		probe.Cert.Subject, probe.Cert.Issuer, probe.Cert.NotAfter.UTC().Format("2006-01-02"), colonFP(got))
+	fprintf(w, "  SHA-256:  %s\n", colonFP(got))
+	fprintf(w, "  Subject:  %q\n  Issuer:   %q\n  Expires:  %s\n",
+		probe.Cert.Subject.String(), probe.Cert.Issuer.String(), probe.Cert.NotAfter.UTC().Format("2006-01-02"))
 	fprintln(w, "Compare this fingerprint with the one the server reports ('jailops server info' there) before trusting it.")
 	fprintf(w, "Pin this certificate for remote %q? [y/N]: ", name)
 	ans, err := a.readLine()
@@ -239,6 +260,11 @@ func (a *app) probeRemote(ctx context.Context, r RemoteConfig) {
 	defer cl.Close()
 	info, err := cl.Info(cctx)
 	if err != nil {
+		return
+	}
+	if info.Hostname == "" {
+		// a server tells a client it does not trust neither its name nor its version
+		a.say("connected, seen as %s\n", info.Auth)
 		return
 	}
 	a.say("connected to %s (version %s), seen as %s\n", info.Hostname, info.Version, info.Auth)

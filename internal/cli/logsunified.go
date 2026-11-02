@@ -85,7 +85,8 @@ jailops logs forward status`
 	}
 	f := cmd.Flags()
 	f.StringArrayVar(&u.jails, "jail", nil, "merge the logs of this jail (repeatable; default every jail)")
-	f.StringArrayVarP(&u.labels, "label", "l", nil, "merge the logs of the jails with this label KEY=VALUE (repeatable)")
+	f.StringArrayVarP(&u.labels, "label", "l", nil, "merge the logs of the jails with this label KEY=VALUE (repeatable; --selector is the same)")
+	aliasFlags(cmd, map[string]string{"selector": "label"})
 	f.StringVar(&u.app, "app", "", "merge the logs of the jails installed from this app")
 	f.BoolVar(&u.appLogs, "app-logs", false, "add the log files the installed apps declare below /var/log")
 	f.BoolVar(&u.allProjects, "all-projects", false, "read every project you may use, not only the current one")
@@ -218,12 +219,12 @@ func (a *app) printUnified(r api.LogsRead, withProject, colour bool) error {
 		width = max(width, len(prefix(api.LogEntry{Project: s.Project, Jail: s.Jail, File: s.File})))
 	}
 	for _, l := range r.Lines {
-		p := prefix(l)
+		p := termText(prefix(l), false)
 		pad := strings.Repeat(" ", max(width-len(p), 0))
 		if colour {
 			p = "\x1b[" + jailColour(l.Project+"/"+l.Jail) + "m" + p + "\x1b[0m"
 		}
-		fprintln(a.env.Stdout, p+pad+"  "+terminalSafe(l.Line))
+		fprintln(a.env.Stdout, colored(p+pad+"  "+terminalSafe(l.Line)))
 	}
 	return nil
 }

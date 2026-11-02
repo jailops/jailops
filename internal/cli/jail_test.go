@@ -58,8 +58,13 @@ func TestJailLifecycle(t *testing.T) {
 	tr.ok("jail", "show", "web")
 	tr.ok("jail", "restart", "web", "--grace", "5")
 	tr.ok("jail", "stop", "web", "--force")
-	tr.ok("jail", "delete", "-y", "db")
-	tr.do("", "jail", "delete", "web")
+	tr.do("", "jail", "delete", "-y", "db") // data loss: -y does not answer it
+	tr.do("web\n", "jail", "delete", "db")  // the wrong name
+	if _, ok := h.srv.JailIn("main", "db"); !ok {
+		t.Fatal("db deleted without its name typed")
+	}
+	tr.do("db\n", "jail", "delete", "db")
+	tr.do("", "jail", "delete", "web") // running, no --force: refused before the question
 	tr.do("", "jail", "show", "db")
 	tr.golden("jail_lifecycle")
 	if _, ok := h.srv.JailIn("main", "db"); ok {

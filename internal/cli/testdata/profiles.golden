@@ -6,7 +6,6 @@ profile/web created
 
 $ jailops profile create bad --set hostname=x
 ! invalid: hostname cannot be set in a profile
-! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
 [exit 2]
 
 $ jailops profile create bad2 --set nonsense=1
@@ -138,12 +137,12 @@ $ jailops profile delete -y base
 ! hint: Wait for the running operation ('jailops op list') and retry. (jailops explain busy)
 [exit 5]
 
-$ jailops delete -y nginx
+$ jailops delete --confirm-data-loss nginx
 jail/nginx deleted
 
 $ jailops profile delete -y base
 profile/base deleted
 
 $ jailops --project host profile list
-! No resources found.
+! No profiles in project host. Create one with: jailops profile create NAME
 

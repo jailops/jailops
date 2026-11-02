@@ -751,7 +751,7 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 		}
 		if _, ok := specGrantsNetwork(p.Spec, eff.Network[i].Network); !ok {
 			return nil, api.Errorf(api.CodeForbidden, "network %q is not granted to project %q", eff.Network[i].Network, p.Meta.Name).
-				WithHint("an administrator grants networks with `jailops project set`")
+				WithHint(fmt.Sprintf("a global admin grants it: jailops network grant %s --project %s", eff.Network[i].Network, p.Meta.Name))
 		}
 	}
 	if len(eff.Devfs) > 0 && !a.Perm.Satisfies(api.PermAdmin) {
@@ -778,7 +778,8 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 		return nil, invalid("a jail needs a storage: name one with --storage NAME or use a profile that has one")
 	}
 	if !specGrantsStorage(p.Spec, spec.Storage) {
-		return nil, api.Errorf(api.CodeForbidden, "storage %q is not granted to project %q", spec.Storage, p.Meta.Name)
+		return nil, api.Errorf(api.CodeForbidden, "storage %q is not granted to project %q", spec.Storage, p.Meta.Name).
+			WithHint(fmt.Sprintf("a global admin grants it: jailops project set %s --storage %s", p.Meta.Name, spec.Storage))
 	}
 	if _, ok := s.storage(spec.Storage); !ok {
 		return nil, notFound("storage", spec.Storage)
@@ -840,7 +841,7 @@ func (s *Service) checkQuota(p project, spec api.JailSpec, u usage, isNew bool) 
 	}
 	if q.CPU > 0 {
 		if spec.Resources.CPU == 0 {
-			return invalid("project %q has a cpu quota: set resources.cpu on the jail", name)
+			return invalid("project %q has a CPU quota: give the jail a CPU limit (--cpu N, or limits.cpu)", name)
 		}
 		if u.cpu+spec.Resources.CPU > q.CPU {
 			return quotaErr("cpu", uint64(q.CPU), uint64(u.cpu), uint64(spec.Resources.CPU))
@@ -848,7 +849,7 @@ func (s *Service) checkQuota(p project, spec api.JailSpec, u usage, isNew bool) 
 	}
 	if q.PIDs > 0 {
 		if spec.Resources.PIDs == 0 {
-			return invalid("project %q has a pids quota: set resources.pids on the jail", name)
+			return invalid("project %q has a process quota: give the jail a process limit (--pids N, or limits.pids)", name)
 		}
 		if u.pids+spec.Resources.PIDs > q.PIDs {
 			return quotaErr("pids", uint64(q.PIDs), uint64(u.pids), uint64(spec.Resources.PIDs))
@@ -858,7 +859,7 @@ func (s *Service) checkQuota(p project, spec api.JailSpec, u usage, isNew bool) 
 		limit := memBytes(q.Memory)
 		want := memBytes(spec.Resources.Memory)
 		if want == 0 {
-			return invalid("project %q has a memory quota: set resources.memory on the jail", name)
+			return invalid("project %q has a memory quota: give the jail a memory limit (--memory SIZE, or limits.memory)", name)
 		}
 		if u.memory+want > limit {
 			return quotaErr("memory", limit, u.memory, want)

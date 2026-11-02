@@ -149,6 +149,15 @@ func TestManagementAPI(t *testing.T) {
 	check(ops, "POST", "/api/v1/hosts", backupd.HostBody{Name: "x", Fingerprint: strings.Repeat("a", 64)}, 403)
 	check(rootW, "GET", "/api/v1/audit", nil, 200)
 	check(rootW, "GET", "/api/v1/users", nil, 200)
+	// the remedies for a wrong chunk or escrow blob of a host of the key domain: backup-admin, audited
+	cid := r.Fix.NewChunk(t).ID.String()
+	check(eye, "POST", "/api/v1/quarantine/"+cid, nil, 403)
+	check(eye, "DELETE", "/api/v1/escrow/0123456789abcdef", nil, 403)
+	check(eye, "GET", "/api/v1/escrow", nil, 200)
+	check(ops, "POST", "/api/v1/quarantine/"+cid, nil, 200)
+	check(ops, "POST", "/api/v1/quarantine/nonsense", nil, 400)
+	check(ops, "DELETE", "/api/v1/escrow/0123456789abcdef", nil, 404)
+	check(ops, "DELETE", "/api/v1/escrow/nonsense", nil, 400)
 	// a response never carries a password hash
 	if _, _, b := rootW.do("GET", "/api/v1/users", nil); strings.Contains(b, "argon2") || strings.Contains(b, "password_hash") {
 		t.Fatalf("the user list leaks hashes: %s", b)
@@ -221,7 +230,7 @@ func TestManagementAPI(t *testing.T) {
 	for _, e := range entries {
 		seen[e.Action] = true
 	}
-	for _, want := range []string{"host.enroll", "host.revoke", "token.create", "token.delete", "user.update", "maintenance.set", "auth.login", "auth.login.failed", "gc.start"} {
+	for _, want := range []string{"host.enroll", "host.revoke", "token.create", "token.delete", "user.update", "maintenance.set", "auth.login", "auth.login.failed", "gc.start", "quarantine.add"} {
 		if !seen[want] {
 			t.Errorf("no audit entry %q (have %v)", want, seen)
 		}
@@ -352,5 +361,23 @@ func TestLoginHardening(t *testing.T) {
 	}
 	if !got429 {
 		t.Fatal("bad bearer tokens are not limited")
+	}
+}
+
+// The node's console turns off the browser features it does not use, and never sends Strict-Transport-Security: its
+// certificate is self-signed and pinned, and a browser that remembered the header could not be told to accept it.
+func TestManagementSecurityHeaders(t *testing.T) {
+	r := startRig(t, memKind, nil)
+	for _, p := range []string{"/api/v1", "/"} {
+		req := httptest.NewRequest("GET", "https://node.test"+p, nil)
+		rec := httptest.NewRecorder()
+		r.Srv.WebHandler().ServeHTTP(rec, req)
+		h := rec.Header()
+		if pp := h.Get("Permissions-Policy"); !strings.Contains(pp, "camera=()") || !strings.Contains(pp, "geolocation=()") {
+			t.Errorf("%s: Permissions-Policy %q", p, pp)
+		}
+		if h.Get("Strict-Transport-Security") != "" {
+			t.Errorf("%s: Strict-Transport-Security %q", p, h.Get("Strict-Transport-Security"))
+		}
 	}
 }

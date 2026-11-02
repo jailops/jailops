@@ -5,7 +5,8 @@ import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
 import { session, can, isHub } from '@jailops/shared/composables/session'
 import { attention } from '@/composables/attention'
-import { bytes, percent, ago } from '@jailops/shared/lib/format'
+import { bytes, percent, sentence } from '@jailops/shared/lib/format'
+import TimeStamp from '@jailops/shared/components/TimeStamp.vue'
 import StatePill from '@/components/StatePill.vue'
 import Meter from '@jailops/shared/components/Meter.vue'
 import Callout from '@jailops/shared/components/Callout.vue'
@@ -118,8 +119,8 @@ const poolPct = computed(() => (pool.value ? percent(pool.value.allocated, pool.
             <div class="body">
               <template v-if="pool">
                 <Meter :value="poolPct" :label="s.overview.pool" :warn-at="75" :danger-at="90" />
-                <p class="muted" style="margin-top: 6px">
-                  {{ bytes(pool.allocated) }} {{ s.overview.used }} · {{ bytes(pool.free) }} {{ s.overview.free }} · {{ bytes(pool.size) }} · {{ Math.round(poolPct) }}%
+                <p class="muted pool-figures" style="margin-top: 6px">
+                  <span>{{ bytes(pool.allocated) }} {{ s.overview.used }}</span> · <span>{{ bytes(pool.free) }} {{ s.overview.free }}</span> · <span>{{ bytes(pool.size) }}</span> · <span>{{ Math.round(poolPct) }}%</span>
                 </p>
               </template>
               <p v-else class="muted">{{ s.overview.poolUnknown }}</p>
@@ -134,8 +135,8 @@ const poolPct = computed(() => (pool.value ? percent(pool.value.allocated, pool.
                 <tbody>
                   <tr v-for="o in recent" :key="o.id">
                     <td>{{ o.description }}</td>
-                    <td><span class="pill" :class="{ ok: o.status === 'success', danger: o.status === 'failure', info: o.status === 'running', warn: o.status === 'cancelled' }">{{ o.status }}</span></td>
-                    <td class="faint nowrap">{{ ago(o.created_at) }}</td>
+                    <td><span class="pill" :class="{ ok: o.status === 'success', danger: o.status === 'failure', info: o.status === 'running', warn: o.status === 'cancelled' }">{{ sentence(o.status) }}</span></td>
+                    <td class="faint nowrap"><TimeStamp :ts="o.created_at" /></td>
                   </tr>
                 </tbody>
               </table>
@@ -158,5 +159,6 @@ const poolPct = computed(() => (pool.value ? percent(pool.value.allocated, pool.
 .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
 .tile { display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; text-decoration: none; color: var(--text); align-items: flex-start; }
 .tile:hover { background: var(--surface-2); }
+.pool-figures span { white-space: nowrap; }
 .tile-n { font-size: 28px; font-weight: 600; line-height: 1; font-variant-numeric: tabular-nums; }
 </style>

@@ -134,6 +134,7 @@ const (
 var Perms = classifyAll([]Entry{
 	// Server and authentication.
 	pub("GET", "/api/v1"),
+	pub("GET", "/readyz"), // readiness: a fixed answer, cached for two seconds
 	pub("POST", "/api/v1/auth/login"),
 	r("POST", "/api/v1/auth/logout", ro),
 	r("GET", "/api/v1/auth/session", ro),

@@ -16,7 +16,11 @@ The helper offers a fixed list of typed operations over a unix socket. It has no
 compromised daemon can ask for anything on that list, and the helper checks every request again against `priv.conf`:
 the storage roots the paths must lie below, the allow-lists, and the limits. The helper accepts connections only from root and from the
 users and groups named in `priv.conf` (checked with `LOCAL_PEERCRED`). The helper is a service boundary between two
-processes of JailOps, not a place where people sign in, so it keeps Unix peer credentials.
+processes of JailOps, not a place where people sign in, so it keeps Unix peer credentials. The helper's socket is
+`/var/run/jailops-priv/priv.sock`, in a directory of root (mode 0710, group `jailops`): the daemon can reach it and
+can put nothing in its place, so it cannot keep the helper from starting. The daemon's own socket is in
+`/var/run/jailops` (mode 1771, group `jailops`). The pid files that daemon(8) writes as root are in `/var/run` itself,
+where the daemon cannot leave a symlink for root to write through.
 
 **What a compromised daemon cannot do:** name a path outside the storage roots, run a program that is not on the
 allow-list, sniff or inject on an interface the operator did not approve, mount a directory the operator did not name,
@@ -29,7 +33,37 @@ So **the allow-lists in `priv.conf`, not the assertion, are the boundary.** Sepa
 credential the daemon cannot hold, such as an administrator confirming at a terminal, which is not how the API works.
 
 There is no Capsicum confinement of the helper or of its file agents yet. The file agents are chrooted child processes with
-a lifetime limit and a global cap.
+a lifetime limit and a global cap (16 at once; one more answers `busy`).
+
+**Storage roots keep the jails' files out of reach.** A jail's tree holds setuid programs (`su`, `sudo`) and its users'
+files; root in the jail may make more. On the host they are safe only because nobody but root can reach them, so the
+helper keeps four rules, each with a test (`internal/priv/invariants_test.go`):
+
+- The directory of every storage root belongs to root with mode 0700. The helper sets it at every start, reload and
+  registration (a root registered before, made with mode 0755, is closed at the first start of this release) and
+  refuses a mountpoint that is not a plain directory.
+- No dataset is mounted on a storage root's own directory (create, set, clone, receive: `mountpoint` must lie below
+  it), and the root itself is never unmounted, remounted or moved, nor its `canmount` changed, through the helper.
+  Either would put a directory with another mode at that place.
+- A root's mountpoint is not on, above or inside a system directory (`/etc`, `/boot`, `/root`, `/usr/local/etc`,
+  `/var/db`, `/var/run` and the like) or a directory of the helper (`conf-dir`, `host-dir`, `wireguard-dir`, the
+  storage file's directory); it may be elsewhere in `/usr` or `/var` (`/usr/jails`).
+- `devices` is off on every root, so on every dataset below it; a request cannot turn it on, and a received stream
+  cannot set it, nor `setuid`, `exec`, `mountpoint`, `sharenfs`, `sharesmb`, `jailed` or `keylocation` (they are
+  inherited). FreeBSD makes device nodes in devfs only; this is a second guard.
+
+A restore writes a jail through a file agent, which runs as root chrooted to the dataset being restored. Into a jail's
+root (and a volume mounted in it) it restores setuid and setgid files and device nodes as the backup recorded them,
+because the jail needs them; that is safe only because of the 0700 directory above. Into anything else (the jail's
+container) it makes no device node and drops setuid and setgid, and says so in the restore's skipped list.
+
+**Files inside jails.** Root in a jail controls its tree, symlinks included. A file operation of the helper on a path
+below a jail's root (or its `root.new`, `root.old`, a volume of the jail, or an image generation) opens that tree as
+its root and walks to it one plain directory at a time: a relative symlink is followed only while it stays inside the
+tree, as the jail itself would see it, and an absolute symlink is refused (the helper does not resolve it as the jail
+would). So no symlink a jail makes turns an operator's `app allow`, an app draft or any other file operation into a read
+or a write of another jail's files, and the path arguments of allow-listed commands below a jail's tree must resolve
+inside it as well.
 
 ## What you decide, in `priv.conf`
 
@@ -39,7 +73,8 @@ a lifetime limit and a global cap.
 | `ndp-proxy = <uplink>=<prefix>` | the IPv6 proxy may capture neighbor discovery on that uplink and advertise addresses in that prefix, at a bounded rate | nothing |
 | `admin-host-mount` | mount host directories below this path into a jail (nullfs) | nothing |
 | `admin-raw-param`, `admin-allow-flag`, `admin-devfs-ruleset`, `admin-zfs-prop` | set these raw `jail.conf` parameters, `allow.*` flags, devfs rulesets or ZFS properties | nothing |
-| `admin-routes`, `admin-raw-pf`, `admin-resume-send` | change routes, load raw PF, resume a ZFS send | off |
+| `admin-routes`, `admin-raw-pf`, `admin-resume-send` | change routes (WireGuard routes of any kind included), load raw PF, resume a ZFS send | off |
+| `wireguard-routes` | WireGuard tunnels may route these networks into themselves although a route there is wider than a /8 (/16 for IPv6) or covers the host's addresses, default gateway, resolvers, loopback, link-local or multicast ([wireguard.md](wireguard.md)) | nothing |
 | `fetch-host` | download from these hosts, over https | the Alpine CDN and `pkg.freebsd.org` |
 | `wireguard-dir` | where the helper keeps the keys of WireGuard tunnels (root, 0700; outside the daemon's directories) | `/var/db/jailops-priv/wireguard` |
 
@@ -52,7 +87,10 @@ far the host name, resolvers and NTP, and the host's own `/etc/pf.conf`) one mod
 (`host.manage.modules`) and `priv.conf` (`host-manage`) list the module: the `priv.conf` line is the boundary, so a
 compromised daemon cannot opt itself in. A module's helper operations take validated fields, never a file body, touch
 an exact list of files and `rc.conf` variables, and need the admin assertion; snapshots are kept in a root-only
-directory (`host-dir`) so a restore can only put back what the helper itself copied. Enable a module only if you would
+directory (`host-dir`) so a restore can only put back what the helper itself copied. A snapshot keeps only what the
+module owns (a copy of a file it owns whole, its block of `ntp.conf`, the values of its `rc.conf` variables), and a
+restore, a revert and the revert at boot put back only that: whatever root changed elsewhere in `rc.conf` or
+`ntp.conf` since stays, and the diff shows no other line of those files. Enable a module only if you would
 let your API admins change what it owns. The details, and the threat model, are in the security section of
 [appliance.md](appliance.md#security).
 
@@ -77,17 +115,41 @@ creates. The rc script shows it on the system console and logs it with the facil
 `/var/log/auth.log`, readable by root only), never in the daemon's own log (`/var/log/messages` is readable by
 everyone). Wrong, expired and missing tokens get the same answer and count toward a lockout per source, like failed
 logins. A host reachable from the network before its setup therefore cannot be taken over without what is printed on its
-console. Once any global administrator exists, every setup route answers `not_found` and a new token cannot be issued.
+console. Once any global administrator exists (a user, or an API token or client certificate that has not expired),
+every setup route answers `not_found`, a new token cannot be issued, and a token issued before is removed. The last
+global administrator cannot be deleted or demoted (`conflict`) while no other one exists, because the setup would open
+again and the next start of `jailopsd` would print a token on the console: make the next administrator first. Root on
+the socket stays the recovery access in every case (`sudo jailops user create NAME --admin`, `set-password`,
+`set-role`); it is not an identity of the database and does not count as one.
 
 ## Log forwarding
 
 `jailopsd` can send the jails' logs and its audit log to syslog servers and webhooks ([logging.md](logging.md)). It reads
 the files through the helper's two read-only log operations and needs nothing new from the helper. TLS receivers are
 always verified (there is no switch to turn that off); a plain udp or tcp sink to a remote address is reported as a
-warning. A webhook's token stays in a root-owned file the daemon reads (`0640 root:jailops`), never in the
-configuration, the API or the audit log. Only a global admin may read or change the sink list, which names receivers
-and files of the host; reading many jails' logs at once needs the operator role, as one jail's does. Log lines are
-data: escaped, cut at 8 KiB, never interpreted.
+warning. Only a global admin may read or change the sink list, which names receivers and files of the host; reading
+many jails' logs at once needs the operator role, as one jail's does. Log lines are data: escaped, cut at 8 KiB, never
+interpreted.
+
+A sink list set through the API (a global admin's token, not root) is held to two limits, because the daemon would
+otherwise act for the token with more reach than the token has:
+
+- **Files**: its `ca_file` and `token_file` must be plain files directly in `logging.secrets_dir` (default
+  `/usr/local/etc/jailops/sinks`, root-owned, 0750 `root:jailops`). Without this, a token could name any root-owned
+  file the daemon's group may read and have its first line sent as a bearer token to a receiver of its choosing. Every
+  CA and token file, of the API or of `jailopsd.yaml`, is opened from `/` one directory at a time without following a
+  symbolic link, and its owner (root) and mode are checked on the open file; the token is read again at each delivery
+  the same way.
+- **Receivers**: not the loopback, link-local (`169.254.0.0/16`, `fe80::/10`, where cloud metadata services answer),
+  unspecified, multicast or broadcast addresses, and not the daemon's own ports on an address of the host. The check
+  runs on the address a name resolved to, when the socket connects, so a name that resolves differently later
+  (rebinding) does not get past it; an address or `localhost` is refused when the list is stored. Private addresses of
+  other machines stay allowed: that is where log servers live.
+
+The forward test answers delivered or not, the time, and a short class of the failure (`connection refused`,
+`timeout`, `HTTP 503`, ...), never what the receiver answered. Sinks in `jailopsd.yaml` are root's word and may name
+any file and any address, the loopback included. The ACME directory URL of the console's certificate may name any
+address; only a global admin sets it, and its last error is a short, escaped snippet.
 The firewall module is the one exception to "JailOps never edits `pf.conf`": with `firewall` in both files the helper
 writes the whole file, rendered by itself from validated fields (no rule text from the daemon), checked with `pfctl -n`
 and loaded with `pfctl -f` through six fixed `pfctl` forms of its own, none of which `run.exec` accepts. Every change
@@ -110,6 +172,13 @@ one. The web console is always built in and off by default (`web.enabled: true` 
 limits, what changes behind a proxy, and the **Not yet** list (DNS-01 and wildcard certificates, a require-client-certificate
 mode, the caller's address behind a proxy) are in [exposure.md](exposure.md).
 
+Answers carry a `Permissions-Policy` that turns off camera, microphone, location and the other device features, and
+`Strict-Transport-Security` (one year, no `includeSubDomains`, no `preload`) only while the served certificate is one a
+browser trusts by itself (ACME, or an uploaded or configured certificate that verifies against the host's roots); never
+with the self-signed certificate, which a browser that remembered the header would refuse without a way to click
+through. Going back to the self-signed certificate after a trusted one leaves browsers that saw the header refusing it
+for up to a year: keep a trusted certificate on that name, or use another name. The backup node never sends it.
+
 The ACME account key and the certificate's key live in `<data_dir>/tls/acme` (0700, files 0600), the daemon's own
 directory: they are the daemon's secrets like its seal key, and a compromised daemon holds them anyway. The redirect of
 the CA's port (80 or 443) to the daemon's unprivileged port is pf's: rendered by the helper when the firewall module
@@ -130,6 +199,9 @@ Every identity (a user of the web console, an API token, a client certificate) h
 - Dangerous parameters (raw jail parameters, host mounts, device nodes, ZFS delegation, raw PF, provisioning commands)
   need `admin` or a global admin, are allow-listed by `priv.conf`, and are audited.
 - Every route has a permission entry in the code, or the daemon refuses to start.
+- A value a client sends that goes into the detail of an audit entry (a source, a sink name, a domain) is quoted with
+  escapes and cut at 200 bytes, also when the request is refused: a line break or a `key=value` cannot forge an entry.
+  See [The audit log](#the-audit-log) for what every entry gets.
 - Jail logs (`GET /api/v1/jails/<n>/logs`, `jailops jail logs`) need `operator`, not `readonly`: what a service prints
   often holds tokens, passwords in error messages or other people's data, and an operator may already read all of it by
   running a shell in the jail. The read goes through two helper operations that accept only the log directory of a jail
@@ -150,7 +222,7 @@ permission table, one scope rule and one audit trail, whether the request arrive
   kind `unix`. `sudo jailops user create admin --admin` creates the first administrator; `sudo jailops user set-password`
   and `set-role` recover a lost password or a wrong role. There is no separate reset mechanism.
 - **Every other local user is anonymous**, exactly like an unauthenticated remote client. It reaches `GET /api/v1`,
-  `GET /healthz`, the login (`POST /api/v1/auth/login`), trust-token redemption (`POST /api/v1/trust/clients`),
+  `GET /healthz`, `GET /readyz`, the login (`POST /api/v1/auth/login`), trust-token redemption (`POST /api/v1/trust/clients`),
   `POST /api/v1/cluster/join` (answers 501), the first-run setup (`GET` and `POST /api/v1/setup`, which need the setup
   token and answer `not_found` once an administrator exists) and the static web console, and nothing else. It can authenticate over the socket
   with an API token, or with a session cookie from a password login, like any remote client. A test runs every route as an
@@ -159,10 +231,76 @@ permission table, one scope rule and one audit trail, whether the request arrive
 The socket stays mode `0666`. Being able to connect confers nothing, because a non-root peer has precisely the rights of an
 anonymous remote client, who can connect to the HTTPS listener (when it is on) just as freely. A tighter mode would only
 keep people from signing in locally with a token or a password; it would add no protection. The same rate limits and audit
-apply to what an anonymous local caller tries (all local callers share the source `unix`).
+apply to what an anonymous local caller tries: each local user is its own source, `unix:<uid>`, so one of them cannot lock
+the others out.
 
 The backup node (`jailops-backupd`) is stricter: its admin socket is mode `0600` and the peer check admits only root (uid 0) as
 administrator; every other local user is refused. The former `admin_group` key is removed and stops the node with a message.
+
+## The audit log
+
+Every state change, every refused one and every failed authentication is an entry. What a caller can put into it is
+bounded, so that nobody can fill the disk or forge an entry by being refused:
+
+- Every entry passes through one function when it is written: control characters (line breaks and escape sequences
+  included), bidirectional controls, zero-width characters and bytes that are not UTF-8 become Go escapes (`\x1b`, `\n`,
+  `\u202e`), and the object is cut at 256 bytes, the detail at 4096 (256 for an anonymous caller).
+- Nothing of the body of a public route is written: a failed login records the route, the source and the result, not
+  the user name that was typed. The path of a refused request is escaped and cut like any object.
+- While a source is locked out, its first refusal is written as usual and the others are counted: one more entry when
+  the minute ends says how many were refused.
+- The log keeps its entries for `audit.retention` (default `90d`) and at most `audit.max_entries` (default 1000000);
+  once a day the daemon deletes what is older or beyond. The newest 1000 entries are never deleted, and the database
+  refuses to (a trigger), so even a mistaken configuration leaves the recent history. A compromised daemon owns the
+  database file and could do more; the log protects against callers of the API, not against the daemon. Forward the
+  audit log to a syslog server ([logging.md](logging.md)) to keep it beyond the host.
+
+## Signing in, and what an unauthenticated caller costs
+
+- A password is checked with argon2id, which takes 64 MiB of memory for each check. At most four checks run at once
+  for the whole daemon; more wait their turn, and when 32 already wait a login is answered `rate_limited` (429) at once.
+- Every login attempt is counted before its password is checked, per user and source and per source: attempts sent at
+  once cannot pass the threshold together, and a source that is locked out costs no password check at all. An unknown
+  user, a wrong password and a disabled user cost one check each, so the time does not tell them apart.
+- A source is an IPv4 address, an IPv6 **/64** (one host usually holds the whole prefix) or a local user (`unix:<uid>`).
+- Guesses for one account from many sources are slowed down, not locked out (that would let anyone lock a real user
+  out): after 10 failures for the account, each further attempt waits 1 s, then 2 s, 4 s and so on up to 30 s before its
+  password is checked, and only one such attempt runs at a time; a right password or a quiet half hour forgets them.
+- A bad token, an untrusted certificate or a forged hub claim counts toward the lockout of its source. While a source is
+  locked out, **valid** tokens from it are refused too (behind a proxy every caller shares the proxy's address:
+  [exposure.md](exposure.md)).
+- Starting a second factor and making new recovery codes ask for the password again, as removing the second factor does.
+- An anonymous `GET /api/v1` learns the API version, the extensions and the role, not the host name, host id, pool or
+  software version. A non-admin caller of `doctor` gets the status of each check without the text of a failing one,
+  which can be a raw error with paths of the host.
+- Request bodies are strict: an unknown member (a misspelled `dry_run` above all), a member in other cases, a member
+  twice or data after the value are refused instead of being dropped.
+
+## Sessions and long requests
+
+- A user sees and ends their own sessions; other users' sessions are for a global admin only (a global reader does
+  not see them).
+- An event stream, a console's output and an exec session check their credential again at every keepalive (and an
+  event stream before each event after any credential changed): a token or certificate deleted, a user disabled, a
+  session ended or a role or scope changed ends them. An identity holds at most 16 event streams.
+- A console session belongs to the identity that opened it, by the kind of its credential and its name, and to its
+  project; its id is in no log line and no audit entry (they show a short hash).
+- API answers are `Cache-Control: no-store`. A token in the query string authenticates nothing.
+
+## What the clients show
+
+- `jailops` cleans every string a server sends before a terminal sees it (names, labels, messages and hints, the audit
+  log, doctor, events, certificate subjects): control characters, bidirectional controls and zero-width characters
+  become U+FFFD. `-o json` and `-o yaml` print what the server sent, escaped by their encoders (JSON keeps a
+  bidirectional control as the character itself). `remote add` prints the fingerprint first and quotes the
+  certificate's subject and issuer, so they cannot paint over it.
+- The server refuses control characters in labels, descriptions and comments in the first place (label keys of letters,
+  digits, `-`, `_` and `.` up to 63 characters with an optional prefix and `/`, values up to 253 bytes of printable
+  text, 64 labels an object; descriptions and comments up to 4096 bytes).
+- `jailops exec` and `shell` put the terminal back on SIGINT, SIGTERM and SIGHUP; after a SIGKILL nothing can, and
+  `reset` repairs the terminal.
+- The web console embedded in `jailopsd` has no demo mode: `?demo` changes nothing (only a demo build, made for the tests
+  and the screenshots, carries canned data). A token used to sign in is forgotten when the server answers 401.
 
 ## How clients are trusted
 
@@ -215,8 +353,10 @@ history; it is in the one answer to the allow and nowhere else (not the registry
 or the daemon log). Whoever reads that answer holds the role's password: treat the terminal or the console where it is
 shown accordingly. Database names are checked against `^[a-z][a-z0-9_]{0,62}$` and PostgreSQL's reserved names before
 any SQL is built, and JailOps never alters or drops a role or a database that its registry does not say it made.
-`pg_hba.conf` is written through the helper's file operations below the jail root (they refuse a path outside it and a
-file that is not a regular file) and given back to `postgres` in the jail; the lines it writes always require
+`pg_hba.conf` is written through the helper's file operations below the jail root (they open the jail root as their
+root, so no symlink of the jail leads out of it, and refuse a file that is not a regular file) and given back to
+`postgres` in the jail; an allow that fails half way keeps the role it made in the registry, and the next allow sets a
+new password and finishes; the lines it writes always require
 `scram-sha-256`. What a jail's root does to its own PostgreSQL afterwards (another `trust` line above the block) is the
 jail's own business, as before.
 
@@ -237,12 +377,15 @@ with `keyformat=passphrase`), give a key file or another key location, change th
 volume (the helper sets `aes-256-gcm`, `keyformat=passphrase`, `keylocation=prompt` itself), or change a passphrase
 without the current one (the helper checks it with `zfs load-key -n` first). Unlocking needs the operator role in the
 jail's project, changing the passphrase the admin role; five wrong passphrases in a row lock a jail's unlocks out for
-30 seconds. There is no recovery key: a lost passphrase is lost data.
+30 seconds. The helper counts wrong passphrases itself too, so a compromised daemon cannot guess without limit: after
+five for a volume (twenty for all volumes together) every try waits, 30 seconds at first and twice as long after each
+further wrong one, at most an hour; a right passphrase forgets the count, and so does a restart of the helper (which
+needs root). There is no recovery key: a lost passphrase is lost data.
 
 ## Projects are not a security boundary against the kernel
 
-A project separates names, quotas, networks and firewall policy. Jails share the host kernel. A high-security tenant needs
-its own pool, its own host, or both. A jail with `zfs_delegation` or a host mount is not isolated from that storage.
+A project separates names, quotas, networks and firewall policy. Jails share the host kernel. A high-security tenant needs an isolation
+boundary judged on its own terms, such as a host of its own: a separate pool splits storage and operations, not the kernel. A jail with `zfs_delegation` or a host mount is not isolated from that storage.
 
 ## Network isolation
 
@@ -259,11 +402,15 @@ ports JailOps did not create is not covered. A bridge is not a full security bou
   starts a process in the jail.
 - The backup key is a file on the host; the recovery key is shown once and kept nowhere. The backup node never holds a key.
   See [backup-restore.md](backup-restore.md).
+- A backup node holds one key domain, so all hosts using it share the backup key: each can read and damage the others'
+  backups (the node cannot tell a wrong chunk from a right one without the key). Give hosts that do not trust each
+  other their own node ([backup-restore.md](backup-restore.md#who-trusts-whom-hosts-that-share-a-node)).
 - Do not put tokens on a command line (visible to other users); use `--token-stdin` or `token_file`.
 - WireGuard: private and preshared keys are made and kept by the helper in `wireguard-dir` (files 0600) and never reach
   a command line, the API, the audit log or a log. A join token holds a peer's private key and is shown once by
   `jailops wireguard peer add`; the server keeps only the peer's public key and the preshared key. `jailops wireguard
-  join -` reads a token from standard input. Reading tunnels needs the operator role, changing them a global admin.
+  join -` reads a token from standard input and `--token-file` from a file; a token given as an argument is accepted
+  with a warning. Reading tunnels needs the operator role, changing them a global admin.
   See [wireguard.md](wireguard.md).
 - The passphrase of encrypted volumes is typed (`jailops` asks without echo) or read from a file you name
   (`--passphrase-file`); it is never a command line argument and never stored by JailOps. See above.

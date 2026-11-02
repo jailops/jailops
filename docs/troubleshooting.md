@@ -48,6 +48,13 @@ example without FreeBSD), with a hint on the next line when there is one. `jailo
 `service jailopsd start` and read the output: the rc script validates the configuration first and prints the problem
 (`field X not found` is an unknown key; remove it). `service jailops_priv checkconfig` does the same for the helper.
 
+**`GET /readyz` answers 503** ([exposure.md](exposure.md#load-balancers-and-monitors)). `not ready: starting`: the daemon
+has not finished starting; if it stays, read its log. `helper`: `jailops-priv` does not answer;
+`service jailops_priv status`, then `service jailops_priv start` (the daemon reconnects by itself). `storage`: the helper
+answers and the JailOps dataset is missing; `zfs list` and `jailops-priv check-config`. `store`: the database does not
+answer a query; `jailops doctor` (`db.integrity`) and the daemon's log. `stopping`: the daemon is shutting down.
+`GET /healthz` stays `ok` in all of these: it only says the process runs.
+
 **`unauthorized: authentication required` on the local socket.** Only root is recognised on the socket; any other local user is
 anonymous, like an unauthenticated remote client. Run the command with `sudo`, or give it an identity: a token
 (`JAILOPS_TOKEN=jot_...`, created with `sudo jailops token create`) or a client certificate (`jailops remote add`). A lost user

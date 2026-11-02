@@ -44,7 +44,6 @@ $ jailops config set nginx limits.memory
 
 $ jailops config set nginx limits.cpu many
 ! invalid: limits.cpu: "many" must be a number between 0 and 4096
-! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
 [exit 2]
 
 $ jailops config set nginx no.such.key 1
@@ -54,7 +53,6 @@ $ jailops config set nginx no.such.key 1
 
 $ jailops config set nginx limits.cpu 4 limits.pids bad
 ! invalid: limits.pids: "bad" must be a number between 0 and 4194304
-! hint: Read the message, correct the named field and retry; 'jailops firewall validate' checks rules offline. (jailops explain invalid)
 [exit 2]
 
 $ jailops config get nginx limits.cpu

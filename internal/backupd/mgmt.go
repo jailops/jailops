@@ -18,6 +18,7 @@ import (
 	"jailops.net/jailops/internal/auth"
 	"jailops.net/jailops/internal/node"
 	"jailops.net/jailops/internal/node/ctl"
+	"jailops.net/jailops/internal/repo/format"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -104,6 +105,9 @@ func newMgmt(s *Server, ui http.Handler, pp auth.PasswordParams) *Mgmt {
 	h("PUT", "/api/v1/maintenance", m.setMaintenance)
 	h("GET", "/api/v1/quarantine", m.quarantine)
 	h("POST", "/api/v1/quarantine/purge", m.purgeQuarantine)
+	h("POST", "/api/v1/quarantine/{id}", m.quarantineChunk)
+	h("GET", "/api/v1/escrow", m.escrowList)
+	h("DELETE", "/api/v1/escrow/{domain}", m.deleteEscrow)
 	h("GET", "/api/v1/retention-policies", m.policies)
 	h("PUT", "/api/v1/retention-policies/{scope}", m.setPolicy)
 	h("DELETE", "/api/v1/retention-policies/{scope}", m.deletePolicy)
@@ -145,12 +149,19 @@ func (m *Mgmt) Handler() http.Handler {
 	return securityHeaders(m.mux)
 }
 
+// permissionsPolicy turns off the browser features the console does not use.
+const permissionsPolicy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), serial=(), bluetooth=(), midi=(), " +
+	"accelerometer=(), gyroscope=(), magnetometer=(), display-capture=()"
+
 func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "same-origin")
+		// no Strict-Transport-Security: the node's certificate is self-signed and pinned by its clients, and a browser
+		// that remembered the header could no longer be told to accept it
+		h.Set("Permissions-Policy", permissionsPolicy)
 		h.Set("Content-Security-Policy", "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 		next.ServeHTTP(w, r)
 	})
@@ -839,6 +850,37 @@ func (m *Mgmt) purgeQuarantine(w http.ResponseWriter, r *http.Request, id *ident
 	}
 	m.audit(r.Context(), id, r, "quarantine.purge", "", map[string]any{"removed": c})
 	writeJSON(w, 200, map[string]int{"removed": c})
+}
+
+func (m *Mgmt) quarantineChunk(w http.ResponseWriter, r *http.Request, id *identity) {
+	cid, err := format.ParseID(r.PathValue("id"))
+	if err != nil {
+		writeError(w, api.Errorf(api.CodeInvalid, "malformed chunk id"))
+		return
+	}
+	moved, err := m.s.Node.QuarantineChunk(r.Context(), cid, id.User, r.RemoteAddr)
+	if err != nil {
+		writeError(w, apiErr(err))
+		return
+	}
+	writeJSON(w, 200, map[string]bool{"moved": moved})
+}
+
+func (m *Mgmt) escrowList(w http.ResponseWriter, r *http.Request, id *identity) {
+	d, err := m.s.Node.ListEscrow(r.Context())
+	if err != nil {
+		writeError(w, apiErr(err))
+		return
+	}
+	writeJSON(w, 200, map[string][]string{"domains": d})
+}
+
+func (m *Mgmt) deleteEscrow(w http.ResponseWriter, r *http.Request, id *identity) {
+	if err := m.s.Node.DeleteEscrow(r.Context(), r.PathValue("domain"), id.User, r.RemoteAddr); err != nil {
+		writeError(w, apiErr(err))
+		return
+	}
+	writeJSON(w, 200, nil)
 }
 
 func (m *Mgmt) policies(w http.ResponseWriter, r *http.Request, id *identity) {

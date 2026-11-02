@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,8 +25,28 @@ func imageDesc() *kindDesc[api.Image] {
 		return []string{i.Metadata.Name, string(i.Spec.OS), i.Spec.Release, i.Spec.Arch,
 			strconv.Itoa(len(i.Status.Generations)), joinOrDash(i.Spec.Aliases)}
 	}
-	d.show = func(a *app, i api.Image) error { return a.showObject(i.Metadata, nil, i.Spec, i.Status) }
+	d.show = func(a *app, i api.Image) error { return a.showImage(i) }
+	d.emptyHint = "jailops image create NAME --release 15.1-RELEASE --alias stable"
 	return &d
+}
+
+// imageRefs completes an image reference: NAME@ALIAS for each alias of an image, and the bare NAME.
+func imageRefs(ctx context.Context, c *sdk.Client) ([]string, error) {
+	imgs, err := collect(c.Images().List(ctx))
+	var out []string
+	for _, i := range imgs {
+		aliases := slices.Clone(i.Spec.Aliases)
+		for _, al := range sortedKeys(i.Status.Aliases) {
+			if !slices.Contains(aliases, al) {
+				aliases = append(aliases, al)
+			}
+		}
+		for _, al := range aliases {
+			out = append(out, i.Metadata.Name+"@"+al)
+		}
+		out = append(out, i.Metadata.Name)
+	}
+	return out, err
 }
 
 // parseGeneration reads a generation written as gN or N, or as IMAGE#gN when

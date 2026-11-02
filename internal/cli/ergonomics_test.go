@@ -38,21 +38,30 @@ func TestJailBulkActions(t *testing.T) {
 	if act.Timeout != 5 {
 		t.Fatalf("grace in seconds: %+v", act)
 	}
-	// A bulk delete needs the project name typed, or -y; it never asks per jail.
+	// A bulk delete destroys data: it shows what goes and needs the project name typed, or --confirm-data-loss;
+	// -y does not answer it, and it never asks per jail. A running jail needs --force first.
+	tr.do("", "delete", "-l", "env=test")
+	tr.ok("stop", "tmp")
 	tr.do("", "delete", "-l", "env=test")
 	tr.do("wrong\n", "delete", "-l", "env=test")
+	tr.do("", "delete", "-l", "env=test", "-y")
 	if _, ok := h.srv.JailIn("main", "tmp"); !ok {
 		t.Fatal("tmp deleted without confirmation")
 	}
-	tr.do("main\n", "delete", "-l", "env=test") // running: refused by the server
-	tr.ok("delete", "-l", "env=test", "--force", "-y")
+	tr.do("main\n", "delete", "-l", "env=test")
+	if _, ok := h.srv.JailIn("main", "tmp"); ok {
+		t.Fatal("tmp survived the typed confirmation")
+	}
 	tr.do("", "delete", "web") // running, no --force
 	tr.ok("--dry-run", "delete", "--force", "web")
+	tr.ok("--dry-run", "delete", "--force", "web", "-o", "json")
+	tr.do("", "--dry-run", "delete", "nosuch") // a dry run of a missing jail is an error
 	if _, ok := h.srv.JailIn("main", "web"); !ok {
 		t.Fatal("dry-run deleted web")
 	}
-	tr.ok("delete", "--force", "-y", "web")
-	tr.ok("delete", "--all", "-y")
+	tr.do("", "delete", "--force", "-y", "web")
+	tr.ok("delete", "--force", "--confirm-data-loss", "web")
+	tr.ok("delete", "--all", "--force", "--confirm-data-loss")
 	tr.ok("list")
 	tr.golden("jail_bulk")
 }
@@ -214,8 +223,8 @@ func TestProjectFilters(t *testing.T) {
 	}
 }
 
-// Harmonised flags and names: trust add --permission (with --role as a hidden
-// alias), remote create/delete, backup restore --to-host by name.
+// Harmonised flags and names: trust add --role (with --permission, the former
+// name, as a hidden alias), remote create/delete, backup restore --to-host by name.
 func TestFlagHarmonisation(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
@@ -223,7 +232,7 @@ func TestFlagHarmonisation(t *testing.T) {
 	tr.ok("trust", "add", "--name", "laptop", "--permission", "operator", "--projects", "main", "-o", "json")
 	tr.ok("trust", "add", "--name", "old", "--role", "admin", "--global", "-o", "json")
 	out, _, _ := h.run("", "trust", "add", "--help")
-	if !strings.Contains(out, "--permission") || strings.Contains(out, "--role") {
+	if strings.Contains(out, "--permission") || !strings.Contains(out, "--role") || strings.Contains(out, "--ttl") || !strings.Contains(out, "--expires") {
 		t.Fatalf("trust add help: %s", out)
 	}
 	tr.ok("remote", "create", "lab", "unix:/run/lab.sock")

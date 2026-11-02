@@ -93,7 +93,7 @@ A policy selects jails **by label**, so label the jails first:
 
 An empty selector matches no jail. `--include-state` also backs up the host's state dataset. The node applies retention,
 garbage collection (with a grace period, minimum 12 hours) and quarantine of corrupt chunks on its own schedule
-(`jailops-backupd gc`, `verify`, `retention`, `quarantine list`).
+(`jailops-backupd gc`, `verify`, `retention`, `quarantine list`, `quarantine add`, `escrow list`, `escrow delete`).
 
 ## 6. Verify
 
@@ -104,6 +104,32 @@ garbage collection (with a grace period, minimum 12 hours) and quarantine of cor
 `extract` and `full` need the key on the host that runs the check and a scratch location (`backup.scratch_dir`,
 `backup.scratch_dataset`). Run verification on a schedule; an untested backup is not a backup. The node verifies the structure of what it holds
 without a key (`jailops-backupd verify`).
+
+### Who trusts whom: hosts that share a node
+
+A repository has **one master key**, so one key domain: the node binds itself to the domain of the first host that backs up
+or escrows (or to `init --key-domain`) and refuses every host with another key. Hosts that share a node therefore share the
+key file: **each of them can read every other's backups**, and each can damage them. Treat the hosts of one node as one trust
+group; hosts that do not trust each other need their own node (or their own repository).
+
+What a host of the group can do to the others, and what the node does about it:
+
+- **Plant a wrong chunk.** A chunk's id is a keyed hash of its plaintext, and the node holds no key: it checks only the
+  unkeyed trailer of a blob, and it stores every chunk create-only. A host that uploads a self-consistent blob under the id
+  of a chunk another host will need first makes the node answer "present" to the honest host, which then never uploads its
+  own copy. The node's verify does not see it; a host's verify (`jailops backup verify`, deep by default) and every
+  restore do, because they decrypt and recompute the id. The remedy is on the node: `jailops-backupd quarantine add CHUNK`
+  (the id from the host's error) moves the blob aside, and the next backup that holds the chunk uploads it again. Run deep
+  verification from a host on a schedule; an untested backup is not a backup.
+- **Store a wrong escrow blob.** The node accepts only an age file (it checks the header, it cannot open it), create-only, so
+  the first host to escrow a domain decides what is stored, and `jailops backup key status` on the others says "escrowed".
+  Open the escrow blob with the recovery identity once, offline, after it is made. A blob that does not open is deleted by
+  an administrator of the node (`jailops-backupd escrow delete DOMAIN`, or `DELETE /api/v1/escrow/{domain}` as
+  `backup-admin`), and a host stores a new one with `jailops backup key escrow`.
+
+Both remedies are audited. Making the node itself refuse a wrong chunk would need a change of the repository format (a
+proof per chunk that the node can check without the key, or one chunk namespace per host at the cost of deduplication
+between hosts); it is not built ([design.md](design.md) section 16).
 
 ## 7. Restore
 

@@ -31,7 +31,9 @@ helper-path = /usr/local/libexec/jailops-priv
 #wireguard-dir = /var/db/jailops-priv/wireguard
 
 # --- who may talk to the helper ----------------------------------------------
-socket = /var/run/jailops/priv.sock
+# The socket's directory belongs to root (mode 0710, group jailops): the daemon reaches the socket and can put
+# nothing there. The former /var/run/jailops/priv.sock is read as this path.
+socket = /var/run/jailops-priv/priv.sock
 group = jailops
 mode = 0660
 allow-user = jailops
@@ -57,6 +59,11 @@ if-prefix = jo
 #admin-host-mount = /tank/archive
 #admin-zfs-prop = compression
 #admin-routes = false
+# Networks a WireGuard tunnel may route into itself although a route there is wider than a /8 (/16 for IPv6), or
+# covers an address of the host, its default gateway, a resolver, loopback, link-local or multicast (for example a
+# full tunnel, 0.0.0.0/1 and 128.0.0.0/1). Without this line, or admin-routes, the helper refuses such routes; every
+# route must lie inside the allowed IPs of a peer of its tunnel either way.
+#wireguard-routes = 10.0.0.0/7
 #admin-raw-pf = false
 #admin-resume-send = false
 
