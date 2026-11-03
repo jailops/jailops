@@ -13,12 +13,14 @@ import ImageCreateDialog from './ImageCreateDialog.vue'
 import { isGlobalAdmin } from '@/composables/project'
 import { session } from '@jailops/shared/composables/session'
 import { defaultImage, freebsdImages, hostRelease, imageLabel } from '@/lib/images'
+import { parseLabelField } from '@/lib/labels'
 import type { Image, Network, Project, Storage } from '@jailops/shared/api/types'
 
 const props = defineProps<{ open: boolean; project: Project | undefined; images: Image[]; storage: Storage[]; networks: Network[] }>()
 const emit = defineEmits<{ close: []; done: [] }>()
 
-const f = reactive({ name: '', image: '', storage: '', network: '' })
+const f = reactive({ name: '', image: '', storage: '', network: '', shell: '', labels: '' })
+const labelField = computed(() => parseLabelField(f.labels))
 // one optional volume; an encrypted one needs a passphrase, typed twice, sent once and then forgotten
 const vol = reactive({ name: '', mount: '', encrypted: false, pass: '', again: '' })
 const busy = ref(false)
@@ -44,10 +46,14 @@ const netNames = computed(() => {
   return g.length ? all.filter((n) => g.some((x) => x.network === n)) : all
 })
 const volUsed = computed(() => !!(vol.name || vol.mount || vol.encrypted))
+/** The shell is a FreeBSD choice: a Linux jail keeps the shell of its distribution. Empty: the host's default
+ *  (jails.shell of jailopsd.yaml, bash unless the host says sh). */
+const freebsd = computed(() => (props.images.find((i) => i.metadata.name === f.image)?.spec.os ?? 'freebsd') === 'freebsd')
 
 // Field id -> problem, in the order of the form: the first one is named next to Create and focused on submit.
 const check = useFormCheck(() => ({
   'jc-name': nameProblem(f.name),
+  'jc-labels': labelField.value.problem ? s.labels.problems[labelField.value.problem] : '',
   'jc-image': f.image ? '' : s.jails.needImageField,
   'jc-sto': f.storage ? '' : s.jails.needStorageField,
   'jc-vol': !volUsed.value ? '' : !vol.name ? s.jails.volumeNameNeeded : nameProblem(vol.name),
@@ -55,7 +61,7 @@ const check = useFormCheck(() => ({
   'jc-pass': !vol.encrypted ? '' : !vol.pass ? s.jails.passphraseNeeded : vol.pass.length < 12 ? s.keys.tooShort : '',
   'jc-pass2': !vol.encrypted ? '' : !vol.again ? s.jails.repeatNeeded : vol.pass !== vol.again ? s.keys.mismatch : '',
 }))
-const labels: Record<string, string> = { 'jc-name': s.jails.name, 'jc-image': s.jails.image, 'jc-sto': s.nav.storage, 'jc-vol': s.jails.volumeName, 'jc-mount': s.jails.volumeMount, 'jc-pass': s.jails.passphrase, 'jc-pass2': s.jails.passphraseRepeat }
+const labels: Record<string, string> = { 'jc-name': s.jails.name, 'jc-labels': s.labels.createField, 'jc-image': s.jails.image, 'jc-sto': s.nav.storage, 'jc-vol': s.jails.volumeName, 'jc-mount': s.jails.volumeMount, 'jc-pass': s.jails.passphrase, 'jc-pass2': s.jails.passphraseRepeat }
 const why = computed(() => (check.firstId.value ? s.form.fixFirst(`${labels[check.firstId.value]}: ${check.reason.value}`) : ''))
 const describe = (id: string, hint?: string) => [check.err(id) ? `${id}-err` : '', hint && check.err(id) !== nameHint() ? hint : ''].filter(Boolean).join(' ') || undefined
 
@@ -75,7 +81,7 @@ watch(() => props.open, (o) => {
   }
   error.value = null
   check.reset()
-  Object.assign(f, { name: '', image: imageRefs.value[0] ?? '', storage: stoNames.value[0] ?? '', network: netNames.value[0] ?? '' })
+  Object.assign(f, { name: '', image: imageRefs.value[0] ?? '', storage: stoNames.value[0] ?? '', network: netNames.value[0] ?? '', shell: '', labels: '' })
 })
 watch(() => vol.encrypted, (e) => { if (!e) Object.assign(vol, { pass: '', again: '' }) })
 
@@ -88,7 +94,7 @@ async function save(): Promise<void> {
   check.reset()
   try {
     await runOp(s.jails.createTitle + ': ' + f.name, () =>
-      api.jails.create({ metadata: { name: f.name }, spec: { image: f.image, storage: f.storage, ...(f.network ? { network: [{ network: f.network, ipv4: 'auto' }] } : {}), ...(volumes.length ? { volumes } : {}) }, ...(passphrase ? { volume_passphrase: passphrase } : {}) }),
+      api.jails.create({ metadata: { name: f.name, ...(Object.keys(labelField.value.labels).length ? { labels: labelField.value.labels } : {}) }, spec: { image: f.image, storage: f.storage, ...(f.network ? { network: [{ network: f.network, ipv4: 'auto' }] } : {}), ...(volumes.length ? { volumes } : {}), ...(f.shell && freebsd.value ? { shell: f.shell } : {}) }, ...(passphrase ? { volume_passphrase: passphrase } : {}) }),
     )
     clearVolume()
     emit('done')
@@ -129,6 +135,17 @@ async function save(): Promise<void> {
         <label for="jc-net">{{ s.install.network }}</label>
         <select id="jc-net" v-model="f.network" aria-describedby="jc-net-hint"><option value="">{{ s.jails.noNetwork }}</option><option v-for="x in netNames" :key="x" :value="x">{{ x }}</option></select>
         <span id="jc-net-hint" class="hint">{{ s.jails.networkHint }}</span>
+      </div>
+      <div v-if="freebsd" class="field">
+        <label for="jc-shell">{{ s.jails.shell }}</label>
+        <select id="jc-shell" v-model="f.shell" aria-describedby="jc-shell-hint" data-test="jc-shell"><option value="">{{ s.jails.shellDefault }}</option><option value="bash">{{ s.jails.shellBash }}</option><option value="sh">{{ s.jails.shellSh }}</option></select>
+        <span id="jc-shell-hint" class="hint">{{ s.jails.shellHint }}</span>
+      </div>
+      <div class="field">
+        <label for="jc-labels">{{ s.labels.createField }}</label>
+        <input id="jc-labels" v-model="f.labels" class="mono" type="text" autocomplete="off" spellcheck="false" autocapitalize="off" placeholder="env=prod team=web" :aria-invalid="!!check.err('jc-labels')" :aria-describedby="describe('jc-labels', 'jc-labels-hint')" data-test="jc-labels" @blur="f.labels && check.touch('jc-labels')" />
+        <span v-if="check.err('jc-labels')" id="jc-labels-err" class="field-error" role="alert">{{ check.err('jc-labels') }}</span>
+        <span id="jc-labels-hint" class="hint">{{ s.labels.createHint }}</span>
       </div>
       <fieldset class="vol-set">
         <legend>{{ s.jails.volume }}</legend>

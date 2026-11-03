@@ -97,8 +97,8 @@ Instead of running `image upgrade` by hand, let JailOps do it every night, per i
     jailops image show freebsd-15-1                           # the next run and the latest runs with their results
 
 In the console it is the checkbox **Upgrade automatically every night** on the image's card of the Images page (with the
-time and **Also upgrade the packages inside the jails**), and the same checkbox in **Create image**, on by default for a new
-FreeBSD image. The card shows the next run and the latest runs; a failed run is shown as a notice on the card until a later
+time and **Also upgrade the packages inside the jails**), and the same checkbox in **Create image**. It is off until you tick it: JailOps upgrades nothing on its own
+unless you asked. The card shows the next run and the latest runs; a failed run is shown as a notice on the card until a later
 run succeeds. Only a global administrator changes it; everyone else sees it.
 
 What a run does, every night at the chosen time (the host's time zone; 03:00 unless you choose another):

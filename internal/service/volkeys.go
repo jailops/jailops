@@ -221,6 +221,7 @@ func (s *Service) UnlockJail(ctx context.Context, name string, req api.JailUnloc
 				if err := s.life.StartJail(ctx, key); err != nil {
 					return nil, fmt.Errorf("unlocked, but the start failed: %w", err)
 				}
+				s.shellAtStart(ctx, key)
 				if err := s.provisionPending(ctx, key); err != nil {
 					s.kick()
 					return nil, err

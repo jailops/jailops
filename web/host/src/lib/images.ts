@@ -96,7 +96,7 @@ export interface ImageForm {
  *  `release` proposes another release (the new release notice). */
 export function initialImageForm(info: ServerInfo | null | undefined, kind: ImageKind = 'freebsd', release = ''): ImageForm {
   const r = release || (kind === 'freebsd' && hostRelease(info)) || DEFAULT_RELEASE[kind]
-  return { kind, name: imageNameFor(kind, r), release: r, arch: hostArch(info), keys: '', build: true, auto: kind === 'freebsd', at: DEFAULT_AUTO_AT, packages: true }
+  return { kind, name: imageNameFor(kind, r), release: r, arch: hostArch(info), keys: '', build: true, auto: false, at: DEFAULT_AUTO_AT, packages: true }
 }
 
 /** The problem of the time of day of the nightly upgrade, or '': HH:MM, as the server reads it. */

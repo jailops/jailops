@@ -147,6 +147,13 @@ type Deps struct {
 	// ProjectFilesDir holds the provisioning files of each project, one
 	// directory per project (default <StateDir>/project-files).
 	ProjectFilesDir string
+	// JailShell (bash or sh), JailPrompt (default, none or a PS1 text) and JailPromptColor are the jails section of
+	// jailopsd.yaml: what a new FreeBSD jail gets when its keys leave shell and prompt empty. An empty JailShell
+	// means sh and an empty JailPrompt none (a Service built without a configuration changes nothing in jails);
+	// JailPromptColor 0 means api.DefaultPromptColor.
+	JailShell       string
+	JailPrompt      string
+	JailPromptColor int
 	// UpdateTick is how often the update schedules are evaluated (default 1m).
 	UpdateTick time.Duration
 	// AutoUpgradeZone is the time zone of the time of day of an image's automatic upgrade (default: the host's).
@@ -271,6 +278,7 @@ type Service struct {
 	upd     updateState
 	imgAuto imageAutoState
 	prov    provMarks
+	shellM  shellMarks
 	histMem histMemory
 	// keys holds the failed unlocks of each jail and the jails a boot wanted to start while they were locked
 	// (volkeys.go). Memory only: a restart forgets both.

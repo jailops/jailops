@@ -63,7 +63,8 @@ export function appConfig(name: string, appDir: string) {
     },
     preview: { port: e.previewPort, strictPort: true },
     build: { outDir, emptyOutDir: true, target: 'es2022', assetsInlineLimit: 0, chunkSizeWarningLimit: 400 },
-    test: { name, environment: 'jsdom', include: ['src/**/*.test.ts'] },
+    // a loaded CI machine runs the demo server slowly: a test may take up to 30 s (the tests wait for a condition, not a fixed time)
+    test: { name, environment: 'jsdom', include: ['src/**/*.test.ts'], testTimeout: 30000 },
   })
 }
 

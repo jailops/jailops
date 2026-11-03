@@ -685,9 +685,21 @@ updates:
 ### 8.5 Shell and provisioning
 
 - **Shell.** `jailops shell <jail>` runs `jexec` with a shell chosen in this order: `--shell`, the jail's `shell`
-  setting (a path inside the jail, a management setting that does not touch `/etc/passwd`), then `/bin/sh`. If the
+  setting (a path inside the jail, or the names `bash` and `sh`; a management setting that does not touch `/etc/passwd`), then `/bin/sh`. If the
   chosen shell does not exist in the jail the command fails with a clear error; it never falls back silently.
-  `jailops set <jail> shell /usr/local/bin/bash` is `config set` for that key and `jailops-sync` can declare it.
+  `jailops set <jail> shell /usr/local/bin/bash` is `config set` for that key and `jailops-sync` can declare it. A shell
+  session starts with the PATH of a login (`/usr/local/bin` included) and root's HOME; from a terminal the CLI passes `TERM`.
+- **Bash and the prompt of a new jail** ([shell.md](shell.md)). A new FreeBSD jail whose request and profiles leave `shell`
+  and `prompt` empty gets `jails.shell` and `jails.prompt` of `jailopsd.yaml` in its spec (bash and `default`). At the
+  first start JailOps installs `bash` into the jail from the host (`pkg -r ROOT install -y bash`) and writes the prompt:
+  one file it owns, `/usr/local/etc/profile.d/jailops-prompt.sh` (a single-quoted `PS1` assignment of a text checked by
+  an allow-list, set only in an interactive bash), sourced from a marked block at the top of `/usr/local/etc/profile` and
+  `/usr/local/etc/bash.bashrc`, the two system start-up files of the FreeBSD bash package. All of it is in the persistent
+  `/usr/local`, so it survives a root swap; a user's own `~/.bashrc` is read later and wins. A failure does not fail the
+  start: it is the jail's `ShellSetup` condition. Existing jails change only when asked (`jailops jail shell-setup`, `POST
+  /api/v1/jails/{name}/shell-setup`, operator, extension `jail_shell_setup`); a changed `prompt` is written at once into a
+  running jail and at the next start of a stopped one, and `none` removes the file and the blocks. Linux jails are left
+  alone. The host's prompt is not managed (a paste, [appliance.md](appliance.md#the-shell-prompt-of-the-host)).
 - **Provisioning** is a short, repeatable creation step, not a configuration-management system:
 
 ```
@@ -1083,6 +1095,8 @@ Open:
 | Upgrades between JailOps versions | Not tried |
 | Hardening after the review of the appliance release | Tested on Linux against the real allow-lists and stand-ins; UNVERIFIED on FreeBSD: file operations below a jail's tree opened at the tree (a ZFS mount) one directory at a time (the app access and log blocks of `scripts/ci-freebsd-e2e.sh`), the pid files in `/var/run` with the real `rc.subr` and `daemon(8)` (the services block checks them), `sysrc -x` when a host restore removes a variable it did not find set (the host blocks), `route -n get -inet default` read for the gateway of the WireGuard route checks (the WireGuard block) |
 | Hardening after the external audit of November 2026 | Tested on Linux through the helper's real guards, its socket and a stand-in for `zfs`: no dataset mounted on a storage root's directory, the root's directory set to root 0700 at start, reload and registration, root mountpoints refused on, above or inside system directories and the helper's own, `devices=off` on every root and never on through a request, `zfs receive` with `-x` for `mountpoint`, `sharenfs`, `sharesmb`, `jailed`, `keylocation`, `devices`, `setuid` and `exec`, write agents that make device nodes and setuid files only in a jail's root, the helper's socket in `/var/run/jailops-priv` (root, 0710). UNVERIFIED on FreeBSD: that `zfs set devices=off` and `zfs receive -x devices -x setuid -x exec` are accepted by the FreeBSD 15.1 ZFS (an unknown name would make every receive fail; `shareiscsi` is not on the list for that reason), what `devices=off` changes there (FreeBSD makes device nodes in devfs only), and the steps of `scripts/ci-freebsd-e2e.sh` that check the socket directory, the root's mode and `devices` |
+| Bash and the prompt of a jail ([shell.md](shell.md)) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.15, the shell block of `scripts/ci-freebsd-e2e.sh`): bash installed at the first start, the files, the prompt in an interactive and a login bash and in `jailops shell`, `~/.bashrc` winning, scripts and `sh` unaffected, `config set prompt` at once and `none`, `shell-setup`, bash and the prompt after an OS upgrade, an app installation's `set-up-shell` step (nginx). UNVERIFIED on FreeBSD: the first start by autostart and by `jailops jail unlock --start`, a failure without a package repository (the `ShellSetup` condition), thick jails, the console's terminal against a real jail (the demo only) |
+| Exec with a terminal loses output | A short command run through `jailops exec` with a pseudo-terminal (`jailops exec -t JAIL -- echo hi` under `script`) printed nothing in 5 of 12 runs on FreeBSD 15.2 (18.15); the same command without a terminal, and `script` without JailOps, never lose it. Not investigated: whether the helper's pty session loses what is still in the terminal's output queue when the command exits, or a later part of the stream **Cause found (15.2-PRERELEASE, Go test `TestTTYSessionDeliversTheOutputOfAShortCommand`, skipped on FreeBSD):** the kernel hangs the terminal up when the session leader, which is the command (the pty is its controlling terminal), exits, and drops the output the helper has not yet read: 3 to 30% of 300 runs of `echo hi` lose it, and a read delayed by 20 ms loses all of them when the helper keeps the slave open. Without a controlling terminal and with the slave kept open none of 300 runs lost output, but an interactive shell needs the controlling terminal for job control and ^C. A fix is a small supervisor as the session leader that stays until the output was read; not built, it only affects the last bytes of a very short command run with `-t`. |
 | Rate-limit shaper | Limits are stored and reported, and nothing enforces them: the jail says so (`status.warnings`, the `RateLimit` condition, a warning after `config set`) and doctor reports `jails.rate_limits` as `info` ("not enforced yet"). No shaper is built |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
 | Jail logs through the helper | `fs.list_logs` and `fs.tail_file` are tested against real directories, symlinks and a fifo on the development host and over the socket; reading a running jail's `/var/log/messages` on a FreeBSD host, a stopped jail (unmounted root: `busy`), a jail with `/var` on its own persistent dataset, and a rotation under `-f` have not been run there |
@@ -1631,6 +1645,34 @@ continuous ping of the production jail from the arm64 host (95 of 95 during this
 the literal power-cycle case (blocked by the test harness, above) and whether a cold boot's much longer window before
 `jailopsd` starts (BIOS, loader, kernel, mounting, `zfs_enable`) changes anything; nothing in that window runs any
 JailOps code or has network interfaces up at all, so there is no additional exposure reasoned, but it was not measured.
+
+### 18.15 The shell of a jail and its prompt (FreeBSD 15.2-PRERELEASE amd64, November 2026)
+
+Checked on a KVM machine with the package `bash-5.3.20` before the design of [shell.md](shell.md) was fixed, then by
+the shell block of `scripts/ci-freebsd-e2e.sh` on a jail made with the defaults:
+
+- The package installs no file below `/usr/local/etc` and is built with `SYSBASHRC` on (`pkg info -o`, the strings of
+  the binary): an interactive bash that is not a login shell reads `/usr/local/etc/bash.bashrc`, then `~/.bashrc`; a
+  login bash reads `/usr/local/etc/profile` (not `/etc/profile`), then `~/.bash_profile`, `~/.bash_login` or
+  `~/.profile`. `bash -c` and `bash -lc` leave `PS1` unset. FreeBSD's `/etc/profile` (read by `sh -l`) sources
+  `/etc/profile.d/*.sh`, `/usr/local/etc/profile` and `/usr/local/etc/profile.d/*.sh`; bash does not read it.
+- So the two system files lead to the one prompt file, a user's `~/.bashrc` set after it wins (`mine> `), and `sh -l`
+  keeps `\u@\h:\w \$ ` from `/root/.shrc`. `~/.bashrc` is read without HOME in the environment (bash finds the home
+  directory itself).
+- `jailops shell` with bash as the jail's shell shows `ESC[38;5;39mroot@web:/#ESC[0m` in a terminal (bash leaves the
+  `\[ \]` markers out of what it prints). Before this change a shell session had
+  `PATH=/sbin:/bin:/usr/sbin:/usr/bin`, no HOME and `TERM=dumb` (bash's own default without TERM); now
+  `PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin`, `HOME=/root` and the client's TERM (bash then
+  turns bracketed paste on, as in a login).
+- Installing `bash` with `pkg -r ROOT install -y bash` from the host adds `/usr/local/bin/bash` and `rbash` to the jail's
+  `/etc/shells` and records bash as installed on purpose (its two dependencies as automatic). The prompt files are
+  written mode 0644 root:wheel by the helper.
+- The prompt checks were run against a real bash: the refused forms (`\\\$(cmd)`, `\044(cmd)`, `\134\$(cmd)`,
+  `\140cmd\140`) do run `cmd` when bash expands the prompt, the accepted ones (including `\$(cmd)` and `\D{...}`) do not
+  (`internal/render/prompt_test.go`, `FuzzPromptFile`).
+- `bash -i` through `jailops exec` without a terminal stops itself (state `T`); the end-to-end checks give it one with
+  `script` inside the jail. A short command run through `jailops exec` **with** a terminal lost its output in 5 of 12 runs
+  (7 of 12 when the client's input stayed open): an open problem of the exec path, not of the shell (section 16).
 
 ### 18.12 Where FreeBSD is going (checked October 2026)
 

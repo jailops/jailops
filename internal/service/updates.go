@@ -180,6 +180,21 @@ func parsePackageUpdates(out []byte, alpine bool) []api.PackageUpdate {
 
 func (s *Service) jailIsLinux(j api.Jail) bool { return j.Spec.OS == api.OSLinux }
 
+// managesPackages says whether JailOps drives the package tool of a jail: pkg for FreeBSD jails and apk for Alpine.
+// A Debian jail (or any other Linux jail) keeps its own packages, for instance with unattended-upgrades, and JailOps
+// never runs apt in it; the same goes for what a person runs in the jail on his own.
+func (s *Service) managesPackages(j api.Jail) bool {
+	if !s.jailIsLinux(j) {
+		return true
+	}
+	ref, err := validate.ParseImageRef(j.Spec.Image)
+	if err != nil {
+		return false
+	}
+	spec, err := s.imageSpec(context.Background(), ref.Name)
+	return err == nil && spec.Source.Type == "minirootfs"
+}
+
 func (s *Service) runInJail(ctx context.Context, key string, timeout time.Duration, argv ...string) ([]byte, error) {
 	if s.d.Jails == nil {
 		return nil, api.Errorf(api.CodeUnsupported, "this daemon cannot run commands in jails")
@@ -268,7 +283,9 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 		return rep
 	}
 	var errs []string
-	if s.jailRunning(ctx, key) {
+	if !s.managesPackages(j) {
+		// nothing to check: the jail updates its own packages
+	} else if s.jailRunning(ctx, key) {
 		alpine := s.jailIsLinux(j)
 		upd := []string{"pkg", "update", "-q"}
 		if alpine {
@@ -517,6 +534,10 @@ func (s *Service) applyJail(ctx context.Context, h *OpHandle, key string, w appl
 // health check. It never rolls data back on its own.
 func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, scheduled bool) api.UpdateRecord {
 	rec := api.UpdateRecord{Kind: api.UpdateKindPackages, Started: s.now().UTC()}
+	if !s.managesPackages(j) {
+		rec.Result, rec.Note = api.UpdateOK, "this jail keeps its own packages (JailOps drives pkg and apk only); nothing was run"
+		return rec
+	}
 	if !s.jailRunning(ctx, key) {
 		rec.Result, rec.Error = api.UpdateFailed, "the jail is not running; packages are updated inside it"
 		return rec

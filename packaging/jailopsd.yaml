@@ -84,6 +84,14 @@ updates:
   # tick: 1m
   # project_files_dir: /var/db/jailops/state/project-files   # provisioning files, one directory per project
 
+# What a new FreeBSD jail gets when its request and its profiles do not say (docs/shell.md): bash, installed into the
+# jail at its first start and started by `jailops shell` and the console, and a coloured bash prompt for every user of the
+# jail. An existing jail gets them only through `jailops jail shell-setup NAME`. Linux jails are left alone.
+jails:
+  # shell: bash          # bash, or sh (FreeBSD's own shell; nothing is installed)
+  # prompt: default      # default (user@host:dir in prompt_color), none, or a bash PS1 text
+  # prompt_color: 39     # 256-colour number of the default prompt (39 light blue, 40 green, 196 red)
+
 # The application catalog (docs/apps.md): one YAML definition per file, installed by the jailops-apps package. The daemon
 # reads these local files only and never fetches anything; a missing directory is an empty catalog. local_dir holds the
 # host's own definitions (NAME.yaml and its icon), read with the catalog; one of the same name as a packaged one wins.

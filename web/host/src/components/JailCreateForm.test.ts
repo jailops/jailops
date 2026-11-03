@@ -63,6 +63,32 @@ describe('JailCreateForm', () => {
     w.unmount()
   })
 
+  it('leaves the shell to the host unless one is chosen, and offers none for a Linux image', async () => {
+    create.mockReset()
+    create.mockResolvedValue({ kind: 'sync', data: {} })
+    const alpine = { metadata: { name: 'alpine-3-22' }, spec: { os: 'linux', release: '3.22.1' }, status: { generations: [{ number: 1 }] } }
+    const w = mount(JailCreateForm, { props: { open: false, project: undefined, images: [image as never, alpine as never], storage: [storage as never], networks: [] }, global: { stubs: { Teleport: true } } })
+    await w.setProps({ open: true })
+    const opts = w.get('#jc-shell').findAll('option').map((o) => [o.attributes('value'), o.text()])
+    expect(opts).toEqual([['', 'Host default (bash with a coloured prompt)'], ['bash', 'bash, with a coloured prompt'], ['sh', "sh, FreeBSD's own shell"]])
+    expect(w.get('#jc-shell').attributes('aria-describedby')).toBe('jc-shell-hint')
+    await w.get('#jc-name').setValue('web')
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(create.mock.calls[0][0].spec).not.toHaveProperty('shell')
+    await w.setProps({ open: false })
+    await w.setProps({ open: true })
+    await w.get('#jc-name').setValue('plain')
+    await w.get('#jc-shell').setValue('sh')
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    expect(create.mock.calls[1][0].spec.shell).toBe('sh')
+    await w.setProps({ open: false })
+    await w.setProps({ open: true })
+    await w.get('#jc-image').setValue('alpine-3-22')
+    expect(w.find('#jc-shell').exists()).toBe(false)
+  })
+
   it('says in place that there is no image and offers to create the base image', async () => {
     const w = mount(JailCreateForm, { props: { open: false, project: undefined, images: [], storage: [storage as never], networks: [] }, global: { stubs: { Teleport: true } } })
     await w.setProps({ open: true })

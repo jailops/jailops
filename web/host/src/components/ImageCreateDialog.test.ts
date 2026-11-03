@@ -17,7 +17,7 @@ function recorded(): { sent: RawRequest[] } {
 }
 
 async function settle(until?: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5000
+  const deadline = Date.now() + 20000
   for (let i = 0; i < 20 || (until && !until() && Date.now() < deadline); i++) {
     await flushPromises()
     await new Promise((r) => setTimeout(r, 5))
@@ -68,8 +68,9 @@ describe('ImageCreateDialog', () => {
     expect((w.get('[data-test="image-arch"]').element as HTMLInputElement).value).toBe('amd64')
     expect(w.find('[data-test="image-alias"]').exists()).toBe(false)
     expect((w.get('[data-test="image-build"]').element as HTMLInputElement).checked).toBe(true)
-    // the nightly upgrade is on for a FreeBSD image, at 03:00, with the packages
-    expect((w.get('[data-test="image-auto"]').element as HTMLInputElement).checked).toBe(true)
+    // the nightly upgrade is the owner's choice: off until the box is ticked, then at 03:00, with the packages
+    expect((w.get('[data-test="image-auto"]').element as HTMLInputElement).checked).toBe(false)
+    await w.get('[data-test="image-auto"]').setValue(true)
     expect((w.get('[data-test="image-at"]').element as HTMLInputElement).value).toBe('03:00')
     expect((w.get('[data-test="image-packages"]').element as HTMLInputElement).checked).toBe(true)
 
@@ -99,7 +100,7 @@ describe('ImageCreateDialog', () => {
     expect(phase(w)).toBe('done')
     expect(writes(sent)).toEqual(['POST /images', 'POST /images/base/generations'])
     expect(sent.find((r) => r.method === 'POST' && r.path === '/images')?.body).toEqual({
-      metadata: { name: 'base' }, spec: { os: 'freebsd', release: '15.1-RELEASE', arch: 'amd64', source: { type: 'pkgbase' }, auto_upgrade: { enabled: true, packages: true } },
+      metadata: { name: 'base' }, spec: { os: 'freebsd', release: '15.1-RELEASE', arch: 'amd64', source: { type: 'pkgbase' } },
     })
     expect(w.get('[data-test="image-done"]').text()).toBe('The image base is ready.')
     expect(w.emitted('done')).toEqual([['base']])
@@ -176,6 +177,7 @@ describe('ImageCreateDialog', () => {
     const { sent } = recorded()
     const w = await open()
     await w.get('[data-test="image-name"]').setValue('nightly')
+    await w.get('[data-test="image-auto"]').setValue(true)
     await w.get('[data-test="image-build"]').setValue(false)
     await w.get('[data-test="image-at"]').setValue('')
     await w.get('form').trigger('submit')

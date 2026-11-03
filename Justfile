@@ -100,6 +100,7 @@ snapshot: web-all share
 # Short fuzz run over the parsers.
 fuzz seconds="20":
     for f in $(go test ./internal/sys/zfs -list '^Fuzz' | grep '^Fuzz'); do go test ./internal/sys/zfs -run '^$' -fuzz "^$f\$" -fuzztime {{seconds}}s; done
+    go test ./internal/render -run '^$' -fuzz '^FuzzPromptFile$' -fuzztime {{seconds}}s
 
 # Regenerate / verify the TypeScript wire types from sdk/api.
 gen-ts:

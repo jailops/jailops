@@ -187,4 +187,5 @@ var Extensions = []string{
 	"volume_unlock",
 	"setup",
 	"host_certificate",
+	"jail_shell_setup",
 }

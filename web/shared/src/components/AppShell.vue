@@ -50,12 +50,15 @@ async function out(): Promise<void> {
       <button class="btn btn-ghost btn-icon menu-btn" type="button" :aria-label="s.app.menu" :aria-expanded="menuOpen" aria-controls="sidebar" @click="menuOpen = !menuOpen"><Icon name="menu" /></button>
       <span class="brand"><BrandMark />{{ brand }}<span v-if="subtitle" class="faint sub"> {{ subtitle }}</span></span>
       <span class="grow"></span>
+      <slot name="search" where="top" />
       <span class="host mono faint">{{ session.info?.hostname }}</span>
     </header>
     <nav id="sidebar" class="sidebar" :aria-label="s.app.mainNav" @keydown.esc="menuOpen && closeMenu()">
       <div class="brand brand-side"><BrandMark :size="26" />{{ brand }}<span v-if="subtitle" class="faint sub"> {{ subtitle }}</span>
         <button class="btn btn-ghost btn-icon drawer-close" type="button" :aria-label="s.app.closeMenu" data-test="drawer-close" @click="closeMenu"><Icon name="x" /></button>
       </div>
+      <!-- an app's search: once in the side bar and once in the phone's top bar -->
+      <div v-if="$slots.search" class="side-search"><slot name="search" where="side" /></div>
       <router-link v-for="i in items" :key="i.to" :to="i.to" class="navlink" exact-active-class="active" :active-class="i.to === '/' ? '' : 'active'">
         <Icon :name="i.icon" />{{ i.label }}
       </router-link>
@@ -97,6 +100,7 @@ async function out(): Promise<void> {
 /* the theme switch and sign out stay in view on a short screen: the footer sticks to the bottom of the scrolling bar */
 .side-foot { margin-top: auto; display: grid; gap: 6px; padding: 10px 4px 0; position: sticky; bottom: -12px; padding-bottom: 12px; background: var(--surface); border-top: 1px solid var(--border); }
 .link-state { font-size: 12px; }
+.side-search { padding: 0 2px 8px; }
 .main { padding: 16px 20px 80px; min-width: 0; max-width: 1400px; width: 100%; }
 .main:focus { outline: none; }
 .demo-banner { margin-bottom: 12px; }

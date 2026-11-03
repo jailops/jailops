@@ -21,7 +21,8 @@ test('an empty Images page explains images and creates the base image', async ({
   await expect(page.getByTestId('image-release-choice')).toContainText('15.1-RELEASE (this host)')
   await expect(page.getByTestId('image-arch')).toHaveValue('amd64')
   await expect(page.getByTestId('image-alias')).toHaveCount(0)
-  await expect(page.getByTestId('image-auto')).toBeChecked()
+  await expect(page.getByTestId('image-auto')).not.toBeChecked() // the nightly upgrade is the owner's choice
+  await page.getByTestId('image-auto').check()
   await expect(page.getByTestId('image-at')).toHaveValue('03:00')
   await expect(page.getByTestId('image-packages')).toBeChecked()
   await expect(page.getByTestId('image-build')).toBeChecked()
@@ -137,7 +138,7 @@ test('a host on a new release is offered its image, from Overview and from Image
   await expect(dialog).toBeVisible()
   await expect(page.getByTestId('image-name')).toHaveValue('freebsd-15-2')
   await expect(page.getByTestId('image-release-choice')).toContainText('15.2-RELEASE (this host)')
-  await expect(page.getByTestId('image-auto')).toBeChecked()
+  await expect(page.getByTestId('image-auto')).not.toBeChecked()
   await page.getByTestId('image-create-go').click()
   await expect(page.getByTestId('image-done')).toHaveText('The image freebsd-15-2 is ready.', { timeout: 15000 })
   await page.getByTestId('image-close').click()

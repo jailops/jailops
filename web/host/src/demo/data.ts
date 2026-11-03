@@ -53,14 +53,20 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
 
 export function jails(): Jail[] {
   return [
-    jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ name: 'content', mount: '/usr/local/www', quota: '10G' }], labels: { role: 'web', tier: 'frontend', 'jailops.app': 'nginx', 'jailops.app.version': '1.30.6,3', 'jailops.app.hash': appHash('nginx') } }),
-    jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ name: 'pgdata', mount: '/var/db/postgres', quota: '200G' }, { name: 'wal', mount: '/var/db/wal', quota: '40G', read_only: false }], labels: { role: 'db', 'jailops.app': 'postgresql', 'jailops.app.version': '18.5', 'jailops.app.hash': appHash('postgresql-previous') } }),
-    jail('mail', 'error', { image: 'freebsd-15-1#g3', gen: 'freebsd-15-1#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Reconciled', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ name: 'spool', mount: '/var/spool', quota: '50G' }] }),
-    jail('build', 'stopped', { autostart: false, labels: { role: 'ci' } }),
-    jail('proxy', 'running', { net: 'edge', ipv4: '192.0.2.10', ipv6: 'auto', labels: { role: 'proxy' } }),
-    jail('cache', 'starting', { ipv4: '10.20.0.14' }),
-    jail('alpine-app', 'running', { image: 'alpine-3.22@stable', gen: 'alpine-3.22#g1', ipv4: 'auto', drift: ['address 10.20.0.30 configured, spec says auto (allocation pending write-back)'] }),
+    jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ name: 'content', mount: '/usr/local/www', quota: '10G' }], labels: { role: 'web', tier: 'frontend', env: 'prod', team: 'web', app: 'nginx', 'jailops.app': 'nginx', 'jailops.app.version': '1.30.6,3', 'jailops.app.hash': appHash('nginx') } }),
+    jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ name: 'pgdata', mount: '/var/db/postgres', quota: '200G' }, { name: 'wal', mount: '/var/db/wal', quota: '40G', read_only: false }], labels: { role: 'db', env: 'prod', team: 'data', backup: 'yes', 'jailops.app': 'postgresql', 'jailops.app.version': '18.5', 'jailops.app.hash': appHash('postgresql-previous') } }),
+    jail('mail', 'error', { image: 'freebsd-15-1#g3', gen: 'freebsd-15-1#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Reconciled', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ name: 'spool', mount: '/var/spool', quota: '50G' }], labels: { role: 'mail', env: 'prod', team: 'ops', app: 'postfix' } }),
+    jail('build', 'stopped', { autostart: false, labels: { role: 'ci', env: 'dev', team: 'platform' } }),
+    jail('proxy', 'running', { net: 'edge', ipv4: '192.0.2.10', ipv6: 'auto', labels: { role: 'proxy', env: 'prod', team: 'web', app: 'haproxy' } }),
+    jail('cache', 'starting', { ipv4: '10.20.0.14', labels: { role: 'cache', env: 'prod', team: 'web', app: 'redis' } }),
+    jail('alpine-app', 'running', { image: 'alpine-3.22@stable', gen: 'alpine-3.22#g1', ipv4: 'auto', drift: ['address 10.20.0.30 configured, spec says auto (allocation pending write-back)'], labels: { role: 'app', env: 'staging', team: 'platform' } }),
     vault(),
+    // a dozen jails in the project, so search and labels have something to sort through; api carries many labels
+    jail('api', 'running', { ipv4: '10.20.0.20', labels: { role: 'api', env: 'prod', team: 'web', app: 'nginx', tier: 'backend', owner: 'alice', 'example.org/cost-center': 'cc-4711', region: 'eu-central', backup: 'yes', release: '2026.10.3' } }),
+    jail('worker', 'running', { ipv4: '10.20.0.21', labels: { role: 'worker', env: 'prod', team: 'data', app: 'python' } }),
+    jail('search', 'stopped', { ipv4: '10.20.0.22', autostart: false, labels: { role: 'search', env: 'staging', team: 'data', app: 'opensearch' } }),
+    jail('metrics', 'running', { ipv4: '10.20.0.23', labels: { role: 'metrics', env: 'prod', team: 'ops', app: 'prometheus' } }),
+    jail('git', 'running', { ipv4: '10.20.0.24', labels: { role: 'git', env: 'prod', team: 'platform', app: 'gitea' } }),
   ]
 }
 
@@ -69,7 +75,7 @@ export const demoVaultPassphrase = 'demo-vault-passphrase'
 
 /** A jail with an encrypted volume, locked as a host boot leaves it. */
 function vault(): Jail {
-  const j = jail('vault', 'locked', { ipv4: '10.20.0.16', vols: [{ name: 'secrets', mount: '/var/db/secrets', quota: '5G', encrypted: true }], labels: { role: 'secrets' } })
+  const j = jail('vault', 'locked', { ipv4: '10.20.0.16', vols: [{ name: 'secrets', mount: '/var/db/secrets', quota: '5G', encrypted: true }], labels: { role: 'secrets', env: 'prod', team: 'ops' } })
   j.status.locked = ['secrets']
   return j
 }

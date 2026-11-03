@@ -13,13 +13,16 @@ register of what is settled and what is open.
 | [security-model.md](security-model.md) | What the unprivileged daemon and the root helper may and may not do, and what you decide |
 | [networking-ipv6.md](networking-ipv6.md) | Networks, routed and switched IPv6, the NDP proxy, the PF isolation |
 | [wireguard.md](wireguard.md) | WireGuard tunnels: a server, peers enrolled with one command and a join token, clients, where the keys live |
+| [labels.md](labels.md) | Labels on jails: the rules, what selects by them, the command line and the console's chips, filter and editors |
 | [storage.md](storage.md) | Storages on big pools, volumes, host mounts, quotas, what is and is not backed up |
 | [backup-restore.md](backup-restore.md) | The backup node, the key and its escrow, policies, verification, restoring |
 | [upgrade.md](upgrade.md) | Upgrading JailOps, upgrading and rolling back jails, managed updates |
+| [roadmap.md](roadmap.md) | What is planned for 0.7.0 and later, in order |
 | [operations.md](operations.md) | Runbooks (lost admin access, a stolen credential, a compromised daemon, a lost backup key, a new host, a firewall lock-out, going back one version), recovery objectives, and what to monitor (`/readyz`, doctor) |
 | [troubleshooting.md](troubleshooting.md) | `jailops doctor` checks by id, `jailops explain` codes, common failures |
 | [linux-jails.md](linux-jails.md) | Alpine and Debian jails under the Linuxulator: limits and prerequisites |
 | [fleet-sync.md](fleet-sync.md) | A git repository of YAML across hosts, what it can declare, secrets with age and SOPS, rollouts |
+| [shell.md](shell.md) | The shell of a jail: bash and its coloured prompt, the files, overriding and removing them, existing jails, the host's prompt |
 | [provisioning.md](provisioning.md) | A fresh VM to a running fleet; the `provision:` step of a jail |
 | [logging.md](logging.md) | The logs of all jails merged by time, and forwarding them to a syslog server or a webhook: what is read, the format, delivery, security |
 | [apps.md](apps.md) | The application catalog: signed definitions of jails that run packages, the format, and how an installation will work |

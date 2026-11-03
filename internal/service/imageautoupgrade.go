@@ -329,7 +329,7 @@ func (s *Service) imageJailKeys(image string) []string {
 func (s *Service) autoUpgradePackages(ctx context.Context, h *OpHandle, image string, run *api.ImageUpgradeRun) {
 	for _, key := range s.imageJailKeys(image) {
 		j, err := s.jailSnapshot(key)
-		if err != nil || j.Spec.Update.Strategy == api.UpdateManual {
+		if err != nil || j.Spec.Update.Strategy == api.UpdateManual || !s.managesPackages(j) {
 			continue
 		}
 		s.mu.RLock()

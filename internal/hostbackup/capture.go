@@ -189,7 +189,7 @@ func streamProps(j JailRecord, d Dataset, cmp string) map[string]string {
 }
 
 func (s *Service) snapshotName() string {
-	return SnapshotPrefix + s.now().Format("20060102T150405") + "-" + randHex(2)
+	return SnapshotPrefix + s.now().Format("20060102T150405") + "-" + randHex(4)
 }
 
 // BackupJail backs up one jail now: one atomic snapshot of its data datasets,

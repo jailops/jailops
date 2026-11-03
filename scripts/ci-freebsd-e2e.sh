@@ -542,6 +542,55 @@ expect "exec reads flags after the jail name, up to --" 'FreeBSD' $J exec web --
 expect "without --, a flag after the jail name is refused" 'would be the command' sh -c "JAILOPS_PROJECT=demo $J exec web --project demo uname 2>&1; true"
 expect "labels" 'backup=yes' $J label --project demo web backup=yes
 
+step "the jail's shell and prompt (docs/shell.md): bash and the default prompt, an override, non-interactive commands"
+webroot=$mount/projects/demo/jails/web/root
+ps1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\]'
+expect "a new jail's shell is bash" '^/usr/local/bin/bash$' $J config get --project demo web shell
+expect "a new jail's prompt is the default" '^default$' $J config get --project demo web prompt
+check "bash was installed into the jail's /usr/local at its first start" test -x "$webroot/usr/local/bin/bash"
+expect "bash is a package of the jail" '^bash-' pkg -r "$webroot" info bash
+check "the prompt file is JailOps'" grep -F -x "	PS1='$ps1'" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
+for f in profile bash.bashrc; do
+	expect "/usr/local/etc/$f sources it" '^# BEGIN jailops prompt' head -1 "$webroot/usr/local/etc/$f"
+done
+# bash reads /usr/local/etc/bash.bashrc in an interactive shell and /usr/local/etc/profile in a login shell (the
+# package is built with SYSBASHRC); both lead to the prompt file. An interactive bash needs a terminal (without one
+# bash -i stops itself): script(1) inside the jail gives it one, and the exec itself stays a plain pipe.
+same() { # same DESCRIPTION WANT COMMAND...: standard output must be exactly WANT
+	desc=$1; want=$2; shift 2
+	out=$("$@" 2>/dev/null) || { echo "$out" >&2; fail "$desc"; }
+	[ "$out" = "$want" ] || { printf 'got:  %s\nwant: %s\n' "$out" "$want" >&2; fail "$desc"; }
+}
+in_pty() { # in_pty JAIL COMMAND...: what COMMAND printed in a pseudo-terminal in the jail, without carriage returns,
+	# the echo of the ^D script sends at the end of its input, and empty lines
+	j=$1; shift
+	$J exec -T --project demo "$j" -- script -q /dev/null "$@" </dev/null 2>/dev/null | tr -d '\r\010' | sed 's/\^D//g' | grep -v '^$' || true
+}
+last_line() { "$@" | tail -n 1; } # a login reads ~/.profile, whose resizewin prints before the command
+same "an interactive bash has the prompt" "PS1=[$ps1]" in_pty web /usr/local/bin/bash -ic 'echo "PS1=[$PS1]"'
+same "an interactive login bash has the prompt" "PS1=[$ps1]" last_line in_pty web /usr/local/bin/bash -lic 'echo "PS1=[$PS1]"'
+same "a bash script is not affected" "PS1=[unset]" $J exec --project demo web -- /usr/local/bin/bash -c 'echo "PS1=[${PS1-unset}]"'
+same "a login bash running a command is not affected" "PS1=[unset]" $J exec --project demo web -- /usr/local/bin/bash -lc 'echo "PS1=[${PS1-unset}]"'
+same "a login sh keeps FreeBSD's own prompt" 'PS1=[\u@\h:\w \$ ]' last_line in_pty web env HOME=/root sh -lic 'echo "PS1=[$PS1]"'
+# the prompt as a terminal shows it: jailops shell (bash, the jail's shell) in a pseudo-terminal, typed into once bash
+# is up (bash drops what was typed before it set the terminal up)
+(sleep 3; printf 'echo "E2E PATH=$PATH HOME=$HOME"\n'; sleep 2; printf 'exit\n'; sleep 1) | TERM=xterm timeout -s KILL 60 script -q "$work/shell.out" $J shell --project demo web >/dev/null 2>&1 || true
+grep -a -q "$(printf '\033')\[38;5;39mroot@web:/#$(printf '\033')\[0m" "$work/shell.out" || { od -c "$work/shell.out" | head -20 >&2; fail "jailops shell shows the blue prompt"; }
+grep -a -q "E2E PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin HOME=/root" "$work/shell.out" || { cat -v "$work/shell.out" >&2; fail "a shell session has the PATH of a login and root's HOME"; }
+# a user's own ~/.bashrc wins
+check "a user's own prompt" $J exec --project demo web -- sh -c "echo \"PS1='mine> '\" > /root/.bashrc"
+same "~/.bashrc wins over the prompt file" "PS1=[mine> ]" in_pty web /usr/local/bin/bash -ic 'echo "PS1=[$PS1]"'
+check "drop the user's own prompt" $J exec --project demo web -- rm /root/.bashrc
+# the key: a new prompt at once, none removes the files, an injection is refused
+check "a red prompt" $J config set --project demo web prompt '\[\e[38;5;196m\]\u@\h:\w\$\[\e[0m\] '
+check "the red prompt is written at once" grep -F -q '38;5;196m' "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
+expect_refused "a prompt that would run a command is refused" $J config set --project demo web prompt '\044(touch /tmp/pwned)'
+check "prompt none" $J config set --project demo web prompt none
+if [ -e "$webroot/usr/local/etc/profile.d/jailops-prompt.sh" ] || [ -e "$webroot/usr/local/etc/bash.bashrc" ]; then fail "prompt none left the files"; fi
+check "the default prompt again" $J config set --project demo web prompt default
+check "shell-setup on a jail that has everything changes nothing" $J jail shell-setup --project demo web
+expect "the shell setup left no condition" '^$' sh -c "$J jail show --project demo web -o json | grep ShellSetup || true"
+
 step "interface descriptions (ifconfig shows what JailOps made)"
 expect "the bridge says what it is" 'description: jailops net=lan bridge' ifconfig jo7
 expect "the gateway end says what it is" 'description: jailops net=lan gateway \(host side\)' ifconfig jo7gb
@@ -695,6 +744,8 @@ check "upgrade to the newer generation" $J jail upgrade up --project demo --gene
 expect "the jail is on the second generation" 'up +running.*#g2' $J jail list --project demo
 expect "the jail still runs" 'FreeBSD' $J exec --project demo up -- uname -s
 expect "its data survived the swap" 'ci-keep' $J exec --project demo up -- cat /root/keep
+expect "bash survived the swap (/usr/local is persistent)" '^bash$' $J exec --project demo up -- /usr/local/bin/bash -c 'echo bash'
+expect "so did the prompt" '38;5;39m' in_pty up /usr/local/bin/bash -ic 'echo "$PS1"'
 check "root rollback" $J jail rollback up --project demo
 expect "back on the first generation" 'up +running.*#g1' $J jail list --project demo
 check "stop the second jail" $J stop up --project demo
@@ -739,7 +790,11 @@ check "restart jailopsd with the catalog" service jailopsd restart
 n=0; until $J app list >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
 expect "the catalog lists nginx as valid" '^nginx .*valid' $J app list -o wide
 expect "a dry run lists the steps" 'install-packages-ports: pkg -r .* install -y nginx' $J app install nginx --project demo --network lan --storage default --dry-run
+expect "an app's jail gets bash and the prompt like any new jail" 'set-up-shell: install bash' $J app install nginx --project demo --network lan --storage default --dry-run
 check "install nginx" $J app install nginx --project demo --network lan --storage default
+expect "the app's jail has bash as its shell" '^/usr/local/bin/bash$' $J config get --project demo nginx shell
+check "bash is in the app's jail" test -x "$mount/projects/demo/jails/nginx/root/usr/local/bin/bash"
+check "the prompt is in the app's jail" grep -F -q "PS1='" "$mount/projects/demo/jails/nginx/root/usr/local/etc/profile.d/jailops-prompt.sh"
 expect "the jail runs and carries the labels" 'jailops.app=nginx' $J label --project demo nginx
 expect "the app is listed as installed" 'nginx +nginx +[^ ]+ +running' $J app installed --project demo
 addr=$($J app installed --project demo | awk '$1 == "nginx" {print $5}' | head -1 | cut -d, -f1)

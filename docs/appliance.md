@@ -492,6 +492,20 @@ offered.
 
 Risks: low; the only write is the scrub schedule.
 
+### The shell prompt of the host (not a module)
+
+Jails get bash and a coloured prompt from JailOps ([shell.md](shell.md)); the host does not, and no module writes the
+host's shell files. The reasons: the prompt is a matter of the administrator's own shell and cuts nobody off, so it gains
+nothing from snapshots and commit confirmed; the host may not have bash at all, and installing a package on the host is
+a software decision the helper does not take (its `pkg` rule works on jail roots only); and the start-up files of bash
+(`/usr/local/etc/profile`, `/usr/local/etc/bash.bashrc`) are the administrator's. The green prompt is one paste,
+described in [shell.md](shell.md#the-host), with the same override story as in a jail (your own `~/.bashrc` wins).
+
+Should it be managed later, it belongs in module 5 (System) as one typed field, the prompt text checked like a jail's
+(`api.CheckPrompt`), writing exactly one file (`/usr/local/etc/profile.d/jailops-prompt.sh`) and the marked block at the
+top of the two start-up files, with a snapshot of the three before the change and the restore of the module. Design
+only.
+
 ## The first-boot wizard (built)
 
 With `jailops_appliance`, a fresh host starts without any user. Three parts make the first visit safe and need no shell:
@@ -529,8 +543,9 @@ With `jailops_appliance`, a fresh host starts without any user. Three parts make
      use them.
   6. **Base image**: the FreeBSD image of the host's release (`environment.kernel_version` of `GET /api/v1`
      without the patch level; another release of 15.1 or later can be chosen) and architecture, named after the release
-     (`freebsd-15-1`; the name follows the release until it is edited), with **Upgrade automatically every night** on
-     (03:00, packages too; one line in the step says what it does): `POST /api/v1/images` with `spec.auto_upgrade`, then
+     (`freebsd-15-1`; the name follows the release until it is edited), with the checkbox **Upgrade automatically every night**
+     (off until ticked; then 03:00, packages too; one line in the step says what it does): `POST /api/v1/images` (with
+     `spec.auto_upgrade` when ticked), then
      its first generation with `POST /api/v1/images/freebsd-15-1/generations`, followed in the step as an operation (progress, Cancel while it may be
      cancelled). The build downloads the base system packages and takes minutes; a failed build keeps the definition,
      says what to check (the network, `pkg.freebsd.org` from the host) and is built again with Try again. When a FreeBSD

@@ -19,6 +19,7 @@ import { volumeName } from '@/lib/apps'
 import { defaultImage } from '@/lib/images'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
 import { loadChoice, saveChoice } from '@/lib/projectScope'
+import { labelKeyProblem, labelValueProblem, labelsProblem, MAX_LABELS } from '@/lib/labels'
 
 interface DemoOp extends Operation {
   startedAt: number
@@ -92,6 +93,15 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   db.projects = d2.projects(countByProject())
   if (emptyMode) db.projects = []
   const shells = new Map<string, { h: StreamHandlers; line: string; jail: string }>()
+  // The jails of the demo that have bash in them: those created here (a new FreeBSD jail gets it at its first start)
+  // and those set up with shell-setup. The seeded jails are older and have none.
+  const bashReady = new Set<string>()
+  const BASH = '/usr/local/bin/bash'
+  const shellPath = (v: string) => (v === 'bash' ? BASH : v === 'sh' ? '/bin/sh' : v)
+  // the server's rule (api.CheckPrompt), in short: no quote, no backquote, $ only as \$, no \\ and no control characters
+  const promptProblem = (v: string): string =>
+    v === 'default' || v === 'none' ? '' : /['`\x00-\x1f\x7f]/.test(v) ? 'the prompt may not contain a quote, a backquote or a control character' : /\$/.test(v.replace(/\\\$/g, '')) || /\\\\/.test(v) ? 'the prompt may contain $ only as \\$ (variables and commands in the prompt are not accepted)' : ''
+  const freebsdImage = (ref: string) => (db.images.find((i) => i.metadata.name === String(ref).split(/[@#]/)[0])?.spec.os ?? 'freebsd') === 'freebsd'
   const logs = da.demoLogs()
   const forward = demoForward('bsd01.example.net')
   const access = demoAccess(() => db.jails, () => db.sets, (app) => { const x = da.detail(app); return x && x !== 'invalid' ? x.definition : undefined })
@@ -418,7 +428,17 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       if (enc && (pass.length < 12 || pass.length > 512 || /[\r\n]/.test(pass))) return fail(400, { code: 'invalid', message: pass ? 'the passphrase must be between 12 and 512 bytes long' : 'a jail with an encrypted volume needs volume_passphrase' })
       if (!enc && pass) return fail(400, { code: 'invalid', message: 'volume_passphrase was given but no volume is encrypted' })
       if (enc) volPass[name] = pass
-      const jail: Jail = { metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), ...(project ? { project } : {}) }, spec: body.spec, status: { power: 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] } }
+      const spec = { ...body.spec } as Jail['spec']
+      if (spec.prompt && promptProblem(spec.prompt)) return fail(400, { code: 'invalid', message: 'prompt: ' + promptProblem(spec.prompt), detail: { field: 'prompt' } })
+      if (freebsdImage(spec.image)) {
+        // jails.shell and jails.prompt of the demo host: bash and the default prompt
+        spec.shell = shellPath(spec.shell || 'bash')
+        if (!spec.prompt && spec.shell === BASH) spec.prompt = 'default'
+        if (spec.shell === BASH) bashReady.add(name)
+      }
+      const labels = (body.metadata?.labels ?? undefined) as Record<string, string> | undefined
+      if (labels && labelsProblem(labels)) return fail(400, { code: 'invalid', message: `the labels are invalid (${labelsProblem(labels)})` })
+      const jail: Jail = { metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), ...(project ? { project } : {}), ...(labels && Object.keys(labels).length ? { labels } : {}) }, spec, status: { power: 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] } }
       return startOp(`Create jail ${name}`, { jails: [`/api/v1/jails/${name}`] }, 800, () => { db.jails.push(jail) }, undefined, false)
     }
     if (seg.length === 1) return ok(db.jails.filter(inProject))
@@ -449,9 +469,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (!f) return fail(400, { code: 'invalid', message: `unknown configuration key "${k}"`, hint: 'jailops config keys lists them', detail: { key: k } })
         if (f.def.type === 'int' && !/^-?\d+$/.test(v)) return fail(400, { code: 'invalid', message: `${k}: "${v}" must be a number`, detail: { key: k } })
         if (k.endsWith('.mtu') && (Number(v) < 576 || Number(v) > 9216)) return fail(400, { code: 'invalid', message: `${k}: "${v}" must be a number between 576 and 9216`, detail: { key: k } })
-        if (k === 'shell' && v && v !== '/bin/sh' && v !== '/usr/local/bin/bash') return fail(400, { code: 'invalid', message: `shell: ${v} does not exist in the jail`, detail: { key: k } })
-        if (f.def.restart_required && flatten(j.spec)[k] !== v) restart.push(k)
-        spec = setValue(spec, f.def, f.dev, v)
+        const val = k === 'shell' ? shellPath(v) : v
+        if (k === 'shell' && val && val !== '/bin/sh' && val !== BASH) return fail(400, { code: 'invalid', message: `shell: ${v} does not exist in the jail`, detail: { key: k } })
+        if (k === 'prompt' && promptProblem(v)) return fail(400, { code: 'invalid', message: 'prompt: ' + promptProblem(v), detail: { key: k } })
+        if (f.def.restart_required && flatten(j.spec)[k] !== val) restart.push(k)
+        spec = setValue(spec, f.def, f.dev, val)
       }
       for (const k of unset) {
         const f = lookupKey(k)
@@ -471,6 +493,24 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         delete db.snaps[name]
         emit('jail-deleted', src)
       }, undefined, false)
+    }
+    // PATCH /jails/{name}: a merge patch, as service.MergePatch applies it; the console sends metadata.labels only
+    if (seg.length === 2 && m === 'PATCH') {
+      if (body.spec !== undefined) return fail(400, { code: 'unsupported', message: 'the demo patches labels only' })
+      const patch = (body.metadata?.labels ?? {}) as Record<string, string | null>
+      const next: Record<string, string> = { ...(j.metadata.labels ?? {}) }
+      for (const [k, v] of Object.entries(patch)) {
+        if (v === null) delete next[k]
+        else if (typeof v !== 'string') return fail(400, { code: 'invalid', message: `patched object is invalid: the value of label "${k}" is not a string` })
+        else next[k] = v
+      }
+      const bad = Object.keys(next).length > MAX_LABELS ? `an object has at most ${MAX_LABELS} labels (got ${Object.keys(next).length})`
+        : Object.entries(next).map(([k, v]) => (labelKeyProblem(k) ? `invalid label key "${k}"` : labelValueProblem(v) === 'valueLong' ? `the value of label "${k}" is longer than 253 bytes` : labelValueProblem(v) ? `the value of label "${k}" holds control or invisible characters` : '')).find(Boolean)
+      if (bad) return fail(400, { code: 'invalid', message: bad, hint: bad.startsWith('invalid label key') ? "letters, digits, '-', '_' and '.', beginning and ending with a letter or digit, at most 63 characters, with an optional prefix and '/' (example.org/tier)" : undefined })
+      j.metadata.labels = Object.keys(next).length ? next : undefined
+      j.metadata.generation = (j.metadata.generation ?? 0) + 1
+      emit('jail-updated', src)
+      return ok(j, etagOf(j.metadata.generation))
     }
     if (seg.length === 2) return ok(j, etagOf(j.metadata.generation))
     switch (seg[2]) {
@@ -939,11 +979,21 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (j.status.provisioned_at && !body.again) return fail(409, { code: 'already_exists', message: 'Provisioning has run before.', hint: 'Use again to run it again.' })
           return startOp(`Provision ${name}`, { jails: [src] }, 1500, () => { j.status.provisioned_at = new Date().toISOString() }, { jail: name, provisioned_at: new Date().toISOString(), steps: ['packages', 'files', 'services'] })
         }
+        if (seg[2] === 'shell-setup' && m === 'POST') {
+          if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `jail "${name}" is not running; the shell is set up inside it`, hint: 'start it first' })
+          const had = bashReady.has(name)
+          return startOp(`Set up the shell of jail ${name}`, { jails: [src] }, 1200, () => {
+            if (!j.spec.shell) j.spec.shell = BASH
+            if (!j.spec.prompt && j.spec.shell === BASH) j.spec.prompt = 'default'
+            if (j.spec.shell === BASH) bashReady.add(name)
+          }, { jail: name, shell: j.spec.shell || BASH, prompt: j.spec.prompt || 'default', ps1: '\\[\\e[38;5;39m\\]\\u@\\h:\\w\\$\\[\\e[0m\\]', steps: [had ? `${BASH} is installed` : 'pkg -r ROOT install -y bash', 'wrote /usr/local/etc/profile.d/jailops-prompt.sh'] })
+        }
         if (seg[2] === 'console') {
           if (m === 'POST' && seg.length === 3) {
             if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `Jail ${name} is not running.` })
             const sh = (j.spec as unknown as { shell?: string }).shell
-            if (sh && sh !== '/bin/sh' && sh !== '/usr/local/bin/bash') return fail(404, { code: 'not_found', message: `The shell ${sh} does not exist in the jail.`, hint: 'Set a shell that exists, or clear the setting to use /bin/sh.' })
+            if (sh === BASH && !bashReady.has(name)) return fail(404, { code: 'not_found', message: `the shell ${BASH} does not exist in jail "${name}"`, hint: `install it with \`jailops jail shell-setup ${name}\`, or use FreeBSD's own shell: \`jailops set ${name} shell sh\`` })
+            if (sh && sh !== '/bin/sh' && sh !== BASH) return fail(404, { code: 'not_found', message: `The shell ${sh} does not exist in the jail.`, hint: 'Set a shell that exists, or clear the setting to use /bin/sh.' })
             const id = 'x' + ++seq
             shells.set(id, { h: undefined as never, line: '', jail: name })
             return ok({ id }, undefined)
@@ -997,9 +1047,10 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const src = `/api/v1/jails/${jail}`
     const j: Jail = {
       metadata: { name: jail, scope: 'host', project, generation: 1, created_at: new Date().toISOString(), labels: { [da.LABEL]: a.name, [`${da.LABEL}.hash`]: det.hash, [`${da.LABEL}.version`]: version } },
-      spec: { image, storage: sto, layout: 'thin', network: [{ network: net, ipv4: addr }], volumes: (a.data ?? []).map((x) => ({ name: volumeName(x.path), mount: x.path })), resources: limits, boot: { autostart: true } },
+      spec: { image, storage: sto, layout: 'thin', network: [{ network: net, ipv4: addr }], volumes: (a.data ?? []).map((x) => ({ name: volumeName(x.path), mount: x.path })), resources: limits, boot: { autostart: true }, shell: BASH, prompt: 'default' },
       status: { power: 'running', jid: 120 + db.jails.length, generation: 'freebsd-15-1#g4', addresses: [`${addr}/${subnet.split('/')[1] ?? '24'}`], started_at: new Date().toISOString(), conditions: [{ type: 'Reconciled', status: 'True' }] },
     }
+    bashReady.add(jail)
     const result = {
       app: a.name, hash: det.hash, version, jail: j, addresses: j.status.addresses, ports: (a.ports ?? []).map((x) => ({ ...x, endpoint: `${addr}:${x.port}` })),
       data: a.data, config: a.config, logs: a.logs, notes: a.notes, snapshot: 'app-installed', steps,
@@ -1028,7 +1079,12 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }, result, false)
   }
 
-  const PROMPT = '\x1b[32mroot@jail\x1b[0m:\x1b[34m~\x1b[0m# '
+  const PLAIN = '\x1b[32mroot@jail\x1b[0m:\x1b[34m~\x1b[0m# '
+  /** What the demo shell shows: the default prompt of JailOps (38;5;39, light blue) in a jail with bash and it. */
+  function promptOf(jail: string): string {
+    const j = db.jails.find((x) => x.metadata.name === jail)
+    return j?.spec.shell === BASH && bashReady.has(jail) && j.spec.prompt === 'default' ? `\x1b[38;5;39mroot@${jail}:/#\x1b[0m` : PLAIN
+  }
   function shellOut(id: string, text: string): void {
     const s = shells.get(id)
     if (!s?.h) return
@@ -1048,7 +1104,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         else if (cmd.startsWith('echo ')) out = cmd.slice(5)
         else if (cmd === 'exit') { shellOut(id, '\r\nlogout\r\n'); s.h.onEvent({ type: 'logging', timestamp: new Date().toISOString(), metadata: { exit: 0 } } as ApiEvent); return }
         else if (cmd) out = `sh: ${cmd.split(' ')[0]}: not found`
-        shellOut(id, '\r\n' + (out ? out + '\r\n' : '') + PROMPT)
+        shellOut(id, '\r\n' + (out ? out + '\r\n' : '') + promptOf(s.jail))
       } else if (ch === '\x7f') {
         if (s.line) { s.line = s.line.slice(0, -1); shellOut(id, '\b \b') }
       } else if (ch >= ' ') {
@@ -1066,7 +1122,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         const sess = shells.get(ex[1])
         if (sess) {
           sess.h = h
-          const t = setTimeout(() => { h.onOpen?.(); shellOut(ex[1], 'JailOps demo shell. Try: hostname, uname -a, ls, echo hi, exit\r\n' + PROMPT) }, 0)
+          const t = setTimeout(() => { h.onOpen?.(); shellOut(ex[1], 'JailOps demo shell. Try: hostname, uname -a, ls, echo hi, exit\r\n' + promptOf(sess.jail)) }, 0)
           return { close: () => { clearTimeout(t); shells.delete(ex[1]) } }
         }
       }

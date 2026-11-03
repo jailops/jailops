@@ -1,0 +1,3 @@
+# BEGIN jailops prompt: managed by JailOps (jailops config set JAIL prompt none removes it)
+if [ -r /usr/local/etc/profile.d/jailops-prompt.sh ]; then . /usr/local/etc/profile.d/jailops-prompt.sh; fi
+# END jailops prompt

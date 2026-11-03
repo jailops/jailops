@@ -192,7 +192,7 @@ func TestAppInstall(t *testing.T) {
 	if len(res.Data) != 2 || len(res.Config) != 1 || len(res.Logs) != 1 || !strings.Contains(res.Notes, "/usr/local/www/web") {
 		t.Fatalf("%+v", res)
 	}
-	wantSteps := []string{"create-jail", "start-jail", "install-packages-ports", "install-packages-jailops", "refresh-library-cache", "record-version", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot"}
+	wantSteps := []string{"create-jail", "start-jail", "install-packages-ports", "install-packages-jailops", "set-up-shell", "refresh-library-cache", "record-version", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot"}
 	var steps []string
 	for _, s := range res.Steps {
 		_, rest, _ := strings.Cut(s, " ")
@@ -204,7 +204,8 @@ func TestAppInstall(t *testing.T) {
 	}
 	// The packages went in from the host with pkg -r, the FreeBSD ones and the jailops ones apart.
 	root := "/jailops/projects/alpha/jails/web/root"
-	if !slices.Equal(e.Installed, []string{root + " web-server", root + " web-tool"}) {
+	// bash, the jail's shell, came in after the app's packages (docs/shell.md)
+	if !slices.Equal(e.Installed, []string{root + " web-server", root + " web-tool", root + " bash"}) {
 		t.Fatalf("installed %v", e.Installed)
 	}
 	// The fake pkg accepts any argv with -r: the calls must be exactly what the argv builders make, the
@@ -217,9 +218,14 @@ func TestAppInstall(t *testing.T) {
 	}
 	want := []string{strings.Join(apps.PkgInstallArgv(root, "ports", []string{"web-server"}), " "),
 		strings.Join(apps.PkgInstallArgv(root, apps.JailopsRepo, []string{"web-tool"}), " "),
+		strings.Join(apps.PkgInstallArgv(root, "ports", []string{api.BashPackage}), " "),
 		strings.Join(apps.PkgVersionArgv(root, "web-server"), " ")}
 	if !slices.Equal(pkgCalls, want) || want[0] != "pkg -r "+root+" install -y web-server" {
 		t.Fatalf("pkg calls %q, want %q", pkgCalls, want)
+	}
+	// The jail's bash prompt, sourced by both start-up files of bash.
+	if !strings.Contains(e.File(root+api.PromptFile), `PS1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\]'`) || !strings.Contains(e.File(root+api.BashrcPath), api.PromptFile) || !strings.Contains(e.File(root+api.ProfilePath), api.PromptFile) {
+		t.Fatalf("prompt files: %v", e.Files.Paths())
 	}
 	// The volume datasets are mounted by the start of the jail, after its root, never by zfs mount -a.
 	for _, v := range []string{"var-db-web", "usr-local-www-web"} {
@@ -320,10 +326,10 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := op.Wait(c)
-	if err != nil || !res.DryRun || len(res.Steps) != 8 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
+	if err != nil || !res.DryRun || len(res.Steps) != 9 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
 		t.Fatalf("%v %+v", err, res)
 	}
-	if !strings.Contains(res.Steps[0], "fb151@stable") || !strings.Contains(res.Steps[5], "/usr/local/bin/tool --ping") {
+	if !strings.Contains(res.Steps[0], "fb151@stable") || !strings.Contains(res.Steps[3], "install -y bash") || !strings.Contains(res.Steps[6], "/usr/local/bin/tool --ping") {
 		t.Fatalf("%v", res.Steps)
 	}
 	if _, err := e.Admin.Jails().Get(c, "tool"); !api.IsCode(err, api.CodeNotFound) {
@@ -837,7 +843,7 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 			repos = append(repos, "install-packages-jailops")
 		}
 		want := append([]string{"create-jail", "start-jail"}, repos...)
-		want = append(want, "refresh-library-cache", "record-version", "write-rc-conf")
+		want = append(want, "set-up-shell", "refresh-library-cache", "record-version", "write-rc-conf")
 		want = append(want, setup(len(def.Setup))...)
 		want = append(want, c2.services...)
 		if c2.health {

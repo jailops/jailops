@@ -9,7 +9,7 @@ const meta = (name: string, age = 86400 * 30) => ({ name, scope: 'host' as const
 
 export function stagingJails(): Jail[] {
   const mk = (name: string, power: Jail['status']['power']): Jail => ({
-    metadata: { ...meta(name, 86400 * 5), project: 'staging', labels: { env: 'staging' } },
+    metadata: { ...meta(name, 86400 * 5), project: 'staging', labels: { env: 'staging', team: name === 'stg-db' ? 'data' : 'web' } },
     spec: { image: 'freebsd-15-1', storage: 'fast', network: [{ network: 'stg', ipv4: 'auto' }], firewall: { policy: '' }, boot: {}, resources: { cpu: 1, memory: '1G' } },
     status: { power, generation: 'freebsd-15-1#g4', addresses: power === 'running' ? ['10.60.0.12/28'] : [], conditions: [{ type: 'Reconciled', status: 'True' }] },
   })
