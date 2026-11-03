@@ -179,6 +179,12 @@ type localSession struct {
 	stdout, stderr io.Reader
 	toClose        []*os.File
 
+	// a session with a terminal runs under a leader process of the helper (session_leader.go)
+	leaderRelease *os.File      // the helper's end of the pipe whose close releases the leader
+	cmdDone       chan struct{} // closed when the leader reported the end of the command
+	rmu           sync.Mutex
+	rep           leaderReport
+
 	done    chan struct{}
 	code    int
 	drained chan struct{} // closed when every output reader has seen its end
@@ -189,7 +195,7 @@ type localSession struct {
 }
 
 func startSession(ctx context.Context, bin string, args []string, o ExecOpts, release func()) (*localSession, error) {
-	s := &localSession{tty: o.TTY, done: make(chan struct{}), drained: make(chan struct{}), release: release}
+	s := &localSession{tty: o.TTY, done: make(chan struct{}), drained: make(chan struct{}), cmdDone: make(chan struct{}), release: release}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = "/"
 	cmd.Env = []string{"PATH=/sbin:/bin:/usr/sbin:/usr/bin"}
@@ -201,6 +207,9 @@ func startSession(ctx context.Context, bin string, args []string, o ExecOpts, re
 		}
 		if s.master != nil {
 			s.master.Close()
+		}
+		if s.leaderRelease != nil {
+			s.leaderRelease.Close()
 		}
 		return nil, api.Errorf(api.CodeInternal, "start session: %v", err)
 	}
@@ -219,9 +228,41 @@ func startSession(ctx context.Context, bin string, args []string, o ExecOpts, re
 		if err := unix.IoctlSetWinsize(s.mfd, unix.TIOCSWINSZ, &unix.Winsize{Row: rows, Col: cols}); err != nil {
 			return fail(err)
 		}
+		// The command runs under a leader of its own (session_leader.go): a new session whose controlling terminal is the
+		// slave (fd 0), which lives until the output of the command was read.
+		self, err := os.Executable()
+		if err != nil {
+			return fail(err)
+		}
+		relR, relW, err := os.Pipe()
+		if err != nil {
+			return fail(err)
+		}
+		repR, repW, err := os.Pipe()
+		if err != nil {
+			relR.Close()
+			relW.Close()
+			return fail(err)
+		}
+		childEnds = append(childEnds, relR, repW)
+		s.toClose = append(s.toClose, repR)
+		s.leaderRelease = relW
+		cmd = exec.Command(self, append([]string{sessionLeaderArg, bin}, args...)...)
+		cmd.Dir = "/"
+		cmd.Env = []string{"PATH=/sbin:/bin:/usr/sbin:/usr/bin"}
+		s.cmd = cmd
+		cmd.ExtraFiles = []*os.File{relR, repW}
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = slave, slave, slave
-		// New session; the slave (child fd 0) becomes the controlling terminal.
 		cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true, Setctty: true, Ctty: 0}
+		go readLeaderReport(repR, func(r leaderReport) {
+			s.rmu.Lock()
+			first := !s.rep.exited && r.exited
+			s.rep = r
+			s.rmu.Unlock()
+			if first {
+				close(s.cmdDone)
+			}
+		})
 		s.stdin = &ttyStdin{f: master}
 		s.stdout = ttyReader{f: master}
 		s.drains = 1
@@ -287,7 +328,27 @@ func (s *localSession) reap(ctx context.Context) {
 		case <-waited:
 		}
 	}()
-	err := s.cmd.Wait()
+	leaderDone := make(chan error, 1)
+	go func() { leaderDone <- s.cmd.Wait() }()
+	if s.leaderRelease != nil {
+		// A terminal session: the leader reports the end of the command and stays; the output is read, then the leader is
+		// released and the terminal ends with it.
+		select {
+		case <-s.cmdDone:
+			s.waitOutputRead(ctx)
+		case <-leaderDone:
+			leaderDone <- nil
+		case <-ctx.Done():
+		}
+		s.leaderRelease.Close()
+	}
+	var err error
+	select {
+	case err = <-leaderDone:
+	case <-time.After(10 * time.Second):
+		s.killGroup()
+		err = <-leaderDone
+	}
 	close(waited)
 	s.killGroup() // no process of the session outlives it
 	s.code = 0
@@ -296,6 +357,13 @@ func (s *localSession) reap(ctx context.Context) {
 		if ws, ok := ps.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
 			s.code = 128 + int(ws.Signal())
 		}
+	}
+	if s.leaderRelease != nil {
+		s.rmu.Lock()
+		if s.rep.exited {
+			s.code = s.rep.exitCode
+		}
+		s.rmu.Unlock()
 	}
 	_ = err
 	close(s.done)
@@ -308,7 +376,35 @@ func (s *localSession) reap(ctx context.Context) {
 	s.Close()
 }
 
-func (s *localSession) killGroup() { _ = syscall.Kill(-s.pgid, syscall.SIGKILL) }
+// waitOutputRead returns once the master of the terminal holds nothing that is not read (at most two seconds).
+func (s *localSession) waitOutputRead(ctx context.Context) {
+	deadline := time.Now().Add(2 * time.Second)
+	quiet := 0
+	for time.Now().Before(deadline) && ctx.Err() == nil {
+		if outputQueued(s.mfd) == 0 {
+			if quiet++; quiet >= 3 {
+				return
+			}
+		} else {
+			quiet = 0
+		}
+		time.Sleep(3 * time.Millisecond)
+	}
+}
+
+func (s *localSession) killGroup() {
+	_ = syscall.Kill(-s.pgid, syscall.SIGKILL)
+	if g := s.commandGroup(); g > 0 {
+		_ = syscall.Kill(-g, syscall.SIGKILL)
+	}
+}
+
+// commandGroup is the process group of the command of a terminal session (the leader reported it), or 0.
+func (s *localSession) commandGroup() int {
+	s.rmu.Lock()
+	defer s.rmu.Unlock()
+	return s.rep.pgid
+}
 
 func (s *localSession) isDone() bool {
 	select {
@@ -351,7 +447,11 @@ func (s *localSession) Signal(sig int) error {
 	if s.isDone() {
 		return api.Errorf(api.CodeNotFound, "the session has ended")
 	}
-	if err := syscall.Kill(-s.pgid, syscall.Signal(sig)); err != nil && !errors.Is(err, syscall.ESRCH) {
+	target := -s.pgid
+	if g := s.commandGroup(); g > 0 {
+		target = -g // the command runs in a process group of its own, below its leader
+	}
+	if err := syscall.Kill(target, syscall.Signal(sig)); err != nil && !errors.Is(err, syscall.ESRCH) {
 		return api.Errorf(api.CodeInternal, "signal: %v", err)
 	}
 	return nil
@@ -376,6 +476,9 @@ func (s *localSession) Close() error {
 	}
 	if s.master != nil {
 		s.master.Close()
+	}
+	if s.leaderRelease != nil {
+		s.leaderRelease.Close()
 	}
 	for _, f := range s.toClose {
 		f.Close()
