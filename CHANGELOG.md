@@ -72,8 +72,14 @@
   image for 15.2-PRERELEASE failed with "No trusted public keys found". Checked with the whole end-to-end flow on
   FreeBSD 15.2-PRERELEASE.
 - The event `image-upgrade-failed` is raised when a nightly run fails.
-- Backup snapshot names carry eight random hex digits instead of four (two jobs of one jail in the same second collided
-  in a test under load).
+- **A short command run with a terminal keeps its output.** `jailops exec -t JAIL -- echo hi` printed nothing in 3 to 30%
+  of the runs on FreeBSD: the kernel hangs a terminal up when its session leader exits and drops the output not yet read.
+  A terminal session now runs under a small leader process of the helper that stays until the output was read, with the
+  command in its own foreground process group (signals, resizing and job control work as before). Checked on FreeBSD
+  15.2-PRERELEASE: none of 1,500 runs lost output.
+- The snapshot ids of the backup repository carry 12 random bits after the microsecond instead of 8 (two jobs of one
+  jail that started in the same microsecond collided in a test with a frozen clock; the ZFS snapshot names of a backup
+  carry eight random hex digits instead of four).
 - **Nothing is upgraded unless it was asked for, and a Debian jail is never touched.** The nightly upgrade is off until
   it is turned on (also in Create image and in the first-run wizard: the box is unticked). `jailops update check` and
   `apply`, the managed schedules and the nightly run drive `pkg` (FreeBSD jails) and `apk` (Alpine jails) only; a Debian

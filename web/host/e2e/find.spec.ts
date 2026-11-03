@@ -12,6 +12,17 @@ async function open(page: Page, path: string): Promise<void> {
 const switcher = (page: Page) => page.getByTestId('quick-switcher')
 const input = (page: Page) => page.getByTestId('qs-input')
 
+/** Waits until the results stopped changing (the list is ranked after a short pause: a read right after typing may see the old one). */
+async function settled(page: Page): Promise<void> {
+  let prev = ''
+  for (let i = 0; i < 40; i++) {
+    const cur = (await page.locator('[role="option"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-qs')))).join(',')
+    if (cur && cur === prev) return
+    prev = cur
+    await page.waitForTimeout(150)
+  }
+}
+
 /** The search button of the layout in view: the side bar on a desktop, the top bar on a phone. */
 async function searchButton(page: Page) {
   const side = page.getByTestId('search-open-side')
@@ -39,6 +50,7 @@ test('Ctrl+K opens the switcher; type, arrows, Enter go to the jail; Escape give
   await expect(input(page)).toBeFocused()
   await input(page).fill('team=data')
   const opts = page.locator('[role="option"]')
+  await settled(page)
   await expect(opts.first()).toHaveAttribute('aria-selected', 'true')
   await page.keyboard.press('ArrowDown')
   await expect(opts.nth(1)).toHaveAttribute('aria-selected', 'true')

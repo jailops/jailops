@@ -300,7 +300,7 @@ in the jail.
 The shell is chosen in this order: --shell, then the jail's configured "shell"
 key (a path inside the jail, not necessarily the login shell of /etc/passwd;
 new FreeBSD jails get bash, and 'jailops set NAME shell sh' goes back to
-FreeBSD's own), then /bin/sh. If the chosen shell does not exist in the jail
+the system's own sh), then /bin/sh. If the chosen shell does not exist in the jail
 the command fails with a clear error; it never falls back to another shell
 ('jailops jail shell-setup NAME' installs bash). The shell starts in / as root
 with the PATH of a login and HOME=/root; from a terminal TERM is passed on.

@@ -268,11 +268,12 @@ func TestExecTTYWindowSizeAndResize(t *testing.T) {
 	})
 }
 
-func TestExecTTYSessionLeaderWithControllingTerminal(t *testing.T) {
+func TestExecTTYSessionCommandIsTheForegroundGroupWithControllingTerminal(t *testing.T) {
 	execHosts(t, func(t *testing.T, h Host, e *env) {
-		// the command is a session leader (sid == pid) and its fd 0 is a
-		// terminal that is also its controlling terminal (/dev/tty opens)
-		script := `[ "$(cut -d' ' -f6 /proc/$$/stat)" = "$$" ] && echo leader; [ -t 0 ] && echo tty0; : > /dev/tty && echo ctty`
+		// the command leads a process group of its own (pgid == pid) that is the foreground group of the terminal
+		// (tpgid == pgid), below the session leader of the helper (sid != pid), and its fd 0 is a terminal that is also its
+		// controlling terminal (/dev/tty opens)
+		script := `[ "$(cut -d' ' -f5 /proc/$$/stat)" = "$$" ] && echo leader; [ "$(cut -d' ' -f8 /proc/$$/stat)" = "$$" ] && echo foreground; [ "$(cut -d' ' -f6 /proc/$$/stat)" != "$$" ] && echo below; [ -t 0 ] && echo tty0; : > /dev/tty && echo ctty`
 		s, err := h.Exec(context.Background(), "alpha_web", []string{"sh", "-c", script}, ExecOpts{TTY: true})
 		if err != nil {
 			t.Fatal(err)
@@ -280,7 +281,7 @@ func TestExecTTYSessionLeaderWithControllingTerminal(t *testing.T) {
 		out := readAll(t, s.Stdout())
 		waitExit(t, s)
 		got := get(t, out)
-		for _, want := range []string{"leader", "tty0", "ctty"} {
+		for _, want := range []string{"leader", "foreground", "below", "tty0", "ctty"} {
 			if !strings.Contains(got, want) {
 				t.Errorf("missing %q in %q", want, got)
 			}
