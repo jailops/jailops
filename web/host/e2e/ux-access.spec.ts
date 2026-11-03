@@ -96,7 +96,7 @@ test('setup: the new host name is used at once, Skip keeps the self-signed certi
   await page.getByTestId('setup-create').click()
   await page.getByTestId('setup-hostname').fill('jails1.example.com')
   await page.getByTestId('setup-apply').click()
-  await expect(page.getByTestId('setup-step')).toHaveText('Step 3 of 6: Certificate')
+  await expect(page.getByTestId('setup-step')).toHaveText('Step 3 of 7: Certificate')
   await expect(page.getByTestId('setup-host')).toHaveText('jails1.example.com')
   await expect(page.getByLabel('remote-add')).toHaveValue(/^jailops remote add jails1 https:\/\/jails1\.example\.com:/)
   // Continue carries out the chosen way: it opens that dialog
@@ -111,5 +111,7 @@ test('setup: the new host name is used at once, Skip keeps the self-signed certi
   await page.getByTestId('setup-subnet').fill('10.77.0.0/16')
   await expect(page.getByTestId('setup-make')).toBeEnabled()
   await page.getByTestId('setup-make').click()
+  await expect(page.getByTestId('setup-step')).toHaveText('Step 6 of 7: Base image')
+  await page.getByTestId('setup-skip').click()
   await expect(page.getByTestId('setup-done')).toContainText('Network lan with 10.77.0.0/16')
 })

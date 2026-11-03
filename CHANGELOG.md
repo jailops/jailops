@@ -2,6 +2,65 @@
 
 ## Unreleased
 
+- **An image is one release.** Images are named after their FreeBSD release, `freebsd-15-1` for 15.1-RELEASE; their
+  generations are the release's patch levels, made with `jailops image upgrade freebsd-15-1`. A new release is a new
+  image (`jailops image create freebsd-15-2 --release 15.2-RELEASE`), created after the host's upgrade; jails stay on
+  the image of their release, and moving a jail's data to a jail of a new release is not automated
+  ([upgrade.md](docs/upgrade.md#an-image-is-one-release)). The console, the wizard, the hints and the documentation no
+  longer propose an alias: jails and apps name the image (`--image freebsd-15-1`, its newest generation). Aliases still
+  work for whoever sets them.
+- **Nightly auto upgrade per image.** `jailops image auto-upgrade freebsd-15-1 on [--at 03:00] [--no-packages]` (`off`
+  stops it), the checkbox **Upgrade automatically every night** on the Images page and in Create image (on by default for
+  a new FreeBSD image), and `spec.auto_upgrade` of `PATCH /api/v1/images/{name}`: every night at the chosen time (the
+  host's time zone) the image gets its next generation, its thin jails move to it one at a time with the health check and
+  the automatic rollback (the run stops at the first jail that fails), and with packages on the packages inside the jails
+  are upgraded. Jails whose update strategy is manual or in place are left alone; a host that was off at that time runs it
+  within four hours of coming back. `status.auto_upgrade` holds the next run and the latest runs (ok, unchanged or
+  failed, with the jails moved, upgraded and failed), shown by `jailops image show` and on the image's card in the
+  console, where a failed run stays as a notice.
+- **Package updates of a FreeBSD jail run from the host.** A thin jail is a pkgbase userland without the `pkg` tool, so
+  `pkg update` inside it answered "The package management tool is not yet installed": `jailops update check` and
+  `update apply` (and the schedules of managed jails) could not upgrade the packages of such a jail. The host now runs
+  `pkg -r <jail root>` for the catalog, the dry run and the upgrade, as the app installer does, and refreshes the
+  library cache of the jail afterwards. Linux jails still run `apk` inside themselves.
+- **Images of a -STABLE, PRERELEASE or -CURRENT release** (`base_latest`) are verified with the key of the ports
+  repositories (`/usr/share/keys/pkg`); the release keys (`pkgbase-<major>`) still verify a -RELEASE. Before, building an
+  image for 15.2-PRERELEASE failed with "No trusted public keys found". Checked with the whole end-to-end flow on
+  FreeBSD 15.2-PRERELEASE.
+- The event `image-upgrade-failed` is raised when a nightly run fails.
+- **The console points at a new release.** When the host runs a newer release than its newest FreeBSD image (the host is
+  on 15.2, the image is `freebsd-15-1`), the Images page and the Overview say so and open Create image filled in for it.
+- **The default image of an app install** is the FreeBSD image of the highest release the host's kernel can run (of two of
+  the same release, the first by name), instead of the only image with the alias `stable`. The install dialog and the
+  jail form list the images with their release (`freebsd-15-1 (15.1-RELEASE)`).
+- **The console creates the base image.** The Images page has **Create image** (FreeBSD, and the Alpine and Debian
+  images the API creates): the release defaults to the host's own and nothing older than 15.1 is accepted, the
+  architecture is the host's, the name is proposed from the release (`freebsd-15-1` for 15.1-RELEASE, and it follows the
+  release until you edit it), and "Build the first generation now" (on by default)
+  builds it right after the definition, followed in the dialog as an operation with its progress, a Cancel button and,
+  when the build fails, what to check and Try again (the definition is kept and not created twice). An empty Images page
+  explains what an image is and offers it first. The first-run wizard has a new step **Base image** after Storage and
+  network: it creates and builds `freebsd-15-1` (the host's release, the host's architecture) (or says that
+  a FreeBSD image exists), shows the build in the step, and can be skipped; the Done step leads to **Install your first
+  app** when an image exists and to **Create the base image** otherwise. The app install dialog and the jail form say in
+  place that there is no image and offer the same dialog, instead of a refusal from the server. The existing routes do
+  the work (`POST /api/v1/images`, `POST /api/v1/images/{name}/generations`); the build itself is unchanged.
+- **The server refuses a FreeBSD image older than 15.1** (the console already did): `image create` and `POST /api/v1/images`
+  answer `invalid` for `15.0-RELEASE`, `14.x` or a release the server cannot read, the same floor `jailops doctor` checks for the host.
+- `GET /api/v1` reports the host's release as `environment.kernel_version` (`kern.osrelease`; the field existed and was
+  always empty). `jailops server info` shows it.
+- **Hints for a missing image.** `jailops app install` without any FreeBSD image, and `jailops create` (or the API) with
+  an image that does not exist, answer with a hint that names the two commands that make it:
+  `jailops image create freebsd-15-1 --release 15.1-RELEASE`, then `jailops image build freebsd-15-1` (the host's
+  release; 15.1-RELEASE when the server cannot read it). The empty `jailops image list` names the host's release too
+  (it always said 15.1-RELEASE). Before, the hints said "create or import the image first" and
+  "name an image with --image".
+- `jailops delete NAME --dry-run` on a running jail prints what would be destroyed and that the delete needs `--force` to
+  stop it first; before, the dry run failed with `conflict: jail is running` unless `--force` was given too.
+- The help of the configuration keys `packages`, `nic.<device>.ingress` and `nic.<device>.egress` says in plain words
+  what is not done yet ("Not enforced yet: the limit is stored and reported only, ..."; "Cannot be set when a jail is
+  created yet: ..."), in `jailops config keys` and in the console.
+
 ## 0.5.1 - 2026-11-02
 
 - **The privileged helper no longer crashes on frames out of order.** A data frame after the end of a request's stream

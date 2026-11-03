@@ -136,7 +136,7 @@ command's flags name:
       app: postgresql                    # the definition in the host's catalog
       network: shop                      # default: the project's only network
       storage: default                   # default: the project's only storage
-      image: freebsd-15@stable           # default: the only FreeBSD image with the alias stable
+      image: freebsd-15-1                # default: the host's FreeBSD image of the newest release it can run
       limits: {memory: 2G, disk: 20G, cpu: 2}   # replace the definition's resource hints
 
 `plan` shows `create` when the jail does not exist, and `sync --apply` installs it and waits for the installation. After

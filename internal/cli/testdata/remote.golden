@@ -61,7 +61,7 @@ $ jailops remote switch known
 now using remote known
 
 $ jailops jail list
-! No jails in project main. Create one with: jailops jail create NAME --image IMAGE@ALIAS --network NETWORK --storage STORAGE
+! No jails in project main. Create one with: jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE
 
 $ jailops remote switch nowhere
 ! usage: unknown remote "nowhere"

@@ -7,7 +7,7 @@ Role:          host
 Hub:           no
 Clustered:     no
 Seen as:       trusted
-OS:            FreeBSD  (amd64)
+OS:            FreeBSD 15.1-RELEASE (amd64)
 ZFS:           -, pool tank
 PF:            no
 Linuxulator:   no
@@ -30,7 +30,7 @@ $ jailops server info -o json
   "auth": "trusted",
   "environment": {
     "os": "FreeBSD",
-    "kernel_version": "",
+    "kernel_version": "15.1-RELEASE",
     "arch": "amd64",
     "pool": "tank"
   }

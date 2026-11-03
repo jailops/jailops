@@ -73,6 +73,8 @@ type kindDesc[T any] struct {
 	// emptyHint is the command that creates the first object, for the message of an empty list ("" for the
 	// kind's create NAME, when it has one).
 	emptyHint string
+	// emptyHintFrom computes emptyHint with what the server says (nil for the fixed one).
+	emptyHintFrom func(ctx context.Context, c *sdk.Client) string
 }
 
 func (d *kindDesc[T]) name(x T) string { return d.meta(&x).Name }
@@ -465,7 +467,11 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 				}
 			}
 			if len(items) == 0 {
-				a.empty = emptyMessage(cmd, d.plural, d.emptyHint, total > 0 || len(args) > 0 || len(labels) > 0, a)
+				hint := d.emptyHint
+				if d.emptyHintFrom != nil {
+					hint = d.emptyHintFrom(cmd.Context(), c)
+				}
+				a.empty = emptyMessage(cmd, d.plural, hint, total > 0 || len(args) > 0 || len(labels) > 0, a)
 			}
 			return a.emitList(nonNil(items), style, func() ([]string, [][]string) { return head, rows }, drop, func() []string {
 				var n []string

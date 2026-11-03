@@ -32,11 +32,11 @@ describe('install form', () => {
   const ctx = { networks: ['lan', 'edge'], storage: ['default'], taken: ['web'] }
   const hints = { memory: '256M', disk: '2G', cpu: '1' }
   it('prefills the app name, the only grant and the hints', () => {
-    expect(initialForm('nginx', hints, ['lan', 'edge'], ['default'])).toEqual({ jail: 'nginx', network: '', storage: 'default', memory: '256M', disk: '2G', cpu: '1' })
+    expect(initialForm('nginx', hints, ['lan', 'edge'], ['default'])).toEqual({ jail: 'nginx', image: '', network: '', storage: 'default', memory: '256M', disk: '2G', cpu: '1' })
     expect(initialForm('nginx', undefined, ['lan'], []).network).toBe('lan')
   })
   it('validates like the server: names, grants, sizes and cpu', () => {
-    const ok = { jail: 'nginx', network: 'lan', storage: 'default', memory: '256M', disk: '2G', cpu: '1' }
+    const ok = { jail: 'nginx', image: '', network: 'lan', storage: 'default', memory: '256M', disk: '2G', cpu: '1' }
     expect(validateInstall(ok, ctx)).toEqual({})
     expect(validateInstall({ ...ok, jail: 'Nginx' }, ctx).jail).toBe('nameInvalid')
     expect(validateInstall({ ...ok, jail: '1web' }, ctx).jail).toBe('nameInvalid')
@@ -50,8 +50,9 @@ describe('install form', () => {
     expect(validateInstall({ ...ok, network: '', storage: '' }, { networks: [], storage: [], taken: [] })).toEqual({})
   })
   it('sends limits only when they differ from the hints', () => {
-    const f = { jail: 'nginx', network: 'lan', storage: 'default', memory: '256M', disk: '2G', cpu: '1' }
+    const f = { jail: 'nginx', image: '', network: 'lan', storage: 'default', memory: '256M', disk: '2G', cpu: '1' }
     expect(installBody(f, hints)).toEqual({ jail: 'nginx', network: 'lan', storage: 'default' })
+    expect(installBody({ ...f, image: 'freebsd-15-2' }, hints)).toEqual({ jail: 'nginx', image: 'freebsd-15-2', network: 'lan', storage: 'default' })
     expect(installBody({ ...f, memory: '1G', cpu: '2' }, hints, true)).toEqual({ jail: 'nginx', network: 'lan', storage: 'default', limits: { memory: '1G', disk: '2G', cpu: 2 }, dry_run: true })
   })
   it('reads the grants of a project; "*" is every storage', () => {

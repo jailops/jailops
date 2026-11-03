@@ -100,7 +100,7 @@ type AppSpec struct {
 	// Network and Storage default to the project's only grant of a kind.
 	Network string `json:"network,omitempty"`
 	Storage string `json:"storage,omitempty"`
-	// Image defaults to the only FreeBSD image with the alias stable.
+	// Image defaults to the FreeBSD image of the highest release the host runs.
 	Image string `json:"image,omitempty"`
 	// Limits replace the definition's resource hints.
 	Limits *api.Resources `json:"limits,omitempty"`

@@ -3,7 +3,7 @@
 import { getClient } from '@jailops/shared/api/client'
 import { core } from '@jailops/shared/api/core'
 import type {
-  Jail, JailAction, JailCreate, JailUnlock, JailPassphraseChange, JailRollback, JailUpgrade, JailSnapshot, Image, ImageBuild, ImageUpgrade, Network, Lease,
+  Jail, JailAction, JailCreate, JailUnlock, JailPassphraseChange, JailRollback, JailUpgrade, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, Token,
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult,
@@ -110,9 +110,12 @@ export const api = {
   },
   images: {
     list: () => c().list<Image>('/images'),
+    /** The definition only (global admin); its first generation is a build. */
+    create: (i: Pick<Image, 'metadata' | 'spec'>) => c().mutate<Image>('POST', '/images', i),
     build: (n: string, b: ImageBuild) => c().mutate('POST', `/images/${e(n)}/generations`, b),
     upgrade: (n: string, u: ImageUpgrade) => c().mutate('POST', `/images/${e(n)}/upgrade`, u),
-    setAlias: (n: string, alias: string, generation: number) => c().mutate<Image>('PUT', `/images/${e(n)}/aliases/${e(alias)}`, { generation }),
+    /** The nightly upgrade of the image (global admin): a merge patch of spec.auto_upgrade. */
+    autoUpgrade: (n: string, a: ImageAutoUpgrade) => c().mutate<Image>('PATCH', `/images/${e(n)}`, { spec: { auto_upgrade: a } }),
     deleteAlias: (n: string, alias: string) => c().mutate<Image>('DELETE', `/images/${e(n)}/aliases/${e(alias)}`),
   },
   networks: {

@@ -15,7 +15,11 @@ import type { PowerState, Jail } from '@jailops/shared/api/types'
 import { projectState } from '@/composables/project'
 import Icon from '@jailops/shared/components/Icon.vue'
 import { isLocked } from '@/composables/jailActions'
+import { isGlobalAdmin } from '@/composables/project'
+import { useRouter } from 'vue-router'
+import NewReleaseNotice from '@/components/NewReleaseNotice.vue'
 
+const router = useRouter()
 const safe = <T,>(p: Promise<T>): Promise<T | undefined> => p.catch(() => undefined)
 
 const l = useLoad(async () => {
@@ -44,7 +48,7 @@ const steps = computed(() => {
   const list = [
     { key: 'storage', done: hasStorage, to: '/storage', title: s.start.storage, text: s.start.storageText },
     { key: 'project', done: hasProject, to: '/projects', title: s.start.project, text: s.start.projectText },
-    { key: 'image', done: hasImage, to: '/images', title: s.start.image, text: s.start.imageText },
+    { key: 'image', done: hasImage, to: hasImage ? '/images' : '/images?create=1', title: s.start.image, text: s.start.imageText },
     { key: 'jail', done: hasJail, to: '/jails', title: s.start.jail, text: s.start.jailText },
   ]
   return list.every((x) => x.done) ? [] : list
@@ -86,6 +90,7 @@ const poolPct = computed(() => (pool.value ? percent(pool.value.allocated, pool.
             </ol>
           </div>
         </section>
+        <NewReleaseNotice :images="l.data.value?.images" :may-create="can('images') && isGlobalAdmin()" @create="router.push('/images?create=1')" />
         <Callout v-if="!projectState.current && can('projects') && projectState.projects.length" tone="info" data-test="overview-no-project">{{ s.project.noneChosenText }} <router-link to="/projects">{{ s.project.goProjects }}</router-link></Callout>
         <Callout v-if="locked.length" tone="warn" data-test="locked-banner">
           <strong>{{ s.keys.banner(locked.length) }}.</strong> {{ s.keys.bannerLead }}

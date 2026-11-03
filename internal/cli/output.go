@@ -427,7 +427,7 @@ func joinOrDash(s []string) string { return dash(strings.Join(s, ",")) }
 // linesOrDash puts each value on a line of its own, for a cell of a boxed table.
 func linesOrDash(s []string) string { return dash(strings.Join(s, "\n")) }
 
-// imageWithGen names an image reference with the generation a jail runs, "freebsd-15@stable (g3)";
+// imageWithGen names an image reference with the generation a jail runs, "freebsd-15-1 (g3)";
 // a reference pinned to that generation is left alone.
 func imageWithGen(ref, gen string) string {
 	if gen == "" || strings.HasSuffix(ref, "#"+gen) {

@@ -31,8 +31,8 @@ type Jail struct {
 
 // JailSpec is the desired state of a jail.
 type JailSpec struct {
-	// Image is an alias such as "freebsd-15.0@stable" or a pinned generation
-	// such as "freebsd-15.0#g3".
+	// Image is an image name such as "freebsd-15-1" (its newest generation),
+	// NAME@alias, or a pinned generation such as "freebsd-15-1#g3".
 	Image string `json:"image"`
 	// OS is the guest family. It defaults to the image's OS and is set by the
 	// server so validators and renderers can apply OS-specific rules.

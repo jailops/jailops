@@ -214,12 +214,16 @@ func TestPkgBaseCopiesKeysAndUsesTheVerifiedConf(t *testing.T) {
 
 func TestPkgBaseRepoConfText(t *testing.T) {
 	w := newWorld(t)
-	for _, c := range []struct{ rel, url string }{
-		{"15.0-RELEASE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_0"},
-		{"15.0-RELEASE-p1", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_0"},
-		{"15.1-RELEASE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_1"},
-		{"15.1-RELEASE-p6", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_1"},
-		{"15.0-STABLE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest"},
+	const relKeys, latestKeys = "/usr/share/keys/pkgbase-${VERSION_MAJOR}", "/usr/share/keys/pkg"
+	for _, c := range []struct{ rel, url, keys string }{
+		{"15.0-RELEASE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_0", relKeys},
+		{"15.0-RELEASE-p1", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_0", relKeys},
+		{"15.1-RELEASE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_1", relKeys},
+		{"15.1-RELEASE-p6", "pkg+https://pkg.FreeBSD.org/${ABI}/base_release_1", relKeys},
+		// base_latest is signed with the key of the ports repositories (verified on 15.2-PRERELEASE)
+		{"15.0-STABLE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest", latestKeys},
+		{"15.2-PRERELEASE", "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest", latestKeys},
+		{"16.0-CURRENT", "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest", latestKeys},
 	} {
 		b := &Build{M: w.M, Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: c.rel, Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}, Work: "/w"}
 		st := PkgBase{}.repoConf(b)
@@ -227,7 +231,7 @@ func TestPkgBaseRepoConfText(t *testing.T) {
 			t.Fatal(err)
 		}
 		got := string(w.Files.Data["/w/repos/jailops.conf"])
-		for _, want := range []string{`url: "` + c.url + `"`, `mirror_type: "srv"`, `fingerprints: "/usr/share/keys/pkgbase-${VERSION_MAJOR}"`} {
+		for _, want := range []string{`url: "` + c.url + `"`, `mirror_type: "srv"`, `fingerprints: "` + c.keys + `"`} {
 			if !strings.Contains(got, want) {
 				t.Errorf("%s: no %q in\n%s", c.rel, want, got)
 			}

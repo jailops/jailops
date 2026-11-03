@@ -214,7 +214,7 @@ func TestUpgradeImageIsAGlobalAdminsOperationAndHonoursTheProjectFilter(t *testi
 	wantCode(t, err, api.CodeNotFound)
 	// An image without a generation says what to run first.
 	if _, err := s.CreateImage(host, api.Image{Metadata: api.ObjectMeta{Name: "empty"}, Spec: api.ImageSpec{
-		OS: api.OSFreeBSD, Release: "15.0-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}}); err != nil {
+		OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = s.UpgradeImage(host, "empty", api.ImageUpgrade{})
@@ -262,5 +262,21 @@ func TestUpgradeImageIsAGlobalAdminsOperationAndHonoursTheProjectFilter(t *testi
 	}
 	if gen, _ := generationOf(t, s, "beta", "api"); gen != "fb#g2" {
 		t.Fatalf("no_jails moved a jail to %s", gen)
+	}
+}
+
+func TestImageReleaseOlderThan151IsRefused(t *testing.T) {
+	_, s := tickingEnv(t)
+	host := as(globalAdmin, "")
+	for _, r := range []string{"15.0-RELEASE", "14.3-RELEASE", "bogus"} {
+		_, err := s.CreateImage(host, api.Image{Metadata: api.ObjectMeta{Name: "old"}, Spec: api.ImageSpec{
+			OS: api.OSFreeBSD, Release: r, Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
+		wantCode(t, err, api.CodeInvalid)
+	}
+	for i, r := range []string{"15.1-RELEASE", "15.2-PRERELEASE", "16.0-CURRENT"} {
+		if _, err := s.CreateImage(host, api.Image{Metadata: api.ObjectMeta{Name: "ok" + string(rune('a'+i))}, Spec: api.ImageSpec{
+			OS: api.OSFreeBSD, Release: r, Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}}); err != nil {
+			t.Fatalf("%s: %v", r, err)
+		}
 	}
 }

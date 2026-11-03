@@ -356,34 +356,32 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 	}
 }
 
-// Without an image the installation takes the only FreeBSD image with the
-// alias stable, whatever it is called.
+// Without an image the installation takes the FreeBSD image of the highest release the host runs, by its bare
+// name, the first by name on a tie; an image of a newer release than the host's is passed over.
 func TestAppInstallDefaultImage(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"tool": appExecCheck})
-	if _, err := e.Admin.Images().DeleteAlias(c, "fb", "stable"); err != nil {
+	from := func(want string) {
+		t.Helper()
+		op, err := e.Admin.Apps().Install(c, "tool", api.AppInstall{DryRun: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := op.Wait(c)
+		if err != nil || !res.DryRun || !strings.Contains(res.Steps[0], "from "+want+" ") && !strings.HasSuffix(res.Steps[0], "from "+want) {
+			t.Fatalf("want from %s: %v %+v", want, err, res)
+		}
+	}
+	from("fb") // fb and fb151 are both 15.1-RELEASE
+	if _, err := e.Admin.Images().Create(c, api.Image{Metadata: api.ObjectMeta{Name: "fa"}, Spec: api.ImageSpec{
+		OS: api.OSFreeBSD, Release: "15.2-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}}); err != nil {
 		t.Fatal(err)
 	}
-	op, err := e.Admin.Apps().Install(c, "tool", api.AppInstall{DryRun: true})
-	if err != nil {
-		t.Fatal(err)
-	}
-	res, err := op.Wait(c)
-	if err != nil || !res.DryRun || !strings.Contains(res.Steps[0], "from fb151@stable") {
-		t.Fatalf("%v %+v", err, res)
-	}
-	if _, err := e.Admin.Images().DeleteAlias(c, "fb151", "stable"); err != nil {
-		t.Fatal(err)
-	}
-	_, err = e.Admin.Apps().Install(c, "tool", api.AppInstall{DryRun: true})
-	wantCode(t, err, api.CodeInvalid)
-	if !strings.Contains(err.Error(), "no FreeBSD image has the alias stable") || !strings.Contains(err.Error(), "your images: fb, fb151") {
-		t.Fatalf("%v", err)
-	}
+	from("fb") // the host runs 15.1
 }
 
 // What is refused before the operation starts.
 func TestAppInstallRefusals(t *testing.T) {
-	e, c := appEnv(t, map[string]string{"web": appWeb, "broken": "version: 1\nname: broken\n"})
+	e, c := appEnv(t, map[string]string{"web": appWeb, "newer": strings.ReplaceAll(strings.Replace(appWeb, "name: web\n", "name: newer\n", 1), `release_min: "15.1"`, `release_min: "15.2"`), "broken": "version: 1\nname: broken\n"})
 	req := api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"}
 	_, err := e.Admin.Apps().Install(c, "nothing", req)
 	wantCode(t, err, api.CodeNotFound)
@@ -391,16 +389,10 @@ func TestAppInstallRefusals(t *testing.T) {
 	wantCode(t, err, api.CodeInvalid)
 	_, err = e.Admin.Apps().Install(c, "../web", req)
 	wantCode(t, err, api.CodeNotFound)
-	// the seeded image is 15.0, the definition wants 15.1
-	_, err = e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb@stable", Network: "lan", Storage: "default"})
+	// the seeded image is 15.1, the definition wants 15.2
+	_, err = e.Admin.Apps().Install(c, "newer", api.AppInstall{Image: "fb@stable", Network: "lan", Storage: "default"})
 	wantCode(t, err, api.CodeInvalid)
-	if !strings.Contains(err.Error(), "15.0-RELEASE") || !strings.Contains(err.Error(), "15.1") {
-		t.Fatalf("%v", err)
-	}
-	// no default image: two FreeBSD images have the alias stable here
-	_, err = e.Admin.Apps().Install(c, "web", api.AppInstall{Network: "lan", Storage: "default"})
-	wantCode(t, err, api.CodeInvalid)
-	if !strings.Contains(err.Error(), "(fb, fb151)") || !strings.Contains(err.Error(), "name an image with --image, for example fb@stable; your images: fb, fb151") {
+	if !strings.Contains(err.Error(), "15.1-RELEASE") || !strings.Contains(err.Error(), "15.2") {
 		t.Fatalf("%v", err)
 	}
 	bad := req

@@ -313,36 +313,14 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 		}
 		image := req.Image
 		if image == "" {
-			// the only FreeBSD image with the alias stable, as the server does
-			var all, found []string
-			for n, im := range s.images.items {
-				all = append(all, n)
-				if im.Spec.OS == api.OSFreeBSD && slices.Contains(im.Spec.Aliases, "stable") {
-					found = append(found, n)
-				}
+			var err *api.Error
+			if image, err = s.defaultAppImage(); err != nil {
+				return reply{err: err}
 			}
-			if len(found) != 1 {
-				slices.Sort(all)
-				slices.Sort(found)
-				example := "freebsd-15@stable"
-				if len(found) > 1 {
-					example = found[0] + "@stable"
-				}
-				yours := "you have no images"
-				if len(all) > 0 {
-					yours = "your images: " + strings.Join(all, ", ")
-				}
-				msg := "no image named, and no FreeBSD image has the alias stable to default to"
-				if len(found) > 1 {
-					msg = fmt.Sprintf("no image named, and %d FreeBSD images have the alias stable (%s), so there is no default", len(found), strings.Join(found, ", "))
-				}
-				return reply{err: api.Errorf(api.CodeInvalid, "%s", msg).WithHint("name an image with --image, for example " + example + "; " + yours)}
-			}
-			image = found[0] + "@stable"
 		}
 		im := s.images.items[imageName(image)]
 		if im == nil {
-			return reply{err: notFound("image", imageName(image)).WithHint("create or import the image first")}
+			return reply{err: notFound("image", imageName(image)).WithHint(s.imageCreateHint(image))}
 		}
 		if !releaseAtLeast(im.Spec.Release, app.Image.ReleaseMin) {
 			return reply{err: api.Errorf(api.CodeInvalid, "image %q is release %s; app %s needs %s or later", imageName(image), im.Spec.Release, name, app.Image.ReleaseMin).
@@ -493,4 +471,47 @@ func releaseAtLeast(release, minimum string) bool {
 	ra, rb, ok1 := num(release)
 	ma, mb, ok2 := num(minimum)
 	return ok1 && ok2 && (ra > ma || ra == ma && rb >= mb)
+}
+
+// defaultAppImage is the image an app is installed from when the request names none, as the server picks it: of the
+// FreeBSD images, the one of the highest release the host runs, the first by name on a tie, by its bare name.
+func (s *Server) defaultAppImage() (string, *api.Error) {
+	host := api.BaseRelease(s.release)
+	var all []string
+	best, bestRel, freebsd := "", "", 0
+	for n, im := range s.images.items {
+		all = append(all, n)
+		if im.Spec.OS != api.OSFreeBSD {
+			continue
+		}
+		freebsd++
+		if !releaseAtLeast(im.Spec.Release, "0.0") || host != "" && releaseAtLeast(host, "0.0") && !releaseAtLeast(host, im.Spec.Release) {
+			continue
+		}
+		newer := best == "" || !releaseAtLeast(bestRel, im.Spec.Release)
+		tie := best != "" && releaseAtLeast(bestRel, im.Spec.Release) && releaseAtLeast(im.Spec.Release, bestRel)
+		if newer || tie && n < best {
+			best, bestRel = n, im.Spec.Release
+		}
+	}
+	if best != "" {
+		return best, nil
+	}
+	slices.Sort(all)
+	yours := "you have no images"
+	if len(all) > 0 {
+		yours = "your images: " + strings.Join(all, ", ")
+	}
+	if freebsd == 0 {
+		hint := api.ImageCreateHint("the base image", "", "", host)
+		if len(all) > 0 {
+			hint += "; " + yours
+		}
+		return "", api.Errorf(api.CodeInvalid, "no image named, and there is no FreeBSD image yet").WithHint(hint)
+	}
+	msg := "no image named, and no FreeBSD image has a release this host can run"
+	if host != "" {
+		msg = fmt.Sprintf("no image named, and every FreeBSD image is of a newer release than this host (%s)", host)
+	}
+	return "", api.Errorf(api.CodeInvalid, "%s", msg).WithHint("name an image with --image; " + yours)
 }

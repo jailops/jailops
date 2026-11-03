@@ -36,7 +36,7 @@ in the table below; everything that has not run on a FreeBSD host is marked UNVE
 | Module 4, updates | Design only |
 | Module 5, system | Design only |
 | Module 6, storage overview | Design only |
-| First-boot wizard | Built in the console (`/setup`), with the modules that exist: account, identity, certificate, firewall, storage and network defaults. The network and pool steps of the design wait for module 3 and the installer. Tested in the console's demo mode and its API against in-process daemons; UNVERIFIED in a browser against a FreeBSD host |
+| First-boot wizard | Built in the console (`/setup`), with the modules that exist: account, identity, certificate, firewall, storage and network defaults, the base image. The network and pool steps of the design wait for module 3 and the installer. Tested in the console's demo mode and its API against in-process daemons; UNVERIFIED in a browser against a FreeBSD host |
 | The console's certificate: upload, ACME | Built ([exposure.md](exposure.md)); the ACME redirect is rendered by the firewall module. UNVERIFIED: issuance by a real CA |
 | Installer image | Design only |
 
@@ -462,7 +462,10 @@ environment (`bectl activate`) and reboots. Owned: nothing in `/etc`; the module
 
 Risks: `/etc` merges after a base upgrade (pkgbase leaves `.pkgsave` files; the module reports them and does not merge
 them by hand), a kernel that does not boot (the boot environment is the answer), and jails whose image generation is
-older than the host (reported; images are upgraded separately, design section 4.3).
+older than the host (reported; images are upgraded separately, design section 4.3). An image is one release: the patch
+levels of the host's release reach the jails through the image's nightly auto upgrade (or `jailops image upgrade`), and a
+new release of the host is followed by a new image (`freebsd-15-2` after 15.2), on which new jails are created; the
+console points this out when the host runs a newer release than its newest FreeBSD image ([upgrade.md](upgrade.md#a-new-release-a-new-image)).
 
 ### 5. System (design)
 
@@ -524,7 +527,17 @@ With `jailops_appliance`, a fresh host starts without any user. Three parts make
   5. **Storage and network defaults**, only what does not exist yet: the pool as storage `default`, a managed network
      `lan` with an IPv4 /24 (10.77.0.0/24 by default) and NAT through the uplink you name, and a project `main` that may
      use them.
-  6. **Done**, with a link to the app catalog.
+  6. **Base image**: the FreeBSD image of the host's release (`environment.kernel_version` of `GET /api/v1`
+     without the patch level; another release of 15.1 or later can be chosen) and architecture, named after the release
+     (`freebsd-15-1`; the name follows the release until it is edited), with **Upgrade automatically every night** on
+     (03:00, packages too; one line in the step says what it does): `POST /api/v1/images` with `spec.auto_upgrade`, then
+     its first generation with `POST /api/v1/images/freebsd-15-1/generations`, followed in the step as an operation (progress, Cancel while it may be
+     cancelled). The build downloads the base system packages and takes minutes; a failed build keeps the definition,
+     says what to check (the network, `pkg.freebsd.org` from the host) and is built again with Try again. When a FreeBSD
+     image exists the step says so. Skipping it is allowed: apps and jails then need an image, which the Images page
+     (Create image) makes later.
+  7. **Done**: **Install your first app** (the app catalog) when an image exists, else **Create the base image** (the
+     Images page with its Create image dialog).
 
 Corrections to the design below: the token is issued by the rc script of `jailopsd` (the daemon makes it; root asks for
 it), not by an installer; the account comes first, because every later step is an API call that needs it; the pool is

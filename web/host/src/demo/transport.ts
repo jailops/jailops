@@ -3,7 +3,7 @@
 // for `?demo`.
 import { storedToken } from '@jailops/shared/api/client'
 import type { EventStream, RawRequest, RawResponse, StreamHandlers, Transport } from '@jailops/shared/api/client'
-import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolicy, AddressSet, Token, Backup, Jail, JailRollback, JailUpgrade, PowerState } from '@jailops/shared/api/types'
+import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolicy, AddressSet, Token, Backup, Jail, JailRollback, JailUpgrade, PowerState, ImageAutoUpgrade } from '@jailops/shared/api/types'
 import * as d from './data'
 import * as d2 from './data2'
 import * as da from './apps'
@@ -16,6 +16,7 @@ import { passwordProblem, validUserName, cleanToken } from '@/lib/setup'
 import { demoForward, unifiedRead, type DemoReply } from './logs'
 import { demoAccess } from './access'
 import { volumeName } from '@/lib/apps'
+import { defaultImage } from '@/lib/images'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
 import { loadChoice, saveChoice } from '@/lib/projectScope'
 
@@ -76,6 +77,16 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     db.jails = []; db.snaps = {} as typeof db.snaps; db.images = []; db.networks = []; db.leases = {} as typeof db.leases
     db.storage = []; db.profiles = { project: [], host: [] } as typeof db.profiles; db.updates = []; db.policies = []; db.sets = []
     db.targets = []; db.bpol = []; db.backups = []; db.remotes = []; db.wireguard = []
+  }
+  // `?demo=noimage`: a host with projects, networks and jails but no image yet (the install and create forms offer
+  // to create the base image)
+  if (typeof location !== 'undefined' && location.search.includes('noimage')) db.images = []
+  // `?demo=newrelease`: the host was upgraded to 15.2 and only the image of 15.1 exists (the new release notice);
+  // `?demo=nightlyfail`: the last nightly upgrade of freebsd-15-1 failed at a jail
+  const newRelease = typeof location !== 'undefined' && location.search.includes('newrelease')
+  if (typeof location !== 'undefined' && location.search.includes('nightlyfail')) {
+    const fb = db.images.find((i) => i.metadata.name === 'freebsd-15-1')
+    if (fb?.status.auto_upgrade) fb.status.auto_upgrade.recent = d.autoUpgradeRuns(true)
   }
   const countByProject = () => { const c: Record<string, number> = {}; for (const j of db.jails) c[j.metadata.project ?? ''] = (c[j.metadata.project ?? ''] ?? 0) + 1; return c }
   db.projects = d2.projects(countByProject())
@@ -154,6 +165,50 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
   }
   const jailOr404 = (n: string): Jail | undefined => db.jails.find((j) => j.metadata.name === n)
+  const flaky = new Set<string>()
+
+  // POST /images: the definition only, checked like service.validateImage and the image sources do
+  function imageCreate(body: Record<string, any>): RawResponse {
+    const name = String(body.metadata?.name ?? '')
+    const sp = (body.spec ?? {}) as import('@jailops/shared/api/types').ImageSpec
+    if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9-]{0,62}$` })
+    if (db.images.some((i) => i.metadata.name === name)) return fail(409, { code: 'already_exists', message: `image "${name}" already exists` })
+    if (!sp.os || !sp.release) return fail(400, { code: 'invalid', message: 'spec.os and spec.release are required' })
+    if (sp.source?.type === 'pkgbase' && !/^[0-9]+\.[0-9]+(-|$)/.test(sp.release)) return fail(400, { code: 'invalid', message: `release "${sp.release}" is not <major>.<minor>-<type>` })
+    if (!['amd64', 'arm64'].includes(sp.arch)) return fail(400, { code: 'invalid', message: `unsupported architecture "${sp.arch}"` })
+    const bad = autoUpgradeProblem(sp.auto_upgrade)
+    if (bad) return bad
+    const img = { metadata: { name, scope: 'fleet' as const, generation: 1, created_at: new Date().toISOString() }, spec: sp, status: { generations: [], aliases: {}, ...autoUpgradeStatus(sp.auto_upgrade) } }
+    db.images.push(img as never)
+    emit('created', `/api/v1/images/${name}`)
+    return { ...ok(img), status: 201 }
+  }
+
+  // spec.auto_upgrade: the time of day is HH:MM, as service.parseAutoUpgradeAt reads it
+  function autoUpgradeProblem(a: ImageAutoUpgrade | undefined): RawResponse | null {
+    if (!a?.at || /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(a.at)) return null
+    return fail(400, { code: 'invalid', message: `auto_upgrade.at "${a.at}" must be a time of day such as 03:00` })
+  }
+  const autoUpgradeStatus = (a: ImageAutoUpgrade | undefined) => (a?.enabled ? { auto_upgrade: { next: d.nextNight(a.at || '03:00') } } : {})
+  // PATCH /images/{name}: a merge patch; the console sends spec.auto_upgrade only
+  function imagePatch(name: string, body: Record<string, any>): RawResponse {
+    const img = db.images.find((i) => i.metadata.name === name)
+    if (!img) return fail(404, { code: 'not_found', message: `Image ${name} not found` })
+    const a = body.spec?.auto_upgrade as ImageAutoUpgrade | null | undefined
+    if (a === null) delete img.spec.auto_upgrade
+    else if (a) {
+      const merged = { ...(img.spec.auto_upgrade ?? { enabled: false }), ...a }
+      const bad = autoUpgradeProblem(merged)
+      if (bad) return bad
+      img.spec.auto_upgrade = merged
+    }
+    const recent = img.status.auto_upgrade?.recent
+    const next = img.spec.auto_upgrade?.enabled ? d.nextNight(img.spec.auto_upgrade.at || '03:00') : undefined
+    img.status.auto_upgrade = next || recent ? { ...(next ? { next } : {}), ...(recent ? { recent } : {}) } : undefined
+    img.metadata.generation = (img.metadata.generation ?? 1) + 1
+    emit('updated', `/api/v1/images/${name}`)
+    return ok(img)
+  }
 
   async function route(req: RawRequest): Promise<RawResponse> {
     await sleep0()
@@ -165,7 +220,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const m = req.method
     const body = (req.body === undefined ? {} : JSON.parse(JSON.stringify(req.body))) as Record<string, any> // the wire is JSON: never keep the caller's reactive objects
 
-    if (path === '' && m === 'GET') return ok({ ...d.server(), auth: authed ? 'trusted' : 'untrusted' })
+    if (path === '' && m === 'GET') {
+      const info = d.server()
+      if (newRelease) info.environment = { ...info.environment, kernel_version: '15.2-RELEASE-p1' }
+      return ok({ ...info, auth: authed ? 'trusted' : 'untrusted' })
+    }
     if (seg[0] === 'setup') return setupRoute(seg, m, body)
     if (seg[0] === 'auth') {
       if (seg[1] === 'session') return authed ? ok({ ...d2.identity(), ...(signedInAs ? { user: signedInAs } : {}), csrf: 'demo-csrf' }) : fail(401, { code: 'unauthorized', message: 'No session.' })
@@ -192,14 +251,31 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     switch (seg[0]) {
       case 'jails': return jailsRoute(seg, m, body, inProject, url)
       case 'images':
+        if (seg.length === 1 && m === 'POST') return imageCreate(body)
         if (seg.length === 1) return ok(db.images)
+        if (seg.length === 2 && m === 'PATCH') return imagePatch(seg[1], body)
         if (seg[2] === 'generations' && m === 'POST') {
           const img = db.images.find((i) => i.metadata.name === seg[1])
           if (!img) return fail(404, { code: 'not_found', message: `Image ${seg[1]} not found` })
-          return startOp(`Build ${seg[1]}#g${(img.status.generations?.length ?? 0) + 1}`, { images: [`/api/v1/images/${seg[1]}`] }, 4000, () => {
-            const n = Math.max(...(img.status.generations ?? []).map((g) => g.number)) + 1
-            img.status.generations!.push({ number: n, name: `${seg[1]}#g${n}`, parent: n - 1, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: 222, created_at: new Date().toISOString(), refs: [] })
+          const gens = (img.status.generations ??= [])
+          const n = Math.max(0, ...gens.map((g) => g.number)) + 1
+          // the first build downloads the whole base system; an image whose name starts with "fail" cannot reach the
+          // package repository (the demo's failed build), one that starts with "flaky" only at its first try
+          const fails = seg[1].startsWith('fail') || (seg[1].startsWith('flaky') && !flaky.has(seg[1]))
+          if (seg[1].startsWith('flaky')) flaky.add(seg[1])
+          const op = startOp(`Build image ${seg[1]}`, { images: [`/api/v1/images/${seg[1]}`] }, 3000, () => {
+            if (fails) return
+            gens.push({ number: n, name: `${seg[1]}#g${n}`, parent: n > 1 ? n - 1 : undefined, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: n === 1 ? 212 : 222, created_at: new Date().toISOString(), refs: [] })
+            // the aliases of the definition follow the newest generation
+            const aliases = (img.status.aliases ??= {})
+            for (const a of img.spec.aliases ?? []) aliases[a] = n
+            emit('image-generation-created', `/api/v1/images/${seg[1]}/generations/${n}`)
           })
+          if (fails) {
+            const o = db.ops[0]
+            o.failure = { code: 'internal', message: 'pkg: https://pkg.freebsd.org/FreeBSD:15:amd64/base_release_1/meta.conf: No address record', hint: 'check that the host reaches the package repository', detail: { step: 'install-sets' } }
+          }
+          return op
         }
         if (seg[2] === 'upgrade' && m === 'POST') {
           const img = db.images.find((i) => i.metadata.name === seg[1])
@@ -421,13 +497,13 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if ((r.scope === 'data' || r.scope === 'all') && !r.confirm_data_loss) return fail(400, { code: 'data_loss_unconfirmed', message: 'This rollback discards data and was not confirmed.', hint: 'Set confirm_data_loss after showing the bytes to the operator.' })
         return startOp(`Rollback ${name} (${r.scope ?? 'root'})`, { jails: [src] }, 2200, () => {
           if (r.scope === 'data' || r.scope === 'all') (db.snaps[name] ?? []).forEach((s) => (s.status.written = 0))
-          if (r.scope !== 'data') j.status.generation = 'freebsd-15#g3'
+          if (r.scope !== 'data') j.status.generation = 'freebsd-15-1#g3'
           emit('jail-rolled-back', src)
         })
       }
       case 'upgrade': {
         const u = body as JailUpgrade
-        const target = u.generation || 'freebsd-15#g5'
+        const target = u.generation || 'freebsd-15-1#g5'
         const preview = {
           from_generation: j.status.generation ?? '', to_generation: target,
           steps: ['Preflight: no dependent clones, replication idle', 'Snapshot all datasets (rollback point)', 'Stop the jail', 'Clone the target generation to root.new', 'Merge /etc with etcupdate', 'Swap root and root.new', 'Start and run the health check'],
@@ -910,7 +986,9 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (!sto) return fail(400, { code: 'invalid', message: `no storage named and project ${project} is granted ${stos.length ? 'several' : 'none'}`, hint: `jailops project show ${project} lists the grants` })
     if (!stos.includes(sto)) return fail(403, { code: 'forbidden', message: `storage ${sto} is not granted to project ${project}`, hint: `jailops project show ${project} lists the grants` })
     const a = det.definition
-    const image = String(body.image || 'freebsd-15@stable')
+    // without a name: the FreeBSD image of the newest release the host runs, as the server picks it
+    const image = String(body.image || defaultImage(db.images, newRelease ? '15.2-RELEASE' : '15.1-RELEASE'))
+    if (!image) return fail(400, { code: 'invalid', message: 'no image named, and there is no FreeBSD image yet', hint: "create the base image with 'jailops image create freebsd-15-1 --release 15.1-RELEASE', then build it with 'jailops image build freebsd-15-1' (the console's Images page does both with Create image)" })
     const steps = da.installSteps(a, jail, project, image)
     const subnet = db.networks.find((x) => x.metadata.name === net)?.spec.ipv4?.subnet ?? '10.20.0.0/24'
     const addr = subnet.replace(/\.\d+\/\d+$/, '') + '.' + (40 + db.jails.length)
@@ -920,7 +998,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const j: Jail = {
       metadata: { name: jail, scope: 'host', project, generation: 1, created_at: new Date().toISOString(), labels: { [da.LABEL]: a.name, [`${da.LABEL}.hash`]: det.hash, [`${da.LABEL}.version`]: version } },
       spec: { image, storage: sto, layout: 'thin', network: [{ network: net, ipv4: addr }], volumes: (a.data ?? []).map((x) => ({ name: volumeName(x.path), mount: x.path })), resources: limits, boot: { autostart: true } },
-      status: { power: 'running', jid: 120 + db.jails.length, generation: 'freebsd-15#g4', addresses: [`${addr}/${subnet.split('/')[1] ?? '24'}`], started_at: new Date().toISOString(), conditions: [{ type: 'Reconciled', status: 'True' }] },
+      status: { power: 'running', jid: 120 + db.jails.length, generation: 'freebsd-15-1#g4', addresses: [`${addr}/${subnet.split('/')[1] ?? '24'}`], started_at: new Date().toISOString(), conditions: [{ type: 'Reconciled', status: 'True' }] },
     }
     const result = {
       app: a.name, hash: det.hash, version, jail: j, addresses: j.status.addresses, ports: (a.ports ?? []).map((x) => ({ ...x, endpoint: `${addr}:${x.port}` })),

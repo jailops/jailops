@@ -131,7 +131,7 @@ tells the confirmation flags apart). Colour is used on a terminal only and
 NO_COLOR turns it off.`,
 		Example: `jailops project create web --new-network
 jailops project switch web
-jailops jail create web --image freebsd-15@stable --network web --storage default
+jailops jail create web --image freebsd-15-1 --network web --storage default
 jailops --remote prod --host host-b jail start web --project web
 jailops events --type lifecycle -o json`,
 		SilenceErrors: true,

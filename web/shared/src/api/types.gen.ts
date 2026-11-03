@@ -998,6 +998,17 @@ export interface ImageAliasSet {
   generation?: number
 }
 
+export interface ImageAutoUpgrade {
+  enabled: boolean
+  at?: string
+  packages?: boolean
+}
+
+export interface ImageAutoUpgradeStatus {
+  next?: string
+  recent?: ImageUpgradeRun[]
+}
+
 export interface ImageBuild {
   from_generation?: number
   dry_run?: boolean
@@ -1035,11 +1046,13 @@ export interface ImageSpec {
   source: ImageSource
   aliases?: string[]
   retention?: ImageRetention
+  auto_upgrade?: ImageAutoUpgrade
 }
 
 export interface ImageStatus {
   generations?: ImageGeneration[]
   aliases?: Record<string, number>
+  auto_upgrade?: ImageAutoUpgradeStatus
 }
 
 export interface ImageUpgrade {
@@ -1066,6 +1079,17 @@ export interface ImageUpgradeResult {
   plan?: string[]
   dry_run?: boolean
   jails: ImageUpgradeJail[]
+}
+
+export interface ImageUpgradeRun {
+  started: string
+  finished: string
+  result: string
+  generation?: string
+  jails_moved?: number
+  jails_upgraded?: number
+  jails_failed?: number
+  detail?: string
 }
 
 export interface Jail {
@@ -1998,7 +2022,7 @@ export const configKeys: readonly ConfigKey[] = [
     "name": "image",
     "type": "string",
     "description": "Image reference: name, name@alias or name#gN. The image name cannot change on a living jail.",
-    "example": "freebsd-15@stable",
+    "example": "freebsd-15-1",
     "restart_required": true,
     "profile": false,
     "path": "image"
@@ -2060,7 +2084,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "nic.\u003cdevice\u003e.egress",
     "type": "rate",
-    "description": "Rate limit of traffic out of the jail, bits per second. UNVERIFIED: not enforced yet; the jail reports a RateLimit condition.",
+    "description": "Rate limit of traffic out of the jail, bits per second. Not enforced yet: the limit is stored and reported only, and the jail reports a RateLimit condition.",
     "example": "10M",
     "restart_required": false,
     "profile": true,
@@ -2069,7 +2093,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "nic.\u003cdevice\u003e.ingress",
     "type": "rate",
-    "description": "Rate limit of traffic into the jail, bits per second. UNVERIFIED: not enforced yet; the jail reports a RateLimit condition.",
+    "description": "Rate limit of traffic into the jail, bits per second. Not enforced yet: the limit is stored and reported only, and the jail reports a RateLimit condition.",
     "example": "10M",
     "restart_required": false,
     "profile": true,
@@ -2123,7 +2147,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "packages",
     "type": "list",
-    "description": "Not yet: creation is refused when set; use the provisioning packages step.",
+    "description": "Cannot be set when a jail is created yet: a create that sets it is refused. Install packages with the provisioning packages step.",
     "example": "nginx,curl",
     "restart_required": true,
     "profile": true,

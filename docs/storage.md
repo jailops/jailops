@@ -45,7 +45,7 @@ A storage cannot be deleted while a project grants it or a jail uses it, and del
 Grant it to a project, with a quota for that project's datasets, and put jails on it:
 
     jailops project set media --storage default --storage bulk=4T
-    jailops create plex --project media --image freebsd-15@stable --network web --storage bulk
+    jailops create plex --project media --image freebsd-15-1 --network web --storage bulk
 
 - **Storage may be shared between projects**; each project gets its own `projects/<project>/` subtree under the root and its
   own quota. (Networks are different: a network belongs to exactly one project.)
@@ -62,7 +62,7 @@ on spinning disks are fine for most services, and a database jail can sit on `de
 
 A volume is a dataset JailOps creates under the jail and mounts at a path:
 
-    jailops create db --project web --image freebsd-15@stable --network lan --storage bulk \
+    jailops create db --project web --image freebsd-15-1 --network lan --storage bulk \
         --volume data:/var/db/postgres:4T
     jailops create web2 ... --volume www:/usr/local/www:ro
 
@@ -77,7 +77,7 @@ management is not part of this version") and changing a `disk.<name>` key of an 
 A volume can be encrypted at rest with native ZFS encryption. You choose it when you create the jail, and you type its
 passphrase after every boot of the host:
 
-    jailops jail create vault --project web --image freebsd-15@stable --network lan --storage default \
+    jailops jail create vault --project web --image freebsd-15-1 --network lan --storage default \
         --volume secrets:/var/db/secrets:encrypted:20G
     The encrypted volumes need a passphrase. It is asked for after every host boot and cannot be recovered when lost.
     Passphrase for the encrypted volumes:
@@ -194,7 +194,7 @@ Two keys, two people:
 
 2. **A global administrator** mounts below one of them:
 
-       jailops create plex --project media --image freebsd-15@stable --network web --storage bulk \
+       jailops create plex --project media --image freebsd-15-1 --network web --storage bulk \
            --host-mount /hdd/archive/movies:/mnt/movies:ro
 
    `--host-mount SOURCE:TARGET[:ro]`, repeatable (`host_mounts` in the jail spec).

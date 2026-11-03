@@ -14,10 +14,6 @@ import (
 // these argument vectors and paths, and the tests of the privileged helper
 // check the same ones against its allow-list.
 
-// DefaultAlias is the alias of the image an app is installed from when none
-// is named: the only FreeBSD image with this alias, as NAME@stable.
-const DefaultAlias = "stable"
-
 // SnapshotName is the snapshot the installer takes of the fresh installation.
 const SnapshotName = "app-installed"
 

@@ -150,7 +150,7 @@ type ImageRef struct {
 func ParseImageRef(s string) (ImageRef, error) {
 	const f = "image"
 	if s == "" {
-		return ImageRef{}, Invalid(f, "an image is required: name one with --image NAME@alias")
+		return ImageRef{}, Invalid(f, "an image is required: name one with --image NAME")
 	}
 	if i := strings.IndexByte(s, '#'); i >= 0 {
 		name, gen := s[:i], s[i+1:]

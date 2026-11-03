@@ -6,7 +6,7 @@ vi.mock('@/api/endpoints', () => ({ api: { jails: { create: (...a: unknown[]) =>
 
 import JailCreateForm from './JailCreateForm.vue'
 
-const image = { metadata: { name: 'freebsd-15' }, spec: { aliases: ['stable'] }, status: { generations: [{ number: 4 }] } }
+const image = { metadata: { name: 'freebsd-15-1' }, spec: { os: 'freebsd', release: '15.1-RELEASE' }, status: { generations: [{ number: 4 }] } }
 const storage = { metadata: { name: 'default' } }
 
 describe('JailCreateForm', () => {
@@ -33,7 +33,7 @@ describe('JailCreateForm', () => {
     await flushPromises()
     expect(create).toHaveBeenCalledWith({
       metadata: { name: 'vault2' },
-      spec: { image: 'freebsd-15@stable', storage: 'default', volumes: [{ name: 'secrets', mount: '/var/db/secrets', encrypted: true }] },
+      spec: { image: 'freebsd-15-1', storage: 'default', volumes: [{ name: 'secrets', mount: '/var/db/secrets', encrypted: true }] },
       volume_passphrase: 'a-long-volume-passphrase',
     })
     expect(w.html()).not.toContain('a-long-volume-passphrase')
@@ -60,6 +60,19 @@ describe('JailCreateForm', () => {
     await flushPromises()
     expect(document.activeElement?.id).toBe('jc-vol')
     expect(create).not.toHaveBeenCalled()
+    w.unmount()
+  })
+
+  it('says in place that there is no image and offers to create the base image', async () => {
+    const w = mount(JailCreateForm, { props: { open: false, project: undefined, images: [], storage: [storage as never], networks: [] }, global: { stubs: { Teleport: true } } })
+    await w.setProps({ open: true })
+    expect(w.get('[data-test="jail-missing"]').text()).toContain('There is no image to start from')
+    expect(w.find('[data-test="jail-create-go"]').exists()).toBe(false)
+    expect(w.get('[data-test="jail-make-image"]').text()).toBe('Create the base image')
+    // the image appears (the list reloads after the build): the form takes it
+    await w.setProps({ images: [image as never] })
+    expect(w.find('[data-test="jail-missing"]').exists()).toBe(false)
+    expect((w.get('#jc-image').element as HTMLSelectElement).value).toBe('freebsd-15-1')
     w.unmount()
   })
 })

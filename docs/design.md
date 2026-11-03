@@ -465,7 +465,7 @@ jailops network create br-web --ipv4 10.50.0.1/24 --ipv6 fd50::1/64
 jailops storage create fast --dataset tank/jailops
 jailops project create web
 jailops project set web --network br-web --storage fast
-jailops create nginx --project web --image freebsd@stable --network br-web --storage fast
+jailops create nginx --project web --image freebsd-15-1 --network br-web --storage fast
 ```
 
 **There is no default project, no default network and no default storage.** A fresh host has no project at all.
@@ -496,7 +496,7 @@ jailops network create br-web --ipv4 10.50.0.1/24 --uplink em0 --nat
 jailops project create web
 jailops project set web --network br-web --storage default
 jailops project switch web
-jailops create nginx --image freebsd@stable --network br-web --storage default
+jailops create nginx --image freebsd-15-1 --network br-web --storage default
 jailops start nginx
 ```
 
@@ -587,7 +587,7 @@ The CLI is small and predictable, and it is the same for one host and a fleet:
 ```
 jailops project switch web          # client-side: the current project of the current remote
 jailops list                        # also: list 'web*' -c name,state --sort age, -o csv, -o compact
-jailops create nginx --image freebsd@stable --network br-web --storage fast --start
+jailops create nginx --image freebsd-15-1 --network br-web --storage fast --start
 jailops stop -l env=prod            # by label selector; --all for every jail of the project
 jailops exec nginx -- /bin/sh       # also: jailops shell nginx
 jailops config show nginx
@@ -730,7 +730,7 @@ them with `jailops app validate`, the daemon's validator run offline by the clie
 `internal/apps/testdata/catalog/`. `GET /api/v1/apps`
 and `/api/v1/apps/<name>` are readable by any authenticated identity (route class `self`). The format, the rules and the
 installation (`POST /api/v1/apps/<name>/install`, operator in the project, extension `app_install`: one operation,
-a thin jail from the only FreeBSD image with the alias `stable` unless one is named, with the data paths as volumes, `pkg -r` from the host through the helper, rc.conf
+a thin jail from the FreeBSD image of the highest release the host can run unless one is named, with the data paths as volumes, `pkg -r` from the host through the helper, rc.conf
 written through the helper's file operations, setup commands and services through the in-jail exec, health check,
 snapshot `app-installed`, labels `jailops.app`, `jailops.app.hash`, `jailops.app.version`; a failure after the first
 start keeps the jail stopped for inspection) are in [apps.md](apps.md). A definition may ask for System V IPC

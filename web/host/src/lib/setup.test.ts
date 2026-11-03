@@ -90,8 +90,8 @@ describe('the remote add commands', () => {
 
 describe('the wizard', () => {
   it('walks the steps in order; only the account cannot be skipped', () => {
-    expect(STEPS.map((s) => nextStep(s))).toEqual(['identity', 'certificate', 'firewall', 'defaults', 'done', 'done'])
-    expect(STEPS.filter(skippable)).toEqual(['identity', 'certificate', 'firewall', 'defaults'])
+    expect(STEPS.map((s) => nextStep(s))).toEqual(['identity', 'certificate', 'firewall', 'defaults', 'image', 'done', 'done'])
+    expect(STEPS.filter(skippable)).toEqual(['identity', 'certificate', 'firewall', 'defaults', 'image'])
   })
   it('proposes ssh from the browser only', () => {
     expect(setupFirewall('203.0.113.5')).toEqual({ template: 'default', ssh: { ports: [22], allow_from: ['203.0.113.5'] }, console: {}, icmp: true })
