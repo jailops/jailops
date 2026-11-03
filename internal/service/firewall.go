@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"slices"
+	"strconv"
 	"strings"
 
 	"jailops.net/jailops/internal/ipam"
@@ -345,25 +347,48 @@ func (s *Service) DeleteAddressSet(ctx context.Context, name string, expect int6
 	if !ks.exists(name) {
 		return notFound("address-set", name)
 	}
+	// Every user is named, so one refusal tells what to change.
+	var users []string
 	pols, _ := s.polKind.p(p.Meta.Name).list()
 	for _, pol := range pols {
 		for _, r := range pol.Spec.Rules {
-			for _, e := range append(append([]string{}, r.From...), r.To...) {
-				if e == "@"+name {
-					return api.Errorf(api.CodeBusy, "address set %q is used by firewall policy %q", name, pol.Meta.Name)
-				}
+			if slices.Contains(r.From, "@"+name) || slices.Contains(r.To, "@"+name) {
+				users = append(users, pol.Meta.Name)
+				break
 			}
 		}
 	}
+	if len(users) > 0 {
+		what := "firewall policy"
+		if len(users) > 1 {
+			what = "firewall policies"
+		}
+		return api.Errorf(api.CodeBusy, "address set %q is used by %s %s", name, what, quoteAll(users)).
+			WithHint(fmt.Sprintf("remove @%s from the rules of %s first", name, strings.Join(users, ", "))).
+			WithDetail("policies", strings.Join(users, ","))
+	}
+	var parents []string
 	sets, _ := ks.list()
 	for _, o := range sets {
-		for _, inc := range o.Spec.Includes {
-			if inc == name {
-				return api.Errorf(api.CodeBusy, "address set %q is included by %q", name, o.Meta.Name)
-			}
+		if slices.Contains(o.Spec.Includes, name) {
+			parents = append(parents, o.Meta.Name)
 		}
 	}
+	if len(parents) > 0 {
+		return api.Errorf(api.CodeBusy, "address set %q is included by %s", name, quoteAll(parents)).
+			WithHint(fmt.Sprintf("remove it from the includes of %s first", strings.Join(parents, ", "))).
+			WithDetail("sets", strings.Join(parents, ","))
+	}
 	return ks.delete(ctx, name, expect)
+}
+
+// quoteAll quotes names and joins them with commas.
+func quoteAll(names []string) string {
+	q := make([]string, len(names))
+	for i, n := range names {
+		q[i] = strconv.Quote(n)
+	}
+	return strings.Join(q, ", ")
 }
 
 // jailAddresses returns the addresses a jail's firewall rules apply to.

@@ -501,6 +501,11 @@ func TestFirewall(t *testing.T) {
 	// A set that a policy uses cannot go.
 	err = fw.AddressSets().Delete(c, "office")
 	wantCode(t, err, api.CodeBusy)
+	// the refusal names the policies, in the message, the hint and the detail
+	var busy *api.Error
+	if !errors.As(err, &busy) || busy.Message != `address set "office" is used by firewall policy "web"` || busy.Detail["policies"] != "web" || !strings.Contains(busy.Hint, "@office") {
+		t.Fatalf("refusal: %+v", err)
+	}
 	j := dtest.WebJail("web")
 	j.Spec.Firewall.Policy = "web"
 	op, err := e.Admin.Jails().Create(c, j)

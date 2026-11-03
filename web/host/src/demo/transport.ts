@@ -3,7 +3,7 @@
 // for `?demo`.
 import { storedToken } from '@jailops/shared/api/client'
 import type { EventStream, RawRequest, RawResponse, StreamHandlers, Transport } from '@jailops/shared/api/client'
-import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolicy, AddressSet, Token, Backup, Jail, JailRollback, JailUpgrade, PowerState, ImageAutoUpgrade } from '@jailops/shared/api/types'
+import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolicy, AddressSet, AddressSetSpec, FirewallRule, Token, Backup, Jail, JailRollback, JailUpgrade, PowerState, ImageAutoUpgrade } from '@jailops/shared/api/types'
 import * as d from './data'
 import * as d2 from './data2'
 import * as da from './apps'
@@ -19,6 +19,7 @@ import { volumeName } from '@/lib/apps'
 import { defaultImage } from '@/lib/images'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
 import { loadChoice, saveChoice } from '@/lib/projectScope'
+import { SET_NAME, setUsers, validateSet, type SetMsgs } from '@/lib/firewall'
 import { labelKeyProblem, labelValueProblem, labelsProblem, MAX_LABELS } from '@/lib/labels'
 
 interface DemoOp extends Operation {
@@ -603,12 +604,44 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     return r
   }
 
+  // The server's texts for a refused address set (internal/validate), so the demo says what the daemon says.
+  const setTexts: SetMsgs = {
+    setRequired: '', setTooLong: '', setBadName: '', setExists: '',
+    setMember: (a) => `address set member "${a}" must be an address or CIDR`,
+    setIncludeName: (n) => `includes "${n}" must match ^[a-z][a-z0-9_]{0,23}$`,
+    setMissing: (n) => `address set "${n}" does not exist`,
+    setCycle: (path) => `address set include cycle: ${path}`,
+  }
+  /** The checks of CreateAddressSet and UpdateAddressSet: name, members, include names, missing sets and cycles. */
+  function setRefused(name: string, spec: AddressSetSpec, inProject: AddressSet[]): RawResponse | null {
+    if (!SET_NAME.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9_]{0,23}$`, detail: { field: 'name' } })
+    const others = Object.fromEntries(inProject.filter((x) => x.metadata.name !== name).map((x) => [x.metadata.name, x.spec]))
+    const e = validateSet(name, { addresses: spec.addresses ?? [], includes: spec.includes }, others, setTexts)
+    if (e.addresses) return fail(400, { code: 'invalid', message: e.addresses, detail: { field: 'addresses' } })
+    if (e.includes) return fail(400, { code: 'invalid', message: e.includes, detail: { field: 'includes' } })
+    return null
+  }
+  const quoted = (xs: string[]) => xs.map((x) => `"${x}"`).join(', ')
+
   function firewallRoute(seg: string[], m: string, body: Record<string, any>, req: RawRequest, project: string): RawResponse {
     const isSet = seg[1] === 'address-sets'
     // policies and address sets belong to a project like jails; the canned ones are the web project's
     const all = (isSet ? db.sets : db.policies) as Array<FirewallPolicy | AddressSet>
     const list = all.filter((x) => (x.metadata.project ?? 'web') === project)
-    if (seg.length === 2 && m === 'POST' && !isSet) {
+    const sets = db.sets.filter((x) => (x.metadata.project ?? 'web') === project)
+    const policies = db.policies.filter((x) => (x.metadata.project ?? 'web') === project)
+    if (seg.length === 2 && m === 'POST' && isSet) {
+      const name = String(body.metadata?.name ?? '')
+      if (sets.some((x) => x.metadata.name === name)) return fail(409, { code: 'already_exists', message: `address-set "${name}" already exists` })
+      const spec: AddressSetSpec = { addresses: body.spec?.addresses ?? [], ...(body.spec?.includes?.length ? { includes: body.spec.includes } : {}) }
+      const refused = setRefused(name, spec, sets)
+      if (refused) return refused
+      const set: AddressSet = { metadata: { name, project, scope: 'fleet', generation: 1, created_at: new Date().toISOString() }, spec }
+      db.sets.push(set)
+      emit('address-set-created', `/api/v1/firewall/address-sets/${name}`)
+      return ok(set, etagOf(1))
+    }
+    if (seg.length === 2 && m === 'POST') {
       const name = String(body.metadata?.name ?? '')
       if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9-]{0,62}$`, detail: { field: 'name' } })
       if (list.some((x) => x.metadata.name === name)) return fail(409, { code: 'already_exists', message: `Policy ${name} already exists.` })
@@ -617,28 +650,62 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       emit('firewall-created', `/api/v1/firewall/policies/${name}`)
       return ok(pol)
     }
-    if (seg.length === 2) return ok(list)
+    if (seg.length === 2) return m === 'GET' ? ok(list) : fail(405, { code: 'invalid', message: `${m} is not allowed here` })
     const item = list.find((x) => x.metadata.name === seg[2])
-    if (!item) return fail(404, { code: 'not_found', message: `${seg[2]} not found` })
+    if (!item) return fail(404, { code: 'not_found', message: `${isSet ? 'address-set' : 'firewall-policy'} "${seg[2]}" not found` })
     if (m === 'GET') return ok(item, etagOf(item.metadata.generation))
-    if (m === 'DELETE' && !isSet) {
-      return startOp(`Delete policy ${seg[2]}`, { firewall: [`/api/v1/firewall/policies/${seg[2]}`] }, 500, () => {
+    if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(item.metadata.generation)) return fail(412, { code: 'conflict', message: 'The object changed since you loaded it.', hint: 'Reload and apply your change again.' })
+    if (m === 'DELETE' && isSet) {
+      // DeleteAddressSet: refused while a rule of a policy names @set or another set includes it
+      const name = seg[2]
+      const users = setUsers(name, policies, sets)
+      if (users.policies.length) {
+        return fail(409, { code: 'busy', message: `address set "${name}" is used by firewall ${users.policies.length > 1 ? 'policies' : 'policy'} ${quoted(users.policies)}`,
+          hint: `remove @${name} from the rules of ${users.policies.join(', ')} first`, detail: { policies: users.policies.join(',') } })
+      }
+      if (users.sets.length) {
+        return fail(409, { code: 'busy', message: `address set "${name}" is included by ${quoted(users.sets)}`,
+          hint: `remove it from the includes of ${users.sets.join(', ')} first`, detail: { sets: users.sets.join(',') } })
+      }
+      db.sets = db.sets.filter((x) => x !== item)
+      emit('address-set-deleted', `/api/v1/firewall/address-sets/${name}`)
+      return ok(null)
+    }
+    if (m === 'DELETE') {
+      // DeletePolicy: not the project's mandatory policy, not while a jail of the project uses it
+      const name = seg[2]
+      const proj = db.projects.find((p) => p.metadata.name === project)
+      if (proj?.spec.firewall === name) return fail(409, { code: 'busy', message: `firewall policy "${name}" is the mandatory policy of project "${project}"`, hint: 'unset spec.firewall on the project first' })
+      const user = db.jails.find((j) => (j.metadata.project ?? '') === project && j.spec.firewall?.policy === name)
+      if (user) return fail(409, { code: 'busy', message: `firewall policy "${name}" is used by jail "${user.metadata.name}"` })
+      return startOp(`Delete policy ${name}`, { firewall: [`/api/v1/firewall/policies/${name}`] }, 500, () => {
         db.policies = db.policies.filter((x) => x !== item)
-        for (const j of db.jails) if (j.spec.firewall?.policy === seg[2] && (j.metadata.project ?? '') === project) delete j.spec.firewall.policy
-        emit('firewall-deleted', `/api/v1/firewall/policies/${seg[2]}`)
+        emit('firewall-deleted', `/api/v1/firewall/policies/${name}`)
       }, undefined, false)
     }
-    if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(item.metadata.generation)) return fail(412, { code: 'conflict', message: 'The object changed since you loaded it.', hint: 'Reload and apply your change again.' })
-    if (!isSet) {
-      const rules = ((body as FirewallPolicy).spec.rules ?? [])
-      for (let i = 0; i < rules.length; i++) {
-        const r = rules[i]
-        if (r.redirect && r.direction !== 'in') return fail(400, { code: 'invalid', message: `rules[${i}]: a redirect is allowed on inbound rules only`, detail: { [`rules[${i}].redirect`]: 'redirect is allowed on inbound rules only' } })
-        for (const a of r.from ?? []) if (a.startsWith('@') && !db.sets.some((s) => s.metadata.name === a.slice(1))) return fail(400, { code: 'invalid', message: `rules[${i}]: unknown address set ${a}`, hint: 'Create the address set first.', detail: { [`rules[${i}].from`]: `unknown address set ${a}` } })
+    if (m !== 'PUT' && m !== 'PATCH') return fail(405, { code: 'invalid', message: `${m} is not allowed here` })
+    // a merge patch keeps what it does not name; a PUT replaces the spec
+    const spec = (m === 'PATCH' ? { ...item.spec, ...(body.spec ?? {}) } : body.spec ?? {}) as Record<string, any>
+    if (body.metadata?.name && body.metadata.name !== seg[2]) return fail(400, { code: 'invalid', message: 'renaming is not supported' })
+    if (isSet) {
+      const next: AddressSetSpec = { addresses: spec.addresses ?? [], ...(spec.includes?.length ? { includes: spec.includes } : {}) }
+      const refused = setRefused(seg[2], next, sets)
+      if (refused) return refused
+      item.spec = next
+      item.metadata.generation = (item.metadata.generation ?? 0) + 1
+      emit('address-set-updated', `/api/v1/firewall/address-sets/${seg[2]}`)
+      return ok(item, etagOf(item.metadata.generation))
+    }
+    const rules = (spec.rules ?? []) as FirewallRule[]
+    for (let i = 0; i < rules.length; i++) {
+      const r = rules[i]
+      if (r.redirect && r.direction !== 'in') return fail(400, { code: 'invalid', message: `rules[${i}]: a redirect is allowed on inbound rules only`, detail: { [`rules[${i}].redirect`]: 'redirect is allowed on inbound rules only' } })
+      for (const k of ['from', 'to'] as const) {
+        for (const a of r[k] ?? []) if (a.startsWith('@') && !sets.some((x) => x.metadata.name === a.slice(1))) return fail(400, { code: 'invalid', message: `rules[${i}]: unknown address set ${a}`, hint: 'Create the address set first.', detail: { [`rules[${i}].${k}`]: `unknown address set ${a}` } })
       }
     }
     return startOp(`Save ${seg[2]}`, { firewall: [`/api/v1/firewall/${seg[1]}/${seg[2]}`] }, 700, () => {
-      item.spec = (body as FirewallPolicy).spec as never
+      item.spec = spec as never
       item.metadata.generation = (item.metadata.generation ?? 0) + 1
       emit('firewall-updated', `/api/v1/firewall/${seg[1]}/${seg[2]}`)
     }, undefined, false)
