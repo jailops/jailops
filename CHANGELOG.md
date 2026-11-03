@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **Address sets are created and deleted in the console.** The Address sets tab of the Firewall page has **Add set**
+  (name, members, includes, checked as the server checks them), **Delete set** (lists the policies and sets that use it
+  and shows the server's refusal) and an empty state; Save is labelled **Save set**.
+- Fixed: the Address sets tab could render nothing, or show its list and lose it again, and saving a firewall policy
+  failed: the editors copied a reactive object with `structuredClone`, which throws.
+- Deleting an address set in use names every policy (or set) that uses it, with a hint and `detail.policies` /
+  `detail.sets`.
+- Demo: address sets can be created and deleted; a policy in use or mandatory is no longer deleted (the server refuses
+  both); a rule's `to` is checked for unknown sets as `from` is.
+
 ## 0.6.0 - 2026-11-03
 
 - **New jails come with bash and a coloured prompt** ([shell.md](docs/shell.md)). A new FreeBSD jail gets bash, installed

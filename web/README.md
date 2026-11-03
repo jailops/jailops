@@ -129,6 +129,18 @@ checks it again. A jail page opens on the tab used last for that jail.
 In the demo the project `web` has thirteen jails with labels (`env`, `team`, `app`, `role`; `api` carries ten), the
 staging project two; the demo accepts the label patch and checks the rules as the server does.
 
+## Firewall (host console)
+
+`/firewall` has two tabs, Policies and Address sets (`?tab=sets`), both of the current project. **Create policy** and
+**Add set** open a dialog; a policy is edited rule by rule and saved with If-Match, and deleted with its name typed while
+jails use it (the server refuses until they use another policy). An address set (`src/components/AddressSetCreateDialog.vue`,
+the checks in `lib/firewall.ts`) has a name (`^[a-z][a-z0-9_]{0,23}$`), members (one address or CIDR per line; empty is
+allowed) and includes (other sets, comma separated); the form refuses what the server refuses, an include that does not
+exist or closes a cycle among them. The editor of a set says which policies and sets use it; **Delete set** lists them
+and shows the server's refusal (`busy`, with the policies in `detail.policies`) while any is left. A project without sets
+shows an empty state with **Add set**. The demo checks names, members, includes and cycles as the server does, refuses a
+set in use and a policy in use or mandatory, and keeps what was created until the page is reloaded.
+
 ## Rules, enforced by `web/tests/architecture.test.ts`
 
 - An app imports `shared` and itself, never another app. Shared imports no app.

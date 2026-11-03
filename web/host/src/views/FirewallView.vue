@@ -6,7 +6,7 @@ import { api } from '@/api/endpoints'
 import { ApiError } from '@jailops/shared/api/client'
 import { useLoad } from '@jailops/shared/composables/load'
 import { runOp } from '@jailops/shared/composables/ops'
-import { blankRule, detailToRuleErrors, splitList, validateRules, type RuleErrors } from '@/lib/firewall'
+import { blankRule, detailToRuleErrors, detailToSetErrors, setSpec, setUsers, splitList, validateRules, validateSet, type RuleErrors, type SetErrors } from '@/lib/firewall'
 import { confirmAction } from '@jailops/shared/composables/confirm'
 import { useTabQuery } from '@jailops/shared/composables/tabs'
 import { useFormCheck } from '@jailops/shared/composables/form'
@@ -17,6 +17,7 @@ import Modal from '@jailops/shared/components/Modal.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
+import AddressSetCreateDialog from '@/components/AddressSetCreateDialog.vue'
 import type { FirewallPolicy, AddressSet, FirewallRule } from '@jailops/shared/api/types'
 
 const l = useLoad(async () => {
@@ -43,6 +44,11 @@ const setEtag = ref<string | undefined>()
 const setText = ref('')
 const setInc = ref('')
 const setError = ref<ApiError | null>(null)
+const setErrors = ref<SetErrors>({})
+const setSaving = ref(false)
+// a pick that was overtaken by a newer one (another set, another project) drops its answer
+let pickSeq = 0
+let setSeq = 0
 
 watch(() => l.data.value, (d) => {
   if (!d) return
@@ -51,25 +57,32 @@ watch(() => l.data.value, (d) => {
   if (want) { wantDone = true; void pick(want) }
   else if ((!selected.value || !d.policies.some((p) => p.metadata.name === selected.value)) && d.policies.length) void pick(d.policies[0].metadata.name)
   else if (!d.policies.length) { selected.value = ''; draft.value = null }
-  if (!setSel.value && d.sets.length) void pickSet(d.sets[0].metadata.name)
+  // the selected set stays while it exists; after a delete or a project switch the first one is shown, or none
+  if (!setSel.value || !d.sets.some((x) => x.metadata.name === setSel.value)) {
+    if (d.sets.length) void pickSet(d.sets[0].metadata.name)
+    else { setSeq++; setSel.value = ''; setDraft.value = null }
+  }
 }, { immediate: true })
 
 const dirty = computed(() => !!draft.value && JSON.stringify(draft.value) !== original.value)
-const setDirty = computed(() => !!setDraft.value && JSON.stringify(withSetText()) !== setOriginal.value)
+const setNow = computed(() => setSpec(setText.value, setInc.value))
+const setDirty = computed(() => !!setDraft.value && JSON.stringify(setNow.value) !== setOriginal.value)
 const attached = computed(() => (l.data.value?.jails ?? []).filter((j) => j.spec.firewall?.policy === selected.value).map((j) => j.metadata.name))
 
 async function pick(n: string): Promise<void> {
   selected.value = n
   apiError.value = null
   fieldErrors.value = {}
+  const mine = ++pickSeq
   try {
     const r = await api.firewall.policy(n)
+    if (mine !== pickSeq) return
     r.data.spec.rules ??= []
     draft.value = structuredClone(r.data)
     original.value = JSON.stringify(r.data)
     etag.value = r.etag
   } catch (e) {
-    apiError.value = e instanceof ApiError ? e : null
+    if (mine === pickSeq) apiError.value = e instanceof ApiError ? e : null
   }
 }
 function revert(): void {
@@ -96,8 +109,10 @@ function list(r: FirewallRule, k: 'from' | 'to' | 'ports', v: string): void {
 function toggleRedirect(r: FirewallRule, on: boolean): void {
   r.redirect = on ? { host_port: 8080, jail_port: 80 } : undefined
 }
+// A copy through JSON: the draft is a reactive proxy, which structuredClone refuses.
+const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v))
 function clean(p: FirewallPolicy): FirewallPolicy {
-  const c = structuredClone(p)
+  const c = copy(p)
   c.spec.rules = (c.spec.rules ?? []).map((r) => {
     const x = { ...r }
     if (!x.name) delete x.name
@@ -136,34 +151,73 @@ async function save(): Promise<void> {
 async function pickSet(n: string): Promise<void> {
   setSel.value = n
   setError.value = null
+  setErrors.value = {}
+  const mine = ++setSeq
   try {
     const r = await api.firewall.addressSet(n)
-    setDraft.value = structuredClone(r.data)
-    setOriginal.value = JSON.stringify(r.data)
+    if (mine !== setSeq) return
+    setDraft.value = r.data
     setText.value = (r.data.spec.addresses ?? []).join('\n')
     setInc.value = (r.data.spec.includes ?? []).join(', ')
+    setOriginal.value = JSON.stringify(setSpec(setText.value, setInc.value))
     setEtag.value = r.etag
   } catch (e) {
-    setError.value = e instanceof ApiError ? e : null
+    if (mine === setSeq) setError.value = e instanceof ApiError ? e : null
   }
 }
-function withSetText(): AddressSet {
-  const d = structuredClone(setDraft.value!)
-  d.spec.addresses = splitList(setText.value)
-  const inc = splitList(setInc.value)
-  if (inc.length) d.spec.includes = inc
-  else delete d.spec.includes
-  return d
-}
-async function saveSet(): Promise<void> {
+function revertSet(): void {
   if (!setDraft.value) return
+  setText.value = (setDraft.value.spec.addresses ?? []).join('\n')
+  setInc.value = (setDraft.value.spec.includes ?? []).join(', ')
+  setErrors.value = {}
   setError.value = null
-  try {
-    await runOp(s.firewall.saveSetTitle(setSel.value), () => api.firewall.putAddressSet(withSetText(), setEtag.value))
-    await pickSet(setSel.value)
-  } catch (e) {
-    setError.value = e instanceof ApiError ? e : null
+}
+const setOthers = computed(() => Object.fromEntries((l.data.value?.sets ?? []).filter((x) => x.metadata.name !== setSel.value).map((x) => [x.metadata.name, x.spec])))
+const setCheck = computed(() => validateSet(setSel.value, setNow.value, setOthers.value, s.firewall))
+/** Why Save set does nothing yet, next to the button. */
+const setWhy = computed(() => (!setDirty.value ? s.firewall.noSetChange : Object.keys(setCheck.value).length ? s.firewall.fixSet : ''))
+const users = computed(() => setUsers(setSel.value, l.data.value?.policies ?? [], l.data.value?.sets ?? []))
+async function saveSet(): Promise<void> {
+  if (!setDraft.value || !setDirty.value || setSaving.value) return
+  setErrors.value = setCheck.value
+  setError.value = null
+  if (setErrors.value.addresses || setErrors.value.includes) {
+    document.getElementById(setErrors.value.addresses ? 'sa' : 'si')?.focus()
+    return
   }
+  setSaving.value = true
+  const name = setSel.value
+  try {
+    await runOp(s.firewall.saveSetTitle(name), () => api.firewall.putAddressSet({ metadata: copy(setDraft.value!.metadata), spec: setNow.value }, setEtag.value))
+    await l.reload()
+    await pickSet(name)
+  } catch (e) {
+    setError.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
+    setErrors.value = detailToSetErrors(setError.value)
+  } finally {
+    setSaving.value = false
+  }
+}
+const creatingSet = ref(false)
+async function setCreated(name: string): Promise<void> {
+  creatingSet.value = false
+  setSel.value = name
+  await l.reload()
+  await pickSet(name)
+}
+// Tier 2: a set holds no data of its own. While rules or other sets use it the server refuses, and the dialog
+// shows the refusal; the users are listed up front.
+function removeSet(): void {
+  const name = setSel.value
+  const u = users.value
+  const items = [...u.policies.map((p) => `${s.firewall.policy} ${p}`), ...u.sets.map((x) => `@${x}`)]
+  confirmAction({
+    title: s.firewall.deleteSetTitle(name), confirmLabel: s.firewall.deleteSet, danger: true,
+    text: items.length ? `${s.firewall.deleteSetText} ${s.firewall.deleteSetUsed(name)}` : s.firewall.deleteSetText,
+    items, itemsLabel: s.firewall.setUsers,
+    run: () => runOp(s.firewall.deleteSetOp(name), () => api.firewall.deleteAddressSet(name)),
+    done: () => { setSeq++; setSel.value = ''; setDraft.value = null; void l.reload() },
+  })
 }
 const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
 
@@ -190,7 +244,7 @@ const create = () => createCheck.submit(async () => {
     createError.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
   }
 })
-// Tier 3 while jails use the policy (they fall back to the host default), tier 2 otherwise.
+// Tier 3 while jails use the policy (the server refuses until they are moved), tier 2 otherwise.
 function removePolicy(): void {
   const name = selected.value
   const jails = attached.value
@@ -206,7 +260,7 @@ function removePolicy(): void {
 
 <template>
   <div>
-    <div class="page-head"><h1>{{ s.firewall.title }}</h1><button v-if="tab === 'policies'" class="btn btn-primary" type="button" data-test="new-policy" @click="openCreate"><Icon name="plus" />{{ s.firewall.create }}</button></div>
+    <div class="page-head"><h1>{{ s.firewall.title }}</h1><button v-if="tab === 'policies'" class="btn btn-primary" type="button" data-test="new-policy" @click="openCreate"><Icon name="plus" />{{ s.firewall.create }}</button><button v-else-if="l.data.value?.sets.length" class="btn btn-primary" type="button" data-test="new-set" @click="creatingSet = true"><Icon name="plus" />{{ s.firewall.addSet }}</button></div>
     <TabBar v-model="tab" :tabs="tabItems" :label="s.firewall.sections" id="fw" />
     <div id="fw-panel" role="tabpanel" :aria-labelledby="`fw-tab-${tab}`">
     <LoadState :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
@@ -282,25 +336,45 @@ function removePolicy(): void {
         </section>
       </div>
 
+      <div v-else-if="!l.data.value?.sets.length" class="panel empty-sets" data-test="sets-empty">
+        <div class="body stack">
+          <h2>{{ s.firewall.emptySets }}</h2>
+          <p class="muted">{{ s.firewall.emptySetsText }}</p>
+          <div><button class="btn btn-primary" type="button" data-test="new-set-empty" @click="creatingSet = true"><Icon name="plus" />{{ s.firewall.addSet }}</button></div>
+        </div>
+      </div>
       <div v-else class="fw-layout">
-        <ul class="plain picker" :aria-label="s.firewall.sets">
-          <li v-for="a in l.data.value?.sets" :key="a.metadata.name"><button type="button" class="btn btn-ghost mono" :class="{ sel: setSel === a.metadata.name }" @click="pickSet(a.metadata.name)">@{{ a.metadata.name }}</button></li>
-          <li v-if="!l.data.value?.sets.length" class="muted">{{ s.firewall.emptySets }}</li>
+        <ul class="plain picker" :aria-label="s.firewall.sets" data-test="set-list">
+          <li v-for="a in l.data.value?.sets" :key="a.metadata.name"><button type="button" class="btn btn-ghost mono" :class="{ sel: setSel === a.metadata.name }" :aria-current="setSel === a.metadata.name" @click="pickSet(a.metadata.name)">@{{ a.metadata.name }}</button></li>
         </ul>
-        <section v-if="setDraft" class="panel">
+        <section v-if="setDraft" class="panel" data-test="set-editor">
           <header>
-            <h2 class="mono">@{{ setDraft.metadata.name }}</h2>
-            <button class="btn btn-primary" type="button" :disabled="!setDirty" @click="saveSet">{{ s.firewall.save }}</button>
+            <div class="row"><h2 class="mono">@{{ setDraft.metadata.name }}</h2><span v-if="setDirty" class="pill warn">{{ s.firewall.unsaved }}</span></div>
+            <div class="row-actions">
+              <span v-if="setWhy" class="why-disabled" data-test="set-save-why">{{ setWhy }}</span>
+              <button class="btn btn-danger" type="button" data-test="delete-set" @click="removeSet">{{ s.firewall.deleteSet }}</button>
+              <button class="btn" type="button" :disabled="!setDirty" @click="revertSet">{{ s.firewall.revert }}</button>
+              <button class="btn btn-primary" type="button" :disabled="setSaving" :aria-disabled="!!setWhy" data-test="save-set" @click="saveSet">{{ s.firewall.saveSet }}</button>
+            </div>
           </header>
           <div class="body stack">
             <ErrorPanel v-if="setError" :error="setError" />
-            <div class="field"><label for="sa">{{ s.firewall.addresses }}</label><textarea id="sa" v-model="setText" rows="8" spellcheck="false"></textarea></div>
-            <div class="field"><label for="si">{{ s.firewall.includes }}</label><input id="si" v-model="setInc" class="mono" type="text" /></div>
+            <p v-if="users.policies.length || users.sets.length" class="muted" data-test="set-users">{{ s.firewall.setUsedBy }}:
+              <template v-for="(n, i) in users.policies" :key="'p' + n">{{ i ? ', ' : '' }}<router-link :to="`/firewall?policy=${n}`" class="mono">{{ n }}</router-link></template><template v-for="(n, i) in users.sets" :key="'s' + n">{{ i || users.policies.length ? ', ' : '' }}<span class="mono">@{{ n }}</span></template></p>
+            <div class="field"><label for="sa">{{ s.firewall.addresses }}</label>
+              <textarea id="sa" v-model="setText" class="mono" rows="8" spellcheck="false" :aria-invalid="!!setErrors.addresses" aria-describedby="sa-h sa-e" @input="setErrors.addresses = undefined"></textarea>
+              <span id="sa-h" class="hint">{{ s.firewall.membersHint }}</span>
+              <span id="sa-e" class="field-error" role="alert">{{ setErrors.addresses }}</span></div>
+            <div class="field"><label for="si">{{ s.firewall.includes }}</label>
+              <input id="si" v-model="setInc" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!setErrors.includes" aria-describedby="si-h si-e" @input="setErrors.includes = undefined" />
+              <span id="si-h" class="hint">{{ s.firewall.includesHint }}</span>
+              <span id="si-e" class="field-error" role="alert">{{ setErrors.includes }}</span></div>
           </div>
         </section>
       </div>
     </LoadState>
     </div>
+    <AddressSetCreateDialog :open="creatingSet" :sets="l.data.value?.sets ?? []" @close="creatingSet = false" @created="setCreated" />
     <Modal :open="creating" :title="s.firewall.createTitle" @close="creating = false">
       <form id="fwp" novalidate @submit.prevent="create">
         <div class="field"><label for="fwp-name">{{ s.firewall.name }} <span class="req" aria-hidden="true">*</span></label>

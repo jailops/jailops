@@ -150,6 +150,8 @@ export const api = {
     /** PUT replaces the object; If-Match carries the generation so a concurrent edit is a 412. */
     putPolicy: (p: FirewallPolicy, etag?: string) => c().mutate('PUT', `/firewall/policies/${e(p.metadata.name)}`, p, { etag }),
     putAddressSet: (a: AddressSet, etag?: string) => c().mutate('PUT', `/firewall/address-sets/${e(a.metadata.name)}`, a, { etag }),
+    createAddressSet: (a: Pick<AddressSet, 'metadata' | 'spec'>) => c().mutate<AddressSet>('POST', '/firewall/address-sets', a),
+    deleteAddressSet: (n: string) => c().mutate('DELETE', `/firewall/address-sets/${e(n)}`),
     createPolicy: (p: Pick<FirewallPolicy, 'metadata' | 'spec'>) => c().mutate<FirewallPolicy>('POST', '/firewall/policies', p),
     deletePolicy: (n: string) => c().mutate('DELETE', `/firewall/policies/${e(n)}`),
   },
