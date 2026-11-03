@@ -661,8 +661,20 @@ func (s *Service) upgradeImageRun(ctx context.Context, h *OpHandle, mgr *imagege
 		switch {
 		case t.skip != "":
 			j.Status, j.Reason = api.ImageUpgradeSkipped, t.skip
+		case res.Unchanged && t.jail.Status.Generation == imagegen.GenerationName(image, from):
+			j.Status, j.Reason = api.ImageUpgradeSkipped, "already on the newest generation"
+		case res.Unchanged && req.DryRun:
+			j.Status, j.To = api.ImageUpgradePlanned, imagegen.GenerationName(image, from)
+		case res.Unchanged && req.NoJails:
+			j.Status, j.Reason = api.ImageUpgradeNotAttempted, "no_jails was set"
+		case res.Unchanged && stopped != "":
+			j.Status, j.Reason = api.ImageUpgradeNotAttempted, "stopped after "+stopped+" failed"
 		case res.Unchanged:
-			j.Status, j.Reason = api.ImageUpgradeSkipped, "the package set did not change"
+			// nothing new was built, but this jail is still on an older generation (an earlier run stopped before it)
+			j = s.moveJailToImage(ctx, h, t, imagegen.GenerationName(image, from), scheduled)
+			if j.Status == api.ImageUpgradeFailed {
+				stopped = jailDisplay(j.Project, j.Jail)
+			}
 		case req.DryRun:
 			j.Status, j.To = api.ImageUpgradePlanned, imagegen.GenerationName(image, from+1)
 		case req.NoJails:
@@ -678,7 +690,11 @@ func (s *Service) upgradeImageRun(ctx context.Context, h *OpHandle, mgr *imagege
 		out.Jails = append(out.Jails, j)
 		h.Progress((i + 1) * 100 / (len(targets) + 1))
 	}
-	if !req.DryRun && !res.Unchanged {
+	moved := false
+	for _, j := range out.Jails {
+		moved = moved || j.Status == api.ImageUpgradeUpgraded
+	}
+	if !req.DryRun && (!res.Unchanged || moved) {
 		s.emit(ctx, "image-upgraded", "/api/v1/images/"+image)
 	}
 	return out, nil

@@ -460,6 +460,21 @@ func (e *Env) script() {
 				}
 			}
 		case "query":
+			if len(rest) == 1 && rest[0] == "%n" { // the installed packages: the base, and what the upgrade dry run names
+				e.sysmu.Lock()
+				dry := e.pkgDry
+				e.sysmu.Unlock()
+				var sb strings.Builder
+				sb.WriteString("FreeBSD-runtime\nFreeBSD-utilities\n")
+				for _, l := range strings.Split(dry, "\n") {
+					if t := strings.TrimSpace(l); strings.Contains(t, " -> ") {
+						if name, _, ok := strings.Cut(t, ":"); ok {
+							sb.WriteString(name + "\n")
+						}
+					}
+				}
+				return run.Result{Stdout: []byte(sb.String())}, nil
+			}
 			if len(rest) == 2 && rest[0] == "%v" { // the version of one package
 				if b, ok := e.Files.Get(root + "/.app-pkgs/" + rest[1]); ok {
 					_, v, _ := strings.Cut(strings.TrimSpace(string(b)), " ")

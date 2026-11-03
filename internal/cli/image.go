@@ -308,8 +308,10 @@ jailops image auto-upgrade freebsd-15-1 off`,
 func (a *app) emitImageUpgrade(image string, res api.ImageUpgradeResult) error {
 	if a.format == fmtTable {
 		switch {
-		case res.Unchanged:
+		case res.Unchanged && !anyJailMoved(res):
 			fprintf(a.env.Stdout, "image/%s unchanged: %s already has the current package set; nothing to upgrade\n", image, res.From)
+		case res.Unchanged:
+			fprintf(a.env.Stdout, "image/%s: %s already has the current package set; the jails that were behind moved to it\n", image, res.From)
 		case res.DryRun:
 			n := 0
 			for _, j := range res.Jails {
@@ -579,4 +581,14 @@ func (a *app) imageDeleteGen(d *kindDesc[api.Image]) *cobra.Command {
 			return a.finishOp(cmd.Context(), h, "generation", label, "deleted", nil)
 		},
 	}
+}
+
+// anyJailMoved says whether an image upgrade moved a jail.
+func anyJailMoved(res api.ImageUpgradeResult) bool {
+	for _, j := range res.Jails {
+		if j.Status == api.ImageUpgradeUpgraded {
+			return true
+		}
+	}
+	return false
 }
