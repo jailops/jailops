@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+- **New jails come with bash and a coloured prompt** ([shell.md](docs/shell.md)). A new FreeBSD jail gets bash, installed
+  from the host's package repository at its first start (`pkg -r ROOT install -y bash`, as an app installation does), as
+  the shell of `jailops shell` and the console, and a light blue `user@host:dir#` prompt for every user of the jail, so a
+  shell in a jail is recognisable at a glance. The prompt is one file JailOps owns,
+  `/usr/local/etc/profile.d/jailops-prompt.sh`, sourced from a marked block at the top of `/usr/local/etc/profile` and
+  `/usr/local/etc/bash.bashrc` (the files the FreeBSD bash package reads); all of it lives in the persistent
+  `/usr/local` and survives OS updates, and a user's own `~/.bashrc` wins. The keys: `shell` (now also the names `bash`
+  and `sh`) and the new `prompt` (`default`, `none` or a PS1 text; written at once into a running jail), `jailops create
+  --shell sh` and `--prompt`, the Shell field of the console's jail form, and `jails.shell`, `jails.prompt`,
+  `jails.prompt_color` in `jailopsd.yaml` for the defaults. A prompt is checked by an allow-list: nothing in it can run a
+  command (no quotes, no backquotes, `$` only as `\$`, only bash's prompt escapes, no `\\` and no octal escapes but
+  `\033` and `\007`). Existing jails are not changed: `jailops jail shell-setup NAME` (and **Install bash and the
+  prompt** on the console's Console tab) gives one what a new jail gets. A setup that fails (no package repository) does
+  not fail the start: it is the jail's `ShellSetup` condition. Linux jails are left alone. The host's green prompt is a
+  paste in the same document; JailOps does not edit the host's shell files.
+- **A shell session finds what packages installed.** `jailops shell` and the console start the shell with
+  `PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin` and `HOME=/root` (before, `/usr/local/bin` was
+  missing and HOME unset), and from a terminal `jailops shell` and `jailops exec -t` pass `TERM`, so bash edits lines
+  instead of assuming a dumb terminal. The console's terminal draws the 256 colours.
+- **Get to a jail and into its shell fast (host console).**
+  - **Quick switcher**: `Ctrl+K` (`Cmd+K`), `/` where no text is typed, or the Search button in the side bar (top bar on
+    a phone). It finds jails by name, image, address, label (`env=prod`, `team:`, `-tier=edge`) and app, the app catalog,
+    images, networks, projects, storage and the console's pages, ranked whole name, prefix, part, anywhere, then letters
+    in order; empty, it shows the recent items. **Every project** searches all the projects the identity may use. A jail
+    row has its quick actions: Shell (`Shift+Enter`), Logs (`Alt+L`), Start or Stop (`Alt+S`, stop asks first). Keyboard
+    and screen reader friendly (dialog, combobox, grouped listbox, results announced), capped per group with "refine your
+    search", in memory so thousands of jails stay fast.
+  - **Labels you can see and change**: chips in the jail list, on the jail page and in the installed apps; a click
+    filters the list. The list's filter reads `key=value`, `key:`, `-key=value` and words, suggests the keys and values the
+    jails carry, lives in the address (`/jails?q=env%3Dprod`, shareable, the back button undoes a chip) and is remembered
+    per user and project. **Edit labels** on the jail page, **Labels** for the selected jails (set or remove one) and a
+    labels field in **Create jail**; each change is a merge patch of `metadata.labels` with the existing `PATCH
+    /api/v1/jails/{name}` (admin in the project). The console checks the server's label rules, on the same test cases
+    (`sdk/api/testdata/labels.json`, new `TestLabelRulesFixture`). Keys starting with `jailops.` are shown, not edited.
+    New page [docs/labels.md](docs/labels.md).
+  - **Shell in one click**: a Shell button on every running jail of the list and on the jail page; `/jails/NAME/shell`
+    opens the Console tab connected (shareable). A stopped jail offers **Start and open shell** (start, then connect when
+    it runs). The Console tab says which shell runs as whom and shows the same shell's command line (`jailops shell NAME
+    --project P`) with a copy button. The tab and the buttons are offered only with the `jail_console` extension to an
+    operator or admin of the project, the right `jailops exec` needs; nothing changed on the server. A jail page opens on
+    the tab used last for that jail.
+  - Fixes on the way: a jail page reached from another jail's page (the switcher) shows the new jail, not the old one; on a
+    phone the select box of a jail card takes the tap; the terminal's 16 colours are readable on its dark background.
+
 - **An image is one release.** Images are named after their FreeBSD release, `freebsd-15-1` for 15.1-RELEASE; their
   generations are the release's patch levels, made with `jailops image upgrade freebsd-15-1`. A new release is a new
   image (`jailops image create freebsd-15-2 --release 15.2-RELEASE`), created after the host's upgrade; jails stay on
@@ -10,8 +54,8 @@
   longer propose an alias: jails and apps name the image (`--image freebsd-15-1`, its newest generation). Aliases still
   work for whoever sets them.
 - **Nightly auto upgrade per image.** `jailops image auto-upgrade freebsd-15-1 on [--at 03:00] [--no-packages]` (`off`
-  stops it), the checkbox **Upgrade automatically every night** on the Images page and in Create image (on by default for
-  a new FreeBSD image), and `spec.auto_upgrade` of `PATCH /api/v1/images/{name}`: every night at the chosen time (the
+  stops it), the checkbox **Upgrade automatically every night** on the Images page and in Create image (off until it is ticked:
+  nothing is upgraded unless the owner asked), and `spec.auto_upgrade` of `PATCH /api/v1/images/{name}`: every night at the chosen time (the
   host's time zone) the image gets its next generation, its thin jails move to it one at a time with the health check and
   the automatic rollback (the run stops at the first jail that fails), and with packages on the packages inside the jails
   are upgraded. Jails whose update strategy is manual or in place are left alone; a host that was off at that time runs it
@@ -28,6 +72,13 @@
   image for 15.2-PRERELEASE failed with "No trusted public keys found". Checked with the whole end-to-end flow on
   FreeBSD 15.2-PRERELEASE.
 - The event `image-upgrade-failed` is raised when a nightly run fails.
+- Backup snapshot names carry eight random hex digits instead of four (two jobs of one jail in the same second collided
+  in a test under load).
+- **Nothing is upgraded unless it was asked for, and a Debian jail is never touched.** The nightly upgrade is off until
+  it is turned on (also in Create image and in the first-run wizard: the box is unticked). `jailops update check` and
+  `apply`, the managed schedules and the nightly run drive `pkg` (FreeBSD jails) and `apk` (Alpine jails) only; a Debian
+  jail, or any other Linux jail, keeps its own packages (for instance with unattended-upgrades) and JailOps never runs
+  `apt` in it.
 - **An image upgrade moves the jails that are behind even when it built nothing.** A run that stopped at a failing jail
   left the jails after it on the old generation, and the next run, finding no new packages, skipped them as "the
   package set did not change". They now move to the newest generation (`jailops image upgrade` says so).

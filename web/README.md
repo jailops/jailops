@@ -61,7 +61,7 @@ progress (`composables/imageCreate.ts`; a failed build keeps the definition and 
 defaults to the host's (`environment.kernel_version` of `GET /api/v1` without the patch level) and nothing older than 15.1
 is offered; the architecture is the host's. The name is proposed from the release (`freebsd-` major `-` minor, so
 15.1-RELEASE gives `freebsd-15-1`) and follows the release select until it is edited. No alias is offered. The nightly auto
-upgrade is a checkbox of the dialog, on by default for a new FreeBSD image. An empty page offers the dialog as its first
+upgrade is a checkbox of the dialog, off until it is ticked. An empty page offers the dialog as its first
 action, `/images?create=1` opens it, and the install dialog and the jail form offer it when there is no image; both list
 the images with their release (`freebsd-15-1 (15.1-RELEASE)`) and preset the newest release the host can run. The first-run
 wizard's Base image step uses the same fields and composable, with one line on what the auto upgrade does.
@@ -90,6 +90,44 @@ start with `fail` show a failed installation.
 address (`?jail=web&since=1h`, `project=*` for every project) and followed every two seconds with the reply's `next` map as
 the cursor (`lib/logs.ts`). Its Forwarding tab, for a global admin, edits the sink list of `/logs/forward`
 (`lib/logforward.ts` checks the form); the demo serves both from `src/demo/logs.ts`.
+
+## Search, labels and the shell (host console)
+
+**Quick switcher** (`src/components/QuickSwitcher.vue`, the index in `composables/search.ts`, the ranking in
+`lib/search.ts`): `Ctrl+K` (`Cmd+K`) anywhere except inside the terminal, `/` where no text is typed, or the Search
+button at the top of the side bar (the top bar on a phone). It searches the jails of the current project (name, image,
+addresses, labels as `key=value`, the app of an installed jail), the app catalog, images, networks, projects, storage
+and the console's pages, with the label terms of the jail filter (`env=prod`, `team:`, `-tier=edge`). **Every project**
+searches the jails of all the projects the identity may use (choosing one switches to its project, as the project
+switcher does); the choice is remembered. Matches rank whole name, prefix, start of a part, anywhere, then letters in
+order (in the name only); each group shows its best few and says how many more a refined search would show. An empty box
+shows the recent items (jails opened from it or visited, kept in `localStorage`, never required) and the pages. The lists
+are loaded when the box opens and again after a change event, a project switch or a minute; ranking runs in memory, so
+thousands of jails stay fast. It is a dialog with a combobox and a grouped listbox: the focus stays in the box, the arrows
+move the active option, Enter opens it, Escape closes and gives the focus back, the number of results is announced. A
+jail row has its quick actions: **Shell** (`Shift+Enter`), **Logs** (`Alt+L`) and **Start** or **Stop** (`Alt+S`; stop
+asks first, tier 2).
+
+**Labels** (`src/components/LabelChips.vue`, `JailLabels.vue`, `JailFilter.vue`, `BulkLabelDialog.vue`, the rules and
+the filter language in `lib/labels.ts`, [docs/labels.md](../docs/labels.md)): chips in the jail list (the first two by
+the keys people look for, env, app, team, then `+N`) and under the jail's name; a chip filters the list. The list's
+filter box reads `key=value`, `key:`, `-key=value` and words, suggests keys and values, and keeps the filter in
+`?q=` (and the state in `?state=`): a chip, a state, a suggestion or Enter is a history step, typing is not. The last
+filter is remembered per user and project. **Edit labels** on the jail page and **Labels** for the selected jails send
+merge patches of `metadata.labels` (`null` removes a key); the label rules are those of `sdk/api/text.go`, tested on the
+same cases (`sdk/api/testdata/labels.json`). Keys starting with `jailops.` are shown but not edited. Only an admin of the
+project is offered the editors.
+
+**Shell**: a running jail has a Shell button in its list row and its page header, and the switcher's Shift+Enter;
+`/jails/NAME/shell` is the shareable address (it opens the Console tab and connects at once, the request is then taken
+off the address so a reload does not open a second session). A stopped jail offers **Start and open shell**: start is
+tier 1, the console connects as soon as the jail runs. The Console tab says which shell runs as whom and shows the same
+shell's command line (`jailops shell NAME --project P`) with a copy button. The tab and the buttons are offered only when
+the server has `jail_console` and the identity is an operator or admin of the project, as `jailops exec` needs; the server
+checks it again. A jail page opens on the tab used last for that jail.
+
+In the demo the project `web` has thirteen jails with labels (`env`, `team`, `app`, `role`; `api` carries ten), the
+staging project two; the demo accepts the label patch and checks the rules as the server does.
 
 ## Rules, enforced by `web/tests/architecture.test.ts`
 

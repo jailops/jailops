@@ -173,6 +173,8 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/updates/apply", op),
 	r("GET", "/api/v1/jails/{name}/updates", ro),
 	r("POST", "/api/v1/jails/{name}/provision", ad),
+	// installs one fixed package (bash) and writes JailOps' own prompt files: no more than an operator may do with exec
+	r("POST", "/api/v1/jails/{name}/shell-setup", op),
 	r("GET", "/api/v1/profiles", ro),
 	r("POST", "/api/v1/profiles", ad),
 	r("GET", "/api/v1/profiles/{name}", ro),

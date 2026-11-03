@@ -56,6 +56,11 @@ func JailSpec(name string, s api.JailSpec) error {
 			return Invalid("shell", "shell %q must be an absolute path inside the jail, without spaces", s.Shell)
 		}
 	}
+	if s.Prompt != "" {
+		if err := api.CheckPrompt(s.Prompt); err != nil {
+			return Invalid("prompt", "prompt: %v", err)
+		}
+	}
 	if s.Provision != nil {
 		if err := provision(*s.Provision); err != nil {
 			return err

@@ -1193,6 +1193,7 @@ export interface JailSpec {
   packages?: string[]
   env?: Record<string, string>
   shell?: string
+  prompt?: string
   provision?: Provision
   profiles?: string[]
   devfs?: DevfsDevice[]
@@ -1680,6 +1681,17 @@ export interface SetupToken {
   hint?: string
 }
 
+export interface ShellSetupRequest {
+}
+
+export interface ShellSetupResult {
+  jail: string
+  shell: string
+  prompt: string
+  ps1?: string
+  steps: string[]
+}
+
 export interface Storage {
   metadata: ObjectMeta
   spec: StorageSpec
@@ -2163,6 +2175,15 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "profiles"
   },
   {
+    "name": "prompt",
+    "type": "string",
+    "description": "Bash prompt of a FreeBSD jail, for every user: default (user@host:dir in colour), none, or a PS1 text such as \\u@\\h:\\w\\$ with bash's escapes (no ', ` or $ other than \\$: nothing in it runs; \\e or \\033 start a colour). A user's own ~/.bashrc wins. Written into /usr/local/etc/profile.d/jailops-prompt.sh at once in a running jail, else at its next start.",
+    "example": "default",
+    "restart_required": false,
+    "profile": true,
+    "path": "prompt"
+  },
+  {
     "name": "proxy.\u003cname\u003e.jail_port",
     "type": "int",
     "description": "Port inside the jail.",
@@ -2196,8 +2217,8 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "shell",
     "type": "string",
-    "description": "Shell that `jailops shell` starts: a path inside the jail (/bin/sh when empty). A management setting; /etc/passwd is not touched.",
-    "example": "/usr/local/bin/bash",
+    "description": "Shell that `jailops shell` and the console start: bash, sh or a path inside the jail (/bin/sh when empty). New FreeBSD jails get bash. A management setting; /etc/passwd is not touched. `jailops jail shell-setup` installs bash when it is missing.",
+    "example": "bash",
     "restart_required": false,
     "profile": true,
     "path": "shell"
@@ -2310,4 +2331,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock', 'setup', 'host_certificate']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock', 'setup', 'host_certificate', 'jail_shell_setup']

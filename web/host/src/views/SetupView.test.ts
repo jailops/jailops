@@ -13,7 +13,7 @@ import { DEMO_SETUP_TOKEN } from '@/demo/setupToken'
 // steps before it are skipped, as a person may.
 
 async function settle(until?: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5000
+  const deadline = Date.now() + 20000
   for (let i = 0; i < 20 || (until && !until() && Date.now() < deadline); i++) {
     await flushPromises()
     await new Promise((r) => setTimeout(r, 5))
@@ -73,7 +73,8 @@ describe('the wizard: base image', () => {
     expect((w.get('[data-test="image-name"]').element as HTMLInputElement).value).toBe('freebsd-15-1')
     expect(w.get('[data-test="image-release-choice"]').text()).toContain('15.1-RELEASE (this host)')
     expect(w.find('[data-test="image-alias"]').exists()).toBe(false)
-    expect((w.get('[data-test="image-auto"]').element as HTMLInputElement).checked).toBe(true)
+    expect((w.get('[data-test="image-auto"]').element as HTMLInputElement).checked).toBe(false)
+    await w.get('[data-test="image-auto"]').setValue(true)
     expect(w.text()).toContain('the image gets the patch updates of its release every night')
     expect(w.get('[data-test="setup-image-skip-note"]').text()).toContain('Images page')
     await w.get('[data-test="setup-image"]').trigger('submit')

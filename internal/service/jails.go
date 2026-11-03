@@ -158,6 +158,7 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 	st.Drift = rt.drift
 	st.ProvisionedAt = s.provisionedAt(name)
 	st.Conditions = append(st.Conditions, rt.conditions...)
+	st.Conditions = append(st.Conditions, s.shellCondition(name)...)
 	if len(e.problems) > 0 {
 		st.Conditions = append(st.Conditions, api.Condition{Type: "Healthy", Status: api.ConditionFalse, Reason: "Degraded",
 			Message: strings.Join(e.problems, "; "), Since: s.now().UTC()})
@@ -311,6 +312,7 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 	if err := s.requireHost("jails"); err != nil {
 		return api.Operation{}, err
 	}
+	j.Spec.Shell = api.ShellPath(j.Spec.Shell) // the names bash and sh
 	pass, err := s.creationPassphrase(j.Spec, in.VolumePassphrase)
 	if err != nil {
 		return api.Operation{}, err
@@ -365,6 +367,11 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 			spec.Layout = api.LayoutThick
 		}
 	}
+	if spec.OS == api.OSLinux && spec.Prompt != "" {
+		return api.Operation{}, invalid("the prompt key is for FreeBSD jails; a Linux jail keeps the prompt of its distribution")
+	}
+	profs, _ := s.resolveProfiles(proj, spec.Profiles)
+	shellSetup := s.shellDefaults(&spec, profs)
 	if spec.Hostname == "" {
 		spec.Hostname = name
 	}
@@ -400,6 +407,10 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 			wipe(pass)
 			if err != nil {
 				return nil, err
+			}
+			if shellSetup {
+				// bash and the prompt are set up at the first start, when the root is mounted
+				s.setShellMark(key, shellMark{Pending: true})
 			}
 			if err := s.refreshJail(ctx, key); err != nil {
 				return nil, err
@@ -478,6 +489,7 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	}
 	spec := in.Spec
 	spec.Network = append([]api.NetworkAttach(nil), spec.Network...)
+	spec.Shell = api.ShellPath(spec.Shell) // the names bash and sh
 	if spec.OS == "" {
 		spec.OS = old.Spec.OS
 	}
@@ -504,6 +516,8 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 		return api.Jail{}, invalid("encryption cannot change")
 	case spec.Storage != old.Spec.Storage:
 		return api.Jail{}, invalid("the storage of a jail cannot change").WithHint("copy the jail to move it")
+	case spec.OS == api.OSLinux && spec.Prompt != "":
+		return api.Jail{}, invalid("the prompt key is for FreeBSD jails; a Linux jail keeps the prompt of its distribution")
 	}
 	if v, changed := encryptionChanged(spec.Volumes, old.Spec.Volumes); changed {
 		return api.Jail{}, invalid("the encryption of volume %q cannot change", v).
@@ -573,6 +587,7 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 		e.jail = nj
 	}
 	s.mu.Unlock()
+	s.promptChanged(ctx, key, old, nj)
 	s.emitIn(ctx, p.Meta.Name, "jail-updated", "/api/v1/jails/"+name)
 	s.kick()
 	return s.getByKey(ctx, key)
@@ -707,6 +722,8 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 				}
 				s.setLocked(key, nil)
 				s.markStartDue(key, false)
+				// A new jail gets its shell and prompt at its first start, before its own provisioning.
+				s.shellAtStart(ctx, key)
 				// A jail that declares provisioning is provisioned at its first start.
 				if err := s.provisionPending(ctx, key); err != nil {
 					s.kick()
@@ -738,6 +755,7 @@ func (s *Service) StartJail(ctx context.Context, key string) error {
 	}
 	if err == nil {
 		s.setLocked(key, nil)
+		s.shellAtStart(ctx, key)
 	}
 	res := "ok"
 	if err != nil {

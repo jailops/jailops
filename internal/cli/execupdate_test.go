@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -133,6 +134,23 @@ func TestShellChoiceAndTerminal(t *testing.T) {
 	if r := last(); r.TTY {
 		t.Fatalf("-T requested a terminal: %+v", r)
 	}
+	// with a terminal the session learns which (bash falls back to a dumb terminal without TERM); a value that is
+	// not a terminal name, and a session without a terminal, send none
+	h.env["TERM"] = "xterm-256color"
+	h.run("exit\n", "shell", "web")
+	if r := last(); !slices.Contains(r.Env, "TERM=xterm-256color") {
+		t.Fatalf("TERM was not forwarded: %+v", r)
+	}
+	h.run("", "exec", "-T", "web", "--", "echo", "plain")
+	if r := last(); len(r.Env) != 0 {
+		t.Fatalf("TERM went to a session without a terminal: %+v", r)
+	}
+	h.env["TERM"] = "x;rm -rf /"
+	h.run("exit\n", "shell", "web")
+	if r := last(); len(r.Env) != 0 {
+		t.Fatalf("a TERM that is not a name was forwarded: %+v", r)
+	}
+	delete(h.env, "TERM")
 	h.tty = false
 	tr.golden("shell")
 }
@@ -235,6 +253,27 @@ func TestProvision(t *testing.T) {
 	tr.ok("--dry-run", "provision", "web")
 	tr.do("", "provision", "ghost")
 	tr.golden("provision")
+}
+
+func TestShellSetupAndShellFlags(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	tr := h.transcript()
+	tr.ok("create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--shell", "sh", "--prompt", "none")
+	tr.ok("config", "get", "web", "shell")
+	tr.ok("config", "get", "web", "prompt")
+	tr.do("", "create", "bad", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--prompt", "$(id)")
+	tr.do("", "jail", "shell-setup", "web") // not running
+	tr.ok("start", "web")
+	tr.ok("config", "unset", "web", "shell")
+	tr.ok("config", "unset", "web", "prompt")
+	tr.ok("jail", "shell-setup", "web")
+	tr.ok("jail", "shell-setup", "web", "-o", "json")
+	tr.ok("--dry-run", "jail", "shell-setup", "web")
+	tr.ok("config", "set", "web", "prompt", `\[\e[38;5;196m\]\u@\h:\w\$\[\e[0m\] `)
+	tr.do("", "config", "set", "web", "prompt", "`id`")
+	tr.do("", "jail", "shell-setup", "ghost")
+	tr.golden("shell_setup")
 }
 
 func TestBackupKeyRunVerify(t *testing.T) {

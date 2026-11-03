@@ -129,7 +129,7 @@ async function restart(): Promise<void> {
               </select>
               <input v-else :id="'k-' + r.name" class="mono" :class="{ invalid: errors[r.name] }" type="text" :value="read(r)" :disabled="fixed(r)" :placeholder="r.key.example" :aria-invalid="!!errors[r.name]" @input="edit(r, ($event.target as HTMLInputElement).value)" />
               <span v-if="errors[r.name]" class="err" data-test="config-error">{{ errors[r.name] }}</span>
-              <span class="hint faint">{{ r.key.name === 'shell' ? s.config.shellHint : helpText(r.key.description) }}</span>
+              <span class="hint faint">{{ r.key.name === 'shell' ? s.config.shellHint : r.key.name === 'prompt' ? s.config.promptHint : helpText(r.key.description) }}</span>
             </td>
           </tr>
         </tbody>

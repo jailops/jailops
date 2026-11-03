@@ -41,7 +41,7 @@ describe('the release rules', () => {
 
 describe('the form', () => {
   it('starts with the image of this host\'s release, upgraded every night', () => {
-    expect(initialImageForm(info('15.1-RELEASE-p3', 'arm64'))).toEqual({ kind: 'freebsd', name: 'freebsd-15-1', release: '15.1-RELEASE', arch: 'arm64', keys: '', build: true, auto: true, at: '03:00', packages: true })
+    expect(initialImageForm(info('15.1-RELEASE-p3', 'arm64'))).toEqual({ kind: 'freebsd', name: 'freebsd-15-1', release: '15.1-RELEASE', arch: 'arm64', keys: '', build: true, auto: false, at: '03:00', packages: true })
     expect(initialImageForm(info('15.2-RELEASE')).name).toBe('freebsd-15-2')
     expect(initialImageForm(null).release).toBe('15.1-RELEASE')
     expect(initialImageForm(null).name).toBe('freebsd-15-1')
@@ -70,7 +70,7 @@ describe('the form', () => {
     expect(imageProblems({ ...f, arch: '' }, []).arch).toBe('Choose amd64 or arm64.')
     expect(imageProblems({ ...f, kind: 'debian', release: 'trixie', keys: '' }, []).keys).toMatch(/keyring/)
     // the time of the nightly upgrade, only while it is on
-    expect(imageProblems({ ...f, at: '' }, []).at).toBe('Required.')
+    expect(imageProblems({ ...f, auto: true, at: '' }, []).at).toBe('Required.')
     expect(imageProblems({ ...f, at: '' , auto: false }, [])).toEqual({})
   })
   it.each([
@@ -79,9 +79,9 @@ describe('the form', () => {
   ])('the time of day %s', (at, want) => expect(autoAtProblem(at)).toBe(want))
   it('sends the definition the CLI sends, with the nightly upgrade', () => {
     const f = initialImageForm(info('15.1-RELEASE'))
-    expect(imageBody(f)).toEqual({ metadata: { name: 'freebsd-15-1' }, spec: { os: 'freebsd', release: '15.1-RELEASE', arch: 'amd64', source: { type: 'pkgbase' }, auto_upgrade: { enabled: true, packages: true } } })
-    expect(imageBody({ ...f, at: '04:30', packages: false }).spec.auto_upgrade).toEqual({ enabled: true, at: '04:30', packages: false })
-    expect(imageBody({ ...f, auto: false }).spec.auto_upgrade).toBeUndefined()
+    expect(imageBody({ ...f, auto: true })).toEqual({ metadata: { name: 'freebsd-15-1' }, spec: { os: 'freebsd', release: '15.1-RELEASE', arch: 'amd64', source: { type: 'pkgbase' }, auto_upgrade: { enabled: true, packages: true } } })
+    expect(imageBody({ ...f, auto: true, at: '04:30', packages: false }).spec.auto_upgrade).toEqual({ enabled: true, at: '04:30', packages: false })
+    expect(imageBody(f).spec.auto_upgrade).toBeUndefined()
     expect(imageBody({ ...f, kind: 'alpine', name: 'alpine', release: ' 3.22 ', auto: false }).spec).toEqual({ os: 'linux', release: '3.22', arch: 'amd64', source: { type: 'minirootfs' } })
     expect(imageBody({ ...f, kind: 'debian', name: 'debian', release: 'trixie', keys: '/k.gpg' }).spec.source).toEqual({ type: 'debootstrap', keys: '/k.gpg' })
     expect(autoUpgradeSpec(false, '03:00', true)).toEqual({ enabled: false, packages: true })

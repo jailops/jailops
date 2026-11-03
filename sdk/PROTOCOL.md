@@ -80,6 +80,7 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `POST /api/v1/jails/<n>/access/deny` | `AppDeny` (`source`, `drop_role`, `dry_run`) | `AppDenyResult`: `removed`, `changed`, `sql`, `steps`, `notes`; the role JailOps made loses its login (or is dropped with `drop_role`, its objects reassigned to postgres, the database kept). Operator; audited |
 | `GET /api/v1/jails/<n>/updates` | | `[]UpdateRecord`, newest first (`updates`) |
 | `POST /api/v1/jails/<n>/provision` | `ProvisionRequest` (`again`) | async, result `ProvisionResult`; `already_exists` when it ran before and `again` is not set (`provisioning`) |
+| `POST /api/v1/jails/<n>/shell-setup` | `ShellSetupRequest` (empty) | async, result `ShellSetupResult` (`jail`, `shell`, `prompt`, `ps1`, `steps`): the keys `shell` and `prompt` the jail leaves empty are set from `jails.*` of `jailopsd.yaml`, bash is installed with `pkg -r ROOT` when it is the shell and missing, the prompt file and the blocks are written (docs/shell.md). `busy` for a stopped jail, `invalid` for a Linux jail. Operator (`jail_shell_setup`) |
 | `GET /api/v1/config-keys` | | `[]ConfigKey`: the key registry (name, type, values, description, example, `restart_required`, `profile`, `admin`, `path` into the spec); any authenticated identity |
 | `GET /api/v1/apps` | | `[]AppSummary`: the application catalog (docs/apps.md), every definition sorted by name, invalid ones with `valid: false` and `error`; `source` is `catalog` (`apps.catalog_dir`) or `local` (`apps.local_dir`), and a local definition that hides a packaged one of the same name carries `overrides: catalog`; any authenticated identity (`apps`) |
 | `GET /api/v1/apps/<n>` | | `AppDetail`: the `definition` with defaults filled in, `hash` (`sha256:<hex>` of the file), `file`, `icon` (a data URI), `source` and `overrides` as in the list (the local definition is the one answered when both directories have the name); `invalid` with the reason for an invalid definition, `not_found` for an unknown name (`apps`) |
@@ -355,11 +356,13 @@ lists the name, and otherwise reports `unsupported`.
 | `host_firewall` | `GET`/`PUT /api/v1/host/firewall` | host management, module firewall (docs/appliance.md): `/etc/pf.conf` rendered whole by the helper; `jailops host firewall show|set|apply|diff`; changes need the module enabled on both sides and go through commit confirmed |
 | `setup` | `GET`/`POST /api/v1/setup`, `POST /api/v1/setup/token` | the first administrator with a one-time setup token (docs/appliance.md) |
 | `host_certificate` | `GET`/`PUT /api/v1/host/certificate`, `POST .../acme`, `POST .../self-signed` | the console's certificate: upload and ACME (docs/exposure.md) |
+| `jail_shell_setup` | `POST /api/v1/jails/<n>/shell-setup` | bash and the prompt of a FreeBSD jail, as a new jail gets them; `jailops jail shell-setup`; the `prompt` key (docs/shell.md) |
 | `host_pending` | `GET /api/v1/host/pending`, `POST .../pending/confirm`, `POST .../pending/revert` | commit confirmed: the change that reverts unless confirmed; `jailops host pending|confirm|revert`; the timer is the helper's |
 | `app_draft` | `GET /api/v1/jails/<n>/app-draft` | a definition drafted from a running jail; `jailops app export` reads it; see Routes and docs/apps.md |
 | `app_access` | `GET`, `POST /api/v1/jails/<n>/access`, `POST .../access/deny` | who may connect to an installed app; `jailops app allow`, `deny` and `access`; see Routes and docs/apps.md |
 | `volume_unlock` | `POST /api/v1/jails/<n>/unlock`, `.../lock`, `.../passphrase`; `volume_passphrase` in `POST /api/v1/jails` | encrypted volumes; `jailops jail unlock`, `lock`, `passphrase` and `jail create --volume NAME:MOUNT:encrypted`; see Routes and docs/storage.md |
 | `backup_pull`, `backup_push` | the backup transport permissions of the backup node | not routes of the host daemon (see above) |
 
-Update and provisioning keys of the registry: `shell`, `updates.mode` (manual, notify, managed),
+Update and provisioning keys of the registry: `shell` (`bash`, `sh` or a path), `prompt` (`default`, `none` or a PS1 text
+that passes `api.CheckPrompt`), `updates.mode` (manual, notify, managed),
 `updates.schedule` (cron), `updates.packages`, `updates.os`, `updates.reboot` (manual, auto).

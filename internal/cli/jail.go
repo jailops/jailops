@@ -368,7 +368,7 @@ jailops jail start web`, "jails")
 	jc.AddCommand(a.jailInfo(d))
 	jc.AddCommand(a.jailLifecycleSet(d)...)
 	jc.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailCopy(d), a.jailLogs(d))
-	jc.AddCommand(a.jailUnlock(d), a.jailLock(d), a.jailPassphrase(d))
+	jc.AddCommand(a.jailUnlock(d), a.jailLock(d), a.jailPassphrase(d), a.jailShellSetup(d))
 	return jc
 }
 
@@ -429,6 +429,7 @@ func (a *app) addJailShortcuts(root *cobra.Command) {
 func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	var (
 		image, layout, hostname, memory, disk, fwPolicy, strategy, window, storage string
+		shell, prompt                                                              string
 		cpu, pids, priority                                                        int
 		networks, volumes, hostMounts, envs, labels, depends, tags, profiles       []string
 		autostart                                                                  bool
@@ -456,6 +457,8 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringArrayVar(&labels, "label", nil, "label KEY=VALUE (repeatable)")
 	f.StringVar(&strategy, "update-strategy", "", "how the jail follows its image: rebase, inplace or manual")
 	f.StringVar(&window, "update-window", "", "update window, for example \"sun 03:00\"")
+	f.StringVar(&shell, "shell", "", "shell of jailops shell and the console: bash, sh or a path inside the jail (default: the host's jails.shell, bash)")
+	f.StringVar(&prompt, "prompt", "", "bash prompt of the jail: default, none or a PS1 text (default: the host's jails.prompt)")
 	a.completeFlag(cmd, "image", imageRefs)
 	a.completeFlag(cmd, "network", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Networks().List(ctx), netName) }))
 	a.completeFlag(cmd, "storage", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Storage().List(ctx), storName) }))
@@ -481,6 +484,12 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 			Firewall:  api.FirewallAttach{Policy: fwPolicy, Tags: tags},
 			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: depends},
 			Update:    api.UpdatePolicy{Strategy: api.UpdateStrategy(strategy), Window: window},
+			Shell:     api.ShellPath(shell), Prompt: prompt,
+		}
+		if prompt != "" {
+			if err := api.CheckPrompt(prompt); err != nil {
+				return api.Jail{}, usagef("--prompt: %v", err)
+			}
 		}
 		for _, n := range networks {
 			net, addrs, _ := strings.Cut(n, "=")
@@ -1057,4 +1066,67 @@ copy data, snapshot or back up the source and restore it under a new name with
 	}
 	cmd.Flags().BoolVar(&keepIP, "keep-ip", false, "keep fixed addresses instead of allocating new ones")
 	return cmd
+}
+
+func (a *app) jailShellSetup(d *kindDesc[api.Jail]) *cobra.Command {
+	return &cobra.Command{
+		Use:   "shell-setup NAME",
+		Short: "Give a jail bash and the JailOps prompt, as new jails get them",
+		Long: `Give a running FreeBSD jail the shell and prompt a new jail gets: the shell and
+prompt keys the jail leaves empty are set from the host's defaults (jails.shell
+and jails.prompt of jailopsd.yaml: bash and the default prompt), bash is
+installed into the jail from the host when it is the shell and missing, and the
+prompt is written. Running it again repairs the files and changes nothing else.
+
+The prompt lives in /usr/local/etc/profile.d/jailops-prompt.sh, sourced from a
+marked block at the top of /usr/local/etc/profile (login shells) and
+/usr/local/etc/bash.bashrc (other interactive shells), so it survives OS
+updates. A user's own ~/.bashrc, ~/.bash_profile or ~/.profile wins over it.
+Change it with 'jailops config set NAME prompt ...' (default, none or a PS1
+text); 'none' removes the files. Existing jails are never changed on their own.`,
+		Example: `jailops jail shell-setup web
+jailops config set web prompt none
+jailops config set web prompt '\[\e[38;5;196m\]\u@\h:\w\$\[\e[0m\] '`,
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeKind(a, d),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if ok, err := a.dry("set up the shell of jail "+args[0], api.ShellSetupRequest{}); ok || err != nil {
+				return err
+			}
+			c, err := a.connect(cmd.Context())
+			if err != nil {
+				return err
+			}
+			h, err := handle(c.Jails().ShellSetup(cmd.Context(), args[0]))
+			if err != nil {
+				return err
+			}
+			if !a.waiting() {
+				return a.finishOp(cmd.Context(), h, "jail", args[0], "shell setup", nil)
+			}
+			v, _, err := a.await(cmd.Context(), h)
+			if err != nil {
+				return err
+			}
+			res, _ := v.(api.ShellSetupResult)
+			if a.format != fmtTable {
+				return a.emit(res, nil, nil, func() []string { return []string{args[0]} })
+			}
+			fprintf(a.env.Stdout, "jail/%s: shell %s, prompt %s\n", args[0], res.Shell, orNone(res.Prompt))
+			if res.PS1 != "" {
+				fprintf(a.env.Stdout, "  PS1='%s'\n", res.PS1)
+			}
+			for _, s := range res.Steps {
+				fprintf(a.env.Stdout, "  %s\n", s)
+			}
+			return nil
+		},
+	}
+}
+
+func orNone(s string) string {
+	if s == "" {
+		return "(not set)"
+	}
+	return s
 }

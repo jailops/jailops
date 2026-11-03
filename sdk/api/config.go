@@ -363,13 +363,20 @@ func buildRegistry() []ckey {
 	str("update.window", "update.window", "Maintenance window of automatic updates.", "sun 03:00", false, true, func(s *JailSpec) *string { return &s.Update.Window }, nil)
 	str("update.healthcheck", "update.healthcheck", "Command run in the jail after an update.", "/usr/local/bin/check", false, true,
 		func(s *JailSpec) *string { return &s.Update.Healthcheck }, nil)
-	str("shell", "shell", "Shell that `jailops shell` starts: a path inside the jail (/bin/sh when empty). A management setting; /etc/passwd is not touched.", "/usr/local/bin/bash", false, true,
-		func(s *JailSpec) *string { return &s.Shell }, func(v string) error {
+	add(ckey{ConfigKey: ConfigKey{Name: "shell", Type: "string", Example: "bash", Profile: true, Path: "shell",
+		Description: "Shell that `jailops shell` and the console start: bash, sh or a path inside the jail (/bin/sh when empty). New FreeBSD jails get bash. A management setting; /etc/passwd is not touched. `jailops jail shell-setup` installs bash when it is missing."},
+		get: func(s *JailSpec, _ string) (string, bool) { return s.Shell, s.Shell != "" },
+		set: func(s *JailSpec, _, v string) error {
+			v = ShellPath(v)
 			if !strings.HasPrefix(v, "/") || len(v) > 255 || strings.ContainsAny(v, " \t\r\n\x00") || strings.Contains(v, "..") {
-				return fmt.Errorf("%q is not an absolute path without spaces inside the jail", v)
+				return cfgErr("shell", "shell: %q is not bash, sh or an absolute path without spaces inside the jail", v)
 			}
+			s.Shell = v
 			return nil
-		})
+		},
+		unset: func(s *JailSpec, _ string) { s.Shell = "" }})
+	str("prompt", "prompt", "Bash prompt of a FreeBSD jail, for every user: default (user@host:dir in colour), none, or a PS1 text such as \\u@\\h:\\w\\$ with bash's escapes (no ', ` or $ other than \\$: nothing in it runs; \\e or \\033 start a colour). A user's own ~/.bashrc wins. Written into "+PromptFile+" at once in a running jail, else at its next start.", "default", false, true,
+		func(s *JailSpec) *string { return &s.Prompt }, CheckPrompt)
 	add(ckey{ConfigKey: ConfigKey{Name: "updates.mode", Type: "enum", Values: []string{"manual", "notify", "managed"}, Profile: true, Path: "update.mode",
 		Description: "manual: nothing happens unless you run it. notify: check on the schedule and report. managed: check and apply on the schedule. Off (manual) by default.", Example: "notify"},
 		get: func(s *JailSpec, _ string) (string, bool) { return string(s.Update.Mode), s.Update.Mode != "" },

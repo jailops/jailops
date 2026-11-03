@@ -59,10 +59,15 @@ type JailSpec struct {
 	// Packages is reserved: installing packages at creation is not implemented and creation with it set is refused.
 	Packages []string          `json:"packages,omitempty"`
 	Env      map[string]string `json:"env,omitempty"`
-	// Shell is the path of the shell `jailops shell` starts inside the jail;
-	// empty means /bin/sh. It is a management setting and does not touch
-	// /etc/passwd.
+	// Shell is the path of the shell `jailops shell` and the console start inside the jail; empty means /bin/sh. It
+	// is a management setting and does not touch /etc/passwd. A new FreeBSD jail gets BashPath (bash installed at
+	// its first start) unless the request or jails.shell of jailopsd.yaml says otherwise.
 	Shell string `json:"shell,omitempty"`
+	// Prompt is the bash prompt of a FreeBSD jail: "default" (DefaultPS1 in the colour of jails.prompt_color),
+	// "none" (no prompt file), or a PS1 text (CheckPrompt). JailOps writes it into PromptFile in the jail's
+	// /usr/local; empty leaves the jail's files alone. A new jail whose shell is bash gets jails.prompt of
+	// jailopsd.yaml.
+	Prompt string `json:"prompt,omitempty"`
 	// Provision is a short, repeatable creation step: packages, files,
 	// services and commands, run once and then marked complete in the status
 	// (design 8.5). There is no agent in the jail and no convergence.

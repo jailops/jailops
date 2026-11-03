@@ -1,12 +1,16 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
 import { ApiError } from '@jailops/shared/api/client'
 import { useLoad } from '@jailops/shared/composables/load'
 import { can, hasExt } from '@jailops/shared/composables/session'
-import { askLifecycle, askDelete, lockJail, encryptedVolumes, isLocked, type Lifecycle } from '@/composables/jailActions'
+import { askLifecycle, askDelete, lockJail, encryptedVolumes, isLocked, lifecycle, type Lifecycle } from '@/composables/jailActions'
+import { canShell, loadJailTab, saveJailTab } from '@/composables/shell'
+import { projectState } from '@/composables/project'
+import { jailId, pushRecent } from '@/lib/search'
+import JailLabels from '@/components/JailLabels.vue'
 import { useTabQuery } from '@jailops/shared/composables/tabs'
 import TabBar from '@jailops/shared/components/TabBar.vue'
 import TimeStamp from '@jailops/shared/components/TimeStamp.vue'
@@ -64,12 +68,48 @@ const tabList = computed(() => ([
   ['logs', s.logs.tab, hasExt('jail_logs')],
   // who may connect: for the jails an app installation made
   ['access', s.appAccess.tab, hasExt('app_access') && isInstalledApp(jail.value)],
-  ['console', s.exec.tab, true],
+  // the console session needs the extension and operator in the project, as `jailops exec`
+  ['console', s.exec.tab, canShell(jail.value?.metadata.project)],
 ] as Array<[Tab, string, boolean]>).filter((t) => t[2]).map(([key, label]) => ({ key, label })))
 // ?tab=logs&file=nginx/access.log opens a tab directly (the app pages link to a jail's log viewer). The Access tab
 // appears once the jail is known to be an app; a ?tab=access waits for it.
 const { tab } = useTabQuery<Tab>(() => tabList.value.map((t) => t.key), 'overview')
 const logFile = typeof route.query.file === 'string' ? route.query.file : ''
+const projectOf = () => jail.value?.metadata.project || projectState.current
+
+// /jails/NAME/shell arrives as ?tab=console&connect=1: the request is kept here and taken off the address, so a reload
+// or the back button does not open a second session. The Shell buttons ask the same way.
+const shellAsk = ref(route.query.connect === '1' ? 1 : 0)
+if (shellAsk.value) {
+  const { connect: _c, ...rest } = route.query
+  void router.replace({ query: rest })
+}
+const shellOK = computed(() => !!jail.value && canShell(jail.value.metadata.project) && !locked.value)
+function openShell(): void {
+  const j = jail.value
+  if (!j) return
+  // start is tier 1: it runs at once; the console waits for the jail to run, then connects
+  if (j.status.power !== 'running' && j.status.power !== 'starting') void lifecycle(name.value, 'start').then(() => l.reload(), () => undefined)
+  tab.value = 'console'
+  shellAsk.value++
+}
+
+// The last tab of each jail is remembered; a page opened without ?tab= opens on it.
+let restored = !!route.query.tab || !!shellAsk.value
+watch([tab, () => tabList.value.map((t) => t.key).join(), () => jail.value?.metadata.name], ([t]) => {
+  if (!jail.value) return
+  if (!restored) {
+    const want = loadJailTab(projectOf(), name.value)
+    if (want && !tabList.value.some((x) => x.key === want)) return // a tab that appears later (Access) is waited for
+    restored = true
+    if (want && want !== t) {
+      tab.value = want as Tab
+      return
+    }
+  }
+  saveJailTab(projectOf(), name.value, t)
+})
+watch(() => jail.value?.metadata.name, (n) => { if (n) pushRecent({ id: jailId(projectOf(), n), kind: 'jail', title: n, to: `/jails/${encodeURIComponent(n)}`, project: projectOf() || undefined }) })
 const rollbackOpen = ref(false)
 const rollbackSnap = ref<string | undefined>()
 const upgradeOpen = ref(false)
@@ -148,6 +188,8 @@ const attentionItems = computed(() => {
             <span v-if="jail.status.jid" class="faint mono">jid {{ jail.status.jid }}</span>
           </div>
           <div class="row-actions">
+            <button v-if="shellOK && (jail.status.power === 'running' || jail.status.power === 'starting')" class="btn btn-primary" type="button" data-test="jail-shell" @click="openShell"><Icon name="terminal" />{{ s.shell.open }}</button>
+            <button v-else-if="shellOK" class="btn" type="button" data-test="jail-shell" @click="openShell"><Icon name="terminal" />{{ s.shell.startOpen }}</button>
             <button v-if="locked" class="btn btn-primary" type="button" data-test="unlock" @click="unlockOpen = true"><Icon name="lockOpen" />{{ s.keys.unlock }}</button>
             <button v-else-if="jail.status.power !== 'running'" class="btn" type="button" @click="act('start')"><Icon name="play" />{{ s.jails.start }}</button>
             <template v-else>
@@ -163,6 +205,7 @@ const attentionItems = computed(() => {
             <button class="btn btn-danger" type="button" data-test="jail-delete" @click="remove"><Icon name="trash" />{{ isApp ? s.jails.uninstall : s.jails.delete }}</button>
           </div>
         </div>
+        <JailLabels :jail="jail" @saved="l.reload" />
         <ErrorPanel v-if="actionError" :error="actionError" />
         <Callout v-if="locked" tone="warn" data-test="locked-callout">{{ s.keys.lockedHint }} <LockChip v-if="jail.status.locked?.length" :volumes="jail.status.locked" :jail="jail.metadata.name" /></Callout>
 
@@ -181,7 +224,7 @@ const attentionItems = computed(() => {
         <JailUpdatesTab v-else-if="tab === 'updates'" :jail="jail" @saved="l.reload" />
         <JailLogsTab v-else-if="tab === 'logs'" :jail="jail" :file="logFile" />
         <JailAccessTab v-else-if="tab === 'access'" :jail="jail" />
-        <JailExecTab v-else-if="tab === 'console'" :jail="jail" />
+        <JailExecTab v-else-if="tab === 'console'" :jail="jail" :connect="shellAsk" @changed="l.reload" />
         <template v-else>
         <section class="panel" aria-labelledby="svs">
           <header><h2 id="svs">{{ s.jail.specVsStatus }}</h2></header>

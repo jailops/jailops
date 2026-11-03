@@ -11,6 +11,10 @@ import LoadState from '@jailops/shared/components/LoadState.vue'
 import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
 import AppIcon from '@/components/AppIcon.vue'
 import StatePill from '@/components/StatePill.vue'
+import LabelChips from '@/components/LabelChips.vue'
+import { useRouter } from 'vue-router'
+import { withLabel } from '@/lib/labels'
+import { canShell, shellPath } from '@/composables/shell'
 import type { AppDetail, Jail } from '@jailops/shared/api/types'
 
 // The jails of the project that carry the label jailops.app: the project's jail list narrowed on the
@@ -20,6 +24,8 @@ const emit = defineEmits<{ retry: []; changed: [] }>()
 // uninstalling is deleting the jail the installation made (the dialog says so and lists the data that goes)
 const uninstall = (j: Jail) => askDelete(j, [], () => emit('changed'))
 const appOf = (j: Jail) => j.metadata.labels?.[LABEL_APP] ?? ''
+const router = useRouter()
+const filter = (k: string, v: string) => void router.push({ path: '/jails', query: { q: withLabel('', k, v) } })
 </script>
 
 <template>
@@ -54,7 +60,7 @@ const appOf = (j: Jail) => j.metadata.labels?.[LABEL_APP] ?? ''
                     </div>
                   </div>
                 </td>
-                <td :data-label="s.apps.jail"><router-link class="mono" :to="`/jails/${j.metadata.name}`">{{ j.metadata.name }}</router-link></td>
+                <td :data-label="s.apps.jail"><router-link class="mono" :to="`/jails/${j.metadata.name}`">{{ j.metadata.name }}</router-link><div class="inst-labels"><LabelChips :labels="j.metadata.labels" :max="2" pick @pick="filter" /></div></td>
                 <td class="mono hide-sm" :data-label="s.install.version">{{ j.metadata.labels?.[LABEL_VERSION] || '-' }}</td>
                 <td :data-label="s.apps.state"><StatePill :state="j.status.power" /></td>
                 <td class="hide-sm" :data-label="s.apps.addresses"><span v-if="!j.status.addresses?.length" class="faint">-</span><div v-for="a in j.status.addresses" :key="a"><AddrCopy :value="a" /></div></td>
@@ -62,6 +68,7 @@ const appOf = (j: Jail) => j.metadata.labels?.[LABEL_APP] ?? ''
                 <td class="actions"><div class="row-actions">
                   <a v-for="o in openLinks(j, details[appOf(j)]?.definition.ports)" :key="o.url" class="btn btn-sm" :href="o.url" target="_blank" rel="noopener noreferrer" :title="s.apps.openTitle(o.url)" :aria-label="s.apps.openTitle(o.url)" :data-test="`open-${j.metadata.name}`"><Icon name="externalLink" />{{ s.apps.open }}</a>
                   <router-link v-if="hasExt('app_access')" class="btn btn-sm btn-ghost" :to="{ path: `/jails/${j.metadata.name}`, query: { tab: 'access' } }" :data-test="`access-${j.metadata.name}`"><Icon name="shield" />{{ s.appAccess.tab }}</router-link>
+                  <router-link v-if="canShell() && j.status.power === 'running'" class="btn btn-sm btn-ghost" :to="shellPath(j.metadata.name)" :aria-label="s.shell.openTitle(j.metadata.name)" :data-shell="j.metadata.name"><Icon name="terminal" />{{ s.shell.open }}</router-link>
                   <router-link class="btn btn-sm btn-ghost" :to="{ path: `/jails/${j.metadata.name}`, query: { tab: 'logs' } }"><Icon name="fileText" />{{ s.logs.tab }}</router-link>
                   <button class="btn btn-sm btn-danger" type="button" :data-test="`uninstall-${j.metadata.name}`" :aria-label="s.jails.uninstallTitle(appOf(j), j.metadata.name)" @click="uninstall(j)"><Icon name="trash" />{{ s.jails.uninstall }}</button>
                 </div></td>
@@ -77,4 +84,5 @@ const appOf = (j: Jail) => j.metadata.labels?.[LABEL_APP] ?? ''
 <style>
 .inst-app { display: flex; gap: 8px; align-items: center; }
 .inst-changed { margin-left: 6px; }
+.inst-labels { margin-top: 2px; }
 </style>

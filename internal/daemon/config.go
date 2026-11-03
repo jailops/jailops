@@ -68,6 +68,8 @@ type Config struct {
 	Backup *BackupConf `yaml:"backup"`
 	// Updates configures the update scheduler.
 	Updates UpdatesConf `yaml:"updates"`
+	// Jails holds the defaults of new jails: their shell and bash prompt (docs/shell.md).
+	Jails JailsConf `yaml:"jails"`
 	// Apps configures the application catalog (docs/apps.md).
 	Apps AppsConf `yaml:"apps"`
 	// Host configures host management (docs/appliance.md).
@@ -133,6 +135,19 @@ type UpdatesConf struct {
 	// ProjectFilesDir holds the provisioning files, one directory per project
 	// (default <state_dir>/project-files).
 	ProjectFilesDir string `yaml:"project_files_dir"`
+}
+
+// JailsConf holds the defaults a new FreeBSD jail gets when its request (and its profiles) leave the shell and
+// prompt keys empty. They apply to jails created from now on; an existing jail gets them only through
+// `jailops jail shell-setup`.
+type JailsConf struct {
+	// Shell is bash (the default: installed at the jail's first start and started by `jailops shell` and the
+	// console) or sh (FreeBSD's own shell; nothing is installed).
+	Shell string `yaml:"shell"`
+	// Prompt is the bash prompt of a jail whose shell is bash: default (the default), none, or a PS1 text.
+	Prompt string `yaml:"prompt"`
+	// PromptColor is the 256-colour number of the default prompt, 1 to 255 (default 39, a light blue).
+	PromptColor *int `yaml:"prompt_color"`
 }
 
 // BackupConf configures internal/hostbackup.
@@ -468,6 +483,26 @@ func (c Config) finish() (Config, error) {
 	}
 	if c.Apps.CatalogDir == "" {
 		c.Apps.CatalogDir = apps.DefaultDir
+	}
+	switch c.Jails.Shell {
+	case "":
+		c.Jails.Shell = api.ShellBash
+	case api.ShellBash, api.ShellSh:
+	default:
+		return c, fmt.Errorf("config: jails.shell %q must be bash or sh", c.Jails.Shell)
+	}
+	if c.Jails.Prompt == "" {
+		c.Jails.Prompt = api.PromptDefault
+	}
+	if err := api.CheckPrompt(c.Jails.Prompt); err != nil {
+		return c, fmt.Errorf("config: jails.prompt: %v", err)
+	}
+	if c.Jails.PromptColor == nil {
+		n := api.DefaultPromptColor
+		c.Jails.PromptColor = &n
+	}
+	if err := api.CheckPromptColor(*c.Jails.PromptColor); err != nil || *c.Jails.PromptColor == 0 {
+		return c, fmt.Errorf("config: jails.prompt_color %d must be a 256-colour number between 1 and 255 (16 is black)", *c.Jails.PromptColor)
 	}
 	if c.Apps.LocalDir == "" {
 		c.Apps.LocalDir = apps.DefaultLocalDir

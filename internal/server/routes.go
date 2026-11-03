@@ -527,6 +527,18 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/shell-setup", h: func(c *rc) error {
+			var in api.ShellSetupRequest
+			if err := c.decodeOptional(&in); err != nil {
+				return err
+			}
+			op, err := svc.ShellSetupJail(c.r.Context(), c.pathArg("name"), in)
+			if err != nil {
+				return err
+			}
+			c.async(op)
+			return nil
+		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/config", h: func(c *rc) error {
 			var ch api.ConfigChange
 			if err := c.decodeOptional(&ch); err != nil {

@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"regexp"
 	"slices"
 	"strings"
 	"syscall"
@@ -65,6 +66,18 @@ func defaultResizeSignal() (<-chan struct{}, func()) {
 	return out, func() { signal.Stop(sig); close(done) }
 }
 
+// termRE is a TERM value that is forwarded to a session with a terminal.
+var termRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,63}$`)
+
+func envHas(env []string, name string) bool {
+	for _, e := range env {
+		if strings.HasPrefix(e, name+"=") {
+			return true
+		}
+	}
+	return false
+}
+
 type execOpts struct {
 	// noTTY runs without a pseudo-terminal even when stdin and stdout are
 	// terminals, which is when one is allocated otherwise.
@@ -93,6 +106,11 @@ func (a *app) runExec(ctx context.Context, jail string, argv []string, o execOpt
 	}
 	useTTY := !o.noTTY && a.env.IsTTY(a.env.Stdin) && a.env.IsTTY(a.env.Stdout)
 	so := sdk.ExecOptions{TTY: useTTY, Shell: o.shell, ShellPath: o.shellPath, Env: o.env, User: o.user}
+	if t := a.env.Getenv("TERM"); useTTY && termRE.MatchString(t) && !envHas(o.env, "TERM") {
+		// the terminal on the other end is this one: without TERM, bash and other programs fall back to a dumb
+		// terminal (no line editing)
+		so.Env = append(append([]string(nil), o.env...), "TERM="+t)
+	}
 	if useTTY {
 		if r, cl, ok := a.env.TermSize(a.env.Stdout); ok {
 			so.Rows, so.Cols = r, cl
@@ -281,9 +299,11 @@ in the jail.
 
 The shell is chosen in this order: --shell, then the jail's configured "shell"
 key (a path inside the jail, not necessarily the login shell of /etc/passwd;
-set it with 'jailops set NAME shell /usr/local/bin/bash'), then /bin/sh. If the
-chosen shell does not exist in the jail the command fails with a clear error;
-it never falls back to another shell.
+new FreeBSD jails get bash, and 'jailops set NAME shell sh' goes back to
+FreeBSD's own), then /bin/sh. If the chosen shell does not exist in the jail
+the command fails with a clear error; it never falls back to another shell
+('jailops jail shell-setup NAME' installs bash). The shell starts in / as root
+with the PATH of a login and HOME=/root; from a terminal TERM is passed on.
 
 Without a terminal on stdin and stdout the shell runs without a pseudo-terminal,
 which is what a pipe such as 'echo id | jailops shell web' needs.`,

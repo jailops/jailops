@@ -6,7 +6,7 @@ import type {
   Jail, JailAction, JailCreate, JailUnlock, JailPassphraseChange, JailRollback, JailUpgrade, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, Token,
-  Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult,
+  Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
   AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
@@ -42,6 +42,8 @@ export const api = {
     lock: (n: string) => c().mutate<Jail>('POST', `/jails/${e(n)}/lock`),
     passphrase: (n: string, b: JailPassphraseChange) => c().mutate<Jail>('POST', `/jails/${e(n)}/passphrase`, b),
     action: (n: string, a: JailAction) => c().mutate('PUT', `/jails/${e(n)}/state`, a),
+    /** A merge patch of the labels only (admin in the project): a value sets a key, null removes it, the rest stays. */
+    patchLabels: (n: string, labels: Record<string, string | null>) => c().mutate<Jail>('PATCH', `/jails/${e(n)}`, { metadata: { labels } }),
     /** Async: the jail, its volumes and their snapshots are destroyed (an installed app is uninstalled this way). */
     remove: (n: string) => c().mutate('DELETE', `/jails/${e(n)}`),
     snapshots: (n: string) => c().list<JailSnapshot>(`/jails/${e(n)}/snapshots`),
@@ -212,6 +214,10 @@ export const api = {
   },
   provision: {
     run: (n: string, b: ProvisionRequest) => c().mutate<ProvisionResult>('POST', `/jails/${e(n)}/provision`, b),
+  },
+  /** bash and the JailOps prompt for a running FreeBSD jail, as a new jail gets them (extension jail_shell_setup). */
+  shellSetup: {
+    run: (n: string) => c().mutate<ShellSetupResult>('POST', `/jails/${e(n)}/shell-setup`, {}),
   },
   /** The project filter lives with the client: composables use this and never touch the network. */
   setProjectFilter: (fn: ((path: string) => string) | null) => c().setRequestFilter(fn),

@@ -457,6 +457,9 @@ func (e *Env) script() {
 					e.Installed = append(e.Installed, root+" "+rest[j])
 					e.sysmu.Unlock()
 					e.Files.Put(root+"/.app-pkgs/"+rest[j], []byte(rest[j]+" "+e.repoVersion()+"\n"))
+					if rest[j] == api.BashPackage { // the jail's shell (docs/shell.md)
+						e.Files.Put(root+api.BashPath, []byte("x"))
+					}
 				}
 			}
 		case "query":

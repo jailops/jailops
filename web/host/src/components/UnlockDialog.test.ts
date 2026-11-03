@@ -20,9 +20,9 @@ function recorded(): { sent: RawRequest[] } {
   return { sent }
 }
 
-/** Let the pending promises and timers run, and wait until `until` holds (up to five seconds: a loaded CI machine is slow). */
+/** Let the pending promises and timers run, and wait until `until` holds (up to twenty seconds: a loaded CI machine is slow). */
 async function settle(until?: () => boolean): Promise<void> {
-  const deadline = Date.now() + 5000
+  const deadline = Date.now() + 20000
   for (let i = 0; i < 20 || (until && !until() && Date.now() < deadline); i++) {
     await flushPromises()
     await new Promise((r) => setTimeout(r, 5))

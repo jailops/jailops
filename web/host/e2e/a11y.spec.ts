@@ -72,7 +72,7 @@ for (const scheme of ['light', 'dark'] as const) {
     await expect(page.getByTestId('new-release')).toBeVisible()
     expect(await audit(page)).toEqual([])
     await page.getByTestId('new-release-go').click()
-    await expect(page.getByTestId('image-auto')).toBeChecked()
+    await expect(page.getByTestId('image-auto')).not.toBeChecked()
     expect(await audit(page)).toEqual([])
   })
 }
@@ -109,6 +109,13 @@ const states: Array<{ name: string; route: string; steps: Array<{ click?: string
   { name: 'new token after a failed submit', route: '/access?tab=tokens', steps: [{ click: '.page-head .btn-primary' }, { click: '[data-test="token-create"]', force: true }] },
   { name: 'add a log sink', route: '/logs?tab=forwarding', steps: [{ click: '[data-test="fw-add"]' }] },
   { name: 'create image after a failed submit', route: '/images', steps: [{ click: '[data-test="image-new"]' }, { fill: ['[data-test="image-name"]', 'Bad'] }, { click: '[data-test="image-create-go"]', force: true }] },
+  { name: 'quick switcher with results', route: '/jails', steps: [{ click: '[data-test^="search-open-"]:visible' }, { fill: ['[data-test="qs-input"]', 'web'] }] },
+  { name: 'quick switcher on recent items and with no match', route: '/jails/api', steps: [{ click: '[data-test^="search-open-"]:visible' }, { fill: ['[data-test="qs-input"]', 'zzzqqq'] }] },
+  { name: 'quick switcher of every project', route: '/', steps: [{ click: '[data-test^="search-open-"]:visible' }, { click: '[data-test="qs-all"]' }, { fill: ['[data-test="qs-input"]', 'env=staging'] }] },
+  { name: 'labels editor after a failed add', route: '/jails/api', steps: [{ click: '[data-test="labels-edit"]' }, { fill: ['[data-test="label-key"]', 'Bad key'] }, { click: '[data-test="label-add"]', force: true }] },
+  { name: 'filtered jail list with suggestions', route: '/jails?q=env%3Dprod%20-team%3Dweb', steps: [{ click: '[data-test="jails-filter"]' }, { fill: ['[data-test="jails-filter"]', 'env=prod -team=web t'] }] },
+  { name: 'bulk labels', route: '/jails', steps: [{ click: '[aria-label="Select api"]' }, { click: '[data-test="bulk-labels"]' }, { click: '[data-test="bl-apply"]', force: true }] },
+  { name: 'connected shell', route: '/jails/web/shell', steps: [] },
 ]
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`a11y ${scheme} dialogs`, () => {

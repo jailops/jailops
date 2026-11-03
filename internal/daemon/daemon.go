@@ -279,6 +279,10 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		deps.Persistent = append(deps.Persistent, lifecycle.PersistentPath{Dataset: p.Dataset, Path: p.Path, Class: lifecycle.Class(p.Class), Merge: p.Merge, NoSeed: p.NoSeed})
 	}
 	deps.UpdateTick, deps.ProjectFilesDir = cfg.Updates.Tick.Std(), cfg.Updates.ProjectFilesDir
+	deps.JailShell, deps.JailPrompt = cfg.Jails.Shell, cfg.Jails.Prompt
+	if cfg.Jails.PromptColor != nil {
+		deps.JailPromptColor = *cfg.Jails.PromptColor
+	}
 	deps.AppsDir = cfg.Apps.CatalogDir
 	deps.Host, deps.HostModules = clients.HostSystem, cfg.Host.Manage.Modules
 	deps.ConsolePort = consolePort(cfg.Listen.HTTPS.Address)

@@ -231,6 +231,7 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		return api.Operation{}, err
 	}
 	spec.OS = im.Spec.OS
+	s.shellDefaults(&spec, nil)
 	now := s.now().UTC()
 	meta := api.ObjectMeta{Name: jail, Project: proj, UUID: state_uuid(), Scope: api.ScopeHost, Host: s.d.HostUUID, Generation: 1,
 		Labels: map[string]string{api.LabelApp: name, api.LabelAppHash: e.Hash}, CreatedAt: now, UpdatedAt: now}
@@ -431,6 +432,17 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 		argv := apps.PkgInstallArgv(root, grp.repo, grp.names)
 		pl.Add(plan.Step{Name: "install-packages-" + grp.repo, Describe: strings.Join(argv, " "),
 			Do: func(ctx context.Context) error { return s.runHost(ctx, 60*time.Minute, argv) }})
+	}
+	if desc := s.shellStepDescribe(key, nj.Spec); desc != "" {
+		// like a jail created by hand: bash and the prompt (docs/shell.md). A failure does not stop the
+		// installation; it is the jail's ShellSetup condition and `jailops jail shell-setup` tries again.
+		pl.Add(plan.Step{Name: "set-up-shell", Describe: desc,
+			Do: func(ctx context.Context) error {
+				if _, err := s.setUpShell(ctx, key, nj.Spec, true); err != nil {
+					s.log.Warn("shell setup", "jail", key, "err", err)
+				}
+				return nil
+			}})
 	}
 	// The library cache of a running jail was built before the packages put their libraries in /usr/local/lib; pkg
 	// -r does not run the ldconfig trigger of the jail, so a program would not find them.
