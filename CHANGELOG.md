@@ -28,6 +28,13 @@
   image for 15.2-PRERELEASE failed with "No trusted public keys found". Checked with the whole end-to-end flow on
   FreeBSD 15.2-PRERELEASE.
 - The event `image-upgrade-failed` is raised when a nightly run fails.
+- **An image upgrade moves the jails that are behind even when it built nothing.** A run that stopped at a failing jail
+  left the jails after it on the old generation, and the next run, finding no new packages, skipped them as "the
+  package set did not change". They now move to the newest generation (`jailops image upgrade` says so).
+- **Package updates upgrade the packages the host names, never the base system.** `pkg -r <root> upgrade` with no names
+  would also pull `FreeBSD-*` base packages from the host's FreeBSD-base repository into a jail's root, behind the
+  image generation; the base only moves with the generation. Verified on FreeBSD 15.2-PRERELEASE: the nightly run
+  moved two jails that were behind and upgraded an outdated package.
 - **The console points at a new release.** When the host runs a newer release than its newest FreeBSD image (the host is
   on 15.2, the image is `freebsd-15-1`), the Images page and the Overview say so and open Create image filled in for it.
 - **The default image of an app install** is the FreeBSD image of the highest release the host's kernel can run (of two of

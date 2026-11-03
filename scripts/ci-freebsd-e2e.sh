@@ -621,7 +621,19 @@ else
 	# a handshake starts with the first packet into the tunnel (or at the first keepalive, 25 s later): route the allowed
 	# network into the client's interface (the route goes with the interface) and send a packet each try; no answer is needed
 	route -n add -net 10.97.1.0/24 -interface wg-home >/dev/null 2>&1 || true
-	expect_retry "a handshake between the two" '[[:space:]][1-9][0-9]+$' sh -c "ping -c 1 -t 1 10.97.1.1 >/dev/null 2>&1; $wgbin show wg-home latest-handshakes"
+	n=0
+	until $wgbin show wg-home latest-handshakes | grep -Eq '[[:space:]][1-9][0-9]+$'; do
+		n=$((n + 1))
+		if [ $n -gt 90 ]; then # a slow CI machine: ninety tries, and what both ends know when it still fails
+			for w in wg-office wg-home; do $wgbin show $w >&2; done
+			netstat -rn -f inet | grep -E '10\.9[78]\.' >&2 || true
+			sockstat -4 -l | grep 51820 >&2 || true
+			fail "a handshake between the two (none after 90 s)"
+		fi
+		ping -c 1 -t 1 10.97.1.1 >/dev/null 2>&1 || true
+		sleep 1
+	done
+	echo "OK: a handshake between the two"
 	expect "the server reports it" 'laptop .* ago' $J wireguard status office
 	if $J doctor 2>&1 | grep -E ' FAIL '; then fail "doctor reports a failing check with tunnels"; fi
 	check "delete the client" $J wireguard delete -y home
@@ -690,13 +702,25 @@ check "stop the second jail" $J stop up --project demo
 step "automatic upgrade of an image (the nightly run, started by the clock of the daemon)"
 expect "the nightly upgrade is off until it is asked for" 'Nightly: +off' $J image show "$img"
 expect_refused "a time of day that does not exist is refused" $J image auto-upgrade "$img" on --at 25:00
+# the jail `up` is on the first generation while the newest is the second (the rollback above), and it gets a package
+# that is behind: the nightly run must move it and upgrade the package, though the repository has nothing new for the image
+check "start the second jail" $J start up --project demo
+uproot=$(jls -j demo_up path) || fail "the path of the second jail"
+check "refresh the package catalogue of the second jail" pkg -r "$uproot" update -q
+check "install a package into the second jail" pkg -r "$uproot" install -y nano
+check "make that package look old" pkg -r "$uproot" shell "UPDATE packages SET version = '0.1' WHERE name = 'nano';"
+expect "the package is behind" '^0\.1$' pkg -r "$uproot" query %v nano
 check "turn it on for two minutes from now" $J image auto-upgrade "$img" on --at "$(date -v+2M +%H:%M)"
 expect "the image names it and its next run" 'Nightly: +every night at [0-9:]+: generation and jails and their packages; next ' $J image show "$img"
 n=0
 until $J image show "$img" | grep -q 'Automatic upgrades'; do
 	n=$((n + 1)); [ $n -gt 150 ] && fail "the automatic upgrade did not run within five minutes"; sleep 2
 done
-expect "the run is recorded and did not fail" '(ok|unchanged) ' $J image show "$img"
+expect "the run moved the two jails that were behind and upgraded the package" ' ok +2 moved, 1 packages upgraded' $J image show "$img"
+expect "the second jail is on the newest generation" 'up +running.*#g2' $J jail list --project demo
+if [ "$(pkg -r "$uproot" query %v nano)" = 0.1 ]; then fail "the package of the second jail was not upgraded"; fi
+expect "the second jail still runs" 'FreeBSD' $J exec --project demo up -- uname -s
+check "stop the second jail again" $J stop up --project demo
 if $J image show "$img" | grep -E '^ +[0-9-]+ [0-9:]+ +failed'; then fail "the automatic upgrade failed"; fi
 check "turn it off" $J image auto-upgrade "$img" off
 expect "off again" 'Nightly: +off' $J image show "$img"

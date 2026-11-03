@@ -280,3 +280,54 @@ func TestImageReleaseOlderThan151IsRefused(t *testing.T) {
 		}
 	}
 }
+
+// A run that stopped at a failing jail leaves the jails after it on the old generation. The next run builds nothing
+// (the package set did not change) but still moves them to the newest generation.
+func TestUpgradeImageMovesJailsThatAreBehindWhenNothingNewWasBuilt(t *testing.T) {
+	e, s := tickingEnv(t)
+	twoProjectJails(t, e, s)
+	host := as(globalAdmin, "")
+	e.SetRepoVersion("15.0p2")
+	e.Jails.SetExecFn(func(_ string, o jailos.ExecOpts) (run.Result, error) {
+		if strings.Join(o.Argv, " ") == "/bin/true" {
+			return run.Result{Stderr: []byte("not healthy")}, errors.New("exit status 1")
+		}
+		return run.Result{}, nil
+	})
+	res := upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
+	if res.Generation == nil || res.Generation.Number != 2 {
+		t.Fatalf("%+v", res)
+	}
+	for _, c := range []struct{ project, name string }{{"alpha", "web"}, {"alpha", "db"}, {"beta", "api"}} {
+		if gen, _ := generationOf(t, s, c.project, c.name); gen != "fb#g1" {
+			t.Fatalf("%s/%s is on %s after a failed run", c.project, c.name, gen)
+		}
+	}
+
+	e.Jails.SetExecFn(func(string, jailos.ExecOpts) (run.Result, error) { return run.Result{}, nil })
+	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
+	if !res.Unchanged || res.Generation != nil {
+		t.Fatalf("a generation was built again: %+v", res)
+	}
+	moved := 0
+	for _, j := range res.Jails {
+		if j.Status == api.ImageUpgradeUpgraded && j.To == "fb#g2" {
+			moved++
+		}
+	}
+	if moved != 3 {
+		t.Fatalf("%+v", res.Jails)
+	}
+	for _, c := range []struct{ project, name string }{{"alpha", "web"}, {"alpha", "db"}, {"beta", "api"}} {
+		if gen, _ := generationOf(t, s, c.project, c.name); gen != "fb#g2" {
+			t.Fatalf("%s/%s is on %s", c.project, c.name, gen)
+		}
+	}
+	// And a third run has nothing left to do.
+	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
+	for _, j := range res.Jails {
+		if j.Status == api.ImageUpgradeUpgraded {
+			t.Fatalf("%+v", j)
+		}
+	}
+}

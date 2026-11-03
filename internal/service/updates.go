@@ -209,6 +209,47 @@ func (s *Service) pkgExec(ctx context.Context, key string, linux bool, timeout t
 	return out, nil
 }
 
+// pkgUpgradeChunk is how many package names one pkg command takes (the helper allows 64 arguments).
+const pkgUpgradeChunk = 50
+
+// pkgUpgrade lists (apply false) or runs (apply true) the upgrade of the packages of a jail. A Linux jail upgrades
+// everything with apk. For a FreeBSD jail the host names the installed packages that are not part of the base
+// system: the base (FreeBSD-*) comes from the image generation and only moves with it, and a bare `pkg upgrade` on
+// the host would also take the base packages from the host's FreeBSD-base repository into the jail's root.
+func (s *Service) pkgUpgrade(ctx context.Context, key string, linux bool, timeout time.Duration, apply bool) ([]byte, error) {
+	if linux {
+		if apply {
+			return s.pkgExec(ctx, key, true, timeout, "apk", "upgrade", "--no-interactive")
+		}
+		return s.pkgExec(ctx, key, true, timeout, "apk", "upgrade", "--simulate", "--no-interactive")
+	}
+	out, err := s.pkgExec(ctx, key, false, timeout, "pkg", "query", "%n")
+	if err != nil {
+		return out, err
+	}
+	var names []string
+	for _, n := range strings.Fields(string(out)) {
+		if !strings.HasPrefix(n, "FreeBSD-") && n != "pkg" {
+			names = append(names, n)
+		}
+	}
+	flag := "-n"
+	if apply {
+		flag = "-y"
+	}
+	var all []byte
+	for len(names) > 0 {
+		n := min(len(names), pkgUpgradeChunk)
+		o, err := s.pkgExec(ctx, key, false, timeout, append([]string{"pkg", "upgrade", flag}, names[:n]...)...)
+		all = append(all, o...)
+		if err != nil {
+			return all, err
+		}
+		names = names[n:]
+	}
+	return all, nil
+}
+
 func (s *Service) jailRunning(ctx context.Context, key string) bool {
 	if s.d.Jails == nil {
 		return false
@@ -229,15 +270,13 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 	var errs []string
 	if s.jailRunning(ctx, key) {
 		alpine := s.jailIsLinux(j)
-		var upd, dry []string
+		upd := []string{"pkg", "update", "-q"}
 		if alpine {
-			upd, dry = []string{"apk", "update", "--no-interactive"}, []string{"apk", "upgrade", "--simulate", "--no-interactive"}
-		} else {
-			upd, dry = []string{"pkg", "update", "-q"}, []string{"pkg", "upgrade", "-n"}
+			upd = []string{"apk", "update", "--no-interactive"}
 		}
 		if _, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, upd...); err != nil {
 			errs = append(errs, "package catalog: "+err.Error())
-		} else if out, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, dry...); err != nil {
+		} else if out, err := s.pkgUpgrade(ctx, key, alpine, 10*time.Minute, false); err != nil {
 			errs = append(errs, "package check: "+err.Error())
 		} else {
 			rep.Packages = parsePackageUpdates(out, alpine)
@@ -484,17 +523,15 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 	}
 	alpine := s.jailIsLinux(j)
 	// The packages that will change, from a dry run.
-	var dry, upd, up []string
+	upd := []string{"pkg", "update", "-q"}
 	if alpine {
-		upd, dry, up = []string{"apk", "update", "--no-interactive"}, []string{"apk", "upgrade", "--simulate", "--no-interactive"}, []string{"apk", "upgrade", "--no-interactive"}
-	} else {
-		upd, dry, up = []string{"pkg", "update", "-q"}, []string{"pkg", "upgrade", "-n"}, []string{"pkg", "upgrade", "-y"}
+		upd = []string{"apk", "update", "--no-interactive"}
 	}
 	if _, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, upd...); err != nil {
 		rec.Result, rec.Error = api.UpdateFailed, "package catalog: "+err.Error()
 		return rec
 	}
-	if out, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, dry...); err == nil {
+	if out, err := s.pkgUpgrade(ctx, key, alpine, 10*time.Minute, false); err == nil {
 		rec.Packages = parsePackageUpdates(out, alpine)
 		if len(rec.Packages) == 0 {
 			rec.Result, rec.Note = api.UpdateOK, "nothing to update"
@@ -507,7 +544,7 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 		return rec
 	}
 	rec.Snapshot = snap.Name
-	if _, err := s.pkgExec(ctx, key, alpine, 60*time.Minute, up...); err != nil {
+	if _, err := s.pkgUpgrade(ctx, key, alpine, 60*time.Minute, true); err != nil {
 		rec.Result, rec.Error = api.UpdateFailed, err.Error()
 		rec.Note = "restore the snapshot with `jailops jail rollback " + j.Metadata.Name + " --all --snapshot " + snap.Name + "` to undo it; that discards what the jail wrote since"
 		return rec

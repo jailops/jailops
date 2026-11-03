@@ -292,7 +292,7 @@ func (s *Service) AutoUpgradeImage(ctx context.Context, image string) api.ImageU
 		return fail("%v", runErr)
 	case run.JailsFailed > 0:
 		run.Result = api.ImageUpgradeRunFailed
-	case run.Generation == "" && run.JailsUpgraded == 0:
+	case run.Generation == "" && run.JailsMoved == 0 && run.JailsUpgraded == 0:
 		run.Result = api.ImageUpgradeRunUnchanged
 	default:
 		run.Result = api.ImageUpgradeRunOK

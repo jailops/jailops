@@ -75,6 +75,14 @@ func TestAutoUpgradeBuildsMovesAndUpgradesPackages(t *testing.T) {
 	if run1.Result != api.ImageUpgradeRunOK || run1.Generation != "" || run1.JailsMoved != 0 || run1.JailsUpgraded != 1 || run1.Detail != "" {
 		t.Fatalf("%+v\n%s", run1, e.Log())
 	}
+	// Only the packages the host names are upgraded: the base system (FreeBSD-*) moves with the image generation.
+	for _, c := range e.Run.Calls() {
+		if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 3 && c.Cmd.Args[2] == "upgrade" {
+			if got := strings.Join(c.Cmd.Args[3:], " "); strings.Contains(got, "FreeBSD-") || !strings.HasSuffix(got, " curl") {
+				t.Fatalf("pkg upgrade names %q", got)
+			}
+		}
+	}
 	if n := upgrades(e); n != 1 {
 		t.Fatalf("pkg upgrade ran %d times (only the running jail, web)", n)
 	}
