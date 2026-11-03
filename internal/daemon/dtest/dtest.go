@@ -127,6 +127,9 @@ type Env struct {
 	DialFn func(ctx context.Context, network, address string) (net.Conn, error)
 	// PkgInstallErr makes the fake pkg fail an app's package installation.
 	PkgInstallErr error
+	pkgDry        string // what `pkg -r ROOT upgrade -n` lists until an upgrade ran (SetPkgUpgrades)
+	pkgUpgErr     error  // makes `pkg -r ROOT upgrade -y` fail (SetPkgUpgradeErr)
+	pkgUpgraded   bool
 	// Installed lists what the fake pkg installed into jail roots, "root name".
 	Installed []string
 	// Host is the simulated host of host management.
@@ -140,6 +143,21 @@ func (e *Env) SetDial(fn func(ctx context.Context, network, address string) (net
 	e.sysmu.Lock()
 	defer e.sysmu.Unlock()
 	e.DialFn = fn
+}
+
+// SetPkgUpgrades sets the dry-run output of `pkg -r ROOT upgrade -n` (the packages a jail would get); once an upgrade
+// ran, the fake answers that the packages are up to date.
+func (e *Env) SetPkgUpgrades(dry string) {
+	e.sysmu.Lock()
+	defer e.sysmu.Unlock()
+	e.pkgDry, e.pkgUpgraded = dry, false
+}
+
+// SetPkgUpgradeErr makes `pkg -r ROOT upgrade -y` fail with err (nil for success).
+func (e *Env) SetPkgUpgradeErr(err error) {
+	e.sysmu.Lock()
+	defer e.sysmu.Unlock()
+	e.pkgUpgErr = err
 }
 
 // SetPkgInstallErr sets PkgInstallErr while the daemon may be running.
@@ -399,6 +417,23 @@ func (e *Env) script() {
 		sub, rest := argv[i], argv[i+1:]
 		switch sub {
 		case "install", "upgrade":
+			if sub == "upgrade" && !options {
+				e.sysmu.Lock()
+				defer e.sysmu.Unlock()
+				for _, a := range rest {
+					if a == "-n" { // the dry run of a package update
+						if e.pkgUpgraded || e.pkgDry == "" {
+							return run.Result{Stdout: []byte("Your packages are up to date.\n")}, nil
+						}
+						return run.Result{Stdout: []byte(e.pkgDry)}, nil
+					}
+				}
+				if e.pkgUpgErr != nil {
+					return run.Result{ExitCode: 1, Stderr: []byte("pkg: repository unreachable\n")}, e.pkgUpgErr
+				}
+				e.pkgUpgraded = true
+				return run.Result{}, nil
+			}
 			if options {
 				e.Files.Put(root+"/bin/sh", []byte("x"))
 				e.Files.Put(root+"/libexec/ld-elf.so.1", []byte("x"))
@@ -548,7 +583,7 @@ func (e *Env) Seed() {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := e.Admin.Images().Create(ctx, api.Image{Metadata: api.ObjectMeta{Name: "fb"}, Spec: api.ImageSpec{
-		OS: api.OSFreeBSD, Release: "15.0-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}}); err != nil {
+		OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}}); err != nil {
 		t.Fatalf("seed image: %v", err)
 	}
 	op, err := e.Admin.Images().Build(ctx, "fb", api.ImageBuild{})

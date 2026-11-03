@@ -314,7 +314,7 @@ func buildRegistry() []ckey {
 		return nil
 	}
 
-	str("image", "image", "Image reference: name, name@alias or name#gN. The image name cannot change on a living jail.", "freebsd-15@stable", true, false,
+	str("image", "image", "Image reference: name, name@alias or name#gN. The image name cannot change on a living jail.", "freebsd-15-1", true, false,
 		func(s *JailSpec) *string { return &s.Image }, func(v string) error {
 			if v == "" || strings.ContainsAny(v, " \t\n/") {
 				return fmt.Errorf("%q is not an image reference", v)
@@ -426,7 +426,7 @@ func buildRegistry() []ckey {
 		func(s *JailSpec) *string { return &s.Firewall.Policy }, func(v string) error { return nameCheck(v) })
 	list("firewall.tags", "firewall.tags", "Tags that firewall rules refer to.", "web,public", false, true,
 		func(s *JailSpec) *[]string { return &s.Firewall.Tags }, nameCheck)
-	list("packages", "packages", "Not yet: creation is refused when set; use the provisioning packages step.", "nginx,curl", true, true, func(s *JailSpec) *[]string { return &s.Packages }, nil)
+	list("packages", "packages", "Cannot be set when a jail is created yet: a create that sets it is refused. Install packages with the provisioning packages step.", "nginx,curl", true, true, func(s *JailSpec) *[]string { return &s.Packages }, nil)
 	add(ckey{ConfigKey: ConfigKey{Name: "env.<var>", Type: "string", Description: "Environment variable of the jail's services.", Example: "env.TZ=UTC", RestartRequired: true, Profile: true, Path: "env.<var>"},
 		get: func(s *JailSpec, d string) (string, bool) { v, ok := s.Env[d]; return v, ok },
 		set: func(s *JailSpec, d, v string) error {
@@ -537,9 +537,9 @@ func buildRegistry() []ckey {
 		return nil
 	}
 	g, st, un = field(nic, rate, func(p *NetworkAttach) *string { return &p.Ingress }, "ingress")
-	devKey("nic.<device>.ingress", "rate", "Rate limit of traffic into the jail, bits per second. UNVERIFIED: not enforced yet; the jail reports a RateLimit condition.", "10M", false, true, false, "network[<device>].ingress", g, st, un)
+	devKey("nic.<device>.ingress", "rate", "Rate limit of traffic into the jail, bits per second. Not enforced yet: the limit is stored and reported only, and the jail reports a RateLimit condition.", "10M", false, true, false, "network[<device>].ingress", g, st, un)
 	g, st, un = field(nic, rate, func(p *NetworkAttach) *string { return &p.Egress }, "egress")
-	devKey("nic.<device>.egress", "rate", "Rate limit of traffic out of the jail, bits per second. UNVERIFIED: not enforced yet; the jail reports a RateLimit condition.", "10M", false, true, false, "network[<device>].egress", g, st, un)
+	devKey("nic.<device>.egress", "rate", "Rate limit of traffic out of the jail, bits per second. Not enforced yet: the limit is stored and reported only, and the jail reports a RateLimit condition.", "10M", false, true, false, "network[<device>].egress", g, st, un)
 
 	// disk devices
 	devKey("disk.<device>", "device", "A data volume; set it to the mount path to add it, unset it to remove it.", "disk.data=/var/db", true, true, false, "volumes[<device>]",

@@ -185,6 +185,7 @@ func (a *app) showImage(i api.Image) error {
 	s.kv("Keeps", orText(strings.Join(keep, ", "), "every generation"))
 	s.kv("Age", age(now, i.Metadata.CreatedAt))
 	s.labels(i.Metadata)
+	a.showAutoUpgrade(s, i)
 	s.section("Generations")
 	if len(i.Status.Generations) == 0 {
 		fprintf(s.w, "  none: build one with 'jailops image build %s'\n", i.Metadata.Name)
@@ -269,4 +270,46 @@ func (i indentWriter) Write(b []byte) (int, error) {
 		}
 	}
 	return len(b), nil
+}
+
+// showAutoUpgrade prints the automatic upgrade of an image: the setting, the next run and the latest runs.
+func (a *app) showAutoUpgrade(s showWriter, i api.Image) {
+	au, st := i.Spec.AutoUpgrade, i.Status.AutoUpgrade
+	if (au == nil || !au.Enabled) && st == nil {
+		s.kv("Nightly", "off ('jailops image auto-upgrade "+i.Metadata.Name+" on' turns it on)")
+		return
+	}
+	if au == nil || !au.Enabled {
+		s.kv("Nightly", "off")
+	} else {
+		at := au.At
+		if at == "" {
+			at = api.DefaultAutoUpgradeAt
+		}
+		what := "generation and jails"
+		if au.Packages {
+			what += " and their packages"
+		}
+		line := "every night at " + at + ": " + what
+		if st != nil && !st.Next.IsZero() {
+			line += "; next " + st.Next.Local().Format("2006-01-02 15:04")
+		}
+		s.kv("Nightly", line)
+	}
+	if st == nil || len(st.Recent) == 0 {
+		return
+	}
+	s.section("Automatic upgrades")
+	rows := [][]string{}
+	for _, r := range st.Recent {
+		what := fmt.Sprintf("%d moved, %d packages upgraded", r.JailsMoved, r.JailsUpgraded)
+		if r.Generation != "" {
+			what = r.Generation + ", " + what
+		}
+		if r.Detail != "" {
+			what += "; " + r.Detail
+		}
+		rows = append(rows, []string{r.Started.Local().Format("2006-01-02 15:04"), r.Result, what})
+	}
+	a.printTable(indentWriter{s.w}, []string{"STARTED", "RESULT", "WHAT"}, rows, nil)
 }

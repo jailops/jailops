@@ -30,7 +30,7 @@
     jailops network create web --ipv4 10.88.0.1/24 --nat --ipv6 2001:db8:1:2:1::1/80 --uplink vtnet0
     jailops project create shop
     jailops project set shop --network web --storage default
-    jailops create site --project shop --image freebsd-15@stable --network web --storage default
+    jailops create site --project shop --image freebsd-15-1 --network web --storage default
     jailops start site --project shop
     jailops list --project shop          # ADDRESSES shows the IPv4 and the IPv6 address
 

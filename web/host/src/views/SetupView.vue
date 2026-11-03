@@ -14,6 +14,10 @@ import Callout from '@jailops/shared/components/Callout.vue'
 import CopyField from '@jailops/shared/components/CopyField.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import CertificatePanel from '@/components/CertificatePanel.vue'
+import ImageFields from '@/components/ImageFields.vue'
+import { useImageCreate } from '@/composables/imageCreate'
+import { useFormCheck } from '@jailops/shared/composables/form'
+import { imageProblems, initialImageForm, type ImageForm } from '@/lib/images'
 import { setPending } from '@/composables/pending'
 import { refreshProjects } from '@/composables/project'
 import { enableLines, RESTART, validDNSName, hostAddr } from '@/lib/host'
@@ -227,6 +231,32 @@ async function createDefaults(): Promise<void> {
   }
 }
 
+// ---- 6: the base image ----
+// The FreeBSD image of this host's release (freebsd-15-1 for 15.1), upgraded every night unless the box is cleared,
+// created and built here unless one exists.
+const img = reactive({ loaded: false, existing: [] as string[], taken: [] as string[] })
+const imf = reactive<ImageForm>(initialImageForm(null))
+// the step shows the build to its end: no toast over its buttons
+const imgRun = useImageCreate({ silent: true })
+const imgIds: Record<string, string> = { name: 'img-name', release: 'img-release', arch: 'img-arch', at: 'img-at' }
+const imgCheck = useFormCheck(() => {
+  const p = imageProblems(imf, imgRun.created.value === imf.name ? [] : img.taken)
+  return Object.fromEntries(Object.entries(imgIds).map(([k, id]) => [id, p[k as keyof typeof p] ?? '']))
+})
+/** Whether apps have an image to start from: the Done step's way on depends on it. */
+const hasImage = ref(false)
+const imgEditing = computed(() => imgRun.phase.value === 'idle' || (imgRun.phase.value === 'failed' && imgRun.failedAt.value === 'create'))
+async function makeImage(): Promise<void> {
+  if (await imgRun.run(imf)) {
+    hasImage.value = true
+    dfDone.value.push(s.setup.madeImage(imf.name, imf.release, imf.auto ? imf.at : ''))
+    next()
+  } else if (imgRun.created.value) {
+    hasImage.value = true // defined, the build failed or was cancelled: the first install builds it too
+  }
+}
+const imageSubmit = () => (imgEditing.value ? imgCheck.submit(makeImage) : makeImage())
+
 async function loadStep(): Promise<void> {
   try {
     if (step.value === 'identity') {
@@ -239,6 +269,17 @@ async function loadStep(): Promise<void> {
       const [st, pr, nw] = await Promise.all([api.storage.list(), api.projects.list(), api.networks.list()])
       Object.assign(have, { loaded: true, storage: st.length, projects: pr.length, networks: nw.length })
       Object.assign(make, { storage: !st.length, project: !pr.length, network: !nw.length })
+    } else if (step.value === 'image') {
+      const l = await api.images.list()
+      const fb = l.filter((i) => i.spec.os === 'freebsd').map((i) => i.metadata.name)
+      Object.assign(img, { loaded: true, existing: fb, taken: l.map((i) => i.metadata.name) })
+      if (fb.length) hasImage.value = true
+      else if (imgRun.phase.value === 'idle') {
+        Object.assign(imf, initialImageForm(session.info))
+        imgCheck.reset()
+      }
+    } else if (step.value === 'done') {
+      hasImage.value = (await api.images.list()).some((i) => i.spec.os === 'freebsd')
     }
   } catch (e) {
     error.value = asError(e)
@@ -375,12 +416,47 @@ const nothingToMake = computed(() => have.loaded && !make.storage && !make.proje
           </div>
         </form>
 
-        <!-- 6: done -->
+        <!-- 6: the base image -->
+        <form v-else-if="step === 'image'" novalidate data-test="setup-image" :data-phase="imgRun.phase.value" @submit.prevent="imageSubmit">
+          <p class="muted">{{ s.setup.imageLead }} {{ s.setup.imageAutoLead }}</p>
+          <Callout v-if="img.existing.length" tone="ok" data-test="setup-image-exists">{{ s.setup.imageExists(img.existing.join(', ')) }}</Callout>
+          <template v-else-if="img.loaded">
+            <ImageFields :f="imf" :err="imgCheck.err" :touch="imgCheck.touch" :disabled="!imgEditing" />
+            <p class="hint">{{ s.imageCreate.buildHint }}</p>
+            <div v-if="imgRun.busy.value" class="stack setup-image-run" role="status" data-test="setup-image-progress">
+              <span><span class="pill info pulse">{{ imgRun.phase.value === 'creating' ? s.imageCreate.creating(imf.name) : s.imageCreate.building(imf.name, imgRun.progress.value) }}</span></span>
+              <div class="meter" aria-hidden="true"><span :style="{ width: Math.max(3, imgRun.progress.value) + '%' }"></span></div>
+              <span class="hint">{{ s.setup.imageBuilding }}</span>
+            </div>
+            <Callout v-if="imgRun.phase.value === 'cancelled'" tone="warn" data-test="setup-image-cancelled">{{ s.imageCreate.cancelled(imf.name) }}</Callout>
+            <template v-if="imgRun.phase.value === 'failed' && imgRun.error.value">
+              <p class="setup-image-failed" data-test="setup-image-failed">{{ imgRun.failedAt.value === 'build' ? s.imageCreate.buildFailed(imf.name) : s.imageCreate.createFailed }}</p>
+              <ErrorPanel :error="imgRun.error.value" />
+              <Callout v-if="imgRun.failedAt.value === 'build'" tone="info">{{ s.imageCreate.check }}</Callout>
+            </template>
+          </template>
+          <ErrorPanel v-if="error" :error="error" />
+          <div class="row setup-nav">
+            <template v-if="img.existing.length"><button class="btn btn-primary" type="button" data-test="setup-next" @click="next">{{ s.setup.continue }}</button></template>
+            <template v-else-if="img.loaded">
+              <span v-if="imgEditing && imgCheck.tried.value && imgCheck.reason.value" class="why-disabled">{{ imgCheck.reason.value }}</span>
+              <button v-if="imgEditing" class="btn btn-primary" type="submit" :disabled="imgRun.busy.value" :aria-disabled="!imgCheck.ok.value" data-test="setup-image-make">{{ s.setup.imageMake }}</button>
+              <button v-else-if="imgRun.phase.value === 'failed' || imgRun.phase.value === 'cancelled'" class="btn btn-primary" type="submit" data-test="setup-image-retry">{{ s.imageCreate.retry }}</button>
+              <button v-if="imgRun.phase.value === 'building' && imgRun.mayCancel.value" class="btn btn-danger" type="button" data-test="setup-image-cancel" @click="imgRun.cancel">{{ s.imageCreate.cancel }}</button>
+            </template>
+            <button v-if="!img.existing.length" class="btn btn-ghost" type="button" data-test="setup-skip" @click="next">{{ s.setup.skip }}</button>
+          </div>
+          <p v-if="!img.existing.length" class="faint" data-test="setup-image-skip-note">{{ s.setup.imageSkipNote }}</p>
+        </form>
+
+        <!-- 7: done -->
         <div v-else class="stack" data-test="setup-done">
           <Callout tone="ok">{{ s.setup.doneLead }}</Callout>
+          <Callout v-if="!hasImage" tone="warn" data-test="setup-done-no-image">{{ s.setup.doneNoImage }}</Callout>
           <ul v-if="dfDone.length" class="setup-list"><li v-for="d in dfDone" :key="d">{{ d }}</li></ul>
           <div class="row">
-            <router-link class="btn btn-primary" to="/apps" data-test="setup-apps">{{ s.setup.toApps }}</router-link>
+            <router-link v-if="hasImage" class="btn btn-primary" to="/apps" data-test="setup-apps">{{ s.setup.toApps }}</router-link>
+            <router-link v-else class="btn btn-primary" to="/images?create=1" data-test="setup-image-link">{{ s.setup.toImage }}</router-link>
             <router-link class="btn" to="/" data-test="setup-overview">{{ s.setup.toOverview }}</router-link>
           </div>
         </div>
@@ -404,4 +480,6 @@ h2:focus { outline: none; }
 .setup-pre { margin: 0; padding: 8px 12px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius); white-space: pre; overflow-x: auto; }
 .plain-set { border: 0; margin: 0; padding: 0; min-width: 0; }
 .setup-nav { margin-top: 12px; }
+.setup-image-run { margin-top: 12px; gap: 6px; }
+.setup-image-failed { margin: 12px 0 6px; font-weight: 500; }
 </style>

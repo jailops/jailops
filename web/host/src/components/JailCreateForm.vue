@@ -8,6 +8,11 @@ import { useFormCheck } from '@jailops/shared/composables/form'
 import { nameHint, nameProblem } from '@jailops/shared/lib/names'
 import Modal from '@jailops/shared/components/Modal.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
+import Icon from '@jailops/shared/components/Icon.vue'
+import ImageCreateDialog from './ImageCreateDialog.vue'
+import { isGlobalAdmin } from '@/composables/project'
+import { session } from '@jailops/shared/composables/session'
+import { defaultImage, freebsdImages, hostRelease, imageLabel } from '@/lib/images'
 import type { Image, Network, Project, Storage } from '@jailops/shared/api/types'
 
 const props = defineProps<{ open: boolean; project: Project | undefined; images: Image[]; storage: Storage[]; networks: Network[] }>()
@@ -19,14 +24,14 @@ const vol = reactive({ name: '', mount: '', encrypted: false, pass: '', again: '
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 
-/** Image references a jail may use: each alias, and the newest generation pinned. */
-const imageRefs = computed(() =>
-  props.images.flatMap((i) => {
-    const gens = i.status.generations ?? []
-    const last = gens.length ? Math.max(...gens.map((g) => g.number)) : 0
-    return [...(i.spec.aliases ?? []).map((a) => `${i.metadata.name}@${a}`), ...(last ? [`${i.metadata.name}#g${last}`] : [])]
-  }),
-)
+/** The images a jail may start from, by plain name (the newest generation): the one an app would get first, then
+ *  the FreeBSD images by release, then the others by name. */
+const imageChoices = computed(() => {
+  const first = defaultImage(props.images, hostRelease(session.info))
+  const rest = [...freebsdImages(props.images), ...props.images.filter((i) => i.spec.os !== 'freebsd').sort((a, b) => (a.metadata.name < b.metadata.name ? -1 : 1))]
+  return [...rest.filter((i) => i.metadata.name === first), ...rest.filter((i) => i.metadata.name !== first)]
+})
+const imageRefs = computed(() => imageChoices.value.map((i) => i.metadata.name))
 /** The project's grants narrow the choices; a "*" grant or no project data allows everything. */
 const stoNames = computed(() => {
   const g = props.project?.spec.storage ?? []
@@ -57,7 +62,11 @@ const describe = (id: string, hint?: string) => [check.err(id) ? `${id}-err` : '
 function clearVolume(): void {
   Object.assign(vol, { name: '', mount: '', encrypted: false, pass: '', again: '' })
 }
-const missing = computed(() => (!imageRefs.value.length ? s.jails.needImage : !stoNames.value.length ? s.jails.needStorage : ''))
+const noImage = computed(() => !imageRefs.value.length)
+const missing = computed(() => (noImage.value ? (isGlobalAdmin() ? s.jails.needImage : s.jails.needImageAsk) : !stoNames.value.length ? s.jails.needStorage : ''))
+// without an image the form offers to create the base image; the list reloads when it is made
+const makingImage = ref(false)
+watch(imageRefs, (r) => { if (!f.image && r.length) f.image = r[0] })
 
 watch(() => props.open, (o) => {
   if (!o) {
@@ -94,7 +103,10 @@ async function save(): Promise<void> {
 
 <template>
   <Modal :open="open" :title="s.jails.createTitle" @close="emit('close')">
-    <p v-if="missing" class="muted" data-test="jail-missing">{{ missing }}</p>
+    <div v-if="missing" class="stack" data-test="jail-missing">
+      <p class="muted jc-missing">{{ missing }}</p>
+      <div v-if="noImage && isGlobalAdmin()" class="row"><button class="btn btn-primary" type="button" data-test="jail-make-image" @click="makingImage = true"><Icon name="plus" />{{ s.imageCreate.openBase }}</button></div>
+    </div>
     <form v-else id="jc" novalidate @submit.prevent="check.submit(save)">
       <p class="hint faint jc-note">{{ s.form.requiredNote }}</p>
       <div class="field">
@@ -105,7 +117,7 @@ async function save(): Promise<void> {
       </div>
       <div class="field">
         <label for="jc-image">{{ s.jails.image }} <span class="req" aria-hidden="true">*</span></label>
-        <select id="jc-image" v-model="f.image" required :aria-invalid="!!check.err('jc-image')" :aria-describedby="describe('jc-image')"><option v-for="x in imageRefs" :key="x" :value="x">{{ x }}</option></select>
+        <select id="jc-image" v-model="f.image" required :aria-invalid="!!check.err('jc-image')" :aria-describedby="describe('jc-image')"><option v-for="i in imageChoices" :key="i.metadata.name" :value="i.metadata.name">{{ imageLabel(i) }}</option></select>
         <span v-if="check.err('jc-image')" id="jc-image-err" class="field-error" role="alert">{{ check.err('jc-image') }}</span>
       </div>
       <div class="field">
@@ -155,6 +167,7 @@ async function save(): Promise<void> {
       <button v-if="!missing" class="btn btn-primary" type="submit" form="jc" :disabled="busy" :aria-disabled="!check.ok.value" data-test="jail-create-go">{{ s.jails.create }}</button>
     </template>
   </Modal>
+  <ImageCreateDialog :open="makingImage" @close="makingImage = false" />
 </template>
 
 <style>
@@ -164,4 +177,5 @@ async function save(): Promise<void> {
 .vol-set > .hint { display: block; margin-top: 2px; color: var(--text-3); font-size: 12px; }
 .jc-pass-field { margin-top: 10px; }
 .jc-note { margin: 0 0 8px; font-size: 12px; }
+.jc-missing { margin: 0; }
 </style>

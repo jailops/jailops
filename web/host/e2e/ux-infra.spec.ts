@@ -15,7 +15,7 @@ async function open(page: Page, path: string): Promise<void> {
 
 test('upgrading an image asks first and lists the jails on it', async ({ page }) => {
   await open(page, '/images')
-  await page.getByTestId('upgrade-freebsd-15').click()
+  await page.getByTestId('upgrade-freebsd-15-1').click()
   const dlg = page.getByTestId('confirm-dialog')
   await expect(dlg).toHaveAttribute('data-tier', '2')
   await expect(dlg.getByTestId('confirm-items')).toContainText('web')

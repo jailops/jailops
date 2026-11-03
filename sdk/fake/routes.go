@@ -163,7 +163,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	info := api.ServerInfo{
 		APIVersion: api.Version, APIExtensions: slices.Clone(s.extensions), Version: "fake",
 		HostUUID: s.uuid, Hostname: s.hostname, Role: api.RoleHost, Hub: s.hub, Auth: auth,
-		Environment: api.Environment{OS: "FreeBSD", Arch: s.arch, Pool: "tank"}, SecretsRecipient: s.secretsRec,
+		Environment: api.Environment{OS: "FreeBSD", KernelVersion: s.release, Arch: s.arch, Pool: "tank"}, SecretsRecipient: s.secretsRec,
 	}
 	s.mu.Unlock()
 	if auth == "untrusted" {
@@ -352,4 +352,13 @@ func imageName(ref string) string {
 func genNumber(s string) int {
 	n, _ := strconv.Atoi(strings.TrimPrefix(s, "g"))
 	return n
+}
+
+// imageCreateHint is the server's hint for an image reference that names no image: the commands that make it.
+func (s *Server) imageCreateHint(ref string) string {
+	alias := ""
+	if _, a, ok := strings.Cut(ref, "@"); ok {
+		alias = a
+	}
+	return api.ImageCreateHint("it", imageName(ref), alias, api.BaseRelease(s.release))
 }

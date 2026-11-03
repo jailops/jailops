@@ -1,11 +1,11 @@
 $ jailops list
-! No jails in project main. Create one with: jailops jail create NAME --image IMAGE@ALIAS --network NETWORK --storage STORAGE
+! No jails in project main. Create one with: jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE
 
 $ jailops network list
 ! No networks. Create one with: jailops network create NAME --ipv4 10.50.0.1/24 --uplink IFACE --nat
 
 $ jailops image list
-! No images. Create one with: jailops image create NAME --release 15.1-RELEASE --alias stable
+! No images. Create one with: jailops image create freebsd-15-1 --release 15.1-RELEASE, then jailops image build freebsd-15-1
 
 $ jailops list web*
 ! No jails in project main match.
@@ -37,6 +37,7 @@ Image freebsd-15
   Aliases:   stable -> g1
   Keeps:     every generation
   Age:       3h
+  Nightly:   off ('jailops image auto-upgrade freebsd-15 on' turns it on)
 
 Generations
   GEN   PACKAGES   AGE   USED BY

@@ -149,6 +149,8 @@ type Deps struct {
 	ProjectFilesDir string
 	// UpdateTick is how often the update schedules are evaluated (default 1m).
 	UpdateTick time.Duration
+	// AutoUpgradeZone is the time zone of the time of day of an image's automatic upgrade (default: the host's).
+	AutoUpgradeZone *time.Location
 	// AppsDir is the application catalog directory (default apps.DefaultDir);
 	// a missing directory is an empty catalog.
 	AppsDir string
@@ -220,6 +222,9 @@ type Service struct {
 	lcfg     lifecycle.Config
 	localReg *LocalRegistrar
 
+	// rel caches the host's kern.osrelease (hostrelease.go).
+	rel hostReleaseCache
+
 	imgKind  kindStore[api.ImageSpec]
 	netKind  kindStore[api.NetworkSpec]
 	polKind  kindStore[api.FirewallPolicySpec]
@@ -264,6 +269,7 @@ type Service struct {
 	logAud     logAudit
 
 	upd     updateState
+	imgAuto imageAutoState
 	prov    provMarks
 	histMem histMemory
 	// keys holds the failed unlocks of each jail and the jails a boot wanted to start while they were locked
@@ -411,6 +417,8 @@ func (s *Service) Start(ctx context.Context) error {
 	if s.life != nil {
 		s.wg.Add(1)
 		go func() { defer s.wg.Done(); s.updateLoop(s.baseCtx) }()
+		s.wg.Add(1)
+		go func() { defer s.wg.Done(); s.imageAutoLoop(s.baseCtx) }()
 	}
 	return nil
 }
@@ -516,7 +524,7 @@ func (s *Service) Info(auth string) api.ServerInfo {
 	return api.ServerInfo{
 		APIVersion: api.Version, APIExtensions: s.Extensions(), Version: s.d.Version,
 		HostUUID: s.d.HostUUID, Hostname: s.d.Hostname, Role: s.d.Role, Hub: s.d.Hub,
-		Auth: auth, Environment: s.d.Env, SecretsRecipient: s.d.SecretsRecipient,
+		Auth: auth, Environment: s.environment(), SecretsRecipient: s.d.SecretsRecipient,
 	}
 }
 

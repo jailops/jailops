@@ -221,9 +221,9 @@ type AppInstall struct {
 	// is granted exactly one of a kind it is the default.
 	Network string `json:"network,omitempty"`
 	Storage string `json:"storage,omitempty"`
-	// Image is the image reference (default: the only FreeBSD image with the
-	// alias stable, as NAME@stable); its release must be at least the
-	// definition's release_min.
+	// Image is the image reference (default: the FreeBSD image of the highest
+	// release the host runs, by its bare name); its release must be at least
+	// the definition's release_min.
 	Image string `json:"image,omitempty"`
 	// Limits replaces the definition's resource hints as the jail's limits.
 	Limits *Resources `json:"limits,omitempty"`

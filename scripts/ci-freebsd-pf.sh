@@ -1,6 +1,7 @@
 #!/bin/sh
 # The packet filter of JailOps, tested with real traffic on a real FreeBSD host. Needs a running jailopsd with an image
-# freebsd@stable and the storage "default" (scripts/ci-freebsd-e2e.sh leaves exactly that), PF running with the
+# of the host's release (freebsd-15-1 on 15.1, or PF_IMAGE) and the storage "default" (scripts/ci-freebsd-e2e.sh leaves
+# exactly that), PF running with the
 # anchor lines of the setup guide, and root.
 #
 #   sh scripts/ci-freebsd-pf.sh              the whole matrix
@@ -15,6 +16,7 @@
 set -u
 
 J=${JAILOPS:-/usr/local/bin/jailops}
+img=${PF_IMAGE:-freebsd-$(freebsd-version -u | sed -E 's/^([0-9]+)\.([0-9]+)-.*/\1-\2/')}
 fails=0
 UC=0
 passes=0
@@ -152,10 +154,10 @@ $J project create pfa </dev/null >/dev/null || die "project pfa"
 $J project create pfb </dev/null >/dev/null || die "project pfb"
 $J project set pfa --network pfa-net --network pfa-net2 --storage default </dev/null >/dev/null || die "grant pfa"
 $J project set pfb --network pfb-net --storage default </dev/null >/dev/null || die "grant pfb"
-for n in a b; do $J create $n --project pfa --image freebsd@stable --network pfa-net --storage default </dev/null >/dev/null || die "create $n"; done
-$J create c --project pfa --image freebsd@stable --network pfa-net --storage default --tag web </dev/null >/dev/null || die "create c"
-$J create d --project pfa --image freebsd@stable --network pfa-net2 --storage default </dev/null >/dev/null || die "create d"
-$J create o --project pfb --image freebsd@stable --network pfb-net --storage default </dev/null >/dev/null || die "create o"
+for n in a b; do $J create $n --project pfa --image "$img" --network pfa-net --storage default </dev/null >/dev/null || die "create $n"; done
+$J create c --project pfa --image "$img" --network pfa-net --storage default --tag web </dev/null >/dev/null || die "create c"
+$J create d --project pfa --image "$img" --network pfa-net2 --storage default </dev/null >/dev/null || die "create d"
+$J create o --project pfb --image "$img" --network pfb-net --storage default </dev/null >/dev/null || die "create o"
 for pn in pfa:a pfa:b pfa:c pfa:d pfb:o; do $J start "${pn#*:}" --project "${pn%%:*}" </dev/null >/dev/null || die "start $pn"; done
 sleep 8
 
@@ -612,7 +614,7 @@ jexec pfrdr ifconfig pfupb inet 198.51.100.2/24 up || die "address in pfrdr"
 jexec pfrdr ifconfig lo0 up >/dev/null 2>&1
 $J network create pfa-up --bridge jo24 --ipv4 10.94.0.1/24 --uplink pfupa </dev/null >/dev/null || die "network pfa-up"
 $J project set pfa --network pfa-net --network pfa-net2 --network pfa-up --storage default </dev/null >/dev/null || die "grant pfa-up"
-$J create r --project pfa --image freebsd@stable --network pfa-up --storage default </dev/null >/dev/null || die "create r"
+$J create r --project pfa --image "$img" --network pfa-up --storage default </dev/null >/dev/null || die "create r"
 policy pfa fwd "default_in: deny
 default_out: allow
 rules:

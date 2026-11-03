@@ -53,6 +53,9 @@ func TestJailBulkActions(t *testing.T) {
 		t.Fatal("tmp survived the typed confirmation")
 	}
 	tr.do("", "delete", "web") // running, no --force
+	// a dry run shows the summary of a running jail without --force too, and says --force is needed
+	tr.ok("--dry-run", "delete", "web")
+	tr.ok("--dry-run", "delete", "web", "-o", "json")
 	tr.ok("--dry-run", "delete", "--force", "web")
 	tr.ok("--dry-run", "delete", "--force", "web", "-o", "json")
 	tr.do("", "--dry-run", "delete", "nosuch") // a dry run of a missing jail is an error

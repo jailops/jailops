@@ -98,6 +98,18 @@ $ jailops delete web
 ! hint: stop it first ('jailops stop web'), or pass --force to stop it before the delete
 [exit 5]
 
+$ jailops --dry-run delete web
+dry-run: would delete jail web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; the delete needs --force to stop it first
+
+$ jailops --dry-run delete web -o json
+{
+  "action": "delete jail",
+  "destroys": [
+    "web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; the delete needs --force to stop it first"
+  ],
+  "dry_run": true
+}
+
 $ jailops --dry-run delete --force web
 dry-run: would delete jail web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; --force stops it first
 
@@ -131,5 +143,5 @@ $ jailops delete --all --force --confirm-data-loss
 jail/db deleted
 
 $ jailops list
-! No jails in project main. Create one with: jailops jail create NAME --image IMAGE@ALIAS --network NETWORK --storage STORAGE
+! No jails in project main. Create one with: jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE
 

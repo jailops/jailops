@@ -78,6 +78,10 @@ func WithSysctl(name, value string) Option {
 // reports none, as a server that could not tell would).
 func WithArch(arch string) Option { return func(s *Server) { s.arch = arch } }
 
+// WithRelease sets the release reported as the kernel version by GET /api/v1 (default 15.1-RELEASE; "" reports
+// none, as a server that could not read it would). The hints for a missing image name it.
+func WithRelease(release string) Option { return func(s *Server) { s.release = release } }
+
 // WithHosts turns the server into a hub: requests carrying ?host=<name> are
 // served by the given server (matched by name or host UUID).
 func WithHosts(hosts map[string]*Server) Option {
@@ -127,6 +131,7 @@ type Server struct {
 	secretsRec  string
 	hostname    string
 	arch        string
+	release     string
 	hub         bool
 	hosts       map[string]*Server
 
@@ -205,7 +210,7 @@ type Server struct {
 // New creates an empty server.
 func New(opts ...Option) *Server {
 	s := &Server{
-		now: time.Now, uuid: newUUID(), hostname: "fake-host", arch: "amd64",
+		now: time.Now, uuid: newUUID(), hostname: "fake-host", arch: "amd64", release: "15.1-RELEASE",
 		extensions: slices.Clone(api.Extensions),
 		snapshots:  map[string][]*api.JailSnapshot{}, access: map[string]*fakeAccess{},
 		identities: map[string]Identity{}, trustTokens: map[string]*trustRec{}, trustFails: map[string]int{},

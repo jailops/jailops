@@ -17,7 +17,11 @@ import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import StatePill from '@/components/StatePill.vue'
 import NotesText from '@/components/NotesText.vue'
-import type { AppDetail, AppInstallResult } from '@jailops/shared/api/types'
+import ImageCreateDialog from '@/components/ImageCreateDialog.vue'
+import { isGlobalAdmin } from '@/composables/project'
+import { baseImageState, defaultImage, freebsdImages, hostRelease, imageLabel } from '@/lib/images'
+import { session } from '@jailops/shared/composables/session'
+import type { AppDetail, AppInstallResult, Image } from '@jailops/shared/api/types'
 
 const props = defineProps<{ open: boolean; detail: AppDetail | null }>()
 const emit = defineEmits<{ close: []; done: [] }>()
@@ -26,7 +30,7 @@ const gate = useInstallGate()
 const app = computed(() => props.detail?.definition)
 const title = computed(() => app.value?.title || app.value?.name || '')
 
-const f = reactive<InstallForm>({ jail: '', network: '', storage: '', memory: '', disk: '', cpu: '' })
+const f = reactive<InstallForm>({ jail: '', image: '', network: '', storage: '', memory: '', disk: '', cpu: '' })
 const taken = ref<string[]>([])
 const touched = ref(false)
 type Phase = 'form' | 'running' | 'done' | 'failed'
@@ -38,6 +42,18 @@ const stepsFor = ref('')
 const progress = ref(0)
 const result = ref<AppInstallResult | null>(null)
 
+// An app installs from a FreeBSD image, by its plain name (its newest generation): the select lists them with their
+// release and presets the one the server would pick (the newest release this host runs). Without any FreeBSD image
+// the dialog says so and offers to create one, instead of a refusal from the server.
+const images = ref<Image[] | null>(null)
+const noImage = computed(() => !!images.value && baseImageState(images.value) === 'none')
+const choices = computed(() => freebsdImages(images.value ?? []))
+const makingImage = ref(false)
+const loadImages = () => api.images.list().then((l) => {
+  images.value = l
+  if (!f.image || !l.some((i) => i.metadata.name === f.image)) f.image = defaultImage(l, hostRelease(session.info)) || (choices.value[0]?.metadata.name ?? '')
+}).catch(() => undefined)
+
 const issues = computed(() => validateInstall(f, { networks: gate.granted.value.networks, storage: gate.granted.value.storage, taken: taken.value }))
 const valid = computed(() => !Object.keys(issues.value).length)
 const say = (k: keyof InstallForm): string => {
@@ -46,7 +62,7 @@ const say = (k: keyof InstallForm): string => {
 }
 const issueText = (k: keyof InstallForm): string => (touched.value || k === 'jail' || k === 'memory' || k === 'disk' || k === 'cpu' ? say(k) : '')
 // the first problem, named next to the Install button; a submit focuses its field
-const fieldIds: Record<keyof InstallForm, string> = { jail: 'inst-jail', network: 'inst-net', storage: 'inst-sto', memory: 'inst-mem', disk: 'inst-disk', cpu: 'inst-cpu' }
+const fieldIds: Record<keyof InstallForm, string> = { jail: 'inst-jail', image: 'inst-image', network: 'inst-net', storage: 'inst-sto', memory: 'inst-mem', disk: 'inst-disk', cpu: 'inst-cpu' }
 const firstIssue = computed(() => (Object.keys(fieldIds) as Array<keyof InstallForm>).find((k) => issues.value[k]))
 const why = computed(() => (firstIssue.value ? s.form.fixFirst(say(firstIssue.value)) : ''))
 function focusFirst(): void {
@@ -75,6 +91,8 @@ watch(() => props.open, (o) => {
   result.value = null
   touched.value = false
   taken.value = []
+  images.value = null
+  void loadImages()
   if (projectState.current) api.jails.list().then((l) => (taken.value = l.map((j) => j.metadata.name))).catch(() => undefined)
 })
 
@@ -149,12 +167,23 @@ function back(): void {
       <template v-if="phase === 'form'">
         <Callout v-if="gate.reason.value" tone="warn" data-test="install-blocked">{{ gate.reason.value }} <router-link v-if="gate.toProject.value" :to="gate.toProject.value" @click="emit('close')">{{ s.apps.toProject }}</router-link></Callout>
         <p v-else-if="projectState.current" class="muted">{{ s.install.lead(projectState.current) }}</p>
+        <Callout v-if="noImage" tone="warn" data-test="install-no-image">
+          <p class="inst-noimg">{{ isGlobalAdmin() ? s.imageCreate.noImage : s.imageCreate.noImageAsk }}</p>
+          <button v-if="isGlobalAdmin()" class="btn btn-sm" type="button" data-test="install-make-image" @click="makingImage = true"><Icon name="plus" />{{ s.imageCreate.openBase }}</button>
+        </Callout>
         <form id="inst" class="inst-form" novalidate @submit.prevent="install">
           <div class="field inst-wide">
             <label for="inst-jail">{{ s.install.jail }} <span class="req" aria-hidden="true">*</span></label>
             <input id="inst-jail" v-model.trim="f.jail" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!issueText('jail')" :aria-describedby="issueText('jail') ? 'inst-jail-err' : 'inst-jail-hint'" />
             <span v-if="issueText('jail')" id="inst-jail-err" class="field-error" role="alert">{{ issueText('jail') }}</span>
             <span v-else id="inst-jail-hint" class="hint">{{ nameHint() }}</span>
+          </div>
+          <div v-if="choices.length" class="field inst-wide">
+            <label for="inst-image">{{ s.install.image }}</label>
+            <select id="inst-image" v-model="f.image" aria-describedby="inst-image-hint" data-test="install-image">
+              <option v-for="i in choices" :key="i.metadata.name" :value="i.metadata.name">{{ imageLabel(i) }}</option>
+            </select>
+            <span id="inst-image-hint" class="hint">{{ s.install.imageHint }}</span>
           </div>
           <div class="field">
             <label for="inst-net">{{ s.install.network }} <span class="req" aria-hidden="true">*</span></label>
@@ -267,10 +296,11 @@ function back(): void {
     <template #footer>
       <template v-if="phase === 'form'">
         <span v-if="gate.block.value" class="why-disabled" data-test="install-why">{{ s.install.blocked }}</span>
+        <span v-else-if="noImage" class="why-disabled" data-test="install-why">{{ s.install.needImage }}</span>
         <span v-else-if="why" class="why-disabled" data-test="install-why">{{ why }}</span>
         <button class="btn" type="button" @click="emit('close')">{{ s.app.cancel }}</button>
-        <button class="btn" type="button" :disabled="busy || !!gate.block.value" :aria-disabled="!valid" data-test="install-preview" @click="preview">{{ busy ? s.install.previewing : s.install.preview }}</button>
-        <button class="btn btn-primary" type="submit" form="inst" :disabled="busy || !!gate.block.value" :aria-disabled="!valid" data-test="install-go"><Icon name="pkg" />{{ s.install.go }}</button>
+        <button class="btn" type="button" :disabled="busy || !!gate.block.value || noImage" :aria-disabled="!valid" data-test="install-preview" @click="preview">{{ busy ? s.install.previewing : s.install.preview }}</button>
+        <button class="btn btn-primary" type="submit" form="inst" :disabled="busy || !!gate.block.value || noImage" :aria-disabled="!valid" data-test="install-go"><Icon name="pkg" />{{ s.install.go }}</button>
       </template>
       <template v-else-if="phase === 'running'">
         <button class="btn" type="button" @click="emit('close')">{{ s.install.close }}</button>
@@ -282,6 +312,7 @@ function back(): void {
       </template>
     </template>
   </Modal>
+  <ImageCreateDialog :open="makingImage" @close="makingImage = false" @done="loadImages" />
 </template>
 
 <style>
@@ -307,6 +338,7 @@ function back(): void {
 .inst-text { display: block; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
 .inst-status { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 0; }
 .inst-addr { margin-right: 10px; }
+.inst-noimg { margin: 0 0 8px; }
 .inst-open { margin-left: 6px; }
 .inst-where dd > div { overflow-wrap: anywhere; }
 .inst-notes p:last-child { margin: 0; }

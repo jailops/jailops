@@ -8,7 +8,7 @@ import type { JailSpec, Profile } from '@jailops/shared/api/types'
 
 const msgs = { int: 'int', size: 'size', rate: 'rate', mac: 'mac', address: 'addr', listen: 'listen', bool: 'bool', name: 'name', enum: (o: string[]) => 'enum ' + o.join('|') }
 const key = (n: string) => ALL_KEYS.find((k) => k.name === n)!
-const spec: JailSpec = { image: 'freebsd-15@stable', resources: { cpu: 2, memory: '2G' }, network: [{ network: 'lan', ipv4: 'auto', mtu: 1500 }], volumes: [{ name: 'data', mount: '/var/db', quota: '10G' }], boot: { autostart: true }, packages: ['nginx'], profiles: ['web-limits'] }
+const spec: JailSpec = { image: 'freebsd-15-1', resources: { cpu: 2, memory: '2G' }, network: [{ network: 'lan', ipv4: 'auto', mtu: 1500 }], volumes: [{ name: 'data', mount: '/var/db', quota: '10G' }], boot: { autostart: true }, packages: ['nginx'], profiles: ['web-limits'] }
 
 describe('project scope', () => {
   it('adds ?project= only to project-level routes', () => {

@@ -42,7 +42,7 @@ func (s *Service) validateCreate(j *api.Jail) error {
 	}
 	sp := &j.Spec
 	if sp.Image == "" {
-		return api.Errorf(api.CodeInvalid, "a jail needs an image: name one with --image NAME@alias (spec.image)")
+		return api.Errorf(api.CodeInvalid, "a jail needs an image: name one with --image NAME (spec.image)")
 	}
 	if sp.Encrypted {
 		return api.Errorf(api.CodeUnsupported, "native ZFS encryption of jails is not implemented").

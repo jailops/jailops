@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { noteBlocks, validateInstall } from './apps'
-import { helpText } from './configKeys'
+import { helpText, ALL_KEYS } from './configKeys'
 import { deleteItems } from '@/composables/jailActions'
 
 describe('notes of a definition', () => {
@@ -20,7 +20,7 @@ describe('notes of a definition', () => {
 
 describe('install form', () => {
   it('uses the server name rule', () => {
-    const ok = { jail: 'web-2', network: 'lan', storage: 'default', memory: '', disk: '', cpu: '' }
+    const ok = { jail: 'web-2', image: '', network: 'lan', storage: 'default', memory: '', disk: '', cpu: '' }
     const ctx = { networks: ['lan'], storage: ['default'], taken: [] }
     expect(validateInstall(ok, ctx)).toEqual({})
     expect(validateInstall({ ...ok, jail: 'web_2' }, ctx).jail).toBe('nameInvalid')
@@ -28,9 +28,10 @@ describe('install form', () => {
 })
 
 describe('config key help', () => {
-  it('drops developer markers', () => {
-    expect(helpText('Rate limit in. UNVERIFIED: not enforced yet; the jail reports a RateLimit condition.')).toBe('Rate limit in. This host does not enforce it yet: the jail reports a RateLimit condition.')
-    expect(helpText('Not yet: creation is refused when set; use the provisioning packages step.')).toBe('Cannot be set when a jail is created; use the provisioning packages step.')
+  it('reads the registry as written: it carries no developer markers', () => {
+    expect(helpText(' Rate limit in.  Not enforced yet. ')).toBe('Rate limit in. Not enforced yet.')
+    expect(helpText(undefined)).toBe('')
+    for (const k of ALL_KEYS) expect(k.description ?? '').not.toMatch(/UNVERIFIED|^Not yet:/)
   })
 })
 

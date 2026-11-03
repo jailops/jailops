@@ -146,7 +146,7 @@ export function retargetRemoteAdd(cmd: string, oldName: string, newName: string)
   return `${m[1]}${short}${m[3]}${newName}${m[5]}`
 }
 
-export const STEPS = ['account', 'identity', 'certificate', 'firewall', 'defaults', 'done'] as const
+export const STEPS = ['account', 'identity', 'certificate', 'firewall', 'defaults', 'image', 'done'] as const
 export type Step = (typeof STEPS)[number]
 
 /** The step after one; the account cannot be skipped, so there is no way past it but creating it. */

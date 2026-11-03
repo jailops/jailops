@@ -122,21 +122,24 @@ func (a *app) jailDesc() *kindDesc[api.Jail] {
 	d.beforeDelete = a.jailForceFlag
 	d.targets = a.jailTargets
 	d.loss = jailLoss
-	d.emptyHint = "jailops jail create NAME --image IMAGE@ALIAS --network NETWORK --storage STORAGE"
+	d.emptyHint = "jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE"
 	d.prepare = a.jailDefaults
 	return &d
 }
 
 // jailLoss says what deleting a jail destroys: the sizes of its root and data, its volumes and the number of its
-// snapshots, as the server reports them now. A running jail without --force is refused here, before any question.
+// snapshots, as the server reports them now. A running jail without --force is refused here, before any question;
+// a dry run reports it instead.
 func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name string) (string, error) {
 	j, err := c.Jails().Get(ctx, name)
 	if err != nil {
 		return "", err
 	}
 	force, _ := cmd.Flags().GetBool("force")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	running := j.Status.Power == api.PowerRunning
-	if running && !force {
+	// a dry run always shows the summary: the running state is part of it, not a reason to fail
+	if running && !force && !dryRun {
 		return "", api.Errorf(api.CodeConflict, "jail %q is running", name).
 			WithHint("stop it first ('jailops stop " + name + "'), or pass --force to stop it before the delete")
 	}
@@ -170,8 +173,11 @@ func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name strin
 		parts = append(parts, count(len(snaps), "snapshot", "snapshots"))
 	}
 	line := fmt.Sprintf("%s (%s): %s", name, dash(string(j.Status.Power)), strings.Join(parts, ", "))
-	if running {
+	switch {
+	case running && force:
 		line += "; --force stops it first"
+	case running:
+		line += "; the delete needs --force to stop it first"
 	}
 	return line, nil
 }
@@ -355,7 +361,7 @@ snapshots, rollback and upgrade).
 
 Use --host to act on a host behind a hub.`,
 		`jailops jail list --state running
-jailops jail create web --image freebsd-15@stable --network lan --memory 2G
+jailops jail create web --image freebsd-15-1 --network lan --memory 2G
 jailops jail show web
 jailops jail start web`, "jails")
 	crudCommands(a, jc, d, jailCreateLong, jailCreateExample, a.jailFlagBuild)
@@ -388,10 +394,10 @@ file) is encrypted with ZFS (aes-256-gcm) under a passphrase you type twice; scr
 give it with --passphrase-file. The passphrase is needed again after every host boot
 ('jailops jail unlock'). A forgotten passphrase cannot be recovered.`
 
-const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15@stable --network lan --storage default --start
-jailops @P@ create db --project web --image freebsd-15@stable --network lan=10.20.0.50 --storage default --volume data:/var/db --memory 4G --autostart
-jailops @P@ create vault --project web --image freebsd-15@stable --network lan --storage default --volume secrets:/var/db/secrets:encrypted
-jailops @P@ create nginx --project web --image freebsd-15@stable --profile web
+const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15-1 --network lan --storage default --start
+jailops @P@ create db --project web --image freebsd-15-1 --network lan=10.20.0.50 --storage default --volume data:/var/db --memory 4G --autostart
+jailops @P@ create vault --project web --image freebsd-15-1 --network lan --storage default --volume secrets:/var/db/secrets:encrypted
+jailops @P@ create nginx --project web --image freebsd-15-1 --profile web
 jailops @P@ create -f web.yaml --project web`
 
 func (a *app) jailLifecycleSet(d *kindDesc[api.Jail]) []*cobra.Command {

@@ -67,6 +67,7 @@ aarch64 | arm64) goarch=arm64 ;;
 *) echo "unsupported architecture $(uname -p)" >&2; exit 2 ;;
 esac
 release=$(freebsd-version -u | sed 's/-p[0-9]*$//')
+img=freebsd-$(echo "$release" | sed -E 's/^([0-9]+)\.([0-9]+)-.*/\1-\2/') # the image of the host's release
 J=/usr/local/bin/jailops
 
 # set -e ends the script without a word: say which step it was
@@ -497,18 +498,28 @@ run_pf() {
 	step "the packet filter, with real traffic (scripts/ci-freebsd-pf.sh)"
 	# the full matrix takes minutes of waiting in its last phases; the quick form still covers every rule path
 	# FORGE_BIN (set by the caller) runs phase 0e, the forged-frame probes; without it phase 0e is skipped
-	PF_FAST=1 FORGE_BIN="${FORGE_BIN:-}" sh "$root/scripts/ci-freebsd-pf.sh" || fail "the packet filter test failed"
+	PF_FAST=1 PF_IMAGE="$img" FORGE_BIN="${FORGE_BIN:-}" sh "$root/scripts/ci-freebsd-pf.sh" || fail "the packet filter test failed"
 }
 
 step "image, network, project"
 uplink=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
 [ -n "$uplink" ] || uplink=$(ifconfig -l | tr ' ' '\n' | grep -v -E '^(lo0|pflog0)$' | head -1)
 jarch=$goarch
-check "image create" $J image create freebsd --release "$release" --arch "$jarch" --alias stable
-check "image build" $J image build freebsd
 check "network create" $J network create lan --bridge jo7 --ipv4 10.77.0.1/24 --uplink "$uplink" --nat
 check "project create" $J project create demo
 check "project grant" $J project set demo --network lan --storage default
+# before any image exists the CLI names the two commands that make the base image, and a create with an image that does not
+# exist names the one it was asked for (the catalog is configured later, so this does not go through an app install)
+out=$($J image list 2>&1) || true
+printf '%s\n' "$out" | grep -F -q "jailops image create $img --release $release, then jailops image build $img" ||
+	{ echo "$out" >&2; fail "the empty image list names the commands that make the base image"; }
+if out=$($J create hintcheck --project demo --image nosuch --network lan --storage default 2>&1); then
+	echo "$out" >&2; fail "a jail create with an image that does not exist (it answered)"
+fi
+printf '%s\n' "$out" | grep -E -q "jailops image create nosuch --release [0-9]+\.[0-9]+-[A-Z0-9]+', then build it with 'jailops image build nosuch'" ||
+	{ echo "$out" >&2; fail "a create with a missing image names the commands that make it"; }
+check "image create" $J image create "$img" --release "$release" --arch "$jarch"
+check "image build" $J image build "$img"
 if [ "$part" = pf ]; then # its own VM in CI: the packet filter test builds its jails from the image above
 	run_pf
 	echo "OK: the packet filter test passed"
@@ -516,7 +527,7 @@ if [ "$part" = pf ]; then # its own VM in CI: the packet filter test builds its 
 fi
 
 step "a jail"
-check "create" $J create web --project demo --image freebsd@stable --network lan --storage default
+check "create" $J create web --project demo --image "$img" --network lan --storage default
 check "start" $J start web --project demo
 sleep 2
 expect "the jail runs FreeBSD" 'FreeBSD' $J exec --project demo web -- uname -s
@@ -627,7 +638,7 @@ case $enc_state in
 enabled | active)
 	(umask 077; printf '%s\n' 'ci-passphrase-0123' >"$work/vault.pass"; printf '%s\n' 'ci-wrong-passphrase' >"$work/wrong.pass"
 		printf '%s\n' 'ci-new-passphrase-4567' >"$work/new.pass")
-	check "a jail with an encrypted volume" $J create vault --project demo --image freebsd@stable --network lan --storage default \
+	check "a jail with an encrypted volume" $J create vault --project demo --image "$img" --network lan --storage default \
 		--volume secrets:/var/db/secrets:encrypted --passphrase-file "$work/vault.pass" --start
 	vds=$(zfs list -H -o name -r "$pool" | grep '/jails/vault/data/secrets$') || fail "no dataset for the encrypted volume"
 	keystatus() { zfs get -H -o value keystatus "$vds"; }
@@ -664,8 +675,8 @@ enabled | active)
 esac
 
 step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
-expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image freebsd@stable --start
-check "a second generation of the image" $J image build freebsd --from g1
+expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --start
+check "a second generation of the image" $J image build "$img" --from g1
 check "a file that must survive" $J exec --project demo up -- sh -c 'echo ci-keep > /root/keep'
 expect "dry run" 'g1 to g2' $J jail upgrade up --project demo --dry-run
 check "upgrade to the newer generation" $J jail upgrade up --project demo --generation g2
@@ -675,6 +686,20 @@ expect "its data survived the swap" 'ci-keep' $J exec --project demo up -- cat /
 check "root rollback" $J jail rollback up --project demo
 expect "back on the first generation" 'up +running.*#g1' $J jail list --project demo
 check "stop the second jail" $J stop up --project demo
+
+step "automatic upgrade of an image (the nightly run, started by the clock of the daemon)"
+expect "the nightly upgrade is off until it is asked for" 'Nightly: +off' $J image show "$img"
+expect_refused "a time of day that does not exist is refused" $J image auto-upgrade "$img" on --at 25:00
+check "turn it on for two minutes from now" $J image auto-upgrade "$img" on --at "$(date -v+2M +%H:%M)"
+expect "the image names it and its next run" 'Nightly: +every night at [0-9:]+: generation and jails and their packages; next ' $J image show "$img"
+n=0
+until $J image show "$img" | grep -q 'Automatic upgrades'; do
+	n=$((n + 1)); [ $n -gt 150 ] && fail "the automatic upgrade did not run within five minutes"; sleep 2
+done
+expect "the run is recorded and did not fail" '(ok|unchanged) ' $J image show "$img"
+if $J image show "$img" | grep -E '^ +[0-9-]+ [0-9:]+ +failed'; then fail "the automatic upgrade failed"; fi
+check "turn it off" $J image auto-upgrade "$img" off
+expect "off again" 'Nightly: +off' $J image show "$img"
 
 step "an app from the catalog (nginx: thin jail, pkg -r from the host, rc.conf, service, health check, snapshot)"
 # the catalog is a directory of local files: the reference copy (or JAILOPS_E2E_CATALOG), copied where the daemon may read it
@@ -762,7 +787,7 @@ isms_check() { # isms_check ADDRESS: the steps of the definition's notes with a 
 pg_access_check() { # postgresql-access: who may connect to a database, from the jails' side
 	check "install postgresql as pgacc" $J app install postgresql --name pgacc --project demo --network lan --storage default
 	for c in pgc1 pgc2; do
-		check "create the client jail $c" $J create "$c" --project demo --image freebsd@stable --network lan --storage default --start
+		check "create the client jail $c" $J create "$c" --project demo --image "$img" --network lan --storage default --start
 		# the PostgreSQL client into the thin jail from the host, as the app installer does it
 		check "psql in $c" pkg -r "$mount/projects/demo/jails/$c/root" install -y postgresql18-client
 		check "the library cache of $c" $J exec --project demo "$c" -- /sbin/ldconfig -m /usr/local/lib

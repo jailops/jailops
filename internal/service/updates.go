@@ -15,6 +15,7 @@ import (
 	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/schedule"
 	"jailops.net/jailops/internal/sys/jailos"
+	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
@@ -191,6 +192,23 @@ func (s *Service) runInJail(ctx context.Context, key string, timeout time.Durati
 	return out, nil
 }
 
+// pkgExec runs a package command for a jail and returns its output. A Linux jail runs apk inside itself. A FreeBSD
+// jail has no package tool of its own (a thin jail is a pkgbase userland without pkg), so the host runs pkg against
+// the jail root with -r, as the app installer does: argv is the command as it would be typed inside the jail
+// ("pkg", "upgrade", "-y") and -r ROOT is put after "pkg".
+func (s *Service) pkgExec(ctx context.Context, key string, linux bool, timeout time.Duration, argv ...string) ([]byte, error) {
+	if linux {
+		return s.runInJail(ctx, key, timeout, argv...)
+	}
+	host := append([]string{argv[0], "-r", s.rootMount(key)}, argv[1:]...)
+	res, err := s.d.Run.Run(ctx, run.Cmd{Name: host[0], Args: host[1:], Timeout: timeout})
+	out := append(append([]byte(nil), res.Stdout...), res.Stderr...)
+	if err != nil {
+		return out, fmt.Errorf("%s: %w: %s", strings.Join(host, " "), err, strings.TrimSpace(string(out)))
+	}
+	return out, nil
+}
+
 func (s *Service) jailRunning(ctx context.Context, key string) bool {
 	if s.d.Jails == nil {
 		return false
@@ -217,9 +235,9 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 		} else {
 			upd, dry = []string{"pkg", "update", "-q"}, []string{"pkg", "upgrade", "-n"}
 		}
-		if _, err := s.runInJail(ctx, key, 10*time.Minute, upd...); err != nil {
+		if _, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, upd...); err != nil {
 			errs = append(errs, "package catalog: "+err.Error())
-		} else if out, err := s.runInJail(ctx, key, 10*time.Minute, dry...); err != nil {
+		} else if out, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, dry...); err != nil {
 			errs = append(errs, "package check: "+err.Error())
 		} else {
 			rep.Packages = parsePackageUpdates(out, alpine)
@@ -472,11 +490,11 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 	} else {
 		upd, dry, up = []string{"pkg", "update", "-q"}, []string{"pkg", "upgrade", "-n"}, []string{"pkg", "upgrade", "-y"}
 	}
-	if _, err := s.runInJail(ctx, key, 10*time.Minute, upd...); err != nil {
+	if _, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, upd...); err != nil {
 		rec.Result, rec.Error = api.UpdateFailed, "package catalog: "+err.Error()
 		return rec
 	}
-	if out, err := s.runInJail(ctx, key, 10*time.Minute, dry...); err == nil {
+	if out, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, dry...); err == nil {
 		rec.Packages = parsePackageUpdates(out, alpine)
 		if len(rec.Packages) == 0 {
 			rec.Result, rec.Note = api.UpdateOK, "nothing to update"
@@ -489,10 +507,14 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 		return rec
 	}
 	rec.Snapshot = snap.Name
-	if _, err := s.runInJail(ctx, key, 60*time.Minute, up...); err != nil {
+	if _, err := s.pkgExec(ctx, key, alpine, 60*time.Minute, up...); err != nil {
 		rec.Result, rec.Error = api.UpdateFailed, err.Error()
 		rec.Note = "restore the snapshot with `jailops jail rollback " + j.Metadata.Name + " --all --snapshot " + snap.Name + "` to undo it; that discards what the jail wrote since"
 		return rec
+	}
+	if !alpine {
+		// pkg -r does not run the ldconfig trigger of the jail: a program would not find a new library
+		_, _ = s.runInJail(ctx, key, 5*time.Minute, "/sbin/ldconfig", "-m", "/usr/local/lib")
 	}
 	if err := s.healthCheck(ctx, key, j); err != nil {
 		rec.Result, rec.Error = api.UpdateFailed, err.Error()

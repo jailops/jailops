@@ -49,7 +49,7 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 
 | Method and path | Request | Reply |
 |---|---|---|
-| `GET /api/v1` | | `ServerInfo` |
+| `GET /api/v1` | | `ServerInfo`; `environment.kernel_version` is the host's `kern.osrelease` (`15.1-RELEASE-p3`), empty when it cannot be read: the console proposes it, without the patch level, as the release of the base image |
 | `GET /healthz` | | `ok`, plain text, always 200: liveness, the process answers. Public, not in the access log |
 | `GET /readyz` | | plain text, `ok` (200) or `not ready: CLASS` (503), CLASS one of `starting`, `stopping`, `helper`, `storage`, `store`: start-up finished, the helper answers a read-only call (the JailOps dataset exists), the database answers a query. Cached for 2 s; `?host=` is not forwarded. Public, not in the access log |
 | `/api/v1/jails` GET, POST | `Jail`; POST also `JailCreate` (`volume_passphrase` for volumes with `encrypted: true`, never returned) | list; POST async, result `Jail` |

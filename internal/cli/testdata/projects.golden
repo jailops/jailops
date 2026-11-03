@@ -112,7 +112,7 @@ NAME    STATE     IMAGE               GEN   ADDRESSES           AGE
 nginx   stopped   freebsd-15@stable   g1    10.50.0.2,fd50::2   3h
 
 $ jailops list
-! No jails in project main. Create one with: jailops jail create NAME --image IMAGE@ALIAS --network NETWORK --storage STORAGE
+! No jails in project main. Create one with: jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE
 
 $ jailops list --project nowhere
 ! not_found: project "nowhere" not found

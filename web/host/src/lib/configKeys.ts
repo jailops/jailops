@@ -243,15 +243,7 @@ export function sourcesOf(exp: { jail: { spec: JailSpec }; sources: Record<strin
   return out
 }
 
-/**
- * The help of a key as a user reads it. The registry's descriptions also serve the command line and carry markers
- * for developers ("UNVERIFIED:", "Not yet:"): they are put in plain words here.
- */
+/** The help of a key as a user reads it: the registry's description, its spacing tidied. */
 export function helpText(d: string | undefined): string {
-  return (d ?? '')
-    .replace(/\s*UNVERIFIED:\s*not enforced yet;?\s*/i, ' This host does not enforce it yet: ')
-    .replace(/^Not yet:\s*creation is refused when set;\s*/i, 'Cannot be set when a jail is created; ')
-    .replace(/\bUNVERIFIED:?\s*/g, '')
-    .replace(/\s{2,}/g, ' ')
-    .trim()
+  return (d ?? '').replace(/\s{2,}/g, ' ').trim()
 }

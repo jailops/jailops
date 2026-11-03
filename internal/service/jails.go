@@ -257,7 +257,7 @@ func (s *Service) imageFor(spec api.JailSpec) (object[api.ImageSpec], validate.I
 	}
 	im, err := s.imgKind.get(ref.Name)
 	if err != nil {
-		return im, ref, api.Errorf(api.CodeNotFound, "image %q not found", ref.Name).WithHint("create or import the image first")
+		return im, ref, api.Errorf(api.CodeNotFound, "image %q not found", ref.Name).WithHint(api.ImageCreateHint("it", ref.Name, ref.Alias, s.hostBaseRelease()))
 	}
 	return im, ref, nil
 }

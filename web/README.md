@@ -45,6 +45,36 @@ for the dev server) append `?demo` to any URL to run
 a console on canned data without a server (`?demo=login` starts signed out). The console a binary embeds is never a
 demo build: it ignores `?demo`.
 
+## Images and the base image (host console)
+
+An image is one FreeBSD release (`freebsd-15-1`); its generations are the patch levels. `/images` shows each image as a
+card (the nightly upgrade in `src/components/ImageAutoUpgrade.vue`) with its release, its number of generations and its nightly auto upgrade: **Upgrade automatically every night**, the
+time (HH:MM in the host's time zone, 03:00 by default) and **Also upgrade the packages inside the jails** (on when the
+upgrade is turned on), saved with `PATCH /images/{name}` and `{spec: {auto_upgrade}}`. The card shows the next run and the
+latest runs from `status.auto_upgrade` (time, ok, unchanged or failed with the detail, jails moved, upgraded and failed); a
+failed latest run is a danger notice on the card, not a toast. Only a global admin changes it; everyone else sees it
+read-only. **Upgrade image and jails** (by hand, at once) stays as it was.
+
+**Create image** (`src/components/ImageCreateDialog.vue`, the fields in `ImageFields.vue`, the checks in `lib/images.ts`)
+posts the definition and then, unless the box is cleared, builds the first generation and follows that operation with its
+progress (`composables/imageCreate.ts`; a failed build keeps the definition and Try again builds it again). The release
+defaults to the host's (`environment.kernel_version` of `GET /api/v1` without the patch level) and nothing older than 15.1
+is offered; the architecture is the host's. The name is proposed from the release (`freebsd-` major `-` minor, so
+15.1-RELEASE gives `freebsd-15-1`) and follows the release select until it is edited. No alias is offered. The nightly auto
+upgrade is a checkbox of the dialog, on by default for a new FreeBSD image. An empty page offers the dialog as its first
+action, `/images?create=1` opens it, and the install dialog and the jail form offer it when there is no image; both list
+the images with their release (`freebsd-15-1 (15.1-RELEASE)`) and preset the newest release the host can run. The first-run
+wizard's Base image step uses the same fields and composable, with one line on what the auto upgrade does.
+
+When the host runs a newer release than the newest FreeBSD image (the host on 15.2, only `freebsd-15-1`), the Images page
+and the Overview show a quiet notice (`src/components/NewReleaseNotice.vue`) with a button that opens Create image filled in for the host's release: a new release
+is a new image, and existing jails stay on theirs.
+
+In the demo, an image whose name starts with `fail` fails to build, one that starts with `flaky` fails at its first try;
+`?demo=noimage` is the demo without images and `?demo=newrelease` a host on 15.2 with only `freebsd-15-1`. The demo's
+`freebsd-15-1` has the nightly upgrade on with an ok run and two unchanged ones; `?demo=nightlyfail` adds a failed night on
+top. The demo accepts the PATCH and checks the time as the server does.
+
 ## Apps and logs (host console)
 
 `/apps` is the app catalog and its Installed tab, `/apps/:name` one definition with the install dialog

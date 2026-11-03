@@ -23,8 +23,18 @@ host up (`jailops-priv appliance-init`: the user, the datasets on `jailops_pool`
 configuration files; every command it runs is in syslog). The start of `jailopsd` prints a **one-time setup token** and
 the console's addresses on the system console (and in `/var/log/auth.log`); `jailops-priv setup-token` prints a new one,
 valid for 24 hours. The console opens a wizard: the first administrator (with the token), the host name, the
-certificate, the host firewall (ssh only from your address, reverted unless you confirm), storage and a network, and a
-link to the app catalog (`pkg install jailops-apps` installs it). `jailops doctor` should then report `appliance` ok.
+certificate, the host firewall (ssh only from your address, reverted unless you confirm), storage and a network, and the
+base image: the image of the host's own release and architecture, named after it (`freebsd-15-1` on 15.1-RELEASE),
+created and built in the step, with the nightly auto upgrade on (one checkbox, 03:00 by default; see
+[upgrade.md](upgrade.md#nightly-auto-upgrade)) (the build downloads the base system packages from `pkg.freebsd.org` and takes a few minutes; a failed
+build says what to check and is tried again in place). The wizard ends with **Install your first app** (the app
+catalog; `pkg install jailops-apps` installs it), or with **Create the base image** when that step was skipped: apps and
+jails start from an image, and the Images page (Create image) makes it at any time. `jailops doctor` should then
+report `appliance` ok.
+
+The first service is then one dialog: on the Apps page choose an app and Install; it takes the project, network and
+storage the wizard made and the FreeBSD image of the newest release the host can run (`freebsd-15-1`). Without an
+image the dialog says so and offers to create the base image instead of failing.
 
 The kernel modules, forwarding and the other host settings of sections 1 and 4 still apply; `jailops doctor` names what
 is missing. The browser warns about the self-signed certificate until you replace it, one of two ways:
@@ -205,20 +215,28 @@ There is no default project or network: you create them and name them. There is 
 which the daemon creates on its first start for the dataset `<pool>/jailops` that section 5 made (`jailops storage list`
 shows it). A project is granted the networks and storages its jails may use.
 
-    jailops image create freebsd-15 --release 15.1-RELEASE --alias stable
-    jailops image build freebsd-15
+    jailops image create freebsd-15-1 --release 15.1-RELEASE    # the host's release; an image is one release
+    jailops image build freebsd-15-1
+    jailops image auto-upgrade freebsd-15-1 on --at 03:00      # optional: its patch levels every night
     jailops network create lan --bridge jo7 --ipv4 10.77.0.1/24 --uplink vtnet0 --nat    # vtnet0: the host's uplink, see below
     jailops project create web
     jailops project set web --network lan --storage default
     jailops project switch web
-    jailops create nginx --image freebsd-15@stable --network lan --storage default --start
+    jailops create nginx --image freebsd-15-1 --network lan --storage default --start
     jailops exec nginx -- uname -a
     jailops token create ci --role operator --projects web --expires 720h    # a token for scripts, now that web exists
 
 `--uplink` is the host's interface towards the outside: `vtnet0` on most virtual machines, `em0`, `igb0` or `ix0` on
 real hardware (`ifconfig -l` lists them). The project of a jail grants exactly one network and one storage here, so
-`jailops create nginx --image freebsd-15@stable --start` would take `lan` and `default` by itself (and say so); naming
+`jailops create nginx --image freebsd-15-1 --start` would take `lan` and `default` by itself (and say so); naming
 them keeps the command right when the project has more.
+
+The image is named after its release: `freebsd-15-1` is 15.1-RELEASE, and a jail made with `--image freebsd-15-1`
+follows its newest generation (its newest patch level). The patch levels come with `jailops image upgrade freebsd-15-1`
+or the nightly auto upgrade; a new release is a new image ([upgrade.md](upgrade.md#an-image-is-one-release)).
+
+Without an image, `jailops app install` and `jailops create` are refused with a hint that names the two commands
+above, with the host's release filled in.
 
 An application from the catalog is one command more: `pkg install jailops-apps` puts the definitions under
 `/usr/local/share/jailops/apps` (`jailops app list` shows them, `jailops app info nginx` describes one), and

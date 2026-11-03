@@ -48,7 +48,8 @@ export function paragraphs(text: string | undefined): string[] {
 export const JAIL_NAME = nameRules.object.re
 const SIZE = /^\d+(?:\.\d+)?[KMGT]?$/i
 
-export interface InstallForm { jail: string; network: string; storage: string; memory: string; disk: string; cpu: string }
+/** The install form; image is a plain image name ('' leaves the choice to the server). */
+export interface InstallForm { jail: string; image: string; network: string; storage: string; memory: string; disk: string; cpu: string }
 export type InstallIssue = 'nameInvalid' | 'nameTaken' | 'needNetwork' | 'needStorage' | 'sizeInvalid' | 'cpuInvalid'
 
 /** Field -> problem. Empty when the form may be sent. */
@@ -67,7 +68,7 @@ export function validateInstall(f: InstallForm, ctx: { networks: string[]; stora
 /** The form prefilled for an app: its name as the jail, the only grant of each kind, the resource hints. */
 export function initialForm(app: string, hints: AppResources | undefined, networks: string[], storage: string[]): InstallForm {
   return {
-    jail: app, network: networks.length === 1 ? networks[0] : '', storage: storage.length === 1 ? storage[0] : '',
+    jail: app, image: '', network: networks.length === 1 ? networks[0] : '', storage: storage.length === 1 ? storage[0] : '',
     memory: hints?.memory ?? '', disk: hints?.disk ?? '', cpu: hints?.cpu ?? '',
   }
 }
@@ -75,6 +76,7 @@ export function initialForm(app: string, hints: AppResources | undefined, networ
 /** The request body. Limits are sent only when they differ from the hints, which the server applies anyway. */
 export function installBody(f: InstallForm, hints: AppResources | undefined, dryRun = false): AppInstall {
   const b: AppInstall = { jail: f.jail }
+  if (f.image) b.image = f.image
   if (f.network) b.network = f.network
   if (f.storage) b.storage = f.storage
   const changed = (f.memory || '') !== (hints?.memory ?? '') || (f.disk || '') !== (hints?.disk ?? '') || (f.cpu || '') !== (hints?.cpu ?? '')

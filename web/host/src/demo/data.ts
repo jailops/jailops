@@ -34,7 +34,7 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
   return {
     metadata: { ...meta(name, 86400 * 40, { labels: o.labels ?? { role: name } }), project: 'web' },
     spec: {
-      image: o.image ?? 'freebsd-15@stable', storage: 'default', layout: 'thin', hostname: `${name}.example.net`,
+      image: o.image ?? 'freebsd-15-1', storage: 'default', layout: 'thin', hostname: `${name}.example.net`,
       update: { strategy: 'rebase', window: 'sun 03:00', healthcheck: '/usr/local/bin/check' },
       resources: { cpu: 2, memory: '2G', disk: '20G', pids: 2048 },
       network: [{ network: net, ipv4: o.ipv4 ?? 'auto', ipv6: o.ipv6 ?? 'none', mtu: 1500 }],
@@ -44,7 +44,7 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
       packages: ['nginx'], encrypted: false,
     },
     status: {
-      power, jid: power === 'running' ? 12 + name.length : undefined, generation: o.gen ?? 'freebsd-15#g4',
+      power, jid: power === 'running' ? 12 + name.length : undefined, generation: o.gen ?? 'freebsd-15-1#g4',
       addresses: power === 'running' ? [(o.ipv4 && o.ipv4 !== 'auto' ? o.ipv4 : '10.20.0.' + (10 + name.length)) + '/24'] : [],
       started_at: power === 'running' ? ago(86400 * 3 + name.length * 600) : undefined, drift: o.drift ?? [], conditions: o.cond ?? [{ type: 'Reconciled', status: 'True', since: ago(3600) }],
     },
@@ -55,7 +55,7 @@ export function jails(): Jail[] {
   return [
     jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ name: 'content', mount: '/usr/local/www', quota: '10G' }], labels: { role: 'web', tier: 'frontend', 'jailops.app': 'nginx', 'jailops.app.version': '1.30.6,3', 'jailops.app.hash': appHash('nginx') } }),
     jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ name: 'pgdata', mount: '/var/db/postgres', quota: '200G' }, { name: 'wal', mount: '/var/db/wal', quota: '40G', read_only: false }], labels: { role: 'db', 'jailops.app': 'postgresql', 'jailops.app.version': '18.5', 'jailops.app.hash': appHash('postgresql-previous') } }),
-    jail('mail', 'error', { image: 'freebsd-15#g3', gen: 'freebsd-15#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Reconciled', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ name: 'spool', mount: '/var/spool', quota: '50G' }] }),
+    jail('mail', 'error', { image: 'freebsd-15-1#g3', gen: 'freebsd-15-1#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Reconciled', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ name: 'spool', mount: '/var/spool', quota: '50G' }] }),
     jail('build', 'stopped', { autostart: false, labels: { role: 'ci' } }),
     jail('proxy', 'running', { net: 'edge', ipv4: '192.0.2.10', ipv6: 'auto', labels: { role: 'proxy' } }),
     jail('cache', 'starting', { ipv4: '10.20.0.14' }),
@@ -86,15 +86,35 @@ export function snapshots(): Record<string, JailSnapshot[]> {
   }
 }
 
+/** The next time of day `at` (HH:MM, local) after now, as the daemon reports status.auto_upgrade.next. */
+export function nextNight(at: string, from = Date.now()): string {
+  const [h, m] = at.split(':').map(Number)
+  const d = new Date(from)
+  d.setHours(h, m, 0, 0)
+  if (d.getTime() <= from) d.setDate(d.getDate() + 1)
+  return d.toISOString()
+}
+
+/** The nightly upgrade runs of the FreeBSD image, newest first; `failed` puts a failed night on top. */
+export function autoUpgradeRuns(failed = false): NonNullable<NonNullable<Image['status']['auto_upgrade']>['recent']> {
+  const run = (days: number, result: string, x: Record<string, unknown> = {}) => ({ started: ago(86400 * days), finished: ago(86400 * days - 240), result, ...x })
+  return [
+    ...(failed ? [run(0.4, 'failed', { generation: 'freebsd-15-1#g5', jails_moved: 2, jails_failed: 1, detail: 'jail db: health check /usr/local/bin/check exited 1; rolled back to freebsd-15-1#g4' })] : []),
+    run(1.4, 'unchanged'),
+    run(2.4, 'unchanged'),
+    run(3.4, 'ok', { generation: 'freebsd-15-1#g4', jails_moved: 5, jails_upgraded: 5 }),
+  ]
+}
+
 export function images(): Image[] {
   const gen = (n: number, parent: number, pk: number, ageDays: number, refs: string[]) => ({
-    number: n, name: `freebsd-15#g${n}`, parent: parent || undefined, manifest: `b3f0${n}c9d2e17a4455e0e1f${n}`.padEnd(40, 'a'), packages: pk, dataset: `tank/jailops/images/freebsd-15/g${n}`, created_at: ago(86400 * ageDays), refs,
+    number: n, name: `freebsd-15-1#g${n}`, parent: parent || undefined, manifest: `b3f0${n}c9d2e17a4455e0e1f${n}`.padEnd(40, 'a'), packages: pk, dataset: `tank/jailops/images/freebsd-15-1/g${n}`, created_at: ago(86400 * ageDays), refs,
   })
   return [
     {
-      metadata: { ...meta('freebsd-15'), scope: 'fleet' },
-      spec: { os: 'freebsd', release: '15.1-RELEASE', arch: 'amd64', source: { type: 'pkgbase', repo: 'https://pkg.freebsd.org/FreeBSD:15:amd64/base_release_1' }, aliases: ['stable'], retention: { keep_last: 3, keep_days: 14 } },
-      status: { generations: [gen(1, 0, 212, 60, []), gen(2, 1, 214, 45, []), gen(3, 2, 219, 20, ['mail']), gen(4, 3, 221, 3, ['web', 'db', 'proxy', 'build', 'cache'])], aliases: { stable: 4, latest: 4 } },
+      metadata: { ...meta('freebsd-15-1'), scope: 'fleet' },
+      spec: { os: 'freebsd', release: '15.1-RELEASE', arch: 'amd64', source: { type: 'pkgbase', repo: 'https://pkg.freebsd.org/FreeBSD:15:amd64/base_release_1' }, retention: { keep_last: 3, keep_days: 14 }, auto_upgrade: { enabled: true, packages: true } },
+      status: { generations: [gen(1, 0, 212, 60, []), gen(2, 1, 214, 45, []), gen(3, 2, 219, 20, ['mail']), gen(4, 3, 221, 3, ['web', 'db', 'proxy', 'build', 'cache'])], auto_upgrade: { next: nextNight('03:00'), recent: autoUpgradeRuns() } },
     },
     {
       metadata: { ...meta('alpine-3.22'), scope: 'fleet' },
@@ -187,7 +207,7 @@ export function backups(): Backup[] {
     spec: {
       jail: jailName, jail_uuid: '0d3f-' + jailName, host_uuid: '6a1f0c52-2f0e-4f0b-8a5c-0123456789ab', policy: jailName === 'web' ? 'nightly' : 'db-hourly', target: 'vault',
       snapshot: snap, zfs_snapshot: `tank/jailops/jails/${jailName}@jo-${snap.slice(0, 8)}`, key_domain: 'kd-7f3a91', full,
-      bundle: { spec: bundleSpec(jailName), image_generation: 'freebsd-15#g4', image_manifest: 'b3f0'.padEnd(40, 'a'), volumes: jailName === 'db' ? ['pgdata', 'wal'] : ['content'], secret_refs: jailName === 'db' ? ['db/replication-key'] : [] },
+      bundle: { spec: bundleSpec(jailName), image_generation: 'freebsd-15-1#g4', image_manifest: 'b3f0'.padEnd(40, 'a'), volumes: jailName === 'db' ? ['pgdata', 'wal'] : ['content'], secret_refs: jailName === 'db' ? ['db/replication-key'] : [] },
     },
     status: { bytes, new_bytes: newBytes, chunks: Math.round(newBytes / 1048576) + 3, files: 120000, verified: true, verified_at: ago(Math.max(60, age - 600)), ...st },
   })
@@ -215,8 +235,8 @@ export function operations(): Operation[] {
   const o = (id: string, d: string, status: Operation['status'], age: number, extra: Partial<Operation> = {}): Operation => ({ id, description: d, status, resources: { jails: ['/api/v1/jails/web'] }, may_cancel: false, created_at: ago(age), updated_at: ago(age - 5), ...extra })
   return [
     o('op-1001', 'Snapshot web', 'success', 3600 * 9),
-    o('op-1002', 'Upgrade db to freebsd-15#g4', 'failure', 3600 * 3, { resources: { jails: ['/api/v1/jails/db'] }, error: { code: 'busy', message: 'Replication is running on jail db.', hint: 'Wait for the send to finish or pause the backup policy db-hourly.' } }),
-    o('op-1003', 'Build freebsd-15#g5', 'running', 140, { may_cancel: true, progress: 62, resources: { images: ['/api/v1/images/freebsd-15'] } }),
+    o('op-1002', 'Upgrade db to freebsd-15-1#g4', 'failure', 3600 * 3, { resources: { jails: ['/api/v1/jails/db'] }, error: { code: 'busy', message: 'Replication is running on jail db.', hint: 'Wait for the send to finish or pause the backup policy db-hourly.' } }),
+    o('op-1003', 'Build freebsd-15-1#g5', 'running', 140, { may_cancel: true, progress: 62, resources: { images: ['/api/v1/images/freebsd-15-1'] } }),
     o('op-1004', 'Start cache', 'success', 90, { resources: { jails: ['/api/v1/jails/cache'] } }),
   ]
 }

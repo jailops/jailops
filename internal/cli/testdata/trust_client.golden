@@ -47,7 +47,7 @@ $ jailops project create other
 [exit 3]
 
 $ jailops list --project web
-! No jails in project web. Create one with: jailops jail create NAME --image IMAGE@ALIAS --network NETWORK --storage STORAGE
+! No jails in project web. Create one with: jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE
 
 $ jailops list --project default
 ! not_found: project "default" not found

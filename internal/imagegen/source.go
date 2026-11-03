@@ -235,6 +235,7 @@ func (p PkgBase) repoConf(b *Build) plan.Step {
 	m := b.M
 	file := path.Join(b.Work, "repos", "jailops.conf")
 	url := b.Spec.Source.Repo
+	keys := b.Spec.Source.Keys
 	if url == "" {
 		if isRelease(b.Spec.Release) {
 			_, minor, err := parseRelease(b.Spec.Release)
@@ -244,10 +245,14 @@ func (p PkgBase) repoConf(b *Build) plan.Step {
 			}
 			url = fmt.Sprintf("pkg+https://pkg.FreeBSD.org/${ABI}/base_release_%d", minor)
 		} else {
+			// base_latest is signed with the key of the ports repositories, not the pkgbase release keys (verified on
+			// 15.2-PRERELEASE: with pkgbase-15 pkg answers "No trusted public keys found")
 			url = "pkg+https://pkg.FreeBSD.org/${ABI}/base_latest"
+			if keys == "" {
+				keys = "/usr/share/keys/pkg"
+			}
 		}
 	}
-	keys := b.Spec.Source.Keys
 	if keys == "" {
 		keys = "/usr/share/keys/pkgbase-${VERSION_MAJOR}"
 	}

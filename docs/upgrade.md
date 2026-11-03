@@ -46,11 +46,25 @@ error but does nothing is exactly what the read-back and that test exist to catc
 
 ## Jails
 
-A thin jail's root is a clone of an **image generation**: an immutable pkgbase userland. Upgrading moves the jail to a newer
-generation and keeps its data. One command does it for the whole image:
+### An image is one release
 
-    jailops image upgrade freebsd-15 --dry-run           # the build plan, and which jails would move
-    jailops image upgrade freebsd-15                     # build the next generation, then move every thin jail to it
+An image is one FreeBSD release and is named after it: `freebsd-15-1` is 15.1-RELEASE, `freebsd-15-2` is 15.2-RELEASE.
+Its **generations** (g1, g2, ...) are the patch levels of that release: each `jailops image upgrade` builds the next one
+with the release's current patches and packages. A thin jail's root is a clone of one generation, an immutable pkgbase
+userland; a jail made with `--image freebsd-15-1` follows the newest generation of the image. A new release (15.2, 16.0)
+is **a new image**, never a new generation of an old one: there is no in-place release upgrade of a jail.
+
+| You want | You run |
+|---|---|
+| the patches of the release your jails run | `jailops image upgrade freebsd-15-1` (or the nightly auto upgrade, below) |
+| a new release | upgrade the host, then `jailops image create freebsd-15-2 --release 15.2-RELEASE` and `jailops image build freebsd-15-2`, and create new jails on it |
+
+### Patch levels: image upgrade
+
+Upgrading moves a jail to a newer generation of its image and keeps its data. One command does it for the whole image:
+
+    jailops image upgrade freebsd-15-1 --dry-run         # the build plan, and which jails would move
+    jailops image upgrade freebsd-15-1                   # build the next generation, then move every thin jail to it
 
 `image upgrade` builds the next generation from the newest one (its packages upgraded; minutes), then moves every thin jail
 that uses the image, in every project, one at a time, exactly as `jail upgrade` does (below), writing the same update history
@@ -58,19 +72,82 @@ and events as `update apply`. It **stops at the first jail that fails or needs a
 attempted, so a bad generation is not rolled across the host; fix the jail (its history says what happened) and run the
 command again. When the package set did not change, nothing is kept and no jail is touched; the command says so. A stopped
 jail is moved too: it is started for the health check and stopped again. Thick jails, Linux jails (always thick), jails with an
-update strategy other than `rebase` and jails pinned to a generation (`freebsd-15#g3`) are skipped and listed. `--project P`
-moves one project's jails, `--no-jails` builds the generation only, and `jailops image generations freebsd-15` shows who is
+update strategy other than `rebase` and jails pinned to a generation (`freebsd-15-1#g3`) are skipped and listed. `--project P`
+moves one project's jails, `--no-jails` builds the generation only, and `jailops image generations freebsd-15-1` shows who is
 where afterwards.
 
 The same in two steps, one jail at a time:
 
-    jailops image build freebsd-15                       # build the next generation (minutes)
+    jailops image build freebsd-15-1                     # build the next generation (minutes)
     jailops jail upgrade web --dry-run --project shop    # what would change
     jailops jail upgrade web --project shop              # snapshot, new root, /etc merge, swap, health check
     jailops jail rollback web --project shop             # root only: back to the previous generation, data untouched
 
 A generation is written `gN` wherever a command takes one (`image build --from g2`, `jail upgrade --generation g4`,
-`image alias set freebsd-15 stable g2`, `image delete-generation freebsd-15 g1`); a bare number is accepted too.
+`image delete-generation freebsd-15-1 g1`); a bare number is accepted too. As an advanced option an image can also carry
+aliases, movable names for one generation (`jailops image alias set freebsd-15-1 tested g2`, used as `freebsd-15-1@tested`);
+the plain name, which follows the newest generation, is what the console and these documents use.
+
+### Nightly auto upgrade
+
+Instead of running `image upgrade` by hand, let JailOps do it every night, per image:
+
+    jailops image auto-upgrade freebsd-15-1 on --at 03:00     # --no-packages leaves the packages inside the jails alone
+    jailops image auto-upgrade freebsd-15-1 off
+    jailops image show freebsd-15-1                           # the next run and the latest runs with their results
+
+In the console it is the checkbox **Upgrade automatically every night** on the image's card of the Images page (with the
+time and **Also upgrade the packages inside the jails**), and the same checkbox in **Create image**, on by default for a new
+FreeBSD image. The card shows the next run and the latest runs; a failed run is shown as a notice on the card until a later
+run succeeds. Only a global administrator changes it; everyone else sees it.
+
+What a run does, every night at the chosen time (the host's time zone; 03:00 unless you choose another):
+
+1. It builds the image's next generation: the patch updates of the release (minutes). When nothing changed, the run is
+   recorded as unchanged and nothing else happens.
+2. It moves the thin jails of the image to the new generation one at a time, exactly as `image upgrade` does: snapshot,
+   new root, `/etc` merge, health check, and the automatic rollback of a jail whose health check fails. **It stops at the
+   first jail that fails**; the jails after it stay where they are until the next run or until you run `image upgrade`.
+3. With packages on (the default), it upgrades the packages inside the jails of the image.
+
+It leaves alone the jails whose update strategy is manual or in place (and thick jails, Linux jails and jails pinned to a
+generation, as `image upgrade` does). A host that was off at the chosen time runs the upgrade when it is back, if that is
+within four hours; later than that it waits for the next night. Each run is recorded with its time, its result (ok,
+unchanged or failed, with what failed) and the number of jails moved, upgraded and failed.
+
+**From a cron script to auto upgrade.** If you ran `jailops image upgrade` (and a package upgrade per jail) from cron, remove
+that entry and turn auto upgrade on for the image at the same hour. What changes: the daemon runs it itself, so it needs no
+token or client on the host; a host that was off catches up within four hours; the packages are upgraded in the same run;
+and each run's result is kept with the image (`jailops image show`, the console) instead of in a mail from cron.
+
+### A new release: a new image
+
+A new FreeBSD release is a new image. Existing jails stay on the image of their release; nothing moves them to another
+release. The order:
+
+1. **Upgrade the host first.** A jail runs on the host's kernel, so the host must run a release at least as new as the
+   image's; a jail is not moved to a generation of a newer release than the host's kernel ("upgrade the host first").
+   After the host's upgrade run `jailops doctor`
+   (see [JailOps](#jailops) above for the firewall check).
+2. **Create and build the image of the new release:**
+
+       jailops image create freebsd-15-2 --release 15.2-RELEASE
+       jailops image build freebsd-15-2
+       jailops image auto-upgrade freebsd-15-2 on --at 03:00
+
+   The console proposes this itself: when the host runs a newer release than the newest FreeBSD image, the Images page and
+   the Overview say so and offer **Create image** for it, filled in.
+3. **Create new jails on the new image** (`--image freebsd-15-2`); `jailops app install` takes the newest release the host
+   can run when no `--image` is given.
+
+**Moving a jail's data to a jail of the new release is not automated.** No command moves a jail, its volumes or its data from
+one release to another. Do it as you would on any new machine: create the new jail next to the old one, copy or export the
+data from the old jail and import it in the new one with the application's own tools, check it, move the addresses or
+ports over, and delete the old jail when you no longer need it. Take a backup of the old jail first
+([backup-restore.md](backup-restore.md)). The old image keeps receiving its patch levels for as long as the release is
+supported; delete it (`jailops image delete freebsd-15-1`) once no jail uses it.
+
+### What an upgrade of a jail does
 
 The upgrade takes one atomic snapshot of all the jail's datasets (the rollback point), clones the new generation, merges
 `/etc` three ways (the account databases `passwd`, `master.passwd` and `group` are merged by JailOps itself by user and group

@@ -8,7 +8,6 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,40 +40,72 @@ type installState struct {
 }
 
 // defaultAppImage is the image an app is installed from when the request names
-// none: the only FreeBSD image the caller may use that has the alias stable,
-// as NAME@stable. None or several is refused with the images there are.
+// none, by its bare name (its newest generation): of the FreeBSD images the
+// caller may use, the one of the highest release the host's kernel can run,
+// the first by name when two have that release. No FreeBSD image, or only
+// images of a newer release than the host's, is refused with the images there are.
 func (s *Service) defaultAppImage(ctx context.Context) (string, error) {
 	objs, err := s.imgKind.list()
 	if err != nil {
 		return "", err
 	}
-	var all, found []string
+	host := s.hostBaseRelease()
+	var all []string
+	best, bestRel, freebsd := "", "", 0
 	for _, o := range objs {
 		if !s.imageVisible(ctx, o.Meta.Name) {
 			continue
 		}
 		all = append(all, o.Meta.Name)
-		if o.Spec.OS == api.OSFreeBSD && slices.Contains(o.Spec.Aliases, apps.DefaultAlias) {
-			found = append(found, o.Meta.Name)
+		if o.Spec.OS != api.OSFreeBSD {
+			continue
+		}
+		freebsd++
+		if _, err := apps.ReleaseAtLeast(o.Spec.Release, "15.1"); err != nil {
+			continue // a release that cannot be compared is never a default
+		}
+		if host != "" {
+			if ok, err := apps.ReleaseAtLeast(host, o.Spec.Release); err == nil && !ok {
+				continue // newer than the running kernel
+			}
+		}
+		if best == "" || newerRelease(o.Spec.Release, bestRel) || sameRelease(o.Spec.Release, bestRel) && o.Meta.Name < best {
+			best, bestRel = o.Meta.Name, o.Spec.Release
 		}
 	}
-	if len(found) == 1 {
-		return found[0] + "@" + apps.DefaultAlias, nil
+	if best != "" {
+		return best, nil
 	}
 	sort.Strings(all)
-	sort.Strings(found)
-	example, yours := "freebsd-15@"+apps.DefaultAlias, "you have no images"
-	if len(found) > 1 {
-		example = found[0] + "@" + apps.DefaultAlias
-	}
+	yours := "you have no images"
 	if len(all) > 0 {
 		yours = "your images: " + strings.Join(all, ", ")
 	}
-	msg := fmt.Sprintf("no image named, and no FreeBSD image has the alias %s to default to", apps.DefaultAlias)
-	if len(found) > 1 {
-		msg = fmt.Sprintf("no image named, and %d FreeBSD images have the alias %s (%s), so there is no default", len(found), apps.DefaultAlias, strings.Join(found, ", "))
+	if freebsd == 0 {
+		// nothing to name: the base image is missing, and the hint says how to make it
+		hint := api.ImageCreateHint("the base image", "", "", host)
+		if len(all) > 0 {
+			hint += "; " + yours
+		}
+		return "", invalid("no image named, and there is no FreeBSD image yet").WithHint(hint)
 	}
-	return "", invalid("%s", msg).WithHint("name an image with --image, for example " + example + "; " + yours)
+	msg := "no image named, and no FreeBSD image has a release this host can run"
+	if host != "" {
+		msg = fmt.Sprintf("no image named, and every FreeBSD image is of a newer release than this host (%s)", host)
+	}
+	return "", invalid("%s", msg).WithHint("name an image with --image; " + yours)
+}
+
+// newerRelease reports whether release a is newer than release b; both compare.
+func newerRelease(a, b string) bool {
+	ok, err := apps.ReleaseAtLeast(b, a)
+	return err == nil && !ok
+}
+
+func sameRelease(a, b string) bool {
+	x, err1 := apps.ReleaseAtLeast(a, b)
+	y, err2 := apps.ReleaseAtLeast(b, a)
+	return err1 == nil && err2 == nil && x && y
 }
 
 // InstallApp answers POST /api/v1/apps/<name>/install. Everything that can
