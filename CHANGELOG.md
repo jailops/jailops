@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-11-03
+
 - **New jails come with bash and a coloured prompt** ([shell.md](docs/shell.md)). A new FreeBSD jail gets bash, installed
   from the host's package repository at its first start (`pkg -r ROOT install -y bash`, as an app installation does), as
   the shell of `jailops shell` and the console, and a light blue `user@host:dir#` prompt for every user of the jail, so a
