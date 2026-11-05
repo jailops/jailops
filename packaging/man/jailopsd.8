@@ -149,7 +149,7 @@ with
 prints a new setup token and the console's addresses on
 .Pa /dev/console
 and to syslog
-.Pq Cm jailops-priv setup-token .
+.Pq Dq service jailopsd setuptoken .
 .El
 .Pp
 At boot
@@ -177,6 +177,9 @@ After an upgrade of the package, restart the pair:
 The configuration is validated as the daemon's user with
 .Dl service jailopsd checkconfig
 and a start refuses a configuration that does not validate.
+The one-time token of the first-run setup (appliance mode), a new one on every
+call, is printed as root by
+.Dl service jailopsd setuptoken
 There is no
 .Cm reload :
 the configuration is read at start.

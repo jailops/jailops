@@ -5,7 +5,7 @@ Four files. Each rejects keys it does not know, so a typo is an error, not a sil
 
 | File | Read by | Owner and mode |
 |---|---|---|
-| `/usr/local/etc/jailops/jailopsd.yaml` | the daemon `jailopsd` | written by `jailops-priv init`, mode 0640, group `jailops` |
+| `/usr/local/etc/jailops/jailopsd.yaml` | the daemon `jailopsd` | written by `jailops-setup`, mode 0640, group `jailops` |
 | `/usr/local/etc/jailops/priv.conf` | the root helper `jailops-priv` | root, 0600 or 0644; **the helper refuses a file others can write** |
 | `/usr/local/etc/jailops/backupd.yaml` | the backup node `jailops-backupd` | see [backup-restore.md](backup-restore.md) |
 | `~/.config/jailops/config.yaml`, `/usr/local/etc/jailops/client.yaml` | the `jailops` client | the user; keep it private, it can hold tokens |
@@ -60,7 +60,7 @@ decided in `priv.conf` ([networking-ipv6.md](networking-ipv6.md)).
 ## priv.conf
 
 One `key = value` per line; the keys are the helper's command-line flags without the dash, and lists may be repeated or
-comma separated. Check it with `jailops-priv check-config` (or `service jailops_priv checkconfig`); reread the storage
+comma separated. Check it with `service jailops_priv checkconfig` (or `service jailops_priv checkconfig`); reread the storage
 file with `service jailops_priv reload`. Sample: `packaging/priv.conf.sample`.
 
 This file is the **operator's authority**: everything the root helper will do for the daemon is bounded by it. See
@@ -89,7 +89,7 @@ The rc scripts read these from `/etc/rc.conf` (set them with `sysrc`); a change 
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `jailops_priv_enable`, `jailopsd_enable` | `NO` | start the helper and the daemon at boot |
+| `jailopsd_enable` | `NO` | start JailOps at boot: the daemon and the helper it needs. `jailops_priv_enable` defaults to it and needs no line |
 | `jailops_priv_config`, `jailopsd_config` | the files above | another configuration file |
 | `jailopsd_runas` | `jailops` | the daemon's user |
 | `jailopsd_web` | unset | `YES` serves the web console (and opens the TLS listener on 39110 when none is set), `NO` forces it off; unset, `web.enabled` decides |

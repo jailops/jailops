@@ -110,7 +110,7 @@ that holds another JailOps dataset; every command it runs goes to syslog.
 ## The first administrator: the setup token
 
 A host without an administrator accepts one request that creates the first one, `POST /api/v1/setup`, with a one-time
-setup token. Only root issues the token (`POST /api/v1/setup/token` over the socket, which `jailops-priv setup-token`
+setup token. Only root issues the token (`POST /api/v1/setup/token` over the socket, which `service jailopsd setuptoken`
 and, in appliance mode, the rc script of `jailopsd` call); it is 32 random bytes (base32), valid for 24 hours, replaced
 by the next one, stored only as its SHA-256 (`<state_dir>/setup/token.json`, 0600) and used up by the administrator it
 creates. The rc script shows it on the system console and logs it with the facility `authpriv` (on FreeBSD

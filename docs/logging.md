@@ -90,7 +90,7 @@ stored list replaces the file's** until `jailops logs forward reset` (or *Reset 
 
 **A list set from the command line or the console is restricted**, because an administrator's token, not root, sets
 it: its `ca_file` and `token_file` must be files directly in `logging.secrets_dir` (default
-`/usr/local/etc/jailops/sinks`, a directory owned by root, mode 0750, group `jailops`, which `jailops-priv init` makes),
+`/usr/local/etc/jailops/sinks`, a directory owned by root, mode 0750, group `jailops`, which the setup makes),
 and its receivers may not be on this host's loopback addresses, link-local addresses (`169.254.0.0/16`, `fe80::/10`,
 cloud metadata services among them), the unspecified, multicast or broadcast addresses, or the daemon's own ports
 (the console's listener and the ACME challenge listener) on an address of the host. A host name is checked on the

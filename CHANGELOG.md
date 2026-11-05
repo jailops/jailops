@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **One service: `sysrc jailopsd_enable=YES` and `service jailopsd start`.** The helper has no line of its own any more:
+  `jailops_priv_enable` (and the boot-time revert of a pending host change, which follows it) defaults to the value of
+  `jailopsd_enable`, and `jailopsd` starts the helper first. `service jailopsd setuptoken` prints the one-time token of
+  the first-run setup: the helper behind it is in `/usr/local/libexec`, not in `PATH`, and nobody runs
+  it by hand. `jailops-setup` enables and starts only `jailopsd`. The install guide, the README, the man pages and the
+  site say so everywhere (no `jailops-priv init` or `service jailops_priv start` as a step).
 - **The two services, after a crash and an upgrade**: daemon(8) now supervises `jailops_priv`, so a helper that
   crashes (or is killed) is started again after 5 seconds instead of leaving the host without it; `stop` ends the
   supervisor, `reload` signals the helper itself, and `status` prints the helper's pid or that it is being restarted.

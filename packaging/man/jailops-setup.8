@@ -28,9 +28,8 @@ Loading
 .Sy pf
 does not start it.
 .It
-Runs
-.Ql jailops-priv init -pool Ar pool :
-the user and group, the datasets and the configuration files.
+Makes the one-time setup of the pool: the user and group, the datasets and the
+configuration files.
 .It
 Turns IP forwarding on now
 .Pq Xr sysctl 8
@@ -49,8 +48,6 @@ see
 .Sx PF .
 .It
 Enables
-.Sy jailops_priv
-and
 .Sy jailopsd
 with the web console
 .Pq Va jailopsd_web

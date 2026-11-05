@@ -34,6 +34,8 @@ run_rc_command() {
 		if [ -n "${start_postcmd}" ]; then eval ${start_postcmd}; fi
 	fi
 	if [ "$1" = stop ] && [ -n "${stop_postcmd}" ]; then eval ${stop_postcmd}; fi
+	if [ "$1" = setuptoken ] && [ -n "${setuptoken_cmd}" ]; then helper="$FAKE_HELPER"; jailopsd_helper="$FAKE_HELPER"; eval ${setuptoken_cmd}; fi
+	echo "priv_enable=${jailops_priv_enable}"
 }
 `
 
@@ -186,5 +188,25 @@ func TestRCDDaemonStopsTheHelper(t *testing.T) {
 	t.Setenv("ONESTOP_STATUS", "0")
 	if idle := runRC(t, "jailopsd", `jailopsd_web="YES"`, "stop", true); strings.Contains(idle.log, "onestop") {
 		t.Errorf("a stop with the helper not running:\n%s", idle.log)
+	}
+}
+
+// service jailopsd setuptoken asks the helper for the token (the helper is not in PATH, so nobody runs it by hand),
+// and jailopsd_enable alone enables the helper and its revert script, which can still be turned off by name.
+func TestRCDSetupTokenAndOneEnable(t *testing.T) {
+	tok := runRC(t, "jailopsd", `jailopsd_enable="YES"`, "setuptoken", true)
+	if !strings.Contains(tok.log, "helper setup-token") || !strings.Contains(tok.out, "Setup token:       TOKEN") {
+		t.Errorf("setup-token:\n%s\n%s", tok.out, tok.log)
+	}
+	for _, script := range []string{"jailops_priv", "jailops_revert"} {
+		if on := runRC(t, script, `jailopsd_enable="YES"`, "status", true); !strings.Contains(on.out, "priv_enable=YES") {
+			t.Errorf("%s with only jailopsd_enable:\n%s", script, on.out)
+		}
+		if off := runRC(t, script, "jailopsd_enable=\"YES\"\njailops_priv_enable=\"NO\"", "status", true); !strings.Contains(off.out, "priv_enable=NO") {
+			t.Errorf("%s turned off by name:\n%s", script, off.out)
+		}
+		if none := runRC(t, script, "", "status", true); !strings.Contains(none.out, "priv_enable=NO") {
+			t.Errorf("%s with nothing set:\n%s", script, none.out)
+		}
 	}
 }

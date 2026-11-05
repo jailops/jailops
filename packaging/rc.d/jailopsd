@@ -24,10 +24,11 @@
 #                            manages those modules besides host.manage.modules of jailopsd.yaml (the helper's own list
 #                            decides what it changes). While no administrator exists, every start prints a new one-time
 #                            setup token and the console's addresses on the system console and to syslog (authpriv,
-#                            /var/log/auth.log); `jailops-priv setup-token` (as root) prints another.
+#                            /var/log/auth.log); `service jailopsd setuptoken` (as root) prints another.
 # jailopsd runs as the unprivileged user jailops; everything that needs root is done by jailops_priv.
 # Configuration: /usr/local/etc/jailops/jailopsd.yaml
 #   service jailopsd checkconfig   validate the configuration
+#   service jailopsd setuptoken   print the one-time token for the console's first-run setup (appliance mode)
 #   service jailopsd status        the process runs (and whether the helper does); GET /readyz says whether it can
 #                                  serve (docs/operations.md)
 # There is no reload: the configuration is read at start (SIGHUP is ignored by design) and a renewed TLS
@@ -50,8 +51,9 @@ jailopsd_helper_pidfile="/var/run/jailops-priv.pid"
 jailopsd_helper_rc="/usr/local/etc/rc.d/jailops_priv"
 jailopsd_console="/dev/console"
 
-extra_commands="checkconfig"
+extra_commands="checkconfig setuptoken"
 checkconfig_cmd="jailopsd_checkconfig"
+setuptoken_cmd="jailopsd_setup_token"
 start_precmd="jailopsd_precmd"
 start_postcmd="jailopsd_poststart"
 status_postcmd="jailopsd_helper_status"
@@ -69,6 +71,12 @@ jailops_appliance_args()
 	""|*[!a-z,]*) echo "jailops_appliance_modules: module names only (identity firewall), not \"${jailops_appliance_modules}\"" >&2; return 1 ;;
 	esac
 	echo "-appliance-modules ${_mods}"
+}
+
+# service jailopsd setuptoken: the one-time token of the first-run setup (appliance mode), a new one on every call
+jailopsd_setup_token()
+{
+	${jailopsd_helper} setup-token
 }
 
 jailopsd_checkconfig()

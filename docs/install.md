@@ -13,8 +13,8 @@ As root, after trusting the package repository (section 2):
     jailops-setup           # -pool NAME when the host has more than one pool
 
 `jailops-setup` does sections 1 and 3 to 6 below, in that order, and only what is not done yet (run it again and
-nothing changes): the kernel modules, `jailops-priv init` on the pool, forwarding, the three anchor lines in
-`/etc/pf.conf`, the services (`jailops_priv`, then `jailopsd` with the web console), `jailops doctor` and the first
+nothing changes): the kernel modules, the one-time setup of the pool, forwarding, the three anchor lines in
+`/etc/pf.conf`, the service (`jailopsd` with the web console; it starts the helper), `jailops doctor` and the first
 administrator; it ends with the console's address. Every action is printed on one line before it runs.
 
 It never changes or moves a line of `pf.conf`: it inserts what is missing where pf wants it (`set state-policy
@@ -31,18 +31,18 @@ For a host you run from the web console: install FreeBSD (on ZFS, as the install
 and a browser.
 
     pkg install jailops
-    sysrc jailops_priv_enable=YES jailopsd_enable=YES jailopsd_web=YES jailops_appliance=YES    # jailops_pool=zroot to name the pool
-    service jailops_priv start && service jailopsd start
-    jailops-priv setup-token                                     # or read the token and the address on the system console
+    sysrc jailopsd_enable=YES jailopsd_web=YES jailops_appliance=YES    # jailops_pool=zroot to name the pool
+    service jailopsd start
+    service jailopsd setuptoken                                 # or read the token and the address on the system console
 
 Then open `https://HOST:39110/` in a browser and enter the token.
 
 (Trust the package repository first, as section 2 says.) What happens: `jailops_appliance="YES"` hands host management
 to JailOps ([appliance.md](appliance.md): the host name, resolvers and NTP, and the host's firewall) in both programs at
-once, without editing `priv.conf` or `jailopsd.yaml`. The first start of `jailops_priv` finds no `priv.conf` and sets the
-host up (`jailops-priv appliance-init`: the user, the datasets on `jailops_pool` or the pool of the root file system, the
+once, without editing `priv.conf` or `jailopsd.yaml`. The first start (of the helper, which `service jailopsd start` starts) finds no `priv.conf` and sets the
+host up (`appliance-init`: the user, the datasets on `jailops_pool` or the pool of the root file system, the
 configuration files; every command it runs is in syslog). The start of `jailopsd` prints a **one-time setup token** and
-the console's addresses on the system console (and in `/var/log/auth.log`); `jailops-priv setup-token` prints a new one,
+the console's addresses on the system console (and in `/var/log/auth.log`); `service jailopsd setuptoken` prints a new one,
 valid for 24 hours. The console opens a wizard: the first administrator (with the token), the host name, the
 certificate, the host firewall (ssh only from your address, reverted unless you confirm), storage and a network, and the
 base image: the image of the host's own release and architecture, named after it (`freebsd-15-1` on 15.1-RELEASE),
@@ -195,30 +195,28 @@ which `jailops jail info` needs for a jail's usage and resource limits need for 
 
 ## 5. Set the host up
 
-    /usr/local/libexec/jailops-priv init -pool zroot
+`jailops-setup` does this step (the Quick install at the top runs it; `jailops-setup -n` shows what it would do). The
+helper program it uses is not run by hand: it is in `/usr/local/libexec`, not in `PATH`.
 
-(`jailops-priv` is not in `PATH`: it is the helper, in `/usr/local/libexec`; `jailops-setup` runs it for you.)
-
-This is the one-time setup of what the unprivileged daemon cannot make for itself. It creates the user and group `jailops`, the storage root dataset `zroot/jailops` (mounted at `/usr/local/jailops`, owned by root),
-the state dataset `zroot/jailops/state` (mounted at `/var/db/jailops/state`, owned by the daemon's user), the
-directories, and the two configuration files `/usr/local/etc/jailops/priv.conf` and `jailopsd.yaml`. It is idempotent
-(run it twice and nothing changes) and `-dry-run` says what it would do. Options: `-dataset`, `-mount`, `-user`, `-group`,
-`-etc`, `-data-dir`, and `-web`, which writes the web console's two settings (the TLS listener on port 39110 and
-`web.enabled: true`) into the configuration; the next section turns it on with one rc.conf line instead.
+It is the one-time setup of what the unprivileged daemon cannot make for itself. It creates the user and group `jailops`,
+the storage root dataset `<pool>/jailops` (mounted at `/usr/local/jailops`), the state dataset `<pool>/jailops/state`
+(mounted at `/var/db/jailops/state`, owned by the daemon's user), the logs dataset `<pool>/jailops/logs` (at
+`/var/log/jailops`), the directories, and the two configuration files `/usr/local/etc/jailops/priv.conf` and
+`jailopsd.yaml`. It is idempotent: run it twice and nothing changes.
 
 ## 6. Start the services
 
 Run these as root. FreeBSD has no `sudo` in the base system: log in as root, use `su -m root -c '...'` (or `su -`), or
 install `doas` or `sudo` from packages; the examples below write the commands as root runs them.
 
-    sysrc jailops_priv_enable=YES jailopsd_enable=YES jailopsd_web=YES
-    service jailops_priv checkconfig
-    service jailops_priv start
+    sysrc jailopsd_enable=YES jailopsd_web=YES
+    service jailopsd checkconfig
     service jailopsd start
     jailops doctor
 
-The helper first: `service jailopsd start` starts `jailops_priv` itself when it is not running (rc.subr's force_depend: it
-says that the helper is forced to start). At boot the order is declared in the rc scripts, and a helper that crashes is started again by daemon(8) after 5 seconds.
+One service is enough: `service jailopsd start` starts the privileged helper first (rc.subr's force_depend), `stop` stops
+both and `restart` replaces both. At boot the order is declared in the rc scripts, and a helper that crashes is started
+again by daemon(8) after 5 seconds.
 
 Then create the first administrator. On the host, **root is the global administrator of the unix socket** (the recovery access); every
 other local user is anonymous until they sign in with a JailOps identity. There is no Unix group that grants a role.
