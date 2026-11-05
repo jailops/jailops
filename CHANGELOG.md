@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.2 - 2026-11-05
+
 - **`jailops doctor` checks a `pf.conf` only root can read** (`pf.state-policy`): a `pf.conf` of mode 0600 is common,
   and the daemon (user `jailops`) cannot open it, so the check warned that it could not. The helper (root) now reads
   `/etc/pf.conf` and reports whether it has `set state-policy if-bound`. A `pf.conf` named by `pf_rules` in another
