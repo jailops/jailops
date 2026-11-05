@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.1 - 2026-11-05
+
 - **Image builds share one package cache**: the dataset `<pool>/jailops/cache` (mounted at `<mount-base>/cache`, made by
   the first build) holds the downloaded packages (`PKG_CACHEDIR`), so a package of the base is fetched once, not into
   every generation. `pkg clean` removes only the outdated ones.
