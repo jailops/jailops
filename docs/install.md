@@ -4,6 +4,27 @@ JailOps needs **FreeBSD 15.1 or later**, a ZFS pool, and a firewall that is `pf`
 whole sequence below on a clean machine, and it is what the CI job runs; if a step here and that script disagree, the
 script is right.
 
+## Quick install
+
+As root, after trusting the package repository (section 2):
+
+    pkg install jailops
+    jailops-setup -n        # what it would do; changes nothing
+    jailops-setup           # -pool NAME when the host has more than one pool
+
+`jailops-setup` does sections 1 and 3 to 6 below, in that order, and only what is not done yet (run it again and
+nothing changes): the kernel modules, `jailops-priv init` on the pool, forwarding, the three anchor lines in
+`/etc/pf.conf`, the services (`jailops_priv`, then `jailopsd` with the web console), `jailops doctor` and the first
+administrator; it ends with the console's address. Every action is printed on one line before it runs.
+
+It never changes or moves a line of `pf.conf`: it inserts what is missing where pf wants it (`set state-policy
+if-bound` and a `scrub` rule only when there are none, and says so), keeps the old file as
+`/etc/pf.conf.jailops-setup-<date>`, checks the new text with `pfctl -nf` before writing anything and loads it with
+`pfctl -f`, which keeps your ssh session. Without a `pf.conf` it writes a minimal one that blocks nothing. It never
+runs `service pf restart`. Starting pf is said first and asked (a `pf.conf` with `block` rules can cut ssh if no rule
+passes it); `-y` answers yes to everything. Then continue with section 7. `man jailops-setup` has the details; the
+sections below explain each step and are the way to do it by hand.
+
 ## The appliance path
 
 For a host you run from the web console: install FreeBSD (on ZFS, as the installer offers), then four commands as root,
@@ -174,7 +195,9 @@ which `jailops jail info` needs for a jail's usage and resource limits need for 
 
 ## 5. Set the host up
 
-    jailops-priv init -pool zroot
+    /usr/local/libexec/jailops-priv init -pool zroot
+
+(`jailops-priv` is not in `PATH`: it is the helper, in `/usr/local/libexec`; `jailops-setup` runs it for you.)
 
 This is the one-time setup of what the unprivileged daemon cannot make for itself. It creates the user and group `jailops`, the storage root dataset `zroot/jailops` (mounted at `/usr/local/jailops`, owned by root),
 the state dataset `zroot/jailops/state` (mounted at `/var/db/jailops/state`, owned by the daemon's user), the
@@ -293,9 +316,14 @@ pkg delete -y jailops jailops-client
 rm -rf /usr/local/etc/jailops /var/db/jailops /var/run/jailops /var/log/jailops /var/tmp/jailops
 ```
 
-Delete the three anchor lines of section 3 from `/etc/pf.conf` and the `jailopsd_*` and `jailops_*` lines from
-`/etc/rc.conf` if the host keeps nothing of JailOps. The bridges of your networks (named like the network) disappear
-with a reboot, or `ifconfig NAME destroy` one at a time. Then start at section 2. Packages of the base are fetched
+`jailops` remembers the current project in the client configuration (`~/.config/jailops/config.yaml`, root's own under
+`/root`), not on the server: after starting over, `jailops doctor` warns that the project does not exist. Remove the
+`project:` line of the remote there, or choose a new one with `jailops project switch NAME`.
+
+Delete the three anchor lines of section 3 from `/etc/pf.conf` (with the `# jailops-setup:` comments and the
+lines below them, if `jailops-setup` added them; its copy of the old file is `/etc/pf.conf.jailops-setup-<date>`) and
+the `jailopsd_*` and `jailops_*` lines from `/etc/rc.conf` if the host keeps nothing of JailOps. The bridges of your networks (named like the network) disappear
+with a reboot, or `ifconfig NAME destroy` one at a time. Then start at section 2 (or with `jailops-setup` after `pkg install jailops`). Packages of the base are fetched
 again: the cache went with the dataset.
 
 ## Remote access

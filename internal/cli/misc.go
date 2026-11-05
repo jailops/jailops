@@ -113,7 +113,13 @@ The exit status is 1 when a check failed.`,
 							add("pf", "WARN", "the server reports no packet filter: firewall policies cannot be applied")
 						}
 						if _, lerr := collect(c.Operations().List(ctx)); lerr != nil {
-							add("permissions", "WARN", "cannot list operations: "+lerr.Error())
+							if conn.Project != "" && api.IsCode(lerr, api.CodeNotFound) {
+								// the server is fine: the configuration of the client names a project it does not have
+								add("project", "WARN", fmt.Sprintf("the project %q (%s) does not exist on this server: %s. List the projects with `jailops project list`, choose another with `jailops project switch NAME` (it is stored in %s)",
+									conn.Project, conn.Sources["project"], lerr.Error(), a.userConfigPath()))
+							} else {
+								add("permissions", "WARN", "cannot list operations: "+lerr.Error())
+							}
 						} else {
 							add("permissions", "PASS", "can read operations")
 						}

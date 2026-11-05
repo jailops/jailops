@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+- **`jailops doctor` checks a `pf.conf` only root can read** (`pf.state-policy`): a `pf.conf` of mode 0600 is common,
+  and the daemon (user `jailops`) cannot open it, so the check warned that it could not. The helper (root) now reads
+  `/etc/pf.conf` and reports whether it has `set state-policy if-bound`. A `pf.conf` named by `pf_rules` in another
+  place the daemon cannot read is shown as INFO, with the command that checks it.
+- **`jailops doctor` says when the client's current project does not exist on the server** (`project`): the current
+  project is kept in the client configuration (`~/.config/jailops/config.yaml`), so after a host was wiped it named a
+  project the server no longer had, and the line read as a permissions problem. It names the project, where the choice
+  comes from and how to choose another (`jailops project switch NAME`). "Start over" in the install guide says so.
+- **`jailops-setup`: one command after `pkg install jailops`** (`/usr/local/sbin/jailops-setup`, `man jailops-setup`):
+  as root it loads the kernel modules, runs `jailops-priv init` (the pool is found when there is one; `-pool` otherwise),
+  turns forwarding on now and at boot, puts the three anchor lines into `/etc/pf.conf`, enables and starts
+  `jailops_priv` and `jailopsd` with the web console, runs `jailops doctor`, offers to create the first administrator
+  and prints the console's address. Each action is printed before it runs, `-n` changes nothing, and a second run
+  changes nothing either. In `pf.conf` no existing line is changed or moved: missing lines are inserted where pf wants
+  them (`set state-policy if-bound` and a scrub rule only when there are none), the old file is kept with a timestamp,
+  the new text is checked with `pfctl -nf` before it is written and loaded with `pfctl -f` (open ssh sessions stay);
+  pf is never restarted, and starting it is announced and asked for (`-y` answers yes). The package message named
+  `jailops-priv init`, which is not in `PATH` (`/usr/local/libexec`); it now names `jailops-setup`.
+
 ## 0.6.1 - 2026-11-05
 
 - **Image builds share one package cache**: the dataset `<pool>/jailops/cache` (mounted at `<mount-base>/cache`, made by

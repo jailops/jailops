@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"regexp"
 	"slices"
@@ -339,7 +340,7 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 	} else {
 		c.add("pf.anchors", api.DoctorFail, "the jailops anchor lines are missing from pf.conf", "add to /etc/pf.conf, and reload it with pfctl -f /etc/pf.conf. pf wants the order: nat-anchor and rdr-anchor with the translation rules, before the first block or pass rule; anchor with the filter rules:\n"+render.AnchorLines())
 	}
-	s.doctorStatePolicy(c, rules)
+	s.doctorStatePolicy(ctx, c, rules)
 }
 
 var (
@@ -352,7 +353,7 @@ var (
 // floating states, let a jail's forwarded packets match the state made for them on the jail's port, translated, and
 // the host then drops all but the first (seen on FreeBSD 15.1: one ping of four). pf does not print the state policy,
 // so the pf.conf the system loads is read; includes are not followed.
-func (s *Service) doctorStatePolicy(c *checkSet, rules string) {
+func (s *Service) doctorStatePolicy(ctx context.Context, c *checkSet, rules string) {
 	const name = "pf.state-policy"
 	if !defaultBlock(rules) {
 		c.add(name, api.DoctorOK, "the loaded ruleset does not block by default", "")
@@ -376,11 +377,31 @@ func (s *Service) doctorStatePolicy(c *checkSet, rules string) {
 		return
 	}
 	b, err := s.hostFile(conf)
+	if errors.Is(err, fs.ErrPermission) && conf == "/etc/pf.conf" {
+		// the helper (root) reads it for us
+		if fw, ok := s.d.Host.(HostFirewallSystem); ok && s.d.Host != nil {
+			if st, herr := fw.HostFirewallRead(ctx); herr == nil && st.StatePolicyIfBound != nil {
+				s.statePolicyResult(c, name, conf, *st.StatePolicyIfBound)
+				return
+			}
+		}
+	}
+	if errors.Is(err, fs.ErrPermission) {
+		// pf.conf is root's (mode 0600 is common): not a fault of the host, only something the daemon cannot judge
+		c.add(name, api.DoctorInfo, conf+" is readable by root only, so the daemon cannot check it; the loaded ruleset blocks by default and jails are routed through it, which wants `set state-policy if-bound` in it",
+			"check it as root: grep state-policy "+conf)
+		return
+	}
 	if err != nil {
 		c.add(name, api.DoctorUnknown, conf+" cannot be read by the daemon: "+err.Error(), "")
 		return
 	}
-	if reStatePolicy.MatchString(stripPFComments(string(b))) {
+	s.statePolicyResult(c, name, conf, PFBindsStates(string(b)))
+}
+
+// statePolicyResult adds the verdict on conf: bound states pass, floating ones lose the packets of a NATed flow.
+func (s *Service) statePolicyResult(c *checkSet, name, conf string, bound bool) {
+	if bound {
 		c.add(name, api.DoctorOK, conf+" binds states to interfaces (set state-policy if-bound)", "")
 		return
 	}

@@ -54,7 +54,13 @@ type HostFirewallState struct {
 	Pending   *api.HostPendingChange `json:"pending,omitempty"`
 	// Modules are the modules priv.conf lets the helper change.
 	Modules []string `json:"modules,omitempty"`
+	// StatePolicyIfBound says whether /etc/pf.conf has `set state-policy if-bound`; the helper (root) reads the file,
+	// which the daemon often cannot (mode 0600). Nil when there is no such file.
+	StatePolicyIfBound *bool `json:"state_policy_if_bound,omitempty"`
 }
+
+// PFBindsStates says whether the text of a pf.conf has `set state-policy if-bound` (comments do not count).
+func PFBindsStates(text string) bool { return reStatePolicy.MatchString(stripPFComments(text)) }
 
 func (s *Service) hostFirewallSystem() (HostFirewallSystem, error) {
 	if _, err := s.hostSystem(); err != nil {

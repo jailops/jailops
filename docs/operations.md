@@ -96,7 +96,7 @@ The host key is `backup.key` (default under `/var/db/jailops`); the recovery key
 
 UNVERIFIED end to end: no restore onto a second machine has been run by the test suite. What the code does:
 
-1. Install the packages and run `jailops-priv init` ([install.md](install.md)); start both services.
+1. Install the packages and run `jailops-setup` ([install.md](install.md)), which also starts both services.
 2. Put back what is not in a JailOps backup, from your own copies: `backup.key` (and its passphrase file),
    `secrets.key` (sealed secrets), the backup client certificate or a new one enrolled with `jailops-backupd hosts enroll`.
 3. Point `backup:` of `jailopsd.yaml` at the same node and restart `jailopsd`. With an empty catalog and the key present,

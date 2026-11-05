@@ -79,9 +79,13 @@ fmt:
     cd sdk && go vet ./...
 
 # Unit tests of both modules, with fakes. Runs anywhere.
-test:
+test: test-setup
     go test ./... -count=1
     cd sdk && go test ./... -count=1
+
+# packaging/jailops-setup against fake sysrc, pfctl, zpool, service and friends (POSIX sh, runs anywhere).
+test-setup:
+    sh scripts/jailops-setup-test.sh
 
 # Race detector.
 test-race:
