@@ -5,13 +5,16 @@ Two different things: upgrading **JailOps itself**, and upgrading the **jails** 
 ## JailOps
 
     pkg upgrade jailops jailops-client            # and jailops-backupd on a node
-    service jailops_priv restart
     service jailopsd restart
     jailops doctor
 
-Running jails are not stopped by restarting the daemon: they are kernel jails. Restarting `jailopsd` briefly stops the
-reconcile loop and the API; restarting `jailops-priv` makes the daemon wait for the helper's socket (it retries for up to 30 seconds
-at start). For a switched-IPv6 network the proxy stops answering while `jailopsd` is down, and announces its addresses
+Both binaries are new and each service runs the old one until it restarts. The two are one service: the helper is the
+part that runs as root. `service jailopsd stop` stops the helper after the daemon and `service jailopsd start` starts it
+first, so `restart` replaces both. (`service jailops_priv restart` alone restarts only the helper: the daemon, which keeps
+running, reconnects once it is back, and the requests it makes meanwhile fail.) `service jailopsd start` also warns while
+the helper still runs a replaced binary.
+Running jails are not stopped by restarting either service: they are kernel jails. Restarting `jailopsd` briefly stops the
+reconcile loop and the API. For a switched-IPv6 network the proxy stops answering while `jailopsd` is down, and announces its addresses
 again when it is back.
 
 What protects your data across an upgrade:

@@ -15,17 +15,25 @@ const rcStub = `
 load_rc_config() { [ -f "$RC_CONF" ] && . "$RC_CONF"; return 0; }
 err() { echo "err: $2" >&2; exit "$1"; }
 install() { echo "install $*" >> "$LOG"; }
+warn() { echo "warning: $*" >&2; }
+info() { echo "info: $*"; }
+checkyesno() { eval "_v=\${$1:-NO}"; case "$_v" in [Yy][Ee][Ss]) return 0 ;; esac; return 1; }
+check_pidfile() { return 0; }
+service() { [ "$2" = onestatus ] && return "${SERVICE_STATUS:-0}"; return 0; }
 run_rc_command() {
 	echo "command_args=${command_args}"
 	echo "required_files=${required_files}"
+	jailopsd_helper_rc="$FAKE_RC"
 	if [ "$1" = start ]; then
 		procname="$FAKE_HELPER"
+		helper="$FAKE_HELPER"
 		jailopsd_helper="$FAKE_HELPER"
 		jailopsd_console="$CONSOLE"
 		su() { shift 3; sh -c "$*"; }
 		if [ -n "${start_precmd}" ]; then eval ${start_precmd} || { echo "precmd failed"; return 1; }; fi
 		if [ -n "${start_postcmd}" ]; then eval ${start_postcmd}; fi
 	fi
+	if [ "$1" = stop ] && [ -n "${stop_postcmd}" ]; then eval ${stop_postcmd}; fi
 }
 `
 
@@ -53,7 +61,9 @@ func runRC(t *testing.T, script, rcconf, arg string, privConf bool) rcRun {
 	if privConf {
 		os.WriteFile(conf, nil, 0o600)
 	}
-	for name, content := range map[string]string{"rc.subr": rcStub, "script": body, "rc.conf": rcconf,
+	// the helper's own rc script: forcestatus answers as SERVICE_STATUS says, forcestart as FORCESTART_STATUS
+	helperrc := "#!/bin/sh\necho \"helper-rc $*\" >> \"$LOG\"\ncase \"$1\" in forcestatus) exit ${SERVICE_STATUS:-0} ;; forcestart) exit ${FORCESTART_STATUS:-0} ;; onestatus) exit ${SERVICE_STATUS:-0} ;; onestop) exit ${ONESTOP_STATUS:-0} ;; esac\nexit 0\n"
+	for name, content := range map[string]string{"rc.subr": rcStub, "script": body, "rc.conf": rcconf, "helperrc": helperrc,
 		"helper": "#!/bin/sh\necho \"helper $*\" >> \"$LOG\"\ncase \"$*\" in *badpool*) exit 1 ;; *setup-token*) echo \"Setup token:       TOKEN\" ;; esac\nexit 0\n"} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o755); err != nil {
 			t.Fatal(err)
@@ -61,7 +71,7 @@ func runRC(t *testing.T, script, rcconf, arg string, privConf bool) rcRun {
 	}
 	cmd := exec.Command("sh", filepath.Join(dir, "script"), arg)
 	cmd.Env = append(os.Environ(), "RC_CONF="+filepath.Join(dir, "rc.conf"), "LOG="+filepath.Join(dir, "log"),
-		"FAKE_HELPER="+filepath.Join(dir, "helper"), "CONSOLE="+filepath.Join(dir, "console"))
+		"FAKE_HELPER="+filepath.Join(dir, "helper"), "FAKE_RC="+filepath.Join(dir, "helperrc"), "CONSOLE="+filepath.Join(dir, "console"))
 	out, err := cmd.CombinedOutput()
 	r := rcRun{out: string(out)}
 	if ee, ok := err.(*exec.ExitError); ok {
@@ -134,5 +144,47 @@ func TestRCDApplianceSwitch(t *testing.T) {
 	}
 	if dOff := runRC(t, "jailopsd", `jailopsd_web="YES"`, "start", true); strings.Contains(dOff.log, "setup-token") || strings.Contains(dOff.out, "appliance") || dOff.console != "" {
 		t.Errorf("jailopsd without the switch:\n%s\n%s", dOff.out, dOff.log)
+	}
+}
+
+// jailopsd depends on the helper as rc.subr's force_depend does: a start by hand with the helper not running starts it
+// first and says so, a helper that cannot be started stops the start, and a helper that runs is left alone.
+func TestRCDDaemonForcesTheHelper(t *testing.T) {
+	t.Setenv("SERVICE_STATUS", "1")
+	forced := runRC(t, "jailopsd", `jailopsd_web="YES"`, "start", true)
+	if !strings.Contains(forced.out, "info: jailopsd depends on jailops_priv, which will be forced to start.") || strings.Contains(forced.out, "precmd failed") ||
+		!strings.Contains(forced.log, "helper-rc forcestatus") || !strings.Contains(forced.log, "helper-rc forcestart") {
+		t.Errorf("a start without the helper:\n%s\n%s", forced.out, forced.log)
+	}
+	if strings.Index(forced.log, "helper-rc forcestart") > strings.Index(forced.log, "-check-config") {
+		t.Errorf("the helper was started after the configuration was checked:\n%s", forced.log)
+	}
+	t.Setenv("FORCESTART_STATUS", "1")
+	if failed := runRC(t, "jailopsd", `jailopsd_web="YES"`, "start", true); !strings.Contains(failed.out, "Unable to force jailops_priv") || !strings.Contains(failed.out, "precmd failed") || strings.Contains(failed.log, "-check-config") {
+		t.Errorf("a helper that does not start:\n%s\n%s", failed.out, failed.log)
+	}
+	t.Setenv("SERVICE_STATUS", "0")
+	t.Setenv("FORCESTART_STATUS", "0")
+	if running := runRC(t, "jailopsd", `jailopsd_web="YES"`, "start", true); strings.Contains(running.out, "forced to start") || strings.Contains(running.log, "forcestart") {
+		t.Errorf("a start with the helper running:\n%s\n%s", running.out, running.log)
+	}
+}
+
+// The helper belongs to the daemon: a stop of jailopsd stops the helper after it when it runs, says so when it cannot,
+// and leaves a helper that is not running alone.
+func TestRCDDaemonStopsTheHelper(t *testing.T) {
+	t.Setenv("SERVICE_STATUS", "0")
+	stopped := runRC(t, "jailopsd", `jailopsd_web="YES"`, "stop", true)
+	if !strings.Contains(stopped.log, "helper-rc onestatus") || !strings.Contains(stopped.log, "helper-rc onestop") {
+		t.Errorf("a stop with the helper running:\n%s\n%s", stopped.out, stopped.log)
+	}
+	t.Setenv("ONESTOP_STATUS", "1")
+	if failed := runRC(t, "jailopsd", `jailopsd_web="YES"`, "stop", true); !strings.Contains(failed.out, "Unable to stop jailops_priv") {
+		t.Errorf("a helper that does not stop:\n%s", failed.out)
+	}
+	t.Setenv("SERVICE_STATUS", "1")
+	t.Setenv("ONESTOP_STATUS", "0")
+	if idle := runRC(t, "jailopsd", `jailopsd_web="YES"`, "stop", true); strings.Contains(idle.log, "onestop") {
+		t.Errorf("a stop with the helper not running:\n%s", idle.log)
 	}
 }

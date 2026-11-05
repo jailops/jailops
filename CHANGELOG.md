@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+- **The two services, after a crash and an upgrade**: daemon(8) now supervises `jailops_priv`, so a helper that
+  crashes (or is killed) is started again after 5 seconds instead of leaving the host without it; `stop` ends the
+  supervisor, `reload` signals the helper itself, and `status` prints the helper's pid or that it is being restarted.
+  `service jailopsd start` while the helper is not running starts the helper first, as rc.subr's `force_depend` does for
+  the scripts of `/etc/rc.d` (the daemon used to start, wait 30 seconds for the socket and exit), a start while the helper still runs a binary a
+  package upgrade replaced warns, and `service jailopsd status` also says whether the helper runs. The helper's rc
+  script now requires `syslogd`, so its first audit lines are not lost at boot. `service jailopsd stop` stops the
+  helper after the daemon, so `service jailopsd restart` replaces both after a `pkg upgrade` (`service jailops_priv`
+  alone still works on the helper only).
+
 ## 0.6.2 - 2026-11-05
 
 - **`jailops doctor` checks a `pf.conf` only root can read** (`pf.state-policy`): a `pf.conf` of mode 0600 is common,
