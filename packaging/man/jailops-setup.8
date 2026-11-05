@@ -128,8 +128,9 @@ before the first filter rule, so that a broad pass rule of the host does not
 decide for the jails.
 .El
 .Pp
-Each inserted line follows a comment that starts with
-.Ql # jailops-setup: .
+A comment that begins with
+.Ql # jailops-setup\&:
+marks each inserted line.
 When the file does not exist, a minimal one is written: the options, the three
 anchor lines and
 .Ql pass all ,
