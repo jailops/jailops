@@ -385,8 +385,12 @@ func (s *Service) ensureProjectDatasets(ctx context.Context, project string, si 
 	cur, _ := z.Get(ctx, projDS, "quota")
 	have := cur["quota"].Value
 	switch {
-	case g.Quota != "" && have != g.Quota:
-		if err := z.Set(ctx, projDS, map[string]string{"quota": g.Quota}); err != nil {
+	case g.Quota != "" && quotaDiffers(have, g.Quota):
+		want, err := validate.CanonicalSize("quota", g.Quota)
+		if err != nil {
+			return err
+		}
+		if err := z.Set(ctx, projDS, map[string]string{"quota": want}); err != nil {
 			return internal(err)
 		}
 	case g.Quota == "" && have != "" && have != "-" && have != "none" && have != "0":
@@ -439,7 +443,7 @@ func (s *Service) newProjectNetwork(ctx context.Context, name string) (string, e
 	if err != nil {
 		return "", err
 	}
-	var used []netip.Prefix
+	used := s.hostPrefixes(ctx)
 	for _, o := range objs {
 		if o.Spec.IPv4 != nil {
 			if p, err := netip.ParsePrefix(o.Spec.IPv4.Subnet); err == nil {
@@ -486,7 +490,7 @@ func (s *Service) newProjectNetwork(ctx context.Context, name string) (string, e
 		return "", api.Errorf(api.CodeAlreadyExists, "a network named %q exists already", netName).
 			WithHint("create the project without new_network and grant that network")
 	}
-	n, err := s.CreateNetwork(ctx, api.Network{Metadata: api.ObjectMeta{Name: netName, Labels: map[string]string{"jailops.project": name}}, Spec: spec})
+	n, err := s.CreateNetwork(ctx, api.Network{Metadata: api.ObjectMeta{Name: netName, Labels: map[string]string{labelProject: name}}, Spec: spec})
 	if err != nil {
 		return "", err
 	}
@@ -519,6 +523,12 @@ func (s *Service) CreateProject(ctx context.Context, in api.Project) (api.Projec
 	name := in.Metadata.Name
 	spec := in.Spec
 	if err := validate.ProjectSpec(name, spec); err != nil {
+		return api.Project{}, err
+	}
+	if err := validate.NameLength("project", "name", name, validate.MaxProjectName); err != nil {
+		return api.Project{}, err
+	}
+	if err := canonicalProjectSizes(&spec); err != nil {
 		return api.Project{}, err
 	}
 	unlock, err := s.locks.lockPatient(ctx, "create project "+name, projectLock(name))
@@ -572,12 +582,15 @@ func (s *Service) UpdateProject(ctx context.Context, name string, in api.Project
 		return api.Project{}, err
 	}
 	if in.Metadata.Name != "" && in.Metadata.Name != name {
-		return api.Project{}, invalid("renaming is not supported")
+		return api.Project{}, renameByAction("project", "projects")
 	}
 	if in.Spec.NewNetwork {
 		return api.Project{}, invalid("new_network applies when a project is created").WithHint("create a network and grant it")
 	}
 	if err := validate.ProjectSpec(name, in.Spec); err != nil {
+		return api.Project{}, err
+	}
+	if err := canonicalProjectSizes(&in.Spec); err != nil {
 		return api.Project{}, err
 	}
 	unlock, err := s.locks.lockPatient(ctx, "update project "+name, projectLock(name))
@@ -769,6 +782,9 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 		}
 	}
 	if err := s.checkProxyConflicts(key, eff); err != nil {
+		return nil, err
+	}
+	if err := s.checkAttachMTU(eff, old); err != nil {
 		return nil, err
 	}
 	if spec.Storage == "" {

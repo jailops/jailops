@@ -154,7 +154,12 @@ func (PkgBase) sets(s api.ImageSpec) []string {
 	if len(s.Source.Sets) > 0 {
 		return s.Source.Sets
 	}
-	return []string{"FreeBSD-set-minimal-jail"}
+	// The minimal jail set (35 packages) is not enough for software from the FreeBSD ports: a package is built against
+	// a complete base system and does not name the base libraries it needs (PostgreSQL stopped at "libexecinfo.so.1 not
+	// found"), and administrators expect sysrc(8), ssh, ee, ntp, ftp and bmake in a jail. The optional jail set
+	// (about 105 packages, 160 MiB) brings them; the development set (compiler and headers, 570 MiB) is left out: an
+	// image that builds software names FreeBSD-set-devel in source.sets.
+	return []string{"FreeBSD-set-minimal-jail", "FreeBSD-set-optional-jail"}
 }
 
 // pkgArgv builds a `pkg -r <root>` argv with a private repository
@@ -166,7 +171,7 @@ func (p PkgBase) pkgArgv(b *Build, abi string, args ...string) []string {
 	if abi == "" {
 		abi, _ = p.abi(b.Spec)
 	}
-	base := []string{"pkg", "-r", b.Root, "-o", "ABI=" + abi, "-o", "REPOS_DIR=" + path.Join(b.Work, "repos"), "-o", "IGNORE_OSVERSION=yes"}
+	base := []string{"pkg", "-r", b.Root, "-o", "ABI=" + abi, "-o", "REPOS_DIR=" + path.Join(b.Work, "repos"), "-o", "IGNORE_OSVERSION=yes", "-o", "PKG_CACHEDIR=" + b.M.Layout.PkgCache()}
 	return append(base, args...)
 }
 
@@ -276,20 +281,66 @@ func (p PkgBase) repoConf(b *Build) plan.Step {
 
 func (p PkgBase) Install(b *Build) ([]plan.Step, error) {
 	r := &pkgRun{p: p, b: b}
-	steps := append([]plan.Step{p.repoConf(b), r.abiStep()}, p.keysSteps(b)...)
+	steps := append([]plan.Step{p.cacheStep(b), p.repoConf(b), r.abiStep()}, p.keysSteps(b)...)
 	steps = append(steps,
 		r.step("pkg-update", "update", "-f", "-r", "jailops"),
-		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...))
+		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...),
+		r.step("pkg-clean", "clean", "-y"),
+		p.rcConfStep(b))
 	return steps, nil
+}
+
+// cacheStep creates the shared package cache dataset (Layout.CacheDS) when it is missing, and removes it again if
+// this build made it and fails: a build leaves nothing behind, and the next one makes it anew.
+func (PkgBase) cacheStep(b *Build) plan.Step {
+	m := b.M
+	ds := m.Layout.CacheDS()
+	made := false
+	return plan.Step{Name: "ensure-cache-dataset", Describe: "zfs create " + ds + " (the package cache, mounted at " + m.Layout.CacheMount() + ") if missing",
+		Do: func(ctx context.Context) error {
+			if ok, err := m.ZFS.Exists(ctx, ds); err != nil || ok {
+				return err
+			}
+			made = true
+			return m.ZFS.Create(ctx, ds, map[string]string{PropManaged: "on", PropKind: "cache", "mountpoint": m.Layout.CacheMount()})
+		},
+		Undo: func(ctx context.Context) error {
+			if ok, err := m.ZFS.Exists(ctx, ds); !made || err != nil || !ok {
+				return err
+			}
+			return m.ZFS.DestroyRecursive(ctx, ds)
+		},
+		UndoOnFail: true}
+}
+
+// jailRcConf is the /etc/rc.conf a new generation starts with (the base ships none): what a jail wants of rc
+// whatever its network is. sendmail would start an MTA in every jail, syslogd would open a network socket, and a
+// jail has nothing to clear in /tmp that the jail's own filesystem does not already start empty.
+const jailRcConf = `# Defaults for a JailOps jail. Change them with sysrc(8); JailOps keeps its own settings in /etc/rc.conf.local.
+sendmail_enable="NONE"
+syslogd_flags="-ss"
+`
+
+// rcConfStep writes jailRcConf, unless the image already has an /etc/rc.conf.
+func (PkgBase) rcConfStep(b *Build) plan.Step {
+	m, dst := b.M, path.Join(b.Root, "etc/rc.conf")
+	return plan.Step{Name: "write-rc-conf", Describe: "write " + dst + " (sendmail off, syslogd without a network socket) unless it exists",
+		Do: func(ctx context.Context) error {
+			if ok, err := m.Files.Exists(ctx, dst); err != nil || ok {
+				return err
+			}
+			return m.Files.WriteAtomic(ctx, dst, []byte(jailRcConf))
+		}}
 }
 
 func (p PkgBase) Upgrade(b *Build) ([]plan.Step, error) {
 	r := &pkgRun{p: p, b: b}
-	steps := append([]plan.Step{p.repoConf(b), r.abiStep()}, p.keysSteps(b)...)
+	steps := append([]plan.Step{p.cacheStep(b), p.repoConf(b), r.abiStep()}, p.keysSteps(b)...)
 	return append(steps,
 		r.step("pkg-update", "update", "-f", "-r", "jailops"),
 		r.step("pkg-upgrade", "upgrade", "-y", "-r", "jailops"),
-		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...)), nil
+		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...),
+		r.step("pkg-clean", "clean", "-y")), nil
 }
 
 func (p PkgBase) Check(b *Build) []plan.Step {

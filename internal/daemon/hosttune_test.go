@@ -209,7 +209,7 @@ func TestCreatingAProxyNetworkWarnsAboutOnlinkNS(t *testing.T) {
 		t.Fatalf("%v %+v", err, got.Status.Warnings)
 	}
 	routed := api.Network{Metadata: api.ObjectMeta{Name: "rt"}, Spec: api.NetworkSpec{
-		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1:2:1::/80", Gateway: "2001:db8:1:2:1::1", Range: "2001:db8:1:2:1::10-2001:db8:1:2:1::ff"}}}
+		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:9:1::/80", Gateway: "2001:db8:9:1::1", Range: "2001:db8:9:1::10-2001:db8:9:1::ff"}}}
 	if n, err := e.Admin.Networks().Create(ctx, routed); err != nil || len(n.Status.Warnings) != 0 {
 		t.Fatalf("%v %+v", err, n.Status.Warnings)
 	}

@@ -58,7 +58,7 @@ const issues = computed(() => validateInstall(f, { networks: gate.granted.value.
 const valid = computed(() => !Object.keys(issues.value).length)
 const say = (k: keyof InstallForm): string => {
   const i = issues.value[k]
-  return !i ? '' : i === 'nameInvalid' ? nameProblem(f.jail) : s.install[i]
+  return !i ? '' : i === 'nameInvalid' ? nameProblem(f.jail, 'jail') : s.install[i]
 }
 const issueText = (k: keyof InstallForm): string => (touched.value || k === 'jail' || k === 'memory' || k === 'disk' || k === 'cpu' ? say(k) : '')
 // the first problem, named next to the Install button; a submit focuses its field
@@ -176,7 +176,7 @@ function back(): void {
             <label for="inst-jail">{{ s.install.jail }} <span class="req" aria-hidden="true">*</span></label>
             <input id="inst-jail" v-model.trim="f.jail" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!issueText('jail')" :aria-describedby="issueText('jail') ? 'inst-jail-err' : 'inst-jail-hint'" />
             <span v-if="issueText('jail')" id="inst-jail-err" class="field-error" role="alert">{{ issueText('jail') }}</span>
-            <span v-else id="inst-jail-hint" class="hint">{{ nameHint() }}</span>
+            <span v-else id="inst-jail-hint" class="hint">{{ nameHint('jail') }}</span>
           </div>
           <div v-if="choices.length" class="field inst-wide">
             <label for="inst-image">{{ s.install.image }}</label>

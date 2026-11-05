@@ -100,6 +100,9 @@ func newProjectEnv(t *testing.T, project, name string) *hookEnv {
 	if err := e.net.BridgeCreate(ctx, "jo0"); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := e.net.EpairCreate(ctx, "jo0g"); err != nil { // the gateway pair, made by the reconcile loop
+		t.Fatal(err)
+	}
 	e.runner.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
 	e.runner.Add(run.Rule{Name: "/sbin/ifconfig", Args: []string{"-j", internal, run.AnyArg, "description", run.AnyArg}})
 	return h

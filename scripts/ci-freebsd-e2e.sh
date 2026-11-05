@@ -67,6 +67,11 @@ aarch64 | arm64) goarch=arm64 ;;
 *) echo "unsupported architecture $(uname -p)" >&2; exit 2 ;;
 esac
 release=$(freebsd-version -u | sed 's/-p[0-9]*$//')
+# the end-to-end flow can build its image from another release than the host's (an older userland on a newer kernel is
+# supported): JAILOPS_E2E_IMAGE_RELEASE=15.1-RELEASE tests the packages of 15.1 on a 15.2 host
+host_release=$release # the hints of the server name the host's release, whatever image the flow builds
+host_img=freebsd-$(echo "$release" | sed -E 's/^([0-9]+)\.([0-9]+)-.*/\1-\2/')
+release=${JAILOPS_E2E_IMAGE_RELEASE:-$release}
 img=freebsd-$(echo "$release" | sed -E 's/^([0-9]+)\.([0-9]+)-.*/\1-\2/') # the image of the host's release
 J=/usr/local/bin/jailops
 
@@ -511,7 +516,7 @@ check "project grant" $J project set demo --network lan --storage default
 # before any image exists the CLI names the two commands that make the base image, and a create with an image that does not
 # exist names the one it was asked for (the catalog is configured later, so this does not go through an app install)
 out=$($J image list 2>&1) || true
-printf '%s\n' "$out" | grep -F -q "jailops image create $img --release $release, then jailops image build $img" ||
+printf '%s\n' "$out" | grep -F -q "jailops image create $host_img --release $host_release, then jailops image build $host_img" ||
 	{ echo "$out" >&2; fail "the empty image list names the commands that make the base image"; }
 if out=$($J create hintcheck --project demo --image nosuch --network lan --storage default 2>&1); then
 	echo "$out" >&2; fail "a jail create with an image that does not exist (it answered)"
@@ -520,6 +525,10 @@ printf '%s\n' "$out" | grep -E -q "jailops image create nosuch --release [0-9]+\
 	{ echo "$out" >&2; fail "a create with a missing image names the commands that make it"; }
 check "image create" $J image create "$img" --release "$release" --arch "$jarch"
 check "image build" $J image build "$img"
+# a generation records the FreeBSD version of its packages (FreeBSD-runtime): a release with its patch level, or the
+# package version of a branch's snapshot as it is
+expect "the generation shows its FreeBSD version" '^ +g1 +([0-9]+\.[0-9]+-RELEASE(-p[0-9]+)?|[0-9]+\.snap[0-9]+) +[0-9]+ ' $J image show "$img"
+expect "and so does the list of generations" "^$img#g1 +1 +- +([0-9]+\\.[0-9]+-RELEASE(-p[0-9]+)?|[0-9]+\\.snap[0-9]+) " $J image generations "$img"
 if [ "$part" = pf ]; then # its own VM in CI: the packet filter test builds its jails from the image above
 	run_pf
 	echo "OK: the packet filter test passed"
@@ -530,8 +539,16 @@ step "a jail"
 check "create" $J create web --project demo --image "$img" --network lan --storage default
 check "start" $J start web --project demo
 sleep 2
+expect "the package cache has a dataset of its own" "^$mount/cache\$" zfs get -H -o value mountpoint "$pool/jailops/cache"
+expect "the image build downloaded into the shared cache" '\.pkg' ls "$mount/cache/pkg"
+expect "the logs of the jails have a dataset of their own" '^/var/log/jailops$' zfs get -H -o value mountpoint "$pool/jailops/logs"
+expect "the start of the jail wrote its console log there" 'jail_.*_console\.log' ls /var/log/jailops
 expect "the jail runs FreeBSD" 'FreeBSD' $J exec --project demo web -- uname -s
-expect "the jail's userland is the host's release" "^$(uname -U)\$" $J exec --project demo web -- uname -U
+if [ -n "${JAILOPS_E2E_IMAGE_RELEASE:-}" ]; then
+  expect "the jail's userland is the image's release" "^$(echo "$JAILOPS_E2E_IMAGE_RELEASE" | sed 's/^\([0-9]*\)\.\([0-9]*\).*/\1/')[0-9]{5}\$" $J exec --project demo web -- uname -U
+else
+  expect "the jail's userland is the host's release" "^$(uname -U)\$" $J exec --project demo web -- uname -U
+fi
 expect "the jail has its address" '10\.77\.0\.' $J exec --project demo web -- ifconfig -a
 expect "the jail reaches the host" '1 packets received' $J exec --project demo web -- ping -c1 -t3 10.77.0.1
 check "a file in the jail" $J exec --project demo web -- sh -c 'echo ci-marker > /root/marker'
@@ -550,9 +567,35 @@ echo "OK: 40 short commands run with a terminal printed all of their output"
 expect "without --, a flag after the jail name is refused" 'would be the command' sh -c "JAILOPS_PROJECT=demo $J exec web --project demo uname 2>&1; true"
 expect "labels" 'backup=yes' $J label --project demo web backup=yes
 
+# Each of these was accepted and failed later: at the first jail start, inside an operation, or never visibly.
+step "refused when given (sizes as bytes, the attachment MTU, the host's subnets, the uplink, names), and the forwarding warning"
+hostsub=$(ifconfig "$uplink" inet | awk '/inet / {split($2, a, "."); print a[1] "." a[2] "." a[3] ".1/24"; exit}')
+[ -n "$hostsub" ] || fail "the uplink $uplink has no IPv4 address"
+expect "a subnet of the uplink's own LAN is refused, naming the interface" "overlaps .* on the host interface $uplink" sh -c "$J network create hostlan --ipv4 $hostsub 2>&1; true"
+out=$(expect "an uplink that does not exist is refused" 'uplink em9 cannot be used: em9 does not exist' sh -c "$J network create typo --ipv4 10.78.0.1/24 --uplink em9 --nat 2>&1; true")
+printf '%s\n' "$out" | grep -q "candidates on this host: .*$uplink" || { echo "$out" >&2; fail "the refusal of a missing uplink names the candidates"; }
+expect "the loopback is no uplink" 'lo0 is a lo interface' sh -c "$J network create typo --ipv4 10.78.0.1/24 --uplink lo0 --nat 2>&1; true"
+expect "an attachment MTU other than the network's is refused" 'MTU 9000 of network device eth0 differs from the MTU 1500 of network lan' sh -c "$J config set web --project demo nic.eth0.mtu=9000 2>&1; true"
+expect "a snapshot name of 70 characters is refused" 'at most 64' sh -c "$J jail snapshot create web $(printf '%070d' 0 | tr 0 s) --project demo 2>&1; true"
+expect "a project name of 14 characters is refused" 'at most 13' sh -c "$J project create abcdefghijklmn 2>&1; true"
+check "a project quota given as 4GiB" $J project set demo --storage default=4GiB
+expect "ZFS has the quota in bytes" '^4294967296$' zfs get -Hp -o value quota "$pool/jailops/projects/demo"
+check "a jail with --disk 4GiB is created" $J create sizes --project demo --image "$img" --network lan --storage default --disk 4GiB --volume data:/data:2GiB
+expect "its root has the quota in bytes" '^4294967296$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/sizes/root"
+expect "its volume too" '^2147483648$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/sizes/data/data"
+check "the jail with sizes starts" $J start sizes --project demo
+check "stop it" $J stop sizes --project demo
+check "delete it" $J delete --confirm-data-loss sizes --project demo
+check "the project quota is taken away again" $J project set demo --storage default
+expect "ZFS has no quota" '^(0|none|-)$' zfs get -Hp -o value quota "$pool/jailops/projects/demo"
+sysctl net.inet.ip.forwarding=0 >/dev/null
+expect "network create warns when forwarding is off" 'sysctl net.inet.ip.forwarding=1' sh -c "$J network create fwd --ipv4 10.79.0.1/24 --uplink $uplink --nat 2>&1"
+sysctl net.inet.ip.forwarding=1 >/dev/null
+check "delete that network" $J network delete fwd -y
+
 step "the jail's shell and prompt (docs/shell.md): bash and the default prompt, an override, non-interactive commands"
 webroot=$mount/projects/demo/jails/web/root
-ps1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\]'
+ps1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\] ' # DefaultPS1, with the space after it
 expect "a new jail's shell is bash" '^/usr/local/bin/bash$' $J config get --project demo web shell
 expect "a new jail's prompt is the default" '^default$' $J config get --project demo web prompt
 check "bash was installed into the jail's /usr/local at its first start" test -x "$webroot/usr/local/bin/bash"
@@ -605,6 +648,131 @@ expect "the gateway end says what it is" 'description: jailops net=lan gateway \
 expect "the host end of the jail's epair" 'description: jailops jail=demo/web net=lan \(host side\)' ifconfig -a
 expect "the jail end, inside the jail" 'description: jailops jail=demo/web net=lan \(jail side\)' $J exec --project demo web -- ifconfig -a
 expect "doctor finds every description" 'net.descriptions +PASS' $J doctor
+
+step "a bridge of any free name, and the helper's ownership of interfaces (docs/security-model.md, Interfaces)"
+# the network's name is its bridge's; the bridge carries JailOps's description from its creation
+out=$($J network create palminn --ipv4 172.17.32.1/24 --uplink "$uplink" --nat 2>&1) || { echo "$out" >&2; fail "network create palminn"; }
+printf '%s\n' "$out" | grep -q warning && { echo "$out" >&2; fail "network palminn gets its own name as its bridge, without a note"; }
+expect "the bridge is named like the network" '^palminn +palminn +172\.17\.32\.0/24' $J network list
+check "project pal" $J project create pal
+check "grant palminn to pal" $J project set pal --network palminn --storage default
+check "a jail on palminn" $J create palweb --project pal --image "$img" --network palminn --storage default
+check "it starts" $J start palweb --project pal
+sleep 2
+expect "ifconfig palminn shows JailOps's description" 'description: jailops net=palminn bridge' ifconfig palminn
+expect "the gateway end of palminn says what it is" 'description: jailops net=palminn gateway \(host side\)' ifconfig palminngb
+expect "the jail has its address on palminn" '172\.17\.32\.' $J exec --project pal palweb -- ifconfig -a
+expect "the jail reaches its gateway" '1 packets received' $J exec --project pal palweb -- ping -c1 -t3 172.17.32.1
+gw4=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
+expect "the jail reaches the host's default gateway through the NAT of the uplink" '1 packets received' $J exec --project pal palweb -- ping -c1 -t5 "$gw4"
+# a bridge made by hand is someone else's: a network cannot have it, at create, and a network named like it gets jo<N>
+b=$(ifconfig bridge create) && ifconfig "$b" name mybr >/dev/null || fail "a bridge made by hand"
+expect "--bridge naming a bridge made by hand is refused at create" "the interface mybr already exists on this host without a JailOps description" \
+	sh -c "$J network create taken --bridge mybr --ipv4 172.17.33.1/24 2>&1; true"
+expect "--bridge naming a driver's interface is refused at create" 'form of the interfaces of the driver "vmx"' \
+	sh -c "$J network create drv --bridge vmx0 --ipv4 172.17.33.1/24 2>&1; true"
+expect "--bridge naming the uplink is refused at create" "form of the interfaces of the driver|already exists on this host" \
+	sh -c "$J network create upl --bridge $uplink --ipv4 172.17.33.1/24 2>&1; true"
+expect "a network named like the hand-made bridge gets jo<N>, and create says why" 'warning: bridge jo[0-9]+ \(the interface mybr already exists on this host' \
+	sh -c "$J network create mybr --ipv4 172.17.33.1/24 2>&1"
+check "delete network mybr" $J network delete mybr -y
+# an interface of an earlier release: a legacy name, no description
+b=$(ifconfig bridge create) && ifconfig "$b" name jo79 >/dev/null || fail "a legacy bridge made by hand"
+# the helper itself, over its socket: every request a compromised daemon could make on the uplink, lo0 and mybr is
+# refused; jo79 is accepted once and marked; an epair keeps the marker in a jail's vnet
+if [ -n "${IFPROBE_BIN:-}" ]; then
+	check "the helper's ownership probe" "$IFPROBE_BIN" -uplink "$uplink" -foreign mybr -legacy jo79 -owned palminn -jail pal_palweb
+	cat "$work/check.out"
+else
+	echo "IFPROBE_BIN is not set: the helper's ownership probe is skipped"
+	ifconfig jo79 destroy
+fi
+expect "mybr is untouched" 'groups: bridge' ifconfig mybr
+if ifconfig mybr | grep -q description; then fail "mybr was given a description"; fi
+check "remove the bridge made by hand" ifconfig mybr destroy
+# a stale epair of JailOps (an epair with a jail's name and JailOps's description, of no jail) is found and removed
+ep=$(ifconfig epair create) && ifconfig "${ep%a}b" name jo0123456789zzb >/dev/null && ifconfig "$ep" name jo0123456789zza >/dev/null || fail "a stale epair"
+ifconfig jo0123456789zza description 'jailops jail=gone/old net=palminn (host side)'
+ifconfig jo0123456789zzb description 'jailops jail=gone/old net=palminn (jail side)'
+expect "doctor lists the stale epair" 'network.epairs +WARN.*jo0123456789zza' $J doctor
+n=0 # the reconcile loop removes it on one of its next passes
+while ifconfig jo0123456789zza >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 60 ] && fail "the stale epair is still there after 120 s"; sleep 2; done
+expect "doctor: no stale epairs" 'network.epairs +PASS' $J doctor
+expect "doctor: the bridges of every network are JailOps's" 'network.bridges +PASS' $J doctor
+expect "doctor: every description" 'net.descriptions +PASS' $J doctor
+# network delete removes the bridge it made
+check "delete the jail" $J delete --force --confirm-data-loss palweb --project pal
+check "delete project pal" $J project delete pal -y
+check "delete network palminn" $J network delete palminn -y
+expect_retry "the bridge palminn is gone" 'gone' sh -c "ifconfig palminn >/dev/null 2>&1 && echo there || echo gone"
+expect "its gateway pair is gone" 'gone' sh -c "ifconfig palminngb >/dev/null 2>&1 && echo there || echo gone"
+
+step "name resolution of jails (docs/networking-ipv6.md): the host's nameservers, a live change, a resolver on the gateway"
+# the network lan was made without dns: its jails get the host's own nameservers
+hostns=$(awk '$1 == "nameserver" && $2 !~ /^(127\.|::1$)/ && $2 !~ /%/ {print $2; exit}' /etc/resolv.conf)
+[ -n "$hostns" ] || fail "the step needs a nameserver in the host's /etc/resolv.conf that is not loopback"
+expect "a network without dns hands the jail the host's nameserver" "^nameserver $hostns\$" cat "$webroot/etc/resolv.conf"
+expect "network show says where they come from" "DNS: +$hostns .*the host's nameservers" $J network show lan
+expect_retry "the jail resolves a name" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' $J exec --project demo web -- drill -Q pkg.freebsd.org
+# a change of the network's dns reaches the running jail at once, without a restart
+jid=$(jls -j demo_web jid)
+$J network show lan -o yaml >"$work/lan.yaml"
+sed "/^spec:/a\\
+\ \ dns: [\"$hostns\", \"192.0.2.53\"]
+" "$work/lan.yaml" >"$work/lan-dns.yaml"
+expect "network edit names the running jails it rewrote" 'resolv.conf rewritten in the running jails demo/web' $J network edit lan -f "$work/lan-dns.yaml"
+expect "the running jail has the new resolv.conf" '^nameserver 192\.0\.2\.53$' cat "$webroot/etc/resolv.conf"
+[ "$(jls -j demo_web jid)" = "$jid" ] || fail "the jail was restarted for a change of its nameservers"
+# a jail that keeps a resolv.conf of its own (# jailops:keep) is left alone, at a change and at a start
+cp "$webroot/etc/resolv.conf" "$work/resolv.jail"
+printf '# jailops:keep\nnameserver 127.0.0.1\n' >"$webroot/etc/resolv.conf"
+expect "a jail's own resolv.conf is not rewritten" 'not rewritten in demo/web: it keeps its own resolv.conf' $J network edit lan -f "$work/lan.yaml"
+check "restart" $J restart web --project demo
+expect "nor at a start" '^nameserver 127\.0\.0\.1$' cat "$webroot/etc/resolv.conf"
+check "the jail gives its resolv.conf back" rm "$webroot/etc/resolv.conf"
+# a host that resolves only through a local resolver: the jails ask the gateway, which answers once a resolver listens there
+cp -p /etc/resolv.conf "$work/resolv.host"
+dns_cleanup() {
+	cp -p "$work/resolv.host" /etc/resolv.conf
+	[ -f "$work/unbound.pid" ] && kill "$(cat "$work/unbound.pid")" 2>/dev/null
+	rm -f "$work/unbound.pid"
+}
+printf 'nameserver 127.0.0.1\n' >/etc/resolv.conf
+expect "the jails of a host behind a local resolver ask the gateway" 'DNS: +10\.77\.0\.1 \(the gateway' $J network show lan
+expect "and network show says what the administrator does" 'access-control: 10\.77\.0\.0/24 allow' $J network show lan
+check "restart" $J restart web --project demo
+expect "the jail's resolv.conf names the gateway" '^nameserver 10\.77\.0\.1$' cat "$webroot/etc/resolv.conf"
+expect "doctor: nothing answers on the gateway yet" 'network\.dns +WARN .*the jails ask the gateway 10\.77\.0\.1' $J doctor
+cat >"$work/unbound.conf" <<UNBOUND
+server:
+	username: ""
+	chroot: ""
+	directory: "$work"
+	pidfile: "$work/unbound.pid"
+	interface: 10.77.0.1
+	access-control: 10.77.0.0/24 allow
+	module-config: "iterator"
+forward-zone:
+	name: "."
+	forward-addr: $hostns
+UNBOUND
+check "a resolver on the gateway (the administrator's part)" local-unbound -c "$work/unbound.conf"
+expect_retry "doctor: the gateway answers" 'network\.dns +PASS +lan: the gateway 10\.77\.0\.1 answers DNS' $J doctor
+expect_retry "the jail resolves through the gateway" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' $J exec --project demo web -- drill -Q pkg.freebsd.org
+dns_cleanup
+check "restart" $J restart web --project demo
+expect "the host's nameserver again" "^nameserver $hostns\$" cat "$webroot/etc/resolv.conf"
+# pf.state-policy: a ruleset that blocks by default (a block ... all without quick; on an interface that does not exist,
+# so it stops nothing here) and NATs jails needs `set state-policy if-bound` in the pf.conf the system loads
+cp -p /etc/pf.conf "$work/pf.host"
+printf 'block drop in log on lo9 all\n' >>/etc/pf.conf
+check "a default block" sh -c 'pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf'
+expect "doctor: the state policy is missing" 'pf\.state-policy +WARN .*set state-policy if-bound' $J doctor
+{ echo 'set state-policy if-bound'; cat "$work/pf.host"; echo 'block drop in log on lo9 all'; } >/etc/pf.conf
+check "the state policy" sh -c 'pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf'
+expect "doctor: the state policy is there" 'pf\.state-policy +PASS' $J doctor
+cp -p "$work/pf.host" /etc/pf.conf
+check "the host's pf.conf again" pfctl -f /etc/pf.conf
 
 step "logs of all jails, and forwarding them to a syslog listener (tcp on the host)"
 marker="ci-forward-$$"
@@ -744,6 +912,14 @@ enabled | active)
 	check "lock again" $J jail lock vault --project demo
 	expect_refused "the old passphrase opens it no more" $J jail unlock vault --project demo --passphrase-file "$work/vault.pass"
 	check "the new one does" $J jail unlock vault --project demo --passphrase-file "$work/new.pass"
+	# a rename moves the volume with the jail: its key stays loaded and its file stays readable
+	check "rename the stopped jail with the encrypted volume" $J rename vault vault2 --project demo -y
+	expect "the volume moved with it, its key loaded" '^available$' zfs get -H -o value keystatus "$pool/jailops/projects/demo/jails/vault2/data/secrets"
+	check "start it under the new name" $J start vault2 --project demo
+	expect "the file on the encrypted volume is read back" '^ci-secret$' $J exec --project demo vault2 -- cat /var/db/secrets/s
+	check "stop it" $J stop vault2 --project demo
+	check "and rename it back" $J rename vault2 vault --project demo -y
+	expect "the key is still loaded" '^available$' keystatus
 	expect "doctor checks the pool feature" 'volumes.encryption +PASS' $J doctor
 	if grep -rq 'ci-passphrase-0123\|ci-new-passphrase-4567' /var/log/messages /var/db/jailops 2>/dev/null; then fail "a passphrase reached a log or the daemon's files"; fi
 	expect "a delete shows the sizes and the snapshots read from ZFS" 'vault \([a-z]+\): root [0-9.]+ [KMGT]?i?B, data [0-9.]+ [KMGT]?i?B \(volumes secrets\), [0-9]+ snapshots?' $J --dry-run delete vault --project demo
@@ -1002,6 +1178,57 @@ check "start the restored jail" $J start web-restored --project demo
 sleep 2
 expect "the file came back" 'ci-marker' $J exec --project demo web-restored -- cat /root/marker
 expect "its own address" '10\.77\.0\.' $J exec --project demo web-restored -- ifconfig -a
+
+step "renames: a network with a running jail, a stopped jail, an image, a project (each renamed back)"
+# a network: the running jail keeps its interfaces and its traffic; only names and descriptions change
+expect "the plan lists the running jail's interfaces" 'interface .*jail=demo/web-restored net=palminn' $J network rename lan palminn --dry-run
+check "rename the network while a jail on it runs" $J network rename lan palminn -y
+expect "the bridge keeps its name and carries the new one" 'description: jailops net=palminn bridge' ifconfig jo7
+expect "the gateway end too" 'description: jailops net=palminn gateway \(host side\)' ifconfig jo7gb
+expect "the running jail's end, inside it" 'description: jailops jail=demo/web-restored net=palminn \(jail side\)' $J exec --project demo web-restored -- ifconfig -a
+expect "the anchor of the network is loaded under the new name" 'nat on .* from 10\.77\.0\.0/24' pfctl -a jailops/net.palminn -sn
+expect_refused "the anchor of the old name is empty" sh -c "pfctl -a jailops/net.lan -sn 2>/dev/null | grep -q nat"
+expect "the project's grant follows" 'palminn' $J project show demo
+expect "the running jail still reaches the host" '1 packets received' $J exec --project demo web-restored -- ping -c1 -t3 10.77.0.1
+gw=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
+if [ -n "$gw" ]; then
+	expect "and the host's gateway, through the NAT of the renamed network" '1 packets received' $J exec --project demo web-restored -- ping -c1 -t3 "$gw"
+fi
+# (doctor's exit status says more than descriptions: a failing check of the machine is not this block's business)
+expect "doctor finds every description" 'net.descriptions +PASS' sh -c "$J doctor 2>&1; true"
+check "rename it back" $J network rename palminn lan -y
+expect "the old name is back" 'description: jailops net=lan bridge' ifconfig jo7
+# a jail: refused while it runs, renamed when it is stopped, its datasets, mountpoints and kernel name follow
+expect_refused "a running jail is not renamed" $J rename web-restored web-renamed --project demo -y
+check "rename the stopped jail" $J rename web web-renamed --project demo -y
+expect_refused "its old datasets are gone" zfs list "$pool/jailops/projects/demo/jails/web"
+expect "its mountpoints moved" "^$mount/projects/demo/jails/web-renamed/root\$" zfs get -H -o value mountpoint "$pool/jailops/projects/demo/jails/web-renamed/root"
+check "start it under the new name" $J start web-renamed --project demo
+expect "the kernel knows it by the new name" '^demo_web-renamed$' jls -j demo_web-renamed name
+expect "its file is there" 'ci-marker' $J exec --project demo web-renamed -- cat /root/marker
+expect "its anchor" 'jailops/demo/web-renamed' pfctl -sA
+check "stop it" $J stop web-renamed --project demo
+check "and rename it back" $J rename web-renamed web --project demo -y
+# an image: the generations move, the clones of running jails follow, the nightly runs move with it
+check "rename the image while a jail on it runs" $J image rename "$img" e2e-img -y
+expect "the jails follow" 'web-restored +running +e2e-img' $J jail list --project demo
+expect "a thin root is a clone of the renamed generation" "^$pool/jailops/images/e2e-img/g[0-9]+@ro\$" zfs get -H -o value origin "$pool/jailops/projects/demo/jails/web-restored/root"
+expect "the generations are mounted under the new name" "^$mount/images/e2e-img/g1\$" zfs get -H -o value mountpoint "$pool/jailops/images/e2e-img/g1"
+expect "the nightly runs moved with it" 'Automatic upgrades' $J image show e2e-img
+expect "the jail still runs" 'FreeBSD' $J exec --project demo web-restored -- uname -s
+check "rename the image back" $J image rename e2e-img "$img" -y
+# a project: every jail stopped, then the datasets, anchors and objects move
+for j in $($J jail list --project demo -o name); do $J stop "$j" --project demo >/dev/null 2>&1 || true; done
+check "rename the project" $J project rename demo e2e-proj -y
+expect_refused "nothing is left under the old name" zfs list "$pool/jailops/projects/demo"
+expect "the mountpoints moved" "^$mount/projects/e2e-proj/jails/web/root\$" zfs get -H -o value mountpoint "$pool/jailops/projects/e2e-proj/jails/web/root"
+check "a jail starts in the renamed project" $J start web --project e2e-proj
+expect "under its new kernel name" '^e2e-proj_web$' jls -j e2e-proj_web name
+expect "with its anchor" 'jailops/e2e-proj/web' pfctl -sA
+expect "and its file" 'ci-marker' $J exec --project e2e-proj web -- cat /root/marker
+check "stop it" $J stop web --project e2e-proj
+check "rename the project back" $J project rename e2e-proj demo -y
+check "start the restored jail again" $J start web-restored --project demo
 
 [ "$part" = e2e ] || run_pf
 

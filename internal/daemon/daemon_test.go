@@ -21,7 +21,7 @@ func TestConfigStrictAndDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Dataset != "tank/jailops" || cfg.MountBase != "/jailops" || cfg.StateDir != "/var/db/jailops/state" || cfg.Listen.Unix.Mode != 0o660 ||
+	if cfg.Dataset != "tank/jailops" || cfg.MountBase != "/usr/local/jailops" || cfg.StateDir != "/var/db/jailops/state" || cfg.Listen.Unix.Mode != 0o660 ||
 		cfg.Reconcile.Interval.Std() != 30*time.Second || cfg.Log.Format != "text" || cfg.Role != "host" {
 		t.Fatalf("%+v", cfg)
 	}

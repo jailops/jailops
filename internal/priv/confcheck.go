@@ -176,7 +176,7 @@ func (c Config) checkJailParam(ctx context.Context, name, key, val string, hasVa
 			return err
 		}
 		if !filepath.IsAbs(s) || filepath.Clean(s) != s || c.isMountRoot(s) || !c.inMounts(s) {
-			return forbidden("path %q is not below %s", s, c.mountBaseDesc())
+			return c.notBelowMount(s)
 		}
 		return nil
 	case "host.hostname":
@@ -199,7 +199,7 @@ func (c Config) checkJailParam(ctx context.Context, name, key, val string, hasVa
 			if !ok {
 				return invalid("vnet.interface: bad value")
 			}
-			if err := c.ifOwned(s); err != nil {
+			if err := c.epairEndName(s); err != nil {
 				return err
 			}
 		}

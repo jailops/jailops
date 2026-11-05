@@ -44,11 +44,12 @@ export function suggestV4(subnet: string): { gateway: string; range: string } | 
 
 export const isV6Cidr = (s: string) => /^[0-9a-fA-F:]+\/\d{1,3}$/.test(s.trim()) && s.includes(':') && Number(s.split('/')[1]) <= 128
 
-/** Field -> message for what is plainly wrong; empty when the form may be sent. */
-export function checkNet(f: NetForm): Record<string, string> {
+/** Field -> message for what is plainly wrong; empty when the form may be sent. An existing network (editing)
+ *  keeps its name, which may be longer than a new one may be. */
+export function checkNet(f: NetForm, existing = false): Record<string, string> {
   const e: Record<string, string> = {}
   // the name rule of the server (shared lib/names.ts); an empty name is the form's "Required."
-  if (f.name && nameError(f.name)) e.name = nameError(f.name)
+  if (!existing && f.name && nameError(f.name, 'network')) e.name = nameError(f.name, 'network')
   if (f.v4) {
     const c = parseV4Cidr(f.v4subnet)
     if (f.v4subnet && !c) e.v4subnet = 'Write the subnet as a.b.c.d/len, for example 10.20.0.0/24.'

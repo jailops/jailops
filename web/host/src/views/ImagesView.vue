@@ -16,9 +16,14 @@ import ImageCreateDialog from '@/components/ImageCreateDialog.vue'
 import ImageAutoUpgrade from '@/components/ImageAutoUpgrade.vue'
 import NewReleaseNotice from '@/components/NewReleaseNotice.vue'
 import { isGlobalAdmin } from '@/composables/project'
+import RenameDialog from '@/components/RenameDialog.vue'
+import { canRename } from '@/composables/rename'
+import { ifMatch } from '@/lib/rename'
 import type { Image } from '@jailops/shared/api/types'
 
 const l = useLoad(() => api.images.list())
+// Rename (extension rename, global admin): the jails and projects that name the image follow
+const renaming = ref<Image | null>(null)
 
 // Create image: the page head's button, the empty page's first action, and /images?create=1 (the wizard and the
 // install dialog link here).
@@ -87,6 +92,7 @@ const removeAlias = () => runOp(s.images.deleteAliasTitle(removingAlias.value!.a
             <div class="row-actions">
               <button v-if="can('generations')" class="btn btn-sm" type="button" :data-test="`build-${img.metadata.name}`" @click="build(img)"><Icon name="plus" />{{ s.images.build }}</button>
               <button v-if="can('image_upgrade')" class="btn btn-sm" type="button" :title="s.images.upgradeHint" :data-test="`upgrade-${img.metadata.name}`" @click="upgrade(img)"><Icon name="play" />{{ s.images.upgrade }}</button>
+              <button v-if="canRename('image')" class="btn btn-sm" type="button" :data-test="`rename-image-${img.metadata.name}`" @click="renaming = img">{{ s.rename.open(s.rename.kinds.image) }}</button>
             </div>
           </header>
           <div class="body muted">
@@ -96,11 +102,12 @@ const removeAlias = () => runOp(s.images.deleteAliasTitle(removingAlias.value!.a
           <p v-if="!img.status.generations?.length" class="body faint" data-test="image-no-generation">{{ s.images.noBuild }}</p>
           <div v-else class="table-wrap">
             <table class="rtable">
-              <thead><tr><th>{{ s.images.generations }}</th><th>{{ s.images.created }}</th><th class="hide-sm">{{ s.images.manifest }}</th><th class="num">{{ s.images.packagesCol }}</th><th>{{ s.images.usedBy }}</th></tr></thead>
+              <thead><tr><th>{{ s.images.generations }}</th><th>{{ s.images.created }}</th><th>{{ s.images.freebsd }}</th><th class="hide-sm">{{ s.images.manifest }}</th><th class="num">{{ s.images.packagesCol }}</th><th>{{ s.images.usedBy }}</th></tr></thead>
               <tbody>
                 <tr v-for="g in [...(img.status.generations ?? [])].sort((a, b) => b.number - a.number)" :key="g.number">
                   <td class="nowrap" :data-label="s.images.generations"><span class="mono">g{{ g.number }}</span> <span v-if="g.parent" class="faint">{{ s.images.parent(g.parent) }}</span><span v-for="a in aliasesOf(img, g.number)" :key="a" class="pill info" style="margin-left: 6px">{{ a }}</span></td>
                   <td class="faint" :data-label="s.images.created"><TimeStamp :ts="g.created_at" /></td>
+                  <td class="mono" :data-label="s.images.freebsd" :title="s.images.freebsdHint" data-test="generation-freebsd">{{ g.freebsd_version || '-' }}</td>
                   <td class="mono faint hide-sm" :data-label="s.images.manifest" :title="g.manifest">{{ g.manifest.slice(0, 12) }}</td>
                   <td class="num" :data-label="s.images.packagesCol">{{ g.packages ?? '-' }}</td>
                   <td :data-label="s.images.usedBy">
@@ -115,6 +122,7 @@ const removeAlias = () => runOp(s.images.deleteAliasTitle(removingAlias.value!.a
         </section>
       </div>
     </LoadState>
+    <RenameDialog :open="!!renaming" kind="image" :name="renaming?.metadata.name ?? ''" :etag="ifMatch(renaming?.metadata.generation)" @close="renaming = null" @done="l.reload" />
     <ImageCreateDialog :open="creating" @close="creating = false" @done="l.reload" />
     <ConfirmDialog :open="!!removingAlias" :title="s.images.deleteAliasTitle(removingAlias?.alias ?? '')" :confirm-label="s.images.deleteAlias" danger :run="removeAlias" @close="removingAlias = null" @done="l.reload"><Callout tone="warn">{{ s.images.deleteAliasText }}</Callout></ConfirmDialog>
   </div>

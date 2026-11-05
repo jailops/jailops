@@ -402,7 +402,7 @@ func TestIPAMAndNetworks(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
 	net, err := e.Admin.Networks().Get(c, "lan")
-	if err != nil || net.Spec.Bridge != "jo0" || net.Metadata.Scope != api.ScopeFleet {
+	if err != nil || net.Spec.Bridge != "lan" || net.Metadata.Scope != api.ScopeFleet {
 		t.Fatalf("%v %+v", err, net)
 	}
 	a := mustJail(t, e, "a")
@@ -440,7 +440,7 @@ func TestIPAMAndNetworks(t *testing.T) {
 	// Exhaust the range.
 	small, _ := e.Admin.Networks().Create(c, api.Network{Metadata: api.ObjectMeta{Name: "tiny"}, Spec: api.NetworkSpec{
 		IPv4: &api.IPv4Net{Subnet: "10.30.0.0/24", Gateway: "10.30.0.1", Range: "10.30.0.5-10.30.0.5"}}})
-	if small.Spec.Bridge != "jo1" {
+	if small.Spec.Bridge != "tiny" {
 		t.Fatalf("%+v", small.Spec)
 	}
 	pr, _ := e.Admin.Projects().Get(c, dtest.SeedProject)
@@ -466,7 +466,7 @@ func TestIPAMAndNetworks(t *testing.T) {
 	n2.Spec.Bridge = "jo9"
 	_, err = e.Admin.Networks().Update(c, "lan", n2, "")
 	wantCode(t, err, api.CodeInvalid)
-	n2.Spec.Bridge = "jo0"
+	n2.Spec.Bridge = "lan"
 	n2.Spec.IPv4.Subnet = "10.77.0.0/24"
 	n2.Spec.IPv4.Gateway = "10.77.0.1"
 	n2.Spec.IPv4.Range = "10.77.0.5-10.77.0.9"

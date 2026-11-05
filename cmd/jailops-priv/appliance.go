@@ -152,7 +152,7 @@ func (a applianceInit) do(stdout io.Writer) error {
 		}
 		pool = p
 	}
-	o := &initOptions{pool: pool, mount: "/jailops", user: "jailops", group: "jailops", etc: "/usr/local/etc/jailops",
+	o := &initOptions{pool: pool, mount: "/usr/local/jailops", user: "jailops", group: "jailops", etc: "/usr/local/etc/jailops",
 		dbDir: "/var/db/jailops", dryRun: a.dryRun, run: logged, chown: os.Chown, appliance: true}
 	if a.prepare != nil {
 		a.prepare(o)

@@ -3,6 +3,9 @@ import { computed, ref } from 'vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import NetworkForm from '@/components/NetworkForm.vue'
 import NetTabs from '@/components/NetTabs.vue'
+import RenameDialog from '@/components/RenameDialog.vue'
+import { canRename } from '@/composables/rename'
+import { ifMatch } from '@/lib/rename'
 import { isGlobalAdmin } from '@/composables/project'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
@@ -45,6 +48,8 @@ function remove(n: Network): void {
   })
 }
 const canWrite = computed(() => isGlobalAdmin())
+// Rename (extension rename): the generation of the list goes with it as If-Match
+const renaming = ref<Network | null>(null)
 const open = ref<Record<string, boolean>>({})
 
 /** The project a network is granted to: a network belongs to at most one. */
@@ -76,6 +81,7 @@ function used(n: Network): number {
             </div>
             <div v-if="canWrite" class="row-actions">
               <button class="btn btn-sm" type="button" :data-test="`edit-net-${n.metadata.name}`" @click="edit(n)">{{ s.networks.edit }}</button>
+              <button v-if="canRename('network')" class="btn btn-sm" type="button" :data-test="`rename-net-${n.metadata.name}`" @click="renaming = n">{{ s.rename.open(s.rename.kinds.network) }}</button>
               <button class="btn btn-sm btn-danger" type="button" :data-test="`delete-net-${n.metadata.name}`" @click="remove(n)">{{ s.networks.delete }}</button>
             </div>
           </header>
@@ -131,6 +137,7 @@ function used(n: Network): number {
       </div>
     </LoadState>
     <NetworkForm :open="creating" @close="creating = false" @done="l.reload" />
+    <RenameDialog :open="!!renaming" kind="network" :name="renaming?.metadata.name ?? ''" :etag="ifMatch(renaming?.metadata.generation)" @close="renaming = null" @done="l.reload" />
     <NetworkForm :open="!!editing" :network="editing?.net" :etag="editing?.etag" @close="editing = null" @done="l.reload" />
   </div>
 </template>

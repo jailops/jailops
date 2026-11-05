@@ -28,7 +28,7 @@ jail/web configuration updated
 
 $ jailops jail shell-setup web
 jail/web: shell /usr/local/bin/bash, prompt default
-  PS1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\]'
+  PS1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\] '
   pkg -r ROOT install -y bash
   wrote /usr/local/etc/profile.d/jailops-prompt.sh
 
@@ -37,7 +37,7 @@ $ jailops jail shell-setup web -o json
   "jail": "web",
   "shell": "/usr/local/bin/bash",
   "prompt": "default",
-  "ps1": "\\[\\e[38;5;39m\\]\\u@\\h:\\w\\$\\[\\e[0m\\]",
+  "ps1": "\\[\\e[38;5;39m\\]\\u@\\h:\\w\\$\\[\\e[0m\\] ",
   "steps": [
     "pkg -r ROOT install -y bash",
     "wrote /usr/local/etc/profile.d/jailops-prompt.sh"

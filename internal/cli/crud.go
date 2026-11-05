@@ -38,6 +38,11 @@ type kindDesc[T any] struct {
 	// create returns a handle when the server answered asynchronously.
 	create func(ctx context.Context, c *sdk.Client, v T) (opHandle, T, error)
 	del    func(ctx context.Context, c *sdk.Client, name string) (opHandle, error)
+	// rename is set for a kind that can be renamed: crudCommands adds "rename" and edit renames when the name
+	// of the document changed.
+	rename renameFn
+	// renameLong is the help of its rename command.
+	renameLong string
 
 	head  []string
 	row   func(now time.Time, x T) []string
@@ -50,6 +55,8 @@ type kindDesc[T any] struct {
 	// warnings are what the server said about a created object (nil for a kind that has none); each is printed
 	// on standard error after the confirmation.
 	warnings func(x T) []string
+	// updated prints, on standard error, what the server said about an updated object (nil for a kind that says nothing).
+	updated func(a *app, x T)
 	// filters registers extra list flags and returns the function that checks
 	// them once they are parsed and gives the predicate.
 	filters func(cmd *cobra.Command) func() (func(x T) bool, error)
@@ -964,12 +971,41 @@ func editObject[T any](a *app, ctx context.Context, d *kindDesc[T], name, file, 
 	if len(docs) != 1 {
 		return fail(usagef("edit takes exactly one document, found %d", len(docs)))
 	}
-	nu, err := d.parse(api.ObjectMeta{}, docs[0], name)
+	// a document that names itself may carry a new name: that is a rename (a bare spec keeps the name)
+	nu, err := d.parse(api.ObjectMeta{}, docs[0], "")
+	if err != nil {
+		nu, err = d.parse(api.ObjectMeta{}, docs[0], name)
+	}
 	if err != nil {
 		return fail(err)
 	}
+	renamed := false
+	if to := d.meta(&nu).Name; to != name {
+		renamed = true
+		if d.rename == nil {
+			return fail(usagef("the name of %s %s cannot change", article(d.noun)+" "+d.noun, name))
+		}
+		// the rename shows what it changes and asks; the rest of the edit goes to the new name
+		if err := a.runRename(ctx, d.noun, name, to, etag, d.rename); err != nil {
+			return fail(err)
+		}
+		if !a.dryRun {
+			if obj, etag, err = d.get(ctx, c, to); err != nil {
+				return fail(err)
+			}
+			name = to
+		}
+		d.meta(&nu).Name = name
+	}
 	next := obj
 	d.setSpec(&next, nu)
+	if renamed && sameDocument(d, obj, next) {
+		cleanup()
+		if !a.dryRun {
+			a.say("%s/%s unchanged apart from its name\n", d.noun, name)
+		}
+		return nil
+	}
 	if ok, err := a.dry("update "+d.noun+" "+name, document(d.kind, *d.meta(&next), d.specOf(&next))); ok || err != nil {
 		cleanup()
 		return err
@@ -983,7 +1019,20 @@ func editObject[T any](a *app, ctx context.Context, d *kindDesc[T], name, file, 
 		return fail(err)
 	}
 	cleanup()
-	return a.finishOp(ctx, nil, d.noun, name, "updated", out)
+	if err := a.finishOp(ctx, nil, d.noun, name, "updated", out); err != nil {
+		return err
+	}
+	if d.updated != nil {
+		d.updated(a, out)
+	}
+	return nil
+}
+
+// sameDocument reports whether two versions of an object have the same specification and labels.
+func sameDocument[T any](d *kindDesc[T], a, b T) bool {
+	x, err1 := toYAML(document(d.kind, *d.meta(&a), d.specOf(&a)))
+	y, err2 := toYAML(document(d.kind, *d.meta(&b), d.specOf(&b)))
+	return err1 == nil && err2 == nil && string(x) == string(y)
 }
 
 // crudCommands adds list, show, create, edit and delete.
@@ -993,4 +1042,7 @@ func crudCommands[T any](a *app, parent *cobra.Command, d *kindDesc[T], createLo
 	addCreate(a, parent, d, createLong, createExample, flagBuild)
 	addEdit(a, parent, d)
 	addDelete(a, parent, d)
+	if d.rename != nil {
+		addRename(a, parent, d, d.renameLong)
+	}
 }

@@ -52,18 +52,18 @@ const freebsd = computed(() => (props.images.find((i) => i.metadata.name === f.i
 
 // Field id -> problem, in the order of the form: the first one is named next to Create and focused on submit.
 const check = useFormCheck(() => ({
-  'jc-name': nameProblem(f.name),
+  'jc-name': nameProblem(f.name, 'jail'),
   'jc-labels': labelField.value.problem ? s.labels.problems[labelField.value.problem] : '',
   'jc-image': f.image ? '' : s.jails.needImageField,
   'jc-sto': f.storage ? '' : s.jails.needStorageField,
-  'jc-vol': !volUsed.value ? '' : !vol.name ? s.jails.volumeNameNeeded : nameProblem(vol.name),
+  'jc-vol': !volUsed.value ? '' : !vol.name ? s.jails.volumeNameNeeded : nameProblem(vol.name, 'volume'),
   'jc-mount': !volUsed.value ? '' : !vol.mount ? s.jails.mountNeeded : /^\/[^\s]*[^/\s]$/.test(vol.mount) ? '' : s.jails.mountInvalid,
   'jc-pass': !vol.encrypted ? '' : !vol.pass ? s.jails.passphraseNeeded : vol.pass.length < 12 ? s.keys.tooShort : '',
   'jc-pass2': !vol.encrypted ? '' : !vol.again ? s.jails.repeatNeeded : vol.pass !== vol.again ? s.keys.mismatch : '',
 }))
 const labels: Record<string, string> = { 'jc-name': s.jails.name, 'jc-labels': s.labels.createField, 'jc-image': s.jails.image, 'jc-sto': s.nav.storage, 'jc-vol': s.jails.volumeName, 'jc-mount': s.jails.volumeMount, 'jc-pass': s.jails.passphrase, 'jc-pass2': s.jails.passphraseRepeat }
 const why = computed(() => (check.firstId.value ? s.form.fixFirst(`${labels[check.firstId.value]}: ${check.reason.value}`) : ''))
-const describe = (id: string, hint?: string) => [check.err(id) ? `${id}-err` : '', hint && check.err(id) !== nameHint() ? hint : ''].filter(Boolean).join(' ') || undefined
+const describe = (id: string, hint?: string) => [check.err(id) ? `${id}-err` : '', hint && check.err(id) !== nameHint(id === 'jc-vol' ? 'volume' : 'jail') ? hint : ''].filter(Boolean).join(' ') || undefined
 
 function clearVolume(): void {
   Object.assign(vol, { name: '', mount: '', encrypted: false, pass: '', again: '' })
@@ -119,7 +119,7 @@ async function save(): Promise<void> {
         <label for="jc-name">{{ s.jails.name }} <span class="req" aria-hidden="true">*</span></label>
         <input id="jc-name" v-model.trim="f.name" class="mono" type="text" required autocomplete="off" spellcheck="false" :aria-invalid="!!check.err('jc-name')" :aria-describedby="describe('jc-name', 'jc-name-hint')" @blur="f.name && check.touch('jc-name')" />
         <span v-if="check.err('jc-name')" id="jc-name-err" class="field-error" role="alert">{{ check.err('jc-name') }}</span>
-        <span v-if="check.err('jc-name') !== nameHint()" id="jc-name-hint" class="hint">{{ nameHint() }}</span>
+        <span v-if="check.err('jc-name') !== nameHint('jail')" id="jc-name-hint" class="hint">{{ nameHint('jail') }}</span>
       </div>
       <div class="field">
         <label for="jc-image">{{ s.jails.image }} <span class="req" aria-hidden="true">*</span></label>
@@ -153,7 +153,7 @@ async function save(): Promise<void> {
           <label for="jc-vol">{{ s.jails.volumeName }}<span v-if="volUsed" class="req" aria-hidden="true"> *</span></label>
           <input id="jc-vol" v-model.trim="vol.name" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!check.err('jc-vol')" :aria-describedby="describe('jc-vol', 'jc-vol-hint')" @blur="vol.name && check.touch('jc-vol')" />
           <span v-if="check.err('jc-vol')" id="jc-vol-err" class="field-error" role="alert" data-test="jc-vol-error">{{ check.err('jc-vol') }}</span>
-          <span v-if="check.err('jc-vol') !== nameHint()" id="jc-vol-hint" class="hint">{{ nameHint() }}</span>
+          <span v-if="check.err('jc-vol') !== nameHint('volume')" id="jc-vol-hint" class="hint">{{ nameHint('volume') }}</span>
         </div>
         <div class="field">
           <label for="jc-mount">{{ s.jails.volumeMount }}<span v-if="volUsed" class="req" aria-hidden="true"> *</span></label>

@@ -22,7 +22,7 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 | `hub` | `false` | keep a registry of remote hosts and forward `?host=` requests to them over pinned mTLS |
 | `pool` | none | the ZFS pool |
 | `dataset` | `<pool>/jailops` | the storage root dataset |
-| `mount_base` | `/jailops` | where the root is mounted |
+| `mount_base` | `/usr/local/jailops` | where the root is mounted |
 | `state_dir` | `<data_dir>/state` | the host's configuration objects. **Outside the storage root**, because the root is root-owned and the daemon cannot write there |
 | `data_dir` | `/var/db/jailops` | SQLite database, seal key, `secrets.key` (the age identity for sealed secrets), TLS material, operation journal |
 | `conf_dir` | `/usr/local/etc/jailops/jails` | rendered `jail.conf` files; must equal `conf-dir` of `priv.conf` |
@@ -72,7 +72,7 @@ This file is the **operator's authority**: everything the root helper will do fo
 | `allow-pool-root` | `false`; a pool's top dataset as a root is refused unless you say so |
 | `conf-dir`, `state-dir`, `work-dir`, `mount-base`, `helper-path` | directories; `state-dir` has no default unless `mount-base` is set |
 | `socket`, `group`, `mode`, `allow-user`, `allow-group` | who may talk to the helper: the unix socket, its group and mode (`0660`), and the users and groups it accepts by peer credentials |
-| `if-prefix` | `jo`; the prefix of the interfaces JailOps creates (`jo7`, `jo7ga`, `jo7gb`, epairs) |
+| `if-prefix` | `jo`; **deprecated**. The helper changes only the bridges and epairs that carry JailOps's description, which it writes when it creates them; their names are free ([security-model.md](security-model.md#interfaces)). A bridge or epair whose name starts with this prefix and that has no description at all (an earlier release, or a creation that was interrupted) counts as JailOps's once and is marked. The prefix of the epairs JailOps names (`jo` and the jail's hash) and of the generated bridge names (`jo<N>`) does not change with it |
 | `wireguard-dir` | `/var/db/jailops-priv/wireguard`; the keys of WireGuard tunnels, one directory per tunnel (root, 0700, created when needed). It must lie outside `state-dir`, `conf-dir`, `work-dir` and `mount-base` ([wireguard.md](wireguard.md)) |
 | `ndp-proxy` | `<uplink>=<prefix>[,<prefix>...]`, one line per uplink, prefixes between /48 and /120. The only thing that lets the IPv6 proxy through. Without it the helper answers `forbidden` with the line to add |
 | `sysctl` | extra sysctls readable through the helper (the built-in list covers `kern.osrelease`, the bridge `pfil_*` switches, forwarding, `hw.ncpu` and a few more) |

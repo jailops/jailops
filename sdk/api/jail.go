@@ -162,7 +162,7 @@ type NetworkAttach struct {
 	// identified by name when profiles are merged.
 	Name    string `json:"name,omitempty"`
 	Network string `json:"network"`
-	// MTU overrides the network's MTU for this interface; zero keeps it.
+	// MTU must be the network's MTU when it is set: a bridge gives every port its own MTU. Zero takes the network's.
 	MTU int `json:"mtu,omitempty"`
 	// Ingress and Egress are rate limits in bits per second ("10M", "1G")
 	// for traffic into and out of the jail. UNVERIFIED: enforcement needs a
@@ -253,6 +253,9 @@ type JailStatus struct {
 	JID int `json:"jid,omitempty"`
 	// Generation is the image generation the root currently uses.
 	Generation string `json:"generation,omitempty"`
+	// FreeBSDVersion is the FreeBSD version of that generation (ImageGeneration.FreeBSDVersion); empty when it was
+	// not recorded.
+	FreeBSDVersion string `json:"freebsd_version,omitempty"`
 	// Addresses are the addresses actually configured.
 	Addresses []string  `json:"addresses,omitempty"`
 	StartedAt time.Time `json:"started_at,omitzero"`

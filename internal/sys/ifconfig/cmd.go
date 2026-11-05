@@ -18,7 +18,10 @@ type Command struct {
 	O Options
 }
 
-var _ Client = (*Command)(nil)
+var (
+	_ Client = (*Command)(nil)
+	_ Reader = (*Command)(nil)
+)
 
 // NewCommand returns a Client with the given options.
 func NewCommand(r run.Runner, o Options) *Command { return &Command{R: r, O: o} }
@@ -58,11 +61,55 @@ func (c *Command) List(ctx context.Context) ([]Iface, error) {
 	return ParseIfconfig(out), nil
 }
 
-// BridgeCreate creates a bridge: `ifconfig bridge create` returns a
-// kernel-chosen name, which is then renamed to name. If the rename fails the
-// new bridge is destroyed again. UNVERIFIED on FreeBSD.
+// Show implements Reader with `ifconfig <name>`.
+func (c *Command) Show(ctx context.Context, name string) (Iface, error) {
+	if err := ValidateIfName(name); err != nil {
+		return Iface{}, err
+	}
+	out, err := c.run(ctx, "ifconfig", name)
+	if err != nil {
+		return Iface{}, err
+	}
+	return one(out, name)
+}
+
+// ShowInJail implements Reader with `ifconfig -j <jail> <name>`.
+func (c *Command) ShowInJail(ctx context.Context, jail, name string) (Iface, error) {
+	if err := ValidateIfName(name); err != nil {
+		return Iface{}, err
+	}
+	if err := ValidateJailRef(jail); err != nil {
+		return Iface{}, err
+	}
+	out, err := c.run(ctx, "ifconfig", "-j", jail, name)
+	if err != nil {
+		return Iface{}, err
+	}
+	return one(out, name)
+}
+
+// own checks, in the kernel, that JailOps owns every name (all names are validated before anything is read).
+func (c *Command) own(ctx context.Context, names ...string) error {
+	for _, n := range names {
+		if err := ValidateIfName(n); err != nil {
+			return err
+		}
+	}
+	for _, n := range names {
+		if err := c.O.owned(ctx, c, n); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// BridgeCreate creates a bridge: `ifconfig bridge create` returns a kernel-chosen name; the new bridge is given the
+// marker and then renamed to name. The rename is the kernel's atomic check that name is free: an interface that
+// exists under it is never touched, and the new bridge is destroyed again (api.CodeAlreadyExists). So no interface
+// ever has the name without the marker, and none is taken over by its name. Verified on FreeBSD 15.2-PRERELEASE amd64:
+// the description survives the rename, and a rename to a name that exists fails with "File exists".
 func (c *Command) BridgeCreate(ctx context.Context, name string) error {
-	if err := c.O.owned(name); err != nil {
+	if err := CheckNewName(name); err != nil {
 		return err
 	}
 	out, err := c.run(ctx, "ifconfig", "bridge", "create")
@@ -70,8 +117,12 @@ func (c *Command) BridgeCreate(ctx context.Context, name string) error {
 		return err
 	}
 	tmp := strings.TrimSpace(out)
-	if ValidateIfName(tmp) != nil {
+	if !strings.HasPrefix(tmp, "bridge") || ValidateIfName(tmp) != nil {
 		return api.Errorf(api.CodeInternal, "ifconfig bridge create returned %q", tmp)
+	}
+	if _, err := c.run(ctx, "ifconfig", tmp, "description", Marker); err != nil {
+		c.run(ctx, "ifconfig", tmp, "destroy") // best effort cleanup
+		return err
 	}
 	if _, err := c.run(ctx, "ifconfig", tmp, "name", name); err != nil {
 		c.run(ctx, "ifconfig", tmp, "destroy") // best effort cleanup
@@ -82,19 +133,17 @@ func (c *Command) BridgeCreate(ctx context.Context, name string) error {
 
 // BridgeDestroy implements Client.
 func (c *Command) BridgeDestroy(ctx context.Context, name string) error {
-	if err := c.O.owned(name); err != nil {
+	if err := c.own(ctx, name); err != nil {
 		return err
 	}
 	_, err := c.run(ctx, "ifconfig", name, "destroy")
 	return err
 }
 
-// BridgeAddMember implements Client: `addm member [private member]`.
+// BridgeAddMember implements Client: `addm member [private member]`. Both must be JailOps's: the uplink or another
+// interface of the host is never made a port of a bridge.
 func (c *Command) BridgeAddMember(ctx context.Context, bridge, member string, private bool) error {
-	if err := c.O.owned(bridge); err != nil {
-		return err
-	}
-	if err := ValidateIfName(member); err != nil {
+	if err := c.own(ctx, bridge, member); err != nil {
 		return err
 	}
 	args := []string{bridge, "addm", member}
@@ -107,7 +156,7 @@ func (c *Command) BridgeAddMember(ctx context.Context, bridge, member string, pr
 
 // BridgeDeleteMember implements Client.
 func (c *Command) BridgeDeleteMember(ctx context.Context, bridge, member string) error {
-	if err := c.O.owned(bridge); err != nil {
+	if err := c.own(ctx, bridge); err != nil {
 		return err
 	}
 	if err := ValidateIfName(member); err != nil {
@@ -117,25 +166,33 @@ func (c *Command) BridgeDeleteMember(ctx context.Context, bridge, member string)
 	return err
 }
 
-// SetDescription implements Client.
+// SetDescription implements Client. The description must be one JailOps writes, so the interface keeps its marker;
+// an empty description writes Marker.
 func (c *Command) SetDescription(ctx context.Context, iface, desc string) error {
-	if err := c.O.owned(iface); err != nil {
+	desc = descOrMarker(desc)
+	if err := ValidateDescription(desc); err != nil {
 		return err
 	}
-	if err := ValidateDescription(desc); err != nil {
+	if !HasMarker(desc) {
+		return api.Errorf(api.CodeInvalid, "description %q would remove the JailOps marker (\"jailops ...\")", desc)
+	}
+	if err := c.own(ctx, iface); err != nil {
 		return err
 	}
 	_, err := c.run(ctx, "ifconfig", iface, "description", desc)
 	return err
 }
 
-// EpairCreate implements Client: `ifconfig epair create` prints "epairNa";
-// both ends are renamed to <name>a and <name>b. On failure the pair is
-// destroyed. UNVERIFIED on FreeBSD (renaming an epair end).
+// EpairCreate implements Client: `ifconfig epair create` prints "epairNa"; both ends are given the marker and then
+// renamed to <name>a and <name>b (the kernel refuses a name that exists, see BridgeCreate). On failure the pair is
+// destroyed. Verified on FreeBSD 15.2-PRERELEASE amd64, the descriptions included (they also survive the move of an
+// end into a vnet and back).
 func (c *Command) EpairCreate(ctx context.Context, name string) (string, string, error) {
 	a, b := name+"a", name+"b"
-	if err := c.O.owned(a); err != nil {
-		return "", "", err
+	for _, n := range []string{a, b} {
+		if err := CheckNewName(n); err != nil {
+			return "", "", err
+		}
 	}
 	out, err := c.run(ctx, "ifconfig", "epair", "create")
 	if err != nil {
@@ -147,6 +204,12 @@ func (c *Command) EpairCreate(ctx context.Context, name string) (string, string,
 	}
 	tb := strings.TrimSuffix(ta, "a") + "b"
 	cleanup := func(n string) { c.run(ctx, "ifconfig", n, "destroy") }
+	for _, n := range []string{ta, tb} {
+		if _, err := c.run(ctx, "ifconfig", n, "description", Marker); err != nil {
+			cleanup(ta)
+			return "", "", err
+		}
+	}
 	if _, err := c.run(ctx, "ifconfig", tb, "name", b); err != nil {
 		cleanup(ta)
 		return "", "", err
@@ -160,33 +223,29 @@ func (c *Command) EpairCreate(ctx context.Context, name string) (string, string,
 
 // EpairDestroy implements Client. Destroying one end removes both.
 func (c *Command) EpairDestroy(ctx context.Context, iface string) error {
-	if err := c.O.owned(iface); err != nil {
+	if err := c.own(ctx, iface); err != nil {
 		return err
 	}
 	_, err := c.run(ctx, "ifconfig", iface, "destroy")
 	return err
 }
 
-// MoveToJail implements Client. UNVERIFIED on FreeBSD: whether addresses
-// survive the move (design section 6).
+// MoveToJail implements Client. The interface keeps its description in the jail's vnet.
 func (c *Command) MoveToJail(ctx context.Context, iface, jail string) error {
-	if err := c.O.owned(iface); err != nil {
+	if err := ValidateJailRef(jail); err != nil {
 		return err
 	}
-	if err := ValidateJailRef(jail); err != nil {
+	if err := c.own(ctx, iface); err != nil {
 		return err
 	}
 	_, err := c.run(ctx, "ifconfig", iface, "vnet", jail)
 	return err
 }
 
-// MoveFromJail implements Client. UNVERIFIED: `ifconfig <if> -vnet <jail>`
-// run from the host.
+// MoveFromJail implements Client: `ifconfig <if> -vnet <jail>` run from the host, for an interface of JailOps in the
+// jail's vnet (read there with ifconfig -j). Verified on FreeBSD 15.2-PRERELEASE amd64 (scripts/ifprobe).
 func (c *Command) MoveFromJail(ctx context.Context, iface, jail string) error {
-	if err := c.O.owned(iface); err != nil {
-		return err
-	}
-	if err := ValidateJailRef(jail); err != nil {
+	if err := c.O.ownedInJail(ctx, c, jail, iface); err != nil {
 		return err
 	}
 	_, err := c.run(ctx, "ifconfig", iface, "-vnet", jail)
@@ -195,7 +254,7 @@ func (c *Command) MoveFromJail(ctx context.Context, iface, jail string) error {
 
 // SetLink implements Client.
 func (c *Command) SetLink(ctx context.Context, iface string, up bool) error {
-	if err := c.O.owned(iface); err != nil {
+	if err := c.own(ctx, iface); err != nil {
 		return err
 	}
 	state := "down"
@@ -229,10 +288,10 @@ func validPrefix(p netip.Prefix) error {
 
 // AddrAdd implements Client.
 func (c *Command) AddrAdd(ctx context.Context, iface string, p netip.Prefix) error {
-	if err := c.O.owned(iface); err != nil {
+	if err := validPrefix(p); err != nil {
 		return err
 	}
-	if err := validPrefix(p); err != nil {
+	if err := c.own(ctx, iface); err != nil {
 		return err
 	}
 	_, err := c.run(ctx, "ifconfig", addrArgs(iface, p, "alias")...)
@@ -241,10 +300,10 @@ func (c *Command) AddrAdd(ctx context.Context, iface string, p netip.Prefix) err
 
 // AddrRemove implements Client.
 func (c *Command) AddrRemove(ctx context.Context, iface string, p netip.Prefix) error {
-	if err := c.O.owned(iface); err != nil {
+	if err := validPrefix(p); err != nil {
 		return err
 	}
-	if err := validPrefix(p); err != nil {
+	if err := c.own(ctx, iface); err != nil {
 		return err
 	}
 	_, err := c.run(ctx, "ifconfig", addrArgs(iface, p, "-alias")...)
@@ -253,13 +312,27 @@ func (c *Command) AddrRemove(ctx context.Context, iface string, p netip.Prefix) 
 
 // RouteAdd implements Client.
 func (c *Command) RouteAdd(ctx context.Context, r Route) error {
-	a, err := routeArgs(c.O, r)
+	a, err := c.routeArgs(ctx, r)
 	if err != nil {
 		return err
 	}
 	c.forgetNeighbor(ctx, r)
 	_, err = c.run(ctx, "route", append([]string{"-n", "add"}, a...)...)
 	return err
+}
+
+// routeArgs validates r and checks that JailOps owns its interface, if it names one.
+func (c *Command) routeArgs(ctx context.Context, r Route) ([]string, error) {
+	a, err := routeArgs(r)
+	if err != nil {
+		return nil, err
+	}
+	if r.Interface != "" && r.Gateway == "" {
+		if err := c.own(ctx, r.Interface); err != nil {
+			return nil, err
+		}
+	}
+	return a, nil
 }
 
 // forgetNeighbor drops the neighbor cache entry of an IPv6 host route's address. The kernel keeps the entry of a
@@ -276,7 +349,7 @@ func (c *Command) forgetNeighbor(ctx context.Context, r Route) {
 
 // RouteDelete implements Client.
 func (c *Command) RouteDelete(ctx context.Context, r Route) error {
-	a, err := routeArgs(c.O, r)
+	a, err := c.routeArgs(ctx, r)
 	if err != nil {
 		return err
 	}
@@ -293,14 +366,14 @@ func neighborArg(iface string, a netip.Addr) string {
 	return a.String()
 }
 
-func (c *Command) neighborCheck(iface string, a netip.Addr) error {
-	if err := c.O.owned(iface); err != nil {
+func (c *Command) neighborCheck(ctx context.Context, iface string, a netip.Addr) error {
+	if err := ValidateIfName(iface); err != nil {
 		return err
 	}
 	if !a.IsValid() || a.Is4In6() || a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() || a.IsLoopback() {
 		return api.Errorf(api.CodeInvalid, "%s is not a unicast address", a)
 	}
-	return nil
+	return c.own(ctx, iface)
 }
 
 // neighborCmd returns the tool, its delete arguments and its set arguments for an address: arp(8) for IPv4, ndp(8)
@@ -314,11 +387,11 @@ func neighborCmd(iface string, a netip.Addr, mac string) (tool string, del, set 
 
 // NeighborSet implements Client with `arp -s` or `ndp -s`, after a delete: an entry that is there is replaced, never kept.
 func (c *Command) NeighborSet(ctx context.Context, iface string, a netip.Addr, mac string) error {
-	if err := c.neighborCheck(iface, a); err != nil {
-		return err
-	}
 	if hw, err := net.ParseMAC(mac); err != nil || len(hw) != 6 {
 		return api.Errorf(api.CodeInvalid, "%q is not an Ethernet address", mac)
+	}
+	if err := c.neighborCheck(ctx, iface, a); err != nil {
+		return err
 	}
 	tool, del, set := neighborCmd(iface, a, mac)
 	_, _ = c.run(ctx, tool, del...)
@@ -328,7 +401,7 @@ func (c *Command) NeighborSet(ctx context.Context, iface string, a netip.Addr, m
 
 // NeighborDelete implements Client with `arp -d` or `ndp -d`.
 func (c *Command) NeighborDelete(ctx context.Context, iface string, a netip.Addr) error {
-	if err := c.neighborCheck(iface, a); err != nil {
+	if err := c.neighborCheck(ctx, iface, a); err != nil {
 		return err
 	}
 	tool, del, _ := neighborCmd(iface, a, "")

@@ -79,7 +79,8 @@ jailops wireguard status office`, "wireguard tunnels", "wg")
 given address, listening on --listen-port (default 51820). Peers get addresses from
 --pool (default the subnet of --address). --endpoint is what peers dial and goes
 into their tokens (default this host's name and the port). A client is made from a
-token with 'jailops wireguard join'.`,
+token with 'jailops wireguard join'. Without --interface the name has at most
+12 characters, so that wg-NAME fits the 15 characters of an interface name.`,
 		`jailops wireguard create office --address 10.99.0.1/24
 jailops wireguard create office --address 10.99.0.1/24 --address fd99::1/64 --network web --endpoint vpn.example.com:51820
 jailops wireguard create -f office.yaml`,

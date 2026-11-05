@@ -54,6 +54,14 @@ with the release's current patches and packages. A thin jail's root is a clone o
 userland; a jail made with `--image freebsd-15-1` follows the newest generation of the image. A new release (15.2, 16.0)
 is **a new image**, never a new generation of an old one: there is no in-place release upgrade of a jail.
 
+**g1 is JailOps's generation counter; p6 is the FreeBSD patch level of its packages.** The number of a generation counts
+the builds of the image on this host (g1, g2, ...) and says nothing about FreeBSD. When a generation is built, JailOps
+records the FreeBSD version its base packages come from (the version of the `FreeBSD-runtime` package, `15.1p6`, shown
+as `15.1-RELEASE-p6`; a snapshot of a branch keeps the package version as it is, `15.snap20261031190411`). `jailops image
+show` and `jailops image generations` have a column `FREEBSD`, `jailops list` writes `freebsd-15-1 (g1, p6)`, and the
+console shows it on the Images page and the jail's page. A generation built before 0.6.1 shows `-`: JailOps does not
+guess it afterwards.
+
 | You want | You run |
 |---|---|
 | the patches of the release your jails run | `jailops image upgrade freebsd-15-1` (or the nightly auto upgrade, below) |

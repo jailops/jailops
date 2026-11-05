@@ -79,7 +79,7 @@ describe('ImageCreateDialog', () => {
     await w.get('[data-test="image-name"]').trigger('blur')
     expect(w.text()).toContain('An image named freebsd-15-1 exists already.')
     await w.get('[data-test="image-name"]').setValue('Base')
-    expect(w.text()).toContain('Lowercase letters, digits and hyphens')
+    expect(w.text()).toContain("Lowercase letters, digits, '.', '_' and '-'")
     await w.get('[data-test="image-name"]').setValue('base')
     await w.get('[data-test="image-release-choice"]').setValue('other')
     await w.get('[data-test="image-release"]').setValue('14.3-RELEASE')

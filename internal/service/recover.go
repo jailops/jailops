@@ -216,6 +216,20 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		}
 		out.Action, out.Detail = "rolled-back", "the staging dataset was removed"
 		return out
+	case "rename":
+		// rename/<kind>/<project>/<name>: the steps were recorded before the first ran
+		if !haveReq || req.Rename == nil {
+			return fail(fmt.Errorf("the rename request was not recorded"))
+		}
+		found, err := s.planExec.Recover(ctx, rec.ID, s.renameExecPlan(req.Rename.Steps))
+		if err != nil {
+			return fail(err)
+		}
+		out.Action, out.Detail = "rolled-back", "the interrupted rename was undone; the old name is in force"
+		if !found {
+			out.Action, out.Detail = "dropped", "the run had already ended"
+		}
+		return out
 	case "image-delete":
 		out.Action, out.Detail = "dropped", "the generation delete was interrupted; delete it again to finish"
 		return out

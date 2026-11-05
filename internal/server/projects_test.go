@@ -287,14 +287,15 @@ func TestProjectDatasetQuota(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, err := e.ZFS.Get(c, "tank/jailops/projects/alpha", "quota")
-	if err != nil || p["quota"].Value != "500G" {
+	// stored and written as bytes: ZFS reports bytes (zfs get -p) and the helper takes no other spelling
+	if err != nil || p["quota"].Value != "536870912000" {
 		t.Fatalf("%v %v", err, p)
 	}
 	if _, err := e.Admin.Projects().Patch(ctxT(t), "alpha", map[string]any{"spec": map[string]any{"storage": []map[string]any{{"storage": "default", "quota": "1T"}}}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	p, _ = e.ZFS.Get(c, "tank/jailops/projects/alpha", "quota")
-	if p["quota"].Value != "1T" {
+	if p["quota"].Value != "1099511627776" {
 		t.Fatalf("%v", p)
 	}
 }

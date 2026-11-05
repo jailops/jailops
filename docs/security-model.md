@@ -23,7 +23,8 @@ can put nothing in its place, so it cannot keep the helper from starting. The da
 where the daemon cannot leave a symlink for root to write through.
 
 **What a compromised daemon cannot do:** name a path outside the storage roots, run a program that is not on the
-allow-list, sniff or inject on an interface the operator did not approve, mount a directory the operator did not name,
+allow-list, change, destroy, rename or take over a network interface JailOps did not create (see
+[Interfaces](#interfaces)), sniff or inject on an interface the operator did not approve, mount a directory the operator did not name,
 make the helper advertise an IPv6 address outside the approved prefixes, or turn a ZFS user property into authority (the
 helper keeps what it granted in its own memory, never in something the daemon can write).
 
@@ -77,6 +78,7 @@ inside it as well.
 | `wireguard-routes` | WireGuard tunnels may route these networks into themselves although a route there is wider than a /8 (/16 for IPv6) or covers the host's addresses, default gateway, resolvers, loopback, link-local or multicast ([wireguard.md](wireguard.md)) | nothing |
 | `fetch-host` | download from these hosts, over https | the Alpine CDN and `pkg.freebsd.org` |
 | `wireguard-dir` | where the helper keeps the keys of WireGuard tunnels (root, 0700; outside the daemon's directories) | `/var/db/jailops-priv/wireguard` |
+| `if-prefix` | deprecated: a bridge or epair whose name starts with it and that has no description at all counts as JailOps's once, and is marked ([Interfaces](#interfaces)) | `jo` |
 
 **An admin who may set these is root on the host.** Keep the lists short, and write nothing you would not give root.
 
@@ -382,6 +384,60 @@ five for a volume (twenty for all volumes together) every try waits, 30 seconds 
 further wrong one, at most an hour; a right passphrase forgets the count, and so does a restart of the helper (which
 needs root). There is no recovery key: a lost passphrase is lost data.
 
+## Interfaces
+
+The helper runs as root and changes network interfaces for the daemon: bridges, epairs, their addresses, members,
+routes, neighbor entries, MTUs, their move into and out of a jail's vnet. It must never be made to change one that
+is not JailOps's: the host's uplink (`vmx0`, `em0`), `lo0`, a bridge an administrator made, a tunnel. **An interface is
+JailOps's when the kernel says so: it is a bridge or an epair (its driver's group) and its description carries
+JailOps's marker** (`jailops ...`, or `jailops:<id>` of releases before 0.4.0). Its name says nothing: a bridge may have
+any free name (`palminn`), and a name that looks like JailOps's (`jo7`) is not enough.
+
+- **Only root sets a description** of an interface in the host's network stack, and the only operations of the helper
+  that write one are the creation of an interface and the description of an interface that already carries the marker.
+  So the daemon cannot have the marker put on an interface that exists, and cannot take it off one (a description that
+  is not JailOps's is refused, and clearing one writes the bare marker `jailops managed`).
+- **Create.** The helper creates a bridge or an epair under a generic name (`bridge3`, `epair5a`), gives it the marker,
+  and only then renames it to the name asked for. The rename is the kernel's atomic check that the name is free: if an
+  interface has the name (made a moment ago, whatever it is), the rename fails, the new interface is destroyed and
+  nothing else is touched. No interface ever has the name without the marker, and no interface is ever taken over by
+  its name. Before that, the helper refuses a name that exists (`forbidden: interface "mybr" exists and is not
+  JailOps's; the helper never takes over an interface by its name`; one that is JailOps's answers `already_exists`) and
+  a name of the form a driver gives its interfaces, whether or not that driver is loaded: a driver name alone (an
+  interface group, `bridge`, `all`) or followed by a unit number, an epair end or a vlan tag (`vmx0`, `em1`, `lo0`,
+  `bridge0`, `epair0a`, `tap0`, `wg0`, `pflog0`, `vlan0.10`; `invalid: interface name "vmx0" has the form of the
+  interfaces of the driver "vmx"`). A device the kernel attaches later is therefore never confused with an interface of
+  JailOps. The list is in `internal/ipam/drivers.go`.
+- **Change, destroy, member, address, route, neighbor entry, MTU, move.** The helper reads the interface from the kernel
+  (`ifconfig NAME`) in the same operation, just before it acts, and refuses one that is not a bridge or an epair
+  (`forbidden: interface "vtnet0" is not managed by JailOps: JailOps changes only bridges and epairs it created`) or
+  that does not carry the marker (`... it has no JailOps description (JailOps marks every interface it creates and
+  never takes one over by its name)`, or `... its description "uplink" is not one JailOps writes`). A bridge member must
+  be JailOps's as well, so the uplink is never made a port. Between the read and the action only root can rename an
+  interface: the helper renames none but the one it has just created.
+- **Command lines.** The command allow-list has no form that creates, renames or destroys a host interface any more
+  (`ifconfig bridge create`, `ifconfig bridgeN name X` are refused); its `ifconfig -j JAIL IF ...` and `route -j JAIL
+  ...` forms act in the vnet of a managed jail and read the interface there first. Root in a vnet jail can set the
+  descriptions in its own vnet, so the marker proves less inside a jail: it keeps the helper off the jail's loopback,
+  and what the jail could forge is an interface of its own vnet. An interface that comes back from a jail's vnet through the
+  helper (`net.move_from_jail`) is a virtual one the jail could reach anyway, and the helper refuses it when the host has
+  an interface of that name: the kernel would bring it back and let two interfaces share the name (verified on FreeBSD
+  15.2). When a jail is removed, the kernel returns its interfaces by itself, with whatever name the jail's root gave
+  them, possibly a name the host has; a lookup by name (the helper's read and its action alike) finds the host's own,
+  which was there first, so such a twin is not taken for JailOps's.
+- **Reading stays open.** The interface list, the uplink's addresses and any one interface are read as before.
+- **jail.conf.** `vnet.interface` must name an epair end of the form JailOps gives them (`jo` and the jail's hash), and
+  each one that exists when the jail is created must be JailOps's in the kernel.
+- **Upgrade.** Interfaces of earlier releases already carry their description. A bridge or epair whose name has a
+  legacy prefix (`if-prefix` in `priv.conf`, default `jo`) and **no description at all** (an older build, or a crash
+  between its creation and its description) counts as JailOps's, and the helper writes the marker the first time it
+  changes it; from then on the marker decides. One with someone else's description, or of another kind, is not
+  JailOps's whatever its name. `if-prefix` is deprecated and kept only for this.
+
+What it does not cover: root on the host can put JailOps's description on anything, and an administrator who does so
+hands that interface to JailOps. A bridge is not a security boundary between the jails on it ([Network
+isolation](#network-isolation)).
+
 ## Projects are not a security boundary against the kernel
 
 A project separates names, quotas, networks and firewall policy. Jails share the host kernel. A high-security tenant needs an isolation
@@ -394,6 +450,19 @@ rules bind the jail's addresses (anti-spoofing). This filters **IP traffic**. A 
 jail's ARP and neighbor entries and MAC address; forged ARP, neighbor advertisements and router advertisements from a
 jail change nothing (design 18.13). A bridge that carries
 ports JailOps did not create is not covered. A bridge is not a full security boundary.
+
+## Name resolution of jails
+
+A network without `dns` gives its jails the host's own nameservers from `/etc/resolv.conf`, read by the daemon (the file
+is world readable): the jails reach them like any other address, through the network's NAT or routing and their own
+firewall policy, and nothing on the host is opened for it. A host that resolves only through loopback (a local unbound)
+gives its jails the network's gateway address instead. That answers only if the administrator lets the resolver listen on
+the gateway and admits the network's subnet (and, with a `pf.conf` that blocks by default, passes port 53 in on the
+gateway interface): JailOps never edits the resolver or `pf.conf` and opens no port. Until then the jails' queries go
+unanswered; no host service is exposed by the default. A jail's own policy governs port 53 like any other traffic. A jail
+that runs its own resolver keeps its `resolv.conf` with the line `# jailops:keep`; JailOps then never writes the file, and
+it rewrites the file of a running jail only through the helper's file operations, which replace a regular file inside the
+jail's root and refuse a symlink.
 
 ## Secrets
 
@@ -415,4 +484,5 @@ ports JailOps did not create is not covered. A bridge is not a full security bou
 - The passphrase of encrypted volumes is typed (`jailops` asks without echo) or read from a file you name
   (`--passphrase-file`); it is never a command line argument and never stored by JailOps. See above.
 - Interface descriptions are built from names only and checked by the helper (`jailops ...`, at most 64 characters of
-  `A-Za-z0-9 ._:/=()-`): nothing a user types reaches `ifconfig` as free text.
+  `A-Za-z0-9 ._:/=()-`): nothing a user types reaches `ifconfig` as free text. The description is also the mark of
+  ownership ([Interfaces](#interfaces)).

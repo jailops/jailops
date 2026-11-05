@@ -344,7 +344,8 @@ func (l *Local) requireJailRoute(target netip.Addr) error {
 	if !ok {
 		return forbidden("ndp.answer: %s has no host route of a jail on this host", target)
 	}
-	if err := l.cfg.ifOwned(iface); err != nil {
+	// read only: the answer changes nothing on the interface, so a legacy one is not marked here
+	if err := l.ifOwnedMark(context.Background(), iface, false); err != nil {
 		return forbidden("ndp.answer: the route of %s leaves through %s, which is not an interface of JailOps", target, iface)
 	}
 	return nil

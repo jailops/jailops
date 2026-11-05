@@ -64,7 +64,7 @@ func TestEveryJailPortIsPrivate(t *testing.T) {
 			}
 		}
 	}
-	if len(private) != 1 || !strings.HasPrefix(private[0], "ifconfig jo") || !strings.Contains(private[0], " private jo") {
+	if len(private) != 1 || !strings.HasPrefix(private[0], "ifconfig ") || !strings.Contains(private[0], " private jo") {
 		t.Fatalf("the attach plan lacks `ifconfig <bridge> private <epair>`: %v", private)
 	}
 }

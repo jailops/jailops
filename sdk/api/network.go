@@ -12,8 +12,10 @@ type Network struct {
 
 // NetworkSpec is the desired state of a network.
 type NetworkSpec struct {
-	// Bridge is the if_bridge name. Defaults to a generated "jo<n>" name.
-	// Bridges not created by jailops are never modified.
+	// Bridge is the if_bridge name: any interface name of at most 13 characters that is free on the host and not a
+	// driver's (vmx0, bridge0, ...). It defaults to the network's name when that is such a name, else to a generated
+	// "jo<n>"; it is set when the network is created and never changes (a rename of the network keeps it). JailOps
+	// creates it with its description and never modifies an interface it did not create.
 	Bridge string `json:"bridge,omitempty"`
 	// Uplink is the physical interface used for NAT or routing. In IPv6
 	// proxy mode it must never be a member of the bridge.
@@ -79,10 +81,40 @@ type NetworkStatus struct {
 	// Orphans are epair interfaces without a jail.
 	Orphans    []string    `json:"orphans,omitempty"`
 	Conditions []Condition `json:"conditions,omitempty"`
-	// Warnings are set in the answer of a create only: what the host lacks for
-	// this network (a sysctl the administrator has to set). They are never
-	// stored; jailops doctor reports the same things.
+	// Warnings are set in the answer of a create or an update only: what the host lacks for
+	// this network (a sysctl the administrator has to set, a resolver that has to listen on the gateway). They are
+	// never stored; jailops doctor reports the same things.
 	Warnings []string `json:"warnings,omitempty"`
+	// DNS is what the jails of the network get in their resolv.conf, worked out when the network is read.
+	DNS *NetworkDNS `json:"dns,omitempty"`
+}
+
+// DNSSource says where the nameservers of a jail's resolv.conf come from.
+type DNSSource string
+
+const (
+	// DNSFromNetwork: the network's dns.
+	DNSFromNetwork DNSSource = "network"
+	// DNSFromHost: the host's own nameservers in /etc/resolv.conf (those a jail can reach: not loopback, not link-local).
+	DNSFromHost DNSSource = "host"
+	// DNSFromGateway: the host resolves only through loopback (a local cache), so jails ask the network's gateway
+	// address; that answers only when the administrator lets the cache listen there.
+	DNSFromGateway DNSSource = "gateway"
+	// DNSNone: no nameserver could be worked out (the host's resolv.conf cannot be read, or the network has no
+	// gateway address a jail could use).
+	DNSNone DNSSource = "none"
+)
+
+// NetworkDNS is the resolver configuration the jails of a network get.
+type NetworkDNS struct {
+	Source      DNSSource `json:"source"`
+	Nameservers []string  `json:"nameservers,omitempty"`
+	// Advice is what the administrator has to do on the host so that the gateway answers (source gateway only).
+	Advice string `json:"advice,omitempty"`
+	// Updated names the running jails whose resolv.conf an update rewrote at once (in the answer of an update only);
+	// NotUpdated the running jails it could not rewrite, with the reason. Stopped jails get it when they start.
+	Updated    []string `json:"updated,omitempty"`
+	NotUpdated []string `json:"not_updated,omitempty"`
 }
 
 // Lease is one allocated address. Leases are derived from jail specs and are

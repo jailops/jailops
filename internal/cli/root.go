@@ -249,7 +249,7 @@ func seconds(d time.Duration) int {
 // trust, backup targets and keys, the server) are not here.
 // 'logs' checks for a project itself: with --all-projects it needs none.
 var projectScopedCommands = []string{
-	"jail", "create", "delete", "list", "info", "start", "stop", "restart", "exec", "shell", "label", "provision", "set",
+	"jail", "create", "delete", "rename", "list", "info", "start", "stop", "restart", "exec", "shell", "label", "provision", "set",
 	"firewall", "profile", "update", "config", "backup policy", "backup restore", "app export",
 }
 

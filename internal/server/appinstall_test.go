@@ -175,7 +175,7 @@ func TestAppInstall(t *testing.T) {
 	if l := j.Metadata.Labels; l[api.LabelApp] != "web" || l[api.LabelAppHash] != res.Hash || l[api.LabelAppVersion] != "15.0p1" {
 		t.Fatalf("labels %v", l)
 	}
-	if r := j.Spec.Resources; r.Memory != "512M" || r.Disk != "4G" || r.CPU != 2 {
+	if r := j.Spec.Resources; r.Memory != "512M" || r.Disk != "4294967296" || r.CPU != 2 {
 		t.Fatalf("limits %+v", r)
 	}
 	if len(j.Spec.Volumes) != 2 || j.Spec.Volumes[0].Name != "var-db-web" || j.Spec.Volumes[0].Mount != "/var/db/web" || j.Spec.Volumes[1].Name != "usr-local-www-web" {
@@ -224,7 +224,7 @@ func TestAppInstall(t *testing.T) {
 		t.Fatalf("pkg calls %q, want %q", pkgCalls, want)
 	}
 	// The jail's bash prompt, sourced by both start-up files of bash.
-	if !strings.Contains(e.File(root+api.PromptFile), `PS1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\]'`) || !strings.Contains(e.File(root+api.BashrcPath), api.PromptFile) || !strings.Contains(e.File(root+api.ProfilePath), api.PromptFile) {
+	if !strings.Contains(e.File(root+api.PromptFile), `PS1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\] '`) || !strings.Contains(e.File(root+api.BashrcPath), api.PromptFile) || !strings.Contains(e.File(root+api.ProfilePath), api.PromptFile) {
 		t.Fatalf("prompt files: %v", e.Files.Paths())
 	}
 	// The volume datasets are mounted by the start of the jail, after its root, never by zfs mount -a.
@@ -254,7 +254,7 @@ func TestAppInstall(t *testing.T) {
 	// rc goes to its console log.
 	conf := e.File("/etc/jailops/jails/alpha_web/jail.conf")
 	if !j.Spec.SysVIPC || !strings.Contains(conf, "\tsysvshm = new;\n") || !strings.Contains(conf, "\tsysvsem = new;\n") || !strings.Contains(conf, "\tsysvmsg = new;\n") ||
-		!strings.Contains(conf, "\texec.consolelog = \"/var/log/jail_${name}_console.log\";\n") {
+		!strings.Contains(conf, "\texec.consolelog = \"/var/log/jailops/jail_${name}_console.log\";\n") {
 		t.Fatalf("sysvipc %v, jail.conf:\n%s", j.Spec.SysVIPC, conf)
 	}
 	// The http check went to the jail's first address from the host.

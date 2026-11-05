@@ -20,6 +20,11 @@ func (a *app) projectDesc() *kindDesc[api.Project] {
 		func(p *api.Project) *api.ObjectMeta { return &p.Metadata },
 		func(p *api.Project) *api.ProjectSpec { return &p.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.Project] { return c.Projects().Resource })
+	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.Project] { return c.Projects().Resource })
+	d.renameLong = renameLong("project", `its policies, address sets, backup policies and profiles, its
+datasets on every storage with the mountpoints of its jails, their records and state, its firewall anchor,
+its provisioning files, the project lists of users, tokens, trust tokens and certificates, and the stored
+log sinks that select it. Every jail of the project must be stopped`)
 	d.head = []string{"", "NAME", "HOSTS", "NETWORKS", "STORAGE", "JAILS", "DESCRIPTION"}
 	d.style = func(col int, v string) string {
 		if col == 0 && v == "*" {
@@ -185,7 +190,10 @@ jailops project set web --network br-web --storage fast
 jailops project switch web`, "projects")
 	crudCommands(a, pc, d, `Create a project. Networks and storage are granted, not created: use --network
 and --storage with existing ones, or --new-network to create a dedicated bridge
-and subnet from the server's pool. Only global admins create projects.`,
+and subnet from the server's pool. Only global admins create projects.
+
+A project name has at most 13 characters: --new-network names the network, and
+with it the bridge, after the project. A storage quota is stored as bytes.`,
 		`jailops project create web
 jailops project create web --network br-web --storage fast=500G --max-jails 20 --max-memory 32G
 jailops project create shop --new-network --hosts freebsd01,freebsd02`,
@@ -271,6 +279,31 @@ jailops project set web --revoke-network old --hosts freebsd01,freebsd02`,
 	a.completeFlag(cmd, "network", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Networks().List(ctx), netName) }))
 	a.completeFlag(cmd, "storage", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Storage().List(ctx), storName) }))
 	return cmd
+}
+
+// followProjectRename makes the renamed project the current one again where the user configuration chose it.
+func (a *app) followProjectRename(from, to string) error {
+	if a.conn == nil || a.conn.Project != from {
+		return nil
+	}
+	if src := a.conn.Sources["project"]; src == "env JAILOPS_PROJECT" || src == "flag --project" {
+		fprintf(a.env.Stderr, "note: %s names the old project %s; use %s from now on\n", src, from, to)
+		return nil
+	}
+	path := a.userConfigPath()
+	cfg, err := loadConfig(path)
+	if err != nil {
+		return err
+	}
+	if cfg.Projects[keyOf(a.conn.Name)] != from {
+		return nil
+	}
+	cfg.Projects[keyOf(a.conn.Name)] = to
+	if err := saveConfig(path, cfg); err != nil {
+		return err
+	}
+	a.say("remote %s now uses project %s\n", keyOf(a.conn.Name), to)
+	return nil
 }
 
 // projectSwitch stores the current project of the current remote.
@@ -415,7 +448,7 @@ projects, each project with its own dataset and quota. Storage is ZFS only.
 Deleting a storage never destroys data; it is refused while a project grants it
 or a jail uses it. Only global admins write storage.`,
 		"jailops storage create fast --dataset tank/jailops\njailops storage list\njailops storage show fast", "storages")
-	crudCommands(a, sc, d, "Register an existing ZFS dataset as a storage. The dataset must exist and be empty or already owned by JailOps.",
+	crudCommands(a, sc, d, "Register an existing ZFS dataset as a storage. The dataset must exist and be empty or already owned by JailOps.\nThe dataset name has at most 88 characters: the datasets of jails, volumes and snapshots are named below it, and ZFS allows 255.",
 		"jailops storage create fast --dataset tank/jailops\njailops storage create slow --dataset hdd/jailops --compression zstd",
 		func(cmd *cobra.Command) func(string) (api.Storage, error) {
 			var dataset, desc, comp string

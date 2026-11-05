@@ -65,7 +65,7 @@ func withConsoleLog(name string, err error) error {
 	if err == nil || !errors.As(err, &ae) || ae.Hint != "" || ae.Code != api.CodeInternal {
 		return err
 	}
-	return ae.WithHint("what the jail's start and stop commands printed is in /var/log/jail_" + name + "_console.log on the host")
+	return ae.WithHint("what the jail's start and stop commands printed is in /var/log/jailops/jail_" + name + "_console.log on the host")
 }
 
 // Remove implements Controller.

@@ -30,11 +30,11 @@ type mtuSetter interface {
 // the command Runner for "ifconfig <bridge> mtu <n>".
 // UNVERIFIED on FreeBSD.
 func (l *Local) SetMTU(ctx context.Context, iface string, mtu int) error {
-	if err := l.cfg.ifOwned(iface); err != nil {
-		return err
-	}
 	if mtu < MinMTU || mtu > MaxMTU {
 		return invalid("mtu %d is outside %d..%d", mtu, MinMTU, MaxMTU)
+	}
+	if err := l.ifOwned(ctx, iface); err != nil {
+		return err
 	}
 	if s, ok := l.d.Net.(mtuSetter); ok {
 		return s.SetMTU(ctx, iface, mtu)
@@ -56,7 +56,7 @@ func checkNDPRoute(addr netip.Addr) error {
 }
 
 // NDPRouteAdd adds the /128 host route addr through iface (a bridge or other
-// interface JailOps owns). Nothing else: no gateway, no prefix, no default.
+// interface JailOps owns; netGuard.RouteAdd reads it in the kernel). Nothing else: no gateway, no prefix, no default.
 // UNVERIFIED on FreeBSD.
 func (l *Local) NDPRouteAdd(ctx context.Context, addr netip.Addr, iface string) error {
 	r, err := l.ndpRoute(addr, iface)
@@ -79,7 +79,7 @@ func (l *Local) ndpRoute(addr netip.Addr, iface string) (ifconfig.Route, error) 
 	if err := checkNDPRoute(addr); err != nil {
 		return ifconfig.Route{}, err
 	}
-	if err := l.cfg.ifOwned(iface); err != nil {
+	if err := ifconfig.ValidateIfName(iface); err != nil {
 		return ifconfig.Route{}, err
 	}
 	return ifconfig.Route{Dest: netip.PrefixFrom(addr, 128).String(), Interface: iface}, nil

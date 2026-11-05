@@ -181,6 +181,7 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/profiles/{name}", ad),
 	r("PATCH", "/api/v1/profiles/{name}", ad),
 	r("DELETE", "/api/v1/profiles/{name}", ad),
+	r("POST", "/api/v1/profiles/{name}/rename", ad),
 
 	// The application catalog: local definition files, readable by any authenticated identity. Installing one creates
 	// a jail in the project of the request and is its own entry: operator, because it creates nothing the definition
@@ -196,6 +197,7 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/projects/{name}", ad),
 	r("PATCH", "/api/v1/projects/{name}", ad),
 	r("DELETE", "/api/v1/projects/{name}", ad),
+	r("POST", "/api/v1/projects/{name}/rename", ad),
 	r("GET", "/api/v1/storage", ro),
 	r("POST", "/api/v1/storage", ad),
 	r("GET", "/api/v1/storage/{name}", ro),
@@ -210,6 +212,7 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/images/{name}", ad),
 	r("PATCH", "/api/v1/images/{name}", ad),
 	r("DELETE", "/api/v1/images/{name}", ad),
+	r("POST", "/api/v1/images/{name}/rename", ad),
 	r("GET", "/api/v1/images/{name}/generations", ro),
 	r("POST", "/api/v1/images/{name}/generations", ad),
 	r("GET", "/api/v1/images/{name}/generations/{gen}", ro),
@@ -225,7 +228,8 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/jails/{name}", ad),
 	r("PATCH", "/api/v1/jails/{name}", ad),
 	r("DELETE", "/api/v1/jails/{name}", ad),
-	r("POST", "/api/v1/jails/{name}", ad), // rename, copy
+	r("POST", "/api/v1/jails/{name}", ad), // copy
+	r("POST", "/api/v1/jails/{name}/rename", ad),
 	r("GET", "/api/v1/jails/{name}/state", ro),
 	r("GET", "/api/v1/jails/{name}/usage", ro),
 	r("PUT", "/api/v1/jails/{name}/state", op),
@@ -285,6 +289,7 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/networks/{name}", ad),
 	r("PATCH", "/api/v1/networks/{name}", ad),
 	r("DELETE", "/api/v1/networks/{name}", ad),
+	r("POST", "/api/v1/networks/{name}/rename", ad),
 	r("GET", "/api/v1/networks/{name}/leases", ro),
 
 	// WireGuard tunnels: an operator reads their state (public keys, peers, handshakes; never a secret), an admin
@@ -307,12 +312,14 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/firewall/policies/{name}", ad),
 	r("PATCH", "/api/v1/firewall/policies/{name}", ad),
 	r("DELETE", "/api/v1/firewall/policies/{name}", ad),
+	r("POST", "/api/v1/firewall/policies/{name}/rename", ad),
 	r("GET", "/api/v1/firewall/address-sets", ro),
 	r("POST", "/api/v1/firewall/address-sets", ad),
 	r("GET", "/api/v1/firewall/address-sets/{name}", ro),
 	r("PUT", "/api/v1/firewall/address-sets/{name}", ad),
 	r("PATCH", "/api/v1/firewall/address-sets/{name}", ad),
 	r("DELETE", "/api/v1/firewall/address-sets/{name}", ad),
+	r("POST", "/api/v1/firewall/address-sets/{name}/rename", ad),
 
 	// Backup. Transport uses the narrow roles (exact match). Only admin also satisfies restore; admin does not satisfy
 	// backup-admin (deleting a backup), backup-push or backup-pull.

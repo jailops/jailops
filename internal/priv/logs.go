@@ -89,7 +89,7 @@ func (c Config) logRef(p string) (logRef, error) {
 		}
 	}
 	if mount == "" {
-		return logRef{}, forbidden("path %q is not below %s", p, c.mountBaseDesc())
+		return logRef{}, c.notBelowMount(p)
 	}
 	segs := strings.Split(strings.TrimPrefix(p, strings.TrimSuffix(mount, "/")+"/"), "/")
 	if len(segs) < 7 || segs[0] != "projects" || segs[2] != "jails" || segs[4] != "root" || segs[5] != "var" || segs[6] != "log" {

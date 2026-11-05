@@ -1,6 +1,6 @@
 // The catalog pages' pure parts: search and categories, the install form, the step list of an
 // installation, the jails that came from the catalog and the links to their web ports.
-import { nameRules, validName } from '@jailops/shared/lib/names'
+import { nameRules, validName, validSize } from '@jailops/shared/lib/names'
 import { AppCategoryValues } from '@jailops/shared/api/types'
 import type { AppCategory, AppInstall, AppPort, AppResources, AppSummary, Jail, Project } from '@jailops/shared/api/types'
 
@@ -45,8 +45,7 @@ export function paragraphs(text: string | undefined): string[] {
 }
 
 /** A jail name as the server checks it on an installation: the shared object name rule. */
-export const JAIL_NAME = nameRules.object.re
-const SIZE = /^\d+(?:\.\d+)?[KMGT]?$/i
+export const JAIL_NAME = nameRules.jail.re
 
 /** The install form; image is a plain image name ('' leaves the choice to the server). */
 export interface InstallForm { jail: string; image: string; network: string; storage: string; memory: string; disk: string; cpu: string }
@@ -55,12 +54,12 @@ export type InstallIssue = 'nameInvalid' | 'nameTaken' | 'needNetwork' | 'needSt
 /** Field -> problem. Empty when the form may be sent. */
 export function validateInstall(f: InstallForm, ctx: { networks: string[]; storage: string[]; taken: string[] }): Partial<Record<keyof InstallForm, InstallIssue>> {
   const out: Partial<Record<keyof InstallForm, InstallIssue>> = {}
-  if (!validName(f.jail)) out.jail = 'nameInvalid'
+  if (!validName(f.jail, 'jail')) out.jail = 'nameInvalid'
   else if (ctx.taken.includes(f.jail)) out.jail = 'nameTaken'
   if (ctx.networks.length && !ctx.networks.includes(f.network)) out.network = 'needNetwork'
   if (ctx.storage.length && !ctx.storage.includes(f.storage)) out.storage = 'needStorage'
-  if (f.memory && !SIZE.test(f.memory.trim())) out.memory = 'sizeInvalid'
-  if (f.disk && !SIZE.test(f.disk.trim())) out.disk = 'sizeInvalid'
+  if (f.memory && !validSize(f.memory)) out.memory = 'sizeInvalid'
+  if (f.disk && !validSize(f.disk)) out.disk = 'sizeInvalid'
   if (f.cpu && !(Number(f.cpu) > 0)) out.cpu = 'cpuInvalid'
   return out
 }

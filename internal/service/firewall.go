@@ -156,7 +156,7 @@ func (s *Service) UpdatePolicy(ctx context.Context, name string, in api.Firewall
 		return api.FirewallPolicy{}, err
 	}
 	if in.Metadata.Name != "" && in.Metadata.Name != name {
-		return api.FirewallPolicy{}, invalid("renaming is not supported")
+		return api.FirewallPolicy{}, renameByAction("firewall policy", "firewall/policies")
 	}
 	if err := bodyProject(p.Meta.Name, in.Metadata.Project); err != nil {
 		return api.FirewallPolicy{}, err
@@ -301,7 +301,7 @@ func (s *Service) UpdateAddressSet(ctx context.Context, name string, in api.Addr
 		return api.AddressSet{}, err
 	}
 	if in.Metadata.Name != "" && in.Metadata.Name != name {
-		return api.AddressSet{}, invalid("renaming is not supported")
+		return api.AddressSet{}, renameByAction("firewall address-set", "firewall/address-sets")
 	}
 	if err := bodyProject(p.Meta.Name, in.Metadata.Project); err != nil {
 		return api.AddressSet{}, err

@@ -82,7 +82,7 @@ func TestNewJailGetsBashAndThePrompt(t *testing.T) {
 	if installedBash(e, webRoot) != 1 || !sj.ran("/sbin/ldconfig -m /usr/local/lib") {
 		t.Fatalf("bash was not installed from the host: %v %v", e.Installed, sj.cmds)
 	}
-	want := `PS1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\]'`
+	want := `PS1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\] '`
 	if !strings.Contains(e.File(webRoot+api.PromptFile), want) {
 		t.Fatalf("prompt file: %q", e.File(webRoot+api.PromptFile))
 	}

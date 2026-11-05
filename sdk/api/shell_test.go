@@ -82,7 +82,7 @@ func TestShellKeys(t *testing.T) {
 	if _, err := ApplyConfig(&s, nil, []string{"prompt"}); err != nil || s.Prompt != "" {
 		t.Errorf("unset prompt: %q %v", s.Prompt, err)
 	}
-	if EffectivePS1("default", 40) != `\[\e[38;5;40m\]\u@\h:\w\$\[\e[0m\]` || EffectivePS1("none", 40) != "" || EffectivePS1("", 40) != "" || EffectivePS1("x> ", 1) != "x> " {
+	if EffectivePS1("default", 40) != `\[\e[38;5;40m\]\u@\h:\w\$\[\e[0m\] ` || EffectivePS1("none", 40) != "" || EffectivePS1("", 40) != "" || EffectivePS1("x> ", 1) != "x> " {
 		t.Error("EffectivePS1")
 	}
 	if CheckPromptColor(-1) == nil || CheckPromptColor(256) == nil || CheckPromptColor(0) != nil || CheckPromptColor(255) != nil {

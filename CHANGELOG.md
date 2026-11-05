@@ -2,6 +2,124 @@
 
 ## Unreleased
 
+- **Image builds share one package cache**: the dataset `<pool>/jailops/cache` (mounted at `<mount-base>/cache`, made by
+  the first build) holds the downloaded packages (`PKG_CACHEDIR`), so a package of the base is fetched once, not into
+  every generation. `pkg clean` removes only the outdated ones.
+- **The logs of the jails have a dataset**: `<pool>/jailops/logs` mounted at `/var/log/jailops` (lz4, made by
+  `jailops-priv init`; the rc script makes the directory on a host set up by an older release). The files
+  `jail_NAME_console.log` moved there from `/var/log` (the old ones stay), and newsyslog rotates them
+  (`/usr/local/etc/newsyslog.conf.d/jailops.conf`: 7 files of 1 MB, compressed).
+- **A new image has an `/etc/rc.conf` for jails**: `sendmail_enable="NONE"` (no MTA started in every jail) and
+  `syslogd_flags="-ss"` (no network socket). The base ships no rc.conf; an image built before has none, change it in
+  the jail with `sysrc`.
+- **An image build and upgrade no longer leave the downloaded packages in the image**: they stayed in `/var/cache/pkg`
+  of every generation (see the shared package cache above).
+- **Jails get a nameserver without `--dns`.** A network without `dns` used to give its jails an empty `resolv.conf`
+  (`pkg` failed with "Transient resolver failure"). Now the order is: the network's `dns`; else the host's own
+  nameservers from `/etc/resolv.conf` (not loopback, not link-local); else, on a host that resolves only through
+  loopback (a local unbound), the network's gateway address, with the unbound lines the administrator adds (JailOps
+  changes nothing on the host and opens no port). `network show` and the API (`status.dns`) say which applies;
+  `network create` prints the lines once; `doctor` (`network.dns`) probes the gateway with one query once a jail on the
+  network runs ([networking-ipv6.md](docs/networking-ipv6.md#name-resolution-of-jails)).
+- **A change of a network's `dns` reaches the running jails at once**, without a restart: their `resolv.conf` is written
+  again and `network edit` names them (`status.dns.updated`, and `not_updated` with the reason). A stopped jail gets it
+  at its next start.
+- **A jail can keep its own `resolv.conf`**: with the line `# jailops:keep` in it JailOps never writes the file (a jail
+  that runs its own resolver).
+- **`jailops doctor` warns about a missing `set state-policy if-bound`** (`pf.state-policy`): a loaded ruleset that
+  blocks by default, NAT or jails, and a `pf.conf` without the line lose all but the first packet of a jail's flow
+  (reproduced on a FreeBSD 15.2 VM: one ping of four, four of four with the line).
+- **The FreeBSD patch level of a generation is shown.** A new generation records the FreeBSD version of its packages
+  (`15.1-RELEASE-p6`, from `FreeBSD-runtime`); `image show` and `image generations` have a column `FREEBSD`, `jailops
+  list` writes `freebsd-15-1 (g1, p6)` (it wrote `freebsd-15-1 (freebsd-15-1#g1)`), the console shows it on the Images
+  page and the jail's page. g1 is JailOps's generation counter; a generation built before shows `-`
+  ([upgrade.md](docs/upgrade.md)).
+- **Values the host would refuse later are refused when they are given.** A network, a jail or a project was accepted
+  and then failed at the first jail start or inside the create operation; each of these is now refused at create or
+  update with the reason and a hint:
+  - Sizes are stored as bytes. `4GiB`, `512m` or `1k` as a project's storage quota was written verbatim to ZFS and
+    refused by the helper at the first jail create, and `--disk 4GiB` failed inside the create ("bad disk quota");
+    the quota was also set again on every pass because bytes were compared with the text. Sizes above 16T (the
+    helper's limit) are refused.
+  - An attachment MTU (`nic.<device>.mtu`) other than its network's: a bridge gives every port its own MTU (on
+    FreeBSD 15.2 the jail's end kept the other MTU and large frames were lost).
+  - A network whose subnet overlaps an address of the host (its uplink's LAN, for example), naming the interface; a
+    routed IPv6 prefix likewise; a proxy-mode subnet outside the prefix of the uplink's segment.
+  - An uplink that does not exist (`--uplink em9` rendered a NAT rule on nothing and the network looked ready), or is
+    a loopback, a bridge, a jail interface or a bridge member; the hint lists the host's candidates.
+  - A snapshot name of more than 64 characters, with upper case letters or starting with `jo-` (the API took up to
+    128 characters, the operation 101). One rule: `^[a-z0-9][a-z0-9._-]{0,63}$`.
+  - A WireGuard name of more than 12 characters without `--interface` now says so, instead of naming the interface
+    field the caller never set.
+  - Names and datasets too long for what is derived from them (ZFS names have at most 255 characters, a PF anchor
+    path that `pfctl -a` loads at most 63): `project create --new-network` derives the network and bridge from the
+    project name.
+- **Name limits for new objects** ([design.md](docs/design.md#31-names-and-their-limits)): project 13 characters, jail,
+  volume and image 32, snapshot 64, a storage dataset 88. Existing objects with longer names keep working;
+  `jailops doctor` lists them (`names.length`). The console shows the limits on the name fields.
+- `network create` warns when IPv4 or IPv6 forwarding is off: the network stays not ready (Precondition) until
+  `sysctl net.inet.ip.forwarding=1` (`sysrc gateway_enable=YES`).
+- `project create --new-network` skips subnets of the pool the host already has on an interface.
+- `project show` and `jail info` show sizes stored as bytes in their unit (`quota 4G`); `config set` takes the sizes
+  the flags take (`512m`, `4GiB`).
+
+- **The default prompt has a space after it** (`root@test:/# ` and not `root@test:/#`): what is typed no longer touches
+  the prompt. A jail that already has the old prompt file gets the new one with `jailops jail shell-setup NAME`.
+- **`jailops doctor` does not call a feature missing that the server was not given.** A host without a backup node, a
+  sealed-secrets identity or the host modules lacks their API extensions on purpose; the check said "the server lacks:
+  backup_pull, backup_push, ..." on every such host. Only extensions every server of the release has are reported.
+- **The default base of an image is the minimal jail set plus the optional jail set.** The minimal set alone (35 packages)
+  left out what software from the FreeBSD ports expects of a base system: PostgreSQL stopped with `libexecinfo.so.1 not
+  found`, and `sysrc` was "command not found" in a new jail. `FreeBSD-set-optional-jail` (about 105 packages, 160 MiB:
+  libexecinfo, sysrc, ssh, ee, ntp, ftp, telnet, bmake and the rest of what a FreeBSD jail normally has) is now part of
+  the default; the development set (compiler and headers, 570 MiB) is not, and an image that builds software names
+  `FreeBSD-set-devel` in `source.sets`. An image with its own `source.sets` is unchanged; an image with none gets the
+  optional set in its next generation (`jailops image upgrade IMAGE`).
+- **The default storage mount is `/usr/local/jailops`** (it was `/jailops`, a new directory directly under `/`). The FreeBSD
+  Handbook keeps jails under `/usr/local/jails` and `hier(7)` advises against new top-level directories; the dataset stays
+  `<pool>/jailops`. Only the default of `jailops-priv init -mount`, `mount_base` of `jailopsd.yaml` and `mount-base` of
+  `priv.conf` changed: an installed host keeps the value in its configuration and works as before. There is no
+  in-place move yet (the datasets of images and jails carry their own absolute mountpoints); a host that has nothing
+  to lose is best set up again with `jailops-priv init` on the new default.
+- `web/*/node_modules` is ignored (a few cache files of it had been committed).
+
+- **A bridge may have any free name, and a network's bridge is named like the network.** `jailops network create
+  palminn --ipv4 172.17.32.1/24 --uplink vmx0 --nat` makes the bridge `palminn` (and its gateway pair `palminnga`,
+  `palminngb`). Without `--bridge` the bridge takes the network's name when it can be one (lowercase letters and
+  digits, at most 13 characters, not a driver's form, free on the host and among the networks), else `jo<N>`, and
+  `network create` says why in a warning. A `--bridge` that is invalid, too long, a driver's form (`vmx0`, `bridge0`,
+  `lo0`) or taken (an interface of the host, or another network's bridge or gateway pair) is refused when the network is
+  created, no longer when its first jail starts (that was `forbidden: interface "palminn" is not managed by JailOps
+  (prefix jo)`). The bridge is stored in the spec and keeps its name until the network is deleted, also across a rename
+  of the network; `network edit` still refuses to change it. New doctor check `network.bridges` explains an interface
+  with a network's name that is not JailOps's.
+- **The helper's ownership rule for interfaces changed** ([security-model.md](docs/security-model.md#interfaces)). It
+  used to change any interface whose name started with `jo`; it now changes only a bridge or an epair whose description,
+  read by the helper from the kernel in the same operation, carries JailOps's marker (`jailops ...`). The helper writes
+  the marker when it creates an interface, before the interface has its name, and the rename that gives it the name is
+  the kernel's atomic check that the name is free. What stays refused, and is now refused regardless of the name: any
+  change to the uplink, `lo0`, a tunnel, a vlan or any interface that is not a bridge or an epair; any change to a bridge
+  or epair without the marker (made by hand); writing the marker on an interface that exists, or a description that
+  removes it (clearing writes the bare marker `jailops managed`); taking over an interface by its name; creating one
+  under a driver's form, loaded or not. Newly refused: the command forms `ifconfig bridge create`, `ifconfig epair
+  create` and `ifconfig bridgeN name X` (nothing used them; with them the daemon could rename a hand-made `bridge0` to a
+  `jo` name), and an `ifconfig -j`/`route -j` form on an interface of a jail's vnet without the marker. Reading stays
+  open.
+- **Upgrade:** nothing to do. Interfaces of earlier releases carry their description already. A bridge or epair whose
+  name starts with the legacy prefix and that has no description at all (an older build, or a crash between creation and
+  description) is accepted once and marked. `if-prefix` in `priv.conf` is deprecated and now only names that legacy
+  prefix (default `jo`); `jailops-priv check-config` says so. Existing networks keep their `jo<N>` bridges.
+- **Renames.** Networks, address sets, firewall policies, profiles, jails, images and projects can be renamed:
+  `jailops network rename lan palminn`, `jailops firewall address-set|policy rename`, `jailops profile rename`, `jailops
+  image rename`, `jailops project rename`, and `jailops jail rename OLD NEW` or `jailops rename OLD NEW` for a stopped jail
+  (`POST /api/v1/<kind>/{name}/rename`, extension `rename`, design 8.8). Everything that refers to the object changes in
+  the same operation or nothing does: project grants and image lists, jail specs and records, policy rules and set
+  includes, profile keys, tunnels, token and certificate scopes, datasets with their mountpoints and properties, PF
+  anchors, interface descriptions (a network's interfaces keep their names, its running jails their traffic), update
+  history and nightly upgrade runs. The command shows what changes and asks (`-y`, `--dry-run`); `jailops <kind> edit`
+  with a new `metadata.name` renames the same way. A running jail, a managed object and app access grants are refused
+  with the way out. The console has Rename on the page of each of these objects. An update that changes a name answers
+  `invalid` and names the rename.
 - **Address sets are created and deleted in the console.** The Address sets tab of the Firewall page has **Add set**
   (name, members, includes, checked as the server checks them), **Delete set** (lists the policies and sets that use it
   and shows the server's refusal) and an empty state; Save is labelled **Save set**.

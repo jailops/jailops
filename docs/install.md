@@ -128,9 +128,16 @@ Two things to know about a host that already has a firewall:
   `pfctl -s rules` prints, `scrub in all fragment reassemble`.
 - **NAT and `set state-policy`.** On a host whose `pf.conf` blocks by default and NATs the jails' IPv4 (`nat on` the uplink),
   forwarded packets of a jail were translated early by pf's floating state (the bridge passes them through pf on the jail's
-  port first) and then dropped by the host: five of six pings never left (the amd64 host, FreeBSD 15.1). `set state-policy if-bound`
-  at the top of `pf.conf` fixed it (6 of 6, and the PF matrix still passes). A host whose `pf.conf` starts with `pass all`
-  (the arm64 host) did not show it.
+  port first) and then dropped by the host: five of six pings never left (the amd64 host, FreeBSD 15.1; one of four on a
+  FreeBSD 15.2 VM with `block log all`). `set state-policy if-bound` at the top of `pf.conf` fixed it (6 of 6, 4 of 4, and
+  the PF matrix still passes). A host whose `pf.conf` starts with `pass all` (the arm64 host) did not show it. Add the
+  line with the other options and load it with `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`. `jailops doctor`
+  warns (`pf.state-policy`) when the loaded ruleset has a `block ... all` rule without `quick`, a network has NAT or a
+  jail exists, and the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`) lacks the line.
+- **DNS for the jails.** A network without `dns` hands its jails the host's own nameservers from `/etc/resolv.conf`.
+  A host that resolves only through a local unbound (`nameserver 127.0.0.1`) hands them the network's gateway address
+  instead, and unbound has to listen there: the lines are in
+  [networking-ipv6.md](networking-ipv6.md#name-resolution-of-jails), and `jailops network create` prints them.
 - **Traffic from the internet into a jail** is stopped by a host whose `pf.conf` blocks inbound traffic on the uplink by
   default. JailOps does not open the uplink for you: admit the addresses of the jails, and only the ports you want,
   with a rule of your own. The jail's anchor still applies afterwards (its policy decides what reaches the jail), so
@@ -169,7 +176,7 @@ which `jailops jail info` needs for a jail's usage and resource limits need for 
 
     jailops-priv init -pool zroot
 
-This is the one-time setup of what the unprivileged daemon cannot make for itself. It creates the user and group `jailops`, the storage root dataset `zroot/jailops` (mounted at `/jailops`, owned by root),
+This is the one-time setup of what the unprivileged daemon cannot make for itself. It creates the user and group `jailops`, the storage root dataset `zroot/jailops` (mounted at `/usr/local/jailops`, owned by root),
 the state dataset `zroot/jailops/state` (mounted at `/var/db/jailops/state`, owned by the daemon's user), the
 directories, and the two configuration files `/usr/local/etc/jailops/priv.conf` and `jailopsd.yaml`. It is idempotent
 (run it twice and nothing changes) and `-dry-run` says what it would do. Options: `-dataset`, `-mount`, `-user`, `-group`,
@@ -218,7 +225,7 @@ shows it). A project is granted the networks and storages its jails may use.
     jailops image create freebsd-15-1 --release 15.1-RELEASE    # the host's release; an image is one release
     jailops image build freebsd-15-1
     jailops image auto-upgrade freebsd-15-1 on --at 03:00      # optional: its patch levels every night
-    jailops network create lan --bridge jo7 --ipv4 10.77.0.1/24 --uplink vtnet0 --nat    # vtnet0: the host's uplink, see below
+    jailops network create lan --ipv4 10.77.0.1/24 --uplink vtnet0 --nat    # the bridge is lan; vtnet0: the host's uplink, see below
     jailops project create web
     jailops project set web --network lan --storage default
     jailops project switch web
@@ -227,9 +234,25 @@ shows it). A project is granted the networks and storages its jails may use.
     jailops token create ci --role operator --projects web --expires 720h    # a token for scripts, now that web exists
 
 `--uplink` is the host's interface towards the outside: `vtnet0` on most virtual machines, `em0`, `igb0` or `ix0` on
-real hardware (`ifconfig -l` lists them). The project of a jail grants exactly one network and one storage here, so
+real hardware (`ifconfig -l` lists them).
+
+<a id="bridge-names"></a>The bridge of a network is named like the network (`lan` above, `ifconfig lan` shows it with the
+description `jailops net=lan bridge`), or as `--bridge NAME` says. Any name an interface can have will do, with three
+limits: lowercase letters and digits, at most 13 characters (the network's gateway pair adds `ga` and `gb`), and not the
+form of a driver's interface (`vmx0`, `em1`, `lo0`, `bridge0`, `tap0`, `wg0`, or a driver's name alone). A name that is
+taken, by an interface of the host or by another network, is refused when the network is created. Without `--bridge`, a
+network whose name cannot be a bridge's (too long, a `-` in it, taken) gets `jo<N>`, and `network create` says why. The
+bridge keeps its name until the network is deleted, also when the network is renamed. JailOps creates the bridge itself
+and never takes over an interface that exists ([security-model.md](security-model.md#interfaces)). The project of a jail grants exactly one network and one storage here, so
 `jailops create nginx --image freebsd-15-1 --start` would take `lan` and `default` by itself (and say so); naming
 them keeps the command right when the project has more.
+
+`network create` checks the network against the host at once: an uplink that does not exist (or is a loopback, a bridge
+or a bridge member) is refused with the interfaces that could be the uplink, a subnet that overlaps an address of the
+host (`10.77.0.0/24` must not be the LAN `vtnet0` is on) is refused with the interface that has it, and when
+forwarding is off (section 4) the command warns that the network stays not ready until `sysctl
+net.inet.ip.forwarding=1`. New names have limits so that what is derived from them fits: a project at most 13
+characters, a jail, a volume and an image 32, a snapshot 64 ([design.md](design.md#31-names-and-their-limits)).
 
 The image is named after its release: `freebsd-15-1` is 15.1-RELEASE, and a jail made with `--image freebsd-15-1`
 follows its newest generation (its newest patch level). The patch levels come with `jailops image upgrade freebsd-15-1`
@@ -255,6 +278,25 @@ Without `project switch` pass `--project web` (or set `JAILOPS_PROJECT=web`) on 
 once it is created (`jailops start nginx` does the same later). Several objects at once come from a file:
 `jailops apply -f site.yaml` creates what is missing and updates what differs, document by document. IPv6, big pools and backups continue in
 [networking-ipv6.md](networking-ipv6.md), [storage.md](storage.md) and [backup-restore.md](backup-restore.md).
+
+## Start over
+
+To wipe a host and install again (a test machine, a failed first try), as root. This destroys every jail, image,
+volume and backup on the pool's `jailops` dataset; there is no undo. Replace `tank` with your pool.
+
+```sh
+service jailopsd onestop; service jailops_priv onestop; service jailops_backupd onestop 2>/dev/null
+for j in $(jls -N name); do jail -r "$j"; done                  # every running jail
+for b in $(ifconfig -l | tr ' ' '\n' | grep -E '^(wg-|epair)'); do ifconfig "$b" destroy; done
+zfs destroy -r tank/jailops                                      # images, jails, state, cache, logs
+pkg delete -y jailops jailops-client
+rm -rf /usr/local/etc/jailops /var/db/jailops /var/run/jailops /var/log/jailops /var/tmp/jailops
+```
+
+Delete the three anchor lines of section 3 from `/etc/pf.conf` and the `jailopsd_*` and `jailops_*` lines from
+`/etc/rc.conf` if the host keeps nothing of JailOps. The bridges of your networks (named like the network) disappear
+with a reboot, or `ifconfig NAME destroy` one at a time. Then start at section 2. Packages of the base are fetched
+again: the cache went with the dataset.
 
 ## Remote access
 

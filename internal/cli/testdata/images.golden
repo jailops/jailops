@@ -21,16 +21,16 @@ Image freebsd-15
   Nightly:   off ('jailops image auto-upgrade freebsd-15 on' turns it on)
 
 Generations
-  GEN   PACKAGES   AGE   USED BY
-  g1    -          3h    -
+  GEN   FREEBSD   PACKAGES   AGE   USED BY
+  g1    -         -          3h    -
 
 $ jailops image build freebsd-15
 generation/freebsd-15#g2 built
 
 $ jailops image generations freebsd-15
-NAME            NUMBER   PARENT   PACKAGES   MANIFEST              AGE   USED BY
-freebsd-15#g1   1        -        0          sha256:<hex>   3h    -
-freebsd-15#g2   2        -        120        sha256:<hex>   3h    -
+NAME            NUMBER   PARENT   FREEBSD   PACKAGES   MANIFEST              AGE   USED BY
+freebsd-15#g1   1        -        -         0          sha256:<hex>   3h    -
+freebsd-15#g2   2        -        -         120        sha256:<hex>   3h    -
 
 $ jailops image build freebsd-15 --dry-run
 dry-run: would build freebsd-15#g3 (120 packages)
@@ -156,9 +156,9 @@ Image freebsd-15
   Nightly:   off ('jailops image auto-upgrade freebsd-15 on' turns it on)
 
 Generations
-  GEN   PACKAGES   AGE   USED BY
-  g1    -          3h    web
-  g2    120        3h    -
+  GEN   FREEBSD   PACKAGES   AGE   USED BY
+  g1    -         -          3h    web
+  g2    -         120        3h    -
 
 $ jailops image delete -y freebsd-15
 ! image_in_use: image "freebsd-15" is used by jail "web"

@@ -192,10 +192,3 @@ func TestALinuxImageBuildAssertsTheLinuxModules(t *testing.T) {
 		t.Fatal("the Linux state must go away when the build is over")
 	}
 }
-
-func TestNetworksWithoutDNS(t *testing.T) {
-	got := networksWithoutDNS(map[string][]string{"a": nil, "b": {"1.1.1.1"}, "c": nil, "d": nil}, map[string]bool{"a": true, "b": true, "c": true})
-	if len(got) != 2 || got[0] != "a" || got[1] != "c" {
-		t.Fatalf("%v", got)
-	}
-}

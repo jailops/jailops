@@ -17,6 +17,9 @@ import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
 import { checkProfile } from '@/lib/configKeys'
 import { projectState } from '@/composables/project'
+import RenameDialog from '@/components/RenameDialog.vue'
+import { canRename } from '@/composables/rename'
+import { ifMatch } from '@/lib/rename'
 import type { Profile } from '@jailops/shared/api/types'
 
 const { tab: scope } = useTabQuery(() => ['project', 'host'] as const, 'project')
@@ -61,6 +64,9 @@ const save = () => check.submit(async () => {
     busy.value = false
   }
 })
+// Rename (extension rename): admin in the project, a global admin for the host profiles; the jails that list it follow
+const renaming = ref<Profile | null>(null)
+const scopeProject = computed(() => (scope.value === 'host' ? 'host' : projectState.current))
 // tier 2: the jails that list the profile are named
 function remove(p: Profile): void {
   const n = p.metadata.name
@@ -87,12 +93,13 @@ function remove(p: Profile): void {
             <td :data-label="s.profiles.name"><span class="mono">{{ p.metadata.name }}</span><div v-if="p.spec.description" class="faint">{{ p.spec.description }}</div></td>
             <td class="mono" :data-label="s.profiles.keys"><div v-for="(v, k) in p.spec.config" :key="k">{{ k }}={{ v }}</div></td>
             <td :data-label="s.profiles.appliedTo"><router-link v-for="j in usedBy(p.metadata.name)" :key="j" class="mono chip" :to="`/jails/${j}`">{{ j }}</router-link></td>
-            <td class="actions"><div class="row-actions"><button class="btn btn-sm" type="button" @click="open(p)">{{ s.profiles.edit }}</button><button class="btn btn-sm btn-danger" type="button" @click="remove(p)">{{ s.profiles.delete }}</button></div></td>
+            <td class="actions"><div class="row-actions"><button class="btn btn-sm" type="button" @click="open(p)">{{ s.profiles.edit }}</button><button v-if="canRename('profile', scopeProject)" class="btn btn-sm" type="button" :data-test="`rename-profile-${p.metadata.name}`" @click="renaming = p">{{ s.rename.open(s.rename.kinds.profile) }}</button><button class="btn btn-sm btn-danger" type="button" @click="remove(p)">{{ s.profiles.delete }}</button></div></td>
           </tr></tbody></table></div>
       </div>
     </LoadState>
     </div>
 
+    <RenameDialog :open="!!renaming" kind="profile" :name="renaming?.metadata.name ?? ''" :etag="ifMatch(renaming?.metadata.generation)" :project="scope === 'host' ? 'host' : undefined" @close="renaming = null" @done="l.reload" />
     <Modal :open="!!editing" :title="editing === 'new' ? s.profiles.createTitle : s.profiles.editTitle(f.name)" wide @close="editing = null">
       <form id="pr" novalidate @submit.prevent="save">
         <div class="form-2"><div class="field"><label for="pr-name">{{ s.profiles.name }} <span v-if="editing === 'new'" class="req" aria-hidden="true">*</span></label>

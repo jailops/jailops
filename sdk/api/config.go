@@ -71,7 +71,7 @@ type ckey struct {
 var (
 	deviceNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 	macRE        = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`)
-	sizeRE       = regexp.MustCompile(`^[1-9][0-9]*[KMGTP]?$`)
+	sizeRE       = regexp.MustCompile(`^[1-9][0-9]*([KMGTPkmgtp](iB|B)?|B)?$`) // the sizes the server takes; it stores them as bytes
 	hostRE       = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 	envRE        = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 	nameRE       = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
@@ -516,7 +516,7 @@ func buildRegistry() []ckey {
 		return nil
 	}, func(p *NetworkAttach) *string { return &p.MAC }, "mac")
 	devKey("nic.<device>.mac", "mac", "MAC address (derived from the jail UUID when empty).", "02:00:00:00:00:01", true, false, false, "network[<device>].mac", g, st, un)
-	devKey("nic.<device>.mtu", "int", "MTU of the interface; 0 keeps the network's.", "1400", true, true, false, "network[<device>].mtu",
+	devKey("nic.<device>.mtu", "int", "MTU of the interface: the network's MTU (a bridge gives every port its own); 0 takes it.", "1500", true, true, false, "network[<device>].mtu",
 		func(s *JailSpec, d string) (string, bool) {
 			if p := nic(s, d, false); p != nil && p.MTU != 0 {
 				return strconv.Itoa(p.MTU), true

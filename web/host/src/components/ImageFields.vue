@@ -55,7 +55,7 @@ const said = (id: string, hint: string) => (props.err(id) ? `${id}-err` : hint)
       <label for="img-name">{{ s.imageCreate.name }} <span class="req" aria-hidden="true">*</span></label>
       <input id="img-name" v-model.trim="f.name" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!err('img-name')" :aria-describedby="said('img-name', 'img-name-h')" data-test="image-name" @blur="touch('img-name')" />
       <span v-if="err('img-name')" id="img-name-err" class="field-error" role="alert">{{ err('img-name') }}</span>
-      <span v-else id="img-name-h" class="hint">{{ nameHint() }}</span>
+      <span v-else id="img-name-h" class="hint">{{ nameHint('image') }}</span>
     </div>
     <div class="field">
       <label :for="offerHost ? 'img-rel-choice' : 'img-release'">{{ s.imageCreate.release }} <span class="req" aria-hidden="true">*</span></label>

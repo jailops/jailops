@@ -147,36 +147,3 @@ func (s *Service) doctorStaticARP(ctx context.Context, c *checkSet) {
 	}
 	c.add("network.staticarp", api.DoctorOK, "the gateway interfaces of networks in use only use static ARP entries", "")
 }
-
-// networksWithoutDNS names the networks that have no nameserver although jails use them: the jails' resolv.conf is
-// empty and they cannot resolve names (the flag form of `network create` has no dns option; use a file or `network edit`).
-func networksWithoutDNS(nets map[string][]string, used map[string]bool) []string {
-	var out []string
-	for name, dns := range nets {
-		if len(dns) == 0 && used[name] {
-			out = append(out, name)
-		}
-	}
-	slices.Sort(out)
-	return out
-}
-
-func (s *Service) doctorDNS(c *checkSet) {
-	nets, _ := s.netKind.list()
-	used := map[string]bool{}
-	s.mu.RLock()
-	for _, e := range s.jails {
-		for _, a := range e.jail.Spec.Network {
-			used[a.Network] = true
-		}
-	}
-	s.mu.RUnlock()
-	m := map[string][]string{}
-	for _, o := range nets {
-		m[o.Meta.Name] = o.Spec.DNS
-	}
-	if bad := networksWithoutDNS(m, used); len(bad) > 0 {
-		c.add("network.dns", api.DoctorWarn, "no nameserver on network(s) "+strings.Join(bad, ", ")+": jails there have an empty resolv.conf and cannot resolve names",
-			"add `dns: [1.1.1.1, 2606:4700:4700::1111]` to the network (`jailops network edit NAME`)")
-	}
-}

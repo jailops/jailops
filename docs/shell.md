@@ -135,7 +135,7 @@ The green prompt on the host is the same mechanism, written once by hand (JailOp
     pkg install bash
     mkdir -p /usr/local/etc/profile.d
     printf '%s\n' 'if [ -n "${BASH_VERSION-}" ] && [ -n "${PS1-}" ]; then' \
-      "    PS1='\\[\\e[38;5;40m\\]\\u@\\h:\\w\\\$\\[\\e[0m\\]'" 'fi' > /usr/local/etc/profile.d/host-prompt.sh
+      "    PS1='\\[\\e[38;5;40m\\]\\u@\\h:\\w\\\$\\[\\e[0m\\] '" 'fi' > /usr/local/etc/profile.d/host-prompt.sh
     for f in /usr/local/etc/profile /usr/local/etc/bash.bashrc; do
       printf '%s\n' '. /usr/local/etc/profile.d/host-prompt.sh' >> "$f"
     done

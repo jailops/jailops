@@ -223,7 +223,7 @@ func customPfctl(_ Config, _ bool, args []string) error {
 var pkgOptionValue = map[string]string{"ASSUME_ALWAYS_YES": "yes", "IGNORE_OSVERSION": "yes"}
 
 // checkPkgOption accepts the few -o options image building needs:
-// REPOS_DIR=<path under the storage roots or the state directory>,
+// REPOS_DIR=<path under the storage roots or the state directory>, PKG_CACHEDIR=<the same>,
 // ASSUME_ALWAYS_YES=yes, IGNORE_OSVERSION=yes and ABI=<abi>.
 func checkPkgOption(c Config, v string) error {
 	k, val, ok := strings.Cut(v, "=")
@@ -231,7 +231,7 @@ func checkPkgOption(c Config, v string) error {
 		return forbidden("pkg -o %q is not allowed", v)
 	}
 	switch {
-	case k == "REPOS_DIR":
+	case k == "REPOS_DIR", k == "PKG_CACHEDIR":
 		return c.checkRulePath(pathState, val)
 	case k == "ABI" && reABI.MatchString(val):
 		return nil
@@ -372,7 +372,7 @@ var CommandRules = []Rule{
 	},
 	{
 		Name: "ifconfig", Binary: "/sbin/ifconfig", MaxTimeoutSeconds: 30, Custom: customIfconfig, Verify: verifyIfconfig,
-		Reason: "create bridges and epairs under generic names and rename them, and configure the interface of a Linux jail from the host (ifconfig -j)",
+		Reason: "configure the interface of a managed jail from the host (ifconfig -j); host bridges and epairs are made by the typed net.* operations",
 	},
 	{
 		Name: "route", Binary: "/sbin/route", MaxTimeoutSeconds: 30, Custom: customRoute, Verify: verifyRoute,
@@ -448,7 +448,7 @@ func (c Config) checkRulePath(kind pathKind, p string) error {
 		return err
 	case pathJailTree:
 		if c.isMountRoot(p) || !c.inMounts(p) {
-			return forbidden("path %q is not below %s", p, c.mountBaseDesc())
+			return c.notBelowMount(p)
 		}
 	case pathState:
 		if !c.inWork(p) && !c.inMounts(p) {

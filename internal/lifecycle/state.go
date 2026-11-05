@@ -50,9 +50,8 @@ const (
 )
 
 var (
-	nameRe     = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
-	snapNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.:-]{0,100}$`)
-	sizeRe     = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KMGTP]?$`)
+	nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+	sizeRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?[KMGTP]?$`)
 )
 
 // Service runs jail lifecycle operations. Callers hold a per-jail lock around

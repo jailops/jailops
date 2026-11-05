@@ -20,6 +20,10 @@ func imageDesc() *kindDesc[api.Image] {
 		func(i *api.Image) *api.ObjectMeta { return &i.Metadata },
 		func(i *api.Image) *api.ImageSpec { return &i.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.Image] { return c.Images().Resource })
+	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.Image] { return c.Images().Resource })
+	d.renameLong = renameLong("image", `its datasets and generations on every pool, the jails on it (running
+ones too: their image reference, their records and their datasets' properties), the image lists of
+projects and the records of its nightly upgrade`)
 	d.head = []string{"NAME", "OS", "RELEASE", "ARCH", "GENERATIONS", "ALIASES"}
 	d.row = func(_ time.Time, i api.Image) []string {
 		return []string{i.Metadata.Name, string(i.Spec.OS), i.Spec.Release, i.Spec.Arch,
@@ -123,7 +127,7 @@ jailops image upgrade freebsd-15-1
 jailops image generations freebsd-15-1`, "images")
 	crudCommands(a, ic, d, `Define an image. The definition says where the base comes from; 'jailops image
 build' then produces its first generation. Without --arch the image is built for
-the architecture of the server.`,
+the architecture of the server. A new image name has at most 32 characters.`,
 		`jailops image create freebsd-15-1 --release 15.1-RELEASE
 jailops image create freebsd-15-1-arm --release 15.1-RELEASE --arch arm64
 jailops image create -f freebsd-15-1.yaml`,
@@ -374,7 +378,7 @@ func (a *app) imageGenerations(d *kindDesc[api.Image]) *cobra.Command {
 		Use:               "generations IMAGE",
 		Aliases:           []string{"gens"},
 		Short:             "List the generations of an image",
-		Long:              "List the generations of an image with the jails that use each one. A generation can be deleted only when no jail uses it.",
+		Long:              "List the generations of an image with the jails that use each one. A generation can be deleted only when no jail uses it.\nThe number (g1, g2, ...) is the JailOps generation counter of the image; FREEBSD is the FreeBSD version its base\npackages were built from (15.1-RELEASE-p6: release 15.1, patch level 6), or - for a generation built before JailOps\nrecorded it.",
 		Example:           "jailops image generations freebsd-15-1\njailops image generations freebsd-15-1 -o json",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, d),
@@ -394,10 +398,10 @@ func (a *app) imageGenerations(d *kindDesc[api.Image]) *cobra.Command {
 					if len(m) > 19 {
 						m = m[:19]
 					}
-					rows = append(rows, []string{g.Name, strconv.Itoa(g.Number), dash(parentName(g.Parent)), strconv.Itoa(g.Packages),
+					rows = append(rows, []string{g.Name, strconv.Itoa(g.Number), dash(parentName(g.Parent)), dash(g.FreeBSDVersion), strconv.Itoa(g.Packages),
 						dash(m), age(a.env.Now(), g.CreatedAt), joinOrDash(g.Refs)})
 				}
-				return []string{"NAME", "NUMBER", "PARENT", "PACKAGES", "MANIFEST", "AGE", "USED BY"}, rows
+				return []string{"NAME", "NUMBER", "PARENT", "FREEBSD", "PACKAGES", "MANIFEST", "AGE", "USED BY"}, rows
 			}, func() []string {
 				var n []string
 				for _, g := range gens {

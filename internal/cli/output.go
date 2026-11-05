@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -397,6 +398,21 @@ func humanBytes(n int64) string {
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
 }
 
+// sizeText shows a size the server stores as bytes ("4294967296") in the largest binary unit that divides it ("4G");
+// anything else is shown as it is.
+func sizeText(s string) string {
+	n, err := strconv.ParseUint(s, 10, 64)
+	if err != nil || n == 0 {
+		return s
+	}
+	for i := 5; i >= 1; i-- {
+		if u := uint64(1) << (10 * i); n%u == 0 {
+			return strconv.FormatUint(n/u, 10) + string("KMGTP"[i-1])
+		}
+	}
+	return s
+}
+
 func age(now, t time.Time) string {
 	if t.IsZero() {
 		return "-"
@@ -427,13 +443,32 @@ func joinOrDash(s []string) string { return dash(strings.Join(s, ",")) }
 // linesOrDash puts each value on a line of its own, for a cell of a boxed table.
 func linesOrDash(s []string) string { return dash(strings.Join(s, "\n")) }
 
-// imageWithGen names an image reference with the generation a jail runs, "freebsd-15-1 (g3)";
-// a reference pinned to that generation is left alone.
-func imageWithGen(ref, gen string) string {
-	if gen == "" || strings.HasSuffix(ref, "#"+gen) {
+// imageWithGen names an image reference with the generation a jail runs and, for a release, the FreeBSD patch level
+// of that generation: "freebsd-15-1 (g3, p6)". A reference pinned to that generation shows only the patch level.
+func imageWithGen(ref, gen, freebsd string) string {
+	var extra []string
+	short := gen
+	if img, n, ok := strings.Cut(gen, "#"); ok && img == imageBase(ref) {
+		short = n
+	}
+	if gen != "" && ref != gen && !strings.HasSuffix(ref, "#"+short) {
+		extra = append(extra, short)
+	}
+	if p := patchLevel(freebsd); p != "" {
+		extra = append(extra, p)
+	}
+	if len(extra) == 0 {
 		return ref
 	}
-	return ref + " (" + gen + ")"
+	return ref + " (" + strings.Join(extra, ", ") + ")"
+}
+
+// patchLevel is "p6" of "15.1-RELEASE-p6"; "" for a release without a patch, a snapshot or nothing.
+func patchLevel(freebsd string) string {
+	if _, p, ok := strings.Cut(freebsd, "-RELEASE-"); ok {
+		return p
+	}
+	return ""
 }
 
 // paint wraps s, cleaned, in the colour of a table cell when colour is on for w.

@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -44,9 +46,11 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)
 	s.doctorStaticARP(ctx, c)
-	s.doctorDNS(c)
+	s.doctorDNS(ctx, c)
+	s.doctorNameLengths(ctx, c)
 	s.doctorRuntime(ctx, c)
 	s.doctorDescriptions(ctx, c)
+	s.doctorBridges(ctx, c)
 	s.doctorWireGuard(ctx, c)
 	s.doctorAppsLocal(c)
 	s.doctorAppsAccess(ctx, c)
@@ -335,6 +339,105 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 	} else {
 		c.add("pf.anchors", api.DoctorFail, "the jailops anchor lines are missing from pf.conf", "add to /etc/pf.conf, and reload it with pfctl -f /etc/pf.conf. pf wants the order: nat-anchor and rdr-anchor with the translation rules, before the first block or pass rule; anchor with the filter rules:\n"+render.AnchorLines())
 	}
+	s.doctorStatePolicy(c, rules)
+}
+
+var (
+	reStatePolicy = regexp.MustCompile(`(?m)^\s*set\s+state-policy\s+if-bound\b`)
+	rePFRules     = regexp.MustCompile(`^\s*pf_rules\s*=\s*(.*?)\s*$`)
+)
+
+// doctorStatePolicy warns about a host whose loaded ruleset blocks by default (a block ... all rule that is not
+// quick) while jails are routed through it, and whose pf.conf does not bind states to interfaces: pf's default,
+// floating states, let a jail's forwarded packets match the state made for them on the jail's port, translated, and
+// the host then drops all but the first (seen on FreeBSD 15.1: one ping of four). pf does not print the state policy,
+// so the pf.conf the system loads is read; includes are not followed.
+func (s *Service) doctorStatePolicy(c *checkSet, rules string) {
+	const name = "pf.state-policy"
+	if !defaultBlock(rules) {
+		c.add(name, api.DoctorOK, "the loaded ruleset does not block by default", "")
+		return
+	}
+	nets, _ := s.netKind.list()
+	nat := false
+	for _, n := range nets {
+		nat = nat || n.Spec.IPv4 != nil && n.Spec.IPv4.NAT
+	}
+	s.mu.RLock()
+	jails := len(s.jails)
+	s.mu.RUnlock()
+	if !nat && jails == 0 {
+		c.add(name, api.DoctorOK, "no network has NAT and there is no jail yet", "")
+		return
+	}
+	conf, err := s.pfConfPath()
+	if err != nil {
+		c.add(name, api.DoctorUnknown, "the pf.conf the system loads cannot be found: "+err.Error(), "")
+		return
+	}
+	b, err := s.hostFile(conf)
+	if err != nil {
+		c.add(name, api.DoctorUnknown, conf+" cannot be read by the daemon: "+err.Error(), "")
+		return
+	}
+	if reStatePolicy.MatchString(stripPFComments(string(b))) {
+		c.add(name, api.DoctorOK, conf+" binds states to interfaces (set state-policy if-bound)", "")
+		return
+	}
+	c.add(name, api.DoctorWarn, "the loaded ruleset blocks by default and "+conf+" has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow gets through)",
+		"add the line `set state-policy if-bound` at the top of "+conf+" (with the other options), check and load it with `pfctl -nf "+conf+" && pfctl -f "+conf+"`; never `service pf restart` over ssh, it flushes the states and cuts the session")
+}
+
+// defaultBlock says whether the loaded ruleset (pfctl -s rules) has a block ... all rule that is not quick.
+func defaultBlock(rules string) bool {
+	for _, ln := range strings.Split(rules, "\n") {
+		f := strings.Fields(ln)
+		if len(f) > 1 && f[0] == "block" && f[len(f)-1] == "all" && !slices.Contains(f, "quick") {
+			return true
+		}
+	}
+	return false
+}
+
+// pfConfPath is the pf.conf the rc script loads: pf_rules of rc.conf (rc.conf.local wins), else /etc/pf.conf.
+func (s *Service) pfConfPath() (string, error) {
+	p := "/etc/pf.conf"
+	for _, f := range []string{"/etc/rc.conf", "/etc/rc.conf.local"} {
+		b, err := s.hostFile(f)
+		if err != nil {
+			continue
+		}
+		for _, ln := range strings.Split(string(b), "\n") {
+			m := rePFRules.FindStringSubmatch(ln)
+			if m == nil {
+				continue
+			}
+			v := m[1]
+			if q := v[:min(1, len(v))]; q == `"` || q == "'" {
+				v, _, _ = strings.Cut(v[1:], q)
+			} else if f := strings.Fields(v); len(f) > 0 {
+				v = f[0]
+			}
+			if strings.ContainsAny(v, "$`") || !strings.HasPrefix(v, "/") {
+				return "", fmt.Errorf("pf_rules in %s is %q", f, m[1])
+			}
+			p = v
+		}
+	}
+	return p, nil
+}
+
+// stripPFComments drops the comments of a pf.conf and joins its continued lines.
+func stripPFComments(conf string) string {
+	conf = strings.ReplaceAll(conf, "\\\n", " ")
+	var out []string
+	for _, ln := range strings.Split(conf, "\n") {
+		if i := strings.IndexByte(ln, '#'); i >= 0 {
+			ln = ln[:i]
+		}
+		out = append(out, ln)
+	}
+	return strings.Join(out, "\n")
 }
 
 func (s *Service) doctorRuntime(ctx context.Context, c *checkSet) {

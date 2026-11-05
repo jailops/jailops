@@ -76,3 +76,18 @@ func TestParsePkgQuerySkipsToolDiagnostics(t *testing.T) {
 		t.Fatalf("%v %v", pkgs, err)
 	}
 }
+
+func TestFreeBSDVersionOfAPackageSet(t *testing.T) {
+	for in, want := range map[string]string{
+		"15.1":                  "15.1-RELEASE",
+		"15.1p6":                "15.1-RELEASE-p6",
+		"15.snap20261031190411": "15.snap20261031190411",
+	} {
+		if got := FreeBSDVersion([]Package{{"FreeBSD-utilities", "x"}, {"FreeBSD-runtime", in}}); got != want {
+			t.Errorf("%s: %q, want %q", in, got, want)
+		}
+	}
+	if got := FreeBSDVersion([]Package{{"musl", "1.2.5-r9"}}); got != "" {
+		t.Errorf("a set without FreeBSD-runtime: %q", got)
+	}
+}

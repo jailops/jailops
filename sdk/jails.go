@@ -304,3 +304,9 @@ func (j *JailClient) Expanded(ctx context.Context, name string) (api.JailExpande
 	out, _, err := get[api.JailExpanded](ctx, j.c, j.r.item(name), url.Values{"expanded": {"true"}})
 	return out, err
 }
+
+// Rename gives a stopped jail a new name (its datasets, records and update history move with it) and rewrites the
+// jails of its project that name it (extension "rename"). See Resource.Rename.
+func (j *JailClient) Rename(ctx context.Context, name string, req api.Rename, etag string) (*Operation[api.RenameResult], error) {
+	return renameAt(ctx, j.c, j.r.item(name), req, etag)
+}

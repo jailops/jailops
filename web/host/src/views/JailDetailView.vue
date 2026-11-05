@@ -27,6 +27,9 @@ import Callout from '@jailops/shared/components/Callout.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
 import RollbackDialog from '@/components/RollbackDialog.vue'
 import UpgradeDialog from '@/components/UpgradeDialog.vue'
+import RenameDialog from '@/components/RenameDialog.vue'
+import { canRename } from '@/composables/rename'
+import { renamedAddress } from '@/lib/rename'
 import { sourcesOf, flatten } from '@/lib/configKeys'
 import JailConfigTab from '@/components/JailConfigTab.vue'
 import JailDevicesTab from '@/components/JailDevicesTab.vue'
@@ -119,6 +122,22 @@ const passOpen = ref(false)
 const encrypted = computed(() => (jail.value ? encryptedVolumes(jail.value) : []))
 const locked = computed(() => !!jail.value && isLocked(jail.value))
 const snapComment = ref('')
+// Rename (extension rename, admin in the project): only a stopped jail is renamed, so a running or locked one says
+// what to do first instead of opening the dialog. Afterwards the page moves to the new name.
+const renameOpen = ref(false)
+const mayRename = computed(() => !!jail.value && canRename('jail', projectOf()))
+const renameWhy = computed(() => {
+  const j = jail.value
+  if (!j) return ''
+  if (locked.value) return s.rename.unlockFirst
+  return j.status.jid || ['running', 'starting', 'stopping'].includes(j.status.power) ? s.rename.stopFirst : ''
+})
+function openRename(): void {
+  if (!renameWhy.value) renameOpen.value = true
+}
+function renamed(to: string): void {
+  void router.replace(renamedAddress('jail', name.value, to, route.fullPath) ?? `/jails/${encodeURIComponent(to)}`)
+}
 const actionError = ref<ApiError | null>(null)
 
 function openRollback(snap?: string): void {
@@ -160,7 +179,7 @@ const rows = computed(() => {
   const imgDiff = pinned && !!j.status.generation && !j.spec.image.endsWith(j.status.generation.replace(/^.*#/, '#')) && j.spec.image !== j.status.generation
   const wantRun = j.spec.boot?.autostart ? 'running (autostart)' : '-'
   return [
-    { field: s.jail.image, spec: j.spec.image, status: j.status.generation || '-', diff: imgDiff },
+    { field: s.jail.image, spec: j.spec.image, status: j.status.generation ? j.status.generation + (j.status.freebsd_version ? ` (${j.status.freebsd_version})` : '') : '-', diff: imgDiff },
     { field: s.jail.addresses, spec: specAddr.map(shortAddr).join(', ') || '-', status: live.map(shortAddr).join(', ') || s.jail.notRunning, diff: addrDiff },
     { field: s.jail.power, spec: wantRun, status: j.status.power, diff: !!j.spec.boot?.autostart && j.status.power !== 'running' },
   ]
@@ -201,6 +220,10 @@ const attentionItems = computed(() => {
             <template v-if="encrypted.length && hasExt('volume_unlock') && !locked">
               <button class="btn" type="button" data-test="lock" @click="lockOpen = true"><Icon name="lock" />{{ s.keys.lock }}</button>
               <button class="btn" type="button" data-test="change-pass" @click="passOpen = true"><Icon name="keyRound" />{{ s.keys.change }}</button>
+            </template>
+            <template v-if="mayRename">
+              <button class="btn" type="button" data-test="jail-rename" :aria-disabled="!!renameWhy" :aria-describedby="renameWhy ? 'jail-rename-why' : undefined" @click="openRename">{{ s.rename.open(s.rename.kinds.jail) }}</button>
+              <span v-if="renameWhy" id="jail-rename-why" class="why-disabled" data-test="jail-rename-why">{{ renameWhy }}</span>
             </template>
             <button class="btn btn-danger" type="button" data-test="jail-delete" @click="remove"><Icon name="trash" />{{ isApp ? s.jails.uninstall : s.jails.delete }}</button>
           </div>
@@ -345,6 +368,7 @@ const attentionItems = computed(() => {
         </div>
         <RollbackDialog :open="rollbackOpen" :jail="jail.metadata.name" :snapshots="snaps" :initial="rollbackSnap" @close="rollbackOpen = false" @done="l.reload" />
         <UpgradeDialog :open="upgradeOpen" :jail="jail" @close="upgradeOpen = false" @done="l.reload" />
+        <RenameDialog :open="renameOpen" kind="jail" :name="jail.metadata.name" :etag="l.data.value?.etag" @close="renameOpen = false" @done="renamed" />
         <UnlockDialog :open="unlockOpen" :jail="jail.metadata.name" @close="unlockOpen = false" @done="l.reload" />
         <PassphraseDialog :open="passOpen" :jail="jail.metadata.name" @close="passOpen = false" @done="l.reload" />
         <ConfirmDialog :open="lockOpen" :title="s.keys.lockTitle(jail.metadata.name)" :confirm-label="s.keys.lock" danger :run="() => lockJail(jail!.metadata.name)" @close="lockOpen = false" @done="l.reload"><Callout tone="warn">{{ s.keys.lockText }}</Callout></ConfirmDialog>

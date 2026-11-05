@@ -112,10 +112,15 @@ type ImageGeneration struct {
 	// Parent is the generation this one was built from, if any.
 	Parent int `json:"parent,omitempty"`
 	// Manifest is a hash over the sorted installed package set and versions.
-	Manifest  string    `json:"manifest"`
-	Packages  int       `json:"packages,omitempty"`
-	Dataset   string    `json:"dataset,omitempty"`
-	CreatedAt time.Time `json:"created_at,omitzero"`
+	Manifest string `json:"manifest"`
+	Packages int    `json:"packages,omitempty"`
+	// FreeBSDVersion is the FreeBSD version the base packages of the generation were built from, taken from the
+	// version of its FreeBSD-runtime package when it was built: "15.1-RELEASE-p6" for a release and its patch level,
+	// the package version as it is for a snapshot of a branch ("15.snap20261031190411"). Empty for a generation built
+	// before JailOps recorded it, and for a Linux image.
+	FreeBSDVersion string    `json:"freebsd_version,omitempty"`
+	Dataset        string    `json:"dataset,omitempty"`
+	CreatedAt      time.Time `json:"created_at,omitzero"`
 	// Refs lists jails that use this generation.
 	Refs []string `json:"refs,omitempty"`
 	// Storages lists the storage whose pool holds a copy. Clones need the

@@ -67,7 +67,7 @@ test('uninstalling an app confirms and lists the data that goes', async ({ page 
 test('the create form follows the server name rule, says what is missing and focuses it', async ({ page }) => {
   await open(page, '/jails')
   await page.getByTestId('new-jail').click()
-  await expect(page.getByRole('dialog')).toContainText('at most 63 characters')
+  await expect(page.getByRole('dialog')).toContainText('at most 32 characters')
   await expect(page.getByTestId('jail-create-why')).toContainText('Name')
   await page.locator('#jc-name').fill('Web.1')
   await page.getByTestId('jail-create-go').click({ force: true })

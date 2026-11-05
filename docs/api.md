@@ -39,6 +39,16 @@ is the `Jail`. A locked jail has `status.power` `locked` and `status.locked` (th
 `rate_limited` (429) for 30 seconds. A passphrase is never in a reply. SDK: `Jails().CreateWithPassphrase`, `Unlock`,
 `Lock`, `ChangePassphrase`; the fake serves them and records the bodies with the passphrases replaced.
 
+**Renames** (extension `rename`, [design.md](design.md#88-renames)): `POST /api/v1/networks/{name}/rename`,
+`/api/v1/firewall/address-sets/{name}/rename`, `/api/v1/firewall/policies/{name}/rename`, `/api/v1/profiles/{name}/rename`,
+`/api/v1/jails/{name}/rename` (a stopped jail), `/api/v1/images/{name}/rename` and `/api/v1/projects/{name}/rename` (its
+jails stopped), body `Rename` (`new_name`, `dry_run`), `If-Match` checked against the object's generation. A dry run
+answers at once with `RenameResult`: `changes` (`kind` object, reference, dataset, anchor, interface, file or state;
+`object`; `detail`), `counts`, `steps` and `warnings`; a rename answers an operation whose result is the same. All of it
+changes or none of it. Global admin for networks, images and projects, the project's admin for the others. An update
+(`PUT`, `PATCH`) never changes a name. SDK: `Resource.Rename` (`c.Networks().Rename`, `c.Firewall().Policies().Rename`,
+...) and `c.Jails().Rename`; the fake serves them.
+
 ## Reaching it
 
 - **Local**: the unix socket. Root (uid 0) is a global admin, the host's recovery access; every other local user is anonymous, like an unauthenticated remote client, and authenticates with a token or a login. The same identities, roles, scopes and audit as the network listener.

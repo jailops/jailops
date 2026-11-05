@@ -263,8 +263,12 @@ func TestJailEditorFlow(t *testing.T) {
 	tr.do("", "jail", "edit", "web")
 	h.env["EDITOR"] = fail
 	tr.do("", "jail", "edit", "web")
-	if m := h.mutations(); len(m) != 1 {
+	// the create, and the dry run of the rename the changed name asked about (not confirmed: no answer)
+	if m := h.mutations(); len(m) != 2 || !strings.HasSuffix(m[1], "/rename") {
 		t.Fatalf("failed edits must not write: %v", m)
+	}
+	if _, ok := h.srv.JailIn("main", "other"); ok {
+		t.Fatal("an unconfirmed rename renamed the jail")
 	}
 	h.env["EDITOR"] = sed + " " // trailing blanks are tolerated
 	tr.do("", "jail", "edit", "web", "--dry-run")

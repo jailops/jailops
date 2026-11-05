@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/validate"
 )
@@ -43,7 +44,6 @@ var (
 	reDevfsGlob  = regexp.MustCompile(`^[a-z0-9*?_./-]{1,64}$`)
 	reDevfsName  = regexp.MustCompile(`^[a-z_][a-z0-9_-]{0,31}$`)
 	reApkArg     = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+@:=/<>~-]{0,127}$`)
-	reIfCreate   = regexp.MustCompile(`^(bridge[0-9]{1,4}|epair[0-9]{1,4}[ab])$`)
 	reNumber     = regexp.MustCompile(`^[0-9]{1,5}$`)
 	apkSubs      = []string{"add", "update", "upgrade", "del", "info", "verify", "--version"}
 	apkFlags     = []string{"--no-cache", "-q", "--quiet", "--update-cache", "-U", "--simulate", "-s", "--no-progress", "-v", "--verbose", "-a", "--available", "--no-interactive"}
@@ -608,7 +608,9 @@ func verifyJexec(_ context.Context, l *Local, args []string) error {
 
 // ---- ifconfig and route ----
 
-func (c Config) checkJailIface(name string) error { return c.ifOwned(name) }
+// checkJailIface checks the form of an interface name in a jail's vnet; verifyIfconfig and verifyRoute read the
+// interface there and require JailOps's marker before the command runs.
+func (c Config) checkJailIface(name string) error { return ifconfig.ValidateIfName(name) }
 
 func parseAddr(s string, v6 bool) (netip.Addr, error) {
 	a, err := netip.ParseAddr(s)
@@ -626,11 +628,10 @@ func parseBits(s string, max int) error {
 	return nil
 }
 
-// customIfconfig accepts:
+// customIfconfig accepts (only in the vnet of a managed jail; bridges and epairs of the host are made by the typed
+// net.* operations, which mark them, never by a command line):
 //
-//	ifconfig bridge create | ifconfig epair create
-//	ifconfig bridgeN name <owned name> | ifconfig epairNa|epairNb name <owned name>
-//	ifconfig -j <jail> <owned iface>
+//	ifconfig -j <jail> <iface>
 //	ifconfig -j <jail> <owned iface> up|down
 //	ifconfig -j <jail> <owned iface> description <JailOps description>
 //	ifconfig -j <jail> <owned iface> mtu <n>
@@ -638,10 +639,6 @@ func parseBits(s string, max int) error {
 //	ifconfig -j <jail> <owned iface> inet6 <addr> [prefixlen <n>] [alias|-alias]
 func customIfconfig(c Config, _ bool, args []string) error {
 	switch {
-	case len(args) == 2 && (args[0] == "bridge" || args[0] == "epair") && args[1] == "create":
-		return nil
-	case len(args) == 3 && reIfCreate.MatchString(args[0]) && args[1] == "name":
-		return c.ifOwned(args[2])
 	case len(args) == 3 && args[0] == "-j":
 		// read-only: the state of one interface in the jail's vnet (its description is repaired from it)
 		if err := ValidJailName(args[1]); err != nil {
@@ -718,11 +715,19 @@ func checkIfconfigJail(r []string) error {
 	return bad()
 }
 
-func verifyIfconfig(_ context.Context, l *Local, args []string) error {
-	if len(args) >= 2 && args[0] == "-j" {
-		return jailGuard{l}.managed(args[1])
+// verifyIfconfig runs in the helper before the command: the jail is managed and, for a form that changes the
+// interface, the interface carries JailOps's marker in the jail's vnet (read there, never taken from the request).
+func verifyIfconfig(ctx context.Context, l *Local, args []string) error {
+	if len(args) < 3 || args[0] != "-j" {
+		return forbidden("ifconfig: only the -j forms are accepted")
 	}
-	return nil
+	if err := (jailGuard{l}).managed(args[1]); err != nil {
+		return err
+	}
+	if len(args) == 3 {
+		return nil // reading one interface
+	}
+	return l.ifOwnedInJail(ctx, args[1], args[2])
 }
 
 // customRoute accepts: route -j <jail> add|delete [-inet6] default|<host> <gateway>.
@@ -741,7 +746,7 @@ func customRoute(c Config, _ bool, args []string) error {
 			return nil
 		}
 		if args[2] == "add" && len(args) == 7 && args[5] == "-interface" {
-			return c.ifOwned(args[6])
+			return c.checkJailIface(args[6])
 		}
 		return forbidden("route: expected -host <ipv4> -interface <interface>")
 	}
@@ -766,7 +771,7 @@ func customRoute(c Config, _ bool, args []string) error {
 	}
 	gw, zone, hasZone := strings.Cut(r[1], "%")
 	if hasZone {
-		if !v6 || c.ifOwned(zone) != nil {
+		if !v6 || c.checkJailIface(zone) != nil {
 			return invalid("invalid gateway %q", r[1])
 		}
 		a, err := parseAddr(gw, true)
@@ -779,6 +784,20 @@ func customRoute(c Config, _ bool, args []string) error {
 	return err
 }
 
-func verifyRoute(_ context.Context, l *Local, args []string) error {
-	return jailGuard{l}.managed(args[1])
+// verifyRoute: the jail is managed, and an interface the route names (-interface, or the zone of a link-local
+// gateway) carries JailOps's marker in the jail's vnet.
+func verifyRoute(ctx context.Context, l *Local, args []string) error {
+	if err := (jailGuard{l}).managed(args[1]); err != nil {
+		return err
+	}
+	iface := ""
+	if len(args) == 7 && args[5] == "-interface" {
+		iface = args[6]
+	} else if _, zone, ok := strings.Cut(args[len(args)-1], "%"); ok {
+		iface = zone
+	}
+	if iface == "" {
+		return nil
+	}
+	return l.ifOwnedInJail(ctx, args[1], iface)
 }

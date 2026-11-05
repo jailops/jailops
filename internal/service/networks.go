@@ -11,6 +11,7 @@ import (
 	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/reconcile"
 	"jailops.net/jailops/internal/render"
+	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
@@ -23,6 +24,7 @@ func (s *Service) networkToAPI(ctx context.Context, o object[api.NetworkSpec]) a
 	if a, f, ok := s.networkCounts(o.Spec, o.Meta.Name); ok {
 		n.Status.Allocated, n.Status.Free = a, f
 	}
+	n.Status.DNS = s.networkDNS(o.Meta.Name, o.Spec)
 	if a := ActorFrom(ctx); !a.Global || ProjectFrom(ctx) != "" {
 		n.Status.Orphans = nil // host interfaces are not the business of a project
 		n.Status.Members = nil
@@ -187,18 +189,21 @@ func overlappingSubnets(a, b api.NetworkSpec) (netip.Prefix, netip.Prefix, bool)
 	return netip.Prefix{}, netip.Prefix{}, false
 }
 
-// nextBridge returns the lowest unused "jo<n>".
-func (s *Service) nextBridge() (string, error) {
+// nextBridge returns the lowest "jo<n>" that no network uses and that is not an interface of the host.
+func (s *Service) nextBridge(host map[string]ifconfig.Iface) (string, error) {
 	objs, err := s.netKind.list()
 	if err != nil {
 		return "", err
 	}
 	used := map[string]bool{}
 	for _, o := range objs {
-		used[o.Spec.Bridge] = true
+		for _, n := range bridgeNames(o.Spec.Bridge) {
+			used[n] = true
+		}
 	}
 	for i := 0; i < 1000; i++ {
-		if b := ipam.BridgeName(i); !used[b] {
+		b := ipam.BridgeName(i)
+		if _, taken := host[b]; !taken && !used[b] && !used[b+"ga"] && !used[b+"gb"] {
 			return b, nil
 		}
 	}
@@ -222,12 +227,21 @@ func (s *Service) CreateNetwork(ctx context.Context, n api.Network) (api.Network
 	if s.netKind.exists(name) {
 		return api.Network{}, api.Errorf(api.CodeAlreadyExists, "network %q already exists", name)
 	}
+	note := ""
 	if n.Spec.Bridge == "" {
-		if n.Spec.Bridge, err = s.nextBridge(); err != nil {
+		if n.Spec.Bridge, note, err = s.defaultBridge(ctx, name); err != nil {
 			return api.Network{}, err
 		}
+	} else if err := s.checkBridge(ctx, name, n.Spec.Bridge); err != nil {
+		return api.Network{}, err
 	}
 	if err := s.validateNetwork(name, &n.Spec, ""); err != nil {
+		return api.Network{}, err
+	}
+	if err := validate.AnchorPath("name", render.NetAnchor(name)); err != nil {
+		return api.Network{}, err
+	}
+	if err := s.checkNetworkHost(ctx, n.Spec); err != nil {
 		return api.Network{}, err
 	}
 	o, err := s.netKind.create(ctx, n.Metadata, n.Spec)
@@ -236,6 +250,10 @@ func (s *Service) CreateNetwork(ctx context.Context, n api.Network) (api.Network
 	}
 	s.kick()
 	out := s.networkToAPI(ctx, o)
+	if note != "" {
+		out.Status.Warnings = append(out.Status.Warnings, note)
+	}
+	out.Status.Warnings = append(out.Status.Warnings, s.forwardingWarnings(ctx, n.Spec)...)
 	// A proxy-mode network needs the host to answer the off-link probes of the segment's routers; the administrator
 	// sets that, so say it now and not only in the doctor.
 	if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy {
@@ -243,44 +261,74 @@ func (s *Service) CreateNetwork(ctx context.Context, n api.Network) (api.Network
 			out.Status.Warnings = append(out.Status.Warnings, w)
 		}
 	}
+	dnsWarnings(&out)
 	return out, nil
 }
 
-// UpdateNetwork replaces a network.
+// dnsWarnings adds to the answer of a create or an update what the administrator has to do for the jails of a
+// network that ask its gateway for names.
+func dnsWarnings(n *api.Network) {
+	if d := n.Status.DNS; d != nil && d.Advice != "" {
+		n.Status.Warnings = append(n.Status.Warnings, d.Advice)
+	}
+}
+
+// UpdateNetwork replaces a network. A change of its dns reaches the running jails on it at once: their resolv.conf is
+// written again (after the network's lock is released, under each jail's own); the answer names them.
 func (s *Service) UpdateNetwork(ctx context.Context, name string, n api.Network, expect int64) (api.Network, error) {
 	if err := requireGlobal(ctx, "changing a network"); err != nil {
 		return api.Network{}, err
 	}
-	unlock, err := s.locks.lockPatient(ctx, "update network "+name, networkLock(name), "network/_bridges")
+	out, before, err := s.updateNetwork(ctx, name, n, expect)
 	if err != nil {
 		return api.Network{}, err
+	}
+	if d := out.Status.DNS; d != nil && !slices.Equal(before.Nameservers, d.Nameservers) {
+		d.Updated, d.NotUpdated = s.liveResolv(ctx, name)
+	}
+	dnsWarnings(&out)
+	return out, nil
+}
+
+// updateNetwork stores the new spec under the network's lock; before is the resolver configuration of its jails
+// until now.
+func (s *Service) updateNetwork(ctx context.Context, name string, n api.Network, expect int64) (api.Network, api.NetworkDNS, error) {
+	unlock, err := s.locks.lockPatient(ctx, "update network "+name, networkLock(name), "network/_bridges")
+	if err != nil {
+		return api.Network{}, api.NetworkDNS{}, err
 	}
 	defer unlock()
 	old, err := s.netKind.get(name)
 	if err != nil {
-		return api.Network{}, err
+		return api.Network{}, api.NetworkDNS{}, err
 	}
+	before := *s.networkDNS(name, old.Spec)
 	if n.Spec.Bridge == "" {
 		n.Spec.Bridge = old.Spec.Bridge
 	}
 	if n.Spec.Bridge != old.Spec.Bridge {
-		return api.Network{}, invalid("the bridge of a network cannot change").WithHint("create a new network and move the jails")
+		return api.Network{}, api.NetworkDNS{}, invalid("the bridge of a network cannot change: its jails' ports, its gateway pair and its address are on it, and the helper creates a bridge only under a free name").WithHint("create a new network and move the jails")
 	}
 	if n.Metadata.Name != "" && n.Metadata.Name != name {
-		return api.Network{}, invalid("renaming is not supported")
+		return api.Network{}, api.NetworkDNS{}, renameByAction("network", "networks")
 	}
 	if err := s.validateNetwork(name, &n.Spec, name); err != nil {
-		return api.Network{}, err
+		return api.Network{}, api.NetworkDNS{}, err
 	}
 	if err := s.checkNetworkFits(name, n.Spec); err != nil {
-		return api.Network{}, err
+		return api.Network{}, api.NetworkDNS{}, err
+	}
+	if err := s.checkNetworkHost(ctx, n.Spec); err != nil {
+		return api.Network{}, api.NetworkDNS{}, err
 	}
 	o, err := s.netKind.update(ctx, name, expect, n.Metadata.Labels, &n.Metadata.ManagedBy, n.Spec)
 	if err != nil {
-		return api.Network{}, err
+		return api.Network{}, api.NetworkDNS{}, err
 	}
 	s.kick()
-	return s.networkToAPI(ctx, o), nil
+	out := s.networkToAPI(ctx, o)
+	out.Status.Warnings = append(out.Status.Warnings, s.forwardingWarnings(ctx, n.Spec)...)
+	return out, before, nil
 }
 
 // checkNetworkFits rejects a spec under which an attached jail's address

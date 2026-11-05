@@ -62,9 +62,10 @@ func ShellPath(v string) string {
 }
 
 // DefaultPS1 is the default prompt: user@host:directory and # or $, in 256-colour number color, with the colour
-// sequences marked as non-printing so bash measures the line correctly.
+// sequences marked as non-printing so bash measures the line correctly, and a space after it so what is typed does not
+// touch the prompt.
 func DefaultPS1(color int) string {
-	return fmt.Sprintf(`\[\e[38;5;%dm\]\u@\h:\w\$\[\e[0m\]`, color)
+	return fmt.Sprintf(`\[\e[38;5;%dm\]\u@\h:\w\$\[\e[0m\] `, color)
 }
 
 // CheckPromptColor reports whether n is a 256-colour number.

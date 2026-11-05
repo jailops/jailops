@@ -141,6 +141,33 @@ and shows the server's refusal (`busy`, with the policies in `detail.policies`) 
 shows an empty state with **Add set**. The demo checks names, members, includes and cycles as the server does, refuses a
 set in use and a policy in use or mandatory, and keeps what was created until the page is reloaded.
 
+## Rename (host console)
+
+**Rename network**, **Rename image**, **Rename project**, **Rename jail**, **Rename policy**, **Rename address set** and
+**Rename profile** sit with the other actions of the object: a network's card, an image's card, the project's page, the
+jail's page header, the policy and set editors of `/firewall`, a profile's row. They are offered only when the server
+has the `rename` extension and to the role the server asks for (`composables/rename.ts`): a global admin for networks,
+images, projects, the host profiles and a project's mandatory policy; an admin of the project for the rest. Storage,
+users, certificates, WireGuard, remotes and backup targets and policies have no Rename. A jail is renamed while it is
+stopped: on a running (or locked) jail the button stays and says next to it to stop (or unlock) the jail first, and
+opens nothing.
+
+The dialog (`src/components/RenameDialog.vue`, the helpers in `lib/rename.ts`) is tier 2: it names what changes before
+anything does. The New name field follows the create rule of the kind (`shared/src/lib/names.ts`, `addressSet` for
+sets); once the name passes, a dry run (`POST <object>/rename` with `dry_run`, debounced) lists the changes grouped by
+what they touch (the object, what refers to it, datasets, firewall anchors, interface descriptions, files, records),
+the counts in words and the server's warnings, in a region that is announced politely. A refusal (a taken name, a
+running jail, a managed object, a stale generation) takes the plan's place in words. **Rename** runs the rename as an
+operation with If-Match (the generation the page read) and follows it; on success the page moves to the new address
+when it is the object's own page (`/jails/NEW`, `/projects/NEW`), and the project switcher follows a renamed current
+project.
+
+The demo (`src/demo/rename.ts`) answers every kind: the plan from the references it holds (project grants and image
+lists, jail networks, policies, profiles, images and boot dependencies, `@set` in policy rules, set includes), the
+rename applied to its data with the old name free again, and the server's refusals: the name rule, a name in use, a
+running jail (busy, with the hint), a locked jail, the hub-managed project `shop`, and a stale If-Match (conflict). A
+new name that starts with `fail` fails the operation and changes nothing.
+
 ## Rules, enforced by `web/tests/architecture.test.ts`
 
 - An app imports `shared` and itself, never another app. Shared imports no app.

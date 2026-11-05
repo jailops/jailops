@@ -16,6 +16,7 @@ import type {
   AppAccess, AppAllow, AppAllowResult, AppDeny, AppDenyResult,
   LogsRead, LogForward, LogForwardSpec, LogForwardTestResult,
   HostCertificate, HostCertificateUpload, ACMESpec, SetupStatus, SetupRequest, SetupResult,
+  Rename, RenameResult,
 } from '@jailops/shared/api/types'
 import type { SnapshotBody, ExecSessionInfo, ConfigResult } from '../types'
 import { logQuery, type LogQuery } from '@/lib/logs'
@@ -230,6 +231,18 @@ export const api = {
     resize: (n: string, id: string, cols: number, rows: number) => c().mutate('POST', `/jails/${e(n)}/console/${e(id)}/resize`, { cols, rows }),
     close: (n: string, id: string) => c().mutate('DELETE', `/jails/${e(n)}/console/${e(id)}`),
     output: (n: string, id: string, h: import('@jailops/shared/api/client').StreamHandlers) => c().stream(`/jails/${e(n)}/console/${e(id)}/output`, h),
+  },
+  /** Extension rename: POST <object>/rename. A dry run answers the plan at once; a rename is an operation whose
+   *  metadata is the same plan. If-Match is the generation of the object as the page read it. The project of a
+   *  project-level object travels in the query like every project request (`host` names the host profiles). */
+  rename: {
+    network: (n: string, b: Rename, etag?: string) => c().mutate<RenameResult>('POST', `/networks/${e(n)}/rename`, b, { etag }),
+    image: (n: string, b: Rename, etag?: string) => c().mutate<RenameResult>('POST', `/images/${e(n)}/rename`, b, { etag }),
+    project: (n: string, b: Rename, etag?: string) => c().mutate<RenameResult>('POST', `/projects/${e(n)}/rename`, b, { etag }),
+    jail: (n: string, b: Rename, etag?: string) => c().mutate<RenameResult>('POST', `/jails/${e(n)}/rename`, b, { etag }),
+    policy: (n: string, b: Rename, etag?: string) => c().mutate<RenameResult>('POST', `/firewall/policies/${e(n)}/rename`, b, { etag }),
+    addressSet: (n: string, b: Rename, etag?: string) => c().mutate<RenameResult>('POST', `/firewall/address-sets/${e(n)}/rename`, b, { etag }),
+    profile: (n: string, b: Rename, etag?: string, project?: string) => c().mutate<RenameResult>('POST', `/profiles/${e(n)}/rename${project ? `?project=${e(project)}` : ''}`, b, { etag }),
   },
   remotes: { list: () => c().list<Remote>('/remotes') },
   operations: {

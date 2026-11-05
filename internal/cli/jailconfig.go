@@ -281,7 +281,7 @@ creates the nic eth1.
 
 If a changed key needs a restart the command lists the keys and does NOT restart
 the jail; --restart restarts it (if it is running) once the change is stored.`
-	example := "jailops config set nginx limits.memory 2G limits.cpu 2\njailops config set nginx nic.eth0.mtu=1400 --restart\njailops config set nginx shell /usr/local/bin/bash"
+	example := "jailops config set nginx limits.memory 2G limits.cpu 2\njailops config set nginx nic.eth0.ipv4=auto --restart\njailops config set nginx shell /usr/local/bin/bash"
 	if unset {
 		use, short = "unset NAME KEY...", "Remove configuration keys of a jail"
 		long = `Reset keys to their defaults. Unsetting a device key such as nic.eth1 removes
@@ -453,6 +453,9 @@ func profileDesc() *kindDesc[api.Profile] {
 		func(p *api.Profile) *api.ObjectMeta { return &p.Metadata },
 		func(p *api.Profile) *api.ProfileSpec { return &p.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.Profile] { return c.Profiles() })
+	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.Profile] { return c.Profiles() })
+	d.renameLong = renameLong("profile", `the jails that apply it (for a host profile, --project host, the
+jails of every project that has no profile of that name)`)
 	d.head = []string{"NAME", "KEYS", "DESCRIPTION"}
 	d.row = func(_ time.Time, p api.Profile) []string {
 		return []string{p.Metadata.Name, strconv.Itoa(len(p.Spec.Config)), dash(p.Spec.Description)}

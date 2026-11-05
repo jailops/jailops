@@ -62,7 +62,8 @@ func (s *scriptedJails) ran(sub string) bool {
 	// A FreeBSD jail has no pkg of its own: the host runs `pkg -r ROOT upgrade -y`, written here as `pkg upgrade -y`.
 	if s.env != nil {
 		for _, c := range s.env.Run.Calls() {
-			if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 2 && c.Cmd.Args[0] == "-r" &&
+			// an image build passes -o options (REPOS_DIR, PKG_CACHEDIR...): it is not a jail's pkg
+			if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 2 && c.Cmd.Args[0] == "-r" && c.Cmd.Args[2] != "-o" &&
 				strings.Contains("pkg "+strings.Join(c.Cmd.Args[2:], " "), sub) {
 				return true
 			}

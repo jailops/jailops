@@ -72,6 +72,7 @@ func (s *Server) routes() {
 	} {
 		reg(m)
 	}
+	s.registerRenames(m)
 	m("POST /api/v1/trust/tokens", s.createTrustToken)
 	m("POST /api/v1/trust/clients", s.redeemTrustToken)
 	m("GET /api/v1/sessions", s.listSessions)
