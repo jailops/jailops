@@ -167,7 +167,7 @@ func TestLint(t *testing.T) {
 // The hand-written pages of the daemons follow the same conventions.
 func TestHandWrittenPages(t *testing.T) {
 	pages, _ := filepath.Glob(filepath.Join("..", "..", "packaging", "man", "*.8"))
-	if len(pages) != 3 {
+	if len(pages) != 4 {
 		t.Fatalf("pages: %v", pages)
 	}
 	for _, p := range pages {

@@ -186,6 +186,10 @@ jobs:
           go vet ./...
           CGO_ENABLED=1 go test ./... -race -count=1
           test -z "$(go list -m all | tail -n +2)" || { echo "the SDK must have no dependencies"; go list -m all; exit 1; }
+      - name: jailops-setup (the installer script, against fake pfctl, sysrc, zpool and service)
+        run: |
+          sh scripts/jailops-setup-test.sh
+          command -v dash >/dev/null && SH=dash sh scripts/jailops-setup-test.sh || true
 
   # Fuzzing beside the other Go jobs (go allows one fuzz target per run; longer on the nightly run).
   fuzz:

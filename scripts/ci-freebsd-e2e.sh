@@ -765,6 +765,7 @@ expect "the host's nameserver again" "^nameserver $hostns\$" cat "$webroot/etc/r
 # pf.state-policy: a ruleset that blocks by default (a block ... all without quick; on an interface that does not exist,
 # so it stops nothing here) and NATs jails needs `set state-policy if-bound` in the pf.conf the system loads
 cp -p /etc/pf.conf "$work/pf.host"
+chmod 600 /etc/pf.conf # root's alone, as on a real host: the daemon (user jailops) cannot open it, the helper reads it
 printf 'block drop in log on lo9 all\n' >>/etc/pf.conf
 check "a default block" sh -c 'pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf'
 expect "doctor: the state policy is missing" 'pf\.state-policy +WARN .*set state-policy if-bound' $J doctor

@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,5 +68,45 @@ func TestDoctorStatePolicy(t *testing.T) {
 	write("pf.jails.conf", "block log all\n")
 	if c := check(); c.Status != api.DoctorWarn || !strings.Contains(c.Hint, "pfctl -nf /etc/pf.jails.conf") {
 		t.Fatalf("%+v", c)
+	}
+}
+
+// A pf.conf only root can read (mode 0600) is still checked: the daemon cannot open it, so the helper (root) does.
+func TestDoctorStatePolicyUnreadablePFConf(t *testing.T) {
+	e := dtest.New(t, dtest.Options{Clients: func(c *daemon.Clients) {
+		c.Runner = loadedRules{c.Runner, "block drop log all\n" + `anchor "jailops/*" all`}
+		c.HostFile = func(p string) ([]byte, error) {
+			if p == "/etc/pf.conf" {
+				return nil, &fs.PathError{Op: "open", Path: p, Err: fs.ErrPermission}
+			}
+			return nil, fs.ErrNotExist
+		}
+	}})
+	e.Seed()
+	s := e.D.Service()
+	createJail(t, e, s, "web")
+	check := func() api.DoctorCheck {
+		t.Helper()
+		for _, c := range s.Doctor(as(globalAdmin, "")).Checks {
+			if c.Name == "pf.state-policy" {
+				return c
+			}
+		}
+		t.Fatal("no pf.state-policy check")
+		return api.DoctorCheck{}
+	}
+	write := func(content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(e.Host.Etc, "pf.conf"), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("set skip on lo0\nset state-policy if-bound\nblock log all\n")
+	if c := check(); c.Status != api.DoctorOK || !strings.Contains(c.Message, "binds states") {
+		t.Fatalf("with the line, read by the helper: %+v", c)
+	}
+	write("set skip on lo0\n# set state-policy if-bound\nblock log all\n")
+	if c := check(); c.Status != api.DoctorWarn || !strings.Contains(c.Hint, "set state-policy if-bound") {
+		t.Fatalf("without the line: %+v", c)
 	}
 }

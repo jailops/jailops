@@ -328,6 +328,10 @@ func (l *Local) HostFirewallRead(ctx context.Context) (service.HostFirewallState
 	pf := f.files["pf.conf"]
 	st := service.HostFirewallState{FileExists: pf.exists, FileManaged: pf.exists && strings.HasPrefix(pf.data, HostResolvHeader+"\n"),
 		PFEnabled: f.pf, Modules: append([]string(nil), l.cfg.HostManage...)}
+	if pf.exists {
+		b := service.PFBindsStates(pf.data)
+		st.StatePolicyIfBound = &b
+	}
 	rec, err := l.readFirewallRecord()
 	if err != nil {
 		return st, err

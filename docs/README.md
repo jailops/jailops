@@ -6,7 +6,7 @@ register of what is settled and what is open.
 
 | Read | When |
 |---|---|
-| [install.md](install.md) | A new host: packages, `jailops-priv init`, the three `pf.conf` lines, forwarding, the first jail |
+| [install.md](install.md) | A new host: packages, `jailops-setup` (or by hand: `jailops-priv init`, the three `pf.conf` lines, forwarding), the first jail |
 | [configuration.md](configuration.md) | Every key of `jailopsd.yaml`, `priv.conf`, `backupd.yaml` and the client file |
 | [exposure.md](exposure.md) | Exposing the API: local only, behind a proxy or Cloudflare, direct with TLS and mTLS; certificates; the web console, off by default |
 | [ports.md](ports.md) | Every port and socket of the family (39110 to 39112): which process, what for, what to open |
