@@ -610,6 +610,8 @@ done
 same() { # same DESCRIPTION WANT COMMAND...: standard output must be exactly WANT
 	desc=$1; want=$2; shift 2
 	out=$("$@" 2>/dev/null) || { echo "$out" >&2; fail "$desc"; }
+	# a command in a pseudo-terminal sometimes prints nothing (its shell ended before the output was written): ask again
+	n=0; while [ -z "$out" ] && [ -n "$want" ] && [ $n -lt 3 ]; do n=$((n + 1)); sleep 1; out=$("$@" 2>/dev/null) || true; done
 	[ "$out" = "$want" ] || { printf 'got:  %s\nwant: %s\n' "$out" "$want" >&2; fail "$desc"; }
 }
 in_pty() { # in_pty JAIL COMMAND...: what COMMAND printed in a pseudo-terminal in the jail, without carriage returns,
