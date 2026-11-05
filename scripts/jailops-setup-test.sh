@@ -133,7 +133,6 @@ check "modules loaded" logged "kldload -n if_bridge if_epair pf zfs"
 check "modules at boot" grep -qx 'pf_load="YES"' "$ROOT/boot/loader.conf"
 check "services enabled" grep -qx 'jailopsd_enable="YES"' "$FAKE/rc.conf"
 check "web on" grep -qx 'jailopsd_web="YES"' "$FAKE/rc.conf"
-check "helper before daemon" log_before "service jailops_priv start" "service jailopsd start"
 check "pf loaded before the daemon starts" log_before "pfctl -f" "service jailopsd start"
 check "doctor" logged "jailops doctor"
 check "no admin without a terminal" eval '! logged "jailops user create"'

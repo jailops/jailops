@@ -4,8 +4,8 @@
 #   jailops-setup [-pool POOL] [-n|--dry-run] [-y|--yes]
 #
 # It does what docs/install.md sections 1 to 6 describe, in this order, and only what is not done yet (safe to run
-# twice): the kernel modules, `jailops-priv init`, IP forwarding, the three anchor lines in pf.conf, the services
-# (jailops_priv, then jailopsd, with the web console), `jailops doctor`, the first administrator. Every action is
+# twice): the kernel modules, the one-time init of the pool, IP forwarding, the three anchor lines in pf.conf, the service
+# (jailopsd, with the web console; it starts the helper), `jailops doctor`, the first administrator. Every action is
 # printed in one line, starting with "> ", before it runs; -n prints them and changes nothing.
 #
 # pf: lines of pf.conf that exist are never changed or moved. Missing lines are inserted where pf wants them (options,
@@ -32,8 +32,8 @@ usage() {
 usage: jailops-setup [-pool POOL] [-n|--dry-run] [-y|--yes]
 
 Sets this host up for JailOps after `pkg install jailops`: the kernel modules,
-jailops-priv init, IP forwarding, the JailOps anchor lines in pf.conf, the
-services, jailops doctor and the first administrator. Run it as root. It is
+the one-time init of the pool, IP forwarding, the JailOps anchor lines in
+pf.conf, the service, jailops doctor and the first administrator. Run it as root. It is
 safe to run again; what is done already is left as it is.
 
   -pool POOL    the ZFS pool for JailOps (needed when the host has more than one)
@@ -339,10 +339,11 @@ if [ "$pf_ok" = 1 ]; then
 	fi
 fi
 
-# ── 5. the services (section 6) ──────────────────────────────────────────────────────────────────────────────────
-step "services"
+# ── 5. the service (section 6) ───────────────────────────────────────────────────────────────────────────────────
+# One service: jailopsd starts the privileged helper it needs (and stops it with itself), so the helper has no line of
+# its own in rc.conf and is never started here.
+step "service"
 set_rc="" web_changed=0
-isyes "$(rcvar jailops_priv_enable)" || set_rc="$set_rc jailops_priv_enable=YES"
 isyes "$(rcvar jailopsd_enable)" || set_rc="$set_rc jailopsd_enable=YES"
 web=$(rcvar jailopsd_web)
 if [ -z "$web" ]; then
@@ -350,22 +351,18 @@ if [ -z "$web" ]; then
 	web=YES web_changed=1
 fi
 [ -n "$set_rc" ] && { run sysrc $set_rc || fail "sysrc$set_rc"; }
-[ -z "$set_rc" ] && ok "jailops_priv and jailopsd are enabled"
+[ -z "$set_rc" ] && ok "jailopsd is enabled"
 started=1
-# the helper first: jailopsd needs it
-for svc in jailops_priv jailopsd; do
-	if service "$svc" status >/dev/null 2>&1; then
-		if [ "$svc" = jailopsd ] && [ "$web_changed" = 1 ]; then
-			run service jailopsd restart || { fail "service jailopsd restart"; started=0; }
-		else
-			ok "$svc is running"
-		fi
-	elif ! run service "$svc" start; then
-		fail "service $svc start: see /var/log/messages"
-		started=0
-		break
+if service jailopsd status >/dev/null 2>&1; then
+	if [ "$web_changed" = 1 ]; then
+		run service jailopsd restart || { fail "service jailopsd restart"; started=0; }
+	else
+		ok "jailopsd is running"
 	fi
-done
+elif ! run service jailopsd start; then
+	fail "service jailopsd start: see /var/log/messages"
+	started=0
+fi
 
 # ── 6. doctor and the first administrator ────────────────────────────────────────────────────────────────────────
 step "jailops doctor"

@@ -20,7 +20,7 @@ Root on the host is the recovery access, always; it is not an identity of the da
 A lost second factor: sign in with a recovery code. Without one, root creates a new administrator as above and deletes
 the old user (`jailops user delete NAME`); there is no command that removes another user's second factor.
 
-`jailops-priv setup-token` (as root) prints a one-time token for the console's first-run setup, and only while **no**
+`service jailopsd setuptoken` (as root) prints a one-time token for the console's first-run setup, and only while **no**
 global administrator exists (a user, or a token or certificate that has not expired). Once one exists the setup routes
 answer `not_found`: use `jailops user create` as root instead. No root on the host means no recovery from JailOps;
 that is the boundary ([security-model.md](security-model.md#the-first-administrator-the-setup-token)).
@@ -121,7 +121,7 @@ passes. A change that would shut out the address the request came from is refuse
 - **The host reboots before the deadline:** the boot script `jailops_revert` puts the old files back before the network
   and pf start (`reverted_at_boot`).
 - **The helper is down while a change waits:** its timer went with it. When it crashed, daemon(8) starts it again after
-  5 seconds; after a `service jailops_priv stop`, start it (`service jailops_priv start`). Either start reads
+  5 seconds; after a `service jailops_priv stop`, `service jailopsd start` starts it again. Either start reads
   the pending record first and reverts at once when the deadline has passed. If it does not start, as root at the
   console: `jailops-priv revert-pending` (it puts the files back and does not reload) and then `service pf reload`.
 - **The revert itself failed** (`last.outcome` is `revert_failed`, with the snapshot in `detail`): from the console as
@@ -140,7 +140,7 @@ Both binaries are new, and each service runs the old one until it restarts. The 
 part that runs as root: `jailops_priv` starts first at boot and stops last at shutdown, `service jailopsd start` starts
 the helper first when it is not running (the force_depend of rc.subr: "depends on jailops_priv, which will be forced to
 start") and `service jailopsd stop` stops it after the daemon, so `service jailopsd restart` replaces both. Jails keep
-running either way: they are kernel jails. `service jailops_priv restart` alone restarts only the helper; the daemon
+running either way: they are kernel jails. `service jailopsd restart` alone restarts only the helper; the daemon
 reconnects, and the requests it makes meanwhile fail. A `service jailopsd start` while the helper still runs the replaced
 binary warns that it needs a restart.
 

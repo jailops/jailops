@@ -12,7 +12,7 @@ the default.
 
 The short way, for a host that is to be run from the console (the five commands are in [install.md](install.md)):
 
-    sysrc jailops_priv_enable=YES jailopsd_enable=YES jailopsd_web=YES jailops_appliance=YES
+    sysrc jailopsd_enable=YES jailopsd_web=YES jailops_appliance=YES
 
 The first start then needs no shell: the helper sets the host up, the daemon prints a one-time setup token and the
 console's address on the system console, and the console's first-run wizard does the rest.
@@ -82,7 +82,7 @@ host:
 host-manage = identity
 ```
 
-Restart both services after a change (`service jailops_priv restart`, `service jailopsd restart`).
+Restart both services after a change (`service jailopsd restart`).
 
 ### One switch in rc.conf
 
@@ -96,7 +96,7 @@ jailops_pool="zroot"                            # optional; the pool of the firs
 ```
 
 The rc script of `jailops_priv` passes the modules to the helper when it starts (`-appliance-modules identity,firewall`,
-or `all`): the helper changes the modules of `host-manage` in `priv.conf` **and** these. `jailops-priv check-config` (and
+or `all`): the helper changes the modules of `host-manage` in `priv.conf` **and** these. `service jailops_priv checkconfig` (and
 `service jailops_priv checkconfig`) prints both lists. The rc script of `jailopsd` passes the same list to the daemon,
 which manages `host.manage.modules` of `jailopsd.yaml` and these. The helper's list is what authorises: a module the daemon
 lists and the helper does not still answers `not_managed`. `jailops doctor` has a check `appliance`: ok when both list the
@@ -516,7 +516,7 @@ With `jailops_appliance`, a fresh host starts without any user. Three parts make
   console's addresses (`https://HOST:39110/`, the host name when it is qualified, then the host's addresses) are written
   to `/dev/console` (and to the terminal of `service jailopsd start`) and logged with the facility `authpriv` (on FreeBSD
   `/var/log/auth.log`, root only). The daemon's own log says only that a token was issued: `/var/log/messages` is readable
-  by everyone. The motd is not touched. `jailops-priv setup-token` as root prints a new one at any time; once an
+  by everyone. The motd is not touched. `service jailopsd setuptoken` as root prints a new one at any time; once an
   administrator exists it answers that the setup is complete (exit 3). It trusts nothing of the daemon's answer: it
   prints only a token of 52 base32 characters (another answer is an error), only addresses of the form
   `https://HOST:PORT/` in printable ASCII, and the hint with control, bidirectional and zero-width characters replaced,
@@ -563,11 +563,11 @@ The design, for the installer image that does not exist yet:
 
 1. **Setup token.** The installer prints a one-time setup token on the system console (and writes it to a root-only
    file). The wizard asks for it; without it nothing can be done, so a host reachable on the network before setup
-   cannot be taken over. The token expires after 24 hours and after first use; `jailops-priv setup-token` prints a new
+   cannot be taken over. The token expires after 24 hours and after first use; `service jailopsd setuptoken` prints a new
    one on the console.
 2. **Host name** (module 1).
 3. **Network**: confirm or change what DHCP gave, or set a static address (module 3, with commit confirmed).
-4. **Pool**: choose the pool and the dataset for JailOps (`jailops-priv init -pool`), or create a pool on empty disks
+4. **Pool**: choose the pool and the dataset for JailOps (`jailops-setup -pool`), or create a pool on empty disks
    (a mirror or a single disk; the wizard lists the disks and says what will be erased).
 5. **Admin account**: the first global administrator with a password and, optionally, TOTP.
 6. **First app**: optionally install one app from the catalog (or skip).

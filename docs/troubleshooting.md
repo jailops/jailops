@@ -62,8 +62,8 @@ new `resolv.conf` at once.
 
 **`GET /readyz` answers 503** ([exposure.md](exposure.md#load-balancers-and-monitors)). `not ready: starting`: the daemon
 has not finished starting; if it stays, read its log. `helper`: `jailops-priv` does not answer;
-`service jailops_priv status`, then `service jailops_priv start` (the daemon reconnects by itself). `storage`: the helper
-answers and the JailOps dataset is missing; `zfs list` and `jailops-priv check-config`. `store`: the database does not
+`service jailops_priv status`, then `service jailopsd restart` (a helper that crashed is started again by itself after 5 seconds). `storage`: the helper
+answers and the JailOps dataset is missing; `zfs list` and `service jailops_priv checkconfig`. `store`: the database does not
 answer a query; `jailops doctor` (`db.integrity`) and the daemon's log. `stopping`: the daemon is shutting down.
 `GET /healthz` stays `ok` in all of these: it only says the process runs.
 
@@ -76,8 +76,8 @@ password is replaced by root with `sudo jailops user set-password NAME`.
 `jailopsd.yaml`. Unix groups no longer grant a role; create the administrators as JailOps users (`sudo jailops user create NAME --admin`).
 
 **The daemon starts and every ZFS or jail operation fails with `forbidden`.** The helper refuses what `priv.conf` does not allow.
-The message names the line to add (`ndp-proxy`, `admin-host-mount`, ...). Edit `priv.conf` as root, `service jailops_priv restart`.
-`jailops-priv check-config` prints the effective roots and allow-lists.
+The message names the line to add (`ndp-proxy`, `admin-host-mount`, ...). Edit `priv.conf` as root, `service jailopsd restart`.
+`service jailops_priv checkconfig` prints the effective roots and allow-lists.
 
 **`forbidden: interface "NAME" is not managed by JailOps: ...`.** The helper changes only bridges and epairs that carry
 JailOps's description, which it gives an interface when it creates it ([security-model.md](security-model.md#interfaces)).

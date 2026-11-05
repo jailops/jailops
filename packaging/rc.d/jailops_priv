@@ -11,7 +11,7 @@
 # start` starts this script first when it is not running and `service jailopsd stop` stops it after the daemon (see jailopsd).
 #
 # Add to /etc/rc.conf:
-#   jailops_priv_enable="YES"
+#   jailopsd_enable="YES"          (enough: the helper is enabled with the daemon; jailops_priv_enable="NO" is the way to say otherwise)
 #   jailops_appliance="YES"        (optional) appliance mode (docs/appliance.md): JailOps manages the host from the
 #                                  console. The helper manages the modules below besides host-manage of priv.conf,
 #                                  and at the first start, without priv.conf, it sets the host up (appliance-init).
@@ -135,7 +135,7 @@ jailops_priv_stop_precmd()
 
 # rc.conf may set jailops_priv_config: read it before anything is derived from it
 load_rc_config $name
-: ${jailops_priv_enable:="NO"}
+: ${jailops_priv_enable:=${jailopsd_enable:-NO}}   # jailopsd_enable=YES is enough: the helper is part of it
 : ${jailops_priv_config:="/usr/local/etc/jailops/priv.conf"}
 
 jailops_priv_appliance=$(jailops_appliance_args) || err 1 "invalid jailops_appliance_modules"

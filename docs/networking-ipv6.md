@@ -103,7 +103,7 @@ On many cloud servers you get a `/64` on a segment shared with other customers. 
 address in it is on-link and asks neighbor discovery who has each one; a jail behind the host never hears the question.
 JailOps answers it itself.
 
-1. **Approve it, once, as root** in `/usr/local/etc/jailops/priv.conf`, then `service jailops_priv restart`:
+1. **Approve it, once, as root** in `/usr/local/etc/jailops/priv.conf`, then `service jailopsd restart`:
 
        ndp-proxy = vtnet0=2001:db8:1:2:100::/80
 
