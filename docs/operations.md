@@ -120,7 +120,8 @@ passes. A change that would shut out the address the request came from is refuse
 - **Still connected and it looks wrong:** `jailops host revert` puts it back now; `jailops host confirm` keeps it.
 - **The host reboots before the deadline:** the boot script `jailops_revert` puts the old files back before the network
   and pf start (`reverted_at_boot`).
-- **The helper is down while a change waits:** its timer went with it. Starting it (`service jailops_priv start`) reads
+- **The helper is down while a change waits:** its timer went with it. When it crashed, daemon(8) starts it again after
+  5 seconds; after a `service jailops_priv stop`, start it (`service jailops_priv start`). Either start reads
   the pending record first and reverts at once when the deadline has passed. If it does not start, as root at the
   console: `jailops-priv revert-pending` (it puts the files back and does not reload) and then `service pf reload`.
 - **The revert itself failed** (`last.outcome` is `revert_failed`, with the snapshot in `detail`): from the console as
@@ -132,8 +133,16 @@ passes. A change that would shut out the address the request came from is refuse
 
     bectl create pre-jailops-upgrade                 # a boot environment of the root file system
     pkg upgrade jailops jailops-client
-    service jailops_priv restart && service jailopsd restart
+    service jailopsd restart
     jailops doctor
+
+Both binaries are new, and each service runs the old one until it restarts. The two are one service, the helper being the
+part that runs as root: `jailops_priv` starts first at boot and stops last at shutdown, `service jailopsd start` starts
+the helper first when it is not running (the force_depend of rc.subr: "depends on jailops_priv, which will be forced to
+start") and `service jailopsd stop` stops it after the daemon, so `service jailopsd restart` replaces both. Jails keep
+running either way: they are kernel jails. `service jailops_priv restart` alone restarts only the helper; the daemon
+reconnects, and the requests it makes meanwhile fail. A `service jailopsd start` while the helper still runs the replaced
+binary warns that it needs a restart.
 
 The database (`/var/db/jailops/jailops.db`) has **forward-only** schema migrations (`internal/store/migrations`,
 three so far): none has a way back. A daemon older than the database refuses to start with `version_skew` and leaves the
@@ -181,7 +190,7 @@ read the details as an administrator when an alert fires.
 |---|---|---|
 | The daemon serves | `GET /readyz`, no credentials ([exposure.md](exposure.md#load-balancers-and-monitors)) | not 200 for two probes in a row; the body names the class |
 | The daemon runs | `GET /healthz`, no credentials | no answer: restart `jailopsd` |
-| The helper is down | `/readyz` answers `not ready: helper`; `service jailops_priv status` | at once: nothing on the host can change |
+| The helper is down | `/readyz` answers `not ready: helper`; `service jailops_priv status` (or `service jailopsd status`, which names both); a crashed helper is started again by daemon(8) after 5 seconds | for more than a minute: nothing on the host can change |
 | The host checks | `GET /api/v1/doctor` with the token (or `jailops doctor`, exit status 1 on a failed check) | `metadata.status` is `fail`; `warn` for a day |
 | Reconcile failures | doctor check `reconcile` (`fail` with the error, `warn` for drift); `status.conditions` of each object | `fail` |
 | Pool health | doctor checks `zfs.pool` and `zfs.pool.<storage>` | not `ok` |

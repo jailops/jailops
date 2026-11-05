@@ -217,6 +217,9 @@ install `doas` or `sudo` from packages; the examples below write the commands as
     service jailopsd start
     jailops doctor
 
+The helper first: `service jailopsd start` starts `jailops_priv` itself when it is not running (rc.subr's force_depend: it
+says that the helper is forced to start). At boot the order is declared in the rc scripts, and a helper that crashes is started again by daemon(8) after 5 seconds.
+
 Then create the first administrator. On the host, **root is the global administrator of the unix socket** (the recovery access); every
 other local user is anonymous until they sign in with a JailOps identity. There is no Unix group that grants a role.
 

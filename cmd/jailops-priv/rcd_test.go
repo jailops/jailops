@@ -172,7 +172,7 @@ func TestRCDPidfilesInRootOnlyDirectories(t *testing.T) {
 		var s script
 		for _, ln := range strings.Split(string(b), "\n") {
 			ln = strings.TrimSpace(ln)
-			for _, key := range []string{"pidfile=", "supervisor_pidfile="} {
+			for _, key := range []string{"pidfile=", "supervisor_pidfile=", "helper_pidfile="} {
 				if v, ok := strings.CutPrefix(ln, key); ok {
 					s.pidfiles = append(s.pidfiles, strings.Trim(v, `"`))
 				}

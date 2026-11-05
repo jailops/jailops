@@ -1,5 +1,5 @@
 .\" jailopsd.8, installed as /usr/local/share/man/man8/jailopsd.8
-.Dd November 2, 2026
+.Dd November 5, 2026
 .Dt JAILOPSD 8
 .Os
 .Sh NAME
@@ -152,6 +152,28 @@ and to syslog
 .Pq Cm jailops-priv setup-token .
 .El
 .Pp
+At boot
+.Sy jailops_priv
+starts first and at shutdown it stops last.
+The two are one service, the helper being the part that runs as root.
+A start of
+.Nm
+by hand while the helper is not running starts the helper first, as
+.Xr rc.subr 8
+does for a dependency (it prints that the helper will be forced to start),
+and a stop of
+.Nm
+stops the helper after it, so
+.Cm restart
+replaces both.
+A start while the helper still runs a binary that has been replaced since
+it started (a package upgrade) warns that the helper needs a restart too.
+.Cm status
+also says whether the helper runs: without it the daemon serves, but changes
+nothing on the host, and it reconnects once the helper is back.
+After an upgrade of the package, restart the pair:
+.Dl service jailopsd restart
+.Pp
 The configuration is validated as the daemon's user with
 .Dl service jailopsd checkconfig
 and a start refuses a configuration that does not validate.
@@ -176,6 +198,10 @@ The configuration; the installed sample is
 The API socket.
 .It Pa /var/run/jailopsd.pid
 The pid of the daemon under rc.d.
+.It Pa /var/run/jailopsd-daemon.pid
+The pid of its
+.Xr daemon 8
+supervisor.
 .It Pa /var/db/jailops
 The data directory: database, seal key, TLS material, operation journal
 .Pq Sy data_dir .
