@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## 0.6.3 - 2026-11-05
+
+- **The text the package prints is a file of the source** (`packaging/pkg/post-install.sh`): a first install says to run
+  `jailops-setup`, an upgrade says `service jailopsd restart`. The recipe of the package reads the file, so a change of the
+  text ships with a release and no longer needs an edit in the packages repository.
 - **One service: `sysrc jailopsd_enable=YES` and `service jailopsd start`.** The helper has no line of its own any more:
   `jailops_priv_enable` (and the boot-time revert of a pending host change, which follows it) defaults to the value of
   `jailopsd_enable`, and `jailopsd` starts the helper first. `service jailopsd setuptoken` prints the one-time token of
