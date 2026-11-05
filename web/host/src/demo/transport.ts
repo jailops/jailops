@@ -125,10 +125,12 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const e: ApiEvent = { type: 'lifecycle', timestamp: new Date().toISOString(), metadata: { action, source, requestor: who } }
     subs.forEach((h) => h.onEvent(e))
   }
-  function startOp(desc: string, resources: Operation['resources'], duration: number, apply: () => void, metadata?: unknown, may_cancel = true): RawResponse {
+  function startOp(desc: string, resources: Operation['resources'], duration: number, apply: () => void, metadata?: unknown, may_cancel = true, failure?: ApiErrorBody): RawResponse {
+    // failure is part of the operation from the start: the answer to the request is computed below, and an operation
+    // whose duration has run out in that millisecond would be reported as a success before a later line set it
     const op: DemoOp = {
       id: `op-${++seq}`, description: desc, status: 'pending', resources, may_cancel, created_at: new Date().toISOString(), updated_at: new Date().toISOString(),
-      startedAt: Date.now(), duration: duration / speed, onDone: apply, metadataFinal: metadata,
+      startedAt: Date.now(), duration: duration / speed, onDone: apply, metadataFinal: metadata, failure,
     }
     db.ops.unshift(op)
     return { status: 202, envelope: { type: 'async', status: 'Operation created', status_code: 100, operation: `/api/v1/operations/${op.id}`, metadata: view(op) } }
@@ -584,8 +586,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       if (a.fails) return
       a.apply()
       emit(`${kind}-renamed`, a.resource.replace(/[^/]+$/, a.result.to))
-    }, a.result, false)
-    if (a.fails) db.ops[0].failure = a.fails
+    }, a.result, false, a.fails)
     return r
   }
 
@@ -613,13 +614,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       const next = String(body.new_passphrase ?? '')
       if (next.length < 12 || next.length > 512) return fail(400, { code: 'invalid', message: 'the passphrase must be between 12 and 512 bytes long' })
       const err = check(body.old_passphrase)
-      const r = startOp(`Change the volume passphrase of jail ${name}`, { jails: [src] }, 900, () => { if (!err) volPass[name] = next }, undefined, false)
-      if (err) db.ops[0].failure = err
-      return r
+      return startOp(`Change the volume passphrase of jail ${name}`, { jails: [src] }, 900, () => { if (!err) volPass[name] = next }, undefined, false, err)
     }
     if (!body.passphrase) return fail(400, { code: 'invalid', message: 'passphrase must be 1 to 512 bytes without a line break' })
     const err = check(body.passphrase)
-    const r = startOp(`Unlock jail ${name}`, { jails: [src] }, 900, () => {
+    return startOp(`Unlock jail ${name}`, { jails: [src] }, 900, () => {
       if (err) return
       j.status.locked = undefined
       if (j.status.power === 'locked') j.status.power = 'stopped'
@@ -628,9 +627,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         j.status.power = 'starting'
         pending.push({ jail: name, to: 'running', at: Date.now() })
       }
-    }, undefined, false)
-    if (err) db.ops[0].failure = err
-    return r
+    }, undefined, false, err)
   }
 
   // The server's texts for a refused address set (internal/validate), so the demo says what the daemon says.
