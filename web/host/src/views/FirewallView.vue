@@ -18,6 +18,9 @@ import Icon from '@jailops/shared/components/Icon.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import AddressSetCreateDialog from '@/components/AddressSetCreateDialog.vue'
+import RenameDialog from '@/components/RenameDialog.vue'
+import { canRename } from '@/composables/rename'
+import { currentProject } from '@/composables/project'
 import type { FirewallPolicy, AddressSet, FirewallRule } from '@jailops/shared/api/types'
 
 const l = useLoad(async () => {
@@ -221,6 +224,24 @@ function removeSet(): void {
 }
 const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
 
+// Rename (extension rename, admin in the project; the project's mandatory policy needs a global admin). The editor's
+// If-Match goes with it; afterwards the editor shows the object under its new name, and the rules that named a set
+// as @name name the new one.
+const renamingPolicy = ref(false)
+const renamingSet = ref(false)
+const mayRenamePolicy = computed(() => canRename('policy', undefined, { mandatory: currentProject.value?.spec.firewall === selected.value }))
+async function policyRenamed(to: string): Promise<void> {
+  selected.value = to
+  await l.reload()
+  await pick(to)
+}
+async function setRenamed(to: string): Promise<void> {
+  setSel.value = to
+  await l.reload()
+  await pickSet(to)
+  if (selected.value) await pick(selected.value)
+}
+
 // create a policy: a name and the two defaults; rules are added in the editor afterwards
 const creating = ref(false)
 const nf = reactive({ name: '', in: 'deny', out: 'allow' })
@@ -276,6 +297,7 @@ function removePolicy(): void {
             <div class="row"><h2 class="mono">{{ draft.metadata.name }}</h2><span v-if="dirty" class="pill warn">{{ s.firewall.unsaved }}</span></div>
             <div class="row-actions">
               <span v-if="saveWhy" class="why-disabled" data-test="save-why">{{ saveWhy }}</span>
+              <button v-if="mayRenamePolicy" class="btn" type="button" data-test="rename-policy" @click="renamingPolicy = true">{{ s.rename.open(s.rename.kinds.policy) }}</button>
               <button class="btn btn-danger" type="button" data-test="delete-policy" @click="removePolicy">{{ s.firewall.delete }}</button>
               <button class="btn" type="button" :disabled="!dirty" @click="revert">{{ s.firewall.revert }}</button>
               <button class="btn btn-primary" type="button" :disabled="saving" :aria-disabled="!!saveWhy" data-test="save-policy" @click="save">{{ s.firewall.save }}</button>
@@ -352,6 +374,7 @@ function removePolicy(): void {
             <div class="row"><h2 class="mono">@{{ setDraft.metadata.name }}</h2><span v-if="setDirty" class="pill warn">{{ s.firewall.unsaved }}</span></div>
             <div class="row-actions">
               <span v-if="setWhy" class="why-disabled" data-test="set-save-why">{{ setWhy }}</span>
+              <button v-if="canRename('addressSet')" class="btn" type="button" data-test="rename-set" @click="renamingSet = true">{{ s.rename.open(s.rename.kinds.addressSet) }}</button>
               <button class="btn btn-danger" type="button" data-test="delete-set" @click="removeSet">{{ s.firewall.deleteSet }}</button>
               <button class="btn" type="button" :disabled="!setDirty" @click="revertSet">{{ s.firewall.revert }}</button>
               <button class="btn btn-primary" type="button" :disabled="setSaving" :aria-disabled="!!setWhy" data-test="save-set" @click="saveSet">{{ s.firewall.saveSet }}</button>
@@ -374,6 +397,8 @@ function removePolicy(): void {
       </div>
     </LoadState>
     </div>
+    <RenameDialog :open="renamingPolicy" kind="policy" :name="selected" :etag="etag" @close="renamingPolicy = false" @done="policyRenamed" />
+    <RenameDialog :open="renamingSet" kind="addressSet" :name="setSel" :etag="setEtag" @close="renamingSet = false" @done="setRenamed" />
     <AddressSetCreateDialog :open="creatingSet" :sets="l.data.value?.sets ?? []" @close="creatingSet = false" @created="setCreated" />
     <Modal :open="creating" :title="s.firewall.createTitle" @close="creating = false">
       <form id="fwp" novalidate @submit.prevent="create">

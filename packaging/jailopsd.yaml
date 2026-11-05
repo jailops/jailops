@@ -7,7 +7,7 @@ hub: false            # true: keep a registry of remotes and forward ?host= requ
 
 pool: tank
 # dataset: tank/jailops          # default <pool>/jailops
-# mount_base: /jailops
+# mount_base: /usr/local/jailops
 # state_dir: /var/db/jailops/state   # default <data_dir>/state; outside the storage root, where "jailops-priv init" mounts it
 # data_dir: /var/db/jailops      # SQLite database, seal key, TLS material, operation journal
 # conf_dir: /usr/local/etc/jailops/jails   # must equal conf_dir of jailops-priv

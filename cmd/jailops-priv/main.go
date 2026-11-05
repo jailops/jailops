@@ -160,7 +160,7 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.StringVar(&o.stateDir, "state-dir", "", "state directory (default <mount-base>/state)")
 	fs.StringVar(&o.helperPath, "helper-path", priv.DefaultHelperPath, "path jail.conf hooks call")
 	fs.StringVar(&o.wgDir, "wireguard-dir", priv.DefaultWireGuardDir, "directory of the WireGuard keys (root only, mode 0700; outside the daemon's directories)")
-	fs.Var(&o.ifPrefix, "if-prefix", "interface name prefix owned by JailOps (default jo)")
+	fs.Var(&o.ifPrefix, "if-prefix", "deprecated: legacy interface name prefix (default jo); a bridge or epair with it and no description counts as JailOps's and is marked at its next change. JailOps owns the interfaces that carry its description")
 	fs.Var(&o.allowUser, "allow-user", "user allowed to connect (jailopsd's user)")
 	fs.Var(&o.allowGroup, "allow-group", "group allowed to connect")
 	fs.Var(&o.ndpProxy, "ndp-proxy", "an uplink the IPv6 proxy may use and the prefixes it may answer for: <uplink>=<prefix>[,<prefix>...] (repeatable)")
@@ -672,7 +672,7 @@ func checkConfig(o *options, cfg priv.Config, stdout, stderr io.Writer) int {
 	w("conf dir:       %s\n", c.ConfDir)
 	w("state dir:      %s\n", c.StateDir)
 	w("helper path:    %s\n", c.HelperPath)
-	w("interfaces:     %s\n", strings.Join(c.IfPrefixes, ", "))
+	w("interfaces:     the bridges and epairs that carry the JailOps description; legacy prefix %s (deprecated)\n", strings.Join(c.IfPrefixes, ", "))
 	for _, u := range c.NDPProxy {
 		var ps []string
 		for _, p := range u.Prefixes {

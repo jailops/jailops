@@ -9,6 +9,7 @@ import (
 
 	"jailops.net/jailops/internal/reconcile"
 	"jailops.net/jailops/internal/render"
+	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk/api"
@@ -147,10 +148,16 @@ func TestOrphansByName(t *testing.T) {
 	_ = w.Jails.Create(bg, "/etc/jailops/jails/p_web/jail.conf", "p_web")
 	mk := func(id string, desc string) string {
 		h, _ := epairOf(id, 0)
+		if !ifconfig.HasMarker(desc) { // someone else's: made by hand, the helper would not write it
+			w.Net.AddIface(ifconfig.Iface{Name: h, Groups: []string{"epair"}, Description: desc})
+			return h
+		}
 		if _, _, err := w.Net.EpairCreate(bg, h[:len(h)-1]); err != nil {
 			t.Fatal(err)
 		}
-		_ = w.Net.SetDescription(bg, h, desc)
+		if err := w.Net.SetDescription(bg, h, desc); err != nil {
+			t.Fatal(err)
+		}
 		return h
 	}
 	mine := mk(jailID, render.JailIfaceDesc("p", "web", "lan", true))
@@ -186,7 +193,7 @@ func TestLegacyMarkerIsReplaced(t *testing.T) {
 		t.Fatalf("%+v", br)
 	}
 	w2 := newWorld(t, reconcile.Config{})
-	_ = w2.Net.BridgeCreate(bg, "jo0")
+	w2.Net.AddIface(ifconfig.Iface{Name: "jo0", Groups: []string{"bridge"}}) // made by hand, or by a release that crashed before its description
 	w2.des = reconcile.Desired{Networks: []reconcile.NetworkDesired{lan()}}
 	if rep := w2.R.Pass(bg); !strings.Contains(rep.Failures["network/lan"], "not managed by JailOps") {
 		t.Fatalf("%+v", rep.Failures)

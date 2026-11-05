@@ -120,7 +120,7 @@ func (s *Service) UpdateProfile(ctx context.Context, name string, in api.Profile
 		return api.Profile{}, err
 	}
 	if in.Metadata.Name != "" && in.Metadata.Name != name {
-		return api.Profile{}, invalid("renaming is not supported")
+		return api.Profile{}, renameByAction("profile", "profiles")
 	}
 	if err := bodyProject(proj, in.Metadata.Project); err != nil {
 		return api.Profile{}, err

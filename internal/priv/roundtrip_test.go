@@ -1062,8 +1062,8 @@ func TestGatewayPairThroughTheHelper(t *testing.T) {
 		}
 	}
 	// a port or an address on an interface JailOps does not own is refused
-	if _, _, err := n.EpairCreate(ctx, "em21g"); !api.IsCode(err, api.CodeForbidden) {
-		t.Errorf("epair outside the prefix: %v", err)
+	if _, _, err := n.EpairCreate(ctx, "em21"); !api.IsCode(err, api.CodeInvalid) { // em21a, em21b: a driver's names
+		t.Errorf("epair under a driver's name: %v", err)
 	}
 	if err := n.AddrAdd(ctx, "em0", mustPrefix("10.91.0.1/24")); !api.IsCode(err, api.CodeForbidden) {
 		t.Errorf("address on em0: %v", err)

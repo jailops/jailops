@@ -263,7 +263,7 @@ func TestSetMTU(t *testing.T) {
 
 // A client that implements the proposed ifconfig.Client method is used.
 type mtuNet struct {
-	ifconfig.Client
+	*ifconfig.Fake
 	got string
 }
 
@@ -274,9 +274,12 @@ func (m *mtuNet) SetMTU(_ context.Context, iface string, mtu int) error {
 
 func TestSetMTUUsesTheInterfaceMethodWhenPresent(t *testing.T) {
 	e := newEnv(t)
-	m := &mtuNet{Client: e.net}
+	m := &mtuNet{Fake: e.net}
 	l, err := NewLocal(e.cfg, Deps{ZFS: e.zfs, Net: m, Runner: e.runner}, WithoutChown())
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.net.BridgeCreate(context.Background(), "jo0"); err != nil {
 		t.Fatal(err)
 	}
 	if err := l.SetMTU(context.Background(), "jo0", 1500); err != nil || m.got != "jo0:0" {
@@ -290,7 +293,11 @@ func TestSetMTUUsesTheInterfaceMethodWhenPresent(t *testing.T) {
 }
 
 func TestSetMTUOverTheSocket(t *testing.T) {
-	f := newFixture(t)
+	f := newFixtureWith(t, func(e *env) {
+		if err := e.net.BridgeCreate(context.Background(), "jo0"); err != nil {
+			t.Fatal(err)
+		}
+	})
 	f.runner.On("ifconfig", []string{"jo0", "mtu", "9000"}, "")
 	if err := f.client.SetMTU(context.Background(), "jo0", 9000); err != nil {
 		t.Error(err)

@@ -230,6 +230,12 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 	if err := s.validateJail(proj, jail, spec); err != nil {
 		return api.Operation{}, err
 	}
+	if err := canonicalJailSizes(&spec, true); err != nil {
+		return api.Operation{}, err
+	}
+	if err := s.checkNewJail(proj, jail, spec); err != nil {
+		return api.Operation{}, err
+	}
 	spec.OS = im.Spec.OS
 	s.shellDefaults(&spec, nil)
 	now := s.now().UTC()

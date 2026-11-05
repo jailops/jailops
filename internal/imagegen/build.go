@@ -258,11 +258,15 @@ func (m *Manager) buildPlan(b *Build, src Source, srcSteps []plan.Step, st *buil
 		Name: "set-properties", Describe: "zfs set jailops:* canmount=noauto mountpoint=" + finalMount + " " + staging,
 		Do: func(ctx context.Context) error {
 			st.createdAt = m.now().Format("2006-01-02T15:04:05Z07:00")
-			return z.Set(ctx, staging, map[string]string{
+			props := map[string]string{
 				PropKind: KindGeneration, PropManifest: st.manifest, PropPackages: strconv.Itoa(len(st.pkgs)),
 				PropParent: strconv.Itoa(b.Parent), PropOSRelease: b.Spec.Release, PropSource: b.Spec.Source.Type, PropOS: string(b.Spec.OS),
 				PropCreated: st.createdAt, "canmount": "noauto", "mountpoint": finalMount,
-			})
+			}
+			if v := FreeBSDVersion(st.pkgs); v != "" {
+				props[PropFreeBSD] = v
+			}
+			return z.Set(ctx, staging, props)
 		}})
 	p.Add(plan.Step{Name: "snapshot-ro", Describe: "zfs snapshot " + stagingRO,
 		Do:   func(ctx context.Context) error { return z.Snapshot(ctx, nil, stagingRO) },

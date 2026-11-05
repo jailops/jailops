@@ -179,3 +179,10 @@ func (p jpaths) rootNewMP() string  { return p.containerMP() + "/root.new" }
 func (p jpaths) rootOldMP() string  { return p.containerMP() + "/root.old" }
 func (p jpaths) specPath() string   { return p.containerMP() + "/spec.json" }
 func (p jpaths) bundlePath() string { return p.containerMP() + "/bundle.json" }
+
+// ContainerOn is the container dataset of the jail name of project on st, and where it is mounted: what a rename
+// moves a container to.
+func ContainerOn(st Storage, project, name string) (ds, mountpoint string) {
+	p := jpaths{st: st, project: project, name: name}
+	return p.containerDS(), p.containerMP()
+}

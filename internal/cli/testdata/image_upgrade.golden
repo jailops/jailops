@@ -85,11 +85,11 @@ OPERATION                              STATUS    DESCRIPTION
 <uuid>   pending   Upgrade image freebsd-15
 
 $ jailops image generations freebsd-15
-NAME            NUMBER   PARENT   PACKAGES   MANIFEST              AGE   USED BY
-freebsd-15#g1   1        -        0          sha256:<hex>   3h    pin
-freebsd-15#g2   2        g1       120        sha256:<hex>   3h    web
-freebsd-15#g3   3        g2       120        sha256:<hex>   3h    api
-freebsd-15#g4   4        g3       120        sha256:<hex>   3h    -
-freebsd-15#g5   5        g4       120        sha256:<hex>   3h    -
-freebsd-15#g6   6        g5       120        sha256:<hex>   3h    -
+NAME            NUMBER   PARENT   FREEBSD   PACKAGES   MANIFEST              AGE   USED BY
+freebsd-15#g1   1        -        -         0          sha256:<hex>   3h    pin
+freebsd-15#g2   2        g1       -         120        sha256:<hex>   3h    web
+freebsd-15#g3   3        g2       -         120        sha256:<hex>   3h    api
+freebsd-15#g4   4        g3       -         120        sha256:<hex>   3h    -
+freebsd-15#g5   5        g4       -         120        sha256:<hex>   3h    -
+freebsd-15#g6   6        g5       -         120        sha256:<hex>   3h    -
 

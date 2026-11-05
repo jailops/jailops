@@ -85,7 +85,7 @@ func TestCommandCreateFailureNamesConsoleLog(t *testing.T) {
 	c := NewCommand(f)
 	err := c.Create(ctx, "/etc/jail.d/alpha_web.conf", "alpha_web")
 	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Code != api.CodeInternal || ae.Hint != "what the jail's start and stop commands printed is in /var/log/jail_alpha_web_console.log on the host" {
+	if !errors.As(err, &ae) || ae.Code != api.CodeInternal || ae.Hint != "what the jail's start and stop commands printed is in /var/log/jailops/jail_alpha_web_console.log on the host" {
 		t.Fatalf("%#v", err)
 	}
 	if err := c.Create(ctx, "/etc/jail.d/alpha_db.conf", "alpha_db"); !errors.As(err, &ae) || ae.Code != api.CodeAlreadyExists || ae.Hint != "" {

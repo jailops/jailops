@@ -44,7 +44,7 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
       packages: ['nginx'], encrypted: false,
     },
     status: {
-      power, jid: power === 'running' ? 12 + name.length : undefined, generation: o.gen ?? 'freebsd-15-1#g4',
+      power, jid: power === 'running' ? 12 + name.length : undefined, generation: o.gen ?? 'freebsd-15-1#g4', freebsd_version: demoFreeBSD(o.gen ?? 'freebsd-15-1#g4'),
       addresses: power === 'running' ? [(o.ipv4 && o.ipv4 !== 'auto' ? o.ipv4 : '10.20.0.' + (10 + name.length)) + '/24'] : [],
       started_at: power === 'running' ? ago(86400 * 3 + name.length * 600) : undefined, drift: o.drift ?? [], conditions: o.cond ?? [{ type: 'Reconciled', status: 'True', since: ago(3600) }],
     },
@@ -112,9 +112,15 @@ export function autoUpgradeRuns(failed = false): NonNullable<NonNullable<Image['
   ]
 }
 
+/** The FreeBSD version of a demo generation: g1 was built from 15.1-RELEASE-p3, every later one a patch level on. */
+export function demoFreeBSD(gen: string): string | undefined {
+  const m = /^freebsd-15-1#g(\d+)$/.exec(gen)
+  return m ? `15.1-RELEASE-p${Math.min(6, Number(m[1]) + 2)}` : undefined
+}
+
 export function images(): Image[] {
   const gen = (n: number, parent: number, pk: number, ageDays: number, refs: string[]) => ({
-    number: n, name: `freebsd-15-1#g${n}`, parent: parent || undefined, manifest: `b3f0${n}c9d2e17a4455e0e1f${n}`.padEnd(40, 'a'), packages: pk, dataset: `tank/jailops/images/freebsd-15-1/g${n}`, created_at: ago(86400 * ageDays), refs,
+    number: n, name: `freebsd-15-1#g${n}`, parent: parent || undefined, manifest: `b3f0${n}c9d2e17a4455e0e1f${n}`.padEnd(40, 'a'), packages: pk, freebsd_version: demoFreeBSD(`freebsd-15-1#g${n}`), dataset: `tank/jailops/images/freebsd-15-1/g${n}`, created_at: ago(86400 * ageDays), refs,
   })
   return [
     {

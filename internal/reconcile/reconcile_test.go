@@ -287,10 +287,7 @@ func TestOrphanEpairCleanup(t *testing.T) {
 	stale := mk(jailID, 0, false) // jail "web" exists but is stopped
 	// An interface with a JailOps looking name but a foreign description is left alone.
 	fh, _ := epairOf("44444444-4444-4444-8444-444444444444", 0)
-	if _, _, err := w.Net.EpairCreate(ctx, fh[:len(fh)-1]); err != nil {
-		t.Fatal(err)
-	}
-	_ = w.Net.SetDescription(ctx, fh, "someone else's")
+	w.Net.AddIface(ifconfig.Iface{Name: fh, Groups: []string{"epair"}, Description: "someone else's"})
 	rep := w.R.Pass(bg)
 	if len(rep.Cleaned) != 2 {
 		t.Fatalf("%+v", rep)

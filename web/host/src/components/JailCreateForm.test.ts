@@ -44,9 +44,9 @@ describe('JailCreateForm', () => {
     create.mockReset()
     const w = mount(JailCreateForm, { props: { open: false, project: undefined, images: [image as never], storage: [storage as never], networks: [] }, global: { stubs: { Teleport: true } }, attachTo: document.body })
     await w.setProps({ open: true })
-    expect(w.text()).toContain('at most 63 characters')
+    expect(w.text()).toContain('at most 32 characters')
     expect(w.get('[data-test="jail-create-why"]').text()).toContain('Name')
-    for (const bad of ['web.1', '1web', 'web_1']) {
+    for (const bad of ['web.1', '1web', 'web_1', 'a'.repeat(33)]) {
       await w.get('#jc-name').setValue(bad)
       await w.get('form').trigger('submit')
       await flushPromises()

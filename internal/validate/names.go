@@ -62,7 +62,7 @@ func Hostname(field, s string) error {
 // (lower case letters and digits, at most 15 characters).
 func IfName(field, s string) error {
 	if !ifnameRE.MatchString(s) {
-		return Invalid(field, "%s %q is not a valid interface name", field, s)
+		return Invalid(field, "%s %q is not a valid interface name (a lowercase letter, then lowercase letters and digits, 15 at most)", field, s)
 	}
 	return nil
 }
@@ -234,6 +234,24 @@ func ParseSize(s string) (uint64, error) {
 		return 0, Invalid("size", "size %q is too large", s)
 	}
 	return n * mult, nil
+}
+
+// MaxSizeBytes is the largest quota, reservation or volume size the privileged helper sets (16 TiB, its fixed limit).
+const MaxSizeBytes = 16 << 40
+
+// CanonicalSize parses a size the way ParseSize does and returns it as decimal bytes, the one form ZFS, the helper and
+// the jail lifecycle all accept and the form `zfs get -p` reports, so a stored value compares equal to what is
+// observed. A size above MaxSizeBytes is refused here and not when the helper sees it.
+func CanonicalSize(field, s string) (string, error) {
+	n, err := ParseSize(s)
+	if err != nil {
+		return "", Invalid(field, "%s %q is not a size such as 512M, 4G or 4GiB", field, s).
+			WithHint("a size is a whole number of bytes with an optional unit K, M, G, T or P (binary, 1K = 1024)")
+	}
+	if n > MaxSizeBytes {
+		return "", Invalid(field, "%s %q is larger than 16T, the largest size the helper sets", field, s)
+	}
+	return strconv.FormatUint(n, 10), nil
 }
 
 // addr parses an IP address without zone.

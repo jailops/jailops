@@ -44,7 +44,7 @@ func TestJailConfGolden(t *testing.T) {
 	}
 	golden(t, "jailconf_sysvipc", s)
 	// separate namespaces, never the host's
-	for _, want := range []string{"\tsysvmsg = new;\n", "\tsysvsem = new;\n", "\tsysvshm = new;\n", "\texec.consolelog = \"/var/log/jail_${name}_console.log\";\n"} {
+	for _, want := range []string{"\tsysvmsg = new;\n", "\tsysvsem = new;\n", "\tsysvshm = new;\n", "\texec.consolelog = \"/var/log/jailops/jail_${name}_console.log\";\n"} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q", want)
 		}

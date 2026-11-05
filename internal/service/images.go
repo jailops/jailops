@@ -62,6 +62,36 @@ func cutImage(gen string) (img, rest string, ok bool) {
 	return "", "", false
 }
 
+// generationFreeBSD is the FreeBSD version of a generation named "<image>#g<N>" (what the jail list shows next to
+// it), read from the first pool that holds it and cached.
+func (s *Service) generationFreeBSD(ctx context.Context, gen string) string {
+	r, err := imagegen.ParseRef(gen)
+	if gen == "" || err != nil || r.Gen == 0 {
+		return ""
+	}
+	s.genVerMu.Lock()
+	v, ok := s.genVer[gen]
+	s.genVerMu.Unlock()
+	if ok {
+		return v
+	}
+	for _, si := range s.storageList() {
+		if si.Images == nil {
+			continue
+		}
+		if v = si.Images.FreeBSDVersion(ctx, r.Image, r.Gen); v != "" {
+			break
+		}
+	}
+	s.genVerMu.Lock()
+	if s.genVer == nil {
+		s.genVer = map[string]string{}
+	}
+	s.genVer[gen] = v
+	s.genVerMu.Unlock()
+	return v
+}
+
 // observeAcross reads an image on every pool and merges the generations by
 // number (every pool that holds one is listed in Storages). Aliases come from
 // the first pool that sets them.
@@ -228,6 +258,9 @@ func (s *Service) CreateImage(ctx context.Context, im api.Image) (api.Image, err
 	if err := s.imgKind.notTaken(im.Metadata.Name); err != nil {
 		return api.Image{}, err
 	}
+	if err := validate.NameLength("image", "name", im.Metadata.Name, validate.MaxImageName); err != nil {
+		return api.Image{}, err
+	}
 	if err := s.validateImage(im.Metadata.Name, im.Spec); err != nil {
 		return api.Image{}, err
 	}
@@ -244,7 +277,7 @@ func (s *Service) UpdateImage(ctx context.Context, name string, im api.Image, ex
 		return api.Image{}, err
 	}
 	if im.Metadata.Name != "" && im.Metadata.Name != name {
-		return api.Image{}, invalid("renaming is not supported")
+		return api.Image{}, renameByAction("image", "images")
 	}
 	if err := s.validateImage(name, im.Spec); err != nil {
 		return api.Image{}, err

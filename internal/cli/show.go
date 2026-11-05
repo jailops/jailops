@@ -131,8 +131,22 @@ func (a *app) showNetwork(n api.Network) error {
 	} else {
 		s.kv("IPv6", "none")
 	}
-	if len(n.Spec.DNS) > 0 {
-		s.kv("DNS", strings.Join(n.Spec.DNS, ", "))
+	switch d := n.Status.DNS; {
+	case d == nil:
+		if len(n.Spec.DNS) > 0 {
+			s.kv("DNS", strings.Join(n.Spec.DNS, ", "))
+		}
+	case d.Source == api.DNSFromNetwork:
+		s.kv("DNS", strings.Join(d.Nameservers, ", "))
+	case d.Source == api.DNSFromHost:
+		s.kv("DNS", strings.Join(d.Nameservers, ", ")+" (the host's nameservers)")
+	case d.Source == api.DNSFromGateway:
+		s.kv("DNS", strings.Join(d.Nameservers, ", ")+" (the gateway: the host resolves only through loopback)")
+		if d.Advice != "" {
+			s.kv("Note", d.Advice)
+		}
+	default:
+		s.kv("DNS", "none: jails get no nameserver (jailops doctor says why)")
 	}
 	if n.Spec.MTU > 0 {
 		s.kv("MTU", strconv.Itoa(n.Spec.MTU))
@@ -197,9 +211,9 @@ func (a *app) showImage(i api.Image) error {
 		if g.Packages > 0 {
 			pkgs = strconv.Itoa(g.Packages)
 		}
-		rows = append(rows, []string{fmt.Sprintf("g%d", g.Number), pkgs, age(now, g.CreatedAt), joinOrDash(g.Refs)})
+		rows = append(rows, []string{fmt.Sprintf("g%d", g.Number), dash(g.FreeBSDVersion), pkgs, age(now, g.CreatedAt), joinOrDash(g.Refs)})
 	}
-	a.printTable(indentWriter{s.w}, []string{"GEN", "PACKAGES", "AGE", "USED BY"}, rows, nil)
+	a.printTable(indentWriter{s.w}, []string{"GEN", "FREEBSD", "PACKAGES", "AGE", "USED BY"}, rows, nil)
 	return nil
 }
 
@@ -220,7 +234,7 @@ func (a *app) showProject(p api.Project) error {
 			g = "every storage"
 		}
 		if st.Quota != "" {
-			g += " (quota " + st.Quota + ")"
+			g += " (quota " + sizeText(st.Quota) + ")"
 		}
 		stor = append(stor, g)
 	}
@@ -242,7 +256,7 @@ func (a *app) showProject(p api.Project) error {
 	s.kv("CPU", strconv.Itoa(st.CPU)+" cores "+limit(q.CPU))
 	mem := humanBytes(st.MemoryUsed)
 	if q.Memory != "" {
-		mem += " of " + q.Memory
+		mem += " of " + sizeText(q.Memory)
 	} else {
 		mem += " (no quota)"
 	}

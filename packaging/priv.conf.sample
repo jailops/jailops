@@ -24,7 +24,7 @@ conf-dir = /usr/local/etc/jailops/jails
 # state-dir has no default unless mount-base is set (then <mount-base>/state).
 state-dir = /var/db/jailops/state
 work-dir = /var/tmp/jailops
-#mount-base = /jailops
+#mount-base = /usr/local/jailops
 helper-path = /usr/local/libexec/jailops-priv
 # Keys of WireGuard interfaces, one directory per tunnel (root only, mode 0700; created when needed). It must lie
 # outside the daemon's directories.
@@ -40,7 +40,10 @@ allow-user = jailops
 #allow-group = some-group
 
 # --- networking ------------------------------------------------------------------
-if-prefix = jo
+# The helper changes only the bridges and epairs that carry the JailOps description, which it writes when it creates
+# them; a bridge may have any free name. if-prefix is deprecated: a bridge or epair whose name starts with it and that
+# has no description at all (made by an earlier release) counts as JailOps's once and is marked. Default jo.
+#if-prefix = jo
 # The IPv6 proxy mode (a switched /64 where the upstream treats the jails' addresses as on-link) answers neighbor
 # solicitations on the uplink. It works only for what is approved here: the uplink and the prefixes the jails'
 # addresses come from. Without this line the helper refuses every request of the proxy. One line per uplink.

@@ -780,6 +780,7 @@ func (s *Server) routeTable() []route {
 		}},
 	)
 	add(s.appAccessRoutes()...)
+	add(s.renameRoutes()...)
 
 	// Projects, storage, trust and sessions.
 	add(resource[api.Project]{base: "/api/v1/projects", param: "name",

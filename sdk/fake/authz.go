@@ -275,6 +275,11 @@ func (s *Server) authorize(rc *reqInfo, pattern string, r *http.Request, authErr
 			return notFoundProject(rc.project)
 		}
 	case scopeList:
+		if strings.HasPrefix(r.URL.Path, "/api/v1/operations/") {
+			// one operation is looked up by its id, as the daemon does: the project of the request does not have to
+			// exist (a project rename is followed under the old name)
+			break
+		}
 		if q := r.URL.Query().Get("project"); q != "" && (!s.projectOK(q) || !rc.canProject(q)) {
 			return notFoundProject(q)
 		}

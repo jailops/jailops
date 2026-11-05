@@ -51,6 +51,10 @@ describe('name fields follow the server rule', () => {
     expect(checkNet({ ...blankNet(), name: 'lan.1', v4subnet: '10.0.0.0/24', v4gateway: '10.0.0.1', v4range: '10.0.0.2-10.0.0.9' }).name).toBe(BAD_NAME)
     expect(checkNet({ ...blankNet(), name: '1lan', v4subnet: '10.0.0.0/24', v4gateway: '10.0.0.1', v4range: '10.0.0.2-10.0.0.9' }).name).toBe(BAD_NAME)
     expect(checkNet({ ...blankNet(), name: 'lan-1', v4subnet: '10.0.0.0/24', v4gateway: '10.0.0.1', v4range: '10.0.0.2-10.0.0.9' }).name).toBeUndefined()
+    // a new network has at most 13 characters; an existing one keeps its longer name
+    const long = { ...blankNet(), name: 'a-long-network', v4subnet: '10.0.0.0/24', v4gateway: '10.0.0.1', v4range: '10.0.0.2-10.0.0.9' }
+    expect(checkNet(long).name).toBe('At most 13 characters.')
+    expect(checkNet(long, true).name).toBeUndefined()
   })
   it('a tunnel name has at most 12 characters', () => {
     expect(checkServer({ ...blankServer(), name: 'office', address: '10.99.0.1/24' }).name).toBeUndefined()

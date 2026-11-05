@@ -24,6 +24,12 @@ func routeWorld(t *testing.T, routes map[netip.Addr]string, readErr error) *worl
 
 func addRoute(t *testing.T, w *world, addr, iface string) {
 	t.Helper()
+	// a route leaves through an interface that exists: the gateway pair of a network, made by the helper
+	if _, err := w.Net.Show(bg, iface); err != nil {
+		if _, _, err := w.Net.EpairCreate(bg, iface[:len(iface)-1]); err != nil {
+			t.Fatal(err)
+		}
+	}
 	if err := w.Net.RouteAdd(bg, ifconfig.Route{Dest: addr + "/128", Interface: iface}); err != nil {
 		t.Fatal(err)
 	}
@@ -132,6 +138,9 @@ func TestStaleLinkLocalNeighborsAreRemoved(t *testing.T) {
 	w.R = reconcile.New(reconcile.Config{}, reconcile.Env{Source: w, Sink: w, Actions: w, Net: w.Net, PF: w.PF, Jails: w.Jails, Sysctl: sysctl, Clock: w.clock,
 		HostNeighbors: func(context.Context) ([]ifconfig.Neighbor, error) { return list, nil }})
 	t.Cleanup(w.R.Close)
+	if _, _, err := w.Net.EpairCreate(bg, gw[:len(gw)-1]); err != nil { // the network's gateway pair
+		t.Fatal(err)
+	}
 	for _, n := range list {
 		if n.Iface == gw {
 			if err := w.Net.NeighborSet(bg, gw, n.Addr, n.MAC); err != nil {

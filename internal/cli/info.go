@@ -299,13 +299,13 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		lim = append(lim, fmt.Sprintf("cpu %d", l.CPU))
 	}
 	if l.Memory != "" {
-		lim = append(lim, "memory "+l.Memory)
+		lim = append(lim, "memory "+sizeText(l.Memory))
 	}
 	if l.Disk != "" {
-		lim = append(lim, "disk "+l.Disk)
+		lim = append(lim, "disk "+sizeText(l.Disk))
 	}
 	if l.DiskReservation != "" {
-		lim = append(lim, "disk reservation "+l.DiskReservation)
+		lim = append(lim, "disk reservation "+sizeText(l.DiskReservation))
 	}
 	if l.PIDs > 0 {
 		lim = append(lim, fmt.Sprintf("pids %d", l.PIDs))

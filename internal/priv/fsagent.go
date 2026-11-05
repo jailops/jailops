@@ -79,7 +79,7 @@ func (l *Local) checkAgentRoot(ctx context.Context, mode, root string) (dataset 
 		return "", invalid("agent mode must be %s or %s", AgentRead, AgentWrite)
 	}
 	if !l.cfg.inMounts(mp) {
-		return "", forbidden("path %q is not below %s", mp, l.cfg.mountBaseDesc())
+		return "", l.cfg.notBelowMount(mp)
 	}
 	// which dataset is mounted there: the one in the storage root that holds the path
 	var root0 string

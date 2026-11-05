@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -15,6 +16,10 @@ func networkDesc() *kindDesc[api.Network] {
 		func(n *api.Network) *api.ObjectMeta { return &n.Metadata },
 		func(n *api.Network) *api.NetworkSpec { return &n.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.Network] { return c.Networks().Resource })
+	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.Network] { return c.Networks().Resource })
+	d.renameLong = renameLong("network", `the projects it is granted to, the jails attached to it (running
+ones too: nothing of their traffic changes), the profiles and WireGuard tunnels that name it, its firewall
+anchor and the descriptions of its interfaces. The bridge and the other interfaces keep their names`)
 	d.head = []string{"NAME", "BRIDGE", "IPV4", "GATEWAY", "RANGE", "USED", "FREE", "UPLINK"}
 	d.row = func(_ time.Time, n api.Network) []string {
 		sub, gw, rng := "-", "-", "-"
@@ -42,6 +47,19 @@ func networkDesc() *kindDesc[api.Network] {
 	d.show = func(a *app, n api.Network) error { return a.showNetwork(n) }
 	d.emptyHint = "jailops network create NAME --ipv4 10.50.0.1/24 --uplink IFACE --nat"
 	d.warnings = func(n api.Network) []string { return n.Status.Warnings }
+	d.updated = func(a *app, n api.Network) {
+		for _, w := range n.Status.Warnings {
+			fprintf(a.env.Stderr, "warning: %s\n", w)
+		}
+		if dn := n.Status.DNS; dn != nil {
+			if len(dn.Updated) > 0 {
+				fprintf(a.env.Stderr, "resolv.conf rewritten in the running jails %s (no restart needed)\n", strings.Join(dn.Updated, ", "))
+			}
+			for _, f := range dn.NotUpdated {
+				fprintf(a.env.Stderr, "warning: resolv.conf not rewritten in %s\n", f)
+			}
+		}
+	}
 	return &d
 }
 
@@ -50,15 +68,25 @@ func (a *app) networkCmd() *cobra.Command {
 	nc := group("network", "Manage VNET networks and their addresses",
 		`A network is a bridge that jails attach to with a virtual interface. JailOps
 allocates addresses from the network's range deterministically and writes them
-into the jail specification; there is no DHCP.`,
-		`jailops network create br-web --ipv4 10.50.0.1/24 --ipv6 fd50::1/64
+into the jail specification; there is no DHCP. The bridge has the network's name
+(or the one --bridge gives) and keeps it for the life of the network.`,
+		`jailops network create palminn --ipv4 172.17.32.1/24 --uplink vmx0 --nat
+jailops network create web --ipv4 10.50.0.1/24 --ipv6 fd50::1/64
 jailops network create lan --subnet 10.20.0.0/24 --gateway 10.20.0.1 --range 10.20.0.10-10.20.0.250 --nat --uplink em0
 jailops network list
 jailops network leases lan`, "networks", "net")
 	crudCommands(a, nc, d, `Create a network. IPv4 is described by --subnet, --gateway and --range; the
 gateway is a real address owned by the host, on the gateway interface of the network. IPv6 is --ipv6 PREFIX;
---ipv6-mode proxy is for a prefix on a shared segment (switched), routed is for a prefix the provider routes to you.`,
-		`jailops network create lan --subnet 10.20.0.0/24 --gateway 10.20.0.1 --range 10.20.0.10-10.20.0.250 --nat --uplink em0
+--ipv6-mode proxy is for a prefix on a shared segment (switched), routed is for a prefix the provider routes to you.
+
+The bridge is named like the network when the name can be an interface name: lowercase letters and digits, at most 13
+characters (its gateway pair adds "ga" and "gb"), not the name of a driver's interface (vmx0, em1, lo0, bridge0, tap0,
+wg0, ...) and not taken on the host or by another network. Otherwise it is jo<N>, and create says why. --bridge NAME
+chooses the name under the same rules. JailOps creates the bridge with its description and changes only interfaces it
+created; an interface of that name that exists already is refused here, not when the first jail starts. The bridge
+keeps its name until the network is deleted, also when the network is renamed.`,
+		`jailops network create palminn --ipv4 172.17.32.1/24 --uplink vmx0 --nat
+jailops network create lan --subnet 10.20.0.0/24 --gateway 10.20.0.1 --range 10.20.0.10-10.20.0.250 --nat --uplink em0
 jailops network create -f lan.yaml`,
 		func(cmd *cobra.Command) func(string) (api.Network, error) {
 			var bridge, uplink, subnet, gw, rng, v4cidr, v6cidr, v6mode string
@@ -66,7 +94,7 @@ jailops network create -f lan.yaml`,
 			var nat bool
 			var mtu int
 			f := cmd.Flags()
-			f.StringVar(&bridge, "bridge", "", "bridge interface name (default: generated)")
+			f.StringVar(&bridge, "bridge", "", "bridge interface name: any free name of at most 13 lowercase letters and digits that is not a driver's (default: the network's name when it can be one, else jo<N>)")
 			f.StringVar(&uplink, "uplink", "", "physical interface used for NAT or routing")
 			f.StringVar(&v4cidr, "ipv4", "", "IPv4 gateway address and prefix, for example 10.50.0.1/24; the rest of the subnet becomes the range")
 			f.StringVar(&v6cidr, "ipv6", "", "IPv6 gateway address and prefix, for example fd50::1/64; with --ipv6-mode proxy, the prefix your provider put on the shared segment, for example 2001:db8:1:2:100::/80")

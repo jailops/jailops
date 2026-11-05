@@ -3,8 +3,8 @@ package lifecycle
 import (
 	"context"
 	"fmt"
-	"strings"
 
+	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -29,12 +29,8 @@ func (s *Service) SnapshotJail(ctx context.Context, name, snapName, comment stri
 	}
 	if snapName == "" {
 		snapName = "snap-" + s.Cfg.now().Format("20060102T150405Z")
-	}
-	if !snapNameRe.MatchString(snapName) {
-		return res, api.Errorf(api.CodeInvalid, "bad snapshot name %q", snapName)
-	}
-	if strings.HasPrefix(snapName, "jo-") {
-		return res, api.Errorf(api.CodeInvalid, "snapshot names starting with jo- are reserved for JailOps")
+	} else if err := validate.SnapshotName("name", snapName); err != nil {
+		return res, err
 	}
 	if len(comment) > 1024 {
 		return res, api.Errorf(api.CodeInvalid, "comment is too long")

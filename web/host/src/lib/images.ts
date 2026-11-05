@@ -27,6 +27,13 @@ export function baseRelease(r: string): string {
   return i > 0 ? r.slice(0, i) : r
 }
 
+/** The patch level of a generation's FreeBSD version, "p6" of "15.1-RELEASE-p6"; '' for a release without one, a
+ *  snapshot of a branch or a generation built before JailOps recorded it. */
+export function patchLevel(v: string | undefined): string {
+  const i = (v ?? '').indexOf('-RELEASE-')
+  return i > 0 ? v!.slice(i + '-RELEASE-'.length) : ''
+}
+
 /** The host's FreeBSD release as GET /api/v1 reports it (environment.kernel_version), without the patch level; ''
  *  when the server does not say or the value is not a release. */
 export function hostRelease(info: ServerInfo | null | undefined): string {
@@ -111,7 +118,7 @@ export type ImageField = 'name' | 'release' | 'arch' | 'keys' | 'at'
 /** Field problems of the form, by field; an empty object when it can be sent. */
 export function imageProblems(f: ImageForm, taken: string[]): Partial<Record<ImageField, string>> {
   const e: Partial<Record<ImageField, string>> = {}
-  const n = nameProblem(f.name)
+  const n = nameProblem(f.name, 'image')
   if (n) e.name = n
   else if (taken.includes(f.name)) e.name = `An image named ${f.name} exists already.`
   const r = releaseProblem(f.kind, f.release.trim())

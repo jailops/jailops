@@ -128,6 +128,14 @@ type LifecycleEvent struct {
 	Project string `json:"project,omitempty"`
 }
 
+// OptionalExtensions are the names a server leaves out on purpose when it does not have the feature behind them (no
+// backup backend, no sealed-secrets identity, the host modules or the certificate manager off): a client's doctor does
+// not call them missing. Service.Extensions withholds exactly these.
+var OptionalExtensions = []string{
+	"backup_pull", "backup_push", "restore_preflight", "backup_key", "backup_run", "backup_verify",
+	"sealed_secrets", "host_identity", "host_firewall", "host_pending", "host_certificate",
+}
+
 // Extensions is the capability list of this API revision. New names are
 // appended; names are never removed or renamed.
 var Extensions = []string{
@@ -188,4 +196,5 @@ var Extensions = []string{
 	"setup",
 	"host_certificate",
 	"jail_shell_setup",
+	"rename",
 }

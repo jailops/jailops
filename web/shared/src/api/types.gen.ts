@@ -70,6 +70,14 @@ export type Code =
 
 export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'conflict', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'not_leader', 'no_quorum', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase']
 
+export type DNSSource =
+  | "network"
+  | "host"
+  | "gateway"
+  | "none"
+
+export const DNSSourceValues: readonly DNSSource[] = ['network', 'host', 'gateway', 'none']
+
 export type DoctorStatus =
   | "ok"
   | "warn"
@@ -1021,6 +1029,7 @@ export interface ImageGeneration {
   parent?: number
   manifest: string
   packages?: number
+  freebsd_version?: string
   dataset?: string
   created_at?: string
   refs?: string[]
@@ -1207,6 +1216,7 @@ export interface JailStatus {
   power: PowerState
   jid?: number
   generation?: string
+  freebsd_version?: string
   addresses?: string[]
   started_at?: string
   drift?: string[]
@@ -1359,6 +1369,14 @@ export interface NetworkAttach {
   mac?: string
 }
 
+export interface NetworkDNS {
+  source: DNSSource
+  nameservers?: string[]
+  advice?: string
+  updated?: string[]
+  not_updated?: string[]
+}
+
 export interface NetworkSpec {
   bridge?: string
   uplink?: string
@@ -1377,6 +1395,7 @@ export interface NetworkStatus {
   orphans?: string[]
   conditions?: Condition[]
   warnings?: string[]
+  dns?: NetworkDNS
 }
 
 export interface OSUpdate {
@@ -1560,6 +1579,29 @@ export interface RemoteStatus {
   last_seen?: string
   version?: string
   extensions?: number
+}
+
+export interface Rename {
+  new_name: string
+  dry_run?: boolean
+}
+
+export interface RenameChange {
+  kind: string
+  object: string
+  detail?: string
+}
+
+export interface RenameResult {
+  kind: Kind
+  project?: string
+  from: string
+  to: string
+  dry_run?: boolean
+  changes: RenameChange[]
+  counts: Record<string, number>
+  steps?: string[]
+  warnings?: string[]
 }
 
 export interface RepositoryStatus {
@@ -2141,8 +2183,8 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "nic.\u003cdevice\u003e.mtu",
     "type": "int",
-    "description": "MTU of the interface; 0 keeps the network's.",
-    "example": "1400",
+    "description": "MTU of the interface: the network's MTU (a bridge gives every port its own); 0 takes it.",
+    "example": "1500",
     "restart_required": true,
     "profile": true,
     "path": "network[\u003cdevice\u003e].mtu"
@@ -2331,4 +2373,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock', 'setup', 'host_certificate', 'jail_shell_setup']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock', 'setup', 'host_certificate', 'jail_shell_setup', 'rename']

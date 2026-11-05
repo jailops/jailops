@@ -77,7 +77,7 @@ func TestConfigNeverRestartsAJailOnItsOwn(t *testing.T) {
 func TestProfilesDevicesAndRendering(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
-	if _, err := e.Admin.Networks().Patch(c, "lan", map[string]any{"spec": map[string]any{"uplink": "em0"}}, ""); err != nil {
+	if _, err := e.Admin.Networks().Patch(c, "lan", map[string]any{"spec": map[string]any{"uplink": "em0", "mtu": 1400}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.Admin.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.ProfileSpec{Config: map[string]string{

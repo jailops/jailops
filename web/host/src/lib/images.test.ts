@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { autoAtProblem, autoUpgradeSpec, baseImageState, baseRelease, defaultImage, freebsdImages, freebsdReleaseProblem, hostRelease, imageBody, imageLabel, imageNameFor, imageProblems, initialImageForm, newHostRelease, releaseProblem } from './images'
+import { autoAtProblem, autoUpgradeSpec, baseImageState, baseRelease, defaultImage, freebsdImages, freebsdReleaseProblem, hostRelease, imageBody, imageLabel, imageNameFor, imageProblems, initialImageForm, newHostRelease, patchLevel, releaseProblem } from './images'
 import type { Image, ServerInfo } from '@jailops/shared/api/types'
 
 const info = (kernel: string, arch = 'amd64') => ({ environment: { os: 'FreeBSD', kernel_version: kernel, arch } }) as unknown as ServerInfo
@@ -118,5 +118,14 @@ describe('several releases', () => {
     // no FreeBSD image at all: the empty page offers the first; an unreadable release says nothing
     expect(newHostRelease([], info('15.2-RELEASE'))).toBe('')
     expect(newHostRelease(one, info(''))).toBe('')
+  })
+})
+
+describe('patchLevel', () => {
+  it('is the pN of a release generation and nothing for a snapshot or an unknown one', () => {
+    expect(patchLevel('15.1-RELEASE-p6')).toBe('p6')
+    expect(patchLevel('15.1-RELEASE')).toBe('')
+    expect(patchLevel('15.snap20261031190411')).toBe('')
+    expect(patchLevel(undefined)).toBe('')
   })
 })

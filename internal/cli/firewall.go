@@ -19,6 +19,9 @@ func policyDesc() *kindDesc[api.FirewallPolicy] {
 		func(p *api.FirewallPolicy) *api.ObjectMeta { return &p.Metadata },
 		func(p *api.FirewallPolicy) *api.FirewallPolicySpec { return &p.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.FirewallPolicy] { return c.Firewall().Policies() })
+	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.FirewallPolicy] { return c.Firewall().Policies() })
+	d.renameLong = renameLong("firewall policy", `the jails and the profiles of the project that use it and, for the
+project's mandatory policy (renamed by a global administrator), the project`)
 	d.head = []string{"NAME", "DEFAULT-IN", "DEFAULT-OUT", "RULES", "RAW"}
 	d.row = func(_ time.Time, p api.FirewallPolicy) []string {
 		raw := "no"
@@ -35,6 +38,10 @@ func addrSetDesc() *kindDesc[api.AddressSet] {
 		func(p *api.AddressSet) *api.ObjectMeta { return &p.Metadata },
 		func(p *api.AddressSet) *api.AddressSetSpec { return &p.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.AddressSet] { return c.Firewall().AddressSets() })
+	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.AddressSet] { return c.Firewall().AddressSets() })
+	d.renameLong = renameLong("address set", `the rules (@NAME) of the policies of the project, the sets that
+include it and the app access grants made from it. Its PF table is renamed too, which ends the
+connections that rules using it passed once; they are made again`)
 	d.head = []string{"NAME", "ADDRESSES", "INCLUDES"}
 	d.row = func(_ time.Time, p api.AddressSet) []string {
 		return []string{p.Metadata.Name, strconv.Itoa(len(p.Spec.Addresses)), joinOrDash(p.Spec.Includes)}

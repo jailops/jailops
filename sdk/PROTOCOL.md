@@ -64,6 +64,7 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `/api/v1/jails/<n>/snapshots/<s>` GET, DELETE | | `JailSnapshot`; DELETE async |
 | `POST /api/v1/jails/<n>/rollback` | `JailRollback` | async, result `Jail`; data/all without `confirm_data_loss` is `data_loss_unconfirmed` |
 | `POST /api/v1/jails/<n>/upgrade` | `JailUpgrade` | async, result `Jail` |
+| `POST /api/v1/<kind>/<n>/rename` for `networks`, `firewall/address-sets`, `firewall/policies`, `profiles`, `jails`, `images`, `projects` | `Rename` (`new_name`, `dry_run`); `If-Match` optional | `dry_run`: sync `RenameResult` (`changes`, `counts`, `steps`, `warnings`), nothing changes; otherwise async, result `RenameResult`. The object and every reference to it change in one operation or not at all; a jail must be stopped (`busy`), a project's jails too; a `managed_by` object is `forbidden`. Admin; networks, images and projects need a global admin (`rename`) |
 | `GET /api/v1/jails/<n>?expanded=true` | | `JailExpanded`: the jail with its profiles merged in (`spec` is the effective spec) and `sources`, the origin of every key (`jail` or `profile:<name>`) |
 | `POST /api/v1/jails/<n>/config?restart=true` | `ConfigChange` (`set`, `unset`) | async, result `{...Jail, restart_required: [keys], restarted}`; **never restarts the jail unless `restart=true`**, and then only when a changed key needs it |
 | `POST /api/v1/jails/<n>/exec` | `ExecRequest` | upgrade to a framed stream, see Exec |
@@ -141,7 +142,7 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `GET /api/v1/audit` | | `[]AuditEntry`, newest first; admin (`audit_log`) |
 | `GET /api/v1/doctor` | | `DoctorReport`: checks with `ok`, `info` (a fact that is not a fault; counts as ok), `warn`, `fail` or `unknown` (`doctor`) |
 | `GET /api/v1/resources` | | host resources and usage (`resources`) |
-| `POST /api/v1/jails/<n>` | copy or rename request | async, result `Jail` (`jail_copy`) |
+| `POST /api/v1/jails/<n>` | copy request | async, result `Jail` (`jail_copy`) |
 
 ### Console
 
@@ -344,7 +345,8 @@ lists the name, and otherwise reports `unsupported`.
 | `jail_console` | `POST /api/v1/jails/<n>/console` and the session routes | see Console |
 | `sealed_secrets` | `secrets_recipient` in `ServerInfo` | the age public key of the host; a jail `env` value `sealed:age:<base64>` is opened by the daemon only when it starts a process in the jail (design 18.8) |
 | `audit_log`, `doctor`, `resources` | `GET /api/v1/audit`, `/api/v1/doctor`, `/api/v1/resources` | see Routes |
-| `jail_copy` | `POST /api/v1/jails/<n>` | copy or rename |
+| `jail_copy` | `POST /api/v1/jails/<n>` | copy |
+| `rename` | `POST /api/v1/<kind>/<n>/rename` | renames with every reference; `jailops <kind> rename OLD NEW`, `jailops rename` for a jail; see Routes and docs/design.md 8.8 |
 | `image_upgrade` | `POST /api/v1/images/<n>/upgrade` | build the next generation and move the jails that use the image; see Routes |
 | `jail_usage` | `GET /api/v1/jails/<n>/usage` | what a jail uses now; `jailops jail info` reads it; see Routes |
 | `jail_logs` | `GET /api/v1/jails/<n>/logs`, `GET .../logs/<file>` | the log files of a jail root and the end of one; `jailops jail logs` reads them; see Routes |

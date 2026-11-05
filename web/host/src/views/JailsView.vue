@@ -17,6 +17,7 @@ import { projectState } from '@/composables/project'
 import UnlockDialog from '@/components/UnlockDialog.vue'
 import LockChip from '@/components/LockChip.vue'
 import { shortAddr } from '@jailops/shared/lib/format'
+import { patchLevel } from '@/lib/images'
 import JailCreateForm from '@/components/JailCreateForm.vue'
 import { currentProject } from '@/composables/project'
 import StatePill from '@/components/StatePill.vue'
@@ -101,8 +102,10 @@ const shown = computed(() =>
 const filtered = computed(() => !!(q.value.trim() || state.value))
 const shellOK = computed(() => canShell())
 const labelsOK = computed(() => canEditLabels())
-/** The generation without the image name the column already shows: freebsd-15-1 #g4. */
+/** The generation without the image name the column already shows, with the FreeBSD patch level of its packages:
+ *  freebsd-15-1 #g4 · p6. */
 const genShort = (image: string, gen: string) => (gen.startsWith(image.replace(/[#@].*$/, '') + '#') ? gen.slice(gen.indexOf('#')) : gen)
+const genLabel = (image: string, gen: string, freebsd?: string) => [genShort(image, gen), patchLevel(freebsd)].filter(Boolean).join(' · ')
 const chosenJails = computed(() => shown.value.filter((j) => sel.value.has(j.metadata.name)))
 const allSelected = computed(() => shown.value.length > 0 && shown.value.every((j) => sel.value.has(j.metadata.name)))
 function toggleAll(): void {
@@ -180,7 +183,7 @@ function one(n: string, a: Lifecycle, power: string): void {
                 <td :data-label="s.jails.name"><router-link class="mono jail-link" :to="`/jails/${j.metadata.name}`">{{ j.metadata.name }}</router-link></td>
                 <td :data-label="s.jails.state"><StatePill :state="j.status.power" /><LockChip v-if="j.status.locked?.length" :volumes="j.status.locked" :jail="j.metadata.name" /></td>
                 <td class="labels-cell" :data-label="s.labels.title"><LabelChips :labels="j.metadata.labels" :max="2" pick @pick="pick" /></td>
-                <td class="mono hide-sm" :data-label="s.jails.image">{{ j.spec.image }}<span v-if="j.status.generation" class="faint">{{ ' ' + j.status.generation }}</span></td>
+                <td class="mono hide-sm" :data-label="s.jails.image">{{ j.spec.image }}<span v-if="j.status.generation" class="faint" data-test="jail-generation" :title="j.status.freebsd_version">{{ ' ' + genLabel(j.spec.image, j.status.generation, j.status.freebsd_version) }}</span></td>
                 <td class="mono hide-sm" :data-label="s.jails.addresses">{{ (j.status.addresses ?? []).map(shortAddr).join(', ') || '-' }}</td>
                 <td :data-label="s.jails.drift"><span v-if="j.status.drift?.length" class="pill warn">{{ s.overview.drift(j.status.drift.length) }}</span><span v-else class="faint">{{ s.jails.inSync }}</span></td>
                 <td class="faint hide-sm hide-md nowrap started-cell" :data-label="s.jails.started"><TimeStamp v-if="j.status.power === 'running'" :ts="j.status.started_at" /><span v-else>-</span></td>

@@ -493,6 +493,9 @@ func (s *Service) CreateStorage(ctx context.Context, in api.Storage) (api.Storag
 	if err := validate.StorageSpec(name, in.Spec); err != nil {
 		return api.Storage{}, err
 	}
+	if err := validate.StorageDataset("dataset", in.Spec.Dataset); err != nil {
+		return api.Storage{}, err
+	}
 	if in.Spec.Encrypted {
 		return api.Storage{}, api.Errorf(api.CodeUnsupported, "encrypted storage is not implemented").
 			WithHint("make the dataset itself an encryption root ('zfs create -o encryption=on -o keyformat=passphrase ...') and register it; ZFS then encrypts everything below it and you load the key with 'zfs load-key' after a boot")
@@ -540,7 +543,8 @@ func (s *Service) UpdateStorage(ctx context.Context, name string, in api.Storage
 		return api.Storage{}, err
 	}
 	if in.Metadata.Name != "" && in.Metadata.Name != name {
-		return api.Storage{}, invalid("renaming is not supported")
+		return api.Storage{}, invalid("a storage cannot be renamed").
+			WithHint("its name is what projects grant and what the records of its jails and the image pools on it carry; it stays")
 	}
 	old, err := s.stoKind.get(name)
 	if err != nil {

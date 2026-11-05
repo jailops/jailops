@@ -48,6 +48,7 @@ var roots = []any{
 	api.LogsRead{}, api.LogForward{}, api.LogForwardTest{}, api.LogForwardTestResult{},
 	api.HostCertificate{}, api.HostCertificateUpload{}, api.ACMESpec{},
 	api.SetupStatus{}, api.SetupRequest{}, api.SetupResult{}, api.SetupToken{},
+	api.Rename{}, api.RenameResult{},
 }
 
 // enums lists the typed string constants. Keep in sync with sdk/api.
@@ -58,6 +59,7 @@ var enums = map[reflect.Type][]string{
 	reflect.TypeFor[api.OS]():              {string(api.OSFreeBSD), string(api.OSLinux)},
 	reflect.TypeFor[api.Layout]():          {string(api.LayoutThin), string(api.LayoutThick)},
 	reflect.TypeFor[api.UpdateStrategy]():  {string(api.UpdateRebase), string(api.UpdateInPlace), string(api.UpdateManual)},
+	reflect.TypeFor[api.DNSSource]():       {string(api.DNSFromNetwork), string(api.DNSFromHost), string(api.DNSFromGateway), string(api.DNSNone)},
 	reflect.TypeFor[api.PowerState]():      {string(api.PowerStopped), string(api.PowerStarting), string(api.PowerRunning), string(api.PowerStopping), string(api.PowerError), string(api.PowerLocked)},
 	reflect.TypeFor[api.RollbackScope]():   {string(api.RollbackRoot), string(api.RollbackData), string(api.RollbackAll)},
 	reflect.TypeFor[api.IPv6Mode]():        {string(api.IPv6Routed), string(api.IPv6Proxy), string(api.IPv6None)},

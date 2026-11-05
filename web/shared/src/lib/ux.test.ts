@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { nameProblem, validName, nameHint } from './names'
+import { nameProblem, validName, nameHint, validSize, DATASET_MAX } from './names'
 import { stamp, snapshotLabel, sentence, plural, bytes, day } from './format'
 import { actionText, objectOf, codeText, type KindMap } from './describe'
 import { nextTab } from '../composables/tabs'
@@ -22,6 +22,22 @@ describe('name rules follow the server', () => {
     expect(validName('a'.repeat(13), 'tunnel')).toBe(false)
     expect(validName('alice.b_2', 'identity')).toBe(true)
     expect(validName('.alice', 'identity')).toBe(false)
+  })
+  it('the lengths of new objects: project and network 13, jail, volume and image 32, snapshot 64', () => {
+    for (const [rule, max] of [['project', 13], ['network', 13], ['jail', 32], ['volume', 32], ['image', 32], ['snapshot', 64]] as const) {
+      expect(validName('a'.repeat(max), rule)).toBe(true)
+      expect(nameProblem('a'.repeat(max + 1), rule)).toBe(`At most ${max} characters.`)
+      expect(nameHint(rule)).toContain(`at most ${max} characters`)
+    }
+    expect(validName('freebsd-15.1_x', 'image')).toBe(true)
+    expect(validName('daily.2026-11-04', 'snapshot')).toBe(true)
+    expect(validName('-x', 'snapshot')).toBe(false)
+    expect(validName('web.1', 'jail')).toBe(false)
+    expect(DATASET_MAX).toBe(88)
+  })
+  it('sizes: what the server parses, not zero, no fractions', () => {
+    for (const ok of ['100', '512M', '512m', '4GiB', '1k', '7B', '2TB', ' 2G ']) expect(validSize(ok)).toBe(true)
+    for (const bad of ['', '0', '0G', '1.5G', '4iB', 'G', '-1', '10Q', '4 G', '1'.repeat(19)]) expect(validSize(bad)).toBe(false)
   })
 })
 

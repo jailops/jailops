@@ -129,6 +129,30 @@ Feature compatibility is checked like this: compare the pool's active features a
 target release line, return VERIFIED, NO or UNKNOWN, and block only on NO. JailOps never runs
 `zpool upgrade`.
 
+### 3.1 Names and their limits
+
+What JailOps derives from a name has limits of its own: an interface name has at most 15 characters, a ZFS dataset
+or snapshot name at most 255, a PF anchor path (`jailops/<project>/<jail>`, `jailops/net.<network>`,
+`jailops/wg.<tunnel>`) at most 63: `pfctl -a` refuses a longer one. A name is refused when its object is
+created (or copied) if what is derived from it would not fit; it is never refused when an existing object is
+loaded, so a system whose objects were named before these limits keeps working, and `jailops doctor` lists those
+names under `names.length`.
+
+| Object | Longest new name | Why |
+|---|---|---|
+| project | 13 | `project create --new-network` names a network, and with it the bridge and its gateway pair (`<bridge>gb`), after the project |
+| jail | 32 | `<storage>/projects/<project>/jails/<jail>/data/<volume>@<snapshot>` |
+| volume | 32 | as for a jail |
+| image | 32 | `<storage>/images/<image>/g<N>` and its snapshots |
+| snapshot | 64, `^[a-z0-9][a-z0-9._-]{0,63}$`, not starting with `jo-` | the snapshot part of the deepest dataset name |
+| WireGuard tunnel | 12 without `--interface` | the default interface `wg-<name>` has at most 15 characters |
+| storage dataset | 88 characters | 255 − 24 (`/projects/`, `/jails/`, `/data/`, `@`) − 141 (project, jail, volume, snapshot at their limits) − 2 |
+
+A jail on a storage created before the dataset limit is checked by the length of its own deepest name (with a
+64-character snapshot) when it is created, and a snapshot by its actual name. Sizes are stored as decimal bytes
+(`4G`, `4GiB` and `4294967296` are the same size): ZFS reports bytes, the helper accepts digits with an upper case
+unit only, and a stored quota then compares equal to the one observed. The helper sets no size above 16T.
+
 ## 4. Thin jails and image generations
 
 The thin jail lifecycle is the most important design problem. A ZFS clone is not an image
@@ -228,7 +252,14 @@ debootstrap (Debian) generation, which is refused.
 One model: **managed VNET bridges with deterministic address allocation**.
 
 - Every jail uses VNET and one or more epair interfaces on a bridge that JailOps created
-  (`jo<n>`, description `jailops net=<network> bridge`). Shared-IP and host-networked jails are not supported.
+  (description `jailops net=<network> bridge`). Shared-IP and host-networked jails are not supported.
+- **The bridge has any free name.** It is the network's name when that can be one, `--bridge NAME` otherwise, or a
+  generated `jo<n>`; it is chosen when the network is created, stored in the spec and never changed (a rename of the
+  network keeps it). A bridge name has at most 13 characters (`ipam.MaxBridgeName`: the gateway pair adds `ga`/`gb`,
+  15 in all), lowercase letters and digits, is not of a driver's form (`vmx0`, `bridge0`, `lo0`, `bridge`;
+  `ipam.DriverLikeName`), its gateway names do not have the shape of a jail's epair, and it is not an interface of the
+  host or of another network (`network create` asks the helper for the host's interfaces and refuses a taken name at
+  once). `jailops doctor` (`network.bridges`) explains an interface with a network's name that is not JailOps's.
 - A network defines subnets, a **gateway that is a real address owned by the host**, and an allocation **range**.
   The gateway lives on the host end (`<bridge>gb`) of a gateway epair whose other end (`<bridge>ga`) is a port of
   the bridge; the bridge itself carries no address (section 18.9 explains why: the host's pf sees a jail's traffic
@@ -239,7 +270,11 @@ One model: **managed VNET bridges with deterministic address allocation**.
   IPv6, not a service.
 - Epair names derive from the jail id, MAC addresses derive from the jail UUID. Reconcile
   removes epairs that belong to no jail.
-- JailOps never modifies a bridge it did not create.
+- JailOps never modifies a bridge it did not create. **Ownership is the kernel's description, never the name**: the
+  helper changes only a bridge or epair whose description carries the JailOps marker, which it writes itself when it
+  creates the interface, before the interface has its name; it never takes over an interface by its name, and refuses
+  to create one under a driver's name. Interfaces of earlier releases with the legacy `jo` prefix and no description
+  are accepted once and marked. The threat model is in [security-model.md](security-model.md#interfaces).
 - **Every interface JailOps makes says what it is** in its description (`ifconfig` shows `description: TEXT`), one
   short line of at most 64 characters of `A-Za-z0-9 ._:/=()-`, built from names only (`render/ifdesc.go`, golden-tested):
   `jailops net=<network> bridge`, `jailops net=<network> gateway (bridge side)` and `(host side)` for the gateway pair,
@@ -363,13 +398,16 @@ project's isolation would otherwise block.
 
 `jail(8)` creates and removes jails from a rendered per-jail `jail.conf` (every value escaped). Besides the path,
 the hostname, the vnet interfaces, devfs and the hook commands, every `jail.conf` sets
-`exec.consolelog = "/var/log/jail_${name}_console.log"` (a file on the host, FreeBSD and Linux jails alike): jail(8)
+`exec.consolelog = "/var/log/jailops/jail_${name}_console.log"` (a file on the host, FreeBSD and Linux jails alike): jail(8)
 then sends the output of the `exec.*` commands (the hooks, `/etc/rc` and `/etc/rc.shutdown`) to that file instead of the
 pipes of the helper that ran `jail -c` or `jail -r`. Without it a daemon that an rc script starts and that keeps its
 descriptors (daemon(8) without `-f`) holds the helper's pipes open after `jail -c` has exited, and the start fails or
 hangs waiting for the end of that output. The command runner also treats a command that exited successfully while a
-leftover process still held its output as a success (the output after its exit is dropped). The file is not rotated
-and stays when the jail is deleted. A jail with `sysvipc` (a key of the jail spec, set by an app definition that asks for
+leftover process still held its output as a success (the output after its exit is dropped). The files are in the
+dataset `<pool>/jailops/logs`, mounted at `/var/log/jailops` (`jailops-priv init` makes it; the rc script makes the
+directory when the dataset does not exist yet), and newsyslog(8) rotates them
+(`/usr/local/etc/newsyslog.conf.d/jailops.conf`: 7 files of at most 1 MB, compressed). A file stays when the jail is
+deleted. A jail with `sysvipc` (a key of the jail spec, set by an app definition that asks for
 it) gets `sysvmsg = new; sysvsem = new; sysvshm = new;`: System V message queues, semaphores and shared memory of its
 own, separate from the host's and every other jail's (never `inherit`, which would share the host's; `allow.sysvipc`,
 which means the same, stays an admin allow-list flag and is refused together with `sysvipc`). The helper accepts
@@ -774,6 +812,42 @@ kind `AppAccess`) says JailOps made it, and no password is stored anywhere. `GET
 show each grant with its rules, rendered anchor lines and `pg_hba.conf` lines, and what is missing on the host.
 UNVERIFIED on FreeBSD until the `postgresql-access` block of the end-to-end test has run.
 
+### 8.8 Renames
+
+A name is chosen once and often wrong: a network called `lan` that should be `palminn`, a jail with a typo. An update
+keeps the name (it answers `invalid` and names the rename); a rename is its own action, `POST <object>/rename` with
+`new_name` (extension `rename`), for networks, address sets, firewall policies, profiles, jails, images and projects,
+with `dry_run`, `If-Match`, the role of changing the object (a global administrator for networks, images and projects,
+the project's administrator for the rest), an audit entry and the event `<kind>-renamed`.
+
+One planner per kind reads the state and lists every change as data: the object itself (a put by UUID with the new
+name; a project rename moves the objects of the project with it), every reference in other objects (project grants and
+image lists, jail specs in `spec.json` and `bundle.json`, policy rules `@set`, set includes, profile keys, tunnel
+networks, app access grants made from a set, certificate and token scopes, stored log sinks), datasets (renamed, with
+their local mountpoints taken away deepest first and set again parents first, and the `jailops:` properties that hold
+the name), PF anchors named after the object (loaded under the new name, the old one flushed), the descriptions of
+interfaces, and files of the state directory keyed by the name. The list is a dry run's answer and, recorded in the
+operation's journal request before the first step, the plan the executor runs under the locks of every object it
+touches: a failure undoes the completed steps in reverse, a daemon that died in the middle undoes them at its next start
+(`recoverInterrupted`), so a rename happens completely or not at all. What it cannot rewrite it refuses with a hint: an
+object a hub or a repository manages (`managed_by`), a raw PF fragment that names a set's table, a host profile naming a
+project's policy, app access across projects.
+
+**Interfaces keep their names.** A network rename changes no bridge, gateway pair or epair (their names do not derive
+from the network's name, and renaming a live interface would cut the jails on it); it rewrites their descriptions,
+inside running jails too, so the ownership test of 5 still holds. Running jails keep their traffic.
+
+**A running jail is refused**, as is a project with a running jail: the kernel knows a jail by its key
+(`<project>_<name>`), and its mounts, epairs and anchor `jailops/<project>/<name>` are set up under it; renaming them
+under a running jail would leave the jail with mounts of datasets that moved and a poststop hook that cleans up the wrong
+names. A stopped jail has none of that; its next start renders everything under the new name. A jail with locked
+volumes, an interrupted run in the journal, an installation or an exec session in progress, or app access grants is
+refused too (deny, rename, allow again). The hostname of a jail is a key of its own and does not follow the name.
+
+What keeps the old name: the audit log, the operations, backups already taken (a restore of one asks for the image
+and project of that time) and the empty mountpoint directories of the old name. Storage, users, certificates, tunnels,
+remotes and backup targets and policies have no rename.
+
 ## 9. Backup
 
 First-class and a release gate for 1.0. Backup and replication are different features with different
@@ -1096,6 +1170,7 @@ Open:
 | Hardening after the review of the appliance release | Tested on Linux against the real allow-lists and stand-ins; UNVERIFIED on FreeBSD: file operations below a jail's tree opened at the tree (a ZFS mount) one directory at a time (the app access and log blocks of `scripts/ci-freebsd-e2e.sh`), the pid files in `/var/run` with the real `rc.subr` and `daemon(8)` (the services block checks them), `sysrc -x` when a host restore removes a variable it did not find set (the host blocks), `route -n get -inet default` read for the gateway of the WireGuard route checks (the WireGuard block) |
 | Hardening after the external audit of November 2026 | Tested on Linux through the helper's real guards, its socket and a stand-in for `zfs`: no dataset mounted on a storage root's directory, the root's directory set to root 0700 at start, reload and registration, root mountpoints refused on, above or inside system directories and the helper's own, `devices=off` on every root and never on through a request, `zfs receive` with `-x` for `mountpoint`, `sharenfs`, `sharesmb`, `jailed`, `keylocation`, `devices`, `setuid` and `exec`, write agents that make device nodes and setuid files only in a jail's root, the helper's socket in `/var/run/jailops-priv` (root, 0710). UNVERIFIED on FreeBSD: that `zfs set devices=off` and `zfs receive -x devices -x setuid -x exec` are accepted by the FreeBSD 15.1 ZFS (an unknown name would make every receive fail; `shareiscsi` is not on the list for that reason), what `devices=off` changes there (FreeBSD makes device nodes in devfs only), and the steps of `scripts/ci-freebsd-e2e.sh` that check the socket directory, the root's mode and `devices` |
 | Bash and the prompt of a jail ([shell.md](shell.md)) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.15, the shell block of `scripts/ci-freebsd-e2e.sh`): bash installed at the first start, the files, the prompt in an interactive and a login bash and in `jailops shell`, `~/.bashrc` winning, scripts and `sh` unaffected, `config set prompt` at once and `none`, `shell-setup`, bash and the prompt after an OS upgrade, an app installation's `set-up-shell` step (nginx). UNVERIFIED on FreeBSD: the first start by autostart and by `jailops jail unlock --start`, a failure without a package repository (the `ShellSetup` condition), thick jails, the console's terminal against a real jail (the demo only) |
+| Renames (8.8) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.16, the renames block and the encrypted-volume block of `scripts/ci-freebsd-e2e.sh`): a network renamed under a running jail (descriptions on the host and inside the jail, the anchor, traffic through the NAT), a stopped jail with its datasets, mountpoints, kernel name and anchor, a stopped jail with an encrypted volume (its key stays loaded), an image with a running thin jail on it (the clone's origin follows, the nightly runs move), a project with its jails, objects and token scopes. UNVERIFIED on FreeBSD: the recovery of a rename interrupted by a crash (tested with the fakes), a project or image on a second storage, a host profile rename. The empty mountpoint directories of the old names are left |
 | Exec with a terminal loses output | **Fixed.** A short command run through `jailops exec` with a pseudo-terminal (`jailops exec -t JAIL -- echo hi` under `script`) printed nothing in 5 of 12 runs on FreeBSD 15.2-PRERELEASE. Cause: the kernel hangs a terminal up when its session leader exits and drops the output the reader of the master has not taken yet (3 to 30% of 300 runs of `echo hi` in a Go test, all of them with a delayed reader). Fix: the helper starts itself as a small leader (`internal/priv/session_leader.go`) that owns the terminal, runs the command in a process group of its own in the foreground, reports the group and the exit status on a pipe, and stays until the helper has read the master empty; the terminal ends only then. Signals go to the command's group; the end-to-end flow runs 40 short commands with a terminal and every one prints its output (0 of 1500 runs of the Go test lost any). |
 | Rate-limit shaper | Limits are stored and reported, and nothing enforces them: the jail says so (`status.warnings`, the `RateLimit` condition, a warning after `config set`) and doctor reports `jails.rate_limits` as `info` ("not enforced yet"). No shaper is built |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
@@ -1123,7 +1198,7 @@ Open:
 | Appliance mode, modules 3 to 6 | Not built: network, updates, system, storage overview, boot environments before a change and the installer image are design only ([appliance.md](appliance.md)) |
 | Appliance mode from rc.conf, first start, setup token, first-run wizard | Built: `jailops_appliance` passed by the rc scripts to both programs (`-appliance-modules`), `jailops-priv appliance-init`, the setup token (`POST /api/v1/setup`, `jailops-priv setup-token`), doctor `appliance`, the console's `/setup` wizard. Tested: the rc scripts run by `sh` against a stand-in of `rc.subr`, their headers sorted like `rcorder` (with `syslogd`), the setup routes against in-process daemons, the wizard in demo mode. Not run on FreeBSD: the real `rc.subr`, `/dev/console`, the `authpriv` line in `/var/log/auth.log`, `zfs list -H -o name /` on a root pool, a first boot. `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_APPLIANCE=1` |
 | The console's certificate: upload and ACME | Built: uploads checked and written atomically, ACME with `golang.org/x/crypto/acme` (http-01, tls-alpn-01), renewal 30 days before expiry with backoff, the `rdr` of the challenge port rendered by the firewall module. Tested against an ACME CA written in the tests and the daemon's real listeners on loopback. Not run: issuance by a real CA (docs/exposure.md has the staging check), ports 80 and 443 redirected by pf (`rdr ... -> 127.0.0.1`, and `-> ::1` for IPv6 in particular), a host behind NAT |
-| Interface descriptions | Rendered, golden-tested and applied through fakes, the helper rules tested against the real allow-list; not run on a host: that a description set on an epair end survives its move into a vnet (JailOps sets the jail end from the host after the move anyway), `ifconfig -j <jail> <if> description` and `ifconfig -j <jail> <if>` from the host, and the end-to-end block of `scripts/ci-freebsd-e2e.sh` |
+| Interface descriptions | Rendered, golden-tested and applied through fakes, the helper rules tested against the real allow-list. Verified on FreeBSD 15.2-PRERELEASE amd64 (November 2026): a description set on a new interface survives its rename and its move into a vnet and back, a rename to a name that exists fails with `File exists`, and the ownership block of `scripts/ci-freebsd-e2e.sh` (a bridge named like its network, the helper's refusals over its socket, a legacy bridge marked once, a stale epair removed) |
 | WireGuard | The helper's operations are tested over the socket with a stand-in for `wg` and `ifconfig`, the token, the configuration file, the `wg show dump` parser and the allocator with unit tests; nothing has run on a host: `ifconfig wg create` and a rename with `-`, `wg syncconf` and the dump format of FreeBSD's `wg`, whether 15.1 has `wg` in the base system, a pf rule naming `wg-office`, a handshake over the loopback (the end-to-end block skips without `if_wg` or `wg`), traffic from a peer into a jail through `jailops/wg.<name>` |
 | API exposure on a real network | TLS 1.3 only, certificate reload, a configured certificate never generated over and the web switch are tested in process; a public listener, a CA-signed certificate with renewal, and a proxy or Cloudflare tunnel in front are not tried. ACME with dns-01 (wildcards), a require-client-certificate mode and the caller's address behind a proxy are not implemented (docs/exposure.md) |
 
@@ -1674,6 +1749,19 @@ the shell block of `scripts/ci-freebsd-e2e.sh` on a jail made with the defaults:
   `script` inside the jail. A short command run through `jailops exec` **with** a terminal lost its output in 5 of 12 runs
   (7 of 12 when the client's input stayed open): an open problem of the exec path, not of the shell (section 16).
 
+### 18.16 Renames (FreeBSD 15.2-PRERELEASE amd64, November 2026)
+
+`jailops network rename lan palminn` with a jail running on it rewrote the descriptions of the bridge, both gateway ends
+and both ends of the jail's epair (the jail end with `ifconfig -j`), loaded `jailops/net.palminn` and flushed
+`jailops/net.lan`; the jail kept pinging the gateway and, through the NAT, the uplink's router, and after a restart its
+hooks found the network under its new name. A rename of a stopped jail took its whole tree with `zfs rename` after the
+local mountpoints were set to `none` deepest first and set again parents first (which mounts what has `canmount=on`; a
+start later mounts the rest as usual); the jail started as `<project>_<new>` with its data, and an encrypted volume
+moved with its key loaded. `zfs rename` of an image dataset carried its generations, and the `origin` of the thin roots
+cloned from them followed by itself. A project rename moved `<root>/projects/<p>` in one `zfs rename`; the jails started
+under their new keys and anchors. `pfctl -sA` keeps listing the emptied anchors of the old names until they are
+replaced, as it does after a jail stops. mandoc `-Tlint` has nothing to say about the pages of the rename commands.
+
 ### 18.12 Where FreeBSD is going (checked October 2026)
 
 What the release notes, the status reports and the release schedule say, and what it means here. None of it is a promise
@@ -1702,6 +1790,24 @@ about FreeBSD 16, whose plans are thin: 16.0 is targeted for December 2027.
   matrix of 15.1, 15.2 and later, not for one version.
 - **Out of scope but visible:** OCI containers (`podman`) on FreeBSD and jail-aware VM tooling are being built by others.
   JailOps stays a jail manager; its API is the place to integrate, not to grow a second runtime.
+
+### 18.16 MTU, anchor paths and the checks of a new network (FreeBSD 15.2-PRERELEASE amd64, November 2026)
+
+- **MTU.** An epair and a bridge each take any MTU up to 65535 (`ifconfig epair0a mtu 9216`, `mtu 65535`; a bridge
+  refuses 70000 with `Invalid argument`), so 9216, the largest MTU JailOps accepts, stays. A bridge does not refuse a
+  member of another MTU: `addm` succeeds and the member is given the bridge's MTU (an epair end set to 9000 and added
+  to a bridge of 1500 has 1500 afterwards, and its peer in the jail keeps what it had), and changing the MTU of a
+  member fails with `SIOCSIFMTU: Operation not supported`; changing the bridge's MTU changes its members'. An
+  attachment MTU other than the network's therefore left the jail's end disagreeing with the host's; it is refused
+  when it is set.
+- **Anchor paths.** `pfctl -a PATH -f -` loads a path of 63 characters and refuses one of 64 with `pfctl_rules:
+  strlcpy`, whatever the length of its components; the anchors JailOps names are checked against that.
+- **A new network against the host** (the daemon on the VM, its uplink `vtnet0` in 10.0.2.0/24): `--ipv4 10.0.2.1/24`
+  is refused naming `10.0.2.15/24 on the host interface vtnet0`; `--uplink em9` and `--uplink lo0` are refused with
+  the candidates (`vtnet0 (10.0.2.15/24)`); a proxy-mode subnet outside the uplink's prefix and a routed prefix
+  inside it are refused; with `net.inet.ip.forwarding=0` a NAT network is created with the warning. A project quota
+  and `--disk` of `4GiB` reach ZFS as `4294967296` and the jail starts; a 70-character snapshot name is refused by the
+  API.
 
 ## 19. Implementation notes
 

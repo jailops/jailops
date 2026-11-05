@@ -15,7 +15,10 @@ import Callout from '@jailops/shared/components/Callout.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
 import QuotaBars from '@/components/QuotaBars.vue'
 import ProjectForm from '@/components/ProjectForm.vue'
-import { isGlobalAdmin, refreshProjects } from '@/composables/project'
+import { isGlobalAdmin, projectState, refreshProjects, switchProject } from '@/composables/project'
+import RenameDialog from '@/components/RenameDialog.vue'
+import { canRename } from '@/composables/rename'
+import { renamedAddress } from '@/lib/rename'
 
 const route = useRoute()
 const router = useRouter()
@@ -28,6 +31,14 @@ const l = useLoad(async () => {
 const p = computed(() => l.data.value?.project)
 const canWrite = computed(() => isGlobalAdmin())
 const editing = ref(false)
+const renaming = ref(false)
+/** After a rename the page moves to the new address; the project switcher follows when it was the current one. */
+async function renamed(to: string): Promise<void> {
+  const from = name.value
+  if (projectState.current === from) switchProject(to)
+  await refreshProjects()
+  await router.replace(renamedAddress('project', from, to, route.fullPath) ?? `/projects/${encodeURIComponent(to)}`)
+}
 const notFound = computed(() => l.error.value?.code === 'not_found')
 
 // Deleting a project is tier 3: the name is typed, even when it is empty.
@@ -54,6 +65,7 @@ const condText = (c: Condition) => s.projects.hostCondition(codeText(c.reason) |
           <div class="row"><h1 class="mono">{{ p.metadata.name }}</h1><span v-if="p.spec.hosts?.length" class="badge info">{{ s.projects.fleet }}</span></div>
           <div class="row">
             <button class="btn" type="button" :disabled="!canWrite" data-test="edit-project" @click="editing = true">{{ s.projects.edit }}</button>
+            <button v-if="canRename('project')" class="btn" type="button" data-test="project-rename" @click="renaming = true">{{ s.rename.open(s.rename.kinds.project) }}</button>
             <button class="btn btn-danger" type="button" :disabled="!canWrite" data-test="project-delete" @click="del">{{ s.projects.delete }}</button>
           </div>
         </div>
@@ -104,6 +116,7 @@ const condText = (c: Condition) => s.projects.hostCondition(codeText(c.reason) |
             </tbody></table></div>
         </section>
 
+        <RenameDialog :open="renaming" kind="project" :name="p.metadata.name" :etag="l.data.value?.etag" @close="renaming = false" @done="renamed" />
         <ProjectForm :open="editing" :project="p" :etag="l.data.value?.etag" :networks="l.data.value?.networks ?? []" :storage="l.data.value?.storage ?? []" @close="editing = false" @done="l.reload" />
       </div>
     </LoadState>

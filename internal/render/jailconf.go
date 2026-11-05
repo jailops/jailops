@@ -53,7 +53,7 @@ type JailConfInput struct {
 // jail, instead of the pipes of whoever ran jail -c or jail -r: a daemon an rc
 // script starts keeps its descriptors open, and the caller would wait for the
 // end of that output for ever. ${name} is the jail's name.
-const ConsoleLog = "/var/log/jail_${name}_console.log"
+const ConsoleLog = "/var/log/jailops/jail_${name}_console.log"
 
 // JailConf renders the jail.conf of one jail.
 func JailConf(in JailConfInput) (string, error) {

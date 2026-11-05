@@ -78,6 +78,13 @@ func newEnv(t *testing.T) *env {
 	e.jails = jailos.NewFake()
 	e.pf = pfctl.NewFake()
 	e.net = ifconfig.NewFake(ifconfig.Options{Prefixes: []string{"jo"}})
+	e.net.AddForeign("em0", true) // the host's uplink: never JailOps's
+	// a bridge an administrator made by hand (ifconfig bridge create; ifconfig bridge0 name mybr): never JailOps's
+	e.net.AddIface(ifconfig.Iface{Name: "mybr", Groups: []string{"bridge"}, Flags: []string{"UP"}})
+	// the gateway pair of a network, through which the fake NDP routes its jail addresses (jo30gb)
+	if _, _, err := e.net.EpairCreate(context.Background(), "jo30g"); err != nil {
+		t.Fatal(err)
+	}
 	e.runner = run.NewFake()
 	l, err := NewLocal(e.cfg, Deps{ZFS: e.zfs, Jails: e.jails, PF: e.pf, Net: e.net, Runner: e.runner, Jexec: e.jexec,
 		NDP: newFakeNDP(dir)}, WithoutChown())
@@ -111,7 +118,7 @@ alpha_web {
 	exec.poststart = "/usr/local/libexec/jailops-priv hook poststart ${name}";
 	exec.prestop = "/usr/local/libexec/jailops-priv hook prestop ${name}";
 	exec.poststop = "/usr/local/libexec/jailops-priv hook poststop ${name}";
-	exec.consolelog = "/var/log/jail_${name}_console.log";
+	exec.consolelog = "/var/log/jailops/jail_${name}_console.log";
 	exec.start = "/bin/sh /etc/rc";
 	exec.stop = "/bin/sh /etc/rc.shutdown jail";
 	enforce_statfs = 2;

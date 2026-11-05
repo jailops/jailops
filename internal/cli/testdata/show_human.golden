@@ -40,8 +40,8 @@ Image freebsd-15
   Nightly:   off ('jailops image auto-upgrade freebsd-15 on' turns it on)
 
 Generations
-  GEN   PACKAGES   AGE   USED BY
-  g1    -          3h    -
+  GEN   FREEBSD   PACKAGES   AGE   USED BY
+  g1    -         -          3h    -
 
 $ jailops project show main
 Project main

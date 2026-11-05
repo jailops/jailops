@@ -2,7 +2,7 @@
 
 ## The model
 
-- A **network** is a managed VNET bridge (`jo<n>`) with an IPv4 subnet and optionally an IPv6 subnet, each with an
+- A **network** is a managed VNET bridge (named like the network, see [install.md](install.md#bridge-names)) with an IPv4 subnet and optionally an IPv6 subnet, each with an
   explicit allocation **range**. JailOps allocates from the range, writes the address into the jail's spec and configures
   it. **No DHCP, no router advertisements, no SLAAC**: `accept_rtadv` is off in the jail, and no jail is ever sent a
   router advertisement or a DHCP answer (below).
@@ -25,7 +25,7 @@
   (`jailops doctor`: `net.descriptions`) and touches no other; a bridge without a description is not taken as its own.
   Interfaces made by releases before 0.4.0 carry `jailops:<id>` and get the readable text on the first pass.
 - A jail attached with plain `--network NAME` gets one address of every family the network has, the default route, and
-  `resolv.conf` from the network's `dns`.
+  a `resolv.conf` (see [name resolution](#name-resolution-of-jails) below).
 
     jailops network create web --ipv4 10.88.0.1/24 --nat --ipv6 2001:db8:1:2:1::1/80 --uplink vtnet0
     jailops project create shop
@@ -36,6 +36,45 @@
 
 `--ipv4 ADDR/PREFIX` makes the rest of the subnet the range; `--ipv6 ADDR/PREFIX` is for routed mode. For anything finer
 (explicit ranges, `proxy` mode, DNS servers, exclusions) use a file: `jailops network create NAME -f file.yaml`.
+
+## Name resolution of jails
+
+JailOps writes a jail's `/etc/resolv.conf` when the jail starts, with the nameservers of the first rule that applies:
+
+1. the `dns` of the jail's networks, when one of them sets it (`jailops network edit NAME`, `dns: [192.0.2.53]`);
+2. else the host's own nameservers in `/etc/resolv.conf` that a jail can reach (not loopback, not link-local; at most
+   three; the host's `search` line is not copied). The jails reach them through the network's NAT or routing;
+3. else, when the host resolves only through loopback (`nameserver 127.0.0.1`, typically the base system's unbound),
+   the network's **gateway address**, the host's own address on the bridge. JailOps changes nothing on the host: the
+   gateway answers once the resolver listens there. For the base system's unbound (`local_unbound`) a file
+   `/var/unbound/conf.d/jails.conf`, here for a network with the gateway 10.77.0.1:
+
+       server:
+           interface: 127.0.0.1
+           interface: ::1
+           interface: 10.77.0.1
+           ip-transparent: yes
+           access-control: 10.77.0.0/24 allow
+
+   then `service local_unbound restart`. `interface` lines replace unbound's default (loopback only), so loopback is
+   listed too; `ip-transparent` lets unbound bind the gateway address at boot, before JailOps has made the network
+   (checked across a reboot of a FreeBSD 15.2 host). A jail whose firewall policy denies outgoing traffic needs a rule
+   for udp and tcp port 53 to the gateway, and a host `pf.conf` that blocks traffic to the host itself a pass rule for it
+   on the gateway interface (`<bridge>gb`). With `block log all` and `set skip on lo0` nothing more was needed on the
+   test host.
+
+`jailops network show NAME` says which rule applies (`DNS: ... (the host's nameservers)`, `(the gateway ...)` with the
+lines above) and `network create` prints them once as a warning; `jailops doctor` (`network.dns`) sends the gateway one
+query (`. NS`, one second) once a jail on the network runs and says whether it answers, refuses (access control) or is
+silent.
+
+A change of the network's `dns` reaches the **running** jails at once: their `resolv.conf` is written again and
+`network edit` names them ("resolv.conf rewritten in the running jails ..."); a stopped jail gets it at its next start.
+A change of the host's own `/etc/resolv.conf` reaches a jail at its next start (or at the next change of the network).
+
+A jail that runs its own resolver, or wants its own file, puts the line `# jailops:keep` into its `/etc/resolv.conf`:
+JailOps then never writes the file, neither at a start nor at a change of the network. The file is written through the
+helper's file operations, which replace only a regular file inside the jail's root and refuse a symlink.
 
 ## Two IPv6 modes
 

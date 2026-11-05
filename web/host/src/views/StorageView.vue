@@ -7,7 +7,7 @@ import { runOp } from '@jailops/shared/composables/ops'
 import { ApiError } from '@jailops/shared/api/client'
 import { bytes, percent, sentence } from '@jailops/shared/lib/format'
 import { useFormCheck } from '@jailops/shared/composables/form'
-import { nameHint } from '@jailops/shared/lib/names'
+import { DATASET_MAX, nameHint } from '@jailops/shared/lib/names'
 import { nameError } from '@/lib/nameField'
 import Icon from '@jailops/shared/components/Icon.vue'
 import Meter from '@jailops/shared/components/Meter.vue'
@@ -33,10 +33,10 @@ const creating = ref(false)
 const form = reactive({ name: '', dataset: '', description: '', compression: '' })
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
-// the object name rule of the server; the dataset must look like pool/name
+// the object name rule of the server; the dataset must look like pool/name and leave room for the names below it
 const check = useFormCheck(() => ({
   'sc-name': nameError(form.name),
-  'sc-ds': !form.dataset ? s.storage.required : !/^[^/\s]+\/\S+$/.test(form.dataset) ? s.storage.datasetBad : '',
+  'sc-ds': !form.dataset ? s.storage.required : !/^[^/\s]+\/\S+$/.test(form.dataset) ? s.storage.datasetBad : form.dataset.length > DATASET_MAX ? s.storage.datasetLong(DATASET_MAX) : '',
 }))
 const labels: Record<string, string> = { 'sc-name': s.storage.name, 'sc-ds': s.storage.dataset }
 function open(): void {

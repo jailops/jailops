@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -259,6 +260,15 @@ func (e *Env) Events(ctx context.Context, c *sdk.Client, opts ...sdk.EventOption
 	return ch
 }
 
+// hostFile reads a file of the simulated host: /etc/NAME is NAME in Host.Etc; nothing else exists.
+func (e *Env) hostFile(p string) ([]byte, error) {
+	name, ok := strings.CutPrefix(p, "/etc/")
+	if !ok || strings.Contains(name, "/") {
+		return nil, os.ErrNotExist
+	}
+	return os.ReadFile(filepath.Join(e.Host.Etc, name))
+}
+
 // New builds and starts an Env. The daemon is stopped when the test ends.
 func New(t testing.TB, o Options) *Env {
 	tt, _ := t.(*testing.T)
@@ -277,6 +287,7 @@ func New(t testing.TB, o Options) *Env {
 		e.ZFS = zfs.NewFake("tank")
 		e.PF = pfctl.NewFake()
 		e.Net = ifconfig.NewFake(ifconfig.Options{})
+		addHostIfaces(e.Net)
 		e.Jails = jailos.NewFake()
 		e.Files = fakes.NewFiles(e.Fault)
 		e.Run = run.NewFake()
@@ -336,7 +347,7 @@ func (e *Env) Start() {
 				Sysctl:  func(_ context.Context, name string) (string, error) { return e.sysctl(name) },
 				Mount:   func(context.Context, string) error { return nil },
 				Unmount: func(context.Context, string) error { return nil },
-				Dial:    e.dial, HostSystem: e.Host.Local, WG: e.WG, Keys: e.Keys}
+				Dial:    e.dial, HostSystem: e.Host.Local, WG: e.WG, Keys: e.Keys, HostFile: e.hostFile}
 			if e.Opts.Clients != nil {
 				e.Opts.Clients(cl)
 			}
@@ -369,6 +380,22 @@ func (e *Env) Stop() {
 	e.D = nil
 	if e.HTTP != nil {
 		e.HTTP.Close()
+	}
+}
+
+// HostIfaces are the fake host's own interfaces, which networks name as their uplink: em0 and vtnet0 are on a
+// segment whose IPv6 prefix 2001:db8:1:2::/64 proxy-mode networks take parts of; em1 has only IPv4.
+var HostIfaces = []ifconfig.Iface{
+	{Name: "em0", Flags: []string{"UP", "RUNNING"}, Inet: []netip.Prefix{netip.MustParsePrefix("203.0.113.2/24")},
+		Inet6: []netip.Prefix{netip.MustParsePrefix("2001:db8:1:2::2/64")}},
+	{Name: "em1", Flags: []string{"UP", "RUNNING"}, Inet: []netip.Prefix{netip.MustParsePrefix("192.0.2.2/24")}},
+	{Name: "vtnet0", Flags: []string{"UP", "RUNNING"}, Inet: []netip.Prefix{netip.MustParsePrefix("198.51.100.15/24")},
+		Inet6: []netip.Prefix{netip.MustParsePrefix("2001:db8:1:2::3/64")}},
+}
+
+func addHostIfaces(f *ifconfig.Fake) {
+	for _, i := range HostIfaces {
+		f.AddHost(i)
 	}
 }
 

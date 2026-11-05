@@ -42,7 +42,7 @@ func QualifiedName(project, name string) (string, error) {
 	k := project + "_" + name
 	if len(k) > MaxJailKeyLen {
 		return "", Invalid("name", "project %q and jail %q are too long together", project, name).
-			WithHint("the project and jail names together may be at most 63 characters")
+			WithHint(fmt.Sprintf("the project and jail names together may be at most %d characters (the jail key project_jail at most %d)", MaxJailKeyLen-1, MaxJailKeyLen))
 	}
 	return k, nil
 }

@@ -258,9 +258,9 @@ func TestDoctorDescriptionsAndWireGuardTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = e.Net.SetDescription(c, n.Spec.Bridge, "jailops:"+n.Metadata.UUID) // the marker of an earlier release
-	_ = e.Net.SetDescription(c, n.Spec.Bridge+"gb", "")                    // lost: not taken as ours, left to the network checks
+	_ = e.Net.SetDescription(c, n.Spec.Bridge+"gb", "")                    // clearing leaves the bare marker: made, not described
 	ch := wgDoctorCheck(t, e, "net.descriptions")
-	if ch.Status != api.DoctorWarn || !strings.Contains(ch.Message, n.Spec.Bridge+` ("jailops:`) || strings.Contains(ch.Message, n.Spec.Bridge+"gb") {
+	if ch.Status != api.DoctorWarn || !strings.Contains(ch.Message, n.Spec.Bridge+` ("jailops:`) || !strings.Contains(ch.Message, n.Spec.Bridge+`gb ("jailops managed")`) {
 		t.Fatalf("%+v", ch)
 	}
 	_ = e.Net.SetDescription(c, n.Spec.Bridge+"gb", "jailops net=lan gateway (host side)")

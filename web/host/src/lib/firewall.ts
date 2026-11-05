@@ -1,4 +1,5 @@
 import type { AddressSet, AddressSetSpec, FirewallPolicy, FirewallRule } from '@jailops/shared/api/types'
+import { nameRules } from '@jailops/shared/lib/names'
 import { ipv4, ipv6Groups } from './host'
 
 export type RuleErrors = Record<string, string> // key: "<index>.<field>"
@@ -51,8 +52,8 @@ export function blankRule(): FirewallRule {
 // create or a replace; the server stays the authority.
 
 /** The rule of an address set name: it becomes part of a PF table name. */
-export const SET_NAME = /^[a-z][a-z0-9_]{0,23}$/
-export const SET_NAME_MAX = 24
+export const SET_NAME = nameRules.addressSet.re
+export const SET_NAME_MAX = nameRules.addressSet.max
 
 /** The messages, named as in the firewall strings of the i18n file (pass s.firewall). */
 export interface SetMsgs {

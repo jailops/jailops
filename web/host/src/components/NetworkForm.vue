@@ -17,13 +17,16 @@ const props = defineProps<{ open: boolean; network?: Network | null; etag?: stri
 const emit = defineEmits<{ close: []; done: [] }>()
 const f = reactive(blankNet())
 const busy = ref(false)
+// what the server said about the host after a save (forwarding off, a sysctl the proxy needs): the network is
+// stored, and the form stays open on these until it is closed
+const warnings = ref<string[]>([])
 const error = ref<ApiError | null>(null)
 const editing = computed(() => !!props.network)
 const touched = reactive<Record<string, boolean>>({})
 // field id -> problem: the plain mistakes of checkNet, then what is required and still empty
 const ids: Record<string, string> = { name: 'nf-name', uplink: 'nf-up', v4subnet: 'nf-v4s', v4gateway: 'nf-v4g', v4range: 'nf-v4r', v6subnet: 'nf-v6s', v6gateway: 'nf-v6g', v6range: 'nf-v6r', family: 'nf-v4' }
 const check = useFormCheck(() => {
-  const p = checkNet(f)
+  const p = checkNet(f, editing.value)
   const need: Record<string, boolean> = {
     name: !f.name, v4subnet: f.v4 && !f.v4subnet, v4gateway: f.v4 && !f.v4gateway, v4range: f.v4 && !f.v4range,
     v6subnet: f.mode !== 'none' && !f.v6subnet, v6gateway: f.mode !== 'none' && !f.v6gateway, v6range: f.mode !== 'none' && !f.v6range,
@@ -41,6 +44,7 @@ watch(() => props.open, (o) => {
   Object.keys(touched).forEach((k) => delete touched[k])
   check.reset()
   error.value = null
+  warnings.value = []
 })
 // A typed subnet fills the gateway and range once, until the user has written their own.
 watch(() => f.v4subnet, (v) => {
@@ -53,10 +57,13 @@ const save = () => check.submit(async () => {
   busy.value = true
   error.value = null
   try {
-    if (props.network) await runOp(s.networks.editTitle(f.name), () => api.networks.put(netBody(f, props.network!), props.etag))
-    else await runOp(s.networks.createTitle + ': ' + f.name, () => api.networks.create(netBody(f)))
+    const r = props.network
+      ? await runOp(s.networks.editTitle(f.name), () => api.networks.put(netBody(f, props.network!), props.etag))
+      : await runOp(s.networks.createTitle + ': ' + f.name, () => api.networks.create(netBody(f)))
     emit('done')
-    emit('close')
+    const w = (r.data as Network | undefined)?.status?.warnings ?? []
+    if (w.length) warnings.value = w
+    else emit('close')
   } catch (e) {
     error.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
   } finally {
@@ -67,12 +74,16 @@ const save = () => check.submit(async () => {
 
 <template>
   <Modal :open="open" :title="editing ? s.networks.editTitle(f.name) : s.networks.createTitle" wide @close="emit('close')">
-    <form id="nf" novalidate @submit.prevent="save">
+    <div v-if="warnings.length" data-test="nf-warnings">
+      <p>{{ editing ? s.networks.savedWarn : s.networks.createdWarn }}</p>
+      <Callout v-for="x in warnings" :key="x" tone="warn">{{ x }}</Callout>
+    </div>
+    <form v-else id="nf" novalidate @submit.prevent="save">
       <div class="form-2">
         <div class="field">
           <label for="nf-name">{{ s.networks.name }} <span class="req" aria-hidden="true">*</span></label>
           <input id="nf-name" v-model="f.name" class="mono" type="text" autocomplete="off" required :readonly="editing" :aria-invalid="!!msg('name')" aria-describedby="nf-name-h nf-name-e" @input="check.touch('nf-name')" />
-          <span id="nf-name-h" class="hint">{{ editing ? s.networks.nameFixed : nameHint() }}</span>
+          <span id="nf-name-h" class="hint">{{ editing ? s.networks.nameFixed : nameHint('network') }}</span>
           <span id="nf-name-e" class="field-error" role="alert">{{ msg('name') }}</span>
         </div>
         <div class="field">
@@ -143,7 +154,10 @@ const save = () => check.submit(async () => {
       <p class="hint">{{ s.networks.serverChecks }}</p>
       <ErrorPanel v-if="error" :error="error" />
     </form>
-    <template #footer>
+    <template v-if="warnings.length" #footer>
+      <button class="btn btn-primary" type="button" data-test="nf-warn-close" @click="emit('close')">{{ s.app.close }}</button>
+    </template>
+    <template v-else #footer>
       <span v-if="check.reason.value" class="why-disabled" data-test="nf-why">{{ s.networks.fixFirst(labels[check.firstId.value] ?? '', check.reason.value) }}</span>
       <button class="btn" type="button" @click="emit('close')">{{ s.app.cancel }}</button>
       <button class="btn btn-primary" type="submit" form="nf" :disabled="busy" :aria-disabled="!check.ok.value" data-test="net-create-go">{{ editing ? s.networks.save : s.networks.create }}</button>

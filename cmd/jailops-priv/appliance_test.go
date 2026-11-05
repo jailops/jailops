@@ -101,7 +101,7 @@ func TestApplianceInit(t *testing.T) {
 		}
 		all := strings.Join(r.cmds, "\n")
 		for _, want := range []string{"zfs list -H -o name /", "zfs get -H -r -s local -o name,value -t filesystem jailops:managed zroot",
-			"zfs create -o mountpoint=/jailops -o jailops:managed=on zroot/jailops"} {
+			"zfs create -o mountpoint=/usr/local/jailops -o jailops:managed=on zroot/jailops"} {
 			if !strings.Contains(all, want) {
 				t.Errorf("missing %q in\n%s", want, all)
 			}
@@ -158,7 +158,7 @@ func TestApplianceInit(t *testing.T) {
 		if err := a.do(&bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "not a pool name") || len(r.cmds) != 0 {
 			t.Fatalf("%v %v", err, r.cmds)
 		}
-		o := initOptions{pool: "-dtank", mount: "/jailops"}
+		o := initOptions{pool: "-dtank", mount: "/usr/local/jailops"}
 		if err := o.validate(); err == nil {
 			t.Error("init accepted a pool with a leading dash")
 		}

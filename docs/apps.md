@@ -257,7 +257,7 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    The provisioning `services.start` step of a FreeBSD jail uses the same wrapper. `setup` and `health.exec` commands
    stay plain argv: they are the definition's own commands, without a shell. The jail's own start (`jail -c` running
    `/etc/rc`) is detached the same way by `exec.consolelog` in its `jail.conf`: the output of `/etc/rc` goes to
-   `/var/log/jail_<project>_<jail>_console.log` on the host (design section 6).
+   `/var/log/jailops/jail_<project>_<jail>_console.log` on the host (design section 6).
 6. **Run the health check**: `tcp` connects from the host to the port on the jail's first address, `http` requests
    the path there (plain HTTP) and expects the status, `exec` runs the command in the jail; the check is retried once a
    second until it passes or `wait_seconds` have passed. Each attempt is given at most 5 seconds, and never more than

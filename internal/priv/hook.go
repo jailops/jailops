@@ -484,6 +484,13 @@ func (l *Local) applyHost(ctx context.Context, s render.Step, private bool) erro
 			return err
 		}
 		if _, ok := have[s.Iface]; ok {
+			// there already: JailOps's (left by a start that failed half way), or refused
+			if err := l.ifOwned(ctx, s.Iface); err != nil {
+				return err
+			}
+			if _, ok := have[s.Arg2]; ok {
+				return l.ifOwned(ctx, s.Arg2)
+			}
 			return nil
 		}
 		a, b, err := net.EpairCreate(ctx, strings.TrimSuffix(s.Iface, "a"))
@@ -497,8 +504,9 @@ func (l *Local) applyHost(ctx context.Context, s render.Step, private bool) erro
 	case render.OpEpairDestroy:
 		return net.EpairDestroy(ctx, s.Iface)
 	case render.OpSetMAC:
-		if err := l.cfg.ifOwned(s.Iface); err != nil {
-			return err
+		// The jail end may already live in a running jail's vnet: not found on the host is not an error.
+		if err := l.ifOwned(ctx, s.Iface); err != nil {
+			return ignoreNotFound(err)
 		}
 		if err := validMAC(s.Arg); err != nil {
 			return err
@@ -506,7 +514,7 @@ func (l *Local) applyHost(ctx context.Context, s render.Step, private bool) erro
 		// The jail end may already live in a running jail's vnet.
 		return ignoreNotFound(l.ifconfigRun(ctx, s.Iface, "ether", s.Arg))
 	case render.OpSetMTU:
-		if err := l.cfg.ifOwned(s.Iface); err != nil {
+		if err := ifconfig.ValidateIfName(s.Iface); err != nil {
 			return err
 		}
 		if s.Arg == "" || len(s.Arg) > 5 || strings.Trim(s.Arg, "0123456789") != "" {
@@ -531,21 +539,21 @@ func (l *Local) applyHost(ctx context.Context, s render.Step, private bool) erro
 	case render.OpDelHostRoute:
 		return net.RouteDelete(ctx, ifconfig.Route{Dest: s.Arg, Interface: s.Iface})
 	case render.OpSetStaticARP:
-		if err := l.cfg.ifOwned(s.Iface); err != nil {
+		if err := l.ifOwned(ctx, s.Iface); err != nil {
 			return err
 		}
 		return l.ifconfigRun(ctx, s.Iface, "staticarp")
 	case render.OpAddBridgeStat, render.OpDelBridgeStat:
-		if err := l.cfg.ifOwned(s.Iface); err != nil {
-			return err
-		}
 		if err := validMAC(s.Arg); err != nil {
 			return err
 		}
 		if s.Op == render.OpDelBridgeStat {
+			if err := l.ifOwned(ctx, s.Iface); err != nil {
+				return ignoreNotFound(err)
+			}
 			return ignoreNotFound(l.ifconfigRun(ctx, s.Iface, "deladdr", s.Arg))
 		}
-		if err := l.cfg.ifOwned(s.Arg2); err != nil {
+		if err := l.ifsOwned(ctx, s.Iface, s.Arg2); err != nil {
 			return err
 		}
 		return l.ifconfigRun(ctx, s.Iface, "static", s.Arg2, s.Arg)
@@ -637,7 +645,8 @@ func (l *Local) applyJail(ctx context.Context, jail string, s render.Step) error
 	default:
 		return api.Errorf(api.CodeUnsupported, "hook cannot apply jail step %q", s.Op)
 	}
-	if err := l.cfg.ifOwned(s.Iface); err != nil {
+	// the command rules (verifyIfconfig, verifyRoute) read the interface in the jail's vnet before they run it
+	if err := ifconfig.ValidateIfName(s.Iface); err != nil {
 		return err
 	}
 	_, err := l.Runner().Run(ctx, run.Cmd{Name: cmd, Args: args, Timeout: 20 * time.Second})

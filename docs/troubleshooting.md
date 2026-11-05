@@ -26,7 +26,10 @@ example without FreeBSD), with a hint on the next line when there is one. `jailo
 | `jail.volumes` | the volume datasets of the jails have `canmount=noauto` | `warn`: a volume made before that has `canmount=on` and is mounted at boot before the jail root it lies in; run the `zfs set canmount=noauto <dataset>` the hint lists |
 | `pf.anchors` | the three anchor lines are in the loaded ruleset | add them to `pf.conf` in the right order and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
+| `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
+| `network.dns` | for every network a jail uses: where its jails get their nameservers (the network's `dns`, the host's `/etc/resolv.conf`, or the gateway when the host resolves only through loopback); a gateway is asked one query (`. NS`, one second) once a jail on the network runs | `warn` when the gateway does not answer, refuses (access control) or no nameserver could be worked out; the hint has the resolver and `pf.conf` lines ([networking-ipv6.md](networking-ipv6.md#name-resolution-of-jails)) |
 | `network.epairs` | epairs without a jail | `warn`: the reconcile loop removes them on its next pass |
+| `network.bridges` | an interface with the name of a network's bridge or gateway pair (`<bridge>ga`, `<bridge>gb`) that is not that network's | `fail` names it and what it carries: no JailOps description (made by hand, or a creation of an earlier release that was interrupted), another object's, or someone else's. JailOps changes only interfaces it created and never takes one over by its name, so the network stays down (`ForeignBridge`). Remove a leftover with `ifconfig NAME destroy` (the reconcile loop then makes the network's own), or delete the network and create it with another `--bridge` |
 | `net.descriptions` | every interface JailOps owns carries its description (bridges, gateway pairs, both ends of running jails' epairs, WireGuard interfaces) | `warn` lists them with what they carry: the reconcile loop sets them on its next pass |
 | `wireguard.tools` | only with a WireGuard tunnel: the wg program (`/usr/bin/wg` or `/usr/local/bin/wg`) and the module `if_wg` | `warn`: `pkg install wireguard-tools`; the loop loads `if_wg` (`if_wg_load="YES"` in `/boot/loader.conf` for boot) |
 | `wireguard.forwarding` | a tunnel serves JailOps networks and forwarding is off | `warn`: `gateway_enable=YES` and `sysctl net.inet.ip.forwarding=1` (JailOps never sets forwarding) |
@@ -43,6 +46,15 @@ example without FreeBSD), with a hint on the next line when there is one. `jailo
 | `conf.dir` | the configuration directory | check it equals `conf-dir` of `priv.conf` |
 
 ## Common failures
+
+**A jail cannot resolve names** ("Transient resolver failure" from `pkg`). `jailops network show NET` says where the jails of
+the network get their nameservers and `jailops doctor` (`network.dns`) checks the gateway case. On a host whose resolver
+is a local cache (`nameserver 127.0.0.1` only), either let the cache answer on the gateway (the lines `network show`
+prints) or give the network nameservers: `jailops network edit NET` with `dns: [192.0.2.53]`; the running jails get the
+new `resolv.conf` at once.
+
+**Jails behind NAT lose most packets** (one ping of four answered) on a host whose `pf.conf` blocks by default: add
+`set state-policy if-bound` at the top of `pf.conf` and reload it (`jailops doctor`: `pf.state-policy`).
 
 **`the socket does not exist: is jailopsd running?`** The daemon is not up. `service jailopsd status`, then
 `service jailopsd start` and read the output: the rc script validates the configuration first and prints the problem
@@ -66,6 +78,15 @@ password is replaced by root with `sudo jailops user set-password NAME`.
 **The daemon starts and every ZFS or jail operation fails with `forbidden`.** The helper refuses what `priv.conf` does not allow.
 The message names the line to add (`ndp-proxy`, `admin-host-mount`, ...). Edit `priv.conf` as root, `service jailops_priv restart`.
 `jailops-priv check-config` prints the effective roots and allow-lists.
+
+**`forbidden: interface "NAME" is not managed by JailOps: ...`.** The helper changes only bridges and epairs that carry
+JailOps's description, which it gives an interface when it creates it ([security-model.md](security-model.md#interfaces)).
+The rest of the message says what the kernel showed: not a bridge or an epair (the uplink, `lo0`, a tunnel), no JailOps
+description (made by hand), or a description of someone else. `forbidden: interface "NAME" exists and is not JailOps's;
+the helper never takes over an interface by its name` comes from a creation under a name that is taken. `jailops doctor`
+(`network.bridges`) lists the networks it blocks; remove a leftover with `ifconfig NAME destroy`, or give the network
+another bridge. `invalid: ... has the form of the interfaces of the driver "vmx"` refuses a bridge name such as `vmx0`,
+`bridge0` or `lo0` before anything is made.
 
 **`a project is required`.** There is no default project. Pass `--project NAME`, set `JAILOPS_PROJECT`, or
 `jailops project switch NAME`. **`a jail needs a network` / `a jail needs a storage`:** name them with `--network` and `--storage`,
@@ -99,7 +120,7 @@ advertisement follows). Fix: `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` no
 [networking-ipv6.md](networking-ipv6.md).
 
 **Jail deletion or unmount reports `busy`.** Stopping a jail retries a busy unmount for a few seconds; if it persists, something
-inside still holds a file open (`fstat -f /jailops/projects/...`).
+inside still holds a file open (`fstat -f /usr/local/jailops/projects/...`).
 
 **An `/etc` merge conflict (`merge_conflict`) on upgrade.** The jail stays on the old generation. Resolve the listed files in the
 jail, then `jailops jail upgrade` again.

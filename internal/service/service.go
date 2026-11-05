@@ -60,7 +60,7 @@ type Deps struct {
 	Env      api.Environment
 
 	// Pool is the ZFS pool name; Root the JailOps dataset ("tank/jailops") and
-	// MountBase the directory its datasets are mounted under ("/jailops").
+	// MountBase the directory its datasets are mounted under ("/usr/local/jailops").
 	Pool      string
 	Root      string
 	MountBase string
@@ -165,6 +165,9 @@ type Deps struct {
 	// catalog (default apps.DefaultLocalDir); a local definition wins over a
 	// packaged one of the same name.
 	AppsLocalDir string
+	// HostFile reads a world-readable file of the host (/etc/resolv.conf, /etc/rc.conf, /etc/pf.conf) as the
+	// daemon's own user; nil reads the file system.
+	HostFile func(path string) ([]byte, error)
 	// DialJail opens a connection from the host to a jail (the tcp and http
 	// health checks of an app installation); nil uses the network.
 	DialJail func(ctx context.Context, network, address string) (net.Conn, error)
@@ -231,6 +234,9 @@ type Service struct {
 
 	// rel caches the host's kern.osrelease (hostrelease.go).
 	rel hostReleaseCache
+	// genVer caches the FreeBSD version of generations by name ("freebsd-15-1#g1"): a generation never changes.
+	genVerMu sync.Mutex
+	genVer   map[string]string
 
 	imgKind  kindStore[api.ImageSpec]
 	netKind  kindStore[api.NetworkSpec]
@@ -300,6 +306,9 @@ type Service struct {
 	certMu    sync.Mutex
 	certCache map[string]certInfo
 	certGen   uint64
+
+	// renameCrashAt makes a rename stop at that step as if the daemon died (tests; 0 never).
+	renameCrashAt int
 
 	closeOnce sync.Once
 	baseCtx   context.Context

@@ -150,3 +150,14 @@ test('a host on a new release is offered its image, from Overview and from Image
   await expect(page.getByTestId('install-image')).toHaveValue('freebsd-15-2')
   await expect(page.getByTestId('install-image').locator('option')).toHaveText(['freebsd-15-2 (15.2-RELEASE)', 'freebsd-15-1 (15.1-RELEASE)'])
 })
+
+test('a generation shows the FreeBSD version of its packages, and the jail list its patch level', async ({ page }, info) => {
+  await go(page, 'x', '/images')
+  const versions = page.locator('[data-image="freebsd-15-1"]').getByTestId('generation-freebsd')
+  await expect(versions).toHaveText(['15.1-RELEASE-p6', '15.1-RELEASE-p5', '15.1-RELEASE-p4', '15.1-RELEASE-p3'])
+  await expect(page.locator('[data-image="alpine-3.22"]').getByTestId('generation-freebsd')).toHaveText(['-'])
+  if (info.project.name === 'phone') return // the image column of the jail list is a desktop column
+  await go(page, 'x', '/jails')
+  await expect(page.locator('[data-jail="web"]').getByTestId('jail-generation')).toHaveText('#g4 · p6')
+  await expect(page.locator('[data-jail="mail"]').getByTestId('jail-generation')).toHaveText('#g3 · p5')
+})

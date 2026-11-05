@@ -15,7 +15,14 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-func forbidden(format string, a ...any) error     { return api.Errorf(api.CodeForbidden, format, a...) }
+func forbidden(format string, a ...any) error { return api.Errorf(api.CodeForbidden, format, a...) }
+
+// notBelowMount refuses a path outside the storage root, and says what to check when the host was upgraded and the
+// images and jails sit where an earlier release mounted them.
+func (c Config) notBelowMount(p string) error {
+	return api.Errorf(api.CodeForbidden, "path %q is not below %s", p, c.mountBaseDesc()).
+		WithHint("mount-base of priv.conf says where the storage root is mounted: when the images and jails live elsewhere (a host made by an earlier release has them under /jailops), set mount-base and mount_base of jailopsd.yaml to that directory (zfs get -r mountpoint <storage-root> shows it) and restart jailops_priv and jailopsd")
+}
 func forbiddenBusy(format string, a ...any) error { return api.Errorf(api.CodeBusy, format, a...) }
 func invalid(format string, a ...any) error       { return api.Errorf(api.CodeInvalid, format, a...) }
 
@@ -200,7 +207,12 @@ func within(root, p string) bool {
 
 // ---- interfaces ----
 
-func (c Config) ifOwned(name string) error {
+// epairEndName checks the name of an interface a jail.conf moves into the jail's vnet (vnet.interface): an end of an
+// epair JailOps names, which carries a legacy prefix (ipam.EpairNames: "jo" and the jail's hash). This is a check of
+// the name's form, not of ownership: jail(8) moves the interface itself, after the prestart hook created it, and a
+// jail.conf must never name the uplink or another interface of the host. Who owns the interface is the kernel's
+// description, checked when the jail is created (jailGuard.Create).
+func (c Config) epairEndName(name string) error {
 	if err := ifconfig.ValidateIfName(name); err != nil {
 		return err
 	}
@@ -209,7 +221,7 @@ func (c Config) ifOwned(name string) error {
 			return nil
 		}
 	}
-	return forbidden("interface %q is not managed by JailOps (prefix %s)", name, strings.Join(c.IfPrefixes, ","))
+	return forbidden("vnet.interface %q is not an epair end JailOps names (prefix %s)", name, strings.Join(c.IfPrefixes, ","))
 }
 
 // checkIfaceDesc accepts only a description JailOps writes: "jailops ..." (or the "jailops:<id>" marker of earlier
@@ -235,7 +247,8 @@ func validMAC(m string) error {
 
 func (c Config) checkRoute(ctx context.Context, r ifconfig.Route) error {
 	if r.Interface != "" {
-		if err := c.ifOwned(r.Interface); err != nil {
+		// ownership is the kernel's word, checked by the caller (netGuard.route)
+		if err := ifconfig.ValidateIfName(r.Interface); err != nil {
 			return err
 		}
 	}

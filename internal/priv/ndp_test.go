@@ -197,6 +197,7 @@ func TestNDPOnlyForAddressesThatRouteToAJail(t *testing.T) {
 		"no route at all":         {},
 		"a route out the uplink":  {"2001:db8:1:2:100::10": "em0"},
 		"a route of someone else": {"2001:db8:1:2:100::10": "tun0"},
+		"a bridge made by hand":   {"2001:db8:1:2:100::10": "mybr"},
 	} {
 		e := newEnv(t)
 		dev := e.local.d.NDP.(*fakeNDP)

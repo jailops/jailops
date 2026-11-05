@@ -80,7 +80,13 @@ func applyWith[T any](a *app, d *kindDesc[T]) applier {
 		if err != nil {
 			return err
 		}
-		return a.finishOp(ctx, nil, d.noun, name, "updated", out)
+		if err := a.finishOp(ctx, nil, d.noun, name, "updated", out); err != nil {
+			return err
+		}
+		if d.updated != nil {
+			d.updated(a, out)
+		}
+		return nil
 	}
 }
 

@@ -2,6 +2,7 @@
 // api.ConfigKeys), so a key exists in one place. Each key's `path` locates it in the typed spec:
 // `resources.cpu`, `network[<device>].mtu`, `env.<var>`. This module reads, writes and validates by path.
 import { clone } from './clone'
+import { validSize } from '@jailops/shared/lib/names'
 import { configKeys, type ConfigKey, type JailSpec, type Profile } from '@jailops/shared/api/types'
 
 export type Spec = Record<string, unknown>
@@ -154,7 +155,7 @@ export function validate(k: ConfigKey, value: string, m: Msgs): string | undefin
   if (v === '') return undefined
   switch (k.type) {
     case 'int': return /^-?\d+$/.test(v) ? undefined : m.int
-    case 'size': return /^[1-9][0-9]*[KMGTP]?$/.test(v) ? undefined : m.size
+    case 'size': return validSize(v) ? undefined : m.size
     case 'rate': return /^[1-9][0-9]*[KMGT]?$/.test(v) ? undefined : m.rate
     case 'bool': return ['true', 'false', 'yes', 'no', 'on', 'off', '1', '0'].includes(v) ? undefined : m.bool
     case 'mac': return /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(v) ? undefined : m.mac

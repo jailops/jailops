@@ -128,6 +128,7 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 	j := cloneJail(e.jail)
 	name := jailKey(j)
 	st := api.JailStatus{Power: api.PowerStopped, Generation: e.jail.Status.Generation}
+	st.FreeBSDVersion = s.generationFreeBSD(ctx, st.Generation)
 	jid, up := 0, false
 	if running != nil {
 		jid, up = running[name], false
@@ -360,6 +361,12 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 	if err := s.validateJail(proj, name, spec); err != nil {
 		return api.Operation{}, err
 	}
+	if err := canonicalJailSizes(&spec, true); err != nil {
+		return api.Operation{}, err
+	}
+	if err := s.checkNewJail(proj, name, spec); err != nil {
+		return api.Operation{}, err
+	}
 	spec.OS = im.Spec.OS
 	if spec.Layout == "" {
 		spec.Layout = api.LayoutThin
@@ -478,7 +485,7 @@ func (s *Service) updateLocked(ctx context.Context, p project, key, name string,
 
 func (s *Service) updateJail(ctx context.Context, p project, key, name string, in api.Jail, expect int64, locked bool) (api.Jail, error) {
 	if in.Metadata.Name != "" && in.Metadata.Name != name {
-		return api.Jail{}, invalid("renaming is not supported")
+		return api.Jail{}, renameByAction("jail", "jails")
 	}
 	if err := bodyProject(p.Meta.Name, in.Metadata.Project); err != nil {
 		return api.Jail{}, err
@@ -503,6 +510,9 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 		spec.Storage = old.Spec.Storage
 	}
 	if err := s.validateJail(p.Meta.Name, name, spec); err != nil {
+		return api.Jail{}, err
+	}
+	if err := canonicalJailSizes(&spec, false); err != nil {
 		return api.Jail{}, err
 	}
 	oref, _ := validate.ParseImageRef(old.Spec.Image)
@@ -868,7 +878,10 @@ func (s *Service) CreateSnapshot(ctx context.Context, jail string, req api.JailS
 	}
 	name := req.Metadata.Name
 	if name != "" {
-		if err := ValidObjectName(name); err != nil {
+		if err := validate.SnapshotName("name", name); err != nil {
+			return api.Operation{}, err
+		}
+		if err := s.checkSnapshotBudget(key, name); err != nil {
 			return api.Operation{}, err
 		}
 		if _, err := s.GetSnapshot(ctx, jail, name); err == nil {
@@ -1108,6 +1121,10 @@ func (s *Service) CopyJail(ctx context.Context, src string, dst api.Jail) (api.O
 	}
 	release, err := s.admit(ctx, p, key, &cspec, nil)
 	if err != nil {
+		return api.Operation{}, err
+	}
+	if err := s.checkNewJail(p.Meta.Name, name, cspec); err != nil {
+		release()
 		return api.Operation{}, err
 	}
 	submitted := false

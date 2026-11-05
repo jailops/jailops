@@ -79,6 +79,26 @@ func TestJailFilesStayInTheJail(t *testing.T) {
 	if c, _ := os.ReadFile(b + hba); string(c) != "B hba\n" {
 		t.Errorf("jail B's pg_hba.conf changed: %q", c)
 	}
+	// the resolv.conf a network's dns change rewrites in a running jail: through A's redirected /etc, and as a symlink
+	// of B's own pointing at A's tree, neither write reaches the other jail
+	write(b+"/etc/resolv.conf", "B resolv\n")
+	if err := f.WriteAtomic(ctx, a+"/etc/resolv.conf", []byte("nameserver 192.0.2.66\n")); !api.IsCode(err, api.CodeForbidden) {
+		t.Errorf("resolv.conf through a symlinked /etc: %v", err)
+	}
+	if c, _ := os.ReadFile(b + "/etc/resolv.conf"); string(c) != "B resolv\n" {
+		t.Errorf("jail B's resolv.conf changed: %q", c)
+	}
+	write(a+".resolv", "A resolv\n")
+	if err := os.Remove(b + "/etc/resolv.conf"); err != nil {
+		t.Fatal(err)
+	}
+	link(b+"/etc/resolv.conf", a+".resolv")
+	if err := f.WriteAtomic(ctx, b+"/etc/resolv.conf", []byte("nameserver 192.0.2.66\n")); err == nil {
+		t.Error("a resolv.conf that is a symlink was replaced")
+	}
+	if c, _ := os.ReadFile(a + ".resolv"); string(c) != "A resolv\n" {
+		t.Errorf("the symlink's target changed: %q", c)
+	}
 	// the same paths work in a jail that did not redirect them
 	write(b+"/etc/rc.conf", "B rc\n")
 	if got, err := f.ReadFile(ctx, apps.RcConfPath(b)); err != nil || string(got) != "B rc\n" {

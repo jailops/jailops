@@ -38,7 +38,7 @@ type Config struct {
 	Pool string `yaml:"pool"`
 	// Dataset is the JailOps dataset; default "<pool>/jailops".
 	Dataset string `yaml:"dataset"`
-	// MountBase is where the dataset is mounted; default "/jailops".
+	// MountBase is where the dataset is mounted; default "/usr/local/jailops".
 	MountBase string `yaml:"mount_base"`
 	// StateDir defaults to <data_dir>/state, which is where jailops-priv init mounts the state dataset. It must lie
 	// outside the storage root: the root is owned by the helper and not writable by the daemon.
@@ -375,7 +375,7 @@ func (d Duration) Std() time.Duration { return time.Duration(d) }
 func Defaults() Config {
 	t := true
 	return Config{
-		Role: "host", MountBase: "/jailops", DataDir: "/var/db/jailops",
+		Role: "host", MountBase: "/usr/local/jailops", DataDir: "/var/db/jailops",
 		ConfDir: "/usr/local/etc/jailops/jails", WorkDir: "/var/tmp/jailops",
 		Listen:    Listen{Unix: UnixListen{Path: "/var/run/jailops/jailops.sock", Mode: 0o666}},
 		Priv:      Priv{Socket: priv.DefaultSocket},

@@ -55,6 +55,9 @@ func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string) *hookEnv {
 	if err := e.net.BridgeCreate(ctx, "jo0"); err != nil {
 		t.Fatal(err)
 	}
+	if _, _, err := e.net.EpairCreate(ctx, "jo0g"); err != nil { // the gateway pair, made by the reconcile loop
+		t.Fatal(err)
+	}
 	e.runner.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
 	for _, bin := range []string{"/sbin/ifconfig", "/sbin/route"} {
 		bin := bin
@@ -273,10 +276,11 @@ func TestHookRefusals(t *testing.T) {
 	if err := h.net.BridgeDestroy(ctx, "jo0"); err != nil {
 		t.Fatal(err)
 	}
+	before := len(h.ifaces())
 	if err := l.RunHook(ctx, PhasePreStart, "alpha_web"); !api.IsCode(err, api.CodeNotFound) {
 		t.Errorf("missing bridge: %v", err)
 	}
-	if len(h.ifaces()) != 1 {
+	if len(h.ifaces()) != before {
 		t.Errorf("hook created interfaces without a bridge: %v", h.ifaces())
 	}
 }

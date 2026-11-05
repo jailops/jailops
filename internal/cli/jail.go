@@ -28,6 +28,13 @@ func (a *app) jailDesc() *kindDesc[api.Jail] {
 	d.update = func(ctx context.Context, c *sdk.Client, n string, v api.Jail, etag string) (api.Jail, error) {
 		return c.Jails().Update(ctx, n, v, etag)
 	}
+	d.rename = func(ctx context.Context, c *sdk.Client, n string, req api.Rename, etag string) (*sdk.Operation[api.RenameResult], error) {
+		return c.Jails().Rename(ctx, n, req, etag)
+	}
+	d.renameLong = renameLong("jail", `its datasets (volumes and snapshots go with them) and their
+mountpoints, its records, its update history, the marks of its provisioning and shell setup, and the boot
+order of the jails that depend on it. The jail must be stopped: the kernel knows a running jail by its
+name, and its mounts, interfaces and firewall anchor are set up under it. Its hostname does not change`)
 	d.create = func(ctx context.Context, c *sdk.Client, v api.Jail) (opHandle, api.Jail, error) {
 		if hasEncryptedVolume(v.Spec) {
 			pass, err := a.newVolumePassphrase()
@@ -79,7 +86,7 @@ func (a *app) jailDesc() *kindDesc[api.Jail] {
 				}
 			}
 			return []string{j.Metadata.Name, dash(string(j.Status.Power)), linesOrDash(v4), linesOrDash(v6),
-				imageWithGen(j.Spec.Image, j.Status.Generation), age(now, j.Metadata.CreatedAt)}
+				imageWithGen(j.Spec.Image, j.Status.Generation, j.Status.FreeBSDVersion), age(now, j.Metadata.CreatedAt)}
 		},
 	}
 	d.filters = func(cmd *cobra.Command) func() (func(api.Jail) bool, error) {
@@ -392,7 +399,11 @@ the specification.
 A volume marked encrypted (--volume NAME:MOUNT:encrypted, or encrypted: true in a
 file) is encrypted with ZFS (aes-256-gcm) under a passphrase you type twice; scripts
 give it with --passphrase-file. The passphrase is needed again after every host boot
-('jailops jail unlock'). A forgotten passphrase cannot be recovered.`
+('jailops jail unlock'). A forgotten passphrase cannot be recovered.
+
+A new jail name has at most 32 characters, and so has a volume name. Sizes
+(--disk, a volume's QUOTA) are stored as bytes; 4G, 4GiB and 4294967296 are
+the same size.`
 
 const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15-1 --network lan --storage default --start
 jailops @P@ create db --project web --image freebsd-15-1 --network lan=10.20.0.50 --storage default --volume data:/var/db --memory 4G --autostart
@@ -421,6 +432,7 @@ func (a *app) addJailShortcuts(root *cobra.Command) {
 	addList(a, root, d, "")
 	addCreate(a, root, d, jailCreateLong, jailCreateExample, a.jailFlagBuild)
 	addDelete(a, root, d)
+	addRename(a, root, d, d.renameLong)
 	root.AddCommand(a.jailInfo(d))
 	root.AddCommand(a.jailLifecycleSet(d)...)
 	root.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.logsCmd(d))
@@ -672,7 +684,7 @@ jailops jail snapshot delete web before-upgrade`, "snap", "snapshots")
 	create := &cobra.Command{
 		Use:               "create JAIL [SNAPSHOT]",
 		Short:             "Take a snapshot of a jail",
-		Long:              "Take a snapshot of all datasets of a jail. Without SNAPSHOT the server chooses a name.",
+		Long:              "Take a snapshot of all datasets of a jail. Without SNAPSHOT the server chooses a name.\nA snapshot name has at most 64 lower case letters, digits, '.', '_' and '-'; names starting with jo- are reserved.",
 		Example:           "jailops jail snapshot create web\njailops jail snapshot create web before-upgrade -m \"before 15.1\"",
 		Args:              cobra.RangeArgs(1, 2),
 		ValidArgsFunction: completeArgs(completeKind(a, d), completeNone),
@@ -1026,7 +1038,7 @@ addresses are replaced by "auto" so the copy does not collide with the source
 
 Only the specification is copied, not the data in the source's datasets. To
 copy data, snapshot or back up the source and restore it under a new name with
-'jailops backup restore --as'.`,
+'jailops backup restore --as'. NAME has at most 32 characters.`,
 		Example:           "jailops jail copy web web2\njailops --host host-b jail copy web web-b",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeArgs(completeKind(a, d), completeNone),

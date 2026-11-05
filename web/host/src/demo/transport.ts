@@ -20,7 +20,9 @@ import { defaultImage } from '@/lib/images'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
 import { loadChoice, saveChoice } from '@/lib/projectScope'
 import { SET_NAME, setUsers, validateSet, type SetMsgs } from '@/lib/firewall'
+import { nameProblem, type NameRule } from '@jailops/shared/lib/names'
 import { labelKeyProblem, labelValueProblem, labelsProblem, MAX_LABELS } from '@/lib/labels'
+import { demoRename, renameKindOf } from './rename'
 
 interface DemoOp extends Operation {
   startedAt: number
@@ -178,11 +180,18 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   const jailOr404 = (n: string): Jail | undefined => db.jails.find((j) => j.metadata.name === n)
   const flaky = new Set<string>()
 
+  // the name of a new object, as the server's create handlers check it (shared lib/names.ts holds the limits)
+  const badName = (name: string, rule: NameRule, what = 'name'): RawResponse | undefined => {
+    const p = name ? nameProblem(name, rule) : 'Required.'
+    return p ? fail(400, { code: 'invalid', message: `${what} "${name}": ${p}`, detail: { field: 'name' } }) : undefined
+  }
+
   // POST /images: the definition only, checked like service.validateImage and the image sources do
   function imageCreate(body: Record<string, any>): RawResponse {
     const name = String(body.metadata?.name ?? '')
     const sp = (body.spec ?? {}) as import('@jailops/shared/api/types').ImageSpec
-    if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9-]{0,62}$` })
+    const badImg = badName(name, 'image')
+    if (badImg) return badImg
     if (db.images.some((i) => i.metadata.name === name)) return fail(409, { code: 'already_exists', message: `image "${name}" already exists` })
     if (!sp.os || !sp.release) return fail(400, { code: 'invalid', message: 'spec.os and spec.release are required' })
     if (sp.source?.type === 'pkgbase' && !/^[0-9]+\.[0-9]+(-|$)/.test(sp.release)) return fail(400, { code: 'invalid', message: `release "${sp.release}" is not <major>.<minor>-<type>` })
@@ -256,6 +265,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (!project && ['jails', 'firewall', 'profiles', 'updates', 'restores'].includes(seg[0])) return fail(400, { code: 'invalid', message: 'a project is required', hint: "name one with --project NAME (list them with 'jailops project list')" })
     const inProject = (j: Jail) => (j.metadata.project ?? '') === project
     for (const p of db.projects) p.status.jails = countByProject()[p.metadata.name] ?? 0
+    const rn = m === 'POST' ? renameKindOf(seg) : undefined
+    if (rn) return renameRoute(rn.kind, rn.name, body, project, req)
     const extra = extraRoutes(seg, m, body, url, req, project)
     if (extra) return extra
 
@@ -276,7 +287,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (seg[1].startsWith('flaky')) flaky.add(seg[1])
           const op = startOp(`Build image ${seg[1]}`, { images: [`/api/v1/images/${seg[1]}`] }, 3000, () => {
             if (fails) return
-            gens.push({ number: n, name: `${seg[1]}#g${n}`, parent: n > 1 ? n - 1 : undefined, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: n === 1 ? 212 : 222, created_at: new Date().toISOString(), refs: [] })
+            gens.push({ number: n, name: `${seg[1]}#g${n}`, parent: n > 1 ? n - 1 : undefined, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: n === 1 ? 212 : 222, freebsd_version: img.spec.os === 'freebsd' ? '15.1-RELEASE-p6' : undefined, created_at: new Date().toISOString(), refs: [] })
             // the aliases of the definition follow the newest generation
             const aliases = (img.status.aliases ??= {})
             for (const a of img.spec.aliases ?? []) aliases[a] = n
@@ -293,7 +304,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (!img) return fail(404, { code: 'not_found', message: `Image ${seg[1]} not found` })
           return startOp(`Upgrade image ${seg[1]}`, { images: [`/api/v1/images/${seg[1]}`] }, 6000, () => {
             const n = Math.max(...(img.status.generations ?? []).map((g) => g.number)) + 1
-            img.status.generations!.push({ number: n, name: `${seg[1]}#g${n}`, parent: n - 1, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: 222, created_at: new Date().toISOString(), refs: [] })
+            img.status.generations!.push({ number: n, name: `${seg[1]}#g${n}`, parent: n - 1, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: 222, freebsd_version: img.spec.os === 'freebsd' ? '15.1-RELEASE-p6' : undefined, created_at: new Date().toISOString(), refs: [] })
           })
         }
         if (seg[2] === 'aliases' && seg[3] && (m === 'PUT' || m === 'DELETE')) {
@@ -315,10 +326,12 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         break
       case 'networks':
         if (seg.length === 1 && m === 'POST') {
+          const badNet = badName(String(body.metadata?.name ?? ''), 'network')
+          if (badNet) return badNet
           if (db.networks.some((n) => n.metadata.name === body.metadata?.name)) return fail(409, { code: 'already_exists', message: `Network ${body.metadata.name} already exists.` })
           const sp = body.spec as import('@jailops/shared/api/types').Network['spec']
           if (sp.ipv6?.mode === 'proxy' && !/^fe80:/i.test(sp.ipv6.gateway)) return fail(400, { code: 'invalid', message: 'in proxy mode the gateway must be the bridge\'s link-local address', hint: 'use a gateway such as fe80::1' })
-          const net = { metadata: { name: body.metadata.name, scope: 'host' as const, generation: 1, created_at: new Date().toISOString() }, spec: { bridge: `jo${db.networks.length}`, ...sp }, status: { bridge_up: true, allocated: 0, free: 100 } }
+          const net = { metadata: { name: body.metadata.name, scope: 'host' as const, generation: 1, created_at: new Date().toISOString() }, spec: { bridge: /^[a-z][a-z0-9]{0,12}$/.test(body.metadata.name) ? body.metadata.name : `jo${db.networks.length}`, ...sp }, status: { bridge_up: true, allocated: 0, free: 100 } }
           return startOp(`Create network ${body.metadata.name}`, {}, 500, () => db.networks.push(net as never), undefined, false)
         }
         if (seg.length === 1) return ok(db.networks)
@@ -422,6 +435,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   function jailsRoute(seg: string[], m: string, body: Record<string, any>, inProject: (j: Jail) => boolean, url: URL): RawResponse {
     if (seg.length === 1 && m === 'POST') {
       const name = String(body.metadata?.name ?? '')
+      const badJail = badName(name, 'jail')
+      if (badJail) return badJail
       if (db.jails.some((x) => x.metadata.name === name && inProject(x))) return fail(409, { code: 'already_exists', message: `Jail ${name} already exists.` })
       const project = url.searchParams.get('project') ?? ''
       const enc = ((body.spec?.volumes ?? []) as Array<{ encrypted?: boolean }>).some((v) => v.encrypted)
@@ -558,6 +573,20 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       }
     }
     return fail(404, { code: 'not_found', message: 'No such route' })
+  }
+
+  // POST <object>/rename (extension rename): a dry run answers the plan, a rename is an operation that ends with it
+  function renameRoute(kind: Parameters<typeof demoRename>[1], name: string, body: Record<string, any>, project: string, req: RawRequest): RawResponse {
+    const a = demoRename(db, kind, name, String(body.new_name ?? ''), project, req.headers?.['If-Match'])
+    if ('error' in a) return fail(a.status, a.error)
+    if (body.dry_run) return ok({ ...a.result, dry_run: true })
+    const r = startOp(`rename ${a.result.kind.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase()} ${name} to ${a.result.to}`, { [a.resource.split('/')[3]]: [a.resource] }, 1200, () => {
+      if (a.fails) return
+      a.apply()
+      emit(`${kind}-renamed`, a.resource.replace(/[^/]+$/, a.result.to))
+    }, a.result, false)
+    if (a.fails) db.ops[0].failure = a.fails
+    return r
   }
 
   function keysRoute(what: string, j: Jail, body: Record<string, any>): RawResponse {
@@ -844,7 +873,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (seg.length === 1 && m === 'GET') return ok(db.wireguard.map(dw.observe))
     if (seg.length === 1 && m === 'POST') {
       const name = String(body.metadata?.name ?? '')
-      if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9-]{0,62}$` })
+      const badWg = badName(name, 'tunnel')
+      if (badWg) return badWg
       if (wg(name)) return fail(409, { code: 'already_exists', message: `wireguard "${name}" already exists` })
       const port = body.spec?.listen_port ?? 51820
       if (db.wireguard.some((w) => w.spec.listen_port === port)) return fail(409, { code: 'already_exists', message: `listen port ${port} is used by another tunnel` })
@@ -913,11 +943,13 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       case 'projects': {
         if (seg.length === 1 && m === 'GET') return ok(db.projects)
         if (seg.length === 1 && m === 'POST') {
+          const badProj = badName(String(body.metadata?.name ?? ''), 'project')
+          if (badProj) return badProj
           if (db.projects.some((p) => p.metadata.name === body.metadata?.name)) return fail(409, { code: 'already_exists', message: `Project ${body.metadata.name} already exists.` })
           const spec = { ...body.spec }
           const held = heldNetwork(spec, '')
           if (held) return fail(409, { code: 'conflict', message: held })
-          if (spec.new_network) { delete spec.new_network; spec.networks = [...(spec.networks ?? []), { network: `br-${body.metadata.name}` }] }
+          if (spec.new_network) { delete spec.new_network; spec.networks = [...(spec.networks ?? []), { network: String(body.metadata.name) }] }
           const created = d2.projects({})[0]
           created.metadata = { name: body.metadata.name, scope: 'host', generation: 1, created_at: new Date().toISOString() }
           created.spec = spec
@@ -1053,7 +1085,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
             if (!j.spec.shell) j.spec.shell = BASH
             if (!j.spec.prompt && j.spec.shell === BASH) j.spec.prompt = 'default'
             if (j.spec.shell === BASH) bashReady.add(name)
-          }, { jail: name, shell: j.spec.shell || BASH, prompt: j.spec.prompt || 'default', ps1: '\\[\\e[38;5;39m\\]\\u@\\h:\\w\\$\\[\\e[0m\\]', steps: [had ? `${BASH} is installed` : 'pkg -r ROOT install -y bash', 'wrote /usr/local/etc/profile.d/jailops-prompt.sh'] })
+          }, { jail: name, shell: j.spec.shell || BASH, prompt: j.spec.prompt || 'default', ps1: '\\[\\e[38;5;39m\\]\\u@\\h:\\w\\$\\[\\e[0m\\] ', steps: [had ? `${BASH} is installed` : 'pkg -r ROOT install -y bash', 'wrote /usr/local/etc/profile.d/jailops-prompt.sh'] })
         }
         if (seg[2] === 'console') {
           if (m === 'POST' && seg.length === 3) {
@@ -1091,7 +1123,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (!p) return fail(404, { code: 'not_found', message: `project ${project} not found` })
     if (body.project && body.project !== project) return fail(400, { code: 'invalid', message: `the body names project ${body.project}, the request ${project}` })
     const jail = String(body.jail || name)
-    if (!/^[a-z][a-z0-9-]{0,62}$/.test(jail)) return fail(400, { code: 'invalid', message: `jail name "${jail}" is not a name`, hint: 'lower-case letters, digits and dashes, starting with a letter' })
+    if (nameProblem(jail, 'jail')) return fail(400, { code: 'invalid', message: `jail name "${jail}" is not a name: ${nameProblem(jail, 'jail')}`, hint: 'lower-case letters, digits and dashes, starting with a letter, at most 32 characters' })
     if (db.jails.some((x) => x.metadata.name === jail && (x.metadata.project ?? '') === project)) return fail(409, { code: 'already_exists', message: `jail ${jail} exists in project ${project}`, hint: 'name the jail with --name, or delete the jail first' })
     const nets = (p.spec.networks ?? []).map((g) => g.network)
     const net = String(body.network || (nets.length === 1 ? nets[0] : ''))
@@ -1150,7 +1182,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   /** What the demo shell shows: the default prompt of JailOps (38;5;39, light blue) in a jail with bash and it. */
   function promptOf(jail: string): string {
     const j = db.jails.find((x) => x.metadata.name === jail)
-    return j?.spec.shell === BASH && bashReady.has(jail) && j.spec.prompt === 'default' ? `\x1b[38;5;39mroot@${jail}:/#\x1b[0m` : PLAIN
+    return j?.spec.shell === BASH && bashReady.has(jail) && j.spec.prompt === 'default' ? `\x1b[38;5;39mroot@${jail}:/#\x1b[0m ` : PLAIN
   }
   function shellOut(id: string, text: string): void {
     const s = shells.get(id)

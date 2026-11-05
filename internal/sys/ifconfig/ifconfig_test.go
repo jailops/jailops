@@ -90,14 +90,50 @@ func newCmd() (*Command, *run.Fake) {
 	return NewCommand(f, Options{}), f
 }
 
+// show is what `ifconfig <name>` prints for an interface of kind ("bridge", "epair", "vmx", "lo") with desc.
+func show(name, kind, desc string) string {
+	out := name + ": flags=1008843<UP,BROADCAST,RUNNING,SIMPLEX,MULTICAST,LOWER_UP> metric 0 mtu 1500\n"
+	if desc != "" {
+		out += "\tdescription: " + desc + "\n"
+	}
+	return out + "\tether 58:9c:fc:10:ff:01\n\tgroups: " + kind + "\n"
+}
+
+// mine answers `ifconfig <name>` with an interface of JailOps (the marker) for every name.
+func mine(f *run.Fake, kind string, names ...string) {
+	for _, n := range names {
+		f.On("ifconfig", []string{n}, show(n, kind, Marker))
+	}
+}
+
+// writes returns the calls that are not reads of one interface (ifconfig NAME, ifconfig -j JAIL NAME).
+func writes(argv []string) []string {
+	var out []string
+	for _, a := range argv {
+		f := strings.Fields(a)
+		if len(f) == 4 && f[1] == "-j" {
+			continue
+		}
+		if len(f) > 2 || a == "ifconfig -a" {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
 func TestCommandBridgeAndEpair(t *testing.T) {
 	c, f := newCmd()
 	f.On("ifconfig", []string{"bridge", "create"}, "bridge0\n")
+	mine(f, "bridge", "jo0", "palminn")
+	mine(f, "epair", "joweba", "jodbea")
 	f.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
-	if err := c.BridgeCreate(ctx, "jo0"); err != nil {
+	if err := c.BridgeCreate(ctx, "palminn"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.SetDescription(ctx, "jo0", "jailops:abc"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetDescription(ctx, "jo0", ""); err != nil { // clearing keeps the marker
 		t.Fatal(err)
 	}
 	if err := c.BridgeAddMember(ctx, "jo0", "joweba", true); err != nil {
@@ -121,21 +157,23 @@ func TestCommandBridgeAndEpair(t *testing.T) {
 	if err := c.SetLink(ctx, "jo0", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.BridgeDestroy(ctx, "jo0"); err != nil {
+	if err := c.BridgeDestroy(ctx, "palminn"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
 		"ifconfig bridge create",
-		"ifconfig bridge0 name jo0",
-		"ifconfig jo0 description jailops:abc",
-		"ifconfig jo0 addm joweba private joweba",
-		"ifconfig jo0 addm jodbea",
-		"ifconfig jo0 deletem joweba",
-		"ifconfig jo0 inet 10.77.0.1/24 alias",
-		"ifconfig jo0 inet6 fd00::1 prefixlen 64 -alias",
-		"ifconfig jo0 up",
-		"ifconfig jo0 down",
-		"ifconfig jo0 destroy",
+		"ifconfig bridge0 description " + Marker, // marked before it has its name
+		"ifconfig bridge0 name palminn",
+		"ifconfig jo0", "ifconfig jo0 description jailops:abc",
+		"ifconfig jo0", "ifconfig jo0 description " + Marker,
+		"ifconfig jo0", "ifconfig joweba", "ifconfig jo0 addm joweba private joweba",
+		"ifconfig jo0", "ifconfig jodbea", "ifconfig jo0 addm jodbea",
+		"ifconfig jo0", "ifconfig jo0 deletem joweba",
+		"ifconfig jo0", "ifconfig jo0 inet 10.77.0.1/24 alias",
+		"ifconfig jo0", "ifconfig jo0 inet6 fd00::1 prefixlen 64 -alias",
+		"ifconfig jo0", "ifconfig jo0 up",
+		"ifconfig jo0", "ifconfig jo0 down",
+		"ifconfig palminn", "ifconfig palminn destroy",
 	}
 	if !reflect.DeepEqual(f.Argv(), want) {
 		t.Errorf("got  %q\nwant %q", f.Argv(), want)
@@ -145,6 +183,8 @@ func TestCommandBridgeAndEpair(t *testing.T) {
 func TestCommandEpair(t *testing.T) {
 	c, f := newCmd()
 	f.On("ifconfig", []string{"epair", "create"}, "epair3a\n")
+	mine(f, "epair", "joweba")
+	f.On("ifconfig", []string{"-j", "web", "joweba"}, show("joweba", "epair", "jailops jail=p/web net=lan (jail side)"))
 	f.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
 	a, b, err := c.EpairCreate(ctx, "joweb")
 	if err != nil || a != "joweba" || b != "jowebb" {
@@ -153,12 +193,18 @@ func TestCommandEpair(t *testing.T) {
 	if err := c.MoveToJail(ctx, a, "web"); err != nil {
 		t.Fatal(err)
 	}
+	if err := c.MoveFromJail(ctx, a, "web"); err != nil {
+		t.Fatal(err)
+	}
 	if err := c.EpairDestroy(ctx, a); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		"ifconfig epair create", "ifconfig epair3b name jowebb", "ifconfig epair3a name joweba",
-		"ifconfig joweba vnet web", "ifconfig joweba destroy",
+		"ifconfig epair create", "ifconfig epair3a description " + Marker, "ifconfig epair3b description " + Marker,
+		"ifconfig epair3b name jowebb", "ifconfig epair3a name joweba",
+		"ifconfig joweba", "ifconfig joweba vnet web",
+		"ifconfig -j web joweba", "ifconfig joweba -vnet web",
+		"ifconfig joweba", "ifconfig joweba destroy",
 	}
 	if !reflect.DeepEqual(f.Argv(), want) {
 		t.Errorf("%q", f.Argv())
@@ -168,6 +214,8 @@ func TestCommandEpair(t *testing.T) {
 func TestEpairRenameFailureCleansUp(t *testing.T) {
 	c, f := newCmd()
 	f.On("ifconfig", []string{"epair", "create"}, "epair3a\n")
+	f.Add(run.Rule{Name: "ifconfig", Args: []string{"epair3a", "description", Marker}})
+	f.Add(run.Rule{Name: "ifconfig", Args: []string{"epair3b", "description", Marker}})
 	f.OnFail("ifconfig", []string{"epair3b", "name", "jowebb"}, 1, "ifconfig: SIOCSIFNAME: File exists")
 	f.Add(run.Rule{Name: "ifconfig", Args: []string{"epair3a", "destroy"}})
 	if _, _, err := c.EpairCreate(ctx, "joweb"); !api.IsCode(err, api.CodeAlreadyExists) {
@@ -178,34 +226,132 @@ func TestEpairRenameFailureCleansUp(t *testing.T) {
 	}
 }
 
-func TestPrefixEnforcement(t *testing.T) {
+// A bridge whose name is taken is never adopted: the kernel refuses the rename and the new bridge goes again.
+func TestBridgeCreateNeverAdopts(t *testing.T) {
 	c, f := newCmd()
-	for i, err := range []error{
-		c.BridgeDestroy(ctx, "bridge0"),
-		c.BridgeCreate(ctx, "em0"),
-		c.BridgeAddMember(ctx, "bridge0", "joweba", false),
-		c.SetLink(ctx, "em0", false),
-		c.AddrAdd(ctx, "em0", netip.MustParsePrefix("10.0.0.1/24")),
-		c.EpairDestroy(ctx, "epair0a"),
-		c.MoveToJail(ctx, "em0", "web"),
-		c.BridgeDestroy(ctx, "jo"), // prefix alone is not a name
+	f.On("ifconfig", []string{"bridge", "create"}, "bridge4\n")
+	f.Add(run.Rule{Name: "ifconfig", Args: []string{"bridge4", "description", Marker}})
+	f.OnFail("ifconfig", []string{"bridge4", "name", "mybr"}, 1, "ifconfig: ioctl SIOCSIFNAME (set name): File exists")
+	f.Add(run.Rule{Name: "ifconfig", Args: []string{"bridge4", "destroy"}})
+	if err := c.BridgeCreate(ctx, "mybr"); !api.IsCode(err, api.CodeAlreadyExists) {
+		t.Fatal(err)
+	}
+	want := []string{"ifconfig bridge create", "ifconfig bridge4 description " + Marker, "ifconfig bridge4 name mybr", "ifconfig bridge4 destroy"}
+	if !reflect.DeepEqual(f.Argv(), want) {
+		t.Errorf("%q", f.Argv())
+	}
+	// a failed description destroys the bridge before it ever has the name
+	c, f = newCmd()
+	f.On("ifconfig", []string{"bridge", "create"}, "bridge4\n")
+	f.OnFail("ifconfig", []string{"bridge4", "description", Marker}, 1, "ifconfig: boom")
+	f.Add(run.Rule{Name: "ifconfig", Args: []string{"bridge4", "destroy"}})
+	if err := c.BridgeCreate(ctx, "mybr"); err == nil {
+		t.Fatal("accepted")
+	}
+	if got := f.Argv(); got[len(got)-1] != "ifconfig bridge4 destroy" || strings.Contains(strings.Join(got, "|"), " name ") {
+		t.Errorf("%q", got)
+	}
+}
+
+// Ownership is the kernel's description and kind, never the name: every refusal, and what is accepted.
+func TestOwnership(t *testing.T) {
+	type cas struct {
+		name, kind, desc string
+		want             Ownership
+		msg              string
+	}
+	for _, k := range []cas{
+		{"palminn", "bridge", Marker, OwnedByMarker, ""},
+		{"palminn", "bridge", "jailops net=palminn bridge", OwnedByMarker, ""},
+		{"jo0", "bridge", "jailops:0b0e7f3e", OwnedByMarker, ""},
+		{"palmingb", "epair", "jailops net=palminn gateway (host side)", OwnedByMarker, ""},
+		{"jo7", "bridge", "", OwnedLegacy, ""},                                             // an older release, or a crash before the description
+		{"jo1234567890aab", "epair", "", OwnedLegacy, ""},                                  // an epair of an older release
+		{"mybr", "bridge", "", NotOwned, "has no JailOps description"},                     // a bridge made by hand
+		{"bridge0", "bridge", "", NotOwned, "has no JailOps description"},                  // the kernel's name
+		{"jo7", "bridge", "customer uplink bridge", NotOwned, "is not one JailOps writes"}, // a legacy name with someone's description
+		{"mybr", "bridge", "jailopsx", NotOwned, "is not one JailOps writes"},
+		{"mybr", "bridge", "Jailops managed", NotOwned, "is not one JailOps writes"},
+		{"vmx0", "vmx", "", NotOwned, "only bridges and epairs"},
+		{"vmx0", "vmx", Marker, NotOwned, "only bridges and epairs"}, // a forged description on the uplink
+		{"jo7", "vmx", "", NotOwned, "only bridges and epairs"},      // a renamed uplink with a legacy name
+		{"lo0", "lo", Marker, NotOwned, "only bridges and epairs"},
+		{"wg0", "wg", "jailops wireguard=office", NotOwned, "only bridges and epairs"},
+		{"tap0", "tap", Marker, NotOwned, "only bridges and epairs"},
 	} {
-		if !api.IsCode(err, api.CodeForbidden) {
-			t.Errorf("case %d: %v", i, err)
+		i := ParseIfconfig(show(k.name, k.kind, k.desc))[0]
+		got, err := Options{}.Owns(i)
+		if got != k.want || (err == nil) != (k.msg == "") || err != nil && (!strings.Contains(err.Error(), k.msg) || !api.IsCode(err, api.CodeForbidden)) {
+			t.Errorf("%s/%s/%q: %v %v", k.name, k.kind, k.desc, got, err)
 		}
 	}
+	// the legacy prefixes are priv.conf's
+	if got, _ := (Options{Prefixes: []string{"old"}}).Owns(Iface{Name: "jo7", Groups: []string{"bridge"}}); got != NotOwned {
+		t.Error("jo is legacy only by default")
+	}
+	if got, _ := (Options{Prefixes: []string{"old"}}).Owns(Iface{Name: "old3", Groups: []string{"bridge"}}); got != OwnedLegacy {
+		t.Error("custom legacy prefix")
+	}
+	if got, _ := (Options{}).Owns(Iface{Name: "jo", Groups: []string{"bridge"}}); got != NotOwned {
+		t.Error("the prefix alone is not a legacy name")
+	}
+}
+
+// Every mutating call reads the interface from the kernel first and touches nothing that is not JailOps's.
+func TestCommandRefusesForeign(t *testing.T) {
+	c, f := newCmd()
+	f.On("ifconfig", []string{"vmx0"}, show("vmx0", "vmx", ""))
+	f.On("ifconfig", []string{"lo0"}, show("lo0", "lo", ""))
+	f.On("ifconfig", []string{"mybr"}, show("mybr", "bridge", "")) // ifconfig bridge create; ifconfig bridge0 name mybr
+	f.On("ifconfig", []string{"forged"}, show("forged", "bridge", "my jailops bridge"))
+	f.On("ifconfig", []string{"jo0"}, show("jo0", "bridge", Marker))
+	f.On("ifconfig", []string{"-j", "web", "lo0"}, show("lo0", "lo", ""))
+	f.OnFail("ifconfig", []string{"ghost"}, 1, "ifconfig: interface ghost does not exist")
+	for _, name := range []string{"vmx0", "lo0", "mybr", "forged"} {
+		for i, err := range []error{
+			c.BridgeDestroy(ctx, name),
+			c.BridgeAddMember(ctx, name, "jo0", false),
+			c.BridgeAddMember(ctx, "jo0", name, false), // the uplink is never made a port
+			c.BridgeDeleteMember(ctx, name, "jo0"),
+			c.SetDescription(ctx, name, Marker), // the daemon cannot have the marker written on a foreign interface
+			c.SetLink(ctx, name, false),
+			c.AddrAdd(ctx, name, netip.MustParsePrefix("10.0.0.1/24")),
+			c.AddrRemove(ctx, name, netip.MustParsePrefix("10.0.0.1/24")),
+			c.EpairDestroy(ctx, name),
+			c.MoveToJail(ctx, name, "web"),
+			c.RouteAdd(ctx, Route{Dest: "2001:db8::5/128", Interface: name}),
+			c.NeighborSet(ctx, name, netip.MustParseAddr("2001:db8::5"), "02:00:00:00:00:01"),
+			c.NeighborDelete(ctx, name, netip.MustParseAddr("2001:db8::5")),
+		} {
+			if !api.IsCode(err, api.CodeForbidden) || !strings.Contains(err.Error(), "not managed by JailOps") {
+				t.Errorf("%s case %d: %v", name, i, err)
+			}
+		}
+	}
+	if !api.IsCode(c.MoveFromJail(ctx, "lo0", "web"), api.CodeForbidden) {
+		t.Error("the loopback of a jail was moved")
+	}
+	if !api.IsCode(c.SetLink(ctx, "ghost", true), api.CodeNotFound) {
+		t.Error("a missing interface is not_found")
+	}
+	if w := writes(f.Argv()); len(w) != 0 {
+		t.Errorf("foreign interface touched: %q", w)
+	}
+	// a create under a driver's name runs nothing at all
+	f.Reset()
+	for _, n := range []string{"vmx0", "em0", "lo0", "bridge0", "bridge", "tap0", "wg0", "pflog0", "vlan0.10", "all"} {
+		if err := c.BridgeCreate(ctx, n); !api.IsCode(err, api.CodeInvalid) || !strings.Contains(err.Error(), "form of the interfaces of the driver") {
+			t.Errorf("%s: %v", n, err)
+		}
+	}
+	if _, _, err := c.EpairCreate(ctx, "epair0"); !api.IsCode(err, api.CodeInvalid) {
+		t.Errorf("epair0a: %v", err)
+	}
+	if err := c.SetDescription(ctx, "jo0", "my text"); !api.IsCode(err, api.CodeInvalid) {
+		t.Errorf("the marker was removable: %v", err)
+	}
 	if len(f.Calls()) != 0 {
-		t.Error("foreign interface touched")
-	}
-	// explicit opt-in
-	f2 := run.NewFake()
-	f2.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
-	if err := NewCommand(f2, Options{AllowForeign: true}).SetLink(ctx, "em0", true); err != nil {
-		t.Fatal(err)
-	}
-	// custom prefix
-	if err := NewCommand(f2, Options{Prefixes: []string{"jail"}}).SetLink(ctx, "jail0", true); err != nil {
-		t.Fatal(err)
+		t.Errorf("ran %q", f.Argv())
 	}
 }
 
@@ -234,6 +380,7 @@ func TestInvalidArguments(t *testing.T) {
 
 func TestRoutes(t *testing.T) {
 	c, f := newCmd()
+	mine(f, "bridge", "jo0")
 	f.Add(run.Rule{Name: "route", Args: []string{run.RestArgs}})
 	for _, err := range []error{
 		c.RouteAdd(ctx, Route{Dest: "10.1.2.3/24", Gateway: "10.0.0.1"}),
@@ -248,6 +395,7 @@ func TestRoutes(t *testing.T) {
 	want := []string{
 		"route -n add -inet 10.1.2.0/24 10.0.0.1",
 		"route -n add -inet6 default fe80::1",
+		"ifconfig jo0",
 		"route -n add -inet6 2001:db8::5 -interface jo0",
 		"route -n delete -inet6 2001:db8:1::/64 fd00::1",
 	}
@@ -332,6 +480,7 @@ func TestFake(t *testing.T) {
 // old one must go when the host route does, and before the route of the next jail is made.
 func TestHostRoutesForgetTheNeighborEntry(t *testing.T) {
 	c, f := newCmd()
+	mine(f, "bridge", "jo0")
 	f.Add(run.Rule{Name: "route", Args: []string{run.RestArgs}})
 	f.Add(run.Rule{Name: "ndp", Args: []string{run.RestArgs}})
 	r := Route{Dest: "2001:db8:1:2:100::10/128", Interface: "jo0"}
@@ -342,8 +491,10 @@ func TestHostRoutesForgetTheNeighborEntry(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := []string{
+		"ifconfig jo0",
 		"route -n delete -inet6 2001:db8:1:2:100::10/128 -interface jo0",
 		"ndp -d 2001:db8:1:2:100::10",
+		"ifconfig jo0",
 		"ndp -d 2001:db8:1:2:100::10",
 		"route -n add -inet6 2001:db8:1:2:100::10/128 -interface jo0",
 	}
@@ -383,6 +534,8 @@ func TestParseVlan(t *testing.T) {
 // A static neighbor entry replaces whatever is there (delete first), and a link-local address carries its interface.
 func TestCommandNeighbor(t *testing.T) {
 	c, f := newCmd()
+	mine(f, "epair", "jo0gb")
+	f.On("ifconfig", []string{"em0"}, show("em0", "em", ""))
 	f.Add(run.Rule{Name: "ndp", Args: []string{run.RestArgs}})
 	f.Add(run.Rule{Name: "arp", Args: []string{run.RestArgs}})
 	mac := "ca:64:60:d0:bb:57"
@@ -407,8 +560,8 @@ func TestCommandNeighbor(t *testing.T) {
 		"ndp -d fe80::c864:60ff:fed0:bb57%jo0gb",
 		"arp -d 10.20.0.12", "arp -s 10.20.0.12 " + mac, "arp -d 10.20.0.12",
 	}
-	if !reflect.DeepEqual(f.Argv(), want) {
-		t.Errorf("got  %q\nwant %q", f.Argv(), want)
+	if got := writes(f.Argv()); !reflect.DeepEqual(got, want) {
+		t.Errorf("got  %q\nwant %q", got, want)
 	}
 	for _, bad := range []func() error{
 		func() error { return c.NeighborSet(ctx, "em0", netip.MustParseAddr("2001:db8::1"), mac) },          // not ours
@@ -419,7 +572,64 @@ func TestCommandNeighbor(t *testing.T) {
 			t.Error("accepted")
 		}
 	}
-	if len(f.Argv()) != len(want) {
+	if len(writes(f.Argv())) != len(want) {
 		t.Error("a refused entry ran a command")
+	}
+}
+
+// The fake stores descriptions and reads them back as the kernel does, with the same ownership rule as Command.
+func TestFakeOwnership(t *testing.T) {
+	f := NewFake(Options{})
+	f.AddForeign("vmx0", true)
+	f.AddIface(Iface{Name: "mybr", Groups: []string{"bridge"}})
+	f.AddIface(Iface{Name: "jo7", Groups: []string{"bridge"}})
+	if err := f.BridgeCreate(ctx, "palminn"); err != nil {
+		t.Fatal(err)
+	}
+	if i, _ := f.Show(ctx, "palminn"); i.Description != Marker {
+		t.Fatalf("created without the marker: %+v", i)
+	}
+	if err := f.SetDescription(ctx, "palminn", "jailops net=palminn bridge"); err != nil {
+		t.Fatal(err)
+	}
+	if i, _ := f.Show(ctx, "palminn"); i.Description != "jailops net=palminn bridge" {
+		t.Fatalf("%+v", i)
+	}
+	for _, err := range []error{f.SetLink(ctx, "vmx0", false), f.SetLink(ctx, "mybr", true), f.SetDescription(ctx, "mybr", Marker),
+		f.BridgeAddMember(ctx, "palminn", "vmx0", false), f.BridgeAddMember(ctx, "palminn", "mybr", false)} {
+		if !api.IsCode(err, api.CodeForbidden) {
+			t.Errorf("foreign: %v", err)
+		}
+	}
+	if err := f.BridgeCreate(ctx, "mybr"); !api.IsCode(err, api.CodeAlreadyExists) {
+		t.Errorf("a taken name: %v", err) // the helper's guard turns this into forbidden for what is not JailOps's
+	}
+	if err := f.BridgeCreate(ctx, "bridge7"); !api.IsCode(err, api.CodeInvalid) {
+		t.Errorf("a driver's name: %v", err)
+	}
+	// legacy: accepted (marking it is the helper's)
+	if err := f.SetLink(ctx, "jo7", true); err != nil {
+		t.Errorf("legacy: %v", err)
+	}
+	// the marker travels into the jail's vnet and back
+	_, b, err := f.EpairCreate(ctx, "jox")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.MoveToJail(ctx, b, "web"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.Show(ctx, b); !api.IsCode(err, api.CodeNotFound) {
+		t.Errorf("a jail's interface is visible on the host: %v", err)
+	}
+	if i, err := f.ShowInJail(ctx, "web", b); err != nil || i.Description != Marker {
+		t.Errorf("%+v %v", i, err)
+	}
+	f.AddToJail("web", Iface{Name: "mine", Groups: []string{"epair"}, Description: "the jail's"})
+	if err := f.MoveFromJail(ctx, "mine", "web"); !api.IsCode(err, api.CodeForbidden) {
+		t.Errorf("an interface the jail made: %v", err)
+	}
+	if err := f.MoveFromJail(ctx, b, "web"); err != nil {
+		t.Fatal(err)
 	}
 }

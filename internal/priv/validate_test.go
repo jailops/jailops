@@ -203,8 +203,7 @@ func TestInterfaceRules(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	n := e.local.Net()
-	e.net.AddForeign("em0", true)
-	for _, name := range []string{"em0", "lo0", "jo", "-jo0", "jo0;x", "jo0 x", "jo/0", "jo" + strings.Repeat("x", 20), ""} {
+	for _, name := range []string{"em0", "lo0", "bridge0", "mybr", "-jo0", "jo0;x", "jo0 x", "jo/0", "jo" + strings.Repeat("x", 20), ""} {
 		if err := n.BridgeCreate(ctx, name); err == nil {
 			t.Errorf("BridgeCreate(%q) succeeded", name)
 		}
@@ -227,8 +226,8 @@ func TestInterfaceRules(t *testing.T) {
 	if err := n.SetDescription(ctx, "jo0", "line\nbreak"); !api.IsCode(err, api.CodeInvalid) {
 		t.Errorf("description: %v", err)
 	}
-	if _, _, err := n.EpairCreate(ctx, "em"); !api.IsCode(err, api.CodeForbidden) {
-		t.Errorf("epair outside the prefix: %v", err)
+	if _, _, err := n.EpairCreate(ctx, "em2"); !api.IsCode(err, api.CodeInvalid) {
+		t.Errorf("epair under a driver's names: %v", err)
 	}
 	if err := n.MoveToJail(ctx, "jo0", "alpha_nojail"); !api.IsCode(err, api.CodeForbidden) {
 		t.Errorf("moving into an unmanaged jail: %v", err)
@@ -506,9 +505,9 @@ func TestConfDirContent(t *testing.T) {
 		"quote in string":      mut(`"web.example.org"`, `"a\"b"`),
 		"mount.fstab outside":  mut("\tmount.devfs;\n", "\tmount.fstab = \"/etc/fstab\";\n"),
 		"nul":                  mut("vnet;", "vnet;\x00"),
-		"consolelog elsewhere": mut(`"/var/log/jail_${name}_console.log"`, `"/etc/rc.conf"`),
-		"consolelog variable":  mut(`"/var/log/jail_${name}_console.log"`, `"/var/log/jail_${path}_console.log"`),
-		"consolelog bare":      mut(`exec.consolelog = "/var/log/jail_${name}_console.log";`, `exec.consolelog;`),
+		"consolelog elsewhere": mut(`"/var/log/jailops/jail_${name}_console.log"`, `"/etc/rc.conf"`),
+		"consolelog variable":  mut(`"/var/log/jailops/jail_${name}_console.log"`, `"/var/log/jailops/jail_${path}_console.log"`),
+		"consolelog bare":      mut(`exec.consolelog = "/var/log/jailops/jail_${name}_console.log";`, `exec.consolelog;`),
 		"sysvshm inherit":      mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvshm = inherit;\n"),
 		"sysvsem quoted":       mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvsem = \"new\";\n"),
 		"sysvmsg bare":         mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvmsg;\n"),

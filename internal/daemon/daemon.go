@@ -298,6 +298,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		return slices.DeleteFunc(ports, func(p int) bool { return p == 0 })
 	}
 	deps.DialJail = clients.Dial
+	deps.HostFile = clients.HostFile
 	deps.ExecLimits = service.ExecLimits{PerJail: cfg.Limits.ExecSessionsPerJail, Idle: cfg.Limits.ExecIdle.Std(), Max: cfg.Limits.ExecMax.Std()}
 	if opts.Registrar != nil {
 		deps.Registrar = opts.Registrar

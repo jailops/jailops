@@ -73,9 +73,9 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 	var ifs []render.NetIface
 	var gateways []string // the l3 end of the gateway pair of each network: what pf sees of traffic to and from the host
 	var macs []string
-	var linkLocal []netip.Addr // the kernel forms them from the MACs above
-	v6 := 0                    // IPv6 attachments
-	var dns []netip.Addr
+	var linkLocal []netip.Addr     // the kernel forms them from the MACs above
+	v6 := 0                        // IPv6 attachments
+	var netSpecs []api.NetworkSpec // the networks in the order the jail attaches them: its nameservers come from them
 	uplink := ""
 	for i, a := range j.Spec.Network {
 		n, err := s.netKind.get(a.Network)
@@ -135,11 +135,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 			}
 		}
 		ifs = append(ifs, nif)
-		for _, ds := range n.Spec.DNS {
-			if ad, err := netip.ParseAddr(ds); err == nil && !containsAddr(dns, ad) {
-				dns = append(dns, ad)
-			}
-		}
+		netSpecs = append(netSpecs, n.Spec)
 		if uplink == "" {
 			uplink = n.Spec.Uplink
 		}
@@ -272,6 +268,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 	b.jailConf = jc
 	// Guest configuration.
 	root := s.rootMount(name)
+	_, dns := s.resolvers(netSpecs)
 	ni := render.NetInput{Hostname: host, Ifaces: ifs, DNS: dns}
 	switch osf {
 	case api.OSLinux:
@@ -299,15 +296,6 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 		b.guest[path.Join(root, guestResolv)] = rv
 	}
 	return b, nil
-}
-
-func containsAddr(l []netip.Addr, a netip.Addr) bool {
-	for _, x := range l {
-		if x == a {
-			return true
-		}
-	}
-	return false
 }
 
 // Desired implements reconcile.Source.
@@ -422,6 +410,9 @@ func (h *hooks) PreStart(ctx context.Context, name string) error {
 		}
 	}
 	for p, c := range b.guest {
+		if p == path.Join(s.rootMount(name), guestResolv) && s.keepsResolv(ctx, p) {
+			continue // the jail's own resolver configuration
+		}
 		if err := f.MkdirAll(ctx, path.Dir(p)); err != nil {
 			return err
 		}

@@ -75,15 +75,26 @@ The exit status is 1 when a check failed.`,
 						} else {
 							add("api version", "PASS", info.APIVersion)
 						}
+						// a feature the server was not given (no backup node, no host module) is not a problem: only what every
+						// server of this release has is reported as missing
 						var missing []string
+						off := 0
 						for _, e := range api.Extensions {
-							if !slices.Contains(info.APIExtensions, e) {
-								missing = append(missing, e)
+							if slices.Contains(info.APIExtensions, e) {
+								continue
 							}
+							if slices.Contains(api.OptionalExtensions, e) {
+								off++
+								continue
+							}
+							missing = append(missing, e)
 						}
-						if len(missing) > 0 {
+						switch {
+						case len(missing) > 0:
 							add("extensions", "WARN", "the server lacks: "+strings.Join(missing, ", "))
-						} else {
+						case off > 0:
+							add("extensions", "PASS", fmt.Sprintf("every extension this server offers is known (%d optional ones are off here: backup, sealed secrets, host modules)", off))
+						default:
 							add("extensions", "PASS", fmt.Sprintf("all %d known extensions present", len(api.Extensions)))
 						}
 						env := info.Environment

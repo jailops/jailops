@@ -11,11 +11,8 @@ import (
 // NetworkSpec validates a network definition.
 func NetworkSpec(s api.NetworkSpec) error {
 	if s.Bridge != "" {
-		if err := IfName("bridge", s.Bridge); err != nil {
+		if err := BridgeName(s.Bridge); err != nil {
 			return err
-		}
-		if len(s.Bridge) > ipam.MaxBridgeName {
-			return Invalid("bridge", "bridge name %q is longer than %d characters (the gateway interface is derived from it)", s.Bridge, ipam.MaxBridgeName)
 		}
 	}
 	if s.Uplink != "" {
@@ -58,6 +55,34 @@ func NetworkSpec(s api.NetworkSpec) error {
 		}
 		if s.IPv6.Mode != api.IPv6None && s.MTU != 0 && s.MTU < 1280 {
 			return Invalid("mtu", "IPv6 needs an MTU of at least 1280")
+		}
+	}
+	return nil
+}
+
+// BridgeName checks the name of a network's bridge. Any interface name will do, with three limits: it leaves room for
+// the gateway pair derived from it (<bridge>ga, <bridge>gb: ipam.MaxBridgeName characters at most); it does not have
+// the form of a driver's interface (vmx0, em1, lo0, bridge0, epair0a, tap0, wg0, a driver's name alone: ipam.DriverLikeName),
+// which the helper refuses to create; and the names derived from it do not have the form of a jail's epair
+// (ipam.IsEpairName), which the stale-epair cleanup looks for. Whether an interface of that name exists on the host is
+// the service's check (it asks the helper).
+func BridgeName(b string) error {
+	if err := IfName("bridge", b); err != nil {
+		return err
+	}
+	if len(b) > ipam.MaxBridgeName {
+		return Invalid("bridge", "bridge name %q is longer than %d characters (the gateway interfaces %sga and %sgb are derived from it, and an interface name has at most 15)", b, ipam.MaxBridgeName, b, b)
+	}
+	if drv, ok := ipam.DriverLikeName(b); ok {
+		return Invalid("bridge", "bridge name %q has the form of the interfaces of the driver %q (%s, %s0, ...), which JailOps does not create", b, drv, drv, drv)
+	}
+	gm, gl3, _ := ipam.GatewayNames(b)
+	for _, d := range []string{gm, gl3} {
+		if ipam.IsEpairName(d) {
+			return Invalid("bridge", "bridge name %q gives the gateway interface %s, which has the form of a jail's interface; choose another name", b, d)
+		}
+		if drv, ok := ipam.DriverLikeName(d); ok {
+			return Invalid("bridge", "bridge name %q gives the gateway interface %s, which has the form of the interfaces of the driver %q; choose another name", b, d, drv)
 		}
 	}
 	return nil

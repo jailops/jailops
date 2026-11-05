@@ -207,11 +207,19 @@ func (m *Manager) readGen(ctx context.Context, image string, n int, ds string) (
 	get := func(p string) string { v, _ := m.ZFS.Get(ctx, ds, p); return v }
 	g.Manifest = get(PropManifest)
 	g.Packages, _ = strconv.Atoi(get(PropPackages))
+	g.FreeBSDVersion = get(PropFreeBSD)
 	g.Parent, _ = strconv.Atoi(get(PropParent))
 	if t, err := time.Parse(time.RFC3339, get(PropCreated)); err == nil {
 		g.CreatedAt = t
 	}
 	return g, nil
+}
+
+// FreeBSDVersion reads the FreeBSD version recorded on generation n of an image on this pool: "" when the generation
+// is not here or was built before JailOps recorded it.
+func (m *Manager) FreeBSDVersion(ctx context.Context, image string, n int) string {
+	v, _ := m.ZFS.Get(ctx, m.Layout.GenDS(image, n), PropFreeBSD)
+	return v
 }
 
 // Resolve turns an image reference into a generation.
