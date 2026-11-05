@@ -694,7 +694,13 @@ check "remove the bridge made by hand" ifconfig mybr destroy
 ep=$(ifconfig epair create) && ifconfig "${ep%a}b" name jo0123456789zzb >/dev/null && ifconfig "$ep" name jo0123456789zza >/dev/null || fail "a stale epair"
 ifconfig jo0123456789zza description 'jailops jail=gone/old net=palminn (host side)'
 ifconfig jo0123456789zzb description 'jailops jail=gone/old net=palminn (jail side)'
-expect "doctor lists the stale epair" 'network.epairs +WARN.*jo0123456789zza' $J doctor
+# The reconciler may remove it before the doctor looks, or while it destroys the pair the doctor sees one side only:
+# either side in the warning, or the pair already gone, is the finding.
+n=0
+while ifconfig jo0123456789zza >/dev/null 2>&1; do
+	$J doctor 2>&1 | grep -Eq 'network.epairs +WARN.*jo0123456789zz[ab]' && break
+	n=$((n + 1)); [ $n -gt 30 ] && fail "doctor does not list the stale epair"; sleep 1
+done
 n=0 # the reconcile loop removes it on one of its next passes
 while ifconfig jo0123456789zza >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 60 ] && fail "the stale epair is still there after 120 s"; sleep 2; done
 expect "doctor: no stale epairs" 'network.epairs +PASS' $J doctor
