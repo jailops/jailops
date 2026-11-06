@@ -391,7 +391,7 @@ routes, neighbor entries, MTUs, their move into and out of a jail's vnet. It mus
 is not JailOps's: the host's uplink (`vmx0`, `em0`), `lo0`, a bridge an administrator made, a tunnel. **An interface is
 JailOps's when the kernel says so: it is a bridge or an epair (its driver's group) and its description carries
 JailOps's marker** (`jailops ...`, or `jailops:<id>` of releases before 0.4.0). Its name says nothing: a bridge may have
-any free name (`palminn`), and a name that looks like JailOps's (`jo7`) is not enough.
+any free name (`office`), and a name that looks like JailOps's (`jo7`) is not enough.
 
 - **Only root sets a description** of an interface in the host's network stack, and the only operations of the helper
   that write one are the creation of an interface and the description of an interface that already carries the marker.

@@ -9,10 +9,10 @@ import (
 )
 
 func TestABridgeNameMustLeaveRoomForTheGatewayInterface(t *testing.T) {
-	if err := NetworkSpec(api.NetworkSpec{Bridge: "palminnbridge", IPv4: &api.IPv4Net{Subnet: "10.1.0.0/24", Gateway: "10.1.0.1", Range: "10.1.0.2-10.1.0.9"}}); err != nil { // 13 characters
+	if err := NetworkSpec(api.NetworkSpec{Bridge: "harbourbridge", IPv4: &api.IPv4Net{Subnet: "10.1.0.0/24", Gateway: "10.1.0.1", Range: "10.1.0.2-10.1.0.9"}}); err != nil { // 13 characters
 		t.Fatal(err)
 	}
-	if err := NetworkSpec(api.NetworkSpec{Bridge: "palminnbridge1", IPv4: &api.IPv4Net{Subnet: "10.1.0.0/24", Gateway: "10.1.0.1", Range: "10.1.0.2-10.1.0.9"}}); err == nil { // 14: the gateway ends would not fit
+	if err := NetworkSpec(api.NetworkSpec{Bridge: "harbourbridge1", IPv4: &api.IPv4Net{Subnet: "10.1.0.0/24", Gateway: "10.1.0.1", Range: "10.1.0.2-10.1.0.9"}}); err == nil { // 14: the gateway ends would not fit
 		t.Fatal("a bridge name that leaves no room for the gateway interface was accepted")
 	}
 }
@@ -21,13 +21,13 @@ func TestABridgeNameMustLeaveRoomForTheGatewayInterface(t *testing.T) {
 // jail's epair.
 func TestBridgeNames(t *testing.T) {
 	for name, want := range map[string]string{
-		"palminn": "", "jo0": "", "jo42": "", "lan": "", "dmz2": "", "bridgeway": "", "vmxnet": "", "lonet": "", "em1x": "",
+		"harbour": "", "jo0": "", "jo42": "", "lan": "", "dmz2": "", "bridgeway": "", "vmxnet": "", "lonet": "", "em1x": "",
 		"vmx0": "driver \"vmx\"", "em1": "driver \"em\"", "lo0": "driver \"lo\"", "bridge0": "driver \"bridge\"", "bridge": "driver \"bridge\"",
 		"epair0a": "driver \"epair\"", "tap3": "driver \"tap\"", "wg0": "driver \"wg\"", "pflog0": "driver \"pflog\"",
 		"igb12": "driver \"igb\"", "all": "driver \"all\"", "VMX0": "not a valid interface name", "dmz_2": "not a valid interface name",
 		"jo1234567890a":  "form of a jail's interface", // jo1234567890aga is an epair end's shape
 		"m":              `gateway interface mgb, which has the form of the interfaces of the driver "mgb"`,
-		"palminnbridge1": "longer than 13", "1net": "not a valid interface name", "pal-minn": "not a valid interface name", "": "",
+		"harbourbridge1": "longer than 13", "1net": "not a valid interface name", "har-bour": "not a valid interface name", "": "",
 	} {
 		err := NetworkSpec(api.NetworkSpec{Bridge: name, IPv4: &api.IPv4Net{Subnet: "10.1.0.0/24", Gateway: "10.1.0.1", Range: "10.1.0.2-10.1.0.9"}})
 		if (err == nil) != (want == "") || err != nil && !strings.Contains(err.Error(), want) {
@@ -81,7 +81,7 @@ func TestRoutedSubnetsAreBetween32And126(t *testing.T) {
 // Every bridge name the service accepts is one the helper creates, with its gateway pair: valid interface names of at
 // most 15 characters, none of a driver's form.
 func FuzzBridgeName(f *testing.F) {
-	for _, s := range []string{"palminn", "jo0", "lan", "vmx0", "bridge", "abcdefghijklm", "jo1234567890a", "epair0", "vlan0.10", "x"} {
+	for _, s := range []string{"harbour", "jo0", "lan", "vmx0", "bridge", "abcdefghijklm", "jo1234567890a", "epair0", "vlan0.10", "x"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, b string) {

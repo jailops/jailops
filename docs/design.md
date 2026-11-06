@@ -814,7 +814,7 @@ UNVERIFIED on FreeBSD until the `postgresql-access` block of the end-to-end test
 
 ### 8.8 Renames
 
-A name is chosen once and often wrong: a network called `lan` that should be `palminn`, a jail with a typo. An update
+A name is chosen once and often wrong: a network called `lan` that should be `office`, a jail with a typo. An update
 keeps the name (it answers `invalid` and names the rename); a rename is its own action, `POST <object>/rename` with
 `new_name` (extension `rename`), for networks, address sets, firewall policies, profiles, jails, images and projects,
 with `dry_run`, `If-Match`, the role of changing the object (a global administrator for networks, images and projects,
@@ -1751,8 +1751,8 @@ the shell block of `scripts/ci-freebsd-e2e.sh` on a jail made with the defaults:
 
 ### 18.16 Renames (FreeBSD 15.2-PRERELEASE amd64, November 2026)
 
-`jailops network rename lan palminn` with a jail running on it rewrote the descriptions of the bridge, both gateway ends
-and both ends of the jail's epair (the jail end with `ifconfig -j`), loaded `jailops/net.palminn` and flushed
+`jailops network rename lan office` with a jail running on it rewrote the descriptions of the bridge, both gateway ends
+and both ends of the jail's epair (the jail end with `ifconfig -j`), loaded `jailops/net.office` and flushed
 `jailops/net.lan`; the jail kept pinging the gateway and, through the NAT, the uplink's router, and after a restart its
 hooks found the network under its new name. A rename of a stopped jail took its whole tree with `zfs rename` after the
 local mountpoints were set to `none` deepest first and set again parents first (which mounts what has `canmount=on`; a

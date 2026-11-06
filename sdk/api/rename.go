@@ -27,7 +27,7 @@ type RenameChange struct {
 	Kind string `json:"kind"`
 	// Object names what changes: "jail web (project alpha)", "dataset tank/jailops/projects/alpha", ...
 	Object string `json:"object"`
-	// Detail says how: "spec.network[0].network: lan -> palminn".
+	// Detail says how: "spec.network[0].network: lan -> office".
 	Detail string `json:"detail,omitempty"`
 }
 

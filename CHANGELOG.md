@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Interfaces of a network that is gone are removed.** A host wiped by hand (the datasets destroyed, the configuration
+  deleted) keeps the bridge and the gateway pair of its networks, because interfaces live in the kernel; they stayed until
+  a reboot or an `ifconfig destroy`. The reconcile loop now destroys the bridge and the gateway pair that carry JailOps's
+  description (`jailops net=NAME ...`) for a network it does not know; an interface with any other description is left
+  alone. "Start over" in the install guide also destroys them (it matched only `wg-` and `epair` names, and the gateway
+  pair is named after the network).
 ## 0.6.3 - 2026-11-05
 
 - **The text the package prints is a file of the source** (`packaging/pkg/post-install.sh`): a first install says to run
@@ -128,12 +134,12 @@
 - `web/*/node_modules` is ignored (a few cache files of it had been committed).
 
 - **A bridge may have any free name, and a network's bridge is named like the network.** `jailops network create
-  palminn --ipv4 172.17.32.1/24 --uplink vmx0 --nat` makes the bridge `palminn` (and its gateway pair `palminnga`,
-  `palminngb`). Without `--bridge` the bridge takes the network's name when it can be one (lowercase letters and
+  office --ipv4 10.66.0.1/24 --uplink vmx0 --nat` makes the bridge `office` (and its gateway pair `officega`,
+  `officegb`). Without `--bridge` the bridge takes the network's name when it can be one (lowercase letters and
   digits, at most 13 characters, not a driver's form, free on the host and among the networks), else `jo<N>`, and
   `network create` says why in a warning. A `--bridge` that is invalid, too long, a driver's form (`vmx0`, `bridge0`,
   `lo0`) or taken (an interface of the host, or another network's bridge or gateway pair) is refused when the network is
-  created, no longer when its first jail starts (that was `forbidden: interface "palminn" is not managed by JailOps
+  created, no longer when its first jail starts (that was `forbidden: interface "office" is not managed by JailOps
   (prefix jo)`). The bridge is stored in the spec and keeps its name until the network is deleted, also across a rename
   of the network; `network edit` still refuses to change it. New doctor check `network.bridges` explains an interface
   with a network's name that is not JailOps's.
@@ -154,7 +160,7 @@
   description) is accepted once and marked. `if-prefix` in `priv.conf` is deprecated and now only names that legacy
   prefix (default `jo`); `jailops-priv check-config` says so. Existing networks keep their `jo<N>` bridges.
 - **Renames.** Networks, address sets, firewall policies, profiles, jails, images and projects can be renamed:
-  `jailops network rename lan palminn`, `jailops firewall address-set|policy rename`, `jailops profile rename`, `jailops
+  `jailops network rename lan office`, `jailops firewall address-set|policy rename`, `jailops profile rename`, `jailops
   image rename`, `jailops project rename`, and `jailops jail rename OLD NEW` or `jailops rename OLD NEW` for a stopped jail
   (`POST /api/v1/<kind>/{name}/rename`, extension `rename`, design 8.8). Everything that refers to the object changes in
   the same operation or nothing does: project grants and image lists, jail specs and records, policy rules and set

@@ -388,7 +388,7 @@ func TestIfconfigRules(t *testing.T) {
 	r.ok(t, "ifconfig", "-j", "shop_web", "em0") // reading is not changing
 	for _, a := range [][]string{
 		// interfaces of the host are made and renamed by the typed operations only (they mark them), never here
-		{"bridge", "create"}, {"epair", "create"}, {"bridge0", "name", "jo0"}, {"bridge12", "name", "palminn"}, {"epair3a", "name", i + "a"},
+		{"bridge", "create"}, {"epair", "create"}, {"bridge0", "name", "jo0"}, {"bridge12", "name", "office"}, {"epair3a", "name", i + "a"},
 		{"bridge0", "name", "mybr"}, {"bridge0", "name", "jo7"},
 		// inside the jail: only an interface with the marker
 		{"-j", "shop_web", "mine0x", "up"}, {"-j", "shop_web", "forged", "up"}, {"-j", "shop_web", "forged", "description", "jailops x"},
