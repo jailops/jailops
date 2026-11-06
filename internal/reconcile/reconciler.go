@@ -682,6 +682,59 @@ func (r *Reconciler) orphanPass(ctx context.Context, des Desired, obs *Observed,
 		rep.Cleaned = append(rep.Cleaned, name)
 		rep.Applied = append(rep.Applied, step.Describe())
 	}
+	r.orphanNetPass(ctx, des, obs, ex, rep)
+}
+
+// netOfDesc names the network an interface of JailOps was made for: its description is "jailops net=NAME bridge" for a
+// bridge and "jailops net=NAME gateway (...)" for the ends of the gateway pair. "" for any other description.
+func netOfDesc(d string) (net, kind string) {
+	rest, ok := strings.CutPrefix(d, "jailops net=")
+	if !ok {
+		return "", ""
+	}
+	net, rest, _ = strings.Cut(rest, " ")
+	switch {
+	case rest == "bridge":
+		return net, "bridge"
+	case strings.HasPrefix(rest, "gateway"):
+		return net, "gateway"
+	}
+	return "", ""
+}
+
+// orphanNetPass destroys the bridge and the gateway pair of a network that no longer exists: the records of a network
+// can go while its interfaces stay (a host wiped by hand, a dataset destroyed under the daemon), because interfaces
+// live in the kernel. Only what carries JailOps's description for a network that is not desired is touched; the pair
+// is destroyed from its host end (destroying an epair removes both ends).
+func (r *Reconciler) orphanNetPass(ctx context.Context, des Desired, obs *Observed, ex *NetExec, rep *Report) {
+	known := map[string]bool{}
+	for _, n := range des.Networks {
+		known[n.Name] = true
+	}
+	for _, name := range sortedIfaces(obs) {
+		i := obs.Ifaces[name]
+		if !ours(i) {
+			continue
+		}
+		net, kind := netOfDesc(i.Description)
+		if net == "" || known[net] {
+			continue
+		}
+		step := render.Step{Op: render.OpBridgeDestroy, Phase: render.PhaseHost, Iface: name}
+		switch {
+		case kind == "bridge" && slices.Contains(i.Groups, "bridge"):
+		case kind == "gateway" && slices.Contains(i.Groups, "epair") && strings.HasSuffix(i.Description, "(host side)"):
+			step.Op = render.OpEpairDestroy
+		default:
+			continue // the other end of a pair goes with it
+		}
+		if err := ex.Exec(ctx, step, ""); err != nil {
+			rep.Failures["interface/"+name] = err.Error()
+			continue
+		}
+		rep.Cleaned = append(rep.Cleaned, name)
+		rep.Applied = append(rep.Applied, step.Describe())
+	}
 }
 
 func sortedIfaces(o *Observed) []string {

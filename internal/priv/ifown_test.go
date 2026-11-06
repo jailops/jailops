@@ -16,10 +16,10 @@ import (
 func ownershipHost(t *testing.T, e *env) {
 	t.Helper()
 	ctx := context.Background()
-	if err := e.net.BridgeCreate(ctx, "palminn"); err != nil { // a network's bridge with a free name
+	if err := e.net.BridgeCreate(ctx, "office"); err != nil { // a network's bridge with a free name
 		t.Fatal(err)
 	}
-	if _, _, err := e.net.EpairCreate(ctx, "palminng"); err != nil {
+	if _, _, err := e.net.EpairCreate(ctx, "officeg"); err != nil {
 		t.Fatal(err)
 	}
 	for _, i := range []ifconfig.Iface{
@@ -49,9 +49,9 @@ func TestInterfaceOwnershipMatrix(t *testing.T) {
 		for _, name := range foreign {
 			for k, err := range []error{
 				n.BridgeDestroy(ctx, name),
-				n.BridgeAddMember(ctx, name, "palminnga", false),
-				n.BridgeAddMember(ctx, "palminn", name, false), // never a port of a JailOps bridge
-				n.BridgeDeleteMember(ctx, name, "palminnga"),
+				n.BridgeAddMember(ctx, name, "officega", false),
+				n.BridgeAddMember(ctx, "office", name, false), // never a port of a JailOps bridge
+				n.BridgeDeleteMember(ctx, name, "officega"),
 				n.SetDescription(ctx, name, ifconfig.Marker), // the marker is never written on what exists
 				n.SetDescription(ctx, name, ""),
 				n.EpairDestroy(ctx, name),
@@ -83,17 +83,17 @@ func TestInterfaceOwnershipMatrix(t *testing.T) {
 			t.Errorf("%s: epair under the kernel's names: %v", via.name, err)
 		}
 		// a description that would take the marker off is refused; clearing keeps it
-		if err := n.SetDescription(ctx, "palminn", "my text"); !api.IsCode(err, api.CodeInvalid) {
+		if err := n.SetDescription(ctx, "office", "my text"); !api.IsCode(err, api.CodeInvalid) {
 			t.Errorf("%s: marker removable: %v", via.name, err)
 		}
-		if err := n.SetDescription(ctx, "palminn", ""); err != nil {
+		if err := n.SetDescription(ctx, "office", ""); err != nil {
 			t.Fatal(err)
 		}
-		if d := desc(t, f.env, "palminn"); d != ifconfig.Marker {
+		if d := desc(t, f.env, "office"); d != ifconfig.Marker {
 			t.Errorf("%s: cleared to %q", via.name, d)
 		}
 		// creating what JailOps already owns is idempotent for the caller
-		if err := n.BridgeCreate(ctx, "palminn"); !api.IsCode(err, api.CodeAlreadyExists) {
+		if err := n.BridgeCreate(ctx, "office"); !api.IsCode(err, api.CodeAlreadyExists) {
 			t.Errorf("%s: create of an owned bridge: %v", via.name, err)
 		}
 	}
@@ -106,7 +106,7 @@ func TestInterfaceOwnershipMatrix(t *testing.T) {
 	for _, i := range ifs {
 		seen[i.Name] = true
 	}
-	for _, n := range []string{"vmx0", "em0", "mybr", "lo0", "palminn"} {
+	for _, n := range []string{"vmx0", "em0", "mybr", "lo0", "office"} {
 		if !seen[n] {
 			t.Errorf("%s not listed", n)
 		}
@@ -132,15 +132,15 @@ func desc(t *testing.T, e *env, name string) string {
 func TestInterfaceOwnershipFreeName(t *testing.T) {
 	f := newFixtureWith(t, func(e *env) {
 		e.conf(t, "shop_web")
-		e.runner.On("ifconfig", []string{"palminn", "mtu", "1400"}, "")
+		e.runner.On("ifconfig", []string{"office", "mtu", "1400"}, "")
 	})
 	ctx := context.Background()
 	n := f.client.Net()
-	if err := n.BridgeCreate(ctx, "palminn"); err != nil {
+	if err := n.BridgeCreate(ctx, "office"); err != nil {
 		t.Fatal(err)
 	}
-	m, l3, err := n.EpairCreate(ctx, "palminng")
-	if err != nil || m != "palminnga" || l3 != "palminngb" {
+	m, l3, err := n.EpairCreate(ctx, "officeg")
+	if err != nil || m != "officega" || l3 != "officegb" {
 		t.Fatal(m, l3, err)
 	}
 	a, b, err := n.EpairCreate(ctx, "jo0123456789a0")
@@ -148,14 +148,14 @@ func TestInterfaceOwnershipFreeName(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, err := range []error{
-		n.SetDescription(ctx, "palminn", "jailops net=palminn bridge"),
-		n.BridgeAddMember(ctx, "palminn", m, false),
-		n.BridgeAddMember(ctx, "palminn", a, true),
-		n.AddrAdd(ctx, l3, netip.MustParsePrefix("172.17.32.1/24")),
-		n.SetLink(ctx, "palminn", true),
+		n.SetDescription(ctx, "office", "jailops net=office bridge"),
+		n.BridgeAddMember(ctx, "office", m, false),
+		n.BridgeAddMember(ctx, "office", a, true),
+		n.AddrAdd(ctx, l3, netip.MustParsePrefix("10.66.0.1/24")),
+		n.SetLink(ctx, "office", true),
 		n.RouteAdd(ctx, ifconfig.Route{Dest: "2001:db8::7/128", Interface: l3}),
 		n.NeighborSet(ctx, l3, netip.MustParseAddr("2001:db8::7"), "02:00:00:00:00:07"),
-		f.client.SetMTU(ctx, "palminn", 1400),
+		f.client.SetMTU(ctx, "office", 1400),
 	} {
 		if err != nil {
 			t.Fatal(err)
@@ -177,7 +177,7 @@ func TestInterfaceOwnershipFreeName(t *testing.T) {
 	if err := n.EpairDestroy(ctx, m); err != nil {
 		t.Fatal(err)
 	}
-	if err := n.BridgeDestroy(ctx, "palminn"); err != nil {
+	if err := n.BridgeDestroy(ctx, "office"); err != nil {
 		t.Fatal(err)
 	}
 }

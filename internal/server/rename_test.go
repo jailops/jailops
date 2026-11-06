@@ -21,10 +21,10 @@ func TestRenameOverHTTP(t *testing.T) {
 
 	// a project administrator renames the objects of the project, not a network
 	padmin := e.Scoped(api.PermAdmin, dtest.SeedProject)
-	if _, err := padmin.Networks().Rename(ctx, "lan", api.Rename{NewName: "palminn"}, ""); !api.IsCode(err, api.CodeForbidden) {
+	if _, err := padmin.Networks().Rename(ctx, "lan", api.Rename{NewName: "office"}, ""); !api.IsCode(err, api.CodeForbidden) {
 		t.Fatalf("a project administrator renamed a network: %v", err)
 	}
-	if _, err := e.Client(api.PermOperator).Networks().Rename(ctx, "lan", api.Rename{NewName: "palminn"}, ""); !api.IsCode(err, api.CodeForbidden) {
+	if _, err := e.Client(api.PermOperator).Networks().Rename(ctx, "lan", api.Rename{NewName: "office"}, ""); !api.IsCode(err, api.CodeForbidden) {
 		t.Fatalf("an operator renamed a network: %v", err)
 	}
 	// a strict body: a misspelled member is refused
@@ -35,16 +35,16 @@ func TestRenameOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.Networks().Rename(ctx, "lan", api.Rename{NewName: "palminn"}, "41"); !api.IsCode(err, api.CodeConflict) {
+	if _, err := g.Networks().Rename(ctx, "lan", api.Rename{NewName: "office"}, "41"); !api.IsCode(err, api.CodeConflict) {
 		t.Fatalf("a stale If-Match: %v", err)
 	}
 	evs := e.Events(ctx, g)
-	op, err := g.Networks().Rename(ctx, "lan", api.Rename{NewName: "palminn"}, etag)
+	op, err := g.Networks().Rename(ctx, "lan", api.Rename{NewName: "office"}, etag)
 	if err != nil {
 		t.Fatal(err)
 	}
 	res, err := op.Wait(ctx)
-	if err != nil || res.To != "palminn" {
+	if err != nil || res.To != "office" {
 		t.Fatalf("%+v %v", res, err)
 	}
 	for seen := false; !seen; {
@@ -52,7 +52,7 @@ func TestRenameOverHTTP(t *testing.T) {
 		case ev := <-evs:
 			var le api.LifecycleEvent
 			if ev.Type == api.EventLifecycle && json.Unmarshal(ev.Metadata, &le) == nil && le.Action == "network-renamed" {
-				if le.Source != "/api/v1/networks/palminn" {
+				if le.Source != "/api/v1/networks/office" {
 					t.Fatalf("%+v", le)
 				}
 				seen = true
@@ -62,11 +62,11 @@ func TestRenameOverHTTP(t *testing.T) {
 		}
 	}
 	code, body := e.Raw("GET", "/api/v1/audit", e.Token(api.PermAdmin), "")
-	if code != 200 || !strings.Contains(body, "/api/v1/networks/lan/rename") || !strings.Contains(body, "rename network lan to palminn") {
+	if code != 200 || !strings.Contains(body, "/api/v1/networks/lan/rename") || !strings.Contains(body, "rename network lan to office") {
 		t.Fatalf("audit: %d %s", code, body)
 	}
 	// the project's jails see the network under its new name
-	if _, err := padmin.Networks().Get(ctx, "palminn"); err != nil {
+	if _, err := padmin.Networks().Get(ctx, "office"); err != nil {
 		t.Fatal(err)
 	}
 }

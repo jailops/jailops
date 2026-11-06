@@ -160,8 +160,8 @@ func networkState(t *testing.T, e *dtest.Env, s *service.Service) string {
 	for _, a := range j.Spec.Network {
 		b.WriteString("jail " + a.Network + "\n")
 	}
-	if strings.Contains(specFile(e, dtest.SeedProject, "web"), `"palminn"`) {
-		b.WriteString("spec.json palminn\n")
+	if strings.Contains(specFile(e, dtest.SeedProject, "web"), `"office"`) {
+		b.WriteString("spec.json office\n")
 	}
 	return b.String()
 }
@@ -179,7 +179,7 @@ func TestRenameNetwork(t *testing.T) {
 	}
 
 	// a dry run lists every reference and changes nothing
-	_, dry, err := s.RenameNetwork(g, "lan", service.RenameOptions{NewName: "palminn", DryRun: true, Expect: lan.Metadata.Generation})
+	_, dry, err := s.RenameNetwork(g, "lan", service.RenameOptions{NewName: "office", DryRun: true, Expect: lan.Metadata.Generation})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,18 +191,18 @@ func TestRenameNetwork(t *testing.T) {
 	}
 
 	// the refusals
-	_, _, err = s.RenameNetwork(as(alphaOnly, dtest.SeedProject), "lan", renameOpts("palminn"))
+	_, _, err = s.RenameNetwork(as(alphaOnly, dtest.SeedProject), "lan", renameOpts("office"))
 	wantCode(t, err, api.CodeForbidden)
-	_, _, err = s.RenameNetwork(g, "lan", renameOpts("Palm_inn"))
+	_, _, err = s.RenameNetwork(g, "lan", renameOpts("Off_ice"))
 	wantCode(t, err, api.CodeInvalid)
 	_, _, err = s.RenameNetwork(g, "lan", renameOpts("lan"))
 	wantCode(t, err, api.CodeInvalid)
-	_, _, err = s.RenameNetwork(g, "nowhere", renameOpts("palminn"))
+	_, _, err = s.RenameNetwork(g, "nowhere", renameOpts("office"))
 	wantCode(t, err, api.CodeNotFound)
 	other := e.MakeNetwork("x")
 	_, _, err = s.RenameNetwork(g, "lan", renameOpts(other))
 	wantCode(t, err, api.CodeAlreadyExists)
-	_, _, err = s.RenameNetwork(g, "lan", service.RenameOptions{NewName: "palminn", Expect: lan.Metadata.Generation + 7})
+	_, _, err = s.RenameNetwork(g, "lan", service.RenameOptions{NewName: "office", Expect: lan.Metadata.Generation + 7})
 	wantCode(t, err, api.CodeConflict)
 	synced := dtest.LAN()
 	synced.Metadata.Name, synced.Metadata.ManagedBy = "synced", "sync:fleet"
@@ -218,12 +218,12 @@ func TestRenameNetwork(t *testing.T) {
 
 	// the rename: every reference follows, the running jail keeps its interfaces
 	before := networkState(t, e, s)
-	res := doRename(t, s)(s.RenameNetwork(g, "lan", service.RenameOptions{NewName: "palminn", Expect: lan.Metadata.Generation}))
-	if res.From != "lan" || res.To != "palminn" || res.Counts[api.RenameReference] < 2 || len(res.Steps) == 0 {
+	res := doRename(t, s)(s.RenameNetwork(g, "lan", service.RenameOptions{NewName: "office", Expect: lan.Metadata.Generation}))
+	if res.From != "lan" || res.To != "office" || res.Counts[api.RenameReference] < 2 || len(res.Steps) == 0 {
 		t.Fatalf("%+v", res)
 	}
 	after := networkState(t, e, s)
-	for _, want := range []string{"net palminn", "grant palminn", "jail palminn", "spec.json palminn"} {
+	for _, want := range []string{"net office", "grant office", "jail office", "spec.json office"} {
 		if !strings.Contains(after, want) {
 			t.Fatalf("after the rename: %s (before %s)", after, before)
 		}
@@ -259,7 +259,7 @@ func TestRenameNetwork(t *testing.T) {
 	}
 	found := false
 	for _, a := range entries {
-		found = found || (a.Method == "OPERATION" && strings.Contains(a.Detail, "rename network lan to palminn") && a.Result == "ok")
+		found = found || (a.Method == "OPERATION" && strings.Contains(a.Detail, "rename network lan to office") && a.Result == "ok")
 	}
 	if !found {
 		t.Fatal("no audit entry")
@@ -283,7 +283,7 @@ func TestRenameNetworkRollsBackEveryStep(t *testing.T) {
 			t.Fatal("the rename never succeeded")
 		}
 		e.Fault.Reset(k)
-		op, _, err := s.RenameNetwork(g, "lan", renameOpts("palminn"))
+		op, _, err := s.RenameNetwork(g, "lan", renameOpts("office"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -302,7 +302,7 @@ func TestRenameNetworkRollsBackEveryStep(t *testing.T) {
 			t.Fatalf("failure at mutation %d left\n%s\ninstead of\n%s", k, now, before)
 		}
 	}
-	if now := networkState(t, e, s); !strings.Contains(now, "jail palminn") {
+	if now := networkState(t, e, s); !strings.Contains(now, "jail office") {
 		t.Fatal(now)
 	}
 }
@@ -315,13 +315,13 @@ func TestRenameInterruptedIsRolledBackAtStart(t *testing.T) {
 	mkJail(t, e, s, alpha, dtest.WebJail("web"))
 	before := networkState(t, e, s)
 	service.SetRenameCrash(s, 3) // the network and the project are renamed, the jail is not
-	op, _, err := s.RenameNetwork(g, "lan", renameOpts("palminn"))
+	op, _, err := s.RenameNetwork(g, "lan", renameOpts("office"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		if _, err := s.GetNetwork(g, "palminn"); err == nil {
+		if _, err := s.GetNetwork(g, "office"); err == nil {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -356,7 +356,7 @@ func TestRenameRefusedWhileBusy(t *testing.T) {
 		Run: func(ctx context.Context, h *service.OpHandle) (any, error) { <-release; return nil, nil }}); err != nil {
 		t.Fatal(err)
 	}
-	_, _, err := s.RenameNetwork(g, "lan", renameOpts("palminn"))
+	_, _, err := s.RenameNetwork(g, "lan", renameOpts("office"))
 	wantCode(t, err, api.CodeBusy)
 }
 

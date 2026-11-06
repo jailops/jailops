@@ -1,11 +1,11 @@
 $ jailops network edit lan -y
-network/lan renamed to palminn (1 reference changed)
-network/palminn updated
+network/lan renamed to office (1 reference changed)
+network/office updated
 
-$ jailops network show palminn -o json
+$ jailops network show office -o json
 {
   "metadata": {
-    "name": "palminn",
+    "name": "office",
     "uuid": "<uuid>",
     "scope": "fleet",
     "generation": 3,

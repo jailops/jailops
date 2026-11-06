@@ -70,7 +70,7 @@ func (a *app) networkCmd() *cobra.Command {
 allocates addresses from the network's range deterministically and writes them
 into the jail specification; there is no DHCP. The bridge has the network's name
 (or the one --bridge gives) and keeps it for the life of the network.`,
-		`jailops network create palminn --ipv4 172.17.32.1/24 --uplink vmx0 --nat
+		`jailops network create lan --ipv4 10.77.0.1/24 --uplink em0 --nat
 jailops network create web --ipv4 10.50.0.1/24 --ipv6 fd50::1/64
 jailops network create lan --subnet 10.20.0.0/24 --gateway 10.20.0.1 --range 10.20.0.10-10.20.0.250 --nat --uplink em0
 jailops network list
@@ -85,7 +85,7 @@ wg0, ...) and not taken on the host or by another network. Otherwise it is jo<N>
 chooses the name under the same rules. JailOps creates the bridge with its description and changes only interfaces it
 created; an interface of that name that exists already is refused here, not when the first jail starts. The bridge
 keeps its name until the network is deleted, also when the network is renamed.`,
-		`jailops network create palminn --ipv4 172.17.32.1/24 --uplink vmx0 --nat
+		`jailops network create lan --ipv4 10.77.0.1/24 --uplink em0 --nat
 jailops network create lan --subnet 10.20.0.0/24 --gateway 10.20.0.1 --range 10.20.0.10-10.20.0.250 --nat --uplink em0
 jailops network create -f lan.yaml`,
 		func(cmd *cobra.Command) func(string) (api.Network, error) {

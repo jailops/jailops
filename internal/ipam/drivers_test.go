@@ -8,8 +8,8 @@ func TestDriverLikeName(t *testing.T) {
 		"tap0": "tap", "wg0": "wg", "pflog0": "pflog", "vlan0.10": "vlan", "igb3": "igb", "vtnet0": "vtnet", "all": "all",
 		"VMX0": "vmx", "ix0": "ix", "lagg0": "lagg", "tun9": "tun",
 		// free names
-		"palminn": "", "jo0": "", "jo7": "", "lan": "", "vmxnet": "", "em1x": "", "bridgeway": "", "epair0c": "", "lo0x": "",
-		"vlan0.x": "", "vlan0.": "", "palminnga": "", "palminngb": "", "jo1234567890aba": "", "": "", "0": "",
+		"office": "", "jo0": "", "jo7": "", "lan": "", "vmxnet": "", "em1x": "", "bridgeway": "", "epair0c": "", "lo0x": "",
+		"vlan0.x": "", "vlan0.": "", "officega": "", "officegb": "", "jo1234567890aba": "", "": "", "0": "",
 	} {
 		got, ok := DriverLikeName(name)
 		if got != want || ok != (want != "") {

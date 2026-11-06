@@ -757,3 +757,36 @@ func TestAJustStartedProxyGetsASecondLookBeforeTheInterval(t *testing.T) {
 		t.Fatal("the loop did not stop")
 	}
 }
+
+// The bridge and the gateway pair of a network whose records are gone (a host wiped by hand) are destroyed by their
+// description; an interface with another description, and the interfaces of a network that exists, are left alone.
+func TestOrphanNetworkInterfacesAreRemoved(t *testing.T) {
+	w := newWorld(t, reconcile.Config{})
+	w.des = reconcile.Desired{Networks: []reconcile.NetworkDesired{lan()}}
+	w.R.Pass(bg) // the bridge and the pair of the network that exists
+	ctx := bg
+	w.Net.AddIface(ifconfig.Iface{Name: "jolost", Groups: []string{"bridge"}, Description: "jailops net=lost bridge"})
+	if _, _, err := w.Net.EpairCreate(ctx, "jolostg"); err != nil { // jolostga and jolostgb
+		t.Fatal(err)
+	}
+	_ = w.Net.SetDescription(ctx, "jolostga", "jailops net=lost gateway (bridge side)")
+	_ = w.Net.SetDescription(ctx, "jolostgb", "jailops net=lost gateway (host side)")
+	w.Net.AddIface(ifconfig.Iface{Name: "joforeign", Groups: []string{"bridge"}, Description: "someone else's"})
+	rep := w.R.Pass(bg)
+	if len(rep.Failures) != 0 {
+		t.Fatalf("%v", rep.Failures)
+	}
+	ifs, _ := w.Net.List(ctx)
+	if _, ok := find(ifs, "jolost"); ok {
+		t.Error("the bridge of a network that is gone survived")
+	}
+	if _, ok := find(ifs, "jolostgb"); ok {
+		t.Error("the gateway pair of a network that is gone survived")
+	}
+	if _, ok := find(ifs, "joforeign"); !ok {
+		t.Error("a bridge with a foreign description was destroyed")
+	}
+	if _, ok := find(ifs, "jo0"); !ok {
+		t.Error("the bridge of the network that exists was destroyed")
+	}
+}

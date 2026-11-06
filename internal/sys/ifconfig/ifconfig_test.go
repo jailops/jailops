@@ -124,10 +124,10 @@ func writes(argv []string) []string {
 func TestCommandBridgeAndEpair(t *testing.T) {
 	c, f := newCmd()
 	f.On("ifconfig", []string{"bridge", "create"}, "bridge0\n")
-	mine(f, "bridge", "jo0", "palminn")
+	mine(f, "bridge", "jo0", "office")
 	mine(f, "epair", "joweba", "jodbea")
 	f.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
-	if err := c.BridgeCreate(ctx, "palminn"); err != nil {
+	if err := c.BridgeCreate(ctx, "office"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.SetDescription(ctx, "jo0", "jailops:abc"); err != nil {
@@ -157,13 +157,13 @@ func TestCommandBridgeAndEpair(t *testing.T) {
 	if err := c.SetLink(ctx, "jo0", false); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.BridgeDestroy(ctx, "palminn"); err != nil {
+	if err := c.BridgeDestroy(ctx, "office"); err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
 		"ifconfig bridge create",
 		"ifconfig bridge0 description " + Marker, // marked before it has its name
-		"ifconfig bridge0 name palminn",
+		"ifconfig bridge0 name office",
 		"ifconfig jo0", "ifconfig jo0 description jailops:abc",
 		"ifconfig jo0", "ifconfig jo0 description " + Marker,
 		"ifconfig jo0", "ifconfig joweba", "ifconfig jo0 addm joweba private joweba",
@@ -173,7 +173,7 @@ func TestCommandBridgeAndEpair(t *testing.T) {
 		"ifconfig jo0", "ifconfig jo0 inet6 fd00::1 prefixlen 64 -alias",
 		"ifconfig jo0", "ifconfig jo0 up",
 		"ifconfig jo0", "ifconfig jo0 down",
-		"ifconfig palminn", "ifconfig palminn destroy",
+		"ifconfig office", "ifconfig office destroy",
 	}
 	if !reflect.DeepEqual(f.Argv(), want) {
 		t.Errorf("got  %q\nwant %q", f.Argv(), want)
@@ -261,10 +261,10 @@ func TestOwnership(t *testing.T) {
 		msg              string
 	}
 	for _, k := range []cas{
-		{"palminn", "bridge", Marker, OwnedByMarker, ""},
-		{"palminn", "bridge", "jailops net=palminn bridge", OwnedByMarker, ""},
+		{"office", "bridge", Marker, OwnedByMarker, ""},
+		{"office", "bridge", "jailops net=office bridge", OwnedByMarker, ""},
 		{"jo0", "bridge", "jailops:0b0e7f3e", OwnedByMarker, ""},
-		{"palmingb", "epair", "jailops net=palminn gateway (host side)", OwnedByMarker, ""},
+		{"officgb", "epair", "jailops net=office gateway (host side)", OwnedByMarker, ""},
 		{"jo7", "bridge", "", OwnedLegacy, ""},                                             // an older release, or a crash before the description
 		{"jo1234567890aab", "epair", "", OwnedLegacy, ""},                                  // an epair of an older release
 		{"mybr", "bridge", "", NotOwned, "has no JailOps description"},                     // a bridge made by hand
@@ -583,20 +583,20 @@ func TestFakeOwnership(t *testing.T) {
 	f.AddForeign("vmx0", true)
 	f.AddIface(Iface{Name: "mybr", Groups: []string{"bridge"}})
 	f.AddIface(Iface{Name: "jo7", Groups: []string{"bridge"}})
-	if err := f.BridgeCreate(ctx, "palminn"); err != nil {
+	if err := f.BridgeCreate(ctx, "office"); err != nil {
 		t.Fatal(err)
 	}
-	if i, _ := f.Show(ctx, "palminn"); i.Description != Marker {
+	if i, _ := f.Show(ctx, "office"); i.Description != Marker {
 		t.Fatalf("created without the marker: %+v", i)
 	}
-	if err := f.SetDescription(ctx, "palminn", "jailops net=palminn bridge"); err != nil {
+	if err := f.SetDescription(ctx, "office", "jailops net=office bridge"); err != nil {
 		t.Fatal(err)
 	}
-	if i, _ := f.Show(ctx, "palminn"); i.Description != "jailops net=palminn bridge" {
+	if i, _ := f.Show(ctx, "office"); i.Description != "jailops net=office bridge" {
 		t.Fatalf("%+v", i)
 	}
 	for _, err := range []error{f.SetLink(ctx, "vmx0", false), f.SetLink(ctx, "mybr", true), f.SetDescription(ctx, "mybr", Marker),
-		f.BridgeAddMember(ctx, "palminn", "vmx0", false), f.BridgeAddMember(ctx, "palminn", "mybr", false)} {
+		f.BridgeAddMember(ctx, "office", "vmx0", false), f.BridgeAddMember(ctx, "office", "mybr", false)} {
 		if !api.IsCode(err, api.CodeForbidden) {
 			t.Errorf("foreign: %v", err)
 		}

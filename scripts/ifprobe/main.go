@@ -6,7 +6,7 @@
 // FreeBSD and run as root on a disposable machine, after the end-to-end flow has created the network OWNED and the
 // managed jail JAIL. Nothing in JailOps itself uses it.
 //
-//	ifprobe -uplink vtnet0 -foreign mybr -legacy jo79 -owned palminn -jail pal_palweb
+//	ifprobe -uplink vtnet0 -foreign mybr -legacy jo79 -owned office -jail edge_edgeweb
 //
 // FOREIGN is a bridge made by hand (ifconfig bridge create; ifconfig bridgeN name mybr), LEGACY one made by hand under
 // a legacy name without a description: the helper accepts it once and marks it. Every check prints one line; the exit

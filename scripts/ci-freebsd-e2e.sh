@@ -653,20 +653,20 @@ expect "doctor finds every description" 'net.descriptions +PASS' $J doctor
 
 step "a bridge of any free name, and the helper's ownership of interfaces (docs/security-model.md, Interfaces)"
 # the network's name is its bridge's; the bridge carries JailOps's description from its creation
-out=$($J network create palminn --ipv4 172.17.32.1/24 --uplink "$uplink" --nat 2>&1) || { echo "$out" >&2; fail "network create palminn"; }
-printf '%s\n' "$out" | grep -q warning && { echo "$out" >&2; fail "network palminn gets its own name as its bridge, without a note"; }
-expect "the bridge is named like the network" '^palminn +palminn +172\.17\.32\.0/24' $J network list
-check "project pal" $J project create pal
-check "grant palminn to pal" $J project set pal --network palminn --storage default
-check "a jail on palminn" $J create palweb --project pal --image "$img" --network palminn --storage default
-check "it starts" $J start palweb --project pal
+out=$($J network create office --ipv4 10.66.0.1/24 --uplink "$uplink" --nat 2>&1) || { echo "$out" >&2; fail "network create office"; }
+printf '%s\n' "$out" | grep -q warning && { echo "$out" >&2; fail "network office gets its own name as its bridge, without a note"; }
+expect "the bridge is named like the network" '^office +office +10\.66\.0\.0/24' $J network list
+check "project edge" $J project create edge
+check "grant office to edge" $J project set edge --network office --storage default
+check "a jail on office" $J create edgeweb --project edge --image "$img" --network office --storage default
+check "it starts" $J start edgeweb --project edge
 sleep 2
-expect "ifconfig palminn shows JailOps's description" 'description: jailops net=palminn bridge' ifconfig palminn
-expect "the gateway end of palminn says what it is" 'description: jailops net=palminn gateway \(host side\)' ifconfig palminngb
-expect "the jail has its address on palminn" '172\.17\.32\.' $J exec --project pal palweb -- ifconfig -a
-expect "the jail reaches its gateway" '1 packets received' $J exec --project pal palweb -- ping -c1 -t3 172.17.32.1
+expect "ifconfig office shows JailOps's description" 'description: jailops net=office bridge' ifconfig office
+expect "the gateway end of office says what it is" 'description: jailops net=office gateway \(host side\)' ifconfig officegb
+expect "the jail has its address on office" '10\.66\.0\.' $J exec --project edge edgeweb -- ifconfig -a
+expect "the jail reaches its gateway" '1 packets received' $J exec --project edge edgeweb -- ping -c1 -t3 10.66.0.1
 gw4=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
-expect "the jail reaches the host's default gateway through the NAT of the uplink" '1 packets received' $J exec --project pal palweb -- ping -c1 -t5 "$gw4"
+expect "the jail reaches the host's default gateway through the NAT of the uplink" '1 packets received' $J exec --project edge edgeweb -- ping -c1 -t5 "$gw4"
 # a bridge made by hand is someone else's: a network cannot have it, at create, and a network named like it gets jo<N>
 b=$(ifconfig bridge create) && ifconfig "$b" name mybr >/dev/null || fail "a bridge made by hand"
 expect "--bridge naming a bridge made by hand is refused at create" "the interface mybr already exists on this host without a JailOps description" \
@@ -683,7 +683,7 @@ b=$(ifconfig bridge create) && ifconfig "$b" name jo79 >/dev/null || fail "a leg
 # the helper itself, over its socket: every request a compromised daemon could make on the uplink, lo0 and mybr is
 # refused; jo79 is accepted once and marked; an epair keeps the marker in a jail's vnet
 if [ -n "${IFPROBE_BIN:-}" ]; then
-	check "the helper's ownership probe" "$IFPROBE_BIN" -uplink "$uplink" -foreign mybr -legacy jo79 -owned palminn -jail pal_palweb
+	check "the helper's ownership probe" "$IFPROBE_BIN" -uplink "$uplink" -foreign mybr -legacy jo79 -owned office -jail edge_edgeweb
 	cat "$work/check.out"
 else
 	echo "IFPROBE_BIN is not set: the helper's ownership probe is skipped"
@@ -694,8 +694,8 @@ if ifconfig mybr | grep -q description; then fail "mybr was given a description"
 check "remove the bridge made by hand" ifconfig mybr destroy
 # a stale epair of JailOps (an epair with a jail's name and JailOps's description, of no jail) is found and removed
 ep=$(ifconfig epair create) && ifconfig "${ep%a}b" name jo0123456789zzb >/dev/null && ifconfig "$ep" name jo0123456789zza >/dev/null || fail "a stale epair"
-ifconfig jo0123456789zza description 'jailops jail=gone/old net=palminn (host side)'
-ifconfig jo0123456789zzb description 'jailops jail=gone/old net=palminn (jail side)'
+ifconfig jo0123456789zza description 'jailops jail=gone/old net=office (host side)'
+ifconfig jo0123456789zzb description 'jailops jail=gone/old net=office (jail side)'
 # The reconciler may remove it before the doctor looks, or while it destroys the pair the doctor sees one side only:
 # either side in the warning, or the pair already gone, is the finding.
 n=0
@@ -709,11 +709,11 @@ expect "doctor: no stale epairs" 'network.epairs +PASS' $J doctor
 expect "doctor: the bridges of every network are JailOps's" 'network.bridges +PASS' $J doctor
 expect "doctor: every description" 'net.descriptions +PASS' $J doctor
 # network delete removes the bridge it made
-check "delete the jail" $J delete --force --confirm-data-loss palweb --project pal
-check "delete project pal" $J project delete pal -y
-check "delete network palminn" $J network delete palminn -y
-expect_retry "the bridge palminn is gone" 'gone' sh -c "ifconfig palminn >/dev/null 2>&1 && echo there || echo gone"
-expect "its gateway pair is gone" 'gone' sh -c "ifconfig palminngb >/dev/null 2>&1 && echo there || echo gone"
+check "delete the jail" $J delete --force --confirm-data-loss edgeweb --project edge
+check "delete project edge" $J project delete edge -y
+check "delete network office" $J network delete office -y
+expect_retry "the bridge office is gone" 'gone' sh -c "ifconfig office >/dev/null 2>&1 && echo there || echo gone"
+expect "its gateway pair is gone" 'gone' sh -c "ifconfig officegb >/dev/null 2>&1 && echo there || echo gone"
 
 step "name resolution of jails (docs/networking-ipv6.md): the host's nameservers, a live change, a resolver on the gateway"
 # the network lan was made without dns: its jails get the host's own nameservers
@@ -1190,14 +1190,14 @@ expect "its own address" '10\.77\.0\.' $J exec --project demo web-restored -- if
 
 step "renames: a network with a running jail, a stopped jail, an image, a project (each renamed back)"
 # a network: the running jail keeps its interfaces and its traffic; only names and descriptions change
-expect "the plan lists the running jail's interfaces" 'interface .*jail=demo/web-restored net=palminn' $J network rename lan palminn --dry-run
-check "rename the network while a jail on it runs" $J network rename lan palminn -y
-expect "the bridge keeps its name and carries the new one" 'description: jailops net=palminn bridge' ifconfig jo7
-expect "the gateway end too" 'description: jailops net=palminn gateway \(host side\)' ifconfig jo7gb
-expect "the running jail's end, inside it" 'description: jailops jail=demo/web-restored net=palminn \(jail side\)' $J exec --project demo web-restored -- ifconfig -a
-expect "the anchor of the network is loaded under the new name" 'nat on .* from 10\.77\.0\.0/24' pfctl -a jailops/net.palminn -sn
+expect "the plan lists the running jail's interfaces" 'interface .*jail=demo/web-restored net=office' $J network rename lan office --dry-run
+check "rename the network while a jail on it runs" $J network rename lan office -y
+expect "the bridge keeps its name and carries the new one" 'description: jailops net=office bridge' ifconfig jo7
+expect "the gateway end too" 'description: jailops net=office gateway \(host side\)' ifconfig jo7gb
+expect "the running jail's end, inside it" 'description: jailops jail=demo/web-restored net=office \(jail side\)' $J exec --project demo web-restored -- ifconfig -a
+expect "the anchor of the network is loaded under the new name" 'nat on .* from 10\.77\.0\.0/24' pfctl -a jailops/net.office -sn
 expect_refused "the anchor of the old name is empty" sh -c "pfctl -a jailops/net.lan -sn 2>/dev/null | grep -q nat"
-expect "the project's grant follows" 'palminn' $J project show demo
+expect "the project's grant follows" 'office' $J project show demo
 expect "the running jail still reaches the host" '1 packets received' $J exec --project demo web-restored -- ping -c1 -t3 10.77.0.1
 gw=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
 if [ -n "$gw" ]; then
@@ -1205,7 +1205,7 @@ if [ -n "$gw" ]; then
 fi
 # (doctor's exit status says more than descriptions: a failing check of the machine is not this block's business)
 expect "doctor finds every description" 'net.descriptions +PASS' sh -c "$J doctor 2>&1; true"
-check "rename it back" $J network rename palminn lan -y
+check "rename it back" $J network rename office lan -y
 expect "the old name is back" 'description: jailops net=lan bridge' ifconfig jo7
 # a jail: refused while it runs, renamed when it is stopped, its datasets, mountpoints and kernel name follow
 expect_refused "a running jail is not renamed" $J rename web-restored web-renamed --project demo -y

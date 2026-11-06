@@ -309,9 +309,11 @@ To wipe a host and install again (a test machine, a failed first try), as root. 
 volume and backup on the pool's `jailops` dataset; there is no undo. Replace `tank` with your pool.
 
 ```sh
-service jailopsd onestop; service jailops_priv onestop; service jailops_backupd onestop 2>/dev/null
+service jailopsd stop; service jailops_backupd onestop 2>/dev/null
 for j in $(jls -N name); do jail -r "$j"; done                  # every running jail
-for b in $(ifconfig -l | tr ' ' '\n' | grep -E '^(wg-|epair)'); do ifconfig "$b" destroy; done
+for i in $(ifconfig -l); do                                      # the bridges and pairs of JailOps, and the tunnels
+	case $i in wg-*) ifconfig "$i" destroy ;; *) ifconfig "$i" 2>/dev/null | grep -q 'description: jailops' && ifconfig "$i" destroy ;; esac
+done 2>/dev/null
 zfs destroy -r tank/jailops                                      # images, jails, state, cache, logs
 pkg delete -y jailops jailops-client
 rm -rf /usr/local/etc/jailops /var/db/jailops /var/run/jailops /var/log/jailops /var/tmp/jailops
@@ -323,8 +325,8 @@ rm -rf /usr/local/etc/jailops /var/db/jailops /var/run/jailops /var/log/jailops 
 
 Delete the three anchor lines of section 3 from `/etc/pf.conf` (with the `# jailops-setup:` comments and the
 lines below them, if `jailops-setup` added them; its copy of the old file is `/etc/pf.conf.jailops-setup-<date>`) and
-the `jailopsd_*` and `jailops_*` lines from `/etc/rc.conf` if the host keeps nothing of JailOps. The bridges of your networks (named like the network) disappear
-with a reboot, or `ifconfig NAME destroy` one at a time. Then start at section 2 (or with `jailops-setup` after `pkg install jailops`). Packages of the base are fetched
+the `jailopsd_*` and `jailops_*` lines from `/etc/rc.conf` if the host keeps nothing of JailOps. The loop above destroyed the bridges and gateway pairs of your networks (they are in the kernel and
+stay until they are destroyed or the host reboots; a running JailOps also removes the ones of a network it does not know). Then start at section 2 (or with `jailops-setup` after `pkg install jailops`). Packages of the base are fetched
 again: the cache went with the dataset.
 
 ## Remote access
