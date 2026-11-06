@@ -704,20 +704,25 @@ func netOfDesc(d string) (net, kind string) {
 
 // orphanNetPass destroys the bridge and the gateway pair of a network that no longer exists: the records of a network
 // can go while its interfaces stay (a host wiped by hand, a dataset destroyed under the daemon), because interfaces
-// live in the kernel. Only what carries JailOps's description for a network that is not desired is touched; the pair
-// is destroyed from its host end (destroying an epair removes both ends).
+// live in the kernel. Only an interface that carries JailOps's description for a network, and whose name is no desired
+// network's bridge or gateway end, is touched; the pair is destroyed from its host end (destroying an epair removes both).
 func (r *Reconciler) orphanNetPass(ctx context.Context, des Desired, obs *Observed, ex *NetExec, rep *Report) {
-	known := map[string]bool{}
+	// What is wanted is told by the interface names, which never change (a rename of a network keeps its bridge), and not
+	// by the network name in the description: the description is rewritten after a rename, in between it names the old one.
+	wanted := map[string]bool{}
 	for _, n := range des.Networks {
-		known[n.Name] = true
+		wanted[n.Bridge] = true
+		if gm, gl3, err := ipam.GatewayNames(n.Bridge); err == nil {
+			wanted[gm], wanted[gl3] = true, true
+		}
 	}
 	for _, name := range sortedIfaces(obs) {
 		i := obs.Ifaces[name]
-		if !ours(i) {
+		if !ours(i) || wanted[name] {
 			continue
 		}
 		net, kind := netOfDesc(i.Description)
-		if net == "" || known[net] {
+		if net == "" {
 			continue
 		}
 		step := render.Step{Op: render.OpBridgeDestroy, Phase: render.PhaseHost, Iface: name}
