@@ -283,19 +283,3 @@ func TestSampleNamesEveryConfigKey(t *testing.T) {
 	}
 	walk(reflect.TypeOf(daemon.Config{}))
 }
-
-// The keys that mapped Unix users and groups to roles are gone; an old configuration stops the daemon with a
-// message that names the key and says what to do, not with a bare "unknown field".
-func TestRemovedUnixKeysFailWithAnExplanation(t *testing.T) {
-	for _, key := range []string{"admin_group: jailops-admin", "user_group: jailops", "user_projects: [web]"} {
-		name, _, _ := strings.Cut(key, ":")
-		_, err := daemon.Decode(strings.NewReader("pool: tank\nlisten:\n  unix:\n    path: /var/run/jailops/jailops.sock\n    " + key + "\n"))
-		if err == nil || !strings.Contains(err.Error(), "listen.unix."+name) || !strings.Contains(err.Error(), "no longer supported") ||
-			!strings.Contains(err.Error(), "jailops user create") {
-			t.Errorf("%s: %v", name, err)
-		}
-	}
-	if _, err := daemon.Decode(strings.NewReader("pool: tank\nlisten:\n  unix:\n    path: /var/run/jailops/jailops.sock\n    mode: 0666\n")); err != nil {
-		t.Fatal(err)
-	}
-}

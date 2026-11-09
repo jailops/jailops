@@ -395,39 +395,12 @@ func Decode(r io.Reader) (Config, error) {
 	if err != nil {
 		return cfg, fmt.Errorf("config: %w", err)
 	}
-	if err := rejectRemovedKeys(raw); err != nil {
-		return cfg, err
-	}
 	dec := yaml.NewDecoder(bytes.NewReader(raw))
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil && err != io.EOF {
 		return cfg, fmt.Errorf("config: %w", err)
 	}
 	return cfg.finish()
-}
-
-// removedUnixKeys are the keys of the old Unix user/group to role mapping.
-var removedUnixKeys = []string{"admin_group", "user_group", "user_projects"}
-
-// rejectRemovedKeys fails with an explanation, not a bare "unknown field", for the keys that mapped Unix groups to
-// roles: that mapping no longer exists.
-func rejectRemovedKeys(raw []byte) error {
-	var probe struct {
-		Listen struct {
-			Unix map[string]any `yaml:"unix"`
-		} `yaml:"listen"`
-	}
-	if err := yaml.Unmarshal(raw, &probe); err != nil {
-		return nil // the strict decode reports the real syntax or type error
-	}
-	for _, k := range removedUnixKeys {
-		if _, ok := probe.Listen.Unix[k]; ok {
-			return fmt.Errorf("config: listen.unix.%s is no longer supported: Unix users and groups are not mapped to roles any more. "+
-				"Remove the key; root on the host is the global administrator, and everyone else signs in with a JailOps user, API token or client certificate "+
-				"(create the first administrator with: sudo jailops user create NAME --admin)", k)
-		}
-	}
-	return nil
 }
 
 // Load reads the file at path.
@@ -477,9 +450,6 @@ func (c Config) finish() (Config, error) {
 	case "text", "json":
 	default:
 		return c, fmt.Errorf("config: log.format %q must be text or json", c.Log.Format)
-	}
-	if c.Priv.Socket == priv.LegacySocket {
-		c.Priv.Socket = priv.DefaultSocket // the helper reads the former path as this one too
 	}
 	if c.Apps.CatalogDir == "" {
 		c.Apps.CatalogDir = apps.DefaultDir

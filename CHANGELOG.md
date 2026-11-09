@@ -4,6 +4,11 @@
 
 ## 0.6.4 - 2026-11-09
 
+- **Interface ownership is the description, only.** The helper changes a bridge or epair when it carries the JailOps
+  description; a name, a prefix or an undescribed interface never makes it JailOps's. **Removed:** `if-prefix` of
+  `priv.conf` and `-if-prefix` of `jailops-priv`, the acceptance of undescribed `jo` interfaces, the `jailops:<id>`
+  marker, the old socket name of the helper, and the special messages for the removed `listen.unix.*_group` keys and
+  the backup node's `admin_group` (an unknown key is an unknown key) and the `private` option of a network, which had no effect (every jail port is a private bridge member).
 - **A firewall rule can name a jail: `from @web`, and so can an address set.** `@name` is an address set of the project or a
   jail of the project and stands for its addresses; they are read at every render, so a rule follows the jail. One name
   never means both: a jail and an address set of a project may not have the same name, with `-` read as `_` (`web-1` and

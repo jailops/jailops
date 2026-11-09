@@ -143,7 +143,7 @@ export function networks(): Network[] {
       status: { bridge_up: true, members: ['epair0a', 'epair1a', 'epair2a', 'epair4a'], allocated: 8, free: 38, orphans: [], conditions: [] },
     },
     {
-      metadata: meta('backend'), spec: { bridge: 'jo1', private: true, ipv4: { subnet: '10.30.0.0/28', gateway: '10.30.0.1', range: '10.30.0.2-10.30.0.13' } },
+      metadata: meta('backend'), spec: { bridge: 'jo1', ipv4: { subnet: '10.30.0.0/28', gateway: '10.30.0.1', range: '10.30.0.2-10.30.0.13' } },
       status: { bridge_up: true, members: ['epair3a'], allocated: 12, free: 0, orphans: ['epair9a', 'epair9b'], conditions: [] },
     },
     {

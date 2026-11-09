@@ -245,7 +245,7 @@ func (r *Reconciler) networkPass(ctx context.Context, n NetworkDesired, obs *Obs
 	}
 	gwMember, gwL3, _ := ipam.GatewayNames(n.Bridge)
 	for _, name := range []string{n.Bridge, gwMember, gwL3} {
-		if i, ok := obs.Ifaces[name]; ok && name != "" && !ownedBy(i, n.ID, n.Steps) {
+		if i, ok := obs.Ifaces[name]; ok && name != "" && !ownedBy(i, n.Steps) {
 			if i.Description == "" || !ours(i) {
 				return fail("ForeignBridge", fmt.Sprintf("interface %s exists and is not managed by JailOps; it is left untouched", name))
 			}
@@ -284,7 +284,7 @@ func (r *Reconciler) networkPass(ctx context.Context, n NetworkDesired, obs *Obs
 	// gateway's pf rules).
 	for _, name := range []string{n.Bridge, gwL3} {
 		i, ok := obs.Ifaces[name]
-		if !ok || !ownedBy(i, n.ID, n.Steps) {
+		if !ok || !ownedBy(i, n.Steps) {
 			continue
 		}
 		want := map[netip.Prefix]bool{}
@@ -650,9 +650,6 @@ func (r *Reconciler) orphanPass(ctx context.Context, des Desired, obs *Observed,
 			continue
 		}
 		j, known := byBase[name[:len(name)-3]]
-		if id, legacy := strings.CutPrefix(i.Description, "jailops:"); legacy {
-			j, known = byID[id]
-		}
 		orphan := !known
 		if known {
 			if _, up := obs.Running[j.Name]; !up && !r.env.Actions.IsLocked("jail/"+j.Name) {

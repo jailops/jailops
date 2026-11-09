@@ -390,7 +390,7 @@ The helper runs as root and changes network interfaces for the daemon: bridges, 
 routes, neighbor entries, MTUs, their move into and out of a jail's vnet. It must never be made to change one that
 is not JailOps's: the host's uplink (`vmx0`, `em0`), `lo0`, a bridge an administrator made, a tunnel. **An interface is
 JailOps's when the kernel says so: it is a bridge or an epair (its driver's group) and its description carries
-JailOps's marker** (`jailops ...`, or `jailops:<id>` of releases before 0.4.0). Its name says nothing: a bridge may have
+JailOps's marker** (`jailops ...`). Its name says nothing: a bridge may have
 any free name (`office`), and a name that looks like JailOps's (`jo7`) is not enough.
 
 - **Only root sets a description** of an interface in the host's network stack, and the only operations of the helper
@@ -428,11 +428,8 @@ any free name (`office`), and a name that looks like JailOps's (`jo7`) is not en
 - **Reading stays open.** The interface list, the uplink's addresses and any one interface are read as before.
 - **jail.conf.** `vnet.interface` must name an epair end of the form JailOps gives them (`jo` and the jail's hash), and
   each one that exists when the jail is created must be JailOps's in the kernel.
-- **Upgrade.** Interfaces of earlier releases already carry their description. A bridge or epair whose name has a
-  legacy prefix (`if-prefix` in `priv.conf`, default `jo`) and **no description at all** (an older build, or a crash
-  between its creation and its description) counts as JailOps's, and the helper writes the marker the first time it
-  changes it; from then on the marker decides. One with someone else's description, or of another kind, is not
-  JailOps's whatever its name. `if-prefix` is deprecated and kept only for this.
+- **No description, no ownership.** A bridge or epair without a description is not JailOps's, whatever its name or its
+  prefix; one with someone else's description, or of another kind, is not either.
 
 What it does not cover: root on the host can put JailOps's description on anything, and an administrator who does so
 hands that interface to JailOps. A bridge is not a security boundary between the jails on it ([Network

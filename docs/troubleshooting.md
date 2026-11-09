@@ -72,9 +72,6 @@ anonymous, like an unauthenticated remote client. Run the command with `sudo`, o
 (`JAILOPS_TOKEN=jot_...`, created with `sudo jailops token create`) or a client certificate (`jailops remote add`). A lost user
 password is replaced by root with `sudo jailops user set-password NAME`.
 
-**`listen.unix.admin_group is no longer supported` (or `user_group`, `user_projects`) when the daemon starts.** Remove the key from
-`jailopsd.yaml`. Unix groups no longer grant a role; create the administrators as JailOps users (`sudo jailops user create NAME --admin`).
-
 **The daemon starts and every ZFS or jail operation fails with `forbidden`.** The helper refuses what `priv.conf` does not allow.
 The message names the line to add (`ndp-proxy`, `admin-host-mount`, ...). Edit `priv.conf` as root, `service jailopsd restart`.
 `service jailops_priv checkconfig` prints the effective roots and allow-lists.

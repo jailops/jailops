@@ -17,12 +17,12 @@ func TestSetDescriptionOverTheWire(t *testing.T) {
 	if err := n.BridgeCreate(ctx, "jo0"); err != nil {
 		t.Fatal(err)
 	}
-	for _, d := range []string{"jailops net=lan bridge", "jailops jail=web/nginx net=lan (host side)", "jailops:0b0e7f3e-5c4b-4f6e-9d3e-111111111111", ""} {
+	for _, d := range []string{"jailops net=lan bridge", "jailops jail=web/nginx net=lan (host side)", ""} {
 		if err := n.SetDescription(ctx, "jo0", d); err != nil {
 			t.Errorf("%q: %v", d, err)
 		}
 	}
-	for _, d := range []string{"uplink", "jailops a;b", "jailops a\nb", "jailops \"x\"", "jailops $(id)", "jailops `id`", "jailops " + strings.Repeat("x", 57), "jailopsx", "JAILOPS net=lan", "jailops ä"} {
+	for _, d := range []string{"uplink", "jailops a;b", "jailops a\nb", "jailops \"x\"", "jailops $(id)", "jailops `id`", "jailops " + strings.Repeat("x", 57), "jailopsx", "jailops:0b0e7f3e-5c4b-4f6e-9d3e-111111111111", "JAILOPS net=lan", "jailops ä"} {
 		if err := n.SetDescription(ctx, "jo0", d); !api.IsCode(err, api.CodeInvalid) {
 			t.Errorf("%q: %v", d, err)
 		}

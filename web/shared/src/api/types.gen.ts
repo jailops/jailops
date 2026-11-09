@@ -1392,7 +1392,6 @@ export interface NetworkSpec {
   ipv6?: IPv6Net
   dns?: string[]
   mtu?: number
-  private?: boolean
 }
 
 export interface NetworkStatus {

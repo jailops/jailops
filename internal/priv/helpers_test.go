@@ -77,7 +77,7 @@ func newEnv(t *testing.T) *env {
 	}
 	e.jails = jailos.NewFake()
 	e.pf = pfctl.NewFake()
-	e.net = ifconfig.NewFake(ifconfig.Options{Prefixes: []string{"jo"}})
+	e.net = ifconfig.NewFake(ifconfig.Options{})
 	e.net.AddForeign("em0", true) // the host's uplink: never JailOps's
 	// a bridge an administrator made by hand (ifconfig bridge create; ifconfig bridge0 name mybr): never JailOps's
 	e.net.AddIface(ifconfig.Iface{Name: "mybr", Groups: []string{"bridge"}, Flags: []string{"UP"}})

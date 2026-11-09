@@ -11,11 +11,10 @@ import (
 // read by the helper itself at the time of the operation, shows a bridge or an epair whose description carries the
 // JailOps marker. It never decides by the name, and never by what a request says. The marker is written by the helper
 // only on an interface it has just created, before that interface has its name, and kept by every later description
-// (a description that would remove it is refused, clearing it writes the marker). An interface of an earlier release
-// (a name with a legacy prefix of priv.conf's if-prefix, and no description at all) counts as owned and is marked the
-// first time the helper changes it.
+// (a description that would remove it is refused, clearing it writes the marker). An interface without a description is
+// someone else's, whatever its name is.
 
-func (l *Local) ifOpts() ifconfig.Options { return ifconfig.Options{Prefixes: l.cfg.IfPrefixes} }
+func (l *Local) ifOpts() ifconfig.Options { return ifconfig.Options{} }
 
 func (l *Local) ifReader(name string) (ifconfig.Reader, error) {
 	rd, ok := l.d.Net.(ifconfig.Reader)
@@ -25,13 +24,8 @@ func (l *Local) ifReader(name string) (ifconfig.Reader, error) {
 	return rd, nil
 }
 
-// ifOwned checks, in the host's network stack, that JailOps owns name, and marks a legacy interface.
+// ifOwned checks, in the host's network stack, that JailOps owns name.
 func (l *Local) ifOwned(ctx context.Context, name string) error {
-	return l.ifOwnedMark(ctx, name, true)
-}
-
-// ifOwnedMark is ifOwned; mark false leaves a legacy interface as it is (for checks that change nothing on it).
-func (l *Local) ifOwnedMark(ctx context.Context, name string, mark bool) error {
 	if err := ifconfig.ValidateIfName(name); err != nil {
 		return err
 	}
@@ -43,15 +37,7 @@ func (l *Local) ifOwnedMark(ctx context.Context, name string, mark bool) error {
 	if err != nil {
 		return err
 	}
-	how, err := l.ifOpts().Owns(i)
-	if err != nil {
-		return err
-	}
-	if how == ifconfig.OwnedLegacy && mark {
-		// once: from now on the interface is owned by its marker, whatever priv.conf's if-prefix says
-		return l.d.Net.SetDescription(ctx, name, ifconfig.Marker)
-	}
-	return nil
+	return l.ifOpts().Owns(i)
 }
 
 // ifsOwned is ifOwned for several names, all validated before any is read.
@@ -85,8 +71,7 @@ func (l *Local) ifOwnedInJail(ctx context.Context, jail, name string) error {
 	if err != nil {
 		return err
 	}
-	_, err = l.ifOpts().Owns(i)
-	return err
+	return l.ifOpts().Owns(i)
 }
 
 // ifCreatable checks a name the helper is asked to create: not a driver's (ifconfig.CheckNewName) and not taken. A
@@ -107,7 +92,7 @@ func (l *Local) ifCreatable(ctx context.Context, name string) error {
 	case err != nil:
 		return err
 	}
-	if _, err := l.ifOpts().Owns(i); err != nil {
+	if err := l.ifOpts().Owns(i); err != nil {
 		return forbidden("interface %q exists and is not JailOps's; the helper never takes over an interface by its name (%v)", name, err)
 	}
 	return api.Errorf(api.CodeAlreadyExists, "interface %s already exists", name)

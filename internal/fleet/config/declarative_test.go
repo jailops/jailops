@@ -49,7 +49,6 @@ func TestProxyAndRoutedNetworksAreCheckedOffline(t *testing.T) {
 		"proxy /32":                 {strings.NewReplacer("2001:db8:1:2:100::/80", "2001:db8::/32").Replace(ok), "between /48 and /126"},
 		"host bits":                 {strings.Replace(ok, "100::/80", "100::1/80", 1), "host bits set"},
 		"range outside":             {strings.Replace(ok, "100::10-2001:db8:1:2:100::ff", "200::10-2001:db8:1:2:200::ff", 1), "outside"},
-		"private without uplink":    {"  private: true\n  ipv4: {subnet: 10.1.0.0/24, gateway: 10.1.0.1, range: 10.1.0.2-10.1.0.9}\n", "set an uplink"},
 		"routed gateway elsewhere":  {strings.Replace(routed, `"2001:db8:1:2:1::1"`, `"2001:db8:9::1"`, 1), "outside"},
 	} {
 		if _, err := netFleet(t, tc.spec); err == nil || !strings.Contains(err.Error(), tc.want) {

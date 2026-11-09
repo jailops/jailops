@@ -99,7 +99,6 @@ function used(n: Network): number {
                   <dt v-if="n.spec.ipv4.exclude?.length">{{ s.networks.exclude }}</dt><dd v-if="n.spec.ipv4.exclude?.length" class="mono">{{ n.spec.ipv4.exclude.join(', ') }}</dd>
                   <dt>{{ s.networks.nat }}</dt><dd>{{ n.spec.ipv4.nat ? s.networks.on : s.networks.off }}</dd>
                 </template>
-                <dt>{{ s.networks.isolation }}</dt><dd :title="n.spec.private ? s.networks.privateHint : ''">{{ n.spec.private ? s.networks.private : s.networks.shared }}</dd>
               </dl>
               <dl class="kv">
                 <dt>{{ s.networks.ipv6 }}</dt>

@@ -71,7 +71,7 @@ describe('editing a network keeps what the form does not show', () => {
   it('round-trips the spec', () => {
     const n: Network = {
       metadata: { name: 'lan', generation: 3 },
-      spec: { bridge: 'jo0', uplink: 'em0', ipv4: { subnet: '10.20.0.0/24', gateway: '10.20.0.1', range: '10.20.0.10-10.20.0.60', exclude: ['10.20.0.40-10.20.0.44'], nat: true }, dns: ['10.20.0.1'], mtu: 1500, private: true },
+      spec: { bridge: 'jo0', uplink: 'em0', ipv4: { subnet: '10.20.0.0/24', gateway: '10.20.0.1', range: '10.20.0.10-10.20.0.60', exclude: ['10.20.0.40-10.20.0.44'], nat: true }, dns: ['10.20.0.1'], mtu: 1500 },
       status: {},
     }
     const f = formOf(n)
