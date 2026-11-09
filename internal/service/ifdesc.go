@@ -45,13 +45,13 @@ func (s *Service) doctorDescriptions(ctx context.Context, c *checkSet) {
 	}
 	for _, n := range des.Networks {
 		for _, st := range n.Steps {
-			// a bridge or gateway end without the network's text (or its earlier marker) is not taken as ours
-			if i, ok := ifs[st.Iface]; ok && st.Op == render.OpSetDescription && st.Arg != "" && i.Description != st.Arg && render.OwnsIface(i.Description, n.ID, st.Arg) {
+			// a bridge or gateway end without the network's text is not taken as ours
+			if i, ok := ifs[st.Iface]; ok && st.Op == render.OpSetDescription && st.Arg != "" && i.Description != st.Arg && render.OwnsIface(i.Description, st.Arg) {
 				bad = append(bad, st.Iface+" ("+quote(i.Description)+")")
 			}
 		}
 	}
-	// a jail's epairs are named after the jail: one with no description or an earlier one of JailOps is the jail's
+	// a jail's epairs are named after the jail: one with no description or another JailOps text is the jail's
 	check := func(name, want string) {
 		if i, ok := ifs[name]; ok && want != "" && i.Description != want && (i.Description == "" || render.IsJailOpsDesc(i.Description)) {
 			bad = append(bad, name+" ("+quote(i.Description)+")")

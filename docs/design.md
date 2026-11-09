@@ -273,8 +273,7 @@ One model: **managed VNET bridges with deterministic address allocation**.
 - JailOps never modifies a bridge it did not create. **Ownership is the kernel's description, never the name**: the
   helper changes only a bridge or epair whose description carries the JailOps marker, which it writes itself when it
   creates the interface, before the interface has its name; it never takes over an interface by its name, and refuses
-  to create one under a driver's name. Interfaces of earlier releases with the legacy `jo` prefix and no description
-  are accepted once and marked. The threat model is in [security-model.md](security-model.md#interfaces).
+  to create one under a driver's name. A bridge or epair without a description is never taken, whatever its name. The threat model is in [security-model.md](security-model.md#interfaces).
 - **Every interface JailOps makes says what it is** in its description (`ifconfig` shows `description: TEXT`), one
   short line of at most 64 characters of `A-Za-z0-9 ._:/=()-`, built from names only (`render/ifdesc.go`, golden-tested):
   `jailops net=<network> bridge`, `jailops net=<network> gateway (bridge side)` and `(host side)` for the gateway pair,
@@ -283,8 +282,8 @@ One model: **managed VNET bridges with deterministic address allocation**.
   The description is set when the interface is made; the jail end is described from the host with
   `ifconfig -j <jail> <if> description ...` once it is in the jail's vnet (the jail's poststart hook, then the reconcile
   loop). The loop repairs a missing or different description of an interface JailOps owns and touches no other:
-  a network's bridge and gateway pair are its own when they carry the network's text or the `jailops:<uuid>` marker of
-  releases before 0.4.0 (which the loop replaces); a jail's epairs are named after the jail's id, so the name alone
+  a network's bridge and gateway pair are its own when they carry the network's text or the bare marker (which the
+  loop replaces with the text); a jail's epairs are named after the jail's id, so the name alone
   makes them the jail's (the jail end is checked once per start of the jail); a WireGuard interface is the one the helper
   recorded creating. A bridge without any description is not taken (it may be anybody's). `jailops doctor` reports
   `net.descriptions`. The helper writes only descriptions that start with `jailops` and fit the character set.
@@ -1236,7 +1235,6 @@ Design consequences of prototype 8:
 
 - The daemon-managed bridge sysctls default to `net.link.bridge.pfil_member=1`, `net.link.bridge.pfil_bridge=0` and `net.link.bridge.pfil_onlyip=1` (configurable). With member filtering per-jail rules are written `on <epair>` and project rules stay interface-independent.
 - The PF renderer never emits a negated address list, always defines the tables an anchor references, includes `fe80::/10` and `::` in a jail's allowed sources, and emits `anchor "*"` in every project anchor.
-- `private` is a per-network option, off by default, documented as "all traffic goes through the host".
 
 ### 18.1 First end-to-end run of the daemon (FreeBSD 15.1 arm64)
 

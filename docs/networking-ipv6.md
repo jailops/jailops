@@ -23,7 +23,6 @@
   net=<network> (host side)` on the host and `(jail side)` inside the jail, a WireGuard tunnel `jailops wireguard=<name>`
   ([wireguard.md](wireguard.md)). The reconcile loop puts a missing or changed description back on an interface it owns
   (`jailops doctor`: `net.descriptions`) and touches no other; a bridge without a description is not taken as its own.
-  Interfaces made by releases before 0.4.0 carry `jailops:<id>` and get the readable text on the first pass.
 - A jail attached with plain `--network NAME` gets one address of every family the network has, the default route, and
   a `resolv.conf` (see [name resolution](#name-resolution-of-jails) below).
 
@@ -300,5 +299,3 @@ ICMPv6 and router-advertisement frames from inside a jail (`scripts/forge`) and 
 caches unchanged, the victim's traffic keeps flowing, the attacker gains no address, nothing reaches the uplink. The
 exact probe count is not quoted here (it would go stale the next time a probe is added; run the script to see it).
 **Not covered:** Ethernet-level attacks outside what `scripts/forge` sends (see [security-model.md](security-model.md)).
-
-The `private` option of a network no longer has an effect: every jail port is private (see above).

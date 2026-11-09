@@ -232,9 +232,6 @@ func (a *app) showNetwork(n api.Network) error {
 	if n.Spec.MTU > 0 {
 		s.kv("MTU", strconv.Itoa(n.Spec.MTU))
 	}
-	if n.Spec.Private {
-		s.kv("Private", "yes: members reach each other only through the host")
-	}
 	s.kv("Addresses", fmt.Sprintf("%d used, %d free", n.Status.Allocated, n.Status.Free))
 	if len(n.Status.Members) > 0 {
 		s.kv("Members", strings.Join(n.Status.Members, ", "))

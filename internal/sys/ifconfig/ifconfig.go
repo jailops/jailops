@@ -17,54 +17,25 @@ import (
 
 // Marker is the description JailOps gives an interface it creates, in the same operation, before the interface has
 // the name it is created for. The reconcile loop replaces it with the readable text ("jailops net=lan bridge"); every
-// text JailOps writes starts with "jailops " (or "jailops:" in releases before 0.4.0), and HasMarker accepts all of
-// them. Only root can set the description of an interface in the host's network stack, so the daemon cannot forge it.
+// text JailOps writes starts with "jailops ", which HasMarker tests. Only root can set the description of an interface in the host's network stack, so the daemon cannot forge it.
 const Marker = "jailops managed"
 
-// HasMarker reports whether a description is one JailOps writes: "jailops ..." or the "jailops:<id>" of earlier
-// releases.
+// HasMarker reports whether a description is one JailOps writes: it starts with "jailops ".
 func HasMarker(desc string) bool {
-	return strings.HasPrefix(desc, "jailops ") || strings.HasPrefix(desc, "jailops:")
+	return strings.HasPrefix(desc, "jailops ")
 }
-
-// DefaultPrefixes are the legacy name prefixes: releases before this one owned every interface whose name started
-// with "jo". An interface with such a name and no description at all (made by an older release, or left by a crash
-// between its creation and its description) still counts as owned, and the helper marks it at its next change.
-// Deprecated: ownership is the marker; the prefix only bridges an upgrade.
-var DefaultPrefixes = []string{"jo"}
 
 // OwnedKinds are the interface kinds (their driver's group) JailOps creates and may change: bridges and epairs. A
 // physical interface, a loopback, a tunnel or a vlan is never owned, whatever its description says.
 var OwnedKinds = []string{"bridge", "epair"}
 
-// Options configure a Client.
-type Options struct {
-	// Prefixes are the legacy name prefixes (see DefaultPrefixes). Nil means DefaultPrefixes.
-	Prefixes []string
-}
-
-func (o Options) prefixes() []string {
-	if len(o.Prefixes) == 0 {
-		return DefaultPrefixes
-	}
-	return o.Prefixes
-}
-
-// Ownership says why JailOps may change an interface.
-type Ownership int
-
-const (
-	// NotOwned: the interface is someone else's.
-	NotOwned Ownership = iota
-	// OwnedByMarker: its description carries the JailOps marker.
-	OwnedByMarker
-	// OwnedLegacy: a bridge or epair whose name has a legacy prefix and that has no description; the caller marks it.
-	OwnedLegacy
-)
+// Options configure how ownership is decided. There is nothing to set today; the type stays so that the clients keep
+// one place to say it.
+type Options struct{}
 
 // Owns decides from the kernel's view of an interface (its kind and description, never a name or a claim of the
 // caller) whether JailOps may change it, and returns the error that explains a refusal.
-func (o Options) Owns(i Iface) (Ownership, error) {
+func (o Options) Owns(i Iface) error {
 	kind := ""
 	for _, g := range i.Groups {
 		if slices.Contains(OwnedKinds, g) {
@@ -72,20 +43,15 @@ func (o Options) Owns(i Iface) (Ownership, error) {
 		}
 	}
 	if kind == "" {
-		return NotOwned, api.Errorf(api.CodeForbidden, "interface %q is not managed by JailOps: JailOps changes only bridges and epairs it created (this one is in the groups %s)", i.Name, groupList(i.Groups))
+		return api.Errorf(api.CodeForbidden, "interface %q is not managed by JailOps: JailOps changes only bridges and epairs it created (this one is in the groups %s)", i.Name, groupList(i.Groups))
 	}
 	if HasMarker(i.Description) {
-		return OwnedByMarker, nil
+		return nil
 	}
 	if i.Description != "" {
-		return NotOwned, api.Errorf(api.CodeForbidden, "interface %q is not managed by JailOps: its description %q is not one JailOps writes", i.Name, i.Description)
+		return api.Errorf(api.CodeForbidden, "interface %q is not managed by JailOps: its description %q is not one JailOps writes", i.Name, i.Description)
 	}
-	for _, p := range o.prefixes() {
-		if strings.HasPrefix(i.Name, p) && len(i.Name) > len(p) {
-			return OwnedLegacy, nil
-		}
-	}
-	return NotOwned, api.Errorf(api.CodeForbidden, "interface %q is not managed by JailOps: it has no JailOps description (JailOps marks every interface it creates and never takes one over by its name)", i.Name)
+	return api.Errorf(api.CodeForbidden, "interface %q is not managed by JailOps: it has no JailOps description (JailOps marks every interface it creates and never takes one over by its name)", i.Name)
 }
 
 func groupList(g []string) string {
@@ -116,8 +82,7 @@ type Reader interface {
 	ShowInJail(ctx context.Context, jail, name string) (Iface, error)
 }
 
-// owned reads name through r and checks that JailOps owns it (a legacy interface counts; marking it is the caller's
-// business).
+// owned reads name through r and checks that JailOps owns it.
 func (o Options) owned(ctx context.Context, r Reader, name string) error {
 	if err := ValidateIfName(name); err != nil {
 		return err
@@ -126,8 +91,7 @@ func (o Options) owned(ctx context.Context, r Reader, name string) error {
 	if err != nil {
 		return err
 	}
-	_, err = o.Owns(i)
-	return err
+	return o.Owns(i)
 }
 
 // ownedInJail is owned for an interface in the vnet of jail.
@@ -142,8 +106,7 @@ func (o Options) ownedInJail(ctx context.Context, r Reader, jail, name string) e
 	if err != nil {
 		return err
 	}
-	_, err = o.Owns(i)
-	return err
+	return o.Owns(i)
 }
 
 // one returns the single interface of `ifconfig <name>` output.

@@ -78,7 +78,6 @@ metadata:
   name: routed
 spec:
   uplink: vtnet0
-  private: true
   ipv6:
     mode: routed
     subnet: "2001:db8:abcd:1:1::/80"

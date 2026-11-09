@@ -6,10 +6,10 @@
 // FreeBSD and run as root on a disposable machine, after the end-to-end flow has created the network OWNED and the
 // managed jail JAIL. Nothing in JailOps itself uses it.
 //
-//	ifprobe -uplink vtnet0 -foreign mybr -legacy jo79 -owned office -jail edge_edgeweb
+//	ifprobe -uplink vtnet0 -foreign mybr -bare jo79 -owned office -jail edge_edgeweb
 //
-// FOREIGN is a bridge made by hand (ifconfig bridge create; ifconfig bridgeN name mybr), LEGACY one made by hand under
-// a legacy name without a description: the helper accepts it once and marks it. Every check prints one line; the exit
+// FOREIGN is a bridge made by hand (ifconfig bridge create; ifconfig bridgeN name mybr), BARE one made by hand
+// under a jo name without a description: the helper refuses it. Every check prints one line; the exit
 // status is 1 when one failed.
 package main
 
@@ -47,11 +47,11 @@ func main() {
 	sock := flag.String("socket", priv.DefaultSocket, "the helper's socket")
 	uplink := flag.String("uplink", "", "the host's uplink")
 	foreign := flag.String("foreign", "", "a bridge made by hand")
-	legacy := flag.String("legacy", "", "a bridge made by hand under a legacy name, without a description")
+	bare := flag.String("bare", "", "a bridge made by hand under a jo name, without a description")
 	owned := flag.String("owned", "", "the bridge of a JailOps network")
 	jail := flag.String("jail", "", "a running managed jail (its internal name)")
 	flag.Parse()
-	if *uplink == "" || *foreign == "" || *legacy == "" || *owned == "" || *jail == "" {
+	if *uplink == "" || *foreign == "" || *bare == "" || *owned == "" || *jail == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -122,11 +122,10 @@ func main() {
 	_, err = c.Runner().Run(ctx, run.Cmd{Name: "ifconfig", Args: []string{"-j", *jail, "lo0", "down"}})
 	refused("ifconfig -j "+*jail+" lo0 down", err)
 
-	// 4. an interface of an earlier release: accepted once, then marked
-	check(*legacy+" has no description", desc(*legacy) == "", desc(*legacy))
-	check(*legacy+" is accepted", n.SetLink(ctx, *legacy, true) == nil, nil)
-	check(*legacy+" now carries the marker", desc(*legacy) == ifconfig.Marker, desc(*legacy))
-	check(*legacy+" is destroyed", n.BridgeDestroy(ctx, *legacy) == nil, nil)
+	// 4. a bridge without a description is not JailOps's, whatever its name
+	check(*bare+" has no description", desc(*bare) == "", desc(*bare))
+	refused(*bare+" is refused", n.SetLink(ctx, *bare, true))
+	check(*bare+" is still undescribed", desc(*bare) == "", desc(*bare))
 
 	// 5. what JailOps makes carries the marker from its creation, in the jail's vnet too
 	a, b, err := n.EpairCreate(ctx, "joprobe")

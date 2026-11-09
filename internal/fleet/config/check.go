@@ -662,9 +662,6 @@ func checkNetwork(o *Object, s api.NetworkSpec, add func(*Object, string, ...any
 	if s.IPv4 == nil && (s.IPv6 == nil || s.IPv6.Mode == api.IPv6None) {
 		add(o, "a network needs ipv4 or ipv6")
 	}
-	if s.Private && s.Uplink == "" {
-		add(o, "private blocks all traffic between the jails of the network and is for networks routed through the host: set an uplink")
-	}
 	if s.Uplink != "" && s.Uplink == s.Bridge {
 		add(o, "uplink must not be the bridge itself")
 	}

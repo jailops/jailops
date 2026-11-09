@@ -693,12 +693,12 @@ expect "--bridge naming the uplink is refused at create" "form of the interfaces
 expect "a network named like the hand-made bridge gets jo<N>, and create says why" 'warning: bridge jo[0-9]+ \(the interface mybr already exists on this host' \
 	sh -c "$J network create mybr --ipv4 10.67.0.1/24 2>&1"
 check "delete network mybr" $J network delete mybr -y
-# an interface of an earlier release: a legacy name, no description
-b=$(ifconfig bridge create) && ifconfig "$b" name jo79 >/dev/null || fail "a legacy bridge made by hand"
+# a bridge made by hand under a jo name, no description
+b=$(ifconfig bridge create) && ifconfig "$b" name jo79 >/dev/null || fail "a jo-named bridge made by hand"
 # the helper itself, over its socket: every request a compromised daemon could make on the uplink, lo0 and mybr is
-# refused; jo79 is accepted once and marked; an epair keeps the marker in a jail's vnet
+# refused; jo79, without a description, is refused too; an epair keeps the marker in a jail's vnet
 if [ -n "${IFPROBE_BIN:-}" ]; then
-	check "the helper's ownership probe" "$IFPROBE_BIN" -uplink "$uplink" -foreign mybr -legacy jo79 -owned office -jail edge_edgeweb
+	check "the helper's ownership probe" "$IFPROBE_BIN" -uplink "$uplink" -foreign mybr -bare jo79 -owned office -jail edge_edgeweb
 	cat "$work/check.out"
 else
 	echo "IFPROBE_BIN is not set: the helper's ownership probe is skipped"

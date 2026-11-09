@@ -110,7 +110,7 @@ func sameRelease(a, b string) bool {
 
 // InstallApp answers POST /api/v1/apps/<name>/install. Everything that can
 // be refused is refused before the operation starts: an unknown or invalid
-// definition, a jail that exists, an image of an older release, a network or
+// definition, a jail that exists, an image that is not present, a network or
 // storage the project is not granted.
 func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstall) (api.Operation, error) {
 	if err := s.requireHost("apps"); err != nil {

@@ -261,13 +261,12 @@ func TestDoctorDescriptionsAndWireGuardTools(t *testing.T) {
 	// repair it, which is slow machines only (the race detector): damage it again, the window is narrow each time.
 	var ch api.DoctorCheck
 	for try := 0; try < 20; try++ {
-		_ = e.Net.SetDescription(c, n.Spec.Bridge, "jailops:"+n.Metadata.UUID) // the marker of an earlier release
-		_ = e.Net.SetDescription(c, n.Spec.Bridge+"gb", "")                    // clearing leaves the bare marker: made, not described
+		_ = e.Net.SetDescription(c, n.Spec.Bridge+"gb", "") // clearing leaves the bare marker: made, not described
 		if ch = wgDoctorCheck(t, e, "net.descriptions"); ch.Status == api.DoctorWarn {
 			break
 		}
 	}
-	if ch.Status != api.DoctorWarn || !strings.Contains(ch.Message, n.Spec.Bridge+` ("jailops:`) || !strings.Contains(ch.Message, n.Spec.Bridge+`gb ("jailops managed")`) {
+	if ch.Status != api.DoctorWarn || !strings.Contains(ch.Message, n.Spec.Bridge+`gb ("jailops managed")`) {
 		t.Fatalf("%+v", ch)
 	}
 	_ = e.Net.SetDescription(c, n.Spec.Bridge+"gb", "jailops net=lan gateway (host side)")

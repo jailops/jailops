@@ -88,7 +88,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 		}
 		in := render.AttachInput{JailID: id, JailUUID: id, Index: i, Project: project, Jail: j.Metadata.Name, Network: a.Network,
 			Bridge: n.Spec.Bridge, MAC: a.MAC, MTU: attachMTU(a, n.Spec.MTU),
-			Uplink: n.Spec.Uplink, Private: n.Spec.Private, HostConfigured: osf == api.OSLinux}
+			Uplink: n.Spec.Uplink, HostConfigured: osf == api.OSLinux}
 		nif := render.NetIface{Name: jailEnd, MTU: attachMTU(a, n.Spec.MTU)}
 		if ad, ok := parseAddr(a.IPv4); ok && n.Spec.IPv4 != nil {
 			in.IPv4 = netip.PrefixFrom(ad, ipam.GuestPrefixLen4())
@@ -453,7 +453,7 @@ func (s *Service) ensureNetwork(ctx context.Context, name string, obs *reconcile
 	if err != nil {
 		return err
 	}
-	if i, ok := obs.Ifaces[n.Spec.Bridge]; ok && !render.OwnsIface(i.Description, n.Meta.UUID, render.NetBridgeDesc(name)) {
+	if i, ok := obs.Ifaces[n.Spec.Bridge]; ok && !render.OwnsIface(i.Description, render.NetBridgeDesc(name)) {
 		return api.Errorf(api.CodeConflict, "interface %s exists and is not managed by JailOps", n.Spec.Bridge)
 	}
 	unlock, err := s.locks.lockPatient(ctx, "prepare network "+name, networkLock(name))

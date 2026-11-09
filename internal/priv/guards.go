@@ -107,7 +107,7 @@ func (g jailGuard) vnetIfacesOwned(ctx context.Context, confPath string) error {
 			if !ok {
 				return invalid("vnet.interface: bad value")
 			}
-			if err := g.l.ifOwnedMark(ctx, n, false); err != nil && !api.IsCode(err, api.CodeNotFound) {
+			if err := g.l.ifOwned(ctx, n); err != nil && !api.IsCode(err, api.CodeNotFound) {
 				return err
 			}
 		}

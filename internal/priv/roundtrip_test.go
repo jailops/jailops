@@ -536,7 +536,7 @@ func TestPFAndNetRoundTrip(t *testing.T) {
 	if err := n.BridgeAddMember(ctx, "jo0", a, true); err != nil {
 		t.Fatal(err)
 	}
-	if err := n.SetDescription(ctx, a, "jailops:x"); err != nil {
+	if err := n.SetDescription(ctx, a, "jailops net=x bridge"); err != nil {
 		t.Fatal(err)
 	}
 	if err := n.AddrAdd(ctx, "jo0", mustPrefix("10.1.0.1/24")); err != nil {
