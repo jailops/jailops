@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.4 - 2026-11-09
+
 - **A firewall rule can name a jail: `from @web`, and so can an address set.** `@name` is an address set of the project or a
   jail of the project and stands for its addresses; they are read at every render, so a rule follows the jail. One name
   never means both: a jail and an address set of a project may not have the same name, with `-` read as `_` (`web-1` and
