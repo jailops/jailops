@@ -15,12 +15,12 @@ import type { AddressSet } from '@jailops/shared/api/types'
 const props = defineProps<{ open: boolean; sets: AddressSet[] }>()
 const emit = defineEmits<{ close: []; created: [name: string] }>()
 
-const f = reactive({ name: '', members: '', includes: '' })
+const f = reactive({ name: '', comment: '', members: '', includes: '' })
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 const server = ref<SetErrors>({})
 const others = computed(() => Object.fromEntries(props.sets.map((x) => [x.metadata.name, x.spec])))
-const local = computed(() => validateSet(f.name, setSpec(f.members, f.includes), others.value, s.firewall))
+const local = computed(() => validateSet(f.name, setSpec(f.members, f.includes, f.comment), others.value, s.firewall))
 const check = useFormCheck(() => ({
   'fws-name': setNameError(f.name, props.sets.map((x) => x.metadata.name), s.firewall),
   'fws-members': local.value.addresses ?? '',
@@ -50,7 +50,7 @@ const create = () => check.submit(async () => {
   server.value = {}
   const name = f.name
   try {
-    await runOp(s.firewall.createSetOp(name), () => api.firewall.createAddressSet({ metadata: { name }, spec: setSpec(f.members, f.includes) }))
+    await runOp(s.firewall.createSetOp(name), () => api.firewall.createAddressSet({ metadata: { name }, spec: setSpec(f.members, f.includes, f.comment) }))
     emit('created', name)
   } catch (e) {
     error.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
@@ -70,6 +70,8 @@ const create = () => check.submit(async () => {
         <input id="fws-name" v-model="f.name" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!err('fws-name')" aria-describedby="fws-name-h fws-name-e" @input="edited('fws-name')" />
         <span id="fws-name-h" class="hint">{{ s.firewall.setNameHint }}</span>
         <span id="fws-name-e" class="field-error" role="alert">{{ err('fws-name') }}</span></div>
+      <div class="field"><label for="fws-comment">{{ s.firewall.comment }}</label>
+        <input id="fws-comment" v-model="f.comment" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.setCommentHint" /></div>
       <div class="field"><label for="fws-members">{{ s.firewall.addresses }}</label>
         <textarea id="fws-members" v-model="f.members" class="mono" rows="6" spellcheck="false" :aria-invalid="!!err('fws-members')" aria-describedby="fws-members-h fws-members-e" @input="edited('fws-members')"></textarea>
         <span id="fws-members-h" class="hint">{{ s.firewall.membersHint }}</span>

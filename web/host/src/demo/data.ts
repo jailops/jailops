@@ -187,8 +187,8 @@ export function policies(): FirewallPolicy[] {
 
 export function addressSets(): AddressSet[] {
   return [
-    { metadata: { ...meta('admins'), scope: 'fleet' }, spec: { addresses: ['198.51.100.7', '203.0.113.0/28'], includes: ['office'] } },
-    { metadata: { ...meta('office'), scope: 'fleet' }, spec: { addresses: ['192.0.2.128/26', '2001:db8:aa::/48'] } },
+    { metadata: { ...meta('admins'), scope: 'fleet' }, spec: { comment: 'Where the administrators connect from', addresses: [{ address: '198.51.100.7', comment: "the administrator's home" }, { address: '203.0.113.0/28', comment: 'the second office' }], includes: ['office'] } },
+    { metadata: { ...meta('office'), scope: 'fleet' }, spec: { comment: 'The office network', addresses: [{ address: '192.0.2.128/26', comment: 'wired and wifi' }, { address: '2001:db8:aa::/48', comment: 'the office, IPv6' }] } },
   ]
 }
 

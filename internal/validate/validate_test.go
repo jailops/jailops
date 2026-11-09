@@ -240,7 +240,8 @@ func TestFirewall(t *testing.T) {
 		{"port range", r(func(x *api.FirewallRule) { x.Ports = []string{"90-80"} }), "rules[0].ports"},
 		{"port junk", r(func(x *api.FirewallRule) { x.Ports = []string{"80 or any"} }), "rules[0].ports"},
 		{"set syntax", r(func(x *api.FirewallRule) { x.From = []string{"@Bad Name"} }), "rules[0].from"},
-		{"set dash", r(func(x *api.FirewallRule) { x.From = []string{"@a-b"} }), "rules[0].from"},
+		{"set dash at the end", r(func(x *api.FirewallRule) { x.From = []string{"@a-"} }), "rules[0].from"},
+		{"set too long", r(func(x *api.FirewallRule) { x.From = []string{"@" + strings.Repeat("a", 33)} }), "rules[0].from"},
 		{"tag syntax", r(func(x *api.FirewallRule) { x.To = []string{"tag:a b"} }), "rules[0].to"},
 		{"addr", r(func(x *api.FirewallRule) { x.To = []string{"10.0.0.1; pass all"} }), "rules[0].to"},
 		{"rdr out", r(func(x *api.FirewallRule) {
@@ -272,13 +273,37 @@ func TestFirewall(t *testing.T) {
 }
 
 func TestAddressSet(t *testing.T) {
-	if err := AddressSetSpec(api.AddressSetSpec{Addresses: []string{"10.0.0.1", "10.0.0.0/8", "2001:db8::/32"}, Includes: []string{"office"}}); err != nil {
+	if err := AddressSetSpec(api.AddressSetSpec{Addresses: api.Entries("10.0.0.1", "10.0.0.0/8", "2001:db8::/32", "@web", "@web-2"), Includes: []string{"office"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range []api.AddressSetSpec{
-		{Addresses: []string{"@x"}}, {Addresses: []string{"any"}}, {Addresses: []string{"1.2.3"}}, {Includes: []string{"Bad"}},
+		{Addresses: api.Entries("@Bad Name")}, {Addresses: api.Entries("any")}, {Addresses: api.Entries("1.2.3")}, {Includes: []string{"Bad"}},
+		{Addresses: []api.AddressEntry{{Address: "10.0.0.1", Comment: "two\nlines"}}},
+		{Addresses: []api.AddressEntry{{Address: "10.0.0.1", Comment: strings.Repeat("x", CommentMax+1)}}},
 	} {
 		wantInvalid(t, AddressSetSpec(s), "")
+	}
+}
+
+// A member "@name" is a jail or another set, flattened like an include; a set that reaches itself through it is a cycle.
+func TestFlattenSetWithJailMembers(t *testing.T) {
+	sets := map[string]api.AddressSetSpec{
+		"git_allow": {Addresses: api.Entries("192.0.2.7", "@web", "@web-2")},
+		"web":       {Addresses: api.Entries("10.0.0.5", "fd00::5")}, // the jail web, as the service adds it
+		"web-2":     {Addresses: api.Entries("10.0.0.6")},
+		"loop":      {Addresses: api.Entries("@loop2")},
+		"loop2":     {Addresses: api.Entries("@loop")},
+	}
+	got, err := FlattenSet("git_allow", sets)
+	if err != nil || strings.Join(got, " ") != "10.0.0.5 10.0.0.6 192.0.2.7 fd00::5" {
+		t.Fatalf("%v %v", got, err)
+	}
+	if _, err := FlattenSet("loop", sets); err == nil || !strings.Contains(err.Error(), "cycle") {
+		t.Fatalf("a cycle through members: %v", err)
+	}
+	sets["git_allow"] = api.AddressSetSpec{Addresses: api.Entries("@nosuch")}
+	if _, err := FlattenSet("git_allow", sets); err == nil || !strings.Contains(err.Error(), "nosuch") {
+		t.Fatalf("a member that is neither: %v", err)
 	}
 }
 
@@ -495,5 +520,40 @@ func TestJailDevicesAreValidated(t *testing.T) {
 		if err := JailSpec("web", s); err == nil {
 			t.Errorf("%s: accepted", name)
 		}
+	}
+}
+
+// A comment on a rule, a policy or a set is one line of at most CommentMax characters.
+func TestFirewallComments(t *testing.T) {
+	rule := api.FirewallRule{Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"22"}}
+	ok := api.FirewallPolicySpec{Comment: "ssh", DefaultIn: "deny", Rules: []api.FirewallRule{{Action: rule.Action, Direction: rule.Direction, Proto: rule.Proto, Ports: rule.Ports, Comment: "from the office"}}}
+	if _, err := FirewallPolicySpec(ok); err != nil {
+		t.Fatal(err)
+	}
+	for name, mod := range map[string]func(p *api.FirewallPolicySpec){
+		"policy two lines": func(p *api.FirewallPolicySpec) { p.Comment = "a\nb" },
+		"policy too long":  func(p *api.FirewallPolicySpec) { p.Comment = strings.Repeat("x", CommentMax+1) },
+		"rule two lines":   func(p *api.FirewallPolicySpec) { p.Rules[0].Comment = "a\rb" },
+		"rule too long":    func(p *api.FirewallPolicySpec) { p.Rules[0].Comment = strings.Repeat("é", CommentMax+1) },
+		// the comment is a comment line of the ruleset: a backslash would continue it onto the next line (the next rule is gone)
+		"policy backslash":    func(p *api.FirewallPolicySpec) { p.Comment = `ends with a backslash\` },
+		"rule quote":          func(p *api.FirewallPolicySpec) { p.Rules[0].Comment = `read file "x"` },
+		"rule bidi override":  func(p *api.FirewallPolicySpec) { p.Rules[0].Comment = "ssh \u202eadmin" },
+		"rule zero width":     func(p *api.FirewallPolicySpec) { p.Rules[0].Comment = "ss\u200bh" },
+		"rule line separator": func(p *api.FirewallPolicySpec) { p.Rules[0].Comment = "a\u2028b" },
+		"rule not UTF-8":      func(p *api.FirewallPolicySpec) { p.Rules[0].Comment = "a\xffb" },
+	} {
+		p := ok
+		p.Rules = append([]api.FirewallRule(nil), ok.Rules...)
+		mod(&p)
+		if _, err := FirewallPolicySpec(p); err == nil {
+			t.Errorf("%s was accepted", name)
+		}
+	}
+	if err := AddressSetSpec(api.AddressSetSpec{Comment: "x\ny", Addresses: api.Entries("10.0.0.1")}); err == nil {
+		t.Error("a set comment of two lines was accepted")
+	}
+	if err := AddressSetSpec(api.AddressSetSpec{Comment: strings.Repeat("x", CommentMax), Addresses: []api.AddressEntry{{Address: "10.0.0.1", Comment: strings.Repeat("y", CommentMax)}}}); err != nil {
+		t.Errorf("comments of exactly %d characters: %v", CommentMax, err)
 	}
 }

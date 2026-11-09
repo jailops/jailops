@@ -217,7 +217,17 @@ func PFAnchor(in PFInput) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		b.line("%s", tableLine("s_"+n, members))
+		// what each member is, for whoever reads the loaded anchor in a review (a comment line: nothing else reads it; the
+		// comments are one line of printable text, checked when the set is made)
+		if c := in.Sets[n].Comment; c != "" {
+			b.line("# set %s: %s", n, pfComment(c))
+		}
+		for _, e := range in.Sets[n].Addresses {
+			if e.Comment != "" {
+				b.line("# set %s: %s %s", n, e.Address, pfComment(e.Comment))
+			}
+		}
+		b.line("%s", tableLine("s_"+strings.ReplaceAll(n, "-", "_"), members))
 	}
 	for _, n := range sortedKeys(tagRefs) {
 		var members []string
@@ -237,6 +247,7 @@ func PFAnchor(in PFInput) (string, error) {
 				return fmt.Errorf("render: rules[%d] has a redirect and needs a valid uplink: %w", i, err)
 			}
 			b.line("# rdr %s", ruleLabel(i, r))
+			ruleComment(&b, r)
 			for _, f := range fams {
 				from, ok := endpoints(r.From, f, nil)
 				if !ok {
@@ -326,12 +337,18 @@ func PFAnchor(in PFInput) (string, error) {
 
 	if in.Mandatory != nil {
 		b.line("# project policy %s", in.Mandatory.Name)
+		if c := in.Mandatory.Policy.Comment; c != "" {
+			b.line("#   %s", pfComment(c))
+		}
 		filterRules(&b, mand, fams, ifs, false)
 		if raw := in.Mandatory.Policy.Raw; raw != "" {
 			b.line("# raw fragment (admin)")
 			b.line("%s", strings.TrimRight(strings.ReplaceAll(raw, "\r\n", "\n"), "\n"))
 		}
 		b.line("# jail policy")
+	}
+	if c := in.Policy.Comment; c != "" {
+		b.line("# policy: %s", pfComment(c))
 	}
 	filterRules(&b, in.Policy.Rules, fams, ifs, false)
 
@@ -449,6 +466,26 @@ func labelPassRules(anchor, text string) string {
 	return strings.TrimSuffix(out.String(), "\n")
 }
 
+// pfComment makes a text safe as the rest of a PF comment line even when nothing checked it before (validate.Comment
+// does, on every path that stores a spec): a line break, a backslash (which continues a comment onto the next line, so the
+// rule after it would be part of it), a double quote, a control, bidirectional or zero-width character and a line or
+// paragraph separator each become a blank.
+func pfComment(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\\' || r == '"' || r == 0x2028 || r == 0x2029 || api.UnsafeRune(r) {
+			return ' '
+		}
+		return r
+	}, strings.ToValidUTF8(s, " "))
+}
+
+// ruleComment writes what the rule is for as a comment line under its header, for whoever reads the loaded anchor.
+func ruleComment(b *builder, r api.FirewallRule) {
+	if r.Comment != "" {
+		b.line("#   %s", pfComment(r.Comment))
+	}
+}
+
 func ruleLabel(i int, r api.FirewallRule) string {
 	if r.Name != "" {
 		return fmt.Sprintf("rule %d: %s", i+1, r.Name)
@@ -487,7 +524,7 @@ func endpoints(entries []string, f family, def []netip.Addr) (string, bool) {
 		case validate.EndpointAny:
 			return "any", true
 		case validate.EndpointSet:
-			parts = append(parts, "<s_"+v+">")
+			parts = append(parts, "<s_"+strings.ReplaceAll(v, "-", "_")+">")
 		case validate.EndpointTag:
 			parts = append(parts, "<t_"+strings.ReplaceAll(v, "-", "_")+">")
 		case validate.EndpointAddr:
@@ -591,6 +628,7 @@ func filterRules(b *builder, rules []api.FirewallRule, fams []family, ifs string
 			continue
 		}
 		b.line("# %s", ruleLabel(i, r))
+		ruleComment(b, r)
 		act := "pass"
 		if r.Action == "deny" {
 			act = "block drop"

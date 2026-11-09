@@ -667,16 +667,31 @@ expect "the jail has its address on office" '10\.66\.0\.' $J exec --project edge
 expect "the jail reaches its gateway" '1 packets received' $J exec --project edge edgeweb -- ping -c1 -t3 10.66.0.1
 gw4=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
 expect "the jail reaches the host's default gateway through the NAT of the uplink" '1 packets received' $J exec --project edge edgeweb -- ping -c1 -t5 "$gw4"
+# a rule names a jail: @edgeweb in an address set of the project, the set in a policy, the policy on another jail
+check "an address set with a jail as a member" $J firewall address-set create git_allow --project edge --address @edgeweb
+check "an address with a comment" $J firewall address-set create office_ip --project edge --address 192.0.2.7 --comment "the office"
+check "a policy that names the set" $J firewall policy create git --project edge --default-in deny --default-out allow --comment "the git server of the team" --rule "allow in tcp from @git_allow port 22 comment ssh from the team" --rule "allow in tcp from @edgeweb port 5432 comment the web jail asks for rows"
+check "a second jail" $J create edgedb --project edge --image "$img" --network office --storage default
+check "its policy" $J config set edgedb firewall.policy git --project edge
+check "it starts" $J start edgedb --project edge
+sleep 2
+expect "the anchor of the second jail holds the address of the first one in the table of the set" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t s_git_allow -T show
+expect "the rule comments are in the loaded anchor's source: show says why a rule is there" 'ssh from the team' $J firewall policy show git --project edge
+expect "and in the table of the jail itself" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t s_edgeweb -T show
+check "delete the second jail" $J delete --force --confirm-data-loss edgedb --project edge
+check "delete the policy that names them" $J firewall policy delete git --project edge -y
+check "delete the set with the jail in it" $J firewall address-set delete git_allow --project edge -y
+check "delete the set with a comment" $J firewall address-set delete office_ip --project edge -y
 # a bridge made by hand is someone else's: a network cannot have it, at create, and a network named like it gets jo<N>
 b=$(ifconfig bridge create) && ifconfig "$b" name mybr >/dev/null || fail "a bridge made by hand"
 expect "--bridge naming a bridge made by hand is refused at create" "the interface mybr already exists on this host without a JailOps description" \
-	sh -c "$J network create taken --bridge mybr --ipv4 172.17.33.1/24 2>&1; true"
+	sh -c "$J network create taken --bridge mybr --ipv4 10.67.0.1/24 2>&1; true"
 expect "--bridge naming a driver's interface is refused at create" 'form of the interfaces of the driver "vmx"' \
-	sh -c "$J network create drv --bridge vmx0 --ipv4 172.17.33.1/24 2>&1; true"
+	sh -c "$J network create drv --bridge vmx0 --ipv4 10.67.0.1/24 2>&1; true"
 expect "--bridge naming the uplink is refused at create" "form of the interfaces of the driver|already exists on this host" \
-	sh -c "$J network create upl --bridge $uplink --ipv4 172.17.33.1/24 2>&1; true"
+	sh -c "$J network create upl --bridge $uplink --ipv4 10.67.0.1/24 2>&1; true"
 expect "a network named like the hand-made bridge gets jo<N>, and create says why" 'warning: bridge jo[0-9]+ \(the interface mybr already exists on this host' \
-	sh -c "$J network create mybr --ipv4 172.17.33.1/24 2>&1"
+	sh -c "$J network create mybr --ipv4 10.67.0.1/24 2>&1"
 check "delete network mybr" $J network delete mybr -y
 # an interface of an earlier release: a legacy name, no description
 b=$(ifconfig bridge create) && ifconfig "$b" name jo79 >/dev/null || fail "a legacy bridge made by hand"

@@ -379,7 +379,7 @@ func TestAppAccessFirewallOnly(t *testing.T) {
 	installApp(t, oper, "web", "web")
 	installApp(t, oper, "tool", "cli")
 	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "office"},
-		Spec: api.AddressSetSpec{Addresses: []string{"198.51.100.0/24"}}}); err != nil {
+		Spec: api.AddressSetSpec{Addresses: api.Entries("198.51.100.0/24")}}); err != nil {
 		t.Fatal(err)
 	}
 	res, err := oper.Apps().Allow(c, "web", api.AppAllow{Source: "@office"})

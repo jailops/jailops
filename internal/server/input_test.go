@@ -16,12 +16,12 @@ func TestRequestBodiesAreStrict(t *testing.T) {
 	tok := e.Token(api.PermAdmin)
 	sets := "/api/v1/firewall/address-sets?project=" + dtest.SeedProject
 	for _, c := range []struct{ name, method, path, body, want string }{
-		{"unknown member", "POST", sets, `{"metadata":{"name":"unk"},"spec":{"addresses":["10.0.0.0/8"]},"bogus":{"x":1}}`, `unknown member \"bogus\"`},
-		{"unknown nested member", "POST", sets, `{"metadata":{"name":"unk","nmae":"x"},"spec":{"addresses":["10.0.0.0/8"]}}`, `unknown member \"metadata.nmae\"`},
-		{"duplicate member", "POST", sets, `{"metadata":{"name":"dupa","name":"dupb"},"spec":{"addresses":["10.0.0.0/8"]}}`, `member \"metadata.name\" appears twice`},
-		{"trailing data", "POST", sets, `{"metadata":{"name":"trail"},"spec":{"addresses":["10.0.0.0/8"]}} GARBAGE`, "after the JSON value"},
-		{"two values", "POST", sets, `{"metadata":{"name":"two"},"spec":{"addresses":["10.0.0.0/8"]}}{}`, "after the JSON value"},
-		{"other cases", "POST", sets, `{"METADATA":{"name":"fold"},"spec":{"addresses":["10.0.0.0/8"]}}`, `the name is \"metadata\"`},
+		{"unknown member", "POST", sets, `{"metadata":{"name":"unk"},"spec":{"addresses":[{"address":"10.0.0.0/8"}]},"bogus":{"x":1}}`, `unknown member \"bogus\"`},
+		{"unknown nested member", "POST", sets, `{"metadata":{"name":"unk","nmae":"x"},"spec":{"addresses":[{"address":"10.0.0.0/8"}]}}`, `unknown member \"metadata.nmae\"`},
+		{"duplicate member", "POST", sets, `{"metadata":{"name":"dupa","name":"dupb"},"spec":{"addresses":[{"address":"10.0.0.0/8"}]}}`, `member \"metadata.name\" appears twice`},
+		{"trailing data", "POST", sets, `{"metadata":{"name":"trail"},"spec":{"addresses":[{"address":"10.0.0.0/8"}]}} GARBAGE`, "after the JSON value"},
+		{"two values", "POST", sets, `{"metadata":{"name":"two"},"spec":{"addresses":[{"address":"10.0.0.0/8"}]}}{}`, "after the JSON value"},
+		{"other cases", "POST", sets, `{"METADATA":{"name":"fold"},"spec":{"addresses":[{"address":"10.0.0.0/8"}]}}`, `the name is \"metadata\"`},
 		{"misspelled dry_run", "PUT", "/api/v1/host/identity", `{"spec":{"hostname":"h1"},"dryrun":true}`, `unknown member \"dryrun\"`},
 		{"deep nesting", "POST", sets, strings.Repeat("[", 5000), "nested deeper"},
 		{"misspelled exec option", "POST", "/api/v1/jails/web/console?project=" + dtest.SeedProject, `{"argv":["id"],"tty":true,"usr":"root"}`, `unknown member \"usr\"`},
@@ -32,7 +32,7 @@ func TestRequestBodiesAreStrict(t *testing.T) {
 		}
 	}
 	// an object read and sent back carries its status, which is ignored; maps take any key
-	ok := `{"metadata":{"name":"ok","labels":{"Any.Key":"v"}},"spec":{"addresses":["10.0.0.0/8"]},"status":{"whatever":1}}`
+	ok := `{"metadata":{"name":"ok","labels":{"Any.Key":"v"}},"spec":{"addresses":[{"address":"10.0.0.0/8"}]},"status":{"whatever":1}}`
 	if code, body := rawDo(t, e, "POST", sets, tok, ok, nil); code != 201 {
 		t.Errorf("status member: %d %s", code, body)
 	}
@@ -48,7 +48,7 @@ func TestLabelsAndFreeTextAreChecked(t *testing.T) {
 	tok := e.Token(api.PermAdmin)
 	sets := "/api/v1/firewall/address-sets?project=" + dtest.SeedProject
 	set := func(name, labels string) string {
-		return `{"metadata":{"name":"` + name + `","labels":{` + labels + `}},"spec":{"addresses":["10.0.0.0/8"]}}`
+		return `{"metadata":{"name":"` + name + `","labels":{` + labels + `}},"spec":{"addresses":[{"address":"10.0.0.0/8"}]}}`
 	}
 	many := make([]string, api.MaxLabels+1)
 	for i := range many {

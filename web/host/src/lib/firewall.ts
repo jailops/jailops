@@ -1,4 +1,4 @@
-import type { AddressSet, AddressSetSpec, FirewallPolicy, FirewallRule } from '@jailops/shared/api/types'
+import type { AddressEntry, AddressSet, AddressSetSpec, FirewallPolicy, FirewallRule } from '@jailops/shared/api/types'
 import { nameRules } from '@jailops/shared/lib/names'
 import { ipv4, ipv6Groups } from './host'
 
@@ -80,6 +80,8 @@ function v4Bytes(s: string): number[] | null {
  * set (the server masks them).
  */
 export function setMember(s: string): boolean {
+  // @name: a jail of the project (its addresses), or another set; the server checks that it exists
+  if (s.startsWith('@')) return /^[a-z][a-z0-9_-]{0,31}$/.test(s.slice(1)) && !s.endsWith('-')
   const slash = s.lastIndexOf('/')
   const addr = slash < 0 ? s : s.slice(0, slash)
   let bits = 32
@@ -102,10 +104,34 @@ export function setNameError(name: string, taken: string[], msg: SetMsgs): strin
   return ''
 }
 
-/** The spec the form sends: members one per line (commas and spaces also separate), includes comma separated. */
-export function setSpec(members: string, includes: string): AddressSetSpec {
+/**
+ * The spec the form sends: members one per line (commas and spaces also separate them), includes comma separated. A line
+ * that ends in `# a comment` is ONE member with that comment (what it is: what a reviewer of the firewall reads next to
+ * `@office` in a rule); an IPv4 and an IPv6 network are two lines, each with its own comment. `comment` is what the set
+ * as a whole is.
+ */
+export function setSpec(members: string, includes: string, comment = ''): AddressSetSpec {
   const inc = splitList(includes)
-  return inc.length ? { addresses: splitList(members), includes: inc } : { addresses: splitList(members) }
+  const addresses: AddressEntry[] = []
+  for (const line of members.split('\n')) {
+    const at = line.indexOf('#')
+    if (at < 0) {
+      addresses.push(...splitList(line).map((address) => ({ address })))
+      continue
+    }
+    const address = line.slice(0, at).trim() // a line with a comment is one member: "a, b # c" is not an address, which the check says
+    const c = line.slice(at + 1).trim()
+    if (address) addresses.push(c ? { address, comment: c } : { address })
+  }
+  const spec: AddressSetSpec = { addresses }
+  if (comment.trim()) spec.comment = comment.trim()
+  if (inc.length) spec.includes = inc
+  return spec
+}
+
+/** The text of the members box for a set: one line per member, `member  # comment` when it has one. */
+export function setTextOf(spec: AddressSetSpec): string {
+  return (spec.addresses ?? []).map((a) => (a.comment ? `${a.address}  # ${a.comment}` : a.address)).join('\n')
 }
 
 /**
@@ -114,8 +140,8 @@ export function setSpec(members: string, includes: string): AddressSetSpec {
  */
 export function validateSet(name: string, spec: AddressSetSpec, others: Record<string, AddressSetSpec>, msg: SetMsgs): SetErrors {
   const e: SetErrors = {}
-  const bad = (spec.addresses ?? []).find((a) => !setMember(a))
-  if (bad !== undefined) e.addresses = msg.setMember(bad)
+  const bad = (spec.addresses ?? []).find((a) => !setMember(a.address))
+  if (bad !== undefined) e.addresses = msg.setMember(bad.address)
   const badInc = (spec.includes ?? []).find((n) => !SET_NAME.test(n))
   if (badInc !== undefined) e.includes = msg.setIncludeName(badInc)
   else if (name) {

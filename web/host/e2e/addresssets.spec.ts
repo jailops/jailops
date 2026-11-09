@@ -105,6 +105,39 @@ test('a new address set is used in a rule, refused while in use, and deleted onc
   await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('@admins')
 })
 
+// What a reviewer of the firewall reads: a comment on a set, on each of its members, on a policy and on a rule is typed in the
+// console, saved, and still there after a reload.
+test('comments on a set, its members, a policy and a rule are saved and read back', async ({ page }) => {
+  await open(page, '/firewall?tab=sets')
+  await page.getByTestId('new-set').click()
+  await page.locator('#fws-name').fill('git_allow')
+  await page.locator('#fws-comment').fill('Who may reach the git server')
+  await page.locator('#fws-members').fill('198.51.100.10  # the office\n2001:db8:1::/64')
+  await page.getByTestId('set-create-go').click()
+  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('@git_allow')
+  await expect(page.getByTestId('set-comment')).toHaveValue('Who may reach the git server')
+  await expect(page.locator('#sa')).toHaveValue('198.51.100.10  # the office\n2001:db8:1::/64')
+
+  await page.locator('[data-tab="policies"]').click()
+  await page.getByTestId('new-policy').click()
+  await page.locator('#fwp-name').fill('git-edge')
+  await page.getByTestId('policy-create-go').click()
+  await page.getByTestId('policy-comment').fill('The git server of the team')
+  await page.getByRole('button', { name: 'Add rule' }).click()
+  await page.locator('[data-rule="0"]').getByLabel('From').fill('@git_allow')
+  await page.locator('[data-rule="0"]').getByLabel('Ports').fill('22')
+  await page.locator('[data-rule="0"]').getByTestId('rule-comment').fill('ssh from the team only')
+  await page.getByTestId('save-policy').click()
+  await expect(page.getByTestId('policy-editor').locator('.pill.warn')).toHaveCount(0)
+
+  // a fresh load of the page reads them from the server (the demo keeps its state in the page, so go back to the list and in again)
+  await page.locator('[data-tab="sets"]').click()
+  await page.locator('[data-tab="policies"]').click()
+  await page.getByRole('button', { name: 'git-edge' }).click()
+  await expect(page.getByTestId('policy-comment')).toHaveValue('The git server of the team')
+  await expect(page.locator('[data-rule="0"]').getByTestId('rule-comment')).toHaveValue('ssh from the team only')
+})
+
 test('phone width: the address set dialog and editor fit the screen', async ({ page }, info) => {
   test.skip(info.project.name !== 'phone')
   await open(page, '/firewall?tab=sets')

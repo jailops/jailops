@@ -19,8 +19,8 @@ func pfBase() PFInput {
 		Tags:       []string{"web", "tier-1"},
 		TagMembers: map[string][]netip.Addr{"admin": {ip("10.20.0.5"), ip("10.20.0.4"), ip("10.20.0.5")}},
 		Sets: map[string]api.AddressSetSpec{
-			"office": {Addresses: []string{"203.0.113.0/24", "2001:db8:ffff::/48"}, Includes: []string{"vpn"}},
-			"vpn":    {Addresses: []string{"198.51.100.7"}},
+			"office": {Addresses: api.Entries("203.0.113.0/24", "2001:db8:ffff::/48"), Includes: []string{"vpn"}},
+			"vpn":    {Addresses: api.Entries("198.51.100.7")},
 		},
 		Uplink:    "em0",
 		Antispoof: true,
@@ -116,7 +116,7 @@ func TestPFErrors(t *testing.T) {
 			i.Sets["vpn"] = api.AddressSetSpec{Includes: []string{"office"}}
 		}},
 		{"self cycle", func(i *PFInput) { i.Sets["vpn"] = api.AddressSetSpec{Includes: []string{"vpn"}} }},
-		{"bad set member", func(i *PFInput) { i.Sets["vpn"] = api.AddressSetSpec{Addresses: []string{"1.2.3.4 pass all"}} }},
+		{"bad set member", func(i *PFInput) { i.Sets["vpn"] = api.AddressSetSpec{Addresses: api.Entries("1.2.3.4 pass all")} }},
 		{"rdr outbound", func(i *PFInput) {
 			i.Policy.Rules = []api.FirewallRule{{Action: "allow", Direction: "out", Proto: "tcp", Redirect: &api.Redirect{HostPort: 1, JailPort: 2}}}
 		}},
@@ -157,7 +157,7 @@ func TestPFSetDiamondIsNotACycle(t *testing.T) {
 		"office": {Includes: []string{"b", "c"}},
 		"b":      {Includes: []string{"d"}},
 		"c":      {Includes: []string{"d"}},
-		"d":      {Addresses: []string{"10.0.0.1"}},
+		"d":      {Addresses: api.Entries("10.0.0.1")},
 	}
 	if _, err := PFAnchor(in); err != nil {
 		t.Fatal(err)
@@ -189,7 +189,7 @@ func FuzzPFAnchor(f *testing.F) {
 				Addresses:  []netip.Addr{ip("10.0.0.5"), ip("2001:db8::5")},
 				Tags:       []string{tag},
 				TagMembers: map[string][]netip.Addr{tag: {ip("10.0.0.9")}},
-				Sets:       map[string]api.AddressSetSpec{set: {Addresses: []string{ep}}},
+				Sets:       map[string]api.AddressSetSpec{set: {Addresses: api.Entries(ep)}},
 				Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
 					{Name: ruleName, Action: "allow", Direction: dir, Proto: "tcp", From: []string{"@" + set, "tag:" + tag, ep}, To: []string{ep}, Ports: []string{port}},
 					{Name: ruleName, Action: "deny", Direction: "in", Proto: "udp", Ports: []string{port}},
@@ -414,7 +414,7 @@ func TestEveryAnchorDefinesTheTablesItReferences(t *testing.T) {
 		Addresses:  []netip.Addr{netip.MustParseAddr("10.20.0.10")},
 		Tags:       []string{"app"},
 		TagMembers: map[string][]netip.Addr{"db": {netip.MustParseAddr("10.20.0.20")}},
-		Sets:       map[string]api.AddressSetSpec{"office": {Addresses: []string{"192.0.2.0/24"}}},
+		Sets:       map[string]api.AddressSetSpec{"office": {Addresses: api.Entries("192.0.2.0/24")}},
 		Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
 			{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office", "tag:db"}, Ports: []string{"22"}}}}}
 	out, err := PFAnchor(in)
@@ -554,7 +554,7 @@ func TestPassRuleLabelsAreStableAndSayWhenARuleChanged(t *testing.T) {
 	}
 	// a member removed from an address set changes the label of the rule that names the set, so its flows end
 	c := render(func(in *PFInput) {
-		in.Sets = map[string]api.AddressSetSpec{"office": {Addresses: []string{"203.0.113.0/24"}}, "vpn": {Addresses: []string{"198.51.100.7"}}}
+		in.Sets = map[string]api.AddressSetSpec{"office": {Addresses: api.Entries("203.0.113.0/24")}, "vpn": {Addresses: api.Entries("198.51.100.7")}}
 	})
 	if len(labels(a)) == len(labels(c)) {
 		same := true
@@ -697,5 +697,77 @@ func TestPFNoAdvertise(t *testing.T) {
 	out, _ = PFAnchor(in)
 	if !strings.Contains(out, "icmp6-type { neighbrsol, neighbradv }") {
 		t.Errorf("an on-link jail cannot answer:\n%s", out)
+	}
+}
+
+// The comments of an address set's entries are lines of the rendered anchor, so that a review of the loaded rules says
+// what a table holds.
+func TestAnchorCarriesTheCommentsOfASet(t *testing.T) {
+	in := PFInput{Jail: "alpha_db", Interfaces: []string{"jo0123456789a0a"}, Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1")}, Uplink: "jo0",
+		Policy: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@git_allow"}, Ports: []string{"22"}}}},
+		Sets: map[string]api.AddressSetSpec{"git_allow": {Addresses: []api.AddressEntry{
+			{Address: "192.0.2.7", Comment: "the office"}, {Address: "198.51.100.9", Comment: "the branch"}}}}, TagMembers: map[string][]netip.Addr{}}
+	rs, err := PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# set git_allow: 192.0.2.7 the office\n", "# set git_allow: 198.51.100.9 the branch\n", "table <s_git_allow> persist { 192.0.2.7, 198.51.100.9 }"} {
+		if !strings.Contains(rs, want) {
+			t.Errorf("%q not in the anchor:\n%s", want, rs)
+		}
+	}
+}
+
+// Rules, policies and sets say what they are for in comment lines of the anchor, for a review of the loaded rules.
+func TestAnchorCarriesTheCommentsOfRulesAndPolicies(t *testing.T) {
+	in := PFInput{Jail: "alpha_db", Interfaces: []string{"jo0123456789a0a"}, Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1")}, Uplink: "jo0",
+		Policy: api.FirewallPolicySpec{Comment: "the database of the shop", DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
+			{Name: "app", Comment: "the web jail asks for rows", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"5432"}}}},
+		Sets: map[string]api.AddressSetSpec{"office": {Comment: "who works from the office", Addresses: []api.AddressEntry{{Address: "192.0.2.7"}}}}, TagMembers: map[string][]netip.Addr{}}
+	rs, err := PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"# policy: the database of the shop\n", "# rule 1: app\n#   the web jail asks for rows\n", "# set office: who works from the office\n"} {
+		if !strings.Contains(rs, want) {
+			t.Errorf("%q not in the anchor:\n%s", want, rs)
+		}
+	}
+}
+
+// A comment that was not checked cannot leave its comment line: no backslash (it would continue the comment onto the next line,
+// and the rule after it would be gone), no line break, no quote, no hidden character.
+func TestAnchorCommentsCannotLeaveTheirLine(t *testing.T) {
+	evil := "x\\\nblock drop in all\r\n\"y\u202e\u2028z"
+	in := PFInput{Jail: "alpha_db", Interfaces: []string{"jo0123456789a0a"}, Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1")}, Uplink: "jo0",
+		Policy: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
+			{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"22"}}}},
+		Sets: map[string]api.AddressSetSpec{"office": {Comment: evil, Addresses: []api.AddressEntry{{Address: "192.0.2.7", Comment: evil}}}}, TagMembers: map[string][]netip.Addr{}}
+	// the policy and its rules are checked by the render itself
+	bad := in
+	bad.Policy.Comment = evil
+	if _, err := PFAnchor(bad); err == nil {
+		t.Error("a policy comment with a backslash and a line break was rendered")
+	}
+	bad = in
+	bad.Policy.Rules = []api.FirewallRule{{Comment: evil, Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"22"}}}
+	if _, err := PFAnchor(bad); err == nil {
+		t.Error("a rule comment with a backslash and a line break was rendered")
+	}
+	// the sets are checked where they are stored, and made safe here as well
+	rs, err := PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ln := range strings.Split(rs, "\n") {
+		if strings.Contains(ln, "block drop in all") && !strings.HasPrefix(strings.TrimSpace(ln), "#") {
+			t.Errorf("a comment became a rule: %q", ln)
+		}
+		if strings.HasPrefix(strings.TrimSpace(ln), "#") && (strings.HasSuffix(ln, `\`) || strings.ContainsAny(ln, "\r\"\u202e\u2028")) {
+			t.Errorf("an unsafe character is in a comment line: %q", ln)
+		}
+	}
+	if !strings.Contains(rs, "pass in quick on") {
+		t.Errorf("the rule after the comment is gone:\n%s", rs)
 	}
 }

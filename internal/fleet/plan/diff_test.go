@@ -43,8 +43,8 @@ func TestDeclaredFieldsAreCompared(t *testing.T) {
 }
 
 func TestListLengthAndMissingFields(t *testing.T) {
-	want := api.AddressSetSpec{Addresses: []string{"a", "b"}}
-	have := api.AddressSetSpec{Addresses: []string{"a"}}
+	want := api.AddressSetSpec{Addresses: api.Entries("a", "b")}
+	have := api.AddressSetSpec{Addresses: api.Entries("a")}
 	if d := diff(t, want, have); len(d) != 1 || !strings.Contains(d[0], "spec.addresses") {
 		t.Fatalf("%v", d)
 	}
@@ -88,8 +88,8 @@ func TestDangers(t *testing.T) {
 		{"policy emptied", api.KindFirewallPolicy, api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "allow"}}}, api.FirewallPolicySpec{}, true},
 		{"policy opened", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultIn: "deny"}, api.FirewallPolicySpec{DefaultIn: "allow"}, true},
 		{"policy edited", api.KindFirewallPolicy, api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "allow"}}}, api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "deny"}}}, false},
-		{"set emptied", api.KindAddressSet, api.AddressSetSpec{Addresses: []string{"1.1.1.1"}}, api.AddressSetSpec{}, true},
-		{"set grown", api.KindAddressSet, api.AddressSetSpec{}, api.AddressSetSpec{Addresses: []string{"1.1.1.1"}}, false},
+		{"set emptied", api.KindAddressSet, api.AddressSetSpec{Addresses: api.Entries("1.1.1.1")}, api.AddressSetSpec{}, true},
+		{"set grown", api.KindAddressSet, api.AddressSetSpec{}, api.AddressSetSpec{Addresses: api.Entries("1.1.1.1")}, false},
 		{"jail unencrypted", api.KindJail, api.JailSpec{Image: "i", Encrypted: true}, api.JailSpec{Image: "i"}, true},
 		{"jail policy detached", api.KindJail, api.JailSpec{Image: "i", Firewall: api.FirewallAttach{Policy: "p"}}, api.JailSpec{Image: "i"}, true},
 		{"jail new image", api.KindJail, api.JailSpec{Image: "a@stable"}, api.JailSpec{Image: "b@stable"}, true},

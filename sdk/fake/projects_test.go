@@ -338,7 +338,7 @@ func TestProjectGrantsAndQuotas(t *testing.T) {
 		t.Fatal(err)
 	}
 	// An address set of web is not visible without its project.
-	if _, err := w.Firewall().AddressSets().Create(ctxT(t), api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: []string{"10.0.0.0/8"}}}); err != nil {
+	if _, err := w.Firewall().AddressSets().Create(ctxT(t), api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: api.Entries("10.0.0.0/8")}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err = admin.Firewall().AddressSets().Get(ctxT(t), "office")

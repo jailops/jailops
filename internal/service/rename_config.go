@@ -424,6 +424,9 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 		if err := ks.notTaken(to); err != nil {
 			return nil, err
 		}
+		if err := s.setClashesJail(proj, to); err != nil {
+			return nil, err
+		}
 		p := newRenamePlan()
 		p.lock(projectLock(proj))
 		p.resources["address-sets"] = []string{"/api/v1/firewall/address-sets/" + name}
@@ -437,17 +440,34 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 			return nil, err
 		}
 		for _, x := range sets {
-			if x.Meta.Name == name || !slices.Contains(x.Spec.Includes, name) {
+			inInc, inMem := slices.Contains(x.Spec.Includes, name), slices.Contains(x.Spec.Members(), "@"+name)
+			if x.Meta.Name == name || !inInc && !inMem {
 				continue
 			}
 			spec := x.Spec
-			spec.Includes = replaceAll(spec.Includes, name, to)
+			detail := ""
+			if inInc {
+				spec.Includes = replaceAll(spec.Includes, name, to)
+				detail = "spec.includes: " + name + " -> " + to
+			}
+			if inMem { // a member "@name" of another set is this set
+				spec.Addresses = slices.Clone(spec.Addresses)
+				for i := range spec.Addresses {
+					if spec.Addresses[i].Address == "@"+name {
+						spec.Addresses[i].Address = "@" + to
+					}
+				}
+				if detail != "" {
+					detail += "; "
+				}
+				detail += "spec.addresses: @" + name + " -> @" + to
+			}
 			xo, err := ks.getObj(x.Meta.Name)
 			if err != nil {
 				return nil, internal(err)
 			}
 			st, err := stateStep(api.KindAddressSet, xo, x.Meta.Name, proj, spec,
-				api.RenameChange{Kind: api.RenameReference, Object: "address set " + x.Meta.Name, Detail: "spec.includes: " + name + " -> " + to})
+				api.RenameChange{Kind: api.RenameReference, Object: "address set " + x.Meta.Name, Detail: detail})
 			if err != nil {
 				return nil, err
 			}

@@ -41,8 +41,8 @@ func sourceObjects() objs {
 		nets: map[string]api.NetworkSpec{"lan": srcNet("10.20.0.0/24", "10.20.0.1"), "dmz": srcNet("10.30.0.0/24", "10.30.0.1")},
 		pols: map[string]api.FirewallPolicySpec{"web": {DefaultIn: "deny", Rules: []api.FirewallRule{
 			{Action: "allow", Direction: "in", From: []string{"@office"}, Ports: []string{"443"}}}}},
-		sets: map[string]api.AddressSetSpec{"office": {Addresses: []string{"192.0.2.0/24"}, Includes: []string{"vpn"}},
-			"vpn": {Addresses: []string{"198.51.100.7"}}, "unused": {Addresses: []string{"1.1.1.1"}}},
+		sets: map[string]api.AddressSetSpec{"office": {Addresses: api.Entries("192.0.2.0/24"), Includes: []string{"vpn"}},
+			"vpn": {Addresses: api.Entries("198.51.100.7")}, "unused": {Addresses: api.Entries("1.1.1.1")}},
 	}
 }
 
@@ -80,8 +80,8 @@ func TestBuildBundle(t *testing.T) {
 	// Frozen: changing the live objects later does not change the bundle.
 	o.pols["web"].Rules[0].Ports[0] = "22"
 	o.nets["lan"].IPv4.Gateway = "changed"
-	o.sets["office"].Addresses[0] = "changed"
-	if b.Policies[0].Rules[0].Ports[0] != "443" || b.Networks[1].IPv4.Gateway != "10.20.0.1" || b.AddressSets[0].Addresses[0] != "192.0.2.0/24" {
+	o.sets["office"].Addresses[0].Address = "changed"
+	if b.Policies[0].Rules[0].Ports[0] != "443" || b.Networks[1].IPv4.Gateway != "10.20.0.1" || b.AddressSets[0].Addresses[0].Address != "192.0.2.0/24" {
 		t.Fatal("bundle aliases live objects")
 	}
 	// Deterministic.

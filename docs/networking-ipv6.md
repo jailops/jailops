@@ -260,12 +260,38 @@ stops when its rule goes.
   The jail's own anchor still decides what reaches the jail. (Verified on FreeBSD 15.1 amd64: a jail on a proxy-mode
   network listened on 8080 and `curl -6 http://[<jail address>]:8080/` from another host, across the internet, returned
   its answer; the rule was removed and the ruleset reloaded afterwards.)
-- A rule reads `ACTION DIRECTION [PROTO] [from ADDR,..] [to ADDR,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT]`; an
-  address is a CIDR or `@name` of an address set. `jailops firewall policy create --help` has the grammar.
+- A rule reads `ACTION DIRECTION [PROTO] [from ADDR,..] [to ADDR,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [comment TEXT]`;
+  an address is a CIDR, or `@name`: an address set of the project, or else a jail of the project (its addresses, read at
+  every render, so the rule follows the jail). A jail and an address set of one project never have the same name, with `-` read as `_` (`web-1` and `web_1` are one pf table): the second is refused when it is made or renamed. A jail whose name is longer than 29
+  characters is left out: use an address set for it. `tag:name` is every jail of the project with that tag.
+  `jailops firewall policy create --help` has the grammar.
 
-      jailops firewall address-set create office --address 192.0.2.0/24 --address 198.51.100.7
-      jailops firewall policy create web --default-in deny --default-out allow \
-        --rule "allow in tcp port 80,443" --rule "allow in tcp from @office port 22"
+      jailops firewall address-set create office --address 192.0.2.0/24 --comment "the office"
+      jailops firewall address-set create git_allow --address 198.51.100.7 --address @web
+      jailops firewall policy create web --default-in deny --default-out allow --comment "the public web server" \
+        --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from @office port 22 comment ssh from the office"
+      jailops firewall policy create db --rule "allow in tcp from @web port 5432 comment the web jail"   # the jail web
+
+  A member of an address set is an address, a CIDR, or `@name` (a jail of the project, or another set): a list such as
+  `git_allow` can hold jails and be added to later. A jail that a rule or a set names is not renamed or deleted until the reference is changed (the refusal names the policy or the set), so a rule never names a jail that is gone, and a jail made later never takes the place of one.
+
+  **Comments are for the review of the firewall.** An address set, each of its entries, a policy and each rule has a
+  `comment`: what it is, why it is there (one line of printable text, at most 200 characters, without double quotes or backslashes because it becomes a comment line of the ruleset; it is not part of any rule). In a file or in
+  `jailops firewall address-set edit` the entries of a set are pairs:
+
+      spec:
+        comment: Who may reach the git server
+        addresses:
+          - address: 198.51.100.7
+            comment: the office
+          - address: "@web"
+            comment: the web jail
+
+  `--comment` of `address-set create` goes with a single `--address`; an IPv4 and an IPv6 network of the same office are two
+  entries, each with its own comment, so that each says what it is. The keyword `comment` ends a `--rule` and takes the rest of it. `address-set show` and `policy show` list the comments in a table, the rendered anchor of a jail carries them as
+  comment lines (`# set git_allow: 198.51.100.7 the office`, `# rule 1: name` and `#   why`, `# policy: ...`), and the
+  console has a comment field on a set, a policy and every rule, and takes the comment of a member at the end of its line
+  (`198.51.100.0/24  # the office`).
 
 Verified on FreeBSD 15.1 with real traffic: `scripts/ci-freebsd-pf.sh` (allow and deny, IPv4 and IPv6, between
 jails of one project and of different projects, from the host, with a rule changed under a running ping, with a restarted

@@ -255,7 +255,11 @@ func (s *Service) resolveSource(ctx context.Context, t appTarget, src apps.Sourc
 	case isJail:
 		return jailSource(proj, src.Name)
 	case isSet:
-		members, err := validate.FlattenSet(src.Name, sets)
+		withJails, err := s.allSetsWithJails(proj) // a member of the set may be a jail: @jail
+		if err != nil {
+			return out, err
+		}
+		members, err := validate.FlattenSet(src.Name, withJails)
 		if err != nil {
 			return out, err
 		}

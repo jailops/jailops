@@ -152,7 +152,7 @@ func (s *Server) fakeSource(r *http.Request, project, self, src string) (canonic
 			return jail(project, rest)
 		}
 		if set := s.addrsets.items[s.addrsets.keyIn(project, rest)]; set != nil {
-			return "@" + rest, api.AccessSourceSet, "", slices.Clone(set.Spec.Addresses), []string{"@" + rest}, nil
+			return "@" + rest, api.AccessSourceSet, "", set.Spec.Members(), []string{"@" + rest}, nil
 		}
 		return "", "", "", nil, nil, api.Errorf(api.CodeNotFound, "@%s is neither a jail nor an address set of project %s", rest, project)
 	}

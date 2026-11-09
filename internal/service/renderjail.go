@@ -204,6 +204,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 					in.TagMembers[t] = append(in.TagMembers[t], m...)
 				}
 			}
+			in.Sets = withEmptyRefs(in.Sets, pols)
 			// The grants of app access (the managed policy app-<jail>) come after the project's policy and before
 			// the jail's own rules; an app's jail it closes stays closed whatever the jail's own policy says.
 			accRules, accClosed := s.accessRulesFor(project, j.Metadata.Name)
@@ -334,7 +335,7 @@ func (s *Service) Desired(ctx context.Context) (reconcile.Desired, error) {
 	for _, j := range jails {
 		p := j.Metadata.Project
 		if _, ok := setsOf[p]; !ok {
-			sets, err := s.allSets(p)
+			sets, err := s.allSetsWithJails(p)
 			if err != nil {
 				return out, err
 			}
@@ -364,7 +365,7 @@ func (h *hooks) PreStart(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	sets, err := s.allSets(j.Metadata.Project)
+	sets, err := s.allSetsWithJails(j.Metadata.Project)
 	if err != nil {
 		return err
 	}

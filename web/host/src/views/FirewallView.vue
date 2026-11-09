@@ -6,7 +6,7 @@ import { api } from '@/api/endpoints'
 import { ApiError } from '@jailops/shared/api/client'
 import { useLoad } from '@jailops/shared/composables/load'
 import { runOp } from '@jailops/shared/composables/ops'
-import { blankRule, detailToRuleErrors, detailToSetErrors, setSpec, setUsers, splitList, validateRules, validateSet, type RuleErrors, type SetErrors } from '@/lib/firewall'
+import { blankRule, detailToRuleErrors, detailToSetErrors, setSpec, setTextOf, setUsers, splitList, validateRules, validateSet, type RuleErrors, type SetErrors } from '@/lib/firewall'
 import { confirmAction } from '@jailops/shared/composables/confirm'
 import { useTabQuery } from '@jailops/shared/composables/tabs'
 import { useFormCheck } from '@jailops/shared/composables/form'
@@ -46,6 +46,7 @@ const setOriginal = ref('')
 const setEtag = ref<string | undefined>()
 const setText = ref('')
 const setInc = ref('')
+const setComment = ref('')
 const setError = ref<ApiError | null>(null)
 const setErrors = ref<SetErrors>({})
 const setSaving = ref(false)
@@ -67,8 +68,9 @@ watch(() => l.data.value, (d) => {
   }
 }, { immediate: true })
 
-const dirty = computed(() => !!draft.value && JSON.stringify(draft.value) !== original.value)
-const setNow = computed(() => setSpec(setText.value, setInc.value))
+// compared as the server would store them: an emptied comment is the same as none
+const dirty = computed(() => !!draft.value && JSON.stringify(clean(draft.value)) !== JSON.stringify(clean(JSON.parse(original.value))))
+const setNow = computed(() => setSpec(setText.value, setInc.value, setComment.value))
 const setDirty = computed(() => !!setDraft.value && JSON.stringify(setNow.value) !== setOriginal.value)
 const attached = computed(() => (l.data.value?.jails ?? []).filter((j) => j.spec.firewall?.policy === selected.value).map((j) => j.metadata.name))
 
@@ -119,6 +121,7 @@ function clean(p: FirewallPolicy): FirewallPolicy {
   c.spec.rules = (c.spec.rules ?? []).map((r) => {
     const x = { ...r }
     if (!x.name) delete x.name
+    if (!x.comment?.trim()) delete x.comment
     if (!x.proto) delete x.proto
     for (const k of ['from', 'to', 'ports'] as const) if (!x[k]?.length) delete x[k]
     if (!x.log) delete x.log
@@ -126,6 +129,7 @@ function clean(p: FirewallPolicy): FirewallPolicy {
     return x
   })
   if (!c.spec.raw) delete c.spec.raw
+  if (!c.spec.comment?.trim()) delete c.spec.comment
   return c
 }
 /** Why Save does nothing yet, next to the button. */
@@ -160,9 +164,10 @@ async function pickSet(n: string): Promise<void> {
     const r = await api.firewall.addressSet(n)
     if (mine !== setSeq) return
     setDraft.value = r.data
-    setText.value = (r.data.spec.addresses ?? []).join('\n')
+    setText.value = setTextOf(r.data.spec)
     setInc.value = (r.data.spec.includes ?? []).join(', ')
-    setOriginal.value = JSON.stringify(setSpec(setText.value, setInc.value))
+    setComment.value = r.data.spec.comment ?? ''
+    setOriginal.value = JSON.stringify(setSpec(setText.value, setInc.value, setComment.value))
     setEtag.value = r.etag
   } catch (e) {
     if (mine === setSeq) setError.value = e instanceof ApiError ? e : null
@@ -170,8 +175,9 @@ async function pickSet(n: string): Promise<void> {
 }
 function revertSet(): void {
   if (!setDraft.value) return
-  setText.value = (setDraft.value.spec.addresses ?? []).join('\n')
+  setText.value = setTextOf(setDraft.value.spec)
   setInc.value = (setDraft.value.spec.includes ?? []).join(', ')
+  setComment.value = setDraft.value.spec.comment ?? ''
   setErrors.value = {}
   setError.value = null
 }
@@ -306,6 +312,8 @@ function removePolicy(): void {
           <div class="body stack">
             <ErrorPanel v-if="apiError" :error="apiError" />
             <p v-if="attached.length" class="muted">{{ s.firewall.usedBy }}: <template v-for="(n, i) in attached" :key="n">{{ i ? ', ' : '' }}<router-link :to="`/jails/${n}`" class="mono">{{ n }}</router-link></template></p>
+            <div class="field"><label for="pc">{{ s.firewall.comment }}</label>
+              <input id="pc" v-model="draft.spec.comment" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.policyCommentHint" data-test="policy-comment" /></div>
             <div class="row">
               <div class="field" style="min-width: 160px"><label for="din">{{ s.firewall.defaultIn }}</label>
                 <select id="din" v-model="draft.spec.default_in"><option value="">-</option><option>allow</option><option>deny</option></select></div>
@@ -319,7 +327,7 @@ function removePolicy(): void {
                 <div class="rule-head row">
                   <span class="mono faint">{{ i + 1 }}</span>
                   <input v-model="r.name" type="text" :placeholder="s.firewall.ruleName" :aria-label="s.firewall.ruleName + ' ' + (i + 1)" style="max-width: 200px" />
-                  <span class="grow"></span>
+                  <input v-model="r.comment" class="grow" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.ruleComment" :aria-label="s.firewall.ruleComment + ' ' + (i + 1)" data-test="rule-comment" />
                   <button class="btn btn-sm btn-icon" type="button" :aria-label="s.firewall.moveUp" :disabled="i === 0" @click="move(i, -1)"><Icon name="arrowUp" /></button>
                   <button class="btn btn-sm btn-icon" type="button" :aria-label="s.firewall.moveDown" :disabled="i === rules.length - 1" @click="move(i, 1)"><Icon name="arrowDown" /></button>
                   <button class="btn btn-sm btn-icon btn-danger" type="button" :aria-label="s.firewall.removeRule" @click="remove(i)"><Icon name="trash" /></button>
@@ -384,6 +392,8 @@ function removePolicy(): void {
             <ErrorPanel v-if="setError" :error="setError" />
             <p v-if="users.policies.length || users.sets.length" class="muted" data-test="set-users">{{ s.firewall.setUsedBy }}:
               <template v-for="(n, i) in users.policies" :key="'p' + n">{{ i ? ', ' : '' }}<router-link :to="`/firewall?policy=${n}`" class="mono">{{ n }}</router-link></template><template v-for="(n, i) in users.sets" :key="'s' + n">{{ i || users.policies.length ? ', ' : '' }}<span class="mono">@{{ n }}</span></template></p>
+            <div class="field"><label for="sc">{{ s.firewall.comment }}</label>
+              <input id="sc" v-model="setComment" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.setCommentHint" data-test="set-comment" /></div>
             <div class="field"><label for="sa">{{ s.firewall.addresses }}</label>
               <textarea id="sa" v-model="setText" class="mono" rows="8" spellcheck="false" :aria-invalid="!!setErrors.addresses" aria-describedby="sa-h sa-e" @input="setErrors.addresses = undefined"></textarea>
               <span id="sa-h" class="hint">{{ s.firewall.membersHint }}</span>

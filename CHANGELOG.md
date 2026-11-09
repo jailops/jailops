@@ -2,12 +2,37 @@
 
 ## Unreleased
 
+- **A firewall rule can name a jail: `from @web`, and so can an address set.** `@name` is an address set of the project or a
+  jail of the project and stands for its addresses; they are read at every render, so a rule follows the jail. One name
+  never means both: a jail and an address set of a project may not have the same name, with `-` read as `_` (`web-1` and
+  `web_1` are one pf table), and the second one is refused when it is made or renamed. A member of an address set may be
+  `@name` too, so a list such as `git_allow` holds jails and is added to later. A name with a hyphen works (`@web-2`); a jail
+  whose name is longer than 29 characters needs an address set. A name that is neither is refused when the policy or the set
+  is made. A jail that a rule or a set names is not renamed or deleted until the reference is changed (the refusal names the
+  policy or the set): a rule that names a jail that is gone would match nobody, and a jail made later under the name would take
+  its place. A restored or declared policy that names a missing jail still renders, as an empty set. Renaming an address set
+  rewrites the `@name` members of other sets. `jailops firewall policy create db --rule "allow in tcp from @web port 5432"`,
+  as `app allow` has `@JAIL`. `jailops fleet` checks the references of a declared repository (`@name` is a set or a jail
+  declared for the host).
+- **Every part of the firewall has a `comment`, for the review of it.** An address set, each of its entries (`addresses:` is
+  a list of `{address, comment}` pairs), a policy and each rule: what it is, why it is there. They are what a reviewer of the
+  firewall reads next to `@office` or a port: `address-set show` and `policy show` list them in a table, the rendered anchor of
+  a jail carries them as comment lines (`# set NAME: MEMBER COMMENT`, `# rule 1: NAME` and `#   WHY`, `# policy: ...`), and the
+  console has a comment field on a set, a policy and every rule, and takes the comment of a member at the end of its line
+  (`198.51.100.0/24  # the office`). A comment is one line of printable text of at most 200 characters, without double quotes or backslashes (it becomes a comment line of the ruleset, and a backslash would continue it onto the next line), and is not part of any rule.
+  `jailops firewall address-set create office --address 192.0.2.7 --comment "the office"` (`--comment` goes with a single
+  `--address`; one entry is one address, so an IPv4 and an IPv6 network are two entries, each with its own comment; several
+  commented entries come from a file or `address-set edit`), `jailops firewall policy create web
+  --comment "the public web server" --rule "allow in tcp port 80,443 comment the site"` (`comment` ends a rule and takes
+  the rest of it). **Breaking:** `addresses` was a list of strings; it is a list of pairs now, in the API, in files and in
+  `address-set` YAML (the examples are rewritten).
 - **Interfaces of a network that is gone are removed.** A host wiped by hand (the datasets destroyed, the configuration
   deleted) keeps the bridge and the gateway pair of its networks, because interfaces live in the kernel; they stayed until
   a reboot or an `ifconfig destroy`. The reconcile loop now destroys the bridge and the gateway pair that carry JailOps's
   description (`jailops net=NAME ...`) for a network it does not know; an interface with any other description is left
   alone. "Start over" in the install guide also destroys them (it matched only `wg-` and `epair` names, and the gateway
   pair is named after the network).
+
 ## 0.6.3 - 2026-11-05
 
 - **The text the package prints is a file of the source** (`packaging/pkg/post-install.sh`): a first install says to run

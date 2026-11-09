@@ -20,10 +20,12 @@ func Invalid(field, format string, args ...any) *api.Error {
 }
 
 var (
-	nameRE     = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
-	labelRE    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
-	ifnameRE   = regexp.MustCompile(`^[a-z][a-z0-9]{0,14}$`)
-	setNameRE  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
+	nameRE    = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	labelRE   = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
+	ifnameRE  = regexp.MustCompile(`^[a-z][a-z0-9]{0,14}$`)
+	setNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
+	// setRefRE is what "@name" in a rule may be: an address set, or a jail of the project (whose name may have hyphens)
+	setRefRE   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
 	tagRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,23}$`)
 	ruleNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$`)
 	pkgRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]{0,127}$`)

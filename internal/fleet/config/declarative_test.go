@@ -150,7 +150,7 @@ func TestNamesFollowTheDaemonRules(t *testing.T) {
 	d := base(t)
 	write(t, d, "shared/networks/my_net.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: my_net\nspec:\n  ipv4: {subnet: 10.1.0.0/24, gateway: 10.1.0.1, range: 10.1.0.2-10.1.0.9}\n")
 	project(t, d, "p", "[a]", "")
-	write(t, d, "projects/p/address-sets/web-tier.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: web-tier\nspec:\n  addresses: [192.0.2.1]\n")
+	write(t, d, "projects/p/address-sets/web-tier.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: web-tier\nspec:\n  addresses: [{address: 192.0.2.1}]\n")
 	f, err := Load(d)
 	if err != nil {
 		t.Fatal(err)

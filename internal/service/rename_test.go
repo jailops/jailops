@@ -649,7 +649,7 @@ func TestRenameImageRollsBackEveryStep(t *testing.T) {
 func projectFixture(t *testing.T, e *dtest.Env, s *service.Service) string {
 	t.Helper()
 	alpha := as(globalAdmin, dtest.SeedProject)
-	if _, err := s.CreateAddressSet(alpha, api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: []string{"192.0.2.0/24"}}}); err != nil {
+	if _, err := s.CreateAddressSet(alpha, api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.0/24")}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreatePolicy(alpha, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny",
