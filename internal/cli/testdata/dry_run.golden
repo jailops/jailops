@@ -85,7 +85,7 @@ metadata:
   name: s
 spec:
   addresses:
-    - 10.0.0.0/8
+    - address: 10.0.0.0/8
 
 $ jailops --dry-run token create t1 --global
 dry-run: would create token t1

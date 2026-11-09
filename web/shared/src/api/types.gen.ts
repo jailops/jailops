@@ -265,13 +265,19 @@ export interface ACMEStatus {
   terms_url?: string
 }
 
+export interface AddressEntry {
+  address: string
+  comment?: string
+}
+
 export interface AddressSet {
   metadata: ObjectMeta
   spec: AddressSetSpec
 }
 
 export interface AddressSetSpec {
-  addresses: string[]
+  comment?: string
+  addresses: AddressEntry[]
   includes?: string[]
 }
 
@@ -752,6 +758,7 @@ export interface FirewallPolicy {
 }
 
 export interface FirewallPolicySpec {
+  comment?: string
   default_in?: string
   default_out?: string
   rules?: FirewallRule[]
@@ -760,6 +767,7 @@ export interface FirewallPolicySpec {
 
 export interface FirewallRule {
   name?: string
+  comment?: string
   action: string
   direction: string
   proto?: string

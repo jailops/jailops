@@ -11,7 +11,7 @@ import (
 func TestRenameCommands(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.srv.SeedAddressSet(api.AddressSet{Metadata: api.ObjectMeta{Name: "office", Project: "main"}, Spec: api.AddressSetSpec{Addresses: []string{"192.0.2.0/24"}}})
+	h.srv.SeedAddressSet(api.AddressSet{Metadata: api.ObjectMeta{Name: "office", Project: "main"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.0/24")}})
 	h.srv.SeedFirewallPolicy(api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web", Project: "main"}, Spec: api.FirewallPolicySpec{
 		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"443"}}}}})
 	tr := h.transcript()

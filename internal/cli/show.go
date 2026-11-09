@@ -96,6 +96,87 @@ func (a *app) showStorage(st api.Storage) error {
 	return nil
 }
 
+// showAddressSet lists the members of a set, each with its comment: what a reviewer of a firewall wants to read next to
+// "@office" in a rule. A member that is a jail (@name) says so in the comment column when it has none.
+func (a *app) showAddressSet(set api.AddressSet) error {
+	s := showWriter{w: a.env.Stdout, width: 9}
+	s.title("Address set %s", set.Metadata.Name)
+	if set.Spec.Comment != "" {
+		s.kv("Comment", set.Spec.Comment)
+	}
+	if len(set.Spec.Includes) > 0 {
+		s.kv("Includes", strings.Join(set.Spec.Includes, ", "))
+	}
+	s.kv("Age", age(a.env.Now(), set.Metadata.CreatedAt))
+	s.labels(set.Metadata)
+	rows := make([][]string, 0, len(set.Spec.Addresses))
+	for _, e := range set.Spec.Addresses {
+		c := e.Comment
+		if c == "" && strings.HasPrefix(e.Address, "@") {
+			c = "(a jail or a set of the project)"
+		}
+		rows = append(rows, []string{e.Address, orText(c, "-")})
+	}
+	if len(rows) > 0 {
+		fprintln(a.env.Stdout)
+		a.printTable(a.env.Stdout, []string{"MEMBER", "COMMENT"}, rows, nil)
+	}
+	return nil
+}
+
+// ruleText writes a rule the way --rule reads it, without its name and comment.
+func ruleText(r api.FirewallRule) string {
+	t := []string{r.Action, r.Direction}
+	if r.Proto != "" {
+		t = append(t, r.Proto)
+	}
+	if len(r.From) > 0 {
+		t = append(t, "from", strings.Join(r.From, ","))
+	}
+	if len(r.To) > 0 {
+		t = append(t, "to", strings.Join(r.To, ","))
+	}
+	if len(r.Ports) > 0 {
+		t = append(t, "port", strings.Join(r.Ports, ","))
+	}
+	if r.Log {
+		t = append(t, "log")
+	}
+	if r.Redirect != nil {
+		t = append(t, fmt.Sprintf("rdr %d:%d", r.Redirect.HostPort, r.Redirect.JailPort))
+	}
+	return strings.Join(t, " ")
+}
+
+// showPolicy lists a policy with what it is for and every rule with why it is there: what a reviewer of the firewall reads.
+func (a *app) showPolicy(p api.FirewallPolicy) error {
+	s := showWriter{w: a.env.Stdout, width: 13}
+	s.title("Firewall policy %s", p.Metadata.Name)
+	if p.Spec.Comment != "" {
+		s.kv("Comment", p.Spec.Comment)
+	}
+	s.kv("Default in", orText(p.Spec.DefaultIn, "(unset)"))
+	s.kv("Default out", orText(p.Spec.DefaultOut, "(unset)"))
+	s.kv("Age", age(a.env.Now(), p.Metadata.CreatedAt))
+	s.labels(p.Metadata)
+	if len(p.Spec.Rules) > 0 {
+		rows := make([][]string, 0, len(p.Spec.Rules))
+		for i, r := range p.Spec.Rules {
+			why := r.Comment
+			if r.Name != "" {
+				why = strings.TrimSpace(r.Name + ": " + why)
+			}
+			rows = append(rows, []string{strconv.Itoa(i + 1), ruleText(r), orText(why, "-")})
+		}
+		fprintln(a.env.Stdout)
+		a.printTable(a.env.Stdout, []string{"#", "RULE", "COMMENT"}, rows, nil)
+	}
+	if p.Spec.Raw != "" {
+		s.section("A raw PF fragment is part of this policy (admin): jailops firewall policy show -o yaml")
+	}
+	return nil
+}
+
 func (a *app) showNetwork(n api.Network) error {
 	s := showWriter{w: a.env.Stdout, width: 11}
 	s.title("Network %s", n.Metadata.Name)

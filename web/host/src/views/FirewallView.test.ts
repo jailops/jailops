@@ -77,7 +77,7 @@ describe('address sets in the firewall page', () => {
       await body().get('#fws').trigger('submit')
       await flushPromises()
       expect(body().get('#fws-name-e').text()).toBe('An address set of this name exists.')
-      expect(body().get('#fws-members-e').text()).toBe('"not-an-address" is not an address or CIDR.')
+      expect(body().get('#fws-members-e').text()).toBe('"not-an-address" is not an address, a CIDR or @jail.')
       expect(body().get('#fws-includes-e').text()).toBe('Address set "ghost" does not exist.')
       expect(body().get('[data-test="set-create-why"]').text()).toContain('Name: An address set of this name exists.')
       expect(document.activeElement?.id).toBe('fws-name')
@@ -107,7 +107,7 @@ describe('address sets in the firewall page', () => {
       await body().get('#fws').trigger('submit')
       await until(() => v.emitted('created')?.length === 2)
       const ops = (await api.firewall.addressSet('ops')).data
-      expect(ops.spec).toEqual({ addresses: ['192.0.2.10', '2001:db8::/64'], includes: ['office', 'empty'] })
+      expect(ops.spec).toEqual({ addresses: [{ address: '192.0.2.10' }, { address: '2001:db8::/64' }], includes: ['office', 'empty'] })
       expect(ops.metadata.project).toBe('web')
     })
 
@@ -161,14 +161,14 @@ describe('address sets in the firewall page', () => {
       await body().get('#sa').setValue('198.51.100.1\nbad')
       await body().get('[data-test="save-set"]').trigger('click')
       await flushPromises()
-      expect(body().get('#sa-e').text()).toBe('"bad" is not an address or CIDR.')
+      expect(body().get('#sa-e').text()).toBe('"bad" is not an address, a CIDR or @jail.')
       expect(document.activeElement?.id).toBe('sa')
       await body().get('#sa').setValue('198.51.100.1')
       await body().get('[data-test="save-set"]').trigger('click')
       await until(() => writes(sent).includes('PUT /firewall/address-sets/lab'))
       // saved and loaded again: nothing left to save
       await until(() => body().find('[data-test="set-save-why"]').exists() && body().get('[data-test="set-save-why"]').text().includes('Nothing to save'))
-      expect((await api.firewall.addressSet('lab')).data.spec.addresses).toEqual(['198.51.100.1'])
+      expect((await api.firewall.addressSet('lab')).data.spec.addresses).toEqual([{ address: '198.51.100.1' }])
       // nothing uses lab: a plain confirmation, then the first set is shown
       await body().get('[data-test="delete-set"]').trigger('click')
       await until(() => body().find('[data-test="confirm-dialog"]').exists())

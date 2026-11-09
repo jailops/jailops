@@ -10,6 +10,8 @@ type FirewallPolicy struct {
 
 // FirewallPolicySpec holds the rules of a policy.
 type FirewallPolicySpec struct {
+	// Comment says what the policy is for: what a reviewer of the firewall reads first (one line, at most 200 characters, no double quotes or backslashes).
+	Comment string `json:"comment,omitempty"`
 	// Default applies when no rule matches: "allow" or "deny".
 	DefaultIn  string         `json:"default_in,omitempty"`
 	DefaultOut string         `json:"default_out,omitempty"`
@@ -21,7 +23,9 @@ type FirewallPolicySpec struct {
 
 // FirewallRule is one typed rule.
 type FirewallRule struct {
-	Name      string   `json:"name,omitempty"`
+	Name string `json:"name,omitempty"`
+	// Comment says why the rule is there (one line, at most 200 characters, no double quotes or backslashes); it is a comment line of the rendered anchor.
+	Comment   string   `json:"comment,omitempty"`
 	Action    string   `json:"action"`          // allow, deny
 	Direction string   `json:"direction"`       // in, out
 	Proto     string   `json:"proto,omitempty"` // tcp, udp, icmp, icmp6
@@ -48,9 +52,37 @@ type AddressSet struct {
 	Spec     AddressSetSpec `json:"spec"`
 }
 
+// AddressEntry is one member of an address set: an address, a CIDR or @name (a jail of the project, or another set),
+// with what it is. The comment is what a reviewer of the firewall reads next to the set's name in a rule: at most 200
+// characters, one line of printable text; it is not part of any rule.
+type AddressEntry struct {
+	Address string `json:"address"`
+	Comment string `json:"comment,omitempty"`
+}
+
 // AddressSetSpec lists the members of an address set.
 type AddressSetSpec struct {
-	Addresses []string `json:"addresses"`
+	// Comment says what the set is (one line, at most 200 characters, no double quotes or backslashes).
+	Comment   string         `json:"comment,omitempty"`
+	Addresses []AddressEntry `json:"addresses"`
 	// Includes names other address sets; cycles are rejected.
 	Includes []string `json:"includes,omitempty"`
+}
+
+// Members is the text of every entry: what a rule or a table holds.
+func (s AddressSetSpec) Members() []string {
+	out := make([]string, len(s.Addresses))
+	for i, e := range s.Addresses {
+		out[i] = e.Address
+	}
+	return out
+}
+
+// Entries makes plain members into entries without comments.
+func Entries(members ...string) []AddressEntry {
+	out := make([]AddressEntry, len(members))
+	for i, m := range members {
+		out[i] = AddressEntry{Address: m}
+	}
+	return out
 }

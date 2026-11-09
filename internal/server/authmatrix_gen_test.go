@@ -211,7 +211,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 		if _, err := pc.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "prof"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.memory": "1G"}}}); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pc.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "set"}, Spec: api.AddressSetSpec{Addresses: []string{"10.0.0.0/8"}}}); err != nil {
+		if _, err := pc.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "set"}, Spec: api.AddressSetSpec{Addresses: api.Entries("10.0.0.0/8")}}); err != nil {
 			t.Fatal(err)
 		}
 	}

@@ -329,6 +329,9 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 	if err := s.validateJail(proj, name, j.Spec); err != nil {
 		return api.Operation{}, err
 	}
+	if err := s.jailClashesSet(proj, name); err != nil {
+		return api.Operation{}, err
+	}
 	if err := api.ValidLabels(j.Metadata.Labels); err != nil {
 		return api.Operation{}, err
 	}
@@ -660,6 +663,9 @@ func (s *Service) DeleteJail(ctx context.Context, name string) (api.Operation, e
 	}
 	if j.Status.Power == api.PowerRunning {
 		return api.Operation{}, api.Errorf(api.CodeBusy, "jail %q is running", name).WithHint("stop it first")
+	}
+	if err := s.noRuleNamesJail(p.Meta.Name, name, true); err != nil {
+		return api.Operation{}, err
 	}
 	return s.Submit(ctx, OpSpec{
 		Description: "Delete jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,

@@ -153,6 +153,20 @@ func (f *Fleet) Check() error {
 			reported[key] = true
 			add(o, "%s refers to unknown %s %q (not declared for host %s)", what, kind, name, h)
 		}
+		// @name in a rule or as a member of a set is an address set or a jail of the project, declared for the host
+		missingRef := func(h, project, name string, o *Object, what string) {
+			_, set := tables[h][Key{api.KindAddressSet, project, name}]
+			_, jail := tables[h][Key{api.KindJail, project, name}]
+			if set || jail {
+				return
+			}
+			key := fmt.Sprintf("%s/@%s", what, name)
+			if reported[key] {
+				return
+			}
+			reported[key] = true
+			add(o, "%s refers to @%s, which is neither an address set nor a jail declared for host %s", what, name, h)
+		}
 		switch s := o.Spec.(type) {
 		case api.JailSpec:
 			f.checkJail(o, s, add, warn)
@@ -247,7 +261,7 @@ func (f *Fleet) Check() error {
 				for _, r := range s.Rules {
 					for _, ref := range append(slices.Clone(r.From), r.To...) {
 						if n, ok := strings.CutPrefix(ref, "@"); ok {
-							missing(h, api.KindAddressSet, o.Project, n, o, "rule")
+							missingRef(h, o.Project, n, o, "rule")
 						}
 					}
 				}
@@ -257,6 +271,11 @@ func (f *Fleet) Check() error {
 			for _, h := range o.Hosts {
 				for _, inc := range s.Includes {
 					missing(h, api.KindAddressSet, o.Project, inc, o, "includes")
+				}
+				for _, e := range s.Addresses {
+					if n, ok := strings.CutPrefix(e.Address, "@"); ok {
+						missingRef(h, o.Project, n, o, "member")
+					}
 				}
 			}
 			for _, h := range o.Hosts {
@@ -600,7 +619,11 @@ func checkAddressSet(o *Object, s api.AddressSetSpec, add func(*Object, string, 
 	if len(s.Addresses) == 0 && len(s.Includes) == 0 {
 		warn(o, "address set %s is empty: rules that reference it match nothing", o.Name)
 	}
-	for _, a := range s.Addresses {
+	for _, e := range s.Addresses {
+		a := e.Address
+		if strings.HasPrefix(a, "@") { // a jail of the project or another set: checked where the objects are known
+			continue
+		}
 		if _, err := netip.ParsePrefix(a); err == nil {
 			continue
 		}
@@ -621,7 +644,13 @@ func setCycle(sets map[string]*Object, name string, stack []string) string {
 	}
 	s, _ := o.Spec.(api.AddressSetSpec)
 	stack = append(slices.Clone(stack), name)
-	for _, inc := range s.Includes {
+	next := slices.Clone(s.Includes)
+	for _, e := range s.Addresses { // a member @name that is a set is followed like an include (a jail has no members)
+		if n, ok := strings.CutPrefix(e.Address, "@"); ok {
+			next = append(next, n)
+		}
+	}
+	for _, inc := range next {
 		if c := setCycle(sets, inc, stack); c != "" {
 			return c
 		}

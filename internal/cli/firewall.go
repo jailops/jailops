@@ -22,6 +22,7 @@ func policyDesc() *kindDesc[api.FirewallPolicy] {
 	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.FirewallPolicy] { return c.Firewall().Policies() })
 	d.renameLong = renameLong("firewall policy", `the jails and the profiles of the project that use it and, for the
 project's mandatory policy (renamed by a global administrator), the project`)
+	d.show = func(a *app, p api.FirewallPolicy) error { return a.showPolicy(p) }
 	d.head = []string{"NAME", "DEFAULT-IN", "DEFAULT-OUT", "RULES", "RAW"}
 	d.row = func(_ time.Time, p api.FirewallPolicy) []string {
 		raw := "no"
@@ -42,6 +43,7 @@ func addrSetDesc() *kindDesc[api.AddressSet] {
 	d.renameLong = renameLong("address set", `the rules (@NAME) of the policies of the project, the sets that
 include it and the app access grants made from it. Its PF table is renamed too, which ends the
 connections that rules using it passed once; they are made again`)
+	d.show = func(a *app, p api.AddressSet) error { return a.showAddressSet(p) }
 	d.head = []string{"NAME", "ADDRESSES", "INCLUDES"}
 	d.row = func(_ time.Time, p api.AddressSet) []string {
 		return []string{p.Metadata.Name, strconv.Itoa(len(p.Spec.Addresses)), joinOrDash(p.Spec.Includes)}
@@ -52,9 +54,10 @@ connections that rules using it passed once; they are made again`)
 func (a *app) firewallCmd() *cobra.Command {
 	fc := group("firewall", "Manage firewall policies and address sets",
 		`A firewall policy is a declarative list of rules rendered into one PF anchor per
-jail; jailops never owns the host's pf.conf. Rules may refer to address sets as
-@name and to jails by tag as tag:name. 'jailops firewall validate' checks files
-offline before they are applied.`,
+jail; jailops never owns the host's pf.conf. Rules may refer to an address set or
+to a jail of the project as @name (a jail by its addresses), and to jails by tag
+as tag:name. 'jailops firewall validate' checks files offline before they are
+applied.`,
 		`jailops firewall policy list
 jailops firewall address-set create office --address 192.0.2.0/24
 jailops firewall validate -f policy.yaml`, "fw")
@@ -62,17 +65,20 @@ jailops firewall validate -f policy.yaml`, "fw")
 	pc := group("policy", "Manage firewall policies", "Create, inspect, edit and delete firewall policies.",
 		"jailops firewall policy list\njailops firewall policy show web", "policies")
 	crudCommands(a, pc, pd, `Create a firewall policy from rule flags or a file. Each --rule has the form
-"ACTION DIRECTION [PROTO] [from ADDR,..] [to ADDR,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT]".`,
-		`jailops firewall policy create web --default-in deny --default-out allow --rule "allow in tcp port 80,443" --rule "allow in tcp from @office port 22"
+"ACTION DIRECTION [PROTO] [from ADDR,..] [to ADDR,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [comment TEXT]";
+comment is last and takes the rest of the rule: why the rule is there, which a reviewer of the firewall reads.
+--comment is what the policy is for.`,
+		`jailops firewall policy create web --default-in deny --default-out allow --comment "the public web server" --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from @office port 22 comment ssh from the office"
 jailops firewall policy create -f web.yaml`,
 		func(cmd *cobra.Command) func(string) (api.FirewallPolicy, error) {
-			var din, dout string
+			var din, dout, comment string
 			var rules []string
+			cmd.Flags().StringVar(&comment, "comment", "", "what the policy is for (one line, at most 200 characters, no double quotes or backslashes)")
 			cmd.Flags().StringVar(&din, "default-in", "", "default for inbound traffic: allow or deny")
 			cmd.Flags().StringVar(&dout, "default-out", "", "default for outbound traffic: allow or deny")
 			cmd.Flags().StringArrayVar(&rules, "rule", nil, "a rule (repeatable)")
 			return func(name string) (api.FirewallPolicy, error) {
-				p := api.FirewallPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.FirewallPolicySpec{DefaultIn: din, DefaultOut: dout}}
+				p := api.FirewallPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.FirewallPolicySpec{DefaultIn: din, DefaultOut: dout, Comment: comment}}
 				for _, r := range rules {
 					fr, err := parseRule(r)
 					if err != nil {
@@ -84,19 +90,28 @@ jailops firewall policy create -f web.yaml`,
 			}
 		})
 	ad := addrSetDesc()
-	ac := group("address-set", "Manage address sets", "Create, inspect, edit and delete address sets referenced as @name in rules.",
+	ac := group("address-set", "Manage address sets", "Create, inspect, edit and delete address sets referenced as @name in rules. A member is an address, a CIDR or @jail. Every entry, set, rule and policy has a `comment`: what it is or why it is there. `show` lists them and the rendered rules carry them as comment lines: comments are what a reviewer of the firewall reads.",
 		"jailops firewall address-set list\njailops firewall address-set show office", "address-sets", "set")
 	crudCommands(a, ac, ad, "Create an address set from --address flags or a file. Sets may include other sets; cycles are rejected.",
-		"jailops firewall address-set create office --address 192.0.2.0/24 --address 198.51.100.7\njailops firewall address-set create -f office.yaml",
+		"jailops firewall address-set create office --address 192.0.2.0/24 --comment \"the office\"\njailops firewall address-set create -f office.yaml",
 		func(cmd *cobra.Command) func(string) (api.AddressSet, error) {
 			var addrs, incl []string
-			cmd.Flags().StringArrayVar(&addrs, "address", nil, "address or CIDR (repeatable)")
+			var comment string
+			cmd.Flags().StringArrayVar(&addrs, "address", nil, "address, CIDR or @jail (repeatable)")
+			cmd.Flags().StringVar(&comment, "comment", "", "what the address is (with a single --address; several entries with comments come from a file, -f, or address-set edit)")
 			cmd.Flags().StringArrayVar(&incl, "include", nil, "name of another address set to include (repeatable)")
 			return func(name string) (api.AddressSet, error) {
 				if len(addrs) == 0 && len(incl) == 0 {
 					return api.AddressSet{}, usagef("give at least one --address or --include (or use -f FILE)")
 				}
-				return api.AddressSet{Metadata: api.ObjectMeta{Name: name}, Spec: api.AddressSetSpec{Addresses: addrs, Includes: incl}}, nil
+				spec := api.AddressSetSpec{Addresses: api.Entries(addrs...), Includes: incl}
+				if comment != "" {
+					if len(addrs) != 1 {
+						return api.AddressSet{}, usagef("--comment describes a single --address; for several entries with comments use a file (-f FILE) or 'address-set edit'")
+					}
+					spec.Addresses[0].Comment = comment
+				}
+				return api.AddressSet{Metadata: api.ObjectMeta{Name: name}, Spec: spec}, nil
 			}
 		})
 	fc.AddCommand(pc, ac, a.firewallValidate())
@@ -119,6 +134,12 @@ func parseRule(s string) (api.FirewallRule, error) {
 		switch t[0] {
 		case "log":
 			r.Log, t = true, t[1:]
+			continue
+		case "comment": // the rest of the rule
+			if len(t) < 2 {
+				return r, usagef("rule %q: comment needs a text", s)
+			}
+			r.Comment, t = strings.Join(t[1:], " "), nil
 			continue
 		}
 		if len(t) < 2 {
@@ -241,7 +262,11 @@ func validateAddrSets(sets map[string]api.AddressSetSpec, docs map[string]bool) 
 			continue
 		}
 		s := sets[name]
-		for _, a := range s.Addresses {
+		for _, e := range s.Addresses {
+			a := e.Address
+			if strings.HasPrefix(a, "@") { // a jail or a set: checked where the objects are known
+				continue
+			}
 			if _, err := netip.ParsePrefix(a); err != nil {
 				if _, err := netip.ParseAddr(a); err != nil {
 					out = append(out, finding{doc, "error", fmt.Sprintf("invalid address %q", a)})

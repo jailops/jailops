@@ -178,7 +178,7 @@ kind: AddressSet
 metadata:
   name: office
 spec:
-  addresses: [203.0.113.0/28, 198.51.100.7]
+  addresses: [{address: 203.0.113.0/28}, {address: 198.51.100.7}]
 `)
 	e.Write("projects/"+Project+"/firewall-policies/web.yaml", `apiVersion: jailops/v1
 kind: FirewallPolicy

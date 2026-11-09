@@ -36,7 +36,7 @@ const password = () => {
   return Array.from(b, (x) => abc[x % abc.length]).join('')
 }
 
-export function demoAccess(jails: () => Jail[], sets: () => Array<{ metadata: { name: string }; spec: { addresses: string[] } }>, def: (app: string) => App | undefined) {
+export function demoAccess(jails: () => Jail[], sets: () => Array<{ metadata: { name: string }; spec: { addresses: Array<{ address: string }> } }>, def: (app: string) => App | undefined) {
   const state = new Map<string, State>()
   const web = '10.20.0.11'
   state.set('db', {
@@ -87,7 +87,7 @@ export function demoAccess(jails: () => Jail[], sets: () => Array<{ metadata: { 
         kind = 'jail'; from = addrOf(src); prefixes = from.map((a) => `${a}/32`)
         if (!from.length) return { status: 400, code: 'invalid', message: `jail "${n}" has no address to allow` }
       } else if (set) {
-        kind = 'address-set'; from = [b.source]; prefixes = [...set.spec.addresses]
+        kind = 'address-set'; from = [b.source]; prefixes = set.spec.addresses.map((e) => e.address)
       } else return { status: 404, code: 'not_found', message: `@${n} is neither a jail nor an address set of project ${j.metadata.project}`, hint: 'jailops list and jailops firewall address-set list show the names' }
     } else {
       canonical = b.source.replace(/\/(32|128)$/, '')

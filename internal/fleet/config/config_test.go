@@ -209,7 +209,7 @@ func TestCheckFindsAddressSetCycleAndBadValues(t *testing.T) {
 	d := base(t)
 	project(t, d, "w", "[a, b, c]", "")
 	write(t, d, "projects/w/address-sets/p.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: p\nspec:\n  includes: [q]\n")
-	write(t, d, "projects/w/address-sets/q.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: q\nspec:\n  includes: [p]\n  addresses: [not-an-ip]\n")
+	write(t, d, "projects/w/address-sets/q.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: q\nspec:\n  includes: [p]\n  addresses: [{address: not-an-ip}]\n")
 	write(t, d, "shared/networks/n.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  ipv4: {subnet: 10.0.0.0/24, gateway: 10.9.9.9, range: 10.0.0.9-10.0.0.2}\n")
 	f, err := Load(d)
 	if err != nil {
@@ -220,6 +220,33 @@ func TestCheckFindsAddressSetCycleAndBadValues(t *testing.T) {
 		t.Fatal("expected errors")
 	}
 	for _, w := range []string{"include cycle: p -> q -> p", `"not-an-ip" is neither`, "ipv4.gateway", "ipv4.range"} {
+		if !strings.Contains(err.Error(), w) {
+			t.Errorf("missing %q in %v", w, err)
+		}
+	}
+}
+
+// @name as a member of a set is a set or a jail of the project: a member that is neither is an error, and sets that reach
+// each other through members are a cycle, as through includes.
+func TestCheckFollowsSetMembersThatNameSetsAndJails(t *testing.T) {
+	d := base(t)
+	project(t, d, "w", "[a, b, c]", "")
+	set := func(name, members string) {
+		write(t, d, "projects/w/address-sets/"+name+".yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: "+name+"\nspec:\n  addresses: ["+members+"]\n")
+	}
+	set("x", "{address: \"@y\", comment: the other set}")
+	set("y", "{address: \"@x\"}")
+	set("z", "{address: \"@ghost\", comment: nobody}")
+	write(t, d, "projects/w/firewall-policies/p.yaml", "apiVersion: jailops/v1\nkind: FirewallPolicy\nmetadata:\n  name: p\nspec:\n  rules:\n    - {action: allow, direction: in, from: [\"@ghost2\"]}\n")
+	f, err := Load(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = f.Check()
+	if err == nil {
+		t.Fatal("expected errors")
+	}
+	for _, w := range []string{"include cycle: x -> y -> x", "@ghost, which is neither an address set nor a jail", "@ghost2, which is neither an address set nor a jail"} {
 		if !strings.Contains(err.Error(), w) {
 			t.Errorf("missing %q in %v", w, err)
 		}
@@ -292,13 +319,13 @@ func TestProjectLayoutRules(t *testing.T) {
 		"hosts required":              {map[string]string{"projects/web.yaml": proj("  description: x\n")}, "spec.hosts is required"},
 		"unknown host":                {map[string]string{"projects/web.yaml": proj("  hosts: [zz]\n")}, `unknown host "zz"`},
 		"default is an ordinary name": {map[string]string{"projects/default.yaml": strings.Replace(proj("  hosts: [a]\n"), "web", "default", 1)}, ""},
-		"object without a project":    {map[string]string{"hosts/a/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\nspec:\n  addresses: [1.1.1.1]\n"}, "belongs to a project"},
+		"object without a project":    {map[string]string{"hosts/a/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\nspec:\n  addresses: [{address: 1.1.1.1}]\n"}, "belongs to a project"},
 		"jail outside a project":      {map[string]string{"hosts/a/jails/j.yaml": "apiVersion: jailops/v1\nkind: Jail\nmetadata:\n  name: j\nspec:\n  image: i\n"}, "put it under projects/<project>/jails/"},
 		"dir w/o project":             {map[string]string{"projects/web/jails/j.yaml": "x"}, "no projects/web.yaml"},
-		"undefined project":           {map[string]string{"shared/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\n  project: ghost\nspec:\n  addresses: [1.1.1.1]\n"}, `project "ghost" is not defined`},
+		"undefined project":           {map[string]string{"shared/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\n  project: ghost\nspec:\n  addresses: [{address: 1.1.1.1}]\n"}, `project "ghost" is not defined`},
 		"host not in project": {map[string]string{
 			"projects/web.yaml":           proj("  hosts: [a]\n"),
-			"hosts/b/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\n  project: web\nspec:\n  addresses: [1.1.1.1]\n"}, "not one of project web's hosts"},
+			"hosts/b/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\n  project: web\nspec:\n  addresses: [{address: 1.1.1.1}]\n"}, "not one of project web's hosts"},
 		"jail on two hosts": {map[string]string{
 			"projects/web.yaml":         proj("  hosts: [a, b]\n"),
 			"projects/web/jails/j.yaml": "apiVersion: jailops/v1\nkind: Jail\nmetadata:\n  name: j\nspec:\n  image: i\n"}, "exactly one named host"},
@@ -309,12 +336,12 @@ func TestProjectLayoutRules(t *testing.T) {
 		"same name two projects ok": {map[string]string{
 			"projects/web.yaml":                proj("  hosts: [a]\n"),
 			"projects/db.yaml":                 strings.Replace(proj("  hosts: [a]\n"), "web", "db", 1),
-			"projects/db/address-sets/s.yaml":  "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\nspec:\n  addresses: [1.1.1.1]\n",
-			"projects/web/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\nspec:\n  addresses: [2.2.2.2]\n"}, ""},
+			"projects/db/address-sets/s.yaml":  "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\nspec:\n  addresses: [{address: 1.1.1.1}]\n",
+			"projects/web/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\nspec:\n  addresses: [{address: 2.2.2.2}]\n"}, ""},
 		"duplicate in one project": {map[string]string{
 			"projects/web.yaml":                proj("  hosts: [a]\n"),
-			"hosts/a/address-sets/s.yaml":      "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\n  project: web\nspec:\n  addresses: [1.1.1.1]\n",
-			"projects/web/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\nspec:\n  addresses: [2.2.2.2]\n"}, "duplicate AddressSet"},
+			"hosts/a/address-sets/s.yaml":      "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\n  project: web\nspec:\n  addresses: [{address: 1.1.1.1}]\n",
+			"projects/web/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\nspec:\n  addresses: [{address: 2.2.2.2}]\n"}, "duplicate AddressSet"},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {

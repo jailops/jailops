@@ -633,7 +633,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   // The server's texts for a refused address set (internal/validate), so the demo says what the daemon says.
   const setTexts: SetMsgs = {
     setRequired: '', setTooLong: '', setBadName: '', setExists: '',
-    setMember: (a) => `address set member "${a}" must be an address or CIDR`,
+    setMember: (a) => `address set member "${a}" must be an address, a CIDR or @jail`,
     setIncludeName: (n) => `includes "${n}" must match ^[a-z][a-z0-9_]{0,23}$`,
     setMissing: (n) => `address set "${n}" does not exist`,
     setCycle: (path) => `address set include cycle: ${path}`,
@@ -659,7 +659,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (seg.length === 2 && m === 'POST' && isSet) {
       const name = String(body.metadata?.name ?? '')
       if (sets.some((x) => x.metadata.name === name)) return fail(409, { code: 'already_exists', message: `address-set "${name}" already exists` })
-      const spec: AddressSetSpec = { addresses: body.spec?.addresses ?? [], ...(body.spec?.includes?.length ? { includes: body.spec.includes } : {}) }
+      const spec: AddressSetSpec = { ...(body.spec?.comment ? { comment: body.spec.comment } : {}), addresses: body.spec?.addresses ?? [], ...(body.spec?.includes?.length ? { includes: body.spec.includes } : {}) }
       const refused = setRefused(name, spec, sets)
       if (refused) return refused
       const set: AddressSet = { metadata: { name, project, scope: 'fleet', generation: 1, created_at: new Date().toISOString() }, spec }
@@ -714,7 +714,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const spec = (m === 'PATCH' ? { ...item.spec, ...(body.spec ?? {}) } : body.spec ?? {}) as Record<string, any>
     if (body.metadata?.name && body.metadata.name !== seg[2]) return fail(400, { code: 'invalid', message: 'renaming is not supported' })
     if (isSet) {
-      const next: AddressSetSpec = { addresses: spec.addresses ?? [], ...(spec.includes?.length ? { includes: spec.includes } : {}) }
+      const next: AddressSetSpec = { ...(spec.comment ? { comment: spec.comment } : {}), addresses: spec.addresses ?? [], ...(spec.includes?.length ? { includes: spec.includes } : {}) }
       const refused = setRefused(seg[2], next, sets)
       if (refused) return refused
       item.spec = next

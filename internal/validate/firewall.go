@@ -8,6 +8,9 @@ import (
 	"strings"
 
 	"jailops.net/jailops/sdk/api"
+
+	"unicode"
+	"unicode/utf8"
 )
 
 // MaxRawLen bounds a raw PF fragment.
@@ -31,6 +34,9 @@ func FirewallPolicySpec(s api.FirewallPolicySpec) (FirewallReport, error) {
 			return rep, Invalid(d.f, "%s %q must be allow or deny", d.f, d.v)
 		}
 	}
+	if err := Comment("comment", s.Comment); err != nil {
+		return rep, err
+	}
 	for i, r := range s.Rules {
 		if err := rule(fmt.Sprintf("rules[%d]", i), r); err != nil {
 			return rep, err
@@ -52,7 +58,31 @@ func FirewallPolicySpec(s api.FirewallPolicySpec) (FirewallReport, error) {
 	return rep, nil
 }
 
+// CommentMax is the longest comment on a firewall object: a rule, a policy, an address set or one of its entries.
+const CommentMax = 200
+
+// Comment checks the comment of a firewall object: one line of printable text of at most CommentMax characters, valid
+// UTF-8, without control, bidirectional or zero-width characters (a review tool shows what is there), line or paragraph
+// separators, double quotes or backslashes. The comment becomes a comment line of the PF ruleset: a backslash at the end of
+// a line would continue the comment onto the next line, which would then be part of it (a rule that is gone), and the
+// helper refuses a ruleset line with `file "` in it, comment or not.
+func Comment(field, c string) error {
+	if n := utf8.RuneCountInString(c); n > CommentMax {
+		return Invalid(field, "the comment is %d characters, at most %d", n, CommentMax)
+	}
+	if api.HasUnsafeText(c, "") || strings.ContainsFunc(c, func(r rune) bool { return unicode.Is(unicode.Zl, r) || unicode.Is(unicode.Zp, r) }) {
+		return Invalid(field, "the comment must be one line of printable text")
+	}
+	if strings.ContainsAny(c, "\"\\") {
+		return Invalid(field, "the comment may not contain a double quote or a backslash: it becomes a comment line of the PF ruleset")
+	}
+	return nil
+}
+
 func rule(f string, r api.FirewallRule) error {
+	if err := Comment(f+".comment", r.Comment); err != nil {
+		return err
+	}
 	if r.Name != "" {
 		if err := RuleName(f+".name", r.Name); err != nil {
 			return err
@@ -158,14 +188,14 @@ const (
 )
 
 // ParseEndpoint classifies a from/to entry: "any", an address or CIDR,
-// "@set" or "tag:<tag>". For EndpointAddr the canonical text is in value.
+// "@name" (an address set, or a jail of the project) or "tag:<tag>". For EndpointAddr the canonical text is in value.
 func ParseEndpoint(s string) (kind EndpointKind, value string, err error) {
 	switch {
 	case s == "any":
 		return EndpointAny, "any", nil
 	case strings.HasPrefix(s, "@"):
-		if e := SetName("address set", s[1:]); e != nil {
-			return 0, "", fmt.Errorf("address set reference %q is invalid", s)
+		if !setRefRE.MatchString(s[1:]) || strings.HasSuffix(s, "-") {
+			return 0, "", fmt.Errorf("reference %q is invalid: @name is an address set or a jail of the project", s)
 		}
 		return EndpointSet, s[1:], nil
 	case strings.HasPrefix(s, "tag:"):
@@ -196,11 +226,17 @@ func ValidateEndpoint(s string) error {
 
 // AddressSetSpec validates an address set.
 func AddressSetSpec(s api.AddressSetSpec) error {
-	for _, a := range s.Addresses {
-		k, _, err := ParseEndpoint(a)
-		if err != nil || k != EndpointAddr {
-			return Invalid("addresses", "address set member %q must be an address or CIDR", a)
+	for _, e := range s.Addresses {
+		k, _, err := ParseEndpoint(e.Address)
+		if err != nil || (k != EndpointAddr && k != EndpointSet) {
+			return Invalid("addresses", "address set member %q must be an address, a CIDR or @jail", e.Address)
 		}
+		if err := Comment("addresses", e.Comment); err != nil {
+			return Invalid("addresses", "the comment of %q: %v", e.Address, err)
+		}
+	}
+	if err := Comment("comment", s.Comment); err != nil {
+		return err
 	}
 	for _, in := range s.Includes {
 		if err := SetName("includes", in); err != nil {
@@ -225,16 +261,22 @@ func FlattenSet(name string, sets map[string]api.AddressSetSpec) ([]string, erro
 		}
 		s, ok := sets[n]
 		if !ok {
-			return Invalid("includes", "address set %q does not exist", n)
+			return Invalid("includes", "address set or jail %q does not exist (a rule or a set names @%s)", n, n)
 		}
 		if seen[n] {
 			return nil
 		}
 		path = append(path, n)
-		for _, a := range s.Addresses {
-			k, v, err := ParseEndpoint(a)
-			if err != nil || k != EndpointAddr {
-				return Invalid("addresses", "address set %q member %q must be an address or CIDR", n, a)
+		for _, e := range s.Addresses {
+			k, v, err := ParseEndpoint(e.Address)
+			if err != nil || (k != EndpointAddr && k != EndpointSet) {
+				return Invalid("addresses", "address set %q member %q must be an address, a CIDR or @jail", n, e.Address)
+			}
+			if k == EndpointSet { // @name: a jail of the project (its addresses), or another set, as an include is
+				if err := walk(v, path); err != nil {
+					return err
+				}
+				continue
 			}
 			out = append(out, v)
 		}

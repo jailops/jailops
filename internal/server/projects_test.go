@@ -670,7 +670,7 @@ func TestTagsDoNotCrossProjects(t *testing.T) {
 	}
 	_ = app
 	// An address set of one project is not visible from another.
-	if _, err := alpha.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: []string{"203.0.113.0/24"}}}); err != nil {
+	if _, err := alpha.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: api.Entries("203.0.113.0/24")}}); err != nil {
 		t.Fatal(err)
 	}
 	_, err := beta.Firewall().AddressSets().Get(c, "office")

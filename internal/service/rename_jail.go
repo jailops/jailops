@@ -61,6 +61,12 @@ func (s *Service) RenameJail(ctx context.Context, name string, o RenameOptions) 
 		if err := s.noAppAccess(proj, name); err != nil {
 			return nil, err
 		}
+		if err := s.noRuleNamesJail(proj, name, false); err != nil {
+			return nil, err
+		}
+		if err := s.jailClashesSet(proj, to); err != nil {
+			return nil, err
+		}
 		st := s.lcfg.StorageOf(key)
 		fromDS, fromMP := lifecycle.ContainerOn(st, proj, name)
 		toDS, toMP := lifecycle.ContainerOn(st, proj, to)
@@ -173,6 +179,39 @@ func (s *Service) noAppAccess(project, name string) error {
 			if g.Kind == api.AccessSourceJail && sp == project && g.SourceName == name {
 				return api.Errorf(api.CodeConflict, "jail %q may connect to app %s (project %s) through app access", name, r.Meta.Name, r.Meta.Project).WithHint(hint)
 			}
+		}
+	}
+	return nil
+}
+
+// noRuleNamesJail refuses a jail, to rename or to delete, that a firewall policy or an address set of its project names as
+// @NAME (and no address set has that name): the reference would end up naming nothing, and the rule would stop matching.
+func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
+	hint := "change the rule or the member to the new name first (jailops firewall policy edit, address-set edit), or name the jail by an address set"
+	if deleting {
+		hint = "remove that reference first (jailops firewall policy edit, address-set edit): a rule that names a jail that is gone matches nobody, and a jail made later under the name would take its place"
+	}
+	if _, err := s.setKind.p(project).get(name); err == nil {
+		return nil // @name is that address set, not the jail
+	}
+	pols, err := s.polKind.p(project).list()
+	if err != nil {
+		return err
+	}
+	for _, o := range pols {
+		for i, r := range o.Spec.Rules {
+			if slices.Contains(r.From, "@"+name) || slices.Contains(r.To, "@"+name) {
+				return api.Errorf(api.CodeConflict, "jail %q is named by rule %d of firewall policy %s", name, i+1, o.Meta.Name).WithHint(hint)
+			}
+		}
+	}
+	sets, err := s.setKind.p(project).list()
+	if err != nil {
+		return err
+	}
+	for _, o := range sets {
+		if slices.Contains(o.Spec.Members(), "@"+name) {
+			return api.Errorf(api.CodeConflict, "jail %q is a member of address set %s", name, o.Meta.Name).WithHint(hint)
 		}
 	}
 	return nil

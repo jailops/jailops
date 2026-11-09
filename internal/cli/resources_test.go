@@ -145,6 +145,17 @@ func TestFirewall(t *testing.T) {
 	tr := h.transcript()
 	tr.ok("firewall", "address-set", "create", "office", "--address", "192.0.2.0/24", "--address", "198.51.100.7")
 	tr.do("", "firewall", "address-set", "create", "empty")
+	// a comment describes the address before it
+	tr.ok("firewall", "address-set", "create", "hq", "--address", "192.0.2.9", "--comment", "the office")
+	tr.ok("firewall", "address-set", "show", "hq", "-o", "yaml")
+	tr.ok("firewall", "address-set", "show", "hq")
+	tr.ok("firewall", "policy", "create", "documented", "--default-in", "deny", "--comment", "the public web server",
+		"--rule", "allow in tcp port 80,443 comment the site", "--rule", "allow in tcp from @hq port 22 comment ssh from the office")
+	tr.ok("firewall", "policy", "show", "documented", "-o", "yaml")
+	tr.ok("firewall", "policy", "show", "documented")
+	tr.do("", "firewall", "policy", "create", "nocomment", "--rule", "allow in tcp port 80 comment")
+	tr.do("", "firewall", "address-set", "create", "c1", "--comment", "no address")
+	tr.do("", "firewall", "address-set", "create", "c2", "--address", "192.0.2.2", "--address", "192.0.2.3", "--comment", "which one")
 	tr.ok("firewall", "policy", "create", "web", "--default-in", "deny", "--default-out", "allow",
 		"--rule", "allow in tcp port 80,443", "--rule", "allow in tcp from @office port 22 log", "--rule", "allow in tcp port 8080 rdr 8080:80")
 	tr.do("", "firewall", "policy", "create", "bad", "--rule", "allow")
@@ -163,7 +174,7 @@ spec:
 ---
 kind: AddressSet
 metadata: {name: office}
-spec: {addresses: ["192.0.2.0/24"]}
+spec: {addresses: [{address: "192.0.2.0/24", comment: "the office"}], comment: "who works from the office"}
 `, 0o644)
 	badf := writeFile(t, h.dir, "bad.yaml", `kind: FirewallPolicy
 metadata: {name: p2}

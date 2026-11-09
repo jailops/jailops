@@ -480,13 +480,13 @@ func TestFirewall(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
 	fw := e.Admin.Firewall()
-	set, err := fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: []string{"203.0.113.0/24"}}})
+	set, err := fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: api.Entries("203.0.113.0/24")}})
 	if err != nil || set.Metadata.Generation != 1 {
 		t.Fatalf("%v %+v", err, set)
 	}
 	_, err = fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "loop"}, Spec: api.AddressSetSpec{Includes: []string{"loop"}}})
 	wantCode(t, err, api.CodeInvalid)
-	_, err = fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "bad"}, Spec: api.AddressSetSpec{Addresses: []string{"not an address"}}})
+	_, err = fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "bad"}, Spec: api.AddressSetSpec{Addresses: api.Entries("not an address")}})
 	wantCode(t, err, api.CodeInvalid)
 	pol := api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow",
 		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"22"}}}}}
@@ -532,7 +532,7 @@ func TestFirewall(t *testing.T) {
 		t.Fatalf("anchor not loaded: %q", live)
 	}
 	// Changing the set reloads the anchor of the running jail.
-	set.Spec.Addresses = []string{"198.51.100.0/24"}
+	set.Spec.Addresses = api.Entries("198.51.100.0/24")
 	if _, err := fw.AddressSets().Update(c, "office", set, `"1"`); err != nil {
 		t.Fatal(err)
 	}
