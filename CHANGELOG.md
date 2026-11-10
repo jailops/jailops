@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.5 - 2026-11-10
+
 - **An installed app starts when the host boots.** `jailops app install` sets `boot.autostart`, so a service comes back
   after a reboot without a second command; `jailops config set JAIL boot.autostart false` turns it off for one jail.
 
