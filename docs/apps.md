@@ -269,12 +269,13 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    policy of that name that app access does not manage refuses the installation before it starts (`conflict`).
 8. **Take the snapshot `app-installed`** of all the jail's datasets: the point to roll back to before the first
    change (`jailops jail rollback JAIL --all --snapshot app-installed`).
-9. **Say how to reach it**: the jail's addresses with the `ports` (`endpoint` is `<first address>:<port>`), the
+9. **Start with the host** (`enable-autostart`): `boot.autostart` of the jail is turned on, the last step, so that an
+   installation that was interrupted or failed, and is kept stopped for inspection, never starts again by itself. The
+   jail then comes back at every boot, in the order `jailops boot` shows;
+   `jailops config set JAIL boot.autostart false` turns it off for one jail.
+10. **Say how to reach it**: the jail's addresses with the `ports` (`endpoint` is `<first address>:<port>`), the
    `data`, `config` and `logs` paths, and the `notes`. Ports marked `expose: true` are recorded as such and nothing
    more: forwarding them through the jail's PF anchor (`proxy` devices) is a later feature.
-
-The jail is made with `boot.autostart: true`: an installed service starts every time the host boots, in the order
-`jailops boot` shows. `jailops config set JAIL boot.autostart false` turns it off for one jail.
 
 The events `app.installed` and `app.install.failed` (source `/api/v1/jails/<jail>`) end it, after the ordinary
 `jail-created`, `jail-started` and `jail-snapshot-created` of the steps.

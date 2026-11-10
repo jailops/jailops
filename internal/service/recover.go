@@ -195,6 +195,10 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		if err := s.life.StopJail(ctx, rest); err != nil {
 			return fail(err)
 		}
+		// kept for inspection means it does not come back with the host either
+		if err := s.setJailAutostart(ctx, rest, false); err != nil {
+			return fail(err)
+		}
 		out.Action, out.Detail = "completed", "the jail of the interrupted installation was stopped and kept for inspection; delete it to install again"
 		return out
 	case "image-build", "image-receive":

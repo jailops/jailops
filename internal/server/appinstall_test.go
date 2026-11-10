@@ -192,7 +192,7 @@ func TestAppInstall(t *testing.T) {
 	if len(res.Data) != 2 || len(res.Config) != 1 || len(res.Logs) != 1 || !strings.Contains(res.Notes, "/usr/local/www/web") {
 		t.Fatalf("%+v", res)
 	}
-	wantSteps := []string{"create-jail", "start-jail", "install-packages-ports", "install-packages-jailops", "set-up-shell", "refresh-library-cache", "record-version", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot"}
+	wantSteps := []string{"create-jail", "start-jail", "install-packages-ports", "install-packages-jailops", "set-up-shell", "refresh-library-cache", "record-version", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot", "enable-autostart"}
 	var steps []string
 	for _, s := range res.Steps {
 		_, rest, _ := strings.Cut(s, " ")
@@ -326,7 +326,7 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := op.Wait(c)
-	if err != nil || !res.DryRun || len(res.Steps) != 9 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
+	if err != nil || !res.DryRun || len(res.Steps) != 10 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
 		t.Fatalf("%v %+v", err, res)
 	}
 	if !strings.Contains(res.Steps[0], "fb151@stable") || !strings.Contains(res.Steps[3], "install -y bash") || !strings.Contains(res.Steps[6], "/usr/local/bin/tool --ping") {
@@ -578,6 +578,9 @@ func TestAppInstallRecovery(t *testing.T) {
 	j, err := e2.Admin.Jails().Get(c, "tool")
 	if err != nil || j.Status.Power != api.PowerStopped || j.Metadata.Labels[api.LabelApp] != "tool" {
 		t.Fatalf("%v %+v\n%s", err, j, e2.Log())
+	}
+	if j.Spec.Boot.Autostart {
+		t.Fatal("a jail kept for inspection starts with the host")
 	}
 	if _, ok, _ := e2.Jails.Get(c, "alpha_tool"); ok {
 		t.Fatal("the jail still runs")
@@ -869,7 +872,7 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 		if c2.health {
 			want = append(want, "health-check")
 		}
-		want = append(want, "close-firewall", "snapshot")
+		want = append(want, "close-firewall", "snapshot", "enable-autostart")
 		if got := names(res.Steps); !slices.Equal(got, want) {
 			t.Errorf("%s: steps %v, want %v", c2.app, res.Steps, want)
 		}
