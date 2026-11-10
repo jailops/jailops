@@ -203,8 +203,6 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		Volumes:   apps.Volumes(app.Data),
 		Resources: limits,
 		SysVIPC:   app.SysVIPC,
-		// An installed service is meant to run: it comes back when the host boots.
-		Boot: api.BootPolicy{Autostart: true},
 	}
 	im, ref, err := s.imageFor(spec)
 	if err != nil {
@@ -542,6 +540,10 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 			s.emitIn(ctx, proj, "jail-snapshot-created", "/api/v1/jails/"+jail+"/snapshots/"+r.Name)
 			return nil
 		}})
+	// An installed service is meant to run: it comes back when the host boots. The last step, so that an interrupted
+	// or failed installation, which is kept stopped for inspection, never starts again by itself.
+	pl.Add(plan.Step{Name: "enable-autostart", Describe: "boot.autostart of " + jail + ": start with the host",
+		Do: func(ctx context.Context) error { return s.setJailAutostart(ctx, key, true) }})
 	return pl
 }
 
@@ -612,6 +614,27 @@ func (s *Service) setJailLabels(ctx context.Context, key string, set map[string]
 	for k, v := range set {
 		nj.Metadata.Labels[k] = v
 	}
+	nj.Metadata.Generation++
+	nj.Metadata.UpdatedAt = s.now().UTC()
+	if err := s.writeJailRecord(ctx, nj); err != nil {
+		return internal(err)
+	}
+	s.mu.Lock()
+	if e := s.jails[key]; e != nil {
+		nj.Status.Generation = e.jail.Status.Generation
+		e.jail = nj
+	}
+	s.mu.Unlock()
+	return nil
+}
+
+// setJailAutostart writes boot.autostart of a jail without touching anything else of it.
+func (s *Service) setJailAutostart(ctx context.Context, key string, on bool) error {
+	nj, err := s.jailSnapshot(key)
+	if err != nil {
+		return err
+	}
+	nj.Spec.Boot.Autostart = on
 	nj.Metadata.Generation++
 	nj.Metadata.UpdatedAt = s.now().UTC()
 	if err := s.writeJailRecord(ctx, nj); err != nil {

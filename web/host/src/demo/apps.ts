@@ -260,6 +260,7 @@ export function installSteps(a: App, jail: string, project: string, image: strin
   if (h) out.push(['health-check', h.http ? `GET http://<first address>:${h.http.port}${h.http.path} until it answers ${h.http.status ?? 200}, at most ${h.wait_seconds ?? 60} attempts` : h.tcp ? `connect to <first address>:${h.tcp} until it accepts, at most ${h.wait_seconds ?? 60} attempts` : `in the jail: ${h.exec?.join(' ')} until it exits 0, at most ${h.wait_seconds ?? 60} attempts`])
   out.push(['close-firewall', `firewall policy app-${jail} (managed by app access): deny every inbound connection until jailops app allow ${jail} from SOURCE`])
   out.push(['snapshot', `snapshot every dataset of ${jail} as app-installed`])
+  out.push(['enable-autostart', `boot.autostart of ${jail}: start with the host`])
   return out.map(([n, d], i) => `${String(i + 1).padStart(2, '0')} ${n}: ${d}`)
 }
 

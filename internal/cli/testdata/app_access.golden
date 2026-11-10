@@ -9,7 +9,7 @@ App postgresql installed as jail db (running)
              /var/db/postgres/data18/pg_hba.conf (restart postgresql) Who may connect.
   Logs:      server /var/log/messages The port logs to syslog.
   Snapshot:  app-installed (jailops jail rollback db --all --snapshot app-installed goes back to it)
-  Steps:     11 done
+  Steps:     12 done
 Notes:
   Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql
 
@@ -24,7 +24,7 @@ App nginx installed as jail web (running)
   Logs:      access /var/log/nginx/access.log One line per request.
              error /var/log/nginx/error.log
   Snapshot:  app-installed (jailops jail rollback web --all --snapshot app-installed goes back to it)
-  Steps:     9 done
+  Steps:     10 done
 Notes:
   Put the site under /usr/local/www.
 
