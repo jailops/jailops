@@ -41,12 +41,12 @@ func addrSetDesc() *kindDesc[api.AddressSet] {
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.AddressSet] { return c.Firewall().AddressSets() })
 	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.AddressSet] { return c.Firewall().AddressSets() })
 	d.renameLong = renameLong("address set", `the rules (@NAME) of the policies of the project, the sets that
-include it and the app access grants made from it. Its PF table is renamed too, which ends the
+name it as a member (@NAME) and the app access grants made from it. Its PF table is renamed too, which ends the
 connections that rules using it passed once; they are made again`)
 	d.show = func(a *app, p api.AddressSet) error { return a.showAddressSet(p) }
-	d.head = []string{"NAME", "ADDRESSES", "INCLUDES"}
+	d.head = []string{"NAME", "ADDRESSES"}
 	d.row = func(_ time.Time, p api.AddressSet) []string {
-		return []string{p.Metadata.Name, strconv.Itoa(len(p.Spec.Addresses)), joinOrDash(p.Spec.Includes)}
+		return []string{p.Metadata.Name, strconv.Itoa(len(p.Spec.Addresses))}
 	}
 	return &d
 }
@@ -74,10 +74,13 @@ jailops firewall policy create -f web.yaml`,
 			var din, dout, comment string
 			var rules []string
 			cmd.Flags().StringVar(&comment, "comment", "", "what the policy is for (one line, at most 200 characters, no double quotes or backslashes)")
-			cmd.Flags().StringVar(&din, "default-in", "", "default for inbound traffic: allow or deny")
-			cmd.Flags().StringVar(&dout, "default-out", "", "default for outbound traffic: allow or deny")
+			cmd.Flags().StringVar(&din, "default-in", "", "default for inbound traffic: allow or deny (required)")
+			cmd.Flags().StringVar(&dout, "default-out", "", "default for outbound traffic: allow or deny (required)")
 			cmd.Flags().StringArrayVar(&rules, "rule", nil, "a rule (repeatable)")
 			return func(name string) (api.FirewallPolicy, error) {
+				if din == "" || dout == "" {
+					return api.FirewallPolicy{}, usagef("give --default-in and --default-out: allow or deny (or use -f FILE)")
+				}
 				p := api.FirewallPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.FirewallPolicySpec{DefaultIn: din, DefaultOut: dout, Comment: comment}}
 				for _, r := range rules {
 					fr, err := parseRule(r)
@@ -92,19 +95,18 @@ jailops firewall policy create -f web.yaml`,
 	ad := addrSetDesc()
 	ac := group("address-set", "Manage address sets", "Create, inspect, edit and delete address sets referenced as @name in rules. A member is an address, a CIDR or @jail. Every entry, set, rule and policy has a `comment`: what it is or why it is there. `show` lists them and the rendered rules carry them as comment lines: comments are what a reviewer of the firewall reads.",
 		"jailops firewall address-set list\njailops firewall address-set show office", "address-sets", "set")
-	crudCommands(a, ac, ad, "Create an address set from --address flags or a file. Sets may include other sets; cycles are rejected.",
+	crudCommands(a, ac, ad, "Create an address set from --address flags or a file. A member may be @name, a jail of the project or another set; cycles are rejected.",
 		"jailops firewall address-set create office --address 192.0.2.0/24 --comment \"the office\"\njailops firewall address-set create -f office.yaml",
 		func(cmd *cobra.Command) func(string) (api.AddressSet, error) {
-			var addrs, incl []string
+			var addrs []string
 			var comment string
 			cmd.Flags().StringArrayVar(&addrs, "address", nil, "address, CIDR or @jail (repeatable)")
 			cmd.Flags().StringVar(&comment, "comment", "", "what the address is (with a single --address; several entries with comments come from a file, -f, or address-set edit)")
-			cmd.Flags().StringArrayVar(&incl, "include", nil, "name of another address set to include (repeatable)")
 			return func(name string) (api.AddressSet, error) {
-				if len(addrs) == 0 && len(incl) == 0 {
-					return api.AddressSet{}, usagef("give at least one --address or --include (or use -f FILE)")
+				if len(addrs) == 0 {
+					return api.AddressSet{}, usagef("give at least one --address (or use -f FILE)")
 				}
-				spec := api.AddressSetSpec{Addresses: api.Entries(addrs...), Includes: incl}
+				spec := api.AddressSetSpec{Addresses: api.Entries(addrs...)}
 				if comment != "" {
 					if len(addrs) != 1 {
 						return api.AddressSet{}, usagef("--comment describes a single --address; for several entries with comments use a file (-f FILE) or 'address-set edit'")
@@ -206,7 +208,11 @@ func validatePolicy(doc string, p api.FirewallPolicySpec, sets func(string) bool
 	var out []finding
 	bad := func(f string, a ...any) { out = append(out, finding{doc, "error", fmt.Sprintf(f, a...)}) }
 	for _, d := range [][2]string{{"default_in", p.DefaultIn}, {"default_out", p.DefaultOut}} {
-		if d[1] != "" && d[1] != "allow" && d[1] != "deny" {
+		switch d[1] {
+		case "allow", "deny":
+		case "":
+			bad("%s is required: allow or deny", d[0])
+		default:
 			bad("%s must be allow or deny, not %q", d[0], d[1])
 		}
 	}
@@ -273,28 +279,25 @@ func validateAddrSets(sets map[string]api.AddressSetSpec, docs map[string]bool) 
 				}
 			}
 		}
-		for _, inc := range s.Includes {
-			if _, ok := sets[inc]; !ok {
-				out = append(out, finding{doc, "error", fmt.Sprintf("includes unknown address set %q", inc)})
-			}
-		}
 		// cycle search from this set
 		var walk func(n string, path []string) []string
 		walk = func(n string, path []string) []string {
 			if slices.Contains(path, n) {
 				return append(path, n)
 			}
-			for _, inc := range sets[n].Includes {
-				if _, ok := sets[inc]; ok {
-					if p := walk(inc, append(slices.Clone(path), n)); p != nil {
-						return p
+			for _, e := range sets[n].Addresses {
+				if inc, ok := strings.CutPrefix(e.Address, "@"); ok {
+					if _, isSet := sets[inc]; isSet {
+						if p := walk(inc, append(slices.Clone(path), n)); p != nil {
+							return p
+						}
 					}
 				}
 			}
 			return nil
 		}
 		if p := walk(name, nil); p != nil && p[len(p)-1] == name {
-			out = append(out, finding{doc, "error", "include cycle: " + strings.Join(p, " -> ")})
+			out = append(out, finding{doc, "error", "address set cycle: " + strings.Join(p, " -> ")})
 		}
 	}
 	return out

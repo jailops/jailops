@@ -278,7 +278,6 @@ export interface AddressSet {
 export interface AddressSetSpec {
   comment?: string
   addresses: AddressEntry[]
-  includes?: string[]
 }
 
 export interface App {
@@ -328,7 +327,6 @@ export interface AppAccessDef {
 export interface AppAccessGrant {
   source: string
   source_kind: string
-  source_project?: string
   addresses?: string[]
   ports: string[]
   database?: string
@@ -759,8 +757,8 @@ export interface FirewallPolicy {
 
 export interface FirewallPolicySpec {
   comment?: string
-  default_in?: string
-  default_out?: string
+  default_in: string
+  default_out: string
   rules?: FirewallRule[]
   raw?: string
 }
@@ -1392,7 +1390,6 @@ export interface NetworkSpec {
   ipv6?: IPv6Net
   dns?: string[]
   mtu?: number
-  private?: boolean
 }
 
 export interface NetworkStatus {

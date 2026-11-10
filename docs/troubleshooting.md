@@ -24,6 +24,7 @@ example without FreeBSD), with a hint on the next line when there is one. `jailo
 | `zfs.pool`, `zfs.pool.<storage>` | the pools are `ONLINE` | `zpool status <pool>` |
 | `zfs.compat` | pool features against `zfs.compat_file` | `fail`: replication to an older host would fail; JailOps never runs `zpool upgrade` |
 | `jail.volumes` | the volume datasets of the jails have `canmount=noauto` | `warn`: a volume made before that has `canmount=on` and is mounted at boot before the jail root it lies in; run the `zfs set canmount=noauto <dataset>` the hint lists |
+| `firewall.defaults` | every stored firewall policy says `default_in` and `default_out` | `fail` names each policy that lacks one: the jails that use it (every jail of the project, for the mandatory policy) keep the anchor they have and are not rendered again; `jailops firewall policy edit NAME` sets the field |
 | `pf.anchors` | the three anchor lines are in the loaded ruleset | add them to `pf.conf` in the right order and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
@@ -72,9 +73,6 @@ anonymous, like an unauthenticated remote client. Run the command with `sudo`, o
 (`JAILOPS_TOKEN=jot_...`, created with `sudo jailops token create`) or a client certificate (`jailops remote add`). A lost user
 password is replaced by root with `sudo jailops user set-password NAME`.
 
-**`listen.unix.admin_group is no longer supported` (or `user_group`, `user_projects`) when the daemon starts.** Remove the key from
-`jailopsd.yaml`. Unix groups no longer grant a role; create the administrators as JailOps users (`sudo jailops user create NAME --admin`).
-
 **The daemon starts and every ZFS or jail operation fails with `forbidden`.** The helper refuses what `priv.conf` does not allow.
 The message names the line to add (`ndp-proxy`, `admin-host-mount`, ...). Edit `priv.conf` as root, `service jailopsd restart`.
 `service jailops_priv checkconfig` prints the effective roots and allow-lists.
@@ -95,8 +93,10 @@ or use a profile that carries them. Nothing is inferred.
 **`network N is already granted to project P`.** A network belongs to exactly one project. Use another network, or revoke the grant
 (`jailops network revoke`).
 
-**A jail cannot reach another project's jail.** By design: projects are closed to each other. Open it with a rule, for example
-an address set and a policy rule `allow in tcp from @name port ...`.
+**A jail cannot reach another project's jail.** By design: projects are closed to each other, like an external host.
+Open it with the addresses, written on both sides: an address set and a rule `allow in tcp from @name port ...` in the
+project that serves, a rule `allow out tcp to ADDRESS port ...` in the project that connects
+([networking-ipv6.md](networking-ipv6.md)).
 
 **A jail starts and has no network.** `jailops network show NAME` (conditions), `jailops doctor` (`sysctl.*`, `kernel.module.*`,
 `pf.anchors`). Check that forwarding is on for routed networks and that `pfil_member` is 1.

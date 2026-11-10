@@ -39,9 +39,9 @@ func srcNet(subnet, gw string) api.NetworkSpec {
 func sourceObjects() objs {
 	return objs{
 		nets: map[string]api.NetworkSpec{"lan": srcNet("10.20.0.0/24", "10.20.0.1"), "dmz": srcNet("10.30.0.0/24", "10.30.0.1")},
-		pols: map[string]api.FirewallPolicySpec{"web": {DefaultIn: "deny", Rules: []api.FirewallRule{
+		pols: map[string]api.FirewallPolicySpec{"web": {DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
 			{Action: "allow", Direction: "in", From: []string{"@office"}, Ports: []string{"443"}}}}},
-		sets: map[string]api.AddressSetSpec{"office": {Addresses: api.Entries("192.0.2.0/24"), Includes: []string{"vpn"}},
+		sets: map[string]api.AddressSetSpec{"office": {Addresses: api.Entries("192.0.2.0/24", "@vpn")},
 			"vpn": {Addresses: api.Entries("198.51.100.7")}, "unused": {Addresses: api.Entries("1.1.1.1")}},
 	}
 }
@@ -93,7 +93,7 @@ func TestBuildBundle(t *testing.T) {
 	// Missing references.
 	for name, mod := range map[string]func(objs){
 		"net": func(o objs) { delete(o.nets, "dmz") }, "policy": func(o objs) { delete(o.pols, "web") },
-		"set": func(o objs) { delete(o.sets, "vpn") },
+		"set": func(o objs) { delete(o.sets, "office") },
 	} {
 		o := sourceObjects()
 		mod(o)
@@ -260,7 +260,7 @@ func TestPreflightErrors(t *testing.T) {
 	}
 	// Existing different policy: kept, reported.
 	h := good()
-	h.Policies["web"] = api.FirewallPolicySpec{DefaultIn: "allow"}
+	h.Policies["web"] = api.FirewallPolicySpec{DefaultIn: "allow", DefaultOut: "allow"}
 	r := Preflight(b, api.RestoreRequest{}, h)
 	if !r.OK || !has(r.Changes, "existing policy is used") {
 		t.Fatalf("%+v", r)

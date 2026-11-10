@@ -64,7 +64,7 @@ func newLeakFixture(t *testing.T) *leakFixture {
 	if _, err := sn.Wait(c); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pa.Firewall().Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "zalphapol"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny"}}); err != nil {
+	if _, err := pa.Firewall().Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "zalphapol"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pa.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "zalphaset"}, Spec: api.AddressSetSpec{Addresses: api.Entries("10.0.0.0/8")}}); err != nil {

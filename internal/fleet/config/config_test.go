@@ -208,8 +208,8 @@ func TestHooksAreTypedData(t *testing.T) {
 func TestCheckFindsAddressSetCycleAndBadValues(t *testing.T) {
 	d := base(t)
 	project(t, d, "w", "[a, b, c]", "")
-	write(t, d, "projects/w/address-sets/p.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: p\nspec:\n  includes: [q]\n")
-	write(t, d, "projects/w/address-sets/q.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: q\nspec:\n  includes: [p]\n  addresses: [{address: not-an-ip}]\n")
+	write(t, d, "projects/w/address-sets/p.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: p\nspec:\n  addresses: [{address: \"@q\"}]\n")
+	write(t, d, "projects/w/address-sets/q.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: q\nspec:\n  addresses: [{address: \"@p\"}, {address: not-an-ip}]\n")
 	write(t, d, "shared/networks/n.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  ipv4: {subnet: 10.0.0.0/24, gateway: 10.9.9.9, range: 10.0.0.9-10.0.0.2}\n")
 	f, err := Load(d)
 	if err != nil {
@@ -219,7 +219,7 @@ func TestCheckFindsAddressSetCycleAndBadValues(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected errors")
 	}
-	for _, w := range []string{"include cycle: p -> q -> p", `"not-an-ip" is neither`, "ipv4.gateway", "ipv4.range"} {
+	for _, w := range []string{"address set cycle: p -> q -> p", `"not-an-ip" is neither`, "ipv4.gateway", "ipv4.range"} {
 		if !strings.Contains(err.Error(), w) {
 			t.Errorf("missing %q in %v", w, err)
 		}
@@ -227,7 +227,7 @@ func TestCheckFindsAddressSetCycleAndBadValues(t *testing.T) {
 }
 
 // @name as a member of a set is a set or a jail of the project: a member that is neither is an error, and sets that reach
-// each other through members are a cycle, as through includes.
+// each other through members are a cycle, .
 func TestCheckFollowsSetMembersThatNameSetsAndJails(t *testing.T) {
 	d := base(t)
 	project(t, d, "w", "[a, b, c]", "")
@@ -237,7 +237,7 @@ func TestCheckFollowsSetMembersThatNameSetsAndJails(t *testing.T) {
 	set("x", "{address: \"@y\", comment: the other set}")
 	set("y", "{address: \"@x\"}")
 	set("z", "{address: \"@ghost\", comment: nobody}")
-	write(t, d, "projects/w/firewall-policies/p.yaml", "apiVersion: jailops/v1\nkind: FirewallPolicy\nmetadata:\n  name: p\nspec:\n  rules:\n    - {action: allow, direction: in, from: [\"@ghost2\"]}\n")
+	write(t, d, "projects/w/firewall-policies/p.yaml", "apiVersion: jailops/v1\nkind: FirewallPolicy\nmetadata:\n  name: p\nspec:\n  default_in: deny\n  default_out: allow\n  rules:\n    - {action: allow, direction: in, from: [\"@ghost2\"]}\n")
 	f, err := Load(d)
 	if err != nil {
 		t.Fatal(err)
@@ -246,7 +246,7 @@ func TestCheckFollowsSetMembersThatNameSetsAndJails(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected errors")
 	}
-	for _, w := range []string{"include cycle: x -> y -> x", "@ghost, which is neither an address set nor a jail", "@ghost2, which is neither an address set nor a jail"} {
+	for _, w := range []string{"address set cycle: x -> y -> x", "@ghost, which is neither an address set nor a jail", "@ghost2, which is neither an address set nor a jail"} {
 		if !strings.Contains(err.Error(), w) {
 			t.Errorf("missing %q in %v", w, err)
 		}

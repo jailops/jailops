@@ -634,17 +634,22 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   const setTexts: SetMsgs = {
     setRequired: '', setTooLong: '', setBadName: '', setExists: '',
     setMember: (a) => `address set member "${a}" must be an address, a CIDR or @jail`,
-    setIncludeName: (n) => `includes "${n}" must match ^[a-z][a-z0-9_]{0,23}$`,
-    setMissing: (n) => `address set "${n}" does not exist`,
-    setCycle: (path) => `address set include cycle: ${path}`,
+    setCycle: (path) => `address set cycle: ${path}`,
   }
-  /** The checks of CreateAddressSet and UpdateAddressSet: name, members, include names, missing sets and cycles. */
-  function setRefused(name: string, spec: AddressSetSpec, inProject: AddressSet[]): RawResponse | null {
+  /** The checks of CreateAddressSet and UpdateAddressSet: name, members and cycles. */
+  function setRefused(name: string, spec: AddressSetSpec, inProject: AddressSet[], project: string): RawResponse | null {
     if (!SET_NAME.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9_]{0,23}$`, detail: { field: 'name' } })
     const others = Object.fromEntries(inProject.filter((x) => x.metadata.name !== name).map((x) => [x.metadata.name, x.spec]))
-    const e = validateSet(name, { addresses: spec.addresses ?? [], includes: spec.includes }, others, setTexts)
+    const e = validateSet(name, { addresses: spec.addresses ?? [] }, others, setTexts)
     if (e.addresses) return fail(400, { code: 'invalid', message: e.addresses, detail: { field: 'addresses' } })
-    if (e.includes) return fail(400, { code: 'invalid', message: e.includes, detail: { field: 'includes' } })
+    // @name is a set or a jail of the project
+    const jails = db.jails.filter((j) => (j.metadata.project ?? 'web') === project).map((j) => j.metadata.name)
+    for (const a of spec.addresses ?? []) {
+      const n = a.address.startsWith('@') ? a.address.slice(1) : ''
+      if (n && n !== name && !others[n] && !jails.includes(n)) {
+        return fail(400, { code: 'invalid', message: `address set or jail "${n}" does not exist (a rule or a set names @${n})`, detail: { field: 'addresses' } })
+      }
+    }
     return null
   }
   const quoted = (xs: string[]) => xs.map((x) => `"${x}"`).join(', ')
@@ -659,8 +664,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (seg.length === 2 && m === 'POST' && isSet) {
       const name = String(body.metadata?.name ?? '')
       if (sets.some((x) => x.metadata.name === name)) return fail(409, { code: 'already_exists', message: `address-set "${name}" already exists` })
-      const spec: AddressSetSpec = { ...(body.spec?.comment ? { comment: body.spec.comment } : {}), addresses: body.spec?.addresses ?? [], ...(body.spec?.includes?.length ? { includes: body.spec.includes } : {}) }
-      const refused = setRefused(name, spec, sets)
+      const spec: AddressSetSpec = { ...(body.spec?.comment ? { comment: body.spec.comment } : {}), addresses: body.spec?.addresses ?? [] }
+      const refused = setRefused(name, spec, sets, project)
       if (refused) return refused
       const set: AddressSet = { metadata: { name, project, scope: 'fleet', generation: 1, created_at: new Date().toISOString() }, spec }
       db.sets.push(set)
@@ -671,7 +676,10 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       const name = String(body.metadata?.name ?? '')
       if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9-]{0,62}$`, detail: { field: 'name' } })
       if (list.some((x) => x.metadata.name === name)) return fail(409, { code: 'already_exists', message: `Policy ${name} already exists.` })
-      const pol: FirewallPolicy = { metadata: { name, project, scope: 'host', generation: 1, created_at: new Date().toISOString() }, spec: { default_in: body.spec?.default_in ?? 'deny', default_out: body.spec?.default_out ?? 'allow', rules: body.spec?.rules ?? [] } }
+      for (const d of ['default_in', 'default_out']) {
+        if (body.spec?.[d] !== 'allow' && body.spec?.[d] !== 'deny') return fail(400, { code: 'invalid', message: `${d} is required: allow or deny (a policy says its defaults)`, detail: { field: d } })
+      }
+      const pol: FirewallPolicy = { metadata: { name, project, scope: 'host', generation: 1, created_at: new Date().toISOString() }, spec: { default_in: body.spec.default_in, default_out: body.spec.default_out, rules: body.spec?.rules ?? [] } }
       db.policies.push(pol)
       emit('firewall-created', `/api/v1/firewall/policies/${name}`)
       return ok(pol)
@@ -682,7 +690,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (m === 'GET') return ok(item, etagOf(item.metadata.generation))
     if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(item.metadata.generation)) return fail(412, { code: 'conflict', message: 'The object changed since you loaded it.', hint: 'Reload and apply your change again.' })
     if (m === 'DELETE' && isSet) {
-      // DeleteAddressSet: refused while a rule of a policy names @set or another set includes it
+      // DeleteAddressSet: refused while a rule of a policy names @set or another set has @set as a member
       const name = seg[2]
       const users = setUsers(name, policies, sets)
       if (users.policies.length) {
@@ -690,8 +698,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           hint: `remove @${name} from the rules of ${users.policies.join(', ')} first`, detail: { policies: users.policies.join(',') } })
       }
       if (users.sets.length) {
-        return fail(409, { code: 'busy', message: `address set "${name}" is included by ${quoted(users.sets)}`,
-          hint: `remove it from the includes of ${users.sets.join(', ')} first`, detail: { sets: users.sets.join(',') } })
+        return fail(409, { code: 'busy', message: `address set "${name}" is a member of ${quoted(users.sets)}`,
+          hint: `remove @${name} from the members of ${users.sets.join(', ')} first`, detail: { sets: users.sets.join(',') } })
       }
       db.sets = db.sets.filter((x) => x !== item)
       emit('address-set-deleted', `/api/v1/firewall/address-sets/${name}`)
@@ -714,8 +722,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const spec = (m === 'PATCH' ? { ...item.spec, ...(body.spec ?? {}) } : body.spec ?? {}) as Record<string, any>
     if (body.metadata?.name && body.metadata.name !== seg[2]) return fail(400, { code: 'invalid', message: 'renaming is not supported' })
     if (isSet) {
-      const next: AddressSetSpec = { ...(spec.comment ? { comment: spec.comment } : {}), addresses: spec.addresses ?? [], ...(spec.includes?.length ? { includes: spec.includes } : {}) }
-      const refused = setRefused(seg[2], next, sets)
+      const next: AddressSetSpec = { ...(spec.comment ? { comment: spec.comment } : {}), addresses: spec.addresses ?? [] }
+      const refused = setRefused(seg[2], next, sets, project)
       if (refused) return refused
       item.spec = next
       item.metadata.generation = (item.metadata.generation ?? 0) + 1

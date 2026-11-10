@@ -652,7 +652,7 @@ func projectFixture(t *testing.T, e *dtest.Env, s *service.Service) string {
 	if _, err := s.CreateAddressSet(alpha, api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.0/24")}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreatePolicy(alpha, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny",
+	if _, err := s.CreatePolicy(alpha, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow",
 		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"443"}}}}}); err != nil {
 		t.Fatal(err)
 	}

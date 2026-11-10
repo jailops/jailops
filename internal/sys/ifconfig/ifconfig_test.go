@@ -130,7 +130,7 @@ func TestCommandBridgeAndEpair(t *testing.T) {
 	if err := c.BridgeCreate(ctx, "office"); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.SetDescription(ctx, "jo0", "jailops:abc"); err != nil {
+	if err := c.SetDescription(ctx, "jo0", "jailops net=office bridge"); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.SetDescription(ctx, "jo0", ""); err != nil { // clearing keeps the marker
@@ -164,7 +164,7 @@ func TestCommandBridgeAndEpair(t *testing.T) {
 		"ifconfig bridge create",
 		"ifconfig bridge0 description " + Marker, // marked before it has its name
 		"ifconfig bridge0 name office",
-		"ifconfig jo0", "ifconfig jo0 description jailops:abc",
+		"ifconfig jo0", "ifconfig jo0 description jailops net=office bridge",
 		"ifconfig jo0", "ifconfig jo0 description " + Marker,
 		"ifconfig jo0", "ifconfig joweba", "ifconfig jo0 addm joweba private joweba",
 		"ifconfig jo0", "ifconfig jodbea", "ifconfig jo0 addm jodbea",
@@ -257,43 +257,33 @@ func TestBridgeCreateNeverAdopts(t *testing.T) {
 func TestOwnership(t *testing.T) {
 	type cas struct {
 		name, kind, desc string
-		want             Ownership
+		owned            bool
 		msg              string
 	}
 	for _, k := range []cas{
-		{"office", "bridge", Marker, OwnedByMarker, ""},
-		{"office", "bridge", "jailops net=office bridge", OwnedByMarker, ""},
-		{"jo0", "bridge", "jailops:0b0e7f3e", OwnedByMarker, ""},
-		{"officgb", "epair", "jailops net=office gateway (host side)", OwnedByMarker, ""},
-		{"jo7", "bridge", "", OwnedLegacy, ""},                                             // an older release, or a crash before the description
-		{"jo1234567890aab", "epair", "", OwnedLegacy, ""},                                  // an epair of an older release
-		{"mybr", "bridge", "", NotOwned, "has no JailOps description"},                     // a bridge made by hand
-		{"bridge0", "bridge", "", NotOwned, "has no JailOps description"},                  // the kernel's name
-		{"jo7", "bridge", "customer uplink bridge", NotOwned, "is not one JailOps writes"}, // a legacy name with someone's description
-		{"mybr", "bridge", "jailopsx", NotOwned, "is not one JailOps writes"},
-		{"mybr", "bridge", "Jailops managed", NotOwned, "is not one JailOps writes"},
-		{"vmx0", "vmx", "", NotOwned, "only bridges and epairs"},
-		{"vmx0", "vmx", Marker, NotOwned, "only bridges and epairs"}, // a forged description on the uplink
-		{"jo7", "vmx", "", NotOwned, "only bridges and epairs"},      // a renamed uplink with a legacy name
-		{"lo0", "lo", Marker, NotOwned, "only bridges and epairs"},
-		{"wg0", "wg", "jailops wireguard=office", NotOwned, "only bridges and epairs"},
-		{"tap0", "tap", Marker, NotOwned, "only bridges and epairs"},
+		{"office", "bridge", Marker, true, ""},
+		{"office", "bridge", "jailops net=office bridge", true, ""},
+		{"officgb", "epair", "jailops net=office gateway (host side)", true, ""},
+		{"mybr", "bridge", "", false, "has no JailOps description"},                     // a bridge made by hand
+		{"bridge0", "bridge", "", false, "has no JailOps description"},                  // the kernel's name
+		{"jo7", "bridge", "", false, "has no JailOps description"},                      // a name that looks like JailOps's is not a reason
+		{"jo1234567890aab", "epair", "", false, "has no JailOps description"},           // the same for an epair
+		{"jo0", "bridge", "jailops:0b0e7f3e", false, "is not one JailOps writes"},       // a description of another form
+		{"jo7", "bridge", "customer uplink bridge", false, "is not one JailOps writes"}, // someone's description
+		{"mybr", "bridge", "jailopsx", false, "is not one JailOps writes"},
+		{"mybr", "bridge", "Jailops managed", false, "is not one JailOps writes"},
+		{"vmx0", "vmx", "", false, "only bridges and epairs"},
+		{"vmx0", "vmx", Marker, false, "only bridges and epairs"}, // a forged description on the uplink
+		{"jo7", "vmx", "", false, "only bridges and epairs"},      // a renamed uplink with a JailOps-like name
+		{"lo0", "lo", Marker, false, "only bridges and epairs"},
+		{"wg0", "wg", "jailops wireguard=office", false, "only bridges and epairs"},
+		{"tap0", "tap", Marker, false, "only bridges and epairs"},
 	} {
 		i := ParseIfconfig(show(k.name, k.kind, k.desc))[0]
-		got, err := Options{}.Owns(i)
-		if got != k.want || (err == nil) != (k.msg == "") || err != nil && (!strings.Contains(err.Error(), k.msg) || !api.IsCode(err, api.CodeForbidden)) {
-			t.Errorf("%s/%s/%q: %v %v", k.name, k.kind, k.desc, got, err)
+		err := Options{}.Owns(i)
+		if (err == nil) != k.owned || (err == nil) != (k.msg == "") || err != nil && (!strings.Contains(err.Error(), k.msg) || !api.IsCode(err, api.CodeForbidden)) {
+			t.Errorf("%s/%s/%q: %v", k.name, k.kind, k.desc, err)
 		}
-	}
-	// the legacy prefixes are priv.conf's
-	if got, _ := (Options{Prefixes: []string{"old"}}).Owns(Iface{Name: "jo7", Groups: []string{"bridge"}}); got != NotOwned {
-		t.Error("jo is legacy only by default")
-	}
-	if got, _ := (Options{Prefixes: []string{"old"}}).Owns(Iface{Name: "old3", Groups: []string{"bridge"}}); got != OwnedLegacy {
-		t.Error("custom legacy prefix")
-	}
-	if got, _ := (Options{}).Owns(Iface{Name: "jo", Groups: []string{"bridge"}}); got != NotOwned {
-		t.Error("the prefix alone is not a legacy name")
 	}
 }
 
@@ -607,9 +597,9 @@ func TestFakeOwnership(t *testing.T) {
 	if err := f.BridgeCreate(ctx, "bridge7"); !api.IsCode(err, api.CodeInvalid) {
 		t.Errorf("a driver's name: %v", err)
 	}
-	// legacy: accepted (marking it is the helper's)
-	if err := f.SetLink(ctx, "jo7", true); err != nil {
-		t.Errorf("legacy: %v", err)
+	// a name that looks like JailOps's, without a description, is someone else's
+	if err := f.SetLink(ctx, "jo7", true); !api.IsCode(err, api.CodeForbidden) {
+		t.Errorf("a jo name without a description: %v", err)
 	}
 	// the marker travels into the jail's vnet and back
 	_, b, err := f.EpairCreate(ctx, "jox")

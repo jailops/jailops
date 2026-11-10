@@ -85,9 +85,9 @@ func TestDangers(t *testing.T) {
 		live, want any
 		danger     bool
 	}{
-		{"policy emptied", api.KindFirewallPolicy, api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "allow"}}}, api.FirewallPolicySpec{}, true},
-		{"policy opened", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultIn: "deny"}, api.FirewallPolicySpec{DefaultIn: "allow"}, true},
-		{"policy edited", api.KindFirewallPolicy, api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "allow"}}}, api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "deny"}}}, false},
+		{"policy emptied", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow"}}}, api.FirewallPolicySpec{}, true},
+		{"policy opened", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}, api.FirewallPolicySpec{DefaultIn: "allow"}, true},
+		{"policy edited", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow"}}}, api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "deny"}}}, false},
 		{"set emptied", api.KindAddressSet, api.AddressSetSpec{Addresses: api.Entries("1.1.1.1")}, api.AddressSetSpec{}, true},
 		{"set grown", api.KindAddressSet, api.AddressSetSpec{}, api.AddressSetSpec{Addresses: api.Entries("1.1.1.1")}, false},
 		{"jail unencrypted", api.KindJail, api.JailSpec{Image: "i", Encrypted: true}, api.JailSpec{Image: "i"}, true},

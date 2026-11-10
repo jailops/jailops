@@ -2,7 +2,7 @@ $ jailops firewall address-set create office --address 192.0.2.0/24 --address 19
 address set/office created
 
 $ jailops firewall address-set create empty
-! usage: give at least one --address or --include (or use -f FILE)
+! usage: give at least one --address (or use -f FILE)
 ! hint: run 'jailops firewall address-set create --help' for usage
 [exit 2]
 
@@ -30,7 +30,7 @@ Address set hq
 MEMBER      COMMENT
 192.0.2.9   the office
 
-$ jailops firewall policy create documented --default-in deny --comment the public web server --rule allow in tcp port 80,443 comment the site --rule allow in tcp from @hq port 22 comment ssh from the office
+$ jailops firewall policy create documented --default-in deny --default-out allow --comment the public web server --rule allow in tcp port 80,443 comment the site --rule allow in tcp from @hq port 22 comment ssh from the office
 firewall policy/documented created
 
 $ jailops firewall policy show documented -o yaml
@@ -45,6 +45,7 @@ metadata:
 spec:
   comment: the public web server
   default_in: deny
+  default_out: allow
   rules:
     - comment: the site
       action: allow
@@ -66,20 +67,25 @@ $ jailops firewall policy show documented
 Firewall policy documented
   Comment:      the public web server
   Default in:   deny
-  Default out:  (unset)
+  Default out:  allow
   Age:          3h
 
 #   RULE                            COMMENT
 1   allow in tcp port 80,443        the site
 2   allow in tcp from @hq port 22   ssh from the office
 
-$ jailops firewall policy create nocomment --rule allow in tcp port 80 comment
+$ jailops firewall policy create nocomment --default-in deny --default-out allow --rule allow in tcp port 80 comment
 ! usage: rule "allow in tcp port 80 comment": comment needs a text
 ! hint: run 'jailops firewall policy create --help' for usage
 [exit 2]
 
+$ jailops firewall policy create nodefaults --rule allow in tcp port 80
+! usage: give --default-in and --default-out: allow or deny (or use -f FILE)
+! hint: run 'jailops firewall policy create --help' for usage
+[exit 2]
+
 $ jailops firewall address-set create c1 --comment no address
-! usage: give at least one --address or --include (or use -f FILE)
+! usage: give at least one --address (or use -f FILE)
 ! hint: run 'jailops firewall address-set create --help' for usage
 [exit 2]
 
@@ -91,19 +97,19 @@ $ jailops firewall address-set create c2 --address 192.0.2.2 --address 192.0.2.3
 $ jailops firewall policy create web --default-in deny --default-out allow --rule allow in tcp port 80,443 --rule allow in tcp from @office port 22 log --rule allow in tcp port 8080 rdr 8080:80
 firewall policy/web created
 
-$ jailops firewall policy create bad --rule allow
+$ jailops firewall policy create bad --default-in deny --default-out allow --rule allow
 ! usage: rule "allow" needs at least ACTION and DIRECTION
 ! hint: run 'jailops firewall policy create --help' for usage
 [exit 2]
 
-$ jailops firewall policy create bad2 --rule allow in tcp bogus 1
+$ jailops firewall policy create bad2 --default-in deny --default-out allow --rule allow in tcp bogus 1
 ! usage: rule "allow in tcp bogus 1": unknown word "bogus"
 ! hint: run 'jailops firewall policy create --help' for usage
 [exit 2]
 
 $ jailops firewall policy list
 NAME         DEFAULT-IN   DEFAULT-OUT   RULES   RAW
-documented   deny         -             2       no
+documented   deny         allow         2       no
 web          deny         allow         3       no
 
 $ jailops firewall policy show web
@@ -118,9 +124,9 @@ Firewall policy web
 3   allow in tcp port 8080 rdr 8080:80      -
 
 $ jailops firewall address-set list
-NAME     ADDRESSES   INCLUDES
-hq       1           -
-office   2           -
+NAME     ADDRESSES
+hq       1
+office   2
 
 $ jailops firewall address-set show office -o json
 {

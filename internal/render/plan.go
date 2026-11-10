@@ -199,8 +199,7 @@ func DescribePlan(steps []Step) string {
 
 // NetworkInput is the input of NetworkPlan.
 type NetworkInput struct {
-	// ID is the network's UUID; interfaces that carry the marker of earlier releases (LegacyIfaceDesc) are
-	// recognised by it.
+	// ID is the network's UUID.
 	ID   string
 	Name string
 	// Bridge is the bridge name; spec.Bridge is used when empty.
@@ -322,9 +321,8 @@ type AttachInput struct {
 	Index                  int // attachment index within the jail
 	Bridge                 string
 	// MAC of the jail end; derived from JailUUID when empty.
-	MAC     string
-	MTU     int
-	Private bool
+	MAC string
+	MTU int
 	// IPv4 and IPv6 are the jail's address with the prefix length it
 	// configures (ipam.GuestPrefixLen6 for IPv6); zero means none.
 	IPv4, IPv6 netip.Prefix
@@ -400,7 +398,7 @@ func AttachPlan(in AttachInput) ([]Step, error) {
 	stat.Arg2 = host
 	out = append(out, with(stat, step(OpDelBridgeStat, in.Bridge, jmac)))
 	// Every jail port is private: frames never pass from a jail to another jail. A jail holds /32 and /128 addresses
-	// and reaches everything, the other jails included, through the host (in.Private is no longer consulted).
+	// and reaches everything, the other jails included, through the host.
 	out = append(out, with(step(OpSetPrivate, in.Bridge, host), step(OpClearPrivate, in.Bridge, host)))
 	out = append(out, with(step(OpIfaceUp, host, ""), step(OpIfaceDown, host, "")))
 	if proxy {

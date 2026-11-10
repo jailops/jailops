@@ -97,7 +97,13 @@ func BuildBundle(spec api.JailSpec, gen api.ImageGeneration, src ObjectSource, s
 			return b, api.Errorf(api.CodeNotFound, "address set %q referenced by the policy does not exist", n)
 		}
 		seen[n] = deepCopy(as)
-		pending = append(pending, as.Includes...)
+		for _, m := range as.Members() { // a member @name is another set, or a jail (not a set)
+			if n, ok := strings.CutPrefix(m, "@"); ok {
+				if _, isSet := src.AddressSet(n); isSet {
+					pending = append(pending, n)
+				}
+			}
+		}
 	}
 	for n := range seen {
 		b.AddressSetNames = append(b.AddressSetNames, n)

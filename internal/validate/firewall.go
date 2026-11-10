@@ -29,7 +29,9 @@ func FirewallPolicySpec(s api.FirewallPolicySpec) (FirewallReport, error) {
 	var rep FirewallReport
 	for _, d := range []struct{ f, v string }{{"default_in", s.DefaultIn}, {"default_out", s.DefaultOut}} {
 		switch d.v {
-		case "", "allow", "deny":
+		case "allow", "deny":
+		case "":
+			return rep, Invalid(d.f, "%s is required: allow or deny (a policy says its defaults)", d.f)
 		default:
 			return rep, Invalid(d.f, "%s %q must be allow or deny", d.f, d.v)
 		}
@@ -238,17 +240,11 @@ func AddressSetSpec(s api.AddressSetSpec) error {
 	if err := Comment("comment", s.Comment); err != nil {
 		return err
 	}
-	for _, in := range s.Includes {
-		if err := SetName("includes", in); err != nil {
-			return err
-		}
-	}
 	return nil
 }
 
-// FlattenSet expands an address set with all its includes into canonical,
-// sorted, de-duplicated address/CIDR strings. A missing set or a cycle in
-// includes is an error.
+// FlattenSet expands an address set with the sets and jails it names as @name into canonical,
+// sorted, de-duplicated address/CIDR strings. A missing name or a cycle is an error.
 func FlattenSet(name string, sets map[string]api.AddressSetSpec) ([]string, error) {
 	seen := map[string]bool{}
 	var walk func(n string, path []string) error
@@ -256,12 +252,12 @@ func FlattenSet(name string, sets map[string]api.AddressSetSpec) ([]string, erro
 	walk = func(n string, path []string) error {
 		for _, p := range path {
 			if p == n {
-				return Invalid("includes", "address set include cycle: %s -> %s", strings.Join(path, " -> "), n)
+				return Invalid("addresses", "address set cycle: %s -> %s", strings.Join(path, " -> "), n)
 			}
 		}
 		s, ok := sets[n]
 		if !ok {
-			return Invalid("includes", "address set or jail %q does not exist (a rule or a set names @%s)", n, n)
+			return Invalid("addresses", "address set or jail %q does not exist (a rule or a set names @%s)", n, n)
 		}
 		if seen[n] {
 			return nil
@@ -272,18 +268,13 @@ func FlattenSet(name string, sets map[string]api.AddressSetSpec) ([]string, erro
 			if err != nil || (k != EndpointAddr && k != EndpointSet) {
 				return Invalid("addresses", "address set %q member %q must be an address, a CIDR or @jail", n, e.Address)
 			}
-			if k == EndpointSet { // @name: a jail of the project (its addresses), or another set, as an include is
+			if k == EndpointSet { // @name: a jail of the project (its addresses), or another set
 				if err := walk(v, path); err != nil {
 					return err
 				}
 				continue
 			}
 			out = append(out, v)
-		}
-		for _, in := range s.Includes {
-			if err := walk(in, path); err != nil {
-				return err
-			}
 		}
 		// A set reached again through another path is flattened once; the
 		// cycle check above only fires for sets on the current path.

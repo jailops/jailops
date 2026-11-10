@@ -45,7 +45,6 @@ const setDraft = ref<AddressSet | null>(null)
 const setOriginal = ref('')
 const setEtag = ref<string | undefined>()
 const setText = ref('')
-const setInc = ref('')
 const setComment = ref('')
 const setError = ref<ApiError | null>(null)
 const setErrors = ref<SetErrors>({})
@@ -70,7 +69,7 @@ watch(() => l.data.value, (d) => {
 
 // compared as the server would store them: an emptied comment is the same as none
 const dirty = computed(() => !!draft.value && JSON.stringify(clean(draft.value)) !== JSON.stringify(clean(JSON.parse(original.value))))
-const setNow = computed(() => setSpec(setText.value, setInc.value, setComment.value))
+const setNow = computed(() => setSpec(setText.value, setComment.value))
 const setDirty = computed(() => !!setDraft.value && JSON.stringify(setNow.value) !== setOriginal.value)
 const attached = computed(() => (l.data.value?.jails ?? []).filter((j) => j.spec.firewall?.policy === selected.value).map((j) => j.metadata.name))
 
@@ -165,9 +164,8 @@ async function pickSet(n: string): Promise<void> {
     if (mine !== setSeq) return
     setDraft.value = r.data
     setText.value = setTextOf(r.data.spec)
-    setInc.value = (r.data.spec.includes ?? []).join(', ')
     setComment.value = r.data.spec.comment ?? ''
-    setOriginal.value = JSON.stringify(setSpec(setText.value, setInc.value, setComment.value))
+    setOriginal.value = JSON.stringify(setSpec(setText.value, setComment.value))
     setEtag.value = r.etag
   } catch (e) {
     if (mine === setSeq) setError.value = e instanceof ApiError ? e : null
@@ -176,7 +174,6 @@ async function pickSet(n: string): Promise<void> {
 function revertSet(): void {
   if (!setDraft.value) return
   setText.value = setTextOf(setDraft.value.spec)
-  setInc.value = (setDraft.value.spec.includes ?? []).join(', ')
   setComment.value = setDraft.value.spec.comment ?? ''
   setErrors.value = {}
   setError.value = null
@@ -190,8 +187,8 @@ async function saveSet(): Promise<void> {
   if (!setDraft.value || !setDirty.value || setSaving.value) return
   setErrors.value = setCheck.value
   setError.value = null
-  if (setErrors.value.addresses || setErrors.value.includes) {
-    document.getElementById(setErrors.value.addresses ? 'sa' : 'si')?.focus()
+  if (setErrors.value.addresses) {
+    document.getElementById('sa')?.focus()
     return
   }
   setSaving.value = true
@@ -316,9 +313,9 @@ function removePolicy(): void {
               <input id="pc" v-model="draft.spec.comment" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.policyCommentHint" data-test="policy-comment" /></div>
             <div class="row">
               <div class="field" style="min-width: 160px"><label for="din">{{ s.firewall.defaultIn }}</label>
-                <select id="din" v-model="draft.spec.default_in"><option value="">-</option><option>allow</option><option>deny</option></select></div>
+                <select id="din" v-model="draft.spec.default_in"><option>allow</option><option>deny</option></select></div>
               <div class="field" style="min-width: 160px"><label for="dout">{{ s.firewall.defaultOut }}</label>
-                <select id="dout" v-model="draft.spec.default_out"><option value="">-</option><option>allow</option><option>deny</option></select></div>
+                <select id="dout" v-model="draft.spec.default_out"><option>allow</option><option>deny</option></select></div>
             </div>
             <h3>{{ s.firewall.rules }}</h3>
             <p v-if="!rules.length" class="muted">{{ s.firewall.noRules }}</p>
@@ -398,10 +395,6 @@ function removePolicy(): void {
               <textarea id="sa" v-model="setText" class="mono" rows="8" spellcheck="false" :aria-invalid="!!setErrors.addresses" aria-describedby="sa-h sa-e" @input="setErrors.addresses = undefined"></textarea>
               <span id="sa-h" class="hint">{{ s.firewall.membersHint }}</span>
               <span id="sa-e" class="field-error" role="alert">{{ setErrors.addresses }}</span></div>
-            <div class="field"><label for="si">{{ s.firewall.includes }}</label>
-              <input id="si" v-model="setInc" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!setErrors.includes" aria-describedby="si-h si-e" @input="setErrors.includes = undefined" />
-              <span id="si-h" class="hint">{{ s.firewall.includesHint }}</span>
-              <span id="si-e" class="field-error" role="alert">{{ setErrors.includes }}</span></div>
           </div>
         </section>
       </div>

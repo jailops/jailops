@@ -256,11 +256,10 @@ func TestPidfileDoesNotFollowASymlink(t *testing.T) {
 }
 
 // The helper's socket lives in a directory only root writes: the daemon's user, a member of the group, may reach the
-// socket but cannot put a file or a socket of its own at its name before the helper starts. The former path, in the
-// daemon's directory, is read as the new one.
+// socket but cannot put a file or a socket of its own at its name before the helper starts.
 func TestHelperSocketDirectoryIsRoots(t *testing.T) {
 	dir := filepath.Dir(priv.DefaultSocket)
-	if dir == "/var/run/jailops" || dir == filepath.Dir(priv.LegacySocket) {
+	if dir == "/var/run/jailops" {
 		t.Fatalf("the helper's socket is in the daemon's directory %s", dir)
 	}
 	b, err := os.ReadFile(filepath.Join("..", "..", "packaging", "rc.d", "jailops_priv"))
@@ -269,9 +268,6 @@ func TestHelperSocketDirectoryIsRoots(t *testing.T) {
 	}
 	if !strings.Contains(string(b), "install -d -m 0710 -o root -g jailops "+dir+"\n") {
 		t.Errorf("the rc script does not make %s as root's, mode 0710", dir)
-	}
-	if helperSocket(priv.LegacySocket) != priv.DefaultSocket || helperSocket("/x/y.sock") != "/x/y.sock" {
-		t.Error("the former socket path is not mapped")
 	}
 	// outside development, a directory that is not root's is refused (this test does not run as root)
 	if os.Geteuid() != 0 {

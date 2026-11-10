@@ -2,6 +2,7 @@ package priv
 
 import (
 	"context"
+	"jailops.net/jailops/internal/ipam"
 	"net/netip"
 	"path/filepath"
 	"regexp"
@@ -17,11 +18,10 @@ import (
 
 func forbidden(format string, a ...any) error { return api.Errorf(api.CodeForbidden, format, a...) }
 
-// notBelowMount refuses a path outside the storage root, and says what to check when the host was upgraded and the
-// images and jails sit where an earlier release mounted them.
+// notBelowMount refuses a path outside the storage root, and says where the storage root is set.
 func (c Config) notBelowMount(p string) error {
 	return api.Errorf(api.CodeForbidden, "path %q is not below %s", p, c.mountBaseDesc()).
-		WithHint("mount-base of priv.conf says where the storage root is mounted: when the images and jails live elsewhere (a host made by an earlier release has them under /jailops), set mount-base and mount_base of jailopsd.yaml to that directory (zfs get -r mountpoint <storage-root> shows it) and restart jailops_priv and jailopsd")
+		WithHint("mount-base of priv.conf says where the storage root is mounted: when the images and jails live elsewhere, set mount-base and mount_base of jailopsd.yaml to that directory (zfs get -r mountpoint <storage-root> shows it) and restart jailops_priv and jailopsd")
 }
 func forbiddenBusy(format string, a ...any) error { return api.Errorf(api.CodeBusy, format, a...) }
 func invalid(format string, a ...any) error       { return api.Errorf(api.CodeInvalid, format, a...) }
@@ -208,7 +208,7 @@ func within(root, p string) bool {
 // ---- interfaces ----
 
 // epairEndName checks the name of an interface a jail.conf moves into the jail's vnet (vnet.interface): an end of an
-// epair JailOps names, which carries a legacy prefix (ipam.EpairNames: "jo" and the jail's hash). This is a check of
+// epair JailOps names (ipam.EpairNames: "jo" and the jail's hash). This is a check of
 // the name's form, not of ownership: jail(8) moves the interface itself, after the prestart hook created it, and a
 // jail.conf must never name the uplink or another interface of the host. Who owns the interface is the kernel's
 // description, checked when the jail is created (jailGuard.Create).
@@ -216,12 +216,10 @@ func (c Config) epairEndName(name string) error {
 	if err := ifconfig.ValidateIfName(name); err != nil {
 		return err
 	}
-	for _, p := range c.IfPrefixes {
-		if strings.HasPrefix(name, p) && len(name) > len(p) {
-			return nil
-		}
+	if ipam.IsEpairName(name) {
+		return nil
 	}
-	return forbidden("vnet.interface %q is not an epair end JailOps names (prefix %s)", name, strings.Join(c.IfPrefixes, ","))
+	return forbidden("vnet.interface %q is not an epair end JailOps names", name)
 }
 
 // checkIfaceDesc accepts only a description JailOps writes: "jailops ..." (or the "jailops:<id>" marker of earlier

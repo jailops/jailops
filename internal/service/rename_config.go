@@ -275,7 +275,7 @@ func (s *Service) networkDescSteps(ctx context.Context, n object[api.NetworkSpec
 		if !uses {
 			continue
 		}
-		sets, err := s.allSets(j.Metadata.Project)
+		sets, err := s.allSetsWithJails(j.Metadata.Project)
 		if err != nil {
 			return nil, err
 		}
@@ -440,28 +440,18 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 			return nil, err
 		}
 		for _, x := range sets {
-			inInc, inMem := slices.Contains(x.Spec.Includes, name), slices.Contains(x.Spec.Members(), "@"+name)
-			if x.Meta.Name == name || !inInc && !inMem {
+			if x.Meta.Name == name || !slices.Contains(x.Spec.Members(), "@"+name) {
 				continue
 			}
 			spec := x.Spec
-			detail := ""
-			if inInc {
-				spec.Includes = replaceAll(spec.Includes, name, to)
-				detail = "spec.includes: " + name + " -> " + to
-			}
-			if inMem { // a member "@name" of another set is this set
-				spec.Addresses = slices.Clone(spec.Addresses)
-				for i := range spec.Addresses {
-					if spec.Addresses[i].Address == "@"+name {
-						spec.Addresses[i].Address = "@" + to
-					}
+			// a member "@name" of another set is this set
+			spec.Addresses = slices.Clone(spec.Addresses)
+			for i := range spec.Addresses {
+				if spec.Addresses[i].Address == "@"+name {
+					spec.Addresses[i].Address = "@" + to
 				}
-				if detail != "" {
-					detail += "; "
-				}
-				detail += "spec.addresses: @" + name + " -> @" + to
 			}
+			detail := "spec.addresses: @" + name + " -> @" + to
 			xo, err := ks.getObj(x.Meta.Name)
 			if err != nil {
 				return nil, internal(err)

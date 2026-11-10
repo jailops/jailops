@@ -202,13 +202,12 @@ func NewLocal(cfg Config, d Deps, opts ...LocalOption) (*Local, error) {
 // run.Exec. UNVERIFIED on FreeBSD.
 func NewSystem(cfg Config, opts ...LocalOption) (*Local, error) {
 	r := run.NewExec()
-	ncfg, err := cfg.Normalize()
-	if err != nil {
+	if _, err := cfg.Normalize(); err != nil {
 		return nil, err
 	}
 	return NewLocal(cfg, Deps{
 		ZFS: zfs.NewClient(r), Jails: jailos.NewCommand(r), PF: pfctl.NewCommand(r),
-		Net:    ifconfig.NewCommand(r, ifconfig.Options{Prefixes: ncfg.IfPrefixes}),
+		Net:    ifconfig.NewCommand(r, ifconfig.Options{}),
 		Runner: r, NDP: systemNDP{},
 	}, opts...)
 }

@@ -12,6 +12,7 @@ Jail web
 
 Resources
   Limits:       cpu 2, memory 2G
+  Firewall:     open: no firewall policy
   Usage:        processes 23, cpu 2h13m, memory 388.2 MiB of 2G
   Disk:         root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB
 
@@ -42,6 +43,7 @@ Jail db
 
 Resources
   Limits:       none
+  Firewall:     open: no firewall policy
   Usage:        - (the jail is not running)
   Disk:         root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB
   Volume data:  /var/db

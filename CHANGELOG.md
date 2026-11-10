@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Breaking: a project is a boundary, and across projects there are only addresses.** `jailops app allow` no longer takes `@PROJECT/JAIL`, and no command writes a rule into a project it was not asked about (the outbound rule in the source jail's own `app-JAIL` policy is gone, with the registry fields and the rename checks that carried it). Another project is treated like an external host: the app's project allows an address or an address set in, and the other project's operators allow the app's addresses out in a policy of their own. Things that talk to each other as one system belong in the same project. The documents, the help, the completion and the console say so.
+- **`@jail` means the same everywhere.** A grant `app allow APP from @web` keeps `@web` in its firewall rule (read at every render, as in any rule) instead of a copy of the addresses. `pg_hba.conf` cannot follow, so its lines are still a copy: `jailops app access` and `jailops doctor` report `the addresses of @web are now ... but the pg_hba lines name ...`, and repeating the allow writes them again. A jail that a grant names is not deleted or renamed until the grant is denied, and the refusal says `jailops app deny APP from @web`. A jail whose name is too long for a rule is refused as a source with the address-set way out. The dead "both a jail and an address set" refusal and its comment are gone (names cannot clash).
+- **Breaking: a policy always says its defaults.** `default_in` and `default_out` are required on every firewall policy (API, files, `policy create` flags, the console form, the fleet check; the managed `app-JAIL` policy says `deny` and `allow`). A policy that was stored without one is not rendered with a default of ours: the jail keeps its anchor, the error names the policy and the field and says `jailops firewall policy edit NAME`, and `jailops doctor` fails `firewall.defaults` naming each such policy. `jailops jail info` shows `Firewall:` with the policy, or `open: no firewall policy`.
+- **Breaking: `includes` of an address set is gone.** A set names another set with a member `@name`, as it names a jail (`--include`, the `includes` field, the console field, the fleet check and the backup bundle follow `@name` members). Deleting or renaming a set protects the sets that name it as a member.
+- **A jail's own policy is its own.** `firewall.policy` of a jail may not name a policy that something else manages (`app-JAIL`) or the project's mandatory policy, which is rendered for every jail already; the API, `jailops fleet` and the console refuse it with the reason.
+- **One table of endpoints** in `docs/networking-ipv6.md`: an address or prefix, `@name`, `tag:name` (rules only), `host` (`app allow` only). Two rebuilds of an anchor (a jail's DNS change and a rename) left jails out of the sets and failed on a rule that names one; they read the sets with the jails now.
+- **Interface ownership is the description, only.** The helper changes a bridge or epair when it carries the JailOps
+  description; a name, a prefix or an undescribed interface never makes it JailOps's. **Removed:** `if-prefix` of
+  `priv.conf` and `-if-prefix` of `jailops-priv`, the acceptance of undescribed `jo` interfaces, the `jailops:<id>`
+  marker, the old socket name of the helper, and the special messages for the removed `listen.unix.*_group` keys and
+  the backup node's `admin_group` (an unknown key is an unknown key) and the `private` option of a network, which had no effect (every jail port is a private bridge member).
+
 ## 0.6.4 - 2026-11-09
 
 - **A firewall rule can name a jail: `from @web`, and so can an address set.** `@name` is an address set of the project or a

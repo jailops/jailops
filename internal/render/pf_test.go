@@ -19,7 +19,7 @@ func pfBase() PFInput {
 		Tags:       []string{"web", "tier-1"},
 		TagMembers: map[string][]netip.Addr{"admin": {ip("10.20.0.5"), ip("10.20.0.4"), ip("10.20.0.5")}},
 		Sets: map[string]api.AddressSetSpec{
-			"office": {Addresses: api.Entries("203.0.113.0/24", "2001:db8:ffff::/48"), Includes: []string{"vpn"}},
+			"office": {Addresses: api.Entries("203.0.113.0/24", "2001:db8:ffff::/48", "@vpn")},
 			"vpn":    {Addresses: api.Entries("198.51.100.7")},
 		},
 		Uplink:    "em0",
@@ -113,9 +113,9 @@ func TestPFErrors(t *testing.T) {
 		{"unknown set", func(i *PFInput) { i.Policy.Rules[0].From = []string{"@nope"} }},
 		{"bad set ref", func(i *PFInput) { i.Policy.Rules[0].From = []string{"@a b"} }},
 		{"cycle", func(i *PFInput) {
-			i.Sets["vpn"] = api.AddressSetSpec{Includes: []string{"office"}}
+			i.Sets["vpn"] = api.AddressSetSpec{Addresses: api.Entries("@office")}
 		}},
-		{"self cycle", func(i *PFInput) { i.Sets["vpn"] = api.AddressSetSpec{Includes: []string{"vpn"}} }},
+		{"self cycle", func(i *PFInput) { i.Sets["vpn"] = api.AddressSetSpec{Addresses: api.Entries("@vpn")} }},
 		{"bad set member", func(i *PFInput) { i.Sets["vpn"] = api.AddressSetSpec{Addresses: api.Entries("1.2.3.4 pass all")} }},
 		{"rdr outbound", func(i *PFInput) {
 			i.Policy.Rules = []api.FirewallRule{{Action: "allow", Direction: "out", Proto: "tcp", Redirect: &api.Redirect{HostPort: 1, JailPort: 2}}}
@@ -145,7 +145,7 @@ func TestPFErrors(t *testing.T) {
 		t.Fatal("not api error")
 	}
 	in = pfBase()
-	in.Sets["vpn"] = api.AddressSetSpec{Includes: []string{"office"}}
+	in.Sets["vpn"] = api.AddressSetSpec{Addresses: api.Entries("@office")}
 	if _, err := PFAnchor(in); err == nil || !strings.Contains(err.Error(), "cycle") {
 		t.Fatalf("cycle message: %v", err)
 	}
@@ -154,9 +154,9 @@ func TestPFErrors(t *testing.T) {
 func TestPFSetDiamondIsNotACycle(t *testing.T) {
 	in := pfBase()
 	in.Sets = map[string]api.AddressSetSpec{
-		"office": {Includes: []string{"b", "c"}},
-		"b":      {Includes: []string{"d"}},
-		"c":      {Includes: []string{"d"}},
+		"office": {Addresses: api.Entries("@b", "@c")},
+		"b":      {Addresses: api.Entries("@d")},
+		"c":      {Addresses: api.Entries("@d")},
 		"d":      {Addresses: api.Entries("10.0.0.1")},
 	}
 	if _, err := PFAnchor(in); err != nil {
@@ -190,7 +190,7 @@ func FuzzPFAnchor(f *testing.F) {
 				Tags:       []string{tag},
 				TagMembers: map[string][]netip.Addr{tag: {ip("10.0.0.9")}},
 				Sets:       map[string]api.AddressSetSpec{set: {Addresses: api.Entries(ep)}},
-				Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
+				Policy: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
 					{Name: ruleName, Action: "allow", Direction: dir, Proto: "tcp", From: []string{"@" + set, "tag:" + tag, ep}, To: []string{ep}, Ports: []string{port}},
 					{Name: ruleName, Action: "deny", Direction: "in", Proto: "udp", Ports: []string{port}},
 				}},
@@ -229,7 +229,7 @@ func FuzzPFNet(f *testing.F) {
 }
 
 func mandBase() *PFMandatory {
-	return &PFMandatory{Name: "baseline", Policy: api.FirewallPolicySpec{DefaultIn: "allow", Rules: []api.FirewallRule{
+	return &PFMandatory{Name: "baseline", Policy: api.FirewallPolicySpec{DefaultIn: "allow", DefaultOut: "allow", Rules: []api.FirewallRule{
 		{Name: "no telnet", Action: "deny", Direction: "in", Proto: "tcp", Ports: []string{"23"}},
 		{Name: "no smtp", Action: "deny", Direction: "out", Proto: "tcp", Ports: []string{"25"}},
 		{Name: "mgmt", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"22"}},
@@ -346,7 +346,7 @@ func TestProjectAnchors(t *testing.T) {
 func TestRedirectOnAListenAddress(t *testing.T) {
 	out, err := PFAnchor(PFInput{Jail: "alpha_web", Interfaces: []string{"jo123456789012a"}, Uplink: "em0",
 		Addresses: []netip.Addr{netip.MustParseAddr("10.20.0.10")},
-		Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
+		Policy: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
 			{Name: "proxy http", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{Listen: "192.0.2.7", HostPort: 8080, JailPort: 80}},
 			{Name: "proxy dns", Action: "allow", Direction: "in", Proto: "udp", Redirect: &api.Redirect{HostPort: 53, JailPort: 53}}}}})
 	if err != nil {
@@ -357,7 +357,7 @@ func TestRedirectOnAListenAddress(t *testing.T) {
 		t.Fatal(out)
 	}
 	_, err = PFAnchor(PFInput{Jail: "alpha_web", Interfaces: []string{"jo123456789012a"}, Uplink: "em0", Addresses: []netip.Addr{netip.MustParseAddr("10.20.0.10")},
-		Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{Listen: "x; pass all", HostPort: 1, JailPort: 1}}}}})
+		Policy: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{Listen: "x; pass all", HostPort: 1, JailPort: 1}}}}})
 	if err == nil {
 		t.Fatal("an injected listen address was rendered")
 	}
@@ -415,7 +415,7 @@ func TestEveryAnchorDefinesTheTablesItReferences(t *testing.T) {
 		Tags:       []string{"app"},
 		TagMembers: map[string][]netip.Addr{"db": {netip.MustParseAddr("10.20.0.20")}},
 		Sets:       map[string]api.AddressSetSpec{"office": {Addresses: api.Entries("192.0.2.0/24")}},
-		Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
+		Policy: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
 			{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office", "tag:db"}, Ports: []string{"22"}}}}}
 	out, err := PFAnchor(in)
 	if err != nil {

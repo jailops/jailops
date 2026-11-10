@@ -26,8 +26,7 @@ func installedNames(ctx context.Context, c *sdk.Client) ([]string, error) {
 }
 
 // completeSource completes the SOURCE of allow and deny: the jails of the
-// project and its address sets as @name, the jails of another project after
-// @project/, and host.
+// project and its address sets as @name, and host.
 func (a *app) completeSource() completer {
 	return func(cmd *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
 		ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
@@ -37,16 +36,6 @@ func (a *app) completeSource() completer {
 			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
 		var out []string
-		if p, _, ok := strings.Cut(strings.TrimPrefix(prefix, "@"), "/"); ok && strings.HasPrefix(prefix, "@") {
-			pc := c.Project(p)
-			for j, err := range pc.Jails().List(ctx) {
-				if err != nil {
-					break
-				}
-				out = append(out, "@"+p+"/"+j.Metadata.Name)
-			}
-			return out, cobra.ShellCompDirectiveNoFileComp
-		}
 		for j, err := range c.Jails().List(ctx) {
 			if err != nil {
 				break
@@ -103,10 +92,9 @@ source is allowed. 'allow' adds a rule to the app's firewall policy app-APP
 (managed by app access) for the ports of the definition, or those of --port.
 
 APP is the jail the app was installed as. SOURCE is one of:
-  @JAIL           a jail of the project (its addresses)
-  @PROJECT/JAIL   a jail of another project you may use; its own policy gets the
-                  rule that lets it out to the app
-  @SET            an address set of the project (firewall address-set)
+  @JAIL           a jail of the project: the rule names it, so it follows the jail
+  @SET            an address set of the project (firewall address-set); a source in
+                  another project is written as addresses in a set
   ADDRESS, PREFIX an address or a prefix, such as 192.0.2.7 or 192.0.2.0/24
   host            the host itself (the gateway addresses of the app's networks)
 
@@ -124,7 +112,7 @@ changed. --dry-run prints the rule, the pg_hba line and the SQL, without the
 password, and changes nothing.`,
 		Example: `jailops app allow db from @web
 jailops app allow db from @web --db shop
-jailops app allow db from @shop/api --db api
+jailops app allow db from @office --db staff
 jailops app allow cache from 192.0.2.0/24 --port 6379
 jailops app allow web from host
 jailops app allow db from @web --rotate

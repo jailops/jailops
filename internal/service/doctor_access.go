@@ -12,7 +12,7 @@ import (
 const rateLimitWarning = "rate limits (nic ingress/egress) are stored but not enforced yet: no shaper is wired"
 
 // doctorAppsAccess reports grants of app access whose firewall rule or
-// pg_hba.conf line is missing on the host (drift), or whose source jail is gone.
+// pg_hba.conf line is missing on the host (drift), or whose pg_hba.conf lines name addresses a source no longer has.
 func (s *Service) doctorAppsAccess(ctx context.Context, c *checkSet) {
 	problems, n, err := s.accessDrift(ctx)
 	switch {

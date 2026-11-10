@@ -88,7 +88,7 @@ jailops_priv_precmd()
 	install -d -m 0710 -o root -g jailops /var/run/jailops-priv
 	install -d -m 0700 /usr/local/etc/jailops/priv.d
 	# the logs of the jails (exec.consolelog): the dataset <pool>/jailops/logs is mounted here when `jailops-priv init`
-	# made it; a host set up by an older release has only the directory, and a jail does not start without it
+	# made it; a jail does not start without the directory
 	install -d -m 0750 -o root -g jailops /var/log/jailops
 	# refuse to start with a configuration that does not validate
 	${helper} -config ${jailops_priv_config} ${jailops_priv_appliance} check-config >/dev/null || return 1

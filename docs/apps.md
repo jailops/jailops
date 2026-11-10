@@ -263,7 +263,7 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    second until it passes or `wait_seconds` have passed. Each attempt is given at most 5 seconds, and never more than
    the time left, so the step ends within `wait_seconds` and one attempt.
 7. **Close the jail** (`close-firewall`): the firewall policy `app-<jail>` is created, managed by app access, with
-   `default_in: deny` and no rule. From the next reconcile pass (a few seconds) nothing reaches the jail, neither its
+   `default_in: deny`, `default_out: allow` and no rule. From the next reconcile pass (a few seconds) nothing reaches the jail, neither its
    network nor the host, until `jailops app allow` lets a source in ([Who may connect](#who-may-connect)). It comes after
    the health check, which connects from the host; the services have run only for the time of that check before. A
    policy of that name that app access does not manage refuses the installation before it starts (`conflict`).
@@ -326,20 +326,33 @@ jailops app access [APP] [-o json|yaml]       # who may connect; without APP, ev
 
 | Source | What it stands for | In the firewall rule | In `pg_hba.conf` |
 |---|---|---|---|
-| `@JAIL` | a jail of the same project | its addresses, as they are when the grant is made | one line per address (`/32`, `/128`) |
-| `@PROJECT/JAIL` | a jail of another project the identity may use (`@` + its own project is the same as `@JAIL`) | its addresses; its own managed policy `app-<jail>` in that project gets the rule that lets it out to the app, because projects are closed to each other | as above |
-| `@SET` | an address set of the project (`jailops firewall address-set`) | `@SET`, so the rule follows the set | one line per member, as the set is when the grant is made |
+| `@JAIL` | a jail of the same project | `@JAIL`, so the rule follows the jail at every render | one line per address (`/32`, `/128`), a copy made when the grant is made |
+| `@SET` | an address set of the project (`jailops firewall address-set`) | `@SET`, so the rule follows the set | one line per member, a copy made when the grant is made |
 | an address or a prefix | `192.0.2.7`, `192.0.2.0/24`, `2001:db8::/48` | the prefix | the prefix |
 | `host` | the host itself: the gateway addresses of the jail's networks, which the host connects from (IPv4, and IPv6 of a routed network; a proxy-mode network has a link-local gateway and is left out) | those addresses | those addresses |
 
-A bare `@name` that is both a jail and an address set is refused (`invalid`): write the jail as `@PROJECT/JAIL`. The
-shell completes `APP`, the word `from` and `SOURCE` (the jails of the project and its address sets as `@name`, the jails
-of another project after `@PROJECT/`, and `host`).
+A jail and an address set of one project never have the same name, so `@name` means one thing. A jail whose name is
+longer than 29 characters cannot be named in a rule: put it in an address set. The shell completes `APP`, the word
+`from` and `SOURCE` (the jails of the project and its address sets as `@name`, and `host`).
 
-**The default scope is the project.** A grant lives with the app, in the app's project. A source in another project
-needs an identity that may use that project too (otherwise `not_found`), and the grant writes into that project's
-managed policy of the source jail: the role is operator, as for the installation, in each project. Deleting the
-cross-project grant removes that rule again, and the policy when it is empty.
+The sources are the same words as in a firewall rule (the table of endpoints in [networking-ipv6.md](networking-ipv6.md)),
+and `@JAIL` and `@SET` keep their names in the rule: the firewall follows them at every render. `pg_hba.conf` cannot follow
+them, so its lines are a copy: when the addresses of a source no longer match them, `jailops app access` and
+`jailops doctor` say so (`the addresses of @web are now ... but the pg_hba lines name ...`), and allowing again from the
+same source writes the lines again.
+
+**A grant lives with the app, in the app's project.** Another project is treated exactly like an external host: only
+addresses and address sets cross it, never a jail reference. Do two things need to talk to each other as one system?
+Then they belong in the same project. Across projects, write the addresses explicitly on both sides. A grant for a source in another project is an address or a prefix (or an address set that
+holds them); the other project's operators allow the app's addresses out in a policy of their own:
+
+```sh
+# project shop: the app db lets the jail of project reports in, by its address
+jailops app allow db from 10.30.0.5 --db reports
+# project reports: the jail (10.30.0.5) may connect out to the app's address, written on this side too
+jailops firewall policy create to-shop-db --default-in deny --default-out allow \
+    --rule "allow out tcp to 10.20.0.10 port 5432 comment the shop database"
+```
 
 **What one allow does.**
 
@@ -384,8 +397,7 @@ cross-project grant removes that rule again, and the policy when it is empty.
    for valkey also that it binds `127.0.0.1` with `protected-mode yes` until `bind` and `protected-mode` in
    `/usr/local/etc/valkey.conf` are changed, and that `requirepass` should be set first.
 
-**What one deny does.** The rule leaves the policy at once (the firewall first, so nothing new gets in), a
-cross-project source's outbound rule leaves its policy, the grant's lines leave the managed block and the server reloads.
+**What one deny does.** The rule leaves the policy at once (the firewall first, so nothing new gets in), the grant's lines leave the managed block and the server reloads.
 The role JailOps made for it loses its login and its password (`ALTER ROLE ... NOLOGIN PASSWORD NULL`) and its open
 sessions are ended; its database and data stay, and a later allow with the same name gives it a login and a new password
 again. `--drop-role` drops it instead: in its database `REASSIGN OWNED BY` the role `TO postgres` and `DROP OWNED`, then
@@ -396,13 +408,13 @@ make, is left as it is. Denying a source that has no grant changes nothing (`cha
 grant the source, what it resolved to, the ports, the database and the lines written, who made it and when; per app the
 access block as it was at the first grant (so a deny works after the definition changed) and the roles JailOps made,
 with whether their database was made too and whether they may log in. It never holds a password. Deleting the app's jail
-deletes its policy and its registry; deleting a jail that is the source of a grant removes the grant's firewall rule at
-once (its addresses may be given to another jail) and leaves the grant, marked, for a deny to take the rest back.
+deletes its policy and its registry; a jail that is the source of a grant is not deleted or renamed until the grant is denied (the refusal says
+`jailops app deny APP from @JAIL`), because the rule names it.
 
 **Transparency.** `jailops app access APP` lists each grant with its typed rules, the lines of the jail's rendered
 anchor they became (the state labels left out), its `pg_hba.conf` lines, who made it, and the **problems**: a rule
-missing from the policy, a line missing from the file (read through the helper while the jail runs), a source jail
-that is gone. `jailops doctor` reports the same as `apps.access` (warn) for every app of the host. Allowing the same
+missing from the policy, a line missing from the file (read through the helper while the jail runs), addresses of a source
+that the file's lines no longer name. `jailops doctor` reports the same as `apps.access` (warn) for every app of the host. Allowing the same
 source again writes what is missing back.
 
 **Idempotent, audited, dry run.** Allow and deny of the apps of a host run one at a time and under the jail's lock; both
@@ -419,7 +431,7 @@ first allow closes them to every other source (the answer says that too).
 **UNVERIFIED on a FreeBSD host** until the end-to-end test has run it: the `postgresql-access` block of
 `scripts/ci-freebsd-e2e.sh` installs PostgreSQL, allows a second jail, connects from it with the printed string and runs
 `select 1`, checks that a jail that was not allowed cannot, and checks the closure after a deny. Not covered by it: the
-restart of a server whose `listen_addresses` was already set by hand, IPv6 sources, address sets, cross-project grants.
+restart of a server whose `listen_addresses` was already set by hand, IPv6 sources and address sets.
 
 ## Logs, updates, upgrades
 

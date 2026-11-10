@@ -74,7 +74,6 @@ spec:
   resources: {memory: 2G}
   network:
     - {name: eth0, mtu: 1400}
-  firewall: {policy: base}
 `)
 	return e
 }

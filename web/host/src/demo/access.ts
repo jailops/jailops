@@ -25,7 +25,9 @@ function rulesOf(from: string[], ports: string[]): string[] {
 function pfOf(jail: string, from: string[], ports: string[]): string[] {
   const nums = ports.map((p) => p.split('/')[0])
   const port = nums.length > 1 ? `{ ${nums.join(' ')} }` : nums[0]
-  const src = from.length > 1 ? `{ ${from.join(' ')} }` : from[0]
+  const table = (x: string) => (x.startsWith('@') ? `<s_${x.slice(1).replace(/-/g, '_')}>` : x) // @name is a table: it follows the jail or the set
+  const names = from.map(table)
+  const src = names.length > 1 ? `{ ${names.join(' ')} }` : names[0]
   return [`pass out quick on { jo1a${jail.length}b } inet proto tcp from ${src} to 10.20.0.0/32 port ${port}`]
 }
 
@@ -43,7 +45,7 @@ export function demoAccess(jails: () => Jail[], sets: () => Array<{ metadata: { 
     closed: true, roles: { web: true },
     grants: [{
       source: '@web', source_kind: 'jail', addresses: [`${web}/32`], ports: ['5432/tcp'], database: 'web', role: 'web', role_created: true, database_created: true,
-      rules: rulesOf([web], ['5432/tcp']), pf: pfOf('db', [web], ['5432/tcp']), hba: [`host web web ${web}/32 scram-sha-256`],
+      rules: rulesOf(['@web'], ['5432/tcp']), pf: pfOf('db', ['@web'], ['5432/tcp']), hba: [`host web web ${web}/32 scram-sha-256`],
       created_at: ago(86400 * 3), created_by: 'admin',
     }],
   })
@@ -84,8 +86,8 @@ export function demoAccess(jails: () => Jail[], sets: () => Array<{ metadata: { 
       const set = sets().find((x) => x.metadata.name === n)
       if (src) {
         if (n === name) return { status: 400, code: 'invalid', message: 'a jail always reaches itself; name another source' }
-        kind = 'jail'; from = addrOf(src); prefixes = from.map((a) => `${a}/32`)
-        if (!from.length) return { status: 400, code: 'invalid', message: `jail "${n}" has no address to allow` }
+        kind = 'jail'; const addrs = addrOf(src); from = [b.source]; prefixes = addrs.map((a) => `${a}/32`)
+        if (!addrs.length) return { status: 400, code: 'invalid', message: `jail "${n}" has no address to allow` }
       } else if (set) {
         kind = 'address-set'; from = [b.source]; prefixes = set.spec.addresses.map((e) => e.address)
       } else return { status: 404, code: 'not_found', message: `@${n} is neither a jail nor an address set of project ${j.metadata.project}`, hint: 'jailops list and jailops firewall address-set list show the names' }

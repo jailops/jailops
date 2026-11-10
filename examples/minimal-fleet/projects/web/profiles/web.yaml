@@ -8,7 +8,6 @@ spec:
   network:
     - {name: eth0, network: br-web, ipv4: auto}
   storage: fast
-  firewall: {policy: base}
   proxy:
     - {name: http, listen: ":80", jail_port: 80}
     - {name: https, listen: ":443", jail_port: 443}

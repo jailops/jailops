@@ -149,17 +149,18 @@ func TestFirewall(t *testing.T) {
 	tr.ok("firewall", "address-set", "create", "hq", "--address", "192.0.2.9", "--comment", "the office")
 	tr.ok("firewall", "address-set", "show", "hq", "-o", "yaml")
 	tr.ok("firewall", "address-set", "show", "hq")
-	tr.ok("firewall", "policy", "create", "documented", "--default-in", "deny", "--comment", "the public web server",
+	tr.ok("firewall", "policy", "create", "documented", "--default-in", "deny", "--default-out", "allow", "--comment", "the public web server",
 		"--rule", "allow in tcp port 80,443 comment the site", "--rule", "allow in tcp from @hq port 22 comment ssh from the office")
 	tr.ok("firewall", "policy", "show", "documented", "-o", "yaml")
 	tr.ok("firewall", "policy", "show", "documented")
-	tr.do("", "firewall", "policy", "create", "nocomment", "--rule", "allow in tcp port 80 comment")
+	tr.do("", "firewall", "policy", "create", "nocomment", "--default-in", "deny", "--default-out", "allow", "--rule", "allow in tcp port 80 comment")
+	tr.do("", "firewall", "policy", "create", "nodefaults", "--rule", "allow in tcp port 80")
 	tr.do("", "firewall", "address-set", "create", "c1", "--comment", "no address")
 	tr.do("", "firewall", "address-set", "create", "c2", "--address", "192.0.2.2", "--address", "192.0.2.3", "--comment", "which one")
 	tr.ok("firewall", "policy", "create", "web", "--default-in", "deny", "--default-out", "allow",
 		"--rule", "allow in tcp port 80,443", "--rule", "allow in tcp from @office port 22 log", "--rule", "allow in tcp port 8080 rdr 8080:80")
-	tr.do("", "firewall", "policy", "create", "bad", "--rule", "allow")
-	tr.do("", "firewall", "policy", "create", "bad2", "--rule", "allow in tcp bogus 1")
+	tr.do("", "firewall", "policy", "create", "bad", "--default-in", "deny", "--default-out", "allow", "--rule", "allow")
+	tr.do("", "firewall", "policy", "create", "bad2", "--default-in", "deny", "--default-out", "allow", "--rule", "allow in tcp bogus 1")
 	tr.ok("firewall", "policy", "list")
 	tr.ok("firewall", "policy", "show", "web")
 	tr.ok("firewall", "address-set", "list")
@@ -169,6 +170,7 @@ func TestFirewall(t *testing.T) {
 metadata: {name: p1}
 spec:
   default_in: deny
+  default_out: allow
   rules:
     - {action: allow, direction: in, proto: tcp, ports: ["22", "8000-8100"], from: ["@office", "10.0.0.0/8", "tag:admin"]}
 ---
@@ -188,11 +190,11 @@ spec:
 ---
 kind: AddressSet
 metadata: {name: a}
-spec: {addresses: ["10.0.0.0/8", "nope"], includes: [b]}
+spec: {addresses: ["10.0.0.0/8", "nope", "@b"]}
 ---
 kind: AddressSet
 metadata: {name: b}
-spec: {includes: [a]}
+spec: {addresses: ["@a"]}
 `, 0o644)
 	tr.ok("firewall", "validate", "-f", good)
 	tr.ok("firewall", "validate", "-f", good, "--offline")
