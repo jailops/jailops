@@ -99,7 +99,7 @@ type AppAccess struct {
 
 // AppAllow is the body of POST /api/v1/jails/<name>/access.
 type AppAllow struct {
-	// Source is @jail, @project/jail, @address-set, an address or a prefix, or host.
+	// Source is @jail, @address-set, an address or a prefix, or host.
 	Source string `json:"source"`
 	// Ports are "N" or "N/proto"; default: the definition's ports (the access
 	// block's port for an app that has one).
