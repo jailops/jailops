@@ -177,6 +177,17 @@ against a bad change, not against losing the pool or the host. Write down, per s
 A target the drill does not meet is a finding: shorten the schedule, keep the key copies where the restoring host gets
 them, or change the target.
 
+## Start at boot
+
+A jail starts when the host boots only when it has **autostart**. A jail that was running before a reboot does not come back on its own: the daemon starts what the jails' specifications say, nothing it remembers.
+
+    jailops create web --image freebsd-15-1 --network lan --storage default --start --autostart
+    jailops config set web boot.autostart true        # for a jail that exists
+    jailops list -c name,state,autostart              # which jails have it
+    jailops boot                                      # in which order they start, and which do not
+
+`jailops boot` shows what the daemon's boot pass would do after a boot of the host, from the jails as they are now: the jails in the order they start, with the reason (`autostart`, or `dependency of NAME`), and the jails with autostart that it does not start, with why. A jail starts after the jails in its `boot.depends`, which start too even without autostart of their own; among the jails that are ready, the lower `boot.priority` starts first, then the name. Almost nobody needs `boot.depends` and `boot.priority`: `jailops config set web boot.depends db` and `boot.priority 10` are there for the case where one jail must be up before another. A cycle, a dependency that does not exist, and a jail with an encrypted volume (it waits for its passphrase after every boot: `jailops jail unlock`) are listed as not started, and so is a jail that depends on one of them. The order is that of the whole host; you see the jails of every project you may use, or one project with `--project`. `jailopsd` starts the jails once, in its first pass after it starts (`reconcile.autostart` of `jailopsd.yaml`).
+
 ## What to monitor
 
 Only what the product exposes today. Use a dedicated read-only token for the checks that need one:

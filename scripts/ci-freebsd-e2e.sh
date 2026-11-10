@@ -536,8 +536,11 @@ if [ "$part" = pf ]; then # its own VM in CI: the packet filter test builds its 
 fi
 
 step "a jail"
-check "create" $J create web --project demo --image "$img" --network lan --storage default
+check "create" $J create web --project demo --image "$img" --network lan --storage default --autostart
 check "start" $J start web --project demo
+expect "the jail list has the AUTOSTART column" 'web +running +yes' $J list --project demo -c name,state,autostart
+expect "the boot plan lists the autostart jail first" '^1[[:space:]]+web[[:space:]]+0[[:space:]]+autostart' $J boot
+expect "the boot plan of one project" '^1[[:space:]]+web[[:space:]]+0[[:space:]]+autostart' $J boot --project demo
 sleep 2
 expect "the package cache has a dataset of its own" "^$mount/cache\$" zfs get -H -o value mountpoint "$pool/jailops/cache"
 expect "the image build downloaded into the shared cache" '\.pkg' ls "$mount/cache/pkg"
@@ -916,7 +919,8 @@ enabled | active)
 	(umask 077; printf '%s\n' 'ci-passphrase-0123' >"$work/vault.pass"; printf '%s\n' 'ci-wrong-passphrase' >"$work/wrong.pass"
 		printf '%s\n' 'ci-new-passphrase-4567' >"$work/new.pass")
 	check "a jail with an encrypted volume" $J create vault --project demo --image "$img" --network lan --storage default \
-		--volume secrets:/var/db/secrets:encrypted --passphrase-file "$work/vault.pass" --start
+		--volume secrets:/var/db/secrets:encrypted --passphrase-file "$work/vault.pass" --start --autostart
+	expect "the boot plan says the encrypted jail waits for its passphrase" 'vault[[:space:]]+waits for the passphrase' $J boot
 	vds=$(zfs list -H -o name -r "$pool" | grep '/jails/vault/data/secrets$') || fail "no dataset for the encrypted volume"
 	keystatus() { zfs get -H -o value keystatus "$vds"; }
 	expect "the key is loaded after the creation" '^available$' keystatus

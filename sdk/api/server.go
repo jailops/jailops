@@ -197,4 +197,5 @@ var Extensions = []string{
 	"host_certificate",
 	"jail_shell_setup",
 	"rename",
+	"boot_plan",
 }

@@ -102,7 +102,7 @@ func classify(pattern string) (api.Permission, string) {
 	case strings.HasPrefix(path, "/api/v1/networks"), strings.HasPrefix(path, "/api/v1/images"),
 		strings.HasPrefix(path, "/api/v1/storage"), strings.HasPrefix(path, "/api/v1/projects"):
 		return rw(scopeHost)
-	case path == "/api/v1/events", path == "/api/v1/updates":
+	case path == "/api/v1/events", path == "/api/v1/updates", path == "/api/v1/boot":
 		return api.PermReadonly, scopeList
 	case path == "/api/v1/logs":
 		// the logs of many jails: the role that may read one jail's

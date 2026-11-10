@@ -53,7 +53,7 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 	d.del = func(ctx context.Context, c *sdk.Client, n string) (opHandle, error) {
 		return handle(c.Jails().Delete(ctx, n))
 	}
-	d.head = []string{"NAME", "STATE", "IMAGE", "GEN", "ADDRESSES", "AGE"}
+	d.head = []string{"NAME", "STATE", "IMAGE", "GEN", "ADDRESSES", "AUTOSTART", "AGE"}
 	d.style = stateStyle(1)
 	d.row = func(now time.Time, j api.Jail) []string {
 		addrs := slices.Clone(j.Status.Addresses)
@@ -67,14 +67,14 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 			}
 		}
 		return []string{j.Metadata.Name, dash(string(j.Status.Power)), j.Spec.Image, dash(j.Status.Generation),
-			joinOrDash(addrs), age(now, j.Metadata.CreatedAt)}
+			joinOrDash(addrs), autostartCell(j), age(now, j.Metadata.CreatedAt)}
 	}
 	// On a terminal: one address per line with its network, the generation
 	// next to the image, and no column a long IPv6 address would crowd out.
 	d.brief = &listView[api.Jail]{
-		head:  []string{"NAME", "STATE", "IPV4", "IPV6", "IMAGE", "AGE"},
+		head:  []string{"NAME", "STATE", "IPV4", "IPV6", "IMAGE", "AUTOSTART", "AGE"},
 		style: stateStyle(1),
-		drop:  []int{5, 4, 3, 2},
+		drop:  []int{6, 4, 3, 2},
 		row: func(now time.Time, j api.Jail) []string {
 			var v4, v6 []string
 			for _, n := range j.Spec.Network {
@@ -86,7 +86,7 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 				}
 			}
 			return []string{j.Metadata.Name, dash(string(j.Status.Power)), linesOrDash(v4), linesOrDash(v6),
-				imageWithGen(j.Spec.Image, j.Status.Generation, j.Status.FreeBSDVersion), age(now, j.Metadata.CreatedAt)}
+				imageWithGen(j.Spec.Image, j.Status.Generation, j.Status.FreeBSDVersion), autostartCell(j), age(now, j.Metadata.CreatedAt)}
 		},
 	}
 	d.filters = func(cmd *cobra.Command) func() (func(api.Jail) bool, error) {
@@ -1144,4 +1144,12 @@ func orNone(s string) string {
 		return "(not set)"
 	}
 	return s
+}
+
+// autostartCell is the AUTOSTART column of a jail list: whether the jail starts when the host boots.
+func autostartCell(j api.Jail) string {
+	if j.Spec.Boot.Autostart {
+		return "yes"
+	}
+	return "-"
 }

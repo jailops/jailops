@@ -1,10 +1,10 @@
 $ jailops list w*
-NAME   STATE     IMAGE               GEN   ADDRESSES    AGE
-web    running   freebsd-15@stable   g1    10.20.0.10   3h
+NAME   STATE     IMAGE               GEN   ADDRESSES    AUTOSTART   AGE
+web    running   freebsd-15@stable   g1    10.20.0.10   -           3h
 
 $ jailops list nothing* d?
-NAME   STATE     IMAGE               GEN   ADDRESSES                                   AGE
-db     stopped   freebsd-15@stable   g1    10.20.0.11,10.94.0.2,2001:db8:1:2:100::10   3h
+NAME   STATE     IMAGE               GEN   ADDRESSES                                   AUTOSTART   AGE
+db     stopped   freebsd-15@stable   g1    10.20.0.11,10.94.0.2,2001:db8:1:2:100::10   -           3h
 
 $ jailops list [
 ! usage: bad name pattern "["
@@ -17,21 +17,21 @@ db     stopped   3h
 web    running   3h
 
 $ jailops list --sort state
-NAME   STATE     IMAGE               GEN   ADDRESSES                                   AGE
-web    running   freebsd-15@stable   g1    10.20.0.10                                  3h
-db     stopped   freebsd-15@stable   g1    10.20.0.11,10.94.0.2,2001:db8:1:2:100::10   3h
+NAME   STATE     IMAGE               GEN   ADDRESSES                                   AUTOSTART   AGE
+web    running   freebsd-15@stable   g1    10.20.0.10                                  -           3h
+db     stopped   freebsd-15@stable   g1    10.20.0.11,10.94.0.2,2001:db8:1:2:100::10   -           3h
 
 $ jailops list --sort state -o name
 web
 db
 
 $ jailops list -c name,bogus
-! usage: unknown column "bogus" (columns: name, state, image, gen, addresses, age, ipv4, ipv6)
+! usage: unknown column "bogus" (columns: name, state, image, gen, addresses, autostart, age, ipv4, ipv6)
 ! hint: run 'jailops list --help' for usage
 [exit 2]
 
 $ jailops list --sort bogus
-! usage: unknown column "bogus" (columns: name, state, image, gen, addresses, age, ipv4, ipv6)
+! usage: unknown column "bogus" (columns: name, state, image, gen, addresses, autostart, age, ipv4, ipv6)
 ! hint: run 'jailops list --help' for usage
 [exit 2]
 
@@ -41,9 +41,9 @@ $ jailops list --state foo
 [exit 2]
 
 $ jailops list -o csv
-NAME,STATE,IMAGE,GEN,ADDRESSES,AGE
-db,stopped,freebsd-15@stable,g1,"10.20.0.11,10.94.0.2,2001:db8:1:2:100::10",3h
-web,running,freebsd-15@stable,g1,10.20.0.10,3h
+NAME,STATE,IMAGE,GEN,ADDRESSES,AUTOSTART,AGE
+db,stopped,freebsd-15@stable,g1,"10.20.0.11,10.94.0.2,2001:db8:1:2:100::10",-,3h
+web,running,freebsd-15@stable,g1,10.20.0.10,-,3h
 
 $ jailops list -o csv --no-headers -c name,addresses
 db,"10.20.0.11,10.94.0.2,2001:db8:1:2:100::10"
@@ -60,9 +60,9 @@ $ jailops jail show web -o csv
 [exit 2]
 
 $ jailops list -o compact
-NAME   STATE     IMAGE               GEN   ADDRESSES                                   AGE
-db     stopped   freebsd-15@stable   g1    10.20.0.11,10.94.0.2,2001:db8:1:2:100::10   3h
-web    running   freebsd-15@stable   g1    10.20.0.10                                  3h
+NAME   STATE     IMAGE               GEN   ADDRESSES                                   AUTOSTART   AGE
+db     stopped   freebsd-15@stable   g1    10.20.0.11,10.94.0.2,2001:db8:1:2:100::10   -           3h
+web    running   freebsd-15@stable   g1    10.20.0.10                                  -           3h
 
 $ jailops list -c name,state
 ┌──────┬─────────┐

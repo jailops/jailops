@@ -119,6 +119,7 @@ func (s *Server) routes() {
 	m("GET /api/v1/jails/{name}/logs", s.jailLogs)
 	m("GET /api/v1/jails/{name}/logs/{file...}", s.jailLog)
 	m("GET /api/v1/logs", s.handleLogs)
+	m("GET /api/v1/boot", s.handleBoot)
 	m("GET /api/v1/logs/forward", s.handleLogForward)
 	m("PUT /api/v1/logs/forward", s.handleLogForwardPut)
 	m("DELETE /api/v1/logs/forward", s.handleLogForwardDelete)

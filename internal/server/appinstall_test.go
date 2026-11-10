@@ -747,6 +747,26 @@ func TestAppInstallRefusesPersistentPaths(t *testing.T) {
 	}
 }
 
+// An installed app starts when the host boots: the installation is the declaration that it should run.
+func TestAppInstallAutostarts(t *testing.T) {
+	e, c := appEnv(t, map[string]string{"web": appWeb})
+	e.SetDial(httpAnswer(204, nil))
+	op, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := op.Wait(c); err != nil {
+		t.Fatalf("%v\n%s", err, e.Log())
+	}
+	j, err := e.Admin.Jails().Get(c, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !j.Spec.Boot.Autostart {
+		t.Fatalf("an installed app does not start at boot: %+v", j.Spec.Boot)
+	}
+}
+
 // The doctor warns about volume datasets that are not canmount=noauto, and
 // gives the command that fixes each.
 func TestDoctorVolumeCanmount(t *testing.T) {

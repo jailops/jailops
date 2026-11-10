@@ -21,6 +21,13 @@ with the join `token` and the `config` file: secrets, returned once, never store
 Reads need the operator role and never carry a private or preshared key; changes need a global admin. SDK:
 `c.WireGuard()`. The extension `interface_descriptions` says the host describes its interfaces (`net.descriptions`).
 
+**Boot plan** ([operations.md](operations.md#start-at-boot)): `GET /api/v1/boot` (extension `boot_plan`, readonly) answers `BootPlan`:
+what the daemon starts after a boot of the host, in order (`order`: `position`, `project`, `jail`, `priority`, `depends`,
+`reason` `autostart` or `dependency of NAME`, `running`), and the jails it does not start with the reason (`not_started`:
+a cycle, a dependency that does not exist, an encrypted volume that waits for its passphrase, a jail that depends on one
+of those). The order is that of the whole host; a caller sees the jails of the project it names, or with `all_projects=true`
+of every project it may use, in the same order and numbered again. SDK: `c.BootPlan(ctx, allProjects)`.
+
 **Logs** ([logging.md](logging.md)): `GET /api/v1/logs` (extension `logs_unified`, operator) merges the end of one file
 (`file`, default `messages`) of the jails of `?project=` (or of every project the caller may use with `all_projects=true`)
 by time: `jail` (repeatable), `label=k=v` (repeatable), `app`, `app_logs=true`, `tail`, `since`, `grep`, and `cursor`,

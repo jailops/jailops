@@ -83,7 +83,7 @@ NAME   IPV4
 web    10.20.0.15 (lan)
 
 $ jailops jail list -c name,ipv4,gen
-! usage: columns name, ipv4, gen are not in one table (columns of -o wide: name, state, image, gen, addresses, age)
+! usage: columns name, ipv4, gen are not in one table (columns of -o wide: name, state, image, gen, addresses, autostart, age)
 ! hint: run 'jailops jail list --help' for usage
 [exit 2]
 
