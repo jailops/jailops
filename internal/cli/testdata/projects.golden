@@ -108,8 +108,8 @@ $ jailops create nginx --project web --image freebsd-15@stable --memory 1G --cpu
 jail/nginx created
 
 $ jailops list --project web
-NAME    STATE     IMAGE               GEN   ADDRESSES           AGE
-nginx   stopped   freebsd-15@stable   g1    10.50.0.2,fd50::2   3h
+NAME    STATE     IMAGE               GEN   ADDRESSES           AUTOSTART   AGE
+nginx   stopped   freebsd-15@stable   g1    10.50.0.2,fd50::2   -           3h
 
 $ jailops list
 ! No jails in project main. Create one with: jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE

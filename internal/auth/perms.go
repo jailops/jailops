@@ -77,7 +77,7 @@ func classify(e Entry) Class {
 		return ClassProject
 	case has("/api/v1/auth"), has("/api/v1/sessions"), p == "/api/v1/config-keys", has("/api/v1/apps"):
 		return ClassSelf
-	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates", p == "/api/v1/logs":
+	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates", p == "/api/v1/logs", p == "/api/v1/boot":
 		return ClassVisible
 	case has("/api/v1/logs/forward"):
 		return ClassGlobal
@@ -243,6 +243,8 @@ var Perms = classifyAll([]Entry{
 	// Logs hold what services print (tokens, passwords in error messages): the role that may exec into the jail.
 	r("GET", "/api/v1/jails/{name}/logs", op),
 	r("GET", "/api/v1/jails/{name}/logs/{file...}", op),
+	// what a boot of the host starts, in which order: the jails of the projects the caller may use
+	r("GET", "/api/v1/boot", ro),
 	// the logs of many jails at once, merged: the same reads, over the projects the caller may use
 	r("GET", "/api/v1/logs", op),
 	// where the host forwards its logs: names receivers and files of the host

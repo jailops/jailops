@@ -203,6 +203,8 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		Volumes:   apps.Volumes(app.Data),
 		Resources: limits,
 		SysVIPC:   app.SysVIPC,
+		// An installed service is meant to run: it comes back when the host boots.
+		Boot: api.BootPolicy{Autostart: true},
 	}
 	im, ref, err := s.imageFor(spec)
 	if err != nil {

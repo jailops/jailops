@@ -273,6 +273,9 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    `data`, `config` and `logs` paths, and the `notes`. Ports marked `expose: true` are recorded as such and nothing
    more: forwarding them through the jail's PF anchor (`proxy` devices) is a later feature.
 
+The jail is made with `boot.autostart: true`: an installed service starts every time the host boots, in the order
+`jailops boot` shows. `jailops config set JAIL boot.autostart false` turns it off for one jail.
+
 The events `app.installed` and `app.install.failed` (source `/api/v1/jails/<jail>`) end it, after the ordinary
 `jail-created`, `jail-started` and `jail-snapshot-created` of the steps.
 

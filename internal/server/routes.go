@@ -313,6 +313,7 @@ func (s *Server) routeTable() []route {
 
 	add(s.jailRoutes()...)
 	add(s.logRoutes()...)
+	add(s.bootRoutes()...)
 
 	// Networks and firewall.
 	add(resource[api.Network]{base: "/api/v1/networks", param: "name",

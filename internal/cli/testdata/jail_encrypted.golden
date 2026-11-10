@@ -29,9 +29,9 @@ $ jailops jail create plain --image freebsd-15@stable --network lan --storage de
 [exit 2]
 
 $ jailops jail list
-NAME     STATE    IMAGE               GEN   ADDRESSES    AGE
-vault    locked   freebsd-15@stable   g1    10.20.0.10   3h
-vault2   locked   freebsd-15@stable   g1    10.20.0.11   3h
+NAME     STATE    IMAGE               GEN   ADDRESSES    AUTOSTART   AGE
+vault    locked   freebsd-15@stable   g1    10.20.0.10   -           3h
+vault2   locked   freebsd-15@stable   g1    10.20.0.11   -           3h
 
 $ jailops jail start vault
 ! locked: jail "vault" is locked: the encrypted volume(s) db wait for a passphrase
@@ -61,22 +61,22 @@ $ jailops jail list --state locked
 ! No jails in project main match.
 
 $ jailops jail list
-┌────────┬─────────┬──────────────────┬──────┬────────────────────────┬─────┐
-│ NAME   │ STATE   │ IPV4             │ IPV6 │ IMAGE                  │ AGE │
-├────────┼─────────┼──────────────────┼──────┼────────────────────────┼─────┤
-│ vault  │ running │ 10.20.0.10 (lan) │ -    │ freebsd-15@stable (g1) │ 3h  │
-│ vault2 │ stopped │ 10.20.0.11 (lan) │ -    │ freebsd-15@stable (g1) │ 3h  │
-└────────┴─────────┴──────────────────┴──────┴────────────────────────┴─────┘
+┌────────┬─────────┬──────────────────┬──────┬────────────────────────┬───────────┬─────┐
+│ NAME   │ STATE   │ IPV4             │ IPV6 │ IMAGE                  │ AUTOSTART │ AGE │
+├────────┼─────────┼──────────────────┼──────┼────────────────────────┼───────────┼─────┤
+│ vault  │ running │ 10.20.0.10 (lan) │ -    │ freebsd-15@stable (g1) │ -         │ 3h  │
+│ vault2 │ stopped │ 10.20.0.11 (lan) │ -    │ freebsd-15@stable (g1) │ -         │ 3h  │
+└────────┴─────────┴──────────────────┴──────┴────────────────────────┴───────────┴─────┘
 
 $ jailops jail lock vault
 jail/vault locked
 
 $ jailops jail list --state locked
-┌───────┬────────┬──────────────────┬──────┬────────────────────────┬─────┐
-│ NAME  │ STATE  │ IPV4             │ IPV6 │ IMAGE                  │ AGE │
-├───────┼────────┼──────────────────┼──────┼────────────────────────┼─────┤
-│ vault │ locked │ 10.20.0.10 (lan) │ -    │ freebsd-15@stable (g1) │ 3h  │
-└───────┴────────┴──────────────────┴──────┴────────────────────────┴─────┘
+┌───────┬────────┬──────────────────┬──────┬────────────────────────┬───────────┬─────┐
+│ NAME  │ STATE  │ IPV4             │ IPV6 │ IMAGE                  │ AUTOSTART │ AGE │
+├───────┼────────┼──────────────────┼──────┼────────────────────────┼───────────┼─────┤
+│ vault │ locked │ 10.20.0.10 (lan) │ -    │ freebsd-15@stable (g1) │ -         │ 3h  │
+└───────┴────────┴──────────────────┴──────┴────────────────────────┴───────────┴─────┘
 
 $ jailops jail unlock vault
 jail/vault unlocked

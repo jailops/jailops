@@ -5,23 +5,23 @@ $ jailops jail create db --image freebsd-15@stable --storage default --network l
 jail/db created
 
 $ jailops jail list
-NAME   STATE     IMAGE               GEN   ADDRESSES    AGE
-db     stopped   freebsd-15@stable   g1    10.20.0.11   3h
-web    stopped   freebsd-15@stable   g1    10.20.0.10   3h
+NAME   STATE     IMAGE               GEN   ADDRESSES    AUTOSTART   AGE
+db     stopped   freebsd-15@stable   g1    10.20.0.11   -           3h
+web    stopped   freebsd-15@stable   g1    10.20.0.10   yes         3h
 
 $ jailops jail start web
 jail/web started
 
 $ jailops jail list
-NAME   STATE     IMAGE               GEN   ADDRESSES    AGE
-db     stopped   freebsd-15@stable   g1    10.20.0.11   3h
-web    running   freebsd-15@stable   g1    10.20.0.10   3h
+NAME   STATE     IMAGE               GEN   ADDRESSES    AUTOSTART   AGE
+db     stopped   freebsd-15@stable   g1    10.20.0.11   -           3h
+web    running   freebsd-15@stable   g1    10.20.0.10   yes         3h
 
 $ jailops jail list --state running -o name
 web
 
 $ jailops jail list -l env=prod --no-headers
-web    running   freebsd-15@stable   g1    10.20.0.10   3h
+web    running   freebsd-15@stable   g1    10.20.0.10   yes         3h
 
 $ jailops jail list --network other
 ! No jails in project main match.

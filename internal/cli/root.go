@@ -194,7 +194,7 @@ jailops events --type lifecycle -o json`,
 	root.AddCommand(
 		a.jailCmd(), a.imageCmd(), a.appCmd(), a.networkCmd(), a.wireguardCmd(), a.firewallCmd(), a.backupCmd(),
 		a.projectCmd(), a.storageCmd(), a.trustCmd(), a.sessionsCmd(), a.whoamiCmd(), a.opCmd(), a.eventsCmd(), a.tokenCmd(), a.certCmd(), a.userCmd(), a.hostCmd(),
-		a.remoteCmd(), a.auditCmd(), a.doctorCmd(), a.serverCmd(), a.explainCmd(), a.completionCmd(), a.versionCmd(), a.manCmd(),
+		a.remoteCmd(), a.auditCmd(), a.bootCmd(), a.doctorCmd(), a.serverCmd(), a.explainCmd(), a.completionCmd(), a.versionCmd(), a.manCmd(),
 	)
 	a.addJailShortcuts(root)
 	root.AddCommand(a.configCmd(), a.profileCmd(), a.updateCmd(), a.setAlias(a.jailDesc()), a.applyCmd())

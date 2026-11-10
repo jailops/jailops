@@ -63,10 +63,10 @@ nginx
 valkey
 
 $ jailops list
-NAME     STATE     IMAGE         GEN   ADDRESSES    AGE
-db       running   freebsd-151   g1    10.20.0.11   3h
-nginx    running   freebsd-151   g1    10.20.0.10   3h
-valkey   running   freebsd-151   g1    10.20.0.12   3h
+NAME     STATE     IMAGE         GEN   ADDRESSES    AUTOSTART   AGE
+db       running   freebsd-151   g1    10.20.0.11   -           3h
+nginx    running   freebsd-151   g1    10.20.0.10   -           3h
+valkey   running   freebsd-151   g1    10.20.0.12   -           3h
 
 $ jailops app install nginx --image freebsd-151
 ! already_exists: jail "nginx" already exists
