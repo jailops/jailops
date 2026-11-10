@@ -67,31 +67,28 @@ describe('address sets in the firewall page', () => {
       return v
     }
 
-    it('checks the name, the members and the includes as the server does, and focuses the first problem', async () => {
+    it('checks the name and the members as the server does, and focuses the first problem', async () => {
       const v = await open(await sets())
       expect(document.activeElement?.id).toBe('fws-name')
       await body().get('#fws-name').setValue('admins')
       await body().get('#fws-members').setValue('192.0.2.1\nnot-an-address')
-      await body().get('#fws-includes').setValue('ghost')
       await body().get('[data-test="set-create-go"]').trigger('click')
       await body().get('#fws').trigger('submit')
       await flushPromises()
       expect(body().get('#fws-name-e').text()).toBe('An address set of this name exists.')
       expect(body().get('#fws-members-e').text()).toBe('"not-an-address" is not an address, a CIDR or @jail.')
-      expect(body().get('#fws-includes-e').text()).toBe('Address set "ghost" does not exist.')
       expect(body().get('[data-test="set-create-why"]').text()).toContain('Name: An address set of this name exists.')
       expect(document.activeElement?.id).toBe('fws-name')
-      // a set that would include itself through another one
+      // a set that has itself as a member
       await body().get('#fws-name').setValue('loop')
-      await body().get('#fws-members').setValue('')
-      await body().get('#fws-includes').setValue('loop')
+      await body().get('#fws-members').setValue('@loop')
       await flushPromises()
-      expect(body().get('#fws-includes-e').text()).toBe('Address set include cycle: loop -> loop.')
+      expect(body().get('#fws-members-e').text()).toBe('Address set cycle: loop -> loop.')
       expect(writes(sent)).toEqual([])
       expect(v.emitted('created')).toBeUndefined()
     })
 
-    it('creates an empty set and a set with members and includes', async () => {
+    it('creates an empty set and a set with members', async () => {
       const v = await open(await sets())
       await body().get('#fws-name').setValue('empty')
       await body().get('#fws').trigger('submit')
@@ -103,11 +100,10 @@ describe('address sets in the firewall page', () => {
       expect((body().get('#fws-name').element as HTMLInputElement).value).toBe('')
       await body().get('#fws-name').setValue('ops')
       await body().get('#fws-members').setValue('192.0.2.10\n2001:db8::/64')
-      await body().get('#fws-includes').setValue('office, empty')
       await body().get('#fws').trigger('submit')
       await until(() => v.emitted('created')?.length === 2)
       const ops = (await api.firewall.addressSet('ops')).data
-      expect(ops.spec).toEqual({ addresses: [{ address: '192.0.2.10' }, { address: '2001:db8::/64' }], includes: ['office', 'empty'] })
+      expect(ops.spec).toEqual({ addresses: [{ address: '192.0.2.10' }, { address: '2001:db8::/64' }] })
       expect(ops.metadata.project).toBe('web')
     })
 
@@ -119,18 +115,18 @@ describe('address sets in the firewall page', () => {
       await until(() => body().find('[data-test="error-panel"]').exists())
       expect(body().get('#fws-name-e').text()).toBe('')
       expect(body().get('[data-test="error-panel"]').text()).toContain('already exists')
-      // an include the dialog believes in but the server does not know: its message lands under the field
+      // a member @name the dialog believes in but the server does not know: its message lands under the field
       await v.setProps({ sets: [{ metadata: { name: 'phantom' }, spec: { addresses: [] } } as AddressSet] })
       await body().get('#fws-name').setValue('fresh')
-      await body().get('#fws-includes').setValue('phantom')
+      await body().get('#fws-members').setValue('@phantom')
       await body().get('#fws').trigger('submit')
-      await until(() => body().get('#fws-includes-e').text() !== '')
-      expect(body().get('#fws-includes-e').text()).toBe('address set "phantom" does not exist')
-      expect(document.activeElement?.id).toBe('fws-includes')
-      // typing clears it; without the include the set is created
-      await body().get('#fws-includes').setValue('')
-      await body().get('#fws-includes').trigger('input')
-      expect(body().get('#fws-includes-e').text()).toBe('')
+      await until(() => body().get('#fws-members-e').text() !== '')
+      expect(body().get('#fws-members-e').text()).toBe('address set or jail "phantom" does not exist (a rule or a set names @phantom)')
+      expect(document.activeElement?.id).toBe('fws-members')
+      // typing clears it; without the member the set is created
+      await body().get('#fws-members').setValue('')
+      await body().get('#fws-members').trigger('input')
+      expect(body().get('#fws-members-e').text()).toBe('')
       await body().get('#fws').trigger('submit')
       await until(() => !!v.emitted('created'))
     })
@@ -192,7 +188,7 @@ describe('address sets in the firewall page', () => {
       expect(panel).toContain('address set "admins" is used by firewall policy "web-default"')
       expect(panel).toContain('remove @admins from the rules of web-default first')
       expect((await sets()).map((x) => x.metadata.name)).toContain('admins')
-      // office is included by admins
+      // office is a member of admins
       closeConfirm()
       await flushPromises()
       const office = body().findAll('[data-test="set-list"] button').find((b) => b.text() === '@office')!
@@ -202,7 +198,7 @@ describe('address sets in the firewall page', () => {
       await until(() => body().find('[data-test="confirm-dialog"]').exists())
       await body().get('[data-test="confirm-dialog"]').trigger('submit')
       await until(() => body().find('[data-test="confirm-dialog"] [data-test="error-panel"]').exists())
-      expect(body().get('[data-test="confirm-dialog"] [data-test="error-panel"]').text()).toContain('is included by "admins"')
+      expect(body().get('[data-test="confirm-dialog"] [data-test="error-panel"]').text()).toContain('is a member of "admins"')
     })
 
     it('shows the empty state with the add button in a project without sets', async () => {

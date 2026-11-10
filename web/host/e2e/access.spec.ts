@@ -31,7 +31,7 @@ test('the access tab lists the grants with the rules they generated', async ({ p
   await expect(g.getByText('host web web 10.20.0.11/32 scram-sha-256')).toBeHidden()
   await g.locator('summary').click()
   await expect(g.getByText('host web web 10.20.0.11/32 scram-sha-256')).toBeVisible()
-  await expect(g).toContainText('allow in tcp from 10.20.0.11 to port 5432')
+  await expect(g).toContainText('allow in tcp from @web to port 5432')
   // a jail that is not an installed app has no such tab
   await open(page, '/jails/mail')
   await expect(page.locator('h1')).toHaveText('mail')

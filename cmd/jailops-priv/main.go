@@ -112,7 +112,6 @@ type options struct {
 	workDir     string
 	helperPath  string
 	wgDir       string
-	ifPrefix    list
 	allowUser   list
 	allowGroup  list
 	ndpProxy    ndpList
@@ -160,7 +159,6 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.StringVar(&o.stateDir, "state-dir", "", "state directory (default <mount-base>/state)")
 	fs.StringVar(&o.helperPath, "helper-path", priv.DefaultHelperPath, "path jail.conf hooks call")
 	fs.StringVar(&o.wgDir, "wireguard-dir", priv.DefaultWireGuardDir, "directory of the WireGuard keys (root only, mode 0700; outside the daemon's directories)")
-	fs.Var(&o.ifPrefix, "if-prefix", "deprecated: legacy interface name prefix (default jo); a bridge or epair with it and no description counts as JailOps's and is marked at its next change. JailOps owns the interfaces that carry its description")
 	fs.Var(&o.allowUser, "allow-user", "user allowed to connect (jailopsd's user)")
 	fs.Var(&o.allowGroup, "allow-group", "group allowed to connect")
 	fs.Var(&o.ndpProxy, "ndp-proxy", "an uplink the IPv6 proxy may use and the prefixes it may answer for: <uplink>=<prefix>[,<prefix>...] (repeatable)")
@@ -219,8 +217,8 @@ func loadConfigFile(fs *flag.FlagSet, path string, required bool) error {
 func (o *options) privConfig() priv.Config {
 	c := priv.Config{
 		StorageRoots: append([]string(nil), o.storage...), StorageFile: o.storageFile, AllowPoolRoot: o.poolRoot,
-		IfPrefixes: o.ifPrefix, MountBase: o.mountBase,
-		ConfDir: o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir,
+		MountBase: o.mountBase,
+		ConfDir:   o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir,
 		WireGuardRoutes: o.wgRoutes,
 		NDPProxy:        o.ndpProxy, Sysctls: o.sysctl, FetchHosts: o.fetchHost, ImageMirrors: o.mirror,
 		HostManage: unionModules(o.hostManage, o.applianceModules()), HostDir: o.hostDir,
@@ -303,7 +301,6 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 		}
 		return 2
 	}
-	o.socket = helperSocket(o.socket)
 	rest := fs.Args()
 	if len(rest) > 0 && rest[0] == "version" {
 		printVersion(stdout)
@@ -446,15 +443,6 @@ func writePidfile(path string) error {
 		return err
 	}
 	return f.Close()
-}
-
-// helperSocket maps the socket path of releases before the helper had a directory of its own to the new one: the
-// directory of the old path is the daemon's, whose user could put a file or a socket there before the helper starts.
-func helperSocket(p string) string {
-	if p == priv.LegacySocket {
-		return priv.DefaultSocket
-	}
-	return p
 }
 
 // listen creates the socket with mode and group set before anyone can connect.
@@ -672,7 +660,7 @@ func checkConfig(o *options, cfg priv.Config, stdout, stderr io.Writer) int {
 	w("conf dir:       %s\n", c.ConfDir)
 	w("state dir:      %s\n", c.StateDir)
 	w("helper path:    %s\n", c.HelperPath)
-	w("interfaces:     the bridges and epairs that carry the JailOps description; legacy prefix %s (deprecated)\n", strings.Join(c.IfPrefixes, ", "))
+	w("interfaces:     the bridges and epairs that carry the JailOps description\n")
 	for _, u := range c.NDPProxy {
 		var ps []string
 		for _, p := range u.Prefixes {

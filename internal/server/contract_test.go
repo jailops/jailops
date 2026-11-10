@@ -484,7 +484,7 @@ func TestFirewall(t *testing.T) {
 	if err != nil || set.Metadata.Generation != 1 {
 		t.Fatalf("%v %+v", err, set)
 	}
-	_, err = fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "loop"}, Spec: api.AddressSetSpec{Includes: []string{"loop"}}})
+	_, err = fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "loop"}, Spec: api.AddressSetSpec{Addresses: api.Entries("@loop")}})
 	wantCode(t, err, api.CodeInvalid)
 	_, err = fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "bad"}, Spec: api.AddressSetSpec{Addresses: api.Entries("not an address")}})
 	wantCode(t, err, api.CodeInvalid)

@@ -57,7 +57,7 @@ func (f *Fake) AddForeign(name string, up bool) {
 }
 
 // AddIface inserts an interface as the kernel would show it (test helper): a bridge made by hand (Groups "bridge"),
-// one of an older release (a legacy name and no description), or one with a forged description.
+// one without a description, or one with a forged description.
 func (f *Fake) AddIface(i Iface) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -124,7 +124,7 @@ func (f *Fake) ownLocked(names ...string) error {
 		if err != nil {
 			return err
 		}
-		if _, err := f.o.Owns(i.Iface); err != nil {
+		if err := f.o.Owns(i.Iface); err != nil {
 			return err
 		}
 	}
@@ -353,7 +353,7 @@ func (f *Fake) MoveFromJail(_ context.Context, iface, jail string) error {
 	if i == nil || i.jail != jail {
 		return notFound(iface)
 	}
-	if _, err := f.o.Owns(i.Iface); err != nil {
+	if err := f.o.Owns(i.Iface); err != nil {
 		return err
 	}
 	i.jail = ""

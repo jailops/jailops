@@ -143,7 +143,7 @@ export function networks(): Network[] {
       status: { bridge_up: true, members: ['epair0a', 'epair1a', 'epair2a', 'epair4a'], allocated: 8, free: 38, orphans: [], conditions: [] },
     },
     {
-      metadata: meta('backend'), spec: { bridge: 'jo1', private: true, ipv4: { subnet: '10.30.0.0/28', gateway: '10.30.0.1', range: '10.30.0.2-10.30.0.13' } },
+      metadata: meta('backend'), spec: { bridge: 'jo1', ipv4: { subnet: '10.30.0.0/28', gateway: '10.30.0.1', range: '10.30.0.2-10.30.0.13' } },
       status: { bridge_up: true, members: ['epair3a'], allocated: 12, free: 0, orphans: ['epair9a', 'epair9b'], conditions: [] },
     },
     {
@@ -187,7 +187,7 @@ export function policies(): FirewallPolicy[] {
 
 export function addressSets(): AddressSet[] {
   return [
-    { metadata: { ...meta('admins'), scope: 'fleet' }, spec: { comment: 'Where the administrators connect from', addresses: [{ address: '198.51.100.7', comment: "the administrator's home" }, { address: '203.0.113.0/28', comment: 'the second office' }], includes: ['office'] } },
+    { metadata: { ...meta('admins'), scope: 'fleet' }, spec: { comment: 'Where the administrators connect from', addresses: [{ address: '198.51.100.7', comment: "the administrator's home" }, { address: '203.0.113.0/28', comment: 'the second office' }, { address: '@office', comment: 'the office sets' }] } },
     { metadata: { ...meta('office'), scope: 'fleet' }, spec: { comment: 'The office network', addresses: [{ address: '192.0.2.128/26', comment: 'wired and wifi' }, { address: '2001:db8:aa::/48', comment: 'the office, IPv6' }] } },
   ]
 }

@@ -205,7 +205,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 		if _, err := sn.Wait(c); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pc.Firewall().Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "pol"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny"}}); err != nil {
+		if _, err := pc.Firewall().Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "pol"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}}); err != nil {
 			t.Fatal(err)
 		}
 		if _, err := pc.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "prof"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.memory": "1G"}}}); err != nil {

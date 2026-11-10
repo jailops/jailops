@@ -78,7 +78,6 @@ inside it as well.
 | `wireguard-routes` | WireGuard tunnels may route these networks into themselves although a route there is wider than a /8 (/16 for IPv6) or covers the host's addresses, default gateway, resolvers, loopback, link-local or multicast ([wireguard.md](wireguard.md)) | nothing |
 | `fetch-host` | download from these hosts, over https | the Alpine CDN and `pkg.freebsd.org` |
 | `wireguard-dir` | where the helper keeps the keys of WireGuard tunnels (root, 0700; outside the daemon's directories) | `/var/db/jailops-priv/wireguard` |
-| `if-prefix` | deprecated: a bridge or epair whose name starts with it and that has no description at all counts as JailOps's once, and is marked ([Interfaces](#interfaces)) | `jo` |
 
 **An admin who may set these is root on the host.** Keep the lists short, and write nothing you would not give root.
 
@@ -342,11 +341,10 @@ person who sends it to the catalog reviews it.
 ## Who may connect to an app
 
 An installed app is closed: its managed firewall policy denies every inbound connection, the host's included, until
-`jailops app allow` lets a source in (`operator` in the project; for a jail of another project, `operator` there too,
-because that jail's policy gets the outbound rule). The managed policies are written by app access only; the firewall
+`jailops app allow` lets a source in (`operator` in the project). The managed policies are written by app access only; the firewall
 routes refuse to change them, so a person cannot widen a grant behind the registry's back, and a jail's own policy
-cannot reopen the closed default. Deleting a jail that is the source of a grant removes the grant's rule at once,
-because its address may be given to another jail.
+cannot reopen the closed default. A jail that is the source of a grant is not deleted until the grant is denied:
+the rule names the jail, and a jail made later under the name would take its place.
 
 For a database app, `psql` runs as `postgres` in the jail through the helper's in-jail exec with the statements on its
 standard input: no statement is in an argument vector. The daemon generates the password (32 characters, about 190 bits),
@@ -390,7 +388,7 @@ The helper runs as root and changes network interfaces for the daemon: bridges, 
 routes, neighbor entries, MTUs, their move into and out of a jail's vnet. It must never be made to change one that
 is not JailOps's: the host's uplink (`vmx0`, `em0`), `lo0`, a bridge an administrator made, a tunnel. **An interface is
 JailOps's when the kernel says so: it is a bridge or an epair (its driver's group) and its description carries
-JailOps's marker** (`jailops ...`, or `jailops:<id>` of releases before 0.4.0). Its name says nothing: a bridge may have
+JailOps's marker** (`jailops ...`). Its name says nothing: a bridge may have
 any free name (`office`), and a name that looks like JailOps's (`jo7`) is not enough.
 
 - **Only root sets a description** of an interface in the host's network stack, and the only operations of the helper
@@ -428,11 +426,8 @@ any free name (`office`), and a name that looks like JailOps's (`jo7`) is not en
 - **Reading stays open.** The interface list, the uplink's addresses and any one interface are read as before.
 - **jail.conf.** `vnet.interface` must name an epair end of the form JailOps gives them (`jo` and the jail's hash), and
   each one that exists when the jail is created must be JailOps's in the kernel.
-- **Upgrade.** Interfaces of earlier releases already carry their description. A bridge or epair whose name has a
-  legacy prefix (`if-prefix` in `priv.conf`, default `jo`) and **no description at all** (an older build, or a crash
-  between its creation and its description) counts as JailOps's, and the helper writes the marker the first time it
-  changes it; from then on the marker decides. One with someone else's description, or of another kind, is not
-  JailOps's whatever its name. `if-prefix` is deprecated and kept only for this.
+- **No description, no ownership.** A bridge or epair without a description is not JailOps's, whatever its name or its
+  prefix; one with someone else's description, or of another kind, is not either.
 
 What it does not cover: root on the host can put JailOps's description on anything, and an administrator who does so
 hands that interface to JailOps. A bridge is not a security boundary between the jails on it ([Network

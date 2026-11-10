@@ -1,7 +1,7 @@
 package api
 
 // FirewallPolicy is a declarative set of rules rendered into one PF anchor
-// per jail ("jailops/<jail>"). jailops never owns the host's pf.conf; the
+// per jail ("jailops/<project>/<jail>"). jailops never owns the host's pf.conf; the
 // administrator adds the anchor lines once.
 type FirewallPolicy struct {
 	Metadata ObjectMeta         `json:"metadata"`
@@ -12,9 +12,9 @@ type FirewallPolicy struct {
 type FirewallPolicySpec struct {
 	// Comment says what the policy is for: what a reviewer of the firewall reads first (one line, at most 200 characters, no double quotes or backslashes).
 	Comment string `json:"comment,omitempty"`
-	// Default applies when no rule matches: "allow" or "deny".
-	DefaultIn  string         `json:"default_in,omitempty"`
-	DefaultOut string         `json:"default_out,omitempty"`
+	// DefaultIn and DefaultOut apply when no rule matches: "allow" or "deny". A policy always says both.
+	DefaultIn  string         `json:"default_in"`
+	DefaultOut string         `json:"default_out"`
 	Rules      []FirewallRule `json:"rules,omitempty"`
 	// Raw is a PF fragment. It requires the admin role and is validated with
 	// pfctl -n before it is loaded.
@@ -29,7 +29,7 @@ type FirewallRule struct {
 	Action    string   `json:"action"`          // allow, deny
 	Direction string   `json:"direction"`       // in, out
 	Proto     string   `json:"proto,omitempty"` // tcp, udp, icmp, icmp6
-	From      []string `json:"from,omitempty"`  // addresses, @address-set, or tag:<tag>
+	From      []string `json:"from,omitempty"`  // addresses, @address-set, @jail, or tag:<tag>
 	To        []string `json:"to,omitempty"`
 	Ports     []string `json:"ports,omitempty"` // "80", "8000-8100"
 	Log       bool     `json:"log,omitempty"`
@@ -60,13 +60,12 @@ type AddressEntry struct {
 	Comment string `json:"comment,omitempty"`
 }
 
-// AddressSetSpec lists the members of an address set.
+// AddressSetSpec lists the members of an address set. A member @name is a jail of the project or another address
+// set; cycles are rejected.
 type AddressSetSpec struct {
 	// Comment says what the set is (one line, at most 200 characters, no double quotes or backslashes).
 	Comment   string         `json:"comment,omitempty"`
 	Addresses []AddressEntry `json:"addresses"`
-	// Includes names other address sets; cycles are rejected.
-	Includes []string `json:"includes,omitempty"`
 }
 
 // Members is the text of every entry: what a rule or a table holds.

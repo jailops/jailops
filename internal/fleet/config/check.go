@@ -204,6 +204,9 @@ func (f *Fleet) Check() error {
 				}
 				if s.Firewall.Policy != "" {
 					missing(h, api.KindFirewallPolicy, o.Project, s.Firewall.Policy, o, "firewall policy")
+					if pdef != nil && pdef.Spec.Firewall == s.Firewall.Policy {
+						add(o, "firewall policy %q is the mandatory policy of project %s: it is rendered for every jail already; name a policy of the jail's own", s.Firewall.Policy, o.Project)
+					}
 				}
 				for _, d := range s.Boot.Depends {
 					missing(h, api.KindJail, o.Project, d, o, "boot.depends")
@@ -237,7 +240,7 @@ func (f *Fleet) Check() error {
 					note(o, "no App %q is declared for host %s: the grants apply only if it was installed there", o.Name, h)
 				}
 				for _, g := range s.Grants {
-					c, _ := model.CanonicalSource(o.Project, g.Source)
+					c, _ := model.CanonicalSource(g.Source)
 					name, ok := strings.CutPrefix(c, "@")
 					if !ok {
 						continue
@@ -269,9 +272,6 @@ func (f *Fleet) Check() error {
 		case api.AddressSetSpec:
 			checkAddressSet(o, s, add, warn)
 			for _, h := range o.Hosts {
-				for _, inc := range s.Includes {
-					missing(h, api.KindAddressSet, o.Project, inc, o, "includes")
-				}
 				for _, e := range s.Addresses {
 					if n, ok := strings.CutPrefix(e.Address, "@"); ok {
 						missingRef(h, o.Project, n, o, "member")
@@ -286,7 +286,7 @@ func (f *Fleet) Check() error {
 					}
 				}
 				if cyc := setCycle(sets, o.Name, nil); cyc != "" {
-					add(o, "address set include cycle: %s", cyc)
+					add(o, "address set cycle: %s", cyc)
 					break
 				}
 			}
@@ -555,7 +555,11 @@ var secretSegment = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 func checkPolicy(o *Object, s api.FirewallPolicySpec, add func(*Object, string, ...any), warn func(*Object, string, ...any)) {
 	for _, d := range []struct{ n, v string }{{"default_in", s.DefaultIn}, {"default_out", s.DefaultOut}} {
-		if d.v != "" && d.v != "allow" && d.v != "deny" {
+		switch d.v {
+		case "allow", "deny":
+		case "":
+			add(o, "%s is required: allow or deny", d.n)
+		default:
 			add(o, "%s must be allow or deny, got %q", d.n, d.v)
 		}
 	}
@@ -616,7 +620,7 @@ func validPorts(p string) bool {
 }
 
 func checkAddressSet(o *Object, s api.AddressSetSpec, add func(*Object, string, ...any), warn func(*Object, string, ...any)) {
-	if len(s.Addresses) == 0 && len(s.Includes) == 0 {
+	if len(s.Addresses) == 0 {
 		warn(o, "address set %s is empty: rules that reference it match nothing", o.Name)
 	}
 	for _, e := range s.Addresses {
@@ -633,7 +637,7 @@ func checkAddressSet(o *Object, s api.AddressSetSpec, add func(*Object, string, 
 	}
 }
 
-// setCycle returns the include path of a cycle reachable from name, or "".
+// setCycle returns the path of a cycle of @name members reachable from name, or "".
 func setCycle(sets map[string]*Object, name string, stack []string) string {
 	if i := slices.Index(stack, name); i >= 0 {
 		return strings.Join(append(slices.Clone(stack[i:]), name), " -> ")
@@ -644,8 +648,8 @@ func setCycle(sets map[string]*Object, name string, stack []string) string {
 	}
 	s, _ := o.Spec.(api.AddressSetSpec)
 	stack = append(slices.Clone(stack), name)
-	next := slices.Clone(s.Includes)
-	for _, e := range s.Addresses { // a member @name that is a set is followed like an include (a jail has no members)
+	var next []string
+	for _, e := range s.Addresses { // a member @name that is a set is followed (a jail has no members)
 		if n, ok := strings.CutPrefix(e.Address, "@"); ok {
 			next = append(next, n)
 		}
@@ -661,9 +665,6 @@ func setCycle(sets map[string]*Object, name string, stack []string) string {
 func checkNetwork(o *Object, s api.NetworkSpec, add func(*Object, string, ...any), warn func(*Object, string, ...any)) {
 	if s.IPv4 == nil && (s.IPv6 == nil || s.IPv6.Mode == api.IPv6None) {
 		add(o, "a network needs ipv4 or ipv6")
-	}
-	if s.Private && s.Uplink == "" {
-		add(o, "private blocks all traffic between the jails of the network and is for networks routed through the host: set an uplink")
 	}
 	if s.Uplink != "" && s.Uplink == s.Bridge {
 		add(o, "uplink must not be the bridge itself")

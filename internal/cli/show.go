@@ -104,9 +104,6 @@ func (a *app) showAddressSet(set api.AddressSet) error {
 	if set.Spec.Comment != "" {
 		s.kv("Comment", set.Spec.Comment)
 	}
-	if len(set.Spec.Includes) > 0 {
-		s.kv("Includes", strings.Join(set.Spec.Includes, ", "))
-	}
 	s.kv("Age", age(a.env.Now(), set.Metadata.CreatedAt))
 	s.labels(set.Metadata)
 	rows := make([][]string, 0, len(set.Spec.Addresses))
@@ -155,8 +152,8 @@ func (a *app) showPolicy(p api.FirewallPolicy) error {
 	if p.Spec.Comment != "" {
 		s.kv("Comment", p.Spec.Comment)
 	}
-	s.kv("Default in", orText(p.Spec.DefaultIn, "(unset)"))
-	s.kv("Default out", orText(p.Spec.DefaultOut, "(unset)"))
+	s.kv("Default in", p.Spec.DefaultIn)
+	s.kv("Default out", p.Spec.DefaultOut)
 	s.kv("Age", age(a.env.Now(), p.Metadata.CreatedAt))
 	s.labels(p.Metadata)
 	if len(p.Spec.Rules) > 0 {
@@ -231,9 +228,6 @@ func (a *app) showNetwork(n api.Network) error {
 	}
 	if n.Spec.MTU > 0 {
 		s.kv("MTU", strconv.Itoa(n.Spec.MTU))
-	}
-	if n.Spec.Private {
-		s.kv("Private", "yes: members reach each other only through the host")
 	}
 	s.kv("Addresses", fmt.Sprintf("%d used, %d free", n.Status.Allocated, n.Status.Free))
 	if len(n.Status.Members) > 0 {

@@ -55,6 +55,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorWireGuard(ctx, c)
 	s.doctorAppsLocal(c)
 	s.doctorAppsAccess(ctx, c)
+	s.doctorPolicyDefaults(c)
 	s.doctorRateLimits(c)
 	s.doctorLogForward(c)
 	rep := api.DoctorReport{Time: s.now().UTC(), Host: s.d.Hostname, Checks: c.list, Status: api.DoctorOK}
@@ -485,7 +486,7 @@ func (s *Service) doctorRuntime(ctx context.Context, c *checkSet) {
 	}
 	// Stale epairs.
 	if s.d.Net != nil {
-		known := map[string]bool{}     // jail ids (the marker of earlier releases)
+		known := map[string]bool{}     // jail ids
 		knownBase := map[string]bool{} // the jail part of epair names
 		s.mu.RLock()
 		for _, e := range s.jails {
@@ -504,8 +505,7 @@ func (s *Service) doctorRuntime(ctx context.Context, c *checkSet) {
 				if !ipam.IsEpairName(i.Name) || !render.IsJailOpsDesc(i.Description) || strings.HasPrefix(i.Description, "jailops net=") {
 					continue
 				}
-				id, legacy := strings.CutPrefix(i.Description, "jailops:")
-				if knownBase[i.Name[:len(i.Name)-3]] || legacy && known[id] {
+				if knownBase[i.Name[:len(i.Name)-3]] {
 					continue
 				}
 				stale = append(stale, i.Name)

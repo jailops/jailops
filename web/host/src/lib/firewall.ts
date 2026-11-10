@@ -62,13 +62,11 @@ export interface SetMsgs {
   setBadName: string
   setExists: string
   setMember: (a: string) => string
-  setIncludeName: (n: string) => string
-  setMissing: (n: string) => string
   setCycle: (path: string) => string
 }
 
 /** The fields of the set form; a key is set only when the field has a problem. */
-export type SetErrors = Partial<Record<'name' | 'addresses' | 'includes', string>>
+export type SetErrors = Partial<Record<'name' | 'addresses', string>>
 
 function v4Bytes(s: string): number[] | null {
   return ipv4(s) ? s.split('.').map(Number) : null
@@ -105,13 +103,12 @@ export function setNameError(name: string, taken: string[], msg: SetMsgs): strin
 }
 
 /**
- * The spec the form sends: members one per line (commas and spaces also separate them), includes comma separated. A line
+ * The spec the form sends: members one per line (commas and spaces also separate them). A line
  * that ends in `# a comment` is ONE member with that comment (what it is: what a reviewer of the firewall reads next to
  * `@office` in a rule); an IPv4 and an IPv6 network are two lines, each with its own comment. `comment` is what the set
  * as a whole is.
  */
-export function setSpec(members: string, includes: string, comment = ''): AddressSetSpec {
-  const inc = splitList(includes)
+export function setSpec(members: string, comment = ''): AddressSetSpec {
   const addresses: AddressEntry[] = []
   for (const line of members.split('\n')) {
     const at = line.indexOf('#')
@@ -125,7 +122,6 @@ export function setSpec(members: string, includes: string, comment = ''): Addres
   }
   const spec: AddressSetSpec = { addresses }
   if (comment.trim()) spec.comment = comment.trim()
-  if (inc.length) spec.includes = inc
   return spec
 }
 
@@ -135,45 +131,45 @@ export function setTextOf(spec: AddressSetSpec): string {
 }
 
 /**
- * The problems of a set the server would refuse: a member that is no address or CIDR, an include that is no set
- * name, does not exist or closes a cycle. `others` are the sets of the project; an empty set is allowed.
+ * The problems of a set the server would refuse: a member that is no address, CIDR or @name, or an @name that closes a
+ * cycle of sets. `others` are the sets of the project; an empty set is allowed. A member @name that is neither a set
+ * nor a jail is the server's to refuse: the console does not list the jails.
  */
 export function validateSet(name: string, spec: AddressSetSpec, others: Record<string, AddressSetSpec>, msg: SetMsgs): SetErrors {
   const e: SetErrors = {}
   const bad = (spec.addresses ?? []).find((a) => !setMember(a.address))
   if (bad !== undefined) e.addresses = msg.setMember(bad.address)
-  const badInc = (spec.includes ?? []).find((n) => !SET_NAME.test(n))
-  if (badInc !== undefined) e.includes = msg.setIncludeName(badInc)
-  else if (name) {
+  if (bad === undefined && name) {
     const sets = { ...others, [name]: spec }
     const walk = (n: string, path: string[]): string => {
       if (path.includes(n)) return msg.setCycle([...path, n].join(' -> '))
       const s = sets[n]
-      if (!s) return msg.setMissing(n)
-      for (const i of s.includes ?? []) {
-        const p = walk(i, [...path, n])
+      if (!s) return '' // a jail, or a name the server checks
+      for (const a of s.addresses ?? []) {
+        if (!a.address.startsWith('@')) continue
+        const p = walk(a.address.slice(1), [...path, n])
         if (p) return p
       }
       return ''
     }
     const p = walk(name, [])
-    if (p) e.includes = p
+    if (p) e.addresses = p
   }
   return e
 }
 
-/** What refers to a set: the policies with @name in a rule and the sets that include it. The server refuses to
+/** What refers to a set: the policies with @name in a rule and the sets that have @name as a member. The server refuses to
  *  delete a set while either list has entries. */
 export function setUsers(name: string, policies: FirewallPolicy[], sets: AddressSet[]): { policies: string[]; sets: string[] } {
   const ref = '@' + name
   return {
     policies: policies.filter((p) => (p.spec.rules ?? []).some((r) => r.from?.includes(ref) || r.to?.includes(ref))).map((p) => p.metadata.name),
-    sets: sets.filter((x) => x.spec.includes?.includes(name)).map((x) => x.metadata.name),
+    sets: sets.filter((x) => (x.spec.addresses ?? []).some((a) => a.address === ref)).map((x) => x.metadata.name),
   }
 }
 
 /** The field a server error names (detail.field of a validation error), with the server's message. */
 export function detailToSetErrors(e: { message: string; detail?: Record<string, string> } | null | undefined): SetErrors {
   const f = e?.detail?.field
-  return f === 'name' || f === 'addresses' || f === 'includes' ? { [f]: e!.message } : {}
+  return f === 'name' || f === 'addresses' ? { [f]: e!.message } : {}
 }

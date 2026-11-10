@@ -58,7 +58,6 @@ test('a new address set is used in a rule, refused while in use, and deleted onc
   await expect(page.locator('#fws-name-e')).toContainText('does not follow the rule')
   await page.locator('#fws-name').fill('lab')
   await page.locator('#fws-members').fill('198.51.100.10\n2001:db8:1::/64')
-  await page.locator('#fws-includes').fill('office')
   await page.getByTestId('set-create-go').click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   await expect(page.getByTestId('set-list')).toContainText('@lab')

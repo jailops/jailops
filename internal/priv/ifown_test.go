@@ -23,9 +23,9 @@ func ownershipHost(t *testing.T, e *env) {
 		t.Fatal(err)
 	}
 	for _, i := range []ifconfig.Iface{
-		{Name: "jo7", Groups: []string{"bridge"}},                                   // an older release's bridge, no description
-		{Name: "jo8", Groups: []string{"bridge"}, Description: "customer bridge"},   // a legacy name with someone's description
-		{Name: "jo9", Groups: []string{"vmx"}},                                      // a physical interface renamed to a legacy name
+		{Name: "jo7", Groups: []string{"bridge"}},                                   // a bridge with no description
+		{Name: "jo8", Groups: []string{"bridge"}, Description: "customer bridge"},   // a jo name with someone's description
+		{Name: "jo9", Groups: []string{"vmx"}},                                      // a physical interface renamed to a jo name
 		{Name: "vmx0", Groups: []string{"vmx"}, Description: "uplink"},              // the uplink
 		{Name: "vmx1", Groups: []string{"vmx"}, Description: ifconfig.Marker},       // an uplink an administrator marked by hand
 		{Name: "bridge0", Groups: []string{"bridge"}},                               // a bridge of the kernel's name
@@ -182,43 +182,23 @@ func TestInterfaceOwnershipFreeName(t *testing.T) {
 	}
 }
 
-// An interface of an earlier release (legacy prefix, no description) is accepted once and marked; one with someone
-// else's description, or of another kind, is not.
-func TestInterfaceOwnershipLegacy(t *testing.T) {
+// An interface is JailOps's by its description, never by its name: a name that looks like JailOps's, without a
+// description, with someone else's, or on another kind of interface, is not changed.
+func TestInterfaceOwnershipIsTheDescriptionNotTheName(t *testing.T) {
 	f := newFixtureWith(t, func(e *env) { ownershipHost(t, e) })
 	ctx := context.Background()
 	n := f.client.Net()
-	if err := n.SetLink(ctx, "jo7", true); err != nil {
-		t.Fatal(err)
+	if err := n.SetLink(ctx, "jo7", true); !api.IsCode(err, api.CodeForbidden) {
+		t.Errorf("a jo name without a description: %v", err)
 	}
-	if d := desc(t, f.env, "jo7"); d != ifconfig.Marker {
-		t.Fatalf("jo7 not marked: %q", d)
-	}
-	if err := n.BridgeDestroy(ctx, "jo7"); err != nil {
-		t.Fatal(err)
+	if d := desc(t, f.env, "jo7"); d != "" {
+		t.Errorf("jo7 was given a description: %q", d)
 	}
 	if err := n.SetLink(ctx, "jo8", true); !api.IsCode(err, api.CodeForbidden) {
-		t.Errorf("legacy name with a foreign description: %v", err)
+		t.Errorf("a jo name with a foreign description: %v", err)
 	}
 	if err := n.SetLink(ctx, "jo9", true); !api.IsCode(err, api.CodeForbidden) {
-		t.Errorf("legacy name on a physical interface: %v", err)
-	}
-	// priv.conf's if-prefix names the legacy prefixes; without jo, a bare jo7 is foreign
-	e := newEnv(t)
-	cfg := e.cfg
-	cfg.IfPrefixes = []string{"old"}
-	net := ifconfig.NewFake(ifconfig.Options{Prefixes: cfg.IfPrefixes}) // the helper builds both from priv.conf
-	l, err := NewLocal(cfg, Deps{ZFS: e.zfs, Jails: e.jails, PF: e.pf, Net: net, Runner: e.runner}, WithoutChown())
-	if err != nil {
-		t.Fatal(err)
-	}
-	net.AddIface(ifconfig.Iface{Name: "jo7", Groups: []string{"bridge"}})
-	net.AddIface(ifconfig.Iface{Name: "old3", Groups: []string{"bridge"}})
-	if err := l.Net().SetLink(ctx, "jo7", true); !api.IsCode(err, api.CodeForbidden) {
-		t.Errorf("jo7 without the prefix: %v", err)
-	}
-	if err := l.Net().SetLink(ctx, "old3", true); err != nil {
-		t.Errorf("old3: %v", err)
+		t.Errorf("a jo name on a physical interface: %v", err)
 	}
 }
 

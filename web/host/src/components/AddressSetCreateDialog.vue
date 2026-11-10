@@ -10,24 +10,23 @@ import Modal from '@jailops/shared/components/Modal.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import type { AddressSet } from '@jailops/shared/api/types'
 
-// Create an address set: a name, its members and the sets it includes. The checks are the server's (lib/firewall.ts);
+// Create an address set: a name and its members (addresses, CIDRs, and @name for a jail or another set). The checks are the server's (lib/firewall.ts);
 // a refusal still lands on its field.
 const props = defineProps<{ open: boolean; sets: AddressSet[] }>()
 const emit = defineEmits<{ close: []; created: [name: string] }>()
 
-const f = reactive({ name: '', comment: '', members: '', includes: '' })
+const f = reactive({ name: '', comment: '', members: '' })
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 const server = ref<SetErrors>({})
 const others = computed(() => Object.fromEntries(props.sets.map((x) => [x.metadata.name, x.spec])))
-const local = computed(() => validateSet(f.name, setSpec(f.members, f.includes, f.comment), others.value, s.firewall))
+const local = computed(() => validateSet(f.name, setSpec(f.members, f.comment), others.value, s.firewall))
 const check = useFormCheck(() => ({
   'fws-name': setNameError(f.name, props.sets.map((x) => x.metadata.name), s.firewall),
   'fws-members': local.value.addresses ?? '',
-  'fws-includes': local.value.includes ?? '',
 }))
-const labels: Record<string, string> = { 'fws-name': s.firewall.name, 'fws-members': s.firewall.addresses, 'fws-includes': s.firewall.includes }
-const fieldOf = { 'fws-name': 'name', 'fws-members': 'addresses', 'fws-includes': 'includes' } as const
+const labels: Record<string, string> = { 'fws-name': s.firewall.name, 'fws-members': s.firewall.addresses }
+const fieldOf = { 'fws-name': 'name', 'fws-members': 'addresses' } as const
 /** The message under a field: the local check, else what the server said about it. */
 const err = (id: keyof typeof fieldOf) => check.err(id) || server.value[fieldOf[id]] || ''
 function edited(id: keyof typeof fieldOf): void {
@@ -37,7 +36,7 @@ function edited(id: keyof typeof fieldOf): void {
 
 watch(() => props.open, (o) => {
   if (!o) return
-  Object.assign(f, { name: '', members: '', includes: '' })
+  Object.assign(f, { name: '', members: '' })
   error.value = null
   server.value = {}
   check.reset()
@@ -50,7 +49,7 @@ const create = () => check.submit(async () => {
   server.value = {}
   const name = f.name
   try {
-    await runOp(s.firewall.createSetOp(name), () => api.firewall.createAddressSet({ metadata: { name }, spec: setSpec(f.members, f.includes, f.comment) }))
+    await runOp(s.firewall.createSetOp(name), () => api.firewall.createAddressSet({ metadata: { name }, spec: setSpec(f.members, f.comment) }))
     emit('created', name)
   } catch (e) {
     error.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
@@ -76,10 +75,6 @@ const create = () => check.submit(async () => {
         <textarea id="fws-members" v-model="f.members" class="mono" rows="6" spellcheck="false" :aria-invalid="!!err('fws-members')" aria-describedby="fws-members-h fws-members-e" @input="edited('fws-members')"></textarea>
         <span id="fws-members-h" class="hint">{{ s.firewall.membersHint }}</span>
         <span id="fws-members-e" class="field-error" role="alert">{{ err('fws-members') }}</span></div>
-      <div class="field"><label for="fws-includes">{{ s.firewall.includes }}</label>
-        <input id="fws-includes" v-model="f.includes" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!err('fws-includes')" aria-describedby="fws-includes-h fws-includes-e" @input="edited('fws-includes')" />
-        <span id="fws-includes-h" class="hint">{{ s.firewall.includesHint }}</span>
-        <span id="fws-includes-e" class="field-error" role="alert">{{ err('fws-includes') }}</span></div>
       <ErrorPanel v-if="error" :error="error" />
     </form>
     <template #footer>

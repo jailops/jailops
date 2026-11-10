@@ -52,7 +52,7 @@ describe('demo rename', () => {
     expect(renameKindOf(['storage', 'x', 'rename'])).toBeUndefined()
     expect(renameKindOf(['networks', 'lan'])).toBeUndefined()
   })
-  it('renames an address set and the rules and includes that name it follow', () => {
+  it('renames an address set and the rules and sets that name it follow', () => {
     const x = db()
     const a = demoRename(x, 'addressSet', 'office', 'office_eu', 'web', '"3"')
     if ('error' in a) throw new Error(a.error.message)
@@ -60,7 +60,7 @@ describe('demo rename', () => {
     expect(a.result.counts).toEqual({ object: 1, reference: 1 })
     a.apply()
     expect(x.sets.map((y) => y.metadata.name)).toEqual(['admins', 'office_eu'])
-    expect(x.sets[0].spec.includes).toEqual(['office_eu'])
+    expect(x.sets[0].spec.addresses.map((a) => a.address)).toContain('@office_eu')
     const b = demoRename(x, 'addressSet', 'admins', 'ops', 'web', undefined)
     if ('error' in b) throw new Error(b.error.message)
     b.apply()

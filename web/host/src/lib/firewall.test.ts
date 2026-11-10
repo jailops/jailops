@@ -26,10 +26,10 @@ describe('address set names', () => {
 })
 
 describe('address set specs', () => {
-  const others = { admins: { addresses: [{ address: '198.51.100.7' }], includes: ['office'] }, office: { addresses: [{ address: '192.0.2.128/26' }] } }
-  it('splits members by lines (and commas) and leaves includes out when there are none', () => {
-    expect(setSpec('192.0.2.1\n 198.51.100.0/24 ,2001:db8::1\n\n', '')).toEqual({ addresses: [{ address: '192.0.2.1' }, { address: '198.51.100.0/24' }, { address: '2001:db8::1' }] })
-    expect(setSpec('', 'office, admins')).toEqual({ addresses: [], includes: ['office', 'admins'] })
+  const others = { admins: { addresses: [{ address: '198.51.100.7' }, { address: '@office' }] }, office: { addresses: [{ address: '192.0.2.128/26' }] } }
+  it('splits members by lines (and commas)', () => {
+    expect(setSpec('192.0.2.1\n 198.51.100.0/24 ,2001:db8::1\n\n')).toEqual({ addresses: [{ address: '192.0.2.1' }, { address: '198.51.100.0/24' }, { address: '2001:db8::1' }] })
+    expect(setSpec('@office, @admins')).toEqual({ addresses: [{ address: '@office' }, { address: '@admins' }] })
   })
   it('allows an empty set, as the server does', () => {
     expect(validateSet('empty', { addresses: [] }, others, s.firewall)).toEqual({})
@@ -37,27 +37,26 @@ describe('address set specs', () => {
   it('names the first member that is no address', () => {
     expect(validateSet('x', { addresses: [{ address: '192.0.2.1' }, { address: 'nope' }, { address: '@office' }] }, others, s.firewall)).toEqual({ addresses: s.firewall.setMember('nope') })
   })
-  it('refuses a bad include name, a missing set and a cycle, with the path', () => {
-    expect(validateSet('x', { addresses: [], includes: ['Office'] }, others, s.firewall).includes).toBe(s.firewall.setIncludeName('Office'))
-    expect(validateSet('x', { addresses: [], includes: ['ghost'] }, others, s.firewall).includes).toBe(s.firewall.setMissing('ghost'))
-    expect(validateSet('x', { addresses: [], includes: ['x'] }, others, s.firewall).includes).toBe(s.firewall.setCycle('x -> x'))
-    // office gains an include of admins, which includes office
-    expect(validateSet('office', { addresses: [], includes: ['admins'] }, { admins: others.admins }, s.firewall).includes).toBe(s.firewall.setCycle('office -> admins -> office'))
+  it('refuses a cycle of members, with the path, and leaves a name that is no set to the server (it may be a jail)', () => {
+    expect(validateSet('x', { addresses: [{ address: '@x' }] }, others, s.firewall).addresses).toBe(s.firewall.setCycle('x -> x'))
+    // office gains the member @admins, which has @office as a member
+    expect(validateSet('office', { addresses: [{ address: '@admins' }] }, { admins: others.admins }, s.firewall).addresses).toBe(s.firewall.setCycle('office -> admins -> office'))
+    expect(validateSet('x', { addresses: [{ address: '@ghost' }] }, others, s.firewall)).toEqual({})
     // two paths to the same set are no cycle
-    expect(validateSet('x', { addresses: [], includes: ['admins', 'office'] }, others, s.firewall)).toEqual({})
+    expect(validateSet('x', { addresses: [{ address: '@admins' }, { address: '@office' }] }, others, s.firewall)).toEqual({})
   })
   it('puts the server message on the field its detail names', () => {
-    expect(detailToSetErrors({ message: 'address set "ghost" does not exist', detail: { field: 'includes' } })).toEqual({ includes: 'address set "ghost" does not exist' })
+    expect(detailToSetErrors({ message: 'address set "ghost" does not exist', detail: { field: 'addresses' } })).toEqual({ addresses: 'address set "ghost" does not exist' })
     expect(detailToSetErrors({ message: 'busy', detail: { policies: 'web' } })).toEqual({})
     expect(detailToSetErrors(null)).toEqual({})
   })
 })
 
 describe('what uses an address set', () => {
-  it('finds rules with @name in from or to, and sets that include it', () => {
+  it('finds rules with @name in from or to, and sets that have it as a member', () => {
     const pol = (name: string, from: string[], to: string[] = []): FirewallPolicy => ({ metadata: { name }, spec: { rules: [{ action: 'allow', direction: 'in', from, to }] } }) as FirewallPolicy
-    const set = (name: string, includes?: string[]): AddressSet => ({ metadata: { name }, spec: { addresses: [], includes } }) as AddressSet
-    const u = setUsers('office', [pol('a', ['@office']), pol('b', [], ['@office']), pol('c', ['@officex', 'office'])], [set('admins', ['office']), set('office')])
+    const set = (name: string, members: string[] = []): AddressSet => ({ metadata: { name }, spec: { addresses: members.map((address) => ({ address })) } }) as AddressSet
+    const u = setUsers('office', [pol('a', ['@office']), pol('b', [], ['@office']), pol('c', ['@officex', 'office'])], [set('admins', ['@office']), set('office')])
     expect(u).toEqual({ policies: ['a', 'b'], sets: ['admins'] })
   })
 })
@@ -65,7 +64,7 @@ describe('what uses an address set', () => {
 describe('setSpec reads a comment at the end of a member line', () => {
   it('takes `# text` as the comment of the one member on the line, and setTextOf writes it back', () => {
     const text = '192.0.2.9  # the office\n198.51.100.9\n@web # the web jail\n10.0.0.1 # the lab\n10.0.0.2 # the lab, too'
-    const spec = setSpec(text, 'other', 'who may connect')
+    const spec = setSpec(text, 'who may connect')
     expect(spec).toEqual({
       comment: 'who may connect',
       addresses: [
@@ -75,15 +74,14 @@ describe('setSpec reads a comment at the end of a member line', () => {
         { address: '10.0.0.1', comment: 'the lab' },
         { address: '10.0.0.2', comment: 'the lab, too' },
       ],
-      includes: ['other'],
     })
-    expect(setTextOf(setSpec(setTextOf(spec), 'other', 'who may connect'))).toBe(setTextOf(spec))
+    expect(setTextOf(setSpec(setTextOf(spec), 'who may connect'))).toBe(setTextOf(spec))
     expect(setTextOf({ addresses: [{ address: '192.0.2.9', comment: 'the office' }, { address: '198.51.100.9' }] })).toBe('192.0.2.9  # the office\n198.51.100.9')
-    expect(setSpec('192.0.2.9', '')).toEqual({ addresses: [{ address: '192.0.2.9' }] })
-    expect(setSpec('# only a comment', '')).toEqual({ addresses: [] })
+    expect(setSpec('192.0.2.9')).toEqual({ addresses: [{ address: '192.0.2.9' }] })
+    expect(setSpec('# only a comment')).toEqual({ addresses: [] })
     // two members and a comment on one line are not an address: the member check says so
-    expect(validateSet('x', setSpec('10.0.0.1, 10.0.0.2  # both', ''), {}, s.firewall).addresses).toBe(s.firewall.setMember('10.0.0.1, 10.0.0.2'))
-    expect(setSpec('192.0.2.9', '', '   ')).toEqual({ addresses: [{ address: '192.0.2.9' }] })
+    expect(validateSet('x', setSpec('10.0.0.1, 10.0.0.2  # both'), {}, s.firewall).addresses).toBe(s.firewall.setMember('10.0.0.1, 10.0.0.2'))
+    expect(setSpec('192.0.2.9', '   ')).toEqual({ addresses: [{ address: '192.0.2.9' }] })
   })
 })
 

@@ -23,7 +23,6 @@
   net=<network> (host side)` on the host and `(jail side)` inside the jail, a WireGuard tunnel `jailops wireguard=<name>`
   ([wireguard.md](wireguard.md)). The reconcile loop puts a missing or changed description back on an interface it owns
   (`jailops doctor`: `net.descriptions`) and touches no other; a bridge without a description is not taken as its own.
-  Interfaces made by releases before 0.4.0 carry `jailops:<id>` and get the readable text on the first pass.
 - A jail attached with plain `--network NAME` gets one address of every family the network has, the default route, and
   a `resolv.conf` (see [name resolution](#name-resolution-of-jails) below).
 
@@ -260,17 +259,46 @@ stops when its rule goes.
   The jail's own anchor still decides what reaches the jail. (Verified on FreeBSD 15.1 amd64: a jail on a proxy-mode
   network listened on 8080 and `curl -6 http://[<jail address>]:8080/` from another host, across the internet, returned
   its answer; the rule was removed and the ruleset reloaded afterwards.)
-- A rule reads `ACTION DIRECTION [PROTO] [from ADDR,..] [to ADDR,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [comment TEXT]`;
-  an address is a CIDR, or `@name`: an address set of the project, or else a jail of the project (its addresses, read at
-  every render, so the rule follows the jail). A jail and an address set of one project never have the same name, with `-` read as `_` (`web-1` and `web_1` are one pf table): the second is refused when it is made or renamed. A jail whose name is longer than 29
-  characters is left out: use an address set for it. `tag:name` is every jail of the project with that tag.
-  `jailops firewall policy create --help` has the grammar.
+- A rule reads `ACTION DIRECTION [PROTO] [from ENDPOINT,..] [to ENDPOINT,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [comment TEXT]`.
+  An endpoint is one of these, the same words wherever a firewall names a source or a destination:
+
+  | Endpoint | Stands for | Where it is accepted |
+  |---|---|---|
+  | `192.0.2.7`, `192.0.2.0/24`, `2001:db8::/48` | an address or a prefix | rules, address-set members, `app allow` |
+  | `@name` | an address set of the project, or else a jail of the project (its addresses, read at every render, so the rule follows the jail) | rules, address-set members, `app allow` |
+  | `tag:name` | every jail of the project with that tag | rules only |
+  | `host` | the host itself: the gateway addresses of the app jail's networks | `app allow` only |
+
+  A jail and an address set of one project never have the same name, with `-` read as `_` (`web-1` and `web_1` are one pf
+  table): the second is refused when it is made or renamed. A jail whose name is longer than 29 characters is left out:
+  use an address set for it. `jailops firewall policy create --help` has the grammar.
+
+  **A policy always says its defaults.** `default_in` and `default_out` are required, `allow` or `deny`, on every policy
+  (`policy create` without `-f` needs `--default-in` and `--default-out`; a file without them is refused, and so is a
+  policy stored without them: the jails that use it are not rendered again and `jailops doctor` fails `firewall.defaults`
+  naming the policy). A jail without a policy is open apart from the isolation of projects, and `jailops jail info` says
+  so: `Firewall: open: no firewall policy`. A jail names a policy of its own in `firewall.policy`; it cannot name the
+  project's mandatory policy, which is rendered for every jail already, nor a policy that something else manages
+  (`app-JAIL`).
+
+  **Projects are boundaries.** Another project is treated exactly like an external host: only addresses and address sets
+  cross it, never a jail reference. Do two things need to talk to each other as one system? Then they belong in the same
+  project. Across projects, write the addresses explicitly on both sides: the project that serves allows the addresses in,
+  the project that connects allows the addresses out.
+
+      # project shop: the web jail of project blog (10.30.0.5) may reach the database
+      jailops firewall address-set create blog --address 10.30.0.5 --comment "the web jail of project blog"
+      jailops firewall policy create db --default-in deny --default-out allow \
+        --rule "allow in tcp from @blog port 5432 comment the blog's web jail"
+      # project blog: the jail may go out to the database at 10.20.0.10 (the closed default of a project says no otherwise)
+      jailops firewall policy create out-db --default-in deny --default-out allow \
+        --rule "allow out tcp to 10.20.0.10 port 5432 comment the shop database"
 
       jailops firewall address-set create office --address 192.0.2.0/24 --comment "the office"
       jailops firewall address-set create git_allow --address 198.51.100.7 --address @web
       jailops firewall policy create web --default-in deny --default-out allow --comment "the public web server" \
         --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from @office port 22 comment ssh from the office"
-      jailops firewall policy create db --rule "allow in tcp from @web port 5432 comment the web jail"   # the jail web
+      jailops firewall policy create db --default-in deny --default-out allow --rule "allow in tcp from @web port 5432 comment the web jail"   # the jail web
 
   A member of an address set is an address, a CIDR, or `@name` (a jail of the project, or another set): a list such as
   `git_allow` can hold jails and be added to later. A jail that a rule or a set names is not renamed or deleted until the reference is changed (the refusal names the policy or the set), so a rule never names a jail that is gone, and a jail made later never takes the place of one.
@@ -300,5 +328,3 @@ ICMPv6 and router-advertisement frames from inside a jail (`scripts/forge`) and 
 caches unchanged, the victim's traffic keeps flowing, the attacker gains no address, nothing reaches the uplink. The
 exact probe count is not quoted here (it would go stale the next time a probe is added; run the script to see it).
 **Not covered:** Ethernet-level attacks outside what `scripts/forge` sends (see [security-model.md](security-model.md)).
-
-The `private` option of a network no longer has an effect: every jail port is private (see above).

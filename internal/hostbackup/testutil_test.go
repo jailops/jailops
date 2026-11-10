@@ -210,7 +210,7 @@ func (objects) Network(n string) (api.NetworkSpec, bool) {
 }
 func (objects) Policy(n string) (api.FirewallPolicySpec, bool) {
 	if n == "web" {
-		return api.FirewallPolicySpec{DefaultIn: "deny"}, true
+		return api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}, true
 	}
 	return api.FirewallPolicySpec{}, false
 }

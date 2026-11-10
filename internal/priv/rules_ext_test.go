@@ -376,7 +376,7 @@ func TestIfconfigRules(t *testing.T) {
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "down")
 	r.ok(t, "ifconfig", "-j", "shop_web", i)
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "description", "jailops jail=shop/web net=lan (jail side)")
-	r.ok(t, "ifconfig", "-j", "shop_web", i, "description", "jailops:0b0e7f3e-5c4b-4f6e-9d3e-111111111111")
+	r.ok(t, "ifconfig", "-j", "shop_web", i, "description", "jailops managed")
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "mtu", "1400")
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "inet", "10.20.0.12/24", "up")
 	r.ok(t, "ifconfig", "-j", "shop_web", i, "inet", "10.20.0.12", "prefixlen", "24")

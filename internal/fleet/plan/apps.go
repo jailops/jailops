@@ -93,7 +93,7 @@ func planApps(ctx context.Context, s *Session, c *sdk.Client, host string, live 
 		}
 		declared := map[string]bool{}
 		for _, g := range spec.Grants {
-			src, _ := model.CanonicalSource(o.Project, g.Source)
+			src, _ := model.CanonicalSource(g.Source)
 			ports, _ := model.NormalizePorts(g.Ports)
 			declared[src] = true
 			it := Item{Host: host, Kind: o.Kind, Project: o.Project, Name: o.Name + " from " + src, Desired: o,

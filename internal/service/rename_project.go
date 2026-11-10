@@ -93,9 +93,6 @@ func (s *Service) RenameProject(ctx context.Context, name string, o RenameOption
 			}
 			p.lock(jailLock(key), jailLock(newKey), anchorLock(key), anchorLock(newKey))
 		}
-		if err := s.noCrossProjectAccess(name); err != nil {
-			return nil, err
-		}
 		// the datasets, storage by storage: the project dataset holds the jails of the project there
 		for _, si := range s.storageList() {
 			ls := si.lifecycle()
@@ -294,26 +291,6 @@ func chainAfter(a, b func(context.Context)) func(context.Context) {
 		}
 		b(ctx)
 	}
-}
-
-// noCrossProjectAccess refuses a project whose jails take part in app access across projects: the grants, their
-// rule names and the outbound rules of the other project carry the project's name.
-func (s *Service) noCrossProjectAccess(project string) error {
-	recs, err := s.accKind().listAll()
-	if err != nil {
-		return err
-	}
-	for _, r := range recs {
-		for _, g := range r.Spec.Grants {
-			cross := (r.Meta.Project == project && g.SourceProject != "" && g.SourceProject != project) ||
-				(r.Meta.Project != project && g.SourceProject == project)
-			if cross {
-				return api.Errorf(api.CodeConflict, "app %s (project %s) has an app access grant across projects (%s)", r.Meta.Name, r.Meta.Project, g.Source).
-					WithHint("deny it (jailops app deny), rename the project, then allow it again")
-			}
-		}
-	}
-	return nil
 }
 
 // renameHistoryProject rewrites the project of the update records of a history file.

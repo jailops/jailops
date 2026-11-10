@@ -747,9 +747,9 @@ func TestAppInstallRefusesPersistentPaths(t *testing.T) {
 	}
 }
 
-// The doctor warns about volume datasets made before volumes were created
-// with canmount=noauto, and gives the command that fixes each.
-func TestDoctorLegacyVolumes(t *testing.T) {
+// The doctor warns about volume datasets that are not canmount=noauto, and
+// gives the command that fixes each.
+func TestDoctorVolumeCanmount(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"web": appWeb})
 	e.SetDial(httpAnswer(204, nil))
 	op, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})

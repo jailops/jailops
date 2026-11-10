@@ -17,23 +17,15 @@ const IfaceDescMax = 64
 // IfaceDescCharset lists the characters a description may hold besides letters and digits.
 const IfaceDescCharset = " ._:/=()-"
 
-// LegacyIfaceDesc is the ownership marker of releases before 0.4.0 ("jailops:<id>"). It is still recognised, and the
-// reconcile loop replaces it with the readable text.
-func LegacyIfaceDesc(id string) string { return "jailops:" + id }
-
-// BridgeDescription is LegacyIfaceDesc, the name earlier code used.
-func BridgeDescription(id string) string { return LegacyIfaceDesc(id) }
-
-// IsJailOpsDesc reports whether a description is one JailOps writes, in either format. It is the helper's ownership
+// IsJailOpsDesc reports whether a description is one JailOps writes. It is the helper's ownership
 // marker (ifconfig.HasMarker): the helper changes only interfaces that carry it.
 func IsJailOpsDesc(d string) bool { return ifconfig.HasMarker(d) }
 
-// OwnsIface reports whether an interface whose name JailOps derives from one of its objects (id) is that object's:
-// it carries the wanted text, the marker of earlier releases for the same object, or the bare marker the helper
-// writes when it creates an interface (ifconfig.Marker: made, not described yet). An interface without a
-// description, or with another one, may be someone else's and is left alone.
-func OwnsIface(desc, id, want string) bool {
-	return desc != "" && (desc == want || desc == ifconfig.Marker || id != "" && desc == LegacyIfaceDesc(id))
+// OwnsIface reports whether an interface whose name JailOps derives from one of its objects is that object's: it carries
+// the wanted text, or the bare marker the helper writes when it creates an interface (ifconfig.Marker: made, not
+// described yet). An interface without a description, or with another one, may be someone else's and is left alone.
+func OwnsIface(desc, want string) bool {
+	return desc != "" && (desc == want || desc == ifconfig.Marker)
 }
 
 // ValidIfaceDesc reports whether d is a description JailOps may write: at most IfaceDescMax bytes of letters,

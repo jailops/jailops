@@ -667,6 +667,9 @@ expect "the jail has its address on office" '10\.66\.0\.' $J exec --project edge
 expect "the jail reaches its gateway" '1 packets received' $J exec --project edge edgeweb -- ping -c1 -t3 10.66.0.1
 gw4=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
 expect "the jail reaches the host's default gateway through the NAT of the uplink" '1 packets received' $J exec --project edge edgeweb -- ping -c1 -t5 "$gw4"
+expect "a jail without a policy says it is open" "Firewall: +open: no firewall policy" $J jail info edgeweb --project edge
+expect "a policy without its defaults is refused" "give --default-in and --default-out" \
+	sh -c "$J firewall policy create nodefaults --project edge --default-in deny --rule 'allow in tcp port 22' 2>&1; true"
 # a rule names a jail: @edgeweb in an address set of the project, the set in a policy, the policy on another jail
 check "an address set with a jail as a member" $J firewall address-set create git_allow --project edge --address @edgeweb
 check "an address with a comment" $J firewall address-set create office_ip --project edge --address 192.0.2.7 --comment "the office"
@@ -693,12 +696,12 @@ expect "--bridge naming the uplink is refused at create" "form of the interfaces
 expect "a network named like the hand-made bridge gets jo<N>, and create says why" 'warning: bridge jo[0-9]+ \(the interface mybr already exists on this host' \
 	sh -c "$J network create mybr --ipv4 10.67.0.1/24 2>&1"
 check "delete network mybr" $J network delete mybr -y
-# an interface of an earlier release: a legacy name, no description
-b=$(ifconfig bridge create) && ifconfig "$b" name jo79 >/dev/null || fail "a legacy bridge made by hand"
+# a bridge made by hand under a jo name, no description
+b=$(ifconfig bridge create) && ifconfig "$b" name jo79 >/dev/null || fail "a jo-named bridge made by hand"
 # the helper itself, over its socket: every request a compromised daemon could make on the uplink, lo0 and mybr is
-# refused; jo79 is accepted once and marked; an epair keeps the marker in a jail's vnet
+# refused; jo79, without a description, is refused too; an epair keeps the marker in a jail's vnet
 if [ -n "${IFPROBE_BIN:-}" ]; then
-	check "the helper's ownership probe" "$IFPROBE_BIN" -uplink "$uplink" -foreign mybr -legacy jo79 -owned office -jail edge_edgeweb
+	check "the helper's ownership probe" "$IFPROBE_BIN" -uplink "$uplink" -foreign mybr -bare jo79 -owned office -jail edge_edgeweb
 	cat "$work/check.out"
 else
 	echo "IFPROBE_BIN is not set: the helper's ownership probe is skipped"
@@ -1104,6 +1107,8 @@ pg_access_check() { # postgresql-access: who may connect to a database, from the
 	expect_refused "pgc2 (not allowed) cannot connect" $J exec --project demo pgc2 -- /usr/local/bin/psql "$url" -tAc 'select 1'
 	expect "app access lists the grant with its pg_hba line" 'host pgc1 pgc1 [0-9.]+/32 scram-sha-256' $J app access pgacc --project demo
 	expect "allowing again changes nothing and prints no password" 'may already reach' $J app allow pgacc from @pgc1 --project demo
+	expect "the source of a grant is not deleted: the rule names it" 'jailops app deny pgacc from @pgc1' \
+		sh -c "$J delete --force --confirm-data-loss pgc1 --project demo 2>&1; true"
 	check "deny pgc1" $J app deny pgacc from @pgc1 --project demo
 	expect_refused_retry "pgc1 cannot connect after the deny" $J exec --project demo pgc1 -- /usr/local/bin/psql "$url" -tAc 'select 1'
 	expect "the grant is gone" 'No grants' $J app access pgacc --project demo

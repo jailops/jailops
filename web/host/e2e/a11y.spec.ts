@@ -108,7 +108,7 @@ const states: Array<{ name: string; route: string; steps: Array<{ click?: string
   { name: 'create firewall policy', route: '/firewall', steps: [{ click: '[data-test="new-policy"]' }, { click: '[data-test="policy-create-go"]', force: true }] },
   { name: 'create address set after a failed submit', route: '/firewall?tab=sets', steps: [{ click: '[data-test="new-set"]' }, { fill: ['#fws-name', 'Bad-Name'] }, { fill: ['#fws-members', 'nope'] }, { click: '[data-test="set-create-go"]', force: true }] },
   { name: 'delete an address set in use, refused', route: '/firewall?tab=sets', steps: [{ click: '[data-test="delete-set"]' }, { click: '[data-test="confirm"]' }] },
-  { name: 'address set editor with field errors', route: '/firewall?tab=sets', steps: [{ fill: ['#sa', 'nope'] }, { fill: ['#si', 'ghost'] }, { click: '[data-test="save-set"]', force: true }] },
+  { name: 'address set editor with field errors', route: '/firewall?tab=sets', steps: [{ fill: ['#sa', 'nope'] }, { click: '[data-test="save-set"]', force: true }] },
   { name: 'new token after a failed submit', route: '/access?tab=tokens', steps: [{ click: '.page-head .btn-primary' }, { click: '[data-test="token-create"]', force: true }] },
   { name: 'add a log sink', route: '/logs?tab=forwarding', steps: [{ click: '[data-test="fw-add"]' }] },
   { name: 'create image after a failed submit', route: '/images', steps: [{ click: '[data-test="image-new"]' }, { fill: ['[data-test="image-name"]', 'Bad'] }, { click: '[data-test="image-create-go"]', force: true }] },

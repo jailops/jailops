@@ -224,14 +224,16 @@ func TestFirewall(t *testing.T) {
 	r := func(mut func(*api.FirewallRule)) api.FirewallPolicySpec {
 		x := api.FirewallRule{Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80"}}
 		mut(&x)
-		return api.FirewallPolicySpec{Rules: []api.FirewallRule{x}}
+		return api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{x}}
 	}
 	tests := []struct {
 		name  string
 		spec  api.FirewallPolicySpec
 		field string
 	}{
-		{"default", api.FirewallPolicySpec{DefaultIn: "maybe"}, "default_in"},
+		{"default", api.FirewallPolicySpec{DefaultIn: "maybe", DefaultOut: "allow"}, "default_in"},
+		{"default in missing", api.FirewallPolicySpec{DefaultOut: "allow"}, "default_in"},
+		{"default out missing", api.FirewallPolicySpec{DefaultIn: "deny"}, "default_out"},
 		{"action", r(func(x *api.FirewallRule) { x.Action = "pass" }), "rules[0].action"},
 		{"direction", r(func(x *api.FirewallRule) { x.Direction = "both" }), "rules[0].direction"},
 		{"proto", r(func(x *api.FirewallRule) { x.Proto = "sctp" }), "rules[0].proto"},
@@ -262,7 +264,7 @@ func TestFirewall(t *testing.T) {
 			x.Redirect = &api.Redirect{HostPort: 1, JailPort: 2}
 		}), "rules[0].redirect"},
 		{"rule name", r(func(x *api.FirewallRule) { x.Name = "x\npass all" }), "rules[0].name"},
-		{"raw ctrl", api.FirewallPolicySpec{Raw: "pass\x00"}, "raw"},
+		{"raw ctrl", api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Raw: "pass\x00"}, "raw"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -273,11 +275,11 @@ func TestFirewall(t *testing.T) {
 }
 
 func TestAddressSet(t *testing.T) {
-	if err := AddressSetSpec(api.AddressSetSpec{Addresses: api.Entries("10.0.0.1", "10.0.0.0/8", "2001:db8::/32", "@web", "@web-2"), Includes: []string{"office"}}); err != nil {
+	if err := AddressSetSpec(api.AddressSetSpec{Addresses: api.Entries("10.0.0.1", "10.0.0.0/8", "2001:db8::/32", "@web", "@web-2", "@office")}); err != nil {
 		t.Fatal(err)
 	}
 	for _, s := range []api.AddressSetSpec{
-		{Addresses: api.Entries("@Bad Name")}, {Addresses: api.Entries("any")}, {Addresses: api.Entries("1.2.3")}, {Includes: []string{"Bad"}},
+		{Addresses: api.Entries("@Bad Name")}, {Addresses: api.Entries("any")}, {Addresses: api.Entries("1.2.3")}, {Addresses: api.Entries("@Bad")},
 		{Addresses: []api.AddressEntry{{Address: "10.0.0.1", Comment: "two\nlines"}}},
 		{Addresses: []api.AddressEntry{{Address: "10.0.0.1", Comment: strings.Repeat("x", CommentMax+1)}}},
 	} {
@@ -526,7 +528,7 @@ func TestJailDevicesAreValidated(t *testing.T) {
 // A comment on a rule, a policy or a set is one line of at most CommentMax characters.
 func TestFirewallComments(t *testing.T) {
 	rule := api.FirewallRule{Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"22"}}
-	ok := api.FirewallPolicySpec{Comment: "ssh", DefaultIn: "deny", Rules: []api.FirewallRule{{Action: rule.Action, Direction: rule.Direction, Proto: rule.Proto, Ports: rule.Ports, Comment: "from the office"}}}
+	ok := api.FirewallPolicySpec{Comment: "ssh", DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: rule.Action, Direction: rule.Direction, Proto: rule.Proto, Ports: rule.Ports, Comment: "from the office"}}}
 	if _, err := FirewallPolicySpec(ok); err != nil {
 		t.Fatal(err)
 	}

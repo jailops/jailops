@@ -21,7 +21,7 @@ func TestEveryJailPortIsPrivate(t *testing.T) {
 	if _, err := e.Admin.Networks().Create(c, n); err != nil {
 		t.Fatal(err)
 	}
-	// A private network belongs to one project, like every network: no sharing, so no ranges to keep apart.
+	// A network belongs to one project: no sharing, so no ranges to keep apart.
 	if _, err := e.Admin.Projects().Create(c, api.Project{Metadata: api.ObjectMeta{Name: "p1"}, Spec: api.ProjectSpec{
 		Networks: []api.ProjectNetwork{{Network: "priv"}},
 		Storage:  []api.ProjectStorage{{Storage: "default"}}}}); err != nil {
@@ -30,7 +30,7 @@ func TestEveryJailPortIsPrivate(t *testing.T) {
 	_, err := e.Admin.Projects().Create(c, api.Project{Metadata: api.ObjectMeta{Name: "p2"}, Spec: api.ProjectSpec{
 		Networks: []api.ProjectNetwork{{Network: "priv"}}}})
 	if !api.IsCode(err, api.CodeConflict) {
-		t.Fatalf("a second project took the private network: %v", err)
+		t.Fatalf("a second project took the network: %v", err)
 	}
 	// Jails attach privately: the host end becomes a private member.
 	jl := dtest.WebJail("w1")

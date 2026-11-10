@@ -78,7 +78,6 @@ metadata:
   name: routed
 spec:
   uplink: vtnet0
-  private: true
   ipv6:
     mode: routed
     subnet: "2001:db8:abcd:1:1::/80"
@@ -101,7 +100,6 @@ spec:
   image: base@stable
   storage: bulk
   network: [{network: proxy, ipv4: auto, ipv6: "2001:db8:1:2:100::80"}]
-  firewall: {policy: floor}
   resources: {cpu: 2, memory: 4G, pids: 500}
   volumes:
     - {name: data, mount: /var/db/postgres, quota: 1T}

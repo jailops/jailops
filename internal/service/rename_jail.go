@@ -172,11 +172,7 @@ func (s *Service) noAppAccess(project, name string) error {
 	}
 	for _, r := range recs {
 		for _, g := range r.Spec.Grants {
-			sp := g.SourceProject
-			if sp == "" {
-				sp = r.Meta.Project
-			}
-			if g.Kind == api.AccessSourceJail && sp == project && g.SourceName == name {
+			if g.Kind == api.AccessSourceJail && r.Meta.Project == project && g.SourceName == name {
 				return api.Errorf(api.CodeConflict, "jail %q may connect to app %s (project %s) through app access", name, r.Meta.Name, r.Meta.Project).WithHint(hint)
 			}
 		}
@@ -201,7 +197,11 @@ func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
 	for _, o := range pols {
 		for i, r := range o.Spec.Rules {
 			if slices.Contains(r.From, "@"+name) || slices.Contains(r.To, "@"+name) {
-				return api.Errorf(api.CodeConflict, "jail %q is named by rule %d of firewall policy %s", name, i+1, o.Meta.Name).WithHint(hint)
+				e := api.Errorf(api.CodeConflict, "jail %q is named by rule %d of firewall policy %s", name, i+1, o.Meta.Name)
+				if o.Meta.ManagedBy == api.AppAccessManagedBy {
+					return e.WithHint("it is the source of an app access grant: jailops app deny " + strings.TrimPrefix(o.Meta.Name, "app-") + " from @" + name + " first")
+				}
+				return e.WithHint(hint)
 			}
 		}
 	}

@@ -18,27 +18,29 @@ import (
 // its update history and the networks it is attached to, gathered into one
 // view. -o json and -o yaml print it as it is.
 type jailInfo struct {
-	Name          string            `json:"name"`
-	Project       string            `json:"project,omitempty"`
-	UUID          string            `json:"uuid,omitempty"`
-	Hostname      string            `json:"hostname,omitempty"`
-	State         api.PowerState    `json:"state"`
-	JID           int               `json:"jid,omitempty"`
-	OS            api.OS            `json:"os,omitempty"`
-	Layout        api.Layout        `json:"layout,omitempty"`
-	Image         string            `json:"image"`
-	Generation    string            `json:"generation,omitempty"`
-	Storage       string            `json:"storage,omitempty"`
-	Profiles      []string          `json:"profiles,omitempty"`
-	CreatedAt     time.Time         `json:"created_at,omitzero"`
-	StartedAt     time.Time         `json:"started_at,omitzero"`
-	ProvisionedAt time.Time         `json:"provisioned_at,omitzero"`
-	Resources     infoResources     `json:"resources"`
-	Interfaces    []infoInterface   `json:"interfaces"`
-	Volumes       []api.VolumeMount `json:"volumes,omitempty"`
-	Snapshots     infoSnapshots     `json:"snapshots"`
-	Update        infoUpdate        `json:"update"`
-	Labels        map[string]string `json:"labels,omitempty"`
+	Name          string          `json:"name"`
+	Project       string          `json:"project,omitempty"`
+	UUID          string          `json:"uuid,omitempty"`
+	Hostname      string          `json:"hostname,omitempty"`
+	State         api.PowerState  `json:"state"`
+	JID           int             `json:"jid,omitempty"`
+	OS            api.OS          `json:"os,omitempty"`
+	Layout        api.Layout      `json:"layout,omitempty"`
+	Image         string          `json:"image"`
+	Generation    string          `json:"generation,omitempty"`
+	Storage       string          `json:"storage,omitempty"`
+	Profiles      []string        `json:"profiles,omitempty"`
+	CreatedAt     time.Time       `json:"created_at,omitzero"`
+	StartedAt     time.Time       `json:"started_at,omitzero"`
+	ProvisionedAt time.Time       `json:"provisioned_at,omitzero"`
+	Resources     infoResources   `json:"resources"`
+	Interfaces    []infoInterface `json:"interfaces"`
+	// FirewallPolicy is the policy the jail is rendered with; empty when it has none and is open.
+	FirewallPolicy string            `json:"firewall_policy,omitempty"`
+	Volumes        []api.VolumeMount `json:"volumes,omitempty"`
+	Snapshots      infoSnapshots     `json:"snapshots"`
+	Update         infoUpdate        `json:"update"`
+	Labels         map[string]string `json:"labels,omitempty"`
 	// Problems are the conditions that are not True, and the drift.
 	Problems []string `json:"problems,omitempty"`
 }
@@ -207,6 +209,12 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 			info.Snapshots.Newest, info.Snapshots.NewestAt = snaps[n-1].Metadata.Name, snaps[n-1].Metadata.CreatedAt
 		}
 	}
+	info.FirewallPolicy = s.Firewall.Policy
+	if info.FirewallPolicy == "" { // an app's jail has the policy that app access keeps for it
+		if p, err := c.Firewall().Policies().Get(ctx, "app-"+m.Name); err == nil && p.Metadata.ManagedBy != "" {
+			info.FirewallPolicy = p.Metadata.Name + " (managed by " + p.Metadata.ManagedBy + ")"
+		}
+	}
 	hist, err := c.Jails().UpdateHistory(ctx, m.Name)
 	if err != nil {
 		info.Update.Error = err.Error()
@@ -314,6 +322,11 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		lim = []string{"none"}
 	}
 	kv("Limits", strings.Join(lim, ", "))
+	if info.FirewallPolicy == "" {
+		kv("Firewall", "open: no firewall policy")
+	} else {
+		kv("Firewall", info.FirewallPolicy)
+	}
 	switch u := info.Resources.Usage; {
 	case u == nil:
 		kv("Usage", "not available: "+info.Resources.UsageError)

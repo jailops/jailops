@@ -256,7 +256,7 @@ func (l *Local) planJail(ctx context.Context, name JailName) ([]attachment, erro
 		in := render.AttachInput{
 			JailID: rec.Metadata.UUID, JailUUID: rec.Metadata.UUID, Index: i,
 			Project: name.Project, Jail: name.Name, Network: att.Network,
-			Bridge: nw.Spec.Bridge, MAC: att.MAC, MTU: nw.Spec.MTU, Uplink: nw.Spec.Uplink, Private: nw.Spec.Private,
+			Bridge: nw.Spec.Bridge, MAC: att.MAC, MTU: nw.Spec.MTU, Uplink: nw.Spec.Uplink,
 			HostConfigured: rec.Spec.OS == api.OSLinux,
 		}
 		if v4 := nw.Spec.IPv4; v4 != nil {

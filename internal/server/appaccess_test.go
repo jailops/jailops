@@ -180,7 +180,7 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 	password := m[2]
 	g := res.Grant
 	if g.Source != "@web-api" || g.SourceKind != api.AccessSourceJail || !g.RoleCreated || !g.DatabaseCreated || !slices.Equal(g.Ports, []string{"5432/tcp"}) ||
-		!slices.Equal(g.Rules, []string{"allow in tcp from 10.20.0.11 to port 5432"}) {
+		!slices.Equal(g.Rules, []string{"allow in tcp from @web-api to port 5432"}) {
 		t.Fatalf("%+v", g)
 	}
 	// psql ran as postgres with the statements on standard input; the server got a SCRAM verifier, never the password
@@ -211,12 +211,12 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 	}
 	// the firewall: the rule is in the managed policy and, after a pass, in the jail's loaded anchor
 	pol, _ = e.Admin.Firewall().Policies().Get(c, "app-db")
-	if len(pol.Spec.Rules) != 1 || pol.Spec.Rules[0].Name != "access web-api" || !slices.Equal(pol.Spec.Rules[0].From, []string{"10.20.0.11"}) {
+	if len(pol.Spec.Rules) != 1 || pol.Spec.Rules[0].Name != "access web-api" || !slices.Equal(pol.Spec.Rules[0].From, []string{"@web-api"}) {
 		t.Fatalf("%+v", pol.Spec)
 	}
 	e.D.Reconciler().Pass(c)
 	loaded, err := e.PF.Read(c, render.JailAnchorFor("alpha", "db"))
-	if err != nil || !strings.Contains(loaded, "# rule 1: access web-api\npass out quick on") || !strings.Contains(loaded, "from 10.20.0.11 to 10.20.0.10 port 5432") ||
+	if err != nil || !strings.Contains(loaded, "# rule 1: access web-api\npass out quick on") || !strings.Contains(loaded, "from <s_web_api> to 10.20.0.10 port 5432") ||
 		!strings.Contains(loaded, "block drop out quick on") {
 		t.Fatalf("%v\n%s", err, loaded)
 	}
@@ -235,7 +235,7 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 	}
 
 	// again: nothing changes, no new password
-	again, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "@alpha/web-api"})
+	again, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "@web-api"})
 	if err != nil || again.Changed || again.ConnectionString != "" || len(pg.take()) != 1 {
 		t.Fatalf("%v %+v", err, again)
 	}
@@ -280,7 +280,7 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 	_, err = oper.Apps().Allow(c, "db", api.AppAllow{Source: "@db"})
 	wantCode(t, err, api.CodeInvalid)
 	_, err = oper.Apps().Allow(c, "db", api.AppAllow{Source: "@other/web"})
-	wantCode(t, err, api.CodeNotFound)
+	wantCode(t, err, api.CodeInvalid)
 
 	// drift: a line removed by hand is reported, by the grant and by doctor, and allow writes it again
 	e.Files.Put(hbaPath, []byte(strings.Replace(e.File(hbaPath), "host web_api web_api 10.20.0.11/32 scram-sha-256\n", "", 1)))
@@ -299,6 +299,51 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 	}
 	if fixed, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "@web-api"}); err != nil || !fixed.Changed || fixed.ConnectionString != "" {
 		t.Fatalf("%v %+v", err, fixed)
+	}
+
+	// an address set is a reference in the firewall rule and a copy in pg_hba.conf: a member added later is reported
+	// as a difference until the allow is repeated
+	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "staff"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.0/24")}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "@staff", Database: "staff"}); err != nil {
+		t.Fatal(err)
+	}
+	staff := func() api.AppAccessGrant {
+		t.Helper()
+		acc, err := oper.Apps().Access(c, "db")
+		if err != nil {
+			t.Fatal(err)
+		}
+		i := slices.IndexFunc(acc.Grants, func(g api.AppAccessGrant) bool { return g.Source == "@staff" })
+		if i < 0 {
+			t.Fatalf("%+v", acc.Grants)
+		}
+		return acc.Grants[i]
+	}
+	if g := staff(); len(g.Problems) != 0 || !slices.Equal(g.Rules, []string{"allow in tcp from @staff to port 5432"}) {
+		t.Fatalf("%+v", g)
+	}
+	set, err := e.Admin.Firewall().AddressSets().Get(c, "staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	set.Spec.Addresses = append(set.Spec.Addresses, api.AddressEntry{Address: "198.51.100.7", Comment: "on call"})
+	if _, err := e.Admin.Firewall().AddressSets().Update(c, "staff", set, ""); err != nil {
+		t.Fatal(err)
+	}
+	if g := staff(); len(g.Problems) != 1 || !strings.Contains(g.Problems[0], "the addresses of @staff are now 192.0.2.0/24, 198.51.100.7/32 but the pg_hba lines name 192.0.2.0/24") ||
+		!strings.Contains(g.Problems[0], "repeat jailops app allow db from @staff") {
+		t.Fatalf("%+v", g.Problems)
+	}
+	if _, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "@staff"}); err != nil {
+		t.Fatal(err)
+	}
+	if g := staff(); len(g.Problems) != 0 {
+		t.Fatalf("%+v", g.Problems)
+	}
+	if _, err := oper.Apps().Deny(c, "db", api.AppDeny{Source: "@staff"}); err != nil {
+		t.Fatal(err)
 	}
 
 	// deny: the rule and the line go, the role loses its login and keeps its database
@@ -394,7 +439,7 @@ func TestAppAccessFirewallOnly(t *testing.T) {
 	if _, err := oper.Apps().Allow(c, "web", api.AppAllow{Source: "@cli", Ports: []string{"8080"}}); err != nil {
 		t.Fatal(err)
 	}
-	// a jail of another project: the operator must be allowed there too; its own policy lets it out to the app
+	// another project is reached by addresses only: @project/jail is not a source
 	net := e.MakeNetwork("b")
 	if _, err := e.Admin.Projects().Create(c, api.Project{Metadata: api.ObjectMeta{Name: "beta"}, Spec: api.ProjectSpec{
 		Networks: []api.ProjectNetwork{{Network: net}}, Storage: []api.ProjectStorage{{Storage: "default"}}}}); err != nil {
@@ -403,47 +448,35 @@ func TestAppAccessFirewallOnly(t *testing.T) {
 	beta := e.Scoped(api.PermAdmin, "beta")
 	startJailIn(t, beta, dtest.WebJailOn("api", net))
 	_, err = oper.Apps().Allow(c, "web", api.AppAllow{Source: "@beta/api", Ports: []string{"8080"}})
-	wantCode(t, err, api.CodeNotFound)
-	both := e.Scoped(api.PermOperator, dtest.SeedProject, "beta")
-	if res, err = both.Apps().Allow(c, "web", api.AppAllow{Source: "@beta/api", Ports: []string{"8080"}}); err != nil || res.Grant.SourceProject != "beta" {
+	wantCode(t, err, api.CodeInvalid)
+	if res, err = oper.Apps().Allow(c, "web", api.AppAllow{Source: "10.20.0.10", Ports: []string{"8080"}}); err != nil || res.Grant.SourceKind != api.AccessSourceCIDR ||
+		!slices.Equal(res.Grant.Rules, []string{"allow in tcp from 10.20.0.10 to port 8080"}) {
 		t.Fatalf("%v %+v", err, res)
 	}
-	out, err := beta.Firewall().Policies().Get(c, "app-api")
-	if err != nil || out.Spec.DefaultIn != "" || len(out.Spec.Rules) != 1 || out.Spec.Rules[0].Direction != "out" || !slices.Equal(out.Spec.Rules[0].To, []string{"10.20.0.10"}) {
-		t.Fatalf("%v %+v", err, out)
-	}
-	e.D.Reconciler().Pass(c)
-	if a, _ := e.PF.Read(c, render.JailAnchorFor("beta", "api")); !strings.Contains(a, "# rule 1: access to alpha.web") || !strings.Contains(a, "pass in quick on") {
-		t.Fatalf("%s", a)
-	}
+	// the rule of a jail source keeps its name, which is read at every render
 	acc, err := oper.Apps().Access(c, "web")
 	if err != nil || len(acc.Grants) != 4 || acc.Type != "" {
 		t.Fatalf("%v %+v", err, acc)
 	}
-	// the source jail deleted: its rule is gone at once, the grant says so until it is denied
-	stop(t, e.Admin, "cli")
-	dop, _ := e.Admin.Jails().Delete(c, "cli")
-	if _, err := dop.Wait(c); err != nil {
-		t.Fatal(err)
-	}
-	pol, _ := e.Admin.Firewall().Policies().Get(c, "app-web")
-	if slices.ContainsFunc(pol.Spec.Rules, func(r api.FirewallRule) bool { return r.Name == "access cli" }) {
-		t.Fatalf("%+v", pol.Spec.Rules)
-	}
-	acc, _ = oper.Apps().Access(c, "web")
-	if i := slices.IndexFunc(acc.Grants, func(g api.AppAccessGrant) bool { return g.Source == "@cli" }); i < 0 || len(acc.Grants[i].Problems) != 1 ||
-		!strings.Contains(acc.Grants[i].Problems[0], "no longer exists") {
+	if i := slices.IndexFunc(acc.Grants, func(g api.AppAccessGrant) bool { return g.Source == "@cli" }); i < 0 || !slices.Equal(acc.Grants[i].Rules, []string{"allow in tcp from @cli to port 8080"}) {
 		t.Fatalf("%+v", acc.Grants)
+	}
+	// a jail that a grant names as its source is not deleted until the grant is denied
+	stop(t, e.Admin, "cli")
+	_, err = e.Admin.Jails().Delete(c, "cli")
+	wantCode(t, err, api.CodeConflict)
+	if !strings.Contains(err.Error(), "app-web") || !strings.Contains(err.(*api.Error).Hint, "jailops app deny web from @cli") {
+		t.Fatalf("%v", err)
 	}
 	if d, err := oper.Apps().Deny(c, "web", api.AppDeny{Source: "@cli"}); err != nil || !d.Changed {
 		t.Fatalf("%v %+v", err, d)
 	}
-	// deny of the cross-project grant clears the source jail's policy, which goes when it is empty
-	if _, err := both.Apps().Deny(c, "web", api.AppDeny{Source: "@beta/api"}); err != nil {
+	dop, err := e.Admin.Jails().Delete(c, "cli")
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := beta.Firewall().Policies().Get(c, "app-api"); !api.IsCode(err, api.CodeNotFound) {
-		t.Fatalf("%v", err)
+	if _, err := dop.Wait(c); err != nil {
+		t.Fatal(err)
 	}
 	// a jail that is not an installed app has no access to manage
 	_, err = e.Admin.Project("beta").Apps().Allow(c, "api", api.AppAllow{Source: "host"})

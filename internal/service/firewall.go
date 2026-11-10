@@ -9,7 +9,6 @@ import (
 	"strconv"
 	"strings"
 
-	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
@@ -226,8 +225,8 @@ func (s *Service) DeletePolicy(ctx context.Context, name string, expect int64) e
 }
 
 // allSetsWithJails is allSets plus, for every jail of the project, a set named like the jail that holds its addresses:
-// a rule says `from @web` and means the jail web, as `app allow` does. An address set of the same name wins. The
-// addresses are read at every render, so a rule follows a jail whose address changes. A jail whose name is too long
+// a rule says `from @web` and means the jail web, as `app allow` does. A jail and an address set never have the
+// same name. The addresses are read at every render, so a rule follows a jail whose address changes. A jail whose name is too long
 // for a pf table (31 characters with the s_ prefix) is left out: use an address set for it.
 func (s *Service) allSetsWithJails(project string) (map[string]api.AddressSetSpec, error) {
 	m, err := s.allSets(project)
@@ -239,9 +238,6 @@ func (s *Service) allSetsWithJails(project string) (map[string]api.AddressSetSpe
 	for _, n := range sortedKeys(s.jails) {
 		j := s.jails[n].jail
 		if j.Metadata.Project != project || len(j.Metadata.Name) > 29 {
-			continue
-		}
-		if _, taken := m[j.Metadata.Name]; taken {
 			continue
 		}
 		var addrs []string
@@ -478,13 +474,13 @@ func (s *Service) DeleteAddressSet(ctx context.Context, name string, expect int6
 	var parents []string
 	sets, _ := ks.list()
 	for _, o := range sets {
-		if slices.Contains(o.Spec.Includes, name) {
+		if slices.Contains(o.Spec.Members(), "@"+name) {
 			parents = append(parents, o.Meta.Name)
 		}
 	}
 	if len(parents) > 0 {
-		return api.Errorf(api.CodeBusy, "address set %q is included by %s", name, quoteAll(parents)).
-			WithHint(fmt.Sprintf("remove it from the includes of %s first", strings.Join(parents, ", "))).
+		return api.Errorf(api.CodeBusy, "address set %q is a member of %s", name, quoteAll(parents)).
+			WithHint(fmt.Sprintf("remove @%s from the members of %s first", name, strings.Join(parents, ", "))).
 			WithDetail("sets", strings.Join(parents, ","))
 	}
 	return ks.delete(ctx, name, expect)
@@ -543,9 +539,6 @@ func (s *Service) tagMembers(project string, policy api.FirewallPolicySpec) map[
 	return out
 }
 
-var _ = ipam.BridgeName
-var _ = fmt.Sprint
-
 // stricterDefault returns the stricter of two defaults. An unset inbound default is deny and an unset outbound
 // default is allow (what the renderer does with an empty value).
 func stricterDefault(a, b, dir string) string {
@@ -586,4 +579,16 @@ func (s *Service) foreignPrefixes(project string) []netip.Prefix {
 		}
 	}
 	return out
+}
+
+// policyDefaults says which default a stored policy lacks: a policy always says default_in and default_out, and a
+// policy that was stored without one is neither rendered nor given a default of ours.
+func policyDefaults(name string, p api.FirewallPolicySpec) error {
+	for _, d := range []struct{ field, v string }{{"default_in", p.DefaultIn}, {"default_out", p.DefaultOut}} {
+		if d.v != "allow" && d.v != "deny" {
+			return invalid("firewall policy %q has no %s: a policy says allow or deny for each direction", name, d.field).
+				WithHint("jailops firewall policy edit " + name + " and set " + d.field)
+		}
+	}
+	return nil
 }

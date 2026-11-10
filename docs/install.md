@@ -253,9 +253,11 @@ shows it). A project is granted the networks and storages its jails may use.
     jailops project create web
     jailops project set web --network lan --storage default
     jailops project switch web
-    jailops create nginx --image freebsd-15-1 --network lan --storage default --start
+    jailops create nginx --image freebsd-15-1 --network lan --storage default --start --autostart
     jailops exec nginx -- uname -a
     jailops token create ci --role operator --projects web --expires 720h    # a token for scripts, now that web exists
+
+`--start` starts the jail now and `--autostart` starts it every time the host boots: a jail without it stays stopped after a reboot, also when it was running before. `jailops config set nginx boot.autostart true` turns it on for a jail that exists.
 
 `--uplink` is the host's interface towards the outside: `vtnet0` on most virtual machines, `em0`, `igb0` or `ix0` on
 real hardware (`ifconfig -l` lists them).

@@ -41,9 +41,9 @@ func Observe(ctx context.Context, n ifconfig.Client, j jailos.Observer) (*Observ
 }
 
 // ownedBy reports whether an interface whose name the network or jail derives may be treated as its own (see
-// render.OwnsIface): the wanted text, the marker of earlier releases for id, or no description.
-func ownedBy(i ifconfig.Iface, id string, steps []render.Step) bool {
-	return render.OwnsIface(i.Description, id, WantDesc(steps, i.Name))
+// render.OwnsIface): the wanted text, or the bare marker of an interface just made.
+func ownedBy(i ifconfig.Iface, steps []render.Step) bool {
+	return render.OwnsIface(i.Description, WantDesc(steps, i.Name))
 }
 
 // WantDesc returns the description the steps give iface, "" when they give none.

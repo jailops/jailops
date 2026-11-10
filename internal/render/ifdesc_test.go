@@ -1,6 +1,7 @@
 package render
 
 import (
+	"jailops.net/jailops/internal/sys/ifconfig"
 	"net/netip"
 	"strings"
 	"testing"
@@ -41,17 +42,17 @@ func TestIfaceDescOwnership(t *testing.T) {
 		own  bool
 	}{
 		{want, true},
-		{"jailops:n-1", true},        // the marker of earlier releases, same object
-		{"jailops:n-2", false},       // another object
+		{ifconfig.Marker, true},      // the bare marker of an interface just made
+		{"jailops:n-1", false},       // another form is not JailOps's
 		{"", false},                  // may be anybody's
 		{"uplink to the lab", false}, // the administrator's own text
 		{NetBridgeDesc("dmz"), false},
 	} {
-		if got := OwnsIface(c.desc, "n-1", want); got != c.own {
+		if got := OwnsIface(c.desc, want); got != c.own {
 			t.Errorf("OwnsIface(%q) = %v", c.desc, got)
 		}
 	}
-	for _, d := range []string{"jailops net=lan bridge", "", "jailops:0b0e7f3e-5c4b-4f6e-9d3e-111111111111"} {
+	for _, d := range []string{"jailops net=lan bridge", ""} {
 		if !ValidIfaceDesc(d) {
 			t.Errorf("%q refused", d)
 		}

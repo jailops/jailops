@@ -72,7 +72,7 @@ func (s *Service) bridgeTaken(network, b string, host map[string]ifconfig.Iface)
 		if k > 0 {
 			want = render.NetGatewayDesc(network, k == 2)
 		}
-		if render.OwnsIface(i.Description, "", want) {
+		if render.OwnsIface(i.Description, want) {
 			continue // this network's own, left by an earlier network of the same name, or made and not described yet
 		}
 		if i.Description == "" {
@@ -143,12 +143,12 @@ func (s *Service) doctorBridges(ctx context.Context, c *checkSet) {
 			if k > 0 {
 				want = render.NetGatewayDesc(o.Meta.Name, k == 2)
 			}
-			if render.OwnsIface(i.Description, o.Meta.UUID, want) {
+			if render.OwnsIface(i.Description, want) {
 				continue
 			}
 			switch {
 			case i.Description == "":
-				bad = append(bad, fmt.Sprintf("%s (network %s) exists without a JailOps description: JailOps did not create it, or an earlier release was interrupted before it described it", n, o.Meta.Name))
+				bad = append(bad, fmt.Sprintf("%s (network %s) exists without a JailOps description: JailOps did not create it, or it was interrupted before it described it", n, o.Meta.Name))
 			case render.IsJailOpsDesc(i.Description):
 				bad = append(bad, fmt.Sprintf("%s (network %s) belongs to another object of JailOps (%q)", n, o.Meta.Name, i.Description))
 			default:

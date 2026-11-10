@@ -365,6 +365,7 @@ metadata:
   name: open
 spec:
   default_in: allow
+  default_out: allow
   rules:
     - {action: allow, direction: in, proto: tcp, ports: ["22"]}
 `)
@@ -383,7 +384,7 @@ func TestAdoptAndClaim(t *testing.T) {
 		Networks: []api.ProjectNetwork{{Network: "lan"}},
 		Storage:  []api.ProjectStorage{{Storage: "default"}},
 	}})
-	srv.SeedFirewallPolicy(api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "base", Project: fleettest.Project}, Spec: api.FirewallPolicySpec{DefaultIn: "deny"}})
+	srv.SeedFirewallPolicy(api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "base", Project: fleettest.Project}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}})
 	srv.SeedJail(api.Jail{
 		Metadata: api.ObjectMeta{Name: "old", Project: fleettest.Project, Labels: map[string]string{"tier": "web"}},
 		Spec: api.JailSpec{Image: "freebsd-15@stable", Hostname: "old", Layout: api.LayoutThin, Storage: "default",

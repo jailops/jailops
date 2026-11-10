@@ -892,7 +892,7 @@ func (f *Fleet) loadObjectDir(dir string, ki model.KindInfo, scope, project stri
 			return fmt.Errorf("%s: spec: %w", f.rel(p), err)
 		}
 		if as, ok := spec.(model.AppAccessSpec); ok {
-			if err := as.Validate(proj); err != nil {
+			if err := as.Validate(); err != nil {
 				return fmt.Errorf("%s: spec: %w", f.rel(p), err)
 			}
 		}

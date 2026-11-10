@@ -691,7 +691,6 @@ func TestConfigNormalize(t *testing.T) {
 		"relative file":  {StorageRoots: []string{"tank/a"}, MountBase: "/j", StorageFile: "x/storage.conf"},
 		"relative base":  {StorageRoots: []string{"tank/jailops"}, MountBase: "jailops"},
 		"slash base":     {StorageRoots: []string{"tank/jailops"}, MountBase: "/"},
-		"bad prefix":     {StorageRoots: []string{"tank/jailops"}, MountBase: "/j", IfPrefixes: []string{"-x"}},
 		"bad host mount": {StorageRoots: []string{"tank/jailops"}, MountBase: "/j", Admin: AdminPolicy{HostMountRoots: []string{"/"}}},
 	} {
 		if _, err := c.Normalize(); err == nil {

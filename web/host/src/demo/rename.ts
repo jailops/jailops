@@ -1,5 +1,5 @@
 // POST <object>/rename in the demo: the plan computed from the references the demo holds (project grants and image
-// lists, jail specs, policy rules and set includes, profile lists, boot dependencies), the refusals of the server
+// lists, jail specs, policy rules and set members, profile lists, boot dependencies), the refusals of the server
 // (name rule, taken name, running or locked jail, managed object, stale If-Match), and the rename applied to the
 // demo data once the operation ends. A new name that starts with "fail" makes the operation fail.
 import type {
@@ -210,9 +210,9 @@ export function demoRename(db: RenameDb, kind: DemoRenameKind, from: string, to:
       })
     }
     for (const x of scoped(db.sets)) {
-      if (!(x.spec.includes ?? []).includes(from)) continue
-      changes.push(ref(`address set ${x.metadata.name}`, `spec.includes: ${from} -> ${to}`))
-      edits.push(() => { x.spec.includes = swap(x.spec.includes, from, to); x.metadata.generation = (x.metadata.generation ?? 0) + 1 })
+      if (!(x.spec.addresses ?? []).some((a) => a.address === `@${from}`)) continue
+      changes.push(ref(`address set ${x.metadata.name}`, `spec.addresses: @${from} -> @${to}`))
+      edits.push(() => { x.spec.addresses = (x.spec.addresses ?? []).map((a) => (a.address === `@${from}` ? { ...a, address: `@${to}` } : a)); x.metadata.generation = (x.metadata.generation ?? 0) + 1 })
     }
   }
 

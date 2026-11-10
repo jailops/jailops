@@ -114,7 +114,7 @@ type AppAccessSpec struct {
 
 // AppGrant is one source of an AppAccess document.
 type AppGrant struct {
-	// Source is @jail, @project/jail, @address-set, an address or a prefix, or host.
+	// Source is @jail, @address-set, an address or a prefix, or host.
 	Source string `json:"source"`
 	// Ports are "N" or "N/proto"; empty means the definition's ports.
 	Ports []string `json:"ports,omitempty"`
@@ -131,23 +131,13 @@ var (
 )
 
 // CanonicalSource is the form the host stores a grant under, so a declared
-// source and a live grant compare: host, @name, @project/jail (@jail when the
-// project is the app's), an address, or a masked prefix.
-func CanonicalSource(project, s string) (string, error) {
+// source and a live grant compare: host, @name, an address, or a masked prefix.
+func CanonicalSource(s string) (string, error) {
 	switch {
 	case s == "host":
 		return s, nil
 	case strings.HasPrefix(s, "@"):
 		rest := s[1:]
-		if p, j, ok := strings.Cut(rest, "/"); ok {
-			if !jailRe.MatchString(p) || !jailRe.MatchString(j) {
-				return "", fmt.Errorf("source %q: @project/jail needs a project name and a jail name", s)
-			}
-			if p == project {
-				return "@" + j, nil
-			}
-			return s, nil
-		}
 		if !srcNameRe.MatchString(rest) {
 			return "", fmt.Errorf("source %q: @ is followed by the name of a jail or of an address set", s)
 		}
@@ -200,10 +190,10 @@ func (s AppSpec) Validate() error {
 }
 
 // Validate checks an AppAccess spec in a project: sources, ports, databases, no source twice.
-func (s AppAccessSpec) Validate(project string) error {
+func (s AppAccessSpec) Validate() error {
 	seen := map[string]bool{}
 	for i, g := range s.Grants {
-		c, err := CanonicalSource(project, g.Source)
+		c, err := CanonicalSource(g.Source)
 		if err != nil {
 			return fmt.Errorf("grants[%d]: %w", i, err)
 		}

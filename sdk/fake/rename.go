@@ -191,10 +191,14 @@ func (s *Server) setRefs(rc *reqInfo, from, to string, apply bool) []api.RenameC
 	}
 	for _, n := range sortedNames(s.addrsets.items) {
 		x := s.addrsets.items[n]
-		if x.Metadata.Project == rc.project && slices.Contains(x.Spec.Includes, from) {
-			out = append(out, ref("address set "+x.Metadata.Name, "spec.includes: "+from+" -> "+to))
+		if x.Metadata.Project == rc.project && slices.Contains(x.Spec.Members(), "@"+from) {
+			out = append(out, ref("address set "+x.Metadata.Name, "spec.addresses: @"+from+" -> @"+to))
 			if apply {
-				x.Spec.Includes = replaced(x.Spec.Includes, from, to)
+				for i := range x.Spec.Addresses {
+					if x.Spec.Addresses[i].Address == "@"+from {
+						x.Spec.Addresses[i].Address = "@" + to
+					}
+				}
 			}
 		}
 	}

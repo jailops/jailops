@@ -401,11 +401,14 @@ file) is encrypted with ZFS (aes-256-gcm) under a passphrase you type twice; scr
 give it with --passphrase-file. The passphrase is needed again after every host boot
 ('jailops jail unlock'). A forgotten passphrase cannot be recovered.
 
+A jail starts when the host boots only with --autostart (boot.autostart); a jail that
+was running before a reboot does not come back on its own.
+
 A new jail name has at most 32 characters, and so has a volume name. Sizes
 (--disk, a volume's QUOTA) are stored as bytes; 4G, 4GiB and 4294967296 are
 the same size.`
 
-const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15-1 --network lan --storage default --start
+const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15-1 --network lan --storage default --start --autostart
 jailops @P@ create db --project web --image freebsd-15-1 --network lan=10.20.0.50 --storage default --volume data:/var/db --memory 4G --autostart
 jailops @P@ create vault --project web --image freebsd-15-1 --network lan --storage default --volume secrets:/var/db/secrets:encrypted
 jailops @P@ create nginx --project web --image freebsd-15-1 --profile web

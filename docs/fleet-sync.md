@@ -156,14 +156,12 @@ installed app is closed to everything else; each entry is what `jailops app allo
     spec:
       grants:
         - {source: "@web", database: shop}           # a jail of the project; database and role shop
-        - {source: "@other/api", database: api}      # a jail of another project
         - {source: "@office"}                        # an address set of the project
         - {source: 192.0.2.0/24, ports: ["5432"]}    # an address or a prefix
         - {source: host}                             # the host itself
 
 `ports` are `N` or `N/udp` (default: the ports of the definition), `database` names the database and role of a
-PostgreSQL grant (default: the source jail's name). Sources compare in the form the host stores them (`@shop/web` in project
-`shop` is `@web`, `192.0.2.7/32` is `192.0.2.7`), so `validate` refuses a source listed twice. `plan` compares the list with
+PostgreSQL grant (default: the source jail's name). Sources compare in the form the host stores them (`192.0.2.7/32` is `192.0.2.7`), so `validate` refuses a source listed twice. `plan` compares the list with
 `GET .../access`: a missing grant is `create`, changed ports or a grant the host reports drift for (a missing firewall rule
 or `pg_hba.conf` line) is `update`, both applied with `jailops app allow`. A changed `database` of an existing grant is a plan
 error: deny it first. A grant the host has and the document does not list is `delete`, applied only with `--prune`, as for

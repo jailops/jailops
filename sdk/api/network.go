@@ -25,14 +25,6 @@ type NetworkSpec struct {
 	DNS    []string `json:"dns,omitempty"`
 	// MTU of the bridge and its members; zero keeps the default.
 	MTU int `json:"mtu,omitempty"`
-	// Private makes every jail interface a private member of the bridge
-	// (ifconfig <bridge> private <epair>). A private member cannot talk to any
-	// other member, not even a jail of the same project on the same subnet:
-	// all traffic goes through the host. Use it only for networks routed
-	// through the host (uplink set); jails on one subnet cannot reach each
-	// other. A network belongs to one project, so there is no addressing to
-	// share. Default false.
-	Private bool `json:"private,omitempty"`
 }
 
 // IPv4Net configures IPv4 on a network.

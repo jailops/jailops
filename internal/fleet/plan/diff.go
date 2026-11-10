@@ -159,7 +159,7 @@ func dangers(kind api.Kind, live, want any) []string {
 			return []string{"deleting an address set silently empties every rule that references it"}
 		}
 		w := want.(api.AddressSetSpec)
-		if len(l.Addresses)+len(l.Includes) > 0 && len(w.Addresses)+len(w.Includes) == 0 {
+		if len(l.Addresses) > 0 && len(w.Addresses) == 0 {
 			out = append(out, "address set would become empty")
 		}
 	case api.KindNetwork:

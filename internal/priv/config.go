@@ -6,7 +6,6 @@ import (
 	"slices"
 	"time"
 
-	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -14,10 +13,7 @@ import (
 const (
 	// DefaultSocket is the helper's socket. Its directory belongs to root (mode 0710, group jailops): the daemon may
 	// reach the socket but cannot put anything in its place.
-	DefaultSocket = "/var/run/jailops-priv/priv.sock"
-	// LegacySocket is where releases before it lived, in the directory the daemon writes. A configuration that
-	// still names it means DefaultSocket.
-	LegacySocket      = "/var/run/jailops/priv.sock"
+	DefaultSocket     = "/var/run/jailops-priv/priv.sock"
 	DefaultConfDir    = "/usr/local/etc/jailops/jails"
 	DefaultHelperPath = "/usr/local/libexec/jailops-priv"
 	// DefaultStorageFile persists the storage roots registered at run time.
@@ -145,8 +141,6 @@ type Config struct {
 	// ImageMirrors are directories fs.read_file may read besides the storage
 	// roots (a local mirror of image archives). Reading is all that is allowed.
 	ImageMirrors []string
-	// IfPrefixes are the interface name prefixes JailOps owns (default "jo").
-	IfPrefixes []string
 	// MountBase is optional. It only supplies the default StateDir
 	// (<MountBase>/state); file and mount paths are checked against the
 	// mountpoints of the registered roots, not against it.
@@ -196,9 +190,6 @@ var DefaultSysctls = []string{
 // Normalize fills defaults and cleans paths. It returns an error when the
 // configuration cannot enforce its own rules.
 func (c Config) Normalize() (Config, error) {
-	if len(c.IfPrefixes) == 0 {
-		c.IfPrefixes = ifconfig.DefaultPrefixes
-	}
 	if c.ConfDir == "" {
 		c.ConfDir = DefaultConfDir
 	}
@@ -231,11 +222,6 @@ func (c Config) Normalize() (Config, error) {
 	}
 	if c.reg == nil {
 		c.reg = newRootSet()
-	}
-	for _, p := range c.IfPrefixes {
-		if err := ifconfig.ValidateIfName(p + "0"); err != nil {
-			return c, api.Errorf(api.CodeInvalid, "interface prefix %q is invalid", p)
-		}
 	}
 	if c.MountBase != "" {
 		if !filepath.IsAbs(c.MountBase) {
