@@ -59,7 +59,8 @@ func (s *Service) checkPolicy(ctx context.Context, name string, spec api.Firewal
 		return api.Errorf(api.CodeForbidden, "a raw PF fragment needs the admin role")
 	}
 	in := render.PFInput{Jail: "check_policy", Interfaces: []string{"jo000000000a"}, Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1")},
-		Policy: spec, Sets: sets, Uplink: "jo0", AllowRaw: true, TagMembers: map[string][]netip.Addr{}}
+		DefaultIn: spec.DefaultIn, DefaultOut: spec.DefaultOut, Policies: []render.PFPolicy{{Name: "check", Policy: spec}},
+		Sets: sets, Uplink: "jo0", AllowRaw: true, TagMembers: map[string][]netip.Addr{}}
 	for _, r := range spec.Rules {
 		for _, e := range append(append([]string{}, r.From...), r.To...) {
 			if k, v, err := validate.ParseEndpoint(e); err == nil && k == validate.EndpointTag {
@@ -143,8 +144,8 @@ func (s *Service) protectedPolicy(ctx context.Context, p project, name string) e
 		return api.Errorf(api.CodeForbidden, "firewall policy %q is managed by app access", name).
 			WithHint("jailops app allow and jailops app deny change it; jailops app access shows its grants")
 	}
-	if p.Spec.Firewall == name && !ActorFrom(ctx).Global {
-		return api.Errorf(api.CodeForbidden, "firewall policy %q is the mandatory policy of project %q; a global administrator manages it", name, p.Meta.Name)
+	if slices.Contains(p.Spec.FirewallPolicies, name) && !ActorFrom(ctx).Global {
+		return api.Errorf(api.CodeForbidden, "firewall policy %q is a mandatory policy of project %q; a global administrator manages it", name, p.Meta.Name)
 	}
 	return nil
 }
@@ -212,12 +213,12 @@ func (s *Service) DeletePolicy(ctx context.Context, name string, expect int64) e
 	if err := s.protectedPolicy(ctx, p, name); err != nil {
 		return err
 	}
-	if p.Spec.Firewall == name {
-		return api.Errorf(api.CodeBusy, "firewall policy %q is the mandatory policy of project %q", name, p.Meta.Name).
-			WithHint("unset spec.firewall on the project first")
+	if slices.Contains(p.Spec.FirewallPolicies, name) {
+		return api.Errorf(api.CodeBusy, "firewall policy %q is a mandatory policy of project %q", name, p.Meta.Name).
+			WithHint("take it out of spec.firewall_policies of the project first")
 	}
 	for _, j := range s.projectJails(p.Meta.Name) {
-		if j.Spec.Firewall.Policy == name {
+		if slices.Contains(j.Spec.Firewall.Policies, name) {
 			return api.Errorf(api.CodeBusy, "firewall policy %q is used by jail %q", name, j.Metadata.Name)
 		}
 	}

@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+- **Breaking: deny wins over allow, whatever the order of the policies.** The anchor of a jail with an enabled deny rule holds
+  the deny rules of all its policies first (`# deny rules of all policies: they win over every allow rule`), then the allow
+  rules of the policies, each group in the order of the policies and the rules, with the headings and the rule numbers of the
+  policies; the same two groups stand on the gateway interface. An anchor without a deny rule is written as it was. The
+  order of a jail's policies and of their rules no longer decides between an allow and a deny; `jailops firewall test` says
+  which allow rules a deny rule won over.
+- **A firewall rule can be switched off.** `disabled` on a rule (`--rule "allow in tcp port 22 disabled comment ..."`,
+  `disabled: true` in a file, a checkbox in the console) keeps it in the policy with its number and shows it as a comment line
+  of the anchor and as `disabled` in `policy show`, without loading it; `firewall test` names a disabled rule the packet
+  would have met.
+
+- **Breaking: a rule names only the other end.** An inbound rule is always to the jail itself and an outbound rule always
+  from it, so `to` on an inbound rule and `from` on an outbound rule are refused (`allow in tcp from @office port 22`,
+  `allow out tcp to 192.0.2.7 port 5432`). A policy that several jails share cannot name the address of one of them, and
+  an inbound rule with its own `to` was rendered on the network's shared gateway interface, where it could decide for
+  other jails.
+
+- **`jailops firewall test`: would this connection pass?** `jailops firewall test --from @web --to @db --port 5432` says
+  pass or block and which rule decides at each anchor it meets: the policy and the number of its rule, its name and comment, a
+  project policy, the managed policy of an app, the isolation of projects, or the default of the anchor, with the rendered pf
+  line. An end is a jail of the project, one address or `host`; both hops of a connection between two jails must pass (what the
+  source sends is judged on its own port, what reaches the destination leaves the host on the gateway interface of its
+  network). It walks the very anchors the renderer loads (`render.BuildAnchor`), not a second copy of the policies, and says
+  `unknown`, or a line under "Not covered", where it cannot know (a raw PF fragment, the host's own `pf.conf`, an open
+  connection, NAT). Exit status 0 pass, 1 block, 8 unknown; `-o json` for a later console. `POST /api/v1/firewall/test`
+  (extension `firewall_test`, operator).
+
+- **Breaking: a jail and a project have several firewall policies.** The jail's `firewall.policy` is `firewall.policies`, a
+  list (`jailops config set DB firewall.policies postgres,ssh-office`; `--firewall-policy` is repeatable at `jailops create`),
+  and the project's mandatory `firewall` is `firewall_policies`, a list (`jailops project set PROJECT --firewall-policy
+  default --firewall-policy monitoring`; an empty value clears it). The anchor of a jail holds the project's policies in
+  the order of their list, then the managed policy of an app, then the jail's own in theirs, each under its own heading
+  (`# project policy NAME`, `# policy NAME`) with its own rule numbers; the strictest default of them all applies, so a
+  jail's policy still cannot turn a project's default deny into allow. A policy that a list names is not deleted and is
+  renamed in every list; a jail's list may not name a mandatory policy of the project, a managed policy or one policy
+  twice. `jailops jail info` lists the policies in order, and `config set JAIL firewall.policies <Tab>` completes their
+  names.
+
+- **`jailops firewall policy create` defaults to deny inbound and allow outbound.** `--default-in` and `--default-out`
+  are only given to change that; the policy still has both written in it.
+
+- **Tab completion for `@jail` in an address set.** `jailops firewall address-set create NAME --address @<Tab>` offers the
+  jails and the other address sets of the project (not the set being made).
+
 ## 0.6.5 - 2026-11-10
 
 - **An installed app starts when the host boots.** `jailops app install` sets `boot.autostart` in its last step

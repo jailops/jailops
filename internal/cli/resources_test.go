@@ -153,6 +153,11 @@ func TestFirewall(t *testing.T) {
 		"--rule", "allow in tcp port 80,443 comment the site", "--rule", "allow in tcp from @hq port 22 comment ssh from the office")
 	tr.ok("firewall", "policy", "show", "documented", "-o", "yaml")
 	tr.ok("firewall", "policy", "show", "documented")
+	// a rule can be switched off without deleting it: it keeps its number and says so
+	tr.ok("firewall", "policy", "create", "switchable", "--rule", "allow in tcp port 80 comment the site",
+		"--rule", "allow in tcp port 22 disabled comment ssh, switched off", "--rule", "deny in tcp port 23 disabled")
+	tr.ok("firewall", "policy", "show", "switchable")
+	tr.ok("firewall", "policy", "show", "switchable", "-o", "yaml")
 	tr.do("", "firewall", "policy", "create", "nocomment", "--default-in", "deny", "--default-out", "allow", "--rule", "allow in tcp port 80 comment")
 	tr.do("", "firewall", "policy", "create", "nodefaults", "--rule", "allow in tcp port 80")
 	tr.do("", "firewall", "address-set", "create", "c1", "--comment", "no address")
@@ -209,6 +214,40 @@ spec: {addresses: ["@a"]}
 	tr.ok("firewall", "policy", "delete", "-y", "web")
 	tr.ok("firewall", "address-set", "delete", "-y", "office")
 	tr.golden("firewall")
+}
+
+// A jail and a project have several firewall policies, given in order: --firewall-policy is repeatable on create and on
+// project set, config sets the list, and info and show print it in the order it is rendered.
+func TestSeveralFirewallPolicies(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	tr := h.transcript()
+	for _, n := range []string{"floor", "monitoring", "postgres", "ssh-office"} {
+		tr.ok("firewall", "policy", "create", n, "--rule", "allow in tcp port 22")
+	}
+	tr.ok("jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan",
+		"--firewall-policy", "postgres", "--firewall-policy", "ssh-office")
+	tr.ok("config", "get", "db", "firewall.policies")
+	tr.ok("config", "set", "db", "firewall.policies", "ssh-office,postgres")
+	tr.ok("config", "get", "db", "firewall.policies")
+	tr.ok("project", "set", "main", "--firewall-policy", "floor", "--firewall-policy", "monitoring")
+	tr.ok("project", "show", "main")
+	tr.ok("jail", "info", "db")
+	tr.ok("jail", "info", "db", "-o", "json")
+	tr.ok("project", "set", "main", "--firewall-policy", "")
+	tr.ok("project", "show", "main")
+	tr.golden("firewall_policies")
+	// the values of the key complete to the names of the policies, also after a comma and in KEY=VALUE
+	for args, want := range map[string]string{
+		"config set db firewall.policies ":           "postgres",
+		"config set db firewall.policies postgres,s": "postgres,ssh-office",
+		"config set db firewall.policies=ssh":        "firewall.policies=ssh-office",
+	} {
+		out, _, code := h.run("", append([]string{"__complete"}, strings.Split(args, " ")...)...)
+		if code != 0 || !strings.Contains(out, want+"\n") {
+			t.Errorf("complete %q: %d %q lacks %q", args, code, out, want)
+		}
+	}
 }
 
 func TestBackup(t *testing.T) {

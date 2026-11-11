@@ -245,6 +245,9 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/jails/{name}/logs/{file...}", op),
 	// what a boot of the host starts, in which order: the jails of the projects the caller may use
 	r("GET", "/api/v1/boot", ro),
+	// would a connection pass the firewall: it changes nothing and reveals what policy show and jail show do, but it is
+	// a POST and no mutation is open to readonly, so it is for operators
+	r("POST", "/api/v1/firewall/test", op),
 	// the logs of many jails at once, merged: the same reads, over the projects the caller may use
 	r("GET", "/api/v1/logs", op),
 	// where the host forwards its logs: names receivers and files of the host

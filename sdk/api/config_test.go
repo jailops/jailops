@@ -18,7 +18,7 @@ func TestRegistryIsConsistent(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"limits.memory", "limits.cpu", "limits.pids", "boot.autostart", "boot.priority", "boot.depends", "image", "hostname",
-		"update.strategy", "update.window", "firewall.policy", "nic.<device>.mtu", "nic.<device>.network", "disk.<device>.quota", "devfs.<name>.device", "proxy.<name>.listen", "env.<var>", "profiles"} {
+		"update.strategy", "update.window", "firewall.policies", "nic.<device>.mtu", "nic.<device>.network", "disk.<device>.quota", "devfs.<name>.device", "proxy.<name>.listen", "env.<var>", "profiles"} {
 		if !seen[want] {
 			t.Errorf("missing key %s", want)
 		}
@@ -37,13 +37,16 @@ func TestApplyConfigSetsAndReportsRestarts(t *testing.T) {
 		"nic.eth0.network": "lan", "nic.eth0.ipv4": "auto", "nic.eth0.mtu": "1400", "nic.eth1.network": "dmz",
 		"disk.data.mount": "/var/db", "disk.data.quota": "5G", "disk.data.read_only": "yes",
 		"devfs.t.device": "tun", "proxy.web.listen": ":8080", "proxy.web.jail_port": "80", "env.TZ": "UTC",
-		"firewall.policy": "web", "update.strategy": "rebase",
+		"firewall.policies": "web, ssh-office", "update.strategy": "rebase",
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if s.Resources.Memory != "2G" || s.Resources.CPU != 2 || !s.Boot.Autostart || !reflect.DeepEqual(s.Boot.Depends, []string{"db", "cache"}) {
 		t.Fatalf("%+v", s)
+	}
+	if !reflect.DeepEqual(s.Firewall.Policies, []string{"web", "ssh-office"}) {
+		t.Fatalf("%+v", s.Firewall)
 	}
 	if len(s.Network) != 2 || s.Network[0].Name != "eth0" || s.Network[0].MTU != 1400 || s.Network[1].Name != "eth1" || s.Network[1].Network != "dmz" {
 		t.Fatalf("%+v", s.Network)
@@ -112,7 +115,7 @@ func TestApplyConfigRejectsAndIsAtomic(t *testing.T) {
 		"rate":           {"nic.eth0.ingress": "fast"},
 		"hostname":       {"hostname": "bad host!"},
 		"list item":      {"boot.depends": "Bad Name"},
-		"injection":      {"firewall.policy": "x\"; rm"},
+		"injection":      {"firewall.policies": "x\"; rm"},
 		"profile loop":   {"profiles": "UPPER"},
 		"partial values": {"limits.cpu": "2", "limits.memory": "zzz"},
 	} {

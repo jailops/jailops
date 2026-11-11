@@ -14,6 +14,7 @@ pass out quick on jo0123456789a0a inet6 proto icmp6 from any to { 2001:db8:1::10
 pass out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-0f240135318b"
 block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
 block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir
+# policy web
 # rule 1: from-common
 pass out quick on jo0123456789a0a inet proto tcp from 10.30.0.5 to 10.20.0.10 port 5432 label "jo-6c7d2e36539a"
 table <foreign> persist { 10.30.0.0/24, fd30::/64 }

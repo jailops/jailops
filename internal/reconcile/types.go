@@ -83,6 +83,9 @@ type JailDesired struct {
 	// when the jail has no firewall.
 	AnchorName string
 	Ruleset    string
+	// Anchor is the structured form of Ruleset, made by the same code: the rules in the order they are loaded, each
+	// with what it matches. The firewall test walks it. It is nil when Ruleset is empty.
+	Anchor *render.Anchor
 	// ParentAnchors maps the parent anchors of AnchorName ("jailops/<project>")
 	// to the ruleset that makes them evaluate their children.
 	// UNVERIFIED: nested anchors on FreeBSD.

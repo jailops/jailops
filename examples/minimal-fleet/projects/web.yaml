@@ -13,5 +13,5 @@ spec:
   storage:
     - {storage: fast, quota: 200G}
   quotas: {jails: 20}
-  firewall: base
+  firewall_policies: [base]
   images: [freebsd-15]

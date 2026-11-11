@@ -709,8 +709,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       // DeletePolicy: not the project's mandatory policy, not while a jail of the project uses it
       const name = seg[2]
       const proj = db.projects.find((p) => p.metadata.name === project)
-      if (proj?.spec.firewall === name) return fail(409, { code: 'busy', message: `firewall policy "${name}" is the mandatory policy of project "${project}"`, hint: 'unset spec.firewall on the project first' })
-      const user = db.jails.find((j) => (j.metadata.project ?? '') === project && j.spec.firewall?.policy === name)
+      if (proj?.spec.firewall_policies?.includes(name)) return fail(409, { code: 'busy', message: `firewall policy "${name}" is a mandatory policy of project "${project}"`, hint: 'take it out of spec.firewall_policies of the project first' })
+      const user = db.jails.find((j) => (j.metadata.project ?? '') === project && j.spec.firewall?.policies?.includes(name))
       if (user) return fail(409, { code: 'busy', message: `firewall policy "${name}" is used by jail "${user.metadata.name}"` })
       return startOp(`Delete policy ${name}`, { firewall: [`/api/v1/firewall/policies/${name}`] }, 500, () => {
         db.policies = db.policies.filter((x) => x !== item)

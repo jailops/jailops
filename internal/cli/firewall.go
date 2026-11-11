@@ -65,22 +65,22 @@ jailops firewall validate -f policy.yaml`, "fw")
 	pc := group("policy", "Manage firewall policies", "Create, inspect, edit and delete firewall policies.",
 		"jailops firewall policy list\njailops firewall policy show web", "policies")
 	crudCommands(a, pc, pd, `Create a firewall policy from rule flags or a file. Each --rule has the form
-"ACTION DIRECTION [PROTO] [from ADDR,..] [to ADDR,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [comment TEXT]";
+"ACTION DIRECTION [PROTO] [from ADDR,..] [to ADDR,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [disabled] [comment TEXT]";
 comment is last and takes the rest of the rule: why the rule is there, which a reviewer of the firewall reads.
---comment is what the policy is for.`,
-		`jailops firewall policy create web --default-in deny --default-out allow --comment "the public web server" --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from @office port 22 comment ssh from the office"
+disabled switches a rule off without deleting it: it keeps its number and shows in the policy and as a comment line
+of the anchor, and it is not loaded. A deny rule wins over every allow rule, whatever the order of the policies.
+--comment is what the policy is for. Without --default-in and --default-out the policy denies
+inbound and allows outbound traffic; both are written into the policy.`,
+		`jailops firewall policy create web --comment "the public web server" --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from @office port 22 comment ssh from the office"
 jailops firewall policy create -f web.yaml`,
 		func(cmd *cobra.Command) func(string) (api.FirewallPolicy, error) {
 			var din, dout, comment string
 			var rules []string
 			cmd.Flags().StringVar(&comment, "comment", "", "what the policy is for (one line, at most 200 characters, no double quotes or backslashes)")
-			cmd.Flags().StringVar(&din, "default-in", "", "default for inbound traffic: allow or deny (required)")
-			cmd.Flags().StringVar(&dout, "default-out", "", "default for outbound traffic: allow or deny (required)")
+			cmd.Flags().StringVar(&din, "default-in", "deny", "default for inbound traffic: allow or deny")
+			cmd.Flags().StringVar(&dout, "default-out", "allow", "default for outbound traffic: allow or deny")
 			cmd.Flags().StringArrayVar(&rules, "rule", nil, "a rule (repeatable)")
 			return func(name string) (api.FirewallPolicy, error) {
-				if din == "" || dout == "" {
-					return api.FirewallPolicy{}, usagef("give --default-in and --default-out: allow or deny (or use -f FILE)")
-				}
 				p := api.FirewallPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.FirewallPolicySpec{DefaultIn: din, DefaultOut: dout, Comment: comment}}
 				for _, r := range rules {
 					fr, err := parseRule(r)
@@ -101,6 +101,7 @@ jailops firewall policy create -f web.yaml`,
 			var addrs []string
 			var comment string
 			cmd.Flags().StringArrayVar(&addrs, "address", nil, "address, CIDR or @jail (repeatable)")
+			_ = cmd.RegisterFlagCompletionFunc("address", a.completeMember())
 			cmd.Flags().StringVar(&comment, "comment", "", "what the address is (with a single --address; several entries with comments come from a file, -f, or address-set edit)")
 			return func(name string) (api.AddressSet, error) {
 				if len(addrs) == 0 {
@@ -116,7 +117,7 @@ jailops firewall policy create -f web.yaml`,
 				return api.AddressSet{Metadata: api.ObjectMeta{Name: name}, Spec: spec}, nil
 			}
 		})
-	fc.AddCommand(pc, ac, a.firewallValidate())
+	fc.AddCommand(pc, ac, a.firewallValidate(), a.firewallTest())
 	return fc
 }
 
@@ -136,6 +137,9 @@ func parseRule(s string) (api.FirewallRule, error) {
 		switch t[0] {
 		case "log":
 			r.Log, t = true, t[1:]
+			continue
+		case "disabled":
+			r.Disabled, t = true, t[1:]
 			continue
 		case "comment": // the rest of the rule
 			if len(t) < 2 {

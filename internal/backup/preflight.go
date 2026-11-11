@@ -91,8 +91,10 @@ func Preflight(b api.Backup, req api.RestoreRequest, h HostState) api.RestorePre
 	if len(bundle.Policies) != len(bundle.PolicyNames) {
 		fail("bundle has %d policies but %d names", len(bundle.Policies), len(bundle.PolicyNames))
 	}
-	if pn := spec.Firewall.Policy; pn != "" && !slices.Equal(bundle.PolicyNames, []string{pn}) {
-		fail("bundle lacks firewall policy %q", pn)
+	for _, pn := range spec.Firewall.Policies {
+		if !slices.Contains(bundle.PolicyNames, pn) {
+			fail("bundle lacks firewall policy %q", pn)
+		}
 	}
 	vols := map[string]bool{}
 	for _, v := range bundle.Volumes {
@@ -181,11 +183,14 @@ func Preflight(b api.Backup, req api.RestoreRequest, h HostState) api.RestorePre
 	}
 
 	// Firewall.
-	if pn := spec.Firewall.Policy; pn != "" && len(bundle.Policies) == 1 && len(bundle.PolicyNames) == 1 {
+	for i, pn := range bundle.PolicyNames {
+		if i >= len(bundle.Policies) || !slices.Contains(spec.Firewall.Policies, pn) {
+			continue
+		}
 		if hp, ok := h.Policies[pn]; !ok {
 			miss("firewall policy %s", pn)
 			chg("create firewall policy %s from the frozen copy", pn)
-		} else if !reflect.DeepEqual(hp, bundle.Policies[0]) {
+		} else if !reflect.DeepEqual(hp, bundle.Policies[i]) {
 			chg("firewall policy %s exists with different rules; the existing policy is used", pn)
 		}
 	}

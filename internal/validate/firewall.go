@@ -60,6 +60,22 @@ func FirewallPolicySpec(s api.FirewallPolicySpec) (FirewallReport, error) {
 	return rep, nil
 }
 
+// PolicyNames checks a list of policy names, of a jail or of a project: each is a name and none is listed twice.
+func PolicyNames(field string, names []string) error {
+	seen := map[string]bool{}
+	for i, n := range names {
+		f := fmt.Sprintf("%s[%d]", field, i)
+		if err := Name(f, n); err != nil {
+			return err
+		}
+		if seen[n] {
+			return Invalid(f, "%s: policy %q is listed twice", field, n)
+		}
+		seen[n] = true
+	}
+	return nil
+}
+
 // CommentMax is the longest comment on a firewall object: a rule, a policy, an address set or one of its entries.
 const CommentMax = 200
 
@@ -112,6 +128,14 @@ func rule(f string, r api.FirewallRule) error {
 		if _, _, err := ParsePortSpec(p); err != nil {
 			return Invalid(f+".ports", "port %q is invalid", p)
 		}
+	}
+	// A rule belongs to the jail that has the policy: an inbound rule is always to the jail itself and an outbound rule
+	// always from it, so a policy that several jails share never names the jail's own address.
+	switch {
+	case r.Direction == "in" && len(r.To) > 0:
+		return Invalid(f+".to", "an inbound rule is always to the jail itself: leave out to, and say who may connect with from")
+	case r.Direction == "out" && len(r.From) > 0:
+		return Invalid(f+".from", "an outbound rule is always from the jail itself: leave out from, and say where it may go with to")
 	}
 	for _, e := range []struct {
 		n string

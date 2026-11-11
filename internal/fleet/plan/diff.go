@@ -135,8 +135,10 @@ func dangers(kind api.Kind, live, want any) []string {
 		if l.Encrypted && !w.Encrypted {
 			out = append(out, "jail encryption would be turned off")
 		}
-		if l.Firewall.Policy != "" && w.Firewall.Policy == "" {
-			out = append(out, fmt.Sprintf("firewall policy %q would be detached", l.Firewall.Policy))
+		for _, pn := range l.Firewall.Policies {
+			if !slices.Contains(w.Firewall.Policies, pn) {
+				out = append(out, fmt.Sprintf("firewall policy %q would be detached", pn))
+			}
 		}
 		if li, wi := imageBase(l.Image), imageBase(w.Image); li != "" && wi != li {
 			out = append(out, fmt.Sprintf("image changes from %q to %q (a different base; use a rollout to move between generations)", li, wi))
@@ -197,8 +199,10 @@ func dangers(kind api.Kind, live, want any) []string {
 			return []string{"deleting a project removes its grants and quotas"}
 		}
 		w := want.(api.ProjectSpec)
-		if l.Firewall != "" && w.Firewall == "" {
-			out = append(out, fmt.Sprintf("the mandatory firewall policy %q would be removed", l.Firewall))
+		for _, pn := range l.FirewallPolicies {
+			if !slices.Contains(w.FirewallPolicies, pn) {
+				out = append(out, fmt.Sprintf("the mandatory firewall policy %q would be removed", pn))
+			}
 		}
 		for _, g := range l.Networks {
 			if !hasNetworkGrant(w, g.Network) {

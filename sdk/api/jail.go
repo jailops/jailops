@@ -179,10 +179,11 @@ type NetworkAttach struct {
 	MAC  string `json:"mac,omitempty"` // derived from the jail UUID when empty
 }
 
-// FirewallAttach selects the policy applied to the jail's anchor.
+// FirewallAttach selects the policies applied to the jail's anchor.
 type FirewallAttach struct {
-	Policy string   `json:"policy,omitempty"`
-	Tags   []string `json:"tags,omitempty"`
+	// Policies are the names of the jail's own policies, rendered in this order after the project's.
+	Policies []string `json:"policies,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
 }
 
 // VolumeMount is a data dataset mounted into the jail.

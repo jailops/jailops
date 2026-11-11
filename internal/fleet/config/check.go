@@ -202,10 +202,18 @@ func (f *Fleet) Check() error {
 						add(o, "image %q is not in project %s's image allow-list", ImageName(s.Image), o.Project)
 					}
 				}
-				if s.Firewall.Policy != "" {
-					missing(h, api.KindFirewallPolicy, o.Project, s.Firewall.Policy, o, "firewall policy")
-					if pdef != nil && pdef.Spec.Firewall == s.Firewall.Policy {
-						add(o, "firewall policy %q is the mandatory policy of project %s: it is rendered for every jail already; name a policy of the jail's own", s.Firewall.Policy, o.Project)
+				for _, pn := range s.Firewall.Policies {
+					missing(h, api.KindFirewallPolicy, o.Project, pn, o, "firewall policy")
+					if pdef != nil && slices.Contains(pdef.Spec.FirewallPolicies, pn) {
+						add(o, "firewall policy %q is a mandatory policy of project %s: it is rendered for every jail already; name policies of the jail's own", pn, o.Project)
+					}
+				}
+				if seen := map[string]bool{}; len(s.Firewall.Policies) > 1 {
+					for _, pn := range s.Firewall.Policies {
+						if seen[pn] {
+							add(o, "firewall policy %q is listed twice", pn)
+						}
+						seen[pn] = true
 					}
 				}
 				for _, d := range s.Boot.Depends {
@@ -466,12 +474,13 @@ func (f *Fleet) checkProject(o *Object, s api.ProjectSpec, tables map[string]map
 	if s.Quotas.Jails < 0 || s.Quotas.CPU < 0 || s.Quotas.PIDs < 0 || s.Quotas.Addresses < 0 {
 		add(o, "quotas must not be negative")
 	}
-	if s.Firewall == "" {
+	if len(s.FirewallPolicies) == 0 {
 		warn(o, "project %s has no mandatory firewall policy", o.Name)
-	} else {
+	}
+	for _, pn := range s.FirewallPolicies {
 		for _, h := range o.Hosts {
-			if _, ok := tables[h][Key{api.KindFirewallPolicy, o.Name, s.Firewall}]; !ok {
-				add(o, "mandatory firewall policy %q is not declared in project %s for host %s", s.Firewall, o.Name, h)
+			if _, ok := tables[h][Key{api.KindFirewallPolicy, o.Name, pn}]; !ok {
+				add(o, "mandatory firewall policy %q is not declared in project %s for host %s", pn, o.Name, h)
 				break
 			}
 		}
@@ -502,7 +511,7 @@ func (f *Fleet) checkJail(o *Object, s api.JailSpec, add func(*Object, string, .
 			}
 		}
 	}
-	if s.Firewall.Policy == "" {
+	if len(s.Firewall.Policies) == 0 {
 		warn(o, "jail %s has no firewall policy", o.Name)
 	}
 	if s.Encrypted {

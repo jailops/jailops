@@ -443,11 +443,11 @@ func (a *app) addJailShortcuts(root *cobra.Command) {
 
 func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	var (
-		image, layout, hostname, memory, disk, fwPolicy, strategy, window, storage string
-		shell, prompt                                                              string
-		cpu, pids, priority                                                        int
-		networks, volumes, hostMounts, envs, labels, depends, tags, profiles       []string
-		autostart                                                                  bool
+		image, layout, hostname, memory, disk, strategy, window, storage                 string
+		shell, prompt                                                                    string
+		cpu, pids, priority                                                              int
+		networks, volumes, hostMounts, envs, labels, depends, tags, profiles, fwPolicies []string
+		autostart                                                                        bool
 	)
 	f := cmd.Flags()
 	f.StringVar(&image, "image", "", "image reference: NAME@alias or NAME#gN (required without -f)")
@@ -463,7 +463,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringArrayVar(&volumes, "volume", nil, "data volume NAME:MOUNT[:ro][:encrypted][:QUOTA] (repeatable); encrypted asks for a passphrase")
 	f.StringVar(&a.passFile, "passphrase-file", "", "read the passphrase of the encrypted volumes from this file (its first line) instead of asking")
 	f.StringArrayVar(&hostMounts, "host-mount", nil, "mount an existing host directory SOURCE:TARGET[:ro] (repeatable; global administrators only, and the host operator must have approved the directory)")
-	f.StringVar(&fwPolicy, "firewall-policy", "", "firewall policy to apply")
+	f.StringArrayVar(&fwPolicies, "firewall-policy", nil, "firewall policy to apply (repeatable; they are rendered in the order given, after the project's)")
 	f.StringArrayVar(&tags, "tag", nil, "firewall tag of this jail (repeatable)")
 	f.BoolVar(&autostart, "autostart", false, "start the jail when the host boots")
 	f.IntVar(&priority, "boot-priority", 0, "boot order, lower starts first")
@@ -496,7 +496,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 			Image: image, Layout: api.Layout(layout), Hostname: hostname,
 			Storage: storage, Profiles: profiles,
 			Resources: api.Resources{CPU: cpu, Memory: memory, Disk: disk, PIDs: pids},
-			Firewall:  api.FirewallAttach{Policy: fwPolicy, Tags: tags},
+			Firewall:  api.FirewallAttach{Policies: fwPolicies, Tags: tags},
 			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: depends},
 			Update:    api.UpdatePolicy{Strategy: api.UpdateStrategy(strategy), Window: window},
 			Shell:     api.ShellPath(shell), Prompt: prompt,

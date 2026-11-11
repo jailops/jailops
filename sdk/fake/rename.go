@@ -207,27 +207,27 @@ func (s *Server) setRefs(rc *reqInfo, from, to string, apply bool) []api.RenameC
 
 func (s *Server) policyRefs(rc *reqInfo, from, to string, apply bool) []api.RenameChange {
 	var out []api.RenameChange
-	if p := s.projects.items[rc.project]; p != nil && p.Spec.Firewall == from {
-		out = append(out, ref("project "+rc.project, "spec.firewall (mandatory policy): "+from+" -> "+to))
+	if p := s.projects.items[rc.project]; p != nil && slices.Contains(p.Spec.FirewallPolicies, from) {
+		out = append(out, ref("project "+rc.project, "spec.firewall_policies (mandatory policy): "+from+" -> "+to))
 		if apply {
-			p.Spec.Firewall = to
+			p.Spec.FirewallPolicies = replaceName(p.Spec.FirewallPolicies, from, to)
 		}
 	}
 	for _, n := range sortedNames(s.profiles.items) {
 		p := s.profiles.items[n]
-		if p.Metadata.Project == rc.project && p.Spec.Config["firewall.policy"] == from {
-			out = append(out, ref("profile "+p.Metadata.Name, "config firewall.policy: "+from+" -> "+to))
+		if l := splitCSV(p.Spec.Config["firewall.policies"]); p.Metadata.Project == rc.project && slices.Contains(l, from) {
+			out = append(out, ref("profile "+p.Metadata.Name, "config firewall.policies: "+from+" -> "+to))
 			if apply {
-				p.Spec.Config["firewall.policy"] = to
+				p.Spec.Config["firewall.policies"] = strings.Join(replaceName(l, from, to), ",")
 			}
 		}
 	}
 	for _, k := range sortedNames(s.jails.items) {
 		j := s.jails.items[k]
-		if j.Metadata.Project == rc.project && j.Spec.Firewall.Policy == from {
-			out = append(out, ref(jailObj(j), "spec.firewall.policy: "+from+" -> "+to))
+		if j.Metadata.Project == rc.project && slices.Contains(j.Spec.Firewall.Policies, from) {
+			out = append(out, ref(jailObj(j), "spec.firewall.policies: "+from+" -> "+to))
 			if apply {
-				j.Spec.Firewall.Policy = to
+				j.Spec.Firewall.Policies = replaceName(j.Spec.Firewall.Policies, from, to)
 			}
 		}
 	}
@@ -386,5 +386,27 @@ func sortedNames[T any](m map[string]*T) []string {
 		out = append(out, k)
 	}
 	slices.Sort(out)
+	return out
+}
+
+// replaceName returns a copy of l with every from replaced by to.
+func replaceName(l []string, from, to string) []string {
+	out := slices.Clone(l)
+	for i := range out {
+		if out[i] == from {
+			out[i] = to
+		}
+	}
+	return out
+}
+
+// splitCSV splits the value of a list key of a profile on commas, without blanks.
+func splitCSV(v string) []string {
+	var out []string
+	for _, x := range strings.Split(v, ",") {
+		if x = strings.TrimSpace(x); x != "" {
+			out = append(out, x)
+		}
+	}
 	return out
 }

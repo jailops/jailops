@@ -385,11 +385,15 @@ interface's public key and what `wg show <if> dump` reports per peer.
   `wg.tools`) are typed; `wg` is not on the command allow-list. Every one that changes something needs the admin
   assertion.
 
-A jail's anchor holds, in this order: the project's mandatory policy, the jail's **managed access policy** when it has
-one, the jail's own policy, the isolation of projects and the defaults. The managed policy `app-<jail>` (`managed_by:
+A jail's anchor holds, in this order: the project's mandatory policies (a list), the jail's **managed access policy** when it has
+one, the jail's own policies (a list, each under its own heading with its own rule numbers), the isolation of projects and the defaults.
+**Deny wins over allow:** when any of these policies has an enabled deny rule, the anchor writes the deny rules of all the policies first and
+then the allow rules (each group in the order of the policies and of the rules, with the headings and rule numbers of the policies), so that,
+every rule being `quick`, the order of the policies does not decide between an allow and a deny; the same two groups stand on the gateway
+interface. A rule with `disabled` is a comment line of the anchor (`# rule N (disabled): name`), not a rule. The managed policy `app-<jail>` (`managed_by:
 app-access`) is written only by `jailops app allow` and `deny` (8.7, apps.md "Who may connect"); the firewall routes
 refuse to change or delete it. An app's jail gets it, denying by default, when the installation ends: the default of the
-anchor is then deny whatever the jail's own policy says, and each grant is a `quick` allow rule for one source. The policy says
+anchor is then deny whatever the jail's own policies say, and each grant is a `quick` allow rule for one source. The policy says
 `default_in: deny` and `default_out: allow`; a source is always in the app's own project, or an address.
 
 ## 6. Jails, Linuxulator and Alpine
@@ -555,7 +559,7 @@ they are kept apart by mechanisms that exist in the system:
 
 | Layer | Mechanism |
 |---|---|
-| Network | A network belongs to one project. Its jails never exchange frames: every jail port is a private bridge member and every flow goes through the host (design 18.13). Each jail's anchor binds its addresses (anti-spoofing), and the host pins the jail's MAC address, ARP and neighbor entries, so a jail cannot take another's address. A project's mandatory policy is rendered before the jail's own. Cross-project traffic is denied unless a policy allows it. |
+| Network | A network belongs to one project. Its jails never exchange frames: every jail port is a private bridge member and every flow goes through the host (design 18.13). Each jail's anchor binds its addresses (anti-spoofing), and the host pins the jail's MAC address, ARP and neighbor entries, so a jail cannot take another's address. A project's mandatory policies are rendered before the jail's own. Cross-project traffic is denied unless a policy allows it. |
 | Storage | Each project has its own dataset under the storage root with a quota; each jail a quota and optionally a reservation. ZFS delegation (`zfs_delegation`) is never granted to project users unless a global admin allows it per jail, and the helper does not hand datasets over yet (section 4.6). |
 | Compute | Per-jail limits through jail parameters and rctl; project quotas are checked before creation. What a jail uses is measured when asked (`GET /api/v1/jails/<n>/usage`, `jailops jail info`): processes, CPU time and memory from racct through `rctl -u jail:<key>` (a read-only form on the helper's command allow-list, for managed jails only; "racct is off" when `kern.racct.enable` is not 1), and the space of its datasets from ZFS `used`/`referenced`. Nothing of it is stored, and the jail list does not carry it. |
 | Identity | Section 8.2. |

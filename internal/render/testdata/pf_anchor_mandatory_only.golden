@@ -18,6 +18,7 @@ pass out quick on jo0123456789a0a inet6 proto icmp6 from any to { 2001:db8:1::10
 pass out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-dc0ca9dcce9f"
 block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
 block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir
+# deny rules of all policies: they win over every allow rule, whatever the order of the policies
 # project policy baseline
 # rule 1: no telnet
 block drop out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 23
@@ -25,13 +26,14 @@ block drop out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::
 # rule 2: no smtp
 block drop in quick on jo0123456789a0a inet proto tcp from 10.20.0.10 to any port 25
 block drop in quick on jo0123456789a0a inet6 proto tcp from 2001:db8:1::100 to any port 25
+# allow rules of the policies, in the order of the policies
+# project policy baseline
 # rule 3: mgmt
 pass out quick on jo0123456789a0a inet proto tcp from <s_office> to 10.20.0.10 port 22 label "jo-201ccbcec172"
 pass out quick on jo0123456789a0a inet6 proto tcp from <s_office> to 2001:db8:1::100 port 22 label "jo-78ffaa29d643"
 # rule 4: fwd
 pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 22 label "jo-904d7036ed52"
 pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 22 label "jo-3759b125f2ce"
-# jail policy
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
 block drop out quick on jo0123456789a0a all
 pass in quick on jo0123456789a0a all label "jo-c69cb0b60680"

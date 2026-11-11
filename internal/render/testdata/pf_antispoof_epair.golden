@@ -13,6 +13,7 @@ pass out quick on { joe1a, joe2a } inet6 proto icmp6 from any to { fd00::10, fe8
 pass out quick on { joe1a, joe2a } inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-cfe0a26510b5"
 block drop out quick on { joe1a, joe2a } from any to ! <jail_addrs>
 block drop out quick on { joe1a, joe2a } inet proto icmp from any to any icmp-type redir
+# policy web
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
 block drop out quick on { joe1a, joe2a } all
 pass in quick on { joe1a, joe2a } all label "jo-dc8f62e899a8"

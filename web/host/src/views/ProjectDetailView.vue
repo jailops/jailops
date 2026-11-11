@@ -91,7 +91,7 @@ const condText = (c: Condition) => s.projects.hostCondition(codeText(c.reason) |
         </div>
 
         <section class="panel"><header><h2>{{ s.projects.firewall }}</h2></header>
-          <div class="body"><span v-if="p.spec.firewall" class="mono" data-test="mandatory-policy">{{ p.spec.firewall }}</span><span v-else class="faint">-</span>
+          <div class="body"><span v-if="p.spec.firewall_policies?.length" class="mono" data-test="mandatory-policy">{{ p.spec.firewall_policies.join(', ') }}</span><span v-else class="faint">-</span>
             <p class="muted" style="margin-top: 6px">{{ s.projects.images }}: <span class="mono">{{ p.spec.images?.join(', ') || s.projects.allImages }}</span></p></div>
         </section>
 

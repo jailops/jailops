@@ -592,7 +592,7 @@ func (s *Service) RenamePolicy(ctx context.Context, name string, o RenameOptions
 		// a host profile names a policy of whichever project its jail is in: one project's rename cannot rewrite it
 		if hp, err := s.profKind.p(api.HostProfileProject).list(); err == nil {
 			for _, x := range hp {
-				if x.Spec.Config["firewall.policy"] == name {
+				if slices.Contains(configList(x.Spec.Config["firewall.policies"]), name) {
 					return nil, api.Errorf(api.CodeConflict, "host profile %q names firewall policy %q for the jails of every project", x.Meta.Name, name).
 						WithHint("a global administrator changes the host profile; then rename the policy")
 				}
@@ -606,40 +606,42 @@ func (s *Service) RenamePolicy(ctx context.Context, name string, o RenameOptions
 			return nil, err
 		}
 		p.add(st)
-		if pr.Spec.Firewall == name {
+		if slices.Contains(pr.Spec.FirewallPolicies, name) {
 			if !ActorFrom(ctx).Global {
-				return nil, api.Errorf(api.CodeForbidden, "firewall policy %q is the mandatory policy of project %q; a global administrator renames it", name, proj)
+				return nil, api.Errorf(api.CodeForbidden, "firewall policy %q is a mandatory policy of project %q; a global administrator renames it", name, proj)
 			}
 			if err := refuseManagedRef("project", proj, pr.Meta.ManagedBy); err != nil {
 				return nil, err
 			}
 			spec := pr.Spec
-			spec.Firewall = to
+			spec.FirewallPolicies = replaceAll(spec.FirewallPolicies, name, to)
 			po, err := s.projKind.getObj(proj)
 			if err != nil {
 				return nil, internal(err)
 			}
 			st, err := stateStep(api.KindProject, po, proj, "", spec,
-				api.RenameChange{Kind: api.RenameReference, Object: "project " + proj, Detail: "spec.firewall (mandatory policy): " + name + " -> " + to})
+				api.RenameChange{Kind: api.RenameReference, Object: "project " + proj, Detail: "spec.firewall_policies (mandatory policy): " + name + " -> " + to})
 			if err != nil {
 				return nil, err
 			}
 			p.add(st)
 		}
 		if err := s.rewriteProfilesIn(p, func(x string) bool { return x == proj }, func(k, v string) (string, bool) {
-			if k == "firewall.policy" && v == name {
-				return to, true
+			if k == "firewall.policies" {
+				if l := configList(v); slices.Contains(l, name) {
+					return strings.Join(replaceAll(l, name, to), ","), true
+				}
 			}
 			return v, false
 		}); err != nil {
 			return nil, err
 		}
 		if err := s.rewriteJails(ctx, p, func(x string) bool { return x == proj }, func(j *api.Jail) []string {
-			if j.Spec.Firewall.Policy != name {
+			if !slices.Contains(j.Spec.Firewall.Policies, name) {
 				return nil
 			}
-			j.Spec.Firewall.Policy = to
-			return []string{"spec.firewall.policy: " + name + " -> " + to}
+			j.Spec.Firewall.Policies = replaceAll(j.Spec.Firewall.Policies, name, to)
+			return []string{"spec.firewall.policies: " + name + " -> " + to}
 		}); err != nil {
 			return nil, err
 		}
@@ -723,4 +725,15 @@ func (s *Service) RenameProfile(ctx context.Context, name string, o RenameOption
 		return p, nil
 	}
 	return s.runRename(ctx, j, o.DryRun)
+}
+
+// configList splits the value of a list key of a profile, the way the key registry does: on commas, without blanks.
+func configList(v string) []string {
+	var out []string
+	for _, x := range strings.Split(v, ",") {
+		if x = strings.TrimSpace(x); x != "" {
+			out = append(out, x)
+		}
+	}
+	return out
 }

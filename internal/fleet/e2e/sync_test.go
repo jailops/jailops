@@ -266,7 +266,7 @@ spec:
     network:
       - network: internal
         ipv4: auto
-    firewall: {policy: web}
+    firewall: {policies: [web]}
     resources: {memory: 1G, cpu: 1}
   after:
     - action: snapshot
@@ -316,7 +316,7 @@ spec:
   image: freebsd-15@stable
   storage: default
   network: [{network: internal}]
-  firewall: {policy: web}
+  firewall: {policies: [web]}
 `)
 	mustOK(t, run(t, e, "validate"))
 	mustFail(t, run(t, e, "sync", "--apply", "--host", "web1"), "is not running")
@@ -344,7 +344,7 @@ spec:
   image: nothing@stable
   network:
     - network: nowhere
-  firewall: {policy: missing}
+  firewall: {policies: [missing]}
   env: {TOKEN: "secret:absent"}
 `)
 	r := mustFail(t, run(t, e, "validate"), "")
@@ -388,7 +388,7 @@ func TestAdoptAndClaim(t *testing.T) {
 	srv.SeedJail(api.Jail{
 		Metadata: api.ObjectMeta{Name: "old", Project: fleettest.Project, Labels: map[string]string{"tier": "web"}},
 		Spec: api.JailSpec{Image: "freebsd-15@stable", Hostname: "old", Layout: api.LayoutThin, Storage: "default",
-			Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.9.0.12"}}, Firewall: api.FirewallAttach{Policy: "base"}},
+			Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.9.0.12"}}, Firewall: api.FirewallAttach{Policies: []string{"base"}}},
 	})
 	// A foreign object is skipped.
 	srv.SeedNetwork(api.Network{Metadata: api.ObjectMeta{Name: "theirs", ManagedBy: "sync:other"}, Spec: api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.8.0.0/24", Gateway: "10.8.0.1", Range: "10.8.0.10-10.8.0.20"}}})

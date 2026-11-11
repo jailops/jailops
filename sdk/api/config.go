@@ -429,8 +429,8 @@ func buildRegistry() []ckey {
 			return cfgErr("updates.reboot", "updates.reboot: %q must be manual or auto", v)
 		},
 		unset: func(s *JailSpec, _ string) { s.Update.Reboot = "" }})
-	str("firewall.policy", "firewall.policy", "Firewall policy of the jail's anchor.", "web", false, true,
-		func(s *JailSpec) *string { return &s.Firewall.Policy }, func(v string) error { return nameCheck(v) })
+	list("firewall.policies", "firewall.policies", "Firewall policies of the jail's anchor, in the order they are rendered after the project's.", "postgres,ssh-office", false, true,
+		func(s *JailSpec) *[]string { return &s.Firewall.Policies }, nameCheck)
 	list("firewall.tags", "firewall.tags", "Tags that firewall rules refer to.", "web,public", false, true,
 		func(s *JailSpec) *[]string { return &s.Firewall.Tags }, nameCheck)
 	list("packages", "packages", "Cannot be set when a jail is created yet: a create that sets it is refused. Install packages with the provisioning packages step.", "nginx,curl", true, true, func(s *JailSpec) *[]string { return &s.Packages }, nil)

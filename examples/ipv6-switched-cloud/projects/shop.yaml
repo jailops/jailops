@@ -11,5 +11,5 @@ spec:
     - {storage: default, quota: 200G}
   quotas: {jails: 10, memory: 16G, addresses: 50}
   # The floor: rendered before every jail's own policy. A jail can add rules but cannot weaken this.
-  firewall: floor
+  firewall_policies: [floor]
   images: [freebsd-15]

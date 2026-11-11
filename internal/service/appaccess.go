@@ -170,23 +170,9 @@ func (s *Service) resolveSource(ctx context.Context, t appTarget, src apps.Sourc
 	out := resolvedSource{canonical: src.Canonical(), kind: src.Kind}
 	switch src.Kind {
 	case api.AccessSourceHost:
-		for _, na := range s.effective(t.jail).Network {
-			n, err := s.netKind.get(na.Network)
-			if err != nil {
-				continue
-			}
-			if n.Spec.IPv4 != nil {
-				if a, ok := parseAddr(n.Spec.IPv4.Gateway); ok {
-					out.from = append(out.from, a.String())
-					out.prefixes = append(out.prefixes, apps.HostPrefix(a))
-				}
-			}
-			if v6 := n.Spec.IPv6; v6 != nil && v6.Mode == api.IPv6Routed {
-				if a, ok := parseAddr(v6.Gateway); ok && !a.IsLinkLocalUnicast() {
-					out.from = append(out.from, a.String())
-					out.prefixes = append(out.prefixes, apps.HostPrefix(a))
-				}
-			}
+		for _, a := range gatewayAddrs(s, &t.jail) {
+			out.from = append(out.from, a.String())
+			out.prefixes = append(out.prefixes, apps.HostPrefix(a))
 		}
 		if len(out.from) == 0 {
 			return out, invalid("the networks of jail %q have no gateway address the host connects from", t.jail.Metadata.Name)

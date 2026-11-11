@@ -19,7 +19,7 @@ func TestPolicyStoredWithoutDefaultsIsRefusedAtRenderAndByDoctor(t *testing.T) {
 		t.Fatal(err)
 	}
 	j := dtest.WebJail("web")
-	j.Spec.Firewall.Policy = "tight"
+	j.Spec.Firewall.Policies = []string{"tight"}
 	op, err := s.CreateJail(ctx, j)
 	if err != nil {
 		t.Fatal(err)
@@ -83,13 +83,13 @@ func TestJailMayNotNameAManagedPolicyOrTheProjectFloor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pr.Spec.Firewall = "floor"
+	pr.Spec.FirewallPolicies = []string{"floor"}
 	if _, err := s.UpdateProject(as(globalAdmin, ""), dtest.SeedProject, pr, pr.Metadata.Generation); err != nil {
 		t.Fatal(err)
 	}
-	for name, want := range map[string]string{"app-db": "is managed by " + api.AppAccessManagedBy, "floor": "is the mandatory policy of project"} {
+	for name, want := range map[string]string{"app-db": "is managed by " + api.AppAccessManagedBy, "floor": "is a mandatory policy of project"} {
 		j := dtest.WebJail("web")
-		j.Spec.Firewall.Policy = name
+		j.Spec.Firewall.Policies = []string{name}
 		_, err := s.CreateJail(ctx, j)
 		wantCode(t, err, api.CodeInvalid)
 		if !strings.Contains(err.Error(), want) {

@@ -22,6 +22,7 @@ pass out quick on jo0123456789a0a inet6 proto icmp6 from any to { 2001:db8:1::10
 pass out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-811b0acb1b20"
 block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
 block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir
+# deny rules of all policies: they win over every allow rule, whatever the order of the policies
 # project policy baseline
 # rule 1: no telnet
 block drop out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 23
@@ -29,32 +30,35 @@ block drop out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::
 # rule 2: no smtp
 block drop in quick on jo0123456789a0a inet proto tcp from 10.20.0.10 to any port 25
 block drop in quick on jo0123456789a0a inet6 proto tcp from 2001:db8:1::100 to any port 25
-# rule 3: mgmt
-pass out quick on jo0123456789a0a inet proto tcp from <s_office> to 10.20.0.10 port 22 label "jo-617777d929b9"
-pass out quick on jo0123456789a0a inet6 proto tcp from <s_office> to 2001:db8:1::100 port 22 label "jo-ce16ac02c6c9"
-# rule 4: fwd
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 22 label "jo-afba935e0692"
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 22 label "jo-d0d56a814c53"
-# jail policy
-# rule 1: ssh from office
-pass out log quick on jo0123456789a0a inet proto tcp from { <s_office>, <t_admin> } to 10.20.0.10 port 22 label "jo-ddcf418aa705"
-pass out log quick on jo0123456789a0a inet6 proto tcp from { <s_office>, <t_admin> } to 2001:db8:1::100 port 22 label "jo-46649035d90e"
-# rule 2: web
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port { 80, 8000:8100 } label "jo-ed895621039a"
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port { 80, 8000:8100 } label "jo-f3ee513a086d"
-# rule 3: ping
-pass out quick on jo0123456789a0a inet proto icmp from any to 10.20.0.10 label "jo-4061d2c9c6bf"
-# rule 4: ping6
-pass out quick on jo0123456789a0a inet6 proto icmp6 from any to 2001:db8:1::100 label "jo-1b89ed4f3a27"
-# rule 5: forward
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80 label "jo-1ca7b29ded01"
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-40901de10ff4"
+# policy web
 # rule 6: no smtp
 block drop in quick on jo0123456789a0a inet proto tcp from 10.20.0.10 to any port 25
 block drop in quick on jo0123456789a0a inet6 proto tcp from 2001:db8:1::100 to any port 25
+# allow rules of the policies, in the order of the policies
+# project policy baseline
+# rule 3: mgmt
+pass out quick on jo0123456789a0a inet proto tcp from <s_office> to 10.20.0.10 port 22 label "jo-bcdfb89a9272"
+pass out quick on jo0123456789a0a inet6 proto tcp from <s_office> to 2001:db8:1::100 port 22 label "jo-fc1747505e7b"
+# rule 4: fwd
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 22 label "jo-b2e11b0891b1"
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 22 label "jo-1db5b2823874"
+# policy web
+# rule 1: ssh from office
+pass out log quick on jo0123456789a0a inet proto tcp from { <s_office>, <t_admin> } to 10.20.0.10 port 22 label "jo-8e124974c34c"
+pass out log quick on jo0123456789a0a inet6 proto tcp from { <s_office>, <t_admin> } to 2001:db8:1::100 port 22 label "jo-d4f85d4af886"
+# rule 2: web
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port { 80, 8000:8100 } label "jo-b079888657ce"
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port { 80, 8000:8100 } label "jo-3ca202b5d4d3"
+# rule 3: ping
+pass out quick on jo0123456789a0a inet proto icmp from any to 10.20.0.10 label "jo-2d36951694d3"
+# rule 4: ping6
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to 2001:db8:1::100 label "jo-068322a920a3"
+# rule 5: forward
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80 label "jo-817377dde930"
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-1c7e47fba5d9"
 # rule 7: dns
-pass in quick on jo0123456789a0a inet proto udp from 10.20.0.10 to 9.9.9.9 port 53 label "jo-0521f05c01b8"
-pass in quick on jo0123456789a0a inet6 proto udp from 2001:db8:1::100 to 2620:fe::fe port 53 label "jo-06336883c304"
+pass in quick on jo0123456789a0a inet proto udp from 10.20.0.10 to 9.9.9.9 port 53 label "jo-09e487119916"
+pass in quick on jo0123456789a0a inet6 proto udp from 2001:db8:1::100 to 2620:fe::fe port 53 label "jo-be7273040736"
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
 block drop out quick on jo0123456789a0a all
-pass in quick on jo0123456789a0a all label "jo-87c32f2b783c"
+pass in quick on jo0123456789a0a all label "jo-5d72af26a3be"

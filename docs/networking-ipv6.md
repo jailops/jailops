@@ -198,7 +198,7 @@ uplink, MLD-snooping switches, removing and recreating the uplink while the prox
 ## Firewall
 
 PF only, **one anchor per jail** (`jailops/<project>/<jail>`), one per project (`jailops/<project>`, with the project's
-mandatory policy and a table of the other projects' subnets) and one per network (`jailops/net.<network>`, with the
+mandatory policies and a table of the other projects' subnets) and one per network (`jailops/net.<network>`, with the
 gateway's pass and the NAT). You add three lines to `pf.conf` once ([install.md](install.md)); JailOps never owns that
 file. A ruleset is rendered, checked with `pfctl -n`, loaded in one operation and **read back**; a load that did not take
 effect is reported as drift. When a rule is removed, the states that rule created are ended too, so a running connection
@@ -206,7 +206,7 @@ stops when its rule goes.
 
 - **Projects are closed to each other.** A jail without a policy still gets an anchor with isolation. Cross-project traffic is
   opened only by a rule you write, for example an address set shared by a `common` project on its own network.
-- **A project's mandatory policy is a floor:** a jail's policy can add rules but cannot weaken the project's defaults.
+- **A project's mandatory policies are a floor:** a jail's policies can add rules but cannot weaken the project's defaults.
 - **Per-jail anti-spoofing** binds a jail to its own addresses and its **own link-local address** (derived from the MAC
   JailOps sets, so the planner knows it; the whole of `fe80::/10` is allowed only when it cannot be derived), plus `::` for
   duplicate address detection only: a neighbour solicitation to a solicited-node group, nothing else. A jail that changes
@@ -259,7 +259,8 @@ stops when its rule goes.
   The jail's own anchor still decides what reaches the jail. (Verified on FreeBSD 15.1 amd64: a jail on a proxy-mode
   network listened on 8080 and `curl -6 http://[<jail address>]:8080/` from another host, across the internet, returned
   its answer; the rule was removed and the ruleset reloaded afterwards.)
-- A rule reads `ACTION DIRECTION [PROTO] [from ENDPOINT,..] [to ENDPOINT,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [comment TEXT]`.
+- A rule reads `ACTION DIRECTION [PROTO] [from ENDPOINT,..] [to ENDPOINT,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [disabled] [comment TEXT]`.
+  A rule belongs to the jail that has the policy: an inbound rule is always to the jail itself and an outbound rule always from it, so an inbound rule names only `from` and an outbound rule only `to` (`to` on an inbound rule and `from` on an outbound rule are refused).
   An endpoint is one of these, the same words wherever a firewall names a source or a destination:
 
   | Endpoint | Stands for | Where it is accepted |
@@ -277,9 +278,38 @@ stops when its rule goes.
   (`policy create` without `-f` needs `--default-in` and `--default-out`; a file without them is refused, and so is a
   policy stored without them: the jails that use it are not rendered again and `jailops doctor` fails `firewall.defaults`
   naming the policy). A jail without a policy is open apart from the isolation of projects, and `jailops jail info` says
-  so: `Firewall: open: no firewall policy`. A jail names a policy of its own in `firewall.policy`; it cannot name the
-  project's mandatory policy, which is rendered for every jail already, nor a policy that something else manages
-  (`app-JAIL`).
+  so: `Firewall: open: no firewall policy`; with policies it lists them in the order they are rendered, the project's marked `(project)` and the managed one `(managed by app-access)`. A jail names the policies of its own in `firewall.policies`, a list
+  (`jailops config set DB firewall.policies postgres,ssh-office`, or `--firewall-policy` more than once at `jailops create`); it cannot name a
+  mandatory policy of the project, which is rendered for every jail already, nor a policy that something else manages
+  (`app-JAIL`), and it names none twice.
+
+  **Several policies.** A project has a list of mandatory policies (`jailops project set PROJECT --firewall-policy default
+  --firewall-policy monitoring`, `firewall_policies` in a file; an empty value clears the list) and a jail has a list of its
+  own. The anchor of a jail holds them in this order: the project's policies in the order of their list, the managed policy
+  `app-JAIL` when the jail has one, then the jail's own policies in the order of theirs. Each policy is a section of the anchor with
+  its own heading (`# project policy NAME` or `# policy NAME`, then its comment) and its own rule numbers, so `policy show NAME`
+  and the anchor read the same. The defaults are the strictest of all the policies in play: `deny` wins over `allow` in each
+  direction, and a policy of a jail can open ports but never turn a default deny of the project into allow. A policy that a list
+  names is not deleted (the refusal names who uses it) and is renamed in every list. The usual shape: the project's mandatory
+  policy `default` (deny inbound, ping allowed) for every jail, and on the PostgreSQL jail `firewall.policies: [postgres]`,
+  where `postgres` allows the address set `postgresql_allow` on port 5432; a policy such as `ssh-office` is a block that
+  many jails name.
+
+  **Deny wins over allow, and the order of the policies does not matter.** When any policy of a jail has an enabled deny
+  rule, the anchor holds the deny rules of all the policies first (under the line `# deny rules of all policies: they win
+  over every allow rule`), then the allow rules of the policies (`# allow rules of the policies, in the order of the
+  policies`). Each group keeps the order of the policies and of the rules, and each rule keeps its heading and its number, so
+  rule 3 of `postgres` is still rule 3 of `postgres` in the anchor; a policy that has rules of both kinds appears in both
+  groups. Every rule is `quick`, so a connection that a deny rule matches is blocked whichever policy comes first, and an
+  allow rule decides only where no deny rule matches. The same two groups stand on the gateway interface for the rules
+  for traffic into the jail. An anchor without a deny rule is written policy by policy. A raw PF fragment stays after the
+  allow rules of its policy.
+
+  **A rule can be switched off without deleting it.** `disabled` (`--rule "allow in tcp port 22 disabled comment ssh, off
+  until the audit"`, `disabled: true` in a file, a checkbox in the console) keeps the rule in the policy: it is validated
+  like any other, it keeps its number, `policy show` marks it, and the anchor has it as a comment line (`# rule 2
+  (disabled): name`, then its comment) so a reviewer sees what is off. It is not loaded: a disabled allow rule lets nothing
+  through and a disabled deny rule stops nothing, and a disabled deny rule does not group the anchor.
 
   **Projects are boundaries.** Another project is treated exactly like an external host: only addresses and address sets
   cross it, never a jail reference. Do two things need to talk to each other as one system? Then they belong in the same
@@ -317,9 +347,46 @@ stops when its rule goes.
 
   `--comment` of `address-set create` goes with a single `--address`; an IPv4 and an IPv6 network of the same office are two
   entries, each with its own comment, so that each says what it is. The keyword `comment` ends a `--rule` and takes the rest of it. `address-set show` and `policy show` list the comments in a table, the rendered anchor of a jail carries them as
-  comment lines (`# set git_allow: 198.51.100.7 the office`, `# rule 1: name` and `#   why`, `# policy: ...`), and the
+  comment lines (`# set git_allow: 198.51.100.7 the office`, `# policy NAME` and `#   what it is for`, `# rule 1: name` and `#   why`), and the
   console has a comment field on a set, a policy and every rule, and takes the comment of a member at the end of its line
   (`198.51.100.0/24  # the office`).
+
+### Would it pass?
+
+`jailops firewall test` says whether a new connection would pass the firewall, and which rule decides at each anchor it
+meets. It walks the anchors JailOps renders and loads (`render.BuildAnchor`: the rules in the order they are loaded, each
+with what it matches and where it comes from), not a second copy of the policies, so the answer is about the rules as
+they are rendered.
+
+    jailops firewall test --from @web --to @db --port 5432
+    jailops firewall test --from @other --to @db --port 5432
+    jailops firewall test --from 192.0.2.7 --to @web --port 443 -o json
+
+An end is a jail of the project (`@web`), one address (the jail that has it, when there is one), or `host` (the host's
+address on the gateway of the other end's network); a set is not an end. What the source jail sends is judged on its own
+port (`in` on its epair); what reaches the destination jail leaves the host on the gateway interface of its network (`out`
+there), because every jail port is private and nothing goes from jail to jail on the bridge. Both hops must pass; each
+prints the decision (`policy postgres rule 1 "who may reach PostgreSQL"`, a project policy, the managed policy of an app,
+the isolation of projects, or the default of the anchor) and the rendered pf line. An address that belongs to no jail of
+the project, another project's jail included, is an external host: only the other end's anchor is evaluated.
+
+For the example above, with the project policy `default` (deny inbound, ping allowed) and `postgres` on the db jail
+(`allow in tcp from @postgresql_allow port 5432`, the set holding `@web`): `web` to `db` port 5432 passes, port 5433 is
+blocked by the default of the anchor, and `other` to `db` port 5432 is blocked too; ping from `other` passes by the
+project policy. The exit status is 0 pass, 1 block, 8 unknown. `icmp` and `icmp6` test an echo request unless
+`--icmp-type` names another type, and say so.
+
+**What it cannot answer, and says so** (`unknown`, or a line under "Not covered", never a guess): a raw PF fragment that
+sits before the decision (`unknown`, naming the policy); a packet that no rule of the anchor matches (the host's rules
+decide); the host's own `pf.conf` (the anchors hang under it and its rules are not evaluated); a connection that is
+already open (pf keeps its state; the answer is for a new one); NAT (the source address is the jail's own, as on its
+port); and the other jails' anchors on the same gateway interface (only the destination's is evaluated).
+When a deny rule decides, the hop lists under `skipped` the allow rules that also match and lost to it (a deny rule wins
+over every allow rule, whatever the order of the policies); a disabled rule that the packet would have met (by direction,
+protocol and port; its addresses are not resolved) is listed there too, as `disabled`. A reference to a
+deleted jail is an empty set that matches nobody; a jail whose name is longer than 29 characters has no `@name` set.
+`loaded_matches_rendered` in the JSON says whether the rule lines loaded in pf for each anchor are the rendered ones
+(`true`, `false`, or `unknown` when pf cannot be asked).
 
 Verified on FreeBSD 15.1 with real traffic: `scripts/ci-freebsd-pf.sh` (allow and deny, IPv4 and IPv6, between
 jails of one project and of different projects, from the host, with a rule changed under a running ping, with a restarted

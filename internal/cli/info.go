@@ -35,12 +35,13 @@ type jailInfo struct {
 	ProvisionedAt time.Time       `json:"provisioned_at,omitzero"`
 	Resources     infoResources   `json:"resources"`
 	Interfaces    []infoInterface `json:"interfaces"`
-	// FirewallPolicy is the policy the jail is rendered with; empty when it has none and is open.
-	FirewallPolicy string            `json:"firewall_policy,omitempty"`
-	Volumes        []api.VolumeMount `json:"volumes,omitempty"`
-	Snapshots      infoSnapshots     `json:"snapshots"`
-	Update         infoUpdate        `json:"update"`
-	Labels         map[string]string `json:"labels,omitempty"`
+	// FirewallPolicies are the policies the jail is rendered with, in the order they are rendered; empty when it has
+	// none and is open.
+	FirewallPolicies []infoPolicy      `json:"firewall_policies,omitempty"`
+	Volumes          []api.VolumeMount `json:"volumes,omitempty"`
+	Snapshots        infoSnapshots     `json:"snapshots"`
+	Update           infoUpdate        `json:"update"`
+	Labels           map[string]string `json:"labels,omitempty"`
 	// Problems are the conditions that are not True, and the drift.
 	Problems []string `json:"problems,omitempty"`
 }
@@ -134,6 +135,13 @@ as structured data.`,
 	}
 }
 
+// infoPolicy is a firewall policy of a jail; Source says where it comes from when it is not the jail's own: "project"
+// for a mandatory policy of the project, "managed by app-access" for the policy app access keeps.
+type infoPolicy struct {
+	Name   string `json:"name"`
+	Source string `json:"source,omitempty"`
+}
+
 // gatherJailInfo builds the report. The jail itself is already read; the
 // extras (snapshots, history, networks) are tried, and a failure is noted in
 // the report rather than ending the command.
@@ -209,11 +217,17 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 			info.Snapshots.Newest, info.Snapshots.NewestAt = snaps[n-1].Metadata.Name, snaps[n-1].Metadata.CreatedAt
 		}
 	}
-	info.FirewallPolicy = s.Firewall.Policy
-	if info.FirewallPolicy == "" { // an app's jail has the policy that app access keeps for it
-		if p, err := c.Firewall().Policies().Get(ctx, "app-"+m.Name); err == nil && p.Metadata.ManagedBy != "" {
-			info.FirewallPolicy = p.Metadata.Name + " (managed by " + p.Metadata.ManagedBy + ")"
+	if pr, err := c.Projects().Get(ctx, m.Project); err == nil {
+		for _, n := range pr.Spec.FirewallPolicies {
+			info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: n, Source: "project"})
 		}
+	}
+	// an app's jail has the policy that app access keeps for it
+	if p, err := c.Firewall().Policies().Get(ctx, "app-"+m.Name); err == nil && p.Metadata.ManagedBy != "" {
+		info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: p.Metadata.Name, Source: "managed by " + p.Metadata.ManagedBy})
+	}
+	for _, n := range s.Firewall.Policies {
+		info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: n})
 	}
 	hist, err := c.Jails().UpdateHistory(ctx, m.Name)
 	if err != nil {
@@ -322,10 +336,18 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		lim = []string{"none"}
 	}
 	kv("Limits", strings.Join(lim, ", "))
-	if info.FirewallPolicy == "" {
+	if len(info.FirewallPolicies) == 0 {
 		kv("Firewall", "open: no firewall policy")
 	} else {
-		kv("Firewall", info.FirewallPolicy)
+		var ps []string
+		for _, p := range info.FirewallPolicies {
+			if p.Source != "" {
+				ps = append(ps, p.Name+" ("+p.Source+")")
+			} else {
+				ps = append(ps, p.Name)
+			}
+		}
+		kv("Firewall", strings.Join(ps, ", "))
 	}
 	switch u := info.Resources.Usage; {
 	case u == nil:

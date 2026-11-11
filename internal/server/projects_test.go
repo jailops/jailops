@@ -419,9 +419,9 @@ func TestMandatoryFirewallPolicyComesFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The mandatory policy must exist in the project.
-	_, err := e.Admin.Projects().Patch(c, "alpha", map[string]any{"spec": map[string]any{"firewall": "missing"}}, "")
+	_, err := e.Admin.Projects().Patch(c, "alpha", map[string]any{"spec": map[string]any{"firewall_policies": []string{"missing"}}}, "")
 	wantCode(t, err, api.CodeNotFound)
-	if _, err := e.Admin.Projects().Patch(c, "alpha", map[string]any{"spec": map[string]any{"firewall": "corp"}}, ""); err != nil {
+	if _, err := e.Admin.Projects().Patch(c, "alpha", map[string]any{"spec": map[string]any{"firewall_policies": []string{"corp"}}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := alpha.Firewall().Policies().Create(c, pol("own", api.FirewallRule{Name: "own-allow-web", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80"}})); err != nil {
@@ -434,13 +434,13 @@ func TestMandatoryFirewallPolicyComesFirst(t *testing.T) {
 	_, err = alpha.Firewall().Policies().Patch(c, "corp", map[string]any{"spec": map[string]any{"default_in": "allow"}}, "")
 	wantCode(t, err, api.CodeForbidden)
 	wantCode(t, alpha.Firewall().Policies().Delete(c, "corp"), api.CodeForbidden)
-	_, err = alpha.Projects().Patch(c, "alpha", map[string]any{"spec": map[string]any{"firewall": ""}}, "")
+	_, err = alpha.Projects().Patch(c, "alpha", map[string]any{"spec": map[string]any{"firewall_policies": []string{}}}, "")
 	wantCode(t, err, api.CodeForbidden)
 	// Even the global admin cannot delete it while the project names it.
 	wantCode(t, admin.Firewall().Policies().Delete(c, "corp"), api.CodeBusy)
 
 	sp := webSpec()
-	sp.Firewall.Policy = "own"
+	sp.Firewall.Policies = []string{"own"}
 	op, err := alpha.Jails().Create(c, sdk.NewJail("web", sp))
 	if err != nil {
 		t.Fatal(err)
@@ -477,6 +477,87 @@ func TestMandatoryFirewallPolicyComesFirst(t *testing.T) {
 	if parent, _ := e.PF.Read(c, "jailops/alpha"); !strings.Contains(parent, `anchor "*"`) {
 		t.Fatalf("parent anchor: %q", parent)
 	}
+}
+
+// A project and a jail can each have several policies. The anchor holds the project's in their order, then the jail's in
+// theirs, each under its own heading with its own rule numbers; the strictest default of them all applies, and a jail
+// without any policy is open.
+func TestSeveralPoliciesOfAJailAndAProject(t *testing.T) {
+	e, alpha, _ := twoProjects(t)
+	c := ctxT(t)
+	admin := e.Admin.Project("alpha")
+	pol := func(name, in, out string, rules ...api.FirewallRule) {
+		t.Helper()
+		if _, err := admin.Firewall().Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.FirewallPolicySpec{DefaultIn: in, DefaultOut: out, Rules: rules}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	allow := func(name, port string) api.FirewallRule {
+		return api.FirewallRule{Name: name, Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{port}}
+	}
+	pol("corp", "deny", "allow", allow("corp-ssh", "22"))
+	pol("mon", "deny", "allow", allow("mon-metrics", "9100"))
+	pol("pg", "allow", "allow", allow("pg-5432", "5432"), allow("pg-5433", "5433"))
+	pol("closed-out", "allow", "deny", allow("office-22", "22"))
+	if _, err := e.Admin.Projects().Patch(c, "alpha", map[string]any{"spec": map[string]any{"firewall_policies": []string{"corp", "mon"}}}, ""); err != nil {
+		t.Fatal(err)
+	}
+	sp := webSpec()
+	sp.Firewall.Policies = []string{"pg", "closed-out"}
+	op, err := alpha.Jails().Create(c, sdk.NewJail("web", sp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := op.Wait(c); err != nil {
+		t.Fatal(err)
+	}
+	so, _ := alpha.Jails().Start(c, "web")
+	if _, err := so.Wait(c); err != nil {
+		t.Fatalf("%v\n%s", err, e.Log())
+	}
+	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_web.conf")
+	last := -1
+	for _, m := range []string{"# project policy corp", "# rule 1: corp-ssh", "# project policy mon", "# rule 1: mon-metrics",
+		"# policy pg", "# rule 1: pg-5432", "# rule 2: pg-5433", "# policy closed-out", "# rule 1: office-22", "# defaults"} {
+		i := strings.Index(rs, m)
+		if i < 0 || i < last {
+			t.Fatalf("%q is missing or out of order:\n%s", m, rs)
+		}
+		last = i
+	}
+	// strictest wins: deny inbound from corp, deny outbound from closed-out
+	for _, want := range []string{"block drop out quick on", "block drop in quick on"} {
+		found := false
+		for _, ln := range strings.Split(rs[strings.Index(rs, "# defaults"):], "\n") {
+			if strings.HasPrefix(ln, want) && strings.Contains(ln, " all") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("the defaults lack %q:\n%s", want, rs)
+		}
+	}
+	// a jail that names nothing gets the project's policies, and their defaults
+	createJail(t, alpha, "bare")
+	bo, _ := alpha.Jails().Start(c, "bare")
+	if _, err := bo.Wait(c); err != nil {
+		t.Fatal(err)
+	}
+	bare := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_bare.conf")
+	if !strings.Contains(bare, "# project policy corp") || !strings.Contains(bare, "# project policy mon") || strings.Contains(bare, "# policy pg") {
+		t.Fatalf("a jail without policies of its own:\n%s", bare)
+	}
+	// the policies a list names are not deleted, and a list does not name one twice or one that is not there
+	wantCode(t, admin.Firewall().Policies().Delete(c, "pg"), api.CodeBusy)
+	wantCode(t, admin.Firewall().Policies().Delete(c, "mon"), api.CodeBusy)
+	dup := webSpec()
+	dup.Firewall.Policies = []string{"pg", "pg"}
+	_, err = alpha.Jails().Create(c, sdk.NewJail("dup", dup))
+	wantCode(t, err, api.CodeInvalid)
+	missing := webSpec()
+	missing.Firewall.Policies = []string{"ghost"}
+	_, err = alpha.Jails().Create(c, sdk.NewJail("ghost", missing))
+	wantCode(t, err, api.CodeNotFound)
 }
 
 // --new-network: a dedicated bridge and subnet from the configured pool.
@@ -643,7 +724,10 @@ func TestTagsDoNotCrossProjects(t *testing.T) {
 	}
 	mk := func(cl *sdk.Client, name, policy string, tags ...string) api.Jail {
 		sp := webSpecIn(cl.ProjectName())
-		sp.Firewall = api.FirewallAttach{Policy: policy, Tags: tags}
+		sp.Firewall = api.FirewallAttach{Tags: tags}
+		if policy != "" {
+			sp.Firewall.Policies = []string{policy}
+		}
 		op, err := cl.Jails().Create(c, sdk.NewJail(name, sp))
 		if err != nil {
 			t.Fatal(err)

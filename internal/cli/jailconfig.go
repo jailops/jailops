@@ -39,6 +39,40 @@ func (a *app) completeJailThenKeys(d *kindDesc[api.Jail]) func(*cobra.Command, [
 	}
 }
 
+// completeJailKeysValues completes the arguments of config set: the jail, then keys, and after the key firewall.policies
+// (or in KEY=VALUE) the names of the firewall policies, of which the value is a comma separated list.
+func (a *app) completeJailKeysValues(d *kindDesc[api.Jail]) completer {
+	keys := a.completeJailThenKeys(d)
+	policies := a.completeNames(listNames(func(ctx context.Context, c *sdk.Client) iterNames {
+		return namesOf(c.Firewall().Policies().List(ctx), func(p api.FirewallPolicy) string { return p.Metadata.Name })
+	}))
+	const key = "firewall.policies"
+	return func(cmd *cobra.Command, args []string, p string) ([]string, cobra.ShellCompDirective) {
+		prefix, forKey := "", false
+		switch {
+		case len(args) >= 2 && args[len(args)-1] == key:
+			prefix, forKey = "", true
+		case strings.HasPrefix(p, key+"="):
+			prefix, forKey, p = key+"=", true, strings.TrimPrefix(p, key+"=")
+		}
+		if !forKey {
+			return keys(cmd, args, p)
+		}
+		head := ""
+		if i := strings.LastIndex(p, ","); i >= 0 {
+			head, p = p[:i+1], p[i+1:]
+		}
+		names, dir := policies(cmd, nil, p)
+		out := make([]string, 0, len(names))
+		for _, n := range names {
+			if strings.HasPrefix(n, p) {
+				out = append(out, prefix+head+n)
+			}
+		}
+		return out, dir | cobra.ShellCompDirectiveNoSpace
+	}
+}
+
 type configRow struct {
 	Key    string `json:"key"`
 	Value  string `json:"value"`
@@ -288,10 +322,14 @@ the jail; --restart restarts it (if it is running) once the change is stored.`
 the device. Restart handling is the same as for 'config set'.`
 		example = "jailops config unset nginx limits.cpu\njailops config unset nginx nic.eth1 --restart"
 	}
+	valuesOrKeys := a.completeJailThenKeys(d)
+	if !unset {
+		valuesOrKeys = a.completeJailKeysValues(d)
+	}
 	cmd := &cobra.Command{
 		Use: use, Short: short, Long: long, Example: example,
 		Args:              cobra.MinimumNArgs(2),
-		ValidArgsFunction: a.completeJailThenKeys(d),
+		ValidArgsFunction: valuesOrKeys,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return a.runConfigChange(cmd, args[0], args[1:], unset, restart)
 		},

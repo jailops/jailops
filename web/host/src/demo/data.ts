@@ -38,7 +38,7 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
       update: { strategy: 'rebase', window: 'sun 03:00', healthcheck: '/usr/local/bin/check' },
       resources: { cpu: 2, memory: '2G', disk: '20G', pids: 2048 },
       network: [{ network: net, ipv4: o.ipv4 ?? 'auto', ipv6: o.ipv6 ?? 'none', mtu: 1500 }],
-      firewall: { policy: o.policy ?? 'web-default', tags: ['managed'] },
+      firewall: { policies: [o.policy ?? 'web-default'], tags: ['managed'] },
       volumes: o.vols ?? [],
       boot: { autostart: o.autostart ?? true, priority: 10 },
       packages: ['nginx'], encrypted: false,

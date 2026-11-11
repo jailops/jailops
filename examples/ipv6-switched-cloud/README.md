@@ -17,7 +17,7 @@ the carved `/80`s.
 
 - **Proxy-mode networks** (`ipv6.mode: proxy`, gateway `fe80::1`, uplink `vtnet0`, a range inside the `/80`). A network
   belongs to one project; the two `/80`s cannot overlap (`validate` checks that offline).
-- **The floor**: both projects name `firewall: floor`, a policy with `default_in: deny`. A jail's own policy adds rules but cannot
+- **The floor**: both projects name `firewall_policies: [floor]`, a policy with `default_in: deny`. A jail's own policies add rules but cannot
   weaken it. Projects cannot reach each other: there is no rule that says they can.
 - **A firewall per jail**: `web` has `public-web` (HTTP and HTTPS from anywhere, SSH from `@admins`), `app` has
   `app-private` (port 8080 only from `@web_tier`).

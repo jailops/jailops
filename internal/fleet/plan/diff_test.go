@@ -91,7 +91,7 @@ func TestDangers(t *testing.T) {
 		{"set emptied", api.KindAddressSet, api.AddressSetSpec{Addresses: api.Entries("1.1.1.1")}, api.AddressSetSpec{}, true},
 		{"set grown", api.KindAddressSet, api.AddressSetSpec{}, api.AddressSetSpec{Addresses: api.Entries("1.1.1.1")}, false},
 		{"jail unencrypted", api.KindJail, api.JailSpec{Image: "i", Encrypted: true}, api.JailSpec{Image: "i"}, true},
-		{"jail policy detached", api.KindJail, api.JailSpec{Image: "i", Firewall: api.FirewallAttach{Policy: "p"}}, api.JailSpec{Image: "i"}, true},
+		{"jail policy detached", api.KindJail, api.JailSpec{Image: "i", Firewall: api.FirewallAttach{Policies: []string{"p"}}}, api.JailSpec{Image: "i"}, true},
 		{"jail new image", api.KindJail, api.JailSpec{Image: "a@stable"}, api.JailSpec{Image: "b@stable"}, true},
 		{"jail new alias", api.KindJail, api.JailSpec{Image: "a@stable"}, api.JailSpec{Image: "a#g3"}, false},
 		{"network renumbered", api.KindNetwork, api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.0.0.0/24"}}, api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.1.0.0/24"}}, true},

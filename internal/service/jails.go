@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -272,7 +273,8 @@ func (s *Service) checkJailRefs(project string, spec api.JailSpec) error {
 			return notFound("network", a.Network)
 		}
 	}
-	if p := spec.Firewall.Policy; p != "" {
+	pr, perr := s.projKind.get(project)
+	for _, p := range spec.Firewall.Policies {
 		o, err := s.polKind.p(project).get(p)
 		if err != nil {
 			if api.IsCode(err, api.CodeNotFound) {
@@ -284,9 +286,9 @@ func (s *Service) checkJailRefs(project string, spec api.JailSpec) error {
 			return invalid("firewall policy %q is managed by %s: it belongs to its own jail and is not a policy to attach", p, o.Meta.ManagedBy).
 				WithHint("write a policy of your own (jailops firewall policy create); app access keeps app-JAIL")
 		}
-		if pr, err := s.projKind.get(project); err == nil && pr.Spec.Firewall == p {
-			return invalid("firewall policy %q is the mandatory policy of project %s: it is rendered for every jail already", p, project).
-				WithHint("name a policy of the jail's own, which adds to it")
+		if perr == nil && slices.Contains(pr.Spec.FirewallPolicies, p) {
+			return invalid("firewall policy %q is a mandatory policy of project %s: it is rendered for every jail already", p, project).
+				WithHint("name policies of the jail's own, which add to it")
 		}
 	}
 	return nil

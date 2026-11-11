@@ -85,7 +85,7 @@ spec:
     range: "2001:db8:abcd:1:1::10-2001:db8:abcd:1:1::ffff"
 `)
 	e.Write("shared/backup-targets/vault.yaml", "apiVersion: jailops/v1\nkind: BackupTarget\nmetadata:\n  name: vault\nspec:\n  kind: node\n  address: https://backup.example.test:8444\n  fingerprint: aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899\n")
-	e.Write("projects/p.yaml", "apiVersion: jailops/v1\nkind: Project\nmetadata:\n  name: p\nspec:\n  hosts: [h1]\n  networks: [{network: proxy}, {network: routed}]\n  storage: [{storage: bulk, quota: 2T}]\n  quotas: {jails: 5, cpu: 8, memory: 16G, pids: 4000, addresses: 100}\n  firewall: floor\n  images: [base]\n")
+	e.Write("projects/p.yaml", "apiVersion: jailops/v1\nkind: Project\nmetadata:\n  name: p\nspec:\n  hosts: [h1]\n  networks: [{network: proxy}, {network: routed}]\n  storage: [{storage: bulk, quota: 2T}]\n  quotas: {jails: 5, cpu: 8, memory: 16G, pids: 4000, addresses: 100}\n  firewall_policies: [floor]\n  images: [base]\n")
 	e.Write("projects/p/firewall-policies/floor.yaml", "apiVersion: jailops/v1\nkind: FirewallPolicy\nmetadata:\n  name: floor\nspec:\n  default_in: deny\n  default_out: allow\n")
 	e.Write("projects/p/address-sets/admins.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: admins\nspec:\n  addresses: [{address: 203.0.113.7}, {address: \"2001:db8:ffff::/48\"}]\n")
 	e.Write("projects/p/backup-policies/nightly.yaml", "apiVersion: jailops/v1\nkind: BackupPolicy\nmetadata:\n  name: nightly\nspec:\n  selector: {backup: nightly}\n  targets: [vault]\n  schedule: \"17 2 * * *\"\n  retention: {daily: 7, weekly: 4, monthly: 6}\n  verify_schedule: \"30 4 * * 0\"\n  verify_mode: deep\n")

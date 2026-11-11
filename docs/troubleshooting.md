@@ -3,7 +3,8 @@
 Start with `jailops doctor`. It prints one line per check, `ok`, `warn`, `fail` or `unknown` (a check that cannot be made, for
 example without FreeBSD), with a hint on the next line when there is one. `jailops explain CODE` explains an error code and
 `jailops explain` lists them. Errors print as `code: message` with a hint; the exit codes are 0 ok, 1 failure, 2 usage or invalid,
-3 auth, 4 not found, 5 conflict, 6 unsupported, 7 internal.
+3 auth, 4 not found, 5 conflict, 6 unsupported, 7 internal. `jailops firewall test` adds one: 0 the connection would pass, 1 it would be
+blocked, 8 the test cannot say.
 
 ## `jailops doctor` checks
 
@@ -24,7 +25,7 @@ example without FreeBSD), with a hint on the next line when there is one. `jailo
 | `zfs.pool`, `zfs.pool.<storage>` | the pools are `ONLINE` | `zpool status <pool>` |
 | `zfs.compat` | pool features against `zfs.compat_file` | `fail`: replication to an older host would fail; JailOps never runs `zpool upgrade` |
 | `jail.volumes` | the volume datasets of the jails have `canmount=noauto` | `warn`: a volume made before that has `canmount=on` and is mounted at boot before the jail root it lies in; run the `zfs set canmount=noauto <dataset>` the hint lists |
-| `firewall.defaults` | every stored firewall policy says `default_in` and `default_out` | `fail` names each policy that lacks one: the jails that use it (every jail of the project, for the mandatory policy) keep the anchor they have and are not rendered again; `jailops firewall policy edit NAME` sets the field |
+| `firewall.defaults` | every stored firewall policy says `default_in` and `default_out` | `fail` names each policy that lacks one: the jails that use it (every jail of the project, for a mandatory policy) keep the anchor they have and are not rendered again; `jailops firewall policy edit NAME` sets the field |
 | `pf.anchors` | the three anchor lines are in the loaded ruleset | add them to `pf.conf` in the right order and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |

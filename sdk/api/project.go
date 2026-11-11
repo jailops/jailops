@@ -22,8 +22,8 @@ type ProjectSpec struct {
 	// Storage lists the storage the project may place jails and volumes on.
 	Storage []ProjectStorage `json:"storage,omitempty"`
 	Quotas  ProjectQuotas    `json:"quotas,omitempty"`
-	// Firewall names a mandatory policy rendered before a jail's own policy.
-	Firewall string `json:"firewall,omitempty"`
+	// FirewallPolicies are the project's mandatory policies, rendered in this order before a jail's own.
+	FirewallPolicies []string `json:"firewall_policies,omitempty"`
 	// Images is an allow-list of image names; empty allows every image.
 	Images []string `json:"images,omitempty"`
 	// NewNetwork is a create-time convenience: the server creates a dedicated

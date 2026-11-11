@@ -183,14 +183,14 @@ export function demoRename(db: RenameDb, kind: DemoRenameKind, from: string, to:
 
   if (kind === 'policy') {
     for (const j of jailsIn(project)) {
-      if (j.spec.firewall?.policy !== from) continue
-      changes.push(ref(jailObject(j), `spec.firewall.policy: ${from} -> ${to}`))
-      edits.push(() => { j.spec.firewall = { ...j.spec.firewall, policy: to } })
+      if (!j.spec.firewall?.policies?.includes(from)) continue
+      changes.push(ref(jailObject(j), `spec.firewall.policies: ${from} -> ${to}`))
+      edits.push(() => { j.spec.firewall = { ...j.spec.firewall, policies: (j.spec.firewall?.policies ?? []).map((n) => (n === from ? to : n)) } })
     }
     const p = db.projects.find((x) => x.metadata.name === project)
-    if (p?.spec.firewall === from) {
-      changes.push(ref(`project ${project}`, `spec.firewall (mandatory policy): ${from} -> ${to}`))
-      edits.push(() => { p.spec.firewall = to })
+    if (p?.spec.firewall_policies?.includes(from)) {
+      changes.push(ref(`project ${project}`, `spec.firewall_policies (mandatory policy): ${from} -> ${to}`))
+      edits.push(() => { p.spec.firewall_policies = (p.spec.firewall_policies ?? []).map((n) => (n === from ? to : n)) })
     }
   }
 

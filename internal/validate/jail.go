@@ -90,10 +90,8 @@ func JailSpec(name string, s api.JailSpec) error {
 	if err := devices(s); err != nil {
 		return err
 	}
-	if p := s.Firewall.Policy; p != "" {
-		if err := Name("firewall.policy", p); err != nil {
-			return err
-		}
+	if err := PolicyNames("firewall.policies", s.Firewall.Policies); err != nil {
+		return err
 	}
 	seenTag := map[string]bool{}
 	for i, t := range s.Firewall.Tags {

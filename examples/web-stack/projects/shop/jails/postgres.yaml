@@ -10,7 +10,7 @@ spec:
   storage: default
   network:
     - {name: eth0, network: shop, ipv4: "10.60.0.30"}
-  firewall: {policy: postgres}
+  firewall: {policies: [postgres]}
   resources: {cpu: 2, memory: 4G, disk: 100G}
   boot: {autostart: true, priority: 10}
   volumes:

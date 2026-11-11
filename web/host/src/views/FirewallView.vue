@@ -71,7 +71,7 @@ watch(() => l.data.value, (d) => {
 const dirty = computed(() => !!draft.value && JSON.stringify(clean(draft.value)) !== JSON.stringify(clean(JSON.parse(original.value))))
 const setNow = computed(() => setSpec(setText.value, setComment.value))
 const setDirty = computed(() => !!setDraft.value && JSON.stringify(setNow.value) !== setOriginal.value)
-const attached = computed(() => (l.data.value?.jails ?? []).filter((j) => j.spec.firewall?.policy === selected.value).map((j) => j.metadata.name))
+const attached = computed(() => (l.data.value?.jails ?? []).filter((j) => j.spec.firewall?.policies?.includes(selected.value)).map((j) => j.metadata.name))
 
 async function pick(n: string): Promise<void> {
   selected.value = n
@@ -232,7 +232,7 @@ const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
 // as @name name the new one.
 const renamingPolicy = ref(false)
 const renamingSet = ref(false)
-const mayRenamePolicy = computed(() => canRename('policy', undefined, { mandatory: currentProject.value?.spec.firewall === selected.value }))
+const mayRenamePolicy = computed(() => canRename('policy', undefined, { mandatory: currentProject.value?.spec.firewall_policies?.includes(selected.value) }))
 async function policyRenamed(to: string): Promise<void> {
   selected.value = to
   await l.reload()
@@ -323,6 +323,7 @@ function removePolicy(): void {
               <li v-for="(r, i) in rules" :key="i" class="rule" :data-rule="i">
                 <div class="rule-head row">
                   <span class="mono faint">{{ i + 1 }}</span>
+                  <span v-if="r.disabled" class="faint" data-test="rule-off">{{ s.firewall.disabled }}</span>
                   <input v-model="r.name" type="text" :placeholder="s.firewall.ruleName" :aria-label="s.firewall.ruleName + ' ' + (i + 1)" style="max-width: 200px" />
                   <input v-model="r.comment" class="grow" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.ruleComment" :aria-label="s.firewall.ruleComment + ' ' + (i + 1)" data-test="rule-comment" />
                   <button class="btn btn-sm btn-icon" type="button" :aria-label="s.firewall.moveUp" :disabled="i === 0" @click="move(i, -1)"><Icon name="arrowUp" /></button>
@@ -344,6 +345,7 @@ function removePolicy(): void {
                 <span v-for="f in (['from', 'to', 'action', 'direction', 'proto'] as const)" :key="f"><span v-if="err(i, f)" class="err" data-test="field-error">{{ f }}: {{ err(i, f) }}</span></span>
                 <div class="row">
                   <label class="check"><input v-model="r.log" type="checkbox" />{{ s.firewall.log }}</label>
+                  <label class="check" :title="s.firewall.disabledHint"><input v-model="r.disabled" type="checkbox" data-test="rule-disabled" />{{ s.firewall.disabled }}</label>
                   <label class="check"><input type="checkbox" :checked="!!r.redirect" @change="toggleRedirect(r, ($event.target as HTMLInputElement).checked)" />{{ s.firewall.redirect }}</label>
                   <template v-if="r.redirect">
                     <input v-model.number="r.redirect.host_port" type="number" min="1" max="65535" :aria-label="s.firewall.hostPort" style="width: 90px" />

@@ -142,6 +142,9 @@ func ruleText(r api.FirewallRule) string {
 	if r.Redirect != nil {
 		t = append(t, fmt.Sprintf("rdr %d:%d", r.Redirect.HostPort, r.Redirect.JailPort))
 	}
+	if r.Disabled {
+		t = append(t, "disabled")
+	}
 	return strings.Join(t, " ")
 }
 
@@ -315,7 +318,7 @@ func (a *app) showProject(p api.Project) error {
 	}
 	s.kv("Networks", orText(strings.Join(nets, ", "), "none: grant one with 'jailops network grant NETWORK --project "+p.Metadata.Name+"'"))
 	s.kv("Storage", orText(strings.Join(stor, ", "), "none: grant one with 'jailops project set "+p.Metadata.Name+" --storage NAME'"))
-	s.kv("Firewall", orText(p.Spec.Firewall, "none"))
+	s.kv("Firewall", orText(strings.Join(p.Spec.FirewallPolicies, ", "), "none"))
 	s.kv("Images", orText(strings.Join(p.Spec.Images, ", "), "any"))
 	s.kv("Age", age(a.env.Now(), p.Metadata.CreatedAt))
 	s.labels(p.Metadata)

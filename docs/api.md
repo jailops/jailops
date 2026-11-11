@@ -21,6 +21,8 @@ with the join `token` and the `config` file: secrets, returned once, never store
 Reads need the operator role and never carry a private or preshared key; changes need a global admin. SDK:
 `c.WireGuard()`. The extension `interface_descriptions` says the host describes its interfaces (`net.descriptions`).
 
+**Firewall test** ([networking-ipv6.md](networking-ipv6.md#would-it-pass)): `POST /api/v1/firewall/test` (extension `firewall_test`, operator in the project) takes `FirewallTestRequest` (`from`, `to`, `proto`, `port`, `icmp_type`, `family`) and answers `FirewallTestResult`: `verdict` (`pass`, `block`, `unknown`), `cases` (one per address pair: the `hops` with the anchor, interface, direction, `verdict`, `decided_by`, `skipped` (the allow rules a deny rule won over, and the disabled rules the packet would have met) and `loaded_matches_rendered`) and `caveats`. It changes nothing.
+
 **Boot plan** ([operations.md](operations.md#start-at-boot)): `GET /api/v1/boot` (extension `boot_plan`, readonly) answers `BootPlan`:
 what the daemon starts after a boot of the host, in order (`order`: `position`, `project`, `jail`, `priority`, `depends`,
 `reason` `autostart` or `dependency of NAME`, `running`), and the jails it does not start with the reason (`not_started`:
