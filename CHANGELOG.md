@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.6 - 2026-11-11
+
 - **Breaking: deny wins over allow, whatever the order of the policies.** The anchor of a jail with an enabled deny rule holds
   the deny rules of all its policies first (`# deny rules of all policies: they win over every allow rule`), then the allow
   rules of the policies, each group in the order of the policies and the rules, with the headings and the rule numbers of the
