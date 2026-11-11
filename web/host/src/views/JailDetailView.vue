@@ -234,7 +234,7 @@ const attentionItems = computed(() => {
 
         <Callout v-for="c in applyFailed" :key="c.type" tone="danger" data-test="apply-failed">
           <p><strong>{{ s.jail.applyFailed }}</strong>: <span class="mono">{{ c.message }}</span></p>
-          <p v-if="pfProblem(c.message) && jail.spec.firewall?.policy">{{ s.jail.applyFailedPf(jail.spec.firewall.policy) }} <router-link to="/firewall" data-test="apply-next">{{ s.jail.openPolicy(jail.spec.firewall.policy) }}</router-link></p>
+          <p v-if="pfProblem(c.message) && jail.spec.firewall?.policies?.length">{{ s.jail.applyFailedPf(jail.spec.firewall.policies.join(', ')) }} <router-link to="/firewall" data-test="apply-next">{{ s.jail.openPolicy(jail.spec.firewall.policies[0]) }}</router-link></p>
           <p v-else>{{ s.jail.applyFailedOther }} <router-link to="/doctor" data-test="apply-next">{{ s.jail.openDoctor }}</router-link></p>
           <p class="muted" style="margin: 0">{{ s.jail.noReconcile }}</p>
         </Callout>
@@ -336,9 +336,9 @@ const attentionItems = computed(() => {
           <section class="panel">
             <header><h2>{{ s.jail.firewall }}</h2></header>
             <div class="body">
-              <p v-if="!jail.spec.firewall?.policy" class="muted">{{ s.jail.noPolicy }}</p>
+              <p v-if="!jail.spec.firewall?.policies?.length" class="muted">{{ s.jail.noPolicy }}</p>
               <dl v-else class="kv">
-                <dt>{{ s.firewall.policy }}</dt><dd><router-link class="mono" to="/firewall">{{ jail.spec.firewall.policy }}</router-link></dd>
+                <dt>{{ s.firewall.policies }}</dt><dd><template v-for="(n, i) in jail.spec.firewall.policies" :key="n">{{ i ? ', ' : '' }}<router-link class="mono" :to="`/firewall?policy=${n}`">{{ n }}</router-link></template></dd>
                 <dt>{{ s.jail.tags }}</dt><dd class="mono">{{ jail.spec.firewall.tags?.join(', ') || '-' }}</dd>
               </dl>
             </div>

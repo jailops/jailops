@@ -315,7 +315,7 @@ func TestProjectGrantsAndQuotas(t *testing.T) {
 		t.Fatal(err)
 	}
 	p, _ = admin.Projects().Get(ctxT(t), "web")
-	p.Spec.Firewall = "base"
+	p.Spec.FirewallPolicies = []string{"base"}
 	if _, err := admin.Projects().Update(ctxT(t), "web", p, ""); err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestProjectGrantsAndQuotas(t *testing.T) {
 		t.Fatal(err)
 	}
 	// A project that names a missing policy is invalid.
-	p.Spec.Firewall = "ghost"
+	p.Spec.FirewallPolicies = []string{"ghost"}
 	_, err = admin.Projects().Update(ctxT(t), "web", p, "")
 	wantCode(t, err, api.CodeInvalid)
 	// Deleting: not while it holds anything, and there is no project that is special.

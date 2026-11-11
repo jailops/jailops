@@ -10,7 +10,7 @@ const meta = (name: string, age = 86400 * 30) => ({ name, scope: 'host' as const
 export function stagingJails(): Jail[] {
   const mk = (name: string, power: Jail['status']['power']): Jail => ({
     metadata: { ...meta(name, 86400 * 5), project: 'staging', labels: { env: 'staging', team: name === 'stg-db' ? 'data' : 'web' } },
-    spec: { image: 'freebsd-15-1', storage: 'fast', network: [{ network: 'stg', ipv4: 'auto' }], firewall: { policy: '' }, boot: {}, resources: { cpu: 1, memory: '1G' } },
+    spec: { image: 'freebsd-15-1', storage: 'fast', network: [{ network: 'stg', ipv4: 'auto' }], firewall: {}, boot: {}, resources: { cpu: 1, memory: '1G' } },
     status: { power, generation: 'freebsd-15-1#g4', addresses: power === 'running' ? ['10.60.0.12/28'] : [], conditions: [{ type: 'Reconciled', status: 'True' }] },
   })
   return [mk('stg-web', 'running'), mk('stg-db', 'stopped')]
@@ -28,7 +28,7 @@ export function projects(counts: Record<string, number>): Project[] {
       description: 'Web shop on two hosts', hosts: ['bsd01', 'bsd02'],
       networks: [{ network: 'shop' }],
       storage: [{ storage: 'fast', quota: '500G' }, { storage: 'default', quota: '100G' }],
-      quotas: { jails: 10, cpu: 16, memory: '32G', addresses: 20 }, firewall: 'web-default', images: ['freebsd-15-1'],
+      quotas: { jails: 10, cpu: 16, memory: '32G', addresses: 20 }, firewall_policies: ['web-default'], images: ['freebsd-15-1'],
     }, { cpu: 14, memory_used: 27 * GiB, disk_used: 210 * GiB, addresses: 8, conditions: [{ type: 'Host:bsd02', status: 'False', reason: 'MissingStorage', message: 'bsd02 has no storage fast' }] }, true),
     p('staging', { description: 'Disposable tests', networks: [{ network: 'stg' }], storage: [{ storage: 'fast', quota: '50G' }], quotas: { jails: 3, memory: '4G' } }, { cpu: 2, memory_used: 1 * GiB, disk_used: 8 * GiB, addresses: 1 }),
   ]

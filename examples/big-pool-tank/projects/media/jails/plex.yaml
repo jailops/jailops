@@ -10,7 +10,7 @@ spec:
   storage: bulk               # the jail's own datasets (root, /usr/local, /var/db) live on the big pool
   network:
     - {name: eth0, network: media, ipv4: auto}
-  firewall: {policy: media-server}
+  firewall: {policies: [media-server]}
   resources: {cpu: 4, memory: 8G}
   volumes:
     # A dataset JailOps creates under the jail on `bulk`: snapshotted, rolled back and backed up with the jail.

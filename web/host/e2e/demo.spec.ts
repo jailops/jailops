@@ -161,6 +161,15 @@ test('projects: quotas with usage, whole-network grants, per-host state of a fle
   await expect(page.locator('[data-host="bsd03"]')).toContainText('Offline')
 })
 
+test('a project has several mandatory policies, shown in the order they are rendered', async ({ page }) => {
+  await open(page, '/projects/shop')
+  await page.getByTestId('edit-project').click()
+  await expect(page.locator('#pf-fw')).toHaveValue('web-default')
+  await page.locator('#pf-fw').fill('web-default, monitoring')
+  await page.getByTestId('project-save').click()
+  await expect(page.getByTestId('mandatory-policy')).toHaveText('web-default, monitoring')
+})
+
 test('creating a project can ask for a dedicated network', async ({ page }) => {
   await open(page, '/projects')
   await page.getByTestId('new-project').click()

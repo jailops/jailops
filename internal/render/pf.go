@@ -92,8 +92,17 @@ type PFInput struct {
 	Tags []string
 	// TagMembers maps a tag to the addresses of every jail that has it.
 	TagMembers map[string][]netip.Addr
-	Policy     api.FirewallPolicySpec
-	Sets       map[string]api.AddressSetSpec
+	// DefaultIn and DefaultOut are the defaults of the anchor, "allow" or "deny". They come last. The caller works
+	// them out from the policies (the strictest wins); an empty inbound default is deny and an empty outbound default
+	// is allow.
+	DefaultIn, DefaultOut string
+	// Policies are rendered into the anchor in this order, each under its own heading and with its own rule
+	// numbers: the project's policies, then the managed access policy, then the jail's own. Their defaults are not
+	// used: DefaultIn and DefaultOut are.
+	Policies []PFPolicy
+	// Proxy are the inbound redirects of the jail's proxy devices, rendered after the policies.
+	Proxy []api.FirewallRule
+	Sets  map[string]api.AddressSetSpec
 	// Uplink is the interface redirects are applied on; required when a
 	// rule has a redirect.
 	Uplink string
@@ -108,18 +117,26 @@ type PFInput struct {
 	// the jail reaches nothing in them, unless a rule of a policy says so first (projects are isolated from each
 	// other by default; a shared service lives in a project of its own and is opened by rules).
 	Foreign []netip.Prefix
-	// Mandatory is the project's mandatory policy. It is rendered before the
-	// jail's own rules, so a jail's policy cannot override it.
-	Mandatory *PFMandatory
 }
 
-// PFMandatory is a project's mandatory firewall policy. Its own defaults are
-// ignored: the caller copies them into PFInput.Policy when the jail has no
-// policy of its own.
-type PFMandatory struct {
-	Name     string
-	Policy   api.FirewallPolicySpec
+// PFPolicy is one policy of an anchor.
+type PFPolicy struct {
+	// Name is the name of the policy. Project is set for a policy the project names: its heading says so.
+	Name    string
+	Project bool
+	Policy  api.FirewallPolicySpec
+	// AllowRaw allows its raw fragment, as PFInput.AllowRaw does for all.
 	AllowRaw bool
+	// Managed is set for the policy of an app: managed by app access, not by the administrator.
+	Managed bool
+}
+
+// heading is the comment line that opens the policy in the anchor.
+func (p PFPolicy) heading() string {
+	if p.Project {
+		return "project policy " + p.Name
+	}
+	return "policy " + p.Name
 }
 
 type family struct {
@@ -127,50 +144,74 @@ type family struct {
 	addrs []netip.Addr
 }
 
-// PFAnchor renders the ruleset of anchor jailops/<jail>. Rules are
-// first-match (every typed rule is "quick"); defaults come last. Tables for
-// address sets and tags are defined inside the anchor so that one load is
-// atomic. UNVERIFIED: acceptance by pfctl -n, mixed-family tables in
-// family-restricted rules.
+// PFAnchor renders the ruleset of anchor jailops/<jail>: BuildAnchor, printed.
 func PFAnchor(in PFInput) (string, error) {
-	if err := validate.JailKey("jail", in.Jail); err != nil {
+	a, err := BuildAnchor(in)
+	if err != nil {
 		return "", err
 	}
+	return FormatAnchor(a), nil
+}
+
+// BuildAnchor builds the anchor jailops/<jail>: its text and the structured form of its filter rules. Rules are
+// first-match (every typed rule is "quick"); defaults come last. Tables for
+// address sets and tags are defined inside the anchor so that one load is
+// atomic. The text and the rules are made by the same code, line by line, so a walk over Rules is a walk over what
+// is loaded. UNVERIFIED: acceptance by pfctl -n, mixed-family tables in
+// family-restricted rules.
+func BuildAnchor(in PFInput) (*Anchor, error) {
+	if err := validate.JailKey("jail", in.Jail); err != nil {
+		return nil, err
+	}
 	if len(in.Interfaces) == 0 {
-		return "", fmt.Errorf("render: pf anchor needs at least one interface")
+		return nil, fmt.Errorf("render: pf anchor needs at least one interface")
 	}
 	for _, i := range append(append([]string(nil), in.Interfaces...), in.Gateways...) {
 		if err := validate.IfName("interface", i); err != nil {
-			return "", err
+			return nil, err
 		}
 	}
-	if _, err := validate.FirewallPolicySpec(in.Policy); err != nil {
-		return "", err
+	for _, d := range []struct{ f, v string }{{"default_in", in.DefaultIn}, {"default_out", in.DefaultOut}} {
+		if d.v != "" && d.v != "allow" && d.v != "deny" {
+			return nil, validate.Invalid(d.f, "%s %q must be allow or deny", d.f, d.v)
+		}
 	}
-	var mand []api.FirewallRule
-	if m := in.Mandatory; m != nil {
-		if err := validate.Name("mandatory policy", m.Name); err != nil {
-			return "", err
+	// sections are the policies and the proxy devices in the order they are rendered
+	type section struct {
+		heading, comment, raw string
+		rules                 []api.FirewallRule
+		origin                Origin
+	}
+	var sections []section
+	var all []api.FirewallRule
+	for _, p := range in.Policies {
+		if err := validate.Name("policy", p.Name); err != nil {
+			return nil, err
 		}
-		if _, err := validate.FirewallPolicySpec(m.Policy); err != nil {
-			return "", err
+		spec := p.Policy
+		spec.DefaultIn, spec.DefaultOut = "deny", "allow" // the anchor's defaults are checked above; only the rules, the comment and the raw fragment are rendered
+		if _, err := validate.FirewallPolicySpec(spec); err != nil {
+			return nil, err
 		}
-		if m.Policy.Raw != "" && !m.AllowRaw {
-			return "", api.Errorf(api.CodeForbidden, "raw PF fragments require the admin role")
+		if p.Policy.Raw != "" && !p.AllowRaw && !in.AllowRaw {
+			return nil, api.Errorf(api.CodeForbidden, "raw PF fragments require the admin role")
 		}
-		mand = m.Policy.Rules
+		sections = append(sections, section{heading: p.heading(), comment: p.Policy.Comment, raw: p.Policy.Raw, rules: p.Policy.Rules,
+			origin: Origin{Stage: StagePolicy, Policy: p.Name, ProjectPolicy: p.Project, Managed: p.Managed}})
+		all = append(all, p.Policy.Rules...)
+	}
+	if len(in.Proxy) > 0 {
+		sections = append(sections, section{heading: "proxy devices", rules: in.Proxy, origin: Origin{Stage: StagePolicy, Policy: "proxy devices"}})
+		all = append(all, in.Proxy...)
 	}
 	for _, t := range in.Tags {
 		if err := validate.Tag("tag", t); err != nil {
-			return "", err
+			return nil, err
 		}
-	}
-	if in.Policy.Raw != "" && !in.AllowRaw {
-		return "", api.Errorf(api.CodeForbidden, "raw PF fragments require the admin role")
 	}
 	addrs := uniqAddrs(in.Addresses)
 	if len(addrs) == 0 {
-		return "", fmt.Errorf("render: jail %s has no addresses", in.Jail)
+		return nil, fmt.Errorf("render: jail %s has no addresses", in.Jail)
 	}
 	var fams []family
 	for _, kw := range []string{"inet", "inet6"} {
@@ -188,11 +229,11 @@ func PFAnchor(in PFInput) (string, error) {
 
 	// Collect referenced tables.
 	setRefs, tagRefs := map[string]bool{}, map[string]bool{}
-	for _, r := range append(append([]api.FirewallRule(nil), mand...), in.Policy.Rules...) {
+	for _, r := range all {
 		for _, e := range append(append([]string(nil), r.From...), r.To...) {
 			k, v, err := validate.ParseEndpoint(e)
 			if err != nil {
-				return "", err
+				return nil, err
 			}
 			switch k {
 			case validate.EndpointSet:
@@ -215,7 +256,7 @@ func PFAnchor(in PFInput) (string, error) {
 	for _, n := range sortedKeys(setRefs) {
 		members, err := validate.FlattenSet(n, in.Sets)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		// what each member is, for whoever reads the loaded anchor in a review (a comment line: nothing else reads it; the
 		// comments are one line of printable text, checked when the set is made)
@@ -240,7 +281,7 @@ func PFAnchor(in PFInput) (string, error) {
 	// Translation rules come before filter rules.
 	rdrRules := func(rules []api.FirewallRule) error {
 		for i, r := range rules {
-			if r.Redirect == nil {
+			if r.Redirect == nil || r.Disabled {
 				continue
 			}
 			if err := validate.IfName("uplink", in.Uplink); err != nil {
@@ -270,11 +311,10 @@ func PFAnchor(in PFInput) (string, error) {
 		}
 		return nil
 	}
-	if err := rdrRules(mand); err != nil {
-		return "", err
-	}
-	if err := rdrRules(in.Policy.Rules); err != nil {
-		return "", err
+	for _, sec := range sections {
+		if err := rdrRules(sec.rules); err != nil {
+			return nil, err
+		}
 	}
 
 	own6 := famAddrs(fams, "inet6")
@@ -289,22 +329,30 @@ func PFAnchor(in PFInput) (string, error) {
 	// holds its link-local address (fe80::/10 when unknown), or IPv6 neighbour discovery breaks. A negated address
 	// list ("from ! { a b }") is a pf syntax error; a negated table is not, and the anchor defines the table it names
 	// (verified on FreeBSD 15.1).
-	{
-		members := append(addrStrings(addrs), llStrings(ll)...)
-		if len(ll) == 0 {
-			members = append(members, "fe80::/10")
-		}
-		b.line("%s", tableLine(AllowedSourceTable, members))
+	jailMembers := append(addrStrings(addrs), llStrings(ll)...)
+	if len(ll) == 0 {
+		jailMembers = append(jailMembers, "fe80::/10")
+	}
+	b.line("%s", tableLine(AllowedSourceTable, jailMembers))
+	jailTable := func(neg bool) Match {
+		return Match{Negate: neg, Prefixes: prefixesOf(jailMembers), Tables: []string{AllowedSourceTable}}
+	}
+	// icmp6 is a rule of the IPv6 control and neighbour stages: a filter rule on proto icmp6 with the given types
+	icmp6 := func(stage, act, dir, class string, from, to Match, types ...string) Rule {
+		return Rule{Action: act, Dir: dir, Class: class, Family: "inet6", Proto: "icmp6", ICMPTypes: types, From: from, To: to, Origin: Origin{Stage: stage}}
 	}
 	if len(own6) > 0 {
 		// IPv6 control traffic. A jail is never a router: no router advertisement or redirect leaves it. The unspecified
 		// address :: cannot be a member of a table (pf accepts it and stores nothing), so duplicate address detection
 		// (a neighbour solicitation to a solicited-node group) has a rule of its own before the antispoof block.
-		b.line("block in quick on %s inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }", ifs)
-		b.line("pass in quick on %s inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol", ifs)
+		b.rule(icmp6(StageIPv6Control, "block", "in", IfEpair, anyMatch(), anyMatch(), "routeradv", "redir"),
+			"block in quick on %s inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }", ifs)
+		b.rule(icmp6(StageIPv6Control, "pass", "in", IfEpair, listMatch([]string{"::"}), listMatch([]string{"ff02::1:ff00:0/104"}), "neighbrsol"),
+			"pass in quick on %s inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol", ifs)
 	}
 	if in.Antispoof {
-		b.line("block in quick on %s from ! <%s> to any", ifs, AllowedSourceTable)
+		b.rule(Rule{Action: "block", Dir: "in", Class: IfEpair, From: jailTable(true), To: anyMatch(), Origin: Origin{Stage: StageAntispoof}},
+			"block in quick on %s from ! <%s> to any", ifs, AllowedSourceTable)
 	}
 	if len(own6) > 0 {
 		// pf cannot read the target of a neighbour message, so a jail's advertisement for another jail's address cannot
@@ -313,49 +361,78 @@ func PFAnchor(in PFInput) (string, error) {
 		// addressed to the jail's own addresses and solicited-node groups reach it. Unicast messages between jails of
 		// one network stay possible: see docs/networking-ipv6.md.
 		from6 := listStr(src6)
+		src6m := listMatch(src6)
 		if in.NoAdvertise {
-			b.line("block in quick on %s inet6 proto icmp6 from any to any icmp6-type neighbradv", ifs)
-			b.line("pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type neighbrsol", ifs, from6)
+			b.rule(icmp6(StageNeighbour, "block", "in", IfEpair, anyMatch(), anyMatch(), "neighbradv"),
+				"block in quick on %s inet6 proto icmp6 from any to any icmp6-type neighbradv", ifs)
+			b.rule(icmp6(StageNeighbour, "pass", "in", IfEpair, src6m, anyMatch(), "neighbrsol"),
+				"pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type neighbrsol", ifs, from6)
 		} else {
-			b.line("block in quick on %s inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv", ifs)
-			b.line("pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type { neighbrsol, neighbradv }", ifs, from6)
+			b.rule(icmp6(StageNeighbour, "block", "in", IfEpair, anyMatch(), listMatch([]string{"ff02::/16"}), "neighbradv"),
+				"block in quick on %s inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv", ifs)
+			b.rule(icmp6(StageNeighbour, "pass", "in", IfEpair, src6m, anyMatch(), "neighbrsol", "neighbradv"),
+				"pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type { neighbrsol, neighbradv }", ifs, from6)
 		}
-		b.line("pass in quick on %s inet6 proto icmp6 from %s to ff02::/16 icmp6-type { listenrep, listendone, 143 }", ifs, from6)
-		b.line("pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type { unreach, toobig, timex, paramprob }", ifs, from6)
+		b.rule(icmp6(StageNeighbour, "pass", "in", IfEpair, src6m, listMatch([]string{"ff02::/16"}), "listenrep", "listendone", "143"),
+			"pass in quick on %s inet6 proto icmp6 from %s to ff02::/16 icmp6-type { listenrep, listendone, 143 }", ifs, from6)
+		b.rule(icmp6(StageNeighbour, "pass", "in", IfEpair, src6m, anyMatch(), "unreach", "toobig", "timex", "paramprob"),
+			"pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type { unreach, toobig, timex, paramprob }", ifs, from6)
 		// the host forwarding from a jail to a neighbour on the same interface would send a redirect; a jail has no
 		// on-link neighbour and must not learn one
-		b.line("block out quick on %s inet6 proto icmp6 from any to any icmp6-type { redir, routeradv }", ifs)
-		b.line("pass out quick on %s inet6 proto icmp6 from any to %s icmp6-type { neighbrsol, neighbradv }", ifs, listStr(ndDests(own6, ll)))
-		b.line("pass out quick on %s inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob }", ifs)
+		b.rule(icmp6(StageNeighbour, "block", "out", IfEpair, anyMatch(), anyMatch(), "redir", "routeradv"),
+			"block out quick on %s inet6 proto icmp6 from any to any icmp6-type { redir, routeradv }", ifs)
+		b.rule(icmp6(StageNeighbour, "pass", "out", IfEpair, anyMatch(), listMatch(ndDests(own6, ll)), "neighbrsol", "neighbradv"),
+			"pass out quick on %s inet6 proto icmp6 from any to %s icmp6-type { neighbrsol, neighbradv }", ifs, listStr(ndDests(own6, ll)))
+		b.rule(icmp6(StageNeighbour, "pass", "out", IfEpair, anyMatch(), anyMatch(), "unreach", "toobig", "timex", "paramprob"),
+			"pass out quick on %s inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob }", ifs)
 	}
 	// Only the jail's own addresses reach it: an address it adds for itself (an alias) receives nothing, and no
 	// broadcast (DHCP) or multicast other than neighbour discovery gets in.
-	b.line("block drop out quick on %s from any to ! <%s>", ifs, AllowedSourceTable)
+	b.rule(Rule{Action: "block", Dir: "out", Class: IfEpair, From: anyMatch(), To: jailTable(true), Origin: Origin{Stage: StageOwnAddrs}},
+		"block drop out quick on %s from any to ! <%s>", ifs, AllowedSourceTable)
 	if len(famAddrs(fams, "inet")) > 0 {
-		b.line("block drop out quick on %s inet proto icmp from any to any icmp-type redir", ifs)
+		b.rule(Rule{Action: "block", Dir: "out", Class: IfEpair, Family: "inet", Proto: "icmp", ICMPTypes: []string{"redir"}, From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageOwnAddrs}},
+			"block drop out quick on %s inet proto icmp from any to any icmp-type redir", ifs)
 	}
 
-	if in.Mandatory != nil {
-		b.line("# project policy %s", in.Mandatory.Name)
-		if c := in.Mandatory.Policy.Comment; c != "" {
-			b.line("#   %s", pfComment(c))
+	// Deny wins over allow, whatever the order of the policies: when any policy has an enabled deny rule, the deny rules of
+	// all the policies come first, then the allow rules (every rule is quick, so the first match decides). Each group
+	// keeps the policy order and the rule order, and the headings and the rule numbers are those of the policies. An
+	// anchor without a deny rule is written policy by policy, as it always was.
+	denyFirst := hasEnabledDeny(all, false)
+	shown := map[int]bool{}
+	head := func(i int) {
+		sec := sections[i]
+		b.line("# %s", sec.heading)
+		if sec.comment != "" && !shown[i] {
+			b.line("#   %s", pfComment(sec.comment))
 		}
-		filterRules(&b, mand, fams, ifs, false)
-		if raw := in.Mandatory.Policy.Raw; raw != "" {
-			b.line("# raw fragment (admin)")
-			b.line("%s", strings.TrimRight(strings.ReplaceAll(raw, "\r\n", "\n"), "\n"))
+		shown[i] = true
+	}
+	want := ""
+	if denyFirst {
+		want = "allow"
+		b.line("# deny rules of all policies: they win over every allow rule, whatever the order of the policies")
+		for i, sec := range sections {
+			if !hasAction(sec.rules, "deny") {
+				continue
+			}
+			head(i)
+			filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, IfEpair, false, "deny")
 		}
-		b.line("# jail policy")
+		b.line("# allow rules of the policies, in the order of the policies")
 	}
-	if c := in.Policy.Comment; c != "" {
-		b.line("# policy: %s", pfComment(c))
-	}
-	filterRules(&b, in.Policy.Rules, fams, ifs, false)
-
-	if in.Policy.Raw != "" {
-		b.line("# raw fragment (admin)")
-		raw := strings.ReplaceAll(in.Policy.Raw, "\r\n", "\n")
-		b.line("%s", strings.TrimRight(raw, "\n"))
+	for i, sec := range sections {
+		if denyFirst && shown[i] && sec.raw == "" && !hasAction(sec.rules, "allow") {
+			continue
+		}
+		head(i)
+		filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, IfEpair, false, want)
+		if sec.raw != "" {
+			b.rule(Rule{Kind: RuleRaw, Class: IfEpair, Origin: Origin{Stage: StageRaw, Policy: sec.origin.Policy, ProjectPolicy: sec.origin.ProjectPolicy, Managed: sec.origin.Managed}},
+				"# raw fragment (admin)")
+			b.line("%s", strings.TrimRight(strings.ReplaceAll(sec.raw, "\r\n", "\n"), "\n"))
+		}
 	}
 
 	if len(in.Foreign) > 0 {
@@ -366,19 +443,33 @@ func PFAnchor(in PFInput) (string, error) {
 		sort.Strings(fp)
 		b.line("%s", tableLine("foreign", fp))
 		b.line("# other projects: closed unless a rule above opened it")
-		b.line("block drop out quick on %s from <foreign> to any", ifs)
-		b.line("block drop in quick on %s from any to <foreign>", ifs)
+		foreign := Match{Prefixes: append([]netip.Prefix(nil), in.Foreign...), Tables: []string{"foreign"}}
+		for i := range foreign.Prefixes {
+			foreign.Prefixes[i] = foreign.Prefixes[i].Masked()
+		}
+		b.rule(Rule{Action: "block", Dir: "out", Class: IfEpair, From: foreign, To: anyMatch(), Origin: Origin{Stage: StageIsolation}},
+			"block drop out quick on %s from <foreign> to any", ifs)
+		b.rule(Rule{Action: "block", Dir: "in", Class: IfEpair, From: anyMatch(), To: foreign, Origin: Origin{Stage: StageIsolation}},
+			"block drop in quick on %s from any to <foreign>", ifs)
 	}
 	b.line("# defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them")
 	inAct, outAct := "block drop", "pass"
-	if in.Policy.DefaultIn == "allow" {
+	if in.DefaultIn == "allow" {
 		inAct = "pass"
 	}
-	if in.Policy.DefaultOut == "deny" {
+	if in.DefaultOut == "deny" {
 		outAct = "block drop"
 	}
-	b.line("%s out quick on %s all", inAct, ifs)
-	b.line("%s in quick on %s all", outAct, ifs)
+	act := func(s string) string {
+		if strings.HasPrefix(s, "block") {
+			return "block"
+		}
+		return "pass"
+	}
+	b.rule(Rule{Action: act(inAct), Dir: "out", Class: IfEpair, From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault}},
+		"%s out quick on %s all", inAct, ifs)
+	b.rule(Rule{Action: act(outAct), Dir: "in", Class: IfEpair, From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault}},
+		"%s in quick on %s all", outAct, ifs)
 	// What the host itself sends to the jail, or routes to it from another network or from the internet, leaves the
 	// host on the gateway interface and is never seen on the jail's own port: the rules for traffic into the jail
 	// stand there too, restricted to the jail's own addresses. (Verified on FreeBSD 15.1: without them a deny-in
@@ -389,31 +480,50 @@ func PFAnchor(in PFInput) (string, error) {
 		if len(own6) > 0 {
 			// No router advertisement or redirect leaves the host on the gateway interface (no SLAAC, ever; what a jail
 			// is sent on its own port is not filtered by pf, so this is where it is stopped).
-			b.line("block drop out quick on %s inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }", gifs)
+			b.rule(icmp6(StageGateway, "block", "out", IfGateway, anyMatch(), anyMatch(), "routeradv", "redir"),
+				"block drop out quick on %s inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }", gifs)
 			// neighbour discovery towards the jail's own addresses, or the host could not reach it; and the ICMPv6
 			// errors (destination unreachable, packet too big, time exceeded, parameter problem) that must never be
 			// blocked, whatever the policy says: path MTU discovery of a flow into the jail depends on them.
-			b.line("pass out quick on %s inet6 proto icmp6 from any to %s icmp6-type { neighbrsol, neighbradv }", gifs, listStr(ndDests(own6, ll)))
-			b.line("pass out quick on %s inet6 proto icmp6 from any to %s icmp6-type { unreach, toobig, timex, paramprob }", gifs, listStr(addrStrings(own6)))
+			b.rule(icmp6(StageGateway, "pass", "out", IfGateway, anyMatch(), listMatch(ndDests(own6, ll)), "neighbrsol", "neighbradv"),
+				"pass out quick on %s inet6 proto icmp6 from any to %s icmp6-type { neighbrsol, neighbradv }", gifs, listStr(ndDests(own6, ll)))
+			b.rule(icmp6(StageGateway, "pass", "out", IfGateway, anyMatch(), addrMatch(own6), "unreach", "toobig", "timex", "paramprob"),
+				"pass out quick on %s inet6 proto icmp6 from any to %s icmp6-type { unreach, toobig, timex, paramprob }", gifs, listStr(addrStrings(own6)))
 		}
-		if in.Mandatory != nil {
-			filterRules(&b, mand, fams, gifs, true)
+		if hasEnabledDeny(all, true) {
+			b.line("# deny rules into the jail: they win over every allow rule")
+			for _, sec := range sections {
+				filterRules(&b, &in, sec.origin, sec.rules, fams, gifs, IfGateway, true, "deny")
+			}
+			b.line("# allow rules into the jail")
+			for _, sec := range sections {
+				filterRules(&b, &in, sec.origin, sec.rules, fams, gifs, IfGateway, true, "allow")
+			}
+		} else {
+			for _, sec := range sections {
+				filterRules(&b, &in, sec.origin, sec.rules, fams, gifs, IfGateway, true, "")
+			}
 		}
-		filterRules(&b, in.Policy.Rules, fams, gifs, true)
 		if len(in.Foreign) > 0 {
+			foreign := Match{Prefixes: append([]netip.Prefix(nil), in.Foreign...), Tables: []string{"foreign"}}
+			for i := range foreign.Prefixes {
+				foreign.Prefixes[i] = foreign.Prefixes[i].Masked()
+			}
 			for _, f := range fams {
-				b.line("block drop out quick on %s %s from <foreign> to %s", gifs, f.kw, listStr(addrStrings(f.addrs)))
+				b.rule(Rule{Action: "block", Dir: "out", Class: IfGateway, Family: f.kw, From: foreign, To: addrMatch(f.addrs), Origin: Origin{Stage: StageIsolation}},
+					"block drop out quick on %s %s from <foreign> to %s", gifs, f.kw, listStr(addrStrings(f.addrs)))
 			}
 		}
 		for _, f := range fams {
-			b.line("%s out quick on %s %s from any to %s", inAct, gifs, f.kw, listStr(addrStrings(f.addrs)))
+			b.rule(Rule{Action: act(inAct), Dir: "out", Class: IfGateway, Family: f.kw, From: anyMatch(), To: addrMatch(f.addrs), Origin: Origin{Stage: StageDefault}},
+				"%s out quick on %s %s from any to %s", inAct, gifs, f.kw, listStr(addrStrings(f.addrs)))
 		}
 	}
 	out, err := b.result()
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return labelPassRules(JailAnchor(in.Jail), out), nil
+	return &Anchor{Name: JailAnchor(in.Jail), Lines: strings.Split(labelPassRules(JailAnchor(in.Jail), out), "\n"), Rules: b.rules}, nil
 }
 
 var (
@@ -487,10 +597,14 @@ func ruleComment(b *builder, r api.FirewallRule) {
 }
 
 func ruleLabel(i int, r api.FirewallRule) string {
-	if r.Name != "" {
-		return fmt.Sprintf("rule %d: %s", i+1, r.Name)
+	head := fmt.Sprintf("rule %d", i+1)
+	if r.Disabled {
+		head += " (disabled)"
 	}
-	return fmt.Sprintf("rule %d", i+1)
+	if r.Name != "" {
+		return head + ": " + r.Name
+	}
+	return head
 }
 
 func tableLine(name string, members []string) string {
@@ -621,17 +735,56 @@ func PFNet(name string, spec api.NetworkSpec) (string, error) {
 	return b.result()
 }
 
-// filterRules renders the typed filter rules of one policy.
-func filterRules(b *builder, rules []api.FirewallRule, fams []family, ifs string, onlyIn bool) {
+// hasEnabledDeny says whether any of the rules is an enabled deny rule; onlyIn looks at the rules for traffic into the
+// jail only.
+func hasEnabledDeny(rules []api.FirewallRule, onlyIn bool) bool {
+	for _, r := range rules {
+		if r.Action == "deny" && !r.Disabled && !(onlyIn && r.Direction == "out") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasAction says whether a policy has a rule of the action "allow" or "deny", enabled or not: a disabled rule is
+// shown, as a comment line, in the group of its action.
+func hasAction(rules []api.FirewallRule, action string) bool {
+	for _, r := range rules {
+		if (r.Action == "deny") == (action == "deny") {
+			return true
+		}
+	}
+	return false
+}
+
+// filterRules renders the typed filter rules of one policy, and records each as a structured rule. class is the
+// interface the rules stand on; onlyIn keeps the rules for traffic into the jail. want is "deny" or "allow" to render
+// only the rules of that action, "" for all of them in their order. A disabled rule is a comment line, not a rule.
+func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, fams []family, ifs, class string, onlyIn bool, want string) {
 	for i, r := range rules {
 		if onlyIn && r.Direction == "out" {
 			continue
 		}
+		if want != "" && (r.Action == "deny") != (want == "deny") {
+			continue
+		}
+		if r.Disabled {
+			dir := "out" // traffic into the jail leaves the host-side end
+			if r.Direction == "out" {
+				dir = "in"
+			}
+			sr := Rule{Kind: RuleDisabled, Line: b.n, Dir: dir, Class: class, Proto: r.Proto, From: anyMatch(), To: anyMatch(), Ports: portRanges(r.Ports), Origin: org}
+			sr.Origin.RuleNo, sr.Origin.RuleName, sr.Origin.Comment = i+1, r.Name, r.Comment
+			b.rules = append(b.rules, sr)
+		}
 		b.line("# %s", ruleLabel(i, r))
 		ruleComment(b, r)
-		act := "pass"
+		if r.Disabled {
+			continue
+		}
+		act, pfAct := "pass", "pass"
 		if r.Action == "deny" {
-			act = "block drop"
+			act, pfAct = "block drop", "block"
 		}
 		dir, own := "out", "to" // traffic into the jail leaves the host-side end
 		if r.Direction == "out" {
@@ -643,16 +796,23 @@ func filterRules(b *builder, rules []api.FirewallRule, fams []family, ifs string
 			}
 			var from, to string
 			var ok1, ok2 bool
+			var mFrom, mTo Match
 			if own == "to" {
 				from, ok1 = endpoints(r.From, f, nil)
 				to, ok2 = endpoints(r.To, f, f.addrs)
+				mFrom, _ = endpointMatch(r.From, f, nil, in)
+				mTo, _ = endpointMatch(r.To, f, f.addrs, in)
 			} else {
 				from, ok1 = endpoints(r.From, f, f.addrs)
 				to, ok2 = endpoints(r.To, f, nil)
+				mFrom, _ = endpointMatch(r.From, f, f.addrs, in)
+				mTo, _ = endpointMatch(r.To, f, nil, in)
 			}
 			if !ok1 || !ok2 {
 				continue
 			}
+			sr := Rule{Action: pfAct, Dir: dir, Class: class, Family: f.kw, Proto: r.Proto, From: mFrom, To: mTo, Origin: org}
+			sr.Origin.RuleNo, sr.Origin.RuleName, sr.Origin.Comment = i+1, r.Name, r.Comment
 			var sb strings.Builder
 			sb.WriteString(act + " " + dir)
 			if r.Log {
@@ -672,10 +832,13 @@ func filterRules(b *builder, rules []api.FirewallRule, fams []family, ifs string
 					sb.WriteString(" log")
 				}
 				fmt.Fprintf(&sb, " quick on %s %s proto %s from %s to %s port %d", ifs, f.kw, r.Proto, from, to2, r.Redirect.JailPort)
+				sr.To = addrMatch(f.addrs[:1])
+				sr.Ports = []PortRange{{Lo: uint16(r.Redirect.JailPort), Hi: uint16(r.Redirect.JailPort)}}
 			} else if len(r.Ports) > 0 {
 				sb.WriteString(" port " + portList(r.Ports))
+				sr.Ports = portRanges(r.Ports)
 			}
-			b.line("%s", sb.String())
+			b.rule(sr, "%s", sb.String())
 		}
 	}
 }

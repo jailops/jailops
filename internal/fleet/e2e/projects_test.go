@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -47,7 +48,7 @@ spec:
   storage:
     - {storage: fast, quota: 50G}
   quotas: {jails: 5}
-  firewall: base
+  firewall_policies: [base]
   images: [freebsd-15]
 `)
 	e.Write("projects/web/firewall-policies/base.yaml", "apiVersion: jailops/v1\nkind: FirewallPolicy\nmetadata:\n  name: base\nspec:\n  default_in: deny\n  default_out: allow\n")
@@ -95,7 +96,7 @@ func TestProjectSpansHostsAndConverges(t *testing.T) {
 		if p.Metadata.ManagedBy != "sync:testfleet" {
 			t.Fatalf("%s: managed_by %q", h, p.Metadata.ManagedBy)
 		}
-		if p.Spec.Firewall != "base" {
+		if !slices.Equal(p.Spec.FirewallPolicies, []string{"base"}) {
 			t.Fatalf("%s: the mandatory policy was not set after its policy existed", h)
 		}
 		if len(p.Spec.Hosts) != 0 {

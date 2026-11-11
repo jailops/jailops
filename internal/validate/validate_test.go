@@ -70,7 +70,7 @@ func okJail() api.JailSpec {
 		Hostname:  "web.example.org",
 		Resources: api.Resources{CPU: 2, Memory: "2G", Disk: "20G"},
 		Network:   []api.NetworkAttach{{Network: "lan", IPv4: "auto", IPv6: "2001:db8::5", MAC: "02:00:00:00:00:01"}},
-		Firewall:  api.FirewallAttach{Policy: "web", Tags: []string{"web", "tier-1"}},
+		Firewall:  api.FirewallAttach{Policies: []string{"web"}, Tags: []string{"web", "tier-1"}},
 		Volumes:   []api.VolumeMount{{Name: "data", Mount: "/srv/data", Quota: "10G"}},
 		Boot:      api.BootPolicy{Depends: []string{"db"}},
 		Packages:  []string{"nginx", "py311-foo+bar"},
@@ -101,7 +101,8 @@ func TestJailSpec(t *testing.T) {
 		{"v6 multicast", func(s *api.JailSpec) { s.Network[0].IPv6 = "ff02::1" }, "network[0].ipv6"},
 		{"mac upper", func(s *api.JailSpec) { s.Network[0].MAC = "02:00:00:00:00:AA" }, "network[0].mac"},
 		{"mac mcast", func(s *api.JailSpec) { s.Network[0].MAC = "01:00:00:00:00:01" }, "network[0].mac"},
-		{"policy", func(s *api.JailSpec) { s.Firewall.Policy = "x y" }, "firewall.policy"},
+		{"policy", func(s *api.JailSpec) { s.Firewall.Policies = []string{"x y"} }, "firewall.policies[0]"},
+		{"policy twice", func(s *api.JailSpec) { s.Firewall.Policies = []string{"x", "x"} }, "firewall.policies[1]"},
 		{"tag", func(s *api.JailSpec) { s.Firewall.Tags = []string{"a b"} }, "firewall.tags[0]"},
 		{"dup tag", func(s *api.JailSpec) { s.Firewall.Tags = []string{"a", "a"} }, "firewall.tags[1]"},
 		{"vol mount", func(s *api.JailSpec) { s.Volumes[0].Mount = "srv/data" }, "volumes[0].mount"},
@@ -419,7 +420,7 @@ func TestProjectSpecShape(t *testing.T) {
 		Hosts:    []string{"h1", "h2"},
 		Networks: []api.ProjectNetwork{{Network: "lan"}, {Network: "dmz"}},
 		Storage:  []api.ProjectStorage{{Storage: "*", Quota: "10G"}},
-		Quotas:   api.ProjectQuotas{Jails: 3, Memory: "4G"}, Firewall: "base", Images: []string{"freebsd-15.0"}, NewNetwork: true,
+		Quotas:   api.ProjectQuotas{Jails: 3, Memory: "4G"}, FirewallPolicies: []string{"base"}, Images: []string{"freebsd-15.0"}, NewNetwork: true,
 	}
 	if err := ProjectSpec("web", ok); err != nil {
 		t.Fatal(err)
@@ -436,7 +437,8 @@ func TestProjectSpecShape(t *testing.T) {
 		"host slash":      func(s *api.ProjectSpec) { s.Hosts = []string{"a/b"} },
 		"host empty":      func(s *api.ProjectSpec) { s.Hosts = []string{""} },
 		"dup host":        func(s *api.ProjectSpec) { s.Hosts = []string{"a", "a"} },
-		"firewall inject": func(s *api.ProjectSpec) { s.Firewall = "x; pass" },
+		"firewall inject": func(s *api.ProjectSpec) { s.FirewallPolicies = []string{"x; pass"} },
+		"firewall twice":  func(s *api.ProjectSpec) { s.FirewallPolicies = []string{"x", "x"} },
 	}
 	for name, m := range mut {
 		s := ok
@@ -557,5 +559,30 @@ func TestFirewallComments(t *testing.T) {
 	}
 	if err := AddressSetSpec(api.AddressSetSpec{Comment: strings.Repeat("x", CommentMax), Addresses: []api.AddressEntry{{Address: "10.0.0.1", Comment: strings.Repeat("y", CommentMax)}}}); err != nil {
 		t.Errorf("comments of exactly %d characters: %v", CommentMax, err)
+	}
+}
+
+// A rule belongs to the jail that has the policy: an inbound rule is to the jail itself and an outbound rule from it, so
+// the other end is the only one a rule names.
+func TestRuleNamesOnlyTheOtherEnd(t *testing.T) {
+	spec := func(r api.FirewallRule) api.FirewallPolicySpec {
+		return api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{r}}
+	}
+	for name, tc := range map[string]struct {
+		rule api.FirewallRule
+		bad  string
+	}{
+		"inbound from":  {api.FirewallRule{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"192.0.2.7"}, Ports: []string{"5432"}}, ""},
+		"outbound to":   {api.FirewallRule{Action: "allow", Direction: "out", Proto: "tcp", To: []string{"192.0.2.7"}, Ports: []string{"5432"}}, ""},
+		"inbound to":    {api.FirewallRule{Action: "allow", Direction: "in", Proto: "tcp", To: []string{"any"}, Ports: []string{"22"}}, "inbound rule is always to the jail itself"},
+		"outbound from": {api.FirewallRule{Action: "allow", Direction: "out", Proto: "tcp", From: []string{"192.0.2.7"}}, "outbound rule is always from the jail itself"},
+	} {
+		_, err := FirewallPolicySpec(spec(tc.rule))
+		switch {
+		case tc.bad == "" && err != nil:
+			t.Errorf("%s: %v", name, err)
+		case tc.bad != "" && (err == nil || !strings.Contains(err.Error(), tc.bad)):
+			t.Errorf("%s: want an error saying %q, got %v", name, tc.bad, err)
+		}
 	}
 }

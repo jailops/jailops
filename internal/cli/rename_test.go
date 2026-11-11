@@ -1,6 +1,7 @@
 package cli_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -34,7 +35,7 @@ func TestRenameCommands(t *testing.T) {
 	// firewall objects
 	tr.ok("firewall", "address-set", "rename", "office", "hq", "-y")
 	tr.ok("firewall", "policy", "rename", "web", "public", "-y")
-	if j, _ = h.srv.JailIn("main", "web"); j.Spec.Firewall.Policy != "public" {
+	if j, _ = h.srv.JailIn("main", "web"); !slices.Equal(j.Spec.Firewall.Policies, []string{"public"}) {
 		t.Fatalf("%+v", j.Spec.Firewall)
 	}
 

@@ -39,7 +39,7 @@ watch(() => props.open, (o) => {
   const p = props.project
   if (p) {
     const q = p.spec.quotas ?? {}
-    Object.assign(f, { name: p.metadata.name, description: p.spec.description ?? '', hosts: (p.spec.hosts ?? []).join(', '), firewall: p.spec.firewall ?? '', images: (p.spec.images ?? []).join(', '), jails: q.jails, cpu: q.cpu, memory: q.memory ?? '', pids: q.pids, addresses: q.addresses, networks: clone(p.spec.networks ?? []), storage: clone(p.spec.storage ?? []) })
+    Object.assign(f, { name: p.metadata.name, description: p.spec.description ?? '', hosts: (p.spec.hosts ?? []).join(', '), firewall: (p.spec.firewall_policies ?? []).join(', '), images: (p.spec.images ?? []).join(', '), jails: q.jails, cpu: q.cpu, memory: q.memory ?? '', pids: q.pids, addresses: q.addresses, networks: clone(p.spec.networks ?? []), storage: clone(p.spec.storage ?? []) })
   }
 })
 
@@ -59,7 +59,7 @@ function body(): Pick<Project, 'metadata' | 'spec'> {
       networks: clean(f.networks),
       storage: clean(f.storage),
       quotas,
-      ...(f.firewall ? { firewall: f.firewall } : {}),
+      ...(split(f.firewall).length ? { firewall_policies: split(f.firewall) } : {}),
       ...(split(f.images).length ? { images: split(f.images) } : {}),
       ...(!editing.value && f.newNetwork ? { new_network: true } : {}),
     },

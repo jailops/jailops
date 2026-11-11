@@ -671,14 +671,15 @@ expect "the jail reaches its gateway" '1 packets received' $J exec --project edg
 gw4=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
 expect "the jail reaches the host's default gateway through the NAT of the uplink" '1 packets received' $J exec --project edge edgeweb -- ping -c1 -t5 "$gw4"
 expect "a jail without a policy says it is open" "Firewall: +open: no firewall policy" $J jail info edgeweb --project edge
-expect "a policy without its defaults is refused" "give --default-in and --default-out" \
-	sh -c "$J firewall policy create nodefaults --project edge --default-in deny --rule 'allow in tcp port 22' 2>&1; true"
+check "a policy without --default-in and --default-out" $J firewall policy create nodefaults --project edge --rule 'allow in tcp port 22'
+expect "it denies inbound and allows outbound, written into the policy" 'nodefaults +deny +allow' $J firewall policy list --project edge
+check "delete it" $J firewall policy delete nodefaults --project edge -y
 # a rule names a jail: @edgeweb in an address set of the project, the set in a policy, the policy on another jail
 check "an address set with a jail as a member" $J firewall address-set create git_allow --project edge --address @edgeweb
 check "an address with a comment" $J firewall address-set create office_ip --project edge --address 192.0.2.7 --comment "the office"
 check "a policy that names the set" $J firewall policy create git --project edge --default-in deny --default-out allow --comment "the git server of the team" --rule "allow in tcp from @git_allow port 22 comment ssh from the team" --rule "allow in tcp from @edgeweb port 5432 comment the web jail asks for rows"
 check "a second jail" $J create edgedb --project edge --image "$img" --network office --storage default
-check "its policy" $J config set edgedb firewall.policy git --project edge
+check "its policy" $J config set edgedb firewall.policies git --project edge
 check "it starts" $J start edgedb --project edge
 sleep 2
 expect "the anchor of the second jail holds the address of the first one in the table of the set" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t s_git_allow -T show

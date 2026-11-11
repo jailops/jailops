@@ -219,5 +219,5 @@ spec:
 // Jail writes a jail declaration on a host.
 func (e *Env) Jail(host, name string, labels string, extra string) {
 	e.T.Helper()
-	e.Write("projects/"+Project+"/jails/"+name+".yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: ["+host+"]\nmetadata:\n  name: "+name+"\n  labels: {"+labels+"}\n"+extra+"spec:\n  image: freebsd-15@stable\n  storage: default\n  network:\n    - network: internal\n      ipv4: auto\n  firewall:\n    policy: web\n")
+	e.Write("projects/"+Project+"/jails/"+name+".yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: ["+host+"]\nmetadata:\n  name: "+name+"\n  labels: {"+labels+"}\n"+extra+"spec:\n  image: freebsd-15@stable\n  storage: default\n  network:\n    - network: internal\n      ipv4: auto\n  firewall:\n    policies: [web]\n")
 }

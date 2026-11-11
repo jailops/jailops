@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -656,7 +657,7 @@ func projectFixture(t *testing.T, e *dtest.Env, s *service.Service) string {
 		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"443"}}}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateProfile(alpha, api.Profile{Metadata: api.ObjectMeta{Name: "small"}, Spec: api.ProfileSpec{Config: map[string]string{"firewall.policy": "web"}}}); err != nil {
+	if _, err := s.CreateProfile(alpha, api.Profile{Metadata: api.ObjectMeta{Name: "small"}, Spec: api.ProfileSpec{Config: map[string]string{"firewall.policies": "web"}}}); err != nil {
 		t.Fatal(err)
 	}
 	web := dtest.WebJail("web")
@@ -778,6 +779,48 @@ func TestRenameProjectRollsBackEveryStep(t *testing.T) {
 	}
 }
 
+// A policy named in the list of a jail or in the list of a project is renamed in place: the order of the list stays.
+func TestRenamePolicyInTheListsOfAJailAndAProject(t *testing.T) {
+	e, s := newEnv(t)
+	projectFixture(t, e, s)
+	alpha := as(globalAdmin, dtest.SeedProject)
+	for _, n := range []string{"first", "second", "floor1", "floor2"} {
+		if _, err := s.CreatePolicy(alpha, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: n}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	j, err := s.GetJail(alpha, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	j.Spec.Firewall.Policies = []string{"first", "second"}
+	if _, err := s.UpdateJail(alpha, "web", j, service.AnyGeneration); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := s.GetProject(as(globalAdmin, ""), dtest.SeedProject)
+	p.Spec.FirewallPolicies = []string{"floor1", "floor2"}
+	if _, err := s.UpdateProject(as(globalAdmin, ""), dtest.SeedProject, p, service.AnyGeneration); err != nil {
+		t.Fatal(err)
+	}
+	res := doRename(t, s)(s.RenamePolicy(alpha, "first", renameOpts("primary")))
+	if !hasChange(res, api.RenameReference, "jail web") {
+		t.Fatalf("%+v", res)
+	}
+	if j, _ := s.GetJail(alpha, "web"); !slices.Equal(j.Spec.Firewall.Policies, []string{"primary", "second"}) {
+		t.Fatalf("%q", j.Spec.Firewall.Policies)
+	}
+	res = doRename(t, s)(s.RenamePolicy(alpha, "floor2", renameOpts("floorb")))
+	if !hasChange(res, api.RenameReference, "project "+dtest.SeedProject) {
+		t.Fatalf("%+v", res)
+	}
+	if p, _ := s.GetProject(as(globalAdmin, ""), dtest.SeedProject); !slices.Equal(p.Spec.FirewallPolicies, []string{"floor1", "floorb"}) {
+		t.Fatalf("%q", p.Spec.FirewallPolicies)
+	}
+	// a policy that a list names is not deleted
+	wantCode(t, s.DeletePolicy(alpha, "second", service.AnyGeneration), api.CodeBusy)
+	wantCode(t, s.DeletePolicy(alpha, "floor1", service.AnyGeneration), api.CodeBusy)
+}
+
 func TestRenameFirewallObjectsAndProfiles(t *testing.T) {
 	e, s := newEnv(t)
 	projectFixture(t, e, s)
@@ -799,7 +842,7 @@ func TestRenameFirewallObjectsAndProfiles(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 	prof, _ := s.GetProfile(alpha, "small")
-	if prof.Spec.Config["firewall.policy"] != "public" {
+	if prof.Spec.Config["firewall.policies"] != "public" {
 		t.Fatalf("%+v", prof.Spec)
 	}
 	// a profile: the jails that apply it follow
@@ -819,14 +862,14 @@ func TestRenameFirewallObjectsAndProfiles(t *testing.T) {
 	doRename(t, s)(s.RenamePolicy(as(alphaOnly, dtest.SeedProject), "public", renameOpts("web")))
 	// the mandatory policy of a project is a global administrator's
 	p, _ := s.GetProject(as(globalAdmin, ""), dtest.SeedProject)
-	p.Spec.Firewall = "web"
+	p.Spec.FirewallPolicies = []string{"web"}
 	if _, err := s.UpdateProject(as(globalAdmin, ""), dtest.SeedProject, p, service.AnyGeneration); err != nil {
 		t.Fatal(err)
 	}
 	_, _, err = s.RenamePolicy(as(alphaOnly, dtest.SeedProject), "web", renameOpts("base"))
 	wantCode(t, err, api.CodeForbidden)
 	doRename(t, s)(s.RenamePolicy(alpha, "web", renameOpts("base")))
-	if p, _ := s.GetProject(as(globalAdmin, ""), dtest.SeedProject); p.Spec.Firewall != "base" {
-		t.Fatalf("mandatory: %q", p.Spec.Firewall)
+	if p, _ := s.GetProject(as(globalAdmin, ""), dtest.SeedProject); !slices.Equal(p.Spec.FirewallPolicies, []string{"base"}) {
+		t.Fatalf("mandatory: %q", p.Spec.FirewallPolicies)
 	}
 }

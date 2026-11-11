@@ -76,14 +76,14 @@ func BuildBundle(spec api.JailSpec, gen api.ImageGeneration, src ObjectSource, s
 		b.Networks = append(b.Networks, deepCopy(ns))
 	}
 	var pending []string
-	if pn := spec.Firewall.Policy; pn != "" {
+	for _, pn := range spec.Firewall.Policies {
 		p, ok := src.Policy(pn)
 		if !ok {
 			return b, api.Errorf(api.CodeNotFound, "firewall policy %q referenced by the jail does not exist", pn)
 		}
 		b.PolicyNames = append(b.PolicyNames, pn)
 		b.Policies = append(b.Policies, deepCopy(p))
-		pending = setRefs(p)
+		pending = append(pending, setRefs(p)...)
 	}
 	seen := map[string]api.AddressSetSpec{}
 	for len(pending) > 0 {

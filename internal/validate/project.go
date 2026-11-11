@@ -126,10 +126,8 @@ func ProjectSpec(name string, s api.ProjectSpec) error {
 			return Invalid("quotas.memory", "memory %q is not a size", q.Memory)
 		}
 	}
-	if s.Firewall != "" {
-		if err := Name("firewall", s.Firewall); err != nil {
-			return err
-		}
+	if err := PolicyNames("firewall_policies", s.FirewallPolicies); err != nil {
+		return err
 	}
 	seen = map[string]bool{}
 	for i, im := range s.Images {

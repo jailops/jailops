@@ -10,5 +10,5 @@ spec:
   storage:
     - {storage: default, quota: 100G}
   quotas: {jails: 10, memory: 8G, addresses: 50}
-  firewall: floor
+  firewall_policies: [floor]
   images: [freebsd-15]

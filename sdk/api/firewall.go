@@ -33,6 +33,9 @@ type FirewallRule struct {
 	To        []string `json:"to,omitempty"`
 	Ports     []string `json:"ports,omitempty"` // "80", "8000-8100"
 	Log       bool     `json:"log,omitempty"`
+	// Disabled switches the rule off without deleting it: it is validated and numbered like any other and shows in the
+	// policy and as a comment line of the rendered anchor, but it is not loaded and lets nothing through or stops nothing.
+	Disabled bool `json:"disabled,omitempty"`
 	// Redirect rewrites the destination (rdr). Allowed on inbound rules only.
 	Redirect *Redirect `json:"redirect,omitempty"`
 }

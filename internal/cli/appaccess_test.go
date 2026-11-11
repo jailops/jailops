@@ -86,6 +86,8 @@ func TestAppAccessCompletion(t *testing.T) {
 		{[]string{"app", "allow", "db", "from", ""}, []string{"@web", "@office", "host"}, []string{"@db"}},
 		{[]string{"app", "deny", "web", "from", ""}, []string{"@db", "@office", "host"}, []string{"@web"}},
 		{[]string{"app", "access", ""}, []string{"db", "web"}, []string{"from"}},
+		{[]string{"firewall", "address-set", "create", "pg_allow", "--address", ""}, []string{"@web", "@db", "@office"}, []string{"host"}},
+		{[]string{"firewall", "address-set", "create", "office", "--address", ""}, []string{"@web", "@db"}, []string{"@office"}},
 	} {
 		out, _, code := h.run("", append([]string{"__complete"}, c.args...)...)
 		lines := strings.Split(out, "\n")

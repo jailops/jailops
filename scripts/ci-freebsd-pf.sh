@@ -92,7 +92,7 @@ remove_all() {
 		retry 6 $J delete --confirm-data-loss "${pn#*:}" --project "${pn%%:*}" </dev/null
 	done
 	for p in pfa pfb; do
-		$J project set $p --firewall "" </dev/null >/dev/null 2>&1
+		$J project set $p --firewall-policy "" </dev/null >/dev/null 2>&1
 		for x in $($J firewall policy list --project $p --no-headers -o name </dev/null 2>/dev/null); do
 			retry 3 $J firewall policy delete -y "$x" --project $p </dev/null
 		done
@@ -191,6 +191,54 @@ udp() {
 # the matrix of one source against jail a, both families. The icmp and tcp probes of the two families are independent of each
 # other, so they run at the same time and their answers are printed afterwards in the usual order. The udp probes stay one at
 # a time: the logger of a jail ("nc -u -l") talks to one sender at a time, so two probes at once would disturb each other.
+# sim SRC DST PROTO [PORT]: `jailops firewall test` for the connection a probe makes. SRC is host, a jail of project pfa
+# (pfa:b) or the jail o of project pfb (an address of another project, which the test treats as an external host); DST is
+# an address of jail a. The exit status is the command's: 0 pass, 1 block, 8 it cannot say.
+sim() {
+	src=$1; dst=$2; proto=$3; port=${4:-}
+	f=$(fam "$dst")
+	[ "$proto" = icmp ] && [ "$f" = 6 ] && proto=icmp6 # a ping of an IPv6 address is icmp6
+	case $src in
+	host) from=host ;;
+	pfa:*) from="@${src#*:}" ;;
+	*) if [ "$f" = 6 ]; then from=$O6; else from=$O4; fi ;;
+	esac
+	set -- --project pfa --from "$from" --to "$dst" --proto "$proto" --family "$f"
+	[ -n "$port" ] && set -- "$@" --port "$port"
+	$J firewall test "$@" </dev/null >/dev/null 2>&1
+}
+# simexpect WANT DESCRIPTION SRC DST PROTO [PORT]: the test must say what the real probe did (allow = pass, deny = block).
+# It is asked about the same connections the probes make, in every phase, so a rule the test misreads shows up where the
+# traffic proves it.
+simexpect() {
+	want=$1; desc=$2; shift 2
+	sim "$@"; rc=$?
+	case $rc in
+	0) got=allow ;;
+	1) got=deny ;;
+	*) printf 'NOTE  firewall test: %s: it cannot say (exit %s)\n' "$desc" "$rc"; return 0 ;;
+	esac
+	if [ "$got" = "$want" ]; then
+		pass "firewall test: $desc ($want)"
+	else
+		bad "firewall test: $desc: expected $want, got $got"
+		simshow "$@" | sed 's/^/      /' # what it said, for whoever reads the log
+	fi
+}
+simshow() { # simshow SRC DST PROTO [PORT]: the same test, printed
+	src=$1; dst=$2; proto=$3; port=${4:-}
+	f=$(fam "$dst")
+	[ "$proto" = icmp ] && [ "$f" = 6 ] && proto=icmp6 # a ping of an IPv6 address is icmp6
+	case $src in
+	host) from=host ;;
+	pfa:*) from="@${src#*:}" ;;
+	*) if [ "$f" = 6 ]; then from=$O6; else from=$O4; fi ;;
+	esac
+	set -- --project pfa --from "$from" --to "$dst" --proto "$proto" --family "$f"
+	[ -n "$port" ] && set -- "$@" --port "$port"
+	$J firewall test "$@" </dev/null 2>&1
+}
+
 matrix() { # matrix SRC ICMP T8080 T9090 T2222 UDP5353   (each allow|deny)
 	src=$1
 	for ver in 4 6; do
@@ -210,6 +258,15 @@ matrix() { # matrix SRC ICMP T8080 T9090 T2222 UDP5353   (each allow|deny)
 			fails=$((fails + $(grep -c '^FAIL' "$f" || true)))
 		done
 		expect "$6" "$src -> a v$ver udp 5353" udp "$src" "$t" 5353
+	done
+	# the firewall test must agree with what the probes just showed
+	for ver in 4 6; do
+		if [ $ver = 4 ]; then t=$A4; else t=$A6; fi
+		simexpect "$2" "$src -> a v$ver icmp" "$src" "$t" icmp
+		simexpect "$3" "$src -> a v$ver tcp 8080" "$src" "$t" tcp 8080
+		simexpect "$4" "$src -> a v$ver tcp 9090" "$src" "$t" tcp 9090
+		simexpect "$5" "$src -> a v$ver tcp 2222" "$src" "$t" tcp 2222
+		simexpect "$6" "$src -> a v$ver udp 5353" "$src" "$t" udp 5353
 	done
 }
 
@@ -442,7 +499,7 @@ say "phase 1: the project's mandatory policy denies everything in (egress allowe
 PRE=$(snapshot)
 policy pfa base 'default_in: deny
 default_out: allow'
-$J project set pfa --firewall base </dev/null >/dev/null || die "project firewall"
+$J project set pfa --firewall-policy base </dev/null >/dev/null || die "project firewall"
 settle 10
 matrix host deny deny deny deny deny
 matrix pfa:b deny deny deny deny deny
@@ -472,8 +529,8 @@ policy pfb toa "default_in: allow
 default_out: allow
 rules:
   - {name: to-a-udp, action: allow, direction: out, proto: udp, to: ['$A4', '$A6'], ports: ['5353']}"
-$J config set a firewall.policy web --project pfa </dev/null >/dev/null || die "attach web"
-$J config set o firewall.policy toa --project pfb </dev/null >/dev/null || die "attach toa"
+$J config set a firewall.policies web --project pfa </dev/null >/dev/null || die "attach web"
+$J config set o firewall.policies toa --project pfb </dev/null >/dev/null || die "attach toa"
 settle 10
 matrix host allow deny deny deny deny
 matrix pfa:b deny allow deny deny deny
@@ -484,7 +541,7 @@ say "phase 3: a policy cannot weaken the project's default (the floor)"
 PRE=$(snapshot)
 policy pfa open 'default_in: allow
 default_out: allow'
-$J config set b firewall.policy open --project pfa </dev/null >/dev/null || die "attach open"
+$J config set b firewall.policies open --project pfa </dev/null >/dev/null || die "attach open"
 # this action is meant to change nothing (the project floor wins): anchors converge in about 4s elsewhere, so 15s is plenty
 SETTLE_WAIT=15 settle 10
 # b has its own policy 'open' (default allow) but the project says default deny in: still denied
@@ -500,7 +557,7 @@ policy pfa lock "default_in: deny
 default_out: deny
 rules:
   - {name: to-a-9090, action: allow, direction: out, proto: tcp, to: ['$A4', '$A6'], ports: ['9090']}"
-$J config set c firewall.policy lock --project pfa </dev/null >/dev/null || die "attach lock"
+$J config set c firewall.policies lock --project pfa </dev/null >/dev/null || die "attach lock"
 settle 10
 for ver in 4 6; do
 	if [ $ver = 4 ]; then a=$A4; b=$B4; h=$H4; else a=$A6; b=$B6; h=$H6; fi
@@ -509,6 +566,59 @@ for ver in 4 6; do
 	expect deny "c -> b v$ver icmp (c's egress denies)" icmp pfa:c "$b"
 	expect deny "c -> host v$ver icmp (c's egress denies)" icmp pfa:c "$h"
 done
+
+say "phase 5: a jail with two policies gets the rules of both"
+PRE=$(snapshot)
+policy pfa extra5 "default_in: deny
+default_out: allow
+rules:
+  - {name: tcp-2222-from-friends, action: allow, direction: in, proto: tcp, from: ['@friends'], ports: ['2222']}"
+$J config set a firewall.policies web,extra5 --project pfa </dev/null >/dev/null || die "attach web and extra5"
+settle 10
+# web opens tcp 8080 for b, extra5 opens tcp 2222 for b: both are in a's anchor
+matrix pfa:b deny allow deny allow deny
+PRE=$(snapshot)
+$J config set a firewall.policies web --project pfa </dev/null >/dev/null || die "attach web again"
+settle 10
+matrix pfa:b deny allow deny deny deny
+
+say "phase 5b: a deny rule wins over an allow rule of another policy of the same jail, in either order; a disabled rule decides nothing"
+PRE=$(snapshot)
+policy pfa quiet5 "default_in: deny
+default_out: allow
+rules:
+  - {name: no-8080-from-friends, action: deny, direction: in, proto: tcp, from: ['@friends'], ports: ['8080']}"
+# web (listed first) allows tcp 8080 for b; quiet5 (listed after it) denies it: the deny wins
+$J config set a firewall.policies web,quiet5 --project pfa </dev/null >/dev/null || die "attach web and quiet5"
+settle 10
+matrix pfa:b deny deny deny deny deny
+matrix pfa:c deny deny allow deny deny # what the deny does not match is decided as before: c's tcp 9090 from the tag
+# the other order of the two policies gives the same answers
+PRE=$(snapshot)
+$J config set a firewall.policies quiet5,web --project pfa </dev/null >/dev/null || die "attach quiet5 and web"
+settle 10
+matrix pfa:b deny deny deny deny deny
+matrix pfa:c deny deny allow deny deny
+# switch the deny rule off: web's allow decides again
+PRE=$(snapshot)
+policy pfa quiet5 "default_in: deny
+default_out: allow
+rules:
+  - {name: no-8080-from-friends, action: deny, direction: in, proto: tcp, from: ['@friends'], ports: ['8080'], disabled: true}"
+settle 10
+matrix pfa:b deny allow deny deny deny
+# a disabled allow rule lets nothing through: tcp 2222 from friends stays closed
+PRE=$(snapshot)
+policy pfa quiet5 "default_in: deny
+default_out: allow
+rules:
+  - {name: tcp-2222-from-friends, action: allow, direction: in, proto: tcp, from: ['@friends'], ports: ['2222'], disabled: true}"
+settle 10
+matrix pfa:b deny allow deny deny deny
+PRE=$(snapshot)
+$J config set a firewall.policies web --project pfa </dev/null >/dev/null || die "attach web again"
+settle 10
+matrix pfa:b deny allow deny deny deny
 
 say "phase 6: pf anchors are real and well formed"
 PRE=$(snapshot)
@@ -619,7 +729,7 @@ policy pfa fwd "default_in: deny
 default_out: allow
 rules:
   - {name: forward-18080, action: allow, direction: in, proto: tcp, redirect: {host_port: 18080, jail_port: 8080}}"
-$J config set r firewall.policy fwd --project pfa </dev/null >/dev/null || die "attach fwd"
+$J config set r firewall.policies fwd --project pfa </dev/null >/dev/null || die "attach fwd"
 $J start r --project pfa </dev/null >/dev/null || die "start r"
 t=0; until jx pfa r true >/dev/null 2>&1; do t=$((t + 1)); [ $t -gt 60 ] && break; sleep 1; done
 R4=$(addr4 pfa r)

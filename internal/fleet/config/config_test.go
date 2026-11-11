@@ -365,7 +365,7 @@ func TestProjectLayoutRules(t *testing.T) {
 
 func TestCheckEnforcesProjectGrants(t *testing.T) {
 	d := base(t)
-	write(t, d, "projects/web.yaml", "apiVersion: jailops/v1\nkind: Project\nmetadata:\n  name: web\nspec:\n  hosts: [a]\n  networks: [{network: ok}]\n  storage: [{storage: default}]\n  images: [img]\n  firewall: base\n")
+	write(t, d, "projects/web.yaml", "apiVersion: jailops/v1\nkind: Project\nmetadata:\n  name: web\nspec:\n  hosts: [a]\n  networks: [{network: ok}]\n  storage: [{storage: default}]\n  images: [img]\n  firewall_policies: [base]\n")
 	write(t, d, "shared/networks/ok.yaml", net("ok"))
 	write(t, d, "shared/networks/other.yaml", net("other"))
 	write(t, d, "shared/images/img.yaml", "apiVersion: jailops/v1\nkind: Image\nmetadata:\n  name: img\nspec: {os: freebsd, release: r, arch: amd64, source: {type: pkgbase}}\n")

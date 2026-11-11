@@ -74,15 +74,60 @@ Firewall policy documented
 1   allow in tcp port 80,443        the site
 2   allow in tcp from @hq port 22   ssh from the office
 
+$ jailops firewall policy create switchable --rule allow in tcp port 80 comment the site --rule allow in tcp port 22 disabled comment ssh, switched off --rule deny in tcp port 23 disabled
+firewall policy/switchable created
+
+$ jailops firewall policy show switchable
+Firewall policy switchable
+  Default in:   deny
+  Default out:  allow
+  Age:          3h
+
+#   RULE                            COMMENT
+1   allow in tcp port 80            the site
+2   allow in tcp port 22 disabled   ssh, switched off
+3   deny in tcp port 23 disabled    -
+
+$ jailops firewall policy show switchable -o yaml
+metadata:
+  name: switchable
+  uuid: <uuid>
+  project: main
+  scope: fleet
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  default_in: deny
+  default_out: allow
+  rules:
+    - comment: the site
+      action: allow
+      direction: in
+      proto: tcp
+      ports:
+        - "80"
+    - comment: ssh, switched off
+      action: allow
+      direction: in
+      proto: tcp
+      ports:
+        - "22"
+      disabled: true
+    - action: deny
+      direction: in
+      proto: tcp
+      ports:
+        - "23"
+      disabled: true
+
 $ jailops firewall policy create nocomment --default-in deny --default-out allow --rule allow in tcp port 80 comment
 ! usage: rule "allow in tcp port 80 comment": comment needs a text
 ! hint: run 'jailops firewall policy create --help' for usage
 [exit 2]
 
 $ jailops firewall policy create nodefaults --rule allow in tcp port 80
-! usage: give --default-in and --default-out: allow or deny (or use -f FILE)
-! hint: run 'jailops firewall policy create --help' for usage
-[exit 2]
+firewall policy/nodefaults created
 
 $ jailops firewall address-set create c1 --comment no address
 ! usage: give at least one --address (or use -f FILE)
@@ -110,6 +155,8 @@ $ jailops firewall policy create bad2 --default-in deny --default-out allow --ru
 $ jailops firewall policy list
 NAME         DEFAULT-IN   DEFAULT-OUT   RULES   RAW
 documented   deny         allow         2       no
+nodefaults   deny         allow         1       no
+switchable   deny         allow         3       no
 web          deny         allow         3       no
 
 $ jailops firewall policy show web

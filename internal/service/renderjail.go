@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"jailops.net/jailops/internal/apps"
 	"net/netip"
 	"path"
 	"path/filepath"
@@ -140,31 +141,27 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 			uplink = n.Spec.Uplink
 		}
 	}
-	// Firewall anchor: the project's mandatory policy first, then the jail's own.
-	var own *object[api.FirewallPolicySpec]
-	if pn := j.Spec.Firewall.Policy; pn != "" {
+	// Firewall anchor: the project's policies first, then the managed access policy, then the jail's own.
+	var projectPols, ownPols []object[api.FirewallPolicySpec]
+	for _, pn := range j.Spec.Firewall.Policies {
 		pol, err := s.polKind.p(project).get(pn)
 		if err != nil {
 			return nil, fmt.Errorf("firewall policy %q: %w", pn, err)
 		}
-		own = &pol
+		ownPols = append(ownPols, pol)
 	}
-	var mandatory *object[api.FirewallPolicySpec]
-	if pr, err := s.projKind.get(project); err == nil && pr.Spec.Firewall != "" {
-		pol, err := s.polKind.p(project).get(pr.Spec.Firewall)
-		if err != nil {
-			return nil, fmt.Errorf("the mandatory firewall policy %q of project %q: %w", pr.Spec.Firewall, project, err)
+	if pr, err := s.projKind.get(project); err == nil {
+		for _, pn := range pr.Spec.FirewallPolicies {
+			pol, err := s.polKind.p(project).get(pn)
+			if err != nil {
+				return nil, fmt.Errorf("the mandatory firewall policy %q of project %q: %w", pn, project, err)
+			}
+			projectPols = append(projectPols, pol)
 		}
-		mandatory = &pol
 	}
 	// A policy that was stored without its defaults is not rendered with a guess: the jail keeps the anchor it has.
-	if own != nil {
-		if err := policyDefaults(own.Meta.Name, own.Spec); err != nil {
-			return nil, err
-		}
-	}
-	if mandatory != nil {
-		if err := policyDefaults(mandatory.Meta.Name, mandatory.Spec); err != nil {
+	for _, p := range append(append([]object[api.FirewallPolicySpec](nil), projectPols...), ownPols...) {
+		if err := policyDefaults(p.Meta.Name, p.Spec); err != nil {
 			return nil, err
 		}
 	}
@@ -190,44 +187,48 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 				TagMembers: map[string][]netip.Addr{}, Sets: sets, Uplink: uplink, AllowRaw: true,
 				Gateways: uniqStrings(gateways), Antispoof: true, LinkLocal: linkLocal, NoAdvertise: v6 > 0,
 				Foreign: s.foreignPrefixes(project)}
-			// A jail without any policy is open (apart from the isolation of projects).
-			in.Policy = api.FirewallPolicySpec{DefaultIn: "allow", DefaultOut: "allow"}
-			var pols []api.FirewallPolicySpec
-			if own != nil {
-				in.Policy = own.Spec
-				pols = append(pols, own.Spec)
+			// A jail without any policy is open (apart from the isolation of projects); with policies, the strictest
+			// default of them all applies: the project's defaults are a floor that a jail's own policy can open ports
+			// through but cannot turn from deny into allow.
+			in.DefaultIn, in.DefaultOut = "allow", "allow"
+			var specs []api.FirewallPolicySpec
+			for _, p := range projectPols {
+				in.Policies = append(in.Policies, render.PFPolicy{Name: p.Meta.Name, Project: true, Policy: p.Spec, AllowRaw: true})
+				specs = append(specs, p.Spec)
 			}
-			if mandatory != nil {
-				in.Mandatory = &render.PFMandatory{Name: mandatory.Meta.Name, Policy: mandatory.Spec, AllowRaw: true}
-				pols = append(pols, mandatory.Spec)
-				if own == nil {
-					// Without a policy of its own the jail takes the defaults of the project's.
-					in.Policy = api.FirewallPolicySpec{DefaultIn: mandatory.Spec.DefaultIn, DefaultOut: mandatory.Spec.DefaultOut}
-				} else {
-					// The project's defaults are a floor: a jail's own policy can open ports, it cannot turn a
-					// project's default deny into a default allow.
-					in.Policy.DefaultIn = stricterDefault(in.Policy.DefaultIn, mandatory.Spec.DefaultIn, "in")
-					in.Policy.DefaultOut = stricterDefault(in.Policy.DefaultOut, mandatory.Spec.DefaultOut, "out")
+			// The grants of app access (the managed policy app-<jail>) come after the project's policies and before the
+			// jail's own; an app's jail it closes stays closed whatever the jail's own policies say.
+			accRules, accClosed := s.accessRulesFor(project, j.Metadata.Name)
+			if len(accRules) > 0 {
+				in.Policies = append(in.Policies, render.PFPolicy{Name: apps.AccessPolicyName(j.Metadata.Name), Managed: true, Policy: api.FirewallPolicySpec{Rules: accRules}})
+			}
+			for _, p := range ownPols {
+				in.Policies = append(in.Policies, render.PFPolicy{Name: p.Meta.Name, Policy: p.Spec, AllowRaw: true})
+				specs = append(specs, p.Spec)
+			}
+			for i, p := range specs {
+				if i == 0 {
+					in.DefaultIn, in.DefaultOut = p.DefaultIn, p.DefaultOut
+					continue
 				}
+				in.DefaultIn = stricterDefault(in.DefaultIn, p.DefaultIn, "in")
+				in.DefaultOut = stricterDefault(in.DefaultOut, p.DefaultOut, "out")
 			}
-			for _, p := range pols {
+			for _, p := range specs {
 				for t, m := range s.tagMembers(project, p) {
 					in.TagMembers[t] = append(in.TagMembers[t], m...)
 				}
 			}
-			in.Sets = withEmptyRefs(in.Sets, pols)
-			// The grants of app access (the managed policy app-<jail>) come after the project's policy and before
-			// the jail's own rules; an app's jail it closes stays closed whatever the jail's own policy says.
-			accRules, accClosed := s.accessRulesFor(project, j.Metadata.Name)
+			in.Sets = withEmptyRefs(in.Sets, specs)
 			if accClosed {
-				in.Policy.DefaultIn = "deny"
+				in.DefaultIn = "deny"
 			}
-			in.Policy.Rules = append(append(append([]api.FirewallRule(nil), accRules...), in.Policy.Rules...), proxyRules...)
-			rs, err := render.PFAnchor(in)
+			in.Proxy = proxyRules
+			an, err := render.BuildAnchor(in)
 			if err != nil {
 				return nil, err
 			}
-			d.AnchorName, d.Ruleset = render.JailAnchor(name), rs
+			d.AnchorName, d.Ruleset, d.Anchor = render.JailAnchor(name), render.FormatAnchor(an), an
 			d.ParentAnchors = map[string]string{render.ProjectAnchor(project): render.ProjectAnchorRules()}
 		}
 	}

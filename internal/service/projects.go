@@ -539,9 +539,9 @@ func (s *Service) CreateProject(ctx context.Context, in api.Project) (api.Projec
 	if err := s.projKind.notTaken(name); err != nil {
 		return api.Project{}, err
 	}
-	if spec.Firewall != "" {
-		return api.Project{}, api.Errorf(api.CodeNotFound, "firewall policy %q does not exist in the new project", spec.Firewall).
-			WithHint("create the project, create the policy in it, then set spec.firewall")
+	if len(spec.FirewallPolicies) > 0 {
+		return api.Project{}, api.Errorf(api.CodeNotFound, "firewall policy %q does not exist in the new project", spec.FirewallPolicies[0]).
+			WithHint("create the project, create the policy in it, then set spec.firewall_policies")
 	}
 	var madeNet string
 	if spec.NewNetwork {
@@ -602,9 +602,19 @@ func (s *Service) UpdateProject(ctx context.Context, name string, in api.Project
 	if err != nil {
 		return api.Project{}, err
 	}
-	if in.Spec.Firewall != "" && in.Spec.Firewall != old.Spec.Firewall {
-		if !s.polKind.p(name).exists(in.Spec.Firewall) {
-			return api.Project{}, api.Errorf(api.CodeNotFound, "firewall policy %q does not exist in project %q", in.Spec.Firewall, name)
+	for _, pn := range in.Spec.FirewallPolicies {
+		if slices.Contains(old.Spec.FirewallPolicies, pn) {
+			continue
+		}
+		o, err := s.polKind.p(name).get(pn)
+		if err != nil {
+			if api.IsCode(err, api.CodeNotFound) {
+				return api.Project{}, api.Errorf(api.CodeNotFound, "firewall policy %q does not exist in project %q", pn, name)
+			}
+			return api.Project{}, err
+		}
+		if o.Meta.ManagedBy != "" {
+			return api.Project{}, invalid("firewall policy %q is managed by %s: it belongs to its own jail and cannot be a mandatory policy", pn, o.Meta.ManagedBy)
 		}
 	}
 	if err := s.checkProjectRefs(name, in.Spec, name); err != nil {

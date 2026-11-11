@@ -507,7 +507,7 @@ func TestFirewall(t *testing.T) {
 		t.Fatalf("refusal: %+v", err)
 	}
 	j := dtest.WebJail("web")
-	j.Spec.Firewall.Policy = "web"
+	j.Spec.Firewall.Policies = []string{"web"}
 	op, err := e.Admin.Jails().Create(c, j)
 	if err != nil {
 		t.Fatal(err)

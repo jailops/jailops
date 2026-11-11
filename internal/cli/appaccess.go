@@ -55,6 +55,35 @@ func (a *app) completeSource() completer {
 	}
 }
 
+// completeMember completes a member of an address set, --address of address-set create: the jails of the project and
+// its address sets as @name, except the set being made (a set may not contain itself).
+func (a *app) completeMember() completer {
+	return func(cmd *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
+		ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+		defer cancel()
+		c, err := a.connect(ctx)
+		if err != nil {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		}
+		var out []string
+		for j, err := range c.Jails().List(ctx) {
+			if err != nil {
+				break
+			}
+			out = append(out, "@"+j.Metadata.Name)
+		}
+		for s, err := range c.Firewall().AddressSets().List(ctx) {
+			if err != nil {
+				break
+			}
+			if len(args) == 0 || s.Metadata.Name != args[0] {
+				out = append(out, "@"+s.Metadata.Name)
+			}
+		}
+		return out, cobra.ShellCompDirectiveNoFileComp
+	}
+}
+
 // completeAppFromSource completes APP, then the word from, then SOURCE.
 func (a *app) completeAppFromSource() completer {
 	apps := a.completeNames(installedNames)

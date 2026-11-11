@@ -57,8 +57,9 @@ log sinks that select it. Every jail of the project must be stopped`)
 
 // projectOpts holds the flags that describe a project; create and set share them.
 type projectOpts struct {
-	description, firewall, maxMemory    string
+	description, maxMemory              string
 	networks, storage, images, hosts    []string
+	firewall                            []string
 	revokeNet, revokeStor               []string
 	maxJails, maxCPU, maxPIDs, maxAddrs int
 	clearImages, newNetwork             bool
@@ -75,7 +76,7 @@ func projectFlags(cmd *cobra.Command, forSet bool) *projectOpts {
 	f.StringVar(&o.maxMemory, "max-memory", "", "quota: total memory, for example 16G")
 	f.IntVar(&o.maxPIDs, "max-pids", 0, "quota: total processes (0 = unlimited)")
 	f.IntVar(&o.maxAddrs, "max-addresses", 0, "quota: total addresses (0 = unlimited)")
-	f.StringVar(&o.firewall, "firewall", "", "mandatory firewall policy rendered before every jail's own (global admins only)")
+	f.StringArrayVar(&o.firewall, "firewall-policy", nil, "mandatory firewall policy rendered before every jail's own (repeatable, in order; an empty value clears the list; global admins only)")
 	f.StringArrayVar(&o.images, "image", nil, "image allow-list entry (repeatable; empty allows every image)")
 	f.StringSliceVar(&o.hosts, "hosts", nil, "hosts a fleet project spans, comma separated (managed by a hub)")
 	if forSet {
@@ -132,8 +133,13 @@ func (o *projectOpts) apply(cmd *cobra.Command, spec *api.ProjectSpec) error {
 	if ch("max-addresses") {
 		spec.Quotas.Addresses = o.maxAddrs
 	}
-	if ch("firewall") {
-		spec.Firewall = o.firewall
+	if ch("firewall-policy") {
+		spec.FirewallPolicies = nil
+		for _, n := range o.firewall { // an empty value clears the list
+			if n != "" {
+				spec.FirewallPolicies = append(spec.FirewallPolicies, n)
+			}
+		}
 	}
 	if o.clearImages {
 		spec.Images = nil

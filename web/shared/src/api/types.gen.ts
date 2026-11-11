@@ -746,7 +746,7 @@ export interface ExecRequest {
 }
 
 export interface FirewallAttach {
-  policy?: string
+  policies?: string[]
   tags?: string[]
 }
 
@@ -773,6 +773,7 @@ export interface FirewallRule {
   to?: string[]
   ports?: string[]
   log?: boolean
+  disabled?: boolean
   redirect?: Redirect
 }
 
@@ -1505,7 +1506,7 @@ export interface ProjectSpec {
   networks?: ProjectNetwork[]
   storage?: ProjectStorage[]
   quotas?: ProjectQuotas
-  firewall?: string
+  firewall_policies?: string[]
   images?: string[]
   new_network?: boolean
 }
@@ -2051,13 +2052,13 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "env.\u003cvar\u003e"
   },
   {
-    "name": "firewall.policy",
-    "type": "string",
-    "description": "Firewall policy of the jail's anchor.",
-    "example": "web",
+    "name": "firewall.policies",
+    "type": "list",
+    "description": "Firewall policies of the jail's anchor, in the order they are rendered after the project's.",
+    "example": "postgres,ssh-office",
     "restart_required": false,
     "profile": true,
-    "path": "firewall.policy"
+    "path": "firewall.policies"
   },
   {
     "name": "firewall.tags",
@@ -2378,4 +2379,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test']

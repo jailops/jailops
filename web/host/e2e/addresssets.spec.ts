@@ -126,6 +126,8 @@ test('comments on a set, its members, a policy and a rule are saved and read bac
   await page.locator('[data-rule="0"]').getByLabel('From').fill('@git_allow')
   await page.locator('[data-rule="0"]').getByLabel('Ports').fill('22')
   await page.locator('[data-rule="0"]').getByTestId('rule-comment').fill('ssh from the team only')
+  await page.locator('[data-rule="0"]').getByTestId('rule-disabled').check()
+  await expect(page.locator('[data-rule="0"]').getByTestId('rule-off')).toBeVisible()
   await page.getByTestId('save-policy').click()
   await expect(page.getByTestId('policy-editor').locator('.pill.warn')).toHaveCount(0)
 
@@ -135,6 +137,9 @@ test('comments on a set, its members, a policy and a rule are saved and read bac
   await page.getByRole('button', { name: 'git-edge' }).click()
   await expect(page.getByTestId('policy-comment')).toHaveValue('The git server of the team')
   await expect(page.locator('[data-rule="0"]').getByTestId('rule-comment')).toHaveValue('ssh from the team only')
+  // a rule switched off keeps its place and says so
+  await expect(page.locator('[data-rule="0"]').getByTestId('rule-disabled')).toBeChecked()
+  await expect(page.locator('[data-rule="0"]').getByTestId('rule-off')).toBeVisible()
 })
 
 test('phone width: the address set dialog and editor fit the screen', async ({ page }, info) => {

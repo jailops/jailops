@@ -75,12 +75,12 @@ func TestAProjectsDefaultDenyIsAFloor(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Spec.Firewall = "base"
+	p.Spec.FirewallPolicies = []string{"base"}
 	if _, err := e.Admin.Projects().Update(c, "alpha", p, ""); err != nil {
 		t.Fatal(err)
 	}
 	j := dtest.WebJailOn("w1", "lan")
-	j.Spec.Firewall.Policy = "open"
+	j.Spec.Firewall.Policies = []string{"open"}
 	startJailIn(t, e.Admin, j)
 	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_w1.conf")
 	i := strings.Index(rs, "# defaults")
@@ -115,7 +115,7 @@ func TestARuleNamesAJail(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := dtest.WebJailOn("db1", "lan")
-	db.Spec.Firewall.Policy = "pg"
+	db.Spec.Firewall.Policies = []string{"pg"}
 	startJailIn(t, e.Admin, db)
 	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_db1.conf")
 	if !strings.Contains(rs, "<s_w1>") || !strings.Contains(rs, addr) {
@@ -178,7 +178,7 @@ func TestAnAddressSetHoldsJails(t *testing.T) {
 		t.Fatal(err)
 	}
 	db := dtest.WebJailOn("g1", "lan")
-	db.Spec.Firewall.Policy = "git"
+	db.Spec.Firewall.Policies = []string{"git"}
 	startJailIn(t, e.Admin, db)
 	e.D.Reconciler().Pass(c)
 	rs, _ := e.PF.Read(c, render.JailAnchorFor("alpha", "g1"))
