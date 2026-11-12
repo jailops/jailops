@@ -46,17 +46,17 @@ func ProjectAnchor(project string) string { return AnchorRoot + "/" + project }
 // wildcard anchor rule inside "jailops/<project>" evaluates "jailops/<project>/*"
 // when the top level wildcard ("jailops/*") evaluates the project anchor.
 func ProjectAnchorRules() string {
-	return "nat-anchor \"*\"\nrdr-anchor \"*\"\nanchor \"*\"\n"
+	return "anchor \"*\"\n"
 }
 
 // NetAnchor returns the anchor path holding the NAT rules of a network.
 func NetAnchor(network string) string { return AnchorRoot + "/net." + network }
 
-// AnchorLines returns the three lines the administrator adds to pf.conf once.
-// JailOps never edits pf.conf. UNVERIFIED: wildcard anchors ("jailops/*")
-// evaluating anchors that are loaded later (prototype 3).
+// AnchorLines returns the line the administrator adds to pf.conf once. JailOps never edits pf.conf. The anchors hold
+// the filter rules and the translation options of the jails and networks (match ... nat-to and rdr-to), so one anchor
+// line is all pf.conf needs; it must stand before any quick rule that should not decide first.
 func AnchorLines() string {
-	return "nat-anchor \"jailops/*\"\nrdr-anchor \"jailops/*\"\nanchor \"jailops/*\"\n"
+	return "anchor \"jailops/*\"\n"
 }
 
 // AllowedSourceTable is the per-jail table of source addresses the jail may
@@ -66,6 +66,11 @@ const AllowedSourceTable = "jail_addrs"
 // PFInput is the input of PFAnchor.
 type PFInput struct {
 	Jail string
+	// MaxStates limits the states each pass rule of the jail may create (pf "keep state (max N)"); 0 sets no limit.
+	MaxStates int
+	// Shaping are the devices of the jail that have a bandwidth limit: the anchor sends what they send into a dummynet
+	// pipe with dnpipe on match rules, which every later pass rule of the anchor inherits.
+	Shaping []Shape
 	// Interfaces are the host-side epair ends of the jail. Rules are
 	// attached to them: direction "in" of a rule means traffic into the
 	// jail (PF "out" on the host-side end), "out" means traffic from the
@@ -103,6 +108,9 @@ type PFInput struct {
 	// Proxy are the inbound redirects of the jail's proxy devices, rendered after the policies.
 	Proxy []api.FirewallRule
 	Sets  map[string]api.AddressSetSpec
+	// Jails maps a jail of the project to its addresses, for jail:NAME in a rule or in an address set. A jail that is
+	// not in it has none: a reference to it matches nobody.
+	Jails map[string][]string
 	// Uplink is the interface redirects are applied on; required when a
 	// rule has a redirect.
 	Uplink string
@@ -228,7 +236,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	ifs := list(in.Interfaces)
 
 	// Collect referenced tables.
-	setRefs, tagRefs := map[string]bool{}, map[string]bool{}
+	setRefs, tagRefs, jailRefs := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, r := range all {
 		for _, e := range append(append([]string(nil), r.From...), r.To...) {
 			k, v, err := validate.ParseEndpoint(e)
@@ -240,9 +248,13 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 				setRefs[v] = true
 			case validate.EndpointTag:
 				tagRefs[v] = true
+			case validate.EndpointJail:
+				jailRefs[v] = true
 			}
 		}
 	}
+	// A set names jails and other sets: their tables are needed by the rules of the policies, the set's own table
+	// holds the addresses flattened. A jail named by a rule gets its own table.
 
 	var b builder
 	b.line("%s", Header)
@@ -254,7 +266,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	}
 
 	for _, n := range sortedKeys(setRefs) {
-		members, err := validate.FlattenSet(n, in.Sets)
+		members, err := validate.FlattenSet(n, in.Sets, in.Jails)
 		if err != nil {
 			return nil, err
 		}
@@ -268,7 +280,10 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 				b.line("# set %s: %s %s", n, e.Address, pfComment(e.Comment))
 			}
 		}
-		b.line("%s", tableLine("s_"+strings.ReplaceAll(n, "-", "_"), members))
+		b.line("%s", tableLine("s_"+n, members))
+	}
+	for _, n := range sortedKeys(jailRefs) {
+		b.line("%s", tableLine("j_"+strings.ReplaceAll(n, "-", "_"), validate.CanonicalAddrs(in.Jails[n])))
 	}
 	for _, n := range sortedKeys(tagRefs) {
 		var members []string
@@ -276,6 +291,20 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			members = append(members, a.String())
 		}
 		b.line("%s", tableLine("t_"+strings.ReplaceAll(n, "-", "_"), members))
+	}
+
+	// Bandwidth limits (egress): what the jail sends arrives on its own port and is sent into the device's pipe; a flow
+	// that the host or the internet started is created on the gateway interface, where the rule gives its state the
+	// pipe for the answers of the jail (the pipe of the direction into the jail is 0: see dummynet.go).
+	for _, sh := range in.Shaping {
+		if sh.Pipe == 0 || len(sh.Addrs) == 0 {
+			continue
+		}
+		b.line("# bandwidth limit of %s: what the jail sends goes through pipe %d", sh.Iface, sh.Pipe)
+		b.line("match in on %s all dnpipe %d", sh.Iface, sh.Pipe)
+		if sh.Gateway != "" {
+			b.line("match out on %s from any to %s dnpipe (0, %d)", sh.Gateway, listStr(sh.Addrs), sh.Pipe)
+		}
 	}
 
 	// Translation rules come before filter rules.
@@ -305,8 +334,14 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 					}
 					to = a.String()
 				}
-				b.line("rdr on %s %s proto %s from %s to %s port %d -> %s port %d",
+				b.line("match in on %s %s proto %s from %s to %s port %d rdr-to %s port %d",
 					in.Uplink, f.kw, r.Proto, from, to, r.Redirect.HostPort, f.addrs[0], r.Redirect.JailPort)
+				// The packet that comes out of the translation is passed here, by a rule of its own that carries the
+				// label every stateful pass rule gets. The state of the connection belongs to this rule, so that the
+				// reconcile loop ends it when the forward is removed (pfctl -k label); a state made by pf's default
+				// rule has no label to end it by. The forward is the allow rule of its policy: it admits what it names.
+				b.line("pass in quick on %s %s proto %s from %s to %s port %d",
+					in.Uplink, f.kw, r.Proto, from, f.addrs[0], r.Redirect.JailPort)
 			}
 		}
 		return nil
@@ -316,7 +351,6 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			return nil, err
 		}
 	}
-
 	own6 := famAddrs(fams, "inet6")
 	ll := linkLocals(in.LinkLocal)
 	// The jail's own sources for IPv6 control traffic: its addresses and its own link-local addresses (the whole of
@@ -523,7 +557,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Anchor{Name: JailAnchor(in.Jail), Lines: strings.Split(labelPassRules(JailAnchor(in.Jail), out), "\n"), Rules: b.rules}, nil
+	return &Anchor{Name: JailAnchor(in.Jail), Lines: strings.Split(labelPassRules(JailAnchor(in.Jail), out, in.MaxStates), "\n"), Rules: b.rules}, nil
 }
 
 var (
@@ -539,7 +573,10 @@ var (
 // labels that are gone after it loads an anchor: pf keeps the states of a rule that was removed, and a flow that is no
 // longer allowed would go on until it ended. The price is that a rule inserted in the middle of an anchor ends the
 // flows of the pass rules below it, which then have to reconnect.
-func labelPassRules(anchor, text string) string {
+//
+// With maxStates above 0 every pass rule of the jail also gets "keep state (max N)": the rule may create at most N
+// states, so one jail cannot fill the state table of the host. The limit is per rule.
+func labelPassRules(anchor, text string, maxStates int) string {
 	tables := map[string]string{}
 	for _, m := range tableDefRE.FindAllStringSubmatch(text, -1) {
 		tables[m[1]] = strings.Join(strings.Fields(m[2]), " ")
@@ -569,6 +606,11 @@ func labelPassRules(anchor, text string) string {
 			next.Write(above[:])
 			next.Write([]byte(ln + "\n" + uses))
 			copy(above[:], next.Sum(nil))
+			// The state limit comes after the label is made, so that changing it does not change a label, which
+			// would end the running flows of the rule.
+			if maxStates > 0 && !raw && strings.HasPrefix(ln, "pass ") && !strings.Contains(ln, " no state") {
+				ln += fmt.Sprintf(" keep state (max %d)", maxStates)
+			}
 		}
 		out.WriteString(ln)
 		out.WriteString("\n")
@@ -638,7 +680,9 @@ func endpoints(entries []string, f family, def []netip.Addr) (string, bool) {
 		case validate.EndpointAny:
 			return "any", true
 		case validate.EndpointSet:
-			parts = append(parts, "<s_"+strings.ReplaceAll(v, "-", "_")+">")
+			parts = append(parts, "<s_"+v+">")
+		case validate.EndpointJail:
+			parts = append(parts, "<j_"+strings.ReplaceAll(v, "-", "_")+">")
 		case validate.EndpointTag:
 			parts = append(parts, "<t_"+strings.ReplaceAll(v, "-", "_")+">")
 		case validate.EndpointAddr:
@@ -728,7 +772,7 @@ func PFNet(name string, spec api.NetworkSpec) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		b.line("nat on %s inet from %s to ! %s -> (%s)", spec.Uplink, p.Masked(), p.Masked(), spec.Uplink)
+		b.line("match out on %s inet from %s to ! %s nat-to (%s)", spec.Uplink, p.Masked(), p.Masked(), spec.Uplink)
 	}
 	b.line("# the gateway pair of the network: judged by the anchors of the jails, not here")
 	b.line("pass quick on %s all no state", member)

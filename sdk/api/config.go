@@ -71,6 +71,7 @@ type ckey struct {
 var (
 	deviceNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
 	macRE        = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`)
+	rateRE       = regexp.MustCompile(`^[1-9][0-9]{0,8}[KMGkmg]?$`)            // a rate in bits per second: 10M is 10 Mbit/s (decimal units)
 	sizeRE       = regexp.MustCompile(`^[1-9][0-9]*([KMGTPkmgtp](iB|B)?|B)?$`) // the sizes the server takes; it stores them as bytes
 	hostRE       = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 	envRE        = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
@@ -332,11 +333,12 @@ func buildRegistry() []ckey {
 		})
 	list("profiles", "profiles", "Profiles merged into this jail, in order; later ones override earlier ones.", "base,web", true, false,
 		func(s *JailSpec) *[]string { return &s.Profiles }, nameCheck)
-	num("limits.cpu", "resources.cpu", "CPU cores the jail may use.", "2", 0, 4096, true, func(s *JailSpec) *int { return &s.Resources.CPU })
-	size("limits.memory", "resources.memory", "Memory limit.", "2G", true, func(s *JailSpec) *string { return &s.Resources.Memory })
-	num("limits.pids", "resources.pids", "Process limit.", "500", 0, 4194304, true, func(s *JailSpec) *int { return &s.Resources.PIDs })
-	size("limits.disk", "resources.disk", "ZFS quota of the jail's root.", "20G", false, func(s *JailSpec) *string { return &s.Resources.Disk })
-	size("limits.disk_reservation", "resources.disk_reservation", "ZFS reservation of the jail's root.", "5G", false, func(s *JailSpec) *string { return &s.Resources.DiskReservation })
+	num("limits.cpu", "resources.cpu", "CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.", "2", 0, 4096, true, func(s *JailSpec) *int { return &s.Resources.CPU })
+	size("limits.memory", "resources.memory", "Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.", "2G", true, func(s *JailSpec) *string { return &s.Resources.Memory })
+	num("limits.pids", "resources.pids", "Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.", "500", 0, 4194304, true, func(s *JailSpec) *int { return &s.Resources.PIDs })
+	size("limits.disk", "resources.disk", "ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.", "20G", false, func(s *JailSpec) *string { return &s.Resources.Disk })
+	size("limits.disk_reservation", "resources.disk_reservation", "ZFS reservation of the jail's container.", "5G", false, func(s *JailSpec) *string { return &s.Resources.DiskReservation })
+	num("limits.states", "resources.states", "Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.", "20000", 0, 10000000, false, func(s *JailSpec) *int { return &s.Resources.States })
 	add(ckey{ConfigKey: ConfigKey{Name: "boot.autostart", Type: "bool", Description: "Start the jail when the host starts.", Example: "true", Profile: true, Path: "boot.autostart"},
 		get: func(s *JailSpec, _ string) (string, bool) { return "true", s.Boot.Autostart },
 		set: func(s *JailSpec, _, v string) error {
@@ -375,7 +377,7 @@ func buildRegistry() []ckey {
 			return nil
 		},
 		unset: func(s *JailSpec, _ string) { s.Shell = "" }})
-	str("prompt", "prompt", "Bash prompt of a FreeBSD jail, for every user: default (user@host:dir in colour), none, or a PS1 text such as \\u@\\h:\\w\\$ with bash's escapes (no ', ` or $ other than \\$: nothing in it runs; \\e or \\033 start a colour). A user's own ~/.bashrc wins. Written into "+PromptFile+" at once in a running jail, else at its next start.", "default", false, true,
+	str("prompt", "prompt", "Bash prompt of a FreeBSD jail, for every user: default (user@jail in colour, then in grey [project/host], then the directory), short (the same without the grey tag), none (no prompt, the variables stay), or a PS1 text such as \\u@\\h [{project}/{host}]:\\w\\$ with bash's escapes (no ', ` or $ other than \\$: nothing in it runs; \\e or \\033 start a colour) and the words {jail}, {project} and {host}, which read the variables JAILOPS_JAIL, JAILOPS_PROJECT and JAILOPS_HOST that every interactive bash of the jail has. A user's own ~/.bashrc wins. Written into "+PromptFile+" at once in a running jail, else at its next start.", "default", false, true,
 		func(s *JailSpec) *string { return &s.Prompt }, CheckPrompt)
 	add(ckey{ConfigKey: ConfigKey{Name: "updates.mode", Type: "enum", Values: []string{"manual", "notify", "managed"}, Profile: true, Path: "update.mode",
 		Description: "manual: nothing happens unless you run it. notify: check on the schedule and report. managed: check and apply on the schedule. Off (manual) by default.", Example: "notify"},
@@ -415,6 +417,15 @@ func buildRegistry() []ckey {
 			return err
 		},
 		unset: func(s *JailSpec, _ string) { s.SysVIPC = false }})
+	add(ckey{ConfigKey: ConfigKey{Name: "zfs.delegation", Type: "bool", Example: "true", RestartRequired: true, Path: "zfs_delegation",
+		Description: "Global administrators only. Hands the jail a ZFS dataset of its own, <container>/delegated: root in the jail can create datasets, snapshots and mounts below it, outside the rules JailOps applies to the jail's data. The host's priv.conf must allow it (admin-zfs-delegation)."},
+		get: func(s *JailSpec, _ string) (string, bool) { return "true", s.Delegate },
+		set: func(s *JailSpec, _, v string) error {
+			b, err := parseBool("zfs.delegation", v)
+			s.Delegate = b
+			return err
+		},
+		unset: func(s *JailSpec, _ string) { s.Delegate = false }})
 	boolKey("updates.packages", "update.packages", "Update the packages inside the jail (pkg or apk, from the host).", func(s *JailSpec) *bool { return &s.Update.Packages })
 	boolKey("updates.os", "update.os", "Move the jail to a newer image generation (root swap).", func(s *JailSpec) *bool { return &s.Update.OS })
 	add(ckey{ConfigKey: ConfigKey{Name: "updates.reboot", Type: "enum", Values: []string{"manual", "auto"}, Profile: true, Path: "update.reboot",
@@ -538,15 +549,13 @@ func buildRegistry() []ckey {
 			}
 		})
 	rate := func(v string) error {
-		if !sizeRE.MatchString(v) {
+		if !rateRE.MatchString(v) {
 			return fmt.Errorf("%q is not a rate in bits per second such as 10M", v)
 		}
 		return nil
 	}
-	g, st, un = field(nic, rate, func(p *NetworkAttach) *string { return &p.Ingress }, "ingress")
-	devKey("nic.<device>.ingress", "rate", "Rate limit of traffic into the jail, bits per second. Not enforced yet: the limit is stored and reported only, and the jail reports a RateLimit condition.", "10M", false, true, false, "network[<device>].ingress", g, st, un)
 	g, st, un = field(nic, rate, func(p *NetworkAttach) *string { return &p.Egress }, "egress")
-	devKey("nic.<device>.egress", "rate", "Rate limit of traffic out of the jail, bits per second. Not enforced yet: the limit is stored and reported only, and the jail reports a RateLimit condition.", "10M", false, true, false, "network[<device>].egress", g, st, un)
+	devKey("nic.<device>.egress", "rate", "Rate limit of what the jail sends through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host; traffic into the jail has no limit.", "10M", false, true, false, "network[<device>].egress", g, st, un)
 
 	// disk devices
 	devKey("disk.<device>", "device", "A data volume; set it to the mount path to add it, unset it to remove it.", "disk.data=/var/db", true, true, false, "volumes[<device>]",

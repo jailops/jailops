@@ -26,9 +26,10 @@ type Client interface {
 	// Load validates, loads in one operation, reads the anchor back and
 	// compares it with the validated rules.
 	Load(ctx context.Context, anchor, ruleset string) error
-	// Read returns the translation rules and filter rules of the anchor.
+	// Read returns the rules of the anchor: the filter rules and the translation options on them (match ... nat-to,
+	// rdr-to).
 	Read(ctx context.Context, anchor string) (string, error)
-	// Flush removes rules, translation rules and tables of the anchor.
+	// Flush removes the rules and the tables of the anchor.
 	Flush(ctx context.Context, anchor string) error
 	TableAdd(ctx context.Context, anchor, table string, addrs ...string) error
 	TableDelete(ctx context.Context, anchor, table string, addrs ...string) error
@@ -139,7 +140,7 @@ func validateRuleset(r string) error {
 	return nil
 }
 
-// ruleKeywords begin the lines that pfctl -sr and -sn print for rules.
+// ruleKeywords begin the lines that pfctl -sr prints for rules.
 var ruleKeywords = map[string]bool{
 	"pass": true, "block": true, "match": true, "nat": true, "rdr": true, "binat": true,
 	"anchor": true, "no": true, "nat-anchor": true, "rdr-anchor": true, "binat-anchor": true,
@@ -244,17 +245,12 @@ func (c *Command) Read(ctx context.Context, anchor string) (string, error) {
 	if err := ValidateAnchor(anchor); err != nil {
 		return "", err
 	}
-	// Verified on FreeBSD 15.1: with "-sn -sr" in one call pfctl prints only
-	// the last listing, so the NAT and the filter rules are read separately.
-	var out strings.Builder
-	for _, what := range []string{"-sn", "-sr"} {
-		res, err := c.pf(ctx, "", "-a", anchor, what)
-		if err != nil {
-			return "", mapErr("read", err)
-		}
-		out.Write(res.Stdout)
+	// The translation options stand on match and pass rules, so -sr lists everything the anchor holds.
+	res, err := c.pf(ctx, "", "-a", anchor, "-sr")
+	if err != nil {
+		return "", mapErr("read", err)
 	}
-	return out.String(), nil
+	return string(res.Stdout), nil
 }
 
 // Flush implements Client.
@@ -266,7 +262,7 @@ func (c *Command) Flush(ctx context.Context, anchor string) error {
 	// exist any more, and flushing its tables then fails with "Operation not
 	// supported by device". Tables go first, while the anchor still exists, and
 	// that one error is the anchor being gone already.
-	for _, what := range []string{"Tables", "nat", "rules"} {
+	for _, what := range []string{"Tables", "rules"} {
 		_, err := c.pf(ctx, "", "-a", anchor, "-F", what)
 		if err != nil {
 			if ee, ok := run.IsExit(err); ok && what == "Tables" && strings.Contains(strings.ToLower(ee.Stderr), "not supported by device") {

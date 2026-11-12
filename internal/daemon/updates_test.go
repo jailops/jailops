@@ -15,6 +15,7 @@ import (
 	"jailops.net/jailops/internal/daemon/dtest"
 	"jailops.net/jailops/internal/sys/jailos"
 	"jailops.net/jailops/internal/sys/run"
+	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -462,5 +463,39 @@ func assertRealCommand(t *testing.T, note string) {
 	}
 	if err != nil {
 		t.Fatalf("%q is not a command the CLI accepts: %v", line, err)
+	}
+}
+
+// While the host runs pkg against the root of a FreeBSD jail, no exec, shell or console session may enter the jail
+// (the tree belongs to the tenant, pkg runs as root on the host); another jail is not affected and the jail is open
+// again afterwards.
+func TestPackageUpdateHoldsTheJailAgainstSessions(t *testing.T) {
+	e := dtest.New(t, dtest.Options{})
+	e.Seed()
+	sj := &scriptedJails{pkgs: pkgDryRun, env: e}
+	e.SetPkgUpgrades(pkgDryRun)
+	ctx := context.Background()
+	var during error
+	e.Jails.SetExecFn(func(jail string, o jailos.ExecOpts) (run.Result, error) {
+		// the library cache is refreshed right after the upgrade, while the update still holds the jail
+		if o.Argv[0] == "/sbin/ldconfig" && during == nil {
+			_, during = e.Admin.Jails().Exec(ctx, "web", []string{"echo", "x"}, sdk.ExecOptions{})
+		}
+		return sj.fn(jail, o)
+	})
+	runningWeb(t, e)
+	aop, err := e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, Packages: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if recs, err := aop.Wait(ctx); err != nil || len(recs) != 1 || recs[0].Result != api.UpdateOK {
+		t.Fatalf("%+v %v", recs, err)
+	}
+	var ae *api.Error
+	if !errors.As(during, &ae) || ae.Code != api.CodeBusy || !strings.Contains(ae.Message, "packages are being installed or updated") {
+		t.Fatalf("exec during the update: %v", during)
+	}
+	if _, err := e.Admin.Jails().Exec(ctx, "web", []string{"echo", "y"}, sdk.ExecOptions{}); err != nil {
+		t.Fatalf("exec after the update: %v", err)
 	}
 }

@@ -5,7 +5,7 @@
 # KEYWORD: shutdown
 #
 # "pf" is required even when pf_enable is NO (rcorder only orders the scripts; a disabled service still runs and
-# exits at once): without it, rcorder gives no guarantee that pf.conf (with the three anchor lines of the setup
+# exits at once): without it, rcorder gives no guarantee that pf.conf (with the anchor line of the setup
 # guide) is loaded before jailopsd creates bridges and starts jails, and an anchor call that resolves to nothing
 # yet falls through to whatever the administrator's own ruleset does next (design 18, the boot-time audit).
 # "syslogd": the daemon logs to syslog, and in appliance mode the setup token goes there too.
@@ -110,7 +110,8 @@ jailopsd_force_depend()
 
 # The two are one service: the helper exists to do for the daemon what needs root. Stopping the daemon stops the helper
 # too, so that `restart` restarts both (a new package has a new binary of each), and `start` starts it again.
-# (Jails are kernel jails: they run on.) At shutdown the helper's own script finds it stopped.
+# (Jails are kernel jails: stopping the daemon leaves them running. At shutdown jailops_shutdown, which requires this
+# script and so is stopped before it, stops the jails first.) At shutdown the helper's own script finds it stopped.
 jailopsd_stop_helper()
 {
 	${jailopsd_helper_rc} onestatus >/dev/null 2>&1 || return 0

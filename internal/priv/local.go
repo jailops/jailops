@@ -323,6 +323,9 @@ func (g zfsGuard) Set(ctx context.Context, name string, props map[string]string)
 	if len(props) == 0 {
 		return invalid("no properties")
 	}
+	if _, ok := props["jailed"]; ok {
+		return g.setJailed(ctx, name, props)
+	}
 	if err := g.l.cfg.zfsProps(ctx, props); err != nil {
 		return err
 	}

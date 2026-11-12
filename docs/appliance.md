@@ -332,7 +332,7 @@ informational level), warns on drift, and is ok when managed without drift. `hos
 Scope: the host's own packet filter: what may reach the host itself (ssh, the console, the API), not the jails. Kind
 `HostFirewall`, extension `host_firewall`; every change goes through commit confirmed (extension `host_pending`).
 
-Without the module JailOps never owns `pf.conf`: the administrator adds three anchor lines and JailOps loads only its
+Without the module JailOps never owns `pf.conf`: the administrator adds the anchor line and JailOps loads only its
 anchors (`jailops/...`); that stays exactly so on a host that does not enable `firewall`. With the module enabled in
 both files, and only then, **JailOps owns `/etc/pf.conf`** (whole-file, with the header) and the `rc.conf` variables
 `pf_enable` (set to `YES`) and `pf_rules` (set to `/etc/pf.conf` only when it names another file).
@@ -343,9 +343,8 @@ the whole file itself, in pf's required order:
 1. the address sets, as `table <jo_hf_NAME> const { ... }`;
 2. options and normalisation: `set skip on lo0` (loopback), `set state-policy if-bound` (the jails' NAT needs it, see
    [install.md](install.md)), `scrub in all fragment reassemble`;
-3. the translation anchors of design 5.2, exactly: `nat-anchor "jailops/*"` and `rdr-anchor "jailops/*"`;
-4. the filter anchor `anchor "jailops/*"`, **first** among the filter rules;
-5. the host policy: `block in all` (`block log in all` with `logging`), `pass out all keep state` (replies to what the
+3. the anchor `anchor "jailops/*"`, **first** among the rules: it holds the filter rules of the jails and the NAT and port forwards of their networks (design 5.2);
+4. the host policy: `block in all` (`block log in all` with `logging`), `pass out all keep state` (replies to what the
    host sends match its state), always neighbour discovery and router advertisements (`icmp6-type { neighbrsol,
    neighbradv, routersol, routeradv }`), path MTU discovery and ICMP errors (`toobig`, `unreach`, `timex`,
    `paramprob`, and IPv4 `unreach code needfrag`), then ssh on its ports from its sources, the console and API on the
@@ -607,7 +606,7 @@ confirmed):
 | `host.snapshot.list` | no | no | reads the snapshot manifests under `host-dir` |
 | `host.snapshot.restore` | yes | the module of the snapshot | what that module's apply touches, from a snapshot under `host-dir`: a file it owns whole, its block of `ntp.conf`, and its own `rc.conf` variables through `sysrc -f /etc/rc.conf NAME=VALUE` or `sysrc -f /etc/rc.conf -x NAME` (a value of letters, digits and `._/:+-` only, else refused); nothing else of `rc.conf` or `ntp.conf`, whatever a manifest says (a manifest of an unknown module or naming another file is refused); then what makes them take effect (ntpd and the host name, or `pfctl -f`/`-e`/`-d`). Refused (`busy`) while a change waits for its confirmation |
 | `host.firewall.read` | no | no | reads `/etc/pf.conf` (only whether it exists, carries the header and its digest leave the helper) and `/etc/rc.conf`, runs `pfctl -s info`; writes nothing |
-| `host.firewall.apply` | yes | `firewall` | renders `/etc/pf.conf` (whole) from validated fields, with, while the console's certificate comes from ACME, two `rdr` rules of port 80 (http-01) or 443 (tls-alpn-01) to the loopback addresses and one `pass` rule, from the challenge and a port of 1024 to 65535 only; `pfctl -n -f -` of that text; `sysrc -f /etc/rc.conf` for `pf_enable` (`YES` only) and `pf_rules` (`/etc/pf.conf` only); `pfctl -f /etc/pf.conf`, `pfctl -e`, `pfctl -s rules`; the snapshot directory, `pending.json` and `firewall.json` under `host-dir`. Refused when the caller's address would be shut out, and while another change waits. With `dry_run` it writes nothing |
+| `host.firewall.apply` | yes | `firewall` | renders `/etc/pf.conf` (whole) from validated fields, with, while the console's certificate comes from ACME, two `match … rdr-to` rules of port 80 (http-01) or 443 (tls-alpn-01) to the loopback addresses and one `pass` rule, from the challenge and a port of 1024 to 65535 only; `pfctl -n -f -` of that text; `sysrc -f /etc/rc.conf` for `pf_enable` (`YES` only) and `pf_rules` (`/etc/pf.conf` only); `pfctl -f /etc/pf.conf`, `pfctl -e`, `pfctl -s rules`; the snapshot directory, `pending.json` and `firewall.json` under `host-dir`. Refused when the caller's address would be shut out, and while another change waits. With `dry_run` it writes nothing |
 | `host.pending.read` | no | no | reads `pending.json` and `pending.last.json` |
 | `host.pending.confirm` | yes | the module of the pending change | removes `pending.json`, writes `pending.last.json`, stops the timer |
 | `host.pending.revert` | yes | no (undoing is always allowed) | puts the snapshot of the pending change back as `host.snapshot.restore` does, then removes the record |

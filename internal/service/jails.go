@@ -149,12 +149,10 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 			st.Addresses = append(st.Addresses, a.String())
 		}
 	}
-	for _, nd := range s.effective(j).Network {
-		if nd.Ingress != "" || nd.Egress != "" {
-			st.Conditions = append(st.Conditions, api.Condition{Type: "RateLimit", Status: api.ConditionFalse, Reason: "NotEnforced",
-				Message: "rate limits are stored but no shaper enforces them yet (UNVERIFIED)", Since: s.now().UTC()})
-			st.Warnings = append(st.Warnings, rateLimitWarning)
-			break
+	if up {
+		if c, w, ok := s.limitsCondition(ctx, j); ok {
+			st.Conditions = append(st.Conditions, c)
+			st.Warnings = append(st.Warnings, w)
 		}
 	}
 	st.Drift = rt.drift
@@ -343,9 +341,6 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 	}
 	name, proj := j.Metadata.Name, p.Meta.Name
 	if err := s.validateJail(proj, name, j.Spec); err != nil {
-		return api.Operation{}, err
-	}
-	if err := s.jailClashesSet(proj, name); err != nil {
 		return api.Operation{}, err
 	}
 	if err := api.ValidLabels(j.Metadata.Labels); err != nil {
@@ -599,6 +594,16 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	}
 	if !labelsEqual(in.Metadata.Labels, old.Metadata.Labels) {
 		if err := api.ValidLabels(in.Metadata.Labels); err != nil {
+			return api.Jail{}, err
+		}
+	}
+	if err := s.applyDiskLimits(ctx, key, old.Spec, spec); err != nil {
+		return api.Jail{}, err
+	}
+	if spec.Delegate != old.Spec.Delegate {
+		// the dataset is made and given the jailed property (or the property cleared) in the request of the global
+		// administrator who changed it; the jail attaches it at its next start
+		if err := s.life.SetDelegation(ctx, key, spec.Delegate); err != nil {
 			return api.Jail{}, err
 		}
 	}

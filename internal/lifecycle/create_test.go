@@ -34,7 +34,7 @@ func TestCreateThin(t *testing.T) {
 	}
 	checks := map[[2]string]string{
 		{c, PropManaged}: "on", {c, PropID}: "uuid-web", {c, PropComplete}: "on", {c, PropKind}: KindContainer,
-		{c + "/root", PropGen}: "1", {c + "/root", "quota"}: "10G", {c + "/root", "mountpoint"}: "/jailops/projects/alpha/jails/web/root",
+		{c + "/root", PropGen}: "1", {c, "quota"}: "10G", {c + "/root", "quota"}: "", {c + "/root", "mountpoint"}: "/jailops/projects/alpha/jails/web/root",
 		{c + "/etc", "mountpoint"}: "/jailops/projects/alpha/jails/web/root/etc", {c + "/etc", PropClass}: "system", {c + "/etc", PropMerge}: "on",
 		{c + "/home", PropClass}: "data", {c + "/data/db", "quota"}: "5G", {c + "/data/db", "mountpoint"}: "/jailops/projects/alpha/jails/web/root/srv/db",
 	}
@@ -225,5 +225,23 @@ func TestAJailBelongsToANamedProject(t *testing.T) {
 	}
 	if k, err := qualify("default", "web"); err != nil || k != "default_web" {
 		t.Fatalf("%q %v: default is only a name", k, err)
+	}
+}
+
+// The disk limit and the reservation of a jail are properties of its container, which cover everything below it; the
+// root clone carries neither.
+func TestDiskLimitIsOnTheContainer(t *testing.T) {
+	w := newWorld(t)
+	w.Files.Dirs["/jailops/projects/alpha/jails/web/root/etc"] = true
+	j := w.jail("web")
+	j.Spec.Resources.DiskReservation = "3G"
+	if _, err := w.S.CreateJail(bg, j, false); err != nil {
+		t.Fatal(err)
+	}
+	c := "tank/jailops/projects/alpha/jails/web"
+	for _, k := range [][3]string{{c, "quota", "10G"}, {c, "reservation", "3G"}, {c + "/root", "quota", ""}, {c + "/root", "reservation", ""}, {c + "/var-db", "quota", ""}} {
+		if got := w.Z.PropOrEmpty(k[0], k[1]); got != k[2] {
+			t.Errorf("%s %s = %q want %q", k[0], k[1], got, k[2])
+		}
 	}
 }

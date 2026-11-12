@@ -447,7 +447,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 		shell, prompt                                                                    string
 		cpu, pids, priority                                                              int
 		networks, volumes, hostMounts, envs, labels, depends, tags, profiles, fwPolicies []string
-		autostart                                                                        bool
+		autostart, zfsDelegation                                                         bool
 	)
 	f := cmd.Flags()
 	f.StringVar(&image, "image", "", "image reference: NAME@alias or NAME#gN (required without -f)")
@@ -456,16 +456,17 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringVar(&layout, "layout", "", "root layout: thin or thick (default depends on the image)")
 	f.StringVar(&hostname, "hostname", "", "hostname inside the jail (default: the jail name)")
 	f.StringArrayVar(&networks, "network", nil, "attach a network granted to the project (repeatable; default: the project's only network, unless a profile supplies one): NET (an address of every family it has), NET=IPV4 or NET=IPV4,IPV6 (an address, auto or none)")
-	f.IntVar(&cpu, "cpu", 0, "CPU limit in cores")
-	f.StringVar(&memory, "memory", "", "memory limit, for example 2G")
-	f.StringVar(&disk, "disk", "", "disk quota, for example 20G")
-	f.IntVar(&pids, "pids", 0, "process limit")
+	f.IntVar(&cpu, "cpu", 0, "CPU cores: the jail is slowed down to that share (rctl pcpu; needs kern.racct.enable=1)")
+	f.StringVar(&memory, "memory", "", "anonymous memory the jail may reserve in total, for example 2G (rctl swapuse; needs kern.racct.enable=1)")
+	f.StringVar(&disk, "disk", "", "ZFS quota of the whole jail (root, data, volumes and snapshots), for example 20G")
+	f.IntVar(&pids, "pids", 0, "processes the jail may have (rctl maxproc; needs kern.racct.enable=1)")
 	f.StringArrayVar(&volumes, "volume", nil, "data volume NAME:MOUNT[:ro][:encrypted][:QUOTA] (repeatable); encrypted asks for a passphrase")
 	f.StringVar(&a.passFile, "passphrase-file", "", "read the passphrase of the encrypted volumes from this file (its first line) instead of asking")
 	f.StringArrayVar(&hostMounts, "host-mount", nil, "mount an existing host directory SOURCE:TARGET[:ro] (repeatable; global administrators only, and the host operator must have approved the directory)")
 	f.StringArrayVar(&fwPolicies, "firewall-policy", nil, "firewall policy to apply (repeatable; they are rendered in the order given, after the project's)")
 	f.StringArrayVar(&tags, "tag", nil, "firewall tag of this jail (repeatable)")
 	f.BoolVar(&autostart, "autostart", false, "start the jail when the host boots")
+	f.BoolVar(&zfsDelegation, "zfs-delegation", false, "global administrators only: hand the jail a ZFS dataset of its own, <container>/delegated, which root in the jail manages (the host's priv.conf must allow it: admin-zfs-delegation)")
 	f.IntVar(&priority, "boot-priority", 0, "boot order, lower starts first")
 	f.StringArrayVar(&depends, "depends", nil, "jail that must start first (repeatable)")
 	f.StringArrayVar(&envs, "env", nil, "environment variable KEY=VALUE (repeatable)")
@@ -473,7 +474,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringVar(&strategy, "update-strategy", "", "how the jail follows its image: rebase, inplace or manual")
 	f.StringVar(&window, "update-window", "", "update window, for example \"sun 03:00\"")
 	f.StringVar(&shell, "shell", "", "shell of jailops shell and the console: bash, sh or a path inside the jail (default: the host's jails.shell, bash)")
-	f.StringVar(&prompt, "prompt", "", "bash prompt of the jail: default, none or a PS1 text (default: the host's jails.prompt)")
+	f.StringVar(&prompt, "prompt", "", "bash prompt of the jail: default, short, none or a PS1 text that may hold {jail}, {project} and {host} (default: the host's jails.prompt)")
 	a.completeFlag(cmd, "image", imageRefs)
 	a.completeFlag(cmd, "network", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Networks().List(ctx), netName) }))
 	a.completeFlag(cmd, "storage", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Storage().List(ctx), storName) }))
@@ -500,6 +501,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: depends},
 			Update:    api.UpdatePolicy{Strategy: api.UpdateStrategy(strategy), Window: window},
 			Shell:     api.ShellPath(shell), Prompt: prompt,
+			Delegate: zfsDelegation,
 		}
 		if prompt != "" {
 			if err := api.CheckPrompt(prompt); err != nil {
@@ -1041,7 +1043,7 @@ addresses are replaced by "auto" so the copy does not collide with the source
 
 Only the specification is copied, not the data in the source's datasets. To
 copy data, snapshot or back up the source and restore it under a new name with
-'jailops backup restore --as'. NAME has at most 32 characters.`,
+'jailops backup restore --as'. NAME has at most 29 characters.`,
 		Example:           "jailops jail copy web web2\njailops --host host-b jail copy web web-b",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeArgs(completeKind(a, d), completeNone),
@@ -1093,15 +1095,20 @@ and jails.prompt of jailopsd.yaml: bash and the default prompt), bash is
 installed into the jail from the host when it is the shell and missing, and the
 prompt is written. Running it again repairs the files and changes nothing else.
 
-The prompt lives in /usr/local/etc/profile.d/jailops-prompt.sh, sourced from a
-marked block at the top of /usr/local/etc/profile (login shells) and
-/usr/local/etc/bash.bashrc (other interactive shells), so it survives OS
-updates. A user's own ~/.bashrc, ~/.bash_profile or ~/.profile wins over it.
-Change it with 'jailops config set NAME prompt ...' (default, none or a PS1
-text); 'none' removes the files. Existing jails are never changed on their own.`,
+Two files in /usr/local/etc/profile.d are sourced from a marked block at the top of
+/usr/local/etc/profile (login shells) and /usr/local/etc/bash.bashrc (other
+interactive shells), so they survive OS updates: jailops-env.sh exports
+JAILOPS_JAIL, JAILOPS_PROJECT and JAILOPS_HOST, and jailops-prompt.sh sets the
+prompt. A user's own ~/.bashrc, ~/.bash_profile or ~/.profile wins over them.
+The default prompt shows the jail, and in grey its project and the host it runs
+on: root@web [shop/babel]:/# . Change it with 'jailops config set NAME prompt ...'
+(default, short, none or a PS1 text); a text may hold {jail}, {project} and {host},
+which read the variables. 'short' has no grey tag; 'none' removes the prompt and keeps
+the variables. Existing jails are never changed on their own.`,
 		Example: `jailops jail shell-setup web
 jailops config set web prompt none
-jailops config set web prompt '\[\e[38;5;196m\]\u@\h:\w\$\[\e[0m\] '`,
+jailops config set web prompt short
+jailops config set web prompt '\[\e[38;5;196m\]\u@{jail}\[\e[0m\] [{project}/{host}]:\w\$ '`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {

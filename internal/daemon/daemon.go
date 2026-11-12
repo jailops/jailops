@@ -283,6 +283,9 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	if cfg.Jails.PromptColor != nil {
 		deps.JailPromptColor = *cfg.Jails.PromptColor
 	}
+	if cfg.Jails.MaxStates != nil {
+		deps.JailMaxStates = *cfg.Jails.MaxStates
+	}
 	deps.AppsDir = cfg.Apps.CatalogDir
 	deps.Host, deps.HostModules = clients.HostSystem, cfg.Host.Manage.Modules
 	deps.ConsolePort = consolePort(cfg.Listen.HTTPS.Address)
@@ -368,6 +371,9 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	d.go_(func() { _ = d.rec.Run(priv.WithAdmin(bg, systemActor)) })
 	d.go_(func() { d.bridgeStateEvents(bg, trigger) })
 	d.go_(func() { d.housekeeping(bg) })
+	if cfg.Devd.On() {
+		d.go_(func() { svc.RunDevd(bg, cfg.Devd.Pipe) })
+	}
 	if d.backups != nil {
 		d.go_(func() { d.backupLoop(priv.WithAdmin(bg, systemActor)) })
 	}

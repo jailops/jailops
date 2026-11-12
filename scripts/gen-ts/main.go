@@ -33,7 +33,7 @@ var roots = []any{
 	api.Image{}, api.ImageBuild{}, api.ImageUpgrade{}, api.ImageUpgradeResult{}, api.ImageAliasSet{},
 	api.Network{}, api.Lease{},
 	api.WireGuard{}, api.WireGuardPeerAdd{}, api.WireGuardPeerCreated{}, api.WireGuardJoin{}, api.WireGuardKeys{},
-	api.FirewallPolicy{}, api.AddressSet{},
+	api.FirewallPolicy{}, api.AddressSet{}, api.FirewallTestRequest{}, api.FirewallTestResult{},
 	api.BackupTarget{}, api.BackupPolicy{}, api.Backup{}, api.RestoreRequest{}, api.RestorePreflight{},
 	api.Token{}, api.Certificate{}, api.User{}, api.Remote{},
 	api.Document{},

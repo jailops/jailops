@@ -1,6 +1,7 @@
 package render
 
 import (
+	"fmt"
 	"net/netip"
 	"regexp"
 	"strings"
@@ -19,6 +20,92 @@ func baseConf() JailConfInput {
 		Name: "alpha_web", Path: "/jailops/projects/alpha/jails/web/root", Hostname: "web.example.org", OS: api.OSFreeBSD,
 		Interfaces: []string{"jo0123456789a0b"}, EnforceStatfs: intp(2), SecureLevel: intp(2),
 		OSRelease: "15.0-RELEASE", Allow: []string{"sysvipc", "raw_sockets", "mount.zfs"},
+		Where: api.PromptContext{Jail: "web", Project: "alpha", Host: "babel"},
+	}
+}
+
+// The jail knows where it is: the parameters env.jail, env.project and env.host, only for what is known and only with
+// the characters a name holds.
+func TestJailConfWhere(t *testing.T) {
+	c := baseConf()
+	c.Where = api.PromptContext{Jail: "web", Project: "alpha", Host: ""}
+	s, err := JailConf(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "\tenv.jailops_jail = \"web\";\n\tenv.jailops_project = \"alpha\";\n\tvnet;") || strings.Contains(s, "env.jailops_host") {
+		t.Fatalf("a jail without a known host:\n%s", s)
+	}
+	c.Where = api.PromptContext{Jail: "we b;$(id)\"", Project: "Alpha", Host: "-babel.example.org-"}
+	s, err = JailConf(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(s, "env.jailops_jail = \"webid\";") || !strings.Contains(s, "env.jailops_project = \"lpha\";") || !strings.Contains(s, "env.jailops_host = \"babelexample-org\";") && !strings.Contains(s, "env.jailops_host = \"babelexampleorg\";") {
+		t.Fatalf("odd characters:\n%s", s)
+	}
+	c.Where = api.PromptContext{}
+	if s, _ = JailConf(c); strings.Contains(s, "env.") {
+		t.Fatalf("nothing is known, so nothing is rendered:\n%s", s)
+	}
+}
+
+// A jail with delegation names its dataset for jail(8), which attaches it at the start; a plain jail has no such line.
+func TestJailConfZFSDataset(t *testing.T) {
+	c := baseConf()
+	one := 1
+	c.Allow, c.EnforceStatfs = []string{"mount", "mount.zfs"}, &one
+	c.ZFSDataset = "tank/jailops/projects/alpha/jails/web/delegated"
+	s, err := JailConf(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"\tenforce_statfs = 1;\n", "\tallow.mount;\n", "\tallow.mount.zfs;\n", "\tzfs.dataset = \"tank/jailops/projects/alpha/jails/web/delegated\";\n"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in\n%s", want, s)
+		}
+	}
+	c.ZFSDataset = "tank/x\";}\n\texec.start = \"x"
+	if _, err := JailConf(c); err == nil {
+		t.Error("a dataset name with a quote was accepted")
+	}
+	c.ZFSDataset = ""
+	if s, _ = JailConf(c); strings.Contains(s, "zfs.dataset") {
+		t.Errorf("a plain jail names a dataset:\n%s", s)
+	}
+}
+
+// A jail with zfs_delegation gets /dev/zfs in its own ruleset: a number nobody else shares, never a Linux jail's.
+func TestDelegatedJailDevfsRuleset(t *testing.T) {
+	devs := SpecDevfsDevices(api.JailSpec{Delegate: true})
+	if len(devs) != 1 || devs[0] != "zfs" {
+		t.Fatalf("devices %v", devs)
+	}
+	n, rules, err := DevfsRuleset(devs)
+	if err != nil || n < DevfsRulesetBase || n >= DevfsRulesetBase+DevfsLinuxOffset {
+		t.Fatalf("ruleset %d %v", n, err)
+	}
+	want := fmt.Sprintf("devfs rule -s %d add path zfs unhide", n)
+	found := false
+	for _, r := range rules {
+		found = found || strings.Join(r, " ") == want
+	}
+	if !found {
+		t.Errorf("no %q in %v", want, rules)
+	}
+	other, _, _ := DevfsRuleset([]string{"tun"})
+	linux, _, _ := LinuxDevfsRuleset([]string{"tun"})
+	if n == other || n == linux || other == linux {
+		t.Errorf("numbers collide: %d %d %d", n, other, linux)
+	}
+	if got := SpecDevfsDevices(api.JailSpec{Devfs: []api.DevfsDevice{{Device: "tun"}}}); len(got) != 1 {
+		t.Errorf("a jail without delegation: %v", got)
+	}
+	// a user cannot name zfs: it is not on the allow-list of the spec
+	for _, d := range api.DevfsAllowList {
+		if d == "zfs" {
+			t.Error("zfs is on the allow-list a user can name")
+		}
 	}
 }
 
@@ -31,6 +118,7 @@ func TestJailConfGolden(t *testing.T) {
 	l := baseConf()
 	l.Name, l.OS, l.Allow, l.OSRelease, l.SecureLevel = "alpha_alpine1", api.OSLinux, []string{"socket_af"}, "", nil
 	l.FstabPath = "/jailops/projects/alpha/jails/alpine1/fstab"
+	l.Where.Jail = "alpine1"
 	s, err = JailConf(l)
 	if err != nil {
 		t.Fatal(err)
@@ -431,13 +519,13 @@ func TestJSONCanonical(t *testing.T) {
 }
 
 func TestLinuxDevfsRuleset(t *testing.T) {
-	n, text, err := LinuxDevfsRuleset(nil)
-	if err != nil || n < 5000 || n >= 55000 {
+	n, rules, err := LinuxDevfsRuleset(nil)
+	if err != nil || n < DevfsRulesetBase || n >= 55000 {
 		t.Fatalf("%d %v", n, err)
 	}
-	golden(t, "devfs_linux", text)
-	n2, text2, _ := LinuxDevfsRuleset([]string{"tun", "tun"})
-	if n2 == n || !strings.Contains(text2, "add path 'tun*' unhide") {
+	golden(t, "devfs_linux", devfsRuleLines(rules))
+	n2, rules2, _ := LinuxDevfsRuleset([]string{"tun", "tun"})
+	if text2 := devfsRuleLines(rules2); n2 == n || !strings.Contains(text2, "add path tun* unhide") {
 		t.Fatal(n2, text2)
 	}
 	if n3, _, _ := LinuxDevfsRuleset([]string{"tun"}); n3 != n2 {

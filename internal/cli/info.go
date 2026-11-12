@@ -332,6 +332,9 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	if l.PIDs > 0 {
 		lim = append(lim, fmt.Sprintf("pids %d", l.PIDs))
 	}
+	if l.States > 0 {
+		lim = append(lim, fmt.Sprintf("pf states %d per rule", l.States))
+	}
 	if len(lim) == 0 {
 		lim = []string{"none"}
 	}

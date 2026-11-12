@@ -26,24 +26,25 @@ describe('address set names', () => {
 })
 
 describe('address set specs', () => {
-  const others = { admins: { addresses: [{ address: '198.51.100.7' }, { address: '@office' }] }, office: { addresses: [{ address: '192.0.2.128/26' }] } }
+  const others = { admins: { addresses: [{ address: '198.51.100.7' }, { address: 'set:office' }] }, office: { addresses: [{ address: '192.0.2.128/26' }] } }
   it('splits members by lines (and commas)', () => {
     expect(setSpec('192.0.2.1\n 198.51.100.0/24 ,2001:db8::1\n\n')).toEqual({ addresses: [{ address: '192.0.2.1' }, { address: '198.51.100.0/24' }, { address: '2001:db8::1' }] })
-    expect(setSpec('@office, @admins')).toEqual({ addresses: [{ address: '@office' }, { address: '@admins' }] })
+    expect(setSpec('set:office, jail:web')).toEqual({ addresses: [{ address: 'set:office' }, { address: 'jail:web' }] })
   })
   it('allows an empty set, as the server does', () => {
     expect(validateSet('empty', { addresses: [] }, others, s.firewall)).toEqual({})
   })
   it('names the first member that is no address', () => {
-    expect(validateSet('x', { addresses: [{ address: '192.0.2.1' }, { address: 'nope' }, { address: '@office' }] }, others, s.firewall)).toEqual({ addresses: s.firewall.setMember('nope') })
+    expect(validateSet('x', { addresses: [{ address: '192.0.2.1' }, { address: 'nope' }, { address: 'set:office' }] }, others, s.firewall)).toEqual({ addresses: s.firewall.setMember('nope') })
   })
-  it('refuses a cycle of members, with the path, and leaves a name that is no set to the server (it may be a jail)', () => {
-    expect(validateSet('x', { addresses: [{ address: '@x' }] }, others, s.firewall).addresses).toBe(s.firewall.setCycle('x -> x'))
-    // office gains the member @admins, which has @office as a member
-    expect(validateSet('office', { addresses: [{ address: '@admins' }] }, { admins: others.admins }, s.firewall).addresses).toBe(s.firewall.setCycle('office -> admins -> office'))
-    expect(validateSet('x', { addresses: [{ address: '@ghost' }] }, others, s.firewall)).toEqual({})
+  it('refuses a cycle of members, with the path, and leaves a set that does not exist to the server, and allows a jail that is not there', () => {
+    expect(validateSet('x', { addresses: [{ address: 'set:x' }] }, others, s.firewall).addresses).toBe(s.firewall.setCycle('x -> x'))
+    // office gains the member set:admins, which has set:office as a member
+    expect(validateSet('office', { addresses: [{ address: 'set:admins' }] }, { admins: others.admins }, s.firewall).addresses).toBe(s.firewall.setCycle('office -> admins -> office'))
+    expect(validateSet('x', { addresses: [{ address: 'set:ghost' }] }, others, s.firewall)).toEqual({})
+    expect(validateSet('x', { addresses: [{ address: 'jail:ghost' }] }, others, s.firewall)).toEqual({})
     // two paths to the same set are no cycle
-    expect(validateSet('x', { addresses: [{ address: '@admins' }, { address: '@office' }] }, others, s.firewall)).toEqual({})
+    expect(validateSet('x', { addresses: [{ address: 'set:admins' }, { address: 'set:office' }] }, others, s.firewall)).toEqual({})
   })
   it('puts the server message on the field its detail names', () => {
     expect(detailToSetErrors({ message: 'address set "ghost" does not exist', detail: { field: 'addresses' } })).toEqual({ addresses: 'address set "ghost" does not exist' })
@@ -53,24 +54,24 @@ describe('address set specs', () => {
 })
 
 describe('what uses an address set', () => {
-  it('finds rules with @name in from or to, and sets that have it as a member', () => {
+  it('finds rules with set:NAME in from or to, and sets that have it as a member', () => {
     const pol = (name: string, from: string[], to: string[] = []): FirewallPolicy => ({ metadata: { name }, spec: { rules: [{ action: 'allow', direction: 'in', from, to }] } }) as FirewallPolicy
     const set = (name: string, members: string[] = []): AddressSet => ({ metadata: { name }, spec: { addresses: members.map((address) => ({ address })) } }) as AddressSet
-    const u = setUsers('office', [pol('a', ['@office']), pol('b', [], ['@office']), pol('c', ['@officex', 'office'])], [set('admins', ['@office']), set('office')])
+    const u = setUsers('office', [pol('a', ['set:office']), pol('b', [], ['set:office']), pol('c', ['set:officex', 'office', 'jail:office'])], [set('admins', ['set:office']), set('office')])
     expect(u).toEqual({ policies: ['a', 'b'], sets: ['admins'] })
   })
 })
 
 describe('setSpec reads a comment at the end of a member line', () => {
   it('takes `# text` as the comment of the one member on the line, and setTextOf writes it back', () => {
-    const text = '192.0.2.9  # the office\n198.51.100.9\n@web # the web jail\n10.0.0.1 # the lab\n10.0.0.2 # the lab, too'
+    const text = '192.0.2.9  # the office\n198.51.100.9\njail:web # the web jail\n10.0.0.1 # the lab\n10.0.0.2 # the lab, too'
     const spec = setSpec(text, 'who may connect')
     expect(spec).toEqual({
       comment: 'who may connect',
       addresses: [
         { address: '192.0.2.9', comment: 'the office' },
         { address: '198.51.100.9' },
-        { address: '@web', comment: 'the web jail' },
+        { address: 'jail:web', comment: 'the web jail' },
         { address: '10.0.0.1', comment: 'the lab' },
         { address: '10.0.0.2', comment: 'the lab, too' },
       ],
@@ -85,13 +86,17 @@ describe('setSpec reads a comment at the end of a member line', () => {
   })
 })
 
-describe('setMember accepts a jail by name', () => {
-  it('takes @jail and @jail-2, not a bad name', () => {
-    expect(setMember('@web')).toBe(true)
-    expect(setMember('@web-2')).toBe(true)
-    expect(setMember('@Web')).toBe(false)
-    expect(setMember('@web-')).toBe(false)
-    expect(setMember('@')).toBe(false)
+describe('setMember accepts a jail or a set by kind', () => {
+  it('takes jail:web, jail:web-2 and set:office_net, not a bad name or an @', () => {
+    expect(setMember('jail:web')).toBe(true)
+    expect(setMember('jail:web-2')).toBe(true)
+    expect(setMember('set:office_net')).toBe(true)
+    expect(setMember('jail:Web')).toBe(false)
+    expect(setMember('jail:web-')).toBe(false)
+    expect(setMember('jail:' + 'a'.repeat(30))).toBe(false)
+    expect(setMember('set:web-2')).toBe(false)
+    expect(setMember('@web')).toBe(false)
+    expect(setMember('jail:')).toBe(false)
     expect(setMember('192.0.2.7')).toBe(true)
   })
 })

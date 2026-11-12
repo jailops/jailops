@@ -25,64 +25,13 @@ func installedNames(ctx context.Context, c *sdk.Client) ([]string, error) {
 	return out, err
 }
 
-// completeSource completes the SOURCE of allow and deny: the jails of the
-// project and its address sets as @name, and host.
-func (a *app) completeSource() completer {
-	return func(cmd *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
-		ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
-		defer cancel()
-		c, err := a.connect(ctx)
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		var out []string
-		for j, err := range c.Jails().List(ctx) {
-			if err != nil {
-				break
-			}
-			if len(args) == 0 || j.Metadata.Name != args[0] {
-				out = append(out, "@"+j.Metadata.Name)
-			}
-		}
-		for s, err := range c.Firewall().AddressSets().List(ctx) {
-			if err != nil {
-				break
-			}
-			out = append(out, "@"+s.Metadata.Name)
-		}
-		out = append(out, "host")
-		return out, cobra.ShellCompDirectiveNoFileComp
-	}
-}
+// completeSource completes the SOURCE of allow and deny: jail:, set: and host, then the jails and the address sets of
+// the project.
+func (a *app) completeSource() completer { return a.refCompleter(placeSource) }
 
-// completeMember completes a member of an address set, --address of address-set create: the jails of the project and
-// its address sets as @name, except the set being made (a set may not contain itself).
-func (a *app) completeMember() completer {
-	return func(cmd *cobra.Command, args []string, prefix string) ([]string, cobra.ShellCompDirective) {
-		ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
-		defer cancel()
-		c, err := a.connect(ctx)
-		if err != nil {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		var out []string
-		for j, err := range c.Jails().List(ctx) {
-			if err != nil {
-				break
-			}
-			out = append(out, "@"+j.Metadata.Name)
-		}
-		for s, err := range c.Firewall().AddressSets().List(ctx) {
-			if err != nil {
-				break
-			}
-			if len(args) == 0 || s.Metadata.Name != args[0] {
-				out = append(out, "@"+s.Metadata.Name)
-			}
-		}
-		return out, cobra.ShellCompDirectiveNoFileComp
-	}
-}
+// completeMember completes a member of an address set, --address of address-set create: jail: and set:, then the
+// jails and the other address sets of the project (not the set being made).
+func (a *app) completeMember() completer { return a.refCompleter(placeMember) }
 
 // completeAppFromSource completes APP, then the word from, then SOURCE.
 func (a *app) completeAppFromSource() completer {
@@ -121,8 +70,8 @@ source is allowed. 'allow' adds a rule to the app's firewall policy app-APP
 (managed by app access) for the ports of the definition, or those of --port.
 
 APP is the jail the app was installed as. SOURCE is one of:
-  @JAIL           a jail of the project: the rule names it, so it follows the jail
-  @SET            an address set of the project (firewall address-set); a source in
+  jail:NAME       a jail of the project: the rule names it, so it follows the jail
+  set:NAME        an address set of the project (firewall address-set); a source in
                   another project is written as addresses in a set
   ADDRESS, PREFIX an address or a prefix, such as 192.0.2.7 or 192.0.2.0/24
   host            the host itself (the gateway addresses of the app's networks)
@@ -139,13 +88,13 @@ or a database it did not make.
 Allowing again changes nothing unless the ports or the source's addresses
 changed. --dry-run prints the rule, the pg_hba line and the SQL, without the
 password, and changes nothing.`,
-		Example: `jailops app allow db from @web
-jailops app allow db from @web --db shop
-jailops app allow db from @office --db staff
+		Example: `jailops app allow db from jail:web
+jailops app allow db from jail:web --db shop
+jailops app allow db from set:office --db staff
 jailops app allow cache from 192.0.2.0/24 --port 6379
 jailops app allow web from host
-jailops app allow db from @web --rotate
-jailops app allow db from @web --dry-run`,
+jailops app allow db from jail:web --rotate
+jailops app allow db from jail:web --dry-run`,
 		Args:              appFromArgs,
 		ValidArgsFunction: a.completeAppFromSource(),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -236,8 +185,8 @@ JailOps made for it loses its login and password and keeps its database;
 --drop-role drops the role instead (what it owned goes to postgres, the
 database is kept). A role another grant uses, or one JailOps did not make, is
 left as it is. Denying a source that has no grant changes nothing.`,
-		Example: `jailops app deny db from @web
-jailops app deny db from @web --drop-role
+		Example: `jailops app deny db from jail:web
+jailops app deny db from jail:web --drop-role
 jailops app deny cache from 192.0.2.0/24 --dry-run`,
 		Args:              appFromArgs,
 		ValidArgsFunction: a.completeAppFromSource(),

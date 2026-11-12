@@ -195,24 +195,24 @@ export function demoRename(db: RenameDb, kind: DemoRenameKind, from: string, to:
   }
 
   if (kind === 'addressSet') {
-    const at = (xs: string[] | undefined) => (xs ?? []).includes(`@${from}`)
+    const at = (xs: string[] | undefined) => (xs ?? []).includes(`set:${from}`)
     for (const pol of scoped(db.policies)) {
       const d: string[] = []
       ;(pol.spec.rules ?? []).forEach((r, i) => {
-        if (at(r.from)) d.push(`rules[${i}].from: @${from} -> @${to}`)
-        if (at(r.to)) d.push(`rules[${i}].to: @${from} -> @${to}`)
+        if (at(r.from)) d.push(`rules[${i}].from: set:${from} -> set:${to}`)
+        if (at(r.to)) d.push(`rules[${i}].to: set:${from} -> set:${to}`)
       })
       if (!d.length) continue
       changes.push(ref(`firewall policy ${pol.metadata.name}`, d.join('; ')))
       edits.push(() => {
-        pol.spec.rules = (pol.spec.rules ?? []).map((r) => ({ ...r, ...(r.from ? { from: swap(r.from, `@${from}`, `@${to}`) } : {}), ...(r.to ? { to: swap(r.to, `@${from}`, `@${to}`) } : {}) }))
+        pol.spec.rules = (pol.spec.rules ?? []).map((r) => ({ ...r, ...(r.from ? { from: swap(r.from, `set:${from}`, `set:${to}`) } : {}), ...(r.to ? { to: swap(r.to, `set:${from}`, `set:${to}`) } : {}) }))
         pol.metadata.generation = (pol.metadata.generation ?? 0) + 1
       })
     }
     for (const x of scoped(db.sets)) {
-      if (!(x.spec.addresses ?? []).some((a) => a.address === `@${from}`)) continue
-      changes.push(ref(`address set ${x.metadata.name}`, `spec.addresses: @${from} -> @${to}`))
-      edits.push(() => { x.spec.addresses = (x.spec.addresses ?? []).map((a) => (a.address === `@${from}` ? { ...a, address: `@${to}` } : a)); x.metadata.generation = (x.metadata.generation ?? 0) + 1 })
+      if (!(x.spec.addresses ?? []).some((a) => a.address === `set:${from}`)) continue
+      changes.push(ref(`address set ${x.metadata.name}`, `spec.addresses: set:${from} -> set:${to}`))
+      edits.push(() => { x.spec.addresses = (x.spec.addresses ?? []).map((a) => (a.address === `set:${from}` ? { ...a, address: `set:${to}` } : a)); x.metadata.generation = (x.metadata.generation ?? 0) + 1 })
     }
   }
 

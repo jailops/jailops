@@ -1,10 +1,12 @@
 package server_test
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
 	"jailops.net/jailops/internal/daemon/dtest"
+	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
@@ -111,11 +113,15 @@ func TestProfilesDevicesAndRendering(t *testing.T) {
 	if !strings.Contains(conf, "devfs_ruleset") || strings.Contains(conf, "devfs_ruleset = 4;") {
 		t.Fatalf("jail.conf:\n%s", conf)
 	}
-	if rules := e.File("/etc/jailops/jails/alpha_web/devfs.rules"); !strings.Contains(rules, "add path 'tun*' unhide") {
-		t.Fatalf("devfs.rules: %q", rules)
+	// the ruleset the jail's devfs mounts is the one the helper loads before the jail is created: same number
+	if n, _, err := render.DevfsRuleset([]string{"tun"}); err != nil || !strings.Contains(conf, fmt.Sprintf("devfs_ruleset = %d;", n)) {
+		t.Fatalf("jail.conf does not name the devfs ruleset of a jail with tun (%d, %v):\n%s", n, err, conf)
+	}
+	if rules := e.File("/etc/jailops/jails/alpha_web/devfs.rules"); rules != "" {
+		t.Fatalf("a devfs.rules file nobody loads was written: %q", rules)
 	}
 	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_web.conf")
-	if !strings.Contains(rs, "port 8080 -> "+j.Spec.Network[0].IPv4+" port 80") {
+	if !strings.Contains(rs, "port 8080 rdr-to "+j.Spec.Network[0].IPv4+" port 80") {
 		t.Fatalf("the proxy device is not an rdr rule:\n%s", rs)
 	}
 	// Two jails cannot forward the same host port, in any project.

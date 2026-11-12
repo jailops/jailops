@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"slices"
@@ -272,7 +273,12 @@ fish:  jailops completion fish > ~/.config/fish/completions/jailops.fish`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			switch args[0] {
 			case "bash":
-				return cmd.Root().GenBashCompletionV2(a.env.Stdout, true)
+				script, err := bashCompletionScript(cmd.Root())
+				if err != nil {
+					return err
+				}
+				_, err = a.env.Stdout.Write(script)
+				return err
 			case "zsh":
 				return cmd.Root().GenZshCompletion(a.env.Stdout)
 			case "fish":
@@ -384,4 +390,30 @@ func globMatch(pattern, s string) bool {
 	b.WriteString("$")
 	re, err := regexp.Compile(b.String())
 	return err == nil && re.MatchString(s)
+}
+
+// bashEval is the line of the generated bash script that asks the program for the completions.
+const bashEval = `    out=$(eval "${requestComp}" 2>/dev/null)`
+
+// bashUnfinishedQuote closes a quote that the word being completed has not closed yet, so that a rule typed as
+// --rule "allow in tcp from j<Tab> reaches the program: the script runs the request through eval, which refuses an
+// unfinished quote and would complete nothing.
+const bashUnfinishedQuote = `    case ${lastParam} in
+        \"*) [[ ${#lastParam} -eq 1 || ${lastParam: -1} != \" ]] && requestComp="${requestComp}\"" ;;
+        \'*) [[ ${#lastParam} -eq 1 || ${lastParam: -1} != \' ]] && requestComp="${requestComp}'" ;;
+    esac
+`
+
+// bashCompletionScript is the bash completion script of the command tree, with the unfinished quote of the last word
+// closed before the program is asked.
+func bashCompletionScript(root *cobra.Command) ([]byte, error) {
+	var b bytes.Buffer
+	if err := root.GenBashCompletionV2(&b, true); err != nil {
+		return nil, err
+	}
+	s := b.String()
+	if !strings.Contains(s, bashEval) {
+		return nil, fmt.Errorf("the generated bash completion script has no line %q to put the quote handling before", bashEval)
+	}
+	return []byte(strings.Replace(s, bashEval, bashUnfinishedQuote+bashEval, 1)), nil
 }

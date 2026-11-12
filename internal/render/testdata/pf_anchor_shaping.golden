@@ -1,0 +1,71 @@
+# Managed by JailOps. Do not edit; changes are overwritten.
+# anchor jailops/alpha/web
+# tags: tier-1 web
+table <s_office> persist { 198.51.100.7, 2001:db8:ffff::/48, 203.0.113.0/24 }
+table <t_admin> persist { 10.20.0.4, 10.20.0.5 }
+# bandwidth limit of jo0123456789a0a: what the jail sends goes through pipe 40000
+match in on jo0123456789a0a all dnpipe 40000
+match out on jo0g0b from any to { 10.20.0.10, 2001:db8:1::100 } dnpipe (0, 40000)
+# rdr rule 5: forward
+match in on em0 inet proto tcp from any to (em0) port 8080 rdr-to 10.20.0.10 port 80
+pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 80 label "jo-514065bc913a"
+match in on em0 inet6 proto tcp from any to (em0) port 8080 rdr-to 2001:db8:1::100 port 80
+pass in quick on em0 inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-2738183dde95"
+table <jail_addrs> persist { 10.20.0.10, 2001:db8:1::100, fe80::/10 }
+block in quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }
+pass in quick on jo0123456789a0a inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol label "jo-be3497b732cb"
+block in quick on jo0123456789a0a from ! <jail_addrs> to any
+block in quick on jo0123456789a0a inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv
+pass in quick on jo0123456789a0a inet6 proto icmp6 from { 2001:db8:1::100, fe80::/10 } to any icmp6-type { neighbrsol, neighbradv } label "jo-4eaea12c9555"
+pass in quick on jo0123456789a0a inet6 proto icmp6 from { 2001:db8:1::100, fe80::/10 } to ff02::/16 icmp6-type { listenrep, listendone, 143 } label "jo-debd790c32cc"
+pass in quick on jo0123456789a0a inet6 proto icmp6 from { 2001:db8:1::100, fe80::/10 } to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-86ff7626e4f4"
+block out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { redir, routeradv }
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-b6267b115194"
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-45c3166bacdf"
+block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
+block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir
+# deny rules of all policies: they win over every allow rule, whatever the order of the policies
+# policy web
+# rule 6: no smtp
+block drop in quick on jo0123456789a0a inet proto tcp from 10.20.0.10 to any port 25
+block drop in quick on jo0123456789a0a inet6 proto tcp from 2001:db8:1::100 to any port 25
+# allow rules of the policies, in the order of the policies
+# policy web
+# rule 1: ssh from office
+pass out log quick on jo0123456789a0a inet proto tcp from { <s_office>, <t_admin> } to 10.20.0.10 port 22 label "jo-a2135c9307ad"
+pass out log quick on jo0123456789a0a inet6 proto tcp from { <s_office>, <t_admin> } to 2001:db8:1::100 port 22 label "jo-4ee14be10306"
+# rule 2: web
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port { 80, 8000:8100 } label "jo-acb0513609d4"
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port { 80, 8000:8100 } label "jo-23dd9079dcbf"
+# rule 3: ping
+pass out quick on jo0123456789a0a inet proto icmp from any to 10.20.0.10 label "jo-2c6920317698"
+# rule 4: ping6
+pass out quick on jo0123456789a0a inet6 proto icmp6 from any to 2001:db8:1::100 label "jo-e2bc578f2fba"
+# rule 5: forward
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80 label "jo-04e7980dacd0"
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-666a1bc90686"
+# rule 7: dns
+pass in quick on jo0123456789a0a inet proto udp from 10.20.0.10 to 9.9.9.9 port 53 label "jo-1ce8e102487a"
+pass in quick on jo0123456789a0a inet6 proto udp from 2001:db8:1::100 to 2620:fe::fe port 53 label "jo-6a57feb350a2"
+# defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
+block drop out quick on jo0123456789a0a all
+pass in quick on jo0123456789a0a all label "jo-1a6a761aff0c"
+# into the jail from the host and from routed networks
+block drop out quick on jo0g0b inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }
+pass out quick on jo0g0b inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv } label "jo-971ac9c39fbc"
+pass out quick on jo0g0b inet6 proto icmp6 from any to 2001:db8:1::100 icmp6-type { unreach, toobig, timex, paramprob } label "jo-08f795f54622"
+# rule 1: ssh from office
+pass out log quick on jo0g0b inet proto tcp from { <s_office>, <t_admin> } to 10.20.0.10 port 22 label "jo-47ade5f86774"
+pass out log quick on jo0g0b inet6 proto tcp from { <s_office>, <t_admin> } to 2001:db8:1::100 port 22 label "jo-9c59a91b4104"
+# rule 2: web
+pass out quick on jo0g0b inet proto tcp from any to 10.20.0.10 port { 80, 8000:8100 } label "jo-d4e274ca3c9c"
+pass out quick on jo0g0b inet6 proto tcp from any to 2001:db8:1::100 port { 80, 8000:8100 } label "jo-18c07a2dd5f2"
+# rule 3: ping
+pass out quick on jo0g0b inet proto icmp from any to 10.20.0.10 label "jo-33f4f7414aed"
+# rule 4: ping6
+pass out quick on jo0g0b inet6 proto icmp6 from any to 2001:db8:1::100 label "jo-f86349c7e876"
+# rule 5: forward
+pass out quick on jo0g0b inet proto tcp from any to 10.20.0.10 port 80 label "jo-2bd428b2b8b1"
+pass out quick on jo0g0b inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-eeb7d0bd143b"
+block drop out quick on jo0g0b inet from any to 10.20.0.10
+block drop out quick on jo0g0b inet6 from any to 2001:db8:1::100

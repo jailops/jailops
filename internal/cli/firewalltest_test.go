@@ -19,26 +19,26 @@ func TestFirewallTest(t *testing.T) {
 	tr := h.transcript()
 	tr.ok("app", "install", "postgresql", "--name", "db", "--image", "freebsd-151@stable")
 	tr.ok("app", "install", "nginx", "--name", "web", "--image", "freebsd-151@stable")
-	tr.ok("firewall", "address-set", "create", "postgresql_allow", "--address", "@web", "--comment", "the web jail")
-	tr.ok("firewall", "policy", "create", "postgres", "--rule", "allow in tcp from @postgresql_allow port 5432 comment who may reach PostgreSQL")
+	tr.ok("firewall", "address-set", "create", "postgresql_allow", "--address", "jail:web", "--comment", "the web jail")
+	tr.ok("firewall", "policy", "create", "postgres", "--rule", "allow in tcp from set:postgresql_allow port 5432 comment who may reach PostgreSQL")
 	tr.ok("config", "set", "db", "firewall.policies", "postgres")
-	_, _, code := tr.do("", "firewall", "test", "--from", "@web", "--to", "@db", "--port", "5432")
+	_, _, code := tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5432")
 	if code != 0 {
 		t.Fatalf("web -> db:5432 exited %d", code)
 	}
-	if _, _, code = tr.do("", "firewall", "test", "--from", "@web", "--to", "@db", "--port", "5433"); code != 1 {
+	if _, _, code = tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5433"); code != 1 {
 		t.Fatalf("web -> db:5433 exited %d, want 1", code)
 	}
-	tr.do("", "firewall", "test", "--from", "@web", "--to", "@db", "--proto", "icmp")
-	tr.do("", "firewall", "test", "--from", "@web", "--to", "@db", "--port", "5432", "-o", "json")
+	tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--proto", "icmp")
+	tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5432", "-o", "json")
 	// refusals
-	tr.do("", "firewall", "test", "--to", "@db", "--port", "5432")
-	tr.do("", "firewall", "test", "--from", "@web", "--to", "@db")
-	tr.do("", "firewall", "test", "--from", "@web", "--to", "@nobody", "--port", "5432")
+	tr.do("", "firewall", "test", "--to", "jail:db", "--port", "5432")
+	tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db")
+	tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:nobody", "--port", "5432")
 	tr.golden("firewall_test")
 
 	// the JSON answer has the verdict, the hops and the rule that decided
-	out, _, code := h.run("", "firewall", "test", "--from", "@web", "--to", "@db", "--port", "5432", "-o", "json")
+	out, _, code := h.run("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5432", "-o", "json")
 	var res api.FirewallTestResult
 	if code != 0 || json.Unmarshal([]byte(out), &res) != nil || res.Verdict != api.TestPass || len(res.Cases) != 1 || len(res.Cases[0].Hops) == 0 {
 		t.Fatalf("%d %s", code, out)
@@ -49,7 +49,7 @@ func TestFirewallTest(t *testing.T) {
 	}
 }
 
-// --from and --to complete from the jails of the project, as @name, and host; --proto and --family complete their values.
+// --from and --to complete in two levels: jail: and host, then the jails of the project; --proto and --family complete their values.
 func TestFirewallTestCompletion(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
@@ -68,9 +68,10 @@ func TestFirewallTestCompletion(t *testing.T) {
 		args       []string
 		want, none []string
 	}{
-		{[]string{"firewall", "test", "--from", ""}, []string{"@db", "host"}, []string{"@office"}},
-		{[]string{"firewall", "test", "--to", ""}, []string{"@db", "host"}, []string{"@office"}},
-		{[]string{"firewall", "test", "--proto", ""}, []string{"tcp", "udp", "icmp", "icmp6"}, []string{"@db"}},
+		{[]string{"firewall", "test", "--from", ""}, []string{"jail:", "set:", "host"}, []string{"jail:db", "set:office"}},
+		{[]string{"firewall", "test", "--from", "jail:"}, []string{"jail:db"}, []string{"set:office", "host"}},
+		{[]string{"firewall", "test", "--to", "jail:"}, []string{"jail:db"}, []string{"set:office"}},
+		{[]string{"firewall", "test", "--proto", ""}, []string{"tcp", "udp", "icmp", "icmp6"}, []string{"jail:db"}},
 	} {
 		out, _, code := h.run("", append([]string{"__complete"}, c.args...)...)
 		if code != 0 {

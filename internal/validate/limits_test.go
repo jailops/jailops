@@ -53,7 +53,7 @@ func TestNameLengthLimits(t *testing.T) {
 			t.Errorf("%s: %v", c.kind, err)
 		}
 	}
-	if MaxStorageDataset != 88 {
+	if MaxStorageDataset != 91 {
 		t.Errorf("MaxStorageDataset = %d", MaxStorageDataset)
 	}
 	// the deepest derived name of a jail at every limit, on a storage at its limit, fits ZFS with two to spare
@@ -81,10 +81,10 @@ func TestSnapshotName(t *testing.T) {
 }
 
 func TestStorageDatasetAndBudget(t *testing.T) {
-	if err := StorageDataset("dataset", "tank/"+strings.Repeat("d", 83)); err != nil {
+	if err := StorageDataset("dataset", "tank/"+strings.Repeat("d", 86)); err != nil {
 		t.Error(err)
 	}
-	wantInvalid(t, StorageDataset("dataset", "tank/"+strings.Repeat("d", 84)), "dataset")
+	wantInvalid(t, StorageDataset("dataset", "tank/"+strings.Repeat("d", 87)), "dataset")
 	if err := DatasetBudget("name", "jail x", strings.Repeat("d", 190), SnapshotReserve); err != nil {
 		t.Error(err)
 	}

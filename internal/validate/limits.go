@@ -15,7 +15,7 @@ import (
 // name longer than 255 characters.
 const (
 	MaxProjectName   = 13
-	MaxJailName      = 32
+	MaxJailName      = 29
 	MaxVolumeName    = 32
 	MaxImageName     = 32
 	MaxSnapshotName  = 64
@@ -60,7 +60,7 @@ func SnapshotName(field, s string) error {
 func StorageDataset(field, ds string) error {
 	if len(ds) > MaxStorageDataset {
 		return Invalid(field, "dataset %q is %d characters long; the dataset of a new storage has at most %d", ds, len(ds), MaxStorageDataset).
-			WithHint("ZFS names are at most 255 characters and a jail's datasets add up to 165 to it (<dataset>/projects/<project>/jails/<jail>/data/<volume>@<snapshot>); choose a shorter dataset")
+			WithHint("ZFS names are at most 255 characters and a jail's datasets add up to 162 to it (<dataset>/projects/<project>/jails/<jail>/data/<volume>@<snapshot>); choose a shorter dataset")
 	}
 	return nil
 }

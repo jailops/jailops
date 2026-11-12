@@ -309,13 +309,20 @@ func (l *Local) RunHook(ctx context.Context, phase, jail string) error {
 	atts, err := l.planJail(ctx, jn)
 	if err != nil {
 		if phase == PhasePostStop {
-			// The spec may be gone with the jail; still drop the anchor.
-			return errors.Join(err, ignoreNotFound(l.PF().Flush(ctx, JailAnchor(jn))))
+			// The spec may be gone with the jail; still drop the anchor and the rctl rules.
+			return errors.Join(err, ignoreNotFound(l.PF().Flush(ctx, JailAnchor(jn))), l.dropLimits(ctx, jn))
 		}
 		return err
 	}
 	switch phase {
 	case PhasePreStart:
+		rec, err := l.loadRecord(ctx, jn)
+		if err != nil {
+			return err
+		}
+		if err := l.loadDevfs(ctx, rec); err != nil {
+			return err // the jail must never start on a devfs ruleset that was not loaded
+		}
 		return l.hookPreStart(ctx, jail, atts)
 	case PhasePostStart:
 		return l.hookPostStart(ctx, jn, atts)
@@ -390,6 +397,9 @@ func (l *Local) hookPostStart(ctx context.Context, jn JailName, atts []attachmen
 			}
 		}
 	}
+	if err := l.applyLimits(ctx, jn); err != nil {
+		return fmt.Errorf("resource limits: %w", err)
+	}
 	if b, err := l.readState(l.cfg.PFAnchorFile(jail)); err == nil {
 		// The parent anchor jailops/<project> must exist first, or PF never
 		// evaluates the jail's anchor. The reconcile loop loads it too;
@@ -411,6 +421,9 @@ func (l *Local) hookPostStart(ctx context.Context, jn JailName, atts []attachmen
 
 func (l *Local) hookPostStop(ctx context.Context, jn JailName, atts []attachment) error {
 	var errs []error
+	if err := l.dropLimits(ctx, jn); err != nil {
+		errs = append(errs, fmt.Errorf("resource limits: %w", err))
+	}
 	if err := ignoreNotFound(l.PF().Flush(ctx, JailAnchor(jn))); err != nil {
 		errs = append(errs, fmt.Errorf("flush pf anchor: %w", err))
 	}

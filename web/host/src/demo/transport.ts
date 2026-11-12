@@ -3,7 +3,7 @@
 // for `?demo`.
 import { storedToken } from '@jailops/shared/api/client'
 import type { EventStream, RawRequest, RawResponse, StreamHandlers, Transport } from '@jailops/shared/api/client'
-import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolicy, AddressSet, AddressSetSpec, FirewallRule, Token, Backup, Jail, JailRollback, JailUpgrade, PowerState, ImageAutoUpgrade } from '@jailops/shared/api/types'
+import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolicy, AddressSet, AddressSetSpec, FirewallRule, FirewallTestRequest, Token, Backup, Jail, JailRollback, JailUpgrade, PowerState, ImageAutoUpgrade } from '@jailops/shared/api/types'
 import * as d from './data'
 import * as d2 from './data2'
 import * as da from './apps'
@@ -23,6 +23,7 @@ import { SET_NAME, setUsers, validateSet, type SetMsgs } from '@/lib/firewall'
 import { nameProblem, type NameRule } from '@jailops/shared/lib/names'
 import { labelKeyProblem, labelValueProblem, labelsProblem, MAX_LABELS } from '@/lib/labels'
 import { demoRename, renameKindOf } from './rename'
+import { demoFirewallTest, DemoFwError } from './fwtest'
 
 interface DemoOp extends Operation {
   startedAt: number
@@ -103,7 +104,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   const shellPath = (v: string) => (v === 'bash' ? BASH : v === 'sh' ? '/bin/sh' : v)
   // the server's rule (api.CheckPrompt), in short: no quote, no backquote, $ only as \$, no \\ and no control characters
   const promptProblem = (v: string): string =>
-    v === 'default' || v === 'none' ? '' : /['`\x00-\x1f\x7f]/.test(v) ? 'the prompt may not contain a quote, a backquote or a control character' : /\$/.test(v.replace(/\\\$/g, '')) || /\\\\/.test(v) ? 'the prompt may contain $ only as \\$ (variables and commands in the prompt are not accepted)' : ''
+    v === 'default' || v === 'none' ? '' : /['`\x00-\x1f\x7f]/.test(v) ? 'the prompt may not contain a quote, a backquote or a control character' : /\$/.test(v.replace(/\\\$/g, '')) || /\\\\/.test(v) ? 'the prompt may contain $ only as \\$ (variables and commands in the prompt are not accepted)' : /[{}]/.test(v.replace(/\\D\{[^}]*\}/g, '').replace(/\{(jail|project|host)\}/g, '')) ? 'a { or } in the prompt must be one of {jail}, {project}, {host}' : ''
   const freebsdImage = (ref: string) => (db.images.find((i) => i.metadata.name === String(ref).split(/[@#]/)[0])?.spec.os ?? 'freebsd') === 'freebsd'
   const logs = da.demoLogs()
   const forward = demoForward('bsd01.example.net')
@@ -373,7 +374,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         { name: 'linuxulator', status: 'warn', message: 'linprocfs is not mounted', hint: 'Add linprocfs to /etc/fstab.' },
         { name: 'jail.kernel.vimage', status: 'unknown', message: 'could not be determined on this platform' },
         { name: 'apps.access', status: 'ok', message: '2 grants; every firewall rule and pg_hba.conf line is in place' },
-        { name: 'jails.rate_limits', status: 'info', message: '1 jail sets a rate limit, which is not enforced yet: web/web', hint: 'the limits are stored and reported; traffic is not shaped until a later version wires a shaper' },
       ] })
       case 'restores': return restore(body)
       case 'remotes': return ok(db.remotes)
@@ -633,7 +633,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   // The server's texts for a refused address set (internal/validate), so the demo says what the daemon says.
   const setTexts: SetMsgs = {
     setRequired: '', setTooLong: '', setBadName: '', setExists: '',
-    setMember: (a) => `address set member "${a}" must be an address, a CIDR or @jail`,
+    setMember: (a) => `address set member "${a}" must be an address, a CIDR, jail:NAME or set:NAME`,
     setCycle: (path) => `address set cycle: ${path}`,
   }
   /** The checks of CreateAddressSet and UpdateAddressSet: name, members and cycles. */
@@ -642,12 +642,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const others = Object.fromEntries(inProject.filter((x) => x.metadata.name !== name).map((x) => [x.metadata.name, x.spec]))
     const e = validateSet(name, { addresses: spec.addresses ?? [] }, others, setTexts)
     if (e.addresses) return fail(400, { code: 'invalid', message: e.addresses, detail: { field: 'addresses' } })
-    // @name is a set or a jail of the project
-    const jails = db.jails.filter((j) => (j.metadata.project ?? 'web') === project).map((j) => j.metadata.name)
+    // set:NAME is a set of the project; jail:NAME may name a jail that is not there (it matches nobody)
     for (const a of spec.addresses ?? []) {
-      const n = a.address.startsWith('@') ? a.address.slice(1) : ''
-      if (n && n !== name && !others[n] && !jails.includes(n)) {
-        return fail(400, { code: 'invalid', message: `address set or jail "${n}" does not exist (a rule or a set names @${n})`, detail: { field: 'addresses' } })
+      const n = a.address.startsWith('set:') ? a.address.slice(4) : ''
+      if (n && n !== name && !others[n]) {
+        return fail(400, { code: 'invalid', message: `address set "${n}" does not exist (a rule or a set names set:${n})`, detail: { field: 'addresses' } })
       }
     }
     return null
@@ -655,6 +654,18 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   const quoted = (xs: string[]) => xs.map((x) => `"${x}"`).join(', ')
 
   function firewallRoute(seg: string[], m: string, body: Record<string, any>, req: RawRequest, project: string): RawResponse {
+    if (seg[1] === 'test' && seg.length === 2 && m === 'POST') {
+      try {
+        const proj = db.projects.find((p) => p.metadata.name === project)
+        return ok(demoFirewallTest(body as FirewallTestRequest, {
+          jails: db.jails.filter((j) => (j.metadata.project ?? '') === project), policies: db.policies.filter((x) => (x.metadata.project ?? 'web') === project),
+          sets: db.sets.filter((x) => (x.metadata.project ?? 'web') === project), projectPolicies: proj?.spec.firewall_policies ?? [],
+        }))
+      } catch (e) {
+        if (e instanceof DemoFwError) return fail(e.status, { code: e.code as ApiErrorBody['code'], message: e.message, ...(e.hint ? { hint: e.hint } : {}) })
+        throw e
+      }
+    }
     const isSet = seg[1] === 'address-sets'
     // policies and address sets belong to a project like jails; the canned ones are the web project's
     const all = (isSet ? db.sets : db.policies) as Array<FirewallPolicy | AddressSet>
@@ -690,16 +701,16 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (m === 'GET') return ok(item, etagOf(item.metadata.generation))
     if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(item.metadata.generation)) return fail(412, { code: 'conflict', message: 'The object changed since you loaded it.', hint: 'Reload and apply your change again.' })
     if (m === 'DELETE' && isSet) {
-      // DeleteAddressSet: refused while a rule of a policy names @set or another set has @set as a member
+      // DeleteAddressSet: refused while a rule of a policy names set:NAME or another set has set:NAME as a member
       const name = seg[2]
       const users = setUsers(name, policies, sets)
       if (users.policies.length) {
         return fail(409, { code: 'busy', message: `address set "${name}" is used by firewall ${users.policies.length > 1 ? 'policies' : 'policy'} ${quoted(users.policies)}`,
-          hint: `remove @${name} from the rules of ${users.policies.join(', ')} first`, detail: { policies: users.policies.join(',') } })
+          hint: `remove set:${name} from the rules of ${users.policies.join(', ')} first`, detail: { policies: users.policies.join(',') } })
       }
       if (users.sets.length) {
         return fail(409, { code: 'busy', message: `address set "${name}" is a member of ${quoted(users.sets)}`,
-          hint: `remove @${name} from the members of ${users.sets.join(', ')} first`, detail: { sets: users.sets.join(',') } })
+          hint: `remove set:${name} from the members of ${users.sets.join(', ')} first`, detail: { sets: users.sets.join(',') } })
       }
       db.sets = db.sets.filter((x) => x !== item)
       emit('address-set-deleted', `/api/v1/firewall/address-sets/${name}`)
@@ -735,7 +746,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       const r = rules[i]
       if (r.redirect && r.direction !== 'in') return fail(400, { code: 'invalid', message: `rules[${i}]: a redirect is allowed on inbound rules only`, detail: { [`rules[${i}].redirect`]: 'redirect is allowed on inbound rules only' } })
       for (const k of ['from', 'to'] as const) {
-        for (const a of r[k] ?? []) if (a.startsWith('@') && !sets.some((x) => x.metadata.name === a.slice(1))) return fail(400, { code: 'invalid', message: `rules[${i}]: unknown address set ${a}`, hint: 'Create the address set first.', detail: { [`rules[${i}].${k}`]: `unknown address set ${a}` } })
+        for (const a of r[k] ?? []) if (a.startsWith('set:') && !sets.some((x) => x.metadata.name === a.slice(4))) return fail(400, { code: 'invalid', message: `rules[${i}]: unknown address set ${a}`, hint: 'Create the address set first.', detail: { [`rules[${i}].${k}`]: `unknown address set ${a}` } })
       }
     }
     return startOp(`Save ${seg[2]}`, { firewall: [`/api/v1/firewall/${seg[1]}/${seg[2]}`] }, 700, () => {

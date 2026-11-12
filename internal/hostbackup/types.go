@@ -42,6 +42,10 @@ type Dataset struct {
 // SkipLocked is Dataset.Skip of a locked encrypted volume.
 const SkipLocked = "locked"
 
+// SkipDelegated is Dataset.Skip of the dataset a jail manages itself (zfs_delegation): it is not mounted on the host,
+// so its files cannot be read there.
+const SkipDelegated = "delegated"
+
 // JailRecord is what the daemon knows about one jail, taken from its record
 // (not from guesses about the dataset layout): this package never builds a
 // dataset name or a mountpoint on its own.

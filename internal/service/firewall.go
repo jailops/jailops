@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"maps"
 	"net/netip"
 	"slices"
 	"strconv"
@@ -47,7 +46,7 @@ func bodyProject(p, body string) error {
 // checkPolicy validates a policy, renders it against placeholder values and,
 // when a PF client exists, has pfctl -n check the result. A raw fragment needs
 // the admin role.
-func (s *Service) checkPolicy(ctx context.Context, name string, spec api.FirewallPolicySpec, sets map[string]api.AddressSetSpec) error {
+func (s *Service) checkPolicy(ctx context.Context, name string, spec api.FirewallPolicySpec, refs fwRefs) error {
 	if err := validate.Name("name", name); err != nil {
 		return err
 	}
@@ -60,7 +59,7 @@ func (s *Service) checkPolicy(ctx context.Context, name string, spec api.Firewal
 	}
 	in := render.PFInput{Jail: "check_policy", Interfaces: []string{"jo000000000a"}, Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1")},
 		DefaultIn: spec.DefaultIn, DefaultOut: spec.DefaultOut, Policies: []render.PFPolicy{{Name: "check", Policy: spec}},
-		Sets: sets, Uplink: "jo0", AllowRaw: true, TagMembers: map[string][]netip.Addr{}}
+		Sets: refs.sets, Jails: refs.jails, Uplink: "jo0", AllowRaw: true, TagMembers: map[string][]netip.Addr{}}
 	for _, r := range spec.Rules {
 		for _, e := range append(append([]string{}, r.From...), r.To...) {
 			if k, v, err := validate.ParseEndpoint(e); err == nil && k == validate.EndpointTag {
@@ -122,7 +121,7 @@ func (s *Service) CreatePolicy(ctx context.Context, in api.FirewallPolicy) (api.
 	if err := ks.notTaken(in.Metadata.Name); err != nil {
 		return api.FirewallPolicy{}, err
 	}
-	sets, err := s.allSetsWithJails(p.Meta.Name)
+	sets, err := s.allRefs(p.Meta.Name)
 	if err != nil {
 		return api.FirewallPolicy{}, err
 	}
@@ -169,7 +168,7 @@ func (s *Service) UpdatePolicy(ctx context.Context, name string, in api.Firewall
 	if err := s.protectedPolicy(ctx, p, name); err != nil {
 		return api.FirewallPolicy{}, err
 	}
-	sets, err := s.allSetsWithJails(p.Meta.Name)
+	sets, err := s.allRefs(p.Meta.Name)
 	if err != nil {
 		return api.FirewallPolicy{}, err
 	}
@@ -225,105 +224,42 @@ func (s *Service) DeletePolicy(ctx context.Context, name string, expect int64) e
 	return ks.delete(ctx, name, expect)
 }
 
-// allSetsWithJails is allSets plus, for every jail of the project, a set named like the jail that holds its addresses:
-// a rule says `from @web` and means the jail web, as `app allow` does. A jail and an address set never have the
-// same name. The addresses are read at every render, so a rule follows a jail whose address changes. A jail whose name is too long
-// for a pf table (31 characters with the s_ prefix) is left out: use an address set for it.
-func (s *Service) allSetsWithJails(project string) (map[string]api.AddressSetSpec, error) {
-	m, err := s.allSets(project)
+// fwRefs is what a reference in a rule or in an address set resolves against: the address sets of the project
+// (set:NAME) and the addresses of its jails (jail:NAME). They are separate namespaces: a jail and an address set may
+// have the same name.
+type fwRefs struct {
+	sets  map[string]api.AddressSetSpec
+	jails map[string][]string
+}
+
+// allRefs reads the address sets and the jail addresses of one project. The addresses of a jail are read at every
+// render, so a rule follows a jail whose address changes; a jail without an address has an empty entry.
+func (s *Service) allRefs(project string) (fwRefs, error) {
+	sets, err := s.allSets(project)
 	if err != nil {
-		return nil, err
+		return fwRefs{}, err
 	}
+	return fwRefs{sets: sets, jails: s.projectJailAddrs(project)}, nil
+}
+
+// projectJailAddrs maps every jail of the project to its addresses (with what its profiles give it, as app access
+// reads them).
+func (s *Service) projectJailAddrs(project string) map[string][]string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
+	m := map[string][]string{}
 	for _, n := range sortedKeys(s.jails) {
 		j := s.jails[n].jail
-		if j.Metadata.Project != project || len(j.Metadata.Name) > 29 {
+		if j.Metadata.Project != project {
 			continue
 		}
 		var addrs []string
-		for _, a := range jailAddrs(s.effective(j)) { // with what its profiles give it, as app access reads it
+		for _, a := range jailAddrs(s.effective(j)) {
 			addrs = append(addrs, a.String())
 		}
-		if len(addrs) > 0 {
-			m[j.Metadata.Name] = api.AddressSetSpec{Addresses: api.Entries(addrs...)}
-		}
+		m[j.Metadata.Name] = addrs
 	}
-	return m, nil
-}
-
-// withEmptyRefs adds an empty set for every @name a rule of the policies, or a member of a set, refers to when no set or
-// jail has that name any more (a jail that was deleted after the rule was made): such a rule matches nobody, and the
-// anchor of every jail that uses the policy is still rendered. The policy was checked when it was made; this is what is
-// left of a reference whose jail is gone. The map of the caller is not changed.
-func withEmptyRefs(sets map[string]api.AddressSetSpec, pols []api.FirewallPolicySpec) map[string]api.AddressSetSpec {
-	out := sets
-	add := func(entry string) {
-		ref, ok := strings.CutPrefix(entry, "@")
-		if !ok {
-			return
-		}
-		if _, have := out[ref]; have {
-			return
-		}
-		if len(out) == len(sets) { // the first addition: copy
-			out = maps.Clone(sets)
-			if out == nil {
-				out = map[string]api.AddressSetSpec{}
-			}
-		}
-		out[ref] = api.AddressSetSpec{}
-	}
-	for _, p := range pols {
-		for _, r := range p.Rules {
-			for _, e := range r.From {
-				add(e)
-			}
-			for _, e := range r.To {
-				add(e)
-			}
-		}
-	}
-	for _, sp := range sets {
-		for _, e := range sp.Addresses {
-			add(e.Address)
-		}
-	}
-	return out
-}
-
-// refName is a name as `@name` reads it: a jail's hyphen is the underscore of a set's name (the pf table of both is
-// s_<name with underscores>), so web-1 and web_1 would be one table.
-func refName(n string) string { return strings.ReplaceAll(n, "-", "_") }
-
-// setClashesJail refuses an address set whose name `@name` would read as a jail of the project too: a rule must mean one thing,
-// and a set would silently take the place of the jail in every rule that names it.
-func (s *Service) setClashesJail(project, set string) error {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, k := range sortedKeys(s.jails) {
-		j := s.jails[k].jail
-		if j.Metadata.Project == project && refName(j.Metadata.Name) == refName(set) {
-			return api.Errorf(api.CodeConflict, "address set %q and jail %q would both be @%s in the rules of project %s", set, j.Metadata.Name, set, project).
-				WithHint("give the set another name: a jail and an address set of one project may not have names that are the same when - is read as _")
-		}
-	}
-	return nil
-}
-
-// jailClashesSet is the same for a jail whose name an address set of the project already has.
-func (s *Service) jailClashesSet(project, jail string) error {
-	sets, err := s.allSets(project)
-	if err != nil {
-		return err
-	}
-	for _, n := range sortedKeys(sets) {
-		if refName(n) == refName(jail) {
-			return api.Errorf(api.CodeConflict, "jail %q and address set %q would both be @%s in the rules of project %s", jail, n, jail, project).
-				WithHint("give the jail another name: a jail and an address set of one project may not have names that are the same when - is read as _")
-		}
-	}
-	return nil
+	return m
 }
 
 // ListAddressSets lists the address sets of the request's project.
@@ -362,12 +298,12 @@ func (s *Service) checkSet(project, name string, spec api.AddressSetSpec) error 
 	if err := validate.AddressSetSpec(spec); err != nil {
 		return err
 	}
-	sets, err := s.allSetsWithJails(project)
+	refs, err := s.allRefs(project)
 	if err != nil {
 		return err
 	}
-	sets[name] = spec
-	if _, err := validate.FlattenSet(name, sets); err != nil {
+	refs.sets[name] = spec
+	if _, err := validate.FlattenSet(name, refs.sets, refs.jails); err != nil {
 		return err
 	}
 	return nil
@@ -387,9 +323,6 @@ func (s *Service) CreateAddressSet(ctx context.Context, in api.AddressSet) (api.
 		return api.AddressSet{}, err
 	}
 	if err := s.checkSet(p.Meta.Name, in.Metadata.Name, in.Spec); err != nil {
-		return api.AddressSet{}, err
-	}
-	if err := s.setClashesJail(p.Meta.Name, in.Metadata.Name); err != nil {
 		return api.AddressSet{}, err
 	}
 	o, err := ks.create(ctx, in.Metadata, in.Spec)
@@ -457,7 +390,7 @@ func (s *Service) DeleteAddressSet(ctx context.Context, name string, expect int6
 	pols, _ := s.polKind.p(p.Meta.Name).list()
 	for _, pol := range pols {
 		for _, r := range pol.Spec.Rules {
-			if slices.Contains(r.From, "@"+name) || slices.Contains(r.To, "@"+name) {
+			if slices.Contains(r.From, "set:"+name) || slices.Contains(r.To, "set:"+name) {
 				users = append(users, pol.Meta.Name)
 				break
 			}
@@ -469,19 +402,19 @@ func (s *Service) DeleteAddressSet(ctx context.Context, name string, expect int6
 			what = "firewall policies"
 		}
 		return api.Errorf(api.CodeBusy, "address set %q is used by %s %s", name, what, quoteAll(users)).
-			WithHint(fmt.Sprintf("remove @%s from the rules of %s first", name, strings.Join(users, ", "))).
+			WithHint(fmt.Sprintf("remove set:%s from the rules of %s first", name, strings.Join(users, ", "))).
 			WithDetail("policies", strings.Join(users, ","))
 	}
 	var parents []string
 	sets, _ := ks.list()
 	for _, o := range sets {
-		if slices.Contains(o.Spec.Members(), "@"+name) {
+		if slices.Contains(o.Spec.Members(), "set:"+name) {
 			parents = append(parents, o.Meta.Name)
 		}
 	}
 	if len(parents) > 0 {
 		return api.Errorf(api.CodeBusy, "address set %q is a member of %s", name, quoteAll(parents)).
-			WithHint(fmt.Sprintf("remove @%s from the members of %s first", name, strings.Join(parents, ", "))).
+			WithHint(fmt.Sprintf("remove set:%s from the members of %s first", name, strings.Join(parents, ", "))).
 			WithDetail("sets", strings.Join(parents, ","))
 	}
 	return ks.delete(ctx, name, expect)

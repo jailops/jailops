@@ -275,7 +275,7 @@ func (s *Service) networkDescSteps(ctx context.Context, n object[api.NetworkSpec
 		if !uses {
 			continue
 		}
-		sets, err := s.allSetsWithJails(j.Metadata.Project)
+		sets, err := s.allRefs(j.Metadata.Project)
 		if err != nil {
 			return nil, err
 		}
@@ -424,9 +424,6 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 		if err := ks.notTaken(to); err != nil {
 			return nil, err
 		}
-		if err := s.setClashesJail(proj, to); err != nil {
-			return nil, err
-		}
 		p := newRenamePlan()
 		p.lock(projectLock(proj))
 		p.resources["address-sets"] = []string{"/api/v1/firewall/address-sets/" + name}
@@ -440,18 +437,18 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 			return nil, err
 		}
 		for _, x := range sets {
-			if x.Meta.Name == name || !slices.Contains(x.Spec.Members(), "@"+name) {
+			if x.Meta.Name == name || !slices.Contains(x.Spec.Members(), "set:"+name) {
 				continue
 			}
 			spec := x.Spec
-			// a member "@name" of another set is this set
+			// a member set:NAME of another set is this set
 			spec.Addresses = slices.Clone(spec.Addresses)
 			for i := range spec.Addresses {
-				if spec.Addresses[i].Address == "@"+name {
-					spec.Addresses[i].Address = "@" + to
+				if spec.Addresses[i].Address == "set:"+name {
+					spec.Addresses[i].Address = "set:" + to
 				}
 			}
-			detail := "spec.addresses: @" + name + " -> @" + to
+			detail := "spec.addresses: set:" + name + " -> set:" + to
 			xo, err := ks.getObj(x.Meta.Name)
 			if err != nil {
 				return nil, internal(err)
@@ -463,7 +460,7 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 			}
 			p.add(st)
 		}
-		// app access grants made from the set, and the jail of the same name that @NAME would then be ambiguous with
+		// app access grants made from the set
 		recs, err := s.accKind().p(proj).list()
 		if err != nil {
 			return nil, err
@@ -479,23 +476,17 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 					continue
 				}
 				hit = true
-				g.Source, g.SourceName, g.From = "@"+to, to, replaceAll(g.From, "@"+name, "@"+to)
+				g.Source, g.SourceName, g.From = "set:"+to, to, replaceAll(g.From, "set:"+name, "set:"+to)
 			}
 			if !hit {
 				continue
-			}
-			if key, err := validate.QualifiedName(proj, to); err == nil {
-				if _, err := s.jailSnapshot(key); err == nil {
-					return nil, api.Errorf(api.CodeConflict, "@%s would name both the address set and the jail %s, and app access grants are made from the set", to, to).
-						WithHint("choose another name")
-				}
 			}
 			ro, err := s.accKind().p(proj).getObj(r.Meta.Name)
 			if err != nil {
 				return nil, internal(err)
 			}
 			st, err := stateStep(api.KindAppAccess, ro, r.Meta.Name, proj, spec,
-				api.RenameChange{Kind: api.RenameReference, Object: "app access of jail " + r.Meta.Name, Detail: "source @" + name + " -> @" + to})
+				api.RenameChange{Kind: api.RenameReference, Object: "app access of jail " + r.Meta.Name, Detail: "source set:" + name + " -> set:" + to})
 			if err != nil {
 				return nil, err
 			}
@@ -516,19 +507,19 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 			var d []string
 			for i := range spec.Rules {
 				r := &spec.Rules[i]
-				nf, nt := replaceAll(r.From, "@"+name, "@"+to), replaceAll(r.To, "@"+name, "@"+to)
+				nf, nt := replaceAll(r.From, "set:"+name, "set:"+to), replaceAll(r.To, "set:"+name, "set:"+to)
 				if slices.Equal(nf, r.From) && slices.Equal(nt, r.To) {
 					continue
 				}
 				r.From, r.To = nf, nt
 				if granted[pol.Meta.Name] {
 					for _, proto := range []string{"tcp", "udp"} {
-						if r.Name == apps.AccessRuleName("@"+name, proto) {
-							r.Name = apps.AccessRuleName("@"+to, proto)
+						if r.Name == apps.AccessRuleName("set:"+name, proto) {
+							r.Name = apps.AccessRuleName("set:"+to, proto)
 						}
 					}
 				}
-				d = append(d, fmt.Sprintf("rule %d: @%s -> @%s", i+1, name, to))
+				d = append(d, fmt.Sprintf("rule %d: set:%s -> set:%s", i+1, name, to))
 			}
 			if len(d) == 0 {
 				continue

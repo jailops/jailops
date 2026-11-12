@@ -655,6 +655,63 @@ func TestGrantRemovalAndDelegation(t *testing.T) {
 	if !strings.Contains(conf, "allow.mount.zfs") {
 		t.Fatalf("delegation is not rendered:\n%s", conf)
 	}
+	dds := "tank/jailops/projects/alpha/jails/deleg/delegated"
+	if !strings.Contains(conf, `zfs.dataset = "`+dds+`";`) {
+		t.Fatalf("the delegated dataset is not named for jail(8):\n%s", conf)
+	}
+	if p, err := e.ZFS.Get(c, dds, "jailed"); err != nil || p["jailed"].Value != "on" {
+		t.Fatalf("the delegated dataset is not jailed: %v %v", p, err)
+	}
+	// doctor: a jail that asks for the dataset and a dataset that is jailed
+	delegCheck := func() api.DoctorCheck {
+		rep, err := e.Admin.Doctor(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, ch := range rep.Checks {
+			if ch.Name == "jail.delegation" {
+				return ch
+			}
+		}
+		t.Fatalf("no jail.delegation check: %+v", rep.Checks)
+		return api.DoctorCheck{}
+	}
+	if ch := delegCheck(); ch.Status != api.DoctorOK {
+		t.Fatalf("%+v", ch)
+	}
+	// a jail does not start without the property: the dataset would be mounted on the host too
+	st, _ := e.Admin.Project("alpha").Jails().Stop(c, "deleg")
+	if _, err := st.Wait(c); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.ZFS.Set(c, dds, map[string]string{"jailed": "off"}); err != nil {
+		t.Fatal(err)
+	}
+	if ch := delegCheck(); ch.Status != api.DoctorFail || !strings.Contains(ch.Message, "deleg") {
+		t.Fatalf("a delegated dataset without jailed: %+v", ch)
+	}
+	if so, err := e.Admin.Project("alpha").Jails().Start(c, "deleg"); err == nil {
+		if _, err = so.Wait(c); err == nil {
+			t.Fatal("the jail started although its delegated dataset is not jailed")
+		}
+	}
+	// turning it off and on again hands the dataset over again
+	dj, tag, _ := e.Admin.Project("alpha").Jails().GetETag(c, "deleg")
+	dj.Spec.Delegate = false
+	if _, err := e.Admin.Project("alpha").Jails().Update(c, "deleg", dj, tag); err != nil {
+		t.Fatal(err)
+	}
+	dj, tag, _ = e.Admin.Project("alpha").Jails().GetETag(c, "deleg")
+	dj.Spec.Delegate = true
+	if _, err := e.Admin.Project("alpha").Jails().Update(c, "deleg", dj, tag); err != nil {
+		t.Fatal(err)
+	}
+	if p, _ := e.ZFS.Get(c, dds, "jailed"); p["jailed"].Value != "on" {
+		t.Fatalf("turning delegation on did not hand the dataset over: %v", p)
+	}
+	if ch := delegCheck(); ch.Status != api.DoctorOK {
+		t.Fatalf("after turning it on again: %+v", ch)
+	}
 	// The project user cannot switch it on for another jail by update.
 	j, etag, _ := alpha.Jails().GetETag(c, "web")
 	j.Spec.Delegate = true

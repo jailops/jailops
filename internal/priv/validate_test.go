@@ -464,11 +464,12 @@ func TestConfDirContent(t *testing.T) {
 	// what the renderer writes for a jail with System V IPC, FreeBSD and Linux, passes as it is
 	for _, osf := range []api.OS{api.OSFreeBSD, api.OSLinux} {
 		jc, err := render.JailConf(render.JailConfInput{Name: "alpha_web", Path: filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "web", "root"),
-			Hostname: "web.example.org", OS: osf, Interfaces: []string{"jo0123456789a0b"}, SysVIPC: true})
+			Hostname: "web.example.org", OS: osf, Interfaces: []string{"jo0123456789a0b"}, SysVIPC: true,
+			Where: api.PromptContext{Jail: "web", Project: "alpha", Host: "babel"}})
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !strings.Contains(jc, "sysvshm = new;") || !strings.Contains(jc, "exec.consolelog") {
+		if !strings.Contains(jc, "sysvshm = new;") || !strings.Contains(jc, "exec.consolelog") || !strings.Contains(jc, "env.jailops_host = \"babel\";") {
 			t.Fatalf("not rendered:\n%s", jc)
 		}
 		if err := w(ctx, "alpha_web.conf", jc); err != nil {
@@ -512,6 +513,15 @@ func TestConfDirContent(t *testing.T) {
 		"sysvsem quoted":       mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvsem = \"new\";\n"),
 		"sysvmsg bare":         mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvmsg;\n"),
 		"sysvmsg disable then": mut("\tenforce_statfs = 2;\n", "\tenforce_statfs = 2;\n\tsysvmsg = new; exec.start = \"id\";\n"),
+		"env other key":        mut("\tvnet;\n", "\tenv.PATH = \"/evil\";\n\tvnet;\n"),
+		"env short key":        mut("\tvnet;\n", "\tenv.jail = \"web\";\n\tvnet;\n"),
+		"env upper case key":   mut("\tvnet;\n", "\tenv.JAILOPS_JAIL = \"web\";\n\tvnet;\n"),
+		"env prefixed other":   mut("\tvnet;\n", "\tenv.jailops_x = \"web\";\n\tvnet;\n"),
+		"env value with space": mut("\tvnet;\n", "\tenv.jailops_jail = \"a b\";\n\tvnet;\n"),
+		"env value variable":   mut("\tvnet;\n", "\tenv.jailops_host = \"${x}\";\n\tvnet;\n"),
+		"env value upper case": mut("\tvnet;\n", "\tenv.jailops_project = \"Shop\";\n\tvnet;\n"),
+		"env bare":             mut("\tvnet;\n", "\tenv.jailops_jail;\n\tvnet;\n"),
+		"meta key":             mut("\tvnet;\n", "\tmeta.jailops_jail = \"web\";\n\tvnet;\n"),
 	}
 	for name, c := range hostile {
 		if err := w(ctx, "alpha_web.conf", c); err == nil {

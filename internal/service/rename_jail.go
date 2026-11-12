@@ -64,9 +64,6 @@ func (s *Service) RenameJail(ctx context.Context, name string, o RenameOptions) 
 		if err := s.noRuleNamesJail(proj, name, false); err != nil {
 			return nil, err
 		}
-		if err := s.jailClashesSet(proj, to); err != nil {
-			return nil, err
-		}
 		st := s.lcfg.StorageOf(key)
 		fromDS, fromMP := lifecycle.ContainerOn(st, proj, name)
 		toDS, toMP := lifecycle.ContainerOn(st, proj, to)
@@ -181,14 +178,11 @@ func (s *Service) noAppAccess(project, name string) error {
 }
 
 // noRuleNamesJail refuses a jail, to rename or to delete, that a firewall policy or an address set of its project names as
-// @NAME (and no address set has that name): the reference would end up naming nothing, and the rule would stop matching.
+// jail:NAME: the reference would end up naming nothing, and the rule would stop matching.
 func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
-	hint := "change the rule or the member to the new name first (jailops firewall policy edit, address-set edit), or name the jail by an address set"
+	hint := "change the rule or the member to the new name first (jailops firewall policy edit, address-set edit), "
 	if deleting {
 		hint = "remove that reference first (jailops firewall policy edit, address-set edit): a rule that names a jail that is gone matches nobody, and a jail made later under the name would take its place"
-	}
-	if _, err := s.setKind.p(project).get(name); err == nil {
-		return nil // @name is that address set, not the jail
 	}
 	pols, err := s.polKind.p(project).list()
 	if err != nil {
@@ -196,10 +190,10 @@ func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
 	}
 	for _, o := range pols {
 		for i, r := range o.Spec.Rules {
-			if slices.Contains(r.From, "@"+name) || slices.Contains(r.To, "@"+name) {
+			if slices.Contains(r.From, "jail:"+name) || slices.Contains(r.To, "jail:"+name) {
 				e := api.Errorf(api.CodeConflict, "jail %q is named by rule %d of firewall policy %s", name, i+1, o.Meta.Name)
 				if o.Meta.ManagedBy == api.AppAccessManagedBy {
-					return e.WithHint("it is the source of an app access grant: jailops app deny " + strings.TrimPrefix(o.Meta.Name, "app-") + " from @" + name + " first")
+					return e.WithHint("it is the source of an app access grant: jailops app deny " + strings.TrimPrefix(o.Meta.Name, "app-") + " from jail:" + name + " first")
 				}
 				return e.WithHint(hint)
 			}
@@ -210,7 +204,7 @@ func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
 		return err
 	}
 	for _, o := range sets {
-		if slices.Contains(o.Spec.Members(), "@"+name) {
+		if slices.Contains(o.Spec.Members(), "jail:"+name) {
 			return api.Errorf(api.CodeConflict, "jail %q is a member of address set %s", name, o.Meta.Name).WithHint(hint)
 		}
 	}

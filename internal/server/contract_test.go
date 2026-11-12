@@ -484,12 +484,12 @@ func TestFirewall(t *testing.T) {
 	if err != nil || set.Metadata.Generation != 1 {
 		t.Fatalf("%v %+v", err, set)
 	}
-	_, err = fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "loop"}, Spec: api.AddressSetSpec{Addresses: api.Entries("@loop")}})
+	_, err = fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "loop"}, Spec: api.AddressSetSpec{Addresses: api.Entries("set:loop")}})
 	wantCode(t, err, api.CodeInvalid)
 	_, err = fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "bad"}, Spec: api.AddressSetSpec{Addresses: api.Entries("not an address")}})
 	wantCode(t, err, api.CodeInvalid)
 	pol := api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow",
-		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"22"}}}}}
+		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:office"}, Ports: []string{"22"}}}}}
 	if _, err := fw.Policies().Create(c, pol); err != nil {
 		t.Fatal(err)
 	}
@@ -503,7 +503,7 @@ func TestFirewall(t *testing.T) {
 	wantCode(t, err, api.CodeBusy)
 	// the refusal names the policies, in the message, the hint and the detail
 	var busy *api.Error
-	if !errors.As(err, &busy) || busy.Message != `address set "office" is used by firewall policy "web"` || busy.Detail["policies"] != "web" || !strings.Contains(busy.Hint, "@office") {
+	if !errors.As(err, &busy) || busy.Message != `address set "office" is used by firewall policy "web"` || busy.Detail["policies"] != "web" || !strings.Contains(busy.Hint, "set:office") {
 		t.Fatalf("refusal: %+v", err)
 	}
 	j := dtest.WebJail("web")

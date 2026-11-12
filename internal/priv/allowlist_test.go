@@ -33,9 +33,6 @@ func TestCommandAllowList(t *testing.T) {
 		{"pkg info", []string{"pkg", "-r", root, "info"}, true},
 		{"etcupdate", []string{"etcupdate", "-D", root, "-s", other}, true},
 		{"etcupdate resolve", []string{"etcupdate", "-D", root, "resolve"}, true},
-		{"freebsd-update fetch", []string{"freebsd-update", "-b", root, "--not-running-from-cron", "fetch"}, true},
-		{"freebsd-update install", []string{"freebsd-update", "-b", root, "-d", filepath.Join(e.cfg.StateDir, "fu"), "install"}, true},
-		{"freebsd-update upgrade", []string{"freebsd-update", "-b", root, "-r", "15.1-RELEASE", "--currently-running", "15.0-RELEASE", "upgrade"}, true},
 
 		// hostile
 		{"no command", nil, false},
@@ -65,13 +62,6 @@ func TestCommandAllowList(t *testing.T) {
 		{"etcupdate -s outside", []string{"etcupdate", "-D", root, "-s", "/"}, false},
 		{"etcupdate unknown flag", []string{"etcupdate", "-D", root, "-p"}, false},
 		{"etcupdate -d outside", []string{"etcupdate", "-D", root, "-d", "/tmp/x"}, false},
-		{"freebsd-update no -b", []string{"freebsd-update", "fetch"}, false},
-		{"freebsd-update -b /", []string{"freebsd-update", "-b", "/", "install"}, false},
-		{"freebsd-update -f", []string{"freebsd-update", "-b", root, "-f", "/tmp/c", "fetch"}, false},
-		{"freebsd-update bad release", []string{"freebsd-update", "-b", root, "-r", "15.1;id", "upgrade"}, false},
-		{"freebsd-update bad subcommand", []string{"freebsd-update", "-b", root, "cron"}, false},
-		{"freebsd-update extra arg", []string{"freebsd-update", "-b", root, "fetch", "x"}, false},
-		{"freebsd-update no subcommand", []string{"freebsd-update", "-b", root}, false},
 	}
 	for _, k := range cases {
 		rule, argv, err := c.CheckCommand(k.argv)

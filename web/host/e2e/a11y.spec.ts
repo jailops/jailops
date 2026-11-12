@@ -3,7 +3,7 @@ import { audit } from '../../shared/a11y'
 import { DEMO_SETUP_TOKEN } from '../src/demo/setupToken'
 
 const routes = ['/', '/doctor', '/jails', '/jails/web', '/jails/mail', '/projects', '/projects/shop', '/storage', '/profiles', '/updates', '/images', '/apps', '/apps?tab=installed', '/apps/nginx', '/apps/postgresql', '/apps/isms', '/apps/nsd', '/apps/mail', '/apps/memcached', '/apps/wiki', '/jails/web?tab=logs', '/jails/build?tab=logs', '/networks', '/firewall', '/backups', '/hosts', '/operations', '/events', '/audit', '/access', '/host', '/networks/wireguard', '/jails/db?tab=access', '/jails/web?tab=access', '/logs', '/logs?jail=db&app_logs=true', '/logs?tab=forwarding', '/jails/vault',
-  '/jails/web?tab=config', '/firewall?tab=sets', '/backups?tab=policies', '/profiles?tab=host', '/access?tab=sessions', '/access?tab=trust', '/access?tab=tokens', '/nope']
+  '/jails/web?tab=config', '/firewall?tab=sets', '/firewall?tab=test', '/firewall?tab=test&from=jail:web&to=jail:db&port=5432', '/firewall?tab=test&from=jail:web&to=jail:db&port=5433', '/firewall?tab=test&from=192.0.2.66&to=@web&port=80', '/firewall?tab=test&from=jail:web&to=jail:mail&port=26', '/backups?tab=policies', '/profiles?tab=host', '/access?tab=sessions', '/access?tab=trust', '/access?tab=tokens', '/nope']
 
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`a11y ${scheme}`, () => {

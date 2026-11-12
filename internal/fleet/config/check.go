@@ -153,19 +153,33 @@ func (f *Fleet) Check() error {
 			reported[key] = true
 			add(o, "%s refers to unknown %s %q (not declared for host %s)", what, kind, name, h)
 		}
-		// @name in a rule or as a member of a set is an address set or a jail of the project, declared for the host
-		missingRef := func(h, project, name string, o *Object, what string) {
-			_, set := tables[h][Key{api.KindAddressSet, project, name}]
-			_, jail := tables[h][Key{api.KindJail, project, name}]
-			if set || jail {
-				return
+		// set:NAME in a rule or as a member of a set is an address set of the project, declared for the host; jail:NAME
+		// is a jail of the project, which may be made later (a reference to a jail that does not exist matches nobody)
+		missingRef := func(h, project, ref string, o *Object, what string) {
+			switch {
+			case strings.HasPrefix(ref, "set:"):
+				name := strings.TrimPrefix(ref, "set:")
+				if _, ok := tables[h][Key{api.KindAddressSet, project, name}]; ok {
+					return
+				}
+				key := fmt.Sprintf("%s/%s", what, ref)
+				if reported[key] {
+					return
+				}
+				reported[key] = true
+				add(o, "%s refers to %s, which is not an address set declared for host %s", what, ref, h)
+			case strings.HasPrefix(ref, "jail:"):
+				name := strings.TrimPrefix(ref, "jail:")
+				if _, ok := tables[h][Key{api.KindJail, project, name}]; ok {
+					return
+				}
+				key := fmt.Sprintf("%s/%s", what, ref)
+				if reported[key] {
+					return
+				}
+				reported[key] = true
+				warn(o, "%s refers to %s, which is not a jail declared for host %s: until it exists the reference matches nobody", what, ref, h)
 			}
-			key := fmt.Sprintf("%s/@%s", what, name)
-			if reported[key] {
-				return
-			}
-			reported[key] = true
-			add(o, "%s refers to @%s, which is neither an address set nor a jail declared for host %s", what, name, h)
 		}
 		switch s := o.Spec.(type) {
 		case api.JailSpec:
@@ -249,20 +263,17 @@ func (f *Fleet) Check() error {
 				}
 				for _, g := range s.Grants {
 					c, _ := model.CanonicalSource(g.Source)
-					name, ok := strings.CutPrefix(c, "@")
-					if !ok {
-						continue
-					}
-					proj := o.Project
-					if pp, j, cross := strings.Cut(name, "/"); cross {
-						proj, name = pp, j
-					}
 					t := tables[h]
-					_, jail := t[Key{api.KindJail, proj, name}]
-					_, app := t[Key{model.KindApp, proj, name}]
-					_, set := t[Key{api.KindAddressSet, proj, name}]
-					if !jail && !app && !set {
-						note(o, "source %s is neither a jail, an app nor an address set declared for host %s: it must exist there", c, h)
+					if name, ok := strings.CutPrefix(c, "jail:"); ok {
+						_, jail := t[Key{api.KindJail, o.Project, name}]
+						_, app := t[Key{model.KindApp, o.Project, name}]
+						if !jail && !app {
+							note(o, "source %s is neither a jail nor an app declared for host %s: it must exist there", c, h)
+						}
+					} else if name, ok := strings.CutPrefix(c, "set:"); ok {
+						if _, set := t[Key{api.KindAddressSet, o.Project, name}]; !set {
+							note(o, "source %s is not an address set declared for host %s: it must exist there", c, h)
+						}
 					}
 				}
 			}
@@ -271,9 +282,7 @@ func (f *Fleet) Check() error {
 			for _, h := range o.Hosts {
 				for _, r := range s.Rules {
 					for _, ref := range append(slices.Clone(r.From), r.To...) {
-						if n, ok := strings.CutPrefix(ref, "@"); ok {
-							missingRef(h, o.Project, n, o, "rule")
-						}
+						missingRef(h, o.Project, ref, o, "rule")
 					}
 				}
 			}
@@ -281,9 +290,7 @@ func (f *Fleet) Check() error {
 			checkAddressSet(o, s, add, warn)
 			for _, h := range o.Hosts {
 				for _, e := range s.Addresses {
-					if n, ok := strings.CutPrefix(e.Address, "@"); ok {
-						missingRef(h, o.Project, n, o, "member")
-					}
+					missingRef(h, o.Project, e.Address, o, "member")
 				}
 			}
 			for _, h := range o.Hosts {
@@ -542,7 +549,7 @@ func (f *Fleet) checkJail(o *Object, s api.JailSpec, add func(*Object, string, .
 		warn(o, "host_mounts need a global-admin identity and a source below an admin-host-mount directory of the host's priv.conf; the helper refuses the jail's start otherwise")
 	}
 	if s.Delegate {
-		warn(o, "zfs_delegation needs a global admin; the daemon accepts it but the helper does not hand the dataset over yet")
+		warn(o, "zfs_delegation needs a global admin, and the host's priv.conf must allow it (admin-zfs-delegation): root in the jail then manages the dataset <container>/delegated outside JailOps' rules")
 	}
 }
 
@@ -634,7 +641,7 @@ func checkAddressSet(o *Object, s api.AddressSetSpec, add func(*Object, string, 
 	}
 	for _, e := range s.Addresses {
 		a := e.Address
-		if strings.HasPrefix(a, "@") { // a jail of the project or another set: checked where the objects are known
+		if strings.HasPrefix(a, "jail:") || strings.HasPrefix(a, "set:") { // a jail or another set of the project: checked where the objects are known
 			continue
 		}
 		if _, err := netip.ParsePrefix(a); err == nil {
@@ -646,7 +653,7 @@ func checkAddressSet(o *Object, s api.AddressSetSpec, add func(*Object, string, 
 	}
 }
 
-// setCycle returns the path of a cycle of @name members reachable from name, or "".
+// setCycle returns the path of a cycle of set:NAME members reachable from name, or "".
 func setCycle(sets map[string]*Object, name string, stack []string) string {
 	if i := slices.Index(stack, name); i >= 0 {
 		return strings.Join(append(slices.Clone(stack[i:]), name), " -> ")
@@ -658,8 +665,8 @@ func setCycle(sets map[string]*Object, name string, stack []string) string {
 	s, _ := o.Spec.(api.AddressSetSpec)
 	stack = append(slices.Clone(stack), name)
 	var next []string
-	for _, e := range s.Addresses { // a member @name that is a set is followed (a jail has no members)
-		if n, ok := strings.CutPrefix(e.Address, "@"); ok {
+	for _, e := range s.Addresses { // a member set:NAME is followed (a jail has no members)
+		if n, ok := strings.CutPrefix(e.Address, "set:"); ok {
 			next = append(next, n)
 		}
 	}

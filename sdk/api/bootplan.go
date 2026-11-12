@@ -298,3 +298,33 @@ func (p BootPlan) Visible(ok func(project string) bool) BootPlan {
 	}
 	return out.numbered()
 }
+
+// StopOrder returns the order in which running jails are stopped when the host shuts down: the reverse of the order
+// they would start in, so a jail stops before the jails it depends on, and among the jails that depend on nothing
+// the one with the higher boot.priority stops first, then the name in reverse. Every jail passed is stopped, with or
+// without autostart. A dependency on a jail that is not in the list is ignored (it is not running). The members of a
+// dependency cycle have no order that is better than another: they stop last, by name.
+func StopOrder(running []BootNode) []string {
+	in := map[string]bool{}
+	for _, j := range running {
+		in[j.Key] = true
+	}
+	nodes := make([]BootNode, 0, len(running))
+	for _, j := range running {
+		n := BootNode{Key: j.Key, Boot: BootPolicy{Autostart: true, Priority: j.Boot.Priority}}
+		for _, d := range j.Boot.Depends {
+			if in[d] && d != j.Key {
+				n.Boot.Depends = append(n.Boot.Depends, d)
+			}
+		}
+		nodes = append(nodes, n)
+	}
+	order, skipped := BootOrder(nodes, nil)
+	slices.Reverse(order)
+	var cyc []string
+	for k := range skipped {
+		cyc = append(cyc, k)
+	}
+	slices.Sort(cyc)
+	return append(order, cyc...)
+}

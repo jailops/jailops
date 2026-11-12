@@ -181,22 +181,22 @@ func (s *Server) setRefs(rc *reqInfo, from, to string, apply bool) []api.RenameC
 		}
 		for i := range p.Spec.Rules {
 			r := &p.Spec.Rules[i]
-			if slices.Contains(r.From, "@"+from) || slices.Contains(r.To, "@"+from) {
-				out = append(out, ref("firewall policy "+p.Metadata.Name, fmt.Sprintf("rule %d: @%s -> @%s", i+1, from, to)))
+			if slices.Contains(r.From, "set:"+from) || slices.Contains(r.To, "set:"+from) {
+				out = append(out, ref("firewall policy "+p.Metadata.Name, fmt.Sprintf("rule %d: set:%s -> set:%s", i+1, from, to)))
 				if apply {
-					r.From, r.To = replaced(r.From, "@"+from, "@"+to), replaced(r.To, "@"+from, "@"+to)
+					r.From, r.To = replaced(r.From, "set:"+from, "set:"+to), replaced(r.To, "set:"+from, "set:"+to)
 				}
 			}
 		}
 	}
 	for _, n := range sortedNames(s.addrsets.items) {
 		x := s.addrsets.items[n]
-		if x.Metadata.Project == rc.project && slices.Contains(x.Spec.Members(), "@"+from) {
-			out = append(out, ref("address set "+x.Metadata.Name, "spec.addresses: @"+from+" -> @"+to))
+		if x.Metadata.Project == rc.project && slices.Contains(x.Spec.Members(), "set:"+from) {
+			out = append(out, ref("address set "+x.Metadata.Name, "spec.addresses: set:"+from+" -> set:"+to))
 			if apply {
 				for i := range x.Spec.Addresses {
-					if x.Spec.Addresses[i].Address == "@"+from {
-						x.Spec.Addresses[i].Address = "@" + to
+					if x.Spec.Addresses[i].Address == "set:"+from {
+						x.Spec.Addresses[i].Address = "set:" + to
 					}
 				}
 			}

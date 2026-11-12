@@ -218,7 +218,7 @@ func (s *Service) writeJailResolv(ctx context.Context, j api.Jail) error {
 		return errors.New("busy with another operation; it gets the change at its next start")
 	}
 	defer unlock()
-	sets, err := s.allSetsWithJails(j.Metadata.Project)
+	sets, err := s.allRefs(j.Metadata.Project)
 	if err != nil {
 		return err
 	}

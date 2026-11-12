@@ -175,8 +175,10 @@ export function policies(): FirewallPolicy[] {
       metadata: meta('web-default'), spec: {
         default_in: 'deny', default_out: 'allow', rules: [
           { name: 'http', action: 'allow', direction: 'in', proto: 'tcp', ports: ['80', '443'] },
-          { name: 'ssh from admins', action: 'allow', direction: 'in', proto: 'tcp', from: ['@admins'], ports: ['22'], log: true },
+          { name: 'ssh from admins', action: 'allow', direction: 'in', proto: 'tcp', from: ['set:admins'], ports: ['22'], log: true },
           { name: 'forward 8080', action: 'allow', direction: 'in', proto: 'tcp', ports: ['8080'], redirect: { host_port: 8080, jail_port: 80 } },
+          { name: 'no scanner', comment: 'a scanner that kept coming back', action: 'deny', direction: 'in', proto: 'tcp', from: ['192.0.2.66'], ports: ['80'] },
+          { name: 'ftp', comment: 'switched off until the migration is done', action: 'allow', direction: 'in', proto: 'tcp', ports: ['21'], disabled: true },
         ],
       },
     },
@@ -187,7 +189,7 @@ export function policies(): FirewallPolicy[] {
 
 export function addressSets(): AddressSet[] {
   return [
-    { metadata: { ...meta('admins'), scope: 'fleet' }, spec: { comment: 'Where the administrators connect from', addresses: [{ address: '198.51.100.7', comment: "the administrator's home" }, { address: '203.0.113.0/28', comment: 'the second office' }, { address: '@office', comment: 'the office sets' }] } },
+    { metadata: { ...meta('admins'), scope: 'fleet' }, spec: { comment: 'Where the administrators connect from', addresses: [{ address: '198.51.100.7', comment: "the administrator's home" }, { address: '203.0.113.0/28', comment: 'the second office' }, { address: 'set:office', comment: 'the office sets' }] } },
     { metadata: { ...meta('office'), scope: 'fleet' }, spec: { comment: 'The office network', addresses: [{ address: '192.0.2.128/26', comment: 'wired and wifi' }, { address: '2001:db8:aa::/48', comment: 'the office, IPv6' }] } },
   ]
 }

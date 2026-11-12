@@ -366,9 +366,6 @@ func (s *Service) cloneNewRoot(st *jailState, rec Record, target api.ImageGenera
 	props := map[string]string{PropManaged: "on", PropID: st.ID, PropKind: KindRoot, PropName: st.Name,
 		"mountpoint": s.Cfg.at(st.Name).rootNewMP(), "canmount": "noauto", PropGen: strconv.Itoa(target.Number),
 		PropImage: st.Image, PropManifest: target.Manifest, PropPrevGen: strconv.Itoa(st.Gen)}
-	if q := rec.Spec.Resources.Disk; q != "" {
-		props["quota"] = q
-	}
 	snap := target.Dataset + "@" + roSnap
 	return plan.Step{Name: "clone-new-root", Describe: fmt.Sprintf("zfs clone %s %s", snap, newDS),
 		Do:   func(ctx context.Context) error { return s.ZFS.Clone(ctx, snap, newDS, props) },

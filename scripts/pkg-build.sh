@@ -67,7 +67,7 @@ stage() { # stage NAME: install the files of one package under $work/NAME
 		install -m 755 "$(bin jailopsd)" "$root/usr/local/sbin/jailopsd"
 		install -m 755 "$pk/jailops-setup" "$root/usr/local/sbin/jailops-setup"
 		install -m 755 "$(bin jailops-priv)" "$root/usr/local/libexec/jailops-priv"
-		install -m 555 "$pk/rc.d/jailopsd" "$pk/rc.d/jailops_priv" "$pk/rc.d/jailops_revert" "$root/usr/local/etc/rc.d/"
+		install -m 555 "$pk/rc.d/jailopsd" "$pk/rc.d/jailops_priv" "$pk/rc.d/jailops_revert" "$pk/rc.d/jailops_shutdown" "$root/usr/local/etc/rc.d/"
 		install -m 644 "$pk/jailopsd.yaml" "$root/usr/local/etc/jailops/jailopsd.yaml.sample"
 		install -m 644 "$pk/priv.conf.sample" "$root/usr/local/etc/jailops/priv.conf.sample"
 		install -m 644 "$pk/newsyslog.conf" "$root/usr/local/etc/newsyslog.conf.d/jailops.conf"

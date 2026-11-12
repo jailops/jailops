@@ -188,6 +188,89 @@ A jail starts when the host boots only when it has **autostart**. A jail that wa
 
 `jailops boot` shows what the daemon's boot pass would do after a boot of the host, from the jails as they are now: the jails in the order they start, with the reason (`autostart`, or `dependency of NAME`), and the jails with autostart that it does not start, with why. A jail starts after the jails in its `boot.depends`, which start too even without autostart of their own; among the jails that are ready, the lower `boot.priority` starts first, then the name. Almost nobody needs `boot.depends` and `boot.priority`: `jailops config set web boot.depends db` and `boot.priority 10` are there for the case where one jail must be up before another. A cycle, a dependency that does not exist, and a jail with an encrypted volume (it waits for its passphrase after every boot: `jailops jail unlock`) are listed as not started, and so is a jail that depends on one of them. The order is that of the whole host; you see the jails of every project you may use, or one project with `--project`. `jailopsd` starts the jails once, in its first pass after it starts (`reconcile.autostart` of `jailopsd.yaml`).
 
+## Stop at shutdown
+
+When the host shuts down, the jails are stopped one after the other before the daemon and the helper stop, so that a database
+flushes and the poststop hooks run (the interfaces and the pf anchors of the jail are taken down). The rc script
+`jailops_shutdown`, which comes with the package and runs whenever `jailopsd_enable` is `YES`, asks the daemon to do it with
+
+    jailops stop-all                  # every running jail of every project, a jail before the jails it depends on
+    jailops stop-all --grace 60s      # how long each jail gets to shut down
+    jailops stop-all --dry-run        # the order, without stopping anything
+
+The order is the reverse of `jailops boot`: a jail stops before the jails in its `boot.depends`, and among independent
+jails the one with the higher `boot.priority` stops first. A jail that cannot be stopped is reported and the rest are stopped
+anyway; init stops whatever is left. Restarting the daemon (`service jailopsd restart`) never stops a jail, and nothing
+runs at boot.
+
+| `rc.conf` | Default | Meaning |
+|---|---|---|
+| `jailops_shutdown_enable` | `jailopsd_enable` | `NO` leaves the jails to init at shutdown |
+| `jailops_shutdown_timeout` | `80` | seconds for all the jails together; it must stay below `rcshutdown_timeout` (90 by default), so raise both for a host with slow databases |
+| `jailops_shutdown_grace` | empty | seconds, or a duration such as `30s`, each jail gets to shut down |
+
+## Resource limits of a jail
+
+A jail has five limits. They are keys of the jail (`jailops config set JAIL KEY VALUE`, also in a profile or a file) and
+each one is enforced by the kernel, not by JailOps polling.
+
+| Key | Enforced with | What happens at the limit |
+|---|---|---|
+| `limits.memory` | rctl `swapuse`, `deny` | the anonymous memory the jail may reserve in total: a `malloc` or `mmap` beyond it fails, and nothing is killed |
+| `limits.pids` | rctl `maxproc`, `deny` | `fork` fails while the jail has that many processes |
+| `limits.cpu` | rctl `pcpu`, `deny`, at cores times 100 | the jail is slowed down to that many cores, nothing is killed |
+| `limits.disk`, `limits.disk_reservation` | ZFS `quota` and `reservation` of the jail's container dataset | writes fail below the container: the root, the persistent datasets, the volumes, and the snapshots of all of them count |
+| `limits.states` | pf `keep state (max N)` on every pass rule of the jail's anchor | a rule creates no new state beyond N; the host's state table cannot be filled by one jail |
+
+Memory is `swapuse` because it is the one resource that counts what a program reserves and refuses the allocation
+beyond the limit. `vmemoryuse` counts every mapping, shared libraries and sparse arenas included: an idle PostgreSQL maps
+1.8 GB for 0.3 GB of memory, and a limit of 1G on it stops the server from starting. `memoryuse` is the resident set,
+summed over the processes, so the pages that processes share are counted for each of them, and the kernel does not
+refuse an allocation for it (`deny` is not enforced; the action `sigkill` kills the process that is over). The limit is
+therefore the memory the jail's programs reserve, not the size of a single process: a server with many processes, such
+as PostgreSQL with twenty busy connections, reserves more than the value it needs when idle, and a limit set to the
+catalog's hint of the application (1G for PostgreSQL) leaves room for a small server and no more. Raise
+`limits.memory` for a busy one. `limits.disk` is a `quota`, so snapshots count against it; a `refquota` would leave them
+out, and the jail could then fill the pool with what its snapshots keep.
+
+`limits.cpu`, `limits.memory` and `limits.pids` need the kernel's resource accounting, which is a boot tunable:
+
+    # /boot/loader.conf
+    kern.racct.enable=1
+
+Without it the kernel accepts no rctl rule. A jail with such a limit still starts, `jailops doctor` fails the check
+`sysctl.kern.racct.enable`, and the jail shows the condition `Limits` (`NotEnforced`) and a warning. The rules are added
+after the jail has started and removed when it stops and when it is deleted (the kernel keeps a rule by the jail's name, so
+a rule left behind would apply to the next jail of that name); a start removes any rule of the name before it adds its own. The three keys take
+effect at the next start of the jail; `limits.disk` and `limits.disk_reservation` apply at once, and ZFS refuses a quota
+below what the jail already uses.
+
+`limits.states` is per rule: a jail with five pass rules may hold five times the number. A jail that sets none gets
+`jails.max_states` of `jailopsd.yaml`, 10000 by default, which is far below pf's default table of 100000 states and
+above what a busy DNS or web server of one jail keeps open; `0` there sets no limit. A jail that needs more has its own
+`limits.states`. Raise the host's table (`set limit states` in `pf.conf`) when the sum of the limits of the jails on it
+should fit. pf also shortens the timeouts of a jail's states once a rule holds 60% of its limit (its adaptive defaults), and refuses new states at the limit.
+
+## Events from the kernel
+
+FreeBSD's devd(8) publishes what the kernel notices, and `jailopsd` reads it from devd's socket
+(`/var/run/devd.seqpacket.pipe`, readable by everyone on a stock host). The few notifications an administrator acts on
+become events in the same stream as the rest (`jailops events`, the console's Events page), so a problem shows
+without anyone polling for it:
+
+| Event (`action`) | When | Source | Who sees it |
+|---|---|---|---|
+| `host-zfs-error` | a pool or a device reports a checksum, I/O, data or device error, a failed probe or a failed pool load | the host | global identities |
+| `host-zfs-pool` | a device of a pool changed state or was removed, a scrub finished or was aborted | the host | global identities |
+| `host-link-down`, `host-link-up` | the link of the uplink of a network, or of a managed bridge or gateway interface, changed | the host | global identities |
+| `jail-limit-hit` | a resource limit with the rctl action `devctl` that names a jail of JailOps was reached | the jail | those who may use its project |
+
+The `detail` of an event is one line of text: `pool tank: checksum on /dev/da0`. The ends of a jail's epair change state
+with every start and stop and give no events. The same event is shown once in 30 seconds and at most 30 events are
+published in a minute, so a failing disk cannot flood the stream. A host without devd, or a socket the daemon cannot
+read, never stops the daemon: it tries again slowly, and `jailops doctor` says so with the check `host.devd`.
+`devd.enable: false` in `jailopsd.yaml` turns the reading off, `devd.pipe` names another socket.
+
 ## What to monitor
 
 Only what the product exposes today. Use a dedicated read-only token for the checks that need one:
@@ -204,7 +287,7 @@ read the details as an administrator when an alert fires.
 | The helper is down | `/readyz` answers `not ready: helper`; `service jailops_priv status` (or `service jailopsd status`, which names both); a crashed helper is started again by daemon(8) after 5 seconds | for more than a minute: nothing on the host can change |
 | The host checks | `GET /api/v1/doctor` with the token (or `jailops doctor`, exit status 1 on a failed check) | `metadata.status` is `fail`; `warn` for a day |
 | Reconcile failures | doctor check `reconcile` (`fail` with the error, `warn` for drift); `status.conditions` of each object | `fail` |
-| Pool health | doctor checks `zfs.pool` and `zfs.pool.<storage>` | not `ok` |
+| Pool health | doctor checks `zfs.pool` and `zfs.pool.<storage>`; the events `host-zfs-error` and `host-zfs-pool` ([above](#events-from-the-kernel)) | not `ok`; any `host-zfs-error` |
 | Pool capacity | `GET /api/v1/resources`: `size`, `allocated`, `free` of the pool (global identity; no doctor check) | `allocated / size` above 80% |
 | The certificate | doctor check `tls.certificate` (warns 14 days before an expiry nothing renews, fails once expired); `tls.acme`; `GET /api/v1/host/certificate`: `current.days_left`, `acme.failures`, `acme.last_error` | `days_left` below 14, or ACME failures |
 | The last successful backup | `GET /api/v1/backups?project=P` (readonly in the project): the newest `metadata.created_at` per `spec.jail` with `status.failed` false; `status.verified_at` for the last verification | older than the RPO |

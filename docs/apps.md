@@ -330,19 +330,19 @@ jailops app access [APP] [-o json|yaml]       # who may connect; without APP, ev
 
 | Source | What it stands for | In the firewall rule | In `pg_hba.conf` |
 |---|---|---|---|
-| `@JAIL` | a jail of the same project | `@JAIL`, so the rule follows the jail at every render | one line per address (`/32`, `/128`), a copy made when the grant is made |
-| `@SET` | an address set of the project (`jailops firewall address-set`) | `@SET`, so the rule follows the set | one line per member, a copy made when the grant is made |
+| `jail:NAME` | a jail of the same project | `jail:NAME`, so the rule follows the jail at every render | one line per address (`/32`, `/128`), a copy made when the grant is made |
+| `set:NAME` | an address set of the project (`jailops firewall address-set`) | `set:NAME`, so the rule follows the set | one line per member, a copy made when the grant is made |
 | an address or a prefix | `192.0.2.7`, `192.0.2.0/24`, `2001:db8::/48` | the prefix | the prefix |
 | `host` | the host itself: the gateway addresses of the jail's networks, which the host connects from (IPv4, and IPv6 of a routed network; a proxy-mode network has a link-local gateway and is left out) | those addresses | those addresses |
 
-A jail and an address set of one project never have the same name, so `@name` means one thing. A jail whose name is
+A jail and an address set may have the same name: `jail:` and `set:` say which is meant. A jail whose name is
 longer than 29 characters cannot be named in a rule: put it in an address set. The shell completes `APP`, the word
-`from` and `SOURCE` (the jails of the project and its address sets as `@name`, and `host`).
+`from` and `SOURCE` (`jail:`, `set:` and `host`, then the jails or the address sets of the project).
 
 The sources are the same words as in a firewall rule (the table of endpoints in [networking-ipv6.md](networking-ipv6.md)),
-and `@JAIL` and `@SET` keep their names in the rule: the firewall follows them at every render. `pg_hba.conf` cannot follow
+and `jail:NAME` and `set:NAME` keep their names in the rule: the firewall follows them at every render. `pg_hba.conf` cannot follow
 them, so its lines are a copy: when the addresses of a source no longer match them, `jailops app access` and
-`jailops doctor` say so (`the addresses of @web are now ... but the pg_hba lines name ...`), and allowing again from the
+`jailops doctor` say so (`the addresses of jail:web are now ... but the pg_hba lines name ...`), and allowing again from the
 same source writes the lines again.
 
 **A grant lives with the app, in the app's project.** Another project is treated exactly like an external host: only
@@ -413,7 +413,7 @@ grant the source, what it resolved to, the ports, the database and the lines wri
 access block as it was at the first grant (so a deny works after the definition changed) and the roles JailOps made,
 with whether their database was made too and whether they may log in. It never holds a password. Deleting the app's jail
 deletes its policy and its registry; a jail that is the source of a grant is not deleted or renamed until the grant is denied (the refusal says
-`jailops app deny APP from @JAIL`), because the rule names it.
+`jailops app deny APP from jail:NAME`), because the rule names it.
 
 **Transparency.** `jailops app access APP` lists each grant with its typed rules, the lines of the jail's rendered
 anchor they became (the state labels left out), its `pg_hba.conf` lines, who made it, and the **problems**: a rule
@@ -659,7 +659,7 @@ without it). The setup only gives the data directory, the key directory and `ser
 the package intends. Its `notes` are the manual steps: a role and a database in a `postgresql` jail with a `pg_hba.conf`
 rule for the isms jail's address, `DATABASE_URL`, `ISMS_BASE_URL`, `ISMS_SIGNING_EMAIL` and the secret in `server.env`,
 the signing key, `isms server migrate` as `isms`, then `service isms start`. The database's side is one command,
-`jailops app allow ISMS-DB from @ISMS --db isms`, which makes the role, the database, the `pg_hba.conf` line and the
+`jailops app allow ISMS-DB from jail:ISMS --db isms`, which makes the role, the database, the `pg_hba.conf` line and the
 firewall rule and prints the connection string for `DATABASE_URL`; the rest stays the person's. The end-to-end test installs it, runs these steps
 against a `postgresql` jail and sees port 8080 answer with a 2xx or 3xx status. **UNVERIFIED**: what exactly the program
 answers there, and therefore the health path, which the definition leaves out (8080 is the default of `isms server
@@ -719,7 +719,7 @@ Prometheus' `/-/ready`, forgejo's port 3000 answering 200 or a redirect to its i
 host asks the jail for the SOA of `example.com` over UDP and over TCP and `nsd-checkconf` passes in the jail; for `mail`,
 Postfix's `220` greeting on port 25 and Dovecot's `* OK` on port 143 (`nc` that sends `QUIT` or `LOGOUT` one second after connecting, because Postfix refuses commands that arrive before its greeting) and the
 `sendmail` line of `mailer.conf`; for `isms`, the steps of its notes with a `postgresql` jail of its own (`isms-db`):
-`jailops app allow isms-db from @isms --db isms` for the role, the database, `listen_addresses`, the `pg_hba.conf` line
+`jailops app allow isms-db from jail:isms --db isms` for the role, the database, `listen_addresses`, the `pg_hba.conf` line
 and the connection string, then `server.env`, the secret, the signing key, `isms server migrate`, `service isms start`,
 and port 8080 answering a 2xx or 3xx status (curl retries while the program starts). Every app is closed after its
 installation, so each check that connects from the host first runs `jailops app allow APP from host`; the nginx block

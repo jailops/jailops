@@ -73,7 +73,7 @@ supported. `jailops doctor` fails on anything older than 15.1.
    files and variables, previews every change as a diff, snapshots what it touches and reports hand edits as drift.
    See [appliance.md](appliance.md); the identity and firewall modules are built. The firewall module is the one case
    where JailOps writes `pf.conf`: only with `firewall` in both files, as a whole file the helper renders around the
-   same three anchor lines (5.2), and every change of it reverts unless it is confirmed.
+   same anchor line (5.2), and every change of it reverts unless it is confirmed.
 
 ## 2. Components
 
@@ -237,8 +237,9 @@ A host usually has more than one pool. Three things, with different owners:
   mount anything the operator did not name. Profiles cannot carry them. The mount point is created in the jail's root on every
   render, because a thin root is replaced by an update. JailOps neither snapshots nor backs up such data; a read-write
   mount lets the jail change it, so use `:ro` or ZFS's own snapshots and replication for what matters. Handing a dataset
-  to a jail to manage itself (`zfs_delegation`: `jailed=on`, `zfs jail`) is accepted by the API and rendered into
-  `jail.conf`, but the helper does not hand the dataset over yet.
+  to a jail to manage itself (`zfs_delegation`) is a dataset of its own, `<container>/delegated`, with `jailed=on`,
+  named in `jail.conf` (`zfs.dataset`) so `jail(8)` attaches it; it needs a global admin and `admin-zfs-delegation` in
+  priv.conf ([storage.md](storage.md#handing-a-dataset-to-the-jail-to-manage)).
 
 ### 4.7 What was proven, and what is open
 
@@ -352,12 +353,11 @@ every table it references, and there are no shared tables (a reference to anothe
 and resolves to nothing; verified on FreeBSD 15.1). `pfctl -n` also accepts a rule that uses an undefined table, so
 the renderer proves that every referenced table is defined. Runtime table entries are lost when an anchor is
 reloaded, so contents are rendered into the anchor. The
-administrator adds three lines to `pf.conf` once (`nat-anchor`, `rdr-anchor`, `anchor`). pf insists on an order: `nat-anchor` and `rdr-anchor` belong with the translation rules, before the first `block` or `pass` rule, and `anchor` among the filter rules (appending all three to the end of a file that already has filter rules fails with "Rules must be in order"; found on a host with a real ruleset). Reload with `pfctl -f /etc/pf.conf`. JailOps
+administrator adds one line to `pf.conf` once, `anchor "jailops/*"`. The anchors hold the filter rules of the jails and the translation of their networks as options on rules (`match out … nat-to` for NAT, `match in … rdr-to` for a port forward), which is how pf describes translation since FreeBSD 15 (`nat-anchor` and `rdr-anchor` belong to the older translation ruleset). The line belongs among the filter rules, before any `quick` rule that should not decide first: a quick rule before it decides for the traffic it matches, and the NAT and port forwards of the networks do not apply to that traffic. Reload with `pfctl -f /etc/pf.conf`. JailOps
 never owns `pf.conf`. A ruleset is rendered, validated with `pfctl -n`, loaded in one operation
 and read back. There is no read-modify-write. Raw PF requires `admin`. The one exception is the planned host firewall module of
 appliance mode ([appliance.md](appliance.md)): when an administrator enables it in both configuration files, and only
-then, the helper renders the whole `pf.conf` around the same jail anchors (the two translation anchors with the
-translation rules, `anchor "jailops/*"` first among the filter rules), checks it with `pfctl -n`, loads it with `pfctl -f`
+then, the helper renders the whole `pf.conf` around the same jail anchors (`anchor "jailops/*"` first among the rules), checks it with `pfctl -n`, loads it with `pfctl -f`
 and reverts it unless the change is confirmed. Without the module JailOps never touches `pf.conf`.
 
 ### 5.3 WireGuard tunnels
@@ -396,6 +396,37 @@ refuse to change or delete it. An app's jail gets it, denying by default, when t
 anchor is then deny whatever the jail's own policies say, and each grant is a `quick` allow rule for one source. The policy says
 `default_in: deny` and `default_out: allow`; a source is always in the app's own project, or an address.
 
+### 5.4 Bandwidth limits
+
+`nic.<device>.egress` is a rate in bits per second with decimal units (`10M` is 10 Mbit/s) for what the jail sends
+through the device. A device that has one gets a **dummynet pipe**, numbered in JailOps's own range (40000 to 59999,
+from a hash of the jail's identity and the device's index, stable and never shared). The jail's anchor sends the traffic
+into it with match rules before its filter rules, and every pass rule after them inherits the pipe:
+
+    match in on <epair> all dnpipe N                                   # what the jail sends arrives on its own port
+    match out on <gateway> from any to <addresses> dnpipe (0, N)       # the answers of the jail in a flow that was started
+                                                                       # on the host or the internet
+
+The second rule gives the state of a flow that the host or the internet started the pipe for the packets of the jail
+(the reverse direction of the state); its first number is 0 because the packets into the jail carry no pipe.
+
+**There is no limit for traffic into the jail.** A packet that pf sends into a pipe and that dummynet releases is put
+into the IP stack again. For what the jail sends that is right: it arrives on the jail's own port, a bridge member, and
+goes on through the host's IP stack (jails reach everything through the host). For a packet on its way to the jail it is
+wrong at the hooks after the gateway interface, the gateway's bridge member and the jail's own port: pf finds the state
+that carries the pipe again, sends the packet into the pipe again, and the reinjection routes it back to the gateway
+interface. The packet circulates until the pipe's queue drops it and the connection stalls (measured on FreeBSD 15.2:
+one acknowledgement repeated 387 times, every 10 ms, never reaching the jail). Floating states, and states bound to
+their interface alike, are found at those hooks, so no layout of match rules shapes the direction into a bridged jail.
+
+The pipe is configured through the helper (`dnctl pipe N config bw RATE`, only for numbers of that range) when the jail
+starts, before its anchor is loaded, and the reconcile loop keeps it right: it sets the pipe again when the limit
+changes or after a reboot. A pipe goes away only after the anchors are loaded: an anchor that still names a pipe that is
+gone drops the traffic it sends into it (measured: 100% loss), so the loop deletes the pipes that no jail wants after it
+has loaded the anchors. The module `dummynet` is loaded when a limit exists (`dummynet_load="YES"` in
+`/boot/loader.conf` loads it at boot); without it traffic sent into a pipe is dropped, so `jailops doctor` fails
+`kernel.module.dummynet` when a limit is set and the module is not there.
+
 ## 6. Jails, Linuxulator and Alpine
 
 `jail(8)` creates and removes jails from a rendered per-jail `jail.conf` (every value escaped). Besides the path,
@@ -414,7 +445,7 @@ it) gets `sysvmsg = new; sysvsem = new; sysvshm = new;`: System V message queues
 own, separate from the host's and every other jail's (never `inherit`, which would share the host's; `allow.sysvipc`,
 which means the same, stays an admin allow-list flag and is refused together with `sysvipc`). The helper accepts
 exactly these lines and nothing else for those parameters. **[UNVERIFIED on FreeBSD: both, see section 16]**
-Running state is read with `jail_get(2)` **[unverified from pure Go: SYS_JAIL_GET in x/sys]**.
+Running state is read with `jls --libxo=json`.
 
 Linux jails use the Linuxulator. Alpine is the first Linux target, Debian follows. What runs in them is bounded by
 the Linuxulator, with a compatibility matrix that is a set of automated tests, not a promise:
@@ -560,8 +591,8 @@ they are kept apart by mechanisms that exist in the system:
 | Layer | Mechanism |
 |---|---|
 | Network | A network belongs to one project. Its jails never exchange frames: every jail port is a private bridge member and every flow goes through the host (design 18.13). Each jail's anchor binds its addresses (anti-spoofing), and the host pins the jail's MAC address, ARP and neighbor entries, so a jail cannot take another's address. A project's mandatory policies are rendered before the jail's own. Cross-project traffic is denied unless a policy allows it. |
-| Storage | Each project has its own dataset under the storage root with a quota; each jail a quota and optionally a reservation. ZFS delegation (`zfs_delegation`) is never granted to project users unless a global admin allows it per jail, and the helper does not hand datasets over yet (section 4.6). |
-| Compute | Per-jail limits through jail parameters and rctl; project quotas are checked before creation. What a jail uses is measured when asked (`GET /api/v1/jails/<n>/usage`, `jailops jail info`): processes, CPU time and memory from racct through `rctl -u jail:<key>` (a read-only form on the helper's command allow-list, for managed jails only; "racct is off" when `kern.racct.enable` is not 1), and the space of its datasets from ZFS `used`/`referenced`. Nothing of it is stored, and the jail list does not carry it. |
+| Storage | Each project has its own dataset under the storage root with a quota; each jail a quota and optionally a reservation. ZFS delegation (`zfs_delegation`) is never granted to project users unless a global admin allows it per jail, and the operator allows it in priv.conf (`admin-zfs-delegation`); the jail then manages its own dataset `<container>/delegated` (section 4.6). |
+| Compute | Per-jail limits: `limits.memory`, `limits.pids` and `limits.cpu` are rctl rules the helper adds when the jail has started (`swapuse`, `maxproc`, `pcpu`; they need `kern.racct.enable=1`, and a jail reports the condition `Limits` when they cannot be enforced), `limits.disk` is the quota of the jail's container dataset, and `limits.states` limits the pf states of the jail's rules; project quotas are checked before creation. See [operations.md](operations.md#resource-limits-of-a-jail). What a jail uses is measured when asked (`GET /api/v1/jails/<n>/usage`, `jailops jail info`): processes, CPU time and memory from racct through `rctl -u jail:<key>` (a read-only form on the helper's command allow-list, for managed jails only; "racct is off" when `kern.racct.enable` is not 1), and the space of its datasets from ZFS `used`/`referenced`. Nothing of it is stored, and the jail list does not carry it. |
 | Identity | Section 8.2. |
 
 A separate dataset is **not** a full security boundary. Jails share the host kernel, the sysctl state, device
@@ -805,7 +836,7 @@ rc.conf knob out. Both write files that validate, with `TODO` markers that `jail
 **Who may connect** (apps.md, extension `app_access`). An installed app is closed: its installation ends by creating the
 managed firewall policy `app-<jail>` (5.2), denying by default. `jailops app allow APP from SOURCE` (`POST
 /api/v1/jails/<n>/access`, operator in the project, audited, answered at once and never kept as an operation result)
-adds an allow rule for one source (`@jail`, `@address-set`, an address or prefix, `host`) and, for a
+adds an allow rule for one source (`jail:NAME`, `set:NAME`, an address or prefix, `host`) and, for a
 definition with the optional `access:` block (`type: postgresql`), makes a role and a database with `psql` run as
 `postgres` in the jail with the statements on stdin, sends the server only a SCRAM-SHA-256 verifier of a generated
 password, writes a managed block of `pg_hba.conf` through the helper's file operations, sets `listen_addresses` once and
@@ -824,7 +855,7 @@ the project's administrator for the rest), an audit entry and the event `<kind>-
 
 One planner per kind reads the state and lists every change as data: the object itself (a put by UUID with the new
 name; a project rename moves the objects of the project with it), every reference in other objects (project grants and
-image lists, jail specs in `spec.json` and `bundle.json`, policy rules `@set`, set members `@set`, profile keys, tunnel
+image lists, jail specs in `spec.json` and `bundle.json`, policy rules `set:NAME`, set members `set:NAME`, profile keys, tunnel
 networks, app access grants made from a set, certificate and token scopes, stored log sinks), datasets (renamed, with
 their local mountpoints taken away deepest first and set again parents first, and the `jailops:` properties that hold
 the name), PF anchors named after the object (loaded under the new name, the old one flushed), the descriptions of
@@ -1174,13 +1205,13 @@ Open:
 | Bash and the prompt of a jail ([shell.md](shell.md)) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.15, the shell block of `scripts/ci-freebsd-e2e.sh`): bash installed at the first start, the files, the prompt in an interactive and a login bash and in `jailops shell`, `~/.bashrc` winning, scripts and `sh` unaffected, `config set prompt` at once and `none`, `shell-setup`, bash and the prompt after an OS upgrade, an app installation's `set-up-shell` step (nginx). UNVERIFIED on FreeBSD: the first start by autostart and by `jailops jail unlock --start`, a failure without a package repository (the `ShellSetup` condition), thick jails, the console's terminal against a real jail (the demo only) |
 | Renames (8.8) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.16, the renames block and the encrypted-volume block of `scripts/ci-freebsd-e2e.sh`): a network renamed under a running jail (descriptions on the host and inside the jail, the anchor, traffic through the NAT), a stopped jail with its datasets, mountpoints, kernel name and anchor, a stopped jail with an encrypted volume (its key stays loaded), an image with a running thin jail on it (the clone's origin follows, the nightly runs move), a project with its jails, objects and token scopes. UNVERIFIED on FreeBSD: the recovery of a rename interrupted by a crash (tested with the fakes), a project or image on a second storage, a host profile rename. The empty mountpoint directories of the old names are left |
 | Exec with a terminal loses output | **Fixed.** A short command run through `jailops exec` with a pseudo-terminal (`jailops exec -t JAIL -- echo hi` under `script`) printed nothing in 5 of 12 runs on FreeBSD 15.2-PRERELEASE. Cause: the kernel hangs a terminal up when its session leader exits and drops the output the reader of the master has not taken yet (3 to 30% of 300 runs of `echo hi` in a Go test, all of them with a delayed reader). Fix: the helper starts itself as a small leader (`internal/priv/session_leader.go`) that owns the terminal, runs the command in a process group of its own in the foreground, reports the group and the exit status on a pipe, and stays until the helper has read the master empty; the terminal ends only then. Signals go to the command's group; the end-to-end flow runs 40 short commands with a terminal and every one prints its output (0 of 1500 runs of the Go test lost any). |
-| Rate-limit shaper | Limits are stored and reported, and nothing enforces them: the jail says so (`status.warnings`, the `RateLimit` condition, a warning after `config set`) and doctor reports `jails.rate_limits` as `info` ("not enforced yet"). No shaper is built |
+| Bandwidth limits | `nic.<device>.egress` is enforced with a dummynet pipe; traffic into the jail has no limit (design 5.4) |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
 | Jail logs through the helper | `fs.list_logs` and `fs.tail_file` are tested against real directories, symlinks and a fifo on the development host and over the socket; reading a running jail's `/var/log/messages` on a FreeBSD host, a stopped jail (unmounted root: `busy`), a jail with `/var` on its own persistent dataset, and a rotation under `-f` have not been run there |
 | Unified logs and forwarding | The merge, the timestamp forms, cursors, the forwarder's offsets, rotation, queue, backoff and the senders (udp, tcp, tls with a test CA, https) are tested in process, and the forwarder against the real helper checks on the development host. Not run on a FreeBSD host: a jail's `messages` written by its `syslogd` and forwarded (the block of `scripts/ci-freebsd-e2e.sh`), a rotation by newsyslog under forwarding, FreeBSD's `syslogd` as a receiver of RFC 5424 with structured data ([logging.md](logging.md)) |
 | Jail usage (`rctl -u`) | The parser follows the `resource=amount` format of rctl(8) (`maxproc`, `cputime`, `memoryuse`) and the helper rule is tested with fakes; neither has run against a host with `kern.racct.enable=1`. Interface counters are not reported: FreeBSD's `ifconfig` prints none, and `netstat -I` would need a rule of its own |
 | Proxy (port-forward) redirects on the uplink | Rendered, and covered by phase 11 of `scripts/ci-freebsd-pf.sh`: a network's uplink is one end of an epair whose other end sits in a plain VNET jail that stands for a client on the uplink's network; its connection to the uplink address on the forwarded port reaches the jail through `rdr-anchor "jailops/*"`, the project anchor and the jail anchor, and a port that is not forwarded stays closed. The host cannot test a forward against itself (what it sends to its own address never arrives on an interface). Not covered: a physical uplink with a real remote machine. UNVERIFIED until the phase has run on a FreeBSD host |
-| `zfs_delegation` | Accepted (global admin only) and rendered into `jail.conf`; the helper does not hand datasets over, so the jail does not see them and no error says so |
+| `zfs_delegation` | The dataset `<container>/delegated` gets `jailed=on` (the helper sets it on that dataset only, for an admin, with `admin-zfs-delegation`), `jail.conf` names it with `zfs.dataset`, and the jail refuses to start when the property is missing. How `zfs.dataset` behaves with a delegated dataset on a running host is in the end-to-end block of `scripts/ci-freebsd-e2e.sh` |
 | Access to installed apps (`jailops app allow`, `deny`) | Built and tested against fakes of the jail runtime, pf and the file system, the helper's real checks for the psql, chown, chmod and restart vectors and the `pg_hba.conf` write, and the SCRAM verifier against RFC 7677. Not run on a host: an app closed by its managed policy (and the host's own connections refused), the rule of a grant in the loaded anchor, psql as postgres with the statements on stdin in a jail, the restart for `listen_addresses`, a client connecting with the printed string (the `postgresql-access` block of `scripts/ci-freebsd-e2e.sh`); cross-project grants and IPv6 sources are not in that block |
 | `sysvipc` and the console log | `sysvmsg/sysvsem/sysvshm = new` and `exec.consolelog` are rendered, accepted by the helper and tested against fakes; PostgreSQL's `initdb` in a jail with them, and a forgejo start (daemon(8) without `-f`) no longer holding `jail -c`, have not been run on a host |
 | App service start wrapper and package ownership | The `/bin/sh -c` start wrapper is tested with a real `sh` on the development host, not in a jail; the `chown` setup lines of the catalog (`pkg -r` leaves the directories of a package's user root-owned) are written from the ports' layout and not yet run |
@@ -1460,8 +1491,13 @@ update` and `apt-get install` work, and the jail has v4 and v6 connectivity. Wha
   `debootstrap` insists on a program named `gpgv2` although it uses `gpgv`: `ln -s gpgv /usr/local/bin/gpgv2`.
 - debootstrap needs `/usr/local/bin` in its PATH (it is a perl and shell program); the rule gives it a fixed environment.
 - debootstrap leaves `proc` mounted inside the build root when it ends badly; the build now unmounts what it mounted.
-- Linux jails leave `devfs.rules` beside their configuration; the helper accepts that file only when every line is a
-  rule JailOps renders.
+- Every Linux jail, and every FreeBSD jail given devices, mounts its `/dev` with a private devfs ruleset. Its number says
+  which devices it holds (5000, plus one bit for each device, plus 64 for a Linux jail), so two different sets never share
+  a number. The helper loads the rules into the kernel in the jail's prestart hook (`devfs rule -s N add ...`, each rule
+  checked against the helper's own grammar) and the jail does not start if that fails: the kernel makes a ruleset number
+  nobody loaded an empty ruleset, and an empty ruleset hides nothing, so such a jail would see the whole `/dev` of the
+  host, raw disks included. The ruleset stays loaded when a jail stops, because jails with the same devices share it and
+  the kernel refuses to delete a ruleset a devfs mount uses.
 - Creating a full-copy jail went through `zfs send | zfs receive` with the stream relayed through the daemon and the
   helper's socket, which ran at about 0.4 MB/s while both processes burned CPU (the unit tests show 100 MB/s, so the
   cause was not found). The copy now happens inside the helper over a kernel pipe (`zfs.replicate`): 140 MB in 2 s. The
@@ -1819,15 +1855,14 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   `POST /api/v1/jails/<n>/config` applies keys atomically and returns `restart_required`; a jail is restarted only with
   `?restart=true`. Devices are named (`nic` MTU and rate limits, `disk`, `devfs` from an allow-list, `proxy`);
   profiles are project-level or host-level (`?project=host`). The effective spec (jail over profiles) is computed
-  where it is used: render, admission, quotas, locks. Rate limits are stored and reported as a `RateLimit` condition,
-  as a warning on the jail (`status.warnings`, printed by `config set`) and as the `info` check `jails.rate_limits` of
-  doctor; no shaper enforces them yet. UNVERIFIED: loading the devfs ruleset by the helper; proxy redirects on the
+  where it is used: render, admission, quotas, locks. Rate limits of a device are enforced with dummynet
+  pipes (design 5.4). UNVERIFIED: loading the devfs ruleset by the helper; proxy redirects on the
   uplink are covered by phase 11 of `scripts/ci-freebsd-pf.sh`, which has not run on a host yet.
 - **Exec (8.3).** `POST /api/v1/jails/<n>/exec` upgrades to a framed stream (`PROTOCOL.md`, Exec). The daemon takes the
   backend as `service.JailExecer`; the helper client provides it, `--dev` uses `jexec -l` in process. Limits per
   jail, idle and total time are configuration (`limits.exec_*`). The helper side and TTY handling ran on FreeBSD 15.1 (18.2).
 - **Host tuning (5, 6).** The reconcile loop loads the modules it needs (if_bridge, if_epair, pf; linux64, linprocfs,
-  linsysfs and fdescfs only while a Linux jail exists) before it touches their sysctls, sets the bridge sysctls
+  linsysfs and fdescfs only while a Linux jail exists; dummynet only while a device has a bandwidth limit) before it touches their sysctls, sets the bridge sysctls
   at runtime (`network.sysctl`, defaults `pfil_member=1`, `pfil_bridge=0`, `pfil_onlyip=1`; `pfil_member` must stay
   1, the configuration refuses 0) and `kern.elf64.fallback_brand=3` while a Linux jail exists, and re-asserts
   them on every pass. It never writes `/etc/sysctl.conf`. The brand goes back to -1 only when this daemon set it.

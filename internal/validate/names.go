@@ -24,8 +24,9 @@ var (
 	labelRE   = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
 	ifnameRE  = regexp.MustCompile(`^[a-z][a-z0-9]{0,14}$`)
 	setNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
-	// setRefRE is what "@name" in a rule may be: an address set, or a jail of the project (whose name may have hyphens)
-	setRefRE   = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,31}$`)
+	// jailRefRE is what jail:NAME in a rule may name: a jail of the project, at most MaxJailName characters
+	jailRefRE  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,28}$`)
+	kindWordRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
 	tagRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,23}$`)
 	ruleNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$`)
 	pkgRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]{0,127}$`)
@@ -187,6 +188,35 @@ func (r ImageRef) String() string {
 		return r.Name + "@" + r.Alias
 	}
 	return r.Name
+}
+
+// ParseRate parses a rate in bits per second: "10M" is 10 Mbit/s, "1G" 1 Gbit/s, "500K" 500 kbit/s, "64000" 64 kbit/s.
+// Units are decimal (K=1000), as network rates are. Zero is rejected.
+func ParseRate(s string) (uint64, error) {
+	t, mult := s, uint64(1)
+	if t != "" {
+		switch t[len(t)-1] {
+		case 'K', 'k':
+			mult = 1000
+		case 'M', 'm':
+			mult = 1000 * 1000
+		case 'G', 'g':
+			mult = 1000 * 1000 * 1000
+		}
+		if mult != 1 {
+			t = t[:len(t)-1]
+		}
+	}
+	if t == "" || len(t) > 9 || t[0] == '0' {
+		return 0, Invalid("rate", "rate %q is not a rate in bits per second such as 10M", s)
+	}
+	for i := 0; i < len(t); i++ {
+		if t[i] < '0' || t[i] > '9' {
+			return 0, Invalid("rate", "rate %q is not a rate in bits per second such as 10M", s)
+		}
+	}
+	n, _ := strconv.ParseUint(t, 10, 64)
+	return n * mult, nil
 }
 
 // ParseSize parses "512M", "2G", "100" (bytes), optionally with a trailing

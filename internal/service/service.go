@@ -147,13 +147,15 @@ type Deps struct {
 	// ProjectFilesDir holds the provisioning files of each project, one
 	// directory per project (default <StateDir>/project-files).
 	ProjectFilesDir string
-	// JailShell (bash or sh), JailPrompt (default, none or a PS1 text) and JailPromptColor are the jails section of
+	// JailShell (bash or sh), JailPrompt (default, short, none or a PS1 text) and JailPromptColor are the jails section of
 	// jailopsd.yaml: what a new FreeBSD jail gets when its keys leave shell and prompt empty. An empty JailShell
 	// means sh and an empty JailPrompt none (a Service built without a configuration changes nothing in jails);
 	// JailPromptColor 0 means api.DefaultPromptColor.
 	JailShell       string
 	JailPrompt      string
 	JailPromptColor int
+	// JailMaxStates is jails.max_states: the pf state limit of a jail whose limits.states is 0 (0 sets no limit).
+	JailMaxStates int
 	// UpdateTick is how often the update schedules are evaluated (default 1m).
 	UpdateTick time.Duration
 	// AutoUpgradeZone is the time zone of the time of day of an image's automatic upgrade (default: the host's).
@@ -205,9 +207,13 @@ type Deps struct {
 
 // Service implements the business logic.
 type Service struct {
-	d   Deps
-	log *slog.Logger
-	now func() time.Time
+	// racctAt and racctVal keep the last answer of the kern.racct.enable sysctl (see racctOn); guarded by mu.
+	racctAt   time.Time
+	racctVal  bool
+	devdState devdHolder // the reader of devd's notifications (devd.go)
+	d         Deps
+	log       *slog.Logger
+	now       func() time.Time
 
 	locks   *lockSet
 	events  *eventBus

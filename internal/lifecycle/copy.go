@@ -90,6 +90,9 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 		items = append(items, it)
 	}
 
+	if st.Delegated != "" {
+		items = append(items, item{st.Delegated, s.Cfg.at(dst).delegatedDS(), map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": "none"}})
+	}
 	srcSnaps := make([]string, len(st.all()))
 	for i, d := range st.all() {
 		srcSnaps[i] = d + "@" + snap
@@ -131,6 +134,12 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 				return z.Replicate(ctx, it.from+"@"+snap, it.to, it.props)
 			},
 			Undo: owned, UndoOnFail: i == 0})
+	}
+	if st.Delegated != "" {
+		// the helper receives without the jailed property: the copy's dataset is handed to its jail again
+		dd := s.Cfg.at(dst).delegatedDS()
+		pl.Add(plan.Step{Name: "delegate-dataset", Describe: "zfs set jailed=on " + dd,
+			Do: func(ctx context.Context) error { return z.Set(ctx, dd, map[string]string{"jailed": "on"}) }})
 	}
 	// rewrite the records for the copy
 	nrec := rec

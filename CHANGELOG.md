@@ -2,6 +2,103 @@
 
 ## Unreleased
 
+- **Breaking: NAT and port forwards are options on rules, and pf.conf needs one line.** The anchors of JailOps hold the
+  translation as `match out on <uplink> … nat-to (<uplink>)` for the NAT of a network and `match in on <uplink> … rdr-to
+  <jail> port N` for a port forward, which is how pf describes translation in FreeBSD 15; the older translation ruleset
+  (`nat-anchor`, `rdr-anchor`) is no longer used. The only line `/etc/pf.conf` needs is `anchor "jailops/*"`, among the
+  filter rules and before any `quick` rule that should not decide first (such a rule also keeps the NAT and the port
+  forwards of the networks from applying to the traffic it matches): delete the two lines `nat-anchor "jailops/*"` and
+  `rdr-anchor "jailops/*"`. `jailops-setup`, `jailops doctor` (`pf.anchors`), the host firewall module and the lines the
+  console and the CLI print for the ACME redirect (`pass in quick … rdr-to`) follow.
+- **Bandwidth limits are enforced: `nic.<device>.egress`.** The limit of what the jail sends through a device was stored
+  and reported only; the host now enforces it with a dummynet pipe that the jail's anchor sends the traffic into
+  (`dnpipe` on `match` rules), for the connections the jail starts and for the answers of a server in the jail. A rate is
+  in bits per second with decimal units: `10M` is 10 Mbit/s. The pipes (numbers 40000 to 59999, JailOps's own) are
+  configured through the helper when the jail starts and kept right by the reconcile loop; they go away with the limit
+  or the jail, after the anchors that named them are loaded. `dummynet` is loaded when a limit exists and `jailops
+  doctor` fails `kernel.module.dummynet` when a limit is set and the module is missing. **Removed:** `nic.<device>.ingress`
+  (pf cannot shape the traffic into a bridged jail without stalling the connections: docs/design.md 5.4), the `RateLimit`
+  condition and the check `jails.rate_limits`.
+- **A port forward ends its connections when it is removed.** The packet that comes out of a forward's translation is
+  passed by a rule of its own on the uplink (`pass in quick on <uplink> … to <jail> port N`), which carries the label that
+  every stateful rule gets, so the state of a connection that came through the forward is ended with the forward
+  (`pfctl -k label`); a state that pf's default rule made has no label to end it by. The forward is the allow rule of its
+  policy: it also admits what it names where the host's own rules would block inbound traffic.
+- **ZFS delegation works.** A jail with `zfs_delegation` (`jailops create --zfs-delegation`, `jailops config set JAIL
+  zfs.delegation true`, global administrators only) manages a dataset of its own, `<container>/delegated`: it has
+  `jailed=on`, the host does not mount it, `jail.conf` names it (`zfs.dataset`) and `jail(8)` attaches it at every start.
+  The host operator must allow it with `admin-zfs-delegation` in `priv.conf`; the helper sets `jailed` on that dataset
+  only. Snapshots, data rollback and `jail copy` include it, a backup leaves it out and says so, turning it off keeps the
+  data, and `jailops doctor` checks `jail.delegation`.
+
+- **The limits of a jail are enforced.** `limits.memory`, `limits.pids` and `limits.cpu` were only counted against the
+  project's quotas. The helper now adds rctl rules when the jail has started: `swapuse` (the anonymous memory the jail
+  reserves; an allocation beyond it fails and nothing is killed), `maxproc` (fork fails) and `pcpu` (the jail is slowed down to its cores). They need
+  `kern.racct.enable=1` in `/boot/loader.conf`; without it the jail still starts, `jailops doctor` fails and the jail
+  shows the condition `Limits` (`NotEnforced`). The helper removes the rules when the jail stops and when it is deleted, and again before it adds them at a start. They
+  take effect at the next start.
+- **`limits.disk` is the quota of the whole jail.** It is set on the jail's container dataset, so it covers the root, the
+  persistent datasets, the volumes and the snapshots, not only the root clone; `limits.disk_reservation` moves with it.
+  A change of either applies at once (ZFS refuses a quota below what the jail uses). **Breaking:** the root clone no
+  longer carries the quota.
+- **`limits.states`** limits the pf states that each pass rule of a jail's anchor may create (`keep state (max N)`), so
+  one jail cannot fill the host's state table. A jail that sets none gets `jails.max_states` of `jailopsd.yaml`, 10000
+  by default (`0`: no limit).
+
+- **Security: the devfs ruleset of a jail is loaded before the jail starts.** A Linux jail, and a FreeBSD jail given devices,
+  mounts `/dev` with a private ruleset, but nothing loaded it: the kernel treats a ruleset number nobody loaded as an empty
+  ruleset, which hides nothing, so the jail saw the host's whole `/dev`, raw disks included. The helper now loads the rules in
+  the jail's pre-start hook (`devfs rule -s N add ...`, each rule checked against its own grammar), and a jail whose ruleset
+  cannot be loaded does not start. The number of a ruleset is the bits of its devices (5000 and up, 64 more for a Linux jail),
+  so two different sets of devices never share one. The `devfs.rules` file that was written beside the configuration, and
+  its check, are gone.
+- **Jails are stopped cleanly when the host shuts down.** The rc script `jailops_shutdown` (enabled with `jailopsd_enable`)
+  runs `jailops stop-all` before the daemon and the helper stop: every running jail of every project is stopped one after
+  the other, a jail before the jails in its `boot.depends` (the reverse of `jailops boot`), so databases get their shutdown
+  and the poststop hooks run. The knobs are `jailops_shutdown_enable`, `_timeout` and `_grace`;
+  `service jailopsd restart` still leaves the jails alone.
+- Removed: `freebsd-update` from the helper's command allow-list (JailOps builds images from pkgbase and never ran it) and
+  the unused `jail_get(2)` reader.
+
+- **The kernel's notifications become events.** `jailopsd` reads devd's socket and publishes a ZFS error
+  (`host-zfs-error`), a pool or device changing state or a scrub finishing (`host-zfs-pool`), the link of the uplink or of a
+  managed bridge going up or down (`host-link-up`, `host-link-down`) and a limit that a jail hit (`jail-limit-hit`, with the
+  rctl action `devctl`) in the event stream, with a one-line `detail`. Identical events are held back for 30 seconds and at
+  most 30 are published a minute. `jailops doctor` has the check `host.devd`; `devd.enable` and `devd.pipe` in
+  `jailopsd.yaml`.
+
+- **Security: package updates and the bash setup of a running FreeBSD jail hold the jail.** While the host runs `pkg`
+  against the jail's root for `jailops update`, the scheduled package update or `jailops jail shell-setup`, exec, shell
+  and console sessions into that jail are refused (`busy`), as they already were during an app installation. The `busy`
+  message says "packages are being installed or updated".
+
+- **The prompt of a jail says where you are.** Every interactive bash of a FreeBSD jail has `JAILOPS_JAIL`,
+  `JAILOPS_PROJECT` and `JAILOPS_HOST` (the host's short name). They come from the jail's own parameters: every start
+  renders `env.jailops_jail`, `env.jailops_project` and `env.jailops_host` into its `jail.conf`, FreeBSD gives them to the
+  jail as the read-only sysctl `security.jail.env` (`jls -j JAIL env` on the host, `sysctl -n security.jail.env` in the
+  jail), and the same `jailops-env.sh` in every jail exports them, so they are right after a rename and after the jail
+  has moved to another host. The default prompt reads them each time it is shown: `root@web [shop/babel]:/#`, with
+  `user@jail` in the colour of `jails.prompt_color` and the tag in grey. `short` is the same without the tag
+  (`jailops config set JAIL prompt short`, `--prompt short`, `jails.prompt`); `none` removes the prompt and keeps the
+  variables. A prompt text may hold `{jail}`, `{project}` and `{host}`, which become references to the variables; any
+  other brace is refused. Host names of jails do not change.
+
+- **Breaking: a reference is `kind:name`, and `@` is gone.** `jail:NAME` (a jail of the project, its addresses read at every
+  render), `set:NAME` (an address set) and `tag:NAME`, in rules, address-set members, `app allow` and `firewall test`;
+  `@web` is refused with the words to write instead. A jail and an address set may have the same name, so the rule that
+  forbade it, and every path that had to check it, is removed; the pf tables are `j_`, `s_` and `t_`. A jail name has at
+  most 29 characters. A `jail:NAME` that does not exist renders as an empty table and `jailops doctor` warns
+  (`firewall.refs`), so a policy may name a jail made later and a fresh host takes a whole fleet repository in one apply.
+  Tab completes the kinds, then the names, also inside `--rule "..."`; `@` and Tab lists every reference.
+- **`jailops firewall validate --review`** adds warnings a reviewer would raise (missing comments, disabled or very broad
+  rules, unused sets and policies, jails that do not exist); they never change the exit status.
+
+- **A firewall simulator in the console.** The Firewall page has a Test tab (`/firewall/test`): choose where a connection
+  starts, where it goes, a protocol and a port, and see it flow through the firewall, each step with its verdict, what
+  decided it (the policy and rule with its comment, the project's policy, an app's managed policy, the isolation of
+  projects, the default), the rule as loaded in pf and the rules passed over. The question is in the address of the page,
+  and the equivalent `jailops firewall test` line has a Copy button.
+
 ## 0.6.6 - 2026-11-11
 
 - **Breaking: deny wins over allow, whatever the order of the policies.** The anchor of a jail with an enabled deny rule holds

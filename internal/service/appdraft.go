@@ -54,7 +54,7 @@ func (s *Service) AppDraft(ctx context.Context, name string) (api.AppDraft, erro
 	installing := s.installing[key]
 	s.execMu.Unlock()
 	if installing {
-		return api.AppDraft{}, api.Errorf(api.CodeBusy, "jail %q is busy: the app is being installed", name).
+		return api.AppDraft{}, api.Errorf(api.CodeBusy, "jail %q is busy: packages are being installed or updated", name).
 			WithHint("wait for the installation to end; `jailops op list` shows it")
 	}
 	root := s.rootMount(key)

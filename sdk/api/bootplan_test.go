@@ -102,3 +102,40 @@ func TestBootPlanVisible(t *testing.T) {
 		t.Fatal("empty lists are not nil")
 	}
 }
+
+func TestStopOrderIsTheReverseOfTheStartOrder(t *testing.T) {
+	node := func(key string, prio int, deps ...string) api.BootNode {
+		return api.BootNode{Key: key, Boot: api.BootPolicy{Priority: prio, Depends: deps}}
+	}
+	for name, tc := range map[string]struct {
+		running []api.BootNode
+		want    []string
+	}{
+		"dependents first": {[]api.BootNode{node("a/db", 0), node("a/web", 0, "a/db"), node("a/cache", 0)}, []string{"a/web", "a/db", "a/cache"}},
+		// start order a/cache, a/db, a/web (a/web needs a/db; a/cache sorts first): the reverse
+		"a chain": {[]api.BootNode{node("a/app", 0, "a/web"), node("a/web", 0, "a/db"), node("a/db", 0)}, []string{"a/app", "a/web", "a/db"}},
+		// higher priority starts later, so it stops first
+		"priority": {[]api.BootNode{node("a/x", 1), node("a/y", 5), node("a/z", 3)}, []string{"a/y", "a/z", "a/x"}},
+		// a dependency that is not running is ignored, and a jail that needs only it stops like any other
+		"stopped dependency": {[]api.BootNode{node("a/web", 0, "a/gone"), node("a/db", 0)}, []string{"a/web", "a/db"}},
+		// across projects the host decides: keys sort by project, the dependency order still holds inside one
+		"two projects": {[]api.BootNode{node("b/web", 0, "b/db"), node("a/web", 0, "a/db"), node("b/db", 0), node("a/db", 0)}, []string{"b/web", "b/db", "a/web", "a/db"}},
+		"cycle last":   {[]api.BootNode{node("a/p", 0, "a/q"), node("a/q", 0, "a/p"), node("a/solo", 0)}, []string{"a/solo", "a/p", "a/q"}},
+		"empty":        {nil, nil},
+	} {
+		got := api.StopOrder(tc.running)
+		if !reflect.DeepEqual(got, tc.want) && (len(got) != 0 || len(tc.want) != 0) {
+			t.Errorf("%s: %q, want %q", name, got, tc.want)
+		}
+	}
+	// whatever the order of the input, a jail stops before everything it needs
+	in := []api.BootNode{node("a/db", 0), node("a/web", 0, "a/db"), node("a/app", 0, "a/web", "a/db")}
+	got := api.StopOrder(in)
+	pos := map[string]int{}
+	for i, k := range got {
+		pos[k] = i
+	}
+	if len(got) != 3 || pos["a/app"] > pos["a/web"] || pos["a/web"] > pos["a/db"] {
+		t.Fatalf("%q", got)
+	}
+}

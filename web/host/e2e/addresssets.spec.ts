@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test'
 
-// Firewall address sets: created, used as @name in a rule, refused while in use, deleted. And the list that
+// Firewall address sets: created, used as set:NAME in a rule, refused while in use, deleted. And the list that
 // once rendered and then vanished (a render error in the set editor). Demo mode, a fresh browser context.
 
 async function open(page: Page, path: string): Promise<void> {
@@ -24,18 +24,18 @@ test('the address sets stay on screen: no render error, and the project switch s
   await page.waitForSelector('.shell')
   await page.evaluate(() => { history.pushState({}, '', '/firewall'); dispatchEvent(new PopStateEvent('popstate')) })
   await page.locator('[data-tab="sets"]').click()
-  await expect(page.getByRole('heading', { name: '@admins' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'set:admins' })).toBeVisible()
   const samples: string[] = []
   for (let i = 0; i < 26; i++) {
     samples.push(await listText(page))
     await page.waitForTimeout(300)
   }
-  expect(new Set(samples)).toEqual(new Set(['@admins|@office']))
+  expect(new Set(samples)).toEqual(new Set(['set:admins|set:office']))
   // an edit recomputes the editor's state: the list and the editor stay (they vanished when that threw)
   await page.getByLabel('Addresses').fill('198.51.100.7\n203.0.113.0/28\n192.0.2.99')
   await page.waitForTimeout(300)
-  expect(await listText(page)).toBe('@admins|@office')
-  await expect(page.getByRole('heading', { name: '@admins' })).toBeVisible()
+  expect(await listText(page)).toBe('set:admins|set:office')
+  await expect(page.getByRole('heading', { name: 'set:admins' })).toBeVisible()
   expect(errors).toEqual([])
   await page.getByRole('button', { name: 'Revert' }).click()
   // staging has no sets: the empty state, not the editor of the web project's set
@@ -43,8 +43,8 @@ test('the address sets stay on screen: no render error, and the project switch s
   await expect(page.getByTestId('sets-empty')).toContainText('No address sets yet.')
   await expect(page.getByTestId('set-editor')).toHaveCount(0)
   await page.getByTestId('project-select').selectOption('web')
-  await expect(page.getByTestId('set-editor')).toContainText('@admins')
-  expect(await listText(page)).toBe('@admins|@office')
+  await expect(page.getByTestId('set-editor')).toContainText('set:admins')
+  expect(await listText(page)).toBe('set:admins|set:office')
   expect(errors).toEqual([])
 })
 
@@ -60,31 +60,31 @@ test('a new address set is used in a rule, refused while in use, and deleted onc
   await page.locator('#fws-members').fill('198.51.100.10\n2001:db8:1::/64')
   await page.getByTestId('set-create-go').click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByTestId('set-list')).toContainText('@lab')
-  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('@lab')
+  await expect(page.getByTestId('set-list')).toContainText('set:lab')
+  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('set:lab')
   await expect(page.locator('#sa')).toHaveValue('198.51.100.10\n2001:db8:1::/64')
 
-  // a policy whose rule allows ssh from @lab
+  // a policy whose rule allows ssh from set:lab
   await page.locator('[data-tab="policies"]').click()
   await page.getByTestId('new-policy').click()
   await page.locator('#fwp-name').fill('lab-edge')
   await page.getByTestId('policy-create-go').click()
   await expect(page.getByTestId('policy-editor')).toContainText('lab-edge')
   await page.getByRole('button', { name: 'Add rule' }).click()
-  await page.locator('[data-rule="0"]').getByLabel('From').fill('@lab')
+  await page.locator('[data-rule="0"]').getByLabel('From').fill('set:lab')
   await page.locator('[data-rule="0"]').getByLabel('Ports').fill('22')
   await page.getByTestId('save-policy').click()
   await expect(page.getByTestId('policy-editor').locator('.pill.warn')).toHaveCount(0)
 
   // the set is in use: the confirmation names the policy, the server refuses and says what to do
   await page.locator('[data-tab="sets"]').click()
-  await page.getByTestId('set-list').getByRole('button', { name: '@lab' }).click()
+  await page.getByTestId('set-list').getByRole('button', { name: 'set:lab' }).click()
   await expect(page.getByTestId('set-users')).toContainText('lab-edge')
   await page.getByTestId('delete-set').click()
   await expect(page.getByTestId('confirm-items')).toContainText('lab-edge')
   await page.getByTestId('confirm').click()
   await expect(page.getByTestId('error-panel')).toContainText('address set "lab" is used by firewall policy "lab-edge"')
-  await expect(page.getByTestId('error-hint')).toContainText('remove @lab from the rules of lab-edge first')
+  await expect(page.getByTestId('error-hint')).toContainText('remove set:lab from the rules of lab-edge first')
   await page.getByRole('button', { name: 'Cancel' }).click()
 
   // remove the rule, then the set goes
@@ -94,14 +94,14 @@ test('a new address set is used in a rule, refused while in use, and deleted onc
   await page.getByTestId('save-policy').click()
   await expect(page.getByTestId('policy-editor').locator('.pill.warn')).toHaveCount(0)
   await page.locator('[data-tab="sets"]').click()
-  await page.getByTestId('set-list').getByRole('button', { name: '@lab' }).click()
+  await page.getByTestId('set-list').getByRole('button', { name: 'set:lab' }).click()
   await expect(page.getByTestId('set-users')).toHaveCount(0)
   await page.getByTestId('delete-set').click()
   await expect(page.getByTestId('confirm-dialog')).toHaveAttribute('data-tier', '2')
   await page.getByTestId('confirm').click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByTestId('set-list')).not.toContainText('@lab')
-  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('@admins')
+  await expect(page.getByTestId('set-list')).not.toContainText('set:lab')
+  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('set:admins')
 })
 
 // What a reviewer of the firewall reads: a comment on a set, on each of its members, on a policy and on a rule is typed in the
@@ -113,7 +113,7 @@ test('comments on a set, its members, a policy and a rule are saved and read bac
   await page.locator('#fws-comment').fill('Who may reach the git server')
   await page.locator('#fws-members').fill('198.51.100.10  # the office\n2001:db8:1::/64')
   await page.getByTestId('set-create-go').click()
-  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('@git_allow')
+  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('set:git_allow')
   await expect(page.getByTestId('set-comment')).toHaveValue('Who may reach the git server')
   await expect(page.locator('#sa')).toHaveValue('198.51.100.10  # the office\n2001:db8:1::/64')
 
@@ -123,7 +123,7 @@ test('comments on a set, its members, a policy and a rule are saved and read bac
   await page.getByTestId('policy-create-go').click()
   await page.getByTestId('policy-comment').fill('The git server of the team')
   await page.getByRole('button', { name: 'Add rule' }).click()
-  await page.locator('[data-rule="0"]').getByLabel('From').fill('@git_allow')
+  await page.locator('[data-rule="0"]').getByLabel('From').fill('set:git_allow')
   await page.locator('[data-rule="0"]').getByLabel('Ports').fill('22')
   await page.locator('[data-rule="0"]').getByTestId('rule-comment').fill('ssh from the team only')
   await page.locator('[data-rule="0"]').getByTestId('rule-disabled').check()

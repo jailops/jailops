@@ -125,25 +125,32 @@ type AppGrant struct {
 }
 
 var (
-	dbNameRe  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
-	srcNameRe = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
-	jailRe    = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	dbNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
+	srcSetRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
+	jailRe   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,28}$`)
 )
 
 // CanonicalSource is the form the host stores a grant under, so a declared
-// source and a live grant compare: host, @name, an address, or a masked prefix.
+// source and a live grant compare: host, jail:NAME, set:NAME, an address, or a masked prefix.
 func CanonicalSource(s string) (string, error) {
 	switch {
 	case s == "host":
 		return s, nil
 	case strings.HasPrefix(s, "@"):
-		rest := s[1:]
-		if !srcNameRe.MatchString(rest) {
-			return "", fmt.Errorf("source %q: @ is followed by the name of a jail or of an address set", s)
+		n := s[1:]
+		return "", fmt.Errorf("source %q: @ is not used: write jail:%s or set:%s", s, n, n)
+	case strings.HasPrefix(s, "jail:"):
+		if !jailRe.MatchString(s[5:]) || strings.HasSuffix(s, "-") {
+			return "", fmt.Errorf("source %q: jail: is followed by the name of a jail of the project", s)
 		}
 		return s, nil
-	case s == "" || s == "any":
-		return "", fmt.Errorf("source %q: name a jail (@web), an address set (@office), an address or a prefix, or host", s)
+	case strings.HasPrefix(s, "set:"):
+		if !srcSetRe.MatchString(s[4:]) {
+			return "", fmt.Errorf("source %q: set: is followed by the name of an address set of the project", s)
+		}
+		return s, nil
+	case s == "" || s == "any" || strings.HasPrefix(s, "tag:"):
+		return "", fmt.Errorf("source %q: name a jail (jail:web), an address set (set:office), an address or a prefix, or host", s)
 	}
 	if strings.Contains(s, "/") {
 		p, err := netip.ParsePrefix(s)
@@ -158,7 +165,7 @@ func CanonicalSource(s string) (string, error) {
 	}
 	a, err := netip.ParseAddr(s)
 	if err != nil || a.Zone() != "" || a.Is4In6() {
-		return "", fmt.Errorf("source %q is not an address, a prefix, @jail, @address-set or host", s)
+		return "", fmt.Errorf("source %q is not an address, a prefix, jail:NAME, set:NAME or host", s)
 	}
 	return a.String(), nil
 }

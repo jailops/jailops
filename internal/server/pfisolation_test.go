@@ -89,8 +89,9 @@ func TestAProjectsDefaultDenyIsAFloor(t *testing.T) {
 	}
 }
 
-// A rule says `from @jail` and means the jail (its addresses, a table of its own), also for a name with a hyphen; a name
-// that is neither an address set nor a jail of the project is refused, and an address set of the same name wins.
+// A rule says `from jail:NAME` and means the jail (its addresses, a table of its own), also for a name with a hyphen; a
+// jail that does not exist is allowed and matches nobody (an empty table); a jail and an address set of one project may
+// have the same name, because a reference says which of them it means.
 func TestARuleNamesAJail(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
@@ -108,17 +109,20 @@ func TestARuleNamesAJail(t *testing.T) {
 		return api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "pg"},
 			Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{from}, Ports: []string{"5432"}}}}}
 	}
-	if _, err := e.Admin.Firewall().Policies().Create(c, rule("@nosuch")); err == nil || !strings.Contains(err.Error(), "nosuch") {
-		t.Fatalf("a name that is neither a set nor a jail was accepted: %v", err)
+	if _, err := e.Admin.Firewall().Policies().Create(c, rule("set:nosuch")); err == nil || !strings.Contains(err.Error(), "nosuch") {
+		t.Fatalf("a set that does not exist was accepted: %v", err)
 	}
-	if _, err := e.Admin.Firewall().Policies().Create(c, rule("@w1")); err != nil {
+	if _, err := e.Admin.Firewall().Policies().Create(c, rule("@w1")); err == nil || !strings.Contains(err.Error(), "jail:w1") {
+		t.Fatalf("@ was accepted, or the error does not say what to write: %v", err)
+	}
+	if _, err := e.Admin.Firewall().Policies().Create(c, rule("jail:w1")); err != nil {
 		t.Fatal(err)
 	}
 	db := dtest.WebJailOn("db1", "lan")
 	db.Spec.Firewall.Policies = []string{"pg"}
 	startJailIn(t, e.Admin, db)
 	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_db1.conf")
-	if !strings.Contains(rs, "<s_w1>") || !strings.Contains(rs, addr) {
+	if !strings.Contains(rs, "<j_w1>") || !strings.Contains(rs, addr) {
 		t.Fatalf("the rule does not hold the addresses of the jail w1 (%s):\n%s", addr, rs)
 	}
 	// a hyphen in the jail's name: the table of it has an underscore
@@ -126,35 +130,40 @@ func TestARuleNamesAJail(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pol.Spec.Rules[0].From = []string{"@web-2"}
+	pol.Spec.Rules[0].From = []string{"jail:web-2"}
 	if _, err := e.Admin.Firewall().Policies().Update(c, "pg", pol, ""); err != nil {
 		t.Fatal(err)
 	}
 	e.D.Reconciler().Pass(c)
 	rs, _ = e.PF.Read(c, render.JailAnchorFor("alpha", "db1"))
-	if !strings.Contains(rs, "<s_web_2>") {
+	if !strings.Contains(rs, "<j_web_2>") {
 		t.Fatalf("a jail with a hyphen in its name is not a table:\n%s", rs)
 	}
-	// an address set and a jail never have the same name in one project: a rule would mean two things
-	_, err = e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "w1"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.77")}})
-	if err == nil || !strings.Contains(err.Error(), `jail "w1"`) || !strings.Contains(err.Error(), "@w1") {
-		t.Fatalf("a set named like a jail was accepted, or the error does not name the jail: %v", err)
+	// a jail that does not exist is an empty table: the policy is made, the anchor renders, the rule matches nobody
+	pol.Spec.Rules[0].From = []string{"jail:later"}
+	if _, err := e.Admin.Firewall().Policies().Update(c, "pg", pol, ""); err != nil {
+		t.Fatalf("a jail that is not there yet was refused: %v", err)
 	}
-	// ... also when the hyphen of a jail is the underscore of a set (the table of both is s_web_2)
-	_, err = e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "web_2"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.78")}})
-	if err == nil || !strings.Contains(err.Error(), `jail "web-2"`) {
-		t.Fatalf("a set web_2 next to the jail web-2 was accepted: %v", err)
+	e.D.Reconciler().Pass(c)
+	rs, _ = e.PF.Read(c, render.JailAnchorFor("alpha", "db1"))
+	if !strings.Contains(rs, "table <j_later> persist\n") {
+		t.Fatalf("a jail that does not exist is not an empty table:\n%s", rs)
 	}
-	// ... and the other way round: a jail named like a set
+	// a jail and an address set may have the same name: jail:w1 and set:w1 are two tables
+	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "w1"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.77")}}); err != nil {
+		t.Fatalf("a set named like a jail was refused: %v", err)
+	}
 	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "lab_1"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.79")}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Admin.Jails().Create(c, dtest.WebJailOn("lab-1", "lan")); err == nil || !strings.Contains(err.Error(), `address set "lab_1"`) {
-		t.Fatalf("a jail named like a set was accepted: %v", err)
+	if op, err := e.Admin.Jails().Create(c, dtest.WebJailOn("lab-1", "lan")); err != nil {
+		t.Fatalf("a jail named like a set was refused: %v", err)
+	} else if _, err := op.Wait(c); err != nil {
+		t.Fatal(err)
 	}
 }
 
-// An address set can hold jails as members ("@w1"), a rule that names it follows them, a jail named by a rule or a member
+// An address set can hold jails as members ("jail:w1"), a rule that names it follows them, a jail named by a rule or a member
 // is not renamed behind its back, a set renamed is renamed in the members of other sets, and a rule whose jail was
 // deleted matches nobody (the anchors of the jails that use the policy are still rendered).
 func TestAnAddressSetHoldsJails(t *testing.T) {
@@ -167,14 +176,14 @@ func TestAnAddressSetHoldsJails(t *testing.T) {
 	}
 	addr := w1.Spec.Network[0].IPv4
 	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "git_allow"},
-		Spec: api.AddressSetSpec{Addresses: []api.AddressEntry{{Address: "192.0.2.7", Comment: "the office"}, {Address: "@w1"}}}}); err != nil {
+		Spec: api.AddressSetSpec{Addresses: []api.AddressEntry{{Address: "192.0.2.7", Comment: "the office"}, {Address: "jail:w1"}}}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "bad"}, Spec: api.AddressSetSpec{Addresses: api.Entries("@nosuch")}}); err == nil {
-		t.Fatal("a member that is neither a jail nor a set was accepted")
+	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "bad"}, Spec: api.AddressSetSpec{Addresses: api.Entries("set:nosuch")}}); err == nil {
+		t.Fatal("a member that is a set that does not exist was accepted")
 	}
 	if _, err := e.Admin.Firewall().Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "git"},
-		Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@git_allow"}, Ports: []string{"22"}}}}}); err != nil {
+		Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:git_allow"}, Ports: []string{"22"}}}}}); err != nil {
 		t.Fatal(err)
 	}
 	db := dtest.WebJailOn("g1", "lan")
@@ -224,5 +233,40 @@ func TestAnAddressSetHoldsJails(t *testing.T) {
 	rs, err = e.PF.Read(c, render.JailAnchorFor("alpha", "g1"))
 	if err != nil || !strings.Contains(rs, "192.0.2.7") || strings.Contains(rs, addr+",") {
 		t.Fatalf("after the jail was deleted (%v):\n%s", err, rs)
+	}
+}
+
+// A policy and an address set may name a jail that is made later (the order of a fleet apply is sets, policies, jails):
+// the reference is an empty table until the jail exists, and then it holds the jail's addresses.
+func TestAPolicyAndASetMayNameAJailMadeLater(t *testing.T) {
+	e := seeded(t)
+	c := ctxT(t)
+	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "clients"},
+		Spec: api.AddressSetSpec{Addresses: []api.AddressEntry{{Address: "jail:later", Comment: "made after the set"}}}}); err != nil {
+		t.Fatalf("a set that names a jail made later was refused: %v", err)
+	}
+	if _, err := e.Admin.Firewall().Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "pg"},
+		Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
+			{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"jail:later"}, Ports: []string{"5432"}},
+			{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:clients"}, Ports: []string{"5433"}}}}}); err != nil {
+		t.Fatalf("a policy that names a jail made later was refused: %v", err)
+	}
+	db := dtest.WebJailOn("db2", "lan")
+	db.Spec.Firewall.Policies = []string{"pg"}
+	startJailIn(t, e.Admin, db)
+	e.D.Reconciler().Pass(c)
+	rs, _ := e.PF.Read(c, render.JailAnchorFor("alpha", "db2"))
+	if !strings.Contains(rs, "table <j_later> persist\n") || !strings.Contains(rs, "table <s_clients> persist\n") {
+		t.Fatalf("before the jail exists both references are empty tables:\n%s", rs)
+	}
+	startJailIn(t, e.Admin, dtest.WebJailOn("later", "lan"))
+	later, err := e.Admin.Jails().Get(c, "later")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.D.Reconciler().Pass(c)
+	rs, _ = e.PF.Read(c, render.JailAnchorFor("alpha", "db2"))
+	if !strings.Contains(rs, "table <j_later> persist { "+later.Spec.Network[0].IPv4) || !strings.Contains(rs, "table <s_clients> persist { "+later.Spec.Network[0].IPv4) {
+		t.Fatalf("after the jail exists the references hold its address %s:\n%s", later.Spec.Network[0].IPv4, rs)
 	}
 }

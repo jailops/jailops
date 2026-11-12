@@ -19,8 +19,8 @@ the carved `/80`s.
   belongs to one project; the two `/80`s cannot overlap (`validate` checks that offline).
 - **The floor**: both projects name `firewall_policies: [floor]`, a policy with `default_in: deny`. A jail's own policies add rules but cannot
   weaken it. Projects cannot reach each other: there is no rule that says they can.
-- **A firewall per jail**: `web` has `public-web` (HTTP and HTTPS from anywhere, SSH from `@admins`), `app` has
-  `app-private` (port 8080 only from `@web_tier`).
+- **A firewall per jail**: `web` has `public-web` (HTTP and HTTPS from anywhere, SSH from `set:admins`), `app` has
+  `app-private` (port 8080 only from `set:web_tier`).
 - **A public web jail** with a fixed IPv6 address (`2001:db8:1:2:100::80`, your AAAA record) and, for IPv4, `proxy:` devices that
   forward the host's ports 80 and 443.
 - Explicit network and storage on every jail; the image is built once by `build: true`.

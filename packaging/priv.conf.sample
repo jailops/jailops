@@ -67,6 +67,10 @@ allow-user = jailops
 #wireguard-routes = 10.0.0.0/7
 #admin-raw-pf = false
 #admin-resume-send = false
+# Lets an admin give a jail a ZFS dataset of its own (jailops create --zfs-delegation): root in that jail can then
+# create datasets, snapshots and mounts below it, outside the rules JailOps applies to the jail's data. An admin who
+# may do this is root on the host for that jail's storage: leave it off unless you need it.
+#admin-zfs-delegation = false
 
 # --- image building ---------------------------------------------------------------
 # Hosts the helper's fetch rule may download from, over https only (default:

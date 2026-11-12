@@ -72,6 +72,9 @@ func JailSpec(name string, s api.JailSpec) error {
 	if s.Resources.PIDs < 0 {
 		return Invalid("resources.pids", "the process limit must not be negative (--pids)")
 	}
+	if s.Resources.States < 0 || s.Resources.States > 10000000 {
+		return Invalid("resources.states", "the state limit must be between 0 and 10000000")
+	}
 	for _, r := range []struct{ field, flag, v string }{{"resources.memory", "memory", s.Resources.Memory}, {"resources.disk", "disk", s.Resources.Disk}} {
 		if r.v != "" {
 			if _, err := ParseSize(r.v); err != nil {
@@ -198,11 +201,9 @@ func devices(s api.JailSpec) error {
 		if n.MTU != 0 && (n.MTU < 576 || n.MTU > 9216) {
 			return Invalid(f+".mtu", "mtu must be 0 or between 576 and 9216")
 		}
-		for fld, v := range map[string]string{"ingress": n.Ingress, "egress": n.Egress} {
-			if v != "" {
-				if _, err := ParseSize(v); err != nil {
-					return Invalid(f+"."+fld, "%s %q is not a rate in bits per second such as 10M", fld, v)
-				}
+		if n.Egress != "" {
+			if _, err := ParseRate(n.Egress); err != nil {
+				return Invalid(f+".egress", "egress %q is not a rate in bits per second such as 10M", n.Egress)
 			}
 		}
 	}

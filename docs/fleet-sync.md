@@ -155,8 +155,8 @@ installed app is closed to everything else; each entry is what `jailops app allo
     hosts: [db1]
     spec:
       grants:
-        - {source: "@web", database: shop}           # a jail of the project; database and role shop
-        - {source: "@office"}                        # an address set of the project
+        - {source: "jail:web", database: shop}           # a jail of the project; database and role shop
+        - {source: "set:office"}                        # an address set of the project
         - {source: 192.0.2.0/24, ports: ["5432"]}    # an address or a prefix
         - {source: host}                             # the host itself
 
@@ -172,8 +172,8 @@ grants of an app. A deny never drops a role: it loses its login and keeps its da
 (`postgres://ROLE:PASSWORD@HOST:5432/DB?sslmode=disable`) once, in the answer of the allow, and keeps only the existence of
 the role. `sync --apply` prints it **once, in its own output**, under the change that made it:
 
-      ok       db1 AppAccess/shop/db from @web (create)
-        connection string for @web on shop/db (shown once, stored nowhere; ...):
+      ok       db1 AppAccess/shop/db from jail:web (create)
+        connection string for jail:web on shop/db (shown once, stored nowhere; ...):
           postgres://shop:...@<address of db>:5432/shop?sslmode=disable
 
 It is not in the plan, not in the JSONL apply log, not in the state directory and never written into the repository. Copy

@@ -121,9 +121,9 @@ func pfPorts(ports []string) string {
 func hostFWTable(set string) string { return "jo_hf_" + set }
 
 // renderHostPF renders the whole of /etc/pf.conf from a canonical spec, in the order pf requires: tables, options,
-// normalisation, translation, filtering. The three anchor lines the jails need are always there; the filter anchor
-// comes first among the filter rules, because the jails' anchors are final (quick) for their own interfaces and a
-// broad pass before them would decide for them.
+// normalisation, then the rules. The anchor line the jails need is always there; it comes first among the rules,
+// because the jails' anchors hold the NAT and the port forwards of their networks and are final (quick) for their own
+// interfaces, and a broad pass before them would decide for them.
 func renderHostPF(s api.HostFirewallSpec) string {
 	var b strings.Builder
 	w := func(format string, a ...any) { fmt.Fprintf(&b, format+"\n", a...) }
@@ -142,19 +142,15 @@ func renderHostPF(s api.HostFirewallSpec) string {
 	w("set state-policy if-bound")
 	w("scrub in all fragment reassemble")
 	w("")
-	w("# translation: the NAT and the port forwards of the jails' networks")
-	w(`nat-anchor "jailops/*"`)
-	w(`rdr-anchor "jailops/*"`)
+	w("# the jails' anchors first: their filter rules and the NAT and port forwards of their networks")
+	w(`anchor "jailops/*"`)
 	if a := s.ACME; a != nil {
 		// after the jails' anchors: a port forward of a jail on the same port wins over the challenge
 		from := api.ACMEChallengePort(a.Challenge)
 		w("# ACME %s challenges of the console's certificate: port %d to the daemon's unprivileged port %d", a.Challenge, from, a.Port)
-		w("rdr inet proto tcp from any to (self) port %d -> 127.0.0.1 port %d", from, a.Port)
-		w("rdr inet6 proto tcp from any to (self) port %d -> ::1 port %d", from, a.Port)
+		w("match in inet proto tcp from any to (self) port %d rdr-to 127.0.0.1 port %d", from, a.Port)
+		w("match in inet6 proto tcp from any to (self) port %d rdr-to ::1 port %d", from, a.Port)
 	}
-	w("")
-	w("# filtering: the jails' own anchors first")
-	w(`anchor "jailops/*"`)
 	switch {
 	case s.Template == api.HostFirewallOpen:
 		w("# open template: everything may reach the host")

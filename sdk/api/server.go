@@ -126,6 +126,9 @@ type LifecycleEvent struct {
 	// Project is the project of the object; empty for host-level objects,
 	// whose events only global identities see.
 	Project string `json:"project,omitempty"`
+	// Detail is one line for a person, for the events the host itself raises (a ZFS error, a link going down, a limit
+	// a jail hit).
+	Detail string `json:"detail,omitempty"`
 }
 
 // OptionalExtensions are the names a server leaves out on purpose when it does not have the feature behind them (no

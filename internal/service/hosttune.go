@@ -112,6 +112,9 @@ func (s *Service) hostDesired() reconcile.HostDesired {
 	if s.hasWireGuard() {
 		mods = append(mods, wireguard.Module)
 	}
+	if s.hasShaping() {
+		mods = append(mods, DummynetModule)
+	}
 	h := reconcile.HostDesired{
 		Modules: mods,
 		Sysctls: s.NetSysctl(),

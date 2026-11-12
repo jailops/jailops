@@ -112,7 +112,7 @@ func (a *app) printCertificate(w io.Writer, st api.HostCertificate) {
 		case r.Managed:
 			s.kv("Redirect", "not applied yet: apply the host firewall again ('jailops host firewall set')")
 		default:
-			fprintln(w, "  Redirect:    add these lines to the translation section of /etc/pf.conf:")
+			fprintln(w, "  Redirect:    add these lines to /etc/pf.conf, after the line anchor \"jailops/*\":")
 			for _, l := range r.Lines {
 				fprintln(w, "      "+l)
 			}
@@ -223,7 +223,7 @@ jailops host certificate acme --domain console.example.com --accept-tos --dry-ru
 			}
 			a.say("host-certificate/acme requested for %s; the self-signed certificate is served until the CA answers\n", strings.Join(spec.Domains, ", "))
 			if r := st.Redirect; r != nil && !r.Managed && len(r.Lines) > 0 {
-				fprintln(a.env.Stderr, "The CA reaches the daemon only through a redirect: add these lines to the translation section of /etc/pf.conf:")
+				fprintln(a.env.Stderr, "The CA reaches the daemon only through a redirect: add these lines to /etc/pf.conf, after the line anchor \"jailops/*\":")
 				for _, l := range r.Lines {
 					fprintln(a.env.Stderr, "    "+l)
 				}

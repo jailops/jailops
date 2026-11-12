@@ -3,6 +3,7 @@ package validate
 import (
 	"fmt"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -211,19 +212,32 @@ const (
 	EndpointAddr
 	EndpointSet
 	EndpointTag
+	EndpointJail
 )
 
-// ParseEndpoint classifies a from/to entry: "any", an address or CIDR,
-// "@name" (an address set, or a jail of the project) or "tag:<tag>". For EndpointAddr the canonical text is in value.
+// ReferenceKinds names the kinds of a reference, as they are written before the colon.
+const ReferenceKinds = "jail:NAME, set:NAME or tag:NAME"
+
+// ParseEndpoint classifies a from/to entry: "any", an address or CIDR, "jail:<name>" (a jail of the project),
+// "set:<name>" (an address set of the project) or "tag:<tag>" (the jails of the project with that firewall tag). For
+// EndpointAddr the canonical text is in value. A reference is always kind:name; "@" is not used.
 func ParseEndpoint(s string) (kind EndpointKind, value string, err error) {
 	switch {
 	case s == "any":
 		return EndpointAny, "any", nil
 	case strings.HasPrefix(s, "@"):
-		if !setRefRE.MatchString(s[1:]) || strings.HasSuffix(s, "-") {
-			return 0, "", fmt.Errorf("reference %q is invalid: @name is an address set or a jail of the project", s)
+		n := strings.TrimPrefix(s, "@")
+		return 0, "", fmt.Errorf("%q: @ is not used: write jail:%s, set:%s or tag:%s", s, n, n, n)
+	case strings.HasPrefix(s, "jail:"):
+		if !jailRefRE.MatchString(s[5:]) || strings.HasSuffix(s, "-") {
+			return 0, "", fmt.Errorf("jail reference %q is invalid: jail:NAME names a jail of the project", s)
 		}
-		return EndpointSet, s[1:], nil
+		return EndpointJail, s[5:], nil
+	case strings.HasPrefix(s, "set:"):
+		if !setNameRE.MatchString(s[4:]) {
+			return 0, "", fmt.Errorf("set reference %q is invalid: set:NAME names an address set of the project", s)
+		}
+		return EndpointSet, s[4:], nil
 	case strings.HasPrefix(s, "tag:"):
 		if e := Tag("tag", s[4:]); e != nil {
 			return 0, "", fmt.Errorf("tag reference %q is invalid", s)
@@ -239,7 +253,10 @@ func ParseEndpoint(s string) (kind EndpointKind, value string, err error) {
 	}
 	a, e := netip.ParseAddr(s)
 	if e != nil || a.Zone() != "" || a.Is4In6() {
-		return 0, "", fmt.Errorf("%q is not a valid address, @set or tag:<tag>", s)
+		if kind, _, ok := strings.Cut(s, ":"); ok && kindWordRE.MatchString(kind) {
+			return 0, "", fmt.Errorf("%q has an unknown kind %q: a reference is %s", s, kind, ReferenceKinds)
+		}
+		return 0, "", fmt.Errorf("%q is not a valid address, or a reference: %s", s, ReferenceKinds)
 	}
 	return EndpointAddr, a.String(), nil
 }
@@ -254,8 +271,11 @@ func ValidateEndpoint(s string) error {
 func AddressSetSpec(s api.AddressSetSpec) error {
 	for _, e := range s.Addresses {
 		k, _, err := ParseEndpoint(e.Address)
-		if err != nil || (k != EndpointAddr && k != EndpointSet) {
-			return Invalid("addresses", "address set member %q must be an address, a CIDR or @jail", e.Address)
+		if err != nil {
+			return Invalid("addresses", "address set member %q: %v", e.Address, err)
+		}
+		if k != EndpointAddr && k != EndpointSet && k != EndpointJail {
+			return Invalid("addresses", "address set member %q must be an address, a CIDR, jail:NAME or set:NAME", e.Address)
 		}
 		if err := Comment("addresses", e.Comment); err != nil {
 			return Invalid("addresses", "the comment of %q: %v", e.Address, err)
@@ -267,9 +287,10 @@ func AddressSetSpec(s api.AddressSetSpec) error {
 	return nil
 }
 
-// FlattenSet expands an address set with the sets and jails it names as @name into canonical,
-// sorted, de-duplicated address/CIDR strings. A missing name or a cycle is an error.
-func FlattenSet(name string, sets map[string]api.AddressSetSpec) ([]string, error) {
+// FlattenSet expands the address set name with the sets (set:NAME) and the jails (jail:NAME) it names into canonical,
+// sorted, de-duplicated address/CIDR strings. jails maps a jail to its addresses; a jail that is not in it has none
+// (a reference to a jail that is gone matches nobody). A set that does not exist, or a cycle, is an error.
+func FlattenSet(name string, sets map[string]api.AddressSetSpec, jails map[string][]string) ([]string, error) {
 	seen := map[string]bool{}
 	var walk func(n string, path []string) error
 	var out []string
@@ -281,7 +302,7 @@ func FlattenSet(name string, sets map[string]api.AddressSetSpec) ([]string, erro
 		}
 		s, ok := sets[n]
 		if !ok {
-			return Invalid("addresses", "address set or jail %q does not exist (a rule or a set names @%s)", n, n)
+			return Invalid("addresses", "address set %q does not exist (a rule or a set names set:%s)", n, n)
 		}
 		if seen[n] {
 			return nil
@@ -289,16 +310,19 @@ func FlattenSet(name string, sets map[string]api.AddressSetSpec) ([]string, erro
 		path = append(path, n)
 		for _, e := range s.Addresses {
 			k, v, err := ParseEndpoint(e.Address)
-			if err != nil || (k != EndpointAddr && k != EndpointSet) {
-				return Invalid("addresses", "address set %q member %q must be an address, a CIDR or @jail", n, e.Address)
+			if err != nil || (k != EndpointAddr && k != EndpointSet && k != EndpointJail) {
+				return Invalid("addresses", "address set %q member %q must be an address, a CIDR, jail:NAME or set:NAME", n, e.Address)
 			}
-			if k == EndpointSet { // @name: a jail of the project (its addresses), or another set
+			switch k {
+			case EndpointSet:
 				if err := walk(v, path); err != nil {
 					return err
 				}
-				continue
+			case EndpointJail:
+				out = append(out, jails[v]...)
+			default:
+				out = append(out, v)
 			}
-			out = append(out, v)
 		}
 		// A set reached again through another path is flattened once; the
 		// cycle check above only fires for sets on the current path.
@@ -308,6 +332,12 @@ func FlattenSet(name string, sets map[string]api.AddressSetSpec) ([]string, erro
 	if err := walk(name, nil); err != nil {
 		return nil, err
 	}
+	return CanonicalAddrs(out), nil
+}
+
+// CanonicalAddrs sorts and de-duplicates address and CIDR strings.
+func CanonicalAddrs(in []string) []string {
+	out := slices.Clone(in)
 	sort.Strings(out)
 	uniq := out[:0]
 	for i, s := range out {
@@ -315,5 +345,5 @@ func FlattenSet(name string, sets map[string]api.AddressSetSpec) ([]string, erro
 			uniq = append(uniq, s)
 		}
 	}
-	return uniq, nil
+	return uniq
 }

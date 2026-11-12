@@ -110,18 +110,8 @@ func (s *Server) assignJail(j, old *api.Jail) *api.Error {
 	return nil
 }
 
-// rateLimitWarnings is what the daemon says about a rate limit in a spec: it is not enforced.
-func rateLimitWarnings(sp api.JailSpec) []string {
-	for _, n := range sp.Network {
-		if n.Ingress != "" || n.Egress != "" {
-			return []string{"rate limits (nic ingress/egress) are stored but not enforced yet: no shaper is wired"}
-		}
-	}
-	return nil
-}
-
 func (s *Server) initJailStatus(j *api.Jail) {
-	j.Status = api.JailStatus{Power: api.PowerStopped, Generation: "g1", Warnings: rateLimitWarnings(j.Spec)}
+	j.Status = api.JailStatus{Power: api.PowerStopped, Generation: "g1"}
 	if i := strings.IndexByte(j.Spec.Image, '#'); i >= 0 {
 		j.Status.Generation = j.Spec.Image[i+1:]
 	} else if g := s.gens[imageName(j.Spec.Image)]; len(g) > 0 {

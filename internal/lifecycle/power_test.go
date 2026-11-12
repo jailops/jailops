@@ -149,3 +149,20 @@ func TestStartFailureReason(t *testing.T) {
 	}
 	_ = errors.New
 }
+
+// A delete takes the runtime state down also for a jail that is not running: it may have been stopped by hand, and its
+// rctl rules stay by name.
+func TestDestroyTearsDownAStoppedJail(t *testing.T) {
+	w := newWorld(t)
+	w.running("web")
+	if err := w.S.StopJail(bg, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	w.Hooks.Log = nil
+	if _, err := w.S.DestroyJail(bg, "alpha_web", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if indexOf(w.Hooks.Log, "poststop alpha_web") < 0 {
+		t.Fatalf("no teardown of a stopped jail: %v", w.Hooks.Log)
+	}
+}

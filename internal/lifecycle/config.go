@@ -144,6 +144,9 @@ func (c Config) ContainerDS(key string) string { return c.at(key).containerDS() 
 // RootDS is the root dataset of a jail.
 func (c Config) RootDS(key string) string { return c.at(key).rootDS() }
 
+// DelegatedDS is the dataset a jail with zfs_delegation manages itself: a child of its container.
+func (c Config) DelegatedDS(key string) string { return c.at(key).delegatedDS() }
+
 // ContainerMP is where the container dataset of a jail is mounted.
 func (c Config) ContainerMP(key string) string { return c.at(key).containerMP() }
 
@@ -170,6 +173,7 @@ func (p jpaths) rootNewDS() string        { return p.containerDS() + "/root.new"
 func (p jpaths) rootOldDS() string        { return p.containerDS() + "/root.old" }
 func (p jpaths) rootStaleDS() string      { return p.containerDS() + "/root.stale" }
 func (p jpaths) volumesDS() string        { return p.containerDS() + "/data" }
+func (p jpaths) delegatedDS() string      { return p.containerDS() + "/delegated" }
 func (p jpaths) volumeDS(v string) string { return p.containerDS() + "/data/" + v }
 func (p jpaths) containerMP() string {
 	return path.Join(p.st.MountBase, "projects", p.project, "jails", p.name)

@@ -40,8 +40,8 @@ func sourceObjects() objs {
 	return objs{
 		nets: map[string]api.NetworkSpec{"lan": srcNet("10.20.0.0/24", "10.20.0.1"), "dmz": srcNet("10.30.0.0/24", "10.30.0.1")},
 		pols: map[string]api.FirewallPolicySpec{"web": {DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
-			{Action: "allow", Direction: "in", From: []string{"@office"}, Ports: []string{"443"}}}}},
-		sets: map[string]api.AddressSetSpec{"office": {Addresses: api.Entries("192.0.2.0/24", "@vpn")},
+			{Action: "allow", Direction: "in", From: []string{"set:office"}, Ports: []string{"443"}}}}},
+		sets: map[string]api.AddressSetSpec{"office": {Addresses: api.Entries("192.0.2.0/24", "set:vpn")},
 			"vpn": {Addresses: api.Entries("198.51.100.7")}, "unused": {Addresses: api.Entries("1.1.1.1")}},
 	}
 }

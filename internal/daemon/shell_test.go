@@ -82,12 +82,23 @@ func TestNewJailGetsBashAndThePrompt(t *testing.T) {
 	if installedBash(e, webRoot) != 1 || !sj.ran("/sbin/ldconfig -m /usr/local/lib") {
 		t.Fatalf("bash was not installed from the host: %v %v", e.Installed, sj.cmds)
 	}
-	want := `PS1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\] '`
+	want := "PS1='" + api.DefaultPS1(39) + "'"
 	if !strings.Contains(e.File(webRoot+api.PromptFile), want) {
 		t.Fatalf("prompt file: %q", e.File(webRoot+api.PromptFile))
 	}
+	// the variables script is the same text in every jail and the jail's own jail.conf says where it is; the prompt file
+	// only reads the variables
+	if env := e.File(webRoot + api.EnvFile); !strings.Contains(env, "security.jail.env") || strings.Contains(env, "alpha") || strings.Contains(env, "testhost") {
+		t.Fatalf("env file: %q", env)
+	}
+	if conf := e.File("/etc/jailops/jails/alpha_web/jail.conf"); !strings.Contains(conf, "\tenv.jailops_jail = \"web\";\n\tenv.jailops_project = \"alpha\";\n\tenv.jailops_host = \"testhost\";\n") {
+		t.Fatalf("jail.conf: %q", conf)
+	}
+	if strings.Contains(e.File(webRoot+api.PromptFile), "alpha") || strings.Contains(e.File(webRoot+api.PromptFile), "testhost") {
+		t.Fatalf("the prompt file holds names: %q", e.File(webRoot+api.PromptFile))
+	}
 	for _, p := range []string{api.ProfilePath, api.BashrcPath} {
-		if f := e.File(webRoot + p); !strings.HasPrefix(f, "# BEGIN jailops prompt") || !strings.Contains(f, ". "+api.PromptFile) {
+		if f := e.File(webRoot + p); !strings.HasPrefix(f, "# BEGIN jailops shell") || !strings.Contains(f, ". "+api.EnvFile) || !strings.Contains(f, ". "+api.PromptFile) {
 			t.Fatalf("%s: %q", p, f)
 		}
 	}
@@ -121,11 +132,17 @@ func TestNewJailGetsBashAndThePrompt(t *testing.T) {
 	if !strings.Contains(e.File(webRoot+api.PromptFile), "PS1='"+red+"'") {
 		t.Fatal("a refused prompt changed the file")
 	}
-	// none removes the file and the blocks; a start-up file with lines of its own keeps them
+	// short is the default without the tag
+	mustOp(e.Admin.Jails().Config(ctx, "web", map[string]string{"prompt": "short"}, nil, false))
+	if f := e.File(webRoot + api.PromptFile); !strings.Contains(f, "PS1='"+api.ShortPS1(39)+"'") || strings.Contains(f, api.Where) {
+		t.Fatalf("short: %q", f)
+	}
+	// none removes the prompt file and keeps the variables; a start-up file with lines of its own keeps them
 	e.Files.Put(webRoot+api.BashrcPath, []byte(e.File(webRoot+api.BashrcPath)+"alias ll='ls -l'\n"))
 	mustOp(e.Admin.Jails().Config(ctx, "web", map[string]string{"prompt": "none"}, nil, false))
-	if e.HasFile(webRoot+api.PromptFile) || e.HasFile(webRoot+api.ProfilePath) || e.File(webRoot+api.BashrcPath) != "alias ll='ls -l'\n" {
-		t.Fatalf("none left: %v %q", e.Files.Paths(), e.File(webRoot+api.BashrcPath))
+	if b := e.File(webRoot + api.BashrcPath); e.HasFile(webRoot+api.PromptFile) || !e.HasFile(webRoot+api.EnvFile) || !strings.Contains(b, ". "+api.EnvFile) ||
+		strings.Contains(b, api.PromptFile) || !strings.HasSuffix(b, "alias ll='ls -l'\n") {
+		t.Fatalf("none left: %v %q", e.Files.Paths(), b)
 	}
 	// a stopped jail gets a changed prompt at its next start
 	mustOp(e.Admin.Jails().Stop(ctx, "web"))
@@ -134,7 +151,7 @@ func TestNewJailGetsBashAndThePrompt(t *testing.T) {
 		t.Fatal("the prompt was written into a stopped jail")
 	}
 	mustOp(e.Admin.Jails().Start(ctx, "web"))
-	if !strings.Contains(e.File(webRoot+api.PromptFile), want) || !strings.HasPrefix(e.File(webRoot+api.BashrcPath), "# BEGIN jailops prompt") ||
+	if !strings.Contains(e.File(webRoot+api.PromptFile), want) || !strings.HasPrefix(e.File(webRoot+api.BashrcPath), "# BEGIN jailops shell") ||
 		!strings.HasSuffix(e.File(webRoot+api.BashrcPath), "alias ll='ls -l'\n") {
 		t.Fatalf("after the start: %q %q", e.File(webRoot+api.PromptFile), e.File(webRoot+api.BashrcPath))
 	}
@@ -283,7 +300,7 @@ func TestShellSetupFailureIsReportedAndRepaired(t *testing.T) {
 		t.Fatalf("%+v %v", got.Status.Conditions, e.Installed)
 	}
 	// a hand edit that cut the block in half: refused with the file named, the file untouched
-	cut := "# BEGIN jailops prompt: managed by JailOps\nmy own line\n"
+	cut := "# BEGIN jailops shell: managed by JailOps\nmy own line\n"
 	e.Files.Put(webRoot+api.BashrcPath, []byte(cut))
 	if err := opErr(e.Admin.Jails().ShellSetup(ctx, "web")); err == nil || !strings.Contains(err.Error(), api.BashrcPath) {
 		t.Fatalf("%v", err)
@@ -330,9 +347,83 @@ func TestJailsConfig(t *testing.T) {
 	if err != nil || cfg.Jails.Shell != "sh" || cfg.Jails.Prompt != `\u@\h:\w\$ ` || *cfg.Jails.PromptColor != 196 {
 		t.Fatalf("%+v %v", cfg.Jails, err)
 	}
+	// a host-wide prompt may say where the jail is, with the three words in braces
+	cfg, err = daemon.Decode(strings.NewReader("pool: tank\njails:\n  prompt: '[{host}] {project}/{jail} \\$ '\n"))
+	if err != nil || cfg.Jails.Prompt != `[{host}] {project}/{jail} \$ ` {
+		t.Fatalf("%+v %v", cfg.Jails, err)
+	}
+	if _, err := daemon.Decode(strings.NewReader("pool: tank\njails:\n  prompt: '{nope} \\$ '\n")); err == nil || !strings.Contains(err.Error(), "{host}") {
+		t.Errorf("an unknown placeholder in jails.prompt: %v", err)
+	}
 	for _, bad := range []string{"shell: zsh", "shell: /usr/local/bin/bash", "prompt: '$(id)'", "prompt: '`id`'", "prompt_color: 0", "prompt_color: 256", "prompt_color: -1", "colour: 3"} {
 		if _, err := daemon.Decode(strings.NewReader("pool: tank\njails:\n  " + bad + "\n")); err == nil {
 			t.Errorf("%s was accepted", bad)
+		}
+	}
+}
+
+// The variables say where the jail is: JAILOPS_JAIL, JAILOPS_PROJECT and JAILOPS_HOST (the short name of the host),
+// from the parameters env.jailops_* of the jail's jail.conf, which every start renders. The prompt reads the
+// variables each time it is shown, so the words {jail}, {project} and {host} of a prompt text become references to
+// them, and a rename changes the jail.conf of the next start and neither the variables script nor the prompt.
+func TestPromptSaysWhereTheJailIs(t *testing.T) {
+	shellT = t
+	e := dtest.New(t, dtest.Options{Hostname: "Babel.Example.org"})
+	e.Seed()
+	sj := &scriptedJails{env: e}
+	e.Jails.SetExecFn(sj.fn)
+	ctx := context.Background()
+	mustOp(e.Admin.Jails().Create(ctx, dtest.WebJail("web")))
+	mustOp(e.Admin.Jails().Start(ctx, "web"))
+	envScript := e.File(webRoot + api.EnvFile)
+	if conf := e.File("/etc/jailops/jails/alpha_web/jail.conf"); !strings.Contains(conf, "env.jailops_host = \"babel\";") || !strings.Contains(conf, "env.jailops_project = \"alpha\";") {
+		t.Fatalf("the jail.conf does not say project and host: %q", conf)
+	}
+	// a prompt text with the words: written at once into the running jail, as references to the variables
+	mustOp(e.Admin.Jails().Config(ctx, "web", map[string]string{"prompt": `[{project}/{jail}@{host}] \$ `}, nil, false))
+	const text = `PS1='[${JAILOPS_PROJECT-}/${JAILOPS_JAIL-}@${JAILOPS_HOST-}] \$ '`
+	if f := e.File(webRoot + api.PromptFile); !strings.Contains(f, text) {
+		t.Fatalf("the placeholders were not turned into references: %q", f)
+	}
+	// a word that is not one of the three is refused and the message names them
+	err := opErr(e.Admin.Jails().Config(ctx, "web", map[string]string{"prompt": "{nope} \\$ "}, nil, false))
+	if !api.IsCode(err, api.CodeInvalid) || !strings.Contains(err.Error(), "{jail}") || !strings.Contains(err.Error(), "{host}") {
+		t.Fatalf("an unknown placeholder: %v", err)
+	}
+	// after a rename of the jail the next start renders the new name into its jail.conf; the variables script and the
+	// prompt are the same text
+	mustOp(e.Admin.Jails().Stop(ctx, "web"))
+	mustOp(e.Admin.Jails().Rename(ctx, "web", api.Rename{NewName: "site"}, ""))
+	mustOp(e.Admin.Jails().Start(ctx, "site"))
+	if conf := e.File("/etc/jailops/jails/alpha_site/jail.conf"); !strings.Contains(conf, "env.jailops_jail = \"site\";") || strings.Contains(conf, "env.jailops_jail = \"web\";") {
+		t.Fatalf("the jail.conf of the renamed jail: %q", conf)
+	}
+	// nothing was written into the jail's files for the rename: they are the same text as before (a real rename moves
+	// the dataset that holds them; the fake files stay where they were written)
+	if env := e.File(webRoot + api.EnvFile); env != envScript {
+		t.Fatalf("the variables script changed with the rename: %q", env)
+	}
+	if f := e.File(webRoot + api.PromptFile); !strings.Contains(f, text) {
+		t.Fatalf("the prompt file changed with the rename: %q", f)
+	}
+}
+
+// jails.max_states is the pf state limit of a jail that sets none: 10000 unless the host says otherwise, 0 for no
+// limit, and never negative.
+func TestJailsMaxStatesConfig(t *testing.T) {
+	cfg, err := daemon.Decode(strings.NewReader("pool: tank\n"))
+	if err != nil || cfg.Jails.MaxStates == nil || *cfg.Jails.MaxStates != daemon.DefaultMaxStates || daemon.DefaultMaxStates != 10000 {
+		t.Fatalf("%+v %v", cfg.Jails, err)
+	}
+	for in, want := range map[string]int{"0": 0, "250000": 250000} {
+		cfg, err = daemon.Decode(strings.NewReader("pool: tank\njails:\n  max_states: " + in + "\n"))
+		if err != nil || *cfg.Jails.MaxStates != want {
+			t.Fatalf("max_states %s: %+v %v", in, cfg.Jails, err)
+		}
+	}
+	for _, bad := range []string{"-1", "10000001"} {
+		if _, err := daemon.Decode(strings.NewReader("pool: tank\njails:\n  max_states: " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "jails.max_states") {
+			t.Errorf("max_states %s: %v", bad, err)
 		}
 	}
 }

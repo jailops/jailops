@@ -97,7 +97,7 @@ func (a *app) showStorage(st api.Storage) error {
 }
 
 // showAddressSet lists the members of a set, each with its comment: what a reviewer of a firewall wants to read next to
-// "@office" in a rule. A member that is a jail (@name) says so in the comment column when it has none.
+// "set:office" in a rule. A member that is a jail or a set says so in the comment column when it has none.
 func (a *app) showAddressSet(set api.AddressSet) error {
 	s := showWriter{w: a.env.Stdout, width: 9}
 	s.title("Address set %s", set.Metadata.Name)
@@ -109,8 +109,13 @@ func (a *app) showAddressSet(set api.AddressSet) error {
 	rows := make([][]string, 0, len(set.Spec.Addresses))
 	for _, e := range set.Spec.Addresses {
 		c := e.Comment
-		if c == "" && strings.HasPrefix(e.Address, "@") {
-			c = "(a jail or a set of the project)"
+		if c == "" {
+			switch {
+			case strings.HasPrefix(e.Address, "jail:"):
+				c = "(a jail of the project)"
+			case strings.HasPrefix(e.Address, "set:"):
+				c = "(an address set of the project)"
+			}
 		}
 		rows = append(rows, []string{e.Address, orText(c, "-")})
 	}
