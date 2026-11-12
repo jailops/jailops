@@ -150,7 +150,7 @@ func TestFirewall(t *testing.T) {
 	tr.ok("firewall", "address-set", "show", "hq", "-o", "yaml")
 	tr.ok("firewall", "address-set", "show", "hq")
 	tr.ok("firewall", "policy", "create", "documented", "--default-in", "deny", "--default-out", "allow", "--comment", "the public web server",
-		"--rule", "allow in tcp port 80,443 comment the site", "--rule", "allow in tcp from @hq port 22 comment ssh from the office")
+		"--rule", "allow in tcp port 80,443 comment the site", "--rule", "allow in tcp from set:hq port 22 comment ssh from the office")
 	tr.ok("firewall", "policy", "show", "documented", "-o", "yaml")
 	tr.ok("firewall", "policy", "show", "documented")
 	// a rule can be switched off without deleting it: it keeps its number and says so
@@ -163,7 +163,7 @@ func TestFirewall(t *testing.T) {
 	tr.do("", "firewall", "address-set", "create", "c1", "--comment", "no address")
 	tr.do("", "firewall", "address-set", "create", "c2", "--address", "192.0.2.2", "--address", "192.0.2.3", "--comment", "which one")
 	tr.ok("firewall", "policy", "create", "web", "--default-in", "deny", "--default-out", "allow",
-		"--rule", "allow in tcp port 80,443", "--rule", "allow in tcp from @office port 22 log", "--rule", "allow in tcp port 8080 rdr 8080:80")
+		"--rule", "allow in tcp port 80,443", "--rule", "allow in tcp from set:office port 22 log", "--rule", "allow in tcp port 8080 rdr 8080:80")
 	tr.do("", "firewall", "policy", "create", "bad", "--default-in", "deny", "--default-out", "allow", "--rule", "allow")
 	tr.do("", "firewall", "policy", "create", "bad2", "--default-in", "deny", "--default-out", "allow", "--rule", "allow in tcp bogus 1")
 	tr.ok("firewall", "policy", "list")
@@ -177,7 +177,7 @@ spec:
   default_in: deny
   default_out: allow
   rules:
-    - {action: allow, direction: in, proto: tcp, ports: ["22", "8000-8100"], from: ["@office", "10.0.0.0/8", "tag:admin"]}
+    - {action: allow, direction: in, proto: tcp, ports: ["22", "8000-8100"], from: ["set:office", "10.0.0.0/8", "tag:admin"]}
 ---
 kind: AddressSet
 metadata: {name: office}
@@ -188,18 +188,18 @@ metadata: {name: p2}
 spec:
   default_in: maybe
   rules:
-    - {action: permit, direction: sideways, proto: tcp, ports: ["99999"], from: ["300.1.1.1", "@nowhere"]}
+    - {action: permit, direction: sideways, proto: tcp, ports: ["99999"], from: ["300.1.1.1", "set:nowhere"]}
     - {action: allow, direction: in, ports: ["80"]}
     - {action: allow, direction: out, proto: tcp, redirect: {host_port: 80, jail_port: 80}}
   raw: "block all"
 ---
 kind: AddressSet
 metadata: {name: a}
-spec: {addresses: ["10.0.0.0/8", "nope", "@b"]}
+spec: {addresses: ["10.0.0.0/8", "nope", "set:b"]}
 ---
 kind: AddressSet
 metadata: {name: b}
-spec: {addresses: ["@a"]}
+spec: {addresses: ["set:a"]}
 `, 0o644)
 	tr.ok("firewall", "validate", "-f", good)
 	tr.ok("firewall", "validate", "-f", good, "--offline")

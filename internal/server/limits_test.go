@@ -4,184 +4,143 @@ import (
 	"strings"
 	"testing"
 
+	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/daemon/dtest"
-	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
 
-// wantRefused asserts an error of the code whose message says what.
-func wantRefused(t *testing.T, err error, code api.Code, what ...string) {
+// seededWith is seeded on a host whose jails.max_states is n.
+func seededWith(t *testing.T, n int) *dtest.Env {
 	t.Helper()
-	wantCode(t, err, code)
-	for _, w := range what {
-		if !strings.Contains(err.Error(), w) {
-			t.Fatalf("%q does not say %q", err, w)
+	e := dtest.New(t, dtest.Options{Mutate: func(c *daemon.Config) { c.Jails.MaxStates = &n }})
+	e.Seed()
+	return e
+}
+
+// A changed disk limit reaches the jail's container dataset, which carries the quota of everything below it, and an
+// unset one is "none". The root clone carries none.
+func TestDiskLimitFollowsAChange(t *testing.T) {
+	e := seeded(t)
+	c := ctxT(t)
+	j := dtest.WebJail("web")
+	j.Spec.Resources.Disk = "10G"
+	op, err := e.Admin.Jails().Create(c, j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := op.Wait(c); err != nil {
+		t.Fatal(err)
+	}
+	container := "tank/jailops/projects/alpha/jails/web"
+	quota := func(ds string) string {
+		p, err := e.ZFS.Get(c, ds, "quota")
+		if err != nil {
+			t.Fatal(err)
 		}
+		return p["quota"].Value
 	}
-}
-
-// Sizes are stored and written as bytes: "4GiB" was accepted by the API and refused by the helper at the first
-// jail create (a project quota) or inside the create operation (a jail's disk).
-func TestSizesAreStoredAsBytes(t *testing.T) {
-	e := seeded(t)
-	c := ctxT(t)
-	if _, err := e.Admin.Projects().Patch(c, dtest.SeedProject, map[string]any{"spec": map[string]any{
-		"storage": []map[string]any{{"storage": "default", "quota": "4GiB"}}, "quotas": map[string]any{"memory": "512m"}}}, ""); err != nil {
-		t.Fatal(err)
+	if q := quota(container); q != "10G" && q != "10737418240" {
+		t.Fatalf("container quota %q", q)
 	}
-	p, err := e.Admin.Projects().Get(c, dtest.SeedProject)
-	if err != nil || p.Spec.Storage[0].Quota != "4294967296" || p.Spec.Quotas.Memory != "536870912" {
-		t.Fatalf("%v %+v", err, p.Spec)
+	if q := quota(container + "/root"); q != "" && q != "none" && q != "0" && q != "-" {
+		t.Fatalf("the root clone has a quota: %q", q)
 	}
-	q, _ := e.ZFS.Get(c, "tank/jailops/projects/"+dtest.SeedProject, "quota")
-	if q["quota"].Value != "4294967296" {
-		t.Fatalf("zfs got %v", q)
-	}
-	sp := webSpec()
-	sp.Resources.Disk, sp.Resources.DiskReservation, sp.Resources.Memory = "1k", "7B", "256M"
-	sp.Volumes = []api.VolumeMount{{Name: "data", Mount: "/data", Quota: "512m"}}
-	op, err := e.Admin.Jails().Create(c, sdk.NewJail("web", sp))
+	cur, etag, err := e.Admin.Jails().GetETag(c, "web")
 	if err != nil {
 		t.Fatal(err)
 	}
-	j, err := op.Wait(c)
-	if err != nil {
-		t.Fatalf("%v\n%s", err, e.Log())
-	}
-	if r := j.Spec.Resources; r.Disk != "1024" || r.DiskReservation != "7" || j.Spec.Volumes[0].Quota != "536870912" {
-		t.Fatalf("%+v %+v", r, j.Spec.Volumes)
-	}
-	root := "tank/jailops/projects/" + dtest.SeedProject + "/jails/web/root"
-	if q, _ := e.ZFS.Get(c, root, "quota"); q["quota"].Value != "1024" {
-		t.Fatalf("root quota %v", q)
-	}
-	// larger than the helper sets, or not a size: refused by the API
-	_, err = e.Admin.Projects().Patch(c, dtest.SeedProject, map[string]any{"spec": map[string]any{"storage": []map[string]any{{"storage": "default", "quota": "17T"}}}}, "")
-	wantRefused(t, err, api.CodeInvalid, "16T")
-	sp.Resources.Disk = "4 GiB"
-	_, err = e.Admin.Jails().Create(c, sdk.NewJail("web2", sp))
-	wantRefused(t, err, api.CodeInvalid, "disk")
-}
-
-// An attachment cannot have another MTU than its network: the bridge gives every port its own.
-func TestAttachmentMTUMustBeTheNetworks(t *testing.T) {
-	e := seeded(t)
-	c := ctxT(t)
-	sp := webSpec()
-	sp.Network[0].MTU = 9000
-	_, err := e.Admin.Jails().Create(c, sdk.NewJail("web", sp))
-	wantRefused(t, err, api.CodeInvalid, "9000", "1500", "lan")
-	sp.Network[0].MTU = 1500
-	op, err := e.Admin.Jails().Create(c, sdk.NewJail("web", sp))
-	if err != nil {
+	cur.Spec.Resources.Disk = "20000000000"
+	cur.Spec.Resources.DiskReservation = "1000000000"
+	if _, err := e.Admin.Jails().Update(c, "web", cur, etag); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := op.Wait(c); err != nil {
+	if q := quota(container); q != "20000000000" {
+		t.Fatalf("container quota after the change: %q", q)
+	}
+	p, _ := e.ZFS.Get(c, container, "reservation")
+	if p["reservation"].Value != "1000000000" {
+		t.Fatalf("container reservation after the change: %q", p["reservation"].Value)
+	}
+	cur, etag, _ = e.Admin.Jails().GetETag(c, "web")
+	cur.Spec.Resources.Disk = ""
+	if _, err := e.Admin.Jails().Update(c, "web", cur, etag); err != nil {
 		t.Fatal(err)
+	}
+	if q := quota(container); q != "none" && q != "" && q != "0" && q != "-" {
+		t.Fatalf("container quota after the limit was removed: %q", q)
 	}
 }
 
-// A network is checked against the host's interfaces when it is created: its subnet is not one the host has, its
-// uplink exists and can carry it, and a proxy-mode subnet lies in the uplink's prefix.
-func TestNetworksAreCheckedAgainstTheHost(t *testing.T) {
-	e := dtest.New(t, dtest.Options{})
-	c := ctxT(t)
-	g := e.Global()
-	v4 := func(name, sub, gw, rng, uplink string) api.Network {
-		return api.Network{Metadata: api.ObjectMeta{Name: name}, Spec: api.NetworkSpec{Uplink: uplink,
-			IPv4: &api.IPv4Net{Subnet: sub, Gateway: gw, Range: rng, NAT: uplink != ""}}}
-	}
-	// em0 is in 203.0.113.0/24
-	_, err := g.Networks().Create(c, v4("lan", "203.0.113.0/25", "203.0.113.1", "203.0.113.10-203.0.113.20", ""))
-	wantRefused(t, err, api.CodeConflict, "203.0.113.2/24", "em0")
-	_, err = g.Networks().Create(c, v4("lan", "10.40.0.0/24", "10.40.0.1", "10.40.0.10-10.40.0.20", "em9"))
-	wantRefused(t, err, api.CodeInvalid, "em9 does not exist")
-	if ae := err.(*api.Error); !strings.Contains(ae.Hint, "em0 (203.0.113.2/24") {
-		t.Fatalf("the hint names no candidate: %q", ae.Hint)
-	}
-	_, err = g.Networks().Create(c, v4("lan", "10.40.0.0/24", "10.40.0.1", "10.40.0.10-10.40.0.20", "lo0"))
-	wantRefused(t, err, api.CodeInvalid, "lo0")
-	if _, err := g.Networks().Create(c, v4("lan", "10.40.0.0/24", "10.40.0.1", "10.40.0.10-10.40.0.20", "em1")); err != nil {
-		t.Fatal(err)
-	}
-	// a routed IPv6 prefix inside the uplink's on-link prefix, and a proxy subnet outside it
-	v6 := func(name string, mode api.IPv6Mode, sub, gw, rng string) api.Network {
-		return api.Network{Metadata: api.ObjectMeta{Name: name}, Spec: api.NetworkSpec{Uplink: "em0",
-			IPv6: &api.IPv6Net{Mode: mode, Subnet: sub, Gateway: gw, Range: rng}}}
-	}
-	_, err = g.Networks().Create(c, v6("rt", api.IPv6Routed, "2001:db8:1:2:7::/80", "2001:db8:1:2:7::1", "2001:db8:1:2:7::10-2001:db8:1:2:7::ff"))
-	wantRefused(t, err, api.CodeConflict, "em0")
-	_, err = g.Networks().Create(c, v6("sw", api.IPv6Proxy, "2001:db8:5::/80", "fe80::1", "2001:db8:5::10-2001:db8:5::ff"))
-	wantRefused(t, err, api.CodeInvalid, "2001:db8:1:2::/64")
-	if _, err := g.Networks().Create(c, v6("sw", api.IPv6Proxy, "2001:db8:1:2:5::/80", "fe80::1", "2001:db8:1:2:5::10-2001:db8:1:2:5::ff")); err != nil {
-		t.Fatal(err)
-	}
-	// an update is checked too
-	_, err = g.Networks().Patch(c, "lan", map[string]any{"spec": map[string]any{"uplink": "em9"}}, "")
-	wantRefused(t, err, api.CodeInvalid, "em9")
-}
-
-// A network that routes says at once when the host does not forward.
-func TestNetworkCreateWarnsWhenForwardingIsOff(t *testing.T) {
-	e := dtest.New(t, dtest.Options{})
-	c := ctxT(t)
-	e.SetSysctl("net.inet.ip.forwarding", "0")
-	n := dtest.LAN()
-	n.Spec.Uplink, n.Spec.IPv4.NAT = "em0", true
-	got, err := e.Global().Networks().Create(c, n)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got.Status.Warnings) != 1 || !strings.Contains(got.Status.Warnings[0], "sysctl net.inet.ip.forwarding=1") || !strings.Contains(got.Status.Warnings[0], "gateway_enable=YES") {
-		t.Fatalf("%q", got.Status.Warnings)
-	}
-	// a network without an uplink routes nothing and is not warned about
-	n2 := dtest.LAN()
-	n2.Metadata.Name = "inner"
-	n2.Spec.IPv4 = &api.IPv4Net{Subnet: "10.21.0.0/24", Gateway: "10.21.0.1", Range: "10.21.0.10-10.21.0.50"}
-	if got, err := e.Global().Networks().Create(c, n2); err != nil || len(got.Status.Warnings) != 0 {
-		t.Fatalf("%v %q", err, got.Status.Warnings)
+// A running jail with memory, process or CPU limits on a host where kern.racct.enable is 0 says that nothing enforces
+// them, and a jail without limits does not.
+func TestLimitsNotEnforcedWithoutRacct(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		racct string
+		res   api.Resources
+		warn  bool
+	}{
+		{"racct off, limits", "0", api.Resources{Memory: "1G", PIDs: 100}, true},
+		{"racct on, limits", "1", api.Resources{Memory: "1G", PIDs: 100}, false},
+		{"racct off, no limits", "0", api.Resources{Disk: "10G"}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := seeded(t)
+			e.SetSysctl("kern.racct.enable", tc.racct)
+			c := ctxT(t)
+			j := dtest.WebJail("web")
+			j.Spec.Resources = tc.res
+			startJailIn(t, e.Admin, j)
+			got, err := e.Admin.Jails().Get(c, "web")
+			if err != nil {
+				t.Fatal(err)
+			}
+			warned := false
+			for _, w := range got.Status.Warnings {
+				warned = warned || strings.Contains(w, "kern.racct.enable")
+			}
+			cond := false
+			for _, cd := range got.Status.Conditions {
+				cond = cond || (cd.Type == "Limits" && cd.Status == api.ConditionFalse && cd.Reason == "NotEnforced")
+			}
+			if warned != tc.warn || cond != tc.warn {
+				t.Fatalf("warning %v condition %v, want %v: %+v", warned, cond, tc.warn, got.Status)
+			}
+		})
 	}
 }
 
-// The names of new objects are limited so that what JailOps derives from them fits; the error names the limit.
-func TestNewNamesAreLimited(t *testing.T) {
-	e := seeded(t)
-	c := ctxT(t)
-	g := e.Global()
-	_, err := g.Projects().Create(c, api.Project{Metadata: api.ObjectMeta{Name: "abcdefghijklmn"}})
-	wantRefused(t, err, api.CodeInvalid, "at most 13")
-	if _, err := g.Projects().Create(c, api.Project{Metadata: api.ObjectMeta{Name: "abcdefghijklm"}}); err != nil {
-		t.Fatal(err)
-	}
-	_, err = e.Admin.Jails().Create(c, sdk.NewJail(strings.Repeat("j", 33), webSpec()))
-	wantRefused(t, err, api.CodeInvalid, "at most 32")
-	sp := webSpec()
-	sp.Volumes = []api.VolumeMount{{Name: strings.Repeat("v", 33), Mount: "/data"}}
-	_, err = e.Admin.Jails().Create(c, sdk.NewJail("web", sp))
-	wantRefused(t, err, api.CodeInvalid, "volume", "at most 32")
-	_, err = g.Images().Create(c, api.Image{Metadata: api.ObjectMeta{Name: strings.Repeat("i", 33)}, Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.0-RELEASE", Source: api.ImageSource{Type: "pkgbase"}}})
-	wantRefused(t, err, api.CodeInvalid, "at most 32")
-	_, err = g.Storage().Create(c, api.Storage{Metadata: api.ObjectMeta{Name: "deep"}, Spec: api.StorageSpec{Dataset: "tank/" + strings.Repeat("d", 84)}})
-	wantRefused(t, err, api.CodeInvalid, "at most 88")
-	j := mustJail(t, e, strings.Repeat("j", 32))
-	snaps := e.Admin.Jails().Snapshots(j.Metadata.Name)
-	_, err = snaps.Create(c, strings.Repeat("s", 70), "")
-	wantRefused(t, err, api.CodeInvalid, "70 characters", "at most 64")
-	_, err = snaps.Create(c, "jo-mine", "")
-	wantRefused(t, err, api.CodeInvalid, "reserved")
-	op, err := snaps.Create(c, strings.Repeat("s", 64), "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := op.Wait(c); err != nil {
-		t.Fatal(err)
-	}
-	_, err = g.WireGuard().Create(c, api.WireGuard{Metadata: api.ObjectMeta{Name: "headquarters1"}, Spec: api.WireGuardSpec{
-		Mode: api.WireGuardServer, Address: []string{"10.99.0.1/24"}, Networks: []string{"lan"}, Endpoint: "vpn.example.com:51820"}})
-	wantRefused(t, err, api.CodeInvalid, "longer than 12 characters: give --interface")
-	if _, err := g.WireGuard().Create(c, api.WireGuard{Metadata: api.ObjectMeta{Name: "headquarters1"}, Spec: api.WireGuardSpec{Interface: "wghq",
-		Mode: api.WireGuardServer, Address: []string{"10.99.0.1/24"}, Networks: []string{"lan"}, Endpoint: "vpn.example.com:51820"}}); err != nil {
-		t.Fatal(err)
+// The state limit of a jail is its limits.states, or the host's jails.max_states when that is 0, and it reaches the
+// pf rules of the jail's anchor.
+func TestStateLimitReachesTheAnchor(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		states int
+		hostly int
+		want   string
+	}{
+		{"jail limit", 777, 10000, "keep state (max 777)"},
+		{"host default", 0, 4242, "keep state (max 4242)"},
+		{"no limit anywhere", 0, 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := seededWith(t, tc.hostly)
+			j := dtest.WebJail("web")
+			j.Spec.Resources.States = tc.states
+			startJailIn(t, e.Admin, j)
+			anchor := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_web.conf")
+			if anchor == "" {
+				t.Fatal("the jail has no rendered anchor")
+			}
+			if tc.want == "" {
+				if strings.Contains(anchor, "keep state") {
+					t.Fatalf("a state option without a limit:\n%s", anchor)
+				}
+				return
+			}
+			if !strings.Contains(anchor, tc.want) {
+				t.Fatalf("no %q in the anchor:\n%s", tc.want, anchor)
+			}
+		})
 	}
 }

@@ -78,8 +78,9 @@ function v4Bytes(s: string): number[] | null {
  * set (the server masks them).
  */
 export function setMember(s: string): boolean {
-  // @name: a jail of the project (its addresses), or another set; the server checks that it exists
-  if (s.startsWith('@')) return /^[a-z][a-z0-9_-]{0,31}$/.test(s.slice(1)) && !s.endsWith('-')
+  // jail:NAME is a jail of the project (its addresses), set:NAME another set; the server checks that a set exists
+  if (s.startsWith('jail:')) return /^[a-z][a-z0-9-]{0,28}$/.test(s.slice(5)) && !s.endsWith('-')
+  if (s.startsWith('set:')) return /^[a-z][a-z0-9_]{0,23}$/.test(s.slice(4))
   const slash = s.lastIndexOf('/')
   const addr = slash < 0 ? s : s.slice(0, slash)
   let bits = 32
@@ -105,7 +106,7 @@ export function setNameError(name: string, taken: string[], msg: SetMsgs): strin
 /**
  * The spec the form sends: members one per line (commas and spaces also separate them). A line
  * that ends in `# a comment` is ONE member with that comment (what it is: what a reviewer of the firewall reads next to
- * `@office` in a rule); an IPv4 and an IPv6 network are two lines, each with its own comment. `comment` is what the set
+ * `set:office` in a rule); an IPv4 and an IPv6 network are two lines, each with its own comment. `comment` is what the set
  * as a whole is.
  */
 export function setSpec(members: string, comment = ''): AddressSetSpec {
@@ -131,9 +132,9 @@ export function setTextOf(spec: AddressSetSpec): string {
 }
 
 /**
- * The problems of a set the server would refuse: a member that is no address, CIDR or @name, or an @name that closes a
- * cycle of sets. `others` are the sets of the project; an empty set is allowed. A member @name that is neither a set
- * nor a jail is the server's to refuse: the console does not list the jails.
+ * The problems of a set the server would refuse: a member that is no address, CIDR, jail:NAME or set:NAME, or a set:NAME
+ * that closes a cycle of sets. `others` are the sets of the project; an empty set is allowed. A member set:NAME that does
+ * not exist is the server's to refuse; a jail:NAME that does not exist is allowed (it matches nobody).
  */
 export function validateSet(name: string, spec: AddressSetSpec, others: Record<string, AddressSetSpec>, msg: SetMsgs): SetErrors {
   const e: SetErrors = {}
@@ -146,8 +147,8 @@ export function validateSet(name: string, spec: AddressSetSpec, others: Record<s
       const s = sets[n]
       if (!s) return '' // a jail, or a name the server checks
       for (const a of s.addresses ?? []) {
-        if (!a.address.startsWith('@')) continue
-        const p = walk(a.address.slice(1), [...path, n])
+        if (!a.address.startsWith('set:')) continue
+        const p = walk(a.address.slice(4), [...path, n])
         if (p) return p
       }
       return ''
@@ -158,10 +159,10 @@ export function validateSet(name: string, spec: AddressSetSpec, others: Record<s
   return e
 }
 
-/** What refers to a set: the policies with @name in a rule and the sets that have @name as a member. The server refuses to
- *  delete a set while either list has entries. */
+/** What refers to a set: the policies with set:NAME in a rule and the sets that have set:NAME as a member. The server refuses
+ *  to delete a set while either list has entries. */
 export function setUsers(name: string, policies: FirewallPolicy[], sets: AddressSet[]): { policies: string[]; sets: string[] } {
-  const ref = '@' + name
+  const ref = 'set:' + name
   return {
     policies: policies.filter((p) => (p.spec.rules ?? []).some((r) => r.from?.includes(ref) || r.to?.includes(ref))).map((p) => p.metadata.name),
     sets: sets.filter((x) => (x.spec.addresses ?? []).some((a) => a.address === ref)).map((x) => x.metadata.name),

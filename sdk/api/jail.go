@@ -64,8 +64,9 @@ type JailSpec struct {
 	// its first start) unless the request or jails.shell of jailopsd.yaml says otherwise.
 	Shell string `json:"shell,omitempty"`
 	// Prompt is the bash prompt of a FreeBSD jail: "default" (DefaultPS1 in the colour of jails.prompt_color),
-	// "none" (no prompt file), or a PS1 text (CheckPrompt). JailOps writes it into PromptFile in the jail's
-	// /usr/local; empty leaves the jail's files alone. A new jail whose shell is bash gets jails.prompt of
+	// "short" (ShortPS1, the same without the tag), "none" (no prompt file; the variables of EnvFile stay), or a PS1
+	// text (CheckPrompt) that may hold the words {jail}, {project} and {host} (ExpandPrompt: they read the variables of
+	// EnvFile). JailOps writes it into PromptFile in the jail's /usr/local; empty leaves the jail's files alone. A new jail whose shell is bash gets jails.prompt of
 	// jailopsd.yaml.
 	Prompt string `json:"prompt,omitempty"`
 	// Provision is a short, repeatable creation step: packages, files,
@@ -82,10 +83,10 @@ type JailSpec struct {
 	Proxy []ProxyDevice `json:"proxy,omitempty"`
 	// Encrypted is reserved: native ZFS encryption of jails is not implemented and creation with it set is refused.
 	Encrypted bool `json:"encrypted,omitempty"`
-	// Delegate asks for the jail's data datasets to be handed to the jail (jailed=on, zfs
-	// allow). It is accepted and rendered into jail.conf (allow.mount.zfs), but the helper does not hand the
-	// datasets over yet. Only a global admin may set it, and a project is not a security boundary for a jail that
-	// has it.
+	// Delegate hands the jail one ZFS dataset of its own, <container>/delegated (jailed=on, zfs.dataset in
+	// jail.conf, allow.mount.zfs): root in the jail can create datasets, snapshots and mounts below it, outside
+	// the rules JailOps applies to the jail's data. Only a global admin may set it, the host's priv.conf must allow it
+	// (admin-zfs-delegation), and a project is not a security boundary for a jail that has it.
 	Delegate bool `json:"zfs_delegation,omitempty"`
 	// SysVIPC gives the jail System V message queues, semaphores and shared memory of its own (sysvmsg, sysvsem
 	// and sysvshm = new in jail.conf): separate from the host's and from every other jail's. Some servers
@@ -145,14 +146,19 @@ const (
 	RebootAuto   UpdateReboot = "auto"
 )
 
-// Resources limits a jail. Enforcement uses jail parameters and rctl.
+// Resources limits a jail. CPU, Memory and PIDs are enforced with rctl rules added when the jail starts (they need
+// kern.racct.enable=1), Disk and DiskReservation are ZFS properties of the jail's container dataset, and States is
+// the limit of pf states each rule of the jail's anchor may create.
 type Resources struct {
-	CPU    int    `json:"cpu,omitempty"`    // cores
-	Memory string `json:"memory,omitempty"` // "2G"
-	Disk   string `json:"disk,omitempty"`   // ZFS quota on the root and data
-	PIDs   int    `json:"pids,omitempty"`
-	// DiskReservation is an optional ZFS reservation for the jail's root.
+	CPU    int    `json:"cpu,omitempty"`    // cores: rctl pcpu, the jail is slowed down to that share
+	Memory string `json:"memory,omitempty"` // "2G": rctl swapuse, the anonymous memory the jail may reserve; an allocation beyond it fails
+	Disk   string `json:"disk,omitempty"`   // ZFS quota of the container: root, persistent datasets, volumes and snapshots
+	PIDs   int    `json:"pids,omitempty"`   // rctl maxproc: fork fails at that many processes
+	// DiskReservation is an optional ZFS reservation of the jail's container.
 	DiskReservation string `json:"disk_reservation,omitempty"`
+	// States is the maximum number of pf states each pass rule of the jail's anchor may create. 0 means the host's
+	// default (jails.max_states of jailopsd.yaml, 10000), which is itself 0 for no limit on a host that sets it so.
+	States int `json:"states,omitempty"`
 }
 
 // NetworkAttach connects a jail to a managed network. Every jail uses VNET;
@@ -164,13 +170,10 @@ type NetworkAttach struct {
 	Network string `json:"network"`
 	// MTU must be the network's MTU when it is set: a bridge gives every port its own MTU. Zero takes the network's.
 	MTU int `json:"mtu,omitempty"`
-	// Ingress and Egress are rate limits in bits per second ("10M", "1G")
-	// for traffic into and out of the jail. UNVERIFIED: enforcement needs a
-	// shaper (dummynet pipes loaded by the root helper); until that is wired
-	// the limit is stored and reported as a condition "RateLimit" with status
-	// False, never as enforced.
-	Ingress string `json:"ingress,omitempty"`
-	Egress  string `json:"egress,omitempty"`
+	// Egress is a rate limit in bits per second ("10M" is 10 Mbit/s, "1G" 1 Gbit/s; decimal units) for what the jail
+	// sends through this device, whoever started the connection. The host enforces it with a dummynet pipe that the
+	// jail's anchor sends the traffic into. Traffic into the jail has no limit: see internal/render/dummynet.go.
+	Egress string `json:"egress,omitempty"`
 	// IPv4 and IPv6 are "auto" (allocate from the network's range), "none",
 	// or a fixed address. The allocation is written back to the spec so it
 	// travels with the jail.

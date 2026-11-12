@@ -27,7 +27,8 @@ function summary(e: ApiEvent): { text: string; source: string; who: string } {
   if (e.type === 'lifecycle') {
     // the object by kind and name, not its API path
     const o = objectOf(String(m.source ?? ''), hostKinds)
-    return { text: sentence(String(m.action ?? '')), source: o ? `${o.kind} ${o.name}` : String(m.source ?? ''), who: String(m.requestor ?? '') }
+    const detail = m.detail ? `: ${String(m.detail)}` : ''
+    return { text: sentence(String(m.action ?? '')) + detail, source: o ? `${o.kind} ${o.name}` : String(m.source ?? ''), who: String(m.requestor ?? '') }
   }
   if (e.type === 'operation') return { text: `${m.description ?? ''} ${m.status ?? ''}`.trim(), source: String(m.id ?? ''), who: '' }
   return { text: String(m.message ?? JSON.stringify(m)), source: '', who: '' }

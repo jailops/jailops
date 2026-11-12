@@ -185,10 +185,14 @@ func endpointMatch(entries []string, f family, def []netip.Addr, in *PFInput) (M
 			return anyMatch(), true
 		case validate.EndpointSet:
 			any = true
-			m.Tables = append(m.Tables, "s_"+strings.ReplaceAll(v, "-", "_"))
-			if members, err := validate.FlattenSet(v, in.Sets); err == nil {
+			m.Tables = append(m.Tables, "s_"+v)
+			if members, err := validate.FlattenSet(v, in.Sets, in.Jails); err == nil {
 				m.Prefixes = append(m.Prefixes, prefixesOf(members)...)
 			}
+		case validate.EndpointJail:
+			any = true
+			m.Tables = append(m.Tables, "j_"+strings.ReplaceAll(v, "-", "_"))
+			m.Prefixes = append(m.Prefixes, prefixesOf(validate.CanonicalAddrs(in.Jails[v]))...)
 		case validate.EndpointTag:
 			any = true
 			m.Tables = append(m.Tables, "t_"+strings.ReplaceAll(v, "-", "_"))

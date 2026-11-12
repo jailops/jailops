@@ -634,7 +634,7 @@ func TestProjectJailAnchorsAndParent(t *testing.T) {
 		t.Fatalf("jail anchor: %q", live)
 	}
 	parent, _ := w.PF.Read(bg, "jailops/web")
-	if !strings.Contains(parent, `anchor "*"`) || !strings.Contains(parent, `nat-anchor "*"`) {
+	if !strings.Contains(parent, `anchor "*"`) || strings.Contains(parent, `nat-anchor`) {
 		t.Fatalf("parent anchor: %q", parent)
 	}
 	// A foreign parent anchor is healed like the jail's own.

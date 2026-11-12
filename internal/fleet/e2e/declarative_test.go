@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"jailops.net/jailops/internal/fleet/fleettest"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -139,4 +140,37 @@ func TestAdoptWarnsAboutHostProfiles(t *testing.T) {
 		Spec: api.JailSpec{Image: "freebsd-15@stable", Storage: "default", Profiles: []string{"small"}}})
 	r := mustOK(t, run(t, e, "adopt", "--host", "h1"))
 	contains(t, r.out, "lists the host's profiles [small]")
+}
+
+// A policy or an address set may name a jail that the same repository declares: jail:NAME is read at every render, so
+// the policy is made before the jail (sets, policies, jails is the order of an apply) and a fresh host takes the whole
+// repository in one apply.
+func TestAPolicyNamesAJailThatIsMadeLater(t *testing.T) {
+	e := fleettest.New(t, "order", "h1")
+	e.StandardObjects()
+	e.Write("projects/"+fleettest.Project+"/firewall-policies/pg.yaml", `apiVersion: jailops/v1
+kind: FirewallPolicy
+metadata:
+  name: pg
+spec:
+  default_in: deny
+  default_out: allow
+  rules:
+    - {name: from-app, action: allow, direction: in, proto: tcp, ports: ["5432"], from: ["jail:app"], comment: the application}
+`)
+	e.Write("projects/"+fleettest.Project+"/address-sets/clients.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: clients\nspec:\n  addresses: [{address: \"jail:app\", comment: the application}]\n")
+	e.Jail("h1", "app", "tier: app", "")
+	r := mustOK(t, run(t, e, "validate"))
+	contains(t, r.out, "ok:")
+	mustOK(t, run(t, e, "sync", "--apply"))
+	c := client(t, e.Hosts["h1"])
+	if p, err := c.Project(fleettest.Project).Firewall().Policies().Get(context.Background(), "pg"); err != nil || p.Spec.Rules[0].From[0] != "jail:app" {
+		t.Fatalf("the policy that names a jail made later is not there: %v %+v", err, p)
+	}
+	if _, err := c.Project(fleettest.Project).Firewall().AddressSets().Get(context.Background(), "clients"); err != nil {
+		t.Fatalf("the set that holds a jail made later is not there: %v", err)
+	}
+	getJailIn(t, e, fleettest.Project, "app")
+	r = mustOK(t, run(t, e, "plan"))
+	contains(t, r.out, "0 create, 0 update, 0 delete")
 }

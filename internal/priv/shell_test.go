@@ -30,7 +30,7 @@ func TestShellSetupThroughTheHelper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	hook, err := render.PromptHookSet("")
+	hook, err := render.PromptHookSet("", true)
 	if err != nil {
 		t.Fatal(err)
 	}

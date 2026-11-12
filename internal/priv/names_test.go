@@ -104,6 +104,7 @@ func newProjectEnv(t *testing.T, project, name string) *hookEnv {
 		t.Fatal(err)
 	}
 	e.runner.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
+	e.runner.Add(run.Rule{Name: "rctl", Args: []string{run.RestArgs}})
 	e.runner.Add(run.Rule{Name: "/sbin/ifconfig", Args: []string{"-j", internal, run.AnyArg, "description", run.AnyArg}})
 	return h
 }
@@ -179,6 +180,7 @@ func TestHookRefusesProjectMismatchAndAmbiguity(t *testing.T) {
 func TestHookFindsAJailInTheSecondRoot(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
+	e.runner.Add(run.Rule{Name: "rctl", Args: []string{run.RestArgs}})
 	mp := e.root("tank/second")
 	if err := e.local.RegisterStorage(WithAdmin(ctx, "a"), "tank/second"); err != nil {
 		t.Fatal(err)

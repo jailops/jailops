@@ -628,7 +628,7 @@ func (a *alpineRun) configSteps() []plan.Step {
 // when a later one fails, and teardown is idempotent.
 func (a *alpineRun) jailUpSteps() []plan.Step {
 	b, m := a.b, a.m
-	n, _, _ := render.LinuxDevfsRuleset(nil)
+	n := render.BuildDevfsRuleset
 	a.ruleset = n
 	root := strings.TrimSuffix(b.Root, "/")
 	mounts := render.LinuxMounts(root, n, 256<<20)

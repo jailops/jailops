@@ -1,8 +1,9 @@
 # The shell of a jail, and its prompt
 
-A new FreeBSD jail comes with **bash** and a coloured prompt, so a shell inside a jail is recognisable at a glance:
+A new FreeBSD jail comes with **bash** and a coloured prompt that says where you are: the jail, its project and the host it
+runs on, so a shell inside a jail is recognisable at a glance:
 
-    root@web:/#            (light blue: 256-colour number 39)
+    root@web [shop/babel]:/#           root@web light blue (256-colour number 39), "[shop/babel]" grey (245)
 
 `jailops shell web` and the console's Console tab start bash; every interactive bash in the jail (root, users you add,
 `su`, ssh logins) shows the prompt. Nothing has to be edited by hand for the common cases, and everything can be
@@ -16,7 +17,7 @@ When the request (and the jail's profiles) do not say otherwise, the daemon fill
 | Key | Default | Meaning |
 |---|---|---|
 | `shell` | `/usr/local/bin/bash` | the shell of `jailops shell` and the console: `bash`, `sh` or a path inside the jail |
-| `prompt` | `default` | the bash prompt of every user: `default`, `none`, or a PS1 text |
+| `prompt` | `default` | the bash prompt of every user: `default`, `short`, `none`, or a PS1 text |
 
 At the jail's **first start** JailOps installs the `bash` package into the jail from the host (`pkg -r ROOT install -y
 bash`, the same command an app installation uses) and writes the prompt. Both live below `/usr/local`, a persistent
@@ -33,24 +34,98 @@ Linux jails are left alone: they keep the shell and prompt of their distribution
 
 | File | Owner | What it does |
 |---|---|---|
+| `/usr/local/etc/profile.d/jailops-env.sh` | JailOps, the same text in every jail | exports `JAILOPS_JAIL`, `JAILOPS_PROJECT` and `JAILOPS_HOST` from the jail's `env` parameters |
 | `/usr/local/etc/profile.d/jailops-prompt.sh` | JailOps, rewritten from the `prompt` key | sets `PS1` in an interactive bash, nothing else |
 | `/usr/local/etc/bash.bashrc` | you; JailOps keeps a marked block at its top | read by every interactive bash that is not a login shell |
 | `/usr/local/etc/profile` | you; JailOps keeps a marked block at its top | read by every login bash (and by `sh -l` through `/etc/profile`) |
 
 The FreeBSD `bash` package installs neither start-up file; it is built with its `SYSBASHRC` option, so bash reads
-`/usr/local/etc/bash.bashrc` and `/usr/local/etc/profile` (not `/etc/profile`). The marked block is three lines:
+`/usr/local/etc/bash.bashrc` and `/usr/local/etc/profile` (not `/etc/profile`). The marked block sources the variables
+first and then the prompt:
 
-    # BEGIN jailops prompt: managed by JailOps (jailops config set JAIL prompt none removes it)
+    # BEGIN jailops shell: managed by JailOps (jailops config set JAIL prompt none keeps the variables and drops the prompt)
+    if [ -r /usr/local/etc/profile.d/jailops-env.sh ]; then . /usr/local/etc/profile.d/jailops-env.sh; fi
     if [ -r /usr/local/etc/profile.d/jailops-prompt.sh ]; then . /usr/local/etc/profile.d/jailops-prompt.sh; fi
-    # END jailops prompt
+    # END jailops shell
+
+With `prompt: none` the prompt file and its line are gone and the variables script stays: the variables are useful without a prompt.
 
 Everything else in those two files is yours and stays as it is. The block is at the top, so your own lines come after it
 and win. A block you cut in half by hand is refused (the operation names the file), never guessed at.
 
 The prompt file sets `PS1` only when bash runs interactively (`PS1` is set): scripts, `bash -c` and `bash -lc` are not
-affected, and `sh` ignores it (it keeps FreeBSD's own prompt from `/root/.shrc`). Verified on FreeBSD 15.2 with bash
-5.3: an interactive bash and an interactive login bash have the prompt, `bash -c` and `bash -lc` have no `PS1`, a login
-`sh` keeps `\u@\h:\w \$ `.
+affected, and `sh` ignores it (it keeps FreeBSD's own prompt from `/root/.shrc`).
+
+## Where the jail is
+
+The default prompt is `user@jail`, then, in a quiet grey, the **project** and the **host** the jail runs on in square
+brackets, then the directory and `#` (root) or `$`:
+
+    root@web [shop/babel]:/usr/local/etc#      a root shell, an ssh login or `jailops shell`
+    ann@web [shop/babel]:~$                    a user
+
+`user@jail` is in the colour of `jails.prompt_color` (39, light blue, unless you change it); the tag is grey (245) and
+the directory has no colour. The jail's host name is not changed: `\h` is the jail's host name, which is the jail's
+name. If the project or the host is not known the tag is `[shop]` or `[babel]`, and without both there is no tag.
+The `short` prompt has no tag: `root@web:/usr/local/etc#`.
+
+The tag is not written into the prompt file. Every interactive bash of the jail has three variables, and the prompt
+reads them each time it is shown:
+
+| Variable | Is |
+|---|---|
+| `JAILOPS_JAIL` | the name of the jail |
+| `JAILOPS_PROJECT` | the project of the jail |
+| `JAILOPS_HOST` | the short name of the host: the first label of its host name, in lower case (`Babel.example.org` is `babel`) |
+
+**Where they come from.** Every start renders three parameters into the jail's `jail.conf`, on the host the jail is
+started on: `env.jailops_jail`, `env.jailops_project` and `env.jailops_host` (a value that is not known has no
+parameter; the values hold only lower-case letters, digits and hyphens). FreeBSD gives a jail its `env` parameters as the
+read-only sysctl `security.jail.env`, lines of `key=value`, which the jail cannot change:
+
+    jls -j web env                       # on the host
+    sysctl -n security.jail.env          # in any shell inside the jail
+    jailops_jail=web
+    jailops_project=shop
+    jailops_host=babel
+
+`jailops-env.sh` reads that sysctl once when a bash starts and exports the three variables. It uses only these three
+keys and only values of the kind above, so another tool that writes the same buffer cannot set anything else. The
+variables are right after a rename (a jail is renamed while it is stopped, and the next start renders the new name) and
+after a jail has moved to another host, and nothing in the jail's files changes for either. A shell that is already open
+keeps its values until the next login. `sh`, scripts, `bash -c` and `ssh host command` do not read the script and do not
+have the variables; they can read the sysctl.
+
+A prompt text of your own may use three words in braces, which become references to the variables:
+
+| Word | Reads |
+|---|---|
+| `{jail}` | `JAILOPS_JAIL` |
+| `{project}` | `JAILOPS_PROJECT` |
+| `{host}` | `JAILOPS_HOST` |
+
+A variable that is not known is empty, and the text around it stays as you wrote it. Any other `{` or `}` is refused, and
+the message names the three words.
+
+    jailops config set web prompt '\u@{jail} [{project}/{host}]:\w\$ '      one jail:  root@web [shop/babel]:/#
+    jailops config set web prompt short                                       no tag:    root@web:/#
+    jailops config set web prompt none                                        no prompt: the variables stay
+
+In your own `~/.bashrc` the variables are ordinary variables, so a prompt of your own can use them in any way:
+
+    PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\] ${JAILOPS_HOST-}/${JAILOPS_PROJECT-}:\w\$ '
+
+If you write a prompt yourself: wrap every colour sequence, including the final reset, in `\[` and `\]` so bash measures
+the line correctly, and end it with a space so what you type does not touch it.
+
+The colour says one thing: the kind of host. Set `prompt_color` once per host, in `jailopsd.yaml`, red for production and
+green for test, and the same text tells hosts apart at a glance. For **every new jail of a host**:
+
+```yaml
+jails:
+  prompt: default      # default, short, none, or a PS1 text
+  prompt_color: 196    # user@jail in red on a production host
+```
 
 ## Overriding it
 
@@ -63,7 +138,8 @@ affected, and `sh` ignores it (it keeps FreeBSD's own prompt from `/root/.shrc`)
 **For one jail:**
 
     jailops config set web prompt '\[\e[38;5;196m\]\u@\h:\w\$\[\e[0m\] '   # red, with a space after # or $
-    jailops config set web prompt none       # remove the prompt file and the two blocks
+    jailops config set web prompt none       # remove the prompt file; the variables stay
+    jailops config set web prompt short      # user@jail:dir without the grey tag
     jailops config set web prompt default    # back to the default
     jailops set web shell sh                 # jailops shell and the console start /bin/sh again
 
@@ -76,8 +152,8 @@ in the jail if it has `pkg`); JailOps does not install it again on its own.
 ```yaml
 jails:
   shell: bash          # or sh: nothing is installed, and the prompt key stays empty
-  prompt: default      # default, none, or a PS1 text
-  prompt_color: 39     # 256-colour number of the default prompt (39 light blue, 40 green, 196 red)
+  prompt: default      # default, short, none, or a PS1 text
+  prompt_color: 39     # 256-colour number of user@jail (39 light blue, 40 green, 196 red)
 ```
 
 A jail whose prompt is `default` takes a changed `prompt_color` at its next start; a jail with a PS1 text of its own
@@ -88,8 +164,8 @@ choose per jail at creation; a profile may set both keys too.
 
 ## Existing jails
 
-A jail created before this version has neither key set, and empty means "leave the files alone": nothing changes on its
-own, not at a start and not at an upgrade. Ask for it:
+A jail whose `shell` and `prompt` keys are empty is left alone: nothing changes on its own, not at a start and not at an
+upgrade. Ask for it:
 
     jailops jail shell-setup web
 
@@ -105,13 +181,12 @@ time it shows the prompt. JailOps therefore accepts an allow-list only (`api.Che
 `jailopsd.yaml`):
 
 - at most 256 bytes of printable UTF-8 on one line;
+- a `{` only as the start of `{jail}`, `{project}` or `{host}` and a `}` only as the end of one (see [Where the jail is](#where-the-jail-is)), or inside `\D{...}`;
 - no `'` and no `` ` ``; a `$` only as the escape `\$` (`#` for root, `$` for everyone else);
 - a backslash only before one of bash's prompt escapes: `\u \h \H \w \W \$ \# \! \j \l \s \t \T \@ \A \d \D{...} \n \r
   \a \e \[ \]` and the octal escapes `\033` (escape) and `\007` (bell); colours are `\[\e[...m\]`;
 - refused, because bash would turn them into a character it then expands: `\\` (a backslash), and every other octal
-  escape (`\044` is a `$`, `\140` a backquote). The tests run the refused forms through a real bash to show that they would
-  run a command, and the accepted ones to show that they do not.
-
+  escape (`\044` is a `$`, `\140` a backquote).
 The accepted text is then written as one single-quoted assignment, `PS1='...'`. A prompt that runs a command (a git
 branch, the exit status) belongs in your own `~/.bashrc`.
 

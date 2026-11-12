@@ -94,6 +94,8 @@ type Reconciler struct {
 	setSysctl map[string]bool
 	// jailSideOK maps a jail to the JID whose jail-side descriptions were found right (checked once per start).
 	jailSideOK map[string]int
+	// pipeRates is the bandwidth this daemon last set on each dummynet pipe of JailOps's range.
+	pipeRates map[int]uint64
 }
 
 // New builds a Reconciler.
@@ -175,6 +177,7 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 		return rep
 	}
 	r.hostPass(ctx, des.Host, &rep)
+	r.pipePass(ctx, des, &rep)
 	obs, err := Observe(ctx, r.env.Net, r.env.Jails)
 	if err != nil {
 		rep.Err = err
@@ -204,6 +207,7 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 	for _, j := range des.Jails {
 		jailConds[j.Name] = r.jailPass(ctx, j, obs, ex, &rep, now)
 	}
+	r.pipeCleanup(ctx, des, &rep) // after the anchors: no anchor names a pipe that goes away
 	r.orphanPass(ctx, des, obs, ex, netStatus, &rep)
 	r.staleRoutePass(ctx, des, obs, ex, &rep)
 	if r.cfg.Autostart && !r.bootDone {

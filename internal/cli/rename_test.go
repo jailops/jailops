@@ -14,7 +14,7 @@ func TestRenameCommands(t *testing.T) {
 	h.seed()
 	h.srv.SeedAddressSet(api.AddressSet{Metadata: api.ObjectMeta{Name: "office", Project: "main"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.0/24")}})
 	h.srv.SeedFirewallPolicy(api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web", Project: "main"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow",
-		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"443"}}}}})
+		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:office"}, Ports: []string{"443"}}}}})
 	tr := h.transcript()
 	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--firewall-policy", "web")
 	tr.ok("jail", "create", "db", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--depends", "web")

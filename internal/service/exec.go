@@ -156,7 +156,7 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 	s.execMu.Lock()
 	if s.installing[key] {
 		s.execMu.Unlock()
-		return nil, api.Errorf(api.CodeBusy, "jail %q is busy: the app is being installed", name).
+		return nil, api.Errorf(api.CodeBusy, "jail %q is busy: packages are being installed or updated", name).
 			WithHint("wait for the installation to end; `jailops op list` shows it")
 	}
 	if s.execN[key] >= lim.PerJail {

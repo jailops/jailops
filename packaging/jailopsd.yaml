@@ -89,8 +89,9 @@ updates:
 # jail. An existing jail gets them only through `jailops jail shell-setup NAME`. Linux jails are left alone.
 jails:
   # shell: bash          # bash, or sh (FreeBSD's own shell; nothing is installed)
-  # prompt: default      # default (user@host:dir in prompt_color), none, or a bash PS1 text
-  # prompt_color: 39     # 256-colour number of the default prompt (39 light blue, 40 green, 196 red)
+  # prompt: default      # default (user@jail [project/host]:dir), short (without the tag), none, or a bash PS1 text
+  # prompt_color: 39     # 256-colour number of user@jail (39 light blue, 40 green, 196 red: one colour per kind of host)
+  # max_states: 10000    # pf states each pass rule of a jail may create when its limits.states is 0 (0: no limit)
 
 # The application catalog (docs/apps.md): one YAML definition per file, installed by the jailops-apps package. The daemon
 # reads these local files only and never fetches anything; a missing directory is an empty catalog. local_dir holds the
@@ -144,6 +145,13 @@ logging:
   #   type: webhook
   #   to: https://hooks.example.com/jailops
   #   token_file: /usr/local/etc/jailops/sinks/hook.token   # the bearer token, first line; never the token itself here
+
+# The kernel's notifications through devd(8): a ZFS error or a pool changing state, the link of the uplink or of a
+# managed bridge, a resource limit a jail hit. They show as events (`jailops events`, the console's Events page) and
+# `jailops doctor` says whether the daemon can read devd's socket (docs/operations.md).
+devd:
+  enable: true                      # the default is on for FreeBSD; false switches it off
+  pipe: /var/run/devd.seqpacket.pipe
 
 # The paths of a thin jail that survive a switch to a newer image generation, each in its own dataset. Empty keeps the
 # built-in list (/etc, /usr/local, /var/db, /var/log, /var/mail, /var/spool, /home, /root). Setting it replaces the list.

@@ -131,20 +131,22 @@ func (s *Server) fakeSource(project, self, src string) (canonical, kind string, 
 			ad := netip.MustParseAddr(x)
 			pf = append(pf, netip.PrefixFrom(ad, ad.BitLen()).String())
 		}
-		return "@" + n, api.AccessSourceJail, pf, []string{"@" + n}, nil
+		return "jail:" + n, api.AccessSourceJail, pf, []string{"jail:" + n}, nil
 	}
 	switch {
 	case src == "host":
 		return "host", api.AccessSourceHost, []string{"10.20.0.1/32"}, []string{"10.20.0.1"}, nil
 	case strings.HasPrefix(src, "@"):
-		rest := src[1:]
+		n := src[1:]
+		return "", "", nil, nil, api.Errorf(api.CodeInvalid, "source %q: @ is not used: write jail:%s or set:%s", src, n, n)
+	case strings.HasPrefix(src, "set:"):
+		rest := src[4:]
 		if set := s.addrsets.items[s.addrsets.keyIn(project, rest)]; set != nil {
-			return "@" + rest, api.AccessSourceSet, set.Spec.Members(), []string{"@" + rest}, nil
+			return "set:" + rest, api.AccessSourceSet, set.Spec.Members(), []string{"set:" + rest}, nil
 		}
-		if s.jails.items[s.jails.keyIn(project, rest)] != nil {
-			return jail(rest)
-		}
-		return "", "", nil, nil, api.Errorf(api.CodeNotFound, "@%s is neither a jail nor an address set of project %s", rest, project)
+		return "", "", nil, nil, api.Errorf(api.CodeNotFound, "address set %q not found in project %s", rest, project)
+	case strings.HasPrefix(src, "jail:"):
+		return jail(src[5:])
 	}
 	if p, err := netip.ParsePrefix(src); err == nil {
 		return p.Masked().String(), api.AccessSourceCIDR, []string{p.Masked().String()}, []string{p.Masked().String()}, nil
@@ -152,7 +154,7 @@ func (s *Server) fakeSource(project, self, src string) (canonical, kind string, 
 	if a, err := netip.ParseAddr(src); err == nil {
 		return a.String(), api.AccessSourceCIDR, []string{netip.PrefixFrom(a, a.BitLen()).String()}, []string{a.String()}, nil
 	}
-	return "", "", nil, nil, api.Errorf(api.CodeInvalid, "source %q is not an address, a prefix, @jail, @address-set or host", src)
+	return "", "", nil, nil, api.Errorf(api.CodeInvalid, "source %q is not an address, a prefix, jail:NAME, set:NAME or host", src)
 }
 
 func fakePassword() string {
@@ -241,7 +243,7 @@ func (s *Server) handleAppAllow(w http.ResponseWriter, r *http.Request) {
 		}
 		if db == "" && kind == api.AccessSourceJail {
 			db = strings.ReplaceAll(canonical[strings.LastIndex(canonical, "/")+1:], "-", "_")
-			db = strings.TrimPrefix(db, "@")
+			db = strings.TrimPrefix(db, "jail:")
 		}
 		if db == "" {
 			writeErr(w, api.Errorf(api.CodeInvalid, "name the database of this grant with --db NAME (a source that is not a jail has no default)"))
@@ -339,9 +341,6 @@ func (s *Server) handleAppDeny(w http.ResponseWriter, r *http.Request) {
 	}
 	project := j.Metadata.Project
 	canonical := req.Source
-	if strings.HasPrefix(canonical, "@"+project+"/") {
-		canonical = "@" + strings.TrimPrefix(canonical, "@"+project+"/")
-	}
 	if p, err := netip.ParsePrefix(canonical); err == nil {
 		canonical = p.Masked().String()
 		if p.Bits() == p.Addr().BitLen() {

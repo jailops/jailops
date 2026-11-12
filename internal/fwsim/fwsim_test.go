@@ -183,15 +183,15 @@ func TestPortRangesAreInclusive(t *testing.T) {
 func TestSetsTagsAndAnyAndTheEmptySet(t *testing.T) {
 	a := anchor(t, func(in *render.PFInput) {
 		in.Sets = map[string]api.AddressSetSpec{
-			"office": {Addresses: api.Entries("203.0.113.0/24", "2001:db8:ffff::/48", "@vpn")},
+			"office": {Addresses: api.Entries("203.0.113.0/24", "2001:db8:ffff::/48", "set:vpn")},
 			"vpn":    {Addresses: api.Entries("198.51.100.7")},
 			"empty":  {},
 		}
 		in.TagMembers = map[string][]netip.Addr{"admin": {peer4}}
 		in.Policies = []render.PFPolicy{{Name: "p", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
-			{Name: "office", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"22"}},
+			{Name: "office", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:office"}, Ports: []string{"22"}},
 			{Name: "admin", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"tag:admin"}, Ports: []string{"2222"}},
-			{Name: "nobody", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@empty"}, Ports: []string{"3333"}},
+			{Name: "nobody", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:empty"}, Ports: []string{"3333"}},
 			{Name: "all", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"any", "10.0.0.1"}, Ports: []string{"80"}},
 		}}}}
 	})

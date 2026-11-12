@@ -57,7 +57,7 @@ export const definitions: App[] = [
     health: { exec: ['/usr/local/bin/pg_isready', '-U', 'postgres'], wait_seconds: 60 },
     resources: { memory: '1G', disk: '10G', cpu: '1' },
     access: { type: 'postgresql', port: 'postgres', service: 'postgresql', hba_file: '/var/db/postgres/data18/pg_hba.conf' },
-    notes: "Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql\nThe jail accepts no connection from outside until you allow one:\njailops app allow NAME from @web makes a role and a database for the jail\nweb, lets its address in and prints the connection string once.\n",
+    notes: "Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql\nThe jail accepts no connection from outside until you allow one:\njailops app allow NAME from jail:web makes a role and a database for the jail\nweb, lets its address in and prints the connection string once.\n",
   },
   {
     version: 1, name: 'valkey', title: 'Valkey', summary: 'In-memory key-value store under the BSD license.',

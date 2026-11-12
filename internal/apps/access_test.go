@@ -20,9 +20,9 @@ func TestParseSource(t *testing.T) {
 		in, kind, name, prefix, canonical string
 	}{
 		{"host", api.AccessSourceHost, "", "", "host"},
-		{"@web", "", "web", "", "@web"},
-		{"@web-1", "", "web-1", "", "@web-1"},
-		{"@office_net", "", "office_net", "", "@office_net"},
+		{"jail:web", api.AccessSourceJail, "web", "", "jail:web"},
+		{"jail:web-1", api.AccessSourceJail, "web-1", "", "jail:web-1"},
+		{"set:office_net", api.AccessSourceSet, "office_net", "", "set:office_net"},
 		{"192.0.2.7", api.AccessSourceCIDR, "", "192.0.2.7/32", "192.0.2.7"},
 		{"192.0.2.9/24", api.AccessSourceCIDR, "", "192.0.2.0/24", "192.0.2.0/24"},
 		{"2001:db8::1", api.AccessSourceCIDR, "", "2001:db8::1/128", "2001:db8::1"},
@@ -44,8 +44,9 @@ func TestParseSource(t *testing.T) {
 			t.Errorf("%q: canonical %q, want %q", c.in, got, c.canonical)
 		}
 	}
-	for _, bad := range []string{"", "any", "@", "@Web", "@web;id", "@a/b/c", "@/web", "@shop/", "@shop/web", "web", "192.0.2.300", "192.0.2.0/33",
-		"fe80::1%em0", "::ffff:192.0.2.1", "@" + strings.Repeat("a", 64), "host ", "$(id)", "@web\n"} {
+	for _, bad := range []string{"", "any", "@", "@web", "@Web", "jail:", "jail:Web", "jail:web;id", "jail:a/b", "jail:shop/web", "jail:web-", "set:web-1", "set:",
+		"set:" + strings.Repeat("a", 25), "jail:" + strings.Repeat("a", 30), "tag:web", "web", "192.0.2.300", "192.0.2.0/33",
+		"fe80::1%em0", "::ffff:192.0.2.1", "host ", "$(id)", "jail:web\n"} {
 		if s, err := ParseSource(bad); err == nil {
 			t.Errorf("%q accepted: %+v", bad, s)
 		}
@@ -86,8 +87,8 @@ var ruleNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$`)
 // source and protocol, and stable.
 func TestAccessRuleNames(t *testing.T) {
 	seen := map[string]string{}
-	for _, src := range []string{"@web", "@office", "192.0.2.7", "192.0.2.0/24", "2001:db8::/48", "host",
-		"@" + strings.Repeat("a", 63), "@" + strings.Repeat("a", 62) + "b", "@" + strings.Repeat("j", 62) + "x"} {
+	for _, src := range []string{"jail:web", "set:web", "set:office", "192.0.2.7", "192.0.2.0/24", "2001:db8::/48", "host",
+		"jail:" + strings.Repeat("a", 29), "jail:" + strings.Repeat("a", 28) + "b", "set:" + strings.Repeat("j", 23) + "x"} {
 		for _, proto := range []string{"tcp", "udp"} {
 			n := AccessRuleName(src, proto)
 			if !ruleNameRE.MatchString(n) {
@@ -99,8 +100,8 @@ func TestAccessRuleNames(t *testing.T) {
 			seen[n] = src + " " + proto
 		}
 	}
-	if AccessRuleName("@web", "tcp") != "access web" || AccessRuleName("@web", "udp") != "access web udp" {
-		t.Fatal(AccessRuleName("@web", "tcp"), AccessRuleName("@web", "udp"))
+	if AccessRuleName("jail:web", "tcp") != "access jail web" || AccessRuleName("jail:web", "udp") != "access jail web udp" {
+		t.Fatal(AccessRuleName("jail:web", "tcp"), AccessRuleName("jail:web", "udp"))
 	}
 	r := api.FirewallRule{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"192.0.2.7", "2001:db8::7"}, Ports: []string{"5432"}}
 	if got := RuleText(r); got != "allow in tcp from 192.0.2.7,2001:db8::7 to port 5432" {

@@ -9,6 +9,8 @@
 #                   them, with or without the -freebsd-<arch> suffix)
 # JAILOPS_E2E_PART   all (default), e2e (everything but the packet filter test) or pf (only the packet filter test)
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
+# The test host needs kern.racct.enable=1 in /boot/loader.conf (a boot tunable: reboot after adding it): the block on resource
+# limits checks the rctl rules, which the kernel accepts only with it.
 # JAILOPS_E2E_APPS   more apps of the catalog to install after nginx, space separated: postgresql, valkey,
 #                   prometheus, forgejo, nsd, mail, isms (default none; CI does not set it). Each one is installed,
 #                   checked in its own way, its logs listed, and stopped. An installed app is closed, so the host is
@@ -90,6 +92,13 @@ check() { # check DESCRIPTION COMMAND...: the command must succeed
 	desc=$1; shift
 	"$@" >"$work/check.out" 2>&1 || { cat "$work/check.out" >&2; fail "$desc"; }
 }
+check_retry() { # check_retry DESCRIPTION COMMAND...: like check, tried for up to 15 s (what the daemon writes after a start lands a moment later)
+	desc=$1; shift; n=0
+	until "$@" >"$work/check.out" 2>&1; do
+		n=$((n + 1)); [ $n -ge 15 ] && { cat "$work/check.out" >&2; fail "$desc"; }
+		sleep 1
+	done
+}
 expect() { # expect DESCRIPTION PATTERN COMMAND...: the output must match
 	desc=$1; pat=$2; shift 2
 	out=$("$@" 2>&1) || { echo "$out" >&2; fail "$desc"; }
@@ -147,6 +156,14 @@ pkg add "$pkgdir/jailops-client-$version.pkg" "$pkgdir/jailops-$version.pkg" "$p
 check "users exist" id jailops
 check "backup user exists" id jailops-backup
 
+step "state of an earlier run: jails, rctl rules and devfs rulesets"
+# a run that failed leaves its jails running, the rctl rules of their limits (the kernel keeps a rule by the jail's name,
+# so it would apply to the jail of the same name in this run) and the devfs rulesets of their devices: remove them
+for j in $(jls -h name 2>/dev/null | grep '^demo_'); do jail -r "$j" >/dev/null 2>&1 || true; done
+for r in $(rctl 2>/dev/null | cut -d: -f1,2 | sort -u | grep '^jail:demo_'); do rctl -r "$r" >/dev/null 2>&1 || true; done
+for s in $(devfs rule showsets 2>/dev/null); do [ "$s" -ge 5000 ] 2>/dev/null && devfs rule -s "$s" delset >/dev/null 2>&1; done
+[ -z "$(jls -h name 2>/dev/null | grep '^demo_')" ] || fail "jails of an earlier run are still running: $(jls -h name | grep '^demo_')"
+
 step "scratch pool and kernel modules"
 zpool destroy -f "$pool" 2>/dev/null || true
 rm -f "$poolfile"
@@ -157,8 +174,6 @@ for m in if_bridge if_epair nullfs pf; do kldload -n $m 2>/dev/null || true; don
 step "PF anchors (the one line of PF setup JailOps asks for)"
 touch /etc/pf.conf
 grep -q 'anchor "jailops/\*"' /etc/pf.conf || cat >> /etc/pf.conf <<'PF'
-nat-anchor "jailops/*"
-rdr-anchor "jailops/*"
 anchor "jailops/*"
 PF
 sysrc pf_enable=YES >/dev/null
@@ -584,12 +599,36 @@ expect "a project name of 14 characters is refused" 'at most 13' sh -c "$J proje
 check "a project quota given as 4GiB" $J project set demo --storage default=4GiB
 expect "ZFS has the quota in bytes" '^4294967296$' zfs get -Hp -o value quota "$pool/jailops/projects/demo"
 check "a jail with --disk 4GiB is created" $J create sizes --project demo --image "$img" --network lan --storage default --disk 4GiB --volume data:/data:2GiB
-expect "its root has the quota in bytes" '^4294967296$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/sizes/root"
+expect "its container has the quota in bytes" '^4294967296$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/sizes"
+expect "its root clone has none" '^(0|none|-)$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/sizes/root"
 expect "its volume too" '^2147483648$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/sizes/data/data"
 check "the jail with sizes starts" $J start sizes --project demo
 check "stop it" $J stop sizes --project demo
 check "delete it" $J delete --confirm-data-loss sizes --project demo
 check "the project quota is taken away again" $J project set demo --storage default
+
+step "resource limits (docs/operations.md): rctl rules, the quota of the container and the pf state limit"
+# kern.racct.enable=1 is a loader tunable: the test host must have it in /boot/loader.conf (doctor fails without it)
+racct=$(sysctl -n kern.racct.enable)
+[ "$racct" = 1 ] || echo "SKIPPED: kern.racct.enable is $racct on this host: the rctl checks of the block below do not run (add it to /boot/loader.conf and reboot)"
+check "a jail with limits is created and started" $J create lim --project demo --image "$img" --network lan --storage default --memory 1G --pids 60 --cpu 1 --disk 512M --start
+expect "the container has the quota in bytes" '^536870912$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/lim"
+expect "the root clone has none" '^(0|none|-)$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/lim/root"
+[ "$racct" != 1 ] || expect_retry "the memory rule is on the running jail" 'jail:demo_lim:swapuse:deny=1073741824' sh -c 'rctl 2>&1'
+[ "$racct" != 1 ] || expect "the process rule is on the running jail" 'jail:demo_lim:maxproc:deny=60' sh -c 'rctl 2>&1'
+[ "$racct" != 1 ] || expect "the CPU rule is on the running jail" 'jail:demo_lim:pcpu:deny=100' sh -c 'rctl 2>&1'
+[ "$racct" != 1 ] || expect "an allocation beyond the memory limit fails" 'out of (memory|space)' sh -c "$J exec --project demo lim -- /usr/bin/awk 'BEGIN{s=\"x\"; for(i=0;i<29;i++) s=s s; print length(s)}' 2>&1 | head -c 300; true"
+[ "$racct" != 1 ] || expect "fork fails beyond the process limit" 'Cannot fork|Resource temporarily unavailable' sh -c "$J exec --project demo lim -- /bin/sh -c 'i=0; while [ \$i -lt 150 ]; do sleep 6 & i=\$((i+1)); done; wait' 2>&1 | head -c 600; true"
+expect "a write beyond the quota fails outside the root clone too" 'quota exceeded' sh -c "$J exec --project demo lim -- /bin/dd if=/dev/random of=/var/db/fill bs=1m count=700 2>&1 | head -c 600; true"
+check "remove the file" $J exec --project demo lim -- /bin/rm -f /var/db/fill
+expect_retry "the default state limit is on the pass rules of the jail's anchor" 'keep state \(max 10000[,)]' pfctl -a jailops/demo/lim -sr
+check "a changed quota applies at once" $J config set lim --project demo limits.disk=1G
+expect "the container has the new quota" '^1073741824$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/lim"
+check "a state limit of the jail" $J config set lim --project demo limits.states=777
+expect_retry "the anchor has the jail's state limit" 'keep state \(max 777[,)]' pfctl -a jailops/demo/lim -sr
+check "stop the jail with limits" $J stop lim --project demo
+[ "$racct" != 1 ] || expect "no rctl rule is left for it" '^0$' sh -c 'rctl 2>&1 | grep -c demo_lim; true'
+check "delete it" $J delete --confirm-data-loss lim --project demo
 expect "ZFS has no quota" '^(0|none|-)$' zfs get -Hp -o value quota "$pool/jailops/projects/demo"
 sysctl net.inet.ip.forwarding=0 >/dev/null
 expect "network create warns when forwarding is off" 'sysctl net.inet.ip.forwarding=1' sh -c "$J network create fwd --ipv4 10.79.0.1/24 --uplink $uplink --nat 2>&1"
@@ -598,14 +637,23 @@ check "delete that network" $J network delete fwd -y
 
 step "the jail's shell and prompt (docs/shell.md): bash and the default prompt, an override, non-interactive commands"
 webroot=$mount/projects/demo/jails/web/root
-ps1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\] ' # DefaultPS1, with the space after it
+# the short name of the host as the daemon writes it into the prompt: the first label, lower case, letters, digits, hyphens
+shorthost=$(hostname | cut -d. -f1 | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-' | sed 's/^-*//; s/-*$//')
+# DefaultPS1: user@jail in the colour, the grey tag [project/host] from the variables the prompt file derives it from, :dir and # or $, a space
+ps1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '
 expect "a new jail's shell is bash" '^/usr/local/bin/bash$' $J config get --project demo web shell
 expect "a new jail's prompt is the default" '^default$' $J config get --project demo web prompt
 check "bash was installed into the jail's /usr/local at its first start" test -x "$webroot/usr/local/bin/bash"
 expect "bash is a package of the jail" '^bash-' pkg -r "$webroot" info bash
-check "the prompt file is JailOps'" grep -F -x "	PS1='$ps1'" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
+check_retry "the prompt file is JailOps'" grep -F -x "	PS1='$ps1'" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
+check_retry "the variables script is JailOps'" grep -F "sysctl -n security.jail.env" "$webroot/usr/local/etc/profile.d/jailops-env.sh"
+check "the variables script holds no name of the project" sh -c '! grep -q demo "$1"' sh "$webroot/usr/local/etc/profile.d/jailops-env.sh"
+# where the jail is comes from the parameters env.jailops_* of its jail.conf: the jail reads them as a sysctl
+expect "the jail knows its project" '^jailops_project=demo$' $J exec --project demo web -- sysctl -n security.jail.env
+expect "the jail knows its name" '^jailops_jail=web$' $J exec --project demo web -- sysctl -n security.jail.env
+expect "the jail knows its host" "^jailops_host=$shorthost\$" $J exec --project demo web -- sysctl -n security.jail.env
 for f in profile bash.bashrc; do
-	expect "/usr/local/etc/$f sources it" '^# BEGIN jailops prompt' head -1 "$webroot/usr/local/etc/$f"
+	expect_retry "/usr/local/etc/$f sources them" '^# BEGIN jailops shell' head -1 "$webroot/usr/local/etc/$f"
 done
 # bash reads /usr/local/etc/bash.bashrc in an interactive shell and /usr/local/etc/profile in a login shell (the
 # package is built with SYSBASHRC); both lead to the prompt file. An interactive bash needs a terminal (without one
@@ -625,13 +673,16 @@ in_pty() { # in_pty JAIL COMMAND...: what COMMAND printed in a pseudo-terminal i
 last_line() { "$@" | tail -n 1; } # a login reads ~/.profile, whose resizewin prints before the command
 same "an interactive bash has the prompt" "PS1=[$ps1]" in_pty web /usr/local/bin/bash -ic 'echo "PS1=[$PS1]"'
 same "an interactive login bash has the prompt" "PS1=[$ps1]" last_line in_pty web /usr/local/bin/bash -lic 'echo "PS1=[$PS1]"'
+same "an interactive bash has the variables" "JAILOPS=[demo web $shorthost]" in_pty web /usr/local/bin/bash -ic 'echo "JAILOPS=[$JAILOPS_PROJECT $JAILOPS_JAIL $JAILOPS_HOST]"'
+same "an interactive login bash has the variables" "JAILOPS=[demo web $shorthost]" last_line in_pty web /usr/local/bin/bash -lic 'echo "JAILOPS=[$JAILOPS_PROJECT $JAILOPS_JAIL $JAILOPS_HOST]"'
 same "a bash script is not affected" "PS1=[unset]" $J exec --project demo web -- /usr/local/bin/bash -c 'echo "PS1=[${PS1-unset}]"'
 same "a login bash running a command is not affected" "PS1=[unset]" $J exec --project demo web -- /usr/local/bin/bash -lc 'echo "PS1=[${PS1-unset}]"'
 same "a login sh keeps FreeBSD's own prompt" 'PS1=[\u@\h:\w \$ ]' last_line in_pty web env HOME=/root sh -lic 'echo "PS1=[$PS1]"'
 # the prompt as a terminal shows it: jailops shell (bash, the jail's shell) in a pseudo-terminal, typed into once bash
 # is up (bash drops what was typed before it set the terminal up)
 (sleep 3; printf 'echo "E2E PATH=$PATH HOME=$HOME"\n'; sleep 2; printf 'exit\n'; sleep 1) | TERM=xterm timeout -s KILL 60 script -q "$work/shell.out" $J shell --project demo web >/dev/null 2>&1 || true
-grep -a -q "$(printf '\033')\[38;5;39mroot@web:/#$(printf '\033')\[0m" "$work/shell.out" || { od -c "$work/shell.out" | head -20 >&2; fail "jailops shell shows the blue prompt"; }
+grep -a -q "$(printf '\033')\[38;5;39mroot@web" "$work/shell.out" || { od -c "$work/shell.out" | head -20 >&2; fail "jailops shell shows the blue prompt"; }
+grep -a -q "$(printf '\033')\[38;5;245m\[demo/$shorthost\]$(printf '\033')\[0m:/#" "$work/shell.out" || { od -c "$work/shell.out" | head -20 >&2; fail "jailops shell shows the project and the host in grey"; }
 grep -a -q "E2E PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin HOME=/root" "$work/shell.out" || { cat -v "$work/shell.out" >&2; fail "a shell session has the PATH of a login and root's HOME"; }
 # a user's own ~/.bashrc wins
 check "a user's own prompt" $J exec --project demo web -- sh -c "echo \"PS1='mine> '\" > /root/.bashrc"
@@ -641,8 +692,11 @@ check "drop the user's own prompt" $J exec --project demo web -- rm /root/.bashr
 check "a red prompt" $J config set --project demo web prompt '\[\e[38;5;196m\]\u@\h:\w\$\[\e[0m\] '
 check "the red prompt is written at once" grep -F -q '38;5;196m' "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
 expect_refused "a prompt that would run a command is refused" $J config set --project demo web prompt '\044(touch /tmp/pwned)'
+check "prompt short" $J config set --project demo web prompt short
+check "short has no tag" grep -F -x "	PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]:\w\\$ '" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
 check "prompt none" $J config set --project demo web prompt none
-if [ -e "$webroot/usr/local/etc/profile.d/jailops-prompt.sh" ] || [ -e "$webroot/usr/local/etc/bash.bashrc" ]; then fail "prompt none left the files"; fi
+if [ -e "$webroot/usr/local/etc/profile.d/jailops-prompt.sh" ]; then fail "prompt none left the prompt file"; fi
+check "prompt none keeps the variables" test -e "$webroot/usr/local/etc/profile.d/jailops-env.sh"
 check "the default prompt again" $J config set --project demo web prompt default
 check "shell-setup on a jail that has everything changes nothing" $J jail shell-setup --project demo web
 expect "the shell setup left no condition" '^$' sh -c "$J jail show --project demo web -o json | grep ShellSetup || true"
@@ -654,6 +708,18 @@ expect "the host end of the jail's epair" 'description: jailops jail=demo/web ne
 expect "the jail end, inside the jail" 'description: jailops jail=demo/web net=lan \(jail side\)' $J exec --project demo web -- ifconfig -a
 expect "doctor finds every description" 'net.descriptions +PASS' $J doctor
 
+step "kernel notifications: the daemon reads devd's socket, and a limit that a jail hit is an event (docs/operations.md)"
+expect_retry "doctor says the daemon reads devd" 'host\.devd +PASS' sh -c "$J doctor 2>&1; true"
+if [ "$(sysctl -n kern.racct.enable 2>/dev/null)" = 1 ]; then
+	# a rule with the action devctl only notifies: the jail web has more than one process, so its next fork matches
+	devd_rule=jail:demo_web:maxproc:devctl=1
+	check "a notify-only rctl rule on the jail web" rctl -a $devd_rule
+	$J exec --project demo web -- sh -c 'sleep 1 & sleep 1 & wait' >/dev/null 2>&1 || true
+	expect_retry "the limit the jail hit is an event" 'jail-limit-hit' sh -c "timeout 4 $J events --project demo --since-id 0 --type lifecycle 2>&1; true"
+	check "the notify-only rule is removed again" rctl -r $devd_rule
+else
+	echo "kern.racct.enable is 0: the event of a limit that a jail hit is not checked" >&2
+fi
 step "a bridge of any free name, and the helper's ownership of interfaces (docs/security-model.md, Interfaces)"
 # the network's name is its bridge's; the bridge carries JailOps's description from its creation
 out=$($J network create office --ipv4 10.66.0.1/24 --uplink "$uplink" --nat 2>&1) || { echo "$out" >&2; fail "network create office"; }
@@ -674,17 +740,17 @@ expect "a jail without a policy says it is open" "Firewall: +open: no firewall p
 check "a policy without --default-in and --default-out" $J firewall policy create nodefaults --project edge --rule 'allow in tcp port 22'
 expect "it denies inbound and allows outbound, written into the policy" 'nodefaults +deny +allow' $J firewall policy list --project edge
 check "delete it" $J firewall policy delete nodefaults --project edge -y
-# a rule names a jail: @edgeweb in an address set of the project, the set in a policy, the policy on another jail
-check "an address set with a jail as a member" $J firewall address-set create git_allow --project edge --address @edgeweb
+# a rule names a jail: jail:edgeweb in an address set of the project, the set in a policy, the policy on another jail
+check "an address set with a jail as a member" $J firewall address-set create git_allow --project edge --address jail:edgeweb
 check "an address with a comment" $J firewall address-set create office_ip --project edge --address 192.0.2.7 --comment "the office"
-check "a policy that names the set" $J firewall policy create git --project edge --default-in deny --default-out allow --comment "the git server of the team" --rule "allow in tcp from @git_allow port 22 comment ssh from the team" --rule "allow in tcp from @edgeweb port 5432 comment the web jail asks for rows"
+check "a policy that names the set" $J firewall policy create git --project edge --default-in deny --default-out allow --comment "the git server of the team" --rule "allow in tcp from set:git_allow port 22 comment ssh from the team" --rule "allow in tcp from jail:edgeweb port 5432 comment the web jail asks for rows"
 check "a second jail" $J create edgedb --project edge --image "$img" --network office --storage default
 check "its policy" $J config set edgedb firewall.policies git --project edge
 check "it starts" $J start edgedb --project edge
 sleep 2
 expect "the anchor of the second jail holds the address of the first one in the table of the set" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t s_git_allow -T show
 expect "the rule comments are in the loaded anchor's source: show says why a rule is there" 'ssh from the team' $J firewall policy show git --project edge
-expect "and in the table of the jail itself" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t s_edgeweb -T show
+expect "and in the table of the jail itself" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t j_edgeweb -T show
 check "delete the second jail" $J delete --force --confirm-data-loss edgedb --project edge
 check "delete the policy that names them" $J firewall policy delete git --project edge -y
 check "delete the set with the jail in it" $J firewall address-set delete git_allow --project edge -y
@@ -911,6 +977,45 @@ else
 	[ ! -e /var/db/jailops-priv/wireguard/office ] || fail "the keys of a deleted tunnel are still there"
 fi
 
+step "ZFS delegation (a dataset of its own for a jail: jailed, attached by jail(8), managed from inside)"
+# The operator allows it in priv.conf (admin-zfs-delegation); the daemon runs as a global administrator here.
+deleg_orig="$work/priv.conf.deleg"
+cp -p /usr/local/etc/jailops/priv.conf "$deleg_orig"
+echo 'admin-zfs-delegation = true' >> /usr/local/etc/jailops/priv.conf
+check "jailops_priv checkconfig with admin-zfs-delegation" service jailops_priv checkconfig
+check "restart jailops_priv" service jailops_priv restart
+check "restart jailopsd" service jailopsd restart
+n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
+dc="$pool/jailops/projects/demo/jails/deleg"
+check "a jail with zfs delegation" $J create deleg --project demo --image "$img" --network lan --storage default --zfs-delegation --start
+dds=$(zfs list -H -o name -r "$pool/jailops/projects/demo/jails/deleg" | grep '/delegated$' | head -n 1)
+[ -n "$dds" ] || fail "the jail has no delegated dataset"
+expect "the delegated dataset is jailed" '^on$' zfs get -H -o value jailed "$dds"
+expect "the host does not mount it" '^no$' zfs get -H -o value mounted "$dds"
+# zfs.dataset is resolved by jail(8) itself (a pseudo-parameter, not a kernel parameter): jls does not know it; the
+# attachment is shown by what the jail's own zfs sees below
+check "the jail's devfs holds /dev/zfs" $J exec --project demo deleg -- test -c /dev/zfs
+expect "the jail's devfs holds no disk node" '^0$' sh -c "$J exec --project demo deleg -- ls /dev | grep -c -E '^(vtbd|ada|da|nvd|nda)[0-9]' || true"
+if $J exec --project demo deleg -- test -x /sbin/zfs; then
+	expect_retry "the jail's zfs sees the dataset" "$dds" $J exec --project demo deleg -- /sbin/zfs list -H -o name
+	check "the jail creates a dataset below it" $J exec --project demo deleg -- /sbin/zfs create "$dds/inner"
+	check "the jail snapshots it" $J exec --project demo deleg -- /sbin/zfs snapshot "$dds/inner@from-the-jail"
+	expect "the host sees what the jail made" "$dds/inner@from-the-jail" zfs list -H -t all -o name -r "$dds"
+else
+	echo "note: the image has no /sbin/zfs; the checks that run zfs inside the jail are skipped" >&2
+fi
+if $J doctor 2>&1 | grep -E ' FAIL .*jail\.delegation'; then fail "doctor fails jail.delegation"; fi
+check "a snapshot of the jail" $J jail snapshot create deleg delegsnap --project demo
+expect "the snapshot took the delegated dataset along" "^$dds@delegsnap\$" zfs list -H -t snapshot -o name "$dds@delegsnap"
+check "stop the jail" $J stop deleg --project demo
+expect "the dataset stays jailed after the stop" '^on$' zfs get -H -o value jailed "$dds"
+check "delete the jail" $J delete --confirm-data-loss deleg --project demo
+if zfs list -H -o name "$dds" >/dev/null 2>&1; then fail "the delegated dataset is still there after the jail was deleted"; fi
+cp -p "$deleg_orig" /usr/local/etc/jailops/priv.conf
+check "restart jailops_priv" service jailops_priv restart
+check "restart jailopsd" service jailopsd restart
+n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
+
 step "an encrypted volume (passphrase from a file, lock, a refused start, a wrong and the right passphrase)"
 # The volume is a ZFS encryption root; its passphrase goes from the file to the daemon and the helper and reaches zfs on
 # standard input. A pool without the encryption feature skips this block and says so.
@@ -948,6 +1053,7 @@ enabled | active)
 	check "rename the stopped jail with the encrypted volume" $J rename vault vault2 --project demo -y
 	expect "the volume moved with it, its key loaded" '^available$' zfs get -H -o value keystatus "$pool/jailops/projects/demo/jails/vault2/data/secrets"
 	check "start it under the new name" $J start vault2 --project demo
+	expect "the renamed jail knows its new name" '^jailops_jail=vault2$' $J exec --project demo vault2 -- sysctl -n security.jail.env
 	expect "the file on the encrypted volume is read back" '^ci-secret$' $J exec --project demo vault2 -- cat /var/db/secrets/s
 	check "stop it" $J stop vault2 --project demo
 	check "and rename it back" $J rename vault2 vault --project demo -y
@@ -978,6 +1084,18 @@ expect "so did the prompt" '38;5;39m' in_pty up /usr/local/bin/bash -ic 'echo "$
 check "root rollback" $J jail rollback up --project demo
 expect "back on the first generation" 'up +running.*#g1' $J jail list --project demo
 check "stop the second jail" $J stop up --project demo
+
+step "devices: a jail given a device mounts a private devfs ruleset that is loaded, and sees no disk"
+upnode=$mount/projects/demo/jails/up/root/dev
+# ruleset 5032 is DevfsRulesetBase (5000) plus the bit of tun (32); a number nobody loaded would show the jail the host's whole /dev
+check "give the second jail a device" $J config set --project demo up devfs.tun.device tun
+check "start the jail that has a device" $J start up --project demo
+check_retry "its private devfs ruleset is in the kernel" sh -c "devfs rule showsets | tr -s ' ' '\n' | grep -qx 5032"
+check "the ruleset holds the device it was given" sh -c "devfs rule -s 5032 show | grep -q 'tun'"
+check_retry "the jail's /dev has no disk node" sh -c "[ \"\$(ls $upnode | grep -c -E '^(vtbd|ada|da|nvd|nda)[0-9]')\" = 0 ]"
+check "the jail's /dev is the jail's, not the host's" sh -c "[ \"\$(ls $upnode | wc -l)\" -lt 30 ] && [ -c $upnode/null ]"
+check "stop the jail again" $J stop up --project demo
+check "take the device away again" $J config unset --project demo up devfs.tun.device
 
 step "automatic upgrade of an image (the nightly run, started by the clock of the daemon)"
 expect "the nightly upgrade is off until it is asked for" 'Nightly: +off' $J image show "$img"
@@ -1054,7 +1172,15 @@ fi
 # one block per app of JAILOPS_E2E_APPS: install, the app's own check, the logs, stop
 app_check() { # app_check NAME ADDRESS
 	case $1 in
-	postgresql) expect "postgresql answers a query" '^1$' $J exec --project demo postgresql -- su -l postgres -c "psql -tA -c 'select 1'" ;;
+	postgresql)
+		expect "postgresql answers a query" '^1$' $J exec --project demo postgresql -- su -l postgres -c "psql -tA -c 'select 1'"
+		# it was installed under the limits its definition hints at (1G, one core) and runs under them
+		[ "$racct" != 1 ] || {
+			expect "the hinted memory limit is on the running jail" 'jail:demo_postgresql:swapuse:deny=1073741824' sh -c 'rctl 2>&1'
+			expect "the hinted CPU limit is on the running jail" 'jail:demo_postgresql:pcpu:deny=100' sh -c 'rctl 2>&1'
+			expect "an allocation far beyond the limit fails in the jail" 'out of (memory|space)' sh -c "$J exec --project demo postgresql -- /usr/bin/awk 'BEGIN{s=\"x\"; for(i=0;i<29;i++) s=s s; print length(s)}' 2>&1 | head -c 300; true"
+			expect "postgresql answers after it" '^1$' $J exec --project demo postgresql -- su -l postgres -c "psql -tA -c 'select 1'"
+		} ;;
 	valkey) expect "valkey answers" '^PONG$' $J exec --project demo valkey -- /usr/local/bin/valkey-cli ping ;;
 	prometheus) expect_retry "prometheus is ready" 'Ready' curl -sS --max-time 5 "http://$2:9090/-/ready" ;;
 	forgejo) expect_retry "forgejo answers (the web installer or a redirect to it)" '^(200|302|303)$' curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "http://$2:3000/" ;;
@@ -1075,7 +1201,7 @@ isms_check() { # isms_check ADDRESS: the steps of the definition's notes with a 
 	[ -n "$db" ] || fail "no address for the isms-db jail"
 	# the role, the database, the pg_hba.conf line, listen_addresses and the firewall rule, in one allow; the
 	# connection string is in its answer only (never printed here: it holds the password)
-	$J app allow isms-db from @isms --db isms --project demo -o json >"$work/isms-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/isms-allow.json" >&2; fail "allow isms to reach isms-db"; }
+	$J app allow isms-db from jail:isms --db isms --project demo -o json >"$work/isms-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/isms-allow.json" >&2; fail "allow isms to reach isms-db"; }
 	url=$(json_field connection_string <"$work/isms-allow.json")
 	rm -f "$work/isms-allow.json"
 	case $url in "postgres://isms:"*"@$db:5432/isms?sslmode=disable") ;; *) fail "app allow printed no connection string for isms" ;; esac
@@ -1101,8 +1227,8 @@ pg_access_check() { # postgresql-access: who may connect to a database, from the
 		check "the library cache of $c" $J exec --project demo "$c" -- /sbin/ldconfig -m /usr/local/lib
 	done
 	expect "a dry run shows the rule, the pg_hba line and the SQL without a password" 'CREATE ROLE "pgc1" LOGIN PASSWORD .<generated' \
-		$J app allow pgacc from @pgc1 --project demo --dry-run
-	$J app allow pgacc from @pgc1 --project demo -o json >"$work/pg-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/pg-allow.json" >&2; fail "allow pgc1 to reach pgacc"; }
+		$J app allow pgacc from jail:pgc1 --project demo --dry-run
+	$J app allow pgacc from jail:pgc1 --project demo -o json >"$work/pg-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/pg-allow.json" >&2; fail "allow pgc1 to reach pgacc"; }
 	url=$(json_field connection_string <"$work/pg-allow.json")
 	rm -f "$work/pg-allow.json"
 	case $url in postgres://pgc1:*@*:5432/pgc1?sslmode=disable) ;; *) fail "app allow printed no connection string for pgc1" ;; esac
@@ -1111,10 +1237,10 @@ pg_access_check() { # postgresql-access: who may connect to a database, from the
 	expect_retry "pgc1 runs a query with the connection string" '^1$' $J exec --project demo pgc1 -- /usr/local/bin/psql "$url" -tAc 'select 1'
 	expect_refused "pgc2 (not allowed) cannot connect" $J exec --project demo pgc2 -- /usr/local/bin/psql "$url" -tAc 'select 1'
 	expect "app access lists the grant with its pg_hba line" 'host pgc1 pgc1 [0-9.]+/32 scram-sha-256' $J app access pgacc --project demo
-	expect "allowing again changes nothing and prints no password" 'may already reach' $J app allow pgacc from @pgc1 --project demo
-	expect "the source of a grant is not deleted: the rule names it" 'jailops app deny pgacc from @pgc1' \
+	expect "allowing again changes nothing and prints no password" 'may already reach' $J app allow pgacc from jail:pgc1 --project demo
+	expect "the source of a grant is not deleted: the rule names it" 'jailops app deny pgacc from jail:pgc1' \
 		sh -c "$J delete --force --confirm-data-loss pgc1 --project demo 2>&1; true"
-	check "deny pgc1" $J app deny pgacc from @pgc1 --project demo
+	check "deny pgc1" $J app deny pgacc from jail:pgc1 --project demo
 	expect_refused_retry "pgc1 cannot connect after the deny" $J exec --project demo pgc1 -- /usr/local/bin/psql "$url" -tAc 'select 1'
 	expect "the grant is gone" 'No grants' $J app access pgacc --project demo
 	url=
@@ -1220,7 +1346,7 @@ check "rename the network while a jail on it runs" $J network rename lan office 
 expect "the bridge keeps its name and carries the new one" 'description: jailops net=office bridge' ifconfig jo7
 expect "the gateway end too" 'description: jailops net=office gateway \(host side\)' ifconfig jo7gb
 expect "the running jail's end, inside it" 'description: jailops jail=demo/web-restored net=office \(jail side\)' $J exec --project demo web-restored -- ifconfig -a
-expect "the anchor of the network is loaded under the new name" 'nat on .* from 10\.77\.0\.0/24' pfctl -a jailops/net.office -sn
+expect "the anchor of the network is loaded under the new name" 'match out on .* inet from 10\.77\.0\.0/24 .*nat-to' pfctl -a jailops/net.office -sr
 expect_refused "the anchor of the old name is empty" sh -c "pfctl -a jailops/net.lan -sn 2>/dev/null | grep -q nat"
 expect "the project's grant follows" 'office' $J project show demo
 expect "the running jail still reaches the host" '1 packets received' $J exec --project demo web-restored -- ping -c1 -t3 10.77.0.1
@@ -1265,6 +1391,14 @@ check "rename the project back" $J project rename e2e-proj demo -y
 check "start the restored jail again" $J start web-restored --project demo
 
 [ "$part" = e2e ] || run_pf
+
+if [ "$part" != pf ]; then
+	step "stop at shutdown: the rc script stops every running jail, a jail before the jails it depends on"
+	check "the shutdown script is installed" test -x /usr/local/etc/rc.d/jailops_shutdown
+	expect "stop-all lists the running jails of every project" 'would stop jail demo/' $J stop-all --dry-run
+	check "the rc script stops the jails (what a host shutdown runs)" service jailops_shutdown onestop
+	expect "no jail runs any more" '^0$' sh -c "jls -n jid 2>/dev/null | wc -l | tr -d ' '"
+fi
 
 step "cleanup"
 $J stop web-restored --project demo >/dev/null 2>&1 || true

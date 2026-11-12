@@ -56,7 +56,7 @@ type accessGrant struct {
 	Source     string `json:"source"`
 	Kind       string `json:"kind"`
 	SourceName string `json:"source_name,omitempty"`
-	// From are the firewall endpoints of the rule (@web and @office stay references, read at every render);
+	// From are the firewall endpoints of the rule (jail:web and set:office stay references, read at every render);
 	// Prefixes are what the client authentication lines name, a copy made when the grant was.
 	From      []string  `json:"from"`
 	Prefixes  []string  `json:"prefixes,omitempty"`
@@ -161,10 +161,9 @@ type resolvedSource struct {
 	prefixes              []netip.Prefix
 }
 
-// resolveSource looks a parsed source up: a bare @name is a jail of the
-// project or an address set of it (a name is never both), host the gateway
-// addresses of the app jail's networks. The firewall rule keeps @name, which
-// is read at every render; prefixes are what pg_hba.conf gets, a copy.
+// resolveSource looks a parsed source up: jail:NAME is a jail of the project, set:NAME an address set of it, host the
+// gateway addresses of the app jail's networks. The firewall rule keeps jail:NAME or set:NAME, which is read at every
+// render; prefixes are what pg_hba.conf gets, a copy.
 func (s *Service) resolveSource(ctx context.Context, t appTarget, src apps.Source) (resolvedSource, error) {
 	proj := t.p.Meta.Name
 	out := resolvedSource{canonical: src.Canonical(), kind: src.Kind}
@@ -185,43 +184,42 @@ func (s *Service) resolveSource(ctx context.Context, t appTarget, src apps.Sourc
 		}
 		out.prefixes = []netip.Prefix{src.Prefix}
 		return out, nil
-	}
-	// a bare @name
-	sets, err := s.allSets(proj)
-	if err != nil {
-		return out, err
-	}
-	if _, ok := sets[src.Name]; ok {
+	case api.AccessSourceSet:
+		sets, err := s.allSets(proj)
+		if err != nil {
+			return out, err
+		}
+		if _, ok := sets[src.Name]; !ok {
+			return out, api.Errorf(api.CodeNotFound, "address set %q not found in project %s", src.Name, proj).
+				WithHint("jailops firewall address-set list shows the names")
+		}
 		prefixes, err := s.setPrefixes(proj, src.Name)
 		if err != nil {
 			return out, err
 		}
-		out.kind, out.name, out.from, out.prefixes = api.AccessSourceSet, src.Name, []string{"@" + src.Name}, prefixes
+		out.name, out.from, out.prefixes = src.Name, []string{"set:" + src.Name}, prefixes
 		return out, nil
 	}
 	key, kerr := validate.QualifiedName(proj, src.Name)
-	if kerr == nil {
-		if _, err := s.jailSnapshot(key); err == nil {
-			if key == t.key {
-				return out, invalid("a jail always reaches itself; name another source")
-			}
-			if len(src.Name) > 29 {
-				return out, invalid("jail %q has a name too long for a rule (more than 29 characters)", src.Name).
-					WithHint("put the jail in an address set (jailops firewall address-set create NAME --address @" + src.Name + ") and allow @NAME")
-			}
-			prefixes, err := s.jailPrefixes(proj, src.Name)
-			if err != nil {
-				return out, err
-			}
-			if len(prefixes) == 0 {
-				return out, invalid("jail %q has no address to allow", src.Name)
-			}
-			out.kind, out.name, out.from, out.prefixes = api.AccessSourceJail, src.Name, []string{"@" + src.Name}, prefixes
-			return out, nil
-		}
+	if kerr != nil {
+		return out, notFound("jail", src.Name)
 	}
-	return out, api.Errorf(api.CodeNotFound, "@%s is neither a jail nor an address set of project %s", src.Name, proj).
-		WithHint("jailops list and jailops firewall address-set list show the names")
+	if _, err := s.jailSnapshot(key); err != nil {
+		return out, api.Errorf(api.CodeNotFound, "jail %q not found in project %s", src.Name, proj).
+			WithHint("jailops list shows the names")
+	}
+	if key == t.key {
+		return out, invalid("a jail always reaches itself; name another source")
+	}
+	prefixes, err := s.jailPrefixes(proj, src.Name)
+	if err != nil {
+		return out, err
+	}
+	if len(prefixes) == 0 {
+		return out, invalid("jail %q has no address to allow", src.Name)
+	}
+	out.name, out.from, out.prefixes = src.Name, []string{"jail:" + src.Name}, prefixes
+	return out, nil
 }
 
 // jailPrefixes are the addresses of a jail of the project as /32 and /128 prefixes.
@@ -243,11 +241,11 @@ func (s *Service) jailPrefixes(project, name string) ([]netip.Prefix, error) {
 
 // setPrefixes are the members of an address set of the project, jails and other sets followed, as prefixes.
 func (s *Service) setPrefixes(project, name string) ([]netip.Prefix, error) {
-	withJails, err := s.allSetsWithJails(project)
+	sets, err := s.allSets(project)
 	if err != nil {
 		return nil, err
 	}
-	members, err := validate.FlattenSet(name, withJails)
+	members, err := validate.FlattenSet(name, sets, s.projectJailAddrs(project))
 	if err != nil {
 		return nil, err
 	}
@@ -344,7 +342,7 @@ func (s *Service) writeAccessPolicy(ctx context.Context, project, jail string, d
 		return true, nil
 	}
 	ks := s.polKind.p(project)
-	sets, err := s.allSetsWithJails(project)
+	sets, err := s.allRefs(project)
 	if err != nil {
 		return false, err
 	}
@@ -929,7 +927,7 @@ func (s *Service) appAccess(ctx context.Context, t appTarget) api.AppAccess {
 	}
 	// the rendered anchor, for the lines each rule became
 	anchor := ""
-	if sets, err := s.allSetsWithJails(proj); err == nil {
+	if sets, err := s.allRefs(proj); err == nil {
 		if b, err := s.buildJail(ctx, t.jail, sets); err == nil {
 			anchor = b.desired.Ruleset
 		}

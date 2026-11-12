@@ -150,6 +150,9 @@ func (a *backupAdapters) Jails(ctx context.Context) ([]hostbackup.JailRecord, er
 			if d.Locked {
 				hd.Skip = hostbackup.SkipLocked
 			}
+			if d.Delegated {
+				hd.Skip = hostbackup.SkipDelegated
+			}
 			rec.Datasets = append(rec.Datasets, hd)
 		}
 		out = append(out, rec)

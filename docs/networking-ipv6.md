@@ -195,6 +195,25 @@ were unaffected; and the PF traffic matrix passed while the proxy ran (design 18
 **UNVERIFIED:** the defence against another host's duplicate address detection (unit tested; it needs a second machine on the segment, and the test hosts have none), the retry of a refused announcement on a live host (unit tested), providers that filter by MAC address or limit neighbor discovery, hundreds of proxied addresses on one
 uplink, MLD-snooping switches, removing and recreating the uplink while the proxy runs.
 
+## Bandwidth limits
+
+A device of a jail can have a rate limit on what the jail sends, in bits per second with decimal units (`10M` is
+10 Mbit/s, `1G` is 1 Gbit/s):
+
+    jailops config set web nic.eth0.egress 10M       # what the jail sends through eth0
+    jailops config unset web nic.eth0.egress         # no limit
+
+`egress` limits everything the jail sends through the device, whoever started the connection: an upload, the answers of
+a server in the jail, a transfer to another jail. The host enforces it with a dummynet pipe that the jail's anchor sends
+the traffic into. The limit is per device: a jail with two devices has a limit for each. Traffic **into** the jail has no
+limit: pf cannot shape it on a bridged jail without stalling the connections (a packet that dummynet holds comes back
+into the IP stack and is routed to the jail's gateway again, where it is held again), so there is no `ingress` key.
+Limit what a jail receives at the machine that sends it.
+
+The kernel module `dummynet` must be loaded (JailOps loads it when a jail has a limit; add `dummynet_load="YES"` to
+`/boot/loader.conf` to have it at boot), and `jailops doctor` fails `kernel.module.dummynet` when a limit exists and the
+module does not.
+
 ## Firewall
 
 PF only, **one anchor per jail** (`jailops/<project>/<jail>`), one per project (`jailops/<project>`, with the project's
@@ -261,18 +280,27 @@ stops when its rule goes.
   its answer; the rule was removed and the ruleset reloaded afterwards.)
 - A rule reads `ACTION DIRECTION [PROTO] [from ENDPOINT,..] [to ENDPOINT,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [disabled] [comment TEXT]`.
   A rule belongs to the jail that has the policy: an inbound rule is always to the jail itself and an outbound rule always from it, so an inbound rule names only `from` and an outbound rule only `to` (`to` on an inbound rule and `from` on an outbound rule are refused).
+  A rule with `rdr HOSTPORT:JAILPORT` is a port forward: a connection to the network's uplink address (or the `listen` address)
+  on HOSTPORT is translated to the jail's address on JAILPORT (`match in on <uplink> … rdr-to`) and passed by a labelled
+  rule on the uplink (`pass in quick on <uplink> … to <jail> port JAILPORT`), which admits what the rule's `from` names,
+  also where the host's own rules block inbound traffic. The state of a connection that came through the forward is ended
+  when the rule is removed or changed.
   An endpoint is one of these, the same words wherever a firewall names a source or a destination:
 
   | Endpoint | Stands for | Where it is accepted |
   |---|---|---|
   | `192.0.2.7`, `192.0.2.0/24`, `2001:db8::/48` | an address or a prefix | rules, address-set members, `app allow` |
-  | `@name` | an address set of the project, or else a jail of the project (its addresses, read at every render, so the rule follows the jail) | rules, address-set members, `app allow` |
+  | `jail:name` | a jail of the project: its addresses, read at every render, so the rule follows the jail; a jail that does not exist matches nobody and `jailops doctor` says so (`firewall.refs`) | rules, address-set members, `app allow`, `firewall test` |
+  | `set:name` | an address set of the project | rules, address-set members, `app allow` |
   | `tag:name` | every jail of the project with that tag | rules only |
-  | `host` | the host itself: the gateway addresses of the app jail's networks | `app allow` only |
+  | `any` | every address | rules only |
+  | `host` | the host itself: the gateway addresses of the app jail's networks | `app allow`, `firewall test` |
 
-  A jail and an address set of one project never have the same name, with `-` read as `_` (`web-1` and `web_1` are one pf
-  table): the second is refused when it is made or renamed. A jail whose name is longer than 29 characters is left out:
-  use an address set for it. `jailops firewall policy create --help` has the grammar.
+  A reference is always `kind:name`; `@` is not used (`@web` is refused with the words to write instead). The kinds are
+  separate namespaces, so a jail and an address set of one project may have the same name; a jail name has at most 29
+  characters, so every jail can be named in a rule. The pf tables are `j_<jail>` (a hyphen read as `_`), `s_<set>` and
+  `t_<tag>`. A set with one address is a perfectly good alias: give it a name and say in its comment what it is.
+  `jailops firewall policy create --help` has the grammar.
 
   **A policy always says its defaults.** `default_in` and `default_out` are required, `allow` or `deny`, on every policy
   (`policy create` without `-f` needs `--default-in` and `--default-out`; a file without them is refused, and so is a
@@ -319,18 +347,18 @@ stops when its rule goes.
       # project shop: the web jail of project blog (10.30.0.5) may reach the database
       jailops firewall address-set create blog --address 10.30.0.5 --comment "the web jail of project blog"
       jailops firewall policy create db --default-in deny --default-out allow \
-        --rule "allow in tcp from @blog port 5432 comment the blog's web jail"
+        --rule "allow in tcp from set:blog port 5432 comment the blog's web jail"
       # project blog: the jail may go out to the database at 10.20.0.10 (the closed default of a project says no otherwise)
       jailops firewall policy create out-db --default-in deny --default-out allow \
         --rule "allow out tcp to 10.20.0.10 port 5432 comment the shop database"
 
       jailops firewall address-set create office --address 192.0.2.0/24 --comment "the office"
-      jailops firewall address-set create git_allow --address 198.51.100.7 --address @web
+      jailops firewall address-set create git_allow --address 198.51.100.7 --address jail:web
       jailops firewall policy create web --default-in deny --default-out allow --comment "the public web server" \
-        --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from @office port 22 comment ssh from the office"
-      jailops firewall policy create db --default-in deny --default-out allow --rule "allow in tcp from @web port 5432 comment the web jail"   # the jail web
+        --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from set:office port 22 comment ssh from the office"
+      jailops firewall policy create db --default-in deny --default-out allow --rule "allow in tcp from jail:web port 5432 comment the web jail"
 
-  A member of an address set is an address, a CIDR, or `@name` (a jail of the project, or another set): a list such as
+  A member of an address set is an address, a CIDR, `jail:name` or `set:name`: a list such as
   `git_allow` can hold jails and be added to later. A jail that a rule or a set names is not renamed or deleted until the reference is changed (the refusal names the policy or the set), so a rule never names a jail that is gone, and a jail made later never takes the place of one.
 
   **Comments are for the review of the firewall.** An address set, each of its entries, a policy and each rule has a
@@ -342,7 +370,7 @@ stops when its rule goes.
         addresses:
           - address: 198.51.100.7
             comment: the office
-          - address: "@web"
+          - address: "jail:web"
             comment: the web jail
 
   `--comment` of `address-set create` goes with a single `--address`; an IPv4 and an IPv6 network of the same office are two
@@ -351,6 +379,11 @@ stops when its rule goes.
   console has a comment field on a set, a policy and every rule, and takes the comment of a member at the end of its line
   (`198.51.100.0/24  # the office`).
 
+**Reviewing a file.** `jailops firewall validate -f FILE --review` adds warnings a reviewer would raise and never changes the
+exit status: a policy, rule, address set or member without a comment, a rule left `disabled`, a very broad rule (allow from
+or to any address with no port), an address set that no rule refers to, a policy that no jail or project uses, and a
+`jail:` that does not exist. Without a server it says what it could not check.
+
 ### Would it pass?
 
 `jailops firewall test` says whether a new connection would pass the firewall, and which rule decides at each anchor it
@@ -358,11 +391,11 @@ meets. It walks the anchors JailOps renders and loads (`render.BuildAnchor`: the
 with what it matches and where it comes from), not a second copy of the policies, so the answer is about the rules as
 they are rendered.
 
-    jailops firewall test --from @web --to @db --port 5432
-    jailops firewall test --from @other --to @db --port 5432
-    jailops firewall test --from 192.0.2.7 --to @web --port 443 -o json
+    jailops firewall test --from jail:web --to jail:db --port 5432
+    jailops firewall test --from jail:other --to jail:db --port 5432
+    jailops firewall test --from 192.0.2.7 --to jail:web --port 443 -o json
 
-An end is a jail of the project (`@web`), one address (the jail that has it, when there is one), or `host` (the host's
+An end is a jail of the project (`jail:web`), one address (the jail that has it, when there is one), or `host` (the host's
 address on the gateway of the other end's network); a set is not an end. What the source jail sends is judged on its own
 port (`in` on its epair); what reaches the destination jail leaves the host on the gateway interface of its network (`out`
 there), because every jail port is private and nothing goes from jail to jail on the bridge. Both hops must pass; each
@@ -371,7 +404,7 @@ the isolation of projects, or the default of the anchor) and the rendered pf lin
 the project, another project's jail included, is an external host: only the other end's anchor is evaluated.
 
 For the example above, with the project policy `default` (deny inbound, ping allowed) and `postgres` on the db jail
-(`allow in tcp from @postgresql_allow port 5432`, the set holding `@web`): `web` to `db` port 5432 passes, port 5433 is
+(`allow in tcp from set:postgresql_allow port 5432`, the set holding `jail:web`): `web` to `db` port 5432 passes, port 5433 is
 blocked by the default of the anchor, and `other` to `db` port 5432 is blocked too; ping from `other` passes by the
 project policy. The exit status is 0 pass, 1 block, 8 unknown. `icmp` and `icmp6` test an echo request unless
 `--icmp-type` names another type, and say so.
@@ -384,7 +417,7 @@ port); and the other jails' anchors on the same gateway interface (only the dest
 When a deny rule decides, the hop lists under `skipped` the allow rules that also match and lost to it (a deny rule wins
 over every allow rule, whatever the order of the policies); a disabled rule that the packet would have met (by direction,
 protocol and port; its addresses are not resolved) is listed there too, as `disabled`. A reference to a
-deleted jail is an empty set that matches nobody; a jail whose name is longer than 29 characters has no `@name` set.
+jail that does not exist is an empty table that matches nobody, and the test says so.
 `loaded_matches_rendered` in the JSON says whether the rule lines loaded in pf for each anchor are the rendered ones
 (`true`, `false`, or `unknown` when pf cannot be asked).
 
@@ -395,3 +428,15 @@ ICMPv6 and router-advertisement frames from inside a jail (`scripts/forge`) and 
 caches unchanged, the victim's traffic keeps flowing, the attacker gains no address, nothing reaches the uplink. The
 exact probe count is not quoted here (it would go stale the next time a probe is added; run the script to see it).
 **Not covered:** Ethernet-level attacks outside what `scripts/forge` sends (see [security-model.md](security-model.md)).
+
+**In the console** the same test is the Test tab of the Firewall page (`/firewall?tab=test`, also `/firewall/test`;
+the extension `firewall_test`, operator in the project). From and To take a jail (`jail:web`, completed from the project's
+jails), one address or `host`; Protocol and Port (or an ICMP type) follow the command; the IP family can be chosen when
+both ends have both. **Run the test** (or Enter) asks; nothing runs while you type. The answer is drawn as a flow, From,
+what the source sends, what reaches the destination, To, each step with an icon and the word PASS, BLOCK or CANNOT SAY,
+the anchor, what decided in words (the policy and the number of the rule with its comment, a project policy, the managed
+policy of an app, the isolation of projects, the default of the anchor), and Details with the rendered pf line and the
+rules passed over (a disabled rule, the allow rules a deny rule won over). The question is kept in the address of the
+page (`from`, `to`, `proto`, `port`, `type`, `family`), so a link asks it again, and the equivalent
+`jailops firewall test` line is under the form with a Copy button. The answer is the server's: the console evaluates
+no rule.

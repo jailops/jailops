@@ -4,7 +4,7 @@ import { getClient } from '@jailops/shared/api/client'
 import { core } from '@jailops/shared/api/core'
 import type {
   Jail, JailAction, JailCreate, JailUnlock, JailPassphraseChange, JailRollback, JailUpgrade, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
-  FirewallPolicy, AddressSet, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
+  FirewallPolicy, AddressSet, FirewallTestRequest, FirewallTestResult, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, Token,
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, ExecRequest,
@@ -147,6 +147,8 @@ export const api = {
     policies: () => c().list<FirewallPolicy>('/firewall/policies'),
     policy: (n: string) => c().getWithEtag<FirewallPolicy>(`/firewall/policies/${e(n)}`),
     addressSets: () => c().list<AddressSet>('/firewall/address-sets'),
+    /** Extension firewall_test: would a new connection pass, and which rule decides (operator in the project; reads only). */
+    test: (b: FirewallTestRequest) => c().mutate<FirewallTestResult>('POST', '/firewall/test', b),
     addressSet: (n: string) => c().getWithEtag<AddressSet>(`/firewall/address-sets/${e(n)}`),
     /** PUT replaces the object; If-Match carries the generation so a concurrent edit is a 412. */
     putPolicy: (p: FirewallPolicy, etag?: string) => c().mutate('PUT', `/firewall/policies/${e(p.metadata.name)}`, p, { etag }),

@@ -69,20 +69,20 @@ test('a running jail says to stop it first instead of opening the dialog', async
 
 test('an address set is renamed and the policy rule that names it follows', async ({ page }) => {
   await open(page, '/firewall?tab=sets')
-  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('@admins')
+  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('set:admins')
   await page.getByTestId('rename-set').click()
   await page.locator('#rn-name').fill('ops-team')
   await expect(page.locator('#rn-name-e')).toHaveText('This name does not follow the rule above.')
   await page.locator('#rn-name').fill('ops_team')
   await expect(page.locator('[data-group="reference"]')).toContainText('firewall policy web-default')
-  await expect(page.locator('[data-group="reference"]')).toContainText('rules[1].from: @admins -> @ops_team')
+  await expect(page.locator('[data-group="reference"]')).toContainText('rules[1].from: set:admins -> set:ops_team')
   await page.getByTestId('rename-go').click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
-  await expect(page.getByTestId('set-list')).toContainText('@ops_team')
-  await expect(page.getByTestId('set-list')).not.toContainText('@admins')
+  await expect(page.getByTestId('set-list')).toContainText('set:ops_team')
+  await expect(page.getByTestId('set-list')).not.toContainText('set:admins')
   await page.locator('[data-tab="policies"]').click()
   await page.getByRole('button', { name: 'web-default' }).click()
-  await expect(page.locator('[data-rule="1"]').getByLabel('From')).toHaveValue('@ops_team')
+  await expect(page.locator('[data-rule="1"]').getByLabel('From')).toHaveValue('set:ops_team')
 })
 
 for (const scheme of ['light', 'dark'] as const) {

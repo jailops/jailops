@@ -210,8 +210,31 @@ Properties worth knowing:
 - Verified on FreeBSD 15.1 arm64 (design 18.11): a read-only mount of a dataset of a second pool showed its files in the jail,
   refused writes, and was gone after the jail stopped; a directory the operator had not listed (`/etc`) was refused.
 
-**Handing a whole dataset to the jail to manage** (`zfs_delegation`: `jailed=on`, `zfs jail`) is accepted by the API (global
-admin only) and rendered into `jail.conf`, but the helper does not hand the dataset over yet. Treat it as planned.
+### Handing a dataset to the jail to manage
+
+A jail can manage a ZFS dataset of its own: root in the jail creates datasets, snapshots and mounts below it with `zfs`
+(a database that keeps its own snapshots, a nested set of volumes). The dataset is `<container>/delegated`, a child of the
+jail's container next to `root` and `data`; it has `jailed=on` and `mountpoint=none`, so the host never mounts it, and
+`jail.conf` names it (`zfs.dataset`) so `jail(8)` attaches it at every start and detaches it at the stop.
+
+    jailops create db --image freebsd-15-1 --zfs-delegation ...
+    jailops config set db zfs.delegation true          # an existing jail; it takes effect at the next start
+
+- **Two consents.** Only a **global administrator** may turn it on (a project user cannot), and the host's `priv.conf`
+  must allow it with `admin-zfs-delegation = true`; without that line the helper refuses the jail's `jail.conf`. The helper
+  sets `jailed` on that one dataset and on nothing else.
+- **What the jail can do.** Everything `zfs` allows inside a jail on that dataset and its children, including setting
+  mountpoints below the jail's root and mounting them. It is **not** under JailOps' mountpoint rules, and the jail also
+  gets `allow.mount`, `allow.mount.zfs` and `enforce_statfs=1`. Do not delegate to a jail you do not trust with that.
+- **Quota.** The jail's disk limit is a quota on the container, so it covers the delegated dataset. A quota set on the
+  dataset itself can only be changed from the host.
+- **Snapshots and rollback** of the jail take the delegated dataset in the same atomic set, and a data rollback restores it
+  (the jail is stopped for it). `jailops jail copy` copies it and hands the copy its own.
+- **Backups leave it out.** A backup reads files from mounted datasets, and the host does not mount this one: the run
+  says `skipped: delegated: ...`. Use `zfs send` of the dataset, or a backup inside the jail.
+- **Turning it off** (`zfs.delegation false`, the jail stopped) clears `jailed` and keeps the data; turning it on again
+  hands the same dataset over. `jailops doctor` (`jail.delegation`) fails when a jail asks for the dataset and it is not
+  jailed, or a dataset is jailed and no jail asks for it.
 
 ## What is backed up
 

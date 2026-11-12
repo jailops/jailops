@@ -18,6 +18,7 @@ import (
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -42,6 +43,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorTLS(ctx, c)
 	s.doctorZFS(ctx, c)
 	s.doctorVolumes(ctx, c)
+	s.doctorDelegation(ctx, c)
 	s.doctorEncryption(ctx, c)
 	s.doctorPF(ctx, c)
 	s.doctorNDPProxy(c)
@@ -56,8 +58,9 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorAppsLocal(c)
 	s.doctorAppsAccess(ctx, c)
 	s.doctorPolicyDefaults(c)
-	s.doctorRateLimits(c)
+	s.doctorJailRefs(c)
 	s.doctorLogForward(c)
+	s.doctorDevd(c)
 	rep := api.DoctorReport{Time: s.now().UTC(), Host: s.d.Hostname, Checks: c.list, Status: api.DoctorOK}
 	rank := map[api.DoctorStatus]int{api.DoctorOK: 0, api.DoctorInfo: 0, api.DoctorUnknown: 1, api.DoctorWarn: 2, api.DoctorFail: 3}
 	for _, ch := range c.list {
@@ -140,7 +143,7 @@ func (s *Service) doctorKernel(ctx context.Context, c *checkSet) {
 	mods := []struct {
 		name     string
 		required bool
-	}{{"if_bridge", true}, {"if_epair", true}, {"pf", true}, {"zfs", true}, {"linux64", needLinux}, {"linprocfs", needLinux}, {"linsysfs", needLinux}, {"fdescfs", needLinux}}
+	}{{"if_bridge", true}, {"if_epair", true}, {"pf", true}, {"zfs", true}, {"linux64", needLinux}, {"linprocfs", needLinux}, {"linsysfs", needLinux}, {"fdescfs", needLinux}, {"dummynet", s.hasShaping()}}
 	for _, m := range mods {
 		ok, avail, _ := s.runOK(ctx, "kldstat", "-q", "-n", m.name)
 		switch {
@@ -200,7 +203,8 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 	}
 	check("net.inet6.ip6.forwarding", "1", v6, "jails reach IPv6 through the host", "")
 	check("net.inet.ip.forwarding", "1", v4, "jails reach IPv4 through the host", "")
-	check("kern.racct.enable", "1", racct, "resource limits use rctl; set it in /boot/loader.conf", "")
+	check("kern.racct.enable", "1", racct, "limits.cpu, limits.memory and limits.pids are enforced with rctl",
+		"add kern.racct.enable=1 to /boot/loader.conf and reboot: the kernel reads it only at boot")
 	check(SysctlOnlinkNS, "1", s.hasProxyNetwork(), "the routers of a shared IPv6 segment probe the host from off-link addresses", onlinkNSHint)
 }
 
@@ -311,23 +315,71 @@ func (s *Service) doctorVolumes(ctx context.Context, c *checkSet) {
 		strings.Join(fixes, "; "))
 }
 
+// doctorDelegation compares zfs_delegation of the jails with the jailed property of their delegated datasets: a jail
+// that asks for the dataset needs it jailed to start, and a jailed dataset of a jail that does not ask for it is
+// neither mounted on the host nor managed by anyone.
+func (s *Service) doctorDelegation(ctx context.Context, c *checkSet) {
+	s.mu.RLock()
+	want := map[string]bool{}
+	for k, e := range s.jails {
+		want[k] = e.jail.Spec.Delegate
+	}
+	s.mu.RUnlock()
+	keys := make([]string, 0, len(want))
+	for k := range want {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var bad []string
+	var fixes []string
+	n := 0
+	for _, k := range keys {
+		ds := s.lcfg.DelegatedDS(k)
+		ok, err := s.d.ZFS.Exists(ctx, ds)
+		if err != nil {
+			continue
+		}
+		jailed := false
+		if ok {
+			v, _ := s.d.ZFS.Get(ctx, ds, "jailed")
+			jailed = v == "on"
+		}
+		switch {
+		case want[k]:
+			n++
+			if !jailed {
+				_, name := validate.SplitQualified(k)
+				bad = append(bad, name)
+				fixes = append(fixes, "jailops config set "+name+" zfs.delegation false; jailops config set "+name+" zfs.delegation true")
+			}
+		case jailed:
+			bad = append(bad, ds)
+			fixes = append(fixes, "zfs set jailed=off "+ds)
+		}
+	}
+	if len(bad) == 0 {
+		if n > 0 {
+			c.add("jail.delegation", api.DoctorOK, fmt.Sprintf("%d jail(s) with a delegated dataset: jailed=on", n), "")
+		}
+		return
+	}
+	c.add("jail.delegation", api.DoctorFail, "the delegated dataset does not match zfs_delegation: "+strings.Join(bad, ", "), strings.Join(fixes, "; "))
+}
+
 func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 	if s.d.Run == nil {
 		c.add("pf.anchors", api.DoctorUnknown, "no command runner", "")
 		return
 	}
-	_, a1, nat := s.runOK(ctx, "pfctl", "-s", "nat")
-	_, a2, rules := s.runOK(ctx, "pfctl", "-s", "rules")
-	if !a1 || !a2 {
+	_, ok, rules := s.runOK(ctx, "pfctl", "-s", "rules")
+	if !ok {
 		c.add("pf.anchors", api.DoctorUnknown, "pfctl is not available here", "")
 		return
 	}
-	hasNat := strings.Contains(nat, `anchor "jailops/*"`)
-	hasFilter := strings.Contains(rules, `anchor "jailops/*"`)
-	if hasNat && hasFilter {
+	if strings.Contains(rules, `anchor "jailops/*"`) {
 		c.add("pf.anchors", api.DoctorOK, "the jailops anchors are in the ruleset", "")
 		if early := quickPassesBeforeAnchor(rules); len(early) > 0 {
-			c.add("pf.order", api.DoctorWarn, "rules of pf.conf that come before the jailops anchor pass traffic for good (quick), so policies cannot filter it: "+strings.Join(early, "; "),
+			c.add("pf.order", api.DoctorWarn, "rules of pf.conf that come before the jailops anchor pass traffic for good (quick), so policies cannot filter it and the NAT and port forwards of the networks do not apply to it: "+strings.Join(early, "; "),
 				`move anchor "jailops/*" above them, or accept that this traffic is not filtered by JailOps`)
 		} else {
 			c.add("pf.order", api.DoctorOK, "no quick pass rule comes before the jailops anchor", "")
@@ -339,7 +391,7 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 				"add `scrub in all fragment reassemble` (and `max-mss` for a tunnel or a smaller MTU) near the top of /etc/pf.conf; see docs/install.md")
 		}
 	} else {
-		c.add("pf.anchors", api.DoctorFail, "the jailops anchor lines are missing from pf.conf", "add to /etc/pf.conf, and reload it with pfctl -f /etc/pf.conf. pf wants the order: nat-anchor and rdr-anchor with the translation rules, before the first block or pass rule; anchor with the filter rules:\n"+render.AnchorLines())
+		c.add("pf.anchors", api.DoctorFail, "the jailops anchor line is missing from pf.conf", "add to /etc/pf.conf, and reload it with pfctl -f /etc/pf.conf. The anchor holds the filter rules and the NAT and port forwards of the jails, so it belongs before any quick rule that should not decide first:\n"+render.AnchorLines())
 	}
 	s.doctorStatePolicy(ctx, c, rules)
 }

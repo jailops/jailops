@@ -43,7 +43,7 @@ func (s *Server) handleFirewallTest(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	end := func(text string) (*api.Jail, netip.Addr, string) {
-		if name, ok := strings.CutPrefix(text, "@"); ok {
+		if name, ok := strings.CutPrefix(text, "jail:"); ok {
 			if j := s.jails.items[s.jails.keyIn(rc.project, name)]; j != nil {
 				var a netip.Addr
 				if len(j.Status.Addresses) > 0 {
@@ -65,12 +65,12 @@ func (s *Server) handleFirewallTest(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, api.Errorf(api.CodeInvalid, "neither end is a jail of this project: there is no anchor of this project to test"))
 		return
 	}
-	if strings.HasPrefix(req.From, "@") && sj == nil {
-		writeErr(w, api.Errorf(api.CodeNotFound, "jail %q not found", strings.TrimPrefix(req.From, "@")))
+	if strings.HasPrefix(req.From, "jail:") && sj == nil {
+		writeErr(w, api.Errorf(api.CodeNotFound, "jail %q not found", strings.TrimPrefix(req.From, "jail:")))
 		return
 	}
-	if strings.HasPrefix(req.To, "@") && dj == nil {
-		writeErr(w, api.Errorf(api.CodeNotFound, "jail %q not found", strings.TrimPrefix(req.To, "@")))
+	if strings.HasPrefix(req.To, "jail:") && dj == nil {
+		writeErr(w, api.Errorf(api.CodeNotFound, "jail %q not found", strings.TrimPrefix(req.To, "jail:")))
 		return
 	}
 	fam := "inet"
@@ -199,7 +199,7 @@ func portsMatch(specs []string, port int) bool {
 	return false
 }
 
-// fakeAddrIn says whether an address is in a from or to list: any, an address or prefix, @set or @jail.
+// fakeAddrIn says whether an address is in a from or to list: any, an address or prefix, set:NAME or jail:NAME.
 func (s *Server) fakeAddrIn(project string, list []string, a netip.Addr) bool {
 	if len(list) == 0 {
 		return true
@@ -208,8 +208,8 @@ func (s *Server) fakeAddrIn(project string, list []string, a netip.Addr) bool {
 		switch {
 		case e == "any":
 			return true
-		case strings.HasPrefix(e, "@"):
-			name := strings.TrimPrefix(e, "@")
+		case strings.HasPrefix(e, "set:"):
+			name := strings.TrimPrefix(e, "set:")
 			if set := s.addrsets.items[s.addrsets.keyIn(project, name)]; set != nil {
 				for _, m := range set.Spec.Addresses {
 					if s.fakeAddrIn(project, []string{m.Address}, a) {
@@ -217,6 +217,8 @@ func (s *Server) fakeAddrIn(project string, list []string, a netip.Addr) bool {
 					}
 				}
 			}
+		case strings.HasPrefix(e, "jail:"):
+			name := strings.TrimPrefix(e, "jail:")
 			if j := s.jails.items[s.jails.keyIn(project, name)]; j != nil {
 				for _, ad := range j.Status.Addresses {
 					if p, err := netip.ParsePrefix(ad); err == nil && p.Addr() == a {

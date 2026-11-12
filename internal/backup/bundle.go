@@ -47,8 +47,8 @@ func setRefs(p api.FirewallPolicySpec) []string {
 	for _, r := range p.Rules {
 		for _, l := range [][]string{r.From, r.To} {
 			for _, a := range l {
-				if strings.HasPrefix(a, "@") {
-					refs = append(refs, a[1:])
+				if n, ok := strings.CutPrefix(a, "set:"); ok {
+					refs = append(refs, n)
 				}
 			}
 		}
@@ -97,11 +97,9 @@ func BuildBundle(spec api.JailSpec, gen api.ImageGeneration, src ObjectSource, s
 			return b, api.Errorf(api.CodeNotFound, "address set %q referenced by the policy does not exist", n)
 		}
 		seen[n] = deepCopy(as)
-		for _, m := range as.Members() { // a member @name is another set, or a jail (not a set)
-			if n, ok := strings.CutPrefix(m, "@"); ok {
-				if _, isSet := src.AddressSet(n); isSet {
-					pending = append(pending, n)
-				}
+		for _, m := range as.Members() { // a member set:NAME is another set; jail:NAME is a jail, not part of the closure
+			if n, ok := strings.CutPrefix(m, "set:"); ok {
+				pending = append(pending, n)
 			}
 		}
 	}

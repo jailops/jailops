@@ -30,7 +30,7 @@ Address set hq
 MEMBER      COMMENT
 192.0.2.9   the office
 
-$ jailops firewall policy create documented --default-in deny --default-out allow --comment the public web server --rule allow in tcp port 80,443 comment the site --rule allow in tcp from @hq port 22 comment ssh from the office
+$ jailops firewall policy create documented --default-in deny --default-out allow --comment the public web server --rule allow in tcp port 80,443 comment the site --rule allow in tcp from set:hq port 22 comment ssh from the office
 firewall policy/documented created
 
 $ jailops firewall policy show documented -o yaml
@@ -59,7 +59,7 @@ spec:
       direction: in
       proto: tcp
       from:
-        - '@hq'
+        - set:hq
       ports:
         - "22"
 
@@ -70,9 +70,9 @@ Firewall policy documented
   Default out:  allow
   Age:          3h
 
-#   RULE                            COMMENT
-1   allow in tcp port 80,443        the site
-2   allow in tcp from @hq port 22   ssh from the office
+#   RULE                               COMMENT
+1   allow in tcp port 80,443           the site
+2   allow in tcp from set:hq port 22   ssh from the office
 
 $ jailops firewall policy create switchable --rule allow in tcp port 80 comment the site --rule allow in tcp port 22 disabled comment ssh, switched off --rule deny in tcp port 23 disabled
 firewall policy/switchable created
@@ -139,7 +139,7 @@ $ jailops firewall address-set create c2 --address 192.0.2.2 --address 192.0.2.3
 ! hint: run 'jailops firewall address-set create --help' for usage
 [exit 2]
 
-$ jailops firewall policy create web --default-in deny --default-out allow --rule allow in tcp port 80,443 --rule allow in tcp from @office port 22 log --rule allow in tcp port 8080 rdr 8080:80
+$ jailops firewall policy create web --default-in deny --default-out allow --rule allow in tcp port 80,443 --rule allow in tcp from set:office port 22 log --rule allow in tcp port 8080 rdr 8080:80
 firewall policy/web created
 
 $ jailops firewall policy create bad --default-in deny --default-out allow --rule allow
@@ -165,10 +165,10 @@ Firewall policy web
   Default out:  allow
   Age:          3h
 
-#   RULE                                    COMMENT
-1   allow in tcp port 80,443                -
-2   allow in tcp from @office port 22 log   -
-3   allow in tcp port 8080 rdr 8080:80      -
+#   RULE                                       COMMENT
+1   allow in tcp port 80,443                   -
+2   allow in tcp from set:office port 22 log   -
+3   allow in tcp port 8080 rdr 8080:80         -
 
 $ jailops firewall address-set list
 NAME     ADDRESSES

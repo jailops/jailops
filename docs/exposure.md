@@ -99,19 +99,19 @@ The daemon is its own ACME client (RFC 8555). It needs:
 
 **The redirect.** With the host firewall module of [appliance.md](appliance.md) managing `/etc/pf.conf`, the daemon adds the
 redirect to the firewall's spec while ACME is the source (`acme` of `GET /api/v1/host/firewall`, filled in by the daemon;
-what a client sends is replaced), and the helper renders it, after the jails' translation anchors (a jail that forwards the
+what a client sends is replaced), and the helper renders it, after the jails' anchor (a jail that forwards the
 same port wins), with a pass rule for the redirected port:
 
-    rdr inet proto tcp from any to (self) port 80 -> 127.0.0.1 port 39080
-    rdr inet6 proto tcp from any to (self) port 80 -> ::1 port 39080
+    match in inet proto tcp from any to (self) port 80 rdr-to 127.0.0.1 port 39080
+    match in inet6 proto tcp from any to (self) port 80 rdr-to ::1 port 39080
     pass in proto tcp from any to { 127.0.0.1, ::1 } port 39080
 
 Apply the host firewall once after turning ACME on (the change waits for its confirmation like every firewall change);
 the certificate's status says `redirect.applied` and `jailops doctor` warns until then. Without the module JailOps never
-edits `pf.conf`: the status and the console print the two lines to add to its translation section, here for http-01:
+edits `pf.conf`: the status and the console print the two lines to add to it, after the line `anchor "jailops/*"`, here for http-01:
 
-    rdr pass inet proto tcp from any to (self) port 80 -> 127.0.0.1 port 39080
-    rdr pass inet6 proto tcp from any to (self) port 80 -> ::1 port 39080
+    pass in quick inet proto tcp from any to (self) port 80 rdr-to 127.0.0.1 port 39080
+    pass in quick inet6 proto tcp from any to (self) port 80 rdr-to ::1 port 39080
 
 The redirect targets the loopback addresses, so the challenge listener (and, with tls-alpn-01, the TLS listener) must
 listen on all addresses or on a loopback address; the configuration is refused otherwise. UNVERIFIED: these rules have

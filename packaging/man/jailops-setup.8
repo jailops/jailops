@@ -36,7 +36,7 @@ Turns IP forwarding on now
 and at boot
 .Pq Va gateway_enable , ipv6_gateway_enable .
 .It
-Puts the three anchor lines of JailOps into
+Puts the anchor line of JailOps into
 .Pa /etc/pf.conf
 (or the file
 .Va pf_rules
@@ -103,7 +103,7 @@ Lines that are in
 .Pa pf.conf
 are never changed, moved or removed.
 What is missing is inserted where pf wants it: options, normalisation,
-translation, filtering.
+filtering.
 .Bl -bullet
 .It
 .Ql set state-policy if-bound ,
@@ -115,21 +115,18 @@ Jails behind NAT need it.
 .Ql scrub in all fragment reassemble ,
 when there is no scrub rule, before the first translation or filter rule.
 .It
-.Ql nat-anchor \&"jailops/*\&"
-and
-.Ql rdr-anchor \&"jailops/*\&" ,
-before the first translation rule, and before the first block or pass rule.
-.It
 .Ql anchor \&"jailops/*\&" ,
 before the first filter rule, so that a broad pass rule of the host does not
 decide for the jails.
+The anchor holds their rules and the NAT and port
+forwards of their networks.
 .El
 .Pp
 A comment that begins with
 .Ql # jailops-setup\&:
 marks each inserted line.
-When the file does not exist, a minimal one is written: the options, the three
-anchor lines and
+When the file does not exist, a minimal one is written: the options, the
+anchor line and
 .Ql pass all ,
 which blocks nothing.
 A file that includes other files is not edited when an anchor line is missing:
@@ -177,7 +174,7 @@ Seconds to wait for the socket of the daemon, default 20.
 .Sh FILES
 .Bl -tag -width Ds -compact
 .It Pa /etc/pf.conf
-The rules of pf, with the anchor lines of JailOps.
+The rules of pf, with the anchor line of JailOps.
 .It Pa /etc/rc.conf
 The variables of the services, forwarding and pf.
 .It Pa /boot/loader.conf

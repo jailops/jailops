@@ -654,7 +654,7 @@ func projectFixture(t *testing.T, e *dtest.Env, s *service.Service) string {
 		t.Fatal(err)
 	}
 	if _, err := s.CreatePolicy(alpha, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow",
-		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@office"}, Ports: []string{"443"}}}}}); err != nil {
+		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:office"}, Ports: []string{"443"}}}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.CreateProfile(alpha, api.Profile{Metadata: api.ObjectMeta{Name: "small"}, Spec: api.ProfileSpec{Config: map[string]string{"firewall.policies": "web"}}}); err != nil {
@@ -831,7 +831,7 @@ func TestRenameFirewallObjectsAndProfiles(t *testing.T) {
 		t.Fatalf("%+v", res)
 	}
 	pol, err := s.GetPolicy(alpha, "web")
-	if err != nil || pol.Spec.Rules[0].From[0] != "@hq" {
+	if err != nil || pol.Spec.Rules[0].From[0] != "set:hq" {
 		t.Fatalf("%+v %v", pol.Spec, err)
 	}
 	_, _, err = s.RenameAddressSet(alpha, "hq", renameOpts("no-dash"))

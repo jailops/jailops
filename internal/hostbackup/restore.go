@@ -452,6 +452,15 @@ func (s *Service) materialize(ctx context.Context, rev *reverter, m materialize)
 		}
 	}
 	cprops[pComplete] = "off"
+	// the disk limit is the quota of the container, not of the root clone
+	delete(cprops, "quota")
+	delete(cprops, "reservation")
+	if q := bundle.Spec.Resources.Disk; q != "" {
+		cprops["quota"] = q
+	}
+	if r := bundle.Spec.Resources.DiskReservation; r != "" {
+		cprops["reservation"] = r
+	}
 	if err := s.zfs.Create(ctx, zfs.CreateOpts{Name: pl.Container, Parents: true, Props: cprops}); err != nil {
 		return gen, fmt.Errorf("creating %s: %w", pl.Container, err)
 	}
@@ -473,9 +482,6 @@ func (s *Service) materialize(ctx context.Context, rev *reverter, m materialize)
 		rprops := baseProps(KindRoot)
 		rprops["mountpoint"], rprops["canmount"] = pl.rootMP(), "on"
 		rprops[pGen], rprops[pImage], rprops[pManifest] = fmt.Sprint(gen.Number), imageName, gen.Manifest
-		if q := bundle.Spec.Resources.Disk; q != "" {
-			rprops["quota"] = q
-		}
 		if err := s.zfs.Clone(ctx, gen.Dataset+"@"+roSnap, pl.root(), rprops, false); err != nil {
 			return gen, fmt.Errorf("cloning the root from %s: %w", gen.Name, err)
 		}

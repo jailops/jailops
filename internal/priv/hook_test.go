@@ -3,7 +3,9 @@ package priv
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -21,10 +23,21 @@ type hookEnv struct {
 	// jailErr, when set, is the stderr of every host-side ifconfig -j and
 	// route -j the hook runs.
 	jailErr string
+	// devfs is the fake kernel's devfs rulesets: the sets that exist and the rules in each, and every devfs command
+	// the hook ran. devfsFail, when set, is the stderr of every `devfs rule -s N add` (the load fails).
+	devfs     map[int][]string
+	devfsCmds []string
+	devfsFail string
+	// devfsKeepsSets makes `delset` fail as the kernel does for a ruleset that a mounted devfs uses.
+	devfsKeepsSets bool
+	// devfsEmptiesSets makes `delset` succeed on the rules but leave the (now empty) set in the kernel.
+	devfsEmptiesSets bool
+	// rctlStderr, when set, is the stderr of every rctl the hook runs (the command fails with it).
+	rctlStderr string
 }
 
 // newHookEnv lays out one jail "web" attached to network "lan" on bridge jo0.
-func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string) *hookEnv {
+func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string, devices ...string) *hookEnv {
 	t.Helper()
 	e := newEnv(t)
 	ctx := context.Background()
@@ -39,6 +52,9 @@ func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string) *hookEnv {
 		t.Fatal(err)
 	}
 	spec := api.JailSpec{Image: "freebsd-15.0@stable", OS: os, Network: []api.NetworkAttach{{Network: "lan", IPv4: ipv4, IPv6: ipv6}}}
+	for _, d := range devices {
+		spec.Devfs = append(spec.Devfs, api.DevfsDevice{Name: d, Device: d})
+	}
 	rec, _ := json.Marshal(map[string]any{"version": 1, "metadata": api.ObjectMeta{Name: "web", Project: "alpha", UUID: hookUUID}, "spec": spec})
 	mustWrite(t, filepath.Join(mp, "spec.json"), string(rec))
 
@@ -59,6 +75,55 @@ func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string) *hookEnv {
 		t.Fatal(err)
 	}
 	e.runner.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
+	e.runner.Add(run.Rule{Name: "rctl", Args: []string{run.RestArgs}, Fn: func(c run.Cmd) (run.Result, error) {
+		if h.rctlStderr != "" {
+			return run.Result{ExitCode: 1, Stderr: []byte(h.rctlStderr)}, &run.ExitError{Name: c.Name, Args: c.Args, Code: 1, Stderr: h.rctlStderr}
+		}
+		return run.Result{}, nil
+	}})
+	h.devfs = map[int][]string{1: nil, 2: nil, 3: nil, 4: nil, 5: nil} // the stock rulesets of a running host
+	for _, bin := range []string{"devfs", "/sbin/devfs"} {
+		bin := bin
+		e.runner.Add(run.Rule{Name: bin, Args: []string{run.RestArgs}, Fn: func(c run.Cmd) (run.Result, error) {
+			line := strings.Join(c.Args, " ")
+			h.devfsCmds = append(h.devfsCmds, line)
+			switch {
+			case line == "rule showsets":
+				var out strings.Builder
+				for n := range h.devfs {
+					fmt.Fprintln(&out, n)
+				}
+				return run.Result{Stdout: []byte(out.String())}, nil
+			case len(c.Args) == 4 && c.Args[3] == "show":
+				n, _ := strconv.Atoi(c.Args[2])
+				var out strings.Builder
+				for i, r := range h.devfs[n] {
+					fmt.Fprintf(&out, "%d %s\n", (i+1)*100, r)
+				}
+				return run.Result{Stdout: []byte(out.String())}, nil
+			case len(c.Args) == 4 && c.Args[3] == "delset":
+				if h.devfsKeepsSets {
+					return run.Result{ExitCode: 1}, &run.ExitError{Name: bin, Args: c.Args, Code: 1, Stderr: "devfs: Device busy"}
+				}
+				if h.devfsEmptiesSets { // a mounted devfs keeps the set alive, but the rules are gone
+					n, _ := strconv.Atoi(c.Args[2])
+					h.devfs[n] = nil
+					return run.Result{}, nil
+				}
+				n, _ := strconv.Atoi(c.Args[2])
+				delete(h.devfs, n)
+				return run.Result{}, nil
+			case len(c.Args) > 4 && c.Args[3] == "add":
+				if h.devfsFail != "" {
+					return run.Result{ExitCode: 1}, &run.ExitError{Name: bin, Args: c.Args, Code: 1, Stderr: h.devfsFail}
+				}
+				n, _ := strconv.Atoi(c.Args[2])
+				h.devfs[n] = append(h.devfs[n], strings.Join(c.Args[4:], " "))
+				return run.Result{}, nil
+			}
+			return run.Result{ExitCode: 1}, &run.ExitError{Name: bin, Args: c.Args, Code: 1, Stderr: "unexpected devfs command"}
+		}})
+	}
 	for _, bin := range []string{"/sbin/ifconfig", "/sbin/route"} {
 		bin := bin
 		e.runner.Add(run.Rule{Name: bin, Args: []string{run.RestArgs}, Fn: func(c run.Cmd) (run.Result, error) {

@@ -30,7 +30,7 @@ func TestCommandRulesAreDocumentedAndFixed(t *testing.T) {
 			t.Errorf("rule %s: timeout %d", r.Name, r.MaxTimeoutSeconds)
 		}
 	}
-	for _, n := range []string{"pkg", "etcupdate", "freebsd-update", "sysctl", "kldstat", "kldload", "pfctl", "uname", "rctl"} {
+	for _, n := range []string{"pkg", "etcupdate", "sysctl", "kldstat", "kldload", "pfctl", "uname", "rctl"} {
 		if !seen[n] {
 			t.Errorf("no rule for %s", n)
 		}
@@ -100,7 +100,7 @@ func TestExtendedCommandRules(t *testing.T) {
 		ok(ctx, "/sbin/kldstat", "kldstat", "-n", m)
 		ok(ctx, "/sbin/kldload", "kldload", m)
 	}
-	if len(KldModules) != 12 {
+	if len(KldModules) != 13 {
 		t.Errorf("module list changed: %v", KldModules)
 	}
 	for _, a := range [][]string{{"-n", "vmm"}, {"-n", "pf.ko"}, {"-n", "../pf"}, {"-n", "/boot/kernel/pf.ko"}, {"-m", "pf"}, {"-v"}, {}, {"-n"}, {"-n", "pf", "zfs"}, {"-q", "-q", "-n", "pf"}, {"-n", "-q", "pf"}, {"-n", "pf\n"}, {"-n", "PF"}} {
@@ -129,6 +129,21 @@ func TestExtendedCommandRules(t *testing.T) {
 		if err == nil {
 			t.Errorf("rctl %q accepted", a)
 		}
+	}
+	// dnctl: the pipes of the bandwidth limits, in JailOps's own range only
+	ok(ctx, "/sbin/dnctl", "dnctl", "pipe", "40000", "config", "bw", "0")
+	ok(ctx, "/sbin/dnctl", "dnctl", "pipe", "59999", "config", "bw", "10000000bit/s")
+	ok(ctx, "/sbin/dnctl", "dnctl", "pipe", "delete", "40001")
+	ok(ctx, "/sbin/dnctl", "dnctl", "pipe", "list")
+	for _, a := range [][]string{
+		{"pipe", "39999", "config", "bw", "10000000bit/s"}, {"pipe", "60000", "config", "bw", "0"}, {"pipe", "1", "config", "bw", "0"},
+		{"pipe", "040000", "config", "bw", "0"}, {"pipe", "-1", "config", "bw", "0"}, {"pipe", "40000", "config", "bw", "10M"},
+		{"pipe", "40000", "config", "bw", "10Mbit/s"}, {"pipe", "40000", "config", "bw", "-5bit/s"}, {"pipe", "40000", "config", "bw", "tun0"},
+		{"pipe", "40000", "config", "delay", "250ms"}, {"pipe", "40000", "config", "bw", "10000bit/s", "queue", "50"},
+		{"pipe", "delete", "1"}, {"pipe", "delete", "all"}, {"pipe", "delete"}, {"pipe", "show"}, {"queue", "40000", "config", "bw", "0"},
+		{"sched", "40000", "config", "type", "wf2q+"}, {"-f", "pipe", "list"}, {"flush"}, {},
+	} {
+		bad(ctx, api.CodeForbidden, append([]string{"dnctl"}, a...)...)
 	}
 	// pfctl: read-only, jailops anchors only
 	ok(ctx, "/sbin/pfctl", "pfctl", "-s", "info")

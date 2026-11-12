@@ -131,6 +131,7 @@ type options struct {
 	adminRoutes   bool
 	wgRoutes      prefixList
 	adminRawPF    bool
+	adminZFSDeleg bool
 	adminResume   bool
 }
 
@@ -176,6 +177,7 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.BoolVar(&o.adminRoutes, "admin-routes", false, "admin may add routes through a gateway")
 	fs.Var(&o.wgRoutes, "wireguard-routes", "network a WireGuard tunnel may route into itself although it is wider than a /8 (/16 for IPv6) or covers the host's addresses, gateway or resolvers (repeatable)")
 	fs.BoolVar(&o.adminRawPF, "admin-raw-pf", false, "admin may load raw pf rulesets")
+	fs.BoolVar(&o.adminZFSDeleg, "admin-zfs-delegation", false, "admin may hand a jail a dataset of its own (zfs_delegation)")
 	fs.BoolVar(&o.adminResume, "admin-resume-send", false, "admin may resume a zfs send from a token")
 	return fs
 }
@@ -224,7 +226,7 @@ func (o *options) privConfig() priv.Config {
 		HostManage: unionModules(o.hostManage, o.applianceModules()), HostDir: o.hostDir,
 		Admin: priv.AdminPolicy{
 			RawJailParams: o.adminRawParam, AllowFlags: o.adminAllow, HostMountRoots: o.adminMounts,
-			ZFSProps: o.adminZFSProp, Routes: o.adminRoutes, RawPF: o.adminRawPF, ResumeSend: o.adminResume,
+			ZFSProps: o.adminZFSProp, Routes: o.adminRoutes, RawPF: o.adminRawPF, ResumeSend: o.adminResume, ZFSDelegation: o.adminZFSDeleg,
 		},
 	}
 	for _, d := range o.adminDevfs {
@@ -686,7 +688,7 @@ func checkConfig(o *options, cfg priv.Config, stdout, stderr io.Writer) int {
 	w("  devfs rulesets:  %v\n", c.Admin.DevfsRulesets)
 	w("  host mounts:     %s\n", strings.Join(c.Admin.HostMountRoots, ", "))
 	w("  zfs properties:  %s\n", strings.Join(c.Admin.ZFSProps, ", "))
-	w("  routes: %v  raw pf: %v  resume send: %v\n", c.Admin.Routes, c.Admin.RawPF, c.Admin.ResumeSend)
+	w("  routes: %v  raw pf: %v  resume send: %v  zfs delegation: %v\n", c.Admin.Routes, c.Admin.RawPF, c.Admin.ResumeSend, c.Admin.ZFSDelegation)
 	w("commands (fixed binaries):\n")
 	for _, r := range priv.CommandRules {
 		w("  %-15s %-26s %s\n", r.Name, r.Binary, r.Reason)

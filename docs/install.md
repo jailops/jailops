@@ -13,7 +13,7 @@ As root, after trusting the package repository (section 2):
     jailops-setup           # -pool NAME when the host has more than one pool
 
 `jailops-setup` does sections 1 and 3 to 6 below, in that order, and only what is not done yet (run it again and
-nothing changes): the kernel modules, the one-time setup of the pool, forwarding, the three anchor lines in
+nothing changes): the kernel modules, the one-time setup of the pool, forwarding, the anchor line in
 `/etc/pf.conf`, the service (`jailopsd` with the web console; it starts the helper), `jailops doctor` and the first
 administrator; it ends with the console's address. Every action is printed on one line before it runs.
 
@@ -66,7 +66,7 @@ When the host's DNS name points at it from the internet, let the daemon obtain a
 it: in the wizard's certificate step or the Host page (Certificates, Request with ACME), give the names, agree to the CA's
 terms, and choose http-01 (port 80) or tls-alpn-01 (port 443). The daemon is not root, so the host redirects that port to
 it: with the firewall module (on with `jailops_appliance`), apply the host firewall once more after turning ACME on and
-JailOps adds the redirect; otherwise add the two `rdr pass` lines the page shows to `/etc/pf.conf`. Clients then trust the
+JailOps adds the redirect; otherwise add the two `pass in quick … rdr-to` lines the page shows to `/etc/pf.conf`, after the line `anchor "jailops/*"`. Clients then trust the
 certificate through their roots and pin nothing. Wildcard names are not possible (no dns-01). Details:
 [exposure.md](exposure.md#acme-a-certificate-from-a-public-ca).
 
@@ -120,23 +120,22 @@ to put it). The packages also install man pages: `man jailops`, `man jailops-jai
 `jailops` and `jailops-sync` (client package), `man jailopsd` and `man jailops-priv` (host package), `man jailops-backupd`
 (backup node package, which installs the completion of `jailops-backupd` too).
 
-## 3. The firewall: three lines in `pf.conf`
+## 3. The firewall: one line in `pf.conf`
 
 JailOps never owns `/etc/pf.conf` (unless you hand it over with the firewall module of [appliance.md](appliance.md)).
 It loads one anchor per jail, per project and per network below `jailops/`, and you
-add three lines **once**. pf insists on an order: the translation anchors belong with the translation rules, before the
-first `block` or `pass` rule, and `anchor` among the filter rules.
+add one line **once**: the anchors hold the filter rules of the jails and the NAT and port forwards of their networks
+(`match … nat-to`, `rdr-to`), so the line belongs among your filter rules, before any `quick` rule that should not
+decide first.
 
-    nat-anchor "jailops/*"
-    rdr-anchor "jailops/*"
-    # ... your own options, scrub and nat rules, then ...
+    # ... your own options and scrub, then ...
     anchor "jailops/*"
     # ... your filter rules
 
 Two things to know about a host that already has a firewall:
 
 - A `quick` pass rule that comes **before** `anchor "jailops/*"` passes its traffic for good, so JailOps's policies
-  cannot filter it. `jailops doctor` warns (`pf.order`) and names such rules. Put the anchor line before broad `quick`
+  cannot filter it and the NAT of a network does not apply to it. `jailops doctor` warns (`pf.order`) and names such rules. Put the anchor line before broad `quick`
   passes.
 - Reload with `pfctl -f /etc/pf.conf` and check it first with `pfctl -nf /etc/pf.conf`. Do **not** use
   `service pf restart` or `pfctl -F states` on a machine you are logged into over ssh: it flushes the states and cuts
@@ -325,7 +324,7 @@ rm -rf /usr/local/etc/jailops /var/db/jailops /var/run/jailops /var/log/jailops 
 `/root`), not on the server: after starting over, `jailops doctor` warns that the project does not exist. Remove the
 `project:` line of the remote there, or choose a new one with `jailops project switch NAME`.
 
-Delete the three anchor lines of section 3 from `/etc/pf.conf` (with the `# jailops-setup:` comments and the
+Delete the anchor line of section 3 from `/etc/pf.conf` (with the `# jailops-setup:` comments and the
 lines below them, if `jailops-setup` added them; its copy of the old file is `/etc/pf.conf.jailops-setup-<date>`) and
 the `jailopsd_*` and `jailops_*` lines from `/etc/rc.conf` if the host keeps nothing of JailOps. The loop above destroyed the bridges and gateway pairs of your networks (they are in the kernel and
 stay until they are destroyed or the host reboots; a running JailOps also removes the ones of a network it does not know). Then start at section 2 (or with `jailops-setup` after `pkg install jailops`). Packages of the base are fetched

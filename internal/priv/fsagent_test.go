@@ -412,21 +412,38 @@ func TestDebootstrapAlwaysChecksTheSignature(t *testing.T) {
 	}
 }
 
-func TestDevfsRulesFileIsChecked(t *testing.T) {
-	n, text, err := render.LinuxDevfsRuleset([]string{"tun", "dri"})
+// Every rule JailOps renders for a jail's devfs ruleset is inside the helper's devfs grammar, and a rule outside it
+// is refused: the hook validates what it runs.
+func TestRenderedDevfsRulesAreInTheHelpersGrammar(t *testing.T) {
+	c := Config{}
+	check := func(rules [][]string) {
+		t.Helper()
+		for _, r := range rules {
+			if err := customDevfs(c, true, r[1:]); err != nil {
+				t.Errorf("%v refused: %v", r, err)
+			}
+		}
+	}
+	_, lin, err := render.LinuxDevfsRuleset([]string{"tun", "dri"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := checkDevfsRulesFile(text); err != nil {
-		t.Fatalf("rendered ruleset %d refused: %v\n%s", n, err, text)
+	check(lin)
+	_, fb, err := render.DevfsRuleset([]string{"tun", "bpf", "pf"})
+	if err != nil {
+		t.Fatal(err)
 	}
-	_, ftext, _ := render.DevfsRuleset([]string{"tun"})
-	if err := checkDevfsRulesFile(ftext); err != nil {
-		t.Fatalf("freebsd ruleset refused: %v\n%s", err, ftext)
-	}
-	for _, bad := range []string{text + "add path 'mem' unhide\n", text + "add path '*' unhide\n", text + "add unhide\n", text + "add path 'tun*' mode 666\n", "[evil=3]\nadd hide\n"} {
-		if err := checkDevfsRulesFile(bad); err == nil {
-			t.Errorf("accepted:\n%s", bad)
+	check(fb)
+	for _, bad := range [][]string{
+		{"rule", "-s", "5001", "add", "path", "mem", "unhide"},
+		{"rule", "-s", "5001", "add", "path", "*", "unhide"},
+		{"rule", "-s", "5001", "add", "unhide"},
+		{"rule", "-s", "4", "add", "hide"},
+		{"rule", "-s", "5001", "delset", "x"},
+		{"rule", "-s", "5001", "add", "path", "../mem", "unhide"},
+	} {
+		if err := customDevfs(c, true, bad); err == nil {
+			t.Errorf("%v accepted", bad)
 		}
 	}
 }

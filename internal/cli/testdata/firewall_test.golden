@@ -28,16 +28,16 @@ App nginx installed as jail web (running)
 Notes:
   Put the site under /usr/local/www.
 
-$ jailops firewall address-set create postgresql_allow --address @web --comment the web jail
+$ jailops firewall address-set create postgresql_allow --address jail:web --comment the web jail
 address set/postgresql_allow created
 
-$ jailops firewall policy create postgres --rule allow in tcp from @postgresql_allow port 5432 comment who may reach PostgreSQL
+$ jailops firewall policy create postgres --rule allow in tcp from set:postgresql_allow port 5432 comment who may reach PostgreSQL
 firewall policy/postgres created
 
 $ jailops config set db firewall.policies postgres
 jail/db configuration updated
 
-$ jailops firewall test --from @web --to @db --port 5432
+$ jailops firewall test --from jail:web --to jail:db --port 5432
 tcp port 5432 10.20.0.11 -> 10.20.0.10 (inet)
   out of web (jailops/main/web, epair in): PASS by the default of the anchor
       pass in quick all (fake default)
@@ -48,7 +48,7 @@ tcp port 5432 10.20.0.11 -> 10.20.0.10 (inet)
 Not covered:
   - the answer is for a new connection: a connection that is already open (pf keeps its state) is not asked about
 
-$ jailops firewall test --from @web --to @db --port 5433
+$ jailops firewall test --from jail:web --to jail:db --port 5433
 tcp port 5433 10.20.0.11 -> 10.20.0.10 (inet)
   out of web (jailops/main/web, epair in): PASS by the default of the anchor
       pass in quick all (fake default)
@@ -60,7 +60,7 @@ Not covered:
   - the answer is for a new connection: a connection that is already open (pf keeps its state) is not asked about
 [exit 1]
 
-$ jailops firewall test --from @web --to @db --proto icmp
+$ jailops firewall test --from jail:web --to jail:db --proto icmp
 icmp echoreq 10.20.0.11 -> 10.20.0.10 (inet)
   out of web (jailops/main/web, epair in): PASS by the default of the anchor
       pass in quick all (fake default)
@@ -73,7 +73,7 @@ Not covered:
   - the answer is for a new connection: a connection that is already open (pf keeps its state) is not asked about
 [exit 1]
 
-$ jailops firewall test --from @web --to @db --port 5432 -o json
+$ jailops firewall test --from jail:web --to jail:db --port 5432 -o json
 {
   "verdict": "pass",
   "cases": [
@@ -120,16 +120,16 @@ $ jailops firewall test --from @web --to @db --port 5432 -o json
   ]
 }
 
-$ jailops firewall test --to @db --port 5432
+$ jailops firewall test --to jail:db --port 5432
 ! usage: --from and --to are required
 ! hint: run 'jailops firewall test --help' for usage
 [exit 2]
 
-$ jailops firewall test --from @web --to @db
+$ jailops firewall test --from jail:web --to jail:db
 ! invalid: a tcp test needs a port from 1 to 65535
 [exit 2]
 
-$ jailops firewall test --from @web --to @nobody --port 5432
+$ jailops firewall test --from jail:web --to jail:nobody --port 5432
 ! not_found: jail "nobody" not found
 ! hint: list them with 'jailops jail list'; check --project, --host and --remote too
 [exit 4]

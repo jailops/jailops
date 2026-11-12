@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -130,6 +131,64 @@ func TestRCDOrdering(t *testing.T) {
 	pkg, _ := os.ReadFile(filepath.Join("..", "..", "scripts", "pkg-build.sh"))
 	if !strings.Contains(string(pkg), `"$pk/rc.d/jailops_revert"`) {
 		t.Error("the package does not install jailops_revert")
+	}
+}
+
+// The shutdown script stops the jails before the daemon and the helper stop: rc stops the scripts in the reverse of
+// the boot order, so a script that requires both is stopped first. It does nothing at boot and is installed with the
+// others; restarting the daemon does not run it.
+func TestRCDShutdownScript(t *testing.T) {
+	dir := filepath.Join("..", "..", "packaging", "rc.d")
+	scripts := map[string]rcHeader{
+		"FILESYSTEMS": {provide: []string{"FILESYSTEMS"}},
+		"NETWORKING":  {provide: []string{"NETWORKING"}},
+		"pf":          {provide: []string{"pf"}},
+		"syslogd":     {provide: []string{"syslogd"}},
+	}
+	for _, n := range []string{"jailops_revert", "jailops_priv", "jailopsd", "jailops_shutdown"} {
+		scripts[n] = readRCHeader(t, filepath.Join(dir, n))
+	}
+	sd := scripts["jailops_shutdown"]
+	if !slices.Equal(sd.provide, []string{"jailops_shutdown"}) || !slices.Contains(sd.require, "jailopsd") || !slices.Contains(sd.require, "jailops_priv") {
+		t.Fatalf("jailops_shutdown: %+v", sd)
+	}
+	order := rcOrder(t, scripts)
+	pos := func(n string) int { return slices.Index(order, n) }
+	// the boot order has it after the daemon and the helper; the shutdown order is the reverse
+	for _, dep := range []string{"jailopsd", "jailops_priv"} {
+		if pos(dep) >= pos("jailops_shutdown") {
+			t.Errorf("%s does not come before jailops_shutdown at boot, so it is not stopped after it at shutdown: %v", dep, order)
+		}
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "jailops_shutdown"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	for _, want := range []string{
+		"# KEYWORD: shutdown", `rcvar="jailops_shutdown_enable"`, `start_cmd=":"`, `stop_cmd="jailops_shutdown_stop"`,
+		"${jailopsd_enable:-NO}", `stop-all`, "timeout ", "return 0", "run_rc_command",
+	} {
+		if !strings.Contains(text, want) {
+			t.Errorf("jailops_shutdown lacks %q", want)
+		}
+	}
+	// the shutdown must go on whatever happens: the command's failure is a warning, the function returns 0
+	if strings.Contains(text, "exit 1") {
+		t.Error("the shutdown script can fail the shutdown")
+	}
+	// the daemon's own script does not run it, so a restart of the daemon never stops a jail
+	if d, _ := os.ReadFile(filepath.Join(dir, "jailopsd")); strings.Contains(string(d), "stop-all") || strings.Contains(string(d), "jailops_shutdown stop") {
+		t.Error("jailopsd stops the jails")
+	}
+	pkg, _ := os.ReadFile(filepath.Join("..", "..", "scripts", "pkg-build.sh"))
+	if !strings.Contains(string(pkg), `"$pk/rc.d/jailops_shutdown"`) {
+		t.Error("the package does not install jailops_shutdown")
+	}
+	if sh, err := exec.LookPath("sh"); err == nil {
+		if out, err := exec.Command(sh, "-n", filepath.Join(dir, "jailops_shutdown")).CombinedOutput(); err != nil {
+			t.Errorf("syntax: %v\n%s", err, out)
+		}
 	}
 }
 

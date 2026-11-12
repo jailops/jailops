@@ -35,7 +35,7 @@ import (
 type shellMark struct {
 	// Pending: the jail was created with a shell or prompt to set up at its first start.
 	Pending bool `json:"pending,omitempty"`
-	// Applied is the prompt last written: the PS1 text, or "none" after the files were removed.
+	// Applied is what the prompt file last said (promptState): the PS1 text, or "none".
 	Applied string `json:"applied,omitempty"`
 	// Error is the latest failure of the setup (empty after a success), At its time.
 	Error string    `json:"error,omitempty"`
@@ -108,6 +108,14 @@ func (s *Service) shellCondition(key string) []api.Condition {
 		Message: m.Error + "; try again with `jailops jail shell-setup " + name + "`, or choose FreeBSD's own shell with `jailops set " + name + " shell sh`"}}
 }
 
+// promptContext is where the jail key is: the jail, its project and the short name of the host. The jail.conf that is
+// rendered for every start carries it as the parameters env.jailops_jail, env.jailops_project and env.jailops_host, so it is the host the
+// jail is started on that is named, whichever host that is.
+func (s *Service) promptContext(key string) api.PromptContext {
+	project, name := validate.SplitQualified(key)
+	return api.PromptContext{Jail: name, Project: project, Host: api.ShortHost(s.d.Hostname)}
+}
+
 func (s *Service) promptColor() int {
 	if c := s.d.JailPromptColor; c > 0 && c < 256 {
 		return c
@@ -135,7 +143,7 @@ func (s *Service) shellDefaults(spec *api.JailSpec, profs []api.Profile) bool {
 }
 
 // promptState is what the prompt key means for the files: the PS1 text, "none", or "" (leave them alone).
-func (s *Service) promptState(eff api.JailSpec) string {
+func (s *Service) promptState(key string, eff api.JailSpec) string {
 	switch eff.Prompt {
 	case "":
 		return ""
@@ -149,62 +157,47 @@ func notExist(err error) bool {
 	return errors.Is(err, os.ErrNotExist) || api.IsCode(err, api.CodeNotFound)
 }
 
-// applyPrompt writes the prompt a state stands for into the jail root: the prompt file and the block at the top of
-// the two start-up files, or, for none, removes both. It returns what it did.
-func (s *Service) applyPrompt(ctx context.Context, key, state string) ([]string, error) {
+// applyPrompt writes what the files of the jail key stand for into the jail root: the variables script (the same text
+// in every jail), the prompt file (unless the prompt is none, which removes it and keeps the variables) and the block
+// at the top of the two start-up files that sources them. ps1 is promptState. It returns what it did.
+func (s *Service) applyPrompt(ctx context.Context, key, ps1 string) ([]string, error) {
 	root := s.rootMount(key)
 	f := s.d.Files
 	var steps []string
-	if state == api.PromptNone {
-		if ok, _ := f.Exists(ctx, root+api.PromptFile); ok {
-			if err := f.RemoveAll(ctx, root+api.PromptFile); err != nil {
-				return steps, fmt.Errorf("remove %s: %w", api.PromptFile, err)
-			}
-			steps = append(steps, "removed "+api.PromptFile)
+	write := func(path, body string) error {
+		if cur, err := f.ReadFile(ctx, root+path); err == nil && string(cur) == body {
+			return nil
 		}
-		for _, p := range []string{api.ProfilePath, api.BashrcPath} {
-			cur, err := f.ReadFile(ctx, root+p)
-			if notExist(err) {
-				continue
-			}
-			if err != nil {
-				return steps, fmt.Errorf("read %s: %w", p, err)
-			}
-			rest, found, err := render.PromptHookRemove(string(cur))
-			if err != nil {
-				return steps, fmt.Errorf("%s: %w", p, err)
-			}
-			if !found {
-				continue
-			}
-			if strings.TrimSpace(rest) == "" {
-				err = f.RemoveAll(ctx, root+p)
-			} else {
-				err = f.WriteAtomic(ctx, root+p, []byte(rest))
-			}
-			if err != nil {
-				return steps, fmt.Errorf("write %s: %w", p, err)
-			}
-			steps = append(steps, "removed the jailops block of "+p)
+		if err := f.WriteAtomic(ctx, root+path, []byte(body)); err != nil {
+			return fmt.Errorf("write %s: %w", path, err)
 		}
-		return steps, nil
+		steps = append(steps, "wrote "+path)
+		return nil
 	}
-	body, err := render.PromptFile(state)
-	if err != nil {
+	if err := write(api.EnvFile, render.EnvScript()); err != nil {
 		return steps, err
 	}
-	if cur, err := f.ReadFile(ctx, root+api.PromptFile); err != nil || string(cur) != body {
-		if err := f.WriteAtomic(ctx, root+api.PromptFile, []byte(body)); err != nil {
-			return steps, fmt.Errorf("write %s: %w", api.PromptFile, err)
+	withPrompt := ps1 != api.PromptNone
+	if withPrompt {
+		body, err := render.PromptFile(ps1)
+		if err != nil {
+			return steps, err
 		}
-		steps = append(steps, "wrote "+api.PromptFile)
+		if err := write(api.PromptFile, body); err != nil {
+			return steps, err
+		}
+	} else if ok, _ := f.Exists(ctx, root+api.PromptFile); ok {
+		if err := f.RemoveAll(ctx, root+api.PromptFile); err != nil {
+			return steps, fmt.Errorf("remove %s: %w", api.PromptFile, err)
+		}
+		steps = append(steps, "removed "+api.PromptFile)
 	}
 	for _, p := range []string{api.ProfilePath, api.BashrcPath} {
 		cur, err := f.ReadFile(ctx, root+p)
 		if err != nil && !notExist(err) {
 			return steps, fmt.Errorf("read %s: %w", p, err)
 		}
-		next, err := render.PromptHookSet(string(cur))
+		next, err := render.PromptHookSet(string(cur), withPrompt)
 		if err != nil {
 			return steps, fmt.Errorf("%s: %w", p, err)
 		}
@@ -217,9 +210,28 @@ func (s *Service) applyPrompt(ctx context.Context, key, state string) ([]string,
 		steps = append(steps, "put the jailops block at the top of "+p)
 	}
 	if len(steps) == 0 {
-		steps = append(steps, "the prompt is in place: "+api.PromptFile+", sourced from "+api.ProfilePath+" and "+api.BashrcPath)
+		steps = append(steps, "the shell files are in place: "+api.EnvFile+" and "+api.PromptFile+", sourced from "+api.ProfilePath+" and "+api.BashrcPath)
 	}
 	return steps, nil
+}
+
+// holdJailForPackages keeps exec, shell and console sessions out of a jail while the host runs pkg against its root
+// (pkg -r runs as root on the host and the jail's tree belongs to the tenant: an operator's session must not be able to
+// change it meanwhile). It refuses with `busy` when another package operation already holds the jail. The caller
+// calls release when the package work is done. Processes that already run in the jail are not stopped by this.
+func (s *Service) holdJailForPackages(key string) (release func(), err error) {
+	s.execMu.Lock()
+	if s.installing[key] {
+		s.execMu.Unlock()
+		return nil, api.Errorf(api.CodeBusy, "a package operation is working on this jail").WithHint("wait for it to end")
+	}
+	s.installing[key] = true
+	s.execMu.Unlock()
+	return func() {
+		s.execMu.Lock()
+		delete(s.installing, key)
+		s.execMu.Unlock()
+	}, nil
 }
 
 // installBash installs the bash package into the root of a running FreeBSD jail from the host, unless it is
@@ -235,18 +247,11 @@ func (s *Service) installBash(ctx context.Context, key string, inApp bool) ([]st
 		return nil, api.Errorf(api.CodeUnsupported, "this daemon cannot run pkg on the host")
 	}
 	if guard {
-		s.execMu.Lock()
-		if s.installing[key] {
-			s.execMu.Unlock()
-			return nil, api.Errorf(api.CodeBusy, "a package installation is working on this jail").WithHint("wait for it to end")
+		release, err := s.holdJailForPackages(key)
+		if err != nil {
+			return nil, err
 		}
-		s.installing[key] = true
-		s.execMu.Unlock()
-		defer func() {
-			s.execMu.Lock()
-			delete(s.installing, key)
-			s.execMu.Unlock()
-		}()
+		defer release()
 	}
 	argv := apps.PkgInstallArgv(root, "ports", []string{api.BashPackage})
 	if err := s.runHost(ctx, 30*time.Minute, argv); err != nil {
@@ -275,12 +280,12 @@ func (s *Service) setUpShell(ctx context.Context, key string, eff api.JailSpec, 
 	m := s.shellMark(key)
 	m.Pending = false
 	if err == nil {
-		if st := s.promptState(eff); st != "" {
+		if ps1 := s.promptState(key, eff); ps1 != "" {
 			var more []string
-			more, err = s.applyPrompt(ctx, key, st)
+			more, err = s.applyPrompt(ctx, key, ps1)
 			steps = append(steps, more...)
 			if err == nil {
-				m.Applied = st
+				m.Applied = s.promptState(key, eff)
 			}
 		}
 	}
@@ -305,7 +310,7 @@ func (s *Service) shellAtStart(ctx context.Context, key string) {
 	switch {
 	case m.Pending:
 		_, err = s.setUpShell(ctx, key, eff, false)
-	case s.promptState(eff) != "" && s.promptState(eff) != m.Applied:
+	case s.promptState(key, eff) != "" && s.promptState(key, eff) != m.Applied:
 		err = s.writePromptMark(ctx, key, eff)
 	default:
 		return
@@ -318,14 +323,13 @@ func (s *Service) shellAtStart(ctx context.Context, key string) {
 
 // writePromptMark applies the prompt of eff and records it.
 func (s *Service) writePromptMark(ctx context.Context, key string, eff api.JailSpec) error {
-	st := s.promptState(eff)
-	_, err := s.applyPrompt(ctx, key, st)
+	_, err := s.applyPrompt(ctx, key, s.promptState(key, eff))
 	m := s.shellMark(key)
 	m.At, m.Error = s.now().UTC(), ""
 	if err != nil {
 		m.Error = "writing the prompt failed: " + tailOf([]byte(err.Error()))
 	} else {
-		m.Applied = st
+		m.Applied = s.promptState(key, eff)
 	}
 	s.setShellMark(key, m)
 	return err
@@ -338,8 +342,8 @@ func (s *Service) promptChanged(ctx context.Context, key string, old, nj api.Jai
 		return
 	}
 	eff := s.effective(nj)
-	st := s.promptState(eff)
-	if st == "" || st == s.promptState(s.effective(old)) {
+	st := s.promptState(key, eff)
+	if st == "" || st == s.promptState(key, s.effective(old)) {
 		return
 	}
 	if !s.jailRunning(ctx, key) {
@@ -415,12 +419,12 @@ func (s *Service) shellStepDescribe(key string, spec api.JailSpec) string {
 	if spec.OS == api.OSFreeBSD && spec.Shell == api.BashPath {
 		parts = append(parts, "install bash unless it is there ("+strings.Join(apps.PkgInstallArgv(s.rootMount(key), "ports", []string{api.BashPackage}), " ")+")")
 	}
-	switch st := s.promptState(spec); {
+	switch st := s.promptState(key, spec); {
 	case spec.OS != api.OSFreeBSD || st == "":
 	case st == api.PromptNone:
-		parts = append(parts, "remove the bash prompt "+api.PromptFile)
+		parts = append(parts, "write "+api.EnvFile+" (where the jail is), no prompt")
 	default:
-		parts = append(parts, "write the bash prompt "+api.PromptFile+" and source it from "+api.ProfilePath+" and "+api.BashrcPath)
+		parts = append(parts, "write "+api.EnvFile+" (where the jail is) and the bash prompt "+api.PromptFile+", sourced from "+api.ProfilePath+" and "+api.BashrcPath)
 	}
 	return strings.Join(parts, "; ")
 }
@@ -428,7 +432,7 @@ func (s *Service) shellStepDescribe(key string, spec api.JailSpec) string {
 // isShellFile reports whether a line names one of the files the shell setup writes.
 func isShellFile(l string) bool {
 	switch strings.TrimSpace(l) {
-	case api.PromptFile, api.ProfilePath, api.BashrcPath:
+	case api.PromptFile, api.EnvFile, api.ProfilePath, api.BashrcPath:
 		return true
 	}
 	return false

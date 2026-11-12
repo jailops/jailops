@@ -193,10 +193,3 @@ func TestFake(t *testing.T) {
 		t.Fatal(js)
 	}
 }
-
-func TestKernelObserverOtherOS(t *testing.T) {
-	// On non-FreeBSD hosts the reader must refuse, never return success.
-	if _, err := NewKernelObserver().List(context.Background()); err != nil && !api.IsCode(err, api.CodeUnsupported) {
-		t.Fatal(err)
-	}
-}

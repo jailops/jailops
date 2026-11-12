@@ -131,6 +131,9 @@ func withoutSkipped(j JailRecord) (JailRecord, []string) {
 		if d.Skip == SkipLocked {
 			w += " (encrypted and waiting for its passphrase; unlock the jail and back it up again)"
 		}
+		if d.Skip == SkipDelegated {
+			w += " (managed by the jail and not mounted on the host: back it up from inside the jail, or with zfs send)"
+		}
 		warnings = append(warnings, w)
 	}
 	j.Datasets = keep

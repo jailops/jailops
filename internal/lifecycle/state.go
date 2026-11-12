@@ -45,6 +45,8 @@ const (
 	KindPersistent = "persistent"
 	KindVolume     = "volume"
 	KindVolumes    = "volumes"
+	// KindDelegated is the dataset a jail manages itself (zfs_delegation): <container>/delegated.
+	KindDelegated = "delegated"
 
 	roSnap = "ro"
 )
@@ -120,6 +122,7 @@ type jailState struct {
 	Root      string
 	Persist   []dsInfo // persistent datasets, mount order
 	Volumes   []dsInfo
+	Delegated string   // the dataset handed to the jail (zfs_delegation), empty when there is none
 	Extra     []string // root.new, root.old if present
 }
 
@@ -144,6 +147,9 @@ func (st *jailState) all() []string {
 	}
 	for _, d := range st.Volumes {
 		out = append(out, d.DS)
+	}
+	if st.Delegated != "" {
+		out = append(out, st.Delegated)
 	}
 	return out
 }
@@ -201,6 +207,8 @@ func (s *Service) observe(ctx context.Context, name string) (*jailState, error) 
 		case rel == "root.new" || rel == "root.old" || rel == "root.stale":
 			st.Extra = append(st.Extra, d)
 		case rel == "data":
+		case rel == "delegated":
+			st.Delegated = d
 		case strings.HasPrefix(rel, "data/") && !strings.Contains(rel[5:], "/"):
 			st.Volumes = append(st.Volumes, s.info(ctx, d, KindVolume))
 		case !strings.Contains(rel, "/") && s.prop(ctx, d, PropKind) == KindPersistent:
@@ -245,6 +253,9 @@ func dataDatasets(st *jailState) []string {
 	}
 	for _, d := range st.Volumes {
 		out = append(out, d.DS)
+	}
+	if st.Delegated != "" {
+		out = append(out, st.Delegated)
 	}
 	return out
 }

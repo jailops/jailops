@@ -25,11 +25,11 @@ func TestFirewallTestWalksTheRenderedAnchors(t *testing.T) {
 	startJailIn(t, e.Admin, dtest.WebJailOn("web", "lan"))
 	startJailIn(t, e.Admin, dtest.WebJailOn("other", "lan"))
 	if _, err := fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "postgresql_allow"},
-		Spec: api.AddressSetSpec{Addresses: []api.AddressEntry{{Address: "@web", Comment: "the web jail"}}}}); err != nil {
+		Spec: api.AddressSetSpec{Addresses: []api.AddressEntry{{Address: "jail:web", Comment: "the web jail"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	mk("postgres", api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
-		{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@postgresql_allow"}, Ports: []string{"5432"}, Comment: "who may reach PostgreSQL"}}})
+		{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:postgresql_allow"}, Ports: []string{"5432"}, Comment: "who may reach PostgreSQL"}}})
 	p, err := e.Admin.Projects().Get(c, "alpha")
 	if err != nil {
 		t.Fatal(err)
@@ -56,7 +56,7 @@ func TestFirewallTestWalksTheRenderedAnchors(t *testing.T) {
 	}
 
 	// the allow-list reaches the database port; both hops pass, and the rule that let it in is named
-	res := test("@web", "@db", "tcp", 5432)
+	res := test("jail:web", "jail:db", "tcp", 5432)
 	if res.Verdict != api.TestPass || len(res.Cases) != 1 || len(res.Cases[0].Hops) != 2 {
 		t.Fatalf("web -> db:5432: %+v", res)
 	}
@@ -74,8 +74,8 @@ func TestFirewallTestWalksTheRenderedAnchors(t *testing.T) {
 	for _, c := range []struct {
 		from string
 		port int
-	}{{"@web", 5433}, {"@other", 5432}, {"host", 5432}} {
-		res := test(c.from, "@db", "tcp", c.port)
+	}{{"jail:web", 5433}, {"jail:other", 5432}, {"host", 5432}} {
+		res := test(c.from, "jail:db", "tcp", c.port)
 		if res.Verdict != api.TestBlock {
 			t.Fatalf("%s -> db:%d should be blocked: %+v", c.from, c.port, res)
 		}
@@ -84,7 +84,7 @@ func TestFirewallTestWalksTheRenderedAnchors(t *testing.T) {
 		}
 	}
 	// ping comes from the project's policy
-	res = test("@other", "@db", "icmp", 0)
+	res = test("jail:other", "jail:db", "icmp", 0)
 	if by := last(res).DecidedBy; res.Verdict != api.TestPass || by == nil || by.Policy != "default" || !by.ProjectPolicy {
 		t.Fatalf("ping other -> db: %+v", res)
 	}
@@ -96,27 +96,27 @@ func TestFirewallTestWalksTheRenderedAnchors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res := test(strings.SplitN(web.Spec.Network[0].IPv4, "/", 2)[0], "@db", "tcp", 5432); res.Verdict != api.TestPass || res.Cases[0].Hops[0].Jail != "web" {
+	if res := test(strings.SplitN(web.Spec.Network[0].IPv4, "/", 2)[0], "jail:db", "tcp", 5432); res.Verdict != api.TestPass || res.Cases[0].Hops[0].Jail != "web" {
 		t.Fatalf("a jail's address is the jail: %+v", res)
 	}
-	res = test("192.0.2.7", "@db", "tcp", 5432)
+	res = test("192.0.2.7", "jail:db", "tcp", 5432)
 	if res.Verdict != api.TestBlock || len(res.Cases[0].Hops) != 1 {
 		t.Fatalf("an external address meets only the destination's anchor: %+v", res)
 	}
 	// refusals say why
 	for _, bad := range []struct{ from, to, proto string }{
-		{"@postgresql_allow", "@db", "tcp"}, {"@nosuch", "@db", "tcp"}, {"@web", "@db", "sctp"}, {"10.0.0.0/8", "@db", "tcp"}, {"host", "host", "tcp"},
+		{"set:postgresql_allow", "jail:db", "tcp"}, {"jail:nosuch", "jail:db", "tcp"}, {"jail:web", "jail:db", "sctp"}, {"10.0.0.0/8", "jail:db", "tcp"}, {"host", "host", "tcp"},
 	} {
 		if _, err := fw.Test(c, api.FirewallTestRequest{From: bad.from, To: bad.to, Proto: bad.proto, Port: 1}); err == nil {
 			t.Errorf("%+v was accepted", bad)
 		}
 	}
-	if _, err := fw.Test(c, api.FirewallTestRequest{From: "@web", To: "@db"}); err == nil {
+	if _, err := fw.Test(c, api.FirewallTestRequest{From: "jail:web", To: "jail:db"}); err == nil {
 		t.Error("a tcp test without a port was accepted")
 	}
 	// icmp is the IPv4 protocol and icmp6 the IPv6 one, as in a rule: the other family has no test with it
 	for _, req := range []api.FirewallTestRequest{
-		{From: "@web", To: "@db", Proto: "icmp", Family: "6"}, {From: "@web", To: "@db", Proto: "icmp6", Family: "4"}, {From: "@web", To: "@db", Proto: "icmp6"}} {
+		{From: "jail:web", To: "jail:db", Proto: "icmp", Family: "6"}, {From: "jail:web", To: "jail:db", Proto: "icmp6", Family: "4"}, {From: "jail:web", To: "jail:db", Proto: "icmp6"}} {
 		if _, err := fw.Test(c, req); err == nil {
 			t.Errorf("%+v was accepted", req)
 		}
@@ -137,15 +137,15 @@ func TestFirewallTestDenyWinsAndDisabledRulesDecideNothing(t *testing.T) {
 		}
 	}
 	startJailIn(t, e.Admin, dtest.WebJailOn("web", "lan"))
-	mk("postgres", api.FirewallRule{Name: "pg from web", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"@web"}, Ports: []string{"5432"}})
-	mk("quiet", api.FirewallRule{Name: "no web", Action: "deny", Direction: "in", Proto: "tcp", From: []string{"@web"}, Ports: []string{"5432"}, Comment: "keep web out"})
+	mk("postgres", api.FirewallRule{Name: "pg from web", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"jail:web"}, Ports: []string{"5432"}})
+	mk("quiet", api.FirewallRule{Name: "no web", Action: "deny", Direction: "in", Proto: "tcp", From: []string{"jail:web"}, Ports: []string{"5432"}, Comment: "keep web out"})
 	// the deny rule is in the policy that is listed LAST
 	db := dtest.WebJailOn("db", "lan")
 	db.Spec.Firewall.Policies = []string{"postgres", "quiet"}
 	startJailIn(t, e.Admin, db)
 	test := func() api.FirewallTestHop {
 		t.Helper()
-		res, err := fw.Test(c, api.FirewallTestRequest{From: "@web", To: "@db", Proto: "tcp", Port: 5432})
+		res, err := fw.Test(c, api.FirewallTestRequest{From: "jail:web", To: "jail:db", Proto: "tcp", Port: 5432})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -194,7 +194,7 @@ func TestFirewallTestSaysUnknownForARawFragment(t *testing.T) {
 	j.Spec.Firewall.Policies = []string{"rawpol"}
 	startJailIn(t, e.Admin, j)
 	startJailIn(t, e.Admin, dtest.WebJailOn("peer", "lan"))
-	res, err := fw.Test(c, api.FirewallTestRequest{From: "@rawjail", To: "@peer", Proto: "tcp", Port: 443})
+	res, err := fw.Test(c, api.FirewallTestRequest{From: "jail:rawjail", To: "jail:peer", Proto: "tcp", Port: 443})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestFirewallTestNeedsAnOperator(t *testing.T) {
 	e := seeded(t)
 	startJailIn(t, e.Admin, dtest.WebJailOn("web", "lan"))
 	startJailIn(t, e.Admin, dtest.WebJailOn("db", "lan"))
-	req := api.FirewallTestRequest{From: "@web", To: "@db", Proto: "tcp", Port: 5432}
+	req := api.FirewallTestRequest{From: "jail:web", To: "jail:db", Proto: "tcp", Port: 5432}
 	if _, err := e.Scoped(api.PermReadonly, "alpha").Firewall().Test(ctxT(t), req); !api.IsCode(err, api.CodeForbidden) {
 		t.Fatalf("readonly: %v", err)
 	}
@@ -223,5 +223,34 @@ func TestFirewallTestNeedsAnOperator(t *testing.T) {
 	}
 	if _, err := e.Scoped(api.PermOperator, "beta").Project("alpha").Firewall().Test(ctxT(t), req); !api.IsCode(err, api.CodeNotFound) {
 		t.Fatalf("an operator of another project may not test in alpha: %v", err)
+	}
+}
+
+// A rule that names a jail that does not exist matches nobody, and the test says so: the table is empty.
+func TestFirewallTestSaysWhenARuleNamesAJailThatIsNotThere(t *testing.T) {
+	e := seeded(t)
+	c := ctxT(t)
+	fw := e.Admin.Firewall()
+	if _, err := fw.Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "pg"}, Spec: api.FirewallPolicySpec{
+		DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
+			{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"jail:ghost"}, Ports: []string{"5432"}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	startJailIn(t, e.Admin, dtest.WebJailOn("web", "lan"))
+	db := dtest.WebJailOn("db", "lan")
+	db.Spec.Firewall.Policies = []string{"pg"}
+	startJailIn(t, e.Admin, db)
+	res, err := fw.Test(c, api.FirewallTestRequest{From: "jail:web", To: "jail:db", Proto: "tcp", Port: 5432})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Verdict != api.TestBlock || !strings.Contains(strings.Join(res.Caveats, "\n"), "policy pg rule 1 names jail:ghost, which does not exist") {
+		t.Fatalf("%s: %v", res.Verdict, res.Caveats)
+	}
+	// the old syntax and a set are refused as ends
+	for _, end := range []string{"@web", "set:office", "tag:x"} {
+		if _, err := fw.Test(c, api.FirewallTestRequest{From: end, To: "jail:db", Proto: "tcp", Port: 5432}); err == nil {
+			t.Errorf("%q was accepted as an end", end)
+		}
 	}
 }

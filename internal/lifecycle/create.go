@@ -209,19 +209,22 @@ func (s *Service) planCreate(ctx context.Context, j api.Jail, recovering bool, p
 		return m
 	}
 	pl := plan.New("create-jail " + name)
+	// The disk limit is the quota of the container: it covers the root, the persistent datasets and the volumes, and
+	// the snapshots of all of them.
+	contProps := map[string]string{"mountpoint": cMP, PropLayout: string(layout), PropImage: imageName, PropComplete: "off"}
+	if q := j.Spec.Resources.Disk; q != "" {
+		contProps["quota"] = q
+	}
+	if r := j.Spec.Resources.DiskReservation; r != "" {
+		contProps["reservation"] = r
+	}
 	pl.Add(plan.Step{Name: "create-container", Describe: fmt.Sprintf("zfs create -o mountpoint=%s %s", cMP, c),
 		Do: func(ctx context.Context) error {
-			return z.Create(ctx, c, base(KindContainer, map[string]string{"mountpoint": cMP, PropLayout: string(layout), PropImage: imageName, PropComplete: "off"}))
+			return z.Create(ctx, c, base(KindContainer, contProps))
 		}, Undo: owned})
 
 	rootProps := base(KindRoot, map[string]string{"mountpoint": rootMP, "canmount": "on", PropGen: strconv.Itoa(gen.Number),
 		PropImage: imageName, PropManifest: gen.Manifest})
-	if q := j.Spec.Resources.Disk; q != "" {
-		rootProps["quota"] = q
-	}
-	if r := j.Spec.Resources.DiskReservation; r != "" {
-		rootProps["reservation"] = r
-	}
 	genRO := gen.Dataset + "@" + roSnap
 	if layout == api.LayoutThin {
 		pl.Add(plan.Step{Name: "clone-root", Describe: fmt.Sprintf("zfs clone %s %s", genRO, rootDS),
@@ -350,6 +353,18 @@ func (s *Service) planCreate(ctx context.Context, j api.Jail, recovering bool, p
 			pl.Add(plan.Step{Name: "create-volume-" + v.Name, Describe: "zfs create " + ds,
 				Do: func(ctx context.Context) error { return z.Create(ctx, ds, props) }})
 		}
+	}
+
+	if j.Spec.Delegate {
+		// The jail manages this dataset itself: it is never mounted on the host (jailed=on) and jail(8) attaches it at the
+		// start (zfs.dataset). Not under JailOps' mountpoint rules: root in the jail sets its own.
+		ds := s.Cfg.at(name).delegatedDS()
+		pl.Add(plan.Step{Name: "create-delegated", Describe: "zfs create " + ds,
+			Do: func(ctx context.Context) error {
+				return z.Create(ctx, ds, base(KindDelegated, map[string]string{"mountpoint": "none", "canmount": "noauto"}))
+			}},
+			plan.Step{Name: "delegate-dataset", Describe: "zfs set jailed=on " + ds,
+				Do: func(ctx context.Context) error { return z.Set(ctx, ds, map[string]string{"jailed": "on"}) }})
 	}
 
 	specB := marshal(rec)

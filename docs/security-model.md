@@ -183,9 +183,23 @@ for up to a year: keep a trusted certificate on that name, or use another name. 
 The ACME account key and the certificate's key live in `<data_dir>/tls/acme` (0700, files 0600), the daemon's own
 directory: they are the daemon's secrets like its seal key, and a compromised daemon holds them anyway. The redirect of
 the CA's port (80 or 443) to the daemon's unprivileged port is pf's: rendered by the helper when the firewall module
-manages `/etc/pf.conf` (two `rdr` rules to the loopback addresses and one `pass`, from two validated numbers), otherwise
+manages `/etc/pf.conf` (two `match … rdr-to` rules to the loopback addresses and one `pass`, from two validated numbers), otherwise
 two lines the administrator adds. Changing the certificate (upload, ACME, self-signed again) needs a global admin and
 is audited.
+
+## Devices
+
+A FreeBSD jail that is given no device mounts `/dev` with the stock jail ruleset (4): the basic and login nodes and nothing
+else. A jail that is given devices (`devfs.NAME.device`), and every Linux jail, mounts it with a private ruleset. The
+ruleset is made of the stock sets that hide everything and unhide the basic and login nodes, then the paths of the
+allow-listed devices (`bpf`, `dri`, `fuse`, `pf`, `tap`, `tun`) or, for a Linux jail, the nodes of a Linux userland.
+Nothing else can be named: the device list is an allow-list, and the helper's `devfs` grammar refuses a bare `unhide`, a
+path outside the list and a ruleset number below 100.
+
+The kernel treats a ruleset number nobody loaded as an empty ruleset, and an empty ruleset hides nothing, so a jail
+started on it would see every device of the host, raw disks included. The helper therefore loads the ruleset in the
+prestart hook, before the jail is created, and **a jail whose ruleset is not in the kernel does not start**: the hook
+fails, with the stock ruleset missing or a rule refused as the reason. A jail's `/dev` holds no disk node.
 
 ## Roles and scopes of API users
 
@@ -322,10 +336,19 @@ limited per source and audited.
 the jail runs (an `operator` may install). The packages' install scripts run as root on the host, chrooted into the jail
 root. Whoever can run commands in the jail could change that tree while `pkg` works on it, so that window is closed:
 while the installation holds the jail, the daemon refuses every exec, shell and console session into it (`busy`, "the
-app is being installed"), and the app's services are not running yet (they are enabled and started only afterwards);
+packages are being installed or updated"), and the app's services are not running yet (they are enabled and started only afterwards);
 what runs in the new jail is the base system of its image. What remains is what the packages themselves do: a package
 from a repository the host trusts runs its scripts with root's rights inside that chroot, as it would for an image
 build. The helper does not refuse `pkg -r` against a running jail; the installation depends on it.
+
+**Package updates and the shell setup of a running jail** run `pkg -r <jail root>` through the helper in the same way, and
+take the same hold: while the host works on the root, the daemon refuses every exec, shell and console session into that
+jail (`busy`, "packages are being installed or updated"). What the hold does not do is stop processes that already run in
+the jail: its services keep running and can change their tree while `pkg` works. `pkg -j JAIL` would remove that window,
+because it attaches to the jail and runs with the jail's rights, but it then reads the repository configuration, the trust
+keys, the cache and the network from inside the jail. JailOps installs packages from the host's repository configuration
+and package cache, so using `-j` would need all of that, and an outbound path to the package servers, in every jail.
+`-r` stays for that reason, and so does the hold.
 
 ## Drafting an app from a jail reads, never writes
 
@@ -436,7 +459,7 @@ isolation](#network-isolation)).
 ## Projects are not a security boundary against the kernel
 
 A project separates names, quotas, networks and firewall policy. Jails share the host kernel. A high-security tenant needs an isolation
-boundary judged on its own terms, such as a host of its own: a separate pool splits storage and operations, not the kernel. A jail with `zfs_delegation` or a host mount is not isolated from that storage.
+boundary judged on its own terms, such as a host of its own: a separate pool splits storage and operations, not the kernel. A jail with `zfs_delegation` or a host mount is not isolated from that storage: root in a jail with `zfs_delegation` manages the dataset `<container>/delegated` itself, with `allow.mount.zfs`, outside the helper's mountpoint rules; it needs a global administrator and `admin-zfs-delegation` in `priv.conf`.
 
 ## Network isolation
 

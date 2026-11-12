@@ -87,7 +87,7 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 	if len(src.addrs) == 0 || len(dst.addrs) == 0 {
 		return api.FirewallTestResult{}, invalid("%s has no address to test with", map[bool]string{true: src.label, false: dst.label}[len(src.addrs) == 0])
 	}
-	sets, err := s.allSetsWithJails(project)
+	refs, err := s.allRefs(project)
 	if err != nil {
 		return api.FirewallTestResult{}, err
 	}
@@ -98,7 +98,7 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 		if a, ok := anchors[key]; ok {
 			return a, nil
 		}
-		b, err := s.buildJail(ctx, j, sets)
+		b, err := s.buildJail(ctx, j, refs)
 		if err != nil {
 			return nil, err
 		}
@@ -191,7 +191,37 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 		}
 	}
 	res.Caveats = append(caveats, testCaveats(src, dst)...)
+	res.Caveats = append(res.Caveats, s.emptyRefCaveats(project, src.jail, dst.jail)...)
 	return res, nil
+}
+
+// emptyRefCaveats say which rules of the policies the tested jails use name a jail that does not exist: the table is
+// empty and the rule matches nobody.
+func (s *Service) emptyRefCaveats(project string, jails ...*api.Jail) []string {
+	refs, err := s.danglingJailRefs(project)
+	if err != nil || len(refs) == 0 {
+		return nil
+	}
+	used := map[string]bool{}
+	if pr, err := s.projKind.get(project); err == nil {
+		for _, n := range pr.Spec.FirewallPolicies {
+			used[n] = true
+		}
+	}
+	for _, j := range jails {
+		if j != nil {
+			for _, n := range j.Spec.Firewall.Policies {
+				used[n] = true
+			}
+		}
+	}
+	var out []string
+	for _, r := range refs {
+		if r.Policy != "" && used[r.Policy] {
+			out = append(out, fmt.Sprintf("policy %s rule %d names jail:%s, which does not exist: its table is empty and the rule matches nobody", r.Policy, r.Rule, r.Jail))
+		}
+	}
+	return out
 }
 
 // testCaveats say what the answer does not cover.
@@ -219,33 +249,35 @@ func testCaveats(src, dst testEnd) []string {
 func (s *Service) testEnd(project, text string) (testEnd, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return testEnd{}, invalid("name both ends: a jail (@name), an address, or host")
+		return testEnd{}, invalid("name both ends: a jail (jail:NAME), an address, or host")
 	}
 	if text == "host" {
 		return testEnd{label: "host", host: true}, nil
 	}
-	if name, ok := strings.CutPrefix(text, "@"); ok {
+	if strings.HasPrefix(text, "@") {
+		n := strings.TrimPrefix(text, "@")
+		return testEnd{}, invalid("@ is not used: write jail:%s", n)
+	}
+	if strings.HasPrefix(text, "set:") || strings.HasPrefix(text, "tag:") {
+		return testEnd{}, invalid("%s is not one end of a connection", text).WithHint("name a jail of the project (jail:NAME) or one address")
+	}
+	if name, ok := strings.CutPrefix(text, "jail:"); ok {
 		key, err := validate.QualifiedName(project, name)
 		if err != nil {
 			return testEnd{}, notFound("jail", name)
 		}
 		j, err := s.jailSnapshot(key)
 		if err != nil {
-			if sets, serr := s.allSets(project); serr == nil {
-				if _, isSet := sets[name]; isSet {
-					return testEnd{}, invalid("@%s is an address set, not one end of a connection", name).WithHint("name a jail of the project or one address")
-				}
-			}
 			return testEnd{}, notFound("jail", name)
 		}
-		return testEnd{label: "@" + name, jail: &j, addrs: jailAddrs(s.effective(j))}, nil
+		return testEnd{label: "jail:" + name, jail: &j, addrs: jailAddrs(s.effective(j))}, nil
 	}
 	if strings.Contains(text, "/") {
 		return testEnd{}, invalid("%q is a prefix: give one address", text)
 	}
 	a, err := netip.ParseAddr(text)
 	if err != nil {
-		return testEnd{}, invalid("%q is not a jail (@name), an address or host", text)
+		return testEnd{}, invalid("%q is not a jail (jail:NAME), an address or host", text)
 	}
 	a = a.Unmap()
 	// an address of a jail of the project is that jail

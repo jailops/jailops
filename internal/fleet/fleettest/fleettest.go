@@ -193,7 +193,7 @@ spec:
       direction: in
       proto: tcp
       ports: ["443"]
-      from: ["@office"]
+      from: ["set:office"]
 `)
 	e.Write("shared/backup-targets/vault.yaml", `apiVersion: jailops/v1
 kind: BackupTarget

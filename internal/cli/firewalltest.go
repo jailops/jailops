@@ -1,13 +1,11 @@
 package cli
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
 	"github.com/spf13/cobra"
 
-	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -23,7 +21,7 @@ func (a *app) firewallTest() *cobra.Command {
 		Short: "Say whether a connection would pass the firewall, and which rule decides",
 		Long: `Say whether a new connection from one end to the other would pass the firewall, and
 which rule decides at each anchor it meets. SOURCE and DESTINATION are a jail of the
-project (@web), one address, or host (the host's address on the gateway of the other end's
+project (jail:web), one address, or host (the host's address on the gateway of the other end's
 network). A set is not an end: name a jail or an address. An address that belongs to a
 jail of the project is that jail. Another project is an external host: its jails are
 addresses here.
@@ -39,11 +37,11 @@ keeps its state), the host's own pf.conf, NAT, and a raw PF fragment, which make
 unknown. The ICMP tests default to an echo request (ping); --icmp-type names another.
 
 Exit status: 0 the connection would pass, 1 it would be blocked, 8 the test cannot say.`,
-		Example: `jailops firewall test --from @web --to @db --port 5432
-jailops firewall test --from @web --to @db --port 5433
-jailops firewall test --from 192.0.2.7 --to @web --port 443
+		Example: `jailops firewall test --from jail:web --to jail:db --port 5432
+jailops firewall test --from jail:web --to jail:db --port 5433
+jailops firewall test --from 192.0.2.7 --to jail:web --port 443
 jailops firewall test --from host --to @db --proto icmp
-jailops firewall test --from @web --to 198.51.100.9 --proto udp --port 53 -o json`,
+jailops firewall test --from jail:web --to 198.51.100.9 --proto udp --port 53 -o json`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if from == "" || to == "" {
@@ -74,27 +72,18 @@ jailops firewall test --from @web --to 198.51.100.9 --proto udp --port 53 -o jso
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&from, "from", "", "where the connection starts: @jail, an address or host")
-	f.StringVar(&to, "to", "", "where it goes: @jail, an address or host")
+	f.StringVar(&from, "from", "", "where the connection starts: jail:NAME, an address or host")
+	f.StringVar(&to, "to", "", "where it goes: jail:NAME, an address or host")
 	f.StringVar(&proto, "proto", "tcp", "tcp, udp, icmp or icmp6")
 	f.IntVar(&port, "port", 0, "destination port of tcp and udp")
 	f.StringVar(&icmpType, "icmp-type", "", "ICMP type as pf names it, such as echoreq (default for icmp and icmp6)")
 	f.StringVar(&family, "family", "", "test only IPv4 (4) or IPv6 (6); default: every family the two ends have in common")
 	enumFlag(cmd, "proto", "tcp", "udp", "icmp", "icmp6")
 	enumFlag(cmd, "family", "4", "6")
-	ends := a.completeNames(func(ctx context.Context, c *sdk.Client) ([]string, error) {
-		out := []string{"host"}
-		for j, err := range c.Jails().List(ctx) {
-			if err != nil {
-				return out, nil
-			}
-			out = append(out, "@"+j.Metadata.Name)
-		}
-		return out, nil
-	})
+	ends := a.refCompleter(placeEnd)
 	for _, name := range []string{"from", "to"} {
-		_ = cmd.RegisterFlagCompletionFunc(name, func(c *cobra.Command, _ []string, t string) ([]string, cobra.ShellCompDirective) {
-			return ends(c, nil, t)
+		_ = cmd.RegisterFlagCompletionFunc(name, func(c *cobra.Command, args []string, t string) ([]string, cobra.ShellCompDirective) {
+			return ends(c, args, t)
 		})
 	}
 	return cmd

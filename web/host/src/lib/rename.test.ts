@@ -60,11 +60,11 @@ describe('demo rename', () => {
     expect(a.result.counts).toEqual({ object: 1, reference: 1 })
     a.apply()
     expect(x.sets.map((y) => y.metadata.name)).toEqual(['admins', 'office_eu'])
-    expect(x.sets[0].spec.addresses.map((a) => a.address)).toContain('@office_eu')
+    expect(x.sets[0].spec.addresses.map((a) => a.address)).toContain('set:office_eu')
     const b = demoRename(x, 'addressSet', 'admins', 'ops', 'web', undefined)
     if ('error' in b) throw new Error(b.error.message)
     b.apply()
-    expect(x.policies[0].spec.rules?.[1].from).toEqual(['@ops'])
+    expect(x.policies[0].spec.rules?.[1].from).toEqual(['set:ops'])
   })
   it('refuses what the server refuses', () => {
     const x = db()

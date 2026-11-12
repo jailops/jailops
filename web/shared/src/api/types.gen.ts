@@ -777,6 +777,61 @@ export interface FirewallRule {
   redirect?: Redirect
 }
 
+export interface FirewallTestCase {
+  family: string
+  from: string
+  to: string
+  proto: string
+  port?: number
+  icmp_type?: string
+  verdict: string
+  hops: FirewallTestHop[]
+}
+
+export interface FirewallTestHop {
+  side: string
+  jail: string
+  anchor: string
+  interface: string
+  direction: string
+  verdict: string
+  decided_by?: FirewallTestRule
+  why?: string
+  skipped?: FirewallTestSkipped[]
+  loaded_matches_rendered?: string
+}
+
+export interface FirewallTestRequest {
+  from: string
+  to: string
+  proto?: string
+  port?: number
+  icmp_type?: string
+  family?: string
+}
+
+export interface FirewallTestResult {
+  verdict: string
+  cases: FirewallTestCase[]
+  caveats?: string[]
+}
+
+export interface FirewallTestRule {
+  stage: string
+  policy?: string
+  project_policy?: boolean
+  managed?: boolean
+  rule?: number
+  name?: string
+  comment?: string
+  pf: string
+}
+
+export interface FirewallTestSkipped {
+  rule: FirewallTestRule
+  why: string
+}
+
 export interface HostCertificate {
   kind: Kind
   source: CertificateSource
@@ -1262,6 +1317,7 @@ export interface LifecycleEvent {
   source: string
   requestor?: string
   project?: string
+  detail?: string
 }
 
 export interface LogEntry {
@@ -1369,7 +1425,6 @@ export interface NetworkAttach {
   name?: string
   network: string
   mtu?: number
-  ingress?: string
   egress?: string
   ipv4?: string
   ipv6?: string
@@ -1629,6 +1684,7 @@ export interface Resources {
   disk?: string
   pids?: number
   disk_reservation?: string
+  states?: number
 }
 
 export interface Response {
@@ -2090,7 +2146,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "limits.cpu",
     "type": "int",
-    "description": "CPU cores the jail may use.",
+    "description": "CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.",
     "example": "2",
     "restart_required": true,
     "profile": true,
@@ -2099,7 +2155,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "limits.disk",
     "type": "size",
-    "description": "ZFS quota of the jail's root.",
+    "description": "ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.",
     "example": "20G",
     "restart_required": false,
     "profile": true,
@@ -2108,7 +2164,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "limits.disk_reservation",
     "type": "size",
-    "description": "ZFS reservation of the jail's root.",
+    "description": "ZFS reservation of the jail's container.",
     "example": "5G",
     "restart_required": false,
     "profile": true,
@@ -2117,7 +2173,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "limits.memory",
     "type": "size",
-    "description": "Memory limit.",
+    "description": "Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.",
     "example": "2G",
     "restart_required": true,
     "profile": true,
@@ -2126,11 +2182,20 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "limits.pids",
     "type": "int",
-    "description": "Process limit.",
+    "description": "Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.",
     "example": "500",
     "restart_required": true,
     "profile": true,
     "path": "resources.pids"
+  },
+  {
+    "name": "limits.states",
+    "type": "int",
+    "description": "Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.",
+    "example": "20000",
+    "restart_required": false,
+    "profile": true,
+    "path": "resources.states"
   },
   {
     "name": "nic.\u003cdevice\u003e",
@@ -2144,20 +2209,11 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "nic.\u003cdevice\u003e.egress",
     "type": "rate",
-    "description": "Rate limit of traffic out of the jail, bits per second. Not enforced yet: the limit is stored and reported only, and the jail reports a RateLimit condition.",
+    "description": "Rate limit of what the jail sends through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host; traffic into the jail has no limit.",
     "example": "10M",
     "restart_required": false,
     "profile": true,
     "path": "network[\u003cdevice\u003e].egress"
-  },
-  {
-    "name": "nic.\u003cdevice\u003e.ingress",
-    "type": "rate",
-    "description": "Rate limit of traffic into the jail, bits per second. Not enforced yet: the limit is stored and reported only, and the jail reports a RateLimit condition.",
-    "example": "10M",
-    "restart_required": false,
-    "profile": true,
-    "path": "network[\u003cdevice\u003e].ingress"
   },
   {
     "name": "nic.\u003cdevice\u003e.ipv4",
@@ -2225,7 +2281,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "prompt",
     "type": "string",
-    "description": "Bash prompt of a FreeBSD jail, for every user: default (user@host:dir in colour), none, or a PS1 text such as \\u@\\h:\\w\\$ with bash's escapes (no ', ` or $ other than \\$: nothing in it runs; \\e or \\033 start a colour). A user's own ~/.bashrc wins. Written into /usr/local/etc/profile.d/jailops-prompt.sh at once in a running jail, else at its next start.",
+    "description": "Bash prompt of a FreeBSD jail, for every user: default (user@jail in colour, then in grey [project/host], then the directory), short (the same without the grey tag), none (no prompt, the variables stay), or a PS1 text such as \\u@\\h [{project}/{host}]:\\w\\$ with bash's escapes (no ', ` or $ other than \\$: nothing in it runs; \\e or \\033 start a colour) and the words {jail}, {project} and {host}, which read the variables JAILOPS_JAIL, JAILOPS_PROJECT and JAILOPS_HOST that every interactive bash of the jail has. A user's own ~/.bashrc wins. Written into /usr/local/etc/profile.d/jailops-prompt.sh at once in a running jail, else at its next start.",
     "example": "default",
     "restart_required": false,
     "profile": true,
@@ -2374,6 +2430,15 @@ export const configKeys: readonly ConfigKey[] = [
     "restart_required": false,
     "profile": true,
     "path": "update.schedule"
+  },
+  {
+    "name": "zfs.delegation",
+    "type": "bool",
+    "description": "Global administrators only. Hands the jail a ZFS dataset of its own, \u003ccontainer\u003e/delegated: root in the jail can create datasets, snapshots and mounts below it, outside the rules JailOps applies to the jail's data. The host's priv.conf must allow it (admin-zfs-delegation).",
+    "example": "true",
+    "restart_required": true,
+    "profile": false,
+    "path": "zfs_delegation"
   }
 ]
 

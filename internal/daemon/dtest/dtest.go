@@ -422,6 +422,11 @@ func (e *Env) sysctl(name string) (string, error) {
 // image builder run. They write into the in-memory files like the real tools
 // write into the jail roots.
 func (e *Env) script() {
+	// dummynet: the module is there and the pipes of the bandwidth limits can be set
+	e.Run.Add(run.Rule{Name: "kldstat", Args: []string{"-q", "-n", "dummynet"}})
+	e.Run.Add(run.Rule{Name: "kldstat", Args: []string{"-n", "dummynet"}})
+	e.Run.Add(run.Rule{Name: "kldload", Args: []string{"dummynet"}})
+	e.Run.Add(run.Rule{Name: "dnctl", Args: []string{run.RestArgs}})
 	e.Run.Add(run.Rule{Name: "pkg", Args: []string{run.RestArgs}, Fn: func(c run.Cmd) (run.Result, error) {
 		argv := append([]string{"pkg"}, c.Args...)
 		if len(argv) > 2 && argv[1] == "config" && argv[2] == "abi" {

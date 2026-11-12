@@ -116,6 +116,10 @@ type AdminPolicy struct {
 	RawPF bool
 	// ResumeSend lets an admin resume a send from an opaque token.
 	ResumeSend bool
+	// ZFSDelegation lets an admin hand a jail one dataset of its own, `<container>/delegated`: the jailed property
+	// of that dataset, `zfs.dataset` with that name, allow.mount, allow.mount.zfs and enforce_statfs=1 in the jail's
+	// jail.conf. The jail's root can then create datasets, snapshots and mounts below it.
+	ZFSDelegation bool
 }
 
 // Config configures validation and the Local implementation.

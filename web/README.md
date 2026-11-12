@@ -131,7 +131,7 @@ staging project two; the demo accepts the label patch and checks the rules as th
 
 ## Firewall (host console)
 
-`/firewall` has two tabs, Policies and Address sets (`?tab=sets`), both of the current project. **Create policy** and
+`/firewall` has three tabs, Policies, Address sets (`?tab=sets`) and Test (`?tab=test`, `/firewall/test`; extension `firewall_test`, operator or admin), all of the current project. The Test tab (`src/components/FirewallTest.vue`, the pure logic in `lib/fwtest.ts`) asks `POST /firewall/test` for a From and a To (a jail, an address or `host`), a protocol and a port, and draws the answer as a flow of hops with what decided each; the form is kept in the query, and the demo (`src/demo/fwtest.ts`) walks its own policies the way the server walks the anchor. **Create policy** and
 **Add set** open a dialog; a policy is edited rule by rule and saved with If-Match, and deleted with its name typed while
 jails use it (the server refuses until they use another policy). An address set (`src/components/AddressSetCreateDialog.vue`,
 the checks in `lib/firewall.ts`) has a name (`^[a-z][a-z0-9_]{0,23}$`), members (one address or CIDR per line; empty is

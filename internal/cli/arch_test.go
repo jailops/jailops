@@ -21,9 +21,11 @@ var allowedImports = map[string]bool{
 	modulePath + "/internal/manpage": true,
 	// the catalog's parser and validator, for app validate; TestAppsLinksNoDaemon keeps it pure
 	modulePath + "/internal/apps": true,
-	"github.com/spf13/cobra":      true,
-	"gopkg.in/yaml.v3":            true,
-	"golang.org/x/term":           true,
+	// the grammar of a firewall reference (jail:NAME, set:NAME, tag:NAME), shared with the server; pure validation
+	modulePath + "/internal/validate": true,
+	"github.com/spf13/cobra":          true,
+	"gopkg.in/yaml.v3":                true,
+	"golang.org/x/term":               true,
 }
 
 // Tests may also use the in-memory server and the package under test.

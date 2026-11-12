@@ -144,6 +144,14 @@ func (s *Service) DestroyJail(ctx context.Context, name string, force, dryRun bo
 			Do:   func(ctx context.Context) error { return s.doStop(ctx, name) },
 			Undo: func(ctx context.Context) error { return s.doStart(ctx, name) }, UndoOnFail: true})
 	}
+	// A jail that is not running has had its runtime state taken down when it stopped, unless it was stopped by hand or
+	// crashed: the rctl rules of its limits stay by name, so a delete takes the runtime state down again. A failure is a
+	// warning, it does not stop the delete.
+	var teardownErr error
+	if !up {
+		pl.Add(plan.Step{Name: "teardown", Describe: "remove runtime state of " + name + " (rctl rules, pf anchor)",
+			Do: func(ctx context.Context) error { teardownErr = s.Hooks.PostStop(ctx, name); return nil }})
+	}
 	pl.Add(plan.Step{Name: "destroy-datasets", Describe: "zfs destroy -r " + st.Container,
 		Do: func(ctx context.Context) error {
 			if s.prop(ctx, st.Container, PropManaged) != "on" {
@@ -157,6 +165,9 @@ func (s *Service) DestroyJail(ctx context.Context, name string, force, dryRun bo
 	}
 	if err := s.run(ctx, "destroy", name, pl); err != nil {
 		return res, err
+	}
+	if teardownErr != nil {
+		res.Warnings = append(res.Warnings, "remove runtime state: "+teardownErr.Error())
 	}
 	// Derived configuration and generation garbage collection happen after the
 	// point of no return; failures are reported, they cannot undo the destroy.

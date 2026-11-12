@@ -150,7 +150,7 @@ func TestACMEHTTP01ThroughTheAPI(t *testing.T) {
 		!strings.HasPrefix(st.RemoteAdd, "jailops remote add console https://console.example.com:") {
 		t.Fatalf("%+v %+v", st, st.ACME)
 	}
-	if !strings.Contains(st.Redirect.Lines[0], "port 80 -> 127.0.0.1 port ") {
+	if !strings.Contains(st.Redirect.Lines[0], "port 80 rdr-to 127.0.0.1 port ") {
 		t.Errorf("%q", st.Redirect.Lines)
 	}
 	leaf, err := handshake(t, a.D.HTTPSAddr(), "jo.example.com", a.ca.Roots())
@@ -236,7 +236,7 @@ func TestACMETLSALPN01AndFailure(t *testing.T) {
 	if leaf, err := handshake(t, a.D.HTTPSAddr(), "console.example.com", a.ca.Roots()); err != nil || leaf.Subject.CommonName != "console.example.com" {
 		t.Fatalf("%v %v", leaf, err)
 	}
-	if st.Redirect == nil || !strings.Contains(st.Redirect.Lines[0], "port 443 -> 127.0.0.1 port ") {
+	if st.Redirect == nil || !strings.Contains(st.Redirect.Lines[0], "port 443 rdr-to 127.0.0.1 port ") {
 		t.Errorf("%+v", st.Redirect)
 	}
 	// an acme-tls/1 handshake without a pending challenge is refused
@@ -676,7 +676,7 @@ func TestACMERedirectThroughTheFirewallModule(t *testing.T) {
 		t.Fatal(err)
 	}
 	pf, _ := os.ReadFile(filepath.Join(a.Host.Etc, "pf.conf"))
-	want := "rdr inet proto tcp from any to (self) port 80 -> 127.0.0.1 port " + strconv.Itoa(fw.Spec.ACME.Port)
+	want := "match in inet proto tcp from any to (self) port 80 rdr-to 127.0.0.1 port " + strconv.Itoa(fw.Spec.ACME.Port)
 	if !strings.Contains(string(pf), want) || strings.Contains(string(pf), "40000") {
 		t.Fatalf("pf.conf:\n%s", pf)
 	}

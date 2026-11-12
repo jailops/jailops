@@ -2,7 +2,6 @@ package cli
 
 import (
 	"fmt"
-	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -10,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
@@ -54,10 +54,10 @@ connections that rules using it passed once; they are made again`)
 func (a *app) firewallCmd() *cobra.Command {
 	fc := group("firewall", "Manage firewall policies and address sets",
 		`A firewall policy is a declarative list of rules rendered into one PF anchor per
-jail; jailops never owns the host's pf.conf. Rules may refer to an address set or
-to a jail of the project as @name (a jail by its addresses), and to jails by tag
-as tag:name. 'jailops firewall validate' checks files offline before they are
-applied.`,
+jail; jailops never owns the host's pf.conf. A rule refers to an address set of the
+project as set:NAME, to a jail of the project as jail:NAME (by its addresses) and to the
+jails with a tag as tag:NAME. 'jailops firewall validate' checks files offline before
+they are applied.`,
 		`jailops firewall policy list
 jailops firewall address-set create office --address 192.0.2.0/24
 jailops firewall validate -f policy.yaml`, "fw")
@@ -71,7 +71,7 @@ disabled switches a rule off without deleting it: it keeps its number and shows 
 of the anchor, and it is not loaded. A deny rule wins over every allow rule, whatever the order of the policies.
 --comment is what the policy is for. Without --default-in and --default-out the policy denies
 inbound and allows outbound traffic; both are written into the policy.`,
-		`jailops firewall policy create web --comment "the public web server" --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from @office port 22 comment ssh from the office"
+		`jailops firewall policy create web --comment "the public web server" --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from set:office port 22 comment ssh from the office"
 jailops firewall policy create -f web.yaml`,
 		func(cmd *cobra.Command) func(string) (api.FirewallPolicy, error) {
 			var din, dout, comment string
@@ -80,6 +80,7 @@ jailops firewall policy create -f web.yaml`,
 			cmd.Flags().StringVar(&din, "default-in", "deny", "default for inbound traffic: allow or deny")
 			cmd.Flags().StringVar(&dout, "default-out", "allow", "default for outbound traffic: allow or deny")
 			cmd.Flags().StringArrayVar(&rules, "rule", nil, "a rule (repeatable)")
+			_ = cmd.RegisterFlagCompletionFunc("rule", a.completeRule())
 			return func(name string) (api.FirewallPolicy, error) {
 				p := api.FirewallPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.FirewallPolicySpec{DefaultIn: din, DefaultOut: dout, Comment: comment}}
 				for _, r := range rules {
@@ -93,19 +94,26 @@ jailops firewall policy create -f web.yaml`,
 			}
 		})
 	ad := addrSetDesc()
-	ac := group("address-set", "Manage address sets", "Create, inspect, edit and delete address sets referenced as @name in rules. A member is an address, a CIDR or @jail. Every entry, set, rule and policy has a `comment`: what it is or why it is there. `show` lists them and the rendered rules carry them as comment lines: comments are what a reviewer of the firewall reads.",
+	ac := group("address-set", "Manage address sets", "Create, inspect, edit and delete address sets, referenced as set:NAME in rules. A member is an address, a CIDR, jail:NAME or set:NAME. Every entry, set, rule and policy has a `comment`: what it is or why it is there. `show` lists them and the rendered rules carry them as comment lines: comments are what a reviewer of the firewall reads.",
 		"jailops firewall address-set list\njailops firewall address-set show office", "address-sets", "set")
-	crudCommands(a, ac, ad, "Create an address set from --address flags or a file. A member may be @name, a jail of the project or another set; cycles are rejected.",
+	crudCommands(a, ac, ad, "Create an address set from --address flags or a file. A member may be jail:NAME (a jail of the project) or set:NAME (another set); cycles are rejected. A set with one address is a perfectly good alias: say in its comment what it is.",
 		"jailops firewall address-set create office --address 192.0.2.0/24 --comment \"the office\"\njailops firewall address-set create -f office.yaml",
 		func(cmd *cobra.Command) func(string) (api.AddressSet, error) {
 			var addrs []string
 			var comment string
-			cmd.Flags().StringArrayVar(&addrs, "address", nil, "address, CIDR or @jail (repeatable)")
+			cmd.Flags().StringArrayVar(&addrs, "address", nil, "address, CIDR, jail:NAME or set:NAME (repeatable)")
 			_ = cmd.RegisterFlagCompletionFunc("address", a.completeMember())
 			cmd.Flags().StringVar(&comment, "comment", "", "what the address is (with a single --address; several entries with comments come from a file, -f, or address-set edit)")
 			return func(name string) (api.AddressSet, error) {
 				if len(addrs) == 0 {
 					return api.AddressSet{}, usagef("give at least one --address (or use -f FILE)")
+				}
+				for _, m := range addrs {
+					if k, _, err := validate.ParseEndpoint(m); err != nil {
+						return api.AddressSet{}, usagef("--address %q: %v", m, err)
+					} else if k != validate.EndpointAddr && k != validate.EndpointJail && k != validate.EndpointSet {
+						return api.AddressSet{}, usagef("--address %q: a member is an address, a CIDR, jail:NAME or set:NAME", m)
+					}
 				}
 				spec := api.AddressSetSpec{Addresses: api.Entries(addrs...)}
 				if comment != "" {
@@ -154,8 +162,14 @@ func parseRule(s string) (api.FirewallRule, error) {
 		switch t[0] {
 		case "from":
 			r.From = list(t[1])
+			if err := checkRefs(s, r.From); err != nil {
+				return r, err
+			}
 		case "to":
 			r.To = list(t[1])
+			if err := checkRefs(s, r.To); err != nil {
+				return r, err
+			}
 		case "port":
 			r.Ports = list(t[1])
 		case "name":
@@ -176,23 +190,22 @@ func parseRule(s string) (api.FirewallRule, error) {
 	return r, nil
 }
 
+// checkRefs refuses a from or to list whose entries are not addresses or references (jail:NAME, set:NAME, tag:NAME).
+func checkRefs(rule string, entries []string) error {
+	for _, e := range entries {
+		if err := validate.ValidateEndpoint(e); err != nil {
+			return usagef("rule %q: %v", rule, err)
+		}
+	}
+	return nil
+}
+
 // validation ---------------------------------------------------------------
 
 type finding struct {
 	Doc     string `json:"document"`
 	Level   string `json:"level"` // error or warning
 	Message string `json:"message"`
-}
-
-func validAddr(s string) bool {
-	if s == "any" || strings.HasPrefix(s, "@") && len(s) > 1 || strings.HasPrefix(s, "tag:") && len(s) > 4 {
-		return true
-	}
-	if _, err := netip.ParsePrefix(s); err == nil {
-		return true
-	}
-	_, err := netip.ParseAddr(s)
-	return err == nil
 }
 
 func validPort(p string) bool {
@@ -243,9 +256,11 @@ func validatePolicy(doc string, p api.FirewallPolicySpec, sets func(string) bool
 			}
 		}
 		for _, addr := range slices.Concat(r.From, r.To) {
-			if !validAddr(addr) {
-				bad("%s: invalid address %q", at, addr)
-			} else if n, ok := strings.CutPrefix(addr, "@"); ok && !sets(n) {
+			k, n, err := validate.ParseEndpoint(addr)
+			switch {
+			case err != nil:
+				bad("%s: %v", at, err)
+			case k == validate.EndpointSet && !sets(n):
 				bad("%s: unknown address set %q", at, n)
 			}
 		}
@@ -273,14 +288,10 @@ func validateAddrSets(sets map[string]api.AddressSetSpec, docs map[string]bool) 
 		}
 		s := sets[name]
 		for _, e := range s.Addresses {
-			a := e.Address
-			if strings.HasPrefix(a, "@") { // a jail or a set: checked where the objects are known
-				continue
-			}
-			if _, err := netip.ParsePrefix(a); err != nil {
-				if _, err := netip.ParseAddr(a); err != nil {
-					out = append(out, finding{doc, "error", fmt.Sprintf("invalid address %q", a)})
-				}
+			if k, _, err := validate.ParseEndpoint(e.Address); err != nil {
+				out = append(out, finding{doc, "error", fmt.Sprintf("member %q: %v", e.Address, err)})
+			} else if k != validate.EndpointAddr && k != validate.EndpointJail && k != validate.EndpointSet {
+				out = append(out, finding{doc, "error", fmt.Sprintf("member %q must be an address, a CIDR, jail:NAME or set:NAME", e.Address)})
 			}
 		}
 		// cycle search from this set
@@ -290,7 +301,7 @@ func validateAddrSets(sets map[string]api.AddressSetSpec, docs map[string]bool) 
 				return append(path, n)
 			}
 			for _, e := range sets[n].Addresses {
-				if inc, ok := strings.CutPrefix(e.Address, "@"); ok {
+				if inc, ok := strings.CutPrefix(e.Address, "set:"); ok {
 					if _, isSet := sets[inc]; isSet {
 						if p := walk(inc, append(slices.Clone(path), n)); p != nil {
 							return p
@@ -309,18 +320,24 @@ func validateAddrSets(sets map[string]api.AddressSetSpec, docs map[string]bool) 
 
 func (a *app) firewallValidate() *cobra.Command {
 	var file string
-	var offline bool
+	var offline, review bool
 	cmd := &cobra.Command{
 		Use:   "validate -f FILE",
 		Short: "Check firewall policies and address sets without applying them",
 		Long: `Check the FirewallPolicy and AddressSet documents of a file: actions, directions,
-protocols, ports, address syntax, redirects, references to @address-sets and
-include cycles. Address sets defined in the same file count, and the ones on
+protocols, ports, address syntax, redirects, references (jail:NAME, set:NAME, tag:NAME)
+and set cycles. Address sets defined in the same file count, and the ones on
 the server are looked up unless --offline is given.
 
 The exit status is 2 when an error was found. Raw PF fragments are not parsed
-here; the server checks them with pfctl -n when they are applied.`,
-		Example: "jailops firewall validate -f policy.yaml\ncat policy.yaml | jailops firewall validate -f - --offline",
+here; the server checks them with pfctl -n when they are applied.
+
+--review adds the warnings a reviewer of the firewall would raise: a policy, a rule, an
+address set or one of its members without a comment, a rule that is disabled or very
+broad (allow from or to any address with no port), an address set no rule refers to,
+a policy no jail or project uses, and a jail:NAME that does not exist. Warnings never
+change the exit status. Without a server it says what it could not check.`,
+		Example: "jailops firewall validate -f policy.yaml\njailops firewall validate -f policy.yaml --review\ncat policy.yaml | jailops firewall validate -f - --offline",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if file == "" {
@@ -359,8 +376,18 @@ here; the server checks them with pfctl -n when they are applied.`,
 					return usagef("validate handles FirewallPolicy and AddressSet documents, not %q", k)
 				}
 			}
+			rv := reviewInput{pols: map[string]api.FirewallPolicySpec{}, sets: map[string]api.AddressSetSpec{}, allPols: map[string]api.FirewallPolicySpec{}}
+			for _, p := range pols {
+				rv.pols[p.name], rv.allPols[p.name] = p.spec, p.spec
+			}
+			for n := range inFile {
+				rv.sets[n] = sets[n]
+			}
 			if !offline {
 				if c, err := a.connect(cmd.Context()); err == nil {
+					if review {
+						loadReview(cmd.Context(), c, &rv)
+					}
 					if remote, err := collect(c.Firewall().AddressSets().List(cmd.Context())); err == nil {
 						for _, r := range remote {
 							if _, dup := sets[r.Metadata.Name]; !dup {
@@ -379,6 +406,10 @@ here; the server checks them with pfctl -n when they are applied.`,
 				all = append(all, validatePolicy("policy/"+p.name, p.spec, known)...)
 			}
 			all = append(all, validateAddrSets(sets, inFile)...)
+			if review {
+				rv.allSets = sets
+				all = append(all, reviewFindings(rv)...)
+			}
 			errs := 0
 			for _, f := range all {
 				if f.Level == "error" {
@@ -408,5 +439,6 @@ here; the server checks them with pfctl -n when they are applied.`,
 	}
 	cmd.Flags().StringVarP(&file, "file", "f", "", "file with FirewallPolicy and AddressSet documents, or - for standard input")
 	cmd.Flags().BoolVar(&offline, "offline", false, "do not look up address sets on the server")
+	cmd.Flags().BoolVar(&review, "review", false, "add the warnings a reviewer would raise: missing comments, disabled or very broad rules, unused sets and policies, jails that do not exist")
 	return cmd
 }

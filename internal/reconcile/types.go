@@ -26,6 +26,16 @@ type Desired struct {
 	WireGuard []WireGuardDesired
 	// Host is the kernel state JailOps manages: modules, then sysctls.
 	Host HostDesired
+	// Pipes are the dummynet pipes of the bandwidth limits that jails have: the loop configures them before it loads
+	// the anchors that send traffic into them, and deletes the pipes of JailOps's range that nobody wants.
+	Pipes []PipeDesired
+}
+
+// PipeDesired is one dummynet pipe: its number (in JailOps's range, render.PipeBase) and its bandwidth in bits per
+// second, 0 for unlimited.
+type PipeDesired struct {
+	Number int
+	Rate   uint64
 }
 
 // HostDesired is the kernel state the loop asserts before it touches

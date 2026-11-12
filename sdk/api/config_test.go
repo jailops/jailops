@@ -112,7 +112,7 @@ func TestApplyConfigRejectsAndIsAtomic(t *testing.T) {
 		"port":           {"proxy.p.jail_port": "70000"},
 		"proto":          {"proxy.p.proto": "icmp"},
 		"env name":       {"env.1X": "y"},
-		"rate":           {"nic.eth0.ingress": "fast"},
+		"rate":           {"nic.eth0.egress": "fast"},
 		"hostname":       {"hostname": "bad host!"},
 		"list item":      {"boot.depends": "Bad Name"},
 		"injection":      {"firewall.policies": "x\"; rm"},
@@ -200,6 +200,29 @@ func TestConfigValuesRoundTrip(t *testing.T) {
 	var t2 JailSpec
 	if _, err := ApplyConfig(&t2, ConfigValues(s), nil); err != nil || !reflect.DeepEqual(ConfigValues(t2), ConfigValues(s)) {
 		t.Fatalf("%v\n%v\n%v", err, ConfigValues(t2), ConfigValues(s))
+	}
+}
+
+// zfs.delegation is a boolean of the jail itself: global administrators set it, and a profile cannot carry it.
+func TestZFSDelegationKey(t *testing.T) {
+	var s JailSpec
+	restart, err := ApplyConfig(&s, map[string]string{"zfs.delegation": "true"}, nil)
+	if err != nil || !s.Delegate || !reflect.DeepEqual(restart, []string{"zfs.delegation"}) {
+		t.Fatalf("%v %v %+v", err, restart, s)
+	}
+	if v := ConfigValues(s); v["zfs.delegation"] != "true" {
+		t.Fatalf("%v", v)
+	}
+	if _, err := ApplyConfig(&s, map[string]string{"zfs.delegation": "maybe"}, nil); err == nil || !s.Delegate {
+		t.Fatalf("not a boolean: %v %+v", err, s)
+	}
+	if _, err := ApplyConfig(&s, nil, []string{"zfs.delegation"}); err != nil || s.Delegate {
+		t.Fatalf("unset: %v %+v", err, s)
+	}
+	for _, k := range ConfigKeys() {
+		if k.Name == "zfs.delegation" && k.Profile {
+			t.Error("a profile may carry zfs.delegation")
+		}
 	}
 }
 

@@ -27,11 +27,11 @@ func RenderJail(s *Service, project, name string) error {
 	if err != nil {
 		return err
 	}
-	sets, err := s.allSetsWithJails(project)
+	refs, err := s.allRefs(project)
 	if err != nil {
 		return err
 	}
-	_, err = s.buildJail(context.Background(), j, sets)
+	_, err = s.buildJail(context.Background(), j, refs)
 	return err
 }
 

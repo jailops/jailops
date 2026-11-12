@@ -291,7 +291,15 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 		if alpine {
 			upd = []string{"apk", "update", "--no-interactive"}
 		}
-		if _, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, upd...); err != nil {
+		release := func() {}
+		var held error
+		if !alpine {
+			release, held = s.holdJailForPackages(key)
+		}
+		defer release()
+		if held != nil {
+			errs = append(errs, "package catalog: "+held.Error())
+		} else if _, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, upd...); err != nil {
 			errs = append(errs, "package catalog: "+err.Error())
 		} else if out, err := s.pkgUpgrade(ctx, key, alpine, 10*time.Minute, false); err != nil {
 			errs = append(errs, "package check: "+err.Error())
@@ -543,6 +551,15 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 		return rec
 	}
 	alpine := s.jailIsLinux(j)
+	// The host runs pkg against the root of a FreeBSD jail: no session may enter the jail meanwhile.
+	if !alpine {
+		release, err := s.holdJailForPackages(key)
+		if err != nil {
+			rec.Result, rec.Error = api.UpdateFailed, "package catalog: "+err.Error()
+			return rec
+		}
+		defer release()
+	}
 	// The packages that will change, from a dry run.
 	upd := []string{"pkg", "update", "-q"}
 	if alpine {

@@ -18,6 +18,8 @@ import Icon from '@jailops/shared/components/Icon.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import AddressSetCreateDialog from '@/components/AddressSetCreateDialog.vue'
+import FirewallTest from '@/components/FirewallTest.vue'
+import { hasFirewallTest } from '@/composables/fwtest'
 import RenameDialog from '@/components/RenameDialog.vue'
 import { canRename } from '@/composables/rename'
 import { currentProject } from '@/composables/project'
@@ -29,9 +31,9 @@ const l = useLoad(async () => {
 })
 
 const route = useRoute()
-const { tab } = useTabQuery(() => ['policies', 'sets'] as const, 'policies')
+const { tab } = useTabQuery(() => (hasFirewallTest() ? (['policies', 'sets', 'test'] as const) : (['policies', 'sets'] as const)), 'policies')
 let wantDone = false
-const tabItems = computed(() => [{ key: 'policies' as const, label: s.firewall.policies }, { key: 'sets' as const, label: s.firewall.sets }])
+const tabItems = computed(() => [{ key: 'policies' as const, label: s.firewall.policies }, { key: 'sets' as const, label: s.firewall.sets }, ...(hasFirewallTest() ? [{ key: 'test' as const, label: s.firewall.test }] : [])])
 const selected = ref('')
 const draft = ref<FirewallPolicy | null>(null)
 const original = ref('')
@@ -216,7 +218,7 @@ async function setCreated(name: string): Promise<void> {
 function removeSet(): void {
   const name = setSel.value
   const u = users.value
-  const items = [...u.policies.map((p) => `${s.firewall.policy} ${p}`), ...u.sets.map((x) => `@${x}`)]
+  const items = [...u.policies.map((p) => `${s.firewall.policy} ${p}`), ...u.sets.map((x) => `set:${x}`)]
   confirmAction({
     title: s.firewall.deleteSetTitle(name), confirmLabel: s.firewall.deleteSet, danger: true,
     text: items.length ? `${s.firewall.deleteSetText} ${s.firewall.deleteSetUsed(name)}` : s.firewall.deleteSetText,
@@ -229,7 +231,7 @@ const err = (i: number, f: string) => fieldErrors.value[`${i}.${f}`]
 
 // Rename (extension rename, admin in the project; the project's mandatory policy needs a global admin). The editor's
 // If-Match goes with it; afterwards the editor shows the object under its new name, and the rules that named a set
-// as @name name the new one.
+// as set:NAME name the new one.
 const renamingPolicy = ref(false)
 const renamingSet = ref(false)
 const mayRenamePolicy = computed(() => canRename('policy', undefined, { mandatory: currentProject.value?.spec.firewall_policies?.includes(selected.value) }))
@@ -287,7 +289,8 @@ function removePolicy(): void {
     <div class="page-head"><h1>{{ s.firewall.title }}</h1><button v-if="tab === 'policies'" class="btn btn-primary" type="button" data-test="new-policy" @click="openCreate"><Icon name="plus" />{{ s.firewall.create }}</button><button v-else-if="l.data.value?.sets.length" class="btn btn-primary" type="button" data-test="new-set" @click="creatingSet = true"><Icon name="plus" />{{ s.firewall.addSet }}</button></div>
     <TabBar v-model="tab" :tabs="tabItems" :label="s.firewall.sections" id="fw" />
     <div id="fw-panel" role="tabpanel" :aria-labelledby="`fw-tab-${tab}`">
-    <LoadState :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
+    <FirewallTest v-if="tab === 'test'" />
+    <LoadState v-else :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
       <div v-if="tab === 'policies'" class="fw-layout">
         <ul class="plain picker" :aria-label="s.firewall.policies">
           <li v-for="p in l.data.value?.policies" :key="p.metadata.name">
@@ -374,11 +377,11 @@ function removePolicy(): void {
       </div>
       <div v-else class="fw-layout">
         <ul class="plain picker" :aria-label="s.firewall.sets" data-test="set-list">
-          <li v-for="a in l.data.value?.sets" :key="a.metadata.name"><button type="button" class="btn btn-ghost mono" :class="{ sel: setSel === a.metadata.name }" :aria-current="setSel === a.metadata.name" @click="pickSet(a.metadata.name)">@{{ a.metadata.name }}</button></li>
+          <li v-for="a in l.data.value?.sets" :key="a.metadata.name"><button type="button" class="btn btn-ghost mono" :class="{ sel: setSel === a.metadata.name }" :aria-current="setSel === a.metadata.name" @click="pickSet(a.metadata.name)">set:{{ a.metadata.name }}</button></li>
         </ul>
         <section v-if="setDraft" class="panel" data-test="set-editor">
           <header>
-            <div class="row"><h2 class="mono">@{{ setDraft.metadata.name }}</h2><span v-if="setDirty" class="pill warn">{{ s.firewall.unsaved }}</span></div>
+            <div class="row"><h2 class="mono">set:{{ setDraft.metadata.name }}</h2><span v-if="setDirty" class="pill warn">{{ s.firewall.unsaved }}</span></div>
             <div class="row-actions">
               <span v-if="setWhy" class="why-disabled" data-test="set-save-why">{{ setWhy }}</span>
               <button v-if="canRename('addressSet')" class="btn" type="button" data-test="rename-set" @click="renamingSet = true">{{ s.rename.open(s.rename.kinds.addressSet) }}</button>
@@ -390,7 +393,7 @@ function removePolicy(): void {
           <div class="body stack">
             <ErrorPanel v-if="setError" :error="setError" />
             <p v-if="users.policies.length || users.sets.length" class="muted" data-test="set-users">{{ s.firewall.setUsedBy }}:
-              <template v-for="(n, i) in users.policies" :key="'p' + n">{{ i ? ', ' : '' }}<router-link :to="`/firewall?policy=${n}`" class="mono">{{ n }}</router-link></template><template v-for="(n, i) in users.sets" :key="'s' + n">{{ i || users.policies.length ? ', ' : '' }}<span class="mono">@{{ n }}</span></template></p>
+              <template v-for="(n, i) in users.policies" :key="'p' + n">{{ i ? ', ' : '' }}<router-link :to="`/firewall?policy=${n}`" class="mono">{{ n }}</router-link></template><template v-for="(n, i) in users.sets" :key="'s' + n">{{ i || users.policies.length ? ', ' : '' }}<span class="mono">set:{{ n }}</span></template></p>
             <div class="field"><label for="sc">{{ s.firewall.comment }}</label>
               <input id="sc" v-model="setComment" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.setCommentHint" data-test="set-comment" /></div>
             <div class="field"><label for="sa">{{ s.firewall.addresses }}</label>

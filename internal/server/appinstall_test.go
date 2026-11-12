@@ -224,7 +224,7 @@ func TestAppInstall(t *testing.T) {
 		t.Fatalf("pkg calls %q, want %q", pkgCalls, want)
 	}
 	// The jail's bash prompt, sourced by both start-up files of bash.
-	if !strings.Contains(e.File(root+api.PromptFile), `PS1='\[\e[38;5;39m\]\u@\h:\w\$\[\e[0m\] '`) || !strings.Contains(e.File(root+api.BashrcPath), api.PromptFile) || !strings.Contains(e.File(root+api.ProfilePath), api.PromptFile) {
+	if !strings.Contains(e.File(root+api.PromptFile), `PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '`) || !strings.Contains(e.File(root+api.BashrcPath), api.PromptFile) || !strings.Contains(e.File(root+api.ProfilePath), api.PromptFile) {
 		t.Fatalf("prompt files: %v", e.Files.Paths())
 	}
 	// The volume datasets are mounted by the start of the jail, after its root, never by zfs mount -a.
@@ -671,7 +671,7 @@ func TestAppInstallRefusesExec(t *testing.T) {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
 	var ae *api.Error
-	if !errors.As(during, &ae) || ae.Code != api.CodeBusy || !strings.Contains(ae.Message, "the app is being installed") || ae.Hint == "" {
+	if !errors.As(during, &ae) || ae.Code != api.CodeBusy || !strings.Contains(ae.Message, "packages are being installed or updated") || ae.Hint == "" {
 		t.Fatalf("exec during the installation: %v", during)
 	}
 	if other != nil || otherOut != "y\n" {

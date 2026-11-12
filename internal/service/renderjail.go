@@ -6,7 +6,6 @@ import (
 	"jailops.net/jailops/internal/apps"
 	"net/netip"
 	"path"
-	"path/filepath"
 	"slices"
 
 	"jailops.net/jailops/internal/ipam"
@@ -27,8 +26,18 @@ type jailBuild struct {
 	guest map[string]string
 	// ifaces are the jail-side interface names.
 	ifaces []string
-	// devfsRules is the devfs ruleset text of the jail's devices ("" when it has none).
-	devfsRules string
+	// shapes are the devices with a bandwidth limit and rates the bandwidth of each pipe they use (bits per second,
+	// 0 unlimited): the pipes must exist before the jail's anchor is loaded.
+	shapes []render.Shape
+	rates  map[int]uint64
+}
+
+// shapeDev is a device of the jail that has a bandwidth limit, as the loop over its devices sees it.
+type shapeDev struct {
+	index   int
+	host    string
+	gateway string
+	addrs   []string
 }
 
 // Where JailOps writes the guest configuration. rc.conf.local is read by the
@@ -51,7 +60,7 @@ func jailKey(j api.Jail) string {
 	return k
 }
 
-func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api.AddressSetSpec) (*jailBuild, error) {
+func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jailBuild, error) {
 	j.Spec = s.effective(j)
 	name, id := jailKey(j), j.Metadata.UUID
 	project := j.Metadata.Project
@@ -78,6 +87,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 	v6 := 0                        // IPv6 attachments
 	var netSpecs []api.NetworkSpec // the networks in the order the jail attaches them: its nameservers come from them
 	uplink := ""
+	var shaped []shapeDev
 	for i, a := range j.Spec.Network {
 		n, err := s.netKind.get(a.Network)
 		if err != nil {
@@ -135,10 +145,34 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 				linkLocal = append(linkLocal, l)
 			}
 		}
+		if a.Egress != "" {
+			sd := shapeDev{index: i, host: host, gateway: ipam.GatewayIface(n.Spec.Bridge)}
+			for _, v := range []string{a.IPv4, a.IPv6} {
+				if ad, ok := parseAddr(v); ok {
+					sd.addrs = append(sd.addrs, ad.String())
+				}
+			}
+			shaped = append(shaped, sd)
+		}
 		ifs = append(ifs, nif)
 		netSpecs = append(netSpecs, n.Spec)
 		if uplink == "" {
 			uplink = n.Spec.Uplink
+		}
+	}
+	if len(shaped) > 0 {
+		numbers, wants, err := s.shapingPlan()
+		if err != nil {
+			return nil, err
+		}
+		b.rates = map[int]uint64{}
+		for _, w := range wants {
+			b.rates[w.Number] = w.Rate
+		}
+		for _, sd := range shaped {
+			if p, ok := numbers[render.PipeKey{Jail: id, Device: sd.index}]; ok {
+				b.shapes = append(b.shapes, render.Shape{Iface: sd.host, Gateway: sd.gateway, Addrs: sd.addrs, Pipe: p})
+			}
 		}
 	}
 	// Firewall anchor: the project's policies first, then the managed access policy, then the jail's own.
@@ -184,9 +218,9 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 	{
 		if addrs := jailAddrs(j.Spec); len(addrs) > 0 && len(d.Epairs) > 0 {
 			in := render.PFInput{Jail: name, Interfaces: d.Epairs, Addresses: addrs, Tags: j.Spec.Firewall.Tags,
-				TagMembers: map[string][]netip.Addr{}, Sets: sets, Uplink: uplink, AllowRaw: true,
+				TagMembers: map[string][]netip.Addr{}, Sets: refs.sets, Jails: refs.jails, Uplink: uplink, AllowRaw: true,
 				Gateways: uniqStrings(gateways), Antispoof: true, LinkLocal: linkLocal, NoAdvertise: v6 > 0,
-				Foreign: s.foreignPrefixes(project)}
+				Foreign: s.foreignPrefixes(project), MaxStates: s.statesLimit(j), Shaping: b.shapes}
 			// A jail without any policy is open (apart from the isolation of projects); with policies, the strictest
 			// default of them all applies: the project's defaults are a floor that a jail's own policy can open ports
 			// through but cannot turn from deny into allow.
@@ -219,7 +253,6 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 					in.TagMembers[t] = append(in.TagMembers[t], m...)
 				}
 			}
-			in.Sets = withEmptyRefs(in.Sets, specs)
 			if accClosed {
 				in.DefaultIn = "deny"
 			}
@@ -237,28 +270,34 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, sets map[string]api
 	if host == "" {
 		host = j.Metadata.Name
 	}
-	in := render.JailConfInput{Name: name, Path: s.rootMount(name), Hostname: host, OS: osf, Interfaces: b.ifaces, SysVIPC: j.Spec.SysVIPC}
+	in := render.JailConfInput{Name: name, Path: s.rootMount(name), Hostname: host, OS: osf, Interfaces: b.ifaces, SysVIPC: j.Spec.SysVIPC, Where: s.promptContext(name)}
 	if j.Spec.Delegate {
-		// UNVERIFIED: a jail that may mount ZFS needs allow.mount.zfs and
-		// enforce_statfs=1; handing the datasets over (jailed=on, zfs jail) is
-		// the root helper's part and is not wired yet.
+		// The jail manages <container>/delegated itself: jail(8) attaches it (zfs.dataset) once the dataset has the
+		// jailed property, which a global admin's request set when delegation was turned on.
+		ds := s.lcfg.DelegatedDS(name)
+		v, err := s.d.ZFS.Get(ctx, ds, "jailed")
+		if err != nil || v != "on" {
+			return nil, api.Errorf(api.CodeConflict, "the delegated dataset %s of jail %q is not handed over (jailed is not on)", ds, j.Metadata.Name).
+				WithHint("turn zfs_delegation off and on again as a global administrator: jailops config set " + j.Metadata.Name + " zfs.delegation false, then true")
+		}
+		in.ZFSDataset = ds
 		in.Allow = []string{"mount", "mount.zfs"}
 		one := 1
 		in.EnforceStatfs = &one
 	}
 	devRS := 0
 	if osf == api.OSLinux {
-		n, rules, err := render.LinuxDevfsRuleset(render.DevfsDevices(j.Spec.Devfs))
+		n, _, err := render.LinuxDevfsRuleset(render.SpecDevfsDevices(j.Spec))
 		if err != nil {
 			return nil, err
 		}
-		in.DevfsRuleset, b.devfsRules, devRS = n, rules, n
-	} else if len(j.Spec.Devfs) > 0 {
-		n, rules, err := render.DevfsRuleset(render.DevfsDevices(j.Spec.Devfs))
+		in.DevfsRuleset, devRS = n, n
+	} else if devs := render.SpecDevfsDevices(j.Spec); len(devs) > 0 {
+		n, _, err := render.DevfsRuleset(devs)
 		if err != nil {
 			return nil, err
 		}
-		in.DevfsRuleset, b.devfsRules = n, rules
+		in.DevfsRuleset = n
 	}
 	// Volumes are ZFS datasets mounted straight at their path in the root (like the persistent ones), so only
 	// host directories need a nullfs line.
@@ -316,6 +355,9 @@ func (s *Service) Desired(ctx context.Context) (reconcile.Desired, error) {
 	var out reconcile.Desired
 	out.Host = s.hostDesired()
 	out.WireGuard = s.wireguardDesired()
+	if _, pipes, err := s.shapingPlan(); err == nil {
+		out.Pipes = pipes
+	}
 	nets, err := s.netKind.list()
 	if err != nil {
 		return out, err
@@ -343,17 +385,17 @@ func (s *Service) Desired(ctx context.Context) (reconcile.Desired, error) {
 		jails = append(jails, s.jails[n].jail)
 	}
 	s.mu.RUnlock()
-	setsOf := map[string]map[string]api.AddressSetSpec{}
+	refsOf := map[string]fwRefs{}
 	for _, j := range jails {
 		p := j.Metadata.Project
-		if _, ok := setsOf[p]; !ok {
-			sets, err := s.allSetsWithJails(p)
+		if _, ok := refsOf[p]; !ok {
+			refs, err := s.allRefs(p)
 			if err != nil {
 				return out, err
 			}
-			setsOf[p] = sets
+			refsOf[p] = refs
 		}
-		b, err := s.buildJail(ctx, j, setsOf[p])
+		b, err := s.buildJail(ctx, j, refsOf[p])
 		if err != nil {
 			out.Jails = append(out.Jails, reconcile.JailDesired{Name: jailKey(j), ID: j.Metadata.UUID, Project: j.Metadata.Project, Boot: j.Spec.Boot, Problem: err.Error()})
 			continue
@@ -377,12 +419,15 @@ func (h *hooks) PreStart(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	sets, err := s.allSetsWithJails(j.Metadata.Project)
+	refs, err := s.allRefs(j.Metadata.Project)
 	if err != nil {
 		return err
 	}
-	b, err := s.buildJail(ctx, j, sets)
+	b, err := s.buildJail(ctx, j, refs)
 	if err != nil {
+		return err
+	}
+	if err := s.ensurePipes(ctx, b.shapes, b.rates); err != nil {
 		return err
 	}
 	obs, err := reconcile.Observe(ctx, s.d.Net, nil)
@@ -402,11 +447,6 @@ func (h *hooks) PreStart(ctx context.Context, name string) error {
 	f := s.d.Files
 	if err := f.MkdirAll(ctx, s.confDir(name)); err != nil {
 		return err
-	}
-	if b.devfsRules != "" {
-		if err := f.WriteAtomic(ctx, s.devfsRulesPath(name), []byte(b.devfsRules)); err != nil {
-			return err
-		}
 	}
 	if err := f.WriteAtomic(ctx, s.confPath(name), []byte(b.jailConf)); err != nil {
 		return err
@@ -535,9 +575,3 @@ func uniqStrings(in []string) []string {
 }
 
 // placement is where PF rules attach: the bridge by default.
-
-// devfsRulesPath is where the devfs ruleset of a jail is left for the root
-// helper, which loads it before the jail starts. UNVERIFIED.
-func (s *Service) devfsRulesPath(key string) string {
-	return filepath.Join(s.confDir(key), "devfs.rules")
-}

@@ -107,7 +107,7 @@ log_before() { a=$(grep -nF -- "$1" "$FAKE/log" | head -1 | cut -d: -f1); b=$(gr
 snapshot() { (cd "$base/h$n" && find . -type f ! -name log | sort | while read -r f; do echo "== $f"; cat "$f"; done) }
 mutations() { grep -vE '^(id |hostname|zpool list|sysrc (-f [^ ]+ )?-n |sysctl -n |kldstat |pfctl -s |pfctl -nf |service [a-z_]+ status|jailops user list|jailops-priv init .*-dry-run)' "$FAKE/log" || true; }
 # the lines of FILE without the ones jailops-setup adds: must be the original file, line for line
-original_lines() { grep -vxE '# jailops-setup: .*|set state-policy if-bound|scrub in all fragment reassemble|(nat-|rdr-)?anchor "jailops/\*"' "$1"; }
+original_lines() { grep -vxE '# jailops-setup: .*|set state-policy if-bound|scrub in all fragment reassemble|anchor "jailops/\*"' "$1"; }
 backups() { ls "$ROOT/etc" | grep -c 'pf.conf.jailops-setup-' || true; }
 
 # ── cases ────────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -117,8 +117,8 @@ setup -y
 check "exit 0" [ "$rc" = 0 ]
 check "pf.conf created" [ -f "$ROOT/etc/pf.conf" ]
 check "minimal file passes all" grep -qx 'pass all' "$ROOT/etc/pf.conf"
-check "anchors before pass all" before "$ROOT/etc/pf.conf" 'anchor "jailops/*"' 'pass all'
-check "nat-anchor before anchor" before "$ROOT/etc/pf.conf" 'nat-anchor "jailops/*"' 'anchor "jailops/*"'
+check "anchor before pass all" before "$ROOT/etc/pf.conf" 'anchor "jailops/*"' 'pass all'
+check "no translation anchors" eval '! grep -qE "^(nat|rdr)-anchor" "$ROOT/etc/pf.conf"'
 check "checked before loading" log_before "pfctl -nf" "pfctl -f"
 check "loaded" logged "pfctl -f $ROOT/etc/pf.conf"
 check "pf enabled" logged "pfctl -e"
@@ -147,7 +147,7 @@ check "exit 0" [ "$rc" = 0 ]
 check "pf.conf unchanged" cmp -s "$ROOT/etc/pf.conf" "$base/pf.first"
 check "no mutation" [ -z "$(mutations | grep -v '^jailops-priv init\|^jailops doctor')" ]
 check "init again (idempotent)" logged "jailops-priv init -pool tank"
-check "says ok for pf" has "ok: pf runs with the JailOps anchors"
+check "says ok for pf" has "ok: pf runs with the JailOps anchor"
 
 case="pf.conf without anchors, pf running"
 new_host
@@ -170,8 +170,6 @@ check "exit 0" [ "$rc" = 0 ]
 check "existing lines unchanged, in order" eval 'original_lines "$f" | cmp -s - "$base/orig"'
 check "state-policy after the options" before "$f" 'set skip on lo0' 'set state-policy if-bound'
 check "scrub before nat" before "$f" 'scrub in all fragment reassemble' 'nat on $ext_if from 10.0.0.0/8 to any -> ($ext_if)'
-check "nat-anchor before the first nat rule" before "$f" 'nat-anchor "jailops/*"' 'nat on $ext_if from 10.0.0.0/8 to any -> ($ext_if)'
-check "rdr-anchor with it" before "$f" 'rdr-anchor "jailops/*"' 'nat on $ext_if from 10.0.0.0/8 to any -> ($ext_if)'
 check "anchor before the first block" before "$f" 'anchor "jailops/*"' 'block in all'
 check "anchor after translation" before "$f" 'nat on $ext_if from 10.0.0.0/8 to any -> ($ext_if)' 'anchor "jailops/*"'
 check "one backup, equal to the original" eval '[ "$(backups)" = 1 ] && cmp -s "$base/orig" "$ROOT"/etc/pf.conf.jailops-setup-*'
@@ -188,13 +186,11 @@ check "idempotent: unchanged" cmp -s "$f" "$base/pf.first"
 check "idempotent: no second backup" [ "$(backups)" = 1 ]
 check "idempotent: no load" eval '! logged "pfctl -f"'
 
-case="pf.conf with the anchors already"
+case="pf.conf with the anchor already"
 new_host
 cat > "$ROOT/etc/pf.conf" <<'EOF'
 set state-policy if-bound
 scrub in all
-nat-anchor "jailops/*"
-rdr-anchor "jailops/*"
 anchor "jailops/*"
 pass all
 EOF
@@ -203,7 +199,7 @@ setup -y
 check "exit 0" [ "$rc" = 0 ]
 check "unchanged" cmp -s "$ROOT/etc/pf.conf" "$base/orig"
 check "no backup" [ "$(backups)" = 0 ]
-check "says it has the lines" has "has the three anchor lines"
+check "says it has the line" has "has the anchor line"
 check "loaded, because pf did not have them" logged "pfctl -f"
 check "checked first" log_before "pfctl -nf" "pfctl -f"
 
@@ -232,7 +228,6 @@ STDIN=$base/yes setup
 f=$ROOT/etc/pf.conf
 check "exit 0 after yes" [ "$rc" = 0 ]
 check "anchor before the first top-level rule" before "$f" 'anchor "jailops/*"' 'anchor "mine" {'
-check "nat-anchor before the first rule" before "$f" 'rdr-anchor "jailops/*"' 'anchor "mine" {'
 check "existing lines unchanged" eval 'original_lines "$f" | cmp -s - "$base/orig"'
 check "enabled after the warning" logged "pfctl -e"
 

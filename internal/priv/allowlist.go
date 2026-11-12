@@ -5,13 +5,16 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"jailops.net/jailops/internal/render"
 )
 
-// The command allow-list for Runner. lifecycle needs three host tools that
-// work on a jail root from the outside: pkg(8), etcupdate(8) and
-// freebsd-update(8). Each is described by one Rule below; a command that
+// The command allow-list for Runner. lifecycle needs two host tools that
+// work on a jail root from the outside: pkg(8) and etcupdate(8). Each is
+// described by one Rule below (as are the other host tools); a command that
 // matches no rule is refused, and the binary that runs is the rule's fixed
 // absolute path, never a path the caller names.
 //
@@ -91,7 +94,7 @@ var (
 )
 
 // KldModules are the kernel modules kldload and kldstat accept.
-var KldModules = []string{"pf", "if_bridge", "if_epair", "if_wg", "linux", "linux64", "linprocfs", "linsysfs", "fdescfs", "nullfs", "tmpfs", "zfs"}
+var KldModules = []string{"pf", "if_bridge", "if_epair", "if_wg", "linux", "linux64", "linprocfs", "linsysfs", "fdescfs", "nullfs", "tmpfs", "zfs", "dummynet"}
 
 // SysctlWrites are the only sysctls a write is accepted for, each with the
 // pattern its value must match. Writing needs the admin assertion.
@@ -177,6 +180,35 @@ func customRctl(_ Config, _ bool, args []string) error {
 
 func verifyRctl(_ context.Context, l *Local, args []string) error {
 	return jailGuard{l}.managed(strings.TrimPrefix(args[1], "jail:"))
+}
+
+var reDnRate = regexp.MustCompile(`^[1-9][0-9]{0,11}bit/s$`)
+
+// customDnctl accepts "pipe N config bw RATE" (RATE is 0, unlimited, or a number of bit/s), "pipe delete N" and
+// "pipe list", for a pipe number in JailOps's own range. Queues, schedulers and every other pipe parameter are refused.
+func customDnctl(_ Config, _ bool, args []string) error {
+	num := func(s string) (int, bool) {
+		n, err := strconv.Atoi(s)
+		return n, err == nil && strconv.Itoa(n) == s && render.IsManagedPipe(n)
+	}
+	switch {
+	case len(args) == 5 && args[0] == "pipe" && args[2] == "config" && args[3] == "bw":
+		if _, ok := num(args[1]); !ok {
+			return forbidden("dnctl: pipe %q is not a JailOps pipe (%d to %d)", args[1], render.PipeBase, render.PipeBase+render.PipeSpan-1)
+		}
+		if args[4] != "0" && !reDnRate.MatchString(args[4]) {
+			return forbidden("dnctl: bandwidth %q must be 0 or a number followed by bit/s", args[4])
+		}
+		return nil
+	case len(args) == 3 && args[0] == "pipe" && args[1] == "delete":
+		if _, ok := num(args[2]); !ok {
+			return forbidden("dnctl: pipe %q is not a JailOps pipe (%d to %d)", args[2], render.PipeBase, render.PipeBase+render.PipeSpan-1)
+		}
+		return nil
+	case len(args) == 2 && args[0] == "pipe" && args[1] == "list":
+		return nil
+	}
+	return forbidden("dnctl: only pipe N config bw RATE, pipe delete N and pipe list are accepted")
 }
 
 // customPfctl accepts the read-only forms "-s info" and
@@ -387,6 +419,10 @@ var CommandRules = []Rule{
 		Reason: "read the resource accounting (processes, cpu time, memory) of a managed jail; rules are neither read nor set",
 	},
 	{
+		Name: "dnctl", Binary: "/sbin/dnctl", MaxTimeoutSeconds: 10, Custom: customDnctl,
+		Reason: "configure and delete the dummynet pipes of the bandwidth limits, in JailOps's own range of pipe numbers only",
+	},
+	{
 		Name: "pkg", Binary: "/usr/sbin/pkg", Reason: "install and update packages inside a jail root from the outside",
 		Verify: verifyPkg,
 
@@ -411,17 +447,6 @@ var CommandRules = []Rule{
 		Name: "freebsd-version", Binary: "/bin/freebsd-version", MaxTimeoutSeconds: 10,
 		Exact:  [][]string{{"-k"}, {"-u"}},
 		Reason: "report the kernel and the userland version of the host",
-	},
-	{
-		Name: "freebsd-update", Binary: "/usr/sbin/freebsd-update", Reason: "update the base system of a jail root or an image generation",
-		Flags: []flagRule{
-			{Flag: "-b", Path: pathJailTree}, {Flag: "-d", Path: pathState},
-			{Flag: "--currently-running", Value: reRelease}, {Flag: "-r", Value: reRelease},
-			{Flag: "--not-running-from-cron"},
-		},
-		RequiredFlags: []string{"-b"},
-		Subcommands:   []string{"fetch", "install", "upgrade", "rollback", "IDS"},
-		MaxRest:       0, MaxTimeoutSeconds: 3600,
 	},
 }
 
