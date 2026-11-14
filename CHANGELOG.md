@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.0 - 2026-11-14
+
 - **A jail can ask for more time to shut down.** `boot.stop_timeout` (`jailops config set db boot.stop_timeout 60`, or
   `--stop-timeout 60` when the jail is made) is the number of seconds a jail has after its stop command before it is
   killed, from 1 to 3600; unset is the ten seconds of jail(8). It is written as `stop.timeout` into the jail's
