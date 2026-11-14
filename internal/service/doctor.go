@@ -696,7 +696,7 @@ func quickPassesBeforeAnchor(rules string) []string {
 // find their jails, and nothing else says so. A proxy whose capture is still being opened (the reconcile loop started it
 // a moment ago) is a warning, not a failure: it opens on its own.
 func (s *Service) doctorNDPProxy(c *checkSet) {
-	var bad, starting []string
+	var bad, starting, flooded []string
 	proxied := 0
 	nets, _ := s.netKind.list()
 	s.mu.RLock()
@@ -710,6 +710,9 @@ func (s *Service) doctorNDPProxy(c *checkSet) {
 		for _, cd := range s.netStat[o.Meta.Name].Conditions {
 			if cd.Type == "NDPProxy" {
 				answering, reason, msg = cd.Status == api.ConditionTrue, cd.Reason, cd.Message
+			}
+			if cd.Type == "NDPFlood" && cd.Status != api.ConditionTrue {
+				flooded = append(flooded, o.Meta.Name+": "+cd.Message)
 			}
 		}
 		switch {
@@ -730,6 +733,9 @@ func (s *Service) doctorNDPProxy(c *checkSet) {
 	case len(starting) > 0:
 		c.add("network.ndproxy", api.DoctorWarn, "the IPv6 proxy is not answering yet for "+strings.Join(starting, "; ")+"; it opens within a few minutes after the daemon starts",
 			"run jailops doctor again in a few minutes; see the network's NDPProxy condition")
+	case len(flooded) > 0:
+		c.add("network.ndproxy", api.DoctorWarn, "the IPv6 proxy dropped solicitations over its limits: "+strings.Join(flooded, "; "),
+			"a neighbor on the uplink sends far more neighbor solicitations than a segment needs; find it with tcpdump on the uplink (icmp6 and ip6[40] == 135) and ask the provider or the switch's port security to stop it")
 	default:
 		c.add("network.ndproxy", api.DoctorOK, "the IPv6 proxy answers for every proxy-mode network", "")
 	}

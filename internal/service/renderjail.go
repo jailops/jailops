@@ -281,7 +281,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 	if host == "" {
 		host = j.Metadata.Name
 	}
-	in := render.JailConfInput{Name: name, Path: s.rootMount(name), Hostname: host, OS: osf, Interfaces: b.ifaces, SysVIPC: j.Spec.SysVIPC, Where: s.promptContext(name)}
+	in := render.JailConfInput{Name: name, Path: s.rootMount(name), Hostname: host, OS: osf, Interfaces: b.ifaces, SysVIPC: j.Spec.SysVIPC, Where: s.promptContext(name), StopTimeout: j.Spec.Boot.StopTimeout}
 	if j.Spec.Delegate {
 		// The jail manages <container>/delegated itself: jail(8) attaches it (zfs.dataset) once the dataset has the
 		// jailed property, which a global admin's request set when delegation was turned on.

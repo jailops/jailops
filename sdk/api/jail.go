@@ -229,11 +229,17 @@ type ProxyDevice struct {
 	Proto string `json:"proto,omitempty"`
 }
 
-// BootPolicy orders jails at host start.
+// MaxStopTimeout is the largest BootPolicy.StopTimeout, in seconds.
+const MaxStopTimeout = 3600
+
+// BootPolicy orders jails at host start and stop.
 type BootPolicy struct {
 	Autostart bool     `json:"autostart,omitempty"`
 	Priority  int      `json:"priority,omitempty"`
 	Depends   []string `json:"depends,omitempty"`
+	// StopTimeout is how many seconds the jail has to shut down by itself before it is killed (jail(8) stop.timeout);
+	// zero is jail(8)'s own default of ten seconds.
+	StopTimeout int `json:"stop_timeout,omitempty"`
 }
 
 // PowerState is the observed run state of a jail.

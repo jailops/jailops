@@ -3,7 +3,10 @@ package jailos
 import (
 	"context"
 	"errors"
+	"os"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -76,9 +79,25 @@ func (c *Command) Remove(ctx context.Context, confPath, name string) error {
 	if err := validateConf(confPath); err != nil {
 		return err
 	}
-	_, err := c.R.Run(ctx, run.Cmd{Name: "jail", Args: []string{"-f", confPath, "-r", name}, Timeout: 120 * time.Second})
+	_, err := c.R.Run(ctx, run.Cmd{Name: "jail", Args: []string{"-f", confPath, "-r", name}, Timeout: stopRunTime(confPath)})
 	return withConsoleLog(name, mapJailErr(name, err))
 }
+
+// stopRunTime is how long jail -r may run: the stop hooks get two minutes, and the jail gets its stop.timeout on top of
+// that, so that a stop that waits as long as the jail asked is not cut short.
+func stopRunTime(confPath string) time.Duration {
+	t := 120 * time.Second
+	if b, err := os.ReadFile(confPath); err == nil {
+		if m := stopTimeoutRE.FindSubmatch(b); m != nil {
+			if n, err := strconv.Atoi(string(m[1])); err == nil && n > 0 && n <= api.MaxStopTimeout {
+				t += time.Duration(n) * time.Second
+			}
+		}
+	}
+	return t
+}
+
+var stopTimeoutRE = regexp.MustCompile(`(?m)^[ \t]*stop\.timeout[ \t]*=[ \t]*([0-9]+)[ \t]*;`)
 
 // Exec implements Controller.
 func (c *Command) Exec(ctx context.Context, name string, o ExecOpts) (run.Result, error) {

@@ -109,7 +109,8 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 			continue
 		}
 		// Sync only changes the table: the proxy answers only while its capture is open.
-		if st := h.ndp.Status(); !st.Open {
+		st := h.ndp.Status()
+		if !st.Open {
 			reason, msg := "Starting", "the capture of "+uplink+" is being opened"
 			if st.Err != "" {
 				reason, msg = "NoCapture", "the capture of "+uplink+" cannot be opened: "+st.Err
@@ -122,6 +123,12 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 		}
 		for _, b := range uplinkNets[uplink] {
 			setCond(b, true, "Answering", fmt.Sprintf("answering for %d address(es) on %s", len(entries), uplink))
+			if st.FloodsLastHour > 0 {
+				if ns := netStatus[b]; ns != nil {
+					ns.Conditions = append(ns.Conditions, cond(CondProxyFlood, false, "Flooded",
+						fmt.Sprintf("%d solicitation(s) on %s were dropped over the proxy's limits in the last hour", st.FloodsLastHour, uplink), now))
+				}
+			}
 		}
 	}
 	// Uplinks nobody needs any more.

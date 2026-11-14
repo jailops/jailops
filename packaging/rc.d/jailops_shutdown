@@ -15,6 +15,8 @@
 #   jailops_shutdown_enable="NO"     leave the jails to init when the host shuts down
 #   jailops_shutdown_timeout="80"    seconds for all the jails together; the rest are left to init. It must stay below
 #                                    rcshutdown_timeout (90 by default): raise both for a host with slow databases
+#                                    A jail that asks for more than ten seconds (boot.stop_timeout) needs the sum of
+#                                    those times here, one jail after the other
 #   jailops_shutdown_grace=""        seconds, or a duration such as 30s, each jail gets to shut down (empty: the
 #                                    jail's own stop timeout)
 #   service jailops_shutdown stop    the same by hand: it stops every running jail of the host

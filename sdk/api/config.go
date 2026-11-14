@@ -348,6 +348,7 @@ func buildRegistry() []ckey {
 		},
 		unset: func(s *JailSpec, _ string) { s.Boot.Autostart = false }})
 	num("boot.priority", "boot.priority", "Start order: lower starts first.", "10", -1000, 1000, false, func(s *JailSpec) *int { return &s.Boot.Priority })
+	num("boot.stop_timeout", "boot.stop_timeout", "Seconds the jail has to shut down by itself, after its stop command, before it is killed; 0 is the system's ten seconds. A database that needs a minute to close says 60. Written into the jail's configuration at its start.", "60", 0, MaxStopTimeout, true, func(s *JailSpec) *int { return &s.Boot.StopTimeout })
 	list("boot.depends", "boot.depends", "Jails of the project that must run first.", "db,cache", false, false,
 		func(s *JailSpec) *[]string { return &s.Boot.Depends }, nameCheck)
 	add(ckey{ConfigKey: ConfigKey{Name: "update.strategy", Type: "enum", Values: []string{string(UpdateRebase), string(UpdateInPlace), string(UpdateManual)},

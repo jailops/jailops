@@ -125,6 +125,8 @@ type Status struct {
 	Err string
 	// Addresses is the number of proxied addresses.
 	Addresses int
+	// FloodsLastHour is how many solicitations the limits dropped in the last hour.
+	FloodsLastHour uint64
 	Metrics
 }
 
@@ -210,6 +212,12 @@ type Proxy struct {
 	// not prevented here, which design 18.10 says plainly.
 	answered map[answerKey]time.Time
 	tbucket  map[tbKey]*tokenBucket
+	// sources and total bound the solicitations the proxy looks at (flood.go); floodLog counts the drops of the last hour.
+	sources     map[MAC]*sourceBucket
+	total       tokenBucket
+	floodLog    hourLog
+	floodSince  uint64
+	floodLogged time.Time
 	// openErr, openFails and nextOpen describe failed attempts to open the capture.
 	openErr   string
 	openFails int
@@ -249,6 +257,7 @@ func New(cfg Config, deps Deps) (*Proxy, error) {
 		pending:  map[netip.Addr]*announceState{},
 		answered: map[answerKey]time.Time{},
 		tbucket:  map[tbKey]*tokenBucket{},
+		sources:  map[MAC]*sourceBucket{},
 	}, nil
 }
 
@@ -491,14 +500,12 @@ func (p *Proxy) answer(target netip.Addr, r Requester) {
 	}
 	if !tb.take(now, answerPerTarget, answerPerTarget) {
 		p.mu.Unlock()
-		p.m.floods.Add(1)
-		p.m.dropped.Add(1)
+		p.flood()
 		return
 	}
 	p.mu.Unlock()
 	if !p.allow() {
-		p.m.floods.Add(1)
-		p.m.dropped.Add(1)
+		p.flood()
 		return
 	}
 	p.mu.Lock()
@@ -532,8 +539,7 @@ func (p *Proxy) defend(target netip.Addr) {
 	host, router := p.hostMAC, p.cfg.Router
 	p.mu.Unlock()
 	if !ok || !p.allow() {
-		p.m.floods.Add(1)
-		p.m.dropped.Add(1)
+		p.flood()
 		return
 	}
 	flags := uint8(FlagOverride)
@@ -649,6 +655,7 @@ func (p *Proxy) Status() Status {
 	p.mu.Unlock()
 	st.Addresses = p.table.Len()
 	st.Metrics = p.Metrics()
+	st.FloodsLastHour = p.FloodsLastHour()
 	return st
 }
 
@@ -710,6 +717,10 @@ func (p *Proxy) HandleFrame(frame []byte) {
 		p.m.malformed.Add(1)
 		return
 	}
+	if !p.admit(mac) {
+		p.flood()
+		return
+	}
 	res := p.table.Solicit(pkt.Target, Requester{IP: pkt.Src, MAC: mac})
 	if res.Probe {
 		p.probe(pkt.Target)
@@ -722,8 +733,7 @@ func (p *Proxy) HandleFrame(frame []byte) {
 		p.m.unknown.Add(1)
 		p.m.dropped.Add(1)
 	case VerdictFlood:
-		p.m.floods.Add(1)
-		p.m.dropped.Add(1)
+		p.flood()
 	default:
 		p.m.dropped.Add(1)
 	}

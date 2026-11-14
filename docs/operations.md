@@ -209,6 +209,15 @@ runs at boot.
 | `jailops_shutdown_timeout` | `80` | seconds for all the jails together; it must stay below `rcshutdown_timeout` (90 by default), so raise both for a host with slow databases |
 | `jailops_shutdown_grace` | empty | seconds, or a duration such as `30s`, each jail gets to shut down |
 
+### How long a jail gets
+
+After its stop command (`/etc/rc.shutdown`) a jail has ten seconds to end by itself; what is still running then is killed. A database that needs longer says so for itself:
+
+    jailops config set db boot.stop_timeout 60        # seconds, 1 to 3600; 0 is the ten seconds
+    jailops create db ... --stop-timeout 60
+
+The key is written into the jail's configuration at its next start. `jailops stop`, `restart`, `stop-all` and the stop at shutdown all wait as long as the jail asks (`--grace` shortens the wait for one run, and the jail is killed when it passes). The jails are stopped one after the other, so `jailops_shutdown_timeout` has to cover the sum of what the running jails ask for, and `rcshutdown_timeout` has to stay above it: with a database that gets 60 seconds, raise `jailops_shutdown_timeout` to 120 and `rcshutdown_timeout` to 130.
+
 ## Resource limits of a jail
 
 A jail has five limits. They are keys of the jail (`jailops config set JAIL KEY VALUE`, also in a profile or a file) and

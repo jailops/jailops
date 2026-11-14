@@ -471,12 +471,14 @@ type fakeNDP struct {
 	shut    bool
 	openErr string
 	closes  int
+	// floods is what Status reports as dropped over the limits in the last hour.
+	floods uint64
 }
 
 func (f *fakeNDP) Status() ndproxy.Status {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return ndproxy.Status{Open: !f.shut, Err: f.openErr}
+	return ndproxy.Status{Open: !f.shut, Err: f.openErr, FloodsLastHour: f.floods}
 }
 func (f *fakeNDP) Close() error { f.mu.Lock(); f.closes++; f.mu.Unlock(); return nil }
 
@@ -747,5 +749,43 @@ func TestAJustStartedProxyGetsASecondLookBeforeTheInterval(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the loop did not stop")
+	}
+}
+
+// A proxy that dropped solicitations over its limits in the last hour says so on the network, next to the condition that
+// says it answers; without drops there is no such condition.
+func TestNDPProxyReportsDroppedSolicitations(t *testing.T) {
+	ndp := &fakeNDP{run: make(chan struct{})}
+	w := newWorld(t, reconcile.Config{NDP: func(string) (reconcile.NDP, error) { return ndp, nil }})
+	j := jailDesired("web")
+	j.Proxy = []reconcile.ProxyAddr{{Addr: "2001:db8:1::10", Iface: "jo0ha", Uplink: "em0"}}
+	w.des = reconcile.Desired{Networks: []reconcile.NetworkDesired{proxyNet()}, Jails: []reconcile.JailDesired{j}}
+	_ = w.Jails.Create(bg, "/etc/jailops/jails/web/jail.conf", "web")
+	w.R.Pass(bg)
+	<-ndp.run
+	flood := func() *api.Condition {
+		for _, c := range w.netSt["lan"].Conditions {
+			if c.Type == reconcile.CondProxyFlood {
+				return &c
+			}
+		}
+		return nil
+	}
+	w.R.Pass(bg)
+	if c := flood(); c != nil {
+		t.Fatalf("a condition without drops: %+v", c)
+	}
+	ndp.mu.Lock()
+	ndp.floods = 4321
+	ndp.mu.Unlock()
+	w.R.Pass(bg)
+	c := flood()
+	if c == nil || c.Status != api.ConditionFalse || c.Reason != "Flooded" || !strings.Contains(c.Message, "4321") {
+		t.Fatalf("%+v", w.netSt["lan"].Conditions)
+	}
+	for _, cd := range w.netSt["lan"].Conditions {
+		if cd.Type == reconcile.CondProxy && cd.Status != api.ConditionTrue {
+			t.Fatalf("drops must not stop the proxy from answering: %+v", cd)
+		}
 	}
 }

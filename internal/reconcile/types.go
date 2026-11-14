@@ -181,11 +181,13 @@ type NDPFactory func(uplink string) (NDP, error)
 
 // Condition types reported by the loop.
 const (
-	CondReady   = "Ready"
-	CondDrift   = "InSync"
-	CondBoot    = "Autostart"
-	CondProxy   = "NDPProxy"
-	CondNetwork = "Network"
+	CondReady = "Ready"
+	CondDrift = "InSync"
+	CondBoot  = "Autostart"
+	CondProxy = "NDPProxy"
+	// CondProxyFlood is False while the proxy dropped solicitations over its limits in the last hour.
+	CondProxyFlood = "NDPFlood"
+	CondNetwork    = "Network"
 )
 
 func cond(t string, ok bool, reason, msg string, now time.Time) api.Condition {
