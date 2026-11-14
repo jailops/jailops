@@ -7,14 +7,6 @@ import (
 	"jailops.net/jailops/internal/validate"
 )
 
-// The classes of interface a rule stands on: the host-side end of the jail's epair (what the jail sends, and what a
-// bridge hop delivers to it) and the gateway interface of the jail's network (what the host sends to the jail, and
-// what is routed to it, leaves the host there).
-const (
-	IfEpair   = "epair"
-	IfGateway = "gateway"
-)
-
 // The stages of an anchor, in the order the renderer writes them. A rule says which stage it belongs to, so that a
 // reader of a verdict knows what decided it.
 const (
@@ -25,8 +17,8 @@ const (
 	StagePolicy      = "policy"        // a rule of a policy
 	StageRaw         = "raw"           // a raw PF fragment of a policy
 	StageIsolation   = "isolation"     // the subnets of other projects
+	StageHost        = "host"          // the host: closed to the jail unless a rule opened it
 	StageDefault     = "default"       // the defaults of the anchor
-	StageGateway     = "gateway"       // ICMPv6 and neighbour discovery on the gateway interface
 )
 
 // Anchor is a rendered anchor: its lines, and for every filter rule among them what it matches. The rules are in the
@@ -66,10 +58,8 @@ type Rule struct {
 	Line int
 	// Action is "pass" or "block".
 	Action string
-	// Dir is the pf direction: "in" (what the jail sends, on its epair) or "out" (what leaves the host on the interface).
+	// Dir is the pf direction: "in" (what the jail sends, on its link) or "out" (what leaves the host on the jail's link).
 	Dir string
-	// Class is the interface the rule stands on: IfEpair or IfGateway.
-	Class string
 	// Family is "inet", "inet6" or "" for both.
 	Family string
 	// Proto is "", "tcp", "udp", "icmp" or "icmp6".
@@ -189,6 +179,10 @@ func endpointMatch(entries []string, f family, def []netip.Addr, in *PFInput) (M
 			if members, err := validate.FlattenSet(v, in.Sets, in.Jails); err == nil {
 				m.Prefixes = append(m.Prefixes, prefixesOf(members)...)
 			}
+		case validate.EndpointHost:
+			any = true
+			m.Tables = append(m.Tables, HostTable)
+			m.Prefixes = append(m.Prefixes, addrMatch(uniqAddrs(in.Host)).Prefixes...)
 		case validate.EndpointJail:
 			any = true
 			m.Tables = append(m.Tables, "j_"+strings.ReplaceAll(v, "-", "_"))

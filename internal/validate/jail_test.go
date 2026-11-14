@@ -66,7 +66,7 @@ func TestHostMountValidation(t *testing.T) {
 		"dot dot":           spec(api.HostMount{Source: "/tank/../etc", Target: "/mnt/x"}),
 		"onto the root":     spec(api.HostMount{Source: "/tank/media", Target: "/"}),
 		"two on one target": spec(api.HostMount{Source: "/tank/a", Target: "/mnt/x"}, api.HostMount{Source: "/tank/b", Target: "/mnt/x"}),
-		"over a volume": {Image: "fb@stable", Volumes: []api.VolumeMount{{Name: "data", Mount: "/mnt/x"}},
+		"over a volume": {Image: "fb@stable", Volumes: []api.VolumeAttach{{Name: "data", Mount: "/mnt/x"}},
 			HostMounts: []api.HostMount{{Source: "/tank/a", Target: "/mnt/x"}}},
 	} {
 		if err := JailSpec("web", s); err == nil {

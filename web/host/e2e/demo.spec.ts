@@ -393,7 +393,7 @@ test('create jail form validates the name and explains what is missing', async (
 test('IPv6 addresses are compressed, copyable and the network mode is a badge', async ({ page }) => {
   await open(page, '/networks')
   await expect(page.locator('[data-network="edge"] [data-ipv6-mode="proxy"]')).toBeVisible()
-  await expect(page.locator('[data-network="lan"]').getByRole('button', { name: /^Copy 2001:db8:20:1::1$/ })).toBeVisible()
+  await expect(page.locator('[data-network="lan"]').getByRole('button', { name: /^Copy 2001:db8:20:1::\/80$/ })).toBeVisible()
 })
 
 test('network form: proxy mode explains itself, validates inline and creates the network', async ({ page }) => {

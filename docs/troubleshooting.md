@@ -11,8 +11,8 @@ blocked, 8 the test cannot say.
 | Id | Looks at | If it is not ok |
 |---|---|---|
 | `host.release` | the running FreeBSD release | `fail` below 15.1: JailOps targets 15.1 and later; upgrade the host |
-| `kernel.module.<name>` | `if_bridge`, `if_epair`, `pf`, `zfs` (and `linux64`, `linprocfs`, `linsysfs`, `fdescfs` while a Linux jail exists) | `kldload <name>` and add it to `/boot/loader.conf` |
-| `sysctl.<name>` | the bridge `pfil_*` switches against `network.sysctl`; `kern.elf64.fallback_brand` for Linux jails | the daemon sets them at run time through the helper; check that the helper allows them |
+| `kernel.module.<name>` | `if_epair`, `pf`, `zfs` (and `linux64`, `linprocfs`, `linsysfs`, `fdescfs` while a Linux jail exists) | `kldload <name>` and add it to `/boot/loader.conf` |
+| `sysctl.<name>` | `kern.elf64.fallback_brand` for Linux jails | the daemon sets it at run time through the helper; check that the helper allows it |
 | `sysctl.net.inet.ip.forwarding`, `sysctl.net.inet6.ip6.forwarding` | forwarding, while a network needs it | `fail`: `sysctl <name>=1` and the `rc.conf` lines of [install.md](install.md) (JailOps never sets forwarding) |
 | `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` | the host answers the off-link probes of a shared IPv6 segment's routers, while a `proxy`-mode network exists | `warn` (recommended): `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` and the line in `/etc/sysctl.conf`; see below |
 | `host.identity` | host management, module identity ([appliance.md](appliance.md)) | `ok` "not managed" while the module is off (the doctor has no info level); `warn` when only one of `jailopsd.yaml` and `priv.conf` enables it, or on drift: the host name, `/etc/resolv.conf` or the NTP block was changed outside JailOps since it applied them (`jailops host show` names the part; apply again or `jailops host restore`) |
@@ -32,13 +32,12 @@ blocked, 8 the test cannot say.
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
 | `network.dns` | for every network a jail uses: where its jails get their nameservers (the network's `dns`, the host's `/etc/resolv.conf`, or the gateway when the host resolves only through loopback); a gateway is asked one query (`. NS`, one second) once a jail on the network runs | `warn` when the gateway does not answer, refuses (access control) or no nameserver could be worked out; the hint has the resolver and `pf.conf` lines ([networking-ipv6.md](networking-ipv6.md#name-resolution-of-jails)) |
 | `network.epairs` | epairs without a jail | `warn`: the reconcile loop removes them on its next pass |
-| `network.bridges` | an interface with the name of a network's bridge or gateway pair (`<bridge>ga`, `<bridge>gb`) that is not that network's | `fail` names it and what it carries: no JailOps description (made by hand, or a creation of an earlier release that was interrupted), another object's, or someone else's. JailOps changes only interfaces it created and never takes one over by its name, so the network stays down (`ForeignBridge`). Remove a leftover with `ifconfig NAME destroy` (the reconcile loop then makes the network's own), or delete the network and create it with another `--bridge` |
-| `net.descriptions` | every interface JailOps owns carries its description (bridges, gateway pairs, both ends of running jails' epairs, WireGuard interfaces) | `warn` lists them with what they carry: the reconcile loop sets them on its next pass |
+| `net.descriptions` | every interface JailOps owns carries its description (both ends of running jails' epairs, WireGuard interfaces) | `warn` lists them with what they carry: the reconcile loop sets them on its next pass |
 | `wireguard.tools` | only with a WireGuard tunnel: the wg program (`/usr/bin/wg` or `/usr/local/bin/wg`) and the module `if_wg` | `warn`: `pkg install wireguard-tools`; the loop loads `if_wg` (`if_wg_load="YES"` in `/boot/loader.conf` for boot) |
 | `wireguard.forwarding` | a tunnel serves JailOps networks and forwarding is off | `warn`: `gateway_enable=YES` and `sysctl net.inet.ip.forwarding=1` (JailOps never sets forwarding) |
 | `wireguard.firewall` | a loaded pf rule of the host mentions each server's listen port | `warn`: add the rule the hint prints to `pf.conf` and reload it |
 | `logs.forward` | only with log sinks ([logging.md](logging.md)): whether each delivers | `warn`: a sink has failed for more than five minutes (`jailops logs forward status` shows the error, `jailops logs forward test NAME` tries again); `info`: a plain udp or tcp sink goes to a remote address |
-| `network.ndproxy` | every `proxy`-mode network has an answering proxy | `fail`: add `ndp-proxy = <uplink>=<prefix>` to `priv.conf` and restart `jailops_priv`; see the network's `NDPProxy` condition. `warn` in the first minutes after `jailopsd` starts: the capture of the uplink is being opened; run the doctor again |
+| `network.ndproxy` | every `proxy`-mode network has an answering proxy | `fail`: see the network's `NDPProxy` condition, it says what the helper refused or what failed. `warn` in the first minutes after `jailopsd` starts: the capture of the uplink is being opened; run the doctor again |
 | `jails.health` | datasets and records of every jail | `warn` names the damaged jails |
 | `reconcile` | the last reconcile pass | `fail` shows the error; `warn` lists drift (rendered and live state differ) |
 | `render` | every configuration renders | `warn` says which one does not |
@@ -76,17 +75,15 @@ anonymous, like an unauthenticated remote client. Run the command with `sudo`, o
 password is replaced by root with `sudo jailops user set-password NAME`.
 
 **The daemon starts and every ZFS or jail operation fails with `forbidden`.** The helper refuses what `priv.conf` does not allow.
-The message names the line to add (`ndp-proxy`, `admin-host-mount`, ...). Edit `priv.conf` as root, `service jailopsd restart`.
+The message names the line to add (`admin-host-mount`, ...). Edit `priv.conf` as root, `service jailopsd restart`.
 `service jailops_priv checkconfig` prints the effective roots and allow-lists.
 
-**`forbidden: interface "NAME" is not managed by JailOps: ...`.** The helper changes only bridges and epairs that carry
+**`forbidden: interface "NAME" is not managed by JailOps: ...`.** The helper changes only epairs that carry
 JailOps's description, which it gives an interface when it creates it ([security-model.md](security-model.md#interfaces)).
-The rest of the message says what the kernel showed: not a bridge or an epair (the uplink, `lo0`, a tunnel), no JailOps
+The rest of the message says what the kernel showed: not an epair (the uplink, `lo0`, a bridge, a tunnel), no JailOps
 description (made by hand), or a description of someone else. `forbidden: interface "NAME" exists and is not JailOps's;
-the helper never takes over an interface by its name` comes from a creation under a name that is taken. `jailops doctor`
-(`network.bridges`) lists the networks it blocks; remove a leftover with `ifconfig NAME destroy`, or give the network
-another bridge. `invalid: ... has the form of the interfaces of the driver "vmx"` refuses a bridge name such as `vmx0`,
-`bridge0` or `lo0` before anything is made.
+the helper never takes over an interface by its name` comes from a creation under a name that is taken; remove the
+leftover with `ifconfig NAME destroy`.
 
 **`a project is required`.** There is no default project. Pass `--project NAME`, set `JAILOPS_PROJECT`, or
 `jailops project switch NAME`. **`a jail needs a network` / `a jail needs a storage`:** name them with `--network` and `--storage`,
@@ -101,7 +98,7 @@ project that serves, a rule `allow out tcp to ADDRESS port ...` in the project t
 ([networking-ipv6.md](networking-ipv6.md)).
 
 **A jail starts and has no network.** `jailops network show NAME` (conditions), `jailops doctor` (`sysctl.*`, `kernel.module.*`,
-`pf.anchors`). Check that forwarding is on for routed networks and that `pfil_member` is 1.
+`pf.anchors`). Check that forwarding is on and that the host's `pf.conf` lets the jails' traffic out of the uplink.
 
 **A switched-IPv6 jail is not reachable from outside.** `jailops doctor` (`network.ndproxy`); then on the host
 `tcpdump -n -e -i <uplink> 'icmp6 and (ip6[40] == 135 or ip6[40] == 136)'` while the router asks: you should see a neighbor
@@ -153,7 +150,7 @@ The hint says which.
 | `key_not_escrowed` | a raw backup was refused because the key has no escrow | `jailops backup key escrow` |
 | `rate_limited` | too many failed authentications from this source | wait and use the right credential |
 | `not_managed` | JailOps does not manage that part of the host: `host.manage.modules` of `jailopsd.yaml` or `host-manage` of `priv.conf` does not list the module | add the lines the hint names and restart both services, or change the host by hand ([appliance.md](appliance.md)) |
-| `locked` | an encrypted volume of the jail waits for its passphrase (after a boot or a lock); the jail does not start | `jailops jail unlock NAME [--start]` ([storage.md](storage.md#encrypted-volumes)) |
+| `locked` | an encrypted volume of the jail waits for its passphrase (after a boot or a lock); the jail does not start | `jailops volume unlock NAME [--start]` ([storage.md](storage.md#encrypted-volumes)) |
 | `bad_passphrase` | the passphrase of the encrypted volumes is wrong (five in a row: `rate_limited` for 30 seconds) | type it again; a lost passphrase cannot be recovered |
 | `maintenance`, `missing_chunks`, `lease_expired`, `plaintext_denied` | backup node states | `jailops explain CODE` |
 | `not_leader`, `no_quorum`, `version_skew` | cluster and version states (cluster mode is not built) | `jailops explain CODE` |

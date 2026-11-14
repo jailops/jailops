@@ -24,7 +24,7 @@ boot.depends, which start even when they have no autostart of their own; among
 the jails that are ready, the lower boot.priority starts first, then the name. A
 jail whose dependencies form a cycle or do not exist is not started, and neither
 is a jail with an encrypted volume: it waits for its passphrase after a boot
-('jailops jail unlock'), and starts then.
+('jailops volume unlock'), and starts then.
 
 You see the jails of every project you may use, whatever project you chose; --project
 shows one project. The order among the jails is the host's. No project needs to be chosen.

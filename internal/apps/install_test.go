@@ -51,9 +51,17 @@ func TestVolumesAndLimits(t *testing.T) {
 			t.Errorf("%s: %q, want %q", in, got, want)
 		}
 	}
-	vols := Volumes([]api.AppPath{{Path: "/var/db/x"}, {Path: "/var/db.x"}, {Path: "/var/db-x"}})
-	if len(vols) != 3 || vols[0].Name != "var-db-x" || vols[1].Name != "var-db-x-2" || vols[2].Name != "var-db-x-3" || vols[2].Mount != "/var/db-x" {
+	vols := Volumes("db", []api.AppPath{{Path: "/var/db/x"}, {Path: "/var/db.x"}, {Path: "/var/db-x"}})
+	if len(vols) != 3 || vols[0].Name != "db-var-db-x" || vols[1].Name != "db-var-db-x-2" || vols[2].Name != "db-var-db-x-3" || vols[2].Mount != "/var/db-x" {
 		t.Errorf("%+v", vols)
+	}
+	// every name is a valid volume name, whatever the jail and the path are called
+	for _, jail := range []string{"db", "a-jail-with-quite-a-long-name", "a-jail-with-the-longest-name-ok"} {
+		for _, v := range Volumes(jail, []api.AppPath{{Path: "/var/db/postgres"}, {Path: "/var/db.postgres"}, {Path: "/usr/local/www/data/uploads"}}) {
+			if len(v.Name) > MaxVolumeName || strings.HasSuffix(v.Name, "-") || !strings.HasPrefix(v.Name, jail[:min(len(jail), MaxVolumeName-3)]) {
+				t.Errorf("%s: volume name %q", jail, v.Name)
+			}
+		}
 	}
 	if l := Limits(api.AppResources{Memory: "1G", Disk: "10G", CPU: "1.5"}); l.CPU != 2 || l.Memory != "1G" || l.Disk != "10G" || l.PIDs != 0 {
 		t.Errorf("%+v", l)

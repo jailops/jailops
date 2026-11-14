@@ -64,11 +64,11 @@ func TestFirewallTestWalksTheRenderedAnchors(t *testing.T) {
 	if by == nil || by.Stage != "policy" || by.Policy != "postgres" || by.Rule != 1 || by.Comment != "who may reach PostgreSQL" || !strings.Contains(by.PF, "5432") {
 		t.Fatalf("the rule that let web in: %+v", by)
 	}
-	if h := res.Cases[0].Hops[0]; h.Side != "source" || h.Interface != "epair" || h.Direction != "in" || h.Jail != "web" {
-		t.Fatalf("the first hop is the source jail's own port: %+v", h)
+	if h := res.Cases[0].Hops[0]; h.Side != "source" || h.Direction != "in" || h.Jail != "web" {
+		t.Fatalf("the first hop is the source jail's own link: %+v", h)
 	}
-	if h := last(res); h.Side != "destination" || h.Interface != "gateway" || h.Direction != "out" || h.Anchor != "jailops/alpha/db" {
-		t.Fatalf("the last hop is the destination's gateway interface: %+v", h)
+	if h := last(res); h.Side != "destination" || h.Direction != "out" || h.Anchor != "jailops/alpha/db" {
+		t.Fatalf("the last hop is the destination's own link: %+v", h)
 	}
 	// another port, and another jail, are blocked by the default of the destination
 	for _, c := range []struct {

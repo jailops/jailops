@@ -1,9 +1,9 @@
 package api
 
-// Network is a managed VNET bridge with deterministic address allocation.
-// jailops creates the bridge and the epair interfaces, configures addresses
-// and routes inside the jail, and installs the host-side addresses. There is
-// no DHCP, no router advertisement and no SLAAC.
+// Network is an address range with an uplink policy and deterministic address allocation. It has no kernel object:
+// every jail attachment is its own routed link (an epair whose host end carries the gateway address), and the host
+// is the router. jailops creates the epair interfaces, configures addresses and routes inside the jail, and installs
+// the host-side addresses and routes. There is no DHCP, no router advertisement and no SLAAC.
 type Network struct {
 	Metadata ObjectMeta    `json:"metadata"`
 	Spec     NetworkSpec   `json:"spec"`
@@ -12,26 +12,22 @@ type Network struct {
 
 // NetworkSpec is the desired state of a network.
 type NetworkSpec struct {
-	// Bridge is the if_bridge name: any interface name of at most 13 characters that is free on the host and not a
-	// driver's (vmx0, bridge0, ...). It defaults to the network's name when that is such a name, else to a generated
-	// "jo<n>"; it is set when the network is created and never changes (a rename of the network keeps it). JailOps
-	// creates it with its description and never modifies an interface it did not create.
-	Bridge string `json:"bridge,omitempty"`
-	// Uplink is the physical interface used for NAT or routing. In IPv6
-	// proxy mode it must never be a member of the bridge.
+	// Uplink is the physical interface used for NAT or routing. In IPv6 proxy mode it must be a plain interface (not a
+	// member of a bridge).
 	Uplink string   `json:"uplink,omitempty"`
 	IPv4   *IPv4Net `json:"ipv4,omitempty"`
 	IPv6   *IPv6Net `json:"ipv6,omitempty"`
 	DNS    []string `json:"dns,omitempty"`
-	// MTU of the bridge and its members; zero keeps the default.
+	// MTU of the epair ends of the network's jails; zero keeps the default.
 	MTU int `json:"mtu,omitempty"`
 }
 
 // IPv4Net configures IPv4 on a network.
 type IPv4Net struct {
 	Subnet string `json:"subnet"` // 10.20.0.0/24
-	// Gateway is a real address owned by the host, configured on the host end (<bridge>gb) of a gateway epair whose
-	// other end is a port of the bridge; the bridge itself carries no address.
+	// Gateway is an address of the host inside the subnet. It is configured as a /32 on the host end of every jail's
+	// epair, so each jail finds it on its own link; it is also the address jails ask for DNS when the host resolves
+	// only through loopback.
 	Gateway string `json:"gateway"`
 	// Range is the inclusive span jailops may allocate from, "a-b".
 	Range string `json:"range"`
@@ -45,12 +41,12 @@ type IPv4Net struct {
 type IPv6Mode string
 
 const (
-	// IPv6Routed: the upstream routes a prefix to the host. The bridge owns
-	// the prefix and no NDP proxy is involved.
+	// IPv6Routed: the upstream routes a prefix to the host. Unallocated addresses of the prefix are rejected, and no
+	// NDP proxy is involved.
 	IPv6Routed IPv6Mode = "routed"
 	// IPv6Proxy: the upstream treats the jail addresses as on-link. jailops
 	// answers neighbor solicitations for allocated addresses on the uplink
-	// and routes /128 host routes through the bridge.
+	// and routes each address to its jail with a /128 host route.
 	IPv6Proxy IPv6Mode = "proxy"
 	IPv6None  IPv6Mode = "none"
 )
@@ -59,15 +55,14 @@ const (
 type IPv6Net struct {
 	Mode    IPv6Mode `json:"mode"`
 	Subnet  string   `json:"subnet"`
-	Gateway string   `json:"gateway"` // link-local is allowed
 	Range   string   `json:"range"`
 	Exclude []string `json:"exclude,omitempty"`
 }
 
 // NetworkStatus is the observed state of a network on one host.
 type NetworkStatus struct {
-	BridgeUp  bool     `json:"bridge_up,omitempty"`
-	Members   []string `json:"members,omitempty"`
+	// Links are the host ends of the epairs of the jails that run on the network.
+	Links     []string `json:"links,omitempty"`
 	Allocated int      `json:"allocated,omitempty"`
 	Free      int      `json:"free,omitempty"`
 	// Orphans are epair interfaces without a jail.

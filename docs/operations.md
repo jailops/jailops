@@ -65,7 +65,7 @@ administrator can do within those bounds, and holds everything the daemon holds.
 | The server certificate's key (self-signed) | `tls/server.{crt,key}` | remove both and restart: a new one is generated; every client pins the new fingerprint, and a hub's hosts trust its new client certificate |
 | ACME account and certificate keys | `tls/acme` | remove `tls/acme/account.key` with the daemon stopped and request again (`jailops host certificate acme`); the certificate key is new at every order. JailOps cannot revoke the old certificate at the CA |
 | Sealed secrets of jails (`sealed:age:`) | `secrets.key` opens them | treat every sealed value as read: change it where it is used. There is no command to replace `secrets.key` and seal again |
-| Passphrases of encrypted volumes | never stored, but typed through the daemon | change those typed while it was compromised: `jailops jail passphrase NAME` |
+| Passphrases of encrypted volumes | never stored, but typed through the daemon | change those typed while it was compromised: `jailops volume passphrase NAME` |
 | WireGuard keys | in the helper's `wireguard-dir`, never in the daemon | not exposed; a join token shown while compromised held a peer's key: remove that peer (`jailops wireguard peer remove SERVER PEER`) and enrol it again. `jailops wireguard rotate-keys NAME` gives a tunnel a new key pair |
 | The backup key | `backup.key`, readable by the daemon | assume the backups can be read by whoever reaches the node. Rotation is a new repository; see below |
 | The backup node client key | `backup-client.key` | revoke and enrol a new one on the node |
@@ -186,7 +186,7 @@ A jail starts when the host boots only when it has **autostart**. A jail that wa
     jailops list -c name,state,autostart              # which jails have it
     jailops boot                                      # in which order they start, and which do not
 
-`jailops boot` shows what the daemon's boot pass would do after a boot of the host, from the jails as they are now: the jails in the order they start, with the reason (`autostart`, or `dependency of NAME`), and the jails with autostart that it does not start, with why. A jail starts after the jails in its `boot.depends`, which start too even without autostart of their own; among the jails that are ready, the lower `boot.priority` starts first, then the name. Almost nobody needs `boot.depends` and `boot.priority`: `jailops config set web boot.depends db` and `boot.priority 10` are there for the case where one jail must be up before another. A cycle, a dependency that does not exist, and a jail with an encrypted volume (it waits for its passphrase after every boot: `jailops jail unlock`) are listed as not started, and so is a jail that depends on one of them. The order is that of the whole host; you see the jails of every project you may use, or one project with `--project`. `jailopsd` starts the jails once, in its first pass after it starts (`reconcile.autostart` of `jailopsd.yaml`).
+`jailops boot` shows what the daemon's boot pass would do after a boot of the host, from the jails as they are now: the jails in the order they start, with the reason (`autostart`, or `dependency of NAME`), and the jails with autostart that it does not start, with why. A jail starts after the jails in its `boot.depends`, which start too even without autostart of their own; among the jails that are ready, the lower `boot.priority` starts first, then the name. Almost nobody needs `boot.depends` and `boot.priority`: `jailops config set web boot.depends db` and `boot.priority 10` are there for the case where one jail must be up before another. A cycle, a dependency that does not exist, and a jail with an encrypted volume (it waits for its passphrase after every boot: `jailops volume unlock`) are listed as not started, and so is a jail that depends on one of them. The order is that of the whole host; you see the jails of every project you may use, or one project with `--project`. `jailopsd` starts the jails once, in its first pass after it starts (`reconcile.autostart` of `jailopsd.yaml`).
 
 ## Stop at shutdown
 
@@ -262,7 +262,7 @@ without anyone polling for it:
 |---|---|---|---|
 | `host-zfs-error` | a pool or a device reports a checksum, I/O, data or device error, a failed probe or a failed pool load | the host | global identities |
 | `host-zfs-pool` | a device of a pool changed state or was removed, a scrub finished or was aborted | the host | global identities |
-| `host-link-down`, `host-link-up` | the link of the uplink of a network, or of a managed bridge or gateway interface, changed | the host | global identities |
+| `host-link-down`, `host-link-up` | the link of the uplink of a network changed | the host | global identities |
 | `jail-limit-hit` | a resource limit with the rctl action `devctl` that names a jail of JailOps was reached | the jail | those who may use its project |
 
 The `detail` of an event is one line of text: `pool tank: checksum on /dev/da0`. The ends of a jail's epair change state

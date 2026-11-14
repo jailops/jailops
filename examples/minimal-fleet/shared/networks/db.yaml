@@ -1,9 +1,9 @@
 apiVersion: jailops/v1
 kind: Network
 metadata:
-  name: br-db
+  name: db
 spec:
-  # A bridge for the db project alone: a network belongs to one project.
+  # A network for the db project alone: a network belongs to one project.
   ipv4:
     subnet: 10.60.0.0/24
     gateway: 10.60.0.1

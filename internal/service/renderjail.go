@@ -6,7 +6,6 @@ import (
 	"jailops.net/jailops/internal/apps"
 	"net/netip"
 	"path"
-	"slices"
 
 	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/reconcile"
@@ -34,10 +33,9 @@ type jailBuild struct {
 
 // shapeDev is a device of the jail that has a bandwidth limit, as the loop over its devices sees it.
 type shapeDev struct {
-	index   int
-	host    string
-	gateway string
-	addrs   []string
+	index           int
+	host            string
+	egress, ingress bool
 }
 
 // Where JailOps writes the guest configuration. rc.conf.local is read by the
@@ -81,13 +79,12 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 		}
 	}
 	var ifs []render.NetIface
-	var gateways []string // the l3 end of the gateway pair of each network: what pf sees of traffic to and from the host
 	var macs []string
 	var linkLocal []netip.Addr     // the kernel forms them from the MACs above
-	v6 := 0                        // IPv6 attachments
 	var netSpecs []api.NetworkSpec // the networks in the order the jail attaches them: its nameservers come from them
 	uplink := ""
 	var shaped []shapeDev
+	var hostAddrs, dnsAddrs []netip.Addr // the host's addresses the jail meets, and the resolver it is pointed at
 	for i, a := range j.Spec.Network {
 		n, err := s.netKind.get(a.Network)
 		if err != nil {
@@ -98,7 +95,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			return nil, err
 		}
 		in := render.AttachInput{JailID: id, JailUUID: id, Index: i, Project: project, Jail: j.Metadata.Name, Network: a.Network,
-			Bridge: n.Spec.Bridge, MAC: a.MAC, MTU: attachMTU(a, n.Spec.MTU),
+			MAC: a.MAC, MTU: attachMTU(a, n.Spec.MTU),
 			Uplink: n.Spec.Uplink, HostConfigured: osf == api.OSLinux}
 		nif := render.NetIface{Name: jailEnd, MTU: attachMTU(a, n.Spec.MTU)}
 		if ad, ok := parseAddr(a.IPv4); ok && n.Spec.IPv4 != nil {
@@ -109,12 +106,11 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 		if ad, ok := parseAddr(a.IPv6); ok && n.Spec.IPv6 != nil {
 			sub, _ := netip.ParsePrefix(n.Spec.IPv6.Subnet)
 			in.IPv6 = netip.PrefixFrom(ad, ipam.GuestPrefixLen6(n.Spec.IPv6.Mode, sub.Bits()))
-			in.Gateway6 = ipam.JailGateway6(n.Spec.IPv6)
+			in.Gateway6 = ipam.GatewayLinkLocal6
 			in.IPv6Mode = n.Spec.IPv6.Mode
-			v6++
 			nif.IPv6, nif.Gateway6 = in.IPv6, in.Gateway6
 			if n.Spec.IPv6.Mode == api.IPv6Proxy {
-				d.Proxy = append(d.Proxy, reconcile.ProxyAddr{Addr: ad.String(), Bridge: ipam.GatewayIface(n.Spec.Bridge), Uplink: n.Spec.Uplink})
+				d.Proxy = append(d.Proxy, reconcile.ProxyAddr{Addr: ad.String(), Iface: host, Uplink: n.Spec.Uplink})
 			}
 		}
 		steps, err := render.AttachPlan(in)
@@ -131,8 +127,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			}
 		}
 		d.Attach = append(d.Attach, hostSteps)
-		d.Bridges = append(d.Bridges, n.Spec.Bridge)
-		gateways = append(gateways, ipam.GatewayIface(n.Spec.Bridge))
+		d.Networks = append(d.Networks, a.Network)
 		d.Epairs = append(d.Epairs, host)
 		b.ifaces = append(b.ifaces, jailEnd)
 		if a.MAC != "" {
@@ -145,14 +140,23 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 				linkLocal = append(linkLocal, l)
 			}
 		}
-		if a.Egress != "" {
-			sd := shapeDev{index: i, host: host, gateway: ipam.GatewayIface(n.Spec.Bridge)}
-			for _, v := range []string{a.IPv4, a.IPv6} {
-				if ad, ok := parseAddr(v); ok {
-					sd.addrs = append(sd.addrs, ad.String())
+		if a.Egress != "" || a.Ingress != "" {
+			shaped = append(shaped, shapeDev{index: i, host: host, egress: a.Egress != "", ingress: a.Ingress != ""})
+		}
+		if n.Spec.IPv4 != nil {
+			if g, err := netip.ParseAddr(n.Spec.IPv4.Gateway); err == nil {
+				hostAddrs = append(hostAddrs, g)
+			}
+		}
+		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+			hostAddrs = append(hostAddrs, ipam.GatewayLinkLocal6)
+		}
+		if d := s.networkDNS(a.Network, n.Spec); d != nil && d.Source == api.DNSFromGateway {
+			for _, ns := range d.Nameservers {
+				if x, err := netip.ParseAddr(ns); err == nil {
+					dnsAddrs = append(dnsAddrs, x)
 				}
 			}
-			shaped = append(shaped, sd)
 		}
 		ifs = append(ifs, nif)
 		netSpecs = append(netSpecs, n.Spec)
@@ -170,8 +174,15 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			b.rates[w.Number] = w.Rate
 		}
 		for _, sd := range shaped {
-			if p, ok := numbers[render.PipeKey{Jail: id, Device: sd.index}]; ok {
-				b.shapes = append(b.shapes, render.Shape{Iface: sd.host, Gateway: sd.gateway, Addrs: sd.addrs, Pipe: p})
+			sh := render.Shape{Iface: sd.host}
+			if sd.egress {
+				sh.Egress = numbers[render.PipeKey{Jail: id, Device: sd.index}]
+			}
+			if sd.ingress {
+				sh.Ingress = numbers[render.PipeKey{Jail: id, Device: sd.index, Ingress: true}]
+			}
+			if sh.Egress != 0 || sh.Ingress != 0 {
+				b.shapes = append(b.shapes, sh)
 			}
 		}
 	}
@@ -219,7 +230,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 		if addrs := jailAddrs(j.Spec); len(addrs) > 0 && len(d.Epairs) > 0 {
 			in := render.PFInput{Jail: name, Interfaces: d.Epairs, Addresses: addrs, Tags: j.Spec.Firewall.Tags,
 				TagMembers: map[string][]netip.Addr{}, Sets: refs.sets, Jails: refs.jails, Uplink: uplink, AllowRaw: true,
-				Gateways: uniqStrings(gateways), Antispoof: true, LinkLocal: linkLocal, NoAdvertise: v6 > 0,
+				Antispoof: true, LinkLocal: linkLocal, Host: append(s.hostAddrs(ctx), hostAddrs...), DNS: dnsAddrs,
 				Foreign: s.foreignPrefixes(project), MaxStates: s.statesLimit(j), Shaping: b.shapes}
 			// A jail without any policy is open (apart from the isolation of projects); with policies, the strictest
 			// default of them all applies: the project's defaults are a floor that a jail's own policy can open ports
@@ -299,9 +310,16 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 		}
 		in.DevfsRuleset = n
 	}
-	// Volumes are ZFS datasets mounted straight at their path in the root (like the persistent ones), so only
-	// host directories need a nullfs line.
+	// The volumes the jail attaches are mounted on the host at their own mountpoint and reach the jail through nullfs,
+	// like the host directories it is granted.
 	var vols []render.FstabVolume
+	att, err := s.attachedVolumes(name)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range att {
+		vols = append(vols, render.FstabVolume{Source: a.Mountpoint, Target: a.Path, ReadOnly: a.ReadOnly})
+	}
 	for _, m := range j.Spec.HostMounts {
 		vols = append(vols, render.FstabVolume{Source: m.Source, Target: m.Target, ReadOnly: m.ReadOnly})
 	}
@@ -363,8 +381,8 @@ func (s *Service) Desired(ctx context.Context) (reconcile.Desired, error) {
 		return out, err
 	}
 	for _, n := range nets {
-		nd := reconcile.NetworkDesired{Name: n.Meta.Name, ID: n.Meta.UUID, Bridge: n.Spec.Bridge, Spec: n.Spec}
-		steps, err := render.NetworkPlan(render.NetworkInput{ID: n.Meta.UUID, Name: n.Meta.Name, Bridge: n.Spec.Bridge, Spec: n.Spec})
+		nd := reconcile.NetworkDesired{Name: n.Meta.Name, ID: n.Meta.UUID, Spec: n.Spec}
+		steps, err := render.NetworkPlan(render.NetworkInput{ID: n.Meta.UUID, Name: n.Meta.Name, Spec: n.Spec})
 		if err != nil {
 			nd.Problem = err.Error()
 		} else {
@@ -410,7 +428,7 @@ func (s *Service) Desired(ctx context.Context) (reconcile.Desired, error) {
 type hooks struct{ s *Service }
 
 // PreStart renders the jail's configuration and makes sure its networks exist.
-// The epair, bridge membership, jail-phase and firewall work happens in the
+// The epair, jail-phase and firewall work happens in the
 // exec hooks of jail.conf, which jail(8) runs through jailops-priv; the
 // rendered PF anchor is left where that hook reads it. It is idempotent.
 func (h *hooks) PreStart(ctx context.Context, name string) error {
@@ -495,18 +513,15 @@ func (s *Service) writeAnchorFile(ctx context.Context, name, ruleset string) err
 	return s.d.Files.WriteAtomic(ctx, p, []byte(ruleset))
 }
 
-// ensureNetwork brings one network's bridge up before a jail attaches.
+// ensureNetwork brings one network up (its sysctl preconditions, reject routes and anchor) before a jail attaches.
 func (s *Service) ensureNetwork(ctx context.Context, name string, obs *reconcile.Observed) error {
 	n, err := s.netKind.get(name)
 	if err != nil {
 		return err
 	}
-	steps, err := render.NetworkPlan(render.NetworkInput{ID: n.Meta.UUID, Name: name, Bridge: n.Spec.Bridge, Spec: n.Spec})
+	steps, err := render.NetworkPlan(render.NetworkInput{ID: n.Meta.UUID, Name: name, Spec: n.Spec})
 	if err != nil {
 		return err
-	}
-	if i, ok := obs.Ifaces[n.Spec.Bridge]; ok && !render.OwnsIface(i.Description, render.NetBridgeDesc(name)) {
-		return api.Errorf(api.CodeConflict, "interface %s exists and is not managed by JailOps", n.Spec.Bridge)
 	}
 	unlock, err := s.locks.lockPatient(ctx, "prepare network "+name, networkLock(name))
 	if err != nil {
@@ -563,15 +578,3 @@ func attachMTU(a api.NetworkAttach, network int) int {
 	}
 	return network
 }
-
-func uniqStrings(in []string) []string {
-	var out []string
-	for _, x := range in {
-		if !slices.Contains(out, x) {
-			out = append(out, x)
-		}
-	}
-	return out
-}
-
-// placement is where PF rules attach: the bridge by default.

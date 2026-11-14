@@ -27,7 +27,7 @@ func devdCheck(t *testing.T, e *dtest.Env) (api.DoctorCheck, bool) {
 	return api.DoctorCheck{}, false
 }
 
-// The kernel's notifications of devd become events: a link change of a managed bridge, a ZFS error, a limit a jail hit;
+// The kernel's notifications of devd become events: a link change of the uplink, a ZFS error, a limit a jail hit;
 // what JailOps does not own, and what it does not know, is left out.
 func TestDevdNotificationsBecomeEvents(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "devd.pipe")
@@ -46,8 +46,8 @@ func TestDevdNotificationsBecomeEvents(t *testing.T) {
 	e := dtest.New(t, dtest.Options{Mutate: func(c *daemon.Config) { c.Devd.Enable, c.Devd.Pipe = &on, path }})
 	e.Seed()
 	mustJail(t, e, "web")
-	lan, err := e.Admin.Networks().Get(ctxT(t), "lan")
-	if err != nil || lan.Spec.Bridge == "" {
+	lan, err := e.Admin.Networks().Patch(ctxT(t), "lan", map[string]any{"spec": map[string]any{"uplink": "em0"}}, "")
+	if err != nil || lan.Spec.Uplink != "em0" {
 		t.Fatalf("%v %+v", err, lan.Spec)
 	}
 	var conn *net.UnixConn
@@ -76,11 +76,11 @@ func TestDevdNotificationsBecomeEvents(t *testing.T) {
 		"!system=IFNET subsystem=wlan0 type=LINK_DOWN",                                     // not JailOps's
 		"!system=JAILOPS subsystem=test type=ping",                                         // unknown
 		"!system=RCTL subsystem=rule type=matched rule=jail:alpha_nobody:maxproc:devctl=1", // not a jail of this host
-		"!system=IFNET subsystem=" + lan.Spec.Bridge + " type=LINK_DOWN",
+		"!system=IFNET subsystem=" + lan.Spec.Uplink + " type=LINK_DOWN",
 		"!system=ZFS subsystem=ZFS type=ereport.fs.zfs.checksum pool=tank vdev_path=/dev/da0",
 		"!system=RCTL subsystem=rule type=matched rule=jail:alpha_web:memoryuse:devctl=1073741824 jail=alpha_web",
 	} {
-		if _, err := conn.Write([]byte(rec)); err != nil {
+		if _, err := conn.Write([]byte(rec + "\n")); err != nil { // devd ends every record with a newline
 			t.Fatal(err)
 		}
 	}

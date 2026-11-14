@@ -38,7 +38,7 @@ func (s *Service) BootPlan(ctx context.Context) (api.BootPlan, error) {
 			}
 		}
 		for _, v := range spec.Volumes {
-			if v.Encrypted {
+			if o, err := s.volKind.p(j.Metadata.Project).get(v.Name); err == nil && o.Spec.Encrypted {
 				b.Encrypted = true
 			}
 		}

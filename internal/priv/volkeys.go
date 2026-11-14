@@ -21,9 +21,9 @@ import (
 // no argv, no audit line and no error. The helper feeds it to zfs on standard input: zfs reads a passphrase from a
 // stdin that is not a terminal as one line.
 //
-// The operations accept only what JailOps creates: a dataset named <container>/data/<volume> below a registered
-// storage root, managed (jailops:managed=on set locally), of kind volume, below a parent of kind volumes, and, except
-// at creation, its own encryption root with keyformat=passphrase.
+// The operations accept only what JailOps creates: a dataset named <storage root>/projects/<project>/volumes/<volume>,
+// managed (jailops:managed=on set locally), of kind volume, below a parent of kind volumes, and, except at creation,
+// its own encryption root with keyformat=passphrase.
 //
 // UNVERIFIED: the zfs commands below were not run on FreeBSD by this change (scripts/ci-freebsd-e2e.sh has the
 // block): that create, load-key and change-key read one line from a stdin that is not a terminal, that
@@ -142,7 +142,7 @@ func (l *Local) localProp(m map[string]zfs.Prop, k string) string {
 	return ""
 }
 
-// volumeParent checks that parent is the managed volumes dataset of a jail.
+// volumeParent checks that parent is the managed volumes dataset of a project: <storage root>/projects/<project>/volumes.
 func (l *Local) volumeParent(ctx context.Context, parent string) error {
 	if err := (zfsGuard{l}).managed(ctx, parent); err != nil {
 		return err
@@ -151,13 +151,27 @@ func (l *Local) volumeParent(ctx context.Context, parent string) error {
 	if err != nil {
 		return err
 	}
-	if l.localProp(m, "jailops:kind") != "volumes" || !strings.HasSuffix(parent, "/data") {
-		return forbidden("%s is not the volumes dataset of a jail", parent)
+	if l.localProp(m, "jailops:kind") != "volumes" || !l.cfg.isVolumesDataset(parent) {
+		return forbidden("%s is not the volumes dataset of a project", parent)
 	}
 	return nil
 }
 
-// encryptedVolume checks that ds is an encrypted volume of a managed jail and returns its key status.
+// isVolumesDataset reports whether ds is <storage root>/projects/<project>/volumes.
+func (c Config) isVolumesDataset(ds string) bool {
+	e, ok := c.rootOf(ds)
+	if !ok {
+		return false
+	}
+	rest, ok := strings.CutPrefix(ds, e.Dataset+"/projects/")
+	if !ok {
+		return false
+	}
+	p, last, ok := strings.Cut(rest, "/")
+	return ok && p != "" && last == "volumes"
+}
+
+// encryptedVolume checks that ds is an encrypted volume of a project and returns its key status.
 func (l *Local) encryptedVolume(ctx context.Context, ds string) (string, error) {
 	if err := l.cfg.zfsDataset(ds); err != nil {
 		return "", err
@@ -167,7 +181,7 @@ func (l *Local) encryptedVolume(ctx context.Context, ds string) (string, error) 
 	}
 	i := strings.LastIndexByte(ds, '/')
 	if i < 0 {
-		return "", forbidden("%s is not a volume of a jail", ds)
+		return "", forbidden("%s is not a volume of a project", ds)
 	}
 	if err := l.volumeParent(ctx, ds[:i]); err != nil {
 		return "", err
@@ -177,7 +191,7 @@ func (l *Local) encryptedVolume(ctx context.Context, ds string) (string, error) 
 		return "", err
 	}
 	if l.localProp(m, "jailops:kind") != "volume" {
-		return "", forbidden("%s is not a volume of a jail", ds)
+		return "", forbidden("%s is not a volume of a project", ds)
 	}
 	if m["encryptionroot"].Value != ds || m["keyformat"].Value != "passphrase" {
 		return "", forbidden("%s is not an encrypted volume with a passphrase", ds)
@@ -263,6 +277,10 @@ func (l *Local) CreateEncrypted(ctx context.Context, o zfs.CreateOpts, passphras
 	args = append(args, o.Name)
 	if _, err := l.zfsKey(ctx, args, passphrase); err != nil {
 		return keyError("create", err)
+	}
+	// a volume created incomplete is being restored: file agents may write it until it is marked complete or destroyed
+	if o.Props[propComplete] == "off" {
+		l.grants.beginRestore(o.Name)
 	}
 	return nil
 }

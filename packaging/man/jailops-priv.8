@@ -39,7 +39,7 @@ runs as root and performs, for
 .Xr jailopsd 8 ,
 a fixed list of typed operations: ZFS datasets and snapshots below the storage
 roots and the keys of encrypted jail volumes (the passphrase on standard input),
-jails, interfaces and bridges, pf anchors, a few sysctls, downloads of
+jails, the epair interfaces of jails, pf anchors, a few sysctls, downloads of
 images and the files the daemon may read.
 Everything else is refused, and every request is written to the audit log.
 The daemon connects over a unix socket owned by root and the group
@@ -216,12 +216,22 @@ and the daemon's scratch directory for image builds.
 .It Fl helper-path Ar path
 The path the jail.conf hooks call, default
 .Pa /usr/local/libexec/jailops-priv .
-.It Fl ndp-proxy Ar uplink=prefix,...
-An uplink the IPv6 proxy may use and the prefixes it may answer for
-(repeatable).
 .It Fl sysctl Ar name , Fl fetch-host Ar host , Fl image-mirror Ar dir
-An extra sysctl readable through the helper, a host images may be fetched
-from over https, a local directory of image archives.
+An extra sysctl readable through the helper, a host that downloads,
+package repositories of image builds and debootstrap mirrors may use over https
+(written http://host, a host also allows plain http for a package repository),
+a local directory of image archives.
+.It Fl pkg-keys-dir Ar dir , Fl keyring-dir Ar dir
+The directories of the key directories a package repository of an image build
+may use besides
+.Pa /usr/share/keys
+(default
+.Pa /usr/local/etc/jailops/keys ) ,
+and of the keyrings debootstrap may check a release with (default
+.Pa /usr/local/share/keyrings ) .
+Root owns them and nobody else can write there, they hold no symbolic links and
+they lie outside every directory the daemon writes; the helper checks this each
+time it uses them.
 .It Xo
 .Fl admin-raw-param , Fl admin-allow-flag , Fl admin-devfs-ruleset ,
 .Fl admin-host-mount , Fl admin-zfs-prop , Fl admin-routes ,

@@ -248,7 +248,7 @@ var systemTrees = []string{"/boot", "/etc", "/root", "/dev", "/bin", "/sbin", "/
 // helperDirs are the helper's own directories: no root may be mounted on, above or inside them.
 func (c Config) helperDirs() []string {
 	var out []string
-	for _, d := range []string{c.ConfDir, filepath.Dir(c.HelperPath), c.HelperPath, filepath.Dir(c.StorageFile), c.HostDir, c.WireGuardDir} {
+	for _, d := range []string{c.ConfDir, filepath.Dir(c.HelperPath), c.HelperPath, filepath.Dir(c.StorageFile), c.HostDir, c.WireGuardDir, c.PkgKeysDir, c.KeyringDir} {
 		if d != "" && d != "/" {
 			out = append(out, d)
 		}

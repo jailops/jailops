@@ -6,7 +6,7 @@
 #
 # "pf" is required even when pf_enable is NO (rcorder only orders the scripts; a disabled service still runs and
 # exits at once): without it, rcorder gives no guarantee that pf.conf (with the anchor line of the setup
-# guide) is loaded before jailopsd creates bridges and starts jails, and an anchor call that resolves to nothing
+# guide) is loaded before jailopsd starts jails, and an anchor call that resolves to nothing
 # yet falls through to whatever the administrator's own ruleset does next (design 18, the boot-time audit).
 # "syslogd": the daemon logs to syslog, and in appliance mode the setup token goes there too.
 # "jailops_priv": the helper starts first at boot, and "shutdown" stops jailopsd before it. The two are one service

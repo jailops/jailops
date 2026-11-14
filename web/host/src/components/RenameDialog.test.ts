@@ -94,7 +94,7 @@ describe('RenameDialog', () => {
     expect(dry[0].path).toBe('/networks/lan/rename')
     expect(dry[0].body).toEqual({ new_name: 'lan2', dry_run: true })
     expect(dry[0].headers?.['If-Match']).toBe('"3"')
-    expect(w.text('[data-test="rename-summary"]')).toMatch(/^The rename changes 1 object, \d+ references, 1 firewall anchor and 1 interface description\.$/)
+    expect(w.text('[data-test="rename-summary"]')).toMatch(/^The rename changes 1 object, \d+ references and 1 firewall anchor\.$/)
     expect(w.text('[data-group="reference"]')).toContain('project web')
     expect(w.text('[data-group="reference"]')).toContain('spec.networks: lan -> lan2')
     expect(w.text('[data-group="reference"]')).toContain('jail web (project web)')

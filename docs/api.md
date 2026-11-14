@@ -39,14 +39,34 @@ the `next` map of the previous reply as JSON, to follow. Reply `LogsRead`: `line
 `LogForward`: `spec.sinks` and `status` with `origin` config or api, `generation` as ETag and each sink's state; `PUT`
 takes `LogForwardSpec` and `If-Match`, `DELETE` returns to `jailopsd.yaml`) and `POST /api/v1/logs/forward/test`
 (`{"sink": NAME}`, one tagged line). SDK: `c.Logs()` (`Read`, `Forward`, `SetForward`, `ResetForward`, `TestForward`).
-**Encrypted volumes** (extension `volume_unlock`, [storage.md](storage.md#encrypted-volumes)): a volume with `encrypted:
-true` is created when `POST /api/v1/jails` carries `volume_passphrase` next to `metadata` and `spec` (`JailCreate`).
-`POST /api/v1/jails/{name}/unlock` (`JailUnlock`: `passphrase`, `start`; operator), `POST .../lock` (operator) and
-`POST .../passphrase` (`JailPassphraseChange`: `old_passphrase`, `new_passphrase`; admin) answer operations whose result
-is the `Jail`. A locked jail has `status.power` `locked` and `status.locked` (the volume names); starting it answers
-`locked` (409), a wrong passphrase fails the operation with `bad_passphrase` (403), five in a row make the jail answer
-`rate_limited` (429) for 30 seconds. A passphrase is never in a reply. SDK: `Jails().CreateWithPassphrase`, `Unlock`,
-`Lock`, `ChangePassphrase`; the fake serves them and records the bodies with the passphrases replaced.
+**Volumes** (extension `volumes`, [storage.md](storage.md#volumes)): a volume is an object of a project, `kind: Volume`
+(`spec`: `storage`, `size`, `uid`, `gid`, `mode`, `encrypted`, `path`, `watch`, `probe`, `on_loss`, `comment`; `status`: `dataset`,
+`mountpoint`, `used`, `locked`, `state`, `detail`, `attached_to`, `warnings`). A volume with a `path` is a directory of the host
+([storage.md](storage.md#host-directories-as-volumes)): only a global administrator makes or attaches one, it has no dataset,
+snapshots, size, key or backup (those answer `invalid`), `status.state` is `ok` or `lost` with `status.detail`, and a start of a
+jail that attaches a lost one answers `busy`. The events `volume-lost`, `volume-restored` and `volume-remounted` follow its watch. `GET|POST /api/v1/volumes`, `GET|PUT|PATCH|DELETE /api/v1/volumes/{name}` (a PUT changes the
+labels, the comment and the size, and the watch of a host directory; the rest is fixed at creation; `POST` and `DELETE` answer operations; a volume that a jail
+attaches is not deleted: `busy`). `POST /api/v1/volumes` takes `VolumeCreate` (`metadata`, `spec`, `passphrase` for an
+encrypted volume). A jail attaches volumes in its spec, `volumes: [{volume, mount, read_only}]`, which a create, a PUT and a
+config change all check (the volume exists in the project, the jail is stopped, an encrypted volume has one jail);
+`GET|POST /api/v1/jails/{name}/volumes` (`VolumeAttachRequest`: `volume`, `mount`, `read_only`, `copy_existing`) and `DELETE
+/api/v1/jails/{name}/volumes/{volume}` attach and detach as operations whose result is the `Jail`. Snapshots:
+`GET|POST /api/v1/volumes/{name}/snapshots`, `DELETE .../snapshots/{snapshot}` and `POST .../rollback` (`VolumeRollback`:
+`snapshot`, `confirm_data_loss`). Encrypted volumes: `POST /api/v1/volumes/{name}/unlock` (`VolumeUnlock`: `passphrase`,
+`start`; operator), `POST .../lock` (operator) and `POST .../passphrase` (`VolumePassphraseChange`: `old_passphrase`,
+`new_passphrase`; admin) answer operations whose result is the `Volume`. A jail that attaches a locked volume has
+`status.power` `locked` and `status.locked` (the volume names); starting it answers `locked` (409), a wrong passphrase fails
+the operation with `bad_passphrase` (403), five in a row make the volume answer `rate_limited` (429) for 30 seconds. A
+passphrase is never in a reply. SDK: `c.Volumes()` (`Create`, `Get`, `List`, `Update`, `Delete`, `Unlock`, `Lock`,
+`ChangePassphrase`, `Rollback`, `Snapshots`), `Jails().AttachVolume`, `DetachVolume`, `Volumes`.
+
+**Backups of volumes** (extension `backup_run`): a volume is a backup of its own. A `Backup` has `spec.kind` (`volume`; absent for a
+jail), `spec.jail` and `spec.jail_uuid` naming the volume and its UUID, and `spec.volume` (its `VolumeSpec`). A policy backs up the
+volumes of the jails it selects and the volumes whose labels match, each once per run; `BackupPolicySpec.exclude_volumes` and
+`BackupRunRequest.no_volumes` (`POST /api/v1/backups/run`) leave them out. `POST /api/v1/restores` with a volume backup restores a
+new volume (the operation's result is the `Volume`; `as` names it, a volume is never replaced; `passphrase` makes an encrypted one
+and is never stored or logged); with a jail backup it first restores the volumes the project lacks from their newest backup, or
+restores the jail with no volume attachments with `no_volumes`.
 
 **Renames** (extension `rename`, [design.md](design.md#88-renames)): `POST /api/v1/networks/{name}/rename`,
 `/api/v1/firewall/address-sets/{name}/rename`, `/api/v1/firewall/policies/{name}/rename`, `/api/v1/profiles/{name}/rename`,

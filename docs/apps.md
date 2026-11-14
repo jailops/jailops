@@ -202,10 +202,11 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    release; 15.1 when the server cannot read it); when every FreeBSD image is of a newer release than the host the hint
    lists the images: upgrade the host or name one with `--image`. The image must be a FreeBSD image whose release is at least
    `image.release_min`, compared major.minor. The jail is created in the project, on the network and storage named
-   (the project's only grant of a kind is the default), with the `data` paths as **volumes** of the jail: one dataset each, named after the
-   path (`/var/db/postgres` becomes the volume `var-db-postgres`), class data, mounted at the path, snapshotted,
-   rolled back and backed up with the jail, and untouched by a generation switch like `/usr/local` and `/var/db`. The
-   datasets start empty and root-owned; the definition's `setup` chowns them. The labels `jailops.app=<name>` and
+   (the project's only grant of a kind is the default), with the `data` paths as **volumes** of the project: one each, named `<jail>-<what the path is called>`
+   (`/var/db/postgres` of the jail `db` becomes the volume `db-var-db-postgres`), made by steps of their own before the
+   jail (`create-volume-NAME` in the plan) and attached at the path. A volume has its own snapshots, is untouched by a
+   generation switch and by the jail's snapshots and rollbacks, and stays when the jail is deleted (`jailops volume
+   list`). The volumes start empty and root-owned; the definition's `setup` chowns them. The labels `jailops.app=<name>` and
    `jailops.app.hash=<hash>` are set at creation. The `resources` hints become the jail's limits unless `--memory`,
    `--disk` or `--cpu` replace them. The jail is then **started**.
 2. **Install the packages from the host** with `pkg -r <root> install -y <names>` through the privileged helper, from
@@ -702,7 +703,7 @@ to the end-to-end test below.
 **Testing limits.** The fake `pkg` accepts any argument vector with `-r`; the tests compare what it received with the
 builders' output instead. The fake log reader keeps the helper's path rules (a jail's `/var/log`, names two segments deep at
 most) but not its symlink and file-type checks, which `internal/priv` tests on a real file system. The ZFS fake does not
-model a dataset mounted under an unmounted parent; the tests assert `canmount=noauto` on the volume datasets instead.
+model a dataset mounted under an unmounted parent; the tests assert the volume datasets' own mountpoint and `canmount=on` instead.
 
 **What ran on a FreeBSD 15.1 host:** `nginx` and `prometheus` installed and ran. That run found the three problems
 this version addresses: PostgreSQL's `initdb` failed without System V shared memory (`sysvipc`), Valkey could not open

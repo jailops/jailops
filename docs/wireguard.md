@@ -60,7 +60,7 @@ subnets and the subnets of the networks it names.
 ## How it is kept running
 
 The tunnel is applied when it is created or changed, and the daemon's reconcile loop keeps it applied: after a reboot
-it creates the interface again (like the bridges of networks), sets its description, addresses and configuration, and
+it creates the interface again (like the interfaces of jails), sets its description, addresses and configuration, and
 changes nothing that already matches. Nothing is written to `rc.conf`. A configuration change is applied with
 `wg syncconf`, so peers that did not change keep their sessions. The kernel module `if_wg` is loaded by the same loop
 when a tunnel exists (add `if_wg_load="YES"` to `/boot/loader.conf` to have it at boot before the daemon starts).
@@ -109,9 +109,10 @@ lets them; add the one rule `jailops wireguard show` prints as `firewall_rule`, 
 `jailops doctor` warns (`wireguard.firewall`) while no loaded rule of the host mentions the port.
 
 **Reaching JailOps networks.** For a server with `networks`, JailOps loads the pf anchor `jailops/wg.<name>`. It passes
-traffic that comes in on the tunnel from the tunnel's subnets to the subnets of those networks, and decides nothing
-else: the host's ruleset and each jail's own firewall policy still apply, so a jail that refuses traffic from outside
-its network refuses the tunnel too. The anchor is evaluated through the `anchor "jailops/*"` line you already have.
+traffic that comes in on the tunnel from the tunnel's subnets to the subnets of those networks and drops everything else
+a peer sends (the host itself and its LAN included), so a peer reaches only what the server names. Each jail's own
+firewall policy still applies to what is admitted: a jail that refuses traffic from outside its network refuses the
+tunnel too. The anchor is evaluated through the `anchor "jailops/*"` line you already have.
 Forwarding stays your switch, as for networks: `jailops doctor` warns (`wireguard.forwarding`) when a tunnel serves
 networks and `net.inet.ip.forwarding` is off. Jails answer through their default route, the host, which knows the
 tunnel's subnet.

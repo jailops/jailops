@@ -162,8 +162,6 @@ export interface HopView {
   side: 'source' | 'destination'
   jail: string
   anchor: string
-  /** The jail's own port, or the gateway of its network: where in the path the rule stands. */
-  at: 'epair' | 'gateway'
   direction: string
   verdict: Verdict
   decision: Decision
@@ -191,7 +189,7 @@ export interface CaseView {
 function hopView(h: FirewallTestHop, i: number): HopView {
   return {
     key: `${h.side}-${i}`, side: h.side === 'destination' ? 'destination' : 'source', jail: h.jail, anchor: h.anchor,
-    at: h.interface === 'gateway' ? 'gateway' : 'epair', direction: h.direction, verdict: verdictOf(h.verdict),
+    direction: h.direction, verdict: verdictOf(h.verdict),
     decision: decisionOf(h.decided_by), why: h.why ?? '',
     skipped: (h.skipped ?? []).map((k) => ({ decision: decisionOf(k.rule), why: k.why })),
     drift: h.loaded_matches_rendered === 'false',

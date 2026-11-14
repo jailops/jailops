@@ -38,9 +38,9 @@ func canonicalProjectSizes(spec *api.ProjectSpec) error {
 	return nil
 }
 
-// canonicalJailSizes stores the ZFS sizes of a jail (its disk quota and reservation, and with volumes the quotas of
-// its volumes) as decimal bytes, so the lifecycle and the helper accept them.
-func canonicalJailSizes(spec *api.JailSpec, volumes bool) error {
+// canonicalJailSizes stores the ZFS sizes of a jail (its disk quota and reservation) as decimal bytes, so the
+// lifecycle and the helper accept them.
+func canonicalJailSizes(spec *api.JailSpec) error {
 	for _, r := range []struct {
 		field string
 		v     *string
@@ -53,20 +53,6 @@ func canonicalJailSizes(spec *api.JailSpec, volumes bool) error {
 			return err
 		}
 		*r.v = c
-	}
-	if !volumes {
-		return nil
-	}
-	spec.Volumes = slices.Clone(spec.Volumes)
-	for i, v := range spec.Volumes {
-		if v.Quota == "" {
-			continue
-		}
-		c, err := validate.CanonicalSize(fmt.Sprintf("volumes[%d].quota", i), v.Quota)
-		if err != nil {
-			return err
-		}
-		spec.Volumes[i].Quota = c
 	}
 	return nil
 }
@@ -81,9 +67,8 @@ func quotaDiffers(have, want string) bool {
 	return err != nil || h != w
 }
 
-// checkNewJail applies the limits of a new jail (create and copy): the length of its name and of its volumes' names,
-// and the length of the deepest dataset name it would get on its storage, a snapshot of a volume. Admission has
-// resolved the storage.
+// checkNewJail applies the limits of a new jail (create and copy): the length of its name and the length of the
+// deepest dataset name it would get on its storage. Admission has resolved the storage.
 func (s *Service) checkNewJail(project, name string, spec api.JailSpec) error {
 	if err := validate.NameLength("jail", "name", name, validate.MaxJailName); err != nil {
 		return err
@@ -91,20 +76,11 @@ func (s *Service) checkNewJail(project, name string, spec api.JailSpec) error {
 	if err := validate.AnchorPath("name", render.JailAnchorFor(project, name)); err != nil {
 		return err
 	}
-	deepest := "/root.stale"
-	for i, v := range spec.Volumes {
-		if err := validate.NameLength("volume", fmt.Sprintf("volumes[%d].name", i), v.Name, validate.MaxVolumeName); err != nil {
-			return err
-		}
-		if d := "/data/" + v.Name; len(d) > len(deepest) {
-			deepest = d
-		}
-	}
 	si, ok := s.storage(spec.Storage)
 	if !ok {
 		return nil
 	}
-	ds := lifecycle.ProjectJailsDS(si.lifecycle(), project) + "/" + name + deepest
+	ds := lifecycle.ProjectJailsDS(si.lifecycle(), project) + "/" + name + "/root.stale"
 	return validate.DatasetBudget("name", "jail "+name, ds, validate.SnapshotReserve)
 }
 
@@ -126,50 +102,9 @@ func (s *Service) checkSnapshotBudget(key, snap string) error {
 		return nil
 	}
 	project, name := validate.SplitQualified(key)
-	deepest := "/root.stale"
-	for _, v := range spec.Volumes {
-		if d := "/data/" + v.Name; len(d) > len(deepest) {
-			deepest = d
-		}
-	}
-	ds := lifecycle.ProjectJailsDS(si.lifecycle(), project) + "/" + name + deepest
+	ds := lifecycle.ProjectJailsDS(si.lifecycle(), project) + "/" + name + "/root.stale"
 	return validate.DatasetBudget("name", "snapshot "+snap, ds, 1+len(snap))
 }
-
-// checkAttachMTU refuses an attachment whose MTU differs from its network's. A bridge forces its own MTU onto every
-// member (FreeBSD 15.2: a member with another MTU is changed to the bridge's when it is added, and changing it while
-// it is a member fails with "Operation not supported"), so the jail's end would disagree with the host's end. An
-// attachment an existing jail already had unchanged (old) is not refused again.
-func (s *Service) checkAttachMTU(eff api.JailSpec, old *api.JailSpec) error {
-	for i, a := range eff.Network {
-		if a.MTU == 0 {
-			continue
-		}
-		if old != nil && slices.ContainsFunc(old.Network, func(o api.NetworkAttach) bool { return o.Network == a.Network && o.MTU == a.MTU }) {
-			continue
-		}
-		n, err := s.netKind.get(a.Network)
-		if err != nil {
-			continue
-		}
-		want := n.Spec.MTU
-		if want == 0 {
-			want = defaultMTU
-		}
-		if a.MTU != want {
-			dev := a.Name
-			if dev == "" {
-				dev = fmt.Sprintf("eth%d", i)
-			}
-			return validate.Invalid(fmt.Sprintf("network[%d].mtu", i), "the MTU %d of network device %s differs from the MTU %d of network %s: every port of a bridge has the bridge's MTU", a.MTU, dev, want, a.Network).
-				WithHint(fmt.Sprintf("leave nic.%s.mtu unset, or change the MTU of the network (jailops network edit %s)", dev, a.Network))
-		}
-	}
-	return nil
-}
-
-// defaultMTU is the MTU of a network without one.
-const defaultMTU = 1500
 
 // doctorNameLengths is the check names.length: objects created before the name limits of design section 3.1 keep
 // working, and this lists them (and is absent when there is none) so an operator knows which names a copy or a new object could not reuse.

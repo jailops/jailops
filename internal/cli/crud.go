@@ -723,8 +723,8 @@ func addDelete[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 	}
 	var confirmLoss bool
 	if d.loss != nil {
-		cmd.Long = "Delete one or more " + d.plural + ` with everything they hold. This destroys data: the root,
-the volumes and the snapshots go with the ` + d.noun + `, and nothing brings them back.
+		cmd.Long = "Delete one or more " + d.plural + ` with everything they hold. This destroys data: the files
+and the snapshots go with the ` + d.noun + `, and nothing brings them back.
 Before anything is deleted the command shows what each delete destroys (the
 sizes and the number of snapshots, read from the server) and asks you to type
 the name (the project name for several); -y does not answer it. Scripts pass

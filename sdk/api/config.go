@@ -178,7 +178,7 @@ func nic(s *JailSpec, d string, create bool) *NetworkAttach {
 	return &s.Network[len(s.Network)-1]
 }
 
-func disk(s *JailSpec, d string, create bool) *VolumeMount {
+func disk(s *JailSpec, d string, create bool) *VolumeAttach {
 	for i := range s.Volumes {
 		if s.Volumes[i].Name == d {
 			return &s.Volumes[i]
@@ -187,7 +187,7 @@ func disk(s *JailSpec, d string, create bool) *VolumeMount {
 	if !create {
 		return nil
 	}
-	s.Volumes = append(s.Volumes, VolumeMount{Name: d})
+	s.Volumes = append(s.Volumes, VolumeAttach{Name: d})
 	return &s.Volumes[len(s.Volumes)-1]
 }
 
@@ -527,7 +527,7 @@ func buildRegistry() []ckey {
 		return nil
 	}, func(p *NetworkAttach) *string { return &p.MAC }, "mac")
 	devKey("nic.<device>.mac", "mac", "MAC address (derived from the jail UUID when empty).", "02:00:00:00:00:01", true, false, false, "network[<device>].mac", g, st, un)
-	devKey("nic.<device>.mtu", "int", "MTU of the interface: the network's MTU (a bridge gives every port its own); 0 takes it.", "1500", true, true, false, "network[<device>].mtu",
+	devKey("nic.<device>.mtu", "int", "MTU of the interface; 0 takes the network's.", "1500", true, true, false, "network[<device>].mtu",
 		func(s *JailSpec, d string) (string, bool) {
 			if p := nic(s, d, false); p != nil && p.MTU != 0 {
 				return strconv.Itoa(p.MTU), true
@@ -555,10 +555,12 @@ func buildRegistry() []ckey {
 		return nil
 	}
 	g, st, un = field(nic, rate, func(p *NetworkAttach) *string { return &p.Egress }, "egress")
-	devKey("nic.<device>.egress", "rate", "Rate limit of what the jail sends through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host; traffic into the jail has no limit.", "10M", false, true, false, "network[<device>].egress", g, st, un)
+	devKey("nic.<device>.egress", "rate", "Rate limit of what the jail sends through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.", "10M", false, true, false, "network[<device>].egress", g, st, un)
+	g, st, un = field(nic, rate, func(p *NetworkAttach) *string { return &p.Ingress }, "ingress")
+	devKey("nic.<device>.ingress", "rate", "Rate limit of what the jail receives through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.", "10M", false, true, false, "network[<device>].ingress", g, st, un)
 
 	// disk devices
-	devKey("disk.<device>", "device", "A data volume; set it to the mount path to add it, unset it to remove it.", "disk.data=/var/db", true, true, false, "volumes[<device>]",
+	devKey("disk.<device>", "device", "A volume of the project attached to the jail: <device> is the name of the volume; set it to the mount path to attach it, unset it to detach it.", "disk.data=/var/db", true, true, false, "volumes[<device>]",
 		func(s *JailSpec, d string) (string, bool) {
 			if p := disk(s, d, false); p != nil {
 				return p.Mount, true
@@ -578,7 +580,7 @@ func buildRegistry() []ckey {
 				}
 			}
 		})
-	dfield := func(key string, check func(string) error, get func(*VolumeMount) *string) (func(*JailSpec, string) (string, bool), func(*JailSpec, string, string) error, func(*JailSpec, string)) {
+	dfield := func(key string, check func(string) error, get func(*VolumeAttach) *string) (func(*JailSpec, string) (string, bool), func(*JailSpec, string, string) error, func(*JailSpec, string)) {
 		return func(s *JailSpec, d string) (string, bool) {
 				p := disk(s, d, false)
 				if p == nil {
@@ -606,11 +608,9 @@ func buildRegistry() []ckey {
 			return fmt.Errorf("%q is not an absolute path inside the jail", v)
 		}
 		return nil
-	}, func(p *VolumeMount) *string { return &p.Mount })
-	devKey("disk.<device>.mount", "string", "Mount path inside the jail.", "/var/db", true, true, false, "volumes[<device>].mount", g, st, un)
-	g, st, un = dfield("quota", func(v string) error { return checkSize("quota", v) }, func(p *VolumeMount) *string { return &p.Quota })
-	devKey("disk.<device>.quota", "size", "ZFS quota of the volume.", "10G", true, true, false, "volumes[<device>].quota", g, st, un)
-	devKey("disk.<device>.read_only", "bool", "Mount the volume read-only.", "true", true, true, false, "volumes[<device>].read_only",
+	}, func(p *VolumeAttach) *string { return &p.Mount })
+	devKey("disk.<device>.mount", "string", "Where the volume is mounted inside the jail.", "/var/db", true, true, false, "volumes[<device>].mount", g, st, un)
+	devKey("disk.<device>.read_only", "bool", "Attach the volume read-only.", "true", true, true, false, "volumes[<device>].read_only",
 		func(s *JailSpec, d string) (string, bool) {
 			p := disk(s, d, false)
 			return "true", p != nil && p.ReadOnly
@@ -660,7 +660,7 @@ func buildRegistry() []ckey {
 	r[len(r)-1].Values = DevfsAllowList
 
 	// proxy devices
-	devKey("proxy.<name>.listen", "listen", "Host address and port the jail's port is forwarded on.", ":8080", false, true, false, "proxy[<name>].listen",
+	devKey("proxy.<name>.listen", "listen", "Host address and port the jail's port is forwarded on.", ":8080", false, true, true, "proxy[<name>].listen",
 		func(s *JailSpec, d string) (string, bool) {
 			p := proxy(s, d, false)
 			if p == nil {
@@ -684,7 +684,7 @@ func buildRegistry() []ckey {
 				}
 			}
 		})
-	devKey("proxy.<name>.jail_port", "int", "Port inside the jail.", "80", false, true, false, "proxy[<name>].jail_port",
+	devKey("proxy.<name>.jail_port", "int", "Port inside the jail.", "80", false, true, true, "proxy[<name>].jail_port",
 		func(s *JailSpec, d string) (string, bool) {
 			p := proxy(s, d, false)
 			if p == nil || p.JailPort == 0 {
@@ -706,7 +706,7 @@ func buildRegistry() []ckey {
 				p.JailPort = 0
 			}
 		})
-	devKey("proxy.<name>.proto", "enum", "tcp or udp.", "tcp", false, true, false, "proxy[<name>].proto",
+	devKey("proxy.<name>.proto", "enum", "tcp or udp.", "tcp", false, true, true, "proxy[<name>].proto",
 		func(s *JailSpec, d string) (string, bool) {
 			p := proxy(s, d, false)
 			if p == nil {
@@ -800,7 +800,7 @@ func ConfigKeyFor(key string) (ConfigKey, string, bool) {
 func ApplyConfig(spec *JailSpec, set map[string]string, unset []string) (restartRequired []string, err error) {
 	work := *spec
 	work.Network = append([]NetworkAttach(nil), spec.Network...)
-	work.Volumes = append([]VolumeMount(nil), spec.Volumes...)
+	work.Volumes = append([]VolumeAttach(nil), spec.Volumes...)
 	work.Devfs = append([]DevfsDevice(nil), spec.Devfs...)
 	work.Proxy = append([]ProxyDevice(nil), spec.Proxy...)
 	work.Profiles = append([]string(nil), spec.Profiles...)
@@ -986,7 +986,7 @@ func ExpandedConfig(spec JailSpec, profiles []Profile) (JailSpec, map[string]str
 	}
 	out := spec
 	out.Network = append([]NetworkAttach(nil), spec.Network...)
-	out.Volumes = append([]VolumeMount(nil), spec.Volumes...)
+	out.Volumes = append([]VolumeAttach(nil), spec.Volumes...)
 	out.Devfs = append([]DevfsDevice(nil), spec.Devfs...)
 	out.Proxy = append([]ProxyDevice(nil), spec.Proxy...)
 	out.Packages = append([]string(nil), spec.Packages...)

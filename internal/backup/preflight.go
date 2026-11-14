@@ -24,9 +24,11 @@ type HostState struct {
 	Networks    map[string]api.NetworkSpec
 	Policies    map[string]api.FirewallPolicySpec
 	AddressSets map[string]api.AddressSetSpec
-	Jails       map[string]JailRef // by name
-	Leases      []api.Lease        // addresses in use
-	Secrets     map[string]bool    // sealed secrets present
+	// Volumes are the volumes of the target project. A backup holds a jail, not the volumes it attaches.
+	Volumes map[string]bool
+	Jails   map[string]JailRef // by name
+	Leases  []api.Lease        // addresses in use
+	Secrets map[string]bool    // sealed secrets present
 	// KeyDomains are the master key domains this host holds, or can unwrap
 	// from escrow with the recovery key.
 	KeyDomains map[string]bool
@@ -96,18 +98,13 @@ func Preflight(b api.Backup, req api.RestoreRequest, h HostState) api.RestorePre
 			fail("bundle lacks firewall policy %q", pn)
 		}
 	}
-	vols := map[string]bool{}
-	for _, v := range bundle.Volumes {
-		vols[v] = true
-	}
+	// The volumes a jail attaches belong to its project, not to the jail: a jail backup holds the attachments, and
+	// each volume is a backup of its own. The caller (internal/hostbackup) marks the volumes it brings back or leaves
+	// out as present; one that is neither must exist where the jail is restored (the jail does not start without it).
 	for _, v := range spec.Volumes {
-		if !vols[v.Name] {
-			fail("bundle lacks volume %q", v.Name)
-		}
-	}
-	for _, v := range spec.Volumes {
-		if v.Encrypted {
-			chg("volume %q was encrypted; it is restored as a plain volume (a restore into an encrypted volume is not built)", v.Name)
+		if !h.Volumes[v.Name] {
+			miss("volume %s (attached at %s)", v.Name, v.Mount)
+			chg("volume %s is not in the project and no backup of it was found: the jail attaches it, and does not start until the volume exists", v.Name)
 		}
 	}
 

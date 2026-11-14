@@ -765,6 +765,10 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	if err := s.checkSealedEnv(eff.Env); err != nil {
 		return nil, err
 	}
+	if spec.Delegate && eff.Resources.Disk == "" {
+		return nil, invalid("ZFS delegation needs a disk limit: the jail manages the dataset it is handed, and without a quota on its container it can fill the pool").
+			WithHint("set limits.disk, for example `jailops config set JAIL limits.disk 20G`")
+	}
 	if len(eff.Network) == 0 {
 		return nil, invalid("a jail needs a network: name one with --network NAME or use a profile that has one")
 	}
@@ -780,6 +784,17 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	if len(eff.Devfs) > 0 && !a.Perm.Satisfies(api.PermAdmin) {
 		return nil, api.Errorf(api.CodeForbidden, "exposing device nodes needs the admin role")
 	}
+	if len(eff.Proxy) > 0 && !a.Perm.Satisfies(api.PermAdmin) && (old == nil || !slices.Equal(eff.Proxy, s.effective(api.Jail{Spec: *old}).Proxy)) {
+		return nil, api.Errorf(api.CodeForbidden, "forwarding a host port into a jail needs the admin role: it opens the host to the network").
+			WithHint("an administrator sets proxy devices; a firewall rule of a policy can forward a port too, and is judged by the project's policies")
+	}
+	var wasVolumes []api.VolumeAttach
+	if old != nil {
+		wasVolumes = s.effective(api.Jail{Spec: *old}).Volumes
+	}
+	if err := s.hostDirAdmission(ctx, p.Meta.Name, eff.Volumes, wasVolumes); err != nil {
+		return nil, err
+	}
 	if len(eff.Proxy) > 0 {
 		up := false
 		for _, nd := range eff.Network {
@@ -792,9 +807,6 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 		}
 	}
 	if err := s.checkProxyConflicts(key, eff); err != nil {
-		return nil, err
-	}
-	if err := s.checkAttachMTU(eff, old); err != nil {
 		return nil, err
 	}
 	if spec.Storage == "" {

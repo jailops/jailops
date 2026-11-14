@@ -14,15 +14,16 @@ import { isGlobalAdmin } from '@/composables/project'
 import { session } from '@jailops/shared/composables/session'
 import { defaultImage, freebsdImages, hostRelease, imageLabel } from '@/lib/images'
 import { parseLabelField } from '@/lib/labels'
-import type { Image, Network, Project, Storage } from '@jailops/shared/api/types'
+import type { Image, Network, Project, Storage, Volume } from '@jailops/shared/api/types'
 
 const props = defineProps<{ open: boolean; project: Project | undefined; images: Image[]; storage: Storage[]; networks: Network[] }>()
 const emit = defineEmits<{ close: []; done: [] }>()
 
 const f = reactive({ name: '', image: '', storage: '', network: '', shell: '', labels: '' })
 const labelField = computed(() => parseLabelField(f.labels))
-// one optional volume; an encrypted one needs a passphrase, typed twice, sent once and then forgotten
-const vol = reactive({ name: '', mount: '', encrypted: false, pass: '', again: '' })
+// one optional volume of the project, attached at a path of the jail (more on the jail's page)
+const vol = reactive({ name: '', mount: '', readOnly: false })
+const volumes = ref<Volume[]>([])
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 
@@ -45,7 +46,7 @@ const netNames = computed(() => {
   const all = props.networks.map((x) => x.metadata.name)
   return g.length ? all.filter((n) => g.some((x) => x.network === n)) : all
 })
-const volUsed = computed(() => !!(vol.name || vol.mount || vol.encrypted))
+const volUsed = computed(() => !!vol.name)
 /** The shell is a FreeBSD choice: a Linux jail keeps the shell of its distribution. Empty: the host's default
  *  (jails.shell of jailopsd.yaml, bash unless the host says sh). */
 const freebsd = computed(() => (props.images.find((i) => i.metadata.name === f.image)?.spec.os ?? 'freebsd') === 'freebsd')
@@ -56,17 +57,14 @@ const check = useFormCheck(() => ({
   'jc-labels': labelField.value.problem ? s.labels.problems[labelField.value.problem] : '',
   'jc-image': f.image ? '' : s.jails.needImageField,
   'jc-sto': f.storage ? '' : s.jails.needStorageField,
-  'jc-vol': !volUsed.value ? '' : !vol.name ? s.jails.volumeNameNeeded : nameProblem(vol.name, 'volume'),
-  'jc-mount': !volUsed.value ? '' : !vol.mount ? s.jails.mountNeeded : /^\/[^\s]*[^/\s]$/.test(vol.mount) ? '' : s.jails.mountInvalid,
-  'jc-pass': !vol.encrypted ? '' : !vol.pass ? s.jails.passphraseNeeded : vol.pass.length < 12 ? s.keys.tooShort : '',
-  'jc-pass2': !vol.encrypted ? '' : !vol.again ? s.jails.repeatNeeded : vol.pass !== vol.again ? s.keys.mismatch : '',
+  'jc-mount': !volUsed.value ? '' : !vol.mount ? s.jails.mountNeeded : /^\/[^\s"\\]*[^/\s]$/.test(vol.mount) && !vol.mount.includes('..') ? '' : s.jails.mountInvalid,
 }))
-const labels: Record<string, string> = { 'jc-name': s.jails.name, 'jc-labels': s.labels.createField, 'jc-image': s.jails.image, 'jc-sto': s.nav.storage, 'jc-vol': s.jails.volumeName, 'jc-mount': s.jails.volumeMount, 'jc-pass': s.jails.passphrase, 'jc-pass2': s.jails.passphraseRepeat }
+const labels: Record<string, string> = { 'jc-name': s.jails.name, 'jc-labels': s.labels.createField, 'jc-image': s.jails.image, 'jc-sto': s.nav.storage, 'jc-mount': s.jails.volumeMount }
 const why = computed(() => (check.firstId.value ? s.form.fixFirst(`${labels[check.firstId.value]}: ${check.reason.value}`) : ''))
-const describe = (id: string, hint?: string) => [check.err(id) ? `${id}-err` : '', hint && check.err(id) !== nameHint(id === 'jc-vol' ? 'volume' : 'jail') ? hint : ''].filter(Boolean).join(' ') || undefined
+const describe = (id: string, hint?: string) => [check.err(id) ? `${id}-err` : '', hint && check.err(id) !== nameHint('jail') ? hint : ''].filter(Boolean).join(' ') || undefined
 
 function clearVolume(): void {
-  Object.assign(vol, { name: '', mount: '', encrypted: false, pass: '', again: '' })
+  Object.assign(vol, { name: '', mount: '', readOnly: false })
 }
 const noImage = computed(() => !imageRefs.value.length)
 const missing = computed(() => (noImage.value ? (isGlobalAdmin() ? s.jails.needImage : s.jails.needImageAsk) : !stoNames.value.length ? s.jails.needStorage : ''))
@@ -81,20 +79,18 @@ watch(() => props.open, (o) => {
   }
   error.value = null
   check.reset()
+  void api.volumes.list().then((v) => { volumes.value = v }).catch(() => { volumes.value = [] })
   Object.assign(f, { name: '', image: imageRefs.value[0] ?? '', storage: stoNames.value[0] ?? '', network: netNames.value[0] ?? '', shell: '', labels: '' })
 })
-watch(() => vol.encrypted, (e) => { if (!e) Object.assign(vol, { pass: '', again: '' }) })
 
 async function save(): Promise<void> {
   busy.value = true
   error.value = null
-  const volumes = volUsed.value ? [{ name: vol.name, mount: vol.mount, ...(vol.encrypted ? { encrypted: true } : {}) }] : []
-  const passphrase = vol.encrypted ? vol.pass : ''
-  Object.assign(vol, { pass: '', again: '' })
+  const attach = volUsed.value ? [{ volume: vol.name, mount: vol.mount, ...(vol.readOnly ? { read_only: true } : {}) }] : []
   check.reset()
   try {
     await runOp(s.jails.createTitle + ': ' + f.name, () =>
-      api.jails.create({ metadata: { name: f.name, ...(Object.keys(labelField.value.labels).length ? { labels: labelField.value.labels } : {}) }, spec: { image: f.image, storage: f.storage, ...(f.network ? { network: [{ network: f.network, ipv4: 'auto' }] } : {}), ...(volumes.length ? { volumes } : {}), ...(f.shell && freebsd.value ? { shell: f.shell } : {}) }, ...(passphrase ? { volume_passphrase: passphrase } : {}) }),
+      api.jails.create({ metadata: { name: f.name, ...(Object.keys(labelField.value.labels).length ? { labels: labelField.value.labels } : {}) }, spec: { image: f.image, storage: f.storage, ...(f.network ? { network: [{ network: f.network, ipv4: 'auto' }] } : {}), ...(attach.length ? { volumes: attach } : {}), ...(f.shell && freebsd.value ? { shell: f.shell } : {}) } }),
     )
     clearVolume()
     emit('done')
@@ -147,33 +143,23 @@ async function save(): Promise<void> {
         <span v-if="check.err('jc-labels')" id="jc-labels-err" class="field-error" role="alert">{{ check.err('jc-labels') }}</span>
         <span id="jc-labels-hint" class="hint">{{ s.labels.createHint }}</span>
       </div>
-      <fieldset class="vol-set">
+      <fieldset v-if="volumes.length" class="vol-set">
         <legend>{{ s.jails.volume }}</legend>
         <div class="field">
-          <label for="jc-vol">{{ s.jails.volumeName }}<span v-if="volUsed" class="req" aria-hidden="true"> *</span></label>
-          <input id="jc-vol" v-model.trim="vol.name" class="mono" type="text" autocomplete="off" spellcheck="false" :aria-invalid="!!check.err('jc-vol')" :aria-describedby="describe('jc-vol', 'jc-vol-hint')" @blur="vol.name && check.touch('jc-vol')" />
-          <span v-if="check.err('jc-vol')" id="jc-vol-err" class="field-error" role="alert" data-test="jc-vol-error">{{ check.err('jc-vol') }}</span>
-          <span v-if="check.err('jc-vol') !== nameHint('volume')" id="jc-vol-hint" class="hint">{{ nameHint('volume') }}</span>
+          <label for="jc-vol">{{ s.jails.volumeName }}</label>
+          <select id="jc-vol" v-model="vol.name" class="mono" data-test="jc-volume" aria-describedby="jc-vol-hint">
+            <option value="">{{ s.jails.volumeNone }}</option>
+            <option v-for="v in volumes" :key="v.metadata.name" :value="v.metadata.name" :disabled="v.spec.encrypted && (v.status?.attached_to?.length ?? 0) > 0">{{ v.metadata.name }}</option>
+          </select>
+          <span id="jc-vol-hint" class="hint">{{ s.jails.volumeHint }}</span>
         </div>
-        <div class="field">
-          <label for="jc-mount">{{ s.jails.volumeMount }}<span v-if="volUsed" class="req" aria-hidden="true"> *</span></label>
-          <input id="jc-mount" v-model.trim="vol.mount" class="mono" type="text" autocomplete="off" spellcheck="false" placeholder="/var/db/app" :aria-invalid="!!check.err('jc-mount')" :aria-describedby="describe('jc-mount')" @blur="vol.mount && check.touch('jc-mount')" />
-          <span v-if="check.err('jc-mount')" id="jc-mount-err" class="field-error" role="alert" data-test="jc-vol-error">{{ check.err('jc-mount') }}</span>
-        </div>
-        <label class="check"><input v-model="vol.encrypted" type="checkbox" data-test="jc-encrypted" aria-describedby="jc-enc-hint" /> {{ s.jails.volumeEncrypted }}</label>
-        <span id="jc-enc-hint" class="hint">{{ s.jails.volumeEncryptedHint }}</span>
-        <template v-if="vol.encrypted">
-          <div class="field jc-pass-field">
-            <label for="jc-pass">{{ s.jails.passphrase }} <span class="req" aria-hidden="true">*</span></label>
-            <input id="jc-pass" v-model="vol.pass" type="password" autocomplete="new-password" :aria-invalid="!!check.err('jc-pass')" :aria-describedby="describe('jc-pass', 'jc-pass-hint')" @blur="vol.pass && check.touch('jc-pass')" />
-            <span v-if="check.err('jc-pass')" id="jc-pass-err" class="field-error" role="alert" data-test="jc-vol-error">{{ check.err('jc-pass') }}</span>
-            <span id="jc-pass-hint" class="hint">{{ s.jails.passphraseHint }}</span>
-          </div>
+        <template v-if="vol.name">
           <div class="field">
-            <label for="jc-pass2">{{ s.jails.passphraseRepeat }} <span class="req" aria-hidden="true">*</span></label>
-            <input id="jc-pass2" v-model="vol.again" type="password" autocomplete="new-password" :aria-invalid="!!check.err('jc-pass2')" :aria-describedby="describe('jc-pass2')" @blur="vol.again && check.touch('jc-pass2')" />
-            <span v-if="check.err('jc-pass2')" id="jc-pass2-err" class="field-error" role="alert" data-test="jc-vol-error">{{ check.err('jc-pass2') }}</span>
+            <label for="jc-mount">{{ s.jails.volumeMount }} <span class="req" aria-hidden="true">*</span></label>
+            <input id="jc-mount" v-model.trim="vol.mount" class="mono" type="text" autocomplete="off" spellcheck="false" placeholder="/var/db/app" :aria-invalid="!!check.err('jc-mount')" :aria-describedby="describe('jc-mount')" @blur="vol.mount && check.touch('jc-mount')" />
+            <span v-if="check.err('jc-mount')" id="jc-mount-err" class="field-error" role="alert" data-test="jc-vol-error">{{ check.err('jc-mount') }}</span>
           </div>
+          <label class="check"><input v-model="vol.readOnly" type="checkbox" data-test="jc-ro" /> {{ s.jails.volumeReadOnly }}</label>
         </template>
       </fieldset>
       <ErrorPanel v-if="error" :error="error" />

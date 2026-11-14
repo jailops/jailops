@@ -23,8 +23,8 @@ func allow(name, proto string, ports ...string) api.FirewallRule {
 
 func anchor(t *testing.T, mut func(*render.PFInput)) *render.Anchor {
 	t.Helper()
-	in := render.PFInput{Jail: "alpha_db", Interfaces: []string{"jo0123456789a0a"}, Gateways: []string{"jo9gb"},
-		Addresses: []netip.Addr{jail4, jail6}, Antispoof: true, NoAdvertise: true,
+	in := render.PFInput{Jail: "alpha_db", Interfaces: []string{"jo0123456789a0a"},
+		Addresses: []netip.Addr{jail4, jail6}, Antispoof: true,
 		DefaultIn: "deny", DefaultOut: "allow", Sets: map[string]api.AddressSetSpec{}, TagMembers: map[string][]netip.Addr{}}
 	if mut != nil {
 		mut(&in)
@@ -37,8 +37,8 @@ func anchor(t *testing.T, mut func(*render.PFInput)) *render.Anchor {
 }
 
 var (
-	intoJail = Hook{Class: render.IfGateway, Dir: "out"} // what reaches the jail
-	fromJail = Hook{Class: render.IfEpair, Dir: "in"}    // what the jail sends
+	intoJail = Hook{Dir: "out"} // what reaches the jail
+	fromJail = Hook{Dir: "in"}  // what the jail sends
 )
 
 func tcp(src, dst netip.Addr, port int) Packet {
@@ -220,12 +220,8 @@ func TestAnEmptyToOnInboundMeansTheJailsAddresses(t *testing.T) {
 		in.Policies = []render.PFPolicy{{Name: "p", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{allow("web", "tcp", "80")}}}}
 	})
 	check(t, "to the jail", Evaluate(a, tcp(peer4, jail4, 80), intoJail), Pass, "policy")
-	// to another address the rule does not apply, and no rule of the anchor decides: the host's rules do
-	if r := Evaluate(a, tcp(peer4, netip.MustParseAddr("10.20.0.99"), 80), intoJail); r.Verdict != Unknown {
-		t.Errorf("a destination that is not the jail: %+v", r)
-	}
-	// on the jail's own port nothing but its own addresses reaches it
-	r := Evaluate(a, tcp(peer4, netip.MustParseAddr("10.20.0.99"), 80), Hook{Class: render.IfEpair, Dir: "out"})
+	// on the jail's own link nothing but its own addresses reaches it
+	r := Evaluate(a, tcp(peer4, netip.MustParseAddr("10.20.0.99"), 80), intoJail)
 	check(t, "an address the jail does not own", r, Block, render.StageOwnAddrs)
 }
 
@@ -275,7 +271,7 @@ func TestICMP(t *testing.T) {
 	// the ICMPv6 errors pass whatever the policy says: path MTU discovery depends on them
 	none := anchor(t, nil)
 	toobig := Packet{Family: "inet6", Proto: "icmp6", Src: peer6, Dst: jail6, ICMPType: "toobig"}
-	check(t, "packet too big, no policy", Evaluate(none, toobig, intoJail), Pass, render.StageGateway)
+	check(t, "packet too big, no policy", Evaluate(none, toobig, intoJail), Pass, render.StageNeighbour)
 	check(t, "ping6, no policy", Evaluate(none, echo6, intoJail), Block, "default")
 	// from the jail: typed rules come first, so without a type the test cannot say
 	r := Evaluate(a, Packet{Family: "inet6", Proto: "icmp6", Src: jail6, Dst: peer6}, fromJail)

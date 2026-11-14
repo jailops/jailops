@@ -24,8 +24,8 @@ func (s *Server) handleBoot(w http.ResponseWriter, r *http.Request) {
 		for _, d := range j.Spec.Boot.Depends {
 			b.Boot.Depends = append(b.Boot.Depends, p+"_"+d)
 		}
-		for _, v := range j.Spec.Volumes {
-			if v.Encrypted {
+		for _, a := range j.Spec.Volumes {
+			if v := s.volumes.items[p+"/"+a.Name]; v != nil && v.Spec.Encrypted {
 				b.Encrypted = true
 			}
 		}

@@ -92,17 +92,11 @@ func newProjectEnv(t *testing.T, project, name string) *hookEnv {
 	spec := api.JailSpec{Image: "freebsd-15.0@stable", OS: api.OSFreeBSD, Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.12"}}}
 	rec, _ := json.Marshal(map[string]any{"version": 1, "metadata": api.ObjectMeta{Name: name, UUID: hookUUID, Project: project}, "spec": spec})
 	mustWrite(t, filepath.Join(mp, "spec.json"), string(rec))
-	nw := api.NetworkSpec{Bridge: "jo0", Uplink: "em0", MTU: 1400, IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200"}}
+	nw := api.NetworkSpec{Uplink: "em0", MTU: 1400, IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200"}}
 	doc, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "lan", UUID: "aaaa-1111-2222"}, "spec": nw})
 	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "aaaa-1111-2222.json"), string(doc))
 	conf := strings.Replace(e.goodConf(), "alpha_web {", internal+" {", 1)
 	mustWrite(t, filepath.Join(e.cfg.ConfDir, internal+".conf"), conf)
-	if err := e.net.BridgeCreate(ctx, "jo0"); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := e.net.EpairCreate(ctx, "jo0g"); err != nil { // the gateway pair, made by the reconcile loop
-		t.Fatal(err)
-	}
 	e.runner.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
 	e.runner.Add(run.Rule{Name: "rctl", Args: []string{run.RestArgs}})
 	e.runner.Add(run.Rule{Name: "/sbin/ifconfig", Args: []string{"-j", internal, run.AnyArg, "description", run.AnyArg}})
@@ -113,17 +107,17 @@ func TestHookInTheProjectLayout(t *testing.T) {
 	h := newProjectEnv(t, "shop", "web")
 	ctx := context.Background()
 	const internal = "shop_web"
+	// the anchor file is named by the internal name and loads into jailops/<project>/<jail>
+	mustWrite(t, h.cfg.PFAnchorFile(internal), "pass in on "+h.host+" all\n")
 	if err := h.local.RunHook(ctx, PhasePreStart, internal); err != nil {
 		t.Fatalf("prestart: %v", err)
 	}
-	if got := h.ifaces()["jo0"]; len(got) != 1 || got[0] != h.host {
-		t.Errorf("bridge members %v", got)
+	if _, ok := h.ifaces()[h.host]; !ok {
+		t.Errorf("host epair end %s missing: %v", h.host, h.ifaces())
 	}
 	if err := h.jails.Create(ctx, filepath.Join(h.cfg.ConfDir, internal+".conf"), internal); err != nil {
 		t.Fatal(err)
 	}
-	// the anchor file is named by the internal name and loads into jailops/<project>/<jail>
-	mustWrite(t, h.cfg.PFAnchorFile(internal), "pass in on "+h.host+" all\n")
 	if err := h.local.RunHook(ctx, PhasePostStart, internal); err != nil {
 		t.Fatalf("poststart: %v", err)
 	}
@@ -136,8 +130,8 @@ func TestHookInTheProjectLayout(t *testing.T) {
 	if a, _ := h.pf.Read(ctx, "jailops/shop/web"); a != "" {
 		t.Errorf("anchor left behind: %q", a)
 	}
-	if len(h.ifaces()["jo0"]) != 0 {
-		t.Errorf("member left behind: %v", h.ifaces())
+	if _, ok := h.ifaces()[h.host]; ok {
+		t.Errorf("epair left behind: %v", h.ifaces())
 	}
 }
 
@@ -249,10 +243,10 @@ func TestJailMayOnlyBeUsedWhenItsConfExists(t *testing.T) {
 	if _, err := j.Exec(ctx, internal, jailosExec("echo")); !api.IsCode(err, api.CodeForbidden) {
 		t.Errorf("exec in a jail without a conf: %v", err)
 	}
-	if err := e.net.BridgeCreate(ctx, "jo0"); err != nil {
+	if _, _, err := e.net.EpairCreate(ctx, "jo0"); err != nil {
 		t.Fatal(err)
 	}
-	if err := e.local.Net().MoveToJail(ctx, "jo0", internal); err == nil {
+	if err := e.local.Net().MoveToJail(ctx, "jo0a", internal); err == nil {
 		t.Error("moved an interface into a jail without a conf")
 	}
 	mustWrite(t, conf, strings.Replace(e.goodConf(), "alpha_web {", internal+" {", 1))

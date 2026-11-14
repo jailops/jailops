@@ -2,9 +2,14 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"maps"
+	"path"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"jailops.net/jailops/internal/reconcile"
 	"jailops.net/jailops/internal/render"
@@ -16,15 +21,16 @@ import (
 // DummynetModule is the kernel module whose pipes carry the bandwidth limits.
 const DummynetModule = "dummynet"
 
-// shapedDevice is one device of a jail with a bandwidth limit: nic.<device>.egress, in bits per second.
+// shapedDevice is one direction of one device of a jail with a bandwidth limit: nic.<device>.egress or
+// nic.<device>.ingress, in bits per second.
 type shapedDevice struct {
-	key              render.PipeKey
-	egress           uint64
-	jail, deviceName string
+	key  render.PipeKey
+	rate uint64
 }
 
-// shapedDevices lists every device of every jail that has a bandwidth limit, from the specs the jails have now (with
-// their profiles merged). A limit that does not parse is skipped here; the spec validation refuses it when it is set.
+// shapedDevices lists every direction of every device of every jail that has a bandwidth limit, from the specs the
+// jails have now (with their profiles merged). A limit that does not parse is skipped here; the spec validation
+// refuses it when it is set.
 func (s *Service) shapedDevices() []shapedDevice {
 	s.mu.RLock()
 	names := sortedKeys(s.jails)
@@ -36,34 +42,114 @@ func (s *Service) shapedDevices() []shapedDevice {
 	var out []shapedDevice
 	for _, j := range jails {
 		for i, nd := range s.effective(j).Network {
-			if nd.Egress == "" {
-				continue
+			for _, dir := range []struct {
+				limit   string
+				ingress bool
+			}{{nd.Egress, false}, {nd.Ingress, true}} {
+				if dir.limit == "" {
+					continue
+				}
+				bits, err := validate.ParseRate(dir.limit)
+				if err != nil || bits == 0 {
+					continue
+				}
+				out = append(out, shapedDevice{key: render.PipeKey{Jail: j.Metadata.UUID, Device: i, Ingress: dir.ingress}, rate: bits})
 			}
-			bits, err := validate.ParseRate(nd.Egress)
-			if err != nil || bits == 0 {
-				continue
-			}
-			out = append(out, shapedDevice{key: render.PipeKey{Jail: j.Metadata.UUID, Device: i}, egress: bits, jail: jailKey(j), deviceName: nd.Name})
 		}
 	}
 	return out
 }
 
-// shapingPlan gives the pipe number of every shaped device and the pipes the host must have: one per device, with the
-// bandwidth of what the jail sends.
+// pipeTable is the pipe number of every limited direction of a device, kept on disk: a number is given once, when a
+// limit is first set, and stays with its device until the limit is removed (render.AllocatePipes), so the anchors and
+// the states of other jails never see a pipe renumbered.
+type pipeTable struct {
+	mu     sync.Mutex
+	loaded bool
+	nums   map[render.PipeKey]int
+}
+
+// pipeTableFile is where the table is kept.
+func (s *Service) pipeTableFile() string { return path.Join(s.d.StateDir, "rendered", "pipes.json") }
+
+type pipeEntry struct {
+	Jail    string `json:"jail"`
+	Device  int    `json:"device"`
+	Ingress bool   `json:"ingress,omitempty"`
+	Pipe    int    `json:"pipe"`
+}
+
+// loadPipes reads the table from disk once.
+func (s *Service) loadPipes(ctx context.Context) {
+	t := &s.pipes
+	if t.loaded {
+		return
+	}
+	t.loaded = true
+	t.nums = map[render.PipeKey]int{}
+	if s.d.StateDir == "" || s.d.Files == nil {
+		return
+	}
+	b, err := s.d.Files.ReadFile(ctx, s.pipeTableFile())
+	if err != nil {
+		return
+	}
+	var es []pipeEntry
+	if json.Unmarshal(b, &es) != nil {
+		return
+	}
+	for _, e := range es {
+		t.nums[render.PipeKey{Jail: e.Jail, Device: e.Device, Ingress: e.Ingress}] = e.Pipe
+	}
+}
+
+// savePipes writes the table after it changed.
+func (s *Service) savePipes(ctx context.Context) {
+	if s.d.StateDir == "" || s.d.Files == nil {
+		return
+	}
+	var es []pipeEntry
+	for k, n := range s.pipes.nums {
+		es = append(es, pipeEntry{Jail: k.Jail, Device: k.Device, Ingress: k.Ingress, Pipe: n})
+	}
+	sort.Slice(es, func(i, j int) bool { return es[i].Pipe < es[j].Pipe })
+	b, err := json.Marshal(es)
+	if err != nil {
+		return
+	}
+	p := s.pipeTableFile()
+	if err := s.d.Files.MkdirAll(ctx, path.Dir(p)); err != nil {
+		s.log.Warn("saving the pipe numbers failed", "err", err)
+		return
+	}
+	if err := s.d.Files.WriteAtomic(ctx, p, b); err != nil {
+		s.log.Warn("saving the pipe numbers failed", "err", err)
+	}
+}
+
+// shapingPlan gives the pipe number of every limited direction and the pipes the host must have: one per direction,
+// with its bandwidth.
 func (s *Service) shapingPlan() (map[render.PipeKey]int, []reconcile.PipeDesired, error) {
 	devs := s.shapedDevices()
 	keys := make([]render.PipeKey, len(devs))
 	for i, d := range devs {
 		keys[i] = d.key
 	}
-	numbers, err := render.PipeNumbers(keys)
+	ctx := context.Background()
+	s.pipes.mu.Lock()
+	defer s.pipes.mu.Unlock()
+	s.loadPipes(ctx)
+	numbers, err := render.AllocatePipes(s.pipes.nums, keys)
 	if err != nil {
 		return nil, nil, err
 	}
+	if !maps.Equal(numbers, s.pipes.nums) {
+		s.pipes.nums = numbers
+		s.savePipes(ctx)
+	}
 	var want []reconcile.PipeDesired
 	for _, d := range devs {
-		want = append(want, reconcile.PipeDesired{Number: numbers[d.key], Rate: d.egress})
+		want = append(want, reconcile.PipeDesired{Number: numbers[d.key], Rate: d.rate})
 	}
 	return numbers, want, nil
 }
@@ -83,8 +169,13 @@ func (s *Service) ensurePipes(ctx context.Context, shapes []render.Shape, rates 
 		}
 	}
 	for _, sh := range shapes {
-		if err := s.configurePipe(ctx, sh.Pipe, rates[sh.Pipe]); err != nil {
-			return err
+		for _, p := range []int{sh.Egress, sh.Ingress} {
+			if p == 0 {
+				continue
+			}
+			if err := s.configurePipe(ctx, p, rates[p]); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

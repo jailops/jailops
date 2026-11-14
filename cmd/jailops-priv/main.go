@@ -17,6 +17,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -50,18 +51,6 @@ func main() {
 }
 
 // list is a repeatable, comma separated flag.
-// ndpList collects the ndp-proxy lines. Its value contains commas (the prefixes), so it is not split.
-type ndpList []priv.NDPUplink
-
-func (l *ndpList) String() string { return fmt.Sprint(len(*l), " uplink(s)") }
-func (l *ndpList) Set(v string) error {
-	u, err := priv.ParseNDPProxy(v)
-	if err != nil {
-		return err
-	}
-	*l = append(*l, u)
-	return nil
-}
 
 // prefixList is a list of networks (wireguard-routes), each without host bits.
 type prefixList []netip.Prefix
@@ -112,9 +101,10 @@ type options struct {
 	workDir     string
 	helperPath  string
 	wgDir       string
+	pkgKeysDir  string
+	keyringDir  string
 	allowUser   list
 	allowGroup  list
-	ndpProxy    ndpList
 	sysctl      list
 	fetchHost   list
 	mirror      list
@@ -160,11 +150,12 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.StringVar(&o.stateDir, "state-dir", "", "state directory (default <mount-base>/state)")
 	fs.StringVar(&o.helperPath, "helper-path", priv.DefaultHelperPath, "path jail.conf hooks call")
 	fs.StringVar(&o.wgDir, "wireguard-dir", priv.DefaultWireGuardDir, "directory of the WireGuard keys (root only, mode 0700; outside the daemon's directories)")
+	fs.StringVar(&o.pkgKeysDir, "pkg-keys-dir", priv.DefaultPkgKeysDir, "directory of the key directories (fingerprints) a package repository of an image build may use besides /usr/share/keys (root only, not writable by others; outside the daemon's directories)")
+	fs.StringVar(&o.keyringDir, "keyring-dir", priv.DefaultKeyringDir, "directory of the keyrings debootstrap may check a release with (root only, not writable by others; outside the daemon's directories)")
 	fs.Var(&o.allowUser, "allow-user", "user allowed to connect (jailopsd's user)")
 	fs.Var(&o.allowGroup, "allow-group", "group allowed to connect")
-	fs.Var(&o.ndpProxy, "ndp-proxy", "an uplink the IPv6 proxy may use and the prefixes it may answer for: <uplink>=<prefix>[,<prefix>...] (repeatable)")
 	fs.Var(&o.sysctl, "sysctl", "extra sysctl name readable through the helper")
-	fs.Var(&o.fetchHost, "fetch-host", "host fetch may download from over https (default dl-cdn.alpinelinux.org and pkg.freebsd.org)")
+	fs.Var(&o.fetchHost, "fetch-host", "host fetch, package repositories and debootstrap mirrors may use over https (http://<host> allows plain http for a package repository on that host); default dl-cdn.alpinelinux.org, pkg.freebsd.org, pkg.jailops.net, deb.debian.org, archive.ubuntu.com, ports.ubuntu.com")
 	fs.Var(&o.mirror, "image-mirror", "directory fs.read_file may read (a local mirror of image archives)")
 	fs.Var(&o.hostManage, "host-manage", "host management module the helper may change (identity, firewall); empty: the host is only read (docs/appliance.md)")
 	fs.StringVar(&o.hostDir, "host-dir", priv.DefaultHostDir, "root-owned directory of the host snapshots and the applied record")
@@ -220,9 +211,9 @@ func (o *options) privConfig() priv.Config {
 	c := priv.Config{
 		StorageRoots: append([]string(nil), o.storage...), StorageFile: o.storageFile, AllowPoolRoot: o.poolRoot,
 		MountBase: o.mountBase,
-		ConfDir:   o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir,
+		ConfDir:   o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir, PkgKeysDir: o.pkgKeysDir, KeyringDir: o.keyringDir,
 		WireGuardRoutes: o.wgRoutes,
-		NDPProxy:        o.ndpProxy, Sysctls: o.sysctl, FetchHosts: o.fetchHost, ImageMirrors: o.mirror,
+		Sysctls:         o.sysctl, FetchHosts: o.fetchHost, ImageMirrors: o.mirror,
 		HostManage: unionModules(o.hostManage, o.applianceModules()), HostDir: o.hostDir,
 		Admin: priv.AdminPolicy{
 			RawJailParams: o.adminRawParam, AllowFlags: o.adminAllow, HostMountRoots: o.adminMounts,
@@ -662,14 +653,7 @@ func checkConfig(o *options, cfg priv.Config, stdout, stderr io.Writer) int {
 	w("conf dir:       %s\n", c.ConfDir)
 	w("state dir:      %s\n", c.StateDir)
 	w("helper path:    %s\n", c.HelperPath)
-	w("interfaces:     the bridges and epairs that carry the JailOps description\n")
-	for _, u := range c.NDPProxy {
-		var ps []string
-		for _, p := range u.Prefixes {
-			ps = append(ps, p.String())
-		}
-		w("ipv6 proxy:     %s answers for %s\n", u.Uplink, strings.Join(ps, ", "))
-	}
+	w("interfaces:     the epairs that carry the JailOps description\n")
 	w("storage roots:\n")
 	warn := 0
 	if st := l.RootStatuses(); len(st) == 0 {
@@ -694,6 +678,8 @@ func checkConfig(o *options, cfg priv.Config, stdout, stderr io.Writer) int {
 		w("  %-15s %-26s %s\n", r.Name, r.Binary, r.Reason)
 	}
 	w("fetch hosts:    %s\n", strings.Join(c.EffectiveFetchHosts(), ", "))
+	w("package keys:   %s (and /usr/share/keys)\n", cmp.Or(c.PkgKeysDir, priv.DefaultPkgKeysDir))
+	w("keyrings:       %s\n", cmp.Or(c.KeyringDir, priv.DefaultKeyringDir))
 	w("image mirrors:  %s\n", strings.Join(c.ImageMirrors, ", "))
 	w("readable files: %s\n", strings.Join(priv.ReadOnlyFiles, ", "))
 	if len(c.HostManage) == 0 {

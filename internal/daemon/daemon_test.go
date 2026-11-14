@@ -167,15 +167,15 @@ func TestDoctor(t *testing.T) {
 	}
 	for name, want := range map[string]api.DoctorStatus{
 		"state.files": api.DoctorOK, "db.integrity": api.DoctorOK, "operations.journal": api.DoctorOK,
-		"sysctl.net.link.bridge.pfil_member": api.DoctorOK, "sysctl.net.inet.ip.forwarding": api.DoctorOK,
-		"jails.health": api.DoctorOK, "render": api.DoctorOK,
+		"sysctl.net.inet.ip.forwarding": api.DoctorOK,
+		"jails.health":                  api.DoctorOK, "render": api.DoctorOK,
 	} {
 		if c, ok := by[name]; !ok || c.Status != want {
 			t.Errorf("%s: %+v", name, c)
 		}
 	}
 	// Kernel modules cannot be read through the fake runner: unknown, not ok.
-	if c := by["kernel.module.if_bridge"]; c.Status != api.DoctorOK && c.Status != api.DoctorUnknown {
+	if c := by["kernel.module.if_epair"]; c.Status != api.DoctorOK && c.Status != api.DoctorUnknown {
 		t.Errorf("%+v", c)
 	}
 	// A sysctl the networks need but the host lacks fails with a hint.

@@ -220,7 +220,7 @@ const endName = (v: string): string => (v === 'host' ? s.fwtest.host : endValue(
                   <span class="ft-state"><Icon :name="verdictIcon(h.verdict)" />{{ verdictText(h.verdict) }}</span>
                   <strong class="ft-title">{{ hopTitle(h) }}</strong>
                   <span class="ft-anchor mono" :title="s.fwtest.hop.anchor">{{ h.anchor }}</span>
-                  <span class="faint ft-at">{{ s.fwtest.hop.at[h.at] }}, {{ h.direction }}</span>
+                  <span class="faint ft-at">{{ s.fwtest.hop.at[h.direction] }}</span>
                   <span class="ft-by" data-test="hop-by">{{ h.verdict === 'unknown' && h.why ? h.why : decidedBy(h.decision) }}</span>
                   <p v-if="h.drift" class="faint ft-drift">{{ s.fwtest.drift }}</p>
                   <details v-if="h.decision.pf || h.skipped.length" class="ft-details" :data-test="`details-${h.side}`">

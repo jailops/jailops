@@ -123,7 +123,7 @@ func TestFileOpsStayInsideTheJailOverTheSocket(t *testing.T) {
 	var a, b string
 	f := newFixtureWith(t, func(e *env) {
 		a, b = jailPair(t, e)
-		vol := filepath.Join(e.cfg.MountBase, "projects", "a", "jails", "x", "data", "v1")
+		vol := filepath.Join(e.cfg.MountBase, "projects", "a", "volumes", "v1")
 		img := filepath.Join(e.cfg.MountBase, "images", "base", "g1")
 		mustWrite(t, filepath.Join(img, "etc", "keep"), "x")
 		for _, d := range []string{vol, filepath.Join(img, "usr")} {
@@ -145,7 +145,7 @@ func TestFileOpsStayInsideTheJailOverTheSocket(t *testing.T) {
 	for _, p := range []string{
 		a + "/var/db/postgres/data/pg_hba.conf",
 		a + "/etc/rc.conf",
-		f.cfg.MountBase + "/projects/a/jails/x/data/v1/out/rc.conf",
+		f.cfg.MountBase + "/projects/a/volumes/v1/out/rc.conf",
 		f.cfg.MountBase + "/images/base/g1/usr/out/rc.conf",
 	} {
 		if _, err := f.client.ReadFile(ctx, p); !api.IsCode(err, api.CodeForbidden) {

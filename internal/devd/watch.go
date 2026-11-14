@@ -1,6 +1,7 @@
 package devd
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"log/slog"
@@ -143,8 +144,12 @@ func (w *Watcher) read(ctx context.Context, conn Conn) error {
 	buf := make([]byte, MaxRecord+1)
 	for {
 		n, err := conn.Read(buf)
-		if n > 0 {
-			w.handle(buf[:n])
+		// devd writes one record per packet and ends each with a newline. A socket that delivers queued packets in one
+		// read (FreeBSD does when the sender does not mark the end of a record) still gives one record per line.
+		for _, line := range bytes.Split(buf[:n], []byte{'\n'}) {
+			if len(line) > 0 {
+				w.handle(line)
+			}
 		}
 		if err != nil {
 			return err

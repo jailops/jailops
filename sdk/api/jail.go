@@ -49,7 +49,7 @@ type JailSpec struct {
 	Resources Resources       `json:"resources,omitempty"`
 	Network   []NetworkAttach `json:"network,omitempty"`
 	Firewall  FirewallAttach  `json:"firewall,omitempty"`
-	Volumes   []VolumeMount   `json:"volumes,omitempty"`
+	Volumes   []VolumeAttach  `json:"volumes,omitempty"`
 	// HostMounts mount existing host directories, usually datasets of a pool JailOps does not manage (a large
 	// archive pool), into the jail with nullfs. Only a global admin may set them, the source must lie below a
 	// directory the host operator approved in the helper's configuration (admin-host-mount), and a profile cannot
@@ -168,12 +168,14 @@ type NetworkAttach struct {
 	// identified by name when profiles are merged.
 	Name    string `json:"name,omitempty"`
 	Network string `json:"network"`
-	// MTU must be the network's MTU when it is set: a bridge gives every port its own MTU. Zero takes the network's.
+	// MTU of this interface (both ends of its epair). Zero takes the network's.
 	MTU int `json:"mtu,omitempty"`
 	// Egress is a rate limit in bits per second ("10M" is 10 Mbit/s, "1G" 1 Gbit/s; decimal units) for what the jail
 	// sends through this device, whoever started the connection. The host enforces it with a dummynet pipe that the
-	// jail's anchor sends the traffic into. Traffic into the jail has no limit: see internal/render/dummynet.go.
+	// jail's anchor sends the traffic into.
 	Egress string `json:"egress,omitempty"`
+	// Ingress is the same limit for what the jail receives through this device, from whoever sends it.
+	Ingress string `json:"ingress,omitempty"`
 	// IPv4 and IPv6 are "auto" (allocate from the network's range), "none",
 	// or a fixed address. The allocation is written back to the spec so it
 	// travels with the jail.
@@ -189,17 +191,14 @@ type FirewallAttach struct {
 	Tags     []string `json:"tags,omitempty"`
 }
 
-// VolumeMount is a data dataset mounted into the jail.
-type VolumeMount struct {
-	// Name is the device name and the name of the volume dataset.
-	Name     string `json:"name"`
+// VolumeAttach attaches a volume of the jail's project to the jail: the volume's dataset is mounted into the jail at
+// Mount with nullfs, read-only when ReadOnly is set. The volume is its own object (see Volume): creating, sizing,
+// owning, snapshotting and deleting it are done there, and one volume can be attached to several jails.
+type VolumeAttach struct {
+	// Name is the name of the volume (jailops volume list).
+	Name     string `json:"volume"`
 	Mount    string `json:"mount"`
-	Quota    string `json:"quota,omitempty"`
 	ReadOnly bool   `json:"read_only,omitempty"`
-	// Encrypted makes the volume a ZFS encryption root (aes-256-gcm, a passphrase typed by a person). It is set
-	// when the jail is created and never changes. The passphrase is entered after every host boot
-	// (POST /api/v1/jails/{name}/unlock); until then the jail is locked and does not start.
-	Encrypted bool `json:"encrypted,omitempty"`
 }
 
 // HostMount is an existing directory of the host mounted into the jail.
@@ -281,29 +280,6 @@ type JailAction struct {
 	Action  string `json:"action"` // start, stop, restart
 	Timeout int    `json:"timeout,omitempty"`
 	Force   bool   `json:"force,omitempty"`
-}
-
-// JailCreate is the body of POST /api/v1/jails: a Jail and, when a volume is encrypted, the passphrase of its
-// encrypted volumes. The passphrase is used once to create them; it is never stored, logged or returned.
-type JailCreate struct {
-	Metadata ObjectMeta `json:"metadata"`
-	Spec     JailSpec   `json:"spec"`
-	// VolumePassphrase is between MinPassphrase and MaxPassphrase bytes, without line breaks.
-	VolumePassphrase string `json:"volume_passphrase,omitempty"`
-}
-
-// JailUnlock is the body of POST /api/v1/jails/{name}/unlock (extension volume_unlock).
-type JailUnlock struct {
-	Passphrase string `json:"passphrase"`
-	// Start starts the jail once its volumes are unlocked.
-	Start bool `json:"start,omitempty"`
-}
-
-// JailPassphraseChange is the body of POST /api/v1/jails/{name}/passphrase (extension volume_unlock): the
-// passphrase of every encrypted volume of the jail changes from Old to New. The jail must be unlocked.
-type JailPassphraseChange struct {
-	Old string `json:"old_passphrase"`
-	New string `json:"new_passphrase"`
 }
 
 // Passphrase limits of encrypted volumes. ZFS itself accepts 8 to 512 bytes; JailOps asks for at least 12.

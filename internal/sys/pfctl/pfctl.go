@@ -4,6 +4,7 @@ package pfctl
 
 import (
 	"context"
+	"fmt"
 	"net/netip"
 	"regexp"
 	"sort"
@@ -159,10 +160,31 @@ func RuleLines(out string) []string {
 		if len(f) == 0 || !ruleKeywords[f[0]] {
 			continue
 		}
-		ls = append(ls, strings.Join(f, " "))
+		ls = append(ls, adaptiveTimeouts.ReplaceAllString(strings.Join(f, " "), ""))
 	}
 	sort.Strings(ls)
 	return ls
+}
+
+// adaptiveTimeouts are the adaptive.start and adaptive.end values pf adds to a rule that has a state limit
+// ("keep state (max 10000, adaptive.start 6000, adaptive.end 12000)"). The verbose dry run prints them on FreeBSD
+// 15.1 and 15.2; the readback of the loaded rule prints them on 15.2 and leaves them out on 15.1. They are defaults
+// derived from the limit, so they are left out of both sides of a comparison.
+var adaptiveTimeouts = regexp.MustCompile(`, adaptive\.(start|end) [0-9]+`)
+
+// firstDifference names the first rule that the two sorted lists do not share, for an error message.
+func firstDifference(want, have []string) string {
+	for i := 0; i < len(want) || i < len(have); i++ {
+		switch {
+		case i >= len(want):
+			return fmt.Sprintf("read back but not expected: %q", have[i])
+		case i >= len(have):
+			return fmt.Sprintf("expected but not read back: %q", want[i])
+		case want[i] != have[i]:
+			return fmt.Sprintf("expected %q, read back %q", want[i], have[i])
+		}
+	}
+	return ""
 }
 
 func mapErr(what string, err error) error {
@@ -193,6 +215,13 @@ func NewCommand(r run.Runner) *Command { return &Command{R: r} }
 
 func (c *Command) pf(ctx context.Context, stdin string, args ...string) (run.Result, error) {
 	cmd := run.Cmd{Name: "pfctl", Args: args, Timeout: 30 * time.Second}
+	if mutates(args) {
+		unlock, err := lockPF(ctx)
+		if err != nil {
+			return run.Result{}, err
+		}
+		defer unlock()
+	}
 	if stdin != "" {
 		cmd.Stdin = strings.NewReader(stdin)
 	}
@@ -235,7 +264,7 @@ func (c *Command) Load(ctx context.Context, anchor, ruleset string) error {
 	}
 	want, have := RuleLines(norm), RuleLines(got)
 	if strings.Join(want, "\n") != strings.Join(have, "\n") {
-		return api.Errorf(api.CodeInternal, "pf anchor %s: loaded rules differ from the validated ruleset (%d expected, %d read back)", anchor, len(want), len(have))
+		return api.Errorf(api.CodeInternal, "pf anchor %s: loaded rules differ from the validated ruleset (%d expected, %d read back): %s", anchor, len(want), len(have), firstDifference(want, have))
 	}
 	return nil
 }

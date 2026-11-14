@@ -169,6 +169,12 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 	if _, _, err := s.accessPolicy(proj, jail); err != nil {
 		return api.Operation{}, err
 	}
+	for _, v := range apps.Volumes(jail, app.Data) {
+		if s.volKind.p(proj).exists(v.Name) {
+			return api.Operation{}, api.Errorf(api.CodeAlreadyExists, "volume %q already exists", v.Name).
+				WithHint("an earlier jail of this name left it: keep its files by attaching it to a jail made by hand, or delete it with jailops volume delete " + v.Name)
+		}
+	}
 	if err := validate.Name("policy", apps.AccessPolicyName(jail)); err != nil {
 		return api.Operation{}, invalid("jail name %q is too long: its firewall policy %s must be a name too", jail, apps.AccessPolicyName(jail))
 	}
@@ -200,7 +206,7 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 	spec := api.JailSpec{
 		Image: image, Storage: storage, Hostname: jail, Layout: api.LayoutThin,
 		Network:   []api.NetworkAttach{{Network: network}},
-		Volumes:   apps.Volumes(app.Data),
+		Volumes:   apps.Volumes(jail, app.Data),
 		Resources: limits,
 		SysVIPC:   app.SysVIPC,
 	}
@@ -230,7 +236,7 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 	if err := s.validateJail(proj, jail, spec); err != nil {
 		return api.Operation{}, err
 	}
-	if err := canonicalJailSizes(&spec, true); err != nil {
+	if err := canonicalJailSizes(&spec); err != nil {
 		return api.Operation{}, err
 	}
 	if err := s.checkNewJail(proj, jail, spec); err != nil {
@@ -388,7 +394,33 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 	proj, jail := nj.Metadata.Project, nj.Metadata.Name
 	root := s.rootMount(key)
 	pl := plan.New("install-app " + app.Name + " " + key)
-	pl.Add(plan.Step{Name: "create-jail", Describe: fmt.Sprintf("create thin jail %s from %s with %d data volume(s) and the labels %s, %s", jail, nj.Spec.Image, len(nj.Spec.Volumes), api.LabelApp, api.LabelAppHash),
+	// The data of the app are volumes of the project, <jail>-<name>, made before the jail that attaches them. They
+	// are never deleted with the jail; a failed installation removes the ones it made.
+	for _, v := range nj.Spec.Volumes {
+		v := v
+		pl.Add(plan.Step{Name: "create-volume-" + v.Name, Describe: fmt.Sprintf("create volume %s for %s", v.Name, v.Mount),
+			Do: func(ctx context.Context) error {
+				p, err := s.projKind.get(proj)
+				if err != nil {
+					return err
+				}
+				si, ok := s.storage(nj.Spec.Storage)
+				if !ok {
+					return notFound("storage", nj.Spec.Storage)
+				}
+				spec := api.VolumeSpec{Storage: si.Name, Mode: "0755", Comment: "data of " + jail + " (" + app.Name + "): " + v.Mount}
+				meta := api.ObjectMeta{Name: v.Name, Project: proj, Labels: map[string]string{api.LabelApp: app.Name}}
+				_, err = s.makeVolume(ctx, project{Meta: p.Meta, Spec: p.Spec}, si, meta, spec, 0o755, nil, false)
+				return err
+			},
+			Undo: func(ctx context.Context) error {
+				if st.started {
+					return nil // kept with the jail for inspection
+				}
+				return s.dropVolume(ctx, proj, v.Name)
+			}, UndoOnFail: true})
+	}
+	pl.Add(plan.Step{Name: "create-jail", Describe: fmt.Sprintf("create thin jail %s from %s attaching %d volume(s), with the labels %s, %s", jail, nj.Spec.Image, len(nj.Spec.Volumes), api.LabelApp, api.LabelAppHash),
 		Do: func(ctx context.Context) error {
 			defer created()
 			if err := h.Bind("create/"+key, &opRequest{Kind: "create", Jail: key, Create: &nj}); err != nil {

@@ -63,14 +63,6 @@ limits:
   # exec_max: 12h
   # auth_failure_threshold: 5     # failed authentications from one source before it is locked out
 
-network:
-  # Set at runtime through the helper and re-asserted by the reconcile loop;
-  # never written to /etc/sysctl.conf. Only these three keys, 0 or 1.
-  sysctl:
-    net.link.bridge.pfil_member: 1
-    net.link.bridge.pfil_bridge: 0
-    net.link.bridge.pfil_onlyip: 1
-
 # Dedicated networks for `jailops project create NAME --new-network`: each project gets a subnet carved from this pool.
 # Without a pool that option answers "unsupported".
 projects:
@@ -146,8 +138,8 @@ logging:
   #   to: https://hooks.example.com/jailops
   #   token_file: /usr/local/etc/jailops/sinks/hook.token   # the bearer token, first line; never the token itself here
 
-# The kernel's notifications through devd(8): a ZFS error or a pool changing state, the link of the uplink or of a
-# managed bridge, a resource limit a jail hit. They show as events (`jailops events`, the console's Events page) and
+# The kernel's notifications through devd(8): a ZFS error or a pool changing state, the link of the uplink, a resource
+# limit a jail hit. They show as events (`jailops events`, the console's Events page) and
 # `jailops doctor` says whether the daemon can read devd's socket (docs/operations.md).
 devd:
   enable: true                      # the default is on for FreeBSD; false switches it off

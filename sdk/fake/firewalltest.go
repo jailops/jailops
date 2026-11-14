@@ -90,10 +90,6 @@ func (s *Server) handleFirewallTest(w http.ResponseWriter, r *http.Request) {
 		h := s.fakeHop(rc.project, j, dir, req, sa, da)
 		h.Side, h.Jail, h.Direction = side, j.Metadata.Name, dir
 		h.Anchor = "jailops/" + rc.project + "/" + j.Metadata.Name
-		h.Interface = "epair"
-		if side == "destination" {
-			h.Interface = "gateway"
-		}
 		c.Hops = append(c.Hops, h)
 		c.Verdict = h.Verdict
 		return h.Verdict == api.TestPass

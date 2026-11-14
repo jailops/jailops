@@ -13,8 +13,8 @@ spec:
   firewall: {policies: [media-server]}
   resources: {cpu: 4, memory: 8G}
   volumes:
-    # A dataset JailOps creates under the jail on `bulk`: snapshotted, rolled back and backed up with the jail.
-    - {name: metadata, mount: /var/db/plexdata, quota: 200G}
+    # A volume of the project (volumes/plexdata.yaml), on `bulk`: it has its own snapshots and outlives the jail.
+    - {volume: plexdata, mount: /var/db/plexdata}
   host_mounts:
     # The archive is NOT JailOps's data: it is a dataset of the pool, mounted with nullfs, read-only. It is not
     # snapshotted or backed up by JailOps. Setting host_mounts needs a global-admin token, and the source must be below an

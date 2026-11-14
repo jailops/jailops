@@ -56,6 +56,8 @@ var Kinds = []KindInfo{
 	{Kind: api.KindFirewallPolicy, Dir: "firewall-policies", ProjectLevel: true, Extension: "firewall_anchors"},
 	{Kind: api.KindBackupTarget, Dir: "backup-targets", Extension: "backup_policies"},
 	{Kind: api.KindBackupPolicy, Dir: "backup-policies", ProjectLevel: true, Extension: "backup_policies"},
+	// A volume is a dataset of one host; a jail that attaches it comes after it.
+	{Kind: api.KindVolume, Dir: "volumes", HostOnly: true, ProjectLevel: true, Extension: "volumes"},
 	{Kind: api.KindJail, Dir: "jails", HostOnly: true, ProjectLevel: true, Extension: "jails"},
 }
 
@@ -475,6 +477,10 @@ func DecodeSpec(kind api.Kind, raw map[string]any) (any, error) {
 		var s api.AddressSetSpec
 		err := DecodeStrict(raw, &s)
 		return s, err
+	case api.KindVolume:
+		var s api.VolumeSpec
+		err := DecodeStrict(raw, &s)
+		return s, err
 	case api.KindBackupPolicy:
 		var s api.BackupPolicySpec
 		err := DecodeStrict(raw, &s)
@@ -514,6 +520,14 @@ func DecodeSpec(kind api.Kind, raw map[string]any) (any, error) {
 // only the keys it sets) instead of replacing the whole list.
 var deviceLists = map[string]bool{"network": true, "volumes": true, "devfs": true, "proxy": true}
 
+// deviceKey is the key an element of a device list is named by: the volumes of a jail by the volume they attach.
+func deviceKey(list string) string {
+	if list == "volumes" {
+		return "volume"
+	}
+	return "name"
+}
+
 // MergeSpec merges a jail spec fragment over a base: maps merge, null
 // deletes, device lists (network, volumes, devfs, proxy) merge by device
 // name, every other value replaces. Unnamed network devices are named
@@ -552,7 +566,7 @@ func nameDevices(kind string, l []any) []any {
 			continue
 		}
 		m = cloneMap(m)
-		if name, _ := m["name"].(string); name == "" && kind == "network" {
+		if name, _ := m[deviceKey(kind)].(string); name == "" && kind == "network" {
 			m["name"] = autoName + "eth" + strconv.Itoa(n)
 		}
 		if kind == "network" {
@@ -591,17 +605,18 @@ func mergeDevices(kind string, base any, over []any) any {
 	out := nameDevices(kind, b)
 	for _, e := range nameDevices(kind, over) {
 		m, ok := e.(map[string]any)
-		name, _ := m["name"].(string)
+		key := deviceKey(kind)
+		name, _ := m[key].(string)
 		if !ok || name == "" {
 			out = append(out, e)
 			continue
 		}
 		found := false
 		for i, x := range out {
-			if xm, ok := x.(map[string]any); ok && sameName(xm["name"], name) {
+			if xm, ok := x.(map[string]any); ok && sameName(xm[key], name) {
 				merged := Merge(xm, m)
-				if xn, _ := xm["name"].(string); !strings.HasPrefix(xn, autoName) {
-					merged["name"] = xn
+				if xn, _ := xm[key].(string); !strings.HasPrefix(xn, autoName) {
+					merged[key] = xn
 				}
 				out[i] = merged
 				found = true

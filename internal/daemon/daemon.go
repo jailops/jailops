@@ -11,7 +11,6 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -274,7 +273,6 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	case opts.Dev:
 		deps.Execer = service.LocalExecer{Prefix: []string{"jexec", "-l"}}
 	}
-	deps.NetSysctl = cfg.Network.Sysctl
 	for _, p := range cfg.Lifecycle.Persistent {
 		deps.Persistent = append(deps.Persistent, lifecycle.PersistentPath{Dataset: p.Dataset, Path: p.Path, Class: lifecycle.Class(p.Class), Merge: p.Merge, NoSeed: p.NoSeed})
 	}
@@ -318,7 +316,11 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		if !opts.Dev && clients.Host != nil {
 			agents = privAgents{clients.Host} // not root: files are read and written by agents of the helper
 		}
-		hb, err := buildHostBackups(cfg, hostUUID, clients.ZFS, log, opts, agents)
+		var mounts hostbackup.DatasetMounter
+		if m, ok := any(clients.Host).(hostbackup.DatasetMounter); ok && clients.Host != nil {
+			mounts = m // a stopped jail's datasets are mounted by the helper for the time of the backup
+		}
+		hb, err := buildHostBackups(cfg, hostUUID, clients.ZFS, log, opts, agents, mounts)
 		if err != nil {
 			return nil, err
 		}
@@ -341,9 +343,8 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	rcfg := reconcile.Config{Interval: cfg.Reconcile.Interval.Std(), Autostart: autostart, NDP: d.ndpFactory()}
 	trigger := make(chan struct{}, 1)
 	d.rec = reconcile.New(rcfg, reconcile.Env{Source: svc, Sink: svc, Actions: svc, Net: clients.Net, PF: clients.PF, Jails: clients.Jails,
-		Run: clients.Runner, Sysctl: clients.Sysctl, HostRoutes: func(context.Context) (map[netip.Addr]string, error) { return priv.ReadHostRoutes() },
-		HostNeighbors: func(context.Context) ([]ifconfig.Neighbor, error) { return priv.ReadStaticNeighbors() },
-		Log:           log, Trigger: trigger, WG: clients.WG})
+		Run: clients.Runner, Sysctl: clients.Sysctl, Routes: func(context.Context) ([]ifconfig.RouteEntry, error) { return priv.ReadRoutes() },
+		Log: log, Trigger: trigger, WG: clients.WG})
 	svc.SetReconciler(d.rec)
 	// 6. Routes are verified against the permission table here.
 	srv, err := server.New(server.Config{
@@ -369,7 +370,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	}
 	// 8. Background work.
 	d.go_(func() { _ = d.rec.Run(priv.WithAdmin(bg, systemActor)) })
-	d.go_(func() { d.bridgeStateEvents(bg, trigger) })
+	d.go_(func() { d.stateEvents(bg, trigger) })
 	d.go_(func() { d.housekeeping(bg) })
 	if cfg.Devd.On() {
 		d.go_(func() { svc.RunDevd(bg, cfg.Devd.Pipe) })
@@ -531,7 +532,7 @@ func (d *Daemon) snapshotState(kind api.Kind, name string) error {
 	return nil
 }
 
-func (d *Daemon) bridgeStateEvents(ctx context.Context, trigger chan<- struct{}) {
+func (d *Daemon) stateEvents(ctx context.Context, trigger chan<- struct{}) {
 	ch, cancel := d.state.Watch(64)
 	defer cancel()
 	for {
@@ -646,8 +647,8 @@ func (d *Daemon) backupDB(ctx context.Context) {
 }
 
 // ndpFactory builds the neighbor discovery proxy. In production it works through the root helper: the
-// helper hands over a locked, read-only capture of the uplink and sends the advertisements itself, for the prefixes the
-// operator approved in priv.conf (ndp-proxy). With --dev it runs in process as root.
+// helper hands over a locked, read-only capture of the uplink and sends the advertisements itself, for the subnets of the
+// networks in proxy mode. With --dev it runs in process as root.
 func (d *Daemon) ndpFactory() reconcile.NDPFactory {
 	return func(uplink string) (reconcile.NDP, error) {
 		if !d.opts.Dev {

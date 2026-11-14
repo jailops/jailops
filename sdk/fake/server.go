@@ -138,8 +138,9 @@ type Server struct {
 	hostSt   fakeHost     // host management (host.go)
 	fwSt     fakeFirewall // the firewall module and commit confirmed (hostfw.go)
 	certSt   fakeCert     // the certificate of the console (hostcert.go)
-	vol      fakeVolumes  // encrypted volumes (volkeys.go)
+	vol      fakeVolumes  // the passphrases and locks of encrypted volumes (volumes.go)
 	jails    *kind[api.Jail]
+	volumes  *kind[api.Volume]
 	profiles *kind[api.Profile]
 	apps     map[string]*appEntry
 	// drafts are what GET /api/v1/jails/{name}/app-draft answers (SeedAppDraft), by jail key
@@ -182,7 +183,8 @@ type Server struct {
 	wireguard *kind[api.WireGuard]
 	wgKeys    int // keys handed out by the WireGuard fake
 
-	snapshots map[string][]*api.JailSnapshot // by jail
+	snapshots map[string][]*api.JailSnapshot   // by jail
+	volSnaps  map[string][]*api.VolumeSnapshot // by volume key
 	gens      map[string][]*api.ImageGeneration
 	genMax    map[string]int            // highest generation number ever used per image: numbers are never reused
 	aliases   map[string]map[string]int // image -> alias -> generation number
@@ -212,7 +214,7 @@ func New(opts ...Option) *Server {
 	s := &Server{
 		now: time.Now, uuid: newUUID(), hostname: "fake-host", arch: "amd64", release: "15.1-RELEASE",
 		extensions: slices.Clone(api.Extensions),
-		snapshots:  map[string][]*api.JailSnapshot{}, access: map[string]*fakeAccess{},
+		snapshots:  map[string][]*api.JailSnapshot{}, volSnaps: map[string][]*api.VolumeSnapshot{}, access: map[string]*fakeAccess{},
 		identities: map[string]Identity{}, trustTokens: map[string]*trustRec{}, trustFails: map[string]int{},
 		sessions: map[string]*api.Session{}, storageStat: map[string]api.StorageStatus{},
 		offline: map[string]bool{}, fleetConds: map[string][]api.Condition{},

@@ -9,7 +9,7 @@ JailOps targets **FreeBSD 15.1 and later**; older releases are not looked at, an
 What is available today and what comes next: [the roadmap](https://jailops.net/status/).
 
 - Thin jails as ZFS clones of immutable, upgradable pkgbase image generations
-- Managed VNET bridges with deterministic IPv4 and IPv6 allocation. No DHCP, no radvd, no SLAAC
+- Routed VNET networks with deterministic IPv4 and IPv6 allocation, one link per jail. No DHCP, no radvd, no SLAAC
 - PF anchors per jail
 - Encrypted, deduplicated backups to a keyless backup node, with restore and restore tests
 - Local-first: every host has its own API and console. A hub manages many hosts; cluster mode is on the roadmap

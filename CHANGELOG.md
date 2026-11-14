@@ -2,6 +2,86 @@
 
 ## Unreleased
 
+- **Volumes can be directories of the host.** `jailops volume create NAME --path /mnt/storagebox/backups` makes a volume of
+  a mount the host operator allows with `admin-host-mount` (the mount point has to lie below that directory: list `/mnt`, not
+  the box). Only a global administrator makes or attaches one. There is no dataset: no snapshots, size, encryption or
+  backup by JailOps, and `--copy-existing` is refused. The helper looks at the path (new operation `fs.source_probe`: no
+  link on the way, a mount point on the way, optionally a file made and removed) when the volume is made and at every
+  jail start, and a jail whose directory is not on its mount does not start, so it never writes to the empty directory a lost
+  mount leaves behind. `--watch` (`--probe mounted|write`, `--on-loss none|stop`) has the daemon look every few seconds,
+  show `state: ok|lost` in the volume, the console and `jailops doctor` (`volume.hostdirs`), send `volume-lost`,
+  `volume-restored` and `volume-remounted` events, stop the jails that attach it with `stop`, and give the running jails their
+  nullfs mount again when the directory is back (a mount made under a nullfs mount afterwards is not seen through it).
+- **Breaking: the host is the router, and there is no bridge.** A network is an address range with an uplink policy and
+  has no interface of its own. Every jail interface is a routed point-to-point link to the host: the host end of its
+  epair carries the network's gateway as a `/32` (and the link-local `fe80::1`), the host holds a `/32` and a `/128` route
+  per jail address through it, and the host answers a packet for an address of the subnet that no jail has with an
+  error instead of sending it out of the uplink (a reject route for the subnet, or for a routed IPv6 prefix). Jails share
+  no segment: none sees another's frames or can poison its neighbour cache, and there is no layer 2 between jails
+  (no multicast, VRRP or mDNS between them). Ingress limits work now (`nic.<device>.ingress`). Removed: `--bridge` and
+  `spec.bridge`, `ipv6.gateway` (the IPv6 gateway of a jail is always `fe80::1`), `status.bridge_up` and
+  `status.members` (the running links are `status.links`), the interface of `firewall test` hops, the check
+  `network.bridges`, the kernel module `if_bridge`, the `network.sysctl` configuration and the `net.link.bridge.*`
+  sysctls, and the rule that an attachment's MTU must be the network's. `--ipv6 PREFIX` takes a prefix (`fd50::/64`).
+  A project name now only prefixes the OS name of its jails. Rules of a jail's anchor stand on the host end of its own
+  link only, with `keep state (if-bound)` on every pass rule, and the anchor of a jail is loaded before the jail's first
+  process runs. See [docs/networking.md](docs/networking.md).
+
+- **IPv6 proxy mode needs no `priv.conf` line.** When an administrator creates a network in proxy mode, the helper accepts
+  its prefix itself: between /48 and /120, global or unique-local, no address of the host inside it, no overlap with another
+  network, and the uplink a plain interface. The line `ndp-proxy` and the helper flag of that name are gone, as is the
+  `JAILOPS_NDP_PROXY` variable of the provisioning script.
+
+- **Long commands and parallel starts.** A command run with `jailops exec` without a terminal is no longer killed after ten
+  seconds: it runs until it ends. Starting several jails of one network at once no longer fails with `busy`, and the helper
+  accepts as many requests at once as it has exec sessions to serve.
+
+- **Backups include the volumes, once each.** A volume is a backup unit of its own, taken from its own snapshot: a policy
+  backs up the volumes of the jails it selects and the volumes whose labels match its selector, each volume once per run
+  however many jails attach it, and a jail's backup holds the attachment and no volume files. `exclude_volumes` on a
+  policy (`jailops backup policy create --exclude-volumes`) and `jailops backup run POLICY --no-volumes` leave them out.
+  `jailops backup list` has a KIND column and `--volume NAME`. A jail restore brings back the volumes the project lacks
+  from their newest backup before the jail (`jailops backup restore --no-volumes` restores the jail with no volume attachments); a
+  volume backup is restored on its own as a new volume (`jailops backup restore ID --as NAME`, never replacing one), and
+  an encrypted volume needs its passphrase for that (`--passphrase-file`) and is not restored with the jail. A locked
+  volume is skipped with the code `locked` until it is unlocked. API: `exclude_volumes` on `BackupPolicySpec`, `kind` and
+  `volume` on `BackupSpec`, `no_volumes` and `passphrase` on `RestoreRequest`, `no_volumes` on `BackupRunRequest`. A
+  restore test (`verify --depth full`) restores the jail without any volume and never touches the live data; a volume
+  backup is tested at `extract` depth at most.
+
+- **Breaking: volumes are objects of a project, attached to jails.** A volume is made on its own and a jail attaches it
+  by name: `jailops volume create maildir --uid 5000 --gid 5000 --mode 0770`, then `jailops create mail ...
+  --volume maildir:/var/mail/vhosts` or `jailops volume attach mail maildir /var/mail/vhosts`. It lives at
+  `<storage>/projects/<project>/volumes/<name>`, is mounted on the host and reaches the jail through a `nullfs` line of
+  its fstab (the helper allows only the root of a volume as such a source), and outlives the jails: deleting a jail never
+  deletes a volume, a jail's snapshot, rollback, upgrade and copy leave volumes alone (a copy attaches none), and one
+  volume can be attached to several jails (a volume writable in more than one says so). The owner and the mode of its
+  root are set once, at creation, by a new narrow helper operation (`fs.volume_owner`: the empty root of a volume,
+  opened one plain directory at a time, no setuid, setgid or sticky bit), so a user with the same number in a mail
+  server and a desktop jail reads the same files. Attaching and detaching need the jail stopped; the attachment is the
+  jail's `volumes: [{volume, mount, read_only}]` (and `disk.<volume>=<path>`), so a file, `edit` and `config` do the
+  same. New: `jailops volume create | list | show | edit | delete | attach | detach | snapshot create|list|delete|rollback
+  | unlock | lock | passphrase`, `kind: Volume` in `apply` and in a fleet repository (`projects/<p>/volumes/`, applied before
+  the jails), API `/api/v1/volumes` and `/api/v1/jails/<n>/volumes` (extension `volumes`, which replaces `volume_unlock`),
+  a Volumes page in the console, `jailops volume attach --copy-existing`, doctor check `jail.volumes`. **Changed:** an
+  encrypted volume is created with `jailops volume create --encrypted` and unlocked with `jailops volume unlock`
+  (`jail unlock`, `lock` and `passphrase` and `volume_passphrase` in the jail's create are gone); an encrypted volume is
+  attached to one jail, and that jail is locked while the volume is. An app's `data` paths become volumes named
+  `<jail>-<name>`, made by steps of the install plan. **Removed:** the
+  per-jail volume datasets (`<jail>/data/<volume>`), the volume quota in `--volume` and in `disk.<volume>.quota` (use
+  `volume create --size`), and the data/all rollback of volumes.
+
+- **Security: the helper no longer lets the daemon choose whom it trusts when it runs `pkg` or `debootstrap` as root.** A
+  repository configuration that the daemon wrote for an image build could name any https host and a key directory in the
+  daemon's own work area, so a compromised daemon could have signed a package itself and had its install script run as
+  root. Now a package repository or a `debootstrap` mirror must be on a host listed in `fetch-host` (defaults:
+  the Alpine CDN, `pkg.freebsd.org`, `pkg.jailops.net`, `deb.debian.org`, `archive.ubuntu.com`, `ports.ubuntu.com`;
+  `http://<host>` allows plain http for a repository there), the key directory must be below `/usr/share/keys` or the new
+  `pkg-keys-dir` (default `/usr/local/etc/jailops/keys`), and the `debootstrap` keyring must be a file in the new
+  `keyring-dir` (default `/usr/local/share/keyrings`). Both directories belong to root, are not writable by others, hold
+  no symbolic links and lie outside the daemon's directories; the helper checks them every time. An image built from a
+  repository of your own needs its host in `fetch-host` and its key directory below `pkg-keys-dir`, placed by root.
+
 - **Breaking: NAT and port forwards are options on rules, and pf.conf needs one line.** The anchors of JailOps hold the
   translation as `match out on <uplink> … nat-to (<uplink>)` for the NAT of a network and `match in on <uplink> … rdr-to
   <jail> port N` for a port forward, which is how pf describes translation in FreeBSD 15; the older translation ruleset
@@ -10,15 +90,15 @@
   forwards of the networks from applying to the traffic it matches): delete the two lines `nat-anchor "jailops/*"` and
   `rdr-anchor "jailops/*"`. `jailops-setup`, `jailops doctor` (`pf.anchors`), the host firewall module and the lines the
   console and the CLI print for the ACME redirect (`pass in quick … rdr-to`) follow.
-- **Bandwidth limits are enforced: `nic.<device>.egress`.** The limit of what the jail sends through a device was stored
-  and reported only; the host now enforces it with a dummynet pipe that the jail's anchor sends the traffic into
-  (`dnpipe` on `match` rules), for the connections the jail starts and for the answers of a server in the jail. A rate is
-  in bits per second with decimal units: `10M` is 10 Mbit/s. The pipes (numbers 40000 to 59999, JailOps's own) are
-  configured through the helper when the jail starts and kept right by the reconcile loop; they go away with the limit
-  or the jail, after the anchors that named them are loaded. `dummynet` is loaded when a limit exists and `jailops
-  doctor` fails `kernel.module.dummynet` when a limit is set and the module is missing. **Removed:** `nic.<device>.ingress`
-  (pf cannot shape the traffic into a bridged jail without stalling the connections: docs/design.md 5.4), the `RateLimit`
-  condition and the check `jails.rate_limits`.
+- **Bandwidth limits are enforced in both directions: `nic.<device>.egress` and `nic.<device>.ingress`.** The host
+  enforces the limit of what a jail sends and of what it receives with dummynet pipes that the jail's anchor sends the
+  traffic into (`dnpipe` on `match` rules, on the jail's own link), for every connection whoever started it. A rate is
+  in bits per second with decimal units: `10M` is 10 Mbit/s. The pipes (numbers 40000 to 59999, JailOps's own) get their
+  number once, when a limit is first set, and keep it as long as the limit exists (`<state_dir>/rendered/pipes.json`), so
+  no jail's pipe is renumbered by a change of another's. They are configured through the helper when the jail starts and
+  kept right by the reconcile loop, and go away with the limit or the jail, after the anchors that named them are
+  loaded. `dummynet` is loaded when a limit exists and `jailops doctor` fails `kernel.module.dummynet` when a limit is
+  set and the module is missing.
 - **A port forward ends its connections when it is removed.** The packet that comes out of a forward's translation is
   passed by a rule of its own on the uplink (`pass in quick on <uplink> … to <jail> port N`), which carries the label that
   every stateful rule gets, so the state of a connection that came through the forward is ended with the forward
@@ -61,8 +141,7 @@
   the unused `jail_get(2)` reader.
 
 - **The kernel's notifications become events.** `jailopsd` reads devd's socket and publishes a ZFS error
-  (`host-zfs-error`), a pool or device changing state or a scrub finishing (`host-zfs-pool`), the link of the uplink or of a
-  managed bridge going up or down (`host-link-up`, `host-link-down`) and a limit that a jail hit (`jail-limit-hit`, with the
+  (`host-zfs-error`), a pool or device changing state or a scrub finishing (`host-zfs-pool`), the link of the uplink going up or down (`host-link-up`, `host-link-down`) and a limit that a jail hit (`jail-limit-hit`, with the
   rctl action `devctl`) in the event stream, with a one-line `detail`. Identical events are held back for 30 seconds and at
   most 30 are published a minute. `jailops doctor` has the check `host.devd`; `devd.enable` and `devd.pipe` in
   `jailopsd.yaml`.

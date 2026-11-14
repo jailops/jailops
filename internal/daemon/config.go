@@ -20,7 +20,6 @@ import (
 	"gopkg.in/yaml.v3"
 	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/priv"
-	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -57,12 +56,11 @@ type Config struct {
 	Priv Priv `yaml:"priv"`
 	Log  Log  `yaml:"log"`
 
-	Reconcile Reconcile   `yaml:"reconcile"`
-	ZFS       ZFSConf     `yaml:"zfs"`
-	Limits    Limits      `yaml:"limits"`
-	Projects  Projects    `yaml:"projects"`
-	Network   NetworkConf `yaml:"network"`
-	Lifecycle Lifecycle   `yaml:"lifecycle"`
+	Reconcile Reconcile `yaml:"reconcile"`
+	ZFS       ZFSConf   `yaml:"zfs"`
+	Limits    Limits    `yaml:"limits"`
+	Projects  Projects  `yaml:"projects"`
+	Lifecycle Lifecycle `yaml:"lifecycle"`
 	// Backup, when present, enables host-side backups (design 9): the key,
 	// capture, the schedule, restore and restore tests, against one backup
 	// node. Absent, every backup call answers unsupported.
@@ -224,15 +222,6 @@ type PersistentPath struct {
 	Class   string `yaml:"class"` // system or data
 	Merge   bool   `yaml:"merge"`
 	NoSeed  bool   `yaml:"no_seed"`
-}
-
-// NetworkConf configures host networking.
-type NetworkConf struct {
-	// Sysctl overrides the bridge sysctls the daemon sets at runtime
-	// through the helper; only net.link.bridge.pfil_bridge, pfil_member and
-	// pfil_onlyip are accepted, each 0 or 1. They are re-asserted by the
-	// reconcile loop and never written to /etc/sysctl.conf.
-	Sysctl map[string]string `yaml:"sysctl"`
 }
 
 // Projects configures project creation. NetworkPool is the pool of subnets
@@ -554,17 +543,6 @@ func (c Config) finish() (Config, error) {
 		}
 		if bits := c.Projects.NetworkBits; bits != 0 && (bits <= p.Bits() || bits > 29) {
 			return c, fmt.Errorf("config: projects.network_bits %d does not fit %s", bits, p)
-		}
-	}
-	if v, ok := c.Network.Sysctl[service.SysctlPfilMemberKey]; ok && v != "1" {
-		return c, fmt.Errorf("config: network.sysctl %s must be 1: the per-jail pf rules stand on the ports of the bridge", service.SysctlPfilMemberKey)
-	}
-	for k, v := range c.Network.Sysctl {
-		if !slices.Contains(service.NetSysctlKeys, k) {
-			return c, fmt.Errorf("config: network.sysctl accepts only %s, not %q", strings.Join(service.NetSysctlKeys, ", "), k)
-		}
-		if v != "0" && v != "1" {
-			return c, fmt.Errorf("config: network.sysctl %s must be 0 or 1, not %q", k, v)
 		}
 	}
 	if b := c.Backup; b != nil {

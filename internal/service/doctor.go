@@ -14,6 +14,7 @@ import (
 
 	"jailops.net/jailops/internal/apps"
 	"jailops.net/jailops/internal/ipam"
+	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/plan"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/run"
@@ -43,17 +44,16 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorTLS(ctx, c)
 	s.doctorZFS(ctx, c)
 	s.doctorVolumes(ctx, c)
+	s.doctorHostDirs(ctx, c)
 	s.doctorDelegation(ctx, c)
 	s.doctorEncryption(ctx, c)
 	s.doctorPF(ctx, c)
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)
-	s.doctorStaticARP(ctx, c)
 	s.doctorDNS(ctx, c)
 	s.doctorNameLengths(ctx, c)
 	s.doctorRuntime(ctx, c)
 	s.doctorDescriptions(ctx, c)
-	s.doctorBridges(ctx, c)
 	s.doctorWireGuard(ctx, c)
 	s.doctorAppsLocal(c)
 	s.doctorAppsAccess(ctx, c)
@@ -143,12 +143,10 @@ func (s *Service) doctorKernel(ctx context.Context, c *checkSet) {
 	mods := []struct {
 		name     string
 		required bool
-	}{{"if_bridge", true}, {"if_epair", true}, {"pf", true}, {"zfs", true}, {"linux64", needLinux}, {"linprocfs", needLinux}, {"linsysfs", needLinux}, {"fdescfs", needLinux}, {"dummynet", s.hasShaping()}}
+	}{{"if_epair", true}, {"pf", true}, {"zfs", true}, {"linux64", needLinux}, {"linprocfs", needLinux}, {"linsysfs", needLinux}, {"fdescfs", needLinux}, {"dummynet", s.hasShaping()}}
 	for _, m := range mods {
 		ok, avail, _ := s.runOK(ctx, "kldstat", "-q", "-n", m.name)
 		switch {
-		case !avail && m.name == "if_bridge" && s.bridgeSysctl(ctx):
-			c.add("kernel.module."+m.name, api.DoctorOK, "loaded (its sysctl tree exists)", "")
 		case !avail:
 			c.add("kernel.module."+m.name, api.DoctorUnknown, "cannot be checked here: kldstat is not available to the daemon", "")
 		case ok:
@@ -205,6 +203,17 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 	check("net.inet.ip.forwarding", "1", v4, "jails reach IPv4 through the host", "")
 	check("kern.racct.enable", "1", racct, "limits.cpu, limits.memory and limits.pids are enforced with rctl",
 		"add kern.racct.enable=1 to /boot/loader.conf and reboot: the kernel reads it only at boot")
+	if v6 { // present from FreeBSD 15.2; JailOps derives a jail's link-local address from its MAC address, which this setting changes
+		const stable = "net.inet6.ip6.use_stableaddr"
+		if got, err := s.sysctl(ctx, stable); err == nil {
+			if got == "0" {
+				c.add("sysctl."+stable, api.DoctorOK, stable+"="+got, "")
+			} else {
+				c.add("sysctl."+stable, api.DoctorFail, stable+" is "+got+": the kernel no longer forms a jail's link-local address from its MAC address, so the jail's IPv6 neighbour discovery is dropped by its own firewall",
+					"sysctl "+stable+"=0 and take it out of /etc/sysctl.conf")
+			}
+		}
+	}
 	check(SysctlOnlinkNS, "1", s.hasProxyNetwork(), "the routers of a shared IPv6 segment probe the host from off-link addresses", onlinkNSHint)
 }
 
@@ -278,41 +287,87 @@ func (s *Service) doctorZFS(ctx context.Context, c *checkSet) {
 	}
 }
 
-// doctorVolumes finds the volume datasets of jails made before volumes were
-// created with canmount=noauto: one with canmount=on is mounted by the boot's
-// zfs mount -a, before the jail root it lies in.
+// doctorHostDirs looks at the volumes that are directories of the host: each must still be on its mount, which is what
+// a jail needs to start and what a watch tells the operator about.
+func (s *Service) doctorHostDirs(ctx context.Context, c *checkSet) {
+	vols, err := s.volKind.listAll()
+	if err != nil {
+		return
+	}
+	var lost []string
+	n := 0
+	for _, o := range vols {
+		if !o.Spec.IsHostDir() {
+			continue
+		}
+		n++
+		if state, detail := s.hostDirState(ctx, o.Spec); state != api.VolumeStateOK {
+			lost = append(lost, fmt.Sprintf("%s/%s (%s): %s", o.Meta.Project, o.Meta.Name, o.Spec.Path, detail))
+		}
+	}
+	switch {
+	case n == 0:
+	case len(lost) > 0:
+		c.add("volume.hostdirs", api.DoctorFail, "a volume's directory is not on its mount: "+strings.Join(lost, "; "), "mount it again; the jails that attach it do not start while it is lost")
+	default:
+		c.add("volume.hostdirs", api.DoctorOK, fmt.Sprintf("%d volume(s) of host directories, every directory is on its mount", n), "")
+	}
+}
+
+// doctorVolumes compares the volumes with their datasets and with the jails that attach them: a volume without its
+// dataset, a dataset that is not mounted where the jails reach it, and an attachment of a volume that does not exist.
 func (s *Service) doctorVolumes(ctx context.Context, c *checkSet) {
 	if s.d.ZClient == nil {
 		return
 	}
-	var keys []string
-	s.mu.RLock()
-	for k, e := range s.jails {
-		if len(e.jail.Spec.Volumes) > 0 {
-			keys = append(keys, k)
-		}
+	vols, err := s.volKind.listAll()
+	if err != nil {
+		return
 	}
-	s.mu.RUnlock()
-	sort.Strings(keys)
-	var fixes []string
-	for _, k := range keys {
-		parent := s.lcfg.ContainerDS(k) + "/data"
-		l, err := s.d.ZClient.List(ctx, zfs.ListOpts{Root: parent, Depth: 1, Types: []string{"filesystem"}, Props: []string{"canmount"}})
-		if err != nil {
+	var bad, fixes []string
+	known := map[string]bool{}
+	for _, o := range vols {
+		known[o.Meta.Project+"/"+o.Meta.Name] = true
+		if o.Spec.IsHostDir() {
+			continue // looked at by doctorHostDirs
+		}
+		si, ok := s.storage(o.Spec.Storage)
+		if !ok {
+			bad = append(bad, fmt.Sprintf("volume %s/%s is on storage %q, which does not exist", o.Meta.Project, o.Meta.Name, o.Spec.Storage))
 			continue
 		}
-		for _, d := range l {
-			if d.Name != parent && d.Props["canmount"] == "on" {
-				fixes = append(fixes, "zfs set canmount=noauto "+d.Name)
+		ds := lifecycle.VolumeDS(si.lifecycle(), o.Meta.Project, o.Meta.Name)
+		if ok, err := s.d.ZFS.Exists(ctx, ds); err != nil {
+			continue
+		} else if !ok {
+			bad = append(bad, fmt.Sprintf("volume %s/%s has no dataset %s", o.Meta.Project, o.Meta.Name, ds))
+			continue
+		}
+		if o.Spec.Encrypted {
+			continue // mounted when it is unlocked
+		}
+		if v, _ := s.d.ZFS.Get(ctx, ds, "mounted"); v == "no" {
+			fixes = append(fixes, "zfs mount "+ds)
+		}
+	}
+	s.mu.RLock()
+	for _, k := range sortedKeys(s.jails) {
+		j := s.jails[k].jail
+		for _, v := range j.Spec.Volumes {
+			if !known[j.Metadata.Project+"/"+v.Name] {
+				bad = append(bad, fmt.Sprintf("jail %s/%s attaches volume %q, which does not exist", j.Metadata.Project, j.Metadata.Name, v.Name))
 			}
 		}
 	}
-	if len(fixes) == 0 {
-		c.add("jail.volumes", api.DoctorOK, "the volume datasets of the jails are mounted with their jails (canmount=noauto)", "")
-		return
+	s.mu.RUnlock()
+	switch {
+	case len(bad) > 0:
+		c.add("jail.volumes", api.DoctorFail, strings.Join(bad, "; "), "jailops volume list; create the missing volume or detach it from the jail")
+	case len(fixes) > 0:
+		c.add("jail.volumes", api.DoctorWarn, fmt.Sprintf("%d volume dataset(s) are not mounted on the host, so the jails that attach them cannot reach them", len(fixes)), strings.Join(fixes, "; "))
+	default:
+		c.add("jail.volumes", api.DoctorOK, fmt.Sprintf("%d volume(s), every dataset is there and every attached volume exists", len(vols)), "")
 	}
-	c.add("jail.volumes", api.DoctorWarn, fmt.Sprintf("%d volume dataset(s) have canmount=on, so the boot mounts them before the jail root they lie in", len(fixes)),
-		strings.Join(fixes, "; "))
 }
 
 // doctorDelegation compares zfs_delegation of the jails with the jailed property of their delegated datasets: a jail
@@ -387,7 +442,7 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 		if hasScrub(rules) {
 			c.add("pf.scrub", api.DoctorOK, "pf.conf normalises packets (scrub)", "")
 		} else {
-			c.add("pf.scrub", api.DoctorWarn, "pf.conf has no scrub rule: fragments are not reassembled and TCP MSS is not clamped",
+			c.add("pf.scrub", api.DoctorWarn, "pf.conf has no scrub rule: fragments are not reassembled (a jail whose policy denies inbound traffic then loses fragmented packets, UDP above the path MTU among them) and TCP MSS is not clamped",
 				"add `scrub in all fragment reassemble` (and `max-mss` for a tunnel or a smaller MTU) near the top of /etc/pf.conf; see docs/install.md")
 		}
 	} else {
@@ -401,17 +456,14 @@ var (
 	rePFRules     = regexp.MustCompile(`^\s*pf_rules\s*=\s*(.*?)\s*$`)
 )
 
-// doctorStatePolicy warns about a host whose loaded ruleset blocks by default (a block ... all rule that is not
-// quick) while jails are routed through it, and whose pf.conf does not bind states to interfaces: pf's default,
-// floating states, let a jail's forwarded packets match the state made for them on the jail's port, translated, and
-// the host then drops all but the first (seen on FreeBSD 15.1: one ping of four). pf does not print the state policy,
-// so the pf.conf the system loads is read; includes are not followed.
+// doctorStatePolicy fails a host whose pf.conf does not bind states to interfaces while jails exist. A jail's traffic is
+// judged at every hop of the host (in on the sender's link, out on the receiver's or on the uplink), and pf's default,
+// floating states let a connection that the first hop admitted pass the next hop without its rules looking at it, and
+// make the host drop all but the first packet of a NATed flow. JailOps's own rules say if-bound themselves; the line
+// makes the host's rules behave the same. pf does not print the state policy, so the pf.conf the system loads is read;
+// includes are not followed.
 func (s *Service) doctorStatePolicy(ctx context.Context, c *checkSet, rules string) {
 	const name = "pf.state-policy"
-	if !defaultBlock(rules) {
-		c.add(name, api.DoctorOK, "the loaded ruleset does not block by default", "")
-		return
-	}
 	nets, _ := s.netKind.list()
 	nat := false
 	for _, n := range nets {
@@ -441,7 +493,7 @@ func (s *Service) doctorStatePolicy(ctx context.Context, c *checkSet, rules stri
 	}
 	if errors.Is(err, fs.ErrPermission) {
 		// pf.conf is root's (mode 0600 is common): not a fault of the host, only something the daemon cannot judge
-		c.add(name, api.DoctorInfo, conf+" is readable by root only, so the daemon cannot check it; the loaded ruleset blocks by default and jails are routed through it, which wants `set state-policy if-bound` in it",
+		c.add(name, api.DoctorInfo, conf+" is readable by root only, so the daemon cannot check it; jails are routed through the host, which wants `set state-policy if-bound` in it",
 			"check it as root: grep state-policy "+conf)
 		return
 	}
@@ -452,13 +504,13 @@ func (s *Service) doctorStatePolicy(ctx context.Context, c *checkSet, rules stri
 	s.statePolicyResult(c, name, conf, PFBindsStates(string(b)))
 }
 
-// statePolicyResult adds the verdict on conf: bound states pass, floating ones lose the packets of a NATed flow.
+// statePolicyResult adds the verdict on conf: bound states pass, floating ones fail.
 func (s *Service) statePolicyResult(c *checkSet, name, conf string, bound bool) {
 	if bound {
 		c.add(name, api.DoctorOK, conf+" binds states to interfaces (set state-policy if-bound)", "")
 		return
 	}
-	c.add(name, api.DoctorWarn, "the loaded ruleset blocks by default and "+conf+" has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow gets through)",
+	c.add(name, api.DoctorFail, conf+" has no `set state-policy if-bound`: with pf's default (floating) states a connection that one hop of the host admitted passes the next without being judged, and jails behind NAT lose packets (only the first of a flow gets through)",
 		"add the line `set state-policy if-bound` at the top of "+conf+" (with the other options), check and load it with `pfctl -nf "+conf+" && pfctl -f "+conf+"`; never `service pf restart` over ssh, it flushes the states and cuts the session")
 }
 
@@ -615,13 +667,6 @@ func (s *Service) doctorRuntime(ctx context.Context, c *checkSet) {
 	}
 }
 
-// bridgeSysctl reports whether the bridge sysctl tree exists, which is how a
-// daemon that may not run kldstat can tell that if_bridge is loaded.
-func (s *Service) bridgeSysctl(ctx context.Context) bool {
-	_, err := s.sysctl(ctx, "net.link.bridge.pfil_member")
-	return err == nil
-}
-
 // quickPassesBeforeAnchor lists the `pass ... quick` rules, in the loaded ruleset, that stand before the jailops
 // anchor and are not tied to an interface that is not a jail's: pf stops at a quick rule, so a jail policy after it
 // never sees that traffic. Rules for one named interface (the uplink) are not a problem for traffic of the jails'
@@ -681,7 +726,7 @@ func (s *Service) doctorNDPProxy(c *checkSet) {
 		return
 	case len(bad) > 0:
 		c.add("network.ndproxy", api.DoctorFail, "the IPv6 proxy is not answering for "+strings.Join(append(bad, starting...), "; "),
-			"approve the uplink and the prefix of the jails' addresses with `ndp-proxy = <uplink>=<prefix>` in priv.conf and restart jailops-priv")
+			"read the network's NDPProxy condition (jailops network show): it says what the helper refused or what failed")
 	case len(starting) > 0:
 		c.add("network.ndproxy", api.DoctorWarn, "the IPv6 proxy is not answering yet for "+strings.Join(starting, "; ")+"; it opens within a few minutes after the daemon starts",
 			"run jailops doctor again in a few minutes; see the network's NDPProxy condition")

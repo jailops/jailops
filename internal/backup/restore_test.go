@@ -50,7 +50,7 @@ func jailSpec() api.JailSpec {
 	return api.JailSpec{Image: "freebsd-15.0@stable",
 		Network:  []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.5", MAC: "02:aa"}, {Network: "dmz", IPv4: "auto"}, {Network: "lan", IPv4: "none"}},
 		Firewall: api.FirewallAttach{Policies: []string{"web"}, Tags: []string{"tag:x"}},
-		Volumes:  []api.VolumeMount{{Name: "db", Mount: "/var/db/app"}}, Encrypted: true}
+		Volumes:  []api.VolumeAttach{{Name: "db", Mount: "/var/db/app"}}, Encrypted: true}
 }
 
 var gen3 = api.ImageGeneration{Number: 3, Name: "freebsd-15.0#g3", Manifest: "mf3"}
@@ -483,16 +483,19 @@ func TestReverter(t *testing.T) {
 	}
 }
 
-func TestPreflightSaysAnEncryptedVolumeComesBackPlain(t *testing.T) {
-	sp := jailSpec()
-	sp.Volumes[0].Encrypted = true
-	bd, err := BuildBundle(sp, gen3, sourceObjects(), []string{"db-pass"})
+func TestPreflightSaysAnAttachedVolumeIsNotInTheBackup(t *testing.T) {
+	bd, err := BuildBundle(jailSpec(), gen3, sourceObjects(), []string{"db-pass"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	b := api.Backup{Spec: api.BackupSpec{Jail: "web", JailUUID: "u-1", HostUUID: "h1", Snapshot: "20250101000000-aabbccdd", KeyDomain: "d1", Bundle: bd}}
-	r := Preflight(b, api.RestoreRequest{Backup: "web@20250101000000-aabbccdd"}, emptyHost())
-	if !has(r.Changes, `volume "db" was encrypted; it is restored as a plain volume`) {
-		t.Fatalf("%v", r.Changes)
+	req := api.RestoreRequest{Backup: "web@20250101000000-aabbccdd"}
+	h := emptyHost()
+	if r := Preflight(b, req, h); !has(r.Missing, "volume db (attached at /var/db/app)") {
+		t.Fatalf("missing: %v", r.Missing)
+	}
+	h.Volumes = map[string]bool{"db": true}
+	if r := Preflight(b, req, h); has(r.Missing, "volume db (attached at /var/db/app)") {
+		t.Fatalf("a volume that exists is reported missing: %v", r.Missing)
 	}
 }

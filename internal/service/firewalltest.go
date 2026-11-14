@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"jailops.net/jailops/internal/fwsim"
+	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/validate"
@@ -79,10 +80,10 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 	}
 	// the host's own address is the gateway of the other end's networks
 	if src.host {
-		src.addrs = gatewayAddrs(s, dst.jail)
+		src.addrs = hostSourceAddrs(ctx, s, dst.jail)
 	}
 	if dst.host {
-		dst.addrs = gatewayAddrs(s, src.jail)
+		dst.addrs = hostSourceAddrs(ctx, s, src.jail)
 	}
 	if len(src.addrs) == 0 || len(dst.addrs) == 0 {
 		return api.FirewallTestResult{}, invalid("%s has no address to test with", map[bool]string{true: src.label, false: dst.label}[len(src.addrs) == 0])
@@ -133,7 +134,7 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 						return false, err
 					}
 					r := fwsim.Evaluate(an, pkt, h)
-					hop := api.FirewallTestHop{Side: side, Jail: j.Metadata.Name, Anchor: an.Name, Interface: h.Class, Direction: h.Dir,
+					hop := api.FirewallTestHop{Side: side, Jail: j.Metadata.Name, Anchor: an.Name, Direction: h.Dir,
 						Verdict: string(r.Verdict), Why: r.Why, LoadedMatchesRendered: loaded[jailKey(*j)]}
 					if r.Rule != nil {
 						hop.DecidedBy = &api.FirewallTestRule{Stage: r.Rule.Origin.Stage, Policy: r.Rule.Origin.Policy, ProjectPolicy: r.Rule.Origin.ProjectPolicy,
@@ -151,17 +152,16 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 					}
 					return true, nil
 				}
-				// What the source jail sends is judged on its own port. What reaches the destination jail leaves the
-				// host on the gateway interface of its network (every jail port is private, so nothing goes jail to
-				// jail on the bridge; docs/design.md 18.9 and 18.13).
+				// What the source jail sends is judged where it arrives on the host, its own link. What reaches the
+				// destination jail leaves the host on the destination's own link (a jail shares no link with another).
 				cont := true
 				if src.jail != nil {
-					if cont, err = walk("source", src.jail, fwsim.Hook{Class: render.IfEpair, Dir: "in"}); err != nil {
+					if cont, err = walk("source", src.jail, fwsim.Hook{Dir: "in"}); err != nil {
 						return api.FirewallTestResult{}, err
 					}
 				}
 				if cont && dst.jail != nil {
-					if _, err = walk("destination", dst.jail, fwsim.Hook{Class: render.IfGateway, Dir: "out"}); err != nil {
+					if _, err = walk("destination", dst.jail, fwsim.Hook{Dir: "out"}); err != nil {
 						return api.FirewallTestResult{}, err
 					}
 				}
@@ -237,7 +237,7 @@ func testCaveats(src, dst testEnd) []string {
 		c = append(c, "the destination is the host: only the source's anchor is evaluated; the host's own rules decide the rest")
 	}
 	if dst.jail != nil {
-		c = append(c, "on the gateway interface only the destination jail's anchor is evaluated, not the anchors of other jails of the network")
+		c = append(c, "on the way out of the host only the destination jail's anchor is evaluated, not the anchors of other jails")
 	}
 	if src.jail != nil {
 		c = append(c, "the source address is the jail's own, as it is on the jail's port, before any translation (NAT)")
@@ -306,8 +306,8 @@ func familyAddrs(addrs []netip.Addr, fam string) []netip.Addr {
 	return out
 }
 
-// gatewayAddrs are the addresses the host connects from or listens on for a jail: the gateways of its networks (IPv4,
-// and IPv6 of a routed network; a proxy-mode network has a link-local gateway and is left out).
+// gatewayAddrs are the addresses the host connects from or listens on for a jail: the gateways of its networks (the
+// IPv4 gateway and the link-local fe80::1).
 func gatewayAddrs(s *Service, j *api.Jail) []netip.Addr {
 	if j == nil {
 		return nil
@@ -323,10 +323,42 @@ func gatewayAddrs(s *Service, j *api.Jail) []netip.Addr {
 				out = append(out, a)
 			}
 		}
-		if v6 := n.Spec.IPv6; v6 != nil && v6.Mode == api.IPv6Routed {
-			if a, ok := parseAddr(v6.Gateway); ok && !a.IsLinkLocalUnicast() {
-				out = append(out, a)
+		if v6 := n.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
+			out = append(out, ipam.GatewayLinkLocal6)
+		}
+	}
+	return out
+}
+
+// hostSourceAddrs are the addresses the host talks to a jail from, as a firewall test sees them: the gateway addresses
+// of gatewayAddrs, except that for IPv6 an address of the host inside the network's prefix replaces fe80::1 (the
+// kernel picks it as the source for a destination in that prefix).
+func hostSourceAddrs(ctx context.Context, s *Service, j *api.Jail) []netip.Addr {
+	if j == nil {
+		return nil
+	}
+	var out []netip.Addr
+	for _, a := range gatewayAddrs(s, j) {
+		if a != ipam.GatewayLinkLocal6 {
+			out = append(out, a)
+		}
+	}
+	for _, na := range s.effective(*j).Network {
+		n, err := s.netKind.get(na.Network)
+		if err != nil || n.Spec.IPv6 == nil || n.Spec.IPv6.Mode == api.IPv6None {
+			continue
+		}
+		own := false
+		if pfx, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
+			for _, h := range s.hostAddrs(ctx) {
+				if pfx.Contains(h) {
+					out = append(out, h)
+					own = true
+				}
 			}
+		}
+		if !own {
+			out = append(out, ipam.GatewayLinkLocal6)
 		}
 	}
 	return out

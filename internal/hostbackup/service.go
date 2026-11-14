@@ -20,9 +20,14 @@ type Deps struct {
 	ZFS zfs.Client
 	// Mounter defaults to OSMounter over ZFS.
 	Mounter Mounter
+	// Datasets mounts the datasets a capture finds unmounted (a jail that is not running). Without it such a capture
+	// fails and says so.
+	Datasets DatasetMounter
 	// Agents, when set, reads snapshots and writes restored jails through file agents (see Agents).
 	Agents Agents
 	Jails  JailSource
+	// Volumes lists the volumes as records; optional (see VolumeSource).
+	Volumes VolumeSource
 	// Objects resolves networks, policies and address sets for the bundle.
 	Objects  backup.ObjectSource
 	Policies PolicySource

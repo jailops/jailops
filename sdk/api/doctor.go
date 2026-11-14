@@ -17,7 +17,7 @@ const (
 
 // DoctorCheck is one diagnostic of GET /api/v1/doctor.
 type DoctorCheck struct {
-	// Name is a stable identifier such as "kernel.module.if_bridge".
+	// Name is a stable identifier such as "kernel.module.if_epair".
 	Name    string       `json:"name"`
 	Status  DoctorStatus `json:"status"`
 	Message string       `json:"message,omitempty"`

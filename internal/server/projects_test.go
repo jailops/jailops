@@ -560,7 +560,7 @@ func TestSeveralPoliciesOfAJailAndAProject(t *testing.T) {
 	wantCode(t, err, api.CodeNotFound)
 }
 
-// --new-network: a dedicated bridge and subnet from the configured pool.
+// --new-network: a dedicated network and subnet from the configured pool.
 func TestNewNetworkCarvesASubnetFromThePool(t *testing.T) {
 	e := dtest.New(t, dtest.Options{Mutate: func(c *daemon.Config) {
 		c.Projects.NetworkPool, c.Projects.NetworkBits = "10.64.0.0/16", 24
@@ -583,7 +583,7 @@ func TestNewNetworkCarvesASubnetFromThePool(t *testing.T) {
 	}
 	na, _ := e.Global().Networks().Get(c, "web")
 	nb, _ := e.Global().Networks().Get(c, "db")
-	if na.Spec.IPv4.Subnet != "10.64.0.0/24" || nb.Spec.IPv4.Subnet != "10.64.1.0/24" || na.Spec.Bridge == nb.Spec.Bridge ||
+	if na.Spec.IPv4.Subnet != "10.64.0.0/24" || nb.Spec.IPv4.Subnet != "10.64.1.0/24" ||
 		na.Spec.IPv4.Gateway != "10.64.0.1" || !na.Spec.IPv4.NAT || na.Spec.Uplink != "em0" {
 		t.Fatalf("%+v\n%+v", na.Spec, nb.Spec)
 	}
@@ -638,6 +638,7 @@ func TestGrantRemovalAndDelegation(t *testing.T) {
 	// Delegation.
 	sp := webSpec()
 	sp.Delegate = true
+	sp.Resources.Disk = "10G"
 	_, err = alpha.Jails().Create(c, sdk.NewJail("deleg", sp))
 	wantCode(t, err, api.CodeForbidden)
 	gop, err := e.Admin.Project("alpha").Jails().Create(c, sdk.NewJail("deleg", sp))
@@ -703,6 +704,7 @@ func TestGrantRemovalAndDelegation(t *testing.T) {
 	}
 	dj, tag, _ = e.Admin.Project("alpha").Jails().GetETag(c, "deleg")
 	dj.Spec.Delegate = true
+	dj.Spec.Resources.Disk = "10G"
 	if _, err := e.Admin.Project("alpha").Jails().Update(c, "deleg", dj, tag); err != nil {
 		t.Fatal(err)
 	}
@@ -715,6 +717,7 @@ func TestGrantRemovalAndDelegation(t *testing.T) {
 	// The project user cannot switch it on for another jail by update.
 	j, etag, _ := alpha.Jails().GetETag(c, "web")
 	j.Spec.Delegate = true
+	j.Spec.Resources.Disk = "10G"
 	_, err = alpha.Jails().Update(c, "web", j, etag)
 	wantCode(t, err, api.CodeForbidden)
 }
@@ -885,6 +888,7 @@ func TestAGlobalOperatorCannotSetHostMountsOrDelegation(t *testing.T) {
 	wantCode(t, err, api.CodeForbidden)
 	sp = webSpec()
 	sp.Delegate = true
+	sp.Resources.Disk = "10G"
 	_, err = op.Jails().Create(c, sdk.NewJail("d1", sp))
 	wantCode(t, err, api.CodeForbidden)
 }

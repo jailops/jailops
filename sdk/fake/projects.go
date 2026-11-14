@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -253,22 +252,13 @@ func (s *Server) newNetworkFor(project string) (string, *api.Error) {
 		if taken[sub] {
 			continue
 		}
-		// the bridge has the network's name when that can be an interface name (the server also refuses a driver's
-		// name and one that is taken on the host), else a generated jo<n>
-		bridge := project
-		if !fakeBridgeRE.MatchString(project) {
-			bridge = "jo" + strconv.Itoa(len(s.networks.items))
-		}
 		n := &api.Network{Metadata: api.ObjectMeta{Name: project}, Spec: api.NetworkSpec{
-			Bridge: bridge,
-			IPv4:   &api.IPv4Net{Subnet: sub, Gateway: fmt.Sprintf("10.64.%d.1", i), Range: fmt.Sprintf("10.64.%d.10-10.64.%d.250", i, i)}}}
+			IPv4: &api.IPv4Net{Subnet: sub, Gateway: fmt.Sprintf("10.64.%d.1", i), Range: fmt.Sprintf("10.64.%d.10-10.64.%d.250", i, i)}}}
 		s.networks.insert(n, false)
 		return project, nil
 	}
 	return "", api.Errorf(api.CodePoolExhausted, "no free subnet in the pool")
 }
-
-var fakeBridgeRE = regexp.MustCompile(`^[a-z][a-z0-9]{0,12}$`)
 
 // ---- jail checks against the project ----
 

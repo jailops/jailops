@@ -9,9 +9,8 @@ import (
 // copied, never when one is loaded: an installed system whose objects have longer names keeps working, and the doctor
 // lists those names (check names.length).
 //
-// The limits leave room for what JailOps derives from a name. A project may name a network (project create
-// --new-network), and a network names its bridge and the bridge's gateway pair ("<bridge>gb", 15 characters at most).
-// The datasets of a jail are <storage>/projects/<project>/jails/<jail>/data/<volume>@<snapshot>, and ZFS refuses a
+// The limits leave room for what JailOps derives from a name. A project prefixes the OS-level name of each of its jails
+// and may name a network (project create --new-network). The datasets of a jail are <storage>/projects/<project>/jails/<jail>/data/<volume>@<snapshot>, and ZFS refuses a
 // name longer than 255 characters.
 const (
 	MaxProjectName   = 13

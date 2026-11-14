@@ -16,6 +16,7 @@ host app1
   create    FirewallPolicy/shop/postgres
   create    BackupTarget/vault
   create    BackupPolicy/shop/nightly
+  create    Volume/shop/postgres-data
   create    Jail/shop/app
   create    Jail/shop/nginx
   create    Jail/shop/postgres
@@ -24,5 +25,5 @@ projects
   shop
     app1         will be created
 
-14 create, 0 update, 0 delete, 0 unchanged, 0 unmanaged
+15 create, 0 update, 0 delete, 0 unchanged, 0 unmanaged
 ```

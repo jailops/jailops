@@ -31,22 +31,11 @@ func (a *app) jailDesc() *kindDesc[api.Jail] {
 	d.rename = func(ctx context.Context, c *sdk.Client, n string, req api.Rename, etag string) (*sdk.Operation[api.RenameResult], error) {
 		return c.Jails().Rename(ctx, n, req, etag)
 	}
-	d.renameLong = renameLong("jail", `its datasets (volumes and snapshots go with them) and their
+	d.renameLong = renameLong("jail", `its datasets (snapshots go with them) and their
 mountpoints, its records, its update history, the marks of its provisioning and shell setup, and the boot
 order of the jails that depend on it. The jail must be stopped: the kernel knows a running jail by its
 name, and its mounts, interfaces and firewall anchor are set up under it. Its hostname does not change`)
 	d.create = func(ctx context.Context, c *sdk.Client, v api.Jail) (opHandle, api.Jail, error) {
-		if hasEncryptedVolume(v.Spec) {
-			pass, err := a.newVolumePassphrase()
-			if err != nil {
-				return nil, api.Jail{}, err
-			}
-			h, err := handle(c.Jails().CreateWithPassphrase(ctx, v, pass))
-			return h, api.Jail{}, err
-		}
-		if a.passFile != "" {
-			return nil, api.Jail{}, usagef("--passphrase-file is given but no volume is encrypted (--volume NAME:MOUNT:encrypted)")
-		}
 		h, err := handle(c.Jails().Create(ctx, v))
 		return h, api.Jail{}, err
 	}
@@ -151,10 +140,6 @@ func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name strin
 			WithHint("stop it first ('jailops stop " + name + "'), or pass --force to stop it before the delete")
 	}
 	var parts []string
-	var vols []string
-	for _, v := range j.Spec.Volumes {
-		vols = append(vols, v.Name)
-	}
 	u, err := c.Jails().Usage(ctx, name)
 	switch {
 	case err != nil:
@@ -162,17 +147,7 @@ func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name strin
 	case u.Disk.Error != "":
 		parts = append(parts, "sizes unknown ("+u.Disk.Error+")")
 	default:
-		parts = append(parts, "root "+humanBytes(u.Disk.RootBytes))
-		data := "data " + humanBytes(u.Disk.DataBytes)
-		if len(vols) > 0 {
-			data += " (volumes " + strings.Join(vols, ", ") + ")"
-		}
-		parts = append(parts, data)
-	}
-	if err != nil || u.Disk.Error != "" {
-		if len(vols) > 0 {
-			parts = append(parts, "volumes "+strings.Join(vols, ", "))
-		}
+		parts = append(parts, "root "+humanBytes(u.Disk.RootBytes), "data "+humanBytes(u.Disk.DataBytes))
 	}
 	if snaps, err := collect(c.Jails().Snapshots(name).List(ctx)); err != nil {
 		parts = append(parts, "snapshots unknown")
@@ -180,6 +155,13 @@ func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name strin
 		parts = append(parts, count(len(snaps), "snapshot", "snapshots"))
 	}
 	line := fmt.Sprintf("%s (%s): %s", name, dash(string(j.Status.Power)), strings.Join(parts, ", "))
+	if len(j.Spec.Volumes) > 0 {
+		var vols []string
+		for _, v := range j.Spec.Volumes {
+			vols = append(vols, v.Name)
+		}
+		line += "; its volumes stay: " + strings.Join(vols, ", ")
+	}
 	switch {
 	case running && force:
 		line += "; --force stops it first"
@@ -375,7 +357,7 @@ jailops jail start web`, "jails")
 	jc.AddCommand(a.jailInfo(d))
 	jc.AddCommand(a.jailLifecycleSet(d)...)
 	jc.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailCopy(d), a.jailLogs(d))
-	jc.AddCommand(a.jailUnlock(d), a.jailLock(d), a.jailPassphrase(d), a.jailShellSetup(d))
+	jc.AddCommand(a.jailShellSetup(d))
 	return jc
 }
 
@@ -396,21 +378,20 @@ The project is --project, JAILOPS_PROJECT or the one chosen with 'project switch
 The server allocates "auto" addresses from the network and writes them back into
 the specification.
 
-A volume marked encrypted (--volume NAME:MOUNT:encrypted, or encrypted: true in a
-file) is encrypted with ZFS (aes-256-gcm) under a passphrase you type twice; scripts
-give it with --passphrase-file. The passphrase is needed again after every host boot
-('jailops jail unlock'). A forgotten passphrase cannot be recovered.
+--volume NAME:PATH[:ro] attaches a volume of the project that exists already (made with
+'jailops volume create') at PATH in the jail; it can be given several times, and
+'jailops volume attach' does the same for a jail that exists. Deleting the jail
+never deletes a volume.
 
 A jail starts when the host boots only with --autostart (boot.autostart); a jail that
 was running before a reboot does not come back on its own.
 
-A new jail name has at most 32 characters, and so has a volume name. Sizes
-(--disk, a volume's QUOTA) are stored as bytes; 4G, 4GiB and 4294967296 are
-the same size.`
+A new jail name has at most 32 characters. Sizes (--disk) are stored as bytes;
+4G, 4GiB and 4294967296 are the same size.`
 
 const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15-1 --network lan --storage default --start --autostart
-jailops @P@ create db --project web --image freebsd-15-1 --network lan=10.20.0.50 --storage default --volume data:/var/db --memory 4G --autostart
-jailops @P@ create vault --project web --image freebsd-15-1 --network lan --storage default --volume secrets:/var/db/secrets:encrypted
+jailops @P@ create db --project web --image freebsd-15-1 --network lan=10.20.0.50 --storage default --volume db-data:/var/db --memory 4G --autostart
+jailops @P@ create mail --project web --image freebsd-15-1 --network lan --storage default --volume maildir:/var/mail/vhosts
 jailops @P@ create nginx --project web --image freebsd-15-1 --profile web
 jailops @P@ create -f web.yaml --project web`
 
@@ -460,8 +441,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringVar(&memory, "memory", "", "anonymous memory the jail may reserve in total, for example 2G (rctl swapuse; needs kern.racct.enable=1)")
 	f.StringVar(&disk, "disk", "", "ZFS quota of the whole jail (root, data, volumes and snapshots), for example 20G")
 	f.IntVar(&pids, "pids", 0, "processes the jail may have (rctl maxproc; needs kern.racct.enable=1)")
-	f.StringArrayVar(&volumes, "volume", nil, "data volume NAME:MOUNT[:ro][:encrypted][:QUOTA] (repeatable); encrypted asks for a passphrase")
-	f.StringVar(&a.passFile, "passphrase-file", "", "read the passphrase of the encrypted volumes from this file (its first line) instead of asking")
+	f.StringArrayVar(&volumes, "volume", nil, "attach a volume of the project that exists already, NAME:PATH[:ro] (repeatable; create one with 'jailops volume create')")
 	f.StringArrayVar(&hostMounts, "host-mount", nil, "mount an existing host directory SOURCE:TARGET[:ro] (repeatable; global administrators only, and the host operator must have approved the directory)")
 	f.StringArrayVar(&fwPolicies, "firewall-policy", nil, "firewall policy to apply (repeatable; they are rendered in the order given, after the project's)")
 	f.StringArrayVar(&tags, "tag", nil, "firewall tag of this jail (repeatable)")
@@ -478,6 +458,9 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	a.completeFlag(cmd, "image", imageRefs)
 	a.completeFlag(cmd, "network", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Networks().List(ctx), netName) }))
 	a.completeFlag(cmd, "storage", listNames(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Storage().List(ctx), storName) }))
+	a.completeFlag(cmd, "volume", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
+		return namesOf(c.Volumes().List(ctx), func(v api.Volume) string { return v.Metadata.Name + ":" })
+	}))
 	a.completeFlag(cmd, "profile", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
 		return namesOf(c.Profiles().List(ctx), func(p api.Profile) string { return p.Metadata.Name })
 	}))
@@ -519,21 +502,10 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 		}
 		for _, v := range volumes {
 			p := strings.Split(v, ":")
-			if len(p) < 2 {
-				return api.Jail{}, usagef("volume %q must be NAME:MOUNT[:ro][:encrypted][:QUOTA]", v)
+			if len(p) < 2 || len(p) > 3 || (len(p) == 3 && p[2] != "ro") {
+				return api.Jail{}, usagef("volume %q must be NAME:PATH[:ro]", v)
 			}
-			vm := api.VolumeMount{Name: p[0], Mount: p[1]}
-			for _, extra := range p[2:] {
-				switch extra {
-				case "ro":
-					vm.ReadOnly = true
-				case "encrypted":
-					vm.Encrypted = true
-				default:
-					vm.Quota = extra
-				}
-			}
-			spec.Volumes = append(spec.Volumes, vm)
+			spec.Volumes = append(spec.Volumes, api.VolumeAttach{Name: p[0], Mount: p[1], ReadOnly: len(p) == 3})
 		}
 		for _, m := range hostMounts {
 			p := strings.Split(m, ":")

@@ -27,6 +27,7 @@ func newRuleEnv(t *testing.T) *ruleEnv {
 	os.MkdirAll(filepath.Join(e.cfg.MountBase, "projects", "default", "jails", "plain", "root", "etc"), 0o755)
 	e.conf(t, "shop_web")
 	e.conf(t, "default_plain")
+	r.trustDirs(t)
 	// the jail ends of their epairs, in their vnets, with the marker they were created with
 	e.net.AddToJail("shop_web", ifconfig.Iface{Name: "jo0123456789ab", Groups: []string{"epair"}, Description: "jailops jail=shop/web net=lan (jail side)"})
 	e.net.AddToJail("default_plain", ifconfig.Iface{Name: "jo0123456789cb", Groups: []string{"epair"}, Description: ifconfig.Marker})
@@ -79,7 +80,7 @@ func TestSysctlFallbackBrand(t *testing.T) {
 		r.bad(t, "sysctl", "kern.elf64.fallback_brand="+v)
 	}
 	r.ok(t, "sysctl", "-n", "kern.elf64.fallback_brand")
-	r.ok(t, "sysctl", "-n", "net.link.bridge.pfil_onlyip")
+	r.ok(t, "sysctl", "-n", "net.inet.ip.forwarding")
 	r.bad(t, "sysctl", "kern.elf64.fallback_brand")
 	r.bad(t, "sysctl", "kern.elf32.fallback_brand=3")
 }
@@ -584,4 +585,26 @@ func TestBuildJailForms(t *testing.T) {
 	if err := r.check(admin, "jail", "-r", "alpha_web"); err == nil {
 		t.Error("removed a jail that is not a build jail")
 	}
+}
+
+// trustDirs makes the root-owned key and keyring directories the helper trusts (the test's user stands in for root).
+func (r *ruleEnv) trustDirs(t *testing.T) {
+	t.Helper()
+	base, _ := filepath.EvalSymlinks(t.TempDir())
+	oldUID, oldAnchor := trustUID, trustAnchor
+	trustUID, trustAnchor = uint32(os.Getuid()), base
+	t.Cleanup(func() { trustUID, trustAnchor = oldUID, oldAnchor })
+	r.cfg.PkgKeysDir = filepath.Join(base, "trust", "keys")
+	r.cfg.KeyringDir = filepath.Join(base, "trust", "keyrings")
+	for _, d := range []string{filepath.Join(r.cfg.PkgKeysDir, "vendor", "trusted"), r.cfg.KeyringDir} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, f := range []string{filepath.Join(r.cfg.PkgKeysDir, "vendor", "trusted", "key1"), filepath.Join(r.cfg.KeyringDir, "debian-archive-keyring.gpg"), filepath.Join(r.cfg.KeyringDir, "k.gpg")} {
+		if err := os.WriteFile(f, []byte("key\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixModes(t, base)
 }

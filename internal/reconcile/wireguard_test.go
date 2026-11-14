@@ -12,7 +12,6 @@ import (
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/wireguard"
-	"jailops.net/jailops/sdk/api"
 )
 
 func wgWorld(t *testing.T) (*world, *wireguard.Fake) {
@@ -173,30 +172,4 @@ func TestOrphansByName(t *testing.T) {
 			t.Errorf("%s was removed", n)
 		}
 	}
-}
-
-// A network's bridge carrying the bare marker is taken as the network's and given the readable text; a bridge
-// without any description is not taken.
-func TestBareMarkerIsReplaced(t *testing.T) {
-	w := newWorld(t, reconcile.Config{})
-	if err := w.Net.BridgeCreate(bg, "jo0"); err != nil {
-		t.Fatal(err)
-	}
-	_ = w.Net.SetDescription(bg, "jo0", "jailops managed")
-	w.des = reconcile.Desired{Networks: []reconcile.NetworkDesired{lan()}}
-	rep := w.R.Pass(bg)
-	if len(rep.Failures) != 0 {
-		t.Fatalf("%+v", rep.Failures)
-	}
-	ifs, _ := w.Net.List(bg)
-	if br, _ := find(ifs, "jo0"); br.Description != "jailops net=lan bridge" {
-		t.Fatalf("%+v", br)
-	}
-	w2 := newWorld(t, reconcile.Config{})
-	w2.Net.AddIface(ifconfig.Iface{Name: "jo0", Groups: []string{"bridge"}}) // made by hand, or by a run that crashed before its description
-	w2.des = reconcile.Desired{Networks: []reconcile.NetworkDesired{lan()}}
-	if rep := w2.R.Pass(bg); !strings.Contains(rep.Failures["network/lan"], "not managed by JailOps") {
-		t.Fatalf("%+v", rep.Failures)
-	}
-	_ = api.ConditionTrue
 }

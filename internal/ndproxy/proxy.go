@@ -44,10 +44,10 @@ type Injector interface {
 
 // Routes manages the host side of the proxy.
 type Routes interface {
-	// Add installs a /128 host route for addr via the bridge.
-	Add(ctx context.Context, addr netip.Addr, bridge string) error
+	// Add installs a /128 host route for addr through iface, the host end of the jail's epair.
+	Add(ctx context.Context, addr netip.Addr, iface string) error
 	// Remove deletes that route.
-	Remove(ctx context.Context, addr netip.Addr, bridge string) error
+	Remove(ctx context.Context, addr netip.Addr, iface string) error
 	// EnsureUplinkNotMember fails if uplink is a member of any bridge.
 	EnsureUplinkNotMember(ctx context.Context, uplink string) error
 }
@@ -59,10 +59,10 @@ type Joiner interface {
 	Leave(iface string, group netip.Addr) error
 }
 
-// Prober sends a solicitation for addr toward the jail bridge. It is only
+// Prober sends a solicitation for addr toward the jail, on iface (the host end of its epair). It is only
 // needed in ModeProbe. The reply is reported with Proxy.NotifyReachable.
 type Prober interface {
-	Probe(addr netip.Addr, bridge string) error
+	Probe(addr netip.Addr, iface string) error
 }
 
 // Deps are the collaborators of a Proxy.
@@ -178,7 +178,7 @@ type Metrics struct {
 	DADIgnored   uint64 // DAD probes for addresses that are not proxied, left unanswered
 	DADDefended  uint64 // DAD probes of other hosts for a proxied address, answered so that they see the duplicate
 	Unknown      uint64 // solicitations for addresses that are not proxied
-	Probes       uint64 // probes sent toward the bridge
+	Probes       uint64 // probes sent toward the jail
 	Reopens      uint64 // times the capture was (re)opened
 	InjectErrors uint64
 }
@@ -217,7 +217,7 @@ type Proxy struct {
 	wake      chan struct{}
 	link      LinkInfo
 	open      bool
-	bridges   map[netip.Addr]string
+	ifaces    map[netip.Addr]string
 	groups    map[netip.Addr]int // solicited-node group -> address count
 	bucket    float64
 	last      time.Time
@@ -242,7 +242,7 @@ func New(cfg Config, deps Deps) (*Proxy, error) {
 		deps:     deps,
 		cfg:      cfg,
 		table:    NewTable(cfg.Table, deps.Clock),
-		bridges:  map[netip.Addr]string{},
+		ifaces:   map[netip.Addr]string{},
 		groups:   map[netip.Addr]int{},
 		reload:   make(chan struct{}, 1),
 		wake:     make(chan struct{}, 1),
@@ -264,28 +264,28 @@ func (p *Proxy) Metrics() Metrics {
 	}
 }
 
-// AddAddress starts proxying addr, routing it via bridge. It is safe to call
+// AddAddress starts proxying addr, routing it through iface. It is safe to call
 // while Run is active. On any failure nothing is left behind.
-func (p *Proxy) AddAddress(ctx context.Context, addr netip.Addr, bridge string) error {
-	if bridge == "" {
-		return api.Errorf(api.CodeInvalid, "bridge is required")
+func (p *Proxy) AddAddress(ctx context.Context, addr netip.Addr, iface string) error {
+	if iface == "" {
+		return api.Errorf(api.CodeInvalid, "interface is required")
 	}
 	p.admin.Lock()
 	defer p.admin.Unlock()
-	return p.addLocked(ctx, addr, bridge)
+	return p.addLocked(ctx, addr, iface)
 }
 
-func (p *Proxy) addLocked(ctx context.Context, addr netip.Addr, bridge string) error {
+func (p *Proxy) addLocked(ctx context.Context, addr netip.Addr, iface string) error {
 	if err := p.table.Add(addr); err != nil {
 		return err
 	}
-	if err := p.deps.Routes.Add(ctx, addr, bridge); err != nil {
+	if err := p.deps.Routes.Add(ctx, addr, iface); err != nil {
 		p.table.Remove(addr)
 		return fmt.Errorf("ndproxy: route for %s: %w", addr, err)
 	}
 	g := SolicitedNode(addr)
 	p.mu.Lock()
-	p.bridges[addr] = bridge
+	p.ifaces[addr] = iface
 	first := p.groups[g] == 0
 	p.groups[g]++
 	uplink := p.cfg.Uplink
@@ -321,8 +321,8 @@ func (p *Proxy) dropLocked(ctx context.Context, addr netip.Addr) error {
 	p.table.Remove(addr) // answers stop before any I/O below
 	g := SolicitedNode(addr)
 	p.mu.Lock()
-	bridge := p.bridges[addr]
-	delete(p.bridges, addr)
+	iface := p.ifaces[addr]
+	delete(p.ifaces, addr)
 	delete(p.pending, addr)
 	for k := range p.tbucket {
 		if k.target == addr {
@@ -340,8 +340,8 @@ func (p *Proxy) dropLocked(ctx context.Context, addr netip.Addr) error {
 	uplink := p.cfg.Uplink
 	p.mu.Unlock()
 	var errs []error
-	if bridge != "" {
-		if err := p.deps.Routes.Remove(ctx, addr, bridge); err != nil {
+	if iface != "" {
+		if err := p.deps.Routes.Remove(ctx, addr, iface); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -355,8 +355,9 @@ func (p *Proxy) dropLocked(ctx context.Context, addr netip.Addr) error {
 
 // Entry is one desired proxied address.
 type Entry struct {
-	Addr   netip.Addr
-	Bridge string
+	Addr netip.Addr
+	// Iface is the host end of the jail's epair.
+	Iface string
 }
 
 // Sync makes the proxied set equal to entries: missing addresses are added,
@@ -366,13 +367,13 @@ func (p *Proxy) Sync(ctx context.Context, entries []Entry) error {
 	defer p.admin.Unlock()
 	want := map[netip.Addr]string{}
 	for _, e := range entries {
-		want[e.Addr] = e.Bridge
+		want[e.Addr] = e.Iface
 	}
 	var errs []error
 	for _, a := range p.table.Addrs() {
 		b, ok := want[a]
 		p.mu.Lock()
-		cur := p.bridges[a]
+		cur := p.ifaces[a]
 		p.mu.Unlock()
 		if !ok || b != cur {
 			errs = append(errs, p.dropLocked(ctx, a))
@@ -380,7 +381,7 @@ func (p *Proxy) Sync(ctx context.Context, entries []Entry) error {
 	}
 	for _, e := range entries {
 		if !p.table.Has(e.Addr) {
-			errs = append(errs, p.addLocked(ctx, e.Addr, e.Bridge))
+			errs = append(errs, p.addLocked(ctx, e.Addr, e.Iface))
 		}
 	}
 	return errors.Join(errs...)
@@ -661,13 +662,13 @@ func (p *Proxy) Close() error {
 
 func (p *Proxy) probe(addr netip.Addr) {
 	p.mu.Lock()
-	bridge := p.bridges[addr]
+	iface := p.ifaces[addr]
 	p.mu.Unlock()
-	if bridge == "" || p.deps.Prober == nil {
+	if iface == "" || p.deps.Prober == nil {
 		return
 	}
 	p.m.probes.Add(1)
-	_ = p.deps.Prober.Probe(addr, bridge) // retransmission covers a lost probe
+	_ = p.deps.Prober.Probe(addr, iface) // retransmission covers a lost probe
 }
 
 // HandleFrame processes one captured frame. Run calls it; tests call it
@@ -690,8 +691,8 @@ func (p *Proxy) HandleFrame(frame []byte) {
 		return // our own transmission
 	}
 	if pkt.IsDAD() {
-		// The capture sees the uplink only: the jails' own duplicate address detection runs on their epairs, behind
-		// the bridge, and never reaches it. A DAD probe here is another host of the segment about to take an address
+		// The capture sees the uplink only: the jails' own duplicate address detection runs on their epairs and
+		// never reaches it. A DAD probe here is another host of the segment about to take an address
 		// of ours: defend it with an advertisement to all nodes (RFC 4862 5.4.3), which shows it the duplicate.
 		if p.table.Has(pkt.Target) {
 			p.defend(pkt.Target)

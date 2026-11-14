@@ -99,21 +99,40 @@ func PackageGroups(pkgs []api.AppPackage) (ports, jailops []string) {
 	return ports, jailops
 }
 
-// Volumes turns the data paths into the jail's volumes: one dataset per
-// path, named after the path. The names are unique and match the volume
-// name rule of the lifecycle.
-func Volumes(data []api.AppPath) []api.VolumeMount {
-	var out []api.VolumeMount
+// MaxVolumeName is the longest name of a volume (validate.MaxVolumeName).
+const MaxVolumeName = 32
+
+// Volumes turns the data paths into the volumes of the jail: one volume per path, named <jail>-<what the path is
+// called>. The names are unique and match the volume name rule; a name that is too long is cut at a dash.
+func Volumes(jail string, data []api.AppPath) []api.VolumeAttach {
+	var out []api.VolumeAttach
 	seen := map[string]bool{}
 	for _, d := range data {
-		n := VolumeName(d.Path)
+		base := VolumeName(d.Path)
+		n := volumeFullName(jail, base, "")
 		for i := 2; seen[n]; i++ {
-			n = VolumeName(d.Path) + "-" + strconv.Itoa(i)
+			n = volumeFullName(jail, base, "-"+strconv.Itoa(i))
 		}
 		seen[n] = true
-		out = append(out, api.VolumeMount{Name: n, Mount: d.Path})
+		out = append(out, api.VolumeAttach{Name: n, Mount: d.Path})
 	}
 	return out
+}
+
+// volumeFullName is <jail>-<base><suffix> within MaxVolumeName characters: the base gives way, the jail's name and
+// the suffix stay.
+func volumeFullName(jail, base, suffix string) string {
+	room := MaxVolumeName - len(jail) - 1 - len(suffix)
+	if room < 1 {
+		return strings.TrimRight(jail[:min(len(jail), MaxVolumeName-len(suffix))], "-") + suffix
+	}
+	if len(base) > room {
+		base = strings.TrimRight(base[:room], "-")
+		if base == "" {
+			base = "d"
+		}
+	}
+	return jail + "-" + base + suffix
 }
 
 // VolumeName derives a dataset name from a data path: lower case letters

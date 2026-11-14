@@ -61,19 +61,19 @@ func TestPFGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	// (a raw fragment is the administrator's own text and stays as written)
-	if !strings.Contains(s, "# raw fragment (admin)\npass quick on lo0 all\n# defaults") {
+	if !strings.Contains(s, "# raw fragment (admin)\npass quick on lo0 all\n# the host:") {
 		t.Fatalf("raw fragment misplaced:\n%s", s)
 	}
 	golden(t, "pf_anchor_raw", s)
 
-	nat, err := PFNet("lan", api.NetworkSpec{Bridge: "jo7", Uplink: "em0", IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.20", NAT: true}})
+	nat, err := PFNet("lan", api.NetworkSpec{Uplink: "em0", IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.20", NAT: true}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	golden(t, "pf_nat", nat)
 	golden(t, "pf_anchor_lines", AnchorLines())
-	// without NAT the anchor still passes the gateway pair, and has no translation rule
-	if s, err := PFNet("lan", api.NetworkSpec{Bridge: "jo7", IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.20"}}); err != nil || strings.Contains(s, "nat-to") || !strings.Contains(s, "pass quick on jo7ga all no state") {
+	// without NAT the anchor has no translation rule
+	if s, err := PFNet("lan", api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.20"}}); err != nil || strings.Contains(s, "nat-to") || strings.Contains(s, "pass ") {
 		t.Fatalf("no nat: %q %v", s, err)
 	}
 	if JailAnchor("alpha_web") != "jailops/alpha/web" || NetAnchor("lan") != "jailops/net.lan" {
@@ -213,9 +213,9 @@ func FuzzPFAnchor(f *testing.F) {
 func FuzzPFNet(f *testing.F) {
 	f.Add("lan", "em0", "10.0.0.0/24", "10.0.0.1")
 	f.Add("lan\npass all", "em0\n", "10.0.0.0/24\n", "10.0.0.1")
-	re := regexp.MustCompile(`^(# .*|match out on [a-z0-9]+ inet from [0-9./]+ to ! [0-9./]+ nat-to \([a-z0-9]+\)|pass quick on [a-z0-9]+ all no state)$`)
+	re := regexp.MustCompile(`^(# .*|match out on [a-z0-9]+ inet from [0-9./]+ to ! [0-9./]+ nat-to \([a-z0-9]+:0\))$`)
 	f.Fuzz(func(t *testing.T, name, up, subnet, gw string) {
-		out, err := PFNet(name, api.NetworkSpec{Bridge: "jo7", Uplink: up, IPv4: &api.IPv4Net{Subnet: subnet, Gateway: gw, Range: gw, NAT: true}})
+		out, err := PFNet(name, api.NetworkSpec{Uplink: up, IPv4: &api.IPv4Net{Subnet: subnet, Gateway: gw, Range: gw, NAT: true}})
 		if err != nil || out == "" {
 			return
 		}
@@ -494,7 +494,7 @@ func TestDevfsRulesetNumbersNeverCollide(t *testing.T) {
 }
 
 func TestAntispoofNeverNegatesAList(t *testing.T) {
-	in := PFInput{Jail: "alpha_web", Interfaces: []string{"joe1a", "joe2a"}, Gateways: []string{"jo0gb"}, Antispoof: true,
+	in := PFInput{Jail: "alpha_web", Interfaces: []string{"joe1a", "joe2a"}, Antispoof: true,
 		Addresses: []netip.Addr{netip.MustParseAddr("10.20.0.10"), netip.MustParseAddr("fd00::10")},
 		DefaultIn: "deny", DefaultOut: "allow", Policies: []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{}}}}
 	out, err := PFAnchor(in)
@@ -532,7 +532,7 @@ func TestEveryAnchorDefinesTheTablesItReferences(t *testing.T) {
 			t.Errorf("table <%s> is used but not defined in the anchor:\n%s", m[1], out)
 		}
 	}
-	if len(def) != 3 {
+	if len(def) != 4 { // the jail's addresses, the host, the set and the tag
 		t.Errorf("tables %v", def)
 	}
 }
@@ -547,37 +547,8 @@ func TestProjectAnchorEndsWithAnchorWildcardAndAdminLines(t *testing.T) {
 	}
 }
 
-func TestPFRulesForTrafficIntoTheJailAlsoStandOnTheGateway(t *testing.T) {
-	in := pfBase()
-	in.Gateways = []string{"jo9gb"}
-	in.DefaultIn, in.DefaultOut = "deny", "allow"
-	in.Policies = []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
-		{Name: "web", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80"}},
-		{Name: "dns", Action: "allow", Direction: "out", Proto: "udp", Ports: []string{"53"}},
-	}}}}
-	s, err := PFAnchor(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sec := s[strings.Index(s, "# into the jail from the host and from routed networks"):]
-	for _, want := range []string{
-		"pass out quick on jo9gb inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::/10, ff02::1:ff00:0/104 } icmp6-type { neighbrsol, neighbradv }",
-		"pass out quick on jo9gb inet proto tcp from any to 10.20.0.10 port 80",
-		"block drop out quick on jo9gb inet from any to 10.20.0.10",
-	} {
-		if !strings.Contains(sec, want) {
-			t.Errorf("missing %q in\n%s", want, sec)
-		}
-	}
-	if strings.Contains(sec, "port 53") {
-		t.Errorf("a rule for traffic out of the jail was repeated on the bridge:\n%s", sec)
-	}
-	golden(t, "pf_anchor_bridge_section", sec)
-}
-
 func TestPFProjectsAreIsolatedUnlessARuleOpensIt(t *testing.T) {
 	in := pfBase()
-	in.Gateways = []string{"jo9gb"}
 	in.Foreign = []netip.Prefix{netip.MustParsePrefix("10.30.0.0/24"), netip.MustParsePrefix("fd30::/64")}
 	in.DefaultIn, in.DefaultOut = "allow", "allow"
 	in.Policies = []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
@@ -595,7 +566,6 @@ func TestPFProjectsAreIsolatedUnlessARuleOpensIt(t *testing.T) {
 	for _, want := range []string{
 		"table <foreign> persist { 10.30.0.0/24, fd30::/64 }",
 		"block drop in quick on jo0123456789a0a from any to <foreign>",
-		"block drop out quick on jo9gb inet from <foreign> to 10.20.0.10",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q in\n%s", want, s)
@@ -720,7 +690,7 @@ func TestALabelChangesWhenARuleIsInsertedAbove(t *testing.T) {
 }
 
 func TestPFNeighbourDiscoveryAndICMPv6(t *testing.T) {
-	in := PFInput{Jail: "alpha_web", Interfaces: []string{"joe1a"}, Gateways: []string{"jo0gb"}, Antispoof: true,
+	in := PFInput{Jail: "alpha_web", Interfaces: []string{"joe1a"}, Antispoof: true,
 		Addresses: []netip.Addr{ip("10.20.0.10"), ip("2001:db8:1::100")},
 		LinkLocal: []netip.Addr{ip("fe80::2858:8aff:fe88:fcd2"), ip("10.1.1.1")}, // a non link-local entry is ignored
 		DefaultIn: "deny", DefaultOut: "deny", Policies: []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{}}}}
@@ -741,10 +711,9 @@ func TestPFNeighbourDiscoveryAndICMPv6(t *testing.T) {
 		"from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { neighbrsol, neighbradv }",
 		// only its own addresses and groups reach the jail
 		"to { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2, ff02::1:ff00:100, ff02::1:ff88:fcd2 } icmp6-type { neighbrsol, neighbradv }",
-		// path MTU discovery: ICMPv6 errors pass both ways and on the gateway, also under a default deny
+		// path MTU discovery: ICMPv6 errors pass both ways, also under a default deny
 		"pass in quick on joe1a inet6 proto icmp6 from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { unreach, toobig, timex, paramprob }",
 		"pass out quick on joe1a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob }",
-		"pass out quick on jo0gb inet6 proto icmp6 from any to 2001:db8:1::100 icmp6-type { unreach, toobig, timex, paramprob }",
 		"to ff02::/16 icmp6-type { listenrep, listendone, 143 }",
 	} {
 		if !strings.Contains(out, want) {
@@ -771,36 +740,26 @@ func TestPFNeighbourDiscoveryAndICMPv6(t *testing.T) {
 	}
 }
 
-// A jail with /128 addresses (proxy mode) never advertises: the host has a permanent entry for it and nobody asks.
-func TestPFNoAdvertise(t *testing.T) {
-	in := PFInput{Jail: "alpha_web", Interfaces: []string{"joe1a"}, Antispoof: true, NoAdvertise: true,
+// The host asks the jail for its address with a solicitation and the jail answers with an advertisement from one of its
+// own addresses; an advertisement never goes to a multicast group.
+func TestPFNeighbourDiscoveryOnTheJailsLink(t *testing.T) {
+	in := PFInput{Jail: "alpha_web", Interfaces: []string{"joe1a"}, Antispoof: true,
 		Addresses: []netip.Addr{ip("2001:db8:1::100")}, LinkLocal: []netip.Addr{ip("fe80::2858:8aff:fe88:fcd2")},
 		DefaultIn: "allow", DefaultOut: "allow", Policies: []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{}}}}
 	out, err := PFAnchor(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	golden(t, "pf_no_advertise", out)
-	if !strings.Contains(out, "block in quick on joe1a inet6 proto icmp6 from any to any icmp6-type neighbradv") {
-		t.Errorf("an advertisement from the jail is not blocked:\n%s", out)
+	golden(t, "pf_nd_link", out)
+	if !strings.Contains(out, "from { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 } to any icmp6-type { neighbrsol, neighbradv }") {
+		t.Errorf("the jail cannot answer the host's solicitation:\n%s", out)
 	}
-	if !strings.Contains(out, "to any icmp6-type neighbrsol label") {
-		t.Errorf("the jail's own solicitations are not passed:\n%s", out)
-	}
-	for _, ln := range strings.Split(out, "\n") {
-		if strings.HasPrefix(ln, "pass in") && strings.Contains(ln, "neighbradv") {
-			t.Errorf("the jail may still advertise: %s", ln)
-		}
+	if !strings.Contains(out, "block in quick on joe1a inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv") {
+		t.Errorf("an advertisement to a multicast group is not blocked:\n%s", out)
 	}
 	// the DAD solicitation from :: still passes
 	if !strings.Contains(out, "from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol") {
 		t.Errorf("DAD is blocked:\n%s", out)
-	}
-	// without the flag the jail may advertise (on-link jails must answer each other)
-	in.NoAdvertise = false
-	out, _ = PFAnchor(in)
-	if !strings.Contains(out, "icmp6-type { neighbrsol, neighbradv }") {
-		t.Errorf("an on-link jail cannot answer:\n%s", out)
 	}
 }
 
@@ -973,25 +932,6 @@ func TestPFGroupedAnchorTextAndRulesAgree(t *testing.T) {
 	}
 }
 
-// On the gateway interface (what the host and routed traffic send to the jail) the inbound deny rules come first too.
-func TestPFGatewayDenyRulesComeFirst(t *testing.T) {
-	in := pfBase()
-	in.Gateways = []string{"jo0gb"}
-	in.Policies = []PFPolicy{
-		{Name: "a", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"22"}}}}},
-		{Name: "b", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{{Name: "no ssh", Action: "deny", Direction: "in", Proto: "tcp", Ports: []string{"22"}}}}},
-	}
-	s, err := PFAnchor(in)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gw := s[strings.Index(s, "# into the jail from the host and from routed networks"):]
-	d, al := strings.Index(gw, "block drop out quick on jo0gb"), strings.Index(gw, "pass out quick on jo0gb inet proto tcp")
-	if d < 0 || al < 0 || d > al || !strings.Contains(gw, "# deny rules into the jail") || !strings.Contains(gw, "# allow rules into the jail") {
-		t.Fatalf("gateway section:\n%s", gw)
-	}
-}
-
 // jail:NAME is a table of its own (j_<name>, a hyphen read as an underscore) that holds the addresses of the jail, also
 // as a member of a set; a jail that is not in Jails is an empty table and matches nobody; a set and a jail of one name
 // are two tables.
@@ -1040,17 +980,22 @@ func TestPFJailReferences(t *testing.T) {
 	}
 }
 
-// A state limit puts "keep state (max N)" on every pass rule of the anchor, never on a block rule, and does not change
-// the label of a rule: a label that changed would end the running flows of the rule.
+// Every pass rule binds its states to the interface (if-bound); a state limit adds "max N" to it, on every pass rule of
+// the anchor, never on a block rule, and does not change the label of a rule: a label that changed would end the
+// running flows of the rule.
 func TestPFStateLimit(t *testing.T) {
 	in := pfBase()
-	in.Gateways = []string{"jo9gb"}
 	plain, err := PFAnchor(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(plain, "keep state") {
-		t.Fatalf("an anchor without a limit has state options:\n%s", plain)
+	for _, ln := range strings.Split(plain, "\n") {
+		if strings.HasPrefix(ln, "pass ") && !strings.HasSuffix(ln, " keep state (if-bound)") {
+			t.Fatalf("a pass rule whose states are not bound to its interface: %s", ln)
+		}
+		if strings.Contains(ln, "max ") && strings.Contains(ln, "keep state") {
+			t.Fatalf("an anchor without a limit has a state limit: %s", ln)
+		}
 	}
 	in.MaxStates = 5000
 	limited, err := PFAnchor(in)
@@ -1062,7 +1007,7 @@ func TestPFStateLimit(t *testing.T) {
 		switch {
 		case strings.HasPrefix(ln, "pass "):
 			passes++
-			if !strings.HasSuffix(ln, " keep state (max 5000)") {
+			if !strings.HasSuffix(ln, " keep state (max 5000, if-bound)") {
 				t.Errorf("a pass rule without the limit: %s", ln)
 			}
 		case strings.HasPrefix(ln, "block "), strings.HasPrefix(ln, "#"):
@@ -1074,7 +1019,54 @@ func TestPFStateLimit(t *testing.T) {
 	if passes == 0 {
 		t.Fatal("no pass rule in the anchor")
 	}
-	if got := strings.ReplaceAll(limited, " keep state (max 5000)", ""); got != plain {
+	if got := strings.ReplaceAll(limited, "max 5000, ", ""); got != plain {
 		t.Errorf("the limit changed more than the state option:\n--- without\n%s\n--- with, option removed\n%s", plain, got)
+	}
+}
+
+// The host is an endpoint of a rule (host) and is closed to the jail after the rules of its policies, ping and the
+// resolver the network points at excepted: a jail reaches no service of the machine it runs on unless a rule says so.
+func TestPFHostEndpointAndClosedHost(t *testing.T) {
+	in := pfBase()
+	in.Host = []netip.Addr{ip("10.20.0.1"), ip("fe80::1"), ip("192.0.2.5")}
+	in.DNS = []netip.Addr{ip("10.20.0.1")}
+	in.Policies = []PFPolicy{{Name: "p", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
+		{Name: "ntp", Action: "allow", Direction: "out", Proto: "udp", To: []string{"host"}, Ports: []string{"123"}},
+		{Name: "from host", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"host"}, Ports: []string{"22"}},
+	}}}}
+	s, err := PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden(t, "pf_anchor_host", s)
+	for _, want := range []string{
+		"table <host> persist { 10.20.0.1, 192.0.2.5, fe80::1 }",
+		"proto udp from 10.20.0.10 to <host> port 123",
+		"proto tcp from <host> to 10.20.0.10 port 22",
+		"pass in quick on jo0123456789a0a inet proto icmp from any to <host>",
+		"pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host>",
+		"pass in quick on jo0123456789a0a inet proto tcp from any to 10.20.0.1 port 53",
+		"pass in quick on jo0123456789a0a inet proto udp from any to 10.20.0.1 port 53",
+		"block drop in quick on jo0123456789a0a from any to <host>",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in\n%s", want, s)
+		}
+	}
+	// the rule of the policy comes before the closing of the host, which comes before the defaults
+	i, j, k := strings.Index(s, "to <host> port 123"), strings.Index(s, "block drop in quick on jo0123456789a0a from any to <host>"), strings.Index(s, "# defaults")
+	if !(i >= 0 && i < j && j < k) {
+		t.Errorf("order of the policy rule, the closed host and the defaults: %d %d %d\n%s", i, j, k, s)
+	}
+	// the simulator's rules: the host is a block unless a rule opened it
+	a, _ := BuildAnchor(in)
+	found := false
+	for _, r := range a.Rules {
+		if r.Origin.Stage == StageHost && r.Action == "block" && r.To.Contains(ip("192.0.2.5")) && !r.To.Contains(ip("10.30.0.1")) {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("the structured rules lack the closing of the host")
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"net/netip"
 	"regexp"
 	"slices"
 	"strings"
@@ -48,11 +47,9 @@ type Env struct {
 	Sysctl func(ctx context.Context, name string) (string, error)
 	Clock  Clock
 	Log    *slog.Logger
-	// HostRoutes reads the IPv6 /128 host routes (address to interface). Optional: without it stale routes of
-	// proxy-mode networks are not collected.
-	HostRoutes func(ctx context.Context) (map[netip.Addr]string, error)
-	// HostNeighbors reads the permanent link-local neighbor entries. Optional: without it stale entries are not collected.
-	HostNeighbors func(ctx context.Context) ([]ifconfig.Neighbor, error)
+	// Routes reads the routing table. Optional: without it the loop does not look at routes, and a route that went
+	// missing is not put back.
+	Routes func(ctx context.Context) ([]ifconfig.RouteEntry, error)
 	// Trigger is an optional extra trigger (state watch events).
 	Trigger <-chan struct{}
 	// WG configures WireGuard interfaces (optional: without it tunnels are reported as not applied).
@@ -61,18 +58,14 @@ type Env struct {
 
 // Report summarises one pass; tests and `doctor` read it.
 type Report struct {
-	At      time.Time
-	Err     error
-	Applied []string            // steps executed
-	Drift   map[string][]string // by jail
-	Orphans []string            // epairs found without a jail
-	Cleaned []string            // orphans removed
-	// StaleRoutes are the /128 host routes of proxy-mode networks that belonged to no jail and were removed.
-	StaleRoutes []string
-	// StaleNeighbors are the link-local static neighbor entries of jails that are gone, removed.
-	StaleNeighbors []string
-	Started        []string          // autostarted jails
-	Failures       map[string]string // resource -> reason
+	At       time.Time
+	Err      error
+	Applied  []string            // steps executed
+	Drift    map[string][]string // by jail
+	Orphans  []string            // epairs found without a jail
+	Cleaned  []string            // orphans removed
+	Started  []string            // autostarted jails
+	Failures map[string]string   // resource -> reason
 }
 
 // Reconciler is the loop.
@@ -178,7 +171,7 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 	}
 	r.hostPass(ctx, des.Host, &rep)
 	r.pipePass(ctx, des, &rep)
-	obs, err := Observe(ctx, r.env.Net, r.env.Jails)
+	obs, err := r.observe(ctx)
 	if err != nil {
 		rep.Err = err
 		r.log.Warn("reconcile: observation failed", "err", err)
@@ -199,7 +192,7 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 	}
 	// Networks changed interfaces; look again before judging jails.
 	if len(rep.Applied) > 0 {
-		if o2, err := Observe(ctx, r.env.Net, r.env.Jails); err == nil {
+		if o2, err := r.observe(ctx); err == nil {
 			obs = o2
 		}
 	}
@@ -207,9 +200,25 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 	for _, j := range des.Jails {
 		jailConds[j.Name] = r.jailPass(ctx, j, obs, ex, &rep, now)
 	}
+	for _, j := range des.Jails {
+		if _, up := obs.Running[j.Name]; !up {
+			continue
+		}
+		for idx, ep := range j.Epairs {
+			if idx < len(j.Networks) {
+				if st := netStatus[j.Networks[idx]]; st != nil {
+					st.Links = append(st.Links, ep)
+				}
+			}
+		}
+	}
+	for _, st := range netStatus {
+		if st != nil {
+			slices.Sort(st.Links)
+		}
+	}
 	r.pipeCleanup(ctx, des, &rep) // after the anchors: no anchor names a pipe that goes away
 	r.orphanPass(ctx, des, obs, ex, netStatus, &rep)
-	r.staleRoutePass(ctx, des, obs, ex, &rep)
 	if r.cfg.Autostart && !r.bootDone {
 		r.bootPass(ctx, des, obs, &rep, now)
 		r.bootDone = true
@@ -235,6 +244,20 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 	return rep
 }
 
+// observe reads the interfaces, the running jails and, when the loop can, the routing table.
+func (r *Reconciler) observe(ctx context.Context) (*Observed, error) {
+	o, err := Observe(ctx, r.env.Net, r.env.Jails)
+	if err != nil {
+		return nil, err
+	}
+	if r.env.Routes != nil {
+		if rt, err := r.env.Routes(ctx); err == nil {
+			o.Routes = rt
+		}
+	}
+	return o, nil
+}
+
 // ---- networks ----
 
 func (r *Reconciler) networkPass(ctx context.Context, n NetworkDesired, obs *Observed, ex *NetExec, rep *Report, now time.Time) *api.NetworkStatus {
@@ -246,15 +269,6 @@ func (r *Reconciler) networkPass(ctx context.Context, n NetworkDesired, obs *Obs
 	}
 	if n.Problem != "" {
 		return fail("Invalid", n.Problem)
-	}
-	gwMember, gwL3, _ := ipam.GatewayNames(n.Bridge)
-	for _, name := range []string{n.Bridge, gwMember, gwL3} {
-		if i, ok := obs.Ifaces[name]; ok && name != "" && !ownedBy(i, n.Steps) {
-			if i.Description == "" || !ours(i) {
-				return fail("ForeignBridge", fmt.Sprintf("interface %s exists and is not managed by JailOps; it is left untouched", name))
-			}
-			return fail("ForeignBridge", fmt.Sprintf("interface %s belongs to another JailOps object (%s)", name, i.Description))
-		}
 	}
 	unlock, err := r.env.Actions.TryLock("reconcile "+n.Name, "network/"+n.Name)
 	if err != nil {
@@ -273,81 +287,17 @@ func (r *Reconciler) networkPass(ctx context.Context, n NetworkDesired, obs *Obs
 		if step.Op == render.OpRequireSysctl {
 			// A precondition, checked every pass; it changes nothing.
 			if err := ex.Exec(ctx, step, ""); err != nil {
-				return r.networkStatusFrom(n, obs, st, fail("Precondition", err.Error()), ctx, now)
+				return fail("Precondition", err.Error())
 			}
 			continue
 		}
 		if err := ex.Exec(ctx, step, ""); err != nil {
 			rep.Applied = append(rep.Applied, step.Describe()+" (failed)")
-			return r.networkStatusFrom(n, obs, st, fail("ApplyFailed", fmt.Sprintf("%s: %v", step.Describe(), err)), ctx, now)
+			return fail("ApplyFailed", fmt.Sprintf("%s: %v", step.Describe(), err))
 		}
 		rep.Applied = append(rep.Applied, step.Describe())
 	}
-	// Remove addresses on our own interfaces that the spec no longer asks for. The bridge itself carries none (an
-	// older layout put the gateway addresses on it, and a stray address there would be answered outside the
-	// gateway's pf rules).
-	for _, name := range []string{n.Bridge, gwL3} {
-		i, ok := obs.Ifaces[name]
-		if !ok || !ownedBy(i, n.Steps) {
-			continue
-		}
-		want := map[netip.Prefix]bool{}
-		for _, s := range n.Steps {
-			if s.Op == render.OpAddAddr && s.Iface == name {
-				if p, err := netip.ParsePrefix(s.Arg); err == nil {
-					want[p] = true
-				}
-			}
-		}
-		for _, list := range [][]netip.Prefix{i.Inet, i.Inet6} {
-			for _, p := range list {
-				if want[p] || p.Addr().IsLinkLocalUnicast() || p.Addr().IsLoopback() {
-					continue
-				}
-				s := render.Step{Op: render.OpRemoveAddr, Phase: render.PhaseHost, Iface: name, Arg: p.String()}
-				if err := ex.Exec(ctx, s, ""); err != nil {
-					rep.Failures["network/"+n.Name] = err.Error()
-					continue
-				}
-				rep.Applied = append(rep.Applied, s.Describe())
-			}
-		}
-	}
-	return r.networkStatusFrom(n, obs, st, nil, ctx, now)
-}
-
-// networkStatusFrom verifies the network against a fresh observation.
-func (r *Reconciler) networkStatusFrom(n NetworkDesired, obs *Observed, st, failed *api.NetworkStatus, ctx context.Context, now time.Time) *api.NetworkStatus {
-	if failed != nil {
-		st = failed
-	}
-	fresh := obs
-	if o2, err := Observe(ctx, r.env.Net, nil); err == nil {
-		fresh = &Observed{Ifaces: o2.Ifaces, Running: obs.Running}
-	}
-	if i, ok := fresh.Ifaces[n.Bridge]; ok {
-		st.BridgeUp = i.Up()
-		gm, _, _ := ipam.GatewayNames(n.Bridge)
-		for _, m := range i.Members {
-			if m.Name != gm { // the host's own port is not a jail
-				st.Members = append(st.Members, m.Name)
-			}
-		}
-		slices.Sort(st.Members)
-	}
-	if failed != nil {
-		return st
-	}
-	for _, s := range n.Steps {
-		if s.Op == render.OpRequireSysctl || s.Op == render.OpLoadAnchor || s.Op == render.OpAddHostRoute {
-			continue
-		}
-		if !Satisfied(s, fresh) {
-			st.Conditions = append(st.Conditions, cond(CondReady, false, "VerifyFailed", "not in effect after apply: "+s.Describe(), now))
-			return st
-		}
-	}
-	st.Conditions = append(st.Conditions, cond(CondReady, true, "Applied", "bridge "+n.Bridge+" with its gateway interface is configured", now))
+	st.Conditions = append(st.Conditions, cond(CondReady, true, "Applied", "the network is configured", now))
 	return st
 }
 
@@ -362,36 +312,36 @@ func (r *Reconciler) jailPass(ctx context.Context, j JailDesired, obs *Observed,
 		return []api.Condition{cond(CondReady, true, "Stopped", "the jail is stopped", now)}
 	}
 	var drift []string
-	// Interfaces: the host end of every epair must exist and be a bridge member.
+	// Interfaces: the host end of every epair must exist, carry the gateway addresses, be up and have the routes to
+	// the jail's addresses.
 	for idx, ep := range j.Epairs {
-		i, ok := obs.Ifaces[ep]
-		if !ok {
+		if _, ok := obs.Ifaces[ep]; !ok {
 			drift = append(drift, fmt.Sprintf("epair %s is missing; restart the jail to recreate it", ep))
 			continue
 		}
-		if idx < len(j.Attach) {
-			for _, s := range j.Attach[idx] {
-				switch s.Op {
-				case render.OpAddMember, render.OpSetPrivate, render.OpIfaceUp, render.OpSetDescription:
-				default:
-					continue
-				}
-				if Satisfied(s, obs) {
-					continue
-				}
-				unlock, err := r.env.Actions.TryLock("reconcile "+j.Name, "jail/"+j.Name)
-				if err != nil {
-					break
-				}
-				if err := ex.Exec(ctx, s, j.Name); err != nil {
-					drift = append(drift, fmt.Sprintf("%s: %v", s.Describe(), err))
-				} else {
-					rep.Applied = append(rep.Applied, s.Describe())
-				}
-				unlock()
-			}
+		if idx >= len(j.Attach) {
+			continue
 		}
-		_ = i
+		for _, s := range j.Attach[idx] {
+			switch s.Op {
+			case render.OpAddAddr, render.OpIfaceUp, render.OpSetDescription, render.OpAddHostRoute:
+			default:
+				continue
+			}
+			if s.Phase != render.PhaseHost || Satisfied(s, obs) {
+				continue
+			}
+			unlock, err := r.env.Actions.TryLock("reconcile "+j.Name, "jail/"+j.Name)
+			if err != nil {
+				break
+			}
+			if err := ex.Exec(ctx, s, j.Name); err != nil {
+				drift = append(drift, fmt.Sprintf("%s: %v", s.Describe(), err))
+			} else {
+				rep.Applied = append(rep.Applied, s.Describe())
+			}
+			unlock()
+		}
 	}
 	drift = append(drift, r.jailSidePass(ctx, j, obs, ex, rep)...)
 	// Firewall anchor, and the parent anchors that lead to it.
@@ -626,31 +576,17 @@ func normMembers(in []string) []string {
 // ---- orphans ----
 
 func (r *Reconciler) orphanPass(ctx context.Context, des Desired, obs *Observed, ex *NetExec, netStatus map[string]*api.NetworkStatus, rep *Report) {
-	byID := map[string]JailDesired{}
-	for _, j := range des.Jails {
-		byID[j.ID] = j
-	}
-	bridgeNet := map[string]string{}
-	for _, n := range des.Networks {
-		bridgeNet[n.Bridge] = n.Name
-	}
 	// An epair is a jail's when its name carries the jail's prefix (ipam.EpairNames); the description says only
-	// that it is JailOps's (either format).
+	// that it is JailOps's.
 	byBase := map[string]JailDesired{}
 	for _, j := range des.Jails {
 		if h, _, err := ipam.EpairNames(j.ID, 0); err == nil {
 			byBase[h[:len(h)-3]] = j
 		}
 	}
-	gateways := map[string]bool{}
-	for _, n := range des.Networks {
-		if gm, gl3, err := ipam.GatewayNames(n.Bridge); err == nil {
-			gateways[gm], gateways[gl3] = true, true
-		}
-	}
 	for _, name := range sortedIfaces(obs) {
 		i := obs.Ifaces[name]
-		if !ipam.IsEpairName(name) || !ours(i) || !strings.HasSuffix(name, "a") || gateways[name] {
+		if !ipam.IsEpairName(name) || !ours(i) || !strings.HasSuffix(name, "a") {
 			continue
 		}
 		j, known := byBase[name[:len(name)-3]]
@@ -664,15 +600,9 @@ func (r *Reconciler) orphanPass(ctx context.Context, des Desired, obs *Observed,
 			continue
 		}
 		rep.Orphans = append(rep.Orphans, name)
-		for bn, b := range bridgeNet {
-			if bi, ok := obs.Ifaces[bn]; ok {
-				for _, m := range bi.Members {
-					if m.Name == name {
-						if st := netStatus[b]; st != nil {
-							st.Orphans = append(st.Orphans, name)
-						}
-					}
-				}
+		if nw := netOfDesc(i.Description); nw != "" {
+			if st := netStatus[nw]; st != nil {
+				st.Orphans = append(st.Orphans, name)
 			}
 		}
 		step := render.Step{Op: render.OpEpairDestroy, Phase: render.PhaseHost, Iface: name}
@@ -683,64 +613,17 @@ func (r *Reconciler) orphanPass(ctx context.Context, des Desired, obs *Observed,
 		rep.Cleaned = append(rep.Cleaned, name)
 		rep.Applied = append(rep.Applied, step.Describe())
 	}
-	r.orphanNetPass(ctx, des, obs, ex, rep)
 }
 
-// netOfDesc names the network an interface of JailOps was made for: its description is "jailops net=NAME bridge" for a
-// bridge and "jailops net=NAME gateway (...)" for the ends of the gateway pair. "" for any other description.
-func netOfDesc(d string) (net, kind string) {
-	rest, ok := strings.CutPrefix(d, "jailops net=")
+// netOfDesc names the network the host end of a jail's epair was made for: its description is
+// "jailops jail=PROJECT/JAIL net=NAME (host side)". "" for any other description.
+func netOfDesc(d string) string {
+	_, rest, ok := strings.Cut(d, " net=")
 	if !ok {
-		return "", ""
+		return ""
 	}
-	net, rest, _ = strings.Cut(rest, " ")
-	switch {
-	case rest == "bridge":
-		return net, "bridge"
-	case strings.HasPrefix(rest, "gateway"):
-		return net, "gateway"
-	}
-	return "", ""
-}
-
-// orphanNetPass destroys the bridge and the gateway pair of a network that no longer exists: the records of a network
-// can go while its interfaces stay (a host wiped by hand, a dataset destroyed under the daemon), because interfaces
-// live in the kernel. Only an interface that carries JailOps's description for a network, and whose name is no desired
-// network's bridge or gateway end, is touched; the pair is destroyed from its host end (destroying an epair removes both).
-func (r *Reconciler) orphanNetPass(ctx context.Context, des Desired, obs *Observed, ex *NetExec, rep *Report) {
-	// What is wanted is told by the interface names, which never change (a rename of a network keeps its bridge), and not
-	// by the network name in the description: the description is rewritten after a rename, in between it names the old one.
-	wanted := map[string]bool{}
-	for _, n := range des.Networks {
-		wanted[n.Bridge] = true
-		if gm, gl3, err := ipam.GatewayNames(n.Bridge); err == nil {
-			wanted[gm], wanted[gl3] = true, true
-		}
-	}
-	for _, name := range sortedIfaces(obs) {
-		i := obs.Ifaces[name]
-		if !ours(i) || wanted[name] {
-			continue
-		}
-		net, kind := netOfDesc(i.Description)
-		if net == "" {
-			continue
-		}
-		step := render.Step{Op: render.OpBridgeDestroy, Phase: render.PhaseHost, Iface: name}
-		switch {
-		case kind == "bridge" && slices.Contains(i.Groups, "bridge"):
-		case kind == "gateway" && slices.Contains(i.Groups, "epair") && strings.HasSuffix(i.Description, "(host side)"):
-			step.Op = render.OpEpairDestroy
-		default:
-			continue // the other end of a pair goes with it
-		}
-		if err := ex.Exec(ctx, step, ""); err != nil {
-			rep.Failures["interface/"+name] = err.Error()
-			continue
-		}
-		rep.Cleaned = append(rep.Cleaned, name)
-		rep.Applied = append(rep.Applied, step.Describe())
-	}
+	name, _, _ := strings.Cut(rest, " ")
+	return name
 }
 
 func sortedIfaces(o *Observed) []string {

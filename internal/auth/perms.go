@@ -100,7 +100,7 @@ func classify(e Entry) Class {
 		return ClassProject
 	case has("/api/v1/images"), has("/api/v1/networks"), has("/api/v1/storage"), has("/api/v1/projects"):
 		return ClassGranted
-	case has("/api/v1/jails"), has("/api/v1/profiles"), has("/api/v1/firewall"), has("/api/v1/backup-policies"), has("/api/v1/jail-templates"):
+	case has("/api/v1/jails"), has("/api/v1/volumes"), has("/api/v1/profiles"), has("/api/v1/firewall"), has("/api/v1/backup-policies"), has("/api/v1/jail-templates"):
 		return ClassProject
 	case has("/api/v1/trust"), has("/api/v1/users"), has("/api/v1/tokens"), has("/api/v1/certificates"), has("/api/v1/remotes"),
 		has("/api/v1/groups"), has("/api/v1/rollouts"), has("/api/v1/cluster"), has("/api/v1/server"), has("/api/v1/doctor"),
@@ -266,11 +266,6 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/jails/{name}/files/{path...}", op),
 	r("POST", "/api/v1/jails/{name}/upgrade", op),
 	r("POST", "/api/v1/jails/{name}/rollback", op),
-	// encrypted volumes: whoever may start and stop the jail may unlock and lock it; changing the passphrase is
-	// an administrator's task
-	r("POST", "/api/v1/jails/{name}/unlock", op),
-	r("POST", "/api/v1/jails/{name}/lock", op),
-	r("POST", "/api/v1/jails/{name}/passphrase", ad),
 	r("POST", "/api/v1/jails/{name}/move", ad),
 	r("GET", "/api/v1/jails/{name}/snapshots", ro),
 	r("POST", "/api/v1/jails/{name}/snapshots", op),
@@ -280,6 +275,21 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/jails/{name}/volumes", ro),
 	r("POST", "/api/v1/jails/{name}/volumes", ad),
 	r("DELETE", "/api/v1/jails/{name}/volumes/{volume}", ad),
+	// volumes: attaching one is a change of the jail's spec; whoever may start and stop the jail that has an encrypted
+	// volume attached may unlock and lock it, changing the passphrase is an administrator's task
+	r("GET", "/api/v1/volumes", ro),
+	r("POST", "/api/v1/volumes", ad),
+	r("GET", "/api/v1/volumes/{name}", ro),
+	r("PUT", "/api/v1/volumes/{name}", ad),
+	r("PATCH", "/api/v1/volumes/{name}", ad),
+	r("DELETE", "/api/v1/volumes/{name}", ad),
+	r("POST", "/api/v1/volumes/{name}/unlock", op),
+	r("POST", "/api/v1/volumes/{name}/lock", op),
+	r("POST", "/api/v1/volumes/{name}/passphrase", ad),
+	r("GET", "/api/v1/volumes/{name}/snapshots", ro),
+	r("POST", "/api/v1/volumes/{name}/snapshots", op),
+	r("DELETE", "/api/v1/volumes/{name}/snapshots/{snapshot}", op),
+	r("POST", "/api/v1/volumes/{name}/rollback", ad),
 	r("GET", "/api/v1/jails/{name}/bundle", ro),
 	r("GET", "/api/v1/jail-templates", ro),
 	r("POST", "/api/v1/jail-templates", ad),

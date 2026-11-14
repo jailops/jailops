@@ -2,7 +2,7 @@
 // import, and only used by the in-process demo transport.
 import type {
   Jail, JailSnapshot, Image, Network, Lease, FirewallPolicy, AddressSet, BackupTarget, BackupPolicy, Backup,
-  Remote, Token, User, Certificate, AuditEntry, Operation, ServerInfo, PoolUsage, PowerState,
+  Remote, Token, User, Certificate, AuditEntry, Operation, ServerInfo, PoolUsage, PowerState, Volume,
 } from '@jailops/shared/api/types'
 import { knownExtensions } from '@jailops/shared/api/types'
 import { appHash } from './apps'
@@ -53,9 +53,9 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
 
 export function jails(): Jail[] {
   return [
-    jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ name: 'content', mount: '/usr/local/www', quota: '10G' }], labels: { role: 'web', tier: 'frontend', env: 'prod', team: 'web', app: 'nginx', 'jailops.app': 'nginx', 'jailops.app.version': '1.30.6,3', 'jailops.app.hash': appHash('nginx') } }),
-    jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ name: 'pgdata', mount: '/var/db/postgres', quota: '200G' }, { name: 'wal', mount: '/var/db/wal', quota: '40G', read_only: false }], labels: { role: 'db', env: 'prod', team: 'data', backup: 'yes', 'jailops.app': 'postgresql', 'jailops.app.version': '18.5', 'jailops.app.hash': appHash('postgresql-previous') } }),
-    jail('mail', 'error', { image: 'freebsd-15-1#g3', gen: 'freebsd-15-1#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Reconciled', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ name: 'spool', mount: '/var/spool', quota: '50G' }], labels: { role: 'mail', env: 'prod', team: 'ops', app: 'postfix' } }),
+    jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ volume: 'content', mount: '/usr/local/www' }], labels: { role: 'web', tier: 'frontend', env: 'prod', team: 'web', app: 'nginx', 'jailops.app': 'nginx', 'jailops.app.version': '1.30.6,3', 'jailops.app.hash': appHash('nginx') } }),
+    jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ volume: 'pgdata', mount: '/var/db/postgres' }, { volume: 'wal', mount: '/var/db/wal', read_only: false }], labels: { role: 'db', env: 'prod', team: 'data', backup: 'yes', 'jailops.app': 'postgresql', 'jailops.app.version': '18.5', 'jailops.app.hash': appHash('postgresql-previous') } }),
+    jail('mail', 'error', { image: 'freebsd-15-1#g3', gen: 'freebsd-15-1#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Reconciled', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ volume: 'spool', mount: '/var/spool' }], labels: { role: 'mail', env: 'prod', team: 'ops', app: 'postfix' } }),
     jail('build', 'stopped', { autostart: false, labels: { role: 'ci', env: 'dev', team: 'platform' } }),
     jail('proxy', 'running', { net: 'edge', ipv4: '192.0.2.10', ipv6: 'auto', labels: { role: 'proxy', env: 'prod', team: 'web', app: 'haproxy' } }),
     jail('cache', 'starting', { ipv4: '10.20.0.14', labels: { role: 'cache', env: 'prod', team: 'web', app: 'redis' } }),
@@ -70,12 +70,12 @@ export function jails(): Jail[] {
   ]
 }
 
-/** The passphrase of the demo jail vault's encrypted volume (unlock it with this in `?demo`). */
+/** The passphrase of the demo volume secrets (unlock it with this in `?demo`). */
 export const demoVaultPassphrase = 'demo-vault-passphrase'
 
-/** A jail with an encrypted volume, locked as a host boot leaves it. */
+/** A jail with an encrypted volume, locked as a host boot leaves it (with the volume). */
 function vault(): Jail {
-  const j = jail('vault', 'locked', { ipv4: '10.20.0.16', vols: [{ name: 'secrets', mount: '/var/db/secrets', quota: '5G', encrypted: true }], labels: { role: 'secrets', env: 'prod', team: 'ops' } })
+  const j = jail('vault', 'locked', { ipv4: '10.20.0.16', vols: [{ volume: 'secrets', mount: '/var/db/secrets' }], labels: { role: 'secrets', env: 'prod', team: 'ops' } })
   j.status.locked = ['secrets']
   return j
 }
@@ -139,24 +139,24 @@ export function images(): Image[] {
 export function networks(): Network[] {
   return [
     {
-      metadata: meta('lan'), spec: { bridge: 'jo0', uplink: 'em0', ipv4: { subnet: '10.20.0.0/24', gateway: '10.20.0.1', range: '10.20.0.10-10.20.0.60', exclude: ['10.20.0.40-10.20.0.44'], nat: true }, ipv6: { mode: 'routed', subnet: '2001:db8:20:1::/80', gateway: '2001:db8:20:1::1', range: '2001:db8:20:1::100-2001:db8:20:1::1ff' }, dns: ['10.20.0.1'], mtu: 1500 },
-      status: { bridge_up: true, members: ['epair0a', 'epair1a', 'epair2a', 'epair4a'], allocated: 8, free: 38, orphans: [], conditions: [] },
+      metadata: meta('lan'), spec: { uplink: 'em0', ipv4: { subnet: '10.20.0.0/24', gateway: '10.20.0.1', range: '10.20.0.10-10.20.0.60', exclude: ['10.20.0.40-10.20.0.44'], nat: true }, ipv6: { mode: 'routed', subnet: '2001:db8:20:1::/80', range: '2001:db8:20:1::100-2001:db8:20:1::1ff' }, dns: ['10.20.0.1'], mtu: 1500 },
+      status: { links: ['epair0a', 'epair1a', 'epair2a', 'epair4a'], allocated: 8, free: 38, orphans: [], conditions: [] },
     },
     {
-      metadata: meta('backend'), spec: { bridge: 'jo1', ipv4: { subnet: '10.30.0.0/28', gateway: '10.30.0.1', range: '10.30.0.2-10.30.0.13' } },
-      status: { bridge_up: true, members: ['epair3a'], allocated: 12, free: 0, orphans: ['epair9a', 'epair9b'], conditions: [] },
+      metadata: meta('backend'), spec: { ipv4: { subnet: '10.30.0.0/28', gateway: '10.30.0.1', range: '10.30.0.2-10.30.0.13' } },
+      status: { links: [], allocated: 12, free: 0, orphans: ['epair9a', 'epair9b'], conditions: [] },
     },
     {
-      metadata: meta('edge'), spec: { bridge: 'jo2', uplink: 'em1', ipv4: { subnet: '192.0.2.0/27', gateway: '192.0.2.1', range: '192.0.2.10-192.0.2.30' }, ipv6: { mode: 'proxy', subnet: '2001:db8:99::/64', gateway: 'fe80::1', range: '2001:db8:99::100-2001:db8:99::10f' } },
-      status: { bridge_up: true, members: ['epair5a'], allocated: 4, free: 17, orphans: [], conditions: [] },
+      metadata: meta('edge'), spec: { uplink: 'em1', ipv4: { subnet: '192.0.2.0/27', gateway: '192.0.2.1', range: '192.0.2.10-192.0.2.30' }, ipv6: { mode: 'proxy', subnet: '2001:db8:99::/64', range: '2001:db8:99::100-2001:db8:99::10f' } },
+      status: { links: [], allocated: 4, free: 17, orphans: [], conditions: [] },
     },
     {
-      metadata: meta('shop'), spec: { bridge: 'jo3', ipv4: { subnet: '10.64.0.0/24', gateway: '10.64.0.1', range: '10.64.0.10-10.64.0.250' } },
-      status: { bridge_up: true, members: [], allocated: 8, free: 233, orphans: [], conditions: [] },
+      metadata: meta('shop'), spec: { ipv4: { subnet: '10.64.0.0/24', gateway: '10.64.0.1', range: '10.64.0.10-10.64.0.250' } },
+      status: { links: [], allocated: 8, free: 233, orphans: [], conditions: [] },
     },
     {
-      metadata: meta('stg'), spec: { bridge: 'jo4', ipv4: { subnet: '10.60.0.0/28', gateway: '10.60.0.1', range: '10.60.0.2-10.60.0.13' } },
-      status: { bridge_up: true, members: [], allocated: 1, free: 12, orphans: [], conditions: [] },
+      metadata: meta('stg'), spec: { ipv4: { subnet: '10.60.0.0/28', gateway: '10.60.0.1', range: '10.60.0.2-10.60.0.13' } },
+      status: { links: [], allocated: 1, free: 12, orphans: [], conditions: [] },
     },
   ]
 }
@@ -225,7 +225,19 @@ export function backups(): Backup[] {
     },
     status: { bytes, new_bytes: newBytes, chunks: Math.round(newBytes / 1048576) + 3, files: 120000, verified: true, verified_at: ago(Math.max(60, age - 600)), ...st },
   })
+  // a volume is a backup of its own, taken once however many jails attach it
+  const vol = (name: string, snap: string, age: number, bytes: number, newBytes: number, spec: Volume['spec'], full = false): Backup => ({
+    metadata: { name: `${name}-${snap}`, scope: 'host', created_at: ago(age) },
+    spec: {
+      kind: 'volume', volume: spec, jail: name, jail_uuid: '5c9e-' + name, host_uuid: '6a1f0c52-2f0e-4f0b-8a5c-0123456789ab', policy: name === 'content' ? 'nightly' : 'db-hourly', target: 'vault',
+      snapshot: snap, zfs_snapshot: `tank/jailops/projects/web/volumes/${name}@jo-${snap.slice(0, 8)}`, key_domain: 'kd-7f3a91', full,
+      bundle: { spec: {} as Jail['spec'], image_generation: '', image_manifest: '' },
+    },
+    status: { bytes, new_bytes: newBytes, chunks: Math.round(newBytes / 1048576) + 3, files: 4000, verified: true, verified_at: ago(Math.max(60, age - 600)) },
+  })
   return [
+    vol('content', '20261020021500-e1f2a3b4', 86400, 3.2 * GiB, 120 * MiB, { storage: 'default', size: '10G', uid: 80, gid: 80, mode: '0755' }),
+    vol('pgdata', '20261021120000-f5a6b7c8', 3600, 61 * GiB, 1.8 * GiB, { storage: 'default', size: '200G', uid: 770, gid: 770, mode: '0700' }),
     mk('web', '20261017021500-a91c03de', 86400 * 4, 9.2 * GiB, 9.2 * GiB, { protected: true }, true),
     mk('web', '20261018021500-b27d11f0', 86400 * 3, 9.3 * GiB, 410 * MiB),
     mk('web', '20261019021500-c4410aa2', 86400 * 2, 9.3 * GiB, 388 * MiB),
@@ -281,5 +293,33 @@ export function certificates(): Certificate[] {
   return [
     { metadata: { ...meta('hub-client'), scope: 'fleet' }, spec: { fingerprint: 'SHA256:5c:11:90:de:ad:be:ef:00:11:22:33:44', permission: 'admin', kind: 'host' } },
     { metadata: { ...meta('vault-pull'), scope: 'fleet' }, spec: { fingerprint: 'SHA256:3b:9f:aa:01:c2:77:de:90:11:5e:42:ab', permission: 'backup-pull', kind: 'backup' } },
+  ]
+}
+
+/** A volume that is a directory of the host: no dataset, the mount is watched. */
+function hostDir(name: string, path: string, o: { watch?: boolean; probe?: string; on_loss?: string; lost?: boolean; comment?: string }): Volume {
+  return {
+    metadata: { ...meta(name, 86400 * 10), project: 'web' },
+    spec: { uid: 0, gid: 0, path, watch: o.watch, probe: o.watch ? (o.probe ?? 'mounted') : undefined, on_loss: o.watch ? (o.on_loss ?? 'none') : undefined, comment: o.comment },
+    status: { mountpoint: path, used: 0, state: o.lost ? 'lost' : 'ok', ...(o.lost ? { detail: 'the directory is not on a mount' } : {}) },
+  }
+}
+
+/** The volumes of the project web: most are attached to a jail; `archive` is not, `secrets` is encrypted and locked. */
+export function volumes(): Volume[] {
+  const v = (name: string, o: { size?: string; used: number; uid?: number; gid?: number; mode?: string; comment?: string; encrypted?: boolean; locked?: boolean }): Volume => ({
+    metadata: { ...meta(name, 86400 * 30), project: 'web' },
+    spec: { storage: 'default', size: o.size, uid: o.uid ?? 0, gid: o.gid ?? 0, mode: o.mode ?? '0755', encrypted: o.encrypted, comment: o.comment },
+    status: { dataset: `tank/jailops/projects/web/volumes/${name}`, mountpoint: `/jailops/projects/web/volumes/${name}`, used: o.used, locked: o.locked },
+  })
+  return [
+    v('content', { size: '10G', used: 3.2 * GiB, uid: 80, gid: 80, mode: '0755', comment: 'the pages of the site' }),
+    v('pgdata', { size: '200G', used: 61 * GiB, uid: 770, gid: 770, mode: '0700', comment: 'the PostgreSQL cluster' }),
+    v('wal', { size: '40G', used: 6.4 * GiB, uid: 770, gid: 770, mode: '0700' }),
+    v('spool', { size: '50G', used: 1.1 * GiB, uid: 125, gid: 125, mode: '0750' }),
+    v('secrets', { size: '5G', used: 0.2 * GiB, uid: 0, gid: 0, mode: '0700', encrypted: true, locked: true, comment: 'keys of the vault' }),
+    v('archive', { used: 420 * GiB, uid: 1001, gid: 1001, mode: '0775', comment: 'old exports, kept for the auditors' }),
+    hostDir('storagebox', '/mnt/storagebox/backups', { watch: true, probe: 'write', on_loss: 'stop', comment: 'the storage box, mounted from the provider' }),
+    hostDir('office-nas', '/mnt/office-nas/share', { watch: true, lost: true, comment: 'the share of the office' }),
   ]
 }

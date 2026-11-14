@@ -6,8 +6,8 @@ nginx in front of an app in front of PostgreSQL, on one host, with **encrypted b
 
 - The jails sit on one network of one project (`shop`). Each has its own firewall policy, so nginx accepts web traffic
   from anywhere, the app accepts port 8080 only from nginx and PostgreSQL accepts port 5432 only from the app.
-- PostgreSQL's data is a **volume** (`data` at `/var/db/postgres`, a quota of 50G): its own dataset, snapshotted and backed up
-  with the jail and untouched when the OS root is replaced by an image update.
+- PostgreSQL's data is a **volume** (`postgres-data` at `/var/db/postgres`, a quota of 50G, owned by uid 770): a dataset of the
+  project with its own snapshots, untouched when the OS root is replaced by an image update and still there when the jail is deleted.
 - `DB_PASSWORD` and `POSTGRES_PASSWORD` are `secret:db.password`, a value of `shared/secrets.sops.yaml` (SOPS + age). Sync
   decrypts it in memory when it applies, seals it to the host's own age key and sends it sealed; the repository holds only
   ciphertext and the API never returns it.

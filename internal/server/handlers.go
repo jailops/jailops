@@ -30,13 +30,12 @@ func (s *Server) jailRoutes() []route {
 	}.routes()
 	jr = append(jr,
 		route{method: "POST", pattern: "/api/v1/jails", h: func(c *rc) error {
-			// a Jail, with the passphrase of its encrypted volumes when it has some (api.JailCreate)
-			var j api.JailCreate
+			var j api.Jail
 			if err := c.decode(&j); err != nil {
 				return err
 			}
 			c.object = "/api/v1/jails/" + j.Metadata.Name
-			op, err := svc.CreateJailWith(c.r.Context(), j)
+			op, err := svc.CreateJail(c.r.Context(), j)
 			if err != nil {
 				return err
 			}
@@ -129,33 +128,31 @@ func (s *Server) jailRoutes() []route {
 			c.async(op)
 			return nil
 		}},
-		// encrypted volumes (volume_unlock): the passphrase is in the body and nowhere else
-		route{method: "POST", pattern: "/api/v1/jails/{name}/unlock", h: func(c *rc) error {
-			var u api.JailUnlock
-			if err := c.decode(&u); err != nil {
+		// the volumes a jail attaches (volumes.go has the volumes themselves)
+		route{method: "GET", pattern: "/api/v1/jails/{name}/volumes", h: func(c *rc) error {
+			v, err := svc.ListJailVolumes(c.r.Context(), c.pathArg("name"))
+			if err != nil {
 				return err
 			}
-			op, err := svc.UnlockJail(c.r.Context(), c.pathArg("name"), u)
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/volumes", h: func(c *rc) error {
+			var req api.VolumeAttachRequest
+			if err := c.decode(&req); err != nil {
+				return err
+			}
+			c.object = "/api/v1/jails/" + c.pathArg("name")
+			op, err := svc.AttachVolume(c.r.Context(), c.pathArg("name"), req)
 			if err != nil {
 				return err
 			}
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/api/v1/jails/{name}/lock", h: func(c *rc) error {
-			op, err := svc.LockJail(c.r.Context(), c.pathArg("name"))
-			if err != nil {
-				return err
-			}
-			c.async(op)
-			return nil
-		}},
-		route{method: "POST", pattern: "/api/v1/jails/{name}/passphrase", h: func(c *rc) error {
-			var pc api.JailPassphraseChange
-			if err := c.decode(&pc); err != nil {
-				return err
-			}
-			op, err := svc.ChangeJailPassphrase(c.r.Context(), c.pathArg("name"), pc)
+		route{method: "DELETE", pattern: "/api/v1/jails/{name}/volumes/{volume}", h: func(c *rc) error {
+			c.object = "/api/v1/jails/" + c.pathArg("name")
+			op, err := svc.DetachVolume(c.r.Context(), c.pathArg("name"), c.pathArg("volume"))
 			if err != nil {
 				return err
 			}

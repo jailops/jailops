@@ -2,7 +2,6 @@ package ifconfig
 
 import (
 	"context"
-	"net"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -103,69 +102,6 @@ func (c *Command) own(ctx context.Context, names ...string) error {
 	return nil
 }
 
-// BridgeCreate creates a bridge: `ifconfig bridge create` returns a kernel-chosen name; the new bridge is given the
-// marker and then renamed to name. The rename is the kernel's atomic check that name is free: an interface that
-// exists under it is never touched, and the new bridge is destroyed again (api.CodeAlreadyExists). So no interface
-// ever has the name without the marker, and none is taken over by its name. Verified on FreeBSD 15.2-PRERELEASE amd64:
-// the description survives the rename, and a rename to a name that exists fails with "File exists".
-func (c *Command) BridgeCreate(ctx context.Context, name string) error {
-	if err := CheckNewName(name); err != nil {
-		return err
-	}
-	out, err := c.run(ctx, "ifconfig", "bridge", "create")
-	if err != nil {
-		return err
-	}
-	tmp := strings.TrimSpace(out)
-	if !strings.HasPrefix(tmp, "bridge") || ValidateIfName(tmp) != nil {
-		return api.Errorf(api.CodeInternal, "ifconfig bridge create returned %q", tmp)
-	}
-	if _, err := c.run(ctx, "ifconfig", tmp, "description", Marker); err != nil {
-		c.run(ctx, "ifconfig", tmp, "destroy") // best effort cleanup
-		return err
-	}
-	if _, err := c.run(ctx, "ifconfig", tmp, "name", name); err != nil {
-		c.run(ctx, "ifconfig", tmp, "destroy") // best effort cleanup
-		return err
-	}
-	return nil
-}
-
-// BridgeDestroy implements Client.
-func (c *Command) BridgeDestroy(ctx context.Context, name string) error {
-	if err := c.own(ctx, name); err != nil {
-		return err
-	}
-	_, err := c.run(ctx, "ifconfig", name, "destroy")
-	return err
-}
-
-// BridgeAddMember implements Client: `addm member [private member]`. Both must be JailOps's: the uplink or another
-// interface of the host is never made a port of a bridge.
-func (c *Command) BridgeAddMember(ctx context.Context, bridge, member string, private bool) error {
-	if err := c.own(ctx, bridge, member); err != nil {
-		return err
-	}
-	args := []string{bridge, "addm", member}
-	if private {
-		args = append(args, "private", member)
-	}
-	_, err := c.run(ctx, "ifconfig", args...)
-	return err
-}
-
-// BridgeDeleteMember implements Client.
-func (c *Command) BridgeDeleteMember(ctx context.Context, bridge, member string) error {
-	if err := c.own(ctx, bridge); err != nil {
-		return err
-	}
-	if err := ValidateIfName(member); err != nil {
-		return err
-	}
-	_, err := c.run(ctx, "ifconfig", bridge, "deletem", member)
-	return err
-}
-
 // SetDescription implements Client. The description must be one JailOps writes, so the interface keeps its marker;
 // an empty description writes Marker.
 func (c *Command) SetDescription(ctx context.Context, iface, desc string) error {
@@ -184,8 +120,9 @@ func (c *Command) SetDescription(ctx context.Context, iface, desc string) error 
 }
 
 // EpairCreate implements Client: `ifconfig epair create` prints "epairNa"; both ends are given the marker and then
-// renamed to <name>a and <name>b (the kernel refuses a name that exists, see BridgeCreate). On failure the pair is
-// destroyed. Verified on FreeBSD 15.2-PRERELEASE amd64, the descriptions included (they also survive the move of an
+// renamed to <name>a and <name>b (the kernel refuses a name that exists: an interface that exists under it is never
+// touched, and the new pair is destroyed again; so no interface ever has the name without the marker, and none is taken
+// over by its name). On failure the pair is destroyed. Verified on FreeBSD 15.2-PRERELEASE amd64, the descriptions included (they also survive the move of an
 // end into a vnet and back).
 func (c *Command) EpairCreate(ctx context.Context, name string) (string, string, error) {
 	a, b := name+"a", name+"b"
@@ -312,7 +249,7 @@ func (c *Command) AddrRemove(ctx context.Context, iface string, p netip.Prefix) 
 
 // RouteAdd implements Client.
 func (c *Command) RouteAdd(ctx context.Context, r Route) error {
-	a, err := c.routeArgs(ctx, r)
+	a, err := c.routeArgs(ctx, r, false)
 	if err != nil {
 		return err
 	}
@@ -322,8 +259,8 @@ func (c *Command) RouteAdd(ctx context.Context, r Route) error {
 }
 
 // routeArgs validates r and checks that JailOps owns its interface, if it names one.
-func (c *Command) routeArgs(ctx context.Context, r Route) ([]string, error) {
-	a, err := routeArgs(r)
+func (c *Command) routeArgs(ctx context.Context, r Route, del bool) ([]string, error) {
+	a, err := routeArgs(r, del)
 	if err != nil {
 		return nil, err
 	}
@@ -349,63 +286,12 @@ func (c *Command) forgetNeighbor(ctx context.Context, r Route) {
 
 // RouteDelete implements Client.
 func (c *Command) RouteDelete(ctx context.Context, r Route) error {
-	a, err := c.routeArgs(ctx, r)
+	a, err := c.routeArgs(ctx, r, true)
 	if err != nil {
 		return err
 	}
 	_, err = c.run(ctx, "route", append([]string{"-n", "delete"}, a...)...)
 	c.forgetNeighbor(ctx, r)
-	return err
-}
-
-// neighborArg is the address as ndp(8) wants it: a link-local address carries its interface.
-func neighborArg(iface string, a netip.Addr) string {
-	if a.IsLinkLocalUnicast() {
-		return a.String() + "%" + iface
-	}
-	return a.String()
-}
-
-func (c *Command) neighborCheck(ctx context.Context, iface string, a netip.Addr) error {
-	if err := ValidateIfName(iface); err != nil {
-		return err
-	}
-	if !a.IsValid() || a.Is4In6() || a.Zone() != "" || a.IsUnspecified() || a.IsMulticast() || a.IsLoopback() {
-		return api.Errorf(api.CodeInvalid, "%s is not a unicast address", a)
-	}
-	return c.own(ctx, iface)
-}
-
-// neighborCmd returns the tool, its delete arguments and its set arguments for an address: arp(8) for IPv4, ndp(8)
-// for IPv6.
-func neighborCmd(iface string, a netip.Addr, mac string) (tool string, del, set []string) {
-	if a.Is4() {
-		return "arp", []string{"-d", a.String()}, []string{"-s", a.String(), mac}
-	}
-	return "ndp", []string{"-d", neighborArg(iface, a)}, []string{"-s", neighborArg(iface, a), mac}
-}
-
-// NeighborSet implements Client with `arp -s` or `ndp -s`, after a delete: an entry that is there is replaced, never kept.
-func (c *Command) NeighborSet(ctx context.Context, iface string, a netip.Addr, mac string) error {
-	if hw, err := net.ParseMAC(mac); err != nil || len(hw) != 6 {
-		return api.Errorf(api.CodeInvalid, "%q is not an Ethernet address", mac)
-	}
-	if err := c.neighborCheck(ctx, iface, a); err != nil {
-		return err
-	}
-	tool, del, set := neighborCmd(iface, a, mac)
-	_, _ = c.run(ctx, tool, del...)
-	_, err := c.run(ctx, tool, set...)
-	return err
-}
-
-// NeighborDelete implements Client with `arp -d` or `ndp -d`.
-func (c *Command) NeighborDelete(ctx context.Context, iface string, a netip.Addr) error {
-	if err := c.neighborCheck(ctx, iface, a); err != nil {
-		return err
-	}
-	tool, del, _ := neighborCmd(iface, a, "")
-	_, err := c.run(ctx, tool, del...)
 	return err
 }
 

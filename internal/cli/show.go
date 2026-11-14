@@ -185,13 +185,6 @@ func (a *app) showPolicy(p api.FirewallPolicy) error {
 func (a *app) showNetwork(n api.Network) error {
 	s := showWriter{w: a.env.Stdout, width: 11}
 	s.title("Network %s", n.Metadata.Name)
-	bridge := orText(n.Spec.Bridge, "generated")
-	if n.Status.BridgeUp {
-		bridge += " (up)"
-	} else {
-		bridge += " (down)"
-	}
-	s.kv("Bridge", bridge)
 	s.kv("Uplink", orText(n.Spec.Uplink, "none"))
 	if v4 := n.Spec.IPv4; v4 != nil {
 		line := v4.Subnet + ", gateway " + v4.Gateway
@@ -208,7 +201,7 @@ func (a *app) showNetwork(n api.Network) error {
 		s.kv("IPv4", "none")
 	}
 	if v6 := n.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
-		s.kv("IPv6", fmt.Sprintf("%s (%s), gateway %s", v6.Subnet, v6.Mode, v6.Gateway))
+		s.kv("IPv6", fmt.Sprintf("%s (%s), gateway fe80::1", v6.Subnet, v6.Mode))
 		rng := v6.Range
 		if len(v6.Exclude) > 0 {
 			rng += " (except " + strings.Join(v6.Exclude, ", ") + ")"
@@ -238,8 +231,8 @@ func (a *app) showNetwork(n api.Network) error {
 		s.kv("MTU", strconv.Itoa(n.Spec.MTU))
 	}
 	s.kv("Addresses", fmt.Sprintf("%d used, %d free", n.Status.Allocated, n.Status.Free))
-	if len(n.Status.Members) > 0 {
-		s.kv("Members", strings.Join(n.Status.Members, ", "))
+	if len(n.Status.Links) > 0 {
+		s.kv("Links", strings.Join(n.Status.Links, ", ")+" (the host ends of the running jails' interfaces)")
 	}
 	if len(n.Status.Orphans) > 0 {
 		s.kv("Orphans", strings.Join(n.Status.Orphans, ", ")+" (interfaces without a jail)")

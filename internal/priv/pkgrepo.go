@@ -9,14 +9,14 @@ import (
 )
 
 var (
-	rePkgURL     = regexp.MustCompile(`^(pkg\+)?https?://[A-Za-z0-9._~:/?&=%+@${}-]{1,300}$`)
 	rePkgKeyLine = regexp.MustCompile(`^\s*([a-z_]+)\s*:\s*(?:"([^"\n]*)"|([A-Za-z0-9_]+))\s*,?\s*$`)
 )
 
 // verifyPkg checks, when pkg is pointed at a repository directory with -o REPOS_DIR, that the repository
-// configuration there is one JailOps writes: a signed repository with a plain http(s) URL. The directory is
-// written by the daemon (through the helper), and pkg runs as root, so a repository without a signature check, or
-// with an odd URL scheme, would let the daemon install what it likes into a jail root as root.
+// configuration there is one JailOps writes: a repository on a host root listed (fetch-host), checked against a key
+// directory that root provides (the base system's, or pkg-keys-dir). The directory is written by the daemon
+// (through the helper) and pkg runs install scripts as root, so a repository, or a key, that the daemon chose would
+// let it run what it likes as root.
 func verifyPkg(_ context.Context, l *Local, args []string) error {
 	for i, a := range args {
 		if a != "-o" || i+1 >= len(args) {
@@ -82,17 +82,14 @@ func (l *Local) checkRepoConf(name, body string) error {
 		}
 		seen[m[1]] = v
 	}
-	if !rePkgURL.MatchString(seen["url"]) {
-		return forbidden("pkg repository %s: url %q is not an http(s) URL", name, seen["url"])
+	if err := l.cfg.checkPkgURL(seen["url"]); err != nil {
+		return forbidden("pkg repository %s: %v", name, err)
 	}
 	if seen["signature_type"] != "fingerprints" {
 		return forbidden("pkg repository %s: the repository must be verified by fingerprints", name)
 	}
-	fp := seen["fingerprints"]
-	if strings.HasPrefix(fp, "/usr/share/keys/") && !strings.Contains(fp, "..") {
-		// the keys the base system ships
-	} else if err := l.cfg.checkRulePath(pathState, fp); err != nil {
-		return forbidden("pkg repository %s: fingerprints %q: %v", name, seen["fingerprints"], err)
+	if err := l.cfg.checkPkgKeys(seen["fingerprints"]); err != nil {
+		return forbidden("pkg repository %s: %v", name, err)
 	}
 	for k := range seen {
 		switch k {

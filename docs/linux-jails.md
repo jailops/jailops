@@ -58,7 +58,8 @@ For Debian only:
   the helper's `debootstrap` rule refuses anything else (debootstrap itself only warns about a missing signature and goes on).
   The Alpine rootfs is checked against its published (or pinned) sha256.
 - The image's base is built with the helper (`debootstrap` runs with a fixed environment so that it finds its tools). Only the
-  hosts in `fetch-host` of `priv.conf` can be downloaded from.
+  hosts in `fetch-host` of `priv.conf` can be downloaded from, and the keyring that checks the release is a file in `keyring-dir`
+  (default `/usr/local/share/keyrings`) that root owns.
 - Linux jails default to the **thick** layout (a full copy of the generation); copying it into the jail runs inside the helper
   (`zfs.replicate`), 140 MB in about 2 seconds.
 

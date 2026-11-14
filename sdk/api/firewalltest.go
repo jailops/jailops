@@ -54,9 +54,8 @@ type FirewallTestHop struct {
 	Jail string `json:"jail"`
 	// Anchor is the pf anchor of the jail.
 	Anchor string `json:"anchor"`
-	// Interface is epair (the jail's own port) or gateway (the gateway interface of its network).
-	Interface string `json:"interface"`
-	// Direction is the pf direction at that interface: in or out.
+	// Direction is the pf direction on the host end of the jail's link: in (what the jail sends) or out (what leaves
+	// the host for the jail).
 	Direction string `json:"direction"`
 	Verdict   string `json:"verdict"`
 	// DecidedBy is the rule that decided; empty when the verdict is unknown.

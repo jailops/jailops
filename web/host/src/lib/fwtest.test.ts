@@ -99,9 +99,9 @@ const answer: FirewallTestResult = {
   cases: [{
     family: 'inet', from: '10.20.0.11', to: '10.20.0.12', proto: 'tcp', port: 5433, verdict: 'block',
     hops: [
-      { side: 'source', jail: 'web', anchor: 'jailops/main/web', interface: 'epair', direction: 'in', verdict: 'pass', decided_by: { stage: 'default', pf: 'pass in quick all' } },
+      { side: 'source', jail: 'web', anchor: 'jailops/main/web', direction: 'in', verdict: 'pass', decided_by: { stage: 'default', pf: 'pass in quick all' } },
       {
-        side: 'destination', jail: 'db', anchor: 'jailops/main/db', interface: 'gateway', direction: 'out', verdict: 'block',
+        side: 'destination', jail: 'db', anchor: 'jailops/main/db', direction: 'out', verdict: 'block',
         decided_by: { stage: 'policy', policy: 'no-scan', rule: 2, name: 'scanner', comment: 'a scanner', pf: 'block drop out quick' },
         skipped: [{ rule: { stage: 'policy', policy: 'postgres', rule: 1, pf: 'pass out quick' }, why: 'a deny rule wins over every allow rule' }],
         loaded_matches_rendered: 'false',
@@ -116,7 +116,7 @@ describe('the flow of a result', () => {
     expect(c.family).toBe('4')
     expect(c.verdict).toBe('block')
     expect(c.stopped).toBe(true)
-    expect(c.hops.map((h) => [h.side, h.at, h.verdict])).toEqual([['source', 'epair', 'pass'], ['destination', 'gateway', 'block']])
+    expect(c.hops.map((h) => [h.side, h.direction, h.verdict])).toEqual([['source', 'in', 'pass'], ['destination', 'out', 'block']])
     expect(packetOf(c)).toBe('tcp port 5433')
   })
   it('keeps what a reviewer looks for: the rule, the rules passed over, the drift', () => {

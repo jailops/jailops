@@ -448,6 +448,16 @@ func (c *Client) MkdirAll(ctx context.Context, q MkdirReq) error {
 	return callNone(ctx, c, OpFSMkdir, q)
 }
 
+// SetVolumeOwner implements Host.
+func (c *Client) SetVolumeOwner(ctx context.Context, q VolumeOwnerReq) error {
+	return callNone(ctx, c, OpFSVolOwner, q)
+}
+
+// ProbeSource implements Host.
+func (c *Client) ProbeSource(ctx context.Context, q SourceProbeReq) (SourceProbe, error) {
+	return callJSON[SourceProbe](ctx, c, OpFSSourceProbe, q, callOpts{})
+}
+
 // Remove implements Host.
 func (c *Client) Remove(ctx context.Context, path string) error {
 	return callNone(ctx, c, OpFSRemove, RemoveReq{Path: path})

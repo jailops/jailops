@@ -25,7 +25,8 @@ func TestBootPlan(t *testing.T) {
 	if err := os.WriteFile(file, []byte("a long enough passphrase\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	create("vault", "--autostart", "--volume", "db:/srv/db:encrypted", "--passphrase-file", file)
+	tr.ok("volume", "create", "secrets", "--encrypted", "--passphrase-file", file)
+	create("vault", "--autostart", "--volume", "secrets:/srv/db")
 	create("report", "--autostart", "--depends", "vault")
 	tr.ok("boot")
 	tr.ok("boot", "-o", "json")

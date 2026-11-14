@@ -251,7 +251,7 @@ func PlanBoot(jails []BootJail) BootPlan {
 			skip(k, fmt.Sprintf("depends on %s, %s", name(blocked), why))
 		case j.Encrypted:
 			failed[k] = "locked"
-			skip(k, "waits for the passphrase of an encrypted volume (jailops jail unlock "+j.Name+"), then starts")
+			skip(k, "waits for the passphrase of an encrypted volume (jailops volume unlock VOLUME), then starts")
 		default:
 			reason := "autostart"
 			if !j.Boot.Autostart {

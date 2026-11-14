@@ -17,6 +17,7 @@ type applier func(ctx context.Context, doc map[string]any) error
 func (a *app) appliers() map[api.Kind]applier {
 	return map[api.Kind]applier{
 		api.KindJail:           applyWith(a, a.jailDesc()),
+		api.KindVolume:         applyWith(a, volumeDesc()),
 		api.KindImage:          applyWith(a, imageDesc()),
 		api.KindNetwork:        applyWith(a, networkDesc()),
 		api.KindProject:        applyWith(a, a.projectDesc()),
@@ -32,7 +33,7 @@ func (a *app) appliers() map[api.Kind]applier {
 }
 
 // projectKinds are the kinds that live in a project.
-var projectKinds = map[api.Kind]bool{api.KindJail: true, api.KindFirewallPolicy: true, api.KindAddressSet: true, api.KindBackupPolicy: true, api.KindProfile: true}
+var projectKinds = map[api.Kind]bool{api.KindJail: true, api.KindVolume: true, api.KindFirewallPolicy: true, api.KindAddressSet: true, api.KindBackupPolicy: true, api.KindProfile: true}
 
 // applyWith is the applier of one kind: create the object when it is new,
 // update it when the document differs, leave it alone otherwise.

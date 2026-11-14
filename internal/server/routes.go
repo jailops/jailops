@@ -27,9 +27,6 @@ var unsupportedRoutes = []struct{ method, pattern, what string }{
 	{"PUT", "/api/v1/jails/{name}/files/{path...}", "file access"},
 	{"POST", "/api/v1/jails/{name}/move", "cold moves"},
 	{"POST", "/api/v1/jails/{name}/snapshots/{snapshot}", "snapshot rename"},
-	{"GET", "/api/v1/jails/{name}/volumes", "volume management"},
-	{"POST", "/api/v1/jails/{name}/volumes", "volume management"},
-	{"DELETE", "/api/v1/jails/{name}/volumes/{volume}", "volume management"},
 	{"GET", "/api/v1/jails/{name}/bundle", "bundle download"},
 	{"GET", "/api/v1/jail-templates", "jail templates"},
 	{"POST", "/api/v1/jail-templates", "jail templates"},
@@ -312,6 +309,7 @@ func (s *Server) routeTable() []route {
 	)
 
 	add(s.jailRoutes()...)
+	add(s.volumeRoutes()...)
 	add(s.logRoutes()...)
 	add(s.bootRoutes()...)
 	add(s.firewallTestRoutes()...)

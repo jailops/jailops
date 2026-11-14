@@ -154,7 +154,7 @@ The administrator either applies again (the file is rewritten, after a snapshot)
 the next apply will show it in the diff.
 
 A module may later offer an explicit `reconcile: true` setting that makes the daemon re-apply on drift, the way it
-asserts the bridge sysctls today. That is opt-in per module and documented with the module; module 1 does not offer it.
+asserts the forwarding sysctls today. That is opt-in per module and documented with the module; module 1 does not offer it.
 
 ## Common mechanics of every module
 

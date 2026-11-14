@@ -3,7 +3,7 @@
 import { getClient } from '@jailops/shared/api/client'
 import { core } from '@jailops/shared/api/core'
 import type {
-  Jail, JailAction, JailCreate, JailUnlock, JailPassphraseChange, JailRollback, JailUpgrade, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
+  Jail, JailAction, JailRollback, JailUpgrade, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, FirewallTestRequest, FirewallTestResult, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, Token,
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
@@ -17,6 +17,7 @@ import type {
   LogsRead, LogForward, LogForwardSpec, LogForwardTestResult,
   HostCertificate, HostCertificateUpload, ACMESpec, SetupStatus, SetupRequest, SetupResult,
   Rename, RenameResult,
+  Volume, VolumeCreate, VolumeUnlock, VolumePassphraseChange, VolumeSnapshot, VolumeRollback, VolumeAttachRequest,
 } from '@jailops/shared/api/types'
 import type { SnapshotBody, ExecSessionInfo, ConfigResult } from '../types'
 import { logQuery, type LogQuery } from '@/lib/logs'
@@ -37,20 +38,39 @@ export const api = {
     /** The current project's jails, or those of another project named here (the Logs page of all projects). */
     list: (project?: string) => c().list<Jail>(project ? `/jails?project=${e(project)}` : '/jails'),
     get: (n: string) => c().get<Jail>(`/jails/${e(n)}`),
-    create: (j: Pick<Jail, 'metadata' | 'spec'> | JailCreate) => c().mutate('POST', '/jails', j),
-    // encrypted volumes (volume_unlock): the passphrase is in the body only
-    unlock: (n: string, b: JailUnlock) => c().mutate<Jail>('POST', `/jails/${e(n)}/unlock`, b),
-    lock: (n: string) => c().mutate<Jail>('POST', `/jails/${e(n)}/lock`),
-    passphrase: (n: string, b: JailPassphraseChange) => c().mutate<Jail>('POST', `/jails/${e(n)}/passphrase`, b),
+    create: (j: Pick<Jail, 'metadata' | 'spec'>) => c().mutate('POST', '/jails', j),
+    /** Extension volumes: attach a volume of the project to the stopped jail (async, result the jail). */
+    attach: (n: string, b: VolumeAttachRequest) => c().mutate<Jail>('POST', `/jails/${e(n)}/volumes`, b),
+    /** The volume and its files stay. */
+    detach: (n: string, volume: string) => c().mutate<Jail>('DELETE', `/jails/${e(n)}/volumes/${e(volume)}`),
     action: (n: string, a: JailAction) => c().mutate('PUT', `/jails/${e(n)}/state`, a),
     /** A merge patch of the labels only (admin in the project): a value sets a key, null removes it, the rest stays. */
     patchLabels: (n: string, labels: Record<string, string | null>) => c().mutate<Jail>('PATCH', `/jails/${e(n)}`, { metadata: { labels } }),
-    /** Async: the jail, its volumes and their snapshots are destroyed (an installed app is uninstalled this way). */
+    /** Async: the jail and its snapshots are destroyed; the volumes it attached stay (an installed app is uninstalled this way). */
     remove: (n: string) => c().mutate('DELETE', `/jails/${e(n)}`),
     snapshots: (n: string) => c().list<JailSnapshot>(`/jails/${e(n)}/snapshots`),
     snapshot: (n: string, b: SnapshotBody) => c().mutate('POST', `/jails/${e(n)}/snapshots`, b),
     rollback: (n: string, r: JailRollback) => c().mutate('POST', `/jails/${e(n)}/rollback`, r),
     upgrade: (n: string, r: JailUpgrade) => c().mutate('POST', `/jails/${e(n)}/upgrade`, r),
+  },
+  /** Extension volumes: the volumes of the current project; jails attach them by name. */
+  volumes: {
+    list: () => c().list<Volume>('/volumes'),
+    get: (n: string) => c().get<Volume>(`/volumes/${e(n)}`),
+    /** The passphrase of an encrypted volume is in the body of the creation only. */
+    create: (b: VolumeCreate) => c().mutate<Volume>('POST', '/volumes', b),
+    /** Labels, comment and size; the owner, the mode and the storage are fixed at creation. */
+    put: (v: Volume, etag?: string) => c().mutate<Volume>('PUT', `/volumes/${e(v.metadata.name)}`, v, { etag }),
+    /** Async: the files and the snapshots are destroyed; a volume a jail attaches is refused (busy). */
+    remove: (n: string) => c().mutate('DELETE', `/volumes/${e(n)}`),
+    // encrypted volumes: the passphrase is in the body only
+    unlock: (n: string, b: VolumeUnlock) => c().mutate<Volume>('POST', `/volumes/${e(n)}/unlock`, b),
+    lock: (n: string) => c().mutate<Volume>('POST', `/volumes/${e(n)}/lock`),
+    passphrase: (n: string, b: VolumePassphraseChange) => c().mutate<Volume>('POST', `/volumes/${e(n)}/passphrase`, b),
+    snapshots: (n: string) => c().list<VolumeSnapshot>(`/volumes/${e(n)}/snapshots`),
+    snapshot: (n: string, b: { metadata: { name?: string }; spec: { volume: string; comment?: string } }) => c().mutate('POST', `/volumes/${e(n)}/snapshots`, b),
+    removeSnapshot: (n: string, snap: string) => c().mutate('DELETE', `/volumes/${e(n)}/snapshots/${e(snap)}`),
+    rollback: (n: string, b: VolumeRollback) => c().mutate<Volume>('POST', `/volumes/${e(n)}/rollback`, b),
   },
   apps: {
     /** Extension apps: the catalog is readable by any identity, it belongs to no project. */

@@ -77,7 +77,7 @@ func (s *Service) StopJail(ctx context.Context, name string) error {
 				if up, err := s.Jails.Running(ctx, name); err != nil || !up {
 					return err
 				}
-				return s.Jails.Stop(ctx, name)
+				return s.stopWithLostHostDirs(ctx, name)
 			}},
 		plan.Step{Name: "teardown", Describe: "remove runtime state of " + name,
 			Do: func(ctx context.Context) error { return s.Hooks.PostStop(ctx, name) }},
@@ -178,4 +178,44 @@ func (s *Service) DestroyJail(ctx context.Context, name string, force, dryRun bo
 		res.Warnings = append(res.Warnings, "collect parked generations: "+err.Error())
 	}
 	return res, nil
+}
+
+// stopWithLostHostDirs stops a jail. When the mount under a host directory was taken away by the system (a box that
+// failed is unmounted by force, and the nullfs mounts on it go with it), jail(8) cannot unmount the fstab line and
+// refuses to remove the jail: "<target>: not a mount point". Each target it names is given a small tmpfs, so that the
+// line has a mount to unmount, and the stop is tried again; the placeholders are removed again when the jail is gone.
+func (s *Service) stopWithLostHostDirs(ctx context.Context, name string) (err error) {
+	st, oerr := s.observe(ctx, name)
+	if oerr != nil {
+		return oerr
+	}
+	var placeholders []string
+	defer func() {
+		for _, target := range placeholders {
+			_, _ = s.Exec.Run(ctx, []string{"umount", "-f", target}) // gone with the jail's own unmount, or here
+		}
+	}()
+	err = s.Jails.Stop(ctx, name)
+	for range len(st.HostDirs) {
+		if err == nil || !strings.Contains(err.Error(), "not a mount point") {
+			return err
+		}
+		placed := false
+		for _, h := range st.HostDirs {
+			target := s.Cfg.at(name).rootMP() + h.Path
+			if !strings.Contains(err.Error(), target+": not a mount point") {
+				continue
+			}
+			if out, merr := s.Exec.Run(ctx, []string{"mount", "-t", "tmpfs", "-o", "size=1m", "tmpfs", target}); merr != nil {
+				return fmt.Errorf("%w (and a placeholder for %s: %v: %s)", err, target, merr, strings.TrimSpace(string(out)))
+			}
+			placeholders = append(placeholders, target)
+			placed = true
+		}
+		if !placed {
+			return err
+		}
+		err = s.Jails.Stop(ctx, name)
+	}
+	return err
 }

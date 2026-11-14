@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strings"
 
-	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
@@ -42,9 +41,8 @@ func JailAnchorFor(project, name string) string { return ProjectAnchor(project) 
 func ProjectAnchor(project string) string { return AnchorRoot + "/" + project }
 
 // ProjectAnchorRules returns the ruleset of a project's parent anchor: it
-// makes PF evaluate the jail anchors below it. UNVERIFIED on FreeBSD: that a
-// wildcard anchor rule inside "jailops/<project>" evaluates "jailops/<project>/*"
-// when the top level wildcard ("jailops/*") evaluates the project anchor.
+// makes PF evaluate the jail anchors below it: the wildcard anchor rule inside "jailops/<project>" evaluates
+// "jailops/<project>/*" when the top level wildcard ("jailops/*") evaluates the project anchor.
 func ProjectAnchorRules() string {
 	return "anchor \"*\"\n"
 }
@@ -59,6 +57,10 @@ func AnchorLines() string {
 	return "anchor \"jailops/*\"\n"
 }
 
+// HostTable is the table of the host's own addresses, which every anchor defines: the endpoint "host" of a rule, and the
+// destination the anchor closes to the jail unless a rule opens it.
+const HostTable = "host"
+
 // AllowedSourceTable is the per-jail table of source addresses the jail may
 // use (its own and fe80::/10). Every anchor defines the tables it uses.
 const AllowedSourceTable = "jail_addrs"
@@ -68,31 +70,27 @@ type PFInput struct {
 	Jail string
 	// MaxStates limits the states each pass rule of the jail may create (pf "keep state (max N)"); 0 sets no limit.
 	MaxStates int
-	// Shaping are the devices of the jail that have a bandwidth limit: the anchor sends what they send into a dummynet
-	// pipe with dnpipe on match rules, which every later pass rule of the anchor inherits.
+	// Shaping are the devices of the jail that have a bandwidth limit: the anchor sends what they send and what they
+	// receive into dummynet pipes with dnpipe on match rules, which every later pass rule of the anchor inherits.
 	Shaping []Shape
-	// Interfaces are the host-side epair ends of the jail. Rules are
-	// attached to them: direction "in" of a rule means traffic into the
-	// jail (PF "out" on the host-side end), "out" means traffic from the
-	// jail (PF "in"). Needs net.link.bridge.pfil_member=1 (verified on FreeBSD 15.1, design 18.9; the host pass
-	// asserts it).
+	// Interfaces are the host ends of the jail's epairs: each is the jail's own routed link, so everything the jail
+	// sends arrives on it and everything for the jail (from the host, from another jail, from the internet) leaves
+	// the host on it. Rules are attached to them: direction "in" of a rule means traffic into the jail (PF "out" on
+	// the host end), "out" means traffic from the jail (PF "in").
 	Interfaces []string
-	// Gateways are the gateway interfaces (the l3 end of the gateway pair) of the jail's networks. What the host
-	// sends to the jail, and what it routes to the jail from other networks, leaves the host on them, and on the
-	// jail's own port the pf hook never sees it: the rules for traffic into the jail stand on the gateway
-	// interface too, restricted to the jail's addresses. Verified on FreeBSD 15.1 (design section 5).
-	Gateways []string
 	// Addresses are the jail's own addresses. It must not be empty.
 	Addresses []netip.Addr
 	// LinkLocal are the jail's own link-local addresses (one per interface, formed by the kernel from the MAC
 	// JailOps sets: ipam.LinkLocalFromMAC). With them the jail may use only its own link-local addresses as the source
 	// of neighbour discovery and receive only its own; without them the whole of fe80::/10 is allowed.
 	LinkLocal []netip.Addr
-	// NoAdvertise forbids every neighbour advertisement from the jail. Every jail with an IPv6 address sets it: a jail
-	// holds its address as /128 in both IPv6 modes (design 18.13), reaches everything through the gateway, and the
-	// host holds a permanent neighbor entry for it (render.OpSetNeighbor), so nobody ever asks the jail for its
-	// address and it never has to answer. (There is no longer a jail that needs to advertise.)
-	NoAdvertise bool
+	// Host are the host's own addresses: the table <host> and the endpoint "host" of a rule. After the rules of the policies
+	// the anchor closes them to the jail, except ICMP and the DNS of DNS (a jail never reaches a service of the host that no
+	// rule names).
+	Host []netip.Addr
+	// DNS are the addresses of the host the jail's resolver asks (the network's gateway when the host resolves only
+	// through loopback): udp and tcp port 53 to them stay open.
+	DNS []netip.Addr
 	// Tags are the jail's own tags (rendered as a comment only).
 	Tags []string
 	// TagMembers maps a tag to the addresses of every jail that has it.
@@ -115,8 +113,6 @@ type PFInput struct {
 	// rule has a redirect.
 	Uplink string
 	// Antispoof adds an antispoof rule for the jail interfaces.
-	// UNVERIFIED: antispoof on bridge members, and its interaction with
-	// IPv6 proxy mode (acceptance test 4 of design section 5).
 	Antispoof bool
 	// AllowRaw must be set by the caller after checking the admin role; a
 	// raw fragment is otherwise refused.
@@ -165,8 +161,7 @@ func PFAnchor(in PFInput) (string, error) {
 // first-match (every typed rule is "quick"); defaults come last. Tables for
 // address sets and tags are defined inside the anchor so that one load is
 // atomic. The text and the rules are made by the same code, line by line, so a walk over Rules is a walk over what
-// is loaded. UNVERIFIED: acceptance by pfctl -n, mixed-family tables in
-// family-restricted rules.
+// is loaded.
 func BuildAnchor(in PFInput) (*Anchor, error) {
 	if err := validate.JailKey("jail", in.Jail); err != nil {
 		return nil, err
@@ -174,7 +169,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	if len(in.Interfaces) == 0 {
 		return nil, fmt.Errorf("render: pf anchor needs at least one interface")
 	}
-	for _, i := range append(append([]string(nil), in.Interfaces...), in.Gateways...) {
+	for _, i := range in.Interfaces {
 		if err := validate.IfName("interface", i); err != nil {
 			return nil, err
 		}
@@ -285,6 +280,8 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	for _, n := range sortedKeys(jailRefs) {
 		b.line("%s", tableLine("j_"+strings.ReplaceAll(n, "-", "_"), validate.CanonicalAddrs(in.Jails[n])))
 	}
+	b.line("# the host's own addresses (a jail reaches none of them unless a rule says so)")
+	b.line("%s", tableLine(HostTable, addrStrings(uniqAddrs(in.Host))))
 	for _, n := range sortedKeys(tagRefs) {
 		var members []string
 		for _, a := range uniqAddrs(in.TagMembers[n]) {
@@ -293,18 +290,18 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		b.line("%s", tableLine("t_"+strings.ReplaceAll(n, "-", "_"), members))
 	}
 
-	// Bandwidth limits (egress): what the jail sends arrives on its own port and is sent into the device's pipe; a flow
-	// that the host or the internet started is created on the gateway interface, where the rule gives its state the
-	// pipe for the answers of the jail (the pipe of the direction into the jail is 0: see dummynet.go).
+	// Bandwidth limits: what the jail sends arrives on its own link and goes into the egress pipe of the device; what is
+	// sent to the jail leaves the host on the same link and goes into the ingress pipe. The first number of dnpipe
+	// shapes the direction of the rule, the second the reverse direction of the same state, so a connection is shaped
+	// the same way whichever side opens it. The pipes are inherited by the pass rules that match the packets after
+	// these rules.
 	for _, sh := range in.Shaping {
-		if sh.Pipe == 0 || len(sh.Addrs) == 0 {
+		if sh.Egress == 0 && sh.Ingress == 0 {
 			continue
 		}
-		b.line("# bandwidth limit of %s: what the jail sends goes through pipe %d", sh.Iface, sh.Pipe)
-		b.line("match in on %s all dnpipe %d", sh.Iface, sh.Pipe)
-		if sh.Gateway != "" {
-			b.line("match out on %s from any to %s dnpipe (0, %d)", sh.Gateway, listStr(sh.Addrs), sh.Pipe)
-		}
+		b.line("# bandwidth limit of %s: what the jail sends goes through pipe %d, what it receives through pipe %d", sh.Iface, sh.Egress, sh.Ingress)
+		b.line("match in on %s all dnpipe (%d, %d)", sh.Iface, sh.Egress, sh.Ingress)
+		b.line("match out on %s all dnpipe (%d, %d)", sh.Iface, sh.Ingress, sh.Egress)
 	}
 
 	// Translation rules come before filter rules.
@@ -372,20 +369,20 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		return Match{Negate: neg, Prefixes: prefixesOf(jailMembers), Tables: []string{AllowedSourceTable}}
 	}
 	// icmp6 is a rule of the IPv6 control and neighbour stages: a filter rule on proto icmp6 with the given types
-	icmp6 := func(stage, act, dir, class string, from, to Match, types ...string) Rule {
-		return Rule{Action: act, Dir: dir, Class: class, Family: "inet6", Proto: "icmp6", ICMPTypes: types, From: from, To: to, Origin: Origin{Stage: stage}}
+	icmp6 := func(stage, act, dir string, from, to Match, types ...string) Rule {
+		return Rule{Action: act, Dir: dir, Family: "inet6", Proto: "icmp6", ICMPTypes: types, From: from, To: to, Origin: Origin{Stage: stage}}
 	}
 	if len(own6) > 0 {
 		// IPv6 control traffic. A jail is never a router: no router advertisement or redirect leaves it. The unspecified
 		// address :: cannot be a member of a table (pf accepts it and stores nothing), so duplicate address detection
 		// (a neighbour solicitation to a solicited-node group) has a rule of its own before the antispoof block.
-		b.rule(icmp6(StageIPv6Control, "block", "in", IfEpair, anyMatch(), anyMatch(), "routeradv", "redir"),
+		b.rule(icmp6(StageIPv6Control, "block", "in", anyMatch(), anyMatch(), "routeradv", "redir"),
 			"block in quick on %s inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }", ifs)
-		b.rule(icmp6(StageIPv6Control, "pass", "in", IfEpair, listMatch([]string{"::"}), listMatch([]string{"ff02::1:ff00:0/104"}), "neighbrsol"),
+		b.rule(icmp6(StageIPv6Control, "pass", "in", listMatch([]string{"::"}), listMatch([]string{"ff02::1:ff00:0/104"}), "neighbrsol"),
 			"pass in quick on %s inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol", ifs)
 	}
 	if in.Antispoof {
-		b.rule(Rule{Action: "block", Dir: "in", Class: IfEpair, From: jailTable(true), To: anyMatch(), Origin: Origin{Stage: StageAntispoof}},
+		b.rule(Rule{Action: "block", Dir: "in", From: jailTable(true), To: anyMatch(), Origin: Origin{Stage: StageAntispoof}},
 			"block in quick on %s from ! <%s> to any", ifs, AllowedSourceTable)
 	}
 	if len(own6) > 0 {
@@ -396,36 +393,29 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		// one network stay possible: see docs/networking-ipv6.md.
 		from6 := listStr(src6)
 		src6m := listMatch(src6)
-		if in.NoAdvertise {
-			b.rule(icmp6(StageNeighbour, "block", "in", IfEpair, anyMatch(), anyMatch(), "neighbradv"),
-				"block in quick on %s inet6 proto icmp6 from any to any icmp6-type neighbradv", ifs)
-			b.rule(icmp6(StageNeighbour, "pass", "in", IfEpair, src6m, anyMatch(), "neighbrsol"),
-				"pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type neighbrsol", ifs, from6)
-		} else {
-			b.rule(icmp6(StageNeighbour, "block", "in", IfEpair, anyMatch(), listMatch([]string{"ff02::/16"}), "neighbradv"),
-				"block in quick on %s inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv", ifs)
-			b.rule(icmp6(StageNeighbour, "pass", "in", IfEpair, src6m, anyMatch(), "neighbrsol", "neighbradv"),
-				"pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type { neighbrsol, neighbradv }", ifs, from6)
-		}
-		b.rule(icmp6(StageNeighbour, "pass", "in", IfEpair, src6m, listMatch([]string{"ff02::/16"}), "listenrep", "listendone", "143"),
+		b.rule(icmp6(StageNeighbour, "block", "in", anyMatch(), listMatch([]string{"ff02::/16"}), "neighbradv"),
+			"block in quick on %s inet6 proto icmp6 from any to ff02::/16 icmp6-type neighbradv", ifs)
+		b.rule(icmp6(StageNeighbour, "pass", "in", src6m, anyMatch(), "neighbrsol", "neighbradv"),
+			"pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type { neighbrsol, neighbradv }", ifs, from6)
+		b.rule(icmp6(StageNeighbour, "pass", "in", src6m, listMatch([]string{"ff02::/16"}), "listenrep", "listendone", "143"),
 			"pass in quick on %s inet6 proto icmp6 from %s to ff02::/16 icmp6-type { listenrep, listendone, 143 }", ifs, from6)
-		b.rule(icmp6(StageNeighbour, "pass", "in", IfEpair, src6m, anyMatch(), "unreach", "toobig", "timex", "paramprob"),
+		b.rule(icmp6(StageNeighbour, "pass", "in", src6m, anyMatch(), "unreach", "toobig", "timex", "paramprob"),
 			"pass in quick on %s inet6 proto icmp6 from %s to any icmp6-type { unreach, toobig, timex, paramprob }", ifs, from6)
 		// the host forwarding from a jail to a neighbour on the same interface would send a redirect; a jail has no
 		// on-link neighbour and must not learn one
-		b.rule(icmp6(StageNeighbour, "block", "out", IfEpair, anyMatch(), anyMatch(), "redir", "routeradv"),
+		b.rule(icmp6(StageNeighbour, "block", "out", anyMatch(), anyMatch(), "redir", "routeradv"),
 			"block out quick on %s inet6 proto icmp6 from any to any icmp6-type { redir, routeradv }", ifs)
-		b.rule(icmp6(StageNeighbour, "pass", "out", IfEpair, anyMatch(), listMatch(ndDests(own6, ll)), "neighbrsol", "neighbradv"),
+		b.rule(icmp6(StageNeighbour, "pass", "out", anyMatch(), listMatch(ndDests(own6, ll)), "neighbrsol", "neighbradv"),
 			"pass out quick on %s inet6 proto icmp6 from any to %s icmp6-type { neighbrsol, neighbradv }", ifs, listStr(ndDests(own6, ll)))
-		b.rule(icmp6(StageNeighbour, "pass", "out", IfEpair, anyMatch(), anyMatch(), "unreach", "toobig", "timex", "paramprob"),
+		b.rule(icmp6(StageNeighbour, "pass", "out", anyMatch(), anyMatch(), "unreach", "toobig", "timex", "paramprob"),
 			"pass out quick on %s inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob }", ifs)
 	}
 	// Only the jail's own addresses reach it: an address it adds for itself (an alias) receives nothing, and no
 	// broadcast (DHCP) or multicast other than neighbour discovery gets in.
-	b.rule(Rule{Action: "block", Dir: "out", Class: IfEpair, From: anyMatch(), To: jailTable(true), Origin: Origin{Stage: StageOwnAddrs}},
+	b.rule(Rule{Action: "block", Dir: "out", From: anyMatch(), To: jailTable(true), Origin: Origin{Stage: StageOwnAddrs}},
 		"block drop out quick on %s from any to ! <%s>", ifs, AllowedSourceTable)
 	if len(famAddrs(fams, "inet")) > 0 {
-		b.rule(Rule{Action: "block", Dir: "out", Class: IfEpair, Family: "inet", Proto: "icmp", ICMPTypes: []string{"redir"}, From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageOwnAddrs}},
+		b.rule(Rule{Action: "block", Dir: "out", Family: "inet", Proto: "icmp", ICMPTypes: []string{"redir"}, From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageOwnAddrs}},
 			"block drop out quick on %s inet proto icmp from any to any icmp-type redir", ifs)
 	}
 
@@ -452,7 +442,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 				continue
 			}
 			head(i)
-			filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, IfEpair, false, "deny")
+			filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, false, "deny")
 		}
 		b.line("# allow rules of the policies, in the order of the policies")
 	}
@@ -461,13 +451,44 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			continue
 		}
 		head(i)
-		filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, IfEpair, false, want)
+		filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, false, want)
 		if sec.raw != "" {
-			b.rule(Rule{Kind: RuleRaw, Class: IfEpair, Origin: Origin{Stage: StageRaw, Policy: sec.origin.Policy, ProjectPolicy: sec.origin.ProjectPolicy, Managed: sec.origin.Managed}},
+			b.rule(Rule{Kind: RuleRaw, Origin: Origin{Stage: StageRaw, Policy: sec.origin.Policy, ProjectPolicy: sec.origin.ProjectPolicy, Managed: sec.origin.Managed}},
 				"# raw fragment (admin)")
 			b.line("%s", strings.TrimRight(strings.ReplaceAll(sec.raw, "\r\n", "\n"), "\n"))
 		}
 	}
+
+	// The host is closed to the jail after the rules of its policies, as the other projects are: a jail that reaches the
+	// host's sshd or its API is a jail that can attack the machine it runs on. What stays open is ping and the resolver
+	// the network points the jail at.
+	hostM := Match{Prefixes: addrMatch(uniqAddrs(in.Host)).Prefixes, Tables: []string{HostTable}}
+	b.line("# the host: closed unless a rule above opened it; ping and the network's resolver stay open")
+	for _, f := range fams {
+		proto := "icmp"
+		if f.kw == "inet6" {
+			proto = "icmp6"
+		}
+		b.rule(Rule{Action: "pass", Dir: "in", Family: f.kw, Proto: proto, From: anyMatch(), To: hostM, Origin: Origin{Stage: StageHost}},
+			"pass in quick on %s %s proto %s from any to <%s>", ifs, f.kw, proto, HostTable)
+	}
+	for _, f := range fams {
+		var dns []netip.Addr
+		for _, a := range uniqAddrs(in.DNS) {
+			if a.Is4() == (f.kw == "inet") {
+				dns = append(dns, a)
+			}
+		}
+		if len(dns) == 0 {
+			continue
+		}
+		for _, proto := range []string{"tcp", "udp"} {
+			b.rule(Rule{Action: "pass", Dir: "in", Family: f.kw, Proto: proto, From: anyMatch(), To: addrMatch(dns), Ports: []PortRange{{Lo: 53, Hi: 53}}, Origin: Origin{Stage: StageHost}},
+				"pass in quick on %s %s proto %s from any to %s port 53", ifs, f.kw, proto, listStr(addrStrings(dns)))
+		}
+	}
+	b.rule(Rule{Action: "block", Dir: "in", From: anyMatch(), To: hostM, Origin: Origin{Stage: StageHost}},
+		"block drop in quick on %s from any to <%s>", ifs, HostTable)
 
 	if len(in.Foreign) > 0 {
 		fp := make([]string, 0, len(in.Foreign))
@@ -481,9 +502,9 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		for i := range foreign.Prefixes {
 			foreign.Prefixes[i] = foreign.Prefixes[i].Masked()
 		}
-		b.rule(Rule{Action: "block", Dir: "out", Class: IfEpair, From: foreign, To: anyMatch(), Origin: Origin{Stage: StageIsolation}},
+		b.rule(Rule{Action: "block", Dir: "out", From: foreign, To: anyMatch(), Origin: Origin{Stage: StageIsolation}},
 			"block drop out quick on %s from <foreign> to any", ifs)
-		b.rule(Rule{Action: "block", Dir: "in", Class: IfEpair, From: anyMatch(), To: foreign, Origin: Origin{Stage: StageIsolation}},
+		b.rule(Rule{Action: "block", Dir: "in", From: anyMatch(), To: foreign, Origin: Origin{Stage: StageIsolation}},
 			"block drop in quick on %s from any to <foreign>", ifs)
 	}
 	b.line("# defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them")
@@ -500,59 +521,10 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		}
 		return "pass"
 	}
-	b.rule(Rule{Action: act(inAct), Dir: "out", Class: IfEpair, From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault}},
+	b.rule(Rule{Action: act(inAct), Dir: "out", From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault}},
 		"%s out quick on %s all", inAct, ifs)
-	b.rule(Rule{Action: act(outAct), Dir: "in", Class: IfEpair, From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault}},
+	b.rule(Rule{Action: act(outAct), Dir: "in", From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault}},
 		"%s in quick on %s all", outAct, ifs)
-	// What the host itself sends to the jail, or routes to it from another network or from the internet, leaves the
-	// host on the gateway interface and is never seen on the jail's own port: the rules for traffic into the jail
-	// stand there too, restricted to the jail's own addresses. (Verified on FreeBSD 15.1: without them a deny-in
-	// policy let the host and routed traffic through.)
-	if len(in.Gateways) > 0 {
-		gifs := listStr(in.Gateways)
-		b.line("# into the jail from the host and from routed networks")
-		if len(own6) > 0 {
-			// No router advertisement or redirect leaves the host on the gateway interface (no SLAAC, ever; what a jail
-			// is sent on its own port is not filtered by pf, so this is where it is stopped).
-			b.rule(icmp6(StageGateway, "block", "out", IfGateway, anyMatch(), anyMatch(), "routeradv", "redir"),
-				"block drop out quick on %s inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }", gifs)
-			// neighbour discovery towards the jail's own addresses, or the host could not reach it; and the ICMPv6
-			// errors (destination unreachable, packet too big, time exceeded, parameter problem) that must never be
-			// blocked, whatever the policy says: path MTU discovery of a flow into the jail depends on them.
-			b.rule(icmp6(StageGateway, "pass", "out", IfGateway, anyMatch(), listMatch(ndDests(own6, ll)), "neighbrsol", "neighbradv"),
-				"pass out quick on %s inet6 proto icmp6 from any to %s icmp6-type { neighbrsol, neighbradv }", gifs, listStr(ndDests(own6, ll)))
-			b.rule(icmp6(StageGateway, "pass", "out", IfGateway, anyMatch(), addrMatch(own6), "unreach", "toobig", "timex", "paramprob"),
-				"pass out quick on %s inet6 proto icmp6 from any to %s icmp6-type { unreach, toobig, timex, paramprob }", gifs, listStr(addrStrings(own6)))
-		}
-		if hasEnabledDeny(all, true) {
-			b.line("# deny rules into the jail: they win over every allow rule")
-			for _, sec := range sections {
-				filterRules(&b, &in, sec.origin, sec.rules, fams, gifs, IfGateway, true, "deny")
-			}
-			b.line("# allow rules into the jail")
-			for _, sec := range sections {
-				filterRules(&b, &in, sec.origin, sec.rules, fams, gifs, IfGateway, true, "allow")
-			}
-		} else {
-			for _, sec := range sections {
-				filterRules(&b, &in, sec.origin, sec.rules, fams, gifs, IfGateway, true, "")
-			}
-		}
-		if len(in.Foreign) > 0 {
-			foreign := Match{Prefixes: append([]netip.Prefix(nil), in.Foreign...), Tables: []string{"foreign"}}
-			for i := range foreign.Prefixes {
-				foreign.Prefixes[i] = foreign.Prefixes[i].Masked()
-			}
-			for _, f := range fams {
-				b.rule(Rule{Action: "block", Dir: "out", Class: IfGateway, Family: f.kw, From: foreign, To: addrMatch(f.addrs), Origin: Origin{Stage: StageIsolation}},
-					"block drop out quick on %s %s from <foreign> to %s", gifs, f.kw, listStr(addrStrings(f.addrs)))
-			}
-		}
-		for _, f := range fams {
-			b.rule(Rule{Action: act(inAct), Dir: "out", Class: IfGateway, Family: f.kw, From: anyMatch(), To: addrMatch(f.addrs), Origin: Origin{Stage: StageDefault}},
-				"%s out quick on %s %s from any to %s", inAct, gifs, f.kw, listStr(addrStrings(f.addrs)))
-		}
-	}
 	out, err := b.result()
 	if err != nil {
 		return nil, err
@@ -574,8 +546,8 @@ var (
 // longer allowed would go on until it ended. The price is that a rule inserted in the middle of an anchor ends the
 // flows of the pass rules below it, which then have to reconnect.
 //
-// With maxStates above 0 every pass rule of the jail also gets "keep state (max N)": the rule may create at most N
-// states, so one jail cannot fill the state table of the host. The limit is per rule.
+// Every pass rule of the jail also gets "keep state (if-bound)", and with maxStates above 0 "keep state (max N, if-bound)":
+// the rule may create at most N states, so one jail cannot fill the state table of the host. The limit is per rule.
 func labelPassRules(anchor, text string, maxStates int) string {
 	tables := map[string]string{}
 	for _, m := range tableDefRE.FindAllStringSubmatch(text, -1) {
@@ -606,10 +578,16 @@ func labelPassRules(anchor, text string, maxStates int) string {
 			next.Write(above[:])
 			next.Write([]byte(ln + "\n" + uses))
 			copy(above[:], next.Sum(nil))
-			// The state limit comes after the label is made, so that changing it does not change a label, which
-			// would end the running flows of the rule.
-			if maxStates > 0 && !raw && strings.HasPrefix(ln, "pass ") && !strings.Contains(ln, " no state") {
-				ln += fmt.Sprintf(" keep state (max %d)", maxStates)
+			// The state options come after the label is made, so that changing the limit does not change a label, which
+			// would end the running flows of the rule. Every state is bound to its interface: a connection is judged
+			// again at every hop of the host (in on the sender's link, out on the receiver's), and a floating state
+			// that the first hop made would carry it through the second without that hop's rules looking at it.
+			if !raw && strings.HasPrefix(ln, "pass ") && !strings.Contains(ln, " no state") {
+				if maxStates > 0 {
+					ln += fmt.Sprintf(" keep state (max %d, if-bound)", maxStates)
+				} else {
+					ln += " keep state (if-bound)"
+				}
 			}
 		}
 		out.WriteString(ln)
@@ -681,6 +659,8 @@ func endpoints(entries []string, f family, def []netip.Addr) (string, bool) {
 			return "any", true
 		case validate.EndpointSet:
 			parts = append(parts, "<s_"+v+">")
+		case validate.EndpointHost:
+			parts = append(parts, "<"+HostTable+">")
 		case validate.EndpointJail:
 			parts = append(parts, "<j_"+strings.ReplaceAll(v, "-", "_")+">")
 		case validate.EndpointTag:
@@ -747,21 +727,15 @@ func sortedKeys(m map[string]bool) []string {
 	return out
 }
 
-// PFNet renders the anchor of a network (NetAnchor(name)): the NAT rule when the network has one, and the pass of
-// the network's own gateway pair. The pair is how the host and routed traffic reach the jails, and a packet that
-// enters the bridge there has already been judged by the jail's anchor on its way out of the gateway, but pf keeps no
-// state across the two hooks (the direction is the opposite), so on a host whose ruleset blocks by default the packet
-// would be dropped at the bridge. The pass is stateless and covers only the pair. (Found on a host with
-// "block log all": the host could not reach any jail.)
+// PFNet renders the anchor of a network (NetAnchor(name)): the NAT rule when the network has one. Nothing else: the
+// traffic of the jails is judged by their own anchors, on the jails' own links. The translation uses the first
+// address of the uplink (":0" leaves its aliases out), so that the source address of a jail's connections does not
+// change from one connection to the next.
 func PFNet(name string, spec api.NetworkSpec) (string, error) {
 	if err := validate.Name("network", name); err != nil {
 		return "", err
 	}
 	if err := validate.NetworkSpec(spec); err != nil {
-		return "", err
-	}
-	member, _, err := ipam.GatewayNames(spec.Bridge)
-	if err != nil {
 		return "", err
 	}
 	var b builder
@@ -772,10 +746,8 @@ func PFNet(name string, spec api.NetworkSpec) (string, error) {
 		if err != nil {
 			return "", err
 		}
-		b.line("match out on %s inet from %s to ! %s nat-to (%s)", spec.Uplink, p.Masked(), p.Masked(), spec.Uplink)
+		b.line("match out on %s inet from %s to ! %s nat-to (%s:0)", spec.Uplink, p.Masked(), p.Masked(), spec.Uplink)
 	}
-	b.line("# the gateway pair of the network: judged by the anchors of the jails, not here")
-	b.line("pass quick on %s all no state", member)
 	return b.result()
 }
 
@@ -801,10 +773,10 @@ func hasAction(rules []api.FirewallRule, action string) bool {
 	return false
 }
 
-// filterRules renders the typed filter rules of one policy, and records each as a structured rule. class is the
-// interface the rules stand on; onlyIn keeps the rules for traffic into the jail. want is "deny" or "allow" to render
+// filterRules renders the typed filter rules of one policy, and records each as a structured rule. ifs are the
+// interfaces the rules stand on; onlyIn keeps the rules for traffic into the jail. want is "deny" or "allow" to render
 // only the rules of that action, "" for all of them in their order. A disabled rule is a comment line, not a rule.
-func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, fams []family, ifs, class string, onlyIn bool, want string) {
+func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, fams []family, ifs string, onlyIn bool, want string) {
 	for i, r := range rules {
 		if onlyIn && r.Direction == "out" {
 			continue
@@ -817,7 +789,7 @@ func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, 
 			if r.Direction == "out" {
 				dir = "in"
 			}
-			sr := Rule{Kind: RuleDisabled, Line: b.n, Dir: dir, Class: class, Proto: r.Proto, From: anyMatch(), To: anyMatch(), Ports: portRanges(r.Ports), Origin: org}
+			sr := Rule{Kind: RuleDisabled, Line: b.n, Dir: dir, Proto: r.Proto, From: anyMatch(), To: anyMatch(), Ports: portRanges(r.Ports), Origin: org}
 			sr.Origin.RuleNo, sr.Origin.RuleName, sr.Origin.Comment = i+1, r.Name, r.Comment
 			b.rules = append(b.rules, sr)
 		}
@@ -855,7 +827,7 @@ func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, 
 			if !ok1 || !ok2 {
 				continue
 			}
-			sr := Rule{Action: pfAct, Dir: dir, Class: class, Family: f.kw, Proto: r.Proto, From: mFrom, To: mTo, Origin: org}
+			sr := Rule{Action: pfAct, Dir: dir, Family: f.kw, Proto: r.Proto, From: mFrom, To: mTo, Origin: org}
 			sr.Origin.RuleNo, sr.Origin.RuleName, sr.Origin.Comment = i+1, r.Name, r.Comment
 			var sb strings.Builder
 			sb.WriteString(act + " " + dir)

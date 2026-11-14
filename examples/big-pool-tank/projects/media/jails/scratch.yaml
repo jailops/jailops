@@ -12,4 +12,4 @@ spec:
   firewall: {policies: [closed]}
   resources: {cpu: 2, memory: 4G}
   volumes:
-    - {name: work, mount: /work, quota: 4T}
+    - {volume: work, mount: /work}

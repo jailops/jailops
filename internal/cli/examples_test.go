@@ -194,7 +194,7 @@ func TestEveryExampleRuns(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	h.srv.SeedProject(api.Project{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.ProjectSpec{
-		Networks: []api.ProjectNetwork{{Network: "br-web"}}, Storage: []api.ProjectStorage{{Storage: "default"}}}})
+		Networks: []api.ProjectNetwork{{Network: "web"}}, Storage: []api.ProjectStorage{{Storage: "default"}}}})
 	// the remotes the examples name, all of them the fake
 	var cfg strings.Builder
 	cfg.WriteString("current: t\nremotes:\n")

@@ -24,19 +24,19 @@ const error = ref<ApiError | null>(null)
 const editing = computed(() => !!props.network)
 const touched = reactive<Record<string, boolean>>({})
 // field id -> problem: the plain mistakes of checkNet, then what is required and still empty
-const ids: Record<string, string> = { name: 'nf-name', uplink: 'nf-up', v4subnet: 'nf-v4s', v4gateway: 'nf-v4g', v4range: 'nf-v4r', v6subnet: 'nf-v6s', v6gateway: 'nf-v6g', v6range: 'nf-v6r', family: 'nf-v4' }
+const ids: Record<string, string> = { name: 'nf-name', uplink: 'nf-up', v4subnet: 'nf-v4s', v4gateway: 'nf-v4g', v4range: 'nf-v4r', v6subnet: 'nf-v6s', v6range: 'nf-v6r', family: 'nf-v4' }
 const check = useFormCheck(() => {
   const p = checkNet(f, editing.value)
   const need: Record<string, boolean> = {
     name: !f.name, v4subnet: f.v4 && !f.v4subnet, v4gateway: f.v4 && !f.v4gateway, v4range: f.v4 && !f.v4range,
-    v6subnet: f.mode !== 'none' && !f.v6subnet, v6gateway: f.mode !== 'none' && !f.v6gateway, v6range: f.mode !== 'none' && !f.v6range,
+    v6subnet: f.mode !== 'none' && !f.v6subnet, v6range: f.mode !== 'none' && !f.v6range,
   }
   const out: Record<string, string> = {}
   for (const k of Object.keys(ids)) out[ids[k]] = p[k] || (need[k] ? s.networks.required : '')
   return out
 })
 const msg = (k: string) => check.err(ids[k])
-const labels: Record<string, string> = { 'nf-name': s.networks.name, 'nf-up': s.networks.uplink, 'nf-v4s': `${s.networks.ipv4} ${s.networks.subnet}`, 'nf-v4g': `${s.networks.ipv4} ${s.networks.gateway}`, 'nf-v4r': `${s.networks.ipv4} ${s.networks.range}`, 'nf-v6s': `${s.networks.ipv6} ${s.networks.subnet}`, 'nf-v6g': `${s.networks.ipv6} ${s.networks.gateway}`, 'nf-v6r': `${s.networks.ipv6} ${s.networks.range}`, 'nf-v4': s.networks.ipv4 }
+const labels: Record<string, string> = { 'nf-name': s.networks.name, 'nf-up': s.networks.uplink, 'nf-v4s': `${s.networks.ipv4} ${s.networks.subnet}`, 'nf-v4g': `${s.networks.ipv4} ${s.networks.gateway}`, 'nf-v4r': `${s.networks.ipv4} ${s.networks.range}`, 'nf-v6s': `${s.networks.ipv6} ${s.networks.subnet}`, 'nf-v6r': `${s.networks.ipv6} ${s.networks.range}`, 'nf-v4': s.networks.ipv4 }
 
 watch(() => props.open, (o) => {
   if (!o) return
@@ -51,7 +51,6 @@ watch(() => f.v4subnet, (v) => {
   const sug = suggestV4(v)
   if (sug && !editing.value && !touched.v4gateway && !touched.v4range) Object.assign(f, { v4gateway: sug.gateway, v4range: sug.range })
 })
-watch(() => f.mode, (m) => { if (m === 'proxy' && !f.v6gateway) f.v6gateway = 'fe80::1' })
 
 const save = () => check.submit(async () => {
   busy.value = true
@@ -137,17 +136,10 @@ const save = () => check.submit(async () => {
             <input id="nf-v6s" v-model="f.v6subnet" class="mono" type="text" placeholder="2001:db8:20:1::/64" autocomplete="off" :aria-invalid="!!msg('v6subnet')" aria-describedby="nf-v6s-e" @blur="check.touch('nf-v6s')" />
             <span id="nf-v6s-e" class="field-error" role="alert">{{ msg('v6subnet') }}</span>
           </div>
-          <div class="form-2">
-            <div class="field">
-              <label for="nf-v6g">{{ s.networks.gateway }} <span class="req" aria-hidden="true">*</span></label>
-              <input id="nf-v6g" v-model="f.v6gateway" class="mono" type="text" :placeholder="f.mode === 'proxy' ? 'fe80::1' : '2001:db8:20:1::1'" autocomplete="off" :aria-invalid="!!msg('v6gateway')" aria-describedby="nf-v6g-e" @blur="check.touch('nf-v6g')" />
-              <span id="nf-v6g-e" class="field-error" role="alert">{{ msg('v6gateway') }}</span>
-            </div>
-            <div class="field">
-              <label for="nf-v6r">{{ s.networks.range }} <span class="req" aria-hidden="true">*</span></label>
-              <input id="nf-v6r" v-model="f.v6range" class="mono" type="text" placeholder="2001:db8:20:1::100-2001:db8:20:1::1ff" autocomplete="off" :aria-invalid="!!msg('v6range')" aria-describedby="nf-v6r-e" @blur="check.touch('nf-v6r')" />
-              <span id="nf-v6r-e" class="field-error" role="alert">{{ msg('v6range') }}</span>
-            </div>
+          <div class="field">
+            <label for="nf-v6r">{{ s.networks.range }} <span class="req" aria-hidden="true">*</span></label>
+            <input id="nf-v6r" v-model="f.v6range" class="mono" type="text" placeholder="2001:db8:20:1::100-2001:db8:20:1::1ff" autocomplete="off" :aria-invalid="!!msg('v6range')" aria-describedby="nf-v6r-e" @blur="check.touch('nf-v6r')" />
+            <span id="nf-v6r-e" class="field-error" role="alert">{{ msg('v6range') }}</span>
           </div>
         </template>
       </fieldset>

@@ -36,9 +36,9 @@ describe('config key help', () => {
 })
 
 describe('deleting a jail', () => {
-  it('lists the root, every volume and the snapshots', () => {
-    const j = { metadata: { name: 'db' }, spec: { image: 'x', volumes: [{ name: 'pgdata', mount: '/var/db/postgres', quota: '200G' }] }, status: { power: 'running' } }
+  it('lists the root and the snapshots; the volumes it attaches stay', () => {
+    const j = { metadata: { name: 'db' }, spec: { image: 'x', volumes: [{ volume: 'pgdata', mount: '/var/db/postgres' }] }, status: { power: 'running' } }
     const items = deleteItems(j as never, [{ status: { written: 1024 } }, { status: { written: 1024 } }] as never)
-    expect(items).toEqual(['the root file system of db', 'volume pgdata at /var/db/postgres (quota 200G) and its data', '2 snapshots of the jail and its volumes'])
+    expect(items).toEqual(['the root file system of db', '2 snapshots of the jail'])
   })
 })

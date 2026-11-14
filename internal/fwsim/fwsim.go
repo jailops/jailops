@@ -36,10 +36,10 @@ type Packet struct {
 	ICMPType string
 }
 
-// Hook is the place in the host's pf where a packet meets an anchor: the interface class and the pf direction.
+// Hook is the place in the host's pf where a packet meets an anchor: the pf direction on the host end of the jail's
+// link. "in" is what the jail sends, "out" what leaves the host for the jail.
 type Hook struct {
-	Class string // render.IfEpair or render.IfGateway
-	Dir   string // "in" or "out"
+	Dir string // "in" or "out"
 }
 
 // Skip is a rule that a walk passed or did not use, and why: a disabled rule that would have matched, or an allow rule
@@ -69,9 +69,6 @@ func Evaluate(a *render.Anchor, p Packet, h Hook) HopResult {
 	var skipped []Skip
 	for i := range a.Rules {
 		r := &a.Rules[i]
-		if r.Class != h.Class {
-			continue
-		}
 		if r.Kind == render.RuleDisabled {
 			if r.Dir == h.Dir && protoPortMatch(r, p) {
 				skipped = append(skipped, Skip{Rule: r, Why: "disabled"})
@@ -99,7 +96,7 @@ func Evaluate(a *render.Anchor, p Packet, h Hook) HopResult {
 		res := HopResult{Verdict: v, Rule: r, Text: a.Lines[r.Line], Skipped: skipped}
 		for j := i + 1; j < len(a.Rules); j++ {
 			o := &a.Rules[j]
-			if o.Class != h.Class || o.Dir != h.Dir {
+			if o.Dir != h.Dir {
 				continue
 			}
 			switch {

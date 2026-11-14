@@ -333,19 +333,34 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 		if req.Limits != nil {
 			limits = *req.Limits
 		}
-		var vols []api.VolumeMount
+		var vols []api.VolumeAttach
 		for _, d := range app.Data {
-			vols = append(vols, api.VolumeMount{Name: volumeName(d.Path), Mount: d.Path})
+			n := volumeName(jail, d.Path)
+			for i := 2; slices.ContainsFunc(vols, func(v api.VolumeAttach) bool { return v.Name == n }); i++ {
+				n = volumeName(jail, d.Path+"-"+strconv.Itoa(i))
+			}
+			vols = append(vols, api.VolumeAttach{Name: n, Mount: d.Path})
+		}
+		for _, v := range vols {
+			if s.volumes.items[rc.project+"/"+v.Name] != nil {
+				return reply{err: api.Errorf(api.CodeAlreadyExists, "volume %q already exists", v.Name).
+					WithHint("an earlier jail of this name left it: delete it with jailops volume delete " + v.Name)}
+			}
 		}
 		j := &api.Jail{Metadata: api.ObjectMeta{Name: jail, Project: rc.project, Labels: map[string]string{api.LabelApp: name, api.LabelAppHash: entry.detail.Hash}},
 			Spec: api.JailSpec{Image: image, OS: api.OSFreeBSD, Storage: storage, Hostname: jail, Layout: api.LayoutThin,
 				Network: []api.NetworkAttach{{Network: network}}, Volumes: vols, Resources: limits, SysVIPC: app.SysVIPC}}
-		steps := []string{"01 create-jail: create thin jail " + jail + " from " + image, "02 start-jail: start " + jail}
-		n := 3
+		var steps []string
+		n := 1
 		step := func(name, what string) {
 			steps = append(steps, fmt.Sprintf("%02d %s: %s", n, name, what))
 			n++
 		}
+		for _, v := range vols {
+			step("create-volume-"+v.Name, "create volume "+v.Name+" for "+v.Mount)
+		}
+		step("create-jail", "create thin jail "+jail+" from "+image)
+		step("start-jail", "start "+jail)
 		// one step per repository, the FreeBSD one first, as the daemon does
 		var ports, jailops []string
 		for _, p := range app.Packages {
@@ -394,6 +409,10 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 			if e := s.assignJail(j, nil); e != nil {
 				return nil, e
 			}
+			for _, a := range vols {
+				s.volumes.insert(&api.Volume{Metadata: api.ObjectMeta{Name: a.Name, Project: rc.project, Labels: map[string]string{api.LabelApp: name}},
+					Spec: api.VolumeSpec{Storage: storage, Mode: "0755", Comment: "data of " + jail + " (" + name + "): " + a.Mount}}, false)
+			}
 			s.initJailStatus(j)
 			s.jails.insert(j, false)
 			s.nextJID++
@@ -434,8 +453,9 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, rp)
 }
 
-// volumeName names the dataset of a data path the way the daemon does.
-func volumeName(p string) string {
+// volumeName is <jail>-<what the path is called>, within the 32 characters of a volume name, the way the daemon names
+// the volume of a data path.
+func volumeName(jail, p string) string {
 	var b strings.Builder
 	dash := true
 	for _, r := range strings.ToLower(strings.Trim(p, "/")) {
@@ -447,12 +467,13 @@ func volumeName(p string) string {
 			dash = true
 		}
 	}
-	n := strings.TrimRight(b.String(), "-")
-	if len(n) > 40 {
-		n = strings.TrimRight(n[:40], "-")
+	base := strings.TrimRight(b.String(), "-")
+	if base == "" {
+		base = "data"
 	}
-	if n == "" {
-		n = "data"
+	n := jail + "-" + base
+	if len(n) > 32 {
+		n = strings.TrimRight(n[:32], "-")
 	}
 	return n
 }

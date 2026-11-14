@@ -129,14 +129,14 @@ say "pool: $pool"
 # ── 1. kernel modules (docs/install.md section 1) ───────────────────────────────────────────────────────────────
 step "kernel modules"
 missing="" boot=""
-for m in if_bridge if_epair pf zfs; do
+for m in if_epair pf zfs; do
 	kldstat -q -n "$m" 2>/dev/null || missing="$missing $m"
 	isyes "$(sysrc -f "$ROOT/boot/loader.conf" -n "${m}_load" 2>/dev/null)" || boot="$boot ${m}_load=YES"
 done
 # loading pf does not start it: it filters nothing until pfctl -e
 [ -n "$missing" ] && { run kldload -n $missing || fail "kldload$missing"; }
 [ -n "$boot" ] && { run sysrc -f "$ROOT/boot/loader.conf" $boot || fail "loader.conf"; }
-[ -z "$missing$boot" ] && ok "if_bridge, if_epair, pf and zfs are loaded and load at boot"
+[ -z "$missing$boot" ] && ok "if_epair, pf and zfs are loaded and load at boot"
 
 # ── 2. jailops-priv init (section 5) ────────────────────────────────────────────────────────────────────────────
 step "jailops-priv init (the user, the datasets, the configuration; what exists is left as it is)"

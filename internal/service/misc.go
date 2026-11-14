@@ -473,6 +473,8 @@ type Backups interface {
 	Delete(ctx context.Context, id string) error
 	Preflight(ctx context.Context, req api.RestoreRequest) (api.RestorePreflight, error)
 	Restore(ctx context.Context, req api.RestoreRequest) (api.Jail, error)
+	// RestoreVolume restores a volume backup as a new volume of the project.
+	RestoreVolume(ctx context.Context, req api.RestoreRequest) (api.Volume, error)
 }
 
 func (s *Service) backupsUnsupported() error {
@@ -583,6 +585,9 @@ func (s *Service) Restore(ctx context.Context, req api.RestoreRequest) (*api.Res
 		return nil, nil, invalid("restore preflight failed: %s", strings.TrimSpace("missing: "+join(pf.Missing)+" errors: "+join(pf.Errors))).
 			WithDetail("missing", join(pf.Missing)).WithDetail("errors", join(pf.Errors))
 	}
+	if b.Spec.Kind == "volume" {
+		return s.restoreVolumeBackup(ctx, p, b, req)
+	}
 	name := req.As
 	if name == "" {
 		name = b.Spec.Jail
@@ -602,6 +607,9 @@ func (s *Service) Restore(ctx context.Context, req api.RestoreRequest) (*api.Res
 			spec.Network[i].Network = m
 		}
 	}
+	if req.NoVolumes {
+		spec.Volumes = nil // the jail is restored with no attachments
+	}
 	var old *api.JailSpec
 	s.mu.RLock()
 	if e, ok := s.jails[key]; ok && req.Replace {
@@ -613,7 +621,16 @@ func (s *Service) Restore(ctx context.Context, req api.RestoreRequest) (*api.Res
 	if err != nil {
 		return nil, nil, err
 	}
-	op, err := s.Submit(ctx, OpSpec{Description: "Restore backup " + req.Backup, Locks: []string{jailLock(key)}, Project: target,
+	locks := []string{jailLock(key)}
+	if !req.NoVolumes {
+		// the volumes of the jail that the project lacks are made by this restore
+		for _, v := range b.Spec.Bundle.Volumes {
+			if _, err := s.volKind.p(target).get(v); err != nil {
+				locks = append(locks, volumeLock(target, v))
+			}
+		}
+	}
+	op, err := s.Submit(ctx, OpSpec{Description: "Restore backup " + req.Backup, Locks: locks, Project: target,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()

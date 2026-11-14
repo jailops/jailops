@@ -6,6 +6,7 @@ import (
 
 	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/daemon/dtest"
+	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -17,21 +18,21 @@ func TestBootPlan(t *testing.T) {
 	c := ctxT(t)
 	create := func(project string, j api.Jail, pass string) {
 		t.Helper()
-		jails := e.Admin.Project(project).Jails()
-		var err error
 		if pass != "" {
-			op, e2 := jails.CreateWithPassphrase(c, j, pass)
+			// the encrypted volume the jail attaches is made first
+			op, e2 := e.Admin.Project(project).Volumes().Create(c, sdk.NewVolume("data", api.VolumeSpec{Encrypted: true}), pass)
 			if e2 != nil {
 				t.Fatal(e2)
 			}
-			_, err = op.Wait(c)
-		} else {
-			op, e2 := jails.Create(c, j)
-			if e2 != nil {
-				t.Fatal(e2)
+			if _, err := op.Wait(c); err != nil {
+				t.Fatalf("volume: %v\n%s", err, e.Log())
 			}
-			_, err = op.Wait(c)
 		}
+		op, e2 := e.Admin.Project(project).Jails().Create(c, j)
+		if e2 != nil {
+			t.Fatal(e2)
+		}
+		_, err := op.Wait(c)
 		if err != nil {
 			t.Fatalf("create %s: %v\n%s", j.Metadata.Name, err, e.Log())
 		}
@@ -46,7 +47,7 @@ func TestBootPlan(t *testing.T) {
 	create(dtest.SeedProject, jail("cache", true, 0), "")
 	create(dtest.SeedProject, jail("idle", false, 0), "")
 	vault := jail("vault", true, 0)
-	vault.Spec.Volumes = []api.VolumeMount{{Name: "data", Mount: "/var/db/vault", Encrypted: true}}
+	vault.Spec.Volumes = []api.VolumeAttach{{Name: "data", Mount: "/var/db/vault"}}
 	create(dtest.SeedProject, vault, "pass-phrase-1")
 	create(dtest.SeedProject, jail("report", true, 0, "vault"), "")
 
@@ -102,7 +103,7 @@ func TestBootPlan(t *testing.T) {
 	if len(skipped) != 2 || skipped["alpha/vault"] == "" || skipped["alpha/report"] == "" {
 		t.Fatalf("not started: %+v", p.NotStarted)
 	}
-	if !strings.Contains(skipped["alpha/vault"], "jailops jail unlock vault") || !strings.Contains(skipped["alpha/report"], "depends on vault") {
+	if !strings.Contains(skipped["alpha/vault"], "jailops volume unlock VOLUME") || !strings.Contains(skipped["alpha/report"], "depends on vault") {
 		t.Errorf("reasons: %+v", skipped)
 	}
 	if _, ok := skipped["alpha/idle"]; ok {

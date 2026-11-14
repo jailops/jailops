@@ -193,7 +193,7 @@ function one(n: string, a: Lifecycle, power: string): void {
                       <router-link v-if="j.status.power === 'running' || j.status.power === 'starting'" class="btn btn-sm" :to="shellPath(j.metadata.name)" :aria-label="s.shell.openTitle(j.metadata.name)" :title="s.shell.openTitle(j.metadata.name)" :data-shell="j.metadata.name"><Icon name="terminal" />{{ s.shell.open }}</router-link>
                       <button v-else class="btn btn-sm" type="button" :aria-label="s.shell.startOpenTitle(j.metadata.name)" :title="s.shell.startOpenTitle(j.metadata.name)" :data-shell="j.metadata.name" @click="goShell(router, j.metadata.name, j.status.power)"><Icon name="terminal" />{{ s.shell.open }}</button>
                     </template>
-                    <button v-if="isLocked(j)" class="btn btn-sm" type="button" :data-unlock="j.metadata.name" :aria-label="s.jails.actionTitle(s.keys.unlock, j.metadata.name)" @click="unlocking = j.metadata.name"><Icon name="lockOpen" />{{ s.keys.unlock }}</button>
+                    <button v-if="isLocked(j)" class="btn btn-sm" type="button" :data-unlock="j.metadata.name" :aria-label="s.jails.actionTitle(s.keys.unlock, j.metadata.name)" @click="unlocking = j.status.locked?.[0] ?? ''"><Icon name="lockOpen" />{{ s.keys.unlock }}</button>
                     <button v-else-if="j.status.power !== 'running'" class="btn btn-sm" type="button" :aria-label="s.jails.actionTitle(s.jails.start, j.metadata.name)" @click="one(j.metadata.name, 'start', j.status.power)"><Icon name="play" />{{ s.jails.start }}</button>
                     <template v-else>
                       <button class="btn btn-sm" type="button" :aria-label="s.jails.actionTitle(s.jails.stop, j.metadata.name)" :data-stop="j.metadata.name" @click="one(j.metadata.name, 'stop', j.status.power)"><Icon name="square" />{{ s.jails.stop }}</button>
@@ -208,7 +208,7 @@ function one(n: string, a: Lifecycle, power: string): void {
       </div>
     </LoadState>
     <BulkLabelDialog :open="labelling" :jails="chosenJails" :known="known" @close="labelling = false" @done="l.reload" />
-    <UnlockDialog :open="!!unlocking" :jail="unlocking" @close="unlocking = ''" @done="l.reload" />
+    <UnlockDialog :open="!!unlocking" :volume="unlocking" @close="unlocking = ''" @done="l.reload" />
     <JailCreateForm :open="creating" :project="currentProject" :images="lookups.data.value?.images ?? []" :storage="lookups.data.value?.storage ?? []" :networks="lookups.data.value?.networks ?? []" @close="creating = false" @done="l.reload" />
   </div>
 </template>

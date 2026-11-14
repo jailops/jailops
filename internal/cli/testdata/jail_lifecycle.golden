@@ -1,7 +1,10 @@
 $ jailops jail create web --image freebsd-15@stable --storage default --network lan --memory 2G --label env=prod --autostart
 jail/web created
 
-$ jailops jail create db --image freebsd-15@stable --storage default --network lan --volume data:/var/db:ro --env A=1
+$ jailops volume create data --storage default
+volume/data created
+
+$ jailops jail create db --image freebsd-15@stable --storage default --network lan --volume data:/srv/data:ro --env A=1
 jail/db created
 
 $ jailops jail list
@@ -55,7 +58,7 @@ jail/web stopped
 
 $ jailops jail delete -y db
 ! This deletes 1 jail of project "main" and destroys its data; it cannot be undone:
-!   db (stopped): root 256.0 MiB, data 70.0 MiB (volumes data), 0 snapshots
+!   db (stopped): root 256.0 MiB, data 70.0 MiB, 0 snapshots; its volumes stay: data
 ! Type the name "db" to confirm: 
 ! usage: confirmation required: standard input is not a terminal and gave no answer
 ! hint: type the name on standard input, or pass --confirm-data-loss (-y does not answer this question)
@@ -63,14 +66,14 @@ $ jailops jail delete -y db
 
 $ jailops jail delete db
 ! This deletes 1 jail of project "main" and destroys its data; it cannot be undone:
-!   db (stopped): root 256.0 MiB, data 70.0 MiB (volumes data), 0 snapshots
+!   db (stopped): root 256.0 MiB, data 70.0 MiB, 0 snapshots; its volumes stay: data
 ! Type the name "db" to confirm: aborted: the name did not match, nothing was changed
 [exit 1]
 
 $ jailops jail delete db
 jail/db deleted
 ! This deletes 1 jail of project "main" and destroys its data; it cannot be undone:
-!   db (stopped): root 256.0 MiB, data 70.0 MiB (volumes data), 0 snapshots
+!   db (stopped): root 256.0 MiB, data 70.0 MiB, 0 snapshots; its volumes stay: data
 ! Type the name "db" to confirm: 
 
 $ jailops jail delete web

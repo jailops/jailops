@@ -34,8 +34,9 @@ func (s *Server) handleExec(c *rc) error {
 		return err
 	}
 	defer st.Release()
-	// Every exec is audited with its argument vector, when it starts and when it ends.
-	argv := fmt.Sprintf("%q", st.Argv)
+	// Every exec is audited with its argument vector, when it starts and when it ends. Long arguments (a script passed on
+	// the command line, a pasted secret) are cut: the entry says what was run, not everything that was typed.
+	argv := fmt.Sprintf("%q", auditArgv(st.Argv))
 	c.detail = "exec argv=" + argv
 	s.svc.Audit(context.WithoutCancel(c.r.Context()), storeEntry(c, "EXEC", st.Project, "start argv="+argv+fmt.Sprintf(" tty=%v", req.TTY)))
 	conn, brw, err := http.NewResponseController(c.w).Hijack()
@@ -188,4 +189,19 @@ func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, li
 	}
 	_ = write(api.FrameExit, api.Int32Payload(int32(code)))
 	return code
+}
+
+// auditArgvMax is how many bytes of one argument an audit entry keeps.
+const auditArgvMax = 200
+
+// auditArgv is the argument vector of an exec as the audit log keeps it: each argument cut to auditArgvMax bytes.
+func auditArgv(argv []string) []string {
+	out := make([]string, len(argv))
+	for i, a := range argv {
+		if len(a) > auditArgvMax {
+			a = a[:auditArgvMax] + fmt.Sprintf("...(%d bytes more)", len(a)-auditArgvMax)
+		}
+		out[i] = a
+	}
+	return out
 }

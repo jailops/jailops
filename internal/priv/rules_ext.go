@@ -25,7 +25,7 @@ import (
 // verified on the 15.1 test host and recorded in the design.
 
 // DefaultFetchHosts are the hosts fetch may download from.
-var DefaultFetchHosts = []string{"dl-cdn.alpinelinux.org", "pkg.freebsd.org"}
+var DefaultFetchHosts = []string{"dl-cdn.alpinelinux.org", "pkg.freebsd.org", "pkg.jailops.net", "deb.debian.org", "archive.ubuntu.com", "ports.ubuntu.com"}
 
 // Devfs rulesets JailOps may define or mount: numbers below 100 belong to the
 // stock devfs.rules and are left alone (4 may be mounted, not changed).
@@ -297,8 +297,9 @@ func (c Config) devfsRulesetOK(n int) bool {
 
 // customMount accepts: mount -t <type> [-o <options>] <device> <path>. The
 // device of every type but nullfs is the type name; a nullfs source is below
-// a storage root. The path is checked against the jail in verifyMount.
-func customMount(c Config, _ bool, args []string) error {
+// a storage root or, with the admin assertion, below an admin-host-mount directory (the mount a volume of a host
+// directory gives a running jail again). The path is checked against the jail in verifyMount.
+func customMount(c Config, admin bool, args []string) error {
 	if len(args) < 4 || args[0] != "-t" || !slices.Contains(mountTypes, args[1]) {
 		return forbidden("mount: only -t <%s> is accepted", strings.Join(mountTypes, "|"))
 	}
@@ -316,7 +317,7 @@ func customMount(c Config, _ bool, args []string) error {
 		return invalid("mount: expected <device> <path>")
 	}
 	if typ == "nullfs" {
-		if err := c.checkRulePath(pathJailTree, rest[0]); err != nil {
+		if err := c.checkRulePath(pathJailTree, rest[0]); err != nil && !(admin && c.hostMountSource(rest[0])) {
 			return err
 		}
 	} else if rest[0] != typ {
@@ -328,7 +329,28 @@ func customMount(c Config, _ bool, args []string) error {
 	return nil
 }
 
+// hostMountSource reports whether p is below a directory of admin-host-mount.
+func (c Config) hostMountSource(p string) bool {
+	for _, r := range c.Admin.HostMountRoots {
+		if within(r, p) {
+			return true
+		}
+	}
+	return false
+}
+
 func verifyMount(_ context.Context, l *Local, args []string) error {
+	if i := slices.Index(args, "nullfs"); i == 1 && len(args) >= 4 {
+		// a source of the host's own directories is held to the allowed directory it lies below, links and all
+		src := args[len(args)-2]
+		for _, r := range l.cfg.Admin.HostMountRoots {
+			if within(r, src) {
+				if err := plainBelow(r, src); err != nil {
+					return err
+				}
+			}
+		}
+	}
 	return l.checkJailRootPath(args[len(args)-1])
 }
 
@@ -554,8 +576,8 @@ func customDebootstrap(c Config, admin bool, args []string) error {
 	if key == args[2] || !cleanAbs(key) {
 		return forbidden("debootstrap: --keyring=<file> is required and checks the release signature")
 	}
-	if !strings.HasPrefix(key, "/usr/local/share/keyrings/") && c.checkRulePath(pathState, key) != nil {
-		return forbidden("debootstrap: keyring %q is not in /usr/local/share/keyrings, the work directory or a storage root", key)
+	if err := c.checkKeyring(key); err != nil {
+		return err
 	}
 	if !reDebSuite.MatchString(args[3]) {
 		return forbidden("debootstrap: %q is not a suite name", args[3])
@@ -566,8 +588,17 @@ func customDebootstrap(c Config, admin bool, args []string) error {
 	if err := c.checkRulePath(pathJailTree, args[4]); err != nil {
 		return err
 	}
-	if len(args) == 6 && !reDebMirror.MatchString(args[5]) {
-		return forbidden("debootstrap: mirror %q must be an https URL", args[5])
+	if len(args) == 6 {
+		if !reDebMirror.MatchString(args[5]) {
+			return forbidden("debootstrap: mirror %q must be an https URL", args[5])
+		}
+		host := strings.TrimPrefix(args[5], "https://")
+		if i := strings.IndexAny(host, "/:"); i >= 0 {
+			host = host[:i]
+		}
+		if !c.pkgHostAllowed(strings.ToLower(host), true) {
+			return forbidden("debootstrap: mirror host %s is not in fetch-host of priv.conf", host)
+		}
 	}
 	return nil
 }
@@ -628,7 +659,7 @@ func parseBits(s string, max int) error {
 	return nil
 }
 
-// customIfconfig accepts (only in the vnet of a managed jail; bridges and epairs of the host are made by the typed
+// customIfconfig accepts (only in the vnet of a managed jail; epairs of the host are made by the typed
 // net.* operations, which mark them, never by a command line):
 //
 //	ifconfig -j <jail> <iface>

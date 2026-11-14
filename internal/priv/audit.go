@@ -99,7 +99,7 @@ func clip(s string, n int) string {
 }
 
 // targetKeys are the argument fields that name what a request acts on.
-var targetKeys = []string{"name", "snapshot", "target", "dataset", "anchor", "path", "iface", "bridge", "member", "jail", "from", "to", "conf", "table", "tag", "src", "dst", "addr", "uplink", "requester_ip"}
+var targetKeys = []string{"name", "snapshot", "target", "dataset", "anchor", "path", "iface", "jail", "from", "to", "conf", "table", "tag", "src", "dst", "addr", "uplink", "requester_ip"}
 
 // auditTarget extracts the named targets of a request. For commands only the
 // program (or the jail command's first word) is recorded.

@@ -222,7 +222,7 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 	}
 	// what was allowed reads back, with the rendered lines and no problem; the password is nowhere
 	acc, err = oper.Apps().Access(c, "db")
-	if err != nil || len(acc.Grants) != 1 || len(acc.Grants[0].Problems) != 0 || len(acc.Grants[0].PF) < 2 || !strings.Contains(acc.Grants[0].PF[0], "port 5432") ||
+	if err != nil || len(acc.Grants) != 1 || len(acc.Grants[0].Problems) != 0 || len(acc.Grants[0].PF) < 1 || !strings.Contains(acc.Grants[0].PF[0], "port 5432") ||
 		strings.Contains(acc.Grants[0].PF[0], "label") || acc.Grants[0].CreatedBy == "" {
 		t.Fatalf("%v %+v", err, acc)
 	}

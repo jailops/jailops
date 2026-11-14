@@ -46,7 +46,7 @@ Every declarative object a user can create with the CLI has a file kind. Nothing
 | `jailops create` | `projects/<p>/jails/*.yaml` (Jail) | the whole spec: network and storage (explicit), `volumes`, `host_mounts`, `proxy`, `devfs`, `resources`, `boot`, `update` schedule, `firewall` (`policies`, a list, and `tags`), `env` with `secret:` references, `provision`, `labels`. `start: true` and `after:` hooks (start, restart, snapshot, exec) run once, after creation |
 | `jailops firewall policy/address-set create` | `projects/<p>/firewall-policies/`, `address-sets/` | the project's mandatory policies are set in a second write once the policies exist |
 | `jailops backup target create` | `shared/backup-targets/*.yaml` (BackupTarget) | `kind: node` needs `address` and a pinned `fingerprint` |
-| `jailops backup policy create` | `projects/<p>/backup-policies/*.yaml` (BackupPolicy) | selector, targets, `schedule`, retention, `verify_schedule`, `verify_mode` |
+| `jailops backup policy create` | `projects/<p>/backup-policies/*.yaml` (BackupPolicy) | selector, targets, `schedule`, retention, `include_state`, `exclude_volumes`, `verify_schedule`, `verify_mode` |
 | `jailops profile create` | `profiles/` or `projects/<p>/profiles/` (Profile) | see "Profiles" below |
 | secrets in a jail's environment | `secret:<name>` and `secret:<dotted.path>` | age and SOPS, see "Secrets" |
 | `jailops app install` | `projects/<p>/apps/*.yaml` (App) | installed once, never changed or deleted; see "Apps and who may reach them" |
@@ -55,9 +55,10 @@ Every declarative object a user can create with the CLI has a file kind. Nothing
 Because the specs are the wire types of the API (decoded strictly: a misspelled key is an error), a field the daemon gains is
 declarable the day it exists. `validate` also checks, offline, what the daemon would refuse at apply time: the name rules of
 jails, networks, policies, address sets and WireGuard tunnels, overlapping subnets and storage datasets, the IPv6 proxy and routed prefix limits,
-the proxy gateway and uplink, reserved fields (`encrypted`, `packages`), and that a **profile cannot carry `host_mounts` or
-`zfs_delegation`**. It warns about a volume with `encrypted: true`: its passphrase is typed by a person, so create that jail
-with `jailops jail create` ([storage.md](storage.md#encrypted-volumes)); sync manages it from then on.
+the proxy gateway and uplink, reserved fields (`encrypted`, `packages`), that a jail's `volumes` name a volume (`kind: Volume`, `projects/<p>/volumes/`), and that a **profile cannot carry `host_mounts` or
+`zfs_delegation`**. It refuses a `Volume` with `encrypted: true`: its passphrase is typed by a person, so create that volume
+with `jailops volume create --encrypted` ([storage.md](storage.md#encrypted-volumes)); a jail of the repository can then
+attach it, and `validate` warns that a volume a jail names is not declared.
 
 **IPv6, CLI flags and YAML.** `--ipv6-mode routed` and `--ipv6-mode proxy` fill in what a file spells out:
 
@@ -67,8 +68,7 @@ with `jailops jail create` ([storage.md](storage.md#encrypted-volumes)); sync ma
 | `--ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy` | `mode: proxy`, `subnet: 2001:db8:1:2:100::/80`, `gateway: fe80::1`, `range: <first>-<last>` and `uplink: vtnet0` on the network |
 | `--ipv4 10.50.0.1/24` | `ipv4: {subnet: 10.50.0.0/24, gateway: 10.50.0.1, range: 10.50.0.2-10.50.0.254}` |
 
-Proxy mode also needs the host operator's `ndp-proxy` line in `priv.conf`; that is root's decision and not something an API
-call can make. Complete files are in `examples/ipv6-switched-cloud` and `examples/ipv6-routed-hetzner`.
+Complete files are in `examples/ipv6-switched-cloud` and `examples/ipv6-routed-hetzner`.
 
 **WireGuard.** A tunnel belongs to one host (its endpoint and its keys are that host's), so it is declared under
 `hosts/<host>/wireguard/` and never under `shared/`. A file carries the spec of a **server**: `mode: server`, `interface`,
@@ -115,7 +115,7 @@ strict decoding refuses one:
   reproduced from a file; sync's own access is the token or certificate you give it (`secrets set`, `remote bootstrap`).
 - Backup keys and the backup node itself: `jailops backup key create/escrow` produce key material that must not be in git, and the
   node (`jailops-backupd`) is configured by its own `backupd.yaml`. Targets and policies are declarable; see `examples/web-stack`.
-- `priv.conf` (`ndp-proxy`, `admin-host-mount`, ...) and `jailopsd.yaml`: they are the host operator's boundary, on purpose out of
+- `priv.conf` (`admin-host-mount`, ...) and `jailopsd.yaml`: they are the host operator's boundary, on purpose out of
   reach of the API. `examples/provisioning/bootstrap.sh` writes them when it installs a host.
 - Runtime actions and data: snapshots (use the `snapshot` hook), backups and restores, exec, updates, generations after the first.
 - Provisioning **files**: `provision.files` copies from `<state_dir>/project-files/<project>/` on the host. Sync does not upload

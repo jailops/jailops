@@ -48,6 +48,9 @@ type BackupPolicySpec struct {
 	Retention RetentionPolicy `json:"retention"`
 	// IncludeState also backs up the host's state dataset.
 	IncludeState bool `json:"include_state,omitempty"`
+	// ExcludeVolumes leaves the volumes out. By default a policy also backs up the volumes the jails it selects
+	// attach, and the volumes whose own labels match the selector, each volume once however many jails attach it.
+	ExcludeVolumes bool `json:"exclude_volumes,omitempty"`
 	// FullEvery forces a full read of the data (still deduplicated) when
 	// the last full read is older than this many days. Zero uses the default.
 	FullEvery int `json:"full_every,omitempty"`
@@ -78,11 +81,16 @@ type Backup struct {
 
 // BackupSpec identifies what was backed up.
 type BackupSpec struct {
+	// Kind is "jail" (the default) or "volume". A volume is a backup of its own: Jail and JailUUID then name the
+	// volume and its UUID, and Volume holds what restore needs to make it again.
+	Kind     string `json:"kind,omitempty"`
 	Jail     string `json:"jail"`
 	JailUUID string `json:"jail_uuid"`
-	HostUUID string `json:"host_uuid"`
-	Policy   string `json:"policy,omitempty"`
-	Target   string `json:"target,omitempty"`
+	// Volume is the spec of the volume of a volume backup (never the passphrase of an encrypted one).
+	Volume   *VolumeSpec `json:"volume,omitempty"`
+	HostUUID string      `json:"host_uuid"`
+	Policy   string      `json:"policy,omitempty"`
+	Target   string      `json:"target,omitempty"`
 	// Snapshot is the repository snapshot id (YYYYMMDDHHMMSS-xxxxxxxx).
 	Snapshot string `json:"snapshot"`
 	// ZFSSnapshot is the name of the consistent snapshot the capture read.
@@ -166,6 +174,12 @@ type RestoreRequest struct {
 	KeepIP     bool              `json:"keep_ip,omitempty"`
 	// DryRun returns the preflight report and changes nothing.
 	DryRun bool `json:"dry_run,omitempty"`
+	// NoVolumes restores a jail with no volume attachments at all (attach them afterwards). By default the volumes
+	// the project lacks are restored from their newest backup first and the others are attached as they are.
+	NoVolumes bool `json:"no_volumes,omitempty"`
+	// Passphrase is the passphrase of the restored volume when the backup holds an encrypted volume; it is used once
+	// to make the volume and never stored.
+	Passphrase string `json:"passphrase,omitempty"`
 }
 
 // RestorePreflight is the report produced before any restore changes state.
@@ -212,6 +226,8 @@ type BackupKeyEscrow struct {
 // now for every jail it selects.
 type BackupRunRequest struct {
 	Policy string `json:"policy"`
+	// NoVolumes leaves the volumes out of this run.
+	NoVolumes bool `json:"no_volumes,omitempty"`
 }
 
 // BackupVerifyRequest is the body of POST /api/v1/backups/{id}/verify. Depth is

@@ -302,7 +302,7 @@ func TestServerInfoVersionDoctor(t *testing.T) {
 		mux.HandleFunc("GET /api/v1/doctor", func(w http.ResponseWriter, r *http.Request) {
 			rep := api.DoctorReport{Status: api.DoctorWarn, Checks: []api.DoctorCheck{
 				{Name: "zfs.pool", Status: api.DoctorOK, Message: "pool tank is online"},
-				{Name: "kernel.module.if_bridge", Status: api.DoctorWarn, Message: "not loaded", Hint: "kldload if_bridge"},
+				{Name: "kernel.module.if_epair", Status: api.DoctorWarn, Message: "not loaded", Hint: "kldload if_epair"},
 				{Name: "pf.enabled", Status: api.DoctorUnknown, Message: "cannot tell without FreeBSD"},
 			}}
 			raw, _ := json.Marshal(rep)
