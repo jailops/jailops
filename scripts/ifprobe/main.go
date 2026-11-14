@@ -3,13 +3,13 @@
 // ifprobe asks the running helper, over its socket, for the interface operations a compromised daemon could ask for,
 // and checks that the helper refuses every one on an interface JailOps did not create (docs/security-model.md,
 // "Interfaces"), and accepts what JailOps needs. It is a test tool only, for scripts/ci-freebsd-e2e.sh: built for
-// FreeBSD and run as root on a disposable machine, after the end-to-end flow has created the network OWNED and the
-// managed jail JAIL. Nothing in JailOps itself uses it.
+// FreeBSD and run as root on a disposable machine, after the end-to-end flow has started the managed jail JAIL.
+// Nothing in JailOps itself uses it.
 //
-//	ifprobe -uplink vtnet0 -foreign mybr -bare jo79 -owned office -jail edge_edgeweb
+//	ifprobe -uplink vtnet0 -foreign mybr -bare epair7a -jail edge_edgeweb
 //
-// FOREIGN is a bridge made by hand (ifconfig bridge create; ifconfig bridgeN name mybr), BARE one made by hand
-// under a jo name without a description: the helper refuses it. Every check prints one line; the exit
+// FOREIGN is a bridge made by hand (ifconfig bridge create; ifconfig bridgeN name mybr), BARE an epair made by hand
+// without a description (ifconfig epair create): the helper refuses both. Every check prints one line; the exit
 // status is 1 when one failed.
 package main
 
@@ -47,11 +47,10 @@ func main() {
 	sock := flag.String("socket", priv.DefaultSocket, "the helper's socket")
 	uplink := flag.String("uplink", "", "the host's uplink")
 	foreign := flag.String("foreign", "", "a bridge made by hand")
-	bare := flag.String("bare", "", "a bridge made by hand under a jo name, without a description")
-	owned := flag.String("owned", "", "the bridge of a JailOps network")
+	bare := flag.String("bare", "", "an epair made by hand, without a description")
 	jail := flag.String("jail", "", "a running managed jail (its internal name)")
 	flag.Parse()
-	if *uplink == "" || *foreign == "" || *bare == "" || *owned == "" || *jail == "" {
+	if *uplink == "" || *foreign == "" || *bare == "" || *jail == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
@@ -76,43 +75,34 @@ func main() {
 		return "(missing)"
 	}
 	before := map[string]string{}
-	for _, name := range []string{*uplink, "lo0", *foreign} {
+	for _, name := range []string{*uplink, "lo0", *foreign, *bare} {
 		before[name] = desc(name)
 	}
 
 	// 1. nothing that is not JailOps's is changed; the requests are harmless if they were carried out by mistake
-	for _, name := range []string{*uplink, "lo0", *foreign} {
-		refused("destroy "+name, n.BridgeDestroy(ctx, name))
+	for _, name := range []string{*uplink, "lo0", *foreign, *bare} {
 		refused("destroy (epair) "+name, n.EpairDestroy(ctx, name))
 		refused("link up "+name, n.SetLink(ctx, name, true))
 		refused("address on "+name, n.AddrAdd(ctx, name, netip.MustParsePrefix("192.0.2.77/32")))
 		refused("the marker written on "+name, n.SetDescription(ctx, name, ifconfig.Marker))
-		refused("a JailOps text written on "+name, n.SetDescription(ctx, name, "jailops net=x bridge"))
-		refused(name+" made a port of "+*owned, n.BridgeAddMember(ctx, *owned, name, false))
+		refused("a JailOps text written on "+name, n.SetDescription(ctx, name, "jailops jail=p/x net=lan (host side)"))
 		refused("route through "+name, n.RouteAdd(ctx, ifconfig.Route{Dest: "2001:db8::77/128", Interface: name}))
-		refused("neighbor entry on "+name, n.NeighborSet(ctx, name, netip.MustParseAddr("2001:db8::77"), "02:00:00:00:00:77"))
 		refused("mtu of "+name, c.SetMTU(ctx, name, 1400))
 		refused("move "+name+" into "+*jail, n.MoveToJail(ctx, name, *jail))
 	}
-	refused("a port added to "+*foreign, n.BridgeAddMember(ctx, *foreign, *owned+"ga", false))
 	for name, was := range before {
 		check("the description of "+name+" is unchanged", desc(name) == was, desc(name))
 	}
 
-	// 2. a name that exists is never taken over; a driver's name is never created
-	err = n.BridgeCreate(ctx, *foreign)
-	check("create over "+*foreign+" is refused as someone else's", api.IsCode(err, api.CodeForbidden) && strings.Contains(err.Error(), "never takes over"), err)
-	for _, name := range []string{*uplink, "vmx0", "em0", "lo1", "bridge0", "bridge", "tap0", "wg0", "pflog1", "vlan0.10"} {
-		err := n.BridgeCreate(ctx, name)
-		check("create "+name+" is refused as a driver's name", api.IsCode(err, api.CodeInvalid) && strings.Contains(err.Error(), "form of the interfaces of the driver"), err)
+	// 2. no reject route for a prefix that is not the subnet of a network of JailOps; a driver's name is never created
+	for _, p := range []string{"0.0.0.0/0", "10.0.0.0/8", "::/0"} {
+		refused("a reject route for "+p, n.RouteAdd(ctx, ifconfig.Route{Dest: p, Reject: true}))
 	}
 	if _, _, err := n.EpairCreate(ctx, "epair9"); !api.IsCode(err, api.CodeInvalid) {
 		check("epair epair9a/epair9b is refused", false, err)
 	} else {
 		check("epair epair9a/epair9b is refused", true, nil)
 	}
-	err = n.BridgeCreate(ctx, *owned)
-	check("create of "+*owned+" again answers already_exists", api.IsCode(err, api.CodeAlreadyExists), err)
 
 	// 3. no command line makes or renames a host interface
 	for _, argv := range [][]string{{"bridge", "create"}, {"epair", "create"}, {"bridge0", "name", "jo5"}, {*uplink, "name", "jo5"}, {*foreign, "destroy"}} {
@@ -122,7 +112,7 @@ func main() {
 	_, err = c.Runner().Run(ctx, run.Cmd{Name: "ifconfig", Args: []string{"-j", *jail, "lo0", "down"}})
 	refused("ifconfig -j "+*jail+" lo0 down", err)
 
-	// 4. a bridge without a description is not JailOps's, whatever its name
+	// 4. an epair without a description is not JailOps's, whatever its name
 	check(*bare+" has no description", desc(*bare) == "", desc(*bare))
 	refused(*bare+" is refused", n.SetLink(ctx, *bare, true))
 	check(*bare+" is still undescribed", desc(*bare) == "", desc(*bare))
@@ -137,8 +127,8 @@ func main() {
 	_, err = c.Runner().Run(ctx, run.Cmd{Name: "ifconfig", Args: []string{"-j", *jail, b, "up"}})
 	check("ifconfig -j "+*jail+" joprobeb up", err == nil, err)
 	check("joprobeb comes back", n.MoveFromJail(ctx, b, *jail) == nil, nil)
+	refused("a description that drops the marker", n.SetDescription(ctx, a, "my link"))
 	check("the pair is destroyed", n.EpairDestroy(ctx, a) == nil, nil)
-	refused("a description that drops the marker", n.SetDescription(ctx, *owned, "my bridge"))
 
 	if failed > 0 {
 		fmt.Printf("%d checks failed\n", failed)

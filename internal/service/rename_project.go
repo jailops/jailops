@@ -196,7 +196,7 @@ func (s *Service) projectObjectSteps(p *renamePlan, from, to string) error {
 		kind api.Kind
 		noun string
 	}{{api.KindFirewallPolicy, "firewall policy"}, {api.KindAddressSet, "address set"}, {api.KindBackupPolicy, "backup policy"},
-		{api.KindProfile, "profile"}, {api.KindAppAccess, "app access of jail"}} {
+		{api.KindProfile, "profile"}, {api.KindVolume, "volume"}, {api.KindAppAccess, "app access of jail"}} {
 		objs, err := s.d.State.ListIn(k.kind, from, "")
 		if err != nil {
 			return internal(err)

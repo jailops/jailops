@@ -5,7 +5,6 @@ import (
 	"sync"
 
 	"jailops.net/jailops/internal/devd"
-	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
@@ -29,7 +28,7 @@ func (h *devdHolder) get() *devd.Watcher {
 }
 
 // RunDevd reads the notifications of devd(8) from the socket at path until ctx ends and publishes the ones an operator
-// acts on as events: a ZFS error or a change of a pool, the link of the uplink or of a managed bridge, and a resource
+// acts on as events: a ZFS error or a change of a pool, the link of the uplink, and a resource
 // limit that a jail hit. A host without devd, or a socket the daemon cannot read, is retried slowly and shows in doctor.
 func (s *Service) RunDevd(ctx context.Context, path string) {
 	w := devd.New(devd.Config{
@@ -43,7 +42,7 @@ func (s *Service) RunDevd(ctx context.Context, path string) {
 	w.Run(ctx)
 }
 
-// devdLink says what an interface is when it is the uplink of a network or a bridge or gateway of one. The epairs of
+// devdLink says what an interface is when it is the uplink of a network. The epairs of
 // the jails are left out: their ends change state with every start and stop.
 func (s *Service) devdLink(iface string) (string, bool) {
 	nets, err := s.netKind.list()
@@ -53,17 +52,6 @@ func (s *Service) devdLink(iface string) (string, bool) {
 	for _, n := range nets {
 		if n.Spec.Uplink != "" && n.Spec.Uplink == iface {
 			return "uplink " + iface, true
-		}
-		b := n.Spec.Bridge
-		if b == "" {
-			continue
-		}
-		member, l3, err := ipam.GatewayNames(b)
-		switch {
-		case iface == b:
-			return "bridge " + b + " of network " + n.Meta.Name, true
-		case err == nil && (iface == member || iface == l3):
-			return "gateway " + iface + " of network " + n.Meta.Name, true
 		}
 	}
 	return "", false

@@ -7,7 +7,7 @@ A NAS: a small fast pool (`zroot`, the system and JailOps's `default` storage) a
 | What | In the example | Owner | Snapshots / backup by JailOps |
 |---|---|---|---|
 | A **storage** on `tank` | `hosts/nas1/storage/bulk.yaml` (`dataset: tank/bulk`), granted to the project with a 12 TB quota | JailOps | yes |
-| A **volume** | `scratch` has `work` (4T), `plex` has `metadata` (200G): datasets under the jail on `bulk` | JailOps | yes, with the jail |
+| A **volume** | `work` (4T) and `plexdata` (200G), made by `projects/media/volumes/`; the jails `scratch` and `plex` attach them | JailOps | its own snapshots; not deleted with a jail |
 | A **host mount** | `plex` sees `/tank/archive/movies` and `/music` read-only | you | no |
 
 ## Prepare the host (once)
@@ -35,7 +35,7 @@ Registering the storage (`sync` creates it) also registers it with the root help
   the fast pool (`storage: default`) while its data is on `bulk`: here `plex` is wholly on `bulk`, because spinning disks are fine for a media
   server.
 - Image generations are built **per pool**: the first jail on `bulk` builds its copy there, so the first start takes longer.
-- Quotas are checked before anything is created: a jail's `resources.disk` and volumes against the project quota.
+- Quotas are checked before anything is created: a jail's `resources.disk` and the volumes of the project against the project quota.
 
 ## Run it
 

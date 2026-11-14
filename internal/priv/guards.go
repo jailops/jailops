@@ -179,6 +179,9 @@ func (g pfGuard) Load(ctx context.Context, anchor, rs string) error {
 	if err := g.l.cfg.checkRuleset(ctx, rs); err != nil {
 		return err
 	}
+	if err := g.l.checkAnchorInterfaces(ctx, anchor, rs); err != nil {
+		return err
+	}
 	return g.l.d.PF.Load(ctx, anchor, rs)
 }
 
@@ -251,36 +254,6 @@ func (g netGuard) owned(ctx context.Context, names ...string) error {
 }
 
 func (g netGuard) List(ctx context.Context) ([]ifconfig.Iface, error) { return g.l.d.Net.List(ctx) }
-
-// BridgeCreate creates a bridge under a name that is free and not a driver's; the bridge carries the marker before
-// it has the name (ifconfig.Command.BridgeCreate).
-func (g netGuard) BridgeCreate(ctx context.Context, name string) error {
-	if err := g.l.ifCreatable(ctx, name); err != nil {
-		return err
-	}
-	return g.l.d.Net.BridgeCreate(ctx, name)
-}
-
-func (g netGuard) BridgeDestroy(ctx context.Context, name string) error {
-	if err := g.owned(ctx, name); err != nil {
-		return err
-	}
-	return g.l.d.Net.BridgeDestroy(ctx, name)
-}
-
-func (g netGuard) BridgeAddMember(ctx context.Context, bridge, member string, private bool) error {
-	if err := g.owned(ctx, bridge, member); err != nil {
-		return err
-	}
-	return g.l.d.Net.BridgeAddMember(ctx, bridge, member, private)
-}
-
-func (g netGuard) BridgeDeleteMember(ctx context.Context, bridge, member string) error {
-	if err := g.owned(ctx, bridge, member); err != nil {
-		return err
-	}
-	return g.l.d.Net.BridgeDeleteMember(ctx, bridge, member)
-}
 
 // SetDescription writes a description JailOps writes on an interface it owns: the marker cannot be put on anything
 // else, and cannot be taken off (clearing writes the marker).
@@ -385,6 +358,9 @@ func (g netGuard) AddrRemove(ctx context.Context, iface string, p netip.Prefix) 
 }
 
 func (g netGuard) route(ctx context.Context, r ifconfig.Route) error {
+	if r.Reject {
+		return g.l.checkRejectRoute(ctx, r)
+	}
 	if err := g.l.cfg.checkRoute(ctx, r); err != nil {
 		return err
 	}
@@ -406,20 +382,6 @@ func (g netGuard) RouteDelete(ctx context.Context, r ifconfig.Route) error {
 		return err
 	}
 	return g.l.d.Net.RouteDelete(ctx, r)
-}
-
-func (g netGuard) NeighborSet(ctx context.Context, iface string, a netip.Addr, mac string) error {
-	if err := g.owned(ctx, iface); err != nil {
-		return err
-	}
-	return g.l.d.Net.NeighborSet(ctx, iface, a, mac)
-}
-
-func (g netGuard) NeighborDelete(ctx context.Context, iface string, a netip.Addr) error {
-	if err := g.owned(ctx, iface); err != nil {
-		return err
-	}
-	return g.l.d.Net.NeighborDelete(ctx, iface, a)
 }
 
 func (g netGuard) IPv6Forwarding(ctx context.Context) (bool, error) {

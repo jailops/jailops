@@ -127,7 +127,7 @@ func JailSpec(name string, s api.JailSpec) error {
 	}
 	for i, v := range s.Volumes {
 		f := fmt.Sprintf("volumes[%d]", i)
-		if err := Name(f+".name", v.Name); err != nil {
+		if err := Name(f+".volume", v.Name); err != nil {
 			return err
 		}
 		if err := AbsPath(f+".mount", v.Mount); err != nil {
@@ -136,13 +136,8 @@ func JailSpec(name string, s api.JailSpec) error {
 		if v.Mount == "/" {
 			return Invalid(f+".mount", "a volume cannot be mounted on /")
 		}
-		if v.Quota != "" {
-			if _, err := ParseSize(v.Quota); err != nil {
-				return Invalid(f+".quota", "quota %q is not a size", v.Quota)
-			}
-		}
 		if seenName[v.Name] {
-			return Invalid(f+".name", "duplicate volume %q", v.Name)
+			return Invalid(f+".volume", "volume %q is attached twice", v.Name)
 		}
 		if seenMount[v.Mount] || seenHost[v.Mount] {
 			return Invalid(f+".mount", "duplicate mount point %q", v.Mount)
@@ -204,6 +199,11 @@ func devices(s api.JailSpec) error {
 		if n.Egress != "" {
 			if _, err := ParseRate(n.Egress); err != nil {
 				return Invalid(f+".egress", "egress %q is not a rate in bits per second such as 10M", n.Egress)
+			}
+		}
+		if n.Ingress != "" {
+			if _, err := ParseRate(n.Ingress); err != nil {
+				return Invalid(f+".ingress", "ingress %q is not a rate in bits per second such as 10M", n.Ingress)
 			}
 		}
 	}

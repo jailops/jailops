@@ -53,14 +53,14 @@ supported. `jailops doctor` fails on anything older than 15.1.
    or rc, and there is no image format other than image generations. Linux guests run in jails through the
    Linuxulator, with documented compatibility limits. Anything that would make JailOps a general container
    platform is out of scope.
-3. **Convention over configuration.** One way to do networking (managed VNET bridges with
+3. **Convention over configuration.** One way to do networking (routed VNET links with
    deterministic addresses), one way to do thin jails, one base source (pkgbase). Options
    that FreeBSD supports but JailOps does not need are not offered.
 4. **A single host is complete.** No cluster setup is needed to start. Hubs and clusters are
    additive.
 5. **One API.** CLI, web UI, `jailops-sync` and automation use the same REST API and the same
    service layer. Nothing is second-class.
-6. **FreeBSD does the work.** jail(8), ZFS, PF and if_bridge do the work. JailOps renders
+6. **FreeBSD does the work.** jail(8), ZFS, PF and the routing table do the work. JailOps renders
    configuration, orders operations and verifies results. It does not reimplement them.
 7. **Do not fake.** Where something cannot be verified without FreeBSD, the code says so.
    A feature that is not implemented returns `unsupported`, it does not pretend.
@@ -140,7 +140,7 @@ names under `names.length`.
 
 | Object | Longest new name | Why |
 |---|---|---|
-| project | 13 | `project create --new-network` names a network, and with it the bridge and its gateway pair (`<bridge>gb`), after the project |
+| project | 13 | prefixes the OS-level name of each of its jails; `project create --new-network` names a network after the project |
 | jail | 32 | `<storage>/projects/<project>/jails/<jail>/data/<volume>@<snapshot>` |
 | volume | 32 | as for a jail |
 | image | 32 | `<storage>/images/<image>/g<N>` and its snapshots |
@@ -226,9 +226,11 @@ A host usually has more than one pool. Three things, with different owners:
 - **Storage on the big pool.** A dataset of the pool is registered as a storage (`jailops storage create bulk --dataset
   tank/jailops`), granted to a project, and a jail is created on it (`--storage bulk`). Roots, snapshots, clones,
   backups and rollback work as everywhere, under the project's own subtree and quota.
-- **Volumes.** A dataset JailOps creates under the jail (`--volume NAME:MOUNT[:ro][:encrypted][:QUOTA]`), snapshotted, rolled back,
-  copied and backed up with the jail. An `encrypted` volume is a ZFS encryption root with a passphrase typed at creation
-  and after every boot; the jail is `locked` until then ([storage.md](storage.md#encrypted-volumes), section 16).
+- **Volumes.** A dataset of a project, `<storage>/projects/<project>/volumes/<name>`, mounted on the host and attached to
+  jails by name (`volumes: [{volume, mount, read_only}]`, a `nullfs` line of the jail's fstab), with an owner and a mode set
+  once at creation. It outlives the jails and can be attached to several; a jail's snapshot, rollback and copy leave it
+  alone. An `encrypted` volume is a ZFS encryption root with a passphrase typed at creation and after every boot; the jail
+  that attaches it is `locked` until then ([storage.md](storage.md#volumes), section 16).
 - **Host mounts.** Data that already exists and that JailOps does not own: `host_mounts` in the jail spec
   (`--host-mount SOURCE:TARGET[:ro]`), mounted with nullfs from a host directory. Only a global administrator may set
   them; the helper writes a jail fstab only when every nullfs source lies below an `admin-host-mount` directory the
@@ -250,55 +252,53 @@ debootstrap (Debian) generation, which is refused.
 
 ## 5. Networking
 
-One model: **managed VNET bridges with deterministic address allocation**.
+One model: **routed VNET links with deterministic address allocation**. A network has no kernel object of its own; the
+host is the router and every jail interface is a point-to-point link to it.
 
-- Every jail uses VNET and one or more epair interfaces on a bridge that JailOps created
-  (description `jailops net=<network> bridge`). Shared-IP and host-networked jails are not supported.
-- **The bridge has any free name.** It is the network's name when that can be one, `--bridge NAME` otherwise, or a
-  generated `jo<n>`; it is chosen when the network is created, stored in the spec and never changed (a rename of the
-  network keeps it). A bridge name has at most 13 characters (`ipam.MaxBridgeName`: the gateway pair adds `ga`/`gb`,
-  15 in all), lowercase letters and digits, is not of a driver's form (`vmx0`, `bridge0`, `lo0`, `bridge`;
-  `ipam.DriverLikeName`), its gateway names do not have the shape of a jail's epair, and it is not an interface of the
-  host or of another network (`network create` asks the helper for the host's interfaces and refuses a taken name at
-  once). `jailops doctor` (`network.bridges`) explains an interface with a network's name that is not JailOps's.
-- A network defines subnets, a **gateway that is a real address owned by the host**, and an allocation **range**.
-  The gateway lives on the host end (`<bridge>gb`) of a gateway epair whose other end (`<bridge>ga`) is a port of
-  the bridge; the bridge itself carries no address (section 18.9 explains why: the host's pf sees a jail's traffic
-  on the bridge ports, and frames addressed to the bridge's own MAC skip them). JailOps allocates from the range, writes the allocation
-  into the jail spec, and configures addresses and the default route inside the jail.
-- **No DHCP, no router advertisement, no SLAAC.** The jail gets `accept_rtadv` disabled.
-  Ordinary IPv6 neighbor discovery between the jail and the gateway still works; it is part of
-  IPv6, not a service.
-- Epair names derive from the jail id, MAC addresses derive from the jail UUID. Reconcile
-  removes epairs that belong to no jail.
-- JailOps never modifies a bridge it did not create. **Ownership is the kernel's description, never the name**: the
-  helper changes only a bridge or epair whose description carries the JailOps marker, which it writes itself when it
-  creates the interface, before the interface has its name; it never takes over an interface by its name, and refuses
-  to create one under a driver's name. A bridge or epair without a description is never taken, whatever its name. The threat model is in [security-model.md](security-model.md#interfaces).
+- Every jail uses VNET and one or more epair interfaces. The host end of an epair is the jail's own link: it carries the
+  network's gateway as a `/32` (the same address on every jail's link, each link being a segment of its own) and the
+  link-local `fe80::1`, and the host holds one `/32` and `/128` host route per jail address through it. The jail holds
+  its addresses as `/32` and `/128` and reaches the gateway by a host route, the rest through it. Shared-IP and
+  host-networked jails are not supported.
+- A network defines subnets, a **gateway address of the host** (IPv4; the IPv6 gateway is always `fe80::1`), and an
+  allocation **range**. JailOps allocates from the range, writes the allocation into the jail spec, and configures
+  addresses and the default route inside the jail. The host rejects the addresses of the subnet that no jail has (a
+  reject route for the subnet, which the more specific routes of the jails override), so a packet for an unallocated
+  address is answered with an error and never sent out of the uplink to come back.
+- **No DHCP, no router advertisement, no SLAAC.** The jail gets `accept_rtadv` disabled. IPv6 neighbor discovery between
+  the jail and its gateway still works; it is part of IPv6, not a service.
+- Epair names derive from the jail id, MAC addresses derive from the jail UUID. Reconcile removes epairs that belong to
+  no jail, and puts back an address or a route of a running jail that went missing (for example after a flush of the
+  routing table).
+- **Ownership is the kernel's description, never the name**: the helper changes only an epair whose description carries
+  the JailOps marker, which it writes itself when it creates the interface, before the interface has its name; it never
+  takes over an interface by its name, and refuses to create one under a driver's name. An epair without a description
+  is never taken, whatever its name. The threat model is in [security-model.md](security-model.md#interfaces).
 - **Every interface JailOps makes says what it is** in its description (`ifconfig` shows `description: TEXT`), one
   short line of at most 64 characters of `A-Za-z0-9 ._:/=()-`, built from names only (`render/ifdesc.go`, golden-tested):
-  `jailops net=<network> bridge`, `jailops net=<network> gateway (bridge side)` and `(host side)` for the gateway pair,
   `jailops jail=<project>/<jail> net=<network> (host side)` and `(jail side)` for the two ends of a jail's epair, and
   `jailops wireguard=<name>` (section 5.3). A name that does not fit is cut and ends in `..`, the same way every time.
   The description is set when the interface is made; the jail end is described from the host with
   `ifconfig -j <jail> <if> description ...` once it is in the jail's vnet (the jail's poststart hook, then the reconcile
-  loop). The loop repairs a missing or different description of an interface JailOps owns and touches no other:
-  a network's bridge and gateway pair are its own when they carry the network's text or the bare marker (which the
-  loop replaces with the text); a jail's epairs are named after the jail's id, so the name alone
-  makes them the jail's (the jail end is checked once per start of the jail); a WireGuard interface is the one the helper
-  recorded creating. A bridge without any description is not taken (it may be anybody's). `jailops doctor` reports
+  loop). The loop repairs a missing or different description of an interface JailOps owns and touches no other: a jail's
+  epairs are named after the jail's id, so the name alone makes them the jail's (the jail end is checked once per start
+  of the jail); a WireGuard interface is the one the helper recorded creating. `jailops doctor` reports
   `net.descriptions`. The helper writes only descriptions that start with `jailops` and fit the character set.
+- **Isolation follows from the topology.** Jails share no segment, so none sees another's frames and none can poison
+  another's neighbour cache; the jail's anchor on its link binds it to its own addresses; the host forwards between two
+  jails what the anchors of both allow. There is no layer 2 between jails (no multicast, VRRP or mDNS between them).
+  Section 18.9 says where pf sees a jail's traffic.
 
 IPv6 has two modes:
 
 | Mode | When | Behaviour |
 |---|---|---|
-| `routed` | The upstream routes a prefix to the host | The bridge owns the prefix. No proxy. **Must work fully without the proxy.** |
-| `proxy` | The upstream treats the addresses as on-link (switched /64) | JailOps answers neighbor solicitations for every address it has allocated to a running jail on the uplink with the host's MAC, announces each one when it appears, and routes `/128` host routes through the bridge. The proxy always runs for a network in this mode; there is no switch for it. What it may do on the uplink is the operator's approval in `priv.conf` (§18.6, §18.10). |
+| `routed` | The upstream routes a prefix to the host | The host routes each address to its jail and rejects the rest of the prefix. No proxy. **Must work fully without the proxy.** |
+| `proxy` | The upstream treats the addresses as on-link (switched /64) | JailOps answers neighbor solicitations for every address it has allocated to a running jail on the uplink with the host's MAC, announces each one when it appears, and routes each address to its jail with a `/128` host route. The proxy always runs for a network in this mode; there is no switch for it. What it may do on the uplink is checked by the helper against the stored network (§18.6, §18.10). |
 
-In `proxy` mode the uplink is never a member of the jail bridge, and the network gets no on-link copy of the
-upstream /64: the gateway is a link-local address (`fe80::1`) on the gateway interface, and each jail address is
-reached through a `/128` host route. **[verified]** on FreeBSD 15.1 amd64 (section 18.10).
+In `proxy` mode the uplink is a plain interface (not a member of a bridge of the host's), and the network gets no on-link copy of the
+upstream /64: each jail address is reached through a `/128` host route through the jail's own link. The jails' gateway is the
+link-local `fe80::1`. **[verified]** on FreeBSD 15.1 amd64 (section 18.10).
 
 The proxy is built in, pure Go, BPF on the uplink with a session state machine
 (incomplete, valid, stale, invalid) and a bounded subscriber queue. It is designed from RFC 4861
@@ -308,9 +308,9 @@ JailOps knows every address it allocates, so it can answer without learning.
 Acceptance of `proxy` mode, with the result on the amd64 test host (a shared switched /64, jails in a `/80`; section
 18.10 and 18.11 have the measurements):
 
-1. `route -n get -inet6 <jail>` selects the gateway interface: **met**.
+1. `route -n get -inet6 <jail>` selects the jail's own link: **met**.
 2. The host never sends a neighbor solicitation for a jail address out of the uplink: **not measured**; the routes
-   point at the gateway interface and nothing suggests otherwise.
+   point at the jails' links and nothing suggests otherwise.
 3. The upstream router keeps reaching the jail after its neighbor entry expires and NUD runs: **met**. A 50 minute
    ping from another machine lost only the first minute's packets, while the entry went stale and was refreshed many times.
 4. Replies leave with the right source and are not blocked by PF: **met**; the PF traffic matrix passed with the proxy running.
@@ -329,15 +329,15 @@ computes addresses by hand:
   `/24` networks (`network_bits`), one per project, behind NAT if `projects.nat` is set. Without a pool the option
   answers `unsupported`.
 - **IPv6:** a routed prefix (for example the `/64` a cloud provider routes to the host) is carved by the operator into
-  `/80` networks, one per bridge or project (`jailops network create ... --ipv6 <addr>/80`): 65,536 networks per `/64`,
+  `/80` networks, one per project (`jailops network create ... --ipv6 <prefix>/80`): 65,536 networks per `/64`,
   2^48 addresses each. A prefix longer than `/64` is fine because JailOps never uses SLAAC or router advertisements;
-  addresses are allocated and configured statically. Automatic carving of IPv6 and a reject route for the unallocated
-  rest of a routed prefix (so packets to addresses no network uses are dropped instead of looping between the host and
-  the provider) are **not implemented**.
-- The gateway is a real address on the gateway interface (see above).
+  addresses are allocated and configured statically. The host rejects the unallocated rest of a routed prefix, so packets
+  to addresses no jail has are answered with an error instead of looping between the host and the provider. Automatic
+  carving of IPv6 is **not implemented**.
+- The IPv4 gateway is an address of the host on every jail's link (see above).
 - The host must forward (`net.inet6.ip6.forwarding=1`, `net.inet.ip.forwarding=1`). **JailOps never sets forwarding**:
   the administrator enables `gateway_enable` and `ipv6_gateway_enable` in `rc.conf`, and `jailops doctor` checks that
-  forwarding is on and persistent. (The daemon sets only the bridge `pfil_*` sysctls and `kern.elf64.fallback_brand`.)
+  forwarding is on and persistent. (The daemon sets only `kern.elf64.fallback_brand`.)
 - A host with a proxy-mode network should answer the unicast neighbor solicitations the segment's routers send from
   their global, off-link addresses (`net.inet6.icmp6.nd6_onlink_ns_rfc4861=1`; the default drops them and the router
   marks the host unreachable for minutes at a time). JailOps never sets it either: `jailops doctor` warns (the setting is recommended)
@@ -375,7 +375,7 @@ interface's public key and what `wg show <if> dump` reports per peer.
   a log. Enrollment (`peer add`) returns the peer's private key and preshared key once, inside a join token
   (`jwg1.<base64url(JSON)>`), and keeps only the public key and the preshared key.
 - **Interfaces** are created by the helper (`ifconfig wg create`, renamed to `wg-<name>`), recorded as its own, described
-  `jailops wireguard=<name>`, and recreated by the reconcile loop like bridges (nothing in `rc.conf`). An interface of
+  `jailops wireguard=<name>`, and recreated by the reconcile loop (nothing in `rc.conf`). An interface of
   that name the helper did not create is refused. `if_wg` is loaded through the module list of the host pass.
 - **pf**: a server with networks gets the anchor `jailops/wg.<name>` (a dot, like `jailops/net.<name>`, so it never meets
   a project's anchor), which passes the tunnel's subnets to those networks and nothing else. The host's `pf.conf` needs
@@ -398,26 +398,19 @@ anchor is then deny whatever the jail's own policies say, and each grant is a `q
 
 ### 5.4 Bandwidth limits
 
-`nic.<device>.egress` is a rate in bits per second with decimal units (`10M` is 10 Mbit/s) for what the jail sends
-through the device. A device that has one gets a **dummynet pipe**, numbered in JailOps's own range (40000 to 59999,
-from a hash of the jail's identity and the device's index, stable and never shared). The jail's anchor sends the traffic
-into it with match rules before its filter rules, and every pass rule after them inherits the pipe:
+`nic.<device>.egress` and `nic.<device>.ingress` are rates in bits per second with decimal units (`10M` is 10 Mbit/s) for
+what the jail sends and what it receives through the device. Each direction of a device that has one gets a **dummynet
+pipe**, numbered in JailOps's own range (40000 to 59999). A number is given once, when the limit is first set, and kept
+(`<state_dir>/rendered/pipes.json`) for as long as the limit exists, so no other jail's pipe is ever renumbered. The jail's
+anchor sends the traffic into the pipes with match rules before its filter rules, and every pass rule after them inherits
+the pipe:
 
-    match in on <epair> all dnpipe N                                   # what the jail sends arrives on its own port
-    match out on <gateway> from any to <addresses> dnpipe (0, N)       # the answers of the jail in a flow that was started
-                                                                       # on the host or the internet
+    match in on <epair> all dnpipe (N, M)    # what the jail sends arrives on its own link (the first number shapes the rule's direction, the second the reverse of the state)
+    match out on <epair> all dnpipe (M, N)   # what is sent to the jail leaves the host on its own link
 
-The second rule gives the state of a flow that the host or the internet started the pipe for the packets of the jail
-(the reverse direction of the state); its first number is 0 because the packets into the jail carry no pipe.
-
-**There is no limit for traffic into the jail.** A packet that pf sends into a pipe and that dummynet releases is put
-into the IP stack again. For what the jail sends that is right: it arrives on the jail's own port, a bridge member, and
-goes on through the host's IP stack (jails reach everything through the host). For a packet on its way to the jail it is
-wrong at the hooks after the gateway interface, the gateway's bridge member and the jail's own port: pf finds the state
-that carries the pipe again, sends the packet into the pipe again, and the reinjection routes it back to the gateway
-interface. The packet circulates until the pipe's queue drops it and the connection stalls (measured on FreeBSD 15.2:
-one acknowledgement repeated 387 times, every 10 ms, never reaching the jail). Floating states, and states bound to
-their interface alike, are found at those hooks, so no layout of match rules shapes the direction into a bridged jail.
+The jail's link is an interface of its own, so one rule sees every packet of one direction of one jail, whoever started the
+connection, and a packet that dummynet releases goes on to its destination (the end-to-end tests measure a transfer in each
+direction against a limit of a few Mbit/s, and an unlimited jail beside it).
 
 The pipe is configured through the helper (`dnctl pipe N config bw RATE`, only for numbers of that range) when the jail
 starts, before its anchor is loaded, and the reconcile loop keeps it right: it sets the pipe again when the limit
@@ -467,7 +460,7 @@ Four layers, one duty each:
 | Jail | Data, `spec.json`, `bundle.json`, `jailops:*` properties | The jail's own datasets |
 | Host configuration | Networks, policies, address sets, backup policies, remotes | JSON files in `<state_dir>/objects/<kind>/<id>.json` (`/var/db/jailops/state`) |
 | Operational data | Users, token hashes, sessions, operations, events, audit log, backup catalog cache | SQLite (`modernc.org/sqlite`, WAL, one writer) |
-| Operating system | `jail.conf`, in-jail `rc.conf`, PF anchors, bridges, epairs | Derived. Never edited by hand. |
+| Operating system | `jail.conf`, in-jail `rc.conf`, PF anchors, epairs | Derived. Never edited by hand. |
 
 SQLite holds nothing required to restore a jail. Users, tokens and the audit log are the only
 non-rebuildable rows; they are copied with `VACUUM INTO` before upgrades and on a schedule.
@@ -522,7 +515,7 @@ section 8.7).
 Three separate resources. **A project is a logical namespace; networks and storage are independent,
 host-managed resources. A project does not create them, it is granted access to them.**
 
-- **Network** (section 5): a managed bridge with address ranges.
+- **Network** (section 5): an address range with an uplink policy.
 - **Storage**: a named ZFS location on a host (`jailops storage create fast --dataset tank/jailops`). Jail and
   volume datasets are created under it. ZFS only; there is no storage abstraction layer. Clones need the
   image generation on the same pool, so each pool that holds thin jails gets its own copy of the generations
@@ -532,11 +525,11 @@ host-managed resources. A project does not create them, it is granted access to 
   for jails, CPU, memory, PIDs and addresses, an optional mandatory firewall policy and an image allow-list.
 
 ```
-jailops network create br-web --ipv4 10.50.0.1/24 --ipv6 fd50::1/64
+jailops network create web --ipv4 10.50.0.1/24 --ipv6 fd50::1/64
 jailops storage create fast --dataset tank/jailops
 jailops project create web
-jailops project set web --network br-web --storage fast
-jailops create nginx --project web --image freebsd-15-1 --network br-web --storage fast
+jailops project set web --network web --storage fast
+jailops create nginx --project web --image freebsd-15-1 --network web --storage fast
 ```
 
 **There is no default project, no default network and no default storage.** A fresh host has no project at all.
@@ -549,11 +542,11 @@ somebody has to remember, and the first thing a second project would break. (The
 is named `default`; it is an ordinary storage, granted to projects and named by jails like any other.)
 
 **A network belongs to one project.** Granting a network that another project already holds is refused
-(`network br-web is already granted to project db`), and a grant is the whole network: there are no shared bridges
+(`network web is already granted to project db`), and a grant is the whole network: there are no shared networks
 and no per-project sub-ranges. Many projects may share one ZFS pool: each gets its own dataset tree under
 `<storage root>/projects/<project>/` and its own quota. Images and host profiles are shared by every project;
 they are immutable or administrator-owned. `jailops project create web --new-network` is the convenience that
-creates a dedicated bridge and subnet.
+creates a dedicated network and subnet.
 
 On the client, `jailops project switch web` stores the current project per remote in the client configuration,
 `--project` and `JAILOPS_PROJECT` override it, and `jailops project list` marks the current one. With none chosen
@@ -563,11 +556,11 @@ global.
 **A fresh host, from nothing to a jail:**
 
 ```
-jailops network create br-web --ipv4 10.50.0.1/24 --uplink em0 --nat
+jailops network create web --ipv4 10.50.0.1/24 --uplink em0 --nat
 jailops project create web
-jailops project set web --network br-web --storage default
+jailops project set web --network web --storage default
 jailops project switch web
-jailops create nginx --image freebsd-15-1 --network br-web --storage default
+jailops create nginx --image freebsd-15-1 --network web --storage default
 jailops start nginx
 ```
 
@@ -590,7 +583,7 @@ they are kept apart by mechanisms that exist in the system:
 
 | Layer | Mechanism |
 |---|---|
-| Network | A network belongs to one project. Its jails never exchange frames: every jail port is a private bridge member and every flow goes through the host (design 18.13). Each jail's anchor binds its addresses (anti-spoofing), and the host pins the jail's MAC address, ARP and neighbor entries, so a jail cannot take another's address. A project's mandatory policies are rendered before the jail's own. Cross-project traffic is denied unless a policy allows it. |
+| Network | A network belongs to one project. Every jail has a link of its own to the host, so jails never exchange frames and every flow goes through the host (section 5). Each jail's anchor binds its addresses (anti-spoofing) and the host routes an address to the one link of its jail, so a jail cannot take another's address. A project's mandatory policies are rendered before the jail's own. Cross-project traffic is denied unless a policy allows it. |
 | Storage | Each project has its own dataset under the storage root with a quota; each jail a quota and optionally a reservation. ZFS delegation (`zfs_delegation`) is never granted to project users unless a global admin allows it per jail, and the operator allows it in priv.conf (`admin-zfs-delegation`); the jail then manages its own dataset `<container>/delegated` (section 4.6). |
 | Compute | Per-jail limits: `limits.memory`, `limits.pids` and `limits.cpu` are rctl rules the helper adds when the jail has started (`swapuse`, `maxproc`, `pcpu`; they need `kern.racct.enable=1`, and a jail reports the condition `Limits` when they cannot be enforced), `limits.disk` is the quota of the jail's container dataset, and `limits.states` limits the pf states of the jail's rules; project quotas are checked before creation. See [operations.md](operations.md#resource-limits-of-a-jail). What a jail uses is measured when asked (`GET /api/v1/jails/<n>/usage`, `jailops jail info`): processes, CPU time and memory from racct through `rctl -u jail:<key>` (a read-only form on the helper's command allow-list, for managed jails only; "racct is off" when `kern.racct.enable` is not 1), and the space of its datasets from ZFS `used`/`referenced`. Nothing of it is stored, and the jail list does not carry it. |
 | Identity | Section 8.2. |
@@ -658,7 +651,7 @@ The CLI is small and predictable, and it is the same for one host and a fleet:
 ```
 jailops project switch web          # client-side: the current project of the current remote
 jailops list                        # also: list 'web*' -c name,state --sort age, -o csv, -o compact
-jailops create nginx --image freebsd-15-1 --network br-web --storage fast --start
+jailops create nginx --image freebsd-15-1 --network web --storage fast --start
 jailops stop -l env=prod            # by label selector; --all for every jail of the project
 jailops exec nginx -- /bin/sh       # also: jailops shell nginx
 jailops config show nginx
@@ -866,8 +859,8 @@ touches: a failure undoes the completed steps in reverse, a daemon that died in 
 object a hub or a repository manages (`managed_by`), a raw PF fragment that names a set's table, a host profile naming a
 project's policy.
 
-**Interfaces keep their names.** A network rename changes no bridge, gateway pair or epair (their names do not derive
-from the network's name, and renaming a live interface would cut the jails on it); it rewrites their descriptions,
+**Interfaces keep their names.** A network rename changes no epair name (they do not derive
+from the network's name, and renaming a live interface would cut the jail on it); it rewrites their descriptions,
 inside running jails too, so the ownership test of 5 still holds. Running jails keep their traffic.
 
 **A running jail is refused**, as is a project with a running jail: the kernel knows a jail by its key
@@ -1149,7 +1142,7 @@ and `jailops-sync` use nothing else.
 |---|---|---|
 | 0 | Repo, CI, nine prototypes (`prototypes/README.md`) | All nine have an answer |
 | M1 | Core: generations, thin and thick jails, lifecycle, snapshots, rollback, state, daemon and privileged helper, API and SDK, CLI, pkg and rc.d | Create, start, snapshot, upgrade and roll back a jail on a clean FreeBSD host |
-| M2 | Network and firewall: bridges, VNET, IPAM, routed and proxy IPv6, PF anchors, doctor, web UI | A jail with IPv4 and IPv6 on a switched network, behind a firewall |
+| M2 | Network and firewall: routed VNET links, IPAM, routed and proxy IPv6, PF anchors, doctor, web UI | A jail with IPv4 and IPv6 on a switched network, behind a firewall |
 | M3 | Alpine and Linux jails | Alpine with sshd and nginx survives restart and rollback |
 | M4 | Backup: chunk repository, host-side encryption, backup node, retention, GC, verify, restore, restore tests, S3; replication between trusted hosts | Restore on another host. A compromised host cannot delete or overwrite backups |
 | M5 | Hub: mTLS, remotes, extensions negotiation, cold move, shared UI | One UI manages ten hosts; one host failing affects no other |
@@ -1178,14 +1171,14 @@ table. UNVERIFIED markers elsewhere in this document stay until the item they na
 | 10 | `zfs diff -FHt` is reliable enough to drive the accelerator | Prototype 9 | Settled with limits (hard links are not reported by name); the accelerator is open, below |
 | 11 | Extended attributes, NFSv4 ACLs and file flags round-trip through capture and restore | Prototype 9 | Settled, with the dataset properties named in 18 |
 | 12 | A restored thin jail comes up from the repository | Restore tests | Settled (18.3, 18.4) |
-| 13 | Per-jail PF anchors isolate jails of different projects on a bridge | Prototype 8 and the PF traffic matrix | Settled for IP traffic (18, 8; 18.9). Ethernet-level protection (ARP, NDP and MAC spoofing, rogue router advertisements) is open, below |
+| 13 | Per-jail PF anchors on each jail's own link isolate jails of different projects | Prototype 8 and the PF traffic matrix | Settled for IP traffic (18, 8; 18.9). Ethernet-level protection (ARP, NDP and MAC spoofing, rogue router advertisements) is open, below |
 | 14 | The capture assumptions of 9.4 hold | Prototype 9 | Settled (18, 9) |
 
 Open:
 
 | Item | What is missing |
 |---|---|
-| Native ZFS encryption | **Encrypted volumes are built** ([storage.md](storage.md#encrypted-volumes)): a volume declared `encrypted` at creation is its own encryption root (aes-256-gcm, `keyformat=passphrase`, `keylocation=prompt`), with a passphrase a person types at creation and after every boot (`jailops jail unlock`, `lock`, `passphrase`; extension `volume_unlock`; state `locked`, error codes `locked` and `bad_passphrase`; the boot skips a locked jail and starts it after its unlock; five wrong passphrases lock unlocks out for 30 seconds). The helper's five operations (`zfs.create_encrypted`, `zfs.load_key`, `zfs.unload_key`, `zfs.change_key` take the passphrase on the request stream, never in arguments; `zfs.feature_state` reads `feature@encryption` for doctor) and the raw copy (`zfs.replicate` with `raw`) are tested against the real allow-list with stand-ins for `zfs`; the service, the lifecycle (an in-memory model of keys), the CLI and the console against fakes. UNVERIFIED on FreeBSD: that `zfs create`, `load-key` and `change-key` read one line from a stdin that is not a terminal, `zfs load-key -n` with the key loaded, the mapped error texts, a raw receive of an encryption root with `-o keylocation=prompt`, snapshots and rollbacks of a locked volume (the `encrypted-volume` block of `scripts/ci-freebsd-e2e.sh`). Not implemented: whole encrypted jails and storages (`spec.encrypted` / `storage.spec.encrypted` answer `unsupported` with the manual alternative in the hint), key files and unattended unlocks, encrypting an existing volume, a restore into an encrypted volume (a restore makes a plain volume and says so) |
+| Native ZFS encryption | **Encrypted volumes are built** ([storage.md](storage.md#encrypted-volumes)): a volume made `encrypted` is its own encryption root (aes-256-gcm, `keyformat=passphrase`, `keylocation=prompt`), with a passphrase a person types at creation and after every boot (`jailops volume unlock`, `lock`, `passphrase`; extension `volumes`; state `locked`, error codes `locked` and `bad_passphrase`; the boot skips a locked jail and starts it after its unlock; five wrong passphrases lock unlocks out for 30 seconds). The helper's five operations (`zfs.create_encrypted`, `zfs.load_key`, `zfs.unload_key`, `zfs.change_key` take the passphrase on the request stream, never in arguments; `zfs.feature_state` reads `feature@encryption` for doctor) and the raw copy (`zfs.replicate` with `raw`) are tested against the real allow-list with stand-ins for `zfs`; the service, the lifecycle (an in-memory model of keys), the CLI and the console against fakes. UNVERIFIED on FreeBSD: that `zfs create`, `load-key` and `change-key` read one line from a stdin that is not a terminal, `zfs load-key -n` with the key loaded, the mapped error texts, a raw receive of an encryption root with `-o keylocation=prompt`, snapshots and rollbacks of a locked volume (the `encrypted-volume` block of `scripts/ci-freebsd-e2e.sh`). Not implemented: whole encrypted jails and storages (`spec.encrypted` / `storage.spec.encrypted` answer `unsupported` with the manual alternative in the hint), key files and unattended unlocks, encrypting an existing volume |
 | Packages at creation (`--package`, `spec.packages`) | Not implemented: the flag was removed; the field answers `unsupported` ("installing packages at creation (spec.packages) is not implemented"). Use the provisioning `packages` step (8.5), which runs once at the first start |
 | Jail freeze | Removed. FreeBSD has no jail freeze; the `freeze` action no longer exists in the SDK, the fake or the service (an unknown action answers `invalid`) |
 | Volumes of an existing jail | `GET/POST /api/v1/jails/<n>/volumes` and `DELETE .../volumes/<v>` answer `unsupported` ("volume management is not part of this version"); `jailops config` on `disk.<name>` keys of an existing jail answers `unsupported` ("changing volumes of an existing jail is not implemented"). Declare volumes at creation |
@@ -1231,7 +1224,7 @@ Open:
 | Appliance mode, modules 3 to 6 | Not built: network, updates, system, storage overview, boot environments before a change and the installer image are design only ([appliance.md](appliance.md)) |
 | Appliance mode from rc.conf, first start, setup token, first-run wizard | Built: `jailops_appliance` passed by the rc scripts to both programs (`-appliance-modules`), `jailops-priv appliance-init`, the setup token (`POST /api/v1/setup`, `service jailopsd setuptoken`), doctor `appliance`, the console's `/setup` wizard. Tested: the rc scripts run by `sh` against a stand-in of `rc.subr`, their headers sorted like `rcorder` (with `syslogd`), the setup routes against in-process daemons, the wizard in demo mode. Not run on FreeBSD: the real `rc.subr`, `/dev/console`, the `authpriv` line in `/var/log/auth.log`, `zfs list -H -o name /` on a root pool, a first boot. `scripts/ci-freebsd-e2e.sh` has the block, off unless `JAILOPS_E2E_APPLIANCE=1` |
 | The console's certificate: upload and ACME | Built: uploads checked and written atomically, ACME with `golang.org/x/crypto/acme` (http-01, tls-alpn-01), renewal 30 days before expiry with backoff, the `rdr` of the challenge port rendered by the firewall module. Tested against an ACME CA written in the tests and the daemon's real listeners on loopback. Not run: issuance by a real CA (docs/exposure.md has the staging check), ports 80 and 443 redirected by pf (`rdr ... -> 127.0.0.1`, and `-> ::1` for IPv6 in particular), a host behind NAT |
-| Interface descriptions | Rendered, golden-tested and applied through fakes, the helper rules tested against the real allow-list. Verified on FreeBSD 15.2-PRERELEASE amd64 (November 2026): a description set on a new interface survives its rename and its move into a vnet and back, a rename to a name that exists fails with `File exists`, and the ownership block of `scripts/ci-freebsd-e2e.sh` (a bridge named like its network, the helper's refusals over its socket, a legacy bridge marked once, a stale epair removed) |
+| Interface descriptions | Rendered, golden-tested and applied through fakes, the helper rules tested against the real allow-list. Verified on FreeBSD 15.2-PRERELEASE amd64 (November 2026): a description set on a new interface survives its rename and its move into a vnet and back, a rename to a name that exists fails with `File exists`, and the ownership block of `scripts/ci-freebsd-e2e.sh` (the helper's refusals over its socket, a stale epair removed) |
 | WireGuard | The helper's operations are tested over the socket with a stand-in for `wg` and `ifconfig`, the token, the configuration file, the `wg show dump` parser and the allocator with unit tests; nothing has run on a host: `ifconfig wg create` and a rename with `-`, `wg syncconf` and the dump format of FreeBSD's `wg`, whether 15.1 has `wg` in the base system, a pf rule naming `wg-office`, a handshake over the loopback (the end-to-end block skips without `if_wg` or `wg`), traffic from a peer into a jail through `jailops/wg.<name>` |
 | API exposure on a real network | TLS 1.3 only, certificate reload, a configured certificate never generated over and the web switch are tested in process; a public listener, a CA-signed certificate with renewal, and a proxy or Cloudflare tunnel in front are not tried. ACME with dns-01 (wildcards), a require-client-certificate mode and the caller's address behind a proxy are not implemented (docs/exposure.md) |
 
@@ -1252,8 +1245,8 @@ proxy and the amd64 clean-install run on amd64). Everything not listed here is u
 | 2 thin upgrade | **The thin-jail design works on FreeBSD 15.1.** `pkg -r <dir> install FreeBSD-set-minimal-jail` builds a usable userland in an empty ZFS dataset, provided the signing key directories (`/usr/share/keys/pkgbase-<major>`) are copied into the new root first, because `pkg -r` resolves fingerprint paths inside the root. The repository for a RELEASE is `pkg+https://pkg.FreeBSD.org/${ABI}/base_release_<minor>` (the minor of the image's release is written out: pkg expands `${VERSION_MINOR}` from an ABI that has no minor and answers 0) (`base_latest` is for -STABLE and -CURRENT), the ABI comes from `pkg config abi` (`FreeBSD:15:aarch64` on arm64), and the keys path from `pkgbase-${VERSION_MAJOR}`. A thin jail whose root is a clone of `g1@ro` with persistent datasets (`/etc`, `/usr/local`, `/var/db`, `/var/log`, `/var/mail`, `/var/spool`, `/home`, `/root`) seeded from the image starts, runs `pkg install` and passes a health check. `etcupdate` works on pkgbase generations through tarballs: `etcupdate extract -d <work> -t <old-etc.tar> -D <jail root>` then `etcupdate -d <work> -t <new-etc.tar> -D <jail root> -L <log>`, where each tarball holds `./etc` of a generation; it prints `M <path>` for merged and `C <path>` for conflicting files and exits non-zero on conflict. Disjoint edits merge cleanly. Swapping roots with `zfs rename` and starting on the new generation works. **Root rollback keeps data written after the upgrade; `all` rollback restores root and every persistent dataset from the single atomic snapshot and discards the data written since (`zfs get written` reports it).** Writes outside the persistent paths vanish with the root. |
 | 3 PF anchors | Anchors load, replace and flush without touching the administrator's ruleset. Replacement is atomic (200 reloads under sampling, never empty or mixed). A syntax error is rejected by `pfctl -n` and by the load, and the old ruleset stays. **Not** rejected: a rule that uses an undefined table. Tables are anchor-local and runtime entries are lost on reload. |
 | 4 ZFS replication | A plain send of a clone is self-contained. `send -R` of a tree recreates the clone relationship. A bookmark works as the incremental base after the source snapshot is destroyed. Guid comparison detects forks. `recv` refuses an existing destination without `-F` and an incremental from a forked base. **An incremental on top of a receiver that has a newer snapshot is accepted without `-F`**, so JailOps must enforce guid continuity itself and never rely on `recv` to refuse. `zfs hold` blocks destroy and `destroy -d` defers. Resume tokens (`recv -s`, `send -t`, `recv -A`) work. A raw send of an encrypted dataset needs no key on the receiver and the key can be loaded later. A non-raw send of an encrypted dataset arrives as plaintext. ZFS is 2.4.2. |
-| 6 Alpine | **Alpine runs as a jail on FreeBSD 15.1 arm64.** The Linuxulator reports Linux 5.15.0. With the minirootfs (v3.22, aarch64, musl) as the jail root: `apk update` and `apk add openssh nginx` work, nginx serves a page and sshd answers with its banner to the host, and ZFS snapshot, breaking the root and `zfs rollback` restores a working system (`apk --version` works again). Details that shape the design: (1) **ELF branding.** Alpine's binaries are built for musl and carry no Linux note; busybox happens to be branded Linux but `apk`, `nginx`, `sshd` and others carry OS/ABI 0. The kernel refuses unbranded binaries, and `execvp` then falls back to `/bin/sh`, which is busybox, hence the confusing `applet not found` and `Exec format error`. Branding files at build time is not enough, because `apk add` installs new unbranded binaries at any time. **JailOps therefore manages `kern.elf64.fallback_brand=3`** (unbranded ELF runs as Linux) whenever a Linux jail exists, and `doctor` checks it. Native FreeBSD binaries carry a FreeBSD brand and are unaffected (verified on the host). A pure-Go equivalent of `brandelf -t Linux` exists as a fallback for build time. (2) **`/dev/shm` and the emulation path.** devfs refuses to create `/dev/shm`. The Linuxulator resolves paths through `/compat/linux` first, and as soon as that directory exists in the jail root a file create below it fails with `ENOENT` (apk could not lock its database). The working layout mounts a **nullfs mirror of the jail root on `<root>/compat/linux`**, creates `dev/shm` through the mirror and mounts a tmpfs there. Mount order: devfs (with a private ruleset), fdescfs, the nullfs mirror, tmpfs on `compat/linux/dev/shm`, linprocfs, linsysfs. (3) **Network.** A Linux userland has no netlink-based tooling that works here; the host configures the jail: `ifconfig -j <jail> <if> inet <addr>/<n> up`, `ifconfig -j <jail> <if> inet6 <addr> prefixlen <n>` and `route -j <jail> add default <gw>`. Linux sees the interface as `eth0` (names are mapped, `compat.linux.use_real_ifnames=0`) with the right address. (4) **Bridges and epairs are created under generic names and renamed**: `ifconfig bridge create` then `ifconfig bridgeN name <name>`; `ifconfig <name> create` fails with `Invalid argument`. (5) `inet6` takes `<addr> prefixlen <n>`; `inet6 <addr>/<n>` in the same command as `inet` was rejected. Not yet verified: amd64 (the test host is arm64), glibc distributions (Debian), `apk` running as a provisioning step from the host, behaviour under load. |
-| 8 isolation | Verified on FreeBSD 15.1 with ordinary tools (no packet forging; active attacks such as forged ARP, NDP, router advertisements and DHCP are intentionally not automated). (1) **The `private` bridge-member flag blocks all direct member-to-member traffic, including between jails of the same project on the same subnet** (ICMP, ICMPv6, TCP all fail with it on and all pass with it off). It is therefore only usable for networks where every flow goes through the host (separate subnets, routed addressing); a shared bridge that lets a project's jails talk to each other leaves it off and relies on PF. (2) **Nested anchors are evaluated only when every intermediate anchor contains `anchor "*"`.** The administrator's `pf.conf` has `anchor "jailops/*"`; JailOps loads `anchor "*"` into `jailops/<project>` and the project rules there. Without it a rule in `jailops/<project>/<jail>` is never evaluated (reachable before and after; blocked as soon as the parent has the wildcard). (3) **PF filters traffic between projects on a shared bridge**: with `private` off and project anchors of the form `block return quick from <A_own> to <B_own>` / `pass quick from <own> to <own>`, cross-project traffic was blocked and intra-project traffic allowed under all four `pfil_*` combinations tried (member 0 or 1, bridge 0 or 1, onlyip 0 or 1). (4) **Source-address enforcement per jail works with a table, at the member interface.** Without a rule a jail that aliased another address and sourced `ping -S` from it reached a neighbouring jail; with `table <jail_addrs> persist { <v4>, <v6>, fe80::/10, :: }` and `block in quick on <epair> from ! <jail_addrs> to any` loaded into the jail's anchor it was dropped and the rule's counters showed the hits. A negated list (`from ! { a b }`) is a syntax error, so the renderer always emits a table; the table must include the link-local prefix and `::` or IPv6 neighbor discovery and duplicate address detection break. A rule on the bridge interface (`block quick from <addr>`) also worked with `pfil_bridge=1`, but cannot say which jail sent the packet, so per-jail enforcement needs **`pfil_member=1`**. (5) Ethernet-level protection (ARP, NDP and MAC spoofing) is **not** covered by these tests and needs `ether` rules; it stays open. (6) Link-local multicast and broadcast probes were inconclusive. |
+| 6 Alpine | **Alpine runs as a jail on FreeBSD 15.1 arm64.** The Linuxulator reports Linux 5.15.0. With the minirootfs (v3.22, aarch64, musl) as the jail root: `apk update` and `apk add openssh nginx` work, nginx serves a page and sshd answers with its banner to the host, and ZFS snapshot, breaking the root and `zfs rollback` restores a working system (`apk --version` works again). Details that shape the design: (1) **ELF branding.** Alpine's binaries are built for musl and carry no Linux note; busybox happens to be branded Linux but `apk`, `nginx`, `sshd` and others carry OS/ABI 0. The kernel refuses unbranded binaries, and `execvp` then falls back to `/bin/sh`, which is busybox, hence the confusing `applet not found` and `Exec format error`. Branding files at build time is not enough, because `apk add` installs new unbranded binaries at any time. **JailOps therefore manages `kern.elf64.fallback_brand=3`** (unbranded ELF runs as Linux) whenever a Linux jail exists, and `doctor` checks it. Native FreeBSD binaries carry a FreeBSD brand and are unaffected (verified on the host). A pure-Go equivalent of `brandelf -t Linux` exists as a fallback for build time. (2) **`/dev/shm` and the emulation path.** devfs refuses to create `/dev/shm`. The Linuxulator resolves paths through `/compat/linux` first, and as soon as that directory exists in the jail root a file create below it fails with `ENOENT` (apk could not lock its database). The working layout mounts a **nullfs mirror of the jail root on `<root>/compat/linux`**, creates `dev/shm` through the mirror and mounts a tmpfs there. Mount order: devfs (with a private ruleset), fdescfs, the nullfs mirror, tmpfs on `compat/linux/dev/shm`, linprocfs, linsysfs. (3) **Network.** A Linux userland has no netlink-based tooling that works here; the host configures the jail: `ifconfig -j <jail> <if> inet <addr>/<n> up`, `ifconfig -j <jail> <if> inet6 <addr> prefixlen <n>` and `route -j <jail> add default <gw>`. Linux sees the interface as `eth0` (names are mapped, `compat.linux.use_real_ifnames=0`) with the right address. (4) **Epairs are created under generic names and renamed**: `ifconfig epair create`, then `ifconfig epairNa name <name>`; `ifconfig <name> create` fails with `Invalid argument`. (5) `inet6` takes `<addr> prefixlen <n>`; `inet6 <addr>/<n>` in the same command as `inet` was rejected. Not yet verified: amd64 (the test host is arm64), glibc distributions (Debian), `apk` running as a provisioning step from the host, behaviour under load. |
+| 8 isolation | Verified on FreeBSD 15.1 with ordinary tools. (1) **Nested anchors are evaluated only when every intermediate anchor contains `anchor "*"`.** The administrator's `pf.conf` has `anchor "jailops/*"`; JailOps loads `anchor "*"` into `jailops/<project>` and the project rules there. Without it a rule in `jailops/<project>/<jail>` is never evaluated. (2) **Source-address enforcement per jail works with a table, at the jail's own interface.** Without a rule a jail that aliased another address and sourced `ping -S` from it reached a neighbouring jail; with `table <jail_addrs> persist { <v4>, <v6>, fe80::/10, :: }` and `block in quick on <epair> from ! <jail_addrs> to any` loaded into the jail's anchor it was dropped and the rule's counters showed the hits. A negated list (`from ! { a b }`) is a syntax error, so the renderer always emits a table; the table must include the link-local prefix and `::` or IPv6 neighbor discovery and duplicate address detection break. |
 | 9 capture | **Snapshot metadata is trustworthy.** Mode, uid, gid, size, mtime, ctime, inode, extended attributes, NFSv4 ACLs and file flags read through `.zfs/snapshot/<name>` equal a live `stat` taken just before the snapshot (80 of 80 files, with a writer running in the same dataset). **inode and ctime are stable** between two successive snapshots, across `zfs rollback`, and (observed) across a clone and a `send \| recv`, so the stat-walk change detection of design 9.4 may rely on both. The first read of a new snapshot waits for the automount (0.5 to 1.7 s observed): capture polls until the directory is readable. `snapdir` is `hidden` by default; listing 60 snapshots takes microseconds. **A file opened under a snapshot that is then destroyed fails with `ENXIO` ("device not configured")**: capture holds the snapshot (`zfs hold`) until it is done and treats `ENXIO` as a failed run. |
 | 9 zfs diff | `zfs diff -FHt` prints **absolute paths**, reports the dataset root `.` as modified whenever its entries change, and is keyed by object, not by name: **a new hard link name is not reported as an addition, and removing one of several link names is not reported as a removal** (observed as 4 of 20 disagreeing batches after normalising paths and the root). The L1 accelerator therefore rescans every directory it reports as modified (which finds new and removed names, including hard links) and always rescans entries with a link count above one. Everything else compared equal. |
 | 9 round trip | A snapshot tree archived and extracted by an independent archiver reproduces content and hard-link groups exactly. NFSv4 ACLs round-trip **only when the target dataset has `acltype=nfsv4`, `aclmode=passthrough` and `aclinherit=passthrough`** (with the default properties the extra ACL entries are lost): the manifest records these properties and restore creates the datasets with them. Directory mtimes are changed by extracting their children, so extraction ends with a final pass that sets directory times, deepest first. ctime and inode necessarily differ in the restored tree. |
@@ -1267,15 +1260,15 @@ Design consequences of prototype 2:
 
 Design consequences of prototype 8:
 
-- The daemon-managed bridge sysctls default to `net.link.bridge.pfil_member=1`, `net.link.bridge.pfil_bridge=0` and `net.link.bridge.pfil_onlyip=1` (configurable). With member filtering per-jail rules are written `on <epair>` and project rules stay interface-independent.
+- Per-jail rules are written `on <epair>` (the host end of the jail's link) and project rules stay interface-independent.
 - The PF renderer never emits a negated address list, always defines the tables an anchor references, includes `fe80::/10` and `::` in a jail's allowed sources, and emits `anchor "*"` in every project anchor.
 
 ### 18.1 First end-to-end run of the daemon (FreeBSD 15.1 arm64)
 
 `jailops image build freebsd15` (pkgbase), `jailops create nginx --project web --image freebsd15@stable
---network br-web`, `jailops start nginx --project web` and `jailops exec --project web nginx -- uname -a` ran
+--network web`, `jailops start nginx --project web` and `jailops exec --project web nginx -- uname -a` ran
 through jailopsd in dev mode with the in-process helper, and the jail started through `jail(8)` with the
-`jailops-priv hook` scripts. The jail has 10.50.0.2/24 on the managed bridge, reaches the gateway and, through
+`jailops-priv hook` scripts. The jail has 10.50.0.2/32 on a link of its own, reaches the gateway and, through
 the NAT anchor, the internet; stop and start repeat cleanly. What the run found, all fixed:
 
 - A pkgbase image has no `/usr/local`; seeding a persistent dataset from a directory the image does not ship
@@ -1293,7 +1286,7 @@ the NAT anchor, the internet; stop and start repeat cleanly. What the run found,
   `packaging/`) and the binary at `helper-path`.
 
 A second run built the Alpine 3.22.1 minirootfs image (arm64) through the daemon and helper, created and started
-an Alpine jail on `br-web` (`uname -sr` inside: `Linux 5.15.0`; it reaches the gateway) and ran commands in it
+an Alpine jail on `web` (`uname -sr` inside: `Linux 5.15.0`; it reaches the gateway) and ran commands in it
 through `jailops exec`. It found: the `/dev/shm` backing directory belongs in the real tree (`<root>/dev/shm`,
 reached through the nullfs mirror), not below `compat/linux`; the `compat/linux` mount point must exist before the
 mirror is mounted; `fdescfs` takes `linrdlnk` and `late`; the private devfs ruleset range is accepted in a
@@ -1453,7 +1446,7 @@ Other review findings fixed: a backslash is no longer accepted in a quoted `jail
 resumable receive need the admin assertion; while `pkg` runs, the repository directory it was checked against cannot be
 changed through the helper.
 
-Browsers cannot perform the `jailops-exec/1` HTTP upgrade, so the web console uses a bridge: a session created with
+Browsers cannot perform the `jailops-exec/1` HTTP upgrade, so the web console uses a relay: a session created with
 `POST /api/v1/jails/{name}/console`, input by POST, output as server-sent events (API extension `jail_console`). The
 session is owned by the creating actor and ends with the process or after an idle period.
 
@@ -1473,10 +1466,10 @@ file on disk (still inside the allow-list); a new or changed host-mount line nee
 ### 18.7 IPv6 on a routed /64, and a glibc distribution (FreeBSD 15.1 arm64)
 
 **IPv6.** The test host has a routed /64 (the provider routes the whole prefix to the host). `jailops network create v6
---bridge jo9 --ipv4 10.88.0.1/24 --ipv6 <prefix>:1::1/80 --uplink vtnet0 --nat --dns 1.1.1.1 --dns 2606:4700:4700::1111`
-makes a dual-stack managed bridge: a /24 for IPv4 (NAT) and a /80 carved out of the routed /64 for IPv6 (routed, no NAT).
+--ipv4 10.88.0.1/24 --ipv6 <prefix>:1::/80 --uplink vtnet0 --nat --dns 1.1.1.1 --dns 2606:4700:4700::1111`
+makes a dual-stack network: a /24 for IPv4 (NAT) and a /80 carved out of the routed /64 for IPv6 (routed, no NAT).
 A jail attached with plain `--network v6` now gets an address of every family the network has; it has the v4 and the v6
-address, the default route through the bridge, and `resolv.conf` from the network. Verified: the jail reaches the
+address, the default route through the host, and `resolv.conf` from the network. Verified: the jail reaches the
 internet over IPv4 and IPv6 (`curl -6` and `curl -4` return 200), the host reaches the jail, and the same for Alpine and
 Debian jails. UNVERIFIED: traffic into the jail from the internet (the test machine has no IPv6 route to it). Switched IPv6 (an
 upstream that is not routed to the host) needs the NDP proxy and is covered in 18.10.
@@ -1519,29 +1512,26 @@ process, and the plaintext lives in the argument list of that call only. `jailop
 recipients from the hosts and lists them in `secrets/recipients.txt`. Services started by the jail's own rc scripts do
 not get the environment (there is no agent in the jail); for those, put the value in a file through provisioning.
 
-### 18.9 Where pf sees a jail's traffic (FreeBSD 15.1 arm64, `pfil_member=1`, `pfil_bridge=0`)
+### 18.9 Where pf sees a jail's traffic
 
-Measured with real traffic (probe, `pfctl -F states` first because states are floating and let old flows through,
-probe at once, since the reconciler restores a hand-edited anchor within seconds):
+Every jail interface is a link of its own: the host end is an ordinary interface in the host's IP stack, and pf sees
+what a jail sends as `in` on it and what is sent to the jail (by the host, by another jail, from the internet) as `out`
+on it. There is no second hook for the same packet on the way to the jail and nothing between the jails that pf cannot
+see.
 
-1. **Jail to jail on one bridge** is seen on the sending jail's port as `in` and on the receiving jail's port as
-   `out`. Per-jail rules on the epair ends filter it, in both directions.
-2. **Frames addressed to the bridge's own MAC bypass the pf hook of the bridge's ports.** With the host's address on
-   the bridge itself, a jail's traffic to the host, or routed through the host to another network or the internet,
-   was never seen by `block in on <jail epair>`; pf saw it only as `in on <bridge>`. So `default_out: deny` and every
-   egress rule did nothing towards the host and the internet, and a jail could claim another jail's address towards
-   them (the anti-spoofing rule on its port never ran). pf `ether` rules did not evaluate at all on this setup, so
-   they are no way out.
-3. **The fix is structural:** the bridge carries no address. The network's gateway addresses are on the `gb` end of a
-   gateway epair whose `ga` end is a port of the bridge (`jo21`, `jo21ga`, `jo21gb`; bridge names have at most 13
-   characters). The host is then just another port: a jail's traffic to it is forwarded between ports, so it meets
-   the jail's own rules on its own port, `block in quick ... from ! <jail_addrs>` included. Verified: the same rule
-   that did nothing before blocks jail to host once the gateway is a port.
-4. **Traffic from the host to a jail** (the host's own, and routed from other networks or the internet) leaves the
-   host on the gateway's `gb` end and is not seen on the jail's port as `out`. The renderer therefore also emits, in
-   the jail's anchor, the rules for traffic into the jail on the gateway interface, restricted to the jail's own
-   addresses (`out on <gateway> ... to <jail>`), with the same order (project policy, jail policy, project isolation,
-   defaults).
+1. **Jail to jail** is judged twice, each time by the anchor of the jail whose link it is on: `in` on the sender's link
+   (the sender's anchor: its addresses, its egress rules) and `out` on the receiver's link (the receiver's anchor: its
+   ingress rules). Both must pass.
+2. **States are bound to their interface.** With pf's default (floating) states, the state that the first hop creates
+   would carry the packet through the second hop without that hop's rules ever looking at it. Every pass rule JailOps
+   renders therefore says `keep state (if-bound)`, and the host's `pf.conf` carries `set state-policy if-bound` so that the
+   rules of the host behave the same (`jailops doctor` fails `pf.state-policy` without it).
+3. **Host to jail** is `out` on the jail's link; **jail to host** is `in` on it and stops there. The host is named in a
+   rule by the endpoint `host` (the table `<host>`: the host's own addresses). Whether a jail may reach the host's
+   services is a rule of its policy like any other; the default policy of a jail closes the host once the policies
+   say so.
+4. **A jail's traffic to the internet** is `in` on its link (the jail's anchor), then `out` on the uplink (the host's own
+   rules, and the translation of the network's anchor).
 5. **Projects are isolated by default.** Every jail has an anchor, with or without a policy. It closes the subnets
    of the networks of every other project (`table <foreign>`) in both directions after the jail's own rules, so a
    rule of a policy can open one flow and nothing else is open. A project policy's defaults are a floor: a jail's own
@@ -1549,12 +1539,11 @@ probe at once, since the reconciler restores a hand-edited anchor within seconds
 6. The tests: `scripts/ci-freebsd-pf.sh` (also run by the e2e script) sends real traffic between a host, four jails
    in two projects and three networks, IPv4 and IPv6, TCP, UDP and ICMP, with expected outcome per probe; with
    `FORGE_BIN` set it also runs forged ARP, ICMPv6 and router-advertisement frames sent from inside a jail with
-   `scripts/forge` (18.13), asserting real effects (unchanged host caches, continuous victim traffic, no leak to the
-   uplink), not rule presence. (The exact probe count is not quoted here: it changes with the matrix and goes stale
+   `scripts/forge` (18.13), asserting real effects (unchanged host caches, continuous victim traffic, no capture of
+   another jail's traffic, no way around the host, no leak to the uplink), not rule presence. (The exact probe count is not quoted here: it changes with the matrix and goes stale
    in prose faster than in the script; run it to see the number.)
    `TestPFGoldensParseWithPfctl` parses every rendered golden with the real `pfctl -n`, which found
-   two grammar errors (`icmp6-type` and `tagged` must follow `from .. to ..`). The optional "bridge placement"
-   (`network.pf_placement: bridge`) was removed: it was unverified and the facts above make it unsound.
+   two grammar errors (`icmp6-type` and `tagged` must follow `from .. to ..`).
 
 **Isolation limits to know (October 2026 audit).** (1) (Closed since: see 18.13. pf cannot name the advertised target,
 so jails hold /32 and /128 addresses, every port is private and the host pins their addresses.) (2) A policy rule `allow out to any` or `allow in from any` also opens the networks of other projects, because the
@@ -1573,23 +1562,23 @@ things only root has, and the daemon is not root and is not trusted, so the help
   (ICMPv6 NS and NA, hop limit 255), sets immediate mode and direction "in", and **locks** it (`BIOCLOCK`) before it
   passes the descriptor over the socket. Measured as the daemon's user on the test host: `write` fails with `EBADF`,
   `BIOCSETIF`, `BIOCSETF`, `BIOCPROMISC` and `BIOCSHDRCMPLT` fail with `EPERM`, a request for another interface is
-  refused by the helper, and reading works. The daemon can listen to neighbor discovery on the approved uplink and
+  refused by the helper, and reading works. The daemon can listen to neighbor discovery on the uplink of a proxy network and
   nothing else.
 - `ndp.answer {uplink, target, requester_ip, requester_mac}`: the helper builds the Neighbor Advertisement itself
   (S and O flags, source address = target, the uplink's own MAC as target link-layer address) and sends it on a
-  write descriptor of its own. The daemon never sends a frame. The helper refuses: an uplink the operator did not
-  approve; a target outside the approved prefixes or that is an address of this host (its kernel answers for those);
+  write descriptor of its own. The daemon never sends a frame. The helper refuses: an uplink no network in proxy
+  mode uses; a target outside the networks' subnets or that is an address of this host (its kernel answers for those);
   an unspecified or multicast requester (Duplicate Address Detection is not answered, by design); a zero, multicast or
   own MAC; and more than 200 advertisements a second per uplink. With `announce` set it sends one unsolicited
   advertisement (override flag only) of an approved target to all nodes, under the same limits; the proxy does that
   when an address is added and whenever the capture is reopened, so a router that has not asked yet, or holds an old
   entry, learns at once.
 
-**The authority is the operator's.** `ndp-proxy = <uplink>=<prefix>[,<prefix>...]` in the root-owned `priv.conf`
-(one line per uplink, prefixes between /48 and /120) is the only thing that lets a request through. Without it the
-operations answer `forbidden` with the line to add, the proxy does not start, and the doctor and the network status
-show that message. A compromised daemon can at most make the helper advertise addresses inside an approved prefix on an
-approved uplink, at a bounded rate; it cannot sniff other interfaces or inject other frames. (Every request is
+**The authority is the stored network.** The helper accepts a request only for the subnet of a stored network in proxy mode on
+that uplink, and checks it itself: between /48 and /120, global or unique-local, no address of the host inside it on any
+interface, no overlap with another network, the uplink a plain interface. Otherwise the operations answer `forbidden`
+with the reason, the proxy does not start, and the doctor and the network status show that message. A compromised
+daemon cannot sniff other interfaces or inject other frames. (Every request is
 audited: since the rc script now passes `-log syslog`, the helper's lines reach syslog, where before they went to
 /dev/null under `daemon -f`.)
 
@@ -1597,14 +1586,14 @@ The multicast group joins (MLD) stay in the daemon: an ordinary `IPV6_JOIN_GROUP
 the solicited-node group of each address). The `/128` host routes through the network's gateway interface are installed
 by the reconcile loop as part of the network steps, and removed when the jail stops.
 
-Measured on the amd64 test host (FreeBSD 15.1 amd64, upstream a shared switched /64, the jails in `2a0a:4cc0:c1:3bb8:100::/80`):
+Measured on the amd64 test host (FreeBSD 15.1 amd64, upstream a shared switched /64, the jails in `2001:db8:c1:3bb8:100::/80`):
 the upstream routers send multicast NS for a jail address and the proxy answers within a millisecond with the host's MAC
 (`tcpdump`: NA with source = target); a jail reaches IPv6 destinations; another host on the internet reaches the jail;
 stopping a jail removes its `/128` route and the others stay reachable. The first packets to a new address can be lost
 while the upstream router resolves it; the proxy answers within a millisecond once it asks, and announces new
 addresses unasked. A jail address that is given to another jail later is forgotten by the host's neighbor cache when the
 host route goes (`ndp -d`), or the host could not reach the new jail for a day. The doctor fails (`network.ndproxy`)
-when a proxy-mode network is not answering, with the `priv.conf` line to add.
+when a proxy-mode network is not answering.
 
 Behaviour of the proxy under load and when it cannot work (October 2026 audit): announcements have a budget of their own
 (10 a second) and are sent for new addresses only, three times, a second apart, as RFC 4861 7.2.6 allows, and again for all
@@ -1618,7 +1607,7 @@ capture (the uplink down, the helper refusing `ndp.open`) makes the network's `N
 `network.ndproxy` fail with the reason, and the retries back off from 2 to 30 seconds. The helper answers and announces
 only for an address that has a `/128` host route through one of its own interfaces (read from the routing table), so a
 compromised daemon cannot make it speak for the upstream router or another machine of the segment even when the operator
-approved the whole /64.
+owns the whole /64.
 
 **The per-target flood, analysed (October 2026).** Who can exploit it: another host already on the shared segment
 (a neighbour tenant with raw-frame access, not a remote attacker). What it buys: one proxied address stops being
@@ -1677,24 +1666,18 @@ Audit of the generated PF rules for neighbour-cache poisoning, checked with forg
   (the table holds its own link-local address, derived from the MAC JailOps sets; `fe80::/10` only when that is unknown),
   `::` passes only as a DAD solicitation to a solicited-node group, router advertisements and redirects are dropped,
   and only neighbour messages to the jail's own addresses and groups reach it.
-- **The model (October 2026): bind every address to its jail, trust nothing a jail says.** A jail holds IPv4 as `/32`
-  and IPv6 as `/128` in both IPv6 modes; its default routes lead to the host (an on-link host route to the IPv4
-  gateway, rc `static_routes` on FreeBSD and a `route -j` step for Linux guests; `fe80::1` on the gateway interface for
-  IPv6). So it has no on-link neighbour and everything, other jails included, goes through the host and PF. Every jail
-  port is a private bridge member. At attach the host installs permanent entries on the gateway interface (`arp -s`,
-  and `ndp -s` for the global and link-local IPv6 addresses, deleted first), sets `staticarp` on it (no ARP request is
-  ever sent, so an address a jail gives itself is never resolved), and adds a static forwarding entry for the jail's
-  MAC address on its port (a learned entry would move to a jail that uses someone else's MAC address); detach and the
-  stale-entry collection remove the entries. Every neighbour advertisement from a jail is blocked, as are router
-  advertisements and redirects (also from the host towards a jail, on the gateway interface). pf `ether` rules did
-  not work on the bridge path here (a block rule for ARP on the jail's port had no effect), so none is used.
-- **Verified** with forged frames sent from inside the jails (a small raw-socket/bpf tool, `temp/nasend`) on the amd64 host
-  (proxy mode) and the arm64 host (routed mode): neighbour advertisements for another jail's address or the gateway, ARP
-  replies and requests claiming another jail's address or the gateway, a router advertisement with an autonomous prefix
-  towards a jail, a DHCP discover, an extra IPv4 or IPv6 address and another jail's MAC address on a jail's interface.
-  None changed any cache, none configured an address, none took another jail's traffic; host to jail, jail to jail
-  (through the host), jail to internet and internet to jail (ICMP, and TCP in proxy mode) kept working through 20
-  restarts of a jail and the reuse of an address by a new jail.
+- **The model: every jail has a link of its own, bind every address to it, trust nothing a jail says.** A jail holds IPv4
+  as `/32` and IPv6 as `/128` in both IPv6 modes; its default routes lead to the host (an on-link host route to the IPv4
+  gateway, rc `static_routes` on FreeBSD and a `route -j` step for Linux guests; `fe80::1` for IPv6). So it has no
+  on-link neighbour and everything, other jails included, goes through the host and PF. The only other party on a
+  jail's link is the host, whose end answers for the gateway addresses, and the host routes each of the jail's addresses
+  to that one link. Router advertisements and redirects are dropped, and a neighbour advertisement never goes to a
+  multicast group. pf `ether` rules are not used.
+- **Verified** with forged frames sent from inside the jails (`scripts/forge`, in the PF matrix): neighbour
+  advertisements for another jail's address or the gateway, ARP replies and requests claiming another jail's address or
+  the gateway, a router advertisement with an autonomous prefix, a DHCP discover, an extra IPv4 or IPv6 address, another
+  jail's MAC address on a jail's interface, a capture of the link, and a direct route to another jail's address on the
+  jail's own link. None changed any cache, none configured an address, none took or saw another jail's traffic.
 - Observed on the way: a host with pf forwarding refragments an oversized IPv6 packet instead of answering with
   packet-too-big, so an ordinary oversized echo produces no error; the error was tested with a forged one. pf also
   passes the answer to a solicitation by state, so a rule against advertisements does not stop a reply to a solicitation
@@ -1703,60 +1686,16 @@ Audit of the generated PF rules for neighbour-cache poisoning, checked with forg
   /48 to /126 and routed /32 to /126; overlapping subnets are refused; a proxy uplink must be a physical or vlan
   interface (doctor).
 
-### 18.14 The boot-time window before PF is up (October 2026)
+### 18.14 The boot-time window before PF is up
 
-Read of the boot order, before any live test: `jailops_priv` (`REQUIRE: zfs`, `BEFORE: jailopsd`) starts the helper;
-`jailopsd` (`REQUIRE: jailops_priv NETWORKING`) then creates the bridges and gateway epairs of every network, loads
-the network anchors, and autostarts jails (each hook attaches its epair, sets the static ARP/ND entries and the
-private bridge flag, *then* runs `jail -c`, whose `exec.start = "/bin/sh /etc/rc"` runs the guest's whole boot
-synchronously; the jail's own PF anchor is loaded only in `hookPostStart`, **after** that finishes). So there is a
-real window, for every jail, between its interface coming up (with real connectivity) and its own anchor existing:
-the length of the guest's `/etc/rc` is attacker-relevant time. The project anchor is also loaded in `hookPostStart`,
-so the first jail of a project has the same gap for the project-level rules.
-
-**What already closes most of it, by the architecture that was there before this audit.** An anchor call
-(`anchor "jailops/*"`) that resolves to nothing yet matches nothing and falls through to whatever comes after it in
-the administrator's own `pf.conf`; on a host that follows the install guide (a default-deny base ruleset, the anchor
-line placed before any broad `quick pass`, both checked by `jailops doctor`'s `pf.anchors` and `pf.order`), a packet
-that arrives before the jail's own anchor exists is dropped by that default, not passed. The static ARP/ND entries
-and the private bridge flag are both set in `hookPreStart`, before the jail's interface exists at all, so by the time
-`exec.start` runs the jail already cannot be ARP/ND-poisoned by, or poison, another jail. The gap this section is
-about is therefore specifically: **can the jail's own traffic itself escape** before its anchor exists, on a
-correctly configured host? The honest answer needs pf actually running at that moment, which was not guaranteed:
-`jailopsd`'s `REQUIRE` line did not name `pf`, so rcorder had no reason to start the PF service before `jailopsd`.
-Without PF running at all there is no default-deny to fall back on — nothing filters anything. **Fixed**: added `pf`
-to `packaging/rc.d/jailopsd`'s `REQUIRE` line (`REQUIRE: jailops_priv NETWORKING pf`); a disabled `pf` service still
-runs its rc script and exits at once, so this adds no delay when pf is not used, and guarantees the ordering when it
-is.
-
-**Measured (October 2026, the amd64 host).** Two genuine power-cycle reboots were run, each with a test jail whose `exec.start`
-sends, from the instant the jail starts, a continuous loop of spoofed-source pings (bind fails every time: a jail
-cannot bind a raw socket to an address it does not own, `PRIV_NETINET_BINDANY` is not granted inside a jail, so this
-particular vector never even leaves the kernel) and forged ARP requests (via `/dev/bpf`, which does leave the jail),
-observed from the arm64 host's uplink (filtered on the marker address and on the amd64 host's own address) and from a local capture on
-the amd64 host itself. **Both reboots lost the test host's own ZFS pool** (`jopsci`, a loopback-file pool created by
-`scripts/ci-freebsd-e2e.sh` under `/tmp` for disposable CI runs): the first time because FreeBSD's default
-`clear_tmp_enable` wipes `/tmp` at every boot (the backing file was gone); moving it to `/var/tmp` (not cleared) fixed
-that but exposed the next layer: `zpool import -a`, what `/etc/rc.d/zfs` runs at boot, only scans `/dev`, never
-arbitrary file paths, so a loopback-file pool is not auto-importable at all regardless of where the file lives. Both
-are properties of the **disposable test harness's storage**, not of JailOps or of the `pf` ordering fix: a production
-pool on real disks (as the install guide assumes) imports normally through the standard mechanism. With the pool gone,
-`jailopsd` itself never got past its own dataset check (`forbidden: dataset "jopsci/jailops" is outside every
-registered storage root`) on either attempt, so there was nothing after it to observe — the spoofing jail never ran.
-**This is why a literal power-cycle measurement is UNVERIFIED on this host**: the test infrastructure cannot currently
-survive a reboot, independently of anything this audit changed.
-
-As the closest honest substitute, the same measurement was run at the daemon level: `jailops_priv` and `jailopsd`
-stopped and started together (the pool manually re-imported first), which exercises the identical code path a real
-boot does from `jailops_priv`'s start onward (host pass, network pass, the jail's `hookPreStart` static entries and
-private flag, `jail -c` running the jail's full `exec.start`, then `hookPostStart` loading its anchor) — everything
-*after* pool import, which is the part this section and the `pf` ordering fix are actually about. The daemon came back
-and the spoofing jail's `exec.start` loop was running about 4 seconds after `jailopsd` started. Result: **zero packets
-with the spoofed source or the forged ARP reached either capture** (the amd64 host's own uplink or the arm64 host's), and a
-continuous ping of the production jail from the arm64 host (95 of 95 during this window) showed **no downtime**. UNVERIFIED:
-the literal power-cycle case (blocked by the test harness, above) and whether a cold boot's much longer window before
-`jailopsd` starts (BIOS, loader, kernel, mounting, `zfs_enable`) changes anything; nothing in that window runs any
-JailOps code or has network interfaces up at all, so there is no additional exposure reasoned, but it was not measured.
+`jailops_priv` (`REQUIRE: zfs`, `BEFORE: jailopsd`) starts the helper; `jailopsd` (`REQUIRE: jailops_priv NETWORKING pf`)
+then loads the network anchors and autostarts jails. Each jail's start hook creates its epair, addresses and routes
+**and loads the jail's own anchor and its project's anchor in `prestart`**, before `jail -c` runs the guest's whole boot
+(`exec.start = "/bin/sh /etc/rc"`), so the guest's first packet already meets its rules. On a host that follows the install
+guide (a default-deny base ruleset, the anchor line placed before any broad `quick pass`, both checked by `jailops
+doctor`'s `pf.anchors` and `pf.order`), an anchor call that resolves to nothing falls through to the host's own default,
+which drops. `pf` is in the `REQUIRE` line of `packaging/rc.d/jailopsd` (a disabled `pf` service still runs its rc script
+and exits at once, so it adds no delay when pf is not used) so that pf is running before the first jail starts.
 
 ### 18.15 The shell of a jail and its prompt (FreeBSD 15.2-PRERELEASE amd64, November 2026)
 
@@ -1788,8 +1727,7 @@ the shell block of `scripts/ci-freebsd-e2e.sh` on a jail made with the defaults:
 
 ### 18.16 Renames (FreeBSD 15.2-PRERELEASE amd64, November 2026)
 
-`jailops network rename lan office` with a jail running on it rewrote the descriptions of the bridge, both gateway ends
-and both ends of the jail's epair (the jail end with `ifconfig -j`), loaded `jailops/net.office` and flushed
+`jailops network rename lan office` with a jail running on it rewrote the descriptions of both ends of the jail's epair (the jail end with `ifconfig -j`), loaded `jailops/net.office` and flushed
 `jailops/net.lan`; the jail kept pinging the gateway and, through the NAT, the uplink's router, and after a restart its
 hooks found the network under its new name. A rename of a stopped jail took its whole tree with `zfs rename` after the
 local mountpoints were set to `none` deepest first and set again parents first (which mounts what has `canmount=on`; a
@@ -1818,9 +1756,8 @@ about FreeBSD 16, whose plans are thin: 16.0 is targeted for December 2027.
 - **Neighbor discovery is moving.** RFC 9131 (gratuitous neighbor advertisements), RFC 7217 stable addresses (`stableaddr`,
   15.1) and optimistic DAD are landing in CURRENT. The proxy's unsolicited advertisements follow the same idea as RFC 9131,
   and nothing here depends on SLAAC or on the host's own address generation.
-- **`if_bridge` and `if_epair` MAC addresses changed in 15.0** (the old stable derivation could collide). The NDP proxy reads the
-  uplink's MAC from the interface rather than assuming it; UNVERIFIED: whether anything else in JailOps assumes a stable
-  epair or bridge MAC.
+- **`if_epair` MAC addresses changed in 15.0** (the old stable derivation could collide). The NDP proxy reads the
+  uplink's MAC from the interface rather than assuming it; JailOps sets the MAC of both ends of every epair itself.
 - **ZFS.** 15.1 has OpenZFS 2.4 (libzfs SONAME bump, legacy sysctls warn, `zfs clone -u`). The compatibility check already
   compares pool features with a replication target; `zfs clone -u` could replace our "clone then set canmount" steps.
 - **Releases come about every quarter** with four-year support for stable branches; 15.2 is due in December 2026. Plan for a
@@ -1830,13 +1767,7 @@ about FreeBSD 16, whose plans are thin: 16.0 is targeted for December 2027.
 
 ### 18.16 MTU, anchor paths and the checks of a new network (FreeBSD 15.2-PRERELEASE amd64, November 2026)
 
-- **MTU.** An epair and a bridge each take any MTU up to 65535 (`ifconfig epair0a mtu 9216`, `mtu 65535`; a bridge
-  refuses 70000 with `Invalid argument`), so 9216, the largest MTU JailOps accepts, stays. A bridge does not refuse a
-  member of another MTU: `addm` succeeds and the member is given the bridge's MTU (an epair end set to 9000 and added
-  to a bridge of 1500 has 1500 afterwards, and its peer in the jail keeps what it had), and changing the MTU of a
-  member fails with `SIOCSIFMTU: Operation not supported`; changing the bridge's MTU changes its members'. An
-  attachment MTU other than the network's therefore left the jail's end disagreeing with the host's; it is refused
-  when it is set.
+- **MTU.** An epair takes any MTU up to 65535 (`ifconfig epair0a mtu 9216`, `mtu 65535`), so 9216, the largest MTU JailOps accepts, stays. Both ends of a jail's epair are given the interface's MTU, which may differ from the network's: every jail has a link of its own.
 - **Anchor paths.** `pfctl -a PATH -f -` loads a path of 63 characters and refuses one of 64 with `pfctl_rules:
   strlcpy`, whatever the length of its components; the anchors JailOps names are checked against that.
 - **A new network against the host** (the daemon on the VM, its uplink `vtnet0` in 10.0.2.0/24): `--ipv4 10.0.2.1/24`
@@ -1861,16 +1792,13 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
 - **Exec (8.3).** `POST /api/v1/jails/<n>/exec` upgrades to a framed stream (`PROTOCOL.md`, Exec). The daemon takes the
   backend as `service.JailExecer`; the helper client provides it, `--dev` uses `jexec -l` in process. Limits per
   jail, idle and total time are configuration (`limits.exec_*`). The helper side and TTY handling ran on FreeBSD 15.1 (18.2).
-- **Host tuning (5, 6).** The reconcile loop loads the modules it needs (if_bridge, if_epair, pf; linux64, linprocfs,
-  linsysfs and fdescfs only while a Linux jail exists; dummynet only while a device has a bandwidth limit) before it touches their sysctls, sets the bridge sysctls
-  at runtime (`network.sysctl`, defaults `pfil_member=1`, `pfil_bridge=0`, `pfil_onlyip=1`; `pfil_member` must stay
-  1, the configuration refuses 0) and `kern.elf64.fallback_brand=3` while a Linux jail exists, and re-asserts
+- **Host tuning (5, 6).** The reconcile loop loads the modules it needs (if_epair, pf; linux64, linprocfs,
+  linsysfs and fdescfs only while a Linux jail exists; dummynet only while a device has a bandwidth limit) before it touches their sysctls, sets
+  `kern.elf64.fallback_brand=3` while a Linux jail exists, and re-asserts
   them on every pass. It never writes `/etc/sysctl.conf`. The brand goes back to -1 only when this daemon set it.
   `doctor` reports modules, the sysctls against the configuration, forwarding (and, with a proxy-mode network,
-  `net.inet6.icmp6.nd6_onlink_ns_rfc4861`) that is not persistent in `/etc/sysctl.conf` (a warning), and private
-  networks.
-- **PF (5).** Rules stand on the jail's own port (the host-side epair end) and on the network's gateway interface
-  (see 18.9). Per-jail source enforcement is `table <jail_addrs> persist { addrs, fe80::/10 }`,
+  `net.inet6.icmp6.nd6_onlink_ns_rfc4861`) that is not persistent in `/etc/sysctl.conf` (a warning).
+- **PF (5).** Rules stand on the jail's own link (the host-side epair end, see 18.9). Per-jail source enforcement is `table <jail_addrs> persist { addrs, fe80::/10 }`,
   `pass in quick on <epair> inet6 from :: to ff02::/16` (the unspecified address cannot be a table member: pf accepts
   it and stores nothing) and `block in quick on <epair> from ! <jail_addrs> to any`;
   no negated address list is ever emitted, and every anchor defines the tables it uses. Project anchors end with

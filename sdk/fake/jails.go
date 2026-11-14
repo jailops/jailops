@@ -17,7 +17,6 @@ import (
 func (s *Server) setupJails() {
 	k := s.jails
 	k.asyncCreate, k.asyncDelete = true, true
-	k.noCreate = true // POST is jailCreate (volkeys.go): the body may carry a passphrase
 	k.keep = func(dst, old *api.Jail) { dst.Status = old.Status }
 	k.expand = func(j *api.Jail) any { return s.jailExpanded(j) }
 	k.validate = func(j, old *api.Jail) *api.Error {
@@ -25,6 +24,9 @@ func (s *Server) setupJails() {
 			return api.Errorf(api.CodeInvalid, "spec.image is required")
 		}
 		if e := s.checkJail(j, old); e != nil {
+			return e
+		}
+		if e := s.checkAttachments(j, old); e != nil {
 			return e
 		}
 		if s.images.items[imageName(j.Spec.Image)] == nil {
@@ -196,7 +198,15 @@ func (s *Server) jailAction(w http.ResponseWriter, r *http.Request) {
 		}
 		if l := s.jails.items[jk].Status.Locked; act.Action != "stop" && len(l) > 0 {
 			return reply{err: api.Errorf(api.CodeLocked, "jail %q is locked: the encrypted volume(s) %s wait for a passphrase", name, strings.Join(l, ", ")).
-				WithHint("jailops jail unlock " + name)}
+				WithHint("jailops volume unlock " + l[0])}
+		}
+		if act.Action != "stop" {
+			for _, a := range s.jails.items[jk].Spec.Volumes {
+				if v := s.volumes.items[rc.project+"/"+a.Name]; v != nil && v.Spec.IsHostDir() && s.vol.lostDirs[v.Spec.Path] {
+					return reply{err: api.Errorf(api.CodeBusy, "volume %q is lost: the directory is not on a mount (%s)", a.Name, v.Spec.Path).
+						WithHint("mount it again; the jail starts when it is there")}
+				}
+			}
 		}
 		op := s.startOp(rc.project, "jails."+act.Action, act.Action+" jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
 			j := s.jails.items[jk]
@@ -607,7 +617,7 @@ func (s *Server) allocate(network string, v6 bool, project, jail string) (string
 	var rng, gw string
 	var excl []string
 	if v6 && n.Spec.IPv6 != nil {
-		rng, gw, excl = n.Spec.IPv6.Range, n.Spec.IPv6.Gateway, n.Spec.IPv6.Exclude
+		rng, excl = n.Spec.IPv6.Range, n.Spec.IPv6.Exclude
 	} else if !v6 && n.Spec.IPv4 != nil {
 		rng, gw, excl = n.Spec.IPv4.Range, n.Spec.IPv4.Gateway, n.Spec.IPv4.Exclude
 	} else {

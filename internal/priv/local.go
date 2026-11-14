@@ -38,6 +38,10 @@ type Host interface {
 	ReadFile(ctx context.Context, path string) ([]byte, error)
 	WriteFile(ctx context.Context, q WriteFileReq) error
 	MkdirAll(ctx context.Context, q MkdirReq) error
+	// SetVolumeOwner sets the owner and mode of the empty root of a volume (see safefs.go).
+	SetVolumeOwner(ctx context.Context, q VolumeOwnerReq) error
+	// ProbeSource says whether a host directory below an admin-host-mount directory is on a mount (see safefs.go).
+	ProbeSource(ctx context.Context, q SourceProbeReq) (SourceProbe, error)
 	Remove(ctx context.Context, path string) error
 	// RemoveAll removes a tree where that is allowed (see Config.recursiveRemovable), else it is Remove.
 	RemoveAll(ctx context.Context, path string) error

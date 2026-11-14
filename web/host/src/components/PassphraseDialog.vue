@@ -6,8 +6,8 @@ import { ApiError } from '@jailops/shared/api/client'
 import { runOp } from '@jailops/shared/composables/ops'
 import Modal from '@jailops/shared/components/Modal.vue'
 
-// Change the passphrase of a jail's encrypted volumes (admin). The fields are cleared on close and after a submit.
-const props = defineProps<{ open: boolean; jail: string }>()
+// Change the passphrase of an encrypted volume (admin). The fields are cleared on close and after a submit.
+const props = defineProps<{ open: boolean; volume: string }>()
 const emit = defineEmits<{ close: []; done: [] }>()
 
 const f = reactive({ old: '', next: '', again: '' })
@@ -41,7 +41,7 @@ async function go(): Promise<void> {
   const body = { old_passphrase: f.old, new_passphrase: f.next }
   reset()
   try {
-    await runOp(s.keys.changeTitle(props.jail), () => api.jails.passphrase(props.jail, body))
+    await runOp(s.keys.changeTitle(props.volume), () => api.volumes.passphrase(props.volume, body))
     emit('done')
     close()
   } catch (e) {
@@ -54,11 +54,11 @@ async function go(): Promise<void> {
 </script>
 
 <template>
-  <Modal :open="open" :title="s.keys.changeTitle(jail)" @close="close">
+  <Modal :open="open" :title="s.keys.changeTitle(volume)" @close="close">
     <form id="pass-form" autocomplete="off" @submit.prevent="go">
       <p class="muted">{{ s.keys.changeLead }}</p>
       <div class="field"><label for="pc-old">{{ s.keys.current }} <span class="req" aria-hidden="true">*</span></label><input id="pc-old" v-model="f.old" type="password" autocomplete="off" /></div>
-      <div class="field"><label for="pc-new">{{ s.keys.newPass }} <span class="req" aria-hidden="true">*</span></label><input id="pc-new" v-model="f.next" type="password" autocomplete="new-password" aria-describedby="pc-new-hint" /><span id="pc-new-hint" class="hint">{{ s.jails.passphraseHint }}</span></div>
+      <div class="field"><label for="pc-new">{{ s.keys.newPass }} <span class="req" aria-hidden="true">*</span></label><input id="pc-new" v-model="f.next" type="password" autocomplete="new-password" aria-describedby="pc-new-hint" /><span id="pc-new-hint" class="hint">{{ s.volumes.passphraseHint }}</span></div>
       <div class="field"><label for="pc-again">{{ s.keys.repeat }} <span class="req" aria-hidden="true">*</span></label><input id="pc-again" v-model="f.again" type="password" autocomplete="new-password" /></div>
       <p v-if="problem || error" class="field-error" role="alert" data-test="pass-error">{{ error || problem }}</p>
     </form>

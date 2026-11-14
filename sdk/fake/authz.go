@@ -149,6 +149,15 @@ func classify(pattern string) (api.Permission, string) {
 		}
 		return api.PermAdmin, scopeProject
 	}
+	if strings.HasPrefix(path, "/api/v1/volumes") {
+		switch {
+		case read:
+			return api.PermReadonly, scopeProject
+		case strings.HasSuffix(path, "/unlock"), strings.HasSuffix(path, "/lock"), strings.HasSuffix(path, "/snapshots"), strings.Contains(path, "/snapshots/"):
+			return api.PermOperator, scopeProject
+		}
+		return api.PermAdmin, scopeProject
+	}
 	return rw(scopeProject)
 }
 

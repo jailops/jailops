@@ -13,8 +13,7 @@ interface Rule {
   reserved?: string[]
 }
 
-// The lengths of new objects (internal/validate): a project and a network name a bridge interface (15 characters
-// with the two of the gateway pair), a jail, volume or image and a snapshot share the 255 characters of a ZFS name.
+// The lengths of new objects (internal/validate): a project prefixes the OS name of its jails, a jail, volume or image and a snapshot share the 255 characters of a ZFS name.
 // Objects created before these limits keep their longer names: an edit form never checks an existing name.
 const letters = (max: number) => `Lowercase letters, digits and hyphens, starting with a letter, at most ${max} characters.`
 const dotted = (max: number) => `Lowercase letters, digits, '.', '_' and '-', starting with a letter or digit, at most ${max} characters.`

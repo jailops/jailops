@@ -106,7 +106,6 @@ export function demoRename(db: RenameDb, kind: DemoRenameKind, from: string, to:
       edits.push(() => { j.spec.network = (j.spec.network ?? []).map((a) => (a.network === from ? { ...a, network: to } : a)) })
     }
     if (net.spec.ipv4?.nat) changes.push({ kind: 'anchor', object: `PF anchor jailops/net.${from}`, detail: `loaded as jailops/net.${to}` })
-    if (net.spec.bridge) changes.push({ kind: 'interface', object: `interface ${net.spec.bridge} (bridge)`, detail: `description "jailops network ${from}" -> "jailops network ${to}"` })
     edits.push(() => {
       if (db.leases[from]) { db.leases[to] = db.leases[from].map((l) => ({ ...l, network: to })); delete db.leases[from] }
     })
@@ -168,7 +167,6 @@ export function demoRename(db: RenameDb, kind: DemoRenameKind, from: string, to:
       }
     }
     changes.push({ kind: 'dataset', object: `dataset tank/jailops/${project}/${from}`, detail: `renamed to tank/jailops/${project}/${to}` })
-    for (const v of j.spec.volumes ?? []) changes.push({ kind: 'dataset', object: `mountpoint of tank/jailops/${project}/${to}/${v.name}`, detail: `/jails/${project}/${from}/data/${v.name} -> /jails/${project}/${to}/data/${v.name}` })
     changes.push({ kind: 'anchor', object: `PF anchor jailops/${project}/${from}`, detail: `loaded as jailops/${project}/${to}` })
     if (db.history[from]?.length) changes.push({ kind: 'state', object: `update history of jail ${from}`, detail: `${from}.json -> ${to}.json` })
     if (!j.spec.hostname) warnings.push(`the jail has no hostname of its own: it is "${to}" from its next start`)

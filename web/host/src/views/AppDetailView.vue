@@ -98,7 +98,7 @@ const invalid = computed(() => l.error.value?.code === 'invalid')
                 <p class="muted">{{ s.apps.dataLead }}</p>
                 <p v-if="!app.data?.length" class="faint">{{ s.app.none }}</p>
                 <ul class="app-paths">
-                  <li v-for="d in app.data" :key="d.path"><Icon name="database" /><div><span class="mono">{{ d.path }}</span> <span class="faint">· {{ s.apps.volume }} <span class="mono">{{ volumeName(d.path) }}</span></span><div class="muted">{{ d.description }}</div></div></li>
+                  <li v-for="d in app.data" :key="d.path"><Icon name="database" /><div><span class="mono">{{ d.path }}</span> <span class="faint">· {{ s.apps.volume }} <span class="mono">&lt;jail&gt;-{{ volumeName(d.path) }}</span></span><div class="muted">{{ d.description }}</div></div></li>
                 </ul>
               </div>
             </section>

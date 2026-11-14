@@ -13,7 +13,10 @@ jail/cache created
 $ jailops create ghost-user --image freebsd-15@stable --storage default --network lan --autostart --depends db
 jail/ghost-user created
 
-$ jailops create vault --image freebsd-15@stable --storage default --network lan --autostart --volume db:/srv/db:encrypted --passphrase-file <dir>/vault.pass
+$ jailops volume create secrets --encrypted --passphrase-file <dir>/vault.pass
+volume/secrets created
+
+$ jailops create vault --image freebsd-15@stable --storage default --network lan --autostart --volume secrets:/srv/db
 jail/vault created
 
 $ jailops create report --image freebsd-15@stable --storage default --network lan --autostart --depends vault
@@ -27,7 +30,7 @@ $ jailops boot
 4   web          2          autostart, after db
 
 NOT STARTED   WHY
-vault         waits for the passphrase of an encrypted volume (jailops jail unlock vault), then starts
+vault         waits for the passphrase of an encrypted volume (jailops volume unlock VOLUME), then starts
 report        depends on vault, which waits for its passphrase
 
 $ jailops boot -o json
@@ -72,7 +75,7 @@ $ jailops boot -o json
     {
       "project": "main",
       "jail": "vault",
-      "reason": "waits for the passphrase of an encrypted volume (jailops jail unlock vault), then starts"
+      "reason": "waits for the passphrase of an encrypted volume (jailops volume unlock VOLUME), then starts"
     },
     {
       "project": "main",
@@ -110,6 +113,6 @@ $ jailops boot --project main
 4   web          2          autostart, after db
 
 NOT STARTED   WHY
-vault         waits for the passphrase of an encrypted volume (jailops jail unlock vault), then starts
+vault         waits for the passphrase of an encrypted volume (jailops volume unlock VOLUME), then starts
 report        depends on vault, which waits for its passphrase
 

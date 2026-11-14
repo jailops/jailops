@@ -592,3 +592,24 @@ func TestSignalAllowListIsFixed(t *testing.T) {
 		t.Errorf("allowed signals changed: %v", names)
 	}
 }
+
+// A command without a terminal runs as long as it runs: the grace period is for what is left after it ended (a command
+// that took longer than it was killed at ten seconds).
+func TestExecWithoutATerminalIsNotCutOffAfterTheGracePeriod(t *testing.T) {
+	old := sessionGrace
+	sessionGrace = 300 * time.Millisecond
+	defer func() { sessionGrace = old }()
+	execHosts(t, func(t *testing.T, h Host, e *env) {
+		s, err := h.Exec(context.Background(), "alpha_web", []string{"sh", "-c", "sleep 1; echo done"}, ExecOpts{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		go io.Copy(io.Discard, s.Stderr())
+		if got := get(t, readAll(t, s.Stdout())); got != "done\n" {
+			t.Errorf("stdout %q", got)
+		}
+		if c := waitExit(t, s); c != 0 {
+			t.Errorf("exit %d: the command was killed while it ran", c)
+		}
+	})
+}

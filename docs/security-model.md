@@ -25,8 +25,9 @@ where the daemon cannot leave a symlink for root to write through.
 **What a compromised daemon cannot do:** name a path outside the storage roots, run a program that is not on the
 allow-list, change, destroy, rename or take over a network interface JailOps did not create (see
 [Interfaces](#interfaces)), sniff or inject on an interface the operator did not approve, mount a directory the operator did not name,
-make the helper advertise an IPv6 address outside the approved prefixes, or turn a ZFS user property into authority (the
-helper keeps what it granted in its own memory, never in something the daemon can write).
+make the helper advertise an IPv6 address outside the approved prefixes, make the helper trust a package repository,
+key or keyring of its own choosing ([Whom the helper trusts](#whom-the-helper-trusts-when-it-runs-package-tools)), or turn
+a ZFS user property into authority (the helper keeps what it granted in its own memory, never in something the daemon can write).
 
 **What it can do, and you should assume it can:** act as any API user for anything inside those bounds. The helper takes
 the "this request is for an admin" assertion from the request itself, because only the daemon knows who authenticated.
@@ -54,12 +55,18 @@ helper keeps four rules, each with a test (`internal/priv/invariants_test.go`):
   inherited). FreeBSD makes device nodes in devfs only; this is a second guard.
 
 A restore writes a jail through a file agent, which runs as root chrooted to the dataset being restored. Into a jail's
-root (and a volume mounted in it) it restores setuid and setgid files and device nodes as the backup recorded them,
+root it restores setuid and setgid files and device nodes as the backup recorded them,
 because the jail needs them; that is safe only because of the 0700 directory above. Into anything else (the jail's
 container) it makes no device node and drops setuid and setgid, and says so in the restore's skipped list.
 
+**Host directories.** The helper's `fs.source_probe` looks at a directory below an `admin-host-mount` directory for a volume
+that is one: it opens it from that directory one plain directory at a time (a symbolic link anywhere is refused), says whether
+a mount point lies on the way (a change of device) and, when asked, makes and removes one file in it. It changes nothing
+else. The mount a running jail gets again when its directory is back is `mount -t nullfs`, accepted for an administrator
+from below an approved directory only, through no link, onto a jail's own tree.
+
 **Files inside jails.** Root in a jail controls its tree, symlinks included. A file operation of the helper on a path
-below a jail's root (or its `root.new`, `root.old`, a volume of the jail, or an image generation) opens that tree as
+below a jail's root (or its `root.new`, `root.old`, a volume of the project, or an image generation) opens that tree as
 its root and walks to it one plain directory at a time: a relative symlink is followed only while it stays inside the
 tree, as the jail itself would see it, and an absolute symlink is refused (the helper does not resolve it as the jail
 would). So no symlink a jail makes turns an operator's `app allow`, an app draft or any other file operation into a read
@@ -71,12 +78,13 @@ inside it as well.
 | Line | What it lets an admin do | Default |
 |---|---|---|
 | `storage-root` | where jails, images and their files may live | the root `init` made |
-| `ndp-proxy = <uplink>=<prefix>` | the IPv6 proxy may capture neighbor discovery on that uplink and advertise addresses in that prefix, at a bounded rate | nothing |
-| `admin-host-mount` | mount host directories below this path into a jail (nullfs) | nothing |
+| `admin-host-mount` | mount host directories below this path into a jail (nullfs), and make volumes of them (`volume create --path`): the mount point has to lie below the path | nothing |
 | `admin-raw-param`, `admin-allow-flag`, `admin-devfs-ruleset`, `admin-zfs-prop` | set these raw `jail.conf` parameters, `allow.*` flags, devfs rulesets or ZFS properties | nothing |
 | `admin-routes`, `admin-raw-pf`, `admin-resume-send` | change routes (WireGuard routes of any kind included), load raw PF, resume a ZFS send | off |
 | `wireguard-routes` | WireGuard tunnels may route these networks into themselves although a route there is wider than a /8 (/16 for IPv6) or covers the host's addresses, default gateway, resolvers, loopback, link-local or multicast ([wireguard.md](wireguard.md)) | nothing |
-| `fetch-host` | download from these hosts, over https | the Alpine CDN and `pkg.freebsd.org` |
+| `fetch-host` | download from these hosts, over https: files, package repositories of image builds and `debootstrap` mirrors (`http://<host>` also allows plain http for a package repository there) | the Alpine CDN, `pkg.freebsd.org`, `pkg.jailops.net`, `deb.debian.org`, `archive.ubuntu.com`, `ports.ubuntu.com` |
+| `pkg-keys-dir` | the key directories a package repository of an image build may use besides `/usr/share/keys` (root, not writable by others, no links; outside the daemon's directories) | `/usr/local/etc/jailops/keys` |
+| `keyring-dir` | the keyrings `debootstrap` may check a release with (the same rules) | `/usr/local/share/keyrings` |
 | `wireguard-dir` | where the helper keeps the keys of WireGuard tunnels (root, 0700; outside the daemon's directories) | `/var/db/jailops-priv/wireguard` |
 
 **An admin who may set these is root on the host.** Keep the lists short, and write nothing you would not give root.
@@ -330,6 +338,26 @@ A hub forwards requests to hosts over pinned mTLS with a signed claim of the cal
 accepts from a certificate of kind `hub` and limits by that certificate's own entry. Failed authentications are rate
 limited per source and audited.
 
+## Whom the helper trusts when it runs package tools
+
+An image build runs `pkg` (and, for a Debian or Ubuntu image, `debootstrap`) as root on the host, and a package's install
+scripts run with root's rights. So whom they trust is not the daemon's choice, and the daemon is not asked. The helper
+refuses a repository configuration, a key or a keyring that root did not provide:
+
+- **The hosts.** A package repository or a `debootstrap` mirror must be on a host listed in `fetch-host` of `priv.conf`,
+  over https unless the host is written `http://<host>` there. A user name, a variable or a port trick in the host part
+  is refused, so is any other scheme.
+- **The keys.** A repository must be verified against a key directory below `/usr/share/keys` (the base system's) or below
+  `pkg-keys-dir`. That directory, everything in it and every directory above it belong to root and cannot be written by
+  anyone else, and none of it is a symbolic link; the helper checks this every time it is used, and it lies outside every
+  directory the daemon can write. A key directory made in the daemon's work area is refused, however it is named.
+- **The keyrings.** The keyring that checks a `debootstrap` release is a file directly in `keyring-dir`, with the same
+  rules.
+
+To build an image from a repository of your own, list its host in `fetch-host` and put its key directory below
+`pkg-keys-dir` yourself, as root. An app installation uses the host's own repository configuration (root's files), not
+one the daemon writes.
+
 ## Installing an app runs package scripts as root
 
 `jailops app install` installs the packages from the host with `pkg -r <jail root> install`, through the helper, while
@@ -395,7 +423,7 @@ socket), goes to the helper on the request stream of the operation, and from the
 in no argument vector, answer, operation record, journal, audit entry or log line, and the tests search all of them for
 it. **A compromised daemon sees every passphrase typed while it is compromised**, and can unload keys (stop and lock jails)
 like an operator. What it cannot do through the helper: run `zfs load-key`, `unload-key` or `change-key` on any dataset
-but an encrypted volume of a JailOps jail (managed, of kind `volume`, below a `volumes` parent, its own encryption root
+but an encrypted volume of a JailOps project (managed, of kind `volume`, below the project's `volumes` parent, its own encryption root
 with `keyformat=passphrase`), give a key file or another key location, change the cipher or the key derivation of a new
 volume (the helper sets `aes-256-gcm`, `keyformat=passphrase`, `keylocation=prompt` itself), or change a passphrase
 without the current one (the helper checks it with `zfs load-key -n` first). Unlocking needs the operator role in the
@@ -407,37 +435,35 @@ needs root). There is no recovery key: a lost passphrase is lost data.
 
 ## Interfaces
 
-The helper runs as root and changes network interfaces for the daemon: bridges, epairs, their addresses, members,
-routes, neighbor entries, MTUs, their move into and out of a jail's vnet. It must never be made to change one that
-is not JailOps's: the host's uplink (`vmx0`, `em0`), `lo0`, a bridge an administrator made, a tunnel. **An interface is
-JailOps's when the kernel says so: it is a bridge or an epair (its driver's group) and its description carries
-JailOps's marker** (`jailops ...`). Its name says nothing: a bridge may have
-any free name (`office`), and a name that looks like JailOps's (`jo7`) is not enough.
+The helper runs as root and changes network interfaces for the daemon: the epairs of jails, their addresses, routes, MTUs
+and their move into and out of a jail's vnet. It must never be made to change one that is not JailOps's: the host's
+uplink (`vmx0`, `em0`), `lo0`, a bridge an administrator made, a tunnel. **An interface is JailOps's when the kernel says
+so: it is an epair (its driver's group) and its description carries JailOps's marker** (`jailops ...`). Its name says
+nothing: a name that looks like JailOps's (`jo7`) is not enough.
 
 - **Only root sets a description** of an interface in the host's network stack, and the only operations of the helper
   that write one are the creation of an interface and the description of an interface that already carries the marker.
   So the daemon cannot have the marker put on an interface that exists, and cannot take it off one (a description that
   is not JailOps's is refused, and clearing one writes the bare marker `jailops managed`).
-- **Create.** The helper creates a bridge or an epair under a generic name (`bridge3`, `epair5a`), gives it the marker,
+- **Create.** The helper creates an epair under a generic name (`epair5a`), gives it the marker,
   and only then renames it to the name asked for. The rename is the kernel's atomic check that the name is free: if an
   interface has the name (made a moment ago, whatever it is), the rename fails, the new interface is destroyed and
   nothing else is touched. No interface ever has the name without the marker, and no interface is ever taken over by
   its name. Before that, the helper refuses a name that exists (`forbidden: interface "mybr" exists and is not
   JailOps's; the helper never takes over an interface by its name`; one that is JailOps's answers `already_exists`) and
   a name of the form a driver gives its interfaces, whether or not that driver is loaded: a driver name alone (an
-  interface group, `bridge`, `all`) or followed by a unit number, an epair end or a vlan tag (`vmx0`, `em1`, `lo0`,
+  interface group, `epair`, `all`) or followed by a unit number, an epair end or a vlan tag (`vmx0`, `em1`, `lo0`,
   `bridge0`, `epair0a`, `tap0`, `wg0`, `pflog0`, `vlan0.10`; `invalid: interface name "vmx0" has the form of the
   interfaces of the driver "vmx"`). A device the kernel attaches later is therefore never confused with an interface of
   JailOps. The list is in `internal/ipam/drivers.go`.
-- **Change, destroy, member, address, route, neighbor entry, MTU, move.** The helper reads the interface from the kernel
-  (`ifconfig NAME`) in the same operation, just before it acts, and refuses one that is not a bridge or an epair
-  (`forbidden: interface "vtnet0" is not managed by JailOps: JailOps changes only bridges and epairs it created`) or
+- **Change, destroy, address, route, MTU, move.** The helper reads the interface from the kernel
+  (`ifconfig NAME`) in the same operation, just before it acts, and refuses one that is not an epair
+  (`forbidden: interface "vtnet0" is not managed by JailOps: JailOps changes only epairs it created`) or
   that does not carry the marker (`... it has no JailOps description (JailOps marks every interface it creates and
-  never takes one over by its name)`, or `... its description "uplink" is not one JailOps writes`). A bridge member must
-  be JailOps's as well, so the uplink is never made a port. Between the read and the action only root can rename an
+  never takes one over by its name)`, or `... its description "uplink" is not one JailOps writes`). Between the read and the action only root can rename an
   interface: the helper renames none but the one it has just created.
 - **Command lines.** The command allow-list has no form that creates, renames or destroys a host interface any more
-  (`ifconfig bridge create`, `ifconfig bridgeN name X` are refused); its `ifconfig -j JAIL IF ...` and `route -j JAIL
+  (`ifconfig epair create`, `ifconfig epairN name X` are refused); its `ifconfig -j JAIL IF ...` and `route -j JAIL
   ...` forms act in the vnet of a managed jail and read the interface there first. Root in a vnet jail can set the
   descriptions in its own vnet, so the marker proves less inside a jail: it keeps the helper off the jail's loopback,
   and what the jail could forge is an interface of its own vnet. An interface that comes back from a jail's vnet through the
@@ -449,12 +475,13 @@ any free name (`office`), and a name that looks like JailOps's (`jo7`) is not en
 - **Reading stays open.** The interface list, the uplink's addresses and any one interface are read as before.
 - **jail.conf.** `vnet.interface` must name an epair end of the form JailOps gives them (`jo` and the jail's hash), and
   each one that exists when the jail is created must be JailOps's in the kernel.
-- **No description, no ownership.** A bridge or epair without a description is not JailOps's, whatever its name or its
+- **No description, no ownership.** An epair without a description is not JailOps's, whatever its name or its
   prefix; one with someone else's description, or of another kind, is not either.
 
 What it does not cover: root on the host can put JailOps's description on anything, and an administrator who does so
-hands that interface to JailOps. A bridge is not a security boundary between the jails on it ([Network
-isolation](#network-isolation)).
+hands that interface to JailOps.
+
+- **Reject routes.** The helper adds a route that answers with an error (`route -reject` through the loopback address) only for the subnet of a network JailOps has stored, never for another prefix, so a compromised daemon cannot cut the host off from a part of the network.
 
 ## Projects are not a security boundary against the kernel
 
@@ -463,11 +490,15 @@ boundary judged on its own terms, such as a host of its own: a separate pool spl
 
 ## Network isolation
 
-Every jail gets a PF anchor, and a project's jails cannot reach another project's unless a rule you wrote opens it. Per-jail
-rules bind the jail's addresses (anti-spoofing). This filters **IP traffic**. A jail holds /32 and /128 addresses behind the host, every jail port is private, and the host pins each
-jail's ARP and neighbor entries and MAC address; forged ARP, neighbor advertisements and router advertisements from a
-jail change nothing (design 18.13). A bridge that carries
-ports JailOps did not create is not covered. A bridge is not a full security boundary.
+Every jail has a link of its own to the host: an epair whose host end is the jail's only neighbour. Jails share no network
+segment, so they cannot see each other's traffic, and what a jail forges at layer 2 (ARP, neighbour advertisements, router
+advertisements, DHCP) reaches the host's end of its own link and changes nothing outside it. The host routes each of a
+jail's addresses to that link and answers for the other addresses of the subnet with an error. Every jail also gets a PF
+anchor on its link: it binds the jail to its own addresses (anti-spoofing), closes it to other projects unless a rule you
+wrote opens the way, and holds the policies of the jail. Between two jails the host forwards what the anchors of both
+allow. The PF matrix of the end-to-end tests checks each of these with real traffic and forged frames
+([networking.md](networking.md)). Jails share the host kernel; this is a separation of networks, not of kernels
+([above](#projects-are-not-a-security-boundary-against-the-kernel)).
 
 ## Name resolution of jails
 

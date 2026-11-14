@@ -40,14 +40,9 @@ allow-user = jailops
 #allow-group = some-group
 
 # --- networking ------------------------------------------------------------------
-# The helper changes only the bridges and epairs that carry the JailOps description, which it writes when it creates
-# them; a bridge may have any free name.
-# The IPv6 proxy mode (a switched /64 where the upstream treats the jails' addresses as on-link) answers neighbor
-# solicitations on the uplink. It works only for what is approved here: the uplink and the prefixes the jails'
-# addresses come from. Without this line the helper refuses every request of the proxy. One line per uplink.
-#ndp-proxy = em0=2001:db8:1:2:100::/80
+# The helper changes only the epairs that carry the JailOps description, which it writes when it creates them.
 # Extra sysctls readable through the helper (the built-in list covers kern.osrelease,
-# the bridge pfil switches, the forwarding switches, hw.ncpu and a few more).
+# the forwarding switches, hw.ncpu and a few more).
 #sysctl = hw.model
 
 # --- what an API admin may unlock (empty means nothing) -------------------------
@@ -56,7 +51,9 @@ allow-user = jailops
 #admin-allow-flag = mount.zfs
 #admin-devfs-ruleset = 10
 # Directories an admin may mount into a jail with `jailops create --host-mount SOURCE:TARGET[:ro]`, for example an
-# archive dataset of a pool JailOps does not manage. The source must be below one of these.
+# archive dataset of a pool JailOps does not manage. The source must be below one of these. A volume with a path
+# (`jailops volume create NAME --path DIR`) names a directory on a mount below one of these too: list the directory
+# above the mount (/mnt), not the mount point of a storage box itself.
 #admin-host-mount = /tank/archive
 #admin-zfs-prop = compression
 #admin-routes = false
@@ -73,10 +70,16 @@ allow-user = jailops
 #admin-zfs-delegation = false
 
 # --- image building ---------------------------------------------------------------
-# Hosts the helper's fetch rule may download from, over https only (default:
-# dl-cdn.alpinelinux.org and pkg.freebsd.org). Repeat or comma separate.
+# Hosts the helper's fetch rule, the package repositories of image builds and the debootstrap mirrors may use, over
+# https (default: dl-cdn.alpinelinux.org, pkg.freebsd.org, pkg.jailops.net, deb.debian.org, archive.ubuntu.com and
+# ports.ubuntu.com). Repeat or comma separate; http://<host> also allows plain http for a package repository there.
 #fetch-host = dl-cdn.alpinelinux.org
 #fetch-host = pkg.freebsd.org
+# The key directories a package repository of an image build may use besides /usr/share/keys, and the keyrings
+# debootstrap may check a release with. Root owns them and nobody else can write there; they lie outside the
+# daemon's directories, and the helper checks them every time. The daemon never chooses what the helper trusts.
+#pkg-keys-dir = /usr/local/etc/jailops/keys
+#keyring-dir = /usr/local/share/keyrings
 # Directories fs.read_file may read besides the storage roots (a local mirror of
 # image archives). /etc/sysctl.conf and /etc/resolv.conf are always readable.
 #image-mirror = /var/db/jailops/mirror

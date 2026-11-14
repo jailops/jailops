@@ -22,7 +22,6 @@ Storage fast
 
 $ jailops network show lan
 Network lan
-  Bridge:     generated (down)
   Uplink:     em0
   IPv4:       10.20.0.0/24, gateway 10.20.0.1, NAT
   IPv4 range: 10.20.0.10-10.20.0.20

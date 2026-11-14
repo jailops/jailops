@@ -16,7 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -76,16 +75,11 @@ func (s *Service) hostNameservers() (usable []netip.Addr, loopback bool, err err
 	return usable, loopback || seen == 0, nil
 }
 
-// gatewayResolver is the address of the host on a network that a jail can ask: the IPv4 gateway, else a global IPv6
-// gateway (a link-local one would need a zone, which resolv.conf of the jail cannot name usefully).
+// gatewayResolver is the address of the host on a network that a jail can ask: the IPv4 gateway (the IPv6 gateway is
+// link-local and would need a zone, which the resolv.conf of the jail cannot name usefully).
 func gatewayResolver(spec api.NetworkSpec) (netip.Addr, bool) {
 	if v4 := spec.IPv4; v4 != nil {
 		if a, err := netip.ParseAddr(v4.Gateway); err == nil {
-			return a, true
-		}
-	}
-	if v6 := spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
-		if a, err := netip.ParseAddr(v6.Gateway); err == nil && !a.IsLinkLocalUnicast() {
 			return a, true
 		}
 	}
@@ -144,20 +138,15 @@ func gatewayDNSAdvice(name string, spec api.NetworkSpec) string {
 	if !ok {
 		return ""
 	}
-	sub := ""
-	if spec.IPv4 != nil && gw.Is4() {
-		sub = spec.IPv4.Subnet
-	} else if spec.IPv6 != nil {
-		sub = spec.IPv6.Subnet
-	}
+	sub := spec.IPv4.Subnet
 	return fmt.Sprintf("the host resolves names only through loopback (%s), so the jails of network %s ask the gateway %s; "+
 		"JailOps changes nothing on the host: let the resolver listen there, for the base system's unbound a file "+
 		"/var/unbound/conf.d/jails.conf with `server:`, `interface: 127.0.0.1`, `interface: ::1`, `interface: %s`, "+
 		"`ip-transparent: yes` (it binds the address before the network exists at boot) and `access-control: %s allow`, "+
 		"then `service local_unbound restart`; a jail whose policy denies outgoing traffic needs a rule for udp and tcp "+
-		"port 53 to %s, and a host pf.conf that blocks traffic to the host itself one passing it in on %s; "+
+		"port 53 to %s, and a host pf.conf that blocks traffic to the host itself one passing it in on the interfaces of the jails (the group epair); "+
 		"or give the network nameservers of its own (`dns:` in jailops network edit %s)",
-		hostResolvPath, name, gw, gw, sub, gw, ipam.GatewayIface(spec.Bridge), name)
+		hostResolvPath, name, gw, gw, sub, gw, name)
 }
 
 // keepsResolv says whether the jail's existing resolv.conf (at p, read through the file operations that stay inside

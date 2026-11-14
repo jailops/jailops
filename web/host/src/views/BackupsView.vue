@@ -30,21 +30,25 @@ const { tab } = useTabQuery(() => tabItems.value.map((t) => t.key), 'snapshots' 
 const restoring = ref<Backup | null>(null)
 const deleting = ref<Backup | null>(null)
 
+// a volume is a backup of its own, so a jail and a volume of the same name are two groups
+const isVolume = (b: Backup) => b.spec.kind === 'volume'
+const groupKey = (b: Backup) => (isVolume(b) ? 'volume:' : 'jail:') + b.spec.jail
 const byJail = computed(() => {
   const m = new Map<string, Backup[]>()
   for (const b of l.data.value?.backups ?? []) {
-    if (!m.has(b.spec.jail)) m.set(b.spec.jail, [])
-    m.get(b.spec.jail)!.push(b)
+    const k = groupKey(b)
+    if (!m.has(k)) m.set(k, [])
+    m.get(k)!.push(b)
   }
   for (const v of m.values()) v.sort((a, b) => (b.metadata.created_at ?? '').localeCompare(a.metadata.created_at ?? ''))
   return [...m.entries()].sort((a, b) => a[0].localeCompare(b[0]))
 })
-const runs = computed(() => byJail.value.map(([jail, list]) => ({ jail, last: list[0] })))
+const runs = computed(() => byJail.value.map(([key, list]) => ({ key, jail: list[0].spec.jail, volume: isVolume(list[0]), last: list[0] })))
 
 const requestDelete = () => runOp(s.backups.deleteTitle(deleting.value!.spec.snapshot), () => api.backups.requestDeletion(deleting.value!.metadata.name))
 const depth = ref<'deep' | 'extract' | 'full'>('deep')
 const verify = (b: Backup) => runOp(s.backups.verifyTitle(b.spec.snapshot), () => api.backups.verify(b.metadata.name, { depth: depth.value })).catch(() => undefined)
-const run = (n: string) => runOp(s.backups.runTitle(n), () => api.backups.run({ policy: n })).catch(() => undefined)
+const run = (n: string, noVolumes = false) => runOp(s.backups.runTitle(n), () => api.backups.run({ policy: n, ...(noVolumes ? { no_volumes: true } : {}) })).catch(() => undefined)
 const retention = (r: object) => Object.entries(r as Record<string, number | undefined>).filter(([, v]) => v).map(([k, v]) => `${v} ${k}`).join(', ') || '-'
 const sel = (m: Record<string, string> | undefined) => Object.entries(m ?? {}).map(([k, v]) => `${k}=${v}`).join(', ') || '-'
 </script>
@@ -58,8 +62,8 @@ const sel = (m: Record<string, string> | undefined) => Object.entries(m ?? {}).m
     <LoadState :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
       <div v-if="tab === 'snapshots'" class="stack">
         <p v-if="!byJail.length" class="empty panel">{{ s.backups.noBackups }}</p>
-        <section v-for="[jail, list] in byJail" :key="jail" class="panel" :data-jail="jail">
-          <header><h2 class="mono">{{ jail }}</h2><span class="faint">{{ s.backups.count(list.length) }}</span></header>
+        <section v-for="[key, list] in byJail" :key="key" class="panel" :data-jail="list[0].spec.jail" :data-kind="isVolume(list[0]) ? 'volume' : 'jail'">
+          <header><h2 class="mono">{{ list[0].spec.jail }}</h2><span v-if="isVolume(list[0])" class="pill info" data-test="volume-backup">{{ s.backups.kindVolume }}</span><span class="faint">{{ s.backups.count(list.length) }}</span></header>
           <div class="table-wrap">
             <table class="rtable">
               <thead><tr><th>{{ s.backups.snapshot }}</th><th class="num">{{ s.backups.size }}</th><th class="num">{{ s.backups.newBytes }}</th><th>{{ s.backups.state }}</th><th><span class="sr-only">{{ s.app.actions }}</span></th></tr></thead>
@@ -94,9 +98,9 @@ const sel = (m: Record<string, string> | undefined) => Object.entries(m ?? {}).m
         <header><span class="muted">{{ s.backups.lastRunsHint }}</span></header>
         <p v-if="!runs.length" class="empty">{{ s.backups.noBackups }}</p>
         <div v-else class="table-wrap"><table class="rtable">
-          <thead><tr><th>{{ s.backups.jail }}</th><th>{{ s.backups.policy }}</th><th>{{ s.backups.lastBackup }}</th><th>{{ s.backups.state }}</th></tr></thead>
-          <tbody><tr v-for="r in runs" :key="r.jail">
-            <td class="mono" :data-label="s.backups.jail">{{ r.jail }}</td><td class="mono" :data-label="s.backups.policy">{{ r.last.spec.policy || '-' }}</td><td :data-label="s.backups.lastBackup"><TimeStamp :ts="r.last.metadata.created_at" /> <span class="faint">{{ bytes(r.last.status.new_bytes) }}</span></td>
+          <thead><tr><th>{{ s.backups.name }}</th><th>{{ s.backups.kind }}</th><th>{{ s.backups.policy }}</th><th>{{ s.backups.lastBackup }}</th><th>{{ s.backups.state }}</th></tr></thead>
+          <tbody><tr v-for="r in runs" :key="r.key">
+            <td class="mono" :data-label="s.backups.name">{{ r.jail }}</td><td :data-label="s.backups.kind">{{ r.volume ? s.backups.kindVolume : s.backups.kindJail }}</td><td class="mono" :data-label="s.backups.policy">{{ r.last.spec.policy || '-' }}</td><td :data-label="s.backups.lastBackup"><TimeStamp :ts="r.last.metadata.created_at" /> <span class="faint">{{ bytes(r.last.status.new_bytes) }}</span></td>
             <td :data-label="s.backups.state"><span class="pill" :class="r.last.status.failed ? 'danger' : r.last.status.verified ? 'ok' : 'warn'">{{ r.last.status.failed ? s.backups.failed : r.last.status.verified ? s.backups.verified : s.backups.unverified }}</span></td>
           </tr></tbody></table></div>
       </div>
@@ -117,11 +121,11 @@ const sel = (m: Record<string, string> | undefined) => Object.entries(m ?? {}).m
         <div v-else class="table-wrap"><table class="rtable">
           <thead><tr><th>{{ s.backups.name }}</th><th>{{ s.backups.selector }}</th><th>{{ s.backups.targets }}</th><th>{{ s.backups.schedule }}</th><th>{{ s.backups.retention }}</th><th>{{ s.backups.verifySchedule }}</th><th><span class="sr-only">{{ s.app.actions }}</span></th></tr></thead>
           <tbody><tr v-for="p in l.data.value?.policies" :key="p.metadata.name">
-            <td class="mono" :data-label="s.backups.name">{{ p.metadata.name }}</td>
+            <td class="mono" :data-label="s.backups.name">{{ p.metadata.name }}<span v-if="p.spec.exclude_volumes" class="pill" style="margin-left: 6px" data-test="volumes-excluded">{{ s.backups.volumesExcluded }}</span></td>
             <td class="mono" :data-label="s.backups.selector">{{ sel(p.spec.selector) }}</td><td class="mono" :data-label="s.backups.targets">{{ (p.spec.targets ?? []).join(', ') }}</td><td class="mono" :data-label="s.backups.schedule">{{ p.spec.schedule }}</td>
             <td :data-label="s.backups.retention">{{ retention(p.spec.retention) }}</td>
             <td class="mono" :data-label="s.backups.verifySchedule">{{ p.spec.verify_schedule || '-' }}<span v-if="p.spec.verify_mode" class="faint"> ({{ p.spec.verify_mode }})</span></td>
-            <td class="actions"><button v-if="hasExt('backup_run')" class="btn btn-sm" type="button" @click="run(p.metadata.name)">{{ s.backups.run }}</button></td>
+            <td class="actions"><div class="row-actions"><button v-if="hasExt('backup_run')" class="btn btn-sm" type="button" @click="run(p.metadata.name)">{{ s.backups.run }}</button><button v-if="hasExt('backup_run') && !p.spec.exclude_volumes" class="btn btn-sm" type="button" data-test="run-no-volumes" @click="run(p.metadata.name, true)">{{ s.backups.runNoVolumes }}</button></div></td>
           </tr></tbody></table></div>
       </div>
     </LoadState>

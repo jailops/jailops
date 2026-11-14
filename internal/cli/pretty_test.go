@@ -16,6 +16,7 @@ func (h *harness) seedDualStack() {
 	for _, args := range [][]string{
 		{"network", "create", "sw", "--ipv4", "10.94.0.1/24", "--uplink", "em0", "--ipv6", "2001:db8:1:2:100::/80", "--ipv6-mode", "proxy"},
 		{"network", "grant", "sw", "--project", "main"},
+		{"volume", "create", "data", "--storage", "default", "--uid", "770", "--gid", "770"},
 		{"jail", "create", "web", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--memory", "2G", "--cpu", "2", "--label", "env=prod"},
 		{"jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--network", "sw", "--volume", "data:/var/db"},
 		{"jail", "start", "web"},

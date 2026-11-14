@@ -64,30 +64,28 @@ const (
 	OpPFTableShow   = "pf.table_show"
 	OpPFKillLabel   = "pf.kill_label"
 
-	OpNetList            = "net.list"
-	OpNetBridgeCreate    = "net.bridge_create"
-	OpNetBridgeDestroy   = "net.bridge_destroy"
-	OpNetBridgeAddMember = "net.bridge_add_member"
-	OpNetBridgeDelMember = "net.bridge_delete_member"
-	OpNetSetDescription  = "net.set_description"
-	OpNetEpairCreate     = "net.epair_create"
-	OpNetEpairDestroy    = "net.epair_destroy"
-	OpNetMoveToJail      = "net.move_to_jail"
-	OpNetMoveFromJail    = "net.move_from_jail"
-	OpNetSetLink         = "net.set_link"
-	OpNetAddrAdd         = "net.addr_add"
-	OpNetAddrRemove      = "net.addr_remove"
-	OpNetRouteAdd        = "net.route_add"
-	OpNetRouteDelete     = "net.route_delete"
-	OpNetNeighborSet     = "net.neighbor_set"
-	OpNetNeighborDelete  = "net.neighbor_delete"
-	OpNetIPv6Forwarding  = "net.ipv6_forwarding"
+	OpNetList           = "net.list"
+	OpNetSetDescription = "net.set_description"
+	OpNetEpairCreate    = "net.epair_create"
+	OpNetEpairDestroy   = "net.epair_destroy"
+	OpNetMoveToJail     = "net.move_to_jail"
+	OpNetMoveFromJail   = "net.move_from_jail"
+	OpNetSetLink        = "net.set_link"
+	OpNetAddrAdd        = "net.addr_add"
+	OpNetAddrRemove     = "net.addr_remove"
+	OpNetRouteAdd       = "net.route_add"
+	OpNetRouteDelete    = "net.route_delete"
+	OpNetIPv6Forwarding = "net.ipv6_forwarding"
 
-	OpFSRead      = "fs.read_file"
-	OpFSWrite     = "fs.write_file"
-	OpFSMkdir     = "fs.mkdir"
-	OpFSRemove    = "fs.remove"
-	OpFSRemoveAll = "fs.remove_all"
+	OpFSRead     = "fs.read_file"
+	OpFSWrite    = "fs.write_file"
+	OpFSMkdir    = "fs.mkdir"
+	OpFSVolOwner = "fs.volume_owner"
+	// fs.source_probe looks at a host directory below an admin-host-mount directory (safefs.go): whether it is on a
+	// mount and whether a file can be made in it. It changes nothing but a probe file it removes again.
+	OpFSSourceProbe = "fs.source_probe"
+	OpFSRemove      = "fs.remove"
+	OpFSRemoveAll   = "fs.remove_all"
 	// fs.list_logs and fs.tail_file read the log directory of a jail root
 	// (logs.go); nothing else, and nothing is written.
 	OpFSListLogs = "fs.list_logs"
@@ -231,19 +229,13 @@ type runArgs struct {
 	MaxOutput int      `json:"max_output,omitempty"`
 }
 type netArgs struct {
-	Name    string         `json:"name,omitempty"`
-	Iface   string         `json:"iface,omitempty"`
-	Bridge  string         `json:"bridge,omitempty"`
-	Member  string         `json:"member,omitempty"`
-	Private bool           `json:"private,omitempty"`
-	Desc    string         `json:"desc,omitempty"`
-	Jail    string         `json:"jail,omitempty"`
-	Up      bool           `json:"up,omitempty"`
-	Prefix  netip.Prefix   `json:"prefix,omitzero"`
-	Route   ifconfig.Route `json:"route,omitzero"`
-	// Addr and MAC are a static neighbor entry.
-	Addr netip.Addr `json:"addr,omitzero"`
-	MAC  string     `json:"mac,omitempty"`
+	Name   string         `json:"name,omitempty"`
+	Iface  string         `json:"iface,omitempty"`
+	Desc   string         `json:"desc,omitempty"`
+	Jail   string         `json:"jail,omitempty"`
+	Up     bool           `json:"up,omitempty"`
+	Prefix netip.Prefix   `json:"prefix,omitzero"`
+	Route  ifconfig.Route `json:"route,omitzero"`
 }
 type epairRes struct {
 	A string `json:"a"`
@@ -503,18 +495,6 @@ func init() {
 	register(OpNetList, false, func(ctx context.Context, h Host, _ empty, _ *callIO) (any, error) {
 		return h.Net().List(ctx)
 	})
-	register(OpNetBridgeCreate, false, func(ctx context.Context, h Host, a netArgs, _ *callIO) (any, error) {
-		return empty{}, h.Net().BridgeCreate(ctx, a.Name)
-	})
-	register(OpNetBridgeDestroy, false, func(ctx context.Context, h Host, a netArgs, _ *callIO) (any, error) {
-		return empty{}, h.Net().BridgeDestroy(ctx, a.Name)
-	})
-	register(OpNetBridgeAddMember, false, func(ctx context.Context, h Host, a netArgs, _ *callIO) (any, error) {
-		return empty{}, h.Net().BridgeAddMember(ctx, a.Bridge, a.Member, a.Private)
-	})
-	register(OpNetBridgeDelMember, false, func(ctx context.Context, h Host, a netArgs, _ *callIO) (any, error) {
-		return empty{}, h.Net().BridgeDeleteMember(ctx, a.Bridge, a.Member)
-	})
 	register(OpNetSetDescription, false, func(ctx context.Context, h Host, a netArgs, _ *callIO) (any, error) {
 		return empty{}, h.Net().SetDescription(ctx, a.Iface, a.Desc)
 	})
@@ -545,12 +525,6 @@ func init() {
 	})
 	register(OpNetRouteDelete, false, func(ctx context.Context, h Host, a netArgs, _ *callIO) (any, error) {
 		return empty{}, h.Net().RouteDelete(ctx, a.Route)
-	})
-	register(OpNetNeighborSet, false, func(ctx context.Context, h Host, a netArgs, _ *callIO) (any, error) {
-		return empty{}, h.Net().NeighborSet(ctx, a.Iface, a.Addr, a.MAC)
-	})
-	register(OpNetNeighborDelete, false, func(ctx context.Context, h Host, a netArgs, _ *callIO) (any, error) {
-		return empty{}, h.Net().NeighborDelete(ctx, a.Iface, a.Addr)
 	})
 	register(OpNetIPv6Forwarding, false, func(ctx context.Context, h Host, _ empty, _ *callIO) (any, error) {
 		v, err := h.Net().IPv6Forwarding(ctx)
@@ -602,6 +576,12 @@ func init() {
 	})
 	register(OpFSMkdir, false, func(ctx context.Context, h Host, a MkdirReq, _ *callIO) (any, error) {
 		return empty{}, h.MkdirAll(ctx, a)
+	})
+	register(OpFSVolOwner, false, func(ctx context.Context, h Host, a VolumeOwnerReq, _ *callIO) (any, error) {
+		return empty{}, h.SetVolumeOwner(ctx, a)
+	})
+	register(OpFSSourceProbe, false, func(ctx context.Context, h Host, a SourceProbeReq, _ *callIO) (any, error) {
+		return h.ProbeSource(ctx, a)
 	})
 	register(OpFSRemoveAll, false, func(ctx context.Context, h Host, a RemoveReq, _ *callIO) (any, error) {
 		return empty{}, h.RemoveAll(ctx, a.Path)

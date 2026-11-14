@@ -178,10 +178,11 @@ func TestAppInstall(t *testing.T) {
 	if r := j.Spec.Resources; r.Memory != "512M" || r.Disk != "4294967296" || r.CPU != 2 {
 		t.Fatalf("limits %+v", r)
 	}
-	if len(j.Spec.Volumes) != 2 || j.Spec.Volumes[0].Name != "var-db-web" || j.Spec.Volumes[0].Mount != "/var/db/web" || j.Spec.Volumes[1].Name != "usr-local-www-web" {
+	if len(j.Spec.Volumes) != 2 || j.Spec.Volumes[0].Name != "web-var-db-web" || j.Spec.Volumes[0].Mount != "/var/db/web" || j.Spec.Volumes[1].Name != "web-usr-local-www-web" {
 		t.Fatalf("volumes %+v", j.Spec.Volumes)
 	}
-	for _, ds := range []string{"tank/jailops/projects/alpha/jails/web/data/var-db-web", "tank/jailops/projects/alpha/jails/web/data/usr-local-www-web", "tank/jailops/projects/alpha/jails/web@app-installed", "tank/jailops/projects/alpha/jails/web/data/var-db-web@app-installed"} {
+	// the data are volumes of the project, made before the jail; the jail's own snapshot does not hold them
+	for _, ds := range []string{"tank/jailops/projects/alpha/volumes/web-var-db-web", "tank/jailops/projects/alpha/volumes/web-usr-local-www-web", "tank/jailops/projects/alpha/jails/web@app-installed"} {
 		if ok, _ := e.ZFS.Exists(c, ds); !ok {
 			t.Errorf("%s does not exist", ds)
 		}
@@ -192,7 +193,7 @@ func TestAppInstall(t *testing.T) {
 	if len(res.Data) != 2 || len(res.Config) != 1 || len(res.Logs) != 1 || !strings.Contains(res.Notes, "/usr/local/www/web") {
 		t.Fatalf("%+v", res)
 	}
-	wantSteps := []string{"create-jail", "start-jail", "install-packages-ports", "install-packages-jailops", "set-up-shell", "refresh-library-cache", "record-version", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot", "enable-autostart"}
+	wantSteps := []string{"create-volume-web-var-db-web", "create-volume-web-usr-local-www-web", "create-jail", "start-jail", "install-packages-ports", "install-packages-jailops", "set-up-shell", "refresh-library-cache", "record-version", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot", "enable-autostart"}
 	var steps []string
 	for _, s := range res.Steps {
 		_, rest, _ := strings.Cut(s, " ")
@@ -227,11 +228,18 @@ func TestAppInstall(t *testing.T) {
 	if !strings.Contains(e.File(root+api.PromptFile), `PS1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '`) || !strings.Contains(e.File(root+api.BashrcPath), api.PromptFile) || !strings.Contains(e.File(root+api.ProfilePath), api.PromptFile) {
 		t.Fatalf("prompt files: %v", e.Files.Paths())
 	}
-	// The volume datasets are mounted by the start of the jail, after its root, never by zfs mount -a.
-	for _, v := range []string{"var-db-web", "usr-local-www-web"} {
-		if p, err := e.ZFS.Get(c, "tank/jailops/projects/alpha/jails/web/data/"+v, "canmount"); err != nil || p["canmount"].Value != "noauto" {
+	// A volume is mounted on the host at its own place (zfs mount -a at boot, devices off) and reaches the jail
+	// through the nullfs line of its fstab.
+	for _, v := range []string{"web-var-db-web", "web-usr-local-www-web"} {
+		p, err := e.ZFS.Get(c, "tank/jailops/projects/alpha/volumes/"+v, "canmount", "devices", "mountpoint")
+		if err != nil || p["canmount"].Value != "on" || p["devices"].Value != "off" || p["mountpoint"].Value != "/jailops/projects/alpha/volumes/"+v {
 			t.Fatalf("%s: %v %+v", v, err, p)
 		}
+	}
+	fstab := e.File("/etc/jailops/jails/alpha_web/fstab")
+	if !strings.Contains(fstab, "/jailops/projects/alpha/volumes/web-var-db-web "+root+"/var/db/web nullfs rw 0 0\n") ||
+		!strings.Contains(fstab, "/jailops/projects/alpha/volumes/web-usr-local-www-web "+root+"/usr/local/www/web nullfs rw 0 0\n") {
+		t.Fatalf("fstab:\n%s", fstab)
 	}
 	// rc.conf holds <name>_enable and the knobs, escaped; rc.conf.local of the network is untouched.
 	rc := e.File(root + "/etc/rc.conf")
@@ -493,13 +501,7 @@ func TestAppInstallFailures(t *testing.T) {
 	}
 	// the operator looks, then deletes it and tries again
 	e.SetPkgInstallErr(nil)
-	dop, err := e.Admin.Jails().Delete(c, "web")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := dop.Wait(c); err != nil {
-		t.Fatal(err)
-	}
+	deleteWithVolumes(t, e, c, "web")
 	// 3. the health check never passes: the services ran, the jail is kept stopped, no snapshot was taken
 	e.SetDial(func(context.Context, string, string) (net.Conn, error) { return nil, errors.New("connection refused") })
 	op, err = e.Admin.Apps().Install(c, "web", req)
@@ -522,8 +524,7 @@ func TestAppInstallFailures(t *testing.T) {
 		t.Fatal("the service was not started")
 	}
 	// a wrong status is a failure too
-	dop, _ = e.Admin.Jails().Delete(c, "web")
-	dop.Wait(c)
+	deleteWithVolumes(t, e, c, "web")
 	e.SetDial(httpAnswer(500, nil))
 	op, _ = e.Admin.Apps().Install(c, "web", req)
 	_, err = op.Wait(c)
@@ -532,8 +533,7 @@ func TestAppInstallFailures(t *testing.T) {
 	}
 	// 4. the service does not start: the error names the service command, not the wrapper's script, with what
 	// the rc script printed
-	dop, _ = e.Admin.Jails().Delete(c, "web")
-	dop.Wait(c)
+	deleteWithVolumes(t, e, c, "web")
 	e.Jails.SetExecFn(func(_ string, o jailos.ExecOpts) (run.Result, error) {
 		if o.Argv[0] == "/bin/sh" && o.Argv[len(o.Argv)-1] == "web" {
 			return run.Result{ExitCode: 1, Stdout: []byte("web does not start: Permission denied\n")}, errors.New("exit 1")
@@ -799,11 +799,12 @@ func TestDoctorVolumeCanmount(t *testing.T) {
 	if ch := check(); ch.Status != api.DoctorOK {
 		t.Fatalf("%+v", ch)
 	}
-	ds := "tank/jailops/projects/alpha/jails/web/data/var-db-web"
-	if err := e.ZFS.Set(c, ds, map[string]string{"canmount": "on"}); err != nil {
+	// a volume whose dataset is gone, and a jail that attaches a volume that does not exist
+	ds := "tank/jailops/projects/alpha/volumes/web-var-db-web"
+	if err := e.ZFS.Destroy(c, ds, zfs.DestroyOpts{Recursive: true}); err != nil {
 		t.Fatal(err)
 	}
-	if ch := check(); ch.Status != api.DoctorWarn || ch.Hint != "zfs set canmount=noauto "+ds || !strings.Contains(ch.Message, "1 volume dataset") {
+	if ch := check(); ch.Status != api.DoctorFail || !strings.Contains(ch.Message, "has no dataset "+ds) {
 		t.Fatalf("%+v", ch)
 	}
 }
@@ -865,7 +866,12 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 		if c2.app == "isms" { // openssh-portable from the FreeBSD packages, then isms from the JailOps repository
 			repos = append(repos, "install-packages-jailops")
 		}
-		want := append([]string{"create-jail", "start-jail"}, repos...)
+		var want []string
+		for range def.Data {
+			want = append(want, "create-volume")
+		}
+		want = append(want, "create-jail", "start-jail")
+		want = append(want, repos...)
 		want = append(want, "set-up-shell", "refresh-library-cache", "record-version", "write-rc-conf")
 		want = append(want, setup(len(def.Setup))...)
 		want = append(want, c2.services...)
@@ -873,7 +879,13 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 			want = append(want, "health-check")
 		}
 		want = append(want, "close-firewall", "snapshot", "enable-autostart")
-		if got := names(res.Steps); !slices.Equal(got, want) {
+		got := names(res.Steps)
+		for i, g := range got {
+			if strings.HasPrefix(g, "create-volume-") {
+				got[i] = "create-volume"
+			}
+		}
+		if !slices.Equal(got, want) {
 			t.Errorf("%s: steps %v, want %v", c2.app, res.Steps, want)
 		}
 	}
@@ -910,5 +922,30 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 	}
 	if res.Snapshot != "app-installed" || len(res.Ports) != 1 || res.Ports[0].Port != 8080 {
 		t.Fatalf("%+v", res)
+	}
+}
+
+// deleteWithVolumes deletes a jail and every volume of the project: an app's data are volumes, and they outlive the
+// jail.
+func deleteWithVolumes(t *testing.T, e *dtest.Env, c context.Context, jail string) {
+	t.Helper()
+	dop, err := e.Admin.Jails().Delete(c, jail)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dop.Wait(c); err != nil {
+		t.Fatal(err)
+	}
+	for v, err := range e.Admin.Volumes().List(c) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		op, err := e.Admin.Volumes().Delete(c, v.Metadata.Name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := op.Wait(c); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

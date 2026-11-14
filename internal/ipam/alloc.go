@@ -107,7 +107,7 @@ func NewV6In(n *api.IPv6Net, sc Scope, inUse []netip.Addr) (*Allocator, error) {
 	if n == nil || n.Mode == api.IPv6None {
 		return nil, invalid("ipv6", "network has no IPv6 configuration")
 	}
-	return fromStrings("ipv6", n.Subnet, n.Gateway, n.Range, n.Exclude, sc, inUse)
+	return fromStrings("ipv6", n.Subnet, "", n.Range, n.Exclude, sc, inUse)
 }
 
 func fromStrings(field, subnet, gw, rng string, excl []string, sc Scope, inUse []netip.Addr) (*Allocator, error) {

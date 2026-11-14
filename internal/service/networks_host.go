@@ -15,8 +15,8 @@ import (
 
 // checkNetworkHost checks a network against the host's interfaces when it is created or changed: the uplink must be
 // an interface that can carry the network's traffic, and the subnets must not be in use on the host already. Both
-// were found only when the first jail started, or never: a typo in the uplink rendered a NAT rule on a missing
-// interface, and a subnet of the host's own LAN broke the host's routing. When the interfaces cannot be listed (a
+// would be found only when the first jail started, or never: a typo in the uplink renders a NAT rule on a missing
+// interface, and a subnet of the host's own LAN breaks the host's routing. When the interfaces cannot be listed (a
 // host without the network client) nothing is refused here; the doctor reports what it can.
 func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) error {
 	if s.d.Net == nil {
@@ -40,12 +40,6 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 			return api.Errorf(api.CodeInvalid, "uplink %s cannot be used: %s", spec.Uplink, p).WithDetail("field", "uplink").WithHint(hint)
 		}
 	}
-	mine := map[string]bool{}
-	if spec.Bridge != "" {
-		if m, l3, err := ipam.GatewayNames(spec.Bridge); err == nil {
-			mine[spec.Bridge], mine[m], mine[l3] = true, true, true
-		}
-	}
 	var subnets []netip.Prefix
 	if spec.IPv4 != nil {
 		if p, err := netip.ParsePrefix(spec.IPv4.Subnet); err == nil {
@@ -62,7 +56,7 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 		}
 	}
 	for _, i := range ifs {
-		if mine[i.Name] || hostIfaceIsNetwork(i) {
+		if hostIfaceIsNetwork(i) {
 			continue
 		}
 		for _, have := range slices.Concat(i.Inet, i.Inet6) {
@@ -113,8 +107,8 @@ func subnetField(p netip.Prefix) string {
 	return "ipv6.subnet"
 }
 
-// hostIfaceIsNetwork reports whether an interface is a bridge or gateway end of a JailOps network (or a jail's
-// epair): its addresses are a network's, which the comparison of network specs covers. A WireGuard interface of
+// hostIfaceIsNetwork reports whether an interface is JailOps's, such as the host end of a jail's epair: its addresses
+// are a network's, which the comparison of network specs covers. A WireGuard interface of
 // JailOps is not: its addresses are routed by the host like any other interface's.
 func hostIfaceIsNetwork(i ifconfig.Iface) bool {
 	return render.IsJailOpsDesc(i.Description) && !strings.HasPrefix(i.Name, "wg")
@@ -122,7 +116,7 @@ func hostIfaceIsNetwork(i ifconfig.Iface) bool {
 
 // routedUplinkProblem says why an interface cannot be the uplink of a network that routes (NAT, a routed IPv6
 // prefix, port forwards), or "" when it can: it must exist and be no loopback, bridge, bridge member or interface of
-// JailOps (a jail's epair end, a gateway end). A vlan(4), a lagg(4), a tunnel or an epair of the administrator's own
+// JailOps (the end of a jail's epair). A vlan(4), a lagg(4), a tunnel or an epair of the administrator's own
 // that leads into another vnet is fine; the proxy's stricter rule is uplinkProblem.
 func routedUplinkProblem(uplink string, ifs []ifconfig.Iface) string {
 	var up *ifconfig.Iface

@@ -43,6 +43,9 @@ func (m *memBackups) Preflight(context.Context, api.RestoreRequest) (api.Restore
 func (m *memBackups) Restore(context.Context, api.RestoreRequest) (api.Jail, error) {
 	return api.Jail{}, nil
 }
+func (m *memBackups) RestoreVolume(context.Context, api.RestoreRequest) (api.Volume, error) {
+	return api.Volume{}, nil
+}
 
 // who is one identity of the matrix.
 type who struct {
@@ -188,6 +191,21 @@ func TestAuthorizationMatrix(t *testing.T) {
 	for _, p := range []string{"alpha", "beta"} {
 		pc := e.Admin.Project(p)
 		sp := webSpecIn(p)
+		vop, err := pc.Volumes().Create(c, sdk.NewVolume("vol", api.VolumeSpec{Storage: "default"}), "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := vop.Wait(c); err != nil {
+			t.Fatalf("%s volume: %v\n%s", p, err, e.Log())
+		}
+		vsn, err := pc.Volumes().Snapshots("vol").Create(c, "s1", "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := vsn.Wait(c); err != nil {
+			t.Fatal(err)
+		}
+		sp.Volumes = []api.VolumeAttach{{Name: "vol", Mount: "/srv/vol"}}
 		op, err := pc.Jails().Create(c, sdk.NewJail("web", sp))
 		if err != nil {
 			t.Fatal(err)
@@ -237,7 +255,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 	if _, err := e.Admin.Remotes().Create(c, api.Remote{Metadata: api.ObjectMeta{Name: "r1"}, Spec: api.RemoteSpec{Address: "127.0.0.1:1", Fingerprint: strings.Repeat("ab", 32)}}); err != nil {
 		t.Fatal(err)
 	}
-	params := map[string]string{"name": "web", "snapshot": "s1", "volume": "db", "gen": "1", "path...": "etc/x", "file...": "messages", "id": opAlpha,
+	params := map[string]string{"name": "web", "snapshot": "s1", "volume": "vol", "gen": "1", "path...": "etc/x", "file...": "messages", "id": opAlpha,
 		"fingerprint": fp, "member": "m"}
 	// The {name} parameter depends on the family.
 	nameFor := func(pattern string) string {
@@ -248,6 +266,8 @@ func TestAuthorizationMatrix(t *testing.T) {
 			return "lan"
 		case strings.HasPrefix(pattern, "/api/v1/storage"):
 			return "default"
+		case strings.HasPrefix(pattern, "/api/v1/volumes"):
+			return "vol"
 		case strings.HasPrefix(pattern, "/api/v1/projects"):
 			return "alpha"
 		case strings.HasPrefix(pattern, "/api/v1/firewall/policies"):

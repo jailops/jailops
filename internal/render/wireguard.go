@@ -10,8 +10,8 @@ import (
 var wgIfaceRE = regexp.MustCompile(`^wg[A-Za-z0-9_.-]{1,13}$`)
 
 // PFWireGuard renders the anchor jailops/wg.<name> of a WireGuard server: traffic that comes in on the tunnel from
-// the tunnel's own subnets may go to the subnets of the JailOps networks the server names, and nothing else is
-// decided here (the host's ruleset and the jails' own policies still apply). Without networks the anchor is empty
+// the tunnel's own subnets may go to the subnets of the JailOps networks the server names, and everything else a peer
+// sends is dropped (the jails' own policies still apply to what is admitted). Without networks the anchor is empty
 // ("" is returned and the anchor is flushed). UNVERIFIED on FreeBSD: an interface name with '-' in a rule.
 func PFWireGuard(name, iface string, tunnels, networks []netip.Prefix) (string, error) {
 	if err := validate.Name("wireguard", name); err != nil {
@@ -42,5 +42,9 @@ func PFWireGuard(name, iface string, tunnels, networks []netip.Prefix) (string, 
 	if n == 0 {
 		return "", nil
 	}
+	// The anchor confines the tunnel: whatever a peer sends that the rules above do not admit is dropped here, so the
+	// host's own ruleset does not decide what a peer may reach (the host itself and its LAN included).
+	b.line("# nothing else from the peers")
+	b.line("block drop in quick on %s all", iface)
 	return b.result()
 }

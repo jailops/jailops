@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 
+	"jailops.net/jailops/internal/hostdir"
 	"jailops.net/jailops/internal/lifecycle/fault"
 )
 
@@ -55,15 +56,20 @@ func (e *Exec) Commands() []string {
 
 // Files is an in-memory file store with atomic writes.
 type Files struct {
-	F     *fault.Injector
-	mu    sync.Mutex
-	Data  map[string][]byte
-	Dirs  map[string]bool
-	Trees map[string][]string // CopyTree: src -> file paths relative to src to copy
+	F      *fault.Injector
+	mu     sync.Mutex
+	Data   map[string][]byte
+	Dirs   map[string]bool
+	Trees  map[string][]string // CopyTree: src -> file paths relative to src to copy
+	Owners map[string]string   // SetOwner: path -> uid:gid:mode
+	// Sources are the directories of the host that are mounts, and ReadOnlySources those that take no file: what
+	// ProbeSource answers from.
+	Sources         map[string]bool
+	ReadOnlySources map[string]bool
 }
 
 func NewFiles(f *fault.Injector) *Files {
-	return &Files{F: f, Data: map[string][]byte{}, Dirs: map[string]bool{}, Trees: map[string][]string{}}
+	return &Files{F: f, Data: map[string][]byte{}, Dirs: map[string]bool{}, Trees: map[string][]string{}, Sources: map[string]bool{}, ReadOnlySources: map[string]bool{}}
 }
 
 func (f *Files) WriteAtomic(_ context.Context, p string, data []byte) error {
@@ -94,6 +100,38 @@ func (f *Files) Exists(_ context.Context, p string) (bool, error) {
 	defer f.mu.Unlock()
 	_, ok := f.Data[p]
 	return ok || f.Dirs[p], nil
+}
+
+// SetOwner records the owner and the mode set on a path.
+func (f *Files) SetOwner(_ context.Context, p string, uid, gid int, mode uint32) error {
+	if err := f.F.Hit("setowner " + p); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Owners == nil {
+		f.Owners = map[string]string{}
+	}
+	f.Owners[p] = fmt.Sprintf("%d:%d:%04o", uid, gid, mode)
+	return nil
+}
+
+// Sources are the directories of the host the fake knows as mounts; ProbeSource answers from it.
+// ProbeSource says whether a path is in Sources (a mount) and, with write, whether it is not in Readonly.
+func (f *Files) ProbeSource(_ context.Context, p string, write bool) (hostdir.Probe, error) {
+	if err := f.F.Hit("probe " + p); err != nil {
+		return hostdir.Probe{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.Sources[p] {
+		return hostdir.Probe{Detail: "the directory is not on a mount"}, nil
+	}
+	out := hostdir.Probe{Mounted: true, Writable: !f.ReadOnlySources[p]}
+	if write && !out.Writable {
+		out.Detail = "no file can be created in the directory"
+	}
+	return out, nil
 }
 
 func (f *Files) MkdirAll(_ context.Context, p string) error {
@@ -181,6 +219,8 @@ type Jails struct {
 	Release string
 	// OnStart runs before a start succeeds, to let tests check the pool.
 	OnStart func(name string) error
+	// OnStop runs before a stop succeeds; an error from it is the stop's (jail(8) refusing to remove the jail).
+	OnStop func(name string) error
 	// ExecFn answers commands run inside a jail (health checks).
 	ExecFn func(name string, argv []string) ([]byte, error)
 	// Never makes Running report false after Start (readiness timeout).
@@ -212,6 +252,11 @@ func (j *Jails) Start(_ context.Context, name string) error {
 func (j *Jails) Stop(_ context.Context, name string) error {
 	if err := j.F.Hit("jail stop " + name); err != nil {
 		return err
+	}
+	if j.OnStop != nil {
+		if err := j.OnStop(name); err != nil {
+			return err
+		}
 	}
 	j.mu.Lock()
 	defer j.mu.Unlock()

@@ -1,24 +1,16 @@
 package render
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
 	"fmt"
 	"sort"
 	"strconv"
 )
 
-// The bandwidth limit of a jail's device is a dummynet pipe, and it limits what the jail SENDS (egress). pf sends the
-// device's packets into the pipe with dnpipe on match rules of the jail's anchor.
-//
-// Only the direction out of the jail can be shaped this way. A packet that is sent into a dummynet pipe and comes back
-// is put into the IP stack again, which is right for what the jail sends (it arrives on the jail's own port, a bridge
-// member, and goes on through the host's IP stack), but wrong at the hooks that a packet on its way TO the jail meets
-// after the gateway interface: the gateway's bridge member and the jail's own port, where pf matches the state again
-// and sends the packet into the pipe again, which routes it back to the gateway interface. The packet circulates
-// until the pipe's queue drops it, and the connection stalls. Traffic into the jail therefore carries no pipe: a rule
-// names it with a zero (dnpipe (0, N)), so that the state of a flow that the host or the internet started still shapes
-// the jail's answers.
+// The bandwidth limit of a jail's device is two dummynet pipes, one for each direction: what the jail sends (egress)
+// and what the jail receives (ingress). pf sends the device's packets into the pipe with dnpipe on match rules of the
+// jail's anchor, on the host end of the device's epair. That interface is the jail's own link, so one rule sees every
+// packet of one jail in one direction: what the jail sends arrives on it (match in), and what is sent to the jail,
+// whoever sent it, leaves the host on it (match out).
 //
 // The pipe numbers are JailOps's own: PipeBase to PipeBase+PipeSpan-1. Nothing else on the host may use them, and the
 // reconciler deletes a pipe in that range that no jail wants.
@@ -27,25 +19,33 @@ const (
 	PipeSpan = 20000 // 20000 devices with a limit
 )
 
-// PipeKey names a device with a limit: the jail's stable identity and the index of the device in its network list.
+// PipeKey names a direction of a device with a limit: the jail's stable identity, the index of the device in its
+// network list and the direction.
 type PipeKey struct {
-	Jail   string
-	Device int
+	Jail    string
+	Device  int
+	Ingress bool
 }
 
-// PipeNumbers gives every key a pipe number. It comes from a hash of the key, and a key whose slot is taken goes to the
-// next free one, in the order of the keys, so the numbers are the same on every call for the same set of keys and no
-// two keys share a pipe.
-func PipeNumbers(keys []PipeKey) (map[PipeKey]int, error) {
+// AllocatePipes gives every key a pipe number and keeps the numbers it had: kept holds the numbers given before (of
+// any keys; those of keys that are not asked for are free again), a key that has a number in kept keeps it, and a key
+// without one gets the lowest number of JailOps's range that no other key has, in the order of the keys. So a number
+// never changes while its key exists, whatever other devices are added or removed: the anchors and the states of the
+// other jails keep naming the pipe they were made with. A number outside the range, or given to two keys, is not
+// kept.
+func AllocatePipes(kept map[PipeKey]int, keys []PipeKey) (map[PipeKey]int, error) {
 	if len(keys) > PipeSpan {
-		return nil, fmt.Errorf("render: %d devices have a bandwidth limit, at most %d are possible", len(keys), PipeSpan)
+		return nil, fmt.Errorf("render: %d directions have a bandwidth limit, at most %d are possible", len(keys), PipeSpan)
 	}
 	sorted := append([]PipeKey(nil), keys...)
 	sort.Slice(sorted, func(i, j int) bool {
 		if sorted[i].Jail != sorted[j].Jail {
 			return sorted[i].Jail < sorted[j].Jail
 		}
-		return sorted[i].Device < sorted[j].Device
+		if sorted[i].Device != sorted[j].Device {
+			return sorted[i].Device < sorted[j].Device
+		}
+		return !sorted[i].Ingress && sorted[j].Ingress
 	})
 	used := map[int]bool{}
 	out := make(map[PipeKey]int, len(sorted))
@@ -53,13 +53,21 @@ func PipeNumbers(keys []PipeKey) (map[PipeKey]int, error) {
 		if _, dup := out[k]; dup {
 			continue
 		}
-		sum := sha256.Sum256([]byte("jailops-pipe\x00" + k.Jail + "\x00" + strconv.Itoa(k.Device)))
-		slot := int(binary.BigEndian.Uint32(sum[:4])) % PipeSpan
-		for used[slot] {
-			slot = (slot + 1) % PipeSpan
+		if n, ok := kept[k]; ok && IsManagedPipe(n) && !used[n] {
+			used[n] = true
+			out[k] = n
 		}
-		used[slot] = true
-		out[k] = PipeBase + slot
+	}
+	next := PipeBase
+	for _, k := range sorted {
+		if _, ok := out[k]; ok {
+			continue
+		}
+		for used[next] {
+			next++
+		}
+		used[next] = true
+		out[k] = next
 	}
 	return out, nil
 }
@@ -67,14 +75,11 @@ func PipeNumbers(keys []PipeKey) (map[PipeKey]int, error) {
 // IsManagedPipe says whether a pipe number is in JailOps's range.
 func IsManagedPipe(n int) bool { return n >= PipeBase && n < PipeBase+PipeSpan }
 
-// Shape is the egress limit of one device of a jail, as its anchor needs it: the jail's host-side end of the device's
-// epair (what the jail sends arrives here), the gateway interface of the device's network and the device's addresses
-// (what the host or the internet started and the jail answers is found by its state), and the pipe.
+// Shape is the bandwidth limit of one device of a jail, as its anchor needs it: the jail's host end of the device's
+// epair and the pipes of the two directions (0: no limit in that direction).
 type Shape struct {
-	Iface   string
-	Gateway string
-	Addrs   []string
-	Pipe    int
+	Iface           string
+	Egress, Ingress int
 }
 
 // PipeRate is a bandwidth limit as dnctl takes it: "10000000bit/s".

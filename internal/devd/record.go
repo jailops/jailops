@@ -1,6 +1,5 @@
 // Package devd reads the notifications the kernel publishes through devd(8) (the seqpacket socket of devd) and turns
-// the few that matter to an operator into JailOps events: a ZFS error, a pool changing state, the link of the uplink or
-// of a managed bridge going down, a resource limit that was hit by a jail.
+// the few that matter to an operator into JailOps events: a ZFS error, a pool changing state, the link of the uplink going down, a resource limit that was hit by a jail.
 //
 // The records are text, one per packet: a type character and, for a notification, key=value pairs (devctl(4)):
 //

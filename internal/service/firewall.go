@@ -44,7 +44,7 @@ func bodyProject(p, body string) error {
 }
 
 // checkPolicy validates a policy, renders it against placeholder values and,
-// when a PF client exists, has pfctl -n check the result. A raw fragment needs
+// when a PF client exists, has pfctl -n check the result. A raw fragment and a port forward need
 // the admin role.
 func (s *Service) checkPolicy(ctx context.Context, name string, spec api.FirewallPolicySpec, refs fwRefs) error {
 	if err := validate.Name("name", name); err != nil {
@@ -56,6 +56,13 @@ func (s *Service) checkPolicy(ctx context.Context, name string, spec api.Firewal
 	}
 	if rep.RequiresAdmin && !ActorFrom(ctx).Perm.Satisfies(api.PermAdmin) {
 		return api.Errorf(api.CodeForbidden, "a raw PF fragment needs the admin role")
+	}
+	if !ActorFrom(ctx).Perm.Satisfies(api.PermAdmin) {
+		for i, r := range spec.Rules {
+			if r.Redirect != nil {
+				return api.Errorf(api.CodeForbidden, "rule %d forwards a host port into a jail, which needs the admin role: it opens the host to the network", i+1)
+			}
+		}
 	}
 	in := render.PFInput{Jail: "check_policy", Interfaces: []string{"jo000000000a"}, Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1")},
 		DefaultIn: spec.DefaultIn, DefaultOut: spec.DefaultOut, Policies: []render.PFPolicy{{Name: "check", Policy: spec}},

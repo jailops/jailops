@@ -55,10 +55,9 @@ type HostDesired struct {
 
 // NetworkDesired is one managed network.
 type NetworkDesired struct {
-	Name   string
-	ID     string
-	Bridge string
-	Spec   api.NetworkSpec
+	Name string
+	ID   string
+	Spec api.NetworkSpec
 	// Steps is render.NetworkPlan for the network.
 	Steps []render.Step
 	// Anchors maps an anchor name used by Steps (OpLoadAnchor) to its ruleset.
@@ -82,8 +81,8 @@ type JailDesired struct {
 	// Attach holds, per network attachment, the host-phase steps of
 	// render.AttachPlan.
 	Attach [][]render.Step
-	// Bridges is the bridge of each attachment.
-	Bridges []string
+	// Networks is the network of each attachment.
+	Networks []string
 	// Epairs are the host-side interface names the jail should have while it runs.
 	Epairs []string
 	// JailSide are the jail-phase description steps of the jail ends of the epairs: what ifconfig shows inside the
@@ -123,8 +122,9 @@ type WireGuardDesired struct {
 
 // ProxyAddr is one address of an IPv6 proxy mode network.
 type ProxyAddr struct {
-	Addr   string
-	Bridge string
+	Addr string
+	// Iface is the host end of the jail's epair: the interface the host route of the address leaves through.
+	Iface  string
 	Uplink string
 }
 

@@ -91,7 +91,15 @@ A policy selects jails **by label**, so label the jails first:
     jailops backup run --project shop nightly      # now, instead of at 02:00
     jailops backup list --project shop
 
-An empty selector matches no jail. `--include-state` also backs up the host's state dataset. The node applies retention,
+An empty selector matches no jail. `--include-state` also backs up the host's state dataset.
+
+**Volumes.** A policy also backs up the volumes of the jails it selects, and the volumes whose own labels match the selector.
+A volume is a backup of its own, taken from its own snapshot, so a volume that three jails attach is copied **once** per run,
+and a jail's backup holds no volume files. `jailops backup list` shows jail and volume backups with a KIND column
+(`--volume NAME` lists one volume's). To leave volumes out, set `--exclude-volumes` on the policy, or
+`jailops backup run nightly --no-volumes` for one run. An encrypted volume is backed up while it is unlocked; a locked one
+is reported (`locked`) and backed up by the next run after `jailops volume unlock`. The files go to the node encrypted with
+the backup key, like everything else. The node applies retention,
 garbage collection (with a grace period, minimum 12 hours) and quarantine of corrupt chunks on its own schedule
 (`jailops-backupd gc`, `verify`, `retention`, `quarantine list`, `quarantine add`, `escrow list`, `escrow delete`).
 
@@ -138,6 +146,16 @@ created and what conflicts. Nothing is touched until you confirm.
 
     jailops backup restore --project shop <id> --as web-restored --dry-run     # the preflight only
     jailops backup restore --project shop <id> --as web-restored -y
+
+**Volumes in a restore.** A jail restore brings back the volumes the jail attaches that the project does not have, each from
+its newest backup, before the jail; a volume the project already has is attached as it is and never touched. `--no-volumes`
+restores the jail with no volume attachments at all (attach the volumes afterwards). A volume
+backup is restored on its own, as a new volume of the project, and never replaces one:
+
+    jailops backup restore --project shop <volume backup id> --as mail-restored
+
+An encrypted volume needs its passphrase for this (typed twice, or `--passphrase-file`), so it is restored before the
+jail, not with it. The preflight lists the volumes a restore would make.
 
 A restore names the project it goes into (`--project`; there is no default) and is admitted like a new jail: the project's
 grants and quotas apply, and the network and storage must be granted to it. The jail gets a new UUID and fresh addresses

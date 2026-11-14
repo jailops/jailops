@@ -5,6 +5,7 @@ import (
 	"net/netip"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 
 	"jailops.net/jailops/internal/ipam"
@@ -19,13 +20,11 @@ type fakeIf struct {
 
 // Fake is an in-memory interface table with the same name rules as Command.
 type Fake struct {
-	mu         sync.Mutex
-	o          Options
-	ifs        map[string]*fakeIf
-	routes     map[string]bool
-	neighbors  map[string]string
-	nextBridge int
-	nextEpair  int
+	mu        sync.Mutex
+	o         Options
+	ifs       map[string]*fakeIf
+	routes    map[string]bool
+	nextEpair int
 	// Forwarding is the value IPv6Forwarding returns.
 	Forwarding bool
 }
@@ -37,13 +36,13 @@ var (
 
 // NewFake returns a Fake with a loopback interface.
 func NewFake(o Options) *Fake {
-	f := &Fake{o: o, ifs: map[string]*fakeIf{}, routes: map[string]bool{}, neighbors: map[string]string{}}
+	f := &Fake{o: o, ifs: map[string]*fakeIf{}, routes: map[string]bool{}}
 	f.ifs["lo0"] = &fakeIf{Iface: Iface{Name: "lo0", Flags: []string{"UP", "LOOPBACK", "RUNNING"}, MTU: 16384}}
 	return f
 }
 
 // AddForeign inserts an interface JailOps does not own (test helper): no description, and no group of a kind JailOps
-// creates unless the name is a bridge's or an epair's (bridge0, epair0a).
+// creates unless the name is an epair's (epair0a), or a bridge's (bridge0: in the group, but never owned).
 func (f *Fake) AddForeign(name string, up bool) {
 	i := Iface{Name: name, MTU: 1500}
 	switch drv, _ := ipam.DriverLikeName(name); drv {
@@ -147,7 +146,7 @@ func (f *Fake) Routes() []string {
 	defer f.mu.Unlock()
 	var r []string
 	for k := range f.routes {
-		r = append(r, k)
+		r = append(r, strings.TrimSpace(k))
 	}
 	sort.Strings(r)
 	return r
@@ -178,72 +177,6 @@ func (f *Fake) List(context.Context) ([]Iface, error) {
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Name < out[b].Name })
 	return out, nil
-}
-
-// BridgeCreate implements Client.
-func (f *Fake) BridgeCreate(_ context.Context, name string) error {
-	if err := CheckNewName(name); err != nil {
-		return err
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.ifs[name] != nil {
-		return api.Errorf(api.CodeAlreadyExists, "ifconfig: interface %s already exists", name)
-	}
-	f.ifs[name] = &fakeIf{Iface: Iface{Name: name, MTU: 1500, Flags: []string{"BROADCAST", "MULTICAST"}, Groups: []string{"bridge"}, Description: Marker}}
-	return nil
-}
-
-// BridgeDestroy implements Client.
-func (f *Fake) BridgeDestroy(_ context.Context, name string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.ownLocked(name); err != nil {
-		return err
-	}
-	delete(f.ifs, name)
-	return nil
-}
-
-// BridgeAddMember implements Client.
-func (f *Fake) BridgeAddMember(_ context.Context, bridge, member string, private bool) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.ownLocked(bridge, member); err != nil {
-		return err
-	}
-	b, _ := f.get(bridge)
-	for _, m := range b.Members {
-		if m.Name == member {
-			return api.Errorf(api.CodeAlreadyExists, "ifconfig: %s is already a member of %s", member, bridge)
-		}
-	}
-	m := Member{Name: member, Flags: []string{"LEARNING", "DISCOVER", "AUTOEGRESS"}, Private: private}
-	if private {
-		m.Flags = append(m.Flags, "PRIVATE")
-	}
-	b.Members = append(b.Members, m)
-	return nil
-}
-
-// BridgeDeleteMember implements Client.
-func (f *Fake) BridgeDeleteMember(_ context.Context, bridge, member string) error {
-	if err := ValidateIfName(member); err != nil {
-		return err
-	}
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.ownLocked(bridge); err != nil {
-		return err
-	}
-	b, _ := f.get(bridge)
-	for k, m := range b.Members {
-		if m.Name == member {
-			b.Members = append(b.Members[:k], b.Members[k+1:]...)
-			return nil
-		}
-	}
-	return api.Errorf(api.CodeNotFound, "ifconfig: %s is not a member of %s", member, bridge)
 }
 
 // SetDescription implements Client.
@@ -315,8 +248,7 @@ func (f *Fake) removeLocked(n string) {
 	}
 }
 
-// MoveToJail implements Client. The interface leaves its bridge, as it does
-// when it changes vnet.
+// MoveToJail implements Client.
 func (f *Fake) MoveToJail(_ context.Context, iface, jail string) error {
 	if err := ValidateJailRef(jail); err != nil {
 		return err
@@ -422,7 +354,7 @@ func (f *Fake) AddrRemove(_ context.Context, iface string, p netip.Prefix) error
 }
 
 func (f *Fake) route(r Route, add bool) error {
-	a, err := routeArgs(r)
+	a, err := routeArgs(r, false)
 	if err != nil {
 		return err
 	}
@@ -456,43 +388,6 @@ func (f *Fake) RouteAdd(_ context.Context, r Route) error { return f.route(r, tr
 
 // RouteDelete implements Client.
 func (f *Fake) RouteDelete(_ context.Context, r Route) error { return f.route(r, false) }
-
-// Neighbors returns the static neighbor entries as "iface addr" to MAC.
-func (f *Fake) Neighbors() map[string]string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := map[string]string{}
-	for k, v := range f.neighbors {
-		out[k] = v
-	}
-	return out
-}
-
-// NeighborSet implements Client.
-func (f *Fake) NeighborSet(_ context.Context, iface string, a netip.Addr, mac string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.ownLocked(iface); err != nil {
-		return err
-	}
-	f.neighbors[iface+" "+a.String()] = mac
-	return nil
-}
-
-// NeighborDelete implements Client.
-func (f *Fake) NeighborDelete(_ context.Context, iface string, a netip.Addr) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if err := f.ownLocked(iface); err != nil {
-		return err
-	}
-	k := iface + " " + a.String()
-	if _, ok := f.neighbors[k]; !ok {
-		return api.Errorf(api.CodeNotFound, "ndp: no entry for %s", a)
-	}
-	delete(f.neighbors, k)
-	return nil
-}
 
 // IPv6Forwarding implements Client.
 func (f *Fake) IPv6Forwarding(context.Context) (bool, error) {

@@ -32,7 +32,7 @@ Replace `2001:db8:abcd:1::/64` with the prefix your provider routes to you and `
 
 ## Verified, and not
 
-Routed mode with a dual-stack managed bridge is verified on FreeBSD 15.1 arm64: FreeBSD, Alpine and Debian jails reached the
+Routed mode with dual-stack networks is verified on FreeBSD 15.1 arm64: FreeBSD, Alpine and Debian jails reached the
 internet over IPv4 and IPv6. **UNVERIFIED:** traffic from the internet into a jail over a routed prefix (the test host has
 no IPv6 route to it), and the automatic carving of `/80`s and a reject route for the unallocated rest of the `/64`: neither is
 implemented, you choose each `/80`, as this example does.

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"syscall"
 
+	"jailops.net/jailops/internal/hostdir"
 	"jailops.net/jailops/internal/priv"
 	"jailops.net/jailops/sdk/api"
 )
@@ -60,6 +61,13 @@ func (f privFiles) MkdirAll(ctx context.Context, path string) error {
 		return osFiles{}.MkdirAll(ctx, path)
 	}
 	return f.h.MkdirAll(ctx, priv.MkdirReq{Path: path, Mode: 0o755})
+}
+func (f privFiles) SetOwner(ctx context.Context, path string, uid, gid int, mode uint32) error {
+	return f.h.SetVolumeOwner(ctx, priv.VolumeOwnerReq{Path: path, UID: uint32(uid), GID: uint32(gid), Mode: mode})
+}
+func (f privFiles) ProbeSource(ctx context.Context, path string, write bool) (hostdir.Probe, error) {
+	r, err := f.h.ProbeSource(ctx, priv.SourceProbeReq{Path: path, Write: write})
+	return hostdir.Probe{Mounted: r.Mounted, Writable: r.Writable, Detail: r.Detail}, err
 }
 func (f privFiles) RemoveAll(ctx context.Context, path string) error {
 	if f.mine(path) {
@@ -136,7 +144,42 @@ func (osFiles) Exists(_ context.Context, path string) (bool, error) {
 	}
 	return err == nil, err
 }
-func (osFiles) MkdirAll(_ context.Context, path string) error  { return os.MkdirAll(path, 0o755) }
+func (osFiles) MkdirAll(_ context.Context, path string) error { return os.MkdirAll(path, 0o755) }
+func (osFiles) SetOwner(_ context.Context, path string, uid, gid int, mode uint32) error {
+	if err := os.Chmod(path, os.FileMode(mode)); err != nil {
+		return err
+	}
+	return os.Chown(path, uid, gid)
+}
+
+// ProbeSource of a daemon without the helper: the directory is on a mount when its device is not its parent's.
+func (osFiles) ProbeSource(_ context.Context, path string, write bool) (hostdir.Probe, error) {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return hostdir.Probe{Detail: "the directory does not exist"}, nil
+	}
+	up, err := os.Stat(filepath.Dir(path))
+	if err != nil {
+		return hostdir.Probe{}, err
+	}
+	a, ok1 := fi.Sys().(*syscall.Stat_t)
+	b, ok2 := up.Sys().(*syscall.Stat_t)
+	if !ok1 || !ok2 || uint64(a.Dev) == uint64(b.Dev) { //nolint:unconvert // the width of Dev differs by system
+		return hostdir.Probe{Detail: "the directory is not on a mount"}, nil
+	}
+	out := hostdir.Probe{Mounted: true}
+	if write {
+		f, err := os.CreateTemp(path, ".jailops-probe-")
+		if err != nil {
+			out.Detail = "no file can be created in the directory"
+			return out, nil
+		}
+		f.Close()
+		os.Remove(f.Name())
+		out.Writable = true
+	}
+	return out, nil
+}
 func (osFiles) RemoveAll(_ context.Context, path string) error { return os.RemoveAll(path) }
 func (osFiles) SHA256(_ context.Context, path string) (string, error) {
 	f, err := os.Open(path)

@@ -30,18 +30,22 @@ function steps(path: string): Step[] {
   })
 }
 
+/** The field a device of a list is named by: the volumes of a jail are named by the volume they attach. */
+const idField = (root: string) => (root === 'volumes' ? 'volume' : 'name')
+
 /** Names of the devices of a kind in a spec. Unnamed NICs are eth0, eth1, ... as the server names them. */
 export function deviceNames(spec: JailSpec, kind: DeviceKind): string[] {
-  const list = ((spec as unknown as Spec)[PATH_ROOT[kind]] as Array<{ name?: string }> | undefined) ?? []
-  return list.map((d, i) => d.name || (kind === 'nic' ? `eth${i}` : `${kind}${i}`))
+  const root = PATH_ROOT[kind]
+  const list = ((spec as unknown as Spec)[root] as Array<Record<string, string | undefined>> | undefined) ?? []
+  return list.map((d, i) => d[idField(root)] || (kind === 'nic' ? `eth${i}` : `${kind}${i}`))
 }
 
 function findDevice(spec: Spec, root: string, name: string, create: boolean): Record<string, unknown> | undefined {
   const list = (spec[root] as Array<Record<string, unknown>> | undefined) ?? (create ? (spec[root] = []) as Array<Record<string, unknown>> : undefined)
   if (!list) return undefined
-  let i = list.findIndex((d, n) => (d.name as string | undefined || (root === 'network' ? `eth${n}` : '')) === name)
+  let i = list.findIndex((d, n) => (d[idField(root)] as string | undefined || (root === 'network' ? `eth${n}` : '')) === name)
   if (i < 0 && create) {
-    list.push({ name })
+    list.push({ [idField(root)]: name })
     i = list.length - 1
   }
   return list[i]

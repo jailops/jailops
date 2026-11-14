@@ -102,7 +102,7 @@ describe('install steps', () => {
     expect(parsed.map((_, i) => stepState(i, parsed, 2, 'failure', 'health-check'))).toEqual(['done', 'done', 'done', 'failed', 'pending'])
     expect(parsed.map((_, i) => stepState(i, parsed, 1, 'failure'))).toEqual(['done', 'failed', 'pending', 'pending', 'pending'])
   })
-  it('names volumes after their path', () => {
+  it('names the volume of a path after the path (the jail name comes before it)', () => {
     expect(volumeName('/var/db/postgres')).toBe('var-db-postgres')
   })
 })

@@ -391,7 +391,7 @@ func TestDebootstrapAlwaysChecksTheSignature(t *testing.T) {
 	r := newRuleEnv(t)
 	root := r.cfg.reg.mounts()[0] + "/images/deb/staging-g1"
 	admin := WithAdmin(context.Background(), "jailopsd")
-	good := []string{"debootstrap", "--arch=arm64", "--variant=minbase", "--keyring=/usr/local/share/keyrings/debian-archive-keyring.gpg", "trixie", root, "https://deb.debian.org/debian"}
+	good := []string{"debootstrap", "--arch=arm64", "--variant=minbase", "--keyring=" + r.cfg.KeyringDir + "/debian-archive-keyring.gpg", "trixie", root, "https://deb.debian.org/debian"}
 	if err := r.check(admin, good...); err != nil {
 		t.Fatal(err)
 	}
@@ -401,10 +401,10 @@ func TestDebootstrapAlwaysChecksTheSignature(t *testing.T) {
 	for name, args := range map[string][]string{
 		"no keyring":   {"debootstrap", "--arch=arm64", "--variant=minbase", "trixie", root},
 		"no gpg check": {"debootstrap", "--arch=arm64", "--variant=minbase", "--no-check-gpg", "trixie", root},
-		"http mirror":  {"debootstrap", "--arch=arm64", "--variant=minbase", "--keyring=/usr/local/share/keyrings/k.gpg", "trixie", root, "http://deb.debian.org/debian"},
+		"http mirror":  {"debootstrap", "--arch=arm64", "--variant=minbase", "--keyring=" + r.cfg.KeyringDir + "/k.gpg", "trixie", root, "http://deb.debian.org/debian"},
 		"bad keyring":  {"debootstrap", "--arch=arm64", "--variant=minbase", "--keyring=/etc/shadow", "trixie", root},
-		"bad target":   {"debootstrap", "--arch=arm64", "--variant=minbase", "--keyring=/usr/local/share/keyrings/k.gpg", "trixie", "/etc"},
-		"extra flag":   {"debootstrap", "--arch=arm64", "--variant=minbase", "--keyring=/usr/local/share/keyrings/k.gpg", "--include=evil", "trixie", root},
+		"bad target":   {"debootstrap", "--arch=arm64", "--variant=minbase", "--keyring=" + r.cfg.KeyringDir + "/k.gpg", "trixie", "/etc"},
+		"extra flag":   {"debootstrap", "--arch=arm64", "--variant=minbase", "--keyring=" + r.cfg.KeyringDir + "/k.gpg", "--include=evil", "trixie", root},
 	} {
 		if err := r.check(admin, args...); err == nil {
 			t.Errorf("%s accepted", name)

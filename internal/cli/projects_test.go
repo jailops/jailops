@@ -22,10 +22,10 @@ func TestProjectsStorageNetworks(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("network", "create", "br-web", "--ipv4", "10.50.0.1/24", "--ipv6", "fd50::1/64")
+	tr.ok("network", "create", "web", "--ipv4", "10.50.0.1/24", "--ipv6", "fd50::1/64")
 	tr.do("", "network", "create", "bad", "--ipv4", "10.50.0.1/24", "--subnet", "10.1.0.0/24")
 	tr.do("", "network", "create", "bad", "--ipv4", "nonsense")
-	tr.ok("network", "show", "br-web", "-o", "yaml")
+	tr.ok("network", "show", "web", "-o", "yaml")
 	tr.ok("storage", "create", "fast", "--dataset", "tank/fast", "--compression", "zstd")
 	tr.do("", "storage", "create", "nodataset")
 	tr.do("", "storage", "create", "bad", "--dataset", "nodash")
@@ -33,25 +33,25 @@ func TestProjectsStorageNetworks(t *testing.T) {
 	tr.ok("storage", "show", "fast", "-o", "name")
 
 	tr.ok("project", "create", "web", "--description", "front end")
-	tr.ok("project", "set", "web", "--network", "br-web", "--storage", "fast=500G", "--max-jails", "2", "--max-memory", "8G")
-	tr.do("", "project", "set", "web", "--network", "br-web=10.50.0.100-10.50.0.150") // a network is granted whole
+	tr.ok("project", "set", "web", "--network", "web", "--storage", "fast=500G", "--max-jails", "2", "--max-memory", "8G")
+	tr.do("", "project", "set", "web", "--network", "web=10.50.0.100-10.50.0.150") // a network is granted whole
 	tr.ok("project", "show", "web")
 	tr.ok("project", "list")
 	tr.do("", "network", "grant", "lan", "--project", "web") // lan belongs to the project main
 	tr.do("", "network", "grant", "lan")
-	tr.ok("network", "revoke", "br-web", "--project", "web")
-	tr.ok("network", "grant", "br-web", "--project", "web")
+	tr.ok("network", "revoke", "web", "--project", "web")
+	tr.ok("network", "grant", "web", "--project", "web")
 	tr.ok("project", "set", "web", "--revoke-storage", "fast")
 	tr.ok("project", "set", "web", "--storage", "fast=500G")
 
 	// Jails go to the project that is named; the network and the storage are named too.
-	tr.ok("create", "nginx", "--project", "web", "--image", "freebsd-15@stable", "--memory", "1G", "--cpu", "1", "--network", "br-web", "--storage", "fast")
+	tr.ok("create", "nginx", "--project", "web", "--image", "freebsd-15@stable", "--memory", "1G", "--cpu", "1", "--network", "web", "--storage", "fast")
 	tr.ok("list", "--project", "web")
 	tr.ok("list")
 	tr.do("", "list", "--project", "nowhere")
 	tr.ok("project", "show", "web", "-o", "json")
-	tr.ok("create", "n2", "--project", "web", "--image", "freebsd-15@stable", "--memory", "1G", "--cpu", "1", "--network", "br-web", "--storage", "fast")
-	_, errs, code := tr.do("", "create", "n3", "--project", "web", "--image", "freebsd-15@stable", "--memory", "1G", "--cpu", "1", "--network", "br-web", "--storage", "fast")
+	tr.ok("create", "n2", "--project", "web", "--image", "freebsd-15@stable", "--memory", "1G", "--cpu", "1", "--network", "web", "--storage", "fast")
+	_, errs, code := tr.do("", "create", "n3", "--project", "web", "--image", "freebsd-15@stable", "--memory", "1G", "--cpu", "1", "--network", "web", "--storage", "fast")
 	if code != 5 || !strings.HasPrefix(errs, "quota_exceeded:") {
 		t.Fatalf("quota: %d %s", code, errs)
 	}

@@ -346,9 +346,9 @@ func TestNetworkCreateWarnsAboutOnlinkNS(t *testing.T) {
 	h.seed()
 	tr := h.transcript()
 	tr.ok("network", "create", "sw", "--ipv4", "10.94.0.1/24", "--uplink", "em0", "--ipv6", "2001:db8:1:2:100::/80", "--ipv6-mode", "proxy")
-	f := writeFile(t, h.dir, "sw2.yaml", "kind: Network\nmetadata: {name: sw2}\nspec:\n  uplink: em0\n  ipv6: {mode: proxy, subnet: \"2001:db8:1:2:200::/80\", gateway: \"fe80::1\", range: \"2001:db8:1:2:200::10-2001:db8:1:2:200::ff\"}\n", 0o644)
+	f := writeFile(t, h.dir, "sw2.yaml", "kind: Network\nmetadata: {name: sw2}\nspec:\n  uplink: em0\n  ipv6: {mode: proxy, subnet: \"2001:db8:1:2:200::/80\", range: \"2001:db8:1:2:200::10-2001:db8:1:2:200::ff\"}\n", 0o644)
 	tr.ok("network", "create", "-f", f)
-	f = writeFile(t, h.dir, "sw3.yaml", "kind: Network\nmetadata: {name: sw3}\nspec:\n  uplink: em0\n  ipv6: {mode: proxy, subnet: \"2001:db8:1:2:300::/80\", gateway: \"fe80::1\", range: \"2001:db8:1:2:300::10-2001:db8:1:2:300::ff\"}\n", 0o644)
+	f = writeFile(t, h.dir, "sw3.yaml", "kind: Network\nmetadata: {name: sw3}\nspec:\n  uplink: em0\n  ipv6: {mode: proxy, subnet: \"2001:db8:1:2:300::/80\", range: \"2001:db8:1:2:300::10-2001:db8:1:2:300::ff\"}\n", 0o644)
 	tr.ok("apply", "-f", f)
 	// A routed network does not depend on it.
 	tr.ok("network", "create", "rt", "--ipv6", "2001:db8:1:2:1::1/80")

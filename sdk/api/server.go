@@ -195,7 +195,7 @@ var Extensions = []string{
 	"app_access",
 	"logs_unified",
 	"log_forward",
-	"volume_unlock",
+	"volumes",
 	"setup",
 	"host_certificate",
 	"jail_shell_setup",

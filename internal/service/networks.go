@@ -27,7 +27,7 @@ func (s *Service) networkToAPI(ctx context.Context, o object[api.NetworkSpec]) a
 	n.Status.DNS = s.networkDNS(o.Meta.Name, o.Spec)
 	if a := ActorFrom(ctx); !a.Global || ProjectFrom(ctx) != "" {
 		n.Status.Orphans = nil // host interfaces are not the business of a project
-		n.Status.Members = nil
+		n.Status.Links = nil
 	}
 	return n
 }
@@ -149,9 +149,6 @@ func (s *Service) validateNetwork(name string, spec *api.NetworkSpec, self strin
 		if o.Meta.Name == self {
 			continue
 		}
-		if spec.Bridge != "" && o.Spec.Bridge == spec.Bridge {
-			return api.Errorf(api.CodeAlreadyExists, "bridge %s is already used by network %q", spec.Bridge, o.Meta.Name)
-		}
 		// Two networks whose subnets overlap cannot both be routed by the host, in any project: an address of one
 		// would be answered, routed and filtered for the other.
 		// (a network of the same name is reported as existing by the caller)
@@ -189,28 +186,7 @@ func overlappingSubnets(a, b api.NetworkSpec) (netip.Prefix, netip.Prefix, bool)
 	return netip.Prefix{}, netip.Prefix{}, false
 }
 
-// nextBridge returns the lowest "jo<n>" that no network uses and that is not an interface of the host.
-func (s *Service) nextBridge(host map[string]ifconfig.Iface) (string, error) {
-	objs, err := s.netKind.list()
-	if err != nil {
-		return "", err
-	}
-	used := map[string]bool{}
-	for _, o := range objs {
-		for _, n := range bridgeNames(o.Spec.Bridge) {
-			used[n] = true
-		}
-	}
-	for i := 0; i < 1000; i++ {
-		b := ipam.BridgeName(i)
-		if _, taken := host[b]; !taken && !used[b] && !used[b+"ga"] && !used[b+"gb"] {
-			return b, nil
-		}
-	}
-	return "", api.Errorf(api.CodePoolExhausted, "no free bridge name")
-}
-
-// CreateNetwork stores a network. The bridge name is assigned here when empty.
+// CreateNetwork stores a network.
 func (s *Service) CreateNetwork(ctx context.Context, n api.Network) (api.Network, error) {
 	if err := requireGlobal(ctx, "creating a network"); err != nil {
 		return api.Network{}, err
@@ -219,24 +195,13 @@ func (s *Service) CreateNetwork(ctx context.Context, n api.Network) (api.Network
 	if err := s.validateNetwork(name, &n.Spec, ""); err != nil {
 		return api.Network{}, err
 	}
-	unlock, err := s.locks.lockPatient(ctx, "create network "+name, networkLock(name), "network/_bridges")
+	unlock, err := s.locks.lockPatient(ctx, "create network "+name, networkLock(name))
 	if err != nil {
 		return api.Network{}, err
 	}
 	defer unlock()
 	if s.netKind.exists(name) {
 		return api.Network{}, api.Errorf(api.CodeAlreadyExists, "network %q already exists", name)
-	}
-	note := ""
-	if n.Spec.Bridge == "" {
-		if n.Spec.Bridge, note, err = s.defaultBridge(ctx, name); err != nil {
-			return api.Network{}, err
-		}
-	} else if err := s.checkBridge(ctx, name, n.Spec.Bridge); err != nil {
-		return api.Network{}, err
-	}
-	if err := s.validateNetwork(name, &n.Spec, ""); err != nil {
-		return api.Network{}, err
 	}
 	if err := validate.AnchorPath("name", render.NetAnchor(name)); err != nil {
 		return api.Network{}, err
@@ -250,9 +215,6 @@ func (s *Service) CreateNetwork(ctx context.Context, n api.Network) (api.Network
 	}
 	s.kick()
 	out := s.networkToAPI(ctx, o)
-	if note != "" {
-		out.Status.Warnings = append(out.Status.Warnings, note)
-	}
 	out.Status.Warnings = append(out.Status.Warnings, s.forwardingWarnings(ctx, n.Spec)...)
 	// A proxy-mode network needs the host to answer the off-link probes of the segment's routers; the administrator
 	// sets that, so say it now and not only in the doctor.
@@ -293,7 +255,7 @@ func (s *Service) UpdateNetwork(ctx context.Context, name string, n api.Network,
 // updateNetwork stores the new spec under the network's lock; before is the resolver configuration of its jails
 // until now.
 func (s *Service) updateNetwork(ctx context.Context, name string, n api.Network, expect int64) (api.Network, api.NetworkDNS, error) {
-	unlock, err := s.locks.lockPatient(ctx, "update network "+name, networkLock(name), "network/_bridges")
+	unlock, err := s.locks.lockPatient(ctx, "update network "+name, networkLock(name))
 	if err != nil {
 		return api.Network{}, api.NetworkDNS{}, err
 	}
@@ -303,12 +265,6 @@ func (s *Service) updateNetwork(ctx context.Context, name string, n api.Network,
 		return api.Network{}, api.NetworkDNS{}, err
 	}
 	before := *s.networkDNS(name, old.Spec)
-	if n.Spec.Bridge == "" {
-		n.Spec.Bridge = old.Spec.Bridge
-	}
-	if n.Spec.Bridge != old.Spec.Bridge {
-		return api.Network{}, api.NetworkDNS{}, invalid("the bridge of a network cannot change: its jails' ports, its gateway pair and its address are on it, and the helper creates a bridge only under a free name").WithHint("create a new network and move the jails")
-	}
 	if n.Metadata.Name != "" && n.Metadata.Name != name {
 		return api.Network{}, api.NetworkDNS{}, renameByAction("network", "networks")
 	}
@@ -321,6 +277,9 @@ func (s *Service) updateNetwork(ctx context.Context, name string, n api.Network,
 	if err := s.checkNetworkHost(ctx, n.Spec); err != nil {
 		return api.Network{}, api.NetworkDNS{}, err
 	}
+	// the helper removes a reject route only while a stored network has its subnet: before the new spec is stored (a
+	// route that is removed for a failed update is put back by the reconcile loop)
+	s.dropRejectRoutes(ctx, old.Meta.UUID, name, old.Spec, n.Spec)
 	o, err := s.netKind.update(ctx, name, expect, n.Metadata.Labels, &n.Metadata.ManagedBy, n.Spec)
 	if err != nil {
 		return api.Network{}, api.NetworkDNS{}, err
@@ -348,7 +307,7 @@ func (s *Service) checkNetworkFits(name string, spec api.NetworkSpec) error {
 				if v6 {
 					v = a.IPv6
 					if spec.IPv6 != nil {
-						sub, gw = spec.IPv6.Subnet, spec.IPv6.Gateway
+						sub = spec.IPv6.Subnet
 					}
 				} else if spec.IPv4 != nil {
 					sub, gw = spec.IPv4.Subnet, spec.IPv4.Gateway
@@ -387,13 +346,12 @@ func (s *Service) PatchNetwork(ctx context.Context, name string, patch map[strin
 	return s.UpdateNetwork(ctx, name, out, cur.Metadata.Generation)
 }
 
-// DeleteNetwork removes a network that no jail uses and, when JailOps owns
-// the bridge and it has no members, the bridge as well.
+// DeleteNetwork removes a network that no jail uses, with its anchor.
 func (s *Service) DeleteNetwork(ctx context.Context, name string, expect int64) error {
 	if err := requireGlobal(ctx, "deleting a network"); err != nil {
 		return err
 	}
-	unlock, err := s.locks.lockPatient(ctx, "delete network "+name, networkLock(name), "network/_bridges")
+	unlock, err := s.locks.lockPatient(ctx, "delete network "+name, networkLock(name))
 	if err != nil {
 		return err
 	}
@@ -422,6 +380,7 @@ func (s *Service) DeleteNetwork(ctx context.Context, name string, expect int64) 
 			}
 		}
 	}
+	s.dropRejectRoutes(ctx, o.Meta.UUID, o.Meta.Name, o.Spec, api.NetworkSpec{}) // while the helper still finds the network stored
 	if err := s.netKind.delete(ctx, name, expect); err != nil {
 		return err
 	}
@@ -432,46 +391,40 @@ func (s *Service) DeleteNetwork(ctx context.Context, name string, expect int64) 
 	return nil
 }
 
-// teardownNetwork removes the bridge of a deleted network when it is ours.
+// teardownNetwork removes what the host holds for a deleted network: its anchor.
 func (s *Service) teardownNetwork(ctx context.Context, o object[api.NetworkSpec]) {
-	// the anchor of a network holds the pass of its gateway port as well as the NAT, so every network has one
 	if s.d.PF != nil {
 		if err := s.d.PF.Flush(ctx, render.NetAnchor(o.Meta.Name)); err != nil && !api.IsCode(err, api.CodeNotFound) {
-			// what stays is a pass of the gateway interface of a network that is gone, which another network may be given
+			// what stays is the translation rule of a network that is gone, which another network may be given
 			s.log.Warn("flushing the anchor of a deleted network failed", "network", o.Meta.Name, "err", err)
 		}
 	}
+}
+
+// dropRejectRoutes removes the reject routes of the old spec of a network that the new spec does not have: a
+// subnet that changed, or a network that is gone.
+func (s *Service) dropRejectRoutes(ctx context.Context, id, name string, old, now api.NetworkSpec) {
 	if s.d.Net == nil {
 		return
 	}
-	ifs, err := s.d.Net.List(ctx)
+	want := map[string]bool{}
+	if steps, err := render.NetworkPlan(render.NetworkInput{ID: id, Name: name, Spec: now}); err == nil {
+		for _, st := range steps {
+			if st.Op == render.OpAddRejectRoute {
+				want[st.Arg] = true
+			}
+		}
+	}
+	steps, err := render.NetworkPlan(render.NetworkInput{ID: id, Name: name, Spec: old})
 	if err != nil {
 		return
 	}
-	gm, _, _ := ipam.GatewayNames(o.Spec.Bridge)
-	for _, i := range ifs {
-		if i.Name != o.Spec.Bridge || !render.OwnsIface(i.Description, render.NetBridgeDesc(o.Meta.Name)) {
+	for _, st := range steps {
+		if st.Op != render.OpAddRejectRoute || want[st.Arg] {
 			continue
 		}
-		// the gateway port is the host's own; any other port is a jail's, and the bridge stays while one is left
-		busy := false
-		for _, m := range i.Members {
-			if m.Name != gm {
-				busy = true
-			}
-		}
-		if busy {
-			continue
-		}
-		for _, g := range ifs {
-			if g.Name == gm && render.OwnsIface(g.Description, render.NetGatewayDesc(o.Meta.Name, false)) {
-				if err := s.d.Net.EpairDestroy(ctx, gm); err != nil { // destroying one end removes both
-					s.log.Warn("destroying the gateway interface of a deleted network failed", "interface", gm, "err", err)
-				}
-			}
-		}
-		if err := s.d.Net.BridgeDestroy(ctx, i.Name); err != nil {
-			s.log.Warn("destroying the bridge of a deleted network failed", "bridge", i.Name, "err", err)
+		if err := s.d.Net.RouteDelete(ctx, ifconfig.Route{Dest: st.Arg, Reject: true}); err != nil && !api.IsCode(err, api.CodeNotFound) {
+			s.log.Warn("removing the reject route of a network failed", "network", name, "route", st.Arg, "err", err)
 		}
 	}
 }

@@ -119,9 +119,9 @@ func TestStateLimitReachesTheAnchor(t *testing.T) {
 		hostly int
 		want   string
 	}{
-		{"jail limit", 777, 10000, "keep state (max 777)"},
-		{"host default", 0, 4242, "keep state (max 4242)"},
-		{"no limit anywhere", 0, 0, ""},
+		{"jail limit", 777, 10000, "keep state (max 777, if-bound)"},
+		{"host default", 0, 4242, "keep state (max 4242, if-bound)"},
+		{"no limit anywhere", 0, 0, "keep state (if-bound)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := seededWith(t, tc.hostly)
@@ -132,11 +132,8 @@ func TestStateLimitReachesTheAnchor(t *testing.T) {
 			if anchor == "" {
 				t.Fatal("the jail has no rendered anchor")
 			}
-			if tc.want == "" {
-				if strings.Contains(anchor, "keep state") {
-					t.Fatalf("a state option without a limit:\n%s", anchor)
-				}
-				return
+			if tc.hostly == 0 && tc.states == 0 && strings.Contains(anchor, "keep state (max") {
+				t.Fatalf("a state limit where there is none:\n%s", anchor)
 			}
 			if !strings.Contains(anchor, tc.want) {
 				t.Fatalf("no %q in the anchor:\n%s", tc.want, anchor)

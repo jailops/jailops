@@ -2,6 +2,7 @@ package reconcile
 
 import (
 	"context"
+	"net/netip"
 
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/ifconfig"
@@ -12,6 +13,19 @@ import (
 type Observed struct {
 	Ifaces  map[string]ifconfig.Iface
 	Running map[string]jailos.Jail
+	// Routes is the routing table; nil when it cannot be read (a route is then neither found nor missing).
+	Routes []ifconfig.RouteEntry
+}
+
+// HasRoute reports whether the routing table has a route for dest through iface ("" matches any interface), and,
+// when reject is set, whether it is a reject route.
+func (o *Observed) HasRoute(dest netip.Prefix, iface string, reject bool) bool {
+	for _, r := range o.Routes {
+		if r.Dest == dest.Masked() && (iface == "" || r.Iface == iface) && r.Reject() == reject {
+			return true
+		}
+	}
+	return false
 }
 
 // Observe reads interfaces and running jails.

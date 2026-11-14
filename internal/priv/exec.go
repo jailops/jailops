@@ -169,6 +169,7 @@ func (l *Local) Exec(ctx context.Context, jail string, argv []string, o ExecOpts
 }
 
 type localSession struct {
+	grace  time.Duration // sessionGrace when the session was made
 	tty    bool
 	cmd    *exec.Cmd
 	pgid   int
@@ -195,7 +196,7 @@ type localSession struct {
 }
 
 func startSession(ctx context.Context, bin string, args []string, o ExecOpts, release func()) (*localSession, error) {
-	s := &localSession{tty: o.TTY, done: make(chan struct{}), drained: make(chan struct{}), cmdDone: make(chan struct{}), release: release}
+	s := &localSession{grace: sessionGrace, tty: o.TTY, done: make(chan struct{}), drained: make(chan struct{}), cmdDone: make(chan struct{}), release: release}
 	cmd := exec.Command(bin, args...)
 	cmd.Dir = "/"
 	cmd.Env = []string{"PATH=/sbin:/bin:/usr/sbin:/usr/bin"}
@@ -317,6 +318,10 @@ func startSession(ctx context.Context, bin string, args []string, o ExecOpts, re
 	return s, nil
 }
 
+// sessionGrace is how long the leader of a terminal session has to end after it was released, and how long the output of
+// a finished session is waited for.
+var sessionGrace = 10 * time.Second
+
 // reap waits for the command, kills what it left behind, frees the slot and
 // closes the descriptors once the output was read (or after a grace period).
 func (s *localSession) reap(ctx context.Context) {
@@ -343,10 +348,16 @@ func (s *localSession) reap(ctx context.Context) {
 		s.leaderRelease.Close()
 	}
 	var err error
-	select {
-	case err = <-leaderDone:
-	case <-time.After(10 * time.Second):
-		s.killGroup()
+	if s.leaderRelease != nil {
+		// the leader of a terminal session was released: it ends within a grace period or is killed
+		select {
+		case err = <-leaderDone:
+		case <-time.After(s.grace):
+			s.killGroup()
+			err = <-leaderDone
+		}
+	} else {
+		// a command without a terminal runs as long as it runs; the end of the request (ctx) kills its group
 		err = <-leaderDone
 	}
 	close(waited)
@@ -371,7 +382,7 @@ func (s *localSession) reap(ctx context.Context) {
 	select {
 	case <-s.drained:
 	case <-ctx.Done():
-	case <-time.After(10 * time.Second):
+	case <-time.After(s.grace):
 	}
 	s.Close()
 }

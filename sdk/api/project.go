@@ -27,7 +27,7 @@ type ProjectSpec struct {
 	// Images is an allow-list of image names; empty allows every image.
 	Images []string `json:"images,omitempty"`
 	// NewNetwork is a create-time convenience: the server creates a dedicated
-	// bridge and subnet from its configured pool of subnets, grants it to the
+	// network with a subnet from its configured pool of subnets, grants it to the
 	// project and clears this flag. It is never stored as true.
 	NewNetwork bool `json:"new_network,omitempty"`
 }

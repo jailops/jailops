@@ -98,8 +98,6 @@ func testMapper() Mapper {
 			switch i {
 			case "em0":
 				return "uplink em0", true
-			case "jo7":
-				return "bridge jo7 of network lan", true
 			}
 			return "", false
 		},
@@ -127,7 +125,7 @@ func TestMap(t *testing.T) {
 		"zfs scrub":   {"!system=ZFS type=misc.fs.zfs.scrub_finish pool=tank", &Event{Action: "host-zfs-pool", Source: "/api/v1/host", Detail: "pool tank: scrub finished"}},
 		"zfs other":   {"!system=ZFS type=misc.fs.zfs.history_event pool=tank", nil},
 		"uplink down": {"!system=IFNET subsystem=em0 type=LINK_DOWN", &Event{Action: "host-link-down", Source: "/api/v1/host", Detail: "uplink em0 link down"}},
-		"bridge up":   {"!system=IFNET subsystem=jo7 type=LINK_UP", &Event{Action: "host-link-up", Source: "/api/v1/host", Detail: "bridge jo7 of network lan link up"}},
+		"uplink up":   {"!system=IFNET subsystem=em0 type=LINK_UP", &Event{Action: "host-link-up", Source: "/api/v1/host", Detail: "uplink em0 link up"}},
 		"unowned":     {"!system=IFNET subsystem=wlan0 type=LINK_DOWN", nil},
 		"epair churn": {"!system=IFNET subsystem=jo0123456789a0a type=LINK_UP", nil},
 		"attach":      {"!system=IFNET subsystem=em0 type=ATTACH", nil},
@@ -229,7 +227,7 @@ func (f *fakeDevd) send(t *testing.T, rec string) {
 		c := f.conn
 		f.mu.Unlock()
 		if c != nil {
-			if _, err := c.Write([]byte(rec)); err != nil {
+			if _, err := c.Write([]byte(rec + "\n")); err != nil { // devd ends every record with a newline
 				t.Fatal(err)
 			}
 			return
@@ -296,7 +294,7 @@ func TestWatcherReadsMapsAndReconnects(t *testing.T) {
 	before := w.Status().Since
 	f.dropClient()
 	waitFor(t, "the new connection", func() bool { s := w.Status(); return s.Connected && s.Since.After(before) })
-	f.send(t, "!system=IFNET subsystem=jo7 type=LINK_UP")
+	f.send(t, "!system=IFNET subsystem=em0 type=LINK_UP")
 	waitFor(t, "an event after the reconnect", func() bool { mu.Lock(); defer mu.Unlock(); return len(got) == 3 })
 }
 
@@ -312,4 +310,22 @@ func TestWatcherStopsWhileWaiting(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after the context ended")
 	}
+}
+
+// Records that arrive in one read (FreeBSD merges queued packets that the sender did not end with a record mark) are
+// still read one by one: devd ends every record with a newline.
+func TestWatcherSplitsTheRecordsOfOnePacket(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "devd.pipe")
+	var mu sync.Mutex
+	var got []Event
+	w := New(Config{Path: path, Mapper: testMapper(), MinRetry: 5 * time.Millisecond, MaxRetry: 20 * time.Millisecond,
+		Sink: func(e Event) { mu.Lock(); got = append(got, e); mu.Unlock() }})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { w.Run(ctx); close(done) }()
+	defer func() { cancel(); <-done }()
+	f := newFakeDevd(t, path)
+	waitFor(t, "the connection", func() bool { return w.Status().Connected })
+	f.send(t, "!system=IFNET subsystem=em0 type=LINK_DOWN\n!system=ZFS type=ereport.fs.zfs.checksum pool=tank vdev_path=/dev/da0\n\n")
+	waitFor(t, "two events from one packet", func() bool { mu.Lock(); defer mu.Unlock(); return len(got) == 2 })
 }

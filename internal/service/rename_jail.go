@@ -133,7 +133,7 @@ func (s *Service) jailIdle(ctx context.Context, key, name string) error {
 	locked := e != nil && len(e.locked) > 0
 	s.mu.RUnlock()
 	if locked {
-		return api.Errorf(api.CodeLocked, "jail %q has locked volumes", name).WithHint("unlock it first (jailops jail unlock " + name + ")")
+		return api.Errorf(api.CodeLocked, "jail %q has locked volumes", name).WithHint("unlock its volumes first (jailops volume list shows them, jailops volume unlock NAME)")
 	}
 	s.execMu.Lock()
 	busy := s.installing[key] || s.execN[key] > 0

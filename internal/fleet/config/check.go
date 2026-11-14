@@ -121,7 +121,7 @@ func (f *Fleet) Check() error {
 	for _, o := range f.Objects {
 		// The daemon's name rules are narrower than the repository's file-name rule: a name it refuses fails at apply time.
 		switch o.Kind {
-		case api.KindJail, api.KindNetwork, api.KindFirewallPolicy, api.KindWireGuard, model.KindApp, api.KindAppAccess:
+		case api.KindJail, api.KindVolume, api.KindNetwork, api.KindFirewallPolicy, api.KindWireGuard, model.KindApp, api.KindAppAccess:
 			if !daemonNameRE.MatchString(o.Name) {
 				add(o, "%s name %q must match %s (lowercase letters, digits and '-', starting with a letter)", o.Kind, o.Name, daemonNameRE)
 			}
@@ -232,6 +232,33 @@ func (f *Fleet) Check() error {
 				}
 				for _, d := range s.Boot.Depends {
 					missing(h, api.KindJail, o.Project, d, o, "boot.depends")
+				}
+				// a volume may have been made by hand: a jail that names one that is not declared is a warning
+				for _, v := range s.Volumes {
+					if _, ok := tables[h][Key{api.KindVolume, o.Project, v.Name}]; !ok {
+						warn(o, "volumes refers to volume %q, which is not declared for host %s: it must exist there before the jail starts", v.Name, h)
+					}
+				}
+			}
+		case api.VolumeSpec:
+			pdef := f.Projects[o.Project]
+			if s.Encrypted {
+				add(o, "an encrypted volume needs a passphrase you type: create it with 'jailops volume create --encrypted' instead of declaring it")
+			}
+			if s.IsHostDir() || s.Watch || s.Probe != "" || s.OnLoss != "" {
+				if _, err := api.CheckHostDirVolume(s); err != nil && !s.Encrypted {
+					add(o, "%v", err)
+				}
+				if s.IsHostDir() {
+					note(o, "a volume of a host directory is made and attached by a global administrator, and the directory must be on a mount below an admin-host-mount directory of each host's priv.conf")
+				}
+			}
+			for _, h := range o.Hosts {
+				if s.Storage != "" && s.Storage != "default" {
+					missing(h, api.KindStorage, "", s.Storage, o, "storage")
+				}
+				if pdef != nil && s.Storage != "" && !grantsStorage(pdef.Spec, s.Storage) {
+					add(o, "storage %q is not granted to project %s", s.Storage, o.Project)
 				}
 			}
 		case model.AppSpec:
@@ -527,11 +554,6 @@ func (f *Fleet) checkJail(o *Object, s api.JailSpec, add func(*Object, string, .
 	if len(s.Packages) > 0 {
 		add(o, "spec.packages is reserved and the daemon refuses it: install packages with spec.provision.packages")
 	}
-	for _, v := range s.Volumes {
-		if v.Encrypted {
-			warn(o, "volume %s is encrypted: its passphrase is typed by a person, so jailops-sync cannot create this jail; create it with 'jailops jail create' and sync manages it from then on", v.Name)
-		}
-	}
 	targets := map[string]bool{}
 	for i, m := range s.HostMounts {
 		if !strings.HasPrefix(m.Source, "/") || !strings.HasPrefix(m.Target, "/") || m.Target == "/" {
@@ -682,9 +704,6 @@ func checkNetwork(o *Object, s api.NetworkSpec, add func(*Object, string, ...any
 	if s.IPv4 == nil && (s.IPv6 == nil || s.IPv6.Mode == api.IPv6None) {
 		add(o, "a network needs ipv4 or ipv6")
 	}
-	if s.Uplink != "" && s.Uplink == s.Bridge {
-		add(o, "uplink must not be the bridge itself")
-	}
 	if v := s.IPv4; v != nil {
 		sub, err := netip.ParsePrefix(v.Subnet)
 		if err != nil || !sub.Addr().Is4() {
@@ -716,25 +735,15 @@ func checkNetwork(o *Object, s api.NetworkSpec, add func(*Object, string, ...any
 		if sub != sub.Masked() {
 			add(o, "ipv6.subnet %q has host bits set (want %s)", v.Subnet, sub.Masked())
 		}
-		lo := 32 // routed: a /32 to a /126
+		lo, hi := 32, 126 // routed: a /32 to a /126
 		if v.Mode == api.IPv6Proxy {
-			lo = 48 // proxy: inside a prefix the host operator approved with ndp-proxy (/48 to /120)
+			lo, hi = 48, 120 // proxy: the helper accepts /48 to /120
 		}
-		if sub.Bits() < lo || sub.Bits() > 126 {
-			add(o, "ipv6.subnet %s: in %s mode the prefix length must be between /%d and /126", sub, v.Mode, lo)
+		if sub.Bits() < lo || sub.Bits() > hi {
+			add(o, "ipv6.subnet %s: in %s mode the prefix length must be between /%d and /%d", sub, v.Mode, lo, hi)
 		}
 		checkRange(o, "ipv6.range", v.Range, sub, add)
-		gw, gerr := netip.ParseAddr(v.Gateway)
-		switch {
-		case gerr != nil || !gw.Is6():
-			add(o, "ipv6.gateway %q is not an IPv6 address", v.Gateway)
-		case !gw.IsLinkLocalUnicast() && !sub.Contains(gw):
-			add(o, "ipv6.gateway %s is outside %s (only a link-local gateway may be)", gw, sub)
-		}
 		if v.Mode == api.IPv6Proxy {
-			if gerr == nil && !gw.IsLinkLocalUnicast() {
-				add(o, "in proxy mode the gateway must be the bridge's link-local address (for example fe80::1): the bridge must not hold an on-link copy of the upstream prefix")
-			}
 			if s.Uplink == "" {
 				add(o, "ipv6 proxy mode needs an uplink to answer neighbor solicitations on")
 			}

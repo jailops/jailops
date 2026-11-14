@@ -3,7 +3,6 @@ package reconcile
 import (
 	"context"
 	"fmt"
-	"jailops.net/jailops/internal/ipam"
 	"net/netip"
 	"time"
 
@@ -23,28 +22,28 @@ type proxyHandle struct {
 // the uplink is the operator's decision in the helper's configuration, and the network says so when it is refused.
 // Routed IPv6 never depends on it.
 func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, netStatus map[string]*api.NetworkStatus, rep *Report, now time.Time) {
-	proxyNets := map[string]string{} // bridge -> network name
+	proxyNets := map[string]bool{} // networks in proxy mode
 	for _, n := range des.Networks {
 		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy {
-			proxyNets[ipam.GatewayIface(n.Bridge)] = n.Name
+			proxyNets[n.Name] = true
 		}
 	}
 	if len(proxyNets) == 0 && len(r.proxies) == 0 {
 		return
 	}
-	setCond := func(bridge string, ok bool, reason, msg string) {
-		if st := netStatus[proxyNets[bridge]]; st != nil {
+	setCond := func(network string, ok bool, reason, msg string) {
+		if st := netStatus[network]; st != nil {
 			st.Conditions = append(st.Conditions, cond(CondProxy, ok, reason, msg, now))
 		}
 	}
 	if r.cfg.NDP == nil {
-		for b := range proxyNets {
-			setCond(b, false, "Unsupported", "no neighbor discovery proxy is available on this daemon")
+		for n := range proxyNets {
+			setCond(n, false, "Unsupported", "no neighbor discovery proxy is available on this daemon")
 		}
 		return
 	}
 	byUplink := map[string][]ndproxy.Entry{}
-	uplinkBridges := map[string][]string{}
+	uplinkNets := map[string][]string{} // uplink -> the proxy-mode networks that use it
 	for _, j := range des.Jails {
 		if _, up := obs.Running[j.Name]; !up {
 			continue
@@ -54,12 +53,12 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 			if err != nil {
 				continue
 			}
-			byUplink[p.Uplink] = append(byUplink[p.Uplink], ndproxy.Entry{Addr: a, Bridge: p.Bridge})
+			byUplink[p.Uplink] = append(byUplink[p.Uplink], ndproxy.Entry{Addr: a, Iface: p.Iface})
 		}
 	}
 	for _, n := range des.Networks {
 		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy && n.Spec.Uplink != "" {
-			uplinkBridges[n.Spec.Uplink] = append(uplinkBridges[n.Spec.Uplink], ipam.GatewayIface(n.Bridge))
+			uplinkNets[n.Spec.Uplink] = append(uplinkNets[n.Spec.Uplink], n.Name)
 			if _, ok := byUplink[n.Spec.Uplink]; !ok {
 				byUplink[n.Spec.Uplink] = nil
 			}
@@ -70,7 +69,7 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 		if h == nil {
 			ndp, err := r.cfg.NDP(uplink)
 			if err != nil {
-				for _, b := range uplinkBridges[uplink] {
+				for _, b := range uplinkNets[uplink] {
 					setCond(b, false, "StartFailed", err.Error())
 				}
 				rep.Failures["ndproxy/"+uplink] = err.Error()
@@ -95,7 +94,7 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 			}
 			_ = h.ndp.Close()
 			delete(r.proxies, uplink)
-			for _, b := range uplinkBridges[uplink] {
+			for _, b := range uplinkNets[uplink] {
 				setCond(b, false, "Stopped", msg)
 			}
 			rep.Failures["ndproxy/"+uplink] = msg
@@ -103,7 +102,7 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 		default:
 		}
 		if err := h.ndp.Sync(ctx, entries); err != nil {
-			for _, b := range uplinkBridges[uplink] {
+			for _, b := range uplinkNets[uplink] {
 				setCond(b, false, "SyncFailed", err.Error())
 			}
 			rep.Failures["ndproxy/"+uplink] = err.Error()
@@ -116,12 +115,12 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 				reason, msg = "NoCapture", "the capture of "+uplink+" cannot be opened: "+st.Err
 				rep.Failures["ndproxy/"+uplink] = msg
 			}
-			for _, b := range uplinkBridges[uplink] {
+			for _, b := range uplinkNets[uplink] {
 				setCond(b, false, reason, msg)
 			}
 			continue
 		}
-		for _, b := range uplinkBridges[uplink] {
+		for _, b := range uplinkNets[uplink] {
 			setCond(b, true, "Answering", fmt.Sprintf("answering for %d address(es) on %s", len(entries), uplink))
 		}
 	}

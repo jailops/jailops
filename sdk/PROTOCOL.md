@@ -52,14 +52,22 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `GET /api/v1` | | `ServerInfo`; `environment.kernel_version` is the host's `kern.osrelease` (`15.1-RELEASE-p3`), empty when it cannot be read: the console proposes it, without the patch level, as the release of the base image |
 | `GET /healthz` | | `ok`, plain text, always 200: liveness, the process answers. Public, not in the access log |
 | `GET /readyz` | | plain text, `ok` (200) or `not ready: CLASS` (503), CLASS one of `starting`, `stopping`, `helper`, `storage`, `store`: start-up finished, the helper answers a read-only call (the JailOps dataset exists), the database answers a query. Cached for 2 s; `?host=` is not forwarded. Public, not in the access log |
-| `/api/v1/jails` GET, POST | `Jail`; POST also `JailCreate` (`volume_passphrase` for volumes with `encrypted: true`, never returned) | list; POST async, result `Jail` |
+| `/api/v1/jails` GET, POST | `Jail` (`spec.volumes`: `{volume, mount, read_only}`, volumes of the project that exist) | list; POST async, result `Jail` |
 | `/api/v1/jails/<n>` GET, PUT, PATCH, DELETE | | `Jail`; DELETE async |
 | `GET /api/v1/jails/<n>/state` | | `JailStatus` |
 | `GET /api/v1/jails/<n>/usage` | | `JailUsage`, measured for this reply and never stored: `accounting` (processes, `cpu_seconds`, `memory_bytes` from racct through `rctl -u`) only while the jail runs, with `error` instead of numbers when racct is off; `disk` (`root_bytes` and `root_referenced_bytes` of the root dataset, `data_bytes` of the persistent datasets and volumes) always, with `error` when a dataset cannot be read. Readonly; the jail list does not carry it (`jail_usage`) |
 | `PUT /api/v1/jails/<n>/state` | `JailAction` (start, stop, restart) | async, result `Jail` |
-| `POST /api/v1/jails/<n>/unlock` | `JailUnlock` (`passphrase`, `start`) | async, result `Jail`: loads the keys of the jail's encrypted volumes and starts it with `start` or when the boot wanted to; `bad_passphrase` (403) fails the operation, five in a row answer `rate_limited` (429) for 30 seconds; `invalid` for a jail without an encrypted volume. Operator (`volume_unlock`) |
-| `POST /api/v1/jails/<n>/lock` | | async, result `Jail`: stops the jail, unmounts its datasets, unloads the keys; state `locked`. Operator (`volume_unlock`) |
-| `POST /api/v1/jails/<n>/passphrase` | `JailPassphraseChange` (`old_passphrase`, `new_passphrase`, 12 to 512 bytes) | async, result `Jail`; the jail must be unlocked (`locked` otherwise). Admin (`volume_unlock`) |
+| `/api/v1/volumes` GET, POST | `Volume`; POST takes `VolumeCreate` (`passphrase` for an encrypted volume, never returned) | list; POST async, result `Volume` (extension `volumes`) |
+| `/api/v1/volumes/<n>` GET, PUT, PATCH, DELETE | `Volume` | `Volume`; a PUT changes labels, comment and `size` only; DELETE async, `busy` while a jail attaches it |
+| `POST /api/v1/volumes/<n>/unlock` | `VolumeUnlock` (`passphrase`, `start`) | async, result `Volume`: loads the key and, with `start` or when the boot wanted to, starts the jail that attaches it; `bad_passphrase` (403) fails the operation, five in a row answer `rate_limited` (429) for 30 seconds. Operator |
+| `POST /api/v1/volumes/<n>/lock` | | async, result `Volume`: stops the jail that attaches it, unmounts the volume, unloads the key. Operator |
+| `POST /api/v1/volumes/<n>/passphrase` | `VolumePassphraseChange` (`old_passphrase`, `new_passphrase`, 12 to 512 bytes) | async, result `Volume`; the volume must be unlocked (`locked` otherwise). Admin |
+| `/api/v1/volumes/<n>/snapshots` GET, POST | `VolumeSnapshot` (name optional) | list; POST async, result `VolumeSnapshot` |
+| `DELETE /api/v1/volumes/<n>/snapshots/<s>` | | async |
+| `POST /api/v1/volumes/<n>/rollback` | `VolumeRollback` (`snapshot`, `confirm_data_loss` required) | async, result `Volume`; refused while a jail that attaches the volume runs |
+| `GET /api/v1/jails/<n>/volumes` | | the jail's `VolumeAttach` list |
+| `POST /api/v1/jails/<n>/volumes` | `VolumeAttachRequest` (`volume`, `mount`, `read_only`, `copy_existing`) | async, result `Jail`; the jail must be stopped (`busy`) |
+| `DELETE /api/v1/jails/<n>/volumes/<volume>` | | async, result `Jail`; the volume and its files stay |
 | `/api/v1/jails/<n>/snapshots` GET, POST | `JailSnapshot` (name optional) | list; POST async, result `JailSnapshot` |
 | `/api/v1/jails/<n>/snapshots/<s>` GET, DELETE | | `JailSnapshot`; DELETE async |
 | `POST /api/v1/jails/<n>/rollback` | `JailRollback` | async, result `Jail`; data/all without `confirm_data_loss` is `data_loss_unconfirmed` |
@@ -230,7 +238,7 @@ users, certificates, tokens, remotes and the server configuration.
   policies (`spec.firewall.policies` of the jail, also a list) in the jail's anchor `jailops/<project>/<jail>`; only a
   global admin may edit or delete one of them or change the field. A jail's list may not name one of them, nor a
   managed policy, and names none twice. `spec.images`, when not empty, restricts the images a jail may use.
-- `POST /api/v1/projects` with `spec.new_network: true` creates a dedicated bridge and subnet from the
+- `POST /api/v1/projects` with `spec.new_network: true` creates a dedicated network with a subnet from the
   server's pool of subnets, grants it to the project and stores the project with the flag cleared
   (`unsupported` when the server has no pool configured).
 - A project is deleted only when it holds no jails, policies, address sets or backup policies
@@ -367,7 +375,7 @@ lists the name, and otherwise reports `unsupported`.
 | `host_pending` | `GET /api/v1/host/pending`, `POST .../pending/confirm`, `POST .../pending/revert` | commit confirmed: the change that reverts unless confirmed; `jailops host pending|confirm|revert`; the timer is the helper's |
 | `app_draft` | `GET /api/v1/jails/<n>/app-draft` | a definition drafted from a running jail; `jailops app export` reads it; see Routes and docs/apps.md |
 | `app_access` | `GET`, `POST /api/v1/jails/<n>/access`, `POST .../access/deny` | who may connect to an installed app; `jailops app allow`, `deny` and `access`; see Routes and docs/apps.md |
-| `volume_unlock` | `POST /api/v1/jails/<n>/unlock`, `.../lock`, `.../passphrase`; `volume_passphrase` in `POST /api/v1/jails` | encrypted volumes; `jailops jail unlock`, `lock`, `passphrase` and `jail create --volume NAME:MOUNT:encrypted`; see Routes and docs/storage.md |
+| `volumes` | `/api/v1/volumes` and below, `/api/v1/jails/<n>/volumes` | volumes of a project, attached to jails by name; encrypted volumes; `jailops volume ...`; see Routes and docs/storage.md |
 | `backup_pull`, `backup_push` | the backup transport permissions of the backup node | not routes of the host daemon (see above) |
 
 Update and provisioning keys of the registry: `shell` (`bash`, `sh` or a path), `prompt` (`default`, `none` or a PS1 text

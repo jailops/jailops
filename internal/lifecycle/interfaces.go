@@ -15,6 +15,7 @@ package lifecycle
 import (
 	"context"
 
+	"jailops.net/jailops/internal/hostdir"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -83,6 +84,12 @@ type Files interface {
 	Exists(ctx context.Context, path string) (bool, error)
 	MkdirAll(ctx context.Context, path string) error
 	RemoveAll(ctx context.Context, path string) error
+	// SetOwner sets the owner and the mode of the root directory of a volume (its mountpoint): once, when the volume
+	// is made.
+	SetOwner(ctx context.Context, path string, uid, gid int, mode uint32) error
+	// ProbeSource looks at a directory of the host that a volume gives to jails: whether it is on a mount, and with
+	// write whether a file can be made in it. A directory that is missing or not on a mount is an answer, not an error.
+	ProbeSource(ctx context.Context, path string, write bool) (hostdir.Probe, error)
 	// CopyTree copies a directory tree preserving ownership, modes and flags.
 	// UNVERIFIED: flags, ACLs and extended attributes on FreeBSD.
 	CopyTree(ctx context.Context, src, dst string) error

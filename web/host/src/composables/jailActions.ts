@@ -47,15 +47,14 @@ export function askStopMany(jails: Array<{ metadata: { name: string }; status: {
   confirmAction({ title: s.jails.bulkTitle(s.jails.stop, names.length), confirmLabel: s.jails.stopSel, text: s.jails.stopManyText, items: running, itemsLabel: s.jails.affectedJails, danger: true, run, done })
 }
 
-/** What deleting a jail destroys, one line each: every volume with its quota, and the snapshots. */
+/** What deleting a jail destroys, one line each: its root and the snapshots. The volumes it attaches stay. */
 export function deleteItems(j: Jail, snaps: JailSnapshot[]): string[] {
-  const vols = (j.spec.volumes ?? []).map((v) => s.jails.volumeItem(v.name, v.mount, v.quota))
-  return [s.jails.rootItem(j.metadata.name), ...vols, ...(snaps.length ? [s.jails.snapshotItem(plural(snaps.length, 'snapshot'))] : [])]
+  return [s.jails.rootItem(j.metadata.name), ...(snaps.length ? [s.jails.snapshotItem(plural(snaps.length, 'snapshot'))] : [])]
 }
 
 /**
  * Delete a jail: data loss, so the name is typed (tier 3). An installed app is a jail too: there it is "uninstall",
- * a tier-2 confirmation that lists the volumes whose data goes with it.
+ * a tier-2 confirmation. The volumes with the app's data stay.
  */
 export function askDelete(j: Jail, snaps: JailSnapshot[], done?: () => void): void {
   const name = j.metadata.name
@@ -87,17 +86,7 @@ export function matches(j: { metadata: { name: string; labels?: Record<string, s
   return hay.some((h) => h.toLowerCase().includes(needle))
 }
 
-/** The names of a jail's encrypted volumes (empty for a jail without). */
-export function encryptedVolumes(j: { spec: { volumes?: Array<{ name: string; encrypted?: boolean }> } }): string[] {
-  return (j.spec.volumes ?? []).filter((v) => v.encrypted).map((v) => v.name)
-}
-
 /** A jail whose encrypted volumes wait for their passphrase. */
 export function isLocked(j: { status: { power: string; locked?: string[] } }): boolean {
   return j.status.power === 'locked' || (j.status.locked?.length ?? 0) > 0
-}
-
-/** Lock: stop the jail and unload the keys of its encrypted volumes. */
-export function lockJail(name: string): Promise<unknown> {
-  return runOp(s.keys.lockTitle(name), () => api.jails.lock(name))
 }

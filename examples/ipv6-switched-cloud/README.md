@@ -27,17 +27,10 @@ the carved `/80`s.
 
 ## Before you apply
 
-1. **Approve the prefix, once, as root**, in `/usr/local/etc/jailops/priv.conf`, then `service jailops_priv restart`. One line per
-   uplink; this one covers both `/80`s:
-
-       ndp-proxy = vtnet0=2001:db8:1:2:100::/79
-
-   Without it the helper refuses every proxy request and says which line to add. The same thing is in the install script
-   of [provisioning](../provisioning) (`JAILOPS_NDP_PROXY`).
-2. Let packets in: pf's default for the uplink is yours. Admit the jails' addresses and the ports you want, for example
+1. Let packets in: pf's default for the uplink is yours. Admit the jails' addresses and the ports you want, for example
    `pass in quick on vtnet0 inet6 proto tcp from any to 2001:db8:1:2:100::/80 port { 80 443 }`. The jail's anchor
    still decides afterwards (see install.md section 3).
-3. Run `jailops doctor`: it fails `network.ndproxy` while a proxy network is not answering.
+2. Run `jailops doctor`: it fails `network.ndproxy` while a proxy network is not answering.
 
 ## Run it
 

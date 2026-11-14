@@ -6,7 +6,8 @@ import { api } from '@/api/endpoints'
 import { ApiError } from '@jailops/shared/api/client'
 import { useLoad } from '@jailops/shared/composables/load'
 import { can, hasExt } from '@jailops/shared/composables/session'
-import { askLifecycle, askDelete, lockJail, encryptedVolumes, isLocked, lifecycle, type Lifecycle } from '@/composables/jailActions'
+import { askLifecycle, askDelete, isLocked, lifecycle, type Lifecycle } from '@/composables/jailActions'
+import { confirmAction } from '@jailops/shared/composables/confirm'
 import { canShell, loadJailTab, saveJailTab } from '@/composables/shell'
 import { projectState } from '@/composables/project'
 import { jailId, pushRecent } from '@/lib/search'
@@ -16,9 +17,8 @@ import TabBar from '@jailops/shared/components/TabBar.vue'
 import TimeStamp from '@jailops/shared/components/TimeStamp.vue'
 import { codeText } from '@jailops/shared/lib/describe'
 import UnlockDialog from '@/components/UnlockDialog.vue'
-import PassphraseDialog from '@/components/PassphraseDialog.vue'
+import AttachVolumeDialog from '@/components/AttachVolumeDialog.vue'
 import LockChip from '@/components/LockChip.vue'
-import ConfirmDialog from '@jailops/shared/components/ConfirmDialog.vue'
 import { runOp } from '@jailops/shared/composables/ops'
 import { bytes, sentence, snapshotLabel } from '@jailops/shared/lib/format'
 import StatePill from '@/components/StatePill.vue'
@@ -117,9 +117,18 @@ const rollbackOpen = ref(false)
 const rollbackSnap = ref<string | undefined>()
 const upgradeOpen = ref(false)
 const unlockOpen = ref(false)
-const lockOpen = ref(false)
-const passOpen = ref(false)
-const encrypted = computed(() => (jail.value ? encryptedVolumes(jail.value) : []))
+const attachOpen = ref(false)
+// volumes are attached and detached while the jail is stopped
+const stoppedOnly = computed(() => !!jail.value && ['running', 'starting', 'stopping'].includes(jail.value.status.power))
+function detach(volume: string): void {
+  const name = jail.value?.metadata.name
+  if (!name) return
+  confirmAction({
+    title: s.jail.detachTitle(volume, name), confirmLabel: s.jail.detach, text: s.jail.detachText,
+    run: () => runOp(s.jail.detachTitle(volume, name), () => api.jails.detach(name, volume)),
+    done: () => void l.reload(),
+  })
+}
 const locked = computed(() => !!jail.value && isLocked(jail.value))
 const snapComment = ref('')
 // Rename (extension rename, admin in the project): only a stopped jail is renamed, so a running or locked one says
@@ -217,10 +226,6 @@ const attentionItems = computed(() => {
             </template>
             <button v-if="can('snapshots')" class="btn" type="button" @click="openRollback()" :disabled="!snaps.length"><Icon name="undo" />{{ s.jail.rollback }}</button>
             <button class="btn" type="button" @click="upgradeOpen = true"><Icon name="arrowUp" />{{ s.jail.upgrade }}</button>
-            <template v-if="encrypted.length && hasExt('volume_unlock') && !locked">
-              <button class="btn" type="button" data-test="lock" @click="lockOpen = true"><Icon name="lock" />{{ s.keys.lock }}</button>
-              <button class="btn" type="button" data-test="change-pass" @click="passOpen = true"><Icon name="keyRound" />{{ s.keys.change }}</button>
-            </template>
             <template v-if="mayRename">
               <button class="btn" type="button" data-test="jail-rename" :aria-disabled="!!renameWhy" :aria-describedby="renameWhy ? 'jail-rename-why' : undefined" @click="openRename">{{ s.rename.open(s.rename.kinds.jail) }}</button>
               <span v-if="renameWhy" id="jail-rename-why" class="why-disabled" data-test="jail-rename-why">{{ renameWhy }}</span>
@@ -347,15 +352,16 @@ const attentionItems = computed(() => {
 
         <div class="grid-2">
           <section class="panel">
-            <header><h2>{{ s.jail.volumes }}</h2></header>
+            <header><h2>{{ s.jail.volumes }}</h2><button v-if="hasExt('volumes')" class="btn btn-sm" type="button" data-test="attach-volume-open" :disabled="stoppedOnly" :title="stoppedOnly ? s.jail.attachStopped : undefined" @click="attachOpen = true"><Icon name="plus" />{{ s.jail.attach }}</button></header>
             <p v-if="!jail.spec.volumes?.length" class="empty">{{ s.jail.noVolumes }}</p>
             <div v-else class="table-wrap">
-              <table>
-                <thead><tr><th>{{ s.jails.name }}</th><th>{{ s.jail.mount }}</th><th>{{ s.jail.quota }}</th></tr></thead>
+              <table data-test="jail-volumes">
+                <thead><tr><th>{{ s.jails.volumeName }}</th><th>{{ s.jail.mount }}</th><th><span class="sr-only">{{ s.app.actions }}</span></th></tr></thead>
                 <tbody>
-                  <tr v-for="v in jail.spec.volumes" :key="v.name">
-                    <td class="mono">{{ v.name }}</td><td class="mono">{{ v.mount }}</td>
-                    <td class="mono">{{ v.quota || '-' }}<span v-if="v.read_only" class="badge info" style="margin-left: 6px">{{ s.jail.readOnly }}</span><span v-if="v.encrypted" class="badge warn" style="margin-left: 6px" :data-encrypted="v.name">{{ s.keys.encrypted }}</span></td>
+                  <tr v-for="v in jail.spec.volumes" :key="v.volume" :data-volume="v.volume">
+                    <td class="mono"><router-link :to="`/volumes/${encodeURIComponent(v.volume)}`">{{ v.volume }}</router-link></td>
+                    <td class="mono">{{ v.mount }}<span v-if="v.read_only" class="badge info" style="margin-left: 6px">{{ s.jail.readOnly }}</span><span v-if="jail.status.locked?.includes(v.volume)" class="badge warn" style="margin-left: 6px" :data-locked-volume="v.volume">{{ s.volumes.locked }}</span></td>
+                    <td class="actions"><button v-if="hasExt('volumes')" class="btn btn-sm" type="button" :data-detach="v.volume" :disabled="stoppedOnly" :title="stoppedOnly ? s.jail.attachStopped : undefined" @click="detach(v.volume)">{{ s.jail.detach }}</button></td>
                   </tr>
                 </tbody>
               </table>
@@ -369,9 +375,8 @@ const attentionItems = computed(() => {
         <RollbackDialog :open="rollbackOpen" :jail="jail.metadata.name" :snapshots="snaps" :initial="rollbackSnap" @close="rollbackOpen = false" @done="l.reload" />
         <UpgradeDialog :open="upgradeOpen" :jail="jail" @close="upgradeOpen = false" @done="l.reload" />
         <RenameDialog :open="renameOpen" kind="jail" :name="jail.metadata.name" :etag="l.data.value?.etag" @close="renameOpen = false" @done="renamed" />
-        <UnlockDialog :open="unlockOpen" :jail="jail.metadata.name" @close="unlockOpen = false" @done="l.reload" />
-        <PassphraseDialog :open="passOpen" :jail="jail.metadata.name" @close="passOpen = false" @done="l.reload" />
-        <ConfirmDialog :open="lockOpen" :title="s.keys.lockTitle(jail.metadata.name)" :confirm-label="s.keys.lock" danger :run="() => lockJail(jail!.metadata.name)" @close="lockOpen = false" @done="l.reload"><Callout tone="warn">{{ s.keys.lockText }}</Callout></ConfirmDialog>
+        <UnlockDialog :open="unlockOpen" :volume="jail.status.locked?.[0] ?? ''" @close="unlockOpen = false" @done="l.reload" />
+        <AttachVolumeDialog :open="attachOpen" :jail="jail.metadata.name" :attached="(jail.spec.volumes ?? []).map((v) => v.volume)" @close="attachOpen = false" @done="l.reload" />
       </div>
     </LoadState>
   </div>

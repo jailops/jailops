@@ -76,8 +76,8 @@ function used(n: Network): number {
           <header>
             <div class="row">
               <h2 class="mono">{{ n.metadata.name }}</h2>
-              <span class="pill" :class="n.status.bridge_up ? 'ok' : 'danger'">{{ n.status.bridge_up ? s.networks.bridgeUp : s.networks.bridgeDown }}</span>
-              <span class="faint mono">{{ n.spec.bridge }}<template v-if="n.spec.uplink"> {{ s.networks.via(n.spec.uplink) }}</template></span>
+              <span v-if="n.spec.uplink" class="faint mono">{{ s.networks.via(n.spec.uplink) }}</span>
+              <span class="faint">{{ s.networks.links(n.status.links?.length ?? 0) }}</span>
             </div>
             <div v-if="canWrite" class="row-actions">
               <button class="btn btn-sm" type="button" :data-test="`edit-net-${n.metadata.name}`" @click="edit(n)">{{ s.networks.edit }}</button>
@@ -106,7 +106,7 @@ function used(n: Network): number {
                 <dd v-else><span class="badge" :class="n.spec.ipv6.mode === 'proxy' ? 'warn' : 'info'" :data-ipv6-mode="n.spec.ipv6.mode">{{ sentence(n.spec.ipv6.mode) }}</span></dd>
                 <template v-if="n.spec.ipv6 && n.spec.ipv6.mode !== 'none'">
                   <dt>{{ s.networks.subnet }}</dt><dd><AddrCopy :value="n.spec.ipv6.subnet" /></dd>
-                  <dt>{{ s.networks.gateway }}</dt><dd><AddrCopy :value="n.spec.ipv6.gateway" /></dd>
+                  <dt>{{ s.networks.gateway }}</dt><dd><AddrCopy value="fe80::1" /></dd>
                   <dt>{{ s.networks.range }}</dt><dd><AddrCopy :value="n.spec.ipv6.range" /></dd>
                 </template>
                 <dt v-if="n.spec.dns?.length">{{ s.networks.dns }}</dt><dd v-if="n.spec.dns?.length"><AddrCopy v-for="a in n.spec.dns" :key="a" :value="a" style="margin-right: 8px" /></dd>

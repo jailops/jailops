@@ -84,7 +84,7 @@ func projectFlags(cmd *cobra.Command, forSet bool) *projectOpts {
 		f.StringArrayVar(&o.revokeStor, "revoke-storage", nil, "withdraw the grant of a storage (repeatable)")
 		f.BoolVar(&o.clearImages, "any-image", false, "remove the image allow-list")
 	} else {
-		f.BoolVar(&o.newNetwork, "new-network", false, "also create a dedicated bridge and subnet and grant it to the project")
+		f.BoolVar(&o.newNetwork, "new-network", false, "also create a dedicated network with a subnet and grant it to the project")
 	}
 	return o
 }
@@ -189,19 +189,19 @@ The current project is client-side state: 'project switch' stores it per remote
 in the client configuration, so switching remotes and switching projects are
 independent and each remote remembers its last project. --project and
 JAILOPS_PROJECT override it for one command.`,
-		`jailops network create br-web --ipv4 10.50.0.1/24
+		`jailops network create web --ipv4 10.50.0.1/24
 jailops storage create fast --dataset tank/jailops
 jailops project create web
-jailops project set web --network br-web --storage fast
+jailops project set web --network web --storage fast
 jailops project switch web`, "projects")
 	crudCommands(a, pc, d, `Create a project. Networks and storage are granted, not created: use --network
-and --storage with existing ones, or --new-network to create a dedicated bridge
-and subnet from the server's pool. Only global admins create projects.
+and --storage with existing ones, or --new-network to create a dedicated network
+with a subnet from the server's pool. Only global admins create projects.
 
-A project name has at most 13 characters: --new-network names the network, and
-with it the bridge, after the project. A storage quota is stored as bytes.`,
+A project name has at most 13 characters. --new-network names the network after
+the project. A storage quota is stored as bytes.`,
 		`jailops project create web
-jailops project create web --network br-web --storage fast=500G --max-jails 20 --max-memory 32G
+jailops project create web --network web --storage fast=500G --max-jails 20 --max-memory 32G
 jailops project create shop --new-network --hosts freebsd01,freebsd02`,
 		func(cmd *cobra.Command) func(string) (api.Project, error) {
 			o := projectFlags(cmd, false)
@@ -257,7 +257,7 @@ of the version it read, and is retried on a conflict.
 
 A network belongs to one project: granting one that another project holds is refused.
 Only global admins change projects.`,
-		Example: `jailops project set web --network br-web --storage fast
+		Example: `jailops project set web --network web --storage fast
 jailops project set web --max-jails 20 --max-memory 32G
 jailops project set web --revoke-network old --hosts freebsd01,freebsd02`,
 		Args:              cobra.ExactArgs(1),
@@ -493,7 +493,7 @@ func (a *app) networkGrantCmds(nd *kindDesc[api.Network]) []*cobra.Command {
 ('project switch'). A network belongs to one project: it is used whole by that
 project and is never shared, so the server refuses to grant a network that another
 project already holds. Only global admins change projects.`,
-		Example:           "jailops network grant br-web --project web\njailops network grant br-web",
+		Example:           "jailops network grant web --project web\njailops network grant web",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, nd),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -524,7 +524,7 @@ project already holds. Only global admins change projects.`,
 		Short: "Withdraw a network grant from a project",
 		Long: `Withdraw the grant of a network from a project: --project, JAILOPS_PROJECT or the
 current project. The server refuses while a jail of the project still uses the network.`,
-		Example:           "jailops network revoke br-web --project web",
+		Example:           "jailops network revoke web --project web",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, nd),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -585,10 +585,10 @@ func lastAddr(p netip.Prefix) netip.Addr {
 func cidr6Network(s string) (*api.IPv6Net, error) {
 	p, err := netip.ParsePrefix(s)
 	if err != nil || !p.Addr().Is6() || p.Bits() > 120 {
-		return nil, usagef("--ipv6 %q must look like fd50::1/64", s)
+		return nil, usagef("--ipv6 %q must look like fd50::/64", s)
 	}
-	gw := p.Addr()
-	lo := gw.Next()
+	p = p.Masked()
+	lo := p.Addr().Next()
 	hi := lo
 	for i := 0; i < 0xfffe; i++ {
 		nx := hi.Next()
@@ -597,11 +597,11 @@ func cidr6Network(s string) (*api.IPv6Net, error) {
 		}
 		hi = nx
 	}
-	return &api.IPv6Net{Mode: api.IPv6Routed, Subnet: p.Masked().String(), Gateway: gw.String(), Range: lo.String() + "-" + hi.String()}, nil
+	return &api.IPv6Net{Mode: api.IPv6Routed, Subnet: p.String(), Range: lo.String() + "-" + hi.String()}, nil
 }
 
-// cidr6Proxy describes a proxy-mode IPv6 network from the prefix the provider put on the shared segment: the gateway is
-// the link-local fe80::1 and the range starts a few addresses in, so the low addresses stay free for the operator.
+// cidr6Proxy describes a proxy-mode IPv6 network from the prefix the provider put on the shared segment: the range
+// starts a few addresses in, so the low addresses stay free for the operator.
 func cidr6Proxy(s string) (*api.IPv6Net, error) {
 	p, err := netip.ParsePrefix(s)
 	if err != nil || !p.Addr().Is6() || p.Bits() > 126 {
@@ -622,5 +622,5 @@ func cidr6Proxy(s string) (*api.IPv6Net, error) {
 		}
 		hi = nx
 	}
-	return &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: p.String(), Gateway: "fe80::1", Range: lo.String() + "-" + hi.String()}, nil
+	return &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: p.String(), Range: lo.String() + "-" + hi.String()}, nil
 }

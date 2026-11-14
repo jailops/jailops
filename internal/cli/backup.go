@@ -85,7 +85,7 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 			}
 		})
 	pd := backupPolicyDesc()
-	pc := group("policy", "Manage backup policies", "A policy selects jails by label and says when to back them up and how long to keep the backups.",
+	pc := group("policy", "Manage backup policies", "A policy selects jails by label and says when to back them up and how long to keep the backups. It also backs up the volumes those jails attach, and the volumes whose own labels match, each volume once however many jails attach it; --exclude-volumes leaves them out.",
 		"jailops backup policy list\njailops backup policy show nightly", "policies")
 	crudCommands(a, pc, pd, "Create a backup policy. The selector matches jails by label; an empty selector matches none.",
 		`jailops backup policy create nightly --selector env=prod --target nightly-node --schedule "0 2 * * *" --keep-daily 14 --keep-weekly 8`,
@@ -93,7 +93,7 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 			var selector, targets []string
 			var schedule, vsched, vmode string
 			var last, hourly, daily, weekly, monthly, yearly, fullEvery int
-			var includeState bool
+			var includeState, excludeVolumes bool
 			f := cmd.Flags()
 			f.StringArrayVarP(&selector, "selector", "l", nil, "label selector KEY=VALUE (repeatable; --label is the same)")
 			aliasFlags(cmd, map[string]string{"label": "selector"})
@@ -106,6 +106,7 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 			f.IntVar(&monthly, "keep-monthly", 0, "keep N monthly backups")
 			f.IntVar(&yearly, "keep-yearly", 0, "keep N yearly backups")
 			f.BoolVar(&includeState, "include-state", false, "also back up the host's state dataset")
+			f.BoolVar(&excludeVolumes, "exclude-volumes", false, "leave the volumes out (by default the volumes of the selected jails are backed up too, once each)")
 			f.IntVar(&fullEvery, "full-every", 0, "force a full read every N days")
 			f.StringVar(&vsched, "verify-schedule", "", "cron expression for restore tests")
 			f.StringVar(&vmode, "verify-mode", "", "verification depth: deep, extract or full")
@@ -128,7 +129,7 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 				return api.BackupPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.BackupPolicySpec{
 					Selector: sel, Targets: targets, Schedule: schedule,
 					Retention:    api.RetentionPolicy{Last: last, Hourly: hourly, Daily: daily, Weekly: weekly, Monthly: monthly, Yearly: yearly},
-					IncludeState: includeState, FullEvery: fullEvery, VerifySchedule: vsched, VerifyMode: vmode,
+					IncludeState: includeState, ExcludeVolumes: excludeVolumes, FullEvery: fullEvery, VerifySchedule: vsched, VerifyMode: vmode,
 				}}, nil
 			}
 		})
@@ -147,6 +148,14 @@ func (a *app) completeBackups() func(*cobra.Command, []string, string) ([]string
 	})
 }
 
+// backupKind is "volume" for a volume backup and "jail" for a jail backup.
+func backupKind(b api.Backup) string {
+	if b.Spec.Kind == "volume" {
+		return "volume"
+	}
+	return "jail"
+}
+
 func verifiedText(b api.Backup) string {
 	switch {
 	case b.Status.Failed:
@@ -158,14 +167,14 @@ func verifiedText(b api.Backup) string {
 }
 
 func (a *app) backupList() *cobra.Command {
-	var jail, target string
+	var jail, volume, target string
 	var labels []string
 	cmd := &cobra.Command{
 		Use:     "list",
 		Aliases: []string{"ls"},
 		Short:   "List backups",
-		Long:    "List the backups the server knows, newest last, optionally of one jail or one target.",
-		Example: "jailops backup list\njailops backup list --jail web -o json",
+		Long:    "List the backups the server knows, newest last, optionally of one jail, one volume or one target. A volume is a backup of its own, so the KIND column tells a jail backup from a volume backup.",
+		Example: "jailops backup list\njailops backup list --jail web -o json\njailops backup list --volume mail",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := a.connect(cmd.Context())
@@ -182,17 +191,18 @@ func (a *app) backupList() *cobra.Command {
 			}
 			items := all[:0]
 			for _, b := range all {
-				if (jail == "" || b.Spec.Jail == jail) && (target == "" || b.Spec.Target == target) {
+				if (jail == "" || (b.Spec.Kind != "volume" && b.Spec.Jail == jail)) && (volume == "" || (b.Spec.Kind == "volume" && b.Spec.Jail == volume)) &&
+					(target == "" || b.Spec.Target == target) {
 					items = append(items, b)
 				}
 			}
 			return a.emit(nonNil(items), nil, func() ([]string, [][]string) {
 				var rows [][]string
 				for _, b := range items {
-					rows = append(rows, []string{b.Metadata.Name, b.Spec.Jail, dash(b.Spec.Target), humanBytes(b.Status.Bytes),
+					rows = append(rows, []string{b.Metadata.Name, backupKind(b), b.Spec.Jail, dash(b.Spec.Target), humanBytes(b.Status.Bytes),
 						humanBytes(b.Status.NewBytes), verifiedText(b), age(a.env.Now(), b.Metadata.CreatedAt)})
 				}
-				return []string{"BACKUP", "JAIL", "TARGET", "SIZE", "NEW", "VERIFIED", "AGE"}, rows
+				return []string{"BACKUP", "KIND", "NAME", "TARGET", "SIZE", "NEW", "VERIFIED", "AGE"}, rows
 			}, func() []string {
 				var n []string
 				for _, b := range items {
@@ -203,6 +213,7 @@ func (a *app) backupList() *cobra.Command {
 		},
 	}
 	cmd.Flags().StringVar(&jail, "jail", "", "only backups of this jail")
+	cmd.Flags().StringVar(&volume, "volume", "", "only backups of this volume")
 	cmd.Flags().StringVar(&target, "target", "", "only backups stored on this target")
 	a.completeFlag(cmd, "target", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
 		return namesOf(c.Backups().Targets().List(ctx), func(t api.BackupTarget) string { return t.Metadata.Name })
@@ -279,14 +290,17 @@ func (a *app) emitRuns(runs []api.BackupRun) error {
 }
 
 func (a *app) backupRun() *cobra.Command {
-	return &cobra.Command{
+	var noVolumes bool
+	cmd := &cobra.Command{
 		Use:   "run POLICY",
 		Short: "Run a backup policy now",
 		Long: `Run a backup policy immediately, outside its schedule, for every jail it
-selects, and wait for it to finish. The result has one line per jail and
-target; the exit status is 1 when a run failed. Needs the admin role and a
-server with a backup backend (extension backup_run).`,
-		Example: "jailops backup run nightly\njailops backup run nightly --no-wait",
+selects and for the volumes those jails attach (each volume once, however many
+jails attach it), and wait for it to finish. --no-volumes leaves the volumes out
+of this run. The result has one line per jail, volume and target; the exit status
+is 1 when a run failed. Needs the admin role and a server with a backup backend
+(extension backup_run).`,
+		Example: "jailops backup run nightly\njailops backup run nightly --no-volumes\njailops backup run nightly --no-wait",
 		Args:    cobra.ExactArgs(1),
 		ValidArgsFunction: a.completeNames(func(ctx context.Context, c *sdk.Client) ([]string, error) {
 			items, err := collect(c.Backups().Policies().List(ctx))
@@ -304,7 +318,7 @@ server with a backup backend (extension backup_run).`,
 			if err != nil {
 				return err
 			}
-			h, err := handle(c.Backups().Run(cmd.Context(), args[0]))
+			h, err := handle(c.Backups().RunWith(cmd.Context(), api.BackupRunRequest{Policy: args[0], NoVolumes: noVolumes}))
 			if err != nil {
 				return err
 			}
@@ -319,6 +333,8 @@ server with a backup backend (extension backup_run).`,
 			return a.emitRuns(runs)
 		},
 	}
+	cmd.Flags().BoolVar(&noVolumes, "no-volumes", false, "leave the volumes out of this run")
+	return cmd
 }
 
 func (a *app) backupVerify() *cobra.Command {
@@ -512,12 +528,14 @@ node may delay it on purpose. The command asks for confirmation unless -y is giv
 
 func (a *app) backupRestore() *cobra.Command {
 	var as, toHost string
-	var replace, keepIP, confirmLoss bool
+	var replace, keepIP, confirmLoss, noVolumes bool
 	var maps []string
 	cmd := &cobra.Command{
 		Use:   "restore BACKUP",
-		Short: "Restore a backup as a jail",
-		Long: `Restore a backup as a jail. The command first asks the server for a preflight:
+		Short: "Restore a backup as a jail or a volume",
+		Long: `Restore a backup as a jail, or, for a volume backup, as a new volume of the
+project (a volume is never replaced: give another name with --as). The command
+first asks the server for a preflight:
 what is missing (image generations, networks, policies), what would be created
 or changed, and what conflicts. The report is always shown. A restore whose
 preflight fails is not started.
@@ -532,11 +550,19 @@ On a hub, --to-host names the host to restore on (its name or UUID); without it
 the restore goes to the host the request is scoped to (--host), else this host.
 
 By default the restored jail gets a new UUID and fresh addresses; --keep-ip
-keeps the fixed addresses of the backup, and --map moves its networks.`,
+keeps the fixed addresses of the backup, and --map moves its networks.
+
+The volumes the jail attaches that the project lacks are restored first, each
+from its newest backup, so the jail finds its data. --no-volumes restores the
+jail with no volume attachments at all (every one is left out; attach the volumes
+afterwards). An encrypted volume is restored on its own, before the jail, because
+it needs its passphrase (--passphrase-file reads it from a file; otherwise it is
+asked for twice).`,
 		Example: `jailops backup restore 20260101020000-ab12cd34 --dry-run
 jailops backup restore 20260101020000-ab12cd34 --as web-restored
 jailops backup restore 20260101020000-ab12cd34 --map lan=dmz --keep-ip
 jailops backup restore 20260101020000-ab12cd34 --replace
+jailops backup restore 20260101020000-ef56ab12 --as mail-restored
 jailops --remote hub backup restore 20260101020000-ab12cd34 --to-host host-b`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.completeBackups(),
@@ -546,7 +572,7 @@ jailops --remote hub backup restore 20260101020000-ab12cd34 --to-host host-b`,
 			if err != nil {
 				return err
 			}
-			req := api.RestoreRequest{Backup: args[0], As: as, Replace: replace, KeepIP: keepIP, Project: a.project}
+			req := api.RestoreRequest{Backup: args[0], As: as, Replace: replace, KeepIP: keepIP, NoVolumes: noVolumes, Project: a.project}
 			if toHost != "" {
 				if req.Host, err = a.hostUUID(ctx, c, toHost); err != nil {
 					return err
@@ -570,7 +596,14 @@ jailops --remote hub backup restore 20260101020000-ab12cd34 --to-host host-b`,
 			if name == "" {
 				name = bk.Spec.Jail
 			}
-			pf, err := c.Backups().Preflight(ctx, req)
+			isVolume := bk.Spec.Kind == "volume"
+			if isVolume && bk.Spec.Volume != nil && bk.Spec.Volume.Encrypted && !a.dryRun {
+				// the passphrase makes the volume again; it is used once and never stored
+				if req.Passphrase, err = a.newPassphrase(a.passFile, "Passphrase for the restored volume: "); err != nil {
+					return err
+				}
+			}
+			pf, err := c.Backups().Preflight(ctx, withPreflightPassphrase(req, isVolume, bk))
 			if err != nil {
 				return err
 			}
@@ -584,6 +617,16 @@ jailops --remote hub backup restore 20260101020000-ab12cd34 --to-host host-b`,
 			}
 			if a.dryRun {
 				return nil
+			}
+			if isVolume {
+				if err := a.confirm(fmt.Sprintf("Restore backup %s as volume %q?", args[0], name)); err != nil {
+					return err
+				}
+				h, err := handle(c.Backups().RestoreVolume(ctx, req))
+				if err != nil {
+					return err
+				}
+				return a.finishOp(ctx, h, "volume", name, "restored", nil)
 			}
 			if replace {
 				warn := fmt.Sprintf("--replace destroys the existing jail %q and everything in it.", name)
@@ -608,7 +651,18 @@ jailops --remote hub backup restore 20260101020000-ab12cd34 --to-host host-b`,
 	f.BoolVar(&keepIP, "keep-ip", false, "keep the fixed addresses of the backup")
 	f.StringArrayVar(&maps, "map", nil, "map a network of the backup to a local one, OLD=NEW (repeatable)")
 	f.BoolVar(&confirmLoss, "confirm-data-loss", false, "confirm that --replace may destroy the existing jail")
+	f.BoolVar(&noVolumes, "no-volumes", false, "restore the jail with no volume attachments (attach them afterwards)")
+	f.StringVar(&a.passFile, "passphrase-file", "", "read the passphrase of a restored encrypted volume from this file (its first line) instead of asking")
 	return cmd
+}
+
+// withPreflightPassphrase gives a preflight of an encrypted volume a stand-in passphrase when none was asked for (a
+// dry run): the preflight only checks that one is given, and the server never stores it.
+func withPreflightPassphrase(req api.RestoreRequest, isVolume bool, b api.Backup) api.RestoreRequest {
+	if isVolume && b.Spec.Volume != nil && b.Spec.Volume.Encrypted && req.Passphrase == "" {
+		req.Passphrase = "dry-run"
+	}
+	return req
 }
 
 func (a *app) showPreflight(b api.Backup, name string, pf api.RestorePreflight) error {
@@ -619,7 +673,7 @@ func (a *app) showPreflight(b api.Backup, name string, pf api.RestorePreflight) 
 		return nil
 	}
 	w := a.env.Stdout
-	fprintf(w, "Preflight: restore backup %s (jail %s) as %s\n", b.Metadata.Name, b.Spec.Jail, name)
+	fprintf(w, "Preflight: restore backup %s (%s %s) as %s\n", b.Metadata.Name, backupKind(b), b.Spec.Jail, name)
 	show := func(title, mark string, items []string) {
 		if len(items) == 0 {
 			return

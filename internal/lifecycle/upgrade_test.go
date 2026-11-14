@@ -21,7 +21,7 @@ func upgrade(w *world, req api.JailUpgrade) (UpgradeResult, error) {
 func TestUpgradeHappyPath(t *testing.T) {
 	w := runningSetup(t)
 	w.Z.WriteFile(jc+"/home", "/home/user/notes", "keep me")
-	w.Z.WriteFile(jc+"/data/db", "/db/rows", "rows")
+	w.Z.WriteFile(dbVol, "/db/rows", "rows")
 	w.started = nil
 	res, err := upgrade(w, api.JailUpgrade{Generation: "g2"})
 	if err != nil {
@@ -60,10 +60,14 @@ func TestUpgradeHappyPath(t *testing.T) {
 		t.Fatal(c)
 	}
 	// pre-upgrade snapshot exists on every dataset, taken in one transaction
-	for _, d := range []string{jc, jc + "/etc", jc + "/home", jc + "/data/db", jc + "/root.old"} {
+	for _, d := range []string{jc, jc + "/etc", jc + "/home", jc + "/root.old"} {
 		if ok, _ := w.Z.Exists(bg, d+"@jo-pre-upgrade-100"); !ok {
 			t.Errorf("no pre-upgrade snapshot on %s", d)
 		}
+	}
+	// the volume the jail attaches is the project's: no jail snapshot is taken of it
+	if ok, _ := w.Z.Exists(bg, dbVol+"@jo-pre-upgrade-100"); ok {
+		t.Error("a jail snapshot reached a volume")
 	}
 	// merge snapshots are gone, bundle records the new generation
 	if ok, _ := w.Z.Exists(bg, jc+"/etc@jo-merge-100"); ok {

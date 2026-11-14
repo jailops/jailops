@@ -16,6 +16,7 @@ import { openSwitcher } from '@/composables/search'
 const items = computed<NavItem[]>(() => ([
   { to: '/', label: s.nav.overview, icon: 'layoutDashboard', show: true },
   { to: '/jails', label: s.nav.jails, icon: 'box', show: can('jails') },
+  { to: '/volumes', label: s.nav.volumes, icon: 'database', show: hasExt('volumes') },
   { to: '/projects', label: s.nav.projects, icon: 'users', show: can('projects') },
   { to: '/storage', label: s.nav.storage, icon: 'hardDrive', show: can('storage') },
   { to: '/images', label: s.nav.images, icon: 'layers', show: can('images') },

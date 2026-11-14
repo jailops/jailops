@@ -556,3 +556,12 @@ func renameByAction(cmd, path string) *api.Error {
 	return invalid("an update does not change the name").
 		WithHint(fmt.Sprintf("rename with jailops %s rename OLD NEW, or POST /api/v1/%s/{name}/rename", cmd, path))
 }
+func uniqStrings(in []string) []string {
+	var out []string
+	for _, x := range in {
+		if !slices.Contains(out, x) {
+			out = append(out, x)
+		}
+	}
+	return out
+}

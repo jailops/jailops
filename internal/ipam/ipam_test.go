@@ -143,12 +143,12 @@ func TestCounts(t *testing.T) {
 }
 
 func TestIPv6Huge(t *testing.T) {
-	a, err := NewV6(&api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8::/32", Gateway: "2001:db8::1", Range: "2001:db8::1-2001:db8:ffff::"}, nil)
+	a, err := NewV6(&api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8::/32", Range: "2001:db8::1-2001:db8:ffff::"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	x, err := a.Allocate(netip.Addr{}, "")
-	if err != nil || x != ap("2001:db8::2") {
+	if err != nil || x != ap("2001:db8::1") {
 		t.Fatalf("%v %v", x, err)
 	}
 	_, fr := a.Counts()
@@ -163,7 +163,7 @@ func TestIPv6Huge(t *testing.T) {
 }
 
 func TestIPv6LinkLocalGatewayAndNetworkAddr(t *testing.T) {
-	a, err := NewV6(&api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2::/64", Gateway: "fe80::1", Range: "2001:db8:1:2::-2001:db8:1:2::10"}, nil)
+	a, err := NewV6(&api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2::/64", Range: "2001:db8:1:2::-2001:db8:1:2::10"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,9 +268,6 @@ func TestEpair(t *testing.T) {
 	if IsEpairName("epair0a") || IsEpairName("jo0") {
 		t.Fatal("false positive")
 	}
-	if BridgeName(3) != "jo3" {
-		t.Fatal()
-	}
 }
 
 func netHW(s string) ([]byte, error) {
@@ -296,7 +293,7 @@ func v4net() *api.IPv4Net {
 	return &api.IPv4Net{Subnet: "10.0.0.0/24", Gateway: "10.0.0.1", Range: "10.0.0.10-10.0.0.60"}
 }
 
-func TestProjectsShareABridgeWithDisjointAddresses(t *testing.T) {
+func TestProjectsShareANetworkWithDisjointAddresses(t *testing.T) {
 	var inUse []netip.Addr // the in-use set spans all projects
 	subA, subB := "10.0.0.10-10.0.0.19", "10.0.0.20-10.0.0.29"
 	got := map[netip.Addr]string{}
@@ -374,7 +371,7 @@ func TestFixedAddressMustBeInSub(t *testing.T) {
 }
 
 func TestScopedIPv6(t *testing.T) {
-	n := &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "fd50::/64", Gateway: "fd50::1", Range: "fd50::10-fd50::ff"}
+	n := &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "fd50::/64", Range: "fd50::10-fd50::ff"}
 	a, _ := NewV6In(n, Scope{Sub: "fd50::20-fd50::2f"}, nil)
 	b, _ := NewV6In(n, Scope{Sub: "fd50::30-fd50::3f"}, []netip.Addr{netip.MustParseAddr("fd50::20")})
 	x, err1 := a.Allocate(netip.Addr{}, "a")
@@ -406,9 +403,9 @@ func TestParseSubAndOverlap(t *testing.T) {
 	}
 }
 
-func v6alloc(t *testing.T, subnet, gw, rng string) *Allocator {
+func v6alloc(t *testing.T, subnet, rng string) *Allocator {
 	t.Helper()
-	a, err := NewV6(&api.IPv6Net{Mode: api.IPv6Routed, Subnet: subnet, Gateway: gw, Range: rng}, nil)
+	a, err := NewV6(&api.IPv6Net{Mode: api.IPv6Routed, Subnet: subnet, Range: rng}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +415,7 @@ func v6alloc(t *testing.T, subnet, gw, rng string) *Allocator {
 // The subnet-router anycast address, the all-ones end and (in a /64) the RFC 2526 anycast identifiers are never handed
 // out, even when the range reaches the end of the subnet; the addresses below them are, and a released one is reused.
 func TestIPv64ReservesAnycastAndTheAllOnesEnd(t *testing.T) {
-	a := v6alloc(t, "2001:db8:1:2::/64", "2001:db8:1:2::1", "2001:db8:1:2:ffff:ffff:ffff:ff00-2001:db8:1:2:ffff:ffff:ffff:ffff")
+	a := v6alloc(t, "2001:db8:1:2::/64", "2001:db8:1:2:ffff:ffff:ffff:ff00-2001:db8:1:2:ffff:ffff:ffff:ffff")
 	got, err := a.Allocate(netip.Addr{}, "x")
 	if err != nil || got != ap("2001:db8:1:2:ffff:ffff:ffff:ff00") {
 		t.Fatalf("%v %v", got, err)
@@ -452,7 +449,7 @@ func TestIPv64ReservesAnycastAndTheAllOnesEnd(t *testing.T) {
 
 // Prefixes other than /64 have no RFC 2526 range: only the all-ones end is kept back.
 func TestIPv6OtherPrefixesReserveOnlyTheAllOnesEnd(t *testing.T) {
-	a := v6alloc(t, "2001:db8:1:2:100::/80", "2001:db8:1:2:100::1", "2001:db8:1:2:100:ffff:ffff:fff0-2001:db8:1:2:100:ffff:ffff:ffff")
+	a := v6alloc(t, "2001:db8:1:2:100::/80", "2001:db8:1:2:100:ffff:ffff:fff0-2001:db8:1:2:100:ffff:ffff:ffff")
 	n := 0
 	for {
 		got, err := a.Allocate(netip.Addr{}, "x")
@@ -468,7 +465,7 @@ func TestIPv6OtherPrefixesReserveOnlyTheAllOnesEnd(t *testing.T) {
 		t.Fatalf("%d addresses, want 15 (the last of 16 is reserved)", n)
 	}
 	// a small subnet: the range may not end at its all-ones address
-	b := v6alloc(t, "2001:db8::/126", "2001:db8::1", "2001:db8::2-2001:db8::3")
+	b := v6alloc(t, "2001:db8::/126", "2001:db8::2-2001:db8::3")
 	if got, err := b.Allocate(netip.Addr{}, "x"); err != nil || got != ap("2001:db8::2") {
 		t.Fatal(got, err)
 	}
@@ -476,7 +473,7 @@ func TestIPv6OtherPrefixesReserveOnlyTheAllOnesEnd(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 	// the range's own last address at the very end of the address space is not an infinite loop
-	c := v6alloc(t, "ffff::/16", "ffff::1", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
+	c := v6alloc(t, "ffff::/16", "ffff:ffff:ffff:ffff:ffff:ffff:ffff:fffe-ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff")
 	if _, err := c.Allocate(netip.Addr{}, "x"); err != nil {
 		t.Logf("%v", err)
 	}

@@ -94,16 +94,13 @@ var (
 )
 
 // KldModules are the kernel modules kldload and kldstat accept.
-var KldModules = []string{"pf", "if_bridge", "if_epair", "if_wg", "linux", "linux64", "linprocfs", "linsysfs", "fdescfs", "nullfs", "tmpfs", "zfs", "dummynet"}
+var KldModules = []string{"pf", "if_epair", "if_wg", "linux", "linux64", "linprocfs", "linsysfs", "fdescfs", "nullfs", "tmpfs", "zfs", "dummynet"}
 
 // SysctlWrites are the only sysctls a write is accepted for, each with the
 // pattern its value must match. Writing needs the admin assertion.
 var SysctlWrites = map[string]*regexp.Regexp{
-	"net.inet6.ip6.forwarding":    regexp.MustCompile(`^[01]$`),
-	"net.inet.ip.forwarding":      regexp.MustCompile(`^[01]$`),
-	"net.link.bridge.pfil_member": regexp.MustCompile(`^[01]$`),
-	"net.link.bridge.pfil_bridge": regexp.MustCompile(`^[01]$`),
-	"net.link.bridge.pfil_onlyip": regexp.MustCompile(`^[01]$`),
+	"net.inet6.ip6.forwarding": regexp.MustCompile(`^[01]$`),
+	"net.inet.ip.forwarding":   regexp.MustCompile(`^[01]$`),
 	// -1 or 3 only: unbranded ELF binaries run as Linux (3) or are refused (-1).
 	"kern.elf64.fallback_brand": regexp.MustCompile(`^(-1|3)$`),
 }
@@ -351,7 +348,7 @@ func customPwdMkdb(c Config, _ bool, args []string) error {
 var CommandRules = []Rule{
 	{
 		Name: "sysctl", Binary: "/sbin/sysctl", MaxTimeoutSeconds: 10, Custom: customSysctl,
-		Reason: "read allow-listed kernel state (-n) and, for an admin, set the forwarding and bridge firewall switches vnet networking needs",
+		Reason: "read allow-listed kernel state (-n) and, for an admin, set the forwarding switches routed vnet networking needs",
 	},
 	{
 		Name: "kldstat", Binary: "/sbin/kldstat", MaxTimeoutSeconds: 10, Custom: customKldstat,
@@ -359,7 +356,7 @@ var CommandRules = []Rule{
 	},
 	{
 		Name: "kldload", Binary: "/sbin/kldload", MaxTimeoutSeconds: 30, Custom: customKldload,
-		Reason: "load one of the fixed kernel modules (pf, bridge, epair, linuxulator, nullfs, tmpfs, zfs...) a feature needs",
+		Reason: "load one of the fixed kernel modules (pf, epair, linuxulator, nullfs, tmpfs, zfs...) a feature needs",
 	},
 	{
 		Name: "pfctl", Binary: "/sbin/pfctl", MaxTimeoutSeconds: 20, Custom: customPfctl,
@@ -404,7 +401,7 @@ var CommandRules = []Rule{
 	},
 	{
 		Name: "ifconfig", Binary: "/sbin/ifconfig", MaxTimeoutSeconds: 30, Custom: customIfconfig, Verify: verifyIfconfig,
-		Reason: "configure the interface of a managed jail from the host (ifconfig -j); host bridges and epairs are made by the typed net.* operations",
+		Reason: "configure the interface of a managed jail from the host (ifconfig -j); epairs of the host are made by the typed net.* operations",
 	},
 	{
 		Name: "route", Binary: "/sbin/route", MaxTimeoutSeconds: 30, Custom: customRoute, Verify: verifyRoute,

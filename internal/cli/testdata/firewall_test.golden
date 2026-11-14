@@ -9,7 +9,7 @@ App postgresql installed as jail db (running)
              /var/db/postgres/data18/pg_hba.conf (restart postgresql) Who may connect.
   Logs:      server /var/log/messages The port logs to syslog.
   Snapshot:  app-installed (jailops jail rollback db --all --snapshot app-installed goes back to it)
-  Steps:     12 done
+  Steps:     13 done
 Notes:
   Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql
 
@@ -24,7 +24,7 @@ App nginx installed as jail web (running)
   Logs:      access /var/log/nginx/access.log One line per request.
              error /var/log/nginx/error.log
   Snapshot:  app-installed (jailops jail rollback web --all --snapshot app-installed goes back to it)
-  Steps:     10 done
+  Steps:     11 done
 Notes:
   Put the site under /usr/local/www.
 
@@ -39,9 +39,9 @@ jail/db configuration updated
 
 $ jailops firewall test --from jail:web --to jail:db --port 5432
 tcp port 5432 10.20.0.11 -> 10.20.0.10 (inet)
-  out of web (jailops/main/web, epair in): PASS by the default of the anchor
+  out of web (jailops/main/web, in): PASS by the default of the anchor
       pass in quick all (fake default)
-  into db (jailops/main/db, gateway out): PASS by policy postgres rule 1 "who may reach PostgreSQL"
+  into db (jailops/main/db, out): PASS by policy postgres rule 1 "who may reach PostgreSQL"
       pass out quick (fake rule)
   Verdict: PASS
 
@@ -50,9 +50,9 @@ Not covered:
 
 $ jailops firewall test --from jail:web --to jail:db --port 5433
 tcp port 5433 10.20.0.11 -> 10.20.0.10 (inet)
-  out of web (jailops/main/web, epair in): PASS by the default of the anchor
+  out of web (jailops/main/web, in): PASS by the default of the anchor
       pass in quick all (fake default)
-  into db (jailops/main/db, gateway out): BLOCK by the default of the anchor
+  into db (jailops/main/db, out): BLOCK by the default of the anchor
       block drop out quick all (fake default)
   Verdict: BLOCK
 
@@ -62,9 +62,9 @@ Not covered:
 
 $ jailops firewall test --from jail:web --to jail:db --proto icmp
 icmp echoreq 10.20.0.11 -> 10.20.0.10 (inet)
-  out of web (jailops/main/web, epair in): PASS by the default of the anchor
+  out of web (jailops/main/web, in): PASS by the default of the anchor
       pass in quick all (fake default)
-  into db (jailops/main/db, gateway out): BLOCK by the default of the anchor
+  into db (jailops/main/db, out): BLOCK by the default of the anchor
       block drop out quick all (fake default)
   Verdict: BLOCK
 
@@ -89,7 +89,6 @@ $ jailops firewall test --from jail:web --to jail:db --port 5432 -o json
           "side": "source",
           "jail": "web",
           "anchor": "jailops/main/web",
-          "interface": "epair",
           "direction": "in",
           "verdict": "pass",
           "decided_by": {
@@ -101,7 +100,6 @@ $ jailops firewall test --from jail:web --to jail:db --port 5432 -o json
           "side": "destination",
           "jail": "db",
           "anchor": "jailops/main/db",
-          "interface": "gateway",
           "direction": "out",
           "verdict": "pass",
           "decided_by": {

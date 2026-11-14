@@ -143,6 +143,10 @@ func dangers(kind api.Kind, live, want any) []string {
 		if li, wi := imageBase(l.Image), imageBase(w.Image); li != "" && wi != li {
 			out = append(out, fmt.Sprintf("image changes from %q to %q (a different base; use a rollout to move between generations)", li, wi))
 		}
+	case api.KindVolume:
+		if del {
+			return []string{"deleting a volume destroys its files and its snapshots"}
+		}
 	case api.KindFirewallPolicy:
 		l := live.(api.FirewallPolicySpec)
 		if del {

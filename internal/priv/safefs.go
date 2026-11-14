@@ -2,6 +2,8 @@ package priv
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"io"
 	"io/fs"
@@ -41,6 +43,35 @@ type MkdirReq struct {
 	GID  uint32 `json:"gid"`
 }
 
+// VolumeOwnerReq sets the owner and the mode of the root directory of a volume.
+type VolumeOwnerReq struct {
+	// Path is the mountpoint of the volume: <storage mount>/projects/<project>/volumes/<name>.
+	Path string `json:"path"`
+	UID  uint32 `json:"uid"`
+	GID  uint32 `json:"gid"`
+	// Mode is the permission bits; setuid, setgid, sticky and world-write bits are refused for files, and here the
+	// sticky bit and the id bits are refused as well.
+	Mode uint32 `json:"mode"`
+}
+
+// SourceProbeReq asks about a host directory that a volume of the host's own directories would give to jails.
+type SourceProbeReq struct {
+	// Path is the directory: below a directory of admin-host-mount in priv.conf, and not that directory itself.
+	Path string `json:"path"`
+	// Write also creates and removes a file in the directory.
+	Write bool `json:"write,omitempty"`
+}
+
+// SourceProbe is the answer. A directory that is missing, is not on a mount or takes no file is a state of the
+// directory, not an error: the detail says which. An error is a path the helper will not look at.
+type SourceProbe struct {
+	// Mounted says that a mount point lies on the way from the allowed directory down to Path, so that the directory
+	// is the mount's and not an empty directory of the host left behind when the mount went away.
+	Mounted  bool   `json:"mounted"`
+	Writable bool   `json:"writable,omitempty"`
+	Detail   string `json:"detail,omitempty"`
+}
+
 // RemoveReq removes one file or one empty directory.
 type RemoveReq struct {
 	Path string `json:"path"`
@@ -61,7 +92,7 @@ var reImageGen = regexp.MustCompile(`^(staging-)?g[0-9]+$`)
 
 // jailTreeDepth returns how many segments of rel (relative to a storage mount) name a tree whose content a jail or an
 // image build controls: a jail root and its update siblings (projects/<p>/jails/<j>/root, root.new, root.old,
-// root.stale), a jail's volume (projects/<p>/jails/<j>/data/<v>) and an image generation (images/<i>/g<N>,
+// root.stale), a volume of a project (projects/<p>/volumes/<v>) and an image generation (images/<i>/g<N>,
 // staging-g<N>). 0 for anything else. Root in a jail can make symlinks in its own tree; opened at the storage mount, a
 // relative one would lead the helper into another jail of the same mount.
 func jailTreeDepth(rel string) int {
@@ -69,8 +100,8 @@ func jailTreeDepth(rel string) int {
 	switch {
 	case len(s) >= 5 && s[0] == "projects" && s[2] == "jails" && slices.Contains([]string{"root", "root.new", "root.old", "root.stale"}, s[4]):
 		return 5
-	case len(s) >= 6 && s[0] == "projects" && s[2] == "jails" && s[4] == "data":
-		return 6
+	case len(s) >= 4 && s[0] == "projects" && s[2] == "volumes":
+		return 4
 	case len(s) >= 3 && s[0] == "images" && reImageGen.MatchString(s[2]):
 		return 3
 	}
@@ -226,6 +257,16 @@ func checkOwner(uid, gid uint32) error {
 	return nil
 }
 
+// checkRootOwned refuses an owner other than root for what is made below the helper's own directories (the work
+// directory and the jail.conf directory): the helper verifies a downloaded archive or package there and then runs it, and
+// a file that the daemon's user owns could be replaced between the two.
+func (c Config) checkRootOwned(r resolved, uid, gid uint32) error {
+	if (uid != 0 || gid != 0) && r.base == "" && (r.root == c.WorkDir || r.root == c.ConfDir) {
+		return forbidden("files below %s belong to root: owner %d:%d is refused", r.root, uid, gid)
+	}
+	return nil
+}
+
 // ReadFile reads a file below an allow-listed root, never following a
 // symlink out of it, and never more than Limits.MaxFileBytes.
 func (l *Local) ReadFile(ctx context.Context, path string) ([]byte, error) {
@@ -285,6 +326,9 @@ func (l *Local) WriteFile(ctx context.Context, q WriteFileReq) error {
 	if err := checkOwner(q.UID, q.GID); err != nil {
 		return err
 	}
+	if err := l.cfg.checkRootOwned(r, q.UID, q.GID); err != nil {
+		return err
+	}
 	if err := l.checkConfContent(ctx, r, q.Path, q.Data); err != nil {
 		return err
 	}
@@ -304,8 +348,7 @@ func (l *Local) WriteFile(ctx context.Context, q WriteFileReq) error {
 	if st, err := root.Lstat(r.rel); err == nil && !st.Mode().IsRegular() {
 		return forbidden("%q exists and is not a regular file", q.Path)
 	}
-	tmp := filepath.Join(dir, "."+base+".jotmp")
-	_ = root.Remove(tmp)
+	tmp := filepath.Join(dir, tmpName(base))
 	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, os.FileMode(q.Mode))
 	if err != nil {
 		return mapFSErr(err)
@@ -361,6 +404,9 @@ func (l *Local) MkdirAll(ctx context.Context, q MkdirReq) error {
 	if err := checkOwner(q.UID, q.GID); err != nil {
 		return err
 	}
+	if err := l.cfg.checkRootOwned(r, q.UID, q.GID); err != nil {
+		return err
+	}
 	root, err := r.openRoot()
 	if err != nil {
 		return mapFSErr(err)
@@ -384,6 +430,54 @@ func (l *Local) MkdirAll(ctx context.Context, q MkdirReq) error {
 		return mapFSErr(err)
 	}
 	if err := root.Chown(r.rel, int(q.UID), int(q.GID)); err != nil && !l.noChown {
+		return mapFSErr(err)
+	}
+	return nil
+}
+
+// SetVolumeOwner sets the owner and the mode of the root of a volume, once: the volume's root must be a plain
+// directory with nothing in it. The path names exactly a volume of a storage mount; it is opened from the mount one
+// plain directory at a time, so nothing in a jail's reach can lead the change elsewhere.
+func (l *Local) SetVolumeOwner(ctx context.Context, q VolumeOwnerReq) error {
+	if err := l.checkFrozen(q.Path); err != nil {
+		return err
+	}
+	r, err := l.cfg.resolve(q.Path)
+	if err != nil {
+		return err
+	}
+	s := strings.Split(r.rel, "/")
+	if r.root == "" || r.base != "" || !l.cfg.isMountRoot(r.root) || len(s) != 4 || jailTreeDepth(r.rel) != 4 {
+		return forbidden("%q is not the root of a volume", q.Path)
+	}
+	if q.Mode&^0o777 != 0 {
+		return invalid("mode %04o of a volume is at most 0777", q.Mode)
+	}
+	if err := checkOwner(q.UID, q.GID); err != nil {
+		return err
+	}
+	tree := resolved{root: filepath.Join(r.root, r.rel), base: r.root, rel: "."}
+	root, err := tree.openRoot()
+	if err != nil {
+		return mapFSErr(err)
+	}
+	defer root.Close()
+	d, err := root.Open(".")
+	if err != nil {
+		return mapFSErr(err)
+	}
+	names, err := d.Readdirnames(1)
+	d.Close()
+	if err != nil && !errors.Is(err, io.EOF) {
+		return mapFSErr(err)
+	}
+	if len(names) > 0 {
+		return forbidden("the volume is not empty: its owner is set when it is made")
+	}
+	if err := root.Chmod(".", os.FileMode(q.Mode)); err != nil {
+		return mapFSErr(err)
+	}
+	if err := root.Chown(".", int(q.UID), int(q.GID)); err != nil && !l.noChown {
 		return mapFSErr(err)
 	}
 	return nil
@@ -513,4 +607,147 @@ func (c Config) checkOwnRoot(r string) error {
 		return forbidden("%s must belong to root and not be writable by anybody else", r)
 	}
 	return nil
+}
+
+// tmpName is the name of the temporary file of a write: unique for every operation, so two writes of one path do not
+// disturb each other and a file or directory that a tenant made under a predictable name cannot stop the write.
+func tmpName(base string) string {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		panic(err) // the system has no randomness: nothing safe can be done
+	}
+	return "." + base + "." + hex.EncodeToString(b[:]) + ".jotmp"
+}
+
+// hostDirRoot returns the admin-host-mount directory a path lies below. The path is clean and absolute and has no
+// "..", and it is not the directory itself: the mount point has to lie below it, for a directory that is a mount point
+// itself is an empty directory of the host once the mount is gone.
+func (c Config) hostDirRoot(path string) (root, rel string, err error) {
+	if path == "" || len(path) > maxPath || strings.ContainsRune(path, 0) || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return "", "", invalid("invalid path %q", path)
+	}
+	for _, r := range c.Admin.HostMountRoots {
+		if !within(r, path) {
+			continue
+		}
+		if path == r {
+			return "", "", api.Errorf(api.CodeForbidden, "%q is the allowed directory itself: its mount point has to lie below it", path).
+				WithHint("list the directory above the mount in admin-host-mount of priv.conf")
+		}
+		rel, _ = filepath.Rel(r, path)
+		return r, rel, nil
+	}
+	return "", "", api.Errorf(api.CodeForbidden, "%q is not below a directory of admin-host-mount in priv.conf", path).
+		WithHint("the host operator lists the directories jails may be given with admin-host-mount")
+}
+
+// sourceDev is the device of a directory of a probe, by its path (tests give some directory a device of its own, for
+// a test cannot mount anything).
+var sourceDev = func(_ string, fi fs.FileInfo) (uint64, bool) { return devOf(fi) }
+
+// devOf is the device of a file.
+func devOf(fi fs.FileInfo) (uint64, bool) {
+	st, ok := fi.Sys().(*syscall.Stat_t)
+	if !ok {
+		return 0, false
+	}
+	return uint64(st.Dev), true //nolint:unconvert // the width of Dev differs by system
+}
+
+// ProbeSource looks at a host directory: it is opened from the allowed directory one plain directory at a time, so a
+// symbolic link anywhere below it is refused; a change of the device on the way is a mount point; with Write a probe
+// file is made in the directory and removed again.
+func (l *Local) ProbeSource(ctx context.Context, q SourceProbeReq) (SourceProbe, error) {
+	rootPath, rel, err := l.cfg.hostDirRoot(q.Path)
+	if err != nil {
+		return SourceProbe{}, err
+	}
+	top, err := os.OpenRoot(rootPath)
+	if err != nil {
+		return SourceProbe{Detail: "the allowed directory " + rootPath + " cannot be opened: " + err.Error()}, nil
+	}
+	defer top.Close()
+	fi, err := top.Stat(".")
+	if err != nil {
+		return SourceProbe{}, mapFSErr(err)
+	}
+	prev, okDev := sourceDev(rootPath, fi)
+	if !okDev {
+		return SourceProbe{}, api.Errorf(api.CodeUnsupported, "the device of a directory is not known on this system")
+	}
+	cur, mounted, at := top, false, rootPath
+	closeCur := func() {
+		if cur != top {
+			cur.Close()
+		}
+	}
+	for _, seg := range strings.Split(rel, "/") {
+		st, err := cur.Lstat(seg)
+		if err != nil {
+			closeCur()
+			if errors.Is(err, fs.ErrNotExist) {
+				return SourceProbe{Detail: "the directory does not exist"}, nil
+			}
+			return SourceProbe{}, mapFSErr(err)
+		}
+		if st.Mode()&fs.ModeSymlink != 0 {
+			closeCur()
+			return SourceProbe{}, forbidden("%q resolves through a symbolic link: a directory given to jails may not contain links", q.Path)
+		}
+		if !st.IsDir() {
+			closeCur()
+			return SourceProbe{}, forbidden("%q is not a directory", q.Path)
+		}
+		next, err := cur.OpenRoot(seg)
+		if err != nil {
+			closeCur()
+			return SourceProbe{}, mapFSErr(err)
+		}
+		got, err := next.Stat(".")
+		if err != nil || !os.SameFile(st, got) {
+			next.Close()
+			closeCur()
+			return SourceProbe{}, forbidden("%q changed while it was opened", q.Path)
+		}
+		closeCur()
+		cur, at = next, filepath.Join(at, seg)
+		if d, ok := sourceDev(at, st); ok {
+			if d != prev {
+				mounted = true
+			}
+			prev = d
+		}
+	}
+	defer closeCur()
+	if !mounted {
+		return SourceProbe{Detail: "the directory is not on a mount"}, nil
+	}
+	out := SourceProbe{Mounted: true}
+	if !q.Write {
+		return out, nil
+	}
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return SourceProbe{}, api.Errorf(api.CodeInternal, "%v", err)
+	}
+	name := ".jailops-probe-" + hex.EncodeToString(b[:])
+	f, err := cur.OpenFile(name, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	if err != nil {
+		out.Detail = "no file can be created in the directory: " + strings.TrimPrefix(err.Error(), "openat "+name+": ")
+		return out, nil
+	}
+	// the data goes to the device before the answer: a mount whose device failed takes the write into its cache
+	// and only the sync says that it cannot be kept
+	_, werr := f.Write([]byte("jailops\n"))
+	if werr == nil {
+		werr = f.Sync()
+	}
+	cerr := f.Close()
+	rerr := cur.Remove(name)
+	if err := errors.Join(werr, cerr, rerr); err != nil {
+		out.Detail = "a file made in the directory could not be written or removed: " + err.Error()
+		return out, nil
+	}
+	out.Writable = true
+	return out, nil
 }

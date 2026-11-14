@@ -83,17 +83,17 @@ The rest of this page is the manual path, which the appliance path does for you.
 ## 1. What the host needs
 
 - A ZFS pool you are willing to give a dataset to (below: `zroot`, the default pool of the FreeBSD installer). JailOps never runs `zpool upgrade`.
-- Kernel modules `if_bridge`, `if_epair`, `pf` and `zfs`: the four `jailops doctor` checks (`zfs` is loaded already
+- Kernel modules `if_epair`, `pf` and `zfs`: the three `jailops doctor` checks (`zfs` is loaded already
   on a FreeBSD installed on ZFS). Load them now and at boot:
 
-      kldload -n if_bridge if_epair pf zfs
-      sysrc -f /boot/loader.conf if_bridge_load=YES if_epair_load=YES pf_load=YES zfs_load=YES
+      kldload -n if_epair pf zfs
+      sysrc -f /boot/loader.conf if_epair_load=YES pf_load=YES zfs_load=YES
 
   (Linux jails also need `linux64`, `linprocfs`, `linsysfs` and `fdescfs`; the daemon loads those itself while a Linux
   jail exists. `nullfs`, which host mounts use, is loaded by `mount` when it is first needed.) `jailops doctor` reports
   a missing module with the command to load it.
 - Network access to `pkg.freebsd.org` for building images from pkgbase. The helper's download rule allows only the
-  hosts in `fetch-host` of `priv.conf` (default `dl-cdn.alpinelinux.org` and `pkg.freebsd.org`), over https.
+  hosts in `fetch-host` of `priv.conf` (default `dl-cdn.alpinelinux.org`, `pkg.freebsd.org`, `pkg.jailops.net`, `deb.debian.org`, `archive.ubuntu.com` and `ports.ubuntu.com`), over https.
 
 ## 2. Install the packages
 
@@ -146,14 +146,15 @@ Two things to know about a host that already has a firewall:
   with `pfctl -a` on FreeBSD 15.1) but JailOps does not render any: the clamp depends on the uplink, which is yours.
   `jailops doctor` warns (`pf.scrub`) when the loaded ruleset has no scrub rule; the format it looks for is the one
   `pfctl -s rules` prints, `scrub in all fragment reassemble`.
-- **NAT and `set state-policy`.** On a host whose `pf.conf` blocks by default and NATs the jails' IPv4 (`nat on` the uplink),
-  forwarded packets of a jail were translated early by pf's floating state (the bridge passes them through pf on the jail's
-  port first) and then dropped by the host: five of six pings never left (the amd64 host, FreeBSD 15.1; one of four on a
-  FreeBSD 15.2 VM with `block log all`). `set state-policy if-bound` at the top of `pf.conf` fixed it (6 of 6, 4 of 4, and
-  the PF matrix still passes). A host whose `pf.conf` starts with `pass all` (the arm64 host) did not show it. Add the
-  line with the other options and load it with `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`. `jailops doctor`
-  warns (`pf.state-policy`) when the loaded ruleset has a `block ... all` rule without `quick`, a network has NAT or a
-  jail exists, and the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`) lacks the line.
+- **`set state-policy if-bound`.** Put it at the top of `pf.conf`, with the other options. A jail's traffic crosses the
+  host's firewall twice (in on the jail's link, out on another), and pf must judge it at both: with the default
+  (floating) states a connection that the first hop admitted would pass the second without being looked at again, and
+  the rules of the jail it is going to would never see it. JailOps's own rules say `if-bound` themselves; the line makes
+  your rules behave the same. Load it with `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`. `jailops-setup` adds it,
+  and `jailops doctor` fails (`pf.state-policy`) when jails exist and the `pf.conf` the system loads (`pf_rules` of
+  `rc.conf`, else `/etc/pf.conf`) lacks it. Because states are bound to interfaces, a host that blocks by default
+  needs a rule that lets the jails' traffic out of the uplink (`pass out on vtnet0 keep state`) as it does for any
+  other machine it forwards for.
 - **DNS for the jails.** A network without `dns` hands its jails the host's own nameservers from `/etc/resolv.conf`.
   A host that resolves only through a local unbound (`nameserver 127.0.0.1`) hands them the network's gateway address
   instead, and unbound has to listen there: the lines are in
@@ -248,7 +249,7 @@ shows it). A project is granted the networks and storages its jails may use.
     jailops image create freebsd-15-1 --release 15.1-RELEASE    # the host's release; an image is one release
     jailops image build freebsd-15-1
     jailops image auto-upgrade freebsd-15-1 on --at 03:00      # optional: its patch levels every night
-    jailops network create lan --ipv4 10.77.0.1/24 --uplink vtnet0 --nat    # the bridge is lan; vtnet0: the host's uplink, see below
+    jailops network create lan --ipv4 10.77.0.1/24 --uplink vtnet0 --nat    # vtnet0: the host's uplink, see below
     jailops project create web
     jailops project set web --network lan --storage default
     jailops project switch web
@@ -261,16 +262,10 @@ shows it). A project is granted the networks and storages its jails may use.
 `--uplink` is the host's interface towards the outside: `vtnet0` on most virtual machines, `em0`, `igb0` or `ix0` on
 real hardware (`ifconfig -l` lists them).
 
-<a id="bridge-names"></a>The bridge of a network is named like the network (`lan` above, `ifconfig lan` shows it with the
-description `jailops net=lan bridge`), or as `--bridge NAME` says. Any name an interface can have will do, with three
-limits: lowercase letters and digits, at most 13 characters (the network's gateway pair adds `ga` and `gb`), and not the
-form of a driver's interface (`vmx0`, `em1`, `lo0`, `bridge0`, `tap0`, `wg0`, or a driver's name alone). A name that is
-taken, by an interface of the host or by another network, is refused when the network is created. Without `--bridge`, a
-network whose name cannot be a bridge's (too long, a `-` in it, taken) gets `jo<N>`, and `network create` says why. The
-bridge keeps its name until the network is deleted, also when the network is renamed. JailOps creates the bridge itself
-and never takes over an interface that exists ([security-model.md](security-model.md#interfaces)). The project of a jail grants exactly one network and one storage here, so
+The project of a jail grants exactly one network and one storage here, so
 `jailops create nginx --image freebsd-15-1 --start` would take `lan` and `default` by itself (and say so); naming
-them keeps the command right when the project has more.
+them keeps the command right when the project has more. A network is only an address range: it makes no interface of
+its own, each jail gets a link of its own to the host ([networking.md](networking.md)).
 
 `network create` checks the network against the host at once: an uplink that does not exist (or is a loopback, a bridge
 or a bridge member) is refused with the interfaces that could be the uplink, a subnet that overlaps an address of the
@@ -312,7 +307,7 @@ volume and backup on the pool's `jailops` dataset; there is no undo. Replace `ta
 ```sh
 service jailopsd stop; service jailops_backupd onestop 2>/dev/null
 for j in $(jls -N name); do jail -r "$j"; done                  # every running jail
-for i in $(ifconfig -l); do                                      # the bridges and pairs of JailOps, and the tunnels
+for i in $(ifconfig -l); do                                      # the epairs of JailOps, and the tunnels
 	case $i in wg-*) ifconfig "$i" destroy ;; *) ifconfig "$i" 2>/dev/null | grep -q 'description: jailops' && ifconfig "$i" destroy ;; esac
 done 2>/dev/null
 zfs destroy -r tank/jailops                                      # images, jails, state, cache, logs
@@ -326,8 +321,8 @@ rm -rf /usr/local/etc/jailops /var/db/jailops /var/run/jailops /var/log/jailops 
 
 Delete the anchor line of section 3 from `/etc/pf.conf` (with the `# jailops-setup:` comments and the
 lines below them, if `jailops-setup` added them; its copy of the old file is `/etc/pf.conf.jailops-setup-<date>`) and
-the `jailopsd_*` and `jailops_*` lines from `/etc/rc.conf` if the host keeps nothing of JailOps. The loop above destroyed the bridges and gateway pairs of your networks (they are in the kernel and
-stay until they are destroyed or the host reboots; a running JailOps also removes the ones of a network it does not know). Then start at section 2 (or with `jailops-setup` after `pkg install jailops`). Packages of the base are fetched
+the `jailopsd_*` and `jailops_*` lines from `/etc/rc.conf` if the host keeps nothing of JailOps. The loop above destroyed the interfaces of your jails (they are in the kernel and
+stay until they are destroyed or the host reboots; a running JailOps also removes the ones that belong to no jail). Then start at section 2 (or with `jailops-setup` after `pkg install jailops`). Packages of the base are fetched
 again: the cache went with the dataset.
 
 ## Remote access

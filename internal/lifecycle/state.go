@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"jailops.net/jailops/internal/hostdir"
 	"jailops.net/jailops/internal/plan"
 	"jailops.net/jailops/sdk/api"
 )
@@ -121,7 +122,11 @@ type jailState struct {
 	Complete  bool
 	Root      string
 	Persist   []dsInfo // persistent datasets, mount order
-	Volumes   []dsInfo
+	Volumes   []dsInfo // the volumes attached to the jail
+	// HostDirs are the attached volumes that are directories of the host: they have no dataset.
+	HostDirs []Attached
+	// VolumeErr is why an attached volume could not be found: the jail does not start, everything else still works.
+	VolumeErr error
 	Delegated string   // the dataset handed to the jail (zfs_delegation), empty when there is none
 	Extra     []string // root.new, root.old if present
 }
@@ -138,14 +143,12 @@ func (st *jailState) has(suffix string) bool {
 	return false
 }
 
-// all returns every dataset of the snapshot set: container, root, persistent,
-// volumes (not root.new/root.old).
+// all returns every dataset of the snapshot set: container, root, persistent and the delegated dataset (not
+// root.new/root.old, and not the volumes attached to the jail: they belong to the project and are never snapshotted,
+// rolled back or copied with a jail).
 func (st *jailState) all() []string {
 	out := []string{st.Container, st.Root}
 	for _, d := range st.Persist {
-		out = append(out, d.DS)
-	}
-	for _, d := range st.Volumes {
 		out = append(out, d.DS)
 	}
 	if st.Delegated != "" {
@@ -154,14 +157,11 @@ func (st *jailState) all() []string {
 	return out
 }
 
-// mountOrder is root first, then persistent datasets by path depth, then
-// volumes by path depth.
+// mountOrder is root first, then persistent datasets by path depth. The volumes attached to the jail are mounted on
+// the host where their own mountpoint is (the jail reaches them through nullfs) and stay mounted when the jail stops.
 func (st *jailState) mountOrder() []string {
 	out := []string{st.Root}
 	for _, d := range st.Persist {
-		out = append(out, d.DS)
-	}
-	for _, d := range st.Volumes {
 		out = append(out, d.DS)
 	}
 	return out
@@ -209,8 +209,6 @@ func (s *Service) observe(ctx context.Context, name string) (*jailState, error) 
 		case rel == "data":
 		case rel == "delegated":
 			st.Delegated = d
-		case strings.HasPrefix(rel, "data/") && !strings.Contains(rel[5:], "/"):
-			st.Volumes = append(st.Volumes, s.info(ctx, d, KindVolume))
 		case !strings.Contains(rel, "/") && s.prop(ctx, d, PropKind) == KindPersistent:
 			st.Persist = append(st.Persist, s.info(ctx, d, KindPersistent))
 		}
@@ -224,6 +222,15 @@ func (s *Service) observe(ctx context.Context, name string) (*jailState, error) 
 		})
 	}
 	sortByDepth(st.Persist)
+	att, verr := s.Cfg.attached(name)
+	st.VolumeErr = verr
+	for _, a := range att {
+		if a.HostDir {
+			st.HostDirs = append(st.HostDirs, a)
+			continue
+		}
+		st.Volumes = append(st.Volumes, dsInfo{DS: a.Dataset, Kind: KindVolume, Class: ClassData, Path: a.Path, MP: a.Mountpoint, Encrypted: a.Encrypted})
+	}
 	sortByDepth(st.Volumes)
 	return st, nil
 }
@@ -251,9 +258,6 @@ func dataDatasets(st *jailState) []string {
 			out = append(out, d.DS)
 		}
 	}
-	for _, d := range st.Volumes {
-		out = append(out, d.DS)
-	}
 	if st.Delegated != "" {
 		out = append(out, st.Delegated)
 	}
@@ -277,6 +281,9 @@ func (s *Service) mountTree(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
+	if st.VolumeErr != nil {
+		return st.VolumeErr
+	}
 	if err := s.refuseLocked(ctx, st); err != nil {
 		return err
 	}
@@ -289,14 +296,40 @@ func (s *Service) mountTree(ctx context.Context, name string) error {
 		}
 	}
 	for _, v := range st.Volumes {
-		// UNVERIFIED: the mount directory must exist in the root; creating it
-		// here keeps it correct after an upgrade replaced the root.
+		// The volume is mounted on the host at its own mountpoint (idempotent); the jail's fstab binds it into the
+		// jail with nullfs. The mount point directory must exist in the root: creating it here keeps it correct after
+		// an upgrade replaced the root.
+		if err := s.ZFS.Mount(ctx, v.DS); err != nil {
+			return fmt.Errorf("volume %s: %w", volumeName(v.DS), err)
+		}
 		if err := s.Files.MkdirAll(ctx, s.Cfg.at(name).rootMP()+v.Path); err != nil {
 			return err
 		}
-		if err := s.ZFS.Mount(ctx, v.DS); err != nil {
+	}
+	for _, h := range st.HostDirs {
+		// A host directory that is not on a mount is the empty directory a lost mount leaves behind: the jail would
+		// take it for its data. It does not start.
+		if err := s.checkHostDir(ctx, h); err != nil {
 			return err
 		}
+		if err := s.Files.MkdirAll(ctx, s.Cfg.at(name).rootMP()+h.Path); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// checkHostDir refuses to give a jail a host directory that is not on a mount now.
+func (s *Service) checkHostDir(ctx context.Context, h Attached) error {
+	p, err := hostdir.Within(ctx, hostdir.Timeout, func(ctx context.Context) (hostdir.Probe, error) {
+		return s.Files.ProbeSource(ctx, h.Mountpoint, h.WriteProbe)
+	})
+	if err != nil {
+		return fmt.Errorf("volume %s: %w", h.Name, err)
+	}
+	if !p.Usable(h.WriteProbe) {
+		return api.Errorf(api.CodeBusy, "volume %q is lost: %s (%s)", h.Name, p.Lost(h.WriteProbe), h.Mountpoint).
+			WithHint("mount it again; the jail starts when it is there")
 	}
 	return nil
 }
@@ -383,12 +416,12 @@ type Record struct {
 // spec and the image generation. Networks, policies and sealed secret
 // references are added by their owners (design section 9).
 type Bundle struct {
-	Version  int               `json:"version"`
-	Metadata api.ObjectMeta    `json:"metadata"`
-	Spec     api.JailSpec      `json:"spec"`
-	Image    BundleImage       `json:"image"`
-	Volumes  []api.VolumeMount `json:"volumes,omitempty"`
-	Written  time.Time         `json:"written_at"`
+	Version  int                `json:"version"`
+	Metadata api.ObjectMeta     `json:"metadata"`
+	Spec     api.JailSpec       `json:"spec"`
+	Image    BundleImage        `json:"image"`
+	Volumes  []api.VolumeAttach `json:"volumes,omitempty"`
+	Written  time.Time          `json:"written_at"`
 }
 
 // BundleImage names the generation the root was built from.

@@ -405,28 +405,28 @@ func TestPlansGolden(t *testing.T) {
 	n := api.NetworkSpec{
 		Uplink: "em0", MTU: 1500,
 		IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200", NAT: true},
-		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1::/64", Gateway: "2001:db8:1::1", Range: "2001:db8:1::100-2001:db8:1::ffff"},
+		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1::/64", Range: "2001:db8:1::100-2001:db8:1::ffff"},
 	}
-	steps, err := NetworkPlan(NetworkInput{ID: "n-123", Name: "lan", Bridge: "jo0", Spec: n})
+	steps, err := NetworkPlan(NetworkInput{ID: "n-123", Name: "lan", Spec: n})
 	if err != nil {
 		t.Fatal(err)
 	}
 	golden(t, "plan_network_routed", DescribePlan(steps))
 	golden(t, "plan_network_routed_rollback", DescribePlan(Rollback(steps)))
 
-	p := api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:2::/64", Gateway: "fe80::1", Range: "2001:db8:2::100-2001:db8:2::200"}}
-	steps, err = NetworkPlan(NetworkInput{ID: "n-456", Name: "wan6", Bridge: "jo1", Spec: p})
+	p := api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:2::/64", Range: "2001:db8:2::100-2001:db8:2::200"}}
+	steps, err = NetworkPlan(NetworkInput{ID: "n-456", Name: "wan6", Spec: p})
 	if err != nil {
 		t.Fatal(err)
 	}
 	golden(t, "plan_network_proxy", DescribePlan(steps))
 	for _, s := range steps {
-		if s.Op == OpAddAddr && strings.HasPrefix(s.Arg, "2001:") {
-			t.Fatalf("proxy bridge got an on-link copy: %s", s.Arg)
+		if s.Op == OpAddRejectRoute && strings.HasPrefix(s.Arg, "2001:") {
+			t.Fatalf("a proxy-mode network got a reject route for its on-link prefix: %s", s.Arg)
 		}
 	}
 
-	a := AttachInput{JailID: "j-1", JailUUID: "0b0e7f3e-5c4b-4f6e-9d3e-111111111111", Index: 0, Project: "web", Jail: "nginx", Network: "lan", Bridge: "jo0", MTU: 1500,
+	a := AttachInput{JailID: "j-1", JailUUID: "0b0e7f3e-5c4b-4f6e-9d3e-111111111111", Index: 0, Project: "web", Jail: "nginx", Network: "lan", MTU: 1500,
 		IPv4: pfx("10.20.0.10/24"), IPv6: pfx("2001:db8:1::100/64"), Gateway4: ip("10.20.0.1"), Gateway6: ip("fe80::1")}
 	steps, err = AttachPlan(a)
 	if err != nil {
@@ -448,24 +448,21 @@ func TestPlansGolden(t *testing.T) {
 func TestPlanErrors(t *testing.T) {
 	good := api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.20"}}
 	for _, in := range []NetworkInput{
-		{ID: "x", Name: "Bad Name", Bridge: "jo0", Spec: good},
-		{ID: "", Name: "lan", Bridge: "jo0", Spec: good},
-		{ID: "a b", Name: "lan", Bridge: "jo0", Spec: good},
-		{ID: "x", Name: "lan", Bridge: "", Spec: good},
-		{ID: "x", Name: "lan", Bridge: "jo0;", Spec: good},
-		{ID: "x", Name: "lan", Bridge: "jo0", Spec: api.NetworkSpec{}},
+		{ID: "x", Name: "Bad Name", Spec: good},
+		{ID: "", Name: "lan", Spec: good},
+		{ID: "a b", Name: "lan", Spec: good},
+		{ID: "x", Name: "lan", Spec: api.NetworkSpec{}},
 	} {
 		if _, err := NetworkPlan(in); err == nil {
 			t.Errorf("accepted %+v", in)
 		}
 	}
-	ok := AttachInput{JailID: "j", JailUUID: "u", Bridge: "jo0"}
+	ok := AttachInput{JailID: "j", JailUUID: "u"}
 	if _, err := AttachPlan(ok); err != nil {
 		t.Fatal(err)
 	}
 	for _, mut := range []func(*AttachInput){
 		func(a *AttachInput) { a.JailID = "" },
-		func(a *AttachInput) { a.Bridge = "x y" },
 		func(a *AttachInput) { a.Index = -1 },
 		func(a *AttachInput) { a.JailUUID = "" },
 		func(a *AttachInput) { a.MAC = "ZZ" },

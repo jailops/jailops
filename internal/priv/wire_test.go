@@ -107,7 +107,7 @@ func FuzzCheckCommand(f *testing.F) {
 	f.Add("sh\x00-c\x00id")
 	f.Add("sysctl\x00-n\x00net.inet.ip.forwarding")
 	f.Add("sysctl\x00net.inet.ip.forwarding=1")
-	f.Add("kldload\x00if_bridge")
+	f.Add("kldload\x00if_epair")
 	f.Add("kldstat\x00-n\x00pf")
 	f.Add("pfctl\x00-a\x00jailops/web/x\x00-s\x00rules")
 	f.Add("uname\x00-r")

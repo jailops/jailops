@@ -7,6 +7,8 @@ export const routes: RouteRecordRaw[] = [
   { path: '/setup', name: 'setup', component: () => import('@/views/SetupView.vue'), meta: { public: true, title: 'Set up' } },
   { path: '/', name: 'overview', component: () => import('@/views/OverviewView.vue'), meta: { title: 'Overview' } },
   { path: '/jails', name: 'jails', component: () => import('@/views/JailsView.vue'), meta: { project: true, feature: 'jails', title: 'Jails' } },
+  { path: '/volumes', name: 'volumes', component: () => import('@/views/VolumesView.vue'), meta: { project: true, ext: 'volumes', title: 'Volumes' } },
+  { path: '/volumes/:name', name: 'volume', component: () => import('@/views/VolumeDetailView.vue'), meta: { project: true, ext: 'volumes', title: 'Volume' } },
   // The shell of a jail, shareable: its Console tab, connecting at once (`connect` is taken off once it is used).
   { path: '/jails/:name/shell', name: 'jail-shell', redirect: (to) => ({ name: 'jail', params: { name: to.params.name }, query: { tab: 'console', connect: '1' } }) },
   { path: '/jails/:name', name: 'jail', component: () => import('@/views/JailDetailView.vue'), meta: { project: true, feature: 'jails', title: 'Jail' } },

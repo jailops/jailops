@@ -334,8 +334,8 @@ func (c Config) rawParam(admin bool, key string) error {
 var fstabTypes = map[string]bool{"devfs": true, "tmpfs": true, "fdescfs": true, "linprocfs": true, "linsysfs": true, "procfs": true, "nullfs": true}
 
 // checkFstab validates a jail fstab. Mount points must be below a storage
-// root's mountpoint. A nullfs source must be below one too, or, with the admin assertion,
-// below an AdminPolicy host mount root.
+// root's mountpoint. A nullfs source must be the root of a volume of a storage (or, for a Linux jail, the jail's own
+// root at compat/linux), or, with the admin assertion, below an AdminPolicy host mount root.
 func (c Config) checkFstab(ctx context.Context, text, existing string) error {
 	if len(text) > 64<<10 {
 		return invalid("fstab too large")
@@ -373,8 +373,11 @@ func (c Config) checkFstab(ctx context.Context, text, existing string) error {
 		if !cleanAbs(dev) {
 			return invalid("fstab line %d: invalid source %q", i+1, dev)
 		}
-		if c.inMounts(dev) {
+		if c.volumeRoot(dev) || c.linuxMirror(dev, mp) {
 			continue
+		}
+		if c.inMounts(dev) {
+			return forbidden("fstab line %d: %q is not the root of a volume: only volumes are mounted into a jail from a storage", i+1, dev)
 		}
 		listed := false
 		for _, r := range c.Admin.HostMountRoots {
@@ -391,6 +394,41 @@ func (c Config) checkFstab(ctx context.Context, text, existing string) error {
 		}
 	}
 	return nil
+}
+
+// volumeRoot reports whether p is exactly the mountpoint of a volume: <storage mount>/projects/<project>/volumes/<name>.
+func (c Config) volumeRoot(p string) bool {
+	for _, m := range c.reg.mounts() {
+		if !within(m, p) {
+			continue
+		}
+		rel, err := filepath.Rel(m, p)
+		if err != nil {
+			return false
+		}
+		s := strings.Split(rel, "/")
+		if len(s) == 4 && jailTreeDepth(rel) == 4 {
+			return true
+		}
+	}
+	return false
+}
+
+// linuxMirror reports whether a nullfs line mirrors a jail's root at its own compat/linux, the mount of a Linux jail.
+func (c Config) linuxMirror(dev, mp string) bool {
+	if mp != dev+"/compat/linux" {
+		return false
+	}
+	for _, m := range c.reg.mounts() {
+		if !within(m, dev) {
+			continue
+		}
+		rel, err := filepath.Rel(m, dev)
+		if err == nil && len(strings.Split(rel, "/")) == 5 && jailTreeDepth(rel) == 5 && filepath.Base(rel) == "root" {
+			return true
+		}
+	}
+	return false
 }
 
 func cleanAbs(p string) bool {

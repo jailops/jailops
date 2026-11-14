@@ -189,8 +189,7 @@ func (l *Local) writeStorageFile(roots []string) error {
 	if st, err := os.Lstat(path); err == nil && !st.Mode().IsRegular() {
 		return forbidden("%s exists and is not a regular file", path)
 	}
-	tmp := path + ".jotmp"
-	_ = os.Remove(tmp)
+	tmp := filepath.Join(filepath.Dir(path), tmpName(filepath.Base(path)))
 	f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return api.Errorf(api.CodeInternal, "storage file: %v", err)

@@ -37,11 +37,11 @@ type jailInfo struct {
 	Interfaces    []infoInterface `json:"interfaces"`
 	// FirewallPolicies are the policies the jail is rendered with, in the order they are rendered; empty when it has
 	// none and is open.
-	FirewallPolicies []infoPolicy      `json:"firewall_policies,omitempty"`
-	Volumes          []api.VolumeMount `json:"volumes,omitempty"`
-	Snapshots        infoSnapshots     `json:"snapshots"`
-	Update           infoUpdate        `json:"update"`
-	Labels           map[string]string `json:"labels,omitempty"`
+	FirewallPolicies []infoPolicy       `json:"firewall_policies,omitempty"`
+	Volumes          []api.VolumeAttach `json:"volumes,omitempty"`
+	Snapshots        infoSnapshots      `json:"snapshots"`
+	Update           infoUpdate         `json:"update"`
+	Labels           map[string]string  `json:"labels,omitempty"`
 	// Problems are the conditions that are not True, and the drift.
 	Problems []string `json:"problems,omitempty"`
 }
@@ -340,7 +340,7 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	}
 	kv("Limits", strings.Join(lim, ", "))
 	if len(info.FirewallPolicies) == 0 {
-		kv("Firewall", "open: no firewall policy")
+		kv("Firewall", "open: no firewall policy (the host answers ping and DNS only)")
 	} else {
 		var ps []string
 		for _, p := range info.FirewallPolicies {
@@ -378,9 +378,6 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		mount := v.Mount
 		if v.ReadOnly {
 			mount += " (read-only)"
-		}
-		if v.Quota != "" {
-			mount += ", quota " + v.Quota
 		}
 		kv("Volume "+v.Name, mount)
 	}

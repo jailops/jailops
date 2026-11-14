@@ -15,10 +15,8 @@ func TestAnchorRulesAreTheFilterLinesOfTheText(t *testing.T) {
 		return api.FirewallRule{Name: name, Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{port}, Comment: "why " + name}
 	}
 	full := pfBase()
-	full.Gateways = []string{"jo9gb"}
 	full.Foreign = []netip.Prefix{netip.MustParsePrefix("10.31.0.0/24")}
 	full.LinkLocal = []netip.Addr{ip("fe80::1")}
-	full.NoAdvertise = true
 	full.Proxy = []api.FirewallRule{{Name: "proxy web", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 8080, JailPort: 80}}}
 	raw := pfBase()
 	raw.Policies = append(raw.Policies, PFPolicy{Name: "admin", AllowRaw: true, Policy: api.FirewallPolicySpec{Raw: "block drop in quick proto tcp to port 9"}})
@@ -28,7 +26,6 @@ func TestAnchorRulesAreTheFilterLinesOfTheText(t *testing.T) {
 		{Name: "app-web", Managed: true, Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{rule("access", "5432")}}},
 		{Name: "postgres", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{rule("from the set", "5432")}}},
 	}
-	several.Gateways = []string{"jo9gb"}
 	for name, in := range map[string]PFInput{"base": pfBase(), "full": full, "raw": raw, "several": several} {
 		an, err := BuildAnchor(in)
 		if err != nil {

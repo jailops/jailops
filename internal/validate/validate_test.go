@@ -71,7 +71,7 @@ func okJail() api.JailSpec {
 		Resources: api.Resources{CPU: 2, Memory: "2G", Disk: "20G"},
 		Network:   []api.NetworkAttach{{Network: "lan", IPv4: "auto", IPv6: "2001:db8::5", MAC: "02:00:00:00:00:01"}},
 		Firewall:  api.FirewallAttach{Policies: []string{"web"}, Tags: []string{"web", "tier-1"}},
-		Volumes:   []api.VolumeMount{{Name: "data", Mount: "/srv/data", Quota: "10G"}},
+		Volumes:   []api.VolumeAttach{{Name: "data", Mount: "/srv/data"}},
 		Boot:      api.BootPolicy{Depends: []string{"db"}},
 		Packages:  []string{"nginx", "py311-foo+bar"},
 		Env:       map[string]string{"A": "b"},
@@ -109,8 +109,7 @@ func TestJailSpec(t *testing.T) {
 		{"vol dotdot", func(s *api.JailSpec) { s.Volumes[0].Mount = "/srv/../etc" }, "volumes[0].mount"},
 		{"vol quote", func(s *api.JailSpec) { s.Volumes[0].Mount = "/srv/\"x" }, "volumes[0].mount"},
 		{"vol root", func(s *api.JailSpec) { s.Volumes[0].Mount = "/" }, "volumes[0].mount"},
-		{"vol quota", func(s *api.JailSpec) { s.Volumes[0].Quota = "x" }, "volumes[0].quota"},
-		{"vol dup", func(s *api.JailSpec) { s.Volumes = append(s.Volumes, s.Volumes[0]) }, "volumes[1].name"},
+		{"vol dup", func(s *api.JailSpec) { s.Volumes = append(s.Volumes, s.Volumes[0]) }, "volumes[1].volume"},
 		{"depends self", func(s *api.JailSpec) { s.Boot.Depends = []string{"web"} }, "boot.depends[0]"},
 		{"package", func(s *api.JailSpec) { s.Packages = []string{"x;rm"} }, "packages[0]"},
 		{"env key", func(s *api.JailSpec) { s.Env = map[string]string{"1A": "x"} }, "env"},
@@ -129,9 +128,9 @@ func TestJailSpec(t *testing.T) {
 
 func okNet() api.NetworkSpec {
 	return api.NetworkSpec{
-		Bridge: "jo0", Uplink: "em0", DNS: []string{"9.9.9.9", "2620:fe::fe"},
+		Uplink: "em0", DNS: []string{"9.9.9.9", "2620:fe::fe"},
 		IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200", Exclude: []string{"10.20.0.50-10.20.0.60"}, NAT: true},
-		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1::/64", Gateway: "2001:db8:1::1", Range: "2001:db8:1::100-2001:db8:1::ffff"},
+		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1::/64", Range: "2001:db8:1::100-2001:db8:1::ffff"},
 	}
 }
 
@@ -140,7 +139,7 @@ func TestNetworkSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	proxy := func(s *api.NetworkSpec) {
-		s.IPv6 = &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:2::/64", Gateway: "fe80::1", Range: "2001:db8:2::100-2001:db8:2::200"}
+		s.IPv6 = &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:2::/64", Range: "2001:db8:2::100-2001:db8:2::200"}
 	}
 	p := okNet()
 	proxy(&p)
@@ -152,8 +151,6 @@ func TestNetworkSpec(t *testing.T) {
 		mut   func(*api.NetworkSpec)
 		field string
 	}{
-		{"bridge", func(s *api.NetworkSpec) { s.Bridge = "jo 0" }, "bridge"},
-		{"uplink=bridge", func(s *api.NetworkSpec) { s.Uplink = "jo0" }, "uplink"},
 		{"uplink epair", func(s *api.NetworkSpec) { s.Uplink = "jo0123456789a0a" }, "uplink"},
 		{"mtu", func(s *api.NetworkSpec) { s.MTU = 100 }, "mtu"},
 		{"mtu v6", func(s *api.NetworkSpec) { s.MTU = 1000 }, "mtu"},
@@ -175,10 +172,7 @@ func TestNetworkSpec(t *testing.T) {
 		{"nat no uplink", func(s *api.NetworkSpec) { s.Uplink = "" }, "ipv4.nat"},
 		{"v6 mode", func(s *api.NetworkSpec) { s.IPv6.Mode = "weird" }, "ipv6.mode"},
 		{"v6 subnet v4", func(s *api.NetworkSpec) { s.IPv6.Subnet = "10.0.0.0/8" }, "ipv6.subnet"},
-		{"v6 gw outside", func(s *api.NetworkSpec) { s.IPv6.Gateway = "2001:db8:9::1" }, "ipv6.gateway"},
-		{"v6 range gw", func(s *api.NetworkSpec) { s.IPv6.Range = "2001:db8:1::1-2001:db8:1::ff" }, "ipv6.range"},
 		{"v6 range outside", func(s *api.NetworkSpec) { s.IPv6.Range = "2001:db8:2::1-2001:db8:2::ff" }, "ipv6.range"},
-		{"proxy global gw", func(s *api.NetworkSpec) { proxy(s); s.IPv6.Gateway = "2001:db8:2::1" }, "ipv6.gateway"},
 		{"proxy no uplink", func(s *api.NetworkSpec) { proxy(s); s.Uplink = ""; s.IPv4.NAT = false }, "uplink"},
 		{"proxy uplink bridge", func(s *api.NetworkSpec) { proxy(s); s.Uplink = "bridge0" }, "uplink"},
 	}
@@ -189,18 +183,10 @@ func TestNetworkSpec(t *testing.T) {
 			wantInvalid(t, NetworkSpec(s), tc.field)
 		})
 	}
-	// routed mode may use a link-local gateway; none disables v6 checks
+	// none disables the v6 checks
 	s := okNet()
-	s.IPv6.Gateway = "fe80::1"
-	if err := NetworkSpec(s); err != nil {
-		t.Fatal(err)
-	}
 	s.IPv6 = &api.IPv6Net{Mode: api.IPv6None}
 	if err := NetworkSpec(s); err != nil {
-		t.Fatal(err)
-	}
-	wantInvalid(t, NetworkMembers(p, []string{"em0"}), "uplink")
-	if err := NetworkMembers(p, []string{"jo0123456789a0a"}); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -16,7 +16,7 @@ import (
 
 const (
 	vkJail    = "tank/jailops/projects/alpha/jails/web"
-	vkVolumes = vkJail + "/data"
+	vkVolumes = "tank/jailops/projects/alpha/volumes"
 	vkVol     = vkVolumes + "/db"
 	// vkPass is a marker: it must reach zfs on standard input and nothing else.
 	vkPass  = "marker-7f3a-correct-horse"
@@ -54,6 +54,9 @@ func newKeyFixtureClock(t *testing.T, keystatus string, now func() time.Time) (*
 		e.addDS(vkVolumes, map[string]string{"jailops:managed": "on", "jailops:kind": "volumes"})
 		e.addDS(vkVol, map[string]string{"jailops:managed": "on", "jailops:kind": "volume", "encryptionroot": vkVol, "keyformat": "passphrase", "keystatus": keystatus})
 		e.addDS(vkJail+"/etc", map[string]string{"jailops:managed": "on", "jailops:kind": "persistent", "encryptionroot": vkJail + "/etc", "keyformat": "passphrase"})
+		// the shape of a volume below a jail is not a volume: the helper knows the volumes of a project only
+		e.addDS(vkJail+"/data", map[string]string{"jailops:managed": "on", "jailops:kind": "volumes"})
+		e.addDS(vkJail+"/data/db", map[string]string{"jailops:managed": "on", "jailops:kind": "volume", "encryptionroot": vkJail + "/data/db", "keyformat": "passphrase"})
 		e.addDS(vkVolumes+"/plain", map[string]string{"jailops:managed": "on", "jailops:kind": "volume"})
 		e.addDS(vkVolumes+"/foreign", map[string]string{"jailops:kind": "volume", "encryptionroot": vkVolumes + "/foreign", "keyformat": "passphrase"})
 		e.addDS(vkVolumes+"/child", map[string]string{"jailops:managed": "on", "jailops:kind": "volume", "encryptionroot": vkVol, "keyformat": "passphrase"})
@@ -162,9 +165,10 @@ func TestKeyOperationsRefuse(t *testing.T) {
 		call func() error
 		code api.Code
 	}{
-		{"outside the storage roots", func() error { return f.client.LoadKey(ctx, "tank/other/data/db", []byte(vkPass)) }, api.CodeForbidden},
+		{"outside the storage roots", func() error { return f.client.LoadKey(ctx, "tank/other/projects/alpha/volumes/db", []byte(vkPass)) }, api.CodeForbidden},
 		{"not managed", func() error { return f.client.LoadKey(ctx, vkVolumes+"/foreign", []byte(vkPass)) }, api.CodeForbidden},
 		{"a persistent dataset", func() error { return f.client.LoadKey(ctx, vkJail+"/etc", []byte(vkPass)) }, api.CodeForbidden},
+		{"a volume-shaped dataset of a jail", func() error { return f.client.LoadKey(ctx, vkJail+"/data/db", []byte(vkPass)) }, api.CodeForbidden},
 		{"a volume without encryption", func() error { return f.client.LoadKey(ctx, vkVolumes+"/plain", []byte(vkPass)) }, api.CodeForbidden},
 		{"not its own encryption root", func() error { return f.client.LoadKey(ctx, vkVolumes+"/child", []byte(vkPass)) }, api.CodeForbidden},
 		{"a key that is not a passphrase", func() error { return f.client.LoadKey(ctx, vkVolumes+"/hex", []byte(vkPass)) }, api.CodeForbidden},
@@ -182,7 +186,7 @@ func TestKeyOperationsRefuse(t *testing.T) {
 			_, err := callJSON[empty](ctx, f.client, OpZFSLoadKey, map[string]string{"name": vkVol, "passphrase": vkPass}, callOpts{in: strings.NewReader(vkPass)})
 			return err
 		}, api.CodeInvalid},
-		{"unload outside the roots", func() error { return f.client.UnloadKey(ctx, "tank/other/data/db") }, api.CodeForbidden},
+		{"unload outside the roots", func() error { return f.client.UnloadKey(ctx, "tank/other/projects/alpha/volumes/db") }, api.CodeForbidden},
 		{"unload a persistent dataset", func() error { return f.client.UnloadKey(ctx, vkJail+"/etc") }, api.CodeForbidden},
 		{"change a locked volume", func() error { return f.client.ChangeKey(ctx, vkVol, []byte(vkPass), []byte(vkNew)) }, api.CodeLocked},
 		{"change with one passphrase", func() error {
@@ -226,7 +230,7 @@ func TestCreateEncryptedOverTheSocket(t *testing.T) {
 		{"not a volume", zfs.CreateOpts{Name: vkJail + "/new"}, vkPass, api.CodeForbidden, nil},
 		{"with parents", zfs.CreateOpts{Name: vkVolumes + "/new", Parents: true}, vkPass, api.CodeInvalid, nil},
 		{"a zvol", zfs.CreateOpts{Name: vkVolumes + "/new", VolumeSize: "1G"}, vkPass, api.CodeInvalid, nil},
-		{"outside the roots", zfs.CreateOpts{Name: "tank/other/data/new"}, vkPass, api.CodeForbidden, nil},
+		{"outside the roots", zfs.CreateOpts{Name: "tank/other/projects/alpha/volumes/new"}, vkPass, api.CodeForbidden, nil},
 		{"a mountpoint outside", zfs.CreateOpts{Name: vkVolumes + "/new"}, vkPass, api.CodeForbidden, map[string]string{"mountpoint": "/etc"}},
 	}
 	for _, r := range refused {

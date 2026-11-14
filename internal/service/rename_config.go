@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"jailops.net/jailops/internal/apps"
-	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
@@ -15,7 +14,7 @@ import (
 
 // The renames of configuration objects: networks, address sets, firewall policies and profiles. Their references
 // live in other state objects and in the records of jails; a network also names a PF anchor and the descriptions of
-// its interfaces. The interfaces themselves keep their names: a live bridge is never renamed.
+// its interfaces. The interfaces themselves keep their names: a live epair is never renamed.
 
 // rewriteJails adds the steps that rewrite the jails edit changes. edit gets a copy of each jail (of the projects
 // keep accepts, every project when keep is nil) and returns it changed with the details, or false to leave it.
@@ -96,7 +95,7 @@ func (s *Service) RenameNetwork(ctx context.Context, name string, o RenameOption
 			return nil, err
 		}
 		p := newRenamePlan()
-		p.lock(networkLock(name), networkLock(to), "network/_bridges")
+		p.lock(networkLock(name), networkLock(to))
 		p.resources["networks"] = []string{"/api/v1/networks/" + name, "/api/v1/networks/" + to}
 		st, err := stateStep(api.KindNetwork, obj, to, "", nil, objectChange("network", name, to))
 		if err != nil {
@@ -226,8 +225,8 @@ func nicNetworkKey(k string) bool {
 	return dev != "" && (!has || field == "network")
 }
 
-// networkDescSteps rewrites the descriptions that carry the network's name: its bridge and gateway pair and both
-// ends of the epairs of the jails that run on it. An interface whose description is not the one JailOps wrote for
+// networkDescSteps rewrites the descriptions that carry the network's name: both ends of the epairs of the jails that
+// run on it. An interface whose description is not the one JailOps wrote for
 // the old name is left alone.
 func (s *Service) networkDescSteps(ctx context.Context, n object[api.NetworkSpec], from, to string) ([]renameStep, error) {
 	if s.d.Net == nil {
@@ -245,17 +244,6 @@ func (s *Service) networkDescSteps(ctx context.Context, n object[api.NetworkSpec
 	add := func(jail, iface, old, nu string) {
 		out = append(out, renameStep{Op: "ifdesc", Jail: jail, Iface: iface, OldValue: old, NewValue: nu,
 			Change: api.RenameChange{Kind: api.RenameInterface, Object: "interface " + ifaceWhere(jail, iface), Detail: fmt.Sprintf("description %q -> %q", old, nu)}})
-	}
-	if b := n.Spec.Bridge; b != "" && desc[b] == render.NetBridgeDesc(from) {
-		add("", b, desc[b], render.NetBridgeDesc(to))
-	}
-	if member, l3, err := ipam.GatewayNames(n.Spec.Bridge); err == nil {
-		if desc[member] == render.NetGatewayDesc(from, false) {
-			add("", member, desc[member], render.NetGatewayDesc(to, false))
-		}
-		if desc[l3] == render.NetGatewayDesc(from, true) {
-			add("", l3, desc[l3], render.NetGatewayDesc(to, true))
-		}
 	}
 	// the epairs of running jails: the steps their start rendered say which interface carries which text
 	running := s.runningKeys(ctx)

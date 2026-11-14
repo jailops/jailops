@@ -43,22 +43,8 @@ func ValidIfaceDesc(d string) bool {
 	return true
 }
 
-// NetBridgeDesc is the description of a network's bridge.
-func NetBridgeDesc(network string) string {
-	return buildDesc([]descField{{"net", network}}, " bridge")
-}
-
-// NetGatewayDesc is the description of one end of a network's gateway pair: the member end is a port of the bridge
-// (bridge side), the other end holds the host's gateway addresses (host side).
-func NetGatewayDesc(network string, hostSide bool) string {
-	if hostSide {
-		return buildDesc([]descField{{"net", network}}, " gateway (host side)")
-	}
-	return buildDesc([]descField{{"net", network}}, " gateway (bridge side)")
-}
-
-// JailIfaceDesc is the description of one end of a jail's epair: the host side is a port of the bridge, the jail
-// side lives in the jail's vnet.
+// JailIfaceDesc is the description of one end of a jail's epair: the host side is the routed link of the jail on the
+// host, the jail side lives in the jail's vnet.
 func JailIfaceDesc(project, jail, network string, hostSide bool) string {
 	side := " (jail side)"
 	if hostSide {

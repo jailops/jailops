@@ -29,14 +29,14 @@ func TestStartStopOrdering(t *testing.T) {
 	log := w.F.Log
 	root := indexOf(log, "zfs mount tank/jailops/projects/alpha/jails/web/root")
 	etc := indexOf(log, "zfs mount tank/jailops/projects/alpha/jails/web/etc")
-	vol := indexOf(log, "zfs mount tank/jailops/projects/alpha/jails/web/data/db")
+	vol := indexOf(log, "zfs mount tank/jailops/projects/alpha/volumes/db")
 	hook := indexOf(log, "prestart alpha_web")
 	jail := indexOf(log, "jail start alpha_web")
 	if !(root >= 0 && root < etc && etc < vol && vol < hook && hook < jail) {
 		t.Fatalf("order wrong: %v", log)
 	}
-	if indexOf(log, "mkdir /jailops/projects/alpha/jails/web/root/srv/db") < 0 || indexOf(log, "mkdir /jailops/projects/alpha/jails/web/root/srv/db") > vol {
-		t.Fatal("volume mount dir must exist before the volume is mounted", log)
+	if indexOf(log, "mkdir /jailops/projects/alpha/jails/web/root/srv/db") < 0 || indexOf(log, "mkdir /jailops/projects/alpha/jails/web/root/srv/db") > hook {
+		t.Fatal("the mount point of the volume must exist before the jail starts", log)
 	}
 	if !w.Jails.IsUp("alpha_web") {
 		t.Fatal("not running")
@@ -51,10 +51,12 @@ func TestStartStopOrdering(t *testing.T) {
 		t.Fatal(err)
 	}
 	log = w.F.Log
-	if !(indexOf(log, "jail stop alpha_web") < indexOf(log, "poststop alpha_web") && indexOf(log, "poststop alpha_web") < indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/data/db") &&
-		indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/data/db") < indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/etc") &&
+	if !(indexOf(log, "jail stop alpha_web") < indexOf(log, "poststop alpha_web") && indexOf(log, "poststop alpha_web") < indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/etc") &&
 		indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/etc") < indexOf(log, "zfs unmount tank/jailops/projects/alpha/jails/web/root")) {
 		t.Fatalf("stop order wrong: %v", log)
+	}
+	if indexOf(log, "zfs unmount "+dbVol) >= 0 {
+		t.Fatal("stopping a jail unmounts a volume other jails may use")
 	}
 	if mounted, _ := w.Z.Mounted(bg, "tank/jailops/projects/alpha/jails/web/root"); mounted {
 		t.Fatal("root still mounted")

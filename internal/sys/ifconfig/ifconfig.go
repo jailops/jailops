@@ -1,4 +1,4 @@
-// Package ifconfig manages bridges, epair interfaces, addresses and routes
+// Package ifconfig manages epair interfaces, addresses and routes
 // through ifconfig(8) and route(8), and reads interface state. It changes only
 // interfaces JailOps owns: those whose description carries the JailOps marker
 // (see Owns), which it writes itself when it creates an interface.
@@ -16,7 +16,7 @@ import (
 )
 
 // Marker is the description JailOps gives an interface it creates, in the same operation, before the interface has
-// the name it is created for. The reconcile loop replaces it with the readable text ("jailops net=lan bridge"); every
+// the name it is created for. The reconcile loop replaces it with the readable text ("jailops jail=web/app net=lan (host side)"); every
 // text JailOps writes starts with "jailops ", which HasMarker tests. Only root can set the description of an interface in the host's network stack, so the daemon cannot forge it.
 const Marker = "jailops managed"
 
@@ -25,9 +25,9 @@ func HasMarker(desc string) bool {
 	return strings.HasPrefix(desc, "jailops ")
 }
 
-// OwnedKinds are the interface kinds (their driver's group) JailOps creates and may change: bridges and epairs. A
-// physical interface, a loopback, a tunnel or a vlan is never owned, whatever its description says.
-var OwnedKinds = []string{"bridge", "epair"}
+// OwnedKinds are the interface kinds (their driver's group) JailOps creates and may change: epairs. A physical
+// interface, a loopback, a tunnel, a bridge or a vlan is never owned, whatever its description says.
+var OwnedKinds = []string{"epair"}
 
 // Options configure how ownership is decided. There is nothing to set today; the type stays so that the clients keep
 // one place to say it.
@@ -43,7 +43,7 @@ func (o Options) Owns(i Iface) error {
 		}
 	}
 	if kind == "" {
-		return api.Errorf(api.CodeForbidden, "interface %q is not managed by JailOps: JailOps changes only bridges and epairs it created (this one is in the groups %s)", i.Name, groupList(i.Groups))
+		return api.Errorf(api.CodeForbidden, "interface %q is not managed by JailOps: JailOps changes only epairs it created (this one is in the groups %s)", i.Name, groupList(i.Groups))
 	}
 	if HasMarker(i.Description) {
 		return nil
@@ -175,7 +175,7 @@ type Addr struct {
 	Prefix netip.Prefix // address with prefix length
 }
 
-// Member is a bridge member port.
+// Member is a port of a bridge (read from the host's own bridges, never changed).
 type Member struct {
 	Name    string
 	Flags   []string
@@ -209,13 +209,6 @@ func (i Iface) Up() bool {
 	return false
 }
 
-// Neighbor is a permanent IPv6 neighbor entry (ndp -an).
-type Neighbor struct {
-	Addr  netip.Addr
-	Iface string
-	MAC   string
-}
-
 // Route describes a route for RouteAdd and RouteDelete.
 type Route struct {
 	// Dest is "default" or an address or prefix; its family selects -inet
@@ -225,6 +218,9 @@ type Route struct {
 	// (-interface).
 	Gateway   string
 	Interface string
+	// Reject makes a route that answers packets for the prefix with an error (route -reject through the loopback
+	// address): Dest is a prefix, there is no Gateway and no Interface.
+	Reject bool
 }
 
 // Client is the interface layer. A mutating call changes only an interface JailOps owns (Options.Owns, read from the
@@ -233,10 +229,6 @@ type Route struct {
 type Client interface {
 	List(ctx context.Context) ([]Iface, error)
 
-	BridgeCreate(ctx context.Context, name string) error
-	BridgeDestroy(ctx context.Context, name string) error
-	BridgeAddMember(ctx context.Context, bridge, member string, private bool) error
-	BridgeDeleteMember(ctx context.Context, bridge, member string) error
 	SetDescription(ctx context.Context, iface, desc string) error
 
 	// EpairCreate creates a pair named <name>a and <name>b and returns both.
@@ -255,19 +247,24 @@ type Client interface {
 	RouteAdd(ctx context.Context, r Route) error
 	RouteDelete(ctx context.Context, r Route) error
 
-	// NeighborSet installs a permanent IPv6 neighbor entry on iface: addr is at mac. An entry of the same address is
-	// replaced (a static entry that outlived its jail would send the next owner's traffic to a dead address).
-	NeighborSet(ctx context.Context, iface string, addr netip.Addr, mac string) error
-	// NeighborDelete removes the entry of addr on iface.
-	NeighborDelete(ctx context.Context, iface string, addr netip.Addr) error
-
 	// IPv6Forwarding reads net.inet6.ip6.forwarding.
 	IPv6Forwarding(ctx context.Context) (bool, error)
 }
 
 // routeArgs validates r and renders `-inet|-inet6 <dest> <gw>|-interface <if>`. The caller checks that JailOps owns
 // the interface.
-func routeArgs(r Route) ([]string, error) {
+func routeArgs(r Route, del bool) ([]string, error) {
+	if r.Reject {
+		p, err := netip.ParsePrefix(r.Dest)
+		if err != nil || r.Gateway != "" || r.Interface != "" || p.Addr().Zone() != "" || p.Addr().IsUnspecified() && p.Bits() == 0 {
+			return nil, api.Errorf(api.CodeInvalid, "invalid reject route %q", r.Dest)
+		}
+		args := []string{famOf(p.Addr()), p.Masked().String()}
+		if !del {
+			args = append(args, loopback(p.Addr()), "-reject")
+		}
+		return args, nil
+	}
 	var fam string
 	dest := r.Dest
 	switch {
@@ -305,6 +302,13 @@ func routeArgs(r Route) ([]string, error) {
 		return nil, api.Errorf(api.CodeInvalid, "route needs a gateway or an interface")
 	}
 	return args, nil
+}
+
+func loopback(a netip.Addr) string {
+	if a.Is4() || a.Is4In6() {
+		return "127.0.0.1"
+	}
+	return "::1"
 }
 
 func famOf(a netip.Addr) string {

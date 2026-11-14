@@ -13,7 +13,7 @@ type Event struct {
 // Mapper says which records are of interest. Both functions come from the service, which knows the networks and the
 // jails; either may be nil, and a record that needs the missing one is then ignored.
 type Mapper struct {
-	// Link describes an interface JailOps owns or depends on ("uplink em0", "bridge jo7 of network lan"); ok is false
+	// Link describes an interface JailOps owns or depends on ("uplink em0"); ok is false
 	// for any other interface, and for the epair of a jail, whose ends come and go with every start.
 	Link func(iface string) (what string, ok bool)
 	// Jail resolves the name the kernel knows a jail by (project_jail) to its project and name.

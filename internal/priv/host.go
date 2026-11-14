@@ -236,8 +236,7 @@ func (l *Local) writeAtomic(dir, name string, data []byte, mode os.FileMode, uid
 	if st, err := root.Lstat(name); err == nil && !st.Mode().IsRegular() {
 		return forbidden("%s is not a regular file", filepath.Join(dir, name))
 	}
-	tmp := "." + name + ".jotmp"
-	_ = root.Remove(tmp)
+	tmp := tmpName(name)
 	f, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return mapFSErr(err)

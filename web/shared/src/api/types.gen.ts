@@ -131,11 +131,12 @@ export type Kind =
   | "Storage"
   | "HostIdentity"
   | "WireGuard"
+  | "Volume"
   | "LogForward"
   | "HostFirewall"
   | "HostCertificate"
 
-export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'Project', 'Storage', 'HostIdentity', 'WireGuard', 'LogForward', 'HostFirewall', 'HostCertificate']
+export const KindValues: readonly Kind[] = ['Jail', 'Image', 'Network', 'FirewallPolicy', 'AddressSet', 'BackupPolicy', 'BackupTarget', 'HostGroup', 'Rollout', 'JailTemplate', 'Remote', 'User', 'Token', 'Certificate', 'Host', 'ImageGeneration', 'JailSnapshot', 'Backup', 'Operation', 'Project', 'Storage', 'HostIdentity', 'WireGuard', 'Volume', 'LogForward', 'HostFirewall', 'HostCertificate']
 
 export type Layout =
   | "thin"
@@ -551,6 +552,7 @@ export interface BackupPolicySpec {
   schedule: string
   retention: RetentionPolicy
   include_state?: boolean
+  exclude_volumes?: boolean
   full_every?: number
   verify_schedule?: string
   verify_mode?: string
@@ -583,11 +585,14 @@ export interface BackupRun {
 
 export interface BackupRunRequest {
   policy: string
+  no_volumes?: boolean
 }
 
 export interface BackupSpec {
+  kind?: string
   jail: string
   jail_uuid: string
+  volume?: VolumeSpec
   host_uuid: string
   policy?: string
   target?: string
@@ -792,7 +797,6 @@ export interface FirewallTestHop {
   side: string
   jail: string
   anchor: string
-  interface: string
   direction: string
   verdict: string
   decided_by?: FirewallTestRule
@@ -1044,7 +1048,6 @@ export interface IPv4Net {
 export interface IPv6Net {
   mode: IPv6Mode
   subnet: string
-  gateway: string
   range: string
   exclude?: string[]
 }
@@ -1182,12 +1185,6 @@ export interface JailAction {
   force?: boolean
 }
 
-export interface JailCreate {
-  metadata: ObjectMeta
-  spec: JailSpec
-  volume_passphrase?: string
-}
-
 export interface JailDiskUsage {
   error?: string
   root_bytes: number
@@ -1222,11 +1219,6 @@ export interface JailLogRead {
   truncated?: boolean
 }
 
-export interface JailPassphraseChange {
-  old_passphrase: string
-  new_passphrase: string
-}
-
 export interface JailRollback {
   scope?: RollbackScope
   snapshot?: string
@@ -1258,7 +1250,7 @@ export interface JailSpec {
   resources?: Resources
   network?: NetworkAttach[]
   firewall?: FirewallAttach
-  volumes?: VolumeMount[]
+  volumes?: VolumeAttach[]
   host_mounts?: HostMount[]
   boot?: BootPolicy
   packages?: string[]
@@ -1286,11 +1278,6 @@ export interface JailStatus {
   provisioned_at?: string
   warnings?: string[]
   locked?: string[]
-}
-
-export interface JailUnlock {
-  passphrase: string
-  start?: boolean
 }
 
 export interface JailUpgrade {
@@ -1426,6 +1413,7 @@ export interface NetworkAttach {
   network: string
   mtu?: number
   egress?: string
+  ingress?: string
   ipv4?: string
   ipv6?: string
   mac?: string
@@ -1440,7 +1428,6 @@ export interface NetworkDNS {
 }
 
 export interface NetworkSpec {
-  bridge?: string
   uplink?: string
   ipv4?: IPv4Net
   ipv6?: IPv6Net
@@ -1449,8 +1436,7 @@ export interface NetworkSpec {
 }
 
 export interface NetworkStatus {
-  bridge_up?: boolean
-  members?: string[]
+  links?: string[]
   allocated?: number
   free?: number
   orphans?: string[]
@@ -1726,6 +1712,8 @@ export interface RestoreRequest {
   network_map?: Record<string, string>
   keep_ip?: boolean
   dry_run?: boolean
+  no_volumes?: boolean
+  passphrase?: string
 }
 
 export interface RetentionPolicy {
@@ -1929,12 +1917,90 @@ export interface UserSpec {
   totp?: boolean
 }
 
-export interface VolumeMount {
-  name: string
+export interface Volume {
+  metadata: ObjectMeta
+  spec: VolumeSpec
+  status?: VolumeStatus
+}
+
+export interface VolumeAttach {
+  volume: string
   mount: string
-  quota?: string
   read_only?: boolean
+}
+
+export interface VolumeAttachRequest {
+  volume: string
+  mount: string
+  read_only?: boolean
+  copy_existing?: boolean
+}
+
+export interface VolumeCreate {
+  metadata: ObjectMeta
+  spec: VolumeSpec
+  passphrase?: string
+}
+
+export interface VolumePassphraseChange {
+  old_passphrase: string
+  new_passphrase: string
+}
+
+export interface VolumeRollback {
+  snapshot: string
+  confirm_data_loss?: boolean
+}
+
+export interface VolumeSnapshot {
+  metadata: ObjectMeta
+  spec: VolumeSnapshotSpec
+  status: VolumeSnapshotStatus
+}
+
+export interface VolumeSnapshotSpec {
+  volume: string
+  comment?: string
+}
+
+export interface VolumeSnapshotStatus {
+  written?: number
+}
+
+export interface VolumeSpec {
+  storage?: string
+  size?: string
+  uid: number
+  gid: number
+  mode?: string
   encrypted?: boolean
+  path?: string
+  watch?: boolean
+  probe?: string
+  on_loss?: string
+  comment?: string
+}
+
+export interface VolumeStatus {
+  dataset?: string
+  mountpoint?: string
+  used: number
+  locked?: boolean
+  state?: string
+  detail?: string
+  attached_to?: VolumeUse[]
+  warnings?: string[]
+}
+
+export interface VolumeUnlock {
+  passphrase: string
+  start?: boolean
+}
+
+export interface VolumeUse {
+  jail: string
+  mount: string
+  read_only?: boolean
 }
 
 export interface WireGuard {
@@ -2065,7 +2131,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "disk.\u003cdevice\u003e",
     "type": "device",
-    "description": "A data volume; set it to the mount path to add it, unset it to remove it.",
+    "description": "A volume of the project attached to the jail: \u003cdevice\u003e is the name of the volume; set it to the mount path to attach it, unset it to detach it.",
     "example": "disk.data=/var/db",
     "restart_required": true,
     "profile": true,
@@ -2074,25 +2140,16 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "disk.\u003cdevice\u003e.mount",
     "type": "string",
-    "description": "Mount path inside the jail.",
+    "description": "Where the volume is mounted inside the jail.",
     "example": "/var/db",
     "restart_required": true,
     "profile": true,
     "path": "volumes[\u003cdevice\u003e].mount"
   },
   {
-    "name": "disk.\u003cdevice\u003e.quota",
-    "type": "size",
-    "description": "ZFS quota of the volume.",
-    "example": "10G",
-    "restart_required": true,
-    "profile": true,
-    "path": "volumes[\u003cdevice\u003e].quota"
-  },
-  {
     "name": "disk.\u003cdevice\u003e.read_only",
     "type": "bool",
-    "description": "Mount the volume read-only.",
+    "description": "Attach the volume read-only.",
     "example": "true",
     "restart_required": true,
     "profile": true,
@@ -2209,11 +2266,20 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "nic.\u003cdevice\u003e.egress",
     "type": "rate",
-    "description": "Rate limit of what the jail sends through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host; traffic into the jail has no limit.",
+    "description": "Rate limit of what the jail sends through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.",
     "example": "10M",
     "restart_required": false,
     "profile": true,
     "path": "network[\u003cdevice\u003e].egress"
+  },
+  {
+    "name": "nic.\u003cdevice\u003e.ingress",
+    "type": "rate",
+    "description": "Rate limit of what the jail receives through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.",
+    "example": "10M",
+    "restart_required": false,
+    "profile": true,
+    "path": "network[\u003cdevice\u003e].ingress"
   },
   {
     "name": "nic.\u003cdevice\u003e.ipv4",
@@ -2245,7 +2311,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "nic.\u003cdevice\u003e.mtu",
     "type": "int",
-    "description": "MTU of the interface: the network's MTU (a bridge gives every port its own); 0 takes it.",
+    "description": "MTU of the interface; 0 takes the network's.",
     "example": "1500",
     "restart_required": true,
     "profile": true,
@@ -2294,6 +2360,7 @@ export const configKeys: readonly ConfigKey[] = [
     "example": "80",
     "restart_required": false,
     "profile": true,
+    "admin": true,
     "path": "proxy[\u003cname\u003e].jail_port"
   },
   {
@@ -2303,6 +2370,7 @@ export const configKeys: readonly ConfigKey[] = [
     "example": ":8080",
     "restart_required": false,
     "profile": true,
+    "admin": true,
     "path": "proxy[\u003cname\u003e].listen"
   },
   {
@@ -2316,6 +2384,7 @@ export const configKeys: readonly ConfigKey[] = [
     "example": "tcp",
     "restart_required": false,
     "profile": true,
+    "admin": true,
     "path": "proxy[\u003cname\u003e].proto"
   },
   {
@@ -2444,4 +2513,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volume_unlock', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test']

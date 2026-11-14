@@ -2,6 +2,7 @@ package priv
 
 import (
 	"context"
+	"encoding/json"
 	fmt "fmt"
 	"net/netip"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/sdk/api"
 )
 
 type env struct {
@@ -53,7 +55,6 @@ func newEnv(t *testing.T) *env {
 		ConfDir:      filepath.Join(dir, "etc", "jails"),
 		StateDir:     filepath.Join(dir, "jailops", "state"),
 		HelperPath:   "/usr/local/libexec/jailops-priv",
-		NDPProxy:     []NDPUplink{{Uplink: "em0", Prefixes: []netip.Prefix{netip.MustParsePrefix("2001:db8:1:2:100::/80")}}},
 	}
 	for _, d := range []string{e.cfg.MountBase, e.cfg.ConfDir, e.cfg.StateDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
@@ -81,10 +82,14 @@ func newEnv(t *testing.T) *env {
 	e.net.AddForeign("em0", true) // the host's uplink: never JailOps's
 	// a bridge an administrator made by hand (ifconfig bridge create; ifconfig bridge0 name mybr): never JailOps's
 	e.net.AddIface(ifconfig.Iface{Name: "mybr", Groups: []string{"bridge"}, Flags: []string{"UP"}})
-	// the gateway pair of a network, through which the fake NDP routes its jail addresses (jo30gb)
+	// an epair, through which the fake NDP routes its jail addresses (jo30gb)
 	if _, _, err := e.net.EpairCreate(context.Background(), "jo30g"); err != nil {
 		t.Fatal(err)
 	}
+	// a network in IPv6 proxy mode on the uplink: the prefix the NDP tests answer for
+	proxyNet, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "edge", UUID: "bbbb-1111-2222"},
+		"spec": api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80"}}})
+	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "bbbb-1111-2222.json"), string(proxyNet))
 	e.runner = run.NewFake()
 	l, err := NewLocal(e.cfg, Deps{ZFS: e.zfs, Jails: e.jails, PF: e.pf, Net: e.net, Runner: e.runner, Jexec: e.jexec,
 		NDP: newFakeNDP(dir)}, WithoutChown())

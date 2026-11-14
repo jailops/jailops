@@ -37,9 +37,9 @@ spec:
     weekly: 8
 
 $ jailops backup list
-BACKUP                    JAIL   TARGET    SIZE      NEW       VERIFIED   AGE
-20260101020000-ab12cd34   web    nightly   5.0 MiB   1.0 MiB   yes        3h
-20260102020000-ee00ff11   db     usb       100 B     0 B       failed     3h
+BACKUP                    KIND   NAME   TARGET    SIZE      NEW       VERIFIED   AGE
+20260101020000-ab12cd34   jail   web    nightly   5.0 MiB   1.0 MiB   yes        3h
+20260102020000-ee00ff11   jail   db     usb       100 B     0 B       failed     3h
 
 $ jailops backup list --jail db -o name
 20260102020000-ee00ff11

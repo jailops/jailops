@@ -4,6 +4,7 @@ import (
 	"net/netip"
 	"path/filepath"
 	"slices"
+	"strings"
 	"time"
 
 	"jailops.net/jailops/sdk/api"
@@ -32,7 +33,7 @@ type Limits struct {
 	MaxVolumeBytes   uint64        // volsize, quota, reservation
 	MaxExecPerJail   int           // exec sessions per jail
 	MaxExecTotal     int           // exec sessions in total
-	MaxInflight      int           // concurrent requests per connection
+	MaxInflight      int           // concurrent requests per connection (an exec session is one for as long as it runs: room for MaxExecTotal sessions and the calls beside them)
 	MaxConns         int           // concurrent connections
 	DefaultTimeout   time.Duration // applied when the request has no deadline
 	MaxTimeout       time.Duration // cap for ordinary requests
@@ -44,7 +45,7 @@ func DefaultLimits() Limits {
 	return Limits{
 		MaxFileBytes: 4 << 20, MaxArgv: 256, MaxArgvBytes: 128 << 10,
 		MaxNames: 256, MaxProps: 64, MaxVolumeBytes: 16 << 40,
-		MaxInflight: 8, MaxConns: 32, MaxExecPerJail: 8, MaxExecTotal: 64,
+		MaxInflight: 96, MaxConns: 32, MaxExecPerJail: 8, MaxExecTotal: 64,
 		DefaultTimeout: 5 * time.Minute, MaxTimeout: time.Hour, MaxStreamTimeout: 24 * time.Hour,
 	}
 }
@@ -155,6 +156,12 @@ type Config struct {
 	StateDir string
 	// WorkDir is the daemon's scratch directory (image builds). Empty: none.
 	WorkDir string
+	// PkgKeysDir holds the key directories (fingerprints) that a pkg repository configuration written by the daemon
+	// may name besides the base system's /usr/share/keys (default DefaultPkgKeysDir). KeyringDir holds the keyrings
+	// that debootstrap may check a release with (default DefaultKeyringDir). Both belong to root, are not
+	// writable by others and lie outside every directory the daemon writes: the daemon never chooses what the
+	// helper trusts. Their contents are checked every time they are used.
+	PkgKeysDir, KeyringDir string
 	// WireGuardDir holds the keys of WireGuard interfaces, one directory per object (default
 	// DefaultWireGuardDir). It belongs to root with mode 0700 and lies outside every directory the daemon writes.
 	WireGuardDir string
@@ -166,9 +173,6 @@ type Config struct {
 	// HelperPath is the path jail.conf hooks call; only the exact hook
 	// command lines are accepted in a jail.conf.
 	HelperPath string
-	// NDPProxy lists the uplinks the IPv6 proxy may use and the prefixes it may answer for. Empty denies every
-	// request: the daemon cannot make the helper answer for anything the operator did not approve here.
-	NDPProxy []NDPUplink
 	// Sysctls extends the read allow-list.
 	Sysctls []string
 	// HostManage lists the host management modules the helper changes (host-manage; docs/appliance.md). Empty:
@@ -186,8 +190,8 @@ type Config struct {
 // DefaultSysctls is the sysctl read allow-list.
 var DefaultSysctls = []string{
 	"kern.osrelease", "kern.osreldate", "kern.ostype", "kern.version",
-	"kern.features.vimage", "net.link.bridge.pfil_member", "net.link.bridge.pfil_bridge", "net.link.bridge.pfil_onlyip",
-	"net.inet.ip.forwarding", "net.inet6.ip6.forwarding", "net.inet6.icmp6.nd6_onlink_ns_rfc4861", "security.jail.jailed",
+	"kern.features.vimage",
+	"net.inet.ip.forwarding", "net.inet6.ip6.forwarding", "net.inet6.icmp6.nd6_onlink_ns_rfc4861", "net.inet6.ip6.use_stableaddr", "security.jail.jailed",
 	"security.jail.vnet", "kern.racct.enable", "hw.ncpu", "hw.physmem",
 }
 
@@ -200,11 +204,6 @@ func (c Config) Normalize() (Config, error) {
 	if c.HelperPath == "" {
 		c.HelperPath = DefaultHelperPath
 	}
-	ndp, err := normalizeNDP(c.NDPProxy)
-	if err != nil {
-		return c, api.Errorf(api.CodeInvalid, "%v", err)
-	}
-	c.NDPProxy = ndp
 	c.StorageRoots = append([]string(nil), c.StorageRoots...)
 	if c.RootDataset != "" && !slices.Contains(c.StorageRoots, c.RootDataset) {
 		c.StorageRoots = append(c.StorageRoots, c.RootDataset)
@@ -255,8 +254,24 @@ func (c Config) Normalize() (Config, error) {
 		*p = filepath.Clean(*p)
 	}
 	for _, h := range c.FetchHosts {
-		if !reHostName.MatchString(h) {
-			return c, api.Errorf(api.CodeInvalid, "fetch host %q is not a lower case host name", h)
+		if !reHostName.MatchString(strings.TrimPrefix(h, "http://")) {
+			return c, api.Errorf(api.CodeInvalid, "fetch host %q is not a lower case host name (http://<host> allows plain http for that host)", h)
+		}
+	}
+	if c.PkgKeysDir == "" {
+		c.PkgKeysDir = DefaultPkgKeysDir
+	}
+	if c.KeyringDir == "" {
+		c.KeyringDir = DefaultKeyringDir
+	}
+	for _, p := range []struct{ key, dir string }{{"pkg-keys-dir", c.PkgKeysDir}, {"keyring-dir", c.KeyringDir}} {
+		if !filepath.IsAbs(p.dir) || filepath.Clean(p.dir) != p.dir || filepath.Dir(p.dir) == "/" {
+			return c, api.Errorf(api.CodeInvalid, "%s %q must be a clean absolute path at least two levels deep", p.key, p.dir)
+		}
+		for _, d := range []string{c.StateDir, c.ConfDir, c.WorkDir, c.MountBase, c.WireGuardDir} {
+			if d != "" && (within(d, p.dir) || within(p.dir, d)) {
+				return c, api.Errorf(api.CodeInvalid, "%s %q must not overlap %s: the daemon writes there, and the helper trusts what is in this directory", p.key, p.dir, d)
+			}
 		}
 	}
 	if c.WireGuardDir == "" {

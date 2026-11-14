@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"jailops.net/jailops/internal/ipam"
+	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
 	"jailops.net/jailops/sdk/api"
@@ -36,7 +37,7 @@ type hookEnv struct {
 	rctlStderr string
 }
 
-// newHookEnv lays out one jail "web" attached to network "lan" on bridge jo0.
+// newHookEnv lays out one jail "web" attached to network "lan".
 func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string, devices ...string) *hookEnv {
 	t.Helper()
 	e := newEnv(t)
@@ -58,22 +59,16 @@ func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string, devices ...string) *
 	rec, _ := json.Marshal(map[string]any{"version": 1, "metadata": api.ObjectMeta{Name: "web", Project: "alpha", UUID: hookUUID}, "spec": spec})
 	mustWrite(t, filepath.Join(mp, "spec.json"), string(rec))
 
-	nw := api.NetworkSpec{Bridge: "jo0", Uplink: "em0", MTU: 1400,
+	nw := api.NetworkSpec{Uplink: "em0", MTU: 1400,
 		IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200"},
-		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "fd00:20::/64", Gateway: "fd00:20::1", Range: "fd00:20::10-fd00:20::ff"}}
+		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "fd00:20::/64", Range: "fd00:20::10-fd00:20::ff"}}
 	doc, _ := json.Marshal(map[string]any{"apiVersion": "jailops/v1", "kind": "Network", "metadata": api.ObjectMeta{Name: "lan", UUID: "aaaa-1111-2222"}, "spec": nw})
 	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "aaaa-1111-2222.json"), string(doc))
 	// a second network with another name must not be picked
-	other, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "dmz", UUID: "bbbb-1111-2222"}, "spec": api.NetworkSpec{Bridge: "jo9"}})
+	other, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "dmz", UUID: "bbbb-1111-2222"}, "spec": api.NetworkSpec{Uplink: "em1"}})
 	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "bbbb-1111-2222.json"), string(other))
 
 	mustWrite(t, filepath.Join(e.cfg.ConfDir, "alpha_web.conf"), e.goodConf())
-	if err := e.net.BridgeCreate(ctx, "jo0"); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := e.net.EpairCreate(ctx, "jo0g"); err != nil { // the gateway pair, made by the reconcile loop
-		t.Fatal(err)
-	}
 	e.runner.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
 	e.runner.Add(run.Rule{Name: "rctl", Args: []string{run.RestArgs}, Fn: func(c run.Cmd) (run.Result, error) {
 		if h.rctlStderr != "" {
@@ -136,15 +131,11 @@ func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string, devices ...string) *
 	return h
 }
 
-func (h *hookEnv) ifaces() map[string][]string {
+func (h *hookEnv) ifaces() map[string]ifconfig.Iface {
 	list, _ := h.net.List(context.Background())
-	m := map[string][]string{}
+	m := map[string]ifconfig.Iface{}
 	for _, i := range list {
-		var mem []string
-		for _, x := range i.Members {
-			mem = append(mem, x.Name)
-		}
-		m[i.Name] = mem
+		m[i.Name] = i
 	}
 	return m
 }
@@ -163,6 +154,7 @@ func TestHookLifecycleFreeBSD(t *testing.T) {
 	h := newHookEnv(t, api.OSFreeBSD, "10.20.0.12", "fd00:20::12")
 	ctx := context.Background()
 	l := h.local
+	mustWrite(t, h.cfg.PFAnchorFile("alpha_web"), "pass in on "+h.host+" all\n")
 
 	if err := l.RunHook(ctx, PhasePreStart, "alpha_web"); err != nil {
 		t.Fatalf("prestart: %v", err)
@@ -174,24 +166,27 @@ func TestHookLifecycleFreeBSD(t *testing.T) {
 	if _, ok := ifs[h.jail]; !ok {
 		t.Fatalf("jail epair end %s missing before start", h.jail)
 	}
-	if len(ifs["jo0"]) != 1 || ifs["jo0"][0] != h.host {
-		t.Errorf("bridge members %v", ifs["jo0"])
+	he := ifs[h.host]
+	if he.Description != "jailops jail=alpha/web net=lan (host side)" || !he.Up() {
+		t.Errorf("host end %+v", he)
 	}
-	list, _ := h.net.List(ctx)
-	for _, i := range list {
-		if i.Name == h.host && (i.Description != "jailops jail=alpha/web net=lan (host side)" || !i.Up()) {
-			t.Errorf("host end %+v", i)
-		}
+	// the host end carries the network's gateway as a /32 and the link-local gateway, and the routes to the jail's
+	// addresses leave through it; the jail end is not given any
+	if got := fmt.Sprint(he.Inet, he.Inet6); got != "[10.20.0.1/32] [fe80::1/64]" {
+		t.Errorf("host end addresses: %s", got)
 	}
-	// the host holds permanent entries for the jail's addresses on the gateway interface before the jail starts
-	if nb := h.net.Neighbors(); len(nb) != 3 || nb["jo0gb fd00:20::12"] == "" || nb["jo0gb 10.20.0.12"] == "" {
-		t.Errorf("neighbor entries after prestart: %v", nb)
+	wantRoutes := []string{"-inet 10.20.0.12/32 -interface " + h.host, "-inet6 fd00:20::12/128 -interface " + h.host}
+	if got := h.net.Routes(); strings.Join(got, "|") != strings.Join(wantRoutes, "|") {
+		t.Errorf("routes %q, want %q", got, wantRoutes)
 	}
 	calls := h.ifconfigCalls()
-	if len(calls) != 6 || !strings.Contains(calls[0], h.host+" ether ") || !strings.Contains(calls[1], h.jail+" ether ") ||
-		calls[2] != h.host+" mtu 1400" || calls[3] != h.jail+" mtu 1400" ||
-		calls[4][:len("jo0 static "+h.host+" ")] != "jo0 static "+h.host+" " || calls[5] != "jo0gb staticarp" {
+	if len(calls) != 4 || !strings.Contains(calls[0], h.host+" ether ") || !strings.Contains(calls[1], h.jail+" ether ") ||
+		calls[2] != h.host+" mtu 1400" || calls[3] != h.jail+" mtu 1400" {
 		t.Errorf("ifconfig calls %q", calls)
+	}
+	// the jail's anchor is loaded before the jail starts, so that the whole of /etc/rc runs behind it
+	if h.pf.LoadCalls["jailops/alpha/web"] != 1 || h.pf.LoadCalls["jailops/alpha"] != 1 {
+		t.Errorf("anchor loads after prestart: %v", h.pf.LoadCalls)
 	}
 
 	// idempotent
@@ -199,24 +194,23 @@ func TestHookLifecycleFreeBSD(t *testing.T) {
 	if err := l.RunHook(ctx, PhasePreStart, "alpha_web"); err != nil {
 		t.Fatalf("second prestart: %v", err)
 	}
-	if got := h.ifaces(); len(got) != len(before) || len(got["jo0"]) != 1 {
+	if got := h.ifaces(); len(got) != len(before) || len(h.net.Routes()) != 2 {
 		t.Errorf("state changed on the second run: %v vs %v", got, before)
 	}
 
+	// the rendered anchor is left by the reconcile loop; prestart loads it
 	// the jail starts: jail.conf's vnet.interface moves the jail end
 	if err := h.jails.Create(ctx, filepath.Join(h.cfg.ConfDir, "alpha_web.conf"), "alpha_web"); err != nil {
 		t.Fatal(err)
 	}
-	// the rendered anchor is left by the reconcile loop
-	mustWrite(t, h.cfg.PFAnchorFile("alpha_web"), "pass in on "+h.host+" all\n")
 	if err := l.RunHook(ctx, PhasePostStart, "alpha_web"); err != nil {
 		t.Fatalf("poststart: %v", err)
 	}
 	if _, ok := h.ifaces()[h.jail]; ok {
 		t.Error("the jail end was not moved into the jail")
 	}
-	if h.pf.LoadCalls["jailops/alpha/web"] != 1 {
-		t.Errorf("anchor loads: %v", h.pf.LoadCalls)
+	if h.pf.LoadCalls["jailops/alpha/web"] != 2 {
+		t.Errorf("the anchor is loaded by prestart (twice here) and not again by poststart: %v", h.pf.LoadCalls)
 	}
 	for _, c := range h.jails.Calls() {
 		if c.Op == "exec" {
@@ -245,17 +239,11 @@ func TestHookLifecycleFreeBSD(t *testing.T) {
 	if _, ok := ifs[h.host]; ok {
 		t.Error("host epair end survived poststop")
 	}
-	if len(ifs["jo0"]) != 0 {
-		t.Errorf("bridge members after poststop: %v", ifs["jo0"])
-	}
-	if _, ok := ifs["jo0"]; !ok {
-		t.Error("poststop removed the bridge")
-	}
 	if a, _ := h.pf.Read(ctx, "jailops/alpha/web"); a != "" {
 		t.Errorf("anchor still loaded: %q", a)
 	}
-	if nb := h.net.Neighbors(); len(nb) != 0 {
-		t.Errorf("neighbor entries survived poststop: %v", nb)
+	if rt := h.net.Routes(); len(rt) != 0 {
+		t.Errorf("routes survived poststop: %q", rt)
 	}
 	if err := l.RunHook(ctx, PhasePostStop, "alpha_web"); err != nil {
 		t.Errorf("second poststop: %v", err)
@@ -336,17 +324,6 @@ func TestHookRefusals(t *testing.T) {
 	}
 	if err := l.RunHook(ctx, PhasePreStart, "ghost"); err == nil {
 		t.Error("a jail without a dataset")
-	}
-	// the bridge is the reconcile loop's job; the hook does not create it
-	if err := h.net.BridgeDestroy(ctx, "jo0"); err != nil {
-		t.Fatal(err)
-	}
-	before := len(h.ifaces())
-	if err := l.RunHook(ctx, PhasePreStart, "alpha_web"); !api.IsCode(err, api.CodeNotFound) {
-		t.Errorf("missing bridge: %v", err)
-	}
-	if len(h.ifaces()) != before {
-		t.Errorf("hook created interfaces without a bridge: %v", h.ifaces())
 	}
 }
 

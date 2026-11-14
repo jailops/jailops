@@ -158,6 +158,8 @@ type Deps struct {
 	JailMaxStates int
 	// UpdateTick is how often the update schedules are evaluated (default 1m).
 	UpdateTick time.Duration
+	// VolumeWatchTick is how often the mounts of watched volumes of host directories are looked at (default 15s).
+	VolumeWatchTick time.Duration
 	// AutoUpgradeZone is the time zone of the time of day of an image's automatic upgrade (default: the host's).
 	AutoUpgradeZone *time.Location
 	// AppsDir is the application catalog directory (default apps.DefaultDir);
@@ -173,8 +175,6 @@ type Deps struct {
 	// DialJail opens a connection from the host to a jail (the tcp and http
 	// health checks of an app installation); nil uses the network.
 	DialJail func(ctx context.Context, network, address string) (net.Conn, error)
-	// NetSysctl overrides NetSysctlDefaults (network.sysctl of jailopsd.yaml).
-	NetSysctl map[string]string
 	// Persistent replaces lifecycle.DefaultPersistent (nil keeps it).
 	Persistent []lifecycle.PersistentPath
 	// ServerFingerprint is the pin of the server certificate; trust tokens
@@ -210,7 +210,9 @@ type Service struct {
 	// racctAt and racctVal keep the last answer of the kern.racct.enable sysctl (see racctOn); guarded by mu.
 	racctAt   time.Time
 	racctVal  bool
-	devdState devdHolder // the reader of devd's notifications (devd.go)
+	devdState devdHolder    // the reader of devd's notifications (devd.go)
+	pipes     pipeTable     // the dummynet pipe number of every limited direction (shaping.go)
+	hostAddr  hostAddrCache // the host's own addresses (hostaddrs.go)
 	d         Deps
 	log       *slog.Logger
 	now       func() time.Time
@@ -257,6 +259,8 @@ type Service struct {
 	profKind kindStore[api.ProfileSpec]
 	wgKind   kindStore[api.WireGuardSpec]
 	fwdKind  kindStore[api.LogForwardSpec]
+	volKind  kindStore[api.VolumeSpec]
+	hostDirs hostDirWatch
 
 	// fwd forwards logs; fwdMu serialises changes of its sink list.
 	fwd      *logfwd.Forwarder
@@ -381,6 +385,7 @@ func New(d Deps) (*Service, error) {
 	s.profKind = newProjectKindStore[api.ProfileSpec](s, api.KindProfile, api.ScopeFleet, "profile", "/api/v1/profiles")
 	s.wgKind = newKindStore[api.WireGuardSpec](s, api.KindWireGuard, api.ScopeFleet, "wireguard", "/api/v1/wireguard")
 	s.fwdKind = newKindStore[api.LogForwardSpec](s, api.KindLogForward, api.ScopeHost, "log-forward", "/api/v1/logs/forward")
+	s.volKind = newProjectKindStore[api.VolumeSpec](s, api.KindVolume, api.ScopeHost, "volume", "/api/v1/volumes")
 	s.fwd = s.newForwarder()
 	s.locks = newLockSet()
 	s.events = newEventBus(d.DB, d.HostUUID)
@@ -395,11 +400,11 @@ func New(d Deps) (*Service, error) {
 		s.nx = &reconcile.NetExec{Net: d.Net, PF: d.PF, Run: d.Run, Sysctl: d.Sysctl}
 	}
 	s.planExec = &plan.Executor{Journal: s.journal, OnEvent: s.ops.planEvent}
-	s.lcfg = lifecycle.Config{Root: d.Root, MountBase: d.MountBase, Locate: s.locate, Storages: s.lifecycleStorages, Persistent: d.Persistent}
+	s.lcfg = lifecycle.Config{Root: d.Root, MountBase: d.MountBase, Locate: s.locate, Storages: s.lifecycleStorages, Persistent: d.Persistent, Attached: s.attachedVolumes}
 	if d.ZFS != nil {
 		lc := d.Lifecycle
 		lc.Root, lc.MountBase = d.Root, d.MountBase
-		lc.Locate, lc.Storages = s.locate, s.lifecycleStorages
+		lc.Locate, lc.Storages, lc.Attached = s.locate, s.lifecycleStorages, s.attachedVolumes
 		if lc.Now == nil {
 			lc.Now = d.Now
 		}
@@ -442,6 +447,8 @@ func (s *Service) Start(ctx context.Context) error {
 		go func() { defer s.wg.Done(); s.updateLoop(s.baseCtx) }()
 		s.wg.Add(1)
 		go func() { defer s.wg.Done(); s.imageAutoLoop(s.baseCtx) }()
+		s.wg.Add(1)
+		go func() { defer s.wg.Done(); s.hostDirLoop(s.baseCtx) }()
 	}
 	return nil
 }

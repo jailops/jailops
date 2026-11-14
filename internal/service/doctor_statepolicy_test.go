@@ -27,8 +27,8 @@ func (l loadedRules) Run(ctx context.Context, c run.Cmd) (run.Result, error) {
 	return l.Runner.Run(ctx, c)
 }
 
-// doctor (pf.state-policy) warns about a host whose loaded ruleset blocks by default while jails are routed through it
-// and whose pf.conf (the one rc.conf names) does not bind states to interfaces; it cannot tell without that file.
+// doctor (pf.state-policy) fails a host whose pf.conf (the one rc.conf names) does not bind states to interfaces while
+// jails exist, whatever the loaded ruleset says; it cannot tell without that file.
 func TestDoctorStatePolicy(t *testing.T) {
 	e := dtest.New(t, dtest.Options{Clients: func(c *daemon.Clients) {
 		c.Runner = loadedRules{c.Runner, "scrub in all fragment reassemble\nblock drop log all\n" + `anchor "jailops/*" all` + "\npass out all flags S/SA keep state"}
@@ -53,7 +53,7 @@ func TestDoctorStatePolicy(t *testing.T) {
 		return api.DoctorCheck{}
 	}
 	write("pf.conf", "# set state-policy if-bound\nblock log all\n")
-	if c := check(); c.Status != api.DoctorWarn || !strings.Contains(c.Hint, "set state-policy if-bound") ||
+	if c := check(); c.Status != api.DoctorFail || !strings.Contains(c.Hint, "set state-policy if-bound") ||
 		!strings.Contains(c.Hint, "pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf") || !strings.Contains(c.Hint, "never `service pf restart`") {
 		t.Fatalf("%+v", c)
 	}
@@ -66,7 +66,7 @@ func TestDoctorStatePolicy(t *testing.T) {
 		t.Fatalf("the file rc.conf names, missing: %+v", c)
 	}
 	write("pf.jails.conf", "block log all\n")
-	if c := check(); c.Status != api.DoctorWarn || !strings.Contains(c.Hint, "pfctl -nf /etc/pf.jails.conf") {
+	if c := check(); c.Status != api.DoctorFail || !strings.Contains(c.Hint, "pfctl -nf /etc/pf.jails.conf") {
 		t.Fatalf("%+v", c)
 	}
 }
@@ -106,7 +106,7 @@ func TestDoctorStatePolicyUnreadablePFConf(t *testing.T) {
 		t.Fatalf("with the line, read by the helper: %+v", c)
 	}
 	write("set skip on lo0\n# set state-policy if-bound\nblock log all\n")
-	if c := check(); c.Status != api.DoctorWarn || !strings.Contains(c.Hint, "set state-policy if-bound") {
+	if c := check(); c.Status != api.DoctorFail || !strings.Contains(c.Hint, "set state-policy if-bound") {
 		t.Fatalf("without the line: %+v", c)
 	}
 }

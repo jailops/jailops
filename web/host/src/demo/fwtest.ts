@@ -128,7 +128,7 @@ function hop(side: 'source' | 'destination', jail: Jail, dir: 'in' | 'out', pkt:
     pf: line({ action: c.rule.action, dir: gw ? 'out' : 'in', proto: c.rule.proto, port: c.rule.ports?.join(','), from: c.rule.from?.join(', ') || 'any', to: c.rule.to?.join(', ') || (gw ? plainAddr(pkt.dst) : 'any'), fam: pkt.fam, gw }),
   })
   const skipped: FirewallTestSkipped[] = all.filter((c) => c.rule.disabled && matches(c)).map((c) => ({ rule: toRule(c), why: 'the rule is switched off' }))
-  const base = { side, jail: jail.metadata.name, anchor: `jailops/web/${jail.metadata.name}`, interface: gw ? 'gateway' : 'epair', direction: gw ? 'out' : 'in', loaded_matches_rendered: 'true' }
+  const base = { side, jail: jail.metadata.name, anchor: `jailops/web/${jail.metadata.name}`, direction: gw ? 'out' : 'in', loaded_matches_rendered: 'true' }
   const hit = denies.find(matches)
   if (hit) {
     const also = allows.filter(matches).map((c): FirewallTestSkipped => ({ rule: toRule(c), why: 'a deny rule wins over every allow rule, whatever the order of the policies' }))

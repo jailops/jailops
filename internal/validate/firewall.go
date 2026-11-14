@@ -213,10 +213,12 @@ const (
 	EndpointSet
 	EndpointTag
 	EndpointJail
+	// EndpointHost is the host itself: its own addresses.
+	EndpointHost
 )
 
 // ReferenceKinds names the kinds of a reference, as they are written before the colon.
-const ReferenceKinds = "jail:NAME, set:NAME or tag:NAME"
+const ReferenceKinds = "host, jail:NAME, set:NAME or tag:NAME"
 
 // ParseEndpoint classifies a from/to entry: "any", an address or CIDR, "jail:<name>" (a jail of the project),
 // "set:<name>" (an address set of the project) or "tag:<tag>" (the jails of the project with that firewall tag). For
@@ -225,6 +227,8 @@ func ParseEndpoint(s string) (kind EndpointKind, value string, err error) {
 	switch {
 	case s == "any":
 		return EndpointAny, "any", nil
+	case s == "host":
+		return EndpointHost, "host", nil
 	case strings.HasPrefix(s, "@"):
 		n := strings.TrimPrefix(s, "@")
 		return 0, "", fmt.Errorf("%q: @ is not used: write jail:%s, set:%s or tag:%s", s, n, n, n)

@@ -125,6 +125,37 @@ func TestTablesAndFlush(t *testing.T) {
 	}
 }
 
+// The dry run prints the adaptive timeouts that pf derives from a state limit; the readback of the loaded rule prints
+// them on 15.2 and leaves them out on 15.1. Both are the same rule.
+func TestLoadAcceptsTheAdaptiveTimeoutsInEitherOutput(t *testing.T) {
+	withAdaptive := "pass out quick on jo0 all flags S/SA keep state (max 10000, adaptive.start 6000, adaptive.end 12000) label \"jo-1\"\n"
+	without := "pass out quick on jo0 all flags S/SA keep state (max 10000) label \"jo-1\"\n"
+	for name, tc := range map[string][2]string{"15.1": {withAdaptive, without}, "15.2": {withAdaptive, withAdaptive}, "reverse": {without, withAdaptive}} {
+		f := run.NewFake()
+		f.On("pfctl", []string{"-n", run.RestArgs}, tc[0])
+		f.On("pfctl", []string{"-a", "jailops/web", "-f", "-"}, "")
+		f.On("pfctl", []string{"-a", "jailops/web", "-sr"}, tc[1])
+		if err := NewCommand(f).Load(context.Background(), "jailops/web", "x"); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	if got := RuleLines(withAdaptive); len(got) != 1 || strings.Contains(got[0], "adaptive") {
+		t.Errorf("%q", got)
+	}
+}
+
+// A real difference is named in the error: the first rule the two sides do not share.
+func TestLoadMismatchNamesTheFirstDifference(t *testing.T) {
+	f := run.NewFake()
+	f.On("pfctl", []string{"-n", run.RestArgs}, "pass in all\nblock drop all\n")
+	f.On("pfctl", []string{"-a", "jailops/web", "-f", "-"}, "")
+	f.On("pfctl", []string{"-a", "jailops/web", "-sr"}, "pass in all\nblock all\n")
+	err := NewCommand(f).Load(context.Background(), "jailops/web", "x")
+	if err == nil || !strings.Contains(err.Error(), `expected "block drop all", read back "block all"`) {
+		t.Fatalf("%v", err)
+	}
+}
+
 func TestRuleLines(t *testing.T) {
 	got := RuleLines("# c\nset skip on lo\ntable <a> { 1.1.1.1 }\n  pass   in  all \nblock\tdrop all\nNo ALTQ support in kernel\n")
 	want := []string{"block drop all", "pass in all"}

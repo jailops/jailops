@@ -7,9 +7,9 @@ import { clone } from './clone'
 export interface NetForm {
   name: string; uplink: string
   v4: boolean; v4subnet: string; v4gateway: string; v4range: string; nat: boolean
-  mode: 'none' | 'routed' | 'proxy'; v6subnet: string; v6gateway: string; v6range: string
+  mode: 'none' | 'routed' | 'proxy'; v6subnet: string; v6range: string
 }
-export const blankNet = (): NetForm => ({ name: '', uplink: '', v4: true, v4subnet: '', v4gateway: '', v4range: '', nat: false, mode: 'none', v6subnet: '', v6gateway: '', v6range: '' })
+export const blankNet = (): NetForm => ({ name: '', uplink: '', v4: true, v4subnet: '', v4gateway: '', v4range: '', nat: false, mode: 'none', v6subnet: '', v6range: '' })
 
 function v4int(a: string): number | null {
   const p = a.trim().split('.')
@@ -63,10 +63,8 @@ export function checkNet(f: NetForm, existing = false): Record<string, string> {
   }
   if (f.mode !== 'none') {
     if (f.v6subnet && !isV6Cidr(f.v6subnet)) e.v6subnet = 'Write the prefix as an IPv6 CIDR, for example 2001:db8:20::/64.'
-    if (f.v6gateway && !f.v6gateway.includes(':')) e.v6gateway = 'Not an IPv6 address.'
     if (f.v6range && !/^[0-9a-fA-F:]+-[0-9a-fA-F:]+$/.test(f.v6range.trim())) e.v6range = 'Write the range as first-last.'
     if (f.mode === 'proxy' && !f.uplink) e.uplink = 'Proxy mode answers neighbour discovery on an uplink: name it.'
-    if (f.mode === 'proxy' && f.v6gateway && !/^fe80:/i.test(f.v6gateway.trim())) e.v6gateway = 'In proxy mode the gateway is the bridge\'s link-local address, for example fe80::1.'
   }
   if (!f.v4 && f.mode === 'none') e.family = 'A network needs IPv4, IPv6, or both.'
   return e
@@ -79,12 +77,12 @@ export function formOf(n: Network): NetForm {
   return {
     name: n.metadata.name, uplink: n.spec.uplink ?? '',
     v4: !!v4, v4subnet: v4?.subnet ?? '', v4gateway: v4?.gateway ?? '', v4range: v4?.range ?? '', nat: !!v4?.nat,
-    mode: (v6?.mode as NetForm['mode']) ?? 'none', v6subnet: v6?.subnet ?? '', v6gateway: v6?.gateway ?? '', v6range: v6?.range ?? '',
+    mode: (v6?.mode as NetForm['mode']) ?? 'none', v6subnet: v6?.subnet ?? '', v6range: v6?.range ?? '',
   }
 }
 
-/** The body of POST /networks, or of PUT for an edit: base keeps what the form does not show (bridge, DNS, MTU,
- *  exclusions, privacy). */
+/** The body of POST /networks, or of PUT for an edit: base keeps what the form does not show (DNS, MTU,
+ *  exclusions). */
 export function netBody(f: NetForm, base?: Network): Pick<Network, 'metadata' | 'spec'> {
   const spec: Network['spec'] = base ? clone(base.spec) : {}
   delete spec.uplink
@@ -92,6 +90,6 @@ export function netBody(f: NetForm, base?: Network): Pick<Network, 'metadata' | 
   delete spec.ipv6
   if (f.uplink.trim()) spec.uplink = f.uplink.trim()
   if (f.v4) spec.ipv4 = { ...(base?.spec.ipv4?.exclude?.length ? { exclude: base.spec.ipv4.exclude } : {}), subnet: f.v4subnet.trim(), gateway: f.v4gateway.trim(), range: f.v4range.trim(), ...(f.nat ? { nat: true } : {}) }
-  if (f.mode !== 'none') spec.ipv6 = { mode: f.mode, subnet: f.v6subnet.trim(), gateway: f.v6gateway.trim(), range: f.v6range.trim() }
+  if (f.mode !== 'none') spec.ipv6 = { mode: f.mode, subnet: f.v6subnet.trim(), range: f.v6range.trim() }
   return { metadata: base ? { ...base.metadata } : { name: f.name }, spec }
 }

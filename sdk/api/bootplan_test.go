@@ -78,7 +78,7 @@ func TestPlanBootLockedJailAndItsDependents(t *testing.T) {
 	for _, s := range p.NotStarted {
 		why[s.Jail] = s.Reason
 	}
-	if !strings.Contains(why["vault"], "jailops jail unlock vault") || !strings.Contains(why["report"], "depends on vault") {
+	if !strings.Contains(why["vault"], "jailops volume unlock VOLUME") || !strings.Contains(why["report"], "depends on vault") {
 		t.Fatalf("%+v", p.NotStarted)
 	}
 }

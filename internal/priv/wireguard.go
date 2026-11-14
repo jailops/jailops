@@ -481,10 +481,14 @@ func (l *Local) WGApply(ctx context.Context, q wireguard.ApplyReq) (wireguard.Ap
 	}
 	created := false
 	if !exists {
-		if err := wgWrite(r, wgIfaceFile, []byte(q.Iface+"\n")); err != nil {
+		// The record is written after the interface exists: a failed create must not leave a record that claims an
+		// interface of that name which somebody else makes later. (A record that cannot be written takes the
+		// interface down again.)
+		if err := t.Create(ctx, q.Iface); err != nil {
 			return res, err
 		}
-		if err := t.Create(ctx, q.Iface); err != nil {
+		if err := wgWrite(r, wgIfaceFile, []byte(q.Iface+"\n")); err != nil {
+			_ = t.Destroy(ctx, q.Iface)
 			return res, err
 		}
 		created = true

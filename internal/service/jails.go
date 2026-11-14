@@ -317,21 +317,10 @@ func (s *Service) imageLocks(ctx context.Context, ref validate.ImageRef, storage
 // result is the Jail. Grants, the image allow-list and the quotas are checked
 // before anything is created.
 func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, error) {
-	return s.CreateJailWith(ctx, api.JailCreate{Metadata: j.Metadata, Spec: j.Spec})
-}
-
-// CreateJailWith is CreateJail with the passphrase of the jail's encrypted volumes. The passphrase is handed to
-// the creation step and dropped; the operation, its journal and the jail never hold it.
-func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Operation, error) {
-	j := api.Jail{Metadata: in.Metadata, Spec: in.Spec}
 	if err := s.requireHost("jails"); err != nil {
 		return api.Operation{}, err
 	}
 	j.Spec.Shell = api.ShellPath(j.Spec.Shell) // the names bash and sh
-	pass, err := s.creationPassphrase(j.Spec, in.VolumePassphrase)
-	if err != nil {
-		return api.Operation{}, err
-	}
 	p, err := s.access(ctx)
 	if err != nil {
 		return api.Operation{}, err
@@ -375,10 +364,13 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 	if err := s.validateJail(proj, name, spec); err != nil {
 		return api.Operation{}, err
 	}
-	if err := canonicalJailSizes(&spec, true); err != nil {
+	if err := canonicalJailSizes(&spec); err != nil {
 		return api.Operation{}, err
 	}
 	if err := s.checkNewJail(proj, name, spec); err != nil {
+		return api.Operation{}, err
+	}
+	if spec.Volumes, err = s.checkAttachments(proj, key, spec.Volumes); err != nil {
 		return api.Operation{}, err
 	}
 	spec.OS = im.Spec.OS
@@ -424,9 +416,7 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 			if err := h.Bind("create/"+key, &opRequest{Kind: "create", Jail: key, Create: &nj}); err != nil {
 				return nil, err
 			}
-			_, err := s.life.CreateJailKeyed(ctx, nj, false, pass)
-			wipe(pass)
-			if err != nil {
+			if _, err := s.life.CreateJail(ctx, nj, false); err != nil {
 				return nil, err
 			}
 			if shellSetup {
@@ -444,8 +434,6 @@ func (s *Service) CreateJailWith(ctx context.Context, in api.JailCreate) (api.Op
 	})
 	if err == nil {
 		submitted = true
-	} else {
-		wipe(pass)
 	}
 	return op, err
 }
@@ -526,7 +514,7 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	if err := s.validateJail(p.Meta.Name, name, spec); err != nil {
 		return api.Jail{}, err
 	}
-	if err := canonicalJailSizes(&spec, false); err != nil {
+	if err := canonicalJailSizes(&spec); err != nil {
 		return api.Jail{}, err
 	}
 	oref, _ := validate.ParseImageRef(old.Spec.Image)
@@ -543,12 +531,10 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	case spec.OS == api.OSLinux && spec.Prompt != "":
 		return api.Jail{}, invalid("the prompt key is for FreeBSD jails; a Linux jail keeps the prompt of its distribution")
 	}
-	if v, changed := encryptionChanged(spec.Volumes, old.Spec.Volumes); changed {
-		return api.Jail{}, invalid("the encryption of volume %q cannot change", v).
-			WithHint("a volume is encrypted when it is created: create a new jail with --volume NAME:MOUNT:encrypted and copy the data into it")
-	}
 	if !volumesEqual(spec.Volumes, old.Spec.Volumes) {
-		return api.Jail{}, api.Errorf(api.CodeUnsupported, "changing volumes of an existing jail is not implemented")
+		if spec.Volumes, err = s.attachmentsChanged(ctx, p.Meta.Name, key, spec.Volumes); err != nil {
+			return api.Jail{}, err
+		}
 	}
 	oldSpec := old.Spec
 	if _, err := s.admit(ctx, p, key, &spec, &oldSpec); err != nil {
@@ -627,21 +613,7 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	return s.getByKey(ctx, key)
 }
 
-// encryptionChanged names a volume whose encryption a new spec changes.
-func encryptionChanged(spec, old []api.VolumeMount) (string, bool) {
-	was := map[string]bool{}
-	for _, v := range old {
-		was[v.Name] = v.Encrypted
-	}
-	for _, v := range spec {
-		if e, ok := was[v.Name]; ok && e != v.Encrypted {
-			return v.Name, true
-		}
-	}
-	return "", false
-}
-
-func volumesEqual(a, b []api.VolumeMount) bool {
+func volumesEqual(a, b []api.VolumeAttach) bool {
 	return jsonEq(a, b) || (len(a) == 0 && len(b) == 0)
 }
 
@@ -1137,6 +1109,9 @@ func (s *Service) CopyJail(ctx context.Context, src string, dst api.Jail) (api.O
 		return api.Operation{}, api.Errorf(api.CodeAlreadyExists, "jail %q already exists", name)
 	}
 	cspec := j.Spec
+	// A copy attaches no volume: a volume belongs to the jails it is attached to, and two jails writing one by
+	// accident is not what a copy is for.
+	cspec.Volumes = nil
 	cspec.Network = append([]api.NetworkAttach(nil), cspec.Network...)
 	for i := range cspec.Network {
 		if cspec.Network[i].IPv4 != "none" && cspec.Network[i].IPv4 != "" {

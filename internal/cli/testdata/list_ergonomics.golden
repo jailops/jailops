@@ -50,9 +50,9 @@ db,"10.20.0.11,10.94.0.2,2001:db8:1:2:100::10"
 web,10.20.0.10
 
 $ jailops network list -o csv
-NAME,BRIDGE,IPV4,GATEWAY,RANGE,USED,FREE,UPLINK
-lan,-,10.20.0.0/24,10.20.0.1,10.20.0.10-10.20.0.20,2,9,em0
-sw,-,10.94.0.0/24,10.94.0.1,10.94.0.2-10.94.0.254,2,251,em0
+NAME,IPV4,GATEWAY,RANGE,USED,FREE,UPLINK
+lan,10.20.0.0/24,10.20.0.1,10.20.0.10-10.20.0.20,2,9,em0
+sw,10.94.0.0/24,10.94.0.1,10.94.0.2-10.94.0.254,2,251,em0
 
 $ jailops jail show web -o csv
 ! usage: -o csv is not available for this command

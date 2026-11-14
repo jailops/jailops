@@ -51,7 +51,7 @@ func (r *Reconciler) bootPass(ctx context.Context, des Desired, obs *Observed, r
 			failed[name] = true
 			if api.IsCode(err, api.CodeLocked) {
 				// Not a failure: the jail waits for the passphrase of an encrypted volume and starts after its unlock.
-				r.setBootCond(name, cond(CondBoot, false, "Locked", "waiting for the passphrase of an encrypted volume (jailops jail unlock)", now))
+				r.setBootCond(name, cond(CondBoot, false, "Locked", "waiting for the passphrase of an encrypted volume (jailops volume unlock)", now))
 				continue
 			}
 			rep.Failures["jail/"+name] = err.Error()

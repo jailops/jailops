@@ -11,9 +11,9 @@ $ jailops network create short
 [exit 2]
 
 $ jailops network list
-NAME   BRIDGE   IPV4           GATEWAY     RANGE                   USED   FREE   UPLINK
-dmz    -        10.30.0.0/24   10.30.0.1   10.30.0.10-10.30.0.12   0      3      em1
-lan    -        10.20.0.0/24   10.20.0.1   10.20.0.10-10.20.0.20   0      11     em0
+NAME   IPV4           GATEWAY     RANGE                   USED   FREE   UPLINK
+dmz    10.30.0.0/24   10.30.0.1   10.30.0.10-10.30.0.12   0      3      em1
+lan    10.20.0.0/24   10.20.0.1   10.20.0.10-10.20.0.20   0      11     em0
 
 $ jailops network grant dmz --project main
 network/dmz granted to project main
@@ -102,7 +102,6 @@ network/viafile updated
 
 $ jailops network show viafile
 Network viafile
-  Bridge:     generated (down)
   Uplink:     none
   IPv4:       10.40.0.0/24, gateway 10.40.0.1
   IPv4 range: 10.40.0.5-10.40.0.30
@@ -131,7 +130,6 @@ spec:
   ipv6:
     mode: proxy
     subnet: 2001:db8:1:2:100::/80
-    gateway: fe80::1
     range: 2001:db8:1:2:100::10-2001:db8:1:2:100:0:1:e
 status:
   free: 253

@@ -18,7 +18,7 @@ func TestRegistryIsConsistent(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"limits.memory", "limits.cpu", "limits.pids", "boot.autostart", "boot.priority", "boot.depends", "image", "hostname",
-		"update.strategy", "update.window", "firewall.policies", "nic.<device>.mtu", "nic.<device>.network", "disk.<device>.quota", "devfs.<name>.device", "proxy.<name>.listen", "env.<var>", "profiles"} {
+		"update.strategy", "update.window", "firewall.policies", "nic.<device>.mtu", "nic.<device>.network", "devfs.<name>.device", "proxy.<name>.listen", "env.<var>", "profiles"} {
 		if !seen[want] {
 			t.Errorf("missing key %s", want)
 		}
@@ -35,7 +35,7 @@ func TestApplyConfigSetsAndReportsRestarts(t *testing.T) {
 	restart, err := ApplyConfig(&s, map[string]string{
 		"limits.memory": "2G", "limits.cpu": "2", "boot.autostart": "true", "boot.depends": "db, cache",
 		"nic.eth0.network": "lan", "nic.eth0.ipv4": "auto", "nic.eth0.mtu": "1400", "nic.eth1.network": "dmz",
-		"disk.data.mount": "/var/db", "disk.data.quota": "5G", "disk.data.read_only": "yes",
+		"disk.data.mount": "/var/db", "disk.data.read_only": "yes",
 		"devfs.t.device": "tun", "proxy.web.listen": ":8080", "proxy.web.jail_port": "80", "env.TZ": "UTC",
 		"firewall.policies": "web, ssh-office", "update.strategy": "rebase",
 	}, nil)
@@ -51,14 +51,14 @@ func TestApplyConfigSetsAndReportsRestarts(t *testing.T) {
 	if len(s.Network) != 2 || s.Network[0].Name != "eth0" || s.Network[0].MTU != 1400 || s.Network[1].Name != "eth1" || s.Network[1].Network != "dmz" {
 		t.Fatalf("%+v", s.Network)
 	}
-	if len(s.Volumes) != 1 || s.Volumes[0].Quota != "5G" || !s.Volumes[0].ReadOnly || s.Volumes[0].Mount != "/var/db" {
+	if len(s.Volumes) != 1 || !s.Volumes[0].ReadOnly || s.Volumes[0].Mount != "/var/db" {
 		t.Fatalf("%+v", s.Volumes)
 	}
 	if len(s.Devfs) != 1 || s.Devfs[0].Device != "tun" || len(s.Proxy) != 1 || s.Proxy[0].JailPort != 80 || s.Env["TZ"] != "UTC" {
 		t.Fatalf("%+v", s)
 	}
 	// Boot and firewall changes are live; limits, devices and environment need a restart.
-	want := []string{"devfs.t.device", "disk.data.mount", "disk.data.quota", "disk.data.read_only", "env.TZ", "limits.cpu", "limits.memory",
+	want := []string{"devfs.t.device", "disk.data.mount", "disk.data.read_only", "env.TZ", "limits.cpu", "limits.memory",
 		"nic.eth0.ipv4", "nic.eth0.mtu", "nic.eth0.network", "nic.eth1.network"}
 	if !reflect.DeepEqual(restart, want) {
 		t.Fatalf("restart:\n got %v\nwant %v", restart, want)
@@ -75,7 +75,7 @@ func TestApplyConfigSetsAndReportsRestarts(t *testing.T) {
 }
 
 func TestApplyConfigUnsetAndDevices(t *testing.T) {
-	s := JailSpec{Network: []NetworkAttach{{Network: "lan", IPv4: "auto"}, {Network: "dmz"}}, Resources: Resources{Memory: "1G"}, Volumes: []VolumeMount{{Name: "data", Mount: "/d"}}}
+	s := JailSpec{Network: []NetworkAttach{{Network: "lan", IPv4: "auto"}, {Network: "dmz"}}, Resources: Resources{Memory: "1G"}, Volumes: []VolumeAttach{{Name: "data", Mount: "/d"}}}
 	restart, err := ApplyConfig(&s, nil, []string{"limits.memory", "nic.eth1", "disk.data"})
 	if err != nil {
 		t.Fatal(err)

@@ -5,7 +5,7 @@ metadata:
 spec:
   hosts: [web1, web2]
   networks:
-    - {network: br-db}
+    - {network: db}
   storage:
     - {storage: fast, quota: 500G}
   quotas: {jails: 4}

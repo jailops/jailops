@@ -120,7 +120,7 @@ func printFirewallTest(a *app, res api.FirewallTestResult) {
 			if h.Side == "source" {
 				side = "out of"
 			}
-			fprintf(w, "  %s %s (%s, %s %s): %s", side, h.Jail, h.Anchor, h.Interface, h.Direction, strings.ToUpper(h.Verdict))
+			fprintf(w, "  %s %s (%s, %s): %s", side, h.Jail, h.Anchor, h.Direction, strings.ToUpper(h.Verdict))
 			switch {
 			case h.DecidedBy != nil:
 				fprintf(w, " by %s\n", describeRule(h.DecidedBy))

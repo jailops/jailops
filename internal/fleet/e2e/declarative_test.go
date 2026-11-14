@@ -69,7 +69,6 @@ spec:
   ipv6:
     mode: proxy
     subnet: "2001:db8:1:2:100::/80"
-    gateway: "fe80::1"
     range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ffff"
   dns: [1.1.1.1, 2606:4700:4700::1111]
 `)
@@ -82,7 +81,6 @@ spec:
   ipv6:
     mode: routed
     subnet: "2001:db8:abcd:1:1::/80"
-    gateway: "2001:db8:abcd:1:1::1"
     range: "2001:db8:abcd:1:1::10-2001:db8:abcd:1:1::ffff"
 `)
 	e.Write("shared/backup-targets/vault.yaml", "apiVersion: jailops/v1\nkind: BackupTarget\nmetadata:\n  name: vault\nspec:\n  kind: node\n  address: https://backup.example.test:8444\n  fingerprint: aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899\n")
@@ -90,6 +88,7 @@ spec:
 	e.Write("projects/p/firewall-policies/floor.yaml", "apiVersion: jailops/v1\nkind: FirewallPolicy\nmetadata:\n  name: floor\nspec:\n  default_in: deny\n  default_out: allow\n")
 	e.Write("projects/p/address-sets/admins.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: admins\nspec:\n  addresses: [{address: 203.0.113.7}, {address: \"2001:db8:ffff::/48\"}]\n")
 	e.Write("projects/p/backup-policies/nightly.yaml", "apiVersion: jailops/v1\nkind: BackupPolicy\nmetadata:\n  name: nightly\nspec:\n  selector: {backup: nightly}\n  targets: [vault]\n  schedule: \"17 2 * * *\"\n  retention: {daily: 7, weekly: 4, monthly: 6}\n  verify_schedule: \"30 4 * * 0\"\n  verify_mode: deep\n")
+	e.Write("projects/p/volumes/data.yaml", "apiVersion: jailops/v1\nkind: Volume\nhosts: [h1]\nmetadata:\n  name: data\nspec:\n  storage: bulk\n  size: 1T\n  uid: 770\n  gid: 770\n  mode: \"0700\"\n")
 	e.Write("projects/p/jails/db.yaml", `apiVersion: jailops/v1
 kind: Jail
 hosts: [h1]
@@ -103,7 +102,7 @@ spec:
   network: [{network: proxy, ipv4: auto, ipv6: "2001:db8:1:2:100::80"}]
   resources: {cpu: 2, memory: 4G, pids: 500}
   volumes:
-    - {name: data, mount: /var/db/postgres, quota: 1T}
+    - {volume: data, mount: /var/db/postgres}
   host_mounts:
     - {source: /tank/archive, target: /mnt/archive, read_only: true}
 `)
@@ -119,12 +118,17 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n.Spec.IPv6 == nil || n.Spec.IPv6.Mode != api.IPv6Proxy || n.Spec.IPv6.Gateway != "fe80::1" || n.Metadata.ManagedBy != "sync:all" {
+	if n.Spec.IPv6 == nil || n.Spec.IPv6.Mode != api.IPv6Proxy || n.Metadata.ManagedBy != "sync:all" {
 		t.Fatalf("%+v", n.Spec.IPv6)
 	}
 	j := getJailIn(t, e, "p", "db")
 	if len(j.Spec.HostMounts) != 1 || len(j.Spec.Volumes) != 1 || j.Spec.Network[0].IPv6 != "2001:db8:1:2:100::80" {
 		t.Fatalf("%+v", j.Spec)
+	}
+	// the volume is made before the jail that attaches it, with the owner and the mode of the file
+	v, err := c.Project("p").Volumes().Get(context.Background(), "data")
+	if err != nil || v.Spec.UID != 770 || v.Spec.Mode != "0700" || v.Spec.Size != "1T" || v.Metadata.ManagedBy != "sync:all" {
+		t.Fatalf("%+v %v", v, err)
 	}
 	if !strings.Contains(r.out, "in sync") && !strings.Contains(r.out, "unchanged") {
 		t.Fatalf("%s", r.out)
