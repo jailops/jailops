@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- **A jail can ask for more time to shut down.** `boot.stop_timeout` (`jailops config set db boot.stop_timeout 60`, or
+  `--stop-timeout 60` when the jail is made) is the number of seconds a jail has after its stop command before it is
+  killed, from 1 to 3600; unset is the ten seconds of jail(8). It is written as `stop.timeout` into the jail's
+  configuration at its next start. `jailops stop`, `restart`, `stop-all` and the stop at shutdown wait as long as the
+  jail asks: the helper's own limit for `jail -r` is two minutes plus the jail's timeout. `jailops_shutdown_timeout`
+  has to cover the jails together.
+
 - **Volumes can be directories of the host.** `jailops volume create NAME --path /mnt/storagebox/backups` makes a volume of
   a mount the host operator allows with `admin-host-mount` (the mount point has to lie below that directory: list `/mnt`, not
   the box). Only a global administrator makes or attaches one. There is no dataset: no snapshots, size, encryption or
@@ -26,6 +33,12 @@
   A project name now only prefixes the OS name of its jails. Rules of a jail's anchor stand on the host end of its own
   link only, with `keep state (if-bound)` on every pass rule, and the anchor of a jail is loaded before the jail's first
   process runs. See [docs/networking.md](docs/networking.md).
+
+- **The IPv6 proxy limits the solicitations it looks at.** One hardware address may send 50 neighbor solicitations a second
+  (a burst of 100) and all together 2000 a second (a burst of 4000); the rest are dropped without an answer, so a neighbor on the
+  uplink that floods it cannot use the host's time or the budget the upstream router needs. The numbers are fixed. The drops are
+  counted and logged at most once a minute, `jailops doctor` warns (`network.ndproxy`) with the count of the last hour, and the
+  network has an `NDPFlood` condition while there are some.
 
 - **IPv6 proxy mode needs no `priv.conf` line.** When an administrator creates a network in proxy mode, the helper accepts
   its prefix itself: between /48 and /120, global or unique-local, no address of the host inside it, no overlap with another

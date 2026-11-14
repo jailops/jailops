@@ -55,6 +55,9 @@ type JailConfInput struct {
 	// security.jail.env (EnvScript); the keys are prefixed because any tool may write that buffer. A value that is
 	// empty has no parameter.
 	Where api.PromptContext
+	// StopTimeout is the number of seconds jail(8) waits after exec.stop before it kills the jail (stop.timeout);
+	// zero leaves jail(8)'s default of ten.
+	StopTimeout int
 }
 
 // ConsoleLog is where jail(8) sends the output of the exec.* commands of a
@@ -172,6 +175,9 @@ func JailConf(in JailConfInput) (string, error) {
 	if !linux {
 		b.line("\texec.start = \"/bin/sh /etc/rc\";")
 		b.line("\texec.stop = \"/bin/sh /etc/rc.shutdown jail\";")
+	}
+	if in.StopTimeout > 0 {
+		b.line("\tstop.timeout = %d;", in.StopTimeout)
 	}
 	b.line("\tenforce_statfs = %d;", es)
 	if in.SecureLevel != nil {

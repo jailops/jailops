@@ -815,6 +815,22 @@ expect "network create warns when forwarding is off" 'sysctl net.inet.ip.forward
 sysctl net.inet.ip.forwarding=1 >/dev/null
 check "delete that network" $J network delete fwd -y
 
+step "stop timeout (docs/operations.md): a service that needs fifteen seconds after SIGTERM is killed at ten, and lives with boot.stop_timeout"
+# the service ends its work on SIGTERM (fifteen seconds), writes a marker into a volume of the host and exits
+slowsh="trap 'sleep 15; echo done > /srv/out/marker; exit 0' TERM; while :; do sleep 1; done"
+for v in sto10 sto30; do check "volume $v" $J volume create $v --project demo; done
+check "a jail with the system's stop time" $J create slow10 --project demo --image "$img" --network lan --storage default --volume sto10:/srv/out --start
+check "a jail that asks for thirty seconds" $J create slow30 --project demo --image "$img" --network lan --storage default --volume sto30:/srv/out --stop-timeout 30 --start
+expect "the setting is in the jail" 'stop_timeout.*30' sh -c "$J config show slow30 --project demo 2>&1"
+expect "jail.conf has it" 'stop\.timeout = 30;' cat /usr/local/etc/jailops/jails/demo_slow30/jail.conf
+for j in slow10 slow30; do check "the service of $j runs" $J exec --project demo $j -- daemon -f /bin/sh -c "$slowsh"; done
+check "stop the jail with the system's time" $J stop slow10 --project demo
+expect "its service was killed before it finished" '^none$' sh -c "[ -e $(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/sto10")/marker ] && echo marker || echo none"
+check "stop the jail that asked for thirty seconds" $J stop slow30 --project demo
+expect "its service finished" '^done$' cat "$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/sto30")/marker"
+for j in slow10 slow30; do check "delete $j" $J delete --confirm-data-loss $j --project demo; done
+for v in sto10 sto30; do check "delete volume $v" $J volume delete $v --project demo --confirm-data-loss; done
+
 step "the jail's shell and prompt (docs/shell.md): bash and the default prompt, an override, non-interactive commands"
 webroot=$mount/projects/demo/jails/web/root
 # the short name of the host as the daemon writes it into the prompt: the first label, lower case, letters, digits, hyphens

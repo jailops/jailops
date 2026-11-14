@@ -750,3 +750,30 @@ func TestWriteFileTemporaryNamesAreUnique(t *testing.T) {
 		}
 	}
 }
+
+// stop.timeout is the jail's own time to shut down: what the renderer writes passes, and only a number of seconds
+// within the limit does.
+func TestConfDirStopTimeout(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	w := func(content string) error {
+		return e.local.WriteFile(ctx, WriteFileReq{Path: filepath.Join(e.cfg.ConfDir, "alpha_web.conf"), Data: []byte(content), Mode: 0o644})
+	}
+	jc, err := render.JailConf(render.JailConfInput{Name: "alpha_web", Path: filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "web", "root"),
+		Hostname: "web.example.org", OS: api.OSFreeBSD, Interfaces: []string{"jo0123456789a0b"}, StopTimeout: 90,
+		Where: api.PromptContext{Jail: "web", Project: "alpha", Host: "babel"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(jc, "\tstop.timeout = 90;\n") {
+		t.Fatalf("not rendered:\n%s", jc)
+	}
+	if err := w(jc); err != nil {
+		t.Fatalf("the renderer's output with a stop timeout was refused: %v", err)
+	}
+	for name, v := range map[string]string{"zero": "0", "too long": "3601", "negative": "-5", "text": "soon", "quoted": `"90"`, "variable": "${x}"} {
+		if err := w(strings.Replace(jc, "stop.timeout = 90;", "stop.timeout = "+v+";", 1)); err == nil {
+			t.Errorf("stop.timeout %s (%s) was accepted", name, v)
+		}
+	}
+}

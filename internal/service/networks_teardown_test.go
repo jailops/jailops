@@ -181,3 +181,22 @@ func TestALinuxImageBuildAssertsTheLinuxModules(t *testing.T) {
 		t.Fatal("the Linux state must go away when the build is over")
 	}
 }
+
+// A proxy that answers but dropped solicitations over its limits in the last hour is a warning that names the count.
+func TestDoctorWarnsWhenTheProxyDroppedSolicitations(t *testing.T) {
+	s := newSvc(t)
+	spec := api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80"}}
+	if _, err := s.netKind.create(bg, api.ObjectMeta{Name: "sw"}, spec); err != nil {
+		t.Fatalf("cannot create the network: %v", err)
+	}
+	s.NetworkStatus("sw", api.NetworkStatus{Conditions: []api.Condition{
+		{Type: "NDPProxy", Status: api.ConditionTrue},
+		{Type: "NDPFlood", Status: api.ConditionFalse, Reason: "Flooded", Message: "4321 solicitation(s) on vtnet0 were dropped over the proxy's limits in the last hour"},
+	}})
+	c := &checkSet{}
+	s.doctorNDPProxy(c)
+	if len(c.list) != 1 || c.list[0].Name != "network.ndproxy" || c.list[0].Status != api.DoctorWarn ||
+		!strings.Contains(c.list[0].Message, "4321") || c.list[0].Hint == "" {
+		t.Fatalf("%+v", c.list)
+	}
+}

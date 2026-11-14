@@ -3,8 +3,11 @@ package jailos
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/sdk/api"
@@ -191,5 +194,44 @@ func TestFake(t *testing.T) {
 	}
 	if js, _ := f.List(ctx); len(js) != 0 {
 		t.Fatal(js)
+	}
+}
+
+// jail -r may run as long as the jail's stop.timeout asked for, on top of the time of the stop hooks: a stop that waits
+// longer than ten seconds is not cut short by the helper.
+func TestRemoveGivesTheStopTimeoutOfTheJail(t *testing.T) {
+	dir := t.TempDir()
+	withTimeout := filepath.Join(dir, "db.conf")
+	if err := os.WriteFile(withTimeout, []byte("db {\n\texec.stop = \"/bin/sh /etc/rc.shutdown jail\";\n\tstop.timeout = 90;\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	without := filepath.Join(dir, "web.conf")
+	if err := os.WriteFile(without, []byte("web {\n\texec.stop = \"/bin/sh /etc/rc.shutdown jail\";\n}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f := run.NewFake()
+	f.Add(run.Rule{Name: "jail", Args: []string{run.RestArgs}})
+	c := NewCommand(f)
+	if err := c.Remove(context.Background(), withTimeout, "db"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Remove(context.Background(), without, "web"); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Remove(context.Background(), "/etc/jail.d/missing.conf", "gone"); err != nil {
+		t.Fatal(err)
+	}
+	calls := f.Calls()
+	if len(calls) != 3 {
+		t.Fatalf("%d calls", len(calls))
+	}
+	if got, want := calls[0].Cmd.Timeout, 210*time.Second; got != want {
+		t.Errorf("stop.timeout = 90: %v, want %v", got, want)
+	}
+	if got, want := calls[1].Cmd.Timeout, 120*time.Second; got != want {
+		t.Errorf("no stop.timeout: %v, want %v", got, want)
+	}
+	if got, want := calls[2].Cmd.Timeout, 120*time.Second; got != want {
+		t.Errorf("a conf that cannot be read: %v, want %v", got, want)
 	}
 }

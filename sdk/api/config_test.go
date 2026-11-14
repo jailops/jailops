@@ -247,3 +247,27 @@ func TestSysVIPCKey(t *testing.T) {
 		t.Fatalf("%+v %v", eff, src)
 	}
 }
+
+// boot.stop_timeout is the seconds a jail has to shut down by itself; it is written at the next start.
+func TestStopTimeoutKey(t *testing.T) {
+	var s JailSpec
+	restart, err := ApplyConfig(&s, map[string]string{"boot.stop_timeout": "60"}, nil)
+	if err != nil || s.Boot.StopTimeout != 60 || !reflect.DeepEqual(restart, []string{"boot.stop_timeout"}) {
+		t.Fatalf("%v %v %+v", err, restart, s.Boot)
+	}
+	if v := ConfigValues(s); v["boot.stop_timeout"] != "60" {
+		t.Fatalf("%v", v)
+	}
+	var t2 JailSpec
+	if _, err := ApplyConfig(&t2, ConfigValues(s), nil); err != nil || t2.Boot.StopTimeout != 60 {
+		t.Fatalf("round trip: %v %+v", err, t2.Boot)
+	}
+	for _, bad := range []string{"-1", "3601", "slow"} {
+		if _, err := ApplyConfig(&JailSpec{}, map[string]string{"boot.stop_timeout": bad}, nil); err == nil {
+			t.Errorf("%q is accepted", bad)
+		}
+	}
+	if _, err := ApplyConfig(&s, nil, []string{"boot.stop_timeout"}); err != nil || s.Boot.StopTimeout != 0 {
+		t.Fatalf("unset: %v %+v", err, s.Boot)
+	}
+}

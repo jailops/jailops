@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"jailops.net/jailops/internal/render"
+	"jailops.net/jailops/sdk/api"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -286,6 +287,15 @@ func (c Config) checkJailParam(ctx context.Context, name, key, val string, hasVa
 	case "exec.stop":
 		if val != `"/bin/sh /etc/rc.shutdown jail"` {
 			return c.rawParam(admin, key)
+		}
+		return nil
+	case "stop.timeout":
+		n, err := num()
+		if err != nil {
+			return err
+		}
+		if n < 1 || n > api.MaxStopTimeout {
+			return invalid("stop.timeout must be between 1 and %d seconds", api.MaxStopTimeout)
 		}
 		return nil
 	case "exec.consolelog":

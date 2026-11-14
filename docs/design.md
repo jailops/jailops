@@ -1140,7 +1140,7 @@ and `jailops-sync` use nothing else.
 
 | | Scope | Done when |
 |---|---|---|
-| 0 | Repo, CI, nine prototypes (`prototypes/README.md`) | All nine have an answer |
+| 0 | Repo, CI | CI builds and tests every change |
 | M1 | Core: generations, thin and thick jails, lifecycle, snapshots, rollback, state, daemon and privileged helper, API and SDK, CLI, pkg and rc.d | Create, start, snapshot, upgrade and roll back a jail on a clean FreeBSD host |
 | M2 | Network and firewall: routed VNET links, IPAM, routed and proxy IPv6, PF anchors, doctor, web UI | A jail with IPv4 and IPv6 on a switched network, behind a firewall |
 | M3 | Alpine and Linux jails | Alpine with sshd and nginx survives restart and rollback |
@@ -1186,7 +1186,7 @@ Open:
 | Routes that answer `unsupported` | `PUT /api/v1/server`, `GET /api/v1/server/config`, cluster, `GET .../console` (listing sessions), `.../files/<path>`, `POST .../move`, `.../snapshots/<s>` (rename), `.../bundle`, jail templates, groups, rollouts and the backup transport routes. Each answers 501 `unsupported` ("<feature> is not part of this version"); the list is `unsupportedRoutes` in `internal/server/routes.go` and `sdk/PROTOCOL.md` |
 | `/var/db/pkg` after a root swap | A dedicated experiment with a genuine package change |
 | Ethernet-level spoofing | `ether` rules did not evaluate on the test host; ARP, NDP and MAC spoofing are not blocked below IP |
-| amd64 beyond the proxy host | The clean-install end-to-end run passes on amd64; Linux jails, backups and most prototypes ran on arm64 only |
+| amd64 beyond the proxy host | The clean-install end-to-end run passes on amd64; Linux jails and backups ran on arm64 only |
 | FreeBSD 15.2 and later | Each new minor release must pass the PF traffic matrix and the clean-install run before it is called supported |
 | The `zfs diff` accelerator | Not built (L1 capture); the stat walk is used |
 | Chunk poisoning within a key domain | The node checks a blob's unkeyed trailer only and stores chunks create-only, so a host of the key domain can plant a self-consistent blob under the id of another host's chunk; hosts find it in a deep verify or a restore, and an administrator of the node removes it (`jailops-backupd quarantine add`). A node that refuses it itself needs a format change (a per-chunk proof the node can check without the key, or a chunk namespace per host): designed only, not built ([backup-restore.md](backup-restore.md#who-trusts-whom-hosts-that-share-a-node)) |
@@ -1236,7 +1236,7 @@ adapted to JailOps's names, scope and rules, and the parts specific to virtual m
 
 ## 18. Verified on FreeBSD 15.1 (arm64 and amd64 test hosts)
 
-Results of the prototypes and runs so far. The architecture is named where it matters (most of this ran on arm64; the
+Results of the runs so far. The architecture is named where it matters (most of this ran on arm64; the
 proxy and the amd64 clean-install run on amd64). Everything not listed here is unverified.
 
 | Prototype | Result |

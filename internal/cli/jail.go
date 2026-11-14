@@ -426,7 +426,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	var (
 		image, layout, hostname, memory, disk, strategy, window, storage                 string
 		shell, prompt                                                                    string
-		cpu, pids, priority                                                              int
+		cpu, pids, priority, stopTimeout                                                 int
 		networks, volumes, hostMounts, envs, labels, depends, tags, profiles, fwPolicies []string
 		autostart, zfsDelegation                                                         bool
 	)
@@ -448,6 +448,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.BoolVar(&autostart, "autostart", false, "start the jail when the host boots")
 	f.BoolVar(&zfsDelegation, "zfs-delegation", false, "global administrators only: hand the jail a ZFS dataset of its own, <container>/delegated, which root in the jail manages (the host's priv.conf must allow it: admin-zfs-delegation)")
 	f.IntVar(&priority, "boot-priority", 0, "boot order, lower starts first")
+	f.IntVar(&stopTimeout, "stop-timeout", 0, "seconds the jail has to shut down by itself before it is killed (default: ten)")
 	f.StringArrayVar(&depends, "depends", nil, "jail that must start first (repeatable)")
 	f.StringArrayVar(&envs, "env", nil, "environment variable KEY=VALUE (repeatable)")
 	f.StringArrayVar(&labels, "label", nil, "label KEY=VALUE (repeatable)")
@@ -481,7 +482,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 			Storage: storage, Profiles: profiles,
 			Resources: api.Resources{CPU: cpu, Memory: memory, Disk: disk, PIDs: pids},
 			Firewall:  api.FirewallAttach{Policies: fwPolicies, Tags: tags},
-			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: depends},
+			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: depends, StopTimeout: stopTimeout},
 			Update:    api.UpdatePolicy{Strategy: api.UpdateStrategy(strategy), Window: window},
 			Shell:     api.ShellPath(shell), Prompt: prompt,
 			Delegate: zfsDelegation,

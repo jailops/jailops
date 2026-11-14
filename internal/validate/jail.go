@@ -147,6 +147,9 @@ func JailSpec(name string, s api.JailSpec) error {
 	if s.Boot.Priority < -1000 || s.Boot.Priority > 1000 {
 		return Invalid("boot.priority", "priority must be between -1000 and 1000")
 	}
+	if s.Boot.StopTimeout < 0 || s.Boot.StopTimeout > api.MaxStopTimeout {
+		return Invalid("boot.stop_timeout", "stop timeout must be between 0 and %d seconds", api.MaxStopTimeout)
+	}
 	for i, d := range s.Boot.Depends {
 		f := fmt.Sprintf("boot.depends[%d]", i)
 		if err := Name(f, d); err != nil {

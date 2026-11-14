@@ -153,6 +153,13 @@ JailOps answers it itself.
 
    There is no switch for it in `jailopsd.yaml`: it runs for every network in `proxy` mode.
 
+   **A neighbor that sends too many solicitations** cannot make the host spend its time on them: the proxy looks at no
+   more than 50 solicitations a second (a burst of 100) from one hardware address and at 2000 a second (a burst of
+   4000) from all of them together, and drops the rest without an answer, so the upstream router, which sends a few,
+   is still answered. The numbers are fixed, far above what a segment of jails needs, and the table of requesters
+   is bounded. What was dropped is counted, written to the log at most once a minute and shown by `jailops doctor`
+   (`network.ndproxy` warns, with the count of the last hour) and in the network's `NDPFlood` condition.
+
 4. **Check it:** `jailops doctor` fails `network.ndproxy` when a proxy network is not
    answering; `jailops network show web` has an `NDPProxy` condition (`Answering`, `StartFailed` and so on). In the
    first minutes after `jailopsd` starts the condition is `Starting` (the capture of the uplink is being opened) and
