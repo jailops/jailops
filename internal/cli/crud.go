@@ -70,6 +70,10 @@ type kindDesc[T any] struct {
 	// objects and returns the resolver of the names: the arguments, or the
 	// objects a selector matches (bulk). nil means the arguments only.
 	targets func(cmd *cobra.Command) func(ctx context.Context, args []string) (names []string, bulk bool, err error)
+	// noSet is set for a kind that has a "set" of its own
+	noSet bool
+	// revoke is set for a kind of credentials: the command that ends one is "revoke", not "delete"
+	revoke bool
 	// loss is set for a kind whose delete destroys data: it says what deleting one object destroys, read from
 	// the server before anything is deleted, or refuses a delete that cannot go ahead. Such a delete needs the
 	// typed name or --confirm-data-loss; -y does not answer it.
@@ -176,7 +180,8 @@ func labelOpts(labels []string) ([]sdk.ListOption, error) {
 
 // article is "a" or "an" for a noun, as in "Create an image".
 func article(noun string) string {
-	if noun != "" && strings.ContainsRune("aeiou", rune(noun[0])) {
+	// "user" starts with a vowel and is said with a consonant
+	if noun != "" && !strings.HasPrefix(noun, "user") && strings.ContainsRune("aeiou", rune(noun[0])) {
 		return "an"
 	}
 	return "a"
@@ -192,7 +197,7 @@ type completer = func(*cobra.Command, []string, string) ([]string, cobra.ShellCo
 // never a message. Names already on the line are left out.
 func (a *app) completeWith(list func(ctx context.Context, c *sdk.Client, args []string) ([]string, error)) completer {
 	return func(cmd *cobra.Command, args []string, _ string) ([]string, cobra.ShellCompDirective) {
-		ctx, cancel := context.WithTimeout(cmd.Context(), 3*time.Second)
+		ctx, cancel := context.WithTimeout(cmd.Context(), completionTimeout)
 		defer cancel()
 		c, err := a.connect(ctx)
 		if err != nil {
@@ -489,8 +494,7 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 			})
 		},
 	}
-	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable; --selector is the same)")
-	aliasFlags(cmd, map[string]string{"selector": "label"})
+	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable)")
 	cmd.Flags().StringSliceVarP(&columns, "columns", "c", nil, "columns of the table, comma separated: "+strings.Join(d.columns(), ", "))
 	cmd.Flags().StringVar(&sortBy, "sort", "", "order the rows by this column")
 	enumFlag(cmd, "columns", d.columns()...)
@@ -712,12 +716,17 @@ func createWarnings[T any](a *app, d *kindDesc[T], x T) {
 // addDelete adds "delete".
 func addDelete[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 	path := "@P@"
+	verb, past, aliases := "delete", "deleted", []string{"rm"}
+	if d.revoke {
+		verb, past, aliases = "revoke", "revoked", nil
+	}
+	Verb := strings.ToUpper(verb[:1]) + verb[1:]
 	cmd := &cobra.Command{
-		Use:               "delete NAME...",
-		Aliases:           []string{"rm"},
-		Short:             "Delete " + d.plural,
-		Long:              "Delete one or more " + d.plural + ". The server refuses when another object still uses them.\nThe command asks for confirmation unless -y is given.",
-		Example:           "jailops " + path + " delete NAME\njailops " + path + " delete -y NAME1 NAME2",
+		Use:               verb + " NAME...",
+		Aliases:           aliases,
+		Short:             Verb + " " + d.plural,
+		Long:              Verb + " one or more " + d.plural + ". The server refuses when another object still uses them.\nThe command asks for confirmation unless -y is given.",
+		Example:           "jailops " + path + " " + verb + " NAME\njailops " + path + " " + verb + " -y NAME1 NAME2",
 		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeKind(a, d),
 	}
@@ -822,14 +831,14 @@ and deletes nothing.`
 					return err
 				}
 			}
-			if ok, err := a.dry("delete "+d.noun+" "+name, nil); ok || err != nil {
+			if ok, err := a.dry(verb+" "+d.noun+" "+name, nil); ok || err != nil {
 				if err != nil {
 					return err
 				}
 				continue
 			}
 			if !bulk && d.loss == nil {
-				if err := a.confirm(fmt.Sprintf("Delete %s %q?", d.noun, name)); err != nil {
+				if err := a.confirm(fmt.Sprintf("%s %s %q?", Verb, d.noun, name)); err != nil {
 					return err
 				}
 			}
@@ -841,7 +850,7 @@ and deletes nothing.`
 			if err != nil {
 				return err
 			}
-			if err := a.finishOp(ctx, h, d.noun, name, "deleted", nil); err != nil {
+			if err := a.finishOp(ctx, h, d.noun, name, past, nil); err != nil {
 				return err
 			}
 		}
@@ -1041,6 +1050,9 @@ func crudCommands[T any](a *app, parent *cobra.Command, d *kindDesc[T], createLo
 	addShow(a, parent, d)
 	addCreate(a, parent, d, createLong, createExample, flagBuild)
 	addEdit(a, parent, d)
+	if flagBuild != nil && !d.noSet {
+		addSet(a, parent, d, flagBuild)
+	}
 	addDelete(a, parent, d)
 	if d.rename != nil {
 		addRename(a, parent, d, d.renameLong)

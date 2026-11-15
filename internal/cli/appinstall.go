@@ -17,7 +17,7 @@ func (a *app) appInstall(d *kindDesc[api.AppSummary]) *cobra.Command {
 	var jail, network, storage, image, memory, disk string
 	var cpu int
 	cmd := &cobra.Command{
-		Use:   "install NAME",
+		Use:   "install APP [JAIL]",
 		Short: "Install an app of the catalog as a new jail",
 		Long: `Create a jail that runs an app of the catalog, as one operation on the server:
 a thin jail from the image with the app's data paths as persistent datasets,
@@ -31,7 +31,7 @@ generation). Without it the server takes the FreeBSD image of the highest
 release the host runs, the first by name when two have that release; when
 there is none it refuses and says how to create one.
 
-The jail is named after the app unless --name says otherwise, and goes into the
+The jail is named after the app unless JAIL is given, and goes into the
 project of the request; --network and --storage name what it is created with
 (the project's only grant of a kind is the default). --memory, --disk and --cpu
 replace the definition's resource hints as the jail's limits.
@@ -42,18 +42,21 @@ the jail stopped for inspection, with its labels, and the error says so.
 --dry-run asks the server for the steps and creates nothing. After a
 successful installation the report says how to reach the app, where its data,
 configuration and logs are, and the notes of the definition. The new jail is
-closed: its firewall policy app-NAME lets nothing in until 'jailops app allow
-NAME from SOURCE' allows a source (the health check runs before it closes).
+closed: its firewall policy app-JAIL lets nothing in until 'jailops app allow
+JAIL --from SOURCE' allows a source (the health check runs before it closes).
 Ports marked expose in the definition are listed; forwarding them is a later
 feature.`,
 		Example: `jailops app install nginx --project web
-jailops app install postgresql --project web --name db --network lan --storage default
+jailops app install postgresql db --project web --network lan --storage default
 jailops app install nginx --project web --image freebsd-15-1 --memory 512M
 jailops app install nginx --project web --dry-run`,
-		Args:              cobra.ExactArgs(1),
-		ValidArgsFunction: completeKind(a, d),
+		Args:              cobra.RangeArgs(1, 2),
+		ValidArgsFunction: completeArgs(completeKind(a, d), completeNone),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
+			if len(args) == 2 {
+				jail = args[1]
+			}
 			req := api.AppInstall{Jail: jail, Network: network, Storage: storage, Image: image, DryRun: a.dryRun}
 			if cmd.Flags().Changed("memory") || cmd.Flags().Changed("disk") || cmd.Flags().Changed("cpu") {
 				req.Limits = &api.Resources{Memory: memory, Disk: disk, CPU: cpu}
@@ -82,7 +85,6 @@ jailops app install nginx --project web --dry-run`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&jail, "name", "", "name of the jail (default: the app name)")
 	f.StringVar(&network, "network", "", "network the jail is attached to, one granted to the project (default: the project's only network)")
 	f.StringVar(&storage, "storage", "", "storage the jail is created on, one granted to the project (default: the project's only storage)")
 	f.StringVar(&image, "image", "", "image reference, NAME or NAME#gN (default: the FreeBSD image of the highest release the host runs); its release must be at least the app's release_min")
@@ -134,7 +136,7 @@ func (a *app) printAppInstalled(w io.Writer, name, jail string, res api.AppInsta
 		fprintf(w, "  %-10s %s\n", k, line)
 	}
 	if len(res.Ports) > 0 {
-		kv("Access", "closed: nothing reaches it until jailops app allow "+j.Metadata.Name+" from SOURCE")
+		kv("Access", "closed: nothing reaches it until jailops app allow "+j.Metadata.Name+" --from SOURCE")
 	}
 	listed := func(k string, rows []string) {
 		if len(rows) == 0 {
@@ -205,9 +207,16 @@ installed (the labels), the state and addresses of the jail, and the ports of
 the app's definition as the catalog has it now. Name patterns such as 'web*'
 narrow the list. -o json and -o yaml print the jails with the app, version and
 ports; -o name prints the jail names.`,
-		Example:           "jailops app installed --project web\njailops app installed --project web -o json",
-		Args:              cobra.ArbitraryArgs,
-		ValidArgsFunction: completeNone,
+		Example: "jailops app installed --project web\njailops app installed --project web -o json",
+		Args:    cobra.ArbitraryArgs,
+		ValidArgsFunction: a.completeNames(func(ctx context.Context, c *sdk.Client) ([]string, error) {
+			jails, err := c.Apps().Installed(ctx)
+			var n []string
+			for _, j := range jails {
+				n = append(n, j.Metadata.Name)
+			}
+			return n, err
+		}),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx := cmd.Context()
 			c, err := a.connect(ctx)

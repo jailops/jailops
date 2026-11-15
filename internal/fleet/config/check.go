@@ -554,22 +554,6 @@ func (f *Fleet) checkJail(o *Object, s api.JailSpec, add func(*Object, string, .
 	if len(s.Packages) > 0 {
 		add(o, "spec.packages is reserved and the daemon refuses it: install packages with spec.provision.packages")
 	}
-	targets := map[string]bool{}
-	for i, m := range s.HostMounts {
-		if !strings.HasPrefix(m.Source, "/") || !strings.HasPrefix(m.Target, "/") || m.Target == "/" {
-			add(o, "host_mounts[%d]: source and target must be absolute paths and the target must not be /", i)
-		}
-		if targets[m.Target] {
-			add(o, "host_mounts[%d]: duplicate mount point %q", i, m.Target)
-		}
-		targets[m.Target] = true
-		if !m.ReadOnly {
-			warn(o, "host_mounts[%d] %s is read-write: the jail can change or delete the host's data (use read_only: true where you can)", i, m.Source)
-		}
-	}
-	if len(s.HostMounts) > 0 {
-		warn(o, "host_mounts need a global-admin identity and a source below an admin-host-mount directory of the host's priv.conf; the helper refuses the jail's start otherwise")
-	}
 	if s.Delegate {
 		warn(o, "zfs_delegation needs a global admin, and the host's priv.conf must allow it (admin-zfs-delegation): root in the jail then manages the dataset <container>/delegated outside JailOps' rules")
 	}
@@ -821,7 +805,7 @@ func checkWireGuard(o *Object, s api.WireGuardSpec, add func(*Object, string, ..
 	switch s.Mode {
 	case api.WireGuardServer:
 	case api.WireGuardClient:
-		add(o, "a WireGuard client cannot be declared: its private key comes from a join token on its own host (jailops wireguard join - < TOKEN-FILE); declare the server and enroll the client with jailops wireguard peer add")
+		add(o, "a WireGuard client cannot be declared: its private key comes from a join token on its own host (jailops wireguard join NAME --token-file TOKEN-FILE); declare the server and enroll the client with jailops wireguard peer add")
 		return
 	default:
 		add(o, "spec.mode must be server (clients are made with jailops wireguard join)")

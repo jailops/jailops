@@ -259,3 +259,36 @@ func TestStopOfAJailWhoseHostDirectoryMountsAreGone(t *testing.T) {
 		t.Fatal("a placeholder was mounted for an unrelated failure")
 	}
 }
+
+// A jail that has never run gets its volumes bound into its root, so the files the host installs land in them, and
+// unbound again before the start mounts them itself.
+func TestBindVolumesIntoAStoppedJail(t *testing.T) {
+	w := newWorld(t)
+	w.created("web")
+	w.attachTo("alpha_web", "www", "/usr/local/www", false)
+	w.attachTo("alpha_web", "data", "/var/db/web", false)
+	if err := w.S.BindVolumes(bg, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	cmds := strings.Join(w.Exec.Commands(), "\n")
+	for _, want := range []string{
+		"mount -t nullfs /jailops/projects/alpha/volumes/www /jailops/projects/alpha/jails/web/root/usr/local/www",
+		"mount -t nullfs /jailops/projects/alpha/volumes/data /jailops/projects/alpha/jails/web/root/var/db/web",
+	} {
+		if !strings.Contains(cmds, want) {
+			t.Errorf("no %q in\n%s", want, cmds)
+		}
+	}
+	if strings.Contains(cmds, "-o ro") {
+		t.Errorf("a read-write bind was read-only:\n%s", cmds)
+	}
+	if err := w.S.UnbindVolumes(bg, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	cmds = strings.Join(w.Exec.Commands(), "\n")
+	data := strings.Index(cmds, "umount /jailops/projects/alpha/jails/web/root/var/db/web")
+	www := strings.Index(cmds, "umount /jailops/projects/alpha/jails/web/root/usr/local/www")
+	if data < 0 || www < 0 || data > www {
+		t.Errorf("the volumes are unmounted in reverse order, the last first:\n%s", cmds)
+	}
+}

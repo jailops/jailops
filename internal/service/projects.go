@@ -752,10 +752,6 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	if spec.Delegate && (old == nil || !old.Delegate) && !globalAdmin {
 		return nil, api.Errorf(api.CodeForbidden, "ZFS delegation is granted by a global administrator only")
 	}
-	if len(spec.HostMounts) > 0 && !globalAdmin && (old == nil || !slices.Equal(spec.HostMounts, old.HostMounts)) {
-		return nil, api.Errorf(api.CodeForbidden, "mounting host directories into a jail is granted by a global administrator only").
-			WithHint("the host operator also lists the allowed directories with admin-host-mount in priv.conf")
-	}
 	profs, err := s.resolveProfiles(p.Meta.Name, spec.Profiles)
 	if err != nil {
 		return nil, err
@@ -817,7 +813,7 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	}
 	if !specGrantsStorage(p.Spec, spec.Storage) {
 		return nil, api.Errorf(api.CodeForbidden, "storage %q is not granted to project %q", spec.Storage, p.Meta.Name).
-			WithHint(fmt.Sprintf("a global admin grants it: jailops project set %s --storage %s", p.Meta.Name, spec.Storage))
+			WithHint(fmt.Sprintf("a global admin grants it: jailops storage grant %s --project %s", spec.Storage, p.Meta.Name))
 	}
 	if _, ok := s.storage(spec.Storage); !ok {
 		return nil, notFound("storage", spec.Storage)

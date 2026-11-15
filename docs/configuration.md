@@ -115,5 +115,5 @@ The sample `packaging/backupd.yaml` is annotated: `hostname`, `listen` (default 
 strongest first: the flags `--remote`, `--host` and `--project`; the environment (`JAILOPS_REMOTE`, `JAILOPS_URL`,
 `JAILOPS_TOKEN`, `JAILOPS_FINGERPRINT`, `JAILOPS_CERT`, `JAILOPS_KEY`, `JAILOPS_CA`, `JAILOPS_HOST`, `JAILOPS_PROJECT`,
 `JAILOPS_SOCKET`, `JAILOPS_CONFIG`); the user file; the host file; the default socket
-`/var/run/jailops/jailops.sock`. Prefer `token_file` (or `--token-stdin`) to a token on the command line: a command-line
+`/var/run/jailops/jailops.sock`. Prefer `token_file` (or `--token-file -`) to a token on the command line: a command-line
 value is visible to other users.

@@ -45,7 +45,7 @@ func (s *Service) volumeStorage(p project, want string) (*storageInfo, error) {
 	}
 	if !specGrantsStorage(p.Spec, want) {
 		return nil, api.Errorf(api.CodeForbidden, "storage %q is not granted to project %q", want, p.Meta.Name).
-			WithHint(fmt.Sprintf("a global admin grants it: jailops project set %s --storage %s", p.Meta.Name, want))
+			WithHint(fmt.Sprintf("a global admin grants it: jailops storage grant %s --project %s", want, p.Meta.Name))
 	}
 	si, ok := s.storage(want)
 	if !ok {

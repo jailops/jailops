@@ -723,6 +723,7 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 			}
 			if a.Action != "stop" {
 				_ = h.Bind("start/"+key, &opRequest{Kind: "start", Jail: key})
+				s.installBashBeforeFirstStart(ctx, key)
 				if err := s.life.StartJail(ctx, key); err != nil {
 					if api.IsCode(err, api.CodeLocked) {
 						s.observeLocked(ctx, key)
@@ -755,6 +756,7 @@ func (s *Service) StartJail(ctx context.Context, key string) error {
 	}
 	defer unlock()
 	project, name := validate.SplitQualified(key)
+	s.installBashBeforeFirstStart(ctx, key)
 	err = s.life.StartJail(ctx, key)
 	if api.IsCode(err, api.CodeLocked) {
 		// Skipped, not failed: the unlock starts it (volkeys.go).

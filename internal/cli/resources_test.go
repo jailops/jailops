@@ -18,23 +18,23 @@ func TestImages(t *testing.T) {
 	tr.ok("image", "list")
 	tr.ok("image", "show", "freebsd-15")
 	tr.ok("image", "build", "freebsd-15")
-	tr.ok("image", "generations", "freebsd-15")
+	tr.ok("image", "generation", "list", "freebsd-15")
 	tr.ok("image", "build", "freebsd-15", "--dry-run")
-	tr.ok("image", "build", "freebsd-15", "--from", "g1")
-	tr.do("", "image", "build", "freebsd-15", "--from", "x")
-	tr.ok("image", "generations", "freebsd-15", "-o", "name")
-	tr.ok("image", "alias", "set", "freebsd-15", "edge")            // newest
-	tr.ok("image", "alias", "set", "freebsd-15", "stable", "g1")    // pin
-	tr.do("", "image", "alias", "set", "freebsd-15", "stable", "9") // no such generation
-	tr.do("", "image", "alias", "set", "freebsd-15", "stable", "x")
+	tr.ok("image", "build", "freebsd-15", "--from-generation", "g1")
+	tr.do("", "image", "build", "freebsd-15", "--from-generation", "x")
+	tr.ok("image", "generation", "list", "freebsd-15", "-o", "name")
+	tr.ok("image", "alias", "add", "freebsd-15", "edge")                            // newest
+	tr.ok("image", "alias", "add", "freebsd-15", "stable", "--generation", "g1")    // pin
+	tr.do("", "image", "alias", "add", "freebsd-15", "stable", "--generation", "9") // no such generation
+	tr.do("", "image", "alias", "add", "freebsd-15", "stable", "--generation", "x")
 	tr.ok("image", "show", "freebsd-15", "-o", "json")
-	tr.ok("image", "alias", "delete", "-y", "freebsd-15", "edge")
-	tr.do("", "image", "alias", "delete", "-y", "freebsd-15", "edge") // already gone
+	tr.ok("image", "alias", "remove", "-y", "freebsd-15", "edge")
+	tr.do("", "image", "alias", "remove", "-y", "freebsd-15", "edge") // already gone
 	tr.ok("image", "list", "-o", "name")
 	tr.ok("jail", "create", "web", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
-	tr.do("", "image", "delete-generation", "-y", "freebsd-15", "1") // in use
-	tr.ok("image", "alias", "set", "freebsd-15", "latest")           // newest (g3)
-	tr.ok("image", "delete-generation", "-y", "freebsd-15", "3")     // the alias that pointed at it moves to g2
+	tr.do("", "image", "generation", "delete", "-y", "freebsd-15", "1") // in use
+	tr.ok("image", "alias", "add", "freebsd-15", "latest")              // newest (g3)
+	tr.ok("image", "generation", "delete", "-y", "freebsd-15", "3")     // the alias that pointed at it moves to g2
 	tr.ok("image", "show", "freebsd-15")
 	tr.do("", "image", "delete", "-y", "freebsd-15") // in use by web
 	tr.ok("image", "delete", "-y", "alpine-3")
@@ -89,7 +89,7 @@ func TestImageUpgrade(t *testing.T) {
 	tr.do("", "image", "upgrade", "freebsd-15", "--project", "nope")
 	tr.do("", "image", "upgrade", "nope")
 	tr.ok("image", "upgrade", "freebsd-15", "--no-wait", "--no-jails")
-	tr.ok("image", "generations", "freebsd-15")
+	tr.ok("image", "generation", "list", "freebsd-15")
 	tr.golden("image_upgrade")
 }
 
@@ -149,23 +149,27 @@ func TestFirewall(t *testing.T) {
 	tr.ok("firewall", "address-set", "create", "hq", "--address", "192.0.2.9", "--comment", "the office")
 	tr.ok("firewall", "address-set", "show", "hq", "-o", "yaml")
 	tr.ok("firewall", "address-set", "show", "hq")
-	tr.ok("firewall", "policy", "create", "documented", "--default-in", "deny", "--default-out", "allow", "--comment", "the public web server",
-		"--rule", "allow in tcp port 80,443 comment the site", "--rule", "allow in tcp from set:hq port 22 comment ssh from the office")
+	tr.ok("firewall", "policy", "create", "documented", "--default-in", "deny", "--default-out", "allow", "--comment", "the public web server")
+	tr.ok("firewall", "rule", "add", "documented", "in", "--action", "allow", "--proto", "tcp", "--port", "80,443", "--comment", "the site")
+	tr.ok("firewall", "rule", "add", "documented", "in", "--action", "allow", "--proto", "tcp", "--from", "set:hq", "--port", "22", "--comment", "ssh from the office")
 	tr.ok("firewall", "policy", "show", "documented", "-o", "yaml")
 	tr.ok("firewall", "policy", "show", "documented")
 	// a rule can be switched off without deleting it: it keeps its number and says so
-	tr.ok("firewall", "policy", "create", "switchable", "--rule", "allow in tcp port 80 comment the site",
-		"--rule", "allow in tcp port 22 disabled comment ssh, switched off", "--rule", "deny in tcp port 23 disabled")
+	tr.ok("firewall", "policy", "create", "switchable")
+	tr.ok("firewall", "rule", "add", "switchable", "in", "--action", "allow", "--proto", "tcp", "--port", "80", "--comment", "the site")
+	tr.ok("firewall", "rule", "add", "switchable", "in", "--action", "allow", "--proto", "tcp", "--port", "22", "--disabled", "--comment", "ssh, switched off")
+	tr.ok("firewall", "rule", "add", "switchable", "in", "--action", "deny", "--proto", "tcp", "--port", "23", "--disabled")
 	tr.ok("firewall", "policy", "show", "switchable")
 	tr.ok("firewall", "policy", "show", "switchable", "-o", "yaml")
-	tr.do("", "firewall", "policy", "create", "nocomment", "--default-in", "deny", "--default-out", "allow", "--rule", "allow in tcp port 80 comment")
-	tr.do("", "firewall", "policy", "create", "nodefaults", "--rule", "allow in tcp port 80")
+	tr.do("", "firewall", "policy", "create", "nodefaults")
 	tr.do("", "firewall", "address-set", "create", "c1", "--comment", "no address")
 	tr.do("", "firewall", "address-set", "create", "c2", "--address", "192.0.2.2", "--address", "192.0.2.3", "--comment", "which one")
-	tr.ok("firewall", "policy", "create", "web", "--default-in", "deny", "--default-out", "allow",
-		"--rule", "allow in tcp port 80,443", "--rule", "allow in tcp from set:office port 22 log", "--rule", "allow in tcp port 8080 rdr 8080:80")
-	tr.do("", "firewall", "policy", "create", "bad", "--default-in", "deny", "--default-out", "allow", "--rule", "allow")
-	tr.do("", "firewall", "policy", "create", "bad2", "--default-in", "deny", "--default-out", "allow", "--rule", "allow in tcp bogus 1")
+	tr.ok("firewall", "policy", "create", "web", "--default-in", "deny", "--default-out", "allow")
+	tr.ok("firewall", "rule", "add", "web", "in", "--action", "allow", "--proto", "tcp", "--port", "80,443")
+	tr.ok("firewall", "rule", "add", "web", "in", "--action", "allow", "--proto", "tcp", "--from", "set:office", "--port", "22", "--log")
+	tr.ok("firewall", "rule", "add", "web", "in", "--action", "allow", "--proto", "tcp", "--redirect", "8080:80")
+	tr.do("", "firewall", "rule", "add", "web", "in")
+	tr.do("", "firewall", "rule", "add", "web", "in", "--action", "allow", "--proto", "bogus")
 	tr.ok("firewall", "policy", "list")
 	tr.ok("firewall", "policy", "show", "web")
 	tr.ok("firewall", "address-set", "list")
@@ -223,7 +227,8 @@ func TestSeveralFirewallPolicies(t *testing.T) {
 	h.seed()
 	tr := h.transcript()
 	for _, n := range []string{"floor", "monitoring", "postgres", "ssh-office"} {
-		tr.ok("firewall", "policy", "create", n, "--rule", "allow in tcp port 22")
+		tr.ok("firewall", "policy", "create", n)
+		tr.ok("firewall", "rule", "add", n, "in", "--action", "allow", "--proto", "tcp", "--port", "22", "--comment", "ssh")
 	}
 	tr.ok("jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan",
 		"--firewall-policy", "postgres", "--firewall-policy", "ssh-office")
@@ -265,7 +270,7 @@ func TestBackup(t *testing.T) {
 		Status:   api.BackupStatus{Bytes: 100, Failed: true},
 	})
 	tr := h.transcript()
-	tr.ok("backup", "target", "create", "nightly", "--kind", "node", "--address", "https://b.example:8443", "--fingerprint", "abcd")
+	tr.ok("backup", "target", "create", "nightly", "--kind", "node", "--url", "https://b.example:8443", "--fingerprint", "abcd")
 	tr.ok("backup", "target", "list")
 	tr.ok("backup", "policy", "create", "nightly", "--selector", "env=prod", "--target", "nightly", "--schedule", "0 2 * * *", "--keep-daily", "14", "--keep-weekly", "8")
 	tr.do("", "backup", "policy", "create", "x", "--target", "nightly")

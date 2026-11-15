@@ -1,4 +1,4 @@
-$ jailops backup target create nightly --kind node --address https://b.example:8443 --fingerprint abcd
+$ jailops backup target create nightly --kind node --url https://b.example:8443 --fingerprint abcd
 backup target/nightly created
 
 $ jailops backup target list

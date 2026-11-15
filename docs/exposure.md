@@ -56,7 +56,7 @@ ports are listed in [ports.md](ports.md).
 | **ACME** | `listen.https.acme` in `jailopsd.yaml`, or the console (Request with ACME) / `jailops host certificate acme` (`POST /api/v1/host/certificate/acme`) | the daemon obtains a certificate for your DNS names from a CA (Let's Encrypt production by default) and renews it, below |
 
 Going back: **Use self-signed again** in the console, or `jailops host certificate self-signed` (it asks you to type the
-name of the certificate it replaces; `--i-know` for a script), serves the generated certificate once more; browsers warn again and clients have to pin it. A choice made in the console or the API is kept in
+name of the certificate it replaces; `--confirm-replace` for a script), serves the generated certificate once more; browsers warn again and clients have to pin it. A choice made in the console or the API is kept in
 `<data_dir>/tls/choice.json` and wins over `listen.https.acme` of the file (delete it and restart to let the file decide
 again); `listen.https.cert`/`key` win over both. Whatever is served, the generated pair stays the daemon's own identity,
 the client certificate a hub presents to its hosts.
@@ -159,7 +159,7 @@ All of these work on the TLS listener at the same time; a credential that is pre
 
 1. **A pinned client certificate** (mTLS). The listener *requests* a client certificate; it never requires one. A presented
    certificate must be within its validity and be a client certificate, and is then looked up **by fingerprint** in the trust store
-   (`jailops cert add`, or the join flow below). It has a role and a scope (a project list or `global`; an empty list is never
+   (`jailops cert create`, or the join flow below). It has a role and a scope (a project list or `global`; an empty list is never
    "everything") and an optional expiry. An unknown certificate with no other credential is answered `unauthorized`.
 2. **An API token** in `Authorization: Bearer`: one role, a scope, `--expires` and `--allow-from` (source networks).
    `jailops token create ci --role operator --projects web --expires 720h --allow-from 203.0.113.0/24`. The secret is shown once.
@@ -179,8 +179,8 @@ identity, so the identity of `jailops-sync` is one.
 
 Join flow for a person or a machine, pinned in both directions:
 
-    jailops trust add --name laptop --role admin --global --expires 15m --cert-expires 2160h   # on the host: prints a single-use token
-    jailops remote add host.example.org --token-stdin --name myhost                         # on the client: paste the token
+    jailops cert enroll laptop --role admin --global --expires 15m --cert-expires 2160h   # on the host: prints a single-use token
+    jailops remote add myhost host.example.org --token-file -                         # on the client: paste the token
 
 The client side is the one-argument form of `remote add`: the server's address (port 39110 unless given), the trust token
 on standard input. It pins the fingerprint the token carries, makes a key pair and is trusted with the token's role and
@@ -271,12 +271,12 @@ The strongest setup JailOps has today: the listener on a public or private addre
    The connection refuses a server whose certificate does not match the fingerprint. With your own CA-signed certificate leave the
    fingerprint to the system roots instead (see "Pinning and renewal").
 4. **Take the tokens and passwords away.** The listener requests a client certificate but does not require one, so a token that
-   exists works from anywhere the firewall lets in: `jailops token list` and `jailops token delete`, no `jailops user create`, and
+   exists works from anywhere the firewall lets in: `jailops token list` and `jailops token revoke`, no `jailops user create`, and
    no `token_secret` in `host.yaml`. A client that presents no certificate and no token reaches only the public routes: `GET /api/v1` (the
    version, the extensions, and whether it is trusted), `GET /healthz`, `GET /readyz`, `POST /api/v1/auth/login` (which needs a valid user and
    password), `POST /api/v1/trust/clients` (which needs a valid single-use trust token), `POST /api/v1/cluster/join` (answers 501) and the
    static console files. A non-root local user of the unix socket is exactly such a client.
-5. Revoke by deleting the identity: `jailops trust revoke NAME|FINGERPRINT`. There is no CRL; the trust store is the list.
+5. Revoke by deleting the identity: `jailops cert revoke NAME|FINGERPRINT`. There is no CRL; the trust store is the list.
 
 **UNVERIFIED on a real network:** the whole recipe end to end on a public address, a CA-signed certificate with renewal on a real host,
 `jailops-sync` over the network with a CA-signed certificate. What the repository's tests do prove, with in-process daemons: TLS 1.3 only

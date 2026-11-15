@@ -208,17 +208,20 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    generation switch and by the jail's snapshots and rollbacks, and stays when the jail is deleted (`jailops volume
    list`). The volumes start empty and root-owned; the definition's `setup` chowns them. The labels `jailops.app=<name>` and
    `jailops.app.hash=<hash>` are set at creation. The `resources` hints become the jail's limits unless `--memory`,
-   `--disk` or `--cpu` replace them. The jail is then **started**.
-2. **Install the packages from the host** with `pkg -r <root> install -y <names>` through the privileged helper, from
+   `--disk` or `--cpu` replace them. The jail is not started yet: its datasets are **mounted** on the host.
+2. **Install the packages from the host** into that root, while the jail has never run, with `pkg -r <root> install -y <names>` through the privileged helper, from
    the FreeBSD repository (`repo: ports`, the host's own repository configuration) or from `pkg.jailops.net`
    (`repo: jailops`: `pkg -r <root> install -y -r jailops <names>`, the repository named `jailops` in the host's
    `pkg` configuration, the one [install.md](install.md) sets up). `-r jailops` limits the whole installation to that
    repository, dependencies included: a JailOps package that needs packages from the FreeBSD repository installs only if
    the definition lists them as `repo: ports` packages too, which go in first (the `ports` group is installed before
    the `jailops` group). The installer assumes the repository exists on the host and does not check it beforehand; a
-   host without it fails at this step with pkg's own message, and the jail is kept stopped. `pkg -r` does not run the jail's library trigger, so the
-   library cache of the running jail is refreshed with `/sbin/ldconfig -m /usr/local/lib` in the jail. The version that was installed is read with
-   `pkg -r <root> query %v <first package>` and becomes the label `jailops.app.version`.
+   host without it fails at this step with pkg's own message, and the jail is kept stopped. For packages of the JailOps
+   repository the repository's configuration and key are then copied from the host into the jail (`seed-jailops-repo`), so
+   that `jailops update` can update them from inside the jail later. The version that was installed is read with
+   `pkg -r <root> query %v <first package>` and becomes the label `jailops.app.version`. The jail is then **started**, and
+   `pkg -r` has not run the jail's library trigger, so the library cache of the running jail is refreshed with
+   `/sbin/ldconfig -m /usr/local/lib` in the jail.
 
    **Ownership.** `pkg -r` extracts the files from the host. A package that creates a user in its install script and
    lists directories owned by that user (`/var/log/valkey`, `/var/run/valkey` belong to `valkey`) gets them
@@ -282,9 +285,9 @@ The events `app.installed` and `app.install.failed` (source `/api/v1/jails/<jail
 `jail-created`, `jail-started` and `jail-snapshot-created` of the steps.
 
 **While the installation runs**, the jail refuses every exec, shell and console session (`busy`, "the app is being
-installed"): `pkg -r` works on the jail root from the host, as root, and nobody else may change that tree meanwhile.
-The packages' install scripts run as root chrooted into the jail root; the app's services are not running during the
-installation (they are enabled and started only afterwards). See [security-model.md](security-model.md).
+installed"). The packages go in from the host while the jail has never run, so what is in its root is the base system of
+its image: their install scripts run as root chrooted into that root, and the app's services are not running until the
+installation has finished (they are enabled and started afterwards). See [security-model.md](security-model.md).
 
 **What a failure leaves behind.** A failure before the jail's first start (the creation itself, also after the jail was
 made, and the start) undoes the creation: the jail and its datasets are deleted again, nothing is left. A failure after the start (a package that does
@@ -322,7 +325,7 @@ denies every inbound connection, from the jail's network, from other jails and f
 itself reaches it until a source is allowed. Three verbs, all in the project of the request:
 
 ```sh
-jailops app allow APP from SOURCE [--port N[/proto]]... [--db NAME] [--rotate] [--dry-run] [--project P]
+jailops app allow APP --from SOURCE [--port N[/proto]]... [--db NAME] [--rotate] [--dry-run] [--project P]
 jailops app deny  APP from SOURCE [--drop-role] [--dry-run] [--project P]
 jailops app access [APP] [-o json|yaml]       # who may connect; without APP, every installed app of the project
 ```
@@ -353,10 +356,10 @@ holds them); the other project's operators allow the app's addresses out in a po
 
 ```sh
 # project shop: the app db lets the jail of project reports in, by its address
-jailops app allow db from 10.30.0.5 --db reports
+jailops app allow db --from 10.30.0.5 --db reports
 # project reports: the jail (10.30.0.5) may connect out to the app's address, written on this side too
-jailops firewall policy create to-shop-db --default-in deny --default-out allow \
-    --rule "allow out tcp to 10.20.0.10 port 5432 comment the shop database"
+jailops firewall policy create to-shop-db --default-in deny --default-out allow
+jailops firewall rule add to-shop-db out --action allow --proto tcp --to 10.20.0.10 --port 5432 --comment "the shop database"
 ```
 
 **What one allow does.**
@@ -414,7 +417,7 @@ grant the source, what it resolved to, the ports, the database and the lines wri
 access block as it was at the first grant (so a deny works after the definition changed) and the roles JailOps made,
 with whether their database was made too and whether they may log in. It never holds a password. Deleting the app's jail
 deletes its policy and its registry; a jail that is the source of a grant is not deleted or renamed until the grant is denied (the refusal says
-`jailops app deny APP from jail:NAME`), because the rule names it.
+`jailops app deny APP --from jail:NAME`), because the rule names it.
 
 **Transparency.** `jailops app access APP` lists each grant with its typed rules, the lines of the jail's rendered
 anchor they became (the state labels left out), its `pg_hba.conf` lines, who made it, and the **problems**: a rule
@@ -452,7 +455,7 @@ restart of a server whose `listen_addresses` was already set by hand, IPv6 sourc
 
 - **Parameters** beyond generated secrets: a definition has no variables and no templates. What needs a choice (a
   domain, a port, a password policy) is a `config` file the person edits, and `notes` says so.
-- **Dependencies between apps** (a forge that needs a database): each app is one jail. `jailops app allow DB from
+- **Dependencies between apps** (a forge that needs a database): each app is one jail. `jailops app allow DB --from
   @FORGE` makes the database's side (role, database, `pg_hba.conf`, firewall) and prints the connection string; writing
   it into the consumer's configuration is the person's step, as its `notes` say.
 - **Multi-jail apps**: one definition, one jail.
@@ -469,7 +472,7 @@ repeats it on any host. The loop:
 
    ```sh
    jailops app new memcached --package memcached --service memcached --port 11211/tcp --category database
-   jailops app export cache --to cache.yaml     # from the running jail "cache" of the current project
+   jailops app export cache --file cache.yaml     # from the running jail "cache" of the current project
    ```
 
    `jailops app new NAME [--package PKG[,PKG...]] [--service NAME] [--port N[/proto]] [--category C] [--dir DIR]`
@@ -478,12 +481,11 @@ repeats it on any host. The loop:
    user to root, the installer runs `ldconfig` and starts services through a wrapper itself, `sysvipc` is for servers
    that need it) and the values the flags give; `--package`, `--service` and `--port` repeat or take commas. It also
    writes `NAME.svg`, a neutral placeholder icon (a rounded square with the first letter), unless an icon of that name
-   is there. It refuses to write over an existing `NAME.yaml` without `--force`.
+   is there. It refuses to write over an existing `NAME.yaml` without `--overwrite`.
 
-   `jailops app export JAIL [--project P] [--to FILE]` asks the daemon for a draft of a running FreeBSD jail and writes
-   it to `FILE` or the standard output (`--force` writes over an existing file; `-o json` or `-o yaml` prints the
-   draft as data instead, `-o` being the output format as everywhere else; `-o FILE.yaml`, the former spelling of
-   `--to`, still writes the file, with a warning). The draft is read, nothing in the jail changes: the packages installed on purpose (their
+   `jailops app export JAIL [--project P] [--file FILE]` asks the daemon for a draft of a running FreeBSD jail and writes
+   it to `FILE` or the standard output (`--overwrite` writes over an existing file; `-o json` or `-o yaml` prints the
+   draft as data instead, `-o` being the output format as everywhere else). The draft is read, nothing in the jail changes: the packages installed on purpose (their
    dependencies come with them; `pkg -r <root> query` on the host), the services enabled in the jail's `/etc/rc.conf`
    and their knobs, the ports something listens on now (`sockstat` in the jail; a port bound to localhost only says
    so), the jail's volumes as `data` paths, the names of the files below `/usr/local/etc` and `/var/log` that changed
@@ -509,7 +511,7 @@ repeats it on any host. The loop:
    `jailops app list --source local`, then `jailops app install NAME`. A local definition of the same name as a
    packaged one replaces it on that host, which is how you test a change to a packaged app.
 
-5. **Iterate**: `jailops delete --force NAME` (type the name to confirm), edit the file in place, `jailops app install NAME` again. A failed installation
+5. **Iterate**: `jailops delete --stop NAME` (type the name to confirm), edit the file in place, `jailops app install NAME` again. A failed installation
    keeps the jail stopped for inspection (`jailops start NAME`, `jailops shell NAME`); the error names the step.
 
 6. **Validate again**, until `jailops app validate NAME.yaml` prints `valid: 1 definition(s), 1 icon(s)`.
@@ -660,7 +662,7 @@ without it). The setup only gives the data directory, the key directory and `ser
 the package intends. Its `notes` are the manual steps: a role and a database in a `postgresql` jail with a `pg_hba.conf`
 rule for the isms jail's address, `DATABASE_URL`, `ISMS_BASE_URL`, `ISMS_SIGNING_EMAIL` and the secret in `server.env`,
 the signing key, `isms server migrate` as `isms`, then `service isms start`. The database's side is one command,
-`jailops app allow ISMS-DB from jail:ISMS --db isms`, which makes the role, the database, the `pg_hba.conf` line and the
+`jailops app allow ISMS-DB --from jail:ISMS --db isms`, which makes the role, the database, the `pg_hba.conf` line and the
 firewall rule and prints the connection string for `DATABASE_URL`; the rest stays the person's. The end-to-end test installs it, runs these steps
 against a `postgresql` jail and sees port 8080 answer with a 2xx or 3xx status. **UNVERIFIED**: what exactly the program
 answers there, and therefore the health path, which the definition leaves out (8080 is the default of `isms server
@@ -720,10 +722,10 @@ Prometheus' `/-/ready`, forgejo's port 3000 answering 200 or a redirect to its i
 host asks the jail for the SOA of `example.com` over UDP and over TCP and `nsd-checkconf` passes in the jail; for `mail`,
 Postfix's `220` greeting on port 25 and Dovecot's `* OK` on port 143 (`nc` that sends `QUIT` or `LOGOUT` one second after connecting, because Postfix refuses commands that arrive before its greeting) and the
 `sendmail` line of `mailer.conf`; for `isms`, the steps of its notes with a `postgresql` jail of its own (`isms-db`):
-`jailops app allow isms-db from jail:isms --db isms` for the role, the database, `listen_addresses`, the `pg_hba.conf` line
+`jailops app allow isms-db --from jail:isms --db isms` for the role, the database, `listen_addresses`, the `pg_hba.conf` line
 and the connection string, then `server.env`, the secret, the signing key, `isms server migrate`, `service isms start`,
 and port 8080 answering a 2xx or 3xx status (curl retries while the program starts). Every app is closed after its
-installation, so each check that connects from the host first runs `jailops app allow APP from host`; the nginx block
+installation, so each check that connects from the host first runs `jailops app allow APP --from host`; the nginx block
 also checks that the page does **not** answer before that. `postgresql-access` in the list is a block of its own: a
 `postgresql` jail and two plain jails with the PostgreSQL client, `allow` from the first (the dry run first), `select 1`
 with the printed connection string from it and a refusal from the second, `app access`, a second `allow` that changes

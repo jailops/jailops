@@ -17,6 +17,9 @@ const MaxAttachments = 16
 
 // JailSpec validates a jail name and spec.
 func JailSpec(name string, s api.JailSpec) error {
+	if err := api.CheckComment(s); err != nil {
+		return err
+	}
 	if err := JailName(name); err != nil {
 		return err
 	}
@@ -108,23 +111,6 @@ func JailSpec(name string, s api.JailSpec) error {
 		seenTag[t] = true
 	}
 	seenName, seenMount := map[string]bool{}, map[string]bool{}
-	seenHost := map[string]bool{}
-	for i, m := range s.HostMounts {
-		f := fmt.Sprintf("host_mounts[%d]", i)
-		if err := AbsPath(f+".source", m.Source); err != nil {
-			return err
-		}
-		if err := AbsPath(f+".target", m.Target); err != nil {
-			return err
-		}
-		if m.Target == "/" {
-			return Invalid(f+".target", "a host directory cannot be mounted on /")
-		}
-		if seenHost[m.Target] {
-			return Invalid(f+".target", "duplicate mount point %q", m.Target)
-		}
-		seenHost[m.Target] = true
-	}
 	for i, v := range s.Volumes {
 		f := fmt.Sprintf("volumes[%d]", i)
 		if err := Name(f+".volume", v.Name); err != nil {
@@ -139,7 +125,7 @@ func JailSpec(name string, s api.JailSpec) error {
 		if seenName[v.Name] {
 			return Invalid(f+".volume", "volume %q is attached twice", v.Name)
 		}
-		if seenMount[v.Mount] || seenHost[v.Mount] {
+		if seenMount[v.Mount] {
 			return Invalid(f+".mount", "duplicate mount point %q", v.Mount)
 		}
 		seenName[v.Name], seenMount[v.Mount] = true, true

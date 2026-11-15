@@ -79,8 +79,12 @@ func TestNewJailGetsBashAndThePrompt(t *testing.T) {
 		t.Fatal("the shell was set up before the first start")
 	}
 	mustOp(e.Admin.Jails().Start(ctx, "web"))
-	if installedBash(e, webRoot) != 1 || !sj.ran("/sbin/ldconfig -m /usr/local/lib") {
+	// bash went in from the host before the jail first ran, so the start's own rc builds the library cache with it
+	if installedBash(e, webRoot) != 1 {
 		t.Fatalf("bash was not installed from the host: %v %v", e.Installed, sj.cmds)
+	}
+	if sj.ran("pkg install") {
+		t.Fatalf("pkg ran inside the jail although the host had installed bash: %v", sj.cmds)
 	}
 	want := "PS1='" + api.DefaultPS1(39) + "'"
 	if !strings.Contains(e.File(webRoot+api.PromptFile), want) {

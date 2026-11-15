@@ -124,7 +124,7 @@ func TestRemoteAddShowsTheFingerprintBeforeTheServersText(t *testing.T) {
 		c, err := x509.ParseCertificate(der)
 		return &cli.CertProbe{Cert: c}, err
 	}
-	_, errs, code := h.run("tok\nn\n", "remote", "add", "evil", ts.URL, "--token-stdin")
+	_, errs, code := h.run("tok\nn\n", "remote", "add", "evil", ts.URL, "--token-file", "-")
 	if code == 0 {
 		t.Fatalf("pinned without a yes: %s", errs)
 	}

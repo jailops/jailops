@@ -435,10 +435,15 @@ func (e *Env) script() {
 		// pkg -r <root> [-o k=v]... <sub> [args]: the image builder passes -o
 		// options and installs a whole base, the app installer names packages.
 		root, i, options := "", 1, false
-		for i < len(argv) && (argv[i] == "-r" || argv[i] == "-o") {
-			if argv[i] == "-r" {
+		for i < len(argv) && (argv[i] == "-r" || argv[i] == "-j" || argv[i] == "-o") {
+			switch argv[i] {
+			case "-r":
 				root = argv[i+1]
-			} else {
+			case "-j": // inside a running jail: its root, as the storage of the fake lays it out
+				if proj, name, ok := strings.Cut(argv[i+1], "_"); ok {
+					root = "/jailops/projects/" + proj + "/jails/" + name + "/root"
+				}
+			default:
 				options = true
 			}
 			i += 2

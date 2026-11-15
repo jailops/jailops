@@ -76,7 +76,7 @@ func TestProjectAndJailRulesOfTheDaemonAreChecked(t *testing.T) {
 	write(t, d, "shared/networks/n.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  ipv4: {subnet: 10.1.0.0/24, gateway: 10.1.0.1, range: 10.1.0.2-10.1.0.9}\n")
 	write(t, d, "shared/images/i.yaml", "apiVersion: jailops/v1\nkind: Image\nmetadata:\n  name: i\nspec:\n  os: freebsd\n  release: 15.1-RELEASE\n  arch: amd64\n  source: {type: pkgbase}\n")
 	project(t, d, "p", "[a]", "  networks: [{network: n}]\n  storage: [{storage: s}]\n")
-	write(t, d, "projects/p/jails/j.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [a]\nmetadata:\n  name: j\nspec:\n  image: i@stable\n  storage: s\n  encrypted: true\n  packages: [nginx]\n  network: [{network: n}]\n  volumes: [{volume: keys, mount: /srv/keys}]\n  host_mounts:\n    - {source: /hdd/a, target: /mnt/a}\n    - {source: /hdd/b, target: /mnt/a, read_only: true}\n")
+	write(t, d, "projects/p/jails/j.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [a]\nmetadata:\n  name: j\nspec:\n  image: i@stable\n  storage: s\n  encrypted: true\n  packages: [nginx]\n  network: [{network: n}]\n  volumes: [{volume: keys, mount: /srv/keys}]\n")
 	f, err := Load(d)
 	if err != nil {
 		t.Fatal(err)
@@ -85,7 +85,7 @@ func TestProjectAndJailRulesOfTheDaemonAreChecked(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted")
 	}
-	for _, want := range []string{"spec.encrypted is reserved: native ZFS encryption is not implemented", "spec.encrypted is reserved: native ZFS encryption of jails", "spec.packages is reserved", "duplicate mount point"} {
+	for _, want := range []string{"spec.encrypted is reserved: native ZFS encryption is not implemented", "spec.encrypted is reserved: native ZFS encryption of jails", "spec.packages is reserved"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("missing %q in:\n%v", want, err)
 		}
@@ -94,15 +94,12 @@ func TestProjectAndJailRulesOfTheDaemonAreChecked(t *testing.T) {
 	if !strings.Contains(w, `volumes refers to volume "keys", which is not declared`) {
 		t.Errorf("no warning for a volume that is not declared:\n%s", w)
 	}
-	if !strings.Contains(w, "read-write") || !strings.Contains(w, "admin-host-mount") {
-		t.Errorf("host mount warnings:\n%s", w)
-	}
 }
 
 func TestProfilesCannotCarryAdminOnlyKeys(t *testing.T) {
 	d := base(t)
-	write(t, d, "profiles/x.yaml", "apiVersion: jailops/v1\nkind: Profile\nmetadata:\n  name: x\nspec:\n  host_mounts:\n    - {source: /a, target: /b}\n")
-	if _, err := Load(d); err == nil || !strings.Contains(err.Error(), "cannot carry host_mounts") {
+	write(t, d, "profiles/x.yaml", "apiVersion: jailops/v1\nkind: Profile\nmetadata:\n  name: x\nspec:\n  zfs_delegation: true\n")
+	if _, err := Load(d); err == nil || !strings.Contains(err.Error(), "cannot carry zfs_delegation") {
 		t.Fatalf("got %v", err)
 	}
 }

@@ -52,7 +52,7 @@ send("exit\n")
 `
 
 // Completion of a reference in a real bash, which splits a word at a colon: the kinds after a Tab, the names after a
-// kind, inside a quoted --rule too. It runs the generated completion script in an interactive bash (python3 drives
+// kind, inside a quoted value too. It runs the generated completion script in an interactive bash (python3 drives
 // the terminal) after sourcing the bash-completion package, which the generated script needs: it is opt-in, with
 // BASH_COMPLETION_SCRIPT set to the package's bash_completion file (for example /usr/share/bash-completion/bash_completion).
 // Without it, bash, python3 or go it is skipped.
@@ -71,8 +71,8 @@ func TestBashCompletionOfReferences(t *testing.T) {
 		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	for _, args := range [][]string{
-		{"app", "install", "postgresql", "--name", "db", "--image", "freebsd-151@stable"},
-		{"app", "install", "nginx", "--name", "web", "--image", "freebsd-151@stable"},
+		{"app", "install", "postgresql", "db", "--image", "freebsd-151@stable"},
+		{"app", "install", "nginx", "web", "--image", "freebsd-151@stable"},
 		{"firewall", "address-set", "create", "office", "--address", "198.51.100.0/24"},
 	} {
 		if o, e, code := h.run("", args...); code != 0 {
@@ -96,10 +96,10 @@ func TestBashCompletionOfReferences(t *testing.T) {
 		{`jailops firewall address-set create s --address `, "\t\t"},
 		{`jailops firewall address-set create s --address ja`, "\t"},
 		{`jailops firewall address-set create s --address jail:`, "\t\t"},
-		{`jailops firewall policy create p --rule "allow in tcp from `, "\t\t"},
-		{`jailops firewall policy create p --rule "allow in tcp from ja`, "\t"},
-		{`jailops firewall policy create p --rule "allow in tcp from jail:`, "\t\t"},
-		{`jailops app allow db from `, "\t\t"},
+		{`jailops firewall rule add p in --from "`, "\t\t"},
+		{`jailops firewall rule add p in --from "ja`, "\t"},
+		{`jailops firewall rule add p in --from "jail:`, "\t\t"},
+		{`jailops app allow db --from `, "\t\t"},
 		{`jailops firewall test --from jail:`, "\t\t"},
 	}
 	arg, err := json.Marshal(cases)
@@ -153,8 +153,8 @@ func TestBashCompletionOfReferences(t *testing.T) {
 	}
 }
 
-// The generated bash script asks the program through eval, which refuses an unfinished quote: a rule typed as
-// --rule "allow in tcp from ja<Tab> would complete nothing. The script closes the quote of the last word first, so the
+// The generated bash script asks the program through eval, which refuses an unfinished quote: a value typed as
+// --from "ja<Tab> would complete nothing. The script closes the quote of the last word first, so the
 // request reaches the program. This runs the script's own function in bash (no bash-completion package needed).
 func TestBashScriptClosesAnUnfinishedQuote(t *testing.T) {
 	for _, tool := range []string{"bash", "go"} {
@@ -180,12 +180,12 @@ func TestBashScriptClosesAnUnfinishedQuote(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range []struct{ last, want string }{
-		{`"allow in tcp from ja`, "allow in tcp from jail:"},
-		{`'allow in tcp from ja`, "allow in tcp from jail:"},
-		{`"allow in tcp from ja"`, "allow in tcp from jail:"},
-		{`"allow in tcp from set:o`, "allow in tcp from set:office"}, // a name after a kind, the colon inside the word
+		{`"ja`, "jail:"},
+		{`'ja`, "jail:"},
+		{`"ja"`, "jail:"},
+		{`"set:o`, "set:office"}, // a name after a kind, the colon inside the word
 	} {
-		cmd := exec.Command("bash", "-c", `source "$1"; words=("$2" firewall policy create p --rule "$3"); cur="$3"; __jailops_get_completion_results; printf '%s' "$out"`, "bash", file, bin, c.last)
+		cmd := exec.Command("bash", "-c", `source "$1"; words=("$2" firewall rule add p in --from "$3"); cur="$3"; __jailops_get_completion_results; printf '%s' "$out"`, "bash", file, bin, c.last)
 		cmd.Env = append(os.Environ(), "JAILOPS_CONFIG="+h.cfgFile)
 		out, err := cmd.CombinedOutput()
 		if err != nil {

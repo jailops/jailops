@@ -74,3 +74,24 @@ func TestEditRenames(t *testing.T) {
 	}
 	tr.golden("edit_rename")
 }
+
+// The renames of the objects that stand on their own: a volume (with the attachments of the jails), a user.
+func TestRenameVolumeAndUserCommands(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	tr := h.transcript()
+	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	tr.ok("volume", "create", "data")
+	tr.ok("volume", "attach", "web", "data", "/srv/data")
+	tr.ok("volume", "rename", "data", "store", "--dry-run")
+	tr.ok("volume", "rename", "data", "store", "-y")
+	if j, _ := h.srv.JailIn("main", "web"); len(j.Spec.Volumes) != 1 || j.Spec.Volumes[0].Name != "store" {
+		t.Fatalf("%+v", j.Spec.Volumes)
+	}
+	tr.do("", "volume", "rename", "store", "Bad_Name", "-y")
+	tr.ok("user", "create", "ann", "--role", "admin", "--global")
+	tr.ok("user", "rename", "ann", "carl", "-y")
+	if out, _, code := h.run("", "user", "show", "carl"); code != 0 || !strings.Contains(out, "carl") {
+		t.Fatalf("user show carl: %d %q", code, out)
+	}
+}

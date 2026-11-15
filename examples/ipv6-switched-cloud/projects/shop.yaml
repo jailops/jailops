@@ -3,7 +3,7 @@ kind: Project
 metadata:
   name: shop
 spec:
-  description: The public shop. Its web jail is reachable from the internet over IPv6.
+  comment: The public shop. Its web jail is reachable from the internet over IPv6.
   hosts: [cloud1]
   networks:
     - {network: shop}

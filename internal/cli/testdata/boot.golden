@@ -16,8 +16,11 @@ jail/ghost-user created
 $ jailops volume create secrets --encrypted --passphrase-file <dir>/vault.pass
 volume/secrets created
 
-$ jailops create vault --image freebsd-15@stable --storage default --network lan --autostart --volume secrets:/srv/db
+$ jailops create vault --image freebsd-15@stable --storage default --network lan --autostart
 jail/vault created
+
+$ jailops volume attach vault secrets /srv/db
+volume/secrets attached to jail vault
 
 $ jailops create report --image freebsd-15@stable --storage default --network lan --autostart --depends vault
 jail/report created

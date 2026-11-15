@@ -64,33 +64,20 @@ jailops firewall validate -f policy.yaml`, "fw")
 	pd := policyDesc()
 	pc := group("policy", "Manage firewall policies", "Create, inspect, edit and delete firewall policies.",
 		"jailops firewall policy list\njailops firewall policy show web", "policies")
-	crudCommands(a, pc, pd, `Create a firewall policy from rule flags or a file. Each --rule has the form
-"ACTION DIRECTION [PROTO] [from ADDR,..] [to ADDR,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [disabled] [comment TEXT]";
-comment is last and takes the rest of the rule: why the rule is there, which a reviewer of the firewall reads.
-disabled switches a rule off without deleting it: it keeps its number and shows in the policy and as a comment line
-of the anchor, and it is not loaded. A deny rule wins over every allow rule, whatever the order of the policies.
---comment is what the policy is for. Without --default-in and --default-out the policy denies
-inbound and allows outbound traffic; both are written into the policy.`,
-		`jailops firewall policy create web --comment "the public web server" --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from set:office port 22 comment ssh from the office"
+	crudCommands(a, pc, pd, `Create a firewall policy, empty or from a file. A policy is made of rules, added one at a time with
+'jailops firewall rule add' (or all at once from a file with -f). --comment is what the policy is for. Without
+--default-in and --default-out the policy denies inbound and allows outbound traffic; both are written into the policy.
+A deny rule wins over every allow rule, whatever the order of the policies.`,
+		`jailops firewall policy create web --comment "the public web server"
+jailops firewall rule add web in --action allow --proto tcp --port 80,443 --comment "the site"
 jailops firewall policy create -f web.yaml`,
 		func(cmd *cobra.Command) func(string) (api.FirewallPolicy, error) {
 			var din, dout, comment string
-			var rules []string
 			cmd.Flags().StringVar(&comment, "comment", "", "what the policy is for (one line, at most 200 characters, no double quotes or backslashes)")
 			cmd.Flags().StringVar(&din, "default-in", "deny", "default for inbound traffic: allow or deny")
 			cmd.Flags().StringVar(&dout, "default-out", "allow", "default for outbound traffic: allow or deny")
-			cmd.Flags().StringArrayVar(&rules, "rule", nil, "a rule (repeatable)")
-			_ = cmd.RegisterFlagCompletionFunc("rule", a.completeRule())
 			return func(name string) (api.FirewallPolicy, error) {
-				p := api.FirewallPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.FirewallPolicySpec{DefaultIn: din, DefaultOut: dout, Comment: comment}}
-				for _, r := range rules {
-					fr, err := parseRule(r)
-					if err != nil {
-						return p, err
-					}
-					p.Spec.Rules = append(p.Spec.Rules, fr)
-				}
-				return p, nil
+				return api.FirewallPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.FirewallPolicySpec{DefaultIn: din, DefaultOut: dout, Comment: comment}}, nil
 			}
 		})
 	ad := addrSetDesc()
@@ -125,79 +112,8 @@ jailops firewall policy create -f web.yaml`,
 				return api.AddressSet{Metadata: api.ObjectMeta{Name: name}, Spec: spec}, nil
 			}
 		})
-	fc.AddCommand(pc, ac, a.firewallValidate(), a.firewallTest())
+	fc.AddCommand(pc, a.ruleCmd(), ac, a.firewallValidate(), a.firewallTest())
 	return fc
-}
-
-func parseRule(s string) (api.FirewallRule, error) {
-	t := strings.Fields(s)
-	var r api.FirewallRule
-	if len(t) < 2 {
-		return r, usagef("rule %q needs at least ACTION and DIRECTION", s)
-	}
-	r.Action, r.Direction = t[0], t[1]
-	t = t[2:]
-	if len(t) > 0 && slices.Contains([]string{"tcp", "udp", "icmp", "icmp6"}, t[0]) {
-		r.Proto, t = t[0], t[1:]
-	}
-	list := func(v string) []string { return strings.Split(v, ",") }
-	for len(t) > 0 {
-		switch t[0] {
-		case "log":
-			r.Log, t = true, t[1:]
-			continue
-		case "disabled":
-			r.Disabled, t = true, t[1:]
-			continue
-		case "comment": // the rest of the rule
-			if len(t) < 2 {
-				return r, usagef("rule %q: comment needs a text", s)
-			}
-			r.Comment, t = strings.Join(t[1:], " "), nil
-			continue
-		}
-		if len(t) < 2 {
-			return r, usagef("rule %q: %q needs a value", s, t[0])
-		}
-		switch t[0] {
-		case "from":
-			r.From = list(t[1])
-			if err := checkRefs(s, r.From); err != nil {
-				return r, err
-			}
-		case "to":
-			r.To = list(t[1])
-			if err := checkRefs(s, r.To); err != nil {
-				return r, err
-			}
-		case "port":
-			r.Ports = list(t[1])
-		case "name":
-			r.Name = t[1]
-		case "rdr":
-			h, j, ok := strings.Cut(t[1], ":")
-			hp, e1 := strconv.Atoi(h)
-			jp, e2 := strconv.Atoi(j)
-			if !ok || e1 != nil || e2 != nil {
-				return r, usagef("rule %q: rdr must be HOSTPORT:JAILPORT", s)
-			}
-			r.Redirect = &api.Redirect{HostPort: hp, JailPort: jp}
-		default:
-			return r, usagef("rule %q: unknown word %q", s, t[0])
-		}
-		t = t[2:]
-	}
-	return r, nil
-}
-
-// checkRefs refuses a from or to list whose entries are not addresses or references (jail:NAME, set:NAME, tag:NAME).
-func checkRefs(rule string, entries []string) error {
-	for _, e := range entries {
-		if err := validate.ValidateEndpoint(e); err != nil {
-			return usagef("rule %q: %v", rule, err)
-		}
-	}
-	return nil
 }
 
 // validation ---------------------------------------------------------------

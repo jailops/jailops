@@ -36,11 +36,11 @@ func (a *app) readLine() (string, error) {
 }
 
 // readSecretFromTerminal reads a line from the terminal without echoing it. It refuses when standard input is not a terminal:
-// a password never comes from a command line, so a script says --password-stdin.
+// a password never comes from a command line, so a script says --password-file -.
 func readSecretFromTerminal(e *Env, prompt string) (string, error) {
 	f, ok := e.Stdin.(*os.File)
 	if !ok || !e.IsTTY(f) {
-		return "", usagef("standard input is not a terminal: pass --password-stdin and give the password on its first line")
+		return "", usagef("standard input is not a terminal: pass --password-file - and give the password on its first line")
 	}
 	fprintf(e.Stderr, "%s", prompt)
 	b, err := term.ReadPassword(int(f.Fd()))
@@ -51,19 +51,12 @@ func readSecretFromTerminal(e *Env, prompt string) (string, error) {
 	return string(b), nil
 }
 
-// newPassword reads a password for a person: from the first line of standard input with --password-stdin, from
-// the first line of a file with --password-file (- is standard input), else from a prompt asked twice. It is never
+// newPassword reads a password for a person: from the first line of a file with --password-file (- is standard
+// input), else from a prompt asked twice. It is never
 // an argument of the command line.
-func (a *app) newPassword(fromStdin bool, file string) (string, error) {
+func (a *app) newPassword(file string) (string, error) {
 	if file != "" {
 		return a.readSecretFile("password", file)
-	}
-	if fromStdin {
-		line, err := a.readLine()
-		if err != nil || line == "" {
-			return "", usagef("--password-stdin needs the password on the first line of standard input")
-		}
-		return line, nil
 	}
 	first, err := a.env.ReadSecret("New password: ")
 	if err != nil {

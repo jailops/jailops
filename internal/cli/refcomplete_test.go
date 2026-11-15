@@ -1,14 +1,16 @@
 package cli_test
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
 	"jailops.net/jailops/sdk/api"
 )
 
-// A reference is completed in two levels, also inside --rule: the kinds where a reference is expected, the names after a
-// kind. The candidates are the whole text typed so far with the word completed, so the shell can replace the string.
+// A reference is completed in two levels in the --from and --to of a rule: the kinds where a reference is expected,
+// the names after a kind. The rule commands complete their other words too: the policy, the direction, the flags'
+// values and the rules of a policy.
 func TestRuleCompletion(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
@@ -16,39 +18,45 @@ func TestRuleCompletion(t *testing.T) {
 		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	for _, args := range [][]string{
-		{"app", "install", "postgresql", "--name", "db", "--image", "freebsd-151@stable"},
-		{"app", "install", "nginx", "--name", "web", "--image", "freebsd-151@stable"},
+		{"app", "install", "postgresql", "db", "--image", "freebsd-151@stable"},
+		{"app", "install", "nginx", "web", "--image", "freebsd-151@stable"},
 		{"firewall", "address-set", "create", "office", "--address", "198.51.100.0/24"},
 		{"firewall", "address-set", "create", "vpn", "--address", "203.0.113.0/24"},
+		{"firewall", "policy", "create", "p"},
+		{"firewall", "rule", "add", "p", "in", "--action", "allow", "--proto", "tcp", "--port", "80,443", "--name", "site", "--comment", "the site"},
+		{"firewall", "rule", "add", "p", "in", "--action", "allow", "--proto", "tcp", "--port", "22", "--from", "set:office", "--comment", "ssh from the office"},
 	} {
 		if o, e, code := h.run("", args...); code != 0 {
 			t.Fatalf("%v: %s %s", args, o, e)
 		}
 	}
-	create := []string{"firewall", "policy", "create", "p", "--rule"}
+	add := []string{"firewall", "rule", "add", "p", "in", "--action", "allow"}
 	for _, c := range []struct {
-		typed      string
+		args       []string
 		want, none []string
 	}{
-		{"", []string{"allow", "deny"}, []string{"in", "from"}},
-		{"al", []string{"allow"}, []string{"deny"}},
-		{"allow ", []string{"allow in", "allow out"}, nil},
-		{"allow in ", []string{"allow in tcp", "allow in udp", "allow in icmp", "allow in icmp6", "allow in from", "allow in port", "allow in comment"}, nil},
-		{"allow in tcp ", []string{"allow in tcp from", "allow in tcp to", "allow in tcp port", "allow in tcp disabled"}, []string{"allow in tcp tcp"}},
-		{"allow in tcp from ", []string{"allow in tcp from jail:", "allow in tcp from set:", "allow in tcp from tag:", "allow in tcp from any"}, []string{"allow in tcp from host", "allow in tcp from jail:web", "allow in tcp from @web"}},
-		{"allow in tcp from j", []string{"allow in tcp from jail:"}, []string{"allow in tcp from set:"}},
-		{"allow in tcp from jail:", []string{"allow in tcp from jail:web", "allow in tcp from jail:db"}, []string{"allow in tcp from set:office"}},
-		{"allow in tcp from set:", []string{"allow in tcp from set:office", "allow in tcp from set:vpn"}, nil},
-		{"allow in tcp from set:office,", []string{"allow in tcp from set:office,jail:", "allow in tcp from set:office,set:", "allow in tcp from set:office,any"}, nil},
-		{"allow in tcp from set:office,set:v", []string{"allow in tcp from set:office,set:vpn"}, []string{"allow in tcp from set:office,set:office"}},
-		{"allow in tcp from set:office ", []string{"allow in tcp from set:office port", "allow in tcp from set:office comment"}, nil},
-		{"allow out tcp to ", []string{"allow out tcp to jail:", "allow out tcp to set:"}, nil},
-		{"allow in tcp port ", nil, []string{"allow in tcp port from"}},
-		{"allow in tcp comment from ", nil, []string{"allow in tcp comment from jail:"}},
+		{append(slices.Clone(add), "--from", ""), []string{"jail:", "set:", "tag:", "any"}, []string{"host", "jail:web", "@web"}},
+		{append(slices.Clone(add), "--from", "j"), []string{"jail:"}, []string{"set:"}},
+		{append(slices.Clone(add), "--from", "jail:"), []string{"jail:web", "jail:db"}, []string{"set:office"}},
+		{append(slices.Clone(add), "--from", "set:"), []string{"set:office", "set:vpn"}, nil},
+		{append(slices.Clone(add), "--from", "set:office,"), []string{"set:office,jail:", "set:office,set:", "set:office,any"}, nil},
+		{append(slices.Clone(add), "--from", "set:office,set:v"), []string{"set:office,set:vpn"}, []string{"set:office,set:office"}},
+		{[]string{"firewall", "rule", "add", "p", "out", "--action", "allow", "--to", ""}, []string{"jail:", "set:"}, nil},
+		{append(slices.Clone(add), "--proto", ""), []string{"tcp", "udp", "icmp", "icmp6"}, nil},
+		{append(slices.Clone(add), "--port", ""), []string{"22", "80", "443", "5432"}, nil},
+		{append(slices.Clone(add), "--port", "80,"), []string{"80,22", "80,443"}, nil},
+		{[]string{"firewall", "rule", "add", "p", "in", "--action", ""}, []string{"allow", "deny"}, nil},
+		{[]string{"firewall", "rule", "add", "p", ""}, []string{"in", "out"}, nil},
+		{[]string{"firewall", "rule", "add", ""}, []string{"p"}, nil},
+		{[]string{"firewall", "rule", "remove", "p", ""}, []string{"1", "2", "site"}, nil},
+		{[]string{"firewall", "rule", "list", ""}, []string{"p"}, nil},
+		{[]string{"firewall", "rule", "move", "p", "2", "--before", ""}, []string{"1", "site"}, nil},
+		{[]string{"firewall", "rule", "edit", "p", "site", "--direction", ""}, []string{"in", "out"}, nil},
+		{[]string{"firewall", "rule", "enable", "p", ""}, []string{"1", "2"}, nil},
 	} {
-		out, _, code := h.run("", append(append([]string{"__complete"}, create...), c.typed)...)
+		out, _, code := h.run("", append([]string{"__complete"}, c.args...)...)
 		if code != 0 {
-			t.Fatalf("%q: %d", c.typed, code)
+			t.Fatalf("%v: %d", c.args, code)
 		}
 		has := func(s string) bool {
 			for _, l := range strings.Split(out, "\n") {
@@ -60,13 +68,16 @@ func TestRuleCompletion(t *testing.T) {
 		}
 		for _, w := range c.want {
 			if !has(w) {
-				t.Errorf("complete --rule %q: %q missing in %q", c.typed, w, out)
+				t.Errorf("complete %v: %q missing in %q", c.args, w, out)
 			}
 		}
 		for _, w := range c.none {
 			if has(w) {
-				t.Errorf("complete --rule %q: %q offered in %q", c.typed, w, out)
+				t.Errorf("complete %v: %q offered in %q", c.args, w, out)
 			}
+		}
+		if strings.HasSuffix(out, ":0\n") && len(c.want) > 0 {
+			t.Errorf("complete %v: falls back to files: %q", c.args, out)
 		}
 	}
 }
@@ -79,9 +90,9 @@ func TestAtSignIsRefused(t *testing.T) {
 		args []string
 		want string
 	}{
-		{[]string{"firewall", "policy", "create", "p", "--rule", "allow in tcp from @office port 22"}, "@ is not used: write jail:office, set:office or tag:office"},
+		{[]string{"firewall", "rule", "add", "p", "in", "--action", "allow", "--from", "@office"}, "@ is not used: write jail:office, set:office or tag:office"},
 		{[]string{"firewall", "address-set", "create", "s", "--address", "@web"}, "@ is not used"},
-		{[]string{"firewall", "policy", "create", "q", "--rule", "allow in tcp from group:office"}, "unknown kind"},
+		{[]string{"firewall", "rule", "add", "p", "in", "--action", "allow", "--from", "group:office"}, "unknown kind"},
 	} {
 		_, e, code := h.run("", c.args...)
 		if code == 0 || !strings.Contains(e, c.want) {

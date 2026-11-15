@@ -16,6 +16,7 @@ import (
 	"jailops.net/jailops/internal/state"
 	"jailops.net/jailops/internal/store"
 	"jailops.net/jailops/internal/sys/run"
+	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -222,6 +223,12 @@ func (st renameStep) describe() string {
 		return fmt.Sprintf("pfctl -a %s -f -; pfctl -a %s -F all", st.To, st.From)
 	case "dir":
 		return fmt.Sprintf("mv %s %s", st.From, st.To)
+	case "storage-registry":
+		return fmt.Sprintf("the daemon registers storage %s as %s", st.From, st.To)
+	case "user-name":
+		return fmt.Sprintf("rename user %s to %s", st.From, st.To)
+	case "wg-keys":
+		return fmt.Sprintf("move the keys of tunnel %s to %s", st.From, st.To)
 	case "identities":
 		return fmt.Sprintf("replace project %s by %s in the scopes of %d identities", st.From, st.To, st.Refs.Count())
 	case "ifdesc":
@@ -335,6 +342,27 @@ func (s *Service) renameDo(ctx context.Context, st renameStep, undo bool) error 
 			return s.replaceProject(ctx, *st.Refs, st.To, st.From)
 		}
 		return s.replaceProject(ctx, *st.Refs, st.From, st.To)
+	case "storage-registry":
+		from, to := st.From, st.To
+		if undo {
+			from, to = to, from
+		}
+		return s.renameStorageRegistry(from, to)
+	case "user-name":
+		from, to := st.From, st.To
+		if undo {
+			from, to = to, from
+		}
+		return s.renameUserName(ctx, st.Prop, from, to)
+	case "wg-keys":
+		from, to := st.From, st.To
+		if undo {
+			from, to = to, from
+		}
+		if s.d.WG == nil {
+			return nil
+		}
+		return s.d.WG.WGRename(ctx, wireguard.RenameReq{From: from, To: to})
 	case "ifdesc":
 		v := st.NewValue
 		if undo {

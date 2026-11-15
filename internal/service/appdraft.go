@@ -63,7 +63,7 @@ func (s *Service) AppDraft(ctx context.Context, name string) (api.AppDraft, erro
 		f.Volumes = append(f.Volumes, v.Mount)
 	}
 
-	argv := apps.PkgLeavesArgv(root)
+	argv := apps.PkgLeavesArgv(key)
 	res, err := s.d.Run.Run(ctx, run.Cmd{Name: argv[0], Args: argv[1:], Timeout: draftTimeout})
 	if err != nil {
 		return api.AppDraft{}, fmt.Errorf("list the packages of jail %s: %w: %s", name, err, tailOf(res.Stderr))

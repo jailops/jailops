@@ -14,10 +14,10 @@ describe('setup: the network step takes every prefix the server takes', () => {
 
 describe('setup: the renamed host', () => {
   it('rewrites the client command the daemon built with its old name', () => {
-    const cmd = 'jailops remote add bsd01 https://bsd01.example.net:39110 --fingerprint ab --token-stdin'
-    expect(retargetRemoteAdd(cmd, 'bsd01.example.net', 'jails1.example.com')).toBe('jailops remote add jails1 https://jails1.example.com:39110 --fingerprint ab --token-stdin')
+    const cmd = 'jailops remote add bsd01 https://bsd01.example.net:39110 --fingerprint ab --token-file -'
+    expect(retargetRemoteAdd(cmd, 'bsd01.example.net', 'jails1.example.com')).toBe('jailops remote add jails1 https://jails1.example.com:39110 --fingerprint ab --token-file -')
     expect(retargetRemoteAdd(cmd, 'bsd01.example.net', 'bsd01.example.net')).toBe(cmd)
     // a command for another name (an ACME domain) is not touched
-    expect(retargetRemoteAdd('jailops remote add web https://web.example.com:39110 --token-stdin', 'bsd01.example.net', 'x.example.com')).toBe('jailops remote add web https://web.example.com:39110 --token-stdin')
+    expect(retargetRemoteAdd('jailops remote add web https://web.example.com:39110 --token-file -', 'bsd01.example.net', 'x.example.com')).toBe('jailops remote add web https://web.example.com:39110 --token-file -')
   })
 })

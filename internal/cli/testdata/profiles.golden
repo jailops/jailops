@@ -1,4 +1,4 @@
-$ jailops profile create base --description defaults --set limits.memory=1G --set boot.autostart=true
+$ jailops profile create base --comment defaults --set limits.memory=1G --set boot.autostart=true
 profile/base created
 
 $ jailops profile create web --set limits.memory=4G --set nic.eth1=lan
@@ -19,7 +19,7 @@ $ jailops profile create bad3 --set limits.memory
 [exit 2]
 
 $ jailops profile list
-NAME   KEYS   DESCRIPTION
+NAME   KEYS   COMMENT
 base   2      defaults
 web    2      -
 

@@ -170,7 +170,7 @@ func TestAppDraftThroughTheHelper(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(root, "etc"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	argv := apps.PkgLeavesArgv(root)
+	argv := apps.PkgLeavesArgv("alpha_cache")
 	if _, out, err := c.CheckCommandCtx(ctx, argv); err != nil || out[0] != "/usr/sbin/pkg" || !slices.Equal(out[1:], argv[1:]) {
 		t.Fatalf("%q: %q %v", argv, out, err)
 	}
@@ -194,9 +194,10 @@ func TestAppDraftThroughTheHelper(t *testing.T) {
 	}
 	// the exact form still needs a jail root
 	bad(api.CodeInvalid, "pkg", "query", "-e", apps.PkgLeavesQuery, apps.PkgLeavesFormat)
-	bad(api.CodeForbidden, apps.PkgLeavesArgv("/usr/local")...)
-	bad(api.CodeForbidden, apps.PkgLeavesArgv(e.cfg.MountBase)...)
-	bad(api.CodeForbidden, apps.PkgLeavesArgv(root+"/../../../../../..")...)
+	bad(api.CodeInvalid, apps.PkgLeavesArgv("/usr/local")...)
+	bad(api.CodeInvalid, apps.PkgLeavesArgv(e.cfg.MountBase)...)
+	bad(api.CodeInvalid, apps.PkgLeavesArgv(root+"/../../../../../..")...)
+	bad(api.CodeInvalid, apps.PkgLeavesArgv("cache")...)
 	bad(api.CodeForbidden, "pkg", "-o", "REPOS_DIR=/etc", "-r", root, "query", "-e", apps.PkgLeavesQuery, apps.PkgLeavesFormat)
 
 	// the in-jail reads run in a managed jail only, as argv

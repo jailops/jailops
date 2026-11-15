@@ -3,7 +3,7 @@ kind: Project
 metadata:
   name: intra
 spec:
-  description: Internal tools. Nothing in this project is reachable from the internet.
+  comment: Internal tools. Nothing in this project is reachable from the internet.
   hosts: [cloud1]
   networks:
     - {network: intra}

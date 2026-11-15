@@ -319,7 +319,7 @@ func TestProjectLayoutRules(t *testing.T) {
 		files map[string]string
 		want  string
 	}{
-		"hosts required":              {map[string]string{"projects/web.yaml": proj("  description: x\n")}, "spec.hosts is required"},
+		"hosts required":              {map[string]string{"projects/web.yaml": proj("  comment: x\n")}, "spec.hosts is required"},
 		"unknown host":                {map[string]string{"projects/web.yaml": proj("  hosts: [zz]\n")}, `unknown host "zz"`},
 		"default is an ordinary name": {map[string]string{"projects/default.yaml": strings.Replace(proj("  hosts: [a]\n"), "web", "default", 1)}, ""},
 		"object without a project":    {map[string]string{"hosts/a/address-sets/s.yaml": "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: s\nspec:\n  addresses: [{address: 1.1.1.1}]\n"}, "belongs to a project"},

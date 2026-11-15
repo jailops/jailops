@@ -80,9 +80,9 @@ Or from the command line or the console, which store the list in the daemon's st
 stored list replaces the file's** until `jailops logs forward reset` (or *Reset to the file* in the console) deletes it.
 `jailops logs forward list` says which one is in force.
 
-    jailops logs forward add syslog --to tls://logs.example.com:6514 --facility local3 [--ca FILE] [--jail NAME]... [-l K=V]...
-    jailops logs forward add webhook --to https://hooks.example.com/jailops --token-file /usr/local/etc/jailops/sinks/hook.token --audit
-    jailops logs forward edit central --facility local5
+    jailops logs forward add central --url tls://logs.example.com:6514 --facility local3 [--ca FILE] [--jail NAME]... [-l K=V]...
+    jailops logs forward add hooks --url https://hooks.example.com/jailops --token-file /usr/local/etc/jailops/sinks/hook.token --audit
+    jailops logs forward set central --facility local5
     jailops logs forward test central            one tagged line, and whether it was delivered
     jailops logs forward status                  sent, queued, dropped, last delivery, failing since, last error
     jailops logs forward remove alerts           asks first; -y in a script

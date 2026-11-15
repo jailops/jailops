@@ -79,8 +79,9 @@ func TestLabelsAndFreeTextAreChecked(t *testing.T) {
 		}
 	}
 	for _, c := range []struct{ name, method, path, body string }{
-		{"project description", "POST", "/api/v1/projects", `{"metadata":{"name":"pctl"},"spec":{"description":"\u001b]52;c;cHduZWQ=\u0007"}}`},
-		{"long project description", "POST", "/api/v1/projects", `{"metadata":{"name":"plong"},"spec":{"description":"` + strings.Repeat("d", api.MaxFreeText+1) + `"}}`},
+		{"project comment", "POST", "/api/v1/projects", `{"metadata":{"name":"pctl"},"spec":{"comment":"\u001b]52;c;cHduZWQ=\u0007"}}`},
+		{"long project comment", "POST", "/api/v1/projects", `{"metadata":{"name":"plong"},"spec":{"comment":"` + strings.Repeat("d", api.MaxFreeText+1) + `"}}`},
+		{"project comment of two lines", "POST", "/api/v1/projects", `{"metadata":{"name":"p2l"},"spec":{"comment":"two lines\nand a tab\there"}}`},
 		{"snapshot comment", "POST", "/api/v1/jails/web/snapshots?project=" + dtest.SeedProject, `{"comment":"\u001b[2J"}`},
 	} {
 		if c.path != "/api/v1/projects" {
@@ -90,7 +91,7 @@ func TestLabelsAndFreeTextAreChecked(t *testing.T) {
 			t.Errorf("%s: %d %s", c.name, code, trunc(body))
 		}
 	}
-	if code, body := rawDo(t, e, "POST", "/api/v1/projects", tok, `{"metadata":{"name":"pok"},"spec":{"description":"two lines\nand a tab\there"}}`, nil); code != 201 {
-		t.Errorf("a description of two lines: %d %s", code, body)
+	if code, body := rawDo(t, e, "POST", "/api/v1/projects", tok, `{"metadata":{"name":"pok"},"spec":{"comment":"one line, with a café"}}`, nil); code != 201 {
+		t.Errorf("a comment of one line: %d %s", code, body)
 	}
 }

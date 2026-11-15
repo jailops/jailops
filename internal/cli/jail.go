@@ -124,20 +124,20 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 }
 
 // jailLoss says what deleting a jail destroys: the sizes of its root and data, its volumes and the number of its
-// snapshots, as the server reports them now. A running jail without --force is refused here, before any question;
+// snapshots, as the server reports them now. A running jail without --stop is refused here, before any question;
 // a dry run reports it instead.
 func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name string) (string, error) {
 	j, err := c.Jails().Get(ctx, name)
 	if err != nil {
 		return "", err
 	}
-	force, _ := cmd.Flags().GetBool("force")
+	force, _ := cmd.Flags().GetBool("stop")
 	dryRun, _ := cmd.Flags().GetBool("dry-run")
 	running := j.Status.Power == api.PowerRunning
 	// a dry run always shows the summary: the running state is part of it, not a reason to fail
 	if running && !force && !dryRun {
 		return "", api.Errorf(api.CodeConflict, "jail %q is running", name).
-			WithHint("stop it first ('jailops stop " + name + "'), or pass --force to stop it before the delete")
+			WithHint("stop it first ('jailops stop " + name + "'), or pass --stop to stop it before the delete")
 	}
 	var parts []string
 	u, err := c.Jails().Usage(ctx, name)
@@ -164,9 +164,9 @@ func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name strin
 	}
 	switch {
 	case running && force:
-		line += "; --force stops it first"
+		line += "; --stop stops it first"
 	case running:
-		line += "; the delete needs --force to stop it first"
+		line += "; the delete needs --stop to stop it first"
 	}
 	return line, nil
 }
@@ -232,13 +232,13 @@ func (a *app) jailStartFlag(cmd *cobra.Command) func(ctx context.Context, name s
 	}
 }
 
-// jailForceFlag registers --force on delete and stops a running jail before
+// jailForceFlag registers --stop on delete and stops a running jail before
 // it is deleted when the flag was given.
 func (a *app) jailForceFlag(cmd *cobra.Command) func(ctx context.Context, name string) error {
 	var force bool
-	cmd.Flags().BoolVar(&force, "force", false, "stop the jail first when it is running (the data-loss confirmation is still needed)")
-	cmd.Long += "\nA running jail is refused unless --force is given, which stops it first; --force does not\nconfirm the data loss."
-	cmd.Example += "\njailops @P@ delete --force --confirm-data-loss web"
+	cmd.Flags().BoolVar(&force, "stop", false, "stop the jail first when it is running (the data-loss confirmation is still needed)")
+	cmd.Long += "\nA running jail is refused unless --stop is given, which stops it first; --stop does not\nconfirm the data loss."
+	cmd.Example += "\njailops @P@ delete --stop --confirm-data-loss web"
 	return func(ctx context.Context, name string) error {
 		if !force {
 			return nil
@@ -276,7 +276,6 @@ func (a *app) jailTargets(cmd *cobra.Command) func(ctx context.Context, args []s
 	var selectors []string
 	var all bool
 	cmd.Flags().StringArrayVarP(&selectors, "selector", "l", nil, "act on the jails carrying these labels, key=value (comma separated or repeated), instead of naming them (--label is the same)")
-	aliasFlags(cmd, map[string]string{"label": "selector"})
 	cmd.Flags().BoolVar(&all, "all", false, "act on every jail of the project")
 	return func(ctx context.Context, args []string) ([]string, bool, error) {
 		switch {
@@ -378,10 +377,8 @@ The project is --project, JAILOPS_PROJECT or the one chosen with 'project switch
 The server allocates "auto" addresses from the network and writes them back into
 the specification.
 
---volume NAME:PATH[:ro] attaches a volume of the project that exists already (made with
-'jailops volume create') at PATH in the jail; it can be given several times, and
-'jailops volume attach' does the same for a jail that exists. Deleting the jail
-never deletes a volume.
+Volumes are attached afterwards: 'jailops volume create' makes one and 'jailops volume attach JAIL
+VOLUME PATH' puts it into a stopped jail. Deleting the jail never deletes a volume.
 
 A jail starts when the host boots only with --autostart (boot.autostart); a jail that
 was running before a reboot does not come back on its own.
@@ -390,8 +387,9 @@ A new jail name has at most 32 characters. Sizes (--disk) are stored as bytes;
 4G, 4GiB and 4294967296 are the same size.`
 
 const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15-1 --network lan --storage default --start --autostart
-jailops @P@ create db --project web --image freebsd-15-1 --network lan=10.20.0.50 --storage default --volume db-data:/var/db --memory 4G --autostart
-jailops @P@ create mail --project web --image freebsd-15-1 --network lan --storage default --volume maildir:/var/mail/vhosts
+jailops @P@ create db --project web --image freebsd-15-1 --network lan=10.20.0.50 --storage default --memory 4G --autostart
+jailops @P@ create mail --project web --image freebsd-15-1 --network lan --storage default
+jailops volume attach mail maildir /var/mail/vhosts --project web
 jailops @P@ create nginx --project web --image freebsd-15-1 --profile web
 jailops @P@ create -f web.yaml --project web`
 
@@ -424,13 +422,14 @@ func (a *app) addJailShortcuts(root *cobra.Command) {
 
 func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	var (
-		image, layout, hostname, memory, disk, strategy, window, storage                 string
-		shell, prompt                                                                    string
-		cpu, pids, priority, stopTimeout                                                 int
-		networks, volumes, hostMounts, envs, labels, depends, tags, profiles, fwPolicies []string
-		autostart, zfsDelegation                                                         bool
+		image, layout, hostname, memory, disk, strategy, window, storage, comment string
+		shell, prompt                                                             string
+		cpu, pids, priority, stopTimeout                                          int
+		networks, envs, labels, depends, tags, profiles, fwPolicies               []string
+		autostart, zfsDelegation                                                  bool
 	)
 	f := cmd.Flags()
+	f.StringVar(&comment, "comment", "", "what the jail is for")
 	f.StringVar(&image, "image", "", "image reference: NAME@alias or NAME#gN (required without -f)")
 	f.StringVar(&storage, "storage", "", "storage to place the jail on, one granted to the project (default: the project's only storage, unless a profile supplies it)")
 	f.StringArrayVar(&profiles, "profile", nil, "profile to apply, later ones override earlier ones (repeatable)")
@@ -441,8 +440,6 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringVar(&memory, "memory", "", "anonymous memory the jail may reserve in total, for example 2G (rctl swapuse; needs kern.racct.enable=1)")
 	f.StringVar(&disk, "disk", "", "ZFS quota of the whole jail (root, data, volumes and snapshots), for example 20G")
 	f.IntVar(&pids, "pids", 0, "processes the jail may have (rctl maxproc; needs kern.racct.enable=1)")
-	f.StringArrayVar(&volumes, "volume", nil, "attach a volume of the project that exists already, NAME:PATH[:ro] (repeatable; create one with 'jailops volume create')")
-	f.StringArrayVar(&hostMounts, "host-mount", nil, "mount an existing host directory SOURCE:TARGET[:ro] (repeatable; global administrators only, and the host operator must have approved the directory)")
 	f.StringArrayVar(&fwPolicies, "firewall-policy", nil, "firewall policy to apply (repeatable; they are rendered in the order given, after the project's)")
 	f.StringArrayVar(&tags, "tag", nil, "firewall tag of this jail (repeatable)")
 	f.BoolVar(&autostart, "autostart", false, "start the jail when the host boots")
@@ -474,11 +471,11 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	enumFlag(cmd, "layout", string(api.LayoutThin), string(api.LayoutThick))
 	enumFlag(cmd, "update-strategy", string(api.UpdateRebase), string(api.UpdateInPlace), string(api.UpdateManual))
 	return func(name string) (api.Jail, error) {
-		if image == "" {
+		if image == "" && !a.partial {
 			return api.Jail{}, usagef("--image is required (or use -f FILE)")
 		}
 		spec := api.JailSpec{
-			Image: image, Layout: api.Layout(layout), Hostname: hostname,
+			Comment: comment, Image: image, Layout: api.Layout(layout), Hostname: hostname,
 			Storage: storage, Profiles: profiles,
 			Resources: api.Resources{CPU: cpu, Memory: memory, Disk: disk, PIDs: pids},
 			Firewall:  api.FirewallAttach{Policies: fwPolicies, Tags: tags},
@@ -500,20 +497,6 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 				att.IPv4, att.IPv6 = v4, v6
 			}
 			spec.Network = append(spec.Network, att)
-		}
-		for _, v := range volumes {
-			p := strings.Split(v, ":")
-			if len(p) < 2 || len(p) > 3 || (len(p) == 3 && p[2] != "ro") {
-				return api.Jail{}, usagef("volume %q must be NAME:PATH[:ro]", v)
-			}
-			spec.Volumes = append(spec.Volumes, api.VolumeAttach{Name: p[0], Mount: p[1], ReadOnly: len(p) == 3})
-		}
-		for _, m := range hostMounts {
-			p := strings.Split(m, ":")
-			if len(p) < 2 || len(p) > 3 || (len(p) == 3 && p[2] != "ro") {
-				return api.Jail{}, usagef("host mount %q must be SOURCE:TARGET[:ro]", m)
-			}
-			spec.HostMounts = append(spec.HostMounts, api.HostMount{Source: p[0], Target: p[1], ReadOnly: len(p) == 3})
 		}
 		if len(envs) > 0 {
 			spec.Env = map[string]string{}

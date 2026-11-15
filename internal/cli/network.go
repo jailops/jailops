@@ -84,11 +84,12 @@ on a shared segment (switched), routed is for a prefix the provider routes to yo
 jailops network create lan --subnet 10.20.0.0/24 --gateway 10.20.0.1 --range 10.20.0.10-10.20.0.250 --nat --uplink em0
 jailops network create -f lan.yaml`,
 		func(cmd *cobra.Command) func(string) (api.Network, error) {
-			var uplink, subnet, gw, rng, v4cidr, v6cidr, v6mode string
+			var uplink, subnet, gw, rng, v4cidr, v6cidr, v6mode, comment string
 			var exclude, dns []string
 			var nat bool
 			var mtu int
 			f := cmd.Flags()
+			f.StringVar(&comment, "comment", "", "what the network is for")
 			f.StringVar(&uplink, "uplink", "", "physical interface used for NAT or routing")
 			f.StringVar(&v4cidr, "ipv4", "", "IPv4 gateway address and prefix, for example 10.50.0.1/24; the rest of the subnet becomes the range")
 			f.StringVar(&v6cidr, "ipv6", "", "IPv6 prefix, for example fd50::/64; with --ipv6-mode proxy, the prefix your provider put on the shared segment, for example 2001:db8:1:2:100::/80")
@@ -102,7 +103,7 @@ jailops network create -f lan.yaml`,
 			f.IntVar(&mtu, "mtu", 0, "MTU of the jails' interfaces")
 			enumFlag(cmd, "ipv6-mode", "routed", "proxy")
 			return func(name string) (api.Network, error) {
-				spec := api.NetworkSpec{Uplink: uplink, DNS: dns, MTU: mtu}
+				spec := api.NetworkSpec{Comment: comment, Uplink: uplink, DNS: dns, MTU: mtu}
 				switch {
 				case v4cidr != "" && (subnet != "" || gw != "" || rng != ""):
 					return api.Network{}, usagef("--ipv4 replaces --subnet, --gateway and --range: use one form")
@@ -114,7 +115,7 @@ jailops network create -f lan.yaml`,
 					v4.NAT, v4.Exclude = nat, append(v4.Exclude, exclude...)
 					spec.IPv4 = v4
 				case subnet != "" || gw != "" || rng != "":
-					if subnet == "" || gw == "" || rng == "" {
+					if (subnet == "" || gw == "" || rng == "") && !a.partial {
 						return api.Network{}, usagef("--subnet, --gateway and --range go together (or use --ipv4)")
 					}
 					spec.IPv4 = &api.IPv4Net{Subnet: subnet, Gateway: gw, Range: rng, Exclude: exclude, NAT: nat}
@@ -135,9 +136,15 @@ jailops network create -f lan.yaml`,
 					}
 					spec.IPv6 = v6
 				} else if cmd.Flags().Changed("ipv6-mode") {
-					return api.Network{}, usagef("--ipv6-mode needs --ipv6")
+					if !a.partial {
+						return api.Network{}, usagef("--ipv6-mode needs --ipv6")
+					}
+					spec.IPv6 = &api.IPv6Net{Mode: api.IPv6Mode(v6mode)}
 				}
-				if spec.IPv4 == nil && spec.IPv6 == nil {
+				if a.partial && spec.IPv4 == nil && (cmd.Flags().Changed("nat") || cmd.Flags().Changed("exclude")) {
+					spec.IPv4 = &api.IPv4Net{NAT: nat, Exclude: exclude}
+				}
+				if spec.IPv4 == nil && spec.IPv6 == nil && !a.partial {
 					return api.Network{}, usagef("give --ipv4 and/or --ipv6, or --subnet, --gateway and --range (or use -f FILE)")
 				}
 				return api.Network{Metadata: api.ObjectMeta{Name: name}, Spec: spec}, nil

@@ -17,10 +17,11 @@ func TestFirewallTest(t *testing.T) {
 		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	tr := h.transcript()
-	tr.ok("app", "install", "postgresql", "--name", "db", "--image", "freebsd-151@stable")
-	tr.ok("app", "install", "nginx", "--name", "web", "--image", "freebsd-151@stable")
+	tr.ok("app", "install", "postgresql", "db", "--image", "freebsd-151@stable")
+	tr.ok("app", "install", "nginx", "web", "--image", "freebsd-151@stable")
 	tr.ok("firewall", "address-set", "create", "postgresql_allow", "--address", "jail:web", "--comment", "the web jail")
-	tr.ok("firewall", "policy", "create", "postgres", "--rule", "allow in tcp from set:postgresql_allow port 5432 comment who may reach PostgreSQL")
+	tr.ok("firewall", "policy", "create", "postgres")
+	tr.ok("firewall", "rule", "add", "postgres", "in", "--action", "allow", "--proto", "tcp", "--from", "set:postgresql_allow", "--port", "5432", "--comment", "who may reach PostgreSQL")
 	tr.ok("config", "set", "db", "firewall.policies", "postgres")
 	_, _, code := tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5432")
 	if code != 0 {
@@ -57,7 +58,7 @@ func TestFirewallTestCompletion(t *testing.T) {
 		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	for _, args := range [][]string{
-		{"app", "install", "postgresql", "--name", "db", "--image", "freebsd-151@stable"},
+		{"app", "install", "postgresql", "db", "--image", "freebsd-151@stable"},
 		{"firewall", "address-set", "create", "office", "--address", "198.51.100.0/24"},
 	} {
 		if o, e, code := h.run("", args...); code != 0 {
@@ -68,7 +69,7 @@ func TestFirewallTestCompletion(t *testing.T) {
 		args       []string
 		want, none []string
 	}{
-		{[]string{"firewall", "test", "--from", ""}, []string{"jail:", "set:", "host"}, []string{"jail:db", "set:office"}},
+		{[]string{"firewall", "test", "--from", ""}, []string{"jail:db", "host", "10.20.0.10"}, []string{"jail:", "set:", "set:office"}},
 		{[]string{"firewall", "test", "--from", "jail:"}, []string{"jail:db"}, []string{"set:office", "host"}},
 		{[]string{"firewall", "test", "--to", "jail:"}, []string{"jail:db"}, []string{"set:office"}},
 		{[]string{"firewall", "test", "--proto", ""}, []string{"tcp", "udp", "icmp", "icmp6"}, []string{"jail:db"}},

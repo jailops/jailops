@@ -36,7 +36,7 @@ Image freebsd-15
   Aliases:   stable -> g1
   Keeps:     every generation
   Age:       3h
-  Nightly:   off ('jailops image auto-upgrade freebsd-15 on' turns it on)
+  Nightly:   off ('jailops image set freebsd-15 --auto-upgrade' turns it on)
 
 Generations
   GEN   FREEBSD   PACKAGES   AGE   USED BY

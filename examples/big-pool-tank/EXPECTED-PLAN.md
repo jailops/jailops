@@ -12,6 +12,8 @@ host nas1
   create    FirewallPolicy/media/closed
   create    FirewallPolicy/media/floor
   create    FirewallPolicy/media/media-server
+  create    Volume/media/movies
+  create    Volume/media/music
   create    Volume/media/plexdata
   create    Volume/media/work
   create    Jail/media/plex
@@ -21,5 +23,5 @@ projects
   media
     nas1         will be created
 
-11 create, 0 update, 0 delete, 0 unchanged, 0 unmanaged
+13 create, 0 update, 0 delete, 0 unchanged, 0 unmanaged
 ```

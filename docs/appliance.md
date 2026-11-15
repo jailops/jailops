@@ -378,8 +378,8 @@ out takes its default, not the value applied before (one rendered file; this dif
 - the rendered text is checked with `pfctl -n -f -` (on standard input; never a file the daemon names);
 - the **lock-out guard**: the daemon passes the address the request came from, as its listener saw it. When that address
   could reach neither an ssh port nor the console port under the new rules, the apply is refused (`forbidden`, detail
-  `guard: lockout`). When the address is unknown (the unix socket, a request through a hub), the apply needs `i_know`
-  (`--i-know`), and the confirmation window still applies. A dry run reports both as warnings. The guard runs on every
+  `guard: lockout`). When the address is unknown (the unix socket, a request through a hub), the apply needs `confirm_lockout`
+  (`--confirm-lockout`), and the confirmation window still applies. A dry run reports both as warnings. The guard runs on every
   apply, not only the first.
 
 Then the snapshot (`/etc/pf.conf`, its absence included, and the values of `pf_enable` and `pf_rules` when one changes;
@@ -400,7 +400,7 @@ a refusal the apply would meet).
 
 **CLI and console.** `jailops host firewall show|set [flags]|apply -f FILE|diff [-f FILE]`, `jailops host pending`,
 `jailops host confirm [--id ID]`, `jailops host revert [--id ID]`; `--dry-run` everywhere, `--confirm-within` and
-`--i-know` on the changes. The console's Host page has a Firewall section (the rules, an editor for the template, the
+`--confirm-lockout` on the changes. The console's Host page has a Firewall section (the rules, an editor for the template, the
 ssh and console sources, the allow rows and the sets with inline validation, Preview with the diff, Apply with the
 window explained, a warning chip while ssh is open to the world), and every page shows the pending banner.
 

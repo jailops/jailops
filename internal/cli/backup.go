@@ -17,6 +17,8 @@ func targetDesc() *kindDesc[api.BackupTarget] {
 		func(p *api.BackupTarget) *api.ObjectMeta { return &p.Metadata },
 		func(p *api.BackupTarget) *api.BackupTargetSpec { return &p.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.BackupTarget] { return c.Backups().Targets() })
+	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.BackupTarget] { return c.Backups().Targets() })
+	d.renameLong = renameLong("backup target", `the targets lists of the backup policies that name it. The backups that were made keep the name in their records`)
 	d.head = []string{"NAME", "KIND", "ADDRESS", "PATH", "PINNED"}
 	d.row = func(_ time.Time, t api.BackupTarget) []string {
 		pinned := "no"
@@ -33,6 +35,8 @@ func backupPolicyDesc() *kindDesc[api.BackupPolicy] {
 		func(p *api.BackupPolicy) *api.ObjectMeta { return &p.Metadata },
 		func(p *api.BackupPolicy) *api.BackupPolicySpec { return &p.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.BackupPolicy] { return c.Backups().Policies() })
+	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.BackupPolicy] { return c.Backups().Policies() })
+	d.renameLong = renameLong("backup policy", `nothing else names it. Its schedule starts again under the new name, and the backups that were made keep the old name in their records`)
 	d.head = []string{"NAME", "SELECTOR", "TARGETS", "SCHEDULE", "KEEP"}
 	d.row = func(_ time.Time, p api.BackupPolicy) []string {
 		var sel []string
@@ -62,7 +66,7 @@ one committed snapshot in a repository.
 
 Restoring always starts with a preflight that lists what is missing and what
 would change; nothing is touched until you confirm.`,
-		`jailops backup target create nightly-node --kind node --address https://backup.example.net:39110 --fingerprint ab12...
+		`jailops backup target create nightly-node --kind node --url https://backup.example.net:39110 --fingerprint ab12...
 jailops backup policy create nightly --selector env=prod --target nightly-node --schedule "0 2 * * *" --keep-daily 14
 jailops backup list --jail web
 jailops backup restore 20260101020000-ab12cd34 --as web-restored`, "backups")
@@ -70,22 +74,23 @@ jailops backup restore 20260101020000-ab12cd34 --as web-restored`, "backups")
 	tc := group("target", "Manage backup targets", "A target is a backup node or a directory that receives encrypted backups.",
 		"jailops backup target list\njailops backup target show nightly-node")
 	crudCommands(a, tc, td, "Create a backup target: a backup node reached over HTTPS (pinned by fingerprint) or a local directory.",
-		`jailops backup target create nightly-node --kind node --address https://backup.example.net:39110 --fingerprint ab12...
+		`jailops backup target create nightly-node --kind node --url https://backup.example.net:39110 --fingerprint ab12...
 jailops backup target create usb --kind directory --path /mnt/backup`,
 		func(cmd *cobra.Command) func(string) (api.BackupTarget, error) {
-			var kind, addr, fp, path string
+			var kind, addr, fp, path, comment string
 			f := cmd.Flags()
+			f.StringVar(&comment, "comment", "", "what the target is for")
 			f.StringVar(&kind, "kind", "node", "target kind: node or directory")
-			f.StringVar(&addr, "address", "", "node address, https://host:port")
+			f.StringVar(&addr, "url", "", "node address, https://host:port")
 			f.StringVar(&fp, "fingerprint", "", "SHA-256 fingerprint pinning the node's certificate")
 			f.StringVar(&path, "path", "", "directory path (kind directory)")
 			enumFlag(cmd, "kind", "node", "directory")
 			return func(name string) (api.BackupTarget, error) {
-				return api.BackupTarget{Metadata: api.ObjectMeta{Name: name}, Spec: api.BackupTargetSpec{Kind: kind, Address: addr, Fingerprint: fp, Path: path}}, nil
+				return api.BackupTarget{Metadata: api.ObjectMeta{Name: name}, Spec: api.BackupTargetSpec{Comment: comment, Kind: kind, Address: addr, Fingerprint: fp, Path: path}}, nil
 			}
 		})
 	pd := backupPolicyDesc()
-	pc := group("policy", "Manage backup policies", "A policy selects jails by label and says when to back them up and how long to keep the backups. It also backs up the volumes those jails attach, and the volumes whose own labels match, each volume once however many jails attach it; --exclude-volumes leaves them out.",
+	pc := group("policy", "Manage backup policies", "A policy selects jails by label and says when to back them up and how long to keep the backups. It also backs up the volumes those jails attach, and the volumes whose own labels match, each volume once however many jails attach it; --no-volumes leaves them out.",
 		"jailops backup policy list\njailops backup policy show nightly", "policies")
 	crudCommands(a, pc, pd, "Create a backup policy. The selector matches jails by label; an empty selector matches none.",
 		`jailops backup policy create nightly --selector env=prod --target nightly-node --schedule "0 2 * * *" --keep-daily 14 --keep-weekly 8`,
@@ -94,9 +99,10 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 			var schedule, vsched, vmode string
 			var last, hourly, daily, weekly, monthly, yearly, fullEvery int
 			var includeState, excludeVolumes bool
+			var comment string
 			f := cmd.Flags()
-			f.StringArrayVarP(&selector, "selector", "l", nil, "label selector KEY=VALUE (repeatable; --label is the same)")
-			aliasFlags(cmd, map[string]string{"label": "selector"})
+			f.StringVar(&comment, "comment", "", "what the policy is for")
+			f.StringArrayVarP(&selector, "selector", "l", nil, "label selector KEY=VALUE (repeatable)")
 			f.StringArrayVar(&targets, "target", nil, "backup target name (repeatable)")
 			f.StringVar(&schedule, "schedule", "", "five-field cron expression (required without -f)")
 			f.IntVar(&last, "keep-last", 0, "keep the last N backups")
@@ -106,7 +112,7 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 			f.IntVar(&monthly, "keep-monthly", 0, "keep N monthly backups")
 			f.IntVar(&yearly, "keep-yearly", 0, "keep N yearly backups")
 			f.BoolVar(&includeState, "include-state", false, "also back up the host's state dataset")
-			f.BoolVar(&excludeVolumes, "exclude-volumes", false, "leave the volumes out (by default the volumes of the selected jails are backed up too, once each)")
+			f.BoolVar(&excludeVolumes, "no-volumes", false, "leave the volumes out (by default the volumes of the selected jails are backed up too, once each)")
 			f.IntVar(&fullEvery, "full-every", 0, "force a full read every N days")
 			f.StringVar(&vsched, "verify-schedule", "", "cron expression for restore tests")
 			f.StringVar(&vmode, "verify-mode", "", "verification depth: deep, extract or full")
@@ -115,7 +121,7 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 				return namesOf(c.Backups().Targets().List(ctx), func(t api.BackupTarget) string { return t.Metadata.Name })
 			}))
 			return func(name string) (api.BackupPolicy, error) {
-				if schedule == "" || len(targets) == 0 {
+				if (schedule == "" || len(targets) == 0) && !a.partial {
 					return api.BackupPolicy{}, usagef("--schedule and at least one --target are required (or use -f FILE)")
 				}
 				sel := map[string]string{}
@@ -127,6 +133,7 @@ jailops backup target create usb --kind directory --path /mnt/backup`,
 					sel[k] = v
 				}
 				return api.BackupPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.BackupPolicySpec{
+					Comment:  comment,
 					Selector: sel, Targets: targets, Schedule: schedule,
 					Retention:    api.RetentionPolicy{Last: last, Hourly: hourly, Daily: daily, Weekly: weekly, Monthly: monthly, Yearly: yearly},
 					IncludeState: includeState, ExcludeVolumes: excludeVolumes, FullEvery: fullEvery, VerifySchedule: vsched, VerifyMode: vmode,
@@ -218,8 +225,7 @@ func (a *app) backupList() *cobra.Command {
 	a.completeFlag(cmd, "target", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
 		return namesOf(c.Backups().Targets().List(ctx), func(t api.BackupTarget) string { return t.Metadata.Name })
 	}))
-	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable; --selector is the same)")
-	aliasFlags(cmd, map[string]string{"selector": "label"})
+	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable)")
 	return cmd
 }
 

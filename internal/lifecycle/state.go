@@ -334,6 +334,15 @@ func (s *Service) checkHostDir(ctx context.Context, h Attached) error {
 	return nil
 }
 
+// MountTree mounts the datasets of a stopped jail on the host (see mountTree): the host can write into its root before
+// it first runs, as the installation of an app's packages does.
+func (s *Service) MountTree(ctx context.Context, name string) error { return s.mountTree(ctx, name) }
+
+// UnmountTree undoes MountTree.
+func (s *Service) UnmountTree(ctx context.Context, name string) error {
+	return s.unmountTree(ctx, name)
+}
+
 // unmountTree unmounts in reverse mount order, continuing after errors.
 func (s *Service) unmountTree(ctx context.Context, name string) error {
 	st, err := s.observe(ctx, name)

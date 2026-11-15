@@ -8,11 +8,17 @@ $ jailops create x --image freebsd-15@stable
 ! hint: name one with --project NAME or JAILOPS_PROJECT=NAME, or choose one with 'jailops project switch NAME' (list them with 'jailops project list'; create one with 'jailops project create NAME --new-network')
 [exit 2]
 
-$ jailops project create web --new-network --storage default
+$ jailops project create web --new-network
 project/web created
 
-$ jailops project create db --new-network --storage default
+$ jailops storage grant default --project web
+storage/default granted to project web
+
+$ jailops project create db --new-network
 project/db created
+
+$ jailops storage grant default --project db
+storage/default granted to project db
 
 $ jailops project switch
 ! no project chosen on remote a: choose one with 'jailops project switch NAME'
@@ -21,7 +27,7 @@ $ jailops project switch web
 remote a now uses project web
 
 $ jailops project list
-    NAME   HOSTS   NETWORKS   STORAGE   JAILS   DESCRIPTION
+    NAME   HOSTS   NETWORKS   STORAGE   JAILS   COMMENT
     db     -       db         default   0       -
     main   -       lan        default   0       -
 *   web    -       web        default   0       -

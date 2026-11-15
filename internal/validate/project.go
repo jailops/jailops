@@ -84,7 +84,7 @@ func ProjectSpec(name string, s api.ProjectSpec) error {
 	if err := ProjectName(name); err != nil {
 		return err
 	}
-	if err := api.ValidFreeText("description", s.Description, true); err != nil {
+	if err := api.ValidFreeText("comment", s.Comment, false); err != nil {
 		return err
 	}
 	seen := map[string]bool{}
@@ -163,7 +163,7 @@ func StorageSpec(name string, s api.StorageSpec) error {
 	if err := Name("name", name); err != nil {
 		return err
 	}
-	if err := api.ValidFreeText("description", s.Description, true); err != nil {
+	if err := api.ValidFreeText("comment", s.Comment, false); err != nil {
 		return err
 	}
 	d := s.Dataset

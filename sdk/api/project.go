@@ -12,7 +12,8 @@ type Project struct {
 
 // ProjectSpec is the desired state of a project.
 type ProjectSpec struct {
-	Description string `json:"description,omitempty"`
+	// Comment is what the project is for.
+	Comment string `json:"comment,omitempty"`
 	// Hosts lists the hosts a fleet project spans. Empty means this host
 	// only. The definition is fleet-level; each host implements the named
 	// networks and storage locally and enforces its own copy.
@@ -100,8 +101,9 @@ type Storage struct {
 type StorageSpec struct {
 	// Dataset is the ZFS dataset that holds jailops data, for example
 	// "tank/jailops". It must exist and live on an imported pool.
-	Dataset     string `json:"dataset"`
-	Description string `json:"description,omitempty"`
+	Dataset string `json:"dataset"`
+	// Comment is what the storage is for.
+	Comment string `json:"comment,omitempty"`
 	// Compression, when set, is applied to new datasets ("zstd", "lz4").
 	Compression string `json:"compression,omitempty"`
 	// Encrypted is reserved: native ZFS encryption is not implemented and creating a storage with it set is refused.

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
@@ -39,4 +40,19 @@ func RenderJail(s *Service, project, name string) error {
 func SetManagedPolicy(s *Service, project, name, managedBy string, spec api.FirewallPolicySpec) error {
 	_, err := s.polKind.p(project).create(context.Background(), api.ObjectMeta{Name: name, ManagedBy: managedBy}, spec)
 	return err
+}
+
+// SeedJailopsRepo runs the copy of the JailOps repository's configuration into a jail root, from the host directory dir.
+func SeedJailopsRepo(s *Service, ctx context.Context, dir, root string) error {
+	old := hostPkgDir
+	hostPkgDir = dir
+	defer func() { hostPkgDir = old }()
+	return s.seedJailopsRepo(ctx, root)
+}
+
+// SetShellSetupDeadline shortens the deadline of the setup after a start; the returned function puts it back.
+func SetShellSetupDeadline(d time.Duration) func() {
+	old := shellSetupDeadline
+	shellSetupDeadline = d
+	return func() { shellSetupDeadline = old }
 }

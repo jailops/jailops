@@ -128,8 +128,8 @@ func (a *app) printCertificate(w io.Writer, st api.HostCertificate) {
 		s.section("Clients add this host with an API token (jot_..., on standard input):")
 		fprintln(w, "  "+st.RemoteAdd)
 		if !cur.PublicCA && st.Port != 0 && len(cur.Names) > 0 {
-			fprintln(w, "or with a single-use trust token from 'jailops trust add' (it pins this certificate):")
-			fprintf(w, "  jailops remote add %s:%d --token-stdin\n", cur.Names[0], st.Port)
+			fprintln(w, "or with a single-use trust token from 'jailops cert enroll' (it pins this certificate):")
+			fprintf(w, "  jailops remote add %s:%d --token-file -\n", cur.Names[0], st.Port)
 		}
 	}
 }
@@ -339,9 +339,9 @@ func (a *app) hostCertSelfSigned() *cobra.Command {
 client has to pin its fingerprint: a client that trusted an uploaded or ACME
 certificate through its roots stops trusting this host. So when another
 certificate is served the command shows it and asks you to type its first name;
---i-know answers that for a script (-y does not). It needs a global
+--confirm-replace answers that for a script (-y does not). It needs a global
 administrator.`,
-		Example: "jailops host certificate self-signed\njailops host certificate self-signed --i-know",
+		Example: "jailops host certificate self-signed\njailops host certificate self-signed --confirm-replace",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			c, err := a.connect(cmd.Context())
@@ -366,7 +366,7 @@ administrator.`,
 				}
 				warn := fmt.Sprintf("This replaces the %s certificate for %s (valid until %s) with the self-signed one:\nbrowsers warn again and every client has to pin the new fingerprint.",
 					cur.Source, joinOrDash(cur.Current.Names), cur.Current.NotAfter.UTC().Format("2006-01-02"))
-				if err := a.confirmTyped(warn, name, iKnow, "--i-know"); err != nil {
+				if err := a.confirmTyped(warn, name, iKnow, "--confirm-replace"); err != nil {
 					return err
 				}
 			}
@@ -381,6 +381,6 @@ administrator.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&iKnow, "i-know", false, "replace a public or uploaded certificate without typing its name")
+	cmd.Flags().BoolVar(&iKnow, "confirm-replace", false, "replace a public or uploaded certificate without typing its name")
 	return cmd
 }

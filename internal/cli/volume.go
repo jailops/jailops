@@ -29,6 +29,10 @@ func volumeDesc() *kindDesc[api.Volume] {
 	d.del = func(ctx context.Context, c *sdk.Client, n string) (opHandle, error) {
 		return handle(c.Volumes().Delete(ctx, n))
 	}
+	d.rename = func(ctx context.Context, c *sdk.Client, n string, req api.Rename, etag string) (*sdk.Operation[api.RenameResult], error) {
+		return c.Volumes().Rename(ctx, n, req, etag)
+	}
+	d.renameLong = renameLong("volume", `its dataset and mount point, the attachments of the jails (they must be stopped) and the disk keys of the profiles of the project that name it`)
 	d.head = []string{"NAME", "STORAGE", "USED", "SIZE", "OWNER", "MODE", "ATTACHED TO", "COMMENT"}
 	d.row = func(_ time.Time, v api.Volume) []string {
 		if v.Spec.IsHostDir() {
@@ -175,7 +179,7 @@ func (a *app) completeAttached() completer {
 const volumeCreateLong = `Create a volume: a dataset of the project that jails attach by name. The volume
 outlives the jails: deleting a jail never deletes a volume, and the same volume
 can be attached to several jails. Attach it with 'jailops volume attach JAIL
-VOLUME PATH', or with --volume NAME:PATH when a jail is created.
+VOLUME PATH'.
 
 --uid, --gid and --mode are the owner and the mode of the root of the volume,
 set once when it is made. FreeBSD has no uid mapping, so a user with the same

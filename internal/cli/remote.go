@@ -51,8 +51,8 @@ are kept in ~/.config/jailops/config.yaml (mode 0600). The built-in remote
 "local" is the unix socket of this host.
 
 (To manage the hosts behind a hub, see 'jailops host'.)`,
-		`jailops remote add prod https://hub.example.net:39110 --token-stdin
-jailops remote add host.example.org --token-stdin --name myhost
+		`jailops remote add prod https://hub.example.net:39110 --token-file -
+jailops remote add myhost host.example.org --token-file -
 jailops remote list
 jailops remote switch prod
 jailops remote remove old`, "remotes")
@@ -62,82 +62,65 @@ jailops remote remove old`, "remotes")
 
 func (a *app) remoteAdd() *cobra.Command {
 	var r RemoteConfig
-	var tokenStdin, sw bool
-	var remoteName string
+	var sw bool
 	cmd := &cobra.Command{
-		Use:     "add NAME URL | ADDRESS --token-stdin",
-		Aliases: []string{"create"},
-		Short:   "Add a remote",
-		Long: `Add a named remote. URL is https://host:port, or unix:/path for a socket.
+		Use:   "add NAME ADDRESS",
+		Short: "Add a remote",
+		Long: `Add a named remote. ADDRESS is host or host:port (the default port is 39110), https://host:port, or
+unix:/path for a socket.
 
-With a single argument, the server's address (host or host:port), and a trust
-token (joc_...) from 'jailops trust add', the command joins the server instead
-(--name names the remote): it pins the server fingerprint carried by the
-token (there is no trust-on-first-use prompt), generates a client key pair
-(the key is stored with mode 0600 next to the configuration), presents the token
-and the certificate, and saves the remote with the certificate in place of an
-API token. The default port is 39110.
+With a trust token (joc_..., made by 'jailops cert enroll') the command joins the server: it pins the server
+fingerprint carried by the token (there is no trust-on-first-use prompt), generates a client key pair (the key is stored
+with mode 0600 next to the configuration), presents the token and the certificate, and saves the remote with the
+certificate in place of an API token.
 
-If the server's certificate is not signed by a trusted authority, the command
-connects once, shows the certificate's SHA-256 fingerprint and asks whether to
-pin it. Compare it with the fingerprint reported by the server before you
-answer yes. -y does not answer this question. If you already know the
-fingerprint, pass --fingerprint: the command checks it against what the server
-presents and refuses on a mismatch.
+With an API token, or none, the remote is saved as it is. If the server's certificate is not signed by a trusted
+authority, the command connects once, shows the certificate's SHA-256 fingerprint and asks whether to pin it. Compare
+it with the fingerprint reported by the server before you answer yes. -y does not answer this question. If you
+already know the fingerprint, pass --fingerprint: the command checks it against what the server presents and refuses
+on a mismatch.
 
-The token is read from --token, from the first line of standard input with
---token-stdin (or --token-file -), or referenced by file with --token-file (an
-API token: the path is stored, not the token). Prefer standard input or a file:
-a value on the command line is visible to other users. A trust token belongs
-to the one-argument form; the two-argument form with one is refused.`,
-		Example: `jailops remote add host.example.org --token-stdin --name myhost <trust-token.txt
-jailops remote add prod https://hub.example.net:39110 --token-stdin <token.txt
+The token is read from --token, from the first line of standard input with --token-file -, or
+referenced by file with --token-file (an API token: the path is stored, not the token). Prefer standard input or a
+file: a value on the command line is visible to other users.`,
+		Example: `jailops remote add myhost host.example.org --token-file - <trust-token.txt
+jailops remote add prod https://hub.example.net:39110 --token-file - <token.txt
 jailops remote add lab https://10.0.0.5:39110 --fingerprint ab:cd:ef:... --token-file ~/.jailops-lab
 jailops remote add edge https://edge:39110 --cert client.pem --key client.key --switch`,
-		Args: cobra.RangeArgs(1, 2),
+		Args:              cobra.ExactArgs(2),
+		ValidArgsFunction: completeNone,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if r.TokenFile == "-" { // standard input, like --token-stdin
-				r.TokenFile, tokenStdin = "", true
-			}
-			if len(args) == 1 {
-				if r.TokenFile != "" {
-					tok, err := a.readSecretFile("token", r.TokenFile)
-					if err != nil {
-						return err
-					}
-					r.Token, r.TokenFile = tok, ""
+			if r.TokenFile == "-" { // standard input
+				line, err := a.readLine()
+				if err != nil || line == "" {
+					return usagef("--token-file - needs the token on the first line of standard input")
 				}
-				if tokenStdin {
-					line, err := a.readLine()
-					if err != nil || line == "" {
-						return usagef("--token-stdin needs the token on the first line of standard input")
-					}
-					r.Token = line
-				}
-				if !strings.HasPrefix(r.Token, sdk.TrustTokenPrefix) {
-					return usagef("one argument is the address of a server to join with a trust token: give the joc_... token with --token-stdin (or NAME URL for an API token)")
-				}
-				return a.addByTrustToken(cmd, remoteName, args[0], r.Token, sw)
+				r.TokenFile, r.Token = "", line
 			}
 			name, target := args[0], args[1]
 			if name == "local" || strings.Contains(name, "://") || name == "" {
 				return usagef("%q is not a valid remote name", name)
 			}
-			if tokenStdin {
-				line, err := a.readLine()
-				if err != nil || line == "" {
-					return usagef("--token-stdin needs the token on the first line of standard input")
+			if r.TokenFile != "" && r.Token == "" {
+				// a trust token in a file joins; for an API token the path is stored, not the token
+				if tok, err := a.readSecretFile("token", r.TokenFile); err == nil && strings.HasPrefix(tok, sdk.TrustTokenPrefix) {
+					r.Token, r.TokenFile = tok, ""
 				}
-				r.Token = line
 			}
 			if strings.HasPrefix(r.Token, sdk.TrustTokenPrefix) {
-				return usagef("%s... is a trust token from 'jailops trust add': it joins with the one-argument form", sdk.TrustTokenPrefix).
-					withHint(fmt.Sprintf("jailops remote add %s --token-stdin --name %s", strings.TrimPrefix(target, "https://"), name))
+				return a.addByTrustToken(cmd, name, target, r.Token, sw)
 			}
 			if sock, ok := strings.CutPrefix(target, "unix:"); ok {
 				r.Socket = sock
 			} else {
 				r.URL = target
+			}
+			if r.URL != "" && !strings.Contains(r.URL, "://") {
+				u, err := normalizeAddress(r.URL)
+				if err != nil {
+					return err
+				}
+				r.URL = u
 			}
 			if r.URL != "" && strings.HasPrefix(r.URL, "https://") && r.CA == "" {
 				if err := a.pinCertificate(cmd.Context(), name, &r); err != nil {
@@ -173,15 +156,13 @@ jailops remote add edge https://edge:39110 --cert client.pem --key client.key --
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&r.Token, "token", "", "API token (visible in the process list; prefer --token-stdin)")
-	f.BoolVar(&tokenStdin, "token-stdin", false, "read the token from the first line of standard input")
-	f.StringVar(&r.TokenFile, "token-file", "", "file holding the token; the path is stored, not the token (- reads standard input like --token-stdin)")
+	f.StringVar(&r.Token, "token", "", "API token or trust token (visible in the process list; prefer --token-file -)")
+	f.StringVar(&r.TokenFile, "token-file", "", "file holding the token; the path is stored, not the token (- reads the first line of standard input)")
 	f.StringVar(&r.Fingerprint, "fingerprint", "", "SHA-256 fingerprint of the server certificate to pin")
 	f.StringVar(&r.Cert, "cert", "", "client certificate file for mTLS")
 	f.StringVar(&r.Key, "key", "", "client key file for mTLS")
 	f.StringVar(&r.CA, "ca", "", "CA bundle that signed the server certificate")
 	f.StringVar(&r.Host, "default-host", "", "scope every request to this host behind a hub")
-	f.StringVar(&remoteName, "name", "", "name of the remote when joining with a trust token (default: the host name)")
 	f.BoolVar(&sw, "switch", false, "make this the current remote (default when none is set)")
 	return cmd
 }

@@ -43,7 +43,7 @@ Every declarative object a user can create with the CLI has a file kind. Nothing
 | `jailops wireguard create --mode server`, `peer add` | `hosts/<host>/wireguard/*.yaml` (WireGuard) | servers only, public parts only; see "WireGuard" below |
 | `jailops storage create` | `hosts/<host>/storage/*.yaml` (Storage) | a dataset on any pool, a big HDD pool included; `compression`. Datasets may not be equal or nested |
 | `jailops image create`, `image build` | `shared/images/*.yaml` (Image) | `aliases` are in the spec. `build: true` builds the **first** generation when the host has none (a fresh host has none and a jail cannot be created from an image without one). Later generations are an operation, not a declaration: `jailops image build`, or a rollout |
-| `jailops create` | `projects/<p>/jails/*.yaml` (Jail) | the whole spec: network and storage (explicit), `volumes`, `host_mounts`, `proxy`, `devfs`, `resources`, `boot`, `update` schedule, `firewall` (`policies`, a list, and `tags`), `env` with `secret:` references, `provision`, `labels`. `start: true` and `after:` hooks (start, restart, snapshot, exec) run once, after creation |
+| `jailops create` | `projects/<p>/jails/*.yaml` (Jail) | the whole spec: network and storage (explicit), `volumes`, `proxy`, `devfs`, `resources`, `boot`, `update` schedule, `firewall` (`policies`, a list, and `tags`), `env` with `secret:` references, `provision`, `labels`. `start: true` and `after:` hooks (start, restart, snapshot, exec) run once, after creation |
 | `jailops firewall policy/address-set create` | `projects/<p>/firewall-policies/`, `address-sets/` | the project's mandatory policies are set in a second write once the policies exist |
 | `jailops backup target create` | `shared/backup-targets/*.yaml` (BackupTarget) | `kind: node` needs `address` and a pinned `fingerprint` |
 | `jailops backup policy create` | `projects/<p>/backup-policies/*.yaml` (BackupPolicy) | selector, targets, `schedule`, retention, `include_state`, `exclude_volumes`, `verify_schedule`, `verify_mode` |
@@ -147,7 +147,7 @@ label `jailops.app` differs) and nothing is applied. An App and a Jail document 
 `limits`, `network` and the rest are read only at the installation; a later change of the document is not drift.
 
 An **AppAccess** document is the list of sources allowed to reach one installed app (metadata.name is the app's jail). An
-installed app is closed to everything else; each entry is what `jailops app allow APP from SOURCE` is given:
+installed app is closed to everything else; each entry is what `jailops app allow APP --from SOURCE` is given:
 
     apiVersion: jailops/v1
     kind: AppAccess
@@ -179,7 +179,7 @@ the role. `sync --apply` prints it **once, in its own output**, under the change
 It is not in the plan, not in the JSONL apply log, not in the state directory and never written into the repository. Copy
 it into the application's secret store at once; `watch --apply` prints it to wherever its output goes, so make the first
 apply of a new grant by hand. Re-applying never makes a new password (sync never asks for a rotation);
-`jailops app allow APP from SOURCE --rotate` does, and prints the new string.
+`jailops app allow APP --from SOURCE --rotate` does, and prints the new string.
 
 **Order.** Apps come after every stored kind of the host (images, networks, storage, projects, policies, jails), and
 grants after the apps: a grant's app is installed and its source jails exist when it is allowed. `validate` warns about a
@@ -264,6 +264,6 @@ Tested with fakes only (in-memory hosts, `internal/fleet/e2e`): `build: true` fo
 and then planning to zero (a WireGuard server with a listed peer included), and the eight example repositories. **UNVERIFIED on a real host:** `build: true` (the first image build
 and then planning to zero, and the nine example repositories. Apps and their grants (`examples/app-access-fleet`) are tested against the
 in-memory host's catalog only: **UNVERIFIED on a real host:** an App installed and an AppAccess applied by sync (the same calls as the CLI). **UNVERIFIED on a real host:** `build: true` (the first image build
-through sync), an IPv6 proxy or routed network created by sync (the same objects created by the CLI are verified), a host mount applied by
+through sync), an IPv6 proxy or routed network created by sync (the same objects created by the CLI are verified), a host-directory volume applied by
 sync with a global-admin token, and `jailops-sync` over the network with a CA-signed server certificate (a pinned self-signed one is
 verified).

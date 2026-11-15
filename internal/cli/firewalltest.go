@@ -47,6 +47,9 @@ jailops firewall test --from jail:web --to 198.51.100.9 --proto udp --port 53 -o
 			if from == "" || to == "" {
 				return usagef("--from and --to are required")
 			}
+			if (proto == "tcp" || proto == "udp") && port == 0 {
+				return usagef("--port is required: the protocol is %s unless --proto says otherwise (for example --port 5432, or --proto icmp to test ping)", proto)
+			}
 			c, err := a.connect(cmd.Context())
 			if err != nil {
 				return err

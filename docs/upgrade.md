@@ -61,7 +61,7 @@ is **a new image**, never a new generation of an old one: there is no in-place r
 the builds of the image on this host (g1, g2, ...) and says nothing about FreeBSD. When a generation is built, JailOps
 records the FreeBSD version its base packages come from (the version of the `FreeBSD-runtime` package, `15.1p6`, shown
 as `15.1-RELEASE-p6`; a snapshot of a branch keeps the package version as it is, `15.snap20261031190411`). `jailops image
-show` and `jailops image generations` have a column `FREEBSD`, `jailops list` writes `freebsd-15-1 (g1, p6)`, and the
+show` and `jailops image generation list` have a column `FREEBSD`, `jailops list` writes `freebsd-15-1 (g1, p6)`, and the
 console shows it on the Images page and the jail's page. A generation built before 0.6.1 shows `-`: JailOps does not
 guess it afterwards.
 
@@ -84,7 +84,7 @@ attempted, so a bad generation is not rolled across the host; fix the jail (its 
 command again. When the package set did not change, nothing is kept and no jail is touched; the command says so. A stopped
 jail is moved too: it is started for the health check and stopped again. Thick jails, Linux jails (always thick), jails with an
 update strategy other than `rebase` and jails pinned to a generation (`freebsd-15-1#g3`) are skipped and listed. `--project P`
-moves one project's jails, `--no-jails` builds the generation only, and `jailops image generations freebsd-15-1` shows who is
+moves one project's jails, `--no-jails` builds the generation only, and `jailops image generation list freebsd-15-1` shows who is
 where afterwards.
 
 The same in two steps, one jail at a time:
@@ -95,16 +95,16 @@ The same in two steps, one jail at a time:
     jailops jail rollback web --project shop             # root only: back to the previous generation, data untouched
 
 A generation is written `gN` wherever a command takes one (`image build --from g2`, `jail upgrade --generation g4`,
-`image delete-generation freebsd-15-1 g1`); a bare number is accepted too. As an advanced option an image can also carry
-aliases, movable names for one generation (`jailops image alias set freebsd-15-1 tested g2`, used as `freebsd-15-1@tested`);
+`image generation delete freebsd-15-1 g1`); a bare number is accepted too. As an advanced option an image can also carry
+aliases, movable names for one generation (`jailops image alias add freebsd-15-1 tested g2`, used as `freebsd-15-1@tested`);
 the plain name, which follows the newest generation, is what the console and these documents use.
 
 ### Nightly auto upgrade
 
 Instead of running `image upgrade` by hand, let JailOps do it every night, per image:
 
-    jailops image auto-upgrade freebsd-15-1 on --at 03:00     # --no-packages leaves the packages inside the jails alone
-    jailops image auto-upgrade freebsd-15-1 off
+    jailops image set freebsd-15-1 --auto-upgrade --upgrade-at 03:00     # --no-packages leaves the packages inside the jails alone
+    jailops image set freebsd-15-1 --auto-upgrade=false
     jailops image show freebsd-15-1                           # the next run and the latest runs with their results
 
 In the console it is the checkbox **Upgrade automatically every night** on the image's card of the Images page (with the
@@ -144,7 +144,7 @@ release. The order:
 
        jailops image create freebsd-15-2 --release 15.2-RELEASE
        jailops image build freebsd-15-2
-       jailops image auto-upgrade freebsd-15-2 on --at 03:00
+       jailops image set freebsd-15-2 --auto-upgrade --upgrade-at 03:00
 
    The console proposes this itself: when the host runs a newer release than the newest FreeBSD image, the Images page and
    the Overview say so and offer **Create image** for it, filled in.

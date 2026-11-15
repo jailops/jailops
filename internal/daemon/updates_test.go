@@ -27,7 +27,7 @@ type scriptedJails struct {
 	failUp   bool   // pkg upgrade -y fails
 	failHC   bool   // the health check fails
 	upgraded bool
-	env      *dtest.Env // the host-side pkg -r commands of FreeBSD jails run on its command fake
+	env      *dtest.Env // the host-side pkg -j commands of FreeBSD jails run on its command fake
 }
 
 func (s *scriptedJails) fn(name string, o jailos.ExecOpts) (run.Result, error) {
@@ -60,11 +60,11 @@ func (s *scriptedJails) ran(sub string) bool {
 			return true
 		}
 	}
-	// A FreeBSD jail has no pkg of its own: the host runs `pkg -r ROOT upgrade -y`, written here as `pkg upgrade -y`.
+	// A FreeBSD jail has no pkg of its own: the host runs `pkg -j JAIL upgrade -y`, written here as `pkg upgrade -y`.
 	if s.env != nil {
 		for _, c := range s.env.Run.Calls() {
 			// an image build passes -o options (REPOS_DIR, PKG_CACHEDIR...): it is not a jail's pkg
-			if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 2 && c.Cmd.Args[0] == "-r" && c.Cmd.Args[2] != "-o" &&
+			if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 2 && c.Cmd.Args[0] == "-j" && c.Cmd.Args[2] != "-o" &&
 				strings.Contains("pkg "+strings.Join(c.Cmd.Args[2:], " "), sub) {
 				return true
 			}

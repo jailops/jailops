@@ -383,7 +383,7 @@ func lockoutGuard(spec api.HostFirewallSpec, peer string, iKnow bool) error {
 			return nil
 		}
 		return api.Errorf(api.CodeInvalid, "the address this request came from is unknown (the unix socket or a hub), so the lock-out check cannot run").
-			WithHint("check that you keep a way in, then repeat with --i-know (i_know in the API); the change still reverts unless you confirm it").
+			WithHint("check that you keep a way in, then repeat with --confirm-lockout (confirm_lockout in the API); the change still reverts unless you confirm it").
 			WithDetail("guard", "unknown_peer")
 	}
 	a, err := netip.ParseAddr(peer)
@@ -463,7 +463,7 @@ func (l *Local) HostFirewallApply(ctx context.Context, q service.HostFirewallReq
 	if pend != nil {
 		res.Warnings = append(res.Warnings, l.busyPending(*pend).Error())
 	}
-	guard := lockoutGuard(spec, q.Peer, q.IKnow)
+	guard := lockoutGuard(spec, q.Peer, q.ConfirmLockout)
 	if q.DryRun || !changed {
 		if guard != nil && changed {
 			res.Warnings = append(res.Warnings, "the apply would be refused: "+guard.Error())

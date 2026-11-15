@@ -391,7 +391,7 @@ func (s *Server) handleAppInstall(w http.ResponseWriter, r *http.Request) {
 		if app.Health != nil {
 			step("health-check", "the health check of the definition")
 		}
-		step("close-firewall", "firewall policy app-"+jail+" (managed by app access): deny every inbound connection until jailops app allow "+jail+" from SOURCE")
+		step("close-firewall", "firewall policy app-"+jail+" (managed by app access): deny every inbound connection until jailops app allow "+jail+" --from SOURCE")
 		step("snapshot", "snapshot every dataset of "+jail+" as app-installed")
 		step("enable-autostart", "boot.autostart of "+jail+": start with the host")
 		res := api.AppInstallResult{App: name, Hash: entry.detail.Hash, Data: app.Data, Config: app.Config, Logs: app.Logs, Notes: app.Notes, Steps: steps, DryRun: req.DryRun}

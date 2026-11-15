@@ -235,7 +235,7 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 		}
 		if ar.unknownCert && !ent.Public {
 			var err error = api.Errorf(api.CodeUnauthorized, "the client certificate is not trusted").
-				WithHint("ask a global administrator for a trust token (jailops trust add)")
+				WithHint("ask a global administrator for a trust token (jailops cert enroll)")
 			if lerr := s.tokLim.Fail("cert|" + auth.SourceKey(c.remote())); lerr != nil {
 				err = lerr
 			}

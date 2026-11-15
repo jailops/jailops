@@ -41,7 +41,7 @@ async function done(): Promise<void> {
               <router-link class="mono" :to="`/projects/${p.metadata.name}`">{{ p.metadata.name }}</router-link>
               <span v-if="p.metadata.name === projectState.current" class="pill info" style="margin-left: 6px">{{ s.projects.current }}</span>
               <span v-if="p.spec.hosts?.length" class="badge info" style="margin-left: 6px">{{ s.projects.fleet }}</span>
-              <div v-if="p.spec.description" class="faint">{{ p.spec.description }}</div>
+              <div v-if="p.spec.comment" class="faint">{{ p.spec.comment }}</div>
             </td>
             <td class="mono" :data-label="s.projects.networks">{{ grants(p) }}</td><td class="mono" :data-label="s.projects.storage">{{ stor(p) }}</td>
             <td :data-label="s.projects.usage"><QuotaBars :project="p" /><span class="faint">{{ s.projects.jailsCount(p.status.jails ?? 0) }}</span></td>

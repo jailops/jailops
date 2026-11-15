@@ -1,9 +1,9 @@
-$ jailops app install postgresql --name db --image freebsd-151@stable
+$ jailops app install postgresql db --image freebsd-151@stable
 App postgresql installed as jail db (running)
   Version:   18.6
   Addresses: 10.20.0.10
   Ports:     postgres 5432/tcp at 10.20.0.10:5432 The SQL port.
-  Access:    closed: nothing reaches it until jailops app allow db from SOURCE
+  Access:    closed: nothing reaches it until jailops app allow db --from SOURCE
   Data:      /var/db/postgres The cluster (data18).
   Config:    /var/db/postgres/data18/postgresql.conf (restart postgresql) Server settings.
              /var/db/postgres/data18/pg_hba.conf (restart postgresql) Who may connect.
@@ -13,12 +13,12 @@ App postgresql installed as jail db (running)
 Notes:
   Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql
 
-$ jailops app install nginx --name web --image freebsd-151@stable
+$ jailops app install nginx web --image freebsd-151@stable
 App nginx installed as jail web (running)
   Version:   1.30.6,3
   Addresses: 10.20.0.11
   Ports:     http 80/tcp at 10.20.0.11:80 (expose: forwarding is not set up yet) HTTP, the default site.
-  Access:    closed: nothing reaches it until jailops app allow web from SOURCE
+  Access:    closed: nothing reaches it until jailops app allow web --from SOURCE
   Data:      /usr/local/www The sites.
   Config:    /usr/local/etc/nginx/nginx.conf (restart nginx) The server configuration.
   Logs:      access /var/log/nginx/access.log One line per request.
@@ -33,7 +33,7 @@ APP   DEFINITION   SOURCE   PORTS   DATABASE   STATE
 db    postgresql   -        -       -          closed
 web   nginx        -        -       -          closed
 
-$ jailops app allow db from jail:web --dry-run
+$ jailops app allow db --from jail:web --dry-run
 Dry run: nothing was changed. Allowing jail:web to reach db would do:
   Rule:      allow in tcp from jail:web to port 5432 (policy app-db)
   pg_hba:    host web web 10.20.0.11/32 scram-sha-256
@@ -44,7 +44,7 @@ Dry run: nothing was changed. Allowing jail:web to reach db would do:
   - in the jail, as postgres: psql with the statements on standard input
   - /var/db/postgres/data18/pg_hba.conf: the managed block gets host web web 10.20.0.11/32 scram-sha-256; then the server reloads it
 
-$ jailops app allow db from jail:web
+$ jailops app allow db --from jail:web
 Allowed jail:web to reach db on 5432/tcp.
   Rule:      allow in tcp from jail:web to port 5432 (policy app-db)
   pg_hba:    host web web 10.20.0.11/32 scram-sha-256
@@ -55,7 +55,7 @@ Connection string (shown once, stored nowhere):
   postgres://web:<password>@10.20.0.10:5432/web?sslmode=disable
 Note: the connection string is shown once and stored nowhere; jailops app allow db from jail:web --rotate makes a new password
 
-$ jailops app allow db from jail:web
+$ jailops app allow db --from jail:web
 jail:web may already reach db on 5432/tcp.
   Rule:      allow in tcp from jail:web to port 5432 (policy app-db)
   pg_hba:    host web web 10.20.0.11/32 scram-sha-256
@@ -63,7 +63,7 @@ jail:web may already reach db on 5432/tcp.
 Note: role web exists: its password was shown when it was made; --rotate makes a new one
 Note: nothing changed: the grant exists as it is
 
-$ jailops app allow db from jail:web --rotate
+$ jailops app allow db --from jail:web --rotate
 Allowed jail:web to reach db on 5432/tcp.
   Rule:      allow in tcp from jail:web to port 5432 (policy app-db)
   pg_hba:    host web web 10.20.0.11/32 scram-sha-256
@@ -73,7 +73,7 @@ Connection string (shown once, stored nowhere):
   postgres://web:<password>@10.20.0.10:5432/web?sslmode=disable
 Note: the connection string is shown once and stored nowhere; jailops app allow db from jail:web --rotate makes a new password
 
-$ jailops app allow db from 192.0.2.0/24 --db shop
+$ jailops app allow db --from 192.0.2.0/24 --db shop
 Allowed 192.0.2.0/24 to reach db on 5432/tcp.
   Rule:      allow in tcp from 192.0.2.0/24 to port 5432 (policy app-db)
   pg_hba:    host shop shop 192.0.2.0/24 scram-sha-256
@@ -84,12 +84,12 @@ Connection string (shown once, stored nowhere):
   postgres://shop:<password>@10.20.0.10:5432/shop?sslmode=disable
 Note: the connection string is shown once and stored nowhere; jailops app allow db from 192.0.2.0/24 --rotate makes a new password
 
-$ jailops app allow web from host
+$ jailops app allow web --from host
 Allowed host to reach web on 80/tcp.
   Rule:      allow in tcp from 10.20.0.1 to port 80 (policy app-web)
 Note: only the firewall changed: the app must itself listen on the jail's address and accept the client (see its configuration files with jailops app info nginx)
 
-$ jailops app allow web from 198.51.100.7 --port 80 --port 443/tcp
+$ jailops app allow web --from 198.51.100.7 --port 80 --port 443
 Allowed 198.51.100.7 to reach web on 80/tcp, 443/tcp.
   Rule:      allow in tcp from 198.51.100.7 to port 80,443 (policy app-web)
 Note: only the firewall changed: the app must itself listen on the jail's address and accept the client (see its configuration files with jailops app info nginx)
@@ -123,22 +123,22 @@ jail:web (jail)
   Rule:      allow in tcp from 192.0.2.0/24 to port 5432
   pg_hba:    host shop shop 192.0.2.0/24 scram-sha-256
 
-$ jailops app deny db from jail:web --dry-run
+$ jailops app deny db --from jail:web --dry-run
 Dry run: nothing was changed. Denying jail:web on db would do:
   - firewall policy app-db: remove allow in tcp from jail:web to port 5432
   SQL: ALTER ROLE "web" NOLOGIN PASSWORD NULL;
 Note: role web keeps its database and loses its login and password; --drop-role drops it
 
-$ jailops app deny db from jail:web
+$ jailops app deny db --from jail:web
 Denied jail:web on db.
   - firewall policy app-db: remove allow in tcp from jail:web to port 5432
   SQL: ALTER ROLE "web" NOLOGIN PASSWORD NULL;
 Note: role web keeps its database and loses its login and password; --drop-role drops it
 
-$ jailops app deny db from jail:web
+$ jailops app deny db --from jail:web
 Note: nothing changed: jail:web has no access to db
 
-$ jailops app deny db from 192.0.2.0/24 --drop-role -y
+$ jailops app deny db --from 192.0.2.0/24 --drop-role -y
 Denied 192.0.2.0/24 on db.
   - firewall policy app-db: remove allow in tcp from 192.0.2.0/24 to port 5432
   SQL: REASSIGN OWNED BY "shop" TO postgres;
@@ -146,26 +146,26 @@ Denied 192.0.2.0/24 on db.
   SQL: DROP ROLE IF EXISTS "shop";
 Note: role shop is dropped; what it owned now belongs to postgres and database shop is kept
 
-$ jailops app allow db from 192.0.2.0/24
+$ jailops app allow db --from 192.0.2.0/24
 ! invalid: name the database of this grant with --db NAME (a source that is not a jail has no default)
 [exit 2]
 
-$ jailops app allow db from jail:nobody
+$ jailops app allow db --from jail:nobody
 ! not_found: jail "nobody" not found
 ! hint: list them with 'jailops jail list'; check --project, --host and --remote too
 [exit 4]
 
 $ jailops app allow db to jail:web
-! usage: jailops app allow APP from SOURCE
+! usage: accepts 1 arg(s), received 3
 ! hint: run 'jailops app allow --help' for usage
 [exit 2]
 
 $ jailops app allow db
-! usage: jailops app allow APP from SOURCE
+! usage: --from is required: who may connect (jail:NAME, set:NAME, an address or prefix, or host)
 ! hint: run 'jailops app allow --help' for usage
 [exit 2]
 
-$ jailops app allow missing from jail:web
+$ jailops app allow missing --from jail:web
 ! not_found: jail "missing" not found
 ! hint: list them with 'jailops jail list'; check --project, --host and --remote too
 [exit 4]

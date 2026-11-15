@@ -23,14 +23,14 @@ export function projects(counts: Record<string, number>): Project[] {
     status: { jails: counts[name] ?? 0, cpu: 0, memory_used: 0, disk_used: 0, addresses: 0, conditions: [], ...status },
   })
   return [
-    p('web', { description: 'The web workloads', networks: [{ network: 'lan' }, { network: 'edge' }, { network: 'backend' }], storage: [{ storage: 'default' }], quotas: {} }, { cpu: 8, memory_used: 9 * GiB, disk_used: 120 * GiB, addresses: 7 }),
+    p('web', { comment: 'The web workloads', networks: [{ network: 'lan' }, { network: 'edge' }, { network: 'backend' }], storage: [{ storage: 'default' }], quotas: {} }, { cpu: 8, memory_used: 9 * GiB, disk_used: 120 * GiB, addresses: 7 }),
     p('shop', {
-      description: 'Web shop on two hosts', hosts: ['bsd01', 'bsd02'],
+      comment: 'Web shop on two hosts', hosts: ['bsd01', 'bsd02'],
       networks: [{ network: 'shop' }],
       storage: [{ storage: 'fast', quota: '500G' }, { storage: 'default', quota: '100G' }],
       quotas: { jails: 10, cpu: 16, memory: '32G', addresses: 20 }, firewall_policies: ['web-default'], images: ['freebsd-15-1'],
     }, { cpu: 14, memory_used: 27 * GiB, disk_used: 210 * GiB, addresses: 8, conditions: [{ type: 'Host:bsd02', status: 'False', reason: 'MissingStorage', message: 'bsd02 has no storage fast' }] }, true),
-    p('staging', { description: 'Disposable tests', networks: [{ network: 'stg' }], storage: [{ storage: 'fast', quota: '50G' }], quotas: { jails: 3, memory: '4G' } }, { cpu: 2, memory_used: 1 * GiB, disk_used: 8 * GiB, addresses: 1 }),
+    p('staging', { comment: 'Disposable tests', networks: [{ network: 'stg' }], storage: [{ storage: 'fast', quota: '50G' }], quotas: { jails: 3, memory: '4G' } }, { cpu: 2, memory_used: 1 * GiB, disk_used: 8 * GiB, addresses: 1 }),
   ]
 }
 
@@ -49,7 +49,7 @@ export function aggregate(p: Project) {
 
 export function storages(): Storage[] {
   return [
-    { metadata: meta('default'), spec: { dataset: 'tank/jailops', description: 'First storage', compression: 'lz4' }, status: { pool: 'tank', health: 'ONLINE', size: 1800 * GiB, used: 1290 * GiB, available: 510 * GiB, fragmentation: 18 } },
+    { metadata: meta('default'), spec: { dataset: 'tank/jailops', comment: 'First storage', compression: 'lz4' }, status: { pool: 'tank', health: 'ONLINE', size: 1800 * GiB, used: 1290 * GiB, available: 510 * GiB, fragmentation: 18 } },
     { metadata: meta('fast'), spec: { dataset: 'nvme/jailops', compression: 'zstd', encrypted: true }, status: { pool: 'nvme', health: 'DEGRADED', size: 900 * GiB, used: 300 * GiB, available: 600 * GiB, fragmentation: 4, conditions: [{ type: 'Healthy', status: 'False', reason: 'Degraded' }] } },
   ]
 }
@@ -74,7 +74,7 @@ export function certificates(): Certificate[] {
 }
 
 export function profiles(): { project: Profile[]; host: Profile[] } {
-  const p = (name: string, project: string, description: string, config: Record<string, string>): Profile => ({ metadata: { ...meta(name), project }, spec: { description, config } })
+  const p = (name: string, project: string, comment: string, config: Record<string, string>): Profile => ({ metadata: { ...meta(name), project }, spec: { comment, config } })
   return {
     project: [
       p('web-limits', 'web', 'Sensible limits for web jails', { 'limits.memory': '2G', 'limits.cpu': '2', 'boot.autostart': 'true', 'nic.eth0.mtu': '1400' }),

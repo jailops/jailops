@@ -97,7 +97,7 @@ web/apps.json  Registry of UI apps: binary, embed package, API role and allowed 
 `pfctl`, `/dev/bpf`, mounts) is requested from `jailops-priv` through a fixed list of typed
 operations. The peer is checked with `LOCAL_PEERCRED` **[verified]** (section 18).
 
-Dangerous parameters (raw jail parameters, host mounts, `allow.*` flags, devfs rulesets, raw
+Dangerous parameters (raw jail parameters, host directories, `allow.*` flags, devfs rulesets, raw
 PF, hooks) require the `admin` role, are allow-listed, and are audited. An API admin is root on
 the host if those are allowed, and the documentation says so.
 
@@ -199,7 +199,7 @@ question is open: how `/var/db/pkg` behaves after a root swap.
    generation that only aliases point at moves each alias to the newest remaining generation, or removes it
    when none remains. Deleting an image removes all its generations and aliases, and is refused (`image_in_use`,
    naming the jails) while any jail references one of them. Aliases are managed explicitly with
-   `PUT|DELETE /api/v1/images/{name}/aliases/{alias}` (`jailops image alias set|delete`, extension `image_aliases`, admin).
+   `PUT|DELETE /api/v1/images/{name}/aliases/{alias}` (`jailops image alias add|delete`, extension `image_aliases`, admin).
 
 ### 4.4 Rollback scopes
 
@@ -231,15 +231,14 @@ A host usually has more than one pool. Three things, with different owners:
   once at creation. It outlives the jails and can be attached to several; a jail's snapshot, rollback and copy leave it
   alone. An `encrypted` volume is a ZFS encryption root with a passphrase typed at creation and after every boot; the jail
   that attaches it is `locked` until then ([storage.md](storage.md#volumes), section 16).
-- **Host mounts.** Data that already exists and that JailOps does not own: `host_mounts` in the jail spec
-  (`--host-mount SOURCE:TARGET[:ro]`), mounted with nullfs from a host directory. Only a global administrator may set
-  them; the helper writes a jail fstab only when every nullfs source lies below an `admin-host-mount` directory the
-  operator listed in `priv.conf` and the request carries the admin assertion. The assertion is self-declared by
-  the daemon (section 18.6), so **the allow-list is the boundary, not the assertion**: a compromised daemon cannot
-  mount anything the operator did not name. Profiles cannot carry them. The mount point is created in the jail's root on every
-  render, because a thin root is replaced by an update. JailOps neither snapshots nor backs up such data; a read-write
-  mount lets the jail change it, so use `:ro` or ZFS's own snapshots and replication for what matters. Handing a dataset
-  to a jail to manage itself (`zfs_delegation`) is a dataset of its own, `<container>/delegated`, with `jailed=on`,
+- **Host directories.** Data that already exists and that JailOps does not own is a volume with `--path`
+  ([storage.md](storage.md#host-directories-as-volumes)): a directory of the host that is a real mount, attached to jails with
+  nullfs. Only a global administrator makes or attaches one; the helper writes a jail fstab only when every nullfs source
+  lies below an `admin-host-mount` directory the operator listed in `priv.conf` and the request carries the admin
+  assertion. The assertion is self-declared by the daemon (section 18.6), so **the allow-list is the boundary, not the
+  assertion**: a compromised daemon cannot mount anything the operator did not name. JailOps neither snapshots nor backs up such
+  data; a read-write attachment lets the jail change it, so attach it read-only or use ZFS's own snapshots and
+  replication for what matters. Handing a dataset to a jail to manage itself (`zfs_delegation`) is a dataset of its own, `<container>/delegated`, with `jailed=on`,
   named in `jail.conf` (`zfs.dataset`) so `jail(8)` attaches it; it needs a global admin and `admin-zfs-delegation` in
   priv.conf ([storage.md](storage.md#handing-a-dataset-to-the-jail-to-manage)).
 
@@ -381,7 +380,7 @@ interface's public key and what `wg show <if> dump` reports per peer.
   a project's anchor), which passes the tunnel's subnets to those networks and nothing else. The host's `pf.conf` needs
   one rule for the listen port; JailOps prints it and `jailops doctor` checks for it (`wireguard.firewall`), with
   `wireguard.tools` (the wg program, the module) and `wireguard.forwarding`.
-- The helper's WireGuard operations (`wg.keys`, `wg.peer_keys`, `wg.import`, `wg.apply`, `wg.remove`, `wg.show`,
+- The helper's WireGuard operations (`wg.keys`, `wg.peer_keys`, `wg.import`, `wg.apply`, `wg.remove`, `wg.rename`, `wg.show`,
   `wg.tools`) are typed; `wg` is not on the command allow-list. Every one that changes something needs the admin
   assertion.
 
@@ -528,7 +527,7 @@ host-managed resources. A project does not create them, it is granted access to 
 jailops network create web --ipv4 10.50.0.1/24 --ipv6 fd50::1/64
 jailops storage create fast --dataset tank/jailops
 jailops project create web
-jailops project set web --network web --storage fast
+jailops network grant web --project web && jailops storage grant fast --project web
 jailops create nginx --project web --image freebsd-15-1 --network web --storage fast
 ```
 
@@ -558,7 +557,7 @@ global.
 ```
 jailops network create web --ipv4 10.50.0.1/24 --uplink em0 --nat
 jailops project create web
-jailops project set web --network web --storage default
+jailops network grant web --project web && jailops storage grant default --project web
 jailops project switch web
 jailops create nginx --image freebsd-15-1 --network web --storage default
 jailops start nginx
@@ -621,13 +620,13 @@ Rules:
   identity may access**. Lists, events, operations, audit entries and backups are filtered by project; an
   identity never learns that an object in another project exists (it gets `not_found`).
 - **Trust workflow** (no trust on first use, no manual certificate copying):
-  1. An unrestricted admin runs `jailops trust add --name laptop --role operator --projects web` (or `--global`).
+  1. An unrestricted admin runs `jailops cert enroll laptop --role operator --projects web` (or `--global`).
      The server returns a single-use **trust token** bound to that name, with an expiry (default 1 hour),
      carrying the server's certificate fingerprint and a secret.
-  2. On the client, `jailops remote add host.example --token <token>` pins the server fingerprint from the
+  2. On the client, `jailops remote add myhost host.example --token <token>` pins the server fingerprint from the
      token, generates a client key pair, and presents the token with the client certificate.
   3. The server consumes the token and records the certificate fingerprint with the role and projects.
-  4. `jailops trust list`, `trust revoke <fingerprint>` manage the store, and `jailops cert` edits a certificate. Revocation takes
+  4. `jailops cert list`, `cert revoke <name or fingerprint>` manage the store, and `jailops cert` edits a certificate. Revocation takes
      effect on the next request. Certificates may carry an expiry.
 - The unix socket: root (uid 0) is a global admin, the host's break-glass and recovery access (`sudo jailops user create NAME --admin`,
   `user set-password`, `user set-role`). Every other local peer is anonymous: it reaches what an unauthenticated remote client reaches
@@ -673,10 +672,10 @@ jailops apply -f site.yaml          # create or update every document of a file
   restarts a jail silently, and `--restart` is an explicit request.
 - **Confirmations.** `-y` answers yes/no questions only. Destroying data (deleting a jail, with its root,
   volumes and snapshots; a data rollback; a restore over a jail) first shows what goes, read from the server
-  (sizes, snapshot count), and needs the typed name, or `--confirm-data-loss` in a script. `--i-know` accepts a
+  (sizes, snapshot count), and needs the typed name, or `--confirm-data-loss` in a script. `--confirm-lockout` accepts a
   risk that is not data loss (a host firewall change whose lock-out check cannot run, replacing a public
-  certificate). Old flag spellings stay accepted as hidden aliases (`--permission` for `--role`, `--ttl` for
-  `--expires`, `--selector` and `--label` for `-l`), so scripts do not break.
+  certificate). One name for each thing: `--role`, `--expires`, `--comment`,
+  `-l` to filter a list and `--selector` to act on jails.
 - **Devices.** A jail's hardware-like attachments are named devices with their own configuration:
   `nic` (a network attachment: network, addresses, MAC, MTU, optional rate limit), `disk` (a volume mount
   of a ZFS dataset, quota, read-only; host path mounts need admin), `devfs` (exposure of selected device
@@ -755,7 +754,7 @@ updates:
   session starts with the PATH of a login (`/usr/local/bin` included) and root's HOME; from a terminal the CLI passes `TERM`.
 - **Bash and the prompt of a new jail** ([shell.md](shell.md)). A new FreeBSD jail whose request and profiles leave `shell`
   and `prompt` empty gets `jails.shell` and `jails.prompt` of `jailopsd.yaml` in its spec (bash and `default`). At the
-  first start JailOps installs `bash` into the jail from the host (`pkg -r ROOT install -y bash`) and writes the prompt:
+  first start JailOps installs `bash` into the running jail (`pkg -j JAIL install -y bash`) and writes the prompt:
   one file it owns, `/usr/local/etc/profile.d/jailops-prompt.sh` (a single-quoted `PS1` assignment of a text checked by
   an allow-list, set only in an interactive bash), sourced from a marked block at the top of `/usr/local/etc/profile` and
   `/usr/local/etc/bash.bashrc`, the two system start-up files of the FreeBSD bash package. All of it is in the persistent
@@ -806,7 +805,7 @@ them with `jailops app validate`, the daemon's validator run offline by the clie
 `internal/apps/testdata/catalog/`. `GET /api/v1/apps`
 and `/api/v1/apps/<name>` are readable by any authenticated identity (route class `self`). The format, the rules and the
 installation (`POST /api/v1/apps/<name>/install`, operator in the project, extension `app_install`: one operation,
-a thin jail from the FreeBSD image of the highest release the host can run unless one is named, with the data paths as volumes, `pkg -r` from the host through the helper, rc.conf
+a thin jail from the FreeBSD image of the highest release the host can run unless one is named, with the data paths as volumes, `pkg -r` from the host through the helper while the jail has never run, rc.conf
 written through the helper's file operations, setup commands and services through the in-jail exec, health check,
 snapshot `app-installed`, labels `jailops.app`, `jailops.app.hash`, `jailops.app.version`; a failure after the first
 start keeps the jail stopped for inspection) are in [apps.md](apps.md). A definition may ask for System V IPC
@@ -820,14 +819,14 @@ read with the catalog on each request: a local definition is listed with `source
 of the same name (`overrides: catalog`), so an author tries an app on a host without a package. Two tools help write
 one (apps.md, "Write your own app"): `jailops app new` writes a commented starter offline, and `jailops app export`
 reads `GET /api/v1/jails/<name>/app-draft` (operator, extension `app_draft`, audited), a draft made from a running
-jail: the packages installed on purpose (`pkg -r <root> query -e "%a = 0" "%n %v %R %w"` on the host, one exact form
+jail: the packages installed on purpose (`pkg -j <jail> query -e "%a = 0" "%n %v %R %w"` on the host, one exact form
 on the helper's allow-list, `RestExact` of the `pkg` rule), the services and knobs of its `rc.conf`, and, through the
 in-jail exec, `sockstat`, the names of files below `/usr/local/etc` and `/var/log` newer than pkg's database (`find`)
 and the owners of the app's directories (`stat`). It never reads a configuration file and leaves a secret-looking
 rc.conf knob out. Both write files that validate, with `TODO` markers that `jailops app validate` reports per line.
 
 **Who may connect** (apps.md, extension `app_access`). An installed app is closed: its installation ends by creating the
-managed firewall policy `app-<jail>` (5.2), denying by default. `jailops app allow APP from SOURCE` (`POST
+managed firewall policy `app-<jail>` (5.2), denying by default. `jailops app allow APP --from SOURCE` (`POST
 /api/v1/jails/<n>/access`, operator in the project, audited, answered at once and never kept as an operation result)
 adds an allow rule for one source (`jail:NAME`, `set:NAME`, an address or prefix, `host`) and, for a
 definition with the optional `access:` block (`type: postgresql`), makes a role and a database with `psql` run as
@@ -1458,10 +1457,10 @@ symbolic link: a mount point below the jail's own root, a source below a storage
 directory. A mount point that does not exist yet is accepted if the part that exists is plain. The recheck is the same
 `WithAdmin("recheck")` pass that jail.conf gets, so the operator's allow-lists, not the daemon's say-so, remain the
 boundary. An approved `admin-host-mount` directory must not be writable by jails that are not trusted equally: two jails
-that share it can still change what is below it between two starts. A host mount an administrator admitted stays when
+that share it can still change what is below it between two starts. A host directory an administrator admitted stays when
 an operator starts, restarts or stops the jail, because the helper accepts an fstab line that is unchanged from the
-file on disk (still inside the allow-list); a new or changed host-mount line needs the administrator again. Setting
-`host_mounts` or `zfs_delegation` needs a global identity with the admin permission, not just a global one.
+file on disk (still inside the allow-list); a new or changed host-directory line needs the administrator again. Making a
+volume with `--path` or setting `zfs_delegation` needs a global identity with the admin permission, not just a global one.
 
 ### 18.7 IPv6 on a routed /64, and a glibc distribution (FreeBSD 15.1 arm64)
 
@@ -1631,10 +1630,10 @@ router-identity reservation is not, which is why it was not. **UNTESTED live**: 
 L2-adjacent host on the uplink segment; the test hosts have no such neighbour, so the fix above is verified with
 fakes only (`internal/ndproxy`), not against a live flood.
 
-### 18.11 Host mounts and the switched-IPv6 soak (October 2026)
+### 18.11 Host directories and the switched-IPv6 soak (October 2026)
 
-- **Host mounts.** On the arm64 host, a dataset of a second pool mounted at `/archive` with `admin-host-mount = /archive`
-  in `priv.conf`: `jailops jail create ... --host-mount /archive:/mnt/archive:ro` created the mount point, the jail saw the
+- **Host directories.** On the arm64 host, a dataset of a second pool mounted at `/archive` with `admin-host-mount = /archive`
+  in `priv.conf`: a jail that attached it read-only at `/mnt/archive` created the mount point, the jail saw the
   files, a write failed with "Read-only file system", the nullfs mount was gone after the jail stopped, and a source the
   operator had not listed (`/etc`) was refused by the helper when the jail was started (the API accepts the spec, because
   only the helper knows the operator's directories).
@@ -1650,7 +1649,7 @@ fakes only (`internal/ndproxy`), not against a live flood.
   `network.ndproxy` and `host.release` checks passed, and a jail address reused by a new jail was reachable at once. The
   announcement was seen on the wire (unsolicited advertisement to `ff02::1`, override flag only). The host-route parser
   (`netstat -rn`) of the helper therefore works on real output.
-- **Symlink attacks on host mounts (arm64).** With the jail stopped, its mount point's parent was replaced by a symlink to
+- **Symlink attacks on host directories (arm64).** With the jail stopped, its mount point's parent was replaced by a symlink to
   the host's `/usr/local/etc`: the start was refused ("path escapes the allowed root") and nothing was mounted on the
   host. A source below the approved directory that was a symlink to `/` was refused ("resolves through a symbolic link").
   The ordinary mount worked again afterwards. Not run on a real host: the operator-start case (a non-admin starting an
@@ -1715,7 +1714,7 @@ the shell block of `scripts/ci-freebsd-e2e.sh` on a jail made with the defaults:
   `PATH=/sbin:/bin:/usr/sbin:/usr/bin`, no HOME and `TERM=dumb` (bash's own default without TERM); now
   `PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin`, `HOME=/root` and the client's TERM (bash then
   turns bracketed paste on, as in a login).
-- Installing `bash` with `pkg -r ROOT install -y bash` from the host adds `/usr/local/bin/bash` and `rbash` to the jail's
+- Installing `bash` with `pkg -j JAIL install -y bash` adds `/usr/local/bin/bash` and `rbash` to the jail's
   `/etc/shells` and records bash as installed on purpose (its two dependencies as automatic). The prompt files are
   written mode 0644 root:wheel by the helper.
 - The prompt checks were run against a real bash: the refused forms (`\\\$(cmd)`, `\044(cmd)`, `\134\$(cmd)`,

@@ -39,37 +39,35 @@ func (a *app) completeJailThenKeys(d *kindDesc[api.Jail]) func(*cobra.Command, [
 	}
 }
 
-// completeJailKeysValues completes the arguments of config set: the jail, then keys, and after the key firewall.policies
-// (or in KEY=VALUE) the names of the firewall policies, of which the value is a comma separated list.
+// completeJailKeysValues completes the arguments of config set: the jail, then keys, then the value of the key just
+// given (KEY VALUE or KEY=VALUE): true and false for a switch, the values of a choice, the names of what the key
+// refers to (a network, a storage, policies, profiles, jails); a comma separated value completes its last element.
 func (a *app) completeJailKeysValues(d *kindDesc[api.Jail]) completer {
 	keys := a.completeJailThenKeys(d)
-	policies := a.completeNames(listNames(func(ctx context.Context, c *sdk.Client) iterNames {
-		return namesOf(c.Firewall().Policies().List(ctx), func(p api.FirewallPolicy) string { return p.Metadata.Name })
-	}))
-	const key = "firewall.policies"
 	return func(cmd *cobra.Command, args []string, p string) ([]string, cobra.ShellCompDirective) {
-		prefix, forKey := "", false
+		key, prefix := "", ""
 		switch {
-		case len(args) >= 2 && args[len(args)-1] == key:
-			prefix, forKey = "", true
-		case strings.HasPrefix(p, key+"="):
-			prefix, forKey, p = key+"=", true, strings.TrimPrefix(p, key+"=")
+		case len(args) >= 2 && !strings.Contains(args[len(args)-1], "=") && (len(args)-1)%2 == 1:
+			key = args[len(args)-1] // KEY VALUE pairs: the value of the key before this word
+		case strings.Contains(p, "="):
+			k, _, _ := strings.Cut(p, "=")
+			key, prefix, p = k, k+"=", strings.TrimPrefix(p, k+"=")
 		}
-		if !forKey {
+		if key == "" {
 			return keys(cmd, args, p)
 		}
-		head := ""
-		if i := strings.LastIndex(p, ","); i >= 0 {
-			head, p = p[:i+1], p[i+1:]
+		values, ok := a.configValues(key)
+		if !ok {
+			return nil, cobra.ShellCompDirectiveNoFileComp
 		}
-		names, dir := policies(cmd, nil, p)
+		names, dir := values(cmd, nil, p)
 		out := make([]string, 0, len(names))
 		for _, n := range names {
-			if strings.HasPrefix(n, p) {
-				out = append(out, prefix+head+n)
+			if name, _, _ := strings.Cut(n, "\t"); strings.HasPrefix(name, p) || strings.Contains(name, ",") {
+				out = append(out, prefix+n)
 			}
 		}
-		return out, dir | cobra.ShellCompDirectiveNoSpace
+		return out, dir
 	}
 }
 
@@ -107,8 +105,9 @@ func (a *app) configKeys() *cobra.Command {
 		Long: `List every key of the registry with its type, whether a change needs a restart
 and what it means. A PREFIX such as nic or limits narrows the list. <device>
 and <name> stand for the name of a device.`,
-		Example: "jailops config keys\njailops config keys limits",
-		Args:    cobra.MaximumNArgs(1),
+		Example:           "jailops config keys\njailops config keys limits",
+		Args:              cobra.MaximumNArgs(1),
+		ValidArgsFunction: completeConfigKeys,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			var keys []api.ConfigKey
 			for _, k := range api.ConfigKeys() {
@@ -494,9 +493,9 @@ func profileDesc() *kindDesc[api.Profile] {
 	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.Profile] { return c.Profiles() })
 	d.renameLong = renameLong("profile", `the jails that apply it (for a host profile, --project host, the
 jails of every project that has no profile of that name)`)
-	d.head = []string{"NAME", "KEYS", "DESCRIPTION"}
+	d.head = []string{"NAME", "KEYS", "COMMENT"}
 	d.row = func(_ time.Time, p api.Profile) []string {
-		return []string{p.Metadata.Name, strconv.Itoa(len(p.Spec.Config)), dash(p.Spec.Description)}
+		return []string{p.Metadata.Name, strconv.Itoa(len(p.Spec.Config)), dash(p.Spec.Comment)}
 	}
 	return &d
 }
@@ -519,7 +518,7 @@ admins.`,
 		func(cmd *cobra.Command) func(string) (api.Profile, error) {
 			var desc string
 			var sets []string
-			cmd.Flags().StringVar(&desc, "description", "", "what the profile is for")
+			cmd.Flags().StringVar(&desc, "comment", "", "what the profile is for")
 			cmd.Flags().StringArrayVar(&sets, "set", nil, "a key, KEY=VALUE (repeatable)")
 			_ = cmd.RegisterFlagCompletionFunc("set", completeConfigKeys)
 			return func(name string) (api.Profile, error) {
@@ -534,7 +533,7 @@ admins.`,
 					}
 					cfg[k] = v
 				}
-				return api.Profile{Metadata: api.ObjectMeta{Name: name}, Spec: api.ProfileSpec{Description: desc, Config: cfg}}, nil
+				return api.Profile{Metadata: api.ObjectMeta{Name: name}, Spec: api.ProfileSpec{Comment: desc, Config: cfg}}, nil
 			}
 		})
 	return pc

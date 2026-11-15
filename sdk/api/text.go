@@ -118,6 +118,17 @@ func ValidFreeText(field, s string, multiline bool) error {
 	return nil
 }
 
+// Commented is a specification that carries a comment, one line of free text about what the object is for.
+type Commented interface{ CommentText() string }
+
+// CheckComment validates the comment of a specification that has one.
+func CheckComment(spec any) error {
+	if c, ok := spec.(Commented); ok {
+		return ValidFreeText("comment", c.CommentText(), false)
+	}
+	return nil
+}
+
 // truncateQuoted shortens a value for an error message.
 func truncateQuoted(s string) string {
 	if len(s) > 80 {

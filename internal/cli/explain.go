@@ -75,10 +75,10 @@ Confirmations come in three kinds, and the flags are not interchangeable:
 -y answers a yes/no question (deleting a policy, a sink, a token); it never
 answers a data-loss question. Data loss (deleting a jail, rolling one back over
 its data, restoring over a jail) needs the typed name or --confirm-data-loss.
---i-know accepts a risk that is not data loss and that the command cannot check
+--confirm-lockout and --confirm-replace accept a risk that is not data loss and that the command cannot check
 for you, such as a host firewall change whose lock-out check cannot run or
-replacing a public certificate with the self-signed one. --force changes how an
-action runs (stop a running jail before deleting it; write over a file).`,
+replacing a public certificate with the self-signed one. --force means one thing:
+do not wait for a graceful shutdown (stop, restart, stop-all).`,
 		Example: `jailops explain
 jailops explain data_loss_unconfirmed
 jailops explain not_found -o json`,

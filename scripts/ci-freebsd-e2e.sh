@@ -8,14 +8,15 @@
 # JAILOPS_BIN_DIR   use these binaries instead of building them (jailops, jailopsd, ... as `just build-freebsd` names
 #                   them, with or without the -freebsd-<arch> suffix)
 # JAILOPS_E2E_PART   all (default), e2e (everything but the packet filter test), pf (only the packet filter test),
-#                    scale (50 jails started and stopped together) or soak (jails churn while traffic flows)
+#                    scale (50 jails started and stopped together), soak (jails churn while traffic flows) or prepare (the
+#                    machine set up with an image, a network and a project, left running: scripts/scale-study.sh starts there)
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
 # The test host needs kern.racct.enable=1 in /boot/loader.conf (a boot tunable: reboot after adding it): the block on resource
 # limits checks the rctl rules, which the kernel accepts only with it.
 # JAILOPS_E2E_APPS   more apps of the catalog to install after nginx, space separated: postgresql, valkey,
 #                   prometheus, forgejo, nsd, mail, isms (default none; CI does not set it). Each one is installed,
 #                   checked in its own way, its logs listed, and stopped. An installed app is closed, so the host is
-#                   allowed in first (jailops app allow NAME from host) for the checks that connect from the host.
+#                   allowed in first (jailops app allow NAME --from host) for the checks that connect from the host.
 #                   isms needs the jailops package repository in the host's pkg configuration (docs/install.md) and
 #                   installs a postgresql jail of its own, isms-db, which it is allowed to reach with app allow.
 #                   postgresql-access is not an app but a block: a postgresql jail (pgacc) and two client jails
@@ -49,7 +50,7 @@ cd "$(dirname "$0")/.."
 root=$(pwd)
 pool=jopsci
 part=${JAILOPS_E2E_PART:-all}
-case $part in all | e2e | pf | scale | soak) ;; *) echo "JAILOPS_E2E_PART must be all, e2e, pf, scale or soak" >&2; exit 2 ;; esac
+case $part in all | e2e | pf | scale | soak | prepare) ;; *) echo "JAILOPS_E2E_PART must be all, e2e, pf, scale, soak or prepare" >&2; exit 2 ;; esac
 e2e_apps=${JAILOPS_E2E_APPS:-}
 for a in $e2e_apps; do
 	case $a in postgresql | valkey | prometheus | forgejo | nsd | mail | isms | postgresql-access) ;; *) echo "JAILOPS_E2E_APPS: no check for $a (postgresql, valkey, prometheus, forgejo, nsd, mail, isms, postgresql-access)" >&2; exit 2 ;; esac
@@ -347,7 +348,7 @@ if [ "${JAILOPS_E2E_HOSTFW:-}" = 1 ]; then
 		set -- --ssh-port "$sshport"
 		echo "SSH_CLIENT is not set (not over ssh, or sudo dropped it): ssh port $sshport stays open to anywhere"
 	fi
-	set -- "$@" --template custom-rules --allow "tcp 9 from 192.0.2.1 comment e2e" --confirm-within 20 --i-know
+	set -- "$@" --template custom-rules --confirm-within 20 --confirm-lockout
 	hostfw_cleanup() { # what a failure in this block leaves behind: the original pf.conf, loaded, and the configuration
 		[ -n "${hostfw_dirty:-}" ] || return 0
 		echo "putting /etc/pf.conf back from $forig" >&2
@@ -366,7 +367,7 @@ if [ "${JAILOPS_E2E_HOSTFW:-}" = 1 ]; then
 	}
 	hostfw_dirty=1
 	expect "not managed by default" 'Managed: +no' $J host firewall show
-	expect "changing is refused while the module is off" 'not_managed' sh -c "$J host firewall set --i-know 2>&1; true"
+	expect "changing is refused while the module is off" 'not_managed' sh -c "$J host firewall set --confirm-lockout 2>&1; true"
 	pf_same
 	echo 'host-manage = firewall' >> /usr/local/etc/jailops/priv.conf
 	printf 'host:\n  manage:\n    modules: [firewall]\n' >> /usr/local/etc/jailops/jailopsd.yaml
@@ -375,7 +376,7 @@ if [ "${JAILOPS_E2E_HOSTFW:-}" = 1 ]; then
 	check "restart jailopsd" service jailopsd restart
 	n=0; until $J host firewall show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
 	expect "managed now" 'Managed: +yes' $J host firewall show
-	expect "the unix socket has no address: the lock-out check needs --i-know" 'i-know' sh -c "$J host firewall set --ssh-port $sshport --confirm-within 20 2>&1; true"
+	expect "the unix socket has no address: the lock-out check needs --confirm-lockout" 'confirm-lockout' sh -c "$J host firewall set --ssh-port $sshport --confirm-within 20 2>&1; true"
 	expect "the dry run shows the diff" '^\+block in all$' $J --dry-run host firewall set "$@"
 	pf_same
 
@@ -397,6 +398,17 @@ if [ "${JAILOPS_E2E_HOSTFW:-}" = 1 ]; then
 	expect "confirm" 'was confirmed' $J host confirm
 	sleep 22 # past the deadline of the confirmed change: nothing may revert it
 	expect "still the managed file" '^# managed by jailops$' head -1 /etc/pf.conf
+	# the rows of custom-rules and the address sets: one command each, every change waits for its confirmation
+	expect "an allow row" 'REVERTS at' $J host firewall allow add --proto tcp --port 9 --from 192.0.2.1 --comment e2e --confirm-within 20 --confirm-lockout
+	expect "confirm the row" 'was confirmed' $J host confirm
+	expect "the row is listed" '1 +tcp +9 +192\.0\.2\.1 +e2e' $J host firewall allow list
+	expect "an address set" 'REVERTS at' $J host firewall address-set create e2e --member 192.0.2.7 --confirm-within 20 --confirm-lockout
+	expect "confirm the set" 'was confirmed' $J host confirm
+	expect "the set is listed" 'e2e +192\.0\.2\.7' $J host firewall address-set list
+	expect "remove the set" 'REVERTS at' $J host firewall address-set delete e2e --confirm-within 20 --confirm-lockout
+	expect "confirm that" 'was confirmed' $J host confirm
+	expect "remove the row" 'REVERTS at' $J host firewall allow remove 1 --confirm-within 20 --confirm-lockout
+	expect "confirm that too" 'was confirmed' $J host confirm
 	expect "doctor: managed, no drift" 'host\.firewall +PASS' sh -c "$J doctor 2>&1; true"
 	cp -p /etc/pf.conf "$work/pf.managed"
 	echo '# a hand edit' >> /etc/pf.conf
@@ -507,7 +519,7 @@ if [ "${JAILOPS_E2E_APPLIANCE:-}" = 1 ]; then
 	expect "ACME over plain http" '^400 .*https' api POST /api/v1/host/certificate/acme '{"domains":["e2e.example.com"],"directory_url":"http://ca.example.com/dir","accept_tos":true}'
 	expect "still the uploaded certificate" '"source":"uploaded"' api GET /api/v1/host/certificate
 	expect "replacing the uploaded certificate needs its name typed" 'confirmation required' sh -c "$J host certificate self-signed -y </dev/null 2>&1; true"
-	expect "the self-signed certificate again" 'self-signed served' $J host certificate self-signed --i-know
+	expect "the self-signed certificate again" 'self-signed served' $J host certificate self-signed --confirm-replace
 	expect "the API agrees" '"source":"self-signed"' api GET /api/v1/host/certificate
 	expect "the TLS listener serves it" 'CN *= *' sh -c "openssl s_client -connect 127.0.0.1:39110 </dev/null 2>/dev/null | openssl x509 -noout -subject"
 	appliance_cleanup
@@ -534,7 +546,7 @@ run_scale() {
 	count=50
 	check "network" $J network create scale --ipv4 10.88.0.1/24 --ipv6 fd50:88::/64 --uplink "$uplink" --nat
 	check "project" $J project create scale
-	check "grant" $J project set scale --network scale --storage default
+	check "grant" sh -c "$J network grant scale --project scale && $J storage grant default --project scale"
 	names=""; i=0
 	while [ $i -lt $count ]; do
 		i=$((i + 1)); n=$(printf 's%02d' $i); names="$names $n"
@@ -605,12 +617,13 @@ run_soak() {
 	secs=${JAILOPS_SOAK_SECONDS:-300}
 	check "network" $J network create soak --ipv4 10.89.0.1/24 --ipv6 fd50:89::/64 --uplink "$uplink" --nat
 	check "project" $J project create soak
-	check "grant" $J project set soak --network soak --storage default
+	check "grant" sh -c "$J network grant soak --project soak && $J storage grant default --project soak"
 	churn=""; i=0
 	while [ $i -lt 20 ]; do i=$((i + 1)); churn="$churn $(printf 'c%02d' $i)"; done
 	for n in st1 st2 $churn; do check "create $n" $J create "$n" --project soak --image "$img" --network soak --storage default; done
 	# the host answers a jail with ping and DNS only; the stream to the host is a rule of its own
-	check "a policy that lets the jail send to a port of the host" $J firewall policy create tohost --project soak --default-in allow --default-out allow --rule 'allow out tcp to host port 9100'
+	check "a policy that lets the jail send to a port of the host" $J firewall policy create tohost --project soak --default-in allow --default-out allow
+	check "its rule" $J firewall rule add tohost out --project soak --action allow --proto tcp --to host --port 9100 --comment "the metrics port of the host"
 	check "st2 uses it" $J config set st2 firewall.policies tohost --project soak
 	check "start the steady jails" $J start st1 st2 --project soak
 	sleep 3
@@ -622,7 +635,19 @@ run_soak() {
 	srv1=$!
 	nc -l 9100 | wc -c > "$work/soak.rxh" &
 	srvh=$!
-	sleep 2
+	# the clients start when the three listeners are there (a fixed pause is not enough on a slow machine)
+	waitlisten() { # waitlisten WHAT 'COMMAND listing the sockets' PORT
+		n=0
+		while [ $n -lt 30 ]; do
+			sh -c "$2" 2>/dev/null | grep -q ":$3 " && return 0
+			sleep 1
+			n=$((n + 1))
+		done
+		fail "the listener $1 is not up after thirty seconds"
+	}
+	waitlisten "of st1 on 9101" "$J exec --project soak st1 -- sockstat -4l" 9101
+	waitlisten "of st1 on 9102" "$J exec --project soak st1 -- sockstat -6l" 9102
+	waitlisten "of the host on 9100" "sockstat -4l" 9100
 	t0=$(date +%s)
 	loop="i=0; while [ \$i -lt $((secs * 4)) ]; do dd if=/dev/zero bs=100000 count=1 2>/dev/null; sleep 0.25; i=\$((i + 1)); done"
 	# each client leaves a file with what it did: the command in the jail says its own exit status and the clock, and so does
@@ -696,7 +721,7 @@ uplink=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
 jarch=$goarch
 check "network create" $J network create lan --ipv4 10.77.0.1/24 --uplink "$uplink" --nat
 check "project create" $J project create demo
-check "project grant" $J project set demo --network lan --storage default
+check "project grant" sh -c "$J network grant lan --project demo && $J storage grant default --project demo"
 # before any image exists the CLI names the two commands that make the base image, and a create with an image that does not
 # exist names the one it was asked for (the catalog is configured later, so this does not go through an app install)
 out=$($J image list 2>&1) || true
@@ -712,7 +737,8 @@ check "image build" $J image build "$img"
 # a generation records the FreeBSD version of its packages (FreeBSD-runtime): a release with its patch level, or the
 # package version of a branch's snapshot as it is
 expect "the generation shows its FreeBSD version" '^ +g1 +([0-9]+\.[0-9]+-RELEASE(-p[0-9]+)?|[0-9]+\.snap[0-9]+) +[0-9]+ ' $J image show "$img"
-expect "and so does the list of generations" "^$img#g1 +1 +- +([0-9]+\\.[0-9]+-RELEASE(-p[0-9]+)?|[0-9]+\\.snap[0-9]+) " $J image generations "$img"
+expect "and so does the list of generations" "^$img#g1 +1 +- +([0-9]+\\.[0-9]+-RELEASE(-p[0-9]+)?|[0-9]+\\.snap[0-9]+) " $J image generation list "$img"
+if [ "$part" = prepare ]; then echo "OK: the machine is prepared"; exit 0; fi
 if [ "$part" = scale ]; then run_scale; echo "OK: the scale test passed"; exit 0; fi
 if [ "$part" = soak ]; then run_soak; echo "OK: the soak test passed"; exit 0; fi
 if [ "$part" = pf ]; then # its own VM in CI: the packet filter test builds its jails from the image above
@@ -775,17 +801,18 @@ check "an attachment MTU other than the network's is accepted: every jail has a 
 check "and taken off again" $J config unset web --project demo nic.eth0.mtu
 expect "a snapshot name of 70 characters is refused" 'at most 64' sh -c "$J jail snapshot create web $(printf '%070d' 0 | tr 0 s) --project demo 2>&1; true"
 expect "a project name of 14 characters is refused" 'at most 13' sh -c "$J project create abcdefghijklmn 2>&1; true"
-check "a project quota given as 4GiB" $J project set demo --storage default=4GiB
+check "a project quota given as 4GiB" $J storage grant default --project demo --quota 4GiB
 expect "ZFS has the quota in bytes" '^4294967296$' zfs get -Hp -o value quota "$pool/jailops/projects/demo"
 check "a volume with --size 2GiB is created" $J volume create sizedata --project demo --storage default --size 2GiB
-check "a jail with --disk 4GiB is created" $J create sizes --project demo --image "$img" --network lan --storage default --disk 4GiB --volume sizedata:/data
+check "a jail with --disk 4GiB is created" $J create sizes --project demo --image "$img" --network lan --storage default --disk 4GiB
+check "attach sizedata to sizes" $J volume attach sizes sizedata /data --project demo
 expect "its container has the quota in bytes" '^4294967296$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/sizes"
 expect "its root clone has none" '^(0|none|-)$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/sizes/root"
 expect "its volume has the quota in bytes" '^2147483648$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/volumes/sizedata"
 check "the jail with sizes starts" $J start sizes --project demo
 check "stop it" $J stop sizes --project demo
 check "delete it" $J delete --confirm-data-loss sizes --project demo
-check "the project quota is taken away again" $J project set demo --storage default
+check "the project quota is taken away again" $J storage grant default --project demo --quota ""
 
 step "resource limits (docs/operations.md): rctl rules, the quota of the container and the pf state limit"
 # kern.racct.enable=1 is a loader tunable: the test host must have it in /boot/loader.conf (doctor fails without it)
@@ -817,19 +844,47 @@ check "delete that network" $J network delete fwd -y
 
 step "stop timeout (docs/operations.md): a service that needs fifteen seconds after SIGTERM is killed at ten, and lives with boot.stop_timeout"
 # the service ends its work on SIGTERM (fifteen seconds), writes a marker into a volume of the host and exits
-slowsh="trap 'sleep 15; echo done > /srv/out/marker; exit 0' TERM; while :; do sleep 1; done"
+slowsh="trap 'sleep 15; echo done > /srv/out/marker; exit 0' TERM; touch /srv/out/ready; while :; do sleep 1; done"
 for v in sto10 sto30; do check "volume $v" $J volume create $v --project demo; done
-check "a jail with the system's stop time" $J create slow10 --project demo --image "$img" --network lan --storage default --volume sto10:/srv/out --start
-check "a jail that asks for thirty seconds" $J create slow30 --project demo --image "$img" --network lan --storage default --volume sto30:/srv/out --stop-timeout 30 --start
+check "a jail with the system's stop time" $J create slow10 --project demo --image "$img" --network lan --storage default
+check "attach sto10 to slow10" $J volume attach slow10 sto10 /srv/out --project demo
+check "start slow10" $J start slow10 --project demo
+check "a jail that asks for thirty seconds" $J create slow30 --project demo --image "$img" --network lan --storage default --stop-timeout 30
+check "attach sto30 to slow30" $J volume attach slow30 sto30 /srv/out --project demo
+check "start slow30" $J start slow30 --project demo
 expect "the setting is in the jail" 'stop_timeout.*30' sh -c "$J config show slow30 --project demo 2>&1"
 expect "jail.conf has it" 'stop\.timeout = 30;' cat /usr/local/etc/jailops/jails/demo_slow30/jail.conf
 for j in slow10 slow30; do check "the service of $j runs" $J exec --project demo $j -- daemon -f /bin/sh -c "$slowsh"; done
+# the signal must not arrive before the shell has set its trap
+for n in 10 30; do
+	expect_retry "the service of slow$n has set its trap" '^ready$' sh -c "[ -e $(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/sto$n")/ready ] && echo ready || echo no"
+done
 check "stop the jail with the system's time" $J stop slow10 --project demo
 expect "its service was killed before it finished" '^none$' sh -c "[ -e $(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/sto10")/marker ] && echo marker || echo none"
 check "stop the jail that asked for thirty seconds" $J stop slow30 --project demo
 expect "its service finished" '^done$' cat "$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/sto30")/marker"
 for j in slow10 slow30; do check "delete $j" $J delete --confirm-data-loss $j --project demo; done
 for v in sto10 sto30; do check "delete volume $v" $J volume delete $v --project demo --confirm-data-loss; done
+
+step "a jail that cannot reach the package servers starts at once, with bash from the host (never over its own network)"
+check "a policy that denies everything outbound" $J firewall policy create closed --project demo --default-in deny --default-out deny
+check "a jail under it" $J create closedj --project demo --image "$img" --network lan --storage default
+check "it uses the policy" $J config set closedj firewall.policies closed --project demo
+t0=$(date +%s)
+check "start it" $J start closedj --project demo
+[ $(( $(date +%s) - t0 )) -le 60 ] || fail "the start of a jail without network took $(( $(date +%s) - t0 )) s"
+expect "its shell is bash, which the host put in before the start" '^/usr/local/bin/bash$' $J config get closedj shell --project demo
+check "bash is in the jail" $J exec --project demo closedj -- test -x /usr/local/bin/bash
+check "delete it" $J delete --confirm-data-loss --stop closedj --project demo
+check "delete the policy" $J firewall policy delete closed --project demo -y
+
+step "packages of a running jail change inside it (pkg -j); what a process of the jail plants cannot make the host write"
+check "a jail that runs" $J create pkgj --project demo --image "$img" --network lan --storage default --start
+expect "the check of its packages runs pkg inside the jail" 'pkgj' $J update check pkgj --project demo
+check "the jail plants a link where pkg keeps its cache" $J exec --project demo pkgj -- sh -c 'rm -rf /var/cache/pkg; ln -s /jopsci-escape /var/cache/pkg; mkdir -p /usr/local/etc/pkg/repos; ln -s /jopsci-escape /usr/local/etc/pkg/repos/escape.conf'
+$J update apply pkgj --project demo --packages -y >/dev/null 2>&1 || true
+[ ! -e /jopsci-escape ] || fail "pkg wrote through a link of a running jail onto the host"
+check "delete it" $J delete --confirm-data-loss --stop pkgj --project demo
 
 step "the jail's shell and prompt (docs/shell.md): bash and the default prompt, an override, non-interactive commands"
 webroot=$mount/projects/demo/jails/web/root
@@ -840,7 +895,7 @@ ps1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops
 expect "a new jail's shell is bash" '^/usr/local/bin/bash$' $J config get --project demo web shell
 expect "a new jail's prompt is the default" '^default$' $J config get --project demo web prompt
 check "bash was installed into the jail's /usr/local at its first start" test -x "$webroot/usr/local/bin/bash"
-expect "bash is a package of the jail" '^bash-' pkg -r "$webroot" info bash
+expect "bash is a package of the jail" '^bash-' pkg -j demo_web info bash
 check_retry "the prompt file is JailOps'" grep -F -x "	PS1='$ps1'" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
 check_retry "the variables script is JailOps'" grep -F "sysctl -n security.jail.env" "$webroot/usr/local/etc/profile.d/jailops-env.sh"
 check "the variables script holds no name of the project" sh -c '! grep -q demo "$1"' sh "$webroot/usr/local/etc/profile.d/jailops-env.sh"
@@ -921,7 +976,7 @@ expect "the network is listed" '^office +10\.66\.0\.0/24' $J network list
 expect_retry "the host rejects the addresses of the subnet that no jail has" '^10\.66\.0\.0/24 +[^ ]+ +URS +lo0' sh -c "netstat -rn -f inet | grep '^10.66.0.0/24'"
 if ifconfig -a | grep -q 'description: jailops net='; then fail "a network made an interface of its own"; fi
 check "project edge" $J project create edge
-check "grant office to edge" $J project set edge --network office --storage default
+check "grant office to edge" sh -c "$J network grant office --project edge && $J storage grant default --project edge"
 check "a jail on office" $J create edgeweb --project edge --image "$img" --network office --storage default
 check "it starts" $J start edgeweb --project edge
 sleep 2
@@ -937,13 +992,20 @@ gw4=$(route -n get default 2>/dev/null | awk '/gateway:/ {print $2}')
 expect "the jail reaches the host's default gateway through the NAT of the uplink" '1 packets received' $J exec --project edge edgeweb -- ping -c1 -t5 "$gw4"
 expect "an address of the subnet that no jail has is refused at once" 'Destination Host Unreachable' sh -c "$J exec --project edge edgeweb -- ping -c1 -t2 10.66.0.77 2>&1; true"
 expect "a jail without a policy says it is open" "Firewall: +open: no firewall policy" $J jail info edgeweb --project edge
-check "a policy without --default-in and --default-out" $J firewall policy create nodefaults --project edge --rule 'allow in tcp port 22'
+check "a policy without --default-in and --default-out" $J firewall policy create nodefaults --project edge
 expect "it denies inbound and allows outbound, written into the policy" 'nodefaults +deny +allow' $J firewall policy list --project edge
 check "delete it" $J firewall policy delete nodefaults --project edge -y
 # a rule names a jail: jail:edgeweb in an address set of the project, the set in a policy, the policy on another jail
 check "an address set with a jail as a member" $J firewall address-set create git_allow --project edge --address jail:edgeweb
 check "an address with a comment" $J firewall address-set create office_ip --project edge --address 192.0.2.7 --comment "the office"
-check "a policy that names the set" $J firewall policy create git --project edge --default-in deny --default-out allow --comment "the git server of the team" --rule "allow in tcp from set:git_allow port 22 comment ssh from the team" --rule "allow in tcp from jail:edgeweb port 5432 comment the web jail asks for rows"
+check "a policy that names the set" $J firewall policy create git --project edge --default-in deny --default-out allow --comment "the git server of the team"
+check "a rule that names the set" $J firewall rule add git in --project edge --action allow --proto tcp --from set:git_allow --port 22 --comment "ssh from the team"
+check "a rule that names the jail" $J firewall rule add git in --project edge --action allow --proto tcp --from jail:edgeweb --port 5432 --comment "the web jail asks for rows"
+expect "the rules are listed with their numbers" '1 +- +allow +in +tcp' $J firewall rule list git --project edge
+check "the second rule is switched off" $J firewall rule disable git 2 --project edge
+expect "policy show marks it" 'disabled' $J firewall policy show git --project edge -o yaml
+check "and on again" $J firewall rule enable git 2 --project edge
+check "the first rule moves behind the second" $J firewall rule move git 1 --after 2 --project edge
 check "a second jail" $J create edgedb --project edge --image "$img" --network office --storage default
 check "its policy" $J config set edgedb firewall.policies git --project edge
 check "it starts" $J start edgedb --project edge
@@ -951,7 +1013,7 @@ sleep 2
 expect "the anchor of the second jail holds the address of the first one in the table of the set" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t s_git_allow -T show
 expect "the rule comments are in the loaded anchor's source: show says why a rule is there" 'ssh from the team' $J firewall policy show git --project edge
 expect "and in the table of the jail itself" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t j_edgeweb -T show
-check "delete the second jail" $J delete --force --confirm-data-loss edgedb --project edge
+check "delete the second jail" $J delete --stop --confirm-data-loss edgedb --project edge
 check "delete the policy that names them" $J firewall policy delete git --project edge -y
 check "delete the set with the jail in it" $J firewall address-set delete git_allow --project edge -y
 check "delete the set with a comment" $J firewall address-set delete office_ip --project edge -y
@@ -987,7 +1049,7 @@ while ifconfig jo0123456789zza >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 60 ] &
 expect "doctor: no stale epairs" 'network.epairs +PASS' $J doctor
 expect "doctor: every description" 'net.descriptions +PASS' $J doctor
 # network delete removes the reject route
-check "delete the jail" $J delete --force --confirm-data-loss edgeweb --project edge
+check "delete the jail" $J delete --stop --confirm-data-loss edgeweb --project edge
 check "delete project edge" $J project delete edge -y
 check "delete network office" $J network delete office -y
 expect_retry "the reject route of office is gone" 'gone' sh -c "netstat -rn -f inet | grep -q '^10.66.0.0/24' && echo there || echo gone"
@@ -1085,16 +1147,16 @@ expect_retry "a line logged in the jail arrives with the jail in the structured 
 expect "the unified view shows it as web/messages" "^web/messages +.*$marker" $J logs --project demo --grep "$marker"
 expect "-o json carries the jail" "\"jail\":\"web\".*$marker" $J logs --project demo --jail web --grep "$marker" -o json
 expect "the sink delivers" '^ci-tcp +ok ' $J logs forward status
-expect "a list through the API may not keep the loopback sink of the file" 'target refused' sh -c "$J logs forward edit ci-tcp --facility local4 2>&1; true"
+expect "a list through the API may not keep the loopback sink of the file" 'target refused' sh -c "$J logs forward set ci-tcp --facility local4 2>&1; true"
 check "an empty list through the API replaces the file's" $J logs forward remove -y ci-tcp
-expect "the API refuses a loopback receiver" 'target refused' sh -c "$J logs forward add syslog --to tcp://127.0.0.1:15515 --name ci-lo 2>&1; true"
-expect "the API refuses a link-local receiver" 'target refused' sh -c "$J logs forward add webhook --to https://169.254.169.254/x --name ci-md 2>&1; true"
+expect "the API refuses a loopback receiver" 'target refused' sh -c "$J logs forward add ci-lo --url tcp://127.0.0.1:15515  2>&1; true"
+expect "the API refuses a link-local receiver" 'target refused' sh -c "$J logs forward add ci-md --url https://169.254.169.254/x  2>&1; true"
 expect "the API refuses a token file outside logging.secrets_dir" 'not a file directly in' \
-	sh -c "$J logs forward add webhook --to https://hooks.example.com/ci --token-file /usr/local/etc/jailops/priv.conf --name ci-wh 2>&1; true"
+	sh -c "$J logs forward add ci-wh --url https://hooks.example.com/ci --token-file /usr/local/etc/jailops/priv.conf  2>&1; true"
 expect "init made the secrets directory" '^root:jailops 750$' stat -f '%Su:%Sg %Lp' /usr/local/etc/jailops/sinks
 printf 'ci-token\n' > "$work/ci.token"
 check "a token file in the secrets directory" install -m 0640 -o root -g jailops "$work/ci.token" /usr/local/etc/jailops/sinks/ci.token
-check "the API accepts a token file there" $J logs forward add webhook --to https://hooks.example.com/ci --token-file /usr/local/etc/jailops/sinks/ci.token --name ci-wh --audit-only
+check "the API accepts a token file there" $J logs forward add ci-wh --url https://hooks.example.com/ci --token-file /usr/local/etc/jailops/sinks/ci.token  --audit-only
 expect "the forward test answers a class, not the receiver's words" '(dns lookup failed|connection refused|timeout|unreachable|HTTP [0-9]+|tls handshake failed|certificate not trusted|send failed)' sh -c "$J logs forward test ci-wh 2>&1; true"
 expect "removing a sink asks first" 'confirmation required' sh -c "$J logs forward remove ci-wh </dev/null 2>&1; true"
 check "remove the sink" $J logs forward remove -y ci-wh
@@ -1126,7 +1188,7 @@ else
 	# the same host: the client gets its own addresses and routes (they must not overlap the server's), and dials
 	# the server on the loopback address
 	# the token holds a private key: from standard input, never as an argument
-	check "a client from the token" sh -c 'printf "%s\n" "$1" | '"$J"' wireguard join - --name home --endpoint 127.0.0.1:51820 --address 10.97.0.2/32 --allowed-ips 10.97.1.0/24' sh "$token"
+	check "a client from the token" sh -c 'printf "%s\n" "$1" | '"$J"' wireguard join home --token-file - --endpoint 127.0.0.1:51820 --address 10.97.0.2/32 --allowed-ips 10.97.1.0/24' sh "$token"
 	expect "the client's interface says what it is" 'description: jailops wireguard=home' ifconfig wg-home
 	# a handshake starts with the first packet into the tunnel (or at the first keepalive, 25 s later): route the allowed
 	# network into the client's interface (the route goes with the interface) and send a packet each try; no answer is needed
@@ -1210,7 +1272,8 @@ vol=$pool/jailops/projects/demo/volumes/maildir
 vmp=$(zfs get -H -o value mountpoint "$vol")
 expect "its root has the owner and the mode" '^5000:5000 770$' sh -c "stat -f '%u:%g %Lp' $vmp"
 expect "devices are off on its dataset" '^off$' zfs get -H -o value devices "$vol"
-check "a jail attaches it at creation" $J create mail --project demo --image "$img" --network lan --storage default --volume maildir:/var/mail/vhosts
+check "a jail attaches it at creation" $J create mail --project demo --image "$img" --network lan --storage default
+check "attach maildir to mail" $J volume attach mail maildir /var/mail/vhosts --project demo
 check "a second jail attaches it later" $J create desktop --project demo --image "$img" --network lan --storage default
 check "attach to the second jail" $J volume attach desktop maildir /home/ann/Mail --project demo
 expect "the volume says it is writable in two jails" 'writable in more than one jail' $J volume show maildir --project demo
@@ -1231,6 +1294,10 @@ check "delete the jail" $J delete --confirm-data-loss mail --project demo
 zfs list "$vol" >/dev/null 2>&1 || fail "deleting a jail destroyed the volume"
 expect "the file is still there" '^mail-1$' cat "$vmp/m1"
 check "detach from the second jail" $J volume detach desktop maildir --project demo
+check "rename the volume" $J volume rename maildir mailbox --project demo -y
+zfs list "${vol%maildir}mailbox" >/dev/null 2>&1 || fail "the dataset of the renamed volume is not there"
+expect "the file moved with it" '^mail-1$' cat "${vmp%maildir}mailbox/m1"
+check "rename it back" $J volume rename mailbox maildir --project demo -y
 check "delete that jail" $J delete --confirm-data-loss desktop --project demo
 check "the volume is deleted when nothing attaches it" $J volume delete maildir --project demo --confirm-data-loss
 if zfs list "$vol" >/dev/null 2>&1; then fail "the volume is still there"; fi
@@ -1244,8 +1311,9 @@ enabled | active)
 	(umask 077; printf '%s\n' 'ci-passphrase-0123' >"$work/vault.pass"; printf '%s\n' 'ci-wrong-passphrase' >"$work/wrong.pass"
 		printf '%s\n' 'ci-new-passphrase-4567' >"$work/new.pass")
 	check "an encrypted volume" $J volume create secrets --project demo --storage default --encrypted --passphrase-file "$work/vault.pass"
-	check "a jail attaches it" $J create vault --project demo --image "$img" --network lan --storage default \
-		--volume secrets:/var/db/secrets --start --autostart
+	check "a jail is made for it" $J create vault --project demo --image "$img" --network lan --storage default --autostart
+	check "the jail attaches it" $J volume attach vault secrets /var/db/secrets --project demo
+	check "the jail starts" $J start vault --project demo
 	expect "the boot plan says the encrypted jail waits for its passphrase" 'vault[[:space:]]+waits for the passphrase' $J boot
 	vds=$pool/jailops/projects/demo/volumes/secrets
 	zfs list -H -o name "$vds" >/dev/null 2>&1 || fail "no dataset for the encrypted volume"
@@ -1379,7 +1447,7 @@ n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail 
 
 step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
 expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --start
-check "a second generation of the image" $J image build "$img" --from g1
+check "a second generation of the image" $J image build "$img" --from-generation g1
 check "a file that must survive" $J exec --project demo up -- sh -c 'echo ci-keep > /root/keep'
 expect "dry run" 'g1 to g2' $J jail upgrade up --project demo --dry-run
 check "upgrade to the newer generation" $J jail upgrade up --project demo --generation g2
@@ -1406,16 +1474,15 @@ check "take the device away again" $J config unset --project demo up devfs.tun.d
 
 step "automatic upgrade of an image (the nightly run, started by the clock of the daemon)"
 expect "the nightly upgrade is off until it is asked for" 'Nightly: +off' $J image show "$img"
-expect_refused "a time of day that does not exist is refused" $J image auto-upgrade "$img" on --at 25:00
+expect_refused "a time of day that does not exist is refused" $J image set "$img" --auto-upgrade --upgrade-at 25:00
 # the jail `up` is on the first generation while the newest is the second (the rollback above), and it gets a package
 # that is behind: the nightly run must move it and upgrade the package, though the repository has nothing new for the image
 check "start the second jail" $J start up --project demo
-uproot=$(jls -j demo_up path) || fail "the path of the second jail"
-check "refresh the package catalogue of the second jail" pkg -r "$uproot" update -q
-check "install a package into the second jail" pkg -r "$uproot" install -y nano
-check "make that package look old" pkg -r "$uproot" shell "UPDATE packages SET version = '0.1' WHERE name = 'nano';"
-expect "the package is behind" '^0\.1$' pkg -r "$uproot" query %v nano
-check "turn it on for two minutes from now" $J image auto-upgrade "$img" on --at "$(date -v+2M +%H:%M)"
+check "refresh the package catalogue of the second jail" pkg -j demo_up update -q
+check "install a package into the second jail" pkg -j demo_up install -y nano
+check "make that package look old" pkg -j demo_up shell "UPDATE packages SET version = '0.1' WHERE name = 'nano';"
+expect "the package is behind" '^0\.1$' pkg -j demo_up query %v nano
+check "turn it on for two minutes from now" $J image set "$img" --auto-upgrade --upgrade-at "$(date -v+2M +%H:%M)"
 expect "the image names it and its next run" 'Nightly: +every night at [0-9:]+: generation and jails and their packages; next ' $J image show "$img"
 n=0
 until $J image show "$img" | grep -q 'Automatic upgrades'; do
@@ -1423,11 +1490,11 @@ until $J image show "$img" | grep -q 'Automatic upgrades'; do
 done
 expect "the run moved the two jails that were behind and upgraded the package" ' ok +2 moved, 1 packages upgraded' $J image show "$img"
 expect "the second jail is on the newest generation" 'up +running.*#g2' $J jail list --project demo
-if [ "$(pkg -r "$uproot" query %v nano)" = 0.1 ]; then fail "the package of the second jail was not upgraded"; fi
+if [ "$(pkg -j demo_up query %v nano)" = 0.1 ]; then fail "the package of the second jail was not upgraded"; fi
 expect "the second jail still runs" 'FreeBSD' $J exec --project demo up -- uname -s
 check "stop the second jail again" $J stop up --project demo
 if $J image show "$img" | grep -E '^ +[0-9-]+ [0-9:]+ +failed'; then fail "the automatic upgrade failed"; fi
-check "turn it off" $J image auto-upgrade "$img" off
+check "turn it off" $J image set "$img" --auto-upgrade=false
 expect "off again" 'Nightly: +off' $J image show "$img"
 
 step "an app from the catalog (nginx: thin jail, pkg -r from the host, rc.conf, service, health check, snapshot)"
@@ -1456,13 +1523,13 @@ addr=$($J app installed --project demo | awk '$1 == "nginx" {print $5}' | head -
 # an installed app is closed, to the host too, until a source is allowed
 expect_refused_retry "a fresh app is closed to the host" curl -sS --max-time 3 "http://$addr/"
 expect "the closed app has no grant" 'No grants' $J app access nginx --project demo
-check "allow the host to reach nginx" $J app allow nginx from host --project demo
+check "allow the host to reach nginx" $J app allow nginx --from host --project demo
 expect_retry "nginx answers from the host" 'Welcome to nginx' curl -sS --max-time 5 "http://$addr/"
 expect "the grant is listed" '^host \(host\)' $J app access nginx --project demo
 expect "the service is enabled in the jail's rc.conf" 'nginx_enable="YES"' $J exec --project demo nginx -- cat /etc/rc.conf
 expect "the snapshot of the fresh installation exists" 'app-installed' $J jail snapshot list nginx --project demo
 # the authoring path: a draft of the running jail has its package, its service and its port, and still carries TODO markers
-$J app export nginx --project demo --to "$work/nginx-draft.yaml" >"$work/export.out" 2>&1 || { cat "$work/export.out" >&2; fail "export a draft of the nginx jail"; }
+$J app export nginx --project demo --file "$work/nginx-draft.yaml" >"$work/export.out" 2>&1 || { cat "$work/export.out" >&2; fail "export a draft of the nginx jail"; }
 expect "-o json prints the draft as data" '"definition"' $J app export nginx --project demo -o json
 grep -q 'name: nginx' "$work/nginx-draft.yaml" || { cat "$work/nginx-draft.yaml" >&2; fail "the draft names the nginx package"; }
 grep -q 'port: 80' "$work/nginx-draft.yaml" || { cat "$work/nginx-draft.yaml" >&2; fail "the draft has port 80"; }
@@ -1503,12 +1570,12 @@ app_check() { # app_check NAME ADDRESS
 	esac
 }
 isms_check() { # isms_check ADDRESS: the steps of the definition's notes with a postgresql jail of its own, then HTTP
-	check "install postgresql for isms" $J app install postgresql --name isms-db --project demo --network lan --storage default
+	check "install postgresql for isms" $J app install postgresql isms-db --project demo --network lan --storage default
 	db=$($J app installed --project demo | awk '$1 == "isms-db" {print $5}' | head -1 | cut -d, -f1)
 	[ -n "$db" ] || fail "no address for the isms-db jail"
 	# the role, the database, the pg_hba.conf line, listen_addresses and the firewall rule, in one allow; the
 	# connection string is in its answer only (never printed here: it holds the password)
-	$J app allow isms-db from jail:isms --db isms --project demo -o json >"$work/isms-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/isms-allow.json" >&2; fail "allow isms to reach isms-db"; }
+	$J app allow isms-db --from jail:isms --db isms --project demo -o json >"$work/isms-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/isms-allow.json" >&2; fail "allow isms to reach isms-db"; }
 	url=$(json_field connection_string <"$work/isms-allow.json")
 	rm -f "$work/isms-allow.json"
 	case $url in "postgres://isms:"*"@$db:5432/isms?sslmode=disable") ;; *) fail "app allow printed no connection string for isms" ;; esac
@@ -1526,16 +1593,16 @@ isms_check() { # isms_check ADDRESS: the steps of the definition's notes with a 
 	check "stop isms-db" $J stop isms-db --project demo
 }
 pg_access_check() { # postgresql-access: who may connect to a database, from the jails' side
-	check "install postgresql as pgacc" $J app install postgresql --name pgacc --project demo --network lan --storage default
+	check "install postgresql as pgacc" $J app install postgresql pgacc --project demo --network lan --storage default
 	for c in pgc1 pgc2; do
 		check "create the client jail $c" $J create "$c" --project demo --image "$img" --network lan --storage default --start
-		# the PostgreSQL client into the thin jail from the host, as the app installer does it
-		check "psql in $c" pkg -r "$mount/projects/demo/jails/$c/root" install -y postgresql18-client
+		# the PostgreSQL client into the running thin jail, inside it, as package updates do
+		check "psql in $c" pkg -j "demo_$c" install -y postgresql18-client
 		check "the library cache of $c" $J exec --project demo "$c" -- /sbin/ldconfig -m /usr/local/lib
 	done
 	expect "a dry run shows the rule, the pg_hba line and the SQL without a password" 'CREATE ROLE "pgc1" LOGIN PASSWORD .<generated' \
-		$J app allow pgacc from jail:pgc1 --project demo --dry-run
-	$J app allow pgacc from jail:pgc1 --project demo -o json >"$work/pg-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/pg-allow.json" >&2; fail "allow pgc1 to reach pgacc"; }
+		$J app allow pgacc --from jail:pgc1 --project demo --dry-run
+	$J app allow pgacc --from jail:pgc1 --project demo -o json >"$work/pg-allow.json" 2>&1 || { sed 's/postgres:\/\/[^@]*@/postgres:\/\/***@/' "$work/pg-allow.json" >&2; fail "allow pgc1 to reach pgacc"; }
 	url=$(json_field connection_string <"$work/pg-allow.json")
 	rm -f "$work/pg-allow.json"
 	case $url in postgres://pgc1:*@*:5432/pgc1?sslmode=disable) ;; *) fail "app allow printed no connection string for pgc1" ;; esac
@@ -1544,10 +1611,10 @@ pg_access_check() { # postgresql-access: who may connect to a database, from the
 	expect_retry "pgc1 runs a query with the connection string" '^1$' $J exec --project demo pgc1 -- /usr/local/bin/psql "$url" -tAc 'select 1'
 	expect_refused "pgc2 (not allowed) cannot connect" $J exec --project demo pgc2 -- /usr/local/bin/psql "$url" -tAc 'select 1'
 	expect "app access lists the grant with its pg_hba line" 'host pgc1 pgc1 [0-9.]+/32 scram-sha-256' $J app access pgacc --project demo
-	expect "allowing again changes nothing and prints no password" 'may already reach' $J app allow pgacc from jail:pgc1 --project demo
-	expect "the source of a grant is not deleted: the rule names it" 'jailops app deny pgacc from jail:pgc1' \
-		sh -c "$J delete --force --confirm-data-loss pgc1 --project demo 2>&1; true"
-	check "deny pgc1" $J app deny pgacc from jail:pgc1 --project demo
+	expect "allowing again changes nothing and prints no password" 'may already reach' $J app allow pgacc --from jail:pgc1 --project demo
+	expect "the source of a grant is not deleted: the rule names it" 'jailops app deny pgacc --from jail:pgc1' \
+		sh -c "$J delete --stop --confirm-data-loss pgc1 --project demo 2>&1; true"
+	check "deny pgc1" $J app deny pgacc --from jail:pgc1 --project demo
 	expect_refused_retry "pgc1 cannot connect after the deny" $J exec --project demo pgc1 -- /usr/local/bin/psql "$url" -tAc 'select 1'
 	expect "the grant is gone" 'No grants' $J app access pgacc --project demo
 	url=
@@ -1565,7 +1632,7 @@ for a in $e2e_apps; do
 	addr=$($J app installed --project demo | awk -v a="$a" '$1 == a {print $5}' | head -1 | cut -d, -f1)
 	[ -n "$addr" ] || fail "no address for the $a jail"
 	# the checks that connect from the host need it allowed (postgresql and valkey are checked inside the jail)
-	case $a in prometheus | forgejo | nsd | mail | isms) check "allow the host to reach $a" $J app allow "$a" from host --project demo ;; esac
+	case $a in prometheus | forgejo | nsd | mail | isms) check "allow the host to reach $a" $J app allow "$a" --from host --project demo ;; esac
 	app_check "$a" "$addr"
 	expect "the log files of $a are listed" 'messages' $J jail logs "$a" --project demo
 	check "stop $a" $J stop "$a" --project demo
@@ -1628,7 +1695,7 @@ YAML
 check "restart jailopsd" service jailopsd restart
 n=0; until $J backup key status >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
 expect "key created" 'JOR1-' $J backup key create
-check "target" $J backup target create vault --address https://127.0.0.1:39111 --fingerprint "$nodefp"
+check "target" $J backup target create vault --url https://127.0.0.1:39111 --fingerprint "$nodefp"
 check "policy" $J backup policy create nightly --project demo --schedule "0 3 * * *" --selector backup=yes --target vault --keep-last 3
 expect "the backup runs" ' ok ' $J backup run --project demo nightly
 id=$($J backup list --project demo --jail web -o name | head -1)
@@ -1648,8 +1715,10 @@ expect "its own address" '10\.77\.0\.' $J exec --project demo web-restored -- if
 
 step "volumes in backups (one copy for several jails, --no-volumes, a lost volume comes back with the jail)"
 check "a volume" $J volume create shared --project demo --storage default --uid 5001 --gid 5001 --mode 0770
-check "the first jail attaches it" $J create vb1 --project demo --image "$img" --network lan --storage default --volume shared:/srv/shared
-check "the second jail attaches it" $J create vb2 --project demo --image "$img" --network lan --storage default --volume shared:/srv/shared
+check "the first jail attaches it" $J create vb1 --project demo --image "$img" --network lan --storage default
+check "attach shared to vb1" $J volume attach vb1 shared /srv/shared --project demo
+check "the second jail attaches it" $J create vb2 --project demo --image "$img" --network lan --storage default
+check "attach shared to vb2" $J volume attach vb2 shared /srv/shared --project demo
 check "label the first jail" $J label vb1 --project demo backup=vol
 check "label the second jail" $J label vb2 --project demo backup=vol
 # neither jail is ever started: their datasets are unmounted, and the volume is written from the host
@@ -1663,10 +1732,10 @@ expect "the list tells jail and volume backups apart" 'volume' $J backup list --
 expect "a run without volumes" ' ok ' $J backup run --project demo vols --no-volumes
 vcount=$($J backup list --project demo --volume shared -o name | wc -l | tr -d ' ')
 [ "$vcount" = 1 ] || fail "a run with --no-volumes backed the volume up ($vcount backups)"
-check "a policy that excludes volumes" $J backup policy create novols --project demo --schedule "0 5 * * *" --selector backup=vol --target vault --keep-last 3 --exclude-volumes
+check "a policy that excludes volumes" $J backup policy create novols --project demo --schedule "0 5 * * *" --selector backup=vol --target vault --keep-last 3 --no-volumes
 expect "its run is ok" ' ok ' $J backup run --project demo novols
 vcount=$($J backup list --project demo --volume shared -o name | wc -l | tr -d ' ')
-[ "$vcount" = 1 ] || fail "a policy with --exclude-volumes backed the volume up ($vcount backups)"
+[ "$vcount" = 1 ] || fail "a policy with --no-volumes backed the volume up ($vcount backups)"
 vbid=$($J backup list --project demo --jail vb1 -o name | head -1)
 volid=$($J backup list --project demo --volume shared -o name | head -1)
 [ -n "$vbid" ] && [ -n "$volid" ] || fail "the jail backup or the volume backup is not listed"

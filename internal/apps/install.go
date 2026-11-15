@@ -31,6 +31,17 @@ func PkgInstallArgv(root, repo string, names []string) []string {
 	return append(argv, names...)
 }
 
+// PkgJailArgv is a pkg command that runs inside a running jail (pkg -j): pkg enters the jail first, so what it writes
+// and the scripts it runs stay in the jail, and it reads the jail's own repository configuration.
+func PkgJailArgv(jail string, args ...string) []string {
+	return append([]string{"pkg", "-j", jail}, args...)
+}
+
+// PkgInstallInJailArgv installs packages from the repository the jail itself is configured for, inside a running jail.
+func PkgInstallInJailArgv(jail string, names []string) []string {
+	return PkgJailArgv(jail, append([]string{"install", "-y"}, names...)...)
+}
+
 // PkgVersionArgv is the host command that reports the installed version of
 // one package of a jail root.
 func PkgVersionArgv(root, name string) []string {

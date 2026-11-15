@@ -118,7 +118,7 @@ resources:
 notes: |
   TODO: what to do after the installation: the first-run steps, how to connect.
 
-$ jailops app export cache --to <dir>/cache.yaml
+$ jailops app export cache --file <dir>/cache.yaml
 Wrote <dir>/cache.yaml, drafted from jail cache, with 10 line(s) marked TODO.
 Next: fill in the marked lines and run 'jailops app validate <dir>/cache.yaml'.
 
@@ -137,24 +137,15 @@ $ jailops app validate <dir>/cache.yaml
 ! hint: fix the files listed and run 'jailops app validate' again; docs/apps.md has the format
 [exit 2]
 
-$ jailops app export cache --to <dir>/cache.yaml
+$ jailops app export cache --file <dir>/cache.yaml
 ! already_exists: <dir>/cache.yaml exists
-! hint: keep it, or write over it with --force
+! hint: keep it, or write over it with --overwrite
 [exit 5]
 
-$ jailops app export cache --to <dir>/other.yaml
+$ jailops app export cache --file <dir>/other.yaml
 Wrote <dir>/other.yaml, drafted from jail cache, with 10 line(s) marked TODO.
 The definition is named cache: rename the file to cache.yaml, or change name: to match the file name.
 Next: fill in the marked lines and run 'jailops app validate <dir>/other.yaml'.
-
-$ jailops app export cache -o <dir>/cache.yaml --force -q
-! warning: -o <dir>/cache.yaml names a file; that use of -o is deprecated, write --to <dir>/cache.yaml (-o is the output format)
-
-$ jailops app export cache -o <dir>/cache.yaml --to <dir>/third.yaml
-! warning: -o <dir>/cache.yaml names a file; that use of -o is deprecated, write --to <dir>/cache.yaml (-o is the output format)
-! usage: -o <dir>/cache.yaml and --to <dir>/third.yaml name two files: use --to
-! hint: run 'jailops app export --help' for usage
-[exit 2]
 
 $ jailops app export cache -o json
 {

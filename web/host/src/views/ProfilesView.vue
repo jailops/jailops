@@ -28,7 +28,7 @@ const l = useLoad(async () => ({ list: await api.profiles.list(scope.value === '
 const usedBy = (n: string) => (l.data.value?.jails ?? []).filter((j) => (j.spec.profiles ?? []).includes(n)).map((j) => j.metadata.name)
 
 const editing = ref<Profile | 'new' | null>(null)
-const f = reactive({ name: '', description: '', rows: [] as Array<{ key: string; value: string }> })
+const f = reactive({ name: '', comment: '', rows: [] as Array<{ key: string; value: string }> })
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 const msgs = { int: s.config.invalidInt, size: s.config.invalidSize, rate: s.config.invalidRate, mac: s.config.invalidMac, address: s.config.invalidAddress, listen: s.config.invalidListen, bool: s.config.invalidBool, name: s.config.invalidPattern, enum: s.config.invalidEnum }
@@ -46,13 +46,13 @@ function open(p: Profile | 'new'): void {
   editing.value = p
   error.value = null
   check.reset()
-  if (p === 'new') Object.assign(f, { name: '', description: '', rows: [{ key: '', value: '' }] })
-  else Object.assign(f, { name: p.metadata.name, description: p.spec.description ?? '', rows: Object.entries(p.spec.config ?? {}).map(([key, value]) => ({ key, value })) })
+  if (p === 'new') Object.assign(f, { name: '', comment: '', rows: [{ key: '', value: '' }] })
+  else Object.assign(f, { name: p.metadata.name, comment: p.spec.comment ?? '', rows: Object.entries(p.spec.config ?? {}).map(([key, value]) => ({ key, value })) })
 }
 const save = () => check.submit(async () => {
   busy.value = true
   error.value = null
-  const body: Profile = { metadata: { name: f.name }, spec: { ...(f.description ? { description: f.description } : {}), config: config.value } }
+  const body: Profile = { metadata: { name: f.name }, spec: { ...(f.comment ? { comment: f.comment } : {}), config: config.value } }
   try {
     if (editing.value === 'new') await runOp(s.profiles.createTitle + ': ' + f.name, () => api.profiles.create(body))
     else await runOp(s.profiles.editTitle(f.name), () => api.profiles.put({ ...(editing.value as Profile), spec: body.spec }))
@@ -90,7 +90,7 @@ function remove(p: Profile): void {
         <div v-else class="table-wrap"><table data-test="profiles-table" class="rtable">
           <thead><tr><th>{{ s.profiles.name }}</th><th>{{ s.profiles.keys }}</th><th>{{ s.profiles.appliedTo }}</th><th><span class="sr-only">{{ s.app.actions }}</span></th></tr></thead>
           <tbody><tr v-for="p in l.data.value?.list" :key="p.metadata.name" :data-profile="p.metadata.name">
-            <td :data-label="s.profiles.name"><span class="mono">{{ p.metadata.name }}</span><div v-if="p.spec.description" class="faint">{{ p.spec.description }}</div></td>
+            <td :data-label="s.profiles.name"><span class="mono">{{ p.metadata.name }}</span><div v-if="p.spec.comment" class="faint">{{ p.spec.comment }}</div></td>
             <td class="mono" :data-label="s.profiles.keys"><div v-for="(v, k) in p.spec.config" :key="k">{{ k }}={{ v }}</div></td>
             <td :data-label="s.profiles.appliedTo"><router-link v-for="j in usedBy(p.metadata.name)" :key="j" class="mono chip" :to="`/jails/${j}`">{{ j }}</router-link></td>
             <td class="actions"><div class="row-actions"><button class="btn btn-sm" type="button" @click="open(p)">{{ s.profiles.edit }}</button><button v-if="canRename('profile', scopeProject)" class="btn btn-sm" type="button" :data-test="`rename-profile-${p.metadata.name}`" @click="renaming = p">{{ s.rename.open(s.rename.kinds.profile) }}</button><button class="btn btn-sm btn-danger" type="button" @click="remove(p)">{{ s.profiles.delete }}</button></div></td>
@@ -105,7 +105,7 @@ function remove(p: Profile): void {
         <div class="form-2"><div class="field"><label for="pr-name">{{ s.profiles.name }} <span v-if="editing === 'new'" class="req" aria-hidden="true">*</span></label>
           <input id="pr-name" v-model="f.name" class="mono" type="text" autocomplete="off" :readonly="editing !== 'new'" :aria-invalid="!!check.err('pr-name')" aria-describedby="pr-name-h pr-name-e" @input="check.touch('pr-name')" />
           <span id="pr-name-h" class="hint">{{ editing === 'new' ? nameHint() : s.profiles.nameFixed }}</span><span id="pr-name-e" class="field-error" role="alert">{{ check.err('pr-name') }}</span></div>
-          <div class="field"><label for="pr-desc">{{ s.profiles.description }}</label><input id="pr-desc" v-model="f.description" type="text" /></div></div>
+          <div class="field"><label for="pr-desc">{{ s.profiles.comment }}</label><input id="pr-desc" v-model="f.comment" type="text" /></div></div>
         <h3>{{ s.profiles.keys }}</h3>
         <div v-for="(r, i) in f.rows" :key="i" class="grant-row grant-sto" :data-row="i">
           <input :id="`pr-key-${i}`" v-model="r.key" class="mono" type="text" list="profile-keys" :aria-label="s.profiles.key" :class="{ invalid: issueOf(r.key) }" />

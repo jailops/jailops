@@ -49,7 +49,8 @@ func TestJailLifecycle(t *testing.T) {
 	tr := h.transcript()
 	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--memory", "2G", "--label", "env=prod", "--autostart")
 	tr.ok("volume", "create", "data", "--storage", "default")
-	tr.ok("jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--volume", "data:/srv/data:ro", "--env", "A=1")
+	tr.ok("jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--env", "A=1")
+	tr.ok("volume", "attach", "db", "data", "/srv/data", "--ro")
 	tr.ok("jail", "list")
 	tr.ok("jail", "start", "web")
 	tr.ok("jail", "list")
@@ -357,9 +358,9 @@ func TestDryRunSendsNothing(t *testing.T) {
 		{"jail", "copy", "web", "w2"},
 		{"network", "create", "n2", "--subnet", "10.1.0.0/24", "--gateway", "10.1.0.1", "--range", "10.1.0.5-10.1.0.9"},
 		{"network", "delete", "-y", "lan"},
-		{"image", "alias", "set", "freebsd-15", "x"},
-		{"image", "alias", "delete", "-y", "freebsd-15", "x"},
-		{"image", "delete-generation", "-y", "freebsd-15", "1"},
+		{"image", "alias", "add", "freebsd-15", "x"},
+		{"image", "alias", "remove", "-y", "freebsd-15", "x"},
+		{"image", "generation", "delete", "-y", "freebsd-15", "1"},
 		{"firewall", "address-set", "create", "s", "--address", "10.0.0.0/8"},
 		{"token", "create", "t1", "--global"},
 		{"user", "create", "bob", "--global"},

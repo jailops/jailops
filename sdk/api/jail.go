@@ -31,6 +31,8 @@ type Jail struct {
 
 // JailSpec is the desired state of a jail.
 type JailSpec struct {
+	// Comment is what the object is for: one line of free text.
+	Comment string `json:"comment,omitempty"`
 	// Image is an image name such as "freebsd-15-1" (its newest generation),
 	// NAME@alias, or a pinned generation such as "freebsd-15-1#g3".
 	Image string `json:"image"`
@@ -50,12 +52,7 @@ type JailSpec struct {
 	Network   []NetworkAttach `json:"network,omitempty"`
 	Firewall  FirewallAttach  `json:"firewall,omitempty"`
 	Volumes   []VolumeAttach  `json:"volumes,omitempty"`
-	// HostMounts mount existing host directories, usually datasets of a pool JailOps does not manage (a large
-	// archive pool), into the jail with nullfs. Only a global admin may set them, the source must lie below a
-	// directory the host operator approved in the helper's configuration (admin-host-mount), and a profile cannot
-	// carry them.
-	HostMounts []HostMount `json:"host_mounts,omitempty"`
-	Boot       BootPolicy  `json:"boot,omitempty"`
+	Boot      BootPolicy      `json:"boot,omitempty"`
 	// Packages is reserved: installing packages at creation is not implemented and creation with it set is refused.
 	Packages []string          `json:"packages,omitempty"`
 	Env      map[string]string `json:"env,omitempty"`
@@ -198,15 +195,6 @@ type VolumeAttach struct {
 	// Name is the name of the volume (jailops volume list).
 	Name     string `json:"volume"`
 	Mount    string `json:"mount"`
-	ReadOnly bool   `json:"read_only,omitempty"`
-}
-
-// HostMount is an existing directory of the host mounted into the jail.
-type HostMount struct {
-	// Source is the absolute path on the host, for example the mountpoint of a dataset of another pool.
-	Source string `json:"source"`
-	// Target is the absolute path inside the jail.
-	Target   string `json:"target"`
 	ReadOnly bool   `json:"read_only,omitempty"`
 }
 

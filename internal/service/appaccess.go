@@ -695,7 +695,7 @@ func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (
 				}
 			}
 			res.ConnectionString = apps.ConnectionString(db, password, host, t.dbPort(), db)
-			res.Notes = append(res.Notes, "the connection string is shown once and stored nowhere; jailops app allow "+jail+" from "+rs.canonical+" --rotate makes a new password")
+			res.Notes = append(res.Notes, "the connection string is shown once and stored nowhere; jailops app allow "+jail+" --from "+rs.canonical+" --rotate makes a new password")
 		} else {
 			res.Notes = append(res.Notes, "role "+db+" exists: its password was shown when it was made; --rotate makes a new one")
 		}
@@ -967,7 +967,7 @@ func (s *Service) grantProblems(project, jail string, g accessGrant, pol object[
 			now, err = s.setPrefixes(project, g.SourceName)
 		}
 		if err == nil && !samePrefixes(now, g.Prefixes) {
-			out = append(out, fmt.Sprintf("the addresses of %s are now %s but the pg_hba lines name %s: repeat jailops app allow %s from %s to refresh them",
+			out = append(out, fmt.Sprintf("the addresses of %s are now %s but the pg_hba lines name %s: repeat jailops app allow %s --from %s to refresh them",
 				g.Source, prefixList(now), strings.Join(g.Prefixes, ", "), jail, g.Source))
 		}
 	}

@@ -219,7 +219,7 @@ Every identity (a user of the web console, an API token, a client certificate) h
   call nothing except its own session routes. Only a global admin may grant `global`.
 - A request for an object of a project the caller may not use answers `not_found`, never `forbidden`, so that existence
   does not leak. A role that is too low is checked first and answers `forbidden`.
-- Dangerous parameters (raw jail parameters, host mounts, device nodes, ZFS delegation, raw PF, provisioning commands)
+- Dangerous parameters (raw jail parameters, host directories, device nodes, ZFS delegation, raw PF, provisioning commands)
   need `admin` or a global admin, are allow-listed by `priv.conf`, and are audited.
 - Every route has a permission entry in the code, or the daemon refuses to start.
 - A value a client sends that goes into the detail of an audit entry (a source, a sink name, a domain) is quoted with
@@ -358,32 +358,38 @@ To build an image from a repository of your own, list its host in `fetch-host` a
 `pkg-keys-dir` yourself, as root. An app installation uses the host's own repository configuration (root's files), not
 one the daemon writes.
 
-## Installing an app runs package scripts as root
+## Package scripts run as root, so never in a root that runs
 
-`jailops app install` installs the packages from the host with `pkg -r <jail root> install`, through the helper, while
-the jail runs (an `operator` may install). The packages' install scripts run as root on the host, chrooted into the jail
-root. Whoever can run commands in the jail could change that tree while `pkg` works on it, so that window is closed:
-while the installation holds the jail, the daemon refuses every exec, shell and console session into it (`busy`, "the
-packages are being installed or updated"), and the app's services are not running yet (they are enabled and started only afterwards);
-what runs in the new jail is the base system of its image. What remains is what the packages themselves do: a package
-from a repository the host trusts runs its scripts with root's rights inside that chroot, as it would for an image
-build. The helper does not refuse `pkg -r` against a running jail; the installation depends on it.
+`pkg` runs the install scripts of a package in a chroot of the root it was given, as the user that started it, with the
+shell and the libraries it finds there. Started by the helper (root of the host) against the root of a jail, that is
+the jail's tree: a process of a running jail that replaced `/bin/sh` or a library, or put a symbolic link where `pkg`
+writes, would have root of the host at the next package operation. So the helper refuses `pkg -r ROOT` for the root of
+a running jail, however the path is spelled (a trailing slash, a symbolic link on the way, `..`); `-r` is for a root no
+jail runs in: an image being built, and the jail of an app installation before it has first run.
 
-**Package updates and the shell setup of a running jail** run `pkg -r <jail root>` through the helper in the same way, and
-take the same hold: while the host works on the root, the daemon refuses every exec, shell and console session into that
-jail (`busy`, "packages are being installed or updated"). What the hold does not do is stop processes that already run in
-the jail: its services keep running and can change their tree while `pkg` works. `pkg -j JAIL` would remove that window,
-because it attaches to the jail and runs with the jail's rights, but it then reads the repository configuration, the trust
-keys, the cache and the network from inside the jail. JailOps installs packages from the host's repository configuration
-and package cache, so using `-j` would need all of that, and an outbound path to the package servers, in every jail.
-`-r` stays for that reason, and so does the hold.
+- **`jailops app install`** makes the jail, mounts its datasets on the host and installs the packages with `pkg -r <jail
+  root> install` through the helper while the jail has never run, and only then starts it. What is in the root is the
+  base system of its image. An `operator` may install. A package from a repository the host trusts runs its scripts with
+  root's rights inside that chroot, as it would for an image build; the app installation uses the host's own repository
+  configuration (root's files), not one the daemon writes. For a package from the JailOps repository the host's
+  configuration of that repository and its key are copied into the jail, so that its packages are updated from it later.
+- **The bash of a new jail** is installed with `pkg -r` before its first start (nothing runs in the root yet, and the
+  host's network fetches the package); a start never waits more than a minute for the shell setup.
+- **Package updates, the retry of the shell setup and the app draft of a running jail** run `pkg -j <jail>`: `pkg` attaches
+  to the jail before it does anything, so what it writes and the scripts it runs are the jail's own, with the jail's
+  rights. The helper allows `-j` for a running jail JailOps manages, with none of the options that name a directory of
+  the host. `pkg` then reads the repository configuration, the keys and the cache inside the jail, and fetches from the
+  jail's network: a jail that must update its packages must be allowed to reach the package servers, and the
+  repositories it updates from are the ones its own `/etc/pkg` and `/usr/local/etc/pkg/repos` name. That configuration is
+  the jail's, as the packages it installs are. While a package operation works in a jail, the daemon refuses every exec,
+  shell and console session into it (`busy`, "packages are being installed or updated").
 
 ## Drafting an app from a jail reads, never writes
 
 `jailops app export` (`GET /api/v1/jails/<n>/app-draft`) needs `operator`, the role that may exec into the jail,
 because it runs commands there: `sockstat`, `find` and `stat` through the in-jail exec, as root in the jail, so what
 they print is the jail's word and is parsed as untrusted text (bounded counts, paths checked against the catalog's
-rules). On the host it runs one exact form, `pkg -r <jail root> query -e "%a = 0" "%n %v %R %w"`, which the helper's
+rules). On the host it runs one exact form, `pkg -j <jail> query -e "%a = 0" "%n %v %R %w"`, which the helper's
 allow-list accepts as it is and in no other shape, and it reads the jail's `/etc/rc.conf` through the helper's file
 operations. It never reads a configuration file, leaves out an rc.conf knob whose name looks like a secret or whose
 value holds a shell expansion, and is audited with counts only. A jail's owner can make the draft say anything; the
@@ -486,7 +492,7 @@ hands that interface to JailOps.
 ## Projects are not a security boundary against the kernel
 
 A project separates names, quotas, networks and firewall policy. Jails share the host kernel. A high-security tenant needs an isolation
-boundary judged on its own terms, such as a host of its own: a separate pool splits storage and operations, not the kernel. A jail with `zfs_delegation` or a host mount is not isolated from that storage: root in a jail with `zfs_delegation` manages the dataset `<container>/delegated` itself, with `allow.mount.zfs`, outside the helper's mountpoint rules; it needs a global administrator and `admin-zfs-delegation` in `priv.conf`.
+boundary judged on its own terms, such as a host of its own: a separate pool splits storage and operations, not the kernel. A jail with `zfs_delegation` or a host-directory volume is not isolated from that storage: root in a jail with `zfs_delegation` manages the dataset `<container>/delegated` itself, with `allow.mount.zfs`, outside the helper's mountpoint rules; it needs a global administrator and `admin-zfs-delegation` in `priv.conf`.
 
 ## Network isolation
 
@@ -523,7 +529,7 @@ jail's root and refuse a symlink.
 - A backup node holds one key domain, so all hosts using it share the backup key: each can read and damage the others'
   backups (the node cannot tell a wrong chunk from a right one without the key). Give hosts that do not trust each
   other their own node ([backup-restore.md](backup-restore.md#who-trusts-whom-hosts-that-share-a-node)).
-- Do not put tokens on a command line (visible to other users); use `--token-stdin` or `token_file`.
+- Do not put tokens on a command line (visible to other users); use `--token-file -` or `token_file`.
 - WireGuard: private and preshared keys are made and kept by the helper in `wireguard-dir` (files 0600) and never reach
   a command line, the API, the audit log or a log. A join token holds a peer's private key and is shown once by
   `jailops wireguard peer add`; the server keeps only the peer's public key and the preshared key. `jailops wireguard

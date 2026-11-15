@@ -27,7 +27,8 @@ type Profile struct {
 
 // ProfileSpec holds the keys of a profile.
 type ProfileSpec struct {
-	Description string `json:"description,omitempty"`
+	// Comment is what the profile is for.
+	Comment string `json:"comment,omitempty"`
 	// Config maps keys of the registry that are allowed in a profile to values.
 	Config map[string]string `json:"config,omitempty"`
 }

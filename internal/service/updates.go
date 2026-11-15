@@ -207,15 +207,16 @@ func (s *Service) runInJail(ctx context.Context, key string, timeout time.Durati
 	return out, nil
 }
 
-// pkgExec runs a package command for a jail and returns its output. A Linux jail runs apk inside itself. A FreeBSD
-// jail has no package tool of its own (a thin jail is a pkgbase userland without pkg), so the host runs pkg against
-// the jail root with -r, as the app installer does: argv is the command as it would be typed inside the jail
-// ("pkg", "upgrade", "-y") and -r ROOT is put after "pkg".
+// pkgExec runs a package command for a running jail and returns its output. A Linux jail runs apk inside itself. A
+// FreeBSD jail has no package tool of its own (a thin jail is a pkgbase userland without pkg), so the host's pkg runs
+// with -j: it enters the jail first, so what it writes and the scripts it runs stay in the jail, and it reads the
+// repositories the jail is configured for. argv is the command as it would be typed inside the jail ("pkg",
+// "upgrade", "-y") and -j JAIL is put after "pkg".
 func (s *Service) pkgExec(ctx context.Context, key string, linux bool, timeout time.Duration, argv ...string) ([]byte, error) {
 	if linux {
 		return s.runInJail(ctx, key, timeout, argv...)
 	}
-	host := append([]string{argv[0], "-r", s.rootMount(key)}, argv[1:]...)
+	host := append([]string{argv[0], "-j", key}, argv[1:]...)
 	res, err := s.d.Run.Run(ctx, run.Cmd{Name: host[0], Args: host[1:], Timeout: timeout})
 	out := append(append([]byte(nil), res.Stdout...), res.Stderr...)
 	if err != nil {
@@ -551,7 +552,7 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 		return rec
 	}
 	alpine := s.jailIsLinux(j)
-	// The host runs pkg against the root of a FreeBSD jail: no session may enter the jail meanwhile.
+	// No session may enter the jail while its packages change.
 	if !alpine {
 		release, err := s.holdJailForPackages(key)
 		if err != nil {
@@ -588,7 +589,7 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 		return rec
 	}
 	if !alpine {
-		// pkg -r does not run the ldconfig trigger of the jail: a program would not find a new library
+		// a program would not find a new library before the library cache is rebuilt
 		_, _ = s.runInJail(ctx, key, 5*time.Minute, "/sbin/ldconfig", "-m", "/usr/local/lib")
 	}
 	if err := s.healthCheck(ctx, key, j); err != nil {

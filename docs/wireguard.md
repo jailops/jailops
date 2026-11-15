@@ -17,7 +17,7 @@ On the server host:
 
 `peer add` prints a **join token** once (`jwg1.` followed by base64url). On another JailOps host:
 
-    jailops wireguard join - < token.txt           # or --token-file token.txt
+    jailops wireguard join office --token-file token.txt
 
 The client is created, its keys go to the helper of that host, and the tunnel comes up. For a phone or a laptop
 without JailOps, print a configuration file instead and import it into the WireGuard app:
@@ -85,8 +85,8 @@ fake server used by tests never carry a private or preshared key.
 endpoint, the peer's addresses, the routes, DNS and the keepalive, as base64url of JSON. It is a secret: whoever holds
 it can be that peer. It is printed once, by `peer add`, and is not stored anywhere on the server, which keeps only the
 peer's public key and the preshared key. The `--format conf` file is the same secret in the format of the WireGuard
-apps. Pass it on over a channel you trust; `join -` reads it from standard input and `--token-file` from a file, so it
-stays out of shell history and the process list (a token given as an argument still works, with a warning).
+apps. Pass it on over a channel you trust; `join NAME --token-file -` reads it from standard input and `--token-file FILE` from a file, so it
+stays out of shell history and the process list (a token is never an argument).
 A lost token is replaced by removing the peer and adding it again.
 
 **Who may do what.** Reading tunnels and their state (public keys, peers, handshakes) needs the operator role; creating,

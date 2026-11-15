@@ -69,7 +69,7 @@ const condText = (c: Condition) => s.projects.hostCondition(codeText(c.reason) |
             <button class="btn btn-danger" type="button" :disabled="!canWrite" data-test="project-delete" @click="del">{{ s.projects.delete }}</button>
           </div>
         </div>
-        <p v-if="p.spec.description" class="muted">{{ p.spec.description }}</p>
+        <p v-if="p.spec.comment" class="muted">{{ p.spec.comment }}</p>
 
         <section class="panel"><header><h2>{{ s.projects.quotas }}</h2></header>
           <div class="body"><QuotaBars :project="p" />

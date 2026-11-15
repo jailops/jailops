@@ -185,7 +185,7 @@ var listCommands = map[string]string{
 	"backup-policy": "jailops backup policy list", "backup-target": "jailops backup target list",
 	"firewall-policy": "jailops firewall policy list", "address-set": "jailops firewall address-set list",
 	"session": "jailops sessions list", "wireguard": "jailops wireguard list",
-	"snapshot": "jailops jail snapshot list JAIL", "generation": "jailops image generations IMAGE",
+	"snapshot": "jailops jail snapshot list JAIL", "generation": "jailops image generation list IMAGE",
 	"peer": "jailops wireguard peer list TUNNEL", "app": "jailops app list",
 }
 

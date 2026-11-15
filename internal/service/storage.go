@@ -656,7 +656,7 @@ func (s *Service) DeleteStorage(ctx context.Context, name string, expect int64) 
 // first start.
 func (s *Service) loadStorages(ctx context.Context) error {
 	if _, err := s.stoKind.get(DefaultStorage); err != nil && s.d.Root != "" {
-		spec := api.StorageSpec{Dataset: s.d.Root, Description: "created at the first start"}
+		spec := api.StorageSpec{Dataset: s.d.Root, Comment: "created at the first start"}
 		if _, err := s.stoKind.create(ctx, api.ObjectMeta{Name: DefaultStorage}, spec); err != nil {
 			return err
 		}
