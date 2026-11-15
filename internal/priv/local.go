@@ -448,7 +448,7 @@ func (g zfsGuard) Destroy(ctx context.Context, name string, o zfs.DestroyOpts) e
 		return err
 	}
 	if err := g.l.d.ZFS.Destroy(ctx, name, o); err != nil {
-		return err
+		return withHolders(ctx, g.l.d.Runner, err)
 	}
 	g.l.grants.forget(name)
 	return nil
