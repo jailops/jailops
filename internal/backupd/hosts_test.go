@@ -2,6 +2,7 @@ package backupd_test
 
 import (
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,7 +40,13 @@ func TestHostAuthentication(t *testing.T) {
 		}
 	}
 	// a node whose certificate does not match the pin is refused by the client
-	wrongFP := "00" + r.Srv.ServerFingerprint()[2:]
+	// the first byte is changed to one that differs from the real one (a fingerprint that starts with 00 would have made
+	// "00" the right pin once in 256 runs)
+	fp := r.Srv.ServerFingerprint()
+	wrongFP := "00" + fp[2:]
+	if strings.HasPrefix(fp, "00") {
+		wrongFP = "ff" + fp[2:]
+	}
 	bad, err := client.New(client.Config{Address: r.Srv.HostAddr(), Fingerprint: wrongFP, Cert: h.Cert, Attempts: 1})
 	if err != nil {
 		t.Fatal(err)
