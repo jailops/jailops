@@ -218,11 +218,12 @@ func TestAppInstall(t *testing.T) {
 			pkgCalls = append(pkgCalls, strings.Join(append([]string{call.Cmd.Name}, call.Cmd.Args...), " "))
 		}
 	}
-	want := []string{strings.Join(apps.PkgInstallArgv(root, "ports", []string{"web-server"}), " "),
-		strings.Join(apps.PkgInstallArgv(root, apps.JailopsRepo, []string{"web-tool"}), " "),
-		strings.Join(apps.PkgInstallArgv(root, "ports", []string{api.BashPackage}), " "),
+	const cache = "/jailops/cache/pkg" // the download cache the host shares between installs
+	want := []string{strings.Join(apps.PkgInstallCachedArgv(root, "ports", cache, []string{"web-server"}), " "),
+		strings.Join(apps.PkgInstallCachedArgv(root, apps.JailopsRepo, cache, []string{"web-tool"}), " "),
+		strings.Join(apps.PkgInstallCachedArgv(root, "ports", cache, []string{api.BashPackage}), " "),
 		strings.Join(apps.PkgVersionArgv(root, "web-server"), " ")}
-	if !slices.Equal(pkgCalls, want) || want[0] != "pkg -r "+root+" install -y web-server" {
+	if !slices.Equal(pkgCalls, want) || want[0] != "pkg -r "+root+" -o PKG_CACHEDIR="+cache+" install -y web-server" {
 		t.Fatalf("pkg calls %q, want %q", pkgCalls, want)
 	}
 	// The jail's bash prompt, sourced by both start-up files of bash.
@@ -918,7 +919,7 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 			pkgCalls = append(pkgCalls, strings.Join(call.Cmd.Args, " "))
 		}
 	}
-	if !slices.Contains(pkgCalls, "-r "+root+" install -y -r jailops isms") {
+	if !slices.Contains(pkgCalls, "-r "+root+" -o PKG_CACHEDIR=/jailops/cache/pkg install -y -r jailops isms") {
 		t.Fatalf("pkg calls %q", pkgCalls)
 	}
 	// enabled in rc.conf, never started: the setup ran, no service start
