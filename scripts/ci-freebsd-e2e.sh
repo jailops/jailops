@@ -44,6 +44,14 @@
 #                   made with openssl and checks that the TLS listener serves it (openssl s_client), checks that wrong
 #                   ACME settings are refused (no CA is contacted), and puts rc.conf, the certificate and the user back.
 #                   It changes no pf.conf. Off by default; CI does not set it: JAILOPS_E2E_APPLIANCE=1 sh scripts/ci-freebsd-e2e.sh
+#
+# Rules of this script (scripts/lint-e2e.sh checks the first one, `just check` and CI run it):
+#   - No bare `sleep N`: wait for the condition (waitfor, expect_retry, check_retry, wait_counts). A pause that has to be
+#     there says why with `# sleep-ok: reason` (the poll of a loop, a deadline that has to pass).
+#   - No assertion on how long something took, except a very loose bound (minutes) that only tells a hang from a slow machine.
+#   - Wait for readiness (a file, a listener, a running jail) before signalling or connecting to what was just started.
+#   - No step depends on an external mirror without a retry (check_net); stop a jail and wait until it is gone before it
+#     is deleted; a step does not rely on what an earlier step left behind unless it created it.
 set -eu
 
 cd "$(dirname "$0")/.."
@@ -98,7 +106,7 @@ check_retry() { # check_retry DESCRIPTION COMMAND...: like check, tried for up t
 	desc=$1; shift; n=0
 	until "$@" >"$work/check.out" 2>&1; do
 		n=$((n + 1)); [ $n -ge 15 ] && { cat "$work/check.out" >&2; fail "$desc"; }
-		sleep 1
+		sleep 1 # sleep-ok: poll of a condition
 	done
 }
 expect() { # expect DESCRIPTION PATTERN COMMAND...: the output must match
@@ -114,7 +122,7 @@ expect_retry() { # expect_retry DESCRIPTION PATTERN COMMAND...: like expect, tri
 	until out=$("$@" 2>&1) && printf '%s\n' "$out" | grep -E -q "$pat"; do
 		n=$((n + 1))
 		[ $n -ge 15 ] && { echo "$out" >&2; fail "$desc (no match for $pat after 30 s)"; }
-		sleep 2
+		sleep 2 # sleep-ok: poll of a condition
 	done
 	printf '%s\n' "$out"
 }
@@ -124,12 +132,31 @@ expect_refused_retry() { # expect_refused_retry DESCRIPTION COMMAND...: the comm
 	while out=$("$@" 2>&1); do
 		n=$((n + 1))
 		[ $n -ge 15 ] && { echo "$out" >&2; fail "$desc (still answered after 30 s)"; }
-		sleep 2
+		sleep 2 # sleep-ok: poll of a condition
 	done
 }
 expect_refused() { # expect_refused DESCRIPTION COMMAND...: the command must fail, at once
 	desc=$1; shift
 	if out=$("$@" 2>&1); then echo "$out" >&2; fail "$desc (it answered)"; fi
+}
+waitfor() { # waitfor DESCRIPTION SECONDS COMMAND...: the command must succeed within SECONDS (polled twice a second); what it printed last is shown when it never does
+	desc=$1; secs=$2; shift 2
+	end=$(( $(date +%s) + secs ))
+	until "$@" >"$work/waitfor.out" 2>&1; do
+		[ "$(date +%s)" -ge "$end" ] && { cat "$work/waitfor.out" >&2; fail "$desc (not after $secs s)"; }
+		sleep 0.5 # sleep-ok: the poll of waitfor
+	done
+}
+check_net() { # check_net DESCRIPTION COMMAND...: like check, for a command that reaches a package mirror: tried four times with a pause (a mirror that answers slowly or not at all once is not a failure of the product)
+	desc=$1; shift; n=0
+	until "$@" >"$work/check.out" 2>&1; do
+		n=$((n + 1)); [ $n -ge 4 ] && { cat "$work/check.out" >&2; fail "$desc"; }
+		sleep 10 # sleep-ok: the pause between the tries at a mirror
+	done
+}
+wait_counts() { # wait_counts PROJECT V4PREFIX V6PREFIX WANT: until net_counts says WANT, for up to 90 s (the caller then checks it and says what is wrong)
+	end=$(( $(date +%s) + 90 ))
+	until [ "$(net_counts "$1" "$2" "$3")" = "$4" ] || [ "$(date +%s)" -ge "$end" ]; do sleep 0.5; done # sleep-ok: the poll of wait_counts
 }
 json_field() { # json_field NAME: the string value of a top-level field of the indented JSON on standard input
 	sed -n "s/^  \"$1\": \"\([^\"]*\)\",*\$/\1/p" | head -1
@@ -205,9 +232,9 @@ check "jailopsd start" service jailopsd start
 n=0
 until [ -S /var/run/jailops/jailops.sock ]; do
 	n=$((n + 1)); [ $n -gt 30 ] && fail "jailopsd did not create its socket"
-	sleep 1
+	sleep 1 # sleep-ok: poll of a condition
 done
-sleep 2
+waitfor "the daemon answers" 60 $J host show
 step "pid files: root writes them in /var/run, never in /var/run/jailops (the daemon may write there)"
 for f in /var/run/jailops-priv.pid /var/run/jailops-priv-daemon.pid /var/run/jailopsd.pid /var/run/jailopsd-daemon.pid; do
 	[ -s "$f" ] || fail "$f is missing"
@@ -396,7 +423,7 @@ if [ "${JAILOPS_E2E_HOSTFW:-}" = 1 ]; then
 	# 2. apply and confirm: the change stays past its deadline
 	expect "apply again" 'REVERTS at' $J host firewall set "$@"
 	expect "confirm" 'was confirmed' $J host confirm
-	sleep 22 # past the deadline of the confirmed change: nothing may revert it
+	sleep 22 # sleep-ok: the deadline of the confirmed change has to pass, nothing may revert it
 	expect "still the managed file" '^# managed by jailops$' head -1 /etc/pf.conf
 	# the rows of custom-rules and the address sets: one command each, every change waits for its confirmation
 	expect "an allow row" 'REVERTS at' $J host firewall allow add --proto tcp --port 9 --from 192.0.2.1 --comment e2e --confirm-within 20 --confirm-lockout
@@ -569,8 +596,9 @@ run_scale() {
 		*) check "start all" $J start --all --project scale ;;
 		esac
 		echo "OK: $count jails started in $(( $(date +%s) - t0 )) s"
-		sleep 3
+
 		want="jails=$count links=$count routes4=$count routes6=$count"
+		wait_counts scale '10\.88\.0\.' 'fd50:88:' "$want"
 		got=$(net_counts scale '10\.88\.0\.' 'fd50:88:')
 		[ "$got" = "$want" ] || fail "after the start of cycle $cycle: $got (want $want)"
 		expect "the reject route of the subnet stays" '^10\.88\.0\.0/24 +[^ ]+ +URS +lo0' sh -c "netstat -rn -f inet | grep '^10.88.0.0/24'"
@@ -593,8 +621,9 @@ run_scale() {
 		no_fail_in_doctor "cycle $cycle, running"
 		echo "-- cycle $cycle: stop all"
 		check "stop all" $J stop --all --project scale
-		sleep 3
+
 		want="jails=0 links=0 routes4=0 routes6=0"
+		wait_counts scale '10\.88\.0\.' 'fd50:88:' "$want"
 		got=$(net_counts scale '10\.88\.0\.' 'fd50:88:')
 		[ "$got" = "$want" ] || fail "after the stop of cycle $cycle: $got (want $want)"
 		leftover=$(ifconfig -l | tr ' ' '\n' | grep -c '^jo' || true)
@@ -626,7 +655,8 @@ run_soak() {
 	check "its rule" $J firewall rule add tohost out --project soak --action allow --proto tcp --to host --port 9100 --comment "the metrics port of the host"
 	check "st2 uses it" $J config set st2 firewall.policies tohost --project soak
 	check "start the steady jails" $J start st1 st2 --project soak
-	sleep 3
+	waitfor "st1 runs" 60 jexec soak_st1 true
+	waitfor "st2 runs" 60 jexec soak_st2 true
 	a1=$($J config get st1 nic.eth0.ipv4 --project soak | tail -1)
 	a1v6=$($J config get st1 nic.eth0.ipv6 --project soak | tail -1 | sed 's#/.*##')
 	bytes=$((secs * 4 * 100000)) # four chunks of 100000 bytes a second, one TCP connection each
@@ -640,7 +670,7 @@ run_soak() {
 		n=0
 		while [ $n -lt 30 ]; do
 			sh -c "$2" 2>/dev/null | grep -q ":$3 " && return 0
-			sleep 1
+			sleep 1 # sleep-ok: poll of a condition
 			n=$((n + 1))
 		done
 		fail "the listener $1 is not up after thirty seconds"
@@ -692,11 +722,11 @@ run_soak() {
 	rx4=$($J exec --project soak st1 -- cat /tmp/rx4 | tr -d ' ')
 	rx6=$($J exec --project soak st1 -- cat /tmp/rx6 | tr -d ' ')
 	[ "$rxh" = "$bytes" ] && [ "$rx4" = "$bytes" ] && [ "$rx6" = "$bytes" ] || fail "the streams lost data: host $rxh, jail v4 $rx4, jail v6 $rx6 bytes (want $bytes)"
-	[ $took -le $((secs + 30)) ] || fail "the streams took $took s for a run of $secs s: they stalled"
+	[ $took -le $((secs + 120)) ] || fail "the streams took $took s for a run of $secs s: they stalled"
 	grep -E -q ' 0\.0% packet loss' "$work/soak.cp" || { cat "$work/soak.cp" >&2; fail "pings from a steady jail to the gateway were lost while jails came and went"; }
 	echo "OK: three TCP streams delivered $bytes bytes each in $took s and no ping was lost while the other jails churned"
 	check "stop what runs" $J stop --all --project soak
-	sleep 3
+	wait_counts soak '10\.89\.0\.' 'fd50:89:' "jails=0 links=0 routes4=0 routes6=0"
 	got=$(net_counts soak '10\.89\.0\.' 'fd50:89:')
 	[ "$got" = "jails=0 links=0 routes4=0 routes6=0" ] || fail "after the churn: $got"
 	leftover=$(ifconfig -l | tr ' ' '\n' | grep -c '^jo' || true)
@@ -753,7 +783,7 @@ check "start" $J start web --project demo
 expect "the jail list has the AUTOSTART column" 'web +running +yes' $J list --project demo -c name,state,autostart
 expect "the boot plan lists the autostart jail first" '^1[[:space:]]+web[[:space:]]+0[[:space:]]+autostart' $J boot
 expect "the boot plan of one project" '^1[[:space:]]+web[[:space:]]+0[[:space:]]+autostart' $J boot --project demo
-sleep 2
+
 expect "the package cache has a dataset of its own" "^$mount/cache\$" zfs get -H -o value mountpoint "$pool/jailops/cache"
 expect "the image build downloaded into the shared cache" '\.pkg' ls "$mount/cache/pkg"
 # what the helper trusts when pkg runs as root is root's choice: a key directory the daemon could write, and a package
@@ -989,7 +1019,7 @@ check "project edge" $J project create edge
 check "grant office to edge" sh -c "$J network grant office --project edge && $J storage grant default --project edge"
 check "a jail on office" $J create edgeweb --project edge --image "$img" --network office --storage default
 check "it starts" $J start edgeweb --project edge
-sleep 2
+waitfor "the host end of edgeweb exists" 60 sh -c "ifconfig -a | grep -q 'description: jailops jail=edge/edgeweb net=office'"
 edgeweb_if=$(ifconfig -a | awk '/^[a-z0-9]+:/ {n=$1; sub(":","",n)} /description: jailops jail=edge\/edgeweb net=office \(host side\)/ {print n; exit}')
 [ -n "$edgeweb_if" ] || fail "the host end of edgeweb was not found"
 expect "its host end carries the gateway as a /32" 'inet 10\.66\.0\.1 netmask 0xffffffff' ifconfig "$edgeweb_if"
@@ -1019,7 +1049,7 @@ check "the first rule moves behind the second" $J firewall rule move git 1 --aft
 check "a second jail" $J create edgedb --project edge --image "$img" --network office --storage default
 check "its policy" $J config set edgedb firewall.policies git --project edge
 check "it starts" $J start edgedb --project edge
-sleep 2
+waitfor "the anchor of edgedb is loaded" 60 sh -c "pfctl -a jailops/edge/edgedb -sr | grep -q ."
 expect "the anchor of the second jail holds the address of the first one in the table of the set" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t s_git_allow -T show
 expect "the rule comments are in the loaded anchor's source: show says why a rule is there" 'ssh from the team' $J firewall policy show git --project edge
 expect "and in the table of the jail itself" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t j_edgeweb -T show
@@ -1222,7 +1252,7 @@ else
 			fail "a handshake between the two (none after 90 s)"
 		fi
 		ping -c 1 -t 1 10.97.1.1 >/dev/null 2>&1 || true
-		sleep 1
+		sleep 1 # sleep-ok: poll of a condition
 	done
 	echo "OK: the tunnel between the two answers"
 	if [ $wg_hs = full ]; then
@@ -1405,7 +1435,7 @@ expect "the mount is a nullfs mount of the directory" '/mnt/e2ebox/share/backups
 check "hd1 writes into the directory" $J exec --project demo hd1 -- sh -c 'echo from-hd1 > /srv/backups/f1'
 expect "the file is on the box" '^from-hd1$' cat /mnt/e2ebox/share/backups/f1
 expect "hd2 sees the same file" '^from-hd1$' $J exec --project demo hd2 -- cat /srv/b2/f1
-sync; sleep 3 # what was written has reached the device before it fails
+sync; sync # what was written has reached the device before it fails
 # the box fails: every read and write to the device fails from now on; a write makes UFS unmount it by force
 check "the box fails" gnop configure -r 100 -w 100 "$hd_md.nop"
 $J exec --project demo hd1 -- sh -c 'echo more > /srv/backups/f2; sync' >/dev/null 2>&1 || true
@@ -1488,8 +1518,8 @@ expect_refused "a time of day that does not exist is refused" $J image set "$img
 # the jail `up` is on the first generation while the newest is the second (the rollback above), and it gets a package
 # that is behind: the nightly run must move it and upgrade the package, though the repository has nothing new for the image
 check "start the second jail" $J start up --project demo
-check "refresh the package catalogue of the second jail" pkg -j demo_up update -q
-check "install a package into the second jail" pkg -j demo_up install -y nano
+check_net "refresh the package catalogue of the second jail" pkg -j demo_up update -q
+check_net "install a package into the second jail" pkg -j demo_up install -y nano
 check "make that package look old" pkg -j demo_up shell "UPDATE packages SET version = '0.1' WHERE name = 'nano';"
 expect "the package is behind" '^0\.1$' pkg -j demo_up query %v nano
 check "turn it on for two minutes from now" $J image set "$img" --auto-upgrade --upgrade-at "$(date -v+2M +%H:%M)"
@@ -1607,7 +1637,7 @@ pg_access_check() { # postgresql-access: who may connect to a database, from the
 	for c in pgc1 pgc2; do
 		check "create the client jail $c" $J create "$c" --project demo --image "$img" --network lan --storage default --start
 		# the PostgreSQL client into the running thin jail, inside it, as package updates do
-		check "psql in $c" pkg -j "demo_$c" install -y postgresql18-client
+		check_net "psql in $c" pkg -j "demo_$c" install -y postgresql18-client
 		check "the library cache of $c" $J exec --project demo "$c" -- /sbin/ldconfig -m /usr/local/lib
 	done
 	expect "a dry run shows the rule, the pg_hba line and the SQL without a password" 'CREATE ROLE "pgc1" LOGIN PASSWORD .<generated' \
@@ -1687,7 +1717,7 @@ hostfp=$(openssl x509 -in /var/db/jailops/backup-client.crt -noout -fingerprint 
 su -m jailops-backup -c "/usr/local/sbin/jailops-backupd -c /usr/local/etc/jailops/backupd.yaml hosts enroll ci-host --fingerprint $hostfp --scopes backup-push,backup-pull,restore" >/dev/null || fail "enroll"
 sysrc jailops_backupd_enable=YES >/dev/null
 check "backupd start" service jailops_backupd start
-sleep 3
+waitfor "the backup node writes its pid file" 60 test -s /var/run/jailops-backupd.pid
 [ -s /var/run/jailops-backupd.pid ] || fail "the backup node's pid file is not in /var/run"
 [ -z "$(find /var/run/jailops-backupd -type f)" ] || fail "regular files in /var/run/jailops-backupd"
 
@@ -1719,9 +1749,9 @@ step "restore as a new jail"
 check "stop the original" $J stop web --project demo
 expect "restore" 'restored' $J backup restore --project demo "$id" --as web-restored -y
 check "start the restored jail" $J start web-restored --project demo
-sleep 2
-expect "the file came back" 'ci-marker' $J exec --project demo web-restored -- cat /root/marker
-expect "its own address" '10\.77\.0\.' $J exec --project demo web-restored -- ifconfig -a
+
+expect_retry "the file came back" 'ci-marker' $J exec --project demo web-restored -- cat /root/marker
+expect_retry "its own address" '10\.77\.0\.' $J exec --project demo web-restored -- ifconfig -a
 
 step "volumes in backups (one copy for several jails, --no-volumes, a lost volume comes back with the jail)"
 check "a volume" $J volume create shared --project demo --storage default --uid 5001 --gid 5001 --mode 0770

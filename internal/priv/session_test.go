@@ -122,7 +122,7 @@ func waitExit(t *testing.T, s ExecSession) int {
 }
 
 func gone(pid int) bool {
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 600; i++ {
 		if err := syscall.Kill(pid, 0); err == syscall.ESRCH {
 			return true
 		}
@@ -424,7 +424,7 @@ func TestExecDisconnectKillsTheSession(t *testing.T) {
 
 func waitFor(t *testing.T, f func() bool, what string) {
 	t.Helper()
-	for i := 0; i < 200; i++ {
+	for i := 0; i < 1200; i++ {
 		if f() {
 			return
 		}

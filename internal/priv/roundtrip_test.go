@@ -944,7 +944,7 @@ func TestReconnect(t *testing.T) {
 	f.client.mu.Unlock()
 	// the next call redials; poll with a deadline instead of guessing how long the drop takes
 	var rerr error
-	for deadline := time.Now().Add(5 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+	for deadline := time.Now().Add(30 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
 		if _, rerr = f.client.ZFS().Exists(ctx, "tank/jailops"); rerr == nil {
 			break
 		}

@@ -176,6 +176,8 @@ jobs:
       - run: go build ./...
       - name: Wire types are current
         run: go run ./scripts/gen-ts -check
+      - name: The end-to-end scripts wait for conditions, not for seconds
+        run: sh scripts/lint-e2e.sh
       - name: The race shards cover every package exactly once
         run: bash scripts/ci-race.sh --check
       - name: SDK module (stdlib only, outside the go.work workspace so that only its own go.mod counts)

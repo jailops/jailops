@@ -100,7 +100,7 @@ func TestSecretsNeverLeak(t *testing.T) {
 		resp.Body.Close()
 	}
 	cancel()
-	time.Sleep(300 * time.Millisecond) // the access log line is written when the stream ends
+	time.Sleep(2 * time.Second) // the access log line is written when the stream ends (a slow CI machine takes its time)
 
 	// Everything that can be read back.
 	var all strings.Builder

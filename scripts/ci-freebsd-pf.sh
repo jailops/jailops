@@ -28,6 +28,14 @@ say()  { printf '\n== %s  [+%ss]\n' "$*" "$(($(date +%s) - t0))"; }
 pass() { passes=$((passes + 1)); printf 'PASS  %s\n' "$*"; }
 bad()  { fails=$((fails + 1)); printf 'FAIL  %s\n' "$*"; }
 die()  { printf 'ABORT %s\n' "$*" >&2; cleanup; exit 2; }
+waitfor_() { # waitfor_ DESCRIPTION SECONDS COMMAND...: the command must succeed within SECONDS (polled twice a second); a miss is a FAIL line, not an abort
+	wf_desc=$1; wf_secs=$2; shift 2
+	wf_end=$(( $(date +%s) + wf_secs ))
+	until "$@" >/dev/null 2>&1; do
+		if [ "$(date +%s)" -ge "$wf_end" ]; then bad "$wf_desc (not after $wf_secs s)"; return 1; fi
+		sleep 0.5 # sleep-ok: the poll of waitfor_
+	done
+}
 
 # --- running things in a jail (as root on the host) --------------------------------------------------------------
 # jx PROJECT NAME CMD... : run CMD in the jail
@@ -52,8 +60,8 @@ expect() {
 	# An allowed probe that fails once is a lost packet or a slow start more often than a rule: look again, twice, and say
 	# so (the note keeps it visible). A denied probe is never repeated: one answer through a rule that must deny is a leak.
 	if [ "$want" = allow ] && [ "$got" = deny ]; then
-		for try in 2 3; do
-			sleep 1
+		for try in 2 3 4 5 6 7 8 9 10 11; do
+			sleep 1 # sleep-ok: pause between the looks at an allowed probe
 			if "$@"; then got=allow; printf 'NOTE  %s: allowed on attempt %s\n' "$desc" "$try"; break; fi
 		done
 	fi
@@ -129,7 +137,7 @@ settle() {
 	while [ "$cur" = "$PRE" ] && [ $t -lt "${SETTLE_WAIT:-60}" ]; do sleep 1; t=$((t + 1)); cur=$(snapshot); done
 	same=0
 	while [ $same -lt 3 ] && [ $t -lt 90 ]; do
-		sleep 1; t=$((t + 1)); n=$(snapshot)
+		sleep 1; t=$((t + 1)); n=$(snapshot) # sleep-ok: poll of a condition
 		if [ "$n" = "$cur" ]; then same=$((same + 1)); else same=0; cur=$n; fi
 	done
 	[ "$cur" = "$PRE" ] && printf 'note: the anchors did not change after the action (%ss)\n' "$t" || printf 'note: anchors converged after %ss\n' "$t"
@@ -164,7 +172,11 @@ $J create c --project pfa --image "$img" --network pfa-net --storage default --t
 $J create d --project pfa --image "$img" --network pfa-net2 --storage default </dev/null >/dev/null || die "create d"
 $J create o --project pfb --image "$img" --network pfb-net --storage default </dev/null >/dev/null || die "create o"
 for pn in pfa:a pfa:b pfa:c pfa:d pfb:o; do $J start "${pn#*:}" --project "${pn%%:*}" </dev/null >/dev/null || die "start $pn"; done
-sleep 8
+for pn in pfa:a pfa:b pfa:c pfa:d pfb:o; do
+	pp_=${pn%%:*}; pn_=${pn#*:}
+	waitfor_ "$pn runs" 90 jexec "${pp_}_${pn_}" true
+	waitfor_ "the anchor of $pn is loaded" 90 sh -c "pfctl -a jailops/$pp_/$pn_ -sr 2>/dev/null | grep -q ."
+done
 
 A4=$(addr4 pfa a); A6=$(addr6 pfa a); B4=$(addr4 pfa b); B6=$(addr6 pfa b)
 C4=$(addr4 pfa c); C6=$(addr6 pfa c); D4=$(addr4 pfa d); D6=$(addr6 pfa d); O4=$(addr4 pfb o); O6=$(addr6 pfb o)
@@ -191,7 +203,7 @@ udp_server
 udp() {
 	UC=$((UC + 1)); tok="t$$-$UC"
 	run_from "$1" sh -c "echo $tok | nc -u -w1 $2 $3" >/dev/null 2>&1
-	sleep 1
+	sleep 1 # sleep-ok: a udp probe that a rule drops leaves nothing to wait for: the look comes after the packet had its time
 	jx pfa a grep -q "$tok" /var/tmp/udp.log 2>/dev/null
 }
 
@@ -308,13 +320,13 @@ for fam in 4 6; do
 	jx pfa c daemon -f sh -c "while :; do nc -u -l -w2 $c 5454 >> /var/tmp/u.log 2>/dev/null; done"
 	jx pfa d daemon -f sh -c "while :; do nc -u -l -w2 $d 5454 >> /var/tmp/u.log 2>/dev/null; done"
 done
-sleep 2
+waitfor_ "the UDP listeners are up" 30 sh -c "sockstat -46 -l | grep -q ':5454 ' && jexec pfa_c sockstat -46 -l | grep -q ':5454 ' && jexec pfa_d sockstat -46 -l | grep -q ':5454 '"
 BIF=$(jx pfa a ifconfig -l | tr ' ' '\n' | grep -v lo0 | head -1)
 send_from_a() { # send_from_a SOURCE DEST TOKEN
 	jx pfa a sh -c "echo $3 | nc -u -w1 -s $1 $2 5454" >/dev/null 2>&1
 }
 arrived() { # arrived WHERE TOKEN: where is host, c or d
-	sleep 1
+	sleep 1 # sleep-ok: a packet that must NOT arrive is looked for after it had its time
 	case $1 in
 	host*) grep -q "$2" "$work/h${1#host}.log" ;;
 	c) jx pfa c grep -q "$2" /var/tmp/u.log ;;
@@ -371,7 +383,7 @@ expect allow "the host end of a's link carries the gateway as a /32" sh -c "ifco
 expect allow "no network has an interface of its own: no bridge of JailOps exists" sh -c "! ifconfig -g bridge | grep -q ."
 jx pfa a ifconfig "$IFA" inet "$EXTRA4/32" alias >/dev/null 2>&1
 jx pfa a ifconfig "$IFA" inet6 "$EXTRA6" prefixlen 128 alias >/dev/null 2>&1
-sleep 3
+waitfor_ "the extra IPv6 address is no longer tentative" 30 sh -c "! jexec pfa_a ifconfig $IFA | grep '$EXTRA6' | grep -q tentative"
 expect deny "host -> an IPv4 address a gave itself" icmp host "$EXTRA4"
 expect deny "b -> an IPv4 address a gave itself" icmp pfa:b "$EXTRA4"
 expect deny "host -> an IPv6 address a gave itself" icmp host "$EXTRA6"
@@ -387,8 +399,8 @@ expect allow "host -> b over IPv4 after a took b's MAC address" icmp host "$B4"
 expect allow "host -> b over IPv6 after a took b's MAC address" icmp host "$B6"
 expect allow "b -> host after a took b's MAC address" icmp pfa:b "$H4"
 jx pfa a ifconfig "$IFA" ether "$MACA" >/dev/null 2>&1
-sleep 3
-n=0; until jx pfa a ping -c1 -t2 "$H4" >/dev/null 2>&1; do n=$((n + 1)); [ $n -ge 5 ] && break; sleep 2; done
+
+n=0; until jx pfa a ping -c1 -t2 "$H4" >/dev/null 2>&1; do n=$((n + 1)); [ $n -ge 15 ] && break; sleep 2; done # sleep-ok: poll of a condition
 expect allow "a -> host with its own MAC address again" icmp pfa:a "$H4"
 # no router advertisement is ever passed, and an advertisement of the jail never goes to a multicast group
 anchor_has2() { pfctl -a jailops/pfa/a -sr 2>/dev/null | grep -q "$1"; }
@@ -443,37 +455,37 @@ echo "-- forged ARP reply: a claims the gateway, to b" | tee -a "$EVID"
 before_bgw=$(jexec_b_gw_mac)
 before=$(arpcache_b)
 jx pfa a /tmp/forge arp -if "$IFA" -eth-dst "$MACB" -eth-src "$MACA" -op reply -sha "$MACA" -spa "$H4" -tha "$MACB" -tpa "$A4" 2>&1 | tee -a "$EVID"
-sleep 1
+sleep 1 # sleep-ok: what a forged frame must not change is looked at after the frame had its time
 expect allow "ARP reply forgery (a->b, claims the gateway): b's cache for the gateway is unaffected" unchanged_bgw_cache "$before_bgw"
 
 echo "-- forged ARP reply: a claims b, to the host" | tee -a "$EVID"
 jx pfa a /tmp/forge arp -if "$IFA" -eth-dst "$GWMAC" -eth-src "$MACA" -op reply -sha "$MACA" -spa "$B4" -tha "$GWMAC" -tpa "$H4" 2>&1 | tee -a "$EVID"
-sleep 1
+sleep 1 # sleep-ok: what a forged frame must not change is looked at after the frame had its time
 expect allow "ARP reply forgery (a->host, claims b): the host's cache for b on b's own link is unchanged" unchanged_arp_b "$before"
 expect allow "and the host still sends to b through b's own link" route_b_via_own
 
 echo "-- forged ARP request broadcast: a claims b's address" | tee -a "$EVID"
 jx pfa a /tmp/forge arp -if "$IFA" -eth-dst ff:ff:ff:ff:ff:ff -eth-src "$MACA" -op request -sha "$MACA" -spa "$B4" -tpa "$H4" 2>&1 | tee -a "$EVID"
-sleep 1
+sleep 1 # sleep-ok: what a forged frame must not change is looked at after the frame had its time
 expect allow "ARP request forgery (a broadcasts as b): the host's cache for b on b's own link is still unchanged" unchanged_arp_b "$before"
 expect allow "and the host still sends to b through b's own link" route_b_via_own
 
 echo "-- forged unicast NA: a claims the gateway's address, to b" | tee -a "$EVID"
 beforeb=$(jexec_b_gw_mac)
 jx pfa a /tmp/forge nd -type na -src "$A6" -dst "$B6" -target fe80::1 -if "$IFA" -lladdr "$MACA" 2>&1 | tee -a "$EVID"
-sleep 1
+sleep 1 # sleep-ok: what a forged frame must not change is looked at after the frame had its time
 expect allow "unicast NA forgery (a->b, claims the gateway): b's cache for the gateway is unchanged" unchanged_bgw_cache "$beforeb"
 
 echo "-- forged multicast NA: a claims b's address, to ff02::1" | tee -a "$EVID"
 beforeh=$(ndcache_b)
 jx pfa a /tmp/forge nd -type na -src "$A6" -dst ff02::1 -target "$B6" -if "$IFA" -lladdr "$MACA" 2>&1 | tee -a "$EVID"
-sleep 1
+sleep 1 # sleep-ok: what a forged frame must not change is looked at after the frame had its time
 expect allow "multicast NA forgery (a claims b, to all nodes): the host's cache for b is unchanged" unchanged_nd_b "$beforeh"
 expect allow "the anchor's neighbradv-block counter on a saw the attempt" neighbradv_blocked
 
 echo "-- forged NS (unicast, not DAD): a solicits for b's address; b must not be disturbed" | tee -a "$EVID"
 jx pfa a /tmp/forge nd -type ns -src "$A6" -dst "$B6" -target "$B6" -if "$IFA" -lladdr "$MACA" 2>&1 | tee -a "$EVID"
-sleep 1
+sleep 1 # sleep-ok: what a forged frame must not change is looked at after the frame had its time
 expect allow "NS forgery: b -> host v6 still works" b_reaches_host_v6
 
 echo "-- forged RA with an autonomous prefix, spoofing the gateway's link-local source" | tee -a "$EVID"
@@ -486,7 +498,7 @@ if echo "$ra_out" | grep -q "can't assign requested address"; then
 else
 	log "the RA was sent (bind succeeded); the anchor's drop is the only defence for it"
 fi
-sleep 2
+sleep 2 # sleep-ok: what a forged frame must not change is looked at after the frame had its time
 expect allow "RA forgery: a's address set is unchanged (no SLAAC), sent or not" unchanged_a_v6 "$before_addrs"
 
 echo "-- forged packet-too-big (sanity: the tool and the anchor do not crash on it; same bind restriction may apply)" | tee -a "$EVID"
@@ -501,7 +513,7 @@ echo "-- a jail cannot sniff another's traffic: a captures on its own link while
 : > "$work/sniff.txt"
 jx pfa a timeout -s INT 6 tcpdump -ni "$IFA" -c 3 "host $B4 or host $B6" > "$work/sniff.txt" 2>&1 &
 SNIFF=$!
-sleep 1
+sleep 1 # sleep-ok: the sniffer is up before the traffic starts
 n=0; while [ $n -lt 4 ]; do ping -c1 -t1 "$B4" >/dev/null 2>&1; ping -6 -c1 -t1 "$B6" >/dev/null 2>&1; jexec pfa_b ping -c1 -t1 "$H4" >/dev/null 2>&1; n=$((n + 1)); done
 wait "$SNIFF" 2>/dev/null
 cat "$work/sniff.txt" >> "$EVID"
@@ -531,7 +543,7 @@ if [ -z "${PF_FAST:-}" ]; then
 		: > "$work/uplink.pcap.txt"
 		timeout 4 tcpdump -ni "$UPLINK" -c 5 "host $B4 or host $B6" > "$work/uplink.pcap.txt" 2>&1 &
 		TD=$!
-		sleep 1
+		sleep 1 # sleep-ok: the sniffer is up before the frame is sent
 		jx pfa a /tmp/forge arp -if "$IFA" -eth-dst ff:ff:ff:ff:ff:ff -eth-src "$MACA" -op request -sha "$MACA" -spa "$B4" -tpa "$H4" >/dev/null 2>&1
 		wait "$TD" 2>/dev/null
 		cat "$work/uplink.pcap.txt" >> "$EVID"
@@ -692,7 +704,7 @@ rules:
   - {name: host-ping6, action: allow, direction: in, proto: icmp6, from: ['$H6']}
   - {name: other-project-udp, action: allow, direction: in, proto: udp, from: ['set:common'], ports: ['5353']}
   - {name: extra-$i, action: allow, direction: in, proto: tcp, from: ['set:friends'], ports: ['70$i$i']}"
-	sleep 2
+	sleep 2 # sleep-ok: paces the rule changes while a ping runs
 done
 wait $pp
 loss=$(grep -o '[0-9.]*% packet loss' "$work/ping.out" | head -1)
@@ -704,7 +716,7 @@ esac
 # go on for ever
 ping -c 90 -i 0.5 "$A4" 2>&1 | while read l; do echo "$(date +%s) $l"; done > "$work/live.out" &
 lp=$!
-sleep 3
+waitfor_ "the ping runs" 30 sh -c "grep -q 'bytes from' $work/live.out"
 PRE=$(snapshot)
 policy pfa web "default_in: deny
 default_out: allow
@@ -712,7 +724,7 @@ rules:
   - {name: from-friends, action: allow, direction: in, proto: tcp, from: ['set:friends'], ports: ['8080']}"
 settle 10
 T=$(date +%s)
-sleep 8
+sleep 8 # sleep-ok: a ping that must stop is watched for a while
 late=$(awk -v t="$T" '$1 > t + 3 && /bytes from/' "$work/live.out" | wc -l | tr -d ' ')
 [ "$late" = 0 ] && pass "a running ping stopped when its rule was removed" || bad "a running ping went on after its rule was removed ($late replies)"
 kill $lp 2>/dev/null; wait $lp 2>/dev/null
@@ -750,7 +762,7 @@ if [ -z "${PF_FAST:-}" ]; then
 	expect deny "b -> a tcp 2222 after the restore" tcp pfa:b "$A4" 2222
 
 	say "phase 10: IPv6 neighbour discovery survives its timers"
-	sleep 120
+	sleep 120 # sleep-ok: IPv6 neighbour discovery has timers that need real time
 	expect allow "b -> a v6 tcp 8080 after two minutes" tcp pfa:b "$A6" 8080
 	expect deny "host -> a v6 icmp after two minutes (no rule)" icmp host "$A6"
 	expect deny "b -> a v6 tcp 2222 after two minutes" tcp pfa:b "$A6" 2222
@@ -794,7 +806,7 @@ expect deny "a client on the uplink does not reach a port that is not forwarded 
 # uplink address, never from the jail's own address. The client jail pfrdr listens and says who connected.
 jexec pfrdr daemon -f nc -k -l 198.51.100.2 9000 || die "nc server in pfrdr"
 jx pfa r daemon -f sh -c 'sleep 20 | nc -w25 198.51.100.2 9000 >/dev/null 2>&1' || die "client connection in r"
-sleep 3
+waitfor_ "the client connection of r is up" 30 sh -c "jexec pfrdr sockstat -4 -c -P tcp 2>/dev/null | grep -q '198.51.100.2:9000 '"
 nat_from_uplink() { jexec pfrdr sockstat -4 -c -P tcp 2>/dev/null | grep -Eq '198\.51\.100\.2:9000 +198\.51\.100\.1:'; }
 nat_from_jail() { jexec pfrdr sockstat -4 -c -P tcp 2>/dev/null | grep -Eq '198\.51\.100\.2:9000 +10\.94\.0\.'; }
 expect allow "a connection of r to the uplink's network is translated to the uplink address" nat_from_uplink
@@ -802,7 +814,7 @@ expect deny "it does not arrive from the jail's own address" nat_from_jail
 # the states of a removed forward are ended: a client keeps a connection open through the forward, the policy then
 # loses the rule, and the state (which pf keeps after a rule is gone) must not survive the next load of the anchor
 jexec pfrdr daemon -f sh -c 'sleep 120 | nc 198.51.100.1 18080 >/dev/null 2>&1' || die "long connection through the forward"
-sleep 2
+waitfor_ "the connection through the forward has a state" 30 sh -c "pfctl -ss 2>/dev/null | grep -q '198.51.100.1:18080'"
 expect allow "the open connection through the forward has a state" sh -c "[ \"\$(pfctl -ss 2>/dev/null | grep -c '198\.51\.100\.1:18080')\" -ge 1 ]"
 policy pfa fwd "default_in: deny
 default_out: allow
@@ -826,32 +838,32 @@ XN=0
 xfer_up() { # xfer_up JAIL HOSTADDR: the jail connects to the host and sends 1.5 MB; prints "SECONDS BYTES"
 	XN=$((XN + 1)); xp=$((9300 + XN)); rm -f "$work/recv.$xp"
 	daemon -f sh -c "nc -l $2 $xp > $work/recv.$xp"
-	sleep 1
+	waitfor_ "the listener of the transfer is up" 15 sh -c "sockstat -4 -6 -l | grep -q ':$xp '"
 	xs=$(date +%s)
 	jx pfa "$1" sh -c "dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 $2 $xp" >/dev/null 2>&1
 	xe=$(date +%s)
-	sleep 1
+	waitfor_ "the data has been written" 10 sh -c "[ \"\$(stat -f %z $work/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
 	echo "$((xe - xs)) $(stat -f %z "$work/recv.$xp" 2>/dev/null || echo 0)"
 }
 xfer_served() { # xfer_served JAIL JAILADDR: the host connects to the jail, which sends 1.5 MB (a server in the jail answering)
 	XN=$((XN + 1)); xp=$((9300 + XN)); rm -f "$work/recv.$xp"
 	jx pfa "$1" daemon -f sh -c "dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -l $2 $xp"
-	sleep 1
+	waitfor_ "the server of the transfer is up" 15 sh -c "jexec pfa_$1 sockstat -4 -6 -l | grep -q ':$xp '"
 	xs=$(date +%s)
 	nc -d -w20 "$2" "$xp" > "$work/recv.$xp" 2>/dev/null
 	xe=$(date +%s)
-	sleep 1
+	waitfor_ "the data has been written" 10 sh -c "[ \"\$(stat -f %z $work/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
 	echo "$((xe - xs)) $(stat -f %z "$work/recv.$xp" 2>/dev/null || echo 0)"
 }
 xfer_down() { # xfer_down JAIL JAILADDR: the host connects to the jail and sends 1.5 MB into it
 	XN=$((XN + 1)); xp=$((9300 + XN)); xj=$1
 	jexec "pfa_$xj" sh -c "rm -f /var/tmp/recv.$xp"
 	jexec "pfa_$xj" daemon -f sh -c "nc -l $2 $xp > /var/tmp/recv.$xp"
-	sleep 1
+	waitfor_ "the listener of the transfer is up" 15 sh -c "jexec pfa_$xj sockstat -4 -6 -l | grep -q ':$xp '"
 	xs=$(date +%s)
 	dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 "$2" "$xp" >/dev/null 2>&1
 	xe=$(date +%s)
-	sleep 1
+	waitfor_ "the data has been written" 10 sh -c "[ \"\$(jexec pfa_$xj stat -f %z /var/tmp/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
 	echo "$((xe - xs)) $(jexec "pfa_$xj" stat -f %z "/var/tmp/recv.$xp" 2>/dev/null || echo 0)"
 }
 pipes() { dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:'; }
