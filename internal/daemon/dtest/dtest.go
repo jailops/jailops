@@ -444,7 +444,10 @@ func (e *Env) script() {
 					root = "/jailops/projects/" + proj + "/jails/" + name + "/root"
 				}
 			default:
-				options = true
+				// the cache directory is no sign of an image build: installs into a jail root pass it too
+				if !(argv[i] == "-o" && strings.HasPrefix(argv[i+1], "PKG_CACHEDIR=")) {
+					options = true
+				}
 			}
 			i += 2
 		}

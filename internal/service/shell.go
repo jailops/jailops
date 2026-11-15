@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -273,11 +274,15 @@ func (s *Service) installBash(ctx context.Context, key string, inApp bool) ([]st
 func (s *Service) setUpShell(ctx context.Context, key string, eff api.JailSpec, inApp bool) ([]string, error) {
 	var steps []string
 	var err error
+	bashFailed := false
 	if eff.Shell == api.BashPath {
 		steps, err = s.installBash(ctx, key, inApp)
+		bashFailed = err != nil
 	}
 	m := s.shellMark(key)
-	m.Pending = false
+	// bash that could not be fetched stays due: the next start of the jail tries again from the host, whose network
+	// and cache do not depend on the firewall of the jail
+	m.Pending = bashFailed
 	if err == nil {
 		if ps1 := s.promptState(key, eff); ps1 != "" {
 			var more []string
@@ -314,6 +319,11 @@ func (s *Service) shellAtStart(ctx context.Context, key string) {
 	eff := s.effective(j)
 	m := s.shellMark(key)
 	switch {
+	case m.Pending && eff.Shell == api.BashPath && !s.bashInRoot(ctx, key):
+		// bash did not get in before the start (no network on the host in time): the jail is up with the shell it has,
+		// and the attempt from inside the running jail goes on in the background, so the start never waits for it.
+		s.setUpShellInBackground(key, j.Metadata.Project, j.Metadata.Name)
+		return
 	case m.Pending:
 		_, err = s.setUpShell(ctx, key, eff, false)
 	case s.promptState(key, eff) != "" && s.promptState(key, eff) != m.Applied:
@@ -325,6 +335,35 @@ func (s *Service) shellAtStart(ctx context.Context, key string) {
 		s.log.Warn("shell setup", "jail", key, "err", err)
 		s.emitIn(ctx, j.Metadata.Project, "jail-shell-setup-failed", "/api/v1/jails/"+j.Metadata.Name)
 	}
+}
+
+// bashInRoot says whether the jail's root has bash.
+func (s *Service) bashInRoot(ctx context.Context, key string) bool {
+	ok, _ := s.d.Files.Exists(ctx, s.rootMount(key)+api.BashPath)
+	return ok
+}
+
+// setUpShellInBackground runs the setup of the shell of a running jail without holding the operation that started
+// it. A failure is the jail's ShellSetup condition and an event, as when the setup runs inside the start.
+func (s *Service) setUpShellInBackground(key, project, name string) {
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		base := s.baseCtx
+		if base == nil {
+			base = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(base, shellSetupDeadline)
+		defer cancel()
+		j, err := s.jailSnapshot(key)
+		if err != nil {
+			return
+		}
+		if _, err := s.setUpShell(ctx, key, s.effective(j), false); err != nil {
+			s.log.Warn("shell setup", "jail", key, "err", err)
+			s.emitIn(ctx, project, "jail-shell-setup-failed", "/api/v1/jails/"+name)
+		}
+	}()
 }
 
 // writePromptMark applies the prompt of eff and records it.
@@ -475,7 +514,23 @@ func (s *Service) installBashBeforeFirstStart(ctx context.Context, key string) {
 		s.log.Warn("bash before the first start", "jail", key, "err", err)
 		return
 	}
-	if err := s.runHost(ctx, 30*time.Minute, apps.PkgInstallArgv(root, "ports", []string{api.BashPackage})); err != nil {
+	// The first start of a jail never waits long for a package mirror: what is not fetched in time is tried again
+	// from inside the running jail (shellAtStart), and the jail starts with the shell it has.
+	ctx, cancel := context.WithTimeout(ctx, bashBeforeStartDeadline)
+	defer cancel()
+	if err := s.runHost(ctx, bashBeforeStartDeadline, apps.PkgInstallCachedArgv(root, "ports", s.pkgCache(), []string{api.BashPackage})); err != nil {
 		s.log.Warn("bash before the first start", "jail", key, "err", err)
 	}
+}
+
+// bashBeforeStartDeadline is how long the first start of a jail waits for the host to fetch bash.
+var bashBeforeStartDeadline = 20 * time.Second
+
+// pkgCache is the directory in which the host keeps the packages it downloaded for jail roots: the cache of the
+// image builds, so that the second jail, and the next one after a first image build, need no download.
+func (s *Service) pkgCache() string {
+	if s.lcfg.MountBase == "" {
+		return ""
+	}
+	return path.Join(s.lcfg.MountBase, "cache", "pkg")
 }

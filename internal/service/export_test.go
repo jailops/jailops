@@ -56,3 +56,9 @@ func SetShellSetupDeadline(d time.Duration) func() {
 	shellSetupDeadline = d
 	return func() { shellSetupDeadline = old }
 }
+
+func SetBashBeforeStartDeadline(d time.Duration) func() {
+	old := bashBeforeStartDeadline
+	bashBeforeStartDeadline = d
+	return func() { bashBeforeStartDeadline = old }
+}
