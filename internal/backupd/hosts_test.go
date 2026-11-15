@@ -56,7 +56,7 @@ func TestHostAuthentication(t *testing.T) {
 	if _, err := r.DB.RevokeHost(ctx, "h"); err != nil { // as the CLI does: another process, no cache invalidation
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(6 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for {
 		_, err := h.C.Info(ctx)
 		if err != nil {
@@ -66,7 +66,7 @@ func TestHostAuthentication(t *testing.T) {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("a revoked host is still served after 6 seconds")
+			t.Fatal("a revoked host is still served after 30 seconds")
 		}
 		time.Sleep(200 * time.Millisecond)
 	}

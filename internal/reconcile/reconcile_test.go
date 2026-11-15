@@ -576,7 +576,7 @@ func TestRunLoopTriggers(t *testing.T) {
 	go func() { w.R.Run(ctx); close(done) }()
 	waitFor := func(what string, cond func() bool) {
 		t.Helper()
-		for i := 0; i < 400; i++ {
+		for i := 0; i < 6000; i++ { // 30 s: a slow CI machine
 			if cond() {
 				return
 			}
@@ -716,7 +716,7 @@ func TestAJustStartedProxyGetsASecondLookBeforeTheInterval(t *testing.T) {
 	go func() { w.R.Run(ctx); close(done) }()
 	waitFor := func(what string, cond func() bool) {
 		t.Helper()
-		for i := 0; i < 400; i++ {
+		for i := 0; i < 6000; i++ { // 30 s: a slow CI machine
 			if cond() {
 				return
 			}

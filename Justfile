@@ -113,7 +113,11 @@ gen-ts:
 check-ts:
     go run ./scripts/gen-ts -check
 
-check: fmt check-ts test
+# The end-to-end scripts wait for conditions, not for seconds (scripts/lint-e2e.sh).
+lint-e2e:
+    sh scripts/lint-e2e.sh
+
+check: fmt check-ts lint-e2e test
 
 # Everything CI runs.
 ci: fmt test build-freebsd

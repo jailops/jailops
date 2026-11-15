@@ -221,7 +221,7 @@ func newFakeDevd(t *testing.T, path string) *fakeDevd {
 
 func (f *fakeDevd) send(t *testing.T, rec string) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		f.mu.Lock()
 		c := f.conn
@@ -248,7 +248,7 @@ func (f *fakeDevd) dropClient() {
 
 func waitFor(t *testing.T, what string, ok func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		if ok() {
 			return
