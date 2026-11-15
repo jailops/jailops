@@ -102,7 +102,7 @@ export function pemProblems(cert: string, key: string, hostname: string): Record
 
 /** The command for a client when a public CA signed the certificate: an API token, nothing pinned. */
 export function publicRemoteAddCommand(name: string, host: string): string {
-  return `jailops remote add ${name} https://${host} --token-stdin`
+  return `jailops remote add ${name} https://${host} --token-file -`
 }
 
 /** The firewall the wizard proposes: the default template, ssh from the browser's address, the console from anywhere. */

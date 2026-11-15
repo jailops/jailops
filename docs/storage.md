@@ -8,7 +8,7 @@ in **who owns the data**, and that decides what JailOps will do with it.
 |---|---|---|---|---|
 | A jail on a storage | JailOps | yes | yes | a global admin registers the storage; a project's grant limits it |
 | A volume | JailOps | its own snapshots; not part of a jail's | not yet (see [What is backed up](#what-is-backed-up)) | a project admin |
-| A host mount | you | no | no | a **global admin**, and only below a directory the host operator listed |
+| A host directory (a volume with `--path`) | you | no | no | a **global admin**, and only below a directory the host operator listed |
 
 ## Storages
 
@@ -44,7 +44,8 @@ A storage cannot be deleted while a project grants it or a jail uses it, and del
 
 Grant it to a project, with a quota for that project's datasets, and put jails on it:
 
-    jailops project set media --storage default --storage bulk=4T
+    jailops storage grant default --project media
+    jailops storage grant bulk --project media --quota 4T
     jailops create plex --project media --image freebsd-15-1 --network web --storage bulk
 
 - **Storage may be shared between projects**; each project gets its own `projects/<project>/` subtree under the root and its
@@ -70,12 +71,14 @@ see; the user and the group that own it have the same numbers in both jails (Fre
 person on the whole host):
 
     jailops volume create maildir --uid 5000 --gid 5000 --mode 0770 --comment "the mail of every user"
-    jailops create mail    --image freebsd-15-1 --network lan --storage default --volume maildir:/var/mail/vhosts
-    jailops create desktop --image freebsd-15-1 --network lan --storage default --volume maildir:/home/ann/Mail
-
-`--volume NAME:PATH[:ro]` attaches a volume that exists already; it never creates one. A jail that exists is changed with
-
+    jailops create mail    --image freebsd-15-1 --network lan --storage default
+    jailops create desktop --image freebsd-15-1 --network lan --storage default
+    jailops volume attach mail    maildir /var/mail/vhosts
     jailops volume attach desktop maildir /home/ann/Mail
+
+`volume attach JAIL VOLUME PATH` (add `--ro` for a read-only mount) attaches a volume that exists already; it never creates one. The jail
+must be stopped. A volume is let go again with
+
     jailops volume detach desktop maildir
 
 The attachment is part of the jail's specification (`volumes: [{volume, mount, read_only}]`, or `disk.<volume>=<path>` with
@@ -134,7 +137,8 @@ passphrase after every boot of the host:
     Passphrase for the encrypted volume:
     Repeat the passphrase:
     volume/vault created
-    jailops create secrets --image freebsd-15-1 --network lan --storage default --volume vault:/var/db/secrets
+    jailops create secrets --image freebsd-15-1 --network lan --storage default
+    jailops volume attach secrets vault /var/db/secrets
 
 `encrypted: true` in a file does the same for `jailops volume create -f` (the passphrase is asked for; a fleet repository
 cannot declare an encrypted volume, there is no place for a passphrase in a file). The volume becomes its own ZFS
@@ -214,37 +218,7 @@ directory at a time (a link anywhere on the way is refused), and only while that
 **Not here:** encrypting a volume in place (`encrypted` cannot change later: the update is refused with a hint), key files or
 any unattended unlock at boot, encrypted storages or whole jails.
 
-## Existing data: host mounts
-
-You have a dataset of ten years of archive on `hdd/archive`, mounted at `/hdd/archive`, and you want a jail to see part of
-it. That data is not JailOps's: it is not snapshotted, backed up or rolled back by JailOps, and a read-write mount lets the
-jail change or delete it. Use `:ro` where you can.
-
-Two keys, two people:
-
-1. **The host operator** (root on the host) names the directories in `priv.conf` and restarts the helper:
-
-       admin-host-mount = /hdd/archive
-
-2. **A global administrator** mounts below one of them:
-
-       jailops create plex --project media --image freebsd-15-1 --network web --storage bulk \
-           --host-mount /hdd/archive/movies:/mnt/movies:ro
-
-   `--host-mount SOURCE:TARGET[:ro]`, repeatable (`host_mounts` in the jail spec).
-
-Properties worth knowing:
-
-- A project's operator cannot add a host mount to a jail, and a profile cannot carry one. An operator can still manage a jail
-  that already has them (start, stop, change other settings).
-- The API accepts the spec; the **helper refuses at jail start** a source that is not below an `admin-host-mount` directory
-  (the API does not know the operator's list). The mount point inside the jail is created for you on every render.
-- The source is checked as a path string against the operator's list. Do not make a directory below an approved root a
-  symlink to somewhere else, and do not approve a root that unprivileged users can write into.
-- Verified on FreeBSD 15.1 arm64 (design 18.11): a read-only mount of a dataset of a second pool showed its files in the jail,
-  refused writes, and was gone after the jail stopped; a directory the operator had not listed (`/etc`) was refused.
-
-### Handing a dataset to the jail to manage
+## Handing a dataset to the jail to manage
 
 A jail can manage a ZFS dataset of its own: root in the jail creates datasets, snapshots and mounts below it with `zfs`
 (a database that keeps its own snapshots, a nested set of volumes). The dataset is `<container>/delegated`, a child of the
@@ -286,7 +260,7 @@ The example is a backup server in a jail that writes to a storage box the host h
     jailops volume create backups --path /mnt/storagebox/backups --watch --probe write --on-loss stop
     jailops volume attach pbs backups /srv/backups
 
-- **Who.** Only a global administrator makes a volume with a path or attaches one, as with `--host-mount` above; a project
+- **Who.** Only a global administrator makes a volume with a path or attaches one, as for the directory above; a project
   operator can start, stop and detach it, and read its state. The directory has to lie on a mount **below** an
   `admin-host-mount` directory: list `/mnt`, not `/mnt/storagebox` (the mount point of the box is the thing that goes
   away, so it must be inside the approved directory, not be it).
@@ -321,8 +295,8 @@ mounts, images (they are rebuilt from pkgbase) and the host's state unless the p
 
 A **volume** is a backup of its own: a policy backs up the volumes of the jails it selects and the volumes whose labels match
 its selector, each once per run however many jails attach it, and a restore of a jail brings back the volumes the project
-lacks from their newest backup. `--exclude-volumes` on the policy and `--no-volumes` on a run or a restore leave volumes
-out. An encrypted volume is backed up while it is unlocked and restored on its own, with its passphrase. A directory of the
-host mounted into a jail, a volume that is one, and an archive dataset are not JailOps's to back up: snapshot or replicate
-them with ZFS itself or with the tool of the box.
+lacks from their newest backup. `--no-volumes` on the policy and `--no-volumes` on a run or a restore leave volumes
+out. An encrypted volume is backed up while it is unlocked and restored on its own, with its passphrase. A host directory (a
+volume with `--path`) and an archive dataset are not JailOps's to back up: snapshot or replicate them with ZFS itself or
+with the tool of the box.
 See [backup-restore.md](backup-restore.md).

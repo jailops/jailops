@@ -90,7 +90,7 @@ The rest of this page is the manual path, which the appliance path does for you.
       sysrc -f /boot/loader.conf if_epair_load=YES pf_load=YES zfs_load=YES
 
   (Linux jails also need `linux64`, `linprocfs`, `linsysfs` and `fdescfs`; the daemon loads those itself while a Linux
-  jail exists. `nullfs`, which host mounts use, is loaded by `mount` when it is first needed.) `jailops doctor` reports
+  jail exists. `nullfs`, which host-directory volumes use, is loaded by `mount` when it is first needed.) `jailops doctor` reports
   a missing module with the command to load it.
 - Network access to `pkg.freebsd.org` for building images from pkgbase. The helper's download rule allows only the
   hosts in `fetch-host` of `priv.conf` (default `dl-cdn.alpinelinux.org`, `pkg.freebsd.org`, `pkg.jailops.net`, `deb.debian.org`, `archive.ubuntu.com` and `ports.ubuntu.com`), over https.
@@ -112,11 +112,15 @@ release; you can also build from source (`just build-freebsd`) or take the stati
 
 The client package installs shell completion for `jailops` and `jailops-sync` where the shells look for it:
 `/usr/local/share/bash-completion/completions/`, `/usr/local/share/zsh/site-functions/` and
-`/usr/local/share/fish/vendor_completions.d/`. Bash needs the `bash-completion` package (`pkg install bash-completion`
-and its line in `.bashrc`), zsh needs `compinit`; fish finds it by itself. Commands and flags complete offline; names of
-jails, images, networks and projects are asked of the server, and without one the shell just gets no names. For a
-binary installed by hand, `jailops completion bash|zsh|fish` prints the script (`jailops completion --help` says where
-to put it). The packages also install man pages: `man jailops`, `man jailops-jail-list` and so on for every command of
+`/usr/local/share/fish/vendor_completions.d/`. Bash finds it by itself with the `bash-completion` package (`pkg install
+bash-completion` and its line in `.bashrc`); without the package, `source <(jailops completion bash)` in `.bashrc` does the
+same, the script brings what it needs. Zsh needs `compinit`; fish finds it by itself. Tab completes commands and flags
+offline, and asks the server for what a name or a value can be: jails, volumes, images, networks, storages, projects,
+firewall policies, address sets, backups, users and sessions of the project you work in; the values of a flag or a
+configuration key (`jailops config set web boot.autostart <Tab>`); the ends of `jailops firewall test` (`jail:web`, `host`,
+the addresses of the jails); files where a flag names one (`-f`, `--passphrase-file`) and nothing where you type a new name
+or free text (a second Tab says what is expected). Without a server the shell just gets no names. For a binary installed by
+hand, `jailops completion bash|zsh|fish` prints the script (`jailops completion --help` says where to put it). The packages also install man pages: `man jailops`, `man jailops-jail-list` and so on for every command of
 `jailops` and `jailops-sync` (client package), `man jailopsd` and `man jailops-priv` (host package), `man jailops-backupd`
 (backup node package, which installs the completion of `jailops-backupd` too).
 
@@ -248,10 +252,10 @@ shows it). A project is granted the networks and storages its jails may use.
 
     jailops image create freebsd-15-1 --release 15.1-RELEASE    # the host's release; an image is one release
     jailops image build freebsd-15-1
-    jailops image auto-upgrade freebsd-15-1 on --at 03:00      # optional: its patch levels every night
+    jailops image set freebsd-15-1 --auto-upgrade --upgrade-at 03:00      # optional: its patch levels every night
     jailops network create lan --ipv4 10.77.0.1/24 --uplink vtnet0 --nat    # vtnet0: the host's uplink, see below
     jailops project create web
-    jailops project set web --network lan --storage default
+    jailops network grant lan --project web && jailops storage grant default --project web
     jailops project switch web
     jailops create nginx --image freebsd-15-1 --network lan --storage default --start --autostart
     jailops exec nginx -- uname -a
@@ -331,8 +335,8 @@ By default only the unix socket listens. To manage a host from another machine s
 `jailopsd.yaml` (for example `":39110"`), restart `jailopsd`, then on the host create a single-use trust token and use
 it on the client (a token is valid for one hour by default):
 
-    jailops trust add --name laptop --role operator --projects web          # on the host: prints a single-use token
-    jailops remote add host.example.org --token-stdin --name myhost         # on the client: paste the token, then Enter
+    jailops cert enroll laptop --role operator --projects web          # on the host: prints a single-use token
+    jailops remote add myhost host.example.org --token-file -         # on the client: paste the token, then Enter
 
 `remote add` takes one argument here, the host's address (`host` or `host:port`, port 39110 by default): that is the
 form that redeems a trust token. The client pins the server fingerprint from the token (there is no trust on first use),

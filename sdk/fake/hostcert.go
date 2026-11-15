@@ -49,9 +49,9 @@ func (s *Server) certStatus() api.HostCertificate {
 		host = c.acme.Domains[0]
 	}
 	name, _, _ := strings.Cut(host, ".")
-	st.RemoteAdd = "jailops remote add " + name + " https://" + host + ":39110 --token-stdin"
+	st.RemoteAdd = "jailops remote add " + name + " https://" + host + ":39110 --token-file -"
 	if !st.Current.PublicCA {
-		st.RemoteAdd = "jailops remote add " + name + " https://" + host + ":39110 --fingerprint " + st.Current.Fingerprint + " --token-stdin"
+		st.RemoteAdd = "jailops remote add " + name + " https://" + host + ":39110 --fingerprint " + st.Current.Fingerprint + " --token-file -"
 	}
 	return st
 }

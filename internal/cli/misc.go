@@ -261,8 +261,9 @@ shell simply gets no names.
 The packages install the scripts, so a packaged client needs nothing from this
 command: /usr/local/share/bash-completion/completions/jailops,
 /usr/local/share/zsh/site-functions/_jailops and
-/usr/local/share/fish/vendor_completions.d/jailops.fish (bash needs the
-bash-completion package; zsh needs compinit). For a binary installed by hand:
+/usr/local/share/fish/vendor_completions.d/jailops.fish (bash finds it
+by itself with the bash-completion package, and without the package source <(jailops completion bash) does the same;
+zsh needs compinit). For a binary installed by hand:
 
 bash:  source <(jailops completion bash)       (or save it under /usr/local/share/bash-completion/completions/jailops)
 zsh:   jailops completion zsh > "${fpath[1]}/_jailops"
@@ -395,8 +396,8 @@ func globMatch(pattern, s string) bool {
 // bashEval is the line of the generated bash script that asks the program for the completions.
 const bashEval = `    out=$(eval "${requestComp}" 2>/dev/null)`
 
-// bashUnfinishedQuote closes a quote that the word being completed has not closed yet, so that a rule typed as
-// --rule "allow in tcp from j<Tab> reaches the program: the script runs the request through eval, which refuses an
+// bashUnfinishedQuote closes a quote that the word being completed has not closed yet, so that a value typed as
+// --from "j<Tab> reaches the program: the script runs the request through eval, which refuses an
 // unfinished quote and would complete nothing.
 const bashUnfinishedQuote = `    case ${lastParam} in
         \"*) [[ ${#lastParam} -eq 1 || ${lastParam: -1} != \" ]] && requestComp="${requestComp}\"" ;;
@@ -404,16 +405,78 @@ const bashUnfinishedQuote = `    case ${lastParam} in
     esac
 `
 
+// bashFallback brings the two functions of the bash-completion package that the generated script uses, for a host
+// that does not have the package: the words of the line with a colon or an equals sign kept inside a word (so that
+// jail:web is one word) and the names of files. Where the package is loaded its functions are the ones in use.
+const bashFallback = `# The bash-completion package is not needed: these stand in for the two functions of it that are used below.
+if ! declare -F _get_comp_words_by_ref >/dev/null 2>&1; then
+    _get_comp_words_by_ref()
+    {
+        local exclude="" __i __j=-1 __w __join=0 __words=() __cword=0 __name
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                -n) exclude=$2; shift 2 ;;
+                -c | -i) shift 2 ;;
+                -*) shift ;;
+                *) break ;;
+            esac
+        done
+        for ((__i = 0; __i < ${#COMP_WORDS[@]}; __i++)); do
+            __w=${COMP_WORDS[__i]}
+            if ((__j >= 0)) && [[ -n $exclude ]] && { ((__join)) || [[ -n $__w && $__w != *[!"$exclude"]* ]]; }; then
+                __words[__j]+=$__w
+            else
+                ((__j++))
+                __words[__j]=$__w
+            fi
+            if [[ -n $exclude && -n $__w && $__w != *[!"$exclude"]* ]]; then __join=1; else __join=0; fi
+            ((__i == COMP_CWORD)) && __cword=$__j
+        done
+        for __name in "$@"; do
+            case $__name in
+                cur) cur=${__words[__cword]} ;;
+                prev) prev=""; ((__cword > 0)) && prev=${__words[__cword - 1]} ;;
+                words) words=("${__words[@]}") ;;
+                cword) cword=$__cword ;;
+            esac
+        done
+    }
+fi
+if ! declare -F _filedir >/dev/null 2>&1; then
+    _filedir()
+    {
+        local dirsonly=0 filter="" f
+        if [[ ${1-} == -d ]]; then dirsonly=1; else filter=${1-}; fi
+        COMPREPLY=()
+        while IFS= read -r f; do
+            if [[ -d $f ]]; then
+                COMPREPLY+=("$f/")
+            elif ((!dirsonly)) && { [[ -z $filter ]] || [[ $f =~ \.($filter)$ ]]; }; then
+                COMPREPLY+=("$f")
+            fi
+        done < <(compgen -f -- "${cur-}")
+    }
+fi
+
+`
+
+// bashBeforeDebug is where the fallback goes: before the first function of the generated script.
+const bashBeforeDebug = "__jailops_debug()\n{"
+
 // bashCompletionScript is the bash completion script of the command tree, with the unfinished quote of the last word
-// closed before the program is asked.
+// closed before the program is asked, and stand-ins for the bash-completion package where it is missing.
 func bashCompletionScript(root *cobra.Command) ([]byte, error) {
 	var b bytes.Buffer
 	if err := root.GenBashCompletionV2(&b, true); err != nil {
 		return nil, err
 	}
 	s := b.String()
-	if !strings.Contains(s, bashEval) {
-		return nil, fmt.Errorf("the generated bash completion script has no line %q to put the quote handling before", bashEval)
+	for _, line := range []string{bashEval, bashBeforeDebug} {
+		if !strings.Contains(s, line) {
+			return nil, fmt.Errorf("the generated bash completion script has no line %q to put the additions before", line)
+		}
 	}
-	return []byte(strings.Replace(s, bashEval, bashUnfinishedQuote+bashEval, 1)), nil
+	s = strings.Replace(s, bashEval, bashUnfinishedQuote+bashEval, 1)
+	s = strings.Replace(s, bashBeforeDebug, bashFallback+bashBeforeDebug, 1)
+	return []byte(s), nil
 }

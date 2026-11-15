@@ -30,6 +30,13 @@ func (s *Server) registerRenames(m muxer) {
 	m("POST /api/v1/jails/{name}/rename", renameHandler(s, s.jails, renamer{noun: "jail", check: s.jailStopped, refs: s.jailRefs}))
 	m("POST /api/v1/images/{name}/rename", renameHandler(s, s.images, renamer{noun: "image", refs: s.imageRefs}))
 	m("POST /api/v1/projects/{name}/rename", renameHandler(s, s.projects, renamer{noun: "project", check: s.projectStopped, refs: s.projectRefs}))
+	m("POST /api/v1/backup-targets/{name}/rename", renameHandler(s, s.targets, renamer{noun: "backup target", refs: s.targetRefs}))
+	m("POST /api/v1/backup-policies/{name}/rename", renameHandler(s, s.bpolicies, renamer{noun: "backup policy", refs: noRefs}))
+	m("POST /api/v1/certificates/{name}/rename", renameHandler(s, s.certs, renamer{noun: "certificate", refs: noRefs}))
+	m("POST /api/v1/storage/{name}/rename", renameHandler(s, s.storages, renamer{noun: "storage", check: s.storageRenamable, refs: s.storageRefs}))
+	m("POST /api/v1/wireguard/{name}/rename", renameHandler(s, s.wireguard, renamer{noun: "WireGuard tunnel", refs: noRefs}))
+	m("POST /api/v1/users/{name}/rename", renameHandler(s, s.users, renamer{noun: "user", refs: noRefs}))
+	m("POST /api/v1/volumes/{name}/rename", renameHandler(s, s.volumes, renamer{noun: "volume", check: s.volumeStopped, refs: s.volumeRefs}))
 }
 
 func renameHandler[T any](s *Server, k *kind[T], rn renamer) http.HandlerFunc {
@@ -129,7 +136,9 @@ func renameNameOK(action, n string) bool {
 
 func kindOf(action string) api.Kind {
 	return map[string]api.Kind{"network": api.KindNetwork, "address-set": api.KindAddressSet, "firewall-policy": api.KindFirewallPolicy,
-		"profile": api.KindProfile, "jail": api.KindJail, "image": api.KindImage, "project": api.KindProject}[action]
+		"profile": api.KindProfile, "jail": api.KindJail, "image": api.KindImage, "project": api.KindProject,
+		"backup-target": api.KindBackupTarget, "backup-policy": api.KindBackupPolicy, "certificate": api.KindCertificate,
+		"storage": api.KindStorage, "volume": api.KindVolume, "user": api.KindUser, "wireguard": api.KindWireGuard}[action]
 }
 
 func ref(object, detail string) api.RenameChange {
@@ -406,6 +415,107 @@ func splitCSV(v string) []string {
 	for _, x := range strings.Split(v, ",") {
 		if x = strings.TrimSpace(x); x != "" {
 			out = append(out, x)
+		}
+	}
+	return out
+}
+
+func noRefs(*reqInfo, string, string, bool) []api.RenameChange { return nil }
+
+func (s *Server) targetRefs(_ *reqInfo, from, to string, apply bool) []api.RenameChange {
+	var out []api.RenameChange
+	for _, k := range sortedNames(s.bpolicies.items) {
+		p := s.bpolicies.items[k]
+		if slices.Contains(p.Spec.Targets, from) {
+			out = append(out, ref("backup policy "+p.Metadata.Name+" (project "+p.Metadata.Project+")", "spec.targets: "+from+" -> "+to))
+			if apply {
+				p.Spec.Targets = replaceName(p.Spec.Targets, from, to)
+			}
+		}
+	}
+	return out
+}
+
+// storageRenamable keeps the name of the default storage.
+func (s *Server) storageRenamable(_ *reqInfo, name string) *api.Error {
+	if name == "default" {
+		return api.Errorf(api.CodeBusy, "the default storage keeps its name")
+	}
+	return nil
+}
+
+func (s *Server) storageRefs(_ *reqInfo, from, to string, apply bool) []api.RenameChange {
+	var out []api.RenameChange
+	for _, n := range sortedNames(s.projects.items) {
+		p := s.projects.items[n]
+		for i := range p.Spec.Storage {
+			if p.Spec.Storage[i].Storage == from {
+				out = append(out, ref("project "+p.Metadata.Name, "spec.storage: "+from+" -> "+to))
+				if apply {
+					p.Spec.Storage[i].Storage = to
+				}
+			}
+		}
+	}
+	for _, k := range sortedNames(s.volumes.items) {
+		v := s.volumes.items[k]
+		if v.Spec.Storage == from {
+			out = append(out, ref("volume "+v.Metadata.Name+" (project "+v.Metadata.Project+")", "spec.storage: "+from+" -> "+to))
+			if apply {
+				v.Spec.Storage = to
+			}
+		}
+	}
+	for _, k := range sortedNames(s.jails.items) {
+		j := s.jails.items[k]
+		if j.Spec.Storage == from {
+			out = append(out, ref(jailObj(j), "spec.storage: "+from+" -> "+to))
+			if apply {
+				j.Spec.Storage = to
+			}
+		}
+	}
+	return out
+}
+
+// volumeStopped refuses the rename of a volume that a running jail attaches.
+func (s *Server) volumeStopped(rc *reqInfo, name string) *api.Error {
+	for _, k := range sortedNames(s.jails.items) {
+		j := s.jails.items[k]
+		if j.Metadata.Project != rc.project || j.Status.Power != api.PowerRunning {
+			continue
+		}
+		for _, v := range j.Spec.Volumes {
+			if v.Name == name {
+				return api.Errorf(api.CodeBusy, "jail %q has volume %q attached and is running: stop it before the volume is renamed", j.Metadata.Name, name).
+					WithHint("jailops stop " + j.Metadata.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Server) volumeRefs(rc *reqInfo, from, to string, apply bool) []api.RenameChange {
+	var out []api.RenameChange
+	if apply {
+		o, n := rc.project+"/"+from, rc.project+"/"+to
+		moveKey(s.vol.pass, o, n)
+		moveKey(s.vol.locked, o, n)
+		moveKey(s.vol.fails, o, n)
+		moveKey(s.vol.until, o, n)
+	}
+	for _, k := range sortedNames(s.jails.items) {
+		j := s.jails.items[k]
+		if j.Metadata.Project != rc.project {
+			continue
+		}
+		for i := range j.Spec.Volumes {
+			if j.Spec.Volumes[i].Name == from {
+				out = append(out, ref(jailObj(j), fmt.Sprintf("spec.volumes[%d].volume: %s -> %s", i, from, to)))
+				if apply {
+					j.Spec.Volumes[i].Name = to
+				}
+			}
 		}
 	}
 	return out

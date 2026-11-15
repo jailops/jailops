@@ -21,7 +21,7 @@ func TestBackupVolumes(t *testing.T) {
 			Spec: api.JailSpec{Image: "freebsd-15@stable", Volumes: []api.VolumeAttach{{Name: "mail", Mount: "/srv/mail"}}}})
 	}
 	tr.ok("backup", "key", "create", "--recipient", "age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	tr.ok("backup", "target", "create", "vault", "--kind", "node", "--address", "https://b.example:8443", "--fingerprint", "abcd")
+	tr.ok("backup", "target", "create", "vault", "--kind", "node", "--url", "https://b.example:8443", "--fingerprint", "abcd")
 	tr.ok("backup", "policy", "create", "nightly", "--selector", "env=prod", "--target", "vault", "--schedule", "0 2 * * *")
 
 	out := tr.ok("backup", "run", "nightly")
@@ -31,12 +31,12 @@ func TestBackupVolumes(t *testing.T) {
 	if out := tr.ok("backup", "run", "nightly", "--no-volumes"); strings.Contains(out, "mail") {
 		t.Fatalf("--no-volumes backed the volume up:\n%s", out)
 	}
-	tr.ok("backup", "policy", "create", "jails-only", "--selector", "env=prod", "--target", "vault", "--schedule", "0 2 * * *", "--exclude-volumes")
+	tr.ok("backup", "policy", "create", "jails-only", "--selector", "env=prod", "--target", "vault", "--schedule", "0 2 * * *", "--no-volumes")
 	if body := string(h.lastBody("POST", "/api/v1/backup-policies")); !strings.Contains(body, `"exclude_volumes":true`) {
 		t.Fatalf("the policy was sent without exclude_volumes: %s", body)
 	}
 	if out := tr.ok("backup", "run", "jails-only"); strings.Contains(out, "mail") {
-		t.Fatalf("a policy with --exclude-volumes backed the volume up:\n%s", out)
+		t.Fatalf("a policy with --no-volumes backed the volume up:\n%s", out)
 	}
 
 	list := tr.ok("backup", "list", "--volume", "mail")

@@ -333,7 +333,7 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 		t.Fatal(err)
 	}
 	if g := staff(); len(g.Problems) != 1 || !strings.Contains(g.Problems[0], "the addresses of set:staff are now 192.0.2.0/24, 198.51.100.7/32 but the pg_hba lines name 192.0.2.0/24") ||
-		!strings.Contains(g.Problems[0], "repeat jailops app allow db from set:staff") {
+		!strings.Contains(g.Problems[0], "repeat jailops app allow db --from set:staff") {
 		t.Fatalf("%+v", g.Problems)
 	}
 	if _, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "set:staff"}); err != nil {
@@ -465,7 +465,7 @@ func TestAppAccessFirewallOnly(t *testing.T) {
 	stop(t, e.Admin, "cli")
 	_, err = e.Admin.Jails().Delete(c, "cli")
 	wantCode(t, err, api.CodeConflict)
-	if !strings.Contains(err.Error(), "app-web") || !strings.Contains(err.(*api.Error).Hint, "jailops app deny web from jail:cli") {
+	if !strings.Contains(err.Error(), "app-web") || !strings.Contains(err.(*api.Error).Hint, "jailops app deny web --from jail:cli") {
 		t.Fatalf("%v", err)
 	}
 	if d, err := oper.Apps().Deny(c, "web", api.AppDeny{Source: "jail:cli"}); err != nil || !d.Changed {

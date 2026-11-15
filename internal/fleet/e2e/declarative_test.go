@@ -103,8 +103,6 @@ spec:
   resources: {cpu: 2, memory: 4G, pids: 500}
   volumes:
     - {volume: data, mount: /var/db/postgres}
-  host_mounts:
-    - {source: /tank/archive, target: /mnt/archive, read_only: true}
 `)
 	r := mustOK(t, run(t, e, "validate"))
 	contains(t, r.out, "ok:")
@@ -122,7 +120,7 @@ spec:
 		t.Fatalf("%+v", n.Spec.IPv6)
 	}
 	j := getJailIn(t, e, "p", "db")
-	if len(j.Spec.HostMounts) != 1 || len(j.Spec.Volumes) != 1 || j.Spec.Network[0].IPv6 != "2001:db8:1:2:100::80" {
+	if len(j.Spec.Volumes) != 1 || j.Spec.Network[0].IPv6 != "2001:db8:1:2:100::80" {
 		t.Fatalf("%+v", j.Spec)
 	}
 	// the volume is made before the jail that attaches it, with the owner and the mode of the file

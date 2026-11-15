@@ -18,11 +18,11 @@ const props = defineProps<{ open: boolean; project: Project | null; etag?: strin
 const emit = defineEmits<{ close: []; done: [] }>()
 
 interface Form {
-  name: string; description: string; hosts: string; firewall: string; images: string; newNetwork: boolean
+  name: string; comment: string; hosts: string; firewall: string; images: string; newNetwork: boolean
   jails: number | undefined; cpu: number | undefined; memory: string; pids: number | undefined; addresses: number | undefined
   networks: ProjectNetwork[]; storage: ProjectStorage[]
 }
-const blank = (): Form => ({ name: '', description: '', hosts: '', firewall: '', images: '', newNetwork: false, jails: undefined, cpu: undefined, memory: '', pids: undefined, addresses: undefined, networks: [], storage: [] })
+const blank = (): Form => ({ name: '', comment: '', hosts: '', firewall: '', images: '', newNetwork: false, jails: undefined, cpu: undefined, memory: '', pids: undefined, addresses: undefined, networks: [], storage: [] })
 const f = reactive<Form>(blank())
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
@@ -39,7 +39,7 @@ watch(() => props.open, (o) => {
   const p = props.project
   if (p) {
     const q = p.spec.quotas ?? {}
-    Object.assign(f, { name: p.metadata.name, description: p.spec.description ?? '', hosts: (p.spec.hosts ?? []).join(', '), firewall: (p.spec.firewall_policies ?? []).join(', '), images: (p.spec.images ?? []).join(', '), jails: q.jails, cpu: q.cpu, memory: q.memory ?? '', pids: q.pids, addresses: q.addresses, networks: clone(p.spec.networks ?? []), storage: clone(p.spec.storage ?? []) })
+    Object.assign(f, { name: p.metadata.name, comment: p.spec.comment ?? '', hosts: (p.spec.hosts ?? []).join(', '), firewall: (p.spec.firewall_policies ?? []).join(', '), images: (p.spec.images ?? []).join(', '), jails: q.jails, cpu: q.cpu, memory: q.memory ?? '', pids: q.pids, addresses: q.addresses, networks: clone(p.spec.networks ?? []), storage: clone(p.spec.storage ?? []) })
   }
 })
 
@@ -54,7 +54,7 @@ function body(): Pick<Project, 'metadata' | 'spec'> {
   return {
     metadata: { ...(props.project?.metadata ?? {}), name: f.name },
     spec: {
-      ...(f.description ? { description: f.description } : {}),
+      ...(f.comment ? { comment: f.comment } : {}),
       ...(split(f.hosts).length ? { hosts: split(f.hosts) } : {}),
       networks: clean(f.networks),
       storage: clean(f.storage),
@@ -96,7 +96,7 @@ void session
           <input id="pf-name" v-model="f.name" class="mono" type="text" autocomplete="off" :readonly="editing" :aria-invalid="!!check.err('pf-name')" aria-describedby="pf-name-h pf-name-e" @input="check.touch('pf-name')" />
           <span id="pf-name-h" class="hint">{{ editing ? s.projects.nameFixed : nameHint('project') }}</span>
           <span id="pf-name-e" class="field-error" role="alert">{{ check.err('pf-name') }}</span></div>
-        <div class="field"><label for="pf-desc">{{ s.projects.description }}</label><input id="pf-desc" v-model="f.description" type="text" /></div>
+        <div class="field"><label for="pf-desc">{{ s.projects.comment }}</label><input id="pf-desc" v-model="f.comment" type="text" /></div>
       </div>
       <label v-if="!editing" class="check" style="margin-bottom: 4px"><input v-model="f.newNetwork" type="checkbox" data-test="new-network" />{{ s.projects.newNetwork }}</label>
       <p v-if="!editing" class="hint muted">{{ s.projects.newNetworkHint }}</p>

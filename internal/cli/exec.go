@@ -259,7 +259,7 @@ jailops exec -T nginx -- cat /var/log/messages > messages
 jailops exec --user www nginx -- id
 jailops --host host-b exec nginx -- service nginx status`,
 		Args:              cobra.MinimumNArgs(2),
-		ValidArgsFunction: completeArgs(completeKind(a, d), completeFiles),
+		ValidArgsFunction: completeArgs(completeKind(a, d), completeNone), // after -- the command is one of the jail, not a file here
 		Annotations:       map[string]string{execAnnotation: "1"},
 		RunE: func(cmd *cobra.Command, args []string) error {
 			argv := args[1:]

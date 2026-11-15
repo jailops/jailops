@@ -215,10 +215,9 @@ func (s *Service) applyPrompt(ctx context.Context, key, ps1 string) ([]string, e
 	return steps, nil
 }
 
-// holdJailForPackages keeps exec, shell and console sessions out of a jail while the host runs pkg against its root
-// (pkg -r runs as root on the host and the jail's tree belongs to the tenant: an operator's session must not be able to
-// change it meanwhile). It refuses with `busy` when another package operation already holds the jail. The caller
-// calls release when the package work is done. Processes that already run in the jail are not stopped by this.
+// holdJailForPackages keeps exec, shell and console sessions out of a jail, and a second package operation away,
+// while pkg works in it (an operator's session must not change the packages meanwhile). It refuses with `busy` when
+// another package operation already holds the jail. The caller calls release when the package work is done.
 func (s *Service) holdJailForPackages(key string) (release func(), err error) {
 	s.execMu.Lock()
 	if s.installing[key] {
@@ -234,9 +233,9 @@ func (s *Service) holdJailForPackages(key string) (release func(), err error) {
 	}, nil
 }
 
-// installBash installs the bash package into the root of a running FreeBSD jail from the host, unless it is
-// there. Exec sessions are kept out while pkg works on the root, and the jail's library cache is refreshed
-// afterwards; an app installation (inApp) does both itself.
+// installBash installs the bash package into a running FreeBSD jail with pkg -j (pkg enters the jail, so the host's
+// root never writes into a root that runs), unless it is there. Exec sessions are kept out while pkg works, and the
+// jail's library cache is refreshed afterwards; an app installation (inApp) does both itself.
 func (s *Service) installBash(ctx context.Context, key string, inApp bool) ([]string, error) {
 	guard := !inApp
 	root := s.rootMount(key)
@@ -253,16 +252,16 @@ func (s *Service) installBash(ctx context.Context, key string, inApp bool) ([]st
 		}
 		defer release()
 	}
-	argv := apps.PkgInstallArgv(root, "ports", []string{api.BashPackage})
-	if err := s.runHost(ctx, 30*time.Minute, argv); err != nil {
+	// inside the running jail: over the jail's own network, which its firewall may close, so it does not wait long
+	argv := apps.PkgInstallInJailArgv(key, []string{api.BashPackage})
+	if err := s.runHost(ctx, 5*time.Minute, argv); err != nil {
 		return nil, err
 	}
 	steps := []string{strings.Join(argv, " ")}
 	if inApp {
 		return steps, nil
 	}
-	// pkg -r does not run the jail's ldconfig trigger; the library cache of the running jail must learn about the
-	// libraries bash brought into /usr/local/lib.
+	// the library cache of the running jail must learn about the libraries bash brought into /usr/local/lib.
 	if _, err := s.runInJail(ctx, key, 5*time.Minute, "/sbin/ldconfig", "-m", "/usr/local/lib"); err != nil {
 		return steps, err
 	}
@@ -298,9 +297,16 @@ func (s *Service) setUpShell(ctx context.Context, key string, eff api.JailSpec, 
 	return steps, err
 }
 
+// shellSetupDeadline is how long the setup after a start may take.
+var shellSetupDeadline = 60 * time.Second
+
 // shellAtStart runs after a jail started: the setup of a new jail, or a prompt that changed while it was stopped.
 // It never fails the start; a failure is the jail's ShellSetup condition and an event.
 func (s *Service) shellAtStart(ctx context.Context, key string) {
+	// A start never waits on the shell: what takes longer than this (a package server the jail cannot reach) is a
+	// failed setup with its event, and the jail keeps the shell it has.
+	ctx, cancel := context.WithTimeout(ctx, shellSetupDeadline)
+	defer cancel()
 	j, err := s.jailSnapshot(key)
 	if err != nil || j.Spec.OS != api.OSFreeBSD {
 		return
@@ -417,7 +423,7 @@ func (s *Service) ShellSetupJail(ctx context.Context, name string, _ api.ShellSe
 func (s *Service) shellStepDescribe(key string, spec api.JailSpec) string {
 	var parts []string
 	if spec.OS == api.OSFreeBSD && spec.Shell == api.BashPath {
-		parts = append(parts, "install bash unless it is there ("+strings.Join(apps.PkgInstallArgv(s.rootMount(key), "ports", []string{api.BashPackage}), " ")+")")
+		parts = append(parts, "install bash unless it is there ("+strings.Join(apps.PkgInstallInJailArgv(key, []string{api.BashPackage}), " ")+")")
 	}
 	switch st := s.promptState(key, spec); {
 	case spec.OS != api.OSFreeBSD || st == "":
@@ -447,4 +453,29 @@ func dropLines(out []byte, drop func(string) bool) []byte {
 		}
 	}
 	return []byte(b.String())
+}
+
+// installBashBeforeFirstStart puts the bash package into the root of a FreeBSD jail that has never run, with pkg -r
+// from the host: nothing runs in the root yet, and the host's network fetches the package, whatever the jail's own
+// firewall policy says. The setup after the start finds bash there. It does nothing for a jail that is not new or
+// does not use bash; a failure is logged and the setup after the start tries again from inside the jail.
+func (s *Service) installBashBeforeFirstStart(ctx context.Context, key string) {
+	j, err := s.jailSnapshot(key)
+	if err != nil || j.Spec.OS != api.OSFreeBSD || s.d.Run == nil {
+		return
+	}
+	if eff := s.effective(j); eff.Shell != api.BashPath || !s.shellMark(key).Pending {
+		return
+	}
+	root := s.rootMount(key)
+	if ok, _ := s.d.Files.Exists(ctx, root+api.BashPath); ok {
+		return
+	}
+	if err := s.life.MountTree(ctx, key); err != nil {
+		s.log.Warn("bash before the first start", "jail", key, "err", err)
+		return
+	}
+	if err := s.runHost(ctx, 30*time.Minute, apps.PkgInstallArgv(root, "ports", []string{api.BashPackage})); err != nil {
+		s.log.Warn("bash before the first start", "jail", key, "err", err)
+	}
 }

@@ -341,3 +341,52 @@ func (s *Service) RemountHostDir(ctx context.Context, name string, a Attached) e
 	}
 	return nil
 }
+
+// BindVolumes mounts the volumes a stopped jail attaches into its root with nullfs, as its fstab does when it starts, so
+// that what the host installs into the root lands where the jail will see it: the files of a package in a directory a
+// volume covers go into the volume, as they do when the jail runs. UnbindVolumes takes them off before the start
+// mounts them itself. The volumes are mounted on the host first (MountTree); the mounts are read-write.
+func (s *Service) BindVolumes(ctx context.Context, name string) error {
+	atts, err := s.Cfg.attached(name)
+	if err != nil {
+		return err
+	}
+	// the helper mounts only below the root of a jail it manages, which a jail that never started is not yet: its
+	// configuration is rendered, as the start does first
+	if len(atts) > 0 {
+		if err := s.Hooks.PreStart(ctx, name); err != nil {
+			return err
+		}
+	}
+	for i, a := range atts {
+		target := s.Cfg.at(name).rootMP() + a.Path
+		if err := s.Files.MkdirAll(ctx, target); err != nil {
+			return err
+		}
+		if out, err := s.Exec.Run(ctx, []string{"mount", "-t", "nullfs", a.Mountpoint, target}); err != nil {
+			_ = s.unbind(ctx, name, atts[:i])
+			return fmt.Errorf("mount %s on %s: %w: %s", a.Mountpoint, target, err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+// UnbindVolumes undoes BindVolumes.
+func (s *Service) UnbindVolumes(ctx context.Context, name string) error {
+	atts, err := s.Cfg.attached(name)
+	if err != nil {
+		return err
+	}
+	return s.unbind(ctx, name, atts)
+}
+
+func (s *Service) unbind(ctx context.Context, name string, atts []Attached) error {
+	var first error
+	for i := len(atts) - 1; i >= 0; i-- {
+		target := s.Cfg.at(name).rootMP() + atts[i].Path
+		if out, err := s.Exec.Run(ctx, []string{"umount", target}); err != nil && first == nil {
+			first = fmt.Errorf("unmount %s: %w: %s", target, err, strings.TrimSpace(string(out)))
+		}
+	}
+	return first
+}

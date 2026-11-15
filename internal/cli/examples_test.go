@@ -87,7 +87,7 @@ func TestShellWords(t *testing.T) {
 		`jailops list 'web*' -c name,age`:                                           `list|web*|-c|name,age`,
 		`TOKEN=$(jailops token create deploy --role operator --global 2>/dev/null)`: `token|create|deploy|--role|operator|--global`,
 		`jailops events --since-id 0`:                                               `events|--since-id|0`,
-		`echo 'pw' | jailops user create bob --password-stdin`:                      `user|create|bob|--password-stdin`,
+		`echo 'pw' | jailops user create bob --password-file -`:                     `user|create|bob|--password-file|-`,
 		`source <(jailops completion bash)`:                                         `completion|bash`,
 		`jailops exec -T nginx -- cat /var/log/messages > messages`:                 `exec|-T|nginx|--|cat|/var/log/messages`,
 		`jailops-sync plan`:                                                         ``,

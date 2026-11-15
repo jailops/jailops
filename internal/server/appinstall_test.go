@@ -193,7 +193,7 @@ func TestAppInstall(t *testing.T) {
 	if len(res.Data) != 2 || len(res.Config) != 1 || len(res.Logs) != 1 || !strings.Contains(res.Notes, "/usr/local/www/web") {
 		t.Fatalf("%+v", res)
 	}
-	wantSteps := []string{"create-volume-web-var-db-web", "create-volume-web-usr-local-www-web", "create-jail", "start-jail", "install-packages-ports", "install-packages-jailops", "set-up-shell", "refresh-library-cache", "record-version", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot", "enable-autostart"}
+	wantSteps := []string{"create-volume-web-var-db-web", "create-volume-web-usr-local-www-web", "create-jail", "mount-jail", "bind-volumes", "install-packages-ports", "install-packages-jailops", "seed-jailops-repo", "install-bash", "record-version", "unbind-volumes", "start-jail", "set-up-shell", "refresh-library-cache", "write-rc-conf", "setup-1", "setup-2", "start-service-web", "health-check", "close-firewall", "snapshot", "enable-autostart"}
 	var steps []string
 	for _, s := range res.Steps {
 		_, rest, _ := strings.Cut(s, " ")
@@ -203,7 +203,8 @@ func TestAppInstall(t *testing.T) {
 	if !slices.Equal(steps, wantSteps) {
 		t.Fatalf("steps %v", res.Steps)
 	}
-	// The packages went in from the host with pkg -r, the FreeBSD ones and the jailops ones apart.
+	// The packages went in from the host with pkg -r while the jail had never run, the FreeBSD ones and the jailops
+	// ones apart, and bash with them.
 	root := "/jailops/projects/alpha/jails/web/root"
 	// bash, the jail's shell, came in after the app's packages (docs/shell.md)
 	if !slices.Equal(e.Installed, []string{root + " web-server", root + " web-tool", root + " bash"}) {
@@ -213,7 +214,7 @@ func TestAppInstall(t *testing.T) {
 	// vectors internal/priv checks against the helper's allow-list.
 	var pkgCalls []string
 	for _, call := range e.Run.Calls() {
-		if call.Cmd.Name == "pkg" && strings.Contains(strings.Join(call.Cmd.Args, " "), root) {
+		if a := strings.Join(call.Cmd.Args, " "); call.Cmd.Name == "pkg" && (strings.Contains(a, root) || strings.Contains(a, "-j alpha_web")) {
 			pkgCalls = append(pkgCalls, strings.Join(append([]string{call.Cmd.Name}, call.Cmd.Args...), " "))
 		}
 	}
@@ -334,10 +335,10 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, err := op.Wait(c)
-	if err != nil || !res.DryRun || len(res.Steps) != 10 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
+	if err != nil || !res.DryRun || len(res.Steps) != 12 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
 		t.Fatalf("%v %+v", err, res)
 	}
-	if !strings.Contains(res.Steps[0], "fb151@stable") || !strings.Contains(res.Steps[3], "install -y bash") || !strings.Contains(res.Steps[6], "/usr/local/bin/tool --ping") {
+	if !strings.Contains(res.Steps[0], "fb151@stable") || !strings.Contains(res.Steps[6], "install -y bash") || !strings.Contains(res.Steps[8], "/usr/local/bin/tool --ping") {
 		t.Fatalf("%v", res.Steps)
 	}
 	if _, err := e.Admin.Jails().Get(c, "tool"); !api.IsCode(err, api.CodeNotFound) {
@@ -459,7 +460,7 @@ func TestAppInstallFailures(t *testing.T) {
 			}
 		}
 	}
-	// 1. the jail does not start: nothing is left behind
+	// 1. the jail does not start: the packages are in, so the jail is kept, stopped, to look at
 	e.Jails.FailCreate = errors.New("jail: cannot start")
 	op, err := e.Admin.Apps().Install(c, "web", req)
 	if err != nil {
@@ -467,17 +468,19 @@ func TestAppInstallFailures(t *testing.T) {
 	}
 	_, err = op.Wait(c)
 	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Detail["step"] != "start-jail" || ae.Detail["jail_kept"] != "" || !strings.Contains(ae.Hint, "nothing was left behind") {
+	if !errors.As(err, &ae) || ae.Detail["step"] != "start-jail" || ae.Detail["jail_kept"] != "true" || !strings.Contains(ae.Hint, "left stopped") {
 		t.Fatalf("%v", err)
 	}
 	failed()
-	if _, err := e.Admin.Jails().Get(c, "web"); !api.IsCode(err, api.CodeNotFound) {
-		t.Fatalf("the jail was kept: %v", err)
+	if j, err := e.Admin.Jails().Get(c, "web"); err != nil || j.Status.Power != api.PowerStopped {
+		t.Fatalf("the jail was not kept stopped: %v", err)
 	}
+	e.Jails.FailCreate = nil
+	deleteWithVolumes(t, e, c, "web")
+	// deleting the jail takes its datasets with it
 	if ok, _ := e.ZFS.Exists(c, "tank/jailops/projects/alpha/jails/web"); ok {
 		t.Fatal("datasets were left behind")
 	}
-	e.Jails.FailCreate = nil
 	// 2. the packages do not install: the jail is kept, stopped, with the labels of the app
 	e.SetPkgInstallErr(errors.New("pkg: no package web-server"))
 	op, err = e.Admin.Apps().Install(c, "web", req)
@@ -864,15 +867,22 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 		}
 		repos := []string{"install-packages-ports"}
 		if c2.app == "isms" { // openssh-portable from the FreeBSD packages, then isms from the JailOps repository
-			repos = append(repos, "install-packages-jailops")
+			repos = append(repos, "install-packages-jailops", "seed-jailops-repo")
 		}
 		var want []string
 		for range def.Data {
 			want = append(want, "create-volume")
 		}
-		want = append(want, "create-jail", "start-jail")
+		want = append(want, "create-jail", "mount-jail")
+		if len(def.Data) > 0 {
+			want = append(want, "bind-volumes")
+		}
 		want = append(want, repos...)
-		want = append(want, "set-up-shell", "refresh-library-cache", "record-version", "write-rc-conf")
+		want = append(want, "install-bash", "record-version")
+		if len(def.Data) > 0 {
+			want = append(want, "unbind-volumes")
+		}
+		want = append(want, "start-jail", "set-up-shell", "refresh-library-cache", "write-rc-conf")
 		want = append(want, setup(len(def.Setup))...)
 		want = append(want, c2.services...)
 		if c2.health {

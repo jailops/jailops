@@ -18,7 +18,8 @@ func (h *harness) seedDualStack() {
 		{"network", "grant", "sw", "--project", "main"},
 		{"volume", "create", "data", "--storage", "default", "--uid", "770", "--gid", "770"},
 		{"jail", "create", "web", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--memory", "2G", "--cpu", "2", "--label", "env=prod"},
-		{"jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--network", "sw", "--volume", "data:/var/db"},
+		{"jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--network", "sw"},
+		{"volume", "attach", "db", "data", "/var/db"},
 		{"jail", "start", "web"},
 	} {
 		if _, errs, code := h.run("", args...); code != 0 {

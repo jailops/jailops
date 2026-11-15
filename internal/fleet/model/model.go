@@ -326,7 +326,7 @@ func (h Hook) Validate() error {
 
 // TemplateSpec is the spec of a JailTemplate document.
 type TemplateSpec struct {
-	Description string `json:"description,omitempty"`
+	Comment string `json:"comment,omitempty"`
 	// Jail is a fragment of a JailSpec merged under every jail using the template.
 	Jail map[string]any `json:"jail,omitempty"`
 	// After hooks run, in order, after a jail using the template is created.
@@ -335,7 +335,7 @@ type TemplateSpec struct {
 
 // RolloutSpec is the spec of a Rollout document: a staged operation over jails.
 type RolloutSpec struct {
-	Description string `json:"description,omitempty"`
+	Comment string `json:"comment,omitempty"`
 	// Hosts limits the hosts; empty means every host.
 	Hosts []string `json:"hosts,omitempty"`
 	// Project is the project whose jails are selected. Required.

@@ -84,7 +84,7 @@ $ jailops image upgrade freebsd-15 --no-wait --no-jails
 OPERATION                              STATUS    DESCRIPTION
 <uuid>   pending   Upgrade image freebsd-15
 
-$ jailops image generations freebsd-15
+$ jailops image generation list freebsd-15
 NAME            NUMBER   PARENT   FREEBSD   PACKAGES   MANIFEST              AGE   USED BY
 freebsd-15#g1   1        -        -         0          sha256:<hex>   3h    pin
 freebsd-15#g2   2        g1       -         120        sha256:<hex>   3h    web

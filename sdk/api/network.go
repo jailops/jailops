@@ -12,6 +12,8 @@ type Network struct {
 
 // NetworkSpec is the desired state of a network.
 type NetworkSpec struct {
+	// Comment is what the object is for: one line of free text.
+	Comment string `json:"comment,omitempty"`
 	// Uplink is the physical interface used for NAT or routing. In IPv6 proxy mode it must be a plain interface (not a
 	// member of a bridge).
 	Uplink string   `json:"uplink,omitempty"`

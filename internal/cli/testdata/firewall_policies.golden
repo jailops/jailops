@@ -1,14 +1,26 @@
-$ jailops firewall policy create floor --rule allow in tcp port 22
+$ jailops firewall policy create floor
 firewall policy/floor created
 
-$ jailops firewall policy create monitoring --rule allow in tcp port 22
+$ jailops firewall rule add floor in --action allow --proto tcp --port 22 --comment ssh
+firewall policy/floor: rule 1 added: allow in tcp port 22
+
+$ jailops firewall policy create monitoring
 firewall policy/monitoring created
 
-$ jailops firewall policy create postgres --rule allow in tcp port 22
+$ jailops firewall rule add monitoring in --action allow --proto tcp --port 22 --comment ssh
+firewall policy/monitoring: rule 1 added: allow in tcp port 22
+
+$ jailops firewall policy create postgres
 firewall policy/postgres created
 
-$ jailops firewall policy create ssh-office --rule allow in tcp port 22
+$ jailops firewall rule add postgres in --action allow --proto tcp --port 22 --comment ssh
+firewall policy/postgres: rule 1 added: allow in tcp port 22
+
+$ jailops firewall policy create ssh-office
 firewall policy/ssh-office created
+
+$ jailops firewall rule add ssh-office in --action allow --proto tcp --port 22 --comment ssh
+firewall policy/ssh-office: rule 1 added: allow in tcp port 22
 
 $ jailops jail create db --image freebsd-15@stable --storage default --network lan --firewall-policy postgres --firewall-policy ssh-office
 jail/db created

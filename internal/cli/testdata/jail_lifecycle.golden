@@ -4,8 +4,11 @@ jail/web created
 $ jailops volume create data --storage default
 volume/data created
 
-$ jailops jail create db --image freebsd-15@stable --storage default --network lan --volume data:/srv/data:ro --env A=1
+$ jailops jail create db --image freebsd-15@stable --storage default --network lan --env A=1
 jail/db created
+
+$ jailops volume attach db data /srv/data --ro
+volume/data attached to jail db
 
 $ jailops jail list
 NAME   STATE     IMAGE               GEN   ADDRESSES    AUTOSTART   AGE

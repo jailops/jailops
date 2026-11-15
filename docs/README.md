@@ -14,7 +14,7 @@ register of what is settled and what is open.
 | [networking-ipv6.md](networking-ipv6.md) | Networks, routed and switched IPv6, the NDP proxy, the PF isolation |
 | [wireguard.md](wireguard.md) | WireGuard tunnels: a server, peers enrolled with one command and a join token, clients, where the keys live |
 | [labels.md](labels.md) | Labels on jails: the rules, what selects by them, the command line and the console's chips, filter and editors |
-| [storage.md](storage.md) | Storages on big pools, volumes, host mounts, quotas, what is and is not backed up |
+| [storage.md](storage.md) | Storages on big pools, volumes, host directories, quotas, what is and is not backed up |
 | [backup-restore.md](backup-restore.md) | The backup node, the key and its escrow, policies, verification, restoring |
 | [upgrade.md](upgrade.md) | Upgrading JailOps, upgrading and rolling back jails, managed updates |
 | [roadmap.md](roadmap.md) | What is planned for 0.7.0 and later, in order |

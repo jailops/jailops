@@ -828,53 +828,9 @@ func TestTagsDoNotCrossProjects(t *testing.T) {
 	}
 }
 
-// An existing directory of the host (a dataset of a pool JailOps does not manage) can be mounted into a jail by a
-// global admin only, read-only if asked, and an operator of the project cannot add it later either.
-func TestHostMountsAreAGlobalAdminsDecision(t *testing.T) {
-	e, alpha, _ := twoProjects(t)
-	c := ctxT(t)
-	sp := webSpec()
-	sp.HostMounts = []api.HostMount{{Source: "/tank/media", Target: "/mnt/media", ReadOnly: true}, {Source: "/tank/archive", Target: "/mnt/archive"}}
-	_, err := alpha.Jails().Create(c, sdk.NewJail("media", sp))
-	wantCode(t, err, api.CodeForbidden)
-	op, err := e.Admin.Project("alpha").Jails().Create(c, sdk.NewJail("media", sp))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := op.Wait(c); err != nil {
-		t.Fatal(err)
-	}
-	so, _ := e.Admin.Project("alpha").Jails().Start(c, "media")
-	if _, err := so.Wait(c); err != nil {
-		t.Fatal(err)
-	}
-	var fstab string
-	for _, k := range e.Files.Paths() {
-		if strings.Contains(k, "alpha_media") && strings.HasSuffix(k, "fstab") {
-			fstab = e.File(k)
-		}
-	}
-	for _, want := range []string{"/tank/media ", "/mnt/media nullfs ro 0 0", "/tank/archive ", "/mnt/archive nullfs rw 0 0"} {
-		if !strings.Contains(fstab, want) {
-			t.Errorf("the fstab lacks %q:\n%s", want, fstab)
-		}
-	}
-	// the project's operator cannot add one to another jail, but keeps working on the jail that has them
-	createJail(t, alpha, "plain")
-	j, etag, _ := alpha.Jails().GetETag(c, "plain")
-	j.Spec.HostMounts = []api.HostMount{{Source: "/tank/media", Target: "/mnt/media"}}
-	_, err = alpha.Jails().Update(c, "plain", j, etag)
-	wantCode(t, err, api.CodeForbidden)
-	m, etag, _ := alpha.Jails().GetETag(c, "media")
-	m.Spec.Env = map[string]string{"A": "1"}
-	if _, err := alpha.Jails().Update(c, "media", m, etag); err != nil {
-		t.Fatalf("an operator changing something else on a jail that has host mounts: %v", err)
-	}
-}
-
 // A global identity that is only an operator is not an administrator: it can set neither host mounts nor delegation,
 // which would otherwise start at the next boot under the daemon's own assertion.
-func TestAGlobalOperatorCannotSetHostMountsOrDelegation(t *testing.T) {
+func TestAGlobalOperatorCannotSetDelegation(t *testing.T) {
 	e, _, _ := twoProjects(t)
 	c := ctxT(t)
 	op, err := sdk.Connect(c, sdk.Remote(e.HTTP.URL, sdk.WithToken(e.IdentityToken(api.PermOperator, true)), sdk.WithProject(dtest.SeedProject), sdk.WithRetries(0)))
@@ -883,43 +839,8 @@ func TestAGlobalOperatorCannotSetHostMountsOrDelegation(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = op.Close() })
 	sp := webSpec()
-	sp.HostMounts = []api.HostMount{{Source: "/tank/media", Target: "/mnt/media"}}
-	_, err = op.Jails().Create(c, sdk.NewJail("m1", sp))
-	wantCode(t, err, api.CodeForbidden)
-	sp = webSpec()
 	sp.Delegate = true
 	sp.Resources.Disk = "10G"
 	_, err = op.Jails().Create(c, sdk.NewJail("d1", sp))
 	wantCode(t, err, api.CodeForbidden)
-}
-
-// The operator of a project can start, stop and restart a jail whose host mounts an administrator admitted.
-func TestAnOperatorRunsAJailWithAdminHostMounts(t *testing.T) {
-	e, _, _ := twoProjects(t)
-	c := ctxT(t)
-	sp := webSpec()
-	sp.HostMounts = []api.HostMount{{Source: "/tank/media", Target: "/mnt/media", ReadOnly: true}}
-	cop, err := e.Admin.Project("alpha").Jails().Create(c, sdk.NewJail("media2", sp))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := cop.Wait(c); err != nil {
-		t.Fatal(err)
-	}
-	oper := e.Scoped(api.PermOperator, "alpha")
-	waitOp := func(wait func() error, err error) {
-		t.Helper()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := wait(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	so, err := oper.Jails().Start(c, "media2")
-	waitOp(func() error { _, e := so.Wait(c); return e }, err)
-	ro, err := oper.Jails().Restart(c, "media2")
-	waitOp(func() error { _, e := ro.Wait(c); return e }, err)
-	to, err := oper.Jails().Stop(c, "media2")
-	waitOp(func() error { _, e := to.Wait(c); return e }, err)
 }

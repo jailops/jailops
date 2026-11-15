@@ -85,8 +85,7 @@ jailops logs forward status`
 	}
 	f := cmd.Flags()
 	f.StringArrayVar(&u.jails, "jail", nil, "merge the logs of this jail (repeatable; default every jail)")
-	f.StringArrayVarP(&u.labels, "label", "l", nil, "merge the logs of the jails with this label KEY=VALUE (repeatable; --selector is the same)")
-	aliasFlags(cmd, map[string]string{"selector": "label"})
+	f.StringArrayVarP(&u.labels, "label", "l", nil, "merge the logs of the jails with this label KEY=VALUE (repeatable)")
 	f.StringVar(&u.app, "app", "", "merge the logs of the jails installed from this app")
 	f.BoolVar(&u.appLogs, "app-logs", false, "add the log files the installed apps declare below /var/log")
 	f.BoolVar(&u.allProjects, "all-projects", false, "read every project you may use, not only the current one")

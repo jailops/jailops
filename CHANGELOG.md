@@ -2,6 +2,84 @@
 
 ## Unreleased
 
+- **`rename` for the rest.** `jailops volume|storage|cert|user|wireguard|backup target|backup policy rename OLD NEW`
+  give the object a new name and change everything that names it in one operation, or none of it: a volume (its dataset and
+  mount point, the attachments of its jails, which must be stopped, and the `disk.NAME` keys of the project's profiles), a
+  storage (the grants of the projects, the volumes and jails on it and the registry of the daemon; the default storage keeps its
+  name), a backup target (the targets lists of the policies), a user (the password, the second factor and the sessions stay),
+  a certificate, a backup policy and a WireGuard tunnel (the directory of its keys, which a new helper operation `wg.rename`
+  moves inside the helper's own WireGuard directory, and its firewall anchor). The backups that were made keep the old
+  names of their policy and target in their records, and the audit log keeps the names a user or certificate had.
+- **Breaking: the host firewall rows and sets have commands of their own.** `jailops host firewall set` no longer takes
+  `--allow`, `--clear-allow` or `--set`. Rows of the custom-rules template are `host firewall allow add --proto tcp --port
+  80,443 --comment "the web"`, `allow list` and `allow remove NUMBER`; address sets are `host firewall address-set
+  create|set|list|delete NAME --member ...`. Each change still reverts itself unless it is confirmed.
+- **Breaking: `host_mounts` is gone from the jail spec.** A directory of the host that a jail should see is a volume with
+  `--path` (`jailops volume create movies --path /mnt/archive/movies`, then `volume attach`), which a global administrator makes,
+  which the daemon can watch and which has its place in the console. The `admin-host-mount` directories of `priv.conf` stay the
+  allow-list for it.
+- **Breaking: one shape for every command.** Every group that makes objects from flags now has `set NAME --flag ...`
+  (only the flags you give change anything; a list flag replaces the list and an empty value clears it) next to
+  `edit`, which stays the editor and `-f FILE` path. A human sentence about an object is `--comment` everywhere
+  (`comment` in the API and in files; `description` is gone from projects, storage, profiles, templates and
+  rollouts) and exists on jails, networks, images, certificates, tokens, users, hosts, backup policies and targets and
+  WireGuard tunnels.
+- **Breaking: one verb for one idea.** The `trust` group is gone: `jailops cert enroll NAME` makes the single-use
+  token of a new client (`--name` is the positional) and `jailops cert list|show|edit|revoke` manage who is trusted;
+  `cert` and `token` end with `revoke`, not `delete`. `remote add NAME ADDRESS` takes the name first; a trust token
+  joins, an API token is saved. `logs forward add NAME --url URL` (the type follows the URL) and `logs forward set`.
+  `app install APP [JAIL]`, `app allow APP --from SOURCE [--port N --proto udp]` and `app deny APP --from SOURCE`.
+  `wireguard join NAME --token-file FILE`. Networks and storage are granted with `network grant|revoke` and
+  `storage grant|revoke [--quota 500G]`: `project create|set` no longer take `--network`, `--storage` or `--revoke-*`.
+  Volumes are attached with `volume attach`: `jail create` has no `--volume` or `--host-mount`.
+  Images: `image set NAME --auto-upgrade --upgrade-at HH:MM --upgrade-packages=false` replaces `auto-upgrade`,
+  `image alias add|remove NAME ALIAS [--generation gN]`, `image generation list|delete`.
+- **Breaking: one meaning for one flag.** `--stop` (delete a running jail after stopping it) instead of `--force`;
+  `--force` only means "do not wait for a graceful shutdown". `--overwrite` and `-f/--file` for `app new` and
+  `app export`; `--from-generation` for `image build`; `--package-set` for image package sets; `--url` for the address
+  of a backup target and of a host; `--no-volumes` for backup policies too; `--confirm-lockout` and
+  `--confirm-replace` instead of `--i-know` (`confirm_lockout` in the API); `--images` for `update apply --os`;
+  secrets only from `--password-file FILE|-` and `--token-file FILE|-`. No old spelling is accepted.
+
+- **Breaking: the rules of a policy are changed with `jailops firewall rule`, and `--rule` is gone.** A rule is no longer a
+  sentence inside a flag, with its comment as the tail of the sentence: it has a flag for each thing it says.
+  `jailops firewall policy create web --comment "the public web server"` makes the policy; `jailops firewall rule add web
+  in --action allow --proto tcp --from set:office --port 22 --comment "ssh from the office"` adds a rule (the direction is
+  the word after the policy; `--at N` puts it at a position; `--name` gives it a name; `--log`, `--redirect
+  HOSTPORT:JAILPORT` and `--disabled` do what their words say). `rule list` numbers the rules the way `policy show` and
+  the rendered anchor do, `rule edit` changes the fields you give (an empty value clears one), `rule move` takes `--to N`,
+  `--before` or `--after`, `rule enable` and `rule disable` switch rules on and off, and `rule remove` takes a number or a
+  name. A rule is addressed by its number or its name; each command writes the policy back with the version it read, prints
+  one line of what changed, and takes `--dry-run`, `-o json` and `-o yaml`. Tab completes every word: the policy, the
+  direction, the references of `--from` and `--to` (also in a comma list), the ports, and the rules of a policy with their
+  comments. `-f FILE` and `policy edit` still take a whole policy. `jailops firewall test` says that `--port` is needed
+  when the protocol is the default, tcp.
+
+- **Tab completes everywhere.** Every flag and argument of `jailops` either completes something or says it is typed, and a
+  test fails for a new one that does neither. What names an object completes from the server in the right project (a
+  firewall policy in `project set NAME --firewall-policy`, volumes, images, users, sessions, label keys and values, tags,
+  hosts, projects); `jailops config set JAIL KEY` completes the value of the key from the key registry (`true` and `false`,
+  the values of a choice, networks, storages, policies, profiles, jails); the ends of `jailops firewall test` offer
+  `jail:NAME`, `host` and the addresses of the jails (no address sets); files complete where a flag names a file (`-f`
+  only YAML and JSON) and directories where it names a directory. Where you type a new name, a number or free text the
+  shell no longer offers the files of the current directory (a bare `.` after `jailops firewall policy create`): nothing
+  completes and a second Tab says what is expected (cobra's ActiveHelp, off with `COBRA_ACTIVE_HELP=0`), and `exec NAME --`
+  completes nothing of this host. The bash script now works without the `bash-completion` package (`source <(jailops
+  completion bash)`), and a test drives it the way bash does, with and without the package, colons in `jail:web` included.
+
+- **Security: `pkg` no longer runs as root of the host in the root of a running jail.** The scripts of a package run in a
+  chroot of the root `pkg -r` is given, with the shell and the libraries found there, so a process of a running jail that
+  replaced them would have had root of the host at the next package operation. The helper now refuses `pkg -r ROOT`
+  for the root of a running jail (all spellings of the path) and allows exactly one of `-r ROOT` and `-j JAIL`. An app
+  installation makes the jail, mounts its datasets and installs the packages while the jail has never run (new steps
+  `mount-jail`, and `seed-jailops-repo` for packages of the JailOps repository, which copies the host's configuration
+  of that repository and its key into the jail), and starts it after `record-version`; a failure from the mount on leaves the
+  stopped jail to look at, also when it is the start that fails. Package updates, the bash of the shell setup and the
+  app draft of a running jail run `pkg -j JAIL`: `pkg` works inside the jail, with the jail's own repository
+  configuration, so a jail has to be able to reach the package servers.
+- **The end-to-end run no longer races.** The stop timeout block waits until the service has set its signal handler, and the
+  soak waits until its listeners are up.
+
 ## 0.7.0 - 2026-11-14
 
 - **A jail can ask for more time to shut down.** `boot.stop_timeout` (`jailops config set db boot.stop_timeout 60`, or

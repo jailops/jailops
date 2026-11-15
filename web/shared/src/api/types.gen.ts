@@ -547,6 +547,7 @@ export interface BackupPolicy {
 }
 
 export interface BackupPolicySpec {
+  comment?: string
   selector?: Record<string, string>
   targets: string[]
   schedule: string
@@ -621,6 +622,7 @@ export interface BackupTarget {
 }
 
 export interface BackupTargetSpec {
+  comment?: string
   kind: string
   address?: string
   fingerprint?: string
@@ -656,6 +658,7 @@ export interface CertificateInfo {
 }
 
 export interface CertificateSpec {
+  comment?: string
   fingerprint: string
   permission: Permission
   kind: string
@@ -890,7 +893,7 @@ export interface HostFirewallApply {
   spec: HostFirewallSpec
   dry_run?: boolean
   confirm_within?: number
-  i_know?: boolean
+  confirm_lockout?: boolean
 }
 
 export interface HostFirewallConsole {
@@ -974,12 +977,6 @@ export interface HostIdentityStatus {
   resolv_conf_managed: boolean
   ntp_block: boolean
   ntp_sync?: HostNTPSync
-}
-
-export interface HostMount {
-  source: string
-  target: string
-  read_only?: boolean
 }
 
 export interface HostNTP {
@@ -1115,6 +1112,7 @@ export interface ImageSource {
 }
 
 export interface ImageSpec {
+  comment?: string
   os: OS
   release: string
   arch: string
@@ -1242,6 +1240,7 @@ export interface JailSnapshotStatus {
 }
 
 export interface JailSpec {
+  comment?: string
   image: string
   os?: OS
   storage?: string
@@ -1252,7 +1251,6 @@ export interface JailSpec {
   network?: NetworkAttach[]
   firewall?: FirewallAttach
   volumes?: VolumeAttach[]
-  host_mounts?: HostMount[]
   boot?: BootPolicy
   packages?: string[]
   env?: Record<string, string>
@@ -1429,6 +1427,7 @@ export interface NetworkDNS {
 }
 
 export interface NetworkSpec {
+  comment?: string
   uplink?: string
   ipv4?: IPv4Net
   ipv6?: IPv6Net
@@ -1502,7 +1501,7 @@ export interface Profile {
 }
 
 export interface ProfileSpec {
-  description?: string
+  comment?: string
   config?: Record<string, string>
 }
 
@@ -1543,7 +1542,7 @@ export interface ProjectQuotas {
 }
 
 export interface ProjectSpec {
-  description?: string
+  comment?: string
   hosts?: string[]
   networks?: ProjectNetwork[]
   storage?: ProjectStorage[]
@@ -1617,6 +1616,7 @@ export interface Remote {
 }
 
 export interface RemoteSpec {
+  comment?: string
   address: string
   fingerprint: string
   host_uuid?: string
@@ -1793,7 +1793,7 @@ export interface Storage {
 
 export interface StorageSpec {
   dataset: string
-  description?: string
+  comment?: string
   compression?: string
   encrypted?: boolean
 }
@@ -1815,6 +1815,7 @@ export interface Token {
 }
 
 export interface TokenSpec {
+  comment?: string
   permission: Permission
   expires_at?: string
   allow_from?: string[]
@@ -1911,6 +1912,7 @@ export interface UserCreated {
 }
 
 export interface UserSpec {
+  comment?: string
   permission: Permission
   projects?: string[]
   global?: boolean
@@ -2057,6 +2059,7 @@ export interface WireGuardPeerStatus {
 }
 
 export interface WireGuardSpec {
+  comment?: string
   mode: WireGuardMode
   interface?: string
   address: string[]

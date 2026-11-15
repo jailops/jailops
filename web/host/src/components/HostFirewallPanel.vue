@@ -50,7 +50,7 @@ const key = computed(() => fwSpecKey(spec.value, within.value))
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 const lockout = ref(false)
-const needIKnow = ref(false)
+const needConfirmLockout = ref(false)
 const iKnow = ref(false)
 const preview = ref<{ key: string; change: HostChange } | null>(null)
 const previewCurrent = computed(() => !!preview.value && preview.value.key === key.value)
@@ -60,7 +60,7 @@ const asError = (e: unknown) => (e instanceof ApiError ? e : new ApiError({ mess
 function showError(e: unknown): void {
   const err = asError(e)
   lockout.value = err.code === 'forbidden' && err.detail.guard === 'lockout'
-  if (err.code === 'invalid' && /i_know|i-know/.test(err.hint + err.message)) needIKnow.value = true
+  if (err.code === 'invalid' && /confirm_lockout|i-know/.test(err.hint + err.message)) needConfirmLockout.value = true
   error.value = lockout.value ? null : err
 }
 
@@ -85,10 +85,10 @@ async function apply(): Promise<void> {
   error.value = null
   lockout.value = false
   try {
-    const r = await api.host.applyFirewall({ spec: spec.value, confirm_within: within.value, ...(iKnow.value ? { i_know: true } : {}) })
+    const r = await api.host.applyFirewall({ spec: spec.value, confirm_within: within.value, ...(iKnow.value ? { confirm_lockout: true } : {}) })
     done.value = r.kind === 'sync' ? (r.data ?? null) : null
     preview.value = null
-    needIKnow.value = false
+    needConfirmLockout.value = false
     iKnow.value = false
     await Promise.all([l.reload(), refreshPending()])
     reset()
@@ -244,7 +244,7 @@ const ruleFrom = (r: HostFirewallRule) => (!r.from || r.from === 'any' ? s.hostf
 
       <Callout v-if="lockout" tone="danger" style="margin-top: 12px" data-test="fw-lockout">{{ s.hostfw.lockout }}</Callout>
       <ErrorPanel v-if="error" :error="error" style="margin-top: 12px" />
-      <label v-if="needIKnow" class="check" style="margin-top: 12px"><input v-model="iKnow" type="checkbox" data-test="fw-i-know" />{{ s.hostfw.iKnow }}</label>
+      <label v-if="needConfirmLockout" class="check" style="margin-top: 12px"><input v-model="iKnow" type="checkbox" data-test="fw-i-know" />{{ s.hostfw.iKnow }}</label>
       <Callout v-if="done?.pending" tone="ok" style="margin-top: 12px" data-test="fw-done">{{ s.hostfw.applied(done.pending.confirm_within) }}</Callout>
 
       <div v-if="preview" class="stack fw-preview" data-test="fw-preview">
@@ -263,11 +263,11 @@ const ruleFrom = (r: HostFirewallRule) => (!r.from || r.from === 'any' ? s.hostf
 
       <div class="row" style="margin-top: 12px">
         <button class="btn" type="submit" :disabled="!canWrite || busy || errors.length > 0 || !windowOk" data-test="fw-preview-btn">{{ s.hostfw.preview }}</button>
-        <button class="btn btn-primary" type="button" :disabled="!canWrite || busy || !previewCurrent || !preview?.change.changed || (needIKnow && !iKnow)" data-test="fw-apply" @click="apply">{{ s.hostfw.apply }}</button>
+        <button class="btn btn-primary" type="button" :disabled="!canWrite || busy || !previewCurrent || !preview?.change.changed || (needConfirmLockout && !iKnow)" data-test="fw-apply" @click="apply">{{ s.hostfw.apply }}</button>
         <button v-if="dirty" class="btn btn-ghost" type="button" @click="reset">{{ s.app.cancel }}</button>
         <span v-if="canWrite && errors.length" class="why-disabled" data-test="fw-why">{{ s.form.fixFirst(errors[0].message) }}</span>
         <span v-else-if="canWrite && !windowOk" class="why-disabled">{{ s.form.fixFirst(s.hostfw.confirmWithinHint) }}</span>
-        <span v-else-if="canWrite && needIKnow && !iKnow && previewCurrent" class="why-disabled">{{ s.hostfw.iKnowFirst }}</span>
+        <span v-else-if="canWrite && needConfirmLockout && !iKnow && previewCurrent" class="why-disabled">{{ s.hostfw.iKnowFirst }}</span>
         <span v-else-if="canWrite && !previewCurrent" class="why-disabled">{{ s.hostfw.previewFirst }}</span>
       </div>
     </form>

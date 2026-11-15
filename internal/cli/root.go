@@ -146,11 +146,6 @@ jailops events --type lifecycle -o json`,
 					a.output = v
 				}
 			}
-			if cmd.Annotations[outputFileAnnotation] != "" && cmd.Flag("output").Changed && isYAMLName(a.output) {
-				// the former -o FILE of app export: still a file, with a warning
-				fprintf(a.env.Stderr, "warning: -o %s names a file; that use of -o is deprecated, write --to %s (-o is the output format)\n", a.output, a.output)
-				a.outputFile, a.output = a.output, "table"
-			}
 			f, err := parseFormat(a.output)
 			if err != nil {
 				a.started = false
@@ -193,28 +188,23 @@ jailops events --type lifecycle -o json`,
 	_ = root.RegisterFlagCompletionFunc("host", a.completeHosts())
 	root.AddCommand(
 		a.jailCmd(), a.volumeCmd(), a.imageCmd(), a.appCmd(), a.networkCmd(), a.wireguardCmd(), a.firewallCmd(), a.backupCmd(),
-		a.projectCmd(), a.storageCmd(), a.trustCmd(), a.sessionsCmd(), a.whoamiCmd(), a.opCmd(), a.eventsCmd(), a.tokenCmd(), a.certCmd(), a.userCmd(), a.hostCmd(),
+		a.projectCmd(), a.storageCmd(), a.sessionsCmd(), a.whoamiCmd(), a.opCmd(), a.eventsCmd(), a.tokenCmd(), a.certCmd(), a.userCmd(), a.hostCmd(),
 		a.remoteCmd(), a.auditCmd(), a.bootCmd(), a.stopAllCmd(), a.doctorCmd(), a.serverCmd(), a.explainCmd(), a.completionCmd(), a.versionCmd(), a.manCmd(),
 	)
 	a.addJailShortcuts(root)
 	root.AddCommand(a.configCmd(), a.profileCmd(), a.updateCmd(), a.setAlias(a.jailDesc()), a.applyCmd())
 	markProjectScoped(root)
 	expandExamples(root)
+	a.finishCompletion(root)
 	return root
-}
-
-// outputFileAnnotation marks a command that once took -o FILE (app export): an -o value that is a YAML file name
-// is read as --to FILE there.
-const outputFileAnnotation = "jailops/output-file"
-
-func isYAMLName(s string) bool {
-	l := strings.ToLower(s)
-	return strings.HasSuffix(l, ".yaml") || strings.HasSuffix(l, ".yml")
 }
 
 // expandExamples replaces @P@ in examples with the path of the command's
 // parent, so shared builders can write examples for any group.
 func expandExamples(c *cobra.Command) {
+	if c.Example == "@SET@" && c.Parent() != nil {
+		c.Example = setExample(strings.TrimPrefix(strings.TrimPrefix(c.Parent().CommandPath(), "jailops"), " "))
+	}
 	if strings.Contains(c.Example, "@P@") && c.Parent() != nil {
 		p := strings.TrimPrefix(c.Parent().CommandPath(), "jailops")
 		p = strings.TrimPrefix(p, " ")

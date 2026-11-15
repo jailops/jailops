@@ -122,7 +122,7 @@ if [ -n "${JAILOPS_ADMIN_USER:-}" ]; then
 	if "$jops" user show "$JAILOPS_ADMIN_USER" >/dev/null 2>&1; then
 		echo "user $JAILOPS_ADMIN_USER exists"
 	elif [ -n "${JAILOPS_ADMIN_PASSWORD_FILE:-}" ]; then
-		"$jops" user create "$JAILOPS_ADMIN_USER" --admin --password-stdin < "$JAILOPS_ADMIN_PASSWORD_FILE"
+		"$jops" user create "$JAILOPS_ADMIN_USER" --admin --password-file - < "$JAILOPS_ADMIN_PASSWORD_FILE"
 	else
 		# the generated password goes to a root-only file, not to the (world-readable) bootstrap log
 		(umask 077; "$jops" user create "$JAILOPS_ADMIN_USER" --admin 2>/dev/null > /root/jailops-admin-password)

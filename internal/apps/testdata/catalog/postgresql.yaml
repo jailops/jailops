@@ -66,5 +66,5 @@ resources:
 notes: |
   Connect from inside the jail with: jailops exec NAME -- su -l postgres -c psql
   The jail accepts no connection from outside until you allow one:
-  jailops app allow NAME from @web makes a role and a database for the jail
+  jailops app allow NAME --from jail:web makes a role and a database for the jail
   web, lets its address in and prints the connection string once.

@@ -157,8 +157,8 @@ $J network create pfa-net2 --ipv4 10.93.0.1/24 --ipv6 fd93:1::/64 </dev/null >/d
 ifconfig lo0 inet6 fd91:1::fff0/128 alias; ifconfig lo0 inet6 fd93:1::fff0/128 alias
 $J project create pfa </dev/null >/dev/null || die "project pfa"
 $J project create pfb </dev/null >/dev/null || die "project pfb"
-$J project set pfa --network pfa-net --network pfa-net2 --storage default </dev/null >/dev/null || die "grant pfa"
-$J project set pfb --network pfb-net --storage default </dev/null >/dev/null || die "grant pfb"
+{ $J network grant pfa-net --project pfa && $J network grant pfa-net2 --project pfa && $J storage grant default --project pfa; } </dev/null >/dev/null || die "grant pfa"
+{ $J network grant pfb-net --project pfb && $J storage grant default --project pfb; } </dev/null >/dev/null || die "grant pfb"
 for n in a b; do $J create $n --project pfa --image "$img" --network pfa-net --storage default </dev/null >/dev/null || die "create $n"; done
 $J create c --project pfa --image "$img" --network pfa-net --storage default --tag web </dev/null >/dev/null || die "create c"
 $J create d --project pfa --image "$img" --network pfa-net2 --storage default </dev/null >/dev/null || die "create d"
@@ -772,7 +772,7 @@ jail -c name=pfrdr persist vnet vnet.interface=pfupb path=/ host.hostname=pfrdr 
 jexec pfrdr ifconfig pfupb inet 198.51.100.2/24 up || die "address in pfrdr"
 jexec pfrdr ifconfig lo0 up >/dev/null 2>&1
 $J network create pfa-up --ipv4 10.94.0.1/24 --uplink pfupa --nat </dev/null >/dev/null || die "network pfa-up"
-$J project set pfa --network pfa-net --network pfa-net2 --network pfa-up --storage default </dev/null >/dev/null || die "grant pfa-up"
+{ $J network grant pfa-net --project pfa && $J network grant pfa-net2 --project pfa && $J network grant pfa-up --project pfa && $J storage grant default --project pfa; } </dev/null >/dev/null || die "grant pfa-up"
 $J create r --project pfa --image "$img" --network pfa-up --storage default </dev/null >/dev/null || die "create r"
 policy pfa fwd "default_in: deny
 default_out: allow

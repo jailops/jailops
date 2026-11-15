@@ -6,7 +6,7 @@ configure on the host besides forwarding.
 
     jailops network create office --ipv4 192.0.2.1/24 --uplink em0 --nat
     jailops project create shop
-    jailops project set shop --network office --storage default
+    jailops network grant office --project shop && jailops storage grant default --project shop
     jailops create site --project shop --image freebsd-15-1 --network office --storage default
     jailops start site --project shop
     jailops list --project shop

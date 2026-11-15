@@ -26,22 +26,22 @@ func TestAppInstall(t *testing.T) {
 	tr.ok("app", "installed")
 	tr.ok("app", "install", "nginx", "--image", "freebsd-151", "--dry-run")
 	tr.ok("app", "install", "nginx", "--image", "freebsd-151")
-	tr.ok("app", "install", "postgresql", "--name", "db", "--image", "freebsd-151", "--network", "lan", "--storage", "default", "--memory", "2G", "--disk", "20G", "--cpu", "2")
+	tr.ok("app", "install", "postgresql", "db", "--image", "freebsd-151", "--network", "lan", "--storage", "default", "--memory", "2G", "--disk", "20G", "--cpu", "2")
 	tr.ok("app", "install", "valkey", "--image", "freebsd-151", "--no-wait")
 	tr.ok("app", "installed")
 	tr.ok("app", "installed", "ng*")
 	tr.ok("app", "installed", "-o", "name")
 	tr.ok("list")
 	tr.do("", "app", "install", "nginx", "--image", "freebsd-151")
-	tr.ok("app", "install", "nginx", "--name", "web2", "--dry-run") // no --image: the highest release the host runs
-	tr.do("", "app", "install", "nginx", "--name", "web2", "--image", "freebsd-15")
+	tr.ok("app", "install", "nginx", "web2", "--dry-run") // no --image: the highest release the host runs
+	tr.do("", "app", "install", "nginx", "web2", "--image", "freebsd-15")
 	tr.do("", "app", "install", "missing")
 	tr.do("", "app", "install", "broken")
-	tr.do("", "app", "install", "nginx", "--name", "web2", "--image", "freebsd-151", "--network", "other")
+	tr.do("", "app", "install", "nginx", "web2", "--image", "freebsd-151", "--network", "other")
 	tr.do("", "app", "install")
 	tr.golden("appinstall")
 
-	out, _, code := h.run("", "app", "install", "nginx", "--name", "web3", "--image", "freebsd-151", "-o", "json")
+	out, _, code := h.run("", "app", "install", "nginx", "web3", "--image", "freebsd-151", "-o", "json")
 	if code != 0 {
 		t.Fatal(out)
 	}

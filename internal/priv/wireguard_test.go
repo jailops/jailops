@@ -368,6 +368,9 @@ func TestWireGuardNeedsTheAdminAssertion(t *testing.T) {
 	if err := c.WGRemove(ctx, wireguard.RemoveReq{Name: "office"}); !api.IsCode(err, api.CodeForbidden) {
 		t.Errorf("remove: %v", err)
 	}
+	if err := c.WGRename(ctx, wireguard.RenameReq{From: "office", To: "hq"}); !api.IsCode(err, api.CodeForbidden) {
+		t.Errorf("rename: %v", err)
+	}
 	// reading the state needs no assertion
 	if _, err := c.WGShow(ctx, wireguard.ShowReq{Name: "office", Iface: "wg-office"}); err != nil {
 		t.Errorf("show: %v", err)
@@ -808,5 +811,47 @@ func TestWireGuardRouteGuardAllowances(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// A rename moves the key directory of an object inside the helper's directory and nowhere else; a second call is
+// a no-op, a name in use and a name that is not a name are refused.
+func TestWireGuardRenameMovesTheKeyDirectory(t *testing.T) {
+	f, h := newWGFixture(t)
+	c := f.client
+	if _, err := c.WGKeys(adminCtx, wireguard.KeysReq{Name: "office"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.WGKeys(adminCtx, wireguard.KeysReq{Name: "taken"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []wireguard.RenameReq{{From: "office", To: "../escape"}, {From: "../office", To: "hq"}, {From: "office", To: "office"}, {From: "office", To: "Bad Name"}} {
+		if err := c.WGRename(adminCtx, bad); !api.IsCode(err, api.CodeInvalid) {
+			t.Errorf("%+v: %v", bad, err)
+		}
+	}
+	if err := c.WGRename(adminCtx, wireguard.RenameReq{From: "office", To: "taken"}); !api.IsCode(err, api.CodeAlreadyExists) {
+		t.Errorf("a name in use: %v", err)
+	}
+	if err := c.WGRename(adminCtx, wireguard.RenameReq{From: "office", To: "hq"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(h.dir, "office")); !os.IsNotExist(err) {
+		t.Errorf("the old directory is still there: %v", err)
+	}
+	if mode(t, filepath.Join(h.dir, "hq")) != 0o700 {
+		t.Errorf("the mode of the moved directory changed")
+	}
+	// again, and for an object that never had keys
+	if err := c.WGRename(adminCtx, wireguard.RenameReq{From: "office", To: "hq"}); err != nil {
+		t.Errorf("a second rename: %v", err)
+	}
+	if err := c.WGRename(adminCtx, wireguard.RenameReq{From: "ghost", To: "spirit"}); err != nil {
+		t.Errorf("an object without keys: %v", err)
+	}
+	// the public key is the same under the new name
+	r, err := c.WGKeys(adminCtx, wireguard.KeysReq{Name: "hq"})
+	if err != nil || r.PublicKey == "" {
+		t.Errorf("keys of the renamed object: %+v %v", r, err)
 	}
 }

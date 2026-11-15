@@ -320,9 +320,6 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 	for _, a := range att {
 		vols = append(vols, render.FstabVolume{Source: a.Mountpoint, Target: a.Path, ReadOnly: a.ReadOnly})
 	}
-	for _, m := range j.Spec.HostMounts {
-		vols = append(vols, render.FstabVolume{Source: m.Source, Target: m.Target, ReadOnly: m.ReadOnly})
-	}
 	if osf == api.OSLinux || len(vols) > 0 {
 		fs, err := render.Fstab(render.FstabInput{OS: osf, Root: s.rootMount(name), Volumes: vols, DevfsRuleset: devRS})
 		if err != nil {
@@ -468,12 +465,6 @@ func (h *hooks) PreStart(ctx context.Context, name string) error {
 	}
 	if err := f.WriteAtomic(ctx, s.confPath(name), []byte(b.jailConf)); err != nil {
 		return err
-	}
-	// nullfs needs the mount point to exist; a thin root is rebased on updates, so it is made on every render
-	for _, m := range j.Spec.HostMounts {
-		if err := f.MkdirAll(ctx, s.rootMount(name)+m.Target); err != nil {
-			return err
-		}
 	}
 	if b.hasFstab {
 		if err := f.WriteAtomic(ctx, s.fstabPath(name), []byte(b.fstab)); err != nil {

@@ -50,6 +50,8 @@ type Rule struct {
 	Flags []flagRule
 	// RequiredFlags must all appear.
 	RequiredFlags []string
+	// OneOfFlags: exactly one of these must appear.
+	OneOfFlags []string
 	// Subcommands are the accepted first positional words. Empty means none
 	// are accepted and the rule takes no positionals unless Rest is set.
 	Subcommands []string
@@ -254,6 +256,8 @@ var pkgOptionValue = map[string]string{"ASSUME_ALWAYS_YES": "yes", "IGNORE_OSVER
 // checkPkgOption accepts the few -o options image building needs:
 // REPOS_DIR=<path under the storage roots or the state directory>, PKG_CACHEDIR=<the same>,
 // ASSUME_ALWAYS_YES=yes, IGNORE_OSVERSION=yes and ABI=<abi>.
+func checkPkgJail(_ Config, v string) error { return ValidJailName(v) }
+
 func checkPkgOption(c Config, v string) error {
 	k, val, ok := strings.Cut(v, "=")
 	if !ok {
@@ -420,12 +424,12 @@ var CommandRules = []Rule{
 		Reason: "configure and delete the dummynet pipes of the bandwidth limits, in JailOps's own range of pipe numbers only",
 	},
 	{
-		Name: "pkg", Binary: "/usr/sbin/pkg", Reason: "install and update packages inside a jail root from the outside",
+		Name: "pkg", Binary: "/usr/sbin/pkg", Reason: "install and update packages in a jail root nobody runs in (-r), or inside a running jail (-j)",
 		Verify: verifyPkg,
 
-		Flags:         []flagRule{{Flag: "-r", Path: pathJailTree}, {Flag: "-o", Check: checkPkgOption, Many: true}},
-		RequiredFlags: []string{"-r"},
-		Exact:         [][]string{{"config", "abi"}},
+		Flags:      []flagRule{{Flag: "-r", Path: pathJailTree}, {Flag: "-j", Check: checkPkgJail}, {Flag: "-o", Check: checkPkgOption, Many: true}},
+		OneOfFlags: []string{"-r", "-j"},
+		Exact:      [][]string{{"config", "abi"}},
 		// the packages installed on purpose, for an app draft (internal/apps.PkgLeavesArgv)
 		RestExact:   [][]string{{"query", "-e", "%a = 0", "%n %v %R %w"}},
 		Subcommands: []string{"install", "upgrade", "update", "delete", "remove", "autoremove", "info", "audit", "lock", "unlock", "fetch", "clean", "check", "version", "bootstrap", "query"},
@@ -608,6 +612,15 @@ func (c Config) CheckCommandCtx(ctx context.Context, argv []string) (*Rule, []st
 	for _, f := range r.RequiredFlags {
 		if seen[f] == 0 {
 			return nil, nil, invalid("%s needs %s", r.Name, f)
+		}
+	}
+	if len(r.OneOfFlags) > 0 {
+		n := 0
+		for _, f := range r.OneOfFlags {
+			n += seen[f]
+		}
+		if n != 1 {
+			return nil, nil, invalid("%s needs exactly one of %s", r.Name, strings.Join(r.OneOfFlags, " and "))
 		}
 	}
 	rest := args[i:]

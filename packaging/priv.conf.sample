@@ -50,7 +50,7 @@ allow-user = jailops
 #admin-raw-param = cpuset
 #admin-allow-flag = mount.zfs
 #admin-devfs-ruleset = 10
-# Directories an admin may mount into a jail with `jailops create --host-mount SOURCE:TARGET[:ro]`, for example an
+# Directories an admin may mount into a jail with `jailops volume create NAME --path DIR`, for example an
 # archive dataset of a pool JailOps does not manage. The source must be below one of these. A volume with a path
 # (`jailops volume create NAME --path DIR`) names a directory on a mount below one of these too: list the directory
 # above the mount (/mnt), not the mount point of a storage box itself.

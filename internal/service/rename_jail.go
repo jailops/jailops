@@ -193,7 +193,7 @@ func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
 			if slices.Contains(r.From, "jail:"+name) || slices.Contains(r.To, "jail:"+name) {
 				e := api.Errorf(api.CodeConflict, "jail %q is named by rule %d of firewall policy %s", name, i+1, o.Meta.Name)
 				if o.Meta.ManagedBy == api.AppAccessManagedBy {
-					return e.WithHint("it is the source of an app access grant: jailops app deny " + strings.TrimPrefix(o.Meta.Name, "app-") + " from jail:" + name + " first")
+					return e.WithHint("it is the source of an app access grant: jailops app deny " + strings.TrimPrefix(o.Meta.Name, "app-") + " --from jail:" + name + " first")
 				}
 				return e.WithHint(hint)
 			}

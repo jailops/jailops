@@ -20,7 +20,10 @@ When the request (and the jail's profiles) do not say otherwise, the daemon fill
 | `prompt` | `default` | the bash prompt of every user: `default`, `short`, `none`, or a PS1 text |
 
 At the jail's **first start** JailOps installs the `bash` package into the jail from the host (`pkg -r ROOT install -y
-bash`, the same command an app installation uses) and writes the prompt. Both live below `/usr/local`, a persistent
+bash`, before anything runs in the jail, with the host's own network, whatever the jail's firewall says) and writes the prompt.
+If the host cannot fetch it, the setup after the start tries once more from inside the jail (`pkg -j JAIL install -y bash`, over
+the jail's own network); the start never waits for it longer than a minute, and `jailops shell` of a jail that still has no bash says
+which command fixes it (`jailops jail shell-setup NAME`) and that `jailops set NAME shell sh` uses FreeBSD's own shell instead. Both live below `/usr/local`, a persistent
 dataset of a thin jail, so they survive an OS update (the root swap of `jailops jail upgrade` and of the nightly image
 upgrade); a thick jail is upgraded in place. App installations do the same right after the app's packages.
 
@@ -144,7 +147,7 @@ jails:
     jailops set web shell sh                 # jailops shell and the console start /bin/sh again
 
 A running jail gets a new prompt at once, a stopped one at its next start. The console's Configuration tab has both keys.
-To drop bash itself, set the shell to `sh` and remove the package by hand (`pkg -r` from the host, or `pkg delete bash`
+To drop bash itself, set the shell to `sh` and remove the package by hand (`pkg delete bash`
 in the jail if it has `pkg`); JailOps does not install it again on its own.
 
 **For all new jails of a host** (`/usr/local/etc/jailops/jailopsd.yaml`, read at the daemon's start):

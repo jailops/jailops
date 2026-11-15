@@ -59,7 +59,7 @@ jail/db stopped
 
 $ jailops delete -l env=test
 ! conflict: jail "tmp" is running
-! hint: stop it first ('jailops stop tmp'), or pass --force to stop it before the delete
+! hint: stop it first ('jailops stop tmp'), or pass --stop to stop it before the delete
 [exit 5]
 
 $ jailops stop tmp
@@ -95,29 +95,29 @@ jail/tmp deleted
 
 $ jailops delete web
 ! conflict: jail "web" is running
-! hint: stop it first ('jailops stop web'), or pass --force to stop it before the delete
+! hint: stop it first ('jailops stop web'), or pass --stop to stop it before the delete
 [exit 5]
 
 $ jailops --dry-run delete web
-dry-run: would delete jail web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; the delete needs --force to stop it first
+dry-run: would delete jail web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; the delete needs --stop to stop it first
 
 $ jailops --dry-run delete web -o json
 {
   "action": "delete jail",
   "destroys": [
-    "web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; the delete needs --force to stop it first"
+    "web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; the delete needs --stop to stop it first"
   ],
   "dry_run": true
 }
 
-$ jailops --dry-run delete --force web
-dry-run: would delete jail web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; --force stops it first
+$ jailops --dry-run delete --stop web
+dry-run: would delete jail web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; --stop stops it first
 
-$ jailops --dry-run delete --force web -o json
+$ jailops --dry-run delete --stop web -o json
 {
   "action": "delete jail",
   "destroys": [
-    "web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; --force stops it first"
+    "web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; --stop stops it first"
   ],
   "dry_run": true
 }
@@ -127,19 +127,19 @@ $ jailops --dry-run delete nosuch
 ! hint: list them with 'jailops jail list'; check --project, --host and --remote too
 [exit 4]
 
-$ jailops delete --force -y web
+$ jailops delete --stop -y web
 ! This deletes 1 jail of project "main" and destroys its data; it cannot be undone:
-!   web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; --force stops it first
+!   web (running): root 256.0 MiB, data 70.0 MiB, 0 snapshots; --stop stops it first
 ! Type the name "web" to confirm: 
 ! usage: confirmation required: standard input is not a terminal and gave no answer
 ! hint: type the name on standard input, or pass --confirm-data-loss (-y does not answer this question)
 [exit 2]
 
-$ jailops delete --force --confirm-data-loss web
+$ jailops delete --stop --confirm-data-loss web
 jail/web stopped
 jail/web deleted
 
-$ jailops delete --all --force --confirm-data-loss
+$ jailops delete --all --stop --confirm-data-loss
 jail/db deleted
 
 $ jailops list

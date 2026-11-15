@@ -73,8 +73,8 @@ func (a *app) showStorage(st api.Storage) error {
 	s := showWriter{w: a.env.Stdout, width: 13}
 	s.title("Storage %s", st.Metadata.Name)
 	s.kv("Dataset", st.Spec.Dataset)
-	if st.Spec.Description != "" {
-		s.kv("Description", st.Spec.Description)
+	if st.Spec.Comment != "" {
+		s.kv("Comment", st.Spec.Comment)
 	}
 	s.kv("Compression", orText(st.Spec.Compression, "inherited"))
 	pool := dash(st.Status.Pool)
@@ -296,8 +296,8 @@ func (a *app) showImage(i api.Image) error {
 func (a *app) showProject(p api.Project) error {
 	s := showWriter{w: a.env.Stdout, width: 12}
 	s.title("Project %s", p.Metadata.Name)
-	if p.Spec.Description != "" {
-		s.kv("Description", p.Spec.Description)
+	if p.Spec.Comment != "" {
+		s.kv("Comment", p.Spec.Comment)
 	}
 	s.kv("Hosts", orText(strings.Join(p.Spec.Hosts, ", "), "this host"))
 	var nets, stor []string
@@ -315,7 +315,7 @@ func (a *app) showProject(p api.Project) error {
 		stor = append(stor, g)
 	}
 	s.kv("Networks", orText(strings.Join(nets, ", "), "none: grant one with 'jailops network grant NETWORK --project "+p.Metadata.Name+"'"))
-	s.kv("Storage", orText(strings.Join(stor, ", "), "none: grant one with 'jailops project set "+p.Metadata.Name+" --storage NAME'"))
+	s.kv("Storage", orText(strings.Join(stor, ", "), "none: grant one with 'jailops storage grant NAME --project "+p.Metadata.Name+"'"))
 	s.kv("Firewall", orText(strings.Join(p.Spec.FirewallPolicies, ", "), "none"))
 	s.kv("Images", orText(strings.Join(p.Spec.Images, ", "), "any"))
 	s.kv("Age", age(a.env.Now(), p.Metadata.CreatedAt))
@@ -366,7 +366,7 @@ func (i indentWriter) Write(b []byte) (int, error) {
 func (a *app) showAutoUpgrade(s showWriter, i api.Image) {
 	au, st := i.Spec.AutoUpgrade, i.Status.AutoUpgrade
 	if (au == nil || !au.Enabled) && st == nil {
-		s.kv("Nightly", "off ('jailops image auto-upgrade "+i.Metadata.Name+" on' turns it on)")
+		s.kv("Nightly", "off ('jailops image set "+i.Metadata.Name+" --auto-upgrade' turns it on)")
 		return
 	}
 	if au == nil || !au.Enabled {

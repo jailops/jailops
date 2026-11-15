@@ -41,7 +41,7 @@ func (p *pkgScript) fn(name string, o jailos.ExecOpts) (run.Result, error) {
 func upgrades(e *dtest.Env) int {
 	n := 0
 	for _, c := range e.Run.Calls() {
-		if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 3 && c.Cmd.Args[0] == "-r" && c.Cmd.Args[2] == "upgrade" && c.Cmd.Args[3] == "-y" {
+		if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 3 && c.Cmd.Args[0] == "-j" && c.Cmd.Args[2] == "upgrade" && c.Cmd.Args[3] == "-y" {
 			n++
 		}
 	}

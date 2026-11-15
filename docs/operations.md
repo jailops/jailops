@@ -30,8 +30,8 @@ that is the boundary ([security-model.md](security-model.md#the-first-administra
 Take the credential away first; it stops working on its next request, and long requests (event streams, console and exec
 sessions) end at their next keepalive.
 
-    jailops token list && jailops token delete NAME            # an API token
-    jailops trust revoke NAME|FINGERPRINT                      # a client certificate (also: jailops cert delete)
+    jailops token list && jailops token revoke NAME            # an API token
+    jailops cert revoke NAME|FINGERPRINT                      # a client certificate (also: jailops cert revoke)
     jailops sessions list && jailops sessions revoke ID        # a console session
     jailops user disable NAME                                  # every session and login of a user, until enable
 
@@ -49,7 +49,7 @@ then enrol a new certificate ([backup-restore.md](backup-restore.md#2-enrol-the-
 ## A daemon you suspect is compromised
 
 **What still holds** while `jailopsd` (the user `jailops`) is in someone else's hands: the helper checks every request
-against `priv.conf`, so no path outside the storage roots, no program outside the allow-list, no host mount the operator
+against `priv.conf`, so no path outside the storage roots, no program outside the allow-list, no host directory the operator
 did not name, no raw `pf.conf` text, no private WireGuard key and no deadline of a pending firewall change
 ([security-model.md](security-model.md#two-programs-one-boundary)). **What does not:** the attacker can do anything an API
 administrator can do within those bounds, and holds everything the daemon holds.

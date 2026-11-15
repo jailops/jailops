@@ -317,7 +317,8 @@ func TestBackupRunVerifyRestoreProject(t *testing.T) {
 	tr.ok("backup", "verify", id, "--depth", "extract")
 	tr.ok("--dry-run", "backup", "run", "nightly")
 	tr.do("", "backup", "run", "ghost")
-	tr.ok("project", "create", "restored", "--storage", "default")
+	tr.ok("project", "create", "restored")
+	tr.ok("storage", "grant", "default", "--project", "restored")
 	tr.ok("backup", "restore", id, "--project", "restored", "--as", "web-r", "-y")
 	var rr api.RestoreRequest
 	if err := json.Unmarshal(h.lastBody("POST", "/api/v1/restores"), &rr); err != nil || rr.Project != "restored" || rr.DryRun {

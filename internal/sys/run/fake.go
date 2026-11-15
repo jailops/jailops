@@ -7,6 +7,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Wildcards for Rule.Args.
@@ -53,6 +54,9 @@ type Fake struct {
 	// CaptureStdin reads Stdin fully into the recorded Call. Do not use it
 	// with huge streams.
 	CaptureStdin bool
+	// HangOn, when set and true for a command, makes Run wait until the context ends or the command's timeout passes,
+	// as a command that never returns would.
+	HangOn func(Cmd) bool
 }
 
 var _ Runner = (*Fake)(nil)
@@ -121,6 +125,22 @@ func matchArgs(pat, args []string) bool {
 func (f *Fake) Run(ctx context.Context, c Cmd) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
+	}
+	if f.HangOn != nil && f.HangOn(c) {
+		// a command that never ends: only the request ending, or the command's own timeout, ends it
+		var timer <-chan time.Time
+		if c.Timeout > 0 {
+			timer = time.After(c.Timeout)
+		}
+		f.mu.Lock()
+		f.calls = append(f.calls, Call{Cmd: c})
+		f.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return Result{}, ctx.Err()
+		case <-timer:
+			return Result{}, fmt.Errorf("%s: %w after %s", Redact(c), ErrTimeout, c.Timeout)
+		}
 	}
 	call := Call{Cmd: c}
 	if c.Stdin != nil && f.CaptureStdin {

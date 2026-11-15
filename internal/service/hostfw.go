@@ -37,8 +37,8 @@ type HostFirewallRequest struct {
 	ConfirmWithin int `json:"confirm_within,omitempty"`
 	// Peer is the address the request came from, as the daemon's listener saw it; empty when it is unknown (the
 	// unix socket, a hub). The lock-out check uses it.
-	Peer  string `json:"peer,omitempty"`
-	IKnow bool   `json:"i_know,omitempty"`
+	Peer           string `json:"peer,omitempty"`
+	ConfirmLockout bool   `json:"confirm_lockout,omitempty"`
 }
 
 // HostFirewallState is what the helper reads.
@@ -167,7 +167,7 @@ func (s *Service) ApplyHostFirewall(ctx context.Context, in api.HostFirewallAppl
 		return api.HostChange{}, err
 	}
 	defer unlock()
-	res, err := fw.HostFirewallApply(ctx, HostFirewallRequest{Spec: spec.Canonical(), DryRun: in.DryRun, ConfirmWithin: in.ConfirmWithin, Peer: peerOf(ctx), IKnow: in.IKnow})
+	res, err := fw.HostFirewallApply(ctx, HostFirewallRequest{Spec: spec.Canonical(), DryRun: in.DryRun, ConfirmWithin: in.ConfirmWithin, Peer: peerOf(ctx), ConfirmLockout: in.ConfirmLockout})
 	if err != nil {
 		return api.HostChange{}, notManagedByHelper(err, api.HostModuleFirewall)
 	}

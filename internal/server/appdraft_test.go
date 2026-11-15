@@ -103,8 +103,7 @@ func TestAppDraft(t *testing.T) {
 		t.Errorf("%+v", d)
 	}
 	// the host command is the one the helper allows; the in-jail ones are the builders'
-	root := "/jailops/projects/alpha/jails/web/root"
-	if !slices.Contains(e.Run.Argv(), strings.Join(apps.PkgLeavesArgv(root), " ")) {
+	if !slices.Contains(e.Run.Argv(), strings.Join(apps.PkgLeavesArgv("alpha_web"), " ")) {
 		t.Errorf("host commands %q", e.Run.Argv())
 	}
 	want := [][]string{apps.SockstatArgv(), apps.FindNewerArgv("/usr/local/etc"), apps.FindNewerArgv("/var/log"),

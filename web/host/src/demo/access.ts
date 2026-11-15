@@ -137,7 +137,7 @@ export function demoAccess(jails: () => Jail[], sets: () => Array<{ metadata: { 
     const host = addrOf(j)[0] ?? '10.20.0.12'
     if (pw) {
       res.connection_string = `postgres://${g.role}:${pw}@${host}:5432/${g.database}?sslmode=disable`
-      notes.push(`the connection string is shown once and stored nowhere; jailops app allow ${name} from ${canonical} --rotate makes a new password`)
+      notes.push(`the connection string is shown once and stored nowhere; jailops app allow ${name} --from ${canonical} --rotate makes a new password`)
     } else if (g.role) notes.push(`role ${g.role} exists: its password was shown when it was made; --rotate makes a new one`)
     if (!res.changed) notes.push('nothing changed: the grant exists as it is')
     return { ok: res }

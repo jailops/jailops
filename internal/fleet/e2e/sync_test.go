@@ -259,7 +259,7 @@ kind: JailTemplate
 metadata:
   name: web-base
 spec:
-  description: a web jail
+  comment: a web jail
   jail:
     image: freebsd-15@stable
     storage: default

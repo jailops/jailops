@@ -30,7 +30,7 @@ const jailsOn = (name: string) => (l.data.value?.jails ?? []).filter((j) => j.sp
 const healthTone = (h: string | undefined) => (h === 'ONLINE' ? 'ok' : h === 'DEGRADED' ? 'warn' : h ? 'danger' : '')
 
 const creating = ref(false)
-const form = reactive({ name: '', dataset: '', description: '', compression: '' })
+const form = reactive({ name: '', dataset: '', comment: '', compression: '' })
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
 // the object name rule of the server; the dataset must look like pool/name and leave room for the names below it
@@ -40,7 +40,7 @@ const check = useFormCheck(() => ({
 }))
 const labels: Record<string, string> = { 'sc-name': s.storage.name, 'sc-ds': s.storage.dataset }
 function open(): void {
-  Object.assign(form, { name: '', dataset: '', description: '', compression: '' })
+  Object.assign(form, { name: '', dataset: '', comment: '', compression: '' })
   error.value = null
   check.reset()
   creating.value = true
@@ -49,7 +49,7 @@ const create = () => check.submit(async () => {
   busy.value = true
   error.value = null
   try {
-    await runOp(s.storage.createTitle + ': ' + form.name, () => api.storage.create({ metadata: { name: form.name }, spec: { dataset: form.dataset, ...(form.description ? { description: form.description } : {}), ...(form.compression ? { compression: form.compression } : {}), } }))
+    await runOp(s.storage.createTitle + ': ' + form.name, () => api.storage.create({ metadata: { name: form.name }, spec: { dataset: form.dataset, ...(form.comment ? { comment: form.comment } : {}), ...(form.compression ? { compression: form.compression } : {}), } }))
     creating.value = false
   } catch (e) {
     error.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
@@ -97,7 +97,7 @@ const remove = () => runOp(s.storage.deleteTitle(removing.value!.metadata.name),
         <div class="field"><label for="sc-ds">{{ s.storage.dataset }} <span class="req" aria-hidden="true">*</span></label>
           <input id="sc-ds" v-model="form.dataset" class="mono" type="text" autocomplete="off" placeholder="tank/jailops" :aria-invalid="!!check.err('sc-ds')" aria-describedby="sc-ds-h sc-ds-e" @blur="check.touch('sc-ds')" />
           <span id="sc-ds-h" class="hint">{{ s.storage.datasetHint }}</span><span id="sc-ds-e" class="field-error" role="alert">{{ check.err('sc-ds') }}</span></div>
-        <div class="field"><label for="sc-desc">{{ s.storage.description }}</label><input id="sc-desc" v-model="form.description" type="text" /></div>
+        <div class="field"><label for="sc-desc">{{ s.storage.comment }}</label><input id="sc-desc" v-model="form.comment" type="text" /></div>
         <div class="field"><label for="sc-comp">{{ s.storage.compression }}</label><select id="sc-comp" v-model="form.compression"><option value="">-</option><option>zstd</option><option>lz4</option></select></div>
         <ErrorPanel v-if="error" :error="error" />
       </form>

@@ -51,20 +51,21 @@ fast      tank/fast      tank   ONLINE   1.0 GiB   1023.0 GiB
 $ jailops storage show fast -o name
 fast
 
-$ jailops project create web --description front end
+$ jailops project create web --comment front end
 project/web created
 
-$ jailops project set web --network web --storage fast=500G --max-jails 2 --max-memory 8G
-project/web updated
+$ jailops network grant web --project web
+network/web granted to project web
 
-$ jailops project set web --network web=10.50.0.100-10.50.0.150
-! usage: --network "web=10.50.0.100-10.50.0.150": a network is granted whole; ranges are not reserved any more
-! hint: run 'jailops project set --help' for usage
-[exit 2]
+$ jailops storage grant fast --project web --quota 500G
+storage/fast granted to project web
+
+$ jailops project set web --max-jails 2 --max-memory 8G
+project/web updated
 
 $ jailops project show web
 Project web
-  Description: front end
+  Comment:     front end
   Hosts:       this host
   Networks:    web
   Storage:     fast (quota 500G)
@@ -80,7 +81,7 @@ Usage
   Addresses:   0 (no quota)
 
 $ jailops project list
-    NAME   HOSTS   NETWORKS   STORAGE   JAILS   DESCRIPTION
+    NAME   HOSTS   NETWORKS   STORAGE   JAILS   COMMENT
 *   main   -       lan        default   0       -
     web    -       web        fast      0/2     front end
 
@@ -97,11 +98,11 @@ network/web revoked from project web
 $ jailops network grant web --project web
 network/web granted to project web
 
-$ jailops project set web --revoke-storage fast
-project/web updated
+$ jailops storage revoke fast --project web
+storage/fast revoked from project web
 
-$ jailops project set web --storage fast=500G
-project/web updated
+$ jailops storage grant fast --project web --quota 500G
+storage/fast granted to project web
 
 $ jailops create nginx --project web --image freebsd-15@stable --memory 1G --cpu 1 --network web --storage fast
 jail/nginx created
@@ -125,12 +126,12 @@ $ jailops project show web -o json
     "uuid": "<uuid>",
     "host": "<uuid>",
     "scope": "host",
-    "generation": 6,
+    "generation": 8,
     "created_at": "2026-03-01T09:00:00Z",
     "updated_at": "2026-03-01T09:00:00Z"
   },
   "spec": {
-    "description": "front end",
+    "comment": "front end",
     "networks": [
       {
         "network": "web"
@@ -174,6 +175,6 @@ $ jailops project delete -y default
 ! hint: list them with 'jailops project list'; check --project, --host and --remote too
 [exit 4]
 
-$ jailops project create shop --new-network --hosts h1,h2 --storage fast
+$ jailops project create shop --new-network --hosts h1,h2
 project/shop created
 

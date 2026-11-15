@@ -44,6 +44,7 @@ const (
 	OpWGImport   = "wg.import"
 	OpWGApply    = "wg.apply"
 	OpWGRemove   = "wg.remove"
+	OpWGRename   = "wg.rename"
 	OpWGShow     = "wg.show"
 	OpWGTools    = "wg.tools"
 )
@@ -71,6 +72,9 @@ func init() {
 	})
 	register(OpWGRemove, false, func(ctx context.Context, h Host, a wireguard.RemoveReq, _ *callIO) (any, error) {
 		return empty{}, h.WGRemove(ctx, a)
+	})
+	register(OpWGRename, false, func(ctx context.Context, h Host, a wireguard.RenameReq, _ *callIO) (any, error) {
+		return empty{}, h.WGRename(ctx, a)
 	})
 	register(OpWGShow, false, func(ctx context.Context, h Host, a wireguard.ShowReq, _ *callIO) (any, error) {
 		return h.WGShow(ctx, a)
@@ -105,6 +109,11 @@ func (c *Client) WGApply(ctx context.Context, q wireguard.ApplyReq) (wireguard.A
 // WGRemove implements wireguard.Host.
 func (c *Client) WGRemove(ctx context.Context, q wireguard.RemoveReq) error {
 	return callNone(ctx, c, OpWGRemove, q)
+}
+
+// WGRename implements wireguard.Host.
+func (c *Client) WGRename(ctx context.Context, q wireguard.RenameReq) error {
+	return callNone(ctx, c, OpWGRename, q)
 }
 
 // WGShow implements wireguard.Host.
@@ -666,6 +675,46 @@ func (l *Local) wgSync(ctx context.Context, r *os.Root, t wgtool.Tool, name, ifa
 	}
 	defer func() { _ = r.Remove(wgConfFile) }()
 	return t.SyncConf(ctx, iface, filepath.Join(l.cfg.WireGuardDir, name, wgConfFile))
+}
+
+// WGRename implements wireguard.Host: the key directory of an object moves to the new name inside the helper's own
+// WireGuard directory, and nowhere else. A second call changes nothing.
+func (l *Local) WGRename(ctx context.Context, q wireguard.RenameReq) error {
+	if err := l.wgAdmin("renaming a WireGuard object")(ctx); err != nil {
+		return err
+	}
+	for _, n := range []string{q.From, q.To} {
+		if err := wireguard.ValidName("name", n); err != nil {
+			return err
+		}
+	}
+	if q.From == q.To {
+		return api.Errorf(api.CodeInvalid, "the new name is the old name")
+	}
+	l.wgMu.Lock()
+	defer l.wgMu.Unlock()
+	base, err := l.wgDir(false)
+	if err != nil {
+		if api.IsCode(err, api.CodeNotFound) {
+			return nil // nothing was ever made on this host
+		}
+		return err
+	}
+	defer base.Close()
+	_, fromErr := base.Lstat(q.From)
+	_, toErr := base.Lstat(q.To)
+	switch {
+	case fromErr != nil && errors.Is(fromErr, fs.ErrNotExist):
+		return nil // never made, or already renamed
+	case fromErr != nil:
+		return api.Errorf(api.CodeInternal, "reading the key directory of %s: %v", q.From, fromErr)
+	case toErr == nil:
+		return api.Errorf(api.CodeAlreadyExists, "wireguard %q already has keys on this host", q.To)
+	}
+	if err := base.Rename(q.From, q.To); err != nil {
+		return api.Errorf(api.CodeInternal, "renaming the key directory of %s: %v", q.From, err)
+	}
+	return nil
 }
 
 // WGRemove implements wireguard.Host.

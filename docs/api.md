@@ -70,11 +70,13 @@ restores the jail with no volume attachments with `no_volumes`.
 
 **Renames** (extension `rename`, [design.md](design.md#88-renames)): `POST /api/v1/networks/{name}/rename`,
 `/api/v1/firewall/address-sets/{name}/rename`, `/api/v1/firewall/policies/{name}/rename`, `/api/v1/profiles/{name}/rename`,
-`/api/v1/jails/{name}/rename` (a stopped jail), `/api/v1/images/{name}/rename` and `/api/v1/projects/{name}/rename` (its
-jails stopped), body `Rename` (`new_name`, `dry_run`), `If-Match` checked against the object's generation. A dry run
+`/api/v1/jails/{name}/rename` (a stopped jail), `/api/v1/images/{name}/rename`, `/api/v1/projects/{name}/rename` (its
+jails stopped), `/api/v1/volumes/{name}/rename` (the jails that attach it stopped), `/api/v1/storage/{name}/rename`,
+`/api/v1/backup-targets/{name}/rename`, `/api/v1/backup-policies/{name}/rename`, `/api/v1/certificates/{name}/rename`,
+`/api/v1/users/{name}/rename` and `/api/v1/wireguard/{name}/rename`, body `Rename` (`new_name`, `dry_run`), `If-Match` checked against the object's generation. A dry run
 answers at once with `RenameResult`: `changes` (`kind` object, reference, dataset, anchor, interface, file or state;
 `object`; `detail`), `counts`, `steps` and `warnings`; a rename answers an operation whose result is the same. All of it
-changes or none of it. Global admin for networks, images and projects, the project's admin for the others. An update
+changes or none of it. Global admin for networks, images, projects, storage, backup targets, certificates, users and WireGuard tunnels, the project's admin for the others. An update
 (`PUT`, `PATCH`) never changes a name. SDK: `Resource.Rename` (`c.Networks().Rename`, `c.Firewall().Policies().Rename`,
 ...) and `c.Jails().Rename`; the fake serves them.
 
@@ -148,7 +150,7 @@ unless it is confirmed. The timer is the helper's own; the daemon only reads it.
 | Route | Role | What |
 |---|---|---|
 | `GET /api/v1/host/firewall` | readonly, global | kind `HostFirewall`: `spec` is what was applied last, or the default before any apply (a hand-written `pf.conf` is not read back into fields); `status`: `managed`, `config_enabled`, `helper_enabled`, `file_exists`, `file_managed`, `drift` (`pf.conf`, `pf_enable`, `pf_rules`), `applied`, `pf_enabled`, `rules` (in plain words), `warnings` (ssh open to the world), `pending`, `console_port`. Always readable |
-| `PUT /api/v1/host/firewall` | admin, global | body `{"spec": {...}, "dry_run": true, "confirm_within": 120, "i_know": false}`; reply `HostChange` with `diff`, `rules`, `actions`, `warnings` and, after a real change, `snapshot` and `pending` |
+| `PUT /api/v1/host/firewall` | admin, global | body `{"spec": {...}, "dry_run": true, "confirm_within": 120, "confirm_lockout": false}`; reply `HostChange` with `diff`, `rules`, `actions`, `warnings` and, after a real change, `snapshot` and `pending` |
 | `GET /api/v1/host/pending` | readonly, global | `HostPending`: `pending` (`id`, `module`, `snapshot`, `created`, `deadline`, `seconds_left`, `confirm_within`) and `last`, how the last one ended (`confirmed`, `reverted`, `timed_out`, `reverted_at_boot`, `revert_failed`) |
 | `POST /api/v1/host/pending/confirm` | admin, global | body `{"id": "..."}` optional; keeps the change; reply `HostPending` |
 | `POST /api/v1/host/pending/revert` | admin, global | the same; puts the snapshot back now |
@@ -173,7 +175,7 @@ the daemon. `nat` other than `none` is `unsupported`. `confirm_within` is 10 to 
 
 A real change is refused with `forbidden` (detail `guard: lockout`) when the address the request came from could reach
 neither an ssh port nor the console under the new rules, and with `invalid` (detail `guard: unknown_peer`) when that address
-is unknown (the unix socket, a request through a hub) unless `i_know` is set; a dry run reports both as `warnings`. While a
+is unknown (the unix socket, a request through a hub) unless `confirm_lockout` is set; a dry run reports both as `warnings`. While a
 change waits for its confirmation every other change of the host (`PUT` of a module, a restore) answers `busy` with the id
 of the pending change in `detail.pending`. In Go:
 

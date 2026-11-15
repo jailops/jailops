@@ -42,9 +42,6 @@ func (s *Server) setupJails() {
 		if verb != "delete" && j.Spec.Delegate && !rc.id.Global {
 			return api.Errorf(api.CodeForbidden, "only a global admin may delegate ZFS to a jail")
 		}
-		if verb != "delete" && len(j.Spec.HostMounts) > 0 && !rc.id.Global {
-			return api.Errorf(api.CodeForbidden, "mounting host directories into a jail is granted by a global administrator only")
-		}
 		return nil
 	}
 	k.assign = func(j, old *api.Jail) *api.Error {

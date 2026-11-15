@@ -318,6 +318,9 @@ func startSession(ctx context.Context, bin string, args []string, o ExecOpts, re
 	return s, nil
 }
 
+// daemonSetsid is how long what a command left in its group has to leave it (setsid) before the group is killed.
+const daemonSetsid = 250 * time.Millisecond
+
 // sessionGrace is how long the leader of a terminal session has to end after it was released, and how long the output of
 // a finished session is waited for.
 var sessionGrace = 10 * time.Second
@@ -361,7 +364,13 @@ func (s *localSession) reap(ctx context.Context) {
 		err = <-leaderDone
 	}
 	close(waited)
-	s.killGroup() // no process of the session outlives it
+	// No process of the session outlives it. A daemon the command started is in the group of the command until it has
+	// made a session of its own, which takes it a moment after its parent exited: killing the group at once would take
+	// it too (one start in ten of `daemon -f`), so what is left is given that moment first.
+	if syscall.Kill(-s.pgid, 0) == nil {
+		time.Sleep(daemonSetsid)
+	}
+	s.killGroup()
 	s.code = 0
 	if ps := s.cmd.ProcessState; ps != nil {
 		s.code = ps.ExitCode()

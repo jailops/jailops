@@ -42,5 +42,12 @@ func (s *Server) renameRoutes() []route {
 		one("/api/v1/jails", svc.RenameJail),
 		one("/api/v1/images", svc.RenameImage),
 		one("/api/v1/projects", svc.RenameProject),
+		one("/api/v1/backup-targets", svc.RenameBackupTarget),
+		one("/api/v1/backup-policies", svc.RenameBackupPolicy),
+		one("/api/v1/certificates", svc.RenameCertificate),
+		one("/api/v1/storage", svc.RenameStorage),
+		one("/api/v1/volumes", svc.RenameVolume),
+		one("/api/v1/users", svc.RenameUser),
+		one("/api/v1/wireguard", svc.RenameWireGuard),
 	}
 }

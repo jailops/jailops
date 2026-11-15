@@ -185,9 +185,9 @@ type HostFirewallApply struct {
 	DryRun bool `json:"dry_run,omitempty"`
 	// ConfirmWithin is the confirmation window in seconds (default 120, 10 to 1800).
 	ConfirmWithin int `json:"confirm_within,omitempty"`
-	// IKnow accepts a change whose lock-out check cannot run because the caller's address is unknown (the unix
+	// ConfirmLockout accepts a change whose lock-out check cannot run because the caller's address is unknown (the unix
 	// socket, a hub). The confirmation window still applies.
-	IKnow bool `json:"i_know,omitempty"`
+	ConfirmLockout bool `json:"confirm_lockout,omitempty"`
 }
 
 // HostPendingChange is a change that reverts itself at Deadline unless it is confirmed.

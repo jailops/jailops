@@ -83,8 +83,8 @@ describe('the upload form', () => {
 
 describe('the remote add commands', () => {
   it('pins nothing with a public certificate, and keeps the trust token form', () => {
-    expect(publicRemoteAddCommand('bsd01', 'console.example.com:39110')).toBe('jailops remote add bsd01 https://console.example.com:39110 --token-stdin')
-    expect(remoteAddCommand('host.example:8443', 'jbc_x.y')).toBe('jailops remote add host.example:8443 --token jbc_x.y')
+    expect(publicRemoteAddCommand('bsd01', 'console.example.com:39110')).toBe('jailops remote add bsd01 https://console.example.com:39110 --token-file -')
+    expect(remoteAddCommand('host.example:8443', 'jbc_x.y')).toBe('jailops remote add myhost host.example:8443 --token jbc_x.y')
   })
 })
 

@@ -84,7 +84,7 @@ should not use outside a test.
 A policy selects jails **by label**, so label the jails first:
 
     jailops label web --project shop backup=yes
-    jailops backup target create vault --address https://backup.example.net:39111 --fingerprint <the node's fingerprint>
+    jailops backup target create vault --url https://backup.example.net:39111 --fingerprint <the node's fingerprint>
     jailops backup policy create nightly --project shop --selector backup=yes --target vault \
         --schedule "0 2 * * *" --keep-daily 14 --keep-weekly 8 --keep-monthly 12 \
         --verify-schedule "0 4 * * 0" --verify-mode extract
@@ -96,7 +96,7 @@ An empty selector matches no jail. `--include-state` also backs up the host's st
 **Volumes.** A policy also backs up the volumes of the jails it selects, and the volumes whose own labels match the selector.
 A volume is a backup of its own, taken from its own snapshot, so a volume that three jails attach is copied **once** per run,
 and a jail's backup holds no volume files. `jailops backup list` shows jail and volume backups with a KIND column
-(`--volume NAME` lists one volume's). To leave volumes out, set `--exclude-volumes` on the policy, or
+(`--volume NAME` lists one volume's). To leave volumes out, set `--no-volumes` on the policy, or
 `jailops backup run nightly --no-volumes` for one run. An encrypted volume is backed up while it is unlocked; a locked one
 is reported (`locked`) and backed up by the next run after `jailops volume unlock`. The files go to the node encrypted with
 the backup key, like everything else. The node applies retention,

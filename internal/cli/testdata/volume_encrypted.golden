@@ -28,11 +28,17 @@ $ jailops volume create plain --passphrase-file <dir>/vault.pass
 ! hint: run 'jailops volume create --help' for usage
 [exit 2]
 
-$ jailops jail create vault --image freebsd-15@stable --network lan --storage default --volume vault:/srv/db
+$ jailops jail create vault --image freebsd-15@stable --network lan --storage default
 jail/vault created
 
-$ jailops jail create vault2 --image freebsd-15@stable --network lan --storage default --volume vault2:/srv/db
+$ jailops volume attach vault vault /srv/db
+volume/vault attached to jail vault
+
+$ jailops jail create vault2 --image freebsd-15@stable --network lan --storage default
 jail/vault2 created
+
+$ jailops volume attach vault2 vault2 /srv/db
+volume/vault2 attached to jail vault2
 
 $ jailops volume attach vault2 vault /srv/other
 ! conflict: volume "vault" is encrypted and attached to jail "vault" already: an encrypted volume is attached to one jail

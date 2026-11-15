@@ -109,7 +109,7 @@ describe('trust', () => {
     expect(scopeValid([], true)).toBe(true)
   })
   it('builds the exact remote add command', () => {
-    expect(remoteAddCommand('host.example:8443', 'jbc_x.y')).toBe('jailops remote add host.example:8443 --token jbc_x.y')
+    expect(remoteAddCommand('host.example:8443', 'jbc_x.y')).toBe('jailops remote add myhost host.example:8443 --token jbc_x.y')
   })
 })
 

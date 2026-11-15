@@ -56,15 +56,15 @@ func TestJailBulkActions(t *testing.T) {
 	// a dry run shows the summary of a running jail without --force too, and says --force is needed
 	tr.ok("--dry-run", "delete", "web")
 	tr.ok("--dry-run", "delete", "web", "-o", "json")
-	tr.ok("--dry-run", "delete", "--force", "web")
-	tr.ok("--dry-run", "delete", "--force", "web", "-o", "json")
+	tr.ok("--dry-run", "delete", "--stop", "web")
+	tr.ok("--dry-run", "delete", "--stop", "web", "-o", "json")
 	tr.do("", "--dry-run", "delete", "nosuch") // a dry run of a missing jail is an error
 	if _, ok := h.srv.JailIn("main", "web"); !ok {
 		t.Fatal("dry-run deleted web")
 	}
-	tr.do("", "delete", "--force", "-y", "web")
-	tr.ok("delete", "--force", "--confirm-data-loss", "web")
-	tr.ok("delete", "--all", "--force", "--confirm-data-loss")
+	tr.do("", "delete", "--stop", "-y", "web")
+	tr.ok("delete", "--stop", "--confirm-data-loss", "web")
+	tr.ok("delete", "--all", "--stop", "--confirm-data-loss")
 	tr.ok("list")
 	tr.golden("jail_bulk")
 }
@@ -108,13 +108,13 @@ func TestGenerationNotation(t *testing.T) {
 	h.srv.SeedGeneration("freebsd-15")
 	h.srv.SeedGeneration("freebsd-15")
 	tr := h.transcript()
-	tr.ok("image", "build", "freebsd-15", "--from", "1")
-	tr.ok("image", "build", "freebsd-15", "--from", "freebsd-15#g2", "--dry-run")
-	tr.do("", "image", "build", "freebsd-15", "--from", "other#g2")
-	tr.ok("image", "alias", "set", "freebsd-15", "stable", "g1")
-	tr.ok("image", "alias", "set", "freebsd-15", "edge", "freebsd-15#g4")
-	tr.ok("image", "delete-generation", "-y", "freebsd-15", "g3")
-	tr.do("", "image", "delete-generation", "-y", "freebsd-15", "three")
+	tr.ok("image", "build", "freebsd-15", "--from-generation", "1")
+	tr.ok("image", "build", "freebsd-15", "--from-generation", "freebsd-15#g2", "--dry-run")
+	tr.do("", "image", "build", "freebsd-15", "--from-generation", "other#g2")
+	tr.ok("image", "alias", "add", "freebsd-15", "stable", "--generation", "g1")
+	tr.ok("image", "alias", "add", "freebsd-15", "edge", "--generation", "freebsd-15#g4")
+	tr.ok("image", "generation", "delete", "-y", "freebsd-15", "g3")
+	tr.do("", "image", "generation", "delete", "-y", "freebsd-15", "three")
 	tr.ok("jail", "create", "web", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
 	tr.ok("jail", "upgrade", "web", "--generation", "2")
 	var up api.JailUpgrade
@@ -226,19 +226,18 @@ func TestProjectFilters(t *testing.T) {
 	}
 }
 
-// Harmonised flags and names: trust add --role (with --permission, the former
-// name, as a hidden alias), remote create/delete, backup restore --to-host by name.
+// Harmonised flags and names: cert enroll --role, remote add/delete, backup restore --to-host by name.
 func TestFlagHarmonisation(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("trust", "add", "--name", "laptop", "--permission", "operator", "--projects", "main", "-o", "json")
-	tr.ok("trust", "add", "--name", "old", "--role", "admin", "--global", "-o", "json")
-	out, _, _ := h.run("", "trust", "add", "--help")
-	if strings.Contains(out, "--permission") || !strings.Contains(out, "--role") || strings.Contains(out, "--ttl") || !strings.Contains(out, "--expires") {
-		t.Fatalf("trust add help: %s", out)
+	tr.ok("cert", "enroll", "laptop", "--role", "operator", "--projects", "main", "-o", "json")
+	tr.ok("cert", "enroll", "old", "--role", "admin", "--global", "-o", "json")
+	out, _, _ := h.run("", "cert", "enroll", "--help")
+	if !strings.Contains(out, "--role") || !strings.Contains(out, "--expires") {
+		t.Fatalf("cert enroll help: %s", out)
 	}
-	tr.ok("remote", "create", "lab", "unix:/run/lab.sock")
+	tr.ok("remote", "add", "lab", "unix:/run/lab.sock")
 	tr.ok("remote", "delete", "lab")
 	h.srv.SeedRemote(api.Remote{Metadata: api.ObjectMeta{Name: "host-b"}, Spec: api.RemoteSpec{Address: "https://10.94.0.2:39110", HostUUID: h.srv.HostUUID()}})
 	h.srv.SeedBackup(api.Backup{
@@ -287,6 +286,7 @@ func TestCompletionEverywhere(t *testing.T) {
 	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
 	h.run("", "jail", "create", "db", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
 	h.run("", "jail", "snapshot", "create", "web", "s1")
+	h.run("", "firewall", "policy", "create", "floor", "--default-in", "deny", "--default-out", "allow")
 	h.srv.SeedRemote(api.Remote{Metadata: api.ObjectMeta{Name: "host-b"}, Spec: api.RemoteSpec{Address: "https://10.94.0.2:39110"}})
 	for _, c := range []struct {
 		args       []string
@@ -296,16 +296,26 @@ func TestCompletionEverywhere(t *testing.T) {
 		{[]string{"delete", "web", "db", ""}, ":", "web"},
 		{[]string{"jail", "snapshot", "delete", "web", ""}, "s1\n", "web"},
 		{[]string{"jail", "snapshot", "show", "web", ""}, "s1\n", ""},
-		{[]string{"image", "alias", "set", "freebsd-15", ""}, "stable\n", ""},
-		{[]string{"image", "alias", "set", "freebsd-15", "stable", ""}, "g1\n", ""},
-		{[]string{"image", "delete-generation", "freebsd-15", ""}, "g1\n", ""},
-		{[]string{"image", "build", "freebsd-15", "--from", ""}, "g1\n", ""},
+		{[]string{"image", "alias", "add", "freebsd-15", ""}, "stable\n", ""},
+		{[]string{"image", "alias", "add", "freebsd-15", "stable", "--generation", ""}, "g1\n", ""},
+		{[]string{"image", "generation", "delete", "freebsd-15", ""}, "g1\n", ""},
+		{[]string{"image", "build", "freebsd-15", "--from-generation", ""}, "g1\n", ""},
 		{[]string{"jail", "list", "--state", ""}, "running\n", ""},
 		{[]string{"list", "-c", ""}, "addresses", ""},
 		{[]string{"list", "--sort", ""}, "age", ""},
 		{[]string{"create", "x", "--layout", ""}, "thick\n", ""},
 		{[]string{"create", "x", "--update-strategy", ""}, "rebase\n", ""},
 		{[]string{"create", "x", "--depends", ""}, "web\n", ""},
+		{[]string{"project", "set", "main", "--firewall-policy", ""}, "floor\n", ""},
+		{[]string{"firewall", "test", "--proto", ""}, "tcp\n", ""},
+		{[]string{"firewall", "test", "--proto", ""}, "icmp6\n", ""},
+		{[]string{"firewall", "test", "--family", ""}, "6\n", ""},
+		{[]string{"firewall", "test", "--icmp-type", ""}, "echoreq\n", ""},
+		{[]string{"firewall", "test", "--from", ""}, "host\n", ""},
+		{[]string{"firewall", "test", "--from", ""}, "jail:db\n", ""},
+		{[]string{"firewall", "test", "--from", "host", "--to", ""}, "jail:db\n", ""},
+		{[]string{"firewall", "test", "--from", "host", "--to", "jail:d"}, "jail:db\n", ""},
+		{[]string{"firewall", "test", "--from", "jail:web", "--to", "jail:db", "--proto", ""}, "udp\n", ""},
 		{[]string{"image", "create", "x", "--os", ""}, "linux\n", ""},
 		{[]string{"image", "create", "x", "--arch", ""}, "arm64\n", ""},
 		{[]string{"image", "create", "x", "--source-type", ""}, "debootstrap\n", ""},

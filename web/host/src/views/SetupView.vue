@@ -151,7 +151,7 @@ async function applyFirewall(): Promise<void> {
   busy.value = true
   error.value = null
   try {
-    const r = await runOp(s.setup.fwTitle, () => api.host.applyFirewall({ spec: setupFirewall(clientAddress.value), confirm_within: SETUP_CONFIRM_WITHIN, ...(clientAddress.value ? {} : { i_know: true }) }))
+    const r = await runOp(s.setup.fwTitle, () => api.host.applyFirewall({ spec: setupFirewall(clientAddress.value), confirm_within: SETUP_CONFIRM_WITHIN, ...(clientAddress.value ? {} : { confirm_lockout: true }) }))
     fwPending.value = r.data?.pending ?? null
     if (fwPending.value) setPending({ pending: fwPending.value })
     else fwConfirmed.value = true
@@ -376,7 +376,7 @@ const nothingToMake = computed(() => have.loaded && !make.storage && !make.proje
             <Callout tone="info">{{ s.setup.fwRevert(SETUP_CONFIRM_WITHIN) }}</Callout>
             <template v-if="!clientAddress">
               <Callout tone="warn">{{ s.setup.fwUnknown }}</Callout>
-              <label class="check"><input v-model="iKnow" type="checkbox" data-test="setup-fw-iknow" />{{ s.setup.fwIKnow }}</label>
+              <label class="check"><input v-model="iKnow" type="checkbox" data-test="setup-fw-iknow" />{{ s.setup.fwConfirmLockout }}</label>
             </template>
             <Callout v-if="fwPending" tone="warn" data-test="setup-fw-pending">{{ s.setup.fwPending }}</Callout>
             <Callout v-if="fwConfirmed" tone="ok" data-test="setup-fw-done">{{ s.setup.fwDone }}</Callout>

@@ -21,6 +21,8 @@ type BackupTarget struct {
 
 // BackupTargetSpec describes a backup destination.
 type BackupTargetSpec struct {
+	// Comment is what the object is for: one line of free text.
+	Comment string `json:"comment,omitempty"`
 	// Kind is "node" (a jailopsd in backup role over HTTPS) or "directory".
 	Kind    string `json:"kind"`
 	Address string `json:"address,omitempty"`
@@ -38,6 +40,8 @@ type BackupPolicy struct {
 // BackupPolicySpec is the desired backup behaviour. Backups are always
 // encrypted on the host before they leave it.
 type BackupPolicySpec struct {
+	// Comment is what the object is for: one line of free text.
+	Comment string `json:"comment,omitempty"`
 	// Selector matches jails by label. An empty selector matches none; use
 	// the label "all" explicitly to match every jail.
 	Selector map[string]string `json:"selector,omitempty"`

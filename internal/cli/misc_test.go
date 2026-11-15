@@ -360,18 +360,18 @@ func TestRemoteCommands(t *testing.T) {
 	url := ts.URL
 
 	// The fingerprint is shown and must be confirmed; -y is not an answer.
-	_, errs, code := tr.do("tok\n", "remote", "add", "lab", url, "--token-stdin", "-y")
+	_, errs, code := tr.do("tok\n", "remote", "add", "lab", url, "--token-file", "-", "-y")
 	if code != 2 || !strings.Contains(errs, colon) || !strings.Contains(errs, "Pin this certificate") {
 		t.Fatalf("-y must not answer the pin question: %d %s", code, errs)
 	}
 	if _, code := statFile(h.cfgFile); code == nil {
 		t.Fatal("config written without confirmation")
 	}
-	_, errs, code = tr.do("tok\nn\n", "remote", "add", "lab", url, "--token-stdin")
+	_, errs, code = tr.do("tok\nn\n", "remote", "add", "lab", url, "--token-file", "-")
 	if code != 1 || !strings.Contains(errs, "not trusted") {
 		t.Fatalf("refused pin: %d %s", code, errs)
 	}
-	out, errs, code := tr.do("tok\ny\n", "remote", "add", "lab", url, "--token-stdin")
+	out, errs, code := tr.do("tok\ny\n", "remote", "add", "lab", url, "--token-file", "-")
 	if code != 0 || !strings.Contains(out, "remote/lab added") || !strings.Contains(out, "connected to tls-host") || !strings.Contains(errs, colon) {
 		t.Fatalf("add: %d %s %s", code, out, errs)
 	}

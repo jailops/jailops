@@ -24,7 +24,7 @@
 
     jailops network create web --ipv4 10.88.0.1/24 --nat --ipv6 2001:db8:1:2:1::/80 --uplink vtnet0
     jailops project create shop
-    jailops project set shop --network web --storage default
+    jailops network grant web --project shop && jailops storage grant default --project shop
     jailops create site --project shop --image freebsd-15-1 --network web --storage default
     jailops start site --project shop
     jailops list --project shop          # ADDRESSES shows the IPv4 and the IPv6 address
@@ -258,9 +258,9 @@ stops when its rule goes.
   The jail's own anchor still decides what reaches the jail. (Verified on FreeBSD 15.1 amd64: a jail on a proxy-mode
   network listened on 8080 and `curl -6 http://[<jail address>]:8080/` from another host, across the internet, returned
   its answer; the rule was removed and the ruleset reloaded afterwards.)
-- A rule reads `ACTION DIRECTION [PROTO] [from ENDPOINT,..] [to ENDPOINT,..] [port PORT,..] [log] [rdr HOSTPORT:JAILPORT] [disabled] [comment TEXT]`.
+- A rule has an action (`allow` or `deny`), a direction (`in` or `out`) and, as it needs them, a protocol, `from` and `to` endpoints, ports, `log`, a redirect, a name, a comment and `disabled`. The rules of a policy are added and changed one at a time with `jailops firewall rule` (`add`, `list`, `edit`, `move`, `enable`, `disable`, `remove`), each rule addressed by its number or its name, or all at once in a file.
   A rule belongs to the jail that has the policy: an inbound rule is always to the jail itself and an outbound rule always from it, so an inbound rule names only `from` and an outbound rule only `to` (`to` on an inbound rule and `from` on an outbound rule are refused).
-  A rule with `rdr HOSTPORT:JAILPORT` is a port forward: a connection to the network's uplink address (or the `listen` address)
+  A rule with a redirect (`--redirect HOSTPORT:JAILPORT`, `redirect:` in a file; it names the ports, so the rule has no `port`) is a port forward: a connection to the network's uplink address (or the `listen` address)
   on HOSTPORT is translated to the jail's address on JAILPORT (`match in on <uplink> … rdr-to`) and passed by a labelled
   rule on the uplink (`pass in quick on <uplink> … to <jail> port JAILPORT`), which admits what the rule's `from` names,
   also where the host's own rules block inbound traffic. The state of a connection that came through the forward is ended
@@ -280,7 +280,7 @@ stops when its rule goes.
   separate namespaces, so a jail and an address set of one project may have the same name; a jail name has at most 29
   characters, so every jail can be named in a rule. The pf tables are `j_<jail>` (a hyphen read as `_`), `s_<set>` and
   `t_<tag>`. A set with one address is a perfectly good alias: give it a name and say in its comment what it is.
-  `jailops firewall policy create --help` has the grammar.
+  `jailops firewall rule add --help` has the flags.
 
   **A policy always says its defaults.** `default_in` and `default_out` are required, `allow` or `deny`, on every policy
   (`policy create` without `-f` needs `--default-in` and `--default-out`; a file without them is refused, and so is a
@@ -312,8 +312,7 @@ stops when its rule goes.
   allow rule decides only where no deny rule matches. An anchor without a deny rule is written policy by policy. A raw PF fragment stays after the
   allow rules of its policy.
 
-  **A rule can be switched off without deleting it.** `disabled` (`--rule "allow in tcp port 22 disabled comment ssh, off
-  until the audit"`, `disabled: true` in a file, a checkbox in the console) keeps the rule in the policy: it is validated
+  **A rule can be switched off without deleting it.** `jailops firewall rule disable web 2` (`--disabled` on `rule add`, `disabled: true` in a file, a checkbox in the console) keeps the rule in the policy: it is validated
   like any other, it keeps its number, `policy show` marks it, and the anchor has it as a comment line (`# rule 2
   (disabled): name`, then its comment) so a reviewer sees what is off. It is not loaded: a disabled allow rule lets nothing
   through and a disabled deny rule stops nothing, and a disabled deny rule does not group the anchor.
@@ -325,17 +324,19 @@ stops when its rule goes.
 
       # project shop: the web jail of project blog (10.30.0.5) may reach the database
       jailops firewall address-set create blog --address 10.30.0.5 --comment "the web jail of project blog"
-      jailops firewall policy create db --default-in deny --default-out allow \
-        --rule "allow in tcp from set:blog port 5432 comment the blog's web jail"
+      jailops firewall policy create db --default-in deny --default-out allow
+      jailops firewall rule add db in --action allow --proto tcp --from set:blog --port 5432 --comment "the blog's web jail"
       # project blog: the jail may go out to the database at 10.20.0.10 (the closed default of a project says no otherwise)
-      jailops firewall policy create out-db --default-in deny --default-out allow \
-        --rule "allow out tcp to 10.20.0.10 port 5432 comment the shop database"
+      jailops firewall policy create out-db --default-in deny --default-out allow
+      jailops firewall rule add out-db out --action allow --proto tcp --to 10.20.0.10 --port 5432 --comment "the shop database"
 
       jailops firewall address-set create office --address 192.0.2.0/24 --comment "the office"
       jailops firewall address-set create git_allow --address 198.51.100.7 --address jail:web
-      jailops firewall policy create web --default-in deny --default-out allow --comment "the public web server" \
-        --rule "allow in tcp port 80,443 comment the site" --rule "allow in tcp from set:office port 22 comment ssh from the office"
-      jailops firewall policy create db --default-in deny --default-out allow --rule "allow in tcp from jail:web port 5432 comment the web jail"
+      jailops firewall policy create web --default-in deny --default-out allow --comment "the public web server"
+      jailops firewall rule add web in --action allow --proto tcp --port 80,443 --comment "the site"
+      jailops firewall rule add web in --action allow --proto tcp --from set:office --port 22 --comment "ssh from the office"
+      jailops firewall policy create db --default-in deny --default-out allow
+      jailops firewall rule add db in --action allow --proto tcp --from jail:web --port 5432 --comment "the web jail"
 
   A member of an address set is an address, a CIDR, `jail:name` or `set:name`: a list such as
   `git_allow` can hold jails and be added to later. A jail that a rule or a set names is not renamed or deleted until the reference is changed (the refusal names the policy or the set), so a rule never names a jail that is gone, and a jail made later never takes the place of one.
@@ -353,7 +354,7 @@ stops when its rule goes.
             comment: the web jail
 
   `--comment` of `address-set create` goes with a single `--address`; an IPv4 and an IPv6 network of the same office are two
-  entries, each with its own comment, so that each says what it is. The keyword `comment` ends a `--rule` and takes the rest of it. `address-set show` and `policy show` list the comments in a table, the rendered anchor of a jail carries them as
+  entries, each with its own comment, so that each says what it is. A rule's comment is `--comment` of `rule add` and `rule edit`. `address-set show` and `policy show` list the comments in a table, the rendered anchor of a jail carries them as
   comment lines (`# set git_allow: 198.51.100.7 the office`, `# policy NAME` and `#   what it is for`, `# rule 1: name` and `#   why`), and the
   console has a comment field on a set, a policy and every rule, and takes the comment of a member at the end of its line
   (`198.51.100.0/24  # the office`).

@@ -204,6 +204,7 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/storage/{name}", ad),
 	r("PATCH", "/api/v1/storage/{name}", ad),
 	r("DELETE", "/api/v1/storage/{name}", ad),
+	r("POST", "/api/v1/storage/{name}/rename", ad),
 
 	// Images and generations.
 	r("GET", "/api/v1/images", ro),
@@ -282,6 +283,7 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/volumes/{name}", ro),
 	r("PUT", "/api/v1/volumes/{name}", ad),
 	r("PATCH", "/api/v1/volumes/{name}", ad),
+	r("POST", "/api/v1/volumes/{name}/rename", ad),
 	r("DELETE", "/api/v1/volumes/{name}", ad),
 	r("POST", "/api/v1/volumes/{name}/unlock", op),
 	r("POST", "/api/v1/volumes/{name}/lock", op),
@@ -316,6 +318,7 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/wireguard/{name}", ad),
 	r("PATCH", "/api/v1/wireguard/{name}", ad),
 	r("DELETE", "/api/v1/wireguard/{name}", ad),
+	r("POST", "/api/v1/wireguard/{name}/rename", ad),
 	r("POST", "/api/v1/wireguard/{name}/peers", ad),
 	r("DELETE", "/api/v1/wireguard/{name}/peers/{peer}", ad),
 	r("POST", "/api/v1/wireguard/{name}/up", ad),
@@ -344,12 +347,14 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/backup-targets/{name}", ad),
 	r("PATCH", "/api/v1/backup-targets/{name}", ad),
 	r("DELETE", "/api/v1/backup-targets/{name}", ad),
+	r("POST", "/api/v1/backup-targets/{name}/rename", ad),
 	r("GET", "/api/v1/backup-policies", ro),
 	r("POST", "/api/v1/backup-policies", ad),
 	r("GET", "/api/v1/backup-policies/{name}", ro),
 	r("PUT", "/api/v1/backup-policies/{name}", ad),
 	r("PATCH", "/api/v1/backup-policies/{name}", ad),
 	r("DELETE", "/api/v1/backup-policies/{name}", ad),
+	r("POST", "/api/v1/backup-policies/{name}/rename", ad),
 	r("GET", "/api/v1/backups", ro),
 	r("POST", "/api/v1/backups", op),
 	r("GET", "/api/v1/backups/{id}", ro),
@@ -410,6 +415,7 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/users/{name}", ad),
 	r("PUT", "/api/v1/users/{name}", ad),
 	r("PATCH", "/api/v1/users/{name}", ad),
+	r("POST", "/api/v1/users/{name}/rename", ad),
 	r("DELETE", "/api/v1/users/{name}", ad),
 	r("POST", "/api/v1/users/{name}/password", ad),
 	r("GET", "/api/v1/tokens", ad),
@@ -422,6 +428,7 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/certificates/{fingerprint}", ad),
 	r("PATCH", "/api/v1/certificates/{fingerprint}", ad),
 	r("DELETE", "/api/v1/certificates/{fingerprint}", ad),
+	r("POST", "/api/v1/certificates/{name}/rename", ad),
 })
 
 func classifyAll(es []Entry) []Entry {

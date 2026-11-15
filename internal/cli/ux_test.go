@@ -69,7 +69,7 @@ func TestHostCertificateCommands(t *testing.T) {
 	// going back replaces the uploaded certificate: its name is typed, -y does not answer
 	tr.do("", "host", "certificate", "self-signed", "-y")
 	tr.do("www.example.org\n", "host", "certificate", "self-signed")
-	tr.ok("host", "certificate", "self-signed", "--i-know")
+	tr.ok("host", "certificate", "self-signed", "--confirm-replace")
 	out := tr.ok("host", "certificate", "show", "-o", "json")
 	var st api.HostCertificate
 	if err := json.Unmarshal([]byte(out), &st); err != nil || st.Source != api.CertSourceSelfSigned {
@@ -150,28 +150,28 @@ func TestJailCreateDefaults(t *testing.T) {
 		t.Fatalf("defaults: %+v %v", j.Spec, err)
 	}
 	h.srv.SeedNetwork(api.Network{Metadata: api.ObjectMeta{Name: "dmz"}, Spec: api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.30.0.0/24", Gateway: "10.30.0.1", Range: "10.30.0.10-10.30.0.20"}}})
-	tr.ok("project", "set", "main", "--network", "dmz")
+	tr.ok("network", "grant", "dmz", "--project", "main")
 	tr.do("", "create", "db", "--image", "freebsd-15@stable", "--storage", "default") // two networks: never guessed
 	tr.ok("--dry-run", "create", "db", "--image", "freebsd-15@stable", "--network", "dmz")
 	tr.golden("jail_create_defaults")
 }
 
-// The vocabulary: -l and --selector, --role and --permission, --expires and --ttl, --X-file for secrets.
+// The vocabulary: -l, --role, --expires and --X-file for secrets.
 func TestVocabularyAliases(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
 	tr.ok("create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--label", "env=prod")
-	tr.ok("list", "--selector", "env=prod", "-o", "name")
-	tr.ok("stop", "--label", "env=prod")
-	tr.ok("token", "create", "a", "--permission", "operator", "--projects", "main", "-o", "name")
-	tr.ok("trust", "add", "--name", "b", "--role", "operator", "--projects", "main", "--ttl", "15m", "-o", "name")
+	tr.ok("list", "--label", "env=prod", "-o", "name")
+	tr.ok("stop", "--selector", "env=prod")
+	tr.ok("token", "create", "a", "--role", "operator", "--projects", "main", "-o", "name")
+	tr.ok("cert", "enroll", "b", "--role", "operator", "--projects", "main", "--expires", "15m", "-o", "name")
 	pw := writeFile(t, h.dir, "pw", "a long password\n", 0o600)
 	tr.ok("user", "create", "carol", "--role", "operator", "--projects", "main", "--password-file", pw)
 	if _, errs, code := tr.do("another long password\n", "user", "set-password", "carol", "--password-file", "-"); code != 0 {
 		t.Fatalf("--password-file -: %d %s", code, errs)
 	}
-	tr.do("pw\n", "user", "set-password", "carol", "--password-file", "-", "--password-stdin")
+	tr.do("pw\n", "user", "set-password", "carol", "--password-file", "-", "--generate")
 	tr.ok("backup", "policy", "create", "nightly", "-l", "env=prod", "--schedule", "0 2 * * *", "--target", "usb", "--dry-run")
 	tr.golden("vocabulary")
 	out, _, _ := h.run("", "__complete", "explain", "")
@@ -226,20 +226,15 @@ func TestDocumentedJoinSequence(t *testing.T) {
 		t.Fatal(errs)
 	}
 	// docs/install.md, "Remote access"
-	token, errs, code := admin.run("", "trust", "add", "--name", "laptop", "--role", "operator", "--projects", "web")
+	token, errs, code := admin.run("", "cert", "enroll", "laptop", "--role", "operator", "--projects", "web")
 	if code != 0 || !strings.HasPrefix(token, sdk.TrustTokenPrefix) {
-		t.Fatalf("trust add: %d %s", code, errs)
+		t.Fatalf("cert enroll: %d %s", code, errs)
 	}
 	client := &harness{t: t, srv: srv, ts: ts, dir: filepath.Join(dir, "client"), env: map[string]string{}, cfgFile: filepath.Join(dir, "client", "config.yaml")}
 	_ = os.MkdirAll(client.dir, 0o700)
 	client.env["JAILOPS_CONFIG"] = client.cfgFile
 	host := strings.TrimPrefix(ts.URL, "https://")
-	// the two-argument form is for API tokens: a trust token there is refused with the right command
-	_, errs, code = client.run(token, "remote", "add", "myhost", ts.URL, "--token-stdin")
-	if code != 2 || !strings.Contains(errs, "jailops remote add "+host+" --token-stdin --name myhost") {
-		t.Fatalf("two arguments with a trust token: %d %s", code, errs)
-	}
-	out, errs, code := client.run(token, "remote", "add", host, "--token-stdin", "--name", "myhost")
+	out, errs, code := client.run(token, "remote", "add", "myhost", host, "--token-file", "-")
 	if code != 0 || !strings.Contains(out, "remote/myhost added: trusted as laptop (operator, web)") {
 		t.Fatalf("join: %d %q %s", code, out, errs)
 	}
@@ -247,12 +242,12 @@ func TestDocumentedJoinSequence(t *testing.T) {
 		t.Fatalf("whoami: %d %q %s", code, out, errs)
 	}
 	// docs/exposure.md, "Join flow": the same with --expires and --cert-expires, the token from a file
-	token, errs, code = admin.run("", "trust", "add", "--name", "ops", "--role", "admin", "--global", "--expires", "15m", "--cert-expires", "2160h")
+	token, errs, code = admin.run("", "cert", "enroll", "ops", "--role", "admin", "--global", "--expires", "15m", "--cert-expires", "2160h")
 	if code != 0 {
 		t.Fatal(errs)
 	}
 	tf := writeFile(t, dir, "token", token, 0o600)
-	if out, errs, code := client.run("", "remote", "add", host, "--token-file", tf, "--name", "ops"); code != 0 || !strings.Contains(out, "trusted as ops (admin, global)") {
+	if out, errs, code := client.run("", "remote", "add", "ops", host, "--token-file", tf); code != 0 || !strings.Contains(out, "trusted as ops (admin, global)") {
 		t.Fatalf("join from a file: %d %q %s", code, out, errs)
 	}
 }

@@ -26,7 +26,7 @@ func TestAppNew(t *testing.T) {
 	tr.do("", "app", "validate", filepath.Join(dir, "memcached.yaml"))
 	tr.do("", "app", "new", "memcached", "--dir", dir)
 	icon := writeFile(t, dir, "memcached.svg", "<svg xmlns=\"http://www.w3.org/2000/svg\"/>", 0o644) // the author's own icon
-	tr.ok("app", "new", "memcached", "--package", "memcached,libevent", "--port", "11211", "--port", "11211/udp", "--dir", dir, "--force")
+	tr.ok("app", "new", "memcached", "--package", "memcached,libevent", "--port", "11211", "--port", "11211/udp", "--dir", dir, "--overwrite")
 	if b, _ := os.ReadFile(icon); !strings.HasPrefix(string(b), "<svg xmlns=\"http://www.w3.org/2000/svg\"/>") {
 		t.Errorf("the icon was overwritten: %s", b)
 	}
@@ -92,12 +92,10 @@ func TestAppExport(t *testing.T) {
 	out := filepath.Join(h.dir, "cache.yaml")
 	tr := h.transcript()
 	tr.ok("app", "export", "cache")
-	tr.ok("app", "export", "cache", "--to", out)
+	tr.ok("app", "export", "cache", "--file", out)
 	tr.do("", "app", "validate", out)
-	tr.do("", "app", "export", "cache", "--to", out)
-	tr.ok("app", "export", "cache", "--to", filepath.Join(h.dir, "other.yaml"))
-	tr.ok("app", "export", "cache", "-o", out, "--force", "-q") // the former spelling: a file, with a warning
-	tr.do("", "app", "export", "cache", "-o", out, "--to", filepath.Join(h.dir, "third.yaml"))
+	tr.do("", "app", "export", "cache", "--file", out)
+	tr.ok("app", "export", "cache", "--file", filepath.Join(h.dir, "other.yaml"))
 	tr.ok("app", "export", "cache", "-o", "json")
 	tr.do("", "app", "export", "cache", "-o", "csv")
 	tr.ok("app", "export", "plain")

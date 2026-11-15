@@ -576,12 +576,12 @@ func TestHostFWLockoutGuard(t *testing.T) {
 		lockoutGuard(api.DefaultHostFirewall(39110).Canonical(), "2001:db8::1", false) != nil {
 		t.Error("open or default")
 	}
-	// unknown caller: refused without i_know, accepted with it
-	if err := lockoutGuard(spec, "", false); !api.IsCode(err, api.CodeInvalid) || !strings.Contains(err.(*api.Error).Hint, "--i-know") {
+	// unknown caller: refused without confirm_lockout, accepted with it
+	if err := lockoutGuard(spec, "", false); !api.IsCode(err, api.CodeInvalid) || !strings.Contains(err.(*api.Error).Hint, "--confirm-lockout") {
 		t.Errorf("unknown peer: %v", err)
 	}
 	if err := lockoutGuard(spec, "", true); err != nil {
-		t.Errorf("i_know: %v", err)
+		t.Errorf("confirm_lockout: %v", err)
 	}
 
 	// through the helper: refused before anything changes; the dry run says so
@@ -607,10 +607,10 @@ func TestHostFWLockoutGuard(t *testing.T) {
 	if snaps, _ := c.HostSnapshots(context.Background()); len(snaps) != 0 {
 		t.Errorf("a refused apply took a snapshot: %v", snaps)
 	}
-	req.IKnow = true
+	req.ConfirmLockout = true
 	res, err := c.HostFirewallApply(admin(), req)
 	if err != nil || res.Pending == nil {
-		t.Fatalf("i_know: %+v %v", res, err)
+		t.Fatalf("confirm_lockout: %+v %v", res, err)
 	}
 }
 

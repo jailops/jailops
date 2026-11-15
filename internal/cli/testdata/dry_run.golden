@@ -68,13 +68,13 @@ spec:
 $ jailops --dry-run network delete -y lan
 dry-run: would delete network lan
 
-$ jailops --dry-run image alias set freebsd-15 x
+$ jailops --dry-run image alias add freebsd-15 x
 dry-run: would point alias x of image freebsd-15 at the newest generation
 
-$ jailops --dry-run image alias delete -y freebsd-15 x
-dry-run: would delete alias x of image freebsd-15
+$ jailops --dry-run image alias remove -y freebsd-15 x
+dry-run: would remove alias x of image freebsd-15
 
-$ jailops --dry-run image delete-generation -y freebsd-15 1
+$ jailops --dry-run image generation delete -y freebsd-15 1
 dry-run: would delete generation freebsd-15#g1
 
 $ jailops --dry-run firewall address-set create s --address 10.0.0.0/8

@@ -26,7 +26,8 @@ func TestBootPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	tr.ok("volume", "create", "secrets", "--encrypted", "--passphrase-file", file)
-	create("vault", "--autostart", "--volume", "secrets:/srv/db")
+	create("vault", "--autostart")
+	tr.ok("volume", "attach", "vault", "secrets", "/srv/db")
 	create("report", "--autostart", "--depends", "vault")
 	tr.ok("boot")
 	tr.ok("boot", "-o", "json")

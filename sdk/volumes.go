@@ -169,3 +169,8 @@ func (s *VolumeSnapshotClient) Delete(ctx context.Context, name string) (*Operat
 	op, _, err := sendOp[None](ctx, s.c, request{method: http.MethodDelete, path: s.r.item(name)}, nil)
 	return op, err
 }
+
+// Rename gives a volume a new name and rewrites everything that refers to it (extension "rename"). See Resource.Rename.
+func (v *VolumeClient) Rename(ctx context.Context, name string, req api.Rename, etag string) (*Operation[api.RenameResult], error) {
+	return v.r.Rename(ctx, name, req, etag)
+}

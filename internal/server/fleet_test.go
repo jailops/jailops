@@ -226,7 +226,7 @@ func TestFleetNeverTouchesAForeignProject(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	local := api.ProjectSpec{Description: "local", Quotas: api.ProjectQuotas{Jails: 1}}
+	local := api.ProjectSpec{Comment: "local", Quotas: api.ProjectQuotas{Jails: 1}}
 	if _, err := h1.Admin.Projects().Create(ctx, api.Project{Metadata: api.ObjectMeta{Name: "web"}, Spec: local}); err != nil {
 		t.Fatal(err)
 	}
@@ -237,7 +237,7 @@ func TestFleetNeverTouchesAForeignProject(t *testing.T) {
 	if c := hubCond(t, hub, "web", "h1"); c.Reason != service.FleetConflict {
 		t.Fatalf("%+v", c)
 	}
-	if p, _ := h1.Admin.Projects().Get(ctx, "web"); p.Spec.Description != "local" || p.Metadata.ManagedBy != "" {
+	if p, _ := h1.Admin.Projects().Get(ctx, "web"); p.Spec.Comment != "local" || p.Metadata.ManagedBy != "" {
 		t.Fatalf("%+v", p)
 	}
 	if err := hub.Admin.Projects().Delete(ctx, "web"); err != nil {

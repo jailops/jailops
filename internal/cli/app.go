@@ -126,6 +126,7 @@ type app struct {
 	wide    bool // -o wide: every column of a list, on a terminal too
 	compact bool // -o compact: the plain table of a pipe, on a terminal too
 	started bool // a command body began: later errors are not usage errors
+	partial bool // "set" builds an object from flags: the flags that create requires may be missing
 	cmdPath string
 	cl      *sdk.Client
 	parent  *sdk.Client
@@ -134,8 +135,6 @@ type app struct {
 	passFile string
 	// empty is what an empty list says instead of the generic "No resources found."
 	empty string
-	// outputFile is the file a deprecated -o FILE named (app export).
-	outputFile string
 }
 
 // NewRootCommand returns the command tree for env. It exists for tests and
