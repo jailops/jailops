@@ -160,3 +160,17 @@ func TestServiceStartScript(t *testing.T) {
 		t.Errorf("left behind: %v", left)
 	}
 }
+
+func TestPkgInstallCachedArgv(t *testing.T) {
+	got := strings.Join(PkgInstallCachedArgv("/r", "ports", "/c/pkg", []string{"bash"}), " ")
+	if got != "pkg -r /r -o PKG_CACHEDIR=/c/pkg install -y bash" {
+		t.Errorf("%q", got)
+	}
+	got = strings.Join(PkgInstallCachedArgv("/r", JailopsRepo, "/c/pkg", []string{"x", "y"}), " ")
+	if got != "pkg -r /r -o PKG_CACHEDIR=/c/pkg install -y -r jailops x y" {
+		t.Errorf("%q", got)
+	}
+	if got := strings.Join(PkgInstallArgv("/r", "ports", []string{"bash"}), " "); got != "pkg -r /r install -y bash" {
+		t.Errorf("no cache: %q", got)
+	}
+}

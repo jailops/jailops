@@ -466,7 +466,7 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 		if len(grp.names) == 0 {
 			continue
 		}
-		argv := apps.PkgInstallArgv(root, grp.repo, grp.names)
+		argv := apps.PkgInstallCachedArgv(root, grp.repo, s.pkgCache(), grp.names)
 		pl.Add(plan.Step{Name: "install-packages-" + grp.repo, Describe: strings.Join(argv, " "),
 			Do: func(ctx context.Context) error { return s.runHost(ctx, 60*time.Minute, argv) }})
 		if grp.repo == apps.JailopsRepo {
@@ -476,7 +476,7 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 	}
 	if nj.Spec.OS == api.OSFreeBSD && nj.Spec.Shell == api.BashPath {
 		// the jail's shell goes in with the packages, while nothing runs in the root (docs/shell.md)
-		argv := apps.PkgInstallArgv(root, "ports", []string{api.BashPackage})
+		argv := apps.PkgInstallCachedArgv(root, "ports", s.pkgCache(), []string{api.BashPackage})
 		pl.Add(plan.Step{Name: "install-bash", Describe: strings.Join(argv, " ") + ", the shell of the jail",
 			Do: func(ctx context.Context) error {
 				if ok, _ := s.d.Files.Exists(ctx, root+api.BashPath); ok {

@@ -52,6 +52,11 @@ func TestAppInstallThroughTheHelper(t *testing.T) {
 	ok(apps.PkgInstallArgv(root, "ports", []string{"postfix", "dovecot"})...)
 	ok(apps.PkgVersionArgv(root, "nginx")...)
 	ok(apps.PkgVersionArgv(root, "py311-prometheus_client")...)
+	// the download cache of the host, shared by every install: below the storage roots, nowhere else
+	ok(apps.PkgInstallCachedArgv(root, "ports", e.cfg.MountBase+"/cache/pkg", []string{"bash"})...)
+	ok(apps.PkgInstallCachedArgv(root, "jailops", e.cfg.MountBase+"/cache/pkg", []string{"isms"})...)
+	bad(api.CodeForbidden, apps.PkgInstallCachedArgv(root, "ports", "/etc", []string{"bash"})...)
+	bad(api.CodeForbidden, apps.PkgInstallCachedArgv(root, "ports", "/tmp/cache", []string{"bash"})...)
 	// not a jail root: the storage root itself, outside it, climbing out, relative
 	bad(api.CodeForbidden, apps.PkgInstallArgv(e.cfg.MountBase, "ports", []string{"nginx"})...)
 	bad(api.CodeForbidden, apps.PkgInstallArgv("/usr/local", "ports", []string{"nginx"})...)

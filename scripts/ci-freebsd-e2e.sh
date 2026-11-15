@@ -866,14 +866,24 @@ expect "its service finished" '^done$' cat "$(zfs get -H -o value mountpoint "$p
 for j in slow10 slow30; do check "delete $j" $J delete --confirm-data-loss $j --project demo; done
 for v in sto10 sto30; do check "delete volume $v" $J volume delete $v --project demo --confirm-data-loss; done
 
-step "a jail that cannot reach the package servers starts at once, with bash from the host (never over its own network)"
+step "a jail that cannot reach the package servers starts at once; the host fetches bash for it, a start never waits long for a mirror"
 check "a policy that denies everything outbound" $J firewall policy create closed --project demo --default-in deny --default-out deny
 check "a jail under it" $J create closedj --project demo --image "$img" --network lan --storage default
 check "it uses the policy" $J config set closedj firewall.policies closed --project demo
-t0=$(date +%s)
-check "start it" $J start closedj --project demo
-[ $(( $(date +%s) - t0 )) -le 60 ] || fail "the start of a jail without network took $(( $(date +%s) - t0 )) s"
-expect "its shell is bash, which the host put in before the start" '^/usr/local/bin/bash$' $J config get closedj shell --project demo
+startbound() { # a start takes a minute at most, whatever the mirror does (the host gives bash 20 s, the jail's own network is never waited for)
+	t0=$(date +%s)
+	check "$1" $J start closedj --project demo
+	[ $(( $(date +%s) - t0 )) -le 60 ] || fail "the start of a jail without network took $(( $(date +%s) - t0 )) s"
+}
+startbound "start it"
+check "a shell is there whatever the mirror did" $J exec --project demo closedj -- /bin/sh -c true
+expect "its shell is bash" '^/usr/local/bin/bash$' $J config get closedj shell --project demo
+# what the host could not fetch in time it fetches at the next start (the cache keeps what it has)
+for n in 1 2 3 4 5; do
+	$J exec --project demo closedj -- test -x /usr/local/bin/bash >/dev/null 2>&1 && break
+	check "stop it ($n)" $J stop closedj --project demo
+	startbound "start it again ($n): the host fetches what it still lacks"
+done
 check "bash is in the jail" $J exec --project demo closedj -- test -x /usr/local/bin/bash
 check "delete it" $J delete --confirm-data-loss --stop closedj --project demo
 check "delete the policy" $J firewall policy delete closed --project demo -y

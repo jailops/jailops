@@ -24,7 +24,18 @@ const JailopsRepo = "jailops"
 // PkgInstallArgv is the host command that installs packages into a jail root
 // from the FreeBSD repository (repo ports) or from pkg.jailops.net.
 func PkgInstallArgv(root, repo string, names []string) []string {
-	argv := []string{"pkg", "-r", root, "install", "-y"}
+	return PkgInstallCachedArgv(root, repo, "", names)
+}
+
+// PkgInstallCachedArgv is PkgInstallArgv with the download cache of pkg set to a directory the host shares between
+// installs (pkg -r would otherwise keep a cache in every jail root and fetch the same packages again for each new
+// jail). An empty cache leaves pkg's own default.
+func PkgInstallCachedArgv(root, repo, cache string, names []string) []string {
+	argv := []string{"pkg", "-r", root}
+	if cache != "" {
+		argv = append(argv, "-o", "PKG_CACHEDIR="+cache)
+	}
+	argv = append(argv, "install", "-y")
 	if repo == JailopsRepo {
 		argv = append(argv, "-r", JailopsRepo)
 	}
