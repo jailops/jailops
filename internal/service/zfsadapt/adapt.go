@@ -177,7 +177,9 @@ func (a *Adapter) Unmount(ctx context.Context, dataset string) error {
 }
 
 var (
-	unmountTries = 20
+	// a jail that was just stopped is torn down by the kernel (its processes, its vnet, its mounts), which on a slow
+	// or busy host takes longer than a few seconds: a dataset still busy after a minute has a holder
+	unmountTries = 120
 	unmountWait  = 500 * time.Millisecond
 )
 
