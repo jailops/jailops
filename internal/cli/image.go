@@ -158,7 +158,7 @@ jailops image create -f freebsd-15-1.yaml`,
 				if release == "" && !a.partial {
 					return api.Image{}, usagef("--release is required (or use -f FILE)")
 				}
-				if arch == "" {
+				if arch == "" && !a.partial { // set builds from the flags given and has the stored architecture
 					var err error
 					if arch, err = a.serverArch(cmd.Context()); err != nil {
 						return api.Image{}, err

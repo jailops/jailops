@@ -336,3 +336,19 @@ func TestCompletionEverywhere(t *testing.T) {
 		}
 	}
 }
+
+// "image set" changes single attributes of a stored image without asking the server for an architecture or building
+// anything from the flags that were not given.
+func TestImageSetAutoUpgrade(t *testing.T) {
+	h := newHarness(t, fake.WithArch("arm64"))
+	if _, errs, code := h.run("", "image", "create", "base", "--release", "15.1-RELEASE"); code != 0 {
+		t.Fatal(errs)
+	}
+	if _, errs, code := h.run("", "image", "set", "base", "--auto-upgrade", "--upgrade-at", "04:30"); code != 0 {
+		t.Fatalf("image set: %d %s", code, errs)
+	}
+	out, errs, code := h.run("", "image", "show", "base", "-o", "yaml")
+	if code != 0 || !strings.Contains(out, "04:30") || !strings.Contains(out, "arch: arm64") || !strings.Contains(out, "release: 15.1-RELEASE") {
+		t.Fatalf("image show: %d %q %s", code, out, errs)
+	}
+}
