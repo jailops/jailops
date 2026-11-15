@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.1 - 2026-11-15
+
 - **`rename` for the rest.** `jailops volume|storage|cert|user|wireguard|backup target|backup policy rename OLD NEW`
   give the object a new name and change everything that names it in one operation, or none of it: a volume (its dataset and
   mount point, the attachments of its jails, which must be stopped, and the `disk.NAME` keys of the project's profiles), a
