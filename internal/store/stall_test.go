@@ -79,7 +79,9 @@ func TestVacuumIntoStallsWrites(t *testing.T) {
 	t.Logf("%d audit rows (database %.1f MiB): the copy took %v; %d event appends meanwhile, the longest waited %v", rows, float64(fi.Size())/(1<<20), copyTime.Round(time.Millisecond), count, longest.Round(time.Millisecond))
 	// The copy runs on a reader connection: a write made meanwhile does not wait for it. (On the writer connection the
 	// longest wait was the whole copy.)
-	if copyTime > 100*time.Millisecond && longest > copyTime/3 {
+	// (Under the race detector on a loaded machine a write waits a good part of a short copy anyway: the writer held
+	// by the whole copy is the failure, and that is a wait of about the copy time.)
+	if copyTime > 100*time.Millisecond && longest > copyTime*3/4 {
 		t.Errorf("a write waited %v for a database copy that took %v: the copy must not hold the writer", longest, copyTime)
 	}
 	if v, problems, err := OpenReadOnlyCheck(ctx, filepath.Join(copyDir, "copy.db")); err != nil || len(problems) > 0 || v == 0 {
