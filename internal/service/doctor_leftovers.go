@@ -57,9 +57,7 @@ func (s *Service) doctorOldNetwork(ctx context.Context, c *checkSet) {
 			}
 		}
 	}
-	mod, avail, _ := s.runOK(ctx, "kldstat", "-q", "-n", "if_bridge")
-	loadedNoBridge := avail && mod && bridges == 0
-	if len(left) == 0 && !loadedNoBridge {
+	if len(left) == 0 {
 		c.add("network.leftovers", api.DoctorOK, "no interfaces of an earlier network layout", "")
 		return
 	}
@@ -75,7 +73,7 @@ func (s *Service) doctorOldNetwork(ctx context.Context, c *checkSet) {
 		}
 		hint = append(hint, "after the jails were restarted: "+strings.Join(cmds, "; "))
 	}
-	if loadedNoBridge || (len(left) > 0 && bridges > 0) {
+	if len(left) > 0 && bridges > 0 {
 		hint = append(hint, "then kldunload if_bridge and remove if_bridge_load from /boot/loader.conf (the routed network does not use it)")
 	}
 	c.add("network.leftovers", api.DoctorWarn, strings.Join(msg, "; "), strings.Join(hint, "; "))

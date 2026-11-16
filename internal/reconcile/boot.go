@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,8 +40,11 @@ func (r *Reconciler) hostBooted(ctx context.Context) bool {
 		// the boot of the host cannot be read: a first start still boots the jails, a later one does not
 		return !known
 	}
-	if known && strings.TrimSpace(string(prev)) == id {
+	if known && sameBoot(strings.TrimSpace(string(prev)), id) {
 		r.log.Info("the daemon started again on a host that stayed up: no jail is started at boot")
+		if strings.TrimSpace(string(prev)) != id { // the clock was set: keep the new reading
+			_ = os.WriteFile(f, []byte(id+"\n"), 0o600)
+		}
 		return false
 	}
 	if err := os.WriteFile(f, []byte(id+"\n"), 0o600); err != nil {
@@ -97,4 +102,29 @@ func (r *Reconciler) setBootCond(name string, c api.Condition) {
 	r.mu.Lock()
 	r.bootCond[name] = c
 	r.mu.Unlock()
+}
+
+var bootSecRE = regexp.MustCompile(`sec = (\d+)`)
+
+// sameBoot says whether two readings of kern.boottime are the same boot of the host. FreeBSD moves the boot time when
+// the clock is set (ntpd, ntpdate), so the readings of one boot can differ by the step; a host that rebooted was down
+// for longer than ten minutes between two readings.
+func sameBoot(prev, now string) bool {
+	if prev == now {
+		return true
+	}
+	a, b := bootSecRE.FindStringSubmatch(prev), bootSecRE.FindStringSubmatch(now)
+	if a == nil || b == nil {
+		return false
+	}
+	x, err1 := strconv.ParseInt(a[1], 10, 64)
+	y, err2 := strconv.ParseInt(b[1], 10, 64)
+	if err1 != nil || err2 != nil {
+		return false
+	}
+	d := x - y
+	if d < 0 {
+		d = -d
+	}
+	return d <= 600
 }

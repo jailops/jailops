@@ -32,6 +32,7 @@ func (l *Local) cleanStaleMounts(ctx context.Context, jn JailName) []string {
 	for pass := 0; pass < stalePasses; pass++ {
 		res, err := l.d.Runner.Run(ctx, run.Cmd{Name: "mount", Args: []string{"-p"}, Timeout: 10 * time.Second})
 		if err != nil {
+			l.note("the mount table could not be read: stale mounts are not looked for", "jail", jn.Internal(), "err", err.Error())
 			return nil
 		}
 		mps := l.jailMounts(string(res.Stdout), jn)
