@@ -121,12 +121,22 @@ func matchArgs(pat, args []string) bool {
 	return len(pat) == len(args)
 }
 
+// SetHangOn sets HangOn while the fake is in use by other goroutines (a daemon that runs in the test).
+func (f *Fake) SetHangOn(fn func(Cmd) bool) {
+	f.mu.Lock()
+	f.HangOn = fn
+	f.mu.Unlock()
+}
+
 // Run implements Runner.
 func (f *Fake) Run(ctx context.Context, c Cmd) (Result, error) {
 	if err := ctx.Err(); err != nil {
 		return Result{}, err
 	}
-	if f.HangOn != nil && f.HangOn(c) {
+	f.mu.Lock()
+	hang := f.HangOn
+	f.mu.Unlock()
+	if hang != nil && hang(c) {
 		// a command that never ends: only the request ending, or the command's own timeout, ends it
 		var timer <-chan time.Time
 		if c.Timeout > 0 {
