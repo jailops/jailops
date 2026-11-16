@@ -49,6 +49,21 @@ blocked, 8 the test cannot say.
 
 ## Common failures
 
+**A stop or a restart takes a minute, or `jailops doctor` says `mounts.leftovers`.** A stop that did not finish (the poststop
+hook failed, a daemon was killed) can leave mounts below the root of the jail: a `devfs` under `root/dev`, stacked once more by each further
+failed stop. They keep the root dataset busy. `jailops op show ID` lists the steps of the operation with the time each took (`unmount`
+says where the minute went). `jailops doctor --fix` takes the mounts off the roots of jails that do not run (`--dry-run` lists them first;
+a jail that runs is never touched, and the command can be run again). The daemon does the same when it starts and every ten minutes, and
+a stop and a start of the jail do it for that jail; `--fix` also destroys the bridge and the gateway pair of the earlier network layout that no
+jail which runs uses. By hand: `mount -p | grep <jail>/root/` and `umount` the lines below the root, deepest
+first, once for every layer.
+
+**A stop of a jail whose shutdown never returns.** The stop commands of a jail (`/etc/rc.shutdown`) get its stop timeout (`boot.stop_timeout`, 30 seconds unless set), and the jail the same time
+again to exit after SIGTERM, with five seconds on top. After that the jail is removed without them, which kills what is left, and a
+`jail-stop-forced` event and the console log of the jail (`/var/log/jailops/jail_<project>_<name>_console.log`) say so and name the processes
+that still ran. A database that needs a minute to close
+says `jailops config set db boot.stop_timeout 60`.
+
 **A jail cannot resolve names** ("Transient resolver failure" from `pkg`). `jailops network show NET` says where the jails of
 the network get their nameservers and `jailops doctor` (`network.dns`) checks the gateway case. On a host whose resolver
 is a local cache (`nameserver 127.0.0.1` only), either let the cache answer on the gateway (the lines `network show`
@@ -117,6 +132,21 @@ solicitations sent from their global addresses; the host holds a `/128` and no r
 advertisement follows). Fix: `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` now and the line
 `net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` in `/etc/sysctl.conf`; JailOps never sets it. See
 [networking-ipv6.md](networking-ipv6.md).
+
+**A bridge, `NETNAMEga` and `NETNAMEgb` are left from an earlier version.** Earlier versions gave every network a bridge and a
+gateway pair; a network is routed now and has no interface of its own. `jailops doctor` says `network.leftovers` and names them.
+The jails that were started before the upgrade are still members of the bridge until they are restarted, so restart them first
+(`jailops restart JAIL ...`: they are down for a few seconds and come back with the routed link; the first start takes the
+gateway address away from the old gateway pair, which is why the jails still on the bridge lose it). Then remove what is left:
+
+    ifconfig -g bridge                # the bridges of the host
+    ifconfig NETNAME destroy          # the bridge; ifconfig NETNAME | grep member must show no jail link any more
+    ifconfig NETNAMEga destroy        # destroying one end of the pair removes the other
+    kldunload if_bridge               # and remove if_bridge_load from /boot/loader.conf
+
+A stop of a jail that was started by an earlier version works too: what is not there is not an error, and what could not be
+removed is written as a warning to the console log of the jail (`/var/log/jailops/jail_PROJECT_NAME_console.log`) and to the
+audit log, and never fails the stop.
 
 **Jail deletion or unmount reports `busy`.** Stopping a jail retries a busy unmount for a few seconds; if it persists, something
 inside still holds a file open (`fstat -f /usr/local/jailops/projects/...`).

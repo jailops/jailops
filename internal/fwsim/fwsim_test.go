@@ -288,3 +288,41 @@ func TestADefaultAllowAnchor(t *testing.T) {
 	a := anchor(t, func(in *render.PFInput) { in.DefaultIn = "allow" })
 	check(t, "open anchor", Evaluate(a, tcp(far4, jail4, 12345), intoJail), Pass, "default")
 }
+
+// "any" as the destination of an allow rule is every address but the host's and those of the other projects: a jail that
+// may reach the internet on port 22 does not reach the host's sshd or the jails of another project. The host is opened
+// by naming it, and a deny rule to "any" still denies the host.
+func TestAnyDestinationDoesNotReachTheHostOrOtherProjects(t *testing.T) {
+	hostAddr := netip.MustParseAddr("10.20.0.1")
+	foreign4 := netip.MustParseAddr("10.30.0.5")
+	build := func(rules ...api.FirewallRule) *render.Anchor {
+		return anchor(t, func(in *render.PFInput) {
+			in.DefaultOut = "deny"
+			in.Host = []netip.Addr{hostAddr}
+			in.Foreign = []netip.Prefix{netip.MustParsePrefix("10.30.0.0/24")}
+			in.Policies = []render.PFPolicy{{Name: "egress", Policy: api.FirewallPolicySpec{Rules: rules}}}
+		})
+	}
+	out := func(name, action string, to ...string) api.FirewallRule {
+		return api.FirewallRule{Name: name, Action: action, Direction: "out", Proto: "tcp", To: to, Ports: []string{"22"}, Comment: "why " + name}
+	}
+	for _, tc := range []struct {
+		name  string
+		rules []api.FirewallRule
+		dst   netip.Addr
+		want  Verdict
+		stage string
+	}{
+		{"the internet", []api.FirewallRule{out("ssh", "allow")}, far4, Pass, "policy"},
+		{"another jail of the project", []api.FirewallRule{out("ssh", "allow")}, peer4, Pass, "policy"},
+		{"the host", []api.FirewallRule{out("ssh", "allow")}, hostAddr, Block, "host"},
+		{"another project", []api.FirewallRule{out("ssh", "allow")}, foreign4, Block, "isolation"},
+		{"the host, named", []api.FirewallRule{out("ssh", "allow", "host")}, hostAddr, Pass, "policy"},
+		{"another project, named", []api.FirewallRule{out("ssh", "allow", "10.30.0.0/24")}, foreign4, Pass, "policy"},
+		{"explicit any", []api.FirewallRule{out("ssh", "allow", "any")}, hostAddr, Block, "host"},
+		{"a deny to any denies the host", []api.FirewallRule{out("no ssh", "deny"), out("ssh", "allow", "host")}, hostAddr, Block, "policy"},
+	} {
+		a := build(tc.rules...)
+		check(t, tc.name, Evaluate(a, tcp(jail4, tc.dst, 22), fromJail), tc.want, tc.stage)
+	}
+}

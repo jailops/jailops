@@ -208,6 +208,18 @@ func (s *Server) routeTable() []route {
 			c.sync(200, svc.Doctor(c.r.Context()), 0)
 			return nil
 		}},
+		route{method: "POST", pattern: "/api/v1/doctor/fix", h: func(c *rc) error {
+			var req api.DoctorFixRequest
+			if err := c.decodeOptional(&req); err != nil {
+				return err
+			}
+			res, err := svc.DoctorFix(c.r.Context(), req.DryRun)
+			if err != nil {
+				return err
+			}
+			c.sync(200, res, 0)
+			return nil
+		}},
 		route{method: "GET", pattern: "/api/v1/resources", h: func(c *rc) error {
 			v, err := svc.Resources(c.r.Context())
 			if err != nil {

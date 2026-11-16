@@ -240,10 +240,8 @@ func (s *Server) authenticate(r *http.Request) (authResult, error) {
 			if strings.HasPrefix(r.URL.Path, "/api/v1/auth/") || strings.HasPrefix(r.URL.Path, "/api/v1/sessions") {
 				return res, api.Errorf(api.CodeForbidden, "%s cannot be reached through a hub", r.URL.Path)
 			}
+			// failures are counted per source, but a claim that verifies is never refused for what others did
 			key := "claim|" + auth.SourceKey(remote)
-			if err := s.tokLim.Check(key); err != nil {
-				return res, err
-			}
 			c, err := auth.VerifyRequestor(leaf, claim, auth.RequestorExpect{Audience: s.svc.HostUUID(), Method: r.Method, Path: r.URL.Path, Now: s.svc.Clock()})
 			if err == nil {
 				var act service.Actor
@@ -272,10 +270,9 @@ func (s *Server) authenticate(r *http.Request) (authResult, error) {
 		}
 	}
 	if bearer != "" {
+		// A token is not guessable (256 bits), so a valid one is never refused because of what others at the same address
+		// tried: the failures of a source are counted, and a wrong token is answered with the lock in force.
 		key := "tok|" + auth.SourceKey(remote)
-		if err := s.tokLim.Check(key); err != nil {
-			return res, err
-		}
 		a, err := s.svc.AuthenticateToken(r.Context(), bearer, ip)
 		if err != nil {
 			if api.IsCode(err, api.CodeUnauthorized) {

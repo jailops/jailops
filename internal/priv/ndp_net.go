@@ -1,10 +1,12 @@
 package priv
 
 import (
+	"context"
 	"net"
 	"net/netip"
 	"os/exec"
 	"strings"
+	"time"
 
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/sdk/api"
@@ -23,6 +25,9 @@ func hardwareAddr(name string) ([6]byte, error) {
 	return mac, nil
 }
 
+// netstatTimeout bounds a read of the routing table: netstat(1) that does not answer must not hold the reconcile pass.
+const netstatTimeout = 15 * time.Second
+
 // hostRoutes reads the IPv6 routing table with netstat(1) and returns its /128 host routes. UNVERIFIED output format
 // on other systems than FreeBSD 15.1, where a host route is printed as "<address>  link#N  UHS  <interface>".
 func hostRoutes() (map[netip.Addr]string, error) { return ReadHostRoutes() }
@@ -30,7 +35,9 @@ func hostRoutes() (map[netip.Addr]string, error) { return ReadHostRoutes() }
 // ReadHostRoutes is hostRoutes for callers outside the package: netstat(1) needs no privilege, so the daemon reads
 // the table itself to find host routes of jails that no longer exist.
 func ReadHostRoutes() (map[netip.Addr]string, error) {
-	out, err := exec.Command("/usr/bin/netstat", "-rnW", "-f", "inet6").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), netstatTimeout)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, "/usr/bin/netstat", "-rnW", "-f", "inet6").Output()
 	if err != nil {
 		return nil, api.Errorf(api.CodeInternal, "netstat: %v", err)
 	}
@@ -81,7 +88,9 @@ func localAddrs() ([]netip.Addr, error) {
 func ReadRoutes() ([]ifconfig.RouteEntry, error) {
 	var out []ifconfig.RouteEntry
 	for _, fam := range []string{"inet", "inet6"} {
-		b, err := exec.Command("/usr/bin/netstat", "-rnW", "-f", fam).Output()
+		ctx, cancel := context.WithTimeout(context.Background(), netstatTimeout)
+		b, err := exec.CommandContext(ctx, "/usr/bin/netstat", "-rnW", "-f", fam).Output()
+		cancel()
 		if err != nil {
 			return nil, api.Errorf(api.CodeInternal, "netstat: %v", err)
 		}

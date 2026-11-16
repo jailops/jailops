@@ -235,6 +235,7 @@ func TestInterfaceRules(t *testing.T) {
 
 func TestRouteRules(t *testing.T) {
 	e := newEnv(t)
+	e.storeLan(t, "10.1.0.0/16")
 	ctx := context.Background()
 	n := e.local.Net()
 	if _, _, err := e.net.EpairCreate(ctx, "jo0"); err != nil {
@@ -255,7 +256,7 @@ func TestRouteRules(t *testing.T) {
 			t.Errorf("route %+v was accepted", r)
 		}
 	}
-	for _, r := range []ifconfig.Route{{Dest: "10.1.1.1/32", Interface: "jo0a"}, {Dest: "2001:db8::5/128", Interface: "jo0a"}, {Dest: "10.1.1.2", Interface: "jo0a"}} {
+	for _, r := range []ifconfig.Route{{Dest: "10.1.1.1/32", Interface: "jo0a"}, {Dest: "2001:db8:1:2:100::5/128", Interface: "jo0a"}, {Dest: "10.1.1.2", Interface: "jo0a"}} {
 		if err := n.RouteAdd(ctx, r); err != nil {
 			t.Errorf("route %+v: %v", r, err)
 		}

@@ -18,6 +18,8 @@ storage-root = tank/jailops
 storage-file = /usr/local/etc/jailops/priv.d/storage.conf
 # A pool's top dataset as a root is refused unless you say so.
 #allow-pool-root = false
+# A jail with a network link does not start while pf is disabled (it would run without the firewall of its anchor).
+#allow-start-without-pf = false
 
 # --- directories ---------------------------------------------------------------
 conf-dir = /usr/local/etc/jailops/jails

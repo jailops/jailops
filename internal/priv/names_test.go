@@ -95,7 +95,7 @@ func newProjectEnv(t *testing.T, project, name string) *hookEnv {
 	nw := api.NetworkSpec{Uplink: "em0", MTU: 1400, IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200"}}
 	doc, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "lan", UUID: "aaaa-1111-2222"}, "spec": nw})
 	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "aaaa-1111-2222.json"), string(doc))
-	conf := strings.Replace(e.goodConf(), "alpha_web {", internal+" {", 1)
+	conf := e.goodConfNamed(internal)
 	mustWrite(t, filepath.Join(e.cfg.ConfDir, internal+".conf"), conf)
 	e.runner.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
 	e.runner.Add(run.Rule{Name: "rctl", Args: []string{run.RestArgs}})
@@ -184,7 +184,7 @@ func TestHookFindsAJailInTheSecondRoot(t *testing.T) {
 	spec := api.JailSpec{OS: api.OSFreeBSD}
 	rec, _ := json.Marshal(map[string]any{"metadata": api.ObjectMeta{Name: "n", UUID: hookUUID, Project: "p"}, "spec": spec})
 	mustWrite(t, filepath.Join(jmp, "spec.json"), string(rec))
-	conf := strings.Replace(e.goodConf(), "alpha_web {", "p_n {", 1)
+	conf := e.goodConfNamed("p_n")
 	mustWrite(t, filepath.Join(e.cfg.ConfDir, "p_n.conf"), conf)
 	for _, ph := range []string{PhasePreStart, PhasePostStart, PhasePostStop} {
 		if err := e.local.RunHook(ctx, ph, "p_n"); err != nil {
@@ -197,7 +197,7 @@ func TestConfDirNamesFollowTheProjectScheme(t *testing.T) {
 	e := newEnv(t)
 	ctx := context.Background()
 	w := func(file, name string) error {
-		conf := strings.Replace(e.goodConf(), "alpha_web {", name+" {", 1)
+		conf := e.goodConfNamed(name)
 		return e.local.WriteFile(ctx, WriteFileReq{Path: filepath.Join(e.cfg.ConfDir, file), Data: []byte(conf), Mode: 0o644})
 	}
 	for _, n := range []string{"shop_web", "default_web", "a-b_c-d"} {
@@ -221,7 +221,7 @@ func TestConfDirNamesFollowTheProjectScheme(t *testing.T) {
 	}
 	// the directory form
 	if err := e.local.WriteFile(ctx, WriteFileReq{Path: filepath.Join(e.cfg.ConfDir, "shop_db", "jail.conf"),
-		Data: []byte(strings.Replace(e.goodConf(), "alpha_web {", "shop_db {", 1)), Mode: 0o644, Parents: true}); err != nil {
+		Data: []byte(e.goodConfNamed("shop_db")), Mode: 0o644, Parents: true}); err != nil {
 		t.Errorf("dir form: %v", err)
 	}
 	// a fstab for a project jail
@@ -249,7 +249,7 @@ func TestJailMayOnlyBeUsedWhenItsConfExists(t *testing.T) {
 	if err := e.local.Net().MoveToJail(ctx, "jo0a", internal); err == nil {
 		t.Error("moved an interface into a jail without a conf")
 	}
-	mustWrite(t, conf, strings.Replace(e.goodConf(), "alpha_web {", internal+" {", 1))
+	mustWrite(t, conf, e.goodConfNamed(internal))
 	if err := j.Create(ctx, conf, internal); err != nil {
 		t.Errorf("create with conf: %v", err)
 	}

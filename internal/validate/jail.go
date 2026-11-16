@@ -130,6 +130,14 @@ func JailSpec(name string, s api.JailSpec) error {
 		}
 		seenName[v.Name], seenMount[v.Mount] = true, true
 	}
+	// nothing is mounted below a volume: a link in the first volume would carry the second mount elsewhere
+	for i, a := range s.Volumes {
+		for j, b := range s.Volumes {
+			if i != j && strings.HasPrefix(b.Mount, strings.TrimSuffix(a.Mount, "/")+"/") {
+				return Invalid(fmt.Sprintf("volumes[%d].mount", j), "mount point %q is inside the mount point %q of volume %q: nothing is mounted below a volume", b.Mount, a.Mount, a.Name)
+			}
+		}
+	}
 	if s.Boot.Priority < -1000 || s.Boot.Priority > 1000 {
 		return Invalid("boot.priority", "priority must be between -1000 and 1000")
 	}

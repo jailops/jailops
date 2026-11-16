@@ -2,6 +2,7 @@ package sdk
 
 import (
 	"context"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -15,6 +16,16 @@ func (c *Client) Doctor(ctx context.Context) (api.DoctorReport, error) {
 		return api.DoctorReport{}, err
 	}
 	r, _, err := get[api.DoctorReport](ctx, c, "/api/v1/doctor", nil)
+	return r, err
+}
+
+// DoctorFix performs the safe cleanups the diagnostics report (POST /api/v1/doctor/fix): stale mounts below the root of
+// stopped jails and what an earlier network layout left. With dryRun it only lists them.
+func (c *Client) DoctorFix(ctx context.Context, dryRun bool) (api.DoctorFixResult, error) {
+	if err := c.need("doctor"); err != nil {
+		return api.DoctorFixResult{}, err
+	}
+	r, _, err := send[api.DoctorFixResult](ctx, c, request{method: http.MethodPost, path: "/api/v1/doctor/fix", body: api.DoctorFixRequest{DryRun: dryRun}})
 	return r, err
 }
 

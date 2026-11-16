@@ -3,6 +3,8 @@
 # tags: tier-1 web
 # the host's own addresses (a jail reaches none of them unless a rule says so)
 table <host> persist
+# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)
+table <not_any> persist
 table <jail_addrs> persist { 10.20.0.10, fe80::/10 }
 block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
 block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir

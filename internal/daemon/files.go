@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"jailops.net/jailops/internal/hostdir"
+	"jailops.net/jailops/internal/mounts"
 	"jailops.net/jailops/internal/priv"
 	"jailops.net/jailops/sdk/api"
 )
@@ -68,6 +69,22 @@ func (f privFiles) SetOwner(ctx context.Context, path string, uid, gid int, mode
 func (f privFiles) ProbeSource(ctx context.Context, path string, write bool) (hostdir.Probe, error) {
 	r, err := f.h.ProbeSource(ctx, priv.SourceProbeReq{Path: path, Write: write})
 	return hostdir.Probe{Mounted: r.Mounted, Writable: r.Writable, Detail: r.Detail}, err
+}
+func (f privFiles) StaleMounts(ctx context.Context) ([]mounts.Stale, error) {
+	ms, err := f.h.StaleMounts(ctx)
+	out := make([]mounts.Stale, 0, len(ms))
+	for _, m := range ms {
+		out = append(out, mounts.Stale{Jail: m.Jail, Path: m.Path, Type: m.Type})
+	}
+	return out, err
+}
+func (f privFiles) HealJail(ctx context.Context, jail string) (mounts.Healed, error) {
+	r, err := f.h.HealJail(ctx, jail)
+	return mounts.Healed{Unmounted: r.Unmounted, Left: r.Left, Errors: r.Errors}, err
+}
+func (f privFiles) HealNetwork(ctx context.Context) (mounts.NetHealed, error) {
+	r, err := f.h.HealNetwork(ctx)
+	return mounts.NetHealed{Destroyed: r.Destroyed, Skipped: r.Skipped}, err
 }
 func (f privFiles) RemoveAll(ctx context.Context, path string) error {
 	if f.mine(path) {
@@ -151,6 +168,11 @@ func (osFiles) SetOwner(_ context.Context, path string, uid, gid int, mode uint3
 	}
 	return os.Chown(path, uid, gid)
 }
+
+// StaleMounts, HealJail and HealNetwork of a daemon without the helper: there is no table of mounts to read and nothing to take off.
+func (osFiles) StaleMounts(context.Context) ([]mounts.Stale, error)     { return nil, nil }
+func (osFiles) HealJail(context.Context, string) (mounts.Healed, error) { return mounts.Healed{}, nil }
+func (osFiles) HealNetwork(context.Context) (mounts.NetHealed, error)   { return mounts.NetHealed{}, nil }
 
 // ProbeSource of a daemon without the helper: the directory is on a mount when its device is not its parent's.
 func (osFiles) ProbeSource(_ context.Context, path string, write bool) (hostdir.Probe, error) {

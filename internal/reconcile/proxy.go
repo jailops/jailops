@@ -3,6 +3,7 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"jailops.net/jailops/internal/supervise"
 	"net/netip"
 	"time"
 
@@ -79,7 +80,9 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 			h = &proxyHandle{ndp: ndp, cancel: cancel, done: make(chan struct{})}
 			go func() {
 				defer close(h.done)
-				h.err = ndp.Run(pctx)
+				if err := supervise.Guard(r.log, "ndproxy", func() { h.err = ndp.Run(pctx) }); err != nil {
+					h.err = err
+				}
 			}()
 			r.proxies[uplink] = h
 			// The capture opens in the proxy's own goroutine, a moment from now; the condition below says "Starting"

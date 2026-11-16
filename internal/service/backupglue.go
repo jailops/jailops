@@ -136,6 +136,8 @@ type BackupJail struct {
 	Spec    api.JailSpec
 	Layout  lifecycle.JailLayout
 	Image   api.ImageGeneration
+	// VolumeIDs maps the name of each volume of the jail (its profiles' included) that has a dataset to its UUID.
+	VolumeIDs map[string]string
 }
 
 // BackupJails lists the jails of this host with their dataset layout.
@@ -156,6 +158,14 @@ func (s *Service) BackupJails(ctx context.Context) ([]BackupJail, error) {
 			continue
 		}
 		bj := BackupJail{Key: k, Name: j.Metadata.Name, UUID: j.Metadata.UUID, Project: j.Metadata.Project, Labels: j.Metadata.Labels, Spec: j.Spec, Layout: lay}
+		for _, v := range s.effective(j).Volumes {
+			if o, err := s.volKind.p(j.Metadata.Project).get(v.Name); err == nil && !o.Spec.IsHostDir() {
+				if bj.VolumeIDs == nil {
+					bj.VolumeIDs = map[string]string{}
+				}
+				bj.VolumeIDs[v.Name] = o.Meta.UUID
+			}
+		}
 		if lay.Image != "" && lay.Generation > 0 {
 			if si, ok := s.storageOfJail(k); ok {
 				if g, err := s.life.Images.Resolve(ctx, si.Root, genRef(lay.Image, lay.Generation)); err == nil {

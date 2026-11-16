@@ -789,3 +789,50 @@ func TestNDPProxyReportsDroppedSolicitations(t *testing.T) {
 		}
 	}
 }
+
+// service pf restart empties every anchor: the watch notices that the anchor of a running jail is empty and asks for a
+// pass, so the jails are unfiltered for seconds and not for the minute of the loop.
+func TestWatchKicksAPassWhenPFWasFlushed(t *testing.T) {
+	w := newWorld(t, reconcile.Config{Interval: time.Hour, Debounce: time.Second, PFWatch: 10 * time.Millisecond})
+	j := jailDesired("web_nginx")
+	j.Project = "web"
+	j.AnchorName = render.JailAnchor("web_nginx")
+	j.ParentAnchors = map[string]string{render.ProjectAnchor("web"): render.ProjectAnchorRules()}
+	w.des = reconcile.Desired{Networks: []reconcile.NetworkDesired{lan()}, Jails: []reconcile.JailDesired{j}}
+	w.R.Pass(bg)
+	_ = w.Jails.Create(bg, "/etc/jailops/jails/web_nginx/jail.conf", "web_nginx")
+	h := j.Epairs[0]
+	_, _, _ = w.Net.EpairCreate(bg, h[:len(h)-1])
+	_ = w.Net.SetDescription(bg, h, "jailops:"+jailID)
+	w.R.Pass(bg) // the running jail's anchor is loaded and remembered
+	if live, _ := w.PF.Read(bg, j.AnchorName); live != j.Ruleset {
+		t.Fatalf("the anchor is not loaded: %q", live)
+	}
+	ctx, cancel := context.WithCancel(bg)
+	done := make(chan struct{})
+	go func() { w.R.Run(ctx); close(done) }()
+	defer func() {
+		cancel()
+		<-done
+	}()
+	waitFor := func(what string, cond func() bool) {
+		t.Helper()
+		for i := 0; i < 6000; i++ {
+			if cond() {
+				return
+			}
+			time.Sleep(5 * time.Millisecond)
+		}
+		t.Fatalf("timed out: %s", what)
+	}
+	waitFor("the loop's first pass and its timer", func() bool { return w.clock.Pending() > 0 })
+	if err := w.PF.Flush(bg, j.AnchorName); err != nil { // service pf restart
+		t.Fatal(err)
+	}
+	waitFor("the debounce of the pass the watch asked for", func() bool { return w.clock.Pending() >= 2 })
+	w.clock.Advance(time.Second)
+	waitFor("the anchor is loaded again", func() bool {
+		live, _ := w.PF.Read(bg, j.AnchorName)
+		return live == j.Ruleset
+	})
+}

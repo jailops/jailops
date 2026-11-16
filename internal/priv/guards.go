@@ -347,6 +347,9 @@ func (g netGuard) AddrAdd(ctx context.Context, iface string, p netip.Prefix) err
 	if err := g.addr(ctx, iface, p); err != nil {
 		return err
 	}
+	if err := g.l.checkStoredNetworkAddr(p.Addr(), "an address on an interface of JailOps"); err != nil {
+		return err
+	}
 	return g.l.d.Net.AddrAdd(ctx, iface, p)
 }
 
@@ -373,6 +376,15 @@ func (g netGuard) route(ctx context.Context, r ifconfig.Route) error {
 func (g netGuard) RouteAdd(ctx context.Context, r ifconfig.Route) error {
 	if err := g.route(ctx, r); err != nil {
 		return err
+	}
+	if !r.Reject && r.Dest != "default" && !(isAdmin(ctx) && g.l.cfg.Admin.Routes) {
+		a, err := netip.ParseAddr(strings.SplitN(r.Dest, "/", 2)[0])
+		if err != nil {
+			return invalid("invalid route %q", r.Dest)
+		}
+		if err := g.l.checkStoredNetworkAddr(a, "a route through an interface of JailOps"); err != nil {
+			return err
+		}
 	}
 	return g.l.d.Net.RouteAdd(ctx, r)
 }
@@ -409,10 +421,25 @@ func (g runGuard) Run(ctx context.Context, c run.Cmd) (run.Result, error) {
 			defer g.l.freeze(d)()
 		}
 	}
+	if rule.Name == "tar" && len(argv) == 5 && argv[1] == "-C" && argv[3] == "-xpzf" {
+		sealed, cleanup, err := g.l.sealArchive(argv[4])
+		if err != nil {
+			return run.Result{}, err
+		}
+		defer cleanup()
+		argv = append(append([]string(nil), argv[:4]...), sealed)
+	}
 	if rule.Verify != nil {
 		if err := rule.Verify(ctx, g.l, argv[1:]); err != nil {
 			return run.Result{}, err
 		}
+	}
+	if rule.Name == "pkg" {
+		var cleanup func()
+		if argv, cleanup, err = g.l.sealRepos(ctx, argv); err != nil {
+			return run.Result{}, err
+		}
+		defer cleanup()
 	}
 	max := time.Duration(rule.MaxTimeoutSeconds) * time.Second
 	if c.Timeout == 0 || c.Timeout == run.NoTimeout || c.Timeout > max {
@@ -425,6 +452,14 @@ func (g runGuard) Run(ctx context.Context, c run.Cmd) (run.Result, error) {
 	c.Name, c.Args = argv[0], argv[1:]
 	if rule.Env != nil {
 		c.Env = rule.Env
+	}
+	if rule.Name == "mount" && len(argv) > 1 {
+		before := g.l.mountPoints(ctx)
+		res, err := g.l.d.Runner.Run(ctx, c)
+		if err == nil {
+			err = g.l.checkMountLanded(ctx, before, argv[len(argv)-1])
+		}
+		return res, err
 	}
 	return g.l.d.Runner.Run(ctx, c)
 }

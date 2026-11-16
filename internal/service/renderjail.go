@@ -6,6 +6,7 @@ import (
 	"jailops.net/jailops/internal/apps"
 	"net/netip"
 	"path"
+	"strings"
 
 	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/reconcile"
@@ -227,7 +228,8 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 	// Every jail has an anchor, with or without a policy: the isolation of projects and the anti-spoofing rules do not
 	// depend on anyone having written a policy.
 	{
-		if addrs := jailAddrs(j.Spec); len(addrs) > 0 && len(d.Epairs) > 0 {
+		// A jail with a link and no address (a network entry of "none") gets the closed anchor of render.BuildAnchor.
+		if addrs := jailAddrs(j.Spec); len(d.Epairs) > 0 {
 			in := render.PFInput{Jail: name, Interfaces: d.Epairs, Addresses: addrs, Tags: j.Spec.Firewall.Tags,
 				TagMembers: map[string][]netip.Addr{}, Sets: refs.sets, Jails: refs.jails, Uplink: uplink, AllowRaw: true,
 				Antispoof: true, LinkLocal: linkLocal, Host: append(s.hostAddrs(ctx), hostAddrs...), DNS: dnsAddrs,
@@ -281,7 +283,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 	if host == "" {
 		host = j.Metadata.Name
 	}
-	in := render.JailConfInput{Name: name, Path: s.rootMount(name), Hostname: host, OS: osf, Interfaces: b.ifaces, SysVIPC: j.Spec.SysVIPC, Where: s.promptContext(name), StopTimeout: j.Spec.Boot.StopTimeout}
+	in := render.JailConfInput{Name: name, Path: s.rootMount(name), Hostname: host, OS: osf, Interfaces: b.ifaces, SysVIPC: j.Spec.SysVIPC, Where: s.promptContext(name), StopTimeout: stopTimeoutOf(j.Spec)}
 	if j.Spec.Delegate {
 		// The jail manages <container>/delegated itself: jail(8) attaches it (zfs.dataset) once the dataset has the
 		// jailed property, which a global admin's request set when delegation was turned on.
@@ -543,7 +545,21 @@ func (s *Service) netExec(anchors map[string]string) *reconcile.NetExec {
 
 // PostStop has nothing to do: the poststop hook of jail.conf flushes the
 // anchor and destroys the epairs, and the reconciler removes what is left.
-func (h *hooks) PostStop(ctx context.Context, name string) error { return nil }
+// PostStop cleans up after a jail that does not run: the helper takes the mounts below its root off and runs what the
+// poststop hook of jail(8) removes (rctl rules, the pf anchor, the links). jail(8) does not run exec.poststop after a
+// failed start or when it died, so this does not depend on it; the helper refuses a jail that runs. It is best effort:
+// what cannot be cleaned now is found by the heal of the daemon.
+func (h *hooks) PostStop(ctx context.Context, name string) error {
+	if h.s.d.Files == nil {
+		return nil
+	}
+	if res, err := h.s.d.Files.HealJail(ctx, name); err != nil {
+		h.s.log.Warn("the clean-up after a stopped jail failed", "jail", name, "err", err)
+	} else if len(res.Errors) > 0 {
+		h.s.log.Warn("the clean-up after a stopped jail was not complete", "jail", name, "errors", strings.Join(res.Errors, "; "))
+	}
+	return nil
+}
 
 // Remove deletes the rendered files of a jail that is being destroyed.
 func (h *hooks) Remove(ctx context.Context, name string) error {
@@ -568,4 +584,13 @@ func attachMTU(a api.NetworkAttach, network int) int {
 		return a.MTU
 	}
 	return network
+}
+
+// stopTimeoutOf is the stop timeout written into the configuration of a jail: its boot.stop_timeout, or the default of
+// JailOps. jail.conf always carries one, so that jail(8) bounds the wait after SIGTERM too.
+func stopTimeoutOf(spec api.JailSpec) int {
+	if spec.Boot.StopTimeout > 0 {
+		return spec.Boot.StopTimeout
+	}
+	return api.DefaultStopTimeout
 }

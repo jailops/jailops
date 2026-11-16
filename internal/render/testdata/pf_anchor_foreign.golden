@@ -3,6 +3,8 @@
 # tags: tier-1 web
 # the host's own addresses (a jail reaches none of them unless a rule says so)
 table <host> persist
+# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)
+table <not_any> persist { 10.30.0.0/24, fd30::/64 }
 table <jail_addrs> persist { 10.20.0.10, 2001:db8:1::100, fe80::/10 }
 block in quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }
 pass in quick on jo0123456789a0a inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol label "jo-b1a9dbe5125f" keep state (if-bound)

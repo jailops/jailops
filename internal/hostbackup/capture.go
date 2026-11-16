@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -259,6 +260,17 @@ func (s *Service) BackupJail(ctx context.Context, j JailRecord, o CaptureOptions
 		if err != nil {
 			return nil, err
 		}
+		// the volumes of the jail are named with the identity of each, which a restore matches its backups on
+		for name, id := range j.VolumeIDs {
+			if b.VolumeIDs == nil {
+				b.VolumeIDs = map[string]string{}
+			}
+			b.VolumeIDs[name] = id
+			if !slices.Contains(b.Volumes, name) {
+				b.Volumes = append(b.Volumes, name)
+			}
+		}
+		sort.Strings(b.Volumes)
 		if bundle, err = json.Marshal(b); err != nil {
 			return nil, err
 		}

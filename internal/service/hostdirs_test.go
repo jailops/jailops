@@ -290,3 +290,44 @@ func TestDoctorSaysWhenAHostDirectoryIsNotOnItsMount(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+// A share that does not answer holds the helper request of its probe until it does: the daemon sends one, however
+// many looks (the watch, a list, a show, doctor) come while it hangs, and none of them waits longer than its own limit.
+func TestAHostDirectoryThatDoesNotAnswerCostsOneProbe(t *testing.T) {
+	defer service.SetHostDirTimeouts(60*time.Millisecond, 60*time.Millisecond)()
+	e, s := newEnv(t)
+	ctx := as(globalAdmin, dtest.SeedProject)
+	newBoxVolume(t, e, s, api.VolumeSpec{Watch: true})
+	hold := make(chan struct{})
+	base := e.Files.Probes()
+	e.Files.ProbeHold = hold
+	start := time.Now()
+	for i := 0; i < 5; i++ {
+		s.WatchHostDirs(context.Background())
+		if l, err := s.ListVolumes(ctx, nil); err != nil || len(l) != 1 || l[0].Status.State != api.VolumeStateLost {
+			t.Fatalf("list: %+v %v", l, err)
+		}
+		if v, err := s.GetVolume(ctx, "box"); err != nil || v.Status.State != api.VolumeStateLost || !strings.Contains(v.Status.Detail, "does not answer") {
+			t.Fatalf("show: %+v %v", v.Status, err)
+		}
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Fatalf("fifteen looks at a dead share took %v", took)
+	}
+	if n := e.Files.Probes() - base; n != 1 {
+		t.Fatalf("%d probes reached the helper, want 1", n)
+	}
+	// the share answers again: the next look is a new probe and sees it
+	close(hold)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		s.WatchHostDirs(context.Background())
+		if v, _ := s.GetVolume(ctx, "box"); v.Status.State == api.VolumeStateOK {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the share is back and the volume is still lost")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}

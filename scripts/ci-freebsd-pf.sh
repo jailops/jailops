@@ -94,10 +94,10 @@ remove_all() {
 	ifconfig pfupa destroy >/dev/null 2>&1
 	for f in "${TMPDIR:-/tmp}"/jailops-pf.*/h4.pid "${TMPDIR:-/tmp}"/jailops-pf.*/h6.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null; done
 	pkill -x nc 2>/dev/null
-	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfb:o; do
+	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfa:n pfa:m pfb:o; do
 		$J stop "${pn#*:}" --project "${pn%%:*}" </dev/null >/dev/null 2>&1
 	done
-	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfb:o; do
+	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfa:n pfa:m pfb:o; do
 		retry 6 $J delete --confirm-data-loss "${pn#*:}" --project "${pn%%:*}" </dev/null
 	done
 	for p in pfa pfb; do
@@ -944,6 +944,48 @@ check_xfer 0 3 "and fast in the other direction: under 3 s" xfer_down d $D4J
 pkill -f "nc -l " >/dev/null 2>&1
 $J config unset d firewall.policies --project pfa </dev/null >/dev/null 2>&1
 $J config set a firewall.policies web --project pfa </dev/null >/dev/null 2>&1
+
+say "a jail with a link and no address has an anchor that closes both directions (docs/networking.md)"
+$J create n --project pfa --image "$img" --network pfa-net=none --storage default </dev/null >/dev/null || die "create n (no address)"
+$J start n --project pfa </dev/null >/dev/null || die "start n"
+waitfor_ "n runs" 90 jexec pfa_n true
+waitfor_ "the anchor of n is loaded" 90 sh -c "pfctl -a jailops/pfa/n -sr 2>/dev/null | grep -q ."
+expect allow "the anchor of n drops what comes in on its link" sh -c "pfctl -a jailops/pfa/n -sr 2>/dev/null | grep -Eq '^block drop in quick on [^ ]+ all'"
+expect allow "the anchor of n drops what goes out on its link" sh -c "pfctl -a jailops/pfa/n -sr 2>/dev/null | grep -Eq '^block drop out quick on [^ ]+ all'"
+NHOST=$(pfctl -a jailops/pfa/n -sr 2>/dev/null | sed -n 's/^block drop in quick on \([^ ]*\) all.*/\1/p' | head -n 1)
+NIF=$(jx pfa n ifconfig -l | tr ' ' '\n' | grep -v '^lo' | head -n 1)
+NGW=$(ifconfig "$NHOST" 2>/dev/null | awk '/ether/ {print $2}')
+if [ -n "$NHOST" ] && [ -n "$NIF" ] && [ -n "$NGW" ]; then
+	# the jail takes the address of another jail, a static ARP entry for the gateway (the MAC of the host's end) and a route
+	jx pfa n ifconfig "$NIF" inet "$A4/32" alias >/dev/null 2>&1
+	jx pfa n route add -host "$H4" -interface "$NIF" >/dev/null 2>&1
+	jx pfa n arp -s "$H4" "$NGW" >/dev/null 2>&1
+	expect deny "n cannot ping the host in the name of jail a" jx pfa n ping -S "$A4" -c1 -t2 "$H4"
+else
+	bad "n: could not read its interfaces (host end '$NHOST', jail end '$NIF', MAC '$NGW')"
+fi
+$J stop n --project pfa </dev/null >/dev/null 2>&1
+
+say "any as the destination of an allow rule is not the host (docs/networking.md)"
+daemon -f nc -l "$H4" 2299 # a service of the host on the gateway address of the network
+jx pfa b daemon -f nc -k -l "$B4" 7777 # a service of another jail of the project, which its policy opens (the project's default is deny in)
+$J firewall rule add open in --project pfa --action allow --proto tcp --port 7777 --comment "the service of the any test" </dev/null >/dev/null || die "rule 7777 in b's policy"
+{ $J firewall policy create anyout --project pfa --default-in deny --default-out deny \
+	&& $J firewall rule add anyout out --project pfa --action allow --proto tcp --port 2299 --comment "any port 2299" \
+	&& $J firewall rule add anyout out --project pfa --action allow --proto tcp --port 7777 --comment "any port 7777"; } </dev/null >/dev/null || die "policy anyout"
+$J create m --project pfa --image "$img" --network pfa-net --storage default --firewall-policy anyout </dev/null >/dev/null || die "create m"
+$J start m --project pfa </dev/null >/dev/null || die "start m"
+waitfor_ "m runs" 90 jexec pfa_m true
+waitfor_ "the anchor of m is loaded" 90 sh -c "pfctl -a jailops/pfa/m -sr 2>/dev/null | grep -q ."
+settle
+expect allow "m reaches the port 7777 of jail b: any is every address of the project but the host" tcp pfa:m "$B4" 7777
+expect deny "m does not reach the port 2299 of the host: any is not the host" tcp pfa:m "$H4" 2299
+$J firewall rule add anyout out --project pfa --action allow --proto tcp --port 2299 --to host --comment "the host, named" </dev/null >/dev/null || die "rule to host"
+settle
+expect allow "once the rule names the host, m reaches its port 2299" tcp pfa:m "$H4" 2299
+pkill -f "nc -l $H4 2299" >/dev/null 2>&1
+jx pfa b pkill -f "nc -k -l $B4 7777" >/dev/null 2>&1
+$J stop m --project pfa </dev/null >/dev/null 2>&1
 
 cleanup
 [ "$fails" -eq 0 ]

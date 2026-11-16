@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // logDir is where the jails' exec.consolelog files are (render.ConsoleLog); its dataset is <dataset>/logs.
@@ -39,7 +41,10 @@ type initOptions struct {
 
 func defaultRun(name string, args ...string) (string, error) {
 	var out bytes.Buffer
-	c := exec.Command(name, args...)
+	ctx, cancel := context.WithTimeout(context.Background(), initCommandTimeout)
+	defer cancel()
+	c := exec.CommandContext(ctx, name, args...)
+	c.WaitDelay = time.Second
 	c.Stdout, c.Stderr = &out, &out
 	err := c.Run()
 	return strings.TrimSpace(out.String()), err
@@ -377,3 +382,7 @@ listen:
   socket: /var/run/jailops-priv/priv.sock
 `, o.pool, o.dataset, o.mount, o.dbDir, filepath.Join(o.dbDir, "state"), listen, web)
 }
+
+// initCommandTimeout bounds each command of `jailops-priv init` (zfs, mkdir and the like): a command that never
+// returns must not leave the setup hanging.
+const initCommandTimeout = 10 * time.Minute

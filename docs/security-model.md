@@ -25,11 +25,14 @@ where the daemon cannot leave a symlink for root to write through.
 **What a compromised daemon cannot do:** name a path outside the storage roots, run a program that is not on the
 allow-list, change, destroy, rename or take over a network interface JailOps did not create (see
 [Interfaces](#interfaces)), sniff or inject on an interface the operator did not approve, mount a directory the operator did not name,
-make the helper advertise an IPv6 address outside the approved prefixes, make the helper trust a package repository,
+make the helper answer neighbor discovery for an address outside the bounds the helper checks itself (a global or unique-local prefix of /48 to /120 on a plain uplink, with no address of the host in it, overlapping no other network), make the helper trust a package repository,
 key or keyring of its own choosing ([Whom the helper trusts](#whom-the-helper-trusts-when-it-runs-package-tools)), or turn
 a ZFS user property into authority (the helper keeps what it granted in its own memory, never in something the daemon can write).
 
-**What it can do, and you should assume it can:** act as any API user for anything inside those bounds. The helper takes
+**What it can do, and you should assume it can:** act as any API user for anything inside those bounds. That includes
+storing a network in proxy mode: the helper takes the prefix from the stored networks, which the daemon writes, so a compromised
+daemon can make the host answer neighbor discovery for any prefix that passes the checks above on the uplink (a segment shared
+with other hosts). The operator approves such a prefix by creating the network, not by a line in `priv.conf`. The helper takes
 the "this request is for an admin" assertion from the request itself, because only the daemon knows who authenticated.
 So **the allow-lists in `priv.conf`, not the assertion, are the boundary.** Separating that further would need a second
 credential the daemon cannot hold, such as an administrator confirming at a terminal, which is not how the API works.
@@ -72,6 +75,25 @@ tree, as the jail itself would see it, and an absolute symlink is refused (the h
 would). So no symlink a jail makes turns an operator's `app allow`, an app draft or any other file operation into a read
 or a write of another jail's files, and the path arguments of allow-listed commands below a jail's tree must resolve
 inside it as well.
+
+**The root of a jail, its mounts and its links.** The `path` of a jail's `jail.conf` is exactly
+`<storage mount>/projects/<project>/jails/<name>/root` of that jail and reaches it without a symbolic link, checked when the
+file is written and again at every start: `jail(8)` follows a link in `path`, and a jail whose root is a link to `/` would
+have the host's files. Nothing is mounted below a volume or on a mount point that another line uses, because a link
+in the volume would carry the second mount over a directory of the host. After a `mount` the helper compares the host's
+mounts with those before, and a mount that appeared anywhere but at its path is unmounted at once; `umount` takes only a path
+that is a mount point now, and `chmod` is refused in the tree of a running jail. The helper reads a file of a jail's tree
+without ever waiting on it (a FIFO a jail planted is refused), and a look at a host directory whose mount does not answer
+gives up after ten seconds and holds one of four slots, never the whole budget of requests.
+
+**Addresses, routes and forwards.** The helper puts an address on a jail's link, or a route through it, only inside the
+subnet of a network JailOps has stored (the gateway's `fe80::1` aside); the route of the IPv6 proxy only for an address
+inside the prefix of a network in proxy mode, never the prefix's anycast address, the host's IPv6 default router or an
+address in the uplink's neighbor cache. A port forward leads to an address of a stored network and takes over a
+privileged port, or one a host process listens on, only when the request carries the admin assertion.
+
+**The log.** An exec session is recorded with its program and the number of its arguments, not the arguments; a command
+line can carry a secret. An archive is copied into the helper's own directory, listed there and extracted from there.
 
 ## What you decide, in `priv.conf`
 
@@ -284,15 +306,23 @@ bounded, so that nobody can fill the disk or forge an entry by being refused:
   for the whole daemon; more wait their turn, and when 32 already wait a login is answered `rate_limited` (429) at once.
 - Every login attempt is counted before its password is checked, per user and source and per source: attempts sent at
   once cannot pass the threshold together, and a source that is locked out costs no password check at all. An unknown
-  user, a wrong password and a disabled user cost one check each, so the time does not tell them apart.
+  user, a wrong password and a disabled user cost one check each, so the time does not tell them apart. Five failures
+  for one user from one source lock that user at that source (30 seconds at first, twice as long after each further
+  failure, up to 15 minutes). The source alone has a limit ten times looser: fifty failures from one address, over any
+  users, lock the address in the same way. So a spray over many users from one address is stopped after fifty
+  attempts, and people behind one address (a NAT, a proxy) are not locked out by a stranger's few wrong passwords.
+- The checks of a secret by a user who is signed in (the current password before a change, a second-factor code) are
+  counted the same way, before the secret is checked, and wait for a password check slot like a login.
 - A source is an IPv4 address, an IPv6 **/64** (one host usually holds the whole prefix) or a local user (`unix:<uid>`).
 - Guesses for one account from many sources are slowed down, not locked out (that would let anyone lock a real user
   out): after 10 failures for the account, each further attempt waits 1 s, then 2 s, 4 s and so on up to 30 s before its
   password is checked, and only one such attempt runs at a time; a right password or a quiet half hour forgets them.
-- A bad token, an untrusted certificate or a forged hub claim counts toward the lockout of its source. While a source is
-  locked out, **valid** tokens from it are refused too (behind a proxy every caller shares the proxy's address:
-  [exposure.md](exposure.md)).
+- A bad token, an untrusted certificate or a forged hub claim counts toward the lockout of its source, and a wrong token
+  from a locked source is answered with the lock. A **valid** token (256 bits, not guessable) or a hub claim that
+  verifies is never refused because of what others at its address tried.
 - Starting a second factor and making new recovery codes ask for the password again, as removing the second factor does.
+  A recovery code has 128 random bits and a salt of its own, is shown once, is compared in constant time and works
+  once; a copy of the database does not give the second factor away.
 - An anonymous `GET /api/v1` learns the API version, the extensions and the role, not the host name, host id, pool or
   software version. A non-admin caller of `doctor` gets the status of each check without the text of a failing one,
   which can be a raw error with paths of the host.
@@ -353,6 +383,11 @@ refuses a repository configuration, a key or a keyring that root did not provide
   directory the daemon can write. A key directory made in the daemon's work area is refused, however it is named.
 - **The keyrings.** The keyring that checks a `debootstrap` release is a file directly in `keyring-dir`, with the same
   rules.
+
+The repository configuration is not checked where the daemon wrote it. The daemon can change a file between a check and
+the run, so the helper reads the whole directory itself (every entry, every file to its end, none longer than 16 KiB, no
+more than 32 entries), accepts exactly the one block JailOps writes with every key once, copies the bytes it checked into
+a directory of its own (root's, mode 0700) and runs `pkg` on that copy, which it removes afterwards.
 
 To build an image from a repository of your own, list its host in `fetch-host` and put its key directory below
 `pkg-keys-dir` yourself, as root. An app installation uses the host's own repository configuration (root's files), not
@@ -505,6 +540,16 @@ wrote opens the way, and holds the policies of the jail. Between two jails the h
 allow. The PF matrix of the end-to-end tests checks each of these with real traffic and forged frames
 ([networking.md](networking.md)). Jails share the host kernel; this is a separation of networks, not of kernels
 ([above](#projects-are-not-a-security-boundary-against-the-kernel)).
+
+**Port forwards.** A forward (a `redirect` rule of a firewall policy, a `proxy.<name>` device of a jail or a profile) takes
+traffic that would reach the host, so only a **global administrator** gives or changes one; an administrator of a project
+may edit the other rules of a policy that already has a forward. A forward is refused on a port some service of the host
+listens on (ssh, the console, the other JailOps listeners, the ACME challenge port while ACME is the source) and on a
+listen address that is not an address of the host.
+
+**Size of the firewall objects.** One project cannot fill the table space pf has for every project: a policy has at most 500
+rules, an address set 5000 members, a project 200 policies and 200 address sets and 20000 set members together.
+`jailops doctor` warns (`firewall.size`) at 80% of a limit.
 
 ## Name resolution of jails
 

@@ -260,7 +260,7 @@ stops when its rule goes.
   its answer; the rule was removed and the ruleset reloaded afterwards.)
 - A rule has an action (`allow` or `deny`), a direction (`in` or `out`) and, as it needs them, a protocol, `from` and `to` endpoints, ports, `log`, a redirect, a name, a comment and `disabled`. The rules of a policy are added and changed one at a time with `jailops firewall rule` (`add`, `list`, `edit`, `move`, `enable`, `disable`, `remove`), each rule addressed by its number or its name, or all at once in a file.
   A rule belongs to the jail that has the policy: an inbound rule is always to the jail itself and an outbound rule always from it, so an inbound rule names only `from` and an outbound rule only `to` (`to` on an inbound rule and `from` on an outbound rule are refused).
-  A rule with a redirect (`--redirect HOSTPORT:JAILPORT`, `redirect:` in a file; it names the ports, so the rule has no `port`) is a port forward: a connection to the network's uplink address (or the `listen` address)
+  A rule with a redirect (`--redirect HOSTPORT:JAILPORT`, `redirect:` in a file; it names the ports, so the rule has no `port`) is a port forward, which only a global administrator makes ([networking.md](networking.md#forwarded-ports)): a connection to the network's uplink address (or the `listen` address)
   on HOSTPORT is translated to the jail's address on JAILPORT (`match in on <uplink> … rdr-to`) and passed by a labelled
   rule on the uplink (`pass in quick on <uplink> … to <jail> port JAILPORT`), which admits what the rule's `from` names,
   also where the host's own rules block inbound traffic. The state of a connection that came through the forward is ended

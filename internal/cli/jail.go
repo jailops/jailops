@@ -476,10 +476,10 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 		}
 		spec := api.JailSpec{
 			Comment: comment, Image: image, Layout: api.Layout(layout), Hostname: hostname,
-			Storage: storage, Profiles: profiles,
+			Storage: storage, Profiles: dropEmpty(profiles),
 			Resources: api.Resources{CPU: cpu, Memory: memory, Disk: disk, PIDs: pids},
-			Firewall:  api.FirewallAttach{Policies: fwPolicies, Tags: tags},
-			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: depends, StopTimeout: stopTimeout},
+			Firewall:  api.FirewallAttach{Policies: dropEmpty(fwPolicies), Tags: dropEmpty(tags)},
+			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: dropEmpty(depends), StopTimeout: stopTimeout},
 			Update:    api.UpdatePolicy{Strategy: api.UpdateStrategy(strategy), Window: window},
 			Shell:     api.ShellPath(shell), Prompt: prompt,
 			Delegate: zfsDelegation,

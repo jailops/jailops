@@ -15,7 +15,7 @@ import (
 // Request bodies are read strictly: a member the request type does not have, a member spelled with other cases
 // ("Dry_Run" for "dry_run"), a member that appears twice and anything after the value are refused. A misspelled
 // option is an error instead of a request that runs without it. The status of an object (a client that read it sends
-// it back) is ignored, as it always was. Maps (labels, configuration keys, merge patches)
+// it back) is ignored. Maps (labels, configuration keys, merge patches)
 // take any key, and values with their own decoding (json.RawMessage, custom unmarshalers) are not looked into.
 
 // checkStrict walks the JSON in data along the type of v and reports the first member that would be dropped or

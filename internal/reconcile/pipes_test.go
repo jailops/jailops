@@ -170,3 +170,24 @@ func (p *loggingPF) Load(ctx context.Context, anchor, ruleset string) error {
 	p.log.lines = append(p.log.lines, "pf load "+anchor)
 	return p.Fake.Load(ctx, anchor, ruleset)
 }
+
+// A pipe that a loaded anchor still names is not deleted, though no jail wants it (a reload that failed keeps the old
+// anchor, which sends its traffic into that pipe); one no anchor names is.
+func TestPipeCleanupKeepsAPipeALoadedAnchorNames(t *testing.T) {
+	dn := &dnRunner{have: map[int]bool{40020: true, 40021: true, 40030: true}}
+	pf := pfctl.NewFake()
+	_ = pf.Load(bg, "jailops/alpha/web", "match in on jo0a all dnpipe(40020, 40021)\npass in quick on jo0a all\n")
+	jd := jailDesired("web")
+	jd.AnchorName = "jailops/alpha/web"
+	src := &pipeSource{des: reconcile.Desired{Jails: []reconcile.JailDesired{jd}}}
+	r := reconcile.New(reconcile.Config{}, reconcile.Env{Source: src, Net: ifconfig.NewFake(ifconfig.Options{}), PF: pf,
+		Jails: jailos.NewFake(), Run: dn, Clock: &fakeClock{}})
+	t.Cleanup(r.Close)
+	r.Pass(bg)
+	if !dn.have[40020] || !dn.have[40021] {
+		t.Fatalf("a pipe a loaded anchor names was deleted: %v", dn.have)
+	}
+	if dn.have[40030] {
+		t.Fatalf("a pipe nobody names was kept: %v", dn.have)
+	}
+}

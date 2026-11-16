@@ -337,6 +337,20 @@ func (f *Fake) addr(iface string, p netip.Prefix, add bool) error {
 		}
 	}
 	if add {
+		// the kernel does not take the same IPv4 address on a second interface when the subnets overlap (a /32 beside
+		// a /32 is fine, a /32 beside the /24 of a gateway is "File exists")
+		if !p.Addr().Is6() {
+			for n, o := range f.ifs {
+				if n == iface {
+					continue
+				}
+				for _, x := range o.Inet {
+					if x.Addr() == p.Addr() && (x.Bits() < 32 || p.Bits() < 32) {
+						return api.Errorf(api.CodeAlreadyExists, "ifconfig: ioctl (SIOCAIFADDR): File exists (%s is on %s)", p.Addr(), n)
+					}
+				}
+			}
+		}
 		*l = append(*l, p)
 		return nil
 	}

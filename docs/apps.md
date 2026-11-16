@@ -170,6 +170,8 @@ it for a running jail (`SeedAppDraft` sets the answer, `SeedLocalApp` adds a loc
 ([Adding or changing an app](#adding-or-changing-an-app)); it is the one command of the client that links the daemon's
 catalog validator (`internal/apps`, which imports nothing that runs commands or touches state; a test keeps it so).
 
+**`stop_timeout`** (seconds, optional) is the shutdown budget the app recommends: it becomes `boot.stop_timeout` of the jail. A database that needs a minute to flush and close says `stop_timeout: 60` (PostgreSQL does); an app that leaves it out gets the default, which is bounded too (see the stop in [operations.md](operations.md)).
+
 **Permissions.** The catalog is readable by **any authenticated identity**, whatever its role and project scope
 (route class `self`, like the configuration key registry): it is documentation of what the host can run, not an object
 of a project. Installing is a project operation: `POST /api/v1/apps/<name>/install` is its own entry of the permission

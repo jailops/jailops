@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"jailops.net/jailops/internal/supervise"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/validate"
@@ -132,7 +134,7 @@ func (s *Service) volumeView(ctx context.Context, project string, o object[api.V
 	}
 	if o.Spec.IsHostDir() {
 		v.Status.Mountpoint = o.Spec.Path
-		v.Status.State, v.Status.Detail = s.hostDirState(ctx, o.Spec)
+		v.Status.State, v.Status.Detail = s.hostDirStateRead(ctx, o)
 		return v
 	}
 	si, ok := s.storage(o.Spec.Storage)
@@ -160,12 +162,26 @@ func (s *Service) ListVolumes(ctx context.Context, labels map[string]string) ([]
 	if err != nil {
 		return nil, err
 	}
-	out := []api.Volume{}
+	var keep []object[api.VolumeSpec]
 	for _, o := range objs {
 		if MatchLabels(o.Meta.Labels, labels) {
-			out = append(out, s.volumeView(ctx, p.Meta.Name, o))
+			keep = append(keep, o)
 		}
 	}
+	// the views are made side by side: a directory that does not answer holds its own view for a few seconds, not the list
+	out := make([]api.Volume, len(keep))
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	for i, o := range keep {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer func() { <-sem; wg.Done() }()
+			defer func() { supervise.Report(s.log, "volume-view", recover()) }()
+			out[i] = s.volumeView(ctx, p.Meta.Name, o)
+		}()
+	}
+	wg.Wait()
 	return out, nil
 }
 
@@ -307,7 +323,13 @@ func (s *Service) makeVolume(ctx context.Context, p project, si *storageInfo, me
 	}
 	req := lifecycle.VolumeRequest{Storage: si.lifecycle(), Project: proj, Name: meta.Name, UUID: state_uuid(), Size: spec.Size,
 		UID: spec.UID, GID: spec.GID, Mode: mode, Encrypted: spec.Encrypted, Restoring: restoring}
-	if _, err := s.life.CreateVolume(ctx, req, pass, false); err != nil {
+	// what a recovery needs to take the dataset away again if the daemon dies in the middle
+	runID := "create-volume/" + proj + "_" + meta.Name
+	recorded := req
+	_ = s.journal.putRequest(runID, opRequest{Kind: "create-volume", Volume: &recorded})
+	_, err := s.life.CreateVolume(ctx, req, pass, false)
+	s.journal.deleteRequest(runID)
+	if err != nil {
 		return object[api.VolumeSpec]{}, err
 	}
 	o, err := s.volKind.p(proj).create(ctx, meta, spec)
@@ -446,6 +468,11 @@ func (s *Service) DeleteVolume(ctx context.Context, name string, expect int64) (
 	}
 	if err := s.refuseAttached(proj, name, "detach it before it is deleted"); err != nil {
 		return api.Operation{}, err
+	}
+	if !o.Spec.IsHostDir() {
+		if err := s.backupRunning("volume", name, o.Meta.UUID); err != nil {
+			return api.Operation{}, err
+		}
 	}
 	if o.Spec.IsHostDir() {
 		// there is no dataset: the volume is forgotten and the directory is left as it is
@@ -666,6 +693,56 @@ func (s *Service) checkAttachments(project, key string, vs []api.VolumeAttach) (
 		}
 	}
 	return vs, nil
+}
+
+// checkEncryptedSharing refuses an encrypted volume that the jail key would attach together with another jail of the
+// project, whether the volume comes from the jail's own spec or from a profile, and whether the other jail exists or
+// is being created. The caller holds quotaMu (jails being created are registered there).
+func (s *Service) checkEncryptedSharing(project, key string, vols []api.VolumeAttach) error {
+	for _, v := range vols {
+		o, err := s.volKind.p(project).get(v.Name)
+		if err != nil || !o.Spec.Encrypted {
+			continue
+		}
+		if other := s.otherUserOfVolume(project, key, v.Name, nil); other != "" {
+			return encryptedSharedErr(v.Name, other)
+		}
+	}
+	return nil
+}
+
+func encryptedSharedErr(volume, jail string) error {
+	return api.Errorf(api.CodeConflict, "volume %q is encrypted and attached to jail %q already: an encrypted volume is attached to one jail", volume, jail).
+		WithHint("jailops volume detach " + jail + " " + volume)
+}
+
+// otherUserOfVolume names a jail of the project other than key that attaches the volume (its own spec and its profiles
+// counted; a jail in override uses the spec given there, for a change that is not stored yet), or "".
+func (s *Service) otherUserOfVolume(project, key, volume string, override map[string]api.JailSpec) string {
+	has := func(spec api.JailSpec) bool {
+		return slices.ContainsFunc(spec.Volumes, func(a api.VolumeAttach) bool { return a.Name == volume })
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for k, e := range s.jails {
+		if k == key || e.jail.Metadata.Project != project {
+			continue
+		}
+		spec, ok := override[k]
+		if !ok {
+			spec = s.effective(e.jail)
+		}
+		if has(spec) {
+			return e.jail.Metadata.Name
+		}
+	}
+	for k, pj := range s.pending {
+		if _, registered := s.jails[k]; k != key && pj.project == project && !registered && has(pj.spec) {
+			_, name := validate.SplitQualified(k)
+			return name
+		}
+	}
+	return ""
 }
 
 // attachmentsChanged runs the checks of a change of a jail's volumes: the jail is stopped and the new ones are valid.

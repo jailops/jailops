@@ -68,9 +68,12 @@ func TestApplyConfigSetsAndReportsRestarts(t *testing.T) {
 	if err != nil || len(restart) != 0 || s.Boot.Priority != 5 {
 		t.Fatalf("%v %v", err, restart)
 	}
-	// The older spelling works.
-	if _, err := ApplyConfig(&s, map[string]string{"network.eth0.mtu": "1500"}, nil); err != nil || s.Network[0].MTU != 1500 {
+	if _, err := ApplyConfig(&s, map[string]string{"nic.eth0.mtu": "1500"}, nil); err != nil || s.Network[0].MTU != 1500 {
 		t.Fatalf("%v %+v", err, s.Network)
+	}
+	// there is one spelling of a device key
+	if _, err := ApplyConfig(&s, map[string]string{"network.eth0.mtu": "1400"}, nil); err == nil {
+		t.Fatal("network.eth0.mtu is no key: the device keys are nic.<device>.<field>")
 	}
 }
 

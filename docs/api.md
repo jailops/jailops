@@ -99,6 +99,13 @@ key. Answers are `Cache-Control: no-store`. An anonymous `GET /api/v1` tells the
 only. The credential goes in the `Authorization` header; a token in the query string authenticates nothing.
 The SDK refuses plain `http://` to anything but loopback.
 
+An error the daemon did not expect answers `internal` (500) with the text `internal error` and the id of the request in the
+hint; the cause, which can carry paths and command output of the host, is in the daemon's log under that id. A port forward
+(a redirect rule of a firewall policy, a `proxy.*` key of a jail or profile) answers `forbidden` (403) to anyone but a global
+administrator and `invalid` (400) on a host port or an address that is the host's own. The firewall objects of a project are
+bounded: a policy has at most 500 rules, an address set 5000 members, a project 200 policies, 200 address sets and 20000 set
+members together (`quota_exceeded` or `invalid`).
+
 Declarative management of everything the API can create is `jailops-sync` ([fleet-sync.md](fleet-sync.md)).
 
 ## Liveness and readiness

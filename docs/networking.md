@@ -50,6 +50,18 @@ host, `allow in tcp from host port 22` lets the host reach the jail. With a poli
 address of the host is dropped; what stays open is ICMP echo and DNS to the network's gateway address. A jail without
 a policy is open to everything but the host: it gets ping and DNS from the host and nothing else, and `jailops jail info` says so.
 
+**`any` is not the host.** As the destination of an allow rule, `any` (named or left out) is every address except the host's
+own and those of the networks of other projects: `allow out tcp port 22` lets a jail ssh to the internet, not to the sshd of
+the host or to the jails of another project. Name the host (`--to host`) or the other project's prefix to open them. A deny
+rule to `any` still denies the host.
+
+**Ping and DNS to the host stay open under every policy**, a deny-all one included, because a jail needs its gateway and its
+resolver. To close them, add deny rules, which win over every allow rule: `jailops firewall rule add POLICY out --action deny
+--proto udp --port 53 --to host` (and `--proto tcp`, and `--proto icmp` for ping).
+
+**A jail with a link and no address** (`--network lan=none`) has an anchor that drops everything in both directions: there is
+no source address it may use and nothing is addressed to it. A jail with a link and no rendered anchor does not start.
+
 Raw PF fragments in a policy are for operators who set `admin-raw-pf` in `priv.conf`. The helper refuses a fragment
 that does not name its interface with `on`, and one that names an interface that is not the jail's own link.
 
@@ -69,7 +81,8 @@ must let the traffic in and contain the line `anchor "jailops/*"` ([install.md](
 
 A device can be limited in each direction with `nic.eth0.egress` (what the jail sends) and `nic.eth0.ingress` (what it
 receives), for example `10M` for 10 Mbit/s. Limits survive a restart of the jail and apply to everything the jail sends or
-receives, whoever started the connection.
+receives, whoever started the connection. The dummynet pipes numbered 40000 to 59999 belong to JailOps: it numbers them once,
+stores the numbers, and removes a pipe of that range that no jail's loaded anchor names; use other numbers for pipes of your own.
 
     jailops config set site nic.eth0.egress 20M --project shop
     jailops config set site nic.eth0.ingress 50M --project shop
@@ -78,3 +91,26 @@ receives, whoever started the connection.
 
 Forwarding on (`gateway_enable=YES`, `ipv6_gateway_enable=YES`), the `pf` and `if_epair` modules, and the one anchor line
 in `pf.conf`. `jailops doctor` checks all three and says what to do.
+
+## When pf is off or was flushed
+
+A jail with a network link does not start while pf is disabled (`pfctl -s info` says `Status: Disabled`): its anchor would be
+loaded and nothing would evaluate it. `jailops doctor` fails `pf.enabled` in that case. Set `allow-start-without-pf = true`
+in `priv.conf` only on a host where that is what you want. `service pf start` and `service pf restart` empty every anchor;
+the daemon looks every few seconds and loads the anchors of the running jails again at once.
+
+## Forwarded ports
+
+Only a global administrator makes a forward (a proxy device, a profile with one, or a redirect rule of a policy), because a
+forward takes traffic that would reach the host: it is refused on a port that a service of the host listens on (ssh, the
+console, the other JailOps listeners, the ACME challenge port while ACME is the source) and on a `listen` address that the
+host does not have. An administrator of the project edits the other rules of a policy that already has a forward.
+
+Two jails cannot forward the same host port (a proxy device, or a redirect rule of a policy the jail is rendered with): the
+second is refused when it is made, and the message names the first jail. A mandatory policy of a project with a redirect can
+be used by one jail of the project only.
+
+## Networks
+
+A network is an ordinary unicast range: IPv4 not in 0/8, loopback, link-local (169.254/16), multicast or 240/4; IPv6 a global
+(2000::/3) or unique-local (fc00::/7) prefix.

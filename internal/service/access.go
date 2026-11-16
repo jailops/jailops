@@ -685,9 +685,18 @@ type Session struct {
 	ExpiresAt time.Time
 }
 
-func (s *Service) loginKeys(user, remote string) []string {
+// loginKey is one limiter key of a login attempt and the limiter that holds it.
+type loginKey struct {
+	lim *auth.Lockout
+	key string
+}
+
+// loginKeys are the limiter keys of a login: one per user and source (tight: five failures lock that user at that
+// source), and one per source alone (ten times looser: it stops one address from trying many users, but several people
+// behind one address are not locked out by a stranger's few wrong passwords).
+func (s *Service) loginKeys(user, remote string) []loginKey {
 	src := auth.SourceKey(remote)
-	return []string{"u|" + strings.ToLower(user) + "|" + src, "ip|" + src}
+	return []loginKey{{s.login, "u|" + strings.ToLower(user) + "|" + src}, {s.loginIP, "ip|" + src}}
 }
 
 var errBadLogin = api.Errorf(api.CodeUnauthorized, "invalid user name or password")
@@ -700,9 +709,9 @@ var errBadLogin = api.Errorf(api.CodeUnauthorized, "invalid user name or passwor
 func (s *Service) Login(ctx context.Context, user, password, totp, remote string) (Session, error) {
 	keys := s.loginKeys(user, remote)
 	for i, k := range keys {
-		if err := s.login.Begin(k); err != nil {
+		if err := k.lim.Begin(k.key); err != nil {
 			for _, b := range keys[:i] {
-				s.login.Abort(b)
+				b.lim.Abort(b.key)
 			}
 			return Session{}, err
 		}
@@ -711,7 +720,7 @@ func (s *Service) Login(ctx context.Context, user, password, totp, remote string
 	defer func() {
 		if !decided {
 			for _, k := range keys {
-				s.login.Abort(k)
+				k.lim.Abort(k.key)
 			}
 		}
 	}()
@@ -727,7 +736,7 @@ func (s *Service) Login(ctx context.Context, user, password, totp, remote string
 		endAcct(false)
 		var locked error
 		for _, k := range keys {
-			if err := s.login.End(k, false); err != nil && locked == nil {
+			if err := k.lim.End(k.key, false); err != nil && locked == nil {
 				locked = err
 			}
 		}
@@ -758,7 +767,7 @@ func (s *Service) Login(ctx context.Context, user, password, totp, remote string
 	decided = true
 	endAcct(true)
 	for _, k := range keys {
-		_ = s.login.End(k, true)
+		_ = k.lim.End(k.key, true)
 	}
 	_ = s.d.DB.Users.TouchLogin(ctx, u.ID)
 	if auth.NeedsRehash(u.PasswordHash, s.d.PasswordParams) {
@@ -799,8 +808,13 @@ func (s *Service) checkSecondFactor(ctx context.Context, u *store.User, code str
 			}
 		}
 	}
-	ok, _ := s.d.DB.Users.ConsumeRecoveryHash(ctx, u.ID, auth.HashRecoveryCode(code))
-	return ok
+	for _, entry := range u.RecoveryHashes {
+		if auth.MatchRecoveryCode(code, entry) {
+			ok, _ := s.d.DB.Users.ConsumeRecoveryHash(ctx, u.ID, entry)
+			return ok
+		}
+	}
+	return false
 }
 
 // AuthenticateSession resolves a session cookie value to its caller and CSRF token.
@@ -840,19 +854,25 @@ func (s *Service) WhoAmI(ctx context.Context, name string) (SessionInfo, error) 
 }
 
 // guard rate-limits an operation that verifies a secret for a signed-in user (the current password, a second
-// factor code): too many failures for the user lock it for a while, like login does. It returns the function to
-// call with the outcome.
+// factor code): too many failures for the user lock it for a while, like login does. The attempt is counted before
+// the secret is checked (Begin), so attempts sent at once cannot all pass the threshold together, and it waits for a
+// derivation slot like a login does. It returns the function to call with the outcome.
 func (s *Service) guard(kind, user string) (done func(ok bool) error, err error) {
 	key := kind + "|" + strings.ToLower(user)
-	if err := s.login.Check(key); err != nil {
+	if err := s.login.Begin(key); err != nil {
 		return nil, err
 	}
+	if err := auth.AdmitDerivation(); err != nil {
+		s.login.Abort(key)
+		return nil, err
+	}
+	decided := false
 	return func(ok bool) error {
-		if ok {
-			s.login.Success(key)
+		if decided {
 			return nil
 		}
-		return s.login.Fail(key)
+		decided = true
+		return s.login.End(key, ok)
 	}, nil
 }
 

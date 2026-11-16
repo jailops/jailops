@@ -100,6 +100,7 @@ var stageText = map[string]string{
 	"own-addresses": "the rule that only the jail's own addresses reach it",
 	"isolation":     "the isolation of projects",
 	"default":       "the default of the anchor",
+	"closed":        "the closed link of a jail without an address",
 	"gateway":       "the rules of the gateway interface",
 	"raw":           "a raw PF fragment",
 }

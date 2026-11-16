@@ -2,6 +2,163 @@
 
 ## Unreleased
 
+- **Fixed: a panic in a background loop no longer ends the daemon, and the daemon comes back on its own.** Every long-running loop of `jailopsd`
+  (reconcile, housekeeping, the devd and host-directory watchers, the backup scheduler, the hub loops, the log forwarder, the certificate renewal)
+  runs under a supervisor: a panic is logged with its stack, counted and the loop starts again after a delay that doubles from one second to a
+  minute. `jailops doctor` warns (`daemon.loops`) while a loop was restarted in the last day, and a new check `operations.long` names operations that
+  have run for more than 15 minutes. `jailopsd` and `jailops-backupd` start again after 10 seconds when they exit without being stopped (`-R 10` in
+  their rc scripts; `service ... stop` stops the supervisor first, so a stop is not undone).
+- **Fixed: exec sessions, the database copy and a few tables.** A command whose stdin pipe is full no longer hides a Ctrl-C or the client leaving
+  (the input has its own queue of at most 1 MiB, then the session ends). The daily copy of the database runs on a connection of its own and no longer
+  holds up every write of the daemon for the length of the copy (a 23 MiB database: the longest wait fell from the whole copy to 31 ms).
+  A client that closes an exec session without reading its output leaks no goroutine, the log forwarder forgets deleted jails, the router
+  solicitation proxy makes one timer of each kind and not three for every frame, and commands without a deadline (`netstat`, the key command, the
+  commands of `jailops-priv init`) have one.
+- **Faster with thousands of jails.** One write and one event for each step of an operation instead of two, and the reconcile loop waits three times
+  as long as its last pass took (at most ten seconds) when kicks follow each other, so a bulk create no longer competes with passes that each
+  read every jail: 1200 jails are made in 42 s instead of 101 s on the fakes.
+
+- **Fixed: a jail that a failed stop or start left behind is cleaned up by JailOps itself.** A stop whose poststop hook had failed (the old bridge) left
+  a `devfs` under `root/dev`, stacked once more by each further failed stop, and the root dataset stayed busy for good: every later stop took a minute.
+  jail(8) does not run `exec.poststop` after a failed start and leaves its devfs mounted when it is killed, so nothing that the hooks made can be
+  counted on to be removed by them. The helper has new operations: `mounts.stale` (read-only: the mounts of a kind JailOps makes below the root of
+  a jail that does not run), `jail.heal` (one jail that does not run: those mounts, deepest first and one layer at a time, and what the poststop
+  hook removes: rctl rules, the pf anchor, the links) and `net.heal` (the bridge and the gateway pair of the earlier network layout that no jail which
+  runs uses). The daemon calls them, never from a hook (jail(8) mounts its own devfs before `exec.prestart`): as a step before `jail -c`, as the
+  teardown of a stop and of a delete (also when the stop failed after the jail was gone), when it starts (every jail that does not run, and the old
+  interfaces), and every ten minutes; and `jailops doctor --fix` does the same on request (`--dry-run` lists what it would do; the checks are
+  `mounts.leftovers` and `network.leftovers`). A stop waits five seconds in all for the datasets to be released and says so (a `jail-unmount-busy`
+  event naming the mounts below the root). The rendered configuration of a deleted jail is removed before its datasets, so a delete that dies in
+  between leaves nothing. A jail's `stop.timeout` is always written into its configuration (its `boot.stop_timeout`, or 30 seconds): the stop commands
+  get that long, the jail the same time again to exit after SIGTERM, and five seconds go on top; after that the jail is removed without its stop
+  commands (`jail -R`), which kills what is left, and a `jail-stop-forced` event and the console log of the jail name the processes that still ran
+  (65 seconds in all by default). A new app definition key `stop_timeout` (seconds) sets `boot.stop_timeout`: PostgreSQL says 60. `jailops op show`
+  lists the steps of an operation with the time each took.
+- **Fixed: a start and a stop no longer wait for what they do not need.** A stop waits at most five seconds in all for the
+  datasets of the jail to be released after its processes died (a root that something on the host holds open used to cost ten
+  seconds per dataset, up to a minute); what is still busy stays mounted until the next start or stop. A jail whose stop
+  commands never return is removed after their budget (at least 50 seconds, longer with `boot.stop_timeout`, plus the
+  jail's stop timeout to exit after SIGTERM): the jail is removed without them, which kills what is left, and the console log
+  of the jail says so. A jail that has already started once never fetches bash from the host again, and a failed setup of
+  bash in the background is tried again after half an hour, not at every start. `jailops op show` lists the steps of an
+  operation with the time each took (`steps`: `jail-stop`, `teardown`, `unmount`, `mount`, `jail-start`, `shell-setup`, ...), so a slow
+  stop or start explains itself.
+
+- **Fixed: a jail that was started before the upgrade from a version with a bridge can be stopped and restarted.** The stop
+  (the `poststop` hook) failed with `ifconfig: ioctl (SIOCDIFADDR): Can't assign requested address` and left the jail's link
+  behind: the start had not given the link the gateway address, because the old gateway pair of the network still held it
+  (the kernel answers `File exists` to a second `/32` of an address in the subnet of the old `/24`), and the stop then
+  removed an address that was not there. Now the start takes the gateway address from that old interface of JailOps (never
+  from an interface that is not JailOps's or from the link of another jail) and replaces the leftover link of the jail; the stop
+  removes what is there, treats what is not as done, runs every step, destroys the link last and always, and only warns about
+  what did not work. `jailops doctor` has a check `network.leftovers` for the bridge, the gateway pair and a loaded `if_bridge`
+  of the earlier layout, with the commands that remove them ([troubleshooting](docs/troubleshooting.md)).
+
+- **Security: port forwards are a global administrator's.** A redirect rule of a firewall policy, a `proxy.<name>` device of a
+  jail and a profile that carries one need a global administrator (an administrator of a project was enough, and could forward
+  the host's own ssh or console port into a jail). A forward is also refused on a port that a service of the host listens on
+  (ssh, the console, the other JailOps listeners, the ACME challenge port while ACME is the source) and on a listen address
+  that is not an address of the host. An administrator of a project still edits the other rules of a policy that has a forward.
+  The console disables the forward controls for anyone else. `jailops config keys` marks these keys `global`.
+- **Security: limits on the size of firewall objects.** A policy has at most 500 rules, an address set 5000 members, a project
+  200 policies, 200 address sets and 20000 set members together, so one project cannot fill the table space pf has for every
+  project. `jailops doctor` warns (`firewall.size`) at 80% of a limit.
+- **Security: login and secret checks are counted before they are checked.** The current password before a change and a
+  second-factor code, asked of a user who is signed in, are counted like a login, so a burst of wrong guesses sent at once
+  is not checked one by one past the threshold. **The limit of one source is looser:** five failures lock one user at one
+  source as before, but a source alone is locked after fifty failures over all users (it was five), so people behind one
+  address are not locked out by a stranger's few wrong passwords; a spray over many users from one address is still stopped
+  after fifty attempts. A valid token or hub claim is never refused because of bad tokens from its address (a wrong token from
+  a locked source still answers with the lock). The backup node keys its limits by the /64 of an IPv6 source and has the same
+  two limits.
+- **Security: recovery codes are 128 bits and salted.** A recovery code of the second factor had 50 bits and an unsalted
+  SHA-256, which a copy of the database could search. A new code has 128 random bits (`xxxxx-xxxxx-xxxxx-xxxxx-xxxxxx`), a
+  salt of its own and is compared in constant time. **The recovery codes made before stop working: make new ones** in the
+  console (it asks for the password again).
+- **Security: errors do not carry host details.** An error the daemon did not expect answers `internal error` and the id of
+  the request; the cause (a store, helper or command error that can carry paths and command output) is in the daemon log
+  under that id.
+- **Fixed: `jailops jail set --tag ""` clears the tags** (it stored an empty tag the server then refused), `set --help` says
+  that `--env` and `--label` add to the stored ones, and `network.<device>.<field>` is no longer a spelling of
+  `nic.<device>.<field>`.
+
+- **Fixed: `project delete` no longer destroys volumes.** A project that still has volumes is not deleted ("1 volumes"):
+  delete them first with `jailops volume delete`, which asks before it destroys data. A dataset below the project that no
+  object accounts for (a jail container a replace-restore parked as `<name>.replaced-<id>`, a volume dataset an interrupted
+  creation left) is named in the refusal and kept until the operator destroys it; `jailops doctor` lists these in
+  `storage.leftovers`, and a replace-restore gives the parked container's `refreservation` back to the pool. Revoking the
+  storage grant of a project that has volumes on it is refused.
+- **Fixed: a profile is not a way around what a jail may attach or use.** Editing a profile now passes what the same change
+  on the jail passes: a host directory is given by a global administrator only, an encrypted volume belongs to one jail (a
+  profile cannot give it to two, and neither can a restore or a copy), the volume must exist, and the project's quotas hold
+  with the limits a profile gives (a jail's quota usage counts its profiles; it counted only its own spec).
+- **Fixed: a daemon killed while it creates a volume.** The recovery at the next start removes the dataset the run made, so
+  the name can be used again, and `jailops doctor` fails on a run the recovery could not resolve instead of saying
+  "operations are in flight". A test fails when a kind of run that is journalled has no recovery. A journal record that
+  outlives a completed plan is dropped by the recovery instead of undoing the plan.
+- **Fixed: a restart of the daemon starts no jail.** Jails with `boot.autostart` start when the host boots, not when the
+  daemon starts again on a host that stayed up (a restart, a package upgrade): a jail an operator stopped for maintenance
+  stays stopped.
+- **Fixed: a failed upgrade does not roll back what the jail wrote to `/var/db`.** After the jail started on the new
+  generation, a failed health check swaps the root back and puts `/etc` back, and keeps the data the jail wrote to
+  `/var/db` (the databases of the packages). Before the start both go back to the moment before the merge.
+- **Fixed: a host directory that does not answer costs one helper request.** The daemon sends one probe per directory at a
+  time and joins every look that comes meanwhile (the watch, a list, a show, `doctor`); reads use the answer of the watch
+  or wait a few seconds, and a list probes the directories side by side. A remount that fails leaves a read-only tmpfs on
+  the jail's mount point (not the empty directory of its root) and is tried again every round; a box that came back while
+  the daemon was down is found at the next start; a second look after `jail -c` stops a jail whose mount went away in
+  between.
+- **Fixed: a volume backup is the volume's own.** A jail backup records the UUID of each volume the jail attaches (its
+  profiles' included), and a restore brings a missing volume back only from a backup of that volume, not from a newer one
+  of another volume that had the name.
+- **Fixed: smaller things.** `limits.disk` does not cover volumes (a volume is a dataset of the project: the docs said it
+  did) and `volume list` says `unlimited` for a volume without `--size`; deleting a jail or a volume while a backup of it
+  runs is refused; `jailops stop-all` stops up to eight jails at a time, each after the jails that depend on it.
+- **Security: the helper checks what it runs, not what the daemon wrote.** The package repository directory is read in
+  full by the helper (all entries, whole files, no key twice, one block), copied into a directory of its own and given to
+  `pkg` there, so a repository the daemon chose can no longer be slipped past the check (a 65th file, bytes after the first
+  8 KiB, a key given twice, a rewrite between the check and the run). An archive that is extracted is copied and listed
+  in the same way. A key path with a variable twice is refused.
+- **Security: a jail's root is its own root.** The `path` of a jail must be `<storage mount>/projects/<project>/jails/<name>/root`
+  of that jail and must reach it without a link, at every start too: a link in `path` made the root of the jail `/`.
+- **Security: nothing is mounted below a volume.** A volume mounted below another volume (or two on one mount point) is
+  refused in the spec and in the fstab; a mount that lands elsewhere than at its path is unmounted at once; `umount` takes
+  only a mount point of the host, and `chmod` is not done in the tree of a running jail.
+- **Security: addresses, routes and forwards belong to a network.** The helper adds an address to a jail's link or a route
+  through it only inside the subnet of a stored network; the IPv6 proxy's route only for an address inside the prefix of a
+  network in proxy mode (not the anycast address, the default router or a neighbor of the uplink); a port forward leads to
+  an address of a stored network and takes over a privileged port, or one a host process listens on, only for an
+  administrator.
+- **Security: smaller things.** A FIFO in a jail's tree is refused, not waited on. A host directory whose mount does not
+  answer gives up after ten seconds and holds one of four probe slots instead of the helper's whole budget. The audit log
+  records the program of an exec session and the number of its arguments, not the arguments.
+
+- **Security: a jail with a link and no address is closed, not open.** A jail created with `--network lan=none` got an
+  epair and no anchor at all: no anti-spoofing, none of the project's mandatory policies, no isolation. It could take the
+  address of another jail and send in its name. Every jail with a link now has an anchor; when it has no address the anchor
+  drops everything in both directions. A jail with a link and no rendered anchor does not start.
+- **Security: `any` is not the host.** As the destination of an allow rule, `any` (named or left out) no longer includes the
+  host's own addresses or the subnets of other projects: `allow out tcp port 22` lets a jail ssh to the internet, not to the
+  sshd of the host or to a jail of another project, as the allow rule decided before the host and isolation blocks. Name the host
+  (`--to host`) or a prefix of the other project to open them; a deny rule to `any` still denies them. Every anchor defines a
+  new table, `not_any`. The pass rules of the anchors change text, so their labels change and open flows reconnect once.
+- **Security: pf off or flushed.** A jail with a network link does not start while pf is disabled (`allow-start-without-pf`
+  in `priv.conf` says otherwise), `jailops doctor` fails `pf.enabled`, and when `service pf restart` has emptied the anchors the
+  daemon loads them again within seconds instead of at the next pass a minute later.
+- **Neighbor solicitations: a flood from one sender no longer starves the router.** The proxy charges a solicitation to the
+  Ethernet source of the frame first and to the global budget only when it passes, keeps a share of the global budget for the
+  requesters it has answered over time (the router), and no longer trusts the source link-layer option of a solicitation,
+  which a sender chooses itself, as a key.
+- **Fixed: a comment in a raw fragment, a forwarded port taken twice, dummynet, WireGuard, allocation.** A comment of the
+  administrator's own in a raw PF fragment no longer turns labelling on for the rules after it (a rule that already said `keep
+  state` got a second one and the anchor did not load): the fragment is enclosed by two marker lines. Two jails cannot forward the
+  same host port (a proxy device or a redirect rule): the second is refused, naming the first. A dummynet pipe a loaded anchor still
+  names is not removed, and pipe numbers that cannot be saved stop the limit from being applied instead of being renumbered at the
+  next start. The WireGuard anchor labels its pass rules and binds their states to the interface. A `/80` at the end of its `/64`
+  does not hand out the reserved subnet anycast identifiers. A network must be an ordinary unicast range (IPv4 not in 0/8,
+  loopback, link-local, multicast or 240/4; IPv6 global or unique-local). Removed with it: the unused project sub-range code of
+  the address allocator.
+
 ## 0.7.1 - 2026-11-15
 
 - **`rename` for the rest.** `jailops volume|storage|cert|user|wireguard|backup target|backup policy rename OLD NEW`

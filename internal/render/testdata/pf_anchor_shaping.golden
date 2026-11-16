@@ -4,6 +4,8 @@
 table <s_office> persist { 198.51.100.7, 2001:db8:ffff::/48, 203.0.113.0/24 }
 # the host's own addresses (a jail reaches none of them unless a rule says so)
 table <host> persist
+# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)
+table <not_any> persist
 table <t_admin> persist { 10.20.0.4, 10.20.0.5 }
 # bandwidth limit of jo0123456789a0a: what the jail sends goes through pipe 40000, what it receives through pipe 40001
 match in on jo0123456789a0a all dnpipe (40000, 40001)

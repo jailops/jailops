@@ -37,6 +37,9 @@ func FirewallPolicySpec(s api.FirewallPolicySpec) (FirewallReport, error) {
 			return rep, Invalid(d.f, "%s %q must be allow or deny", d.f, d.v)
 		}
 	}
+	if len(s.Rules) > api.MaxPolicyRules {
+		return rep, Invalid("rules", "a policy has at most %d rules, not %d: split it into several policies", api.MaxPolicyRules, len(s.Rules))
+	}
 	if err := Comment("comment", s.Comment); err != nil {
 		return rep, err
 	}
@@ -167,6 +170,12 @@ func rule(f string, r api.FirewallRule) error {
 		if rd.HostPort < 1 || rd.HostPort > 65535 || rd.JailPort < 1 || rd.JailPort > 65535 {
 			return Invalid(f+".redirect", "redirect ports must be between 1 and 65535")
 		}
+		if rd.Listen != "" {
+			a, err := netip.ParseAddr(rd.Listen)
+			if err != nil || a.Zone() != "" || a.IsMulticast() || a.IsUnspecified() || a.IsLoopback() {
+				return Invalid(f+".redirect.listen", "listen %q is not a unicast address of the host", rd.Listen)
+			}
+		}
 	}
 	return nil
 }
@@ -273,6 +282,9 @@ func ValidateEndpoint(s string) error {
 
 // AddressSetSpec validates an address set.
 func AddressSetSpec(s api.AddressSetSpec) error {
+	if len(s.Addresses) > api.MaxAddressSetMembers {
+		return Invalid("addresses", "an address set has at most %d members, not %d: use prefixes (a CIDR covers many addresses) or several sets", api.MaxAddressSetMembers, len(s.Addresses))
+	}
 	for _, e := range s.Addresses {
 		k, _, err := ParseEndpoint(e.Address)
 		if err != nil {

@@ -1342,6 +1342,21 @@ check "delete that jail" $J delete --confirm-data-loss desktop --project demo
 check "the volume is deleted when nothing attaches it" $J volume delete maildir --project demo --confirm-data-loss
 if zfs list "$vol" >/dev/null 2>&1; then fail "the volume is still there"; fi
 
+step "a project with volumes is not deleted; a restart of the daemon starts no jail an operator stopped"
+check "a project that holds a volume" sh -c "$J project create vkeep && $J storage grant default --project vkeep"
+check "its volume" $J volume create precious --project vkeep
+expect_refused "a project with a volume is not deleted" $J project delete vkeep -y
+zfs list "$pool/jailops/projects/vkeep/volumes/precious" >/dev/null 2>&1 || fail "the refused delete destroyed the volume"
+check "the volume goes first" $J volume delete precious --project vkeep --confirm-data-loss
+check "then the project" $J project delete vkeep -y
+check "a jail that starts at boot" $J create asj --project demo --image "$img" --network lan --storage default --start --autostart
+check "an operator stops it for maintenance" $J stop asj --project demo
+check "the daemon restarts" service jailopsd restart
+waitfor "the daemon answers" 60 $J host show
+sleep 6 # sleep-ok: the first reconcile pass of the new daemon runs within seconds; nothing is announced when it finds no jail to start
+if jls -h name | grep -qx demo_asj; then fail "a restart of the daemon started a jail with boot.autostart that was stopped on purpose"; fi
+check "delete it" $J delete --confirm-data-loss asj --project demo
+
 step "an encrypted volume (passphrase from a file, lock, a refused start, a wrong and the right passphrase)"
 # The volume is a ZFS encryption root; its passphrase goes from the file to the daemon and the helper and reaches zfs on
 # standard input. A pool without the encryption feature skips this block and says so.
@@ -1859,6 +1874,39 @@ if [ "$part" != pf ]; then
 	expect "stop-all lists the running jails of every project" 'would stop jail demo/' $J stop-all --dry-run
 	check "the rc script stops the jails (what a host shutdown runs)" service jailops_shutdown onestop
 	expect "no jail runs any more" '^0$' sh -c "jls -n jid 2>/dev/null | wc -l | tr -d ' '"
+fi
+
+if [ "$part" != pf ]; then
+	step "a stop that did not finish: the mounts it left below the root are taken off by the next stop, by a start and by doctor --fix; a started jail has exactly one devfs and a working /dev"
+	sr="$mount/projects/demo/jails/stale1/root"
+	devfs_layers() { mount -p | awk -v p="$sr/dev" '$2 == p && $3 == "devfs"' | wc -l | tr -d ' '; }
+	stale_mounts() { zfs mount -a >/dev/null 2>&1; mkdir -p "$sr/dev" "$sr/mnt"; mount -t devfs devfs "$sr/dev"; mount -t devfs devfs "$sr/dev"; mount -t nullfs /tmp "$sr/mnt"; }
+	check "a jail for it" $J create stale1 --project demo --image "$img" --network lan --storage default --start
+	expect "a started jail has /dev" 'null' $J exec --project demo stale1 -- ls /dev/null /dev/zero /dev/random
+	expect "and exactly one devfs under its root" '^1$' devfs_layers
+	check "stop it" $J stop stale1 --project demo
+	stale_mounts
+	expect "two stacked devfs are there" '^2$' devfs_layers
+	expect "doctor names them" 'mounts\.leftovers +WARN' $J doctor
+	check "doctor --fix --dry-run lists what it would do" $J doctor --fix --dry-run
+	expect "and does nothing" '^2$' devfs_layers
+	check "doctor --fix takes them off" $J doctor --fix
+	expect "no devfs is left" '^0$' devfs_layers
+	stale_mounts
+	check "the next stop takes them off" $J stop stale1 --project demo
+	expect "no devfs is left after the stop" '^0$' devfs_layers
+	stale_mounts
+	check "a start takes them off" $J start stale1 --project demo
+	expect "and the jail has exactly one devfs" '^1$' devfs_layers
+	expect "and a working /dev" 'null' $J exec --project demo stale1 -- ls /dev/null /dev/zero
+	check "a shutdown script that never returns" $J exec --project demo stale1 -- sh -c 'printf "#!/bin/sh\n# PROVIDE: zzhang\n# REQUIRE: LOGIN\n# KEYWORD: shutdown\n. /etc/rc.subr\nname=zzhang\nrcvar=zzhang_enable\nstart_cmd=:\nstop_cmd=zzhang_stop\nzzhang_stop() { echo zzhang hangs; sleep 300; }\nload_rc_config \$name\nrun_rc_command \$1\n" > /etc/rc.d/zzhang; chmod +x /etc/rc.d/zzhang; echo zzhang_enable=YES >> /etc/rc.conf'
+	t0=$(date +%s)
+	check "its stop finishes within its budget" $J stop stale1 --project demo
+	[ $(( $(date +%s) - t0 )) -le 240 ] || fail "the stop of a jail whose shutdown never returns took $(( $(date +%s) - t0 )) s"
+	expect "the jail is gone" '^0$' sh -c "jls -n name 2>/dev/null | grep -c 'name=demo_stale1\$' || true"
+	expect "its console log says the shutdown was cut off" 'did not shut down' cat /var/log/jailops/jail_demo_stale1_console.log
+	expect "no mount is left below its root" '^0$' devfs_layers
+	check "delete it" $J delete --confirm-data-loss stale1 --project demo
 fi
 
 step "cleanup"

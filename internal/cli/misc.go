@@ -21,15 +21,20 @@ type check struct {
 }
 
 func (a *app) doctorCmd() *cobra.Command {
-	return &cobra.Command{
+	var fix bool
+	cmd := &cobra.Command{
 		Use:   "doctor",
 		Short: "Check the connection and the server",
 		Long: `Run a series of checks and print PASS, WARN or FAIL for each (INFO for a fact the
 server reports that is not a fault, such as a setting it stores and does not enforce yet): which
 configuration is used, whether the server answers, how it sees you, whether the
 API versions and extensions match, and what the host reports about ZFS and PF.
-The exit status is 1 when a check failed.`,
-		Example: "jailops doctor\njailops --remote prod doctor -o json",
+The exit status is 1 when a check failed.
+
+--fix performs the safe cleanups the checks report (the mounts a stop that did not finish left below the root of
+a stopped jail) and lists what an earlier network layout left, with the commands that remove it. A jail that runs is
+never touched, and the command can be run again. With --dry-run it only lists what it would do.`,
+		Example: "jailops doctor\njailops doctor --fix\njailops doctor --fix --dry-run\njailops --remote prod doctor -o json",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
@@ -167,12 +172,43 @@ The exit status is 1 when a check failed.`,
 			}); err != nil {
 				return err
 			}
+			if fix {
+				c, cerr := a.connect(ctx)
+				if cerr != nil {
+					return cerr
+				}
+				res, ferr := c.DoctorFix(ctx, a.dryRun)
+				if ferr != nil {
+					return ferr
+				}
+				if len(res.Actions) == 0 {
+					a.say("nothing to clean up\n")
+				}
+				for _, act := range res.Actions {
+					state := "done"
+					switch {
+					case res.DryRun:
+						state = "would do"
+					case act.Error != "":
+						state = "not done"
+					case !act.Done:
+						state = "skipped"
+					}
+					line := fmt.Sprintf("%s: %s: %s", act.Check, state, act.What)
+					if act.Error != "" && !res.DryRun {
+						line += " (" + act.Error + ")"
+					}
+					a.say("%s\n", line)
+				}
+			}
 			if bad > 0 {
 				return fmt.Errorf("%d check(s) failed", bad)
 			}
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&fix, "fix", false, "perform the safe cleanups the checks report (see the description)")
+	return cmd
 }
 
 func (a *app) serverCmd() *cobra.Command {

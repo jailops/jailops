@@ -4,6 +4,8 @@
 table <s_office> persist { 198.51.100.7, 2001:db8:ffff::/48, 203.0.113.0/24 }
 # the host's own addresses (a jail reaches none of them unless a rule says so)
 table <host> persist
+# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)
+table <not_any> persist
 table <t_admin> persist { 10.20.0.4, 10.20.0.5 }
 # rdr rule 5: forward
 match in on em0 inet proto tcp from any to (em0) port 8080 rdr-to 10.20.0.10 port 80
@@ -48,6 +50,7 @@ pass in quick on jo0123456789a0a inet proto udp from 10.20.0.10 to 9.9.9.9 port 
 pass in quick on jo0123456789a0a inet6 proto udp from 2001:db8:1::100 to 2620:fe::fe port 53 label "jo-68b42b97a402" keep state (if-bound)
 # raw fragment (admin)
 pass quick on lo0 all
+# end of raw fragment (admin)
 # the host: closed unless a rule above opened it; ping and the network's resolver stay open
 pass in quick on jo0123456789a0a inet proto icmp from any to <host> label "jo-dab8aa653a64" keep state (if-bound)
 pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host> label "jo-0e8194c2c58c" keep state (if-bound)

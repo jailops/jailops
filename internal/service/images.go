@@ -84,8 +84,8 @@ func (s *Service) generationFreeBSD(ctx context.Context, gen string) string {
 		}
 	}
 	s.genVerMu.Lock()
-	if s.genVer == nil {
-		s.genVer = map[string]string{}
+	if s.genVer == nil || len(s.genVer) >= maxGenVerCache {
+		s.genVer = map[string]string{} // a cache: a generation that was deleted does not stay for ever
 	}
 	s.genVer[gen] = v
 	s.genVerMu.Unlock()
@@ -834,3 +834,6 @@ func (s *Service) ensureLinuxHost(ctx context.Context, image string) error {
 	}
 	return nil
 }
+
+// maxGenVerCache bounds the cache of the FreeBSD versions of generations.
+const maxGenVerCache = 4096

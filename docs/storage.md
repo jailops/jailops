@@ -278,7 +278,12 @@ The example is a backup server in a jail that writes to a storage box the host h
   the mount is lost. They stay stopped: start them when `volume show` says `ok`.
 - **When the mount is back.** A running jail gets its mount again by itself (the daemon removes the old mount in the jail
   and makes it again; a mount made under a nullfs mount afterwards is not seen through it, which is why). The event
-  `volume-remounted` says so.
+  `volume-remounted` says so. If the new mount cannot be made, a small read-only tmpfs stands on the jail's mount point
+  (never the empty directory of the jail's own root) and the daemon tries again every round. A box that came back while
+  the daemon was down is found at the daemon's next start.
+- **A share that does not answer.** A hung NFS or SMB mount answers no probe: the volume is `lost` ("the directory does
+  not answer") and the daemon keeps one probe on its way per directory, however many looks come meanwhile, so a dead share
+  cannot use up the helper's requests. A list or a show uses the watch's last answer or waits a few seconds.
 - **Not JailOps's files.** No snapshots, rollback, size limit, encryption or copy of the jail's files into it
   (`--copy-existing`), and backups skip it: back it up where it is, with the tool of the box. Deleting the volume forgets it
   and leaves the directory as it is. A volume that is a directory is attached read-write to as many jails as you like, with the
@@ -295,7 +300,8 @@ mounts, images (they are rebuilt from pkgbase) and the host's state unless the p
 
 A **volume** is a backup of its own: a policy backs up the volumes of the jails it selects and the volumes whose labels match
 its selector, each once per run however many jails attach it, and a restore of a jail brings back the volumes the project
-lacks from their newest backup. `--no-volumes` on the policy and `--no-volumes` on a run or a restore leave volumes
+lacks from the newest backup of that very volume (a volume that was deleted and made again under the same name is another
+volume). `--no-volumes` on the policy and `--no-volumes` on a run or a restore leave volumes
 out. An encrypted volume is backed up while it is unlocked and restored on its own, with its passphrase. A host directory (a
 volume with `--path`) and an archive dataset are not JailOps's to back up: snapshot or replicate them with ZFS itself or
 with the tool of the box.

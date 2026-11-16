@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 
 	"jailops.net/jailops/sdk/api"
@@ -113,4 +114,56 @@ func (s *Service) doctorJailRefs(c *checkSet) {
 	}
 	c.add("firewall.refs", api.DoctorWarn, strings.Join(bad, "; ")+": a reference to a jail that does not exist matches nobody",
 		"jailops firewall policy edit NAME, or address-set edit NAME, with the name of the jail (jailops list shows them), or make the jail")
+}
+
+// doctorFirewallSize warns when a project's firewall objects come close to the limits (api.MaxPolicyRules and the
+// others): pf's table-entries limit is one for the whole kernel, so one project that fills it stops every other project
+// from loading an anchor. The limits are far below what a real policy needs; a warning means look at the project.
+func (s *Service) doctorFirewallSize(c *checkSet) {
+	pols, err := s.polKind.listAll()
+	if err != nil {
+		return
+	}
+	sets, err := s.setKind.listAll()
+	if err != nil {
+		return
+	}
+	type use struct{ policies, sets, members, rules int }
+	per := map[string]*use{}
+	get := func(p string) *use {
+		if per[p] == nil {
+			per[p] = &use{}
+		}
+		return per[p]
+	}
+	for _, o := range pols {
+		u := get(o.Meta.Project)
+		u.policies++
+		u.rules = max(u.rules, len(o.Spec.Rules))
+	}
+	for _, o := range sets {
+		u := get(o.Meta.Project)
+		u.sets++
+		u.members += len(o.Spec.Addresses)
+	}
+	near := func(n, limit int) bool { return n*10 >= limit*8 }
+	var warn []string
+	for p, u := range per {
+		switch {
+		case near(u.policies, api.MaxPoliciesPerProject):
+			warn = append(warn, fmt.Sprintf("%s has %d of %d policies", p, u.policies, api.MaxPoliciesPerProject))
+		case near(u.sets, api.MaxAddressSetsPerProject):
+			warn = append(warn, fmt.Sprintf("%s has %d of %d address sets", p, u.sets, api.MaxAddressSetsPerProject))
+		case near(u.members, api.MaxSetMembersPerProject):
+			warn = append(warn, fmt.Sprintf("%s has %d of %d address set members", p, u.members, api.MaxSetMembersPerProject))
+		case near(u.rules, api.MaxPolicyRules):
+			warn = append(warn, fmt.Sprintf("%s has a policy of %d of %d rules", p, u.rules, api.MaxPolicyRules))
+		}
+	}
+	if len(warn) == 0 {
+		return
+	}
+	slices.Sort(warn)
+	c.add("firewall.size", api.DoctorWarn, strings.Join(warn, "; "),
+		"use prefixes instead of single addresses and split large policies: pf's table-entries limit is shared by every project")
 }

@@ -33,7 +33,9 @@ type Mgmt struct {
 	ui   http.Handler
 	pp   auth.PasswordParams
 	lock *auth.Lockout
-	mux  *http.ServeMux
+	// ipLock limits the logins of one source address over all users, ten times looser than lock.
+	ipLock *auth.Lockout
+	mux    *http.ServeMux
 	// hashSem bounds the password hashes that run at once. Every login attempt, valid user or not, costs an argon2id hash
 	// (64 MiB, several passes), and the lockout only counts a failure after the hash is done: without a bound one client
 	// could start hundreds of hashes in parallel before it is locked out.
@@ -68,7 +70,7 @@ func newMgmt(s *Server, ui http.Handler, pp auth.PasswordParams) *Mgmt {
 	if err != nil {
 		panic(err) // a malformed static table is a programming error caught by tests
 	}
-	m := &Mgmt{s: s, reg: reg, ui: ui, pp: pp, lock: auth.NewLockout(auth.LockoutConfig{}), mux: http.NewServeMux(),
+	m := &Mgmt{s: s, reg: reg, ui: ui, pp: pp, lock: auth.NewLockout(auth.LockoutConfig{}), ipLock: auth.NewLockout(auth.LockoutConfig{Threshold: 50}), mux: http.NewServeMux(),
 		hashSem: make(chan struct{}, max(1, runtime.NumCPU()))}
 	var routes []string
 	h := func(method, pattern string, fn func(http.ResponseWriter, *http.Request, *identity)) {
@@ -211,6 +213,12 @@ func (m *Mgmt) wrap(method, pattern string, fn func(http.ResponseWriter, *http.R
 	}
 }
 
+// loginKey is one limiter key of a login and the limiter that holds it.
+type loginKey struct {
+	lim *auth.Lockout
+	key string
+}
+
 func (m *Mgmt) identify(r *http.Request) (*identity, error) {
 	ctx := r.Context()
 	if h := r.Header.Get("Authorization"); h != "" {
@@ -218,13 +226,14 @@ func (m *Mgmt) identify(r *http.Request) (*identity, error) {
 		if !ok || !auth.TokenWellFormed(tok) {
 			return nil, api.Errorf(api.CodeUnauthorized, "malformed bearer token")
 		}
-		tokKey := "tok|" + remoteAddr(r).String()
-		if err := m.lock.Check(tokKey); err != nil {
-			return nil, api.Errorf(api.CodeRateLimited, "too many failed attempts")
-		}
+		// failures are counted per source (an IPv6 source is its /64); a token is not guessable, so a valid one is never
+		// refused for what others at the same address tried
+		tokKey := "tok|" + auth.SourceKey(remoteAddr(r).String())
 		t, err := m.s.DB.TokenByHash(ctx, auth.HashToken(tok))
 		if err != nil {
-			_ = m.lock.Fail(tokKey)
+			if lerr := m.lock.Fail(tokKey); lerr != nil {
+				return nil, api.Errorf(api.CodeRateLimited, "too many failed attempts")
+			}
 			return nil, api.Errorf(api.CodeUnauthorized, "unknown token")
 		}
 		var exp time.Time
@@ -322,10 +331,10 @@ func (m *Mgmt) login(w http.ResponseWriter, r *http.Request, _ *identity) {
 	}
 	// Two keys: the pair (one user from one place) and the source (a spray over many names). A key for the user
 	// from anywhere would let a stranger lock the administrator out.
-	ip := remoteAddr(r).String()
-	keys := []string{strings.ToLower(req.Username) + "|" + ip, "ip|" + ip}
-	for _, key := range keys {
-		if err := m.lock.Check(key); err != nil {
+	ip := auth.SourceKey(remoteAddr(r).String()) // an IPv6 source is its /64
+	keys := []loginKey{{m.lock, strings.ToLower(req.Username) + "|" + ip}, {m.ipLock, "ip|" + ip}}
+	for _, k := range keys {
+		if err := k.lim.Check(k.key); err != nil {
 			var le *auth.LockedError
 			if errors.As(err, &le) {
 				w.Header().Set("Retry-After", le.RetryAfterSeconds())
@@ -347,15 +356,15 @@ func (m *Mgmt) login(w http.ResponseWriter, r *http.Request, _ *identity) {
 	}
 	release()
 	if !valid {
-		for _, key := range keys {
-			_ = m.lock.Fail(key)
+		for _, k := range keys {
+			_ = k.lim.Fail(k.key)
 		}
 		_ = m.s.DB.Audit(r.Context(), "anonymous", "auth.login.failed", req.Username, nil, r.RemoteAddr)
 		writeError(w, api.Errorf(api.CodeUnauthorized, "wrong user name or password"))
 		return
 	}
-	for _, key := range keys {
-		m.lock.Success(key)
+	for _, k := range keys {
+		k.lim.Success(k.key)
 	}
 	sid, hash, err := auth.NewSessionID()
 	if err == nil {

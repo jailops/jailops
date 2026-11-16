@@ -3,6 +3,7 @@ package backupd_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -292,9 +293,11 @@ func TestLoginHardening(t *testing.T) {
 	}
 	// A spray over many names from one source is stopped by the source key, not only the pair keys.
 	spray := r.web2("192.0.2.50")
+	// (the source key is ten times looser than one user's, so that people behind one address are not locked out by a
+	// stranger: sixty names are more than it allows)
 	locked := false
-	for _, n := range []string{"a", "b", "c", "d", "e", "f", "g", "h", "i", "root"} {
-		if spray.login(n, "wrong password here") == 429 {
+	for i := 0; i < 60; i++ {
+		if spray.login(fmt.Sprintf("name%d", i), "wrong password here") == 429 {
 			locked = true
 		}
 	}
@@ -379,5 +382,36 @@ func TestManagementSecurityHeaders(t *testing.T) {
 		if h.Get("Strict-Transport-Security") != "" {
 			t.Errorf("%s: Strict-Transport-Security %q", p, h.Get("Strict-Transport-Security"))
 		}
+	}
+}
+
+// A user at an address is locked after a few wrong passwords, but another user at the same address is not; an IPv6 source
+// is counted by its /64, so rotating addresses inside it does not give a fresh allowance.
+func TestLoginLockoutIsPerUserAndPrefix(t *testing.T) {
+	r := startRig(t, memKind, nil)
+	const pw = "correct horse battery staple"
+	for _, n := range []string{"ann", "bob"} {
+		if err := backupd.CreateUser(ctx, r.DB, n, pw, "admin", testParams); err != nil {
+			t.Fatal(err)
+		}
+	}
+	one := r.web2("192.0.2.70")
+	for i := 0; i < 6; i++ {
+		one.login("ann", "wrong password here")
+	}
+	if st := one.login("ann", pw); st != 429 {
+		t.Fatalf("ann after six wrong passwords: %d", st)
+	}
+	if st := one.login("bob", pw); st != 200 {
+		t.Fatalf("bob at the same address: %d", st)
+	}
+	locked := 0
+	for i := 1; i <= 12; i++ {
+		if r.web2(fmt.Sprintf("[2001:db8:7:7::%x]", i)).login("bob", "wrong password here") == 429 {
+			locked++
+		}
+	}
+	if locked < 5 {
+		t.Fatalf("12 wrong passwords for bob from 12 addresses of one /64: only %d refused", locked)
 	}
 }

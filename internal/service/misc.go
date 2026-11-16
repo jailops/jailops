@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"jailops.net/jailops/internal/supervise"
 	"slices"
 	"strings"
 	"sync"
@@ -188,7 +189,11 @@ func (s *Service) ProbeRemotes(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, o := range objs {
 		wg.Add(1)
-		go func() { defer wg.Done(); s.probeStore(ctx, o) }()
+		go func() {
+			defer wg.Done()
+			defer func() { supervise.Report(s.log, "store-probe", recover()) }()
+			s.probeStore(ctx, o)
+		}()
 	}
 	wg.Wait()
 }
@@ -475,6 +480,16 @@ type Backups interface {
 	Restore(ctx context.Context, req api.RestoreRequest) (api.Jail, error)
 	// RestoreVolume restores a volume backup as a new volume of the project.
 	RestoreVolume(ctx context.Context, req api.RestoreRequest) (api.Volume, error)
+}
+
+// backupRunning refuses an operation that destroys what a backup is reading: a delete of a jail or a volume while a
+// backup of it runs would fail half way (the capture has its datasets mounted) or fail the backup. Backends that do not
+// say whether a run is on its way are not asked.
+func (s *Service) backupRunning(kind, name, uuid string) error {
+	if b, ok := s.d.Backups.(interface{ Busy(uuid string) bool }); ok && uuid != "" && b.Busy(uuid) {
+		return api.Errorf(api.CodeBusy, "a backup of %s %q is running", kind, name).WithHint("wait for it to finish (jailops backup list), then delete")
+	}
+	return nil
 }
 
 func (s *Service) backupsUnsupported() error {

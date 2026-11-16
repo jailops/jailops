@@ -88,3 +88,18 @@ func Entries(members ...string) []AddressEntry {
 	}
 	return out
 }
+
+// Limits on the size of the firewall objects of a project. pf's table-entries limit is one for the whole kernel and every
+// anchor holds its own copy of each table it names, so one project that makes huge address sets could stop every other
+// project from loading an anchor. The limits are generous for any real policy.
+const (
+	// MaxPolicyRules is the number of rules of one policy.
+	MaxPolicyRules = 500
+	// MaxAddressSetMembers is the number of members of one address set.
+	MaxAddressSetMembers = 5000
+	// MaxPoliciesPerProject and MaxAddressSetsPerProject are the numbers of each kind in one project.
+	MaxPoliciesPerProject    = 200
+	MaxAddressSetsPerProject = 200
+	// MaxSetMembersPerProject is the number of members of all the address sets of one project together.
+	MaxSetMembersPerProject = 20000
+)

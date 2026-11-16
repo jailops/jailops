@@ -70,6 +70,8 @@ type Service struct {
 	Executor *plan.Executor
 	// Keys encrypts volumes; nil refuses encrypted volumes (unsupported).
 	Keys Keys
+	// Warn, when set, is told of something a stop could not finish or had to force: the jail, the event's action, what.
+	Warn func(ctx context.Context, jail, action, what string)
 }
 
 func (s *Service) executor() *plan.Executor {
@@ -393,6 +395,19 @@ func (s *Service) doStart(ctx context.Context, name string) error {
 		if err := s.Jails.Start(ctx, name); err != nil {
 			return err
 		}
+		// jail(8) makes the nullfs mounts of the fstab a moment after the check of mountTree: a box that went away in
+		// between leaves the jail on the empty directory of the host's mount point. A second look ends that.
+		if atts, err := s.Cfg.attached(name); err == nil {
+			for _, a := range atts {
+				if !a.HostDir {
+					continue
+				}
+				if err := s.checkHostDir(ctx, a); err != nil {
+					_ = s.doStop(ctx, name)
+					return err
+				}
+			}
+		}
 	}
 	return s.waitReady(ctx, name)
 }
@@ -402,7 +417,8 @@ func (s *Service) doStop(ctx context.Context, name string) error {
 	if up, err := s.Jails.Running(ctx, name); err != nil {
 		return err
 	} else if up {
-		if err := s.Jails.Stop(ctx, name); err != nil {
+		if err := s.stopJail(ctx, name); err != nil {
+			s.cleanAfterFailedStop(ctx, name, err)
 			return err
 		}
 	}

@@ -44,9 +44,15 @@ func bodyProject(p, body string) error {
 }
 
 // checkPolicy validates a policy, renders it against placeholder values and,
-// when a PF client exists, has pfctl -n check the result. A raw fragment and a port forward need
-// the admin role.
+// when a PF client exists, has pfctl -n check the result. A raw fragment needs the admin role and a port
+// forward a global administrator (checkRedirectRules).
 func (s *Service) checkPolicy(ctx context.Context, name string, spec api.FirewallPolicySpec, refs fwRefs) error {
+	return s.checkPolicyWas(ctx, name, spec, refs, nil)
+}
+
+// checkPolicyWas is checkPolicy for an update: the forwards the stored policy already has stay as they are for an
+// administrator of the project, who may edit the other rules (was is nil for a new policy).
+func (s *Service) checkPolicyWas(ctx context.Context, name string, spec api.FirewallPolicySpec, refs fwRefs, was *api.FirewallPolicySpec) error {
 	if err := validate.Name("name", name); err != nil {
 		return err
 	}
@@ -57,12 +63,11 @@ func (s *Service) checkPolicy(ctx context.Context, name string, spec api.Firewal
 	if rep.RequiresAdmin && !ActorFrom(ctx).Perm.Satisfies(api.PermAdmin) {
 		return api.Errorf(api.CodeForbidden, "a raw PF fragment needs the admin role")
 	}
-	if !ActorFrom(ctx).Perm.Satisfies(api.PermAdmin) {
-		for i, r := range spec.Rules {
-			if r.Redirect != nil {
-				return api.Errorf(api.CodeForbidden, "rule %d forwards a host port into a jail, which needs the admin role: it opens the host to the network", i+1)
-			}
-		}
+	if err := s.checkRedirectRules(ctx, spec, was); err != nil {
+		return err
+	}
+	if err := s.checkPolicyForwardClash(ctx, name, spec); err != nil {
+		return err
 	}
 	in := render.PFInput{Jail: "check_policy", Interfaces: []string{"jo000000000a"}, Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1")},
 		DefaultIn: spec.DefaultIn, DefaultOut: spec.DefaultOut, Policies: []render.PFPolicy{{Name: "check", Policy: spec}},
@@ -128,6 +133,9 @@ func (s *Service) CreatePolicy(ctx context.Context, in api.FirewallPolicy) (api.
 	if err := ks.notTaken(in.Metadata.Name); err != nil {
 		return api.FirewallPolicy{}, err
 	}
+	if have, err := ks.list(); err == nil && len(have) >= api.MaxPoliciesPerProject {
+		return api.FirewallPolicy{}, api.Errorf(api.CodeQuotaExceeded, "a project has at most %d firewall policies", api.MaxPoliciesPerProject)
+	}
 	sets, err := s.allRefs(p.Meta.Name)
 	if err != nil {
 		return api.FirewallPolicy{}, err
@@ -179,7 +187,11 @@ func (s *Service) UpdatePolicy(ctx context.Context, name string, in api.Firewall
 	if err != nil {
 		return api.FirewallPolicy{}, err
 	}
-	if err := s.checkPolicy(ctx, name, in.Spec, sets); err != nil {
+	var was *api.FirewallPolicySpec
+	if cur, err := ks.get(name); err == nil {
+		was = &cur.Spec
+	}
+	if err := s.checkPolicyWas(ctx, name, in.Spec, sets, was); err != nil {
 		return api.FirewallPolicy{}, err
 	}
 	o, err := ks.update(ctx, name, expect, in.Metadata.Labels, &in.Metadata.ManagedBy, in.Spec)
@@ -310,6 +322,17 @@ func (s *Service) checkSet(project, name string, spec api.AddressSetSpec) error 
 		return err
 	}
 	refs.sets[name] = spec
+	if len(refs.sets) > api.MaxAddressSetsPerProject {
+		return api.Errorf(api.CodeQuotaExceeded, "a project has at most %d address sets", api.MaxAddressSetsPerProject)
+	}
+	members := 0
+	for _, sp := range refs.sets {
+		members += len(sp.Addresses)
+	}
+	if members > api.MaxSetMembersPerProject {
+		return api.Errorf(api.CodeQuotaExceeded, "the address sets of a project have at most %d members together, not %d", api.MaxSetMembersPerProject, members).
+			WithHint("use prefixes (a CIDR covers many addresses) instead of single addresses")
+	}
 	if _, err := validate.FlattenSet(name, refs.sets, refs.jails); err != nil {
 		return err
 	}

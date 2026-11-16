@@ -140,6 +140,8 @@ type Config struct {
 	StorageFile string
 	// AllowPoolRoot lets a pool's top dataset be registered as a root.
 	AllowPoolRoot bool
+	// AllowStartWithoutPF lets a jail with a network link start while pf is disabled; by default the start is refused.
+	AllowStartWithoutPF bool
 	// FetchHosts are the hosts fetch may download from (default
 	// DefaultFetchHosts).
 	FetchHosts []string

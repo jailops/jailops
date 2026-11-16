@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"jailops.net/jailops/internal/supervise"
 	"slices"
 	"strings"
 	"sync"
@@ -112,6 +113,7 @@ func (e *EventBus) Subscribe(ctx context.Context, after int64) <-chan store.Stor
 	}
 	b.mu.Unlock()
 	go func() {
+		defer func() { supervise.Report(nil, "event-stream", recover()) }()
 		defer close(out)
 		defer func() {
 			b.mu.Lock()

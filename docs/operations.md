@@ -179,7 +179,7 @@ them, or change the target.
 
 ## Start at boot
 
-A jail starts when the host boots only when it has **autostart**. A jail that was running before a reboot does not come back on its own: the daemon starts what the jails' specifications say, nothing it remembers.
+A jail starts when the host boots only when it has **autostart**. A jail that was running before a reboot does not come back on its own: the daemon starts what the jails' specifications say, nothing it remembers. The daemon does this once per boot of the host (it keeps the boot time it ran for in `boot-id` in its state directory): a daemon that starts again on a host that stayed up, by `service jailopsd restart` or a package upgrade, starts no jail, so a jail you stopped for maintenance stays stopped.
 
     jailops create web --image freebsd-15-1 --network lan --storage default --start --autostart
     jailops config set web boot.autostart true        # for a jail that exists
@@ -190,7 +190,7 @@ A jail starts when the host boots only when it has **autostart**. A jail that wa
 
 ## Stop at shutdown
 
-When the host shuts down, the jails are stopped one after the other before the daemon and the helper stop, so that a database
+When the host shuts down, the jails are stopped, up to eight at a time and each after the jails that depend on it, before the daemon and the helper stop, so that a database
 flushes and the poststop hooks run (the interfaces and the pf anchors of the jail are taken down). The rc script
 `jailops_shutdown`, which comes with the package and runs whenever `jailopsd_enable` is `YES`, asks the daemon to do it with
 
@@ -216,7 +216,9 @@ After its stop command (`/etc/rc.shutdown`) a jail has ten seconds to end by its
     jailops config set db boot.stop_timeout 60        # seconds, 1 to 3600; 0 is the ten seconds
     jailops create db ... --stop-timeout 60
 
-The key is written into the jail's configuration at its next start. `jailops stop`, `restart`, `stop-all` and the stop at shutdown all wait as long as the jail asks (`--grace` shortens the wait for one run, and the jail is killed when it passes). The jails are stopped one after the other, so `jailops_shutdown_timeout` has to cover the sum of what the running jails ask for, and `rcshutdown_timeout` has to stay above it: with a database that gets 60 seconds, raise `jailops_shutdown_timeout` to 120 and `rcshutdown_timeout` to 130.
+The key is written into the jail's configuration at its next start. `jailops stop`, `restart`, `stop-all` and the stop at shutdown all wait as long as the jail asks (`--grace` shortens the wait for one run, and the jail is killed when it passes). Up to eight jails stop at once, each after the jails that depend on it, so `jailops_shutdown_timeout` has to cover the longest chain of jails that depend on each other (and, with more than eight jails, the time the queue takes), and `rcshutdown_timeout` has to stay above it: with a database that gets 60 seconds, raise `jailops_shutdown_timeout` to 120 and `rcshutdown_timeout` to 130.
+
+**A stop is always bounded.** The stop commands of a jail get its stop timeout (`boot.stop_timeout`, 30 seconds unless set) and the jail the same time again to exit after SIGTERM, with five seconds on top (65 seconds by default); after that it is removed without them, which kills what is left, and a `jail-stop-forced` event and the console log of the jail name the processes that still ran. After the jail is gone a stop waits five seconds in all for its datasets to be released; what is still busy stays mounted until the next start or stop and is reported as a `jail-unmount-busy` event. `jailops op show ID` lists the steps of an operation with the time each took, and `jailops doctor --fix` takes the mounts that a stop which did not finish left below the root of a stopped jail off ([troubleshooting.md](troubleshooting.md)).
 
 ## Resource limits of a jail
 
@@ -228,7 +230,7 @@ each one is enforced by the kernel, not by JailOps polling.
 | `limits.memory` | rctl `swapuse`, `deny` | the anonymous memory the jail may reserve in total: a `malloc` or `mmap` beyond it fails, and nothing is killed |
 | `limits.pids` | rctl `maxproc`, `deny` | `fork` fails while the jail has that many processes |
 | `limits.cpu` | rctl `pcpu`, `deny`, at cores times 100 | the jail is slowed down to that many cores, nothing is killed |
-| `limits.disk`, `limits.disk_reservation` | ZFS `quota` and `reservation` of the jail's container dataset | writes fail below the container: the root, the persistent datasets, the volumes, and the snapshots of all of them count |
+| `limits.disk`, `limits.disk_reservation` | ZFS `quota` and `reservation` of the jail's container dataset | writes fail below the container: the root, the persistent datasets and the snapshots of all of them count; a volume is a dataset of the project, outside the container: it is bounded by its own `--size` and by the project's storage quota, not by the jail's limit |
 | `limits.states` | pf `keep state (max N)` on every pass rule of the jail's anchor | a rule creates no new state beyond N; the host's state table cannot be filled by one jail |
 
 Memory is `swapuse` because it is the one resource that counts what a program reserves and refuses the allocation
@@ -279,6 +281,20 @@ with every start and stop and give no events. The same event is shown once in 30
 published in a minute, so a failing disk cannot flood the stream. A host without devd, or a socket the daemon cannot
 read, never stops the daemon: it tries again slowly, and `jailops doctor` says so with the check `host.devd`.
 `devd.enable: false` in `jailopsd.yaml` turns the reading off, `devd.pipe` names another socket.
+
+## When the daemon crashes
+
+A panic in one of the background loops of `jailopsd` (the reconcile loop, the housekeeping, the devd watcher, the host
+directory watcher, the backup scheduler, the hub loops) does not end the daemon: the loop is logged with its stack in the
+log of `jailopsd`, counted, and started again after a delay that doubles from one second to a minute. `jailops doctor`
+warns (`daemon.loops`) while one was restarted in the last day: report the stack as an issue. A panic in a request is
+answered with an error and logged, as before.
+
+If the daemon itself exits (the kernel killed it for memory, a panic outside the loops), daemon(8) starts it again after
+10 seconds (`-R 10` in `/usr/local/etc/rc.d/jailopsd` and `jailops_backupd`; the helper has `-R 5`). The jails keep
+running meanwhile; the API and the console are back with the daemon. `service jailopsd stop` stops the supervisor first,
+so a stop is not undone. A daemon that exits at once on every start is started again every 10 seconds, no faster; its
+reason is in `/var/log/messages` (tag `jailopsd`).
 
 ## What to monitor
 

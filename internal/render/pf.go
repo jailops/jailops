@@ -57,6 +57,25 @@ func AnchorLines() string {
 	return "anchor \"jailops/*\"\n"
 }
 
+// NotAnyTable is the table of the addresses an allow rule to "any" does not reach: the host's own addresses and the
+// subnets of the other projects.
+const NotAnyTable = "not_any"
+
+// notAnyMembers are the members of NotAnyTable.
+func notAnyMembers(in *PFInput) []string {
+	members := addrStrings(uniqAddrs(in.Host))
+	for _, p := range in.Foreign {
+		members = append(members, p.Masked().String())
+	}
+	sort.Strings(members)
+	return members
+}
+
+// notAnyMatch is the structured form of "to ! <not_any>".
+func notAnyMatch(in *PFInput) Match {
+	return Match{Negate: true, Prefixes: prefixesOf(notAnyMembers(in)), Tables: []string{NotAnyTable}}
+}
+
 // HostTable is the table of the host's own addresses, which every anchor defines: the endpoint "host" of a rule, and the
 // destination the anchor closes to the jail unless a rule opens it.
 const HostTable = "host"
@@ -157,6 +176,23 @@ func PFAnchor(in PFInput) (string, error) {
 	return FormatAnchor(a), nil
 }
 
+// closedAnchor is the anchor of a jail whose links have no address (a network entry of "none"): such a jail has no
+// source address it may use and nothing is addressed to it, so nothing goes in or out. It is still an anchor: a jail
+// with an interface and no anchor would be open to the host's rules alone.
+func closedAnchor(in PFInput) *Anchor {
+	var b builder
+	ifs := list(in.Interfaces)
+	b.line("%s", Header)
+	b.line("# anchor %s", JailAnchor(in.Jail))
+	b.line("# the jail has no address on its links: nothing goes in or out")
+	b.rule(Rule{Action: "block", Dir: "in", From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageClosed}},
+		"block drop in quick on %s all", ifs)
+	b.rule(Rule{Action: "block", Dir: "out", From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageClosed}},
+		"block drop out quick on %s all", ifs)
+	out, _ := b.result()
+	return &Anchor{Name: JailAnchor(in.Jail), Lines: strings.Split(out, "\n"), Rules: b.rules}
+}
+
 // BuildAnchor builds the anchor jailops/<jail>: its text and the structured form of its filter rules. Rules are
 // first-match (every typed rule is "quick"); defaults come last. Tables for
 // address sets and tags are defined inside the anchor so that one load is
@@ -214,7 +250,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	}
 	addrs := uniqAddrs(in.Addresses)
 	if len(addrs) == 0 {
-		return nil, fmt.Errorf("render: jail %s has no addresses", in.Jail)
+		return closedAnchor(in), nil
 	}
 	var fams []family
 	for _, kw := range []string{"inet", "inet6"} {
@@ -282,6 +318,8 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	}
 	b.line("# the host's own addresses (a jail reaches none of them unless a rule says so)")
 	b.line("%s", tableLine(HostTable, addrStrings(uniqAddrs(in.Host))))
+	b.line("# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)")
+	b.line("%s", tableLine(NotAnyTable, notAnyMembers(&in)))
 	for _, n := range sortedKeys(tagRefs) {
 		var members []string
 		for _, a := range uniqAddrs(in.TagMembers[n]) {
@@ -454,8 +492,9 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, false, want)
 		if sec.raw != "" {
 			b.rule(Rule{Kind: RuleRaw, Origin: Origin{Stage: StageRaw, Policy: sec.origin.Policy, ProjectPolicy: sec.origin.ProjectPolicy, Managed: sec.origin.Managed}},
-				"# raw fragment (admin)")
+				"%s", rawBegin)
 			b.line("%s", strings.TrimRight(strings.ReplaceAll(sec.raw, "\r\n", "\n"), "\n"))
+			b.line("%s", rawEnd)
 		}
 	}
 
@@ -548,6 +587,12 @@ var (
 //
 // Every pass rule of the jail also gets "keep state (if-bound)", and with maxStates above 0 "keep state (max N, if-bound)":
 // the rule may create at most N states, so one jail cannot fill the state table of the host. The limit is per rule.
+// rawBegin and rawEnd are the comment lines that enclose the administrator's raw fragment in an anchor.
+const (
+	rawBegin = "# raw fragment (admin)"
+	rawEnd   = "# end of raw fragment (admin)"
+)
+
 func labelPassRules(anchor, text string, maxStates int) string {
 	tables := map[string]string{}
 	for _, m := range tableDefRE.FindAllStringSubmatch(text, -1) {
@@ -557,8 +602,14 @@ func labelPassRules(anchor, text string, maxStates int) string {
 	raw := false                           // the administrator's raw fragment is passed on untouched
 	above := sha256.Sum256([]byte(anchor)) // what comes before: a running hash of the rules seen so far
 	for _, ln := range strings.Split(text, "\n") {
-		if strings.HasPrefix(ln, "# ") {
-			raw = ln == "# raw fragment (admin)"
+		// The fragment is the lines between its two markers, whatever comments it has itself: a comment of the
+		// administrator's must not turn the labelling on for the rules that follow it (a rule that says keep state would
+		// get a second one, which pf refuses to load).
+		switch ln {
+		case rawBegin:
+			raw = true
+		case rawEnd:
+			raw = false
 		}
 		rule := strings.TrimSpace(ln) != "" && !strings.HasPrefix(ln, "#") && !strings.HasPrefix(ln, "table ")
 		if rule {
@@ -823,6 +874,12 @@ func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, 
 				to, ok2 = endpoints(r.To, f, nil)
 				mFrom, _ = endpointMatch(r.From, f, f.addrs, in)
 				mTo, _ = endpointMatch(r.To, f, nil, in)
+				// "any" as the destination of an allow rule is every address but the host's and those of the other
+				// projects: a jail that may reach "the internet" does not thereby reach the host's sshd or the jails of
+				// another project (name them to open them). A deny rule keeps "any": it may deny more, never less.
+				if r.Action == "allow" && to == "any" {
+					to, mTo = "! <"+NotAnyTable+">", notAnyMatch(in)
+				}
 			}
 			if !ok1 || !ok2 {
 				continue

@@ -41,7 +41,7 @@ func exitForCode(c api.Code) int {
 		return ExitConflict
 	case api.CodeUnsupported, api.CodeUnverified, api.CodeZFSIncompatible, api.CodeVersionSkew, api.CodeNotManaged:
 		return ExitUnsupported // not_managed: this host does not let JailOps do it
-	case api.CodeInternal, api.CodeNotLeader, api.CodeNoQuorum:
+	case api.CodeInternal, api.CodeNotLeader, api.CodeNoQuorum, api.CodeStopForced:
 		return ExitInternal
 	}
 	return ExitInternal // a code this client does not know is a server matter

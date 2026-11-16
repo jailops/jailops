@@ -3,6 +3,7 @@ package jailos
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"regexp"
 	"sort"
@@ -79,23 +80,67 @@ func (c *Command) Remove(ctx context.Context, confPath, name string) error {
 	if err := validateConf(confPath); err != nil {
 		return err
 	}
-	_, err := c.R.Run(ctx, run.Cmd{Name: "jail", Args: []string{"-f", confPath, "-r", name}, Timeout: stopRunTime(confPath)})
+	budget := stopRunTime(confPath)
+	_, err := c.R.Run(ctx, run.Cmd{Name: "jail", Args: []string{"-f", confPath, "-r", name}, Timeout: budget})
+	if errors.Is(err, run.ErrTimeout) && ctx.Err() == nil {
+		// The jail's stop commands (exec.stop) did not return within the budget: nothing bounds them in jail(8) (its
+		// exec.timeout would only refuse the removal). The jail is removed without them, which kills what is left, and
+		// the console log of the jail says so.
+		// what still runs in the jail is named before it is removed: the operator sees why the shutdown did not finish
+		var running string
+		if ps, perr := c.R.Run(ctx, run.Cmd{Name: "ps", Args: []string{"-J", name, "-o", "pid=", "-o", "comm="}, Timeout: 10 * time.Second}); perr == nil {
+			var procs []string
+			for _, l := range strings.Split(string(ps.Stdout), "\n") {
+				if f := strings.Fields(l); len(f) > 0 {
+					procs = append(procs, strings.Join(f, " "))
+				}
+			}
+			running = strings.Join(procs, ", ")
+		}
+		if _, ferr := c.R.Run(ctx, run.Cmd{Name: "jail", Args: []string{"-R", name}, Timeout: 30 * time.Second}); ferr == nil {
+			noteForcedStop(name, budget, running)
+			msg := fmt.Sprintf("jail %s did not shut down within %s: it was removed without its stop commands and its processes were killed", name, budget)
+			if running != "" {
+				msg += " (still running: " + running + ")"
+			}
+			return api.Errorf(api.CodeStopForced, "%s", msg) // the jail is gone: the daemon takes it as a stop, with a warning
+		}
+	}
 	return withConsoleLog(name, mapJailErr(name, err))
 }
 
-// stopRunTime is how long jail -r may run: the stop hooks get two minutes, and the jail gets its stop.timeout on top of
-// that, so that a stop that waits as long as the jail asked is not cut short.
+// noteForcedStop appends a line to the console log of the jail: the stop commands were cut off, and what still ran.
+func noteForcedStop(name string, budget time.Duration, running string) {
+	f, err := os.OpenFile("/var/log/jailops/jail_"+name+"_console.log", os.O_WRONLY|os.O_APPEND|os.O_CREATE, 0o640)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "jailops: the jail did not shut down within %s; it was removed and its processes were killed", budget)
+	if running != "" {
+		fmt.Fprintf(f, " (still running: %s)", running)
+	}
+	fmt.Fprintln(f)
+}
+
+// stopRunTime is how long jail -r may run: the stop commands (exec.stop) get the jail's stop timeout to shut a service down
+// cleanly, the jail gets the same time again to exit after SIGTERM (stop.timeout), and five seconds go on top. After that
+// the jail is removed without them, so that a stop is always bounded: boot.stop_timeout is the knob of both, and a jail
+// without one has api.DefaultStopTimeout (30 s: 65 s in all).
 func stopRunTime(confPath string) time.Duration {
-	t := 120 * time.Second
+	t := api.DefaultStopTimeout
 	if b, err := os.ReadFile(confPath); err == nil {
 		if m := stopTimeoutRE.FindSubmatch(b); m != nil {
 			if n, err := strconv.Atoi(string(m[1])); err == nil && n > 0 && n <= api.MaxStopTimeout {
-				t += time.Duration(n) * time.Second
+				t = n
 			}
 		}
 	}
-	return t
+	return time.Duration(2*t+stopSlack) * time.Second
 }
+
+// stopSlack is the seconds that go on top of the budget of a stop.
+var stopSlack = 5
 
 var stopTimeoutRE = regexp.MustCompile(`(?m)^[ \t]*stop\.timeout[ \t]*=[ \t]*([0-9]+)[ \t]*;`)
 

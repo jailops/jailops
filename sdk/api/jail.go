@@ -217,6 +217,10 @@ type ProxyDevice struct {
 	Proto string `json:"proto,omitempty"`
 }
 
+// DefaultStopTimeout is the stop timeout of a jail that does not set boot.stop_timeout, in seconds: the time the stop
+// commands of the jail get to shut a service down cleanly, and the jail then to exit after SIGTERM, before it is removed.
+const DefaultStopTimeout = 30
+
 // MaxStopTimeout is the largest BootPolicy.StopTimeout, in seconds.
 const MaxStopTimeout = 3600
 

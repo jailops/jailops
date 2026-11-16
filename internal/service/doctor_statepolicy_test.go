@@ -110,3 +110,39 @@ func TestDoctorStatePolicyUnreadablePFConf(t *testing.T) {
 		t.Fatalf("without the line: %+v", c)
 	}
 }
+
+// infoRunner answers `pfctl -s info` with the status of the test: pfctl -s rules prints the loaded ruleset while pf is
+// disabled, so only this tells.
+type infoRunner struct {
+	loadedRules
+	status string
+}
+
+func (l infoRunner) Run(ctx context.Context, c run.Cmd) (run.Result, error) {
+	if c.Name == "pfctl" && strings.Join(c.Args, " ") == "-s info" {
+		return run.Result{Stdout: []byte("Status: " + l.status + "          Debug: Urgent\n")}, nil
+	}
+	return l.loadedRules.Run(ctx, c)
+}
+
+// doctor (pf.enabled) fails while pf is disabled, though the ruleset is loaded and has the anchor line.
+func TestDoctorFailsWhilePFIsDisabled(t *testing.T) {
+	for status, want := range map[string]api.DoctorStatus{"Disabled": api.DoctorFail, "Enabled for 0 days 00:01:02": api.DoctorOK} {
+		status, want := status, want
+		t.Run(status, func(t *testing.T) {
+			e := dtest.New(t, dtest.Options{Clients: func(c *daemon.Clients) {
+				c.Runner = infoRunner{loadedRules{c.Runner, "scrub in all fragment reassemble\nblock drop log all\n" + `anchor "jailops/*" all` + "\n"}, status}
+			}})
+			e.Seed()
+			for _, c := range e.D.Service().Doctor(as(globalAdmin, "")).Checks {
+				if c.Name == "pf.enabled" {
+					if c.Status != want {
+						t.Fatalf("%+v, want %s", c, want)
+					}
+					return
+				}
+			}
+			t.Fatal("no pf.enabled check")
+		})
+	}
+}

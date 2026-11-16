@@ -67,13 +67,122 @@ func TestSourcesDoNotShareABudget(t *testing.T) {
 
 func TestAllSolicitationsTogetherHaveABudget(t *testing.T) {
 	r := newRig(t, Config{})
-	n := solicitTotalBurst + 1000
+	n := solicitGeneralBurst + 1000
 	for i := 0; i < n; i++ { // every solicitation from a source of its own, so no source limit applies
 		r.solicit(macN(i + 1))
 	}
 	m := r.p.Metrics()
-	if m.Unknown != solicitTotalBurst || m.Floods != 1000 {
+	if m.Unknown != solicitGeneralBurst || m.Floods != 1000 {
 		t.Fatalf("passed %d, dropped %d", m.Unknown, m.Floods)
+	}
+}
+
+// routerAsks runs the audit's picture: the router asks for the address of a jail ten times a second for five seconds
+// while a flood runs alongside (flood is called each tenth of a second); it returns how many advertisements the router got.
+func routerAsks(t *testing.T, r *rig, flood func(step int)) uint64 {
+	t.Helper()
+	if !r.p.table.Has(jailA) {
+		r.add(t, jailA)
+	}
+	before := r.p.Metrics().Answered
+	for step := 0; step < 50; step++ {
+		if flood != nil {
+			flood(step)
+		}
+		r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
+		r.clk.Advance(100 * time.Millisecond)
+	}
+	return r.p.Metrics().Answered - before
+}
+
+// A flood from one MAC at twenty thousand a second spends its own allowance and nothing of the router's: the router
+// is answered as often as when nothing floods (the global budget used to be charged before the source's, so the
+// flood used it all up).
+func TestAFloodFromOneMACDoesNotStarveTheRouter(t *testing.T) {
+	quiet := routerAsks(t, newRig(t, Config{}), nil)
+	if quiet == 0 {
+		t.Fatal("the router was never answered without a flood")
+	}
+	r := newRig(t, Config{})
+	got := routerAsks(t, r, func(int) {
+		for i := 0; i < 2000; i++ {
+			r.solicit(macB)
+		}
+	})
+	if got != quiet {
+		t.Fatalf("the router got %d answers during the flood, %d without it", got, quiet)
+	}
+	if r.p.Metrics().Floods == 0 {
+		t.Fatal("the flood was not counted")
+	}
+}
+
+// The source link-layer option is the sender's own claim: a sender that puts a different one in every solicitation is
+// still one Ethernet source with one allowance.
+func TestRotatingTheLinkLayerOptionDoesNotEvadeTheSourceBudget(t *testing.T) {
+	r := newRig(t, Config{})
+	for i := 0; i < 3000; i++ {
+		other := macN(i + 1)
+		r.p.HandleFrame(mkNS(router, unknownTarget, SolicitedNode(unknownTarget), macB, &other))
+	}
+	m := r.p.Metrics()
+	if m.Unknown != solicitBurst || m.Floods != 3000-solicitBurst {
+		t.Fatalf("passed %d, dropped %d: %+v", m.Unknown, m.Floods, m)
+	}
+	r.p.mu.Lock()
+	n := len(r.p.sources)
+	r.p.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("%d senders held for one Ethernet source", n)
+	}
+}
+
+// A flood from a new MAC in every frame passes the allowance of each source and uses up the general budget; the router,
+// which the proxy has answered over time, keeps the reserved part of it.
+func TestAFloodOfManyMACsLeavesTheKnownRouterItsReservedShare(t *testing.T) {
+	quiet := routerAsks(t, newRig(t, Config{}), nil)
+	r := newRig(t, Config{})
+	r.add(t, jailA)
+	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
+	r.clk.Advance(2 * time.Second)
+	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
+	r.clk.Advance(time.Second)
+	r.p.mu.Lock()
+	known := r.p.sources[macA] != nil && r.p.sources[macA].known
+	r.p.mu.Unlock()
+	if !known {
+		t.Fatal("a requester that was answered and asked again a second later is not known")
+	}
+	n := 0
+	got := routerAsks(t, r, func(int) {
+		for i := 0; i < 2000; i++ { // twenty thousand a second, every one from a MAC of its own
+			n++
+			r.solicit(macN(n))
+		}
+	})
+	if got != quiet {
+		t.Fatalf("the known router got %d answers during the flood, %d without it", got, quiet)
+	}
+}
+
+// A sender that changes its MAC every time is never known, however often it is answered, and a full table of known
+// senders is not emptied by new ones.
+func TestAnUnknownFloodNeverBecomesKnown(t *testing.T) {
+	r := newRig(t, Config{})
+	r.add(t, jailA)
+	for i := 0; i < 5000; i++ {
+		m := macN(i + 1)
+		r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), m, &m))
+		if i%100 == 99 {
+			r.clk.Advance(time.Second)
+		}
+	}
+	r.p.mu.Lock()
+	defer r.p.mu.Unlock()
+	for m, b := range r.p.sources {
+		if b.known {
+			t.Fatalf("%v is known after one answer", m)
+		}
 	}
 }
 
@@ -131,5 +240,24 @@ func TestDropsOfTheLastHourAreCountedAndLoggedOncePerMinute(t *testing.T) {
 	r.clk.Advance(61 * time.Minute)
 	if got := p.Status().FloodsLastHour; got != 0 {
 		t.Fatalf("floods an hour later: %d", got)
+	}
+}
+
+func TestAKnownSenderSurvivesAFloodThatFillsTheTable(t *testing.T) {
+	r := newRig(t, Config{})
+	r.add(t, jailA)
+	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
+	r.clk.Advance(2 * time.Second)
+	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
+	for i := 0; i < sourceTableMax*3; i++ {
+		r.solicit(macN(i + 1))
+		if i%1000 == 0 {
+			r.clk.Advance(time.Second)
+		}
+	}
+	r.p.mu.Lock()
+	defer r.p.mu.Unlock()
+	if b := r.p.sources[macA]; b == nil || !b.known {
+		t.Fatal("a flood of new senders pushed the known router out of the table")
 	}
 }

@@ -40,6 +40,14 @@ type Host interface {
 	MkdirAll(ctx context.Context, q MkdirReq) error
 	// SetVolumeOwner sets the owner and mode of the empty root of a volume (see safefs.go).
 	SetVolumeOwner(ctx context.Context, q VolumeOwnerReq) error
+	// StaleMounts lists the mounts below the roots of jails that do not run, of a kind JailOps makes (stalemounts.go).
+	StaleMounts(ctx context.Context) ([]StaleMount, error)
+	// HealJail cleans up after one jail that does not run: the mounts below its root, and what its poststop hook removes
+	// (rctl rules, the pf anchor, its links). A running jail is refused.
+	HealJail(ctx context.Context, jail string) (HealJailRes, error)
+	// HealNetwork destroys the interfaces of the earlier network layout (a bridge, the gateway pair of a network) that
+	// no jail that runs uses (netheal.go).
+	HealNetwork(ctx context.Context) (HealNetRes, error)
 	// ProbeSource says whether a host directory below an admin-host-mount directory is on a mount (see safefs.go).
 	ProbeSource(ctx context.Context, q SourceProbeReq) (SourceProbe, error)
 	Remove(ctx context.Context, path string) error
@@ -164,7 +172,12 @@ type Local struct {
 	hostNote func(msg string, a ...any) // logs what the timer and a restart do with a pending change
 
 	frozenMu sync.Mutex
-	frozen   map[string]int // directories a running command reads its configuration from: no writes meanwhile
+	// probes of host directories in flight, by path (ProbeSource), and how long a request waits for one
+	probeMu   sync.Mutex
+	probing   map[string]bool
+	probeWait time.Duration
+	probeFn   func(context.Context, SourceProbeReq) (SourceProbe, error) // tests
+	frozen    map[string]int                                             // directories a running command reads its configuration from: no writes meanwhile
 
 	wgMu sync.Mutex // one WireGuard operation at a time
 
@@ -720,6 +733,11 @@ func (l *Local) mountOp(ctx context.Context, verb, dataset string) error {
 	}
 	if err := (zfsGuard{l}).managed(ctx, dataset); err != nil {
 		return err
+	}
+	if verb == "unmount" {
+		// What an earlier stop left below the root of a jail that does not run (a devfs under root/dev, stacked by each
+		// failed stop) keeps the dataset busy for good: it comes off first.
+		l.cleanStaleMountsOfDataset(ctx, dataset)
 	}
 	_, err := l.d.Runner.Run(ctx, run.Cmd{Name: "zfs", Args: []string{verb, dataset}, Timeout: 60 * time.Second})
 	if err != nil {

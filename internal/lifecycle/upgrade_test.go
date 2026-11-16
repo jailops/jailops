@@ -171,6 +171,35 @@ func TestUpgradeHealthCheckFailureSwapsBack(t *testing.T) {
 	}
 }
 
+// A failed upgrade swaps the root back, and the data the jail wrote while it ran on the new generation stays: a rollback
+// of /var/db to the snapshot taken before the start would drop the databases' last writes, while /home keeps its own.
+func TestUpgradeFailureAfterTheStartKeepsWhatTheJailWroteToData(t *testing.T) {
+	w := runningSetup(t)
+	w.Z.WriteFile(jc+"/var-db", "/before", "x")
+	w.Jails.ExecFn = func(name string, argv []string) ([]byte, error) {
+		w.Z.WriteFile(jc+"/var-db", "/during", "written while the jail ran on the new generation")
+		w.Z.WriteFile(jc+"/home", "/during", "also")
+		return []byte("connection refused"), errors.New("exit 1")
+	}
+	if _, err := upgrade(w, api.JailUpgrade{Generation: "g2"}); err == nil || !strings.Contains(err.Error(), "health check") {
+		t.Fatal(err)
+	}
+	for _, ds := range []string{"var-db", "home"} {
+		if !strings.Contains(w.Z.Dump(), jc+"/"+ds) {
+			t.Fatalf("no dataset %s in this setup", ds)
+		}
+	}
+	if got, _ := w.Z.ReadFile(jc+"/var-db", "/during"); got == "" {
+		t.Fatal("what the jail wrote to /var/db was rolled back")
+	}
+	if got, _ := w.Z.ReadFile(jc+"/home", "/during"); got == "" {
+		t.Fatal("what the jail wrote to /home was rolled back")
+	}
+	if got, _ := w.Z.ReadFile(jc+"/var-db", "/before"); got == "" {
+		t.Fatal("/var/db lost what it had before")
+	}
+}
+
 func TestUpgradeJailDiesAfterStart(t *testing.T) {
 	w := runningSetup(t)
 	before := w.state()

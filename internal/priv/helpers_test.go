@@ -136,6 +136,22 @@ func (e *env) goodConf() string {
 	return sprintf(goodConf, filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "web", "root"))
 }
 
+// storeLan stores a network with this IPv4 subnet: the addresses and routes a test puts on an epair lie in it.
+func (e *env) storeLan(t *testing.T, subnet string) {
+	t.Helper()
+	b, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "lan", UUID: "cccc-1111-2222"},
+		"spec": api.NetworkSpec{Uplink: "em0", IPv4: &api.IPv4Net{Subnet: subnet, Gateway: subnet[:strings.LastIndex(subnet, ".")] + ".1"}}})
+	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "cccc-1111-2222.json"), string(b))
+}
+
+// goodConfNamed is goodConf for the jail called name (<project>_<jail>), at the root path that name has.
+func (e *env) goodConfNamed(name string) string {
+	proj, jail, _ := strings.Cut(name, "_")
+	conf := strings.Replace(e.goodConf(), "alpha_web {", name+" {", 1)
+	return strings.Replace(conf, filepath.Join(e.cfg.MountBase, "projects", "alpha", "jails", "web", "root"),
+		filepath.Join(e.cfg.MountBase, "projects", proj, "jails", jail, "root"), 1)
+}
+
 func sprintf(f string, a ...any) string { return fmt.Sprintf(f, a...) }
 
 func jailosExec(argv ...string) jailos.ExecOpts { return jailos.ExecOpts{Argv: argv} }
@@ -151,5 +167,5 @@ func removeAll(p string) error { return os.RemoveAll(p) }
 // conf makes jail key a managed jail (its conf file exists).
 func (e *env) conf(t *testing.T, key string) {
 	t.Helper()
-	mustWrite(t, filepath.Join(e.cfg.ConfDir, key+".conf"), strings.Replace(e.goodConf(), "alpha_web {", key+" {", 1))
+	mustWrite(t, filepath.Join(e.cfg.ConfDir, key+".conf"), e.goodConfNamed(key))
 }

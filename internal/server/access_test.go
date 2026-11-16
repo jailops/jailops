@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -607,5 +608,47 @@ func TestSecurityHeaders(t *testing.T) {
 	csp := resp.Header.Get("Content-Security-Policy")
 	if !strings.Contains(csp, "base-uri 'none'") || !strings.Contains(csp, "form-action 'self'") {
 		t.Fatalf("csp: %q", csp)
+	}
+}
+
+// What strangers at one address did does not lock out the others: a valid token is never refused for the bad tokens
+// that came from its address, and the wrong passwords of one user do not lock another user at the same address.
+func TestSharedAddressDoesNotLockOutOthers(t *testing.T) {
+	e := dtest.New(t, dtest.Options{})
+	c := ctxT(t)
+	for _, name := range []string{"ann", "bob"} {
+		if _, err := e.Admin.Users().Create(c, api.UserCreate{Metadata: api.ObjectMeta{Name: name}, Password: goodPassword,
+			Spec: api.UserSpec{Permission: api.PermAdmin, Global: true}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	good := e.Token(api.PermAdmin)
+	bad := "jot_" + strings.Repeat("a", 52)
+	for range 12 {
+		e.Raw("GET", "/api/v1/jails?project=alpha", bad, "")
+	}
+	if code, _ := e.Raw("GET", "/api/v1/jails?project=alpha", bad, ""); code != 429 {
+		t.Fatalf("bad tokens are not limited: %d", code)
+	}
+	if code, body := e.Raw("GET", "/api/v1/jails?project=alpha", good, ""); code == 401 || code == 429 {
+		t.Fatalf("a valid token from an address with bad tokens: %d %s", code, body)
+	}
+	h := e.D.Handler()
+	login := func(user, pw string) int {
+		req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"username":"`+user+`","password":"`+pw+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = "192.0.2.50:1"
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	for range 6 {
+		login("ann", "wrong-password-guess")
+	}
+	if code := login("ann", goodPassword); code != 429 {
+		t.Fatalf("ann after six wrong passwords: %d", code)
+	}
+	if code := login("bob", goodPassword); code != 200 {
+		t.Fatalf("bob at the same address as ann's wrong passwords: %d", code)
 	}
 }

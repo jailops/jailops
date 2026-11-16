@@ -71,6 +71,7 @@ This file is the **operator's authority**: everything the root helper will do fo
 |---|---|
 | `storage-root` | a ZFS dataset that exists, is on an imported pool and carries `jailops:managed=on`. Everything the helper does with ZFS, mounts and files stays below one. Repeatable; more are registered at run time (admin only) in `storage-file` (`/usr/local/etc/jailops/priv.d/storage.conf`) and reread on SIGHUP |
 | `allow-pool-root` | `false`; a pool's top dataset as a root is refused unless you say so |
+| `allow-start-without-pf` | `false`; a jail with a network link does not start while pf is disabled unless you say so |
 | `conf-dir`, `state-dir`, `work-dir`, `mount-base`, `helper-path` | directories; `state-dir` has no default unless `mount-base` is set |
 | `socket`, `group`, `mode`, `allow-user`, `allow-group` | who may talk to the helper: the unix socket, its group and mode (`0660`), and the users and groups it accepts by peer credentials |
 | `wireguard-dir` | `/var/db/jailops-priv/wireguard`; the keys of WireGuard tunnels, one directory per tunnel (root, 0700, created when needed). It must lie outside `state-dir`, `conf-dir`, `work-dir` and `mount-base` ([wireguard.md](wireguard.md)) |

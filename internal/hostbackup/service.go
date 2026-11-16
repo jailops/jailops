@@ -128,6 +128,10 @@ func (s *Service) isBusy(uuid string) bool {
 	return s.busy[uuid]
 }
 
+// Busy says whether a backup of the jail or volume with this UUID is being taken or restored now (the delete of a
+// jail or volume asks before it starts).
+func (s *Service) Busy(uuid string) bool { return s.isBusy(uuid) }
+
 func randHex(n int) string {
 	b := make([]byte, n)
 	if _, err := rand.Read(b); err != nil {

@@ -660,6 +660,9 @@ func (s *Service) DeleteJail(ctx context.Context, name string) (api.Operation, e
 	if err := s.noRuleNamesJail(p.Meta.Name, name, true); err != nil {
 		return api.Operation{}, err
 	}
+	if err := s.backupRunning("jail", name, j.Metadata.UUID); err != nil {
+		return api.Operation{}, err
+	}
 	return s.Submit(ctx, OpSpec{
 		Description: "Delete jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
@@ -723,7 +726,7 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 			}
 			if a.Action != "stop" {
 				_ = h.Bind("start/"+key, &opRequest{Kind: "start", Jail: key})
-				s.installBashBeforeFirstStart(ctx, key)
+				_ = h.Timed("bash-from-the-host", func() error { s.installBashBeforeFirstStart(ctx, key); return nil })
 				if err := s.life.StartJail(ctx, key); err != nil {
 					if api.IsCode(err, api.CodeLocked) {
 						s.observeLocked(ctx, key)
@@ -733,9 +736,9 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 				s.setLocked(key, nil)
 				s.markStartDue(key, false)
 				// A new jail gets its shell and prompt at its first start, before its own provisioning.
-				s.shellAtStart(ctx, key)
+				_ = h.Timed("shell-setup", func() error { s.shellAtStart(ctx, key); return nil })
 				// A jail that declares provisioning is provisioned at its first start.
-				if err := s.provisionPending(ctx, key); err != nil {
+				if err := h.Timed("provisioning", func() error { return s.provisionPending(ctx, key) }); err != nil {
 					s.kick()
 					return nil, err
 				}

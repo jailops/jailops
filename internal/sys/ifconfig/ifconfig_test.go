@@ -513,3 +513,16 @@ func TestFakeOwnership(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Removing an address that is not on the interface is "not found", whatever the kernel calls it: `ifconfig X inet A
+// -alias` answers "Can't assign requested address" (EADDRNOTAVAIL), which is what a jail started by an earlier version
+// gives a stop that removes the gateway alias of the routed link.
+func TestAddrRemoveOfAnAddressThatIsNotThereIsNotFound(t *testing.T) {
+	c, f := newCmd()
+	mine(f, "epair", "joweba")
+	f.OnFail("ifconfig", []string{"joweba", "inet", "10.77.0.1/32", "-alias"}, 1, "ifconfig: ioctl (SIOCDIFADDR): Can't assign requested address\n")
+	err := c.AddrRemove(ctx, "joweba", netip.MustParsePrefix("10.77.0.1/32"))
+	if !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("got %v, want not found", err)
+	}
+}

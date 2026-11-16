@@ -155,6 +155,7 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/sessions", ro),
 	r("DELETE", "/api/v1/sessions/{id}", ro),
 	r("GET", "/api/v1/doctor", ro),
+	r("POST", "/api/v1/doctor/fix", ad),
 	r("GET", "/api/v1/resources", ro),
 	r("PUT", "/api/v1/server", ad),
 	r("GET", "/api/v1/server/config", ro),

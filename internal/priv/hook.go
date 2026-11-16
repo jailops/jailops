@@ -311,7 +311,7 @@ func (l *Local) RunHook(ctx context.Context, phase, jail string) error {
 	atts, err := l.planJail(ctx, jn)
 	if err != nil {
 		if phase == PhasePostStop {
-			// The spec may be gone with the jail; still drop the anchor and the rctl rules.
+			// The spec may be gone with the jail; still drop the anchor and the rctl rules,
 			return errors.Join(err, l.dropJailAnchor(ctx, jn), l.dropLimits(ctx, jn))
 		}
 		return err
@@ -366,18 +366,29 @@ func (l *Local) hookPreStart(ctx context.Context, jn JailName, atts []attachment
 			}
 		}
 	}
+	// pf must run: with pf disabled the anchor is loaded and nothing evaluates it, and the jail would run with no
+	// firewall at all (and no NAT). A host where pfctl does not answer is not judged.
+	if len(atts) > 0 && !l.cfg.AllowStartWithoutPF {
+		if on := l.pfEnabled(ctx); on != nil && !*on {
+			return fmt.Errorf("pf is disabled: not starting jail %s with a network link without its firewall (enable pf with `service pf onestart` or pfctl -e, or set allow-start-without-pf in priv.conf)", jn.Internal())
+		}
+	}
 	// The jail's anchor is in place before its first process runs: jail(8) runs exec.start next, and the whole of
 	// /etc/rc would otherwise run with the host's rules alone. The host end of every epair exists now, which the rules
 	// name.
-	return l.loadJailAnchor(ctx, jn)
+	return l.loadJailAnchor(ctx, jn, len(atts) > 0)
 }
 
 // loadJailAnchor loads the rendered anchor of a jail and the parent anchor of its project that makes pf evaluate it.
-// A jail without a rendered anchor has none.
-func (l *Local) loadJailAnchor(ctx context.Context, jn JailName) error {
+// A jail without a link has no anchor; a jail with a link and no rendered anchor does not start: it would be open to
+// the rules of the host alone.
+func (l *Local) loadJailAnchor(ctx context.Context, jn JailName, hasLinks bool) error {
 	b, err := l.readState(l.cfg.PFAnchorFile(jn.Internal()))
 	if err != nil {
 		if api.IsCode(err, api.CodeNotFound) {
+			if hasLinks {
+				return fmt.Errorf("jail %s has a network link and no rendered pf anchor: refusing to start it without a firewall", jn.Internal())
+			}
 			return nil
 		}
 		return fmt.Errorf("read rendered pf anchor: %w", err)
@@ -424,6 +435,11 @@ func (l *Local) hookPostStart(ctx context.Context, jn JailName, atts []attachmen
 	return nil
 }
 
+// hookPostStop takes down what the jail's start put on the host. It is best effort and every step runs whatever the
+// steps before it did: a jail that stops must never be reported as failed because an address, a route or a rule was
+// already gone (a jail started by an earlier version has other addresses and routes than the ones this version
+// removes). What did not work is logged as a warning and not returned; the epair goes last and always, and a leftover
+// is removed by the next start.
 func (l *Local) hookPostStop(ctx context.Context, jn JailName, atts []attachment) error {
 	var errs []error
 	if err := l.dropLimits(ctx, jn); err != nil {
@@ -433,13 +449,27 @@ func (l *Local) hookPostStop(ctx context.Context, jn JailName, atts []attachment
 		errs = append(errs, err)
 	}
 	for k := len(atts) - 1; k >= 0; k-- {
+		var destroy []render.Step
 		for _, s := range render.Rollback(hostSteps(atts[k].steps)) {
+			if s.Op == render.OpEpairDestroy {
+				destroy = append(destroy, s)
+				continue
+			}
+			if err := ignoreNotFound(l.applyHost(ctx, s)); err != nil {
+				errs = append(errs, fmt.Errorf("%s: %w", s.Describe(), err))
+			}
+		}
+		for _, s := range destroy {
 			if err := ignoreNotFound(l.applyHost(ctx, s)); err != nil {
 				errs = append(errs, fmt.Errorf("%s: %w", s.Describe(), err))
 			}
 		}
 	}
-	return errors.Join(errs...)
+	if len(errs) > 0 {
+		l.note("jail teardown finished with warnings", "jail", jn.Internal(), "warnings", errors.Join(errs...).Error())
+		fmt.Fprintf(os.Stderr, "jailops-priv: stopped %s; cleanup warnings: %v\n", jn.Internal(), errors.Join(errs...))
+	}
+	return nil
 }
 
 // dropJailAnchor ends the states of the rules of a jail's anchor and empties the anchor. The states go first: pf keeps
@@ -500,14 +530,16 @@ func (l *Local) applyHost(ctx context.Context, s render.Step) error {
 			return err
 		}
 		if _, ok := have[s.Iface]; ok {
-			// there already: JailOps's (left by a start that failed half way), or refused
+			// There already: the name is derived from this jail and this jail is starting, so nothing runs on it. It is
+			// what a teardown left behind (a start or stop that failed half way, or a jail started by a version that
+			// joined the epair to a bridge): destroy it, with the bridge membership it carries, and make a new one. A
+			// name that is not JailOps's is refused.
 			if err := l.ifOwned(ctx, s.Iface); err != nil {
 				return err
 			}
-			if _, ok := have[s.Arg2]; ok {
-				return l.ifOwned(ctx, s.Arg2)
+			if err := net.EpairDestroy(ctx, s.Iface); ignoreNotFound(err) != nil {
+				return fmt.Errorf("remove the leftover interface %s: %w", s.Iface, err)
 			}
-			return nil
 		}
 		a, b, err := net.EpairCreate(ctx, strings.TrimSuffix(s.Iface, "a"))
 		if err != nil {
@@ -546,7 +578,7 @@ func (l *Local) applyHost(ctx context.Context, s render.Step) error {
 			return invalid("invalid address %q", s.Arg)
 		}
 		if s.Op == render.OpAddAddr {
-			return ignoreExists(net.AddrAdd(ctx, s.Iface, p))
+			return l.addAddr(ctx, s.Iface, p)
 		}
 		return ignoreNotFound(net.AddrRemove(ctx, s.Iface, p))
 	case render.OpIfaceUp:
@@ -561,6 +593,53 @@ func (l *Local) applyHost(ctx context.Context, s render.Step) error {
 		return nil // answered by the daemon's built-in proxy, not by the hook
 	}
 	return api.Errorf(api.CodeUnsupported, "hook cannot apply step %q", s.Op)
+}
+
+// addAddr puts a prefix on an interface. "File exists" means the address is on an interface already: this one (done),
+// or another one, because the kernel refuses the same address twice in one subnet. The other one is what an earlier
+// version left behind when it is an interface of JailOps (the gateway pair of the bridge network, which carried the
+// gateway address with the network's prefix): the address is taken from it, the jails that still run on that bridge
+// have to be restarted anyway. An interface that is not JailOps's is never touched.
+func (l *Local) addAddr(ctx context.Context, iface string, p netip.Prefix) error {
+	net := l.Net()
+	err := net.AddrAdd(ctx, iface, p)
+	if err == nil || !api.IsCode(err, api.CodeAlreadyExists) {
+		return err
+	}
+	list, lerr := net.List(ctx)
+	if lerr != nil {
+		return err
+	}
+	for _, i := range list {
+		var have []netip.Prefix
+		for _, q := range append(slices.Clone(i.Inet), i.Inet6...) {
+			if q.Addr() == p.Addr() {
+				have = append(have, q)
+			}
+		}
+		if len(have) == 0 {
+			continue
+		}
+		if i.Name == iface {
+			return nil
+		}
+		if oerr := l.ifOwned(ctx, i.Name); oerr != nil {
+			return api.Errorf(api.CodeConflict, "the address %s is in use on %s, which JailOps does not manage", p.Addr(), i.Name)
+		}
+		if strings.HasPrefix(i.Name, "jo") && strings.HasSuffix(i.Name, "a") {
+			// the host end of the link of a jail: its own gateway address, never taken from it
+			return api.Errorf(api.CodeConflict, "the address %s is in use on %s, the link of another jail", p.Addr(), i.Name)
+		}
+		for _, q := range have {
+			if rerr := ignoreNotFound(net.AddrRemove(ctx, i.Name, q)); rerr != nil {
+				return fmt.Errorf("take %s from %s: %w", q, i.Name, rerr)
+			}
+		}
+		l.note("took an address from an interface an earlier version left", "address", p.Addr().String(), "from", i.Name, "to", iface)
+		fmt.Fprintf(os.Stderr, "jailops-priv: took %s from %s (left by an earlier version); jails still running on that bridge need a restart\n", p.Addr(), i.Name)
+		return ignoreExists(net.AddrAdd(ctx, iface, p))
+	}
+	return err
 }
 
 func famWord(arg string) string {

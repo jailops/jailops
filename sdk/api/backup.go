@@ -156,6 +156,10 @@ type RestoreBundle struct {
 	Policies        []FirewallPolicySpec `json:"policies,omitempty"`
 	AddressSets     []AddressSetSpec     `json:"address_sets,omitempty"`
 	Volumes         []string             `json:"volumes,omitempty"`
+	// VolumeIDs maps the name of each volume the jail attached to the volume's UUID. A restore brings back a volume
+	// the project lacks only from a backup of that very volume, never from a newer one of another volume that had the
+	// name.
+	VolumeIDs map[string]string `json:"volume_ids,omitempty"`
 	// SecretRefs name sealed secrets; the secrets are never in the bundle.
 	SecretRefs []string `json:"secret_refs,omitempty"`
 }

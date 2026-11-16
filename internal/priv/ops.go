@@ -89,7 +89,14 @@ const (
 	// fs.list_logs and fs.tail_file read the log directory of a jail root
 	// (logs.go); nothing else, and nothing is written.
 	OpFSListLogs = "fs.list_logs"
-	OpFSTailFile = "fs.tail_file"
+	// mounts.stale lists the mounts of a kind JailOps makes below the root of a jail that does not run (read-only);
+	// jail.heal cleans up after one jail that does not run: those mounts, and what its poststop hook removes (rctl
+	// rules, the pf anchor, its links); net.heal destroys the interfaces of the earlier network layout that no jail
+	// that runs uses (stalemounts.go, netheal.go).
+	OpMountsStale = "mounts.stale"
+	OpJailHeal    = "jail.heal"
+	OpNetHeal     = "net.heal"
+	OpFSTailFile  = "fs.tail_file"
 
 	OpNetSetMTU = "net.set_mtu"
 
@@ -588,6 +595,16 @@ func init() {
 	})
 	register(OpFSRemove, false, func(ctx context.Context, h Host, a RemoveReq, _ *callIO) (any, error) {
 		return empty{}, h.Remove(ctx, a.Path)
+	})
+	register(OpMountsStale, false, func(ctx context.Context, h Host, _ empty, _ *callIO) (any, error) {
+		m, err := h.StaleMounts(ctx)
+		return StaleMountsRes{Mounts: m}, err
+	})
+	register(OpJailHeal, false, func(ctx context.Context, h Host, a HealJailReq, _ *callIO) (any, error) {
+		return h.HealJail(ctx, a.Jail)
+	})
+	register(OpNetHeal, false, func(ctx context.Context, h Host, _ empty, _ *callIO) (any, error) {
+		return h.HealNetwork(ctx)
 	})
 	register(OpFSListLogs, false, func(ctx context.Context, h Host, a listLogsArgs, _ *callIO) (any, error) {
 		files, truncated, err := h.ListLogs(ctx, a.Dir)

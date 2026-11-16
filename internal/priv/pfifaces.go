@@ -8,9 +8,11 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/ifconfig"
+	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -71,7 +73,7 @@ func (l *Local) checkAnchorInterfaces(ctx context.Context, anchor, rs string) er
 			if !uplinks[n] {
 				return forbidden("%s stands on %s, which is not an interface of JailOps or the uplink of a network", at, n)
 			}
-			if err := uplinkShape(at, t); err != nil {
+			if err := l.uplinkShape(ctx, at, t); err != nil {
 				return err
 			}
 		}
@@ -99,10 +101,10 @@ func (l *Local) ifIsTunnel(ctx context.Context, name string) bool {
 
 // uplinkShape accepts a rule on an uplink only in the forms the renderer writes for a network's translation and a
 // jail's port forwards.
-func uplinkShape(at, t string) error {
+func (l *Local) uplinkShape(ctx context.Context, at, t string) error {
 	switch {
 	case strings.HasPrefix(t, "match in on ") && strings.Contains(t, " rdr-to "):
-		return nil
+		return l.checkForward(ctx, at, t)
 	case strings.HasPrefix(t, "match out on ") && strings.Contains(t, " nat-to "):
 		return nil
 	case strings.HasPrefix(t, "pass in quick on "):
@@ -147,4 +149,59 @@ func (l *Local) networkUplinks() map[string]bool {
 		}
 	}
 	return out
+}
+
+var reForward = regexp.MustCompile(`\bto\s+(\S+)\s+port\s+([0-9]+)\s+rdr-to\s+(\S+)\s+port\s+([0-9]+)\s*$`)
+
+// checkForward accepts a forward (match in on UPLINK ... to ADDR port N rdr-to JAIL port M) when it leads to a jail and
+// leaves the host's own ports alone: the target is an address of a network JailOps has stored, never one of the host,
+// and the port it takes over on the host is neither a privileged port nor one a host process listens on, unless the
+// request carries the admin assertion (the API asks for a global administrator for that). Without it a compromised
+// daemon, or a project administrator, could send the host's ssh or console port into a jail of their own.
+func (l *Local) checkForward(ctx context.Context, at, t string) error {
+	m := reForward.FindStringSubmatch(t)
+	if m == nil {
+		return forbidden("%s: a forward names its port and its target as the renderer writes them", at)
+	}
+	target, err := netip.ParseAddr(strings.Trim(m[3], "{}"))
+	if err != nil {
+		return forbidden("%s: the target of a forward is one address of a jail", at)
+	}
+	local, _ := localAddrs()
+	for _, h := range local {
+		if h == target.Unmap() {
+			return forbidden("%s: the target %s is an address of the host", at, target)
+		}
+	}
+	if err := l.checkStoredNetworkAddr(target, "the target of a forward"); err != nil {
+		return forbidden("%s: %v", at, err)
+	}
+	port, _ := strconv.Atoi(m[2])
+	if isAdmin(ctx) {
+		return nil
+	}
+	if port < 1024 {
+		return forbidden("%s: the host's port %d is a privileged port: forwarding it needs the admin assertion", at, port)
+	}
+	if hostListens(ctx, l, port) {
+		return forbidden("%s: a process of the host listens on port %d: forwarding it needs the admin assertion", at, port)
+	}
+	return nil
+}
+
+// hostListens says whether a process of the host listens on the port (sockstat(1), any address, tcp or udp). A lookup
+// that fails says no.
+func hostListens(ctx context.Context, l *Local, port int) bool {
+	res, err := l.d.Runner.Run(ctx, run.Cmd{Name: "sockstat", Args: []string{"-46l"}, Timeout: 10 * time.Second})
+	if err != nil {
+		return false
+	}
+	want := ":" + strconv.Itoa(port)
+	for _, line := range strings.Split(string(res.Stdout), "\n") {
+		f := strings.Fields(line)
+		if len(f) >= 6 && strings.HasSuffix(f[5], want) {
+			return true
+		}
+	}
+	return false
 }
