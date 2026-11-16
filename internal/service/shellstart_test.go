@@ -19,7 +19,7 @@ func TestStartDoesNotWaitOnTheShellSetup(t *testing.T) {
 	e, s := tickingEnv(t)
 	alpha := as(globalAdmin, dtest.SeedProject)
 	e.SetPkgInstallErr(errors.New("pkg: no network"))
-	e.Run.HangOn = func(c run.Cmd) bool { return c.Name == "pkg" && slices.Contains(c.Args, "-j") }
+	e.Run.SetHangOn(func(c run.Cmd) bool { return c.Name == "pkg" && slices.Contains(c.Args, "-j") })
 	defer service.SetShellSetupDeadline(300 * time.Millisecond)()
 
 	op, err := s.CreateJail(alpha, dtest.WebJail("web"))
@@ -63,9 +63,9 @@ func TestStartDoesNotWaitOnTheShellSetup(t *testing.T) {
 func TestFirstStartIsBoundedWhenTheHostCannotFetchBash(t *testing.T) {
 	e, s := tickingEnv(t)
 	alpha := as(globalAdmin, dtest.SeedProject)
-	e.Run.HangOn = func(c run.Cmd) bool {
+	e.Run.SetHangOn(func(c run.Cmd) bool {
 		return c.Name == "pkg" && (slices.Contains(c.Args, "-r") || slices.Contains(c.Args, "-j")) && slices.Contains(c.Args, "install")
-	}
+	})
 	defer service.SetBashBeforeStartDeadline(300 * time.Millisecond)()
 	defer service.SetShellSetupDeadline(300 * time.Millisecond)()
 
