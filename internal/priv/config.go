@@ -191,7 +191,7 @@ type Config struct {
 
 // DefaultSysctls is the sysctl read allow-list.
 var DefaultSysctls = []string{
-	"kern.osrelease", "kern.osreldate", "kern.ostype", "kern.version",
+	"kern.osrelease", "kern.osreldate", "kern.ostype", "kern.version", "kern.boottime",
 	"kern.features.vimage",
 	"net.inet.ip.forwarding", "net.inet6.ip6.forwarding", "net.inet6.icmp6.nd6_onlink_ns_rfc4861", "net.inet6.ip6.use_stableaddr", "security.jail.jailed",
 	"security.jail.vnet", "kern.racct.enable", "hw.ncpu", "hw.physmem",
