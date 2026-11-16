@@ -227,7 +227,7 @@ package repositories of image builds and debootstrap mirrors may use over https
 a local directory of image archives.
 .It Fl unbound-conf Ar file
 The file the helper writes the names of the running jails into
-.Pq Ar jail Ns . Ns Ar project Ns .internal
+.Pq Ar jail Ns \&. Ns Ar project Ns \&.internal
 for the host's resolver.
 The default is
 .Pa /var/unbound/conf.d/jailops.conf ,
@@ -239,7 +239,7 @@ See
 .Pa docs/dns.md .
 .It Fl dns-suffix Ar suffix
 The zone under which the jails have names:
-.Ar jail Ns . Ns Ar project Ns . Ns Ar suffix .
+.Ar jail Ns \&. Ns Ar project Ns \&. Ns Ar suffix .
 The default is
 .Dq internal ;
 DNS labels, not
