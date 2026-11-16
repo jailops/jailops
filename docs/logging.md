@@ -105,7 +105,7 @@ host (`logs` for `logs.example.com`).
 
 | Key | Meaning |
 |---|---|
-| `name` | `^[a-z][a-z0-9-]{0,31}$`, unique; at most 16 sinks |
+| `name` | the name rule (hyphens only, at most 32 characters), unique; at most 16 sinks |
 | `type` | `syslog` or `webhook` |
 | `to` | `udp://HOST[:514]`, `tcp://HOST[:514]`, `tls://HOST[:6514]` for syslog; an `https://` URL for a webhook |
 | `facility` | `local0` (default) to `local7`; syslog only |

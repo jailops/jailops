@@ -807,7 +807,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   }
   /** The checks of CreateAddressSet and UpdateAddressSet: name, members and cycles. */
   function setRefused(name: string, spec: AddressSetSpec, inProject: AddressSet[], project: string): RawResponse | null {
-    if (!SET_NAME.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9_]{0,23}$`, detail: { field: 'name' } })
+    if (!SET_NAME.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must follow the name rule (lowercase letters, digits and hyphens, starting with a letter, at most 29 characters)`, detail: { field: 'name' } })
     const others = Object.fromEntries(inProject.filter((x) => x.metadata.name !== name).map((x) => [x.metadata.name, x.spec]))
     const e = validateSet(name, { addresses: spec.addresses ?? [] }, others, setTexts)
     if (e.addresses) return fail(400, { code: 'invalid', message: e.addresses, detail: { field: 'addresses' } })

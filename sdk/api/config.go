@@ -72,13 +72,11 @@ type ckey struct {
 }
 
 var (
-	deviceNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
-	macRE        = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`)
-	rateRE       = regexp.MustCompile(`^[1-9][0-9]{0,8}[KMGkmg]?$`)            // a rate in bits per second: 10M is 10 Mbit/s (decimal units)
-	sizeRE       = regexp.MustCompile(`^[1-9][0-9]*([KMGTPkmgtp](iB|B)?|B)?$`) // the sizes the server takes; it stores them as bytes
-	hostRE       = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
-	envRE        = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
-	nameRE       = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+	macRE  = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`)
+	rateRE = regexp.MustCompile(`^[1-9][0-9]{0,8}[KMGkmg]?$`)            // a rate in bits per second: 10M is 10 Mbit/s (decimal units)
+	sizeRE = regexp.MustCompile(`^[1-9][0-9]*([KMGTPkmgtp](iB|B)?|B)?$`) // the sizes the server takes; it stores them as bytes
+	hostRE = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
+	envRE  = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 )
 
 // DevfsAllowList lists the device nodes a jail may be given.
@@ -231,7 +229,7 @@ func deviceField[T any](dev string, find func(*JailSpec, string, bool) *T,
 			v := get(p)
 			return v, v != ""
 		}, func(s *JailSpec, d, v string) error {
-			if !deviceNameRE.MatchString(d) {
+			if !IsName(d, 31) {
 				return cfgErr(dev+"."+d, "%q is not a device name (lower case letters, digits and '-')", d)
 			}
 			set(find(s, d, true), v)
@@ -312,7 +310,7 @@ func buildRegistry() []ckey {
 			unset: func(s *JailSpec, _ string) { *get(s) = nil }})
 	}
 	nameCheck := func(v string) error {
-		if !nameRE.MatchString(v) {
+		if !IsName(v, MaxName) {
 			return fmt.Errorf("%q is not a name (lower case letters, digits and '-')", v)
 		}
 		return nil
@@ -481,7 +479,7 @@ func buildRegistry() []ckey {
 				v := *get(p)
 				return v, v != ""
 			}, func(s *JailSpec, d, v string) error {
-				if !deviceNameRE.MatchString(d) {
+				if !IsName(d, 31) {
 					return cfgErr("nic."+d+"."+key, "%q is not a device name", d)
 				}
 				if check != nil {
@@ -504,7 +502,7 @@ func buildRegistry() []ckey {
 			}
 			return "", false
 		}, func(s *JailSpec, d, v string) error {
-			if !deviceNameRE.MatchString(d) {
+			if !IsName(d, 31) {
 				return cfgErr("nic."+d, "%q is not a device name", d)
 			}
 			nic(s, d, true).Network = v
@@ -538,7 +536,7 @@ func buildRegistry() []ckey {
 			}
 			return "", false
 		}, func(s *JailSpec, d, v string) error {
-			if !deviceNameRE.MatchString(d) {
+			if !IsName(d, 31) {
 				return cfgErr("nic."+d+".mtu", "%q is not a device name", d)
 			}
 			n, err := atoiRange("nic."+d+".mtu", v, 576, 9216)
@@ -571,7 +569,7 @@ func buildRegistry() []ckey {
 			}
 			return "", false
 		}, func(s *JailSpec, d, v string) error {
-			if !deviceNameRE.MatchString(d) {
+			if !IsName(d, 31) {
 				return cfgErr("disk."+d, "%q is not a device name", d)
 			}
 			disk(s, d, true).Mount = v
@@ -593,7 +591,7 @@ func buildRegistry() []ckey {
 				v := *get(p)
 				return v, v != ""
 			}, func(s *JailSpec, d, v string) error {
-				if !deviceNameRE.MatchString(d) {
+				if !IsName(d, 31) {
 					return cfgErr("disk."+d+"."+key, "%q is not a device name", d)
 				}
 				if err := check(v); err != nil {
@@ -623,7 +621,7 @@ func buildRegistry() []ckey {
 			if err != nil {
 				return err
 			}
-			if !deviceNameRE.MatchString(d) {
+			if !IsName(d, 31) {
 				return cfgErr("disk."+d+".read_only", "%q is not a device name", d)
 			}
 			disk(s, d, true).ReadOnly = b
@@ -643,7 +641,7 @@ func buildRegistry() []ckey {
 			}
 			return p.Device, p.Device != ""
 		}, func(s *JailSpec, d, v string) error {
-			if !deviceNameRE.MatchString(d) {
+			if !IsName(d, 31) {
 				return cfgErr("devfs."+d+".device", "%q is not a device name", d)
 			}
 			for _, a := range DevfsAllowList {
@@ -672,7 +670,7 @@ func buildRegistry() []ckey {
 			}
 			return p.Listen, p.Listen != ""
 		}, func(s *JailSpec, d, v string) error {
-			if !deviceNameRE.MatchString(d) {
+			if !IsName(d, 31) {
 				return cfgErr("proxy."+d+".listen", "%q is not a device name", d)
 			}
 			if err := checkListen("proxy."+d+".listen", v); err != nil {
@@ -700,7 +698,7 @@ func buildRegistry() []ckey {
 			if err != nil {
 				return err
 			}
-			if !deviceNameRE.MatchString(d) {
+			if !IsName(d, 31) {
 				return cfgErr("proxy."+d+".jail_port", "%q is not a device name", d)
 			}
 			proxy(s, d, true).JailPort = n
@@ -721,7 +719,7 @@ func buildRegistry() []ckey {
 			if v != "tcp" && v != "udp" {
 				return cfgErr("proxy."+d+".proto", "proxy.%s.proto: %q must be tcp or udp", d, v)
 			}
-			if !deviceNameRE.MatchString(d) {
+			if !IsName(d, 31) {
 				return cfgErr("proxy."+d+".proto", "%q is not a device name", d)
 			}
 			proxy(s, d, true).Proto = v

@@ -65,6 +65,9 @@ no source address it may use and nothing is addressed to it. A jail with a link 
 Raw PF fragments in a policy are for operators who set `admin-raw-pf` in `priv.conf`. The helper refuses a fragment
 that does not name its interface with `on`, and one that names an interface that is not the jail's own link.
 
+**Names.** With one line in `priv.conf` the jails of a project reach each other by name, `postgres.verkis.internal`, answered
+by the unbound of the host and limited to the project of the jail that asks: [dns.md](dns.md).
+
 ## Several networks, several families
 
 A jail can attach to several networks; each attachment is its own link with its own gateway. A network has IPv4, IPv6 or

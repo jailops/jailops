@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -164,6 +165,15 @@ type Config struct {
 	// writable by others and lie outside every directory the daemon writes: the daemon never chooses what the
 	// helper trusts. Their contents are checked every time they are used.
 	PkgKeysDir, KeyringDir string
+	// UnboundConf is the one file the helper writes the names of the running jails into for the host's resolver
+	// (dns.unbound, docs/dns.md). The helper binary's default is DefaultUnboundConf, the conf.d of the base system's
+	// local-unbound, which counts only when that directory exists; empty (also the zero Config): off. Its directory
+	// belongs to root and is closed to others, and lies outside every directory the daemon writes.
+	UnboundConf string
+	// DNSSuffix is the zone under which the names of the jails live: NAME.PROJECT.<suffix> (dns-suffix; default
+	// DefaultDNSSuffix). One or more DNS labels; `local` (multicast DNS) is refused. A suffix of the administrator's own
+	// (corp.example) is the clean choice.
+	DNSSuffix string
 	// WireGuardDir holds the keys of WireGuard interfaces, one directory per object (default
 	// DefaultWireGuardDir). It belongs to root with mode 0700 and lies outside every directory the daemon writes.
 	WireGuardDir string
@@ -273,6 +283,22 @@ func (c Config) Normalize() (Config, error) {
 		for _, d := range []string{c.StateDir, c.ConfDir, c.WorkDir, c.MountBase, c.WireGuardDir} {
 			if d != "" && (within(d, p.dir) || within(p.dir, d)) {
 				return c, api.Errorf(api.CodeInvalid, "%s %q must not overlap %s: the daemon writes there, and the helper trusts what is in this directory", p.key, p.dir, d)
+			}
+		}
+	}
+	if c.DNSSuffix == "" {
+		c.DNSSuffix = DefaultDNSSuffix
+	}
+	if err := validate.Hostname("dns-suffix", c.DNSSuffix); err != nil || c.DNSSuffix == "local" || strings.HasSuffix(c.DNSSuffix, ".local") || len(c.DNSSuffix) > 100 {
+		return c, api.Errorf(api.CodeInvalid, "dns-suffix %q must be DNS labels and not `local` (multicast DNS)", c.DNSSuffix)
+	}
+	if c.UnboundConf != "" {
+		if !filepath.IsAbs(c.UnboundConf) || filepath.Clean(c.UnboundConf) != c.UnboundConf || filepath.Dir(c.UnboundConf) == "/" || !strings.HasSuffix(c.UnboundConf, ".conf") {
+			return c, api.Errorf(api.CodeInvalid, "unbound-conf %q must be a clean absolute path of a .conf file at least two levels deep", c.UnboundConf)
+		}
+		for _, d := range []string{c.StateDir, c.ConfDir, c.WorkDir, c.MountBase} {
+			if d != "" && within(d, c.UnboundConf) {
+				return c, api.Errorf(api.CodeInvalid, "unbound-conf %q must not lie in %s: the daemon writes there", c.UnboundConf, d)
 			}
 		}
 	}

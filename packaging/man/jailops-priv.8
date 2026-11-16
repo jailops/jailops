@@ -225,6 +225,26 @@ An extra sysctl readable through the helper, a host that downloads,
 package repositories of image builds and debootstrap mirrors may use over https
 (written http://host, a host also allows plain http for a package repository),
 a local directory of image archives.
+.It Fl unbound-conf Ar file
+The file the helper writes the names of the running jails into
+.Pq Ar jail Ns . Ns Ar project Ns .internal
+for the host's resolver.
+The default is
+.Pa /var/unbound/conf.d/jailops.conf ,
+the conf.d of the base system's local-unbound.
+It is used when local_unbound is enabled and that directory exists.
+An empty value turns it off.
+Its directory belongs to root and is closed to others.
+See
+.Pa docs/dns.md .
+.It Fl dns-suffix Ar suffix
+The zone under which the jails have names:
+.Ar jail Ns . Ns Ar project Ns . Ns Ar suffix .
+The default is
+.Dq internal ;
+DNS labels, not
+.Dq local
+.Pq multicast DNS .
 .It Fl pkg-keys-dir Ar dir , Fl keyring-dir Ar dir
 The directories of the key directories a package repository of an image build
 may use besides

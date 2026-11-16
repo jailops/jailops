@@ -22,7 +22,7 @@ func TestParseSource(t *testing.T) {
 		{"host", api.AccessSourceHost, "", "", "host"},
 		{"jail:web", api.AccessSourceJail, "web", "", "jail:web"},
 		{"jail:web-1", api.AccessSourceJail, "web-1", "", "jail:web-1"},
-		{"set:office_net", api.AccessSourceSet, "office_net", "", "set:office_net"},
+		{"set:office-net", api.AccessSourceSet, "office-net", "", "set:office-net"},
 		{"192.0.2.7", api.AccessSourceCIDR, "", "192.0.2.7/32", "192.0.2.7"},
 		{"192.0.2.9/24", api.AccessSourceCIDR, "", "192.0.2.0/24", "192.0.2.0/24"},
 		{"2001:db8::1", api.AccessSourceCIDR, "", "2001:db8::1/128", "2001:db8::1"},
@@ -44,8 +44,8 @@ func TestParseSource(t *testing.T) {
 			t.Errorf("%q: canonical %q, want %q", c.in, got, c.canonical)
 		}
 	}
-	for _, bad := range []string{"", "any", "@", "@web", "@Web", "jail:", "jail:Web", "jail:web;id", "jail:a/b", "jail:shop/web", "jail:web-", "set:web-1", "set:",
-		"set:" + strings.Repeat("a", 25), "jail:" + strings.Repeat("a", 30), "tag:web", "web", "192.0.2.300", "192.0.2.0/33",
+	for _, bad := range []string{"", "any", "@", "@web", "@Web", "jail:", "jail:Web", "jail:web;id", "jail:a/b", "jail:shop/web", "jail:web-", "set:web_1", "set:web-",
+		"set:" + strings.Repeat("a", 30), "jail:" + strings.Repeat("a", 30), "tag:web", "web", "192.0.2.300", "192.0.2.0/33",
 		"fe80::1%em0", "::ffff:192.0.2.1", "host ", "$(id)", "jail:web\n"} {
 		if s, err := ParseSource(bad); err == nil {
 			t.Errorf("%q accepted: %+v", bad, s)

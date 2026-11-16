@@ -103,6 +103,8 @@ type options struct {
 	wgDir       string
 	pkgKeysDir  string
 	keyringDir  string
+	unboundConf string
+	dnsSuffix   string
 	allowUser   list
 	allowGroup  list
 	sysctl      list
@@ -153,6 +155,8 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.StringVar(&o.wgDir, "wireguard-dir", priv.DefaultWireGuardDir, "directory of the WireGuard keys (root only, mode 0700; outside the daemon's directories)")
 	fs.StringVar(&o.pkgKeysDir, "pkg-keys-dir", priv.DefaultPkgKeysDir, "directory of the key directories (fingerprints) a package repository of an image build may use besides /usr/share/keys (root only, not writable by others; outside the daemon's directories)")
 	fs.StringVar(&o.keyringDir, "keyring-dir", priv.DefaultKeyringDir, "directory of the keyrings debootstrap may check a release with (root only, not writable by others; outside the daemon's directories)")
+	fs.StringVar(&o.dnsSuffix, "dns-suffix", priv.DefaultDNSSuffix, "zone under which the names of the jails live: NAME.PROJECT.<suffix>; DNS labels, not local; a suffix of your own (corp.example) is the clean choice (docs/dns.md)")
+	fs.StringVar(&o.unboundConf, "unbound-conf", priv.DefaultUnboundConf, "file the helper writes the names of the running jails into for the host's resolver (name.project.internal; docs/dns.md); the default is the conf.d of the base system's local-unbound, which is used only when it is set up; empty: off")
 	fs.Var(&o.allowUser, "allow-user", "user allowed to connect (jailopsd's user)")
 	fs.Var(&o.allowGroup, "allow-group", "group allowed to connect")
 	fs.Var(&o.sysctl, "sysctl", "extra sysctl name readable through the helper")
@@ -213,7 +217,7 @@ func (o *options) privConfig() priv.Config {
 	c := priv.Config{
 		StorageRoots: append([]string(nil), o.storage...), StorageFile: o.storageFile, AllowPoolRoot: o.poolRoot,
 		MountBase: o.mountBase,
-		ConfDir:   o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir, PkgKeysDir: o.pkgKeysDir, KeyringDir: o.keyringDir,
+		ConfDir:   o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir, PkgKeysDir: o.pkgKeysDir, UnboundConf: o.unboundConf, DNSSuffix: o.dnsSuffix, KeyringDir: o.keyringDir,
 		WireGuardRoutes: o.wgRoutes,
 		Sysctls:         o.sysctl, FetchHosts: o.fetchHost, ImageMirrors: o.mirror,
 		HostManage: unionModules(o.hostManage, o.applianceModules()), HostDir: o.hostDir, AllowStartWithoutPF: o.allowNoPF,

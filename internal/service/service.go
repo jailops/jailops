@@ -216,6 +216,7 @@ type Service struct {
 	// racctAt and racctVal keep the last answer of the kern.racct.enable sysctl (see racctOn); guarded by mu.
 	racctAt   time.Time
 	racctVal  bool
+	unbound   unboundState  // the names of the jails through the host's unbound (dns_unbound.go)
 	devdState devdHolder    // the reader of devd's notifications (devd.go)
 	pipes     pipeTable     // the dummynet pipe number of every limited direction (shaping.go)
 	hostAddr  hostAddrCache // the host's own addresses (hostaddrs.go)
@@ -465,6 +466,9 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	s.warmCerts()
 	s.startLogForward()
+	if s.d.Files != nil {
+		s.unboundOn(ctx) // is it on: the resolv.conf of the jails that start now depends on it
+	}
 	if s.life != nil {
 		s.loop("updates", s.updateLoop)
 		s.loop("image-auto-upgrade", s.imageAutoLoop)

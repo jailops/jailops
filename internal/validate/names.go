@@ -20,33 +20,38 @@ func Invalid(field, format string, args ...any) *api.Error {
 }
 
 var (
-	nameRE    = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
-	labelRE   = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
-	ifnameRE  = regexp.MustCompile(`^[a-z][a-z0-9]{0,14}$`)
-	setNameRE = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
-	// jailRefRE is what jail:NAME in a rule may name: a jail of the project, at most MaxJailName characters
-	jailRefRE  = regexp.MustCompile(`^[a-z][a-z0-9-]{0,28}$`)
+	labelRE    = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
+	ifnameRE   = regexp.MustCompile(`^[a-z][a-z0-9]{0,14}$`)
 	kindWordRE = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]*$`)
-	tagRE      = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,23}$`)
 	ruleNameRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}$`)
 	pkgRE      = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9+._-]{0,127}$`)
 	envKeyRE   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]{0,127}$`)
 	macRE      = regexp.MustCompile(`^[0-9a-f]{2}(:[0-9a-f]{2}){5}$`)
-	imageNmRE  = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,62}$`)
-	aliasRE    = regexp.MustCompile(`^[a-z][a-z0-9._-]{0,62}$`)
 	osrelRE    = regexp.MustCompile(`^[0-9]{1,3}\.[0-9]{1,3}(-[A-Za-z0-9]{1,16}(-p[0-9]{1,4})?)?$`)
 )
 
-// Name validates a jail, network or policy name: DNS-label-like, lower case.
-func Name(field, s string) error {
-	if !nameRE.MatchString(s) {
-		return Invalid(field, "%s %q must match ^[a-z][a-z0-9-]{0,62}$", field, s)
+// Name validates a name a user chooses (jail, network, storage, volume, policy, profile, ...): api.NamePattern, at
+// most 63 characters.
+func Name(field, s string) error { return NameMax(field, s, api.MaxName) }
+
+// NameMax validates a name by api.NamePattern with a limit of its own (a derived name sets it).
+func NameMax(field, s string, max int) error {
+	if !api.IsName(s, max) {
+		return Invalid(field, "%s %q must be lower case letters, digits and hyphens, start with a letter, not end in a hyphen, at most %d characters", field, s, max)
 	}
 	return nil
 }
 
 // JailName validates a jail name.
-func JailName(s string) error { return Name("name", s) }
+func JailName(s string) error {
+	if err := Name("name", s); err != nil {
+		return err
+	}
+	if s == "host" { // host.PROJECT.internal is the host as the jails see it
+		return Invalid("name", "name %q is the name of the host in the names of the jails; choose another", s)
+	}
+	return nil
+}
 
 // Hostname validates a DNS hostname of at most 253 characters.
 func Hostname(field, s string) error {
@@ -70,21 +75,18 @@ func IfName(field, s string) error {
 	return nil
 }
 
-// SetName validates an address set name (a PF table name component).
-func SetName(field, s string) error {
-	if !setNameRE.MatchString(s) {
-		return Invalid(field, "%s %q must match ^[a-z][a-z0-9_]{0,23}$", field, s)
-	}
-	return nil
-}
+// SetName validates the name of a new address set: lower case letters, digits and hyphens, at most 29 characters (its
+// table in pf is "s_" and the name with the hyphens written as underscores, see SetTable).
+func SetName(field, s string) error { return NameMax(field, s, MaxSetName) }
+
+// MaxSetName is the longest name of an address set: its table in pf, "s_" and the name, has at most 31 characters.
+const MaxSetName = 29
+
+// SetTable is the name of the pf table of an address set: pf names have no hyphen.
+func SetTable(name string) string { return "s_" + strings.ReplaceAll(name, "-", "_") }
 
 // Tag validates a firewall tag.
-func Tag(field, s string) error {
-	if !tagRE.MatchString(s) || strings.HasSuffix(s, "-") {
-		return Invalid(field, "%s %q must match ^[a-z0-9][a-z0-9-]{0,23}$", field, s)
-	}
-	return nil
-}
+func Tag(field, s string) error { return NameMax(field, s, 24) }
 
 // RuleName validates a free-form rule label.
 func RuleName(field, s string) error {
@@ -157,7 +159,7 @@ func ParseImageRef(s string) (ImageRef, error) {
 	}
 	if i := strings.IndexByte(s, '#'); i >= 0 {
 		name, gen := s[:i], s[i+1:]
-		if !imageNmRE.MatchString(name) {
+		if !api.IsName(name, api.MaxName) {
 			return ImageRef{}, Invalid(f, "image name %q is invalid", name)
 		}
 		if len(gen) < 2 || gen[0] != 'g' || len(gen) > 10 || (gen[1] == '0') {
@@ -170,10 +172,10 @@ func ParseImageRef(s string) (ImageRef, error) {
 		return ImageRef{Name: name, Generation: n, Pinned: true}, nil
 	}
 	name, alias, has := strings.Cut(s, "@")
-	if !imageNmRE.MatchString(name) {
+	if !api.IsName(name, api.MaxName) {
 		return ImageRef{}, Invalid(f, "image reference %q is invalid (--image NAME, NAME@alias or NAME#gN)", s)
 	}
-	if has && !aliasRE.MatchString(alias) {
+	if has && !api.IsName(alias, 32) {
 		return ImageRef{}, Invalid(f, "image alias %q is invalid", alias)
 	}
 	return ImageRef{Name: name, Alias: alias}, nil

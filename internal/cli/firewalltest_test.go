@@ -19,9 +19,9 @@ func TestFirewallTest(t *testing.T) {
 	tr := h.transcript()
 	tr.ok("app", "install", "postgresql", "db", "--image", "freebsd-151@stable")
 	tr.ok("app", "install", "nginx", "web", "--image", "freebsd-151@stable")
-	tr.ok("firewall", "address-set", "create", "postgresql_allow", "--address", "jail:web", "--comment", "the web jail")
+	tr.ok("firewall", "address-set", "create", "postgresql-allow", "--address", "jail:web", "--comment", "the web jail")
 	tr.ok("firewall", "policy", "create", "postgres")
-	tr.ok("firewall", "rule", "add", "postgres", "in", "--action", "allow", "--proto", "tcp", "--from", "set:postgresql_allow", "--port", "5432", "--comment", "who may reach PostgreSQL")
+	tr.ok("firewall", "rule", "add", "postgres", "in", "--action", "allow", "--proto", "tcp", "--from", "set:postgresql-allow", "--port", "5432", "--comment", "who may reach PostgreSQL")
 	tr.ok("config", "set", "db", "firewall.policies", "postgres")
 	_, _, code := tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5432")
 	if code != 0 {

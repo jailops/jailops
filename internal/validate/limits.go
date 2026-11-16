@@ -1,7 +1,7 @@
 package validate
 
 import (
-	"regexp"
+	"jailops.net/jailops/sdk/api"
 	"strings"
 )
 
@@ -29,8 +29,6 @@ const (
 	MaxStorageDataset = MaxDatasetName - datasetOverhead - (MaxProjectName + MaxJailName + MaxVolumeName + MaxSnapshotName) - 2
 )
 
-var snapNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
-
 // NameLength refuses a name of a new object (kind "project", "jail", ...) that is longer than max.
 func NameLength(kind, field, name string, max int) error {
 	if len(name) > max {
@@ -40,14 +38,14 @@ func NameLength(kind, field, name string, max int) error {
 	return nil
 }
 
-// SnapshotName validates the name of a new snapshot: lower case letters, digits, '.', '_' and '-', at most 64
-// characters, starting with a letter or digit, and not with "jo-" (the names JailOps takes itself).
+// SnapshotName validates the name of a new snapshot: lower case letters, digits and hyphens (api.NamePattern), at most 64
+// characters, and not with "jo-" (the names JailOps takes itself).
 func SnapshotName(field, s string) error {
-	if !snapNameRE.MatchString(s) {
+	if !api.IsName(s, MaxSnapshotName) {
 		if len(s) > MaxSnapshotName {
 			return Invalid(field, "snapshot name %q is %d characters long; a snapshot name has at most %d", s, len(s), MaxSnapshotName)
 		}
-		return Invalid(field, "snapshot name %q must match ^[a-z0-9][a-z0-9._-]{0,63}$", s)
+		return Invalid(field, "snapshot name %q must follow the name rule (lower case letters, digits and hyphens, starting with a letter)", s)
 	}
 	if strings.HasPrefix(s, "jo-") {
 		return Invalid(field, "snapshot names starting with jo- are reserved for JailOps")

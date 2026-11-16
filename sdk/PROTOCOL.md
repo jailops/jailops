@@ -35,7 +35,7 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
   The server owns `uuid`, `scope`, `host`, `created_at` and all `status`; clients cannot change them.
   `PATCH` applies a JSON merge patch (RFC 7386) with the same `If-Match` rule.
   Responses to `PUT`/`PATCH` carry the new `ETag`. `generation` increases when the stored object changes.
-- Creates are `POST /api/v1/<resource>` with the full object. Names: lowercase letters, digits, `-_.`.
+- Creates are `POST /api/v1/<resource>` with the full object. Names: lowercase letters, digits and hyphens, starting with a letter and not ending in a hyphen (`^[a-z]([a-z0-9-]*[a-z0-9])?$`), at most 63 characters unless a derived name sets a shorter limit (a project 13, a jail 29, an address set 29).
 - Operation results: on success `operation.metadata` is the resulting object (for example the `Jail`);
   when it is empty the client fetches the object by name where it knows it.
 - Multi-host (hub): add `?host=<uuid-or-name>` to any request, including `/api/v1/events`. The hub

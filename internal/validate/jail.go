@@ -171,8 +171,6 @@ func JailSpec(name string, s api.JailSpec) error {
 	return nil
 }
 
-var deviceRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,30}$`)
-
 // devices validates the named devices of a jail: unique names per kind, the
 // devfs allow-list, proxy listeners and profile names.
 func devices(s api.JailSpec) error {
@@ -183,8 +181,8 @@ func devices(s api.JailSpec) error {
 		if name == "" {
 			name = fmt.Sprintf("eth%d", i)
 		}
-		if !deviceRE.MatchString(name) {
-			return Invalid(f+".name", "device name %q must match %s", name, deviceRE)
+		if !api.IsName(name, 31) {
+			return Invalid(f+".name", "device name %q must follow the name rule (%s, at most 31 characters)", name, api.NamePattern)
 		}
 		if seen[name] {
 			return Invalid(f+".name", "duplicate network device %q", name)
@@ -211,8 +209,8 @@ func devices(s api.JailSpec) error {
 	dseen := map[string]bool{}
 	for i, d := range s.Devfs {
 		f := fmt.Sprintf("devfs[%d]", i)
-		if !deviceRE.MatchString(d.Name) {
-			return Invalid(f+".name", "device name %q must match %s", d.Name, deviceRE)
+		if !api.IsName(d.Name, 31) {
+			return Invalid(f+".name", "device name %q must follow the name rule (%s, at most 31 characters)", d.Name, api.NamePattern)
 		}
 		if !allowed[d.Device] {
 			return Invalid(f+".device", "%q is not on the devfs allow-list (%s)", d.Device, strings.Join(api.DevfsAllowList, ", "))
@@ -225,8 +223,8 @@ func devices(s api.JailSpec) error {
 	pseen := map[string]bool{}
 	for i, p := range s.Proxy {
 		f := fmt.Sprintf("proxy[%d]", i)
-		if !deviceRE.MatchString(p.Name) {
-			return Invalid(f+".name", "device name %q must match %s", p.Name, deviceRE)
+		if !api.IsName(p.Name, 31) {
+			return Invalid(f+".name", "device name %q must follow the name rule (%s, at most 31 characters)", p.Name, api.NamePattern)
 		}
 		if pseen[p.Name] {
 			return Invalid(f+".name", "duplicate proxy device %q", p.Name)

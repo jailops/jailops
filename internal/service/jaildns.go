@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -27,13 +28,12 @@ import (
 //     jail's first network. That answers only when the administrator lets the cache listen there: JailOps never
 //     changes the host's resolver and opens no port for it.
 //
-// A jail whose /etc/resolv.conf has the line KeepResolvMarker keeps its own file: JailOps does not write it.
+// JailOps writes a jail's /etc/resolv.conf only while the file is absent, empty or still has the line
+// render.ResolvMarker that JailOps wrote into it: a jail whose file was edited (the line removed) or came with
+// content of its own keeps it, at every start and at every change of the network's dns.
 
 // hostResolvPath is the host's resolver configuration. It is world readable; the daemon reads it itself.
 const hostResolvPath = "/etc/resolv.conf"
-
-// KeepResolvMarker is the line that keeps JailOps from writing a jail's resolv.conf.
-const KeepResolvMarker = "# jailops:keep"
 
 // hostFile reads a world-readable file of the host (resolv.conf, rc.conf, pf.conf) as the daemon's own user.
 func (s *Service) hostFile(p string) ([]byte, error) {
@@ -102,6 +102,13 @@ func (s *Service) resolvers(nets []api.NetworkSpec) (api.DNSSource, []netip.Addr
 	if len(nets) == 0 {
 		return api.DNSNone, nil
 	}
+	if s.unboundCached() { // the names of the jails are answered by the host's unbound at the gateway
+		for _, n := range nets {
+			if gw, ok := gatewayResolver(n); ok {
+				return api.DNSFromGateway, []netip.Addr{gw}
+			}
+		}
+	}
 	host, loopback, err := s.hostNameservers()
 	switch {
 	case err != nil:
@@ -126,7 +133,11 @@ func (s *Service) networkDNS(name string, spec api.NetworkSpec) *api.NetworkDNS 
 		d.Nameservers = append(d.Nameservers, a.String())
 	}
 	if src == api.DNSFromGateway {
-		d.Advice = gatewayDNSAdvice(name, spec)
+		if s.unboundCached() {
+			s.fillNames(d)
+		} else {
+			d.Advice = gatewayDNSAdvice(name, spec)
+		}
 	}
 	return d
 }
@@ -150,18 +161,18 @@ func gatewayDNSAdvice(name string, spec api.NetworkSpec) string {
 }
 
 // keepsResolv says whether the jail's existing resolv.conf (at p, read through the file operations that stay inside
-// the jail's root) has the marker line that keeps JailOps from writing it.
+// the jail's root) is the jail's own: it has content and no longer the marker line JailOps wrote into it.
 func (s *Service) keepsResolv(ctx context.Context, p string) bool {
 	b, err := s.d.Files.ReadFile(ctx, p)
-	if err != nil {
+	if err != nil || strings.TrimSpace(string(b)) == "" {
 		return false
 	}
 	for _, l := range strings.Split(string(b), "\n") {
-		if strings.Join(strings.Fields(l), " ") == KeepResolvMarker {
-			return true
+		if strings.HasPrefix(l, render.ResolvMarker) {
+			return false
 		}
 	}
-	return false
+	return true
 }
 
 // liveResolv writes the resolv.conf of every running jail on a network again, after a change of its dns: the file
@@ -196,7 +207,7 @@ func (s *Service) liveResolv(ctx context.Context, network string) (updated, fail
 }
 
 // errKept is a jail that keeps its own resolv.conf.
-var errKept = errors.New("it keeps its own resolv.conf (" + KeepResolvMarker + ")")
+var errKept = errors.New("its resolv.conf is its own (the line \"" + render.ResolvMarker + "\" is gone)")
 
 // writeJailResolv renders and writes one running jail's resolv.conf under the jail's lock; a jail busy with another
 // operation is left to its next start.

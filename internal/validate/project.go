@@ -131,7 +131,7 @@ func ProjectSpec(name string, s api.ProjectSpec) error {
 	}
 	seen = map[string]bool{}
 	for i, im := range s.Images {
-		if !imageNmRE.MatchString(im) {
+		if !api.IsName(im, api.MaxName) {
 			return Invalid(fmt.Sprintf("images[%d]", i), "image name %q is invalid", im)
 		}
 		if seen[im] {

@@ -82,6 +82,14 @@ allow-user = jailops
 # daemon's directories, and the helper checks them every time. The daemon never chooses what the helper trusts.
 #pkg-keys-dir = /usr/local/etc/jailops/keys
 #keyring-dir = /usr/local/share/keyrings
+# Names for the jails (docs/dns.md): the file the helper writes the names of the running jails into, NAME.PROJECT.internal,
+# for the host's resolver. Nothing to set: the default is the conf.d of the base system's local-unbound and counts when
+# local_unbound is enabled and that directory is root's. Empty turns it off; a path points it at another file (a plain
+# unbound with unbound-control). The directory belongs to root and is closed to others.
+#unbound-conf = /var/unbound/conf.d/jailops.conf
+# The zone under which the jails have names: NAME.PROJECT.<suffix>. DNS labels, not local (multicast DNS); a suffix you own,
+# like corp.example, is the clean choice.
+#dns-suffix = internal
 # Directories fs.read_file may read besides the storage roots (a local mirror of
 # image archives). /etc/sysctl.conf and /etc/resolv.conf are always readable.
 #image-mirror = /var/db/jailops/mirror

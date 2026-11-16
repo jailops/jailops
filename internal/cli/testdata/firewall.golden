@@ -1,13 +1,19 @@
 $ jailops firewall address-set create office --address 192.0.2.0/24 --address 198.51.100.7
 address set/office created
 
-$ jailops firewall address-set create empty
-! usage: give at least one --address (or use -f FILE)
-! hint: run 'jailops firewall address-set create --help' for usage
-[exit 2]
-
-$ jailops firewall address-set create hq --address 192.0.2.9 --comment the office
+$ jailops firewall address-set create hq --comment the office
 address set/hq created
+
+$ jailops firewall address-set add hq 192.0.2.9 --comment the office network
+address set/hq: added 192.0.2.9
+
+$ jailops firewall address-set add hq 192.0.2.9 192.0.2.10
+address set/hq: added 192.0.2.10 (already a member: 192.0.2.9)
+
+$ jailops firewall address-set add hq not-an-address
+! usage: "not-an-address" is not a valid address, or a reference: host, jail:NAME, set:NAME or tag:NAME
+! hint: run 'jailops firewall address-set add --help' for usage
+[exit 2]
 
 $ jailops firewall address-set show hq -o yaml
 metadata:
@@ -15,20 +21,32 @@ metadata:
   uuid: <uuid>
   project: main
   scope: fleet
-  generation: 1
+  generation: 3
   created_at: "2026-03-01T09:00:00Z"
   updated_at: "2026-03-01T09:00:00Z"
 spec:
+  comment: the office
   addresses:
     - address: 192.0.2.9
-      comment: the office
+      comment: the office network
+    - address: 192.0.2.10
 
 $ jailops firewall address-set show hq
 Address set hq
+  Comment:  the office
   Age:      3h
 
-MEMBER      COMMENT
-192.0.2.9   the office
+MEMBER       COMMENT
+192.0.2.9    the office network
+192.0.2.10   -
+
+$ jailops firewall address-set remove hq 192.0.2.77
+! usage: 192.0.2.77 is not a member of address set hq (jailops firewall address-set show hq)
+! hint: run 'jailops firewall address-set remove --help' for usage
+[exit 2]
+
+$ jailops firewall address-set remove hq 192.0.2.10
+address set/hq: removed 192.0.2.10
 
 $ jailops firewall policy create documented --default-in deny --default-out allow --comment the public web server
 firewall policy/documented created
@@ -91,7 +109,7 @@ firewall policy/switchable: rule 2 added: allow in tcp port 22 disabled
 
 $ jailops firewall rule add switchable in --action deny --proto tcp --port 23 --disabled
 firewall policy/switchable: rule 3 added: deny in tcp port 23 disabled
-! note: the rule has no comment; 'jailops firewall validate --review' asks for one
+! note: the rule has no comment; say why it is there with: jailops firewall rule edit switchable 3 --comment TEXT
 
 $ jailops firewall policy show switchable
 Firewall policy switchable
@@ -140,35 +158,24 @@ spec:
 $ jailops firewall policy create nodefaults
 firewall policy/nodefaults created
 
-$ jailops firewall address-set create c1 --comment no address
-! usage: give at least one --address (or use -f FILE)
-! hint: run 'jailops firewall address-set create --help' for usage
-[exit 2]
-
-$ jailops firewall address-set create c2 --address 192.0.2.2 --address 192.0.2.3 --comment which one
-! usage: --comment describes a single --address; for several entries with comments use a file (-f FILE) or 'address-set edit'
-! hint: run 'jailops firewall address-set create --help' for usage
-[exit 2]
-
 $ jailops firewall policy create web --default-in deny --default-out allow
 firewall policy/web created
 
 $ jailops firewall rule add web in --action allow --proto tcp --port 80,443
 firewall policy/web: rule 1 added: allow in tcp port 80,443
-! note: the rule has no comment; 'jailops firewall validate --review' asks for one
+! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 1 --comment TEXT
 
 $ jailops firewall rule add web in --action allow --proto tcp --from set:office --port 22 --log
 firewall policy/web: rule 2 added: allow in tcp from set:office port 22 log
-! note: the rule has no comment; 'jailops firewall validate --review' asks for one
+! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 2 --comment TEXT
 
 $ jailops firewall rule add web in --action allow --proto tcp --redirect 8080:80
 firewall policy/web: rule 3 added: allow in tcp rdr 8080:80
-! note: the rule has no comment; 'jailops firewall validate --review' asks for one
+! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 3 --comment TEXT
 
 $ jailops firewall rule add web in
-! usage: --action is required: allow or deny
-! hint: run 'jailops firewall rule add --help' for usage
-[exit 2]
+firewall policy/web: rule 4 added: allow in
+! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 4 --comment TEXT
 
 $ jailops firewall rule add web in --action allow --proto bogus
 ! invalid: proto "bogus" must be tcp, udp, icmp or icmp6
@@ -179,7 +186,7 @@ NAME         DEFAULT-IN   DEFAULT-OUT   RULES   RAW
 documented   deny         allow         2       no
 nodefaults   deny         allow         0       no
 switchable   deny         allow         3       no
-web          deny         allow         3       no
+web          deny         allow         4       no
 
 $ jailops firewall policy show web
 Firewall policy web
@@ -191,6 +198,7 @@ Firewall policy web
 1   allow in tcp port 80,443                   -
 2   allow in tcp from set:office port 22 log   -
 3   allow in tcp rdr 8080:80                   -
+4   allow in                                   -
 
 $ jailops firewall address-set list
 NAME     ADDRESSES

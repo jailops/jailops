@@ -244,8 +244,8 @@ does not reach every jail at once.
 
 ## Naming rules
 
-File name equals `metadata.name`. Jails, networks and firewall policies use the daemon's rule (`^[a-z][a-z0-9-]{0,62}$`), address
-sets `^[a-z][a-z0-9_]{0,23}$` (they become PF tables, so `web_tier`, not `web-tier`); `validate` says so before the daemon would.
+File name equals `metadata.name`. Every kind uses the daemon's one rule (`^[a-z]([a-z0-9-]*[a-z0-9])?$`, hyphens only, at most 63 characters; an address
+set 29, because its name becomes a PF table with the hyphens written as underscores); `validate` says so before the daemon would.
 
 ## Plain http
 

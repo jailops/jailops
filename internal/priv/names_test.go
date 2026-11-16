@@ -89,7 +89,7 @@ func newProjectEnv(t *testing.T, project, name string) *hookEnv {
 	if err := e.zfs.Create(ctx, zfs.CreateOpts{Name: ds, Props: map[string]string{"jailops:managed": "on", "mountpoint": mp}}); err != nil {
 		t.Fatal(err)
 	}
-	spec := api.JailSpec{Image: "freebsd-15.0@stable", OS: api.OSFreeBSD, Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.12"}}}
+	spec := api.JailSpec{Image: "freebsd-15-0@stable", OS: api.OSFreeBSD, Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.12"}}}
 	rec, _ := json.Marshal(map[string]any{"version": 1, "metadata": api.ObjectMeta{Name: name, UUID: hookUUID, Project: project}, "spec": spec})
 	mustWrite(t, filepath.Join(mp, "spec.json"), string(rec))
 	nw := api.NetworkSpec{Uplink: "em0", MTU: 1400, IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200"}}

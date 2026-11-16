@@ -48,6 +48,9 @@ type Host interface {
 	// HealNetwork destroys the interfaces of the earlier network layout (a bridge, the gateway pair of a network) that
 	// no jail that runs uses (netheal.go).
 	HealNetwork(ctx context.Context) (HealNetRes, error)
+	// DNSUnbound writes the names of the running jails for the host's unbound (dnsunbound.go); without unbound-conf in
+	// priv.conf it does nothing and says it is off.
+	DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error)
 	// ProbeSource says whether a host directory below an admin-host-mount directory is on a mount (see safefs.go).
 	ProbeSource(ctx context.Context, q SourceProbeReq) (SourceProbe, error)
 	Remove(ctx context.Context, path string) error

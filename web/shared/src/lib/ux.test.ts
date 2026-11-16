@@ -20,8 +20,8 @@ describe('name rules follow the server', () => {
     expect(validName('shop', 'project')).toBe(true)
     expect(validName('a'.repeat(12), 'tunnel')).toBe(true)
     expect(validName('a'.repeat(13), 'tunnel')).toBe(false)
-    expect(validName('alice.b_2', 'identity')).toBe(true)
-    expect(validName('.alice', 'identity')).toBe(false)
+    expect(validName('alice-b2', 'identity')).toBe(true)
+    for (const bad of ['alice.b', 'alice_b', '.alice', 'Alice', '2alice']) expect(validName(bad, 'identity')).toBe(false)
   })
   it('the lengths of new objects: project and network 13, jail, volume and image 32, snapshot 64', () => {
     for (const [rule, max] of [['project', 13], ['network', 13], ['jail', 32], ['volume', 32], ['image', 32], ['snapshot', 64]] as const) {
@@ -29,8 +29,10 @@ describe('name rules follow the server', () => {
       expect(nameProblem('a'.repeat(max + 1), rule)).toBe(`At most ${max} characters.`)
       expect(nameHint(rule)).toContain(`at most ${max} characters`)
     }
-    expect(validName('freebsd-15.1_x', 'image')).toBe(true)
-    expect(validName('daily.2026-11-04', 'snapshot')).toBe(true)
+    expect(validName('freebsd-15-1', 'image')).toBe(true)
+    expect(validName('freebsd-15.1_x', 'image')).toBe(false)
+    expect(validName('daily-2026-11-04', 'snapshot')).toBe(true)
+    expect(validName('daily.2026-11-04', 'snapshot')).toBe(false)
     expect(validName('-x', 'snapshot')).toBe(false)
     expect(validName('web.1', 'jail')).toBe(false)
     expect(DATASET_MAX).toBe(88)

@@ -96,7 +96,10 @@ const (
 	OpMountsStale = "mounts.stale"
 	OpJailHeal    = "jail.heal"
 	OpNetHeal     = "net.heal"
-	OpFSTailFile  = "fs.tail_file"
+	// dns.unbound writes the names of the running jails for the host's unbound into the one file root named
+	// (unbound-conf) and has unbound read it again; the text is made by the helper (dnsunbound.go).
+	OpDNSUnbound = "dns.unbound"
+	OpFSTailFile = "fs.tail_file"
 
 	OpNetSetMTU = "net.set_mtu"
 
@@ -605,6 +608,9 @@ func init() {
 	})
 	register(OpNetHeal, false, func(ctx context.Context, h Host, _ empty, _ *callIO) (any, error) {
 		return h.HealNetwork(ctx)
+	})
+	register(OpDNSUnbound, false, func(ctx context.Context, h Host, a DNSUnboundReq, _ *callIO) (any, error) {
+		return h.DNSUnbound(ctx, a.Apply)
 	})
 	register(OpFSListLogs, false, func(ctx context.Context, h Host, a listLogsArgs, _ *callIO) (any, error) {
 		files, truncated, err := h.ListLogs(ctx, a.Dir)

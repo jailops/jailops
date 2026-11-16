@@ -1,13 +1,15 @@
 #!/bin/sh
 #
 # PROVIDE: jailopsd
-# REQUIRE: jailops_priv NETWORKING pf syslogd
+# REQUIRE: jailops_priv NETWORKING pf syslogd local_unbound
 # KEYWORD: shutdown
 #
 # "pf" is required even when pf_enable is NO (rcorder only orders the scripts; a disabled service still runs and
 # exits at once): without it, rcorder gives no guarantee that pf.conf (with the anchor line of the setup
 # guide) is loaded before jailopsd starts jails, and an anchor call that resolves to nothing
 # yet falls through to whatever the administrator's own ruleset does next (design 18, the boot-time audit).
+# "local_unbound": the names of the jails are written for the resolver (docs/dns.md), which should be up when the first
+# jail starts, so that they exist after a reboot (an unknown or disabled service is ignored by rcorder, as with pf).
 # "syslogd": the daemon logs to syslog, and in appliance mode the setup token goes there too.
 # "jailops_priv": the helper starts first at boot, and "shutdown" stops jailopsd before it. The two are one service
 # (the helper is the part that runs as root): run by hand, `service jailopsd start` starts the helper first when it is

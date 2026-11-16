@@ -9,3 +9,11 @@ type Healed struct{ Unmounted, Left, Errors []string }
 
 // NetHealed says which interfaces of the earlier network layout were destroyed and which were left, with the reason.
 type NetHealed struct{ Destroyed, Skipped []string }
+
+// UnboundState says where the names of the jails stand for the host's unbound (the helper's dns.unbound).
+type UnboundState struct {
+	Enabled, Current, Changed, Reloaded, Base, Recurse bool
+	Path, Control, Sample, Reason, Suffix              string
+	Names, Jails, Projects                             int
+	Gateways, Forward                                  []string
+}

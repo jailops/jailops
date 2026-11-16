@@ -59,7 +59,7 @@ export function jails(): Jail[] {
     jail('build', 'stopped', { autostart: false, labels: { role: 'ci', env: 'dev', team: 'platform' } }),
     jail('proxy', 'running', { net: 'edge', ipv4: '192.0.2.10', ipv6: 'auto', labels: { role: 'proxy', env: 'prod', team: 'web', app: 'haproxy' } }),
     jail('cache', 'starting', { ipv4: '10.20.0.14', labels: { role: 'cache', env: 'prod', team: 'web', app: 'redis' } }),
-    jail('alpine-app', 'running', { image: 'alpine-3.22@stable', gen: 'alpine-3.22#g1', ipv4: 'auto', drift: ['address 10.20.0.30 configured, spec says auto (allocation pending write-back)'], labels: { role: 'app', env: 'staging', team: 'platform' } }),
+    jail('alpine-app', 'running', { image: 'alpine-3-22@stable', gen: 'alpine-3-22#g1', ipv4: 'auto', drift: ['address 10.20.0.30 configured, spec says auto (allocation pending write-back)'], labels: { role: 'app', env: 'staging', team: 'platform' } }),
     vault(),
     // a dozen jails in the project, so search and labels have something to sort through; api carries many labels
     jail('api', 'running', { ipv4: '10.20.0.20', labels: { role: 'api', env: 'prod', team: 'web', app: 'nginx', tier: 'backend', owner: 'alice', 'example.org/cost-center': 'cc-4711', region: 'eu-central', backup: 'yes', release: '2026.10.3' } }),
@@ -129,9 +129,9 @@ export function images(): Image[] {
       status: { generations: [gen(1, 0, 212, 60, []), gen(2, 1, 214, 45, []), gen(3, 2, 219, 20, ['mail']), gen(4, 3, 221, 3, ['web', 'db', 'proxy', 'build', 'cache'])], auto_upgrade: { next: nextNight('03:00'), recent: autoUpgradeRuns() } },
     },
     {
-      metadata: { ...meta('alpine-3.22'), scope: 'fleet' },
+      metadata: { ...meta('alpine-3-22'), scope: 'fleet' },
       spec: { os: 'linux', release: '3.22', arch: 'amd64', source: { type: 'minirootfs', repo: 'https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/x86_64' }, aliases: ['stable'], retention: { keep_last: 2 } },
-      status: { generations: [{ number: 1, name: 'alpine-3.22#g1', manifest: 'a9c1d0'.padEnd(40, '7'), packages: 18, created_at: ago(86400 * 9), refs: ['alpine-app'] }], aliases: { stable: 1 } },
+      status: { generations: [{ number: 1, name: 'alpine-3-22#g1', manifest: 'a9c1d0'.padEnd(40, '7'), packages: 18, created_at: ago(86400 * 9), refs: ['alpine-app'] }], aliases: { stable: 1 } },
     },
   ]
 }
@@ -139,8 +139,8 @@ export function images(): Image[] {
 export function networks(): Network[] {
   return [
     {
-      metadata: meta('lan'), spec: { uplink: 'em0', ipv4: { subnet: '10.20.0.0/24', gateway: '10.20.0.1', range: '10.20.0.10-10.20.0.60', exclude: ['10.20.0.40-10.20.0.44'], nat: true }, ipv6: { mode: 'routed', subnet: '2001:db8:20:1::/80', range: '2001:db8:20:1::100-2001:db8:20:1::1ff' }, dns: ['10.20.0.1'], mtu: 1500 },
-      status: { links: ['epair0a', 'epair1a', 'epair2a', 'epair4a'], allocated: 8, free: 38, orphans: [], conditions: [] },
+      metadata: meta('lan'), spec: { uplink: 'em0', ipv4: { subnet: '10.20.0.0/24', gateway: '10.20.0.1', range: '10.20.0.10-10.20.0.60', exclude: ['10.20.0.40-10.20.0.44'], nat: true }, ipv6: { mode: 'routed', subnet: '2001:db8:20:1::/80', range: '2001:db8:20:1::100-2001:db8:20:1::1ff' }, mtu: 1500 },
+      status: { links: ['epair0a', 'epair1a', 'epair2a', 'epair4a'], allocated: 8, free: 38, orphans: [], conditions: [], dns: { source: 'gateway', nameservers: ['10.20.0.1'], suffix: 'internal', forward: ['192.0.2.53'] } },
     },
     {
       metadata: meta('backend'), spec: { ipv4: { subnet: '10.30.0.0/28', gateway: '10.30.0.1', range: '10.30.0.2-10.30.0.13' } },

@@ -11,7 +11,7 @@ import (
 // A declared source compares with a live grant in the form the host stores it.
 func TestCanonicalSource(t *testing.T) {
 	for in, want := range map[string]string{
-		"host": "host", "jail:web": "jail:web", "set:office_net": "set:office_net",
+		"host": "host", "jail:web": "jail:web", "set:office-net": "set:office-net",
 		"192.0.2.7": "192.0.2.7", "192.0.2.7/32": "192.0.2.7", "192.0.2.9/24": "192.0.2.0/24",
 		"2001:db8::1": "2001:db8::1", "2001:db8::1/64": "2001:db8::/64",
 	} {
@@ -20,7 +20,7 @@ func TestCanonicalSource(t *testing.T) {
 			t.Errorf("%q: %q %v, want %q", in, got, err, want)
 		}
 	}
-	for _, bad := range []string{"", "any", "@", "@web", "jail:Web", "jail:a/", "jail:shop/web", "set:a-b", "tag:web", "web", "192.0.2.300", "fe80::1%em0", "::ffff:192.0.2.1"} {
+	for _, bad := range []string{"", "any", "@", "@web", "jail:Web", "jail:a/", "jail:shop/web", "set:a_b", "tag:web", "web", "192.0.2.300", "fe80::1%em0", "::ffff:192.0.2.1"} {
 		if _, err := CanonicalSource(bad); err == nil {
 			t.Errorf("%q accepted", bad)
 		}

@@ -364,7 +364,7 @@ func TestGuestErrors(t *testing.T) {
 var (
 	rcLineRE    = regexp.MustCompile(`^(#.*|[a-z0-9_]+="[A-Za-z0-9 .:/%_-]*")$`)
 	ifaceLineRE = regexp.MustCompile(`^(# Managed.*|auto [a-z0-9]+|auto lo|iface lo inet loopback|iface [a-z0-9]+ inet6? (static|manual)|\t(address|gateway) [0-9a-f:./]+|\tmtu [0-9]+|)$`)
-	resolvRE    = regexp.MustCompile(`^(# Managed.*|search [A-Za-z0-9. -]+|nameserver [0-9a-f:.]+)$`)
+	resolvRE    = regexp.MustCompile(`^(# (Managed|written by JailOps).*|search [A-Za-z0-9. -]+|nameserver [0-9a-f:.]+)$`)
 )
 
 func FuzzGuest(f *testing.F) {
@@ -484,7 +484,7 @@ func TestJSONCanonical(t *testing.T) {
 		Metadata: api.ObjectMeta{Name: "web", UUID: "u-1", Scope: api.ScopeHost, Generation: 3,
 			Labels:    map[string]string{"z": "1", "a": "<2>"},
 			CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.FixedZone("x", 3600))},
-		Spec: api.JailSpec{Image: "freebsd-15.0@stable", Env: map[string]string{"B": "2", "A": "1"},
+		Spec: api.JailSpec{Image: "freebsd-15-0@stable", Env: map[string]string{"B": "2", "A": "1"},
 			Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.10"}}},
 		Status: api.JailStatus{Power: api.PowerRunning, JID: 7},
 	}
@@ -503,7 +503,7 @@ func TestJSONCanonical(t *testing.T) {
 		t.Fatal("html escaped")
 	}
 	golden(t, "spec_json", string(a))
-	bj, err := BundleJSON(api.RestoreBundle{Spec: j.Spec, ImageGeneration: "freebsd-15.0#g3", ImageManifest: "sha256:abc",
+	bj, err := BundleJSON(api.RestoreBundle{Spec: j.Spec, ImageGeneration: "freebsd-15-0#g3", ImageManifest: "sha256:abc",
 		Networks: []api.NetworkSpec{{Uplink: "em0"}}, Volumes: []string{"data"}, SecretRefs: []string{"s1"}})
 	if err != nil {
 		t.Fatal(err)

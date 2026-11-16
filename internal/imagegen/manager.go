@@ -101,7 +101,7 @@ func parseAliases(s string) map[string]int {
 		if !ok {
 			continue
 		}
-		if n, err := strconv.Atoi(v); err == nil && aliasRe.MatchString(k) {
+		if n, err := strconv.Atoi(v); err == nil && validAlias(k) {
 			out[k] = n
 		}
 	}
@@ -122,7 +122,7 @@ func directChildren(parent string, all []string) []string {
 // Observe reads the generations of an image from ZFS.
 func (m *Manager) Observe(ctx context.Context, image string) (Observed, error) {
 	var o Observed
-	if !imageRe.MatchString(image) {
+	if !validImage(image) {
 		return o, api.Errorf(api.CodeInvalid, "bad image name %q", image)
 	}
 	ids := m.Layout.ImageDS(image)

@@ -61,6 +61,9 @@ type Env struct {
 	Trigger <-chan struct{}
 	// WG configures WireGuard interfaces (optional: without it tunnels are reported as not applied).
 	WG wireguard.Host
+	// AfterPass is called once after each pass of Run (optional): the names of the jails for the host's resolver follow
+	// what the pass found running.
+	AfterPass func(ctx context.Context)
 }
 
 // Report summarises one pass; tests and `doctor` read it.
@@ -182,6 +185,9 @@ func (r *Reconciler) Run(ctx context.Context) error {
 	for {
 		began := r.env.Clock.Now()
 		r.Pass(ctx)
+		if r.env.AfterPass != nil {
+			r.env.AfterPass(ctx)
+		}
 		took := r.env.Clock.Now().Sub(began)
 		select {
 		case <-ctx.Done():

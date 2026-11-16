@@ -56,10 +56,7 @@ type Source struct {
 	Prefix netip.Prefix
 }
 
-var (
-	jailNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,28}$`)
-	setNameRE  = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
-)
+var ()
 
 // ParseSource reads the source of an allow or a deny: jail:NAME (a jail of the project), set:NAME (an address set of
 // the project), an address or a prefix, or host.
@@ -71,12 +68,12 @@ func ParseSource(s string) (Source, error) {
 		n := s[1:]
 		return Source{}, fmt.Errorf("source %q: @ is not used: write jail:%s or set:%s", s, n, n)
 	case strings.HasPrefix(s, "jail:"):
-		if !jailNameRE.MatchString(s[5:]) || strings.HasSuffix(s, "-") {
+		if !api.IsName(s[5:], 29) {
 			return Source{}, fmt.Errorf("source %q: jail: is followed by the name of a jail of the project", s)
 		}
 		return Source{Kind: api.AccessSourceJail, Name: s[5:]}, nil
 	case strings.HasPrefix(s, "set:"):
-		if !setNameRE.MatchString(s[4:]) {
+		if !api.IsName(s[4:], 29) {
 			return Source{}, fmt.Errorf("source %q: set: is followed by the name of an address set of the project", s)
 		}
 		return Source{Kind: api.AccessSourceSet, Name: s[4:]}, nil

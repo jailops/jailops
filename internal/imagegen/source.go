@@ -653,7 +653,8 @@ func (a *alpineRun) configSteps() []plan.Step {
 			if err != nil {
 				return nil, fmt.Errorf("the host's /etc/resolv.conf is needed for apk inside the build: %w", err)
 			}
-			return d, nil
+			// the marker lets a jail made from the image get its own resolv.conf at its first start
+			return append([]byte(render.ResolvMarker+"\n"), d...), nil
 		}),
 		write("write-apk-repositories", "etc/apk/repositories", func(context.Context) ([]byte, error) {
 			return []byte(fmt.Sprintf("%s/v%s/main\n%s/v%s/community\n", alpineMirror, a.branch, alpineMirror, a.branch)), nil

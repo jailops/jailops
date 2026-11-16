@@ -834,8 +834,8 @@ func TestRenameFirewallObjectsAndProfiles(t *testing.T) {
 	if err != nil || pol.Spec.Rules[0].From[0] != "set:hq" {
 		t.Fatalf("%+v %v", pol.Spec, err)
 	}
-	_, _, err = s.RenameAddressSet(alpha, "hq", renameOpts("no-dash"))
-	wantCode(t, err, api.CodeInvalid) // a set name becomes a table name
+	_, _, err = s.RenameAddressSet(alpha, "hq", renameOpts("no_underscore"))
+	wantCode(t, err, api.CodeInvalid) // a set name has no underscore: its table in pf has one for every hyphen
 	// a policy: the profile and the jails that name it follow
 	res = doRename(t, s)(s.RenamePolicy(alpha, "web", renameOpts("public")))
 	if !hasChange(res, api.RenameReference, "profile small") {

@@ -234,14 +234,14 @@ func TestHostSelectionAndGroups(t *testing.T) {
 	e.Write("hosts/db1/host.yaml", "apiVersion: jailops/v1\nkind: Host\nmetadata:\n  name: db1\n  labels: {role: db, env: prod}\nspec:\n  url: "+e.Hosts["db1"].URL()+"\n")
 	e.Write("groups/prod.yaml", "apiVersion: jailops/v1\nkind: HostGroup\nmetadata:\n  name: prod\nspec:\n  selector: {env: prod}\n")
 	e.Write("groups/everything.yaml", "apiVersion: jailops/v1\nkind: HostGroup\nmetadata:\n  name: everything\nspec:\n  members: [\"@prod\", web2]\n")
-	e.Write("projects/main/address-sets/prod_only.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: prod_only\nhosts: [\"@prod\"]\nspec:\n  addresses: [{address: 192.0.2.1}]\n")
+	e.Write("projects/main/address-sets/prod-only.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: prod-only\nhosts: [\"@prod\"]\nspec:\n  addresses: [{address: 192.0.2.1}]\n")
 
 	mustOK(t, run(t, e, "validate"))
 	mustOK(t, run(t, e, "sync", "--apply", "--host", "@everything"))
 	for h, want := range map[string]bool{"web1": true, "web2": false, "db1": true} {
-		_, err := client(t, e.Hosts[h]).Project(fleettest.Project).Firewall().AddressSets().Get(context.Background(), "prod_only")
+		_, err := client(t, e.Hosts[h]).Project(fleettest.Project).Firewall().AddressSets().Get(context.Background(), "prod-only")
 		if (err == nil) != want {
-			t.Fatalf("%s: prod_only present=%v, want %v (%v)", h, err == nil, want, err)
+			t.Fatalf("%s: prod-only present=%v, want %v (%v)", h, err == nil, want, err)
 		}
 	}
 	// --host limits what is planned and applied.

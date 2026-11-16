@@ -128,8 +128,6 @@ type AppGrant struct {
 
 var (
 	dbNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,62}$`)
-	srcSetRe = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
-	jailRe   = regexp.MustCompile(`^[a-z][a-z0-9-]{0,28}$`)
 )
 
 // CanonicalSource is the form the host stores a grant under, so a declared
@@ -142,12 +140,12 @@ func CanonicalSource(s string) (string, error) {
 		n := s[1:]
 		return "", fmt.Errorf("source %q: @ is not used: write jail:%s or set:%s", s, n, n)
 	case strings.HasPrefix(s, "jail:"):
-		if !jailRe.MatchString(s[5:]) || strings.HasSuffix(s, "-") {
+		if !api.IsName(s[5:], 29) {
 			return "", fmt.Errorf("source %q: jail: is followed by the name of a jail of the project", s)
 		}
 		return s, nil
 	case strings.HasPrefix(s, "set:"):
-		if !srcSetRe.MatchString(s[4:]) {
+		if !api.IsName(s[4:], 29) {
 			return "", fmt.Errorf("source %q: set: is followed by the name of an address set of the project", s)
 		}
 		return s, nil
@@ -192,7 +190,7 @@ func NormalizePorts(in []string) ([]string, error) {
 
 // Validate checks an App spec.
 func (s AppSpec) Validate() error {
-	if !jailRe.MatchString(s.App) {
+	if !api.IsName(s.App, 29) {
 		return fmt.Errorf("spec.app %q must name an app of the catalog (^[a-z][a-z0-9-]{0,62}$)", s.App)
 	}
 	return nil
@@ -409,16 +407,14 @@ func (r RolloutSpec) Validate() error {
 
 var genRe = regexp.MustCompile(`^g[1-9][0-9]*$`)
 
-var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,127}$`)
-
-// CheckName enforces the API's name rule: lowercase letters, digits and
-// "-_." starting with a letter or digit.
+// CheckName enforces the API's name rule (api.NamePattern): lowercase letters, digits and hyphens, starting with
+// a letter.
 func CheckName(name string) error {
 	if name == "" {
 		return fmt.Errorf("name is empty")
 	}
-	if !nameRe.MatchString(name) {
-		return fmt.Errorf("name %q must use lowercase letters, digits, '-', '_' and '.', start with a letter or digit, at most 128 characters", name)
+	if !api.IsName(name, api.MaxName) {
+		return fmt.Errorf("name %q must use lowercase letters, digits and hyphens, start with a letter, not end in a hyphen, at most %d characters", name, api.MaxName)
 	}
 	return nil
 }

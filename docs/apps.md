@@ -57,7 +57,7 @@ files cannot claim one name). The catalog in the packages repository is the refe
 
 ```yaml
 version: 1                       # required, 1
-name: postgresql                 # a jail name: ^[a-z][a-z0-9-]{0,62}$, equal to the file name
+name: postgresql                 # a jail name (lowercase letters, digits and hyphens, starting with a letter), equal to the file name
 title: PostgreSQL                # one line, at most 80 characters
 summary: Relational database server, PostgreSQL 18 from the FreeBSD packages.   # one line, at most 140
 description: |                   # plain text paragraphs, no markup, at most 2000 characters
@@ -116,7 +116,7 @@ Rules the validator enforces, besides the sizes above:
   (`foo-bar` and `foo_bar`) are invalid.
 - `setup` and `health.exec` commands are argv with an absolute program path; there is no shell, no search path, no
   pipe. At most 32 setup commands.
-- Names of ports and logs are short slugs (`^[a-z][a-z0-9-]{0,31}$`); a port is unique per `port/proto`.
+- Names of ports and logs are short names (the name rule, at most 32 characters); a port is unique per `port/proto`.
 - `health.http.path` is an absolute request path; `status` defaults to 200. A definition may leave `health` out; the
   catalog does so only for an app that starts none of its services (`isms`: nothing runs to check until the
   operator has configured it).

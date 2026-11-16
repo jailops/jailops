@@ -242,12 +242,12 @@ func ParseEndpoint(s string) (kind EndpointKind, value string, err error) {
 		n := strings.TrimPrefix(s, "@")
 		return 0, "", fmt.Errorf("%q: @ is not used: write jail:%s, set:%s or tag:%s", s, n, n, n)
 	case strings.HasPrefix(s, "jail:"):
-		if !jailRefRE.MatchString(s[5:]) || strings.HasSuffix(s, "-") {
+		if !api.IsName(s[5:], MaxJailName) {
 			return 0, "", fmt.Errorf("jail reference %q is invalid: jail:NAME names a jail of the project", s)
 		}
 		return EndpointJail, s[5:], nil
 	case strings.HasPrefix(s, "set:"):
-		if !setNameRE.MatchString(s[4:]) {
+		if !api.IsName(s[4:], MaxSetName) {
 			return 0, "", fmt.Errorf("set reference %q is invalid: set:NAME names an address set of the project", s)
 		}
 		return EndpointSet, s[4:], nil

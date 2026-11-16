@@ -24,12 +24,12 @@ func TestFirewallTestWalksTheRenderedAnchors(t *testing.T) {
 		{Action: "allow", Direction: "in", Proto: "icmp", Comment: "ping and ICMP errors"}}})
 	startJailIn(t, e.Admin, dtest.WebJailOn("web", "lan"))
 	startJailIn(t, e.Admin, dtest.WebJailOn("other", "lan"))
-	if _, err := fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "postgresql_allow"},
+	if _, err := fw.AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "postgresql-allow"},
 		Spec: api.AddressSetSpec{Addresses: []api.AddressEntry{{Address: "jail:web", Comment: "the web jail"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	mk("postgres", api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{
-		{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:postgresql_allow"}, Ports: []string{"5432"}, Comment: "who may reach PostgreSQL"}}})
+		{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:postgresql-allow"}, Ports: []string{"5432"}, Comment: "who may reach PostgreSQL"}}})
 	p, err := e.Admin.Projects().Get(c, "alpha")
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +105,7 @@ func TestFirewallTestWalksTheRenderedAnchors(t *testing.T) {
 	}
 	// refusals say why
 	for _, bad := range []struct{ from, to, proto string }{
-		{"set:postgresql_allow", "jail:db", "tcp"}, {"jail:nosuch", "jail:db", "tcp"}, {"jail:web", "jail:db", "sctp"}, {"10.0.0.0/8", "jail:db", "tcp"}, {"host", "host", "tcp"},
+		{"set:postgresql-allow", "jail:db", "tcp"}, {"jail:nosuch", "jail:db", "tcp"}, {"jail:web", "jail:db", "sctp"}, {"10.0.0.0/8", "jail:db", "tcp"}, {"host", "host", "tcp"},
 	} {
 		if _, err := fw.Test(c, api.FirewallTestRequest{From: bad.from, To: bad.to, Proto: bad.proto, Port: 1}); err == nil {
 			t.Errorf("%+v was accepted", bad)

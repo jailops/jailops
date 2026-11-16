@@ -2,7 +2,7 @@ package priv
 
 import (
 	"context"
-	"regexp"
+	"jailops.net/jailops/sdk/api"
 	"strings"
 )
 
@@ -32,13 +32,11 @@ func delegationLines(conf string) string {
 // delegatedLeaf is the name of the dataset a jail may be handed: the child `delegated` of its container.
 const delegatedLeaf = "delegated"
 
-var delegateNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
-
 // delegatedDatasetNames are the names the delegated dataset of the jail with this key (`<project>_<name>`) can have:
 // one per storage root, because the helper does not know which storage the jail lives on.
 func (c Config) delegatedDatasetNames(key string) []string {
 	project, name, ok := strings.Cut(key, "_")
-	if !ok || !delegateNameRE.MatchString(project) || !delegateNameRE.MatchString(name) {
+	if !ok || !api.IsName(project, api.MaxName) || !api.IsName(name, api.MaxName) {
 		return nil
 	}
 	var out []string
@@ -57,7 +55,7 @@ func (c Config) isDelegatedDataset(name string) bool {
 		}
 		p := strings.Split(rel, "/")
 		if len(p) == 5 && p[0] == "projects" && p[2] == "jails" && p[4] == delegatedLeaf &&
-			delegateNameRE.MatchString(p[1]) && delegateNameRE.MatchString(p[3]) {
+			api.IsName(p[1], api.MaxName) && api.IsName(p[3], api.MaxName) {
 			return true
 		}
 	}

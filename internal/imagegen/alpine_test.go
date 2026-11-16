@@ -88,7 +88,7 @@ func TestAlpineBuildsFromTheMirrorAndRunsApkInAJail(t *testing.T) {
 	if got := string(w.Files.Data[root+"/etc/apk/repositories"]); got != "https://dl-cdn.alpinelinux.org/alpine/v3.22/main\nhttps://dl-cdn.alpinelinux.org/alpine/v3.22/community\n" {
 		t.Errorf("repositories %q", got)
 	}
-	if string(w.Files.Data[root+"/etc/resolv.conf"]) != "nameserver 192.0.2.53\n" {
+	if string(w.Files.Data[root+"/etc/resolv.conf"]) != "# written by JailOps\nnameserver 192.0.2.53\n" {
 		t.Errorf("resolv.conf %q", w.Files.Data[root+"/etc/resolv.conf"])
 	}
 }

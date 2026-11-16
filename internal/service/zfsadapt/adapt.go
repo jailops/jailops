@@ -8,6 +8,7 @@ import (
 	"context"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -126,6 +127,25 @@ func (a *Adapter) Snapshots(ctx context.Context, dataset string) ([]string, erro
 	for _, d := range l {
 		if ds, sn := zfs.SplitSnapshot(d.Name); ds == dataset && sn != "" {
 			out = append(out, sn)
+		}
+	}
+	return out, nil
+}
+
+// SnapshotTimes gives the creation time of each snapshot of a dataset, by short name.
+func (a *Adapter) SnapshotTimes(ctx context.Context, dataset string) (map[string]time.Time, error) {
+	l, err := a.C.List(ctx, zfs.ListOpts{Root: dataset, Types: []string{"snapshot"}, Depth: 1, Props: []string{"creation"}})
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]time.Time{}
+	for _, d := range l {
+		ds, sn := zfs.SplitSnapshot(d.Name)
+		if ds != dataset || sn == "" {
+			continue
+		}
+		if sec, err := strconv.ParseInt(d.Props["creation"], 10, 64); err == nil && sec > 0 {
+			out[sn] = time.Unix(sec, 0).UTC()
 		}
 	}
 	return out, nil

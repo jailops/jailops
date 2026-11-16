@@ -153,7 +153,7 @@ func TestARuleNamesAJail(t *testing.T) {
 	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "w1"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.77")}}); err != nil {
 		t.Fatalf("a set named like a jail was refused: %v", err)
 	}
-	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "lab_1"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.79")}}); err != nil {
+	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "lab-1"}, Spec: api.AddressSetSpec{Addresses: api.Entries("192.0.2.79")}}); err != nil {
 		t.Fatal(err)
 	}
 	if op, err := e.Admin.Jails().Create(c, dtest.WebJailOn("lab-1", "lan")); err != nil {
@@ -175,7 +175,7 @@ func TestAnAddressSetHoldsJails(t *testing.T) {
 		t.Fatal(err)
 	}
 	addr := w1.Spec.Network[0].IPv4
-	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "git_allow"},
+	if _, err := e.Admin.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "git-allow"},
 		Spec: api.AddressSetSpec{Addresses: []api.AddressEntry{{Address: "192.0.2.7", Comment: "the office"}, {Address: "jail:w1"}}}}); err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestAnAddressSetHoldsJails(t *testing.T) {
 		t.Fatal("a member that is a set that does not exist was accepted")
 	}
 	if _, err := e.Admin.Firewall().Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "git"},
-		Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:git_allow"}, Ports: []string{"22"}}}}}); err != nil {
+		Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:git-allow"}, Ports: []string{"22"}}}}}); err != nil {
 		t.Fatal(err)
 	}
 	db := dtest.WebJailOn("g1", "lan")
@@ -206,20 +206,20 @@ func TestAnAddressSetHoldsJails(t *testing.T) {
 	if err == nil {
 		_, err = rop.Wait(c)
 	}
-	if err == nil || !strings.Contains(err.Error(), "git_allow") {
+	if err == nil || !strings.Contains(err.Error(), "git-allow") {
 		t.Fatalf("a jail that a set names was renamed, or refused without naming the set: %v", err)
 	}
 	// a jail that a set names is not deleted behind the set's back either
-	if _, err := e.Admin.Jails().Delete(c, "w1"); err == nil || !strings.Contains(err.Error(), "git_allow") {
+	if _, err := e.Admin.Jails().Delete(c, "w1"); err == nil || !strings.Contains(err.Error(), "git-allow") {
 		t.Fatalf("a jail that a set names was deleted, or the refusal does not name the set: %v", err)
 	}
 	// the reference is removed, the jail goes: the rule of the policy still renders and now matches only the office
-	gs, err := e.Admin.Firewall().AddressSets().Get(c, "git_allow")
+	gs, err := e.Admin.Firewall().AddressSets().Get(c, "git-allow")
 	if err != nil {
 		t.Fatal(err)
 	}
 	gs.Spec.Addresses = api.Entries("192.0.2.7")
-	if _, err := e.Admin.Firewall().AddressSets().Update(c, "git_allow", gs, ""); err != nil {
+	if _, err := e.Admin.Firewall().AddressSets().Update(c, "git-allow", gs, ""); err != nil {
 		t.Fatal(err)
 	}
 	dop, err := e.Admin.Jails().Delete(c, "w1")

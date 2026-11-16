@@ -43,9 +43,7 @@ const (
 )
 
 var (
-	imageRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
-	aliasRe = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,31}$`)
-	genRe   = regexp.MustCompile(`^g([0-9]+)$`)
+	genRe = regexp.MustCompile(`^g([0-9]+)$`)
 )
 
 // GenerationName is "<image>#g<N>".
@@ -62,14 +60,14 @@ type Ref struct {
 // ParseRef parses an image reference.
 func ParseRef(s string) (Ref, error) {
 	if img, a, ok := strings.Cut(s, "@"); ok {
-		if !imageRe.MatchString(img) || !aliasRe.MatchString(a) {
+		if !validImage(img) || !validAlias(a) {
 			return Ref{}, api.Errorf(api.CodeInvalid, "bad image reference %q", s)
 		}
 		return Ref{Image: img, Alias: a}, nil
 	}
 	if img, g, ok := strings.Cut(s, "#"); ok {
 		m := genRe.FindStringSubmatch(g)
-		if !imageRe.MatchString(img) || m == nil {
+		if !validImage(img) || m == nil {
 			return Ref{}, api.Errorf(api.CodeInvalid, "bad image reference %q", s)
 		}
 		n, err := strconv.Atoi(m[1])
@@ -78,7 +76,7 @@ func ParseRef(s string) (Ref, error) {
 		}
 		return Ref{Image: img, Gen: n}, nil
 	}
-	if !imageRe.MatchString(s) {
+	if !validImage(s) {
 		return Ref{}, api.Errorf(api.CodeInvalid, "bad image reference %q", s)
 	}
 	return Ref{Image: s}, nil
@@ -116,3 +114,7 @@ func (l Layout) GenMount(image string, n int) string {
 func (l Layout) StagingMount(image string, n int) string {
 	return fmt.Sprintf("%s/images/%s/staging-g%d", l.MountBase, image, n)
 }
+
+// validImage and validAlias follow api.NamePattern (an alias has at most 32 characters).
+func validImage(s string) bool { return api.IsName(s, api.MaxName) }
+func validAlias(s string) bool { return api.IsName(s, 32) }

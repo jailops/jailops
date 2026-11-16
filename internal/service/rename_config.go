@@ -486,9 +486,9 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 			return nil, err
 		}
 		for _, pol := range pols {
-			if strings.Contains(pol.Spec.Raw, "s_"+name) {
+			if strings.Contains(pol.Spec.Raw, validate.SetTable(name)) {
 				return nil, api.Errorf(api.CodeConflict, "the raw PF fragment of firewall policy %q mentions the table of address set %q", pol.Meta.Name, name).
-					WithHint("a raw fragment is not rewritten: change it to the new table name <s_" + to + "> after the rename, or remove it first")
+					WithHint("a raw fragment is not rewritten: change it to the new table name <" + validate.SetTable(to) + "> after the rename, or remove it first")
 			}
 			spec := pol.Spec
 			spec.Rules = slices.Clone(pol.Spec.Rules)

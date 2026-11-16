@@ -98,6 +98,9 @@ type Files interface {
 	HealJail(ctx context.Context, jail string) (mounts.Healed, error)
 	// HealNetwork destroys the interfaces of the earlier network layout that no jail that runs uses.
 	HealNetwork(ctx context.Context) (mounts.NetHealed, error)
+	// DNSUnbound writes the names of the running jails for the host's unbound and has it read them again (apply), or
+	// only reports; a daemon without the helper, or a helper without unbound-conf, reports Enabled false.
+	DNSUnbound(ctx context.Context, apply bool) (mounts.UnboundState, error)
 	// CopyTree copies a directory tree preserving ownership, modes and flags.
 	// UNVERIFIED: flags, ACLs and extended attributes on FreeBSD.
 	CopyTree(ctx context.Context, src, dst string) error

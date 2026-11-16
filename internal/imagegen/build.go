@@ -362,7 +362,7 @@ func (m *Manager) buildPlan(b *Build, src Source, srcSteps []plan.Step, st *buil
 
 // SetAlias moves an alias to an existing generation (for example "stable").
 func (m *Manager) SetAlias(ctx context.Context, image, alias string, n int) error {
-	if !aliasRe.MatchString(alias) {
+	if !validAlias(alias) {
 		return api.Errorf(api.CodeInvalid, "bad alias %q", alias)
 	}
 	o, err := m.Observe(ctx, image)
