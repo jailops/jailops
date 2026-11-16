@@ -40,20 +40,10 @@ JailOps writes a jail's `/etc/resolv.conf` when the jail starts, with the namese
 2. else the host's own nameservers in `/etc/resolv.conf` that a jail can reach (not loopback, not link-local; at most
    three; the host's `search` line is not copied). The jails reach them through the network's NAT or routing;
 3. else, when the host resolves only through loopback (`nameserver 127.0.0.1`, typically the base system's unbound),
-   the network's **gateway address**, the host's own address on every jail's link. JailOps changes nothing on the host: the
-   gateway answers once the resolver listens there. For the base system's unbound (`local_unbound`) a file
-   `/var/unbound/conf.d/jails.conf`, here for a network with the gateway 10.77.0.1:
-
-       server:
-           interface: 127.0.0.1
-           interface: ::1
-           interface: 10.77.0.1
-           ip-transparent: yes
-           access-control: 10.77.0.0/24 allow
-
-   then `service local_unbound restart`. `interface` lines replace unbound's default (loopback only), so loopback is
-   listed too; `ip-transparent` lets unbound bind the gateway address at boot, before JailOps has made the network
-   (checked across a reboot of a FreeBSD 15.2 host). A jail whose firewall policy denies outgoing traffic needs a rule
+   the network's **gateway address**, the host's own address on every jail's link. With the base system's resolver
+   (`local_unbound`) that is all it takes: `jailops-setup` enables it and the helper writes the one file it needs under
+   `/var/unbound/conf.d` (the gateway addresses it listens on, the subnets it answers and the names of the jails); see
+   [dns.md](dns.md). A jail whose firewall policy denies outgoing traffic needs a rule
    for udp and tcp port 53 to the gateway, and a host `pf.conf` that blocks traffic to the host itself a pass rule for it
    on the jails' interfaces (the interface group `epair`). With `block log all` and `set skip on lo0` nothing more was needed on the
    test host.

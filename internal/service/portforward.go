@@ -141,7 +141,8 @@ func (s *Service) checkRedirectRules(ctx context.Context, spec api.FirewallPolic
 			return false
 		}
 		for _, o := range was.Rules {
-			if o.Redirect != nil && *o.Redirect == *r.Redirect && o.Proto == r.Proto && slices.Equal(o.From, r.From) {
+			// enabling a forward that was stored disabled is publishing a host port: that is the global administrator's
+			if o.Redirect != nil && *o.Redirect == *r.Redirect && o.Proto == r.Proto && slices.Equal(o.From, r.From) && (!o.Disabled || r.Disabled) {
 				return true
 			}
 		}

@@ -29,6 +29,7 @@ web:                                  # the management API and web console: in t
 
 grace: 24h                            # garbage collection grace period (minimum 12h)
 deletion_delay: 72h                   # default delay of a deletion request
+# host_quota: 500G                    # the most one host may have stored on the node (default: no limit)
 
 retention:                            # the default policy for groups without their own
   daily: 14

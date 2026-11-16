@@ -17,6 +17,9 @@ import (
 // The escrow blob is the master key wrapped to offline recovery recipients. It
 // is not secret (only the holder of a recovery identity can open it) and the
 // node cannot read it; it stores it create-only next to the data it protects.
+//
+// Every host has a slot of its own, escrow/<domain>/<host id>.age, named by the host identity the node authenticated:
+// a host can neither take the place of another host's blob nor overwrite it, and what a host reads back is its own.
 
 const (
 	escrowDir = "escrow/"
@@ -28,17 +31,33 @@ const (
 // ageHeader starts every binary age file with at least one recipient stanza; the hosts write only this form.
 const ageHeader = "age-encryption.org/v1\n-> "
 
-func escrowKey(domain string) string { return escrowDir + domain + escrowExt }
+func escrowKey(domain, host string) string { return escrowDir + domain + "/" + host + escrowExt }
 
-// PutEscrow stores the escrow blob of a key domain, create-only. The same bytes
-// again are a success; other bytes for an existing domain are refused (a host
-// cannot replace the escrow of a key).
+// validSlot reports whether a host id can name a slot (the node generates ids; this keeps a path out of the key).
+func validSlot(id string) bool {
+	if id == "" || len(id) > 64 {
+		return false
+	}
+	for _, c := range id {
+		if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+
+// PutEscrow stores the escrow blob of a key domain in the slot of host h, create-only. The same bytes
+// again are a success; other bytes for an existing slot are refused (a host
+// cannot replace its escrow of a key).
 func (n *Node) PutEscrow(ctx context.Context, h Host, domain string, r io.Reader, size int64) error {
 	if !format.ValidDomainID(domain) {
 		return errf(api.CodeInvalid, "malformed key domain id")
 	}
 	if err := n.requireOnline(); err != nil {
 		return err
+	}
+	if !validSlot(h.ID) {
+		return errf(api.CodeInvalid, "malformed host identity")
 	}
 	if size <= 0 || size > MaxEscrowBytes {
 		return errf(api.CodeInvalid, "an escrow blob has between 1 and %d bytes", MaxEscrowBytes)
@@ -59,24 +78,24 @@ func (n *Node) PutEscrow(ctx context.Context, h Host, domain string, r io.Reader
 	if err := n.bindDomain(ctx, domain); err != nil {
 		return err
 	}
-	err := datastore.PutBytes(ctx, n.be, escrowKey(domain), b, datastore.PutOptions{IfAbsent: true})
+	err := datastore.PutBytes(ctx, n.be, escrowKey(domain, h.ID), b, datastore.PutOptions{IfAbsent: true})
 	switch {
 	case err == nil:
 		n.audit(ctx, "host:"+h.Name, "escrow.put", domain, nil, "")
 		return nil
 	case errors.Is(err, datastore.ErrExists):
-		cur, rerr := datastore.ReadAll(ctx, n.be, escrowKey(domain), MaxEscrowBytes)
+		cur, rerr := datastore.ReadAll(ctx, n.be, escrowKey(domain, h.ID), MaxEscrowBytes)
 		if rerr == nil && bytes.Equal(cur, b) {
 			return nil
 		}
-		return errf(api.CodeAlreadyExists, "an escrow blob exists for key domain %s", domain)
+		return errf(api.CodeAlreadyExists, "this host already stored a different escrow blob for key domain %s", domain)
 	}
 	return asAPIError(err)
 }
 
-// DeleteEscrow removes the escrow blob of a key domain: an administrator's remedy for a blob that does not open
-// with the recovery identity (a host of the key domain may have stored a wrong one first). A host then stores a
-// new one with PutEscrow, which is create-only as before. The repository stays bound to its key domain.
+// DeleteEscrow removes the escrow blobs of a key domain, every host's: an administrator's remedy for a blob that
+// does not open with the recovery identity. Each host then stores a new one with PutEscrow, which is create-only as
+// before. The repository stays bound to its key domain.
 func (n *Node) DeleteEscrow(ctx context.Context, domain, actor, remote string) error {
 	if !format.ValidDomainID(domain) {
 		return errf(api.CodeInvalid, "malformed key domain id")
@@ -84,36 +103,52 @@ func (n *Node) DeleteEscrow(ctx context.Context, domain, actor, remote string) e
 	if err := n.requireOnline(); err != nil {
 		return err
 	}
-	if _, err := n.be.Head(ctx, escrowKey(domain)); errors.Is(err, datastore.ErrNotFound) {
-		return errf(api.CodeNotFound, "no escrow blob for key domain %s", domain)
-	} else if err != nil {
+	var keys []string
+	err := n.be.List(ctx, escrowDir+domain+"/", func(o datastore.ObjectInfo) error {
+		keys = append(keys, o.Key)
+		return nil
+	})
+	if err != nil {
 		return asAPIError(err)
 	}
-	if err := n.be.Delete(ctx, escrowKey(domain)); err != nil {
-		return asAPIError(err)
+	if len(keys) == 0 {
+		return errf(api.CodeNotFound, "no escrow blob for key domain %s", domain)
+	}
+	for _, k := range keys {
+		if err := n.be.Delete(ctx, k); err != nil {
+			return asAPIError(err)
+		}
 	}
 	n.audit(ctx, actor, "escrow.delete", domain, nil, remote)
 	return nil
 }
 
-// GetEscrow returns the escrow blob of a key domain.
-func (n *Node) GetEscrow(ctx context.Context, domain string) ([]byte, error) {
+// GetEscrow returns the escrow blob host h stored for a key domain.
+func (n *Node) GetEscrow(ctx context.Context, h Host, domain string) ([]byte, error) {
 	if !format.ValidDomainID(domain) {
 		return nil, errf(api.CodeInvalid, "malformed key domain id")
 	}
-	b, err := datastore.ReadAll(ctx, n.be, escrowKey(domain), MaxEscrowBytes)
+	if !validSlot(h.ID) {
+		return nil, errf(api.CodeInvalid, "malformed host identity")
+	}
+	b, err := datastore.ReadAll(ctx, n.be, escrowKey(domain, h.ID), MaxEscrowBytes)
 	if err != nil {
 		return nil, asAPIError(err)
 	}
 	return b, nil
 }
 
-// ListEscrow lists the key domains that have an escrow blob.
-func (n *Node) ListEscrow(ctx context.Context) ([]string, error) {
+// ListEscrow lists the key domains that have an escrow blob: the ones host h stored, or, for host "" (the
+// administrator), every domain that has one.
+func (n *Node) ListEscrow(ctx context.Context, host string) ([]string, error) {
 	out := []string{}
+	seen := map[string]bool{}
 	err := n.be.List(ctx, escrowDir, func(o datastore.ObjectInfo) error {
-		d := strings.TrimSuffix(strings.TrimPrefix(o.Key, escrowDir), escrowExt)
-		if format.ValidDomainID(d) && escrowKey(d) == o.Key {
+		rest := strings.TrimPrefix(o.Key, escrowDir)
+		d, slot, ok := strings.Cut(rest, "/")
+		slot = strings.TrimSuffix(slot, escrowExt)
+		if ok && format.ValidDomainID(d) && escrowKey(d, slot) == o.Key && (host == "" || slot == host) && !seen[d] {
+			seen[d] = true
 			out = append(out, d)
 		}
 		return nil
@@ -141,7 +176,7 @@ func (n *Node) hPutEscrow(w http.ResponseWriter, r *http.Request, h Host) {
 }
 
 func (n *Node) hGetEscrow(w http.ResponseWriter, r *http.Request, h Host) {
-	b, err := n.GetEscrow(r.Context(), r.PathValue("domain"))
+	b, err := n.GetEscrow(r.Context(), h, r.PathValue("domain"))
 	if err != nil {
 		writeErr(w, err)
 		return
@@ -153,7 +188,11 @@ func (n *Node) hGetEscrow(w http.ResponseWriter, r *http.Request, h Host) {
 }
 
 func (n *Node) hListEscrow(w http.ResponseWriter, r *http.Request, h Host) {
-	d, err := n.ListEscrow(r.Context())
+	if !validSlot(h.ID) {
+		writeErr(w, errf(api.CodeInvalid, "malformed host identity"))
+		return
+	}
+	d, err := n.ListEscrow(r.Context(), h.ID)
 	if err != nil {
 		writeErr(w, err)
 		return

@@ -2131,7 +2131,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "boot.stop_timeout",
     "type": "int",
-    "description": "Seconds the jail has to shut down by itself, after its stop command, before it is killed; 0 is the system's ten seconds. A database that needs a minute to close says 60. Written into the jail's configuration at its start.",
+    "description": "Seconds the jail has to shut down by itself, after its stop command, before it is killed; 0 is the default of thirty seconds. A database that needs a minute to close says 60. Written into the jail's configuration at its start.",
     "example": "60",
     "restart_required": true,
     "profile": true,

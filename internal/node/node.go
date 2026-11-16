@@ -76,6 +76,12 @@ type Config struct {
 	RetentionSafety time.Duration
 	// MaxOpenSessions bounds the memory held by sessions (default 64).
 	MaxOpenSessions int
+	// MaxSessionsPerHost bounds the sessions one host may hold open at once (default 8), so that one host cannot keep
+	// the others from backing up.
+	MaxSessionsPerHost int
+	// HostQuota bounds the bytes one host may have stored on the node (0 = no limit); a chunk that would pass it is
+	// refused with quota_exceeded.
+	HostQuota int64
 	// Parallelism bounds concurrent backend requests of one operation (default 32).
 	Parallelism int
 	// Audit is called after every administrative action, in addition to the audit table.
@@ -177,6 +183,9 @@ func Open(ctx context.Context, cfg Config) (*Node, error) {
 	}
 	if n.cfg.DeletionDelay <= 0 {
 		n.cfg.DeletionDelay = DefaultDeletionDelay
+	}
+	if n.cfg.MaxSessionsPerHost <= 0 {
+		n.cfg.MaxSessionsPerHost = 8
 	}
 	if n.cfg.MaxOpenSessions <= 0 {
 		n.cfg.MaxOpenSessions = 64

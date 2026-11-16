@@ -159,10 +159,9 @@ Two things to know about a host that already has a firewall:
   `rc.conf`, else `/etc/pf.conf`) lacks it. Because states are bound to interfaces, a host that blocks by default
   needs a rule that lets the jails' traffic out of the uplink (`pass out on vtnet0 keep state`) as it does for any
   other machine it forwards for.
-- **DNS for the jails.** A network without `dns` hands its jails the host's own nameservers from `/etc/resolv.conf`.
-  A host that resolves only through a local unbound (`nameserver 127.0.0.1`) hands them the network's gateway address
-  instead, and unbound has to listen there: the lines are in
-  [networking-ipv6.md](networking-ipv6.md#name-resolution-of-jails), and `jailops network create` prints them.
+- **DNS for the jails.** `jailops-setup` enables the base system's resolver (`local_unbound`), and the jails get names
+  (`db.shop.internal`) and the host's nameservers through it with nothing to write by hand: see [dns.md](dns.md). A
+  network that names nameservers of its own (`jailops network edit`, `dns:`) keeps them.
 - **Traffic from the internet into a jail** is stopped by a host whose `pf.conf` blocks inbound traffic on the uplink by
   default. JailOps does not open the uplink for you: admit the addresses of the jails, and only the ports you want,
   with a rule of your own. The jail's anchor still applies afterwards (its policy decides what reaches the jail), so

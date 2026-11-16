@@ -337,7 +337,7 @@ func (n *Node) aQuarantineChunk(w http.ResponseWriter, r *http.Request, a Actor)
 }
 
 func (n *Node) aEscrowList(w http.ResponseWriter, r *http.Request, a Actor) {
-	d, err := n.ListEscrow(r.Context())
+	d, err := n.ListEscrow(r.Context(), "")
 	if err != nil {
 		writeErr(w, err)
 		return

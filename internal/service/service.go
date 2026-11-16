@@ -213,6 +213,10 @@ type Deps struct {
 
 // Service implements the business logic.
 type Service struct {
+	// backupFails is the last failed scheduled backup of each policy and jail (cleared by the next one that works); the
+	// doctor says what failed.
+	backupMu    sync.Mutex
+	backupFails map[string]backupFailure
 	// racctAt and racctVal keep the last answer of the kern.racct.enable sysctl (see racctOn); guarded by mu.
 	racctAt   time.Time
 	racctVal  bool

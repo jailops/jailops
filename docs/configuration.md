@@ -106,7 +106,7 @@ The rc scripts read these from `/etc/rc.conf` (set them with `sysrc`); a change 
 
 The backup node. It needs PostgreSQL (its control plane), a datastore (a directory or an S3 bucket) and a certificate.
 The sample `packaging/backupd.yaml` is annotated: `hostname`, `listen` (default `:39111`), `admin_socket` (mode 0600, root only; the former `admin_group` key is removed and stops the node at start), `tls`,
-`database.dsn_file`, `datastore` (`directory` or `s3`), `web`, `grace`, `deletion_delay`, `retention`, `schedule`.
+`database.dsn_file`, `datastore` (`directory` or `s3`), `web`, `grace`, `deletion_delay`, `host_quota` (the most one host may have stored, such as `500G`; unset = no limit), `retention`, `schedule`.
 `jailops-backupd -c FILE init` creates the repository and the certificate and prints the fingerprint that hosts pin.
 
 ## The client file

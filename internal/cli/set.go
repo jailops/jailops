@@ -22,7 +22,7 @@ import (
 func addSet[T any](a *app, parent *cobra.Command, d *kindDesc[T], flagBuild func(*cobra.Command) func(string) (T, error)) {
 	cmd := &cobra.Command{
 		Use:   "set NAME",
-		Short: "Change attributes of " + article(d.noun) + " " + d.noun,
+		Short: "Change attributes of " + article(d.noun) + " " + d.noun + setHint(d.noun),
 		Long: `Change attributes of ` + article(d.noun) + ` ` + d.noun + ` with the flags of create: only the flags you give change
 anything. A list flag replaces the whole list, and an empty value clears it; --env and --label add to the
 stored ones (remove one with 'jailops config unset'). The
@@ -335,4 +335,12 @@ func dropEmpty(l []string) []string {
 		}
 	}
 	return out
+}
+
+// setHint says, for a jail, how this command differs from the short 'jailops set'.
+func setHint(noun string) string {
+	if noun == "jail" {
+		return " with the flags of create (a configuration key by name is 'jailops set NAME KEY VALUE')"
+	}
+	return ""
 }

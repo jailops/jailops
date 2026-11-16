@@ -129,11 +129,16 @@ What a host of the group can do to the others, and what the node does about it:
   restore do, because they decrypt and recompute the id. The remedy is on the node: `jailops-backupd quarantine add CHUNK`
   (the id from the host's error) moves the blob aside, and the next backup that holds the chunk uploads it again. Run deep
   verification from a host on a schedule; an untested backup is not a backup.
-- **Store a wrong escrow blob.** The node accepts only an age file (it checks the header, it cannot open it), create-only, so
-  the first host to escrow a domain decides what is stored, and `jailops backup key status` on the others says "escrowed".
-  Open the escrow blob with the recovery identity once, offline, after it is made. A blob that does not open is deleted by
-  an administrator of the node (`jailops-backupd escrow delete DOMAIN`, or `DELETE /api/v1/escrow/{domain}` as
-  `backup-admin`), and a host stores a new one with `jailops backup key escrow`.
+- **Store a wrong escrow blob.** The node accepts only an age file (it checks the header, it cannot open it), create-only,
+  and every host has an escrow slot of its own: what a host stores can be neither replaced nor pre-empted by another
+  host, and `jailops backup key status` on a host says "escrowed" only for the blob that host stored. Open the escrow
+  blob with the recovery identity once, offline, after it is made. A blob that does not open is deleted by an
+  administrator of the node (`jailops-backupd escrow delete DOMAIN` removes the blobs of every host, or
+  `DELETE /api/v1/escrow/{domain}` as `backup-admin`), and each host stores a new one with `jailops backup key escrow`.
+
+A host can also be given a limit: `host_quota: 500G` in `backupd.yaml` caps what one host has stored on the node (what
+its open sessions and its retained snapshots uploaded). A chunk over the limit is refused with `quota_exceeded`; the
+default is no limit.
 
 Both remedies are audited. Making the node itself refuse a wrong chunk would need a change of the repository format (a
 proof per chunk that the node can check without the key, or one chunk namespace per host at the cost of deduplication

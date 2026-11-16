@@ -230,7 +230,7 @@ type BootPolicy struct {
 	Priority  int      `json:"priority,omitempty"`
 	Depends   []string `json:"depends,omitempty"`
 	// StopTimeout is how many seconds the jail has to shut down by itself before it is killed (jail(8) stop.timeout);
-	// zero is jail(8)'s own default of ten seconds.
+	// zero is DefaultStopTimeout.
 	StopTimeout int `json:"stop_timeout,omitempty"`
 }
 

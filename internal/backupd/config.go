@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -49,6 +50,8 @@ type Config struct {
 	Grace Duration `yaml:"grace"`
 	// Lease is the session lease (default 15m).
 	Lease Duration `yaml:"lease"`
+	// HostQuota is the most one host may have stored on the node ("500G"; empty = no limit).
+	HostQuota string `yaml:"host_quota"`
 	// DeletionDelay is the default delay of a deletion request (default 72h).
 	DeletionDelay Duration `yaml:"deletion_delay"`
 	// Retention is the default policy for groups without their own.
@@ -214,6 +217,11 @@ func (c *Config) defaults() {
 
 // Validate checks the configuration without touching the network.
 func (c *Config) Validate() error {
+	if c.HostQuota != "" {
+		if _, err := c.hostQuota(); err != nil {
+			return fmt.Errorf("backupd: host_quota %q is not a size such as 500G", c.HostQuota)
+		}
+	}
 	if c.Web.Listen != "" {
 		return errors.New("backupd: web.listen was removed: the management API and the console are served on listen (default :39111), next to the host API; delete web.listen")
 	}
@@ -328,4 +336,31 @@ func (c *Config) DSN() (string, error) {
 		return "", err
 	}
 	return strings.TrimSpace(string(b)), nil
+}
+
+// hostQuota is host_quota in bytes: "500G", "2T", "100M" or plain bytes (binary units); 0 when unset.
+func (c *Config) hostQuota() (int64, error) {
+	t := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSpace(c.HostQuota), "B"), "i")
+	if t == "" {
+		return 0, nil
+	}
+	mult := int64(1)
+	switch t[len(t)-1] {
+	case 'K', 'k':
+		mult = 1 << 10
+	case 'M', 'm':
+		mult = 1 << 20
+	case 'G', 'g':
+		mult = 1 << 30
+	case 'T', 't':
+		mult = 1 << 40
+	}
+	if mult != 1 {
+		t = t[:len(t)-1]
+	}
+	n, err := strconv.ParseInt(t, 10, 64)
+	if err != nil || n <= 0 || n > (1<<62)/mult {
+		return 0, fmt.Errorf("invalid size %q", c.HostQuota)
+	}
+	return n * mult, nil
 }

@@ -92,7 +92,7 @@ func TestEscrowIsAnAgeFileAndAnAdminCanDeleteIt(t *testing.T) {
 	if err := e.Node.PutEscrow(ctx, h, d, bytes.NewReader(good), int64(len(good))); err != nil {
 		t.Fatalf("a new blob after the delete: %v", err)
 	}
-	if got, _ := e.Node.GetEscrow(ctx, d); !bytes.Equal(got, good) {
+	if got, _ := e.Node.GetEscrow(ctx, h, d); !bytes.Equal(got, good) {
 		t.Fatalf("%q", got)
 	}
 	if got := e.Node.Info().KeyDomain; got != d {

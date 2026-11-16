@@ -85,10 +85,18 @@ func (n *Node) BeginWith(ctx context.Context, h Host, req wire.BeginRequest) (*S
 		}
 	}
 	n.pinMu.Lock()
-	open := len(n.sessions)
+	open, mine := len(n.sessions), 0
+	for _, x := range n.sessions {
+		if x.host == h.ID {
+			mine++
+		}
+	}
 	n.pinMu.Unlock()
 	if open >= n.cfg.MaxOpenSessions {
 		return nil, errf(api.CodeBusy, "the node has too many open sessions").WithHint("retry later")
+	}
+	if mine >= n.cfg.MaxSessionsPerHost { // one host cannot take every session of the node
+		return nil, errf(api.CodeBusy, "this host has too many open sessions").WithHint("finish or abandon some of them, or retry later")
 	}
 	if _, err := n.be.Head(ctx, snapPrefix(group, snapshot)+fileCommit); err == nil {
 		return nil, errf(api.CodeAlreadyExists, "snapshot %s is already committed", snapshot)
@@ -321,6 +329,16 @@ func (n *Node) PutChunk(ctx context.Context, h Host, sid string, id format.ID, r
 	}
 	if err := n.touch(ctx, s, 0, 0); err != nil {
 		return nil, err
+	}
+	if q := n.cfg.HostQuota; q > 0 {
+		used, uerr := n.db.HostUsage(ctx, h.ID)
+		if uerr != nil {
+			return nil, asAPIError(uerr)
+		}
+		if used+size > q {
+			return nil, errf(api.CodeQuotaExceeded, "host %s has stored %d of its %d bytes", h.Name, used, q).
+				WithHint("remove old snapshots of this host, or raise host_quota in the node configuration")
+		}
 	}
 	n.gcMu.RLock()
 	defer n.gcMu.RUnlock()

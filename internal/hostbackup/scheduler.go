@@ -329,6 +329,9 @@ func (s *Service) finishJob(jo job, started time.Time, attempt int, err error) {
 		return
 	}
 	st.inflight = false
+	if n := s.cfg.Notify; n != nil && errCode(err) != api.CodeBusy && errCode(err) != api.CodeMaintenance {
+		defer n(jo.policy.Metadata.Project, jo.policy.Metadata.Name, jo.jail.Name, err)
+	}
 	nextSlot := func() {
 		st.attempt = 0
 		if t, ok := s.nextFire(st.spec, now, jo.jail.UUID, jo.policy.Metadata.Name); ok {

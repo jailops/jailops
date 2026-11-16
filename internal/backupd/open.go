@@ -97,7 +97,8 @@ func (c *Config) OpenDB(ctx context.Context) (*ctl.DB, error) {
 
 // NodeConfig builds the node configuration for an opened backend and database.
 func (c *Config) NodeConfig(b datastore.Backend, db *ctl.DB, adopt bool) node.Config {
-	return node.Config{Backend: b, DB: db, ServerID: c.ServerID, Hostname: c.Hostname, Adopt: adopt, Lease: time.Duration(c.Lease), Grace: time.Duration(c.Grace),
+	quota, _ := c.hostQuota() // Validate checked it
+	return node.Config{HostQuota: quota, Backend: b, DB: db, ServerID: c.ServerID, Hostname: c.Hostname, Adopt: adopt, Lease: time.Duration(c.Lease), Grace: time.Duration(c.Grace),
 		DeletionDelay: time.Duration(c.DeletionDelay), RetentionDefault: c.Retention.Policy(), RetentionTimezone: c.Retention.Timezone}
 }
 
