@@ -1888,10 +1888,10 @@ if [ "$part" != pf ]; then
 	check "stop it" $J stop stale1 --project demo
 	stale_mounts
 	expect "two stacked devfs are there" '^2$' devfs_layers
-	expect "doctor names them" 'mounts\.leftovers +WARN' $J doctor
-	check "doctor --fix --dry-run lists what it would do" $J doctor --fix --dry-run
+	expect "doctor names them" 'mounts\.leftovers +WARN' sh -c "$J doctor 2>&1; true" # the exit status is the verdict of every check: a CI host may fail others
+	check "doctor --fix --dry-run lists what it would do" sh -c "$J doctor --fix --dry-run 2>&1; true"
 	expect "and does nothing" '^2$' devfs_layers
-	check "doctor --fix takes them off" $J doctor --fix
+	check "doctor --fix takes them off" sh -c "$J doctor --fix 2>&1; true"
 	expect "no devfs is left" '^0$' devfs_layers
 	stale_mounts
 	check "the next stop takes them off" $J stop stale1 --project demo
