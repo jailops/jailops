@@ -224,7 +224,7 @@ func (d *DB) AuditLog(ctx context.Context, actionPrefix string, limit int, befor
 		beforeID = 1 << 62
 	}
 	rows, err := d.pool.Query(ctx, `SELECT id, at, actor, action, target, detail, remote FROM audit
-		WHERE id < $3 AND action LIKE $1 || '%' ORDER BY id DESC LIMIT $2`, actionPrefix, limit, beforeID)
+		WHERE id < $3 AND starts_with(action, $1) ORDER BY id DESC LIMIT $2`, actionPrefix, limit, beforeID)
 	if err != nil {
 		return nil, err
 	}

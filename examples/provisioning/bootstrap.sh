@@ -52,24 +52,19 @@ sysrc -f /boot/loader.conf if_epair_load=YES nullfs_load=YES pf_load=YES >/dev/n
 
 step "packages"
 if [ -n "${JAILOPS_PKG_DIR:-}" ]; then
-	# shellcheck disable=SC2046
-	pkg add $(ls "$JAILOPS_PKG_DIR"/jailops-client-*.pkg "$JAILOPS_PKG_DIR"/jailops-[0-9]*.pkg) || \
-		pkg add -f $(ls "$JAILOPS_PKG_DIR"/jailops-client-*.pkg "$JAILOPS_PKG_DIR"/jailops-[0-9]*.pkg)
+	pkg add "$JAILOPS_PKG_DIR"/jailops-client-*.pkg "$JAILOPS_PKG_DIR"/jailops-[0-9]*.pkg || \
+		pkg add -f "$JAILOPS_PKG_DIR"/jailops-client-*.pkg "$JAILOPS_PKG_DIR"/jailops-[0-9]*.pkg
 else
 	pkg install -y jailops
 fi
 if [ -n "$fleet_repo" ]; then pkg install -y git; fi
 
-step "pf: the three anchor lines (JailOps never owns pf.conf)"
+step "pf: the anchor line (JailOps never owns pf.conf)"
 touch /etc/pf.conf
 if ! grep -q 'anchor "jailops/\*"' /etc/pf.conf; then
-	# nat-anchor and rdr-anchor belong with the translation rules, anchor with the filter rules; with no other rules
-	# in the file the order below is the right one. If you already have a pf.conf, put the lines where install.md says.
-	cat >> /etc/pf.conf <<'PF'
-nat-anchor "jailops/*"
-rdr-anchor "jailops/*"
-anchor "jailops/*"
-PF
+	# The anchors hold the filter rules and the translation of the jails; with no other rules in the file the line
+	# can go last. If you already have a pf.conf, put it where install.md says.
+	echo 'anchor "jailops/*"' >> /etc/pf.conf
 fi
 pfctl -nf /etc/pf.conf || die "/etc/pf.conf does not parse"
 sysrc pf_enable=YES >/dev/null

@@ -36,25 +36,20 @@ type Mgmt struct {
 	// ipLock limits the logins of one source address over all users, ten times looser than lock.
 	ipLock *auth.Lockout
 	mux    *http.ServeMux
-	// hashSem bounds the password hashes that run at once. Every login attempt, valid user or not, costs an argon2id hash
-	// (64 MiB, several passes), and the lockout only counts a failure after the hash is done: without a bound one client
-	// could start hundreds of hashes in parallel before it is locked out.
-	hashSem chan struct{}
 }
 
 // readDeadline is how long a management request may take to arrive (a variable for the tests).
 var readDeadline = 15 * time.Second
 
-// hashSlot takes a slot for one password hash and returns what releases it; false answers the request with 429.
-func (m *Mgmt) hashSlot(w http.ResponseWriter) (func(), bool) {
-	select {
-	case m.hashSem <- struct{}{}:
-		return func() { <-m.hashSem }, true
-	default:
+// admitHash refuses a request that needs a password hash when the queue for one is full. The hashes run in
+// auth's gate (a few at once, the others wait their turn), so a burst waits instead of being turned away.
+func admitHash(w http.ResponseWriter) bool {
+	if err := auth.AdmitDerivation(); err != nil {
 		w.Header().Set("Retry-After", "1")
 		writeError(w, api.Errorf(api.CodeRateLimited, "too many sign-in attempts at once, try again in a moment"))
-		return nil, false
+		return false
 	}
+	return true
 }
 
 type identity struct {
@@ -70,8 +65,7 @@ func newMgmt(s *Server, ui http.Handler, pp auth.PasswordParams) *Mgmt {
 	if err != nil {
 		panic(err) // a malformed static table is a programming error caught by tests
 	}
-	m := &Mgmt{s: s, reg: reg, ui: ui, pp: pp, lock: auth.NewLockout(auth.LockoutConfig{}), ipLock: auth.NewLockout(auth.LockoutConfig{Threshold: 50}), mux: http.NewServeMux(),
-		hashSem: make(chan struct{}, max(1, runtime.NumCPU()))}
+	m := &Mgmt{s: s, reg: reg, ui: ui, pp: pp, lock: auth.NewLockout(auth.LockoutConfig{}), ipLock: auth.NewLockout(auth.LockoutConfig{Threshold: 50}), mux: http.NewServeMux()}
 	var routes []string
 	h := func(method, pattern string, fn func(http.ResponseWriter, *http.Request, *identity)) {
 		routes = append(routes, method+" "+pattern)
@@ -229,6 +223,9 @@ func (m *Mgmt) identify(r *http.Request) (*identity, error) {
 		// failures are counted per source (an IPv6 source is its /64); a token is not guessable, so a valid one is never
 		// refused for what others at the same address tried
 		tokKey := "tok|" + auth.SourceKey(remoteAddr(r).String())
+		if err := m.lock.Check(tokKey); err != nil {
+			return nil, api.Errorf(api.CodeRateLimited, "too many failed attempts")
+		}
 		t, err := m.s.DB.TokenByHash(ctx, auth.HashToken(tok))
 		if err != nil {
 			if lerr := m.lock.Fail(tokKey); lerr != nil {
@@ -333,8 +330,12 @@ func (m *Mgmt) login(w http.ResponseWriter, r *http.Request, _ *identity) {
 	// from anywhere would let a stranger lock the administrator out.
 	ip := auth.SourceKey(remoteAddr(r).String()) // an IPv6 source is its /64
 	keys := []loginKey{{m.lock, strings.ToLower(req.Username) + "|" + ip}, {m.ipLock, "ip|" + ip}}
-	for _, k := range keys {
-		if err := k.lim.Check(k.key); err != nil {
+	// every attempt counts before its password is hashed, so attempts sent at once cannot pass the threshold together
+	for i, k := range keys {
+		if err := k.lim.Begin(k.key); err != nil {
+			for _, b := range keys[:i] {
+				b.lim.Abort(b.key)
+			}
 			var le *auth.LockedError
 			if errors.As(err, &le) {
 				w.Header().Set("Retry-After", le.RetryAfterSeconds())
@@ -343,28 +344,26 @@ func (m *Mgmt) login(w http.ResponseWriter, r *http.Request, _ *identity) {
 			return
 		}
 	}
-	u, err := m.s.DB.User(r.Context(), req.Username)
-	release, ok := m.hashSlot(w)
-	if !ok {
+	if !admitHash(w) {
+		for _, k := range keys {
+			k.lim.Abort(k.key)
+		}
 		return
 	}
+	u, err := m.s.DB.User(r.Context(), req.Username)
 	valid := false
 	if err == nil && !u.Disabled {
 		valid, _ = auth.VerifyPassword(req.Password, u.PasswordHash)
 	} else {
 		auth.BurnPasswordTime(req.Password, m.pp) // the time must not tell whether the user exists
 	}
-	release()
+	for _, k := range keys {
+		_ = k.lim.End(k.key, valid)
+	}
 	if !valid {
-		for _, k := range keys {
-			_ = k.lim.Fail(k.key)
-		}
-		_ = m.s.DB.Audit(r.Context(), "anonymous", "auth.login.failed", req.Username, nil, r.RemoteAddr)
+		_ = m.s.DB.Audit(r.Context(), "anonymous", "auth.login.failed", "", nil, r.RemoteAddr)
 		writeError(w, api.Errorf(api.CodeUnauthorized, "wrong user name or password"))
 		return
-	}
-	for _, k := range keys {
-		k.lim.Success(k.key)
 	}
 	sid, hash, err := auth.NewSessionID()
 	if err == nil {
@@ -416,12 +415,10 @@ func (m *Mgmt) password(w http.ResponseWriter, r *http.Request, id *identity) {
 		writeError(w, api.Errorf(api.CodeRateLimited, "too many failed attempts"))
 		return
 	}
-	release, slot := m.hashSlot(w)
-	if !slot {
+	if !admitHash(w) {
 		return
 	}
 	ok, _ := auth.VerifyPassword(req.Current, u.PasswordHash)
-	release()
 	if !ok {
 		_ = m.lock.Fail(pwKey)
 		writeError(w, api.Errorf(api.CodeUnauthorized, "the current password is wrong"))

@@ -310,7 +310,7 @@ func (l *Local) TailFile(ctx context.Context, p string, offset, limit int64) ([]
 		return nil, 0, 0, invalid("%s is not a regular file", ref.name)
 	}
 	// O_NONBLOCK: a file the jail swapped for a FIFO after the check must not block the helper (it is refused below)
-	f, err := lr.OpenFile(ref.name, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	f, err := lr.OpenFile(ref.name, os.O_RDONLY|syscall.O_NONBLOCK|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, 0, 0, logFSErr(err)
 	}

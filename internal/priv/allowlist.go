@@ -59,6 +59,8 @@ type Rule struct {
 	SubcommandOptional bool
 	// Rest matches the arguments after the subcommand, one by one.
 	Rest *regexp.Regexp
+	// RestCheck is a further test of each of them.
+	RestCheck func(string) bool
 	// MaxRest bounds their number.
 	MaxRest int
 	// RestFlags are flags allowed after the subcommand.
@@ -274,7 +276,21 @@ func checkPkgOption(c Config, v string) error {
 	return forbidden("pkg -o %q is not allowed", v)
 }
 
-var etcupdateSubs = []string{"extract", "resolve", "status", "diff", "build", "revert"}
+// pkgNameOK refuses what rePkgName lets through and pkg would take as a file: a name that climbs out (..), one that ends
+// as a package or an archive, and more than one slash (a port origin has one: category/name).
+func pkgNameOK(a string) bool {
+	if strings.Contains(a, "..") || strings.Count(a, "/") > 1 {
+		return false
+	}
+	for _, suf := range []string{".pkg", ".txz", ".tbz", ".tgz", ".tar", ".gz", ".xz", ".zst"} {
+		if strings.HasSuffix(strings.ToLower(a), suf) {
+			return false
+		}
+	}
+	return true
+}
+
+var etcupdateSubs = []string{"extract", "resolve", "status", "diff", "revert"}
 
 // customEtcupdate accepts etcupdate with its flags and one optional
 // subcommand, flags before or after it:
@@ -282,7 +298,7 @@ var etcupdateSubs = []string{"extract", "resolve", "status", "diff", "build", "r
 //	etcupdate extract -d <work> -t <tar> -D <root>
 //	etcupdate -d <work> -t <tar> -D <root> -L <log>
 //
-// -D and -s name a tree below a storage root (never the root itself); -d, -t
+// -D names a tree below a storage root (never the root itself); -d, -t
 // and -L name paths below the state directory or a storage root.
 func customEtcupdate(c Config, _ bool, args []string) error {
 	seen := map[string]bool{}
@@ -296,7 +312,7 @@ func customEtcupdate(c Config, _ bool, args []string) error {
 				return invalid("etcupdate: %s given twice", a)
 			}
 			seen[a] = true
-		case "-D", "-s", "-d", "-t", "-L":
+		case "-D", "-d", "-t", "-L":
 			if seen[a] {
 				return invalid("etcupdate: %s given twice", a)
 			}
@@ -306,7 +322,7 @@ func customEtcupdate(c Config, _ bool, args []string) error {
 				return invalid("etcupdate: %s needs a value", a)
 			}
 			kind := pathState
-			if a == "-D" || a == "-s" {
+			if a == "-D" {
 				kind = pathJailTree
 			}
 			if err := c.checkRulePath(kind, args[i]); err != nil {
@@ -318,7 +334,7 @@ func customEtcupdate(c Config, _ bool, args []string) error {
 				return forbidden("etcupdate: flag %q is not allowed", a)
 			case sub == "" && slices.Contains(etcupdateSubs, a) && len(rest) == 0:
 				sub = a
-			case sub != "" && sub != "extract" && sub != "build" && rePkgName.MatchString(a) && len(rest) < 16:
+			case sub != "" && sub != "extract" && rePkgName.MatchString(a) && pkgNameOK(a) && len(rest) < 16:
 				rest = append(rest, a)
 			default:
 				return forbidden("etcupdate: argument %q is not allowed", a)
@@ -433,7 +449,7 @@ var CommandRules = []Rule{
 		// the packages installed on purpose, for an app draft (internal/apps.PkgLeavesArgv)
 		RestExact:   [][]string{{"query", "-e", "%a = 0", "%n %v %R %w"}},
 		Subcommands: []string{"install", "upgrade", "update", "delete", "remove", "autoremove", "info", "audit", "lock", "unlock", "fetch", "clean", "check", "version", "bootstrap", "query"},
-		Rest:        rePkgName, MaxRest: 64, RestFlags: []string{"-y", "-q", "-n", "-f", "-a", "-U", "-F", "-x", "-r", "-d"},
+		Rest:        rePkgName, RestCheck: pkgNameOK, MaxRest: 64, RestFlags: []string{"-y", "-q", "-n", "-f", "-a", "-U", "-F", "-x", "-r", "-d"},
 		MaxTimeoutSeconds: 3600,
 	},
 	{
@@ -648,7 +664,7 @@ func (c Config) CheckCommandCtx(ctx context.Context, argv []string) (*Rule, []st
 				}
 				continue
 			}
-			if r.Rest == nil || !r.Rest.MatchString(a) {
+			if r.Rest == nil || !r.Rest.MatchString(a) || (r.RestCheck != nil && !r.RestCheck(a)) {
 				return nil, nil, forbidden("%s: argument %q is not allowed", r.Name, a)
 			}
 		}

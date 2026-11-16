@@ -31,7 +31,9 @@ func TestCommandAllowList(t *testing.T) {
 		{"pkg update -f", []string{"pkg", "-r", root, "update", "-f"}, true},
 		{"pkg delete", []string{"pkg", "-r", root, "delete", "-y", "curl"}, true},
 		{"pkg info", []string{"pkg", "-r", root, "info"}, true},
-		{"etcupdate", []string{"etcupdate", "-D", root, "-s", other}, true},
+		{"etcupdate", []string{"etcupdate", "-D", root, "-d", other}, true},
+		{"etcupdate -s", []string{"etcupdate", "-D", root, "-s", other}, false},
+		{"etcupdate build", []string{"etcupdate", "-D", root, "build", other}, false},
 		{"etcupdate resolve", []string{"etcupdate", "-D", root, "resolve"}, true},
 
 		// hostile
@@ -57,9 +59,8 @@ func TestCommandAllowList(t *testing.T) {
 		{"pkg name with space", []string{"pkg", "-r", root, "install", "a b"}, false},
 		{"pkg leading dash name", []string{"pkg", "-r", root, "install", "-evil"}, false},
 		{"pkg NUL", []string{"pkg", "-r", root, "install", "a\x00b"}, false},
-		{"etcupdate no -D", []string{"etcupdate", "-s", other}, false},
-		{"etcupdate -D outside", []string{"etcupdate", "-D", "/etc", "-s", other}, false},
-		{"etcupdate -s outside", []string{"etcupdate", "-D", root, "-s", "/"}, false},
+		{"etcupdate no -D", []string{"etcupdate", "-d", other}, false},
+		{"etcupdate -D outside", []string{"etcupdate", "-D", "/etc", "-d", other}, false},
 		{"etcupdate unknown flag", []string{"etcupdate", "-D", root, "-p"}, false},
 		{"etcupdate -d outside", []string{"etcupdate", "-D", root, "-d", "/tmp/x"}, false},
 	}
@@ -151,5 +152,18 @@ func TestBootTimeIsReadableThroughTheHelper(t *testing.T) {
 	c := Config{}
 	if err := customSysctl(c, false, []string{"-n", "kern.boottime"}); err != nil {
 		t.Fatalf("kern.boottime: %v", err)
+	}
+}
+
+func TestPkgNameOK(t *testing.T) {
+	for _, n := range []string{"nginx", "FreeBSD-set-minimal-jail", "ca_root_nss", "www/nginx", "bash@default", "py311-foo=1.2"} {
+		if !pkgNameOK(n) {
+			t.Errorf("%q refused", n)
+		}
+	}
+	for _, n := range []string{"../x", "a/b/c", "foo.pkg", "x.txz", "dir/x.tar", "/x"} {
+		if pkgNameOK(n) && rePkgName.MatchString(n) {
+			t.Errorf("%q accepted", n)
+		}
 	}
 }

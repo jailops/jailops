@@ -118,8 +118,9 @@ func TestCopyTreePreservesWhatItShould(t *testing.T) {
 			t.Errorf("%s: mode %v want %v", p, fi.Mode().Perm(), want)
 		}
 	}
-	if fi, _ := os.Lstat(filepath.Join(te.dst, "suid")); fi == nil || fi.Mode()&os.ModeSetuid == 0 {
-		t.Error("setuid bit lost")
+	// the destination is not a jail tree: no setuid or setgid file is made there
+	if fi, _ := os.Lstat(filepath.Join(te.dst, "suid")); fi == nil || fi.Mode()&os.ModeSetuid != 0 {
+		t.Error("setuid bit kept outside a jail tree")
 	}
 	for p, want := range map[string]string{"a/rel": "b/file", "abs": "/etc/passwd", "dangling": "nowhere"} {
 		got, err := os.Readlink(filepath.Join(te.dst, p))

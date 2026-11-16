@@ -429,6 +429,24 @@ func (g runGuard) Run(ctx context.Context, c run.Cmd) (run.Result, error) {
 		defer cleanup()
 		argv = append(append([]string(nil), argv[:4]...), sealed)
 	}
+	if rule.Name == "etcupdate" {
+		// -t names an archive the daemon can write: what is listed and extracted is the sealed copy
+		for i := 1; i+1 < len(argv); i++ {
+			if argv[i] != "-t" {
+				continue
+			}
+			sealed, cleanup, err := g.l.sealArchive(argv[i+1])
+			if err != nil {
+				return run.Result{}, err
+			}
+			defer cleanup()
+			if err := verifyTar(ctx, g.l, []string{"-C", "", "-xpzf", sealed}); err != nil {
+				return run.Result{}, err
+			}
+			argv = append([]string(nil), argv...)
+			argv[i+1] = sealed
+		}
+	}
 	if rule.Verify != nil {
 		if err := rule.Verify(ctx, g.l, argv[1:]); err != nil {
 			return run.Result{}, err

@@ -207,6 +207,9 @@ type fdConn struct {
 
 	fmu sync.Mutex
 	fds []*os.File
+
+	// noFDs: the peer never sends descriptors (the server side of priv.sock); any that arrive are closed and end the connection
+	noFDs bool
 }
 
 func newFDConn(c *net.UnixConn) *fdConn {
@@ -225,7 +228,10 @@ func (r fdReader) Read(p []byte) (int, error) {
 		n = 0
 	}
 	if oobn > 0 {
-		r.fc.collect(oob[:oobn])
+		if r.fc.collect(oob[:oobn]) && r.fc.noFDs {
+			r.fc.closeFDs()
+			return n, errors.New("priv: descriptors from a peer that sends none")
+		}
 	}
 	if flags&unix.MSG_CTRUNC != 0 {
 		// Descriptors were dropped by the kernel; the connection is unusable.
@@ -234,10 +240,12 @@ func (r fdReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-func (fc *fdConn) collect(oob []byte) {
+// collect queues the descriptors of a control message and reports whether there were any.
+func (fc *fdConn) collect(oob []byte) bool {
+	got := false
 	msgs, err := unix.ParseSocketControlMessage(oob)
 	if err != nil {
-		return
+		return false
 	}
 	for _, m := range msgs {
 		fds, err := unix.ParseUnixRights(&m)
@@ -246,11 +254,13 @@ func (fc *fdConn) collect(oob []byte) {
 		}
 		fc.fmu.Lock()
 		for _, fd := range fds {
+			got = true
 			unix.CloseOnExec(fd)
 			fc.fds = append(fc.fds, os.NewFile(uintptr(fd), "passed-fd"))
 		}
 		fc.fmu.Unlock()
 	}
+	return got
 }
 
 func (fc *fdConn) takeFDs(n int) ([]*os.File, error) {
