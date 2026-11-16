@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Fixed: a restart of the daemon starts no jail an operator stopped, on a real host.** The boot pass tells a boot of the host from a restart of the daemon by `kern.boottime`, which the helper did not let the daemon read, so every start of the daemon counted as a boot and started the jails with `boot.autostart` that had been stopped on purpose. `kern.boottime` is on the read list of the helper now, and a test keeps it there.
+- **Fixed: a mirror that does not answer for a moment no longer fails an image build.** A `pkg` step of the build is tried three more times (after 5, 10 and 20 seconds) when the mirror cannot be reached or answers with a server error; what pkg already fetched is kept, so a retry asks only for what is missing. A checksum mismatch or a missing package is never retried.
+
 ## 0.7.2 - 2026-11-16
 
 - **Fixed: a panic in a background loop no longer ends the daemon, and the daemon comes back on its own.** Every long-running loop of `jailopsd`

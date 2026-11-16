@@ -143,3 +143,13 @@ func TestOperationListHasNoCommandOperation(t *testing.T) {
 		t.Errorf("only %d operations registered", len(OperationNames()))
 	}
 }
+
+// The boot pass of the daemon reads kern.boottime through the helper to tell a restart of the daemon (no jail is started)
+// from a boot of the host (autostart jails start). A name missing here is refused, the daemon reads an empty id, and
+// every restart of the daemon then counts as a boot.
+func TestBootTimeIsReadableThroughTheHelper(t *testing.T) {
+	c := Config{}
+	if err := customSysctl(c, false, []string{"-n", "kern.boottime"}); err != nil {
+		t.Fatalf("kern.boottime: %v", err)
+	}
+}

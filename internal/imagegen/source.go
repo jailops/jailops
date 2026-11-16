@@ -6,6 +6,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"jailops.net/jailops/internal/plan"
 	"jailops.net/jailops/internal/render"
@@ -188,13 +189,50 @@ func (r *pkgRun) step(name string, args ...string) plan.Step {
 		Name: name, Describe: quote(r.p.pkgArgv(r.b, r.abi, args...)),
 		Do: func(ctx context.Context) error {
 			argv := r.p.pkgArgv(r.b, r.abi, args...)
-			out, err := r.b.M.Exec.Run(ctx, argv)
-			if err != nil {
-				return fmt.Errorf("%s: %w: %s", quote(argv), err, tail(out))
+			var out []byte
+			var err error
+			// A mirror that does not answer for a moment must not fail an image build: pkg keeps what it already
+			// fetched in its cache, so a second try only asks for what is missing.
+			for try := 0; ; try++ {
+				if out, err = r.b.M.Exec.Run(ctx, argv); err == nil {
+					return nil
+				}
+				if try >= fetchRetries || !transientFetch(out) {
+					break
+				}
+				select {
+				case <-ctx.Done():
+					return fmt.Errorf("%s: %w: %s", quote(argv), err, tail(out))
+				case <-time.After(fetchBackoff << try):
+				}
 			}
-			return nil
+			return fmt.Errorf("%s: %w: %s", quote(argv), err, tail(out))
 		},
 	}
+}
+
+var (
+	// fetchRetries is how many more times a pkg step is tried when a mirror could not be reached.
+	fetchRetries = 3
+	// fetchBackoff is the wait before the first retry; it doubles each time.
+	fetchBackoff = 5 * time.Second
+)
+
+// transientFetch says whether the output of a failed pkg run is a network failure that a retry can cure: a mirror
+// that cannot be reached or answers with a server error. A signature that does not match, a missing package or an
+// unknown option are never retried.
+func transientFetch(out []byte) bool {
+	low := strings.ToLower(string(out))
+	for _, m := range []string{
+		"no route to host", "operation timed out", "connection timed out", "connection refused", "connection reset",
+		"network is unreachable", "temporary failure in name resolution", "could not resolve", "service unavailable",
+		"bad gateway", "gateway timeout", "http error 5", "502 ", "503 ", "504 ", "try again",
+	} {
+		if strings.Contains(low, m) {
+			return true
+		}
+	}
+	return false
 }
 
 // abiStep asks the host's pkg for its ABI. The answer replaces the one
