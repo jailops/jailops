@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.2 - 2026-11-16
+
 - **Fixed: a panic in a background loop no longer ends the daemon, and the daemon comes back on its own.** Every long-running loop of `jailopsd`
   (reconcile, housekeeping, the devd and host-directory watchers, the backup scheduler, the hub loops, the log forwarder, the certificate renewal)
   runs under a supervisor: a panic is logged with its stack, counted and the loop starts again after a delay that doubles from one second to a
