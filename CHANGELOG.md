@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.7.3 - 2026-11-16
+
 - **Fixed: setting the clock does not make a restart of the daemon a boot.** FreeBSD moves `kern.boottime` when the clock is stepped, so a daemon that started again after a step took it for a new boot and started the jails an operator had stopped. Two readings within ten minutes are the same boot.
 
 - **Fixed: a restart of the daemon starts no jail an operator stopped, on a real host.** The boot pass tells a boot of the host from a restart of the daemon by `kern.boottime`, which the helper did not let the daemon read, so every start of the daemon counted as a boot and started the jails with `boot.autostart` that had been stopped on purpose. `kern.boottime` is on the read list of the helper now, and a test keeps it there.
