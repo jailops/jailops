@@ -29,6 +29,7 @@ func (l *Local) HealNetwork(ctx context.Context) (HealNetRes, error) {
 		return res, err
 	}
 	live := map[string]bool{} // the host ends of the links of the jails that run
+	unreadable := false
 	list, err := l.d.Jails.List(ctx)
 	if err != nil {
 		return res, err
@@ -40,6 +41,7 @@ func (l *Local) HealNetwork(ctx context.Context) (HealNetRes, error) {
 		}
 		atts, err := l.planJail(ctx, jn)
 		if err != nil {
+			unreadable = true // the links of a jail that runs are not known: no bridge is taken away below
 			continue
 		}
 		for _, a := range atts {
@@ -58,6 +60,10 @@ func (l *Local) HealNetwork(ctx context.Context) (HealNetRes, error) {
 		}
 		switch {
 		case bridge:
+			if unreadable {
+				res.Skipped = append(res.Skipped, fmt.Sprintf("%s: a jail that runs could not be read, so its links are not known", i.Name))
+				continue
+			}
 			held := ""
 			for _, m := range i.Members {
 				if live[m.Name] {
