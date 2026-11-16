@@ -32,7 +32,7 @@ const (
 	CodeZFSIncompatible Code = "zfs_incompatible"
 	CodeChainBroken     Code = "chain_broken"
 	CodeMergeConflict   Code = "merge_conflict"   // /etc merge needs a human; the jail stays on the old generation
-	CodeQuotaExceeded   Code = "quota_exceeded"   // a project quota would be exceeded
+	CodeQuotaExceeded   Code = "quota_exceeded"   // a project quota or the storage quota of a backup host would be exceeded
 	CodeRateLimited     Code = "rate_limited"     // too many failed attempts (HTTP 429)
 	CodeKeyNotEscrowed  Code = "key_not_escrowed" // raw backup refused: no recoverable key escrow
 	CodePlaintextDenied Code = "plaintext_denied" // node target needs encrypted data or allow_plaintext

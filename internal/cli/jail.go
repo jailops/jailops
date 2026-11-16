@@ -383,7 +383,7 @@ VOLUME PATH' puts it into a stopped jail. Deleting the jail never deletes a volu
 A jail starts when the host boots only with --autostart (boot.autostart); a jail that
 was running before a reboot does not come back on its own.
 
-A new jail name has at most 32 characters. Sizes (--disk) are stored as bytes;
+A new jail name has at most 29 characters. Sizes (--disk) are stored as bytes;
 4G, 4GiB and 4294967296 are the same size.`
 
 const jailCreateExample = `jailops @P@ create web --project web --image freebsd-15-1 --network lan --storage default --start --autostart
@@ -430,7 +430,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	)
 	f := cmd.Flags()
 	f.StringVar(&comment, "comment", "", "what the jail is for")
-	f.StringVar(&image, "image", "", "image reference: NAME@alias or NAME#gN (required without -f)")
+	f.StringVar(&image, "image", "", "image reference: NAME (the newest generation), NAME@alias or NAME#gN (required without -f)")
 	f.StringVar(&storage, "storage", "", "storage to place the jail on, one granted to the project (default: the project's only storage, unless a profile supplies it)")
 	f.StringArrayVar(&profiles, "profile", nil, "profile to apply, later ones override earlier ones (repeatable)")
 	f.StringVar(&layout, "layout", "", "root layout: thin or thick (default depends on the image)")
@@ -440,12 +440,12 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringVar(&memory, "memory", "", "anonymous memory the jail may reserve in total, for example 2G (rctl swapuse; needs kern.racct.enable=1)")
 	f.StringVar(&disk, "disk", "", "ZFS quota of the whole jail (root, data, volumes and snapshots), for example 20G")
 	f.IntVar(&pids, "pids", 0, "processes the jail may have (rctl maxproc; needs kern.racct.enable=1)")
-	f.StringArrayVar(&fwPolicies, "firewall-policy", nil, "firewall policy to apply (repeatable; they are rendered in the order given, after the project's)")
+	f.StringArrayVar(&fwPolicies, "firewall-policy", nil, "firewall policy of the jail (repeatable; they are rendered in the order given, after the project's). On set the policies given REPLACE the whole list of the jail; to add one name all of them")
 	f.StringArrayVar(&tags, "tag", nil, "firewall tag of this jail (repeatable)")
 	f.BoolVar(&autostart, "autostart", false, "start the jail when the host boots")
 	f.BoolVar(&zfsDelegation, "zfs-delegation", false, "global administrators only: hand the jail a ZFS dataset of its own, <container>/delegated, which root in the jail manages (the host's priv.conf must allow it: admin-zfs-delegation)")
 	f.IntVar(&priority, "boot-priority", 0, "boot order, lower starts first")
-	f.IntVar(&stopTimeout, "stop-timeout", 0, "seconds the jail has to shut down by itself before it is killed (default: ten)")
+	f.IntVar(&stopTimeout, "stop-timeout", 0, "seconds the jail has to shut down by itself before it is killed (default: thirty)")
 	f.StringArrayVar(&depends, "depends", nil, "jail that must start first (repeatable)")
 	f.StringArrayVar(&envs, "env", nil, "environment variable KEY=VALUE (repeatable)")
 	f.StringArrayVar(&labels, "label", nil, "label KEY=VALUE (repeatable)")

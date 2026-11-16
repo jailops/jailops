@@ -56,9 +56,9 @@ var HostRoutes = []Route{
 	{"GET", Base + "/groups/{group}/snapshots/{snap}/manifest", ScopePull, false, "the encrypted manifest (Range supported)"},
 	{"GET", Base + "/chunks/{id}", ScopePull, false, "a chunk blob (Range supported)"},
 	{"POST", Base + "/restore-tests", ScopeRestore, false, "record the result of a restore test run on a host that holds the key"},
-	{"GET", Base + "/escrow", ScopePull, false, "the key domains that have an escrow blob"},
-	{"GET", Base + "/escrow/{domain}", ScopePull, false, "the escrow blob of a key domain (the master key wrapped to offline recovery recipients)"},
-	{"PUT", Base + "/escrow/{domain}", ScopePush, false, "store the escrow blob of a key domain, create-only"},
+	{"GET", Base + "/escrow", ScopePull, false, "the key domains this host stored an escrow blob for"},
+	{"GET", Base + "/escrow/{domain}", ScopePull, false, "this host's escrow blob of a key domain (the master key wrapped to offline recovery recipients)"},
+	{"PUT", Base + "/escrow/{domain}", ScopePush, false, "store this host's escrow blob of a key domain, create-only (a slot per host)"},
 }
 
 // AdminRoutes are administration. They are served on the local unix socket
@@ -83,7 +83,7 @@ var AdminRoutes = []Route{
 	{"POST", Base + "/admin/quarantine/purge", ScopeAdmin, true, "remove healed quarantine entries"},
 	{"POST", Base + "/admin/quarantine/{id}", ScopeAdmin, true, "move a chunk a host reported as undecryptable aside, although it passes the keyless check"},
 	{"GET", Base + "/admin/escrow", ScopeRead, true, "key domains with an escrow blob"},
-	{"DELETE", Base + "/admin/escrow/{domain}", ScopeAdmin, true, "delete a damaged escrow blob, so a host can store a new one"},
+	{"DELETE", Base + "/admin/escrow/{domain}", ScopeAdmin, true, "delete the escrow blobs of a key domain (every host's), so hosts can store new ones"},
 	{"GET", Base + "/admin/retention-policies", ScopeRead, true, "stored retention policies"},
 	{"PUT", Base + "/admin/retention-policies/{scope}", ScopeAdmin, true, "store a retention policy (scope: default or a group id)"},
 	{"DELETE", Base + "/admin/retention-policies/{scope}", ScopeAdmin, true, "remove a retention policy"},

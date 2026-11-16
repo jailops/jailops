@@ -316,7 +316,7 @@ read the details as an administrator when an alert fires.
 | Pool capacity | `GET /api/v1/resources`: `size`, `allocated`, `free` of the pool (global identity; no doctor check) | `allocated / size` above 80% |
 | The certificate | doctor check `tls.certificate` (warns 14 days before an expiry nothing renews, fails once expired); `tls.acme`; `GET /api/v1/host/certificate`: `current.days_left`, `acme.failures`, `acme.last_error` | `days_left` below 14, or ACME failures |
 | The last successful backup | `GET /api/v1/backups?project=P` (readonly in the project): the newest `metadata.created_at` per `spec.jail` with `status.failed` false; `status.verified_at` for the last verification | older than the RPO |
-| Failed scheduled backups | the daemon's log only: `backup: job failed` | any line |
+| Failed scheduled backups | `jailops doctor` (`backup.recent`, one warning per policy and jail, with the first line of the error), the event `backup-failed`, and the daemon's log (`backup: job failed`) | any warning or event |
 | A firewall revert that failed | `GET /api/v1/host/pending`: `last.outcome` is `revert_failed` | at once |
 | Who did what | the audit log forwarded to syslog ([logging.md](logging.md)), or `GET /api/v1/audit` (global admin) | `denied` results and `authentication failed` from unknown sources |
 | Protocol violations at the helper | the helper's log: `priv.protocol.violation` (a peer sent frames out of order; the helper closed that connection) | any line: the daemon or something else on the socket misbehaves |

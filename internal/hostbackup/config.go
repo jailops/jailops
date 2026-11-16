@@ -67,6 +67,10 @@ type Config struct {
 	HostUUID string
 	Node     NodeConfig
 
+	// Notify, when set, is told the end of every scheduled run of a policy (err nil: it worked), so that a failure is
+	// more than a line of the log.
+	Notify func(project, policy, jail string, err error)
+
 	// Concurrency bounds the jobs that run at once (default 2). A jail never
 	// has more than one.
 	Concurrency int

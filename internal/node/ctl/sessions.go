@@ -147,3 +147,14 @@ func (d *DB) PinnedSnapshots(ctx context.Context) (map[[2]string]bool, error) {
 	}
 	return out, rows.Err()
 }
+
+// HostUsage is the number of bytes a host uploaded that the node still holds on its behalf: what its open sessions
+// have put so far plus what the sessions of its retained snapshots put. Aborted and expired sessions do not count
+// (their chunks are garbage), and neither do snapshots retention has removed.
+func (d *DB) HostUsage(ctx context.Context, hostID string) (int64, error) {
+	var n int64
+	err := d.pool.QueryRow(ctx, `SELECT COALESCE(SUM(s.bytes_put), 0)::bigint FROM sessions s
+		WHERE s.host_id = $1::uuid AND (s.state = 'open' OR (s.state = 'committed' AND EXISTS (
+			SELECT 1 FROM snapshots n WHERE n.group_id = s.group_id AND n.snapshot_id = s.snapshot_id)))`, hostID).Scan(&n)
+	return n, err
+}

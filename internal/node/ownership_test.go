@@ -83,3 +83,59 @@ func TestHostsSeeOnlyTheirGroupsAndReportOnlyOnThem(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// Every host has an escrow slot of its own: a host that stores a blob first cannot pre-empt another host's.
+func TestEscrowSlotsBelongToTheirHost(t *testing.T) {
+	e := nodetest.NewEnv(t, nodetest.Options{})
+	squatter, real := e.Host(t, "squatter"), e.Host(t, "real")
+	const d = "5e62dd65bc023787"
+	junk := []byte("age-encryption.org/v1\n-> X25519 junk")
+	good := []byte("age-encryption.org/v1\n-> X25519 stanza\nthe real blob")
+	if err := e.Node.PutEscrow(ctx, squatter, d, bytes.NewReader(junk), int64(len(junk))); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Node.PutEscrow(ctx, real, d, bytes.NewReader(good), int64(len(good))); err != nil {
+		t.Fatalf("the real host was refused: %v", err)
+	}
+	if got, err := e.Node.GetEscrow(ctx, real, d); err != nil || !bytes.Equal(got, good) {
+		t.Fatalf("%q %v", got, err)
+	}
+	if l, _ := e.Node.ListEscrow(ctx, real.ID); len(l) != 1 {
+		t.Fatalf("%v", l)
+	}
+	other := e.Host(t, "other")
+	if _, err := e.Node.GetEscrow(ctx, other, d); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("a host without a blob reads another's: %v", err)
+	}
+	if err := e.Node.DeleteEscrow(ctx, d, "admin", ""); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := e.Node.ListEscrow(ctx, ""); len(l) != 0 {
+		t.Fatalf("%v", l)
+	}
+}
+
+// A host that has used its quota is refused with quota_exceeded; another host is not affected.
+func TestHostQuota(t *testing.T) {
+	f := nodetest.NewFixture(t, 23)
+	c0, c1 := f.NewChunk(t), f.NewChunk(t)
+	e := nodetest.NewEnv(t, nodetest.Options{Configure: func(c *node.Config) { c.HostQuota = int64(len(c0.Blob)) + 1 }})
+	a, b := e.Host(t, "a"), e.Host(t, "b")
+	sa, err := e.Node.Begin(ctx, a, f.Group("a", "j"), nodetest.SnapshotID(e.Clock.Now(), 1), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Node.PutChunk(ctx, a, sa.ID, c0.ID, bytes.NewReader(c0.Blob), int64(len(c0.Blob))); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Node.PutChunk(ctx, a, sa.ID, c1.ID, bytes.NewReader(c1.Blob), int64(len(c1.Blob))); !api.IsCode(err, api.CodeQuotaExceeded) {
+		t.Fatalf("over the quota: %v", err)
+	}
+	sb, err := e.Node.Begin(ctx, b, f.Group("b", "j"), nodetest.SnapshotID(e.Clock.Now(), 2), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.Node.PutChunk(ctx, b, sb.ID, c0.ID, bytes.NewReader(c0.Blob), int64(len(c0.Blob))); err != nil {
+		t.Fatalf("another host: %v", err)
+	}
+}

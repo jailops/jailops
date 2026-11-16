@@ -52,6 +52,11 @@ func buildHostBackups(cfg Config, hostUUID string, z zfs.Client, log *slog.Logge
 	hc := hostbackup.Config{
 		KeyPath: b.KeyPath, PassphraseFile: b.PassphraseFile, RecoveryRecipients: b.RecoveryRecipients, AllowUnescrowed: b.AllowUnescrowed,
 		HostUUID: hostUUID, Concurrency: b.Concurrency, ScratchDir: b.ScratchDir, ScratchDataset: b.ScratchDataset, Log: log,
+		Notify: func(project, policy, jail string, err error) {
+			if s, e := late.get(); e == nil {
+				s.BackupResult(project, policy, jail, err)
+			}
+		},
 		Node: hostbackup.NodeConfig{Name: b.Node.Name, Address: b.Node.Address, Fingerprint: b.Node.Fingerprint, CertFile: b.Node.CertFile, KeyFile: b.Node.KeyFile},
 	}
 	if opts.BackupTLS != nil {

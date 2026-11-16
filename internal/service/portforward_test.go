@@ -137,3 +137,27 @@ func TestProjectAdminEditsAPolicyWithAForwardButNotTheForward(t *testing.T) {
 	_, err = s.UpdatePolicy(project, "fwd", changed, cur.Metadata.Generation)
 	wantCode(t, err, api.CodeForbidden)
 }
+
+// A forward that a global administrator switched off stays the global administrator's: a project administrator cannot
+// switch it on again.
+func TestProjectAdminCannotEnableAForwardThatWasDisabled(t *testing.T) {
+	_, s := newEnv(t)
+	admin := as(globalAdmin, dtest.SeedProject)
+	project := as(alphaOnly, dtest.SeedProject)
+	if _, err := s.CreatePolicy(admin, redirectPolicy("fwd", 2224, "")); err != nil {
+		t.Fatal(err)
+	}
+	cur, _ := s.GetPolicy(admin, "fwd")
+	off := cur
+	off.Spec.Rules = append([]api.FirewallRule(nil), cur.Spec.Rules...)
+	off.Spec.Rules[0].Disabled = true
+	if _, err := s.UpdatePolicy(admin, "fwd", off, cur.Metadata.Generation); err != nil {
+		t.Fatal(err)
+	}
+	cur, _ = s.GetPolicy(project, "fwd")
+	on := cur
+	on.Spec.Rules = append([]api.FirewallRule(nil), cur.Spec.Rules...)
+	on.Spec.Rules[0].Disabled = false
+	_, err := s.UpdatePolicy(project, "fwd", on, cur.Metadata.Generation)
+	wantCode(t, err, api.CodeForbidden)
+}

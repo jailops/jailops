@@ -480,7 +480,7 @@ file cancels. Restart handling is the same as for 'config set'.`,
 // setAlias is 'jailops set NAME KEY VALUE', the short form of 'config set'.
 func (a *app) setAlias(d *kindDesc[api.Jail]) *cobra.Command {
 	cmd := a.configSet(d, false)
-	cmd.Short = "Set configuration keys of a jail (short for config set)"
+	cmd.Short = "Set configuration keys of a jail by name: KEY VALUE or KEY=VALUE (short for config set; the flags of create are jail set)"
 	cmd.Example = "jailops set nginx shell /usr/local/bin/bash\njailops set nginx limits.memory 2G --restart"
 	return cmd
 }

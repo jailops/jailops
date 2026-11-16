@@ -160,7 +160,7 @@ func securityHeaders(next http.Handler) http.Handler {
 		h := w.Header()
 		h.Set("X-Content-Type-Options", "nosniff")
 		h.Set("X-Frame-Options", "DENY")
-		h.Set("Referrer-Policy", "same-origin")
+		h.Set("Referrer-Policy", "no-referrer")
 		// no Strict-Transport-Security: the node's certificate is self-signed and pinned by its clients, and a browser
 		// that remembered the header could no longer be told to accept it
 		h.Set("Permissions-Policy", permissionsPolicy)
@@ -876,7 +876,7 @@ func (m *Mgmt) quarantineChunk(w http.ResponseWriter, r *http.Request, id *ident
 }
 
 func (m *Mgmt) escrowList(w http.ResponseWriter, r *http.Request, id *identity) {
-	d, err := m.s.Node.ListEscrow(r.Context())
+	d, err := m.s.Node.ListEscrow(r.Context(), "")
 	if err != nil {
 		writeError(w, apiErr(err))
 		return

@@ -473,13 +473,13 @@ func TestKeyDomainAndEscrow(t *testing.T) {
 	if err := e.Node.PutEscrow(ctx, h, "0123456789abcdef", bytes.NewReader(nil), 0); code(err) == "" {
 		t.Fatal("an empty escrow blob")
 	}
-	if got, err := e.Node.GetEscrow(ctx, "0123456789abcdef"); err != nil || !bytes.Equal(got, blob) {
+	if got, err := e.Node.GetEscrow(ctx, h, "0123456789abcdef"); err != nil || !bytes.Equal(got, blob) {
 		t.Fatalf("%q %v", got, err)
 	}
-	if l, err := e.Node.ListEscrow(ctx); err != nil || len(l) != 1 || l[0] != "0123456789abcdef" {
+	if l, err := e.Node.ListEscrow(ctx, ""); err != nil || len(l) != 1 || l[0] != "0123456789abcdef" {
 		t.Fatalf("%v %v", l, err)
 	}
-	if _, err := e.Node.GetEscrow(ctx, "../../etc/passwd"); code(err) != api.CodeInvalid {
+	if _, err := e.Node.GetEscrow(ctx, h, "../../etc/passwd"); code(err) != api.CodeInvalid {
 		t.Fatalf("%v", err)
 	}
 }

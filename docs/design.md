@@ -895,7 +895,7 @@ datastore.json                 format version, id, created        create-if-abse
 owner.json                     the backup node that owns it        create-if-absent
 chunks/aa/bb/<id>              one encrypted chunk blob            immutable, write-once
 quarantine/<id>                a corrupt blob moved out of chunks/
-escrow/<domain>.<ext>          the master key wrapped to offline recovery recipients
+escrow/<domain>/<host>.<ext>   the master key wrapped to offline recovery recipients, one slot per host
 groups/<group>/<snap>/index    plaintext list of (end offset, chunk id) with a checksum trailer
 groups/<group>/<snap>/manifest encrypted JSON: jail spec, restore bundle, per-dataset stats, bases
 groups/<group>/<snap>/commit.json  receipt, written last and create-only

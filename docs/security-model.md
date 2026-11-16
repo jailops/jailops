@@ -354,6 +354,11 @@ bounded, so that nobody can fill the disk or forge an entry by being refused:
   `reset` repairs the terminal.
 - The web console embedded in `jailopsd` has no demo mode: `?demo` changes nothing (only a demo build, made for the tests
   and the screenshots, carries canned data). A token used to sign in is forgotten when the server answers 401.
+- The console keeps an API token in the session storage of the tab, so that a reload does not sign the user out; a
+  script in the console's own origin could read it, and the content security policy (no inline and no third-party
+  script) is what keeps one out. The session cookie is `HttpOnly` and `SameSite=Strict`, and `Secure` whenever the
+  console is served over TLS: a console on plain HTTP, before a certificate is set up, sends it in clear text, which is
+  why the first step of the setup is the certificate.
 
 ## How clients are trusted
 
@@ -556,13 +561,26 @@ rules, an address set 5000 members, a project 200 policies and 200 address sets 
 A network without `dns` gives its jails the host's own nameservers from `/etc/resolv.conf`, read by the daemon (the file
 is world readable): the jails reach them like any other address, through the network's NAT or routing and their own
 firewall policy, and nothing on the host is opened for it. A host that resolves only through loopback (a local unbound)
-gives its jails the network's gateway address instead. That answers only if the administrator lets the resolver listen on
-the gateway and admits the network's subnet (and, with a `pf.conf` that blocks by default, passes port 53 in on the
-gateway interface): JailOps never edits the resolver or `pf.conf` and opens no port. Until then the jails' queries go
-unanswered; no host service is exposed by the default. A jail's own policy governs port 53 like any other traffic. A jail
+gives its jails the network's gateway address instead, and the base system's resolver (`local_unbound`) answers there. The
+helper writes exactly one file for it, `/var/unbound/conf.d/jailops.conf` (or the path of `unbound-conf` in `priv.conf`;
+empty turns it off): the text is made by the helper from the stored networks and the running jails, so the daemon
+chooses no bytes; the directory must belong to root and be closed to others; the new file is checked with
+`local-unbound-checkconf` before it replaces the old one, and the old one comes back when the check or the reload
+fails. The helper runs `local-unbound-control reload` (and `service local_unbound restart` when a network is added) and
+nothing else of the resolver. A host that runs another resolver than the base system's keeps writing its own
+configuration: JailOps touches neither it nor `pf.conf`, and opens no port. Until the resolver answers on the gateway the
+jails' queries go unanswered; no host service is exposed by the default. A jail's own policy governs port 53 like any other traffic. A jail
 that runs its own resolver removes the line `# written by JailOps` from its `resolv.conf`; JailOps then never writes the file again, and
 it rewrites the file of a running jail only through the helper's file operations, which replace a regular file inside the
 jail's root and refuse a symlink.
+
+## Hosts of a backup node do not trust each other
+
+A backup node knows its hosts by the certificate each one presents, and it keeps the chunks encrypted under a key it
+never sees. One enrolled host is not given power over another: a host's escrow blob lives in a slot of its own, named
+by the host the node authenticated, so no host can take the place of another host's or replace it; a host holds a few
+open sessions at once; and `host_quota` caps what one host may have stored. What the hosts that share a node do share
+is the key domain ([backup-restore.md](backup-restore.md)).
 
 ## Secrets
 

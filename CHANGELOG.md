@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **Fixed: console output could come up blank.** The console of the web viewer sent the last event number of the event stream when it opened the stream of a jail's console, so the server skipped the first lines of output. Each stream keeps its own number now.
+- **Security: a port forward that was switched off stays the global administrator's.** An administrator of a project could switch on a forward of a policy that a global administrator had disabled; enabling a forward needs the global role like adding one.
+- **A failed scheduled backup is not only a line of the log.** `jailops doctor` has `backup.recent` (a warning for each policy and jail whose last scheduled backup failed, with the first line of the error), and the event stream gets `backup-failed`.
+- **Backup node: one host cannot take every session.** A host holds at most eight open sessions (`MaxSessionsPerHost` of the node), so that one host cannot keep the others from backing up.
+- **Security: a host cannot take another host's escrow.** The escrow blob lives in a slot of its own for each host (`escrow/DOMAIN/HOST.age`, named by the host identity the node authenticated), so a host that escrows first can neither pre-empt nor overwrite another's, and `backup key status` reports only the host's own blob. **Changed:** a blob in the old place (`escrow/DOMAIN.age`) is not found; run `jailops backup key escrow` on each host again. `escrow delete` removes the blobs of a domain for every host.
+- **Backup node: a limit for each host.** `host_quota` in `backupd.yaml` (for example `500G`) caps what one host has stored on the node; a chunk over it is refused with `quota_exceeded`. Unset, there is no limit.
+- **Fixed: help and docs that said otherwise.** A jail name has at most 29 characters and the stop timeout defaults to thirty seconds; the hint of `jailops explain forbidden` names `jailops storage grant`; `jail set --firewall-policy` replaces the whole list; the docs no longer tell you to write the unbound file by hand (the helper writes it: see docs/dns.md); the Referrer-Policy of the backup node is `no-referrer` like the host's.
+
 ## 0.8.0 - 2026-11-16
 
 - **The names of the jails cannot take the host's resolver down.** The resolver checks the file of names before it reads it (`local-unbound-checkconf` with the new file in place); when it refuses, the old file is put back, nothing is reloaded and `jailops doctor` says what the resolver said. The resolver listens on the host's address of every network of a project, running jail or not, so it is restarted when the networks change and never when a jail starts or stops. The doctor line no longer names a jail or an address of another project.

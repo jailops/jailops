@@ -63,6 +63,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorWireGuard(ctx, c)
 	s.doctorAppsLocal(c)
 	s.doctorAppsAccess(ctx, c)
+	s.doctorBackups(c)
 	s.doctorPolicyDefaults(c)
 	s.doctorFirewallSize(c)
 	s.doctorJailRefs(c)

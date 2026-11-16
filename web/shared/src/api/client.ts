@@ -157,7 +157,8 @@ export class HttpTransport implements Transport {
         const headers: Record<string, string> = { Accept: 'text/event-stream' }
         const tok = currentToken()
         if (tok) headers['Authorization'] = `Bearer ${tok}`
-        if (lastEventId) headers['Last-Event-ID'] = lastEventId
+        const resume = lastEventIds.get(path)
+        if (resume) headers['Last-Event-ID'] = resume
         const res = await fetch(BASE + path, { headers, signal: ctl.signal, credentials: 'same-origin' })
         if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
         h.onOpen?.()
@@ -171,7 +172,7 @@ export class HttpTransport implements Transport {
           while ((i = buf.search(/\r?\n\r?\n/)) >= 0) {
             const frame = buf.slice(0, i)
             buf = buf.slice(i).replace(/^\r?\n\r?\n/, '')
-            handleFrame(frame, h)
+            handleFrame(frame, h, (id) => lastEventIds.set(path, id))
           }
         }
         throw new Error('stream closed')
@@ -183,10 +184,12 @@ export class HttpTransport implements Transport {
   }
 }
 
-let lastEventId = ''
+// The id of the last event of each stream, by path: a reconnect of /events resumes after its own last event, and the
+// output of a console never inherits the sequence of another stream.
+const lastEventIds = new Map<string, string>()
 
 /** Parse one SSE frame (exported for tests). */
-export function handleFrame(frame: string, h: StreamHandlers): void {
+export function handleFrame(frame: string, h: StreamHandlers, setId?: (id: string) => void): void {
   let data = ''
   for (const line of frame.split(/\r?\n/)) {
     if (!line || line.startsWith(':')) continue
@@ -194,7 +197,7 @@ export function handleFrame(frame: string, h: StreamHandlers): void {
     const field = c < 0 ? line : line.slice(0, c)
     const val = c < 0 ? '' : line.slice(c + 1).replace(/^ /, '')
     if (field === 'data') data += (data ? '\n' : '') + val
-    else if (field === 'id') lastEventId = val
+    else if (field === 'id') setId?.(val)
     else if (field === 'retry') h.onRetry?.(Number(val))
   }
   if (!data) return
