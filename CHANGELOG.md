@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.1 - 2026-11-16
 
 - **Security: fixes from an external audit of 0.8.0.**
   - `etcupdate` through the helper no longer takes `-s` or `build`, and the `-t` archive is copied into the helper's own directory and listed before use, like the `tar` extraction.
@@ -13,8 +13,6 @@
   - `jailops-priv init` makes `/var/tmp/jailops` and the directory of the rendered `jail.conf` files mode 0700.
   - `release.yml` does not keep the checkout's credentials.
 - **Fixed: `jailops-setup`** handles `match ... scrub(` on the awk of the BSDs and writes `pf.conf` through a temporary file with a unique name; `bootstrap.sh` adds only `anchor "jailops/*"`.
-
-## 0.8.1 - 2026-11-16
 
 - **Fixed: the jails of an older version get the search domain of their names.** A jail whose `resolv.conf` JailOps wrote before 0.8.0 (the line `# Managed by JailOps. Do not edit; changes are overwritten.`) was taken for a jail with a file of its own, so it never got `search PROJECT.internal` and the short names did not work. Such a file is JailOps's own and is written again at the next start of the jail.
 
