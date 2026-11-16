@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- **The names of the jails cannot take the host's resolver down.** The resolver checks the file of names before it reads it (`local-unbound-checkconf` with the new file in place); when it refuses, the old file is put back, nothing is reloaded and `jailops doctor` says what the resolver said. The resolver listens on the host's address of every network of a project, running jail or not, so it is restarted when the networks change and never when a jail starts or stops. The doctor line no longer names a jail or an address of another project.
+
+- **Names for the jails, through the base system's local-unbound, with nothing to configure.** `jailops-setup` enables the
+  host resolver (`local_unbound`) as part of the normal setup and leaves a resolver that already listens on port 53
+  alone. The helper then writes `/var/unbound/conf.d/jailops.conf` with the names of the running jails and with what
+  the resolver needs to answer them (`interface:` for the host's address on each network of a running jail,
+  `ip-transparent: yes`, `access-control:` for the subnets). A jail called `postgres` in the project `verkis` is
+  `postgres.verkis.internal` (A and AAAA), `postgres.v4.verkis.internal` (IPv4 only) and `postgres.v6.verkis.internal`
+  (IPv6 only), and `postgres` through the `search` line of its `resolv.conf`; the host is `host.verkis.internal`. A jail
+  sees the names of its own project and of no other: the file holds a view for each project. The helper makes the text
+  from the stored objects, not the daemon. It is written after a jail starts or stops and read with
+  `local-unbound-control reload`; a new network with its first running jail adds an interface and restarts
+  local-unbound once; `jailopsd` starts after `local_unbound`. `jailops jail info` has a `DNS` block (nameserver,
+  search, the jail's names, where every other name goes) and the console shows it; `jailops doctor` has `dns.unbound`
+  (`N names for M jails in P projects; suffix internal; unbound forwards everything else to ...`, a warning with the
+  fix when the resolver is not enabled). Customising is three things: `dns-suffix` in `priv.conf` (`internal` by
+  default), a network with `dns:` of its own (it keeps them and gets no names), and a jail's own `resolv.conf`.
+  **Changed:** JailOps writes a jail's `/etc/resolv.conf` only while it is absent, empty or has the first line
+  `# written by JailOps`; delete that line to keep your own file (the line `# jailops:keep` is gone).
+  [docs/dns.md](docs/dns.md).
+
+- **Breaking: one rule for every name a user chooses, and an address set takes hyphens.** A jail, project, network, storage, image, image alias, volume, snapshot, firewall policy, address set, profile, user, certificate, token, WireGuard tunnel, host of the backup node and every other name is lower case letters, digits and hyphens, starts with a letter and does not end in a hyphen (`^[a-z]([a-z0-9-]*[a-z0-9])?$`, `api.NamePattern`), at most 63 characters unless a derived name needs less (a project 13, a jail and an address set 29, a host firewall set 24). An underscore, a dot, an upper case letter and a digit at the start are refused everywhere; an address set called `git_allow` is `git-allow` now, and its pf table is `s_git_allow` (the hyphens of the name written as underscores, which is why no name has an underscore). Delete and make again what has an underscore in its name. The names of rules (`--name`) stay free labels, and the keys of labels keep their `domain/key` form.
+
+- **`jailops firewall test` says it in a few lines.** The answer is the verdict and, for each end, the rule that decided (`web sends: allowed by the default of the anchor`, `db takes: allowed by policy postgres rule 1 "who may reach PostgreSQL"`). `-v` adds the rendered pf rules, the rules that were skipped and what the test does not cover.
+- **Fixed: the time of a snapshot.** `jailops info` and `jailops jail snapshot list` showed `- ago` for every snapshot: the API never filled in when it was taken. It is read from ZFS now.
+- **`jailops firewall rule add` allows by default.** Without `--action` the rule allows (`--action deny` blocks), and a rule with `--port` and no `--proto` is tcp.
+
+- **An address set is made empty and filled one member at a time, like a policy and its rules.** `jailops firewall address-set create NAME` needs no address any more (`--comment` says what the set is; `--address` and `-f FILE` stay as shortcuts), `jailops firewall address-set add NAME MEMBER... [--comment TEXT]` adds members (one that is already there is left as it is and named) and `jailops firewall address-set remove NAME MEMBER...` takes them out; a member that is not in the set is an error. A rule that names an empty set matches nothing. **Breaking:** `--comment` of `create` was the comment of a single `--address`; it is the comment of the set now, and the comment of a member comes with `add`.
+
 ## 0.7.3 - 2026-11-16
 
 - **Fixed: setting the clock does not make a restart of the daemon a boot.** FreeBSD moves `kern.boottime` when the clock is stepped, so a daemon that started again after a step took it for a new boot and started the jails an operator had stopped. Two readings within ten minutes are the same boot.
