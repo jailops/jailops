@@ -47,9 +47,9 @@ func TestParseSize(t *testing.T) {
 
 func TestImageRef(t *testing.T) {
 	ok := map[string]ImageRef{
-		"freebsd-15.0@stable": {Name: "freebsd-15.0", Alias: "stable"},
-		"freebsd-15.0#g3":     {Name: "freebsd-15.0", Generation: 3, Pinned: true},
-		"alpine-3.22":         {Name: "alpine-3.22"},
+		"freebsd-15-0@stable": {Name: "freebsd-15-0", Alias: "stable"},
+		"freebsd-15-0#g3":     {Name: "freebsd-15-0", Generation: 3, Pinned: true},
+		"alpine-3-22":         {Name: "alpine-3-22"},
 	}
 	for s, want := range ok {
 		got, err := ParseImageRef(s)
@@ -57,7 +57,7 @@ func TestImageRef(t *testing.T) {
 			t.Errorf("%q: %+v %v", s, got, err)
 		}
 	}
-	for _, s := range []string{"", "@stable", "x@", "x#", "x#g", "x#g0", "x#3", "x#g03", "x#g-1", "x#g+1", "X@a", "x@A", "x y", "x#g1@a", "a/b", "x@a\n"} {
+	for _, s := range []string{"", "@stable", "freebsd-15.0@stable", "x@", "x#", "x#g", "x#g0", "x#3", "x#g03", "x#g-1", "x#g+1", "X@a", "x@A", "x y", "x#g1@a", "a/b", "x@a\n"} {
 		if _, err := ParseImageRef(s); err == nil {
 			t.Errorf("%q accepted", s)
 		}
@@ -66,7 +66,7 @@ func TestImageRef(t *testing.T) {
 
 func okJail() api.JailSpec {
 	return api.JailSpec{
-		Image:     "freebsd-15.0@stable",
+		Image:     "freebsd-15-0@stable",
 		Hostname:  "web.example.org",
 		Resources: api.Resources{CPU: 2, Memory: "2G", Disk: "20G"},
 		Network:   []api.NetworkAttach{{Network: "lan", IPv4: "auto", IPv6: "2001:db8::5", MAC: "02:00:00:00:00:01"}},
@@ -230,7 +230,7 @@ func TestFirewall(t *testing.T) {
 		{"port junk", r(func(x *api.FirewallRule) { x.Ports = []string{"80 or any"} }), "rules[0].ports"},
 		{"at sign", r(func(x *api.FirewallRule) { x.From = []string{"@office"} }), "rules[0].from"},
 		{"set syntax", r(func(x *api.FirewallRule) { x.From = []string{"set:Bad Name"} }), "rules[0].from"},
-		{"set with a dash", r(func(x *api.FirewallRule) { x.From = []string{"set:a-b"} }), "rules[0].from"},
+		{"set with an underscore", r(func(x *api.FirewallRule) { x.From = []string{"set:a_b"} }), "rules[0].from"},
 		{"jail dash at the end", r(func(x *api.FirewallRule) { x.From = []string{"jail:a-"} }), "rules[0].from"},
 		{"jail too long", r(func(x *api.FirewallRule) { x.From = []string{"jail:" + strings.Repeat("a", 30)} }), "rules[0].from"},
 		{"unknown kind", r(func(x *api.FirewallRule) { x.From = []string{"group:office"} }), "rules[0].from"},
@@ -281,21 +281,21 @@ func TestAddressSet(t *testing.T) {
 // its members is a cycle, and a jail that is not there has no addresses.
 func TestFlattenSetWithJailMembers(t *testing.T) {
 	sets := map[string]api.AddressSetSpec{
-		"git_allow": {Addresses: api.Entries("192.0.2.7", "jail:web", "jail:web-2", "set:office", "jail:gone")},
+		"git-allow": {Addresses: api.Entries("192.0.2.7", "jail:web", "jail:web-2", "set:office", "jail:gone")},
 		"office":    {Addresses: api.Entries("198.51.100.0/24")},
 		"loop":      {Addresses: api.Entries("set:loop2")},
 		"loop2":     {Addresses: api.Entries("set:loop")},
 	}
 	jails := map[string][]string{"web": {"10.0.0.5", "fd00::5"}, "web-2": {"10.0.0.6"}}
-	got, err := FlattenSet("git_allow", sets, jails)
+	got, err := FlattenSet("git-allow", sets, jails)
 	if err != nil || strings.Join(got, " ") != "10.0.0.5 10.0.0.6 192.0.2.7 198.51.100.0/24 fd00::5" {
 		t.Fatalf("%v %v", got, err)
 	}
 	if _, err := FlattenSet("loop", sets, jails); err == nil || !strings.Contains(err.Error(), "cycle") {
 		t.Fatalf("a cycle through members: %v", err)
 	}
-	sets["git_allow"] = api.AddressSetSpec{Addresses: api.Entries("set:nosuch")}
-	if _, err := FlattenSet("git_allow", sets, jails); err == nil || !strings.Contains(err.Error(), "nosuch") {
+	sets["git-allow"] = api.AddressSetSpec{Addresses: api.Entries("set:nosuch")}
+	if _, err := FlattenSet("git-allow", sets, jails); err == nil || !strings.Contains(err.Error(), "nosuch") {
 		t.Fatalf("a set that does not exist: %v", err)
 	}
 }
@@ -303,7 +303,7 @@ func TestFlattenSetWithJailMembers(t *testing.T) {
 // A reference is kind:name; @ is not used, and an unknown kind names the kinds.
 func TestParseEndpointKinds(t *testing.T) {
 	for s, want := range map[string]EndpointKind{"any": EndpointAny, "jail:web": EndpointJail, "jail:web-2": EndpointJail, "set:office": EndpointSet,
-		"set:git_allow": EndpointSet, "tag:backend": EndpointTag, "192.0.2.7": EndpointAddr, "10.0.0.0/8": EndpointAddr, "2001:db8::1": EndpointAddr} {
+		"set:git-allow": EndpointSet, "tag:backend": EndpointTag, "192.0.2.7": EndpointAddr, "10.0.0.0/8": EndpointAddr, "2001:db8::1": EndpointAddr} {
 		if k, _, err := ParseEndpoint(s); err != nil || k != want {
 			t.Errorf("%s: kind %v, %v", s, k, err)
 		}
@@ -315,7 +315,7 @@ func TestParseEndpointKinds(t *testing.T) {
 		"jail:Web":                        "invalid",
 		"jail:web-":                       "invalid",
 		"jail:" + strings.Repeat("a", 30): "invalid",
-		"set:web-1":                       "invalid",
+		"set:web_1":                       "invalid",
 		"set:":                            "invalid",
 		"tag:":                            "invalid",
 		"web":                             "not a valid address",
@@ -412,6 +412,9 @@ func TestQualifiedNameInjective(t *testing.T) {
 		for i, n := 0, r.IntN(6); i < n; i++ {
 			b = append(b, alpha[r.IntN(len(alpha))])
 		}
+		if b[len(b)-1] == '-' { // a name does not end in a hyphen
+			b = append(b, 'x')
+		}
 		return string(b)
 	}
 	seen := map[string][2]string{}
@@ -437,7 +440,7 @@ func TestProjectSpecShape(t *testing.T) {
 		Hosts:    []string{"h1", "h2"},
 		Networks: []api.ProjectNetwork{{Network: "lan"}, {Network: "dmz"}},
 		Storage:  []api.ProjectStorage{{Storage: "*", Quota: "10G"}},
-		Quotas:   api.ProjectQuotas{Jails: 3, Memory: "4G"}, FirewallPolicies: []string{"base"}, Images: []string{"freebsd-15.0"}, NewNetwork: true,
+		Quotas:   api.ProjectQuotas{Jails: 3, Memory: "4G"}, FirewallPolicies: []string{"base"}, Images: []string{"freebsd-15-0"}, NewNetwork: true,
 	}
 	if err := ProjectSpec("web", ok); err != nil {
 		t.Fatal(err)

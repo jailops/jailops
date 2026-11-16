@@ -40,8 +40,8 @@ func addrSetDesc() *kindDesc[api.AddressSet] {
 		func(p *api.AddressSet) *api.AddressSetSpec { return &p.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.AddressSet] { return c.Firewall().AddressSets() })
 	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.AddressSet] { return c.Firewall().AddressSets() })
-	d.renameLong = renameLong("address set", `the rules (@NAME) of the policies of the project, the sets that
-name it as a member (@NAME) and the app access grants made from it. Its PF table is renamed too, which ends the
+	d.renameLong = renameLong("address set", `the rules (set:NAME) of the policies of the project, the sets that
+name it as a member (set:NAME) and the app access grants made from it. Its PF table is renamed too, which ends the
 connections that rules using it passed once; they are made again`)
 	d.show = func(a *app, p api.AddressSet) error { return a.showAddressSet(p) }
 	d.head = []string{"NAME", "ADDRESSES"}
@@ -59,7 +59,8 @@ project as set:NAME, to a jail of the project as jail:NAME (by its addresses) an
 jails with a tag as tag:NAME. 'jailops firewall validate' checks files offline before
 they are applied.`,
 		`jailops firewall policy list
-jailops firewall address-set create office --address 192.0.2.0/24
+jailops firewall address-set create office --comment "the office"
+jailops firewall address-set add office 192.0.2.0/24
 jailops firewall validate -f policy.yaml`, "fw")
 	pd := policyDesc()
 	pc := group("policy", "Manage firewall policies", "Create, inspect, edit and delete firewall policies.",
@@ -83,35 +84,29 @@ jailops firewall policy create -f web.yaml`,
 	ad := addrSetDesc()
 	ac := group("address-set", "Manage address sets", "Create, inspect, edit and delete address sets, referenced as set:NAME in rules. A member is an address, a CIDR, jail:NAME or set:NAME. Every entry, set, rule and policy has a `comment`: what it is or why it is there. `show` lists them and the rendered rules carry them as comment lines: comments are what a reviewer of the firewall reads.",
 		"jailops firewall address-set list\njailops firewall address-set show office", "address-sets", "set")
-	crudCommands(a, ac, ad, "Create an address set from --address flags or a file. A member may be jail:NAME (a jail of the project) or set:NAME (another set); cycles are rejected. A set with one address is a perfectly good alias: say in its comment what it is.",
-		"jailops firewall address-set create office --address 192.0.2.0/24 --comment \"the office\"\njailops firewall address-set create -f office.yaml",
+	crudCommands(a, ac, ad, `Create an address set, empty or from a file. Members are added one at a time with 'jailops firewall
+address-set add' (or with --address here, or all at once from a file with -f). A member may be jail:NAME (a jail of the
+project) or set:NAME (another set); cycles are rejected. --comment is what the set is for. A set with one address is a
+perfectly good alias: say in its comment what it is. A rule that names an empty set matches nothing.`,
+		`jailops firewall address-set create office --comment "the office"
+jailops firewall address-set add office 192.0.2.0/24 --comment "the office network"
+jailops firewall address-set create -f office.yaml`,
 		func(cmd *cobra.Command) func(string) (api.AddressSet, error) {
 			var addrs []string
 			var comment string
-			cmd.Flags().StringArrayVar(&addrs, "address", nil, "address, CIDR, jail:NAME or set:NAME (repeatable)")
+			cmd.Flags().StringArrayVar(&addrs, "address", nil, "a first member: address, CIDR, jail:NAME or set:NAME (repeatable; more come with 'address-set add')")
 			_ = cmd.RegisterFlagCompletionFunc("address", a.completeMember())
-			cmd.Flags().StringVar(&comment, "comment", "", "what the address is (with a single --address; several entries with comments come from a file, -f, or address-set edit)")
+			cmd.Flags().StringVar(&comment, "comment", "", "what the set is for (one line, at most 200 characters, no double quotes or backslashes)")
 			return func(name string) (api.AddressSet, error) {
-				if len(addrs) == 0 {
-					return api.AddressSet{}, usagef("give at least one --address (or use -f FILE)")
-				}
 				for _, m := range addrs {
-					if k, _, err := validate.ParseEndpoint(m); err != nil {
+					if err := checkMember(m); err != nil {
 						return api.AddressSet{}, usagef("--address %q: %v", m, err)
-					} else if k != validate.EndpointAddr && k != validate.EndpointJail && k != validate.EndpointSet {
-						return api.AddressSet{}, usagef("--address %q: a member is an address, a CIDR, jail:NAME or set:NAME", m)
 					}
 				}
-				spec := api.AddressSetSpec{Addresses: api.Entries(addrs...)}
-				if comment != "" {
-					if len(addrs) != 1 {
-						return api.AddressSet{}, usagef("--comment describes a single --address; for several entries with comments use a file (-f FILE) or 'address-set edit'")
-					}
-					spec.Addresses[0].Comment = comment
-				}
-				return api.AddressSet{Metadata: api.ObjectMeta{Name: name}, Spec: spec}, nil
+				return api.AddressSet{Metadata: api.ObjectMeta{Name: name}, Spec: api.AddressSetSpec{Comment: comment, Addresses: api.Entries(addrs...)}}, nil
 			}
 		})
+	ac.AddCommand(a.addrSetAdd(), a.addrSetRemove())
 	fc.AddCommand(pc, a.ruleCmd(), ac, a.firewallValidate(), a.firewallTest())
 	return fc
 }

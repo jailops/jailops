@@ -122,12 +122,12 @@ func (f *Fleet) Check() error {
 		// The daemon's name rules are narrower than the repository's file-name rule: a name it refuses fails at apply time.
 		switch o.Kind {
 		case api.KindJail, api.KindVolume, api.KindNetwork, api.KindFirewallPolicy, api.KindWireGuard, model.KindApp, api.KindAppAccess:
-			if !daemonNameRE.MatchString(o.Name) {
-				add(o, "%s name %q must match %s (lowercase letters, digits and '-', starting with a letter)", o.Kind, o.Name, daemonNameRE)
+			if !api.IsName(o.Name, api.MaxName) {
+				add(o, "%s name %q must follow %s (lowercase letters, digits and '-', starting with a letter, not ending in '-')", o.Kind, o.Name, api.NamePattern)
 			}
 		case api.KindAddressSet:
-			if !setNameRE.MatchString(o.Name) {
-				add(o, "address set name %q must match %s (lowercase letters, digits and '_', starting with a letter: it becomes a PF table)", o.Name, setNameRE)
+			if !api.IsName(o.Name, 29) {
+				add(o, "address set name %q must follow %s (29 characters at most)", o.Name, api.NamePattern)
 			}
 		}
 		for _, s := range o.SecretRefs {
@@ -458,11 +458,6 @@ func (f *Fleet) Check() error {
 	f.Warnings = slices.Compact(f.Warnings)
 	return errors.Join(errs...)
 }
-
-var (
-	daemonNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
-	setNameRE    = regexp.MustCompile(`^[a-z][a-z0-9_]{0,23}$`)
-)
 
 func grantsNetwork(p api.ProjectSpec, n string) bool {
 	for _, g := range p.Networks {
@@ -854,8 +849,8 @@ func checkWireGuard(o *Object, s api.WireGuardSpec, add func(*Object, string, ..
 	var used []netip.Prefix
 	for i, p := range s.Peers {
 		f := fmt.Sprintf("spec.peers[%d]", i)
-		if !daemonNameRE.MatchString(p.Name) {
-			add(o, "%s.name %q must match %s", f, p.Name, daemonNameRE)
+		if !api.IsName(p.Name, api.MaxName) {
+			add(o, "%s.name %q must follow %s", f, p.Name, api.NamePattern)
 		}
 		if names[p.Name] {
 			add(o, "%s: peer %q is listed twice", f, p.Name)

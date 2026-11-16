@@ -382,7 +382,7 @@ func TestHostFWRefusalsOverTheWire(t *testing.T) {
 		"comment too long":     custom(api.HostFirewallAllow{Proto: "tcp", Ports: []string{"80"}, Comment: long}),
 		"set name":             {Sets: []api.HostFirewallSet{{Name: "a b", Members: []string{"192.0.2.1"}}}},
 		"set name long":        {Sets: []api.HostFirewallSet{{Name: "a" + strings.Repeat("b", 24), Members: []string{"192.0.2.1"}}}},
-		"set name dash":        {Sets: []api.HostFirewallSet{{Name: "a-b", Members: []string{"192.0.2.1"}}}},
+		"set name underscore":  {Sets: []api.HostFirewallSet{{Name: "a_b", Members: []string{"192.0.2.1"}}}},
 		"set twice":            {Sets: []api.HostFirewallSet{{Name: "a", Members: []string{"192.0.2.1"}}, {Name: "a", Members: []string{"192.0.2.2"}}}},
 		"set empty":            {Sets: []api.HostFirewallSet{{Name: "a"}}},
 		"set member @":         {Sets: []api.HostFirewallSet{{Name: "a", Members: []string{"@b"}}}},

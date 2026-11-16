@@ -118,7 +118,7 @@ func pfPorts(ports []string) string {
 }
 
 // hostFWTable is the pf table of a set (at most 30 characters: pf allows 31).
-func hostFWTable(set string) string { return "jo_hf_" + set }
+func hostFWTable(set string) string { return "jo_hf_" + strings.ReplaceAll(set, "-", "_") }
 
 // renderHostPF renders the whole of /etc/pf.conf from a canonical spec, in the order pf requires: tables, options,
 // normalisation, then the rules. The anchor line the jails need is always there; it comes first among the rules,

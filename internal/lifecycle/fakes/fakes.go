@@ -365,6 +365,11 @@ func (f *Files) SeedKeys(_ context.Context, root string) error {
 	return nil
 }
 
+// DNSUnbound is off in the fake: no helper, no unbound.
+func (f *Files) DNSUnbound(context.Context, bool) (mounts.UnboundState, error) {
+	return mounts.UnboundState{}, nil
+}
+
 // HealNetwork destroys nothing: the fake has no interfaces.
 func (f *Files) HealNetwork(context.Context) (mounts.NetHealed, error) {
 	return mounts.NetHealed{}, nil

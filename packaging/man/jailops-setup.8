@@ -36,6 +36,19 @@ Turns IP forwarding on now
 and at boot
 .Pq Va gateway_enable , ipv6_gateway_enable .
 .It
+Offers to enable the host resolver of the base system
+.Pq Va local_unbound_enable , Xr local-unbound-setup 8 ,
+which answers the DNS of the jails and gives them names
+.Pq Ar jail Ns . Ns Ar project Ns .internal ;
+when it is enabled already it only makes its
+.Pa conf.d
+directory root's.
+It writes
+.Pa /etc/resolv.conf
+and
+.Pa /var/unbound ,
+so it asks.
+.It
 Puts the anchor line of JailOps into
 .Pa /etc/pf.conf
 (or the file

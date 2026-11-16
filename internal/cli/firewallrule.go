@@ -264,11 +264,12 @@ func rulePositionCompleter(a *app) completer {
 func (a *app) ruleAdd() *cobra.Command {
 	var at int
 	cmd := &cobra.Command{
-		Use:   "add POLICY in|out --action allow|deny [flags]",
+		Use:   "add POLICY in|out [flags]",
 		Short: "Add a rule to a firewall policy",
 		Long: `Add a rule at the end of the policy, or at a position with --at. The direction is the second word: in is
-traffic to the jail, out is traffic from it. --action is required; everything else narrows the rule: without --proto
-it matches every protocol, without --from or --to every address, without --port every port. Say why the rule is there
+traffic to the jail, out is traffic from it. The rule allows unless --action deny says otherwise; everything else
+narrows the rule: without --proto it matches every protocol (with --port it is tcp), without --from or --to every
+address, without --port every port. Say why the rule is there
 with --comment: it shows in 'policy show' and as a comment line in the rendered anchor. An inbound rule names the
 source with --from; an outbound rule names the destination with --to. A rule with --redirect HOSTPORT:JAILPORT
 forwards a port of the host to the jail.`,
@@ -288,14 +289,15 @@ jailops firewall rule add web in --action allow --proto tcp --redirect 8080:80 -
 		if args[1] != "in" && args[1] != "out" {
 			return usagef("the direction is in (to the jail) or out (from the jail), not %q", args[1])
 		}
-		if o.action == "" {
-			return usagef("--action is required: allow or deny")
-		}
 		o.direction = args[1]
 		var r api.FirewallRule
 		r.Direction = args[1]
+		r.Action = "allow" // the default; --action deny says otherwise
 		if err := o.apply(cmd, &r); err != nil {
 			return err
+		}
+		if r.Proto == "" && cmd.Flags().Changed("port") {
+			r.Proto = "tcp" // a port needs a protocol, and tcp is the one everything else defaults to
 		}
 		c, err := a.connect(cmd.Context())
 		if err != nil {
@@ -320,7 +322,7 @@ jailops firewall rule add web in --action allow --proto tcp --redirect 8080:80 -
 			return err
 		}
 		if r.Comment == "" && !a.quiet && !a.dryRun {
-			fprintf(a.env.Stderr, "note: the rule has no comment; 'jailops firewall validate --review' asks for one\n")
+			fprintf(a.env.Stderr, "note: the rule has no comment; say why it is there with: jailops firewall rule edit %s %d --comment TEXT\n", args[0], pos+1)
 		}
 		return nil
 	}

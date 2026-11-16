@@ -109,11 +109,11 @@ test('a new address set is used in a rule, refused while in use, and deleted onc
 test('comments on a set, its members, a policy and a rule are saved and read back', async ({ page }) => {
   await open(page, '/firewall?tab=sets')
   await page.getByTestId('new-set').click()
-  await page.locator('#fws-name').fill('git_allow')
+  await page.locator('#fws-name').fill('git-allow')
   await page.locator('#fws-comment').fill('Who may reach the git server')
   await page.locator('#fws-members').fill('198.51.100.10  # the office\n2001:db8:1::/64')
   await page.getByTestId('set-create-go').click()
-  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('set:git_allow')
+  await expect(page.getByTestId('set-editor').locator('h2')).toHaveText('set:git-allow')
   await expect(page.getByTestId('set-comment')).toHaveValue('Who may reach the git server')
   await expect(page.locator('#sa')).toHaveValue('198.51.100.10  # the office\n2001:db8:1::/64')
 
@@ -123,7 +123,7 @@ test('comments on a set, its members, a policy and a rule are saved and read bac
   await page.getByTestId('policy-create-go').click()
   await page.getByTestId('policy-comment').fill('The git server of the team')
   await page.getByRole('button', { name: 'Add rule' }).click()
-  await page.locator('[data-rule="0"]').getByLabel('From').fill('set:git_allow')
+  await page.locator('[data-rule="0"]').getByLabel('From').fill('set:git-allow')
   await page.locator('[data-rule="0"]').getByLabel('Ports').fill('22')
   await page.locator('[data-rule="0"]').getByTestId('rule-comment').fill('ssh from the team only')
   await page.locator('[data-rule="0"]').getByTestId('rule-disabled').check()

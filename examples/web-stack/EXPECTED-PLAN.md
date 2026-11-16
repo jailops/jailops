@@ -9,7 +9,7 @@ host app1
   create    Network/shop
   create    Project/shop
   create    AddressSet/shop/admins
-  create    AddressSet/shop/app_tier
+  create    AddressSet/shop/app-tier
   create    FirewallPolicy/shop/app
   create    FirewallPolicy/shop/floor
   create    FirewallPolicy/shop/nginx

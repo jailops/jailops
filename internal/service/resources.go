@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"strings"
+	"jailops.net/jailops/internal/validate"
 	"time"
 
 	"jailops.net/jailops/internal/state"
@@ -289,22 +289,9 @@ func MatchLabels(labels, want map[string]string) bool {
 	return true
 }
 
-// ValidObjectName is the name rule for kinds without a stricter validator:
-// lowercase letters, digits and "-_." (PROTOCOL.md).
-func ValidObjectName(n string) error {
-	if n == "" || len(n) > 128 {
-		return invalid("name must be 1 to 128 characters")
-	}
-	for _, c := range n {
-		if !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.') {
-			return invalid("invalid name %q", n).WithHint("use lowercase letters, digits, '-', '_' and '.'")
-		}
-	}
-	if strings.HasPrefix(n, ".") {
-		return invalid("invalid name %q", n)
-	}
-	return nil
-}
+// ValidObjectName is the name rule for kinds without a stricter validator: the one rule for every name a user
+// chooses, api.NamePattern, at most 63 characters.
+func ValidObjectName(n string) error { return validate.Name("name", n) }
 
 // MergePatch applies an RFC 7386 merge patch to the JSON form of v and
 // decodes the result into out.

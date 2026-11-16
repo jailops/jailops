@@ -825,6 +825,7 @@ func (s *Service) snapToAPI(ctx context.Context, project, key string, r lifecycl
 		Spec:     api.JailSnapshotSpec{Jail: jail},
 		Status:   api.JailSnapshotStatus{Written: r.TotalWritten},
 	}
+	sn.Metadata.CreatedAt = r.Created
 	if c, err := s.d.ZFS.Get(ctx, s.lcfg.ContainerDS(key)+"@"+r.Name, lifecycle.PropComment); err == nil {
 		sn.Spec.Comment = c
 	}

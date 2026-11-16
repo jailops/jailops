@@ -37,11 +37,13 @@ type jailInfo struct {
 	Interfaces    []infoInterface `json:"interfaces"`
 	// FirewallPolicies are the policies the jail is rendered with, in the order they are rendered; empty when it has
 	// none and is open.
-	FirewallPolicies []infoPolicy       `json:"firewall_policies,omitempty"`
-	Volumes          []api.VolumeAttach `json:"volumes,omitempty"`
-	Snapshots        infoSnapshots      `json:"snapshots"`
-	Update           infoUpdate         `json:"update"`
-	Labels           map[string]string  `json:"labels,omitempty"`
+	FirewallPolicies []infoPolicy `json:"firewall_policies,omitempty"`
+	// DNS says how the jail resolves names; absent when it has no network.
+	DNS       *infoDNS           `json:"dns,omitempty"`
+	Volumes   []api.VolumeAttach `json:"volumes,omitempty"`
+	Snapshots infoSnapshots      `json:"snapshots"`
+	Update    infoUpdate         `json:"update"`
+	Labels    map[string]string  `json:"labels,omitempty"`
 	// Problems are the conditions that are not True, and the drift.
 	Problems []string `json:"problems,omitempty"`
 }
@@ -77,6 +79,61 @@ type infoAddress struct {
 	Scope   string `json:"scope"`  // global or link
 	// Configured says the server saw the address on the running jail.
 	Configured bool `json:"configured"`
+}
+
+// infoDNS is how a jail resolves names: where it asks, the names it has itself and where every other name goes.
+type infoDNS struct {
+	Source      api.DNSSource `json:"source"`
+	Nameservers []string      `json:"nameservers,omitempty"`
+	Search      string        `json:"search,omitempty"`
+	// Names are the names of the jail itself, when the host's resolver gives them.
+	Names []string `json:"names,omitempty"`
+	// Others says where every other name goes; Note says why the jail has no names of its own.
+	Others string `json:"others,omitempty"`
+	Note   string `json:"note,omitempty"`
+}
+
+// jailDNS reads the DNS of a jail out of the status of its first network and its own addresses.
+func jailDNS(j api.Jail, nw api.Network, addrs []string) *infoDNS {
+	d := nw.Status.DNS
+	if d == nil {
+		return nil
+	}
+	out := &infoDNS{Source: d.Source, Nameservers: d.Nameservers}
+	switch {
+	case d.Suffix != "":
+		zone := j.Metadata.Project + "." + d.Suffix
+		out.Search = zone
+		name := j.Metadata.Name
+		out.Names = []string{name + "." + zone, name}
+		var v4, v6 bool
+		for _, a := range addrs {
+			if ip, ok := addrOf(a); ok && !ip.IsLinkLocalUnicast() {
+				v4, v6 = v4 || ip.Is4(), v6 || ip.Is6()
+			}
+		}
+		if v4 {
+			out.Names = append(out.Names, name+".v4."+zone)
+		}
+		if v6 {
+			out.Names = append(out.Names, name+".v6."+zone)
+		}
+		switch {
+		case len(d.Forward) > 0:
+			out.Others = "forwarded to " + strings.Join(d.Forward, ", ")
+		case d.Recurse:
+			out.Others = "resolved from the root servers"
+		}
+	case d.Source == api.DNSFromNetwork:
+		out.Note = "the network names its own nameservers, so the jails have no names of each other"
+		out.Others = "the network's own nameservers"
+	case d.Source == api.DNSFromHost:
+		out.Note = "no names: the host resolver does not give them (jailops doctor, dns.unbound)"
+		out.Others = "the host's nameservers"
+	default:
+		out.Note = "no names: the host resolver does not give them (jailops doctor, dns.unbound)"
+	}
+	return out
 }
 
 type infoSnapshots struct {
@@ -202,6 +259,15 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 	}
 	if info.Interfaces == nil {
 		info.Interfaces = []infoInterface{}
+	}
+	if len(s.Network) > 0 {
+		if nw, err := c.Networks().Get(ctx, s.Network[0].Network); err == nil {
+			addrs := append([]string{}, st.Addresses...)
+			for _, n := range s.Network {
+				addrs = append(addrs, fixedAddr(n.IPv4), fixedAddr(n.IPv6))
+			}
+			info.DNS = jailDNS(j, nw, addrs)
+		}
 	}
 	if u, err := c.Jails().Usage(ctx, m.Name); err != nil {
 		info.Resources.UsageError = err.Error()
@@ -405,6 +471,29 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 				note = ", configured"
 			}
 			fprintf(w, "    %-42s %s %s%s\n", ad.Address, ad.Family, ad.Scope, note)
+		}
+	}
+
+	if dn := info.DNS; dn != nil {
+		section("DNS")
+		ns := strings.Join(dn.Nameservers, ", ")
+		switch dn.Source {
+		case api.DNSFromGateway:
+			ns += " (the gateway)"
+		case api.DNSFromNetwork:
+			ns += " (the network's own)"
+		case api.DNSNone:
+			ns = "none"
+		}
+		kv("Nameserver", ns)
+		if dn.Search != "" {
+			kv("Search", dn.Search)
+			kv("Names", strings.Join(dn.Names, ", "))
+		} else if dn.Note != "" {
+			kv("Names", dn.Note)
+		}
+		if dn.Others != "" {
+			kv("Other names", dn.Others)
 		}
 	}
 

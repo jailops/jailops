@@ -67,8 +67,8 @@ A change of the network's `dns` reaches the **running** jails at once: their `re
 `network edit` names them ("resolv.conf rewritten in the running jails ..."); a stopped jail gets it at its next start.
 A change of the host's own `/etc/resolv.conf` reaches a jail at its next start (or at the next change of the network).
 
-A jail that runs its own resolver, or wants its own file, puts the line `# jailops:keep` into its `/etc/resolv.conf`:
-JailOps then never writes the file, neither at a start nor at a change of the network. The file is written through the
+A jail that runs its own resolver, or wants its own file, removes the first line (`# written by JailOps`) of its `/etc/resolv.conf`, or
+writes a file of its own before the first start: JailOps then never writes the file, neither at a start nor at a change of the network. The file is written through the
 helper's file operations, which replace only a regular file inside the jail's root and refuse a symlink.
 
 ## Two IPv6 modes
@@ -277,9 +277,9 @@ stops when its rule goes.
   | `host` | the host itself: the gateway addresses of the app jail's networks | `app allow`, `firewall test` |
 
   A reference is always `kind:name`; `@` is not used (`@web` is refused with the words to write instead). The kinds are
-  separate namespaces, so a jail and an address set of one project may have the same name; a jail name has at most 29
-  characters, so every jail can be named in a rule. The pf tables are `j_<jail>` (a hyphen read as `_`), `s_<set>` and
-  `t_<tag>`. A set with one address is a perfectly good alias: give it a name and say in its comment what it is.
+  separate namespaces, so a jail and an address set of one project may have the same name; a jail name and an address set name have
+  at most 29 characters, so each can be named in a rule and in a pf table. The pf tables are `j_<jail>`, `s_<set>` and
+  `t_<tag>`, with every hyphen of the name written as `_`; names have no underscore, so two names never give one table. A set with one address is a perfectly good alias: give it a name and say in its comment what it is.
   `jailops firewall rule add --help` has the flags.
 
   **A policy always says its defaults.** `default_in` and `default_out` are required, `allow` or `deny`, on every policy
@@ -300,7 +300,7 @@ stops when its rule goes.
   direction, and a policy of a jail can open ports but never turn a default deny of the project into allow. A policy that a list
   names is not deleted (the refusal names who uses it) and is renamed in every list. The usual shape: the project's mandatory
   policy `default` (deny inbound, ping allowed) for every jail, and on the PostgreSQL jail `firewall.policies: [postgres]`,
-  where `postgres` allows the address set `postgresql_allow` on port 5432; a policy such as `ssh-office` is a block that
+  where `postgres` allows the address set `postgresql-allow` on port 5432; a policy such as `ssh-office` is a block that
   many jails name.
 
   **Deny wins over allow, and the order of the policies does not matter.** When any policy of a jail has an enabled deny
@@ -323,23 +323,27 @@ stops when its rule goes.
   the project that connects allows the addresses out.
 
       # project shop: the web jail of project blog (10.30.0.5) may reach the database
-      jailops firewall address-set create blog --address 10.30.0.5 --comment "the web jail of project blog"
+      jailops firewall address-set create blog --comment "the web jail of project blog"
+      jailops firewall address-set add blog 10.30.0.5
       jailops firewall policy create db --default-in deny --default-out allow
       jailops firewall rule add db in --action allow --proto tcp --from set:blog --port 5432 --comment "the blog's web jail"
       # project blog: the jail may go out to the database at 10.20.0.10 (the closed default of a project says no otherwise)
       jailops firewall policy create out-db --default-in deny --default-out allow
       jailops firewall rule add out-db out --action allow --proto tcp --to 10.20.0.10 --port 5432 --comment "the shop database"
 
-      jailops firewall address-set create office --address 192.0.2.0/24 --comment "the office"
-      jailops firewall address-set create git_allow --address 198.51.100.7 --address jail:web
+      jailops firewall address-set create office --comment "the office"
+      jailops firewall address-set add office 192.0.2.0/24 --comment "the office network"
+      jailops firewall address-set create git-allow --address 198.51.100.7 --address jail:web
       jailops firewall policy create web --default-in deny --default-out allow --comment "the public web server"
       jailops firewall rule add web in --action allow --proto tcp --port 80,443 --comment "the site"
       jailops firewall rule add web in --action allow --proto tcp --from set:office --port 22 --comment "ssh from the office"
       jailops firewall policy create db --default-in deny --default-out allow
       jailops firewall rule add db in --action allow --proto tcp --from jail:web --port 5432 --comment "the web jail"
 
-  A member of an address set is an address, a CIDR, `jail:name` or `set:name`: a list such as
-  `git_allow` can hold jails and be added to later. A jail that a rule or a set names is not renamed or deleted until the reference is changed (the refusal names the policy or the set), so a rule never names a jail that is gone, and a jail made later never takes the place of one.
+  A set is made empty and filled one member at a time, like a policy and its rules: `address-set add NAME MEMBER...` adds
+  members (one that is already there is left as it is) and `address-set remove NAME MEMBER...` takes them out; a set may be
+  empty, and a rule that names an empty set matches nothing. A member of an address set is an address, a CIDR, `jail:name` or `set:name`: a list such as
+  `git-allow` can hold jails and be added to later. A jail that a rule or a set names is not renamed or deleted until the reference is changed (the refusal names the policy or the set), so a rule never names a jail that is gone, and a jail made later never takes the place of one.
 
   **Comments are for the review of the firewall.** An address set, each of its entries, a policy and each rule has a
   `comment`: what it is, why it is there (one line of printable text, at most 200 characters, without double quotes or backslashes because it becomes a comment line of the ruleset; it is not part of any rule). In a file or in
@@ -353,9 +357,9 @@ stops when its rule goes.
           - address: "jail:web"
             comment: the web jail
 
-  `--comment` of `address-set create` goes with a single `--address`; an IPv4 and an IPv6 network of the same office are two
-  entries, each with its own comment, so that each says what it is. A rule's comment is `--comment` of `rule add` and `rule edit`. `address-set show` and `policy show` list the comments in a table, the rendered anchor of a jail carries them as
-  comment lines (`# set git_allow: 198.51.100.7 the office`, `# policy NAME` and `#   what it is for`, `# rule 1: name` and `#   why`), and the
+  `--comment` of `address-set create` says what the set is and `--comment` of `address-set add` says what the members it adds
+  are; an IPv4 and an IPv6 network of the same office are two entries added with a comment each, so that each says what it is. A rule's comment is `--comment` of `rule add` and `rule edit`. `address-set show` and `policy show` list the comments in a table, the rendered anchor of a jail carries them as
+  comment lines (`# set git-allow: 198.51.100.7 the office`, `# policy NAME` and `#   what it is for`, `# rule 1: name` and `#   why`), and the
   console has a comment field on a set, a policy and every rule, and takes the comment of a member at the end of its line
   (`198.51.100.0/24  # the office`).
 
@@ -384,7 +388,7 @@ the isolation of projects, or the default of the anchor) and the rendered pf lin
 the project, another project's jail included, is an external host: only the other end's anchor is evaluated.
 
 For the example above, with the project policy `default` (deny inbound, ping allowed) and `postgres` on the db jail
-(`allow in tcp from set:postgresql_allow port 5432`, the set holding `jail:web`): `web` to `db` port 5432 passes, port 5433 is
+(`allow in tcp from set:postgresql-allow port 5432`, the set holding `jail:web`): `web` to `db` port 5432 passes, port 5433 is
 blocked by the default of the anchor, and `other` to `db` port 5432 is blocked too; ping from `other` passes by the
 project policy. The exit status is 0 pass, 1 block, 8 unknown. `icmp` and `icmp6` test an echo request unless
 `--icmp-type` names another type, and say so.

@@ -482,8 +482,8 @@ type HostBody struct {
 
 // EnrollHost validates and stores a host. It is shared by the CLI and the API.
 func EnrollHost(ctx context.Context, db *ctl.DB, b HostBody) (ctl.Host, error) {
-	if b.Name == "" || len(b.Name) > 128 {
-		return ctl.Host{}, api.Errorf(api.CodeInvalid, "a host needs a name of up to 128 characters")
+	if !api.IsName(b.Name, api.MaxName) {
+		return ctl.Host{}, api.Errorf(api.CodeInvalid, "a host needs a name: lower case letters, digits and hyphens, starting with a letter, at most %d characters", api.MaxName)
 	}
 	fp := b.Fingerprint
 	if fp == "" && b.Certificate != "" {
@@ -967,6 +967,9 @@ func (m *Mgmt) userList(w http.ResponseWriter, r *http.Request, id *identity) {
 
 // CreateUser adds a user with a checked password. It is shared by the CLI and the API.
 func CreateUser(ctx context.Context, db *ctl.DB, name, password, role string, pp auth.PasswordParams) error {
+	if !api.IsName(name, api.MaxName) {
+		return api.Errorf(api.CodeInvalid, "a user needs a name: lower case letters, digits and hyphens, starting with a letter, at most %d characters", api.MaxName)
+	}
 	if !validRole(role) {
 		return api.Errorf(api.CodeInvalid, "role must be readonly, backup-admin or admin")
 	}
@@ -1095,8 +1098,8 @@ func (m *Mgmt) tokenCreate(w http.ResponseWriter, r *http.Request, id *identity)
 		writeError(w, err)
 		return
 	}
-	if b.Name == "" || len(b.Name) > 128 || !validRole(b.Role) {
-		writeError(w, api.Errorf(api.CodeInvalid, "a token needs a name and a role (readonly, backup-admin or admin)"))
+	if !api.IsName(b.Name, api.MaxName) || !validRole(b.Role) {
+		writeError(w, api.Errorf(api.CodeInvalid, "a token needs a name (lower case letters, digits and hyphens, starting with a letter) and a role (readonly, backup-admin or admin)"))
 		return
 	}
 	if err := auth.ValidateAllowFrom(b.AllowFrom); err != nil {

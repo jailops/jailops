@@ -143,12 +143,9 @@ func TestNamesFollowTheDaemonRules(t *testing.T) {
 	write(t, d, "shared/networks/my_net.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: my_net\nspec:\n  ipv4: {subnet: 10.1.0.0/24, gateway: 10.1.0.1, range: 10.1.0.2-10.1.0.9}\n")
 	project(t, d, "p", "[a]", "")
 	write(t, d, "projects/p/address-sets/web-tier.yaml", "apiVersion: jailops/v1\nkind: AddressSet\nmetadata:\n  name: web-tier\nspec:\n  addresses: [{address: 192.0.2.1}]\n")
-	f, err := Load(d)
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = f.Check()
-	if err == nil || !strings.Contains(err.Error(), `Network name "my_net"`) || !strings.Contains(err.Error(), `address set name "web-tier"`) {
+	// one rule for every kind: an underscore is refused, a hyphen is fine, also in the name of an address set
+	_, err := Load(d)
+	if err == nil || !strings.Contains(err.Error(), `"my_net"`) || strings.Contains(err.Error(), `web-tier`) {
 		t.Fatalf("got %v", err)
 	}
 }

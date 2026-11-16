@@ -311,7 +311,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 				b.line("# set %s: %s %s", n, e.Address, pfComment(e.Comment))
 			}
 		}
-		b.line("%s", tableLine("s_"+n, members))
+		b.line("%s", tableLine(validate.SetTable(n), members))
 	}
 	for _, n := range sortedKeys(jailRefs) {
 		b.line("%s", tableLine("j_"+strings.ReplaceAll(n, "-", "_"), validate.CanonicalAddrs(in.Jails[n])))

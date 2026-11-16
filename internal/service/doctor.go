@@ -52,6 +52,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)
 	s.doctorDNS(ctx, c)
+	s.doctorUnbound(ctx, c)
 	s.doctorNameLengths(ctx, c)
 	s.doctorRuntime(ctx, c)
 	s.doctorOldNetwork(ctx, c)

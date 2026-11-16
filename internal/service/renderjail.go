@@ -337,14 +337,15 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 	b.jailConf = jc
 	// Guest configuration.
 	root := s.rootMount(name)
-	_, dns := s.resolvers(netSpecs)
+	dnsSrc, dns := s.resolvers(netSpecs)
+	search := s.dnsSearch(dnsSrc, project)
 	ni := render.NetInput{Hostname: host, Ifaces: ifs, DNS: dns}
 	switch osf {
 	case api.OSLinux:
 		for p, f := range map[string]func() (string, error){
 			guestAlpineI: func() (string, error) { return render.AlpineInterfaces(ni) },
 			guestAlpineH: func() (string, error) { return render.AlpineHostname(host) },
-			guestResolv:  func() (string, error) { return render.AlpineResolvConf(dns, nil) },
+			guestResolv:  func() (string, error) { return render.AlpineResolvConf(dns, search) },
 		} {
 			c, err := f()
 			if err != nil {
@@ -358,7 +359,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			return nil, err
 		}
 		b.guest[path.Join(root, guestRcConf)] = rc
-		rv, err := render.ResolvConf(dns, nil)
+		rv, err := render.ResolvConf(dns, search)
 		if err != nil {
 			return nil, err
 		}

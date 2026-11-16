@@ -560,7 +560,7 @@ gives its jails the network's gateway address instead. That answers only if the 
 the gateway and admits the network's subnet (and, with a `pf.conf` that blocks by default, passes port 53 in on the
 gateway interface): JailOps never edits the resolver or `pf.conf` and opens no port. Until then the jails' queries go
 unanswered; no host service is exposed by the default. A jail's own policy governs port 53 like any other traffic. A jail
-that runs its own resolver keeps its `resolv.conf` with the line `# jailops:keep`; JailOps then never writes the file, and
+that runs its own resolver removes the line `# written by JailOps` from its `resolv.conf`; JailOps then never writes the file again, and
 it rewrites the file of a running jail only through the helper's file operations, which replace a regular file inside the
 jail's root and refuse a symlink.
 

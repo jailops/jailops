@@ -1,5 +1,5 @@
 import type { AddressEntry, AddressSet, AddressSetSpec, FirewallPolicy, FirewallRule } from '@jailops/shared/api/types'
-import { nameRules } from '@jailops/shared/lib/names'
+import { NAME_PATTERN, nameRules } from '@jailops/shared/lib/names'
 import { ipv4, ipv6Groups } from './host'
 
 export type RuleErrors = Record<string, string> // key: "<index>.<field>"
@@ -79,8 +79,8 @@ function v4Bytes(s: string): number[] | null {
  */
 export function setMember(s: string): boolean {
   // jail:NAME is a jail of the project (its addresses), set:NAME another set; the server checks that a set exists
-  if (s.startsWith('jail:')) return /^[a-z][a-z0-9-]{0,28}$/.test(s.slice(5)) && !s.endsWith('-')
-  if (s.startsWith('set:')) return /^[a-z][a-z0-9_]{0,23}$/.test(s.slice(4))
+  if (s.startsWith('jail:')) return s.length - 5 <= 29 && NAME_PATTERN.test(s.slice(5))
+  if (s.startsWith('set:')) return s.length - 4 <= 29 && NAME_PATTERN.test(s.slice(4))
   const slash = s.lastIndexOf('/')
   const addr = slash < 0 ? s : s.slice(0, slash)
   let bits = 32

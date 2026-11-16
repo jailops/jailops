@@ -86,6 +86,12 @@ func (f privFiles) HealNetwork(ctx context.Context) (mounts.NetHealed, error) {
 	r, err := f.h.HealNetwork(ctx)
 	return mounts.NetHealed{Destroyed: r.Destroyed, Skipped: r.Skipped}, err
 }
+func (f privFiles) DNSUnbound(ctx context.Context, apply bool) (mounts.UnboundState, error) {
+	r, err := f.h.DNSUnbound(ctx, apply)
+	return mounts.UnboundState{Enabled: r.Enabled, Base: r.Base, Reason: r.Reason, Current: r.Current, Changed: r.Changed, Reloaded: r.Reloaded, Path: r.Path,
+		Control: r.Control, Sample: r.Sample, Names: r.Names, Gateways: r.Gateways,
+		Suffix: r.Suffix, Jails: r.Jails, Projects: r.Projects, Forward: r.Forward, Recurse: r.Recurse}, err
+}
 func (f privFiles) RemoveAll(ctx context.Context, path string) error {
 	if f.mine(path) {
 		return osFiles{}.RemoveAll(ctx, path)
@@ -173,6 +179,9 @@ func (osFiles) SetOwner(_ context.Context, path string, uid, gid int, mode uint3
 func (osFiles) StaleMounts(context.Context) ([]mounts.Stale, error)     { return nil, nil }
 func (osFiles) HealJail(context.Context, string) (mounts.Healed, error) { return mounts.Healed{}, nil }
 func (osFiles) HealNetwork(context.Context) (mounts.NetHealed, error)   { return mounts.NetHealed{}, nil }
+func (osFiles) DNSUnbound(context.Context, bool) (mounts.UnboundState, error) {
+	return mounts.UnboundState{}, nil
+}
 
 // ProbeSource of a daemon without the helper: the directory is on a mount when its device is not its parent's.
 func (osFiles) ProbeSource(_ context.Context, path string, write bool) (hostdir.Probe, error) {

@@ -766,14 +766,14 @@ func TestPFNeighbourDiscoveryOnTheJailsLink(t *testing.T) {
 // what a table holds.
 func TestAnchorCarriesTheCommentsOfASet(t *testing.T) {
 	in := PFInput{Jail: "alpha_db", Interfaces: []string{"jo0123456789a0a"}, Addresses: []netip.Addr{netip.MustParseAddr("192.0.2.1")}, Uplink: "jo0",
-		DefaultIn: "deny", DefaultOut: "allow", Policies: []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:git_allow"}, Ports: []string{"22"}}}}}},
-		Sets: map[string]api.AddressSetSpec{"git_allow": {Addresses: []api.AddressEntry{
+		DefaultIn: "deny", DefaultOut: "allow", Policies: []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:git-allow"}, Ports: []string{"22"}}}}}},
+		Sets: map[string]api.AddressSetSpec{"git-allow": {Addresses: []api.AddressEntry{
 			{Address: "192.0.2.7", Comment: "the office"}, {Address: "198.51.100.9", Comment: "the branch"}}}}, TagMembers: map[string][]netip.Addr{}}
 	rs, err := PFAnchor(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# set git_allow: 192.0.2.7 the office\n", "# set git_allow: 198.51.100.9 the branch\n", "table <s_git_allow> persist { 192.0.2.7, 198.51.100.9 }"} {
+	for _, want := range []string{"# set git-allow: 192.0.2.7 the office\n", "# set git-allow: 198.51.100.9 the branch\n", "table <s_git_allow> persist { 192.0.2.7, 198.51.100.9 }"} {
 		if !strings.Contains(rs, want) {
 			t.Errorf("%q not in the anchor:\n%s", want, rs)
 		}

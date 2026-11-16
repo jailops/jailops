@@ -79,7 +79,7 @@ type Match struct {
 	Any      bool
 	Negate   bool
 	Prefixes []netip.Prefix
-	// Tables are the names of the pf tables the match names, for a reader of a trace ("s_postgresql_allow").
+	// Tables are the names of the pf tables the match names, for a reader of a trace ("s_postgresql_allow": the name postgresql-allow with the hyphen written as an underscore).
 	Tables []string
 }
 
@@ -176,7 +176,7 @@ func endpointMatch(entries []string, f family, def []netip.Addr, in *PFInput) (M
 			return anyMatch(), true
 		case validate.EndpointSet:
 			any = true
-			m.Tables = append(m.Tables, "s_"+v)
+			m.Tables = append(m.Tables, validate.SetTable(v))
 			if members, err := validate.FlattenSet(v, in.Sets, in.Jails); err == nil {
 				m.Prefixes = append(m.Prefixes, prefixesOf(members)...)
 			}

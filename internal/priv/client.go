@@ -469,6 +469,11 @@ func (c *Client) HealJail(ctx context.Context, jail string) (HealJailRes, error)
 	return callJSON[HealJailRes](ctx, c, OpJailHeal, HealJailReq{Jail: jail}, callOpts{})
 }
 
+// DNSUnbound implements Host.
+func (c *Client) DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error) {
+	return callJSON[UnboundRes](ctx, c, OpDNSUnbound, DNSUnboundReq{Apply: apply}, callOpts{})
+}
+
 // HealNetwork implements Host.
 func (c *Client) HealNetwork(ctx context.Context) (HealNetRes, error) {
 	return callJSON[HealNetRes](ctx, c, OpNetHeal, empty{}, callOpts{})

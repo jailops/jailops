@@ -106,7 +106,7 @@ func TestJailDNSDefaultsAndLiveChange(t *testing.T) {
 	}
 
 	// the owner of "own" runs his own resolver
-	mine := "# jailops:keep\nnameserver 127.0.0.1\n"
+	mine := "nameserver 127.0.0.1\n"
 	e.Files.Put(resolvOf("own"), []byte(mine))
 	stopped := e.File(resolvOf("db"))
 
@@ -116,7 +116,7 @@ func TestJailDNSDefaultsAndLiveChange(t *testing.T) {
 	}
 	d = n.Status.DNS
 	if d.Source != api.DNSFromNetwork || !slices.Equal(d.Updated, []string{"alpha/web"}) || len(d.NotUpdated) != 2 ||
-		!strings.Contains(d.NotUpdated[0], "alpha/link") || !strings.Contains(d.NotUpdated[1], "alpha/own: it keeps its own resolv.conf") {
+		!strings.Contains(d.NotUpdated[0], "alpha/link") || !strings.Contains(d.NotUpdated[1], "alpha/own: its resolv.conf is its own") {
 		t.Fatalf("%+v", d)
 	}
 	if got := e.File(resolvOf("web")); !strings.Contains(got, "nameserver 192.0.2.53\n") || strings.Contains(got, "10.20.0.1") {

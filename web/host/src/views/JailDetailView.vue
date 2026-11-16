@@ -56,7 +56,31 @@ const l = useLoad(async () => {
   const snaps = can('snapshots') ? await api.jails.snapshots(name.value).catch(() => [] as JailSnapshot[]) : []
   const nets = [...new Set(jail.spec.network?.map((n) => n.network) ?? [])]
   const leases = (await Promise.all(nets.map((n) => api.networks.leases(n).catch(() => [] as Lease[])))).flat().filter((x) => x.jail === jail.metadata.name)
-  return { jail, etag, sources, snaps, leases }
+  const dns = nets.length ? (await api.networks.get(nets[0]).catch(() => undefined))?.data.status?.dns : undefined
+  return { jail, etag, sources, snaps, leases, dns }
+})
+// How the jail resolves names (the same lines as `jailops jail info`): where it asks, its own names, where the rest goes.
+const dnsLines = computed(() => {
+  const d = l.data.value?.dns
+  const j = jail.value
+  if (!d || !j) return []
+  const ns = (d.nameservers ?? []).join(', ') + (d.source === 'gateway' ? ` (${s.jail.dnsGateway})` : d.source === 'network' ? ` (${s.jail.dnsOwn})` : '')
+  const out: [string, string][] = [[s.jail.dnsNameserver, ns || '-']]
+  if (d.suffix) {
+    const zone = `${j.metadata.project}.${d.suffix}`
+    const addrs = [...(j.status.addresses ?? []), ...(j.spec.network ?? []).flatMap((n) => [n.ipv4, n.ipv6])].filter((a): a is string => !!a && a !== 'none' && a !== 'auto')
+    const v4 = addrs.some((a) => !a.includes(':'))
+    const v6 = addrs.some((a) => a.includes(':') && !a.toLowerCase().startsWith('fe80'))
+    const names = [`${j.metadata.name}.${zone}`, j.metadata.name, ...(v4 ? [`${j.metadata.name}.v4.${zone}`] : []), ...(v6 ? [`${j.metadata.name}.v6.${zone}`] : [])]
+    out.push([s.jail.dnsSearch, zone], [s.jail.dnsNames, names.join(', ')])
+    if (d.forward?.length) out.push([s.jail.dnsOthers, s.jail.dnsForwarded(d.forward.join(', '))])
+    else if (d.recurse) out.push([s.jail.dnsOthers, s.jail.dnsRoot])
+  } else if (d.source === 'network') {
+    out.push([s.jail.dnsNames, s.jail.dnsNoNamesOwn], [s.jail.dnsOthers, s.jail.dnsOwnOthers])
+  } else {
+    out.push([s.jail.dnsNames, s.jail.dnsNoNames])
+  }
+  return out
 })
 const jail = computed<Jail | undefined>(() => l.data.value?.jail)
 const snaps = computed(() => [...(l.data.value?.snaps ?? [])].sort((a, b) => (b.metadata.created_at ?? '').localeCompare(a.metadata.created_at ?? '')))
@@ -332,6 +356,10 @@ const attentionItems = computed(() => {
                   </tr>
                 </tbody>
               </table>
+            </div>
+            <div class="body" v-if="dnsLines.length">
+              <h3>{{ s.jail.dns }}</h3>
+              <dl class="kv"><template v-for="[k, x] in dnsLines" :key="k"><dt>{{ k }}</dt><dd class="mono">{{ x }}</dd></template></dl>
             </div>
             <div class="body" v-if="l.data.value?.leases.length">
               <h3>{{ s.jail.leases }}</h3>

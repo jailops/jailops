@@ -47,13 +47,13 @@ func sourceObjects() objs {
 }
 
 func jailSpec() api.JailSpec {
-	return api.JailSpec{Image: "freebsd-15.0@stable",
+	return api.JailSpec{Image: "freebsd-15-0@stable",
 		Network:  []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.5", MAC: "02:aa"}, {Network: "dmz", IPv4: "auto"}, {Network: "lan", IPv4: "none"}},
 		Firewall: api.FirewallAttach{Policies: []string{"web"}, Tags: []string{"tag:x"}},
 		Volumes:  []api.VolumeAttach{{Name: "db", Mount: "/var/db/app"}}, Encrypted: true}
 }
 
-var gen3 = api.ImageGeneration{Number: 3, Name: "freebsd-15.0#g3", Manifest: "mf3"}
+var gen3 = api.ImageGeneration{Number: 3, Name: "freebsd-15-0#g3", Manifest: "mf3"}
 
 func TestBuildBundle(t *testing.T) {
 	o := sourceObjects()
@@ -61,7 +61,7 @@ func TestBuildBundle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.ImageGeneration != "freebsd-15.0#g3" || b.ImageManifest != "mf3" || len(b.Networks) != 2 || len(b.Policies) != 1 {
+	if b.ImageGeneration != "freebsd-15-0#g3" || b.ImageManifest != "mf3" || len(b.Networks) != 2 || len(b.Policies) != 1 {
 		t.Fatalf("%+v", b)
 	}
 	if !reflect.DeepEqual(b.AddressSetNames, []string{"office", "vpn"}) || len(b.AddressSets) != 2 {
@@ -135,7 +135,7 @@ func TestPreflightDifferentHostWithNetworkMap(t *testing.T) {
 	h := emptyHost()
 	h.Networks["office-lan"] = srcNet("172.16.0.0/24", "172.16.0.1")
 	h.Networks["dmz"] = srcNet("10.30.0.0/24", "10.30.0.1")
-	h.Generations["freebsd-15.0#g3"] = "mf3"
+	h.Generations["freebsd-15-0#g3"] = "mf3"
 	h.Secrets["db-pass"] = true
 	h.KeyDomains["d1"] = true
 	h.Leases = []api.Lease{{Address: "172.16.0.9", Jail: "other", Network: "office-lan"}}
@@ -192,7 +192,7 @@ func TestPreflightErrors(t *testing.T) {
 		h := emptyHost()
 		h.Networks["lan"] = srcNet("10.20.0.0/24", "10.20.0.1")
 		h.Networks["dmz"] = srcNet("10.30.0.0/24", "10.30.0.1")
-		h.Generations["freebsd-15.0#g3"] = "mf3"
+		h.Generations["freebsd-15-0#g3"] = "mf3"
 		h.Secrets["db-pass"] = true
 		h.KeyDomains["d1"] = true
 		return h
@@ -216,8 +216,8 @@ func TestPreflightErrors(t *testing.T) {
 			h.Jails["web"] = JailRef{Name: "web", UUID: "u-9"}
 			r.As = "web2"
 		}, "", ""},
-		{"manifest differs", func(h *HostState, r *api.RestoreRequest) { h.Generations["freebsd-15.0#g3"] = "other" }, "manifest", ""},
-		{"generation missing is creatable", func(h *HostState, r *api.RestoreRequest) { delete(h.Generations, "freebsd-15.0#g3") }, "", "image generation"},
+		{"manifest differs", func(h *HostState, r *api.RestoreRequest) { h.Generations["freebsd-15-0#g3"] = "other" }, "manifest", ""},
+		{"generation missing is creatable", func(h *HostState, r *api.RestoreRequest) { delete(h.Generations, "freebsd-15-0#g3") }, "", "image generation"},
 		{"secret missing", func(h *HostState, r *api.RestoreRequest) { delete(h.Secrets, "db-pass") }, "sealed secret", "secret db-pass"},
 		{"key missing", func(h *HostState, r *api.RestoreRequest) { delete(h.KeyDomains, "d1") }, "recovery key", "encryption key domain d1"},
 		{"network missing is creatable", func(h *HostState, r *api.RestoreRequest) { delete(h.Networks, "dmz") }, "", "network dmz"},

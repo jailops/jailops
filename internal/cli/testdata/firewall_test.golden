@@ -28,52 +28,39 @@ App nginx installed as jail web (running)
 Notes:
   Put the site under /usr/local/www.
 
-$ jailops firewall address-set create postgresql_allow --address jail:web --comment the web jail
-address set/postgresql_allow created
+$ jailops firewall address-set create postgresql-allow --address jail:web --comment the web jail
+address set/postgresql-allow created
 
 $ jailops firewall policy create postgres
 firewall policy/postgres created
 
-$ jailops firewall rule add postgres in --action allow --proto tcp --from set:postgresql_allow --port 5432 --comment who may reach PostgreSQL
-firewall policy/postgres: rule 1 added: allow in tcp from set:postgresql_allow port 5432
+$ jailops firewall rule add postgres in --action allow --proto tcp --from set:postgresql-allow --port 5432 --comment who may reach PostgreSQL
+firewall policy/postgres: rule 1 added: allow in tcp from set:postgresql-allow port 5432
 
 $ jailops config set db firewall.policies postgres
 jail/db configuration updated
 
 $ jailops firewall test --from jail:web --to jail:db --port 5432
-tcp port 5432 10.20.0.11 -> 10.20.0.10 (inet)
-  out of web (jailops/main/web, in): PASS by the default of the anchor
-      pass in quick all (fake default)
-  into db (jailops/main/db, out): PASS by policy postgres rule 1 "who may reach PostgreSQL"
-      pass out quick (fake rule)
-  Verdict: PASS
+tcp port 5432 10.20.0.11 -> 10.20.0.10 (inet): PASS
+  web sends: allowed by the default of the anchor
+  db takes: allowed by policy postgres rule 1 "who may reach PostgreSQL"
 
-Not covered:
-  - the answer is for a new connection: a connection that is already open (pf keeps its state) is not asked about
+(-v shows the rendered pf rules and what the test does not cover)
 
 $ jailops firewall test --from jail:web --to jail:db --port 5433
-tcp port 5433 10.20.0.11 -> 10.20.0.10 (inet)
-  out of web (jailops/main/web, in): PASS by the default of the anchor
-      pass in quick all (fake default)
-  into db (jailops/main/db, out): BLOCK by the default of the anchor
-      block drop out quick all (fake default)
-  Verdict: BLOCK
+tcp port 5433 10.20.0.11 -> 10.20.0.10 (inet): BLOCK
+  web sends: allowed by the default of the anchor
+  db takes: blocked by the default of the anchor
 
-Not covered:
-  - the answer is for a new connection: a connection that is already open (pf keeps its state) is not asked about
+(-v shows the rendered pf rules and what the test does not cover)
 [exit 1]
 
 $ jailops firewall test --from jail:web --to jail:db --proto icmp
-icmp echoreq 10.20.0.11 -> 10.20.0.10 (inet)
-  out of web (jailops/main/web, in): PASS by the default of the anchor
-      pass in quick all (fake default)
-  into db (jailops/main/db, out): BLOCK by the default of the anchor
-      block drop out quick all (fake default)
-  Verdict: BLOCK
+icmp echoreq 10.20.0.11 -> 10.20.0.10 (inet): BLOCK
+  web sends: allowed by the default of the anchor
+  db takes: blocked by the default of the anchor
 
-Not covered:
-  - no ICMP type was given: the test is an echo request (ping); other types may meet other rules
-  - the answer is for a new connection: a connection that is already open (pf keeps its state) is not asked about
+(-v shows the rendered pf rules and what the test does not cover)
 [exit 1]
 
 $ jailops firewall test --from jail:web --to jail:db --port 5432 -o json

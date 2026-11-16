@@ -113,7 +113,7 @@ test('an image card turns the nightly upgrade on and off and shows its runs', as
   await expect(card.getByTestId('auto-upgrade-next')).toHaveCount(0)
   await expect(card.getByTestId('auto-upgrade-runs')).toBeVisible()
   // the Linux image has none: nothing shows but the box
-  await expect(page.locator('[data-image="alpine-3.22"]').getByTestId('auto-upgrade-on')).not.toBeChecked()
+  await expect(page.locator('[data-image="alpine-3-22"]').getByTestId('auto-upgrade-on')).not.toBeChecked()
 })
 
 test('a failed night is shown plainly on the card', async ({ page }) => {
@@ -155,7 +155,7 @@ test('a generation shows the FreeBSD version of its packages, and the jail list 
   await go(page, 'x', '/images')
   const versions = page.locator('[data-image="freebsd-15-1"]').getByTestId('generation-freebsd')
   await expect(versions).toHaveText(['15.1-RELEASE-p6', '15.1-RELEASE-p5', '15.1-RELEASE-p4', '15.1-RELEASE-p3'])
-  await expect(page.locator('[data-image="alpine-3.22"]').getByTestId('generation-freebsd')).toHaveText(['-'])
+  await expect(page.locator('[data-image="alpine-3-22"]').getByTestId('generation-freebsd')).toHaveText(['-'])
   if (info.project.name === 'phone') return // the image column of the jail list is a desktop column
   await go(page, 'x', '/jails')
   await expect(page.locator('[data-jail="web"]').getByTestId('jail-generation')).toHaveText('#g4 · p6')

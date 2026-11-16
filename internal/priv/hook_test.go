@@ -54,7 +54,7 @@ func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string, devices ...string) *
 	if err := e.zfs.Create(ctx, zfs.CreateOpts{Name: "tank/jailops/projects/alpha/jails/web", Props: map[string]string{"jailops:managed": "on", "mountpoint": mp}}); err != nil {
 		t.Fatal(err)
 	}
-	spec := api.JailSpec{Image: "freebsd-15.0@stable", OS: os, Network: []api.NetworkAttach{{Network: "lan", IPv4: ipv4, IPv6: ipv6}}}
+	spec := api.JailSpec{Image: "freebsd-15-0@stable", OS: os, Network: []api.NetworkAttach{{Network: "lan", IPv4: ipv4, IPv6: ipv6}}}
 	for _, d := range devices {
 		spec.Devfs = append(spec.Devfs, api.DevfsDevice{Name: d, Device: d})
 	}

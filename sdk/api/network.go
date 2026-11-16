@@ -100,6 +100,11 @@ type NetworkDNS struct {
 	Nameservers []string  `json:"nameservers,omitempty"`
 	// Advice is what the administrator has to do on the host so that the gateway answers (source gateway only).
 	Advice string `json:"advice,omitempty"`
+	// Suffix is the zone under which the jails have names (NAME.PROJECT.<suffix>) when the host's resolver gives
+	// them; Forward is where that resolver sends every other name, and Recurse says it resolves them itself.
+	Suffix  string   `json:"suffix,omitempty"`
+	Forward []string `json:"forward,omitempty"`
+	Recurse bool     `json:"recurse,omitempty"`
 	// Updated names the running jails whose resolv.conf an update rewrote at once (in the answer of an update only);
 	// NotUpdated the running jails it could not rewrite, with the reason. Stopped jails get it when they start.
 	Updated    []string `json:"updated,omitempty"`

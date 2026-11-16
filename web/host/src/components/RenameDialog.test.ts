@@ -76,12 +76,12 @@ describe('RenameDialog', () => {
     await w.type('lan')
     expect(w.text('#rn-name-e')).toBe('This is the name it has now.')
     expect(sent.filter((r) => r.path.includes('/rename'))).toEqual([])
-    // an address set follows its own rule: underscores, no hyphens
+    // an address set follows the same rule: hyphens, no underscores
     mounted?.unmount()
     const s = await open('addressSet', 'admins')
-    await s.type('ops-team')
-    expect(s.text('#rn-name-e')).toBe('This name does not follow the rule above.')
     await s.type('ops_team')
+    expect(s.text('#rn-name-e')).toBe('This name does not follow the rule above.')
+    await s.type('ops-team')
     expect(s.text('#rn-name-e')).toBe('')
   })
 

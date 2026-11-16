@@ -50,7 +50,8 @@ func TestParseRef(t *testing.T) {
 		invalid bool
 	}{
 		{"fb@stable", Ref{Image: "fb", Alias: "stable"}, false},
-		{"freebsd-15.0#g3", Ref{Image: "freebsd-15.0", Gen: 3}, false},
+		{"freebsd-15-0#g3", Ref{Image: "freebsd-15-0", Gen: 3}, false},
+		{"freebsd-15.0#g3", Ref{}, true},
 		{"fb", Ref{Image: "fb"}, false},
 		{"fb#3", Ref{}, true},
 		{"fb#g0", Ref{}, true},

@@ -65,8 +65,8 @@ func TestNameLengthLimits(t *testing.T) {
 }
 
 func TestSnapshotName(t *testing.T) {
-	good := []string{"a", "0", "before-upgrade", "v1.2_3", "update-1730000000-ab", strings.Repeat("s", 64)}
-	bad := []string{"", "-a", ".a", "_a", "Snap", "a:b", "a b", "a/b", "a@b", strings.Repeat("s", 65), strings.Repeat("s", 70), "jo-mine"}
+	good := []string{"a", "before-upgrade", "v1-2-3", "update-1730000000-ab", strings.Repeat("s", 64)}
+	bad := []string{"", "0", "v1.2_3", "a-", "-a", ".a", "_a", "Snap", "a:b", "a b", "a/b", "a@b", strings.Repeat("s", 65), strings.Repeat("s", 70), "jo-mine"}
 	for _, s := range good {
 		if err := SnapshotName("name", s); err != nil {
 			t.Errorf("%q: %v", s, err)

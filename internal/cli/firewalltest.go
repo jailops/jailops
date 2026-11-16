@@ -15,6 +15,7 @@ const ExitUndecided = 8
 
 func (a *app) firewallTest() *cobra.Command {
 	var from, to, proto, icmpType, family string
+	var verbose bool
 	var port int
 	cmd := &cobra.Command{
 		Use:   "test --from SOURCE --to DESTINATION [--port N]",
@@ -63,7 +64,7 @@ jailops firewall test --from jail:web --to 198.51.100.9 --proto udp --port 53 -o
 					return err
 				}
 			} else {
-				printFirewallTest(a, res)
+				printFirewallTest(a, res, verbose)
 			}
 			switch res.Verdict {
 			case api.TestPass:
@@ -80,6 +81,7 @@ jailops firewall test --from jail:web --to 198.51.100.9 --proto udp --port 53 -o
 	f.StringVar(&proto, "proto", "tcp", "tcp, udp, icmp or icmp6")
 	f.IntVar(&port, "port", 0, "destination port of tcp and udp")
 	f.StringVar(&icmpType, "icmp-type", "", "ICMP type as pf names it, such as echoreq (default for icmp and icmp6)")
+	f.BoolVarP(&verbose, "verbose", "v", false, "show the rendered pf rules, the rules that were skipped and what the test does not cover")
 	f.StringVar(&family, "family", "", "test only IPv4 (4) or IPv6 (6); default: every family the two ends have in common")
 	enumFlag(cmd, "proto", "tcp", "udp", "icmp", "icmp6")
 	enumFlag(cmd, "family", "4", "6")
@@ -105,7 +107,55 @@ var stageText = map[string]string{
 	"raw":           "a raw PF fragment",
 }
 
-func printFirewallTest(a *app, res api.FirewallTestResult) {
+// printFirewallTest says whether the connection passes and which rule decides at each end, in a few lines; verbose
+// adds the rendered pf rules, the rules that were skipped and what the test does not cover.
+func printFirewallTest(a *app, res api.FirewallTestResult, verbose bool) {
+	if verbose {
+		printFirewallTestVerbose(a, res)
+		return
+	}
+	w := a.env.Stdout
+	for i, c := range res.Cases {
+		if i > 0 {
+			fprintf(w, "\n")
+		}
+		what := c.Proto
+		if c.Port > 0 {
+			what += " port " + fmt.Sprint(c.Port)
+		}
+		if c.ICMPType != "" {
+			what += " " + c.ICMPType
+		}
+		fprintf(w, "%s %s -> %s (%s): %s\n", what, c.From, c.To, c.Family, strings.ToUpper(c.Verdict))
+		for _, h := range c.Hops {
+			who := "takes"
+			if h.Side == "source" {
+				who = "sends"
+			}
+			switch {
+			case h.DecidedBy != nil:
+				word := map[string]string{"pass": "allowed", "block": "blocked"}[h.Verdict]
+				if word == "" {
+					word = h.Verdict
+				}
+				fprintf(w, "  %s %s: %s by %s\n", h.Jail, who, word, describeRule(h.DecidedBy))
+			case h.Why != "":
+				fprintf(w, "  %s %s: %s: %s\n", h.Jail, who, h.Verdict, h.Why)
+			default:
+				fprintf(w, "  %s %s: %s\n", h.Jail, who, h.Verdict)
+			}
+			if h.LoadedMatchesRendered == "false" {
+				fprintf(w, "  note: the rules loaded in pf for %s differ from the rendered ones; the daemon will load them again\n", h.Anchor)
+			}
+		}
+	}
+	if len(res.Cases) > 1 {
+		fprintf(w, "\nVerdict: %s\n", strings.ToUpper(res.Verdict))
+	}
+	fprintf(w, "\n(-v shows the rendered pf rules and what the test does not cover)\n")
+}
+
+func printFirewallTestVerbose(a *app, res api.FirewallTestResult) {
 	w := a.env.Stdout
 	for i, c := range res.Cases {
 		if i > 0 {

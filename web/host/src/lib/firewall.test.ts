@@ -14,13 +14,13 @@ describe('address set members as the server parses them', () => {
 })
 
 describe('address set names', () => {
-  it('follows ^[a-z][a-z0-9_]{0,23}$ and is not taken', () => {
+  it('follows the name rule (hyphens) and is not taken', () => {
     expect(setNameError('office', [], s.firewall)).toBe('')
-    expect(setNameError('ops_v6', [], s.firewall)).toBe('')
+    expect(setNameError('ops-v6', [], s.firewall)).toBe('')
     expect(setNameError('', [], s.firewall)).toBe(s.firewall.setRequired)
-    expect(setNameError('a'.repeat(25), [], s.firewall)).toBe(s.firewall.setTooLong)
-    expect(setNameError('a'.repeat(24), [], s.firewall)).toBe('')
-    for (const n of ['Office', 'web-1', '1abc', '_x', 'a b']) expect(setNameError(n, [], s.firewall), n).toBe(s.firewall.setBadName)
+    expect(setNameError('a'.repeat(30), [], s.firewall)).toBe(s.firewall.setTooLong)
+    expect(setNameError('a'.repeat(29), [], s.firewall)).toBe('')
+    for (const n of ['Office', 'web_1', '1abc', '_x', 'a b', 'web-']) expect(setNameError(n, [], s.firewall), n).toBe(s.firewall.setBadName)
     expect(setNameError('admins', ['admins'], s.firewall)).toBe(s.firewall.setExists)
   })
 })
@@ -87,14 +87,15 @@ describe('setSpec reads a comment at the end of a member line', () => {
 })
 
 describe('setMember accepts a jail or a set by kind', () => {
-  it('takes jail:web, jail:web-2 and set:office_net, not a bad name or an @', () => {
+  it('takes jail:web, jail:web-2 and set:office-net, not a bad name or an @', () => {
     expect(setMember('jail:web')).toBe(true)
     expect(setMember('jail:web-2')).toBe(true)
-    expect(setMember('set:office_net')).toBe(true)
+    expect(setMember('set:office-net')).toBe(true)
     expect(setMember('jail:Web')).toBe(false)
     expect(setMember('jail:web-')).toBe(false)
     expect(setMember('jail:' + 'a'.repeat(30))).toBe(false)
-    expect(setMember('set:web-2')).toBe(false)
+    expect(setMember('set:web-2')).toBe(true)
+    expect(setMember('set:web_2')).toBe(false)
     expect(setMember('@web')).toBe(false)
     expect(setMember('jail:')).toBe(false)
     expect(setMember('192.0.2.7')).toBe(true)

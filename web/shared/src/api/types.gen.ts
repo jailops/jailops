@@ -1425,6 +1425,9 @@ export interface NetworkDNS {
   source: DNSSource
   nameservers?: string[]
   advice?: string
+  suffix?: string
+  forward?: string[]
+  recurse?: boolean
   updated?: string[]
   not_updated?: string[]
 }

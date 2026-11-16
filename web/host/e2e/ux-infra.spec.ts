@@ -23,7 +23,7 @@ test('upgrading an image asks first and lists the jails on it', async ({ page })
   await page.getByRole('button', { name: 'Cancel' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(0)
   // building is asked too, and runs after the confirmation
-  await page.getByTestId('build-alpine-3.22').click()
+  await page.getByTestId('build-alpine-3-22').click()
   await expect(page.getByTestId('confirm-items')).toContainText('alpine-app')
   await page.getByTestId('confirm').click()
   await expect(page.locator('.toast').first()).toBeVisible()

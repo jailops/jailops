@@ -494,7 +494,7 @@ func TestSetupFlow(t *testing.T) {
 	if code, body := post(tok.Token, "admin", "short"); code != 400 || !strings.Contains(body, "at least 12") {
 		t.Errorf("%d %s", code, body)
 	}
-	if code, body := post(tok.Token, "Admin!", "a long enough passphrase 42"); code != 400 || !strings.Contains(body, "invalid name") {
+	if code, body := post(tok.Token, "Admin!", "a long enough passphrase 42"); code != 400 || !strings.Contains(body, "lower case letters, digits and hyphens") {
 		t.Errorf("%d %s", code, body)
 	}
 	for i := range 5 {

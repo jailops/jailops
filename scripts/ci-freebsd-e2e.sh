@@ -1037,10 +1037,10 @@ check "a policy without --default-in and --default-out" $J firewall policy creat
 expect "it denies inbound and allows outbound, written into the policy" 'nodefaults +deny +allow' $J firewall policy list --project edge
 check "delete it" $J firewall policy delete nodefaults --project edge -y
 # a rule names a jail: jail:edgeweb in an address set of the project, the set in a policy, the policy on another jail
-check "an address set with a jail as a member" $J firewall address-set create git_allow --project edge --address jail:edgeweb
-check "an address with a comment" $J firewall address-set create office_ip --project edge --address 192.0.2.7 --comment "the office"
+check "an address set with a jail as a member" $J firewall address-set create git-allow --project edge --address jail:edgeweb
+check "an address with a comment" $J firewall address-set create office-ip --project edge --address 192.0.2.7 --comment "the office"
 check "a policy that names the set" $J firewall policy create git --project edge --default-in deny --default-out allow --comment "the git server of the team"
-check "a rule that names the set" $J firewall rule add git in --project edge --action allow --proto tcp --from set:git_allow --port 22 --comment "ssh from the team"
+check "a rule that names the set" $J firewall rule add git in --project edge --action allow --proto tcp --from set:git-allow --port 22 --comment "ssh from the team"
 check "a rule that names the jail" $J firewall rule add git in --project edge --action allow --proto tcp --from jail:edgeweb --port 5432 --comment "the web jail asks for rows"
 expect "the rules are listed with their numbers" '1 +- +allow +in +tcp' $J firewall rule list git --project edge
 check "the second rule is switched off" $J firewall rule disable git 2 --project edge
@@ -1056,8 +1056,8 @@ expect "the rule comments are in the loaded anchor's source: show says why a rul
 expect "and in the table of the jail itself" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t j_edgeweb -T show
 check "delete the second jail" $J delete --stop --confirm-data-loss edgedb --project edge
 check "delete the policy that names them" $J firewall policy delete git --project edge -y
-check "delete the set with the jail in it" $J firewall address-set delete git_allow --project edge -y
-check "delete the set with a comment" $J firewall address-set delete office_ip --project edge -y
+check "delete the set with the jail in it" $J firewall address-set delete git-allow --project edge -y
+check "delete the set with a comment" $J firewall address-set delete office-ip --project edge -y
 # a bridge made by hand is someone else's and never part of a network
 b=$(ifconfig bridge create) && ifconfig "$b" name mybr >/dev/null || fail "a bridge made by hand"
 # an epair made by hand under a jo name, no description
@@ -1111,10 +1111,10 @@ sed "/^spec:/a\\
 expect "network edit names the running jails it rewrote" 'resolv.conf rewritten in the running jails demo/web' $J network edit lan -f "$work/lan-dns.yaml"
 expect "the running jail has the new resolv.conf" '^nameserver 192\.0\.2\.53$' cat "$webroot/etc/resolv.conf"
 [ "$(jls -j demo_web jid)" = "$jid" ] || fail "the jail was restarted for a change of its nameservers"
-# a jail that keeps a resolv.conf of its own (# jailops:keep) is left alone, at a change and at a start
+# a jail whose resolv.conf lost the JailOps line is left alone, at a change and at a start
 cp "$webroot/etc/resolv.conf" "$work/resolv.jail"
-printf '# jailops:keep\nnameserver 127.0.0.1\n' >"$webroot/etc/resolv.conf"
-expect "a jail's own resolv.conf is not rewritten" 'not rewritten in demo/web: it keeps its own resolv.conf' $J network edit lan -f "$work/lan.yaml"
+printf 'nameserver 127.0.0.1\n' >"$webroot/etc/resolv.conf"
+expect "a jail's own resolv.conf is not rewritten" 'not rewritten in demo/web: its resolv.conf is its own' $J network edit lan -f "$work/lan.yaml"
 check "restart" $J restart web --project demo
 expect "nor at a start" '^nameserver 127\.0\.0\.1$' cat "$webroot/etc/resolv.conf"
 check "the jail gives its resolv.conf back" rm "$webroot/etc/resolv.conf"
