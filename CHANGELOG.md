@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-11-16
+
 - **The names of the jails cannot take the host's resolver down.** The resolver checks the file of names before it reads it (`local-unbound-checkconf` with the new file in place); when it refuses, the old file is put back, nothing is reloaded and `jailops doctor` says what the resolver said. The resolver listens on the host's address of every network of a project, running jail or not, so it is restarted when the networks change and never when a jail starts or stops. The doctor line no longer names a jail or an address of another project.
 
 - **Names for the jails, through the base system's local-unbound, with nothing to configure.** `jailops-setup` enables the
