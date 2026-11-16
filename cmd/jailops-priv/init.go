@@ -221,7 +221,7 @@ func (o *initOptions) do(w io.Writer) error {
 	for _, d := range []struct {
 		p    string
 		mode os.FileMode
-	}{{o.mount, 0o700}, {"/var/tmp/jailops", 0o755}} {
+	}{{o.mount, 0o700}, {"/var/tmp/jailops", 0o700}} {
 		o.say(w, "directory %s: owner root, mode %04o", d.p, d.mode)
 		if o.dryRun {
 			continue
@@ -238,10 +238,16 @@ func (o *initOptions) do(w io.Writer) error {
 	}
 	// the configuration, never overwritten; the directory of the rendered jail.conf files too
 	if !o.dryRun {
-		for _, d := range []string{o.etc, filepath.Join(o.etc, "jails")} {
-			if err := os.MkdirAll(o.path(d), 0o755); err != nil {
-				return err
-			}
+		if err := os.MkdirAll(o.path(o.etc), 0o755); err != nil {
+			return err
+		}
+		// the rendered jail.conf files are read by the helper alone
+		jails := o.path(filepath.Join(o.etc, "jails"))
+		if err := os.MkdirAll(jails, 0o700); err != nil {
+			return err
+		}
+		if err := os.Chmod(jails, 0o700); err != nil {
+			return err
 		}
 	}
 	// the files of log sinks set through the API (logging.secrets_dir): root writes them, the daemon's group reads

@@ -214,7 +214,7 @@ function bare(s) { gsub(/"[^"]*"/, "\"\"", s); sub(/#.*/, "", s); return s }
 		else if (k == "scrub") { cls = "norm"; scrub = 1 }
 		else if (k == "altq" || k == "queue") cls = "queue"
 		else if (k ~ /^(nat|rdr|binat|nat-anchor|rdr-anchor|binat-anchor|no)$/) cls = "trans"   # rules of the older translation ruleset stay where they are
-		else if (k ~ /^(pass|block|anchor|match|antispoof)$/) { cls = "filter"; if (k == "match" && t ~ /[ \t]scrub([ \t(]|$)/) scrub = 1 }
+		else if (k ~ /^(pass|block|anchor|match|antispoof)$/) { cls = "filter"; if (k == "match" && t ~ /[ \t]scrub([ \t]|[(]|$)/) scrub = 1 }
 		else if (k == "include") inc = 1
 		if (k == "block") blk = 1
 		if (line ~ /^[ \t]*anchor[ \t]+"jailops\/\*"/) ha = 1
@@ -330,8 +330,9 @@ if [ "$pf_ok" = 1 ]; then
 					say "> write $conf (the lines marked + above; the old text is in $backup)"
 					if [ "$dry" = 0 ]; then
 						# the new file takes the mode and owner of the old one, then replaces it in one rename
-						if ! { cp -p "$conf" "$conf.jailops-setup.tmp" && cat "$cand" > "$conf.jailops-setup.tmp" && mv -f "$conf.jailops-setup.tmp" "$conf"; }; then
-							rm -f "$conf.jailops-setup.tmp"
+						newconf=$(mktemp "$conf.jailops-setup.XXXXXX") || newconf=$conf.jailops-setup.tmp
+						if ! { cp -p "$conf" "$newconf" && cat "$cand" > "$newconf" && mv -f "$newconf" "$conf"; }; then
+							rm -f "$newconf"
 							fail "writing $conf: it is unchanged (the copy $backup is not needed)"
 							pf_ok=0
 						fi

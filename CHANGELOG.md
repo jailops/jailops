@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Security: fixes from an external audit of 0.8.0.**
+  - `etcupdate` through the helper no longer takes `-s` or `build`, and the `-t` archive is copied into the helper's own directory and listed before use, like the `tar` extraction.
+  - A package name given to `pkg` is a name or a port origin: no `..`, no second slash, and nothing that ends as a package or archive file.
+  - The `delegated` dataset of a jail is opened like the rest of the jail's tree (no link followed), and `fs.copy_tree` makes setuid and setgid files only in a jail tree.
+  - A half-built copy with immutable flags is cleaned up, and the helper closes and refuses descriptors a client sends over `priv.sock`.
+  - A directory made by the helper is changed through its descriptor, and a log is opened without following a link.
+  - The backup node counts sign-in attempts before the hash (attempts at once cannot pass the limit), refuses a source that is locked before it asks the database about a token, waits in the shared queue for a hash instead of answering at once, and no longer writes the typed user name of a failed sign-in to the audit table; the audit filter by action prefix takes `%` and `_` literally.
+  - A trust token is checked against the certificate the host serves now.
+  - `jailops-priv init` makes `/var/tmp/jailops` and the directory of the rendered `jail.conf` files mode 0700.
+  - `release.yml` does not keep the checkout's credentials.
+- **Fixed: `jailops-setup`** handles `match ... scrub(` on the awk of the BSDs and writes `pf.conf` through a temporary file with a unique name; `bootstrap.sh` adds only `anchor "jailops/*"`.
+
 ## 0.8.1 - 2026-11-16
 
 - **Fixed: the jails of an older version get the search domain of their names.** A jail whose `resolv.conf` JailOps wrote before 0.8.0 (the line `# Managed by JailOps. Do not edit; changes are overwritten.`) was taken for a jail with a file of its own, so it never got `search PROJECT.internal` and the short names did not work. Such a file is JailOps's own and is written again at the next start of the jail.

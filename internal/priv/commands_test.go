@@ -366,7 +366,7 @@ func TestImageBuildingCommands(t *testing.T) {
 	// etcupdate: subcommand before or after the flags
 	ok("/usr/sbin/etcupdate", "etcupdate", "extract", "-d", work, "-t", tar, "-D", root)
 	ok("/usr/sbin/etcupdate", "etcupdate", "-d", work, "-t", tar, "-D", root, "-L", filepath.Join(work, "log"))
-	ok("/usr/sbin/etcupdate", "etcupdate", "-D", root, "-s", filepath.Join(root, "src"), "resolve")
+	ok("/usr/sbin/etcupdate", "etcupdate", "-D", root, "resolve")
 	bad("etcupdate", "extract", "-d", work, "-t", tar)                 // no -D
 	bad("etcupdate", "extract", "-d", "/tmp/x", "-t", tar, "-D", root) // work outside
 	bad("etcupdate", "extract", "-d", work, "-t", "/etc/passwd", "-D", root)

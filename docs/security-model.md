@@ -405,7 +405,10 @@ shell and the libraries it finds there. Started by the helper (root of the host)
 the jail's tree: a process of a running jail that replaced `/bin/sh` or a library, or put a symbolic link where `pkg`
 writes, would have root of the host at the next package operation. So the helper refuses `pkg -r ROOT` for the root of
 a running jail, however the path is spelled (a trailing slash, a symbolic link on the way, `..`); `-r` is for a root no
-jail runs in: an image being built, and the jail of an app installation before it has first run.
+jail runs in: an image being built, and the jail of an app installation before it has first run. A jail that ran once
+and is stopped again is not refused, so what its processes left in the root is the base of the next `pkg -r` there: the
+helper does not look through a stopped jail's tree. The helper takes a package name only as a name or a port origin
+(`category/name`), never a path or a file name that ends as a package or an archive.
 
 - **`jailops app install`** makes the jail, mounts its datasets on the host and installs the packages with `pkg -r <jail
   root> install` through the helper while the jail has never run, and only then starts it. What is in the root is the

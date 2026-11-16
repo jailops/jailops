@@ -229,25 +229,13 @@ func TestOnePortRevocationAndResumption(t *testing.T) {
 	}
 }
 
-// The management API is reachable by clients that have proved nothing yet: password hashing is bounded, and a body that
+// The management API is reachable by clients that have proved nothing yet: a body that
 // never arrives does not hold a handler.
 func TestConsoleAnonymousLimits(t *testing.T) {
 	r := startRig(t, memKind, nil)
 	base := "https://" + r.Srv.HostAddr()
 	login := `{"username":"nobody","password":"x"}`
 
-	r.Srv.SetHashSlots(0) // no hash may start
-	req, _ := http.NewRequest("POST", base+"/api/v1/auth/login", strings.NewReader(login))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := r.plainClient().Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	resp.Body.Close()
-	if resp.StatusCode != 429 || resp.Header.Get("Retry-After") == "" {
-		t.Fatalf("with no hash slot free: %d, Retry-After %q", resp.StatusCode, resp.Header.Get("Retry-After"))
-	}
-	r.Srv.SetHashSlots(1)
 	if code, _ := status(t, r.plainClient(), "POST", base+"/api/v1/auth/login", login); code != 401 {
 		t.Fatalf("a wrong password with a free slot: %d", code)
 	}

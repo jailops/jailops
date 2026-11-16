@@ -176,6 +176,7 @@ type session struct {
 
 func (s *Server) serveConn(uc *net.UnixConn) {
 	fc := newFDConn(uc)
+	fc.noFDs = true
 	defer fc.close()
 	conn := s.nextID.Add(1)
 	cred, err := s.opts.PeerCred(uc)

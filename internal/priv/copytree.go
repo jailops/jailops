@@ -169,12 +169,14 @@ func (l *Local) CopyTree(ctx context.Context, src, dst string, o CopyOpts) (Copy
 		return res, mapFSErr(err)
 	}
 	defer dr.Close()
-	return l.runCopy(ctx, sr, dr, o)
+	return l.runCopy(ctx, sr, dr, o, jailTreeDepth(rd.rel) > 0)
 }
 
 // runCopy copies the directory src into the directory dst, both already
 // opened as roots.
-func (l *Local) runCopy(ctx context.Context, sr, dr *os.Root, o CopyOpts) (CopyResult, error) {
+//
+// special says whether dst is a tree a jail controls, the only kind that may get setuid and setgid files.
+func (l *Local) runCopy(ctx context.Context, sr, dr *os.Root, o CopyOpts, special bool) (CopyResult, error) {
 	var res CopyResult
 	sfi, err := sr.Lstat(".")
 	if err != nil {
@@ -191,7 +193,7 @@ func (l *Local) runCopy(ctx context.Context, sr, dr *os.Root, o CopyOpts) (CopyR
 	}
 	c := &copier{
 		ctx: ctx, src: sr, dst: dr, o: o, srcDev: sst.Dev, dstID: dst0.id(),
-		links: map[fileID]string{}, buf: make([]byte, copyChunk), noChown: l.noChown,
+		links: map[fileID]string{}, buf: make([]byte, copyChunk), noChown: l.noChown, special: special,
 	}
 	err = c.run(sfi)
 	c.progress("", true)
@@ -210,6 +212,7 @@ type copier struct {
 	unit    []fileID          // links recorded by the current top-level unit
 	buf     []byte
 	noChown bool
+	special bool // dst is a jail tree: setuid and setgid are kept
 	entries int64
 	res     CopyResult
 	last    time.Time
@@ -346,7 +349,13 @@ func (c *copier) forceRemove(rel string) {
 	var walk func(p string, depth int)
 	walk = func(p string, depth int) {
 		fi, err := c.dst.Lstat(p)
-		if err != nil || !fi.IsDir() || depth > maxMaxDepth+1 {
+		if err != nil || depth > maxMaxDepth+1 {
+			return
+		}
+		if fi.Mode()&os.ModeSymlink == 0 {
+			c.clearFlags(p)
+		}
+		if !fi.IsDir() {
 			return
 		}
 		_ = c.dst.Chmod(p, 0o700)
@@ -360,6 +369,14 @@ func (c *copier) forceRemove(rel string) {
 	}
 	walk(rel, 0)
 	_ = c.dst.RemoveAll(rel)
+}
+
+// clearFlags takes the file flags off an entry of a half-built tree: an immutable one cannot be removed.
+func (c *copier) clearFlags(rel string) {
+	if f, err := c.dst.OpenFile(rel, os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0); err == nil {
+		_ = copyFlags(f, 0)
+		f.Close()
+	}
 }
 
 func (c *copier) bump(cur string) error {
@@ -592,7 +609,11 @@ func (c *copier) applyMeta(sf, df *os.File, fi os.FileInfo, dstRel string) error
 		return mapFSErr(err)
 	}
 	// chmod after chown: chown clears setuid and setgid.
-	if err := df.Chmod(fi.Mode()); err != nil {
+	mode := fi.Mode()
+	if !c.special {
+		mode &^= os.ModeSetuid | os.ModeSetgid
+	}
+	if err := df.Chmod(mode); err != nil {
 		return mapFSErr(err)
 	}
 	c.res.MetaSkipped += int64(copyXattrs(sf, df))

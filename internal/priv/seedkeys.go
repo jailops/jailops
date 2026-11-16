@@ -70,7 +70,7 @@ func (l *Local) SeedKeys(ctx context.Context, root string) (CopyResult, error) {
 		return res, mapFSErr(err)
 	}
 	defer dr.Close()
-	res, err = l.runCopy(ctx, sr, dr, CopyOpts{}.filled())
+	res, err = l.runCopy(ctx, sr, dr, CopyOpts{}.filled(), false)
 	if err != nil {
 		_ = top.RemoveAll(rk.rel)
 	}

@@ -99,7 +99,7 @@ var reImageGen = regexp.MustCompile(`^(staging-)?g[0-9]+$`)
 func jailTreeDepth(rel string) int {
 	s := strings.Split(rel, "/")
 	switch {
-	case len(s) >= 5 && s[0] == "projects" && s[2] == "jails" && slices.Contains([]string{"root", "root.new", "root.old", "root.stale"}, s[4]):
+	case len(s) >= 5 && s[0] == "projects" && s[2] == "jails" && slices.Contains([]string{"root", "root.new", "root.old", "root.stale", delegatedLeaf}, s[4]):
 		return 5
 	case len(s) >= 4 && s[0] == "projects" && s[2] == "volumes":
 		return 4
@@ -429,10 +429,17 @@ func (l *Local) MkdirAll(ctx context.Context, q MkdirReq) error {
 	if err := root.MkdirAll(r.rel, os.FileMode(q.Mode)); err != nil {
 		return mapFSErr(err)
 	}
-	if err := root.Chmod(r.rel, os.FileMode(q.Mode)); err != nil {
+	// the directory is opened without following a link and changed through the descriptor: a path that a jail swapped
+	// for a link after MkdirAll is refused instead of followed
+	d, err := root.OpenFile(r.rel, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
 		return mapFSErr(err)
 	}
-	if err := root.Chown(r.rel, int(q.UID), int(q.GID)); err != nil && !l.noChown {
+	defer d.Close()
+	if err := d.Chmod(os.FileMode(q.Mode)); err != nil {
+		return mapFSErr(err)
+	}
+	if err := d.Chown(int(q.UID), int(q.GID)); err != nil && !l.noChown {
 		return mapFSErr(err)
 	}
 	return nil

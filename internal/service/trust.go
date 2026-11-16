@@ -125,7 +125,7 @@ func (s *Service) RedeemTrustToken(ctx context.Context, req api.TrustClientReque
 	if err != nil {
 		return api.Certificate{}, err
 	}
-	claims, err := auth.VerifyTrustToken(hmacKey, req.Token, s.d.ServerFingerprint, now)
+	claims, err := auth.VerifyTrustToken(hmacKey, req.Token, s.servingFingerprint(), now)
 	if err != nil {
 		return fail(err)
 	}
