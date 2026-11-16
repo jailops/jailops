@@ -80,7 +80,7 @@ type FirewallTestSkipped struct {
 // FirewallTestRule is a rule that decided a hop, with where it comes from.
 type FirewallTestRule struct {
 	// Stage is policy for a rule of a policy, default for the defaults of the anchor, isolation for the other
-	// projects, and the names of the fixed stages (ipv6-control, antispoof, neighbour, own-addresses, gateway).
+	// projects, and the names of the fixed stages (ipv6-control, antispoof, neighbour, own-addresses, closed, gateway).
 	Stage string `json:"stage"`
 	// Policy is the policy of a policy rule; ProjectPolicy is set when the project names it, Managed when it is the
 	// policy of an app.

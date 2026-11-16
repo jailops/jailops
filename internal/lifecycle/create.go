@@ -159,8 +159,8 @@ func (s *Service) planCreate(ctx context.Context, j api.Jail, recovering bool) (
 		return m
 	}
 	pl := plan.New("create-jail " + name)
-	// The disk limit is the quota of the container: it covers the root, the persistent datasets and the volumes, and
-	// the snapshots of all of them.
+	// The disk limit is the quota of the container: it covers the root, the persistent datasets and the snapshots of
+	// all of them. The volumes a jail attaches are datasets of the project, outside the container.
 	contProps := map[string]string{"mountpoint": cMP, PropLayout: string(layout), PropImage: imageName, PropComplete: "off"}
 	if q := j.Spec.Resources.Disk; q != "" {
 		contProps["quota"] = q

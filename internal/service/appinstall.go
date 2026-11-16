@@ -209,6 +209,7 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		Volumes:   apps.Volumes(jail, app.Data),
 		Resources: limits,
 		SysVIPC:   app.SysVIPC,
+		Boot:      api.BootPolicy{StopTimeout: app.StopTimeout},
 	}
 	im, ref, err := s.imageFor(spec)
 	if err != nil {

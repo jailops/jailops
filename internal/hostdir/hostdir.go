@@ -5,6 +5,7 @@ package hostdir
 
 import (
 	"context"
+	"jailops.net/jailops/internal/supervise"
 	"time"
 )
 
@@ -49,7 +50,11 @@ func Within(ctx context.Context, d time.Duration, probe func(context.Context) (P
 	}
 	ch := make(chan result, 1)
 	go func() {
-		p, err := probe(ctx)
+		var p Probe
+		var err error
+		if perr := supervise.Guard(nil, "host-directory-probe", func() { p, err = probe(ctx) }); perr != nil {
+			err = perr
+		}
 		ch <- result{p, err}
 	}()
 	t := time.NewTimer(d)

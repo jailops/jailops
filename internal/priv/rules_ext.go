@@ -15,6 +15,7 @@ import (
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/validate"
+	"jailops.net/jailops/sdk/api"
 )
 
 // Rules for building images and wiring Linux jails from the host. Every
@@ -185,8 +186,12 @@ func customChmod(c Config, _ bool, args []string) error {
 
 // verifyChmod refuses a path with a symbolic link in it: chmod follows links, and an image archive can contain one
 // that points out of the image root.
-func verifyChmod(_ context.Context, _ *Local, args []string) error {
+func verifyChmod(ctx context.Context, l *Local, args []string) error {
 	for _, p := range args[1:] {
+		// a tree a running jail controls can change under the call: chmod is for the roots of images and of jails that are stopped
+		if name := l.runningJailAt(ctx, p); name != "" {
+			return forbidden("chmod: %q is in the tree of the running jail %s", p, name)
+		}
 		real, err := filepath.EvalSymlinks(p)
 		if err != nil {
 			return invalid("chmod: %v", err)
@@ -365,8 +370,23 @@ func customUmount(c Config, _ bool, args []string) error {
 	return nil
 }
 
-func verifyUmount(_ context.Context, l *Local, args []string) error {
-	return l.checkJailRootPath(args[len(args)-1])
+// verifyUmount takes a path that is a mount point of the host as it is listed, and no other: umount(8) resolves the
+// path, so a path that is a link a jail put in its tree would unmount whatever the link points at (a host file system).
+// A mount point cannot be replaced while it is mounted, so what the list shows now is what umount will resolve.
+func verifyUmount(ctx context.Context, l *Local, args []string) error {
+	p := args[len(args)-1]
+	if err := l.checkJailRootPath(p); err != nil {
+		return err
+	}
+	if mps := l.mountPoints(ctx); mps != nil {
+		for _, mp := range mps {
+			if mp == p {
+				return nil
+			}
+		}
+		return api.Errorf(api.CodeNotFound, "umount: %s is not a mount point", p)
+	}
+	return nil
 }
 
 // ---- jail ----
@@ -831,4 +851,32 @@ func verifyRoute(ctx context.Context, l *Local, args []string) error {
 		return nil
 	}
 	return l.ifOwnedInJail(ctx, args[1], iface)
+}
+
+// runningJailAt returns the name of the running jail whose root path p lies in, "" when there is none.
+func (l *Local) runningJailAt(ctx context.Context, p string) string {
+	if l == nil || l.d.Jails == nil {
+		return ""
+	}
+	list, err := l.d.Jails.List(ctx)
+	if err != nil {
+		return ""
+	}
+	real := filepath.Clean(p)
+	if r, err := filepath.EvalSymlinks(real); err == nil {
+		real = r
+	}
+	for _, j := range list {
+		if j.Path == "" {
+			continue
+		}
+		jp := filepath.Clean(j.Path)
+		if r, err := filepath.EvalSymlinks(jp); err == nil {
+			jp = r
+		}
+		if within(jp, real) || within(jp, filepath.Clean(p)) {
+			return j.Name
+		}
+	}
+	return ""
 }

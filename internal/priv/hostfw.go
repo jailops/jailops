@@ -27,9 +27,9 @@ import (
 // copy of what it replaces, writes the pending record (hostpending.go) and only then writes and loads the file. Every
 // change reverts itself unless it is confirmed.
 //
-// UNVERIFIED: pfctl has run against fakes only; scripts/ci-freebsd-e2e.sh has a block for a real host
-// (JAILOPS_E2E_HOSTFW=1). Not verified either: a host whose pf was disabled before the first apply, and sources of
-// the other address family than the one the test connects with.
+// The block of scripts/ci-freebsd-e2e.sh with JAILOPS_E2E_HOSTFW=1 runs the module against a real pf (it rewrites the
+// machine's pf.conf, so CI does not set it). Not covered by it: a host whose pf was disabled before the first apply, and
+// sources of the other address family than the one the test connects with.
 
 // pfctlBin is the one program the firewall module runs, with the forms checkHostPfctl accepts.
 const pfctlBin = "/sbin/pfctl"

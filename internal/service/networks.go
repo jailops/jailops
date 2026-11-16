@@ -38,7 +38,7 @@ func (s *Service) networkCounts(spec api.NetworkSpec, name string) (alloc, free 
 	if spec.IPv4 == nil {
 		return 0, 0, false
 	}
-	a, err := ipam.NewV4In(spec.IPv4, ipam.Scope{}, s.addressesOn(name, "", false))
+	a, err := ipam.NewV4(spec.IPv4, s.addressesOn(name, "", false))
 	if err != nil {
 		return 0, 0, false
 	}
@@ -511,12 +511,12 @@ func (s *Service) assignAddresses(project, self string, spec *api.JailSpec) erro
 				if n.Spec.IPv6 == nil || n.Spec.IPv6.Mode == api.IPv6None {
 					return invalid("network %q has no IPv6", a.Network)
 				}
-				al, err = ipam.NewV6In(n.Spec.IPv6, ipam.Scope{}, inUse)
+				al, err = ipam.NewV6(n.Spec.IPv6, inUse)
 			} else {
 				if n.Spec.IPv4 == nil {
 					return invalid("network %q has no IPv4", a.Network)
 				}
-				al, err = ipam.NewV4In(n.Spec.IPv4, ipam.Scope{}, inUse)
+				al, err = ipam.NewV4(n.Spec.IPv4, inUse)
 			}
 			if err != nil {
 				return err

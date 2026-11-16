@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"jailops.net/jailops/internal/supervise"
 	"os"
 	"path"
 	"path/filepath"
@@ -36,6 +37,9 @@ import (
 type shellMark struct {
 	// Pending: the jail was created with a shell or prompt to set up at its first start.
 	Pending bool `json:"pending,omitempty"`
+	// Started: the jail has started at least once. The host fetches bash for a jail only before its first start; a
+	// later start never waits for a package server, and what is still missing is tried again in the background.
+	Started bool `json:"started,omitempty"`
 	// Applied is what the prompt file last said (promptState): the PS1 text, or "none".
 	Applied string `json:"applied,omitempty"`
 	// Error is the latest failure of the setup (empty after a success), At its time.
@@ -305,6 +309,9 @@ func (s *Service) setUpShell(ctx context.Context, key string, eff api.JailSpec, 
 // shellSetupDeadline is how long the setup after a start may take.
 var shellSetupDeadline = 60 * time.Second
 
+// shellRetryAfter is how long a failed setup of bash waits before a start tries it again in the background.
+var shellRetryAfter = 30 * time.Minute
+
 // shellAtStart runs after a jail started: the setup of a new jail, or a prompt that changed while it was stopped.
 // It never fails the start; a failure is the jail's ShellSetup condition and an event.
 func (s *Service) shellAtStart(ctx context.Context, key string) {
@@ -318,8 +325,16 @@ func (s *Service) shellAtStart(ctx context.Context, key string) {
 	}
 	eff := s.effective(j)
 	m := s.shellMark(key)
+	if !m.Started {
+		m.Started = true
+		s.setShellMark(key, m)
+	}
 	switch {
 	case m.Pending && eff.Shell == api.BashPath && !s.bashInRoot(ctx, key):
+		// a failed attempt is not repeated at every start: `jailops jail shell-setup` asks for one at once
+		if m.Error != "" && s.now().Sub(m.At) < shellRetryAfter {
+			return
+		}
 		// bash did not get in before the start (no network on the host in time): the jail is up with the shell it has,
 		// and the attempt from inside the running jail goes on in the background, so the start never waits for it.
 		s.setUpShellInBackground(key, j.Metadata.Project, j.Metadata.Name)
@@ -349,6 +364,7 @@ func (s *Service) setUpShellInBackground(key, project, name string) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer func() { supervise.Report(s.log, "shell-setup", recover()) }()
 		base := s.baseCtx
 		if base == nil {
 			base = context.Background()
@@ -503,15 +519,20 @@ func (s *Service) installBashBeforeFirstStart(ctx context.Context, key string) {
 	if err != nil || j.Spec.OS != api.OSFreeBSD || s.d.Run == nil {
 		return
 	}
-	if eff := s.effective(j); eff.Shell != api.BashPath || !s.shellMark(key).Pending {
+	// Only the very first start: a jail that has run (the mark says so) or that has no shell to set up costs a
+	// restart nothing here, whatever its root holds.
+	if m := s.shellMark(key); m.Started || !m.At.IsZero() || !m.Pending { // a recorded attempt means it has run
 		return
 	}
-	root := s.rootMount(key)
-	if ok, _ := s.d.Files.Exists(ctx, root+api.BashPath); ok {
+	if eff := s.effective(j); eff.Shell != api.BashPath {
 		return
 	}
 	if err := s.life.MountTree(ctx, key); err != nil {
 		s.log.Warn("bash before the first start", "jail", key, "err", err)
+		return
+	}
+	root := s.rootMount(key)
+	if ok, _ := s.d.Files.Exists(ctx, root+api.BashPath); ok {
 		return
 	}
 	// The first start of a jail never waits long for a package mirror: what is not fetched in time is tried again

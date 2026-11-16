@@ -24,7 +24,8 @@ func addSet[T any](a *app, parent *cobra.Command, d *kindDesc[T], flagBuild func
 		Use:   "set NAME",
 		Short: "Change attributes of " + article(d.noun) + " " + d.noun,
 		Long: `Change attributes of ` + article(d.noun) + ` ` + d.noun + ` with the flags of create: only the flags you give change
-anything. A list flag replaces the whole list, and an empty value clears it. The
+anything. A list flag replaces the whole list, and an empty value clears it; --env and --label add to the
+stored ones (remove one with 'jailops config unset'). The
 update carries the ETag of the version that was read, so a change made in the
 meantime is refused, not overwritten. --dry-run prints the new document and sends
 nothing. To change the whole document in an editor use edit.`,
@@ -239,6 +240,8 @@ func probeValue(f *pflag.Flag) (string, bool) {
 		return "", false
 	}
 	switch f.Value.Type() {
+	case "stringArray", "stringSlice":
+		return "probe", true
 	case "bool":
 		if f.DefValue == "true" {
 			return "false", true
@@ -321,4 +324,15 @@ func setExample(group string) string {
 		e = group + " set NAME --help"
 	}
 	return "jailops " + e + "\njailops " + e + " --dry-run"
+}
+
+// dropEmpty removes the empty entries of a list flag: an empty value clears the list (--tag "") and is no entry of it.
+func dropEmpty(l []string) []string {
+	var out []string
+	for _, v := range l {
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

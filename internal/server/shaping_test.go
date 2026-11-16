@@ -18,8 +18,11 @@ func TestBandwidthLimitsAreEnforcedWithPipes(t *testing.T) {
 	j.Spec.Network[0].Ingress = "8M"
 	startJailIn(t, e.Admin, j)
 	var cfg []string
+	seen := map[string]bool{}
 	for _, a := range e.Run.Argv() {
-		if strings.HasPrefix(a, "dnctl pipe ") && strings.Contains(a, " config bw ") {
+		// a pass of the reconcile loop that runs meanwhile configures the same pipes again (it is idempotent): once each
+		if strings.HasPrefix(a, "dnctl pipe ") && strings.Contains(a, " config bw ") && !seen[a] {
+			seen[a] = true
 			cfg = append(cfg, a)
 		}
 	}

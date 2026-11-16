@@ -352,3 +352,22 @@ func TestImageSetAutoUpgrade(t *testing.T) {
 		t.Fatalf("image show: %d %q %s", code, out, errs)
 	}
 }
+
+// "set" clears a list with an empty value, as its help says, and does not store an empty entry.
+func TestJailSetClearsAList(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	if _, errs, code := h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--tag", "front"); code != 0 {
+		t.Fatal(errs)
+	}
+	if out, _, _ := h.run("", "jail", "show", "web", "-o", "yaml"); !strings.Contains(out, "front") {
+		t.Fatalf("the tag was not set: %s", out)
+	}
+	if _, errs, code := h.run("", "jail", "set", "web", "--tag", ""); code != 0 || strings.Contains(errs, "cannot tell") {
+		t.Fatalf("set --tag \"\": %d %s", code, errs)
+	}
+	out, _, _ := h.run("", "jail", "show", "web", "-o", "yaml")
+	if strings.Contains(out, "front") || strings.Contains(out, `""`) {
+		t.Fatalf("the tag list was not cleared: %s", out)
+	}
+}

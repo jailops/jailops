@@ -152,6 +152,8 @@ type opRequest struct {
 	TargetGen int `json:"target_gen,omitempty"`
 	// Rename holds the steps of a rename.
 	Rename *renameRequest `json:"rename,omitempty"`
+	// Volume is the request of a volume's creation.
+	Volume *lifecycle.VolumeRequest `json:"volume,omitempty"`
 }
 
 type copyRequest struct {

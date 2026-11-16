@@ -67,8 +67,9 @@ export type Code =
   | "not_managed"
   | "locked"
   | "bad_passphrase"
+  | "stop_forced"
 
-export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'conflict', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'not_leader', 'no_quorum', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase']
+export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'conflict', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'not_leader', 'no_quorum', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase', 'stop_forced']
 
 export type DNSSource =
   | "network"
@@ -300,6 +301,7 @@ export interface App {
   logs?: AppLog[]
   setup?: string[][]
   sysvipc?: boolean
+  stop_timeout?: number
   health?: AppHealth
   resources?: AppResources
   notes?: string
@@ -689,6 +691,7 @@ export interface ConfigKey {
   restart_required: boolean
   profile: boolean
   admin?: boolean
+  global?: boolean
   path: string
 }
 
@@ -1475,6 +1478,13 @@ export interface Operation {
   created_at: string
   updated_at: string
   progress?: number
+  steps?: OperationStep[]
+}
+
+export interface OperationStep {
+  name: string
+  duration_ms: number
+  failed?: boolean
 }
 
 export interface PackageUpdate {
@@ -1694,6 +1704,7 @@ export interface RestoreBundle {
   policies?: FirewallPolicySpec[]
   address_sets?: AddressSetSpec[]
   volumes?: string[]
+  volume_ids?: Record<string, string>
   secret_refs?: string[]
 }
 
@@ -2374,6 +2385,7 @@ export const configKeys: readonly ConfigKey[] = [
     "restart_required": false,
     "profile": true,
     "admin": true,
+    "global": true,
     "path": "proxy[\u003cname\u003e].jail_port"
   },
   {
@@ -2384,6 +2396,7 @@ export const configKeys: readonly ConfigKey[] = [
     "restart_required": false,
     "profile": true,
     "admin": true,
+    "global": true,
     "path": "proxy[\u003cname\u003e].listen"
   },
   {
@@ -2398,6 +2411,7 @@ export const configKeys: readonly ConfigKey[] = [
     "restart_required": false,
     "profile": true,
     "admin": true,
+    "global": true,
     "path": "proxy[\u003cname\u003e].proto"
   },
   {

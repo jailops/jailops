@@ -57,6 +57,12 @@ func (c *rc) fail(err error) {
 		ae = api.Errorf(api.CodeRateLimited, "too many failed attempts").
 			WithHint("try again in "+locked.RetryAfterSeconds()+" seconds").WithDetail("retry_after", locked.RetryAfterSeconds())
 	case errors.As(err, &ae):
+		if ae.Code == api.CodeInternal {
+			// what the service wrapped (a store, helper or command error) can carry host paths and command output: it goes to
+			// the daemon log under the request id, and the client gets the id
+			c.s.log.Error("internal error", "rid", c.rid, "route", c.r.Method+" "+c.r.URL.Path, "err", ae.Message)
+			ae = api.Errorf(api.CodeInternal, "internal error").WithHint("see the daemon log for request " + c.rid)
+		}
 	default:
 		var mb *http.MaxBytesError
 		if errors.As(err, &mb) {

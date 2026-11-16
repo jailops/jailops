@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"jailops.net/jailops/sdk/api"
 )
@@ -282,7 +283,9 @@ func (l *Local) ReadFile(ctx context.Context, path string) ([]byte, error) {
 		return nil, mapFSErr(err)
 	}
 	defer root.Close()
-	f, err := root.Open(r.rel)
+	// O_NONBLOCK: opening a fifo that a jail planted in its tree would otherwise wait for a writer for ever, with the
+	// request's slot. The file is looked at before anything is read from it, and only a regular file is read.
+	f, err := root.OpenFile(r.rel, os.O_RDONLY|syscall.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, mapFSErr(err)
 	}
@@ -658,6 +661,62 @@ func devOf(fi fs.FileInfo) (uint64, bool) {
 // symbolic link anywhere below it is refused; a change of the device on the way is a mount point; with Write a probe
 // file is made in the directory and removed again.
 func (l *Local) ProbeSource(ctx context.Context, q SourceProbeReq) (SourceProbe, error) {
+	// A mount that hangs (a network share whose server is gone) blocks a call on it for as long as the kernel likes,
+	// and nothing can interrupt that. The probe runs in its own goroutine that the request abandons after a deadline;
+	// a path that has a probe in flight is not probed again, and at most probeSlots probes are in flight, so a stuck
+	// mount costs one slot and never the helper's whole budget of requests.
+	l.probeMu.Lock()
+	if l.probing[q.Path] {
+		l.probeMu.Unlock()
+		return SourceProbe{Detail: "the mount does not answer: an earlier look at it has not returned"}, nil
+	}
+	if len(l.probing) >= probeSlots {
+		l.probeMu.Unlock()
+		return SourceProbe{}, forbiddenBusy("%d probes of host directories are waiting on mounts that do not answer", probeSlots)
+	}
+	if l.probing == nil {
+		l.probing = map[string]bool{}
+	}
+	l.probing[q.Path] = true
+	l.probeMu.Unlock()
+	type result struct {
+		p   SourceProbe
+		err error
+	}
+	done := make(chan result, 1)
+	bg := context.WithoutCancel(ctx)
+	go func() {
+		fn := l.probeFn
+		if fn == nil {
+			fn = l.probeSource
+		}
+		p, err := fn(bg, q)
+		// the path is free again before the request hears of the answer: the next look must not meet its own last one
+		l.probeMu.Lock()
+		delete(l.probing, q.Path)
+		l.probeMu.Unlock()
+		done <- result{p, err}
+	}()
+	select {
+	case r := <-done:
+		return r.p, r.err
+	case <-ctx.Done():
+		return SourceProbe{}, ctx.Err()
+	case <-time.After(l.probeDeadline()):
+		return SourceProbe{Detail: "the mount does not answer: a call on it has not returned within " + l.probeDeadline().String()}, nil
+	}
+}
+
+const probeSlots = 4
+
+func (l *Local) probeDeadline() time.Duration {
+	if l.probeWait > 0 {
+		return l.probeWait
+	}
+	return 10 * time.Second
+}
+
+func (l *Local) probeSource(ctx context.Context, q SourceProbeReq) (SourceProbe, error) {
 	rootPath, rel, err := l.cfg.hostDirRoot(q.Path)
 	if err != nil {
 		return SourceProbe{}, err

@@ -187,7 +187,7 @@ func (s *Service) usageOf(name, except string) usage {
 	s.mu.RLock()
 	for key, e := range s.jails {
 		if key != except && e.jail.Metadata.Project == name {
-			u.add(e.jail.Spec)
+			u.add(s.effective(e.jail))
 		}
 	}
 	s.mu.RUnlock()
@@ -317,6 +317,14 @@ func (s *Service) checkProjectInUse(name string, old, next api.ProjectSpec) erro
 		if !specGrantsStorage(next, j.Spec.Storage) {
 			return api.Errorf(api.CodeBusy, "storage %q holds jail %q of the project", j.Spec.Storage, j.Metadata.Name).
 				WithHint("delete the jail first")
+		}
+	}
+	if l, err := s.volKind.p(name).list(); err == nil {
+		for _, v := range l {
+			if !v.Spec.IsHostDir() && !specGrantsStorage(next, v.Spec.Storage) {
+				return api.Errorf(api.CodeBusy, "storage %q holds volume %q of the project", v.Spec.Storage, v.Meta.Name).
+					WithHint("delete the volume first")
+			}
 		}
 	}
 	u := s.usageOf(name, "")
@@ -664,11 +672,60 @@ func (s *Service) projectObjects(name string) (map[string]int, int) {
 	if l, err := s.bpolKind.p(name).list(); err == nil {
 		held["backup policies"] = len(l)
 	}
+	if l, err := s.volKind.p(name).list(); err == nil {
+		held["volumes"] = len(l)
+	}
 	total := 0
 	for _, n := range held {
 		total += n
 	}
 	return held, total
+}
+
+// projectLeftovers names the datasets below the datasets of a project on any storage that are not the empty
+// containers JailOps keeps for it: what is there belongs to something that is not an object of the project any more.
+func (s *Service) projectLeftovers(ctx context.Context, name string) ([]string, error) {
+	z := s.d.ZClient
+	if z == nil {
+		return nil, nil
+	}
+	var out []string
+	for _, si := range s.storageList() {
+		pd := lifecycle.ProjectDS(si.lifecycle(), name)
+		if ok, _ := z.Exists(ctx, pd); !ok {
+			continue
+		}
+		if p, _ := z.Get(ctx, pd, "jailops:managed"); p["jailops:managed"].Value != "on" {
+			continue
+		}
+		list, err := z.List(ctx, zfs.ListOpts{Root: pd, Recursive: true})
+		if err != nil {
+			return nil, err
+		}
+		sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
+		keep := map[string]bool{
+			pd: true, lifecycle.ProjectJailsDS(si.lifecycle(), name): true, lifecycle.ProjectVolumesDS(si.lifecycle(), name): true,
+		}
+		var offenders []string
+		for _, d := range list {
+			if keep[d.Name] {
+				continue
+			}
+			covered := false
+			for _, o := range offenders {
+				if strings.HasPrefix(d.Name, o+"/") {
+					covered = true
+					break
+				}
+			}
+			if !covered {
+				offenders = append(offenders, d.Name)
+			}
+		}
+		sort.Strings(offenders)
+		out = append(out, offenders...)
+	}
+	return out, nil
 }
 
 // DeleteProject deletes an empty project and its datasets.
@@ -702,7 +759,16 @@ func (s *Service) DeleteProject(ctx context.Context, name string, expect int64) 
 			}
 		}
 		sort.Strings(parts)
-		return api.Errorf(api.CodeBusy, "project %q is not empty: %s", name, strings.Join(parts, ", ")).WithHint("delete them first")
+		return api.Errorf(api.CodeBusy, "project %q is not empty: %s", name, strings.Join(parts, ", ")).WithHint("delete them first (volumes with 'jailops volume delete', which asks before it destroys data)")
+	}
+	// What is left below the project's datasets is data that no object of the project accounts for (a volume dataset
+	// whose object is gone, a jail container parked by a replace-restore, a dataset an interrupted operation left):
+	// it is named, and nothing is destroyed until the operator has dealt with it.
+	if left, err := s.projectLeftovers(ctx, name); err != nil {
+		return err
+	} else if len(left) > 0 {
+		return api.Errorf(api.CodeBusy, "project %q still has datasets: %s", name, strings.Join(left, ", ")).
+			WithHint("look at them with 'zfs list -r', keep what you need and destroy the rest with 'zfs destroy -r' (jailops would delete them with the project)")
 	}
 	if err := s.projKind.delete(ctx, name, expect); err != nil {
 		return err
@@ -780,9 +846,15 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	if len(eff.Devfs) > 0 && !a.Perm.Satisfies(api.PermAdmin) {
 		return nil, api.Errorf(api.CodeForbidden, "exposing device nodes needs the admin role")
 	}
-	if len(eff.Proxy) > 0 && !a.Perm.Satisfies(api.PermAdmin) && (old == nil || !slices.Equal(eff.Proxy, s.effective(api.Jail{Spec: *old}).Proxy)) {
-		return nil, api.Errorf(api.CodeForbidden, "forwarding a host port into a jail needs the admin role: it opens the host to the network").
-			WithHint("an administrator sets proxy devices; a firewall rule of a policy can forward a port too, and is judged by the project's policies")
+	if len(eff.Proxy) > 0 {
+		if old == nil || !slices.Equal(eff.Proxy, s.effective(api.Jail{Spec: *old}).Proxy) {
+			if err := requireGlobalForForward(ctx, "forwarding a host port into a jail"); err != nil {
+				return nil, err
+			}
+		}
+		if err := s.checkProxyDevices(ctx, "jail "+key, eff.Proxy); err != nil {
+			return nil, err
+		}
 	}
 	var wasVolumes []api.VolumeAttach
 	if old != nil {
@@ -827,6 +899,9 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	}
 	s.quotaMu.Lock()
 	defer s.quotaMu.Unlock()
+	if err := s.checkEncryptedSharing(p.Meta.Name, key, eff.Volumes); err != nil {
+		return nil, err
+	}
 	u := s.usageOfLocked(p.Meta.Name, key)
 	if err := s.checkQuota(p, eff, u, isNew); err != nil {
 		return nil, err
@@ -842,13 +917,34 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	}, nil
 }
 
+// usageWithoutLocked sums the jails of a project (those being created included) except the jails in skip, for a
+// caller that holds quotaMu and counts those jails itself with the specs they would have.
+func (s *Service) usageWithoutLocked(name string, skip map[string]api.JailSpec) usage {
+	var u usage
+	s.mu.RLock()
+	for key, e := range s.jails {
+		if _, skipped := skip[key]; !skipped && e.jail.Metadata.Project == name {
+			u.add(s.effective(e.jail))
+		}
+	}
+	for key, pj := range s.pending {
+		if _, registered := s.jails[key]; !registered && pj.project == name {
+			if _, skipped := skip[key]; !skipped {
+				u.add(pj.spec)
+			}
+		}
+	}
+	s.mu.RUnlock()
+	return u
+}
+
 // usageOfLocked is usageOf for a caller that holds quotaMu.
 func (s *Service) usageOfLocked(name, except string) usage {
 	var u usage
 	s.mu.RLock()
 	for key, e := range s.jails {
 		if key != except && e.jail.Metadata.Project == name {
-			u.add(e.jail.Spec)
+			u.add(s.effective(e.jail))
 		}
 	}
 	for key, pj := range s.pending {

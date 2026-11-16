@@ -45,9 +45,9 @@ $ jailops volume attach vault2 vault /srv/other
 [exit 5]
 
 $ jailops volume list
-NAME     STORAGE   USED   SIZE   OWNER     MODE   ATTACHED TO       COMMENT
-vault    default   0 B    5G     770:770   0700   vault (locked)    -
-vault2   default   0 B    -      0:0       0755   vault2 (locked)   -
+NAME     STORAGE   USED   SIZE        OWNER     MODE   ATTACHED TO       COMMENT
+vault    default   0 B    5G          770:770   0700   vault (locked)    -
+vault2   default   0 B    unlimited   0:0       0755   vault2 (locked)   -
 
 $ jailops jail list
 NAME     STATE    IMAGE               GEN   ADDRESSES    AUTOSTART   AGE

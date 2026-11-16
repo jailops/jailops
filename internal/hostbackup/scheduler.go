@@ -3,6 +3,7 @@ package hostbackup
 import (
 	"context"
 	"errors"
+	"jailops.net/jailops/internal/supervise"
 	"sort"
 	"sync"
 	"time"
@@ -242,7 +243,7 @@ func (s *Service) Tick(ctx context.Context) (int, error) {
 		go func() {
 			defer s.wg.Done()
 			defer func() { <-s.sem }()
-			s.runJob(ctx, jo)
+			_ = supervise.Guard(nil, "backup-job", func() { s.runJob(ctx, jo) })
 		}()
 	}
 	return started, nil
@@ -426,8 +427,14 @@ func (s *Service) RunNowWith(ctx context.Context, project, policy string, o RunO
 		go func() {
 			defer wg.Done()
 			defer func() { <-s.sem }()
-			res, err := s.BackupJail(ctx, j, CaptureOptions{Policy: policy, Targets: p.Spec.Targets,
-				FullEvery: time.Duration(p.Spec.FullEvery) * 24 * time.Hour})
+			var res *CaptureResult
+			var err error
+			if perr := supervise.Guard(nil, "backup-jail", func() {
+				res, err = s.BackupJail(ctx, j, CaptureOptions{Policy: policy, Targets: p.Spec.Targets,
+					FullEvery: time.Duration(p.Spec.FullEvery) * 24 * time.Hour})
+			}); perr != nil {
+				res, err = nil, perr
+			}
 			mu.Lock()
 			defer mu.Unlock()
 			switch {

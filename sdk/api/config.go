@@ -58,6 +58,8 @@ type ConfigKey struct {
 	Profile bool `json:"profile"`
 	// Admin marks keys that need the admin role (device nodes).
 	Admin bool `json:"admin,omitempty"`
+	// Global marks keys that need a global administrator: a published port takes traffic the host would otherwise get.
+	Global bool `json:"global,omitempty"`
 	// Path is the location in the typed spec, for example "resources.cpu".
 	Path string `json:"path"`
 }
@@ -467,7 +469,7 @@ func buildRegistry() []ckey {
 	// nic devices
 	devKey := func(name, typ, desc, example string, restart, profile, admin bool, path string,
 		get func(*JailSpec, string) (string, bool), set func(*JailSpec, string, string) error, unset func(*JailSpec, string)) {
-		add(ckey{ConfigKey: ConfigKey{Name: name, Type: typ, Description: desc, Example: example, RestartRequired: restart, Profile: profile, Admin: admin, Path: path},
+		add(ckey{ConfigKey: ConfigKey{Name: name, Type: typ, Description: desc, Example: example, RestartRequired: restart, Profile: profile, Admin: admin, Global: strings.HasPrefix(name, "proxy."), Path: path},
 			get: get, set: set, unset: unset})
 	}
 	field := func(find func(*JailSpec, string, bool) *NetworkAttach, check func(string) error, get func(*NetworkAttach) *string, key string) (func(*JailSpec, string) (string, bool), func(*JailSpec, string, string) error, func(*JailSpec, string)) {
@@ -744,18 +746,9 @@ func ConfigKeys() []ConfigKey {
 	return out
 }
 
-// aliasKey maps the older spelling network.<device>.<field> to nic.
-func aliasKey(k string) string {
-	if rest, ok := strings.CutPrefix(k, "network."); ok {
-		return "nic." + rest
-	}
-	return k
-}
-
 // lookup finds the registry entry of a concrete key and the device or
 // variable name it carries.
 func lookup(key string) (*ckey, string, bool) {
-	key = aliasKey(key)
 	parts := strings.Split(key, ".")
 	for i := range registry {
 		k := &registry[i]
@@ -827,7 +820,7 @@ func ApplyConfig(spec *JailSpec, set map[string]string, unset []string) (restart
 			return err
 		}
 		if k.RestartRequired && !equalFlat(before, ConfigValues(work)) {
-			restart[aliasKey(key)] = true
+			restart[key] = true
 		}
 		return nil
 	}

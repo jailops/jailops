@@ -59,6 +59,7 @@ access:
   port: postgres
   service: postgresql
   hba_file: /var/db/postgres/data18/pg_hba.conf
+stop_timeout: 60
 resources:
   memory: 1G
   disk: 10G

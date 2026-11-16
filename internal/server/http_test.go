@@ -74,10 +74,13 @@ func TestAPIAnswersAreNotCached(t *testing.T) {
 }
 
 // Logins sent at once from one source: every attempt is counted before its password is derived, so no more than the
-// threshold derive, and no more than auth.DeriveSlots derivations (64 MiB each) run at once.
+// threshold of the source (ten times that of one user, so that people behind one address are not locked out by a stranger)
+// derive, and no more than auth.DeriveSlots derivations (64 MiB each) run at once.
 func TestConcurrentLoginsAreBounded(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
-	const n = 48
+	h := e.D.Handler() // in process: no connections to run out of under the race detector
+	const n = 64
+	const perSource = 50 // ten times the threshold of one user
 	var peak atomic.Uint64
 	stop := make(chan struct{})
 	sampled := make(chan struct{})
@@ -104,9 +107,13 @@ func TestConcurrentLoginsAreBounded(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			code, _ := rawDo(t, e, "POST", "/api/v1/auth/login", "", fmt.Sprintf(`{"username":"nobody%d","password":"x"}`, i), nil)
+			req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(fmt.Sprintf(`{"username":"nobody%d","password":"x"}`, i)))
+			req.Header.Set("Content-Type", "application/json")
+			req.RemoteAddr = "192.0.2.200:1"
+			rec := httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
 			mu.Lock()
-			codes[code]++
+			codes[rec.Code]++
 			mu.Unlock()
 		}()
 	}
@@ -114,10 +121,10 @@ func TestConcurrentLoginsAreBounded(t *testing.T) {
 	close(stop)
 	<-sampled
 	slots, after := auth.DerivationStats()
-	if codes[401] > 5 || codes[401]+codes[429] != n {
-		t.Errorf("%d logins at once from one source: %v (at most 5 may be checked)", n, codes)
+	if codes[401] > perSource || codes[401]+codes[429] != n {
+		t.Errorf("%d logins at once from one source: %v (at most %d may be checked)", n, codes, perSource)
 	}
-	if after-before > 5 {
+	if after-before > perSource {
 		t.Errorf("%d derivations for %d refused logins", after-before, n)
 	}
 	if slots > auth.DeriveSlots {
@@ -433,5 +440,53 @@ func TestOnlyAGlobalAdminSeesOtherUsersSessions(t *testing.T) {
 	}
 	if code, body := rawDo(t, e, "DELETE", "/api/v1/sessions/"+id, admin, "", nil); code != 200 {
 		t.Errorf("a global admin: %d %s", code, body)
+	}
+}
+
+// A spray over many users from one address is slowed (fifty failures lock the address, with a lockout that grows), while a
+// user at the same address who has not failed keeps working until then: the numbers of the two limiters.
+func TestSourceLimitStopsASprayButNotAGoodUserBelowIt(t *testing.T) {
+	e := dtest.New(t, dtest.Options{})
+	c := ctxT(t)
+	if _, err := e.Admin.Users().Create(c, api.UserCreate{Metadata: api.ObjectMeta{Name: "ann"}, Password: goodPassword,
+		Spec: api.UserSpec{Permission: api.PermAdmin, Global: true}}); err != nil {
+		t.Fatal(err)
+	}
+	h := e.D.Handler()
+	login := func(user, pw, addr string) int {
+		req := httptest.NewRequest("POST", "/api/v1/auth/login", strings.NewReader(`{"username":"`+user+`","password":"`+pw+`"}`))
+		req.Header.Set("Content-Type", "application/json")
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	const addr = "192.0.2.77:1"
+	checked, refused := 0, 0
+	for i := 0; i < 80; i++ {
+		switch login(fmt.Sprintf("nobody%d", i), "wrong-password-guess", addr) {
+		case 401:
+			checked++
+		case 429:
+			refused++
+		}
+	}
+	t.Logf("a spray of 80 users from one address: %d checked, %d refused", checked, refused)
+	// the fiftieth failure is answered with the lock, so 49 are answered as wrong passwords
+	if checked != 49 || refused != 31 {
+		t.Errorf("the source limit is 50 failures: %d checked and %d refused of 80", checked, refused)
+	}
+	if code := login("ann", goodPassword, addr); code != 429 {
+		t.Errorf("a locked address: the right password gets %d", code)
+	}
+	// below the limit a user behind the same address signs in
+	if code := login("ann", goodPassword, "192.0.2.78:1"); code != 200 {
+		t.Errorf("another address: %d", code)
+	}
+	for i := 0; i < 40; i++ {
+		login(fmt.Sprintf("other%d", i), "wrong-password-guess", "192.0.2.79:1")
+	}
+	if code := login("ann", goodPassword, "192.0.2.79:1"); code != 200 {
+		t.Errorf("an address with 40 failures over other users: ann gets %d", code)
 	}
 }

@@ -116,6 +116,18 @@ func (s *Service) PlanCreateVolume(ctx context.Context, r VolumeRequest, passphr
 			return nil, err
 		}
 	}
+	return s.volumePlan(r, passphrase), nil
+}
+
+// RecoverCreateVolume rolls back an interrupted CreateVolume: the dataset the run made is destroyed and the volumes
+// parent it made is removed again. It reports whether a run was found.
+func (s *Service) RecoverCreateVolume(ctx context.Context, r VolumeRequest) (bool, error) {
+	return s.RecoverRun(ctx, "create-volume", volumeKey(r.Project, r.Name), s.volumePlan(r, nil))
+}
+
+// volumePlan is the plan of a volume's creation; the passphrase is only used by the step that makes an encrypted
+// volume (a recovery needs the undo steps and runs none of the others).
+func (s *Service) volumePlan(r VolumeRequest, passphrase []byte) *plan.Plan {
 	z := s.ZFS
 	parent := ProjectVolumesDS(r.Storage, r.Project)
 	ds := VolumeDS(r.Storage, r.Project, r.Name)
@@ -156,7 +168,7 @@ func (s *Service) PlanCreateVolume(ctx context.Context, r VolumeRequest, passphr
 			}
 			return s.Files.SetOwner(ctx, mp, r.UID, r.GID, mode)
 		}})
-	return pl, nil
+	return pl
 }
 
 // CreateVolume makes a volume (see PlanCreateVolume).
@@ -337,7 +349,14 @@ func (s *Service) RemountHostDir(ctx context.Context, name string, a Attached) e
 	}
 	argv = append(argv, a.Mountpoint, target)
 	if out, err := s.Exec.Run(ctx, argv); err != nil {
-		return fmt.Errorf("mount %s on %s: %w: %s", a.Mountpoint, target, err, strings.TrimSpace(string(out)))
+		// the old mount is gone and the new one is not there: the jail would write into the empty directory of its
+		// own root, which a rollback or an upgrade of the root throws away. A small read-only tmpfs stands in until
+		// the mount can be made.
+		note := ""
+		if pout, perr := s.Exec.Run(ctx, []string{"mount", "-t", "tmpfs", "-o", "size=1m,ro", "tmpfs", target}); perr != nil {
+			note = fmt.Sprintf(" (and no stand-in mount: %v: %s)", perr, strings.TrimSpace(string(pout)))
+		}
+		return fmt.Errorf("mount %s on %s: %w: %s%s", a.Mountpoint, target, err, strings.TrimSpace(string(out)), note)
 	}
 	return nil
 }

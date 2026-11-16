@@ -169,7 +169,9 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 	release := func() {
 		once.Do(func() {
 			s.execMu.Lock()
-			s.execN[key]--
+			if s.execN[key]--; s.execN[key] <= 0 {
+				delete(s.execN, key) // no entry stays for a jail that once ran a command
+			}
 			s.execMu.Unlock()
 		})
 	}

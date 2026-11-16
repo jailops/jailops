@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"jailops.net/jailops/internal/supervise"
 	"net"
 	"net/http"
 	"strings"
@@ -96,6 +97,7 @@ func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, li
 	maxT := time.AfterFunc(lim.Max, func() { kill("the session reached its maximum duration") })
 	defer maxT.Stop()
 	go func() {
+		defer func() { supervise.Report(nil, "exec-session", recover()) }()
 		t := time.NewTicker(lim.Idle/4 + time.Millisecond)
 		defer t.Stop()
 		ka := time.NewTicker(s.cfg.KeepAlive)
@@ -118,8 +120,10 @@ func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, li
 		}
 	}()
 	// Client to command.
+	in := newStdinPump(sess.Stdin())
 	go func() {
-		defer func() { _ = sess.Stdin().Close() }()
+		defer func() { supervise.Report(nil, "exec-session", recover()) }()
+		defer in.stop()
 		for {
 			t, p, err := api.ReadFrame(rd)
 			if err != nil {
@@ -130,11 +134,12 @@ func (s *Server) pump(conn net.Conn, rd *bufio.Reader, st *service.ExecStart, li
 			switch t {
 			case api.FrameStdin:
 				if len(p) == 0 {
-					_ = sess.Stdin().Close()
+					in.closeInput()
 					continue
 				}
-				if _, err := sess.Stdin().Write(p); err != nil {
-					continue // the command no longer reads
+				if !in.push(p) {
+					kill("the command did not read its input")
+					return
 				}
 			case api.FrameResize:
 				if r, c, err := api.ParseResize(p); err == nil {

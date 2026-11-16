@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"jailops.net/jailops/internal/priv"
+	"jailops.net/jailops/internal/supervise"
 	"log/slog"
 	"net"
 	"net/http"
@@ -340,7 +341,8 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	}
 	// 5. Reconciler.
 	autostart := cfg.Reconcile.Autostart != nil && *cfg.Reconcile.Autostart
-	rcfg := reconcile.Config{Interval: cfg.Reconcile.Interval.Std(), Autostart: autostart, NDP: d.ndpFactory()}
+	rcfg := reconcile.Config{Interval: cfg.Reconcile.Interval.Std(), Autostart: autostart, NDP: d.ndpFactory(),
+		BootStateFile: filepath.Join(cfg.StateDir, "boot-id")}
 	trigger := make(chan struct{}, 1)
 	d.rec = reconcile.New(rcfg, reconcile.Env{Source: svc, Sink: svc, Actions: svc, Net: clients.Net, PF: clients.PF, Jails: clients.Jails,
 		Run: clients.Runner, Sysctl: clients.Sysctl, Routes: func(context.Context) ([]ifconfig.RouteEntry, error) { return priv.ReadRoutes() },
@@ -369,18 +371,19 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		}
 	}
 	// 8. Background work.
-	d.go_(func() { _ = d.rec.Run(priv.WithAdmin(bg, systemActor)) })
-	d.go_(func() { d.stateEvents(bg, trigger) })
-	d.go_(func() { d.housekeeping(bg) })
+	admin := priv.WithAdmin(bg, systemActor)
+	d.loop(bg, "reconcile", func(context.Context) { _ = d.rec.Run(admin) })
+	d.loop(bg, "state-events", func(ctx context.Context) { d.stateEvents(ctx, trigger) })
+	d.loop(bg, "housekeeping", d.housekeeping)
 	if cfg.Devd.On() {
-		d.go_(func() { svc.RunDevd(bg, cfg.Devd.Pipe) })
+		d.loop(bg, "devd", func(ctx context.Context) { svc.RunDevd(ctx, cfg.Devd.Pipe) })
 	}
 	if d.backups != nil {
-		d.go_(func() { d.backupLoop(priv.WithAdmin(bg, systemActor)) })
+		d.loop(bg, "backup", func(context.Context) { d.backupLoop(admin) })
 	}
 	if cfg.Hub {
-		d.go_(func() { d.probeLoop(bg) })
-		d.go_(func() { d.fleetLoop(bg) })
+		d.loop(bg, "hub-probe", d.probeLoop)
+		d.loop(bg, "hub-fleet", d.fleetLoop)
 	}
 	ok = true
 	svc.MarkStarted() // GET /readyz answers from here on
@@ -419,6 +422,13 @@ func (h *hostBackups) admin() backupAdmin { return backupAdmin{h.svc} }
 func (d *Daemon) go_(f func()) {
 	d.wg.Add(1)
 	go func() { defer d.wg.Done(); f() }()
+}
+
+// loop runs a background loop of the daemon under the supervisor: a panic in it is logged and counted and the loop
+// starts again after a delay; it does not end the daemon.
+func (d *Daemon) loop(ctx context.Context, name string, f func(context.Context)) {
+	d.wg.Add(1)
+	go func() { defer d.wg.Done(); supervise.Run(ctx, d.log, name, f) }()
 }
 
 // Handler returns the full HTTP handler (for tests that do not listen).

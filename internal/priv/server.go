@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"jailops.net/jailops/internal/supervise"
 	"net"
 	"os"
 	"runtime/debug"
@@ -124,6 +125,7 @@ func (s *Server) Serve(ln net.Listener) error {
 		go func() {
 			defer s.wg.Done()
 			defer func() { <-s.slots }()
+			defer func() { supervise.Report(nil, "helper-connection", recover()) }()
 			s.serveConn(uc)
 		}()
 	}

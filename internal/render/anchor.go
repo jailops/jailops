@@ -19,6 +19,7 @@ const (
 	StageIsolation   = "isolation"     // the subnets of other projects
 	StageHost        = "host"          // the host: closed to the jail unless a rule opened it
 	StageDefault     = "default"       // the defaults of the anchor
+	StageClosed      = "closed"        // a jail with a link and no address: nothing goes in or out
 )
 
 // Anchor is a rendered anchor: its lines, and for every filter rule among them what it matches. The rules are in the

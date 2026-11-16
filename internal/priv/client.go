@@ -458,6 +458,22 @@ func (c *Client) ProbeSource(ctx context.Context, q SourceProbeReq) (SourceProbe
 	return callJSON[SourceProbe](ctx, c, OpFSSourceProbe, q, callOpts{})
 }
 
+// StaleMounts implements Host.
+func (c *Client) StaleMounts(ctx context.Context) ([]StaleMount, error) {
+	r, err := callJSON[StaleMountsRes](ctx, c, OpMountsStale, empty{}, callOpts{})
+	return r.Mounts, err
+}
+
+// HealJail implements Host.
+func (c *Client) HealJail(ctx context.Context, jail string) (HealJailRes, error) {
+	return callJSON[HealJailRes](ctx, c, OpJailHeal, HealJailReq{Jail: jail}, callOpts{})
+}
+
+// HealNetwork implements Host.
+func (c *Client) HealNetwork(ctx context.Context) (HealNetRes, error) {
+	return callJSON[HealNetRes](ctx, c, OpNetHeal, empty{}, callOpts{})
+}
+
 // Remove implements Host.
 func (c *Client) Remove(ctx context.Context, path string) error {
 	return callNone(ctx, c, OpFSRemove, RemoveReq{Path: path})

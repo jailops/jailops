@@ -8,8 +8,10 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"jailops.net/jailops/internal/sys/ifconfig"
+	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -65,6 +67,9 @@ func checkNDPRoute(addr netip.Addr) error {
 func (l *Local) NDPRouteAdd(ctx context.Context, addr netip.Addr, iface string) error {
 	r, err := l.ndpRoute(addr, iface)
 	if err != nil {
+		return err
+	}
+	if err := l.checkNDPAddress(ctx, addr); err != nil {
 		return err
 	}
 	return l.Net().RouteAdd(ctx, r)
@@ -150,4 +155,89 @@ func (l *Local) storedNetworks() ([]networkDoc, error) {
 		}
 	}
 	return out, nil
+}
+
+// checkStoredNetworkAddr accepts an address (or the destination of a host route) on an interface of JailOps only when it
+// lies in the subnet of a network JailOps has stored: its IPv4 subnet or its IPv6 prefix. The link-local addresses of
+// an epair's host end (fe80::1, the gateway of every jail) are always fine. Without it the daemon could have the host
+// put any address on a jail's link or send the host's traffic for any address into a jail (8.8.8.8/32, a resolver, a
+// mirror). what names the thing in the refusal.
+func (l *Local) checkStoredNetworkAddr(a netip.Addr, what string) error {
+	if a.Is6() && a.IsLinkLocalUnicast() {
+		return nil
+	}
+	nets, err := l.storedNetworks()
+	if err != nil {
+		return err
+	}
+	for _, n := range nets {
+		for _, p := range networkPrefixes(n.Spec) {
+			if p.Contains(a) {
+				return nil
+			}
+		}
+	}
+	return forbidden("%s: %s is not inside the subnet of a network of JailOps", what, a)
+}
+
+// checkNDPAddress accepts the /128 route of the NDP proxy only for the address of a jail: inside the prefix of a stored
+// network in proxy mode that the proxy approves (ndpPrefixes), not the prefix's own subnet-router anycast address, not
+// the address of the uplink's IPv6 default router and not one that the uplink's neighbor cache holds: the proxy
+// answers neighbor discovery for what it has a route for, so a route for the router's address would put the host
+// between the router and every host on the segment.
+func (l *Local) checkNDPAddress(ctx context.Context, addr netip.Addr) error {
+	nets, err := l.storedNetworks()
+	if err != nil {
+		return err
+	}
+	for _, n := range nets {
+		v6 := n.Spec.IPv6
+		if v6 == nil || v6.Mode != api.IPv6Proxy {
+			continue
+		}
+		p, err := netip.ParsePrefix(v6.Subnet)
+		if err != nil || !p.Masked().Contains(addr) {
+			continue
+		}
+		if addr == p.Masked().Addr() {
+			return forbidden("%s is the subnet-router anycast address of %s", addr, p)
+		}
+		up, err := l.ndpPrefixes(ctx, n.Spec.Uplink)
+		if err != nil {
+			return err
+		}
+		if !up.contains(addr) {
+			continue
+		}
+		if l.neighborOnUplink(ctx, n.Spec.Uplink, addr) {
+			return forbidden("%s is the address of a router or host on %s, not of a jail", addr, n.Spec.Uplink)
+		}
+		return nil
+	}
+	return forbidden("%s is not inside the prefix of a network in IPv6 proxy mode", addr)
+}
+
+// neighborOnUplink reports whether addr is the IPv6 default router of the host or an entry of the neighbor cache on the
+// uplink. A lookup that fails says no: the checks above already bind the address to a proxy prefix.
+func (l *Local) neighborOnUplink(ctx context.Context, uplink string, addr netip.Addr) bool {
+	if res, err := l.d.Runner.Run(ctx, run.Cmd{Name: "route", Args: []string{"-n", "get", "-inet6", "default"}, Timeout: 10 * time.Second}); err == nil {
+		for _, line := range strings.Split(string(res.Stdout), "\n") {
+			if f := strings.Fields(line); len(f) == 2 && f[0] == "gateway:" {
+				if g, err := netip.ParseAddr(strings.SplitN(f[1], "%", 2)[0]); err == nil && g == addr {
+					return true
+				}
+			}
+		}
+	}
+	if res, err := l.d.Runner.Run(ctx, run.Cmd{Name: "ndp", Args: []string{"-an"}, Timeout: 10 * time.Second}); err == nil {
+		for _, line := range strings.Split(string(res.Stdout), "\n") {
+			f := strings.Fields(line)
+			if len(f) >= 3 && f[2] == uplink {
+				if g, err := netip.ParseAddr(strings.SplitN(f[0], "%", 2)[0]); err == nil && g == addr {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }

@@ -8,63 +8,125 @@ import (
 // Bounds on what a neighbor on the uplink can make the proxy spend. They are fixed numbers, not settings: a segment of
 // jails needs a few solicitations a second, so these never touch normal use, and a flood meets them whatever the
 // operator would have set.
+//
+// A solicitation is charged to the sender first, by the Ethernet source address of the frame, which a host on the
+// segment cannot vary for free (switches restrict or log it). Only a solicitation that passes is charged to the global
+// budget, so a flood from one sender spends its own allowance and nothing of anybody else's. The source link-layer
+// option and the source address of a solicitation are the sender's own claims and are never keys: the option only
+// tells where the answer goes.
+//
+// The global budget is the last resort against a flood from many senders (many MACs, or a forged source address each
+// time). It is split: a part only the requesters the proxy knows may use (the router, which asks again and again and
+// was answered), so a flood of new addresses fills the rest and the router still gets its answers.
 const (
-	// solicitPerSource is how many solicitations one requester MAC may send per second (and solicitBurst how many at
-	// once). The per-target budget alone lets a source that asks for many different addresses use the whole answer
-	// budget, which the router needs.
+	// solicitPerSource is how many solicitations one Ethernet source may send per second (and solicitBurst how many
+	// at once).
 	solicitPerSource = 50
 	solicitBurst     = 100
-	// solicitTotal is the budget of all solicitations the proxy looks at per second, whoever sends them.
-	solicitTotal      = 2000
-	solicitTotalBurst = 4000
-	// sourceTableMax bounds the table of requesters; when it is full the oldest entries go first.
+	// solicitGeneral is the global budget every requester may use per second; solicitReserved is the part of the global
+	// budget that only a known requester may use, on top of it.
+	solicitGeneral       = 1500
+	solicitGeneralBurst  = 3000
+	solicitReserved      = 500
+	solicitReservedBurst = 1000
+	// knownAfter is how long after its first answer a requester that asks again counts as known: a sender that changes
+	// its MAC for every solicitation never reaches it.
+	knownAfter = time.Second
+	// knownMax bounds the requesters that are known; a flood of new ones never pushes a known one out of the table.
+	knownMax = 256
+	// sourceTableMax bounds the table of senders; when it is full the oldest entries go first.
 	sourceTableMax = 4096
 	// floodLogEvery is the longest rate at which the proxy writes down that it dropped solicitations.
 	floodLogEvery = time.Minute
 	floodWindow   = time.Hour
 )
 
-// sourceBucket is the token bucket of one requester.
+// sourceBucket is the token bucket of one sender and what the proxy knows of it.
 type sourceBucket struct {
 	tokenBucket
+	// answeredAt is when the sender was first answered; known is set when it asked again knownAfter later.
+	answeredAt time.Time
+	known      bool
 }
 
-// admit applies the budgets to one solicitation of the requester mac: the budget of all solicitations, then the
-// budget of the requester.
-func (p *Proxy) admit(mac MAC) bool {
+// admit applies the budgets to one solicitation: the budget of the Ethernet source of the frame, and only then the
+// global budget, the reserved part of it for a known requester first. The source address of the packet is no key: a
+// flood that forges the router's address would otherwise use up the router's allowance.
+func (p *Proxy) admit(eth MAC) bool {
 	now := p.deps.Clock.Now()
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if !p.total.take(now, solicitTotal, solicitTotalBurst) {
-		return false
-	}
-	b := p.sources[mac]
+	b := p.sources[eth]
 	if b == nil {
 		if len(p.sources) >= sourceTableMax {
 			p.evictSources(now)
 		}
 		b = &sourceBucket{}
-		p.sources[mac] = b
+		p.sources[eth] = b
 	}
-	return b.take(now, solicitPerSource, solicitBurst)
+	if !b.take(now, solicitPerSource, solicitBurst) {
+		return false
+	}
+	if b.known && p.reserved.take(now, solicitReserved, solicitReservedBurst) {
+		return true
+	}
+	return p.total.take(now, solicitGeneral, solicitGeneralBurst)
 }
 
-// evictSources makes room in the table of requesters: the buckets that have filled up again (the requester is quiet)
-// go first; when none has, the one that was used longest ago.
-func (p *Proxy) evictSources(now time.Time) {
-	var oldest MAC
-	var oldestAt time.Time
-	for m, b := range p.sources {
-		if now.Sub(b.last).Seconds()*solicitPerSource >= solicitBurst {
-			delete(p.sources, m)
-			continue
-		}
-		if oldestAt.IsZero() || b.last.Before(oldestAt) {
-			oldest, oldestAt = m, b.last
+// answeredTo notes that the sender with this Ethernet source was answered: asking again later makes it known.
+func (p *Proxy) answeredTo(eth MAC) {
+	now := p.deps.Clock.Now()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	b := p.sources[eth]
+	if b == nil || b.known {
+		return
+	}
+	if b.answeredAt.IsZero() {
+		b.answeredAt = now
+		return
+	}
+	if now.Sub(b.answeredAt) < knownAfter {
+		return
+	}
+	known := 0
+	for _, o := range p.sources {
+		if o.known {
+			known++
 		}
 	}
-	if len(p.sources) >= sourceTableMax {
-		delete(p.sources, oldest)
+	if known < knownMax {
+		b.known = true
+	}
+}
+
+// evictSources makes room in the table of senders in one pass, so that a flood of new senders costs the proxy a scan
+// per quarter of the table and not one per frame: the buckets that have filled up again (the sender is quiet) go first,
+// then others, and a known sender stays unless every entry is known.
+func (p *Proxy) evictSources(now time.Time) {
+	want := sourceTableMax / 4
+	removed := 0
+	for m, b := range p.sources {
+		if !b.known && now.Sub(b.last).Seconds()*solicitPerSource >= solicitBurst {
+			delete(p.sources, m)
+			removed++
+		}
+	}
+	for m, b := range p.sources {
+		if removed >= want {
+			return
+		}
+		if !b.known {
+			delete(p.sources, m)
+			removed++
+		}
+	}
+	for m := range p.sources { // every entry is known: the table is full of the requesters the proxy trusts; drop some
+		if removed >= want {
+			return
+		}
+		delete(p.sources, m)
+		removed++
 	}
 }
 

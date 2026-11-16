@@ -237,6 +237,21 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 	case "image-delete":
 		out.Action, out.Detail = "dropped", "the generation delete was interrupted; delete it again to finish"
 		return out
+	case "create-volume":
+		// create-volume/<project>_<name>: the dataset the run made is taken away again (the volume has no object yet:
+		// the object is stored after the dataset is complete), so the name can be used again
+		if !haveReq || req.Volume == nil {
+			return fail(fmt.Errorf("the volume request was not recorded"))
+		}
+		found, err := s.life.RecoverCreateVolume(ctx, *req.Volume)
+		if err != nil {
+			return fail(err)
+		}
+		out.Action, out.Detail = "rolled-back", "the interrupted creation of the volume was undone; create it again"
+		if !found {
+			out.Action, out.Detail = "dropped", "the run had already ended"
+		}
+		return out
 	}
 	return fail(fmt.Errorf("unknown run kind %q", kind))
 }

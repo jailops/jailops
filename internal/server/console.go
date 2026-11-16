@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"jailops.net/jailops/internal/supervise"
 	"net/http"
 	"strconv"
 	"strings"
@@ -199,7 +200,10 @@ func (s *Server) handleConsoleOpen(c *rc) error {
 	argv := fmt.Sprintf("%q", st.Argv)
 	c.detail = "console argv=" + argv
 	s.svc.Audit(context.WithoutCancel(c.r.Context()), storeEntry(c, "EXEC", st.Project, "console start argv="+argv))
-	go s.runConsole(cs)
+	go func() {
+		defer func() { supervise.Report(nil, "console-session", recover()) }()
+		s.runConsole(cs)
+	}()
 	c.sync(200, map[string]string{"id": cs.id}, 0)
 	return nil
 }

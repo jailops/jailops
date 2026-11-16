@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"jailops.net/jailops/internal/supervise"
 	"log/slog"
 	"regexp"
 	"slices"
@@ -27,8 +28,14 @@ type Config struct {
 	Interval time.Duration
 	// Debounce coalesces bursts of triggers (default 250ms).
 	Debounce time.Duration
-	// Autostart starts jails with boot.autostart on the first pass.
+	// PFWatch is how often the loop looks at whether pf was flushed (default 5s).
+	PFWatch time.Duration
+	// Autostart starts jails with boot.autostart on the first pass after the host booted.
 	Autostart bool
+	// BootStateFile remembers the boot of the host (kern.boottime) that the boot pass ran for. A daemon that starts
+	// again while the host stays up (a restart, a package upgrade) starts no jails: an operator may have stopped
+	// them on purpose. Empty: every daemon start is a boot.
+	BootStateFile string
 	// NDP builds the neighbor discovery proxies of networks in IPv6 proxy mode; without it those networks report
 	// that no proxy is available.
 	NDP NDPFactory
@@ -89,6 +96,9 @@ type Reconciler struct {
 	jailSideOK map[string]int
 	// pipeRates is the bandwidth this daemon last set on each dummynet pipe of JailOps's range.
 	pipeRates map[int]uint64
+	// sentinel is the anchor of a running jail the last pass found in place: when it is empty, pf was flushed
+	// (service pf restart runs pfctl -F all) and the watch asks for a pass at once.
+	sentinel string
 }
 
 // New builds a Reconciler.
@@ -98,6 +108,9 @@ func New(cfg Config, env Env) *Reconciler {
 	}
 	if cfg.Debounce <= 0 {
 		cfg.Debounce = 250 * time.Millisecond
+	}
+	if cfg.PFWatch <= 0 {
+		cfg.PFWatch = defaultPFWatch
 	}
 	if env.Clock == nil {
 		env.Clock = SystemClock{}
@@ -125,11 +138,51 @@ func (r *Reconciler) Last() Report {
 	return r.last
 }
 
+// debounceWait is the wait before a pass that a kick asked for: the configured one, or three times what the last pass
+// took when that is longer, up to maxDebounce.
+func debounceWait(base, took time.Duration) time.Duration {
+	if t := 3 * took; t > base {
+		return min(t, maxDebounce)
+	}
+	return base
+}
+
+// maxDebounce is the longest wait between two passes that kicks cause.
+const maxDebounce = 10 * time.Second
+
+// defaultPFWatch is how often the loop looks at whether pf still holds the anchors it loaded.
+const defaultPFWatch = 5 * time.Second
+
+// watchPF asks for a pass at once when the anchor of a running jail is empty: starting or restarting pf flushes every
+// anchor (rc.d/pf runs pfctl -F all), and the jails would be unfiltered until the next pass a minute later.
+func (r *Reconciler) watchPF(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(r.cfg.PFWatch): // wall time, not the injected clock: the watch is about the host, not about the loop's timers
+		}
+		r.mu.Lock()
+		an := r.sentinel
+		r.mu.Unlock()
+		if an == "" || r.env.PF == nil {
+			continue
+		}
+		if live, err := r.env.PF.Read(ctx, an); err == nil && len(pfctl.RuleLines(live)) == 0 {
+			r.log.Warn("reconcile: the firewall anchor of a running jail is empty (pf was flushed): loading the anchors again", "anchor", an)
+			r.Kick()
+		}
+	}
+}
+
 // Run loops until ctx ends.
 func (r *Reconciler) Run(ctx context.Context) error {
 	defer r.stopProxies()
+	go supervise.Run(ctx, r.log, "pf-watch", r.watchPF)
 	for {
+		began := r.env.Clock.Now()
 		r.Pass(ctx)
+		took := r.env.Clock.Now().Sub(began)
 		select {
 		case <-ctx.Done():
 			return nil
@@ -138,11 +191,14 @@ func (r *Reconciler) Run(ctx context.Context) error {
 		case <-r.env.Clock.After(r.cfg.Interval):
 			continue
 		}
-		// Debounce: let a burst settle, then drain what arrived meanwhile.
+		// Debounce: let a burst settle, then drain what arrived meanwhile. A pass of a host with thousands of jails
+		// takes a second: under a steady stream of kicks (a bulk create) passes would follow each other at once and
+		// take a third of the machine, so the wait grows with the time a pass took (a quarter of the time at most).
+		wait := debounceWait(r.cfg.Debounce, took)
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-r.env.Clock.After(r.cfg.Debounce):
+		case <-r.env.Clock.After(wait):
 		}
 		select {
 		case <-r.kick:
@@ -220,7 +276,9 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 	r.pipeCleanup(ctx, des, &rep) // after the anchors: no anchor names a pipe that goes away
 	r.orphanPass(ctx, des, obs, ex, netStatus, &rep)
 	if r.cfg.Autostart && !r.bootDone {
-		r.bootPass(ctx, des, obs, &rep, now)
+		if r.hostBooted(ctx) {
+			r.bootPass(ctx, des, obs, &rep, now)
+		}
 		r.bootDone = true
 	}
 	r.proxyPass(ctx, des, obs, netStatus, &rep, now)
@@ -346,6 +404,9 @@ func (r *Reconciler) jailPass(ctx context.Context, j JailDesired, obs *Observed,
 	drift = append(drift, r.jailSidePass(ctx, j, obs, ex, rep)...)
 	// Firewall anchor, and the parent anchors that lead to it.
 	if j.Ruleset != "" && r.env.PF != nil {
+		r.mu.Lock()
+		r.sentinel = j.AnchorName
+		r.mu.Unlock()
 		for _, an := range sortedAnchors(j.ParentAnchors) {
 			pj := JailDesired{Name: j.Name, AnchorName: an, Ruleset: j.ParentAnchors[an]}
 			if r.anchorDrift(ctx, pj) == "" {

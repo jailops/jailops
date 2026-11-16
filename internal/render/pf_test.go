@@ -61,7 +61,7 @@ func TestPFGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	// (a raw fragment is the administrator's own text and stays as written)
-	if !strings.Contains(s, "# raw fragment (admin)\npass quick on lo0 all\n# the host:") {
+	if !strings.Contains(s, "# raw fragment (admin)\npass quick on lo0 all\n# end of raw fragment (admin)\n# the host:") {
 		t.Fatalf("raw fragment misplaced:\n%s", s)
 	}
 	golden(t, "pf_anchor_raw", s)
@@ -106,7 +106,6 @@ func TestPFErrors(t *testing.T) {
 	}{
 		{"no ifaces", func(i *PFInput) { i.Interfaces = nil }},
 		{"bad iface", func(i *PFInput) { i.Interfaces = []string{"em0 all"} }},
-		{"no addrs", func(i *PFInput) { i.Addresses = nil }},
 		{"jail name", func(i *PFInput) { i.Jail = "a\npass all" }},
 		{"raw without admin", func(i *PFInput) { i.Policies[0].Policy.Raw = "pass all"; i.AllowRaw = false }},
 		{"unknown set", func(i *PFInput) { i.Policies[0].Policy.Rules[0].From = []string{"set:nope"} }},
@@ -532,7 +531,7 @@ func TestEveryAnchorDefinesTheTablesItReferences(t *testing.T) {
 			t.Errorf("table <%s> is used but not defined in the anchor:\n%s", m[1], out)
 		}
 	}
-	if len(def) != 4 { // the jail's addresses, the host, the set and the tag
+	if len(def) != 5 { // the jail's addresses, the host, what "any" does not reach, the set and the tag
 		t.Errorf("tables %v", def)
 	}
 }
@@ -1068,5 +1067,55 @@ func TestPFHostEndpointAndClosedHost(t *testing.T) {
 	}
 	if !found {
 		t.Error("the structured rules lack the closing of the host")
+	}
+}
+
+// A jail with a link and no address (a network entry of "none") has an anchor that closes both directions: with no
+// anchor it would be open to the rules of the host alone, and could send in the name of another jail.
+func TestPFNoAddressClosesTheLinks(t *testing.T) {
+	in := pfBase()
+	in.Addresses = nil
+	in.Policies = nil
+	a, err := BuildAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := a.Text()
+	for _, want := range []string{"block drop in quick on " + in.Interfaces[0] + " all", "block drop out quick on " + in.Interfaces[0] + " all"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("missing %q in:\n%s", want, text)
+		}
+	}
+	if strings.Contains(text, "pass") {
+		t.Errorf("a closed anchor passes something:\n%s", text)
+	}
+	if len(a.Rules) != 2 || a.Rules[0].Origin.Stage != StageClosed || a.Rules[0].Action != "block" {
+		t.Errorf("rules %+v", a.Rules)
+	}
+}
+
+// The rules of an administrator's raw fragment stay as written even after a comment of the administrator's own: a
+// rule that already says keep state must not get a second one (pf refuses to load such a rule, and the whole anchor
+// with it).
+func TestRawFragmentIsUntouchedAfterItsOwnComments(t *testing.T) {
+	in := pfBase()
+	in.Policies[0].Policy.Raw = "# my rules\npass in quick on lo0 proto tcp to port 25 keep state\n# more\npass out quick on lo0 all\n"
+	in.AllowRaw = true
+	s, err := PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"pass in quick on lo0 proto tcp to port 25 keep state\n", "pass out quick on lo0 all\n"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("a raw rule was changed: want %q in\n%s", want, s)
+		}
+	}
+	if strings.Count(s, "keep state") > 0 && strings.Contains(s, "keep state label") {
+		t.Errorf("a label was put behind keep state:\n%s", s)
+	}
+	// the rules JailOps wrote after the fragment are labelled again
+	after := s[strings.Index(s, "# end of raw fragment (admin)"):]
+	if !strings.Contains(after, "keep state (if-bound)") {
+		t.Errorf("the rules after the fragment are not labelled:\n%s", after)
 	}
 }

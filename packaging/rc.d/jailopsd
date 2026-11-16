@@ -57,6 +57,7 @@ setuptoken_cmd="jailopsd_setup_token"
 start_precmd="jailopsd_precmd"
 start_postcmd="jailopsd_poststart"
 status_postcmd="jailopsd_helper_status"
+stop_cmd="jailopsd_stop"
 stop_postcmd="jailopsd_stop_helper"
 
 # jailops_appliance_args prints the flag that passes jailops_appliance_modules on, nothing when appliance mode is off.
@@ -108,6 +109,20 @@ jailopsd_force_depend()
 	fi
 }
 
+# Stop: TERM to the supervisor (daemon(8) passes it to jailopsd and exits without a restart), then wait for both.
+jailopsd_stop()
+{
+	_sup=$(check_pidfile ${supervisor_pidfile} /usr/sbin/daemon)
+	_pid=$(check_pidfile ${pidfile} ${procname})
+	if [ -z "${_sup}${_pid}" ]; then
+		echo "${name} not running? (check ${pidfile})."
+		return 1
+	fi
+	[ -z "${_sup}" ] || kill -TERM ${_sup}
+	[ -z "${_pid}" ] || [ -n "${_sup}" ] || kill -TERM ${_pid}
+	wait_for_pids ${_sup} ${_pid}
+}
+
 # The two are one service: the helper exists to do for the daemon what needs root. Stopping the daemon stops the helper
 # too, so that `restart` restarts both (a new package has a new binary of each), and `start` starts it again.
 # (Jails are kernel jails: stopping the daemon leaves them running. At shutdown jailops_shutdown, which requires this
@@ -155,7 +170,9 @@ load_rc_config $name
 : ${jailopsd_config:="/usr/local/etc/jailops/jailopsd.yaml"}
 : ${jailopsd_runas:="jailops"}
 
-# -p: pid of jailopsd itself (rc status and stop use it); -P: the supervisor, which exits with it.
+# -p: pid of jailopsd itself (rc status uses it); -P: the supervisor. -R 10: when jailopsd exits without being stopped (a
+# crash, the kernel killing it for memory), the supervisor starts it again after 10 seconds, no faster. A stop therefore goes
+# to the supervisor first (jailopsd_stop), which stops jailopsd and exits without starting it again.
 jailopsd_extra=""
 case "${jailopsd_web:-}" in
 [Yy][Ee][Ss]) jailopsd_extra="-web" ;;
@@ -163,7 +180,7 @@ case "${jailopsd_web:-}" in
 esac
 jailopsd_appliance=$(jailops_appliance_args) || err 1 "invalid jailops_appliance_modules"
 jailopsd_extra="${jailopsd_extra} ${jailopsd_appliance}"
-command_args="-f -S -T jailopsd -u ${jailopsd_runas} -p ${pidfile} -P ${supervisor_pidfile} ${procname} -config ${jailopsd_config} ${jailopsd_extra}"
+command_args="-f -S -T jailopsd -R 10 -u ${jailopsd_runas} -p ${pidfile} -P ${supervisor_pidfile} ${procname} -config ${jailopsd_config} ${jailopsd_extra}"
 required_files="${jailopsd_config}"
 
 run_rc_command "$1"

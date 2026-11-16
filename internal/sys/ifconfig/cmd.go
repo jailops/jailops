@@ -244,6 +244,10 @@ func (c *Command) AddrRemove(ctx context.Context, iface string, p netip.Prefix) 
 		return err
 	}
 	_, err := c.run(ctx, "ifconfig", addrArgs(iface, p, "-alias")...)
+	if err != nil && strings.Contains(strings.ToLower(err.Error()), "can't assign requested address") {
+		// the address is not on the interface (SIOCDIFADDR answers EADDRNOTAVAIL): what was to be removed is gone
+		return api.Errorf(api.CodeNotFound, "ifconfig: address %s is not on %s", p, iface)
+	}
 	return err
 }
 

@@ -168,3 +168,64 @@ func TestDestroyTearsDownAStoppedJail(t *testing.T) {
 		t.Fatalf("no teardown of a stopped jail: %v", w.Hooks.Log)
 	}
 }
+
+// busyZFS refuses to unmount: something on the host holds the datasets of the jail.
+type busyZFS struct{ ZFS }
+
+func (busyZFS) Unmount(context.Context, string) error {
+	return api.Errorf(api.CodeBusy, "cannot unmount: pool or dataset is busy")
+}
+
+// A stop whose datasets stay busy after the jail is gone succeeds, says so, and does not wait for them.
+func TestStopDoesNotWaitForABusyRoot(t *testing.T) {
+	w := newWorld(t)
+	w.created("web")
+	if err := w.S.StartJail(bg, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	w.S.ZFS = busyZFS{w.S.ZFS}
+	var warned string
+	w.S.Warn = func(_ context.Context, jail, _, what string) { warned = jail + ": " + what }
+	t0 := time.Now()
+	if err := w.S.StopJail(bg, "alpha_web"); err != nil {
+		t.Fatal("a busy root is not a failed stop:", err)
+	}
+	if d := time.Since(t0); d > 3*time.Second {
+		t.Errorf("the stop waited %s", d)
+	}
+	if !strings.Contains(warned, "alpha_web") || !strings.Contains(warned, "stay mounted") {
+		t.Errorf("no warning for the datasets that stay mounted: %q", warned)
+	}
+}
+
+// forcedJails answers a stop as the helper does when the stop commands of a jail never returned: the jail is removed
+// and the answer says it was forced.
+type forcedJails struct{ Jails }
+
+func (f forcedJails) Stop(ctx context.Context, name string) error {
+	if err := f.Jails.Stop(ctx, name); err != nil {
+		return err
+	}
+	return api.Errorf(api.CodeStopForced, "jail %s did not shut down within 1m5s (still running: 4021 sleep)", name)
+}
+
+// A forced stop is a stop with an event that names what still ran; the rest of the stop goes on.
+func TestForcedStopIsAStopWithAnEvent(t *testing.T) {
+	w := newWorld(t)
+	w.created("web")
+	if err := w.S.StartJail(bg, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	w.S.Jails = forcedJails{w.S.Jails}
+	var action, what string
+	w.S.Warn = func(_ context.Context, _, a, wh string) { action, what = a, wh }
+	if err := w.S.StopJail(bg, "alpha_web"); err != nil {
+		t.Fatal("a forced stop is not a failed stop:", err)
+	}
+	if action != "jail-stop-forced" || !strings.Contains(what, "still running: 4021 sleep") {
+		t.Errorf("event %q %q", action, what)
+	}
+	if mounted, _ := w.Z.Mounted(bg, "tank/jailops/projects/alpha/jails/web/root"); mounted {
+		t.Error("the root is still mounted after the forced stop")
+	}
+}

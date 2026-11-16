@@ -620,7 +620,7 @@ func TestAppInstallRecovery(t *testing.T) {
 	}
 	e3.Stop()
 	leave(2)
-	start := plan.Record{ID: "start/alpha_tool", Plan: "start-jail alpha_tool", Steps: []string{"mount", "render", "jail-start", "ready"}, Begun: 3, Done: 2, State: plan.StateRunning}
+	start := plan.Record{ID: "start/alpha_tool", Plan: "start-jail alpha_tool", Steps: []string{"mount", "heal-mounts", "render", "jail-start", "ready"}, Begun: 4, Done: 3, State: plan.StateRunning}
 	b, _ := json.Marshal(start)
 	if err := os.WriteFile(filepath.Join(journal, "start~alpha_tool.json"), b, 0o600); err != nil {
 		t.Fatal(err)

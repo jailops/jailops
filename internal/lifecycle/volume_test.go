@@ -292,3 +292,53 @@ func TestBindVolumesIntoAStoppedJail(t *testing.T) {
 		t.Errorf("the volumes are unmounted in reverse order, the last first:\n%s", cmds)
 	}
 }
+
+// A daemon that dies in the middle of a volume's creation takes the dataset away again at its next start, whatever
+// step it died after, and leaves the project's other datasets alone.
+func TestCreateVolumeCrashRecovery(t *testing.T) {
+	req := VolumeRequest{Project: "alpha", Name: "maildir", UUID: "vol-1", Size: "5G", UID: 5000, GID: 5000, Mode: 0o770}
+	w0 := newWorld(t)
+	req.Storage = w0.storage()
+	steps := len(w0.S.volumePlan(req, nil).Steps)
+	for k := 1; k <= steps; k++ {
+		w := newWorld(t)
+		req.Storage = w.storage()
+		crash(t, w, "create-volume/alpha_maildir", w.S.volumePlan(req, nil), k)
+		if found, err := w.S.RecoverCreateVolume(bg, req); !found || err != nil {
+			t.Fatalf("after %d steps: %v %v", k, found, err)
+		}
+		// the dataset is gone (the empty volumes parent of the project stays: it is the project's, not the volume's)
+		if ok, _ := w.Z.Exists(bg, "tank/jailops/projects/alpha/volumes/maildir"); ok {
+			t.Fatalf("crash after %d steps: the dataset of the volume is still there\n%s", k, w.Z.Dump())
+		}
+		// the name is free again
+		if _, err := w.S.CreateVolume(bg, req, nil, false); err != nil {
+			t.Fatalf("after the recovery: %v", err)
+		}
+	}
+}
+
+// A remount that cannot be made (the box is back but the mount fails) must not leave the jail on the empty directory of
+// its own root: a small read-only tmpfs stands in, and the error is returned so that the watch tries again.
+func TestRemountOfAHostDirectoryThatFailsLeavesAPlaceholder(t *testing.T) {
+	w := newWorld(t)
+	w.created("web")
+	w.Files.Sources["/mnt/box/backups"] = true
+	a := Attached{Name: "box", HostDir: true, Mountpoint: "/mnt/box/backups", Path: "/srv/box"}
+	w.attach["alpha_web"] = append(w.attach["alpha_web"], a)
+	target := "/jailops/projects/alpha/jails/web/root/srv/box"
+	w.Exec.Handler = func(argv []string) ([]byte, error) {
+		if len(argv) > 3 && argv[0] == "mount" && argv[2] == "nullfs" {
+			return []byte("mount_nullfs: Device busy"), errors.New("exit 1")
+		}
+		return w.handle(argv)
+	}
+	err := w.S.RemountHostDir(bg, "alpha_web", a)
+	if err == nil || !strings.Contains(err.Error(), "Device busy") {
+		t.Fatalf("a failed mount was not reported: %v", err)
+	}
+	last := strings.Join(w.Exec.Calls[len(w.Exec.Calls)-1], " ")
+	if last != "mount -t tmpfs -o size=1m,ro tmpfs "+target {
+		t.Fatalf("no stand-in on the target: %v", w.Exec.Calls)
+	}
+}

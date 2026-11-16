@@ -183,7 +183,7 @@ func (c Config) checkJailParam(ctx context.Context, name, key, val string, hasVa
 		if !filepath.IsAbs(s) || filepath.Clean(s) != s || c.isMountRoot(s) || !c.inMounts(s) {
 			return c.notBelowMount(s)
 		}
-		return nil
+		return c.checkJailRoot(name, s)
 	case "host.hostname":
 		s, err := str()
 		if err != nil {
@@ -350,6 +350,9 @@ func (c Config) checkFstab(ctx context.Context, text, existing string) error {
 	if len(text) > 64<<10 {
 		return invalid("fstab too large")
 	}
+	if err := c.checkFstabNesting(text); err != nil {
+		return err
+	}
 	for i, line := range strings.Split(text, "\n") {
 		t := strings.TrimSpace(line)
 		if t == "" || strings.HasPrefix(t, "#") {
@@ -445,4 +448,55 @@ func cleanAbs(p string) bool {
 	// no path the helper is asked about holds two dots in a row, even inside a name (a clean path has no ".." element, and
 	// this keeps the rule simple to audit)
 	return filepath.IsAbs(p) && filepath.Clean(p) == p && !strings.ContainsAny(p, "\x00\n\t ") && !strings.Contains(p, "..")
+}
+
+var reJailRoot = regexp.MustCompile(`^(/.+)/projects/([^/]+)/jails/([^/]+)/root$`)
+
+// checkJailRoot says that the path of a jail is the root of that jail and no other place: <storage mount>/projects/
+// <project>/jails/<name>/root, where the jail is called <project>_<name>, and that it reaches that place without a
+// symbolic link. jail(8) follows a link in path (the jail's root would be whatever it points at, the host's / for
+// one), so the lexical form is not enough: the check resolves the path as it is now, and runs again when the jail is
+// started.
+func (c Config) checkJailRoot(name, p string) error {
+	m := reJailRoot.FindStringSubmatch(p)
+	if m == nil || !c.isMountRoot(m[1]) || name != m[2]+"_"+m[3] {
+		return forbidden("the path of jail %s is %s/projects/<project>/jails/<name>/root of a storage root, not %q", name, c.mountBaseDesc(), p)
+	}
+	if err := plainBelow(m[1], p); err != nil {
+		return forbidden("the path of jail %s: %v", name, err)
+	}
+	return nil
+}
+
+// checkFstabNesting refuses a mount point below the mount point of a volume or a host directory (and two mounts on one
+// mount point). Until jail(8) has mounted the first, the second path is a path of the jail's own tree; afterwards it
+// is a path inside the volume, which another jail (or this one) can write to: a symbolic link there would carry the
+// second mount to wherever it points, over a directory of the host. Only what the helper itself lays out is nested: a
+// Linux jail's compat/linux mirror of its own root with the file systems below it, and devfs with fdescfs.
+func (c Config) checkFstabNesting(text string) error {
+	type mnt struct {
+		dev, mp, typ string
+		line         int
+	}
+	var all []mnt
+	for i, line := range strings.Split(text, "\n") {
+		f := strings.Fields(strings.TrimSpace(line))
+		if len(f) == 6 && !strings.HasPrefix(f[0], "#") {
+			all = append(all, mnt{f[0], f[1], f[2], i + 1})
+		}
+	}
+	for _, in := range all {
+		for _, out := range all {
+			if in.line == out.line || out.typ != "nullfs" || c.linuxMirror(out.dev, out.mp) {
+				continue
+			}
+			if in.mp == out.mp {
+				return forbidden("fstab line %d: mount point %q is mounted twice (line %d)", in.line, in.mp, out.line)
+			}
+			if within(out.mp, in.mp) {
+				return forbidden("fstab line %d: mount point %q is inside the mount point %q of line %d: nothing is mounted below a volume", in.line, in.mp, out.mp, out.line)
+			}
+		}
+	}
+	return nil
 }

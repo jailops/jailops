@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"jailops.net/jailops/internal/backup"
 	"jailops.net/jailops/internal/sys/zfs"
@@ -131,8 +132,13 @@ func lose(t *testing.T, r *rig, h *volHost, name string) {
 
 func attach(j JailRecord, vols ...string) JailRecord {
 	j.Spec.Volumes = nil
+	j.VolumeIDs = nil
 	for _, v := range vols {
 		j.Spec.Volumes = append(j.Spec.Volumes, api.VolumeAttach{Name: v, Mount: "/var/" + v})
+		if j.VolumeIDs == nil {
+			j.VolumeIDs = map[string]string{}
+		}
+		j.VolumeIDs[v] = "uuid-" + v
 	}
 	return j
 }
@@ -592,5 +598,27 @@ func TestAVolumeThatIsNotMountedIsBackedUp(t *testing.T) {
 	z.order = nil
 	if _, err := r.svc.BackupJail(bg, rec, CaptureOptions{Policy: "p"}); err != nil || len(z.order) != 0 {
 		t.Fatalf("a mounted volume was mounted again: %v %v", z.order, err)
+	}
+}
+
+// A volume that was deleted and made again under the same name is another volume: the newer backups of the new one are
+// not what an older jail's restore brings back.
+func TestNewestVolumeBackupIsOfTheVolumeTheJailAttached(t *testing.T) {
+	r, _, _ := volumeRig(t)
+	old := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	mk := func(name, uuid string, at time.Time) api.Backup {
+		return api.Backup{Metadata: api.ObjectMeta{Name: name + uuid, Project: "alpha", CreatedAt: at},
+			Spec: api.BackupSpec{Kind: "volume", Jail: name, JailUUID: uuid, KeyDomain: r.svc.currentKey().DomainID()}}
+	}
+	key := r.svc.currentKey()
+	all := []api.Backup{mk("mail", "uuid-1", old), mk("mail", "uuid-2", old.Add(time.Hour))}
+	if b, ok := newestVolumeBackup(all, "alpha", "mail", "uuid-1", key); !ok || b.Spec.JailUUID != "uuid-1" {
+		t.Fatalf("%+v %v", b, ok)
+	}
+	if _, ok := newestVolumeBackup(all, "alpha", "mail", "", key); ok {
+		t.Fatal("a bundle that does not know the volume matched a backup by its name")
+	}
+	if _, ok := newestVolumeBackup(all, "alpha", "mail", "uuid-3", key); ok {
+		t.Fatal("a backup of another volume was taken")
 	}
 }

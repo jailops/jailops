@@ -15,8 +15,10 @@ import (
 	"filippo.io/age"
 	"fmt"
 	"io"
+	"jailops.net/jailops/internal/supervise"
 	"log/slog"
 	"net"
+	"net/netip"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -35,6 +37,7 @@ import (
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk"
 	"jailops.net/jailops/sdk/api"
@@ -195,6 +198,9 @@ type Deps struct {
 	LogOwnPorts func() []int
 	// ConsolePort is the port of the TLS listener (listen.https.address), 0 without one; the host firewall opens it.
 	ConsolePort int
+	// HostAddrs are the addresses of this host's interfaces: a port forward may be published on one of them only. Nil
+	// reads the interfaces of the machine.
+	HostAddrs func() ([]netip.Addr, error)
 	// ConsoleURLs are the addresses of the console (https://HOST:PORT/) a setup token is printed with; nil without a
 	// TLS listener.
 	ConsoleURLs func() []string
@@ -224,6 +230,8 @@ type Service struct {
 	journal *fileJournal
 	nx      *reconcile.NetExec
 	login   *auth.Lockout
+	// loginIP limits the logins of one source address over all users, ten times looser than login.
+	loginIP *auth.Lockout
 	acct    *auth.AccountDelay
 	// credGen counts changes of credentials (tokens, users, certificates, sessions) so long streams check theirs again.
 	credGen atomic.Int64
@@ -246,21 +254,22 @@ type Service struct {
 	genVerMu sync.Mutex
 	genVer   map[string]string
 
-	imgKind  kindStore[api.ImageSpec]
-	netKind  kindStore[api.NetworkSpec]
-	polKind  kindStore[api.FirewallPolicySpec]
-	setKind  kindStore[api.AddressSetSpec]
-	tgtKind  kindStore[api.BackupTargetSpec]
-	bpolKind kindStore[api.BackupPolicySpec]
-	remKind  kindStore[api.RemoteSpec]
-	certKind kindStore[api.CertificateSpec]
-	projKind kindStore[api.ProjectSpec]
-	stoKind  kindStore[api.StorageSpec]
-	profKind kindStore[api.ProfileSpec]
-	wgKind   kindStore[api.WireGuardSpec]
-	fwdKind  kindStore[api.LogForwardSpec]
-	volKind  kindStore[api.VolumeSpec]
-	hostDirs hostDirWatch
+	imgKind       kindStore[api.ImageSpec]
+	netKind       kindStore[api.NetworkSpec]
+	polKind       kindStore[api.FirewallPolicySpec]
+	setKind       kindStore[api.AddressSetSpec]
+	tgtKind       kindStore[api.BackupTargetSpec]
+	bpolKind      kindStore[api.BackupPolicySpec]
+	remKind       kindStore[api.RemoteSpec]
+	certKind      kindStore[api.CertificateSpec]
+	projKind      kindStore[api.ProjectSpec]
+	stoKind       kindStore[api.StorageSpec]
+	profKind      kindStore[api.ProfileSpec]
+	wgKind        kindStore[api.WireGuardSpec]
+	fwdKind       kindStore[api.LogForwardSpec]
+	volKind       kindStore[api.VolumeSpec]
+	hostDirs      hostDirWatch
+	hostDirProbes hostDirProbes
 
 	// fwd forwards logs; fwdMu serialises changes of its sink list.
 	fwd      *logfwd.Forwarder
@@ -369,7 +378,7 @@ func New(d Deps) (*Service, error) {
 	}
 	s := &Service{d: d, log: d.Log, now: d.Now,
 		jails: map[string]*jailEntry{}, status: map[string]jailRuntime{}, netStat: map[string]api.NetworkStatus{},
-		login: auth.NewLockout(withClock(d.Lockout, d.Now)), acct: auth.NewAccountDelay(auth.AccountDelayConfig{Now: d.Now}), trustLim: auth.NewLockout(withClock(d.Lockout, d.Now)), setupLim: auth.NewLockout(withClock(d.Lockout, d.Now)), storages: map[string]*storageInfo{}, placed: map[string]string{},
+		login: auth.NewLockout(withClock(d.Lockout, d.Now)), loginIP: auth.NewLockout(looser(withClock(d.Lockout, d.Now), 10)), acct: auth.NewAccountDelay(auth.AccountDelayConfig{Now: d.Now}), trustLim: auth.NewLockout(withClock(d.Lockout, d.Now)), setupLim: auth.NewLockout(withClock(d.Lockout, d.Now)), storages: map[string]*storageInfo{}, placed: map[string]string{},
 		pending: map[string]pendingJail{}, execN: map[string]int{}, installing: map[string]bool{}, localReg: NewLocalRegistrar()}
 	s.baseCtx, s.cancel = context.WithCancel(context.Background())
 	s.imgKind = newKindStore[api.ImageSpec](s, api.KindImage, api.ScopeFleet, "image", "/api/v1/images")
@@ -410,12 +419,26 @@ func New(d Deps) (*Service, error) {
 		}
 		s.lcfg = lc
 		s.life = &lifecycle.Service{Cfg: lc, ZFS: d.ZFS, Exec: d.Exec, Jails: &jailRuntimeAdapter{s: s}, Files: d.Files,
-			Hooks: &hooks{s: s}, Images: &imageAdapter{s: s}, Executor: s.planExec, Keys: d.Keys}
+			Hooks: &hooks{s: s}, Images: &imageAdapter{s: s}, Executor: s.planExec, Keys: d.Keys,
+			Warn: func(ctx context.Context, key, action, what string) {
+				project, name := validate.SplitQualified(key)
+				s.log.Warn(what, "jail", key, "event", action)
+				s.emitIn(ctx, project, action, "/api/v1/jails/"+name)
+			}}
 	}
 	if d.Root != "" {
 		s.addStorage(DefaultStorage, api.StorageSpec{Dataset: d.Root}, d.Root, d.MountBase)
 	}
 	return s, nil
+}
+
+// looser raises the threshold of a lockout configuration by factor (the default threshold is 5).
+func looser(c auth.LockoutConfig, factor int) auth.LockoutConfig {
+	if c.Threshold <= 0 {
+		c.Threshold = 5
+	}
+	c.Threshold *= factor
+	return c
 }
 
 func withClock(c auth.LockoutConfig, now func() time.Time) auth.LockoutConfig {
@@ -443,14 +466,19 @@ func (s *Service) Start(ctx context.Context) error {
 	s.warmCerts()
 	s.startLogForward()
 	if s.life != nil {
-		s.wg.Add(1)
-		go func() { defer s.wg.Done(); s.updateLoop(s.baseCtx) }()
-		s.wg.Add(1)
-		go func() { defer s.wg.Done(); s.imageAutoLoop(s.baseCtx) }()
-		s.wg.Add(1)
-		go func() { defer s.wg.Done(); s.hostDirLoop(s.baseCtx) }()
+		s.loop("updates", s.updateLoop)
+		s.loop("image-auto-upgrade", s.imageAutoLoop)
+		s.loop("host-directories", s.hostDirLoop)
+		s.loop("heal", s.healLoop)
 	}
 	return nil
+}
+
+// loop runs a background loop of the service under the supervisor: a panic in it is logged and counted and the loop
+// starts again after a delay.
+func (s *Service) loop(name string, f func(context.Context)) {
+	s.wg.Add(1)
+	go func() { defer s.wg.Done(); supervise.Run(s.baseCtx, s.log, name, f) }()
 }
 
 // Close stops background work and cancels running operations.

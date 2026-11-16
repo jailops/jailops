@@ -22,7 +22,7 @@ import FirewallTest from '@/components/FirewallTest.vue'
 import { hasFirewallTest } from '@/composables/fwtest'
 import RenameDialog from '@/components/RenameDialog.vue'
 import { canRename } from '@/composables/rename'
-import { currentProject } from '@/composables/project'
+import { currentProject, isGlobalAdmin } from '@/composables/project'
 import type { FirewallPolicy, AddressSet, FirewallRule } from '@jailops/shared/api/types'
 
 const l = useLoad(async () => {
@@ -112,6 +112,8 @@ function move(i: number, d: number): void {
 function list(r: FirewallRule, k: 'from' | 'to' | 'ports', v: string): void {
   r[k] = splitList(v)
 }
+// a port forward takes traffic that would reach the host: only a global administrator gives or changes one
+const canForward = computed(() => isGlobalAdmin())
 function toggleRedirect(r: FirewallRule, on: boolean): void {
   r.redirect = on ? { host_port: 8080, jail_port: 80 } : undefined
 }
@@ -349,11 +351,11 @@ function removePolicy(): void {
                 <div class="row">
                   <label class="check"><input v-model="r.log" type="checkbox" />{{ s.firewall.log }}</label>
                   <label class="check" :title="s.firewall.disabledHint"><input v-model="r.disabled" type="checkbox" data-test="rule-disabled" />{{ s.firewall.disabled }}</label>
-                  <label class="check"><input type="checkbox" :checked="!!r.redirect" @change="toggleRedirect(r, ($event.target as HTMLInputElement).checked)" />{{ s.firewall.redirect }}</label>
+                  <label class="check" :title="canForward ? undefined : s.firewall.redirectGlobal"><input type="checkbox" :checked="!!r.redirect" :disabled="!canForward" data-test="rule-redirect" @change="toggleRedirect(r, ($event.target as HTMLInputElement).checked)" />{{ s.firewall.redirect }}</label>
                   <template v-if="r.redirect">
-                    <input v-model.number="r.redirect.host_port" type="number" min="1" max="65535" :aria-label="s.firewall.hostPort" style="width: 90px" />
+                    <input v-model.number="r.redirect.host_port" type="number" min="1" max="65535" :disabled="!canForward" :aria-label="s.firewall.hostPort" style="width: 90px" />
                     <span class="faint">{{ s.firewall.to2 }}</span>
-                    <input v-model.number="r.redirect.jail_port" type="number" min="1" max="65535" :aria-label="s.firewall.jailPort" style="width: 90px" />
+                    <input v-model.number="r.redirect.jail_port" type="number" min="1" max="65535" :disabled="!canForward" :aria-label="s.firewall.jailPort" style="width: 90px" />
                   </template>
                   <span v-if="err(i, 'redirect')" class="err" data-test="field-error">{{ err(i, 'redirect') }}</span>
                 </div>

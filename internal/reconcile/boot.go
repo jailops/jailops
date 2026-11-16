@@ -3,6 +3,8 @@ package reconcile
 import (
 	"context"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"jailops.net/jailops/sdk/api"
@@ -16,6 +18,34 @@ func StartOrder(jails []JailDesired, running map[string]bool) (order []string, s
 		nodes[i] = api.BootNode{Key: j.Name, Boot: j.Boot}
 	}
 	return api.BootOrder(nodes, running)
+}
+
+// hostBooted says whether the host booted since the boot pass last ran (and records the boot it ran for): a daemon that
+// starts again on a host that stayed up leaves the jails as they are.
+func (r *Reconciler) hostBooted(ctx context.Context) bool {
+	f := r.cfg.BootStateFile
+	if f == "" {
+		return true
+	}
+	prev, err := os.ReadFile(f)
+	known := err == nil
+	id := ""
+	if r.env.Sysctl != nil {
+		id, _ = r.env.Sysctl(ctx, "kern.boottime")
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		// the boot of the host cannot be read: a first start still boots the jails, a later one does not
+		return !known
+	}
+	if known && strings.TrimSpace(string(prev)) == id {
+		r.log.Info("the daemon started again on a host that stayed up: no jail is started at boot")
+		return false
+	}
+	if err := os.WriteFile(f, []byte(id+"\n"), 0o600); err != nil {
+		r.log.Warn("the boot of the host could not be recorded", "err", err)
+	}
+	return true
 }
 
 func (r *Reconciler) bootPass(ctx context.Context, des Desired, obs *Observed, rep *Report, now time.Time) {

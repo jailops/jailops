@@ -593,14 +593,19 @@ func (s *Service) park(ctx context.Context, rev *reverter, container string) (st
 	}
 	type saved struct {
 		name, value, source string
+		refres              string // a reservation of its own ("" when it has none)
 	}
 	var olds []saved
 	for _, d := range list {
-		p, err := s.zfs.Get(ctx, d.Name, "mountpoint")
+		p, err := s.zfs.Get(ctx, d.Name, "mountpoint", "refreservation")
 		if err != nil {
 			return "", err
 		}
-		olds = append(olds, saved{d.Name, p["mountpoint"].Value, p["mountpoint"].Source})
+		o := saved{name: d.Name, value: p["mountpoint"].Value, source: p["mountpoint"].Source}
+		if r := p["refreservation"]; r.Source == "local" && r.Value != "none" && r.Value != "0" && r.Value != "" && r.Value != "-" {
+			o.refres = r.Value
+		}
+		olds = append(olds, o)
 	}
 	id := randHex(3)
 	snap := "jailops-prerestore-" + id
@@ -636,6 +641,11 @@ func (s *Service) park(ctx context.Context, rev *reverter, container string) (st
 				return err
 			}
 			errs = append(errs, restoreMPs(ctx, ""))
+			for _, o := range olds {
+				if o.refres != "" {
+					errs = append(errs, s.zfs.Set(ctx, o.name, map[string]string{"refreservation": o.refres}))
+				}
+			}
 		case 1:
 			errs = append(errs, restoreMPs(ctx, ""))
 		}
@@ -656,6 +666,15 @@ func (s *Service) park(ctx context.Context, rev *reverter, container string) (st
 		return "", err
 	}
 	state = 2
+	// a parked jail runs nowhere: its guarantee of space (refreservation) is given back to the pool, so that keeping
+	// the old data does not keep that space reserved
+	for _, o := range olds {
+		if o.refres != "" {
+			if err := s.zfs.Set(ctx, parked+strings.TrimPrefix(o.name, container), map[string]string{"refreservation": "none"}); err != nil {
+				return "", err
+			}
+		}
+	}
 	return parked, nil
 }
 
@@ -871,7 +890,7 @@ func (s *Service) planVolumes(ctx context.Context, req api.RestoreRequest, rp *r
 		if all == nil {
 			all, _ = s.deps.Catalog.Backups(ctx)
 		}
-		vb, ok := newestVolumeBackup(all, rp.project, name, s.currentKey())
+		vb, ok := newestVolumeBackup(all, rp.project, name, rp.b.Spec.Bundle.VolumeIDs[name], s.currentKey())
 		if !ok {
 			continue // stays missing: the preflight reports it
 		}
@@ -888,12 +907,17 @@ func (s *Service) planVolumes(ctx context.Context, req api.RestoreRequest, rp *r
 	return notes, errs
 }
 
-// newestVolumeBackup finds the newest usable backup of a volume of the project that this host's key opens.
-func newestVolumeBackup(all []api.Backup, project, name string, key *keys.Key) (api.Backup, bool) {
+// newestVolumeBackup finds the newest usable backup of a volume of the project that this host's key opens. The volume is
+// the one with this UUID: a volume deleted and made again under the same name is another volume, and its backups are not
+// the ones an older jail needs. Without a UUID (the bundle does not know the volume) nothing matches.
+func newestVolumeBackup(all []api.Backup, project, name, id string, key *keys.Key) (api.Backup, bool) {
 	var best api.Backup
 	found := false
+	if id == "" {
+		return best, false
+	}
 	for _, b := range all {
-		if b.Spec.Kind != "volume" || b.Spec.Jail != name || b.Metadata.Project != project || b.Status.Failed {
+		if b.Spec.Kind != "volume" || b.Spec.Jail != name || b.Spec.JailUUID != id || b.Metadata.Project != project || b.Status.Failed {
 			continue
 		}
 		if key == nil || key.DomainID() != b.Spec.KeyDomain {

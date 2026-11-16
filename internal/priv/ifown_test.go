@@ -54,7 +54,7 @@ func TestInterfaceOwnershipMatrix(t *testing.T) {
 				n.SetLink(ctx, name, false),
 				n.AddrAdd(ctx, name, netip.MustParsePrefix("10.9.0.1/24")),
 				n.AddrRemove(ctx, name, netip.MustParsePrefix("10.9.0.1/24")),
-				n.RouteAdd(ctx, ifconfig.Route{Dest: "2001:db8::7/128", Interface: name}),
+				n.RouteAdd(ctx, ifconfig.Route{Dest: "2001:db8:1:2:100::7/128", Interface: name}),
 				n.MoveToJail(ctx, name, "shop_web"),
 				f.client.SetMTU(ctx, name, 1400),
 			} {
@@ -124,6 +124,7 @@ func desc(t *testing.T, e *env, name string) string {
 func TestInterfaceOwnershipOfAJailsEpair(t *testing.T) {
 	f := newFixtureWith(t, func(e *env) {
 		e.conf(t, "shop_web")
+		e.storeLan(t, "10.66.0.0/24")
 		e.runner.On("ifconfig", []string{"jo0123456789a0a", "mtu", "1400"}, "")
 	})
 	ctx := context.Background()
@@ -136,7 +137,7 @@ func TestInterfaceOwnershipOfAJailsEpair(t *testing.T) {
 		n.SetDescription(ctx, a, "jailops jail=shop/web net=lan (host side)"),
 		n.AddrAdd(ctx, a, netip.MustParsePrefix("10.66.0.1/32")),
 		n.SetLink(ctx, a, true),
-		n.RouteAdd(ctx, ifconfig.Route{Dest: "2001:db8::7/128", Interface: a}),
+		n.RouteAdd(ctx, ifconfig.Route{Dest: "2001:db8:1:2:100::7/128", Interface: a}),
 		f.client.SetMTU(ctx, a, 1400),
 	} {
 		if err != nil {

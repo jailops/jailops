@@ -165,6 +165,11 @@ The upgrade takes one atomic snapshot of all the jail's datasets (the rollback p
 name), swaps the roots with `zfs rename`, starts the jail and runs its health check. On failure it swaps back and starts the old
 root. An `/etc` conflict a human must resolve leaves the jail on the old generation (`merge_conflict`).
 
+What a failed upgrade puts back depends on whether the jail had run on the new generation. Before the start nothing the
+jail wrote exists, so `/etc` and `/var/db` go back to the moment before the merge. After the start `/etc` still goes back
+(it was merged for the new generation and the old root needs its own), but `/var/db` keeps what the jail wrote while it ran:
+the databases of the packages are not rolled back. Changes made to files in `/etc` by the jail in that window are lost.
+
 Rollback has scopes, and the difference matters:
 
 | Scope | Does | Data |

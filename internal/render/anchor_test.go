@@ -42,8 +42,11 @@ func TestAnchorRulesAreTheFilterLinesOfTheText(t *testing.T) {
 		var want []int
 		inRaw := false
 		for i, ln := range an.Lines {
-			if strings.HasPrefix(ln, "# ") {
-				inRaw = ln == "# raw fragment (admin)"
+			switch ln {
+			case rawBegin:
+				inRaw = true
+			case rawEnd:
+				inRaw = false
 			}
 			// the pass rule after a port forward's translation stands on the uplink, which is neither the jail's own port
 			// nor its gateway: the test of a connection does not walk it
@@ -65,7 +68,7 @@ func TestAnchorRulesAreTheFilterLinesOfTheText(t *testing.T) {
 				}
 				got = append(got, r.Line)
 			case RuleRaw:
-				if an.Lines[r.Line] != "# raw fragment (admin)" {
+				if an.Lines[r.Line] != rawBegin {
 					t.Errorf("%s: the raw marker is at %q", name, an.Lines[r.Line])
 				}
 			}

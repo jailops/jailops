@@ -91,6 +91,13 @@ func rootOwned(p string) error {
 // cleanKeyPath checks the text of a path a repository configuration gives for its keys: only plain components
 // and the variables pkg expands, never "..".
 func cleanKeyPath(p string) bool {
+	seen := map[string]bool{}
+	for _, v := range rePkgVar.FindAllString(p, -1) {
+		if seen[v] { // a variable twice is not a path root chose: pkg expands each one itself
+			return false
+		}
+		seen[v] = true
+	}
 	plain := rePkgVar.ReplaceAllString(p, "x")
 	if !rePkgKeyPath.MatchString(plain) || strings.Contains(plain, "..") || strings.Contains(plain, "//") {
 		return false

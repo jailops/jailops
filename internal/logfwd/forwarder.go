@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"jailops.net/jailops/internal/supervise"
 	"log/slog"
 	"maps"
 	"net"
@@ -313,6 +314,11 @@ func (s *sink) run(ctx context.Context) {
 			s.snd.close()
 		}
 	}()
+	// a panic in a cycle is a restart of the loop (the state of the sink is in its fields), not the end of the daemon
+	supervise.Run(ctx, s.env.Log, "log-forward", s.loop)
+}
+
+func (s *sink) loop(ctx context.Context) {
 	for {
 		s.cycle(ctx)
 		select {
@@ -444,6 +450,18 @@ func (s *sink) refresh(ctx context.Context) {
 		}
 	}
 	s.srcs = srcs
+	// a source that is gone (a deleted jail) leaves the tables once nothing of it is queued
+	live := make(map[string]bool, len(srcs))
+	for _, src := range srcs {
+		live[src.key] = true
+	}
+	for k := range s.read {
+		if !live[k] && s.pending[k] == 0 {
+			delete(s.read, k)
+			delete(s.acked, k)
+			delete(s.pending, k)
+		}
+	}
 	s.mu.Lock()
 	s.nSources, s.overLimit = len(srcs), over
 	s.mu.Unlock()

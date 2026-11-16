@@ -62,3 +62,20 @@ func SetBashBeforeStartDeadline(d time.Duration) func() {
 	bashBeforeStartDeadline = d
 	return func() { bashBeforeStartDeadline = old }
 }
+
+// SetHostDirTimeouts shortens how long a read and a probe wait for a host directory that does not answer, and returns
+// what puts them back.
+func SetHostDirTimeouts(read, probe time.Duration) func() {
+	r, p := hostDirReadTimeout.Load(), hostDirProbeTimeout.Load()
+	hostDirReadTimeout.Store(int64(read))
+	hostDirProbeTimeout.Store(int64(probe))
+	return func() { hostDirReadTimeout.Store(r); hostDirProbeTimeout.Store(p) }
+}
+
+// SetShellRetryAfter changes how long a failed setup of bash waits before a start tries it again; the returned
+// function puts it back.
+func SetShellRetryAfter(d time.Duration) func() {
+	old := shellRetryAfter
+	shellRetryAfter = d
+	return func() { shellRetryAfter = old }
+}

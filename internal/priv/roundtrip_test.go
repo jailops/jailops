@@ -494,7 +494,7 @@ func TestRunnerRoundTrip(t *testing.T) {
 }
 
 func TestPFAndNetRoundTrip(t *testing.T) {
-	f := newFixture(t)
+	f := newFixtureWith(t, func(e *env) { e.storeLan(t, "10.1.0.0/16") })
 	ctx := context.Background()
 	p := f.client.PF()
 	if _, _, err := f.client.Net().EpairCreate(ctx, "jo0123456789a0"); err != nil {

@@ -4,6 +4,8 @@
 table <s_office> persist { 198.51.100.7, 2001:db8:ffff::/48, 203.0.113.0/24 }
 # the host's own addresses (a jail reaches none of them unless a rule says so)
 table <host> persist
+# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)
+table <not_any> persist
 # rdr rule 4: fwd
 match in on em0 inet proto tcp from any to (em0) port 2222 rdr-to 10.20.0.10 port 22
 pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 22 label "jo-714f021251d5" keep state (if-bound)

@@ -39,7 +39,7 @@ func volumeDesc() *kindDesc[api.Volume] {
 			// a directory of the host: its path stands where the storage does, and nothing of a dataset applies
 			return []string{v.Metadata.Name, v.Spec.Path, "-", "-", "-", "-", dash(usesCell(v.Status.AttachedTo) + lockedCell(v)), dash(v.Spec.Comment)}
 		}
-		return []string{v.Metadata.Name, v.Spec.Storage, humanBytes(v.Status.Used), dash(v.Spec.Size), fmt.Sprintf("%d:%d", v.Spec.UID, v.Spec.GID),
+		return []string{v.Metadata.Name, v.Spec.Storage, humanBytes(v.Status.Used), unlimitedOr(v.Spec.Size), fmt.Sprintf("%d:%d", v.Spec.UID, v.Spec.GID),
 			v.Spec.Mode, dash(usesCell(v.Status.AttachedTo) + lockedCell(v)), dash(v.Spec.Comment)}
 	}
 	d.brief = &listView[api.Volume]{
@@ -524,4 +524,12 @@ would be lost, and asks you to type the volume name. In a script, pass
 	rollback.Flags().BoolVar(&confirmLoss, "confirm-data-loss", false, "confirm that data written since the snapshot may be destroyed")
 	sc.AddCommand(create, list, del, rollback)
 	return sc
+}
+
+// unlimitedOr is the size of a volume: without one only the project's storage quota bounds it, and the list says so.
+func unlimitedOr(size string) string {
+	if size == "" {
+		return "unlimited"
+	}
+	return size
 }

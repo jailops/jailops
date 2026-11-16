@@ -175,8 +175,9 @@ func TestTarRuleListsBeforeExtracting(t *testing.T) {
 		e := r.env
 		e.runner = run.NewFake()
 		l, _ := NewLocal(e.cfg, Deps{ZFS: e.zfs, Runner: e.runner}, WithoutChown())
-		e.runner.On("/usr/bin/tar", []string{"-tzf", archive}, list)
-		e.runner.On("/usr/bin/tar", []string{"-C", dest, "-xpzf", archive}, "")
+		// the archive is copied into a directory of the helper's: listed and extracted from the copy
+		e.runner.On("/usr/bin/tar", []string{"-tzf", run.AnyArg}, list)
+		e.runner.On("/usr/bin/tar", []string{"-C", dest, "-xpzf", run.AnyArg}, "")
 		_, err := l.Runner().Run(ctx, run.Cmd{Name: "tar", Args: []string{"-C", dest, "-xpzf", archive}})
 		return err
 	}

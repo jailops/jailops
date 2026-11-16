@@ -77,8 +77,20 @@ func (r *Reconciler) pipeCleanup(ctx context.Context, des Desired, rep *Report) 
 	for _, p := range des.Pipes {
 		want[p.Number] = true
 	}
+	var gone []int
 	for _, n := range existing {
-		if want[n] || !render.IsManagedPipe(n) {
+		if !want[n] && render.IsManagedPipe(n) {
+			gone = append(gone, n)
+		}
+	}
+	if len(gone) == 0 {
+		return
+	}
+	// A pipe that a loaded anchor still names stays: a reload that failed keeps the old anchor, and the traffic it
+	// sends into a pipe that is gone is dropped.
+	named := r.pipesNamedByAnchors(ctx, des)
+	for _, n := range gone {
+		if named[n] {
 			continue
 		}
 		if _, err := r.env.Run.Run(ctx, run.Cmd{Name: "dnctl", Args: []string{"pipe", "delete", strconv.Itoa(n)}}); err != nil {
@@ -105,4 +117,32 @@ func (r *Reconciler) listPipes(ctx context.Context) ([]int, error) {
 		}
 	}
 	return out, nil
+}
+
+// rePipeUse finds the numbers of a dnpipe option in an anchor.
+var rePipeUse = regexp.MustCompile(`dnpipe\s*\(?\s*([0-9]+)(?:\s*,\s*([0-9]+))?`)
+
+// pipesNamedByAnchors are the pipe numbers the loaded anchors of the jails send traffic into.
+func (r *Reconciler) pipesNamedByAnchors(ctx context.Context, des Desired) map[int]bool {
+	named := map[int]bool{}
+	if r.env.PF == nil {
+		return named
+	}
+	for _, j := range des.Jails {
+		if j.AnchorName == "" {
+			continue
+		}
+		live, err := r.env.PF.Read(ctx, j.AnchorName)
+		if err != nil {
+			continue
+		}
+		for _, m := range rePipeUse.FindAllStringSubmatch(live, -1) {
+			for _, g := range m[1:] {
+				if n, err := strconv.Atoi(g); err == nil && g != "" {
+					named[n] = true
+				}
+			}
+		}
+	}
+	return named
 }

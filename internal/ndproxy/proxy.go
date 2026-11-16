@@ -215,6 +215,7 @@ type Proxy struct {
 	// sources and total bound the solicitations the proxy looks at (flood.go); floodLog counts the drops of the last hour.
 	sources     map[MAC]*sourceBucket
 	total       tokenBucket
+	reserved    tokenBucket
 	floodLog    hourLog
 	floodSince  uint64
 	floodLogged time.Time
@@ -709,15 +710,17 @@ func (p *Proxy) HandleFrame(frame []byte) {
 		p.m.dropped.Add(1)
 		return
 	}
+	// The answer goes to the source link-layer option when there is one; the budgets are kept by the Ethernet source of
+	// the frame, which the sender cannot vary for free.
 	mac := pkt.EthSrc
 	if pkt.SourceLLA != nil {
 		mac = *pkt.SourceLLA
 	}
-	if mac.IsZero() || mac.IsMulticast() || mac == host {
+	if mac.IsZero() || mac.IsMulticast() || mac == host || pkt.EthSrc.IsZero() || pkt.EthSrc.IsMulticast() {
 		p.m.malformed.Add(1)
 		return
 	}
-	if !p.admit(mac) {
+	if !p.admit(pkt.EthSrc) {
 		p.flood()
 		return
 	}
@@ -727,6 +730,7 @@ func (p *Proxy) HandleFrame(frame []byte) {
 	}
 	switch res.Verdict {
 	case VerdictAnswer:
+		p.answeredTo(pkt.EthSrc)
 		p.answer(pkt.Target, Requester{IP: pkt.Src, MAC: mac})
 	case VerdictQueued:
 	case VerdictUnknown:
@@ -783,6 +787,9 @@ func (p *Proxy) Run(ctx context.Context) error {
 		p.mu.Unlock()
 	}
 	defer closeStream()
+	// One timer of each kind lives across the iterations of the loop: a frame wakes the loop, and under a flood of
+	// solicitations that is thousands of iterations a second, each of which used to make three timers of its own.
+	var announceT, tableT, pollT loopTimer
 
 	for ctx.Err() == nil {
 		p.mu.Lock()
@@ -827,22 +834,18 @@ func (p *Proxy) Run(ctx context.Context) error {
 		var announceTimer <-chan time.Time
 		if stream != nil {
 			if next := p.Announce(); !next.IsZero() {
-				d := next.Sub(p.deps.Clock.Now())
-				if d < 0 {
-					d = 0
-				}
-				announceTimer = p.deps.Clock.After(d)
+				announceTimer = announceT.until(p.deps.Clock, next)
+			} else {
+				announceT.reset()
 			}
 		}
 		var tableTimer <-chan time.Time
 		if next, ok := p.table.Next(); ok {
-			d := next.Sub(p.deps.Clock.Now())
-			if d < 0 {
-				d = 0
-			}
-			tableTimer = p.deps.Clock.After(d)
+			tableTimer = tableT.until(p.deps.Clock, next)
+		} else {
+			tableT.reset()
 		}
-		poll := p.deps.Clock.After(cfg.LinkPoll)
+		pollTimer := pollT.after(p.deps.Clock, cfg.LinkPoll)
 
 		select {
 		case <-ctx.Done():
@@ -853,12 +856,15 @@ func (p *Proxy) Run(ctx context.Context) error {
 				p.HandleFrame(r.frame)
 			}
 		case <-tableTimer:
+			tableT.reset()
 			p.Tick()
 		case <-p.reload:
 			closeStream()
 		case <-p.wake:
 		case <-announceTimer:
-		case <-poll:
+			announceT.reset()
+		case <-pollTimer:
+			pollT.reset()
 			if stream != nil && p.linkChanged() {
 				closeStream()
 			}
@@ -866,6 +872,36 @@ func (p *Proxy) Run(ctx context.Context) error {
 	}
 	return nil
 }
+
+// loopTimer keeps the channel of a timer until it fires or its deadline changes, so that waking the loop for something
+// else does not make a new timer.
+type loopTimer struct {
+	ch <-chan time.Time
+	at time.Time
+}
+
+// until returns the channel of a timer that fires at the deadline.
+func (t *loopTimer) until(c Clock, at time.Time) <-chan time.Time {
+	if t.ch == nil || !t.at.Equal(at) {
+		d := at.Sub(c.Now())
+		if d < 0 {
+			d = 0
+		}
+		t.ch, t.at = c.After(d), at
+	}
+	return t.ch
+}
+
+// after returns the channel of a timer that fires d from the first call after the last reset.
+func (t *loopTimer) after(c Clock, d time.Duration) <-chan time.Time {
+	if t.ch == nil {
+		t.ch, t.at = c.After(d), time.Time{}
+	}
+	return t.ch
+}
+
+// reset forgets the timer: it fired, or it is not wanted any more.
+func (t *loopTimer) reset() { t.ch, t.at = nil, time.Time{} }
 
 func (p *Proxy) nextOpenAt() time.Time {
 	p.mu.Lock()

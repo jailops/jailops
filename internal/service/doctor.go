@@ -45,6 +45,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorZFS(ctx, c)
 	s.doctorVolumes(ctx, c)
 	s.doctorHostDirs(ctx, c)
+	s.doctorLeftovers(ctx, c)
 	s.doctorDelegation(ctx, c)
 	s.doctorEncryption(ctx, c)
 	s.doctorPF(ctx, c)
@@ -53,11 +54,16 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorDNS(ctx, c)
 	s.doctorNameLengths(ctx, c)
 	s.doctorRuntime(ctx, c)
+	s.doctorOldNetwork(ctx, c)
+	s.doctorMounts(ctx, c)
+	s.doctorLoops(c)
+	s.doctorLongOperations(ctx, c)
 	s.doctorDescriptions(ctx, c)
 	s.doctorWireGuard(ctx, c)
 	s.doctorAppsLocal(c)
 	s.doctorAppsAccess(ctx, c)
 	s.doctorPolicyDefaults(c)
+	s.doctorFirewallSize(c)
 	s.doctorJailRefs(c)
 	s.doctorLogForward(c)
 	s.doctorDevd(c)
@@ -107,9 +113,28 @@ func (s *Service) doctorState(ctx context.Context, c *checkSet) {
 				bad = append(bad, r.ID)
 			}
 		}
+		// a run that the recovery at the start could not resolve keeps its record: it is not "in flight", it waits for
+		// the operator
+		stuck := map[string]string{}
+		for _, o := range s.Recovered() {
+			if o.Action == "needs-attention" {
+				stuck[o.Run] = o.Detail
+			}
+		}
+		var attention []string
+		inflight := 0
+		for _, r := range recs {
+			if d, ok := stuck[r.ID]; ok {
+				attention = append(attention, r.ID+" ("+d+")")
+			} else if r.State != plan.StateFailed {
+				inflight++
+			}
+		}
 		if len(bad) > 0 {
 			c.add("operations.journal", api.DoctorFail, "a rollback did not complete for: "+strings.Join(bad, ", "), "inspect the datasets of these jails, then remove the journal record")
-		} else if len(recs) > 0 {
+		} else if len(attention) > 0 {
+			c.add("operations.journal", api.DoctorFail, "the recovery after the last start could not resolve: "+strings.Join(attention, "; "), "look at what the run made (zfs list), clean it up, then remove the record from the journal directory")
+		} else if inflight > 0 {
 			c.add("operations.journal", api.DoctorOK, "operations are in flight", "")
 		} else {
 			c.add("operations.journal", api.DoctorOK, "no interrupted operations", "")
@@ -287,6 +312,52 @@ func (s *Service) doctorZFS(ctx context.Context, c *checkSet) {
 	}
 }
 
+// doctorLeftovers names the datasets of the projects that no object accounts for: the container a replace-restore
+// parked (it keeps the old jail until the operator has looked at the restored one) and a volume dataset that an
+// interrupted creation left without its volume. Nothing is destroyed: they hold data.
+func (s *Service) doctorLeftovers(ctx context.Context, c *checkSet) {
+	z := s.d.ZClient
+	if z == nil {
+		return
+	}
+	vols, err := s.volKind.listAll()
+	if err != nil {
+		return
+	}
+	known := map[string]bool{}
+	for _, o := range vols {
+		known[o.Meta.Project+"/"+o.Meta.Name] = true
+	}
+	var parked, orphans []string
+	for _, si := range s.storageList() {
+		root := si.lifecycle().Root + "/projects/"
+		list, err := z.List(ctx, zfs.ListOpts{Root: strings.TrimSuffix(root, "/"), Recursive: true, Props: []string{"used"}})
+		if err != nil {
+			continue
+		}
+		for _, d := range list {
+			rel := strings.TrimPrefix(d.Name, root)
+			parts := strings.Split(rel, "/")
+			switch {
+			case len(parts) == 3 && parts[1] == "jails" && strings.Contains(parts[2], ".replaced-"):
+				parked = append(parked, fmt.Sprintf("%s (%s)", d.Name, sizeText(atoi64(d.Props["used"]))))
+			case len(parts) == 3 && parts[1] == "volumes" && !known[parts[0]+"/"+parts[2]]:
+				orphans = append(orphans, fmt.Sprintf("%s (%s)", d.Name, sizeText(atoi64(d.Props["used"]))))
+			}
+		}
+	}
+	switch {
+	case len(orphans) > 0:
+		c.add("storage.leftovers", api.DoctorWarn, "volume datasets without a volume: "+strings.Join(orphans, ", "),
+			"an interrupted creation left them; look at them with 'zfs list -r', then destroy what you do not need with 'zfs destroy -r'")
+	case len(parked) > 0:
+		c.add("storage.leftovers", api.DoctorInfo, "datasets of jails that a restore replaced are kept: "+strings.Join(parked, ", "),
+			"keep them until the restored jail is checked, then destroy each with 'zfs destroy -r NAME'; they count against the project's storage quota")
+	default:
+		c.add("storage.leftovers", api.DoctorOK, "no dataset is left that no object of a project accounts for", "")
+	}
+}
+
 // doctorHostDirs looks at the volumes that are directories of the host: each must still be on its mount, which is what
 // a jail needs to start and what a watch tells the operator about.
 func (s *Service) doctorHostDirs(ctx context.Context, c *checkSet) {
@@ -301,7 +372,7 @@ func (s *Service) doctorHostDirs(ctx context.Context, c *checkSet) {
 			continue
 		}
 		n++
-		if state, detail := s.hostDirState(ctx, o.Spec); state != api.VolumeStateOK {
+		if state, detail := s.hostDirStateRead(ctx, o); state != api.VolumeStateOK {
 			lost = append(lost, fmt.Sprintf("%s/%s (%s): %s", o.Meta.Project, o.Meta.Name, o.Spec.Path, detail))
 		}
 	}
@@ -431,6 +502,17 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 		c.add("pf.anchors", api.DoctorUnknown, "pfctl is not available here", "")
 		return
 	}
+	// pfctl -s rules still prints the loaded ruleset while pf is disabled: a disabled pf evaluates none of it, and the
+	// jails would run without a firewall.
+	if okInfo, _, info := s.runOK(ctx, "pfctl", "-s", "info"); okInfo {
+		switch pfStatus(info) {
+		case "Disabled":
+			c.add("pf.enabled", api.DoctorFail, "pf is disabled: the anchors of the jails are loaded and nothing evaluates them, so the jails run without a firewall (a jail with a network link does not start while pf is off)",
+				"enable pf: sysrc pf_enable=YES, then service pf start (or pfctl -e now); load the ruleset first with pfctl -f /etc/pf.conf if it is not loaded")
+		case "Enabled":
+			c.add("pf.enabled", api.DoctorOK, "pf is enabled", "")
+		}
+	}
 	if strings.Contains(rules, `anchor "jailops/*"`) {
 		c.add("pf.anchors", api.DoctorOK, "the jailops anchors are in the ruleset", "")
 		if early := quickPassesBeforeAnchor(rules); len(early) > 0 {
@@ -449,6 +531,16 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 		c.add("pf.anchors", api.DoctorFail, "the jailops anchor line is missing from pf.conf", "add to /etc/pf.conf, and reload it with pfctl -f /etc/pf.conf. The anchor holds the filter rules and the NAT and port forwards of the jails, so it belongs before any quick rule that should not decide first:\n"+render.AnchorLines())
 	}
 	s.doctorStatePolicy(ctx, c, rules)
+}
+
+// pfStatus is "Enabled" or "Disabled" from the output of pfctl -s info, "" when it does not say.
+func pfStatus(info string) string {
+	for _, ln := range strings.Split(info, "\n") {
+		if f := strings.Fields(ln); len(f) >= 2 && f[0] == "Status:" {
+			return f[1]
+		}
+	}
+	return ""
 }
 
 var (
@@ -791,4 +883,18 @@ func (s *Service) doctorAppsLocal(c *checkSet) {
 		return
 	}
 	c.add("apps.local_dir", api.DoctorOK, fmt.Sprintf("%d definition(s) in %s", len(es), dir), "")
+}
+
+// sizeText writes a number of bytes the way a person reads it (1.5 GiB).
+func sizeText(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit && exp < 4; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTP"[exp])
 }

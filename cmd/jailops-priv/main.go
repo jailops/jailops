@@ -110,6 +110,7 @@ type options struct {
 	mirror      list
 	hostManage  list
 	hostDir     string
+	allowNoPF   bool
 	// appliance is what rc.conf turns on (jailops_appliance, passed by the rc script); never read from priv.conf.
 	appliance list
 
@@ -158,6 +159,7 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.Var(&o.fetchHost, "fetch-host", "host fetch, package repositories and debootstrap mirrors may use over https (http://<host> allows plain http for a package repository on that host); default dl-cdn.alpinelinux.org, pkg.freebsd.org, pkg.jailops.net, deb.debian.org, archive.ubuntu.com, ports.ubuntu.com")
 	fs.Var(&o.mirror, "image-mirror", "directory fs.read_file may read (a local mirror of image archives)")
 	fs.Var(&o.hostManage, "host-manage", "host management module the helper may change (identity, firewall); empty: the host is only read (docs/appliance.md)")
+	fs.BoolVar(&o.allowNoPF, "allow-start-without-pf", false, "start a jail that has a network link while pf is disabled (by default the start is refused: the jail would run without the firewall of its anchor)")
 	fs.StringVar(&o.hostDir, "host-dir", priv.DefaultHostDir, "root-owned directory of the host snapshots and the applied record")
 	fs.Var(&o.appliance, applianceFlag, "modules rc.conf turns on (jailops_appliance; the rc script passes it): added to host-manage; \"all\" is every module. Not a key of the configuration file")
 	fs.Var(&o.adminRawParam, "admin-raw-param", "jail.conf parameter an admin may set")
@@ -214,7 +216,7 @@ func (o *options) privConfig() priv.Config {
 		ConfDir:   o.confDir, StateDir: o.stateDir, WorkDir: o.workDir, HelperPath: o.helperPath, WireGuardDir: o.wgDir, PkgKeysDir: o.pkgKeysDir, KeyringDir: o.keyringDir,
 		WireGuardRoutes: o.wgRoutes,
 		Sysctls:         o.sysctl, FetchHosts: o.fetchHost, ImageMirrors: o.mirror,
-		HostManage: unionModules(o.hostManage, o.applianceModules()), HostDir: o.hostDir,
+		HostManage: unionModules(o.hostManage, o.applianceModules()), HostDir: o.hostDir, AllowStartWithoutPF: o.allowNoPF,
 		Admin: priv.AdminPolicy{
 			RawJailParams: o.adminRawParam, AllowFlags: o.adminAllow, HostMountRoots: o.adminMounts,
 			ZFSProps: o.adminZFSProp, Routes: o.adminRoutes, RawPF: o.adminRawPF, ResumeSend: o.adminResume, ZFSDelegation: o.adminZFSDeleg,

@@ -64,8 +64,11 @@ func ipv4(s api.NetworkSpec) error {
 	if p.Bits() < 8 || p.Bits() > 30 {
 		return Invalid("ipv4.subnet", "ipv4.subnet prefix length must be between 8 and 30")
 	}
-	if p.Addr().IsMulticast() || p.Addr().IsLoopback() {
-		return Invalid("ipv4.subnet", "ipv4.subnet %q is not a unicast network", n.Subnet)
+	// A network of jails is a unicast network of ordinary addresses: not "this network" (0/8), loopback, link-local,
+	// multicast or the reserved class E (224/3): the reject route of the subnet would blackhole traffic that means
+	// something else, and the jails would be given addresses that are not theirs to use.
+	if a := p.Addr(); a.IsMulticast() || a.IsLoopback() || a.IsLinkLocalUnicast() || a.As4()[0] == 0 || a.As4()[0] >= 224 {
+		return Invalid("ipv4.subnet", "ipv4.subnet %q is not a network for jails: use a private range (10/8, 172.16/12, 192.168/16, 100.64/10) or a range that is routed to this host", n.Subnet)
 	}
 	gw, err := addr("ipv4.gateway", n.Gateway)
 	if err != nil || !gw.Is4() {
@@ -118,6 +121,11 @@ func lastAddr(p netip.Prefix) netip.Addr {
 	return a
 }
 
+var (
+	globalUnicast6 = netip.MustParsePrefix("2000::/3")
+	uniqueLocal6   = netip.MustParsePrefix("fc00::/7")
+)
+
 func ipv6(s api.NetworkSpec) error {
 	n := s.IPv6
 	switch n.Mode {
@@ -143,8 +151,8 @@ func ipv6(s api.NetworkSpec) error {
 	if p.Bits() < lo || p.Bits() > hi {
 		return Invalid("ipv6.subnet", "ipv6.subnet prefix length must be between %d and %d", lo, hi)
 	}
-	if p.Addr().IsLinkLocalUnicast() || p.Addr().IsMulticast() || p.Addr().IsLoopback() {
-		return Invalid("ipv6.subnet", "ipv6.subnet %q is not a global or unique-local network", n.Subnet)
+	if !globalUnicast6.Contains(p.Addr()) && !uniqueLocal6.Contains(p.Addr()) {
+		return Invalid("ipv6.subnet", "ipv6.subnet %q must be a global (2000::/3) or unique-local (fc00::/7) network", n.Subnet)
 	}
 	r, err := ipam.ParseRange(n.Range)
 	if err != nil || r.First.Is4() {

@@ -63,6 +63,8 @@ type JailRecord struct {
 	Image api.ImageGeneration
 	// SecretRefs name sealed secrets (never their values).
 	SecretRefs []string
+	// VolumeIDs maps the name of each volume the jail attaches to its UUID (the bundle records it).
+	VolumeIDs map[string]string
 	// IsState marks the host state record (include_state): its datasets are
 	// all captured and it has no restore bundle.
 	IsState bool

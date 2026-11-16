@@ -199,6 +199,10 @@ A storage root dataset fixed in the file, for example
 A pool's top dataset is refused unless
 .Fl allow-pool-root
 is set.
+.It Fl allow-start-without-pf
+Start a jail that has a network link while pf is disabled.
+By default the start is refused.
+Its anchor would be loaded and nothing would evaluate it.
 .It Fl storage-file Ar path
 The file that persists the storage roots registered at run time, default
 .Pa /usr/local/etc/jailops/priv.d/storage.conf

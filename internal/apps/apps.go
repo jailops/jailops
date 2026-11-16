@@ -267,6 +267,9 @@ func Validate(app *api.App) error {
 	if !slices.Contains(api.AppCategories, app.Category) {
 		return invalid("category", "%q is not one of %s", app.Category, joinCategories())
 	}
+	if app.StopTimeout < 0 || app.StopTimeout > api.MaxStopTimeout {
+		return invalid("stop_timeout", "must be between 0 and %d seconds", api.MaxStopTimeout)
+	}
 	if app.Homepage != "" {
 		u, err := url.Parse(app.Homepage)
 		if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil {

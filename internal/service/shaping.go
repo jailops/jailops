@@ -103,10 +103,11 @@ func (s *Service) loadPipes(ctx context.Context) {
 	}
 }
 
-// savePipes writes the table after it changed.
-func (s *Service) savePipes(ctx context.Context) {
+// savePipes writes the table after it changed. A table that cannot be saved is an error: the numbers of other jails
+// could be allocated again at the next start, and a jail's traffic would run through another jail's pipe.
+func (s *Service) savePipes(ctx context.Context) error {
 	if s.d.StateDir == "" || s.d.Files == nil {
-		return
+		return nil
 	}
 	var es []pipeEntry
 	for k, n := range s.pipes.nums {
@@ -115,16 +116,16 @@ func (s *Service) savePipes(ctx context.Context) {
 	sort.Slice(es, func(i, j int) bool { return es[i].Pipe < es[j].Pipe })
 	b, err := json.Marshal(es)
 	if err != nil {
-		return
+		return err
 	}
 	p := s.pipeTableFile()
 	if err := s.d.Files.MkdirAll(ctx, path.Dir(p)); err != nil {
-		s.log.Warn("saving the pipe numbers failed", "err", err)
-		return
+		return fmt.Errorf("saving the dummynet pipe numbers: %w", err)
 	}
 	if err := s.d.Files.WriteAtomic(ctx, p, b); err != nil {
-		s.log.Warn("saving the pipe numbers failed", "err", err)
+		return fmt.Errorf("saving the dummynet pipe numbers: %w", err)
 	}
+	return nil
 }
 
 // shapingPlan gives the pipe number of every limited direction and the pipes the host must have: one per direction,
@@ -144,8 +145,14 @@ func (s *Service) shapingPlan() (map[render.PipeKey]int, []reconcile.PipeDesired
 		return nil, nil, err
 	}
 	if !maps.Equal(numbers, s.pipes.nums) {
+		// the numbers are not used before they are saved: a restart that did not find them would number the pipes again
+		// and give one jail's limit to another
+		prev := s.pipes.nums
 		s.pipes.nums = numbers
-		s.savePipes(ctx)
+		if err := s.savePipes(ctx); err != nil {
+			s.pipes.nums = prev
+			return nil, nil, err
+		}
 	}
 	var want []reconcile.PipeDesired
 	for _, d := range devs {

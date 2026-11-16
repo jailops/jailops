@@ -16,6 +16,7 @@ import (
 	"context"
 
 	"jailops.net/jailops/internal/hostdir"
+	"jailops.net/jailops/internal/mounts"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -90,6 +91,13 @@ type Files interface {
 	// ProbeSource looks at a directory of the host that a volume gives to jails: whether it is on a mount, and with
 	// write whether a file can be made in it. A directory that is missing or not on a mount is an answer, not an error.
 	ProbeSource(ctx context.Context, path string, write bool) (hostdir.Probe, error)
+	// StaleMounts lists the mounts below the roots of jails that do not run, of a kind JailOps makes (devfs, nullfs,
+	// ...): what a stop that did not finish left behind. HealJail takes them off one jail's root and removes what its
+	// poststop hook removes (rctl rules, the pf anchor, its links).
+	StaleMounts(ctx context.Context) ([]mounts.Stale, error)
+	HealJail(ctx context.Context, jail string) (mounts.Healed, error)
+	// HealNetwork destroys the interfaces of the earlier network layout that no jail that runs uses.
+	HealNetwork(ctx context.Context) (mounts.NetHealed, error)
 	// CopyTree copies a directory tree preserving ownership, modes and flags.
 	// UNVERIFIED: flags, ACLs and extended attributes on FreeBSD.
 	CopyTree(ctx context.Context, src, dst string) error

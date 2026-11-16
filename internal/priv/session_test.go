@@ -533,7 +533,8 @@ func TestExecLimits(t *testing.T) {
 	}
 }
 
-func TestExecIsAuditedWithItsArgv(t *testing.T) {
+// The audit log names the program and how many arguments it got, never the arguments: a command line may carry a secret.
+func TestExecIsAuditedWithItsProgramButNotItsArguments(t *testing.T) {
 	fx := newFixture(t)
 	fx.conf(t, "alpha_web")
 	s, err := fx.client.Exec(WithAdmin(context.Background(), "alice"), "alpha_web", []string{"sh", "-c", "exit 0"}, ExecOpts{})
@@ -547,10 +548,13 @@ func TestExecIsAuditedWithItsArgv(t *testing.T) {
 		return strings.Contains(fx.audit.String(), `"outcome":"ok"`) && strings.Contains(fx.audit.String(), "jail.session")
 	}, "audit line")
 	out := fx.audit.String()
-	for _, want := range []string{`"op":"jail.session"`, `"argv":"sh -c exit 0"`, `"jail":"alpha_web"`, `"admin":"alice"`} {
+	for _, want := range []string{`"op":"jail.session"`, `"argv":"sh (2 arguments)"`, `"jail":"alpha_web"`, `"admin":"alice"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("audit lacks %s:\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "exit 0") {
+		t.Errorf("the arguments are in the audit log:\n%s", out)
 	}
 	// a refused session is audited too
 	_, _ = fx.client.Exec(context.Background(), "alpha_ghost", []string{"id"}, ExecOpts{})

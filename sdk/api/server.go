@@ -98,6 +98,17 @@ type Operation struct {
 	UpdatedAt time.Time `json:"updated_at"`
 	// Progress is a 0..100 estimate when the operation can compute one.
 	Progress int `json:"progress,omitempty"`
+	// Steps lists the steps the operation ran, in order, with the time each took: where the time went.
+	Steps []OperationStep `json:"steps,omitempty"`
+}
+
+// OperationStep is one step of an operation and how long it took.
+type OperationStep struct {
+	Name string `json:"name"`
+	// DurationMS is the time the step took, in milliseconds.
+	DurationMS int64 `json:"duration_ms"`
+	// Failed is set when the step failed.
+	Failed bool `json:"failed,omitempty"`
 }
 
 // EventType names an event stream class.
