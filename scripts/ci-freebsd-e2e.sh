@@ -872,26 +872,27 @@ expect "network create warns when forwarding is off" 'sysctl net.inet.ip.forward
 sysctl net.inet.ip.forwarding=1 >/dev/null
 check "delete that network" $J network delete fwd -y
 
-step "stop timeout (docs/operations.md): a service that needs fifteen seconds after SIGTERM is killed at ten, and lives with boot.stop_timeout"
+step "stop timeout (docs/operations.md): a service that needs fifteen seconds after SIGTERM is killed by a stop timeout of five, and lives with the default of thirty"
 # the service ends its work on SIGTERM (fifteen seconds), writes a marker into a volume of the host and exits
 slowsh="trap 'sleep 15; echo done > /srv/out/marker; exit 0' TERM; touch /srv/out/ready; while :; do sleep 1; done"
 for v in sto10 sto30; do check "volume $v" $J volume create $v --project demo; done
-check "a jail with the system's stop time" $J create slow10 --project demo --image "$img" --network lan --storage default
+check "a jail with a stop timeout of five seconds" $J create slow10 --project demo --image "$img" --network lan --storage default --stop-timeout 5
 check "attach sto10 to slow10" $J volume attach slow10 sto10 /srv/out --project demo
 check "start slow10" $J start slow10 --project demo
-check "a jail that asks for thirty seconds" $J create slow30 --project demo --image "$img" --network lan --storage default --stop-timeout 30
+check "a jail with the default stop timeout (thirty seconds)" $J create slow30 --project demo --image "$img" --network lan --storage default
 check "attach sto30 to slow30" $J volume attach slow30 sto30 /srv/out --project demo
 check "start slow30" $J start slow30 --project demo
-expect "the setting is in the jail" 'stop_timeout.*30' sh -c "$J config show slow30 --project demo 2>&1"
-expect "jail.conf has it" 'stop\.timeout = 30;' cat /usr/local/etc/jailops/jails/demo_slow30/jail.conf
+expect "the setting is in the jail" 'stop_timeout.*5' sh -c "$J config show slow10 --project demo 2>&1"
+expect "jail.conf of the jail with five seconds has it" 'stop\.timeout = 5;' cat /usr/local/etc/jailops/jails/demo_slow10/jail.conf
+expect "jail.conf of the other one has the default" 'stop\.timeout = 30;' cat /usr/local/etc/jailops/jails/demo_slow30/jail.conf
 for j in slow10 slow30; do check "the service of $j runs" $J exec --project demo $j -- daemon -f /bin/sh -c "$slowsh"; done
 # the signal must not arrive before the shell has set its trap
 for n in 10 30; do
 	expect_retry "the service of slow$n has set its trap" '^ready$' sh -c "[ -e $(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/sto$n")/ready ] && echo ready || echo no"
 done
-check "stop the jail with the system's time" $J stop slow10 --project demo
+check "stop the jail with five seconds" $J stop slow10 --project demo
 expect "its service was killed before it finished" '^none$' sh -c "[ -e $(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/sto10")/marker ] && echo marker || echo none"
-check "stop the jail that asked for thirty seconds" $J stop slow30 --project demo
+check "stop the jail with the default" $J stop slow30 --project demo
 expect "its service finished" '^done$' cat "$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/sto30")/marker"
 for j in slow10 slow30; do check "delete $j" $J delete --confirm-data-loss $j --project demo; done
 for v in sto10 sto30; do check "delete volume $v" $J volume delete $v --project demo --confirm-data-loss; done
