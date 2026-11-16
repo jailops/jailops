@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Fixed: the jails of an older version get the search domain of their names.** A jail whose `resolv.conf` JailOps wrote before 0.8.0 (the line `# Managed by JailOps. Do not edit; changes are overwritten.`) was taken for a jail with a file of its own, so it never got `search PROJECT.internal` and the short names did not work. Such a file is JailOps's own and is written again at the next start of the jail.
+
 - **Fixed: console output could come up blank.** The console of the web viewer sent the last event number of the event stream when it opened the stream of a jail's console, so the server skipped the first lines of output. Each stream keeps its own number now.
 - **Security: a port forward that was switched off stays the global administrator's.** An administrator of a project could switch on a forward of a policy that a global administrator had disabled; enabling a forward needs the global role like adding one.
 - **A failed scheduled backup is not only a line of the log.** `jailops doctor` has `backup.recent` (a warning for each policy and jail whose last scheduled backup failed, with the first line of the error), and the event stream gets `backup-failed`.

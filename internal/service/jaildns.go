@@ -168,7 +168,8 @@ func (s *Service) keepsResolv(ctx context.Context, p string) bool {
 		return false
 	}
 	for _, l := range strings.Split(string(b), "\n") {
-		if strings.HasPrefix(l, render.ResolvMarker) {
+		// the marker is the line of 0.8.0 and later; the "managed" header is what every version before wrote
+		if strings.HasPrefix(l, render.ResolvMarker) || strings.HasPrefix(l, render.Header) {
 			return false
 		}
 	}
