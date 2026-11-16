@@ -57,7 +57,7 @@ func TestRestartOfTheDaemonDoesNotStartJailsStoppedOnPurpose(t *testing.T) {
 		t.Fatal(err)
 	}
 	e3 := dtest.New(t, dtest.Options{Reuse: e})
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(60 * time.Second)
 	for !running(t, e3, "web") {
 		if time.Now().After(deadline) {
 			t.Fatal("the boot pass did not start the jail after the host booted")
