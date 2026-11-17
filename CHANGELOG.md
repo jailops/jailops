@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.2 - 2026-11-17
+
 - **`jailops-setup` is for the CLI first: the web console is opt-in.** The setup no longer turns the web console on by
   itself. It asks "Serve the web console (port 39110)?" (default no; `-y` never answers yes), or take `--web`. Only with
   the console on is the first administrator offered, because the CLI as root over the local socket needs no user. A step
