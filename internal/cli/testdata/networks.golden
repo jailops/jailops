@@ -1,5 +1,6 @@
 $ jailops network create dmz --subnet 10.30.0.0/24 --gateway 10.30.0.1 --range 10.30.0.10-10.30.0.12 --nat --dns 10.30.0.1 --uplink em1
 network/dmz created
+Grant it to a project with: jailops network grant dmz --project main
 
 $ jailops network create bad --subnet nonsense --gateway 10.30.0.1 --range a-b
 ! invalid: invalid subnet "nonsense"
@@ -71,6 +72,7 @@ status:
 
 $ jailops network create solo --subnet 10.50.0.0/24 --gateway 10.50.0.1 --range 10.50.0.5-10.50.0.9
 network/solo created
+Grant it to a project with: jailops network grant solo --project main
 
 $ jailops network grant solo --project main
 network/solo granted to project main
@@ -96,6 +98,7 @@ network/lan deleted
 
 $ jailops network create -f <dir>/net.yaml
 network/viafile created
+Grant it to a project with: jailops network grant viafile --project main
 
 $ jailops network edit viafile -f <dir>/net2.yaml
 network/viafile updated
@@ -112,6 +115,7 @@ Network viafile
 
 $ jailops network create sw --ipv4 10.94.0.1/24 --uplink em0 --ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy
 network/sw created
+Grant it to a project with: jailops network grant sw --project main
 
 $ jailops network show sw -o yaml
 metadata:

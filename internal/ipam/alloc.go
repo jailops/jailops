@@ -91,7 +91,13 @@ func NewV6(n *api.IPv6Net, inUse []netip.Addr) (*Allocator, error) {
 	if n == nil || n.Mode == api.IPv6None {
 		return nil, invalid("ipv6", "network has no IPv6 configuration")
 	}
-	return fromStrings("ipv6", n.Subnet, "", n.Range, n.Exclude, inUse)
+	gw := ""
+	if p, err := netip.ParsePrefix(n.Subnet); err == nil {
+		if r := Resolver6(p); r.IsValid() {
+			gw = r.String() // the host's own address on the network: kept back from the jails
+		}
+	}
+	return fromStrings("ipv6", n.Subnet, gw, n.Range, n.Exclude, inUse)
 }
 
 func fromStrings(field, subnet, gw, rng string, excl []string, inUse []netip.Addr) (*Allocator, error) {

@@ -240,7 +240,7 @@ func (s *Service) readmitProfile(ctx context.Context, proj, name string, spec ap
 		for _, nd := range eff.Network {
 			if _, ok := specGrantsNetwork(po.Spec, nd.Network); !ok && nd.Network != "" {
 				return api.Errorf(api.CodeForbidden, "jail %q would attach network %q, which project %q was not granted", who, nd.Network, j.Metadata.Project).
-					WithHint(fmt.Sprintf("a global admin grants it: jailops network grant %s --project %s", nd.Network, j.Metadata.Project))
+					WithHint(fmt.Sprintf("a network belongs to the host, and a project may use it only after a grant, even for a global admin: jailops network grant %s --project %s", nd.Network, j.Metadata.Project))
 			}
 		}
 		if len(eff.Devfs) > 0 && len(j.Spec.Devfs) == 0 && !ActorFrom(ctx).Perm.Satisfies(api.PermAdmin) {
@@ -544,7 +544,7 @@ func (s *Service) ConfigureJail(ctx context.Context, name string, ch api.ConfigC
 			now, _ := s.getByKey(ctx, key)
 			if restart && len(keys) > 0 && now.Status.Power == api.PowerRunning {
 				_ = h.Bind("stop/"+key, &opRequest{Kind: "stop", Jail: key})
-				if err := s.life.StopJail(ctx, key); err != nil {
+				if err := s.stopJail(ctx, key); err != nil {
 					return nil, err
 				}
 				_ = h.Bind("start/"+key, &opRequest{Kind: "start", Jail: key})

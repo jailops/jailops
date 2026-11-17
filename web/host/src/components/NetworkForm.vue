@@ -20,6 +20,7 @@ const busy = ref(false)
 // what the server said about the host after a save (forwarding off, a sysctl the proxy needs): the network is
 // stored, and the form stays open on these until it is closed
 const warnings = ref<string[]>([])
+const notes = ref<string[]>([])
 const error = ref<ApiError | null>(null)
 const editing = computed(() => !!props.network)
 const touched = reactive<Record<string, boolean>>({})
@@ -45,6 +46,7 @@ watch(() => props.open, (o) => {
   check.reset()
   error.value = null
   warnings.value = []
+  notes.value = []
 })
 // A typed subnet fills the gateway and range once, until the user has written their own.
 watch(() => f.v4subnet, (v) => {
@@ -60,9 +62,10 @@ const save = () => check.submit(async () => {
       ? await runOp(s.networks.editTitle(f.name), () => api.networks.put(netBody(f, props.network!), props.etag))
       : await runOp(s.networks.createTitle + ': ' + f.name, () => api.networks.create(netBody(f)))
     emit('done')
-    const w = (r.data as Network | undefined)?.status?.warnings ?? []
-    if (w.length) warnings.value = w
-    else emit('close')
+    const st = (r.data as Network | undefined)?.status
+    warnings.value = st?.warnings ?? []
+    notes.value = st?.notes ?? []
+    if (!warnings.value.length && !notes.value.length) emit('close')
   } catch (e) {
     error.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
   } finally {
@@ -73,9 +76,10 @@ const save = () => check.submit(async () => {
 
 <template>
   <Modal :open="open" :title="editing ? s.networks.editTitle(f.name) : s.networks.createTitle" wide @close="emit('close')">
-    <div v-if="warnings.length" data-test="nf-warnings">
-      <p>{{ editing ? s.networks.savedWarn : s.networks.createdWarn }}</p>
+    <div v-if="warnings.length || notes.length" data-test="nf-warnings">
+      <p>{{ warnings.length ? (editing ? s.networks.savedWarn : s.networks.createdWarn) : (editing ? s.networks.saved : s.networks.created) }}</p>
       <Callout v-for="x in warnings" :key="x" tone="warn">{{ x }}</Callout>
+      <Callout v-for="x in notes" :key="x" tone="info" data-test="nf-note">{{ x }}</Callout>
     </div>
     <form v-else id="nf" novalidate @submit.prevent="save">
       <div class="form-2">
@@ -146,7 +150,7 @@ const save = () => check.submit(async () => {
       <p class="hint">{{ s.networks.serverChecks }}</p>
       <ErrorPanel v-if="error" :error="error" />
     </form>
-    <template v-if="warnings.length" #footer>
+    <template v-if="warnings.length || notes.length" #footer>
       <button class="btn btn-primary" type="button" data-test="nf-warn-close" @click="emit('close')">{{ s.app.close }}</button>
     </template>
     <template v-else #footer>

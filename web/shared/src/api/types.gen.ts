@@ -1448,6 +1448,7 @@ export interface NetworkStatus {
   orphans?: string[]
   conditions?: Condition[]
   warnings?: string[]
+  notes?: string[]
   dns?: NetworkDNS
 }
 

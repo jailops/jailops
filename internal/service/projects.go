@@ -832,7 +832,7 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 			WithHint("set limits.disk, for example `jailops config set JAIL limits.disk 20G`")
 	}
 	if len(eff.Network) == 0 {
-		return nil, invalid("a jail needs a network: name one with --network NAME or use a profile that has one")
+		return nil, noNetworkNamed(p)
 	}
 	for i := range eff.Network {
 		if eff.Network[i].Network == "" {
@@ -840,7 +840,7 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 		}
 		if _, ok := specGrantsNetwork(p.Spec, eff.Network[i].Network); !ok {
 			return nil, api.Errorf(api.CodeForbidden, "network %q is not granted to project %q", eff.Network[i].Network, p.Meta.Name).
-				WithHint(fmt.Sprintf("a global admin grants it: jailops network grant %s --project %s", eff.Network[i].Network, p.Meta.Name))
+				WithHint(fmt.Sprintf("a network belongs to the host, and a project may use it only after a grant, even for a global admin: jailops network grant %s --project %s", eff.Network[i].Network, p.Meta.Name))
 		}
 	}
 	if len(eff.Devfs) > 0 && !a.Perm.Satisfies(api.PermAdmin) {
@@ -881,11 +881,11 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 		spec.Storage = eff.Storage // a profile may carry it
 	}
 	if spec.Storage == "" {
-		return nil, invalid("a jail needs a storage: name one with --storage NAME or use a profile that has one")
+		return nil, noStorageNamed(p, "a jail")
 	}
 	if !specGrantsStorage(p.Spec, spec.Storage) {
 		return nil, api.Errorf(api.CodeForbidden, "storage %q is not granted to project %q", spec.Storage, p.Meta.Name).
-			WithHint(fmt.Sprintf("a global admin grants it: jailops storage grant %s --project %s", spec.Storage, p.Meta.Name))
+			WithHint(fmt.Sprintf("a storage belongs to the host, and a project may use it only after a grant, even for a global admin: jailops storage grant %s --project %s", spec.Storage, p.Meta.Name))
 	}
 	if _, ok := s.storage(spec.Storage); !ok {
 		return nil, notFound("storage", spec.Storage)
@@ -1014,3 +1014,28 @@ func (s *Service) checkQuota(p project, spec api.JailSpec, u usage, isNew bool) 
 // projectLock serialises changes of one project's definition.
 func projectLock(n string) string { return "project/" + n }
 func storageLock(n string) string { return "storage/" + n }
+
+// noNetworkNamed is the refusal of a jail that names no network: the project has none granted (say how to grant one), or
+// it has some and the jail has to name one.
+func noNetworkNamed(p project) error {
+	var have []string
+	for _, g := range p.Spec.Networks {
+		have = append(have, g.Network)
+	}
+	if len(have) == 0 {
+		return invalid("project %s has no network: grant one with: jailops network grant NAME --project %s (jailops network list shows them)", p.Meta.Name, p.Meta.Name)
+	}
+	return invalid("a jail needs a network: name one with --network NAME (the project has %s) or use a profile that has one", strings.Join(have, ", "))
+}
+
+// noStorageNamed is the same for a storage: what names the storage (a jail, a volume), and what the project has.
+func noStorageNamed(p project, what string) error {
+	var have []string
+	for _, g := range p.Spec.Storage {
+		have = append(have, g.Storage)
+	}
+	if len(have) == 0 {
+		return invalid("project %s has no storage: grant one with: jailops storage grant NAME --project %s (jailops storage list shows them)", p.Meta.Name, p.Meta.Name)
+	}
+	return invalid("%s needs a storage: name one with --storage NAME (the project has %s)", what, strings.Join(have, ", "))
+}

@@ -228,7 +228,32 @@ func (a *app) jailStartFlag(cmd *cobra.Command) func(ctx context.Context, name s
 		if err != nil {
 			return err
 		}
-		return a.finishOp(ctx, h, "jail", name, "started", nil)
+		if err := a.finishOp(ctx, h, "jail", name, "started", nil); err != nil {
+			return err
+		}
+		a.noteShellInstalling(ctx, c, name)
+		return nil
+	}
+}
+
+// shellInstalling says whether the jail's bash is being installed in the background (its ShellSetup condition).
+func shellInstalling(j api.Jail) bool {
+	for _, c := range j.Status.Conditions {
+		if c.Type == "ShellSetup" && c.Reason == api.ShellInstalling {
+			return true
+		}
+	}
+	return false
+}
+
+// noteShellInstalling tells, after a start, that the shell of a new jail is on its way: the start does not wait for
+// the package server, and `jailops shell` waits for bash instead. It says nothing in machine-readable output.
+func (a *app) noteShellInstalling(ctx context.Context, c *sdk.Client, name string) {
+	if a.format != fmtTable {
+		return
+	}
+	if j, err := c.Jails().Get(ctx, name); err == nil && shellInstalling(j) {
+		fprintln(a.env.Stderr, "bash is being installed in the background; jailops shell waits for it")
 	}
 }
 
@@ -576,6 +601,9 @@ The jails are named, or selected by label with -l (the same key=value labels as
 			}
 			if err := a.finishOp(cmd.Context(), h, "jail", name, past, nil); err != nil {
 				return err
+			}
+			if verb != "stop" {
+				a.noteShellInstalling(cmd.Context(), c, name)
 			}
 		}
 		return nil

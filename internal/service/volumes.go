@@ -42,12 +42,12 @@ func volToAPI(o object[api.VolumeSpec]) api.Volume {
 func (s *Service) volumeStorage(p project, want string) (*storageInfo, error) {
 	if want == "" {
 		if want = p.Spec.SoleStorage(); want == "" {
-			return nil, invalid("a volume needs a storage: name one with --storage NAME").WithHint("jailops project show " + p.Meta.Name + " lists the grants")
+			return nil, noStorageNamed(p, "a volume")
 		}
 	}
 	if !specGrantsStorage(p.Spec, want) {
 		return nil, api.Errorf(api.CodeForbidden, "storage %q is not granted to project %q", want, p.Meta.Name).
-			WithHint(fmt.Sprintf("a global admin grants it: jailops storage grant %s --project %s", want, p.Meta.Name))
+			WithHint(fmt.Sprintf("a storage belongs to the host, and a project may use it only after a grant, even for a global admin: jailops storage grant %s --project %s", want, p.Meta.Name))
 	}
 	si, ok := s.storage(want)
 	if !ok {

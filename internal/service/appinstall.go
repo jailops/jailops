@@ -53,7 +53,7 @@ func (s *Service) defaultAppImage(ctx context.Context) (string, error) {
 	var all []string
 	best, bestRel, freebsd := "", "", 0
 	for _, o := range objs {
-		if !s.imageVisible(ctx, o.Meta.Name) {
+		if !s.imageUsable(ctx, o.Meta.Name) {
 			continue
 		}
 		all = append(all, o.Meta.Name)
@@ -515,7 +515,7 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 			return nil
 		},
 		Undo: func(ctx context.Context) error {
-			if err := s.life.StopJail(ctx, key); err != nil {
+			if err := s.stopJail(ctx, key); err != nil {
 				return err
 			}
 			s.markStopped(key)

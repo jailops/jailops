@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -134,7 +135,7 @@ func (m *opManager) run(ctx context.Context, lo *liveOp, spec OpSpec, release fu
 	func() {
 		defer func() {
 			if r := recover(); r != nil {
-				s.log.Error("operation panicked", "op", lo.op.ID, "panic", r)
+				s.log.Error("operation panicked", "op", lo.op.ID, "panic", r, "stack", string(debug.Stack()))
 				err = api.Errorf(api.CodeInternal, "operation panicked: %v", r)
 			}
 		}()

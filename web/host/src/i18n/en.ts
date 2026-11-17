@@ -1431,6 +1431,8 @@ export const en = {
   networks: {
     title: 'Networks',
     create: 'Create network',
+    created: 'The network was created.',
+    saved: 'The network was saved.',
     createdWarn: 'The network was created. The host needs attention before it carries traffic:',
     savedWarn: 'The network was saved. The host needs attention before it carries traffic:',
     required: 'Required.',

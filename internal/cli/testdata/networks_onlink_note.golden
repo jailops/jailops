@@ -1,0 +1,18 @@
+$ jailops network create sw --ipv4 10.94.0.1/24 --uplink em0 --ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy
+network/sw created
+Grant it to a project with: jailops network grant sw --project main
+! note: on some shared IPv6 segments the setting net.inet6.icmp6.nd6_onlink_ns_rfc4861 matters (it is 0): https://jailops.net/articles/shared-ipv6-neighbor-discovery/#fix
+
+$ jailops network create -f <dir>/sw2.yaml
+network/sw2 created
+Grant it to a project with: jailops network grant sw2 --project main
+! note: on some shared IPv6 segments the setting net.inet6.icmp6.nd6_onlink_ns_rfc4861 matters (it is 0): https://jailops.net/articles/shared-ipv6-neighbor-discovery/#fix
+
+$ jailops apply -f <dir>/sw3.yaml
+network/sw3 created
+! note: on some shared IPv6 segments the setting net.inet6.icmp6.nd6_onlink_ns_rfc4861 matters (it is 0): https://jailops.net/articles/shared-ipv6-neighbor-discovery/#fix
+
+$ jailops network create rt --ipv6 2001:db8:1:2:1::1/80
+network/rt created
+Grant it to a project with: jailops network grant rt --project main
+

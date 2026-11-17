@@ -423,6 +423,16 @@ func storageDesc() *kindDesc[api.Storage] {
 	d.style = stateStyle(3)
 	d.show = func(a *app, s api.Storage) error { return a.showStorage(s) }
 	d.emptyHint = "jailops storage create NAME --dataset POOL/jailops"
+	d.nextStep = func(ctx context.Context, a *app, c *sdk.Client, name string) string {
+		return grantStep(ctx, a, c, "storage", name, func(sp api.ProjectSpec) bool {
+			for _, g := range sp.Storage {
+				if g.Storage == name || g.Storage == "*" {
+					return true
+				}
+			}
+			return false
+		})
+	}
 	return &d
 }
 
@@ -692,4 +702,22 @@ current project. The server refuses while a jail or a volume of the project stil
 		},
 	}
 	return []*cobra.Command{grant, revoke}
+}
+
+// grantStep is the line after a network or a storage is created: it belongs to the host, and a project may use it only
+// after a grant, so when no project has it yet the line says how. It names the selected project when there is one.
+func grantStep(ctx context.Context, a *app, c *sdk.Client, kind, name string, granted func(api.ProjectSpec) bool) string {
+	for p, err := range c.Projects().List(ctx) {
+		if err != nil {
+			return ""
+		}
+		if granted(p.Spec) {
+			return ""
+		}
+	}
+	project := "PROJECT"
+	if a.conn != nil && a.conn.CurrentProject() != "" {
+		project = a.conn.CurrentProject()
+	}
+	return fmt.Sprintf("Grant it to a project with: jailops %s grant %s --project %s", kind, name, project)
 }

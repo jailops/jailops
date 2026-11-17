@@ -14,7 +14,7 @@ blocked, 8 the test cannot say.
 | `kernel.module.<name>` | `if_epair`, `pf`, `zfs` (and `linux64`, `linprocfs`, `linsysfs`, `fdescfs` while a Linux jail exists) | `kldload <name>` and add it to `/boot/loader.conf` |
 | `sysctl.<name>` | `kern.elf64.fallback_brand` for Linux jails | the daemon sets it at run time through the helper; check that the helper allows it |
 | `sysctl.net.inet.ip.forwarding`, `sysctl.net.inet6.ip6.forwarding` | forwarding, while a network needs it | `fail`: `sysctl <name>=1` and the `rc.conf` lines of [install.md](install.md) (JailOps never sets forwarding) |
-| `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` | the host answers the off-link probes of a shared IPv6 segment's routers, while a `proxy`-mode network exists | `warn` (recommended): `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` and the line in `/etc/sysctl.conf`; see below |
+| `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` | the host answers the off-link probes of a shared IPv6 segment's routers, while a `proxy`-mode network exists | `info` while it is 0 (never a warning; it matters on some segments only): read [networking-ipv6.md](networking-ipv6.md#one-host-setting-that-matters-on-some-segments) and set `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` with the line in `/etc/sysctl.conf` when the case fits |
 | `host.identity` | host management, module identity ([appliance.md](appliance.md)) | `ok` "not managed" while the module is off (the doctor has no info level); `warn` when only one of `jailopsd.yaml` and `priv.conf` enables it, or on drift: the host name, `/etc/resolv.conf` or the NTP block was changed outside JailOps since it applied them (`jailops host show` names the part; apply again or `jailops host restore`) |
 | `host.devd` | the daemon reads the kernel's notifications from devd ([operations.md](operations.md#events-from-the-kernel)) | `ok` while connected; `warn` with the reason when devd's socket cannot be read, and the check is absent with `devd.enable: false` |
 | `host.firewall` | host management, module firewall ([appliance.md](appliance.md)) | `ok` "not managed" while the module is off; `warn` when only one of `jailopsd.yaml` and `priv.conf` enables it, while a change waits for its confirmation (`jailops host confirm` or `jailops host revert`), or on drift: `/etc/pf.conf`, `pf_enable` or `pf_rules` changed outside JailOps (`jailops host firewall diff` shows it; apply again or `jailops host restore`) |
@@ -22,7 +22,7 @@ blocked, 8 the test cannot say.
 | `tls.certificate` | the certificate the TLS listener serves ([exposure.md](exposure.md)) | `ok` with its source and days left; `warn` when one nothing renews (uploaded or the files of `jailopsd.yaml`) expires within 14 days, `fail` once expired |
 | `tls.acme` | ACME ([exposure.md](exposure.md#acme-a-certificate-from-a-public-ca)) | `ok` "not used" without ACME; `warn` when the last request or renewal failed (with the error and the next attempt), when there is no certificate yet, when the firewall module does not redirect the challenge port yet (apply the host firewall again), or when the daemon cannot reach its own challenge listener |
 | `host.ntp` | `ntpd_enable` and what `ntpq -pn` reports | `warn` when ntpd is not enabled or has no system peer yet; `unknown` when ntpq does not answer |
-| `sysctl.persistent` | forwarding (and the sysctl above) on and persistent | `warn`: set `gateway_enable=YES` and `ipv6_gateway_enable=YES` in `rc.conf`, `net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` in `sysctl.conf` (JailOps never edits them) |
+| `sysctl.persistent` | forwarding on and persistent | `warn`: set `gateway_enable=YES` and `ipv6_gateway_enable=YES` in `rc.conf`, or the forwarding lines in `sysctl.conf` (JailOps never edits them) |
 | `zfs.pool`, `zfs.pool.<storage>` | the pools are `ONLINE` | `zpool status <pool>` |
 | `zfs.compat` | pool features against `zfs.compat_file` | `fail`: replication to an older host would fail; JailOps never runs `zpool upgrade` |
 | `jail.volumes` | the volume datasets of the jails have `canmount=noauto` | `warn`: a volume made before that has `canmount=on` and is mounted at boot before the jail root it lies in; run the `zfs set canmount=noauto <dataset>` the hint lists |
@@ -123,15 +123,11 @@ solicitation never arrives, the provider may be filtering by MAC or not delegati
 cannot fix (design section 16).
 
 **Host is unreachable from a monitor every few hours on a shared IPv6 segment.** The host's own IPv6 address (not only
-the jails') is unreachable for a few minutes at a time, a few times a day; `jailops doctor` fails
-`sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`. The provider's routers probe the host's address with unicast neighbor
-solicitations sent from their global addresses; the host holds a `/128` and no router advertisement describes the
-`/64`, so FreeBSD's default drops them as off-link and the router marks the host unreachable. Check:
-`netstat -s -p icmp6 | grep bad` (the counter of bad neighbor solicitations grows) and
-`tcpdump -n -e -i <uplink> 'icmp6 and ip6[40] == 135 and ip6 dst host <host address>'` (probes arrive, no
-advertisement follows). Fix: `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` now and the line
-`net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` in `/etc/sysctl.conf`; JailOps never sets it. See
-[networking-ipv6.md](networking-ipv6.md).
+the jails') is unreachable for a few minutes at a time, a few times a day, and the counter of bad neighbor solicitations
+grows (`netstat -s -p icmp6 | grep -i 'bad neighbor solicitation'`). On some segments the routers probe the host with
+unicast neighbor solicitations from their global addresses, which FreeBSD drops by default. What it is, how to be sure
+and what to set (`net.inet6.icmp6.nd6_onlink_ns_rfc4861=1`, which JailOps never sets): see
+[networking-ipv6.md](networking-ipv6.md#one-host-setting-that-matters-on-some-segments).
 
 **A bridge, `NETNAMEga` and `NETNAMEgb` are left from an earlier version.** Earlier versions gave every network a bridge and a
 gateway pair; a network is routed now and has no interface of its own. `jailops doctor` says `network.leftovers` and names them.

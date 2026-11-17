@@ -746,6 +746,45 @@ run_pf() {
 	PF_FAST=1 PF_IMAGE="$img" FORGE_BIN="${FORGE_BIN:-}" sh "$root/scripts/ci-freebsd-pf.sh" || fail "the packet filter test failed"
 }
 
+# names of jails over IPv6 (docs/dns.md): the jails of an IPv6 only network ask the resolver address of their prefix, which
+# the helper makes the host hold on lo0 while the base system's local-unbound answers for the names of the jails
+dns6_step() {
+	step "names of jails over IPv6 (docs/dns.md): an IPv6 only network has a resolver address of its own"
+	cp -p /etc/resolv.conf "$work/resolv.names"
+	sysrc local_unbound_enable=YES >/dev/null
+	check "local-unbound-setup" local-unbound-setup
+	check "start local_unbound" service local_unbound onerestart
+	chown root:wheel /var/unbound/conf.d; chmod 755 /var/unbound/conf.d # what jailops-setup does
+	check "restart jailopsd (it asks the helper about the names at its start)" service jailopsd restart
+	waitfor "the daemon answers" 60 $J host show
+	check "an IPv6 only network" $J network create v6only --ipv6 2001:db8:77:1::/64 --ipv6-mode routed --uplink "$uplink"
+	check "grant it to demo" $J network grant v6only --project demo
+	check "a jail on it" $J create v6 --project demo --image "$img" --network v6only --storage default --start
+	expect "network show says what the jails ask" 'DNS: +2001:db8:77:1::1 \(the gateway' $J network show v6only
+	waitfor "the packages of the first start are in (an exec waits for them)" 180 $J exec --project demo v6 -- true
+	expect_retry "the jail asks the resolver address of its prefix only" '^nameserver 2001:db8:77:1::1$' $J exec --project demo v6 -- cat /etc/resolv.conf
+	expect "the host holds the resolver address on the loopback" '2001:db8:77:1::1 prefixlen 128' ifconfig lo0 inet6
+	expect_retry "doctor: the names answer on every address the jails ask" 'dns\.unbound +PASS' $J doctor
+	expect_retry "the jail finds its own name through the resolver address" '2001:db8:77:1::' $J exec --project demo v6 -- drill -Q v6.demo.internal AAAA
+	expect_retry "and any other name through the host's resolver" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' $J exec --project demo v6 -- drill -Q pkg.freebsd.org
+	# a dual stack network: the gateway and the resolver address, IPv4 first
+	check "a dual stack network" $J network create v64 --ipv4 10.79.0.1/24 --ipv6 2001:db8:77:2::/64 --ipv6-mode routed --uplink "$uplink"
+	check "grant it to demo" $J network grant v64 --project demo
+	check "a jail on it" $J create v64 --project demo --image "$img" --network v64 --storage default --start
+	waitfor "the packages of the first start are in" 180 $J exec --project demo v64 -- true
+	expect_retry "a dual stack jail asks the gateway first" '^nameserver 10\.79\.0\.1$' $J exec --project demo v64 -- cat /etc/resolv.conf
+	expect "and the resolver address of its IPv6 prefix next" '^nameserver 2001:db8:77:2::1$' $J exec --project demo v64 -- cat /etc/resolv.conf
+	check "delete the jails" sh -c "$J delete --stop --confirm-data-loss v6 --project demo && $J delete --stop --confirm-data-loss v64 --project demo"
+	check "withdraw the grants" sh -c "$J network revoke v6only --project demo && $J network revoke v64 --project demo"
+	check "delete the networks" $J network delete v6only v64 -y
+	waitfor "the resolver addresses leave the loopback with their networks" 60 sh -c '! ifconfig lo0 inet6 | grep -q "2001:db8:77:[12]::1 "'
+	service local_unbound onestop >/dev/null 2>&1
+	sysrc local_unbound_enable=NO >/dev/null
+	cp -p "$work/resolv.names" /etc/resolv.conf
+	check "restart jailopsd" service jailopsd restart
+	waitfor "the daemon answers" 60 $J host show
+}
+
 step "image, network, project"
 uplink=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
 [ -n "$uplink" ] || uplink=$(ifconfig -l | tr ' ' '\n' | grep -v -E '^(lo0|pflog0)$' | head -1)
@@ -857,7 +896,7 @@ expect "the root clone has none" '^(0|none|-)$' zfs get -Hp -o value quota "$poo
 [ "$racct" != 1 ] || expect "the CPU rule is on the running jail" 'jail:demo_lim:pcpu:deny=100' sh -c 'rctl 2>&1'
 [ "$racct" != 1 ] || expect "an allocation beyond the memory limit fails" 'out of (memory|space)' sh -c "$J exec --project demo lim -- /usr/bin/awk 'BEGIN{s=\"x\"; for(i=0;i<29;i++) s=s s; print length(s)}' 2>&1 | head -c 300; true"
 [ "$racct" != 1 ] || expect "fork fails beyond the process limit" 'Cannot fork|Resource temporarily unavailable' sh -c "$J exec --project demo lim -- /bin/sh -c 'i=0; while [ \$i -lt 150 ]; do sleep 6 & i=\$((i+1)); done; wait' 2>&1 | head -c 600; true"
-# the first start of a jail fetches bash from the host in the background and the jail is busy until that is over (the rctl checks above are skipped without racct, so nothing has waited for it)
+# the first start of a jail installs bash into the running jail in the background and the jail is busy until that is over (the rctl checks above are skipped without racct, so nothing has waited for it)
 waitfor "the package step of the first start is over" 120 $J exec --project demo lim -- true
 expect "a write beyond the quota fails outside the root clone too" 'quota exceeded' sh -c "$J exec --project demo lim -- /bin/dd if=/dev/random of=/var/db/fill bs=1m count=700 2>&1 | head -c 600; true"
 check "remove the file" $J exec --project demo lim -- /bin/rm -f /var/db/fill
@@ -924,6 +963,7 @@ check "delete the policy" $J firewall policy delete closed --project demo -y
 
 step "packages of a running jail change inside it (pkg -j); what a process of the jail plants cannot make the host write"
 check "a jail that runs" $J create pkgj --project demo --image "$img" --network lan --storage default --start
+waitfor "the shell of the new jail is installed (it holds the jail for pkg until then)" 180 $J exec --project demo pkgj -- test -x /usr/local/bin/bash
 expect "the check of its packages runs pkg inside the jail" 'pkgj' $J update check pkgj --project demo
 check "the jail plants a link where pkg keeps its cache" $J exec --project demo pkgj -- sh -c 'rm -rf /var/cache/pkg; ln -s /jopsci-escape /var/cache/pkg; mkdir -p /usr/local/etc/pkg/repos; ln -s /jopsci-escape /usr/local/etc/pkg/repos/escape.conf'
 $J update apply pkgj --project demo --packages -y >/dev/null 2>&1 || true
@@ -938,7 +978,7 @@ shorthost=$(hostname | cut -d. -f1 | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-' | sed 's/
 ps1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '
 expect "a new jail's shell is bash" '^/usr/local/bin/bash$' $J config get --project demo web shell
 expect "a new jail's prompt is the default" '^default$' $J config get --project demo web prompt
-check "bash was installed into the jail's /usr/local at its first start" test -x "$webroot/usr/local/bin/bash"
+waitfor "bash is installed into the jail's /usr/local after its first start (the start does not wait for it)" 180 test -x "$webroot/usr/local/bin/bash"
 expect "bash is a package of the jail" '^bash-' pkg -j demo_web info bash
 check_retry "the prompt file is JailOps'" grep -F -x "	PS1='$ps1'" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
 check_retry "the variables script is JailOps'" grep -F "sysctl -n security.jail.env" "$webroot/usr/local/etc/profile.d/jailops-env.sh"
@@ -1153,6 +1193,7 @@ expect_retry "the jail resolves through the gateway" '^[0-9]+\.[0-9]+\.[0-9]+\.[
 dns_cleanup
 check "restart" $J restart web --project demo
 expect "the host's nameserver again" "^nameserver $hostns\$" cat "$webroot/etc/resolv.conf"
+dns6_step
 # pf.state-policy: jails need `set state-policy if-bound` in the pf.conf the system loads (a failed check without it)
 cp -p /etc/pf.conf "$work/pf.host"
 chmod 600 /etc/pf.conf # root's alone, as on a real host: the daemon (user jailops) cannot open it, the helper reads it

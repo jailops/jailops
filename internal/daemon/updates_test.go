@@ -102,6 +102,7 @@ func runningWeb(t *testing.T, e *dtest.Env) {
 	if _, err := so.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
+	waitShellSetup(t, e, "web") // the bash of a new jail is installed in the background and holds the jail until it is done
 }
 
 func TestPackageUpdatePipeline(t *testing.T) {
@@ -476,6 +477,8 @@ func TestPackageUpdateHoldsTheJailAgainstSessions(t *testing.T) {
 	e.SetPkgUpgrades(pkgDryRun)
 	ctx := context.Background()
 	var during error
+	e.Jails.SetExecFn(sj.fn)
+	runningWeb(t, e) // its bash is installed in the background first, and that runs ldconfig too
 	e.Jails.SetExecFn(func(jail string, o jailos.ExecOpts) (run.Result, error) {
 		// the library cache is refreshed right after the upgrade, while the update still holds the jail
 		if o.Argv[0] == "/sbin/ldconfig" && during == nil {
@@ -483,7 +486,6 @@ func TestPackageUpdateHoldsTheJailAgainstSessions(t *testing.T) {
 		}
 		return sj.fn(jail, o)
 	})
-	runningWeb(t, e)
 	aop, err := e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, Packages: true})
 	if err != nil {
 		t.Fatal(err)

@@ -52,9 +52,15 @@ type kindDesc[T any] struct {
 	brief *listView[T]
 	// show prints the human form of one object; nil prints YAML.
 	show func(a *app, x T) error
+	// nextStep is one line printed on standard output after an object is created, the command that makes it usable
+	// ("" for nothing); it may ask the server.
+	nextStep func(ctx context.Context, a *app, c *sdk.Client, name string) string
 	// warnings are what the server said about a created object (nil for a kind that has none); each is printed
 	// on standard error after the confirmation.
 	warnings func(x T) []string
+	// notes are what the server said about a created object that is worth knowing and is no fault (nil for a kind
+	// that has none); each is printed on standard error as "note: ...", after the warnings.
+	notes func(x T) []string
 	// updated prints, on standard error, what the server said about an updated object (nil for a kind that says nothing).
 	updated func(a *app, x T)
 	// filters registers extra list flags and returns the function that checks
@@ -689,6 +695,11 @@ documents; each one is created in order.`,
 					return err
 				}
 				createWarnings(a, d, out)
+				if d.nextStep != nil {
+					if line := d.nextStep(cmd.Context(), a, c, name); line != "" {
+						fprintf(a.env.Stdout, "%s\n", line)
+					}
+				}
 			}
 			if after != nil {
 				if err := after(cmd.Context(), name); err != nil {
@@ -703,11 +714,15 @@ documents; each one is created in order.`,
 
 // createWarnings prints what the server warned about a created object, on standard error, after the confirmation.
 func createWarnings[T any](a *app, d *kindDesc[T], x T) {
-	if d.warnings == nil {
-		return
+	if d.warnings != nil {
+		for _, w := range d.warnings(x) {
+			fprintf(a.env.Stderr, "warning: %s\n", w)
+		}
 	}
-	for _, w := range d.warnings(x) {
-		fprintf(a.env.Stderr, "warning: %s\n", w)
+	if d.notes != nil {
+		for _, n := range d.notes(x) {
+			fprintf(a.env.Stderr, "note: %s\n", n)
+		}
 	}
 }
 

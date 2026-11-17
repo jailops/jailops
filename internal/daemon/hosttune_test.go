@@ -7,6 +7,7 @@ import (
 
 	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/daemon/dtest"
+	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -136,9 +137,9 @@ func doctorCheck(t *testing.T, e *dtest.Env, name string) api.DoctorCheck {
 	return api.DoctorCheck{}
 }
 
-// The routers of a shared IPv6 segment probe the host from off-link addresses; FreeBSD drops the probes unless
-// net.inet6.icmp6.nd6_onlink_ns_rfc4861 is 1. The doctor asks for it once a proxy-mode network exists, and for it
-// to be persistent; JailOps never sets it.
+// The routers of some shared IPv6 segments probe the host from off-link addresses; FreeBSD drops the probes unless
+// net.inet6.icmp6.nd6_onlink_ns_rfc4861 is 1. The doctor informs about it once a proxy-mode network exists (never a
+// warning, and not part of the persistence check); JailOps never sets it.
 func TestDoctorChecksOnlinkNSForProxyNetworks(t *testing.T) {
 	const oid = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
 	e := dtest.New(t, dtest.Options{})
@@ -153,29 +154,24 @@ func TestDoctorChecksOnlinkNSForProxyNetworks(t *testing.T) {
 		t.Fatal(err)
 	}
 	c := doctorCheck(t, e, "sysctl."+oid)
-	if c.Status != api.DoctorWarn || !strings.Contains(c.Hint, "sysctl "+oid+"=1") || !strings.Contains(c.Hint, "/etc/sysctl.conf") || !strings.Contains(c.Hint, "unreachable") {
+	if c.Status != api.DoctorInfo || !strings.Contains(c.Hint, service.OnlinkNSDocs) || strings.Contains(c.Message+c.Hint, "unreachable") {
 		t.Fatalf("%+v", c)
 	}
 	e.SetSysctl(oid, "1")
 	if c := doctorCheck(t, e, "sysctl."+oid); c.Status != api.DoctorOK || c.Message != oid+"=1" {
 		t.Fatalf("%+v", c)
 	}
-	// Persistence: forwarding alone is not enough once a proxy network exists.
+	// Persistence is about forwarding only: the setting above never makes sysctl.persistent warn.
 	e.Files.Data["/etc/rc.conf"] = []byte("ipv6_gateway_enable=\"YES\"\n")
 	e.Files.Data["/etc/sysctl.conf"] = []byte("# nothing\n")
-	c = doctorCheck(t, e, "sysctl.persistent")
-	if c.Status != api.DoctorWarn || !strings.Contains(c.Message, oid) || strings.Contains(c.Message, "forwarding") || !strings.Contains(c.Hint, oid+"=1 to /etc/sysctl.conf") {
-		t.Fatalf("%+v", c)
-	}
-	e.Files.Data["/etc/sysctl.conf"] = []byte(oid + "=1\n")
-	if c := doctorCheck(t, e, "sysctl.persistent"); c.Status != api.DoctorOK || !strings.Contains(c.Message, oid) {
+	if c := doctorCheck(t, e, "sysctl.persistent"); c.Status != api.DoctorOK || strings.Contains(c.Message, oid) {
 		t.Fatalf("%+v", c)
 	}
 }
 
-// Creating a proxy-mode network on a host whose sysctl is 0 says so in the answer; a routed network and a host
-// with the sysctl on say nothing.
-func TestCreatingAProxyNetworkWarnsAboutOnlinkNS(t *testing.T) {
+// Creating a proxy-mode network on a host whose sysctl is 0 carries a note in the answer, never a warning; a routed
+// network and a host with the sysctl on say nothing.
+func TestCreatingAProxyNetworkNotesOnlinkNS(t *testing.T) {
 	const oid = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
 	e := dtest.New(t, dtest.Options{})
 	e.Seed()
@@ -185,23 +181,23 @@ func TestCreatingAProxyNetworkWarnsAboutOnlinkNS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(n.Status.Warnings) != 1 || !strings.Contains(n.Status.Warnings[0], "sysctl "+oid+"=1") || !strings.Contains(n.Status.Warnings[0], "/etc/sysctl.conf") {
-		t.Fatalf("%+v", n.Status.Warnings)
+	if len(n.Status.Notes) != 1 || !strings.Contains(n.Status.Notes[0], oid) || !strings.Contains(n.Status.Notes[0], service.OnlinkNSDocs) || len(n.Status.Warnings) != 0 {
+		t.Fatalf("%+v %+v", n.Status.Notes, n.Status.Warnings)
 	}
-	// The warning is for the answer of the create only, never stored (a network is visible to the host-wide client
+	// The note is for the answer of the create only, never stored (a network is visible to the host-wide client
 	// before a project is granted it).
-	if got, err := e.Global().Networks().Get(ctx, "sw"); err != nil || len(got.Status.Warnings) != 0 {
-		t.Fatalf("%v %+v", err, got.Status.Warnings)
+	if got, err := e.Global().Networks().Get(ctx, "sw"); err != nil || len(got.Status.Notes) != 0 {
+		t.Fatalf("%v %+v", err, got.Status.Notes)
 	}
 	routed := api.Network{Metadata: api.ObjectMeta{Name: "rt"}, Spec: api.NetworkSpec{
 		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:9:1::/80", Range: "2001:db8:9:1::10-2001:db8:9:1::ff"}}}
-	if n, err := e.Admin.Networks().Create(ctx, routed); err != nil || len(n.Status.Warnings) != 0 {
-		t.Fatalf("%v %+v", err, n.Status.Warnings)
+	if n, err := e.Admin.Networks().Create(ctx, routed); err != nil || len(n.Status.Notes) != 0 {
+		t.Fatalf("%v %+v", err, n.Status.Notes)
 	}
 	e.SetSysctl(oid, "1")
 	p := proxyNet()
 	p.Metadata.Name, p.Spec.IPv6.Subnet, p.Spec.IPv6.Range = "sw2", "2001:db8:1:2:200::/80", "2001:db8:1:2:200::10-2001:db8:1:2:200::ff"
-	if n, err := e.Admin.Networks().Create(ctx, p); err != nil || len(n.Status.Warnings) != 0 {
-		t.Fatalf("%v %+v", err, n.Status.Warnings)
+	if n, err := e.Admin.Networks().Create(ctx, p); err != nil || len(n.Status.Notes) != 0 {
+		t.Fatalf("%v %+v", err, n.Status.Notes)
 	}
 }

@@ -209,7 +209,7 @@ func (s *Service) UnlockVolume(ctx context.Context, name string, req api.VolumeU
 				_, jail := validate.SplitQualified(k)
 				s.markStartDue(k, false)
 				_ = h.Bind("start/"+k, &opRequest{Kind: "start", Jail: k})
-				s.installBashBeforeFirstStart(ctx, k)
+				s.installBashFromTheHost(ctx, k)
 				if err := s.life.StartJail(ctx, k); err != nil {
 					return nil, fmt.Errorf("unlocked, but the start of %s failed: %w", jail, err)
 				}
@@ -245,7 +245,7 @@ func (s *Service) LockVolume(ctx context.Context, name string) (api.Operation, e
 			for _, k := range jails {
 				s.markStartDue(k, false)
 				_ = h.Bind("stop/"+k, &opRequest{Kind: "stop", Jail: k})
-				if err := s.life.StopJail(ctx, k); err != nil {
+				if err := s.stopJail(ctx, k); err != nil {
 					return nil, err
 				}
 				s.markStopped(k)

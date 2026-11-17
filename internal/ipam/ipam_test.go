@@ -148,7 +148,7 @@ func TestIPv6Huge(t *testing.T) {
 		t.Fatal(err)
 	}
 	x, err := a.Allocate(netip.Addr{}, "")
-	if err != nil || x != ap("2001:db8::1") {
+	if err != nil || x != ap("2001:db8::2") { // ::1 is the host's resolver address
 		t.Fatalf("%v %v", x, err)
 	}
 	_, fr := a.Counts()
@@ -168,8 +168,8 @@ func TestIPv6LinkLocalGatewayAndNetworkAddr(t *testing.T) {
 		t.Fatal(err)
 	}
 	x, _ := a.Allocate(netip.Addr{}, "")
-	if x != ap("2001:db8:1:2::1") {
-		t.Fatalf("got %s (network address must be skipped)", x)
+	if x != ap("2001:db8:1:2::2") {
+		t.Fatalf("got %s (the network address and the host's resolver address must be skipped)", x)
 	}
 }
 

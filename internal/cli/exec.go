@@ -312,6 +312,11 @@ which is what a pipe such as 'echo id | jailops shell web' needs.`,
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.shell = true
+			if c, err := a.connect(cmd.Context()); err == nil {
+				if j, err := c.Jails().Get(cmd.Context(), args[0]); err == nil && shellInstalling(j) {
+					fprintln(a.env.Stderr, "installing the shell (bash) in the background, waiting ...")
+				}
+			}
 			return a.runExec(cmd.Context(), args[0], nil, o)
 		},
 	}

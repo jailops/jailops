@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+- **Fixed: a network that was just created was missing from `jailops network list`, `show`, `edit` and `get`.** The CLI sends
+  the selected project with every command, and for the administrator of the host that narrowed the networks (and the images)
+  to those the project is granted, so a network that is not granted yet looked as if it did not exist, while `network create`
+  still said it did. A global administrator sees every network and image whatever project the request names; a project
+  identity still sees only what its project is granted. `network create` and `storage create` end with the command that grants
+  it to a project when no project has it, the refusal of a project that is not granted names the reason, and a jail or a
+  volume that names no network or storage says that the project has none (and how to grant one) or lists the ones it has.
+- **Fixed: the jails of an IPv6 only network had no resolver, and a dual stack network gave them an IPv4 one only.** A jail asks
+  the host in the address families of its network: the IPv4 gateway, the resolver address of the IPv6 prefix (its second
+  address, for example `2001:db8:1:2:100::1` in `2001:db8:1:2:100::/80`), or both, IPv4 first. While the names of the jails are
+  on, the helper makes the host hold that address on its loopback as a `/128`, unbound listens on it, `host.PROJECT.internal`
+  has an AAAA record for it, and `jailops doctor` asks every address the jails ask. The allocator keeps the address back from
+  the jails; a network that is deleted loses it again.
+- **Fixed: the first start of a jail does not wait for a package server, and the shell waits for bash.** A new jail starts at
+  once. Bash is installed into the running jail in the background: `jailops start` says so, the jail shows a `ShellSetup`
+  condition with the reason `Installing`, and `jailops shell` (or any command in the jail) waits up to a minute for it instead
+  of answering that the shell does not exist. A later start, while bash is still missing, lets the host fetch it into the
+  stopped root (three tries at most), and `jailops shell` says why when the installation failed. A stop waits for that setup
+  to end instead of cutting `pkg` off in the middle, and `jailops update check` right after a start no longer panics.
+- **The neighbor discovery setting `net.inet6.icmp6.nd6_onlink_ns_rfc4861` is information, not a warning.** It matters on some
+  shared IPv6 segments only (those whose routers probe the host from their global addresses). `jailops network create` prints
+  a `note:` that points at the explanation, `jailops doctor` shows the value as `info` while a proxy-mode network exists, and
+  `sysctl.persistent` looks at forwarding only. The answer of a create or an update has a `notes` list next to `warnings`
+  (`Status.Notes` in the SDK; the web console shows it as a note). The IPv6 docs say what the setting does, how to recognise
+  the case and what to set; JailOps still never sets it.
 - **Fixed: a release without its type was accepted.** `jailops image create NAME --release 15.1` (or a typo such as
   `15.1-RELESE`) was built from the `base_latest` packages without a word. A FreeBSD release has its type now
   (`15.1-RELEASE`, `15.2-PRERELEASE`, `16.0-CURRENT`, `15.1-RC2`), and the refusal names the release of the host. The

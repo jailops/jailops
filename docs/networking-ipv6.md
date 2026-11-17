@@ -46,7 +46,10 @@ JailOps writes a jail's `/etc/resolv.conf` when the jail starts, with the namese
    [dns.md](dns.md). A jail whose firewall policy denies outgoing traffic needs a rule
    for udp and tcp port 53 to the gateway, and a host `pf.conf` that blocks traffic to the host itself a pass rule for it
    on the jails' interfaces (the interface group `epair`). With `block log all` and `set skip on lo0` nothing more was needed on the
-   test host.
+   test host. On a network with IPv6 the jail asks a second address, or only that one on an IPv6 only network: the
+   network's **resolver address** (the second address of the IPv6 subnet, for example `2001:db8:1:2:100::1`), which
+   the helper makes the host hold on its loopback and unbound listen on while the names of the jails are on
+   ([dns.md](dns.md#nothing-to-configure)). A link-local gateway cannot be written into a `resolv.conf`.
 
 `jailops network show NAME` says which rule applies (`DNS: ... (the host's nameservers)`, `(the gateway ...)` with the
 lines above) and `network create` prints them once as a warning; `jailops doctor` (`network.dns`) sends the gateway one
@@ -162,26 +165,31 @@ JailOps answers it itself.
    first minutes after `jailopsd` starts the condition is `Starting` (the capture of the uplink is being opened) and
    the doctor warns instead of failing; it opens on its own.
 
-#### Recommended on the host
+#### One host setting that matters on some segments
 
     sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1          # now
     echo 'net.inet6.icmp6.nd6_onlink_ns_rfc4861=1' >> /etc/sysctl.conf   # after a reboot
 
-The routers of a shared segment check that the host's own address is still there with unicast neighbor solicitations
-sent from their global addresses. The host holds its address as a `/128` and no router advertisement describes the
-`/64`, so for FreeBSD the sender is not an on-link neighbour and, with the default `0`, the solicitation is dropped and
-counted as bad. The router then marks the host unreachable for minutes at a time, every few hours, and the jails
-behind it with it. Not every network is fully RFC compliant: some routers probe from a global address as above, and Linux
-answers such a solicitation where FreeBSD does not by default. With `1` every probe is answered (the packet must still
-arrive with hop limit 255). The setting is the administrator's decision, because it makes the host a little less strict.
-JailOps flags the problem and names the fix, and never sets it: `jailops doctor` warns about `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` while a proxy-mode network exists and
-`sysctl.persistent` warns until the line is in `/etc/sysctl.conf`; `network create` says the same in its answer.
-To see the problem: `netstat -s -p icmp6 | grep bad` counts the dropped solicitations, and
+On some shared segments the routers check that the host's own address is still there with unicast neighbor
+solicitations sent from their global addresses. The host holds its address as a `/128` and no router advertisement
+describes the `/64`, so for FreeBSD the sender is not an on-link neighbour and, with the default `0`, the solicitation is
+dropped and counted as bad. Not every network is fully RFC compliant: some routers probe from a global address as
+above, and other systems answer such a solicitation where FreeBSD does not by default. A router that gets no answer may
+mark the host unreachable for a while, and the jails behind it with it. With `1` every probe is answered (the packet must
+still arrive with hop limit 255). The setting is the administrator's decision, because it makes the host a little less
+strict, and JailOps never sets it. `jailops doctor` shows the value as information
+(`sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`) while a proxy-mode network exists, and `network create` prints a note
+that points here.
 
+**Recognise the case:** the counter of bad neighbor solicitations grows over minutes while the host or its jails answer
+from outside only some of the time. A segment whose routers do not probe from global addresses never shows it, and then
+the default is fine. Look at the counter, and at the probes:
+
+    netstat -s -p icmp6 | grep -i 'bad neighbor solicitation'
     tcpdump -n -e -i vtnet0 'icmp6 and ip6[40] == 135 and ip6 dst host 2001:db8:1:2::2'
 
-shows the probes for the host's address (`2001:db8:1:2::2`) arriving from the routers' global addresses; without
-the sysctl no advertisement (`ip6[40] == 136`) follows them.
+The second command shows the probes for the host's address (`2001:db8:1:2::2`) arriving from the routers' global
+addresses; without the sysctl no advertisement (`ip6[40] == 136`) follows them.
 
 On a host that is not in appliance mode, set a static default route (`ipv6_defaultrouter="fe80::1%vtnet0"` in `rc.conf`,
 with the router's link-local address): a default route learned from router advertisements does not last on a host that

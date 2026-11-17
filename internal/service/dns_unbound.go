@@ -211,17 +211,54 @@ func (s *Service) doctorUnbound(ctx context.Context, c *checkSet) {
 	}
 	f := strings.Fields(st.Sample)
 	name, want := f[0], f[1]
-	got, why := s.lookupAt(ctx, st.Gateways[0], name)
-	if !slices.Contains(got, want) {
+	// every address the jails ask has to answer: the IPv6 resolver address of each network (the helper holds it on the
+	// loopback), and the IPv4 gateway of a network a jail runs on (the host holds it on the jails' links only then)
+	for _, at := range s.probeAddrs(ctx, st.Gateways) {
+		got, why := s.lookupAt(ctx, at, name)
+		if slices.Contains(got, want) {
+			continue
+		}
 		// no name and no address: the doctor is read by users of every project
-		msg := "asking the gateway of a network for the name of a running jail does not give its address"
+		msg := "asking the gateway of a network (" + at + ") for the name of a running jail does not give its address"
 		if why != "" {
 			msg += ": " + why
 		}
-		c.add("dns.unbound", api.DoctorWarn, msg, "the resolver has to listen on the gateway: service local_unbound restart (a new network needs one restart; JailOps does it itself when it writes the file); when another resolver than local-unbound owns port 53 there, stop it or give the network nameservers of its own")
+		c.add("dns.unbound", api.DoctorWarn, msg, "the resolver has to listen on the gateway and on the resolver address of an IPv6 network: service local_unbound restart (a new network needs one restart; JailOps does it itself when it writes the file); when another resolver than local-unbound owns port 53 there, stop it or give the network nameservers of its own")
 		return
 	}
 	c.add("dns.unbound", api.DoctorOK, fmt.Sprintf("%d names for %d jails in %d projects; suffix %s; %s", st.Names, st.Jails, st.Projects, st.Suffix, upstreamText(st)), "")
+}
+
+// probeAddrs are the addresses of gateways that the host holds now: the resolver address of an IPv6 network always, the
+// IPv4 gateway of a network with a running jail.
+func (s *Service) probeAddrs(ctx context.Context, gateways []string) []string {
+	running := map[string]bool{}
+	run := s.runningJails(ctx)
+	s.mu.RLock()
+	for k, e := range s.jails {
+		if _, up := run[k]; up {
+			for _, a := range e.jail.Spec.Network {
+				running[a.Network] = true
+			}
+		}
+	}
+	s.mu.RUnlock()
+	held := map[string]bool{}
+	nets, _ := s.netKind.list()
+	for _, o := range nets {
+		for _, a := range gatewayResolvers(o.Spec, true) {
+			if a.Is6() || running[o.Meta.Name] {
+				held[a.String()] = true
+			}
+		}
+	}
+	var out []string
+	for _, g := range gateways {
+		if held[g] {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // upstreamText says where the host's unbound sends every name that is not a jail's.

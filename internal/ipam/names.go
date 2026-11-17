@@ -91,6 +91,18 @@ func GuestPrefixLen4() int { return 32 }
 // passing the host and its PF.
 var GatewayLinkLocal6 = netip.MustParseAddr("fe80::1")
 
+// Resolver6 is the address of the host that the jails of an IPv6 network ask for DNS: the second address of the
+// subnet (2001:db8:1:2:100::1 in 2001:db8:1:2:100::/80). The host holds it on its loopback while the resolver is
+// managed (the helper's dns.unbound), the jails reach it through their default gateway, and the allocator never
+// hands it to a jail. It is not link-local, because a resolv.conf cannot name a link-local server usefully.
+func Resolver6(subnet netip.Prefix) netip.Addr {
+	subnet = subnet.Masked()
+	if !subnet.IsValid() || !subnet.Addr().Is6() || subnet.Bits() > 126 {
+		return netip.Addr{}
+	}
+	return subnet.Addr().Next()
+}
+
 // LinkLocalFromMAC returns the IPv6 link-local address FreeBSD derives from an interface's MAC address (the modified
 // EUI-64 form, fe80::/64). A VNET jail's epair end gets the MAC JailOps sets, and the kernel forms its link-local
 // address from it (verified on FreeBSD 15.1 amd64). It is wrong only if the jail changes its own link-local address

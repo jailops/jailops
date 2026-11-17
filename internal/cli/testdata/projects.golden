@@ -1,5 +1,6 @@
 $ jailops network create web --ipv4 10.50.0.1/24 --ipv6 fd50::1/64
 network/web created
+Grant it to a project with: jailops network grant web --project main
 
 $ jailops network create bad --ipv4 10.50.0.1/24 --subnet 10.1.0.0/24
 ! usage: --ipv4 replaces --subnet, --gateway and --range: use one form
@@ -33,6 +34,7 @@ status:
 
 $ jailops storage create fast --dataset tank/fast --compression zstd
 storage/fast created
+Grant it to a project with: jailops storage grant fast --project main
 
 $ jailops storage create nodataset
 ! usage: --dataset is required (or use -f FILE)
