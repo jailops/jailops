@@ -2,6 +2,7 @@ package render
 
 import (
 	"net/netip"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +60,29 @@ server:
 `
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+// The host's own resolver listens on the loopback. Unbound does that by default only while no `interface:` line exists, and
+// the generated file has such lines, so it names the loopback too, unless the administrator's configuration covers it.
+func TestUnboundConfKeepsTheLoopback(t *testing.T) {
+	a := netip.MustParseAddr
+	p := netip.MustParsePrefix
+	nets := []DNSNet{{Project: "shop", Subnets: []netip.Prefix{p("10.20.0.0/24")}, Gateway: a("10.20.0.1")}}
+	for name, listening := range map[string][]string{"none": nil, "other addresses": {"192.0.2.9"}} {
+		got := UnboundConf("internal", nil, nets, listening)
+		for _, line := range []string{"\tinterface: 127.0.0.1\n", "\tinterface: ::1\n", "\tinterface: 10.20.0.1\n"} {
+			if !strings.Contains(got, line) {
+				t.Errorf("%s: missing %q in:\n%s", name, line, got)
+			}
+		}
+	}
+	for name, listening := range map[string][]string{"both": {"127.0.0.1", "::1"}, "wildcards": {"0.0.0.0", "::"}} {
+		if got := UnboundConf("internal", nil, nets, listening); strings.Contains(got, "interface: 127.0.0.1") || strings.Contains(got, "interface: ::1") {
+			t.Errorf("%s: the loopback is named twice:\n%s", name, got)
+		}
+	}
+	if got := UnboundConf("internal", nil, nil, nil); strings.Contains(got, "interface:") {
+		t.Errorf("no network: the file leaves unbound as it is:\n%s", got)
 	}
 }

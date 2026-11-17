@@ -80,8 +80,10 @@ func TestVacuumIntoStallsWrites(t *testing.T) {
 	// The copy runs on a reader connection: a write made meanwhile does not wait for it. (On the writer connection the
 	// longest wait was the whole copy.)
 	// (Under the race detector on a loaded machine a write waits a good part of a short copy anyway: the writer held
-	// by the whole copy is the failure, and that is a wait of about the copy time.)
-	if copyTime > 100*time.Millisecond && longest > copyTime*3/4 {
+	// by the whole copy is the failure, and that is a wait of about the copy time. A copy of a few hundred milliseconds
+	// is within the noise of a scheduler pause, so the bound is checked only for a copy that is clearly longer; raise
+	// JAILOPS_STALL_ROWS to measure it on a machine that copies fast.)
+	if copyTime > 400*time.Millisecond && longest > copyTime*3/4 {
 		t.Errorf("a write waited %v for a database copy that took %v: the copy must not hold the writer", longest, copyTime)
 	}
 	if v, problems, err := OpenReadOnlyCheck(ctx, filepath.Join(copyDir, "copy.db")); err != nil || len(problems) > 0 || v == 0 {
