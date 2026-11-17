@@ -115,6 +115,16 @@ func UnboundConf(suffix string, jails []DNSJail, nets []DNSNet, listening []stri
 	}
 	slices.Sort(extra)
 	acl = append(acl, slices.Compact(extra)...)
+	// The host's own resolver listens on the loopback: unbound does that by default only while no `interface:` line
+	// exists, and the lines below end that, so the loopback is named too, unless the administrator's own configuration
+	// already covers it.
+	if len(ifaces) > 0 {
+		for _, lo := range []string{"127.0.0.1", "::1"} {
+			if !slices.Contains(listening, lo) && !slices.Contains(listening, wildcard(lo)) {
+				ifaces = append(ifaces, lo)
+			}
+		}
+	}
 	slices.Sort(ifaces)
 	b.line("server:")
 	if len(ifaces) > 0 {
@@ -162,4 +172,12 @@ func unboundNames(name, zone string, addrs []netip.Addr) []string {
 		out = append(out, unboundRecord(name+".v6."+zone, a))
 	}
 	return out
+}
+
+// wildcard is the unspecified address of the family of a: what an `interface:` line names to cover every address.
+func wildcard(a string) string {
+	if strings.Contains(a, ":") {
+		return "::"
+	}
+	return "0.0.0.0"
 }

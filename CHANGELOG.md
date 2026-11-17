@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fixed: the host's own resolver stopped answering on the loopback.** The unbound of the host listens on `127.0.0.1` and
+  `::1` only while its configuration has no `interface:` line. The file JailOps writes for the jails' networks has such
+  lines, so a host whose own configuration names none lost its resolver (`pkg update` failed with "Transient resolver
+  failure"). The file names the loopback as well in that case.
 - **Fixed: `jailops firewall test` from the host to a jail on an IPv6 network.** The resolver address of the network is on
   the host's loopback and answers DNS queries only; the test no longer tries it as a source of host traffic, which showed
   a block that no packet of the host meets.
