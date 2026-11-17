@@ -49,6 +49,15 @@ blocked, 8 the test cannot say.
 
 ## Common failures
 
+**`pkg` says "Transient resolver failure", or every lookup on the host fails (`jailops doctor`: `dns.unbound` fails).** The host
+asks its own `local_unbound` on `127.0.0.1`, and it does not answer. Look at `sockstat -46l | grep :53` (what listens),
+`service local_unbound status` and `local-unbound-checkconf`. Versions before 0.8.3 wrote `interface:` lines into
+`/var/unbound/conf.d/jailops.conf` that took the loopback from a resolver whose own configuration had none: `rm
+/var/unbound/conf.d/jailops.conf && service local_unbound restart` gives the host its resolver back at once, and the
+current version writes the loopback into the file ([dns.md](dns.md#the-hosts-own-resolver-keeps-its-loopback)). When the
+resolver answers but cannot resolve names outside (`dns.upstream` warns), its upstream is the thing to look at: the forward
+zone of `local_unbound`, or `local-unbound-setup` without one so that it resolves from the root servers.
+
 **A stop or a restart takes a minute, or `jailops doctor` says `mounts.leftovers`.** A stop that did not finish (the poststop
 hook failed, a daemon was killed) can leave mounts below the root of the jail: a `devfs` under `root/dev`, stacked once more by each further
 failed stop. They keep the root dataset busy. `jailops op show ID` lists the steps of the operation with the time each took (`unmount`

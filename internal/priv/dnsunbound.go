@@ -3,6 +3,8 @@ package priv
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"jailops.net/jailops/internal/dnsprobe"
 	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/ifconfig"
@@ -40,6 +43,7 @@ type UnboundRes struct {
 	Changed  bool   `json:"changed,omitempty"`  // this call wrote it
 	Reloaded bool   `json:"reloaded,omitempty"` // and the resolver read it again
 	Control  string `json:"control,omitempty"`  // why the control program did not answer; empty: it did
+	Warn     string `json:"warn,omitempty"`     // an address that should answer does not, and did not before the change either
 	Names    int    `json:"names"`              // the distinct names in the file
 	Jails    int    `json:"jails,omitempty"`    // the running jails with an address they are for
 	Projects int    `json:"projects,omitempty"` // and the projects of those
@@ -69,6 +73,11 @@ func (l *Local) DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error) 
 	res := UnboundRes{}
 	path := l.cfg.UnboundConf
 	if path == "" {
+		if apply && isAdmin(ctx) {
+			dnsMu.Lock()
+			defer dnsMu.Unlock()
+			res.Control = l.removeOwnDefaultConf(ctx)
+		}
 		return res, nil
 	}
 	res.Path, res.Base, res.Suffix = path, path == DefaultUnboundConf, l.cfg.DNSSuffix
@@ -115,21 +124,32 @@ func (l *Local) DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error) 
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return res, fmt.Errorf("unbound-conf %s: %w", path, err)
 	}
-	res.Current = err == nil && bytes.Equal(cur, []byte(text))
+	existed := err == nil
+	res.Current = existed && bytes.Equal(cur, []byte(text))
 	if apply {
 		l.syncResolverAddrs(ctx, nets)
 	}
 	var out string
 	var cerr error
 	if apply && !res.Current {
+		// A text that failed is not tried again at every pass: each try writes the file and restarts the resolver.
+		if why := l.dnsHeldBack(text); why != "" {
+			res.Control = why
+			return res, nil
+		}
+		// What answers now has to answer after the change: the host's own resolver above all (pkg and everything else
+		// ask it), and the gateways the jails ask.
+		addrs := l.probeAddrs(ctx, res.Gateways)
+		before := l.answering(ctx, addrs, 2)
 		if err := l.writeUnboundConf(path, text); err != nil {
 			return res, err
 		}
 		// The resolver checks its configuration, with the new file in place, before it reads it: a text it refuses
 		// (an interface the administrator has named too) puts the old file back and nothing is reloaded.
 		if why := l.checkResolver(ctx, res.Base); why != "" {
-			l.restoreUnboundConf(path, cur, err == nil)
+			l.restoreUnboundConf(path, cur, existed)
 			res.Control = "the resolver refused the names, the old file is back: " + why
+			l.dnsHoldBack(text, res.Control)
 			return res, nil
 		}
 		res.Changed, res.Current = true, true
@@ -142,15 +162,31 @@ func (l *Local) DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error) 
 		}
 		res.Reloaded = cerr == nil
 		if cerr != nil {
-			// the resolver would not read it: the old file goes back and the resolver reads that
-			l.restoreUnboundConf(path, cur, err == nil)
-			res.Changed, res.Current = false, false
-			if res.Base {
-				_, _ = l.restartResolver(ctx)
-			} else {
-				_, _ = l.unboundControl(ctx, res.Base, "reload")
-			}
+			// the resolver would not read it: the old file goes back and the resolver reads that. What the rollback
+			// itself did comes first: a resolver that is stopped is the worse news.
+			rb := l.rollbackResolver(ctx, res.Base, path, cur, existed)
+			res.Changed, res.Current, res.Reloaded = false, false, false
+			res.Control = joinWhy(rb, describeControl(out, cerr))
+			l.dnsHoldBack(text, res.Control)
+			return res, nil
 		}
+		// The check that the restart exited 0 is not enough: a resolver that starts without the loopback exits 0 too.
+		after := l.answering(ctx, addrs, 3)
+		if lost := stoppedAnswering(before, after); len(lost) > 0 {
+			rb := l.rollbackResolver(ctx, res.Base, path, cur, existed)
+			res.Changed, res.Current, res.Reloaded = false, false, false
+			msg := "the host's resolver stopped answering at " + strings.Join(lost, ", ") + " after the names were written: the old file is back"
+			if rb != "" {
+				msg = rb + "; " + msg
+			}
+			if again := stoppedAnswering(before, l.answering(ctx, addrs, 3)); len(again) > 0 {
+				msg += "; it still does not answer at " + strings.Join(again, ", ") + " (look at: sockstat -46l | grep :53; service local_unbound status)"
+			}
+			res.Control = msg
+			l.dnsHoldBack(text, msg)
+			return res, errors.New(msg)
+		}
+		res.Warn = stillSilent(before, after)
 	} else {
 		out, cerr = l.unboundControl(ctx, res.Base, "status")
 	}
@@ -160,6 +196,184 @@ func (l *Local) DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error) 
 		res.Forward, res.Recurse = parseForwards(fw)
 	}
 	return res, nil
+}
+
+// dnsRetryAfter is how long a text of the names that failed is not tried again.
+const dnsRetryAfter = 10 * time.Minute
+
+// dnsFailure is the last text the resolver would not take: its hash, why, and until when it is held back.
+type dnsFailure struct {
+	hash  string
+	why   string
+	until time.Time
+}
+
+func dnsHash(text string) string {
+	h := sha256.Sum256([]byte(text))
+	return hex.EncodeToString(h[:])
+}
+
+// dnsHeldBack says why the text is not tried: the same text failed a short while ago ("" when it may be tried).
+func (l *Local) dnsHeldBack(text string) string {
+	f := l.dnsFail
+	if f.hash == "" || f.hash != dnsHash(text) || !l.now().Before(f.until) {
+		return ""
+	}
+	return fmt.Sprintf("held back until %s after a failure of the same text: %s", f.until.Format("15:04"), f.why)
+}
+
+func (l *Local) dnsHoldBack(text, why string) {
+	l.dnsFail = dnsFailure{hash: dnsHash(text), why: why, until: l.now().Add(dnsRetryAfter)}
+}
+
+// joinWhy joins the reasons, the first one first, leaving out an empty one.
+func joinWhy(parts ...string) string {
+	var out []string
+	for _, p := range parts {
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return strings.Join(out, "; ")
+}
+
+// rollbackResolver puts the old file back and has the resolver read it. A restart that fails is tried once more: a
+// resolver left stopped takes the host's names with it. It returns what went wrong ("" when nothing did).
+func (l *Local) rollbackResolver(ctx context.Context, base bool, path string, old []byte, existed bool) string {
+	l.restoreUnboundConf(path, old, existed)
+	if !base {
+		if out, err := l.unboundControl(ctx, base, "reload"); err != nil {
+			return "the reload after the rollback failed: " + describeControl(out, err)
+		}
+		return ""
+	}
+	out, err := l.restartResolver(ctx)
+	if err == nil {
+		return ""
+	}
+	out2, err2 := l.restartResolver(ctx)
+	if err2 == nil {
+		return "the restart after the rollback failed once (" + describeControl(out, err) + ") and worked the second time"
+	}
+	return "the restart after the rollback failed (" + describeControl(out, err) + ") and again (" + describeControl(out2, err2) + "): local_unbound may be stopped, run service local_unbound onestart"
+}
+
+// hostLoopbackNameservers are the loopback nameservers of the host's resolv.conf, the ones the host asks itself: an
+// unspecified address is the loopback, and a file with no nameserver line (or none) is the loopback too.
+func (l *Local) hostLoopbackNameservers() []string {
+	b, err := os.ReadFile(l.etcPath("resolv.conf"))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	var out []string
+	seen := 0
+	for _, ln := range strings.Split(string(b), "\n") {
+		f := strings.Fields(ln)
+		if len(f) < 2 || f[0] != "nameserver" {
+			continue
+		}
+		seen++
+		a, err := netip.ParseAddr(f[1])
+		switch {
+		case err != nil:
+		case a.IsUnspecified():
+			if a.Is6() {
+				out = append(out, "::1")
+			} else {
+				out = append(out, "127.0.0.1")
+			}
+		case a.IsLoopback():
+			out = append(out, a.Unmap().String())
+		}
+	}
+	if seen == 0 {
+		out = append(out, "127.0.0.1")
+	}
+	return slices.Compact(out)
+}
+
+// probeAddrs are the addresses to ask after a change: the host's own loopback nameservers, and the gateways of the
+// networks that the host holds on an interface now (an IPv4 gateway exists only while a jail runs on its network).
+func (l *Local) probeAddrs(ctx context.Context, gateways []string) []string {
+	out := l.hostLoopbackNameservers()
+	if len(gateways) == 0 {
+		return out
+	}
+	held := map[string]bool{}
+	if list, err := l.Net().List(ctx); err == nil {
+		for _, i := range list {
+			for _, p := range append(slices.Clone(i.Inet), i.Inet6...) {
+				held[p.Addr().WithZone("").String()] = true
+			}
+		}
+	}
+	for _, g := range gateways {
+		if held[g] && !slices.Contains(out, g) {
+			out = append(out, g)
+		}
+	}
+	return out
+}
+
+// answering asks each address for `localhost`, which unbound answers from its own built-in zone (no upstream, no
+// cache), and says which answer in a way that serves a client.
+func (l *Local) answering(ctx context.Context, addrs []string, tries int) map[string]bool {
+	f := l.d.DNSProbe
+	if f == nil {
+		f = dnsprobe.Query
+	}
+	up := map[string]bool{}
+	for _, a := range addrs {
+		up[a] = dnsprobe.Wait(ctx, f, a, "localhost.", dnsprobe.TypeA, tries, 500*time.Millisecond).Up()
+	}
+	return up
+}
+
+// stoppedAnswering are the addresses that answered before and do not now, sorted.
+func stoppedAnswering(before, after map[string]bool) []string {
+	var out []string
+	for a, was := range before {
+		if was && !after[a] {
+			out = append(out, a)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// stillSilent says which addresses did not answer before and do not now: not a loss of the change, but doctor's news.
+func stillSilent(before, after map[string]bool) string {
+	var out []string
+	for a, was := range before {
+		if !was && !after[a] {
+			out = append(out, a)
+		}
+	}
+	if len(out) == 0 {
+		return ""
+	}
+	slices.Sort(out)
+	return "does not answer at " + strings.Join(out, ", ")
+}
+
+// removeOwnDefaultConf is what the helper does while the names are off (unbound-conf is empty): the file it wrote
+// earlier stays in effect, with interface lines that took the loopback from the host's resolver, so it goes. Only a
+// file that carries the header of the helper is touched; a restart follows once. It returns a note when that failed.
+func (l *Local) removeOwnDefaultConf(ctx context.Context) string {
+	b, err := os.ReadFile(DefaultUnboundConf)
+	if err != nil || !bytes.HasPrefix(b, []byte(render.Header)) {
+		return ""
+	}
+	if err := rootOwned(filepath.Dir(DefaultUnboundConf)); err != nil {
+		return ""
+	}
+	if err := os.Remove(DefaultUnboundConf); err != nil {
+		return "the file of the names could not be removed: " + err.Error()
+	}
+	if out, err := l.restartResolver(ctx); err != nil {
+		return "the file of the names is removed, but the restart of the resolver failed: " + describeControl(out, err)
+	}
+	return ""
 }
 
 // checkResolver runs the configuration check of the resolver (local-unbound-checkconf for the base system's, else
@@ -460,6 +674,9 @@ func listeningAddrs(own string) []string {
 			l = strings.TrimSpace(l)
 			if !strings.HasPrefix(l, "interface:") {
 				continue
+			}
+			if i := strings.IndexByte(l, '#'); i >= 0 { // a trailing comment
+				l = strings.TrimSpace(l[:i])
 			}
 			a := strings.Trim(strings.TrimSpace(strings.TrimPrefix(l, "interface:")), `"`)
 			if i := strings.IndexByte(a, '@'); i >= 0 {

@@ -15,6 +15,7 @@ import (
 	"filippo.io/age"
 	"fmt"
 	"io"
+	"jailops.net/jailops/internal/dnsprobe"
 	"jailops.net/jailops/internal/supervise"
 	"log/slog"
 	"net"
@@ -178,6 +179,9 @@ type Deps struct {
 	// DialJail opens a connection from the host to a jail (the tcp and http
 	// health checks of an app installation); nil uses the network.
 	DialJail func(ctx context.Context, network, address string) (net.Conn, error)
+	// ProbeDNS asks a DNS server one question over UDP (doctor checks that the host's own resolver answers); nil
+	// leaves that check out.
+	ProbeDNS dnsprobe.Func
 	// Persistent replaces lifecycle.DefaultPersistent (nil keeps it).
 	Persistent []lifecycle.PersistentPath
 	// ServerFingerprint is the pin of the server certificate; trust tokens

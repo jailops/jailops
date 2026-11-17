@@ -103,6 +103,18 @@ nameservers the host used at that time: look at it, or ask `local-unbound-contro
 recurses). To resolve yourself, run `local-unbound-setup none` (it keeps the old file as a backup) and
 `service local_unbound restart`.
 
+## The host's own resolver keeps its loopback
+
+The host asks its own resolver on `127.0.0.1` (and `::1`) for every name, `pkg` included. Unbound listens there by itself
+only while its configuration has no `interface:` line, and the file JailOps writes has such lines, so it names the
+loopback too, unless your own configuration lists it already (an address named twice is a fatal error of unbound).
+After each change the helper asks the loopback nameservers of the host's `resolv.conf` for `localhost`, which unbound
+answers from its own zone, and the gateways it has just made unbound listen on. An address that answered before the
+change and does not answer after it puts the old file back, restarts the resolver once more and says so (the text that
+failed is not tried again for ten minutes). `jailops doctor` asks the same question (`dns.unbound` fails when the host's
+resolver does not answer) and warns when it answers but cannot resolve names outside (`dns.upstream`). With the names
+off (`unbound-conf =`) the helper takes away the file it wrote earlier, once, and the resolver restarts.
+
 ## Switching it off, or another resolver
 
 `unbound-conf =` (empty) in `priv.conf` turns it off. A path there points the helper at another file, for a plain `unbound`

@@ -117,9 +117,10 @@ scripts() {
 		cat <<'JSON'
 "scripts": {
   "pre-install": "pw groupshow jailops >/dev/null 2>&1 || pw groupadd jailops; pw usershow jailops >/dev/null 2>&1 || pw useradd jailops -g jailops -d /var/db/jailops -s /usr/sbin/nologin -c 'JailOps daemon'; true",
-  "post-install": "install -d -m 0750 -o jailops -g jailops /var/db/jailops; echo 'JailOps is installed. Next, as root: jailops-setup (jailops-setup -n shows what it would do; man jailops-setup)'"
-},
+  "post-install": "install -d -m 0750 -o jailops -g jailops /var/db/jailops; echo 'JailOps is installed. Next, as root: jailops-setup (jailops-setup -n shows what it would do; man jailops-setup)'",
 JSON
+		# packaging/pkg/pre-deinstall.sh as one JSON string
+		printf '  "pre-deinstall": "%s"\n},\n' "$(sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' "$here/packaging/pkg/pre-deinstall.sh" | awk '{printf "%s\\n", $0}')"
 		;;
 	jailops-backupd)
 		cat <<'JSON'

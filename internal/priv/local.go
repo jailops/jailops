@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"jailops.net/jailops/internal/dnsprobe"
 	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/jailos"
@@ -145,6 +146,9 @@ type Deps struct {
 	// AfterFunc arms the timer of a pending change and returns its stop function (default time.AfterFunc); tests
 	// substitute a timer they fire themselves.
 	AfterFunc func(d time.Duration, f func()) (stop func() bool)
+	// DNSProbe asks a DNS server one question (dns.unbound checks that the host's resolver answers after a change);
+	// default dnsprobe.Query, tests substitute their own.
+	DNSProbe dnsprobe.Func
 	// WGLocate returns the wg program (default: the first of wireguard.Binaries that is root's); tests substitute
 	// their own.
 	WGLocate func() string
@@ -169,6 +173,8 @@ type Local struct {
 	noChown bool // tolerate failing chown (tests as an ordinary user)
 
 	ndp ndpState
+
+	dnsFail dnsFailure // the last text of the names the resolver would not take (dnsMu)
 
 	hostMu   sync.Mutex                 // one host management request at a time
 	pendStop func() bool                // stops the timer of the pending change (hostMu)
