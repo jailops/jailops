@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.3 - 2026-11-17
+
 - **Fixed: a network that was just created was missing from `jailops network list`, `show`, `edit` and `get`.** The CLI sends
   the selected project with every command, and for the administrator of the host that narrowed the networks (and the images)
   to those the project is granted, so a network that is not granted yet looked as if it did not exist, while `network create`
