@@ -132,12 +132,55 @@ check "forwarding now" grep -qx 'net.inet.ip.forwarding=1' "$FAKE/sysctl"
 check "modules loaded" logged "kldload -n if_epair pf zfs"
 check "modules at boot" grep -qx 'pf_load="YES"' "$ROOT/boot/loader.conf"
 check "services enabled" grep -qx 'jailopsd_enable="YES"' "$FAKE/rc.conf"
-check "web on" grep -qx 'jailopsd_web="YES"' "$FAKE/rc.conf"
+check "web off by default" eval '! grep -q "^jailopsd_web=" "$FAKE/rc.conf"'
 check "pf loaded before the daemon starts" log_before "pfctl -f" "service jailopsd start"
 check "doctor" logged "jailops doctor"
 check "no admin without a terminal" eval '! logged "jailops user create"'
-check "console URL" has "https://host.example:39110/"
+check "no console URL" eval '! has "39110/"'
+check "says the CLI works as root" has "The CLI works as root on this host"
+check "no admin question" eval '! has "first administrator"'
 check "never restarts pf" eval '! grep -q "service pf" "$FAKE/log"'
+
+case="--web turns the web console on"
+new_host
+setup -y --web
+check "exit 0" [ "$rc" = 0 ]
+check "web on" grep -qx 'jailopsd_web="YES"' "$FAKE/rc.conf"
+check "console URL" has "https://host.example:39110/"
+check "admin step is there, without a terminal a warning" has "! no administrator yet"
+check "no admin created without a terminal" eval '! logged "jailops user create"'
+check "a warning does not make the exit status 1" [ "$rc" = 0 ]
+
+case="the web question: no is the default, yes turns it on, an own setting stays"
+new_host
+echo n > "$base/n"
+STDIN=$base/n setup -n
+check "a dry run does not ask" eval '! has "Serve the web console"'
+printf 'y\n' > "$base/y1"
+STDIN=$base/y1 setup -y
+check "-y never turns it on" eval '! grep -q "^jailopsd_web=" "$FAKE/rc.conf"'
+STDIN=$base/n setup
+check "no: stays off" eval '! grep -q "^jailopsd_web=" "$FAKE/rc.conf"'
+check "asked" has "Serve the web console (port 39110)?"
+new_host
+printf 'n\ny\n' > "$base/ny"
+STDIN=$base/ny setup
+check "pf, then the web console: yes turns it on" grep -qx 'jailopsd_web="YES"' "$FAKE/rc.conf"
+new_host
+echo 'jailopsd_web="NO"' > "$FAKE/rc.conf"
+setup -y
+check "an own NO stays" grep -qx 'jailopsd_web="NO"' "$FAKE/rc.conf"
+check "an own NO is not asked about" eval '! has "Serve the web console"'
+
+case="an optional step that fails does not count"
+new_host
+fake local-unbound-setup 'exit 1'
+setup -y
+rm -f "$fakes/local-unbound-setup"
+check "exit 0" [ "$rc" = 0 ]
+check "said with a warning" has "! enabling local_unbound failed"
+check "nothing is not done" eval '! has "are not done"'
+check "the rest is done" logged "service jailopsd start"
 
 case="second run changes nothing"
 cp "$ROOT/etc/pf.conf" "$base/pf.first"
@@ -220,6 +263,7 @@ echo n > "$base/no"
 STDIN=$base/no setup
 check "exit 1 (pf not done)" [ "$rc" = 1 ]
 check "warns about ssh" has "this session and every later ssh login are cut"
+check "says pf was skipped and how to go on" has "x pf skipped, left as it is"
 check "file unchanged after no" cmp -s "$ROOT/etc/pf.conf" "$base/orig"
 check "nothing loaded or enabled" eval '! logged "pfctl -f" && ! logged "pfctl -e"'
 check "the rest still done" logged "service jailopsd start"

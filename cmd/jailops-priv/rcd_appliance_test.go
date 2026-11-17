@@ -59,9 +59,11 @@ func runRC(t *testing.T, script, rcconf, arg string, privConf bool) rcRun {
 	stub := filepath.Join(dir, "rc.subr")
 	body := strings.Replace(string(b), ". /etc/rc.subr", ". "+stub, 1)
 	conf := filepath.Join(dir, "priv.conf")
-	rcconf += "\njailops_priv_config=\"" + conf + "\"\n"
+	dconf := filepath.Join(dir, "jailopsd.yaml")
+	rcconf += "\njailops_priv_config=\"" + conf + "\"\njailopsd_config=\"" + dconf + "\"\n"
 	if privConf {
 		os.WriteFile(conf, nil, 0o600)
+		os.WriteFile(dconf, nil, 0o640)
 	}
 	// the helper's own rc script: forcestatus answers as SERVICE_STATUS says, forcestart as FORCESTART_STATUS
 	helperrc := "#!/bin/sh\necho \"helper-rc $*\" >> \"$LOG\"\ncase \"$1\" in forcestatus) exit ${SERVICE_STATUS:-0} ;; forcestart) exit ${FORCESTART_STATUS:-0} ;; onestatus) exit ${SERVICE_STATUS:-0} ;; onestop) exit ${ONESTOP_STATUS:-0} ;; esac\nexit 0\n"
@@ -169,6 +171,18 @@ func TestRCDDaemonForcesTheHelper(t *testing.T) {
 	t.Setenv("FORCESTART_STATUS", "0")
 	if running := runRC(t, "jailopsd", `jailopsd_web="YES"`, "start", true); strings.Contains(running.out, "forced to start") || strings.Contains(running.log, "forcestart") {
 		t.Errorf("a start with the helper running:\n%s\n%s", running.out, running.log)
+	}
+}
+
+// A start before jailops-setup has made the configuration says so in one line and does not start the helper; in
+// appliance mode the helper writes the configuration on its first start, so the start goes on.
+func TestRCDDaemonWithoutConfigurationSaysSetup(t *testing.T) {
+	no := runRC(t, "jailopsd", "", "start", false)
+	if !strings.Contains(no.out, "jailopsd.yaml: run jailops-setup first") || !strings.Contains(no.out, "precmd failed") || strings.Contains(no.log, "forcestart") {
+		t.Errorf("a start without a configuration:\n%s\n%s", no.out, no.log)
+	}
+	if app := runRC(t, "jailopsd", `jailops_appliance="YES"`, "start", false); strings.Contains(app.out, "run jailops-setup first") {
+		t.Errorf("appliance mode asked for jailops-setup:\n%s", app.out)
 	}
 }
 

@@ -138,6 +138,11 @@ jailopsd_stop_helper()
 
 jailopsd_precmd()
 {
+	# without jailops-setup there is no configuration yet (in appliance mode the helper writes it on its first start)
+	if [ -z "${jailopsd_appliance}" ] && [ ! -r "${jailopsd_config}" ]; then
+		warn "no ${jailopsd_config}: run jailops-setup first"
+		return 1
+	fi
 	# the daemon is useless without the helper, and would wait 30 seconds for its socket and exit
 	jailopsd_force_depend || return 1
 	if jailopsd_helper_replaced; then
@@ -183,6 +188,5 @@ esac
 jailopsd_appliance=$(jailops_appliance_args) || err 1 "invalid jailops_appliance_modules"
 jailopsd_extra="${jailopsd_extra} ${jailopsd_appliance}"
 command_args="-f -S -T jailopsd -R 10 -u ${jailopsd_runas} -p ${pidfile} -P ${supervisor_pidfile} ${procname} -config ${jailopsd_config} ${jailopsd_extra}"
-required_files="${jailopsd_config}"
 
 run_rc_command "$1"

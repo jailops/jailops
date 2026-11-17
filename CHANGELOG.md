@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- **`jailops-setup` is for the CLI first: the web console is opt-in.** The setup no longer turns the web console on by
+  itself. It asks "Serve the web console (port 39110)?" (default no; `-y` never answers yes), or take `--web`. Only with
+  the console on is the first administrator offered, because the CLI as root over the local socket needs no user. A step
+  that is optional (the host resolver, the console, the administrator) that is skipped or fails is a warning and does not
+  make the exit status 1; a skipped pf change says so and what to do.
+- **The install guide starts with `jailops-setup`.** Appliance mode (the setup token and the web wizard) is its own
+  optional section.
+- **`jailops user create --password-prompt`** says whether the password is empty or the two do not match, and asks again
+  up to three times.
+- **`service jailopsd start` before `jailops-setup`** says "no jailopsd.yaml: run jailops-setup first".
+
 ## 0.8.1 - 2026-11-16
 
 - **Security: fixes from an external audit of 0.8.0.**
@@ -941,7 +954,7 @@
   - The generated self-signed key is written atomically with mode 0600 (no write through a symlink); `jailops_pool` and `-pool` refuse a name that starts with `-`; the reference catalog's mail app starts Dovecot with `disable_plaintext_auth = yes` (no password in clear before TLS) and its notes say so.
   - Documented: what a global admin can point log sinks and the ACME directory at ([security-model.md](docs/security-model.md#log-forwarding)), and that volume ownership rests on the `jailops:managed` and `jailops:kind` user properties ([storage.md](docs/storage.md#encrypted-volumes)).
 
-- **The appliance path: one rc.conf switch, a first start without a shell** ([docs/install.md](docs/install.md#the-appliance-path), [docs/appliance.md](docs/appliance.md)).
+- **The appliance path: one rc.conf switch, a first start without a shell** ([docs/install.md](docs/install.md#appliance-mode-host-managed-by-jailops-set-up-from-the-web-console), [docs/appliance.md](docs/appliance.md)).
   - `jailops_appliance="YES"` in `/etc/rc.conf` (with `jailops_appliance_modules`, default all modules, and `jailops_pool`) turns host management on in both programs: the rc script of `jailops_priv` passes `-appliance-modules` to the helper, which manages `host-manage` of `priv.conf` and these together (read at start only; not a key of `priv.conf`; `check-config` prints both lists), and the rc script of `jailopsd` passes the same list to the daemon (`host.manage.modules` and these). The helper's list still decides: the daemon cannot switch itself on. Doctor check `appliance` (ok when both agree, a warning with the line to fix otherwise).
   - First start: without `priv.conf`, the rc script runs the new `jailops-priv appliance-init`, the setup of `init` on `jailops_pool` or the pool of the root file system, refusing a pool that holds another JailOps dataset and logging every command to syslog. `jailops-priv revert-pending` does nothing before the helper is set up.
   - **Setup token** (extension `setup`): `POST /api/v1/setup/token` (root on the socket) issues a one-time token (32 random bytes, base32, 24 hours, stored as its SHA-256 in `<state_dir>/setup/token.json`), `GET /api/v1/setup` tells anyone that an administrator is missing, `POST /api/v1/setup` with the token creates the first global administrator and uses the token up; wrong tokens are locked out per source like failed logins; every setup route answers `not_found` once an administrator exists. `jailops-priv setup-token [-wait D] [-syslog]` asks the daemon for one and prints it with the console's addresses (exit 3 once set up); the rc script of `jailopsd` runs it after every start in appliance mode and writes it to `/dev/console` and syslog `authpriv` (`/var/log/auth.log`), never to the daemon's own log. `jailopsd` now requires `syslogd` in its rc order. SDK `SetupStatus`, `Setup`, `SetupToken`.

@@ -51,25 +51,40 @@ func readSecretFromTerminal(e *Env, prompt string) (string, error) {
 	return string(b), nil
 }
 
+// passwordTries is how many times the prompt of a new password asks again after a password that is empty or does not
+// match the repeat.
+const passwordTries = 3
+
 // newPassword reads a password for a person: from the first line of a file with --password-file (- is standard
-// input), else from a prompt asked twice. It is never
-// an argument of the command line.
+// input), else from a prompt asked twice, again (up to passwordTries times) when the password is empty or the two do
+// not match. It is never an argument of the command line.
 func (a *app) newPassword(file string) (string, error) {
 	if file != "" {
 		return a.readSecretFile("password", file)
 	}
-	first, err := a.env.ReadSecret("New password: ")
-	if err != nil {
-		return "", err
+	var problem error
+	for try := 0; try < passwordTries; try++ {
+		first, err := a.env.ReadSecret("New password: ")
+		if err != nil {
+			return "", err
+		}
+		if first == "" {
+			problem = usagef("the password is empty")
+		} else {
+			second, err := a.env.ReadSecret("Repeat the password: ")
+			if err != nil {
+				return "", err
+			}
+			if first == second {
+				return first, nil
+			}
+			problem = usagef("the passwords do not match")
+		}
+		if try < passwordTries-1 {
+			fprintf(a.env.Stderr, "%v: try again\n", problem)
+		}
 	}
-	second, err := a.env.ReadSecret("Repeat the password: ")
-	if err != nil {
-		return "", err
-	}
-	if first == "" || first != second {
-		return "", usagef("the passwords are empty or do not match")
-	}
-	return first, nil
+	return "", problem
 }
 
 // readSecretFile reads a secret from the first line of a file, or of standard input for "-". A file others may
