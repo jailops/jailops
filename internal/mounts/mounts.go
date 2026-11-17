@@ -13,7 +13,7 @@ type NetHealed struct{ Destroyed, Skipped []string }
 // UnboundState says where the names of the jails stand for the host's unbound (the helper's dns.unbound).
 type UnboundState struct {
 	Enabled, Current, Changed, Reloaded, Base, Recurse bool
-	Path, Control, Sample, Reason, Suffix              string
+	Path, Control, Sample, Reason, Suffix, Warn        string
 	Names, Jails, Projects                             int
 	Gateways, Forward                                  []string
 }

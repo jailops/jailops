@@ -2,13 +2,17 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io/fs"
 	"net"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync"
 	"time"
 
+	"jailops.net/jailops/internal/dnsprobe"
 	"jailops.net/jailops/internal/mounts"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk/api"
@@ -31,6 +35,7 @@ type unboundState struct {
 	checked time.Time
 	sig     string    // what the names were last written for
 	synced  time.Time // and when
+	offDone bool      // the helper was asked once to take its own file away while the names are off
 }
 
 // unboundRecheck is how long the answer "is it on" is kept, and the longest the names go without a look.
@@ -113,7 +118,11 @@ func (s *Service) liveResolvAll(ctx context.Context) {
 // reconcile loop, and does nothing but compare a short signature of what runs unless something changed (or ten
 // minutes passed). A failure is logged and shown by doctor; it never stops a jail from starting.
 func (s *Service) SyncDNS(ctx context.Context) {
-	if s.d.Files == nil || !s.unboundOn(ctx) {
+	if s.d.Files == nil {
+		return
+	}
+	if !s.unboundOn(ctx) {
+		s.dnsOffCleanup(ctx)
 		return
 	}
 	sig := s.dnsSignature(ctx)
@@ -134,11 +143,33 @@ func (s *Service) SyncDNS(ctx context.Context) {
 	case st.Changed:
 		s.log.Info("the names of the jails were written for unbound", "file", st.Path, "addresses", st.Names)
 	}
+	if st.Warn != "" {
+		s.log.Warn("the resolver of the host after the names were written", "note", st.Warn)
+	}
 	u.mu.Lock()
 	if st.Control == "" {
 		u.sig, u.synced = sig, time.Now()
 	}
 	u.mu.Unlock()
+}
+
+// dnsOffCleanup asks the helper once to take away the file of the names it wrote earlier while the names are off (the
+// interface lines of that file stay in effect and keep the loopback from the host's own resolver). It does nothing
+// when the helper has no such file.
+func (s *Service) dnsOffCleanup(ctx context.Context) {
+	u := &s.unbound
+	u.mu.Lock()
+	if u.offDone || !u.known {
+		u.mu.Unlock()
+		return
+	}
+	u.offDone = true
+	u.mu.Unlock()
+	if st, err := s.d.Files.DNSUnbound(ctx, true); err != nil {
+		s.log.Warn("the file of the names of the jails could not be taken away", "err", err)
+	} else if st.Control != "" {
+		s.log.Warn("the file of the names of the jails could not be taken away", "note", st.Control)
+	}
 }
 
 // dnsSignature is a short text of what the names depend on: the running jails with their addresses, and the networks
@@ -198,6 +229,8 @@ func (s *Service) doctorUnbound(ctx context.Context, c *checkSet) {
 	case !st.Enabled:
 		c.add("dns.unbound", api.DoctorWarn, "the names are not on: "+st.Reason, "")
 		return
+	case s.hostResolverDown(ctx, c, st):
+		return
 	case !st.Current:
 		c.add("dns.unbound", api.DoctorWarn, "the names in "+st.Path+" are not those of the running jails; the daemon writes them after its next pass", "wait a minute, or restart jailopsd")
 		return
@@ -227,6 +260,74 @@ func (s *Service) doctorUnbound(ctx context.Context, c *checkSet) {
 		return
 	}
 	c.add("dns.unbound", api.DoctorOK, fmt.Sprintf("%d names for %d jails in %d projects; suffix %s; %s", st.Names, st.Jails, st.Projects, st.Suffix, upstreamText(st)), "")
+}
+
+// hostLoopbackNS are the loopback nameservers of the host's resolv.conf, the ones the host asks itself: an unspecified
+// address is the loopback, and a file with no nameserver line is the loopback too.
+func (s *Service) hostLoopbackNS() []string {
+	b, err := s.hostFile(hostResolvPath)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	var out []string
+	seen := 0
+	for _, ln := range strings.Split(string(b), "\n") {
+		f := strings.Fields(ln)
+		if len(f) < 2 || f[0] != "nameserver" {
+			continue
+		}
+		seen++
+		a, err := netip.ParseAddr(f[1])
+		switch {
+		case err != nil:
+		case a.IsUnspecified() && a.Is6():
+			out = append(out, "::1")
+		case a.IsUnspecified():
+			out = append(out, "127.0.0.1")
+		case a.IsLoopback():
+			out = append(out, a.Unmap().String())
+		}
+	}
+	if seen == 0 {
+		out = append(out, "127.0.0.1")
+	}
+	return slices.Compact(out)
+}
+
+// hostResolverDown reports, as a failure of dns.unbound, a loopback nameserver of the host that does not answer: the
+// host's own lookups (pkg, everything) go through it, and the file of the names can be what took it away (a resolver
+// listens on the loopback by itself only while no interface line exists). It asks for `localhost`, which unbound
+// answers from its own zone, so that an upstream that is gone does not look like a resolver that is down; a resolver
+// that answers but cannot resolve names outside is dns.upstream's warning. It returns true when it reported.
+func (s *Service) hostResolverDown(ctx context.Context, c *checkSet, st mounts.UnboundState) bool {
+	probe := s.d.ProbeDNS
+	if probe == nil {
+		return false
+	}
+	first := ""
+	for _, ns := range s.hostLoopbackNS() {
+		r := dnsprobe.Wait(ctx, probe, ns, "localhost.", dnsprobe.TypeA, 3, 500*time.Millisecond)
+		if r.Up() {
+			if first == "" {
+				first = ns
+			}
+			continue
+		}
+		why := "nothing answers"
+		if r.Status == dnsprobe.Refused {
+			why = "it refuses the host's own queries"
+		}
+		c.add("dns.unbound", api.DoctorFail, "the host's own resolver does not answer at "+ns+" ("+why+"): pkg and every lookup of the host fail",
+			"look at: sockstat -46l | grep :53 and service local_unbound status; the names of the jails are in "+st.Path+": remove that file and run service local_unbound restart")
+		return true
+	}
+	if first != "" {
+		if r := probe(ctx, first, ".", dnsprobe.TypeNS, 2*time.Second); r.Status == dnsprobe.ServFail {
+			c.add("dns.upstream", api.DoctorWarn, "the host's resolver at "+first+" answers, but cannot resolve names outside (SERVFAIL)",
+				"its upstream does not answer: "+upstreamText(st)+"; check the forward zone of the resolver, or let it resolve from the root servers")
+		}
+	}
+	return false
 }
 
 // probeAddrs are the addresses of gateways that the host holds now: the resolver address of an IPv6 network always, the

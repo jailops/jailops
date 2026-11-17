@@ -2,13 +2,20 @@
 
 ## Unreleased
 
+- **The host's own resolver is checked after every change of the names, and given back when the names are off.** After the
+  helper writes the file of the names and has `local_unbound` read it, it asks the loopback nameservers of the host's
+  `resolv.conf` (and the gateways it just made the resolver listen on) for `localhost`; an address that answered before
+  and does not now puts the old file back, restarts the resolver once more, and says so. The text that failed is not tried
+  again for ten minutes (it wrote the file and restarted the resolver at every pass), and a failed restart after the
+  rollback is tried a second time and reported first. `jailops doctor` fails `dns.unbound` when a loopback nameserver of
+  the host does not answer and warns (`dns.upstream`) when it answers but cannot resolve names outside. With `unbound-conf`
+  empty the helper takes away the file it wrote earlier, and the package removes it (and the resolver addresses on `lo0`)
+  when it is deinstalled. A host on 0.8.0 to 0.8.2 whose resolver lost its loopback needs `rm
+  /var/unbound/conf.d/jailops.conf && service local_unbound restart` before `pkg upgrade` can download (docs/upgrade.md).
 - **Fixed: the host's own resolver stopped answering on the loopback.** The unbound of the host listens on `127.0.0.1` and
   `::1` only while its configuration has no `interface:` line. The file JailOps writes for the jails' networks has such
   lines, so a host whose own configuration names none lost its resolver (`pkg update` failed with "Transient resolver
   failure"). The file names the loopback as well in that case.
-- **Fixed: `jailops firewall test` from the host to a jail on an IPv6 network.** The resolver address of the network is on
-  the host's loopback and answers DNS queries only; the test no longer tries it as a source of host traffic, which showed
-  a block that no packet of the host meets.
 - **Fixed: `jailops firewall test` from the host to a jail on an IPv6 network.** The resolver address of the network is on
   the host's loopback and answers DNS queries only; the test no longer tries it as a source of host traffic, which showed
   a block that no packet of the host meets.

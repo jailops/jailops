@@ -17,6 +17,18 @@ Running jails are not stopped by restarting either service: they are kernel jail
 reconcile loop and the API. For a switched-IPv6 network the proxy stops answering while `jailopsd` is down, and announces its addresses
 again when it is back.
 
+**From 0.8.0, 0.8.1 or 0.8.2 on a host with names for the jails:** the file `/var/unbound/conf.d/jailops.conf` of those
+versions took `127.0.0.1` and `::1` from the host's own `local_unbound` when the unbound configuration had no `interface:`
+line of its own. The host then cannot resolve names, and `pkg upgrade` cannot download. Before you upgrade, check with
+`host pkg.freebsd.org 127.0.0.1`; when it does not answer, remove the file and restart the resolver, then upgrade:
+
+    rm /var/unbound/conf.d/jailops.conf && service local_unbound restart
+    pkg upgrade jailops jailops-client
+    service jailopsd restart
+
+(Or name the loopback yourself: a file in `conf.d` with `server:`, `interface: 127.0.0.1` and `interface: ::1`.) The first
+pass of the daemon after `service jailopsd restart` writes the file again, now with the loopback in it.
+
 What protects your data across an upgrade:
 
 - The daemon copies its SQLite database (users, token hashes, sessions, audit log) with `VACUUM INTO` once a day into
