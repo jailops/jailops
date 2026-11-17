@@ -5,6 +5,9 @@
 - **Fixed: `jailops firewall test` from the host to a jail on an IPv6 network.** The resolver address of the network is on
   the host's loopback and answers DNS queries only; the test no longer tries it as a source of host traffic, which showed
   a block that no packet of the host meets.
+- **Fixed: `jailops firewall test` from the host to a jail on an IPv6 network.** The resolver address of the network is on
+  the host's loopback and answers DNS queries only; the test no longer tries it as a source of host traffic, which showed
+  a block that no packet of the host meets.
 ## 0.8.3 - 2026-11-17
 
 - **Fixed: a network that was just created was missing from `jailops network list`, `show`, `edit` and `get`.** The CLI sends
