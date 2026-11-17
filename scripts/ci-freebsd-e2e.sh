@@ -10,6 +10,7 @@
 # JAILOPS_E2E_PART   all (default), e2e (everything but the packet filter test), pf (only the packet filter test),
 #                    scale (50 jails started and stopped together), soak (jails churn while traffic flows) or prepare (the
 #                    machine set up with an image, a network and a project, left running: scripts/scale-study.sh starts there)
+# JAILOPS_PF_SHARD   a, b or c (with the part pf): the shard of the packet filter test (scripts/ci-freebsd-pf.sh); all (default) runs it whole
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
 # The test host needs kern.racct.enable=1 in /boot/loader.conf (a boot tunable: reboot after adding it): the block on resource
 # limits checks the rctl rules, which the kernel accepts only with it.
@@ -59,6 +60,12 @@ root=$(pwd)
 pool=jopsci
 part=${JAILOPS_E2E_PART:-all}
 case $part in all | e2e | pf | scale | soak | prepare) ;; *) echo "JAILOPS_E2E_PART must be all, e2e, pf, scale, soak or prepare" >&2; exit 2 ;; esac
+# JAILOPS_E2E_SHARD  1, 2 or 3 (with the part e2e): the blocks after "a jail" are split in three that share nothing but the
+#                   machine set up above and the jail web; CI runs the three on VMs of their own. all (default) runs every block in the
+#                   order of this file.
+shard=${JAILOPS_E2E_SHARD:-all}
+case $shard in all | 1 | 2 | 3) ;; *) echo "JAILOPS_E2E_SHARD must be all, 1, 2 or 3" >&2; exit 2 ;; esac
+shard_on() { [ "$shard" = all ] || [ "$shard" = "$1" ]; }
 e2e_apps=${JAILOPS_E2E_APPS:-}
 for a in $e2e_apps; do
 	case $a in postgresql | valkey | prometheus | forgejo | nsd | mail | isms | postgresql-access) ;; *) echo "JAILOPS_E2E_APPS: no check for $a (postgresql, valkey, prometheus, forgejo, nsd, mail, isms, postgresql-access)" >&2; exit 2 ;; esac
@@ -743,7 +750,7 @@ run_pf() {
 	step "the packet filter, with real traffic (scripts/ci-freebsd-pf.sh)"
 	# the full matrix takes minutes of waiting in its last phases; the quick form still covers every rule path
 	# FORGE_BIN (set by the caller) runs phase 0e, the forged-frame probes; without it phase 0e is skipped
-	PF_FAST=1 PF_IMAGE="$img" FORGE_BIN="${FORGE_BIN:-}" sh "$root/scripts/ci-freebsd-pf.sh" || fail "the packet filter test failed"
+	PF_FAST=1 PF_SHARD="${JAILOPS_PF_SHARD:-all}" PF_IMAGE="$img" FORGE_BIN="${FORGE_BIN:-}" sh "$root/scripts/ci-freebsd-pf.sh" || fail "the packet filter test failed"
 }
 
 # names of jails over IPv6 (docs/dns.md): the jails of an IPv6 only network ask the resolver address of their prefix, which
@@ -859,6 +866,14 @@ echo "OK: 40 short commands run with a terminal printed all of their output"
 expect "without --, a flag after the jail name is refused" 'would be the command' sh -c "JAILOPS_PROJECT=demo $J exec web --project demo uname 2>&1; true"
 expect "labels" 'backup=yes' $J label --project demo web backup=yes
 
+# in_pty is used by two shards (the shell block and the OS upgrade): it lives here, with what every shard has
+in_pty() { # in_pty JAIL COMMAND...: what COMMAND printed in a pseudo-terminal in the jail, without carriage returns,
+	# the echo of the ^D script sends at the end of its input, and empty lines
+	j=$1; shift
+	$J exec -T --project demo "$j" -- script -q /dev/null "$@" </dev/null 2>/dev/null | tr -d '\r\010' | sed 's/\^D//g' | grep -v '^$' || true
+}
+
+if shard_on 1; then # shard 1: the jail, its limits, its shell, networks, DNS, logs, WireGuard, ZFS delegation (and the last two blocks)
 # Each of these was accepted and failed later: at the first jail start, inside an operation, or never visibly.
 step "refused when given (sizes as bytes, the host's subnets, the uplink, names), and the forwarding warning"
 hostsub=$(ifconfig "$uplink" inet | awk '/inet / {split($2, a, "."); print a[1] "." a[2] "." a[3] ".1/24"; exit}')
@@ -999,11 +1014,6 @@ same() { # same DESCRIPTION WANT COMMAND...: standard output must be exactly WAN
 	# a command in a pseudo-terminal sometimes prints nothing (its shell ended before the output was written): ask again
 	n=0; while [ -z "$out" ] && [ -n "$want" ] && [ $n -lt 3 ]; do n=$((n + 1)); sleep 1; out=$("$@" 2>/dev/null) || true; done
 	[ "$out" = "$want" ] || { printf 'got:  %s\nwant: %s\n' "$out" "$want" >&2; fail "$desc"; }
-}
-in_pty() { # in_pty JAIL COMMAND...: what COMMAND printed in a pseudo-terminal in the jail, without carriage returns,
-	# the echo of the ^D script sends at the end of its input, and empty lines
-	j=$1; shift
-	$J exec -T --project demo "$j" -- script -q /dev/null "$@" </dev/null 2>/dev/null | tr -d '\r\010' | sed 's/\^D//g' | grep -v '^$' || true
 }
 last_line() { "$@" | tail -n 1; } # a login reads ~/.profile, whose resizewin prints before the command
 same "an interactive bash has the prompt" "PS1=[$ps1]" in_pty web /usr/local/bin/bash -ic 'echo "PS1=[$PS1]"'
@@ -1351,6 +1361,9 @@ check "restart jailops_priv" service jailops_priv restart
 check "restart jailopsd" service jailopsd restart
 n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
 
+fi
+
+if shard_on 2; then # shard 2: volumes, then the backup node, restores and renames (they use the volumes and the restored jail)
 step "volumes (owner and mode, nullfs into two jails, delete keeps the volume, snapshots)"
 check "a volume owned by 5000:5000 with mode 0770" $J volume create maildir --project demo --storage default --uid 5000 --gid 5000 --mode 0770
 vol=$pool/jailops/projects/demo/volumes/maildir
@@ -1545,6 +1558,9 @@ check "restart jailops_priv" service jailops_priv restart
 check "restart jailopsd" service jailopsd restart
 n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
 
+fi
+
+if shard_on 3; then # shard 3: the OS upgrade, image upgrades, devices and the apps of the catalog
 step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
 expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --start
 check "a second generation of the image" $J image build "$img" --from-generation g1
@@ -1596,6 +1612,10 @@ check "stop the second jail again" $J stop up --project demo
 if $J image show "$img" | grep -E '^ +[0-9-]+ [0-9:]+ +failed'; then fail "the automatic upgrade failed"; fi
 check "turn it off" $J image set "$img" --auto-upgrade=false
 expect "off again" 'Nightly: +off' $J image show "$img"
+# the run history follows a rename of the image (the rename block below checks it too when this block ran before it)
+check "rename the image: its run history comes along" $J image rename "$img" e2e-hist -y
+expect "the nightly runs moved with it" 'Automatic upgrades' $J image show e2e-hist
+check "rename it back" $J image rename e2e-hist "$img" -y
 
 step "an app from the catalog (nginx: thin jail, pkg -r from the host, rc.conf, service, health check, snapshot)"
 # the catalog is a directory of local files: the reference copy (or JAILOPS_E2E_CATALOG), copied where the daemon may read it
@@ -1738,6 +1758,9 @@ for a in $e2e_apps; do
 	check "stop $a" $J stop "$a" --project demo
 done
 
+fi
+
+if shard_on 2; then
 step "backup node (PostgreSQL, the node, this host enrolled)"
 if ! su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; then # the CI VM has it running already
 	pkg install -y postgresql17-server >/dev/null 2>&1 || pkg install -y postgresql16-server >/dev/null || fail "postgresql"
@@ -1891,11 +1914,13 @@ expect "its anchor" 'jailops/demo/web-renamed' pfctl -sA
 check "stop it" $J stop web-renamed --project demo
 check "and rename it back" $J rename web-renamed web --project demo -y
 # an image: the generations move, the clones of running jails follow, the nightly runs move with it
+# the run history of the nightly upgrade moves with the image; it exists when the block of the automatic upgrade ran before (shard 3 checks it there)
+had_history=0; if $J image show "$img" | grep -q 'Automatic upgrades'; then had_history=1; fi
 check "rename the image while a jail on it runs" $J image rename "$img" e2e-img -y
 expect "the jails follow" 'web-restored +running +e2e-img' $J jail list --project demo
 expect "a thin root is a clone of the renamed generation" "^$pool/jailops/images/e2e-img/g[0-9]+@ro\$" zfs get -H -o value origin "$pool/jailops/projects/demo/jails/web-restored/root"
 expect "the generations are mounted under the new name" "^$mount/images/e2e-img/g1\$" zfs get -H -o value mountpoint "$pool/jailops/images/e2e-img/g1"
-expect "the nightly runs moved with it" 'Automatic upgrades' $J image show e2e-img
+if [ $had_history = 1 ]; then expect "the nightly runs moved with it" 'Automatic upgrades' $J image show e2e-img; fi
 expect "the jail still runs" 'FreeBSD' $J exec --project demo web-restored -- uname -s
 check "rename the image back" $J image rename e2e-img "$img" -y
 # a project: every jail stopped, then the datasets, anchors and objects move
@@ -1911,9 +1936,11 @@ check "stop it" $J stop web --project e2e-proj
 check "rename the project back" $J project rename e2e-proj demo -y
 check "start the restored jail again" $J start web-restored --project demo
 
+fi
+
 [ "$part" = e2e ] || run_pf
 
-if [ "$part" != pf ]; then
+if [ "$part" != pf ] && shard_on 1; then
 	step "stop at shutdown: the rc script stops every running jail, a jail before the jails it depends on"
 	check "the shutdown script is installed" test -x /usr/local/etc/rc.d/jailops_shutdown
 	expect "stop-all lists the running jails of every project" 'would stop jail demo/' $J stop-all --dry-run
@@ -1921,7 +1948,7 @@ if [ "$part" != pf ]; then
 	expect "no jail runs any more" '^0$' sh -c "jls -n jid 2>/dev/null | wc -l | tr -d ' '"
 fi
 
-if [ "$part" != pf ]; then
+if [ "$part" != pf ] && shard_on 1; then
 	step "a stop that did not finish: the mounts it left below the root are taken off by the next stop, by a start and by doctor --fix; a started jail has exactly one devfs and a working /dev"
 	sr="$mount/projects/demo/jails/stale1/root"
 	devfs_layers() { mount -p | awk -v p="$sr/dev" '$2 == p && $3 == "devfs"' | wc -l | tr -d ' '; }

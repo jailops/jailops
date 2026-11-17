@@ -6,6 +6,7 @@
 #
 #   sh scripts/ci-freebsd-pf.sh              the whole matrix
 #   PF_FAST=1 sh scripts/ci-freebsd-pf.sh    skip the phases that wait for minutes
+#   PF_SHARD=a|b|c ...                      one third of the matrix (a: phases 0-0e, 11, 12; b: 1-8 and the last two blocks; c: 5b); CI runs the three apart
 #   PF_KEEP=1 ...                            leave the projects and jails in place to look at them
 #   FORGE_BIN=/path/to/forge-freebsd-<arch>  run phase 0e, the forged-frame probes (scripts/forge); skipped without it
 #
@@ -289,6 +290,55 @@ matrix() { # matrix SRC ICMP T8080 T9090 T2222 UDP5353   (each allow|deny)
 	done
 }
 
+# prep_policies: the policies, address sets and attachments that phases 1 to 5 leave behind, made without their probes. A shard
+# that starts after them (PF_SHARD c and a) calls it instead of running them; the phases below set the same things with their probes.
+prep_policies() {
+	PRE=$(snapshot)
+	policy pfa base 'default_in: deny
+default_out: allow'
+	$J project set pfa --firewall-policy base </dev/null >/dev/null || die "project firewall"
+	policy pfa friends-dummy 'default_in: deny
+default_out: allow'
+	$J firewall address-set create friends --address "$B4" --address "$B6" --project pfa </dev/null >/dev/null || die "address set"
+	$J firewall address-set create office --address "$H4" --address "$H6" --project pfa </dev/null >/dev/null || die "address set office"
+	$J firewall address-set create common --address "$O4" --address "$O6" --project pfa </dev/null >/dev/null || die "address set common"
+	policy pfa web "default_in: deny
+default_out: allow
+rules:
+  - {name: from-friends, action: allow, direction: in, proto: tcp, from: ['set:friends'], ports: ['8080']}
+  - {name: from-web-tag, action: allow, direction: in, proto: tcp, from: ['tag:web'], ports: ['9090']}
+  - {name: host-ping4, action: allow, direction: in, proto: icmp, from: ['$H4']}
+  - {name: host-ping6, action: allow, direction: in, proto: icmp6, from: ['$H6']}
+  - {name: other-project-udp, action: allow, direction: in, proto: udp, from: ['set:common'], ports: ['5353']}"
+	policy pfb toa "default_in: allow
+default_out: allow
+rules:
+  - {name: to-a-udp, action: allow, direction: out, proto: udp, to: ['$A4', '$A6'], ports: ['5353']}"
+	$J config set a firewall.policies web --project pfa </dev/null >/dev/null || die "attach web"
+	$J config set o firewall.policies toa --project pfb </dev/null >/dev/null || die "attach toa"
+	policy pfa open 'default_in: allow
+default_out: allow'
+	$J config set b firewall.policies open --project pfa </dev/null >/dev/null || die "attach open"
+	policy pfa lock "default_in: deny
+default_out: deny
+rules:
+  - {name: to-a-9090, action: allow, direction: out, proto: tcp, to: ['$A4', '$A6'], ports: ['9090']}"
+	$J config set c firewall.policies lock --project pfa </dev/null >/dev/null || die "attach lock"
+	policy pfa extra5 "default_in: deny
+default_out: allow
+rules:
+  - {name: tcp-2222-from-friends, action: allow, direction: in, proto: tcp, from: ['set:friends'], ports: ['2222']}"
+	settle 10
+}
+
+# The phases are split in three shards that CI runs on VMs of their own (PF_SHARD): a = the phases without a policy (0 to 0e), the port
+# forward and the bandwidth limits; b = phases 1 to 8 and the last two blocks; c = phase 5b. all (default) runs them in the order below.
+# A shard sets up the same jails (the setup above); a and c bring the policies of phases 1 to 5 about with prep_policies.
+shard=${PF_SHARD:-all}
+case $shard in all | a | b | c) ;; *) echo "PF_SHARD must be all, a, b or c" >&2; exit 2 ;; esac
+shard_on() { [ "$shard" = all ] || [ "$shard" = "$1" ]; }
+
+if shard_on a; then # shard a
 say "phase 0: no policy anywhere. Open inside a project, closed between projects"
 PRE=$(snapshot)
 matrix host allow allow allow allow allow
@@ -556,6 +606,9 @@ else
 	say "phase 0e: skipped (set FORGE_BIN=/path/to/forge-freebsd-<arch> to run the forged-frame probes)"
 fi
 
+fi
+
+if shard_on b; then # shard b
 say "phase 1: the project's mandatory policy denies everything in (egress allowed)"
 PRE=$(snapshot)
 policy pfa base 'default_in: deny
@@ -643,6 +696,10 @@ $J config set a firewall.policies web --project pfa </dev/null >/dev/null || die
 settle 10
 matrix pfa:b deny allow deny deny deny
 
+fi
+
+if shard_on c; then # shard c
+[ "$shard" = all ] || prep_policies
 say "phase 5b: a deny rule wins over an allow rule of another policy of the same jail, in either order; a disabled rule decides nothing"
 PRE=$(snapshot)
 policy pfa quiet5 "default_in: deny
@@ -681,6 +738,9 @@ $J config set a firewall.policies web --project pfa </dev/null >/dev/null || die
 settle 10
 matrix pfa:b deny allow deny deny deny
 
+fi
+
+if shard_on b; then
 say "phase 6: pf anchors are real and well formed"
 PRE=$(snapshot)
 if pfctl -a jailops/pfa/a -sr 2>&1 | grep -q 'foreign'; then pass "a's anchor has the isolation rules"; else bad "a's anchor lacks the isolation rules"; fi
@@ -767,6 +827,10 @@ if [ -z "${PF_FAST:-}" ]; then
 	expect deny "host -> a v6 icmp after two minutes (no rule)" icmp host "$A6"
 	expect deny "b -> a v6 tcp 2222 after two minutes" tcp pfa:b "$A6" 2222
 fi
+fi
+
+if shard_on a; then
+[ "$shard" = all ] || prep_policies
 say "phase 11: a port forward (a redirect rule of a policy) brings a connection that arrives on the uplink into the jail"
 # A redirect is rendered as "match in on <uplink> ... to (<uplink>) port H rdr-to <jail> port J" and applies only to packets that
 # arrive on the uplink. The host cannot test it against itself: what it sends to its own address never arrives on an
@@ -945,6 +1009,9 @@ pkill -f "nc -l " >/dev/null 2>&1
 $J config unset d firewall.policies --project pfa </dev/null >/dev/null 2>&1
 $J config set a firewall.policies web --project pfa </dev/null >/dev/null 2>&1
 
+fi
+
+if shard_on b; then
 say "a jail with a link and no address has an anchor that closes both directions (docs/networking.md)"
 $J create n --project pfa --image "$img" --network pfa-net=none --storage default </dev/null >/dev/null || die "create n (no address)"
 $J start n --project pfa </dev/null >/dev/null || die "start n"
@@ -986,6 +1053,8 @@ expect allow "once the rule names the host, m reaches its port 2299" tcp pfa:m "
 pkill -f "nc -l $H4 2299" >/dev/null 2>&1
 jx pfa b pkill -f "nc -k -l $B4 7777" >/dev/null 2>&1
 $J stop m --project pfa </dev/null >/dev/null 2>&1
+
+fi
 
 cleanup
 [ "$fails" -eq 0 ]
