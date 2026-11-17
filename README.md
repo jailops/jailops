@@ -29,10 +29,12 @@ License: BSD-2-Clause.
 ## Install (FreeBSD)
 
     pkg install jailops                    # from pkg.jailops.net: add the repository first, see "Packages" below
-    jailops-setup                          # as root: init, forwarding, pf.conf, services, doctor, first admin
+    jailops-setup                          # as root: init, forwarding, host resolver, pf.conf, service, doctor
 
-`jailops-setup -n` shows what it would do; it asks before it changes pf, then prints the console's address
-(`https://HOST:39110/`). What it does step by step, and how to do it by hand, is in [docs/install.md](docs/install.md).
+`jailops-setup -n` shows what it would do; it asks before it changes pf. Afterwards the CLI works as root over the local
+socket: no user, token or browser is needed. The web console is optional (`jailops-setup --web`, port 39110). A host run
+from the web console alone is the optional [appliance mode](docs/install.md#appliance-mode-host-managed-by-jailops-set-up-from-the-web-console).
+What the setup does step by step, and how to do it by hand, is in [docs/install.md](docs/install.md).
 
 ### Packages
 

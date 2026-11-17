@@ -255,7 +255,14 @@ which creates the user, the datasets and both configuration files; with
 the first start of
 .Sy jailops_priv
 does it.
-The first administrator is created with the setup token in the web console
-.Pq Li POST /api/v1/setup
-or as root with
+On the host the CLI needs no user:
+root is the global administrator of the unix socket.
+For the web console
+.Pq Va jailopsd_web
+the first administrator is created as root with
 .Dl jailops user create NAME --admin --password-prompt
+.Pp
+In appliance mode
+.Pq Va jailops_appliance
+the first administrator is created in the web console with the setup token
+.Pq Li POST /api/v1/setup .

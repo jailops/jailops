@@ -13,72 +13,20 @@ As root, after trusting the package repository (section 2):
     jailops-setup           # -pool NAME when the host has more than one pool
 
 `jailops-setup` does sections 1 and 3 to 6 below, in that order, and only what is not done yet (run it again and
-nothing changes): the kernel modules, the one-time setup of the pool, forwarding, the anchor line in
-`/etc/pf.conf`, the service (`jailopsd` with the web console; it starts the helper), `jailops doctor` and the first
-administrator; it ends with the console's address. Every action is printed on one line before it runs.
+nothing changes): the kernel modules, the one-time setup of the pool, forwarding, the host resolver, the anchor line in
+`/etc/pf.conf`, the service (`jailopsd`; it starts the helper) and `jailops doctor`. Afterwards the CLI works as root over the
+local socket: no user, token or browser is needed (`jailops info`, then section 7). The web console is off; `--web` (or the
+answer yes to its question) turns it on and offers the first administrator it needs (section 6). Every action is printed on
+one line before it runs.
 
 It never changes or moves a line of `pf.conf`: it inserts what is missing where pf wants it (`set state-policy
 if-bound` and a `scrub` rule only when there are none, and says so), keeps the old file as
 `/etc/pf.conf.jailops-setup-<date>`, checks the new text with `pfctl -nf` before writing anything and loads it with
 `pfctl -f`, which keeps your ssh session. Without a `pf.conf` it writes a minimal one that blocks nothing. It never
 runs `service pf restart`. Starting pf is said first and asked (a `pf.conf` with `block` rules can cut ssh if no rule
-passes it); `-y` answers yes to everything. Then continue with section 7. `man jailops-setup` has the details; the
+passes it); `-y` answers yes to everything except the web console. Then continue with section 7. For a host run from the
+web console alone, see [Appliance mode](#appliance-mode-host-managed-by-jailops-set-up-from-the-web-console). `man jailops-setup` has the details; the
 sections below explain each step and are the way to do it by hand.
-
-## The appliance path
-
-For a host you run from the web console: install FreeBSD (on ZFS, as the installer offers), then four commands as root,
-and a browser.
-
-    pkg install jailops
-    sysrc jailopsd_enable=YES jailopsd_web=YES jailops_appliance=YES    # jailops_pool=zroot to name the pool
-    service jailopsd start
-    service jailopsd setuptoken                                 # or read the token and the address on the system console
-
-Then open `https://HOST:39110/` in a browser and enter the token.
-
-(Trust the package repository first, as section 2 says.) What happens: `jailops_appliance="YES"` hands host management
-to JailOps ([appliance.md](appliance.md): the host name, resolvers and NTP, and the host's firewall) in both programs at
-once, without editing `priv.conf` or `jailopsd.yaml`. The first start (of the helper, which `service jailopsd start` starts) finds no `priv.conf` and sets the
-host up (`appliance-init`: the user, the datasets on `jailops_pool` or the pool of the root file system, the
-configuration files; every command it runs is in syslog). The start of `jailopsd` prints a **one-time setup token** and
-the console's addresses on the system console (and in `/var/log/auth.log`); `service jailopsd setuptoken` prints a new one,
-valid for 24 hours. The console opens a wizard: the first administrator (with the token), the host name, the
-certificate, the host firewall (ssh only from your address, reverted unless you confirm), storage and a network, and the
-base image: the image of the host's own release and architecture, named after it (`freebsd-15-1` on 15.1-RELEASE),
-created and built in the step, with an optional nightly auto upgrade (one checkbox, off until you tick it, 03:00 by default; see
-[upgrade.md](upgrade.md#nightly-auto-upgrade)) (the build downloads the base system packages from `pkg.freebsd.org` and takes a few minutes; a failed
-build says what to check and is tried again in place). The wizard ends with **Install your first app** (the app
-catalog; `pkg install jailops-apps` installs it), or with **Create the base image** when that step was skipped: apps and
-jails start from an image, and the Images page (Create image) makes it at any time. `jailops doctor` should then
-report `appliance` ok.
-
-The first service is then one dialog: on the Apps page choose an app and Install; it takes the project, network and
-storage the wizard made and the FreeBSD image of the newest release the host can run (`freebsd-15-1`). Without an
-image the dialog says so and offers to create the base image instead of failing.
-
-The kernel modules, forwarding and the other host settings of sections 1 and 4 still apply; `jailops doctor` names what
-is missing. The browser warns about the self-signed certificate until you replace it, one of two ways:
-
-### Internet facing: ACME
-
-When the host's DNS name points at it from the internet, let the daemon obtain a certificate from a public CA and renew
-it: in the wizard's certificate step or the Host page (Certificates, Request with ACME), give the names, agree to the CA's
-terms, and choose http-01 (port 80) or tls-alpn-01 (port 443). The daemon is not root, so the host redirects that port to
-it: with the firewall module (on with `jailops_appliance`), apply the host firewall once more after turning ACME on and
-JailOps adds the redirect; otherwise add the two `pass in quick … rdr-to` lines the page shows to `/etc/pf.conf`, after the line `anchor "jailops/*"`. Clients then trust the
-certificate through their roots and pin nothing. Wildcard names are not possible (no dns-01). Details:
-[exposure.md](exposure.md#acme-a-certificate-from-a-public-ca).
-
-### Inside a network: your own certificate
-
-On a private network, upload a certificate of your own CA in the wizard or on the Host page (Certificates, Upload): the
-PEM chain, its key and the host name clients use. It is checked, written to `/var/db/jailops/tls`, and served from the
-next connection on; nothing renews it, so upload the next one before it expires (`jailops doctor` warns 14 days before).
-Or keep the self-signed certificate: clients pin its fingerprint (the page shows the `jailops remote add` command).
-From the command line, `jailops host certificate show|acme|upload|self-signed` does the same as the Host page.
-
-The rest of this page is the manual path, which the appliance path does for you.
 
 ## 1. What the host needs
 
@@ -212,7 +160,7 @@ the storage root dataset `<pool>/jailops` (mounted at `/usr/local/jailops`), the
 Run these as root. FreeBSD has no `sudo` in the base system: log in as root, use `su -m root -c '...'` (or `su -`), or
 install `doas` or `sudo` from packages; the examples below write the commands as root runs them.
 
-    sysrc jailopsd_enable=YES jailopsd_web=YES
+    sysrc jailopsd_enable=YES
     service jailopsd checkconfig
     service jailopsd start
     jailops doctor
@@ -221,8 +169,11 @@ One service is enough: `service jailopsd start` starts the privileged helper fir
 both and `restart` replaces both. At boot the order is declared in the rc scripts, and a helper that crashes is started
 again by daemon(8) after 5 seconds.
 
-Then create the first administrator. On the host, **root is the global administrator of the unix socket** (the recovery access); every
-other local user is anonymous until they sign in with a JailOps identity. There is no Unix group that grants a role.
+On the host, **root is the global administrator of the unix socket**: the CLI needs no user. Every other local user is
+anonymous until they sign in with a JailOps identity. There is no Unix group that grants a role.
+
+The web console is optional. For it, turn it on (`sysrc jailopsd_web=YES`, `service jailopsd restart`) and create the first
+administrator, who signs in with a password:
 
     jailops user create admin --admin --password-prompt     # a global administrator; the password is asked, never an argument
     jailops user set-password admin                         # recovery: root replaces a lost password, no old one needed
@@ -230,9 +181,9 @@ other local user is anonymous until they sign in with a JailOps identity. There 
 Tokens for scripts come after the first project exists (section 7), because a token is scoped to projects:
 `jailops token create ci --role operator --projects web --expires 720h`.
 
-`jailopsd_web=YES` turns the web console on and opens the TLS listener on port 39110: open `https://HOST:39110/` and sign in as `admin` (the
-server certificate is self-signed; open the port in your firewall for the machines that should reach it, see [ports.md](ports.md)). Leave
-the line out for a host you only reach with the CLI.
+`jailopsd_web=YES` opens the TLS listener on port 39110: open `https://HOST:39110/` and sign in as `admin` (the
+server certificate is self-signed; open the port in your firewall for the machines that should reach it, see [ports.md](ports.md)).
+Leave the line out for a host you only reach with the CLI, which is the default.
 
 Identities (users, API tokens, client certificates) have the same roles, scopes and audit over the socket and over the network.
 A person who is not root uses a token (`JAILOPS_TOKEN`, or `jailops remote add`) or signs in to the web console. Run the commands
@@ -301,6 +252,61 @@ Without `project switch` pass `--project web` (or set `JAILOPS_PROJECT=web`) on 
 once it is created (`jailops start nginx` does the same later). Several objects at once come from a file:
 `jailops apply -f site.yaml` creates what is missing and updates what differs, document by document. IPv6, big pools and backups continue in
 [networking-ipv6.md](networking-ipv6.md), [storage.md](storage.md) and [backup-restore.md](backup-restore.md).
+
+## Appliance mode: host managed by JailOps, set up from the web console
+
+**Optional.** The path above (`jailops-setup`, the CLI as root) is the default and needs no browser. Appliance mode is for a
+host you want to run from the web console alone, where JailOps also manages the host's own name, firewall, resolvers and
+updates ([appliance.md](appliance.md)). Install FreeBSD (on ZFS, as the installer offers), then four commands as root,
+and a browser.
+
+    pkg install jailops
+    sysrc jailopsd_enable=YES jailopsd_web=YES jailops_appliance=YES    # jailops_pool=zroot to name the pool
+    service jailopsd start
+    service jailopsd setuptoken                                 # or read the token and the address on the system console
+
+Then open `https://HOST:39110/` in a browser and enter the token.
+
+(Trust the package repository first, as section 2 says.) What happens: `jailops_appliance="YES"` hands host management
+to JailOps ([appliance.md](appliance.md): the host name, resolvers and NTP, and the host's firewall) in both programs at
+once, without editing `priv.conf` or `jailopsd.yaml`. The first start (of the helper, which `service jailopsd start` starts) finds no `priv.conf` and sets the
+host up (`appliance-init`: the user, the datasets on `jailops_pool` or the pool of the root file system, the
+configuration files; every command it runs is in syslog). The start of `jailopsd` prints a **one-time setup token** and
+the console's addresses on the system console (and in `/var/log/auth.log`); `service jailopsd setuptoken` prints a new one,
+valid for 24 hours. The console opens a wizard: the first administrator (with the token), the host name, the
+certificate, the host firewall (ssh only from your address, reverted unless you confirm), storage and a network, and the
+base image: the image of the host's own release and architecture, named after it (`freebsd-15-1` on 15.1-RELEASE),
+created and built in the step, with an optional nightly auto upgrade (one checkbox, off until you tick it, 03:00 by default; see
+[upgrade.md](upgrade.md#nightly-auto-upgrade)) (the build downloads the base system packages from `pkg.freebsd.org` and takes a few minutes; a failed
+build says what to check and is tried again in place). The wizard ends with **Install your first app** (the app
+catalog; `pkg install jailops-apps` installs it), or with **Create the base image** when that step was skipped: apps and
+jails start from an image, and the Images page (Create image) makes it at any time. `jailops doctor` should then
+report `appliance` ok.
+
+The first service is then one dialog: on the Apps page choose an app and Install; it takes the project, network and
+storage the wizard made and the FreeBSD image of the newest release the host can run (`freebsd-15-1`). Without an
+image the dialog says so and offers to create the base image instead of failing.
+
+The kernel modules, forwarding and the other host settings of sections 1 and 4 still apply; `jailops doctor` names what
+is missing. The browser warns about the self-signed certificate until you replace it, one of two ways:
+
+### Internet facing: ACME
+
+When the host's DNS name points at it from the internet, let the daemon obtain a certificate from a public CA and renew
+it: in the wizard's certificate step or the Host page (Certificates, Request with ACME), give the names, agree to the CA's
+terms, and choose http-01 (port 80) or tls-alpn-01 (port 443). The daemon is not root, so the host redirects that port to
+it: with the firewall module (on with `jailops_appliance`), apply the host firewall once more after turning ACME on and
+JailOps adds the redirect; otherwise add the two `pass in quick … rdr-to` lines the page shows to `/etc/pf.conf`, after the line `anchor "jailops/*"`. Clients then trust the
+certificate through their roots and pin nothing. Wildcard names are not possible (no dns-01). Details:
+[exposure.md](exposure.md#acme-a-certificate-from-a-public-ca).
+
+### Inside a network: your own certificate
+
+On a private network, upload a certificate of your own CA in the wizard or on the Host page (Certificates, Upload): the
+PEM chain, its key and the host name clients use. It is checked, written to `/var/db/jailops/tls`, and served from the
+next connection on; nothing renews it, so upload the next one before it expires (`jailops doctor` warns 14 days before).
+Or keep the self-signed certificate: clients pin its fingerprint (the page shows the `jailops remote add` command).
+From the command line, `jailops host certificate show|acme|upload|self-signed` does the same as the Host page.
 
 ## Start over
 

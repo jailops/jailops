@@ -10,6 +10,7 @@
 .Op Fl pool Ar pool
 .Op Fl n | -dry-run
 .Op Fl y | -yes
+.Op Fl web
 .Sh DESCRIPTION
 .Nm
 is the one command to run, as root, after
@@ -62,31 +63,47 @@ see
 .It
 Enables
 .Sy jailopsd
-with the web console
-.Pq Va jailopsd_web
 in
-.Xr rc.conf 5 ,
-unless
+.Xr rc.conf 5
+and starts it, the helper first.
+The web console
+.Pq Va jailopsd_web
+stays off unless you ask for it: with
+.Fl web ,
+or with the answer yes to the question
+.Dq Serve the web console ,
+which is asked on a terminal and never answered by
+.Fl y .
+A
 .Va jailopsd_web
-is set already, and starts them, the helper first.
+that is set already is left as it is.
 .It
 Runs
 .Ql jailops doctor .
 .It
-Offers to create the first administrator
+With the web console on, offers to create the first administrator
 .Pq Ql jailops user create admin --admin --password-prompt
-when no user exists and standard input is a terminal.
-.It
-Prints the address of the web console.
+when no user exists and standard input is a terminal, and prints the address of
+the web console.
+Without the web console no user is needed: on the host the CLI works as root
+over the local socket.
 .El
 .Pp
 Every action is printed on one line starting with
 .Ql >
 before it runs.
-A step that fails is reported with a line starting with
+A step that must work and fails or is skipped
+.Pq the modules, the init, forwarding, Xr pf 4
+is reported with a line starting with
 .Ql x ;
 the steps after it still run, except after a failed
-.Cm init .
+.Cm init ,
+and the exit status is 1.
+A step that is optional and fails or is skipped
+.Pq the host resolver, the web console, the administrator
+is reported with a line starting with
+.Ql \&!
+and does not change the exit status.
 .Pp
 A host in appliance mode
 .Pq Va jailops_appliance
@@ -110,6 +127,9 @@ which changes nothing either.
 .It Fl y , -yes
 Do not ask: apply the pf changes, including starting pf.
 Read what a dry run prints first.
+The web console stays off.
+.It Fl web
+Serve the web console on port 39110 and offer the first administrator it needs.
 .El
 .Sh PF
 Lines that are in
