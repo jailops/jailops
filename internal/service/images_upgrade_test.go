@@ -265,10 +265,12 @@ func TestUpgradeImageIsAGlobalAdminsOperationAndHonoursTheProjectFilter(t *testi
 	}
 }
 
-func TestImageReleaseOlderThan151IsRefused(t *testing.T) {
+// An older release is refused, and so is a release without its type or with a typo in it: such a name would be built from
+// base_latest without a word.
+func TestImageReleaseOlderThan151OrWithoutItsTypeIsRefused(t *testing.T) {
 	_, s := tickingEnv(t)
 	host := as(globalAdmin, "")
-	for _, r := range []string{"15.0-RELEASE", "14.3-RELEASE", "bogus"} {
+	for _, r := range []string{"15.0-RELEASE", "14.3-RELEASE", "bogus", "15.1", "15.1-RELESE"} {
 		_, err := s.CreateImage(host, api.Image{Metadata: api.ObjectMeta{Name: "old"}, Spec: api.ImageSpec{
 			OS: api.OSFreeBSD, Release: r, Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
 		wantCode(t, err, api.CodeInvalid)

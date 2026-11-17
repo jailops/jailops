@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -174,6 +175,11 @@ func (s *Service) imageVisible(ctx context.Context, name string) bool {
 	return false
 }
 
+// freebsdReleaseRE is a FreeBSD release with its type: 15.1-RELEASE, 15.2-PRERELEASE, 16.0-CURRENT, 15.1-RC2, with the
+// patch level a host reports as an option (15.1-RELEASE-p3). Only a RELEASE reads the release repository of its minor;
+// the other types read base_latest.
+var freebsdReleaseRE = regexp.MustCompile(`^[0-9]{1,3}\.[0-9]{1,3}-(RELEASE|STABLE|CURRENT|PRERELEASE|(ALPHA|BETA|RC)[0-9]{1,2})(-p[0-9]{1,4})?$`)
+
 func (s *Service) validateImage(name string, spec api.ImageSpec) error {
 	if err := validate.Name("name", name); err != nil {
 		return err
@@ -186,6 +192,14 @@ func (s *Service) validateImage(name string, spec api.ImageSpec) error {
 	}
 	if spec.OS == api.OSFreeBSD {
 		var major, minor int
+		if !freebsdReleaseRE.MatchString(spec.Release) {
+			// a release without its type ("15.1") or a typo would be built from base_latest, silently: refuse it
+			e := invalid("spec.release %q is not a FreeBSD release such as 15.1-RELEASE", spec.Release)
+			if host := s.hostBaseRelease(); host != "" {
+				e = e.WithHint("this host runs " + host + ": jailops image create " + api.ImageNameForRelease(host) + " --release " + host)
+			}
+			return e
+		}
 		if _, err := fmt.Sscanf(spec.Release, "%d.%d", &major, &minor); err != nil {
 			return invalid("spec.release %q is not a FreeBSD release such as 15.1-RELEASE", spec.Release)
 		}

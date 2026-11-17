@@ -5,10 +5,9 @@ The packages on `pkg.jailops.net` are built, signed and published by
 machine is needed, Go cross-compiles on Linux. That repository holds the package definitions of the three packages below
 (`main/jailops-client`, `main/jailops`, `main/jailops-backupd`) and the install instructions for a host.
 
-The rest of this file describes the **old path**, kept for a transition: `scripts/pkg-build.sh` makes the packages from
+The rest of this file describes how a package is made from this repository: `scripts/pkg-build.sh` makes the packages from
 binaries cross-built on any machine (`goreleaser` or `just build-freebsd`) and `scripts/pkg-repo.sh` turns a directory of
-packages into a signed repository. Both run on FreeBSD, because they use `pkg(8)`. They can be removed once the first
-JailOps packages have been published from jailops-packages.
+packages into a signed repository. Both run on FreeBSD, because they use `pkg(8)`.
 
 Three packages come out of one build:
 
@@ -45,4 +44,4 @@ A host uses it with `/usr/local/etc/pkg/repos/jailops.conf`:
       enabled: yes
     }
 
-Then `pkg update && pkg install jailops`, and `jailops-setup` once, as root: it sets the host up and turns the web console on (port 39110).
+Then `pkg update && pkg install jailops`, and `jailops-setup` once, as root: it sets the host up, and the CLI works as root afterwards (`jailops-setup --web` adds the web console on port 39110).
