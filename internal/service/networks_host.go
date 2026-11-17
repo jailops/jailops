@@ -80,12 +80,16 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 			}
 		}
 		if up != nil && !slices.ContainsFunc(up.Inet6, func(p netip.Prefix) bool {
-			return !p.Addr().IsLinkLocalUnicast() && p.Bits() <= v6.Bits() && p.Masked().Contains(v6.Addr())
+			if p.Addr().IsLinkLocalUnicast() {
+				return false
+			}
+			seg := segmentPrefix(p)
+			return seg.Bits() <= v6.Bits() && seg.Contains(v6.Addr())
 		}) {
 			var have []string
 			for _, p := range up.Inet6 {
 				if !p.Addr().IsLinkLocalUnicast() {
-					have = append(have, p.Masked().String())
+					have = append(have, segmentPrefix(p).String())
 				}
 			}
 			on := "no global IPv6 prefix"
@@ -94,10 +98,20 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 			}
 			return api.Errorf(api.CodeInvalid, "in proxy mode the subnet %s must lie inside the prefix of the uplink's segment, and %s has %s", v6, spec.Uplink, on).
 				WithDetail("field", "ipv6.subnet").
-				WithHint("proxy mode answers for addresses of the segment the uplink is on; take a part of that prefix, or use --ipv6-mode routed for a prefix routed to this host")
+				WithHint("proxy mode answers for addresses of the segment the uplink is on: take a part of that prefix (a host address of /128 stands for the /64 around it); or use --ipv6-mode routed for a prefix routed to this host")
 		}
 	}
 	return nil
+}
+
+// segmentPrefix is the prefix of the segment an address of an interface sits on. A host on a shared segment usually
+// holds its address as a /128 (the provider's router answers neighbor discovery for the whole /64), so an address
+// with a prefix longer than /64 stands for the /64 around it; a prefix of /64 or shorter is the segment's own.
+func segmentPrefix(p netip.Prefix) netip.Prefix {
+	if p.Bits() > 64 {
+		return netip.PrefixFrom(p.Addr(), 64).Masked()
+	}
+	return p.Masked()
 }
 
 func subnetField(p netip.Prefix) string {
