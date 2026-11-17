@@ -325,6 +325,11 @@ func gatewayAddrs(s *Service, j *api.Jail) []netip.Addr {
 		}
 		if v6 := n.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
 			out = append(out, ipam.GatewayLinkLocal6)
+			if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
+				if r := ipam.Resolver6(p); r.IsValid() {
+					out = append(out, r)
+				}
+			}
 		}
 	}
 	return out

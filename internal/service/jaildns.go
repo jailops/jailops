@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk/api"
 )
@@ -24,9 +25,11 @@ import (
 //  1. the dns of its networks, when one of them sets it;
 //  2. else the host's own nameservers in /etc/resolv.conf that a jail can reach (not loopback, not link-local); the
 //     jail reaches them like any other address, through the network's NAT or routing and its firewall policy;
-//  3. else, when the host resolves only through loopback (a local cache such as unbound), the gateway address of the
-//     jail's first network. That answers only when the administrator lets the cache listen there: JailOps never
-//     changes the host's resolver and opens no port for it.
+//  3. else, when the host resolves only through loopback (a local cache such as unbound), the host's address on the
+//     jail's first network, in the families the network has: the IPv4 gateway, and on a network with IPv6 the
+//     resolver address (ipam.Resolver6). The IPv4 gateway answers only when the administrator lets the cache listen
+//     there; the resolver address is the one JailOps holds itself while the names of the jails are on (the helper's
+//     dns.unbound makes the host hold it and unbound listen on it), so an IPv6 only network has a resolver only then.
 //
 // JailOps writes a jail's /etc/resolv.conf only while the file is absent, empty or still has the line
 // render.ResolvMarker that JailOps wrote into it: a jail whose file was edited (the line removed) or came with
@@ -75,15 +78,24 @@ func (s *Service) hostNameservers() (usable []netip.Addr, loopback bool, err err
 	return usable, loopback || seen == 0, nil
 }
 
-// gatewayResolver is the address of the host on a network that a jail can ask: the IPv4 gateway (the IPv6 gateway is
-// link-local and would need a zone, which the resolv.conf of the jail cannot name usefully).
-func gatewayResolver(spec api.NetworkSpec) (netip.Addr, bool) {
+// gatewayResolvers are the addresses of the host on a network that a jail can ask, in the families of the network:
+// the IPv4 gateway, then, when v6 is true and the network has IPv6, the resolver address. (The IPv6 gateway is
+// link-local and would need a zone, which the resolv.conf of the jail cannot name usefully.)
+func gatewayResolvers(spec api.NetworkSpec, v6 bool) []netip.Addr {
+	var out []netip.Addr
 	if v4 := spec.IPv4; v4 != nil {
 		if a, err := netip.ParseAddr(v4.Gateway); err == nil {
-			return a, true
+			out = append(out, a)
 		}
 	}
-	return netip.Addr{}, false
+	if v6 && spec.IPv6 != nil && spec.IPv6.Mode != api.IPv6None {
+		if p, err := netip.ParsePrefix(spec.IPv6.Subnet); err == nil {
+			if a := ipam.Resolver6(p); a.IsValid() {
+				out = append(out, a)
+			}
+		}
+	}
+	return out
 }
 
 // resolvers works out the nameservers of a jail on the given networks (in the order the jail attaches them).
@@ -102,10 +114,11 @@ func (s *Service) resolvers(nets []api.NetworkSpec) (api.DNSSource, []netip.Addr
 	if len(nets) == 0 {
 		return api.DNSNone, nil
 	}
-	if s.unboundCached() { // the names of the jails are answered by the host's unbound at the gateway
+	managed := s.unboundCached()
+	if managed { // the names of the jails are answered by the host's unbound at the gateway
 		for _, n := range nets {
-			if gw, ok := gatewayResolver(n); ok {
-				return api.DNSFromGateway, []netip.Addr{gw}
+			if gws := gatewayResolvers(n, true); len(gws) > 0 {
+				return api.DNSFromGateway, gws
 			}
 		}
 	}
@@ -117,8 +130,8 @@ func (s *Service) resolvers(nets []api.NetworkSpec) (api.DNSSource, []netip.Addr
 		return api.DNSFromHost, host
 	case loopback:
 		for _, n := range nets {
-			if gw, ok := gatewayResolver(n); ok {
-				return api.DNSFromGateway, []netip.Addr{gw}
+			if gws := gatewayResolvers(n, false); len(gws) > 0 {
+				return api.DNSFromGateway, gws
 			}
 		}
 	}
@@ -139,16 +152,21 @@ func (s *Service) networkDNS(name string, spec api.NetworkSpec) *api.NetworkDNS 
 			d.Advice = gatewayDNSAdvice(name, spec)
 		}
 	}
+	if src == api.DNSNone && spec.IPv4 == nil && spec.IPv6 != nil && spec.IPv6.Mode != api.IPv6None {
+		d.Advice = "the jails of the IPv6 only network " + name + " have no resolver: the names of the jails (local-unbound, docs/dns.md) give them one at the network's resolver address; " +
+			"or give the network nameservers of its own (`dns:` in jailops network edit " + name + ")"
+	}
 	return d
 }
 
 // gatewayDNSAdvice says what the administrator has to do so that the jails of a network that ask its gateway get an
 // answer. JailOps does none of it.
 func gatewayDNSAdvice(name string, spec api.NetworkSpec) string {
-	gw, ok := gatewayResolver(spec)
-	if !ok {
+	gws := gatewayResolvers(spec, false)
+	if len(gws) == 0 {
 		return ""
 	}
+	gw := gws[0]
 	sub := spec.IPv4.Subnet
 	return fmt.Sprintf("the host resolves names only through loopback (%s), so the jails of network %s ask the gateway %s; "+
 		"JailOps changes nothing on the host: let the resolver listen there, for the base system's unbound a file "+
@@ -278,7 +296,15 @@ func (s *Service) doctorDNS(ctx context.Context, c *checkSet) {
 				lines = append(lines, name+": the gateway "+ns+" (not probed: no jail on it runs)")
 				continue
 			}
-			ok, why := s.probeDNS(ctx, d.Nameservers[0])
+			ok, why := true, ""
+			for _, at := range d.Nameservers { // the IPv4 gateway and the IPv6 resolver address of a dual stack network
+				if ok, why = s.probeDNS(ctx, at); !ok {
+					if len(d.Nameservers) > 1 {
+						why = at + ": " + why
+					}
+					break
+				}
+			}
 			if ok {
 				lines = append(lines, name+": the gateway "+ns+" answers DNS")
 				continue

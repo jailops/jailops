@@ -19,11 +19,13 @@ When the request (and the jail's profiles) do not say otherwise, the daemon fill
 | `shell` | `/usr/local/bin/bash` | the shell of `jailops shell` and the console: `bash`, `sh` or a path inside the jail |
 | `prompt` | `default` | the bash prompt of every user: `default`, `short`, `none`, or a PS1 text |
 
-At the jail's **first start** JailOps installs the `bash` package into the jail from the host (`pkg -r ROOT install -y
-bash`, before anything runs in the jail, with the host's own network, whatever the jail's firewall says) and writes the prompt.
-If the host cannot fetch it, the setup after the start tries once more from inside the jail (`pkg -j JAIL install -y bash`, over
-the jail's own network); the start never waits for it longer than a minute, and `jailops shell` of a jail that still has no bash says
-which command fixes it (`jailops jail shell-setup NAME`) and that `jailops set NAME shell sh` uses FreeBSD's own shell instead. Both live below `/usr/local`, a persistent
+A new jail starts at once: its **first start** never waits for a package server. JailOps installs the `bash` package into
+the running jail in the background (`pkg -j JAIL install -y bash`, over the jail's own network) and writes the prompt; `jailops start`
+says so, the jail shows a `ShellSetup` condition with the reason `Installing` meanwhile, and `jailops shell` (or any command
+in the jail) waits up to a minute for it. A later start, while bash is still missing, lets the host fetch it into the stopped root
+first (`pkg -r ROOT install -y bash`, with the host's own network, whatever the jail's firewall says; up to three times, 20 seconds
+each). When the installation fails, `jailops shell` says why and which command fixes it (`jailops jail shell-setup NAME`), and
+`jailops set NAME shell sh` uses FreeBSD's own shell instead. Both live below `/usr/local`, a persistent
 dataset of a thin jail, so they survive an OS update (the root swap of `jailops jail upgrade` and of the nightly image
 upgrade); a thick jail is upgraded in place. App installations do the same right after the app's packages.
 

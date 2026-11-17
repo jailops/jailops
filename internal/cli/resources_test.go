@@ -346,9 +346,9 @@ func TestBackupExtensions(t *testing.T) {
 	}
 }
 
-// A proxy-mode network on a host that drops the off-link probes of its segment's routers: the server warns in its
-// answer and the client prints it, for a network from flags, from a file and through apply.
-func TestNetworkCreateWarnsAboutOnlinkNS(t *testing.T) {
+// A proxy-mode network on a host that drops the off-link probes of its segment's routers: the server notes it in its
+// answer and the client prints the note, for a network from flags, from a file and through apply.
+func TestNetworkCreateNotesOnlinkNS(t *testing.T) {
 	h := newHarness(t, fake.WithSysctl("net.inet6.icmp6.nd6_onlink_ns_rfc4861", "0"))
 	h.seed()
 	tr := h.transcript()
@@ -359,5 +359,5 @@ func TestNetworkCreateWarnsAboutOnlinkNS(t *testing.T) {
 	tr.ok("apply", "-f", f)
 	// A routed network does not depend on it.
 	tr.ok("network", "create", "rt", "--ipv6", "2001:db8:1:2:1::1/80")
-	tr.golden("networks_onlink_warning")
+	tr.golden("networks_onlink_note")
 }

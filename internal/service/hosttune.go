@@ -21,15 +21,14 @@ const (
 )
 
 // SysctlOnlinkNS makes the kernel answer a unicast neighbor solicitation whose sender is not an on-link neighbour. On
-// a shared IPv6 segment (proxy mode) the provider's routers probe the host's own address from their global addresses;
-// with the default, 0, FreeBSD drops the probes (netstat -s -p icmp6 counts "bad neighbor solicitation messages"), the
-// router marks the host unreachable for minutes at a time, and the jails behind it with it. JailOps never sets it: the
-// administrator does, and the doctor says so.
+// some shared IPv6 segments (proxy mode) the provider's routers probe the host's own address from their global
+// addresses; with the default, 0, FreeBSD drops the probes (netstat -s -p icmp6 counts "bad neighbor solicitation
+// messages") and the router may mark the host unreachable for a while. It is host configuration and matters only on
+// such a segment: JailOps never sets it, and the doctor and a network create only point at the page that explains it.
 const SysctlOnlinkNS = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
 
-// onlinkNSHint is what the doctor and a network create say when SysctlOnlinkNS is off on a host with a proxy-mode
-// network.
-const onlinkNSHint = "the routers of a shared IPv6 segment probe the host's address from their global addresses and FreeBSD drops those solicitations as off-link, so the host (and its jails) is unreachable over IPv6 for minutes every few hours; run `sysctl " + SysctlOnlinkNS + "=1` and add `" + SysctlOnlinkNS + "=1` to /etc/sysctl.conf (JailOps never sets it)"
+// OnlinkNSDocs explains the setting: what it does, how to recognise the case and what to set.
+const OnlinkNSDocs = "https://jailops.net/articles/shared-ipv6-neighbor-discovery/#fix"
 
 // hasProxyNetwork reports whether a network in IPv6 proxy mode exists.
 func (s *Service) hasProxyNetwork() bool {
@@ -42,11 +41,11 @@ func (s *Service) hasProxyNetwork() bool {
 	return false
 }
 
-// onlinkNSWarning returns the warning of a proxy-mode network on a host whose SysctlOnlinkNS is 0, and nothing when it
-// is 1 or cannot be read (the doctor reports that).
-func (s *Service) onlinkNSWarning(ctx context.Context) string {
+// onlinkNSNote returns the note of a proxy-mode network on a host whose SysctlOnlinkNS is 0, and nothing when it is
+// 1 or cannot be read (the doctor reports that).
+func (s *Service) onlinkNSNote(ctx context.Context) string {
 	if v, err := s.sysctl(ctx, SysctlOnlinkNS); err == nil && v == "0" {
-		return SysctlOnlinkNS + " is 0: " + onlinkNSHint
+		return "on some shared IPv6 segments the setting " + SysctlOnlinkNS + " matters (it is " + v + "): " + OnlinkNSDocs
 	}
 	return ""
 }
@@ -123,8 +122,8 @@ func (s *Service) doctorHost(ctx context.Context, c *checkSet) {
 	s.doctorForwardingPersistent(ctx, c)
 }
 
-// doctorForwardingPersistent warns when routing (or, with a proxy-mode network, the answer to off-link neighbor
-// solicitations) is needed but /etc/sysctl.conf does not keep it across a reboot. The daemon never edits that file.
+// doctorForwardingPersistent warns when routing is needed but /etc/sysctl.conf does not keep it across a reboot. The
+// daemon never edits that file. SysctlOnlinkNS is not part of it: the doctor only informs about that one.
 func (s *Service) doctorForwardingPersistent(ctx context.Context, c *checkSet) {
 	nets, _ := s.netKind.list()
 	need := map[string]bool{}
@@ -134,9 +133,6 @@ func (s *Service) doctorForwardingPersistent(ctx context.Context, c *checkSet) {
 		}
 		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
 			need["net.inet6.ip6.forwarding"] = true
-		}
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy {
-			need[SysctlOnlinkNS] = true
 		}
 	}
 	if len(need) == 0 {
@@ -185,14 +181,7 @@ func (s *Service) doctorForwardingPersistent(ctx context.Context, c *checkSet) {
 	sort.Strings(missing)
 	if len(missing) > 0 {
 		what, hint := "routing stops working after a reboot until the daemon has run", "add "+missing[0]+"=1 to /etc/sysctl.conf, or gateway_enable=YES / ipv6_gateway_enable=YES to /etc/rc.conf (JailOps never edits them)"
-		if missing[0] == SysctlOnlinkNS {
-			what, hint = "after a reboot the host stops answering the probes of the routers of its shared IPv6 segment", "add "+SysctlOnlinkNS+"=1 to /etc/sysctl.conf (JailOps never edits it)"
-		}
 		c.add("sysctl.persistent", api.DoctorWarn, strings.Join(missing, ", ")+" is not set to 1 in /etc/sysctl.conf or /etc/rc.conf; "+what, hint)
-		return
-	}
-	if need[SysctlOnlinkNS] {
-		c.add("sysctl.persistent", api.DoctorOK, "forwarding and "+SysctlOnlinkNS+" are persistent (sysctl.conf or rc.conf)", "")
 		return
 	}
 	c.add("sysctl.persistent", api.DoctorOK, "forwarding is persistent (sysctl.conf or rc.conf)", "")

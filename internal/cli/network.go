@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -47,9 +48,23 @@ anchor and the descriptions of its interfaces`)
 	d.show = func(a *app, n api.Network) error { return a.showNetwork(n) }
 	d.emptyHint = "jailops network create NAME --ipv4 10.50.0.1/24 --uplink IFACE --nat"
 	d.warnings = func(n api.Network) []string { return n.Status.Warnings }
+	d.nextStep = func(ctx context.Context, a *app, c *sdk.Client, name string) string {
+		return grantStep(ctx, a, c, "network", name, func(sp api.ProjectSpec) bool {
+			for _, g := range sp.Networks {
+				if g.Network == name {
+					return true
+				}
+			}
+			return false
+		})
+	}
+	d.notes = func(n api.Network) []string { return n.Status.Notes }
 	d.updated = func(a *app, n api.Network) {
 		for _, w := range n.Status.Warnings {
 			fprintf(a.env.Stderr, "warning: %s\n", w)
+		}
+		for _, w := range n.Status.Notes {
+			fprintf(a.env.Stderr, "note: %s\n", w)
 		}
 		if dn := n.Status.DNS; dn != nil {
 			if len(dn.Updated) > 0 {

@@ -116,6 +116,10 @@ const (
 	ConditionUnknown = "Unknown"
 )
 
+// ShellInstalling is the reason of the ShellSetup condition while bash is being installed into a running jail in the
+// background: `jailops shell` waits for it.
+const ShellInstalling = "Installing"
+
 // Document is the declarative envelope used in YAML files and in the state
 // dataset. Spec is decoded according to Kind.
 type Document struct {

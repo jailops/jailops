@@ -151,6 +151,11 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 		}
 		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
 			hostAddrs = append(hostAddrs, ipam.GatewayLinkLocal6)
+			if p, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
+				if r := ipam.Resolver6(p); r.IsValid() {
+					hostAddrs = append(hostAddrs, r) // the host's resolver address: closed to the jail like the gateway, but for DNS
+				}
+			}
 		}
 		if d := s.networkDNS(a.Network, n.Spec); d != nil && d.Source == api.DNSFromGateway {
 			for _, ns := range d.Nameservers {

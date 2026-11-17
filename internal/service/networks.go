@@ -47,10 +47,11 @@ func (s *Service) networkCounts(spec api.NetworkSpec, name string) (alloc, free 
 }
 
 // networkVisible says whether the caller may see a network: global identities
-// see all, project identities the networks their projects are granted.
+// see all, whatever project the request names (a network is the host's, and one that is not granted yet must still
+// be listed), project identities the networks their projects are granted.
 func (s *Service) networkVisible(ctx context.Context, name string) bool {
 	a := ActorFrom(ctx)
-	if a.Global && ProjectFrom(ctx) == "" {
+	if a.Global {
 		return true
 	}
 	projects := a.Projects
@@ -216,11 +217,11 @@ func (s *Service) CreateNetwork(ctx context.Context, n api.Network) (api.Network
 	s.kick()
 	out := s.networkToAPI(ctx, o)
 	out.Status.Warnings = append(out.Status.Warnings, s.forwardingWarnings(ctx, n.Spec)...)
-	// A proxy-mode network needs the host to answer the off-link probes of the segment's routers; the administrator
-	// sets that, so say it now and not only in the doctor.
+	// On some shared segments the routers probe the host from off-link addresses and the host has to answer them; the
+	// administrator sets that, so point at the explanation now and not only in the doctor.
 	if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy {
-		if w := s.onlinkNSWarning(ctx); w != "" {
-			out.Status.Warnings = append(out.Status.Warnings, w)
+		if w := s.onlinkNSNote(ctx); w != "" {
+			out.Status.Notes = append(out.Status.Notes, w)
 		}
 	}
 	dnsWarnings(&out)

@@ -58,16 +58,15 @@ func TestStartDoesNotWaitOnTheShellSetup(t *testing.T) {
 	}
 }
 
-// The first start waits at most the deadline for the host to fetch bash (a slow mirror), starts the jail with the shell
-// it has, and tries again from inside the running jail in the background: the start does not wait for that either.
-func TestFirstStartIsBoundedWhenTheHostCannotFetchBash(t *testing.T) {
+// The first start never waits for a package server: the jail starts at once, the host does not fetch bash before
+// the start, and the jail says right after the start that bash is being installed in the background.
+func TestFirstStartNeverWaitsForTheHost(t *testing.T) {
 	e, s := tickingEnv(t)
 	alpha := as(globalAdmin, dtest.SeedProject)
 	e.Run.SetHangOn(func(c run.Cmd) bool {
 		return c.Name == "pkg" && (slices.Contains(c.Args, "-r") || slices.Contains(c.Args, "-j")) && slices.Contains(c.Args, "install")
 	})
-	defer service.SetBashBeforeStartDeadline(300 * time.Millisecond)()
-	defer service.SetShellSetupDeadline(300 * time.Millisecond)()
+	defer service.SetShellSetupDeadline(2 * time.Second)()
 
 	op, err := s.CreateJail(alpha, dtest.WebJail("web"))
 	if err != nil {
@@ -84,27 +83,68 @@ func TestFirstStartIsBoundedWhenTheHostCannotFetchBash(t *testing.T) {
 	if got := wait(t, s, op); got.Status != api.OpSuccess {
 		t.Fatalf("start: %+v\n%s", got, e.Log())
 	}
-	if d := time.Since(t0); d > 5*time.Second {
-		t.Errorf("the start took %s with a deadline of 300 ms", d)
+	if d := time.Since(t0); d > 1500*time.Millisecond {
+		t.Errorf("the start took %s: it waited for a package server", d)
 	}
-	if _, ok, _ := e.Jails.Get(alpha, "alpha_web"); !ok {
-		t.Error("the jail does not run")
-	}
-	// the host-side install passed the shared cache of the host
-	cached := false
 	for _, c := range e.Run.Calls() {
-		if c.Cmd.Name == "pkg" && slices.Contains(c.Cmd.Args, "-r") && slices.ContainsFunc(c.Cmd.Args, func(a string) bool { return len(a) > 14 && a[:14] == "PKG_CACHEDIR=/" }) {
-			cached = true
+		if c.Cmd.Name == "pkg" && slices.Contains(c.Cmd.Args, "install") && slices.ContainsFunc(c.Cmd.Args, func(a string) bool { return strings.HasSuffix(a, "/jails/web/root") }) {
+			t.Errorf("the host fetched bash before the first start: %v", c.Cmd.Args)
 		}
 	}
-	if !cached {
-		t.Error("the install from the host did not use the cache directory of the host")
+	j, err := s.GetJail(alpha, "web")
+	if err != nil {
+		t.Fatal(err)
+	}
+	installing := false
+	for _, c := range j.Status.Conditions {
+		installing = installing || (c.Type == "ShellSetup" && c.Reason == api.ShellInstalling)
+	}
+	if !installing {
+		t.Errorf("the jail does not say that bash is being installed: %+v", j.Status.Conditions)
 	}
 }
 
-// A restart of a jail that has run adds nothing for the shell: no pkg from the host, the root is not even looked at
-// for bash, and a failed setup in the background is not repeated at every start.
-func TestRestartOfAJailThatHasRunNeverFetchesBash(t *testing.T) {
+// A shell session in a jail whose bash is being installed in the background waits for that, instead of answering
+// that the shell does not exist; when the installation fails it says why.
+func TestShellWaitsForTheBashOfTheBackground(t *testing.T) {
+	e, s := tickingEnv(t)
+	alpha := as(globalAdmin, dtest.SeedProject)
+	e.Run.SetHangOn(func(c run.Cmd) bool {
+		return c.Name == "pkg" && slices.Contains(c.Args, "-j") && slices.Contains(c.Args, "install")
+	})
+	defer service.SetShellSetupDeadline(600 * time.Millisecond)()
+
+	op, err := s.CreateJail(alpha, dtest.WebJail("web"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := wait(t, s, op); got.Status != api.OpSuccess {
+		t.Fatalf("create: %+v\n%s", got, e.Log())
+	}
+	op, err = s.JailAction(alpha, "web", api.JailAction{Action: "start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := wait(t, s, op); got.Status != api.OpSuccess {
+		t.Fatalf("start: %+v\n%s", got, e.Log())
+	}
+	t0 := time.Now()
+	_, err = s.StartExec(alpha, "web", api.ExecRequest{Shell: true})
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.Code != api.CodeNotFound {
+		t.Fatalf("a shell without bash: %v", err)
+	}
+	if d := time.Since(t0); d < 300*time.Millisecond {
+		t.Errorf("the session did not wait for the installation of bash (%s)", d)
+	}
+	if !strings.Contains(ae.Hint, "the setup of bash failed") {
+		t.Errorf("the hint does not say why: %q", ae.Hint)
+	}
+}
+
+// A start after the first one, while bash is still missing, lets the host fetch it into the stopped root, three
+// times at most; a failed setup in the background is not repeated at every start after that.
+func TestRestartsOfAJailWithoutBashAreBounded(t *testing.T) {
 	e, s := tickingEnv(t)
 	alpha := as(globalAdmin, dtest.SeedProject)
 	e.SetPkgInstallErr(errors.New("pkg: no network"))
@@ -142,22 +182,19 @@ func TestRestartOfAJailThatHasRunNeverFetchesBash(t *testing.T) {
 		}
 		return
 	}
-	act("start") // the first start: the host tries once, then the jail's own attempt in the background
+	act("start") // the first start: no host install; the jail's own attempt in the background
 	time.Sleep(500 * time.Millisecond)
-	host1, jail1 := pkgCalls()
-	if host1 != 1 {
-		t.Fatalf("the first start made %d installs from the host, want 1\n%v\n%s", host1, e.Run.Calls(), e.Log())
+	if host, jail := pkgCalls(); host != 0 || jail != 1 {
+		t.Fatalf("the first start made %d installs from the host and %d in the jail, want 0 and 1\n%s", host, jail, e.Log())
 	}
-	for i := 0; i < 3; i++ {
+	for i := 0; i < 6; i++ {
 		act("restart")
+		time.Sleep(400 * time.Millisecond)
 	}
-	time.Sleep(500 * time.Millisecond)
-	host2, jail2 := pkgCalls()
-	if host2 != host1 {
-		t.Errorf("a restart fetched bash from the host: %d installs, %d before", host2, host1)
-	}
-	if jail2 != jail1 {
-		t.Errorf("a failed setup was repeated at every start: %d installs in the jail, %d before", jail2, jail1)
+	// three tries of the host (the constant of the service), each followed by an attempt in the jail; later starts
+	// repeat neither
+	if host, jail := pkgCalls(); host != 3 || jail != 3 {
+		t.Errorf("after six restarts: %d installs from the host and %d in the jail, want 3 and 3", host, jail)
 	}
 }
 

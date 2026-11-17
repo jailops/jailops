@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/daemon/dtest"
@@ -52,6 +53,21 @@ func shellCond(j api.Jail) *api.Condition {
 	return nil
 }
 
+// waitShellSetup waits until the jail no longer says that its bash is being installed in the background.
+func waitShellSetup(t *testing.T, e *dtest.Env, name string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(20 * time.Millisecond) {
+		j, err := e.Admin.Jails().Get(context.Background(), name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c := shellCond(j); c == nil || c.Reason != api.ShellInstalling {
+			return
+		}
+	}
+	t.Fatal("the shell of the jail is still being set up")
+}
+
 func installedBash(e *dtest.Env, root string) int {
 	n := 0
 	for _, in := range e.Installed {
@@ -79,12 +95,13 @@ func TestNewJailGetsBashAndThePrompt(t *testing.T) {
 		t.Fatal("the shell was set up before the first start")
 	}
 	mustOp(e.Admin.Jails().Start(ctx, "web"))
-	// bash went in from the host before the jail first ran, so the start's own rc builds the library cache with it
+	// the first start does not wait for a package server: bash goes into the running jail in the background
+	waitShellSetup(t, e, "web")
 	if installedBash(e, webRoot) != 1 {
-		t.Fatalf("bash was not installed from the host: %v %v", e.Installed, sj.cmds)
+		t.Fatalf("bash was not installed: %v %v", e.Installed, sj.cmds)
 	}
-	if sj.ran("pkg install") {
-		t.Fatalf("pkg ran inside the jail although the host had installed bash: %v", sj.cmds)
+	if !sj.ran("pkg install") {
+		t.Fatalf("pkg did not run inside the jail: %v", sj.cmds)
 	}
 	want := "PS1='" + api.DefaultPS1(39) + "'"
 	if !strings.Contains(e.File(webRoot+api.PromptFile), want) {
@@ -208,6 +225,7 @@ func TestShellChoicesAndExistingJails(t *testing.T) {
 		t.Fatalf("%+v", j.Spec)
 	}
 	mustOp(e.Admin.Jails().Start(ctx, "web2"))
+	waitShellSetup(t, e, "web2")
 	root2 := "/jailops/projects/alpha/jails/web2/root"
 	if installedBash(e, root2) != 1 || !strings.Contains(e.File(root2+api.PromptFile), `PS1='\u@\h \$ '`) {
 		t.Fatalf("%v %q", e.Installed, e.File(root2+api.PromptFile))

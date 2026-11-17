@@ -96,6 +96,21 @@ func shellSessionEnv(user string) []string {
 	return env
 }
 
+// shellWaitFor is how long a shell session waits for the bash that is being installed in the background.
+var shellWaitFor = 60 * time.Second
+
+// shellMissing is the hint for a shell that is not in the jail: why bash is not there when the setup failed, and how
+// to get it.
+func (s *Service) shellMissing(key, name, sh string) string {
+	h := shellMissingHint(name, sh)
+	if m := s.shellMark(key); sh == api.BashPath && m.Error != "" {
+		h = "the setup of bash failed: " + m.Error + "; " + h
+	} else if s.shellInBackground(key) {
+		h = "bash is still being installed in the background; try again in a moment, or " + h
+	}
+	return h
+}
+
 func shellMissingHint(name, sh string) string {
 	if sh == api.BashPath {
 		return "install it with `jailops jail shell-setup " + name + "`, or use FreeBSD's own shell: `jailops set " + name + " shell sh`"
@@ -123,6 +138,11 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 	if j.Status.Power != api.PowerRunning {
 		return nil, api.Errorf(api.CodeBusy, "jail %q is not running", name).WithHint("start it first")
 	}
+	// The jail started a moment ago and its bash is being installed in the background, which keeps sessions out
+	// of it: wait for that, but not for ever.
+	if s.shellInBackground(key) {
+		s.waitShellSetup(ctx, key, shellWaitFor)
+	}
 	argv := req.Argv
 	shellSession := req.Shell || len(argv) == 0
 	if shellSession {
@@ -138,7 +158,7 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 		}
 		if ok, _ := s.d.Files.Exists(ctx, path.Join(s.rootMount(key), sh)); !ok {
 			return nil, api.Errorf(api.CodeNotFound, "the shell %s does not exist in jail %q", sh, name).
-				WithHint(shellMissingHint(name, sh))
+				WithHint(s.shellMissing(key, name, sh))
 		}
 		argv = []string{sh}
 	}

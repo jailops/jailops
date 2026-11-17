@@ -12,11 +12,13 @@ type DNSJail struct {
 	Addrs         []netip.Addr
 }
 
-// DNSNet is a network of a project with its subnets and the address of the host on it (the gateway).
+// DNSNet is a network of a project with its subnets and the addresses of the host on it that the jails ask for DNS:
+// the IPv4 gateway and, on a network with IPv6, the resolver address (ipam.Resolver6).
 type DNSNet struct {
-	Project string
-	Subnets []netip.Prefix
-	Gateway netip.Addr
+	Project   string
+	Subnets   []netip.Prefix
+	Gateway   netip.Addr
+	Resolver6 netip.Addr
 }
 
 // UnboundZone is the zone of the names inside a project: NAME.<project>.<suffix>; the suffix is `internal` unless
@@ -28,7 +30,7 @@ func UnboundZone(project, suffix string) string { return project + "." + suffix 
 // the subnets of the project's networks, so that a jail sees the names of its own project and of no other. The text
 // depends on nothing but the arguments, in a fixed order. listening are the addresses the resolver already listens on
 // by the administrator's own configuration (an `interface:` line twice is a fatal error of unbound, so none is written
-// twice; 0.0.0.0 covers every IPv4 address). A project name and a jail name are DNS labels already
+// twice; 0.0.0.0 covers every IPv4 address and :: every IPv6 address). A project name and a jail name are DNS labels already
 // (lower case letters, digits and hyphens), so nothing needs escaping.
 func UnboundConf(suffix string, jails []DNSJail, nets []DNSNet, listening []string) string {
 	var b builder
@@ -53,8 +55,18 @@ func UnboundConf(suffix string, jails []DNSJail, nets []DNSNet, listening []stri
 		b.line("\tlocal-zone: %q static", zone+".")
 		var recs []string
 		for _, n := range nets {
-			if n.Project == p && n.Gateway.IsValid() && n.Gateway.Is4() {
-				recs = append(recs, unboundNames("host", zone, []netip.Addr{n.Gateway})...)
+			if n.Project != p {
+				continue
+			}
+			var host []netip.Addr
+			if n.Gateway.IsValid() && n.Gateway.Is4() {
+				host = append(host, n.Gateway)
+			}
+			if n.Resolver6.IsValid() && n.Resolver6.Is6() {
+				host = append(host, n.Resolver6)
+			}
+			if len(host) > 0 {
+				recs = append(recs, unboundNames("host", zone, host)...)
 			}
 		}
 		js := byProject[p]
@@ -91,6 +103,9 @@ func UnboundConf(suffix string, jails []DNSJail, nets []DNSNet, listening []stri
 	for _, n := range nets {
 		if n.Gateway.IsValid() && n.Gateway.Is4() && n.Project != "" && !slices.Contains(listening, n.Gateway.String()) && !slices.Contains(listening, "0.0.0.0") {
 			ifaces = append(ifaces, n.Gateway.String())
+		}
+		if n.Resolver6.IsValid() && n.Resolver6.Is6() && n.Project != "" && !slices.Contains(listening, n.Resolver6.String()) && !slices.Contains(listening, "::") {
+			ifaces = append(ifaces, n.Resolver6.String())
 		}
 		if _, ok := byProject[n.Project]; !ok && n.Project != "" {
 			for _, sn := range n.Subnets {

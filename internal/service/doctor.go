@@ -217,8 +217,8 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 			if hint == "" {
 				hint = "sysctl " + name + "=" + want + " and add it to /etc/sysctl.conf"
 			}
-			if name == SysctlOnlinkNS { // recommended, not needed to work: a segment whose routers do not probe from off-link addresses is fine without it
-				c.add("sysctl."+name, api.DoctorWarn, name+" is "+got+", JailOps recommends "+want+" ("+why+")", hint)
+			if name == SysctlOnlinkNS { // host configuration that matters on some segments only: information, never a fault
+				c.add("sysctl."+name, api.DoctorInfo, name+"="+got+" (the default); "+why, hint)
 				break
 			}
 			c.add("sysctl."+name, api.DoctorFail, name+" is "+got+", JailOps needs "+want+" ("+why+")", hint)
@@ -241,7 +241,7 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 			}
 		}
 	}
-	check(SysctlOnlinkNS, "1", s.hasProxyNetwork(), "the routers of a shared IPv6 segment probe the host from off-link addresses", onlinkNSHint)
+	check(SysctlOnlinkNS, "1", s.hasProxyNetwork(), "on a shared IPv6 segment whose routers probe the host from their global addresses it needs 1", "see "+OnlinkNSDocs)
 }
 
 func (s *Service) doctorZFS(ctx context.Context, c *checkSet) {

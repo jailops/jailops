@@ -162,7 +162,7 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		p, err := s.life.PlanStart(ctx, rest)
 		return recover(p, err)
 	case "stop":
-		if err := s.life.StopJail(ctx, rest); err != nil {
+		if err := s.stopJail(ctx, rest); err != nil {
 			return fail(err)
 		}
 		out.Action, out.Detail = "completed", "the jail was stopped"
@@ -192,7 +192,7 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 			out.Action, out.Detail = "rolled-back", "the jail of the interrupted installation never completed a start and was deleted"
 			return out
 		}
-		if err := s.life.StopJail(ctx, rest); err != nil {
+		if err := s.stopJail(ctx, rest); err != nil {
 			return fail(err)
 		}
 		// kept for inspection means it does not come back with the host either

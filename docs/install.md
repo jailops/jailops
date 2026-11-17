@@ -131,15 +131,10 @@ JailOps turns forwarding on at run time when a network needs it, but it does not
     sysrc gateway_enable=YES ipv6_gateway_enable=YES
     sysctl net.inet.ip.forwarding=1 net.inet6.ip6.forwarding=1
 
-A host with a switched IPv6 network (`--ipv6-mode proxy`, a `/64` on a segment shared with other customers) must also
-answer the neighbor solicitations its routers send from off-link addresses, or the routers drop it for minutes at a
-time (see [networking-ipv6.md](networking-ipv6.md)). `jailops doctor` checks it too, and JailOps never sets it:
-
-    sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1
-
-and in `/etc/sysctl.conf`, so it survives a reboot:
-
-    net.inet6.icmp6.nd6_onlink_ns_rfc4861=1
+On a switched IPv6 network (`--ipv6-mode proxy`, a `/64` on a segment shared with other customers) one more host setting
+matters on some segments, where the routers probe the host from off-link addresses. `jailops doctor` shows it as
+information, and JailOps never sets it: [networking-ipv6.md](networking-ipv6.md#one-host-setting-that-matters-on-some-segments)
+says when and what to set.
 
 Optional: `kern.racct.enable=1` in `/boot/loader.conf` (it takes a reboot) turns the kernel's resource accounting on,
 which `jailops jail info` needs for a jail's usage and resource limits need for enforcement.
@@ -189,8 +184,7 @@ Identities (users, API tokens, client certificates) have the same roles, scopes 
 A person who is not root uses a token (`JAILOPS_TOKEN`, or `jailops remote add`) or signs in to the web console. Run the commands
 below as root or with such a token.
 
-`jailops doctor` should show no `FAIL`. A `WARN` for `sysctl.persistent` means forwarding (or, with a switched IPv6
-network, `net.inet6.icmp6.nd6_onlink_ns_rfc4861`) is on but will not survive a reboot until you set the `rc.conf` or
+`jailops doctor` should show no `FAIL`. A `WARN` for `sysctl.persistent` means forwarding is on but will not survive a reboot until you set the `rc.conf` or
 `sysctl.conf` lines of section 4. Section "doctor checks" of [troubleshooting.md](troubleshooting.md)
 explains each check.
 
@@ -236,7 +230,7 @@ Without an image, `jailops app install` and `jailops create` are refused with a 
 above, with the host's release filled in.
 
 `jailops shell web` (or the console's Console tab) opens bash in the jail with a light blue `root@web:/#` prompt:
-a new FreeBSD jail gets bash from the host's package repository at its first start. `--shell sh` keeps FreeBSD's own
+a new FreeBSD jail gets bash from the package repository in the background right after its first start (`jailops shell` waits for it). `--shell sh` keeps FreeBSD's own
 shell, `jailops config set web prompt ...` changes the prompt, your own `~/.bashrc` wins over it, and `jails:` in
 `jailopsd.yaml` changes the defaults of the host ([shell.md](shell.md), also for the green prompt of the host).
 

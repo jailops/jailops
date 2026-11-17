@@ -16,8 +16,22 @@ file there as root. A resolver that already listens on port 53 of the host is le
   jails and what the resolver needs to answer them: the host's address on the network of each project with a running
   jail (`interface:`, with `ip-transparent: yes`; an address your own configuration already lists is not repeated) and the
   subnets it admits (`access-control:`);
-- a jail asks the gateway of its network, and its `/etc/resolv.conf` has `search PROJECT.internal`. Everything that is not a
-  jail's name goes on to wherever the host resolver sends it.
+- a jail asks the host on its network, in the address families the network has, and its `/etc/resolv.conf` has `search
+  PROJECT.internal`. Everything that is not a jail's name goes on to wherever the host resolver sends it.
+
+What a jail asks depends on its network:
+
+| Network | `nameserver` lines of the jail |
+|---|---|
+| IPv4 only | the gateway, `10.77.0.1` |
+| dual stack | the gateway, then the resolver address of the IPv6 prefix |
+| IPv6 only | the resolver address of the IPv6 prefix |
+
+The resolver address of an IPv6 network is the second address of its subnet (`2001:db8:1:2:100::1` in
+`2001:db8:1:2:100::/80`). It is not link-local, because a `resolv.conf` cannot name a link-local server usefully. The
+helper makes the host hold it on its loopback as a `/128` and unbound listen on it; a jail reaches it through its default
+gateway like any address of the host. The allocator never gives it to a jail, and a network that is deleted loses it
+again. In proxy mode nothing answers for it on the uplink.
 
 ## See how it works
 

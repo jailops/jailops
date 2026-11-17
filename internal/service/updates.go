@@ -297,6 +297,9 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 		if !alpine {
 			release, held = s.holdJailForPackages(key)
 		}
+		if held != nil {
+			release = func() {} // a refused hold gives no release function
+		}
 		defer release()
 		if held != nil {
 			errs = append(errs, "package catalog: "+held.Error())
@@ -626,7 +629,7 @@ func (s *Service) healthCheck(ctx context.Context, key string, j api.Jail) error
 }
 
 func (s *Service) restartKey(ctx context.Context, key string) error {
-	if err := s.life.StopJail(ctx, key); err != nil {
+	if err := s.stopJail(ctx, key); err != nil {
 		return err
 	}
 	return s.life.StartJail(ctx, key)

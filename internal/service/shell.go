@@ -37,9 +37,13 @@ import (
 type shellMark struct {
 	// Pending: the jail was created with a shell or prompt to set up at its first start.
 	Pending bool `json:"pending,omitempty"`
-	// Started: the jail has started at least once. The host fetches bash for a jail only before its first start; a
-	// later start never waits for a package server, and what is still missing is tried again in the background.
+	// Started: the jail has started at least once. The first start never waits for a package server: the jail
+	// starts at once and bash is fetched into the running jail in the background. A later start, while bash is
+	// still missing, lets the host fetch it into the stopped root first (a closed firewall of the jail does not
+	// matter there), up to hostTries times.
 	Started bool `json:"started,omitempty"`
+	// HostTries counts those attempts of the host.
+	HostTries int `json:"host_tries,omitempty"`
 	// Applied is what the prompt file last said (promptState): the PS1 text, or "none".
 	Applied string `json:"applied,omitempty"`
 	// Error is the latest failure of the setup (empty after a success), At its time.
@@ -50,6 +54,43 @@ type shellMark struct {
 type shellMarks struct {
 	mu sync.Mutex
 	m  map[string]shellMark
+	// bg is the set of jails whose bash is being installed in the background right now.
+	bg map[string]bool
+}
+
+// hostTries is how many starts of a jail that still lacks bash let the host fetch it before the start.
+const hostTries = 3
+
+// stopJail stops a jail the way every caller does, after a setup of its shell in the background has ended: pkg inside the
+// jail is not cut off in the middle of its work (a jail whose pkg was killed by the stop stayed "dying" and kept its
+// root busy).
+func (s *Service) stopJail(ctx context.Context, key string) error {
+	s.waitShellSetup(ctx, key, shellSetupDeadline+5*time.Second)
+	return s.life.StopJail(ctx, key)
+}
+
+// shellInBackground says whether the shell of the jail is being set up in the background now.
+func (s *Service) shellInBackground(key string) bool {
+	s.shellM.mu.Lock()
+	defer s.shellM.mu.Unlock()
+	return s.shellM.bg[key]
+}
+
+// waitShellSetup waits, at most d, for a background setup of the shell of the jail to end.
+func (s *Service) waitShellSetup(ctx context.Context, key string, d time.Duration) {
+	deadline := time.NewTimer(d)
+	defer deadline.Stop()
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	for s.shellInBackground(key) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-deadline.C:
+			return
+		case <-tick.C:
+		}
+	}
 }
 
 func (s *Service) shellPath(key string) string {
@@ -102,9 +143,14 @@ func (s *Service) forgetShell(key string) {
 	}
 }
 
-// shellCondition is the jail's ShellSetup condition: present only while the latest setup failed.
+// shellCondition is the jail's ShellSetup condition: present while bash is being installed in the background and
+// while the latest setup failed.
 func (s *Service) shellCondition(key string) []api.Condition {
 	m := s.shellMark(key)
+	if s.shellInBackground(key) {
+		return []api.Condition{{Type: "ShellSetup", Status: api.ConditionUnknown, Reason: api.ShellInstalling, Since: s.now().UTC(),
+			Message: "bash is being installed in the background; `jailops shell` waits for it"}}
+	}
 	if m.Error == "" {
 		return nil
 	}
@@ -331,8 +377,8 @@ func (s *Service) shellAtStart(ctx context.Context, key string) {
 	}
 	switch {
 	case m.Pending && eff.Shell == api.BashPath && !s.bashInRoot(ctx, key):
-		// a failed attempt is not repeated at every start: `jailops jail shell-setup` asks for one at once
-		if m.Error != "" && s.now().Sub(m.At) < shellRetryAfter {
+		// a failed attempt is not repeated at every start (after the host had its tries): `jailops jail shell-setup` asks for one at once
+		if m.Error != "" && s.now().Sub(m.At) < shellRetryAfter && m.HostTries >= hostTries {
 			return
 		}
 		// bash did not get in before the start (no network on the host in time): the jail is up with the shell it has,
@@ -361,9 +407,24 @@ func (s *Service) bashInRoot(ctx context.Context, key string) bool {
 // setUpShellInBackground runs the setup of the shell of a running jail without holding the operation that started
 // it. A failure is the jail's ShellSetup condition and an event, as when the setup runs inside the start.
 func (s *Service) setUpShellInBackground(key, project, name string) {
+	s.shellM.mu.Lock()
+	if s.shellM.bg[key] {
+		s.shellM.mu.Unlock()
+		return
+	}
+	if s.shellM.bg == nil {
+		s.shellM.bg = map[string]bool{}
+	}
+	s.shellM.bg[key] = true // set here, not in the goroutine: the start that returns next reports it
+	s.shellM.mu.Unlock()
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer func() {
+			s.shellM.mu.Lock()
+			delete(s.shellM.bg, key)
+			s.shellM.mu.Unlock()
+		}()
 		defer func() { supervise.Report(s.log, "shell-setup", recover()) }()
 		base := s.baseCtx
 		if base == nil {
@@ -510,41 +571,43 @@ func dropLines(out []byte, drop func(string) bool) []byte {
 	return []byte(b.String())
 }
 
-// installBashBeforeFirstStart puts the bash package into the root of a FreeBSD jail that has never run, with pkg -r
-// from the host: nothing runs in the root yet, and the host's network fetches the package, whatever the jail's own
-// firewall policy says. The setup after the start finds bash there. It does nothing for a jail that is not new or
-// does not use bash; a failure is logged and the setup after the start tries again from inside the jail.
-func (s *Service) installBashBeforeFirstStart(ctx context.Context, key string) {
+// installBashFromTheHost puts the bash package into the root of a stopped FreeBSD jail that has started before and
+// still lacks it, with pkg -r from the host: nothing runs in the root, and the host's network fetches the package,
+// whatever the jail's own firewall policy says. The first start of a jail never does this and never waits: the jail
+// starts at once and bash is fetched into the running jail in the background (shellAtStart). It does nothing for a
+// jail that does not use bash; a failure is logged and the setup after the start tries again from inside the jail.
+func (s *Service) installBashFromTheHost(ctx context.Context, key string) {
 	j, err := s.jailSnapshot(key)
 	if err != nil || j.Spec.OS != api.OSFreeBSD || s.d.Run == nil {
 		return
 	}
-	// Only the very first start: a jail that has run (the mark says so) or that has no shell to set up costs a
-	// restart nothing here, whatever its root holds.
-	if m := s.shellMark(key); m.Started || !m.At.IsZero() || !m.Pending { // a recorded attempt means it has run
+	m := s.shellMark(key)
+	if !m.Pending || !(m.Started || !m.At.IsZero()) || m.HostTries >= hostTries { // a recorded attempt means it has run
 		return
 	}
 	if eff := s.effective(j); eff.Shell != api.BashPath {
 		return
 	}
 	if err := s.life.MountTree(ctx, key); err != nil {
-		s.log.Warn("bash before the first start", "jail", key, "err", err)
+		s.log.Warn("bash from the host", "jail", key, "err", err)
 		return
 	}
 	root := s.rootMount(key)
 	if ok, _ := s.d.Files.Exists(ctx, root+api.BashPath); ok {
 		return
 	}
-	// The first start of a jail never waits long for a package mirror: what is not fetched in time is tried again
-	// from inside the running jail (shellAtStart), and the jail starts with the shell it has.
+	m.HostTries++
+	s.setShellMark(key, m)
+	// The host never waits long for a package mirror: what is not fetched in time is tried again from inside the
+	// running jail (shellAtStart), and the jail starts with the shell it has.
 	ctx, cancel := context.WithTimeout(ctx, bashBeforeStartDeadline)
 	defer cancel()
 	if err := s.runHost(ctx, bashBeforeStartDeadline, apps.PkgInstallCachedArgv(root, "ports", s.pkgCache(), []string{api.BashPackage})); err != nil {
-		s.log.Warn("bash before the first start", "jail", key, "err", err)
+		s.log.Warn("bash from the host", "jail", key, "err", err)
 	}
 }
 
-// bashBeforeStartDeadline is how long the first start of a jail waits for the host to fetch bash.
+// bashBeforeStartDeadline is how long a later start of a jail waits for the host to fetch the bash it still lacks.
 var bashBeforeStartDeadline = 20 * time.Second
 
 // pkgCache is the directory in which the host keeps the packages it downloaded for jail roots: the cache of the

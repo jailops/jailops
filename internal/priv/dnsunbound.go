@@ -15,7 +15,9 @@ import (
 	"sync"
 	"time"
 
+	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/render"
+	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/sdk/api"
 )
@@ -101,8 +103,10 @@ func (l *Local) DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error) 
 		}
 	}
 	for _, n := range nets {
-		if n.Gateway.IsValid() && !slices.Contains(res.Gateways, n.Gateway.String()) {
-			res.Gateways = append(res.Gateways, n.Gateway.String())
+		for _, a := range []netip.Addr{n.Gateway, n.Resolver6} {
+			if a.IsValid() && !slices.Contains(res.Gateways, a.String()) {
+				res.Gateways = append(res.Gateways, a.String())
+			}
 		}
 	}
 	res.Projects = len(projects)
@@ -112,6 +116,9 @@ func (l *Local) DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error) 
 		return res, fmt.Errorf("unbound-conf %s: %w", path, err)
 	}
 	res.Current = err == nil && bytes.Equal(cur, []byte(text))
+	if apply {
+		l.syncResolverAddrs(ctx, nets)
+	}
 	var out string
 	var cerr error
 	if apply && !res.Current {
@@ -261,6 +268,7 @@ func (l *Local) dnsInputs(ctx context.Context) ([]render.DNSJail, []render.DNSNe
 				if v6 := nw.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
 					if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
 						dn.Subnets = append(dn.Subnets, p)
+						dn.Resolver6 = ipam.Resolver6(p)
 					}
 				}
 				nets = append(nets, dn)
@@ -335,6 +343,7 @@ func (l *Local) addStoredNetworks(ctx context.Context, nets []render.DNSNet, see
 		if v6 := nw.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
 			if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
 				dn.Subnets = append(dn.Subnets, p)
+				dn.Resolver6 = ipam.Resolver6(p)
 			}
 		}
 		nets = append(nets, dn)
@@ -491,4 +500,71 @@ func parseForwards(out string) ([]string, bool) {
 		}
 	}
 	return nil, true
+}
+
+// resolverAddrsFile records the addresses the helper put on the loopback for the resolver (one JSON list), so that the
+// address of a network that is gone is taken off again. It is the helper's own, in its host directory.
+func (l *Local) resolverAddrsFile() string {
+	return filepath.Join(l.cfg.HostDir, "dns-resolver-addrs.json")
+}
+
+// syncResolverAddrs makes the host hold the resolver address (ipam.Resolver6) of every network with IPv6 on its
+// loopback, as a /128: the jails ask it through their default gateway and unbound listens on it. The addresses
+// come from the stored networks, never from the daemon's request, and the helper takes off only what it put there
+// itself (the record). A failure is logged: the resolver still starts (it binds the address before it exists) and
+// doctor says the lookup at the address fails.
+func (l *Local) syncResolverAddrs(ctx context.Context, nets []render.DNSNet) {
+	want := map[netip.Addr]bool{}
+	for _, n := range nets {
+		if n.Project != "" && n.Resolver6.IsValid() {
+			want[n.Resolver6] = true
+		}
+	}
+	var had []string
+	if b, err := os.ReadFile(l.resolverAddrsFile()); err == nil {
+		_ = json.Unmarshal(b, &had)
+	}
+	onLo := map[netip.Addr]bool{}
+	if list, err := l.Net().List(ctx); err == nil {
+		for _, i := range list {
+			if i.Name == "lo0" {
+				for _, p := range i.Inet6 {
+					onLo[p.Addr()] = true
+				}
+			}
+		}
+	}
+	ifc := func(a netip.Addr, verb string) error {
+		_, err := l.d.Runner.Run(ctx, run.Cmd{Name: "/sbin/ifconfig", Args: append([]string{"lo0"}, ifconfig.AddrWords(netip.PrefixFrom(a, 128), verb)...), Timeout: 10 * time.Second})
+		return err
+	}
+	var keep []string
+	for a := range want {
+		if !onLo[a] {
+			if err := ifc(a, "alias"); err != nil {
+				l.note("the resolver address could not be put on the loopback", "address", a.String(), "err", err.Error())
+				continue
+			}
+		}
+		keep = append(keep, a.String())
+	}
+	for _, h := range had {
+		a, err := netip.ParseAddr(h)
+		if err != nil || want[a] || !onLo[a] {
+			continue
+		}
+		if err := ifc(a, "-alias"); err != nil {
+			l.note("the resolver address of a removed network could not be taken off the loopback", "address", h, "err", err.Error())
+			keep = append(keep, h) // try again at the next pass
+		}
+	}
+	slices.Sort(keep)
+	b, _ := json.Marshal(keep)
+	if cur, err := os.ReadFile(l.resolverAddrsFile()); err == nil && bytes.Equal(bytes.TrimSpace(cur), b) {
+		return
+	}
+	if err := os.MkdirAll(l.cfg.HostDir, 0o700); err != nil {
+		return
+	}
+	_ = os.WriteFile(l.resolverAddrsFile(), append(b, '\n'), 0o600)
 }

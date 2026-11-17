@@ -74,6 +74,9 @@ type NetworkStatus struct {
 	// this network (a sysctl the administrator has to set, a resolver that has to listen on the gateway). They are
 	// never stored; jailops doctor reports the same things.
 	Warnings []string `json:"warnings,omitempty"`
+	// Notes are set in the answer of a create or an update only, like Warnings, for what is worth knowing and is not
+	// a fault (a host setting that matters on some networks). They are never stored.
+	Notes []string `json:"notes,omitempty"`
 	// DNS is what the jails of the network get in their resolv.conf, worked out when the network is read.
 	DNS *NetworkDNS `json:"dns,omitempty"`
 }

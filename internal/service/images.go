@@ -154,8 +154,18 @@ func (s *Service) imageToAPI(ctx context.Context, o object[api.ImageSpec]) api.I
 }
 
 // imageVisible says whether the caller may see an image: global identities
-// see every image, project identities the images their projects allow.
+// see every image, whatever project the request names (an image is the host's), project identities the images their
+// projects allow.
 func (s *Service) imageVisible(ctx context.Context, name string) bool {
+	if ActorFrom(ctx).Global {
+		return true
+	}
+	return s.imageUsable(ctx, name)
+}
+
+// imageUsable says whether the project of the request, or the projects of the caller when it names none, may create
+// a jail from an image: global identities with no project may use every image.
+func (s *Service) imageUsable(ctx context.Context, name string) bool {
 	a := ActorFrom(ctx)
 	if a.Global && ProjectFrom(ctx) == "" {
 		return true

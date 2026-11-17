@@ -11,6 +11,10 @@ configure on the host besides forwarding.
     jailops start site --project shop
     jailops list --project shop
 
+`network create` makes a network of the host; it is listed for the host's administrators at once. A project may use it
+only after `jailops network grant NAME --project PROJECT`, also when a global administrator creates the jail, and a
+network is granted to one project. `storage create` and `storage grant` work the same way.
+
 ## What you get
 
 - **Addresses are allocated for you.** The range of the network is the pool. A jail's address is written into its
