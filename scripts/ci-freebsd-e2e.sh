@@ -91,7 +91,8 @@ J=/usr/local/bin/jailops
 current=start
 host_cleanup() { :; } # the host identity block replaces it while the machine's identity is changed
 trap 'rc=$?; host_cleanup; [ $rc -eq 0 ] || echo "FAILED (exit $rc) in step: $current" >&2' EXIT
-step() { current=$*; printf '\n== %s\n' "$*"; }
+t_start=$(date +%s)
+step() { current=$*; printf '\n== %s  [+%ss]\n' "$*" "$(( $(date +%s) - t_start ))"; } # the seconds since the start: CI logs show which steps take the time
 fail() {
 	echo "FAILED: $*" >&2
 	echo "--- last messages" >&2
@@ -856,6 +857,8 @@ expect "the root clone has none" '^(0|none|-)$' zfs get -Hp -o value quota "$poo
 [ "$racct" != 1 ] || expect "the CPU rule is on the running jail" 'jail:demo_lim:pcpu:deny=100' sh -c 'rctl 2>&1'
 [ "$racct" != 1 ] || expect "an allocation beyond the memory limit fails" 'out of (memory|space)' sh -c "$J exec --project demo lim -- /usr/bin/awk 'BEGIN{s=\"x\"; for(i=0;i<29;i++) s=s s; print length(s)}' 2>&1 | head -c 300; true"
 [ "$racct" != 1 ] || expect "fork fails beyond the process limit" 'Cannot fork|Resource temporarily unavailable' sh -c "$J exec --project demo lim -- /bin/sh -c 'i=0; while [ \$i -lt 150 ]; do sleep 6 & i=\$((i+1)); done; wait' 2>&1 | head -c 600; true"
+# the first start of a jail fetches bash from the host in the background and the jail is busy until that is over (the rctl checks above are skipped without racct, so nothing has waited for it)
+waitfor "the package step of the first start is over" 120 $J exec --project demo lim -- true
 expect "a write beyond the quota fails outside the root clone too" 'quota exceeded' sh -c "$J exec --project demo lim -- /bin/dd if=/dev/random of=/var/db/fill bs=1m count=700 2>&1 | head -c 600; true"
 check "remove the file" $J exec --project demo lim -- /bin/rm -f /var/db/fill
 expect_retry "the default state limit is on the pass rules of the jail's anchor" 'keep state \([^)]*max 10000[,)]' pfctl -a jailops/demo/lim -sr
