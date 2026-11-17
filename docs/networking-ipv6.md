@@ -110,6 +110,12 @@ JailOps answers it itself.
 
    `jailops network create web -f web.yaml`. The uplink must be a plain interface, not a member of one of your bridges (JailOps checks).
 
+   **The subnet lies inside the segment of the uplink.** JailOps refuses a proxy subnet outside the segment the uplink is
+   on. The segment is the prefix of the host's global address on the uplink; the host usually holds that address as a
+   `/128` (`inet6 2001:db8:1:2::1 prefixlen 128`), and then the segment is the `/64` around it, so any subnet inside
+   `2001:db8:1:2::/64` is accepted. Take a part of the `/64` that the host's own address is not in (`2001:db8:1:2:100::/80`
+   above), and a different part for each network.
+
    **Limits JailOps checks for you.** The helper accepts proxied prefixes of `/48` to `/120` only, so a proxy-mode
    subnet must be `/48` to `/120`; a routed subnet is `/32` to `/126`. Two networks
    may not have overlapping subnets (IPv4 or IPv6, in any project): `network create` names the one that does. In every

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **Fixed: a proxy-mode network on a host whose address is a `/128`.** A cloud server usually holds its address on the shared
+  segment as a `/128`, and `jailops network create ... --ipv6-mode proxy` refused every subnet because no prefix of the uplink
+  held it. The segment of an address longer than `/64` is the `/64` around it now, so a subnet inside it is accepted; one
+  outside it is still refused, and the message names the segment.
 ## 0.8.2 - 2026-11-17
 
 - **`jailops-setup` is for the CLI first: the web console is opt-in.** The setup no longer turns the web console on by
