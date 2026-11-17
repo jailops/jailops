@@ -127,11 +127,12 @@ func TestLeakExecSessions(t *testing.T) {
 			for i := 0; i < 40; i++ {
 				run()
 			}
-			// the children are reaped soon after the sessions end
+			// the children are reaped soon after the sessions end: wait for the count and for the zombies (live counts
+			// them, so a count that is back at the start can still hold children nobody has waited for yet)
 			var live, zom int
 			for i := 0; i < 100; i++ {
 				live, zom = children(t)
-				if live <= l0 {
+				if live <= l0 && zom == 0 {
 					break
 				}
 				time.Sleep(50 * time.Millisecond)

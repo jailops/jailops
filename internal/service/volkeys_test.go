@@ -214,6 +214,20 @@ func TestBootStartsALockedJailAfterItsUnlock(t *testing.T) {
 	}
 }
 
+// afterHousekeeping asks for an operation and asks again while the answer is "busy" because the housekeeping pass of a
+// daemon that has just started holds the jail (it takes each jail's lock for a moment to remove a root.old). A person
+// or a script that is refused that way asks again; the refusal of two operations at once is meant.
+func afterHousekeeping(f func() (api.Operation, error)) (api.Operation, error) {
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		op, err := f()
+		if err == nil || !api.IsCode(err, api.CodeBusy) || !strings.Contains(err.Error(), "housekeeping") || time.Now().After(deadline) {
+			return op, err
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 func TestBootWishIsMemoryOnly(t *testing.T) {
 	e, s, _ := encEnv(t)
 	ctx := as(globalAdmin, dtest.SeedProject)
@@ -224,16 +238,20 @@ func TestBootWishIsMemoryOnly(t *testing.T) {
 	e.Stop()
 	e2 := dtest.New(t, dtest.Options{Reuse: e, Mutate: noAutostart})
 	s2 := e2.D.Service()
-	op, err := s2.UnlockVolume(ctx, "vault", api.VolumeUnlock{Passphrase: encPass})
+	op, err := afterHousekeeping(func() (api.Operation, error) {
+		return s2.UnlockVolume(ctx, "vault", api.VolumeUnlock{Passphrase: encPass})
+	})
 	mustOp(t, s2, op, err)
 	if st := power(t, s2, ctx); st.Power != api.PowerStopped {
 		t.Fatalf("%+v", st)
 	}
 	// the boot pass of the restarted daemon derives the wish again from boot.autostart
-	op, err = s2.LockVolume(ctx, "vault")
+	op, err = afterHousekeeping(func() (api.Operation, error) { return s2.LockVolume(ctx, "vault") })
 	mustOp(t, s2, op, err)
 	wantCode(t, s2.StartJail(ctx, dtest.SeedProject+"_vault"), api.CodeLocked)
-	op, err = s2.UnlockVolume(ctx, "vault", api.VolumeUnlock{Passphrase: encPass})
+	op, err = afterHousekeeping(func() (api.Operation, error) {
+		return s2.UnlockVolume(ctx, "vault", api.VolumeUnlock{Passphrase: encPass})
+	})
 	mustOp(t, s2, op, err)
 	if st := power(t, s2, ctx); st.Power != api.PowerRunning {
 		t.Fatalf("%+v", st)
