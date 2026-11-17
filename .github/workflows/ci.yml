@@ -21,6 +21,42 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # A release commit changes version.txt and CHANGELOG.md and nothing else: the tree it comes from passed this workflow already on its
+  # parent. When the change is only those two files and the parent has a green push run, the slow jobs (the race detector, the fuzzers,
+  # the browsers and the FreeBSD VMs) are skipped, so a release PR and the push of its merge take minutes. Anything else runs everything.
+  # `just release` still asks for a green run of exactly the commit it tags: the jobs that run here make it.
+  changes:
+    name: What changed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      release_only: ${{ steps.c.outputs.release_only }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: c
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          set -eu
+          only=false
+          if [ "$EVENT" = push ] || [ "$EVENT" = pull_request ]; then
+            files=$(git diff --name-only HEAD^1 HEAD)
+            if [ -n "$files" ] && [ -z "$(printf '%s\n' "$files" | grep -v -x -e version.txt -e CHANGELOG.md || true)" ]; then
+              parent=$(git rev-parse HEAD^1)
+              green=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow CI --commit "$parent" --event push --limit 5 \
+                --json status,conclusion --jq '[.[] | select(.status == "completed" and .conclusion == "success")] | length' || echo 0)
+              if [ "${green:-0}" -ge 1 ]; then only=true; fi
+              echo "only version.txt and CHANGELOG.md changed; green runs of the parent ${parent}: ${green:-0}"
+            fi
+          fi
+          echo "release_only=$only" >> "$GITHUB_OUTPUT"
+
   # The consoles are embedded in the binaries, so they are built first and handed to the Go jobs. Only the build blocks
   # them: the type checks, the unit tests and the Playwright tests run beside the Go jobs in web-test and web-e2e.
   web-build:
@@ -75,7 +111,8 @@ jobs:
   # libraries and fonts (apt), with a quick mirror, retries and the downloaded packages kept between runs.
   web-e2e:
     name: Web consoles (end-to-end, Chromium)
-    needs: web-build
+    needs: [web-build, changes]
+    if: needs.changes.outputs.release_only != 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -196,7 +233,8 @@ jobs:
   # Fuzzing beside the other Go jobs (go allows one fuzz target per run; longer on the nightly run).
   fuzz:
     name: Go fuzz
-    needs: web-build
+    needs: [web-build, changes]
+    if: needs.changes.outputs.release_only != 'true'
     runs-on: ubuntu-latest
     env:
       CGO_ENABLED: "0"
@@ -240,7 +278,8 @@ jobs:
   # The tests with the race detector, in four parallel shards (scripts/ci-race.sh: split by measured run time).
   race:
     name: Go race detector (${{ matrix.shard }})
-    needs: web-build
+    needs: [web-build, changes]
+    if: needs.changes.outputs.release_only != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -341,13 +380,29 @@ jobs:
   # traffic (scripts/ci-freebsd-e2e.sh, JAILOPS_E2E_PART). They do not depend on each other, so the run takes the
   # longest one, not the sum.
   freebsd:
-    name: FreeBSD VM (${{ matrix.part }})
-    needs: web-build
+    name: FreeBSD VM (${{ matrix.part }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
+    needs: [web-build, changes]
+    if: needs.changes.outputs.release_only != 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        part: [go, e2e, pf]
+        # the end-to-end flow and the packet filter test are linear scripts that took twenty minutes each: they run in shards on VMs of
+        # their own (scripts/ci-freebsd-e2e.sh JAILOPS_E2E_SHARD, scripts/ci-freebsd-pf.sh PF_SHARD), each set up the same way
+        include:
+          - part: go
+          - part: e2e
+            shard: "1"
+          - part: e2e
+            shard: "2"
+          - part: e2e
+            shard: "3"
+          - part: pf
+            shard: a
+          - part: pf
+            shard: b
+          - part: pf
+            shard: c
     steps:
       - uses: actions/checkout@v7
         with:
@@ -396,8 +451,9 @@ jobs:
       - uses: vmactions/freebsd-vm@v1
         env:
           PART: ${{ matrix.part }}
+          SHARD: ${{ matrix.shard }}
         with:
-          envs: PART JAILOPS_REQUIRE_CONSOLE
+          envs: PART SHARD JAILOPS_REQUIRE_CONSOLE
           cache-after-prepare: true
           release: "15.1"
           usesh: true
@@ -412,7 +468,10 @@ jobs:
             kldload pf 2>/dev/null || true   # pfctl(8) of FreeBSD 15 talks to the kernel through netlink: the module must be loaded
             go version
             if [ "$PART" != go ]; then
-              JAILOPS_E2E_PART="$PART" JAILOPS_BIN_DIR="$PWD/vm-bin" FORGE_BIN="$PWD/vm-bin/forge-freebsd-amd64" sh scripts/ci-freebsd-e2e.sh
+              e2e_shard=all; pf_shard=all
+              [ "$PART" = e2e ] && e2e_shard="$SHARD"
+              [ "$PART" = pf ] && pf_shard="$SHARD"
+              JAILOPS_E2E_PART="$PART" JAILOPS_E2E_SHARD="$e2e_shard" JAILOPS_PF_SHARD="$pf_shard" JAILOPS_BIN_DIR="$PWD/vm-bin" FORGE_BIN="$PWD/vm-bin/forge-freebsd-amd64" sh scripts/ci-freebsd-e2e.sh
               exit
             fi
             # the Go tests need a PostgreSQL (embedded-postgres has no FreeBSD build): start the packaged one
@@ -422,3 +481,19 @@ jobs:
             n=0; until su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && { echo "postgresql does not answer"; exit 1; }; sleep 1; done
             export JAILOPS_TEST_DATABASE_URL="postgres://postgres@127.0.0.1:5432/postgres?sslmode=disable"
             go test ./... -count=1   # go vet runs in the cross-build job on the same GOOS and files
+
+  # One name for the whole workflow: green when every job passed or was skipped on purpose (a release-only change).
+  ci-ok:
+    name: CI ok
+    if: always()
+    needs: [changes, web-build, web-test, web-e2e, lint, fuzz, race, cross, freebsd]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job passed, or was skipped on purpose
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+          CHANGES: ${{ needs.changes.result }}
+        run: |
+          echo "$RESULTS"
+          [ "$CHANGES" = success ] || { echo "the change detection did not run"; exit 1; }
+          case " $RESULTS " in *" failure "* | *" cancelled "*) exit 1 ;; esac
