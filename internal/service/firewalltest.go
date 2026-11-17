@@ -342,9 +342,21 @@ func hostSourceAddrs(ctx context.Context, s *Service, j *api.Jail) []netip.Addr 
 	if j == nil {
 		return nil
 	}
+	// The resolver address of an IPv6 network (ipam.Resolver6) answers the jail's DNS queries and nothing else: the host
+	// does not open traffic to a jail from it, so it is not a source of a host-to-jail test.
+	resolvers := map[netip.Addr]bool{}
+	for _, na := range s.effective(*j).Network {
+		if n, err := s.netKind.get(na.Network); err == nil && n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+			if pfx, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
+				if r := ipam.Resolver6(pfx); r.IsValid() {
+					resolvers[r] = true
+				}
+			}
+		}
+	}
 	var out []netip.Addr
 	for _, a := range gatewayAddrs(s, j) {
-		if a != ipam.GatewayLinkLocal6 {
+		if a != ipam.GatewayLinkLocal6 && !resolvers[a] {
 			out = append(out, a)
 		}
 	}
@@ -356,7 +368,7 @@ func hostSourceAddrs(ctx context.Context, s *Service, j *api.Jail) []netip.Addr 
 		own := false
 		if pfx, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
 			for _, h := range s.hostAddrs(ctx) {
-				if pfx.Contains(h) {
+				if pfx.Contains(h) && !resolvers[h] {
 					out = append(out, h)
 					own = true
 				}
