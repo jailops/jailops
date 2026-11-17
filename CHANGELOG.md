@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **Fixed: a release without its type was accepted.** `jailops image create NAME --release 15.1` (or a typo such as
+  `15.1-RELESE`) was built from the `base_latest` packages without a word. A FreeBSD release has its type now
+  (`15.1-RELEASE`, `15.2-PRERELEASE`, `16.0-CURRENT`, `15.1-RC2`), and the refusal names the release of the host. The
+  console's image form says the same.
+- **A proxy-mode subnet that holds the host's own address is refused when the network is made**, with a hint to take a
+  part of the segment's prefix elsewhere, not when the first jail starts.
+- **Onboarding texts.** The hints name `jailops server info` (`jailops info` takes a jail); the text after `pkg install`
+  and the end of `jailops-setup` say that the CLI works as root and that `--web` adds the console, and the first-image hint
+  names the release of the host. The install guide no longer asks for `pkg install jailops-apps` (it comes with
+  `jailops`), names the plain jail `web`, and describes `remote add NAME ADDRESS` as the command is. The IPv6 guide says
+  why the `nd6_onlink_ns_rfc4861` setting is recommended, that JailOps only flags it, and that a host outside appliance
+  mode sets a static default route. The examples of the DNS pages use neutral names.
 - **Fixed: a proxy-mode network on a host whose address is a `/128`.** A cloud server usually holds its address on the shared
   segment as a `/128`, and `jailops network create ... --ipv6-mode proxy` refused every subnet because no prefix of the uplink
   held it. The segment of an address longer than `/64` is the `/64` around it now, so a subnet inside it is accepted; one
@@ -51,9 +63,9 @@
   host resolver (`local_unbound`) as part of the normal setup and leaves a resolver that already listens on port 53
   alone. The helper then writes `/var/unbound/conf.d/jailops.conf` with the names of the running jails and with what
   the resolver needs to answer them (`interface:` for the host's address on each network of a running jail,
-  `ip-transparent: yes`, `access-control:` for the subnets). A jail called `postgres` in the project `verkis` is
-  `postgres.verkis.internal` (A and AAAA), `postgres.v4.verkis.internal` (IPv4 only) and `postgres.v6.verkis.internal`
-  (IPv6 only), and `postgres` through the `search` line of its `resolv.conf`; the host is `host.verkis.internal`. A jail
+  `ip-transparent: yes`, `access-control:` for the subnets). A jail called `postgres` in the project `shop` is
+  `postgres.shop.internal` (A and AAAA), `postgres.v4.shop.internal` (IPv4 only) and `postgres.v6.shop.internal`
+  (IPv6 only), and `postgres` through the `search` line of its `resolv.conf`; the host is `host.shop.internal`. A jail
   sees the names of its own project and of no other: the file holds a view for each project. The helper makes the text
   from the stored objects, not the daemon. It is written after a jail starts or stops and read with
   `local-unbound-control reload`; a new network with its first running jail adds an interface and restarts

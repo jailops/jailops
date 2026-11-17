@@ -26,4 +26,8 @@ func TestProxySubnetInsideTheSegmentOfAHostAddressOf128(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "2001:db8:103:211::/64") {
 		t.Fatalf("a subnet outside the /64 must be refused and name the segment: %v", err)
 	}
+	err = s.checkNetworkHost(bg, spec("2001:db8:103:211::/64"))
+	if err == nil || !strings.Contains(err.Error(), "holds the host's own address 2001:db8:103:211::1") {
+		t.Fatalf("a subnet that holds the host's own address must be refused at once: %v", err)
+	}
 }

@@ -1,8 +1,8 @@
 # Names for jails
 
-The jails of a project reach each other by name. A jail called `postgres` in the project `verkis` is
-`postgres.verkis.internal`, and a jail of that project can say just `postgres`. The host on the network of the project is
-`host.verkis.internal`. A jail sees the names of its own project and of no other. The defaults are meant to be used: this is
+The jails of a project reach each other by name. A jail called `postgres` in the project `shop` is
+`postgres.shop.internal`, and a jail of that project can say just `postgres`. The host on the network of the project is
+`host.shop.internal`. A jail sees the names of its own project and of no other. The defaults are meant to be used: this is
 how the jails of a host resolve names, and nothing needs setting.
 
 ## Nothing to configure
@@ -25,9 +25,9 @@ file there as root. A resolver that already listens on port 53 of the host is le
 
 ```
 DNS
-  Nameserver:   172.17.28.1 (the gateway)
-  Search:       verkis.internal
-  Names:        postgres.verkis.internal, postgres, postgres.v4.verkis.internal, postgres.v6.verkis.internal
+  Nameserver:   10.77.0.1 (the gateway)
+  Search:       shop.internal
+  Names:        postgres.shop.internal, postgres, postgres.v4.shop.internal, postgres.v6.shop.internal
   Other names:  forwarded to 192.0.2.53
 ```
 
@@ -42,8 +42,8 @@ jail has no names. Nothing stops a jail from starting either way.
 
 ## IPv4 and IPv6
 
-Every jail has three names, for the families it has an address of: `postgres.verkis.internal` answers with every address
-(A and AAAA), `postgres.v4.verkis.internal` with the IPv4 ones only and `postgres.v6.verkis.internal` with the IPv6 ones
+Every jail has three names, for the families it has an address of: `postgres.shop.internal` answers with every address
+(A and AAAA), `postgres.v4.shop.internal` with the IPv4 ones only and `postgres.v6.shop.internal` with the IPv6 ones
 only. A jail without an IPv6 address has no `.v6` name. The short forms work through the search domain, `postgres`,
 `postgres.v4` and `postgres.v6`; the host is `host` and `host.v4`. Use the `.v4` or `.v6` name where a program has to
 connect over one family.
@@ -53,7 +53,7 @@ connect over one family.
 Three things, and only these:
 
 1. **Another suffix.** `dns-suffix = corp.example` in `priv.conf` (one or more DNS labels, `internal` by default; `local` is
-   refused, it is multicast DNS) gives `postgres.verkis.corp.example` and the search line to match. A suffix you own is the
+   refused, it is multicast DNS) gives `postgres.shop.corp.example` and the search line to match. A suffix you own is the
    clean choice: it can never collide with a public name, and you can answer it elsewhere too.
 2. **A network with its own nameservers.** `dns:` in `jailops network edit` names the resolvers of the network's jails. They keep
    them and get no names: a network that points at its own resolver brings its own names.

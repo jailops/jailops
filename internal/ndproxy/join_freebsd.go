@@ -31,8 +31,8 @@ type joinSock struct {
 // sockets, which makes the kernel send MLD reports and accept the group's
 // Ethernet multicast address without promiscuous mode.
 //
-// UNVERIFIED: that this really makes the NS visible to BPF without
-// promiscuous mode is hypothesis H2 of prototype 5.
+// The multicast solicitations of the routers reach the capture without promiscuous mode (E3 of doc.go). Not tested:
+// MLD-snooping switches, the per-socket membership limit (maxGroupsPerSocket) and a rejoin after a link flap.
 type MulticastJoiner struct {
 	mu    sync.Mutex
 	socks []*joinSock

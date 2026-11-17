@@ -441,9 +441,13 @@ say ""
 if isyes "$web"; then
 	say "The web console: https://$(hostname):$WEB_PORT/ (a self-signed certificate; open port $WEB_PORT in your firewall for the machines that use it)"
 else
-	say "The CLI works as root on this host over the local socket (jailops info). The web console is off: docs/install.md section 6 turns it on."
+	say "The CLI works as root on this host over the local socket (jailops server info). The web console is off: docs/install.md section 6 turns it on."
 fi
-say "Next: the first image, network and jail, docs/install.md section 7 (jailops image create freebsd-15-1 --release 15.1-RELEASE);"
+# the release of this host (15.1-RELEASE-p6 is 15.1-RELEASE) and the image that is named after it (freebsd-15-1)
+rel=$(freebsd-version -u 2>/dev/null | sed 's/-p[0-9]*$//')
+case $rel in [0-9]*.[0-9]*-*) ;; *) rel=15.1-RELEASE ;; esac
+img=freebsd-$(printf '%s' "$rel" | sed 's/^\([0-9]*\)\.\([0-9]*\).*/\1-\2/')
+say "Next: the first image, network and jail, docs/install.md section 7 (jailops image create $img --release $rel);"
 say "the application catalog: jailops app list."
 if [ "$problems" -gt 0 ]; then
 	say "x $problems step(s) are not done; the lines starting with x above say which. Run jailops-setup again after fixing them."

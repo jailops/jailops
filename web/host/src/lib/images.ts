@@ -63,8 +63,8 @@ export function imageNameFor(kind: ImageKind, release: string): string {
   return n ? `${kind}-${n[0]}-${n[1]}` : kind
 }
 
-// validate.OSRelease: 15.1, 15.1-RELEASE, 15.1-RELEASE-p3
-const FREEBSD_RE = /^[0-9]{1,3}\.[0-9]{1,3}(-[A-Za-z0-9]{1,16}(-p[0-9]{1,4})?)?$/
+// the server's freebsdReleaseRE: 15.1-RELEASE, 15.2-PRERELEASE, 16.0-CURRENT, 15.1-RC2, 15.1-RELEASE-p3 (a release always has its type)
+const FREEBSD_RE = /^[0-9]{1,3}\.[0-9]{1,3}-(RELEASE|STABLE|CURRENT|PRERELEASE|(ALPHA|BETA|RC)[0-9]{1,2})(-p[0-9]{1,4})?$/
 
 /** The problem of a FreeBSD release, or '': the server's form, and nothing older than 15.1. */
 export function freebsdReleaseProblem(r: string): string {

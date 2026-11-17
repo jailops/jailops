@@ -114,7 +114,8 @@ JailOps answers it itself.
    on. The segment is the prefix of the host's global address on the uplink; the host usually holds that address as a
    `/128` (`inet6 2001:db8:1:2::1 prefixlen 128`), and then the segment is the `/64` around it, so any subnet inside
    `2001:db8:1:2::/64` is accepted. Take a part of the `/64` that the host's own address is not in (`2001:db8:1:2:100::/80`
-   above), and a different part for each network.
+   above), and a different part for each network: a subnet that holds an address of the host (the whole `/64`, say) is
+   refused when the network is made, because the proxy never answers for the host's own address.
 
    **Limits JailOps checks for you.** The helper accepts proxied prefixes of `/48` to `/120` only, so a proxy-mode
    subnet must be `/48` to `/120`; a routed subnet is `/32` to `/126`. Two networks
@@ -170,8 +171,10 @@ The routers of a shared segment check that the host's own address is still there
 sent from their global addresses. The host holds its address as a `/128` and no router advertisement describes the
 `/64`, so for FreeBSD the sender is not an on-link neighbour and, with the default `0`, the solicitation is dropped and
 counted as bad. The router then marks the host unreachable for minutes at a time, every few hours, and the jails
-behind it with it. With `1` every probe is answered (the packet must still arrive with hop limit 255). JailOps never
-sets it: `jailops doctor` warns about `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` while a proxy-mode network exists and
+behind it with it. Not every network is fully RFC compliant: some routers probe from a global address as above, and Linux
+answers such a solicitation where FreeBSD does not by default. With `1` every probe is answered (the packet must still
+arrive with hop limit 255). The setting is the administrator's decision, because it makes the host a little less strict.
+JailOps flags the problem and names the fix, and never sets it: `jailops doctor` warns about `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` while a proxy-mode network exists and
 `sysctl.persistent` warns until the line is in `/etc/sysctl.conf`; `network create` says the same in its answer.
 To see the problem: `netstat -s -p icmp6 | grep bad` counts the dropped solicitations, and
 
@@ -179,6 +182,10 @@ To see the problem: `netstat -s -p icmp6 | grep bad` counts the dropped solicita
 
 shows the probes for the host's address (`2001:db8:1:2::2`) arriving from the routers' global addresses; without
 the sysctl no advertisement (`ip6[40] == 136`) follows them.
+
+On a host that is not in appliance mode, set a static default route (`ipv6_defaultrouter="fe80::1%vtnet0"` in `rc.conf`,
+with the router's link-local address): a default route learned from router advertisements does not last on a host that
+forwards, which JailOps needs, because FreeBSD ignores advertisements on a forwarding host.
 
 **Verified** on FreeBSD 15.1 **amd64** with a shared switched `/64`, the jails in a `/80`: the upstream routers were answered
 at once; a jail pinged the internet for 50 minutes (3,000 packets, none lost) and another machine pinged the jail for 50

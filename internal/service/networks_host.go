@@ -73,6 +73,20 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 		}
 	}
 	if proxy && v6.IsValid() {
+		// the proxy never answers for an address of the host itself, and the helper refuses such a prefix when the first
+		// jail starts: say it here, where the network is made
+		for _, i := range ifs {
+			if hostIfaceIsNetwork(i) {
+				continue
+			}
+			for _, h := range i.Inet6 {
+				if !h.Addr().IsLinkLocalUnicast() && v6.Contains(h.Addr()) {
+					return api.Errorf(api.CodeInvalid, "in proxy mode the subnet %s holds the host's own address %s on %s", v6, h.Addr(), i.Name).
+						WithDetail("field", "ipv6.subnet").
+						WithHint("take a part of the segment's prefix that does not hold the host's own address, such as a /80 elsewhere in the /64")
+				}
+			}
+		}
 		var up *ifconfig.Iface
 		for k := range ifs {
 			if ifs[k].Name == spec.Uplink {

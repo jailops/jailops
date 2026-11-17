@@ -108,10 +108,10 @@ func MAC(field, s string) error {
 	return nil
 }
 
-// OSRelease validates a jail osrelease such as "15.0-RELEASE" or "14.2-RELEASE-p3".
+// OSRelease validates a jail osrelease such as "15.1-RELEASE" or "15.1-RELEASE-p3".
 func OSRelease(field, s string) error {
 	if !osrelRE.MatchString(s) {
-		return Invalid(field, "%s %q is not a release such as 15.0-RELEASE", field, s)
+		return Invalid(field, "%s %q is not a release such as 15.1-RELEASE", field, s)
 	}
 	return nil
 }

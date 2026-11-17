@@ -43,7 +43,7 @@ type SopsPolicy struct {
 // SopsRecipient is one entry in .sops.yaml's `keys:` list, resolved
 // against every creation_rule that references it.
 type SopsRecipient struct {
-	Anchor  string   // YAML anchor name — the label, e.g. "ahall_laptop"
+	Anchor  string   // YAML anchor name — the label, e.g. "alice_laptop"
 	Comment string   // free-text HeadComment directly above the entry, if any
 	PubKey  string   // age1... recipient
 	Rules   []string // path_regex of every creation_rule wired to this recipient

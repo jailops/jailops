@@ -19,7 +19,7 @@ describe('the host release', () => {
 describe('the release rules', () => {
   it.each([
     ['15.1-RELEASE', ''],
-    ['15.1', ''],
+    ['15.1', 'A release such as 15.1-RELEASE.'],
     ['15.1-RELEASE-p2', ''],
     ['16.0-CURRENT', ''],
     ['15.0-RELEASE', 'JailOps supports FreeBSD 15.1 and later.'],

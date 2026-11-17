@@ -15,7 +15,7 @@ As root, after trusting the package repository (section 2):
 `jailops-setup` does sections 1 and 3 to 6 below, in that order, and only what is not done yet (run it again and
 nothing changes): the kernel modules, the one-time setup of the pool, forwarding, the host resolver, the anchor line in
 `/etc/pf.conf`, the service (`jailopsd`; it starts the helper) and `jailops doctor`. Afterwards the CLI works as root over the
-local socket: no user, token or browser is needed (`jailops info`, then section 7). The web console is off; `--web` (or the
+local socket: no user, token or browser is needed (`jailops server info` shows the server, then section 7). The web console is off; `--web` (or the
 answer yes to its question) turns it on and offers the first administrator it needs (section 6). Every action is printed on
 one line before it runs.
 
@@ -117,7 +117,7 @@ Two things to know about a host that already has a firewall:
 
       pass in quick on vtnet0 inet6 proto tcp from any to 2001:db8:1:2:100::/80 port 8080
 
-  (Verified on FreeBSD 15.1 amd64 with a jail listening on 8080 and `curl -6` from another host.) ICMPv6 errors, which
+  ICMPv6 errors, which
   path MTU discovery needs, are admitted by the jails' own anchors; the host's default `pass quick inet6 proto
   ipv6-icmp` line must stay.
 
@@ -207,17 +207,17 @@ shows it). A project is granted the networks and storages its jails may use.
     jailops project create web
     jailops network grant lan --project web && jailops storage grant default --project web
     jailops project switch web
-    jailops create nginx --image freebsd-15-1 --network lan --storage default --start --autostart
-    jailops exec nginx -- uname -a
+    jailops create web --image freebsd-15-1 --network lan --storage default --start --autostart
+    jailops exec web -- uname -a
     jailops token create ci --role operator --projects web --expires 720h    # a token for scripts, now that web exists
 
-`--start` starts the jail now and `--autostart` starts it every time the host boots: a jail without it stays stopped after a reboot, also when it was running before. `jailops config set nginx boot.autostart true` turns it on for a jail that exists.
+`--start` starts the jail now and `--autostart` starts it every time the host boots: a jail without it stays stopped after a reboot, also when it was running before. `jailops config set web boot.autostart true` turns it on for a jail that exists.
 
 `--uplink` is the host's interface towards the outside: `vtnet0` on most virtual machines, `em0`, `igb0` or `ix0` on
 real hardware (`ifconfig -l` lists them).
 
 The project of a jail grants exactly one network and one storage here, so
-`jailops create nginx --image freebsd-15-1 --start` would take `lan` and `default` by itself (and say so); naming
+`jailops create web --image freebsd-15-1 --start` would take `lan` and `default` by itself (and say so); naming
 them keeps the command right when the project has more. A network is only an address range: it makes no interface of
 its own, each jail gets a link of its own to the host ([networking.md](networking.md)).
 
@@ -235,21 +235,21 @@ or the nightly auto upgrade; a new release is a new image ([upgrade.md](upgrade.
 Without an image, `jailops app install` and `jailops create` are refused with a hint that names the two commands
 above, with the host's release filled in.
 
-`jailops shell nginx` (or the console's Console tab) opens bash in the jail with a light blue `root@nginx:/#` prompt:
+`jailops shell web` (or the console's Console tab) opens bash in the jail with a light blue `root@web:/#` prompt:
 a new FreeBSD jail gets bash from the host's package repository at its first start. `--shell sh` keeps FreeBSD's own
-shell, `jailops config set nginx prompt ...` changes the prompt, your own `~/.bashrc` wins over it, and `jails:` in
+shell, `jailops config set web prompt ...` changes the prompt, your own `~/.bashrc` wins over it, and `jails:` in
 `jailopsd.yaml` changes the defaults of the host ([shell.md](shell.md), also for the green prompt of the host).
 
-An application from the catalog is one command more: `pkg install jailops-apps` puts the definitions under
+An application from the catalog is one command more. The definitions came with the `jailops` package, under
 `/usr/local/share/jailops/apps` (`jailops app list` shows them, `jailops app info nginx` describes one), and
-`jailops app install nginx --network lan --storage default` creates a jail named `nginx`, installs the package into it
+`jailops app install nginx shop --network lan --storage default` creates a jail named `shop`, installs the package into it
 from the FreeBSD repository, enables and starts the service, checks that it answers, snapshots the fresh installation as
 `app-installed` and prints where the site, the configuration and the logs are. `jailops app installed` lists the jails
 that came from the catalog. What the installation does step by step, and what it leaves behind when a step fails, is in
 [apps.md](apps.md).
 
 Without `project switch` pass `--project web` (or set `JAILOPS_PROJECT=web`) on every jail command. `--start` starts the jail
-once it is created (`jailops start nginx` does the same later). Several objects at once come from a file:
+once it is created (`jailops start web` does the same later). Several objects at once come from a file:
 `jailops apply -f site.yaml` creates what is missing and updates what differs, document by document. IPv6, big pools and backups continue in
 [networking-ipv6.md](networking-ipv6.md), [storage.md](storage.md) and [backup-restore.md](backup-restore.md).
 
@@ -279,7 +279,7 @@ base image: the image of the host's own release and architecture, named after it
 created and built in the step, with an optional nightly auto upgrade (one checkbox, off until you tick it, 03:00 by default; see
 [upgrade.md](upgrade.md#nightly-auto-upgrade)) (the build downloads the base system packages from `pkg.freebsd.org` and takes a few minutes; a failed
 build says what to check and is tried again in place). The wizard ends with **Install your first app** (the app
-catalog; `pkg install jailops-apps` installs it), or with **Create the base image** when that step was skipped: apps and
+catalog, which came with the `jailops` package), or with **Create the base image** when that step was skipped: apps and
 jails start from an image, and the Images page (Create image) makes it at any time. `jailops doctor` should then
 report `appliance` ok.
 
@@ -343,7 +343,7 @@ it on the client (a token is valid for one hour by default):
     jailops cert enroll laptop --role operator --projects web          # on the host: prints a single-use token
     jailops remote add myhost host.example.org --token-file -         # on the client: paste the token, then Enter
 
-`remote add` takes one argument here, the host's address (`host` or `host:port`, port 39110 by default): that is the
-form that redeems a trust token. The client pins the server fingerprint from the token (there is no trust on first use),
-makes a key pair and is trusted with the role and projects of the token. (`remote add NAME URL` with two arguments is for
-an API token, `jot_...`.) The web consoles are served by the same listener.
+`remote add NAME ADDRESS` names the host and gives its address (`host` or `host:port`, port 39110 by default). With a
+trust token (`--token-file`) the client pins the server fingerprint from the token (there is no trust on first use),
+makes a key pair and is trusted with the role and projects of the token; with an API token (`jot_...`) the remote is
+saved as it is. The web consoles are served by the same listener.

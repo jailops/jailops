@@ -7,6 +7,6 @@ if [ -f /usr/local/etc/jailops/priv.conf ]; then
 fi
 echo "JailOps is installed. Next, as root, one command:"
 echo "  jailops-setup"
-echo "It sets the host up (the pool, IP forwarding, the host resolver that gives the jails names, the anchor lines in /etc/pf.conf, the service), runs jailops doctor,"
-echo "offers to create the first administrator and prints the console address. It asks before it changes pf;"
-echo "jailops-setup -n shows what it would do. See man jailops-setup."
+echo "It sets the host up (the pool, IP forwarding, the host resolver that gives the jails names, the anchor lines in /etc/pf.conf, the service) and runs jailops doctor."
+echo "It asks before it changes pf; jailops-setup -n shows what it would do. The CLI works as root afterwards;"
+echo "jailops-setup --web adds the web console. See man jailops-setup."
