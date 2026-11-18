@@ -59,3 +59,15 @@ func (c *Client) AuditFiltered(ctx context.Context, f AuditFilter) ([]api.AuditE
 	r, _, err := get[[]api.AuditEntry](ctx, c, "/api/v1/audit", q)
 	return r, err
 }
+
+// NDPStatus returns the state of the neighbor discovery proxy of every uplink (GET /api/v1/ndp).
+func (c *Client) NDPStatus(ctx context.Context) (api.NDPStatus, error) {
+	r, _, err := get[api.NDPStatus](ctx, c, "/api/v1/ndp", nil)
+	return r, err
+}
+
+// NDPEvents returns the recent events of the proxies with a sequence number above after (GET /api/v1/ndp/events).
+func (c *Client) NDPEvents(ctx context.Context, after uint64) (api.NDPEvents, error) {
+	r, _, err := get[api.NDPEvents](ctx, c, "/api/v1/ndp/events", url.Values{"after": {strconv.FormatUint(after, 10)}})
+	return r, err
+}

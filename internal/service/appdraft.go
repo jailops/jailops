@@ -51,11 +51,11 @@ func (s *Service) AppDraft(ctx context.Context, name string) (api.AppDraft, erro
 			WithHint("start it first: jailops start " + name + "; the draft reads the sockets the app listens on")
 	}
 	s.execMu.Lock()
-	installing := s.installing[key]
+	installing, hold := s.installing[key], s.holds[key]
 	s.execMu.Unlock()
 	if installing {
-		return api.AppDraft{}, api.Errorf(api.CodeBusy, "jail %q is busy: packages are being installed or updated", name).
-			WithHint("wait for the installation to end; `jailops op list` shows it")
+		return api.AppDraft{}, api.Errorf(api.CodeBusy, "jail %q is busy: %s is working on it", name, holdWords(hold, s.now())).
+			WithHint("wait for it to end; `jailops op list` shows it")
 	}
 	root := s.rootMount(key)
 	f := apps.DraftFacts{Jail: name, SysVIPC: j.Spec.SysVIPC, Resources: j.Spec.Resources, Errs: map[string]string{}}

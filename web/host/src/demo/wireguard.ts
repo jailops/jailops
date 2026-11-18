@@ -39,7 +39,7 @@ export function tunnels(): WireGuard[] {
 /** The kernel's view: the first peer of a server and every client have shaken hands. */
 export function observe(w: WireGuard): WireGuard {
   const o = structuredClone(w)
-  o.status.up = !o.spec.down
+  o.status.up = !o.spec.disabled
   if (!o.status.up) {
     o.status.peers = []
     return o

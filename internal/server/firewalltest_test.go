@@ -254,3 +254,93 @@ func TestFirewallTestSaysWhenARuleNamesAJailThatIsNotThere(t *testing.T) {
 		}
 	}
 }
+
+// A connection from outside meets the jail's own firewall on the uplink first: an allow rule with an external source
+// admits it there, and a jail with only defaults is closed from the Internet whatever its default_in says. The network
+// is an IPv6 proxy network behind em0 (the layout of a host with one /128 on a shared segment) and an IPv4 subnet
+// the upstream routes (no NAT).
+func TestFirewallTestMeetsTheUplinkOfAJailFromOutside(t *testing.T) {
+	e := seeded(t)
+	c := ctxT(t)
+	fw := e.Admin.Firewall()
+	if _, err := e.Admin.Networks().Create(c, api.Network{Metadata: api.ObjectMeta{Name: "pub"}, Spec: api.NetworkSpec{Uplink: "em0",
+		IPv4: &api.IPv4Net{Subnet: "10.99.0.0/24", Gateway: "10.99.0.1", Range: "10.99.0.10-10.99.0.50"},
+		IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"}}}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := e.Admin.Projects().Get(c, "alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p.Spec.Networks = append(p.Spec.Networks, api.ProjectNetwork{Network: "pub"})
+	if _, err := e.Admin.Projects().Update(c, "alpha", p, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "ssh"}, Spec: api.FirewallPolicySpec{DefaultIn: "allow", DefaultOut: "allow",
+		Rules: []api.FirewallRule{{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"2282"}, Comment: "ssh from anywhere"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	on := func(name string) api.Jail {
+		j := dtest.WebJailOn(name, "pub")
+		j.Spec.Network[0].IPv6 = "auto"
+		return j
+	}
+	open := on("open")
+	open.Spec.Firewall.Policies = []string{"ssh"}
+	startJailIn(t, e.Admin, open)
+	startJailIn(t, e.Admin, on("closed")) // no policy: default_in allow, and no rule that names the Internet
+	test := func(from, to string, port int, family string) api.FirewallTestResult {
+		t.Helper()
+		res, err := fw.Test(c, api.FirewallTestRequest{From: from, To: to, Proto: "tcp", Port: port, Family: family})
+		if err != nil {
+			t.Fatalf("%s -> %s: %v", from, to, err)
+		}
+		return res
+	}
+	for _, f := range []struct{ family, outside, inside string }{
+		{"6", "2001:db8:9::77", "2001:db8:1:2:100::99"}, {"4", "198.51.100.77", "10.99.0.99"},
+	} {
+		// the rule admits the port on the uplink, and then the jail's link
+		res := test(f.outside, "jail:open", 2282, f.family)
+		hops := res.Cases[0].Hops
+		if res.Verdict != api.TestPass || len(hops) != 2 || hops[0].Side != "uplink" || hops[0].Direction != "in" || hops[1].Side != "destination" {
+			t.Fatalf("IPv%s outside -> open:2282: %+v", f.family, res)
+		}
+		if by := hops[0].DecidedBy; by == nil || by.Policy != "ssh" || by.Rule != 1 || !strings.Contains(by.PF, " on em0 ") {
+			t.Fatalf("IPv%s the rule that let it in on the uplink: %+v", f.family, by)
+		}
+		// another port is not named: blocked on the uplink, and the answer says whose rule decides then
+		res = test(f.outside, "jail:open", 2283, f.family)
+		hops = res.Cases[0].Hops
+		if res.Verdict != api.TestBlock || len(hops) != 1 || hops[0].Side != "uplink" || !strings.Contains(hops[0].Why, "uplink em0") {
+			t.Fatalf("IPv%s outside -> open:2283: %+v", f.family, res)
+		}
+		// a jail with only defaults is closed from outside, although its default_in is allow
+		res = test(f.outside, "jail:closed", 2282, f.family)
+		if res.Verdict != api.TestBlock || len(res.Cases[0].Hops) != 1 || res.Cases[0].Hops[0].Side != "uplink" {
+			t.Fatalf("IPv%s outside -> closed:2282: %+v", f.family, res)
+		}
+		// a source inside a network of JailOps does not arrive on an uplink: no uplink hop, and the test says so
+		res = test(f.inside, "jail:open", 2282, f.family)
+		if res.Cases[0].Hops[0].Side == "uplink" || !strings.Contains(strings.Join(res.Caveats, " "), "inside a network of JailOps") {
+			t.Fatalf("IPv%s an address of the network: %+v", f.family, res)
+		}
+	}
+	// doctor says which jails the Internet can reach: the one with the rule, not the one with only defaults
+	rep, err := e.Admin.Doctor(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, ck := range rep.Checks {
+		if ck.Name == "jails.exposed" {
+			found = true
+			if ck.Status != api.DoctorInfo || !strings.Contains(ck.Message, "alpha/open") || !strings.Contains(ck.Message, "2282") || strings.Contains(ck.Message, "alpha/closed") {
+				t.Errorf("jails.exposed: %+v", ck)
+			}
+		}
+	}
+	if !found {
+		t.Error("doctor has no jails.exposed line")
+	}
+}

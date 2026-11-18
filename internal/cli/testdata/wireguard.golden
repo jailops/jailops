@@ -93,11 +93,11 @@ $ jailops wireguard status home
 PEER       ADDRESS        HANDSHAKE   RECEIVED / SENT     ENDPOINT
 (server)   10.99.0.0/24   3h ago      4.0 KiB / 8.0 KiB   203.0.113.10:51820
 
-$ jailops wireguard down home
-wireguard/home is down
+$ jailops wireguard disable home
+wireguard/home is disabled
 
-$ jailops wireguard up home
-wireguard/home is up
+$ jailops wireguard enable home
+wireguard/home is enabled
 
 $ jailops -y wireguard rotate-keys office
 PUBLIC KEY

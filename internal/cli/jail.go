@@ -42,7 +42,7 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 	d.del = func(ctx context.Context, c *sdk.Client, n string) (opHandle, error) {
 		return handle(c.Jails().Delete(ctx, n))
 	}
-	d.head = []string{"NAME", "STATE", "IMAGE", "GEN", "ADDRESSES", "AUTOSTART", "AGE"}
+	d.head = []string{"NAME", "STATE", "IMAGE", "GEN", "ADDRESSES", "AUTOSTART", "USED", "AGE"}
 	d.style = stateStyle(1)
 	d.row = func(now time.Time, j api.Jail) []string {
 		addrs := slices.Clone(j.Status.Addresses)
@@ -56,14 +56,14 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 			}
 		}
 		return []string{j.Metadata.Name, dash(string(j.Status.Power)), j.Spec.Image, dash(j.Status.Generation),
-			joinOrDash(addrs), autostartCell(j), age(now, j.Metadata.CreatedAt)}
+			joinOrDash(addrs), autostartCell(j), usedCell(j), age(now, j.Metadata.CreatedAt)}
 	}
 	// On a terminal: one address per line with its network, the generation
 	// next to the image, and no column a long IPv6 address would crowd out.
 	d.brief = &listView[api.Jail]{
-		head:  []string{"NAME", "STATE", "IPV4", "IPV6", "IMAGE", "AUTOSTART", "AGE"},
+		head:  []string{"NAME", "STATE", "IPV4", "IPV6", "IMAGE", "AUTOSTART", "USED", "AGE"},
 		style: stateStyle(1),
-		drop:  []int{6, 4, 3, 2},
+		drop:  []int{7, 6, 4, 3, 2},
 		row: func(now time.Time, j api.Jail) []string {
 			var v4, v6 []string
 			for _, n := range j.Spec.Network {
@@ -75,7 +75,7 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 				}
 			}
 			return []string{j.Metadata.Name, dash(string(j.Status.Power)), linesOrDash(v4), linesOrDash(v6),
-				imageWithGen(j.Spec.Image, j.Status.Generation, j.Status.FreeBSDVersion), autostartCell(j), age(now, j.Metadata.CreatedAt)}
+				imageWithGen(j.Spec.Image, j.Status.Generation, j.Status.FreeBSDVersion), autostartCell(j), usedCell(j), age(now, j.Metadata.CreatedAt)}
 		},
 	}
 	d.filters = func(cmd *cobra.Command) func() (func(api.Jail) bool, error) {
@@ -174,6 +174,11 @@ func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name strin
 // jailDefaults gives a jail without a network or a storage (and without a profile, which may carry them) the
 // project's only grant of that kind, as app install does, and says which it took.
 func (a *app) jailDefaults(ctx context.Context, c *sdk.Client, j *api.Jail) error {
+	if j.Spec.Image == "" {
+		if err := a.defaultImage(ctx, c, j); err != nil {
+			return err
+		}
+	}
 	if len(j.Spec.Profiles) > 0 || (len(j.Spec.Network) > 0 && j.Spec.Storage != "") {
 		return nil
 	}
@@ -195,6 +200,28 @@ func (a *app) jailDefaults(ctx context.Context, c *sdk.Client, j *api.Jail) erro
 		}
 	}
 	return nil
+}
+
+// defaultImage gives a jail without an image the host's only image and says so, like the network and the storage; with
+// none or several images it asks for one and lists them.
+func (a *app) defaultImage(ctx context.Context, c *sdk.Client, j *api.Jail) error {
+	images, err := collect(c.Images().List(ctx))
+	if err != nil {
+		return err
+	}
+	switch len(images) {
+	case 0:
+		return usagef("--image is required (or use -f FILE); this host has no image yet: jailops image create NAME --release RELEASE")
+	case 1:
+		j.Spec.Image = images[0].Metadata.Name
+		fprintf(a.env.Stderr, "image %s: the only image\n", j.Spec.Image)
+		return nil
+	}
+	var names []string
+	for _, im := range images {
+		names = append(names, im.Metadata.Name)
+	}
+	return usagef("--image is required (or use -f FILE): this host has %s", strings.Join(names, ", "))
 }
 
 // count is "1 snapshot", "3 snapshots".
@@ -403,7 +430,7 @@ The server allocates "auto" addresses from the network and writes them back into
 the specification.
 
 Volumes are attached afterwards: 'jailops volume create' makes one and 'jailops volume attach JAIL
-VOLUME PATH' puts it into a stopped jail. Deleting the jail never deletes a volume.
+VOLUME PATH' puts it into a jail, running or not. Deleting the jail never deletes a volume.
 
 A jail starts when the host boots only with --autostart (boot.autostart); a jail that
 was running before a reboot does not come back on its own.
@@ -455,14 +482,14 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	)
 	f := cmd.Flags()
 	f.StringVar(&comment, "comment", "", "what the jail is for")
-	f.StringVar(&image, "image", "", "image reference: NAME (the newest generation), NAME@alias or NAME#gN (required without -f)")
+	f.StringVar(&image, "image", "", "image reference: NAME (the newest generation), NAME@alias or NAME#gN (default: the host's only image)")
 	f.StringVar(&storage, "storage", "", "storage to place the jail on, one granted to the project (default: the project's only storage, unless a profile supplies it)")
 	f.StringArrayVar(&profiles, "profile", nil, "profile to apply, later ones override earlier ones (repeatable)")
 	f.StringVar(&layout, "layout", "", "root layout: thin or thick (default depends on the image)")
 	f.StringVar(&hostname, "hostname", "", "hostname inside the jail (default: the jail name)")
 	f.StringArrayVar(&networks, "network", nil, "attach a network granted to the project (repeatable; default: the project's only network, unless a profile supplies one): NET (an address of every family it has), NET=IPV4 or NET=IPV4,IPV6 (an address, auto or none)")
 	f.IntVar(&cpu, "cpu", 0, "CPU cores: the jail is slowed down to that share (rctl pcpu; needs kern.racct.enable=1)")
-	f.StringVar(&memory, "memory", "", "anonymous memory the jail may reserve in total, for example 2G (rctl swapuse; needs kern.racct.enable=1)")
+	f.StringVar(&memory, "memory", "", "limit on the anonymous (swap-backed) memory the jail may reserve, for example 2G; an allocation beyond it fails and nothing is killed. `jailops info JAIL` shows it as \"reserved\", next to the resident memory (rctl swapuse; needs kern.racct.enable=1)")
 	f.StringVar(&disk, "disk", "", "ZFS quota of the whole jail (root, data, volumes and snapshots), for example 20G")
 	f.IntVar(&pids, "pids", 0, "processes the jail may have (rctl maxproc; needs kern.racct.enable=1)")
 	f.StringArrayVar(&fwPolicies, "firewall-policy", nil, "firewall policy of the jail (repeatable; they are rendered in the order given, after the project's). On set the policies given REPLACE the whole list of the jail; to add one name all of them")
@@ -474,7 +501,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringArrayVar(&depends, "depends", nil, "jail that must start first (repeatable)")
 	f.StringArrayVar(&envs, "env", nil, "environment variable KEY=VALUE (repeatable)")
 	f.StringArrayVar(&labels, "label", nil, "label KEY=VALUE (repeatable)")
-	f.StringVar(&strategy, "update-strategy", "", "how the jail follows its image: rebase, inplace or manual")
+	f.StringVar(&strategy, "update-strategy", "", "how the jail follows its image: rebase (a thin jail moves to a newer generation; the default), inplace (thick and Linux jails only) or manual")
 	f.StringVar(&window, "update-window", "", "update window, for example \"sun 03:00\"")
 	f.StringVar(&shell, "shell", "", "shell of jailops shell and the console: bash, sh or a path inside the jail (default: the host's jails.shell, bash)")
 	f.StringVar(&prompt, "prompt", "", "bash prompt of the jail: default, short, none or a PS1 text that may hold {jail}, {project} and {host} (default: the host's jails.prompt)")
@@ -496,9 +523,6 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	enumFlag(cmd, "layout", string(api.LayoutThin), string(api.LayoutThick))
 	enumFlag(cmd, "update-strategy", string(api.UpdateRebase), string(api.UpdateInPlace), string(api.UpdateManual))
 	return func(name string) (api.Jail, error) {
-		if image == "" && !a.partial {
-			return api.Jail{}, usagef("--image is required (or use -f FILE)")
-		}
 		spec := api.JailSpec{
 			Comment: comment, Image: image, Layout: api.Layout(layout), Hostname: hostname,
 			Storage: storage, Profiles: dropEmpty(profiles),
@@ -1135,6 +1159,14 @@ func orNone(s string) string {
 		return "(not set)"
 	}
 	return s
+}
+
+// usedCell is the USED column of a jail list: what the jail's own datasets take on the pool, "-" when it is not known.
+func usedCell(j api.Jail) string {
+	if j.Status.DiskUsed <= 0 {
+		return "-"
+	}
+	return humanBytes(j.Status.DiskUsed)
 }
 
 // autostartCell is the AUTOSTART column of a jail list: whether the jail starts when the host boots.

@@ -290,8 +290,9 @@ func TestADefaultAllowAnchor(t *testing.T) {
 }
 
 // "any" as the destination of an allow rule is every address but the host's and those of the other projects: a jail that
-// may reach the internet on port 22 does not reach the host's sshd or the jails of another project. The host is opened
-// by naming it, and a deny rule to "any" still denies the host.
+// may reach the internet on port 22 does not reach the host's sshd or the jails of another project. The host is closed
+// before the allow rules, so no allow rule opens it, whatever it names: the host itself, a prefix that holds a host address
+// or all of IPv4. The jails of other projects are opened by naming their prefix.
 func TestAnyDestinationDoesNotReachTheHostOrOtherProjects(t *testing.T) {
 	hostAddr := netip.MustParseAddr("10.20.0.1")
 	foreign4 := netip.MustParseAddr("10.30.0.5")
@@ -317,12 +318,31 @@ func TestAnyDestinationDoesNotReachTheHostOrOtherProjects(t *testing.T) {
 		{"another jail of the project", []api.FirewallRule{out("ssh", "allow")}, peer4, Pass, "policy"},
 		{"the host", []api.FirewallRule{out("ssh", "allow")}, hostAddr, Block, "host"},
 		{"another project", []api.FirewallRule{out("ssh", "allow")}, foreign4, Block, "isolation"},
-		{"the host, named", []api.FirewallRule{out("ssh", "allow", "host")}, hostAddr, Pass, "policy"},
+		{"the host, named", []api.FirewallRule{out("ssh", "allow", "host")}, hostAddr, Block, "host"},
+		{"a prefix that holds the host", []api.FirewallRule{out("ssh", "allow", "10.20.0.0/24")}, hostAddr, Block, "host"},
+		{"all of IPv4", []api.FirewallRule{out("ssh", "allow", "0.0.0.0/0")}, hostAddr, Block, "host"},
 		{"another project, named", []api.FirewallRule{out("ssh", "allow", "10.30.0.0/24")}, foreign4, Pass, "policy"},
+		{"another project, named by an address", []api.FirewallRule{out("ssh", "allow", "10.30.0.5")}, foreign4, Pass, "policy"},
+		{"all of IPv4 does not name another project", []api.FirewallRule{out("ssh", "allow", "0.0.0.0/0")}, foreign4, Block, "isolation"},
+		{"a /8 that holds another project does not name it", []api.FirewallRule{out("ssh", "allow", "10.0.0.0/8")}, foreign4, Block, "isolation"},
 		{"explicit any", []api.FirewallRule{out("ssh", "allow", "any")}, hostAddr, Block, "host"},
 		{"a deny to any denies the host", []api.FirewallRule{out("no ssh", "deny"), out("ssh", "allow", "host")}, hostAddr, Block, "policy"},
 	} {
 		a := build(tc.rules...)
 		check(t, tc.name, Evaluate(a, tcp(jail4, tc.dst, 22), fromJail), tc.want, tc.stage)
 	}
+}
+
+// An `allow in` rule of this project from any address does not admit the jails of another project: its isolation does not
+// depend on what the other project's policy says, and the other project's `allow out to 0.0.0.0/0` does not reach it.
+func TestAllowInFromAnyDoesNotAdmitAnotherProject(t *testing.T) {
+	foreign4 := netip.MustParseAddr("10.30.0.5")
+	a := anchor(t, func(in *render.PFInput) {
+		in.Foreign = []netip.Prefix{netip.MustParsePrefix("10.30.0.0/24")}
+		in.Policies = []render.PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
+			{Name: "world", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80"}, From: []string{"any"}},
+		}}}}
+	})
+	check(t, "the internet", Evaluate(a, tcp(far4, jail4, 80), intoJail), Pass, "policy")
+	check(t, "a jail of another project", Evaluate(a, tcp(foreign4, jail4, 80), intoJail), Block, "isolation")
 }

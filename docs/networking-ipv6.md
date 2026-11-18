@@ -30,7 +30,8 @@
     jailops list --project shop          # ADDRESSES shows the IPv4 and the IPv6 address
 
 `--ipv4 ADDR/PREFIX` makes the rest of the subnet the range; `--ipv6 PREFIX` is for routed mode. For anything finer
-(explicit ranges, `proxy` mode, DNS servers, exclusions) use a file: `jailops network create NAME -f file.yaml`.
+(explicit ranges, DNS servers, exclusions) use a file: `jailops network create NAME -f file.yaml`; a prefix on a shared
+segment adds `--ipv6-mode proxy` (see [Switched](#switched-the-ndp-proxy)).
 
 ## Name resolution of jails
 
@@ -43,10 +44,8 @@ JailOps writes a jail's `/etc/resolv.conf` when the jail starts, with the namese
    the network's **gateway address**, the host's own address on every jail's link. With the base system's resolver
    (`local_unbound`) that is all it takes: `jailops-setup` enables it and the helper writes the one file it needs under
    `/var/unbound/conf.d` (the gateway addresses it listens on, the subnets it answers and the names of the jails); see
-   [dns.md](dns.md). A jail whose firewall policy denies outgoing traffic needs a rule
-   for udp and tcp port 53 to the gateway, and a host `pf.conf` that blocks traffic to the host itself a pass rule for it
-   on the jails' interfaces (the interface group `epair`). With `block log all` and `set skip on lo0` nothing more was needed on the
-   test host. On a network with IPv6 the jail asks a second address, or only that one on an IPv6 only network: the
+   [dns.md](dns.md). Every jail reaches the gateway on udp and tcp port 53 whatever its
+   firewall policy (a deny rule closes it), and `/etc/pf.conf` needs nothing for it: JailOps' firewall governs the jails. On a network with IPv6 the jail asks a second address, or only that one on an IPv6 only network: the
    network's **resolver address** (the second address of the IPv6 subnet, for example `2001:db8:1:2:100::1`), which
    the helper makes the host hold on its loopback and unbound listen on while the names of the jails are on
    ([dns.md](dns.md#nothing-to-configure)). A link-local gateway cannot be written into a `resolv.conf`.
@@ -69,7 +68,7 @@ helper's file operations, which replace only a regular file inside the jail's ro
 | | `routed` | `proxy` |
 |---|---|---|
 | The provider gives you | a prefix routed to the host's address | a `/64` on the shared segment of the uplink |
-| Who answers neighbor discovery | nobody has to; the upstream router already knows the prefix lives behind the host | the JailOps proxy, for each allocated address |
+| Who answers neighbor discovery | nobody has to; the upstream router already knows the prefix lives behind the host | the JailOps proxy of the network, for the whole range |
 | The jails' prefix | a `/80` (or any length) carved out of the routed prefix | a `/80` inside the shared `/64` |
 | Jail gateway | the link-local `fe80::1` on the jail's link | the link-local `fe80::1` on the jail's link |
 | Depends on the proxy | never | always |
@@ -113,6 +112,15 @@ JailOps answers it itself.
 
    `jailops network create web -f web.yaml`. The uplink must be a plain interface, not a member of one of your bridges (JailOps checks).
 
+   A network that exists switches with one command, for good (the setting is kept in the network and the proxy runs again
+   after a reboot):
+
+       jailops network ndp-proxy enable web      # the prefix is on a shared segment: the host answers for the range
+       jailops network ndp-proxy disable web     # the provider routes the prefix to this host
+
+   `--ipv6-range a-b` chooses the allocation range of the prefix. By default it is 240 addresses, `::10` to `::ff` of a
+   `/80`, so the low addresses stay free for you.
+
    **The subnet lies inside the segment of the uplink.** JailOps refuses a proxy subnet outside the segment the uplink is
    on. The segment is the prefix of the host's global address on the uplink; the host usually holds that address as a
    `/128` (`inet6 2001:db8:1:2::1 prefixlen 128`), and then the segment is the `/64` around it, so any subnet inside
@@ -131,27 +139,34 @@ JailOps answers it itself.
    is given); `jailops doctor` fails `network.uplink` for it, for a bridge member and for a virtual interface (lo, epair,
    tun, gif, wg, lagg and so on). The proxy was verified on a physical (virtio) uplink; **UNVERIFIED** on a vlan(4).
 
-3. **What the proxy does** for each address of a *running* jail:
+3. **What the proxy does.** One proxy per uplink answers for the **allocation range of each network in proxy mode, whether
+   a jail runs on an address or not**: there is nothing to register when a jail starts, so the first packet of a new jail
+   never waits for the proxy. It answers for the first 1024 addresses of the range and for the address of every running
+   jail; a range larger than that is answered above the limit only while the jail runs (`network ndp-proxy status` says
+   so). It does the following:
    - answers the router's neighbor solicitation with the **host's own MAC** (the router then sends the traffic to the host,
      which routes it), within a millisecond; unicast solicitations of the router's reachability checks are answered too;
-   - announces the address (an unsolicited advertisement, override flag only, to all nodes) when it appears and whenever the
-     capture is reopened, so the first packets are not left waiting for the router's timers;
-   - installs a `/128` host route through the jail's own link, and removes it **and the host's cached neighbor entry**
-     (`ndp -d`) when the jail stops, so a new jail that gets the same address is reachable at once. A route that
-     outlives its jail (the daemon was killed, a jail vanished, a reboot) would blackhole the address: the reconcile loop,
-     on every pass and so at daemon start, puts back the `/128` route of every running jail (a route disappears with its
-     jail's link, so none outlives its jail);
-   - joins the solicited-node multicast group of each address;
+   - announces every address of the range once when the proxy starts and whenever the capture is reopened, and a jail's
+     address three times when the jail starts, so a router that cached a failed resolution while the jail was down
+     learns the host's MAC at once; announcements are rate-limited (10 a second);
+   - captures with the uplink in promiscuous mode (`ifconfig` shows PROMISC while the daemon runs) so that no multicast
+     filter of the network card or the hypervisor can hide a solicitation, and joins the solicited-node multicast group
+     of every address of the range, which a snooping switch needs to forward the question to this port;
+   - installs a `/128` host route through the jail's own link for a **running** jail only, and removes it **and the host's
+     cached neighbor entry** (`ndp -d`) when the jail stops, so a new jail that gets the same address is reachable at once.
+     A route that outlives its jail would blackhole the address: the reconcile loop puts back the `/128` route of every
+     running jail on every pass, and so at daemon start;
+   - sends a packet for an address of the range that no jail runs into a reject route of the prefix: the sender gets an
+     ICMPv6 error and the packet never leaves the uplink again;
    - **defends** an address when another host of the segment runs duplicate address detection for it (a solicitation
      from `::`): the proxy answers with an advertisement to all nodes, so that host sees the duplicate. The capture sees the
      uplink only (BPF, inbound direction), and a jail runs its own DAD on its own link, which never
      reaches it, so a jail's DAD is not answered;
-   - never answers for the host's own addresses (its kernel does), ignores everything outside the addresses it allocated,
-     and rate-limits itself. An announcement that the helper refuses (it reads the routing table at most every second
-     and a quarter, and a route that was installed a moment ago may not be in its reading yet) is tried again after
-     1.2 seconds, up to 20 times, and does not use up one of its three repeats.
-
-   There is no switch for it in `jailopsd.yaml`: it runs for every network in `proxy` mode.
+   - never answers for the host's own addresses (its kernel does), for the resolver address of the network (the second
+     address of the prefix, held on the loopback), or for an address outside the range, and rate-limits itself. An
+     announcement that the helper refuses (it reads the routing table at most every second and a quarter, and a route
+     that was installed a moment ago may not be in its reading yet) is tried again after 1.2 seconds, up to 20 times,
+     and does not use up one of its three repeats.
 
    **A neighbor that sends too many solicitations** cannot make the host spend its time on them: the proxy looks at no
    more than 50 solicitations a second (a burst of 100) from one hardware address and at 2000 a second (a burst of
@@ -202,6 +217,20 @@ address was reachable from outside within about three seconds of its jail starti
 were unaffected; and the PF traffic matrix passed while the proxy ran (design 18.10, 18.11).
 **UNVERIFIED:** the defence against another host's duplicate address detection (unit tested; it needs a second machine on the segment, and the test hosts have none), the retry of a refused announcement on a live host (unit tested), providers that filter by MAC address or limit neighbor discovery, hundreds of proxied addresses on one
 uplink, MLD-snooping switches, removing and recreating the uplink while the proxy runs.
+
+### Seeing what the proxy does
+
+A jail on a switched network that has no IPv6 outside is usually a router that asked "who has this address" and got no
+answer. `jailops network ndp-proxy status NETWORK` shows whether the proxy is on, the range it answers for, how many
+questions it got, answered and dropped, when the last question, answer and announcement were, and a table of the addresses
+that were asked for or have a running jail, with what happened to the last question of each:
+
+    jailops network ndp-proxy status web
+    jailops network ndp-proxy watch web        # each question and answer as it happens; --count N stops after N
+
+An address with `seen` above zero and `answered` zero is one the router asked for and the proxy did not answer: the
+last drop says why (a rate limit, a refusal of the helper). An address the router never asked for does not appear. `-o json`
+prints the same for scripts. The last 256 events are kept in memory; `status` and `watch` need a global identity, a read-only one is enough; `enable` and `disable` need a global operator.
 
 ## Bandwidth limits
 
@@ -260,15 +289,12 @@ stops when its rule goes.
 - **PF scrub.** Anchors accept `match ... scrub (...)` and `scrub` rules (checked with `pfctl -a` on FreeBSD 15.1), but
   JailOps renders none: the host's `pf.conf` owns normalisation (`scrub in all fragment reassemble`, see
   [install.md](install.md)), and `jailops doctor` warns (`pf.scrub`) when the loaded main ruleset has no scrub rule.
-- **Inbound connections from the internet** into a jail on a proxy or routed network need a rule of yours in the host's
-  `pf.conf` when it blocks inbound traffic on the uplink by default. JailOps never edits that file. For jails in
-  `2001:db8:1:2:100::/80` behind `vtnet0` and a service on port 8080:
-
-      pass in quick on vtnet0 inet6 proto tcp from any to 2001:db8:1:2:100::/80 port 8080
-
-  The jail's own anchor still decides what reaches the jail. (Verified on FreeBSD 15.1 amd64: a jail on a proxy-mode
-  network listened on 8080 and `curl -6 http://[<jail address>]:8080/` from another host, across the internet, returned
-  its answer; the rule was removed and the ruleset reloaded afterwards.)
+- **Inbound connections from the internet** into a jail on a proxy or routed network are opened by the jail's own firewall,
+  not by `pf.conf`. An `allow in` rule with an external source in a policy of the jail
+  (`jailops firewall rule add web in --action allow --proto tcp --port 8080`) renders `pass in quick on <uplink> ... to
+  <jail address> port 8080` in the jail's anchor, which wins over the host's `block ... all` wherever the anchor line
+  stands. A jail with only defaults stays closed from the internet, and `jailops firewall test --from <address outside>
+  --to jail:web --port 8080` walks that hop too. See [install.md](install.md) section 3.
 - A rule has an action (`allow` or `deny`), a direction (`in` or `out`) and, as it needs them, a protocol, `from` and `to` endpoints, ports, `log`, a redirect, a name, a comment and `disabled`. The rules of a policy are added and changed one at a time with `jailops firewall rule` (`add`, `list`, `edit`, `move`, `enable`, `disable`, `remove`), each rule addressed by its number or its name, or all at once in a file.
   A rule belongs to the jail that has the policy: an inbound rule is always to the jail itself and an outbound rule always from it, so an inbound rule names only `from` and an outbound rule only `to` (`to` on an inbound rule and `from` on an outbound rule are refused).
   A rule with a redirect (`--redirect HOSTPORT:JAILPORT`, `redirect:` in a file; it names the ports, so the rule has no `port`) is a port forward, which only a global administrator makes ([networking.md](networking.md#forwarded-ports)): a connection to the network's uplink address (or the `listen` address)
@@ -276,6 +302,15 @@ stops when its rule goes.
   rule on the uplink (`pass in quick on <uplink> … to <jail> port JAILPORT`), which admits what the rule's `from` names,
   also where the host's own rules block inbound traffic. The state of a connection that came through the forward is ended
   when the rule is removed or changed.
+  An `allow in` rule with an external source (`any`, an address, a prefix or an address set) and no redirect is rendered the
+  same way, on the uplink of each routed address of the jail (an IPv6 address of a routed or proxy network, an IPv4
+  address of a network without NAT): `pass in quick on <uplink> ... to <jail address> port N`. That is what exposes a
+  jail to the internet. The defaults, and the rules whose source is `host`, a jail or a tag, never open the uplink; a
+  `deny in` rule is rendered on the uplink first, so it wins at the door as on the jail's link, and a packet that comes
+  in on the uplink from a subnet of the jail's own networks or of another project, or that pf's reverse path check
+  refuses (`urpf-failed`: an address of a tunnel or of the host's own network from outside), is dropped as forged. Every
+  pass on the uplink limits its states (`limits.states` of the jail, else `jails.max_states` of the host, else 5000), so a flood of connection attempts fills
+  the rule and not the host's state table.
   An endpoint is one of these, the same words wherever a firewall names a source or a destination:
 
   | Endpoint | Stands for | Where it is accepted |
@@ -320,8 +355,9 @@ stops when its rule goes.
   policies`). Each group keeps the order of the policies and of the rules, and each rule keeps its heading and its number, so
   rule 3 of `postgres` is still rule 3 of `postgres` in the anchor; a policy that has rules of both kinds appears in both
   groups. Every rule is `quick`, so a connection that a deny rule matches is blocked whichever policy comes first, and an
-  allow rule decides only where no deny rule matches. An anchor without a deny rule is written policy by policy. A raw PF fragment stays after the
-  allow rules of its policy.
+  allow rule decides only where no deny rule matches. An anchor without a deny rule is written policy by policy. The closing of the host (ping and the
+  resolver excepted) stands after the deny rules and before every allow rule, so no allow rule reaches a service of the host. A raw PF
+  fragment stays after the allow rules of its policy, and so after the closing of the host.
 
   **A rule can be switched off without deleting it.** `jailops firewall rule disable web 2` (`--disabled` on `rule add`, `disabled: true` in a file, a checkbox in the console) keeps the rule in the policy: it is validated
   like any other, it keeps its number, `policy show` marks it, and the anchor has it as a comment line (`# rule 2
@@ -393,7 +429,9 @@ they are rendered.
 An end is a jail of the project (`jail:web`), one address (the jail that has it, when there is one), or `host` (the host's
 address on the gateway of the other end's network); a set is not an end. What the source jail sends is judged where it
 arrives on the host, its own link (`in`); what reaches the destination jail is judged where it leaves the host for that
-jail, its own link (`out`). Both hops must pass; each
+jail, its own link (`out`). A connection from an address outside every network of JailOps to a jail's routed address meets
+the jail's anchor on the **uplink** first (`in`): no rule of the jail that admits it there is a block, because the host's own
+pf.conf decides then and blocks inbound traffic by default. All hops must pass; each
 prints the decision (`policy postgres rule 1 "who may reach PostgreSQL"`, a project policy, the managed policy of an app,
 the isolation of projects, or the default of the anchor) and the rendered pf line. An address that belongs to no jail of
 the project, another project's jail included, is an external host: only the other end's anchor is evaluated.

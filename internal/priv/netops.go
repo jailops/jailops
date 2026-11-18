@@ -124,7 +124,7 @@ func (l *Local) checkRejectRoute(ctx context.Context, r ifconfig.Route) error {
 				return nil
 			}
 		}
-		if v6 := d.Spec.IPv6; v6 != nil && v6.Mode == api.IPv6Routed {
+		if v6 := d.Spec.IPv6; v6 != nil && (v6.Mode == api.IPv6Routed || v6.Mode == api.IPv6Proxy) {
 			if q, err := netip.ParsePrefix(v6.Subnet); err == nil && q.Masked() == p.Masked() {
 				return nil
 			}

@@ -8,10 +8,10 @@ table <not_any> persist
 table <jail_addrs> persist { 10.20.0.10, fe80::/10 }
 block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
 block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir
-# policy web
-# the host: closed unless a rule above opened it; ping and the network's resolver stay open
-pass in quick on jo0123456789a0a inet proto icmp from any to <host> label "jo-5af657cde82a" keep state (if-bound)
+# the host: closed to the jail whatever its policies allow; ping, the errors a path needs and the network's resolver stay open
+pass in quick on jo0123456789a0a inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label "jo-0d1b9036447f" keep state (if-bound)
 block drop in quick on jo0123456789a0a from any to <host>
+# policy web
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
-pass out quick on jo0123456789a0a all label "jo-2a02f363a529" keep state (if-bound)
+pass out quick on jo0123456789a0a all label "jo-247d4468fec6" keep state (if-bound)
 block drop in quick on jo0123456789a0a all

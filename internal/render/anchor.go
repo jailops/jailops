@@ -20,6 +20,7 @@ const (
 	StageHost        = "host"          // the host: closed to the jail unless a rule opened it
 	StageDefault     = "default"       // the defaults of the anchor
 	StageClosed      = "closed"        // a jail with a link and no address: nothing goes in or out
+	StageUplink      = "uplink"        // the rules on the uplink: what the jail's policies admit from the Internet
 )
 
 // Anchor is a rendered anchor: its lines, and for every filter rule among them what it matches. The rules are in the
@@ -29,6 +30,11 @@ type Anchor struct {
 	Name  string
 	Lines []string
 	Rules []Rule
+	// Uplinks maps the jail's addresses that the upstream reaches by routing to their uplink: where an external packet
+	// to the jail arrives on the host (a hop of a firewall test).
+	Uplinks map[netip.Addr]string
+	// Tunnels maps the jail's addresses to the WireGuard interfaces whose peers may be admitted to them by an allow in rule.
+	Tunnels map[netip.Addr][]string
 }
 
 // Text is the ruleset as it is loaded.
@@ -59,6 +65,9 @@ type Rule struct {
 	Line int
 	// Action is "pass" or "block".
 	Action string
+	// Iface is the uplink the rule stands on; empty for a rule on the jail's own links (its epairs). Dir "in" with an Iface
+	// is what arrives on the uplink.
+	Iface string
 	// Dir is the pf direction: "in" (what the jail sends, on its link) or "out" (what leaves the host on the jail's link).
 	Dir string
 	// Family is "inet", "inet6" or "" for both.

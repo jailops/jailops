@@ -862,3 +862,40 @@ func TestProjectReplayDeterministic(t *testing.T) {
 		t.Fatalf("replay differs:\n%v\n%v", a, b)
 	}
 }
+
+// A tunnel stored by 0.8.3 as `down` must not come up after the upgrade: the document is rewritten with `disabled` when
+// it is loaded, and a document that has `disabled` already keeps it.
+func TestStoredWireGuardDownBecomesDisabled(t *testing.T) {
+	doc := map[string]any{"kind": "WireGuard", "spec": map[string]any{"interface": "wg-office", "down": true}}
+	if !renameFields(doc) {
+		t.Fatal("a stored `down` was not rewritten")
+	}
+	spec := doc["spec"].(map[string]any)
+	if spec["disabled"] != true || spec["down"] != nil {
+		t.Fatalf("spec after the rewrite: %v", spec)
+	}
+	if renameFields(doc) {
+		t.Fatal("the rewrite is not idempotent")
+	}
+	both := map[string]any{"kind": "WireGuard", "spec": map[string]any{"down": false, "disabled": true}}
+	renameFields(both)
+	if both["spec"].(map[string]any)["disabled"] != true {
+		t.Fatalf("an existing `disabled` was overwritten: %v", both["spec"])
+	}
+	other := map[string]any{"kind": "Network", "spec": map[string]any{"down": true}}
+	if renameFields(other) {
+		t.Fatal("another kind was touched")
+	}
+	raw := []byte(`{"apiVersion":"jailops/v1","kind":"WireGuard","metadata":{"uuid":"u1","name":"office"},"spec":{"interface":"wg-office","down":true}}`)
+	o, changed, err := decodeObject(raw, nil)
+	if err != nil || !changed {
+		t.Fatalf("decode: changed=%v err=%v", changed, err)
+	}
+	var spec2 struct {
+		Disabled bool `json:"disabled"`
+		Down     bool `json:"down"`
+	}
+	if err := json.Unmarshal(o.Spec, &spec2); err != nil || !spec2.Disabled || spec2.Down {
+		t.Fatalf("decoded spec %s: %v", o.Spec, err)
+	}
+}

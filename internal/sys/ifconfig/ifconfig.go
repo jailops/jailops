@@ -128,7 +128,7 @@ func descOrMarker(d string) string {
 }
 
 // ValidateIfName accepts FreeBSD interface names: a letter, then letters,
-// digits, '_' and '.', at most 15 bytes (IFNAMSIZ is 16 with the NUL).
+// digits, '_' and '.' (and '-' in the name of a wg interface), at most 15 bytes (IFNAMSIZ is 16 with the NUL).
 func ValidateIfName(n string) error {
 	if n == "" || len(n) > 15 {
 		return api.Errorf(api.CodeInvalid, "invalid interface name %q", n)
@@ -136,7 +136,8 @@ func ValidateIfName(n string) error {
 	for i := 0; i < len(n); i++ {
 		c := n[i]
 		letter := c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
-		if !(letter || i > 0 && (c >= '0' && c <= '9' || c == '_' || c == '.')) {
+		// a tunnel of JailOps is renamed wg-<name>: the hyphen is allowed in the name of a wg interface only
+		if !(letter || i > 0 && (c >= '0' && c <= '9' || c == '_' || c == '.' || c == '-' && strings.HasPrefix(n, "wg"))) {
 			return api.Errorf(api.CodeInvalid, "invalid interface name %q", n)
 		}
 	}

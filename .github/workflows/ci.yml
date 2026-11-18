@@ -15,6 +15,8 @@ permissions:
 # the Go jobs always get the built consoles: a test fails when one is missing from the binary
 env:
   JAILOPS_REQUIRE_CONSOLE: "1"
+  # the next entry is tried after ANY error of the module proxy, not only after a 404: a stream error of proxy.golang.org failed a run
+  GOPROXY: https://proxy.golang.org|direct
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -192,6 +194,8 @@ jobs:
           key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
+      - name: Fetch the Go modules
+        uses: ./.github/actions/go-modules
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
@@ -257,6 +261,8 @@ jobs:
           key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
+      - name: Fetch the Go modules
+        uses: ./.github/actions/go-modules
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
@@ -315,6 +321,8 @@ jobs:
           key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
+      - name: Fetch the Go modules
+        uses: ./.github/actions/go-modules
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
@@ -354,6 +362,8 @@ jobs:
           key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
+      - name: Fetch the Go modules
+        uses: ./.github/actions/go-modules
       - uses: actions/download-artifact@v8
         with:
           name: console-dist
@@ -432,6 +442,9 @@ jobs:
           key: go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-${{ hashFiles('go.sum') }}
           restore-keys: |
             go-${{ github.job }}-${{ matrix.shard }}${{ matrix.arch }}${{ matrix.part }}-
+      - name: Fetch the Go modules
+        if: matrix.part != 'go'
+        uses: ./.github/actions/go-modules
       - name: Build the binaries for the e2e VM
         if: matrix.part != 'go'
         env:
@@ -453,7 +466,7 @@ jobs:
           PART: ${{ matrix.part }}
           SHARD: ${{ matrix.shard }}
         with:
-          envs: PART SHARD JAILOPS_REQUIRE_CONSOLE
+          envs: PART SHARD JAILOPS_REQUIRE_CONSOLE GOPROXY
           cache-after-prepare: true
           release: "15.1"
           usesh: true
@@ -480,6 +493,7 @@ jobs:
             service postgresql onestart
             n=0; until su -m postgres -c "psql -c 'select 1'" >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && { echo "postgresql does not answer"; exit 1; }; sleep 1; done
             export JAILOPS_TEST_DATABASE_URL="postgres://postgres@127.0.0.1:5432/postgres?sslmode=disable"
+            n=0; until go mod download; do n=$((n + 1)); [ $n -ge 3 ] && exit 1; echo "go mod download failed (attempt $n of 3)"; sleep $((n * 10)); done
             go test ./... -count=1   # go vet runs in the cross-build job on the same GOOS and files
 
   # One name for the whole workflow: green when every job passed or was skipped on purpose (a release-only change).

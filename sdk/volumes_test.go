@@ -45,7 +45,7 @@ func TestVolumes(t *testing.T) {
 	if err := attach("desktop", "/home/ann/Mail"); err != nil {
 		t.Fatal(err)
 	}
-	if v, _ = c.Volumes().Get(ctx, "maildir"); len(v.Status.AttachedTo) != 2 || len(v.Status.Warnings) != 1 || !strings.Contains(v.Status.Warnings[0], "writable in more than one jail") {
+	if v, _ = c.Volumes().Get(ctx, "maildir"); len(v.Status.AttachedTo) != 2 || len(v.Status.Warnings) != 0 {
 		t.Fatalf("%+v", v.Status)
 	}
 	if err := attach("mail", "/srv/other"); !api.IsCode(err, api.CodeAlreadyExists) {
@@ -58,13 +58,20 @@ func TestVolumes(t *testing.T) {
 	if err != nil || len(vols) != 1 || vols[0].Mount != "/var/mail/vhosts" {
 		t.Fatalf("%+v %v", vols, err)
 	}
-	// a running jail neither attaches nor detaches
+	// a running jail detaches and attaches at once
 	sop, _ := c.Jails().Start(ctx, "mail")
 	if _, err := sop.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := c.Jails().DetachVolume(ctx, "mail", "maildir"); !api.IsCode(err, api.CodeBusy) {
+	dop, err := c.Jails().DetachVolume(ctx, "mail", "maildir")
+	if err != nil {
 		t.Fatalf("detach from a running jail: %v", err)
+	}
+	if _, err := dop.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := attach("mail", "/var/mail/vhosts"); err != nil {
+		t.Fatalf("attach to a running jail: %v", err)
 	}
 	// snapshots
 	snop, err := c.Volumes().Snapshots("maildir").Create(ctx, "s1", "first")

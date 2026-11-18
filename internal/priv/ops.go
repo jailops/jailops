@@ -237,7 +237,14 @@ type runArgs struct {
 	Stdin     bool     `json:"stdin,omitempty"`
 	TimeoutMs int64    `json:"timeout_ms,omitempty"`
 	MaxOutput int      `json:"max_output,omitempty"`
+	// GraceMs is how long the command has to end after SIGTERM when its timeout expires or the call is cancelled; it is
+	// killed after that. Zero kills at once. The helper caps it at maxTermGrace.
+	GraceMs int64 `json:"grace_ms,omitempty"`
 }
+
+// maxTermGrace bounds the grace a caller may ask for, so a request cannot keep a process alive for long.
+const maxTermGrace = 10 * time.Second
+
 type netArgs struct {
 	Name   string         `json:"name,omitempty"`
 	Iface  string         `json:"iface,omitempty"`
@@ -646,6 +653,9 @@ func init() {
 	})
 	register(OpRun, true, func(ctx context.Context, h Host, a runArgs, c *callIO) (any, error) {
 		cmd := run.Cmd{Name: a.Name, Args: a.Args, Stdout: c.Out, Timeout: time.Duration(a.TimeoutMs) * time.Millisecond, MaxOutput: a.MaxOutput}
+		if a.GraceMs > 0 {
+			cmd.TermGrace = min(time.Duration(a.GraceMs)*time.Millisecond, maxTermGrace)
+		}
 		if a.Stdin {
 			cmd.Stdin = c.In
 		}

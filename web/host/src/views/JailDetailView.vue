@@ -142,8 +142,6 @@ const rollbackSnap = ref<string | undefined>()
 const upgradeOpen = ref(false)
 const unlockOpen = ref(false)
 const attachOpen = ref(false)
-// volumes are attached and detached while the jail is stopped
-const stoppedOnly = computed(() => !!jail.value && ['running', 'starting', 'stopping'].includes(jail.value.status.power))
 function detach(volume: string): void {
   const name = jail.value?.metadata.name
   if (!name) return
@@ -380,7 +378,7 @@ const attentionItems = computed(() => {
 
         <div class="grid-2">
           <section class="panel">
-            <header><h2>{{ s.jail.volumes }}</h2><button v-if="hasExt('volumes')" class="btn btn-sm" type="button" data-test="attach-volume-open" :disabled="stoppedOnly" :title="stoppedOnly ? s.jail.attachStopped : undefined" @click="attachOpen = true"><Icon name="plus" />{{ s.jail.attach }}</button></header>
+            <header><h2>{{ s.jail.volumes }}</h2><button v-if="hasExt('volumes')" class="btn btn-sm" type="button" data-test="attach-volume-open" @click="attachOpen = true"><Icon name="plus" />{{ s.jail.attach }}</button></header>
             <p v-if="!jail.spec.volumes?.length" class="empty">{{ s.jail.noVolumes }}</p>
             <div v-else class="table-wrap">
               <table data-test="jail-volumes">
@@ -389,7 +387,7 @@ const attentionItems = computed(() => {
                   <tr v-for="v in jail.spec.volumes" :key="v.volume" :data-volume="v.volume">
                     <td class="mono"><router-link :to="`/volumes/${encodeURIComponent(v.volume)}`">{{ v.volume }}</router-link></td>
                     <td class="mono">{{ v.mount }}<span v-if="v.read_only" class="badge info" style="margin-left: 6px">{{ s.jail.readOnly }}</span><span v-if="jail.status.locked?.includes(v.volume)" class="badge warn" style="margin-left: 6px" :data-locked-volume="v.volume">{{ s.volumes.locked }}</span></td>
-                    <td class="actions"><button v-if="hasExt('volumes')" class="btn btn-sm" type="button" :data-detach="v.volume" :disabled="stoppedOnly" :title="stoppedOnly ? s.jail.attachStopped : undefined" @click="detach(v.volume)">{{ s.jail.detach }}</button></td>
+                    <td class="actions"><button v-if="hasExt('volumes')" class="btn btn-sm" type="button" :data-detach="v.volume" @click="detach(v.volume)">{{ s.jail.detach }}</button></td>
                   </tr>
                 </tbody>
               </table>

@@ -12,19 +12,21 @@ import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
 import { runOp } from '@jailops/shared/composables/ops'
 import { confirmAction } from '@jailops/shared/composables/confirm'
-import { rangeSize, percent, sentence } from '@jailops/shared/lib/format'
+import { rangeSize, percent, sentence, ago } from '@jailops/shared/lib/format'
 import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
 import Meter from '@jailops/shared/components/Meter.vue'
 import Callout from '@jailops/shared/components/Callout.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
-import type { Lease, Network } from '@jailops/shared/api/types'
+import type { Lease, Network, NDPNetwork, NDPUplink } from '@jailops/shared/api/types'
 
 const l = useLoad(async () => {
   const nets = await api.networks.list()
   const leases: Record<string, Lease[]> = {}
   await Promise.all(nets.map(async (n) => (leases[n.metadata.name] = await api.networks.leases(n.metadata.name).catch(() => []))))
   const projects = await api.projects.list().catch(() => [])
-  return { nets, leases, projects }
+  // the proxy state needs the operator role: a console without it shows the switch and no status
+  const ndp = await api.ndp().catch(() => null)
+  return { nets, leases, projects, ndp }
 })
 const creating = ref(false)
 const editing = ref<{ net: Network; etag?: string } | null>(null)
@@ -48,6 +50,25 @@ function remove(n: Network): void {
   })
 }
 const canWrite = computed(() => isGlobalAdmin())
+/** What the proxy answers for on a network, and the proxy of its uplink (the counters are the uplink's). */
+function ndpOf(n: Network): { net?: NDPNetwork; up?: NDPUplink } {
+  const d = l.data.value?.ndp
+  return { net: d?.networks?.find((x) => x.name === n.metadata.name), up: d?.uplinks?.find((x) => x.uplink === n.spec.uplink) }
+}
+/** The newest of the times a proxy recorded for its addresses. */
+function newest(up: NDPUplink | undefined, key: 'last_seen' | 'last_answer' | 'last_announce'): string {
+  const ts = (up?.addrs ?? []).map((a) => a[key]).filter((t): t is string => !!t).sort()
+  return ts.length ? ago(ts[ts.length - 1]) : s.networks.ndpNever
+}
+/** Turn the NDP proxy of a network on or off: the same change as `jailops network ndp-proxy enable|disable`. */
+async function toggleNdp(n: Network): Promise<void> {
+  const on = n.spec.ipv6?.mode !== 'proxy'
+  const r = await api.networks.get(n.metadata.name)
+  if (!r.data.spec.ipv6) return
+  const next = { metadata: r.data.metadata, spec: { ...r.data.spec, ipv6: { ...r.data.spec.ipv6, mode: on ? 'proxy' : 'routed' } } } as Pick<Network, 'metadata' | 'spec'>
+  await runOp(s.networks.ndpSwitch, () => api.networks.put(next, r.etag))
+  void l.reload()
+}
 // Rename (extension rename): the generation of the list goes with it as If-Match
 const renaming = ref<Network | null>(null)
 const open = ref<Record<string, boolean>>({})
@@ -108,12 +129,28 @@ function used(n: Network): number {
                   <dt>{{ s.networks.subnet }}</dt><dd><AddrCopy :value="n.spec.ipv6.subnet" /></dd>
                   <dt>{{ s.networks.gateway }}</dt><dd><AddrCopy value="fe80::1" /></dd>
                   <dt>{{ s.networks.range }}</dt><dd><AddrCopy :value="n.spec.ipv6.range" /></dd>
+                  <dt>{{ s.networks.ndpSwitch }}</dt>
+                  <dd>
+                    <span class="badge" :class="n.spec.ipv6.mode === 'proxy' ? 'ok' : 'info'" :data-ndp="n.spec.ipv6.mode === 'proxy' ? 'on' : 'off'">{{ n.spec.ipv6.mode === 'proxy' ? s.networks.on : s.networks.off }}</span>
+                    <button v-if="canWrite" class="btn btn-sm" type="button" style="margin-left: 8px" :disabled="n.spec.ipv6.mode !== 'proxy' && !n.spec.uplink" :title="n.spec.ipv6.mode !== 'proxy' && !n.spec.uplink ? s.networks.ndpNeedsUplink : s.networks.ndpSwitchHelp" :data-test="`ndp-${n.metadata.name}`" @click="toggleNdp(n)">{{ n.spec.ipv6.mode === 'proxy' ? s.networks.ndpDisable : s.networks.ndpEnable }}</button>
+                  </dd>
                 </template>
                 <dt v-if="n.spec.dns?.length">{{ s.networks.dns }}</dt><dd v-if="n.spec.dns?.length"><AddrCopy v-for="a in n.spec.dns" :key="a" :value="a" style="margin-right: 8px" /></dd>
                 <dt v-if="n.spec.mtu">{{ s.networks.mtu }}</dt><dd v-if="n.spec.mtu" class="mono">{{ n.spec.mtu }}</dd>
               </dl>
             </div>
             <p v-if="n.spec.ipv6?.mode" class="faint">{{ s.networks.modeHint[n.spec.ipv6.mode] }}</p>
+            <div v-if="n.spec.ipv6?.mode === 'proxy' && ndpOf(n).up" data-test="ndp-status">
+              <h3>{{ s.networks.ndpStatusTitle }}</h3>
+              <dl class="kv">
+                <dt>{{ s.networks.ndpState }}</dt>
+                <dd v-if="ndpOf(n).up?.open"><span class="badge ok">{{ s.networks.ndpAnswering }}</span> <span class="muted">{{ ndpOf(n).net ? s.networks.ndpAnswersFor(ndpOf(n).net!.answers) : '' }}</span></dd>
+                <dd v-else><span class="badge warn">{{ s.networks.ndpNoCapture(ndpOf(n).up?.error ?? '') }}</span></dd>
+                <dt>{{ s.networks.ndpQuestions }}</dt><dd class="mono">{{ s.networks.ndpCounts((ndpOf(n).up?.addrs ?? []).reduce((a, x) => a + x.seen, 0), ndpOf(n).up?.answered ?? 0, ndpOf(n).up?.dropped ?? 0) }}</dd>
+                <dt>{{ s.networks.ndpLast }}</dt><dd class="mono">{{ newest(ndpOf(n).up, 'last_seen') }} / {{ newest(ndpOf(n).up, 'last_answer') }} / {{ newest(ndpOf(n).up, 'last_announce') }}</dd>
+              </dl>
+              <p v-if="ndpOf(n).net?.beyond" class="faint">{{ s.networks.ndpBeyond(1024) }}</p>
+            </div>
             <Callout v-if="n.status.orphans?.length" tone="warn">
               <strong>{{ s.networks.orphans }}</strong>: <span class="mono">{{ n.status.orphans.join(', ') }}</span><br /><span class="muted">{{ s.networks.orphanHint }}</span>
             </Callout>

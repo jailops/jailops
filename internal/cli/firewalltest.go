@@ -31,11 +31,13 @@ The test walks the anchors JailOps renders and loads: what the source jail sends
 on its own port, what reaches the destination jail leaves the host on the gateway interface
 of its network. Each hop prints the rule that decided: the policy, the number of the rule,
 its name and comment, and the rendered pf line. For a connection between two jails both
-hops must pass.
+hops must pass. A connection from an address outside every network of JailOps to a jail's
+routed address meets the jail's anchor on the uplink first: when no rule of the jail admits it
+there, it is blocked (an "allow in" rule with an external source opens the uplink).
 
 It does not cover what it cannot know, and says so: a connection that is already open (pf
-keeps its state), the host's own pf.conf, NAT, and a raw PF fragment, which makes the answer
-unknown. The ICMP tests default to an echo request (ping); --icmp-type names another.
+keeps its state), the host's own pf.conf (a quick rule of yours before the anchor line wins:
+jailops doctor, pf.inbound), NAT, and a raw PF fragment, which makes the answer unknown. The ICMP tests default to an echo request (ping); --icmp-type names another.
 
 Exit status: 0 the connection would pass, 1 it would be blocked, 8 the test cannot say.`,
 		Example: `jailops firewall test --from jail:web --to jail:db --port 5432
@@ -104,6 +106,7 @@ var stageText = map[string]string{
 	"default":       "the default of the anchor",
 	"closed":        "the closed link of a jail without an address",
 	"gateway":       "the rules of the gateway interface",
+	"uplink":        "the rule against forged sources on the uplink",
 	"raw":           "a raw PF fragment",
 }
 
@@ -129,8 +132,13 @@ func printFirewallTest(a *app, res api.FirewallTestResult, verbose bool) {
 		fprintf(w, "%s %s -> %s (%s): %s\n", what, c.From, c.To, c.Family, strings.ToUpper(c.Verdict))
 		for _, h := range c.Hops {
 			who := "takes"
-			if h.Side == "source" {
+			switch h.Side {
+			case "source":
 				who = "sends"
+			case "uplink":
+				who = "on the uplink"
+			case "tunnel":
+				who = "on the tunnel"
 			}
 			switch {
 			case h.DecidedBy != nil:
@@ -171,8 +179,13 @@ func printFirewallTestVerbose(a *app, res api.FirewallTestResult) {
 		fprintf(w, "%s %s -> %s (%s)\n", what, c.From, c.To, c.Family)
 		for _, h := range c.Hops {
 			side := "into"
-			if h.Side == "source" {
+			switch h.Side {
+			case "source":
 				side = "out of"
+			case "uplink":
+				side = "from the uplink into"
+			case "tunnel":
+				side = "from the tunnel into"
 			}
 			fprintf(w, "  %s %s (%s, %s): %s", side, h.Jail, h.Anchor, h.Direction, strings.ToUpper(h.Verdict))
 			switch {

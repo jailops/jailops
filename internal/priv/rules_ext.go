@@ -344,8 +344,11 @@ func (c Config) hostMountSource(p string) bool {
 	return false
 }
 
-func verifyMount(_ context.Context, l *Local, args []string) error {
+func verifyMount(ctx context.Context, l *Local, args []string) error {
 	if i := slices.Index(args, "nullfs"); i == 1 && len(args) >= 4 {
+		if err := checkVolumeMountTarget(ctx, l, args[len(args)-2], args[len(args)-1]); err != nil {
+			return err
+		}
 		// a source of the host's own directories is held to the allowed directory it lies below, links and all
 		src := args[len(args)-2]
 		for _, r := range l.cfg.Admin.HostMountRoots {

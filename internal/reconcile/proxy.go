@@ -7,6 +7,7 @@ import (
 	"net/netip"
 	"time"
 
+	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/ndproxy"
 	"jailops.net/jailops/sdk/api"
 )
@@ -18,11 +19,13 @@ type proxyHandle struct {
 	err    error
 }
 
-// proxyPass keeps one neighbor discovery proxy per uplink in step with the
-// addresses of running jails on proxy-mode networks. A proxy-mode network always has one; what a daemon may do on
-// the uplink is the operator's decision in the helper's configuration, and the network says so when it is refused.
-// Routed IPv6 never depends on it.
+// proxyPass keeps one neighbor discovery proxy per uplink in step with the networks in proxy mode that use it. The
+// proxy answers for the allocation range of each network (ipam.ProxyAddrs6) whether a jail runs or not, and holds the
+// host route of every running jail. A proxy-mode network always has one; what a daemon may do on the uplink is the
+// operator's decision in the helper's configuration, and the network says so when it is refused. Routed IPv6 never
+// depends on it.
 func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, netStatus map[string]*api.NetworkStatus, rep *Report, now time.Time) {
+	rangeNote := map[string]string{}
 	proxyNets := map[string]bool{} // networks in proxy mode
 	for _, n := range des.Networks {
 		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy {
@@ -43,8 +46,28 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 		}
 		return
 	}
-	byUplink := map[string][]ndproxy.Entry{}
+	byUplink := map[string]*ndproxy.Desired{}
 	uplinkNets := map[string][]string{} // uplink -> the proxy-mode networks that use it
+	for _, n := range des.Networks {
+		if n.Spec.IPv6 == nil || n.Spec.IPv6.Mode != api.IPv6Proxy || n.Spec.Uplink == "" {
+			continue
+		}
+		d := byUplink[n.Spec.Uplink]
+		if d == nil {
+			d = &ndproxy.Desired{}
+			byUplink[n.Spec.Uplink] = d
+		}
+		uplinkNets[n.Spec.Uplink] = append(uplinkNets[n.Spec.Uplink], n.Name)
+		addrs, more, err := ipam.ProxyAddrs6(n.Spec.IPv6)
+		if err != nil {
+			setCond(n.Name, false, "BadRange", err.Error())
+			continue
+		}
+		if more {
+			rangeNote[n.Name] = fmt.Sprintf("the range is larger than the %d addresses the proxy answers for; the addresses above it are answered while their jail runs", ipam.AnswerLimit6)
+		}
+		d.Addrs = append(d.Addrs, addrs...)
+	}
 	for _, j := range des.Jails {
 		if _, up := obs.Running[j.Name]; !up {
 			continue
@@ -54,18 +77,12 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 			if err != nil {
 				continue
 			}
-			byUplink[p.Uplink] = append(byUplink[p.Uplink], ndproxy.Entry{Addr: a, Iface: p.Iface})
-		}
-	}
-	for _, n := range des.Networks {
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy && n.Spec.Uplink != "" {
-			uplinkNets[n.Spec.Uplink] = append(uplinkNets[n.Spec.Uplink], n.Name)
-			if _, ok := byUplink[n.Spec.Uplink]; !ok {
-				byUplink[n.Spec.Uplink] = nil
+			if d := byUplink[p.Uplink]; d != nil {
+				d.Routes = append(d.Routes, ndproxy.Entry{Addr: a, Iface: p.Iface})
 			}
 		}
 	}
-	for uplink, entries := range byUplink {
+	for uplink, desired := range byUplink {
 		h := r.proxies[uplink]
 		if h == nil {
 			ndp, err := r.cfg.NDP(uplink)
@@ -104,7 +121,18 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 			continue
 		default:
 		}
-		if err := h.ndp.Sync(ctx, entries); err != nil {
+		if pf, ok := h.ndp.(ndpPrefixer); ok {
+			var prefixes []netip.Prefix
+			for _, n := range des.Networks {
+				if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy && n.Spec.Uplink == uplink {
+					if p, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
+						prefixes = append(prefixes, p)
+					}
+				}
+			}
+			pf.SetPrefixes(prefixes)
+		}
+		if err := h.ndp.Sync(ctx, *desired); err != nil {
 			for _, b := range uplinkNets[uplink] {
 				setCond(b, false, "SyncFailed", err.Error())
 			}
@@ -125,7 +153,11 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 			continue
 		}
 		for _, b := range uplinkNets[uplink] {
-			setCond(b, true, "Answering", fmt.Sprintf("answering for %d address(es) on %s", len(entries), uplink))
+			msg := fmt.Sprintf("answering for %d address(es) on %s, %d of them with a running jail", len(desired.Addrs)+extraRoutes(desired), uplink, len(desired.Routes))
+			if note := rangeNote[b]; note != "" {
+				msg += "; " + note
+			}
+			setCond(b, true, "Answering", msg)
 			if st.FloodsLastHour > 0 {
 				if ns := netStatus[b]; ns != nil {
 					ns.Conditions = append(ns.Conditions, cond(CondProxyFlood, false, "Flooded",
@@ -137,7 +169,7 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 	// Uplinks nobody needs any more.
 	for uplink, h := range r.proxies {
 		if _, ok := byUplink[uplink]; !ok {
-			_ = h.ndp.Sync(ctx, nil)
+			_ = h.ndp.Sync(ctx, ndproxy.Desired{})
 			h.cancel()
 			go func(h *proxyHandle) { <-h.done; _ = h.ndp.Close() }(h)
 			delete(r.proxies, uplink)
@@ -147,7 +179,7 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 
 func (r *Reconciler) stopProxies() {
 	for k, h := range r.proxies {
-		_ = h.ndp.Sync(context.Background(), nil)
+		_ = h.ndp.Sync(context.Background(), ndproxy.Desired{})
 		h.cancel()
 		<-h.done
 		_ = h.ndp.Close()
@@ -157,3 +189,18 @@ func (r *Reconciler) stopProxies() {
 
 // Close stops the proxies (Run does it on exit; tests that call Pass call this).
 func (r *Reconciler) Close() { r.passMu.Lock(); defer r.passMu.Unlock(); r.stopProxies() }
+
+// extraRoutes counts the running jails whose address is outside the answered range.
+func extraRoutes(d *ndproxy.Desired) int {
+	in := make(map[netip.Addr]bool, len(d.Addrs))
+	for _, a := range d.Addrs {
+		in[a] = true
+	}
+	n := 0
+	for _, e := range d.Routes {
+		if !in[e.Addr] {
+			n++
+		}
+	}
+	return n
+}

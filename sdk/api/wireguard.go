@@ -52,11 +52,13 @@ type WireGuardSpec struct {
 	Keepalive int `json:"keepalive,omitempty"`
 	// Peers are the enrolled peers of a server, public parts only.
 	Peers []WireGuardPeer `json:"peers,omitempty"`
-	// Networks are JailOps networks the peers of a server may reach: the managed pf anchor jailops/wg.<name> passes
-	// traffic from the tunnel to them and nothing else. Forwarding stays the administrator's switch.
+	// Networks are JailOps networks the tunnel of a server routes to: the routes a peer's token carries and the
+	// forwarding between them. They give a peer no access: the peers are an external source, and a jail admits them with
+	// its own allow in rules (from the tunnel's prefix, a set or an address). The managed pf anchor jailops/wg.<name> only
+	// protects the host. Forwarding stays the administrator's switch.
 	Networks []string `json:"networks,omitempty"`
-	// Down keeps the object and its keys but removes the interface.
-	Down bool `json:"down,omitempty"`
+	// Disabled keeps the object and its keys but removes the interface; `jailops wireguard enable` brings it back.
+	Disabled bool `json:"disabled,omitempty"`
 }
 
 // WireGuardPeer is one enrolled peer of a server.

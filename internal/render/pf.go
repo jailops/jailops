@@ -128,9 +128,16 @@ type PFInput struct {
 	// Jails maps a jail of the project to its addresses, for jail:NAME in a rule or in an address set. A jail that is
 	// not in it has none: a reference to it matches nobody.
 	Jails map[string][]string
-	// Uplink is the interface redirects are applied on; required when a
-	// rule has a redirect.
+	// Uplink is the interface redirects are applied on when the jail's addresses have no entry in UplinkOf; required
+	// when a rule has a redirect and UplinkOf has none.
 	Uplink string
+	// UplinkOf maps each of the jail's addresses to the uplink of the network that holds it. Redirects are applied on the
+	// uplink of the address they lead to. An address the upstream reaches by routing (Routed: an IPv6 address of a
+	// routed or proxy network, an IPv4 address of a network without NAT) is also opened to the Internet by the explicit
+	// allow rules of its policies with an external source, on its uplink (see uplinkRules).
+	UplinkOf map[netip.Addr]Uplink
+	// OwnNets are the subnets of the networks the jail is on: nothing from them arrives on the uplink.
+	OwnNets []netip.Prefix
 	// Antispoof adds an antispoof rule for the jail interfaces.
 	Antispoof bool
 	// AllowRaw must be set by the caller after checking the admin role; a
@@ -343,13 +350,10 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	}
 
 	// Translation rules come before filter rules.
-	rdrRules := func(rules []api.FirewallRule) error {
+	rdrRules := func(org Origin, rules []api.FirewallRule) error {
 		for i, r := range rules {
 			if r.Redirect == nil || r.Disabled {
 				continue
-			}
-			if err := validate.IfName("uplink", in.Uplink); err != nil {
-				return fmt.Errorf("render: rules[%d] has a redirect and needs a valid uplink: %w", i, err)
 			}
 			b.line("# rdr %s", ruleLabel(i, r))
 			ruleComment(&b, r)
@@ -358,7 +362,12 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 				if !ok {
 					continue
 				}
-				to := "(" + in.Uplink + ")"
+				// the redirect is applied on the uplink of the network that holds the jail's address it leads to
+				up := in.uplinkFor(f.addrs[0])
+				if err := validate.IfName("uplink", up); err != nil {
+					return fmt.Errorf("render: rules[%d] has a redirect and needs a valid uplink: %w", i, err)
+				}
+				to := "(" + up + ")"
 				if l := r.Redirect.Listen; l != "" {
 					a, err := netip.ParseAddr(l)
 					if err != nil {
@@ -370,21 +379,35 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 					to = a.String()
 				}
 				b.line("match in on %s %s proto %s from %s to %s port %d rdr-to %s port %d",
-					in.Uplink, f.kw, r.Proto, from, to, r.Redirect.HostPort, f.addrs[0], r.Redirect.JailPort)
+					up, f.kw, r.Proto, from, to, r.Redirect.HostPort, f.addrs[0], r.Redirect.JailPort)
 				// The packet that comes out of the translation is passed here, by a rule of its own that carries the
 				// label every stateful pass rule gets. The state of the connection belongs to this rule, so that the
 				// reconcile loop ends it when the forward is removed (pfctl -k label); a state made by pf's default
 				// rule has no label to end it by. The forward is the allow rule of its policy: it admits what it names.
-				b.line("pass in quick on %s %s proto %s from %s to %s port %d",
-					in.Uplink, f.kw, r.Proto, from, f.addrs[0], r.Redirect.JailPort)
+				mFrom, _ := endpointMatch(r.From, f, nil, &in)
+				sr := Rule{Action: "pass", Dir: "in", Iface: up, Family: f.kw, Proto: r.Proto, From: mFrom, To: addrMatch(f.addrs[:1]),
+					Ports:  []PortRange{{Lo: uint16(r.Redirect.JailPort), Hi: uint16(r.Redirect.JailPort)}},
+					Origin: org}
+				sr.Origin.RuleNo, sr.Origin.RuleName, sr.Origin.Comment = i+1, r.Name, r.Comment
+				b.rule(sr, "pass in quick on %s %s proto %s from %s to %s port %d",
+					up, f.kw, r.Proto, from, f.addrs[0], r.Redirect.JailPort)
 			}
 		}
 		return nil
 	}
 	for _, sec := range sections {
-		if err := rdrRules(sec.rules); err != nil {
+		if err := rdrRules(sec.origin, sec.rules); err != nil {
 			return nil, err
 		}
+	}
+	// What the policies admit from the Internet to the jail's routed addresses stands on their uplink, next to the
+	// redirects: the administrator's own rules only decide what the anchors do not.
+	var upSecs []uplinkSection
+	for _, sec := range sections {
+		upSecs = append(upSecs, uplinkSection{org: sec.origin, rules: sec.rules})
+	}
+	if err := uplinkRules(&b, &in, upSecs, fams); err != nil {
+		return nil, err
 	}
 	own6 := famAddrs(fams, "inet6")
 	ll := linkLocals(in.LinkLocal)
@@ -461,6 +484,68 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	// all the policies come first, then the allow rules (every rule is quick, so the first match decides). Each group
 	// keeps the policy order and the rule order, and the headings and the rule numbers are those of the policies. An
 	// anchor without a deny rule is written policy by policy, as it always was.
+	// The host is closed to the jail before the allow rules of its policies, as the other projects are after them: a jail
+	// that reaches the host's sshd or its API is a jail that can attack the machine it runs on, and an allow rule that
+	// names a prefix or a set holding a host address (0.0.0.0/0, the network's own subnet, the uplink's LAN) must not
+	// open it either. Deny rules come first (they only close). What stays open is ping and the resolver the network
+	// points the jail at. JailOps' firewall governs the jails: /etc/pf.conf governs the host.
+	hostStage := func() {
+		hostM := Match{Prefixes: addrMatch(uniqAddrs(in.Host)).Prefixes, Tables: []string{HostTable}}
+		b.line("# the host: closed to the jail whatever its policies allow; ping, the errors a path needs and the network's resolver stay open")
+		for _, f := range fams {
+			// ping and the errors a path needs, not every ICMP type: redirects, timestamps, router solicitations and the
+			// ICMPv6 node-information and MLD queries are not asked of the host
+			proto, typeKw, types := "icmp", "icmp-type", []string{"echoreq", "unreach", "timex", "paramprob"}
+			if f.kw == "inet6" {
+				proto, typeKw, types = "icmp6", "icmp6-type", []string{"echoreq", "unreach", "toobig", "timex", "paramprob"}
+			}
+			b.rule(Rule{Action: "pass", Dir: "in", Family: f.kw, Proto: proto, ICMPTypes: types, From: anyMatch(), To: hostM, Origin: Origin{Stage: StageHost}},
+				"pass in quick on %s %s proto %s from any to <%s> %s { %s }", ifs, f.kw, proto, HostTable, typeKw, strings.Join(types, ", "))
+		}
+		for _, f := range fams {
+			var dns []netip.Addr
+			for _, a := range uniqAddrs(in.DNS) {
+				if a.Is4() == (f.kw == "inet") {
+					dns = append(dns, a)
+				}
+			}
+			if len(dns) == 0 {
+				continue
+			}
+			for _, proto := range []string{"tcp", "udp"} {
+				b.rule(Rule{Action: "pass", Dir: "in", Family: f.kw, Proto: proto, From: anyMatch(), To: addrMatch(dns), Ports: []PortRange{{Lo: 53, Hi: 53}}, Origin: Origin{Stage: StageHost}},
+					"pass in quick on %s %s proto %s from any to %s port 53", ifs, f.kw, proto, listStr(addrStrings(dns)))
+			}
+		}
+		b.rule(Rule{Action: "block", Dir: "in", From: anyMatch(), To: hostM, Origin: Origin{Stage: StageHost}},
+			"block drop in quick on %s from any to <%s>", ifs, HostTable)
+	}
+
+	// The other projects are closed before the allow rules as well, for every foreign prefix that no allow rule of this
+	// jail names with a prefix of its own (equal to it or narrower): an allow rule with a wide prefix (0.0.0.0/0, ::/0, a
+	// /8 that holds another project's network) does not reach them, and an `allow in --from any` of another project
+	// does not open this jail, whatever the other project's policies say. A rule that names a foreign prefix opens it
+	// ("name them to open them"); the block after the allow rules stays as the last word for what is left.
+	isolationStage := func() {
+		closed := foreignNotNamed(in.Foreign, all, fams, &in)
+		if len(closed) == 0 {
+			return
+		}
+		fp := make([]string, 0, len(closed))
+		m := Match{Tables: []string{"foreign_closed"}}
+		for _, p := range closed {
+			fp = append(fp, p.String())
+			m.Prefixes = append(m.Prefixes, p)
+		}
+		sort.Strings(fp)
+		b.line("%s", tableLine("foreign_closed", fp))
+		b.line("# other projects: closed before the allow rules, except what a rule names with an address or prefix of its own")
+		b.rule(Rule{Action: "block", Dir: "out", From: m, To: anyMatch(), Origin: Origin{Stage: StageIsolation}},
+			"block drop out quick on %s from <foreign_closed> to any", ifs)
+		b.rule(Rule{Action: "block", Dir: "in", From: anyMatch(), To: m, Origin: Origin{Stage: StageIsolation}},
+			"block drop in quick on %s from any to <foreign_closed>", ifs)
+	}
+
 	denyFirst := hasEnabledDeny(all, false)
 	shown := map[int]bool{}
 	head := func(i int) {
@@ -482,7 +567,12 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			head(i)
 			filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, false, "deny")
 		}
+		hostStage()
+		isolationStage()
 		b.line("# allow rules of the policies, in the order of the policies")
+	} else {
+		hostStage()
+		isolationStage()
 	}
 	for i, sec := range sections {
 		if denyFirst && shown[i] && sec.raw == "" && !hasAction(sec.rules, "allow") {
@@ -497,37 +587,6 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			b.line("%s", rawEnd)
 		}
 	}
-
-	// The host is closed to the jail after the rules of its policies, as the other projects are: a jail that reaches the
-	// host's sshd or its API is a jail that can attack the machine it runs on. What stays open is ping and the resolver
-	// the network points the jail at.
-	hostM := Match{Prefixes: addrMatch(uniqAddrs(in.Host)).Prefixes, Tables: []string{HostTable}}
-	b.line("# the host: closed unless a rule above opened it; ping and the network's resolver stay open")
-	for _, f := range fams {
-		proto := "icmp"
-		if f.kw == "inet6" {
-			proto = "icmp6"
-		}
-		b.rule(Rule{Action: "pass", Dir: "in", Family: f.kw, Proto: proto, From: anyMatch(), To: hostM, Origin: Origin{Stage: StageHost}},
-			"pass in quick on %s %s proto %s from any to <%s>", ifs, f.kw, proto, HostTable)
-	}
-	for _, f := range fams {
-		var dns []netip.Addr
-		for _, a := range uniqAddrs(in.DNS) {
-			if a.Is4() == (f.kw == "inet") {
-				dns = append(dns, a)
-			}
-		}
-		if len(dns) == 0 {
-			continue
-		}
-		for _, proto := range []string{"tcp", "udp"} {
-			b.rule(Rule{Action: "pass", Dir: "in", Family: f.kw, Proto: proto, From: anyMatch(), To: addrMatch(dns), Ports: []PortRange{{Lo: 53, Hi: 53}}, Origin: Origin{Stage: StageHost}},
-				"pass in quick on %s %s proto %s from any to %s port 53", ifs, f.kw, proto, listStr(addrStrings(dns)))
-		}
-	}
-	b.rule(Rule{Action: "block", Dir: "in", From: anyMatch(), To: hostM, Origin: Origin{Stage: StageHost}},
-		"block drop in quick on %s from any to <%s>", ifs, HostTable)
 
 	if len(in.Foreign) > 0 {
 		fp := make([]string, 0, len(in.Foreign))
@@ -568,7 +627,9 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Anchor{Name: JailAnchor(in.Jail), Lines: strings.Split(labelPassRules(JailAnchor(in.Jail), out, in.MaxStates), "\n"), Rules: b.rules}, nil
+	an := &Anchor{Name: JailAnchor(in.Jail), Lines: strings.Split(labelPassRules(JailAnchor(in.Jail), out, in.MaxStates), "\n"), Rules: b.rules}
+	an.Uplinks, an.Tunnels = routedUplinks(&in, addrs), tunnelIfaces(&in, addrs)
+	return an, nil
 }
 
 var (
@@ -623,7 +684,12 @@ func labelPassRules(anchor, text string, maxStates int) string {
 				h := sha256.New()
 				h.Write(above[:])
 				h.Write([]byte(ln + "\n" + uses))
-				ln += ` label "` + pfctl.LabelPrefix + hex.EncodeToString(h.Sum(nil))[:12] + `"`
+				lbl := ` label "` + pfctl.LabelPrefix + hex.EncodeToString(h.Sum(nil))[:12] + `"`
+				if i := strings.Index(ln, " keep state"); i >= 0 { // the rule has its own state options: the label stands before them
+					ln = ln[:i] + lbl + ln[i:]
+				} else {
+					ln += lbl
+				}
 			}
 			next := sha256.New()
 			next.Write(above[:])
@@ -633,7 +699,7 @@ func labelPassRules(anchor, text string, maxStates int) string {
 			// would end the running flows of the rule. Every state is bound to its interface: a connection is judged
 			// again at every hop of the host (in on the sender's link, out on the receiver's), and a floating state
 			// that the first hop made would carry it through the second without that hop's rules looking at it.
-			if !raw && strings.HasPrefix(ln, "pass ") && !strings.Contains(ln, " no state") {
+			if !raw && strings.HasPrefix(ln, "pass ") && !strings.Contains(ln, " no state") && !strings.Contains(ln, " keep state") {
 				if maxStates > 0 {
 					ln += fmt.Sprintf(" keep state (max %d, if-bound)", maxStates)
 				} else {
@@ -985,4 +1051,45 @@ func tagName(key string) string {
 		}
 	}
 	return sb.String()
+}
+
+// foreignNotNamed returns the foreign prefixes (masked, without duplicates) that no enabled allow rule names with an
+// address, a set member or a prefix that is equal to the foreign prefix or lies inside it. A prefix that holds the
+// foreign one (0.0.0.0/0, ::/0, a /8) does not name it. The destination of an outgoing rule and the source of an
+// incoming rule are the ends that point at another project.
+func foreignNotNamed(foreign []netip.Prefix, rules []api.FirewallRule, fams []family, in *PFInput) []netip.Prefix {
+	named := map[netip.Prefix]bool{}
+	for _, r := range rules {
+		if r.Disabled || r.Action != "allow" {
+			continue
+		}
+		entries := r.To
+		if r.Direction != "out" {
+			entries = r.From
+		}
+		for _, f := range fams {
+			m, ok := endpointMatch(entries, f, nil, in)
+			if !ok || m.Any {
+				continue
+			}
+			for _, p := range m.Prefixes {
+				for _, fp := range foreign {
+					fp = fp.Masked()
+					if p.Bits() >= fp.Bits() && fp.Contains(p.Addr()) {
+						named[fp] = true
+					}
+				}
+			}
+		}
+	}
+	seen := map[netip.Prefix]bool{}
+	var out []netip.Prefix
+	for _, fp := range foreign {
+		fp = fp.Masked()
+		if !named[fp] && !seen[fp] {
+			seen[fp] = true
+			out = append(out, fp)
+		}
+	}
+	return out
 }

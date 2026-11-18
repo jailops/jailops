@@ -36,15 +36,15 @@ func (w *WireGuardClient) Join(ctx context.Context, q api.WireGuardJoin) (api.Wi
 	return out, err
 }
 
-// Up brings a tunnel up; Down takes it down (the keys stay).
-func (w *WireGuardClient) Up(ctx context.Context, name string) (api.WireGuard, error) {
-	out, _, err := send[api.WireGuard](ctx, w.c, request{method: http.MethodPost, path: w.item(name) + "/up"})
+// Enable brings a tunnel up and keeps it up.
+func (w *WireGuardClient) Enable(ctx context.Context, name string) (api.WireGuard, error) {
+	out, _, err := send[api.WireGuard](ctx, w.c, request{method: http.MethodPost, path: w.item(name) + "/enable"})
 	return out, err
 }
 
-// Down takes a tunnel down.
-func (w *WireGuardClient) Down(ctx context.Context, name string) (api.WireGuard, error) {
-	out, _, err := send[api.WireGuard](ctx, w.c, request{method: http.MethodPost, path: w.item(name) + "/down"})
+// Disable takes a tunnel down and keeps it down (the keys stay).
+func (w *WireGuardClient) Disable(ctx context.Context, name string) (api.WireGuard, error) {
+	out, _, err := send[api.WireGuard](ctx, w.c, request{method: http.MethodPost, path: w.item(name) + "/disable"})
 	return out, err
 }
 

@@ -134,7 +134,7 @@ spec:
   ipv6:
     mode: proxy
     subnet: 2001:db8:1:2:100::/80
-    range: 2001:db8:1:2:100::10-2001:db8:1:2:100:0:1:e
+    range: 2001:db8:1:2:100::10-2001:db8:1:2:100::ff
 status:
   free: 253
 
@@ -147,4 +147,59 @@ $ jailops network create nomode --ipv4 10.96.0.1/24 --ipv6-mode proxy
 ! usage: --ipv6-mode needs --ipv6
 ! hint: run 'jailops network create --help' for usage
 [exit 2]
+
+$ jailops network ndp-proxy enable sw
+network/sw unchanged
+
+$ jailops network ndp-proxy disable sw
+network/sw updated
+network/sw: the NDP proxy is off; the prefix 2001:db8:1:2:100::/80 must be routed to this host by the provider
+
+$ jailops network ndp-proxy disable sw
+network/sw unchanged
+
+$ jailops network ndp-proxy enable sw --dry-run
+dry-run: would enable ndp-proxy of network sw
+apiVersion: jailops/v1
+kind: Network
+metadata:
+  name: sw
+spec:
+  uplink: em0
+  ipv4:
+    subnet: 10.94.0.0/24
+    gateway: 10.94.0.1
+    range: 10.94.0.2-10.94.0.254
+  ipv6:
+    mode: proxy
+    subnet: 2001:db8:1:2:100::/80
+    range: 2001:db8:1:2:100::10-2001:db8:1:2:100::ff
+
+$ jailops network ndp-proxy enable sw
+network/sw updated
+network/sw: the NDP proxy answers for 2001:db8:1:2:100::10-2001:db8:1:2:100::ff on em0
+
+$ jailops network show sw
+Network sw
+  Uplink:     em0
+  IPv4:       10.94.0.0/24, gateway 10.94.0.1
+  IPv4 range: 10.94.0.2-10.94.0.254
+  IPv6:       2001:db8:1:2:100::/80 (proxy), gateway fe80::1
+  IPv6 range: 2001:db8:1:2:100::10-2001:db8:1:2:100::ff
+  NDP proxy:  enabled ('jailops network ndp-proxy status sw')
+  Addresses:  0 used, 253 free
+  Age:        3h
+
+$ jailops network ndp-proxy enable dmz
+! usage: network dmz has no IPv6 prefix: the NDP proxy answers for IPv6 addresses (give one with 'jailops network set dmz --ipv6 PREFIX')
+! hint: run 'jailops network ndp-proxy enable --help' for usage
+[exit 2]
+
+$ jailops network set sw --ipv6-mode routed
+! usage: unknown flag: --ipv6-mode
+! hint: run 'jailops network set --help' for usage
+[exit 2]
+
+$ jailops network set sw --ipv6-range 2001:db8:1:2:100::20-2001:db8:1:2:100::2f
+network/sw updated
 

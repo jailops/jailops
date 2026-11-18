@@ -68,11 +68,14 @@ attach it, and `validate` warns that a volume a jail names is not declared.
 | `--ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy` | `mode: proxy`, `subnet: 2001:db8:1:2:100::/80`, `gateway: fe80::1`, `range: <first>-<last>` and `uplink: vtnet0` on the network |
 | `--ipv4 10.50.0.1/24` | `ipv4: {subnet: 10.50.0.0/24, gateway: 10.50.0.1, range: 10.50.0.2-10.50.0.254}` |
 
+A network that exists switches between the two with `jailops network ndp-proxy enable|disable NETWORK`, which changes
+`mode` in the stored network; in a repository the same change is the `mode` line of the file.
+
 Complete files are in `examples/ipv6-switched-cloud` and `examples/ipv6-routed-hetzner`.
 
 **WireGuard.** A tunnel belongs to one host (its endpoint and its keys are that host's), so it is declared under
 `hosts/<host>/wireguard/` and never under `shared/`. A file carries the spec of a **server**: `mode: server`, `interface`,
-`address`, `listen_port`, `endpoint`, `allowed_ips` (the pool), `dns`, `keepalive`, `networks`, `down`, and per peer `name`,
+`address`, `listen_port`, `endpoint`, `allowed_ips` (the pool), `dns`, `keepalive`, `networks`, `disabled`, and per peer `name`,
 `public_key`, `allowed_ips` (its tunnel address) and `keepalive`. There is no field for a private key or a preshared key, and the
 strict decoding refuses one:
 

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/ifconfig"
 	"jailops.net/jailops/internal/sys/run"
@@ -24,14 +25,17 @@ import (
 
 var (
 	reOnIfaces = regexp.MustCompile(`\bon\s+(\{[^}]*\}|\S+)`)
-	reTo       = regexp.MustCompile(`\bto\s+(\S+)`)
+	reTo       = regexp.MustCompile(`\bto\s+(\{[^}]*\}|\S+)`)
 	reDnpipe   = regexp.MustCompile(`\bdnpipe\s*(\([0-9, ]+\)|[0-9]+)`)
 )
 
 // checkAnchorInterfaces checks the ruleset of an anchor the helper is asked to load.
 func (l *Local) checkAnchorInterfaces(ctx context.Context, anchor, rs string) error {
+	project, jail, isJail := jailOfAnchor(anchor)
 	if l.cfg.Admin.RawPF {
-		return nil
+		// admin-raw-pf is what the operator lets a global administrator write: rules on the uplink and on other
+		// interfaces. It never lets the anchor of one jail stand on the link of another.
+		return l.checkOwnLinks(ctx, rs, isJail, project, jail)
 	}
 	var uplinks map[string]bool // read when a rule needs it
 	for k, ln := range strings.Split(rs, "\n") {
@@ -64,14 +68,27 @@ func (l *Local) checkAnchorInterfaces(ctx context.Context, anchor, rs string) er
 			if err := ifconfig.ValidateIfName(n); err != nil {
 				return err
 			}
-			if l.ifOwned(ctx, n) == nil || strings.HasPrefix(anchor, AnchorPrefix+"wg.") && l.ifIsTunnel(ctx, n) {
+			if l.ifOwned(ctx, n) == nil {
+				// the anchor of a jail names the links of that jail: a rule on the link of another jail would decide
+				// the traffic of that jail (a link that has no readable description yet, one the reconcile loop has not
+				// described, is not another jail's)
+				if isJail {
+					if owner := l.ifJailOwner(ctx, n); owner != "" && owner != project+"/"+jail {
+						return forbidden("%s stands on %s, which is the link of another jail: the anchor of a jail names its own links", at, n)
+					}
+				}
+				continue
+			}
+			if strings.HasPrefix(anchor, AnchorPrefix+"wg.") && l.ifIsTunnel(ctx, n) {
 				continue
 			}
 			if uplinks == nil {
 				uplinks = l.networkUplinks()
 			}
-			if !uplinks[n] {
-				return forbidden("%s stands on %s, which is not an interface of JailOps or the uplink of a network", at, n)
+			// the uplink of a network, or the interface of a WireGuard server of JailOps (the peers are an external source like
+			// the Internet): in both the rule must be of a shape the renderer writes for a jail
+			if !uplinks[n] && !l.ifIsTunnel(ctx, n) {
+				return forbidden("%s stands on %s, which is not an interface of JailOps, the uplink of a network or a tunnel", at, n)
 			}
 			if err := l.uplinkShape(ctx, at, t); err != nil {
 				return err
@@ -107,19 +124,35 @@ func (l *Local) uplinkShape(ctx context.Context, at, t string) error {
 		return l.checkForward(ctx, at, t)
 	case strings.HasPrefix(t, "match out on ") && strings.Contains(t, " nat-to "):
 		return nil
-	case strings.HasPrefix(t, "pass in quick on "):
+	case strings.HasPrefix(t, "pass in quick on "), strings.HasPrefix(t, "pass in log quick on "),
+		strings.HasPrefix(t, "block drop in quick on "), strings.HasPrefix(t, "block drop in log quick on "):
+		// What the renderer writes on the uplink for a jail: the pass of a forward, what the jail's policies admit from
+		// outside, and the blocks that go with them (forged sources, a deny rule). All of them are inbound and name the
+		// jail's own addresses as their destination (one address or a list), never `any` and never an address of the host.
 		m := reTo.FindStringSubmatch(t)
 		if m == nil {
 			return forbidden("%s: a rule on the uplink names its destination", at)
 		}
-		a, err := netip.ParseAddr(strings.Trim(m[1], "{}"))
-		if err != nil {
-			return forbidden("%s: a rule on the uplink names one address of a jail as its destination", at)
+		dests := strings.FieldsFunc(strings.Trim(m[1], "{}"), func(r rune) bool { return r == ',' || r == ' ' })
+		if len(dests) == 0 || strings.HasPrefix(m[1], "<") {
+			return forbidden("%s: a rule on the uplink names the addresses of a jail as its destination, not a table", at)
 		}
 		local, _ := localAddrs()
-		for _, h := range local {
-			if h == a.Unmap() {
-				return forbidden("%s: the destination %s is an address of the host", at, a)
+		for _, d := range dests {
+			a, err := netip.ParseAddr(d)
+			if err != nil {
+				return forbidden("%s: a rule on the uplink names addresses of a jail as its destination", at)
+			}
+			for _, h := range local {
+				if h == a.Unmap() {
+					return forbidden("%s: the destination %s is an address of the host", at, a)
+				}
+			}
+			if l.isNetworkHostAddr(a.Unmap()) {
+				return forbidden("%s: the destination %s is the address a network gives the host", at, a)
+			}
+			if err := l.checkStoredNetworkAddr(a.Unmap(), "the destination of a rule on the uplink"); err != nil {
+				return forbidden("%s: %v", at, err)
 			}
 		}
 		return nil
@@ -204,4 +237,85 @@ func hostListens(ctx context.Context, l *Local, port int) bool {
 		}
 	}
 	return false
+}
+
+// isNetworkHostAddr says whether an address is one the host itself holds for a stored network: the gateway of its IPv4
+// subnet or the resolver address of its IPv6 prefix. A rule on the uplink never leads there.
+func (l *Local) isNetworkHostAddr(a netip.Addr) bool {
+	nets, err := l.storedNetworks()
+	if err != nil {
+		return false
+	}
+	for _, n := range nets {
+		if n.Spec.IPv4 != nil {
+			if g, err := netip.ParseAddr(n.Spec.IPv4.Gateway); err == nil && g == a {
+				return true
+			}
+		}
+		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+			if p, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil && ipam.Resolver6(p) == a {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// jailOfAnchor splits the anchor of a jail, jailops/PROJECT/JAIL; the anchors of a network, a tunnel and a project
+// have one more or one less part.
+func jailOfAnchor(anchor string) (project, jail string, ok bool) {
+	rest, found := strings.CutPrefix(anchor, AnchorPrefix)
+	if !found {
+		return "", "", false
+	}
+	parts := strings.Split(rest, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", false
+	}
+	return parts[0], parts[1], true
+}
+
+// ifJailOwner reads the jail an epair was made for from its description ("jailops jail=PROJECT/JAIL net=NAME (host
+// side)"): "" when the interface cannot be read or has no such text yet.
+func (l *Local) ifJailOwner(ctx context.Context, name string) string {
+	rd, err := l.ifReader(name)
+	if err != nil {
+		return ""
+	}
+	i, err := rd.Show(ctx, name)
+	if err != nil {
+		return ""
+	}
+	_, rest, ok := strings.Cut(i.Description, " jail=")
+	if !ok {
+		return ""
+	}
+	owner, _, _ := strings.Cut(rest, " ")
+	return owner
+}
+
+// checkOwnLinks refuses a rule of the anchor of a jail that stands on the link of another jail.
+func (l *Local) checkOwnLinks(ctx context.Context, rs string, isJail bool, project, jail string) error {
+	if !isJail {
+		return nil
+	}
+	for k, ln := range strings.Split(rs, "\n") {
+		t := strings.TrimSpace(ln)
+		if t == "" || strings.HasPrefix(t, "#") {
+			continue
+		}
+		m := reOnIfaces.FindStringSubmatch(t)
+		if m == nil {
+			continue
+		}
+		for _, n := range strings.FieldsFunc(strings.Trim(m[1], "{}"), func(r rune) bool { return r == ',' || r == ' ' }) {
+			if ifconfig.ValidateIfName(n) != nil || l.ifOwned(ctx, n) != nil {
+				continue
+			}
+			if owner := l.ifJailOwner(ctx, n); owner != "" && owner != project+"/"+jail {
+				return forbidden("ruleset line %d stands on %s, which is the link of another jail: the anchor of a jail names its own links", k+1, n)
+			}
+		}
+	}
+	return nil
 }

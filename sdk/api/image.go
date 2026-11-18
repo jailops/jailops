@@ -18,7 +18,7 @@ type ImageSpec struct {
 	// Comment is what the object is for: one line of free text.
 	Comment string `json:"comment,omitempty"`
 	OS      OS     `json:"os"`
-	Release string `json:"release"` // "15.0-RELEASE" for FreeBSD, "3.22" for Alpine
+	Release string `json:"release"` // "15.1-RELEASE" for FreeBSD, "3.22" for Alpine
 	Arch    string `json:"arch"`    // "amd64", "arm64"
 	// Source describes where the base comes from.
 	Source ImageSource `json:"source"`

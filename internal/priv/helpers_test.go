@@ -3,6 +3,7 @@ package priv
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	fmt "fmt"
 	"net/netip"
 	"os"
@@ -19,16 +20,17 @@ import (
 )
 
 type env struct {
-	t      *testing.T
-	base   string
-	cfg    Config
-	zfs    *zfs.Fake
-	jails  *jailos.Fake
-	pf     *pfctl.Fake
-	net    *ifconfig.Fake
-	runner *run.Fake
-	jexec  string
-	local  *Local
+	pfStatus, pfRules string // what pfctl -s info and -s rules answer (pfOn)
+	t                 *testing.T
+	base              string
+	cfg               Config
+	zfs               *zfs.Fake
+	jails             *jailos.Fake
+	pf                *pfctl.Fake
+	net               *ifconfig.Fake
+	runner            *run.Fake
+	jexec             string
+	local             *Local
 }
 
 func mustWrite(t *testing.T, path, content string) {
@@ -168,4 +170,19 @@ func removeAll(p string) error { return os.RemoveAll(p) }
 func (e *env) conf(t *testing.T, key string) {
 	t.Helper()
 	mustWrite(t, filepath.Join(e.cfg.ConfDir, key+".conf"), e.goodConfNamed(key))
+}
+
+// pfOn makes pf run with the anchor line in its ruleset, which a jail with a network link needs to start (hookPreStart).
+// A test changes e.pfStatus ("" for a pf that does not answer) and e.pfRules.
+func (e *env) pfOn() {
+	e.pfStatus, e.pfRules = "Enabled for 0 days 00:00:01", "anchor \"jailops/*\" all\n"
+	e.runner.Add(run.Rule{Name: pfctlBin, Args: []string{"-s", "info"}, Fn: func(run.Cmd) (run.Result, error) {
+		if e.pfStatus == "" {
+			return run.Result{}, errors.New("pfctl: /dev/pf: No such file or directory")
+		}
+		return run.Result{Stdout: []byte("Status: " + e.pfStatus + "          Debug: Urgent\n")}, nil
+	}})
+	e.runner.Add(run.Rule{Name: pfctlBin, Args: []string{"-s", "rules"}, Fn: func(run.Cmd) (run.Result, error) {
+		return run.Result{Stdout: []byte(e.pfRules)}, nil
+	}})
 }

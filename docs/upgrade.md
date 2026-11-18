@@ -29,6 +29,15 @@ line of its own. The host then cannot resolve names, and `pkg upgrade` cannot do
 (Or name the loopback yourself: a file in `conf.d` with `server:`, `interface: 127.0.0.1` and `interface: ::1`.) The first
 pass of the daemon after `service jailopsd restart` writes the file again, now with the loopback in it.
 
+**To 0.8.4 from an earlier version, before you restart `jailopsd`:** run `jailops doctor` and read `pf.anchors` and
+`pf.inbound`. From 0.8.4 a jail with a network link does not start (at boot or later) while pf does not answer or its
+ruleset has no `anchor "jailops/*"` line at the top level (a line nested in another anchor is not found), and the firewall of
+the jails decides what the Internet reaches: an explicit `allow in` rule with an external source opens the uplink, and a
+`pass in quick on <uplink> ... to <jail prefix>` rule written by hand is no longer needed. Add the anchor line to
+`/etc/pf.conf` and `pfctl -f /etc/pf.conf` first. Three more changes need an action: WireGuard peers reach a jail only where
+the jail has an `allow in --from <tunnel prefix>` rule; `jailops wireguard up` and `down` are `enable` and `disable`; a
+policy with a raw PF fragment can be edited only by a global administrator.
+
 What protects your data across an upgrade:
 
 - The daemon copies its SQLite database (users, token hashes, sessions, audit log) with `VACUUM INTO` once a day into

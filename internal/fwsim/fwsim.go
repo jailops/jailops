@@ -40,6 +40,8 @@ type Packet struct {
 // link. "in" is what the jail sends, "out" what leaves the host for the jail.
 type Hook struct {
 	Dir string // "in" or "out"
+	// Iface is the uplink the hook stands on: what arrives from the Internet. Empty is the jail's own link.
+	Iface string
 }
 
 // Skip is a rule that a walk passed or did not use, and why: a disabled rule that would have matched, or an allow rule
@@ -58,6 +60,9 @@ type HopResult struct {
 	Text string
 	// Why says what could not be decided, when the verdict is Unknown.
 	Why string
+	// NoMatch is true when no rule of the anchor matched at the hook (the verdict is Unknown): on the uplink that is
+	// a block, because the host's own ruleset decides and blocks inbound traffic by default.
+	NoMatch bool
 	// Skipped are the disabled rules that the packet would have met (by interface, direction, protocol and port; their
 	// addresses are not resolved), and, when a deny rule decided, the allow rules of the policies that also match: a
 	// deny rule wins over every allow rule, whatever the order of the policies.
@@ -69,6 +74,9 @@ func Evaluate(a *render.Anchor, p Packet, h Hook) HopResult {
 	var skipped []Skip
 	for i := range a.Rules {
 		r := &a.Rules[i]
+		if r.Iface != h.Iface && r.Kind != render.RuleRaw {
+			continue // a rule of the jail's link is not met on the uplink, and the other way round; a raw fragment may be either
+		}
 		if r.Kind == render.RuleDisabled {
 			if r.Dir == h.Dir && protoPortMatch(r, p) {
 				skipped = append(skipped, Skip{Rule: r, Why: "disabled"})
@@ -96,7 +104,7 @@ func Evaluate(a *render.Anchor, p Packet, h Hook) HopResult {
 		res := HopResult{Verdict: v, Rule: r, Text: a.Lines[r.Line], Skipped: skipped}
 		for j := i + 1; j < len(a.Rules); j++ {
 			o := &a.Rules[j]
-			if o.Dir != h.Dir {
+			if o.Dir != h.Dir || o.Iface != h.Iface {
 				continue
 			}
 			switch {
@@ -112,7 +120,7 @@ func Evaluate(a *render.Anchor, p Packet, h Hook) HopResult {
 		}
 		return res
 	}
-	return HopResult{Verdict: Unknown, Skipped: skipped, Why: "no rule of this anchor matches the packet: the rules of the host decide"}
+	return HopResult{Verdict: Unknown, Skipped: skipped, NoMatch: true, Why: "no rule of this anchor matches the packet: the rules of the host decide"}
 }
 
 // protoPortMatch says whether the protocol and the port of a packet fit a rule; the addresses are not looked at.

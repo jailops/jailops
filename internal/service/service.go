@@ -307,7 +307,9 @@ type Service struct {
 	// installing are the jails an app installation holds: no exec session
 	// may enter them while pkg works on their root from the host.
 	installing map[string]bool
-	logAud     logAudit
+	// holds says what holds such a jail and since when (under execMu, with installing).
+	holds  map[string]holdInfo
+	logAud logAudit
 
 	upd     updateState
 	imgAuto imageAutoState
@@ -388,7 +390,7 @@ func New(d Deps) (*Service, error) {
 	s := &Service{d: d, log: d.Log, now: d.Now,
 		jails: map[string]*jailEntry{}, status: map[string]jailRuntime{}, netStat: map[string]api.NetworkStatus{},
 		login: auth.NewLockout(withClock(d.Lockout, d.Now)), loginIP: auth.NewLockout(looser(withClock(d.Lockout, d.Now), 10)), acct: auth.NewAccountDelay(auth.AccountDelayConfig{Now: d.Now}), trustLim: auth.NewLockout(withClock(d.Lockout, d.Now)), setupLim: auth.NewLockout(withClock(d.Lockout, d.Now)), storages: map[string]*storageInfo{}, placed: map[string]string{},
-		pending: map[string]pendingJail{}, execN: map[string]int{}, installing: map[string]bool{}, localReg: NewLocalRegistrar()}
+		pending: map[string]pendingJail{}, execN: map[string]int{}, installing: map[string]bool{}, holds: map[string]holdInfo{}, localReg: NewLocalRegistrar()}
 	s.baseCtx, s.cancel = context.WithCancel(context.Background())
 	s.imgKind = newKindStore[api.ImageSpec](s, api.KindImage, api.ScopeFleet, "image", "/api/v1/images")
 	s.netKind = newKindStore[api.NetworkSpec](s, api.KindNetwork, api.ScopeFleet, "network", "/api/v1/networks")

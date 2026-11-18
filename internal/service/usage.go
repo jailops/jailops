@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"path"
 	"strconv"
+	"strings"
 
 	"jailops.net/jailops/internal/lifecycle"
 	"jailops.net/jailops/internal/sys/jailos"
@@ -48,7 +50,7 @@ func (s *Service) accounting(ctx context.Context, key string) *api.JailAccountin
 			a.Error = err.Error()
 			break
 		}
-		a.Processes, a.CPUSeconds, a.MemoryBytes = r.Processes, r.CPUSeconds, r.MemoryBytes
+		a.Processes, a.CPUSeconds, a.MemoryBytes, a.SwapBytes = r.Processes, r.CPUSeconds, r.MemoryBytes, r.SwapBytes
 	}
 	return a
 }
@@ -93,4 +95,43 @@ func (s *Service) diskUsage(ctx context.Context, key string) api.JailDiskUsage {
 func bytesProp(v string) (int64, bool) {
 	n, err := strconv.ParseInt(v, 10, 64)
 	return n, err == nil && n >= 0
+}
+
+// jailsDiskUsed is `used` of the root and the persistent datasets of each jail key, read with one ZFS listing for
+// each directory that holds containers (the jails of a project on a storage), not one for each jail. A jail whose
+// numbers cannot be read is left out of the map.
+func (s *Service) jailsDiskUsed(ctx context.Context, keys []string) map[string]int64 {
+	out := map[string]int64{}
+	if s.d.ZClient == nil || len(keys) == 0 {
+		return out
+	}
+	byParent := map[string][]string{}
+	for _, k := range keys {
+		parent := path.Dir(s.lcfg.ContainerDS(k))
+		byParent[parent] = append(byParent[parent], k)
+	}
+	for parent, ks := range byParent {
+		rows, err := s.d.ZClient.List(ctx, zfs.ListOpts{Root: parent, Recursive: true, Props: []string{"used", lifecycle.PropKind}})
+		if err != nil {
+			continue
+		}
+		for _, k := range ks {
+			container, root := s.lcfg.ContainerDS(k), s.lcfg.RootDS(k)
+			var sum int64
+			seen := false
+			for _, r := range rows {
+				used, ok := bytesProp(r.Props["used"])
+				switch {
+				case r.Name == root && ok:
+					sum, seen = sum+used, true
+				case strings.HasPrefix(r.Name, container+"/") && r.Props[lifecycle.PropKind] == lifecycle.KindPersistent && ok:
+					sum += used
+				}
+			}
+			if seen {
+				out[k] = sum
+			}
+		}
+	}
+	return out
 }

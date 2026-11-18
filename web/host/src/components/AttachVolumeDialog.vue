@@ -9,7 +9,7 @@ import Modal from '@jailops/shared/components/Modal.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import type { Volume } from '@jailops/shared/api/types'
 
-// Attach a volume of the project to a stopped jail at a path of the jail. The volumes that can be attached are those
+// Attach a volume of the project to a jail, stopped or running, at a path of the jail. The volumes that can be attached are those
 // that are not attached to this jail already (an encrypted volume that another jail has is left out).
 const props = defineProps<{ open: boolean; jail: string; attached: string[] }>()
 const emit = defineEmits<{ close: []; done: [] }>()

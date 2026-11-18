@@ -25,7 +25,7 @@ func wgWorld(t *testing.T) (*world, *wireguard.Fake) {
 
 func officeDesired() reconcile.WireGuardDesired {
 	tun := []netip.Prefix{netip.MustParsePrefix("10.99.0.0/24")}
-	rs, _ := render.PFWireGuard("office", "wg-office", tun, []netip.Prefix{netip.MustParsePrefix("10.20.0.0/24")})
+	rs, _ := render.PFWireGuard("office", "wg-office", tun, []netip.Addr{netip.MustParseAddr("203.0.113.2")}, nil)
 	return reconcile.WireGuardDesired{Name: "office", Iface: "wg-office", Anchor: wireguard.Anchor("office"), Ruleset: rs,
 		Apply: wireguard.ApplyReq{Name: "office", Iface: "wg-office", ListenPort: 51820, Addresses: []netip.Prefix{netip.MustParsePrefix("10.99.0.1/24")},
 			Peers: []wireguard.PeerConf{{PublicKey: wireguard.FakeKey(7), AllowedIPs: []netip.Prefix{netip.MustParsePrefix("10.99.0.2/32")}}}}}
@@ -42,16 +42,16 @@ func TestWireGuardPassRecreates(t *testing.T) {
 	if len(rep.Failures) != 0 || !strings.Contains(strings.Join(rep.Applied, ";"), "wireguard office: created wg-office") {
 		t.Fatalf("%+v", rep)
 	}
-	if live, _ := w.PF.Read(bg, "jailops/wg.office"); !strings.Contains(live, "pass in quick on wg-office") {
+	if live, _ := w.PF.Read(bg, "jailops/wg.office"); !strings.Contains(live, "block drop in quick on wg-office from any to <host>") {
 		t.Fatalf("anchor %q", live)
 	}
 	rep = w.R.Pass(bg)
 	if len(rep.Applied) != 0 {
 		t.Fatalf("a second pass changed %v", rep.Applied)
 	}
-	// down: the interface goes, the keys stay
+	// disabled: the interface goes, the keys stay
 	d := officeDesired()
-	d.Down = true
+	d.Disabled = true
 	w.des.WireGuard = []reconcile.WireGuardDesired{d}
 	w.R.Pass(bg)
 	if _, ok := wg.Iface("office"); ok || !wg.HasKeys("office") {

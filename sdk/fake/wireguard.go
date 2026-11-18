@@ -102,7 +102,7 @@ func (s *Server) wgDefaults(w *api.WireGuard) {
 func (s *Server) wgStatus(w *api.WireGuard) {
 	st := &w.Status
 	st.Interface = w.Spec.Interface
-	st.Up = !w.Spec.Down
+	st.Up = !w.Spec.Disabled
 	st.Peers = nil
 	if w.Spec.Mode == api.WireGuardServer {
 		st.ListenPort = w.Spec.ListenPort
@@ -122,8 +122,8 @@ func (s *Server) wgStatus(w *api.WireGuard) {
 			LatestHandshake: s.now().Add(-12e9).UTC(), RxBytes: 4096, TxBytes: 8192, PresharedKey: true}}
 	}
 	st.Conditions = []api.Condition{{Type: "Ready", Status: api.ConditionTrue, Reason: "Up", Message: "interface " + w.Spec.Interface + " is up", Since: s.now().UTC()}}
-	if w.Spec.Down {
-		st.Conditions = []api.Condition{{Type: "Ready", Status: api.ConditionFalse, Reason: "Down", Message: "the tunnel is down (jailops wireguard up starts it)", Since: s.now().UTC()}}
+	if w.Spec.Disabled {
+		st.Conditions = []api.Condition{{Type: "Ready", Status: api.ConditionFalse, Reason: "Disabled", Message: "the tunnel is disabled (jailops wireguard enable starts it)", Since: s.now().UTC()}}
 	}
 }
 
@@ -272,15 +272,15 @@ func (s *Server) wgPeerRemove(w http.ResponseWriter, r *http.Request) {
 	s.wgReply(w, o)
 }
 
-func (s *Server) wgSetDown(down bool) http.HandlerFunc {
+func (s *Server) wgSetDisabled(disabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		o, ok := s.wgGet(w, r)
 		if !ok {
 			return
 		}
-		if o.Spec.Down != down {
-			o.Spec.Down = down
+		if o.Spec.Disabled != disabled {
+			o.Spec.Disabled = disabled
 			s.wgTouch(o)
 		}
 		s.wgReply(w, o)

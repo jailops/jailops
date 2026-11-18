@@ -342,3 +342,157 @@ func TestRemountOfAHostDirectoryThatFailsLeavesAPlaceholder(t *testing.T) {
 		t.Fatalf("no stand-in on the target: %v", w.Exec.Calls)
 	}
 }
+
+// A running jail gets a volume mounted at once (read-only when asked) and gives it back; a mount that is in use is
+// refused as busy and the volumes this call had already taken off are mounted again.
+func TestVolumesOfARunningJail(t *testing.T) {
+	w := newWorld(t)
+	w.created("web")
+	root := "/jailops/projects/alpha/jails/web/root"
+	w.volume("www")
+	w.volume("data")
+	st := w.storage()
+	www := Attached{Name: "www", Dataset: VolumeDS(st, "alpha", "www"), Mountpoint: VolumeMP(st, "alpha", "www"), Path: "/usr/local/www", ReadOnly: true}
+	data := Attached{Name: "data", Dataset: VolumeDS(st, "alpha", "data"), Mountpoint: VolumeMP(st, "alpha", "data"), Path: "/var/db/web"}
+	if err := w.S.MountLive(bg, "alpha_web", []Attached{www, data}); err != nil {
+		t.Fatal(err)
+	}
+	cmds := strings.Join(w.Exec.Commands(), "\n")
+	for _, want := range []string{
+		"mount -t nullfs -o ro /jailops/projects/alpha/volumes/www " + root + "/usr/local/www",
+		"mount -t nullfs /jailops/projects/alpha/volumes/data " + root + "/var/db/web",
+	} {
+		if !strings.Contains(cmds, want) {
+			t.Errorf("no %q in\n%s", want, cmds)
+		}
+	}
+	// the second mount of the list is in use: nothing is changed
+	w.Exec.Handler = func(argv []string) ([]byte, error) {
+		if len(argv) == 2 && argv[0] == "umount" && strings.HasSuffix(argv[1], "/var/db/web") {
+			return []byte("umount: " + argv[1] + ": Device busy"), errors.New("exit 1")
+		}
+		return w.handle(argv)
+	}
+	before := len(w.Exec.Calls)
+	err := w.S.UnmountLive(bg, "alpha_web", []Attached{www, data})
+	var busy *VolumeBusyError
+	if !errors.As(err, &busy) || busy.Path != "/var/db/web" {
+		t.Fatalf("a mount in use is not busy: %v", err)
+	}
+	after := strings.Join(w.Exec.Commands()[before:], "\n")
+	// the first goes, the second is in use, and the first is mounted again (read-only as it was)
+	if !strings.Contains(after, "umount "+root+"/usr/local/www") || !strings.Contains(after, "mount -t nullfs -o ro /jailops/projects/alpha/volumes/www "+root+"/usr/local/www") {
+		t.Fatalf("the volume taken off before the refusal was not mounted again:\n%s", after)
+	}
+	// a mount that is not there is fine
+	w.Exec.Handler = func(argv []string) ([]byte, error) {
+		if len(argv) == 2 && argv[0] == "umount" {
+			return []byte("umount: " + argv[1] + ": not a file system root directory"), errors.New("exit 1")
+		}
+		return w.handle(argv)
+	}
+	if err := w.S.UnmountLive(bg, "alpha_web", []Attached{www}); err != nil {
+		t.Fatalf("a mount that is not there: %v", err)
+	}
+}
+
+// A volume of a Linux jail is mounted twice: in the root and below the compat/linux mirror, which Linux processes
+// resolve every path through first. Taking it off goes the other way round, the mount below the mirror first; a mount
+// that is in use on either level is busy and the level that was taken off is mounted again.
+func TestVolumesOfARunningLinuxJail(t *testing.T) {
+	w := newWorld(t)
+	w.created("web")
+	root := "/jailops/projects/alpha/jails/web/root"
+	w.volume("mail")
+	st := w.storage()
+	mail := Attached{Name: "mail", Dataset: VolumeDS(st, "alpha", "mail"), Mountpoint: VolumeMP(st, "alpha", "mail"), Path: "/srv/mail", ReadOnly: true, Linux: true}
+	if err := w.S.MountLive(bg, "alpha_web", []Attached{mail}); err != nil {
+		t.Fatal(err)
+	}
+	mounts := []string{}
+	for _, c := range w.Exec.Commands() {
+		if strings.HasPrefix(c, "mount -t nullfs") {
+			mounts = append(mounts, c)
+		}
+	}
+	want := []string{
+		"mount -t nullfs -o ro /jailops/projects/alpha/volumes/mail " + root + "/srv/mail",
+		"mount -t nullfs -o ro /jailops/projects/alpha/volumes/mail " + root + "/compat/linux/srv/mail",
+	}
+	if strings.Join(mounts, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("mounts:\n%s\nwant:\n%s", strings.Join(mounts, "\n"), strings.Join(want, "\n"))
+	}
+
+	before := len(w.Exec.Calls)
+	if err := w.S.UnmountLive(bg, "alpha_web", []Attached{mail}); err != nil {
+		t.Fatal(err)
+	}
+	var umounts []string
+	for _, c := range w.Exec.Commands()[before:] {
+		if strings.HasPrefix(c, "umount ") {
+			umounts = append(umounts, c)
+		}
+	}
+	if strings.Join(umounts, "\n") != "umount "+root+"/compat/linux/srv/mail\numount "+root+"/srv/mail" {
+		t.Fatalf("the mount below the mirror does not come off first: %v", umounts)
+	}
+
+	// the mount in the root is in use after the one below the mirror came off: the latter is mounted again
+	w.Exec.Handler = func(argv []string) ([]byte, error) {
+		if len(argv) == 2 && argv[0] == "umount" && argv[1] == root+"/srv/mail" {
+			return []byte("umount: " + argv[1] + ": Device busy"), errors.New("exit 1")
+		}
+		return w.handle(argv)
+	}
+	before = len(w.Exec.Calls)
+	err := w.S.UnmountLive(bg, "alpha_web", []Attached{mail})
+	var busy *VolumeBusyError
+	if !errors.As(err, &busy) || busy.Path != "/srv/mail" {
+		t.Fatalf("a mount in use is not busy: %v", err)
+	}
+	after := strings.Join(w.Exec.Commands()[before:], "\n")
+	if !strings.Contains(after, "mount -t nullfs -o ro /jailops/projects/alpha/volumes/mail "+root+"/compat/linux/srv/mail") {
+		t.Fatalf("the mount below the mirror was not made again:\n%s", after)
+	}
+
+	// a FreeBSD jail has the one mount only
+	fb := mail
+	fb.Linux = false
+	before = len(w.Exec.Calls)
+	w.Exec.Handler = nil
+	if err := w.S.MountLive(bg, "alpha_web", []Attached{fb}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range w.Exec.Commands()[before:] {
+		if strings.Contains(c, "compat/linux") {
+			t.Fatalf("a FreeBSD jail mounted below compat/linux: %s", c)
+		}
+	}
+}
+
+// A Linux jail that started under an older version has no mount below the mirror: the helper refuses that umount with
+// "is not a mount point", which is nothing to take off, not a failed detach.
+func TestDetachOfAMountThatIsGoneIsNotAnError(t *testing.T) {
+	w := newWorld(t)
+	w.created("web")
+	root := "/jailops/projects/alpha/jails/web/root"
+	w.volume("mail")
+	st := w.storage()
+	mail := Attached{Name: "mail", Dataset: VolumeDS(st, "alpha", "mail"), Mountpoint: VolumeMP(st, "alpha", "mail"), Path: "/srv/mail", Linux: true}
+	w.Exec.Handler = func(argv []string) ([]byte, error) {
+		if len(argv) == 2 && argv[0] == "umount" && argv[1] == root+"/compat/linux/srv/mail" {
+			return nil, errors.New("umount: " + argv[1] + " is not a mount point")
+		}
+		return w.handle(argv)
+	}
+	if err := w.S.UnmountLive(bg, "alpha_web", []Attached{mail}); err != nil {
+		t.Fatalf("detach of a mount that is not there: %v", err)
+	}
+	umounted := false
+	for _, c := range w.Exec.Commands() {
+		umounted = umounted || c == "umount "+root+"/srv/mail"
+	}
+	if !umounted {
+		t.Fatal("the mount in the root was not taken off")
+	}
+}

@@ -92,7 +92,11 @@ type Reconciler struct {
 	last     Report
 	bootDone bool
 	bootCond map[string]api.Condition
-	proxies  map[string]*proxyHandle
+	// bootRetry holds the jails whose start at boot failed for a reason that can pass (a refused anchor, a slow pfctl, an
+	// interface list that failed once): each pass tries them again, a few times, instead of leaving them down.
+	bootRetry map[string]bootTry
+	proxies   map[string]*proxyHandle
+	ndpView   map[string]NDP // the proxies as the last pass left them, for jailops ndp status (guarded by mu)
 	// setSysctl records the sysctls this daemon changed, for Release.
 	setSysctl map[string]bool
 	// jailSideOK maps a jail to the JID whose jail-side descriptions were found right (checked once per start).
@@ -122,7 +126,7 @@ func New(cfg Config, env Env) *Reconciler {
 		env.Log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	return &Reconciler{cfg: cfg, env: env, log: env.Log, kick: make(chan struct{}, 1),
-		bootCond: map[string]api.Condition{}, proxies: map[string]*proxyHandle{}, setSysctl: map[string]bool{},
+		bootCond: map[string]api.Condition{}, bootRetry: map[string]bootTry{}, proxies: map[string]*proxyHandle{}, setSysctl: map[string]bool{},
 		jailSideOK: map[string]int{}}
 }
 
@@ -287,7 +291,14 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 		}
 		r.bootDone = true
 	}
+	r.bootRetryPass(ctx, des, obs, &rep, now)
 	r.proxyPass(ctx, des, obs, netStatus, &rep, now)
+	r.mu.Lock()
+	r.ndpView = map[string]NDP{}
+	for k, h := range r.proxies {
+		r.ndpView[k] = h.ndp
+	}
+	r.mu.Unlock()
 	r.wireguardPass(ctx, des, &rep)
 	for _, n := range des.Networks {
 		if st := netStatus[n.Name]; st != nil && r.env.Sink != nil {
@@ -527,7 +538,7 @@ func (r *Reconciler) wireguardPass(ctx context.Context, des Desired, rep *Report
 		if err != nil {
 			continue // an operation is changing it
 		}
-		if w.Down {
+		if w.Disabled {
 			if err := r.env.WG.WGRemove(ctx, wireguard.RemoveReq{Name: w.Name, Iface: w.Iface}); err != nil {
 				rep.Failures[key] = err.Error()
 			}

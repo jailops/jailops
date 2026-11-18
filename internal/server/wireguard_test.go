@@ -30,7 +30,8 @@ func TestWireGuardThroughTheAPI(t *testing.T) {
 	if !srv.Status.Up || !wireguard.ValidKey(srv.Status.PublicKey) || srv.Status.FirewallRule != "pass in on $ext_if proto udp to port 51820" {
 		t.Fatalf("status %+v", srv.Status)
 	}
-	if rs := pfRules(e.PF, "jailops/wg.office"); !strings.Contains(rs, "pass in quick on wg-office inet from 10.99.0.0/24 to 10.20.0.0/24") {
+	// the anchor of a tunnel protects the host and passes nothing: what the peers reach in a jail is the jail's own rules'
+	if rs := pfRules(e.PF, "jailops/wg.office"); !strings.Contains(rs, "block drop in quick on wg-office from any to <host>") || strings.Contains(rs, "pass ") {
 		t.Errorf("anchor:\n%s", rs)
 	}
 	// an operator reads, an admin changes
@@ -83,13 +84,13 @@ func TestWireGuardThroughTheAPI(t *testing.T) {
 	if _, err := g.WireGuard().Join(c, api.WireGuardJoin{Token: p.Token, Name: "home"}); !api.IsCode(err, api.CodeAlreadyExists) {
 		t.Fatalf("joined twice: %v", err)
 	}
-	if _, err := g.WireGuard().Down(c, "home"); err != nil {
+	if _, err := g.WireGuard().Disable(c, "home"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := e.WG.Iface("home"); ok {
 		t.Fatal("down kept the interface")
 	}
-	if _, err := g.WireGuard().Up(c, "home"); err != nil {
+	if _, err := g.WireGuard().Enable(c, "home"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := e.WG.Iface("home"); !ok {

@@ -93,6 +93,12 @@ func (s *Service) attachedVolumes(key string) ([]lifecycle.Attached, error) {
 	if e != nil {
 		vs = s.effective(jail).Volumes
 	}
+	return s.attachedOf(project, jail.Spec.OS == api.OSLinux, vs)
+}
+
+// attachedOf resolves attachments to what the lifecycle mounts: the volume's dataset and place on the host, the path in
+// the jail, read-only or not.
+func (s *Service) attachedOf(project string, linux bool, vs []api.VolumeAttach) ([]lifecycle.Attached, error) {
 	var out []lifecycle.Attached
 	var errs []error
 	for _, v := range vs {
@@ -103,7 +109,7 @@ func (s *Service) attachedVolumes(key string) ([]lifecycle.Attached, error) {
 		}
 		if o.Spec.IsHostDir() {
 			out = append(out, lifecycle.Attached{Name: v.Name, HostDir: true, Mountpoint: o.Spec.Path, Path: v.Mount, ReadOnly: v.ReadOnly,
-				WriteProbe: o.Spec.Watch && o.Spec.Probe == api.VolumeProbeWrite})
+				WriteProbe: o.Spec.Watch && o.Spec.Probe == api.VolumeProbeWrite, Linux: linux})
 			continue
 		}
 		si, ok := s.storage(o.Spec.Storage)
@@ -113,7 +119,7 @@ func (s *Service) attachedVolumes(key string) ([]lifecycle.Attached, error) {
 		}
 		st := si.lifecycle()
 		out = append(out, lifecycle.Attached{Dataset: lifecycle.VolumeDS(st, project, v.Name), Mountpoint: lifecycle.VolumeMP(st, project, v.Name),
-			Path: v.Mount, ReadOnly: v.ReadOnly, Encrypted: o.Spec.Encrypted})
+			Path: v.Mount, ReadOnly: v.ReadOnly, Encrypted: o.Spec.Encrypted, Linux: linux})
 	}
 	return out, errors.Join(errs...)
 }
@@ -123,15 +129,6 @@ func (s *Service) volumeView(ctx context.Context, project string, o object[api.V
 	v := volToAPI(o)
 	name := o.Meta.Name
 	v.Status.AttachedTo = s.volumeUses(project, name)
-	var rw []string
-	for _, u := range v.Status.AttachedTo {
-		if !u.ReadOnly {
-			rw = append(rw, u.Jail)
-		}
-	}
-	if len(rw) > 1 {
-		v.Status.Warnings = append(v.Status.Warnings, fmt.Sprintf("writable in more than one jail (%s): the jails share the files and their locking; a mail store, a database or a package cache needs one writer", strings.Join(rw, ", ")))
-	}
 	if o.Spec.IsHostDir() {
 		v.Status.Mountpoint = o.Spec.Path
 		v.Status.State, v.Status.Detail = s.hostDirStateRead(ctx, o)
@@ -745,13 +742,62 @@ func (s *Service) otherUserOfVolume(project, key, volume string, override map[st
 	return ""
 }
 
-// attachmentsChanged runs the checks of a change of a jail's volumes: the jail is stopped and the new ones are valid.
+// attachmentsChanged runs the checks of a change of a jail's volumes: the new ones are valid.
 func (s *Service) attachmentsChanged(ctx context.Context, project, key string, spec []api.VolumeAttach) ([]api.VolumeAttach, error) {
-	_, jail := validate.SplitQualified(key)
-	if j, err := s.getByKey(ctx, key); err == nil && j.Status.Power == api.PowerRunning {
-		return nil, api.Errorf(api.CodeBusy, "jail %q is running: volumes are attached and detached while it is stopped", jail).WithHint("jailops stop " + jail)
-	}
 	return s.checkAttachments(project, key, spec)
+}
+
+// applyLiveVolumes changes what a RUNNING jail has mounted from old to new attachments, before the jail's record is
+// written: a detach that is refused (the mount is in use) leaves everything as it was. Attachments whose volume,
+// path or mode changed are taken off and made again. The jail's fstab is rendered from the record afterwards, so the
+// next start and the stop of jail(8) agree with what is mounted now.
+func (s *Service) applyLiveVolumes(ctx context.Context, project, key, jail string, oldVs, newVs []api.VolumeAttach) error {
+	same := func(a, b api.VolumeAttach) bool {
+		return a.Name == b.Name && a.Mount == b.Mount && a.ReadOnly == b.ReadOnly
+	}
+	var gone, added []api.VolumeAttach
+	for _, o := range oldVs {
+		if !slices.ContainsFunc(newVs, func(n api.VolumeAttach) bool { return same(o, n) }) {
+			gone = append(gone, o)
+		}
+	}
+	for _, n := range newVs {
+		if !slices.ContainsFunc(oldVs, func(o api.VolumeAttach) bool { return same(o, n) }) {
+			added = append(added, n)
+		}
+	}
+	if len(gone) == 0 && len(added) == 0 {
+		return nil
+	}
+	// the jail may have stopped since the request was checked: a volume mounted into a stopped root would be mounted
+	// twice by the next start
+	if s.d.Jails != nil {
+		if _, up, err := s.d.Jails.Get(ctx, key); err == nil && !up {
+			return api.Errorf(api.CodeBusy, "jail %q stopped while its volumes were being changed", jail).WithHint("run the command again: a stopped jail takes the change at its next start")
+		}
+	}
+	linux := s.isLinuxJail(key)
+	goneAtt, err := s.attachedOf(project, linux, gone)
+	if err != nil {
+		return err
+	}
+	addedAtt, err := s.attachedOf(project, linux, added)
+	if err != nil {
+		return err
+	}
+	if err := s.life.UnmountLive(ctx, key, goneAtt); err != nil {
+		var busy *lifecycle.VolumeBusyError
+		if errors.As(err, &busy) {
+			return api.Errorf(api.CodeBusy, "jail %q still uses %s: the volume stays attached", jail, busy.Path).
+				WithHint("find what holds it with: jailops exec " + jail + " -- fstat " + busy.Path + "; then detach again (nothing was changed)")
+		}
+		return internal(err)
+	}
+	if err := s.life.MountLive(ctx, key, addedAtt); err != nil {
+		_ = s.life.MountLive(ctx, key, goneAtt) // the detached ones come back: the record is not changed
+		return internal(err)
+	}
+	return nil
 }
 
 // ListJailVolumes lists what a jail attaches.
@@ -770,8 +816,8 @@ func (s *Service) ListJailVolumes(ctx context.Context, jail string) ([]api.Volum
 	return j.Spec.Volumes, nil
 }
 
-// AttachVolume attaches a volume of the project to a stopped jail at a path in it, as an operation whose result is
-// the jail. With CopyExisting the files the jail has at the path are copied into the volume first.
+// AttachVolume attaches a volume of the project to a jail at a path in it, as an operation whose result is the jail: a
+// running jail gets the mount at once. With CopyExisting the files the jail has at the path are copied into the volume first.
 func (s *Service) AttachVolume(ctx context.Context, jail string, req api.VolumeAttachRequest) (api.Operation, error) {
 	if err := s.requireHost("volumes"); err != nil {
 		return api.Operation{}, err
@@ -821,8 +867,8 @@ func (s *Service) AttachVolume(ctx context.Context, jail string, req api.VolumeA
 			if err != nil {
 				return nil, notFound("jail", jail)
 			}
-			if j, err := s.getByKey(ctx, key); err == nil && j.Status.Power == api.PowerRunning {
-				return nil, api.Errorf(api.CodeBusy, "jail %q is running: volumes are attached and detached while it is stopped", jail).WithHint("jailops stop " + jail)
+			if j, err := s.getByKey(ctx, key); err == nil && j.Status.Power == api.PowerRunning && req.CopyExisting {
+				return nil, api.Errorf(api.CodeBusy, "jail %q is running: the files it has at the path are copied into the volume while it is stopped", jail).WithHint("jailops stop " + jail + ", or attach without --copy-existing")
 			}
 			in := cur
 			in.Spec.Volumes = append(slices.Clone(cur.Spec.Volumes), api.VolumeAttach{Name: req.Volume, Mount: req.Mount, ReadOnly: req.ReadOnly})
@@ -843,8 +889,8 @@ func (s *Service) AttachVolume(ctx context.Context, jail string, req api.VolumeA
 	})
 }
 
-// DetachVolume detaches a volume from a stopped jail as an operation whose result is the jail. The volume and its
-// files stay.
+// DetachVolume detaches a volume from a jail as an operation whose result is the jail; a running jail is refused with
+// busy while it uses the mount. The volume and its files stay.
 func (s *Service) DetachVolume(ctx context.Context, jail, volume string) (api.Operation, error) {
 	if err := s.requireHost("volumes"); err != nil {
 		return api.Operation{}, err
@@ -873,9 +919,6 @@ func (s *Service) DetachVolume(ctx context.Context, jail, volume string) (api.Op
 			if i < 0 {
 				return nil, notFound("volume attachment", volume)
 			}
-			if j, err := s.getByKey(ctx, key); err == nil && j.Status.Power == api.PowerRunning {
-				return nil, api.Errorf(api.CodeBusy, "jail %q is running: volumes are attached and detached while it is stopped", jail).WithHint("jailops stop " + jail)
-			}
 			in := cur
 			in.Spec.Volumes = slices.Delete(slices.Clone(cur.Spec.Volumes), i, i+1)
 			if len(in.Spec.Volumes) == 0 {
@@ -894,4 +937,12 @@ func (s *Service) updateAttachments(ctx context.Context, p project, key, jail st
 	}
 	defer unlockNets()
 	return s.updateLocked(ctx, p, key, jail, in, AnyGeneration)
+}
+
+// isLinuxJail says whether the jail with this key has a Linux userland.
+func (s *Service) isLinuxJail(key string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	e := s.jails[key]
+	return e != nil && e.jail.Spec.OS == api.OSLinux
 }

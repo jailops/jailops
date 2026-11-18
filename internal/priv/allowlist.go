@@ -255,9 +255,10 @@ func customPfctl(_ Config, _ bool, args []string) error {
 
 var pkgOptionValue = map[string]string{"ASSUME_ALWAYS_YES": "yes", "IGNORE_OSVERSION": "yes"}
 
-// checkPkgOption accepts the few -o options image building needs:
+// checkPkgOption accepts the few -o options image building and the shell setup need:
 // REPOS_DIR=<path under the storage roots or the state directory>, PKG_CACHEDIR=<the same>,
-// ASSUME_ALWAYS_YES=yes, IGNORE_OSVERSION=yes and ABI=<abi>.
+// ASSUME_ALWAYS_YES=yes, IGNORE_OSVERSION=yes, ABI=<abi>, and the limits of a download:
+// FETCH_TIMEOUT=<1 to 600 seconds> and FETCH_RETRY=<0 to 10>.
 func checkPkgJail(_ Config, v string) error { return ValidJailName(v) }
 
 func checkPkgOption(c Config, v string) error {
@@ -270,10 +271,18 @@ func checkPkgOption(c Config, v string) error {
 		return c.checkRulePath(pathState, val)
 	case k == "ABI" && reABI.MatchString(val):
 		return nil
+	case k == "FETCH_TIMEOUT" && inRange(val, 1, 600), k == "FETCH_RETRY" && inRange(val, 0, 10):
+		return nil
 	case pkgOptionValue[k] != "" && pkgOptionValue[k] == val:
 		return nil
 	}
 	return forbidden("pkg -o %q is not allowed", v)
+}
+
+// inRange says whether v is a plain decimal number from lo to hi.
+func inRange(v string, lo, hi int) bool {
+	n, err := strconv.Atoi(v)
+	return err == nil && strconv.Itoa(n) == v && n >= lo && n <= hi
 }
 
 // pkgNameOK refuses what rePkgName lets through and pkg would take as a file: a name that climbs out (..), one that ends

@@ -110,16 +110,21 @@ Two things to know about a host that already has a firewall:
 - **DNS for the jails.** `jailops-setup` enables the base system's resolver (`local_unbound`), and the jails get names
   (`db.shop.internal`) and the host's nameservers through it with nothing to write by hand: see [dns.md](dns.md). A
   network that names nameservers of its own (`jailops network edit`, `dns:`) keeps them.
-- **Traffic from the internet into a jail** is stopped by a host whose `pf.conf` blocks inbound traffic on the uplink by
-  default. JailOps does not open the uplink for you: admit the addresses of the jails, and only the ports you want,
-  with a rule of your own. The jail's anchor still applies afterwards (its policy decides what reaches the jail), so
-  this rule is the host's door, not the jail's. For jails with addresses in `2001:db8:1:2:100::/80` behind `vtnet0`:
+- **Traffic from the internet into a jail** needs nothing in `pf.conf`: the jail's own firewall opens it. An `allow in`
+  rule with an external source (`any`, an address, a prefix or an address set) in a policy of the jail opens the uplink
+  for the jail's own addresses, in its anchor, whatever your `pf.conf` blocks by default:
 
-      pass in quick on vtnet0 inet6 proto tcp from any to 2001:db8:1:2:100::/80 port 8080
+      jailops firewall rule add web in --action allow --proto tcp --port 8080
 
-  ICMPv6 errors, which
-  path MTU discovery needs, are admitted by the jails' own anchors; the host's default `pass quick inet6 proto
-  ipv6-icmp` line must stay.
+  A jail with only defaults stays closed from the internet, whatever its `default_in` says, and `allow in from any`
+  means the whole internet. `pf.conf` is for the host's own services. If you added a rule of your own for a jail
+  prefix (`pass in quick on vtnet0 ... to <jail prefix> ...`), delete it: it keeps a jail without an allow rule
+  reachable, and `jailops doctor` (`pf.inbound`) names it. The same check fails when a `block ... quick` rule of yours
+  for every source stands before the `anchor "jailops/*"` line and drops the traffic before the anchor is asked: decide
+  what that rule is for (to keep the Internet away from the jails, leave it; for the policies to decide, move the anchor
+  line above it). A blocklist of single sources is not flagged and stays above the anchor line, where it applies to the
+  jails too. `jailops doctor` (`jails.exposed`) lists the jails the Internet can reach. ICMPv6 errors, which path MTU discovery needs, are admitted by the jails' own anchors; the
+  host's default `pass quick inet6 proto ipv6-icmp` line must stay.
 
 Then `sysrc pf_enable=YES`, and start pf only if it is not running (`service pf onestart`).
 

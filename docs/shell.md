@@ -21,10 +21,16 @@ When the request (and the jail's profiles) do not say otherwise, the daemon fill
 
 A new jail starts at once: its **first start** never waits for a package server. JailOps installs the `bash` package into
 the running jail in the background (`pkg -j JAIL install -y bash`, over the jail's own network) and writes the prompt; `jailops start`
-says so, the jail shows a `ShellSetup` condition with the reason `Installing` meanwhile, and `jailops shell` (or any command
-in the jail) waits up to a minute for it. A later start, while bash is still missing, lets the host fetch it into the stopped root
+says so, the jail shows a `ShellSetup` condition with the reason `Installing` meanwhile (the step it is in and since when), and
+`jailops shell` waits up to a minute for the bash and shows what it waits for, with a line that moves (the seconds and the
+step); Ctrl-C stops the waiting, not the setup. A command that needs no bash (`jailops exec JAIL -- COMMAND`, `jailops shell
+--shell /bin/sh`) works at once. The package downloads of the setup give up after ten seconds for an address, so that a dead
+IPv6 or IPv4 path fails fast and pkg goes on to the other family. A stop, a restart, an update or an app installation gives the
+setup a few seconds and then ends it gently (SIGTERM to pkg, SIGKILL three seconds later); it stays due and the next start
+tries again, with an event `jail-shell-setup-cancelled`. A later start, while bash is still missing, lets the host fetch it into the stopped root
 first (`pkg -r ROOT install -y bash`, with the host's own network, whatever the jail's firewall says; up to three times, 20 seconds
-each). When the installation fails, `jailops shell` says why and which command fixes it (`jailops jail shell-setup NAME`), and
+each). When the installation fails, `jailops shell` says in which step and why (when pkg's output shows that the package server did
+not answer: which commands tell the address family that does not work) and which command fixes it (`jailops jail shell-setup NAME`), and
 `jailops set NAME shell sh` uses FreeBSD's own shell instead. Both live below `/usr/local`, a persistent
 dataset of a thin jail, so they survive an OS update (the root swap of `jailops jail upgrade` and of the nightly image
 upgrade); a thick jail is upgraded in place. App installations do the same right after the app's packages.

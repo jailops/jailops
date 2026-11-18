@@ -49,15 +49,25 @@ Every jail has a link of its own, so jails never share a network segment:
 
 ## The jail and the host
 
-The host is an endpoint of a policy like any other: `allow out tcp to host port 443` lets a jail reach a service on the
-host, `allow in tcp from host port 22` lets the host reach the jail. With a policy, everything else a jail sends to an
-address of the host is dropped; what stays open is ICMP echo and DNS to the network's gateway address. A jail without
-a policy is open to everything but the host: it gets ping and DNS from the host and nothing else, and `jailops jail info` says so.
+JailOps' firewall governs the jails; `/etc/pf.conf` governs this host. JailOps never edits `pf.conf`, never opens the
+host, and needs exactly one line there: `anchor "jailops/*"`.
+
+**The host is closed to every jail, whatever a policy says.** The anchor drops what a jail sends to an address of the host
+before it looks at the allow rules of its policies, so an allow rule to `host`, to a prefix that holds a host address (all
+of IPv4 or IPv6, the network's own subnet, the LAN of the uplink) or to a set that holds one never reaches a service of the
+host. `allow out ... --to host` is refused, with a message that says so. Two things stay open: DNS to the network's resolver
+(udp and tcp port 53) and ping, with the ICMP errors a path needs, to the host's addresses. If a service of the host has to be
+reachable from a jail, that is the host administrator's decision and it goes in `/etc/pf.conf`, as a quick pass rule before
+the anchor line.
+
+The host may connect to a jail when the jail's policy lets it: `allow in tcp from host port 22` lets the host reach the jail.
+A jail without a policy accepts connections from the host and from the jails of its project, may connect anywhere but to
+the host and to other projects, and gets ping and DNS from the host and nothing else; `jailops jail info` says so.
 
 **`any` is not the host.** As the destination of an allow rule, `any` (named or left out) is every address except the host's
 own and those of the networks of other projects: `allow out tcp port 22` lets a jail ssh to the internet, not to the sshd of
-the host or to the jails of another project. Name the host (`--to host`) or the other project's prefix to open them. A deny
-rule to `any` still denies the host.
+the host or to the jails of another project. Name the other project's prefix to open its jails. A deny rule to `any` still
+denies the host.
 
 **Ping and DNS to the host stay open under every policy**, a deny-all one included, because a jail needs its gateway and its
 resolver. To close them, add deny rules, which win over every allow rule: `jailops firewall rule add POLICY out --action deny
@@ -66,8 +76,10 @@ resolver. To close them, add deny rules, which win over every allow rule: `jailo
 **A jail with a link and no address** (`--network lan=none`) has an anchor that drops everything in both directions: there is
 no source address it may use and nothing is addressed to it. A jail with a link and no rendered anchor does not start.
 
-Raw PF fragments in a policy are for operators who set `admin-raw-pf` in `priv.conf`. The helper refuses a fragment
-that does not name its interface with `on`, and one that names an interface that is not the jail's own link.
+A raw PF fragment in a policy is for the administrator of the host: it needs a global administrator, and the helper loads
+one that stands on an interface other than a jail's link only when the operator set `admin-raw-pf` in `priv.conf`. It is
+rendered after the closing of the host, so it cannot open the host either, and the anchor of one jail never stands on the
+link of another jail.
 
 **Names.** With one line in `priv.conf` the jails of a project reach each other by name, `postgres.shop.internal`, answered
 by the unbound of the host and limited to the project of the jail that asks: [dns.md](dns.md).

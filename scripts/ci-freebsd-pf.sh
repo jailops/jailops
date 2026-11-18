@@ -6,7 +6,7 @@
 #
 #   sh scripts/ci-freebsd-pf.sh              the whole matrix
 #   PF_FAST=1 sh scripts/ci-freebsd-pf.sh    skip the phases that wait for minutes
-#   PF_SHARD=a|b|c ...                      one third of the matrix (a: phases 0-0e, 11, 12; b: 1-8 and the last two blocks; c: 5b); CI runs the three apart
+#   PF_SHARD=a|b|c ...                      one third of the matrix (a: phases 0-0e, 11, 11b, 12; b: 1-8 and the last two blocks; c: 5b); CI runs the three apart
 #   PF_KEEP=1 ...                            leave the projects and jails in place to look at them
 #   FORGE_BIN=/path/to/forge-freebsd-<arch>  run phase 0e, the forged-frame probes (scripts/forge); skipped without it
 #
@@ -91,14 +91,18 @@ retry() { # retry TRIES COMMAND...: stop at the first success (a stopping jail n
 }
 remove_all() {
 	jail -r pfrdr >/dev/null 2>&1
+	jail -r ndprt >/dev/null 2>&1
+	ifconfig vlan77 destroy >/dev/null 2>&1
+	ifconfig ndpa destroy >/dev/null 2>&1
 	ifconfig lo0 inet6 fd91:1::fff0 -alias >/dev/null 2>&1; ifconfig lo0 inet6 fd93:1::fff0 -alias >/dev/null 2>&1
 	ifconfig pfupa destroy >/dev/null 2>&1
 	for f in "${TMPDIR:-/tmp}"/jailops-pf.*/h4.pid "${TMPDIR:-/tmp}"/jailops-pf.*/h6.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null; done
 	pkill -x nc 2>/dev/null
-	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfa:n pfa:m pfb:o; do
+	pfctl -f /etc/pf.conf >/dev/null 2>&1 # the main ruleset phase 11b changed goes back
+	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfa:u4 pfa:u6 pfa:n pfa:m pfa:nd1 pfa:nd2 pfa:nd3 pfb:o; do
 		$J stop "${pn#*:}" --project "${pn%%:*}" </dev/null >/dev/null 2>&1
 	done
-	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfa:n pfa:m pfb:o; do
+	for pn in pfa:a pfa:b pfa:c pfa:d pfa:r pfa:u4 pfa:u6 pfa:n pfa:m pfa:nd1 pfa:nd2 pfa:nd3 pfb:o; do
 		retry 6 $J delete --confirm-data-loss "${pn#*:}" --project "${pn%%:*}" </dev/null
 	done
 	for p in pfa pfb; do
@@ -111,7 +115,7 @@ remove_all() {
 		done
 		retry 3 $J project delete -y $p </dev/null
 	done
-	for n in pfa-net pfa-net2 pfa-up pfb-net; do retry 3 $J network delete -y $n </dev/null; done
+	for n in pfa-net pfa-net2 pfa-up pfa-up4 pfa-up6 ndp-up pfb-net; do retry 3 $J network delete -y $n </dev/null; done
 }
 
 policy() { # policy PROJECT NAME YAML-BODY: create or replace
@@ -131,7 +135,7 @@ EOF
 # The reconciler loads anchors on its own schedule. settle waits until the anchors have changed after the action that
 # came before it and have then stopped changing, and says how long that took (the time is a measurement of the product,
 # not a pause that has to be long enough).
-snapshot() { for a in jailops/pfa/a jailops/pfa/b jailops/pfa/c jailops/pfb/o jailops/pfa/d jailops/pfa/r jailops/net.pfa-net; do pfctl -a "$a" -sr 2>/dev/null; done | cksum; }
+snapshot() { for a in jailops/pfa/a jailops/pfa/b jailops/pfa/c jailops/pfb/o jailops/pfa/d jailops/pfa/r jailops/pfa/u4 jailops/pfa/u6 jailops/net.pfa-net; do pfctl -a "$a" -sr 2>/dev/null; done | cksum; }
 PRE=$(snapshot)
 settle() {
 	t=0; cur=$(snapshot)
@@ -354,23 +358,19 @@ done
 
 say "phase 0b: a jail cannot send with another jail's address (nothing else is filtering yet)"
 PRE=$(snapshot)
-# the host is closed to a jail except for ping and the network's resolver: a rule opens the port of the listener below
-policy pfa hostudp 'default_in: allow
-default_out: allow
-rules:
-  - {name: to-host-udp, action: allow, direction: out, proto: udp, to: [host], ports: ["5454"]}'
-$J config set a firewall.policies hostudp --project pfa </dev/null >/dev/null || die "attach hostudp"
+# the host is closed to a jail except for ping and the network's resolver, whatever a policy allows: a rule that names the
+# host as a destination is refused, and the listeners below are in jails c and d only
+expect deny "a rule that allows a jail to reach the host is refused" sh -c "$J firewall policy create hostudp --project pfa --default-in allow --default-out allow </dev/null >/dev/null 2>&1 && $J firewall rule add hostudp out --project pfa --action allow --proto udp --port 5454 --to host </dev/null >/dev/null 2>&1"
+$J firewall policy delete hostudp --project pfa -y </dev/null >/dev/null 2>&1
 settle 10
-# UDP listeners that log what arrives: on the host, in jail c (same network) and in jail d (another network of the same
-# project, reached through the host)
+# UDP listeners that log what arrives: in jail c (same network) and in jail d (another network of the same project,
+# reached through the host)
 for fam in 4 6; do
-	if [ $fam = 4 ]; then h=$H4; c=$C4; d=$D4; else h=$H6; c=$C6; d=$D6; fi
-	: > "$work/h$fam.log"
-	daemon -f -p "$work/h$fam.pid" sh -c "while :; do nc -u -l -w2 $h 5454 >> $work/h$fam.log 2>/dev/null; done"
+	if [ $fam = 4 ]; then c=$C4; d=$D4; else c=$C6; d=$D6; fi
 	jx pfa c daemon -f sh -c "while :; do nc -u -l -w2 $c 5454 >> /var/tmp/u.log 2>/dev/null; done"
 	jx pfa d daemon -f sh -c "while :; do nc -u -l -w2 $d 5454 >> /var/tmp/u.log 2>/dev/null; done"
 done
-waitfor_ "the UDP listeners are up" 30 sh -c "sockstat -46 -l | grep -q ':5454 ' && jexec pfa_c sockstat -46 -l | grep -q ':5454 ' && jexec pfa_d sockstat -46 -l | grep -q ':5454 '"
+waitfor_ "the UDP listeners are up" 30 sh -c "jexec pfa_c sockstat -46 -l | grep -q ':5454 ' && jexec pfa_d sockstat -46 -l | grep -q ':5454 '"
 BIF=$(jx pfa a ifconfig -l | tr ' ' '\n' | grep -v lo0 | head -1)
 send_from_a() { # send_from_a SOURCE DEST TOKEN
 	jx pfa a sh -c "echo $3 | nc -u -w1 -s $1 $2 5454" >/dev/null 2>&1
@@ -386,9 +386,8 @@ arrived() { # arrived WHERE TOKEN: where is host, c or d
 for ver in 4 6; do
 	if [ $ver = 4 ]; then a=$A4; b=$B4; fl="inet $B4/32 alias"; fr="inet $B4 -alias"; else a=$A6; b=$B6; fl="inet6 $B6 prefixlen 128 alias"; fr="inet6 $B6 -alias"; fi
 	jx pfa a ifconfig "$BIF" $fl >/dev/null 2>&1
-	for target in host c d; do
+	for target in c d; do
 		case $target in
-		host) if [ $ver = 4 ]; then dst=$H4; else dst=$H6; fi; w="host$ver" ;;
 		c) if [ $ver = 4 ]; then dst=$C4; else dst=$C6; fi; w=c ;;
 		d) if [ $ver = 4 ]; then dst=$D4; else dst=$D6; fi; w=d ;;
 		esac
@@ -403,8 +402,6 @@ for ver in 4 6; do
 done
 expect deny "a reaches a port of the host that no rule names (the host is closed to jails)" sh -c "jexec pfa_a nc -z -w2 $H4 22"
 expect allow "a pings the host (ping stays open)" icmp pfa:a "$H4"
-$J config unset a firewall.policies --project pfa </dev/null >/dev/null || die "detach hostudp"
-settle 10
 
 say "phase 0c: the anchors carry the ICMPv6 that must never be blocked (path MTU discovery) and the neighbour discovery rules"
 PRE=$(snapshot)
@@ -886,12 +883,156 @@ rules: []"
 settle
 expect allow "removing the forward ends the state of the connection that came through it" sh -c "[ \"\$(pfctl -ss 2>/dev/null | grep -c '198\.51\.100\.1:18080')\" -eq 0 ]"
 expect deny "the removed forward no longer admits a new connection" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 18080"
+
+say "phase 11b: an allow rule with an external source opens the uplink for a jail's routed address; a jail with only defaults stays closed"
+# The host's own ruleset blocks what arrives on the uplink and names no rule (a default-deny host): that is the host's door. The
+# jails' anchors must open what their policies admit without a rule of the host's for the jails. pfrdr is the machine on the uplink
+# again, now with IPv6 and a route to the jails' networks (an IPv4 network without NAT and an IPv6 network the upstream routes).
+PRE=$(snapshot)
+ifconfig pfupa inet6 2001:db8:f::1/64 || die "IPv6 address on pfupa"
+jexec pfrdr ifconfig pfupb inet6 2001:db8:f::2/64 || die "IPv6 address in pfrdr"
+jexec pfrdr route add -net 10.95.0.0/24 198.51.100.1 >/dev/null || die "IPv4 route in pfrdr"
+jexec pfrdr route add -inet6 2001:db8:f:1::/64 2001:db8:f::1 >/dev/null || die "IPv6 route in pfrdr"
+waitfor_ "the IPv6 addresses of the uplink pair are ready" 20 sh -c "! ifconfig pfupa | grep -q tentative && ! jexec pfrdr ifconfig pfupb | grep -q tentative"
+$J network create pfa-up4 --ipv4 10.95.0.1/24 --uplink pfupa </dev/null >/dev/null || die "network pfa-up4"
+$J network create pfa-up6 --ipv6 2001:db8:f:1::/64 --ipv6-mode routed --uplink pfupa </dev/null >/dev/null || die "network pfa-up6"
+{ $J network grant pfa-up4 --project pfa && $J network grant pfa-up6 --project pfa; } </dev/null >/dev/null || die "grant pfa-up4, pfa-up6"
+$J create u4 --project pfa --image "$img" --network pfa-up4 --storage default </dev/null >/dev/null || die "create u4"
+$J create u6 --project pfa --image "$img" --network pfa-up6 --storage default </dev/null >/dev/null || die "create u6"
+policy pfa up-default "default_in: allow
+default_out: allow"
+$J config set u4 firewall.policies up-default --project pfa </dev/null >/dev/null || die "attach up-default to u4"
+$J config set u6 firewall.policies up-default --project pfa </dev/null >/dev/null || die "attach up-default to u6"
+for n in u4 u6; do $J start $n --project pfa </dev/null >/dev/null || die "start $n"; done
+for n in u4 u6; do waitfor_ "$n runs" 90 jx pfa $n true; done
+U4=$(addr4 pfa u4); U6=$(addr6 pfa u6)
+[ -n "$U4" ] && [ -n "$U6" ] || die "u4 or u6 has no address"
+for n in u4:$U4 u6:$U6; do for port in 8080 8081; do jx pfa "${n%%:*}" daemon -f nc -k -l "${n#*:}" $port || die "nc server in ${n%%:*}"; done; done
+# the host blocks inbound traffic on the uplink by default, as a default-deny pf.conf does (the ICMPv6 line stays: neighbour discovery)
+# (the two lines go before the anchor line, after whatever options and normalisation the host's pf.conf has: pf wants the rules in order)
+awk '/^anchor/ && !done { print "block drop in on pfupa all"; print "pass quick inet6 proto ipv6-icmp all keep state (if-bound)"; done = 1 } { print }' /etc/pf.conf | pfctl -f - >/dev/null 2>&1 || die "load the main ruleset with a default block on the uplink"
+settle 10
+ext() { jexec pfrdr nc -z -w2 "$1" "$2"; }
+expect deny "no rule: a jail with default_in allow is closed from the uplink (IPv4 without NAT)" ext "$U4" 8080
+expect deny "no rule: a jail with default_in allow is closed from the uplink (IPv6 routed)" ext "$U6" 8080
+policy pfa up-open "default_in: allow
+default_out: allow
+rules:
+  - {name: tcp-8080, action: allow, direction: in, proto: tcp, ports: ['8080']}"
+$J config set u4 firewall.policies up-open --project pfa </dev/null >/dev/null || die "attach up-open to u4"
+$J config set u6 firewall.policies up-open --project pfa </dev/null >/dev/null || die "attach up-open to u6"
+settle
+upl_has() { pfctl -a "jailops/pfa/$1" -sr 2>/dev/null | grep -q "$2"; }
+expect allow "the anchor of u4 carries the pass rule on the uplink" upl_has u4 "pass in quick on pfupa inet proto tcp from any to $U4 port = [a-z0-9-]* .*label"
+expect allow "the anchor of u6 carries the pass rule on the uplink" upl_has u6 "pass in quick on pfupa inet6 proto tcp from any to $U6 port = [a-z0-9-]* .*label"
+expect allow "allow in 8080 opens u4 from the uplink, with nothing in the host's pf.conf for it" ext "$U4" 8080
+expect allow "allow in 8080 opens u6 from the uplink, with nothing in the host's pf.conf for it" ext "$U6" 8080
+expect deny "a port no rule names stays closed (u4 8081)" ext "$U4" 8081
+expect deny "a port no rule names stays closed (u6 8081)" ext "$U6" 8081
+fwtest_says() { $J firewall test "$@" </dev/null 2>/dev/null | grep -q "$FWWANT"; }
+FWWANT="on the uplink: allowed by policy up-open"
+expect allow "firewall test walks the uplink hop and agrees (u4 8080)" fwtest_says --from 198.51.100.2 --to jail:u4 --port 8080 --project pfa
+expect allow "firewall test walks the uplink hop and agrees (u6 8080)" fwtest_says --from 2001:db8:f::2 --to jail:u6 --port 8080 --project pfa
+FWWANT="on the uplink: block: no rule of the jail admits it"
+expect allow "firewall test says blocked on the uplink for a port no rule names (u4 8081)" fwtest_says --from 198.51.100.2 --to jail:u4 --port 8081 --project pfa
+policy pfa up-open "default_in: allow
+default_out: allow
+rules:
+  - {name: from-a-only, action: allow, direction: in, proto: tcp, from: ['jail:a'], ports: ['8080']}"
+settle
+expect deny "a rule whose source is a jail never opens the uplink (u4)" ext "$U4" 8080
+expect deny "a rule whose source is a jail never opens the uplink (u6)" ext "$U6" 8080
+policy pfa up-open "default_in: allow
+default_out: allow
+rules:
+  - {name: from-uplink-net, action: allow, direction: in, proto: tcp, from: ['198.51.100.0/24', '2001:db8:f::/64'], ports: ['8080']}"
+settle
+expect allow "a rule from the prefix of the uplink opens u4 for a client in it" ext "$U4" 8080
+expect allow "a rule from the prefix of the uplink opens u6 for a client in it" ext "$U6" 8080
+policy pfa up-open "default_in: allow
+default_out: allow
+rules:
+  - {name: from-elsewhere, action: allow, direction: in, proto: tcp, from: ['192.0.2.0/24', '2001:db8:ee::/48'], ports: ['8080']}"
+settle
+expect deny "a rule from another prefix does not admit a client outside it (u4)" ext "$U4" 8080
+expect deny "a rule from another prefix does not admit a client outside it (u6)" ext "$U6" 8080
+pfctl -f /etc/pf.conf >/dev/null 2>&1
 jail -r pfrdr >/dev/null 2>&1
 ifconfig pfupa destroy >/dev/null 2>&1
 
+say "phase 11b: the NDP proxy of a network answers for its whole range, for a jail that starts after it too, and for nothing else"
+# A network in IPv6 proxy mode answers the router's neighbor solicitations for the range of the network whether a jail runs
+# or not. The uplink of such a network is a plain interface or a vlan(4), so the lab is vlan 77 on one end of an epair
+# (ndpa; the host holds one /128 there, as a cloud server does) and a plain VNET jail (ndprt) on the other end, with the
+# /64 on-link: it plays the provider's router, which resolves an address only by neighbor solicitation. What it learns
+# about an address shows in its neighbor table: the host's MAC when the proxy answered, nothing when it did not.
+ep=$(ifconfig epair create 2>/dev/null) || die "epair create (ndp)"
+ifconfig "$ep" name ndpa >/dev/null || die "rename $ep"
+ifconfig "${ep%a}b" name ndpb >/dev/null || die "rename ${ep%a}b"
+ifconfig ndpa up
+ifconfig vlan77 create vlan 77 vlandev ndpa >/dev/null || die "vlan77"
+ifconfig vlan77 inet6 2001:db8:77::1/128 up || die "address on vlan77"
+jail -c name=ndprt persist vnet vnet.interface=ndpb path=/ host.hostname=ndprt >/dev/null || die "vnet jail ndprt"
+jexec ndprt ifconfig ndpb up
+jexec ndprt ifconfig vlan77 create vlan 77 vlandev ndpb >/dev/null || die "vlan77 in ndprt"
+jexec ndprt ifconfig vlan77 inet6 2001:db8:77::fffe/64 -ifdisabled up || die "address in ndprt"
+HM=$(ifconfig vlan77 | awk '/ether /{print $2; exit}')
+mac_norm() { echo "$1" | tr 'A-F:' 'a-f ' | { read -r a b c d e f; printf '%x:%x:%x:%x:%x:%x' "0x$a" "0x$b" "0x$c" "0x$d" "0x$e" "0x$f"; }; }
+HMN=$(mac_norm "$HM")
+$J network create ndp-up --ipv4 10.97.0.1/24 --nat --uplink vlan77 --ipv6 2001:db8:77:0:100::/80 --ipv6-mode proxy </dev/null >/dev/null || die "network ndp-up"
+$J network grant ndp-up --project pfa </dev/null >/dev/null || die "grant ndp-up"
+addr6() { $J config get "$2" nic.eth0.ipv6 --project "$1" </dev/null 2>/dev/null | tail -1 | sed 's|/.*||'; }
+# The router asks who has ADDR when it sends to it (a ping makes it ask). resolved: its neighbor table then holds the host's MAC.
+# answered: the status of the proxy counts an answer for ADDR.
+ask() { jexec ndprt ping6 -c 1 -t 2 "$1" >/dev/null 2>&1; }
+resolved() {
+	jexec ndprt ndp -d "$1" >/dev/null 2>&1
+	ask "$1"
+	m=$(jexec ndprt ndp -an 2>/dev/null | awk -v a="$1" '$1 == a {print $2; exit}')
+	[ -n "$m" ] && [ "$m" != "(incomplete)" ] && [ "$(mac_norm "$m")" = "$HMN" ]
+}
+answered() {
+	ask "$1"
+	n=$($J network ndp-proxy status ndp-up </dev/null 2>/dev/null | awk -v a="$1" '$1 == a {print $4; exit}')
+	[ "${n:-0}" -gt 0 ]
+}
+$J create nd1 --project pfa --image "$img" --network ndp-up --storage default </dev/null >/dev/null || die "create nd1"
+$J start nd1 --project pfa </dev/null >/dev/null || die "start nd1"
+N1=$(addr6 pfa nd1)
+[ -n "$N1" ] || die "nd1 has no IPv6 address"
+waitfor_ "the proxy answers for the first jail" 60 resolved "$N1"
+expect allow "the router resolves the address of the first jail to the host's MAC" resolved "$N1"
+# a jail that starts after the proxy: its address is answered like the first one
+$J create nd2 --project pfa --image "$img" --network ndp-up --storage default </dev/null >/dev/null || die "create nd2"
+$J create nd3 --project pfa --image "$img" --network ndp-up --storage default </dev/null >/dev/null || die "create nd3"
+$J start nd2 --project pfa </dev/null >/dev/null || die "start nd2"
+$J start nd3 --project pfa </dev/null >/dev/null || die "start nd3"
+N2=$(addr6 pfa nd2); N3=$(addr6 pfa nd3)
+expect allow "a jail that started after the proxy is answered (second)" answered "$N2"
+expect allow "a jail that started after the proxy is answered (third)" answered "$N3"
+# the range is answered whether a jail runs or not: an address nobody has resolves to the host and meets an error there
+UNUSED=2001:db8:77:0:100::50
+expect allow "an address of the range that no jail runs is answered too" answered "$UNUSED"
+expect allow "and the packet for it meets a reject route on the host instead of leaving the uplink again" sh -c "route -n get -inet6 $UNUSED 2>/dev/null | grep -q 'flags:.*REJECT'"
+$J stop nd2 --project pfa </dev/null >/dev/null || die "stop nd2"
+expect allow "the address of a stopped jail is still answered" answered "$N2"
+expect deny "and its host route is gone" sh -c "netstat -rn -f inet6 | grep -q '$N2'"
+# what the proxy never answers for: the resolver address of the network (held by the host on the loopback), an address
+# outside the range
+RES=2001:db8:77:0:100::1
+expect deny "the resolver address of the network is not answered" answered "$RES"
+expect deny "an address outside the range is not answered" answered 2001:db8:77:0:100::5000
+expect allow "jailops ndp-proxy status says what the proxy answered for the second jail" sh -c "$J network ndp-proxy status ndp-up </dev/null 2>/dev/null | grep -q '$N2'"
+for n in nd1 nd2 nd3; do $J stop "$n" --project pfa </dev/null >/dev/null 2>&1; retry 6 $J delete --confirm-data-loss "$n" --project pfa </dev/null; done
+$J network revoke ndp-up --project pfa </dev/null >/dev/null 2>&1
+retry 3 $J network delete -y ndp-up </dev/null
+jail -r ndprt >/dev/null 2>&1
+ifconfig vlan77 destroy >/dev/null 2>&1
+ifconfig ndpa destroy >/dev/null 2>&1
+
 say "phase 12: bandwidth limits of a device (dummynet pipes) slow what the jail sends and what it receives, each by itself, and stall nothing"
-# The host listens on its address on the network of jail d (HD4); d sends 1.5 MB to it. Without a limit that takes a
-# moment; with a limit of 2 Mbit/s (250 kB/s) it takes six seconds. A limit is a dummynet pipe of JailOps's range (40000 to
+# Jail d sends 1.5 MB to jail a (the traffic crosses the host); the host connects to d for the other direction. Without a limit
+# that takes a moment; with a limit of 2 Mbit/s (250 kB/s) it takes six seconds. A limit is a dummynet pipe of JailOps's range (40000 to
 # 59999) per direction: the anchor of d sends what the jail sends (egress) and what the jail receives (ingress) into
 # its pipes, on the jail's own link. Both directions are measured with real transfers of one connection each, counting the
 # bytes that arrived, so that a transfer that did not finish is told from a slow one. nc -N ends the connection with the data.
@@ -899,15 +1040,18 @@ PRE=$(snapshot)
 SZ=1536000
 XN=0
 # (jx sets the shell variables p and n: the helpers below keep their own names)
-xfer_up() { # xfer_up JAIL HOSTADDR: the jail connects to the host and sends 1.5 MB; prints "SECONDS BYTES"
-	XN=$((XN + 1)); xp=$((9300 + XN)); rm -f "$work/recv.$xp"
-	daemon -f sh -c "nc -l $2 $xp > $work/recv.$xp"
-	waitfor_ "the listener of the transfer is up" 15 sh -c "sockstat -4 -6 -l | grep -q ':$xp '"
+# JailOps' firewall never opens the host, so the transfers that a jail starts end in another jail of the project (the traffic
+# crosses the host and the anchors of both jails, and the pipes of the sender shape it)
+xfer_up() { # xfer_up JAIL DESTJAIL DESTADDR: the jail connects to the other jail and sends 1.5 MB; prints "SECONDS BYTES"
+	XN=$((XN + 1)); xp=$((9300 + XN)); xj=$2
+	jexec "pfa_$xj" sh -c "rm -f /var/tmp/recv.$xp"
+	jexec "pfa_$xj" daemon -f sh -c "nc -l $3 $xp > /var/tmp/recv.$xp"
+	waitfor_ "the listener of the transfer is up" 15 sh -c "jexec pfa_$xj sockstat -4 -6 -l | grep -q ':$xp '"
 	xs=$(date +%s)
-	jx pfa "$1" sh -c "dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 $2 $xp" >/dev/null 2>&1
+	jx pfa "$1" sh -c "dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 $3 $xp" >/dev/null 2>&1
 	xe=$(date +%s)
-	waitfor_ "the data has been written" 10 sh -c "[ \"\$(stat -f %z $work/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
-	echo "$((xe - xs)) $(stat -f %z "$work/recv.$xp" 2>/dev/null || echo 0)"
+	waitfor_ "the data has been written" 10 sh -c "[ \"\$(jexec pfa_$xj stat -f %z /var/tmp/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
+	echo "$((xe - xs)) $(jexec "pfa_$xj" stat -f %z "/var/tmp/recv.$xp" 2>/dev/null || echo 0)"
 }
 xfer_served() { # xfer_served JAIL JAILADDR: the host connects to the jail, which sends 1.5 MB (a server in the jail answering)
 	XN=$((XN + 1)); xp=$((9300 + XN)); rm -f "$work/recv.$xp"
@@ -948,12 +1092,11 @@ D4J=$(addr4 pfa d)
 policy pfa xfer "default_in: deny
 default_out: allow
 rules:
-  - {name: transfer-ports, action: allow, direction: in, proto: tcp, ports: ['9300-9999']}
-  - {name: to-host-transfer-ports, action: allow, direction: out, proto: tcp, to: [host], ports: ['9300-9999']}"
+  - {name: transfer-ports, action: allow, direction: in, proto: tcp, ports: ['9300-9999']}"
 $J config set d firewall.policies xfer --project pfa </dev/null >/dev/null || die "attach xfer to d"
 $J config set a firewall.policies web,xfer --project pfa </dev/null >/dev/null || die "attach xfer to a"
 settle
-check_xfer 0 3 "an unlimited jail sends 1.5 MB to the host in less than 3 s" xfer_up d $HD4
+check_xfer 0 3 "an unlimited jail sends 1.5 MB to another jail in less than 3 s" xfer_up d a $A4
 check_xfer 0 3 "the host sends 1.5 MB into the jail in less than 3 s" xfer_down d $D4J
 $J config set d nic.eth0.egress 2M --project pfa </dev/null >/dev/null || die "set the egress limit of d"
 settle
@@ -965,10 +1108,10 @@ ONLY='dnpipe( [0-9]+$|\([0-9]+, ?0\))'
 ZERO='dnpipe\(0, ?[0-9]+\)'
 expect allow "the anchor of d shapes what the jail sends, in both directions of a state, and nothing else" sh -c "pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -Eq 'match in on .* $ONLY' && pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -Eq 'match out on .* $ZERO'"
 EPIPE=$(pfctl -a jailops/pfa/d -sr 2>/dev/null | sed -n 's/.*match in on .* dnpipe \([0-9]*\).*/\1/p' | head -1)
-check_xfer 4 20 "egress 2 Mbit/s, a connection the jail starts: 1.5 MB take 4 to 19 s" xfer_up d $HD4
+check_xfer 4 20 "egress 2 Mbit/s, a connection the jail starts: 1.5 MB take 4 to 19 s" xfer_up d a $A4
 check_xfer 4 20 "egress 2 Mbit/s, a connection the host starts, the jail answering: 4 to 19 s" xfer_served d $D4J
 check_xfer 0 3 "egress 2 Mbit/s does not slow what is sent into the jail: under 3 s" xfer_down d $D4J
-check_xfer 0 3 "a jail without a limit is not slowed down: under 3 s" xfer_up a $H4
+check_xfer 0 3 "a jail without a limit is not slowed down: under 3 s" xfer_up a d $D4J
 # a limit of another jail does not renumber the pipe of this one: the numbers are given once
 $J config set a nic.eth0.egress 50M --project pfa </dev/null >/dev/null || die "set the egress limit of a"
 settle
@@ -983,13 +1126,13 @@ t=0; until [ "$(pipes)" -eq 1 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
 expect allow "an ingress limit made one pipe" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 1 ]"
 expect allow "the anchor of d shapes what the jail receives, in both directions of a state, and nothing else" sh -c "pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -Eq 'match out on .* $ONLY' && pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -Eq 'match in on .* $ZERO'"
 check_xfer 4 20 "ingress 2 Mbit/s, the host sends 1.5 MB into the jail: 4 to 19 s" xfer_down d $D4J
-check_xfer 0 3 "ingress 2 Mbit/s does not slow what the jail sends: under 3 s" xfer_up d $HD4
+check_xfer 0 3 "ingress 2 Mbit/s does not slow what the jail sends: under 3 s" xfer_up d a $A4
 check_xfer 0 3 "ingress 2 Mbit/s does not slow what the jail answers: under 3 s" xfer_served d $D4J
 $J config set d nic.eth0.egress 2M --project pfa </dev/null >/dev/null || die "set both limits on d"
 settle
 t=0; until [ "$(pipes)" -eq 2 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
 expect allow "both limits make two pipes" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 2 ]"
-check_xfer 4 20 "both limits: what the jail sends takes 4 to 19 s" xfer_up d $HD4
+check_xfer 4 20 "both limits: what the jail sends takes 4 to 19 s" xfer_up d a $A4
 check_xfer 4 20 "both limits: what the jail receives takes 4 to 19 s" xfer_down d $D4J
 # the limits survive a restart of the jail
 $J restart d --project pfa </dev/null >/dev/null 2>&1 || bad "restart d"
@@ -1003,7 +1146,7 @@ settle
 t=0; until [ "$(pipes)" -eq 0 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
 expect allow "removing the limits removes the pipes" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 0 ]"
 expect allow "and the anchor no longer names one" sh -c "! pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -q dnpipe"
-check_xfer 0 3 "and the jail is fast again: under 3 s" xfer_up d $HD4
+check_xfer 0 3 "and the jail is fast again: under 3 s" xfer_up d a $A4
 check_xfer 0 3 "and fast in the other direction: under 3 s" xfer_down d $D4J
 pkill -f "nc -l " >/dev/null 2>&1
 $J config unset d firewall.policies --project pfa </dev/null >/dev/null 2>&1
@@ -1047,9 +1190,8 @@ waitfor_ "the anchor of m is loaded" 90 sh -c "pfctl -a jailops/pfa/m -sr 2>/dev
 settle
 expect allow "m reaches the port 7777 of jail b: any is every address of the project but the host" tcp pfa:m "$B4" 7777
 expect deny "m does not reach the port 2299 of the host: any is not the host" tcp pfa:m "$H4" 2299
-$J firewall rule add anyout out --project pfa --action allow --proto tcp --port 2299 --to host --comment "the host, named" </dev/null >/dev/null || die "rule to host"
-settle
-expect allow "once the rule names the host, m reaches its port 2299" tcp pfa:m "$H4" 2299
+expect deny "a rule that names the host as the destination of an allow is refused" sh -c "$J firewall rule add anyout out --project pfa --action allow --proto tcp --port 2299 --to host --comment 'the host, named' </dev/null >/dev/null 2>&1"
+expect deny "m still does not reach the port 2299 of the host: no policy opens the host" tcp pfa:m "$H4" 2299
 pkill -f "nc -l $H4 2299" >/dev/null 2>&1
 jx pfa b pkill -f "nc -k -l $B4 7777" >/dev/null 2>&1
 $J stop m --project pfa </dev/null >/dev/null 2>&1

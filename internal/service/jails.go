@@ -215,10 +215,16 @@ func (s *Service) ListJails(ctx context.Context, labels map[string]string) ([]ap
 	}
 	s.mu.RUnlock()
 	out := []api.Jail{}
+	var keys []string
 	for _, e := range entries {
 		if MatchLabels(e.jail.Metadata.Labels, labels) {
 			out = append(out, s.view(ctx, e, run))
+			keys = append(keys, jailKey(e.jail))
 		}
+	}
+	used := s.jailsDiskUsed(ctx, keys)
+	for i, k := range keys {
+		out[i].Status.DiskUsed = used[k]
 	}
 	return out, nil
 }
@@ -229,7 +235,11 @@ func (s *Service) GetJail(ctx context.Context, name string) (api.Jail, error) {
 	if err != nil {
 		return api.Jail{}, err
 	}
-	return s.getByKey(ctx, key)
+	j, err := s.getByKey(ctx, key)
+	if err == nil {
+		j.Status.DiskUsed = s.jailsDiskUsed(ctx, []string{key})[key]
+	}
+	return j, err
 }
 
 func (s *Service) getByKey(ctx context.Context, key string) (api.Jail, error) {
@@ -379,6 +389,9 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 		if spec.OS == api.OSLinux {
 			spec.Layout = api.LayoutThick
 		}
+	}
+	if err := validate.UpdateStrategyFits(spec); err != nil {
+		return api.Operation{}, err
 	}
 	if spec.OS == api.OSLinux && spec.Prompt != "" {
 		return api.Operation{}, invalid("the prompt key is for FreeBSD jails; a Linux jail keeps the prompt of its distribution")
@@ -583,6 +596,13 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 			return api.Jail{}, err
 		}
 	}
+	if spec.Update.Strategy != old.Spec.Update.Strategy {
+		fit := spec
+		fit.OS, fit.Layout = old.Spec.OS, old.Spec.Layout // what the jail is, not what the request leaves out
+		if err := validate.UpdateStrategyFits(fit); err != nil {
+			return api.Jail{}, err
+		}
+	}
 	if err := s.applyDiskLimits(ctx, key, old.Spec, spec); err != nil {
 		return api.Jail{}, err
 	}
@@ -598,15 +618,47 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	nj.Metadata.Labels, nj.Metadata.ManagedBy = in.Metadata.Labels, mb
 	nj.Metadata.Generation = old.Metadata.Generation + 1
 	nj.Metadata.UpdatedAt = s.now().UTC()
+	// A running jail gets its volumes mounted or unmounted now. The record and the rendered jail.conf and fstab come
+	// first, so the helper's checks of the fstab (plain mount points, nothing below a volume) refuse a bad attachment
+	// before anything is mounted; a mount or a detach that is refused puts the record and the files back as they were.
+	liveVolumes := false
+	if !volumesEqual(spec.Volumes, old.Spec.Volumes) {
+		if cur, err := s.getByKey(ctx, key); err == nil && cur.Status.Power == api.PowerRunning {
+			liveVolumes = true
+		}
+	}
+	setMemory := func(j api.Jail) {
+		s.mu.Lock()
+		if e := s.jails[key]; e != nil {
+			j.Status.Generation = e.jail.Status.Generation
+			e.jail = j
+		}
+		s.mu.Unlock()
+	}
 	if err := s.writeJailRecord(ctx, nj); err != nil {
 		return api.Jail{}, internal(err)
 	}
-	s.mu.Lock()
-	if e := s.jails[key]; e != nil {
-		nj.Status.Generation = e.jail.Status.Generation
-		e.jail = nj
+	if liveVolumes {
+		restore := func() {
+			if err := s.writeJailRecord(ctx, old); err != nil {
+				s.log.Warn("put the jail record back after a refused live volume change", "jail", key, "err", err)
+			}
+			setMemory(old)
+			if err := s.renderConf(ctx, key); err != nil {
+				s.log.Warn("render the old jail.conf after a refused live volume change", "jail", key, "err", err)
+			}
+		}
+		setMemory(nj)
+		if err := s.renderConf(ctx, key); err != nil {
+			restore()
+			return api.Jail{}, err
+		}
+		if err := s.applyLiveVolumes(ctx, p.Meta.Name, key, name, old.Spec.Volumes, spec.Volumes); err != nil {
+			restore()
+			return api.Jail{}, err
+		}
 	}
-	s.mu.Unlock()
+	setMemory(nj)
 	s.promptChanged(ctx, key, old, nj)
 	s.emitIn(ctx, p.Meta.Name, "jail-updated", "/api/v1/jails/"+name)
 	s.kick()

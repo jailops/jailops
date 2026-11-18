@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"jailops.net/jailops/internal/service"
-	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -90,18 +89,14 @@ func TestHelperSatisfiesTheServiceInterfaces(t *testing.T) {
 // no link needs neither. allow-start-without-pf says otherwise for the first.
 func TestHookRefusesALinkedJailWithoutPFOrWithoutAnAnchor(t *testing.T) {
 	ctx := context.Background()
-	newEnvWithPF := func(status string) *hookEnv {
+	const anchorLine = `anchor "jailops/*" all` + "\n"
+	newEnvWithPF := func(status, rules string) *hookEnv {
 		h := newHookEnv(t, api.OSFreeBSD, "10.20.0.12", "none")
-		h.runner.Add(run.Rule{Name: pfctlBin, Args: []string{run.RestArgs}, Fn: func(c run.Cmd) (run.Result, error) {
-			if strings.Join(c.Args, " ") == "-s info" {
-				return run.Result{Stdout: []byte("Status: " + status + "          Debug: Urgent\n")}, nil
-			}
-			return run.Result{}, nil
-		}})
+		h.pfStatus, h.pfRules = status, rules
 		mustWrite(t, h.cfg.PFAnchorFile("alpha_web"), "pass in on "+h.host+" all\n")
 		return h
 	}
-	off := newEnvWithPF("Disabled")
+	off := newEnvWithPF("Disabled", anchorLine)
 	err := off.local.RunHook(ctx, PhasePreStart, "alpha_web")
 	if err == nil || !strings.Contains(err.Error(), "pf is disabled") {
 		t.Fatalf("pf is disabled: %v", err)
@@ -109,16 +104,29 @@ func TestHookRefusesALinkedJailWithoutPFOrWithoutAnAnchor(t *testing.T) {
 	if off.pf.LoadCalls["jailops/alpha/web"] != 0 {
 		t.Errorf("an anchor was loaded although the start was refused: %v", off.pf.LoadCalls)
 	}
-	on := newEnvWithPF("Enabled for 0 days 00:01:02")
+	// pf that does not answer is pf that is not loaded: not judged as "fine"
+	notLoaded := newEnvWithPF("", anchorLine)
+	if err := notLoaded.local.RunHook(ctx, PhasePreStart, "alpha_web"); err == nil || !strings.Contains(err.Error(), "pf does not answer") {
+		t.Fatalf("pf is not loaded: %v", err)
+	}
+	// pf runs, but its ruleset has no line that evaluates the anchors of JailOps: the jail would be unfiltered
+	noLine := newEnvWithPF("Enabled for 0 days 00:01:02", "block drop log all\n")
+	if err := noLine.local.RunHook(ctx, PhasePreStart, "alpha_web"); err == nil || !strings.Contains(err.Error(), `no line anchor "jailops/*"`) {
+		t.Fatalf("a ruleset without the anchor line: %v", err)
+	}
+	if noLine.pf.LoadCalls["jailops/alpha/web"] != 0 {
+		t.Errorf("an anchor was loaded although the start was refused: %v", noLine.pf.LoadCalls)
+	}
+	on := newEnvWithPF("Enabled for 0 days 00:01:02", anchorLine)
 	if err := on.local.RunHook(ctx, PhasePreStart, "alpha_web"); err != nil {
 		t.Fatalf("pf runs: %v", err)
 	}
-	allowed := newEnvWithPF("Disabled")
+	allowed := newEnvWithPF("Disabled", anchorLine)
 	allowed.local.cfg.AllowStartWithoutPF = true
 	if err := allowed.local.RunHook(ctx, PhasePreStart, "alpha_web"); err != nil {
 		t.Fatalf("allow-start-without-pf: %v", err)
 	}
-	missing := newEnvWithPF("Enabled for 0 days 00:01:02")
+	missing := newEnvWithPF("Enabled for 0 days 00:01:02", anchorLine)
 	if err := os.Remove(missing.cfg.PFAnchorFile("alpha_web")); err != nil {
 		t.Fatal(err)
 	}

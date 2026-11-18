@@ -1179,6 +1179,7 @@ export interface JailAccounting {
   processes: number
   cpu_seconds: number
   memory_bytes: number
+  swap_bytes: number
 }
 
 export interface JailAction {
@@ -1280,6 +1281,7 @@ export interface JailStatus {
   provisioned_at?: string
   warnings?: string[]
   locked?: string[]
+  disk_used?: number
 }
 
 export interface JailUpgrade {
@@ -1402,6 +1404,52 @@ export interface LogsRead {
   sources: LogSource[]
   next: Record<string, number>
   truncated?: boolean
+}
+
+export interface NDPAddress {
+  address: string
+  interface?: string
+  held: boolean
+  since?: string
+  seen: number
+  answered: number
+  dropped: number
+  announced: number
+  last_seen?: string
+  last_from?: string
+  last_verdict?: string
+  last_answer?: string
+  last_announce?: string
+  last_error?: string
+}
+
+export interface NDPNetwork {
+  name: string
+  enabled: boolean
+  uplink?: string
+  prefix: string
+  range: string
+  answers: number
+  beyond?: boolean
+}
+
+export interface NDPStatus {
+  uplinks: NDPUplink[]
+  networks: NDPNetwork[]
+}
+
+export interface NDPUplink {
+  uplink: string
+  open: boolean
+  error?: string
+  reopens: number
+  addresses: number
+  answered: number
+  announced: number
+  dropped: number
+  floods: number
+  inject_errors: number
+  addrs?: NDPAddress[]
 }
 
 export interface Network {
@@ -2086,7 +2134,7 @@ export interface WireGuardSpec {
   keepalive?: number
   peers?: WireGuardPeer[]
   networks?: string[]
-  down?: boolean
+  disabled?: boolean
 }
 
 export interface WireGuardStatus {

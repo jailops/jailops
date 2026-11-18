@@ -109,15 +109,6 @@ func (s *Server) setupVolumes() {
 		v.Status.Mountpoint = "/jailops/projects/" + v.Metadata.Project + "/volumes/" + v.Metadata.Name
 		v.Status.AttachedTo = s.volumeUses(v.Metadata.Project, v.Metadata.Name)
 		v.Status.Locked = s.vol.locked[key]
-		var rw []string
-		for _, u := range v.Status.AttachedTo {
-			if !u.ReadOnly {
-				rw = append(rw, u.Jail)
-			}
-		}
-		if len(rw) > 1 {
-			v.Status.Warnings = append(v.Status.Warnings, "writable in more than one jail ("+strings.Join(rw, ", ")+"): the jails share the files and their locking")
-		}
 	}
 }
 
@@ -254,9 +245,6 @@ func (s *Server) volumeUses(project, name string) []api.VolumeUse {
 func (s *Server) checkAttachments(j, old *api.Jail) *api.Error {
 	if old != nil && sameVolumes(j.Spec.Volumes, old.Spec.Volumes) {
 		return nil
-	}
-	if old != nil && old.Status.Power == api.PowerRunning {
-		return api.Errorf(api.CodeBusy, "jail %q is running: volumes are attached and detached while it is stopped", j.Metadata.Name).WithHint("jailops stop " + j.Metadata.Name)
 	}
 	seenName, seenMount := map[string]bool{}, map[string]bool{}
 	for _, a := range j.Spec.Volumes {

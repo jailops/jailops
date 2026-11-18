@@ -420,10 +420,14 @@ func TestPlansGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "plan_network_proxy", DescribePlan(steps))
+	rejected := false
 	for _, s := range steps {
-		if s.Op == OpAddRejectRoute && strings.HasPrefix(s.Arg, "2001:") {
-			t.Fatalf("a proxy-mode network got a reject route for its on-link prefix: %s", s.Arg)
+		if s.Op == OpAddRejectRoute && s.Arg == "2001:db8:2::/64" {
+			rejected = true
 		}
+	}
+	if !rejected {
+		t.Fatal("a proxy-mode network needs a reject route for its prefix: the proxy answers for the range, and a packet for an address nobody uses must not leave the uplink again")
 	}
 
 	a := AttachInput{JailID: "j-1", JailUUID: "0b0e7f3e-5c4b-4f6e-9d3e-111111111111", Index: 0, Project: "web", Jail: "nginx", Network: "lan", MTU: 1500,
@@ -539,7 +543,7 @@ func TestLinuxDevfsRuleset(t *testing.T) {
 			kinds = append(kinds, f[0]+":"+strings.TrimPrefix(f[1], "/r"))
 		}
 	}
-	want := "devfs:/dev fdescfs:/dev/fd /r:/compat/linux tmpfs:/compat/linux/dev/shm linprocfs:/proc linsysfs:/sys"
+	want := "devfs:/dev fdescfs:/dev/fd /r:/compat/linux tmpfs:/compat/linux/dev/shm linprocfs:/proc linsysfs:/sys linprocfs:/compat/linux/proc linsysfs:/compat/linux/sys"
 	if strings.Join(kinds, " ") != want {
 		t.Fatalf("%s", strings.Join(kinds, " "))
 	}

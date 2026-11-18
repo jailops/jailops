@@ -206,12 +206,13 @@ func TestDropsOfTheLastHourAreCountedAndLoggedOncePerMinute(t *testing.T) {
 	r := newRig(t, Config{})
 	var mu sync.Mutex
 	var logs []string
-	p, err := New(Config{Uplink: "em0"}, Deps{Capture: r.cap, Injector: r.inj, Routes: r.rt, Joiner: r.jn, Prober: r.pr, Clock: r.clk,
+	p, err := New(Config{Uplink: "em0"}, Deps{Capture: r.cap, Injector: r.inj, Routes: r.rt, Joiner: r.jn, Clock: r.clk,
 		Logf: func(f string, a ...any) { mu.Lock(); logs = append(logs, fmt.Sprintf(f, a...)); mu.Unlock() }})
 	if err != nil {
 		t.Fatal(err)
 	}
 	p.hostMAC = macH
+	p.SetPrefixes([]netip.Prefix{netip.MustParsePrefix("2001:db8::/32")})
 	flood := func(n int) {
 		for i := 0; i < n; i++ {
 			p.HandleFrame(mkNS(router, unknownTarget, SolicitedNode(unknownTarget), macB, nil))
@@ -259,5 +260,75 @@ func TestAKnownSenderSurvivesAFloodThatFillsTheTable(t *testing.T) {
 	defer r.p.mu.Unlock()
 	if b := r.p.sources[macA]; b == nil || !b.known {
 		t.Fatal("a flood of new senders pushed the known router out of the table")
+	}
+}
+
+// A promiscuous capture on a shared segment sees every solicitation of the segment. The ones for addresses that are
+// neither held nor inside a prefix of ours belong to other machines: they are counted and nothing else, so they use
+// none of the allowance of the router (the same Ethernet source asks for ours) and do not fill the ring of events.
+func TestSolicitationsForOtherMachinesUseNoAllowanceAndNoEvents(t *testing.T) {
+	r := newRig(t, Config{})
+	r.add(t, jailA)
+	foreign := netip.MustParseAddr("2001:db9::7")
+	for i := 0; i < 5000; i++ {
+		r.p.HandleFrame(mkNS(router, foreign, SolicitedNode(foreign), macA, &macA))
+	}
+	if m := r.p.Metrics(); m.Floods != 0 || r.p.FloodsLastHour() != 0 {
+		t.Fatalf("solicitations for other machines were charged against the allowance: %+v", m)
+	}
+	// the router, with the same Ethernet source, is still answered for the jail
+	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
+	if m := r.p.Metrics(); m.Answered != 1 {
+		t.Fatalf("the router was not answered after the noise: %+v", m)
+	}
+	events, _ := r.p.EventsAfter(0)
+	if len(events) != 1 {
+		t.Fatalf("the noise filled the event ring: %d events", len(events))
+	}
+}
+
+// The ring keeps the last events in order across the first wrap: the oldest one is the one that goes.
+func TestEventRingKeepsTheNewestAcrossTheWrap(t *testing.T) {
+	r := newRig(t, Config{})
+	r.add(t, jailA)
+	n := maxEvents + 5
+	for i := 0; i < n; i++ {
+		r.p.record("solicit", jailA, router, fmt.Sprintf("v%d", i))
+	}
+	events, last := r.p.EventsAfter(0)
+	if len(events) != maxEvents {
+		t.Fatalf("%d events, want %d", len(events), maxEvents)
+	}
+	for i, ev := range events {
+		if want := fmt.Sprintf("v%d", n-maxEvents+i); ev.Verdict != want {
+			t.Fatalf("event %d is %s, want %s: the ring is not in order", i, ev.Verdict, want)
+		}
+		if i > 0 && ev.Seq <= events[i-1].Seq {
+			t.Fatalf("sequence numbers do not rise: %d after %d", ev.Seq, events[i-1].Seq)
+		}
+	}
+	if last != events[len(events)-1].Seq {
+		t.Fatalf("last is %d, the newest event has %d", last, events[len(events)-1].Seq)
+	}
+}
+
+// Two proxies (two uplinks) of one daemon share one sequence: after the newest sequence number seen on either, neither
+// proxy repeats an event, and none is lost to the other's numbers.
+func TestEventSequenceIsOneForAllProxies(t *testing.T) {
+	a, b := newRig(t, Config{}), newRig(t, Config{})
+	a.add(t, jailA)
+	b.add(t, jailA)
+	a.p.record("solicit", jailA, router, "a1")
+	b.p.record("solicit", jailA, router, "b1")
+	a.p.record("solicit", jailA, router, "a2")
+	_, lastA := a.p.EventsAfter(0)
+	_, lastB := b.p.EventsAfter(0)
+	cursor := max(lastA, lastB)
+	b.p.record("solicit", jailA, router, "b2")
+	if evs, _ := a.p.EventsAfter(cursor); len(evs) != 0 {
+		t.Fatalf("proxy a repeats events: %v", evs)
+	}
+	if evs, _ := b.p.EventsAfter(cursor); len(evs) != 1 || evs[0].Verdict != "b2" {
+		t.Fatalf("proxy b lost its event to the other's numbers: %v", evs)
 	}
 }

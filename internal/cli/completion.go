@@ -389,6 +389,7 @@ var freeTextFlags = map[string]string{
 	"interface":                        "the name of a new interface",
 	"ipv4":                             "an address",
 	"ipv6":                             "a prefix",
+	"ipv6-range":                       "an address range a-b typed by the operator",
 	"keys":                             "a path inside the image's source",
 	"map":                              "OLD=NEW of two networks, typed",
 	"max-memory":                       "a size",

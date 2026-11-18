@@ -1,0 +1,13 @@
+name: Fetch the Go modules
+description: go mod download with three attempts; a transient error of the module proxy must not fail a whole run.
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: |
+        for n in 1 2 3; do
+          go mod download && exit 0
+          echo "go mod download failed (attempt $n of 3)"
+          sleep $((n * 10))
+        done
+        exit 1

@@ -57,12 +57,12 @@ func (s *Server) wireguardRoutes() []route {
 			v, err := svc.RemoveWireGuardPeer(c.r.Context(), c.pathArg("name"), c.pathArg("peer"))
 			return sync(c, v, err)
 		}},
-		route{method: "POST", pattern: "/api/v1/wireguard/{name}/up", h: func(c *rc) error {
-			v, err := svc.SetWireGuardDown(c.r.Context(), c.pathArg("name"), false)
+		route{method: "POST", pattern: "/api/v1/wireguard/{name}/enable", h: func(c *rc) error {
+			v, err := svc.SetWireGuardDisabled(c.r.Context(), c.pathArg("name"), false)
 			return sync(c, v, err)
 		}},
-		route{method: "POST", pattern: "/api/v1/wireguard/{name}/down", h: func(c *rc) error {
-			v, err := svc.SetWireGuardDown(c.r.Context(), c.pathArg("name"), true)
+		route{method: "POST", pattern: "/api/v1/wireguard/{name}/disable", h: func(c *rc) error {
+			v, err := svc.SetWireGuardDisabled(c.r.Context(), c.pathArg("name"), true)
 			return sync(c, v, err)
 		}},
 		route{method: "POST", pattern: "/api/v1/wireguard/{name}/rotate-keys", h: func(c *rc) error {

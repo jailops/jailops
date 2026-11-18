@@ -58,9 +58,9 @@ function addToHostFirewall(w: WireGuard): void {
   })
 }
 
-async function setUp(w: WireGuard, up: boolean): Promise<void> {
+async function setEnabled(w: WireGuard, enable: boolean): Promise<void> {
   const n = w.metadata.name
-  await runOp(`${up ? s.wireguard.bringUp : s.wireguard.takeDown}: ${n}`, () => (up ? api.wireguard.up(n) : api.wireguard.down(n))).catch(() => undefined)
+  await runOp(`${enable ? s.wireguard.enable : s.wireguard.disable}: ${n}`, () => (enable ? api.wireguard.enable(n) : api.wireguard.disable(n))).catch(() => undefined)
   await l.reload()
 }
 const removeTunnel = () => api.wireguard.remove(deleting.value?.metadata.name ?? '')
@@ -103,7 +103,7 @@ async function rotate(): Promise<void> {
               <dt>{{ s.wireguard.publicKey }}</dt><dd class="wg-key"><AddrCopy :value="w.status.public_key" /></dd>
               <template v-if="w.spec.networks?.length"><dt>{{ s.wireguard.networks }}</dt><dd><span v-for="n in w.spec.networks" :key="n" class="chip mono">{{ n }}</span></dd></template>
             </dl>
-            <p v-if="w.spec.down" class="muted">{{ s.wireguard.downHint }}</p>
+            <p v-if="w.spec.disabled" class="muted">{{ s.wireguard.disabledHint }}</p>
             <template v-if="w.spec.mode === 'server'">
               <Callout v-if="cover(w).state === 'allowed'" tone="ok" data-test="wg-fw">{{ s.wireguard.fwAllowed(port(w), (cover(w) as { from: string[] }).from.join(', ')) }} <router-link to="/host">{{ s.wireguard.fwHostLink }}</router-link></Callout>
               <Callout v-else-if="cover(w).state === 'open'" tone="ok" data-test="wg-fw">{{ s.wireguard.fwOpen(port(w)) }}</Callout>
@@ -136,8 +136,8 @@ async function rotate(): Promise<void> {
               </div>
             </div>
             <div class="row-actions">
-              <button v-if="w.spec.down" class="btn btn-sm" type="button" :disabled="!canWrite" data-test="wg-up" @click="setUp(w, true)">{{ s.wireguard.bringUp }}</button>
-              <button v-else class="btn btn-sm" type="button" :disabled="!canWrite" data-test="wg-down" @click="setUp(w, false)">{{ s.wireguard.takeDown }}</button>
+              <button v-if="w.spec.disabled" class="btn btn-sm" type="button" :disabled="!canWrite" data-test="wg-enable" @click="setEnabled(w, true)">{{ s.wireguard.enable }}</button>
+              <button v-else class="btn btn-sm" type="button" :disabled="!canWrite" data-test="wg-disable" @click="setEnabled(w, false)">{{ s.wireguard.disable }}</button>
               <button class="btn btn-sm" type="button" :disabled="!canWrite" data-test="wg-rotate" @click="rotating = w">{{ s.wireguard.rotate }}</button>
               <button class="btn btn-sm btn-danger" type="button" :disabled="!canWrite" data-test="wg-delete" @click="deleting = w">{{ s.wireguard.delete }}</button>
             </div>

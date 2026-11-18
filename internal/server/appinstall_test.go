@@ -675,7 +675,7 @@ func TestAppInstallRefusesExec(t *testing.T) {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
 	var ae *api.Error
-	if !errors.As(during, &ae) || ae.Code != api.CodeBusy || !strings.Contains(ae.Message, "packages are being installed or updated") || ae.Hint == "" {
+	if !errors.As(during, &ae) || ae.Code != api.CodeBusy || !strings.Contains(ae.Message, "an app installation") || ae.Hint == "" {
 		t.Fatalf("exec during the installation: %v", during)
 	}
 	if other != nil || otherOut != "y\n" {

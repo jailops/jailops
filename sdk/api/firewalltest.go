@@ -49,7 +49,9 @@ type FirewallTestCase struct {
 
 // FirewallTestHop is what one anchor does with the packet.
 type FirewallTestHop struct {
-	// Side is source (what the jail sends) or destination (what reaches the jail).
+	// Side is source (what the jail sends), destination (what reaches the jail), uplink (what arrives from outside on the
+	// uplink of the jail's address, before it reaches the jail's link) or tunnel (what a peer of a WireGuard server sends,
+	// on the tunnel's interface).
 	Side string `json:"side"`
 	Jail string `json:"jail"`
 	// Anchor is the pf anchor of the jail.

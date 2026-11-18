@@ -295,7 +295,7 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 		release := func() {}
 		var held error
 		if !alpine {
-			release, held = s.holdJailForPackages(key)
+			release, held = s.holdJailFor(key, "a package update", false)
 		}
 		if held != nil {
 			release = func() {} // a refused hold gives no release function
@@ -557,7 +557,7 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 	alpine := s.jailIsLinux(j)
 	// No session may enter the jail while its packages change.
 	if !alpine {
-		release, err := s.holdJailForPackages(key)
+		release, err := s.holdJailFor(key, "a package update", false)
 		if err != nil {
 			rec.Result, rec.Error = api.UpdateFailed, "package catalog: "+err.Error()
 			return rec

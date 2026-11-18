@@ -97,6 +97,10 @@ type Attached struct {
 	WriteProbe bool
 	// Name is the name of the volume.
 	Name string
+	// Linux marks a volume of a Linux jail: a Linux process reaches every path through the nullfs mirror of the root on
+	// compat/linux first, and a mirror does not show what is mounted on the lower tree, so the volume is mounted a
+	// second time below the mirror.
+	Linux bool
 }
 
 func (c Config) attached(key string) ([]Attached, error) {

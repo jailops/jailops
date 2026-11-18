@@ -2,6 +2,93 @@
 
 ## Unreleased
 
+- **Security: the firewall of JailOps never opens the host or another project.** JailOps' firewall governs the jails and
+  `/etc/pf.conf` governs the host. Before, four things went around that:
+  - An allow rule that named `host`, a prefix holding a host address (all of IPv4 or IPv6, the network's own subnet, the LAN
+    of the uplink) or a set holding one was rendered before the closing of the host, so anyone who could edit a policy of a
+    project could open the host's sshd, API port or NFS to their jail, and the rules of `pf.conf` after the anchor line never
+    saw the packet. The host is closed before the allow rules now, whatever they name (DNS to the resolver and ping stay
+    open); an allow rule to `host` is refused when it is written, and a service of the host that a jail needs is opened in
+    `/etc/pf.conf`.
+  - A raw PF fragment of a policy needed only the admin role of a project. It needs a global administrator now, it is
+    rendered after the closing of the host, and the helper refuses a rule in the anchor of one jail that stands on the link
+    of another jail, with or without `admin-raw-pf`. Raw fragments that project administrators stored earlier stay until the
+    policy is edited; they stand after the closing of the host and of the other projects, so they cannot open either.
+  - An allow rule with a wide prefix (`allow out to 0.0.0.0/0`, a `/8`) or `allow in --from any` passed on the link of its
+    own jail into the networks of other projects, and the isolation of a project depended on the policies of another.
+    The other projects are closed before the allow rules now, in both directions, except for an address or prefix that a
+    rule names itself ("name them to open them"); the block after the allow rules stays as the backstop.
+  - When the addresses of the host, or the networks of the other projects, could not be read, the tables that close them
+    were empty and the anchor was rendered open. The render is an error now: the jail keeps the anchor it has and a start is
+    refused (the WireGuard anchor likewise). A new host address is in the tables after the next reconcile pass, a minute at
+  most.
+- **Security: a jail with a network link does not start when pf does not answer or its ruleset lacks `anchor "jailops/*"`**
+  (`allow-start-without-pf` in `priv.conf` says otherwise). ICMP to the host is ping and the errors a path needs, not every
+  type.
+- **The jail's own firewall decides what the Internet reaches, not `pf.conf`.** An explicit `allow in` rule with an
+  external source (`any`, an address, a prefix or an address set) renders `pass in quick on <uplink> ... to <jail address>
+  port N` in the jail's anchor, for IPv6 routed and proxy networks and for IPv4 networks without NAT. A host whose
+  `pf.conf` blocks inbound traffic by default needs no rule for its jails. A jail with only defaults stays closed from
+  the Internet whatever its `default_in` says; a rule whose source is `host`, a jail or a tag never opens the uplink; a
+  `deny in` rule is applied on the uplink first; a packet with a source in a network of JailOps, or one that pf's reverse
+  path check refuses, is dropped as forged; every pass limits its states (`limits.states` of the jail, else `jails.max_states`,
+  else 5000). **Behaviour change:** `allow in ... from any` means the whole Internet. Delete a hand-written `pass in quick on
+  <uplink> ... to <jail prefix>` rule: it is not needed, and `jailops doctor` names it (`pf.inbound`).
+- **`jailops firewall test` walks the uplink.** A connection from an address outside every network of JailOps meets the anchor
+  of the jail on the uplink first and is blocked there when no rule admits it. `--to host` tests every address of the host.
+- **`jailops doctor`:** `pf.inbound` fails when a `block ... quick` rule for every source stands before the anchor line and drops
+  inbound traffic to the jails; `jails.exposed` (info) lists the jails the Internet can reach, with their ports.
+- **WireGuard: the peers of a tunnel are an external source.** The anchor `jailops/wg.<name>` closes the host and every network
+  the tunnel does not serve to its peers and passes nothing; a jail admits peers with its own `allow in --from <tunnel prefix>`
+  rule. The `networks` of a server give routes and forwarding, not access. **Behaviour change:** peers no longer reach jails implicitly; add `jailops firewall rule add POLICY in
+  --action allow --proto tcp --port N --from <tunnel prefix>` to the jails they must reach.
+- **WireGuard: `up` and `down` are `enable` and `disable`.** The field `spec.down` is `spec.disabled`, the routes are
+  `POST /api/v1/wireguard/{name}/enable` and `/disable`. **Breaking:** no aliases; change scripts. A stored tunnel that was
+  down stays down: the field is renamed when the file or the record is loaded.
+- **The NDP proxy answers for the range of the network, and the network switches it.** On a shared segment the host answers
+  the router's "who has this address" for the allocation range of each network in `proxy` mode (the first 1024 addresses of the
+  range and the address of every running jail), whether a jail runs or not. Nothing is registered when a jail starts, so a
+  second or third jail is answered like the first. The capture is promiscuous and the solicited-node group of every address of
+  the range is joined, so a multicast filter of the network card or the hypervisor cannot hide a question. The host's own
+  addresses and the resolver address of the network are never answered. `jailops network ndp-proxy enable|disable NETWORK` sets
+  `ipv6.mode` to `proxy` or `routed` for good; `status NETWORK` shows the range and what the proxy answered; `watch NETWORK`
+  prints each question and answer live; REST `GET /api/v1/ndp` and `/ndp/events`. The web console has the switch and a status
+  panel. `jailops doctor` fails `network.ndproxy` for an address the router asked for and the proxy never answered.
+  **Breaking:** `network set --ipv6-mode` is gone (the mode is chosen at create or switched with the commands above);
+  the flag is not on `network set` at all; `--ipv6-range a-b` sets the IPv6 range; a new proxy network gets 240 addresses (`::10` to `::ff` of a `/80`). A network in
+  proxy mode keeps working after the upgrade.
+- **Volumes are attached and detached while the jail runs.** `volume attach` and `detach`, `config set disk.NAME=PATH`, `edit`
+  and a file mount the volume into a running jail at once (nullfs, read-only with `--ro`) and take it off again; the record and
+  the jail's `fstab` follow. A detach of a mount that a process of the jail uses is refused with `busy` and changes nothing
+  (`jailops exec JAIL -- fstat PATH` shows the process). The mount is made with the checks of a `fstab` line (a path inside the
+  jail's root, no symlink on the way, a source that is a volume), and a failed update puts the record back. `--copy-existing`
+  needs a stopped jail. A volume shared by several jails
+  is not a warning: `volume show` lists `Attached to: mail (rw), desktop (ro)`.
+- **Fixed: a volume of a Linux jail, `/proc` and `/sys` were empty for a Linux process.** The Linuxulator resolves every path
+  through a nullfs mirror of the jail's root on `compat/linux`, and a mirror shows the plain directory under a mount. Volumes,
+  `linprocfs` and `linsysfs` are mounted below the mirror too, at the start of the jail and by `volume attach` and `detach` on a
+  running jail. `docs/linux-jails.md` lists what a Linux process sees and the limits of the Linuxulator.
+- **`jailops shell` shows what it waits for while the bash of a new jail is installed:** what is going on, how to leave (Ctrl-C
+  stops the waiting, not the setup; `jailops exec JAIL -- sh` works meanwhile), the step and the seconds. A failed setup names
+  the step and the reason, and when pkg's output shows that the package server did not answer, the commands that tell which
+  address family does not work. A command that needs no bash, and a shell that is not bash, enter the jail at once.
+- **A stop, a restart, an update or an app installation waits three seconds for the setup of the shell**, then ends it gently
+  (SIGTERM to pkg, SIGKILL three seconds later); the setup stays due and the next start tries again (event
+  `jail-shell-setup-cancelled`). Its downloads give up after ten seconds for an address (`FETCH_TIMEOUT=10`, `FETCH_RETRY=1`; the
+  helper accepts these two `pkg -o` options), so a dead IPv6 or IPv4 path fails fast and pkg goes on to the other family.
+- **A jail whose start fails at boot is tried again** on the next passes of the reconcile loop (a few tries, ten seconds
+  apart) instead of waiting for the next daemon start. A thin jail stored with `update_strategy: inplace` (an earlier version
+  accepted it) stays updatable; `jailops doctor` warns (`jails.update`) and names `jailops jail set JAIL --update-strategy rebase`.
+- **`jailops op show` is readable:** status with how long the operation ran and when it last changed, what it affects, the steps with
+  their times, and the error with its hint; a running operation with no step says so.
+- **The memory limit and the memory shown are named.** `jailops info JAIL` shows resident and reserved memory (`swapuse`, the
+  counter `--memory` limits) next to the limit; the help and `docs/operations.md` say which counter is limited.
+- **`jailops create` takes the host's only image** when `--image` is not given, and says so; `--update-strategy inplace` is refused
+  for a thin jail at create and set; `jailops jail list` has a `USED` column (`disk_used` in the API).
+- **Docs:** `design.md` names the unbound file among what JailOps writes on the host, lists volumes of an existing jail as built
+  and puts the remotes in the client's configuration file.
+- **CI:** Go modules are fetched with three attempts and `GOPROXY=https://proxy.golang.org|direct`, so a failed download from the
+  module proxy does not fail a run (the composite action `.github/actions/go-modules`; the VM job retries the same way).
 - **The host's own resolver is checked after every change of the names, and given back when the names are off.** After the
   helper writes the file of the names and has `local_unbound` read it, it asks the loopback nameservers of the host's
   `resolv.conf` (and the gateways it just made the resolver listen on) for `localhost`; an address that answered before

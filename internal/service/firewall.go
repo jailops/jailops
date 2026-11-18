@@ -60,8 +60,16 @@ func (s *Service) checkPolicyWas(ctx context.Context, name string, spec api.Fire
 	if err != nil {
 		return err
 	}
-	if rep.RequiresAdmin && !ActorFrom(ctx).Perm.Satisfies(api.PermAdmin) {
-		return api.Errorf(api.CodeForbidden, "a raw PF fragment needs the admin role")
+	// A raw fragment is pf text of the administrator of the host, not of a project: a project's administrator who may
+	// write it could pass or block the traffic of other projects' jails. It needs a global administrator.
+	if rep.RequiresAdmin {
+		if a := ActorFrom(ctx); !a.Global || !a.Perm.Satisfies(api.PermAdmin) {
+			return api.Errorf(api.CodeForbidden, "a raw PF fragment needs a global administrator").
+				WithHint("a policy of a project holds rules; raw pf text is the host administrator's (and the helper needs admin-raw-pf in priv.conf)")
+		}
+	}
+	if err := refuseHostAllowOut(spec); err != nil {
+		return err
 	}
 	if err := s.checkRedirectRules(ctx, spec, was); err != nil {
 		return err
@@ -515,10 +523,10 @@ func stricterDefault(a, b, dir string) string {
 
 // foreignPrefixes are the subnets of the networks that belong to projects other than project. A network is never
 // shared between projects, so everything in them is another project's.
-func (s *Service) foreignPrefixes(project string) []netip.Prefix {
+func (s *Service) foreignPrefixes(project string) ([]netip.Prefix, error) {
 	projs, err := s.projKind.list()
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	var out []netip.Prefix
 	for _, p := range projs {
@@ -528,7 +536,10 @@ func (s *Service) foreignPrefixes(project string) []netip.Prefix {
 		for _, pn := range p.Spec.Networks {
 			n, err := s.netKind.get(pn.Network)
 			if err != nil {
-				continue
+				if api.IsCode(err, api.CodeNotFound) {
+					continue // a grant of a network that is gone
+				}
+				return nil, err
 			}
 			if n.Spec.IPv4 != nil {
 				if pf, err := netip.ParsePrefix(n.Spec.IPv4.Subnet); err == nil {
@@ -542,7 +553,7 @@ func (s *Service) foreignPrefixes(project string) []netip.Prefix {
 			}
 		}
 	}
-	return out
+	return out, nil
 }
 
 // policyDefaults says which default a stored policy lacks: a policy always says default_in and default_out, and a
@@ -552,6 +563,26 @@ func policyDefaults(name string, p api.FirewallPolicySpec) error {
 		if d.v != "allow" && d.v != "deny" {
 			return invalid("firewall policy %q has no %s: a policy says allow or deny for each direction", name, d.field).
 				WithHint("jailops firewall policy edit " + name + " and set " + d.field)
+		}
+	}
+	return nil
+}
+
+// refuseHostAllowOut refuses an allow rule that names the host as the destination of a jail's traffic: JailOps' firewall
+// governs the jails and /etc/pf.conf governs the host, so a jail reaches the host through the gateway services
+// JailOps provides (DNS and ping) and nothing else. Such a rule was rendered after the closing of the host and could
+// not match; a deny rule to the host is a rule that closes and stays valid.
+func refuseHostAllowOut(spec api.FirewallPolicySpec) error {
+	for i, r := range spec.Rules {
+		if r.Action != "allow" || r.Direction != "out" {
+			continue
+		}
+		for _, e := range r.To {
+			if k, _, err := validate.ParseEndpoint(e); err == nil && k == validate.EndpointHost {
+				return invalid("rule %d: a jail does not reach the host through a policy", i+1).
+					WithDetail("field", "rules.to").
+					WithHint("JailOps' firewall governs the jails and /etc/pf.conf governs this host: a jail reaches the host's DNS and ping through its gateway and nothing else, and a service of the host that a jail needs is opened there, with a quick pass rule before the anchor line (the host's own rules)")
+			}
 		}
 	}
 	return nil

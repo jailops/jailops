@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -91,10 +92,85 @@ func (r *Reconciler) bootPass(ctx context.Context, des Desired, obs *Observed, r
 			}
 			rep.Failures["jail/"+name] = err.Error()
 			r.setBootCond(name, cond(CondBoot, false, "StartFailed", err.Error(), now))
+			r.mu.Lock()
+			r.bootRetry[name] = bootTry{n: 1, at: now}
+			r.mu.Unlock()
 			continue
 		}
 		rep.Started = append(rep.Started, name)
 		r.setBootCond(name, cond(CondBoot, true, "Started", "started at boot", now))
+	}
+}
+
+// bootTry is how often a jail was tried at boot and when it was tried last.
+type bootTry struct {
+	n  int
+	at time.Time
+}
+
+const (
+	// bootRetries is how many times in all a jail is tried at boot: the first try of the boot pass and the retries of
+	// the passes after it.
+	bootRetries = 4
+	// bootRetryGap is the least time between two tries of one jail.
+	bootRetryGap = 10 * time.Second
+)
+
+// bootRetryPass tries the jails again whose start at boot failed: a failure of the fail-closed checks (the host's
+// addresses could not be read once, pf answered slowly) passes, and the jail would otherwise stay down until somebody
+// started it by hand. A jail that is running by now, that no longer wants to start at boot or that is waiting for its
+// passphrase is dropped from the list; one that fails the last time keeps the StartFailed condition.
+func (r *Reconciler) bootRetryPass(ctx context.Context, des Desired, obs *Observed, rep *Report, now time.Time) {
+	r.mu.Lock()
+	due := map[string]bootTry{}
+	for n, t := range r.bootRetry {
+		due[n] = t
+	}
+	r.mu.Unlock()
+	if len(due) == 0 {
+		return
+	}
+	by := map[string]JailDesired{}
+	for _, j := range des.Jails {
+		by[j.Name] = j
+	}
+	names := make([]string, 0, len(due))
+	for n := range due {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	drop := func(n string) {
+		r.mu.Lock()
+		delete(r.bootRetry, n)
+		r.mu.Unlock()
+	}
+	for _, n := range names {
+		t := due[n]
+		j, ok := by[n]
+		if _, up := obs.Running[n]; !ok || up || !j.Boot.Autostart {
+			drop(n)
+			continue
+		}
+		if now.Sub(t.at) < bootRetryGap {
+			continue
+		}
+		if err := r.env.Actions.StartJail(ctx, n); err != nil {
+			t.n++
+			t.at = now
+			if api.IsCode(err, api.CodeLocked) || t.n >= bootRetries {
+				drop(n)
+			} else {
+				r.mu.Lock()
+				r.bootRetry[n] = t
+				r.mu.Unlock()
+			}
+			r.setBootCond(n, cond(CondBoot, false, "StartFailed", fmt.Sprintf("%v (try %d of %d)", err, t.n, bootRetries), now))
+			rep.Failures["jail/"+n] = err.Error()
+			continue
+		}
+		drop(n)
+		rep.Started = append(rep.Started, n)
+		r.setBootCond(n, cond(CondBoot, true, "Started", fmt.Sprintf("started at boot (try %d)", t.n+1), now))
 	}
 }
 

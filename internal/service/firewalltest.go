@@ -83,7 +83,8 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 		src.addrs = hostSourceAddrs(ctx, s, dst.jail)
 	}
 	if dst.host {
-		dst.addrs = hostSourceAddrs(ctx, s, src.jail)
+		// a jail meets every address of the host, not only its gateway: all of them are tested
+		dst.addrs = uniqAddrList(append(hostSourceAddrs(ctx, s, src.jail), s.hostAddrs(ctx)...))
 	}
 	if len(src.addrs) == 0 || len(dst.addrs) == 0 {
 		return api.FirewallTestResult{}, invalid("%s has no address to test with", map[bool]string{true: src.label, false: dst.label}[len(src.addrs) == 0])
@@ -112,6 +113,7 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 	}
 
 	res := api.FirewallTestResult{Verdict: api.TestPass}
+	insideCaveat := false
 	for _, fam := range []string{"inet", "inet6"} {
 		if req.Family == "4" && fam != "inet" || req.Family == "6" && fam != "inet6" {
 			continue
@@ -134,6 +136,17 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 						return false, err
 					}
 					r := fwsim.Evaluate(an, pkt, h)
+					if h.Iface != "" && r.NoMatch {
+						// On the uplink nothing of the jail's own firewall admits the packet: the host's ruleset decides and
+						// it blocks what no rule names. That is the honest answer, not "unknown". The peers of a tunnel are
+						// admitted by the jail's rules only.
+						r.Verdict = fwsim.Block
+						if side == "tunnel" {
+							r.Why = fmt.Sprintf("no rule of the jail admits it on the tunnel %s: the peers of a tunnel reach a jail only through an allow in rule of its policies (from the tunnel's prefix, a set or an address)", h.Iface)
+						} else {
+							r.Why = fmt.Sprintf("no rule of the jail admits it on the uplink %s; the host's own pf.conf decides, which blocks inbound traffic by default (an allow rule with an external source opens it)", h.Iface)
+						}
+					}
 					hop := api.FirewallTestHop{Side: side, Jail: j.Metadata.Name, Anchor: an.Name, Direction: h.Dir,
 						Verdict: string(r.Verdict), Why: r.Why, LoadedMatchesRendered: loaded[jailKey(*j)]}
 					if r.Rule != nil {
@@ -155,7 +168,27 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 				// What the source jail sends is judged where it arrives on the host, its own link. What reaches the
 				// destination jail leaves the host on the destination's own link (a jail shares no link with another).
 				cont := true
-				if src.jail != nil {
+				// A connection from outside arrives on the uplink of the destination's address first: the jail's own rules
+				// there decide whether it gets to its link at all.
+				if src.jail == nil && !src.host && dst.jail != nil {
+					an, err := anchorOf(*dst.jail)
+					if err != nil {
+						return api.FirewallTestResult{}, err
+					}
+					if wg, ok := s.tunnelOf(sa); ok {
+						// a peer of a WireGuard server: an external source that comes in on the tunnel's interface
+						if cont, err = walk("tunnel", dst.jail, fwsim.Hook{Dir: "in", Iface: wg}); err != nil {
+							return api.FirewallTestResult{}, err
+						}
+					} else if up, ok := an.Uplinks[da]; ok {
+						if s.insideAJailOpsNetwork(sa) {
+							insideCaveat = true
+						} else if cont, err = walk("uplink", dst.jail, fwsim.Hook{Dir: "in", Iface: up}); err != nil {
+							return api.FirewallTestResult{}, err
+						}
+					}
+				}
+				if cont && src.jail != nil {
 					if cont, err = walk("source", src.jail, fwsim.Hook{Dir: "in"}); err != nil {
 						return api.FirewallTestResult{}, err
 					}
@@ -189,6 +222,9 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 		case c.Verdict == api.TestUnknown && res.Verdict != api.TestBlock:
 			res.Verdict = api.TestUnknown
 		}
+	}
+	if insideCaveat {
+		caveats = append(caveats, "the source address is inside a network of JailOps: it does not arrive on an uplink, so the uplink is not evaluated")
 	}
 	res.Caveats = append(caveats, testCaveats(src, dst)...)
 	res.Caveats = append(res.Caveats, s.emptyRefCaveats(project, src.jail, dst.jail)...)
@@ -228,13 +264,16 @@ func (s *Service) emptyRefCaveats(project string, jails ...*api.Jail) []string {
 func testCaveats(src, dst testEnd) []string {
 	c := []string{
 		"the answer is for a new connection: a connection that is already open (pf keeps its state) is not asked about",
-		"the rules of the host's own pf.conf are not evaluated; JailOps's anchors hang under it and the defaults of an anchor are final",
+		"only JailOps' rules are evaluated: a rule of an anchor that passes or blocks is final, so /etc/pf.conf after the anchor line never sees the packet; quick rules of pf.conf before the anchor line are not evaluated (jailops doctor: pf.inbound and pf.order name such rules)",
 	}
 	if src.jail != nil && dst.jail == nil && !dst.host {
 		c = append(c, "the destination is not a jail of this project: only the source's anchor is evaluated; the host's rules and the uplink decide the rest")
 	}
 	if src.jail != nil && dst.host {
-		c = append(c, "the destination is the host: only the source's anchor is evaluated; the host's own rules decide the rest")
+		c = append(c, "the destination is the host: this is the jail's side only. JailOps' firewall never passes a jail's traffic to the host except DNS to the resolver and ping; a service of the host that a jail needs is opened in /etc/pf.conf with a quick pass rule before the anchor line")
+	}
+	if src.host && dst.jail != nil {
+		c = append(c, "the source is the host: the answer is whether the jail's rules admit a connection the host opens; what the host may send is /etc/pf.conf's to say")
 	}
 	if dst.jail != nil {
 		c = append(c, "on the way out of the host only the destination jail's anchor is evaluated, not the anchors of other jails")
@@ -398,4 +437,48 @@ func (s *Service) loadedState(ctx context.Context, anchor, ruleset string) strin
 		return "true"
 	}
 	return "false"
+}
+
+// insideAJailOpsNetwork says whether an address lies in the subnet of a network of JailOps: such a source never arrives on
+// an uplink.
+func (s *Service) insideAJailOpsNetwork(a netip.Addr) bool {
+	objs, err := s.netKind.list()
+	if err != nil {
+		return false
+	}
+	for _, o := range objs {
+		for _, sub := range []string{subnetOf4(o.Spec), subnetOf6(o.Spec)} {
+			if p, err := netip.ParsePrefix(sub); err == nil && p.Contains(a) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func subnetOf4(n api.NetworkSpec) string {
+	if n.IPv4 != nil {
+		return n.IPv4.Subnet
+	}
+	return ""
+}
+
+func subnetOf6(n api.NetworkSpec) string {
+	if n.IPv6 != nil && n.IPv6.Mode != api.IPv6None {
+		return n.IPv6.Subnet
+	}
+	return ""
+}
+
+// uniqAddrList removes the duplicates of a list of addresses, keeping the order.
+func uniqAddrList(in []netip.Addr) []netip.Addr {
+	seen := map[netip.Addr]bool{}
+	var out []netip.Addr
+	for _, a := range in {
+		if a.IsValid() && !seen[a] {
+			seen[a] = true
+			out = append(out, a)
+		}
+	}
+	return out
 }

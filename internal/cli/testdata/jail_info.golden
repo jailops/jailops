@@ -13,7 +13,7 @@ Jail web
 Resources
   Limits:       cpu 2, memory 2G
   Firewall:     open: no firewall policy (the host answers ping and DNS only)
-  Usage:        processes 23, cpu 2h13m, memory 388.2 MiB of 2G
+  Usage:        processes 23, cpu 2h13m, memory 388.2 MiB resident, 256.0 MiB reserved of the 2G limit
   Disk:         root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB
 
 Network
@@ -138,7 +138,8 @@ $ jailops jail info web -o json
       "accounting": {
         "processes": 23,
         "cpu_seconds": 8013,
-        "memory_bytes": 407048192
+        "memory_bytes": 407048192,
+        "swap_bytes": 268435456
       },
       "disk": {
         "root_bytes": 268435456,

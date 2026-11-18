@@ -12,14 +12,14 @@ async function open(page: Page, path: string): Promise<void> {
   await page.waitForLoadState('networkidle')
 }
 
-test('the list shows what attaches each volume and warns about two writers', async ({ page }) => {
+test('the list shows what attaches each volume', async ({ page }) => {
   await open(page, '/volumes')
   await expect(page.locator('[data-volume="pgdata"]')).toContainText('db')
   await expect(page.locator('[data-volume="archive"]')).toContainText('No jail')
   await expect(page.locator('[data-volume="secrets"]')).toContainText('Locked')
 })
 
-test('a volume is attached to a stopped jail and detached again, and a running one is refused', async ({ page }) => {
+test('a volume is attached to a jail and detached again, also while the jail runs', async ({ page }) => {
   await open(page, '/jails/build')
   await page.getByTestId('attach-volume-open').click()
   const dlg = page.getByRole('dialog')
@@ -31,8 +31,14 @@ test('a volume is attached to a stopped jail and detached again, and a running o
   await page.locator('[data-detach="archive"]').click()
   await page.getByRole('dialog').getByTestId('confirm').click()
   await expect(page.locator('[data-volume="archive"]')).toHaveCount(0)
+  // a running jail takes it at once
   await open(page, '/jails/web')
-  await expect(page.getByTestId('attach-volume-open')).toBeDisabled()
+  await page.getByTestId('attach-volume-open').click()
+  const live = page.getByRole('dialog')
+  await live.getByTestId('attach-volume').selectOption('archive')
+  await live.getByTestId('attach-mount').fill('/srv/archive')
+  await live.getByTestId('attach-go').click()
+  await expect(page.locator('[data-volume="archive"]')).toContainText('/srv/archive')
 })
 
 test('a snapshot is taken, and a volume that is attached is not deleted', async ({ page }) => {

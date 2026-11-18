@@ -81,7 +81,7 @@ type VolumeStatus struct {
 	Detail string `json:"detail,omitempty"`
 	// AttachedTo lists the jails the volume is attached to.
 	AttachedTo []VolumeUse `json:"attached_to,omitempty"`
-	// Warnings are lines a reviewer should read, such as a volume that is writable in more than one jail.
+	// Warnings are lines a reviewer should read.
 	Warnings []string `json:"warnings,omitempty"`
 }
 

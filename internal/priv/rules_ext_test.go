@@ -609,3 +609,48 @@ func (r *ruleEnv) trustDirs(t *testing.T) {
 	}
 	fixModes(t, base)
 }
+
+// A volume that is mounted into a RUNNING jail is held to what an fstab is held to when the jail starts: the mount point
+// is a plain path in the jail's root, it is not over the jail's own file systems, and nothing is mounted below a volume
+// or over one. A link in the jail's tree would carry the mount into another jail's root.
+func TestLiveVolumeMountIsHeldToTheFstabChecks(t *testing.T) {
+	r := newRuleEnv(t)
+	vol := filepath.Join(r.cfg.MountBase, "projects", "shop", "volumes", "maildir")
+	other := filepath.Join(r.cfg.MountBase, "projects", "shop", "jails", "db", "root", "var")
+	for _, d := range []string{vol, other, filepath.Join(r.root, "srv", "mail"), filepath.Join(r.root, "compat", "linux", "srv", "mail"),
+		filepath.Join(r.root, "srv", "mail", "inner"), filepath.Join(r.root, "var", "x"), filepath.Join(r.root, "proc"), filepath.Join(r.root, "sys")} {
+		os.MkdirAll(d, 0o755)
+	}
+	mount := func(target string) []string { return []string{"mount", "-t", "nullfs", vol, target} }
+	// what is mounted below the jail's root now: the Linux layout and one volume at /srv/mail
+	list := strings.Join([]string{
+		"devfs " + filepath.Join(r.root, "dev") + " devfs rw 0 0",
+		r.root + " " + filepath.Join(r.root, "compat", "linux") + " nullfs rw 0 0",
+		vol + " " + filepath.Join(r.root, "srv", "mail") + " nullfs rw 0 0",
+		// the datasets of a thin jail's own tree are mounted below the root as well: they are not volumes
+		"tank/jail/local " + filepath.Join(r.root, "usr", "local") + " zfs rw 0 0",
+	}, "\n") + "\n"
+	r.env.runner.On("mount", []string{"-p"}, list)
+	os.MkdirAll(filepath.Join(r.root, "usr", "local", "www"), 0o755)
+	r.ok(t, mount(filepath.Join(r.root, "usr", "local", "www"))...)
+	r.ok(t, "mount", "-t", "nullfs", vol, filepath.Join(r.root, "srv", "other"))
+	os.MkdirAll(filepath.Join(r.root, "srv", "other"), 0o755)
+	r.ok(t, mount(filepath.Join(r.root, "srv", "other"))...)
+	// the second mount of a Linux jail: the same path below the mirror
+	r.ok(t, mount(filepath.Join(r.root, "compat", "linux", "srv", "other"))...)
+	// a link in the path
+	os.Symlink(other, filepath.Join(r.root, "srv", "link"))
+	r.bad(t, mount(filepath.Join(r.root, "srv", "link"))...)
+	os.Symlink("/etc", filepath.Join(r.root, "srv", "etc"))
+	r.bad(t, mount(filepath.Join(r.root, "srv", "etc", "x"))...)
+	// the jail's own file systems and the mirror
+	for _, p := range []string{"proc", "sys", "dev", "dev/fd", "compat/linux", "compat/linux/proc", "compat/linux/dev/shm", "compat"} {
+		r.bad(t, mount(filepath.Join(r.root, p))...)
+	}
+	// below a volume, over one, and on one
+	r.bad(t, mount(filepath.Join(r.root, "srv", "mail", "inner"))...)
+	r.bad(t, mount(filepath.Join(r.root, "srv"))...)
+	r.bad(t, mount(filepath.Join(r.root, "srv", "mail"))...)
+	// the mirror itself is not a volume
+	r.ok(t, "mount", "-t", "nullfs", r.root, filepath.Join(r.root, "compat", "linux"))
+}

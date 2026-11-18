@@ -207,6 +207,17 @@ func (a *app) showNetwork(n api.Network) error {
 			rng += " (except " + strings.Join(v6.Exclude, ", ") + ")"
 		}
 		s.kv("IPv6 range", rng)
+		if v6.Mode == api.IPv6Proxy {
+			state := "enabled"
+			for _, c := range n.Status.Conditions {
+				if c.Type == "NDPProxy" {
+					state += ", " + strings.ToLower(c.Reason)
+				}
+			}
+			s.kv("NDP proxy", state+" ('jailops network ndp-proxy status "+n.Metadata.Name+"')")
+		} else {
+			s.kv("NDP proxy", "off ('jailops network ndp-proxy enable "+n.Metadata.Name+"' for a prefix on a shared segment)")
+		}
 	} else {
 		s.kv("IPv6", "none")
 	}

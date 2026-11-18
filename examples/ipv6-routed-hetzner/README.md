@@ -22,7 +22,7 @@ Replace `2001:db8:abcd:1::/64` with the prefix your provider routes to you and `
 
 - Forwarding must be on (`gateway_enable`, `ipv6_gateway_enable`; install.md section 4) and `pf.conf` needs the three
   anchor lines.
-- Admit the prefix at the host's door if your `pf.conf` blocks inbound traffic by default (install.md section 3).
+- Nothing in `pf.conf` is needed for the jails: an `allow in` rule of a policy opens the uplink for the jail (install.md section 3).
 
 ## Run it
 

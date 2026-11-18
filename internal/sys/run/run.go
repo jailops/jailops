@@ -44,6 +44,9 @@ type Cmd struct {
 	// DefaultMaxStderr). Zero means the defaults. Excess output is dropped
 	// and Result.Truncated is set; the process is not killed.
 	MaxOutput int
+	// TermGrace, when positive, makes the end of the command (the timeout or a cancelled context) gentle: the
+	// process group gets SIGTERM, and SIGKILL only when it is still there TermGrace later. Zero kills at once.
+	TermGrace time.Duration
 }
 
 // Result is what a finished command left behind.
