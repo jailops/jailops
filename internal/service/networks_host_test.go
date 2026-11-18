@@ -31,3 +31,22 @@ func TestProxySubnetInsideTheSegmentOfAHostAddressOf128(t *testing.T) {
 		t.Fatalf("a subnet that holds the host's own address must be refused at once: %v", err)
 	}
 }
+
+// The resolver address of the subnet, which the host holds on its loopback for the jails, is not the host's own
+// address in the sense of the NDP proxy; any other address of the host inside the subnet still is.
+func TestProxySubnetMayHoldTheResolverAddressOnTheLoopback(t *testing.T) {
+	s := newSvc(t)
+	f := ifconfig.NewFake(ifconfig.Options{})
+	f.AddIface(ifconfig.Iface{Name: "vtnet0", Flags: []string{"UP"}, Inet6: []netip.Prefix{netip.MustParsePrefix("2001:db8:103:211::1/128")}})
+	f.AddIface(ifconfig.Iface{Name: "lo1", Groups: []string{"lo"}, Flags: []string{"UP", "LOOPBACK"}, Inet6: []netip.Prefix{netip.MustParsePrefix("2001:db8:103:211:100::1/128")}})
+	s.d.Net = f
+	spec := api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:103:211:100::/80"}}
+	if err := s.checkNetworkHost(bg, spec); err != nil {
+		t.Fatalf("the resolver address on the loopback must not refuse the subnet: %v", err)
+	}
+	f.AddIface(ifconfig.Iface{Name: "lo2", Groups: []string{"lo"}, Flags: []string{"UP", "LOOPBACK"}, Inet6: []netip.Prefix{netip.MustParsePrefix("2001:db8:103:211:100::7/128")}})
+	err := s.checkNetworkHost(bg, spec)
+	if err == nil || !strings.Contains(err.Error(), "holds the host's own address 2001:db8:103:211:100::7") {
+		t.Fatalf("another address of the host inside the subnet must be refused: %v", err)
+	}
+}

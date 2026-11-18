@@ -80,6 +80,10 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 				continue
 			}
 			for _, h := range i.Inet6 {
+				// the resolver address of the network, which the host holds on its loopback for the jails
+				if h.Addr() == ipam.Resolver6(v6) && slices.Contains(i.Groups, "lo") {
+					continue
+				}
 				if !h.Addr().IsLinkLocalUnicast() && v6.Contains(h.Addr()) {
 					return api.Errorf(api.CodeInvalid, "with the NDP proxy the subnet %s holds the host's own address %s on %s", v6, h.Addr(), i.Name).
 						WithDetail("field", "ipv6.subnet").

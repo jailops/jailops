@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"slices"
 	"sync"
 	"time"
 
@@ -213,8 +214,13 @@ func (l *Local) ndpPrefixes(ctx context.Context, uplink string) (ndpUplink, erro
 		case !p.Addr().IsGlobalUnicast():
 			return u, forbidden("prefix %s is not a global or unique-local unicast prefix", p)
 		}
+		resolver := ipam.Resolver6(p)
 		for _, i := range list {
 			for _, h := range i.Inet6 {
+				// the resolver address of the network is the helper's own, held on the loopback; the proxy never answers for it
+				if h.Addr() == resolver && slices.Contains(i.Groups, "lo") {
+					continue
+				}
 				if p.Contains(h.Addr()) {
 					return u, forbidden("prefix %s holds the host's own address %s on %s", p, h.Addr(), i.Name)
 				}

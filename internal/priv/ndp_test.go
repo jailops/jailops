@@ -327,3 +327,27 @@ func TestNDPAnnouncementsAreRateLimited(t *testing.T) {
 		t.Fatalf("the bucket does not refill: %v", err)
 	}
 }
+
+// The resolver address of the network is held by the helper on the loopback; it is not an address of the host that the
+// prefix may not hold. Any other address inside the prefix, on the loopback or elsewhere, still is.
+func TestNDPPrefixMayHoldTheResolverAddressOnTheLoopback(t *testing.T) {
+	loopback := func(e *env, addr string) {
+		e.net.AddIface(ifconfig.Iface{Name: "lo1", Groups: []string{"lo"}, Flags: []string{"UP", "LOOPBACK"}, Inet6: []netip.Prefix{netip.MustParsePrefix(addr)}})
+	}
+	e := newEnv(t)
+	loopback(e, "2001:db8:1:2:100::1/128")
+	if err := e.local.NDPAnswer(context.Background(), ndpReq()); err != nil {
+		t.Fatalf("the resolver address on the loopback must not refuse the proxy: %v", err)
+	}
+	if e.local.d.NDP.(*fakeNDP).frames() != 1 {
+		t.Fatal("no advertisement was sent")
+	}
+	for _, addr := range []string{"2001:db8:1:2:100::2/128", "2001:db8:1:2:100::10/128"} {
+		e := newEnv(t)
+		loopback(e, addr)
+		err := e.local.NDPAnswer(context.Background(), ndpReq())
+		if !api.IsCode(err, api.CodeForbidden) || !strings.Contains(err.Error(), "own address") {
+			t.Fatalf("%s on the loopback is an address of the host: %v", addr, err)
+		}
+	}
+}
