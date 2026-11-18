@@ -1,19 +1,19 @@
 $ jailops stop-all
 ! No jail is running.
 
-$ jailops create db --image freebsd-15@stable --storage default --network lan --start
+$ jailops create db --image freebsd-15 --storage default --network lan --start
 jail/db created
 jail/db started
 
-$ jailops create web --image freebsd-15@stable --storage default --network lan --start --depends db
+$ jailops create web --image freebsd-15 --storage default --network lan --start --depends db
 jail/web created
 jail/web started
 
-$ jailops create cache --image freebsd-15@stable --storage default --network lan --start
+$ jailops create cache --image freebsd-15 --storage default --network lan --start
 jail/cache created
 jail/cache started
 
-$ jailops create idle --image freebsd-15@stable --storage default --network lan --start
+$ jailops create idle --image freebsd-15 --storage default --network lan --start
 jail/idle created
 jail/idle started
 

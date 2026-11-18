@@ -64,7 +64,7 @@ func WithSecretsRecipient(r string) Option { return func(s *Server) { s.secretsR
 func WithHostName(n string) Option { return func(s *Server) { s.hostname = n } }
 
 // WithSysctl sets a sysctl of the fake host. The fake looks at net.inet6.icmp6.nd6_onlink_ns_rfc4861 when a
-// proxy-mode network is created: "0" makes the answer carry the note of the real daemon.
+// network with the NDP proxy is created: "0" makes the answer carry the note of the real daemon.
 func WithSysctl(name, value string) Option {
 	return func(s *Server) {
 		if s.sysctls == nil {
@@ -186,9 +186,8 @@ type Server struct {
 	snapshots map[string][]*api.JailSnapshot   // by jail
 	volSnaps  map[string][]*api.VolumeSnapshot // by volume key
 	gens      map[string][]*api.ImageGeneration
-	genMax    map[string]int            // highest generation number ever used per image: numbers are never reused
-	aliases   map[string]map[string]int // image -> alias -> generation number
-	imgSame   map[string]bool           // images whose upgrade finds nothing to upgrade (SeedImageCurrent)
+	genMax    map[string]int  // highest generation number ever used per image: numbers are never reused
+	imgSame   map[string]bool // images whose upgrade finds nothing to upgrade (SeedImageCurrent)
 	nextJID   int
 	streams   int
 
@@ -220,7 +219,6 @@ func New(opts ...Option) *Server {
 		offline: map[string]bool{}, fleetConds: map[string][]api.Condition{},
 		gens:    map[string][]*api.ImageGeneration{},
 		genMax:  map[string]int{},
-		aliases: map[string]map[string]int{},
 		imgSame: map[string]bool{},
 		ops:     map[string]*opState{}, opFail: map[string][]*api.Error{},
 		notify: make(chan struct{}), drop: make(chan struct{}), closed: make(chan struct{}),

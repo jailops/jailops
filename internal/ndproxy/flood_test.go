@@ -96,8 +96,7 @@ func routerAsks(t *testing.T, r *rig, flood func(step int)) uint64 {
 }
 
 // A flood from one MAC at twenty thousand a second spends its own allowance and nothing of the router's: the router
-// is answered as often as when nothing floods (the global budget used to be charged before the source's, so the
-// flood used it all up).
+// is answered as often as when nothing floods: the source's allowance is charged before the global budget.
 func TestAFloodFromOneMACDoesNotStarveTheRouter(t *testing.T) {
 	quiet := routerAsks(t, newRig(t, Config{}), nil)
 	if quiet == 0 {

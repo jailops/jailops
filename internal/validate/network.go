@@ -33,7 +33,7 @@ func NetworkSpec(s api.NetworkSpec) error {
 			return Invalid("dns", "dns %q is not a usable unicast address", d)
 		}
 	}
-	if s.IPv4 == nil && (s.IPv6 == nil || s.IPv6.Mode == api.IPv6None) {
+	if s.IPv4 == nil && s.IPv6 == nil {
 		return Invalid("ipv4", "a network needs at least one address family")
 	}
 	if s.IPv4 != nil {
@@ -45,7 +45,7 @@ func NetworkSpec(s api.NetworkSpec) error {
 		if err := ipv6(s); err != nil {
 			return err
 		}
-		if s.IPv6.Mode != api.IPv6None && s.MTU != 0 && s.MTU < 1280 {
+		if s.MTU != 0 && s.MTU < 1280 {
 			return Invalid("mtu", "IPv6 needs an MTU of at least 1280")
 		}
 	}
@@ -128,13 +128,6 @@ var (
 
 func ipv6(s api.NetworkSpec) error {
 	n := s.IPv6
-	switch n.Mode {
-	case api.IPv6None:
-		return nil
-	case api.IPv6Routed, api.IPv6Proxy:
-	default:
-		return Invalid("ipv6.mode", "ipv6.mode %q must be routed, proxy or none", n.Mode)
-	}
 	p, err := netip.ParsePrefix(n.Subnet)
 	if err != nil || !p.Addr().Is6() || p.Addr().Is4In6() || p.Addr().Zone() != "" {
 		return Invalid("ipv6.subnet", "ipv6.subnet %q is not an IPv6 CIDR", n.Subnet)
@@ -142,10 +135,10 @@ func ipv6(s api.NetworkSpec) error {
 	if p != p.Masked() {
 		return Invalid("ipv6.subnet", "ipv6.subnet %q has host bits set (want %s)", n.Subnet, p.Masked())
 	}
-	// What the proxy cannot serve is refused here, not when the first jail starts: the helper accepts prefixes of
+	// What the NDP proxy cannot serve is refused here, not when the first jail starts: the helper accepts prefixes of
 	// /48 to /120.
 	lo, hi := ipam.RoutedSubnetMin6, ipam.SubnetMax6
-	if n.Mode == api.IPv6Proxy {
+	if n.NDPProxy {
 		lo, hi = ipam.ProxySubnetMin6, ipam.ProxyApproveMax6
 	}
 	if p.Bits() < lo || p.Bits() > hi {
@@ -164,15 +157,15 @@ func ipv6(s api.NetworkSpec) error {
 	if err := exclusions("ipv6.exclude", n.Exclude, p); err != nil {
 		return err
 	}
-	if n.Mode == api.IPv6Proxy && r.Contains(p.Masked().Addr()) {
+	if n.NDPProxy && r.Contains(p.Masked().Addr()) {
 		return Invalid("ipv6.range", "ipv6.range %q contains the base address %s of the prefix, which routers use (the subnet-router anycast address): start the range above it", n.Range, p.Masked().Addr())
 	}
-	if n.Mode == api.IPv6Proxy {
+	if n.NDPProxy {
 		if s.Uplink == "" {
-			return Invalid("uplink", "ipv6 proxy mode needs an uplink to answer neighbor solicitations on")
+			return Invalid("uplink", "ipv6.ndp_proxy needs an uplink to answer neighbor solicitations on")
 		}
 		if ipam.IsEpairName(s.Uplink) || strings.HasPrefix(s.Uplink, "bridge") {
-			return Invalid("uplink", "in proxy mode the uplink %q must be a plain interface, not a bridge or an interface of a jail", s.Uplink)
+			return Invalid("uplink", "with the NDP proxy the uplink %q must be a plain interface, not a bridge or an interface of a jail", s.Uplink)
 		}
 	}
 	return nil

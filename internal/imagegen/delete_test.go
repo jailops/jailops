@@ -27,12 +27,11 @@ func buildN(t *testing.T, w *world, image string, n int) {
 func TestDeleteRefused(t *testing.T) {
 	w := newWorld(t)
 	buildN(t, w, "fb", 2)
-	w.M.SetAlias(bg, "fb", "stable", 2)
-	jails := []JailRef{{Name: "web", Image: "fb@stable", Current: "fb#g1"}, {Name: "db", Image: "fb#g2"}}
+	jails := []JailRef{{Name: "web", Image: "fb", Current: "fb#g1"}, {Name: "db", Image: "fb#g2"}}
 	if _, err := w.M.Delete(bg, "fb", 1, jails, false); !api.IsCode(err, api.CodeImageInUse) {
 		t.Fatalf("current generation of a jail must block: %v", err)
 	}
-	if _, err := w.M.Delete(bg, "fb", 1, []JailRef{{Name: "x", Image: "fb@latest", Previous: "fb#g1"}}, false); !api.IsCode(err, api.CodeImageInUse) {
+	if _, err := w.M.Delete(bg, "fb", 1, []JailRef{{Name: "x", Image: "fb", Previous: "fb#g1"}}, false); !api.IsCode(err, api.CodeImageInUse) {
 		t.Fatalf("rollback target must block: %v", err)
 	}
 	if _, err := w.M.Delete(bg, "fb", 9, nil, false); !api.IsCode(err, api.CodeNotFound) {
@@ -40,14 +39,8 @@ func TestDeleteRefused(t *testing.T) {
 	}
 }
 
-func noAliasWorld(t *testing.T) *world {
-	w := newWorld(t)
-	w.AddImage("fb") // no aliases
-	return w
-}
-
 func TestDeleteDestroysWhenNoClones(t *testing.T) {
-	w := noAliasWorld(t)
+	w := newWorld(t)
 	buildN(t, w, "fb", 1)
 	res, err := w.M.Delete(bg, "fb", 1, nil, false)
 	if err != nil || res.Parked {
@@ -59,7 +52,7 @@ func TestDeleteDestroysWhenNoClones(t *testing.T) {
 }
 
 func TestDeleteParksThenCollects(t *testing.T) {
-	w := noAliasWorld(t)
+	w := newWorld(t)
 	buildN(t, w, "fb", 2)
 	// a jail root cloned from g2 (not in the specs passed to Delete: ZFS safety net)
 	w.Z.Create(bg, "tank/jailops/jails/j", nil)
@@ -104,7 +97,7 @@ func TestDeleteParksThenCollects(t *testing.T) {
 }
 
 func TestCollectLeavesUnmanaged(t *testing.T) {
-	w := noAliasWorld(t)
+	w := newWorld(t)
 	w.Z.Create(bg, "tank/jailops/deleted", nil)
 	w.Z.Create(bg, "tank/jailops/deleted/foreign", nil)
 	if got, err := w.M.Collect(bg); err != nil || len(got) != 0 {
@@ -117,7 +110,7 @@ func TestCollectLeavesUnmanaged(t *testing.T) {
 
 func deleteSetup(withClone bool) func(t *testing.T) *world {
 	return func(t *testing.T) *world {
-		w := noAliasWorld(t)
+		w := newWorld(t)
 		buildN(t, w, "fb", 2)
 		if withClone {
 			w.Z.Create(bg, "tank/jailops/jails/j", nil)
@@ -145,7 +138,7 @@ func TestDeleteFailureSweep(t *testing.T) {
 }
 
 func TestDeleteDryRun(t *testing.T) {
-	w := noAliasWorld(t)
+	w := newWorld(t)
 	buildN(t, w, "fb", 2)
 	before := w.state()
 	w.F.Reset(0)
@@ -156,7 +149,7 @@ func TestDeleteDryRun(t *testing.T) {
 }
 
 func TestDeleteInjectedErrorIsReported(t *testing.T) {
-	w := noAliasWorld(t)
+	w := newWorld(t)
 	buildN(t, w, "fb", 1)
 	w.F.Reset(1)
 	if _, err := w.M.Delete(bg, "fb", 1, nil, false); !errors.Is(err, fault.ErrInjected) {
@@ -165,21 +158,21 @@ func TestDeleteInjectedErrorIsReported(t *testing.T) {
 }
 
 func TestRefs(t *testing.T) {
-	st := api.ImageStatus{Aliases: map[string]int{"stable": 2, "latest": 3}, Generations: []api.ImageGeneration{{Number: 1}, {Number: 2}, {Number: 3}}}
+	st := api.ImageStatus{Generations: []api.ImageGeneration{{Number: 1}, {Number: 2}, {Number: 3}}}
 	jails := []JailRef{
-		{Name: "a", Image: "fb@stable"},
+		{Name: "a", Image: "fb"},
 		{Name: "b", Image: "fb#g1"},
-		{Name: "c", Image: "fb@latest", Current: "fb#g2", Previous: "other#g1"},
-		{Name: "d", Image: "other@stable", Current: "other#g2"},
+		{Name: "c", Image: "fb", Current: "fb#g2", Previous: "other#g1"},
+		{Name: "d", Image: "other", Current: "other#g2"},
 		{Name: "e", Image: "garbage!"},
 	}
 	got := Refs("fb", st, jails)
-	want := map[int][]string{1: {"b"}, 2: {"a", "c"}, 3: {"c"}}
+	want := map[int][]string{1: {"b"}, 2: {"c"}, 3: {"a", "c"}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("%v", got)
 	}
 	ApplyRefs("fb", &st, jails)
-	if !reflect.DeepEqual(st.Generations[1].Refs, []string{"a", "c"}) {
+	if !reflect.DeepEqual(st.Generations[2].Refs, []string{"a", "c"}) {
 		t.Fatal(st.Generations)
 	}
 }
@@ -189,8 +182,7 @@ func TestCandidates(t *testing.T) {
 	mk := func(n, daysAgo int) api.ImageGeneration {
 		return api.ImageGeneration{Number: n, CreatedAt: now.AddDate(0, 0, -daysAgo)}
 	}
-	st := api.ImageStatus{Generations: []api.ImageGeneration{mk(1, 100), mk(2, 80), mk(3, 60), mk(4, 40), mk(5, 5), mk(6, 1)},
-		Aliases: map[string]int{"stable": 2}}
+	st := api.ImageStatus{Generations: []api.ImageGeneration{mk(1, 100), mk(2, 80), mk(3, 60), mk(4, 40), mk(5, 5), mk(6, 1)}}
 	tests := []struct {
 		name  string
 		ret   api.ImageRetention
@@ -198,10 +190,10 @@ func TestCandidates(t *testing.T) {
 		want  []int
 	}{
 		{"no policy keeps all", api.ImageRetention{}, nil, nil},
-		{"keep last 2", api.ImageRetention{KeepLast: 2}, nil, []int{1, 3, 4}},
-		{"keep days 30", api.ImageRetention{KeepDays: 30}, nil, []int{1, 3, 4}},
-		{"both", api.ImageRetention{KeepLast: 4, KeepDays: 30}, nil, []int{1}},
-		{"referenced kept", api.ImageRetention{KeepLast: 1}, []JailRef{{Name: "j", Image: "fb#g4"}}, []int{1, 3, 5}},
+		{"keep last 2", api.ImageRetention{KeepLast: 2}, nil, []int{1, 2, 3, 4}},
+		{"keep days 30", api.ImageRetention{KeepDays: 30}, nil, []int{1, 2, 3, 4}},
+		{"both", api.ImageRetention{KeepLast: 4, KeepDays: 30}, nil, []int{1, 2}},
+		{"referenced kept", api.ImageRetention{KeepLast: 1}, []JailRef{{Name: "j", Image: "fb#g4"}}, []int{1, 2, 3, 5}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -214,7 +206,7 @@ func TestCandidates(t *testing.T) {
 }
 
 func TestPrune(t *testing.T) {
-	w := noAliasWorld(t)
+	w := newWorld(t)
 	buildN(t, w, "fb", 4)
 	got, err := w.M.Prune(bg, "fb", api.ImageRetention{KeepLast: 1}, []JailRef{{Name: "j", Image: "fb#g2"}})
 	if err != nil {
@@ -230,67 +222,18 @@ func TestPrune(t *testing.T) {
 	}
 }
 
-func aliasesOf(t *testing.T, w *world, image string) map[string]int {
-	t.Helper()
-	o, err := w.M.Observe(bg, image)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return o.Status.Aliases
-}
-
-func TestDeleteMovesAliasesToTheNextNewestGeneration(t *testing.T) {
-	w := newWorld(t) // aliases stable and latest
-	buildN(t, w, "fb", 3)
-	if err := w.M.SetAlias(bg, "fb", "stable", 2); err != nil {
-		t.Fatal(err)
-	}
-	// dry run shows the alias step and changes nothing
-	res, err := w.M.Delete(bg, "fb", 3, nil, true)
-	if err != nil || len(res.Plan) == 0 || !reflect.DeepEqual(aliasesOf(t, w, "fb"), map[string]int{"latest": 3, "stable": 2}) {
-		t.Fatalf("%v %v %v", res.Plan, err, aliasesOf(t, w, "fb"))
-	}
-	if _, err := w.M.Delete(bg, "fb", 3, nil, false); err != nil {
-		t.Fatal(err)
-	}
-	if got := aliasesOf(t, w, "fb"); !reflect.DeepEqual(got, map[string]int{"latest": 2, "stable": 2}) {
-		t.Fatalf("latest must move to the next newest generation: %v", got)
-	}
-	if _, err := w.M.Delete(bg, "fb", 2, nil, false); err != nil {
-		t.Fatal(err)
-	}
-	if got := aliasesOf(t, w, "fb"); !reflect.DeepEqual(got, map[string]int{"latest": 1, "stable": 1}) {
-		t.Fatalf("%v", got)
-	}
-	if _, err := w.M.Delete(bg, "fb", 1, nil, false); err != nil {
-		t.Fatal(err)
-	}
-	if got := aliasesOf(t, w, "fb"); len(got) != 0 {
-		t.Fatalf("aliases must go with the last generation: %v", got)
-	}
-}
-
-func TestDeleteGenerationUsedByJailKeepsAliases(t *testing.T) {
+func TestDeleteGenerationUsedByJailIsRefused(t *testing.T) {
 	w := newWorld(t)
 	buildN(t, w, "fb", 2)
-	_, err := w.M.Delete(bg, "fb", 2, []JailRef{{Name: "web", Image: "fb@latest"}}, false)
-	if !api.IsCode(err, api.CodeImageInUse) || aliasesOf(t, w, "fb")["latest"] != 2 {
-		t.Fatalf("%v %v", err, aliasesOf(t, w, "fb"))
+	_, err := w.M.Delete(bg, "fb", 2, []JailRef{{Name: "web", Image: "fb"}}, false)
+	if !api.IsCode(err, api.CodeImageInUse) {
+		t.Fatal(err)
 	}
 }
 
-func TestDeleteAliasAndImage(t *testing.T) {
+func TestDeleteImage(t *testing.T) {
 	w := newWorld(t)
 	buildN(t, w, "fb", 1)
-	if ok, err := w.M.DeleteAlias(bg, "fb", "stable"); !ok || err != nil {
-		t.Fatal(ok, err)
-	}
-	if ok, _ := w.M.DeleteAlias(bg, "fb", "stable"); ok {
-		t.Fatal("already gone")
-	}
-	if got := aliasesOf(t, w, "fb"); !reflect.DeepEqual(got, map[string]int{"latest": 1}) {
-		t.Fatal(got)
-	}
 	if _, err := w.M.Delete(bg, "fb", 1, nil, false); err != nil {
 		t.Fatal(err)
 	}

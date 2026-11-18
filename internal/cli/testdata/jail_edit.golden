@@ -1,4 +1,4 @@
-$ jailops jail create web --image freebsd-15@stable --network lan --storage default
+$ jailops jail create web --image freebsd-15 --network lan --storage default
 jail/web created
 
 $ jailops jail edit web
@@ -38,7 +38,7 @@ kind: Jail
 metadata:
   name: web
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   layout: thin
   hostname: edited

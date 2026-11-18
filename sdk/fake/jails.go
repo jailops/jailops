@@ -2,10 +2,8 @@ package fake
 
 import (
 	"fmt"
-	"maps"
 	"net/http"
 	"net/netip"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -82,7 +80,7 @@ func (s *Server) assignJail(j, old *api.Jail) *api.Error {
 				if n.Spec.IPv4 != nil {
 					a.IPv4 = "auto"
 				}
-				if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+				if n.Spec.IPv6 != nil {
 					a.IPv6 = "auto"
 				}
 			}
@@ -467,7 +465,7 @@ func (s *Server) setupNetworks() {
 	// sysctl is 0; see WithSysctl).
 	k.created = func(n *api.Network) {
 		const oid = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy && s.sysctls[oid] == "0" {
+		if n.Spec.IPv6 != nil && n.Spec.IPv6.NDPProxy && s.sysctls[oid] == "0" {
 			n.Status.Notes = append(n.Status.Notes, "on some shared IPv6 segments the setting "+oid+" matters (it is 0): https://jailops.net/articles/shared-ipv6-neighbor-discovery/#fix")
 		}
 	}
@@ -724,7 +722,6 @@ func (s *Server) setupImages() {
 	k.onDelete = func(i *api.Image) {
 		delete(s.gens, i.Metadata.Name)
 		delete(s.genMax, i.Metadata.Name)
-		delete(s.aliases, i.Metadata.Name)
 	}
 	k.decorate = func(i *api.Image) {
 		i.Status.Generations = nil
@@ -732,10 +729,6 @@ func (s *Server) setupImages() {
 			c := clone(g)
 			c.Refs = s.genRefs(i.Metadata.Name, g.Number)
 			i.Status.Generations = append(i.Status.Generations, c)
-		}
-		i.Status.Aliases = nil
-		if len(s.aliases[i.Metadata.Name]) > 0 {
-			i.Status.Aliases = maps.Clone(s.aliases[i.Metadata.Name])
 		}
 		i.Status.AutoUpgrade = nil
 		if au := i.Spec.AutoUpgrade; au != nil && au.Enabled {
@@ -818,7 +811,6 @@ func (s *Server) genBuild(w http.ResponseWriter, r *http.Request) {
 			if !b.DryRun {
 				s.gens[name] = append(s.gens[name], g)
 				s.genMax[name] = n
-				s.followAliases(name, n)
 				s.emit("image-generation-created", "/api/v1/images/"+name+"/generations/"+strconv.Itoa(n))
 			}
 			return clone(g), nil
@@ -878,7 +870,6 @@ func (s *Server) imageUpgrade(w http.ResponseWriter, r *http.Request) {
 					Manifest: "sha256:" + randHex(16), Packages: 120, CreatedAt: s.now(), Dataset: fmt.Sprintf("tank/jailops/images/%s/g%d", name, n)}
 				s.gens[name] = append(s.gens[name], g)
 				s.genMax[name] = n
-				s.followAliases(name, n)
 				s.emit("image-generation-created", "/api/v1/images/"+name+"/generations/"+strconv.Itoa(n))
 				c := clone(g)
 				out.Generation = &c
@@ -961,7 +952,6 @@ func (s *Server) genDelete(w http.ResponseWriter, r *http.Request) {
 			for i, g := range l {
 				if g.Number == n {
 					s.gens[name] = append(l[:i:i], l[i+1:]...)
-					s.moveAliasesFrom(name, n)
 					return nil, nil
 				}
 			}
@@ -989,100 +979,4 @@ func (s *Server) findGen(image string, n int) *api.ImageGeneration {
 		}
 	}
 	return nil
-}
-
-// followAliases points the aliases named in the image spec at the new generation, as a build does.
-func (s *Server) followAliases(image string, n int) {
-	im := s.images.items[image]
-	if im == nil {
-		return
-	}
-	for _, a := range im.Spec.Aliases {
-		if s.aliases[image] == nil {
-			s.aliases[image] = map[string]int{}
-		}
-		s.aliases[image][a] = n
-	}
-}
-
-// moveAliasesFrom moves the aliases that pointed at a deleted generation to the newest remaining one, or drops them.
-func (s *Server) moveAliasesFrom(image string, n int) {
-	newest := 0
-	for _, g := range s.gens[image] {
-		newest = max(newest, g.Number)
-	}
-	for a, an := range s.aliases[image] {
-		if an != n {
-			continue
-		}
-		if newest > 0 {
-			s.aliases[image][a] = newest
-		} else {
-			delete(s.aliases[image], a)
-		}
-	}
-}
-
-func (s *Server) aliasSet(w http.ResponseWriter, r *http.Request) {
-	name, alias := r.PathValue("name"), r.PathValue("alias")
-	b, e := decode[api.ImageAliasSet](r)
-	if e != nil {
-		writeErr(w, e)
-		return
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, im := s.images.find(r, name)
-	if im == nil {
-		writeErr(w, notFound("image", name))
-		return
-	}
-	n := (*b).Generation
-	if n == 0 {
-		for _, g := range s.gens[name] {
-			n = max(n, g.Number)
-		}
-		if n == 0 {
-			writeErr(w, notFound("generation", "newest").WithHint("build one first"))
-			return
-		}
-	} else if s.findGen(name, n) == nil {
-		writeErr(w, notFound("generation", strconv.Itoa(n)))
-		return
-	}
-	if s.aliases[name] == nil {
-		s.aliases[name] = map[string]int{}
-	}
-	s.aliases[name][alias] = n
-	if !slices.Contains(im.Spec.Aliases, alias) {
-		im.Spec.Aliases = append(im.Spec.Aliases, alias)
-		im.Metadata.Generation++
-	}
-	out := clone(im)
-	s.images.decorate(&out)
-	writeSync(w, 200, out)
-}
-
-func (s *Server) aliasDelete(w http.ResponseWriter, r *http.Request) {
-	name, alias := r.PathValue("name"), r.PathValue("alias")
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	_, im := s.images.find(r, name)
-	if im == nil {
-		writeErr(w, notFound("image", name))
-		return
-	}
-	_, had := s.aliases[name][alias]
-	if !had && !slices.Contains(im.Spec.Aliases, alias) {
-		writeErr(w, notFound("alias", alias))
-		return
-	}
-	delete(s.aliases[name], alias)
-	if slices.Contains(im.Spec.Aliases, alias) {
-		im.Spec.Aliases = slices.DeleteFunc(im.Spec.Aliases, func(a string) bool { return a == alias })
-		im.Metadata.Generation++
-	}
-	out := clone(im)
-	s.images.decorate(&out)
-	writeSync(w, 200, out)
 }

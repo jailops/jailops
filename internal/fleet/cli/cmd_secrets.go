@@ -185,7 +185,7 @@ re-run 'secrets set' for an existing secret to include a new host.`,
 					return fmt.Errorf("host %s: %w", h, err)
 				}
 				if info.SecretsRecipient == "" {
-					fmt.Fprintf(cmd.OutOrStdout(), "%-20s publishes no secrets key (an older version)\n", h)
+					fmt.Fprintf(cmd.OutOrStdout(), "%-20s publishes no secrets key\n", h)
 					continue
 				}
 				if strings.Contains(string(cur), info.SecretsRecipient) {

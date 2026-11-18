@@ -236,7 +236,7 @@ func (s *Service) wgRender(o object[api.WireGuardSpec]) (wireguard.ApplyReq, str
 					served = append(served, p)
 				}
 			}
-			if v6 := no.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
+			if v6 := no.Spec.IPv6; v6 != nil {
 				host = append(host, ipam.GatewayLinkLocal6)
 				if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
 					served = append(served, p)
@@ -600,7 +600,7 @@ func (s *Service) wgClientRoutes(sp api.WireGuardSpec) []string {
 				add(p)
 			}
 		}
-		if v6 := no.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
+		if v6 := no.Spec.IPv6; v6 != nil {
 			if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
 				add(p)
 			}

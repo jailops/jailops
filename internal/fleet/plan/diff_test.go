@@ -18,8 +18,8 @@ func diff(t *testing.T, want, have any) []string {
 }
 
 func TestServerDefaultsAreNotDrift(t *testing.T) {
-	want := api.JailSpec{Image: "i@stable", Network: []api.NetworkAttach{{Network: "n", IPv4: "auto"}}}
-	have := api.JailSpec{Image: "i@stable", Layout: api.LayoutThin, Hostname: "x", OS: api.OSFreeBSD,
+	want := api.JailSpec{Image: "i", Network: []api.NetworkAttach{{Network: "n", IPv4: "auto"}}}
+	have := api.JailSpec{Image: "i", Layout: api.LayoutThin, Hostname: "x", OS: api.OSFreeBSD,
 		Network: []api.NetworkAttach{{Network: "n", IPv4: "10.0.0.5", MAC: "02:00:00:00:00:01"}}}
 	if d := diff(t, want, have); len(d) != 0 {
 		t.Fatalf("defaults reported as drift: %v", d)
@@ -27,9 +27,9 @@ func TestServerDefaultsAreNotDrift(t *testing.T) {
 }
 
 func TestDeclaredFieldsAreCompared(t *testing.T) {
-	want := api.JailSpec{Image: "i@stable", Resources: api.Resources{Memory: "2G", CPU: 2},
+	want := api.JailSpec{Image: "i", Resources: api.Resources{Memory: "2G", CPU: 2},
 		Network: []api.NetworkAttach{{Network: "n", IPv4: "10.0.0.7"}}}
-	have := api.JailSpec{Image: "i@stable", Resources: api.Resources{Memory: "1G", CPU: 2},
+	have := api.JailSpec{Image: "i", Resources: api.Resources{Memory: "1G", CPU: 2},
 		Network: []api.NetworkAttach{{Network: "n", IPv4: "10.0.0.5"}}}
 	d := strings.Join(diff(t, want, have), "\n")
 	for _, w := range []string{`spec.resources.memory: live "1G", want "2G"`, `spec.network[0].ipv4: live "10.0.0.5", want "10.0.0.7"`} {
@@ -92,8 +92,8 @@ func TestDangers(t *testing.T) {
 		{"set grown", api.KindAddressSet, api.AddressSetSpec{}, api.AddressSetSpec{Addresses: api.Entries("1.1.1.1")}, false},
 		{"jail unencrypted", api.KindJail, api.JailSpec{Image: "i", Encrypted: true}, api.JailSpec{Image: "i"}, true},
 		{"jail policy detached", api.KindJail, api.JailSpec{Image: "i", Firewall: api.FirewallAttach{Policies: []string{"p"}}}, api.JailSpec{Image: "i"}, true},
-		{"jail new image", api.KindJail, api.JailSpec{Image: "a@stable"}, api.JailSpec{Image: "b@stable"}, true},
-		{"jail new alias", api.KindJail, api.JailSpec{Image: "a@stable"}, api.JailSpec{Image: "a#g3"}, false},
+		{"jail new image", api.KindJail, api.JailSpec{Image: "a"}, api.JailSpec{Image: "b"}, true},
+		{"jail new alias", api.KindJail, api.JailSpec{Image: "a"}, api.JailSpec{Image: "a#g3"}, false},
 		{"network renumbered", api.KindNetwork, api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.0.0.0/24"}}, api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.1.0.0/24"}}, true},
 		{"network range changed", api.KindNetwork, api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.0.0.0/24", Range: "a"}}, api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.0.0.0/24", Range: "b"}}, false},
 		{"target repinned", api.KindBackupTarget, api.BackupTargetSpec{Kind: "node", Fingerprint: "aa"}, api.BackupTargetSpec{Kind: "node", Fingerprint: "bb"}, true},

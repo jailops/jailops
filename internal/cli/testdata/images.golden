@@ -1,4 +1,4 @@
-$ jailops image create alpine-3 --os linux --release 3.22 --source-type minirootfs --alias latest
+$ jailops image create alpine-3 --os linux --release 3.22 --source-type minirootfs
 image/alpine-3 created
 
 $ jailops image create bad
@@ -7,15 +7,14 @@ $ jailops image create bad
 [exit 2]
 
 $ jailops image list
-NAME         OS        RELEASE        ARCH    GENERATIONS   ALIASES
-alpine-3     linux     3.22           amd64   0             latest
-freebsd-15   freebsd   15.0-RELEASE   amd64   1             stable
+NAME         OS        RELEASE        ARCH    GENERATIONS
+alpine-3     linux     3.22           amd64   0
+freebsd-15   freebsd   15.0-RELEASE   amd64   1
 
 $ jailops image show freebsd-15
 Image freebsd-15
   System:    freebsd 15.0-RELEASE (amd64)
   Source:    pkgbase
-  Aliases:   stable -> g1
   Keeps:     every generation
   Age:       3h
   Nightly:   off ('jailops image set freebsd-15 --auto-upgrade' turns it on)
@@ -48,29 +47,13 @@ freebsd-15#g1
 freebsd-15#g2
 freebsd-15#g3
 
-$ jailops image alias add freebsd-15 edge
-image/freebsd-15 alias edge set to g3
-
-$ jailops image alias add freebsd-15 stable --generation g1
-image/freebsd-15 alias stable set to g1
-
-$ jailops image alias add freebsd-15 stable --generation 9
-! not_found: generation "9" not found
-! hint: list them with 'jailops image generation list IMAGE'; check --project, --host and --remote too
-[exit 4]
-
-$ jailops image alias add freebsd-15 stable --generation x
-! usage: --generation must be a generation such as g2, not "x"
-! hint: run 'jailops image alias add --help' for usage
-[exit 2]
-
 $ jailops image show freebsd-15 -o json
 {
   "metadata": {
     "name": "freebsd-15",
     "uuid": "<uuid>",
     "scope": "fleet",
-    "generation": 2,
+    "generation": 1,
     "created_at": "2026-03-01T09:00:00Z",
     "updated_at": "2026-03-01T09:00:00Z"
   },
@@ -81,10 +64,6 @@ $ jailops image show freebsd-15 -o json
     "source": {
       "type": "pkgbase"
     },
-    "aliases": [
-      "stable",
-      "edge"
-    ],
     "retention": {}
   },
   "status": {
@@ -112,21 +91,9 @@ $ jailops image show freebsd-15 -o json
         "dataset": "tank/jailops/images/freebsd-15/g3",
         "created_at": "2026-03-01T09:00:00Z"
       }
-    ],
-    "aliases": {
-      "edge": 3,
-      "stable": 1
-    }
+    ]
   }
 }
-
-$ jailops image alias remove -y freebsd-15 edge
-image/freebsd-15 alias edge removed
-
-$ jailops image alias remove -y freebsd-15 edge
-! not_found: alias "edge" not found
-! hint: List the kind to see the names, check --host and --remote, and check the spelling. (jailops explain not_found)
-[exit 4]
 
 $ jailops image list -o name
 alpine-3
@@ -140,9 +107,6 @@ $ jailops image generation delete -y freebsd-15 1
 ! hint: upgrade or destroy those jails first
 [exit 5]
 
-$ jailops image alias add freebsd-15 latest
-image/freebsd-15 alias latest set to g3
-
 $ jailops image generation delete -y freebsd-15 3
 generation/freebsd-15#g3 deleted
 
@@ -150,7 +114,6 @@ $ jailops image show freebsd-15
 Image freebsd-15
   System:    freebsd 15.0-RELEASE (amd64)
   Source:    pkgbase
-  Aliases:   stable -> g1, latest -> g2
   Keeps:     every generation
   Age:       3h
   Nightly:   off ('jailops image set freebsd-15 --auto-upgrade' turns it on)

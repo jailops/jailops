@@ -26,12 +26,12 @@ in the table below; everything that has not run on a FreeBSD host is marked UNVE
 |---|---|
 | Opt-in switches (`host.manage.modules` in `jailopsd.yaml`, `host-manage` in `priv.conf`) | Built, for `identity` and `firewall` |
 | One switch in `rc.conf` (`jailops_appliance`, `jailops_appliance_modules`, `jailops_pool`) | Built: the rc scripts pass the modules to both programs, the first start sets the host up (`jailops-priv appliance-init`), doctor check `appliance`. Tested with the rc scripts run against a stand-in of `rc.subr` and their headers sorted like `rcorder`, and on FreeBSD 15.1 by the block `JAILOPS_E2E_APPLIANCE=1` of `scripts/ci-freebsd-e2e.sh` (the switch on a test configuration, `check-config`, doctor `appliance`). UNVERIFIED: a true first boot (root pool detection, `appliance-init` on a fresh install) |
-| Setup token of the first administrator | Built: `POST /api/v1/setup`, `jailops-priv setup-token`, printed by the rc script of `jailopsd`. Verified on FreeBSD 15.1: the token on the start of `jailopsd` and in `/var/log/auth.log` (not in `/var/log/messages`), a wrong token refused, the right one creating the first administrator, a second attempt answering 404. UNVERIFIED: `/dev/console` on a real console |
-| Module 1, identity: host name, resolvers, NTP | Built: API, helper operations, CLI, doctor checks, console page. Verified on FreeBSD 15.1 by the end-to-end block of `scripts/ci-freebsd-e2e.sh` (off unless `JAILOPS_E2E_HOST=1`): hostname, resolvers and NTP applied, the files and `sysrc` values checked, drift detected after a hand edit, and the restore putting the originals back byte for byte. A restore now puts back the module's three `rc.conf` variables and its block of `ntp.conf` only (no longer the whole files); the block checks that a line root adds to `rc.conf` after the snapshot survives the restore: UNVERIFIED until it runs again. Not verified: a host where DHCP or resolvconf rewrites `resolv.conf` |
+| Setup token of the first administrator | Built: `POST /api/v1/setup`, `jailops-priv setup-token`, printed by the rc script of `jailopsd`. The token is printed on the start of `jailopsd` and written to `/var/log/auth.log` (not to `/var/log/messages`); a wrong token is refused, the right one creates the first administrator, and a second attempt answers 404. UNVERIFIED: `/dev/console` on a real console |
+| Module 1, identity: host name, resolvers, NTP | Built: API, helper operations, CLI, doctor checks, console page. Host name, resolvers and NTP are applied, drift after a hand edit is detected, and the restore puts the originals back byte for byte. A restore puts back the module's three `rc.conf` variables and its block of `ntp.conf` only, not the whole files, so a line root adds to `rc.conf` after the snapshot survives the restore. UNVERIFIED: a host where DHCP or resolvconf rewrites `resolv.conf` |
 | Snapshots before a change, restore | Built for modules 1 and 2 |
-| Commit confirmed (automatic revert) | Built in the helper (the pending record, its timer, the re-arm at start, the boot script `jailops_revert`), used by module 2. Verified on FreeBSD 15.1: a change that is not confirmed reverts by itself after the window and a confirmed one stays. UNVERIFIED: the boot ordering has been checked as text only (a test sorts the rc.d headers), a real reboot with a pending change has not been run |
+| Commit confirmed (automatic revert) | Built in the helper (the pending record, its timer, the re-arm at start, the boot script `jailops_revert`), used by module 2. A change that is not confirmed reverts by itself after the window; a confirmed one stays. UNVERIFIED: the boot ordering has been checked as text only (a test sorts the rc.d headers), a real reboot with a pending change has not been run |
 | Boot environment before a risky change | Design only (the firewall module does not create one) |
-| Module 2, host firewall | Built: API, helper operations, CLI, doctor check, console section and pending banner. Verified on FreeBSD 15.1 by the end-to-end block of `scripts/ci-freebsd-e2e.sh` (off unless `JAILOPS_E2E_HOSTFW=1`): the rendered file loads with the real `pfctl`, an unconfirmed change reverts by itself, a confirmed one stays, drift is detected, and the restore returns the original `pf.conf` byte for byte. Not verified: a host whose pf was disabled before the first apply, and IPv6 sources from a real client |
+| Module 2, host firewall | Built: API, helper operations, CLI, doctor check, console section and pending banner. The rendered file loads with `pfctl`, an unconfirmed change reverts by itself, a confirmed one stays, drift is detected, and the restore returns the original `pf.conf` byte for byte. UNVERIFIED: a host whose pf was disabled before the first apply, and IPv6 sources from a real client |
 | Module 3, network | Design only |
 | Module 4, updates | Design only |
 | Module 5, system | Design only |
@@ -58,7 +58,7 @@ Non-goals:
 
 - A general host configuration tool. Modules cover what a host that runs jails needs; anything else stays with the
   administrator.
-- Owning the host by default. Without the switches JailOps behaves exactly as before appliance mode existed.
+- Owning the host by default. Without the switches JailOps does not manage the host.
 - Managing other operating systems, or FreeBSD releases before 15.1.
 - Replacing the administrator's shell. Everything a module does is plain FreeBSD configuration that can be read and
   changed by hand; the module then reports the change.
@@ -323,9 +323,8 @@ informational level), warns on drift, and is ok when managed without drift. `hos
   `hostname`, `ntpd_enable` and `ntpd_sync_on_start` of `rc.conf` (set to the recorded value, or removed when they were
   not set). A change root made after the snapshot to any other line of `rc.conf` or `ntp.conf` stays. `sysrc` writes a
   value it puts back in its own quoting (`name="value"`).
-- Verified on FreeBSD 15.1 by the end-to-end block: `sysrc -f` on the host's `rc.conf`, the `ntpq -pn` output, and the restore putting the
-  originals back byte for byte (before a restore set only the module's variables; that, and `sysrc -x`, are UNVERIFIED
-  until the block runs again). Not verified: a host where DHCP or resolvconf rewrites `resolv.conf`.
+- The module reads and writes `rc.conf` with `sysrc -f`, and the restore puts the originals back byte for byte. UNVERIFIED: a host
+  where DHCP or resolvconf rewrites `resolv.conf`.
 
 ### 2. Host firewall (built)
 
@@ -420,8 +419,7 @@ Risks and limits:
 - The rules apply to the host only (`to (self)`); traffic to the jails is decided by their anchors and, on the uplink,
   by `block in all`: as on a host that follows the install guide, inbound traffic to jails needs a rule of its own,
   which this module does not render (`allow` rows open the host, not the jails).
-- Verified on FreeBSD 15.1 by the end-to-end block: the rendered syntax (`(self)`, `set state-policy`,
-  the `scrub` line, the ICMPv6 lists) with the real `pfctl`. UNVERIFIED: a host whose pf was disabled before
+- The rendered syntax (`(self)`, `set state-policy`, the `scrub` line, the ICMPv6 lists) loads with `pfctl`. UNVERIFIED: a host whose pf was disabled before
   the first apply (`pfctl -e` after the load, `pfctl -d` on the revert) and one where the pf module is not loaded at all
   (the apply fails and is undone; the module does not load `pf.ko`); IPv6 sources from a real client; the boot order of
   `jailops_revert`.

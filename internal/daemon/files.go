@@ -15,6 +15,7 @@ import (
 	"jailops.net/jailops/internal/hostdir"
 	"jailops.net/jailops/internal/mounts"
 	"jailops.net/jailops/internal/priv"
+	"jailops.net/jailops/internal/sys/zfs"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -107,6 +108,11 @@ func (f privFiles) RemoveAll(ctx context.Context, path string) error {
 func (f privFiles) SeedKeys(ctx context.Context, root string) error {
 	_, err := f.h.SeedKeys(ctx, root)
 	return err
+}
+
+// TreeDiff compares a directory with another one through the helper.
+func (f privFiles) TreeDiff(ctx context.Context, dir, base string, limit int) (zfs.DiffResult, error) {
+	return f.h.TreeDiff(ctx, priv.TreeDiffReq{Dir: dir, Base: base, Limit: limit})
 }
 
 // CopyTree seeds a persistent dataset from the image through the helper.

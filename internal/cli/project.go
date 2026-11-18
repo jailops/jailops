@@ -589,33 +589,7 @@ func cidr6Network(s string) (*api.IPv6Net, error) {
 		}
 		hi = nx
 	}
-	return &api.IPv6Net{Mode: api.IPv6Routed, Subnet: p.String(), Range: lo.String() + "-" + hi.String()}, nil
-}
-
-// cidr6Proxy describes a proxy-mode IPv6 network from the prefix the provider put on the shared segment: the range
-// starts a few addresses in, so the low addresses stay free for the operator, and holds 240 addresses at most: the host
-// answers neighbor discovery for all of them.
-func cidr6Proxy(s string) (*api.IPv6Net, error) {
-	p, err := netip.ParsePrefix(s)
-	if err != nil || !p.Addr().Is6() || p.Bits() > 126 {
-		return nil, usagef("--ipv6 %q must be a prefix such as 2001:db8:1:2:100::/80", s)
-	}
-	p = p.Masked()
-	lo := p.Addr().Next()
-	if p.Bits() <= 123 {
-		for i := 0; i < 15; i++ {
-			lo = lo.Next()
-		}
-	}
-	hi := lo
-	for i := 0; i < 239; i++ {
-		nx := hi.Next()
-		if !p.Contains(nx) {
-			break
-		}
-		hi = nx
-	}
-	return &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: p.String(), Range: lo.String() + "-" + hi.String()}, nil
+	return &api.IPv6Net{Subnet: p.String(), Range: lo.String() + "-" + hi.String()}, nil
 }
 
 // storage additions: grants -----------------------------------------------------

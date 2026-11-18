@@ -195,7 +195,7 @@ func newRig(t *testing.T, cfg Config) *rig {
 	r.p = p
 	// For direct HandleFrame tests the host MAC is set as Run would.
 	p.hostMAC = macH
-	// the prefix of the proxy-mode network the addresses of the tests belong to
+	// the prefix of the network with the NDP proxy the addresses of the tests belong to
 	p.SetPrefixes([]netip.Prefix{netip.MustParsePrefix("2001:db8::/32")})
 	return r
 }

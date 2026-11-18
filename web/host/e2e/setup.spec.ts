@@ -81,7 +81,6 @@ test('the wizard creates the administrator, then every later step', async ({ pag
   await expect(page.getByTestId('image-name')).toHaveValue('freebsd-15-1')
   await expect(page.getByTestId('image-release-choice')).toContainText('15.1-RELEASE (this host)')
   await expect(page.getByTestId('image-arch')).toHaveValue('amd64')
-  await expect(page.getByTestId('image-alias')).toHaveCount(0)
   await expect(page.getByTestId('image-auto')).not.toBeChecked() // the nightly upgrade is the owner's choice
   await page.getByTestId('image-auto').check()
   await expect(page.getByTestId('image-at')).toHaveValue('03:00')

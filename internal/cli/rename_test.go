@@ -16,8 +16,8 @@ func TestRenameCommands(t *testing.T) {
 	h.srv.SeedFirewallPolicy(api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web", Project: "main"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow",
 		Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:office"}, Ports: []string{"443"}}}}})
 	tr := h.transcript()
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--firewall-policy", "web")
-	tr.ok("jail", "create", "db", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--depends", "web")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--firewall-policy", "web")
+	tr.ok("jail", "create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--depends", "web")
 
 	// a network: the plan, then the rename
 	tr.ok("network", "rename", "lan", "office", "--dry-run")
@@ -51,7 +51,7 @@ func TestRenameCommands(t *testing.T) {
 
 	// an image and a project
 	tr.ok("image", "rename", "freebsd-15", "freebsd-15-0", "-y")
-	if j, _ = h.srv.JailIn("main", "web"); j.Spec.Image != "freebsd-15-0@stable" {
+	if j, _ = h.srv.JailIn("main", "web"); j.Spec.Image != "freebsd-15-0" {
 		t.Fatalf("%+v", j.Spec.Image)
 	}
 	tr.ok("project", "rename", "main", "primary", "-y")
@@ -80,7 +80,7 @@ func TestRenameVolumeAndUserCommands(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	tr.ok("volume", "create", "data")
 	tr.ok("volume", "attach", "web", "data", "/srv/data")
 	tr.ok("volume", "rename", "data", "store", "--dry-run")

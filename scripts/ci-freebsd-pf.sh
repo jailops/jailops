@@ -895,7 +895,7 @@ jexec pfrdr route add -net 10.95.0.0/24 198.51.100.1 >/dev/null || die "IPv4 rou
 jexec pfrdr route add -inet6 2001:db8:f:1::/64 2001:db8:f::1 >/dev/null || die "IPv6 route in pfrdr"
 waitfor_ "the IPv6 addresses of the uplink pair are ready" 20 sh -c "! ifconfig pfupa | grep -q tentative && ! jexec pfrdr ifconfig pfupb | grep -q tentative"
 $J network create pfa-up4 --ipv4 10.95.0.1/24 --uplink pfupa </dev/null >/dev/null || die "network pfa-up4"
-$J network create pfa-up6 --ipv6 2001:db8:f:1::/64 --ipv6-mode routed --uplink pfupa </dev/null >/dev/null || die "network pfa-up6"
+$J network create pfa-up6 --ipv6 2001:db8:f:1::/64 --uplink pfupa </dev/null >/dev/null || die "network pfa-up6"
 { $J network grant pfa-up4 --project pfa && $J network grant pfa-up6 --project pfa; } </dev/null >/dev/null || die "grant pfa-up4, pfa-up6"
 $J create u4 --project pfa --image "$img" --network pfa-up4 --storage default </dev/null >/dev/null || die "create u4"
 $J create u6 --project pfa --image "$img" --network pfa-up6 --storage default </dev/null >/dev/null || die "create u6"
@@ -1004,7 +1004,7 @@ jail -r pfrdr >/dev/null 2>&1
 ifconfig pfupa destroy >/dev/null 2>&1
 
 say "phase 11b: the NDP proxy of a network answers for its whole range, for a jail that starts after it too, and for nothing else"
-# A network in IPv6 proxy mode answers the router's neighbor solicitations for the range of the network whether a jail runs
+# A network with the NDP proxy answers the router's neighbor solicitations for the range of the network whether a jail runs
 # or not. The uplink of such a network is a plain interface or a vlan(4), so the lab is vlan 77 on one end of an epair
 # (ndpa; the host holds one /128 there, as a cloud server does) and a plain VNET jail (ndprt) on the other end, with the
 # /64 on-link: it plays the provider's router, which resolves an address only by neighbor solicitation. What it learns
@@ -1022,7 +1022,8 @@ jexec ndprt ifconfig vlan77 inet6 2001:db8:77::fffe/64 -ifdisabled up || die "ad
 HM=$(ifconfig vlan77 | awk '/ether /{print $2; exit}')
 mac_norm() { echo "$1" | tr 'A-F:' 'a-f ' | { read -r a b c d e f; printf '%x:%x:%x:%x:%x:%x' "0x$a" "0x$b" "0x$c" "0x$d" "0x$e" "0x$f"; }; }
 HMN=$(mac_norm "$HM")
-$J network create ndp-up --ipv4 10.97.0.1/24 --nat --uplink vlan77 --ipv6 2001:db8:77:0:100::/80 --ipv6-mode proxy </dev/null >/dev/null || die "network ndp-up"
+$J network create ndp-up --ipv4 10.97.0.1/24 --nat --uplink vlan77 --ipv6 2001:db8:77:0:100::/80 </dev/null >/dev/null || die "network ndp-up"
+$J network ndp-proxy enable ndp-up </dev/null >/dev/null || die "ndp-proxy enable ndp-up"
 $J network grant ndp-up --project pfa </dev/null >/dev/null || die "grant ndp-up"
 addr6() { $J config get "$2" nic.eth0.ipv6 --project "$1" </dev/null 2>/dev/null | tail -1 | sed 's|/.*||'; }
 # The router asks who has ADDR when it sends to it (a ping makes it ask). resolved: its neighbor table then holds the host's MAC.

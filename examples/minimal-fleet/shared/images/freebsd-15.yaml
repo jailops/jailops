@@ -9,4 +9,3 @@ spec:
   source:
     type: pkgbase
     sets: [FreeBSD-set-minimal-jail]
-  aliases: [stable]

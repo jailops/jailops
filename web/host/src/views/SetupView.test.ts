@@ -72,7 +72,6 @@ describe('the wizard: base image', () => {
     const { w, step } = await toImageStep()
     expect((w.get('[data-test="image-name"]').element as HTMLInputElement).value).toBe('freebsd-15-1')
     expect(w.get('[data-test="image-release-choice"]').text()).toContain('15.1-RELEASE (this host)')
-    expect(w.find('[data-test="image-alias"]').exists()).toBe(false)
     expect((w.get('[data-test="image-auto"]').element as HTMLInputElement).checked).toBe(false)
     await w.get('[data-test="image-auto"]').setValue(true)
     expect(w.text()).toContain('the image gets the patch updates of its release every night')

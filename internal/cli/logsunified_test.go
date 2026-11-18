@@ -14,7 +14,7 @@ import (
 func seedUnified(h *harness) {
 	h.seed()
 	for _, j := range [][]string{{"web", "tier=front"}, {"db", "jailops.app=postgresql"}, {"cache", "tier=back"}} {
-		h.run("", "jail", "create", j[0], "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--label", j[1])
+		h.run("", "jail", "create", j[0], "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--label", j[1])
 	}
 	h.srv.SeedJailLog("main", "web", "messages", []byte("Mar  1 08:50:00 web sshd[1]: Accepted publickey\nMar  1 08:55:00 web nginx[3]: upstream timed out\n"))
 	h.srv.SeedJailLog("main", "db", "messages", []byte("Mar  1 08:52:00 db postgres[9]: checkpoint starting\n  DETAIL: no time of its own\nMar  1 08:56:00 db postgres[9]: checkpoint complete\n"))

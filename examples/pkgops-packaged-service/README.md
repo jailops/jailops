@@ -40,11 +40,6 @@ builder). This page says exactly which parts work today.
 - Shipping project files with the fleet instead of by hand.
 - Installing from a repository in `provision.packages` before `provision.files` (the order is fixed today).
 
-## UNVERIFIED
-
-The `provision:` step on FreeBSD (the design marks every provisioning command as run through `jexec` and not yet verified), and
-whether a minimal pkgbase jail carries a working `pkg` that can fetch from an https repository.
-
 ## Run it
 
     jailops-sync -C examples/pkgops-packaged-service/fleet validate

@@ -29,8 +29,6 @@ type buildState struct {
 	manifest  string
 	createdAt string
 	imageMade bool
-	oldAlias  string
-	hadAlias  bool
 	// requireChange stops the plan, keeping nothing, when the package set
 	// equals the parent's.
 	requireChange bool
@@ -300,40 +298,6 @@ func (m *Manager) buildPlan(b *Build, src Source, srcSteps []plan.Step, st *buil
 			}
 			return z.Rename(ctx, final, staging)
 		}})
-	p.Add(plan.Step{
-		Name: "move-aliases", Describe: "alias latest and unset aliases of the spec point at " + GenerationName(b.Image, b.Number),
-		Do: func(ctx context.Context) error {
-			old, err := z.Get(ctx, imageDS, PropAliases)
-			if err != nil {
-				return err
-			}
-			st.oldAlias, st.hadAlias = old, old != ""
-			al := parseAliases(old)
-			for _, a := range b.Spec.Aliases {
-				if _, set := al[a]; !set || a == "latest" {
-					al[a] = b.Number
-				}
-			}
-			if v := formatAliases(al); v != old && v != "" {
-				return z.Set(ctx, imageDS, map[string]string{PropAliases: v})
-			}
-			return nil
-		},
-		Undo: func(ctx context.Context) error {
-			if ok, _ := z.Exists(ctx, imageDS); !ok {
-				return nil
-			}
-			cur, _ := z.Get(ctx, imageDS, PropAliases)
-			if cur == st.oldAlias {
-				return nil
-			}
-			if st.hadAlias {
-				return z.Set(ctx, imageDS, map[string]string{PropAliases: st.oldAlias})
-			}
-			return z.Inherit(ctx, imageDS, PropAliases)
-		},
-		UndoOnFail: true,
-	})
 	var oldLast string
 	p.Add(plan.Step{
 		Name: "record-last-generation", Describe: fmt.Sprintf("zfs set %s=%d %s", PropLastGen, b.Number, imageDS),
@@ -358,24 +322,4 @@ func (m *Manager) buildPlan(b *Build, src Source, srcSteps []plan.Step, st *buil
 	})
 	p.Add(m.cleanWork(b.Work))
 	return p
-}
-
-// SetAlias moves an alias to an existing generation (for example "stable").
-func (m *Manager) SetAlias(ctx context.Context, image, alias string, n int) error {
-	if !validAlias(alias) {
-		return api.Errorf(api.CodeInvalid, "bad alias %q", alias)
-	}
-	o, err := m.Observe(ctx, image)
-	if err != nil {
-		return err
-	}
-	if _, ok := o.gen(n); !ok {
-		return api.Errorf(api.CodeNotFound, "generation %s does not exist", GenerationName(image, n))
-	}
-	al := o.Status.Aliases
-	if al == nil {
-		al = map[string]int{}
-	}
-	al[alias] = n
-	return m.ZFS.Set(ctx, m.Layout.ImageDS(image), map[string]string{PropAliases: formatAliases(al)})
 }

@@ -13,7 +13,7 @@ type NetIface struct {
 	// Name is the interface name inside the jail.
 	Name string
 	// IPv4 and IPv6 are the interface address with its prefix length; the
-	// zero Prefix means none. In IPv6 proxy mode callers pass a /128.
+	// zero Prefix means none. With the NDP proxy callers pass a /128.
 	IPv4, IPv6 netip.Prefix
 	// Gateway4 and Gateway6 are used only on the interface marked Default.
 	// Gateway6 may be link-local; the scope is added from Name.

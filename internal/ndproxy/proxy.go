@@ -830,7 +830,7 @@ func (p *Proxy) Run(ctx context.Context) error {
 	}
 	defer closeStream()
 	// One timer of each kind lives across the iterations of the loop: a frame wakes the loop, and under a flood of
-	// solicitations that is thousands of iterations a second, each of which used to make three timers of its own.
+	// solicitations that is thousands of iterations a second.
 	var announceT, pollT loopTimer
 
 	for ctx.Err() == nil {

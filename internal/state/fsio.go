@@ -158,25 +158,25 @@ func encodeObject(o *Object) ([]byte, error) {
 // decodeObject parses, migrates and validates one document. The second
 // result reports that a migration changed it.
 func decodeObject(data []byte, migs []Migration) (*Object, bool, error) {
-	o, changed, _, err := decodeObjectForwards(data, migs)
+	o, changed, _, _, err := decodeObjectForwards(data, migs)
 	return o, changed, err
 }
 
 // decodeObjectForwards is decodeObject that also returns the port forwards it took out of the document (see
-// MigratedForward).
-func decodeObjectForwards(data []byte, migs []Migration) (*Object, bool, []MigratedForward, error) {
+// MigratedForward) and the image alias references it rewrote (see MigratedImageRef).
+func decodeObjectForwards(data []byte, migs []Migration) (*Object, bool, []MigratedForward, []MigratedImageRef, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.UseNumber()
 	var doc map[string]any
 	if err := dec.Decode(&doc); err != nil {
-		return nil, false, nil, fmt.Errorf("decode: %w", err)
+		return nil, false, nil, nil, fmt.Errorf("decode: %w", err)
 	}
 	if dec.More() {
-		return nil, false, nil, errors.New("trailing data after document")
+		return nil, false, nil, nil, errors.New("trailing data after document")
 	}
 	changed, err := migrate(doc, migs)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	if renameFields(doc) {
 		changed = true
@@ -185,19 +185,23 @@ func decodeObjectForwards(data []byte, migs []Migration) (*Object, bool, []Migra
 	if moved {
 		changed = true
 	}
+	imageRefs, stripped := stripImageAliases(doc)
+	if stripped {
+		changed = true
+	}
 	b, err := json.Marshal(doc)
 	if err != nil {
-		return nil, false, nil, err
+		return nil, false, nil, nil, err
 	}
 	var o Object
 	if err := json.Unmarshal(b, &o); err != nil {
-		return nil, false, nil, fmt.Errorf("decode object: %w", err)
+		return nil, false, nil, nil, fmt.Errorf("decode object: %w", err)
 	}
 	if o.Kind == "" || o.Metadata.UUID == "" || o.Metadata.Name == "" {
-		return nil, false, nil, errors.New("document lacks kind, uuid or name")
+		return nil, false, nil, nil, errors.New("document lacks kind, uuid or name")
 	}
 	if len(o.Spec) == 0 {
-		return nil, false, nil, errors.New("document lacks spec")
+		return nil, false, nil, nil, errors.New("document lacks spec")
 	}
-	return &o, changed, forwards, nil
+	return &o, changed, forwards, imageRefs, nil
 }

@@ -18,7 +18,7 @@ func TestBackupVolumes(t *testing.T) {
 	tr.ok("volume", "create", "mail", "--uid", "5000", "--gid", "5000", "--mode", "0770")
 	for _, n := range []string{"web1", "web2"} {
 		h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: n, Project: "main", Labels: map[string]string{"env": "prod"}},
-			Spec: api.JailSpec{Image: "freebsd-15@stable", Volumes: []api.VolumeAttach{{Name: "mail", Mount: "/srv/mail"}}}})
+			Spec: api.JailSpec{Image: "freebsd-15", Volumes: []api.VolumeAttach{{Name: "mail", Mount: "/srv/mail"}}}})
 	}
 	tr.ok("backup", "key", "create", "--recipient", "age1xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
 	tr.ok("backup", "target", "create", "vault", "--kind", "node", "--url", "https://b.example:8443", "--fingerprint", "abcd")
@@ -83,7 +83,7 @@ func TestBackupVolumes(t *testing.T) {
 	// a jail restore without the volumes it attaches that the project lacks
 	h.srv.SeedBackup(api.Backup{Metadata: api.ObjectMeta{Name: "20260104020000-cc33dd44", Project: "main"},
 		Spec: api.BackupSpec{Jail: "web3", JailUUID: "11111111-2222-4333-8444-555555555557", Target: "vault", Snapshot: "20260104020000-cc33dd44",
-			Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15@stable", Volumes: []api.VolumeAttach{{Name: "gone", Mount: "/srv/gone"}}}}}})
+			Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15", Volumes: []api.VolumeAttach{{Name: "gone", Mount: "/srv/gone"}}}}}})
 	pre := tr.ok("backup", "restore", "20260104020000-cc33dd44", "--dry-run")
 	if !strings.Contains(pre, "no backup of it was found") {
 		t.Fatalf("the preflight does not say the volume is missing:\n%s", pre)
@@ -110,7 +110,7 @@ func TestBackupRestoreNoVolumesDropsEveryAttachment(t *testing.T) {
 	tr.ok("volume", "create", "mail")
 	h.srv.SeedBackup(api.Backup{Metadata: api.ObjectMeta{Name: "20260105020000-ee55ff66", Project: "main"},
 		Spec: api.BackupSpec{Jail: "web5", JailUUID: "11111111-2222-4333-8444-555555555558", Target: "vault", Snapshot: "20260105020000-ee55ff66",
-			Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15@stable", Volumes: []api.VolumeAttach{{Name: "mail", Mount: "/srv/mail"}}}}}})
+			Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15", Volumes: []api.VolumeAttach{{Name: "mail", Mount: "/srv/mail"}}}}}})
 	tr.ok("backup", "restore", "20260105020000-ee55ff66", "--as", "keeps", "-y")
 	if j := tr.ok("jail", "show", "keeps"); !strings.Contains(j, "mail") {
 		t.Fatalf("a normal restore lost the attachment:\n%s", j)

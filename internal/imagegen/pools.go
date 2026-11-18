@@ -64,16 +64,15 @@ func (m *Manager) findAcross(ctx context.Context, image string, n int) (*holder,
 			continue
 		}
 		if g, ok := o.gen(n); ok {
-			return &holder{m: p, g: g, aliases: o.Status.Aliases}, nil
+			return &holder{m: p, g: g}, nil
 		}
 	}
 	return nil, api.Errorf(api.CodeNotFound, "generation %s does not exist", GenerationName(image, n))
 }
 
 type holder struct {
-	m       *Manager
-	g       api.ImageGeneration
-	aliases map[string]int
+	m *Manager
+	g api.ImageGeneration
 }
 
 // Holders lists the roots of the pools that hold generation n of image.
@@ -91,9 +90,8 @@ func (m *Manager) Holders(ctx context.Context, image string, n int) []string {
 
 // Provide resolves a reference across every pool and makes sure this pool
 // holds the generation it names, so that a jail on this pool can clone it:
-//   - a pinned reference names its number; an alias is looked up here first,
-//     then on the other pools; a bare image name means the newest generation
-//     on any pool;
+//   - a pinned reference names its number; a bare image name means the newest
+//     generation on any pool;
 //   - a generation this pool already holds is returned as is;
 //   - one that only another pool holds is received here (send and receive of
 //     the immutable @ro snapshot, committed by a rename like a build);
@@ -108,8 +106,6 @@ func (m *Manager) Provide(ctx context.Context, ref string) (api.ImageGeneration,
 	if err != nil {
 		return api.ImageGeneration{}, err
 	}
-	// The pools in preference order: the first pool that has an alias decides
-	// what it means, so a rebuilt "stable" is followed on every pool.
 	var obs []Observed
 	var peerObs []holderObs
 	for _, p := range m.pools() {
@@ -133,16 +129,6 @@ func (m *Manager) Provide(ctx context.Context, ref string) (api.ImageGeneration,
 	switch {
 	case r.Gen > 0:
 		n = r.Gen
-	case r.Alias != "":
-		for _, o := range obs {
-			if v, ok := o.Status.Aliases[r.Alias]; ok {
-				n = v
-				break
-			}
-		}
-		if n == 0 && anyGen {
-			return api.ImageGeneration{}, api.Errorf(api.CodeNotFound, "image %s has no alias %q", r.Image, r.Alias)
-		}
 	default:
 		for _, o := range obs {
 			for _, g := range o.Status.Generations {
@@ -167,7 +153,7 @@ func (m *Manager) Provide(ctx context.Context, ref string) (api.ImageGeneration,
 	}
 	for _, po := range peerObs {
 		if g, ok := po.obs.gen(n); ok {
-			return m.receive(ctx, r.Image, n, po.m, g, po.obs.Status.Aliases)
+			return m.receive(ctx, r.Image, n, po.m, g)
 		}
 	}
 	return api.ImageGeneration{}, api.Errorf(api.CodeNotFound, "generation %s does not exist", GenerationName(r.Image, n))
@@ -179,7 +165,7 @@ type holderObs struct {
 }
 
 // receive copies generation n of image from the pool of src into this pool.
-func (m *Manager) receive(ctx context.Context, image string, n int, src *Manager, g api.ImageGeneration, srcAliases map[string]int) (api.ImageGeneration, error) {
+func (m *Manager) receive(ctx context.Context, image string, n int, src *Manager, g api.ImageGeneration) (api.ImageGeneration, error) {
 	z := m.ZFS
 	imageDS := m.Layout.ImageDS(image)
 	staging := m.Layout.StagingDS(image, n)
@@ -188,8 +174,7 @@ func (m *Manager) receive(ctx context.Context, image string, n int, src *Manager
 	stagingRO := staging + "@" + ROSnap
 	finalMount := m.Layout.GenMount(image, n)
 	imageMade := false
-	var oldAlias, oldLast string
-	var hadAlias bool
+	var oldLast string
 	destroy := func(ds string) func(context.Context) error {
 		return func(ctx context.Context) error {
 			ok, err := z.Exists(ctx, ds)
@@ -269,40 +254,6 @@ func (m *Manager) receive(ctx context.Context, image string, n int, src *Manager
 			}
 			return z.Rename(ctx, final, staging)
 		}})
-	p.Add(plan.Step{
-		Name: "copy-aliases", Describe: "adopt the aliases of the source pool that this pool lacks",
-		Do: func(ctx context.Context) error {
-			old, err := z.Get(ctx, imageDS, PropAliases)
-			if err != nil {
-				return err
-			}
-			oldAlias, hadAlias = old, old != ""
-			al := parseAliases(old)
-			changed := false
-			for a, num := range srcAliases {
-				if _, set := al[a]; !set && num == n {
-					al[a] = num
-					changed = true
-				}
-			}
-			if !changed {
-				return nil
-			}
-			return z.Set(ctx, imageDS, map[string]string{PropAliases: formatAliases(al)})
-		},
-		Undo: func(ctx context.Context) error {
-			if ok, _ := z.Exists(ctx, imageDS); !ok {
-				return nil
-			}
-			cur, _ := z.Get(ctx, imageDS, PropAliases)
-			if cur == oldAlias {
-				return nil
-			}
-			if hadAlias {
-				return z.Set(ctx, imageDS, map[string]string{PropAliases: oldAlias})
-			}
-			return z.Inherit(ctx, imageDS, PropAliases)
-		}, UndoOnFail: true})
 	p.Add(plan.Step{
 		Name: "record-last-generation", Describe: fmt.Sprintf("zfs set %s=%d %s", PropLastGen, n, imageDS),
 		Do: func(ctx context.Context) error {

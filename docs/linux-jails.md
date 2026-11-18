@@ -3,16 +3,16 @@
 JailOps runs Linux userlands as jails through the FreeBSD **Linuxulator**: Alpine from its minirootfs (musl) and Debian from
 `debootstrap` (glibc). They are jails like any other (a ZFS dataset, a VNET interface, a PF anchor, snapshots, rollback,
 backups) with a Linux userland instead of a FreeBSD one. What a Linux jail can run is bounded by what the Linuxulator
-supports. Verified on **FreeBSD 15.1 arm64 and amd64** (below).
+supports.
 
-## What was verified (FreeBSD 15.1 arm64)
+## What runs
 
 - **Alpine 3.22** (aarch64, musl): `apk update` and `apk add openssh nginx` work, nginx serves a page, sshd answers, a ZFS
   rollback repairs a broken root; the jail has IPv4 and IPv6 connectivity.
 - **Debian 13 (trixie)**, glibc 2.41, built with `debootstrap` (80 packages, 140 MB): `apt-get update` and `install` work; the
   jail has IPv4 and IPv6 connectivity (`curl -4` and `curl -6` return 200).
 
-**October 2026, with the /32 and /128 addressing of design 18.13, on arm64 (routed IPv6) and amd64 (proxy-mode IPv6):** an
+**October 2026, with the /32 and /128 addressing of design 18.13, on arm64 (routed IPv6) and amd64 (NDP proxy IPv6):** an
 Alpine 3.22 and a Debian 13 jail each got their `/32` with the on-link route to the gateway (`eth0`: `10.x.x.1 UH`, default
 via it), `apk add curl` and `apt-get install curl iputils-ping netcat-openbsd` worked, `curl -4` and `curl -6` reached the
 internet, the two jails reached each other (IPv4 ping, IPv6 over tcp) and the host reached them (and, on amd64, a host
@@ -23,12 +23,12 @@ Linux jail (the Linuxulator has no `ICMP6_FILTER`; use tcp), and the network nee
 resolver (the network's `dns` list is written to `resolv.conf`; `network create` has no flag for it, use a file or
 `network edit`); `jailops doctor` warns (`network.dns`) about a network in use without one.
 
-Not verified: other glibc distributions, behaviour under load, **managed updates and package provisioning for Debian**
+Not covered: other glibc distributions, behaviour under load, **managed updates and package provisioning for Debian**
 (they run `apk` only; an upgrade of a debootstrap generation is refused, build a new one).
 
 ## Host prerequisites
 
-The daemon loads the Linux modules (`linux64`, `linprocfs`, `linsysfs`, `fdescfs`) while a Linux jail or a Linux image exists (and before it builds one, so the first build works from a clean host: verified on arm64 with the modules unloaded), and manages
+The daemon loads the Linux modules (`linux64`, `linprocfs`, `linsysfs`, `fdescfs`) while a Linux jail or a Linux image exists (and before it builds one, so the first build works from a clean host), and manages
 `kern.elf64.fallback_brand=3` for as long as one does: unbranded ELF binaries (Alpine's `apk`, `nginx`, `sshd` are not
 branded Linux) must run as Linux, and the kernel refuses them otherwise. Native FreeBSD binaries carry a FreeBSD brand and are
 unaffected. `jailops doctor` checks it (`sysctl.kern.elf64.fallback_brand`); the daemon returns the value to -1 only if it was
@@ -43,14 +43,14 @@ For Debian only:
 
 ## Build an image and start a jail
 
-    jailops image create alpine-3 --os linux --release 3.22 --arch arm64 --source-type minirootfs --alias latest
+    jailops image create alpine-3 --os linux --release 3.22 --arch arm64 --source-type minirootfs
     jailops image build alpine-3
 
     jailops image create debian --os linux --release trixie --arch arm64 --source-type debootstrap \
-        --keys /usr/local/share/keyrings/debian-archive-keyring.gpg --alias stable
+        --keys /usr/local/share/keyrings/debian-archive-keyring.gpg
     jailops image build debian
 
-    jailops create db --project web --image debian@stable --network lan --storage default
+    jailops create db --project web --image debian --network lan --storage default
     jailops start db --project web
     jailops exec db --project web -- cat /etc/os-release
 

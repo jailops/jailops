@@ -660,7 +660,7 @@ func (d *Daemon) backupDB(ctx context.Context) {
 
 // ndpFactory builds the neighbor discovery proxy. In production it works through the root helper: the
 // helper hands over a locked, read-only capture of the uplink and sends the advertisements itself, for the subnets of the
-// networks in proxy mode. With --dev it runs in process as root.
+// networks with the NDP proxy. With --dev it runs in process as root.
 func (d *Daemon) ndpFactory() reconcile.NDPFactory {
 	return func(uplink string) (reconcile.NDP, error) {
 		if !d.opts.Dev {

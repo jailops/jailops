@@ -40,7 +40,7 @@ func TestEncryptedVolumes(t *testing.T) {
 	}
 	tr.do("", "volume", "create", "plain", "--passphrase-file", file)
 	for _, j := range []string{"vault", "vault2"} {
-		tr.ok("jail", "create", j, "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+		tr.ok("jail", "create", j, "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 		tr.ok("volume", "attach", j, j, "/srv/db")
 	}
 	// an encrypted volume is attached to one jail only

@@ -12,7 +12,7 @@ import (
 )
 
 // The examples of the help are commands a person copies. The convention: a word in capitals (NAME, FILE, JAIL,
-// NAME1, FINGERPRINT, IMAGE@ALIAS) or "..." stands for a value to supply; everything else runs as written. What
+// NAME1, FINGERPRINT) or "..." stands for a value to supply; everything else runs as written. What
 // surrounds the command (sudo, VAR=value, pipes, redirections, $(...)) is the shell's.
 //
 // Every example line is parsed against the real command tree: the command exists, its flags exist, the number of
@@ -175,7 +175,7 @@ var notRunnable = map[string]string{
 	"host certificate upload --cert fullchain.pem --key privkey.pem --hostname console.example.org": "reads a certificate of the host",
 }
 
-// placeholder is a word that stands for a value to supply: capitals (NAME, IMAGE@ALIAS, NAME.yaml) or "...".
+// placeholder is a word that stands for a value to supply: capitals (NAME, NAME.yaml) or "...".
 func placeholder(argv []string) bool {
 	for _, w := range argv {
 		if strings.Contains(w, "...") {

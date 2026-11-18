@@ -7,7 +7,7 @@ metadata:
 hosts: [web1]
 start: true
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   profiles: [small, web]
   expose: [{ports: ["80", "443"]}]
   resources: {memory: 2G}

@@ -292,7 +292,7 @@ func (a *app) completionCmd() *cobra.Command {
 		Long: `Print a completion script for a shell. Commands and flags complete on their
 own; names of jails, images, networks, projects, backups and operations are
 completed from the server you are connected to, and when no server answers the
-shell simply gets no names.
+shell gets no names.
 
 The packages install the scripts, so a packaged client needs nothing from this
 command: /usr/local/share/bash-completion/completions/jailops,

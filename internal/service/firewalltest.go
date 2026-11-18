@@ -405,7 +405,7 @@ func gatewayAddrs(s *Service, j *api.Jail) []netip.Addr {
 				out = append(out, a)
 			}
 		}
-		if v6 := n.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
+		if v6 := n.Spec.IPv6; v6 != nil {
 			out = append(out, ipam.GatewayLinkLocal6)
 			if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
 				if r := ipam.Resolver6(p); r.IsValid() {
@@ -428,7 +428,7 @@ func hostSourceAddrs(ctx context.Context, s *Service, j *api.Jail) []netip.Addr 
 	// does not open traffic to a jail from it, so it is not a source of a host-to-jail test.
 	resolvers := map[netip.Addr]bool{}
 	for _, na := range s.effective(*j).Network {
-		if n, err := s.netKind.get(na.Network); err == nil && n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+		if n, err := s.netKind.get(na.Network); err == nil && n.Spec.IPv6 != nil {
 			if pfx, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
 				if r := ipam.Resolver6(pfx); r.IsValid() {
 					resolvers[r] = true
@@ -444,7 +444,7 @@ func hostSourceAddrs(ctx context.Context, s *Service, j *api.Jail) []netip.Addr 
 	}
 	for _, na := range s.effective(*j).Network {
 		n, err := s.netKind.get(na.Network)
-		if err != nil || n.Spec.IPv6 == nil || n.Spec.IPv6.Mode == api.IPv6None {
+		if err != nil || n.Spec.IPv6 == nil {
 			continue
 		}
 		own := false
@@ -507,7 +507,7 @@ func subnetOf4(n api.NetworkSpec) string {
 }
 
 func subnetOf6(n api.NetworkSpec) string {
-	if n.IPv6 != nil && n.IPv6.Mode != api.IPv6None {
+	if n.IPv6 != nil {
 		return n.IPv6.Subnet
 	}
 	return ""

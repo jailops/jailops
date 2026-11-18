@@ -53,8 +53,3 @@ rotate them.
 Sync changes only what it owns (`managed_by: sync:multi-host`); anything else is reported, never touched. `prune-check`
 lists live objects the repository does not declare and deletes nothing.
 
-## Verified, and not
-
-`validate`, `plan`, `sync --apply`, drift reverted, and a SOPS secret sealed to a host's own age key and opened inside the jail are
-verified on FreeBSD. **UNVERIFIED:** age plugin identities, `remote bootstrap` against a real host, and rollouts on real jails
-(tested with fakes), this exact repository on two real hosts.

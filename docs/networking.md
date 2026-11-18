@@ -87,8 +87,9 @@ by the unbound of the host and limited to the project of the jail that asks: [dn
 ## Several networks, several families
 
 A jail can attach to several networks; each attachment is its own link with its own gateway. A network has IPv4, IPv6 or
-both. IPv6 comes in two modes, `routed` (your provider routes a prefix to the host) and `proxy` (a prefix on the shared
-segment of the uplink, for which the host answers neighbour discovery); see [networking-ipv6.md](networking-ipv6.md).
+both. The IPv6 prefix is either routed to the host by your provider or sits on a shared segment of the uplink; in the second
+case the NDP proxy of the network (`jailops network ndp-proxy enable NETWORK`) answers neighbour discovery for the host;
+see [networking-ipv6.md](networking-ipv6.md).
 
 ## Reaching the outside
 

@@ -16,7 +16,7 @@ import (
 )
 
 // ImageName returns the image part of an image reference such as
-// "freebsd-15.1@stable" or "freebsd-15.1#g3".
+// "freebsd-15.1" or "freebsd-15.1#g3".
 func ImageName(ref string) string {
 	if i := strings.IndexAny(ref, "@#"); i >= 0 {
 		return ref[:i]
@@ -680,7 +680,7 @@ func setCycle(sets map[string]*Object, name string, stack []string) string {
 }
 
 func checkNetwork(o *Object, s api.NetworkSpec, add func(*Object, string, ...any), warn func(*Object, string, ...any)) {
-	if s.IPv4 == nil && (s.IPv6 == nil || s.IPv6.Mode == api.IPv6None) {
+	if s.IPv4 == nil && (s.IPv6 == nil) {
 		add(o, "a network needs ipv4 or ipv6")
 	}
 	if v := s.IPv4; v != nil {
@@ -698,14 +698,6 @@ func checkNetwork(o *Object, s api.NetworkSpec, add func(*Object, string, ...any
 		}
 	}
 	if v := s.IPv6; v != nil {
-		switch v.Mode {
-		case api.IPv6Routed, api.IPv6None, api.IPv6Proxy:
-		default:
-			add(o, "ipv6.mode must be routed, proxy or none")
-		}
-		if v.Mode == api.IPv6None {
-			return
-		}
 		sub, err := netip.ParsePrefix(v.Subnet)
 		if err != nil || !sub.Addr().Is6() {
 			add(o, "ipv6.subnet %q is not an IPv6 prefix", v.Subnet)
@@ -714,17 +706,21 @@ func checkNetwork(o *Object, s api.NetworkSpec, add func(*Object, string, ...any
 		if sub != sub.Masked() {
 			add(o, "ipv6.subnet %q has host bits set (want %s)", v.Subnet, sub.Masked())
 		}
-		lo, hi := 32, 126 // routed: a /32 to a /126
-		if v.Mode == api.IPv6Proxy {
-			lo, hi = 48, 120 // proxy: the helper accepts /48 to /120
+		lo, hi := 32, 126 // a /32 to a /126
+		if v.NDPProxy {
+			lo, hi = 48, 120 // with the NDP proxy the helper accepts /48 to /120
 		}
 		if sub.Bits() < lo || sub.Bits() > hi {
-			add(o, "ipv6.subnet %s: in %s mode the prefix length must be between /%d and /%d", sub, v.Mode, lo, hi)
+			if v.NDPProxy {
+				add(o, "ipv6.subnet %s: with ipv6.ndp_proxy the prefix length must be between /%d and /%d", sub, lo, hi)
+			} else {
+				add(o, "ipv6.subnet %s: the prefix length must be between /%d and /%d", sub, lo, hi)
+			}
 		}
 		checkRange(o, "ipv6.range", v.Range, sub, add)
-		if v.Mode == api.IPv6Proxy {
+		if v.NDPProxy {
 			if s.Uplink == "" {
-				add(o, "ipv6 proxy mode needs an uplink to answer neighbor solicitations on")
+				add(o, "ipv6.ndp_proxy needs an uplink to answer neighbor solicitations on")
 			}
 		}
 	}
@@ -738,7 +734,7 @@ func networkPrefixes(s api.NetworkSpec) []netip.Prefix {
 			out = append(out, p.Masked())
 		}
 	}
-	if s.IPv6 != nil && s.IPv6.Mode != api.IPv6None {
+	if s.IPv6 != nil {
 		if p, err := netip.ParsePrefix(s.IPv6.Subnet); err == nil {
 			out = append(out, p.Masked())
 		}

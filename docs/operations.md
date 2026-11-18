@@ -290,7 +290,7 @@ A panic in one of the background loops of `jailopsd` (the reconcile loop, the ho
 directory watcher, the backup scheduler, the hub loops) does not end the daemon: the loop is logged with its stack in the
 log of `jailopsd`, counted, and started again after a delay that doubles from one second to a minute. `jailops doctor`
 warns (`daemon.loops`) while one was restarted in the last day: report the stack as an issue. A panic in a request is
-answered with an error and logged, as before.
+answered with an error and logged.
 
 If the daemon itself exits (the kernel killed it for memory, a panic outside the loops), daemon(8) starts it again after
 10 seconds (`-R 10` in `/usr/local/etc/rc.d/jailopsd` and `jailops_backupd`; the helper has `-R 5`). The jails keep

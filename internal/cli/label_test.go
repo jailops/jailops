@@ -8,7 +8,7 @@ import (
 func TestLabelSetListAndRemove(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	tr := h.transcript()
 	if out, _, code := tr.do("", "label", "web", "backup=yes", "tier=frontend"); code != 0 || !strings.Contains(out, "backup=yes") || !strings.Contains(out, "tier=frontend") {
 		t.Fatalf("set: %d %q", code, out)

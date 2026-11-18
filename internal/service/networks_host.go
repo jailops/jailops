@@ -26,7 +26,7 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 	if err != nil {
 		return nil
 	}
-	proxy := spec.IPv6 != nil && spec.IPv6.Mode == api.IPv6Proxy
+	proxy := spec.IPv6 != nil && spec.IPv6.NDPProxy
 	if spec.Uplink != "" {
 		p := uplinkProblem(spec.Uplink, ifs)
 		if !proxy {
@@ -47,7 +47,7 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 		}
 	}
 	var v6 netip.Prefix
-	if spec.IPv6 != nil && spec.IPv6.Mode != api.IPv6None {
+	if spec.IPv6 != nil {
 		if p, err := netip.ParsePrefix(spec.IPv6.Subnet); err == nil {
 			v6 = p.Masked()
 			if !proxy {
@@ -81,7 +81,7 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 			}
 			for _, h := range i.Inet6 {
 				if !h.Addr().IsLinkLocalUnicast() && v6.Contains(h.Addr()) {
-					return api.Errorf(api.CodeInvalid, "in proxy mode the subnet %s holds the host's own address %s on %s", v6, h.Addr(), i.Name).
+					return api.Errorf(api.CodeInvalid, "with the NDP proxy the subnet %s holds the host's own address %s on %s", v6, h.Addr(), i.Name).
 						WithDetail("field", "ipv6.subnet").
 						WithHint("take a part of the segment's prefix that does not hold the host's own address, such as a /80 elsewhere in the /64")
 				}
@@ -110,9 +110,9 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 			if len(have) > 0 {
 				on = "only " + strings.Join(have, ", ")
 			}
-			return api.Errorf(api.CodeInvalid, "in proxy mode the subnet %s must lie inside the prefix of the uplink's segment, and %s has %s", v6, spec.Uplink, on).
+			return api.Errorf(api.CodeInvalid, "with the NDP proxy the subnet %s must lie inside the prefix of the uplink's segment, and %s has %s", v6, spec.Uplink, on).
 				WithDetail("field", "ipv6.subnet").
-				WithHint("proxy mode answers for addresses of the segment the uplink is on: take a part of that prefix (a host address of /128 stands for the /64 around it); or use --ipv6-mode routed for a prefix routed to this host")
+				WithHint("the NDP proxy answers for addresses of the segment the uplink is on: take a part of that prefix (a host address of /128 stands for the /64 around it); or switch the NDP proxy off (jailops network ndp-proxy disable) for a prefix routed to this host")
 		}
 	}
 	return nil
@@ -204,7 +204,7 @@ func uplinkCandidates(ifs []ifconfig.Iface, proxy bool) []string {
 // forwardingWarnings says which forwarding sysctl a network needs that is off. A network that routes (NAT, an uplink,
 // IPv6) is created and shown as not ready with the reason Precondition until it is on; this says so at once.
 func (s *Service) forwardingWarnings(ctx context.Context, spec api.NetworkSpec) []string {
-	v6 := spec.IPv6 != nil && spec.IPv6.Mode != api.IPv6None
+	v6 := spec.IPv6 != nil
 	if !(spec.IPv4 != nil && spec.IPv4.NAT) && !v6 && spec.Uplink == "" {
 		return nil
 	}

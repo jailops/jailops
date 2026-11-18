@@ -294,7 +294,6 @@ func (s *Server) imageRefs(_ *reqInfo, from, to string, apply bool) []api.Rename
 		}
 		moveKey(s.gens, from, to)
 		moveKey(s.genMax, from, to)
-		moveKey(s.aliases, from, to)
 		moveKey(s.imgSame, from, to)
 	}
 	for _, n := range sortedNames(s.projects.items) {

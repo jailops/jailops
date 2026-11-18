@@ -51,7 +51,7 @@ A stopped jail's root is mounted only while it runs: reading the logs of a
 stopped jail answers busy with the dataset to mount. Reading a log needs the
 operator role (logs hold what services print) and is audited.
 
---events restores the former meaning of this command: it streams the log
+--events streams the log
 events the server publishes for the jail until interrupted, from now on or
 from an event id with --since-id, and keeps no history.`,
 		Example: `jailops jail logs web

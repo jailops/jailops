@@ -47,9 +47,9 @@ func TestParseSize(t *testing.T) {
 
 func TestImageRef(t *testing.T) {
 	ok := map[string]ImageRef{
-		"freebsd-15-0@stable": {Name: "freebsd-15-0", Alias: "stable"},
-		"freebsd-15-0#g3":     {Name: "freebsd-15-0", Generation: 3, Pinned: true},
-		"alpine-3-22":         {Name: "alpine-3-22"},
+		"freebsd-15-0":    {Name: "freebsd-15-0"},
+		"freebsd-15-0#g3": {Name: "freebsd-15-0", Generation: 3, Pinned: true},
+		"alpine-3-22":     {Name: "alpine-3-22"},
 	}
 	for s, want := range ok {
 		got, err := ParseImageRef(s)
@@ -57,7 +57,7 @@ func TestImageRef(t *testing.T) {
 			t.Errorf("%q: %+v %v", s, got, err)
 		}
 	}
-	for _, s := range []string{"", "@stable", "freebsd-15.0@stable", "x@", "x#", "x#g", "x#g0", "x#3", "x#g03", "x#g-1", "x#g+1", "X@a", "x@A", "x y", "x#g1@a", "a/b", "x@a\n"} {
+	for _, s := range []string{"", "@stable", "freebsd-15.0", "x@", "x#", "x#g", "x#g0", "x#3", "x#g03", "x#g-1", "x#g+1", "X@a", "x@A", "x@stable", "freebsd-15@stable", "x y", "x#g1@a", "a/b", "x@a\n"} {
 		if _, err := ParseImageRef(s); err == nil {
 			t.Errorf("%q accepted", s)
 		}
@@ -66,7 +66,7 @@ func TestImageRef(t *testing.T) {
 
 func okJail() api.JailSpec {
 	return api.JailSpec{
-		Image:     "freebsd-15-0@stable",
+		Image:     "freebsd-15-0",
 		Hostname:  "web.example.org",
 		Resources: api.Resources{CPU: 2, Memory: "2G", Disk: "20G"},
 		Network:   []api.NetworkAttach{{Network: "lan", IPv4: "auto", IPv6: "2001:db8::5", MAC: "02:00:00:00:00:01"}},
@@ -130,7 +130,7 @@ func okNet() api.NetworkSpec {
 	return api.NetworkSpec{
 		Uplink: "em0", DNS: []string{"9.9.9.9", "2620:fe::fe"},
 		IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200", Exclude: []string{"10.20.0.50-10.20.0.60"}, NAT: true},
-		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1::/64", Range: "2001:db8:1::100-2001:db8:1::ffff"},
+		IPv6: &api.IPv6Net{Subnet: "2001:db8:1::/64", Range: "2001:db8:1::100-2001:db8:1::ffff"},
 	}
 }
 
@@ -139,7 +139,7 @@ func TestNetworkSpec(t *testing.T) {
 		t.Fatal(err)
 	}
 	proxy := func(s *api.NetworkSpec) {
-		s.IPv6 = &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:2::/64", Range: "2001:db8:2::100-2001:db8:2::200"}
+		s.IPv6 = &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:2::/64", Range: "2001:db8:2::100-2001:db8:2::200"}
 	}
 	p := okNet()
 	proxy(&p)
@@ -170,7 +170,6 @@ func TestNetworkSpec(t *testing.T) {
 		{"v4 exclude outside", func(s *api.NetworkSpec) { s.IPv4.Exclude = []string{"10.30.0.1"} }, "ipv4.exclude"},
 		{"v4 exclude junk", func(s *api.NetworkSpec) { s.IPv4.Exclude = []string{"zz"} }, "ipv4.exclude"},
 		{"nat no uplink", func(s *api.NetworkSpec) { s.Uplink = "" }, "ipv4.nat"},
-		{"v6 mode", func(s *api.NetworkSpec) { s.IPv6.Mode = "weird" }, "ipv6.mode"},
 		{"v6 subnet v4", func(s *api.NetworkSpec) { s.IPv6.Subnet = "10.0.0.0/8" }, "ipv6.subnet"},
 		{"v6 range outside", func(s *api.NetworkSpec) { s.IPv6.Range = "2001:db8:2::1-2001:db8:2::ff" }, "ipv6.range"},
 		{"proxy no uplink", func(s *api.NetworkSpec) { proxy(s); s.Uplink = ""; s.IPv4.NAT = false }, "uplink"},
@@ -183,9 +182,9 @@ func TestNetworkSpec(t *testing.T) {
 			wantInvalid(t, NetworkSpec(s), tc.field)
 		})
 	}
-	// none disables the v6 checks
+	// no IPv6 section: no v6 checks
 	s := okNet()
-	s.IPv6 = &api.IPv6Net{Mode: api.IPv6None}
+	s.IPv6 = nil
 	if err := NetworkSpec(s); err != nil {
 		t.Fatal(err)
 	}

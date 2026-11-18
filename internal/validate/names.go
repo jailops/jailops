@@ -143,15 +143,12 @@ func AbsPath(field, s string) error {
 // ImageRef is a parsed image reference.
 type ImageRef struct {
 	Name string
-	// Alias is the movable alias ("stable"); empty when Generation or the
-	// default alias is meant.
-	Alias string
 	// Generation is the pinned generation number; zero when not pinned.
 	Generation int
 	Pinned     bool
 }
 
-// ParseImageRef parses "name", "name@alias" or "name#g<N>".
+// ParseImageRef parses "name" (the newest generation) or "name#g<N>".
 func ParseImageRef(s string) (ImageRef, error) {
 	const f = "image"
 	if s == "" {
@@ -171,14 +168,10 @@ func ParseImageRef(s string) (ImageRef, error) {
 		}
 		return ImageRef{Name: name, Generation: n, Pinned: true}, nil
 	}
-	name, alias, has := strings.Cut(s, "@")
-	if !api.IsName(name, api.MaxName) {
-		return ImageRef{}, Invalid(f, "image reference %q is invalid (--image NAME, NAME@alias or NAME#gN)", s)
+	if !api.IsName(s, api.MaxName) {
+		return ImageRef{}, Invalid(f, "image reference %q is invalid (--image NAME or NAME#gN)", s)
 	}
-	if has && !api.IsName(alias, 32) {
-		return ImageRef{}, Invalid(f, "image alias %q is invalid", alias)
-	}
-	return ImageRef{Name: name, Alias: alias}, nil
+	return ImageRef{Name: s}, nil
 }
 
 // String formats the reference canonically.
@@ -186,8 +179,6 @@ func (r ImageRef) String() string {
 	switch {
 	case r.Pinned:
 		return fmt.Sprintf("%s#g%d", r.Name, r.Generation)
-	case r.Alias != "":
-		return r.Name + "@" + r.Alias
 	}
 	return r.Name
 }

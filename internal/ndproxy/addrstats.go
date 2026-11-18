@@ -22,7 +22,7 @@ type AddrStats struct {
 	// Announced and LastAnnounce count the unsolicited advertisements.
 	Announced    uint64
 	LastAnnounce time.Time
-	// Missed counts solicitations for the address that came while it was not held (inside a prefix of a proxy-mode
+	// Missed counts solicitations for the address that came while it was not held (inside a prefix of an NDP proxy
 	// network), LastMissed is the last one: the router asked and nobody answered.
 	Missed     uint64
 	LastMissed time.Time
@@ -57,7 +57,7 @@ type addrState struct {
 	AddrStats
 }
 
-// SetPrefixes tells the proxy which prefixes belong to the proxy-mode networks: a solicitation inside one for an
+// SetPrefixes tells the proxy which prefixes belong to the networks with the NDP proxy: a solicitation inside one for an
 // address that is not held is counted as a miss. It changes no answer.
 func (p *Proxy) SetPrefixes(prefixes []netip.Prefix) {
 	p.mu.Lock()
@@ -124,7 +124,7 @@ func (p *Proxy) noteSent(a netip.Addr, announce bool, err error) {
 	}
 }
 
-// noteMissed records a solicitation for an address inside a proxy-mode prefix that the proxy does not hold.
+// noteMissed records a solicitation for an address inside an NDP proxy prefix that the proxy does not hold.
 func (p *Proxy) noteMissed(a netip.Addr) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

@@ -17,7 +17,7 @@ import (
 func TestExecAndExitStatus(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.run("", "start", "web")
 	tr := h.transcript()
 	tr.ok("exec", "web", "--", "echo", "hello", "world")
@@ -56,7 +56,7 @@ func TestExecAndExitStatus(t *testing.T) {
 func TestShellChoiceAndTerminal(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.run("", "start", "web")
 	last := func() api.ExecRequest {
 		var r api.ExecRequest
@@ -240,7 +240,7 @@ func TestProvision(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	spec := writeFile(t, h.dir, "p.yaml", "kind: Jail\nmetadata: {name: web}\nspec:\n  image: freebsd-15@stable\n  storage: default\n  network: [{network: lan}]\n  provision:\n    packages: [nginx]\n    services: {enable: [nginx], start: [nginx]}\n    commands: [[echo, done]]\n", 0o644)
+	spec := writeFile(t, h.dir, "p.yaml", "kind: Jail\nmetadata: {name: web}\nspec:\n  image: freebsd-15\n  storage: default\n  network: [{network: lan}]\n  provision:\n    packages: [nginx]\n    services: {enable: [nginx], start: [nginx]}\n    commands: [[echo, done]]\n", 0o644)
 	tr.ok("create", "-f", spec)
 	tr.ok("jail", "show", "web")
 	tr.do("", "provision", "web") // not running
@@ -259,10 +259,10 @@ func TestShellSetupAndShellFlags(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--shell", "sh", "--prompt", "none")
+	tr.ok("create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--shell", "sh", "--prompt", "none")
 	tr.ok("config", "get", "web", "shell")
 	tr.ok("config", "get", "web", "prompt")
-	tr.do("", "create", "bad", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--prompt", "$(id)")
+	tr.do("", "create", "bad", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--prompt", "$(id)")
 	tr.do("", "jail", "shell-setup", "web") // not running
 	tr.ok("start", "web")
 	tr.ok("config", "unset", "web", "shell")
@@ -305,7 +305,7 @@ func TestBackupRunVerifyRestoreProject(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--label", "env=prod")
+	tr.ok("create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--label", "env=prod")
 	tr.ok("backup", "target", "create", "usb", "--kind", "pool", "--path", "tank/backup")
 	tr.ok("backup", "policy", "create", "nightly", "--selector", "env=prod", "--target", "usb", "--schedule", "0 2 * * *")
 	tr.do("", "backup", "run", "nightly") // no key yet: nothing leaves the host unencrypted
@@ -331,7 +331,7 @@ func TestBackupRunVerifyRestoreProject(t *testing.T) {
 func TestJailConsole(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	_, errs, code := h.run("", "jail", "console", "web")
 	if code == 0 || !strings.Contains(errs, "not running") {
 		t.Fatalf("stopped jail: %d %q", code, errs)
@@ -357,7 +357,7 @@ func TestExecEndsAndRestoresTheTerminalOnASignal(t *testing.T) {
 	for _, args := range [][]string{{"exec", "web", "--", "cat"}, {"shell", "web"}} {
 		h := newHarness(t)
 		h.seed()
-		h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+		h.run("", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 		h.run("", "start", "web")
 		var raw, restored atomic.Int32
 		h.rawTerm = func(any) (func(), error) { raw.Add(1); return func() { restored.Add(1) }, nil }

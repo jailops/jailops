@@ -29,9 +29,10 @@
     jailops start site --project shop
     jailops list --project shop          # ADDRESSES shows the IPv4 and the IPv6 address
 
-`--ipv4 ADDR/PREFIX` makes the rest of the subnet the range; `--ipv6 PREFIX` is for routed mode. For anything finer
+`--ipv4 ADDR/PREFIX` makes the rest of the subnet the range; `--ipv6 PREFIX` gives the network its IPv6 prefix. For anything finer
 (explicit ranges, DNS servers, exclusions) use a file: `jailops network create NAME -f file.yaml`; a prefix on a shared
-segment adds `--ipv6-mode proxy` (see [Switched](#switched-the-ndp-proxy)).
+segment needs the NDP proxy of the network, switched on after the create with `jailops network ndp-proxy enable NAME`
+(see [Switched](#switched-the-ndp-proxy)).
 
 ## Name resolution of jails
 
@@ -63,12 +64,12 @@ A jail that runs its own resolver, or wants its own file, removes the first line
 writes a file of its own before the first start: JailOps then never writes the file, neither at a start nor at a change of the network. The file is written through the
 helper's file operations, which replace only a regular file inside the jail's root and refuse a symlink.
 
-## Two IPv6 modes
+## Two kinds of prefix
 
-| | `routed` | `proxy` |
+| | Routed (the NDP proxy is off) | On a shared segment (the NDP proxy is on) |
 |---|---|---|
 | The provider gives you | a prefix routed to the host's address | a `/64` on the shared segment of the uplink |
-| Who answers neighbor discovery | nobody has to; the upstream router already knows the prefix lives behind the host | the JailOps proxy of the network, for the whole range |
+| Who answers neighbor discovery | nobody has to; the upstream router already knows the prefix lives behind the host | the NDP proxy of the network, for the whole range |
 | The jails' prefix | a `/80` (or any length) carved out of the routed prefix | a `/80` inside the shared `/64` |
 | Jail gateway | the link-local `fe80::1` on the jail's link | the link-local `fe80::1` on the jail's link |
 | Depends on the proxy | never | always |
@@ -89,7 +90,7 @@ On many cloud servers you get a `/64` on a segment shared with other customers. 
 address in it is on-link and asks neighbor discovery who has each one; a jail behind the host never hears the question.
 JailOps answers it itself.
 
-1. **Check the prefix.** For a network in proxy mode an administrator creates, the helper lets the daemon capture neighbor
+1. **Check the prefix.** For a network with the NDP proxy an administrator creates, the helper lets the daemon capture neighbor
    discovery on the uplink (a read-only, locked BPF descriptor that delivers only ICMPv6 NS and NA) and advertise
    **addresses inside the network's prefix**, at a bounded rate (200 a second). The prefix is between /48 and /120, global
    or unique-local, not one the host holds an address in on any interface, and not overlapping another network; the
@@ -98,14 +99,15 @@ JailOps answers it itself.
 2. **Create the network** with flags (the jails' gateway is `fe80::1` and the range starts at `::10`):
 
        jailops network create web --ipv4 10.94.0.1/24 --nat --uplink vtnet0 \
-         --ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy
+         --ipv6 2001:db8:1:2:100::/80
+       jailops network ndp-proxy enable web
 
    or, to choose the range, DNS servers and exclusions, from a file:
 
        uplink: vtnet0
        ipv4: {subnet: 10.94.0.0/24, gateway: 10.94.0.1, range: 10.94.0.2-10.94.0.254, nat: true}
        ipv6:
-         mode: proxy
+         ndp_proxy: true
          subnet: "2001:db8:1:2:100::/80"
          range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"
        dns: [1.1.1.1, 2606:4700:4700::1111]
@@ -128,7 +130,7 @@ JailOps answers it itself.
    above), and a different part for each network: a subnet that holds an address of the host (the whole `/64`, say) is
    refused when the network is made, because the proxy never answers for the host's own address.
 
-   **Limits JailOps checks for you.** The helper accepts proxied prefixes of `/48` to `/120` only, so a proxy-mode
+   **Limits JailOps checks for you.** The helper accepts proxied prefixes of `/48` to `/120` only, so an NDP proxy
    subnet must be `/48` to `/120`; a routed subnet is `/32` to `/126`. Two networks
    may not have overlapping subnets (IPv4 or IPv6, in any project): `network create` names the one that does. In every
    `/64` the subnet-router anycast address (`::`), the all-ones end and the RFC 2526 reserved anycast identifiers (the top
@@ -137,9 +139,9 @@ JailOps answers it itself.
    **The uplink** is the interface the segment is on: a physical interface (without vlan children) or a vlan(4)
    interface. The physical parent of a vlan is not suitable (the proxy captures and sends the frames of the interface it
    is given); `jailops doctor` fails `network.uplink` for it, for a bridge member and for a virtual interface (lo, epair,
-   tun, gif, wg, lagg and so on). The proxy was verified on a physical (virtio) uplink; **UNVERIFIED** on a vlan(4).
+   tun, gif, wg, lagg and so on). The proxy runs on a physical (virtio) uplink; **UNVERIFIED** on a vlan(4).
 
-3. **What the proxy does.** One proxy per uplink answers for the **allocation range of each network in proxy mode, whether
+3. **What the proxy does.** One proxy per uplink answers for the **allocation range of each network with the NDP proxy, whether
    a jail runs on an address or not**: there is nothing to register when a jail starts, so the first packet of a new jail
    never waits for the proxy. It answers for the first 1024 addresses of the range and for the address of every running
    jail; a range larger than that is answered above the limit only while the jail runs (`network ndp-proxy status` says
@@ -193,7 +195,7 @@ above, and other systems answer such a solicitation where FreeBSD does not by de
 mark the host unreachable for a while, and the jails behind it with it. With `1` every probe is answered (the packet must
 still arrive with hop limit 255). The setting is the administrator's decision, because it makes the host a little less
 strict, and JailOps never sets it. `jailops doctor` shows the value as information
-(`sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`) while a proxy-mode network exists, and `network create` prints a note
+(`sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`) while a network with the NDP proxy exists, and `network create` prints a note
 that points here.
 
 **Recognise the case:** the counter of bad neighbor solicitations grows over minutes while the host or its jails answer
@@ -320,7 +322,7 @@ stops when its rule goes.
   A reference is always `kind:name`; `@` is not used (`@web` is refused with the words to write instead). The kinds are
   separate namespaces, so a jail and an address set of one project may have the same name; a jail name and an address set name have
   at most 29 characters, so each can be named in a rule and in a pf table. The pf tables are `j_<jail>`, `s_<set>` and
-  `t_<tag>`, with every hyphen of the name written as `_`; names have no underscore, so two names never give one table. A set with one address is a perfectly good alias: give it a name and say in its comment what it is.
+  `t_<tag>`, with every hyphen of the name written as `_`; names have no underscore, so two names never give one table. A set may hold one address: give it a name and say in its comment what it is.
   `jailops firewall rule add --help` has the flags.
 
   **A policy always says its defaults.** `default_in` and `default_out` are required, `allow` or `deny`, on every policy
@@ -449,12 +451,6 @@ jail that does not exist is an empty table that matches nobody, and the test say
 `loaded_matches_rendered` in the JSON says whether the rule lines loaded in pf for each anchor are the rendered ones
 (`true`, `false`, or `unknown` when pf cannot be asked).
 
-Verified on FreeBSD 15.1 with real traffic: `scripts/ci-freebsd-pf.sh` (allow and deny, IPv4 and IPv6, between
-jails of one project and of different projects, from the host, with a rule changed under a running ping, with a restarted
-jail), on both architectures, behind a real default-deny `pf.conf`. With `FORGE_BIN` set it also sends forged ARP,
-ICMPv6 and router-advertisement frames from inside a jail (`scripts/forge`) and asserts real effects: host ARP/ND
-caches unchanged, the victim's traffic keeps flowing, the attacker gains no address, nothing reaches the uplink. The
-exact probe count is not quoted here (it would go stale the next time a probe is added; run the script to see it).
 **Not covered:** Ethernet-level attacks outside what `scripts/forge` sends (see [security-model.md](security-model.md)).
 
 **In the console** the same test is the Test tab of the Firewall page (`/firewall?tab=test`, also `/firewall/test`;

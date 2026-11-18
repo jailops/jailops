@@ -196,7 +196,7 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 		if n.Spec.IPv4 != nil {
 			v4 = true
 		}
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+		if n.Spec.IPv6 != nil {
 			v6 = true
 		}
 	}
@@ -791,7 +791,7 @@ func quickPassesBeforeAnchor(rules string) []string {
 	return out
 }
 
-// doctorNDPProxy reports the networks in IPv6 proxy mode whose proxy is not answering: the upstream router then cannot
+// doctorNDPProxy reports the networks with the NDP proxy whose proxy is not answering: the upstream router then cannot
 // find their jails, and nothing else says so. A proxy whose capture is still being opened (the reconcile loop started it
 // a moment ago) is a warning, not a failure: it opens on its own.
 func (s *Service) doctorNDPProxy(c *checkSet) {
@@ -800,7 +800,7 @@ func (s *Service) doctorNDPProxy(c *checkSet) {
 	nets, _ := s.netKind.list()
 	s.mu.RLock()
 	for _, o := range nets {
-		if o.Spec.IPv6 == nil || o.Spec.IPv6.Mode != api.IPv6Proxy {
+		if o.Spec.IPv6 == nil || !o.Spec.IPv6.NDPProxy {
 			continue
 		}
 		proxied++
@@ -841,7 +841,7 @@ func (s *Service) doctorNDPProxy(c *checkSet) {
 				"jailops network ndp-proxy status NETWORK shows each address with what the proxy did; jailops network ndp-proxy watch NETWORK shows the questions live")
 			return
 		}
-		c.add("network.ndproxy", api.DoctorOK, "the IPv6 proxy answers for every proxy-mode network", "")
+		c.add("network.ndproxy", api.DoctorOK, "the IPv6 proxy answers for every network with the NDP proxy", "")
 	}
 }
 

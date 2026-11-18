@@ -1,4 +1,4 @@
-$ jailops jail create web --image freebsd-15@stable --network lan --storage default
+$ jailops jail create web --image freebsd-15 --network lan --storage default
 jail/web created
 
 $ jailops jail logs web

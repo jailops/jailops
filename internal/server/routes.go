@@ -307,26 +307,6 @@ func (s *Server) routeTable() []route {
 			c.async(op)
 			return nil
 		}},
-		route{method: "PUT", pattern: "/api/v1/images/{name}/aliases/{alias}", h: func(c *rc) error {
-			var b api.ImageAliasSet
-			if err := c.decodeOptional(&b); err != nil {
-				return err
-			}
-			v, err := svc.SetImageAlias(c.r.Context(), c.pathArg("name"), c.pathArg("alias"), b.Generation)
-			if err != nil {
-				return err
-			}
-			c.sync(200, v, 0)
-			return nil
-		}},
-		route{method: "DELETE", pattern: "/api/v1/images/{name}/aliases/{alias}", h: func(c *rc) error {
-			v, err := svc.DeleteImageAlias(c.r.Context(), c.pathArg("name"), c.pathArg("alias"))
-			if err != nil {
-				return err
-			}
-			c.sync(200, v, 0)
-			return nil
-		}},
 	)
 
 	add(s.jailRoutes()...)
@@ -538,6 +518,23 @@ func (s *Server) routeTable() []route {
 		}},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/reach", h: func(c *rc) error {
 			v, err := svc.JailReach(c.r.Context(), c.pathArg("name"))
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/diff", h: func(c *rc) error {
+			q := c.r.URL.Query()
+			limit := 0
+			if v := q.Get("limit"); v != "" {
+				n, err := strconv.Atoi(v)
+				if err != nil {
+					return api.Errorf(api.CodeInvalid, "limit %q is not a number", v)
+				}
+				limit = n
+			}
+			v, err := svc.JailDiff(c.r.Context(), c.pathArg("name"), limit, q.Get("dataset"), q.Get("packages") == "true")
 			if err != nil {
 				return err
 			}

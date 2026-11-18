@@ -6,7 +6,7 @@ metadata:
   name: web
   labels: {tier: web}
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default            # a jail names its storage and its network; nothing is filled in
   network:
     - name: eth0

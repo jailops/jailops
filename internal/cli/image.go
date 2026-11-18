@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -24,10 +23,10 @@ func imageDesc() *kindDesc[api.Image] {
 	d.renameLong = renameLong("image", `its datasets and generations on every pool, the jails on it (running
 ones too: their image reference, their records and their datasets' properties), the image lists of
 projects and the records of its nightly upgrade`)
-	d.head = []string{"NAME", "OS", "RELEASE", "ARCH", "GENERATIONS", "ALIASES"}
+	d.head = []string{"NAME", "OS", "RELEASE", "ARCH", "GENERATIONS"}
 	d.row = func(_ time.Time, i api.Image) []string {
 		return []string{i.Metadata.Name, string(i.Spec.OS), i.Spec.Release, i.Spec.Arch,
-			strconv.Itoa(len(i.Status.Generations)), joinOrDash(i.Spec.Aliases)}
+			strconv.Itoa(len(i.Status.Generations))}
 	}
 	d.show = func(a *app, i api.Image) error { return a.showImage(i) }
 	d.emptyHintFrom = func(ctx context.Context, c *sdk.Client) string {
@@ -41,20 +40,11 @@ projects and the records of its nightly upgrade`)
 	return &d
 }
 
-// imageRefs completes an image reference: NAME@ALIAS for each alias of an image, and the bare NAME.
+// imageRefs completes an image reference: the name of each image.
 func imageRefs(ctx context.Context, c *sdk.Client) ([]string, error) {
 	imgs, err := collect(c.Images().List(ctx))
 	var out []string
 	for _, i := range imgs {
-		aliases := slices.Clone(i.Spec.Aliases)
-		for _, al := range sortedKeys(i.Status.Aliases) {
-			if !slices.Contains(aliases, al) {
-				aliases = append(aliases, al)
-			}
-		}
-		for _, al := range aliases {
-			out = append(out, i.Metadata.Name+"@"+al)
-		}
 		out = append(out, i.Metadata.Name)
 	}
 	return out, err
@@ -98,20 +88,6 @@ func (a *app) completeGenerations() completer {
 	})
 }
 
-// completeAliases completes an alias of the image named first.
-func (a *app) completeAliases() completer {
-	return a.completeWith(func(ctx context.Context, c *sdk.Client, args []string) ([]string, error) {
-		if len(args) == 0 {
-			return nil, nil
-		}
-		img, err := c.Images().Get(ctx, args[0])
-		if err != nil {
-			return nil, err
-		}
-		return sortedKeys(img.Status.Aliases), nil
-	})
-}
-
 func (a *app) imageCmd() *cobra.Command {
 	d := imageDesc()
 	ic := group("image", "Manage images and their generations",
@@ -120,7 +96,7 @@ packages. Every build adds an immutable generation (g1, g2, ...): the patch
 levels of the release. A jail's root is a clone of one generation; a jail that
 names the image by its name follows its newest generation, and 'jailops image
 upgrade' builds the next one and moves the jails to it. A new release is a new
-image. Aliases name a generation by another name, for advanced use.`,
+image.`,
 		`jailops image list
 jailops image build freebsd-15-1
 jailops image upgrade freebsd-15-1
@@ -134,7 +110,7 @@ jailops image create -f freebsd-15-1.yaml`,
 		func(cmd *cobra.Command) func(string) (api.Image, error) {
 			var os_, release, arch, stype, repo, keys, comment, upgradeAt string
 			var autoUpgrade, upgradePackages bool
-			var sets, aliases []string
+			var sets []string
 			var keepLast, keepDays int
 			f := cmd.Flags()
 			f.StringVar(&comment, "comment", "", "what the image is for")
@@ -148,7 +124,6 @@ jailops image create -f freebsd-15-1.yaml`,
 			f.StringVar(&repo, "repo", "", "package repository or rootfs mirror")
 			f.StringVar(&keys, "keys", "", "keyring or key directory that checks the base's signature (required for debootstrap)")
 			f.StringArrayVar(&sets, "package-set", nil, "package set to install (repeatable)")
-			f.StringArrayVar(&aliases, "alias", nil, "movable alias such as stable (repeatable)")
 			f.IntVar(&keepLast, "keep-last", 0, "always keep this many generations")
 			f.IntVar(&keepDays, "keep-days", 0, "keep unused generations this many days")
 			f.BoolVar(&autoUpgrade, "auto-upgrade", false, "upgrade the image every night: build the next generation (the patch updates of the release) and move its thin jails to it one at a time, with a health check and an automatic rollback")
@@ -167,7 +142,6 @@ jailops image create -f freebsd-15-1.yaml`,
 				spec := api.ImageSpec{
 					Comment: comment, OS: api.OS(os_), Release: release, Arch: arch,
 					Source:    api.ImageSource{Type: stype, Repo: repo, Keys: keys, Sets: sets},
-					Aliases:   aliases,
 					Retention: api.ImageRetention{KeepLast: keepLast, KeepDays: keepDays},
 				}
 				if autoUpgrade || cmd.Flags().Changed("auto-upgrade") || cmd.Flags().Changed("upgrade-at") || cmd.Flags().Changed("upgrade-packages") {
@@ -178,10 +152,10 @@ jailops image create -f freebsd-15-1.yaml`,
 		})
 	for _, c := range ic.Commands() {
 		if c.Name() == "delete" {
-			c.Long = "Delete one or more images with all their generations and aliases. The server refuses, naming the jails, while a jail uses any generation.\nThe command asks for confirmation unless -y is given."
+			c.Long = "Delete one or more images with all their generations. The server refuses, naming the jails, while a jail uses any generation.\nThe command asks for confirmation unless -y is given."
 		}
 	}
-	ic.AddCommand(a.imageBuild(d), a.imageUpgrade(d), a.imageAlias(d), a.imageGeneration(d))
+	ic.AddCommand(a.imageBuild(d), a.imageUpgrade(d), a.imageGeneration(d))
 	return ic
 }
 
@@ -422,99 +396,11 @@ can take minutes; the command waits unless --no-wait is given.
 	return cmd
 }
 
-func (a *app) imageAlias(d *kindDesc[api.Image]) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "alias",
-		Short: "Point a movable alias of an image at a generation, or remove it",
-		Long: `Aliases such as "stable" or "latest" name a generation of an image. Jails that
-reference IMAGE@ALIAS follow the generation the alias points to. A build moves the
-aliases of the image to the new generation; 'alias add' pins one to any generation.`,
-		Example: "jailops image alias add freebsd-15-1 stable --generation g2\njailops image alias remove freebsd-15-1 old",
-	}
-	cmd.AddCommand(a.imageAliasAdd(d), a.imageAliasRemove(d))
-	return cmd
-}
-
-func (a *app) imageAliasAdd(d *kindDesc[api.Image]) *cobra.Command {
-	var gen string
-	cmd := &cobra.Command{
-		Use:   "add IMAGE ALIAS",
-		Short: "Point an alias at a generation (the newest when omitted)",
-		Long: `Create the alias or move it to the generation --generation names (gN, or the number N). Without
---generation it points at the newest generation. The alias is also recorded in the
-image spec, so later builds keep moving it.`,
-		Example:           "jailops image alias add freebsd-15-1 stable --generation g2\njailops image alias add freebsd-15-1 latest",
-		Args:              cobra.ExactArgs(2),
-		ValidArgsFunction: completeArgs(completeKind(a, d), a.completeAliases()),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			n := 0
-			if gen != "" {
-				var err error
-				if n, err = parseGeneration("--generation", gen, args[0]); err != nil {
-					return err
-				}
-			}
-			target := "the newest generation"
-			if n > 0 {
-				target = fmt.Sprintf("generation g%d", n)
-			}
-			if ok, err := a.dry(fmt.Sprintf("point alias %s of image %s at %s", args[1], args[0], target), nil); ok || err != nil {
-				return err
-			}
-			c, err := a.connect(cmd.Context())
-			if err != nil {
-				return err
-			}
-			img, err := c.Images().SetAlias(cmd.Context(), args[0], args[1], n)
-			if err != nil {
-				return err
-			}
-			return a.finishOp(cmd.Context(), nil, "image", args[0], fmt.Sprintf("alias %s set to g%d", args[1], img.Status.Aliases[args[1]]), nil)
-		},
-	}
-	cmd.Flags().StringVar(&gen, "generation", "", "generation the alias points at, gN or N (default: the newest)")
-	_ = cmd.RegisterFlagCompletionFunc("generation", func(c *cobra.Command, args []string, p string) ([]string, cobra.ShellCompDirective) {
-		if len(args) == 0 {
-			return nil, cobra.ShellCompDirectiveNoFileComp
-		}
-		return a.completeGenerations()(c, args[:1], p)
-	})
-	return cmd
-}
-
-func (a *app) imageAliasRemove(d *kindDesc[api.Image]) *cobra.Command {
-	return &cobra.Command{
-		Use:   "remove IMAGE ALIAS",
-		Short: "Remove an alias of an image",
-		Long: `Remove the alias from the image and from its spec, so a later build does not bring
-it back. Jails that reference IMAGE@ALIAS can no longer resolve it.`,
-		Example:           "jailops image alias remove freebsd-15-1 old",
-		Args:              cobra.ExactArgs(2),
-		ValidArgsFunction: completeArgs(completeKind(a, d), a.completeAliases()),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			if ok, err := a.dry(fmt.Sprintf("remove alias %s of image %s", args[1], args[0]), nil); ok || err != nil {
-				return err
-			}
-			if err := a.confirm(fmt.Sprintf("Remove alias %s of image %s?", args[1], args[0])); err != nil {
-				return err
-			}
-			c, err := a.connect(cmd.Context())
-			if err != nil {
-				return err
-			}
-			if _, err := c.Images().DeleteAlias(cmd.Context(), args[0], args[1]); err != nil {
-				return err
-			}
-			return a.finishOp(cmd.Context(), nil, "image", args[0], "alias "+args[1]+" removed", nil)
-		},
-	}
-}
-
 func (a *app) imageGenerationDelete(d *kindDesc[api.Image]) *cobra.Command {
 	return &cobra.Command{
 		Use:               "delete IMAGE GENERATION",
 		Short:             "Delete a generation of an image that no jail uses",
-		Long:              "Delete one generation (gN, or the number N) of an image. The server refuses (image_in_use) while a jail uses it. Aliases that pointed at it move to the next newest remaining generation, or are removed when none remains.",
+		Long:              "Delete one generation (gN, or the number N) of an image. The server refuses (image_in_use) while a jail uses it.",
 		Example:           "jailops image generation delete freebsd-15-1 g1",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeArgs(completeKind(a, d), a.completeGenerations()),

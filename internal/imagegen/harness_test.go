@@ -54,13 +54,13 @@ func newWorld(t *testing.T) *world {
 		},
 		Now: func() time.Time { return w.now },
 	}
-	w.AddImage("fb", "stable", "latest")
+	w.AddImage("fb")
 	return w
 }
 
-func (w *world) AddImage(name string, aliases ...string) {
+func (w *world) AddImage(name string) {
 	w.specs[name] = api.ImageSpec{OS: api.OSFreeBSD, Release: "15.0-RELEASE", Arch: "amd64",
-		Source: api.ImageSource{Type: "pkgbase"}, Aliases: aliases}
+		Source: api.ImageSource{Type: "pkgbase"}}
 }
 
 func (w *world) repoPkgs() []Package {

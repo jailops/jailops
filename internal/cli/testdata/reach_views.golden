@@ -1,4 +1,4 @@
-$ jailops app install nginx web --image freebsd-151@stable
+$ jailops app install nginx web --image freebsd-151
 App nginx installed as jail web (running)
   Version:   1.30.6,3
   Addresses: 10.20.0.10
@@ -18,8 +18,8 @@ jail/web exposed: 80
   IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 8080->80
 
 $ jailops list
-NAME   STATE     IMAGE                GEN   ADDRESSES    EXPOSED         AUTOSTART   USED   AGE
-web    running   freebsd-151@stable   g1    10.20.0.10   8080→80/tcp 4   -           -      3h
+NAME   STATE     IMAGE         GEN   ADDRESSES    EXPOSED         AUTOSTART   USED   AGE
+web    running   freebsd-151   g1    10.20.0.10   8080→80/tcp 4   -           -      3h
 
 $ jailops firewall show web
 Reaches jail/web

@@ -105,7 +105,7 @@ func TestJailLifecycle(t *testing.T) {
 	_, err := e.Admin.Jails().Create(c, dtest.WebJail("web"))
 	wantCode(t, err, api.CodeAlreadyExists)
 	bad := dtest.WebJail("db")
-	bad.Spec.Image = "nope@stable"
+	bad.Spec.Image = "nope"
 	_, err = e.Admin.Jails().Create(c, bad)
 	wantCode(t, err, api.CodeNotFound)
 
@@ -359,7 +359,7 @@ func TestETagAndMerge(t *testing.T) {
 	if err != nil || q.Metadata.UUID == p.Metadata.UUID || q.Metadata.Scope != api.ScopeHost || q.Status.Power != api.PowerStopped {
 		t.Fatalf("%v %+v", err, q)
 	}
-	q.Spec.Image = "other@stable"
+	q.Spec.Image = "other"
 	_, err = e.Admin.Jails().Update(c, "web", q, "")
 	wantCode(t, err, api.CodeInvalid)
 	// Modify retries on conflict.
@@ -569,7 +569,7 @@ func TestImagesAndGenerations(t *testing.T) {
 	}
 	_, err = e.Admin.Images().DeleteGeneration(c, "fb", 1)
 	wantCode(t, err, api.CodeImageInUse)
-	for i := 0; i < 2; i++ { // the alias follows the newest generation, so g2 is free once g3 exists
+	for i := 0; i < 2; i++ { // g2 is free once g3 exists
 		bop, _ := e.Admin.Images().Build(c, "fb", api.ImageBuild{FromGeneration: 1})
 		if _, err := bop.Wait(c); err != nil {
 			t.Fatal(err)
@@ -577,12 +577,6 @@ func TestImagesAndGenerations(t *testing.T) {
 	}
 	_, err = e.Admin.Images().DeleteGeneration(c, "fb", 3)
 	wantCode(t, err, api.CodeImageInUse)
-	// An alias pinned to g2 moves to the newest remaining generation when g2 goes; an alias is managed explicitly.
-	if im, err := e.Admin.Images().SetAlias(c, "fb", "pinned", 2); err != nil || im.Status.Aliases["pinned"] != 2 {
-		t.Fatalf("%v %+v", err, im)
-	}
-	_, err = e.Admin.Images().SetAlias(c, "fb", "pinned", 9)
-	wantCode(t, err, api.CodeNotFound)
 	dop, err := e.Admin.Images().DeleteGeneration(c, "fb", 2)
 	if err != nil {
 		t.Fatal(err)
@@ -590,16 +584,7 @@ func TestImagesAndGenerations(t *testing.T) {
 	if _, err := dop.Wait(c); err != nil {
 		t.Fatal(err)
 	}
-	im, err = e.Admin.Images().Get(c, "fb")
-	if err != nil || im.Status.Aliases["pinned"] != 3 {
-		t.Fatalf("the alias must move to the next newest generation: %v %+v", err, im.Status.Aliases)
-	}
-	if im, err := e.Admin.Images().DeleteAlias(c, "fb", "pinned"); err != nil || im.Status.Aliases["pinned"] != 0 || slices.Contains(im.Spec.Aliases, "pinned") {
-		t.Fatalf("%v %+v", err, im)
-	}
-	_, err = e.Admin.Images().DeleteAlias(c, "fb", "pinned")
-	wantCode(t, err, api.CodeNotFound)
-	// Deleting the image removes every generation and alias once no jail uses it.
+	// Deleting the image removes every generation once no jail uses it.
 	jop, err := e.Admin.Jails().Delete(c, "web")
 	if err != nil {
 		t.Fatal(err)

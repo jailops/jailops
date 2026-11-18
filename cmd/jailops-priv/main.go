@@ -91,7 +91,6 @@ type options struct {
 	logTo       string
 	dev         bool
 	daemon      bool
-	rootDS      string
 	storage     list
 	storageFile string
 	poolRoot    bool
@@ -143,7 +142,6 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	fs.StringVar(&o.logTo, "log", "", "audit log destination: stderr or syslog (default stderr; syslog with -daemon)")
 	fs.BoolVar(&o.dev, "dev", false, "development: do not require root, allow the invoking user")
 	fs.BoolVar(&o.daemon, "daemon", false, "detach from the terminal (rc.d may use daemon(8) with the foreground default instead)")
-	fs.StringVar(&o.rootDS, "root-dataset", "", "deprecated: same as storage-root")
 	fs.Var(&o.storage, "storage-root", "storage root dataset fixed in this file, for example tank/jailops (repeatable); more are registered at run time")
 	fs.StringVar(&o.storageFile, "storage-file", priv.DefaultStorageFile, "file that persists the storage roots registered at run time (root-owned, mode 0600)")
 	fs.BoolVar(&o.poolRoot, "allow-pool-root", false, "allow a pool's top dataset as a storage root")
@@ -230,9 +228,6 @@ func (o *options) privConfig() priv.Config {
 		if n, err := strconv.Atoi(d); err == nil {
 			c.Admin.DevfsRulesets = append(c.Admin.DevfsRulesets, n)
 		}
-	}
-	if o.rootDS != "" {
-		c.StorageRoots = append(c.StorageRoots, o.rootDS)
 	}
 	return c
 }

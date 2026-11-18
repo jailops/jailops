@@ -38,7 +38,7 @@ func TestEpairAddressesAndRoutesAreOnlyOfStoredNetworks(t *testing.T) {
 	}
 }
 
-// The NDP proxy's /128 route is for a jail's address inside the prefix of a network in proxy mode: not the prefix's
+// The NDP proxy's /128 route is for a jail's address inside the prefix of a network with the NDP proxy: not the prefix's
 // anycast address, not an address outside, not the router of the segment.
 func TestNDPRouteIsForAddressesOfTheProxyPrefixOnly(t *testing.T) {
 	e := newEnv(t)

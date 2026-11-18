@@ -53,9 +53,3 @@ user-data, which most providers show to anyone who can read the instance's metad
 Images: the fleet's image has `build: true`, so the first generation is built when the image is created, and a jail on it can start.
 That first build downloads pkgbase packages and takes minutes.
 
-## Verified, and not
-
-Each command is one of `docs/install.md` or `scripts/ci-freebsd-e2e.sh`, which run on FreeBSD 15.1 (a clean install, both
-architectures). **UNVERIFIED:** `bootstrap.sh` itself on a fresh VM (it is syntax-checked and its fleet is applied to in-memory hosts
-by the test suite), `user-data` on any cloud provider including `nuageinit`, and the `provision:` step (`pkg install nginx` inside
-the jail) on FreeBSD.

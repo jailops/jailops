@@ -64,7 +64,7 @@ func TestCreateThin(t *testing.T) {
 	}
 	var rec Record
 	b, _ := w.Files.ReadFile(bg, "/jailops/projects/alpha/jails/web/spec.json")
-	if err := json.Unmarshal(b, &rec); err != nil || rec.Metadata.Name != "web" || rec.Spec.Image != "fb@stable" {
+	if err := json.Unmarshal(b, &rec); err != nil || rec.Metadata.Name != "web" || rec.Spec.Image != "fb" {
 		t.Fatal(err, rec)
 	}
 	var bd Bundle
@@ -80,7 +80,7 @@ func TestCreateThin(t *testing.T) {
 func TestCreateThickLinux(t *testing.T) {
 	w := newWorld(t)
 	j := w.jail("deb")
-	j.Spec.Image = "alp@stable"
+	j.Spec.Image = "alp"
 	j.Spec.Volumes = nil
 	if _, err := w.S.CreateJail(bg, j, false); err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ func TestCreateThickLinux(t *testing.T) {
 	}
 	j2 := w.jail("x")
 	j2.Spec.Layout = api.LayoutThin
-	j2.Spec.Image = "alp@stable"
+	j2.Spec.Image = "alp"
 	if _, err := w.S.CreateJail(bg, j2, false); !api.IsCode(err, api.CodeInvalid) {
 		t.Fatalf("thin Linux jail accepted: %v", err)
 	}
@@ -123,7 +123,7 @@ func TestCreateValidation(t *testing.T) {
 		{"bad name", func(j *api.Jail) { j.Metadata.Name = "Web/1" }, api.CodeInvalid},
 		{"no uuid", func(j *api.Jail) { j.Metadata.UUID = "" }, api.CodeInvalid},
 		{"no image", func(j *api.Jail) { j.Spec.Image = "" }, api.CodeInvalid},
-		{"unknown image", func(j *api.Jail) { j.Spec.Image = "nope@stable" }, api.CodeNotFound},
+		{"unknown image", func(j *api.Jail) { j.Spec.Image = "nope" }, api.CodeNotFound},
 		{"encrypted", func(j *api.Jail) { j.Spec.Encrypted = true }, api.CodeUnsupported},
 		{"packages", func(j *api.Jail) { j.Spec.Packages = []string{"nginx"} }, api.CodeUnsupported},
 		{"bad quota", func(j *api.Jail) { j.Spec.Resources.Disk = "lots" }, api.CodeInvalid},
@@ -161,7 +161,7 @@ func TestCreateDryRun(t *testing.T) {
 }
 
 func TestCreateFailureSweep(t *testing.T) {
-	for name, img := range map[string]string{"thin": "fb@stable", "thick": "alp@stable"} {
+	for name, img := range map[string]string{"thin": "fb", "thick": "alp"} {
 		t.Run(name, func(t *testing.T) {
 			sweep(t, newWorld, func(w *world) error {
 				j := w.jail("web")

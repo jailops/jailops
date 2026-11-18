@@ -21,7 +21,7 @@ const (
 )
 
 // SysctlOnlinkNS makes the kernel answer a unicast neighbor solicitation whose sender is not an on-link neighbour. On
-// some shared IPv6 segments (proxy mode) the provider's routers probe the host's own address from their global
+// some shared IPv6 segments (the NDP proxy) the provider's routers probe the host's own address from their global
 // addresses; with the default, 0, FreeBSD drops the probes (netstat -s -p icmp6 counts "bad neighbor solicitation
 // messages") and the router may mark the host unreachable for a while. It is host configuration and matters only on
 // such a segment: JailOps never sets it, and the doctor and a network create only point at the page that explains it.
@@ -30,18 +30,18 @@ const SysctlOnlinkNS = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
 // OnlinkNSDocs explains the setting: what it does, how to recognise the case and what to set.
 const OnlinkNSDocs = "https://jailops.net/articles/shared-ipv6-neighbor-discovery/#fix"
 
-// hasProxyNetwork reports whether a network in IPv6 proxy mode exists.
+// hasProxyNetwork reports whether a network with the NDP proxy exists.
 func (s *Service) hasProxyNetwork() bool {
 	nets, _ := s.netKind.list()
 	for _, n := range nets {
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy {
+		if n.Spec.IPv6 != nil && n.Spec.IPv6.NDPProxy {
 			return true
 		}
 	}
 	return false
 }
 
-// onlinkNSNote returns the note of a proxy-mode network on a host whose SysctlOnlinkNS is 0, and nothing when it is
+// onlinkNSNote returns the note of a network with the NDP proxy on a host whose SysctlOnlinkNS is 0, and nothing when it is
 // 1 or cannot be read (the doctor reports that).
 func (s *Service) onlinkNSNote(ctx context.Context) string {
 	if v, err := s.sysctl(ctx, SysctlOnlinkNS); err == nil && v == "0" {
@@ -131,7 +131,7 @@ func (s *Service) doctorForwardingPersistent(ctx context.Context, c *checkSet) {
 		if n.Spec.IPv4 != nil && (n.Spec.IPv4.NAT || n.Spec.Uplink != "") {
 			need["net.inet.ip.forwarding"] = true
 		}
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+		if n.Spec.IPv6 != nil {
 			need["net.inet6.ip6.forwarding"] = true
 		}
 	}

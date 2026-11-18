@@ -143,7 +143,7 @@ func TestCounts(t *testing.T) {
 }
 
 func TestIPv6Huge(t *testing.T) {
-	a, err := NewV6(&api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8::/32", Range: "2001:db8::1-2001:db8:ffff::"}, nil)
+	a, err := NewV6(&api.IPv6Net{Subnet: "2001:db8::/32", Range: "2001:db8::1-2001:db8:ffff::"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +163,7 @@ func TestIPv6Huge(t *testing.T) {
 }
 
 func TestIPv6LinkLocalGatewayAndNetworkAddr(t *testing.T) {
-	a, err := NewV6(&api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2::/64", Range: "2001:db8:1:2::-2001:db8:1:2::10"}, nil)
+	a, err := NewV6(&api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2::/64", Range: "2001:db8:1:2::-2001:db8:1:2::10"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestOverlap(t *testing.T) {
 
 func v6alloc(t *testing.T, subnet, rng string) *Allocator {
 	t.Helper()
-	a, err := NewV6(&api.IPv6Net{Mode: api.IPv6Routed, Subnet: subnet, Range: rng}, nil)
+	a, err := NewV6(&api.IPv6Net{Subnet: subnet, Range: rng}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,10 +376,10 @@ func TestIPv6OtherPrefixesReserveOnlyTheAllOnesEnd(t *testing.T) {
 	}
 }
 
-// A /80 at the end of its /64 (the proxy mode hands out /80s) holds the reserved subnet anycast identifiers of RFC 2526, and
+// A /80 at the end of its /64 (the NDP proxy hands out /80s) holds the reserved subnet anycast identifiers of RFC 2526, and
 // none of its addresses is given out; a /80 elsewhere in the /64 holds none, and its own last address is the only one kept back.
 func TestReservedAnycastIdentifiersInsideALongerPrefix(t *testing.T) {
-	top := &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:ffff::/80", Range: "2001:db8:1:2:ffff:ffff:ffff:ff00-2001:db8:1:2:ffff:ffff:ffff:ffff"}
+	top := &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2:ffff::/80", Range: "2001:db8:1:2:ffff:ffff:ffff:ff00-2001:db8:1:2:ffff:ffff:ffff:ffff"}
 	al, err := NewV6(top, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +396,7 @@ func TestReservedAnycastIdentifiersInsideALongerPrefix(t *testing.T) {
 	if g := got.As16(); g[15] >= 0x80 {
 		t.Errorf("a reserved identifier was allocated: %s", got)
 	}
-	mid := &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::20"}
+	mid := &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2:100::/80", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::20"}
 	if _, err := NewV6(mid, nil); err != nil {
 		t.Fatal(err)
 	}

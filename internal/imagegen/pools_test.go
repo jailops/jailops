@@ -26,12 +26,12 @@ func twoPools(t *testing.T) (*world, *Manager, *Manager) {
 func TestProvideBuildsOnDemandThenReceives(t *testing.T) {
 	_, a, b := twoPools(t)
 	// No generation anywhere: the first jail's pool builds one.
-	g1, err := a.Provide(bg, "fb@stable")
+	g1, err := a.Provide(bg, "fb")
 	if err != nil || g1.Number != 1 || g1.Dataset != "tank/jailops/images/fb/g1" {
 		t.Fatalf("%+v %v", g1, err)
 	}
 	// The other pool receives the same generation instead of building another.
-	g2, err := b.Provide(bg, "fb@stable")
+	g2, err := b.Provide(bg, "fb")
 	if err != nil || g2.Number != 1 || g2.Dataset != "tank/fast/images/fb/g1" {
 		t.Fatalf("%+v %v", g2, err)
 	}
@@ -58,9 +58,6 @@ func TestProvideBuildsOnDemandThenReceives(t *testing.T) {
 	}
 	// An unknown pinned generation does not exist on any pool.
 	if _, err := b.Provide(bg, "fb#g7"); !api.IsCode(err, api.CodeNotFound) {
-		t.Fatal(err)
-	}
-	if _, err := b.Provide(bg, "fb@nope"); !api.IsCode(err, api.CodeNotFound) {
 		t.Fatal(err)
 	}
 }
@@ -101,7 +98,7 @@ func TestReceiveFailureLeavesNothingBehind(t *testing.T) {
 	// twoPools wires the managers inside the world; rebuild b from a's peers for the op.
 	sweep(t, sweepSetup, func(w *world) error {
 		b := w.M.Peers()[1]
-		_, err := b.Provide(bg, "fb@latest")
+		_, err := b.Provide(bg, "fb")
 		return err
 	})
 }

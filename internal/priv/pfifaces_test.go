@@ -92,7 +92,7 @@ func TestAnchorRulesOnTheUplinkNameOnlyAJailsAddresses(t *testing.T) {
 	ctx := context.Background()
 	nw, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "lan", UUID: "aaaa-1111-2222"},
 		"spec": api.NetworkSpec{Uplink: "em0", IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.20"},
-			IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1::/64"}}})
+			IPv6: &api.IPv6Net{Subnet: "2001:db8:1::/64"}}})
 	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "aaaa-1111-2222.json"), string(nw))
 	p := e.local.PF()
 	for _, rs := range []string{

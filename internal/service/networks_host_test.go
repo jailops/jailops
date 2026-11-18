@@ -17,7 +17,7 @@ func TestProxySubnetInsideTheSegmentOfAHostAddressOf128(t *testing.T) {
 	f.AddIface(ifconfig.Iface{Name: "vtnet0", Flags: []string{"UP"}, Inet6: []netip.Prefix{netip.MustParsePrefix("2001:db8:103:211::1/128")}})
 	s.d.Net = f
 	spec := func(subnet string) api.NetworkSpec {
-		return api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: subnet}}
+		return api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{NDPProxy: true, Subnet: subnet}}
 	}
 	if err := s.checkNetworkHost(bg, spec("2001:db8:103:211:100::/80")); err != nil {
 		t.Fatalf("a subnet inside the /64 of the host address: %v", err)

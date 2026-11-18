@@ -9,12 +9,6 @@ $ jailops image build freebsd-15 --from-generation other#g2
 ! hint: run 'jailops image build --help' for usage
 [exit 2]
 
-$ jailops image alias add freebsd-15 stable --generation g1
-image/freebsd-15 alias stable set to g1
-
-$ jailops image alias add freebsd-15 edge --generation freebsd-15#g4
-image/freebsd-15 alias edge set to g4
-
 $ jailops image generation delete -y freebsd-15 g3
 generation/freebsd-15#g3 deleted
 

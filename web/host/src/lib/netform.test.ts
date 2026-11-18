@@ -12,8 +12,8 @@ describe('network form helpers', () => {
     expect(Object.keys(checkNet(f)).sort()).toEqual(['v4gateway', 'v4range'])
     expect(checkNet({ ...blankNet(), name: 'lan', v4subnet: '10.20.0.0/7', v4gateway: '10.20.0.1', v4range: '10.20.0.2-10.20.0.9' })).toEqual({})
   })
-  it('proxy needs an uplink', () => {
-    const f = { ...blankNet(), name: 'edge', v4: false, mode: 'proxy' as const, v6subnet: '2001:db8:99::/64', v6range: '2001:db8:99::100-2001:db8:99::1ff' }
+  it('the NDP proxy needs an uplink', () => {
+    const f = { ...blankNet(), name: 'edge', v4: false, v6: true, ndp: true, v6subnet: '2001:db8:99::/64', v6range: '2001:db8:99::100-2001:db8:99::1ff' }
     expect(checkNet(f)).toMatchObject({ uplink: expect.any(String) })
     expect(checkNet({ ...f, uplink: 'em1' })).toEqual({})
   })

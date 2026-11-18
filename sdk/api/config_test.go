@@ -31,7 +31,7 @@ func TestRegistryIsConsistent(t *testing.T) {
 }
 
 func TestApplyConfigSetsAndReportsRestarts(t *testing.T) {
-	s := JailSpec{Image: "fb@stable"}
+	s := JailSpec{Image: "fb"}
 	restart, err := ApplyConfig(&s, map[string]string{
 		"limits.memory": "2G", "limits.cpu": "2", "boot.autostart": "true", "boot.depends": "db, cache",
 		"nic.eth0.network": "lan", "nic.eth0.ipv4": "auto", "nic.eth0.mtu": "1400", "nic.eth1.network": "dmz",

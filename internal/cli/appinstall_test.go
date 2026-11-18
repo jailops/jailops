@@ -115,7 +115,7 @@ func TestAppInstallRollbackCommandIsReal(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	h.srv.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "freebsd-151"},
-		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}})
+		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	out, errs, code := h.run("", "app", "install", "nginx", "--image", "freebsd-151")
 	if code != 0 {
@@ -134,8 +134,8 @@ func TestAppInstallRollbackCommandIsReal(t *testing.T) {
 	}
 }
 
-// Without --image the install takes the only FreeBSD image with the alias
-// stable, here the quick start's freebsd-15 (too old for the definition).
+// Without --image the install takes the host's only FreeBSD image, here the
+// quick start's freebsd-15 (too old for the definition).
 func TestAppInstallDefaultImage(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
@@ -164,10 +164,6 @@ func TestNoImageHintNamesTheCommands(t *testing.T) {
 	_, errs, code = h.run("", "jail", "create", "web", "--image", "base")
 	if code == 0 || !strings.Contains(errs, "hint: create it with 'jailops image create base --release 15.2-RELEASE', then build it with 'jailops image build base'") {
 		t.Fatalf("jail create: %d %s", code, errs)
-	}
-	_, errs, _ = h.run("", "jail", "create", "web", "--image", "base@lts")
-	if !strings.Contains(errs, "'jailops image create base --release 15.2-RELEASE --alias lts'") {
-		t.Fatalf("jail create with an alias: %s", errs)
 	}
 	h = newHarness(t, fake.WithRelease(""))
 	_, errs, _ = h.run("", "app", "install", "nginx")

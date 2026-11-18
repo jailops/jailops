@@ -126,9 +126,8 @@ The same in two steps, one jail at a time:
     jailops jail rollback web --project shop             # root only: back to the previous generation, data untouched
 
 A generation is written `gN` wherever a command takes one (`image build --from g2`, `jail upgrade --generation g4`,
-`image generation delete freebsd-15-1 g1`); a bare number is accepted too. As an advanced option an image can also carry
-aliases, movable names for one generation (`jailops image alias add freebsd-15-1 tested g2`, used as `freebsd-15-1@tested`);
-the plain name, which follows the newest generation, is what the console and these documents use.
+`image generation delete freebsd-15-1 g1`); a bare number is accepted too. The plain image name follows the newest
+generation; `freebsd-15-1#g2` pins one.
 
 ### Nightly auto upgrade
 
@@ -238,3 +237,19 @@ says whether a restart an update needs is applied automatically. The daemon eval
 - UNVERIFIED: the package and generation updates have been tested with fakes, and the mechanism ran on a real jail only
   for the generation swap. `jailops-sync` rollouts stage upgrades across hosts (canary, batches, a health gate); see
   [fleet-sync.md](fleet-sync.md).
+
+## Leftovers of the bridge layout
+
+A host that ran a release from before the routed layout can still have a bridge and a gateway pair (`NETNAMEga`, `NETNAMEgb`) for a network; a network is routed and has no interface of its own. `jailops doctor` says `network.leftovers` and names them.
+The jails that were started before the upgrade are still members of the bridge until they are restarted, so restart them first
+(`jailops restart JAIL ...`: they are down for a few seconds and come back with the routed link; the first start takes the
+gateway address away from the old gateway pair, which is why the jails still on the bridge lose it). Then remove what is left:
+
+    ifconfig -g bridge                # the bridges of the host
+    ifconfig NETNAME destroy          # the bridge; ifconfig NETNAME | grep member must show no jail link any more
+    ifconfig NETNAMEga destroy        # destroying one end of the pair removes the other
+    kldunload if_bridge               # and remove if_bridge_load from /boot/loader.conf
+
+A stop of such a jail works too: what is not there is not an error, and what could not be
+removed is written as a warning to the console log of the jail (`/var/log/jailops/jail_PROJECT_NAME_console.log`) and to the
+audit log, and never fails the stop.

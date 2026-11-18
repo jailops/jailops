@@ -1,7 +1,10 @@
-$ jailops network create sw --ipv4 10.94.0.1/24 --uplink em0 --ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy
+$ jailops network create sw --ipv4 10.94.0.1/24 --uplink em0 --ipv6 2001:db8:1:2:100::/80
 network/sw created
 Grant it to a project with: jailops network grant sw --project main
-! note: on some shared IPv6 segments the setting net.inet6.icmp6.nd6_onlink_ns_rfc4861 matters (it is 0): https://jailops.net/articles/shared-ipv6-neighbor-discovery/#fix
+
+$ jailops network ndp-proxy enable sw
+network/sw updated
+network/sw: the NDP proxy answers for 2001:db8:1:2:100::1-2001:db8:1:2:100::ffff on em0
 
 $ jailops network create -f <dir>/sw2.yaml
 network/sw2 created

@@ -23,7 +23,7 @@ func TestVolumes(t *testing.T) {
 		t.Fatalf("%+v %v", v, err)
 	}
 	for _, n := range []string{"mail", "desktop"} {
-		jop, err := c.Jails().Create(ctx, sdk.NewJail(n, api.JailSpec{Image: "freebsd-15@stable", Storage: "default", Network: []api.NetworkAttach{{Network: "lan"}}}))
+		jop, err := c.Jails().Create(ctx, sdk.NewJail(n, api.JailSpec{Image: "freebsd-15", Storage: "default", Network: []api.NetworkAttach{{Network: "lan"}}}))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -111,7 +111,7 @@ func TestEncryptedVolume(t *testing.T) {
 	if _, err := op.Wait(ctx); err != nil {
 		t.Fatal(err)
 	}
-	jop, _ := c.Jails().Create(ctx, sdk.NewJail("v", api.JailSpec{Image: "freebsd-15@stable", Storage: "default", Network: []api.NetworkAttach{{Network: "lan"}},
+	jop, _ := c.Jails().Create(ctx, sdk.NewJail("v", api.JailSpec{Image: "freebsd-15", Storage: "default", Network: []api.NetworkAttach{{Network: "lan"}},
 		Volumes: []api.VolumeAttach{{Name: "vault", Mount: "/srv/v"}}}))
 	if _, err := jop.Wait(ctx); err != nil {
 		t.Fatal(err)
@@ -165,7 +165,7 @@ func TestHostDirectoryVolume(t *testing.T) {
 	if _, err := c.Volumes().Snapshots("box").Create(ctx, "s1", ""); !api.IsCode(err, api.CodeInvalid) {
 		t.Fatalf("a snapshot of a host directory: %v", err)
 	}
-	jop, err := c.Jails().Create(ctx, sdk.NewJail("backup", api.JailSpec{Image: "freebsd-15@stable", Storage: "default", Network: []api.NetworkAttach{{Network: "lan"}}}))
+	jop, err := c.Jails().Create(ctx, sdk.NewJail("backup", api.JailSpec{Image: "freebsd-15", Storage: "default", Network: []api.NetworkAttach{{Network: "lan"}}}))
 	if err != nil {
 		t.Fatal(err)
 	}

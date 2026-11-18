@@ -94,7 +94,7 @@ func (h *harness) seed() {
 	h.srv.SeedImage(api.Image{
 		Metadata: api.ObjectMeta{Name: "freebsd-15"},
 		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.0-RELEASE", Arch: "amd64",
-			Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}},
+			Source: api.ImageSource{Type: "pkgbase"}},
 	})
 	h.srv.SeedGeneration("freebsd-15")
 	h.srv.SeedNetwork(api.Network{

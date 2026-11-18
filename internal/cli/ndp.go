@@ -32,10 +32,10 @@ type ndpView struct {
 }
 
 var toggleLong = map[bool]string{
-	true: `Switch the NDP proxy of a network on for good: the network goes to IPv6 mode proxy, the host answers the router's
+	true: `Switch the NDP proxy of a network on for good: the host answers the router's
 "who has this address" for the range of the network on its uplink from now on and again after every reboot. Use it when the
 provider puts the prefix on the same segment as the host. Running it again changes nothing.`,
-	false: `Switch the NDP proxy of a network off for good: the network goes to IPv6 mode routed and the host stops answering
+	false: `Switch the NDP proxy of a network off for good: the host stops answering
 neighbor discovery for its range. Use it when the provider routes the prefix to this host. Running it again changes nothing.`,
 }
 
@@ -94,8 +94,16 @@ why in the last column; an address the router never asked for does not appear.`,
 	return root
 }
 
+// ndpMark is the marker of the IPv6 column of the network list: the network has the NDP proxy switched on.
+func ndpMark(v6 *api.IPv6Net) string {
+	if v6 != nil && v6.NDPProxy {
+		return " (ndp)"
+	}
+	return ""
+}
+
 func ndpSubnet(n api.Network) (netip.Prefix, error) {
-	if n.Spec.IPv6 == nil || n.Spec.IPv6.Mode == api.IPv6None || n.Spec.IPv6.Subnet == "" {
+	if n.Spec.IPv6 == nil || n.Spec.IPv6.Subnet == "" {
 		return netip.Prefix{}, usagef("network %s has no IPv6 prefix: the NDP proxy answers for IPv6 addresses (give one with 'jailops network set %s --ipv6 PREFIX')", n.Metadata.Name, n.Metadata.Name)
 	}
 	return netip.ParsePrefix(n.Spec.IPv6.Subnet)
@@ -116,17 +124,13 @@ func (a *app) ndpToggle(cmd *cobra.Command, d *kindDesc[api.Network], name, verb
 	if on && n.Spec.Uplink == "" {
 		return usagef("network %s has no uplink: the NDP proxy answers on the uplink's segment (set one with 'jailops network set %s --uplink IFACE')", name, name)
 	}
-	mode := api.IPv6Routed
-	if on {
-		mode = api.IPv6Proxy
-	}
-	if n.Spec.IPv6.Mode == mode {
+	if n.Spec.IPv6.NDPProxy == on {
 		a.say("network/%s unchanged\n", name)
 		return nil
 	}
 	next := n
 	v6 := *n.Spec.IPv6
-	v6.Mode = mode
+	v6.NDPProxy = on
 	next.Spec.IPv6 = &v6
 	if ok, err := a.dry(verb+" ndp-proxy of network "+name, document(d.kind, *d.meta(&next), d.specOf(&next))); ok || err != nil {
 		return err
@@ -162,7 +166,7 @@ func (a *app) ndpStatus(cmd *cobra.Command, d *kindDesc[api.Network], name strin
 	if err != nil {
 		return err
 	}
-	v := ndpView{Network: name, Enabled: n.Spec.IPv6.Mode == api.IPv6Proxy, Uplink: n.Spec.Uplink, Prefix: pfx.String(), Range: n.Spec.IPv6.Range}
+	v := ndpView{Network: name, Enabled: n.Spec.IPv6.NDPProxy, Uplink: n.Spec.Uplink, Prefix: pfx.String(), Range: n.Spec.IPv6.Range}
 	if v.Enabled {
 		st, err := c.NDPStatus(cmd.Context())
 		if err != nil {
@@ -273,7 +277,7 @@ func (a *app) ndpWatch(cmd *cobra.Command, d *kindDesc[api.Network], name string
 	if err != nil {
 		return err
 	}
-	if n.Spec.IPv6.Mode != api.IPv6Proxy {
+	if !n.Spec.IPv6.NDPProxy {
 		return usagef("the NDP proxy of network %s is off ('jailops network ndp-proxy enable %s' turns it on)", name, name)
 	}
 	w := a.env.Stdout

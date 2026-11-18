@@ -478,6 +478,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if err := s.applyMigratedForwards(ctx); err != nil {
 		return fmt.Errorf("service: migrating stored port forwards: %w", err)
 	}
+	s.dropImageAliases(ctx)
 	s.warmCerts()
 	s.startLogForward()
 	if s.d.Files != nil {

@@ -15,7 +15,7 @@ import (
 // references. References come from jail specs, never from ZFS clone origins.
 type JailRef struct {
 	Name string
-	// Image is the spec reference: "<image>@<alias>", "<image>#g<N>" or "<image>".
+	// Image is the spec reference: "<image>#g<N>" or "<image>".
 	Image string
 	// Current and Previous are generation names ("<image>#g<N>") of the root
 	// in use and of the root a rollback would return to. Either may be empty.
@@ -116,28 +116,6 @@ func (m *Manager) Delete(ctx context.Context, image string, n int, jails []JailR
 			return z.Hold(ctx, snap, HoldTag)
 		}
 	}
-	moved, newAliases := aliasesWithout(o.Status, n)
-	imageDS := m.Layout.ImageDS(image)
-	var oldAliases string
-	var hadAliases bool
-	moveAliases := plan.Step{Name: "move-aliases", Describe: "move or remove the aliases that point at " + GenerationName(image, n) + ": " + strings.Join(moved, ", "),
-		Do: func(ctx context.Context) error {
-			old, err := z.Get(ctx, imageDS, PropAliases)
-			if err != nil {
-				return err
-			}
-			oldAliases, hadAliases = old, old != ""
-			return m.writeAliases(ctx, image, newAliases)
-		},
-		Undo: func(ctx context.Context) error {
-			if ok, _ := z.Exists(ctx, imageDS); !ok {
-				return nil
-			}
-			if hadAliases {
-				return z.Set(ctx, imageDS, map[string]string{PropAliases: oldAliases})
-			}
-			return z.Inherit(ctx, imageDS, PropAliases)
-		}, UndoOnFail: true}
 	release := plan.Step{Name: "release-hold", Describe: "zfs release " + HoldTag + " " + ro,
 		Do: func(ctx context.Context) error {
 			hs, err := z.Holds(ctx, ro)
@@ -153,9 +131,6 @@ func (m *Manager) Delete(ctx context.Context, image string, n int, jails []JailR
 		},
 		Undo: rehold(ro), UndoOnFail: true}
 	p := plan.New("image-delete " + GenerationName(image, n))
-	if len(moved) > 0 {
-		p.Add(moveAliases)
-	}
 	if len(clones) == 0 {
 		p.Add(release,
 			plan.Step{Name: "unmount", Describe: "zfs unmount " + ds, Do: func(ctx context.Context) error { return z.Unmount(ctx, ds) }},
@@ -212,59 +187,7 @@ func (m *Manager) Delete(ctx context.Context, image string, n int, jails []JailR
 	return res, nil
 }
 
-// aliasesWithout returns the aliases that point at generation n (sorted) and the alias map after removing n: each
-// such alias moves to the newest remaining generation, or disappears when none remains.
-func aliasesWithout(st api.ImageStatus, n int) ([]string, map[string]int) {
-	newest := 0
-	for _, g := range st.Generations {
-		if g.Number != n && g.Number > newest {
-			newest = g.Number
-		}
-	}
-	var moved []string
-	out := map[string]int{}
-	for a, an := range st.Aliases {
-		if an != n {
-			out[a] = an
-			continue
-		}
-		moved = append(moved, a)
-		if newest > 0 {
-			out[a] = newest
-		}
-	}
-	sort.Strings(moved)
-	return moved, out
-}
-
-// writeAliases stores the alias map on the image dataset; an empty map clears the property.
-func (m *Manager) writeAliases(ctx context.Context, image string, al map[string]int) error {
-	ids := m.Layout.ImageDS(image)
-	if len(al) == 0 {
-		return m.ZFS.Inherit(ctx, ids, PropAliases)
-	}
-	return m.ZFS.Set(ctx, ids, map[string]string{PropAliases: formatAliases(al)})
-}
-
-// DeleteAlias removes an alias from the image on this pool. It reports whether the alias existed.
-func (m *Manager) DeleteAlias(ctx context.Context, image, alias string) (bool, error) {
-	o, err := m.Observe(ctx, image)
-	if err != nil {
-		return false, err
-	}
-	if _, ok := o.Status.Aliases[alias]; !ok {
-		return false, nil
-	}
-	al := map[string]int{}
-	for a, n := range o.Status.Aliases {
-		if a != alias {
-			al[a] = n
-		}
-	}
-	return true, m.writeAliases(ctx, image, al)
-}
-
-// DeleteImage removes the image dataset (aliases and the generation counter) once it holds no generation any more.
+// DeleteImage removes the image dataset (the generation counter) once it holds no generation any more.
 // It leaves the dataset alone when anything is still below it.
 func (m *Manager) DeleteImage(ctx context.Context, image string) error {
 	ids := m.Layout.ImageDS(image)
@@ -339,7 +262,7 @@ func (m *Manager) Collect(ctx context.Context) ([]string, error) {
 }
 
 // Candidates returns the generations the retention policy allows deleting:
-// never the newest, never referenced by a jail, never an alias target, outside
+// never the newest, never referenced by a jail, outside
 // the KeepLast newest and older than KeepDays. A policy with both values zero
 // keeps everything.
 func Candidates(r api.ImageRetention, image string, st api.ImageStatus, jails []JailRef, now time.Time) []int {
@@ -349,13 +272,9 @@ func Candidates(r api.ImageRetention, image string, st api.ImageStatus, jails []
 	gens := append([]api.ImageGeneration(nil), st.Generations...)
 	sort.Slice(gens, func(i, j int) bool { return gens[i].Number > gens[j].Number })
 	refs := Refs(image, st, jails)
-	aliased := map[int]bool{}
-	for _, n := range st.Aliases {
-		aliased[n] = true
-	}
 	var out []int
 	for i, g := range gens {
-		if i == 0 || i < r.KeepLast || len(refs[g.Number]) > 0 || aliased[g.Number] {
+		if i == 0 || i < r.KeepLast || len(refs[g.Number]) > 0 {
 			continue
 		}
 		if r.KeepDays > 0 && !g.CreatedAt.IsZero() && now.Sub(g.CreatedAt) < time.Duration(r.KeepDays)*24*time.Hour {

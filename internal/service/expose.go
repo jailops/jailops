@@ -20,13 +20,13 @@ import (
 // exposeRoute is how the Internet reaches one address of a jail: directly on the uplink (an address the upstream routes
 // to the host) or through a port forward (an IPv4 address behind NAT), or not at all (a network without an uplink).
 type exposeRoute struct {
-	Family  string // "4" or "6"
-	Addr    netip.Addr
-	Network string
-	Uplink  string
-	NAT     bool         // an IPv4 address behind NAT: reached through a forward
-	Routed  bool         // reached directly on the uplink
-	Mode    api.IPv6Mode // the IPv6 mode of the network (routed or proxy), for the warnings
+	Family   string // "4" or "6"
+	Addr     netip.Addr
+	Network  string
+	Uplink   string
+	NAT      bool // an IPv4 address behind NAT: reached through a forward
+	Routed   bool // reached directly on the uplink
+	NDPProxy bool // the network has the NDP proxy switched on, for the warnings
 }
 
 // addressed are the routes that have an address already: what a jail that exists can be reached on.
@@ -47,10 +47,9 @@ func (s *Service) exposeRoutes(spec api.JailSpec) []exposeRoute {
 			up := n.Spec.Uplink != ""
 			out = append(out, exposeRoute{Family: "4", Addr: ad, Network: a.Network, Uplink: n.Spec.Uplink, NAT: up && n.Spec.IPv4.NAT, Routed: up && !n.Spec.IPv4.NAT})
 		}
-		if ad, _ := parseAddr(a.IPv6); a.IPv6 != "none" && n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+		if ad, _ := parseAddr(a.IPv6); a.IPv6 != "none" && n.Spec.IPv6 != nil {
 			up := n.Spec.Uplink != ""
-			routed := up && (n.Spec.IPv6.Mode == api.IPv6Routed || n.Spec.IPv6.Mode == api.IPv6Proxy)
-			out = append(out, exposeRoute{Family: "6", Addr: ad, Network: a.Network, Uplink: n.Spec.Uplink, Routed: routed, Mode: n.Spec.IPv6.Mode})
+			out = append(out, exposeRoute{Family: "6", Addr: ad, Network: a.Network, Uplink: n.Spec.Uplink, Routed: up, NDPProxy: n.Spec.IPv6.NDPProxy})
 		}
 	}
 	return out
@@ -469,8 +468,8 @@ func (s *Service) exposeResult(name string, all, named []api.ExposeEntry, routes
 			f.Via, f.Note = "none", "network "+r.Network+" has no uplink: nothing arrives from outside"
 		}
 		res.Families = append(res.Families, f)
-		if r.Family == "6" && r.Mode == api.IPv6Routed && r.Routed {
-			res.Warnings = append(res.Warnings, fmt.Sprintf("network %s is in routed mode: the Internet reaches %s only if your provider routes its prefix to this host (on a shared segment: jailops network ndp-proxy enable %s)", r.Network, r.Addr, r.Network))
+		if r.Family == "6" && !r.NDPProxy && r.Routed {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("network %s: the Internet reaches %s only if your provider routes the prefix to this host (on a shared segment: jailops network ndp-proxy enable %s)", r.Network, r.Addr, r.Network))
 		}
 	}
 	if fams != nil && !slices.Contains(fams, "6") {

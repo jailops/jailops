@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"regexp"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -94,8 +93,7 @@ func (s *Service) generationFreeBSD(ctx context.Context, gen string) string {
 }
 
 // observeAcross reads an image on every pool and merges the generations by
-// number (every pool that holds one is listed in Storages). Aliases come from
-// the first pool that sets them.
+// number (every pool that holds one is listed in Storages).
 func (s *Service) observeAcross(ctx context.Context, image string) (api.ImageStatus, imagegen.Observed, bool) {
 	var st api.ImageStatus
 	var agg imagegen.Observed
@@ -118,14 +116,6 @@ func (s *Service) observeAcross(ctx context.Context, image string) (api.ImageSta
 			g.Storages = []string{si.Name}
 			seen[g.Number] = len(st.Generations)
 			st.Generations = append(st.Generations, g)
-		}
-		for a, n := range obs.Status.Aliases {
-			if st.Aliases == nil {
-				st.Aliases = map[string]int{}
-			}
-			if _, set := st.Aliases[a]; !set || si.Name == DefaultStorage {
-				st.Aliases[a] = n
-			}
 		}
 		agg.Deleted = append(agg.Deleted, obs.Deleted...)
 		agg.Staging = append(agg.Staging, obs.Staging...)
@@ -231,11 +221,6 @@ func (s *Service) validateImage(name string, spec api.ImageSpec) error {
 	if err := so.CheckSpec(spec); err != nil {
 		return err
 	}
-	for _, a := range spec.Aliases {
-		if err := validate.Name("alias", a); err != nil {
-			return err
-		}
-	}
 	if au := spec.AutoUpgrade; au != nil && au.At != "" {
 		if _, err := parseAutoUpgradeAt(au.At); err != nil {
 			return err
@@ -337,7 +322,7 @@ func (s *Service) PatchImage(ctx context.Context, name string, patch map[string]
 	return s.UpdateImage(ctx, name, out, cur.Metadata.Generation)
 }
 
-// DeleteImage removes an image with all its generations and aliases. It is refused, naming the jails, while any jail
+// DeleteImage removes an image with all its generations. It is refused, naming the jails, while any jail
 // references the image.
 func (s *Service) DeleteImage(ctx context.Context, name string, expect int64) error {
 	if err := requireGlobal(ctx, "deleting an image"); err != nil {
@@ -370,11 +355,6 @@ func (s *Service) DeleteImage(ctx context.Context, name string, expect int64) er
 		if err != nil {
 			continue
 		}
-		for a := range o.Status.Aliases {
-			if _, err := m.DeleteAlias(ctx, name, a); err != nil {
-				return err
-			}
-		}
 		for _, g := range o.Status.Generations {
 			if _, err := m.Delete(ctx, name, g.Number, refs, false); err != nil {
 				return err
@@ -388,100 +368,6 @@ func (s *Service) DeleteImage(ctx context.Context, name string, expect int64) er
 		}
 	}
 	return s.imgKind.delete(ctx, name, expect)
-}
-
-// SetImageAlias points an alias of an image at a generation (the newest when gen is zero) and records the alias in
-// the image spec so later builds keep moving it. It returns the updated image.
-func (s *Service) SetImageAlias(ctx context.Context, image, alias string, gen int) (api.Image, error) {
-	if err := requireGlobal(ctx, "changing an image alias"); err != nil {
-		return api.Image{}, err
-	}
-	if err := s.requireHost("image aliases"); err != nil {
-		return api.Image{}, err
-	}
-	if err := validate.Name("alias", alias); err != nil {
-		return api.Image{}, err
-	}
-	if gen < 0 {
-		return api.Image{}, invalid("generation must be a generation number or empty for the newest")
-	}
-	unlock, err := s.locks.lockPatient(ctx, "set alias of image "+image, imageLock(image))
-	if err != nil {
-		return api.Image{}, err
-	}
-	defer unlock()
-	o, err := s.imgKind.get(image)
-	if err != nil {
-		return api.Image{}, notFound("image", image)
-	}
-	st, _, _ := s.observeAcross(ctx, image)
-	if gen == 0 {
-		for _, g := range st.Generations {
-			gen = max(gen, g.Number)
-		}
-		if gen == 0 {
-			return api.Image{}, api.Errorf(api.CodeNotFound, "image %q has no generation to point %q at", image, alias).WithHint("build one first")
-		}
-	}
-	found := false
-	for _, m := range s.imageManagers() {
-		if ob, err := m.Observe(ctx, image); err != nil {
-			continue
-		} else if _, ok := genOf(ob, gen); !ok {
-			continue
-		}
-		if err := m.SetAlias(ctx, image, alias, gen); err != nil {
-			return api.Image{}, err
-		}
-		found = true
-	}
-	if !found {
-		return api.Image{}, api.Errorf(api.CodeNotFound, "generation %s does not exist", imagegen.GenerationName(image, gen))
-	}
-	if !slices.Contains(o.Spec.Aliases, alias) {
-		o.Spec.Aliases = append(slices.Clone(o.Spec.Aliases), alias)
-		if o, err = s.imgKind.update(ctx, image, AnyGeneration, o.Meta.Labels, &o.Meta.ManagedBy, o.Spec); err != nil {
-			return api.Image{}, err
-		}
-	}
-	s.emit(ctx, "image-alias-set", "/api/v1/images/"+image)
-	return s.imageToAPI(ctx, o), nil
-}
-
-// DeleteImageAlias removes an alias from an image: its target on every pool and its name in the image spec, so a later
-// build does not bring it back. It returns the updated image.
-func (s *Service) DeleteImageAlias(ctx context.Context, image, alias string) (api.Image, error) {
-	if err := requireGlobal(ctx, "changing an image alias"); err != nil {
-		return api.Image{}, err
-	}
-	unlock, err := s.locks.lockPatient(ctx, "delete alias of image "+image, imageLock(image))
-	if err != nil {
-		return api.Image{}, err
-	}
-	defer unlock()
-	o, err := s.imgKind.get(image)
-	if err != nil {
-		return api.Image{}, notFound("image", image)
-	}
-	existed := slices.Contains(o.Spec.Aliases, alias)
-	for _, m := range s.imageManagers() {
-		ok, err := m.DeleteAlias(ctx, image, alias)
-		if err != nil {
-			return api.Image{}, err
-		}
-		existed = existed || ok
-	}
-	if !existed {
-		return api.Image{}, api.Errorf(api.CodeNotFound, "image %q has no alias %q", image, alias)
-	}
-	if slices.Contains(o.Spec.Aliases, alias) {
-		o.Spec.Aliases = slices.DeleteFunc(slices.Clone(o.Spec.Aliases), func(a string) bool { return a == alias })
-		if o, err = s.imgKind.update(ctx, image, AnyGeneration, o.Meta.Labels, &o.Meta.ManagedBy, o.Spec); err != nil {
-			return api.Image{}, err
-		}
-	}
-	s.emit(ctx, "image-alias-deleted", "/api/v1/images/"+image)
-	return s.imageToAPI(ctx, o), nil
 }
 
 // ListGenerations returns the generations of an image with their references.
@@ -592,14 +478,6 @@ func (s *Service) buildBody(ctx context.Context, h *OpHandle, mgr *imagegen.Mana
 	}
 	if err != nil || req.DryRun || res.Unchanged {
 		return res, err
-	}
-	// Aliases follow the newest generation.
-	if spec, err := s.imageSpec(ctx, image); err == nil {
-		for _, a := range spec.Aliases {
-			if err := mgr.SetAlias(ctx, image, a, res.Generation.Number); err != nil {
-				s.log.Warn("moving an image alias failed", "image", image, "alias", a, "err", err)
-			}
-		}
 	}
 	s.emit(ctx, "image-generation-created", "/api/v1/images/"+image+"/generations/"+strconv.Itoa(res.Generation.Number))
 	return res, nil

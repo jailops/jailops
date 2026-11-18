@@ -49,8 +49,3 @@ restoring on a new host from the recovery key alone is **not usable from the CLI
 --allow-from <your address>`, then `jailops-sync secrets set app1-token`. To take the token out of the picture use a client
 certificate instead (`jailops-sync remote bootstrap`, see [multi-host-fleet](../multi-host-fleet)).
 
-## Verified, and not
-
-Backup, verify at three depths and restore as a new jail are verified on FreeBSD 15.1 arm64 (backup-restore.md).
-**UNVERIFIED:** the provisioning of nginx and PostgreSQL inside the jails as written here, and this repository applied to a
-real host (the tests apply it to in-memory hosts and check every object with the daemon's validators).

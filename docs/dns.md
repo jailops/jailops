@@ -31,7 +31,7 @@ The resolver address of an IPv6 network is the second address of its subnet (`20
 `2001:db8:1:2:100::/80`). It is not link-local, because a `resolv.conf` cannot name a link-local server usefully. The
 helper makes the host hold it on its loopback as a `/128` and unbound listen on it; a jail reaches it through its default
 gateway like any address of the host. The allocator never gives it to a jail, and a network that is deleted loses it
-again. In proxy mode nothing answers for it on the uplink.
+again. With the NDP proxy nothing answers for it on the uplink.
 
 ## See how it works
 

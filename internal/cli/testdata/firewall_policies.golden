@@ -26,7 +26,7 @@ $ jailops firewall rule add ssh-office in --action allow --proto tcp --port 22 -
 firewall policy/ssh-office: rule 1 added: allow in tcp port 22
 ! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
-$ jailops jail create db --image freebsd-15@stable --storage default --network lan --firewall-policy postgres --firewall-policy ssh-office
+$ jailops jail create db --image freebsd-15 --storage default --network lan --firewall-policy postgres --firewall-policy ssh-office
 jail/db created
 
 $ jailops config get db firewall.policies
@@ -63,7 +63,7 @@ Jail db
   Hostname:     db
   State:        stopped
   Type:         thin jail
-  Image:        freebsd-15@stable, generation g1
+  Image:        freebsd-15, generation g1
   Storage:      default
   Created:      2026-03-01 09:00 UTC (3h ago)
   UUID:         <uuid>
@@ -99,7 +99,7 @@ $ jailops jail info db -o json
   "hostname": "db",
   "state": "stopped",
   "layout": "thin",
-  "image": "freebsd-15@stable",
+  "image": "freebsd-15",
   "generation": "g1",
   "storage": "default",
   "created_at": "2026-03-01T09:00:00Z",

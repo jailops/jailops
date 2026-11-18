@@ -1,4 +1,4 @@
-$ jailops jail create web --image freebsd-15@stable --storage default --network lan=10.20.0.15
+$ jailops jail create web --image freebsd-15 --storage default --network lan=10.20.0.15
 jail/web created
 
 $ jailops jail snapshot create web s1 -m first
@@ -71,7 +71,7 @@ $ jailops jail show web2 -o json
     "updated_at": "2026-03-01T09:00:00Z"
   },
   "spec": {
-    "image": "freebsd-15@stable",
+    "image": "freebsd-15",
     "storage": "default",
     "layout": "thin",
     "hostname": "web",
@@ -99,7 +99,7 @@ kind: Jail
 metadata:
   name: web3
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   layout: thin
   hostname: web

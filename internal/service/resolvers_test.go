@@ -13,7 +13,7 @@ func TestResolversFollowTheAddressFamiliesOfTheNetwork(t *testing.T) {
 	s := &Service{}
 	s.unbound.known, s.unbound.enabled = true, true
 	v4 := &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1"}
-	v6 := &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1:2:100::/80"}
+	v6 := &api.IPv6Net{Subnet: "2001:db8:1:2:100::/80"}
 	for name, c := range map[string]struct {
 		spec api.NetworkSpec
 		want []string

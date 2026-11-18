@@ -1,11 +1,11 @@
-$ jailops --dry-run jail create x --image freebsd-15@stable --network lan --storage default
+$ jailops --dry-run jail create x --image freebsd-15 --network lan --storage default
 dry-run: would create jail x
 apiVersion: jailops/v1
 kind: Jail
 metadata:
   name: x
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   network:
     - network: lan
@@ -45,7 +45,7 @@ kind: Jail
 metadata:
   name: w2
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   layout: thin
   hostname: web
@@ -67,12 +67,6 @@ spec:
 
 $ jailops --dry-run network delete -y lan
 dry-run: would delete network lan
-
-$ jailops --dry-run image alias add freebsd-15 x
-dry-run: would point alias x of image freebsd-15 at the newest generation
-
-$ jailops --dry-run image alias remove -y freebsd-15 x
-dry-run: would remove alias x of image freebsd-15
 
 $ jailops --dry-run image generation delete -y freebsd-15 1
 dry-run: would delete generation freebsd-15#g1

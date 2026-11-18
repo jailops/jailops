@@ -16,7 +16,7 @@
       "B": "2"
     },
     "firewall": {},
-    "image": "freebsd-15-0@stable",
+    "image": "freebsd-15-0",
     "network": [
       {
         "ipv4": "10.20.0.10",

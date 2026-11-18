@@ -34,7 +34,7 @@ type JailSpec struct {
 	// Comment is what the object is for: one line of free text.
 	Comment string `json:"comment,omitempty"`
 	// Image is an image name such as "freebsd-15-1" (its newest generation),
-	// NAME@alias, or a pinned generation such as "freebsd-15-1#g3".
+	// or a pinned generation such as "freebsd-15-1#g3".
 	Image string `json:"image"`
 	// OS is the guest family. It defaults to the image's OS and is set by the
 	// server so validators and renderers can apply OS-specific rules.
@@ -350,7 +350,7 @@ type JailRollback struct {
 // JailUpgrade is the body of POST /api/v1/jails/{name}/upgrade.
 type JailUpgrade struct {
 	// Generation pins the target; empty means the newest generation of the
-	// jail's image alias.
+	// jail's image.
 	Generation string `json:"generation,omitempty"`
 	DryRun     bool   `json:"dry_run,omitempty"`
 }

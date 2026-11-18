@@ -2,8 +2,6 @@ package ipam
 
 import (
 	"testing"
-
-	"jailops.net/jailops/sdk/api"
 )
 
 func TestLinkLocalFromMAC(t *testing.T) {
@@ -16,12 +14,10 @@ func TestLinkLocalFromMAC(t *testing.T) {
 	}
 }
 
-// In both modes a jail holds a /128 and reaches everything through the host's link-local gateway.
-func TestGuestAddressingIsTheSameInBothModes(t *testing.T) {
-	for _, m := range []api.IPv6Mode{api.IPv6Routed, api.IPv6Proxy} {
-		if GuestPrefixLen6(m, 80) != 128 {
-			t.Errorf("%s: jail prefix is not /128", m)
-		}
+// A jail holds a /128 and reaches everything through the host's link-local gateway.
+func TestGuestAddressingIsOneHostPrefix(t *testing.T) {
+	if GuestPrefixLen6() != 128 {
+		t.Error("jail prefix is not /128")
 	}
 	if GatewayLinkLocal6.String() != "fe80::1" {
 		t.Errorf("gateway %s", GatewayLinkLocal6)

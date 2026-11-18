@@ -53,24 +53,6 @@ func (i *ImageClient) DeleteGeneration(ctx context.Context, image string, number
 	return op, err
 }
 
-// SetAlias points an alias of an image at a generation; zero means the newest. It returns the updated image.
-func (i *ImageClient) SetAlias(ctx context.Context, image, alias string, generation int) (api.Image, error) {
-	if err := i.c.need("image_aliases"); err != nil {
-		return api.Image{}, err
-	}
-	out, _, err := send[api.Image](ctx, i.c, request{method: http.MethodPut, path: i.item(image) + "/aliases/" + esc(alias), body: api.ImageAliasSet{Generation: generation}})
-	return out, err
-}
-
-// DeleteAlias removes an alias of an image. It returns the updated image.
-func (i *ImageClient) DeleteAlias(ctx context.Context, image, alias string) (api.Image, error) {
-	if err := i.c.need("image_aliases"); err != nil {
-		return api.Image{}, err
-	}
-	out, _, err := send[api.Image](ctx, i.c, request{method: http.MethodDelete, path: i.item(image) + "/aliases/" + esc(alias)})
-	return out, err
-}
-
 // NetworkClient accesses /api/v1/networks.
 type NetworkClient struct {
 	*Resource[api.Network]

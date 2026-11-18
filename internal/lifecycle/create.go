@@ -220,7 +220,9 @@ func (s *Service) planCreate(ctx context.Context, j api.Jail, recovering bool) (
 			props := base(KindPersistent, map[string]string{PropClass: string(pp.Class), PropPath: path.Clean(pp.Path), PropMerge: onOff(pp.Merge), "mountpoint": final})
 			if pp.NoSeed {
 				pl.Add(plan.Step{Name: "create-" + pp.Dataset, Describe: fmt.Sprintf("zfs create -o mountpoint=%s %s", final, ds),
-					Do: func(ctx context.Context) error { return z.Create(ctx, ds, props) }})
+					Do: func(ctx context.Context) error { return z.Create(ctx, ds, props) }},
+					plan.Step{Name: "baseline-" + pp.Dataset, Describe: "zfs snapshot " + ds + "@" + BaselineSnap,
+						Do: func(ctx context.Context) error { return z.Snapshot(ctx, nil, ds+"@"+BaselineSnap) }})
 				continue
 			}
 			seedProps := map[string]string{}
@@ -260,6 +262,8 @@ func (s *Service) planCreate(ctx context.Context, j api.Jail, recovering bool) (
 					}
 					return s.Files.RemoveAll(ctx, stage)
 				}})
+			pl.Add(plan.Step{Name: "baseline-" + pp.Dataset, Describe: "zfs snapshot " + ds + "@" + BaselineSnap,
+				Do: func(ctx context.Context) error { return z.Snapshot(ctx, nil, ds+"@"+BaselineSnap) }})
 		}
 		pl.Add(plan.Step{Name: "unmount-root", Describe: "zfs unmount " + rootDS,
 			Do: func(ctx context.Context) error {

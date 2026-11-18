@@ -37,9 +37,6 @@ watch(() => route.query.create, (c) => {
   void router.replace({ query: { ...route.query, create: undefined } })
 }, { immediate: true })
 
-function aliasesOf(img: Image, n: number): string[] {
-  return Object.entries(img.status.aliases ?? {}).filter(([, g]) => g === n).map(([a]) => a)
-}
 /** Every jail on any generation of the image (the server's used-by data). */
 function jailsOn(img: Image): string[] {
   return [...new Set((img.status.generations ?? []).flatMap((g) => g.refs ?? []))].sort()
@@ -62,9 +59,6 @@ function upgrade(img: Image): void {
   })
 }
 
-// Aliases are an advanced feature of the CLI: the page shows the ones there are and removes them, and sets none.
-const removingAlias = ref<{ image: string; alias: string } | null>(null)
-const removeAlias = () => runOp(s.images.deleteAliasTitle(removingAlias.value!.alias), () => api.images.deleteAlias(removingAlias.value!.image, removingAlias.value!.alias))
 </script>
 
 <template>
@@ -87,7 +81,6 @@ const removeAlias = () => runOp(s.images.deleteAliasTitle(removingAlias.value!.a
             <div class="row">
               <h2 class="mono">{{ img.metadata.name }}</h2>
               <span class="faint" data-test="image-release">{{ s.images.release(img.spec.release) }} <span class="mono">{{ img.spec.os }} {{ img.spec.arch }}</span> · {{ s.images.gens(img.status.generations?.length ?? 0) }}</span>
-              <span v-for="(g, a) in img.status.aliases" :key="a" class="pill info">{{ a }} = g{{ g }}<button v-if="can('image_aliases')" class="btn btn-sm" type="button" :title="s.images.deleteAlias" :aria-label="s.images.deleteAlias" :data-test="`delete-alias-${a}`" style="margin-left: 4px" @click="removingAlias = { image: img.metadata.name, alias: String(a) }"><Icon name="x" /></button></span>
             </div>
             <div class="row-actions">
               <button v-if="can('generations')" class="btn btn-sm" type="button" :data-test="`build-${img.metadata.name}`" @click="build(img)"><Icon name="plus" />{{ s.images.build }}</button>
@@ -105,7 +98,7 @@ const removeAlias = () => runOp(s.images.deleteAliasTitle(removingAlias.value!.a
               <thead><tr><th>{{ s.images.generations }}</th><th>{{ s.images.created }}</th><th>{{ s.images.freebsd }}</th><th class="hide-sm">{{ s.images.manifest }}</th><th class="num">{{ s.images.packagesCol }}</th><th>{{ s.images.usedBy }}</th></tr></thead>
               <tbody>
                 <tr v-for="g in [...(img.status.generations ?? [])].sort((a, b) => b.number - a.number)" :key="g.number">
-                  <td class="nowrap" :data-label="s.images.generations"><span class="mono">g{{ g.number }}</span> <span v-if="g.parent" class="faint">{{ s.images.parent(g.parent) }}</span><span v-for="a in aliasesOf(img, g.number)" :key="a" class="pill info" style="margin-left: 6px">{{ a }}</span></td>
+                  <td class="nowrap" :data-label="s.images.generations"><span class="mono">g{{ g.number }}</span> <span v-if="g.parent" class="faint">{{ s.images.parent(g.parent) }}</span></td>
                   <td class="faint" :data-label="s.images.created"><TimeStamp :ts="g.created_at" /></td>
                   <td class="mono" :data-label="s.images.freebsd" :title="s.images.freebsdHint" data-test="generation-freebsd">{{ g.freebsd_version || '-' }}</td>
                   <td class="mono faint hide-sm" :data-label="s.images.manifest" :title="g.manifest">{{ g.manifest.slice(0, 12) }}</td>
@@ -124,7 +117,6 @@ const removeAlias = () => runOp(s.images.deleteAliasTitle(removingAlias.value!.a
     </LoadState>
     <RenameDialog :open="!!renaming" kind="image" :name="renaming?.metadata.name ?? ''" :etag="ifMatch(renaming?.metadata.generation)" @close="renaming = null" @done="l.reload" />
     <ImageCreateDialog :open="creating" @close="creating = false" @done="l.reload" />
-    <ConfirmDialog :open="!!removingAlias" :title="s.images.deleteAliasTitle(removingAlias?.alias ?? '')" :confirm-label="s.images.deleteAlias" danger :run="removeAlias" @close="removingAlias = null" @done="l.reload"><Callout tone="warn">{{ s.images.deleteAliasText }}</Callout></ConfirmDialog>
   </div>
 </template>
 

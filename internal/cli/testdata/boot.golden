@@ -1,28 +1,28 @@
 $ jailops boot
 ! No jail starts at boot. Give one autostart: jailops config set JAIL boot.autostart true
 
-$ jailops create db --image freebsd-15@stable --storage default --network lan
+$ jailops create db --image freebsd-15 --storage default --network lan
 jail/db created
 
-$ jailops create web --image freebsd-15@stable --storage default --network lan --autostart --depends db --boot-priority 2
+$ jailops create web --image freebsd-15 --storage default --network lan --autostart --depends db --boot-priority 2
 jail/web created
 
-$ jailops create cache --image freebsd-15@stable --storage default --network lan --autostart
+$ jailops create cache --image freebsd-15 --storage default --network lan --autostart
 jail/cache created
 
-$ jailops create ghost-user --image freebsd-15@stable --storage default --network lan --autostart --depends db
+$ jailops create ghost-user --image freebsd-15 --storage default --network lan --autostart --depends db
 jail/ghost-user created
 
 $ jailops volume create secrets --encrypted --passphrase-file <dir>/vault.pass
 volume/secrets created
 
-$ jailops create vault --image freebsd-15@stable --storage default --network lan --autostart
+$ jailops create vault --image freebsd-15 --storage default --network lan --autostart
 jail/vault created
 
 $ jailops volume attach vault secrets /srv/db
 volume/secrets attached to jail vault
 
-$ jailops create report --image freebsd-15@stable --storage default --network lan --autostart --depends vault
+$ jailops create report --image freebsd-15 --storage default --network lan --autostart --depends vault
 jail/report created
 
 $ jailops boot

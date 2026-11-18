@@ -28,7 +28,7 @@ func seedBasics(s *fake.Server) {
 	seedProject(s)
 	s.SeedImage(api.Image{
 		Metadata: api.ObjectMeta{Name: "freebsd-15"},
-		Spec:     api.ImageSpec{OS: api.OSFreeBSD, Release: "15.0-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}},
+		Spec:     api.ImageSpec{OS: api.OSFreeBSD, Release: "15.0-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}},
 	})
 	s.SeedGeneration("freebsd-15")
 	s.SeedNetwork(api.Network{
@@ -54,7 +54,7 @@ func newEnv(t *testing.T, fopts ...fake.Option) (*fake.Server, *sdk.Client) {
 
 func webSpec() api.JailSpec {
 	return api.JailSpec{
-		Image:   "freebsd-15@stable",
+		Image:   "freebsd-15",
 		Storage: "default",
 		Network: []api.NetworkAttach{{Network: "lan", IPv4: "auto"}},
 	}

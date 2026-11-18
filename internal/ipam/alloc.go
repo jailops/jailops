@@ -47,7 +47,7 @@ func New(prefix netip.Prefix, gateway netip.Addr, rng Range, exclude []Range, in
 		// as special). In a /64 the reserved subnet anycast identifiers of RFC 2526 are reserved too: the highest 128
 		// interface identifiers, and the same 128 with the universal/local bit cleared (fdff:ffff:ffff:ff80 to
 		// fdff:ffff:ffff:ffff, the form the RFC writes for EUI-64 interfaces), whenever they lie inside the prefix (a /64,
-		// or a longer prefix at the end of its /64: the proxy mode hands out /80s). A prefix shorter than a /64 has no
+		// or a longer prefix at the end of its /64: the NDP proxy hands out /80s). A prefix shorter than a /64 has no
 		// such rule.
 		last := lastOf(prefix)
 		a.reserved[last] = true
@@ -88,7 +88,7 @@ func NewV4(n *api.IPv4Net, inUse []netip.Addr) (*Allocator, error) {
 
 // NewV6 builds an Allocator from the network's IPv6 configuration.
 func NewV6(n *api.IPv6Net, inUse []netip.Addr) (*Allocator, error) {
-	if n == nil || n.Mode == api.IPv6None {
+	if n == nil {
 		return nil, invalid("ipv6", "network has no IPv6 configuration")
 	}
 	gw := ""

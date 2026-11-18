@@ -26,7 +26,6 @@ spec:
     gateway: 10.50.0.1
     range: 10.50.0.2-10.50.0.254
   ipv6:
-    mode: routed
     subnet: fd50::/64
     range: fd50::1-fd50::ffff
 status:
@@ -106,12 +105,12 @@ storage/fast revoked from project web
 $ jailops storage grant fast --project web --quota 500G
 storage/fast granted to project web
 
-$ jailops create nginx --project web --image freebsd-15@stable --memory 1G --cpu 1 --network web --storage fast
+$ jailops create nginx --project web --image freebsd-15 --memory 1G --cpu 1 --network web --storage fast
 jail/nginx created
 
 $ jailops list --project web
-NAME    STATE     IMAGE               GEN   ADDRESSES           EXPOSED   AUTOSTART   USED   AGE
-nginx   stopped   freebsd-15@stable   g1    10.50.0.2,fd50::1   -         -           -      3h
+NAME    STATE     IMAGE        GEN   ADDRESSES           EXPOSED   AUTOSTART   USED   AGE
+nginx   stopped   freebsd-15   g1    10.50.0.2,fd50::1   -         -           -      3h
 
 $ jailops list
 ! No jails in project main. Create one with: jailops jail create NAME --image IMAGE --network NETWORK --storage STORAGE
@@ -159,10 +158,10 @@ $ jailops project show web -o json
   }
 }
 
-$ jailops create n2 --project web --image freebsd-15@stable --memory 1G --cpu 1 --network web --storage fast
+$ jailops create n2 --project web --image freebsd-15 --memory 1G --cpu 1 --network web --storage fast
 jail/n2 created
 
-$ jailops create n3 --project web --image freebsd-15@stable --memory 1G --cpu 1 --network web --storage fast
+$ jailops create n3 --project web --image freebsd-15 --memory 1G --cpu 1 --network web --storage fast
 ! quota_exceeded: project "web" would exceed its jails quota (3 of 2)
 ! hint: See the usage with 'jailops project show NAME', free something up, or ask a global admin to raise the quota with 'jailops project set NAME --max-...'. (jailops explain quota_exceeded)
 [exit 5]

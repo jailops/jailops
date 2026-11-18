@@ -44,8 +44,3 @@ Registering the storage (`sync` creates it) also registers it with the root help
     jailops-sync -C examples/big-pool-tank plan          # compare with EXPECTED-PLAN.md
     jailops-sync -C examples/big-pool-tank sync --apply
 
-## Verified, and not
-
-A read-only host mount of a dataset of a second pool, refused writes, and a refused directory outside the approved list are
-verified on FreeBSD 15.1 arm64 (design 18.11). **UNVERIFIED:** this repository on a real 16 TB pool, a storage of
-that size under load.

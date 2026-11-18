@@ -6,7 +6,7 @@ metadata:
   name: wiki
   labels: {tier: tools}
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   network:
     - {name: eth0, network: intra, ipv4: auto, ipv6: auto}

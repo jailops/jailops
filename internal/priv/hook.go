@@ -270,13 +270,12 @@ func (l *Local) planJail(ctx context.Context, name JailName) ([]attachment, erro
 				in.Gateway4 = gw
 			}
 		}
-		if v6 := nw.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
-			p, err := netip.ParsePrefix(v6.Subnet)
-			if err != nil {
+		if v6 := nw.Spec.IPv6; v6 != nil {
+			if _, err := netip.ParsePrefix(v6.Subnet); err != nil {
 				return nil, fmt.Errorf("network %s: %w", att.Network, err)
 			}
-			in.IPv6Mode = v6.Mode
-			if in.IPv6, err = guestAddr(att.IPv6, ipam.GuestPrefixLen6(v6.Mode, p.Bits()), true); err != nil {
+			in.NDPProxy = v6.NDPProxy
+			if in.IPv6, err = guestAddr(att.IPv6, ipam.GuestPrefixLen6(), true); err != nil {
 				return nil, err
 			}
 			if in.IPv6.IsValid() {

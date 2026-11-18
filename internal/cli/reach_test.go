@@ -13,10 +13,10 @@ func TestReachViews(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	h.srv.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "freebsd-151"},
-		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}})
+		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	tr := h.transcript()
-	tr.ok("app", "install", "nginx", "web", "--image", "freebsd-151@stable")
+	tr.ok("app", "install", "nginx", "web", "--image", "freebsd-151")
 	tr.ok("expose", "web", "80", "--host-port", "8080")
 	tr.ok("list")
 	tr.ok("firewall", "show", "web")

@@ -47,7 +47,7 @@ func sourceObjects() objs {
 }
 
 func jailSpec() api.JailSpec {
-	return api.JailSpec{Image: "freebsd-15-0@stable",
+	return api.JailSpec{Image: "freebsd-15-0",
 		Network:  []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.5", MAC: "02:aa"}, {Network: "dmz", IPv4: "auto"}, {Network: "lan", IPv4: "none"}},
 		Firewall: api.FirewallAttach{Policies: []string{"web"}, Tags: []string{"tag:x"}},
 		Volumes:  []api.VolumeAttach{{Name: "db", Mount: "/var/db/app"}}, Encrypted: true}

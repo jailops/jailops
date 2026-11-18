@@ -13,7 +13,7 @@ func TestBootPlan(t *testing.T) {
 	tr := h.transcript()
 	tr.ok("boot") // nothing starts at boot yet
 	create := func(name string, extra ...string) {
-		args := append([]string{"create", name, "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan"}, extra...)
+		args := append([]string{"create", name, "--image", "freebsd-15", "--storage", "default", "--network", "lan"}, extra...)
 		tr.ok(args...)
 	}
 	create("db")

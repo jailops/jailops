@@ -55,7 +55,7 @@ func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string, devices ...string) *
 	if err := e.zfs.Create(ctx, zfs.CreateOpts{Name: "tank/jailops/projects/alpha/jails/web", Props: map[string]string{"jailops:managed": "on", "mountpoint": mp}}); err != nil {
 		t.Fatal(err)
 	}
-	spec := api.JailSpec{Image: "freebsd-15-0@stable", OS: os, Network: []api.NetworkAttach{{Network: "lan", IPv4: ipv4, IPv6: ipv6}}}
+	spec := api.JailSpec{Image: "freebsd-15-0", OS: os, Network: []api.NetworkAttach{{Network: "lan", IPv4: ipv4, IPv6: ipv6}}}
 	for _, d := range devices {
 		spec.Devfs = append(spec.Devfs, api.DevfsDevice{Name: d, Device: d})
 	}
@@ -64,7 +64,7 @@ func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string, devices ...string) *
 
 	nw := api.NetworkSpec{Uplink: "em0", MTU: 1400,
 		IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200"},
-		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "fd00:20::/64", Range: "fd00:20::10-fd00:20::ff"}}
+		IPv6: &api.IPv6Net{Subnet: "fd00:20::/64", Range: "fd00:20::10-fd00:20::ff"}}
 	doc, _ := json.Marshal(map[string]any{"apiVersion": "jailops/v1", "kind": "Network", "metadata": api.ObjectMeta{Name: "lan", UUID: "aaaa-1111-2222"}, "spec": nw})
 	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "aaaa-1111-2222.json"), string(doc))
 	// a second network with another name must not be picked

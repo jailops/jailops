@@ -93,8 +93,8 @@ func TestBashCompletion(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	for _, args := range [][]string{
-		{"jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default"},
-		{"jail", "create", "db", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default"},
+		{"jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default"},
+		{"jail", "create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default"},
 		{"jail", "snapshot", "create", "web", "s1"},
 		{"firewall", "policy", "create", "floor", "--default-in", "deny", "--default-out", "allow"},
 		{"firewall", "address-set", "create", "office", "--address", "198.51.100.0/24"},

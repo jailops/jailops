@@ -405,7 +405,7 @@ func TestPlansGolden(t *testing.T) {
 	n := api.NetworkSpec{
 		Uplink: "em0", MTU: 1500,
 		IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200", NAT: true},
-		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1::/64", Range: "2001:db8:1::100-2001:db8:1::ffff"},
+		IPv6: &api.IPv6Net{Subnet: "2001:db8:1::/64", Range: "2001:db8:1::100-2001:db8:1::ffff"},
 	}
 	steps, err := NetworkPlan(NetworkInput{ID: "n-123", Name: "lan", Spec: n})
 	if err != nil {
@@ -414,7 +414,7 @@ func TestPlansGolden(t *testing.T) {
 	golden(t, "plan_network_routed", DescribePlan(steps))
 	golden(t, "plan_network_routed_rollback", DescribePlan(Rollback(steps)))
 
-	p := api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:2::/64", Range: "2001:db8:2::100-2001:db8:2::200"}}
+	p := api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:2::/64", Range: "2001:db8:2::100-2001:db8:2::200"}}
 	steps, err = NetworkPlan(NetworkInput{ID: "n-456", Name: "wan6", Spec: p})
 	if err != nil {
 		t.Fatal(err)
@@ -427,7 +427,7 @@ func TestPlansGolden(t *testing.T) {
 		}
 	}
 	if !rejected {
-		t.Fatal("a proxy-mode network needs a reject route for its prefix: the proxy answers for the range, and a packet for an address nobody uses must not leave the uplink again")
+		t.Fatal("a network with the NDP proxy needs a reject route for its prefix: the proxy answers for the range, and a packet for an address nobody uses must not leave the uplink again")
 	}
 
 	a := AttachInput{JailID: "j-1", JailUUID: "0b0e7f3e-5c4b-4f6e-9d3e-111111111111", Index: 0, Project: "web", Jail: "nginx", Network: "lan", MTU: 1500,
@@ -437,7 +437,7 @@ func TestPlansGolden(t *testing.T) {
 		t.Fatal(err)
 	}
 	golden(t, "plan_attach_freebsd", DescribePlan(steps))
-	a.IPv6Mode, a.Uplink, a.IPv6, a.HostConfigured = api.IPv6Proxy, "em0", pfx("2001:db8:2::100/128"), true
+	a.NDPProxy, a.Uplink, a.IPv6, a.HostConfigured = true, "em0", pfx("2001:db8:2::100/128"), true
 	steps, err = AttachPlan(a)
 	if err != nil {
 		t.Fatal(err)
@@ -473,7 +473,7 @@ func TestPlanErrors(t *testing.T) {
 		func(a *AttachInput) { a.MTU = 3 },
 		func(a *AttachInput) { a.IPv4 = pfx("2001:db8::1/64") },
 		func(a *AttachInput) { a.Gateway6 = ip("10.0.0.1") },
-		func(a *AttachInput) { a.IPv6Mode, a.IPv6, a.Uplink = api.IPv6Proxy, pfx("2001:db8::1/128"), "" },
+		func(a *AttachInput) { a.NDPProxy, a.IPv6, a.Uplink = true, pfx("2001:db8::1/128"), "" },
 	} {
 		a := ok
 		mut(&a)
@@ -488,7 +488,7 @@ func TestJSONCanonical(t *testing.T) {
 		Metadata: api.ObjectMeta{Name: "web", UUID: "u-1", Scope: api.ScopeHost, Generation: 3,
 			Labels:    map[string]string{"z": "1", "a": "<2>"},
 			CreatedAt: time.Date(2026, 1, 2, 3, 4, 5, 0, time.FixedZone("x", 3600))},
-		Spec: api.JailSpec{Image: "freebsd-15-0@stable", Env: map[string]string{"B": "2", "A": "1"},
+		Spec: api.JailSpec{Image: "freebsd-15-0", Env: map[string]string{"B": "2", "A": "1"},
 			Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.10"}}},
 		Status: api.JailStatus{Power: api.PowerRunning, JID: 7},
 	}

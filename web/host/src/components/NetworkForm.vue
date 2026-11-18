@@ -30,7 +30,7 @@ const check = useFormCheck(() => {
   const p = checkNet(f, editing.value)
   const need: Record<string, boolean> = {
     name: !f.name, v4subnet: f.v4 && !f.v4subnet, v4gateway: f.v4 && !f.v4gateway, v4range: f.v4 && !f.v4range,
-    v6subnet: f.mode !== 'none' && !f.v6subnet, v6range: f.mode !== 'none' && !f.v6range,
+    v6subnet: f.v6 && !f.v6subnet, v6range: f.v6 && !f.v6range,
   }
   const out: Record<string, string> = {}
   for (const k of Object.keys(ids)) out[ids[k]] = p[k] || (need[k] ? s.networks.required : '')
@@ -123,18 +123,8 @@ const save = () => check.submit(async () => {
       </fieldset>
 
       <fieldset class="nf-set">
-        <legend>{{ s.networks.ipv6 }}</legend>
-        <div class="field">
-          <label for="nf-mode">{{ s.networks.mode }}</label>
-          <select id="nf-mode" v-model="f.mode" data-test="nf-mode">
-            <option value="none">{{ s.networks.modeNone }}</option>
-            <option value="routed">{{ s.networks.modeRouted }}</option>
-            <option value="proxy">{{ s.networks.modeProxy }}</option>
-          </select>
-        </div>
-        <Callout v-if="f.mode === 'routed'" tone="info" data-test="mode-help">{{ s.networks.routedHelp }}</Callout>
-        <Callout v-if="f.mode === 'proxy'" tone="warn" data-test="mode-help">{{ s.networks.proxyHelp }}<br />{{ s.networks.pfNote }}</Callout>
-        <template v-if="f.mode !== 'none'">
+        <legend><label class="check"><input id="nf-v6" v-model="f.v6" type="checkbox" data-test="nf-v6" />{{ s.networks.ipv6 }}</label></legend>
+        <template v-if="f.v6">
           <div class="field">
             <label for="nf-v6s">{{ s.networks.subnet }} <span class="req" aria-hidden="true">*</span></label>
             <input id="nf-v6s" v-model="f.v6subnet" class="mono" type="text" placeholder="2001:db8:20:1::/64" autocomplete="off" :aria-invalid="!!msg('v6subnet')" aria-describedby="nf-v6s-e" @blur="check.touch('nf-v6s')" />
@@ -145,6 +135,9 @@ const save = () => check.submit(async () => {
             <input id="nf-v6r" v-model="f.v6range" class="mono" type="text" placeholder="2001:db8:20:1::100-2001:db8:20:1::1ff" autocomplete="off" :aria-invalid="!!msg('v6range')" aria-describedby="nf-v6r-e" @blur="check.touch('nf-v6r')" />
             <span id="nf-v6r-e" class="field-error" role="alert">{{ msg('v6range') }}</span>
           </div>
+          <label class="check"><input v-model="f.ndp" type="checkbox" data-test="nf-ndp" />{{ s.networks.ndpSwitch }}</label>
+          <p class="hint">{{ s.networks.ndpSwitchHelp }}</p>
+          <Callout v-if="f.ndp" tone="warn" data-test="ndp-help">{{ s.networks.proxyHelp }}<br />{{ s.networks.pfNote }}</Callout>
         </template>
       </fieldset>
       <p class="hint">{{ s.networks.serverChecks }}</p>

@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/netip"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -194,7 +195,7 @@ func (s *Service) dnsSignature(ctx context.Context) string {
 			line += " " + v4.Subnet + " " + v4.Gateway
 		}
 		if v6 := o.Spec.IPv6; v6 != nil {
-			line += " " + v6.Subnet + " " + string(v6.Mode)
+			line += " " + v6.Subnet + " " + strconv.FormatBool(v6.NDPProxy)
 		}
 		parts = append(parts, line)
 	}

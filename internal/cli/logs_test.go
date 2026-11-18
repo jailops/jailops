@@ -29,7 +29,7 @@ func TestJailLogs(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	tr.ok("jail", "logs", "web")
 	seedLogs(h)
 	tr.ok("jail", "logs", "web")
@@ -63,7 +63,7 @@ func TestJailLogs(t *testing.T) {
 	// an old server
 	old := newHarness(t, fake.WithExtensions("operations", "etag", "events", "jails"))
 	old.seed()
-	old.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	old.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	if _, errs, code := old.run("", "jail", "logs", "web"); code != 6 || !strings.Contains(errs, `server does not support "jail_logs"`) {
 		t.Fatalf("old server: %d %s", code, errs)
 	}
@@ -74,7 +74,7 @@ func TestJailLogs(t *testing.T) {
 func TestJailLogsFollow(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.srv.SeedJailLog("main", "web", "messages", []byte("one\ntwo\n"))
 	var out, errb syncBuilder
 	ctx, cancel := context.WithCancel(context.Background())
@@ -138,7 +138,7 @@ func (s *syncBuilder) String() string {
 func TestJailLogsControlCharacters(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.srv.SeedJailLog("main", "web", "evil", []byte("a\x1b]0;title\x07b\tc\x1b[2Jd\u009be\x7ff ü\n"))
 	out, errs, code := h.run("", "jail", "logs", "web", "evil")
 	if code != 0 || errs != "" || out != "a\uFFFD]0;title\uFFFDb\tc\uFFFD[2Jd\uFFFDe\uFFFDf ü\n" {

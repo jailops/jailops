@@ -49,7 +49,7 @@ func uplinkProblem(uplink string, ifs []ifconfig.Iface) string {
 	return ""
 }
 
-// doctorNDPUplink checks the uplink of every proxy-mode network.
+// doctorNDPUplink checks the uplink of every network with the NDP proxy.
 func (s *Service) doctorNDPUplink(ctx context.Context, c *checkSet) {
 	if s.d.Net == nil {
 		return
@@ -57,7 +57,7 @@ func (s *Service) doctorNDPUplink(ctx context.Context, c *checkSet) {
 	nets, _ := s.netKind.list()
 	var uplinks []string
 	for _, o := range nets {
-		if o.Spec.IPv6 != nil && o.Spec.IPv6.Mode == api.IPv6Proxy && !slices.Contains(uplinks, o.Spec.Uplink) {
+		if o.Spec.IPv6 != nil && o.Spec.IPv6.NDPProxy && !slices.Contains(uplinks, o.Spec.Uplink) {
 			uplinks = append(uplinks, o.Spec.Uplink)
 		}
 	}

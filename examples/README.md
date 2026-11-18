@@ -9,7 +9,7 @@ beside it. An example that stops working fails the build.
 | Example | What it shows | Hosts |
 |---|---|---|
 | [`minimal-fleet`](minimal-fleet) | the smallest complete fleet: profiles, SOPS and age secrets, a rollout, mTLS to one host | 2 |
-| [`ipv6-switched-cloud`](ipv6-switched-cloud) | a cloud server with a **shared /64** (NDP proxy mode): one `/80` per project, two segmented projects, a firewall per jail, a public web jail | 1 |
+| [`ipv6-switched-cloud`](ipv6-switched-cloud) | a cloud server with a **shared /64** (the NDP proxy): one `/80` per project, two segmented projects, a firewall per jail, a public web jail | 1 |
 | [`ipv6-routed-hetzner`](ipv6-routed-hetzner) | a **routed /64**: one `/80` per project, no proxy involved | 1 |
 | [`web-stack`](web-stack) | nginx, an app and PostgreSQL, a backup schedule and encrypted backups to a keyless backup node | 1 |
 | [`big-pool-tank`](big-pool-tank) | a 16 TB HDD pool used as a storage, volumes, and an existing archive attached read-only as host-directory volumes | 1 |

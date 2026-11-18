@@ -122,8 +122,7 @@ Rules the validator enforces, besides the sizes above:
   operator has configured it).
 - `resources.memory` and `.disk` are sizes (`512M`, `10G`); `cpu` is a number.
 - `access` is optional and strict like the rest: `type` must be `postgresql`, `port` a tcp port of `ports`, `service` one
-  of `services`, `hba_file` one of the `config` paths; any other key is invalid. The key is new in 0.4.0, so a daemon
-  before it lists a definition that has it as invalid (see the trust model). The reference copy of `postgresql` in
+  of `services`, `hba_file` one of the `config` paths; any other key is invalid. The reference copy of `postgresql` in
   `internal/apps/testdata/catalog/` has the block; the definition that hosts install lives in the packages repository
   and gets it there, by a pull request of its own, once 0.4.0 is the release that repository builds against. What the
   block makes JailOps do is in [Who may connect](#who-may-connect).
@@ -339,7 +338,7 @@ jailops app access [APP] [-o json|yaml]       # who may connect; without APP, ev
 | `jail:NAME` | a jail of the same project | `jail:NAME`, so the rule follows the jail at every render | one line per address (`/32`, `/128`), a copy made when the grant is made |
 | `set:NAME` | an address set of the project (`jailops firewall address-set`) | `set:NAME`, so the rule follows the set | one line per member, a copy made when the grant is made |
 | an address or a prefix | `192.0.2.7`, `192.0.2.0/24`, `2001:db8::/48` | the prefix | the prefix |
-| `host` | the host itself: the gateway addresses of the jail's networks, which the host connects from (IPv4, and IPv6 of a routed network; a proxy-mode network has a link-local gateway and is left out) | those addresses | those addresses |
+| `host` | the host itself: the gateway addresses of the jail's networks, which the host connects from (IPv4, and IPv6 of a routed network; a network with the NDP proxy has a link-local gateway and is left out) | those addresses | those addresses |
 
 A jail and an address set may have the same name: `jail:` and `set:` say which is meant. A jail whose name is
 longer than 29 characters cannot be named in a rule: put it in an address set. The shell completes `APP`, the word
@@ -433,8 +432,8 @@ audited with the source. `--dry-run` resolves the source and asks the server (re
 rule, the `pg_hba.conf` lines, the SQL with `<generated, shown once>` for the password, and the steps, and changes
 nothing; the jail must run for an app with an access block (`busy` otherwise, also for a real allow or deny).
 
-**Apps installed before 0.4.0** have no policy and are open to their network. `jailops app access` says so, and their
-first allow closes them to every other source (the answer says that too).
+**An app that has no access policy** is open to its network. `jailops app access` says so, and its first allow closes it to
+every other source (the answer says that too).
 
 **Fleet sync** declares apps and their grants too (kinds `App` and `AppAccess`, [fleet-sync.md](fleet-sync.md)).
 
@@ -714,24 +713,3 @@ this version addresses: PostgreSQL's `initdb` failed without System V shared mem
 its log file in a root-owned `/var/log/valkey` (the `setup` lines above), and forgejo failed because the daemon(8)
 supervisor of its rc script held the pipes of the in-jail `service forgejo start` and, at the next start, of `jail -c`
 (the start wrapper and the console log).
-
-Verified on a FreeBSD host with the end-to-end test: PostgreSQL with `sysvipc`, Valkey with its setup lines, forgejo with
-the start wrapper and the console log, and `isms`, `nsd` and `mail` as far as stated above. The end-to-end test
-(`scripts/ci-freebsd-e2e.sh`) installs nginx, fetches its default page from the host and stops it; with
-`JAILOPS_E2E_APPS="postgresql valkey prometheus forgejo nsd mail isms postgresql-access"` (or any of them) it then installs each named
-app in its own block and checks it: `select 1` through `psql` as `postgres`, `valkey-cli ping` answering `PONG`,
-Prometheus' `/-/ready`, forgejo's port 3000 answering 200 or a redirect to its installer; for `nsd`, `drill` from the
-host asks the jail for the SOA of `example.com` over UDP and over TCP and `nsd-checkconf` passes in the jail; for `mail`,
-Postfix's `220` greeting on port 25 and Dovecot's `* OK` on port 143 (`nc` that sends `QUIT` or `LOGOUT` one second after connecting, because Postfix refuses commands that arrive before its greeting) and the
-`sendmail` line of `mailer.conf`; for `isms`, the steps of its notes with a `postgresql` jail of its own (`isms-db`):
-`jailops app allow isms-db --from jail:isms --db isms` for the role, the database, `listen_addresses`, the `pg_hba.conf` line
-and the connection string, then `server.env`, the secret, the signing key, `isms server migrate`, `service isms start`,
-and port 8080 answering a 2xx or 3xx status (curl retries while the program starts). Every app is closed after its
-installation, so each check that connects from the host first runs `jailops app allow APP --from host`; the nginx block
-also checks that the page does **not** answer before that. `postgresql-access` in the list is a block of its own: a
-`postgresql` jail and two plain jails with the PostgreSQL client, `allow` from the first (the dry run first), `select 1`
-with the printed connection string from it and a refusal from the second, `app access`, a second `allow` that changes
-nothing, then `deny` and the first refused too.
-None of these checks reaches the internet. `isms` needs the `jailops` repository in the host's pkg configuration; the
-script refuses to start (exit 2) with the reason when it is missing. Then it lists the jail's log files and stops the
-jail. CI does not set the variable.

@@ -95,13 +95,6 @@ export type EventType =
 
 export const EventTypeValues: readonly EventType[] = ['lifecycle', 'operation', 'logging']
 
-export type IPv6Mode =
-  | "routed"
-  | "proxy"
-  | "none"
-
-export const IPv6ModeValues: readonly IPv6Mode[] = ['routed', 'proxy', 'none']
-
 export type JailLogKind =
   | "active"
   | "rotated"
@@ -700,6 +693,28 @@ export interface DevfsDevice {
   device: string
 }
 
+export interface DiffDataset {
+  name: string
+  path: string
+  base: string
+  note?: string
+  entries: DiffEntry[]
+  total: number
+  counts: Record<string, number>
+  truncated?: boolean
+}
+
+export interface DiffEntry {
+  kind: string
+  path: string
+  to?: string
+}
+
+export interface DiffPackages {
+  packages: string[]
+  note?: string
+}
+
 export interface DoctorCheck {
   name: string
   status: DoctorStatus
@@ -1115,10 +1130,10 @@ export interface IPv4Net {
 }
 
 export interface IPv6Net {
-  mode: IPv6Mode
   subnet: string
   range: string
   exclude?: string[]
+  ndp_proxy?: boolean
 }
 
 export interface Identity {
@@ -1134,10 +1149,6 @@ export interface Image {
   metadata: ObjectMeta
   spec: ImageSpec
   status: ImageStatus
-}
-
-export interface ImageAliasSet {
-  generation?: number
 }
 
 export interface ImageAutoUpgrade {
@@ -1188,14 +1199,12 @@ export interface ImageSpec {
   release: string
   arch: string
   source: ImageSource
-  aliases?: string[]
   retention?: ImageRetention
   auto_upgrade?: ImageAutoUpgrade
 }
 
 export interface ImageStatus {
   generations?: ImageGeneration[]
-  aliases?: Record<string, number>
   auto_upgrade?: ImageAutoUpgradeStatus
 }
 
@@ -1254,6 +1263,13 @@ export interface JailAction {
   action: string
   timeout?: number
   force?: boolean
+}
+
+export interface JailDiff {
+  jail: string
+  image: string
+  datasets: DiffDataset[]
+  packages?: DiffPackages
 }
 
 export interface JailDiskUsage {
@@ -2386,7 +2402,7 @@ export const configKeys: readonly ConfigKey[] = [
   {
     "name": "image",
     "type": "string",
-    "description": "Image reference: name, name@alias or name#gN. The image name cannot change on a living jail.",
+    "description": "Image reference: name or name#gN. The image name cannot change on a living jail.",
     "example": "freebsd-15-1",
     "restart_required": true,
     "profile": false,
@@ -2671,4 +2687,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'jail_diff']

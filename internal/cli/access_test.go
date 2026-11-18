@@ -141,8 +141,8 @@ func TestHubScoping(t *testing.T) {
 func TestEvents(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
-	h.run("", "jail", "create", "db", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.run("", "jail", "start", "web")
 	tr := h.transcript()
 	tr.ok("events", "--since-id", "0", "--type", "lifecycle", "--count", "3")

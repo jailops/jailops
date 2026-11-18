@@ -98,3 +98,12 @@ func SetShellSettle(wait, grace time.Duration) func() {
 func (s *Service) ApplyForwards(ctx context.Context, fws []state.MigratedForward) error {
 	return s.applyForwards(ctx, fws)
 }
+
+// ReportImageAliases is reportImageAliases, and ImageDataset the dataset of an image on the default pool.
+func (s *Service) ReportImageAliases(ctx context.Context, refs []state.MigratedImageRef) {
+	s.reportImageAliases(ctx, refs)
+}
+
+func (s *Service) ImageDataset(image string) string {
+	return s.imageManagers()[0].Layout.ImageDS(image)
+}

@@ -17,10 +17,10 @@ func (s *Service) NDPStatus(_ context.Context) api.NDPStatus {
 	objs, _ := s.netKind.list()
 	for _, o := range objs {
 		v6 := o.Spec.IPv6
-		if v6 == nil || v6.Mode == api.IPv6None {
+		if v6 == nil {
 			continue
 		}
-		n := api.NDPNetwork{Name: o.Meta.Name, Enabled: v6.Mode == api.IPv6Proxy, Uplink: o.Spec.Uplink, Prefix: v6.Subnet, Range: v6.Range}
+		n := api.NDPNetwork{Name: o.Meta.Name, Enabled: v6.NDPProxy, Uplink: o.Spec.Uplink, Prefix: v6.Subnet, Range: v6.Range}
 		if n.Enabled {
 			addrs, more, _ := ipam.ProxyAddrs6(v6)
 			n.Answers, n.Beyond = len(addrs), more

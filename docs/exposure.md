@@ -136,12 +136,8 @@ cannot reach). The next step for those is a `dns-01` challenge through a DNS pro
 certificate elsewhere and upload it, or point `listen.https.cert`/`key` at the files your tool keeps current. One
 certificate per daemon; no external account binding; no revocation from JailOps.
 
-**Tested how.** The tests run the whole flow against a CA written in the tests (`internal/daemon/dtest/acmeca.go`): the
-directory and its terms, nonces, signed requests checked, the account, an order for two names, both challenges validated
-against the daemon's real listeners, finalize with the CSR's names checked, the chain served on the TLS listener, a
-restart that serves the cached certificate, a refused validation with its backoff. Not covered there: DNS, the CA's rate
-limits, ports 80 and 443 behind pf. **UNVERIFIED: issuance by a real CA.** A person verifies it once against the staging
-directory, on a host whose DNS name points at it and whose port 80 reaches it:
+**UNVERIFIED: issuance by a real CA.** To try it against the staging directory, on a host whose DNS name points at it and
+whose port 80 reaches it:
 
     # as root on the host
     jailops host certificate acme --domain console.example.com --accept-tos --staging

@@ -2,11 +2,11 @@ package api
 
 import "time"
 
-// NDPStatus is the reply of GET /api/v1/ndp: the neighbor discovery proxy of each uplink that has IPv6 proxy-mode
+// NDPStatus is the reply of GET /api/v1/ndp: the neighbor discovery proxy of each uplink that has IPv6 NDP proxy
 // networks, with what it knows about every address it holds or was asked for.
 type NDPStatus struct {
 	Uplinks []NDPUplink `json:"uplinks"`
-	// Networks are the networks with an IPv6 prefix and what the proxy answers for on each (in proxy mode).
+	// Networks are the networks with an IPv6 prefix and what the proxy answers for on each.
 	Networks []NDPNetwork `json:"networks"`
 }
 
@@ -17,7 +17,7 @@ const AnswerLimit6 = 1024
 // NDPNetwork is the neighbor discovery proxy of one network.
 type NDPNetwork struct {
 	Name string `json:"name"`
-	// Enabled is true while the network is in proxy mode.
+	// Enabled is true while the NDP proxy of the network is on.
 	Enabled bool   `json:"enabled"`
 	Uplink  string `json:"uplink,omitempty"`
 	Prefix  string `json:"prefix"`

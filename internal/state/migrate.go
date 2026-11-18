@@ -78,6 +78,35 @@ var fieldRenames = map[api.Kind][]fieldRename{
 	api.KindWireGuard: {{From: "down", To: "disabled"}},
 }
 
+// ipv6ModeToSwitch rewrites the stored IPv6 block of a network from the one-off `mode` field to the `ndp_proxy` switch:
+// `proxy` becomes `ndp_proxy: true`, `routed` just loses the field, and a network whose mode was `none` loses its
+// IPv6 block.
+func ipv6ModeToSwitch(doc map[string]any) bool {
+	if kind, _ := doc["kind"].(string); api.Kind(kind) != api.KindNetwork {
+		return false
+	}
+	spec, ok := doc["spec"].(map[string]any)
+	if !ok {
+		return false
+	}
+	v6, ok := spec["ipv6"].(map[string]any)
+	if !ok {
+		return false
+	}
+	mode, has := v6["mode"]
+	if !has {
+		return false
+	}
+	delete(v6, "mode")
+	switch mode {
+	case "proxy":
+		v6["ndp_proxy"] = true
+	case "none":
+		delete(spec, "ipv6")
+	}
+	return true
+}
+
 // renameFields applies fieldRenames to doc and reports whether it changed anything. A document that already has the
 // new name keeps it, and the old one is dropped.
 func renameFields(doc map[string]any) bool {
@@ -86,7 +115,7 @@ func renameFields(doc map[string]any) bool {
 	if !ok {
 		return false
 	}
-	changed := false
+	changed := ipv6ModeToSwitch(doc)
 	for _, r := range fieldRenames[api.Kind(kind)] {
 		v, has := spec[r.From]
 		if !has {

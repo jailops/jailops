@@ -191,7 +191,6 @@ var Extensions = []string{
 	"jail_shell",
 	"provisioning",
 	"sealed_secrets",
-	"image_aliases",
 	"image_upgrade",
 	"jail_usage",
 	"apps",
@@ -215,4 +214,5 @@ var Extensions = []string{
 	"firewall_test",
 	"jail_expose",
 	"jail_reach",
+	"jail_diff",
 }

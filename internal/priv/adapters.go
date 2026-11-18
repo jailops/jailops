@@ -80,6 +80,9 @@ func (z zfsClient) Written(ctx context.Context, dataset, since string) (uint64, 
 	r, err := callJSON[guidRes](ctx, z.c, OpZFSWritten, zfsWrittenArgs{dataset, since}, callOpts{})
 	return r.V, err
 }
+func (z zfsClient) Diff(ctx context.Context, from, to string, limit int, skip []string) (zfs.DiffResult, error) {
+	return callJSON[zfs.DiffResult](ctx, z.c, OpZFSDiff, zfsDiffArgs{from, to, limit, skip}, callOpts{})
+}
 func (z zfsClient) GUID(ctx context.Context, name string) (uint64, error) {
 	r, err := callJSON[guidRes](ctx, z.c, OpZFSGUID, nameArgs{name}, callOpts{})
 	return r.V, err

@@ -407,7 +407,7 @@ jailops jail start web`, "jails")
 	crudCommands(a, jc, d, jailCreateLong, jailCreateExample, a.jailFlagBuild)
 	jc.AddCommand(a.jailInfo(d))
 	jc.AddCommand(a.jailLifecycleSet(d)...)
-	jc.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailCopy(d), a.jailLogs(d))
+	jc.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailCopy(d), a.jailLogs(d), a.jailDiff(d))
 	jc.AddCommand(a.jailShellSetup(d))
 	return jc
 }
@@ -482,7 +482,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	)
 	f := cmd.Flags()
 	f.StringVar(&comment, "comment", "", "what the jail is for")
-	f.StringVar(&image, "image", "", "image reference: NAME (the newest generation), NAME@alias or NAME#gN (default: the host's only image)")
+	f.StringVar(&image, "image", "", "image reference: NAME (the newest generation) or NAME#gN (default: the host's only image)")
 	f.StringVar(&storage, "storage", "", "storage to place the jail on, one granted to the project (default: the project's only storage, unless a profile supplies it)")
 	f.StringArrayVar(&profiles, "profile", nil, "profile to apply, later ones override earlier ones (repeatable)")
 	f.StringVar(&layout, "layout", "", "root layout: thin or thick (default depends on the image)")

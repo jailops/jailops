@@ -117,7 +117,7 @@ func (p *fakePG) take() []string {
 
 func installApp(t *testing.T, c *sdk.Client, app, jail string) api.AppInstallResult {
 	t.Helper()
-	op, err := c.Apps().Install(ctxT(t), app, api.AppInstall{Jail: jail, Image: "fb151@stable", Network: "lan", Storage: "default"})
+	op, err := c.Apps().Install(ctxT(t), app, api.AppInstall{Jail: jail, Image: "fb151", Network: "lan", Storage: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
