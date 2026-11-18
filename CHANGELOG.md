@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- **The e2e run no longer depends on a package mirror to get bash.** The host fills the package cache of the jail
+  roots with bash before the shell steps, a jail whose first setup lost against a slow mirror is given the bash from
+  that cache at its next start, and a failed step prints what the daemon and the helper logged about packages, shells
+  and setups.
 ## 0.8.4 - 2026-11-18
 
 - **No IPv6 mode: the NDP proxy is a switch of the network.** A network has an IPv6 prefix, and the proxy that answers

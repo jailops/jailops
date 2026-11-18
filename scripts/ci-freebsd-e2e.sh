@@ -107,7 +107,20 @@ fail() {
 	echo "FAILED: $*" >&2
 	echo "--- last messages" >&2
 	tail -n 40 /var/log/messages >&2 || true
+	echo "--- what the daemon and the helper logged about packages, shells and setups" >&2
+	grep -E 'pkg|shell|setup|bash' /var/log/messages 2>/dev/null | tail -n 200 >&2 || true
 	exit 1
+}
+bash_in() { # bash_in JAIL: bash is in the root of the jail within 120 s; a setup that lost against a slow mirror stays due, and the next start fetches bash from the host, out of its warm cache (tried at most three times)
+	j=$1; f=$mount/projects/demo/jails/$j/root/usr/local/bin/bash; n=0
+	while :; do
+		end=$(( $(date +%s) + 120 ))
+		until [ -x "$f" ] || [ "$(date +%s)" -ge "$end" ]; do sleep 1; done # sleep-ok: poll of a condition
+		[ -x "$f" ] && return 0
+		n=$((n + 1)); [ $n -gt 3 ] && fail "bash is in the jail $j (not after $n tries)"
+		check "stop $j (bash is not in it after 120 s)" $J stop "$j" --project demo
+		check "start $j (the host fetches the bash it lacks)" $J start "$j" --project demo
+	done
 }
 check() { # check DESCRIPTION COMMAND...: the command must succeed
 	desc=$1; shift
@@ -799,6 +812,7 @@ dns6_step() {
 }
 
 step "image, network, project"
+check_net "the host holds bash and what it needs in the package cache of the jail roots (a jail fetches it from there, whatever the mirror does later)" pkg fetch -y -d -o PKG_CACHEDIR=$mount/cache/pkg bash
 uplink=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
 [ -n "$uplink" ] || uplink=$(ifconfig -l | tr ' ' '\n' | grep -v -E '^(lo0|pflog0)$' | head -1)
 jarch=$goarch
@@ -984,7 +998,7 @@ check "delete the policy" $J firewall policy delete closed --project demo -y
 
 step "packages of a running jail change inside it (pkg -j); what a process of the jail plants cannot make the host write"
 check "a jail that runs" $J create pkgj --project demo --image "$img" --network lan --storage default --start
-waitfor "the shell of the new jail is installed (the setup runs in the background; a command that needs no bash works meanwhile)" 180 $J exec --project demo pkgj -- test -x /usr/local/bin/bash
+bash_in pkgj
 expect "the check of its packages runs pkg inside the jail" 'pkgj' $J update check pkgj --project demo
 check "the jail plants a link where pkg keeps its cache" $J exec --project demo pkgj -- sh -c 'rm -rf /var/cache/pkg; ln -s /jopsci-escape /var/cache/pkg; mkdir -p /usr/local/etc/pkg/repos; ln -s /jopsci-escape /usr/local/etc/pkg/repos/escape.conf'
 $J update apply pkgj --project demo --packages -y >/dev/null 2>&1 || true
@@ -999,7 +1013,7 @@ shorthost=$(hostname | cut -d. -f1 | tr 'A-Z' 'a-z' | tr -cd 'a-z0-9-' | sed 's/
 ps1='\[\e[38;5;39m\]\u@\h\[\e[0m\]${_jailops_where:+ \[\e[38;5;245m\][${_jailops_where}]\[\e[0m\]}:\w\$ '
 expect "a new jail's shell is bash" '^/usr/local/bin/bash$' $J config get --project demo web shell
 expect "a new jail's prompt is the default" '^default$' $J config get --project demo web prompt
-waitfor "bash is installed into the jail's /usr/local after its first start (the start does not wait for it)" 180 test -x "$webroot/usr/local/bin/bash"
+bash_in web
 expect "bash is a package of the jail" '^bash-' pkg -j demo_web info bash
 check_retry "the prompt file is JailOps'" grep -F -x "	PS1='$ps1'" "$webroot/usr/local/etc/profile.d/jailops-prompt.sh"
 check_retry "the variables script is JailOps'" grep -F "sysctl -n security.jail.env" "$webroot/usr/local/etc/profile.d/jailops-env.sh"
@@ -1644,7 +1658,7 @@ if shard_on 3; then # shard 3: the OS upgrade, image upgrades, devices and the a
 step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
 expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --start
 check "a second generation of the image" $J image build "$img" --from-generation g1
-waitfor "the shell of the second jail is installed (the setup runs in the background; a stop would end it and leave it due)" 180 $J exec --project demo up -- test -x /usr/local/bin/bash
+bash_in up
 check "a file that must survive" $J exec --project demo up -- sh -c 'echo ci-keep > /root/keep'
 expect "dry run" 'g1 to g2' $J jail upgrade up --project demo --dry-run
 check "upgrade to the newer generation" $J jail upgrade up --project demo --generation g2
