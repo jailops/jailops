@@ -94,6 +94,7 @@ remove_all() {
 	jail -r ndprt >/dev/null 2>&1
 	ifconfig vlan77 destroy >/dev/null 2>&1
 	ifconfig ndpa destroy >/dev/null 2>&1
+	ifconfig lo0 inet6 2001:db8:77:0:100::1 -alias >/dev/null 2>&1
 	ifconfig lo0 inet6 fd91:1::fff0 -alias >/dev/null 2>&1; ifconfig lo0 inet6 fd93:1::fff0 -alias >/dev/null 2>&1
 	ifconfig pfupa destroy >/dev/null 2>&1
 	for f in "${TMPDIR:-/tmp}"/jailops-pf.*/h4.pid "${TMPDIR:-/tmp}"/jailops-pf.*/h6.pid; do [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null; done
@@ -1023,6 +1024,10 @@ HM=$(ifconfig vlan77 | awk '/ether /{print $2; exit}')
 mac_norm() { echo "$1" | tr 'A-F:' 'a-f ' | { read -r a b c d e f; printf '%x:%x:%x:%x:%x:%x' "0x$a" "0x$b" "0x$c" "0x$d" "0x$e" "0x$f"; }; }
 HMN=$(mac_norm "$HM")
 $J network create ndp-up --ipv4 10.97.0.1/24 --nat --uplink vlan77 --ipv6 2001:db8:77:0:100::/80 </dev/null >/dev/null || die "network ndp-up"
+# The host holds the resolver address of the network on its loopback while the names are managed (dns.unbound); the
+# proxy must start with it there and never answer for it
+RES=2001:db8:77:0:100::1
+ifconfig lo0 inet6 "$RES/128" alias || die "the resolver address on lo0"
 $J network ndp-proxy enable ndp-up </dev/null >/dev/null || die "ndp-proxy enable ndp-up"
 $J network grant ndp-up --project pfa </dev/null >/dev/null || die "grant ndp-up"
 addr6() { $J config get "$2" nic.eth0.ipv6 --project "$1" </dev/null 2>/dev/null | tail -1 | sed 's|/.*||'; }
@@ -1046,6 +1051,7 @@ N1=$(addr6 pfa nd1)
 [ -n "$N1" ] || die "nd1 has no IPv6 address"
 waitfor_ "the proxy answers for the first jail" 60 resolved "$N1"
 expect allow "the router resolves the address of the first jail to the host's MAC" resolved "$N1"
+expect allow "doctor: the proxy answers with the resolver address on the loopback" sh -c "$J doctor </dev/null 2>&1 | grep -Eq 'network\.ndproxy +PASS'"
 # a jail that starts after the proxy: its address is answered like the first one
 $J create nd2 --project pfa --image "$img" --network ndp-up --storage default </dev/null >/dev/null || die "create nd2"
 $J create nd3 --project pfa --image "$img" --network ndp-up --storage default </dev/null >/dev/null || die "create nd3"
@@ -1063,7 +1069,6 @@ expect allow "the address of a stopped jail is still answered" answered "$N2"
 expect deny "and its host route is gone" sh -c "netstat -rn -f inet6 | grep -q '$N2'"
 # what the proxy never answers for: the resolver address of the network (held by the host on the loopback), an address
 # outside the range
-RES=2001:db8:77:0:100::1
 expect deny "the resolver address of the network is not answered" answered "$RES"
 expect deny "an address outside the range is not answered" answered 2001:db8:77:0:100::5000
 expect allow "jailops ndp-proxy status says what the proxy answered for the second jail" sh -c "$J network ndp-proxy status ndp-up </dev/null 2>/dev/null | grep -q '$N2'"
@@ -1071,6 +1076,7 @@ for n in nd1 nd2 nd3; do $J stop "$n" --project pfa </dev/null >/dev/null 2>&1; 
 $J network revoke ndp-up --project pfa </dev/null >/dev/null 2>&1
 retry 3 $J network delete -y ndp-up </dev/null
 jail -r ndprt >/dev/null 2>&1
+ifconfig lo0 inet6 2001:db8:77:0:100::1 -alias >/dev/null 2>&1
 ifconfig vlan77 destroy >/dev/null 2>&1
 ifconfig ndpa destroy >/dev/null 2>&1
 

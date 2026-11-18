@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **The NDP proxy starts on a host that holds the resolver address.** The proxy refused to open its capture when the
+  prefix of the network held an address of the host, and the helper's own resolver address of the network (the second
+  address of the subnet, held on the loopback for the names of the jails) counted as one: the proxy stayed off and the
+  jails of the network got no IPv6. That address is the helper's, the proxy never answers for it, and it no longer
+  refuses the prefix; any other address of the host inside the prefix still does, in the helper and when the network is
+  made.
 - **The e2e run no longer depends on a package mirror to get bash.** The host fills the package cache of the jail
   roots with bash before the shell steps, a jail whose first setup lost against a slow mirror is given the bash from
   that cache at its next start, and a failed step prints what the daemon and the helper logged about packages, shells
