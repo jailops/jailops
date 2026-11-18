@@ -444,8 +444,8 @@ func (e *Env) script() {
 					root = "/jailops/projects/" + proj + "/jails/" + name + "/root"
 				}
 			default:
-				// the cache directory is no sign of an image build: installs into a jail root pass it too
-				if !(argv[i] == "-o" && strings.HasPrefix(argv[i+1], "PKG_CACHEDIR=")) {
+				// the cache directory and the fetch limits are no sign of an image build: installs into a jail root pass them too
+				if !(argv[i] == "-o" && (strings.HasPrefix(argv[i+1], "PKG_CACHEDIR=") || strings.HasPrefix(argv[i+1], "FETCH_"))) {
 					options = true
 				}
 			}

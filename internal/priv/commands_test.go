@@ -354,6 +354,12 @@ func TestImageBuildingCommands(t *testing.T) {
 	for _, sub := range [][]string{{"install", "-y", "pkg"}, {"upgrade"}, {"query", "%n-%v"}, {"query", "%n-%v", "pkg"}, {"install", "nginx", "curl"}} {
 		ok("/usr/sbin/pkg", pkg(sub...)...)
 	}
+	// the download limits of the shell setup: in front of -r and after it, as the daemon sends them
+	ok("/usr/sbin/pkg", "pkg", "-o", "FETCH_TIMEOUT=10", "-o", "FETCH_RETRY=1", "-r", root, "install", "-y", "bash")
+	ok("/usr/sbin/pkg", "pkg", "-o", "FETCH_TIMEOUT=10", "-o", "FETCH_RETRY=1", "-j", "demo_web", "install", "-y", "bash")
+	for _, o := range []string{"FETCH_TIMEOUT=0", "FETCH_TIMEOUT=601", "FETCH_TIMEOUT=10s", "FETCH_TIMEOUT=-1", "FETCH_RETRY=11", "FETCH_RETRY=", "FETCH_RETRY=010"} {
+		bad("pkg", "-r", root, "-o", o, "install", "x")
+	}
 	ok("/usr/sbin/pkg", "pkg", "config", "abi")
 	bad("pkg", "config", "abi", "x")
 	bad("pkg", "config", "repos")
@@ -452,5 +458,27 @@ func TestSeedKeysOverTheSocket(t *testing.T) {
 	// here: only the refusal path is checked over the wire
 	if _, err := f.client.SeedKeys(context.Background(), "/etc"); !api.IsCode(err, api.CodeForbidden) {
 		t.Errorf("%v", err)
+	}
+}
+
+// The grace of a command (SIGTERM first, SIGKILL after it) travels over the socket to the helper that runs the process:
+// without it every cancelled pkg is killed at once. The helper caps what a caller asks for.
+func TestTermGraceReachesTheHelper(t *testing.T) {
+	f := newFixture(t)
+	f.runner.On("/sbin/sysctl", []string{"net.inet.ip.forwarding=0"}, "")
+	ctx := WithAdmin(context.Background(), "alice")
+	for _, tc := range []struct{ ask, want time.Duration }{
+		{3 * time.Second, 3 * time.Second},
+		{time.Hour, maxTermGrace},
+		{0, 0},
+	} {
+		cmd := run.Cmd{Name: "sysctl", Args: []string{"net.inet.ip.forwarding=0"}, TermGrace: tc.ask}
+		if _, err := f.client.Runner().Run(ctx, cmd); err != nil {
+			t.Fatal(err)
+		}
+		calls := f.runner.Calls()
+		if got := calls[len(calls)-1].Cmd.TermGrace; got != tc.want {
+			t.Errorf("asked %v: the helper ran the command with a grace of %v, want %v", tc.ask, got, tc.want)
+		}
 	}
 }

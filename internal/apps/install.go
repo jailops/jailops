@@ -42,6 +42,20 @@ func PkgInstallCachedArgv(root, repo, cache string, names []string) []string {
 	return append(argv, names...)
 }
 
+// FetchLimits are the pkg options that make a download give up soon: 10 seconds for an address and one try, and a
+// dead address family (a jail with an IPv6 address and no IPv6 route) fails fast so that pkg goes on to the other.
+var FetchLimits = []string{"-o", "FETCH_TIMEOUT=10", "-o", "FETCH_RETRY=1"}
+
+// WithFetchLimits is the pkg command argv with FetchLimits after the program name (pkg takes its global options
+// before the command, in any order).
+func WithFetchLimits(argv []string) []string {
+	if len(argv) == 0 {
+		return argv
+	}
+	out := append([]string{argv[0]}, FetchLimits...)
+	return append(out, argv[1:]...)
+}
+
 // PkgJailArgv is a pkg command that runs inside a running jail (pkg -j): pkg enters the jail first, so what it writes
 // and the scripts it runs stay in the jail, and it reads the jail's own repository configuration.
 func PkgJailArgv(jail string, args ...string) []string {

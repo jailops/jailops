@@ -54,3 +54,22 @@ func TestUpdatePolicyShellAndProvisionValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestInPlaceUpdateStrategyIsRefusedForAThinJail(t *testing.T) {
+	spec := api.JailSpec{Image: "freebsd-15-1", OS: api.OSFreeBSD, Layout: api.LayoutThin, Update: api.UpdatePolicy{Strategy: api.UpdateInPlace}}
+	if err := UpdateStrategyFits(spec); err == nil {
+		t.Error("inplace on a thin jail is accepted")
+	}
+	// a jail stored with the strategy before the rule stays valid and updatable: JailSpec does not hold it to the rule
+	if err := JailSpec("web", spec); err != nil {
+		t.Errorf("a stored thin jail with inplace is no longer valid: %v", err)
+	}
+	spec.Layout = api.LayoutThick
+	if err := UpdateStrategyFits(spec); err != nil {
+		t.Errorf("inplace on a thick jail: %v", err)
+	}
+	linux := api.JailSpec{OS: api.OSLinux, Layout: api.LayoutThick, Update: api.UpdatePolicy{Strategy: api.UpdateInPlace}}
+	if err := UpdateStrategyFits(linux); err != nil {
+		t.Errorf("inplace on a Linux jail: %v", err)
+	}
+}

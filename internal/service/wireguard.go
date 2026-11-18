@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"jailops.net/jailops/internal/ipam"
 	"jailops.net/jailops/internal/reconcile"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/wireguard"
@@ -66,8 +67,8 @@ func (s *Service) wgToAPI(ctx context.Context, o object[api.WireGuardSpec]) api.
 	}
 	now := s.now()
 	switch msg := s.wgProblem(o.Meta.Name); {
-	case o.Spec.Down:
-		w.Status.Conditions = append(w.Status.Conditions, api.Condition{Type: "Ready", Status: api.ConditionFalse, Reason: "Down", Message: "the tunnel is down (jailops wireguard up starts it)", Since: now})
+	case o.Spec.Disabled:
+		w.Status.Conditions = append(w.Status.Conditions, api.Condition{Type: "Ready", Status: api.ConditionFalse, Reason: "Disabled", Message: "the tunnel is disabled (jailops wireguard enable starts it)", Since: now})
 	case msg != "":
 		w.Status.Conditions = append(w.Status.Conditions, api.Condition{Type: "Ready", Status: api.ConditionFalse, Reason: "ApplyFailed", Message: msg, Since: now})
 	case w.Status.Up:
@@ -173,7 +174,7 @@ func (s *Service) checkWireGuard(name string, spec api.WireGuardSpec) error {
 
 // wgDesired renders what the helper and pf need for one object.
 func (s *Service) wgDesired(o object[api.WireGuardSpec]) reconcile.WireGuardDesired {
-	d := reconcile.WireGuardDesired{Name: o.Meta.Name, Iface: o.Spec.Interface, Down: o.Spec.Down, Anchor: wireguard.Anchor(o.Meta.Name)}
+	d := reconcile.WireGuardDesired{Name: o.Meta.Name, Iface: o.Spec.Interface, Disabled: o.Spec.Disabled, Anchor: wireguard.Anchor(o.Meta.Name)}
 	req, rs, err := s.wgRender(o)
 	if err != nil {
 		d.Problem = err.Error()
@@ -208,26 +209,44 @@ func (s *Service) wgRender(o object[api.WireGuardSpec]) (wireguard.ApplyReq, str
 		req.Routes = routes
 		req.Peers = []wireguard.PeerConf{{PublicKey: sp.PeerPublicKey, AllowedIPs: routes, Endpoint: sp.Endpoint, Keepalive: sp.Keepalive}}
 	}
-	var nets []netip.Prefix
-	for _, n := range sp.Networks {
-		no, err := s.netKind.get(n)
+	rs := ""
+	if sp.Mode == api.WireGuardServer {
+		// The host's own addresses, which the anchor closes to the peers: its interfaces, the tunnel's own address and what
+		// the host holds for each network the tunnel serves (a gateway, the resolver address).
+		// Read as the jail anchors read it: a host whose addresses cannot be read gets no anchor, not one whose table
+		// leaves the uplink's addresses open to the peers.
+		host, err := s.hostAddrsChecked(context.Background())
 		if err != nil {
 			return req, "", err
 		}
-		if v4 := no.Spec.IPv4; v4 != nil {
-			if p, err := netip.ParsePrefix(v4.Subnet); err == nil {
-				nets = append(nets, p.Masked())
+		for _, p := range addrs {
+			host = append(host, p.Addr())
+		}
+		var served []netip.Prefix
+		for _, n := range sp.Networks {
+			no, err := s.netKind.get(n)
+			if err != nil {
+				return req, "", err
+			}
+			if v4 := no.Spec.IPv4; v4 != nil {
+				if g, err := netip.ParseAddr(v4.Gateway); err == nil {
+					host = append(host, g)
+				}
+				if p, err := netip.ParsePrefix(v4.Subnet); err == nil {
+					served = append(served, p)
+				}
+			}
+			if v6 := no.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
+				host = append(host, ipam.GatewayLinkLocal6)
+				if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
+					served = append(served, p)
+					if r := ipam.Resolver6(p); r.IsValid() {
+						host = append(host, r)
+					}
+				}
 			}
 		}
-		if v6 := no.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
-			if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
-				nets = append(nets, p.Masked())
-			}
-		}
-	}
-	rs := ""
-	if sp.Mode == api.WireGuardServer {
-		if rs, err = render.PFWireGuard(o.Meta.Name, sp.Interface, wireguard.Masked(addrs), nets); err != nil {
+		if rs, err = render.PFWireGuard(o.Meta.Name, sp.Interface, wireguard.Masked(addrs), host, served); err != nil {
 			return req, "", err
 		}
 	}
@@ -245,7 +264,7 @@ func (s *Service) wgApply(ctx context.Context, o object[api.WireGuardSpec]) erro
 	if d.Problem != "" {
 		return invalid("%s", d.Problem)
 	}
-	if o.Spec.Down {
+	if o.Spec.Disabled {
 		err = h.WGRemove(ctx, wireguard.RemoveReq{Name: o.Meta.Name, Iface: o.Spec.Interface})
 		if err == nil && s.d.PF != nil {
 			err = ignoreCode(s.d.PF.Flush(ctx, d.Anchor), api.CodeNotFound)
@@ -679,12 +698,12 @@ func (s *Service) JoinWireGuard(ctx context.Context, q api.WireGuardJoin) (api.W
 	return s.wgAfterChange(ctx, o), nil
 }
 
-// SetWireGuardDown takes a tunnel down (the interface goes, the keys stay) or brings it up again.
-func (s *Service) SetWireGuardDown(ctx context.Context, name string, down bool) (api.WireGuard, error) {
+// SetWireGuardDisabled takes a tunnel down and keeps it down (the interface goes, the keys stay), or brings it up again.
+func (s *Service) SetWireGuardDisabled(ctx context.Context, name string, disabled bool) (api.WireGuard, error) {
 	if err := requireGlobal(ctx, "starting or stopping a WireGuard tunnel"); err != nil {
 		return api.WireGuard{}, err
 	}
-	unlock, err := s.locks.lockPatient(ctx, "wireguard up/down "+name, wgLock(name))
+	unlock, err := s.locks.lockPatient(ctx, "wireguard enable/disable "+name, wgLock(name))
 	if err != nil {
 		return api.WireGuard{}, err
 	}
@@ -694,7 +713,7 @@ func (s *Service) SetWireGuardDown(ctx context.Context, name string, down bool) 
 		return api.WireGuard{}, err
 	}
 	spec := o.Spec
-	spec.Down = down
+	spec.Disabled = disabled
 	no, err := s.wgKind.update(ctx, name, o.Meta.Generation, o.Meta.Labels, nil, spec)
 	if err != nil {
 		return api.WireGuard{}, err
@@ -763,7 +782,7 @@ func (s *Service) wireguardDescChecks(ctx context.Context, quote func(string) st
 	}
 	var out []string
 	for _, o := range objs {
-		if o.Spec.Down {
+		if o.Spec.Disabled {
 			continue
 		}
 		sh, err := s.d.WG.WGShow(ctx, wireguard.ShowReq{Name: o.Meta.Name, Iface: o.Spec.Interface})
@@ -801,7 +820,7 @@ func (s *Service) doctorWireGuard(ctx context.Context, c *checkSet) {
 	needFwd := false
 	var ports []int
 	for _, o := range objs {
-		if o.Spec.Mode == api.WireGuardServer && !o.Spec.Down {
+		if o.Spec.Mode == api.WireGuardServer && !o.Spec.Disabled {
 			ports = append(ports, o.Spec.ListenPort)
 			needFwd = needFwd || len(o.Spec.Networks) > 0
 		}
@@ -844,4 +863,45 @@ func portsRules(ports []int) []string {
 		out[i] = wireguard.FirewallRule(p)
 	}
 	return out
+}
+
+// tunnelsServing are the interfaces of the WireGuard servers (up) whose networks include the given one: their peers come in
+// on them, to the jails of the network.
+func (s *Service) tunnelsServing(network string) []string {
+	objs, err := s.wgKind.list()
+	if err != nil {
+		return nil
+	}
+	var out []string
+	for _, o := range objs {
+		if o.Spec.Mode == api.WireGuardServer && !o.Spec.Disabled && slices.Contains(o.Spec.Networks, network) {
+			out = append(out, o.Spec.Interface)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// tunnelOf is the interface of the WireGuard server (up) whose tunnel subnets hold an address: a source inside them is a
+// peer's.
+func (s *Service) tunnelOf(a netip.Addr) (string, bool) {
+	objs, err := s.wgKind.list()
+	if err != nil {
+		return "", false
+	}
+	for _, o := range objs {
+		if o.Spec.Mode != api.WireGuardServer || o.Spec.Disabled {
+			continue
+		}
+		addrs, err := wireguard.ParsePrefixes("address", o.Spec.Address, false)
+		if err != nil {
+			continue
+		}
+		for _, p := range wireguard.Masked(addrs) {
+			if p.Contains(a) {
+				return o.Spec.Interface, true
+			}
+		}
+	}
+	return "", false
 }

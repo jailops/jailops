@@ -5,7 +5,7 @@ import { core } from '@jailops/shared/api/core'
 import type {
   Jail, JailAction, JailRollback, JailUpgrade, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, FirewallTestRequest, FirewallTestResult, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
-  Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, Token,
+  Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, NDPStatus, Token,
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
@@ -29,6 +29,8 @@ export const api = {
   ...core,
   pool: () => c().get<PoolUsage>('/resources'),
   doctor: () => c().get<DoctorReport>('/doctor'),
+  /** The neighbour discovery proxy of every uplink, and the networks it answers for (operator role). */
+  ndp: () => c().get<NDPStatus>('/ndp'),
   tokens: {
     list: () => c().list<Token>('/tokens'),
     create: (t: Pick<Token, 'metadata' | 'spec'>) => c().mutate<Token>('POST', '/tokens', t),
@@ -159,8 +161,8 @@ export const api = {
     join: (j: WireGuardJoin) => c().mutate<WireGuard>('POST', '/wireguard/join', j),
     addPeer: (n: string, p: WireGuardPeerAdd) => c().mutate<WireGuardPeerCreated>('POST', `/wireguard/${e(n)}/peers`, p),
     removePeer: (n: string, peer: string) => c().mutate<WireGuard>('DELETE', `/wireguard/${e(n)}/peers/${e(peer)}`),
-    up: (n: string) => c().mutate<WireGuard>('POST', `/wireguard/${e(n)}/up`),
-    down: (n: string) => c().mutate<WireGuard>('POST', `/wireguard/${e(n)}/down`),
+    enable: (n: string) => c().mutate<WireGuard>('POST', `/wireguard/${e(n)}/enable`),
+    disable: (n: string) => c().mutate<WireGuard>('POST', `/wireguard/${e(n)}/disable`),
     rotateKeys: (n: string) => c().mutate<WireGuardKeys>('POST', `/wireguard/${e(n)}/rotate-keys`),
   },
   firewall: {

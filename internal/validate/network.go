@@ -164,6 +164,9 @@ func ipv6(s api.NetworkSpec) error {
 	if err := exclusions("ipv6.exclude", n.Exclude, p); err != nil {
 		return err
 	}
+	if n.Mode == api.IPv6Proxy && r.Contains(p.Masked().Addr()) {
+		return Invalid("ipv6.range", "ipv6.range %q contains the base address %s of the prefix, which routers use (the subnet-router anycast address): start the range above it", n.Range, p.Masked().Addr())
+	}
 	if n.Mode == api.IPv6Proxy {
 		if s.Uplink == "" {
 			return Invalid("uplink", "ipv6 proxy mode needs an uplink to answer neighbor solicitations on")

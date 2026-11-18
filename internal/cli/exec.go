@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -313,8 +314,21 @@ which is what a pipe such as 'echo id | jailops shell web' needs.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o.shell = true
 			if c, err := a.connect(cmd.Context()); err == nil {
-				if j, err := c.Jails().Get(cmd.Context(), args[0]); err == nil && shellInstalling(j) {
-					fprintln(a.env.Stderr, "installing the shell (bash) in the background, waiting ...")
+				ctx := cmd.Context()
+				get := func(ctx context.Context) (api.Jail, error) { return c.Jails().Get(ctx, args[0]) }
+				// Only a bash that is on its way is waited for: `--shell /bin/sh` and a jail whose shell is sh open at once.
+				if j, err := get(ctx); err == nil && shellInstalling(j) && (o.shellPath == api.BashPath || (o.shellPath == "" && j.Spec.Shell == api.BashPath)) {
+					w := shellWait{out: a.env.Stderr, tty: a.env.IsTTY(a.env.Stderr), now: a.env.Now, sleep: sleepCtx, get: get,
+						poll: time.Second, limit: 70 * time.Second}
+					if err := w.run(ctx, args[0]); err != nil {
+						return err
+					}
+					// The setup ended without bash: say why before the shell answers that it does not exist.
+					if j, err := get(ctx); err == nil {
+						if cd := shellCond(j); cd != nil && cd.Reason == "Failed" {
+							fprintln(a.env.Stderr, cd.Message)
+						}
+					}
 				}
 			}
 			return a.runExec(cmd.Context(), args[0], nil, o)

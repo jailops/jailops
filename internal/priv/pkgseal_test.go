@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/sys/run"
+	"jailops.net/jailops/sdk/api"
 )
 
 const sealGood = "jailops: {\n  url: \"https://pkg.freebsd.org/${ABI}/latest\",\n  signature_type: \"fingerprints\",\n  fingerprints: \"/usr/share/keys/pkg\",\n  enabled: yes\n}\n"
@@ -200,6 +202,20 @@ func TestFstabNothingIsMountedBelowAVolume(t *testing.T) {
 	siblings := v1 + " " + root + "/srv nullfs rw 0 0\n" + v2 + " " + root + "/srv2 nullfs rw 0 0\ndevfs " + root + "/dev devfs rw 0 0\nfdescfs " + root + "/dev/fd fdescfs rw 0 0\n"
 	if err := e.cfg.checkFstab(ctx, siblings, siblings); err != nil {
 		t.Errorf("siblings and devfs with fdescfs: %v", err)
+	}
+	// the fstab of a Linux jail as it is rendered: its volume in the root and again below the mirror of the root on
+	// compat/linux, and linprocfs and linsysfs below the mirror too
+	linux, err := render.Fstab(render.FstabInput{OS: api.OSLinux, Root: root, DevfsRuleset: 7000,
+		Volumes: []render.FstabVolume{{Source: v1, Target: "/srv"}, {Source: v2, Target: "/srv2", ReadOnly: true}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := e.cfg.checkFstab(ctx, linux, linux); err != nil {
+		t.Errorf("the fstab of a Linux jail with volumes: %v\n%s", err, linux)
+	}
+	below := v1 + " " + root + "/srv nullfs rw 0 0\n" + v2 + " " + root + "/srv/y nullfs rw 0 0\n" + v1 + " " + root + "/compat/linux/srv nullfs rw 0 0\n"
+	if err := e.cfg.checkFstab(ctx, below, below); err == nil {
+		t.Error("a volume below a volume is accepted next to the mirror lines")
 	}
 }
 

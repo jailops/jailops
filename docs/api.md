@@ -17,7 +17,7 @@ There is no OpenAPI document today.
 **WireGuard** (extension `wireguard`, [wireguard.md](wireguard.md)): `GET|POST /api/v1/wireguard`,
 `GET|PUT|PATCH|DELETE /api/v1/wireguard/{name}`, `POST /api/v1/wireguard/{name}/peers` (answers `WireGuardPeerCreated`
 with the join `token` and the `config` file: secrets, returned once, never stored), `DELETE .../peers/{peer}`,
-`POST /api/v1/wireguard/join` (`WireGuardJoin`: a client from a token), `POST .../up`, `.../down`, `.../rotate-keys`.
+`POST /api/v1/wireguard/join` (`WireGuardJoin`: a client from a token), `POST .../enable`, `.../disable`, `.../rotate-keys`.
 Reads need the operator role and never carry a private or preshared key; changes need a global admin. SDK:
 `c.WireGuard()`. The extension `interface_descriptions` says the host describes its interfaces (`net.descriptions`).
 
@@ -48,7 +48,7 @@ jail that attaches a lost one answers `busy`. The events `volume-lost`, `volume-
 labels, the comment and the size, and the watch of a host directory; the rest is fixed at creation; `POST` and `DELETE` answer operations; a volume that a jail
 attaches is not deleted: `busy`). `POST /api/v1/volumes` takes `VolumeCreate` (`metadata`, `spec`, `passphrase` for an
 encrypted volume). A jail attaches volumes in its spec, `volumes: [{volume, mount, read_only}]`, which a create, a PUT and a
-config change all check (the volume exists in the project, the jail is stopped, an encrypted volume has one jail);
+config change all check (the volume exists in the project, an encrypted volume has one jail; a running jail gets the mount at once, and a detach of a mount in use is `busy`);
 `GET|POST /api/v1/jails/{name}/volumes` (`VolumeAttachRequest`: `volume`, `mount`, `read_only`, `copy_existing`) and `DELETE
 /api/v1/jails/{name}/volumes/{volume}` attach and detach as operations whose result is the `Jail`. Snapshots:
 `GET|POST /api/v1/volumes/{name}/snapshots`, `DELETE .../snapshots/{snapshot}` and `POST .../rollback` (`VolumeRollback`:

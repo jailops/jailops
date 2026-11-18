@@ -60,8 +60,9 @@ func TestPFGolden(t *testing.T) {
 	if s, err = PFAnchor(in); err != nil {
 		t.Fatal(err)
 	}
-	// (a raw fragment is the administrator's own text and stays as written)
-	if !strings.Contains(s, "# raw fragment (admin)\npass quick on lo0 all\n# end of raw fragment (admin)\n# the host:") {
+	// (a raw fragment is the administrator's own text and stays as written; it stands after the closed host, which no
+	// fragment reopens)
+	if !strings.Contains(s, "# raw fragment (admin)\npass quick on lo0 all\n# end of raw fragment (admin)\n# defaults:") {
 		t.Fatalf("raw fragment misplaced:\n%s", s)
 	}
 	golden(t, "pf_anchor_raw", s)
@@ -1023,8 +1024,9 @@ func TestPFStateLimit(t *testing.T) {
 	}
 }
 
-// The host is an endpoint of a rule (host) and is closed to the jail after the rules of its policies, ping and the
-// resolver the network points at excepted: a jail reaches no service of the machine it runs on unless a rule says so.
+// The host is an endpoint of a rule (host) and is closed to the jail before the allow rules of its policies, ping and
+// the resolver the network points at excepted: a jail reaches no service of the machine it runs on, whatever a policy
+// allows.
 func TestPFHostEndpointAndClosedHost(t *testing.T) {
 	in := pfBase()
 	in.Host = []netip.Addr{ip("10.20.0.1"), ip("fe80::1"), ip("192.0.2.5")}
@@ -1042,8 +1044,8 @@ func TestPFHostEndpointAndClosedHost(t *testing.T) {
 		"table <host> persist { 10.20.0.1, 192.0.2.5, fe80::1 }",
 		"proto udp from 10.20.0.10 to <host> port 123",
 		"proto tcp from <host> to 10.20.0.10 port 22",
-		"pass in quick on jo0123456789a0a inet proto icmp from any to <host>",
-		"pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host>",
+		"pass in quick on jo0123456789a0a inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob }",
+		"pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob }",
 		"pass in quick on jo0123456789a0a inet proto tcp from any to 10.20.0.1 port 53",
 		"pass in quick on jo0123456789a0a inet proto udp from any to 10.20.0.1 port 53",
 		"block drop in quick on jo0123456789a0a from any to <host>",
@@ -1052,10 +1054,11 @@ func TestPFHostEndpointAndClosedHost(t *testing.T) {
 			t.Errorf("missing %q in\n%s", want, s)
 		}
 	}
-	// the rule of the policy comes before the closing of the host, which comes before the defaults
+	// the host is closed before the rules of the policies, which come before the defaults: an allow rule that names the
+	// host (or a prefix that holds a host address) never reaches a service of the host
 	i, j, k := strings.Index(s, "to <host> port 123"), strings.Index(s, "block drop in quick on jo0123456789a0a from any to <host>"), strings.Index(s, "# defaults")
-	if !(i >= 0 && i < j && j < k) {
-		t.Errorf("order of the policy rule, the closed host and the defaults: %d %d %d\n%s", i, j, k, s)
+	if !(j >= 0 && j < i && i < k) {
+		t.Errorf("order of the closed host, the policy rule and the defaults: %d %d %d\n%s", j, i, k, s)
 	}
 	// the simulator's rules: the host is a block unless a rule opened it
 	a, _ := BuildAnchor(in)
@@ -1117,5 +1120,44 @@ func TestRawFragmentIsUntouchedAfterItsOwnComments(t *testing.T) {
 	after := s[strings.Index(s, "# end of raw fragment (admin)"):]
 	if !strings.Contains(after, "keep state (if-bound)") {
 		t.Errorf("the rules after the fragment are not labelled:\n%s", after)
+	}
+}
+
+// No allow rule of any shape stands before the closing of the host: the destination "host", a prefix that holds a host
+// address (all of IPv4, all of IPv6, the network's own subnet) and an address set that holds one all come after it, so
+// JailOps' firewall, which governs the jails, never opens a service of the host (the host's own pf.conf does that).
+func TestPFNoAllowRuleStandsBeforeTheClosedHost(t *testing.T) {
+	in := pfBase()
+	in.Host = []netip.Addr{ip("10.20.0.1"), ip("fe80::1"), ip("192.0.2.5"), ip("2001:db8::5")}
+	in.DNS = []netip.Addr{ip("10.20.0.1")}
+	in.Sets = map[string]api.AddressSetSpec{"lan": {Addresses: api.Entries("192.0.2.0/24")}}
+	in.Policies = []PFPolicy{{Name: "p", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
+		{Name: "to host", Action: "allow", Direction: "out", Proto: "tcp", To: []string{"host"}, Ports: []string{"22"}},
+		{Name: "all v4", Action: "allow", Direction: "out", Proto: "tcp", To: []string{"0.0.0.0/0"}, Ports: []string{"2200"}},
+		{Name: "all v6", Action: "allow", Direction: "out", Proto: "tcp", To: []string{"::/0"}, Ports: []string{"2201"}},
+		{Name: "own subnet", Action: "allow", Direction: "out", Proto: "tcp", To: []string{"10.20.0.0/24"}, Ports: []string{"2202"}},
+		{Name: "set", Action: "allow", Direction: "out", Proto: "tcp", To: []string{"set:lan"}, Ports: []string{"2203"}},
+		{Name: "any", Action: "allow", Direction: "out", Proto: "tcp", Ports: []string{"2204"}},
+	}}}}
+	s, err := PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closed := strings.Index(s, "block drop in quick on jo0123456789a0a from any to <host>")
+	if closed < 0 {
+		t.Fatalf("the host is not closed:\n%s", s)
+	}
+	n := 0
+	for _, ln := range strings.Split(s, "\n") {
+		if !strings.HasPrefix(ln, "pass in quick") || !strings.Contains(ln, " port 22") || strings.Contains(ln, "port 53") {
+			continue
+		}
+		n++
+		if at := strings.Index(s, ln); at < closed {
+			t.Errorf("an allow rule stands before the closing of the host: %s", ln)
+		}
+	}
+	if n < 6 {
+		t.Errorf("expected the six allow rules, found %d:\n%s", n, s)
 	}
 }

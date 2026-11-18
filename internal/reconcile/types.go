@@ -109,8 +109,8 @@ type JailDesired struct {
 type WireGuardDesired struct {
 	Name  string
 	Iface string
-	// Down: the interface must not exist (the keys stay).
-	Down bool
+	// Disabled: the interface must not exist (the keys stay).
+	Disabled bool
 	// Apply is what the helper configures (public parts only).
 	Apply wireguard.ApplyReq
 	// Anchor and Ruleset are the pf anchor of a server (jailops/wg.<name>); an empty ruleset flushes it.
@@ -167,7 +167,7 @@ func (SystemClock) After(d time.Duration) <-chan time.Time { return time.After(d
 
 // NDP is the part of the neighbor discovery proxy the loop drives.
 type NDP interface {
-	Sync(ctx context.Context, entries []ndproxy.Entry) error
+	Sync(ctx context.Context, d ndproxy.Desired) error
 	Run(ctx context.Context) error
 	// Status says whether the capture is open (and why not) and carries the counters.
 	Status() ndproxy.Status

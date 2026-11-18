@@ -273,3 +273,57 @@ fe80::1%lo0                       link#11                       UHS             
 		t.Fatalf("%v", r)
 	}
 }
+
+// The proxy answers for the allocation range of a network in proxy mode whether a jail holds the address or not; what
+// is outside the range needs the host route of a jail, and the resolver address of the network is never answered.
+func TestNDPAnswerForTheRangeNeedsNoJail(t *testing.T) {
+	e := newEnv(t)
+	spec := api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80",
+		Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff", Exclude: []string{"2001:db8:1:2:100::80"}}}
+	b, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "edge", UUID: "bbbb-1111-2222"}, "spec": spec})
+	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "bbbb-1111-2222.json"), string(b))
+	dev := e.local.d.NDP.(*fakeNDP)
+	for target, ok := range map[string]bool{
+		"2001:db8:1:2:100::50": true,  // in the range, no jail
+		"2001:db8:1:2:100::ff": true,  // the last address of the range
+		"2001:db8:1:2:100::80": false, // excluded
+		"2001:db8:1:2:100::1":  false, // the resolver address of the network
+		"2001:db8:1:2:100::2":  false, // outside the range, no jail route
+	} {
+		q := ndpReq()
+		q.Target = target
+		err := e.local.NDPAnswer(context.Background(), q)
+		if ok && err != nil {
+			t.Errorf("%s: %v", target, err)
+		}
+		if !ok && !api.IsCode(err, api.CodeForbidden) {
+			t.Errorf("%s: want forbidden, got %v", target, err)
+		}
+	}
+	if dev.frames() != 2 {
+		t.Fatalf("%d frames sent, want 2", dev.frames())
+	}
+}
+
+// Announcements share the bucket of the answers: a daemon that is compromised cannot spray advertisements over the
+// uplink faster than the helper allows, however much of the range it names.
+func TestNDPAnnouncementsAreRateLimited(t *testing.T) {
+	e := newEnv(t)
+	now := time.Unix(9000, 0)
+	e.local.ndp.now = func() time.Time { return now }
+	a := NDPAnswerReq{Uplink: "em0", Target: "2001:db8:1:2:100::10", Announce: true}
+	sent := 0
+	var last error
+	for i := 0; i < int(ndpAnswersPerSecond)*3; i++ {
+		if last = e.local.NDPAnswer(context.Background(), a); last == nil {
+			sent++
+		}
+	}
+	if sent != int(ndpAnswersPerSecond) || !api.IsCode(last, api.CodeBusy) {
+		t.Fatalf("%d announcements went out in one instant, the last answer: %v", sent, last)
+	}
+	now = now.Add(time.Second)
+	if err := e.local.NDPAnswer(context.Background(), a); err != nil {
+		t.Fatalf("the bucket does not refill: %v", err)
+	}
+}

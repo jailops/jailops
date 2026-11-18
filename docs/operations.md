@@ -233,6 +233,8 @@ each one is enforced by the kernel, not by JailOps polling.
 | `limits.disk`, `limits.disk_reservation` | ZFS `quota` and `reservation` of the jail's container dataset | writes fail below the container: the root, the persistent datasets and the snapshots of all of them count; a volume is a dataset of the project, outside the container: it is bounded by its own `--size` and by the project's storage quota, not by the jail's limit |
 | `limits.states` | pf `keep state (max N)` on every pass rule of the jail's anchor | a rule creates no new state beyond N; the host's state table cannot be filled by one jail |
 
+`jailops info JAIL` shows both counters next to the limit: the memory that is **resident** now (`memoryuse`, what the processes hold in RAM) and the memory the jail has **reserved** (`swapuse`, the counter the limit is of). A jail can show a resident size above its limit and be under it: the limit counts reservations, not pages in RAM.
+
 Memory is `swapuse` because it is the one resource that counts what a program reserves and refuses the allocation
 beyond the limit. `vmemoryuse` counts every mapping, shared libraries and sparse arenas included: an idle PostgreSQL maps
 1.8 GB for 0.3 GB of memory, and a limit of 1G on it stops the server from starting. `memoryuse` is the resident set,

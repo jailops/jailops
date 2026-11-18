@@ -167,13 +167,17 @@ func TestRejectRoutesAreForTheSubnetsOfNetworksOnly(t *testing.T) {
 			"spec": api.NetworkSpec{Uplink: "em0", IPv4: &api.IPv4Net{Subnet: "10.20.0.0/24", Gateway: "10.20.0.1", Range: "10.20.0.10-10.20.0.200"},
 				IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1::/64", Range: "2001:db8:1::10-2001:db8:1::ff"}}})
 		mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "aaaa-1111-2222.json"), string(nw))
+		// a network in proxy mode too: the host rejects its prefix, so a packet for an address nobody uses never leaves the uplink
+		px, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "shared", UUID: "cccc-1111-2222"},
+			"spec": api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:2:3:100::/80", Range: "2001:db8:2:3:100::10-2001:db8:2:3:100::ff"}}})
+		mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "cccc-1111-2222.json"), string(px))
 	})
 	ctx := context.Background()
 	for _, via := range []struct {
 		name string
 		n    ifconfig.Client
 	}{{"guard", f.env.local.Net()}, {"socket", f.client.Net()}} {
-		for _, d := range []string{"10.20.0.0/24", "2001:db8:1::/64"} {
+		for _, d := range []string{"10.20.0.0/24", "2001:db8:1::/64", "2001:db8:2:3:100::/80"} {
 			if err := via.n.RouteAdd(ctx, ifconfig.Route{Dest: d, Reject: true}); err != nil {
 				t.Errorf("%s: reject %s: %v", via.name, d, err)
 			}

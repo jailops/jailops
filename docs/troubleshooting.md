@@ -29,6 +29,8 @@ blocked, 8 the test cannot say.
 | `firewall.defaults` | every stored firewall policy says `default_in` and `default_out` | `fail` names each policy that lacks one: the jails that use it (every jail of the project, for a mandatory policy) keep the anchor they have and are not rendered again; `jailops firewall policy edit NAME` sets the field |
 | `pf.anchors` | the anchor line is in the loaded ruleset | add it to `pf.conf` among the filter rules and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
+| `pf.inbound` | while a jail on an IPv6 or a non-NAT IPv4 network exists: a `block ... quick` rule for every source before the anchor line, or a hand-written `pass ... quick` rule for a jail prefix | `fail` for the block (it drops inbound traffic to the jails before their policies are asked: decide whether that is what the rule is for; to let the policies decide, move the anchor line above it; rules for single sources, such as a blocklist, are not flagged), `warn` for the pass (it keeps a jail without an `allow in` rule reachable: delete it; the jail's own `allow in` rules open the uplink, [install.md](install.md) section 3) |
+| `jails.exposed` | the jails whose anchor has a pass rule on an uplink | `info`: lists the jails the Internet can reach and their ports (a port forward, or an `allow in` rule with an external source), so the rules a project's administrator writes for his own jail are visible to the others |
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
 | `network.dns` | for every network a jail uses: where its jails get their nameservers (the network's `dns`, the host's `/etc/resolv.conf`, or the gateway when the host resolves only through loopback); a gateway is asked one query (`. NS`, one second) once a jail on the network runs | `warn` when the gateway does not answer, refuses (access control) or no nameserver could be worked out; the hint has the resolver and `pf.conf` lines ([networking-ipv6.md](networking-ipv6.md#name-resolution-of-jails)) |
 | `network.epairs` | epairs without a jail | `warn`: the reconcile loop removes them on its next pass |
@@ -161,6 +163,16 @@ jail, then `jailops jail upgrade` again.
 
 **`unverified_platform`.** The feature needs a facility this host does not have, or that was never proven on FreeBSD 15.1 or later.
 The hint says which.
+
+### A jail has no IPv6 outside (switched network)
+
+DNS and IPv4 work but `ping` to an IPv6 address from the jail gets no answer, and a jail that started earlier on the same
+network works: run `jailops network ndp-proxy status NETWORK` and look at the jail's address. `seen` above zero with
+`answered` zero means the router asked and the proxy did not answer (the last question says why); `seen` zero means the
+proxy's capture never saw the question. `jailops network ndp-proxy watch NETWORK` shows the router's questions and the
+proxy's answers live while you ping. If the network says `NDP proxy: off`, the provider must route the prefix to this host,
+or switch the proxy on with `jailops network ndp-proxy enable NETWORK`. `jailops doctor` names addresses the router asked
+for and the proxy never answered (`network.ndproxy`).
 
 ## Error codes
 

@@ -6,13 +6,14 @@
 // The upstream network treats jail addresses as on-link (a switched /64).
 // The upstream router therefore sends neighbor solicitations for a jail
 // address onto the uplink, where nobody owns it. The host, which routes to
-// each jail through its own /128 host route, must answer them with its own
-// MAC so that traffic for the jail arrives at the host.
+// each running jail through its own /128 host route, must answer them with its
+// own MAC so that traffic for the jail arrives at the host.
 //
 // JailOps allocates every jail address itself, so the proxy knows which
-// addresses to answer for and never has to learn them. By default it answers
-// at once (ModeImmediate). ModeProbe first solicits toward the jail and
-// answers only when the jail replies.
+// addresses to answer for and never has to learn them: it answers for the
+// allocation range of each network in proxy mode (Proxy.Sync, Desired.Addrs)
+// whether a jail runs or not, and keeps a host route only for a running jail
+// (Desired.Routes). It answers at once, without asking the jail.
 //
 // # Design (RFC 4861, RFC 4443, RFC 8200)
 //
@@ -25,9 +26,8 @@
 //     host's MAC. They go to the requester's link-layer address.
 //   - A solicitation from the unspecified address is Duplicate Address
 //     Detection. It is never answered, so a jail can run DAD.
-//   - Table is a pure, clock-injected state machine (incomplete, valid,
-//     stale, invalid) with bounded queues. Proxy wires it to the Capture,
-//     Injector, Routes, Joiner, Prober and Clock interfaces.
+//   - Table is the bounded set of addresses the proxy answers for. Proxy wires
+//     it to the Capture, Injector, Routes, Joiner and Clock interfaces.
 //   - The BPF filter passes only ICMPv6 NS/NA with hop limit 255.
 //
 // # Acceptance

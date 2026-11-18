@@ -56,16 +56,53 @@ type shellMarks struct {
 	m  map[string]shellMark
 	// bg is the set of jails whose bash is being installed in the background right now.
 	bg map[string]bool
+	// prog is where the setup of such a jail is: when it began and the step it is in now.
+	prog map[string]shellProg
 }
+
+// shellProg is the progress of a setup of the shell: `jailops shell` shows it while it waits.
+type shellProg struct {
+	Started time.Time
+	Step    string
+	// Cancel ends the setup (SIGTERM to pkg, SIGKILL after shellTermGrace); Cancelled says it was asked to.
+	Cancel    context.CancelFunc
+	Cancelled bool
+}
+
+// shellStep records the step the setup of the jail's shell is in (the setup of a jail that is not in the
+// background is not tracked).
+func (s *Service) shellStep(key, step string) {
+	s.shellM.mu.Lock()
+	defer s.shellM.mu.Unlock()
+	if p, ok := s.shellM.prog[key]; ok {
+		p.Step = step
+		s.shellM.prog[key] = p
+	}
+}
+
+// shellStepOf is the step the background setup of the jail's shell is in, "" when there is none.
+func (s *Service) shellStepOf(key string) string {
+	s.shellM.mu.Lock()
+	defer s.shellM.mu.Unlock()
+	return s.shellM.prog[key].Step
+}
+
+// The steps of the setup of a shell, in the words of `jailops shell` while it waits.
+const (
+	stepFetchBash   = "fetching and installing bash with pkg (the package catalogue comes first)"
+	stepLibraries   = "updating the library cache of the jail"
+	stepPromptFiles = "writing the prompt"
+)
 
 // hostTries is how many starts of a jail that still lacks bash let the host fetch it before the start.
 const hostTries = 3
 
-// stopJail stops a jail the way every caller does, after a setup of its shell in the background has ended: pkg inside the
-// jail is not cut off in the middle of its work (a jail whose pkg was killed by the stop stayed "dying" and kept its
-// root busy).
+// stopJail stops a jail the way every caller does, after the setup of its shell in the background has had a moment (a
+// few seconds) or has been cancelled gently (settleShellSetup): pkg inside the jail is not cut off in the middle of its
+// work (a jail whose pkg was killed by the stop stayed "dying" and kept its root busy), and a setup that hangs on a dead
+// network does not make every stop wait for it.
 func (s *Service) stopJail(ctx context.Context, key string) error {
-	s.waitShellSetup(ctx, key, shellSetupDeadline+5*time.Second)
+	s.settleShellSetup(ctx, key)
 	return s.life.StopJail(ctx, key)
 }
 
@@ -91,6 +128,37 @@ func (s *Service) waitShellSetup(ctx context.Context, key string, d time.Duratio
 		case <-tick.C:
 		}
 	}
+}
+
+// shellSettleWait is how long a stop, a restart, an update or an app installation waits for the setup of the jail's
+// shell, and shellTermGrace how long pkg has to end after SIGTERM before it is killed.
+var (
+	shellSettleWait = 3 * time.Second
+	shellTermGrace  = 3 * time.Second
+)
+
+// settleShellSetup makes the background setup of the shell of the jail end before the caller goes on: it waits for it
+// a few seconds, then cancels it (SIGTERM to pkg's process group, SIGKILL after shellTermGrace) and waits for that.
+// The cancelled setup stays due: the next start tries again.
+func (s *Service) settleShellSetup(ctx context.Context, key string) {
+	if !s.shellInBackground(key) {
+		return
+	}
+	s.waitShellSetup(ctx, key, shellSettleWait)
+	if !s.shellInBackground(key) {
+		return
+	}
+	s.shellM.mu.Lock()
+	p, ok := s.shellM.prog[key]
+	if ok {
+		p.Cancelled = true
+		s.shellM.prog[key] = p
+	}
+	s.shellM.mu.Unlock()
+	if ok && p.Cancel != nil {
+		p.Cancel()
+	}
+	s.waitShellSetup(ctx, key, shellTermGrace+3*time.Second)
 }
 
 func (s *Service) shellPath(key string) string {
@@ -148,8 +216,19 @@ func (s *Service) forgetShell(key string) {
 func (s *Service) shellCondition(key string) []api.Condition {
 	m := s.shellMark(key)
 	if s.shellInBackground(key) {
-		return []api.Condition{{Type: "ShellSetup", Status: api.ConditionUnknown, Reason: api.ShellInstalling, Since: s.now().UTC(),
-			Message: "bash is being installed in the background; `jailops shell` waits for it"}}
+		s.shellM.mu.Lock()
+		p := s.shellM.prog[key]
+		s.shellM.mu.Unlock()
+		since := p.Started
+		if since.IsZero() {
+			since = s.now()
+		}
+		step := p.Step
+		if step == "" {
+			step = stepFetchBash
+		}
+		return []api.Condition{{Type: "ShellSetup", Status: api.ConditionUnknown, Reason: api.ShellInstalling, Since: since.UTC(),
+			Message: api.ShellInstallingMessage(step)}}
 	}
 	if m.Error == "" {
 		return nil
@@ -266,22 +345,51 @@ func (s *Service) applyPrompt(ctx context.Context, key, ps1 string) ([]string, e
 	return steps, nil
 }
 
-// holdJailForPackages keeps exec, shell and console sessions out of a jail, and a second package operation away,
-// while pkg works in it (an operator's session must not change the packages meanwhile). It refuses with `busy` when
-// another package operation already holds the jail. The caller calls release when the package work is done.
-func (s *Service) holdJailForPackages(key string) (release func(), err error) {
+// holdInfo says what holds a jail's package work and since when. Shell: it is only the setup of the shell (bash and the
+// prompt), which a session that does not need bash may enter.
+type holdInfo struct {
+	What  string
+	Since time.Time
+	Shell bool
+}
+
+// holdJailFor keeps exec, shell and console sessions out of a jail, and a second package operation away, while pkg works
+// in it (an operator's session must not change the packages meanwhile): the operation is named what, for the message of
+// whoever is refused. It refuses with `busy` when another package operation already holds the jail. A holder that is
+// not the setup of the shell first gives a background setup of the shell a few seconds and cancels it (settleShellSetup).
+// shell is true for the setup of the shell itself, which does not keep a session that needs no bash out of the jail.
+// The caller calls release when the package work is done.
+func (s *Service) holdJailFor(key, what string, shell bool) (release func(), err error) {
+	if !shell {
+		s.settleShellSetup(context.Background(), key)
+	}
 	s.execMu.Lock()
 	if s.installing[key] {
+		h := s.holds[key]
 		s.execMu.Unlock()
-		return nil, api.Errorf(api.CodeBusy, "a package operation is working on this jail").WithHint("wait for it to end")
+		return nil, api.Errorf(api.CodeBusy, "%s is working on this jail", holdWords(h, s.now())).WithHint("wait for it to end; `jailops op list` shows it")
 	}
 	s.installing[key] = true
+	s.holds[key] = holdInfo{What: what, Since: s.now(), Shell: shell}
 	s.execMu.Unlock()
 	return func() {
 		s.execMu.Lock()
 		delete(s.installing, key)
+		delete(s.holds, key)
 		s.execMu.Unlock()
 	}, nil
+}
+
+// holdWords names the operation that holds a jail and how long it has: "the setup of the shell (33 s)".
+func holdWords(h holdInfo, now time.Time) string {
+	what := h.What
+	if what == "" {
+		what = "a package operation"
+	}
+	if h.Since.IsZero() {
+		return what
+	}
+	return fmt.Sprintf("%s (started %d s ago)", what, int(now.Sub(h.Since).Seconds()))
 }
 
 // installBash installs the bash package into a running FreeBSD jail with pkg -j (pkg enters the jail, so the host's
@@ -297,15 +405,16 @@ func (s *Service) installBash(ctx context.Context, key string, inApp bool) ([]st
 		return nil, api.Errorf(api.CodeUnsupported, "this daemon cannot run pkg on the host")
 	}
 	if guard {
-		release, err := s.holdJailForPackages(key)
+		release, err := s.holdJailFor(key, "the setup of the shell", true)
 		if err != nil {
 			return nil, err
 		}
 		defer release()
 	}
 	// inside the running jail: over the jail's own network, which its firewall may close, so it does not wait long
-	argv := apps.PkgInstallInJailArgv(key, []string{api.BashPackage})
-	if err := s.runHost(ctx, 5*time.Minute, argv); err != nil {
+	argv := apps.WithFetchLimits(apps.PkgInstallInJailArgv(key, []string{api.BashPackage}))
+	s.shellStep(key, stepFetchBash)
+	if err := s.runHostGrace(ctx, 5*time.Minute, argv, shellTermGrace); err != nil {
 		return nil, err
 	}
 	steps := []string{strings.Join(argv, " ")}
@@ -313,6 +422,7 @@ func (s *Service) installBash(ctx context.Context, key string, inApp bool) ([]st
 		return steps, nil
 	}
 	// the library cache of the running jail must learn about the libraries bash brought into /usr/local/lib.
+	s.shellStep(key, stepLibraries)
 	if _, err := s.runInJail(ctx, key, 5*time.Minute, "/sbin/ldconfig", "-m", "/usr/local/lib"); err != nil {
 		return steps, err
 	}
@@ -336,6 +446,7 @@ func (s *Service) setUpShell(ctx context.Context, key string, eff api.JailSpec, 
 	if err == nil {
 		if ps1 := s.promptState(key, eff); ps1 != "" {
 			var more []string
+			s.shellStep(key, stepPromptFiles)
 			more, err = s.applyPrompt(ctx, key, ps1)
 			steps = append(steps, more...)
 			if err == nil {
@@ -346,10 +457,51 @@ func (s *Service) setUpShell(ctx context.Context, key string, eff api.JailSpec, 
 	m.At = s.now().UTC()
 	m.Error = ""
 	if err != nil {
-		m.Error = "setting up the shell failed: " + tailOf([]byte(err.Error()))
+		_, jname := validate.SplitQualified(key)
+		m.Error = shellFailure(s.shellStepOf(key), jname, ctx, err)
 	}
 	s.setShellMark(key, m)
 	return steps, err
+}
+
+// shellFailure is the text of a failed setup of the shell: the step it was in and the reason, which for a setup
+// that ran out of time is the time and not "context deadline exceeded", and for pkg output that says the network
+// did not answer, what to look at.
+func shellFailure(step, jail string, ctx context.Context, err error) string {
+	what := "setting up the shell failed"
+	if step != "" {
+		what += " (" + step + ")"
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		what += ": it did not finish in " + shellSetupDeadline.String()
+		if unreachable(err) {
+			return what + "; " + unreachableHint(jail)
+		}
+		return what + " (the package server or the jail's network may be slow or closed)"
+	}
+	if unreachable(err) {
+		return what + ": " + unreachableHint(jail) + " (" + tailOf([]byte(err.Error())) + ")"
+	}
+	return what + ": " + tailOf([]byte(err.Error()))
+}
+
+// unreachable says whether the pkg output tells that the package server did not answer (a timeout, no route, a
+// resolver that did not answer, a refused connection).
+func unreachable(err error) bool {
+	m := strings.ToLower(err.Error())
+	for _, w := range []string{"timed out", "timeout", "no route to host", "network is unreachable", "transient resolver failure",
+		"temporary failure in name resolution", "connection refused", "operation timed out"} {
+		if strings.Contains(m, w) {
+			return true
+		}
+	}
+	return false
+}
+
+// unreachableHint names the cause and the commands that tell which address family does not work.
+func unreachableHint(jail string) string {
+	return "the jail could not reach the package server (pkg.freebsd.org) over IPv6 or IPv4; look with " +
+		"`jailops exec " + jail + " -- host pkg.freebsd.org`, `jailops exec " + jail + " -- ping -6 -c 1 pkg.freebsd.org` and `ping -4`"
 }
 
 // shellSetupDeadline is how long the setup after a start may take.
@@ -416,6 +568,16 @@ func (s *Service) setUpShellInBackground(key, project, name string) {
 		s.shellM.bg = map[string]bool{}
 	}
 	s.shellM.bg[key] = true // set here, not in the goroutine: the start that returns next reports it
+	if s.shellM.prog == nil {
+		s.shellM.prog = map[string]shellProg{}
+	}
+	base := s.baseCtx
+	if base == nil {
+		base = context.Background()
+	}
+	// The context is made here too, so that a stop that comes at once can cancel a setup whose goroutine has not run.
+	ctx, cancel := context.WithTimeout(base, shellSetupDeadline)
+	s.shellM.prog[key] = shellProg{Started: s.now(), Step: stepFetchBash, Cancel: cancel}
 	s.shellM.mu.Unlock()
 	s.wg.Add(1)
 	go func() {
@@ -423,20 +585,29 @@ func (s *Service) setUpShellInBackground(key, project, name string) {
 		defer func() {
 			s.shellM.mu.Lock()
 			delete(s.shellM.bg, key)
+			delete(s.shellM.prog, key)
 			s.shellM.mu.Unlock()
 		}()
 		defer func() { supervise.Report(s.log, "shell-setup", recover()) }()
-		base := s.baseCtx
-		if base == nil {
-			base = context.Background()
-		}
-		ctx, cancel := context.WithTimeout(base, shellSetupDeadline)
 		defer cancel()
 		j, err := s.jailSnapshot(key)
 		if err != nil {
 			return
 		}
 		if _, err := s.setUpShell(ctx, key, s.effective(j), false); err != nil {
+			s.shellM.mu.Lock()
+			cancelled := s.shellM.prog[key].Cancelled
+			s.shellM.mu.Unlock()
+			if cancelled {
+				// The stop, restart, update or app installation that asked for the jail ended the setup: it stays due (the
+				// next start tries again) and is no failure.
+				m := s.shellMark(key)
+				m.Pending, m.Error = true, ""
+				s.setShellMark(key, m)
+				s.log.Info("the setup of the shell was cancelled by the stop", "jail", key)
+				s.emitIn(base, project, "jail-shell-setup-cancelled", "/api/v1/jails/"+name)
+				return
+			}
 			s.log.Warn("shell setup", "jail", key, "err", err)
 			s.emitIn(ctx, project, "jail-shell-setup-failed", "/api/v1/jails/"+name)
 		}
@@ -602,7 +773,7 @@ func (s *Service) installBashFromTheHost(ctx context.Context, key string) {
 	// running jail (shellAtStart), and the jail starts with the shell it has.
 	ctx, cancel := context.WithTimeout(ctx, bashBeforeStartDeadline)
 	defer cancel()
-	if err := s.runHost(ctx, bashBeforeStartDeadline, apps.PkgInstallCachedArgv(root, "ports", s.pkgCache(), []string{api.BashPackage})); err != nil {
+	if err := s.runHostGrace(ctx, bashBeforeStartDeadline, apps.WithFetchLimits(apps.PkgInstallCachedArgv(root, "ports", s.pkgCache(), []string{api.BashPackage})), shellTermGrace); err != nil {
 		s.log.Warn("bash from the host", "jail", key, "err", err)
 	}
 }

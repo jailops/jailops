@@ -300,13 +300,17 @@ func (s *Service) appInstallRun(ctx context.Context, h *OpHandle, p project, e a
 		res.Steps = s.appInstallPlan(h, nj, app, &installState{}, func() {}).Describe()
 		return res, nil
 	}
+	// The setup of the shell that runs in the background gets a moment and is then cancelled: pkg is not run twice.
+	s.settleShellSetup(ctx, key)
 	// No exec session may enter the jail while pkg works on its root from the host.
 	s.execMu.Lock()
 	s.installing[key] = true
+	s.holds[key] = holdInfo{What: "an app installation", Since: s.now()}
 	s.execMu.Unlock()
 	defer func() {
 		s.execMu.Lock()
 		delete(s.installing, key)
+		delete(s.holds, key)
 		s.execMu.Unlock()
 	}()
 	si, _ := s.storage(nj.Spec.Storage)
@@ -643,6 +647,16 @@ func (s *Service) dropCreatedJail(ctx context.Context, proj, key string) error {
 // production, which checks it against its allow-list).
 func (s *Service) runHost(ctx context.Context, timeout time.Duration, argv []string) error {
 	res, err := s.d.Run.Run(ctx, run.Cmd{Name: argv[0], Args: argv[1:], Timeout: timeout})
+	if err != nil {
+		return fmt.Errorf("%s: %w: %s", strings.Join(argv, " "), err, tailOf(append(res.Stdout, res.Stderr...)))
+	}
+	return nil
+}
+
+// runHostGrace is runHost for a command that ends gently: SIGTERM to its process group when the time or the context
+// runs out, SIGKILL grace later.
+func (s *Service) runHostGrace(ctx context.Context, timeout time.Duration, argv []string, grace time.Duration) error {
+	res, err := s.d.Run.Run(ctx, run.Cmd{Name: argv[0], Args: argv[1:], Timeout: timeout, TermGrace: grace})
 	if err != nil {
 		return fmt.Errorf("%s: %w: %s", strings.Join(argv, " "), err, tailOf(append(res.Stdout, res.Stderr...)))
 	}

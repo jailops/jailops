@@ -72,18 +72,34 @@ func (Exec) Run(ctx context.Context, c Cmd) (Result, error) {
 	}
 	cmd.Stdin = c.Stdin
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	exited := make(chan struct{})
+	defer close(exited)
 	cmd.Cancel = func() error {
 		// Negative pid addresses the process group created by Setpgid.
 		if cmd.Process == nil {
 			return nil
 		}
-		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		sig := syscall.SIGKILL
+		if c.TermGrace > 0 {
+			// Gently first: the process may clean up (pkg lets go of its lock and its half-written files); what is
+			// still there after the grace is killed.
+			sig = syscall.SIGTERM
+			pgid := cmd.Process.Pid
+			go func() {
+				select {
+				case <-exited:
+				case <-time.After(c.TermGrace):
+					_ = syscall.Kill(-pgid, syscall.SIGKILL)
+				}
+			}()
+		}
+		err := syscall.Kill(-cmd.Process.Pid, sig)
 		if err != nil && !errors.Is(err, syscall.ESRCH) {
 			return err
 		}
 		return nil
 	}
-	cmd.WaitDelay = 2 * time.Second
+	cmd.WaitDelay = 2*time.Second + c.TermGrace
 
 	maxOut := c.MaxOutput
 	if maxOut <= 0 {

@@ -366,6 +366,18 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       case 'backup-policies':
         // the canned policies are the web project's; another project has none of them
         return ok(db.bpol.filter((p) => (p.metadata.project ?? 'web') === project))
+      case 'ndp': {
+        // the proxy of the demo network `edge` (mode proxy, uplink em1): it answers for its range and has seen a few questions
+        const t = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
+        if (seg[1] === 'events') return ok({ events: [], last: 0 })
+        return ok({
+          uplinks: [{ uplink: 'em1', open: true, reopens: 1, addresses: 16, answered: 41, announced: 20, dropped: 0, floods: 0, inject_errors: 0, addrs: [
+            { address: '2001:db8:99::100', interface: 'jo7ha', held: true, seen: 30, answered: 30, dropped: 0, announced: 4, last_seen: t(1), last_from: 'fe80::1', last_verdict: 'answered', last_answer: t(1), last_announce: t(40) },
+            { address: '2001:db8:99::101', held: true, seen: 11, answered: 11, dropped: 0, announced: 1, last_seen: t(9), last_from: 'fe80::1', last_verdict: 'answered', last_answer: t(9), last_announce: t(60) },
+          ] }],
+          networks: [{ name: 'edge', enabled: true, uplink: 'em1', prefix: '2001:db8:99::/64', range: '2001:db8:99::100-2001:db8:99::10f', answers: 16 }],
+        })
+      }
       case 'doctor': return ok({ time: new Date().toISOString(), host: 'bsd01.example.net', status: 'fail', checks: [
         { name: 'zfs.pool', status: 'ok', message: 'pool tank is ONLINE' },
         { name: 'kernel.module.if_epair', status: 'ok', message: 'loaded' },
@@ -591,19 +603,16 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
 
   type VolumeAttach = NonNullable<Jail['spec']['volumes']>[number]
   const usesOf = (project: string, volume: string) => db.jails.filter((x) => (x.metadata.project ?? '') === project).flatMap((x) => (x.spec.volumes ?? []).filter((v) => v.volume === volume).map((v) => ({ jail: x.metadata.name, mount: v.mount, ...(v.read_only ? { read_only: true } : {}) })))
-  /** A volume as the server reports it: the jails that attach it and what is worth a warning, computed now. */
+  /** A volume as the server reports it: the jails that attach it, computed now. */
   function volView(v: Volume): Volume {
     const project = v.metadata.project ?? ''
     const uses = usesOf(project, v.metadata.name)
-    const rw = uses.filter((u) => !u.read_only).map((u) => u.jail)
-    const warnings = rw.length > 1 ? [`writable in more than one jail (${rw.join(', ')}): the jails share the files and their locking; a mail store, a database or a package cache needs one writer`] : []
-    return { ...v, status: { ...(v.status ?? { used: 0 }), used: v.status?.used ?? 0, attached_to: uses, ...(warnings.length ? { warnings } : {}) } }
+    return { ...v, status: { ...(v.status ?? { used: 0 }), used: v.status?.used ?? 0, attached_to: uses } }
   }
   /** The refusals of a volume that is a directory of the host: nothing of a dataset applies to it. */
   const hostDirRefused = (name: string): RawResponse => fail(400, { code: 'invalid', message: `volume "${name}" is a directory of the host: it has no snapshots, no key and no size of its own`, hint: "its files are the host's; snapshot, copy or back them up there" })
   /** The checks of an attachment, as the server makes them: the volume exists, an encrypted one has one jail, the path is sane. */
-  function attachRefused(jail: string, project: string, list: VolumeAttach[], running = false): RawResponse | null {
-    if (running) return fail(409, { code: 'busy', message: `jail "${jail}" is running: volumes are attached and detached while it is stopped`, hint: `jailops stop ${jail}` })
+  function attachRefused(jail: string, project: string, list: VolumeAttach[]): RawResponse | null {
     const seen = new Set<string>()
     const mounts = new Set<string>()
     for (const a of list) {
@@ -624,12 +633,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const project = j.metadata.project ?? ''
     const src = `/api/v1/jails/${name}`
     if (seg.length === 3 && m === 'GET') return ok(j.spec.volumes ?? [])
-    const running = ['running', 'starting', 'stopping'].includes(j.status.power)
     if (seg.length === 3 && m === 'POST') {
       const att: VolumeAttach = { volume: String(body.volume ?? ''), mount: String(body.mount ?? ''), ...(body.read_only ? { read_only: true } : {}) }
       if (!att.volume || !att.mount) return fail(400, { code: 'invalid', message: 'name the volume and the path it has in the jail' })
       if ((j.spec.volumes ?? []).some((v) => v.volume === att.volume)) return fail(409, { code: 'already_exists', message: `volume "${att.volume}" is attached to jail "${name}" already`, hint: `jailops volume detach ${name} ${att.volume} to attach it elsewhere in the jail` })
-      const refused = attachRefused(name, project, [...(j.spec.volumes ?? []), att], running)
+      const refused = attachRefused(name, project, [...(j.spec.volumes ?? []), att])
       if (refused) return refused
       return startOp(`Attach volume ${att.volume} to jail ${name}`, { jails: [src] }, 500, () => {
         j.spec.volumes = [...(j.spec.volumes ?? []), att]
@@ -639,7 +647,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
     if (seg.length === 4 && m === 'DELETE') {
       if (!(j.spec.volumes ?? []).some((v) => v.volume === seg[3])) return fail(404, { code: 'not_found', message: `volume attachment "${seg[3]}" not found` })
-      if (running) return attachRefused(name, project, [], true) as RawResponse
       return startOp(`Detach volume ${seg[3]} from jail ${name}`, { jails: [src] }, 500, () => {
         j.spec.volumes = (j.spec.volumes ?? []).filter((v) => v.volume !== seg[3])
         j.metadata.generation = (j.metadata.generation ?? 0) + 1
@@ -1108,7 +1115,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       touch(w)
       return ok(dw.observe(w))
     }
-    if ((seg[2] === 'up' || seg[2] === 'down') && m === 'POST') { w.spec.down = seg[2] === 'down'; touch(w); return ok(dw.observe(w)) }
+    if ((seg[2] === 'enable' || seg[2] === 'disable') && m === 'POST') { w.spec.disabled = seg[2] === 'disable'; touch(w); return ok(dw.observe(w)) }
     if (seg[2] === 'rotate-keys' && m === 'POST') {
       w.status.public_key = dw.demoKey()
       return ok({ public_key: w.status.public_key, warning: w.spec.mode === 'server' ? 'every peer must be given the new public key: issue new tokens (jailops wireguard peer remove, then peer add)' : 'the server of this client must be given the new public key: remove the peer there and enroll it again' })

@@ -10,7 +10,10 @@
 // replicated log.
 package api
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Version is the API version served under /api/v1.
 const Version = "1.0"
@@ -119,6 +122,27 @@ const (
 // ShellInstalling is the reason of the ShellSetup condition while bash is being installed into a running jail in the
 // background: `jailops shell` waits for it.
 const ShellInstalling = "Installing"
+
+// The message of the ShellSetup condition while bash is being installed names the step the setup is in:
+// ShellInstallingMessage(step) and ShellInstallingStep(message) are each other's inverse.
+const (
+	shellInstallingPrefix = "bash is being installed in the background: "
+	shellInstallingSuffix = "; `jailops shell` waits for it"
+)
+
+// ShellInstallingMessage is the message of the ShellSetup condition for a setup that is in the step.
+func ShellInstallingMessage(step string) string {
+	return shellInstallingPrefix + step + shellInstallingSuffix
+}
+
+// ShellInstallingStep is the step a ShellSetup condition message names, or "" for a message of another form.
+func ShellInstallingStep(message string) string {
+	m, ok := strings.CutPrefix(message, shellInstallingPrefix)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSuffix(m, shellInstallingSuffix)
+}
 
 // Document is the declarative envelope used in YAML files and in the state
 // dataset. Spec is decoded according to Kind.

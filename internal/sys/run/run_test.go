@@ -122,3 +122,26 @@ func TestRedact(t *testing.T) {
 		}
 	}
 }
+
+// With a grace the end of a command is gentle: SIGTERM first, SIGKILL only when the process group is still there
+// after the grace.
+func TestTermGraceEndsGentlyThenKills(t *testing.T) {
+	// ends on SIGTERM at once
+	t0 := time.Now()
+	_, err := Exec{}.Run(context.Background(), Cmd{Name: "sh", Args: []string{"-c", "sleep 30"}, Timeout: 100 * time.Millisecond, TermGrace: 20 * time.Second})
+	if err == nil {
+		t.Fatal("no error for a command that ran out of time")
+	}
+	if d := time.Since(t0); d > 10*time.Second {
+		t.Errorf("a command that ends on SIGTERM took %s", d)
+	}
+	// ignores SIGTERM: killed after the grace
+	t0 = time.Now()
+	_, err = Exec{}.Run(context.Background(), Cmd{Name: "sh", Args: []string{"-c", "trap '' TERM; while :; do sleep 1; done"}, Timeout: 100 * time.Millisecond, TermGrace: 400 * time.Millisecond})
+	if err == nil {
+		t.Fatal("no error for a command that ignored SIGTERM")
+	}
+	if d := time.Since(t0); d < 400*time.Millisecond || d > 4*time.Second {
+		t.Errorf("a command that ignores SIGTERM ended after %s: want the grace, then SIGKILL", d)
+	}
+}

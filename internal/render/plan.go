@@ -221,8 +221,9 @@ func NetworkPlan(in NetworkInput) ([]Step, error) {
 	if s.IPv4 != nil {
 		reject(s.IPv4.Subnet)
 	}
-	if v6 && s.IPv6.Mode == api.IPv6Routed {
-		// in proxy mode the subnet is on-link on the uplink: an address nobody has is simply not answered there
+	if v6 {
+		// In proxy mode the host answers for the range on the uplink whether a jail runs or not: a packet for an address
+		// nobody uses must meet an error here and never be sent out of the uplink again.
 		reject(s.IPv6.Subnet)
 	}
 	a := NetAnchor(in.Name)

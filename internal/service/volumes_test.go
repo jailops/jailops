@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"jailops.net/jailops/internal/sys/run"
 	"strings"
 	"testing"
 
@@ -76,7 +77,7 @@ func TestVolumeCreateShowUpdateDelete(t *testing.T) {
 }
 
 func TestAttachAndDetachRules(t *testing.T) {
-	_, s := newEnv(t)
+	e, s := newEnv(t)
 	ctx := as(globalAdmin, dtest.SeedProject)
 	newVolume(t, s, ctx, "maildir", api.VolumeSpec{UID: 5000, GID: 5000, Mode: "0770"})
 	for _, n := range []string{"mail", "desktop"} {
@@ -96,12 +97,12 @@ func TestAttachAndDetachRules(t *testing.T) {
 	if err := attach("mail", "/var/mail/vhosts", false); err != nil {
 		t.Fatal(err)
 	}
-	// the same volume, writable in a second jail: allowed, and reported
+	// the same volume, writable in a second jail: allowed, and nothing to warn about
 	if err := attach("desktop", "/home/ann/Mail", false); err != nil {
 		t.Fatal(err)
 	}
 	v, _ := s.GetVolume(ctx, "maildir")
-	if len(v.Status.AttachedTo) != 2 || len(v.Status.Warnings) != 1 || !strings.Contains(v.Status.Warnings[0], "writable in more than one jail") {
+	if len(v.Status.AttachedTo) != 2 || len(v.Status.Warnings) != 0 {
 		t.Fatalf("%+v", v.Status)
 	}
 	// attached twice to one jail, over a persistent path, a bad path, a missing volume
@@ -123,21 +124,45 @@ func TestAttachAndDetachRules(t *testing.T) {
 	// a volume that is attached is not deleted
 	_, err := s.DeleteVolume(ctx, "maildir", service.AnyGeneration)
 	wantCode(t, err, api.CodeBusy)
-	// a running jail neither attaches nor detaches
+	// a running jail attaches and detaches at once: the mount is made or taken off, the record follows, and a detach
+	// of a mount that is in use is refused and changes nothing
 	op, err := s.JailAction(ctx, "desktop", api.JailAction{Action: "start"})
 	mustOp(t, s, op, err)
+	// the next umount says the mount is in use
+	e.Run.Prepend(run.Rule{Name: "umount", Args: []string{run.AnyArg}, Result: run.Result{ExitCode: 1, Stderr: []byte("umount: /x: Device busy")}, Times: 1})
+	mounted := func(verb, suffix string) bool {
+		for _, c := range e.Run.Calls() {
+			if c.Cmd.Name == verb && len(c.Cmd.Args) > 0 && strings.HasSuffix(c.Cmd.Args[len(c.Cmd.Args)-1], suffix) {
+				return true
+			}
+		}
+		return false
+	}
 	op, err = s.DetachVolume(ctx, "desktop", "maildir")
 	failedWith(t, s, op, err, api.CodeBusy)
-	op, err = s.AttachVolume(ctx, "desktop", api.VolumeAttachRequest{Volume: "other", Mount: "/srv/o"})
+	if j, _ := s.GetJail(ctx, "desktop"); len(j.Spec.Volumes) != 1 {
+		t.Fatalf("a refused detach changed the record: %+v", j.Spec.Volumes)
+	}
+	op, err = s.DetachVolume(ctx, "desktop", "maildir")
+	mustOp(t, s, op, err)
+	if j, _ := s.GetJail(ctx, "desktop"); len(j.Spec.Volumes) != 0 || !mounted("umount", "/home/ann/Mail") {
+		t.Fatalf("detach: %+v", j.Spec.Volumes)
+	}
+	op, err = s.AttachVolume(ctx, "desktop", api.VolumeAttachRequest{Volume: "other", Mount: "/srv/o", ReadOnly: true})
+	mustOp(t, s, op, err)
+	if j, _ := s.GetJail(ctx, "desktop"); len(j.Spec.Volumes) != 1 || !mounted("mount", "/srv/o") {
+		t.Fatalf("attach: %+v", j.Spec.Volumes)
+	}
+	// copying the files of the path into the volume needs a stopped jail
+	op, err = s.AttachVolume(ctx, "desktop", api.VolumeAttachRequest{Volume: "maildir", Mount: "/srv/m", CopyExisting: true})
 	failedWith(t, s, op, err, api.CodeBusy)
-	// editing the jail's spec is the same thing and is refused alike
+	// editing the jail's spec is the same thing
 	j, _ := s.GetJail(ctx, "desktop")
 	j.Spec.Volumes = nil
-	_, err = s.UpdateJail(ctx, "desktop", j, service.AnyGeneration)
-	wantCode(t, err, api.CodeBusy)
+	if _, err = s.UpdateJail(ctx, "desktop", j, service.AnyGeneration); err != nil {
+		t.Fatal(err)
+	}
 	op, err = s.JailAction(ctx, "desktop", api.JailAction{Action: "stop"})
-	mustOp(t, s, op, err)
-	op, err = s.DetachVolume(ctx, "desktop", "maildir")
 	mustOp(t, s, op, err)
 	// deleting a jail never deletes its volume
 	op, err = s.DeleteJail(ctx, "mail")
@@ -196,4 +221,68 @@ func TestVolumeSnapshotsAndRollback(t *testing.T) {
 	mustOp(t, s, op, err)
 	op, err = s.DeleteVolumeSnapshot(ctx, "data", "s1")
 	mustOp(t, s, op, err)
+}
+
+// A live attach renders the jail's fstab first: when that fails, nothing is mounted and the record stays as it was.
+// The old order mounted, wrote the record and only logged a failed render, which left a mount the jail's own stop
+// did not know about.
+func TestLiveAttachRefusedByTheRenderChangesNothing(t *testing.T) {
+	e, s := newEnv(t)
+	ctx := as(globalAdmin, dtest.SeedProject)
+	newVolume(t, s, ctx, "other", api.VolumeSpec{})
+	op, err := s.CreateJail(ctx, dtest.WebJail("desktop"))
+	mustOp(t, s, op, err)
+	op, err = s.JailAction(ctx, "desktop", api.JailAction{Action: "start"})
+	mustOp(t, s, op, err)
+	attach := func() error {
+		op, err := s.AttachVolume(ctx, "desktop", api.VolumeAttachRequest{Volume: "other", Mount: "/srv/o"})
+		if err != nil {
+			return err
+		}
+		if got := wait(t, s, op); got.Status != api.OpSuccess {
+			return &api.Error{Code: got.Error.Code, Message: got.Error.Message}
+		}
+		return nil
+	}
+	// find the step that writes the fstab during one successful attach, then fail exactly that step on the next one
+	e.Fault.Reset(0)
+	if err := attach(); err != nil {
+		t.Fatal(err)
+	}
+	k := 0
+	for i, l := range e.Fault.Log {
+		if strings.Contains(l, "fstab") {
+			k = i + 1
+			break
+		}
+	}
+	if k == 0 {
+		t.Fatalf("no fstab write in the steps of a live attach: %v", e.Fault.Log)
+	}
+	op, err = s.DetachVolume(ctx, "desktop", "other")
+	mustOp(t, s, op, err)
+	mounts := func() int {
+		n := 0
+		for _, c := range e.Run.Calls() {
+			if c.Cmd.Name == "mount" && len(c.Cmd.Args) > 0 && strings.HasSuffix(c.Cmd.Args[len(c.Cmd.Args)-1], "/srv/o") {
+				n++
+			}
+		}
+		return n
+	}
+	before := mounts()
+	e.Fault.Reset(k)
+	if err := attach(); err == nil {
+		t.Fatal("the attach succeeded although the fstab could not be written")
+	}
+	e.Fault.Reset(0)
+	if got := mounts(); got != before {
+		t.Errorf("a mount was made before the render succeeded (%d before, %d after)", before, got)
+	}
+	if j, _ := s.GetJail(ctx, "desktop"); len(j.Spec.Volumes) != 0 {
+		t.Errorf("the refused attach left the record changed: %+v", j.Spec.Volumes)
+	}
+	if err := attach(); err != nil {
+		t.Errorf("the attach does not work after the refused one: %v", err)
+	}
 }

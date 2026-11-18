@@ -171,6 +171,9 @@ func decodeObject(data []byte, migs []Migration) (*Object, bool, error) {
 	if err != nil {
 		return nil, false, err
 	}
+	if renameFields(doc) {
+		changed = true
+	}
 	b, err := json.Marshal(doc)
 	if err != nil {
 		return nil, false, err

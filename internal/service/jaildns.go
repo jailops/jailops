@@ -172,10 +172,10 @@ func gatewayDNSAdvice(name string, spec api.NetworkSpec) string {
 		"JailOps changes nothing on the host: let the resolver listen there, for the base system's unbound a file "+
 		"/var/unbound/conf.d/jails.conf with `server:`, `interface: 127.0.0.1`, `interface: ::1`, `interface: %s`, "+
 		"`ip-transparent: yes` (it binds the address before the network exists at boot) and `access-control: %s allow`, "+
-		"then `service local_unbound restart`; a jail whose policy denies outgoing traffic needs a rule for udp and tcp "+
-		"port 53 to %s, and a host pf.conf that blocks traffic to the host itself one passing it in on the interfaces of the jails (the group epair); "+
+		"then `service local_unbound restart`. Every jail reaches the gateway on udp and tcp port 53 whatever its policy "+
+		"(a deny rule closes it), and /etc/pf.conf needs nothing for it: JailOps' firewall governs the jails; "+
 		"or give the network nameservers of its own (`dns:` in jailops network edit %s)",
-		hostResolvPath, name, gw, gw, sub, gw, name)
+		hostResolvPath, name, gw, gw, sub, name)
 }
 
 // keepsResolv says whether the jail's existing resolv.conf (at p, read through the file operations that stay inside

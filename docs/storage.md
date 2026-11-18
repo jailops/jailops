@@ -77,24 +77,32 @@ person on the whole host):
     jailops volume attach desktop maildir /home/ann/Mail
 
 `volume attach JAIL VOLUME PATH` (add `--ro` for a read-only mount) attaches a volume that exists already; it never creates one. The jail
-must be stopped. A volume is let go again with
+may run: the volume is mounted into it at once. A volume is let go again with
 
     jailops volume detach desktop maildir
 
 The attachment is part of the jail's specification (`volumes: [{volume, mount, read_only}]`, or `disk.<volume>=<path>` with
-`jailops config`), so `jailops edit` and a file do the same. The jail must be **stopped**: a running jail is refused with
-`busy`. The attachment takes effect at the next start. The volume is mounted on the host at its own place,
+`jailops config`), so `jailops edit` and a file do the same. A **running** jail gets the mount at once and gives it back at once; the
+attachment is in its record and its `fstab` from then on, so the next start makes it again. A detach is refused with `busy`
+while a process of the jail uses the mount (`jailops exec JAIL -- fstat PATH` shows which one); nothing is changed, and
+the detach works once the process is done. The volume is mounted on the host at its own place,
 `<storage mount>/projects/<project>/volumes/<name>`, and the jail's `fstab` binds it into the jail with `nullfs`; the jail
-stops the mount again when it stops, and the volume stays where it is for the other jails.
+stops the mount again when it stops, and the volume stays where it is for the other jails. `--copy-existing` (the files of
+the path go into the volume first) needs a stopped jail. Volumes that a profile of the project attaches (`disk.<volume>`)
+reach a running jail at its next start.
 
 **Owner and mode.** `--uid`, `--gid` and `--mode` (default `0` `0` `0755`) are the owner and the mode of the root of the
 volume. They are set once, when the volume is made, by the privileged helper (an operation that works on the empty root of
 a volume and refuses anything else), and they cannot change later: change the owner of the files from inside a jail with
 `chown`. The mode has no setuid, setgid or sticky bit.
 
-**Several jails.** A volume can be attached read-write to more than one jail; `jailops volume show` and `attach` say so
-(`writable in more than one jail`), because the jails then share files and their locking. A mail store, a database or a
-package cache needs one writer: attach it `--ro` to the others. An encrypted volume is attached to one jail only.
+**Several jails.** A volume can be attached to more than one jail, and the jails share the same files; `jailops volume show`
+lists them (`Attached to: mail (rw), desktop (ro)`). An application that needs a single writer, such as a database, is
+attached read-write to one jail and `--ro` to the others. An encrypted volume is attached to one jail only.
+
+**Linux jails.** A volume of a Linux jail is mounted twice, at its path in the jail's root and at the same path below
+`compat/linux`, because a Linux process reaches every path through that mirror first (see
+[linux-jails.md](linux-jails.md#what-a-linux-process-sees-and-what-it-does-not)). Attach and detach do both mounts.
 
 **Attached over existing files.** What the jail has at the path is hidden while the volume is mounted over it.
 `jailops volume attach JAIL VOLUME PATH --copy-existing` copies the files of the path into the volume first (the volume

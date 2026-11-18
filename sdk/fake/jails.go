@@ -156,7 +156,7 @@ func (s *Server) jailUsage(w http.ResponseWriter, r *http.Request) {
 		case ok:
 			u = seeded
 		case j.Status.Power == api.PowerRunning:
-			u = api.JailUsage{Accounting: &api.JailAccounting{Processes: 23, CPUSeconds: 8013, MemoryBytes: 407048192}}
+			u = api.JailUsage{Accounting: &api.JailAccounting{Processes: 23, CPUSeconds: 8013, MemoryBytes: 407048192, SwapBytes: 268435456}}
 		}
 		if !ok {
 			u.Disk = api.JailDiskUsage{RootBytes: 268435456, RootReferencedBytes: 1610612736, DataBytes: 73400320}

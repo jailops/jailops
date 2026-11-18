@@ -55,12 +55,16 @@ func volumeDesc() *kindDesc[api.Volume] {
 	}
 	d.show = func(a *app, v api.Volume) error {
 		var extra []string
-		for _, u := range v.Status.AttachedTo {
-			mode := "read-write"
-			if u.ReadOnly {
-				mode = "read-only"
+		if len(v.Status.AttachedTo) > 0 {
+			var jails []string
+			for _, u := range v.Status.AttachedTo {
+				mode := "rw"
+				if u.ReadOnly {
+					mode = "ro"
+				}
+				jails = append(jails, fmt.Sprintf("%s (%s)", u.Jail, mode))
 			}
-			extra = append(extra, fmt.Sprintf("Attached:    %s at %s (%s)", u.Jail, u.Mount, mode))
+			extra = append(extra, "Attached to: "+strings.Join(jails, ", "))
 		}
 		if v.Spec.IsHostDir() {
 			state := v.Status.State
@@ -269,7 +273,8 @@ func (a *app) volumeCmd() *cobra.Command {
 own. It outlives the jails: a jail's deletion detaches its volumes and never deletes
 one, a copy of a jail attaches none, and a jail snapshot or rollback leaves volumes
 alone (a volume has snapshots of its own). The same volume can be attached to several
-jails; one that is writable in more than one says so.
+jails, and a jail that runs attaches and detaches it at once; 'volume show' lists the jails
+that attach it.
 
 The root of a volume has the owner and the mode it was made with, so a user of the
 same number in two jails reads and writes the same files.`,
@@ -286,16 +291,16 @@ func (a *app) volumeAttach() *cobra.Command {
 	var ro, copyExisting bool
 	cmd := &cobra.Command{
 		Use:   "attach JAIL VOLUME PATH",
-		Short: "Attach a volume to a stopped jail",
-		Long: `Attach a volume of the project to a stopped jail: the jail sees it at PATH, through
-a nullfs mount from the volume's place on the host, from its next start on. A jail
-that runs is refused; the attachment is part of the jail's specification
+		Short: "Attach a volume to a jail",
+		Long: `Attach a volume of the project to a jail: the jail sees it at PATH, through a nullfs
+mount from the volume's place on the host. A jail that runs gets the mount at once;
+a stopped one at its next start. The attachment is part of the jail's specification
 (volumes), so it is the same as editing the jail.
 
 With --ro the jail may read the volume and not write it. The same volume can be
-attached to several jails; a volume that is writable in more than one jail is
-reported, because the jails then share its files and their locking. An encrypted
-volume is attached to one jail only.
+attached to several jails; they share its files (an application that needs a
+single writer, such as a database, is attached read-write to one jail and --ro to
+the others). An encrypted volume is attached to one jail only.
 
 What the jail has at PATH is hidden while the volume is mounted over it. With
 --copy-existing the files of PATH are copied into the volume first (the volume
@@ -336,9 +341,11 @@ should be new); nothing is removed from the jail's own root.`,
 func (a *app) volumeDetach() *cobra.Command {
 	return &cobra.Command{
 		Use:   "detach JAIL VOLUME",
-		Short: "Detach a volume from a stopped jail",
-		Long: `Detach a volume from a stopped jail. The volume and its files stay; the jail no
-longer sees them. A jail that runs is refused.`,
+		Short: "Detach a volume from a jail",
+		Long: `Detach a volume from a jail. The volume and its files stay; the jail no longer sees
+them. A jail that runs gives the mount back at once; while a process of the jail uses
+it the detach is refused (busy) and nothing changes: 'jailops exec JAIL -- fstat PATH'
+shows which one.`,
 		Example:           "jailops volume detach mail maildir",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: completeArgs(completeKind(a, a.jailDesc()), a.completeAttached(), completeNone),

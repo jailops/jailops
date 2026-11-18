@@ -63,11 +63,32 @@ For Debian only:
 - Linux jails default to the **thick** layout (a full copy of the generation); copying it into the jail runs inside the helper
   (`zfs.replicate`), 140 MB in about 2 seconds.
 
+## What a Linux process sees, and what it does not
+
+With an Alpine jail:
+
+- **Volumes** are visible and writable at their path (`ls`, `du` and writes from the Alpine shell reach the volume, with its
+  owner and mode), at the start of the jail and when the volume is attached to the running jail. `jailops exec JAIL -- cmd`
+  runs the jail's own binary, so for an Alpine jail it is a Linux process and sees the same tree as the shell.
+- **`ps`, `/proc` and `/sys`** list the jail's processes and the system files (`linprocfs` and `linsysfs` below the mirror).
+- **`ping` to an IPv6 address** fails with `setsockopt(ICMP6_FILTER)`: the Linuxulator has no ICMPv6 filter. Test IPv6 with a
+  TCP client (`curl -6`). `ping -4` works.
+- **`ip route`, `ip -6 route` and other netlink dumps** fail with `RTNETLINK answers: Bad message`: netlink is not complete
+  in the Linuxulator. The host configures the jail's interface and routes (`ifconfig -j`, `route -j`), and `ifconfig` in the
+  jail shows the address.
+- **`dmesg`** is refused (`klogctl: Operation not permitted`): a jail may not read the kernel message buffer.
+- `uname -r` prints `5.15.0`, the Linux version the Linuxulator reports; it is not a Linux kernel and implements the system
+  calls FreeBSD has written.
+
 ## How they differ from FreeBSD jails
 
 - **Mounts:** a private devfs ruleset, `fdescfs`, a `nullfs` mirror of the root on `compat/linux` (the Linuxulator resolves paths
   through `/compat/linux` first, and a file create below it fails otherwise), `tmpfs` on `compat/linux/dev/shm`, `linprocfs` and
-  `linsysfs`. JailOps writes the jail's `fstab`. The jail's `/dev` is mounted with a private devfs ruleset that the helper loads into
+  `linsysfs` in the root and again below the mirror, and every volume in the root and again below the mirror. A `nullfs` mirror
+  shows the plain directory under a mount of the lower tree, not the mount: a Linux process that opens `/proc`, `/sys` or a volume
+  finds the empty directory of the mirror unless the same file system is mounted below the mirror too. JailOps writes the
+  jail's `fstab`, and a volume that is attached to a running jail (`volume attach`) gets both mounts at once; a detach takes the
+  mount below the mirror off first. The jail's `/dev` is mounted with a private devfs ruleset that the helper loads into
   the kernel before the jail is created, from rules it validates itself; a jail whose ruleset cannot be loaded does not start
   (see [Devices](security-model.md#devices)).
 - **Network:** a Linux userland has no tooling that works here, so the host configures the jail with the `-j` forms

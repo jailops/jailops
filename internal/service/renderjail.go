@@ -85,7 +85,9 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 	var netSpecs []api.NetworkSpec // the networks in the order the jail attaches them: its nameservers come from them
 	uplink := ""
 	var shaped []shapeDev
-	var hostAddrs, dnsAddrs []netip.Addr // the host's addresses the jail meets, and the resolver it is pointed at
+	var hostAddrs, dnsAddrs []netip.Addr       // the host's addresses the jail meets, and the resolver it is pointed at
+	uplinkOf := map[netip.Addr]render.Uplink{} // the uplink of each address of the jail, by the network that holds it
+	var ownNets []netip.Prefix                 // the subnets of the jail's networks
 	for i, a := range j.Spec.Network {
 		n, err := s.netKind.get(a.Network)
 		if err != nil {
@@ -155,6 +157,28 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 				if r := ipam.Resolver6(p); r.IsValid() {
 					hostAddrs = append(hostAddrs, r) // the host's resolver address: closed to the jail like the gateway, but for DNS
 				}
+			}
+		}
+		// The uplink of the jail's addresses: redirects are applied on it, and an address the upstream routes to the host (IPv6
+		// routed or proxy, IPv4 without NAT) is opened to the Internet on it by the allow rules of the jail's policies.
+		// The peers of a WireGuard server that serves the network come in on the tunnel's interface: an external source as well.
+		tunnels := s.tunnelsServing(a.Network)
+		if n.Spec.Uplink != "" || len(tunnels) > 0 {
+			if ad, ok := parseAddr(a.IPv4); ok && n.Spec.IPv4 != nil {
+				uplinkOf[ad] = render.Uplink{Iface: n.Spec.Uplink, Routed: n.Spec.Uplink != "" && !n.Spec.IPv4.NAT, Tunnels: tunnels}
+			}
+			if ad, ok := parseAddr(a.IPv6); ok && n.Spec.IPv6 != nil {
+				uplinkOf[ad] = render.Uplink{Iface: n.Spec.Uplink, Routed: n.Spec.Uplink != "" && (n.Spec.IPv6.Mode == api.IPv6Routed || n.Spec.IPv6.Mode == api.IPv6Proxy), Tunnels: tunnels}
+			}
+		}
+		if n.Spec.IPv4 != nil {
+			if p, err := netip.ParsePrefix(n.Spec.IPv4.Subnet); err == nil {
+				ownNets = append(ownNets, p.Masked())
+			}
+		}
+		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+			if p, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
+				ownNets = append(ownNets, p.Masked())
 			}
 		}
 		if d := s.networkDNS(a.Network, n.Spec); d != nil && d.Source == api.DNSFromGateway {
@@ -235,10 +259,21 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 	{
 		// A jail with a link and no address (a network entry of "none") gets the closed anchor of render.BuildAnchor.
 		if addrs := jailAddrs(j.Spec); len(d.Epairs) > 0 {
+			// The tables <host> and <foreign> are what closes the host and the other projects to the jail: an anchor
+			// rendered without them would be open, so a reading that fails is an error, not an empty table (the jail
+			// keeps the anchor it has, and a start is refused).
+			hostNow, err := s.hostAddrsChecked(ctx)
+			if err != nil {
+				return nil, fmt.Errorf("the addresses of the host cannot be read, so the firewall of %s is not rendered (it would not close the host): %w", name, err)
+			}
+			foreign, err := s.foreignPrefixes(project)
+			if err != nil {
+				return nil, fmt.Errorf("the networks of the other projects cannot be read, so the firewall of %s is not rendered (it would not close them): %w", name, err)
+			}
 			in := render.PFInput{Jail: name, Interfaces: d.Epairs, Addresses: addrs, Tags: j.Spec.Firewall.Tags,
-				TagMembers: map[string][]netip.Addr{}, Sets: refs.sets, Jails: refs.jails, Uplink: uplink, AllowRaw: true,
-				Antispoof: true, LinkLocal: linkLocal, Host: append(s.hostAddrs(ctx), hostAddrs...), DNS: dnsAddrs,
-				Foreign: s.foreignPrefixes(project), MaxStates: s.statesLimit(j), Shaping: b.shapes}
+				TagMembers: map[string][]netip.Addr{}, Sets: refs.sets, Jails: refs.jails, Uplink: uplink, UplinkOf: uplinkOf, OwnNets: ownNets, AllowRaw: true,
+				Antispoof: true, LinkLocal: linkLocal, Host: append(hostNow, hostAddrs...), DNS: dnsAddrs,
+				Foreign: foreign, MaxStates: s.statesLimit(j), Shaping: b.shapes}
 			// A jail without any policy is open (apart from the isolation of projects); with policies, the strictest
 			// default of them all applies: the project's defaults are a floor that a jail's own policy can open ports
 			// through but cannot turn from deny into allow.
@@ -491,6 +526,34 @@ func (h *hooks) PreStart(ctx context.Context, name string) error {
 		}
 	}
 	return s.writeAnchorFile(ctx, name, b.desired.Ruleset)
+}
+
+// renderConf writes jail.conf and the fstab of a jail from its record: the files jail(8) reads when the jail starts and
+// stops. Unlike PreStart it writes nothing inside the root (a running jail keeps its rc.conf and resolv.conf) and
+// brings no network up.
+func (s *Service) renderConf(ctx context.Context, name string) error {
+	j, err := s.jailSnapshot(name)
+	if err != nil {
+		return err
+	}
+	refs, err := s.allRefs(j.Metadata.Project)
+	if err != nil {
+		return err
+	}
+	b, err := s.buildJail(ctx, j, refs)
+	if err != nil {
+		return err
+	}
+	f := s.d.Files
+	if err := f.MkdirAll(ctx, s.confDir(name)); err != nil {
+		return err
+	}
+	if b.hasFstab {
+		if err := f.WriteAtomic(ctx, s.fstabPath(name), []byte(b.fstab)); err != nil {
+			return err
+		}
+	}
+	return f.WriteAtomic(ctx, s.confPath(name), []byte(b.jailConf))
 }
 
 // writeAnchorFile leaves the rendered PF anchor for the start hook, or

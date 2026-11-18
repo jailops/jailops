@@ -77,9 +77,9 @@ test('create a server, join with a token, take a tunnel down and delete it', asy
   const home = page.locator('[data-wg="homelink"]')
   await expect(home.locator('[data-wg-mode="client"]')).toBeVisible()
 
-  await home.getByTestId('wg-down').click()
+  await home.getByTestId('wg-disable').click()
   await expect(home.getByTestId('wg-state')).toHaveText('Down')
-  await home.getByTestId('wg-up').click()
+  await home.getByTestId('wg-enable').click()
   await expect(home.getByTestId('wg-state')).toHaveText('Up')
 
   await lab.getByTestId('wg-rotate').click()

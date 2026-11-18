@@ -67,7 +67,11 @@ supported. `jailops doctor` fails on anything older than 15.1.
 8. **Pure Go.** `CGO_ENABLED=0`. The one place CGO may be admitted is the Raft library
    decision (section 11), isolated behind a build tag.
 9. **The host belongs to its administrator, unless they hand a part of it over.** By default JailOps manages jails
-   and never edits the host's own configuration (`pf.conf`, `rc.conf`, `resolv.conf`). Appliance mode is the explicit,
+   and never edits the host's own configuration (`pf.conf`, `rc.conf`, `resolv.conf`). The one exception outside appliance
+   mode is the host resolver: for the names of the jails (`dns-suffix`, [dns.md](dns.md)) the helper writes its own
+   file `/var/unbound/conf.d/jailops.conf` (it never edits the administrator's `unbound.conf`), checks the host resolver
+   after each change, puts the old file back when the resolver stops answering, and restarts `local_unbound` when the
+   set of addresses it listens on changes; `unbound-conf` empty turns it off. Appliance mode is the explicit,
    per-module exception: a module (identity, firewall, network, updates, system, storage) is managed only when both
    `jailopsd.yaml` (`host.manage.modules`) and `priv.conf` (`host-manage`) list it, and then it owns an exact list of
    files and variables, previews every change as a diff, snapshots what it touches and reports hand edits as drift.
@@ -354,7 +358,7 @@ the renderer proves that every referenced table is defined. Runtime table entrie
 reloaded, so contents are rendered into the anchor. The
 administrator adds one line to `pf.conf` once, `anchor "jailops/*"`. The anchors hold the filter rules of the jails and the translation of their networks as options on rules (`match out … nat-to` for NAT, `match in … rdr-to` for a port forward), which is how pf describes translation since FreeBSD 15 (`nat-anchor` and `rdr-anchor` belong to the older translation ruleset). The line belongs among the filter rules, before any `quick` rule that should not decide first: a quick rule before it decides for the traffic it matches, and the NAT and port forwards of the networks do not apply to that traffic. Reload with `pfctl -f /etc/pf.conf`. JailOps
 never owns `pf.conf`. A ruleset is rendered, validated with `pfctl -n`, loaded in one operation
-and read back. There is no read-modify-write. Raw PF requires `admin`. The one exception is the planned host firewall module of
+and read back. There is no read-modify-write. Raw PF requires a global administrator. The one exception is the planned host firewall module of
 appliance mode ([appliance.md](appliance.md)): when an administrator enables it in both configuration files, and only
 then, the helper renders the whole `pf.conf` around the same jail anchors (`anchor "jailops/*"` first among the rules), checks it with `pfctl -n`, loads it with `pfctl -f`
 and reverts it unless the change is confirmed. Without the module JailOps never touches `pf.conf`.
@@ -364,7 +368,7 @@ and reverts it unless the change is confirmed. Without the module JailOps never 
 A `WireGuard` object (`/api/v1/wireguard/{name}`, extension `wireguard`; operator reads, admin changes) is a tunnel of
 the host: a **server** with a listen port and enrolled peers, or a **client** made from a join token
 ([wireguard.md](wireguard.md)). The spec holds public parts only (addresses, port, endpoint, the pool or the routed
-prefixes, peers' public keys and addresses, the JailOps networks a server's peers may reach); the status adds the
+prefixes, peers' public keys and addresses, the JailOps networks a server serves); the status adds the
 interface's public key and what `wg show <if> dump` reports per peer.
 
 - **Keys** are made and kept by the helper (`wg genkey`, `wg genpsk`, `wg pubkey` with the key on standard input) in
@@ -376,8 +380,10 @@ interface's public key and what `wg show <if> dump` reports per peer.
 - **Interfaces** are created by the helper (`ifconfig wg create`, renamed to `wg-<name>`), recorded as its own, described
   `jailops wireguard=<name>`, and recreated by the reconcile loop (nothing in `rc.conf`). An interface of
   that name the helper did not create is refused. `if_wg` is loaded through the module list of the host pass.
-- **pf**: a server with networks gets the anchor `jailops/wg.<name>` (a dot, like `jailops/net.<name>`, so it never meets
-  a project's anchor), which passes the tunnel's subnets to those networks and nothing else. The host's `pf.conf` needs
+- **pf**: a server gets the anchor `jailops/wg.<name>` (a dot, like `jailops/net.<name>`, so it never meets
+  a project's anchor), which holds only what protects the host (a forged source, everything to the host's addresses). The
+  peers are an external source: a jail's own `allow in` rules open the tunnel's interface for the jail's addresses, as
+  they open the uplink. The host's `pf.conf` needs
   one rule for the listen port; JailOps prints it and `jailops doctor` checks for it (`wireguard.firewall`), with
   `wireguard.tools` (the wg program, the module) and `wireguard.forwarding`.
 - The helper's WireGuard operations (`wg.keys`, `wg.peer_keys`, `wg.import`, `wg.apply`, `wg.remove`, `wg.rename`, `wg.show`,
@@ -457,9 +463,10 @@ Four layers, one duty each:
 | Layer | What | Where |
 |---|---|---|
 | Jail | Data, `spec.json`, `bundle.json`, `jailops:*` properties | The jail's own datasets |
-| Host configuration | Networks, policies, address sets, backup policies, remotes | JSON files in `<state_dir>/objects/<kind>/<id>.json` (`/var/db/jailops/state`) |
+| Host configuration | Networks, policies, address sets, backup policies | JSON files in `<state_dir>/objects/<kind>/<id>.json` (`/var/db/jailops/state`) |
 | Operational data | Users, token hashes, sessions, operations, events, audit log, backup catalog cache | SQLite (`modernc.org/sqlite`, WAL, one writer) |
 | Operating system | `jail.conf`, in-jail `rc.conf`, PF anchors, epairs | Derived. Never edited by hand. |
+| Client configuration | The remotes a CLI talks to (address, pinned fingerprint) and the project it has selected | `~/.config/jailops/config.yaml` of the user who runs the CLI, not on the server |
 
 SQLite holds nothing required to restore a jail. Users, tokens and the audit log are the only
 non-rebuildable rows; they are copied with `VACUUM INTO` before upgrades and on a schedule.
@@ -1180,7 +1187,7 @@ Open:
 | Native ZFS encryption | **Encrypted volumes are built** ([storage.md](storage.md#encrypted-volumes)): a volume made `encrypted` is its own encryption root (aes-256-gcm, `keyformat=passphrase`, `keylocation=prompt`), with a passphrase a person types at creation and after every boot (`jailops volume unlock`, `lock`, `passphrase`; extension `volumes`; state `locked`, error codes `locked` and `bad_passphrase`; the boot skips a locked jail and starts it after its unlock; five wrong passphrases lock unlocks out for 30 seconds). The helper's five operations (`zfs.create_encrypted`, `zfs.load_key`, `zfs.unload_key`, `zfs.change_key` take the passphrase on the request stream, never in arguments; `zfs.feature_state` reads `feature@encryption` for doctor) and the raw copy (`zfs.replicate` with `raw`) are tested against the real allow-list with stand-ins for `zfs`; the service, the lifecycle (an in-memory model of keys), the CLI and the console against fakes. UNVERIFIED on FreeBSD: that `zfs create`, `load-key` and `change-key` read one line from a stdin that is not a terminal, `zfs load-key -n` with the key loaded, the mapped error texts, a raw receive of an encryption root with `-o keylocation=prompt`, snapshots and rollbacks of a locked volume (the `encrypted-volume` block of `scripts/ci-freebsd-e2e.sh`). Not implemented: whole encrypted jails and storages (`spec.encrypted` / `storage.spec.encrypted` answer `unsupported` with the manual alternative in the hint), key files and unattended unlocks, encrypting an existing volume |
 | Packages at creation (`--package`, `spec.packages`) | Not implemented: the flag was removed; the field answers `unsupported` ("installing packages at creation (spec.packages) is not implemented"). Use the provisioning `packages` step (8.5), which runs once at the first start |
 | Jail freeze | Removed. FreeBSD has no jail freeze; the `freeze` action no longer exists in the SDK, the fake or the service (an unknown action answers `invalid`) |
-| Volumes of an existing jail | `GET/POST /api/v1/jails/<n>/volumes` and `DELETE .../volumes/<v>` answer `unsupported` ("volume management is not part of this version"); `jailops config` on `disk.<name>` keys of an existing jail answers `unsupported` ("changing volumes of an existing jail is not implemented"). Declare volumes at creation |
+| Volumes of an existing jail | Built: `volume attach` and `volume detach`, `jailops config` on `disk.<name>` keys, `jailops edit` and a file attach and detach volumes of an existing jail, also while it runs (a nullfs mount made or taken off at once; a detach of a mount in use is `busy`, nothing changes) ([storage.md](storage.md)) |
 | `inplace` update strategy for thin jails | `jailops jail upgrade` answers `unsupported` ("update strategy inplace is not implemented for thin jails"); thick and Linux jails are updated through managed updates, not rebased ("rebase upgrades apply to thin jails; ... jails update in place, which is not implemented") |
 | Routes that answer `unsupported` | `PUT /api/v1/server`, `GET /api/v1/server/config`, cluster, `GET .../console` (listing sessions), `.../files/<path>`, `POST .../move`, `.../snapshots/<s>` (rename), `.../bundle`, jail templates, groups, rollouts and the backup transport routes. Each answers 501 `unsupported` ("<feature> is not part of this version"); the list is `unsupportedRoutes` in `internal/server/routes.go` and `sdk/PROTOCOL.md` |
 | `/var/db/pkg` after a root swap | A dedicated experiment with a genuine package change |
@@ -1693,7 +1700,10 @@ then loads the network anchors and autostarts jails. Each jail's start hook crea
 (`exec.start = "/bin/sh /etc/rc"`), so the guest's first packet already meets its rules. On a host that follows the install
 guide (a default-deny base ruleset, the anchor line placed before any broad `quick pass`, both checked by `jailops
 doctor`'s `pf.anchors` and `pf.order`), an anchor call that resolves to nothing falls through to the host's own default,
-which drops. `pf` is in the `REQUIRE` line of `packaging/rc.d/jailopsd` (a disabled `pf` service still runs its rc script
+which drops. What the Internet may reach is the jails' own policies' business, not `pf.conf`'s: an explicit `allow in` rule with an
+external source is rendered on the uplink of each routed address of the jail, in the jail's anchor, and wins over the host's block; the
+defaults never open it (`doctor`'s `pf.inbound` names a quick block of the administrator's that stands before the anchor line).
+`pf` is in the `REQUIRE` line of `packaging/rc.d/jailopsd` (a disabled `pf` service still runs its rc script
 and exits at once, so it adds no delay when pf is not used) so that pf is running before the first jail starts.
 
 ### 18.15 The shell of a jail and its prompt (FreeBSD 15.2-PRERELEASE amd64, November 2026)

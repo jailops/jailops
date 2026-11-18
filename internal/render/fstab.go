@@ -88,6 +88,11 @@ func Fstab(in FstabInput) (string, error) {
 			mode = "ro"
 		}
 		b.line("%s %s%s nullfs %s 0 0", v.Source, root, v.Target, mode)
+		if in.OS == api.OSLinux {
+			// A Linux process reaches every path through the mirror of the root first, and a mirror does not show
+			// what is mounted on the lower tree: the volume is mounted below the mirror as well.
+			b.line("%s %s/%s%s nullfs %s 0 0", v.Source, root, LinuxCompat, v.Target, mode)
+		}
 	}
 	return b.result()
 }
@@ -100,11 +105,16 @@ type LinuxMount struct {
 
 // LinuxMounts returns the mounts of a Linux jail in the verified order on
 // FreeBSD 15.1: devfs (private ruleset), fdescfs, a nullfs mirror of the
-// root on compat/linux, tmpfs on its dev/shm, linprocfs, linsysfs. devfs
-// refuses to create /dev/shm and the Linuxulator resolves paths through
-// compat/linux first (a create below it fails with ENOENT once the directory
-// exists), so the mirror makes creates land in the real tree and the tmpfs
-// provides /dev/shm through it. root has no trailing slash.
+// root on compat/linux, tmpfs on its dev/shm, linprocfs, linsysfs, and
+// linprocfs and linsysfs again below the mirror. devfs refuses to create
+// /dev/shm and the Linuxulator resolves paths through compat/linux first (a
+// create below it fails with ENOENT once the directory exists), so the mirror
+// makes creates land in the real tree and the tmpfs provides /dev/shm through
+// it. A mirror shows the directory under a mount of the lower tree, not the
+// mount: a Linux process that opens /proc or /sys finds the plain empty
+// directory of the mirror, so the two file systems are mounted below the
+// mirror as well (and so is every volume, see Fstab). root has no trailing
+// slash.
 func LinuxMounts(root string, devfsRuleset int, shmBytes uint64) []LinuxMount {
 	dev := ""
 	if devfsRuleset != 0 {
@@ -117,6 +127,8 @@ func LinuxMounts(root string, devfsRuleset int, shmBytes uint64) []LinuxMount {
 		{"tmpfs", "tmpfs", root + "/" + LinuxShmDir, fmt.Sprintf("size=%d,mode=1777", shmBytes)},
 		{"linprocfs", "linprocfs", root + "/proc", ""},
 		{"linsysfs", "linsysfs", root + "/sys", ""},
+		{"linprocfs", "linprocfs", root + "/" + LinuxCompat + "/proc", ""},
+		{"linsysfs", "linsysfs", root + "/" + LinuxCompat + "/sys", ""},
 	}
 }
 

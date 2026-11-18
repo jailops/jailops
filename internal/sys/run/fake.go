@@ -83,6 +83,16 @@ func (f *Fake) Add(r Rule) *Rule {
 	return &rr
 }
 
+// Prepend registers a rule that is tried before every rule added so far (a test that overrides the answer of a command a
+// harness scripts for every call) and returns the stored copy.
+func (f *Fake) Prepend(r Rule) *Rule {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rr := r
+	f.rules = append([]*Rule{&rr}, f.rules...)
+	return &rr
+}
+
 // Calls returns a copy of the recorded calls.
 func (f *Fake) Calls() []Call {
 	f.mu.Lock()

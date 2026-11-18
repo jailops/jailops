@@ -1,6 +1,7 @@
 package service
 
 import (
+	"net/netip"
 	"strings"
 	"testing"
 )
@@ -45,5 +46,40 @@ func TestDefaultBlockAndStatePolicyLine(t *testing.T) {
 		if got := reStatePolicy.MatchString(stripPFComments(conf)); got != want {
 			t.Errorf("%q: %v", conf, got)
 		}
+	}
+}
+
+// The administrator's rules before the anchor that stand in the way of what the policies admit from outside: a quick block
+// of every source, and a pass rule for a jail prefix. Rules of the host's own, with a source list, a table or a port, and
+// the default block that is not quick, are not.
+func TestInboundRulesInTheWayOfTheAnchor(t *testing.T) {
+	nets := []inboundNet{
+		{name: "pub6", uplink: "vtnet0", subnet: netip.MustParsePrefix("2001:db8:1:2:100::/80")},
+		{name: "pub4", uplink: "vtnet0", subnet: netip.MustParsePrefix("198.51.100.0/28")},
+	}
+	rules := strings.Join([]string{
+		"block drop log all", // not quick
+		"block drop in quick on vtnet0 inet from 10.0.0.0/8 to any",
+		"block drop in quick on vtnet0 inet6 from <bridges_v6> to any",
+		"pass in quick on vtnet0 proto tcp from <office> to (vtnet0) port = 2282 flags S/SA keep state (if-bound)",
+		"block drop in quick on vtnet0 inet6 all",
+		"block drop in quick on em9 all", // another interface
+		"block drop out quick on vtnet0 all",
+		"block drop in quick on vtnet0 inet6 proto tcp from any to any port = 25",
+		"pass in quick on vtnet0 inet6 proto tcp from <office> to 2001:db8:1:2:100::/80 port = 2282 flags S/SA keep state (if-bound)",
+		`anchor "jailops/*" all`,
+		"block drop in quick on vtnet0 all", // after the anchor: not in the way
+	}, "\n")
+	blocks, passes := inboundRulesInTheWay(rules, nets)
+	if len(blocks) != 1 || !strings.Contains(blocks[0], "block drop in quick on vtnet0 inet6 all") || !strings.Contains(blocks[0], "pub6") {
+		t.Errorf("blocks: %q", blocks)
+	}
+	if len(passes) != 1 || !strings.Contains(passes[0], "2001:db8:1:2:100::/80") {
+		t.Errorf("passes: %q", passes)
+	}
+	// the same host with the anchor above the block: nothing in the way
+	b2, p2 := inboundRulesInTheWay(`anchor "jailops/*" all`+"\n"+rules, nets)
+	if len(b2) != 0 || len(p2) != 0 {
+		t.Errorf("rules after the anchor: %q %q", b2, p2)
 	}
 }

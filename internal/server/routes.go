@@ -220,6 +220,15 @@ func (s *Server) routeTable() []route {
 			c.sync(200, res, 0)
 			return nil
 		}},
+		route{method: "GET", pattern: "/api/v1/ndp", h: func(c *rc) error {
+			c.sync(200, svc.NDPStatus(c.r.Context()), 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/ndp/events", h: func(c *rc) error {
+			after, _ := strconv.ParseUint(c.r.URL.Query().Get("after"), 10, 64)
+			c.sync(200, svc.NDPEvents(c.r.Context(), after), 0)
+			return nil
+		}},
 		route{method: "GET", pattern: "/api/v1/resources", h: func(c *rc) error {
 			v, err := svc.Resources(c.r.Context())
 			if err != nil {

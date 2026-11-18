@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path"
+	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -103,7 +106,7 @@ follow.`,
 	show := &cobra.Command{
 		Use:               "show ID",
 		Short:             "Show one operation",
-		Long:              "Show one operation: its status, the objects it affects, its result or its error.",
+		Long:              "Show one operation: its status and how long it has run, the objects it affects, the steps it ran with the time each took, and its error with the hint. -o json and -o yaml print every field.",
 		Example:           "jailops op show 3f1c8a52-...",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.completeOps(),
@@ -115,6 +118,10 @@ follow.`,
 			o, err := c.Operations().Get(cmd.Context(), args[0])
 			if err != nil {
 				return err
+			}
+			if a.format == fmtTable {
+				a.printOperation(o)
+				return nil
 			}
 			return a.emit(o, nil, nil, func() []string { return []string{o.ID} })
 		},
@@ -313,4 +320,66 @@ func (a *app) streamEvents(ctx context.Context, types []api.EventType, jail, sin
 		}
 	}
 	return nil
+}
+
+// printOperation writes an operation for a person: the status with its times, what it affects, the steps and where
+// the time went, and the error with its hint. A running operation that has recorded no step says so.
+func (a *app) printOperation(o api.Operation) {
+	w := a.env.Stdout
+	now := a.env.Now()
+	fprintf(w, "%s  %s\n", o.ID, o.Description)
+	status := string(o.Status)
+	switch {
+	case o.Status.Final() && !o.UpdatedAt.IsZero() && !o.CreatedAt.IsZero():
+		status += fmt.Sprintf(" after %s, %s ago", o.UpdatedAt.Sub(o.CreatedAt).Round(100*time.Millisecond), age(now, o.UpdatedAt))
+	case !o.CreatedAt.IsZero():
+		status += fmt.Sprintf(" for %s, last update %s ago", age(now, o.CreatedAt), age(now, o.UpdatedAt))
+	}
+	if o.Progress > 0 {
+		status += fmt.Sprintf(" (%d%%)", o.Progress)
+	}
+	fprintf(w, "status:   %s\n", status)
+	if o.Project != "" {
+		fprintf(w, "project:  %s\n", o.Project)
+	}
+	var kinds []string
+	for k := range o.Resources {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	for _, k := range kinds {
+		var names []string
+		for _, r := range o.Resources[k] {
+			names = append(names, path.Base(r))
+		}
+		fprintf(w, "affects:  %s %s\n", k, strings.Join(names, ", "))
+	}
+	if o.MayCancel && !o.Status.Final() {
+		fprintf(w, "cancel:   jailops op cancel %s\n", o.ID)
+	}
+	if len(o.Steps) == 0 {
+		if !o.Status.Final() {
+			fprintf(w, "steps:    no steps recorded yet (a step is recorded when it ends)\n")
+		}
+	} else {
+		var rows [][]string
+		var total int64
+		for _, st := range o.Steps {
+			res := "ok"
+			if st.Failed {
+				res = "failed"
+			}
+			total += st.DurationMS
+			rows = append(rows, []string{st.Name, (time.Duration(st.DurationMS) * time.Millisecond).String(), res})
+		}
+		rows = append(rows, []string{"total", (time.Duration(total) * time.Millisecond).String(), ""})
+		fprintln(w, "steps:")
+		a.printTable(w, []string{"STEP", "TIME", "RESULT"}, rows, nil)
+	}
+	if o.Error != nil {
+		fprintf(w, "error:    %s: %s\n", o.Error.Code, o.Error.Message)
+		if o.Error.Hint != "" {
+			fprintf(w, "hint:     %s\n", o.Error.Hint)
+		}
+	}
 }

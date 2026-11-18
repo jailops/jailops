@@ -136,6 +136,16 @@ func TestNetworks(t *testing.T) {
 	tr.ok("network", "show", "sw", "-o", "yaml")
 	tr.do("", "network", "create", "badmode", "--ipv4", "10.95.0.1/24", "--ipv6", "2001:db8:1:2:200::/80", "--ipv6-mode", "bogus")
 	tr.do("", "network", "create", "nomode", "--ipv4", "10.96.0.1/24", "--ipv6-mode", "proxy")
+	// the NDP proxy is switched with its own commands; a second run changes nothing
+	tr.ok("network", "ndp-proxy", "enable", "sw")
+	tr.ok("network", "ndp-proxy", "disable", "sw")
+	tr.ok("network", "ndp-proxy", "disable", "sw")
+	tr.ok("network", "ndp-proxy", "enable", "sw", "--dry-run")
+	tr.ok("network", "ndp-proxy", "enable", "sw")
+	tr.ok("network", "show", "sw")
+	tr.do("", "network", "ndp-proxy", "enable", "dmz")         // no IPv6 prefix
+	tr.do("", "network", "set", "sw", "--ipv6-mode", "routed") // the flag is gone from set: switched with ndp-proxy
+	tr.ok("network", "set", "sw", "--ipv6-range", "2001:db8:1:2:100::20-2001:db8:1:2:100::2f")
 	tr.golden("networks")
 }
 

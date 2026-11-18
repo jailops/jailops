@@ -27,9 +27,8 @@ the carved `/80`s.
 
 ## Before you apply
 
-1. Let packets in: pf's default for the uplink is yours. Admit the jails' addresses and the ports you want, for example
-   `pass in quick on vtnet0 inet6 proto tcp from any to 2001:db8:1:2:100::/80 port { 80 443 }`. The jail's anchor
-   still decides afterwards (see install.md section 3).
+1. Nothing to write in `pf.conf` for the jails: the `allow in` rules of `public-web` open the uplink for the
+   jail's own addresses. Delete any `pass in quick on vtnet0 ... to <jail prefix>` rule you added earlier.
 2. Run `jailops doctor`: it fails `network.ndproxy` while a proxy network is not answering.
 
 ## Run it

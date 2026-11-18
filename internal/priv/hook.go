@@ -366,11 +366,19 @@ func (l *Local) hookPreStart(ctx context.Context, jn JailName, atts []attachment
 			}
 		}
 	}
-	// pf must run: with pf disabled the anchor is loaded and nothing evaluates it, and the jail would run with no
-	// firewall at all (and no NAT). A host where pfctl does not answer is not judged.
+	// pf must run and must evaluate the anchors: with pf disabled, not loaded, or a main ruleset that lacks the line
+	// anchor "jailops/*", the jail's anchor is loaded and nothing evaluates it, and the jail would run with no firewall
+	// at all (and no NAT). A host where pfctl does not answer is a host where pf is not loaded, which is the same.
 	if len(atts) > 0 && !l.cfg.AllowStartWithoutPF {
-		if on := l.pfEnabled(ctx); on != nil && !*on {
+		on := l.pfEnabled(ctx)
+		switch {
+		case on == nil:
+			return fmt.Errorf("pf does not answer (is the pf module loaded?): not starting jail %s with a network link without its firewall (load pf and enable it with `service pf onestart`, or set allow-start-without-pf in priv.conf)", jn.Internal())
+		case !*on:
 			return fmt.Errorf("pf is disabled: not starting jail %s with a network link without its firewall (enable pf with `service pf onestart` or pfctl -e, or set allow-start-without-pf in priv.conf)", jn.Internal())
+		}
+		if rules, err := l.hostPfctl(ctx, "", "-s", "rules"); err == nil && !strings.Contains(rules, `anchor "`+AnchorPrefix+`*"`) {
+			return fmt.Errorf("the ruleset of pf has no line anchor \"jailops/*\": not starting jail %s with a network link, because nothing would evaluate its firewall (/etc/pf.conf is the host's file and needs that one line; jailops doctor says where; or set allow-start-without-pf in priv.conf)", jn.Internal())
 		}
 	}
 	// The jail's anchor is in place before its first process runs: jail(8) runs exec.start next, and the whole of

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -34,6 +35,16 @@ nothing. To change the whole document in an editor use edit.`,
 		ValidArgsFunction: completeKind(a, d),
 	}
 	build := flagBuild(cmd)
+	if len(d.createOnly) > 0 {
+		kept := pflag.NewFlagSet("set", pflag.ContinueOnError)
+		cmd.Flags().VisitAll(func(f *pflag.Flag) {
+			if !slices.Contains(d.createOnly, f.Name) {
+				kept.AddFlag(f)
+			}
+		})
+		cmd.ResetFlags()
+		cmd.Flags().AddFlagSet(kept)
+	}
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 		if !anyFlagGiven(cmd) {

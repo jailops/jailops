@@ -3,17 +3,21 @@ package render
 import (
 	"net/netip"
 	"regexp"
+	"sort"
 
 	"jailops.net/jailops/internal/validate"
 )
 
 var wgIfaceRE = regexp.MustCompile(`^wg[A-Za-z0-9_.-]{1,13}$`)
 
-// PFWireGuard renders the anchor jailops/wg.<name> of a WireGuard server: traffic that comes in on the tunnel from
-// the tunnel's own subnets may go to the subnets of the JailOps networks the server names, and everything else a peer
-// sends is dropped (the jails' own policies still apply to what is admitted). Without networks the anchor is empty
-// ("" is returned and the anchor is flushed).
-func PFWireGuard(name, iface string, tunnels, networks []netip.Prefix) (string, error) {
+// PFWireGuard renders the anchor jailops/wg.<name> of a WireGuard server. It holds only what protects the host from the
+// tunnel: a source that is no address of the tunnel is dropped (the antispoof of the interface), and so is everything a
+// peer sends to the host itself. What a peer reaches in a jail is not decided here: the peers of a tunnel are one more
+// external source, and the jail's own `allow in` rules with their source (the tunnel's prefix, a set, an address) open
+// the tunnel's interface for the jail's addresses, exactly as they open the uplink for the Internet (render.uplinkRules).
+// A peer reaches nothing outside the networks the server serves (served): what is addressed anywhere else, the host's
+// LAN or whatever its pf.conf would pass, is dropped here, so a tunnel is no way into the rest of the host's networks.
+func PFWireGuard(name, iface string, tunnels []netip.Prefix, host []netip.Addr, served []netip.Prefix) (string, error) {
 	if err := validate.Name("wireguard", name); err != nil {
 		return "", err
 	}
@@ -21,36 +25,41 @@ func PFWireGuard(name, iface string, tunnels, networks []netip.Prefix) (string, 
 		return "", validate.Invalid("interface", "invalid wireguard interface %q", iface)
 	}
 	var b builder
-	n := 0
-	for _, to := range networks {
-		for _, from := range tunnels {
-			if !from.IsValid() || !to.IsValid() || from.Addr().Is4() != to.Addr().Is4() {
-				continue
-			}
-			if n == 0 {
-				b.line("%s", Header)
-				b.line("# anchor jailops/wg.%s: the peers of the tunnel reach these JailOps networks", name)
-			}
-			fam := "inet"
-			if from.Addr().Is6() {
-				fam = "inet6"
-			}
-			b.line("pass in quick on %s %s from %s to %s", iface, fam, from.Masked(), to.Masked()) // labelPassRules adds the label and keep state (if-bound)
-			n++
+	b.line("%s", Header)
+	b.line("# anchor jailops/wg.%s: what protects the host from the tunnel; what the peers reach in a jail is decided by the jail's own allow in rules", name)
+	b.line("%s", tableLine(HostTable, addrStrings(uniqAddrs(host))))
+	var nets []string
+	for _, p := range tunnels {
+		if p.IsValid() {
+			nets = append(nets, p.Masked().String())
 		}
 	}
-	if n == 0 {
-		return "", nil
+	sort.Strings(nets)
+	if len(nets) > 0 {
+		b.line("%s", tableLine("tunnel_nets", nets))
+		b.line("# a packet that comes in on the tunnel with a source that is no address of the tunnel is forged")
+		b.line("block drop in quick on %s from ! <tunnel_nets> to any", iface)
 	}
-	// The anchor confines the tunnel: whatever a peer sends that the rules above do not admit is dropped here, so the
-	// host's own ruleset does not decide what a peer may reach (the host itself and its LAN included).
-	b.line("# nothing else from the peers")
-	b.line("block drop in quick on %s all", iface)
+	b.line("# the host: closed to the peers (the host's own pf.conf decides what the host offers them, if anything)")
+	b.line("block drop in quick on %s from any to <%s>", iface, HostTable)
+	var sn []string
+	for _, p := range served {
+		if p.IsValid() {
+			sn = append(sn, p.Masked().String())
+		}
+	}
+	sort.Strings(sn)
+	if len(sn) > 0 {
+		b.line("%s", tableLine("served_nets", sn))
+		b.line("# a peer reaches the networks this tunnel serves (their jails decide) and nothing else")
+		b.line("block drop in quick on %s from any to ! <served_nets>", iface)
+	} else {
+		b.line("# this tunnel serves no network: a peer reaches nothing")
+		b.line("block drop in quick on %s all", iface)
+	}
 	out, err := b.result()
 	if err != nil {
 		return "", err
 	}
-	// The pass rules carry the label and the interface-bound state of every other anchor: a floating state would carry
-	// a connection through the second hop (the jail's anchor) without that hop's rules looking at it.
-	return labelPassRules("jailops/wg."+name, out, 0), nil
+	return out, nil
 }

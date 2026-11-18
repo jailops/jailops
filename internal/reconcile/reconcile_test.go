@@ -465,7 +465,7 @@ func TestAutostartSkipsALockedJail(t *testing.T) {
 
 type fakeNDP struct {
 	mu      sync.Mutex
-	entries [][]ndproxy.Entry
+	entries []ndproxy.Desired
 	run     chan struct{}
 	// shut makes the capture report as closed with the reason openErr; closes counts Close calls.
 	shut    bool
@@ -482,18 +482,18 @@ func (f *fakeNDP) Status() ndproxy.Status {
 }
 func (f *fakeNDP) Close() error { f.mu.Lock(); f.closes++; f.mu.Unlock(); return nil }
 
-func (f *fakeNDP) Sync(_ context.Context, e []ndproxy.Entry) error {
+func (f *fakeNDP) Sync(_ context.Context, d ndproxy.Desired) error {
 	f.mu.Lock()
-	f.entries = append(f.entries, e)
+	f.entries = append(f.entries, d)
 	f.mu.Unlock()
 	return nil
 }
 func (f *fakeNDP) Run(ctx context.Context) error { close(f.run); <-ctx.Done(); return nil }
-func (f *fakeNDP) last() []ndproxy.Entry {
+func (f *fakeNDP) last() ndproxy.Desired {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.entries) == 0 {
-		return nil
+		return ndproxy.Desired{}
 	}
 	return f.entries[len(f.entries)-1]
 }
@@ -514,16 +514,19 @@ func TestNDPProxyManagement(t *testing.T) {
 	j := jailDesired("web")
 	j.Proxy = []reconcile.ProxyAddr{{Addr: "2001:db8:1::10", Iface: "jo0ha", Uplink: "em0"}}
 	w.des = reconcile.Desired{Networks: []reconcile.NetworkDesired{proxyNet()}, Jails: []reconcile.JailDesired{j}}
-	// A stopped jail is not answered for.
+	// The range is answered while no jail runs; the stopped jail has no route.
 	w.R.Pass(bg)
-	if len(built) != 1 || built[0] != "em0" || len(ndp.last()) != 0 {
-		t.Fatalf("%v %v", built, ndp.last())
+	if len(built) != 1 || built[0] != "em0" {
+		t.Fatalf("%v", built)
+	}
+	if got := ndp.last(); len(got.Addrs) != 17 || len(got.Routes) != 0 {
+		t.Fatalf("range 2001:db8:1::10-20 is 17 addresses, no running jail: %+v", got)
 	}
 	<-ndp.run
 	_ = w.Jails.Create(bg, "/etc/jailops/jails/web/jail.conf", "web")
 	w.R.Pass(bg)
 	got := ndp.last()
-	if len(got) != 1 || got[0].Addr.String() != "2001:db8:1::10" || got[0].Iface != "jo0ha" {
+	if len(got.Routes) != 1 || got.Routes[0].Addr.String() != "2001:db8:1::10" || got.Routes[0].Iface != "jo0ha" {
 		t.Fatalf("%+v", got)
 	}
 	var cond api.Condition
@@ -535,11 +538,11 @@ func TestNDPProxyManagement(t *testing.T) {
 	if cond.Status != api.ConditionTrue || cond.Reason != "Answering" {
 		t.Fatalf("%+v", w.netSt["lan"].Conditions)
 	}
-	// The jail stops: the address is withdrawn.
+	// The jail stops: its route is withdrawn, the address is still answered.
 	_ = w.Jails.Remove(bg, "/etc/jailops/jails/web/jail.conf", "web")
 	w.R.Pass(bg)
-	if len(ndp.last()) != 0 {
-		t.Fatalf("%+v", ndp.last())
+	if got := ndp.last(); len(got.Routes) != 0 || len(got.Addrs) != 17 {
+		t.Fatalf("%+v", got)
 	}
 	if len(built) != 1 {
 		t.Fatalf("the proxy was rebuilt: %v", built)
@@ -835,4 +838,64 @@ func TestWatchKicksAPassWhenPFWasFlushed(t *testing.T) {
 		live, _ := w.PF.Read(bg, j.AnchorName)
 		return live == j.Ruleset
 	})
+}
+
+// A jail whose start at boot fails for a reason that can pass (the fail-closed checks of the anchor, a slow pfctl) is
+// tried again by the passes after the first, not left down: each retry waits ten seconds, it stops after the fourth
+// try, and a retry that works says so.
+func TestAutostartRetriesAFailedJail(t *testing.T) {
+	w := newWorld(t, reconcile.Config{Autostart: true})
+	w.des = reconcile.Desired{Jails: []reconcile.JailDesired{jd("db", 0), jd("cache", 5)}}
+	w.fail["db"] = errors.New("pf did not answer")
+	w.R.Pass(bg)
+	bootCond := func(n string) api.Condition {
+		for _, c := range w.jailSt[n] {
+			if c.Type == reconcile.CondBoot {
+				return c
+			}
+		}
+		return api.Condition{}
+	}
+	tries := func() int {
+		n := 0
+		for _, s := range w.starts {
+			if s == "db" {
+				n++
+			}
+		}
+		return n
+	}
+	if tries() != 1 {
+		t.Fatalf("starts %v", w.starts)
+	}
+	w.R.Pass(bg) // inside the gap: no retry
+	if tries() != 1 {
+		t.Fatalf("retried at once: %v", w.starts)
+	}
+	for i := 0; i < 10; i++ {
+		w.clock.Advance(11 * time.Second)
+		w.R.Pass(bg)
+	}
+	if tries() != 4 {
+		t.Fatalf("a jail is tried 4 times in all, not %d: %v", tries(), w.starts)
+	}
+	if c := bootCond("db"); c.Reason != "StartFailed" || !strings.Contains(c.Message, "try 4 of 4") {
+		t.Fatalf("%+v", c)
+	}
+	// a later failure that passes starts it on the next try
+	w2 := newWorld(t, reconcile.Config{Autostart: true})
+	w2.des = reconcile.Desired{Jails: []reconcile.JailDesired{jd("db", 0)}}
+	w2.fail["db"] = errors.New("pf did not answer")
+	w2.R.Pass(bg)
+	delete(w2.fail, "db")
+	w2.clock.Advance(11 * time.Second)
+	rep := w2.R.Pass(bg)
+	if len(rep.Started) != 1 || rep.Started[0] != "db" {
+		t.Fatalf("the retry did not start the jail: %+v", rep)
+	}
+	for _, x := range w2.jailSt["db"] {
+		if x.Type == reconcile.CondBoot && (x.Reason != "Started" || x.Status != api.ConditionTrue) {
+			t.Fatalf("%+v", x)
+		}
+	}
 }

@@ -91,3 +91,23 @@ func TestNetworksAreOrdinaryUnicastRanges(t *testing.T) {
 		}
 	}
 }
+
+// A proxy range that holds the base address of the prefix would take over the subnet-router anycast address, which a
+// router uses: it is refused when the network is made, and a routed network (no proxy) is not held to it.
+func TestProxyRangeRefusesTheBaseAddress(t *testing.T) {
+	s := proxySpec("2001:db8:1:2:100::/80")
+	s.IPv6.Range = "2001:db8:1:2:100::-2001:db8:1:2:100::20"
+	err := NetworkSpec(s)
+	if err == nil || !strings.Contains(err.Error(), "base address") {
+		t.Fatalf("a range from the base address: %v", err)
+	}
+	s.IPv6.Range = "2001:db8:1:2:100::1-2001:db8:1:2:100::20"
+	if err := NetworkSpec(s); err != nil {
+		t.Fatalf("a range above the base address: %v", err)
+	}
+	s.IPv6.Mode = api.IPv6Routed
+	s.IPv6.Range = "2001:db8:1:2:100::-2001:db8:1:2:100::20"
+	if err := NetworkSpec(s); err != nil {
+		t.Fatalf("a routed network: %v", err)
+	}
+}

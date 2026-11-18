@@ -431,3 +431,38 @@ func TestOperationFailureAndCancel(t *testing.T) {
 	}
 	tr.golden("operation_failure")
 }
+
+// A host with one image needs no --image, as a project with one network or storage needs no --network or --storage;
+// with several images the error lists them.
+func TestJailCreateDefaultsTheOnlyImage(t *testing.T) {
+	h := newHarness(t, fake.WithHostName("alpha"))
+	h.seed()
+	_, errs, code := h.run("", "jail", "create", "web", "--network", "lan", "--storage", "default")
+	if code != 0 || !strings.Contains(errs, "image freebsd-15: the only image") {
+		t.Fatalf("one image: %d %s", code, errs)
+	}
+	h.srv.SeedImage(api.Image{
+		Metadata: api.ObjectMeta{Name: "freebsd-16"},
+		Spec:     api.ImageSpec{OS: api.OSFreeBSD, Release: "16.0-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}},
+	})
+	_, errs, code = h.run("", "jail", "create", "w2", "--network", "lan", "--storage", "default")
+	if code == 0 || !strings.Contains(errs, "freebsd-15") || !strings.Contains(errs, "freebsd-16") {
+		t.Fatalf("two images: %d %s", code, errs)
+	}
+}
+
+// op show tells a person the status and where the time went, and says so when a running operation has no step yet.
+func TestOpShowIsReadable(t *testing.T) {
+	h := newHarness(t, fake.WithHostName("alpha"))
+	h.seed()
+	tr := h.transcript()
+	id := strings.TrimSpace(tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--no-wait", "-o", "name"))
+	tr.ok("op", "wait", id)
+	out, errs, code := h.run("", "op", "show", id)
+	if code != 0 || !strings.Contains(out, "status:   success") || !strings.Contains(out, id) {
+		t.Fatalf("op show: %d %s %s", code, out, errs)
+	}
+	if out, _, _ = h.run("", "op", "show", id, "-o", "yaml"); !strings.Contains(out, "status: success") {
+		t.Fatalf("yaml form changed: %s", out)
+	}
+}

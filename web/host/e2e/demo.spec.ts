@@ -396,6 +396,19 @@ test('IPv6 addresses are compressed, copyable and the network mode is a badge', 
   await expect(page.locator('[data-network="lan"]').getByRole('button', { name: /^Copy 2001:db8:20:1::\/80$/ })).toBeVisible()
 })
 
+test('the NDP proxy of a network is a switch with a status panel', async ({ page }) => {
+  await open(page, '/networks')
+  const edge = page.locator('[data-network="edge"]')
+  await expect(edge.locator('[data-ndp="on"]')).toBeVisible()
+  await expect(edge.getByTestId('ndp-edge')).toHaveText('Turn off')
+  await expect(edge.getByTestId('ndp-status')).toContainText('Answering')
+  await expect(edge.getByTestId('ndp-status')).toContainText('41 answered')
+  const lan = page.locator('[data-network="lan"]')
+  await expect(lan.locator('[data-ndp="off"]')).toBeVisible()
+  await expect(lan.getByTestId('ndp-lan')).toHaveText('Turn on')
+  await expect(lan.getByTestId('ndp-status')).toHaveCount(0)
+})
+
 test('network form: proxy mode explains itself, validates inline and creates the network', async ({ page }) => {
   await open(page, '/networks')
   await page.getByTestId('new-network').click()

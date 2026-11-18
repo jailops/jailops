@@ -79,6 +79,7 @@ func FuzzParseJailName(f *testing.F) {
 func newProjectEnv(t *testing.T, project, name string) *hookEnv {
 	t.Helper()
 	e := newEnv(t)
+	e.pfOn()
 	ctx := context.Background()
 	h := &hookEnv{env: e}
 	internal := project + "_" + name

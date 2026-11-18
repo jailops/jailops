@@ -20,6 +20,7 @@
         "volumes",
         "images",
         "networks",
+        "ndp",
         "firewall",
         "backup-targets",
         "backup-policies",

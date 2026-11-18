@@ -172,43 +172,31 @@ func (j *fakeJoiner) Leave(_ string, g netip.Addr) error {
 }
 func (j *fakeJoiner) joins(g netip.Addr) int { j.mu.Lock(); defer j.mu.Unlock(); return j.joined[g] }
 
-type fakeProber struct {
-	mu     sync.Mutex
-	probed []netip.Addr
-}
-
-func (p *fakeProber) Probe(a netip.Addr, _ string) error {
-	p.mu.Lock()
-	p.probed = append(p.probed, a)
-	p.mu.Unlock()
-	return nil
-}
-func (p *fakeProber) n() int { p.mu.Lock(); defer p.mu.Unlock(); return len(p.probed) }
-
 type rig struct {
 	p   *Proxy
 	cap *fakeCapture
 	inj *fakeInjector
 	rt  *fakeRoutes
 	jn  *fakeJoiner
-	pr  *fakeProber
 	clk *fakeClock
 }
 
 func newRig(t *testing.T, cfg Config) *rig {
 	t.Helper()
 	r := &rig{cap: &fakeCapture{info: LinkInfo{Index: 3, MAC: macH, Up: true}}, inj: &fakeInjector{},
-		rt: &fakeRoutes{}, jn: &fakeJoiner{}, pr: &fakeProber{}, clk: newClock()}
+		rt: &fakeRoutes{}, jn: &fakeJoiner{}, clk: newClock()}
 	if cfg.Uplink == "" {
 		cfg.Uplink = "em0"
 	}
-	p, err := New(cfg, Deps{Capture: r.cap, Injector: r.inj, Routes: r.rt, Joiner: r.jn, Prober: r.pr, Clock: r.clk})
+	p, err := New(cfg, Deps{Capture: r.cap, Injector: r.inj, Routes: r.rt, Joiner: r.jn, Clock: r.clk})
 	if err != nil {
 		t.Fatal(err)
 	}
 	r.p = p
 	// For direct HandleFrame tests the host MAC is set as Run would.
 	p.hostMAC = macH
+	// the prefix of the proxy-mode network the addresses of the tests belong to
+	p.SetPrefixes([]netip.Prefix{netip.MustParsePrefix("2001:db8::/32")})
 	return r
 }
 
@@ -318,15 +306,6 @@ func TestDADDefenceStopsWithTheJail(t *testing.T) {
 	}
 }
 
-func TestDADDefenceInProbeModeDoesNotProbe(t *testing.T) {
-	r := newRig(t, Config{Table: TableConfig{Mode: ModeProbe}})
-	r.add(t, jailA)
-	r.p.HandleFrame(mkNS(netip.IPv6Unspecified(), jailA, SolicitedNode(jailA), macA, nil))
-	if r.pr.n() != 0 || r.p.Table().Pending() != 0 {
-		t.Fatal("DAD triggered a probe")
-	}
-}
-
 func TestUnknownTargetIgnored(t *testing.T) {
 	r := newRig(t, Config{})
 	r.add(t, jailA)
@@ -414,10 +393,10 @@ func TestSync(t *testing.T) {
 	b := netip.MustParseAddr("2001:db8::b")
 	c := netip.MustParseAddr("2001:db8::c")
 	ctx := context.Background()
-	if err := r.p.Sync(ctx, []Entry{{jailA, "jo0"}, {b, "jo0"}}); err != nil {
+	if err := r.p.Sync(ctx, Desired{Routes: []Entry{{jailA, "jo0"}, {b, "jo0"}}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.p.Sync(ctx, []Entry{{b, "jo1"}, {c, "jo0"}}); err != nil {
+	if err := r.p.Sync(ctx, Desired{Routes: []Entry{{b, "jo1"}, {c, "jo0"}}}); err != nil {
 		t.Fatal(err)
 	}
 	got := r.p.Table().Addrs()
@@ -426,22 +405,39 @@ func TestSync(t *testing.T) {
 	}
 }
 
-func TestFloodBoundedProbeMode(t *testing.T) {
-	r := newRig(t, Config{Table: TableConfig{Mode: ModeProbe, MaxPendingPerAddr: 4, MaxPendingTotal: 8}})
-	r.add(t, jailA)
-	for i := 0; i < 2000; i++ {
-		src := netip.AddrFrom16([16]byte{0xfe, 0x80, 14: byte(i >> 8), 15: byte(i)})
-		mac := MAC{2, 0, 0, 0, byte(i >> 8), byte(i)}
-		r.p.HandleFrame(mkNS(src, jailA, SolicitedNode(jailA), mac, &mac))
+// The range is answered whether a jail runs or not; a route exists only for a running jail, and the address stays
+// answered when the jail stops.
+func TestSyncAnswersTheRangeAndRoutesTheRunningJails(t *testing.T) {
+	r := newRig(t, Config{})
+	ctx := context.Background()
+	b := netip.MustParseAddr("2001:db8::b")
+	c := netip.MustParseAddr("2001:db8::c")
+	rng := Desired{Addrs: []netip.Addr{jailA, b, c}}
+	if err := r.p.Sync(ctx, rng); err != nil {
+		t.Fatal(err)
 	}
-	if n := r.p.Table().Pending(); n != 4 {
-		t.Fatalf("pending %d", n)
+	if got := r.p.Table().Addrs(); len(got) != 3 || r.rt.count() != 0 {
+		t.Fatalf("range without jails: %v, %d routes", got, r.rt.count())
 	}
-	if m := r.p.Metrics(); m.Floods < 1990 || m.Answered != 0 {
-		t.Fatalf("%+v", m)
+	rng.Routes = []Entry{{b, "jo1"}}
+	if err := r.p.Sync(ctx, rng); err != nil {
+		t.Fatal(err)
 	}
-	if r.pr.n() != 1 {
-		t.Fatalf("probes %d", r.pr.n())
+	if r.rt.count() != 1 || r.rt.routes[b] != "jo1" {
+		t.Fatalf("routes %v", r.rt.routes)
+	}
+	rng.Routes = nil
+	if err := r.p.Sync(ctx, rng); err != nil {
+		t.Fatal(err)
+	}
+	if r.rt.count() != 0 || !r.p.Table().Has(b) {
+		t.Fatalf("a stopped jail keeps its answer and loses its route: %d routes, held %v", r.rt.count(), r.p.Table().Has(b))
+	}
+	if err := r.p.Sync(ctx, Desired{Addrs: []netip.Addr{jailA}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := r.p.Table().Addrs(); len(got) != 1 || got[0] != jailA {
+		t.Fatalf("addresses that left the range are dropped: %v", got)
 	}
 }
 
@@ -465,48 +461,10 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
-func TestProbeModeAnswersAfterReply(t *testing.T) {
-	r := newRig(t, Config{Table: TableConfig{Mode: ModeProbe, RetransmitTime: time.Second, RetransmitLimit: 2}})
-	r.add(t, jailA)
-	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
-	if len(r.inj.all()) != 0 || r.pr.n() != 1 {
-		t.Fatal("must probe first")
-	}
-	r.clk.Advance(time.Second)
-	r.p.Tick()
-	if r.pr.n() != 2 {
-		t.Fatalf("retransmit: %d", r.pr.n())
-	}
-	r.p.NotifyReachable(jailA)
-	out := r.inj.all()
-	if len(out) != 1 || parseOut(t, out[0]).EthDst != macA {
-		t.Fatal("queued requester not answered")
-	}
-	r.clk.Advance(time.Second) // not the same requester's retransmission any more
-	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
-	if len(r.inj.all()) != 2 {
-		t.Fatal("valid entry must answer at once")
-	}
-}
-
-func TestProbeModeRemovedWhileQueued(t *testing.T) {
-	r := newRig(t, Config{Table: TableConfig{Mode: ModeProbe}})
-	r.add(t, jailA)
-	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
-	_ = r.p.RemoveAddress(context.Background(), jailA)
-	r.p.NotifyReachable(jailA)
-	if len(r.inj.all()) != 0 {
-		t.Fatal("answered for removed address")
-	}
-}
-
 func TestNewValidation(t *testing.T) {
 	d := Deps{Capture: &fakeCapture{}, Injector: &fakeInjector{}, Routes: &fakeRoutes{}, Joiner: &fakeJoiner{}, Clock: newClock()}
 	if _, err := New(Config{}, d); err == nil {
 		t.Fatal("no uplink")
-	}
-	if _, err := New(Config{Uplink: "em0", Table: TableConfig{Mode: ModeProbe}}, d); err == nil {
-		t.Fatal("probe mode without prober")
 	}
 	if _, err := New(Config{Uplink: "em0"}, Deps{}); err == nil {
 		t.Fatal("no deps")
@@ -609,7 +567,7 @@ func TestRunReopensOnReconfigure(t *testing.T) {
 	cancel, errc := startRun(t, r)
 	defer stopRun(t, cancel, errc)
 	r.eventually(t, "open", func() bool { return r.cap.stream(0) != nil })
-	if err := r.p.Reconfigure(Config{Uplink: "em0", Promisc: true, Table: TableConfig{Mode: ModeImmediate}}); err != nil {
+	if err := r.p.Reconfigure(Config{Uplink: "em0", Promisc: true}); err != nil {
 		t.Fatal(err)
 	}
 	r.eventually(t, "reopen", func() bool { return r.cap.stream(1) != nil })
@@ -624,10 +582,10 @@ func TestRunReopensOnReconfigure(t *testing.T) {
 	}
 }
 
-func TestReconfigureTimingWithoutRestart(t *testing.T) {
-	r := newRig(t, Config{Table: TableConfig{Mode: ModeProbe}})
+func TestReconfigureWithoutRestart(t *testing.T) {
+	r := newRig(t, Config{})
 	r.add(t, jailA)
-	if err := r.p.Reconfigure(Config{Uplink: "em0", Table: TableConfig{Mode: ModeImmediate}}); err != nil {
+	if err := r.p.Reconfigure(Config{Uplink: "em0", Router: true}); err != nil {
 		t.Fatal(err)
 	}
 	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
@@ -655,16 +613,6 @@ func TestRunRefusesBridgeMember(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("did not refuse")
 	}
-}
-
-func TestRunTimersDriveProbes(t *testing.T) {
-	r := newRig(t, Config{Table: TableConfig{Mode: ModeProbe, RetransmitTime: time.Second, RetransmitLimit: 3}})
-	r.add(t, jailA)
-	cancel, errc := startRun(t, r)
-	defer stopRun(t, cancel, errc)
-	r.eventually(t, "open", func() bool { return r.cap.stream(0) != nil })
-	r.cap.stream(0).in <- mkNS(router, jailA, SolicitedNode(jailA), macA, &macA)
-	r.eventually(t, "retransmits", func() bool { return r.pr.n() >= 3 })
 }
 
 // announcedTargets counts the unsolicited advertisements per target.
@@ -934,5 +882,48 @@ func TestPerTargetFloodDoesNotStarveAnotherRequestersMAC(t *testing.T) {
 	r.p.HandleFrame(mkNS(router, jailA, SolicitedNode(jailA), macA, &macA))
 	if got := r.p.Metrics().Answered; got != floodedAnswered+1 {
 		t.Fatalf("the router's solicitation for the flooded target was not answered: %d -> %d", floodedAnswered, got)
+	}
+}
+
+// An address that joins the held set after the proxy started is answered like the first one: its table entry and its
+// solicited-node group are made when it joins, and nothing about the capture depends on the addresses of the start.
+func TestAddressesAddedAfterTheStartAreAnswered(t *testing.T) {
+	r := newRig(t, Config{})
+	ctx := context.Background()
+	b := netip.MustParseAddr("2001:db8::b")
+	c := netip.MustParseAddr("2001:db8::c")
+	if err := r.p.Sync(ctx, Desired{Addrs: []netip.Addr{jailA}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.p.Sync(ctx, Desired{Addrs: []netip.Addr{jailA, b, c}, Routes: []Entry{{b, "jo1"}, {c, "jo2"}}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range []netip.Addr{jailA, b, c} {
+		if r.jn.joined[SolicitedNode(a)] != 1 {
+			t.Fatalf("the group of %s was not joined once: %v", a, r.jn.joined)
+		}
+	}
+	r.p.HandleFrame(mkNS(router, b, SolicitedNode(b), macA, &macA))
+	r.p.HandleFrame(mkNS(router, c, SolicitedNode(c), macA, &macA))
+	r.clk.Advance(time.Second)
+	if n := r.p.Metrics().Answered; n != 2 {
+		t.Fatalf("answered %d of 2 solicitations for addresses added after the start", n)
+	}
+}
+
+// The range of a network is answered whether a jail holds an address or not, an address outside it is not, and the
+// answered set never contains an address the caller left out of Addrs (the host's own, the resolver, the gateway).
+func TestOnlyTheGivenAddressesAreAnswered(t *testing.T) {
+	r := newRig(t, Config{})
+	in := netip.MustParseAddr("2001:db8::11")
+	host := netip.MustParseAddr("2001:db8::1")
+	if err := r.p.Sync(context.Background(), Desired{Addrs: []netip.Addr{in}}); err != nil {
+		t.Fatal(err)
+	}
+	r.p.HandleFrame(mkNS(router, in, SolicitedNode(in), macA, &macA))
+	r.p.HandleFrame(mkNS(router, host, SolicitedNode(host), macA, &macA))
+	m := r.p.Metrics()
+	if m.Answered != 1 || m.Unknown != 1 {
+		t.Fatalf("answered %d, unknown %d: only the given address may be answered", m.Answered, m.Unknown)
 	}
 }

@@ -59,19 +59,12 @@ type Joiner interface {
 	Leave(iface string, group netip.Addr) error
 }
 
-// Prober sends a solicitation for addr toward the jail, on iface (the host end of its epair). It is only
-// needed in ModeProbe. The reply is reported with Proxy.NotifyReachable.
-type Prober interface {
-	Probe(addr netip.Addr, iface string) error
-}
-
 // Deps are the collaborators of a Proxy.
 type Deps struct {
 	Capture  Capture
 	Injector Injector
 	Routes   Routes
 	Joiner   Joiner
-	Prober   Prober // required in ModeProbe
 	Clock    Clock
 	// Logf, when set, receives the first failure to open the capture and its recovery.
 	Logf func(format string, args ...any)
@@ -80,7 +73,6 @@ type Deps struct {
 // Config configures the Proxy. Zero values take defaults.
 type Config struct {
 	Uplink string
-	Table  TableConfig
 	// Promisc puts the uplink into promiscuous mode. It is off by default:
 	// the design expects solicited-node group membership and the host's
 	// own MAC to make promiscuous mode unnecessary (UNVERIFIED).
@@ -125,6 +117,8 @@ type Status struct {
 	Err string
 	// Addresses is the number of proxied addresses.
 	Addresses int
+	// Addrs is what the proxy knows about each address it holds or was asked for.
+	Addrs []AddrStats
 	// FloodsLastHour is how many solicitations the limits dropped in the last hour.
 	FloodsLastHour uint64
 	Metrics
@@ -180,13 +174,12 @@ type Metrics struct {
 	DADIgnored   uint64 // DAD probes for addresses that are not proxied, left unanswered
 	DADDefended  uint64 // DAD probes of other hosts for a proxied address, answered so that they see the duplicate
 	Unknown      uint64 // solicitations for addresses that are not proxied
-	Probes       uint64 // probes sent toward the jail
 	Reopens      uint64 // times the capture was (re)opened
 	InjectErrors uint64
 }
 
 type counters struct {
-	answered, announced, dropped, malformed, floods, coalesced, dad, defended, unknown, probes, reopens, injectErrors atomic.Uint64
+	answered, announced, dropped, malformed, floods, coalesced, dad, defended, unknown, reopens, injectErrors atomic.Uint64
 }
 
 // Proxy answers neighbor solicitations on the uplink for allocated jail
@@ -227,6 +220,12 @@ type Proxy struct {
 	link      LinkInfo
 	open      bool
 	ifaces    map[netip.Addr]string
+	prefixes  []netip.Prefix
+	seq       uint64 // events recorded: the position in the ring
+	lastSeq   uint64 // the sequence number of the newest event
+	ring      []Event
+	stats     map[netip.Addr]*addrState
+	missed    map[netip.Addr]*AddrStats
 	groups    map[netip.Addr]int // solicited-node group -> address count
 	bucket    float64
 	last      time.Time
@@ -241,17 +240,16 @@ func New(cfg Config, deps Deps) (*Proxy, error) {
 	if deps.Capture == nil || deps.Injector == nil || deps.Routes == nil || deps.Joiner == nil || deps.Clock == nil {
 		return nil, api.Errorf(api.CodeInvalid, "capture, injector, routes, joiner and clock are required")
 	}
-	if cfg.Table.Mode == ModeProbe && deps.Prober == nil {
-		return nil, api.Errorf(api.CodeInvalid, "probe mode needs a prober")
-	}
 	if cfg.LinkPoll <= 0 {
 		cfg.LinkPoll = 2 * time.Second
 	}
 	return &Proxy{
 		deps:     deps,
 		cfg:      cfg,
-		table:    NewTable(cfg.Table, deps.Clock),
+		table:    NewTable(),
 		ifaces:   map[netip.Addr]string{},
+		stats:    map[netip.Addr]*addrState{},
+		missed:   map[netip.Addr]*AddrStats{},
 		groups:   map[netip.Addr]int{},
 		reload:   make(chan struct{}, 1),
 		wake:     make(chan struct{}, 1),
@@ -270,50 +268,92 @@ func (p *Proxy) Metrics() Metrics {
 	return Metrics{
 		Answered: p.m.answered.Load(), Announced: p.m.announced.Load(), Dropped: p.m.dropped.Load(), Malformed: p.m.malformed.Load(),
 		Floods: p.m.floods.Load(), Coalesced: p.m.coalesced.Load(), DADIgnored: p.m.dad.Load(), DADDefended: p.m.defended.Load(), Unknown: p.m.unknown.Load(),
-		Probes: p.m.probes.Load(), Reopens: p.m.reopens.Load(), InjectErrors: p.m.injectErrors.Load(),
+		Reopens: p.m.reopens.Load(), InjectErrors: p.m.injectErrors.Load(),
 	}
 }
 
-// AddAddress starts proxying addr, routing it through iface. It is safe to call
-// while Run is active. On any failure nothing is left behind.
+// AddAddress starts answering for addr and routes it through iface. It is safe to call while Run is active. On any
+// failure nothing is left behind.
 func (p *Proxy) AddAddress(ctx context.Context, addr netip.Addr, iface string) error {
 	if iface == "" {
 		return api.Errorf(api.CodeInvalid, "interface is required")
 	}
 	p.admin.Lock()
 	defer p.admin.Unlock()
-	return p.addLocked(ctx, addr, iface)
+	if err := p.addLocked(ctx, addr); err != nil {
+		return err
+	}
+	if err := p.setRouteLocked(ctx, addr, iface); err != nil {
+		_ = p.dropLocked(ctx, addr)
+		return err
+	}
+	return nil
 }
 
-func (p *Proxy) addLocked(ctx context.Context, addr netip.Addr, iface string) error {
+// addLocked makes the proxy answer for addr: a table entry, the solicited-node group of the address and its first
+// announcement. The route to a jail is a separate step (setRouteLocked).
+func (p *Proxy) addLocked(ctx context.Context, addr netip.Addr) error {
 	if err := p.table.Add(addr); err != nil {
 		return err
 	}
-	if err := p.deps.Routes.Add(ctx, addr, iface); err != nil {
-		p.table.Remove(addr)
-		return fmt.Errorf("ndproxy: route for %s: %w", addr, err)
-	}
 	g := SolicitedNode(addr)
 	p.mu.Lock()
-	p.ifaces[addr] = iface
+	p.noteAdded(addr, "")
 	first := p.groups[g] == 0
 	p.groups[g]++
 	uplink := p.cfg.Uplink
 	p.mu.Unlock()
 	if first {
 		if err := p.deps.Joiner.Join(uplink, g); err != nil {
-			p.dropLocked(ctx, addr)
+			_ = p.dropLocked(ctx, addr)
 			return fmt.Errorf("ndproxy: join %s: %w", g, err)
 		}
 	}
 	p.mu.Lock()
+	p.pending[addr] = &announceState{left: 1}
+	p.mu.Unlock()
+	p.wakeUp()
+	return nil
+}
+
+// setRouteLocked makes the host route of addr go through iface, or none when iface is empty. A new route announces the
+// address again, so that a router that cached a failed resolution while the jail was down learns the host's MAC.
+func (p *Proxy) setRouteLocked(ctx context.Context, addr netip.Addr, iface string) error {
+	p.mu.Lock()
+	cur := p.ifaces[addr]
+	p.mu.Unlock()
+	if cur == iface {
+		return nil
+	}
+	if cur != "" {
+		if err := p.deps.Routes.Remove(ctx, addr, cur); err != nil {
+			return fmt.Errorf("ndproxy: route of %s: %w", addr, err)
+		}
+		p.mu.Lock()
+		delete(p.ifaces, addr)
+		p.noteIface(addr, "")
+		p.mu.Unlock()
+	}
+	if iface == "" {
+		return nil
+	}
+	if err := p.deps.Routes.Add(ctx, addr, iface); err != nil {
+		return fmt.Errorf("ndproxy: route for %s: %w", addr, err)
+	}
+	p.mu.Lock()
+	p.ifaces[addr] = iface
+	p.noteIface(addr, iface)
 	p.pending[addr] = &announceState{left: announceRepeats}
 	p.mu.Unlock()
+	p.wakeUp()
+	return nil
+}
+
+func (p *Proxy) wakeUp() {
 	select {
 	case p.wake <- struct{}{}:
 	default:
 	}
-	return nil
 }
 
 // RemoveAddress stops proxying addr at once; the route and group are then
@@ -333,6 +373,7 @@ func (p *Proxy) dropLocked(ctx context.Context, addr netip.Addr) error {
 	p.mu.Lock()
 	iface := p.ifaces[addr]
 	delete(p.ifaces, addr)
+	p.noteDropped(addr)
 	delete(p.pending, addr)
 	for k := range p.tbucket {
 		if k.target == addr {
@@ -363,36 +404,54 @@ func (p *Proxy) dropLocked(ctx context.Context, addr netip.Addr) error {
 	return errors.Join(errs...)
 }
 
-// Entry is one desired proxied address.
+// Entry is the host route of one running jail: its address, through the host end of the jail's epair.
 type Entry struct {
 	Addr netip.Addr
 	// Iface is the host end of the jail's epair.
 	Iface string
 }
 
-// Sync makes the proxied set equal to entries: missing addresses are added,
-// extra ones removed. All errors are collected.
-func (p *Proxy) Sync(ctx context.Context, entries []Entry) error {
+// Desired is what the proxy of an uplink holds: it answers for every address of Addrs and for the address of every
+// route, and keeps a host route for each of Routes.
+type Desired struct {
+	// Addrs are the addresses the proxy answers for whether a jail runs or not: the allocation ranges of the
+	// networks that use the uplink.
+	Addrs []netip.Addr
+	// Routes are the running jails' addresses.
+	Routes []Entry
+}
+
+// Sync makes the proxy hold exactly d: missing addresses are added, extra ones removed, routes follow the running
+// jails. All errors are collected.
+func (p *Proxy) Sync(ctx context.Context, d Desired) error {
 	p.admin.Lock()
 	defer p.admin.Unlock()
-	want := map[netip.Addr]string{}
-	for _, e := range entries {
+	want := make(map[netip.Addr]string, len(d.Addrs)+len(d.Routes))
+	for _, a := range d.Addrs {
+		want[a] = ""
+	}
+	for _, e := range d.Routes {
 		want[e.Addr] = e.Iface
 	}
 	var errs []error
 	for _, a := range p.table.Addrs() {
-		b, ok := want[a]
-		p.mu.Lock()
-		cur := p.ifaces[a]
-		p.mu.Unlock()
-		if !ok || b != cur {
+		if _, ok := want[a]; !ok {
 			errs = append(errs, p.dropLocked(ctx, a))
 		}
 	}
-	for _, e := range entries {
-		if !p.table.Has(e.Addr) {
-			errs = append(errs, p.addLocked(ctx, e.Addr, e.Iface))
+	addrs := make([]netip.Addr, 0, len(want))
+	for a := range want {
+		addrs = append(addrs, a)
+	}
+	sort.Slice(addrs, func(i, j int) bool { return addrs[i].Less(addrs[j]) })
+	for _, a := range addrs {
+		if !p.table.Has(a) {
+			if err := p.addLocked(ctx, a); err != nil {
+				errs = append(errs, err)
+				continue
+			}
 		}
+		errs = append(errs, p.setRouteLocked(ctx, a, want[a]))
 	}
 	return errors.Join(errs...)
 }
@@ -403,9 +462,6 @@ func (p *Proxy) Sync(ctx context.Context, entries []Entry) error {
 func (p *Proxy) Reconfigure(cfg Config) error {
 	if cfg.Uplink == "" {
 		return api.Errorf(api.CodeInvalid, "uplink interface is required")
-	}
-	if cfg.Table.Mode == ModeProbe && p.deps.Prober == nil {
-		return api.Errorf(api.CodeInvalid, "probe mode needs a prober")
 	}
 	if cfg.LinkPoll <= 0 {
 		cfg.LinkPoll = 2 * time.Second
@@ -420,7 +476,6 @@ func (p *Proxy) Reconfigure(cfg Config) error {
 		groups = append(groups, g)
 	}
 	p.mu.Unlock()
-	p.table.SetConfig(cfg.Table)
 	if old.Uplink != cfg.Uplink {
 		for _, g := range groups {
 			_ = p.deps.Joiner.Leave(old.Uplink, g) // best effort: old link may be gone
@@ -433,14 +488,6 @@ func (p *Proxy) Reconfigure(cfg Config) error {
 		}
 	}
 	return nil
-}
-
-// NotifyReachable reports that the jail answered a probe for addr (ModeProbe);
-// queued requesters are answered.
-func (p *Proxy) NotifyReachable(addr netip.Addr) {
-	for _, r := range p.table.Reachable(addr) {
-		p.answer(addr, r)
-	}
 }
 
 // allow applies the answer rate limit.
@@ -468,9 +515,9 @@ func (p *Proxy) allow() bool {
 	return true
 }
 
-func (p *Proxy) answer(target netip.Addr, r Requester) {
+func (p *Proxy) answer(target netip.Addr, r Requester) string {
 	if !p.table.Has(target) {
-		return // removed while queued: never answer
+		return "no entry" // removed while queued: never answer
 	}
 	now := p.deps.Clock.Now()
 	p.mu.Lock()
@@ -478,7 +525,7 @@ func (p *Proxy) answer(target netip.Addr, r Requester) {
 	if t, ok := p.answered[key]; ok && now.Sub(t) < answerGap {
 		p.mu.Unlock()
 		p.m.coalesced.Add(1)
-		return
+		return "answered a moment ago"
 	}
 	if len(p.answered) > 4096 { // forged sources: keep the memory bounded whatever the timers do
 		for k, t := range p.answered {
@@ -502,12 +549,12 @@ func (p *Proxy) answer(target netip.Addr, r Requester) {
 	if !tb.take(now, answerPerTarget, answerPerTarget) {
 		p.mu.Unlock()
 		p.flood()
-		return
+		return "dropped: rate limit for this address"
 	}
 	p.mu.Unlock()
 	if !p.allow() {
 		p.flood()
-		return
+		return "dropped: rate limit"
 	}
 	p.mu.Lock()
 	p.answered[key] = now
@@ -520,9 +567,12 @@ func (p *Proxy) answer(target netip.Addr, r Requester) {
 	f := BuildNA(host, r.MAC, target, r.IP, target, flags, &host)
 	if err := p.deps.Injector.Send(f); err != nil {
 		p.m.injectErrors.Add(1)
-		return
+		p.noteSent(target, false, err)
+		return "error: " + err.Error()
 	}
+	p.noteSent(target, false, nil)
 	p.m.answered.Add(1)
+	return "answered"
 }
 
 // defend answers another host's duplicate address detection for a proxied address: an advertisement of the target,
@@ -609,6 +659,12 @@ func (p *Proxy) Announce() time.Time {
 		p.mu.Unlock()
 		f := BuildNA(host, MulticastMAC(allNodes), a, allNodes, a, flags, &host)
 		err := p.deps.Injector.Send(f)
+		p.noteSent(a, true, err)
+		if err != nil {
+			p.record("announce", a, netip.Addr{}, "error: "+err.Error())
+		} else {
+			p.record("announce", a, netip.Addr{}, "sent")
+		}
 		p.mu.Lock()
 		if p.pending[a] != st {
 			p.mu.Unlock() // removed or restarted while sending
@@ -655,6 +711,7 @@ func (p *Proxy) Status() Status {
 	st := Status{Open: p.open, Err: p.openErr}
 	p.mu.Unlock()
 	st.Addresses = p.table.Len()
+	st.Addrs = p.Addresses()
 	st.Metrics = p.Metrics()
 	st.FloodsLastHour = p.FloodsLastHour()
 	return st
@@ -666,17 +723,6 @@ func (p *Proxy) Close() error {
 		return c.Close()
 	}
 	return nil
-}
-
-func (p *Proxy) probe(addr netip.Addr) {
-	p.mu.Lock()
-	iface := p.ifaces[addr]
-	p.mu.Unlock()
-	if iface == "" || p.deps.Prober == nil {
-		return
-	}
-	p.m.probes.Add(1)
-	_ = p.deps.Prober.Probe(addr, iface) // retransmission covers a lost probe
 }
 
 // HandleFrame processes one captured frame. Run calls it; tests call it
@@ -720,43 +766,39 @@ func (p *Proxy) HandleFrame(frame []byte) {
 		p.m.malformed.Add(1)
 		return
 	}
-	if !p.admit(pkt.EthSrc) {
-		p.flood()
-		return
-	}
-	res := p.table.Solicit(pkt.Target, Requester{IP: pkt.Src, MAC: mac})
-	if res.Probe {
-		p.probe(pkt.Target)
-	}
-	switch res.Verdict {
-	case VerdictAnswer:
-		p.answeredTo(pkt.EthSrc)
-		p.answer(pkt.Target, Requester{IP: pkt.Src, MAC: mac})
-	case VerdictQueued:
-	case VerdictUnknown:
+	// The capture is promiscuous: on a shared segment it sees every solicitation of the segment. One for an address
+	// that is neither held nor inside a prefix of ours is somebody else's: it is counted and nothing more, so that it
+	// uses none of the sender's allowance (the router asks for ours with the same Ethernet source) and does not fill
+	// the ring of events.
+	if !p.ours(pkt.Target) {
 		p.m.unknown.Add(1)
 		p.m.dropped.Add(1)
-	case VerdictFlood:
-		p.flood()
-	default:
-		p.m.dropped.Add(1)
+		return
 	}
+	if !p.admit(pkt.EthSrc) {
+		p.flood()
+		p.record("solicit", pkt.Target, pkt.Src, "dropped: flood limit of the sender")
+		return
+	}
+	if !p.table.Has(pkt.Target) {
+		p.m.unknown.Add(1)
+		p.m.dropped.Add(1)
+		p.noteMissed(pkt.Target)
+		p.record("solicit", pkt.Target, pkt.Src, "no entry: the address is not held")
+		return
+	}
+	p.answeredTo(pkt.EthSrc)
+	p.record("solicit", pkt.Target, pkt.Src, p.answer(pkt.Target, Requester{IP: pkt.Src, MAC: mac}))
 }
 
-// Tick runs table timers. Run calls it; tests call it directly.
-func (p *Proxy) Tick() {
+// ours reports whether a is held by the proxy or lies inside a prefix of a network it serves.
+func (p *Proxy) ours(a netip.Addr) bool {
+	if p.table.Has(a) {
+		return true
+	}
 	p.mu.Lock()
-	now := p.deps.Clock.Now()
-	for k, t := range p.answered {
-		if now.Sub(t) > time.Second {
-			delete(p.answered, k)
-		}
-	}
-	p.mu.Unlock()
-	res := p.table.Tick()
-	for _, a := range res.Probes {
-		p.probe(a)
-	}
+	defer p.mu.Unlock()
+	return p.inPrefix(a)
 }
 
 type readResult struct {
@@ -789,7 +831,7 @@ func (p *Proxy) Run(ctx context.Context) error {
 	defer closeStream()
 	// One timer of each kind lives across the iterations of the loop: a frame wakes the loop, and under a flood of
 	// solicitations that is thousands of iterations a second, each of which used to make three timers of its own.
-	var announceT, tableT, pollT loopTimer
+	var announceT, pollT loopTimer
 
 	for ctx.Err() == nil {
 		p.mu.Lock()
@@ -839,12 +881,6 @@ func (p *Proxy) Run(ctx context.Context) error {
 				announceT.reset()
 			}
 		}
-		var tableTimer <-chan time.Time
-		if next, ok := p.table.Next(); ok {
-			tableTimer = tableT.until(p.deps.Clock, next)
-		} else {
-			tableT.reset()
-		}
 		pollTimer := pollT.after(p.deps.Clock, cfg.LinkPoll)
 
 		select {
@@ -855,9 +891,6 @@ func (p *Proxy) Run(ctx context.Context) error {
 			} else {
 				p.HandleFrame(r.frame)
 			}
-		case <-tableTimer:
-			tableT.reset()
-			p.Tick()
 		case <-p.reload:
 			closeStream()
 		case <-p.wake:

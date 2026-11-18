@@ -43,6 +43,7 @@ type hookEnv struct {
 func newHookEnv(t *testing.T, os api.OS, ipv4, ipv6 string, devices ...string) *hookEnv {
 	t.Helper()
 	e := newEnv(t)
+	e.pfOn()
 	ctx := context.Background()
 	h := &hookEnv{env: e}
 	h.host, h.jail, _ = ipam.EpairNames(hookUUID, 0)

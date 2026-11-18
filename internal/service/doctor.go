@@ -49,6 +49,8 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorDelegation(ctx, c)
 	s.doctorEncryption(ctx, c)
 	s.doctorPF(ctx, c)
+	s.doctorExposedJails(ctx, c)
+	s.doctorInPlaceThinJails(c)
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)
 	s.doctorDNS(ctx, c)
@@ -518,19 +520,21 @@ func (s *Service) doctorPF(ctx context.Context, c *checkSet) {
 	if strings.Contains(rules, `anchor "jailops/*"`) {
 		c.add("pf.anchors", api.DoctorOK, "the jailops anchors are in the ruleset", "")
 		if early := quickPassesBeforeAnchor(rules); len(early) > 0 {
-			c.add("pf.order", api.DoctorWarn, "rules of pf.conf that come before the jailops anchor pass traffic for good (quick), so policies cannot filter it and the NAT and port forwards of the networks do not apply to it: "+strings.Join(early, "; "),
-				`move anchor "jailops/*" above them, or accept that this traffic is not filtered by JailOps`)
+			c.add("pf.order", api.DoctorWarn, "these quick rules of pf.conf come before the jailops anchor and decide traffic for good, before the policies of the jails and before the NAT and port forwards of the networks: "+strings.Join(early, "; "),
+				`keep host rules in pf.conf and jail rules in policies; move anchor "jailops/*" above rules that pass jail traffic`)
 		} else {
 			c.add("pf.order", api.DoctorOK, "no quick pass rule comes before the jailops anchor", "")
 		}
+		s.doctorPFInbound(c, rules)
 		if hasScrub(rules) {
 			c.add("pf.scrub", api.DoctorOK, "pf.conf normalises packets (scrub)", "")
 		} else {
 			c.add("pf.scrub", api.DoctorWarn, "pf.conf has no scrub rule: fragments are not reassembled (a jail whose policy denies inbound traffic then loses fragmented packets, UDP above the path MTU among them) and TCP MSS is not clamped",
-				"add `scrub in all fragment reassemble` (and `max-mss` for a tunnel or a smaller MTU) near the top of /etc/pf.conf; see docs/install.md")
+				"add `scrub in all fragment reassemble` (and `max-mss` for a tunnel or a smaller MTU) near the top of /etc/pf.conf (scrub is a host-wide option, so it lives there); see docs/install.md")
 		}
 	} else {
-		c.add("pf.anchors", api.DoctorFail, "the jailops anchor line is missing from pf.conf", "add to /etc/pf.conf, and reload it with pfctl -f /etc/pf.conf. The anchor holds the filter rules and the NAT and port forwards of the jails, so it belongs before any quick rule that should not decide first:\n"+render.AnchorLines())
+		c.add("pf.anchors", api.DoctorFail, "the jailops anchor line is missing from the ruleset of pf: the rules of the jails are loaded but pf does not evaluate them (a jail with a network link does not start)",
+			"/etc/pf.conf is yours and protects this host: JailOps' firewall governs the jails and needs exactly one line there. Add it before any quick rule that should not decide first, then reload with pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf. Write no jail rules in pf.conf: policies do that:\n"+render.AnchorLines())
 	}
 	s.doctorStatePolicy(ctx, c, rules)
 }
@@ -831,8 +835,28 @@ func (s *Service) doctorNDPProxy(c *checkSet) {
 		c.add("network.ndproxy", api.DoctorWarn, "the IPv6 proxy dropped solicitations over its limits: "+strings.Join(flooded, "; "),
 			"a neighbor on the uplink sends far more neighbor solicitations than a segment needs; find it with tcpdump on the uplink (icmp6 and ip6[40] == 135) and ask the provider or the switch's port security to stop it")
 	default:
+		if un := s.ndpUnanswered(); len(un) > 0 {
+			c.add("network.ndproxy", api.DoctorFail, "the router asked for addresses the IPv6 proxy did not answer: "+strings.Join(un, "; "),
+				"jailops network ndp-proxy status NETWORK shows each address with what the proxy did; jailops network ndp-proxy watch NETWORK shows the questions live")
+			return
+		}
 		c.add("network.ndproxy", api.DoctorOK, "the IPv6 proxy answers for every proxy-mode network", "")
 	}
+}
+
+// ndpUnanswered lists the addresses the segment asked for in the last ten minutes and the proxy never answered, with
+// the reason of the last drop: a jail on such an address has no IPv6 outside.
+func (s *Service) ndpUnanswered() []string {
+	var out []string
+	for _, u := range s.NDPStatus(context.Background()).Uplinks {
+		for _, a := range u.Addrs {
+			if a.Seen == 0 || a.Answered > 0 || a.LastSeen == nil || s.now().Sub(*a.LastSeen) > 10*time.Minute {
+				continue
+			}
+			out = append(out, fmt.Sprintf("%s asked %d time(s), answered 0 (%s)", a.Address, a.Seen, a.LastVerdict))
+		}
+	}
+	return out
 }
 
 // minHostMajor and minHostMinor are the oldest FreeBSD release JailOps is built and tested for.

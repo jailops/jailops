@@ -66,7 +66,7 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `DELETE /api/v1/volumes/<n>/snapshots/<s>` | | async |
 | `POST /api/v1/volumes/<n>/rollback` | `VolumeRollback` (`snapshot`, `confirm_data_loss` required) | async, result `Volume`; refused while a jail that attaches the volume runs |
 | `GET /api/v1/jails/<n>/volumes` | | the jail's `VolumeAttach` list |
-| `POST /api/v1/jails/<n>/volumes` | `VolumeAttachRequest` (`volume`, `mount`, `read_only`, `copy_existing`) | async, result `Jail`; the jail must be stopped (`busy`) |
+| `POST /api/v1/jails/<n>/volumes` | `VolumeAttachRequest` (`volume`, `mount`, `read_only`, `copy_existing`) | async, result `Jail`; a running jail gets the mount at once (`busy` for a detach of a mount in use) |
 | `DELETE /api/v1/jails/<n>/volumes/<volume>` | | async, result `Jail`; the volume and its files stay |
 | `/api/v1/jails/<n>/snapshots` GET, POST | `JailSnapshot` (name optional) | list; POST async, result `JailSnapshot` |
 | `/api/v1/jails/<n>/snapshots/<s>` GET, DELETE | | `JailSnapshot`; DELETE async |
@@ -109,7 +109,7 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `POST /api/v1/wireguard/<n>/peers` | `WireGuardPeerAdd` (`name`, `address`, `keepalive`) | 201 sync `WireGuardPeerCreated` (`peer`, `token`, `config`, `warning`). The `token` (`jwg1.<base64url(JSON)>`) and the `config` hold the peer's private key and the preshared key **once**: never stored, never an operation result, never in the audit detail; `already_exists`, `pool_exhausted`, `invalid` for a client |
 | `DELETE /api/v1/wireguard/<n>/peers/<peer>` | | `WireGuard` |
 | `POST /api/v1/wireguard/join` | `WireGuardJoin` (`token`, `name`, `interface`, `endpoint`, `address`, `allowed_ips`) | 201 `WireGuard`: a client made from the token; the keys go to the helper; `invalid` for a token that is not one (the reply never repeats it) |
-| `POST /api/v1/wireguard/<n>/up`, `/down`, `/rotate-keys` | | `WireGuard`; rotate-keys answers `WireGuardKeys` (`public_key`, `warning`) |
+| `POST /api/v1/wireguard/<n>/enable`, `/disable`, `/rotate-keys` | | `WireGuard`; rotate-keys answers `WireGuardKeys` (`public_key`, `warning`) |
 | `/api/v1/firewall/policies`, `/api/v1/firewall/address-sets` and `/<n>` | | CRUD |
 | `/api/v1/backup-targets`, `/api/v1/backup-policies` and `/<n>` | | CRUD |
 | `/api/v1/backups`, `/<n>` | | GET list/item; DELETE async |
@@ -152,6 +152,8 @@ non-JSON error body (a proxy, a crash) is mapped from the status: 400 invalid, 4
 | `GET /api/v1/audit` | | `[]AuditEntry`, newest first; admin (`audit_log`) |
 | `GET /api/v1/doctor` | | `DoctorReport`: checks with `ok`, `info` (a fact that is not a fault; counts as ok), `warn`, `fail` or `unknown` (`doctor`) |
 | `GET /api/v1/resources` | | host resources and usage (`resources`) |
+| `GET /api/v1/ndp` | | `NDPStatus`: the neighbor discovery proxy of each uplink with a proxy-mode network, and what it answers for; global identity, readonly is enough |
+| `GET /api/v1/ndp/events?after=N` | | `NDPEvents`: the recent proxy events, oldest first, with the sequence number to pass as `after` next; global identity, readonly is enough |
 | `POST /api/v1/jails/<n>` | copy request | async, result `Jail` (`jail_copy`) |
 
 ### Console

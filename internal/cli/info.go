@@ -427,9 +427,11 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		kv("Usage", "- ("+u.Accounting.Error+")")
 	default:
 		a := u.Accounting
-		mem := humanBytes(a.MemoryBytes)
+		// The limit counts the anonymous memory the jail has reserved (swapuse), not the resident memory: show both and
+		// say which one the limit is of.
+		mem := humanBytes(a.MemoryBytes) + " resident"
 		if l.Memory != "" {
-			mem += " of " + l.Memory
+			mem += ", " + humanBytes(a.SwapBytes) + " reserved of the " + l.Memory + " limit"
 		}
 		kv("Usage", fmt.Sprintf("processes %d, cpu %s, memory %s", a.Processes, humanSeconds(a.CPUSeconds), mem))
 	}

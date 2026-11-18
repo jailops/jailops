@@ -138,11 +138,6 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 	if j.Status.Power != api.PowerRunning {
 		return nil, api.Errorf(api.CodeBusy, "jail %q is not running", name).WithHint("start it first")
 	}
-	// The jail started a moment ago and its bash is being installed in the background, which keeps sessions out
-	// of it: wait for that, but not for ever.
-	if s.shellInBackground(key) {
-		s.waitShellSetup(ctx, key, shellWaitFor)
-	}
 	argv := req.Argv
 	shellSession := req.Shell || len(argv) == 0
 	if shellSession {
@@ -155,6 +150,12 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 		}
 		if !strings.HasPrefix(sh, "/") || strings.ContainsAny(sh, "\x00\n ") {
 			return nil, invalid("shell %q must be an absolute path inside the jail", sh)
+		}
+		// The jail started a moment ago and its bash is being installed in the background: a session that needs that
+		// bash waits for it, but not for ever. A session that needs no bash (`exec -- cmd`, `shell --shell /bin/sh`)
+		// does not wait.
+		if sh == api.BashPath && s.shellInBackground(key) {
+			s.waitShellSetup(ctx, key, shellWaitFor)
 		}
 		if ok, _ := s.d.Files.Exists(ctx, path.Join(s.rootMount(key), sh)); !ok {
 			return nil, api.Errorf(api.CodeNotFound, "the shell %s does not exist in jail %q", sh, name).
@@ -174,10 +175,11 @@ func (s *Service) StartExec(ctx context.Context, name string, req api.ExecReques
 	}
 	lim := s.ExecLimitsOf()
 	s.execMu.Lock()
-	if s.installing[key] {
+	// The setup of the shell holds the jail too, but a session may enter it: it needs no package work of its own.
+	if h := s.holds[key]; s.installing[key] && !h.Shell {
 		s.execMu.Unlock()
-		return nil, api.Errorf(api.CodeBusy, "jail %q is busy: packages are being installed or updated", name).
-			WithHint("wait for the installation to end; `jailops op list` shows it")
+		return nil, api.Errorf(api.CodeBusy, "jail %q is busy: %s is working on it", name, holdWords(h, s.now())).
+			WithHint("wait for it to end; `jailops op list` shows it")
 	}
 	if s.execN[key] >= lim.PerJail {
 		s.execMu.Unlock()

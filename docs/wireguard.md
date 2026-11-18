@@ -2,8 +2,8 @@
 
 JailOps manages WireGuard tunnels of the host: a **server** that peers join, and a **client** of a server. The goal is
 one command per side and nothing to remember: the host makes the keys, assigns the addresses, applies the
-configuration, and keeps the tunnel up across reboots. A server can name JailOps networks its peers may reach, so a
-laptop or a branch host reaches the jails of a project through the tunnel.
+configuration, and keeps the tunnel up across reboots. A server can name JailOps networks it serves, so a
+laptop or a branch host reaches the jails of a project through the tunnel, where a jail's own `allow in` rule lets it.
 
 What it is not: a full VPN suite. There is no full tunnel (a client never takes the host's default route), no DNS
 handling on the host, no NAT for peers and no change to the host's own `pf.conf`.
@@ -30,8 +30,8 @@ Then:
     jailops wireguard status office        # per peer: latest handshake, bytes received and sent, endpoint
     jailops wireguard peer list office
     jailops wireguard peer remove office laptop
-    jailops wireguard down office          # the interface goes, the keys stay
-    jailops wireguard up office
+    jailops wireguard disable office       # the interface goes, the keys stay, and it stays off after a reboot
+    jailops wireguard enable office
     jailops wireguard rotate-keys office
     jailops wireguard delete office        # interface, pf anchor and keys
 
@@ -50,8 +50,8 @@ under Networks, WireGuard.
 | `dns` | handed to peers in their tokens | kept for reference; the host's resolver is not changed |
 | `keepalive` | per peer, optional | default 25 seconds |
 | `peers` | name, public key, addresses, created | none |
-| `networks` | JailOps networks the peers may reach | none |
-| `down` | interface removed, keys kept | same |
+| `networks` | JailOps networks the tunnel routes to (forwarding and the routes of a peer's token); the jails admit the peers with their own `allow in` rules | none |
+| `disabled` | interface removed, keys kept | same |
 
 `peer add` takes the next free address of each family of the pool (never the server's own, never one of another peer;
 the first address and an IPv4 broadcast address are skipped), or `--address`. A peer's token routes the server's tunnel
@@ -108,11 +108,23 @@ lets them; add the one rule `jailops wireguard show` prints as `firewall_rule`, 
 
 `jailops doctor` warns (`wireguard.firewall`) while no loaded rule of the host mentions the port.
 
-**Reaching JailOps networks.** For a server with `networks`, JailOps loads the pf anchor `jailops/wg.<name>`. It passes
-traffic that comes in on the tunnel from the tunnel's subnets to the subnets of those networks and drops everything else
-a peer sends (the host itself and its LAN included), so a peer reaches only what the server names. Each jail's own
-firewall policy still applies to what is admitted: a jail that refuses traffic from outside its network refuses the
-tunnel too. The anchor is evaluated through the `anchor "jailops/*"` line you already have.
+**Reaching JailOps networks.** The `networks` of a server say which JailOps networks the tunnel **routes**: the
+forwarding between the tunnel and those networks and the routes a peer's token carries. They give a peer no access by
+themselves. The peers of a tunnel are one more external source, like the Internet: a jail admits them with its own
+`allow in` rules, with the tunnel's prefix, an address set or an address as the source:
+
+    jailops firewall rule add web in --action allow --proto tcp --port 5432 --from 10.99.0.0/24
+
+An `allow in` rule with an external source opens the jail's addresses on the uplink **and** on the tunnel of every server
+whose `networks` include the jail's network (one rule on `wg-office`, with the same source, ports and state limit). A jail
+with no such rule is closed to the peers, whatever its `default_in` says. `jailops firewall test --from 10.99.0.2 --to
+jail:web --port 5432` walks the hop on the tunnel: a source inside the tunnel's subnets is a peer.
+
+JailOps still loads the pf anchor `jailops/wg.<name>` for a server, and it holds only what protects the host: a packet
+that comes in on the tunnel with a source that is no address of the tunnel is dropped, and so is everything a peer sends
+to the host itself (its addresses, the gateways it holds for the networks). It passes nothing. What a peer sends
+elsewhere (the host's LAN, the Internet) is the host's own `pf.conf`'s business. The anchor is evaluated through the
+`anchor "jailops/*"` line you already have.
 Forwarding stays your switch, as for networks: `jailops doctor` warns (`wireguard.forwarding`) when a tunnel serves
 networks and `net.inet.ip.forwarding` is off. Jails answer through their default route, the host, which knows the
 tunnel's subnet.
@@ -166,5 +178,5 @@ is missing, on a machine without `if_wg` or `wg`). In particular:
   in the base system or only in `wireguard-tools`.
 - A pf rule that names an interface with `-` (`pass in quick on wg-office ...`).
 - A handshake between two interfaces of one host over the loopback address (the end-to-end block).
-- Traffic from a peer into a jail through `jailops/wg.<name>` and the jail's own anchor.
+- Traffic from a peer into a jail: the jail's own `allow in` rule on the tunnel's interface (`wg-<name>`), and the host block of `jailops/wg.<name>`.
 - `kldload if_wg` through the helper.

@@ -3,10 +3,12 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
 	"jailops.net/jailops/internal/plan"
+	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -408,4 +410,137 @@ func (s *Service) unbind(ctx context.Context, name string, atts []Attached) erro
 		}
 	}
 	return first
+}
+
+// VolumeBusyError is the refusal of UnmountLive: a process of the jail still uses the mount.
+type VolumeBusyError struct {
+	Path   string // the path in the jail
+	Detail string // what umount said
+}
+
+func (e *VolumeBusyError) Error() string {
+	return fmt.Sprintf("%s is in use in the jail: %s", e.Path, e.Detail)
+}
+
+// MountLive gives a RUNNING jail volumes: each is mounted on the host at its own place first (idempotent), the mount
+// point directory is made in the jail's root, and the volume is bound there with nullfs, which the jail sees at once.
+// The jail's fstab (rendered from its specification) holds the same mounts, so the next start makes them again and
+// the stop of jail(8) takes them off. A failure takes the mounts this call made off again.
+func (s *Service) MountLive(ctx context.Context, name string, atts []Attached) error {
+	var done []Attached
+	for _, a := range atts {
+		if err := s.mountLive(ctx, name, a); err != nil {
+			_ = s.UnmountLive(ctx, name, done)
+			return err
+		}
+		done = append(done, a)
+	}
+	return nil
+}
+
+func (s *Service) mountLive(ctx context.Context, name string, a Attached) error {
+	if a.HostDir {
+		if err := s.checkHostDir(ctx, a); err != nil {
+			return err
+		}
+	} else if err := s.ZFS.Mount(ctx, a.Dataset); err != nil {
+		if low := strings.ToLower(err.Error()); strings.Contains(low, "key") && (strings.Contains(low, "not loaded") || strings.Contains(low, "unavailable")) {
+			return fmt.Errorf("volume %s is locked: unlock it first (jailops volume unlock %s): %w", a.Name, a.Name, err)
+		}
+		return fmt.Errorf("volume %s: %w", a.Name, err)
+	}
+	target := s.Cfg.at(name).rootMP() + a.Path
+	if err := s.Files.MkdirAll(ctx, target); err != nil {
+		return err
+	}
+	argv := []string{"mount", "-t", "nullfs"}
+	if a.ReadOnly {
+		argv = append(argv, "-o", "ro")
+	}
+	argv = append(argv, a.Mountpoint, target)
+	if out, err := s.Exec.Run(ctx, argv); err != nil {
+		return fmt.Errorf("mount %s on %s: %w: %s", a.Mountpoint, target, err, strings.TrimSpace(string(out)))
+	}
+	if a.Linux {
+		compat := s.compatTarget(name, a)
+		argv = append(argv[:len(argv)-2:len(argv)-2], a.Mountpoint, compat)
+		if out, err := s.Exec.Run(ctx, argv); err != nil {
+			_, _ = s.Exec.Run(ctx, []string{"umount", target})
+			return fmt.Errorf("mount %s on %s: %w: %s", a.Mountpoint, compat, err, strings.TrimSpace(string(out)))
+		}
+	}
+	return nil
+}
+
+// compatTarget is where a Linux jail sees a volume: the path below the nullfs mirror of its root.
+func (s *Service) compatTarget(name string, a Attached) string {
+	return s.Cfg.at(name).rootMP() + "/" + render.LinuxCompat + a.Path
+}
+
+// UnmountLive takes volumes off a RUNNING jail, deepest path first. A Linux jail has two mounts per volume, and the one
+// below the compat/linux mirror comes off first. A mount that is in use is a *VolumeBusyError and everything this call
+// unmounted is mounted again, so a refused detach changes nothing. A mount that is not there is fine. The volume and its
+// files stay.
+func (s *Service) UnmountLive(ctx context.Context, name string, atts []Attached) error {
+	order := slices.Clone(atts)
+	slices.SortStableFunc(order, func(x, y Attached) int { return depth(y.Path) - depth(x.Path) })
+	var done []Attached
+	for _, a := range order {
+		changed, err := s.unmountLive(ctx, name, a)
+		if err != nil {
+			for i := len(done) - 1; i >= 0; i-- {
+				_ = s.mountLive(ctx, name, done[i])
+			}
+			return err
+		}
+		if changed {
+			done = append(done, a)
+		}
+	}
+	return nil
+}
+
+// unmountLive takes one volume off: the mount below the mirror of a Linux jail first, then the one in the root. changed
+// says whether a mount was taken off.
+func (s *Service) unmountLive(ctx context.Context, name string, a Attached) (bool, error) {
+	changed := false
+	var compat string
+	if a.Linux {
+		compat = s.compatTarget(name, a)
+		did, err := s.umountOne(ctx, compat, a.Path)
+		if err != nil {
+			return false, err
+		}
+		changed = did
+	}
+	did, err := s.umountOne(ctx, s.Cfg.at(name).rootMP()+a.Path, a.Path)
+	if err != nil {
+		if changed {
+			argv := []string{"mount", "-t", "nullfs"}
+			if a.ReadOnly {
+				argv = append(argv, "-o", "ro")
+			}
+			_, _ = s.Exec.Run(ctx, append(argv, a.Mountpoint, compat))
+		}
+		return false, err
+	}
+	return changed || did, nil
+}
+
+// umountOne unmounts target. A mount that is not there is fine (false, nil); a mount in use is a *VolumeBusyError.
+func (s *Service) umountOne(ctx context.Context, target, path string) (bool, error) {
+	out, err := s.Exec.Run(ctx, []string{"umount", target})
+	if err == nil {
+		return true, nil
+	}
+	text := strings.TrimSpace(string(out))
+	// the helper refuses a path that is not a mount point with an error of its own ("umount: P is not a mount point"):
+	// a Linux jail that started under an older version has no mount below the mirror, and there is nothing to take off
+	switch low := strings.ToLower(text + " " + err.Error()); {
+	case strings.Contains(low, "not a file system root directory"), strings.Contains(low, "not mounted"), strings.Contains(low, "is not a mount point"):
+		return false, nil
+	case strings.Contains(low, "busy"):
+		return false, &VolumeBusyError{Path: path, Detail: text}
+	}
+	return false, fmt.Errorf("unmount %s: %w: %s", target, err, text)
 }

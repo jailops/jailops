@@ -25,6 +25,9 @@
 #                   string allow printed, pgc2 is refused, and after the deny pgc1 is refused too.
 # JAILOPS_E2E_CATALOG  the catalog directory to install from (default: the reference copy internal/apps/testdata/catalog;
 #                   for a change of the catalog itself, main/jailops-apps/apps of a packages repository checkout)
+# JAILOPS_E2E_LINUX  1 builds an Alpine image from its minirootfs (it downloads from dl-cdn.alpinelinux.org) and checks what a
+#                   Linux process of a Linux jail sees: a volume attached to the running jail and after a restart, /proc, and
+#                   that a detach takes the volume away. Off by default; CI does not set it (it needs that download).
 # JAILOPS_E2E_HOST  1 runs the host identity block (docs/appliance.md): it enables the module, changes the host name,
 #                   /etc/resolv.conf (to documentation addresses that resolve nothing), the NTP block of /etc/ntp.conf
 #                   and ntpd_enable of THIS machine, then restores them through 'jailops host restore' and checks that
@@ -658,10 +661,11 @@ run_soak() {
 	churn=""; i=0
 	while [ $i -lt 20 ]; do i=$((i + 1)); churn="$churn $(printf 'c%02d' $i)"; done
 	for n in st1 st2 $churn; do check "create $n" $J create "$n" --project soak --image "$img" --network soak --storage default; done
-	# the host answers a jail with ping and DNS only; the stream to the host is a rule of its own
-	check "a policy that lets the jail send to a port of the host" $J firewall policy create tohost --project soak --default-in allow --default-out allow
-	check "its rule" $J firewall rule add tohost out --project soak --action allow --proto tcp --to host --port 9100 --comment "the metrics port of the host"
-	check "st2 uses it" $J config set st2 firewall.policies tohost --project soak
+	# the host answers a jail with ping and DNS only, whatever a policy allows (JailOps' firewall never opens the host): the
+	# stream to the host is opened where a host administrator opens it, by a quick pass in the host's own pf.conf before the
+	# anchor line
+	awk -v rule="pass in quick proto tcp from any to 10.89.0.1 port 9100 flags S/SA keep state (if-bound)" '/^anchor "jailops\/\*"/ { print rule } { print }' /etc/pf.conf > "$work/pf-soak.conf"
+	check "the host's pf.conf opens the metrics port of the host to the jails" pfctl -f "$work/pf-soak.conf"
 	check "start the steady jails" $J start st1 st2 --project soak
 	waitfor "st1 runs" 60 jexec soak_st1 true
 	waitfor "st2 runs" 60 jexec soak_st2 true
@@ -978,7 +982,7 @@ check "delete the policy" $J firewall policy delete closed --project demo -y
 
 step "packages of a running jail change inside it (pkg -j); what a process of the jail plants cannot make the host write"
 check "a jail that runs" $J create pkgj --project demo --image "$img" --network lan --storage default --start
-waitfor "the shell of the new jail is installed (it holds the jail for pkg until then)" 180 $J exec --project demo pkgj -- test -x /usr/local/bin/bash
+waitfor "the shell of the new jail is installed (the setup runs in the background; a command that needs no bash works meanwhile)" 180 $J exec --project demo pkgj -- test -x /usr/local/bin/bash
 expect "the check of its packages runs pkg inside the jail" 'pkgj' $J update check pkgj --project demo
 check "the jail plants a link where pkg keeps its cache" $J exec --project demo pkgj -- sh -c 'rm -rf /var/cache/pkg; ln -s /jopsci-escape /var/cache/pkg; mkdir -p /usr/local/etc/pkg/repos; ln -s /jopsci-escape /usr/local/etc/pkg/repos/escape.conf'
 $J update apply pkgj --project demo --packages -y >/dev/null 2>&1 || true
@@ -1374,9 +1378,30 @@ check "a jail attaches it at creation" $J create mail --project demo --image "$i
 check "attach maildir to mail" $J volume attach mail maildir /var/mail/vhosts --project demo
 check "a second jail attaches it later" $J create desktop --project demo --image "$img" --network lan --storage default
 check "attach to the second jail" $J volume attach desktop maildir /home/ann/Mail --project demo
-expect "the volume says it is writable in two jails" 'writable in more than one jail' $J volume show maildir --project demo
+expect "the volume lists the jails that attach it, without a warning" '^Attached to: .*(mail \(rw\).*desktop \(rw\)|desktop \(rw\).*mail \(rw\))' $J volume show maildir --project demo
+if $J volume show maildir --project demo 2>&1 | grep -qi 'warning'; then fail "sharing a volume between two jails warns"; fi
 check "start mail" $J start mail --project demo
-expect_refused "a running jail does not detach a volume" $J volume detach mail maildir --project demo
+# a running jail attaches and detaches volumes at once
+check "a volume for the running jail" $J volume create live --project demo --storage default
+check "attach it to the running jail" $J volume attach mail live /srv/live --project demo
+expect "the mount is a nullfs mount" 'volumes/live on .*nullfs' mount -t nullfs
+check "write a file in it" $J exec --project demo mail -- sh -c 'echo live-1 > /srv/live/f'
+livemp=$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/live")
+expect "the file is in the volume on the host" '^live-1$' cat "$livemp/f"
+check "a second volume for a read-only attach" $J volume create liveq --project demo --storage default
+check "attach it read-only to the running jail" $J volume attach mail liveq /srv/liveq --ro --project demo
+expect_refused "a read-only attachment refuses a write" $J exec --project demo mail -- sh -c 'echo x > /srv/liveq/f'
+( $J exec --project demo mail -- sh -c 'cd /srv/live && exec tail -f /dev/null' >/dev/null 2>&1 & )
+waitfor "a process of the jail holds the volume" 30 $J exec --project demo mail -- pgrep -f 'tail -f /dev/null'
+expect "a detach of a mount in use is refused and says so" 'busy|in use' sh -c "$J volume detach mail live --project demo 2>&1; true"
+expect "the volume is still attached after the refusal" '^Attached to: .*mail' $J volume show live --project demo
+check "the process lets go" $J exec --project demo mail -- pkill -f 'tail -f /dev/null'
+waitfor "the volume detaches from the running jail" 30 $J volume detach mail live --project demo
+expect_refused "the files are gone from the jail" $J exec --project demo mail -- test -e /srv/live/f
+expect "the files stay in the volume on the host" '^live-1$' cat "$livemp/f"
+check "detach the read-only volume" $J volume detach mail liveq --project demo
+check "delete the volumes of the test" $J volume delete live --project demo --confirm-data-loss
+check "delete the other one" $J volume delete liveq --project demo --confirm-data-loss
 expect "the jail sees the owner and the mode" '^5000:5000 770$' $J exec --project demo mail -- stat -f '%u:%g %Lp' /var/mail/vhosts
 check "write a file in the volume" $J exec --project demo mail -- sh -c 'echo mail-1 > /var/mail/vhosts/m1'
 check "start desktop" $J start desktop --project demo
@@ -1399,6 +1424,34 @@ check "rename it back" $J volume rename mailbox maildir --project demo -y
 check "delete that jail" $J delete --confirm-data-loss desktop --project demo
 check "the volume is deleted when nothing attaches it" $J volume delete maildir --project demo --confirm-data-loss
 if zfs list "$vol" >/dev/null 2>&1; then fail "the volume is still there"; fi
+
+if [ -n "${JAILOPS_E2E_LINUX:-}" ]; then
+	step "a Linux jail: a volume, /proc and /sys as a Linux process sees them (through the compat/linux mirror)"
+	arch=$(uname -p); case $arch in amd64) larch=amd64 ;; *) larch=arm64 ;; esac
+	check "an Alpine image" $J image create e2e-alpine --os linux --release 3.22 --arch "$larch" --source-type minirootfs
+	check "build it" $J image build e2e-alpine
+	check "a volume for the Linux jail" $J volume create linvol --project demo --storage default
+	linmp=$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/linvol")
+	echo from-host > "$linmp/h"
+	check "a Linux jail" $J create lin --project demo --image e2e-alpine --network lan --storage default --start
+	waitfor "the Linux jail answers" 60 $J exec --project demo lin -- /bin/busybox true
+	check "attach the volume to the running Linux jail" $J volume attach lin linvol /srv/vol --project demo
+	expect "a Linux process sees the volume" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
+	check "a Linux process writes in the volume" $J exec --project demo lin -- /bin/busybox sh -c 'echo from-linux > /srv/vol/w'
+	expect "the file is in the volume on the host" '^from-linux$' cat "$linmp/w"
+	expect "a Linux process lists its processes in /proc" 'busybox' $J exec --project demo lin -- /bin/busybox ps
+	expect "a Linux process sees /sys" '^(bus|class|devices|kernel)' $J exec --project demo lin -- /bin/busybox ls /sys
+	check "restart the Linux jail" $J restart lin --project demo
+	waitfor "the Linux jail answers after the restart" 60 $J exec --project demo lin -- /bin/busybox true
+	expect "after the restart a Linux process sees the volume too" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
+	check "detach the volume from the running Linux jail" $J volume detach lin linvol --project demo
+	expect_refused "the files are gone for a Linux process" $J exec --project demo lin -- /bin/busybox test -e /srv/vol/h
+	if mount -t nullfs | grep -q "volumes/linvol"; then fail "a nullfs mount of the volume is left after the detach"; fi
+	check "stop the Linux jail" $J stop lin --project demo
+	check "delete the Linux jail" $J delete --confirm-data-loss lin --project demo
+	check "delete the volume" $J volume delete linvol --project demo --confirm-data-loss
+	check "delete the image" $J image delete e2e-alpine -y
+fi
 
 step "a project with volumes is not deleted; a restart of the daemon starts no jail an operator stopped"
 check "a project that holds a volume" sh -c "$J project create vkeep && $J storage grant default --project vkeep"
@@ -1564,6 +1617,7 @@ if shard_on 3; then # shard 3: the OS upgrade, image upgrades, devices and the a
 step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
 expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --start
 check "a second generation of the image" $J image build "$img" --from-generation g1
+waitfor "the shell of the second jail is installed (the setup runs in the background; a stop would end it and leave it due)" 180 $J exec --project demo up -- test -x /usr/local/bin/bash
 check "a file that must survive" $J exec --project demo up -- sh -c 'echo ci-keep > /root/keep'
 expect "dry run" 'g1 to g2' $J jail upgrade up --project demo --dry-run
 check "upgrade to the newer generation" $J jail upgrade up --project demo --generation g2

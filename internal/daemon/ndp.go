@@ -25,14 +25,16 @@ func newHelperNDP(host priv.Host, net ifconfig.Client, uplink string, logf func(
 	// reason reaches the network's status and the doctor instead of the proxy silently retrying.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	f, err := host.NDPOpen(ctx, uplink, false)
+	f, err := host.NDPOpen(ctx, uplink, true)
 	if err != nil {
 		return nil, err
 	}
 	_ = f.Close()
 	// 100 advertisements a second is far more than a link of jails needs and keeps a flood of solicitations from
 	// filling the audit log; the helper has a hard limit of its own.
-	p, err := ndproxy.New(ndproxy.Config{Uplink: uplink, MaxAnswersPerSecond: 100}, ndproxy.Deps{
+	// The capture is promiscuous: a solicitation reaches the proxy whatever the multicast filter of the NIC or the
+	// hypervisor holds. The group joins of the range stay: a snooping switch forwards a group to the ports that joined it.
+	p, err := ndproxy.New(ndproxy.Config{Uplink: uplink, MaxAnswersPerSecond: 100, Promisc: true}, ndproxy.Deps{
 		Capture: h, Injector: h, Routes: reconcileRoutes{net: net},
 		Joiner: ndproxy.NewMulticastJoiner(), Clock: reconcile.SystemClock{}, Logf: logf,
 	})

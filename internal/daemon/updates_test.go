@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -63,9 +64,18 @@ func (s *scriptedJails) ran(sub string) bool {
 	// A FreeBSD jail has no pkg of its own: the host runs `pkg -j JAIL upgrade -y`, written here as `pkg upgrade -y`.
 	if s.env != nil {
 		for _, c := range s.env.Run.Calls() {
+			// the fetch limits of the shell setup (-o FETCH_TIMEOUT=.. -o FETCH_RETRY=..) are no sign of an image build
+			args := slices.Clone(c.Cmd.Args)
+			for i := 0; i+1 < len(args); {
+				if args[i] == "-o" && strings.HasPrefix(args[i+1], "FETCH_") {
+					args = slices.Delete(args, i, i+2)
+					continue
+				}
+				i++
+			}
 			// an image build passes -o options (REPOS_DIR, PKG_CACHEDIR...): it is not a jail's pkg
-			if c.Cmd.Name == "pkg" && len(c.Cmd.Args) > 2 && c.Cmd.Args[0] == "-j" && c.Cmd.Args[2] != "-o" &&
-				strings.Contains("pkg "+strings.Join(c.Cmd.Args[2:], " "), sub) {
+			if c.Cmd.Name == "pkg" && len(args) > 2 && args[0] == "-j" && args[2] != "-o" &&
+				strings.Contains("pkg "+strings.Join(args[2:], " "), sub) {
 				return true
 			}
 		}
@@ -494,7 +504,7 @@ func TestPackageUpdateHoldsTheJailAgainstSessions(t *testing.T) {
 		t.Fatalf("%+v %v", recs, err)
 	}
 	var ae *api.Error
-	if !errors.As(during, &ae) || ae.Code != api.CodeBusy || !strings.Contains(ae.Message, "packages are being installed or updated") {
+	if !errors.As(during, &ae) || ae.Code != api.CodeBusy || !strings.Contains(ae.Message, "a package update") {
 		t.Fatalf("exec during the update: %v", during)
 	}
 	if _, err := e.Admin.Jails().Exec(ctx, "web", []string{"echo", "y"}, sdk.ExecOptions{}); err != nil {

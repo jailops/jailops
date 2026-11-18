@@ -48,10 +48,8 @@ func TestAnchorRulesAreTheFilterLinesOfTheText(t *testing.T) {
 			case rawEnd:
 				inRaw = false
 			}
-			// the pass rule after a port forward's translation stands on the uplink, which is neither the jail's own port
-			// nor its gateway: the test of a connection does not walk it
-			afterForward := i > 0 && strings.HasPrefix(an.Lines[i-1], "match in on ") && strings.Contains(an.Lines[i-1], " rdr-to ")
-			if !inRaw && !afterForward && (strings.HasPrefix(ln, "pass ") || strings.HasPrefix(ln, "block ")) {
+			// the pass rule after a port forward's translation stands on the uplink: it is a structured rule with an Iface
+			if !inRaw && (strings.HasPrefix(ln, "pass ") || strings.HasPrefix(ln, "block ")) {
 				want = append(want, i)
 			}
 		}

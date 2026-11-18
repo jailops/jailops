@@ -40,7 +40,7 @@ var roots = []any{
 	api.Project{}, api.ProjectAggregate{}, api.ProjectHostStatus{}, api.Storage{}, api.Session{}, api.Identity{}, api.TrustTokenRequest{}, api.TrustToken{}, api.TrustClientRequest{}, api.Profile{}, api.ConfigKey{}, api.JailExpanded{}, api.ConfigChange{}, api.UpdateReport{}, api.UpdateRecord{}, api.UpdateCheckRequest{}, api.UpdateApplyRequest{},
 	api.Provision{}, api.ProvisionRequest{}, api.ProvisionResult{}, api.ShellSetupRequest{}, api.ShellSetupResult{}, api.ExecRequest{}, api.BackupRun{}, api.BackupRunRequest{}, api.BackupVerifyRequest{},
 	api.BackupKeyStatus{}, api.BackupKeyCreate{}, api.BackupKeyCreated{}, api.BackupKeyEscrow{},
-	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
+	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.NDPStatus{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
 	api.AppSummary{}, api.AppDetail{}, api.AppInstall{}, api.AppInstallResult{}, api.AppDraft{},
 	api.HostIdentity{}, api.HostIdentityApply{}, api.HostRestore{}, api.HostChange{}, api.HostSnapshot{},
 	api.HostFirewall{}, api.HostFirewallApply{}, api.HostPending{}, api.HostPendingAction{},

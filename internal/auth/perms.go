@@ -103,7 +103,7 @@ func classify(e Entry) Class {
 	case has("/api/v1/jails"), has("/api/v1/volumes"), has("/api/v1/profiles"), has("/api/v1/firewall"), has("/api/v1/backup-policies"), has("/api/v1/jail-templates"):
 		return ClassProject
 	case has("/api/v1/trust"), has("/api/v1/users"), has("/api/v1/tokens"), has("/api/v1/certificates"), has("/api/v1/remotes"),
-		has("/api/v1/groups"), has("/api/v1/rollouts"), has("/api/v1/cluster"), has("/api/v1/server"), has("/api/v1/doctor"),
+		has("/api/v1/groups"), has("/api/v1/rollouts"), has("/api/v1/cluster"), has("/api/v1/server"), has("/api/v1/doctor"), has("/api/v1/ndp"),
 		has("/api/v1/resources"), has("/api/v1/backup-targets"), has("/api/v1/host"), has("/api/v1/wireguard"), has("/api/v1/setup"):
 		return ClassGlobal
 	}
@@ -156,6 +156,8 @@ var Perms = classifyAll([]Entry{
 	r("DELETE", "/api/v1/sessions/{id}", ro),
 	r("GET", "/api/v1/doctor", ro),
 	r("POST", "/api/v1/doctor/fix", ad),
+	r("GET", "/api/v1/ndp", ro),
+	r("GET", "/api/v1/ndp/events", ro),
 	r("GET", "/api/v1/resources", ro),
 	r("PUT", "/api/v1/server", ad),
 	r("GET", "/api/v1/server/config", ro),
@@ -322,8 +324,8 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/wireguard/{name}/rename", ad),
 	r("POST", "/api/v1/wireguard/{name}/peers", ad),
 	r("DELETE", "/api/v1/wireguard/{name}/peers/{peer}", ad),
-	r("POST", "/api/v1/wireguard/{name}/up", ad),
-	r("POST", "/api/v1/wireguard/{name}/down", ad),
+	r("POST", "/api/v1/wireguard/{name}/enable", ad),
+	r("POST", "/api/v1/wireguard/{name}/disable", ad),
 	r("POST", "/api/v1/wireguard/{name}/rotate-keys", ad),
 	r("GET", "/api/v1/firewall/policies", ro),
 	r("POST", "/api/v1/firewall/policies", ad),

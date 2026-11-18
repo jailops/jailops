@@ -79,3 +79,16 @@ func SetShellRetryAfter(d time.Duration) func() {
 	shellRetryAfter = d
 	return func() { shellRetryAfter = old }
 }
+
+// HoldForTest holds a jail the way an app installation does and returns what lets it go.
+func HoldForTest(s *Service, key, what string) (func(), error) {
+	return s.holdJailFor(key, what, false)
+}
+
+// SetShellSettle shortens how long a stop waits for the setup of the shell and how long pkg has to end after SIGTERM;
+// the returned function puts them back.
+func SetShellSettle(wait, grace time.Duration) func() {
+	w, g := shellSettleWait, shellTermGrace
+	shellSettleWait, shellTermGrace = wait, grace
+	return func() { shellSettleWait, shellTermGrace = w, g }
+}

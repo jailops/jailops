@@ -18,6 +18,7 @@ func networkDesc() *kindDesc[api.Network] {
 		func(n *api.Network) *api.NetworkSpec { return &n.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.Network] { return c.Networks().Resource })
 	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.Network] { return c.Networks().Resource })
+	d.createOnly = []string{"ipv6-mode"}
 	d.renameLong = renameLong("network", `the projects it is granted to, the jails attached to it (running
 ones too: nothing of their traffic changes), the profiles and WireGuard tunnels that name it, its firewall
 anchor and the descriptions of its interfaces`)
@@ -99,7 +100,7 @@ on a shared segment (switched), routed is for a prefix the provider routes to yo
 jailops network create lan --subnet 10.20.0.0/24 --gateway 10.20.0.1 --range 10.20.0.10-10.20.0.250 --nat --uplink em0
 jailops network create -f lan.yaml`,
 		func(cmd *cobra.Command) func(string) (api.Network, error) {
-			var uplink, subnet, gw, rng, v4cidr, v6cidr, v6mode, comment string
+			var uplink, subnet, gw, rng, v4cidr, v6cidr, v6mode, v6range, comment string
 			var exclude, dns []string
 			var nat bool
 			var mtu int
@@ -108,7 +109,8 @@ jailops network create -f lan.yaml`,
 			f.StringVar(&uplink, "uplink", "", "physical interface used for NAT or routing")
 			f.StringVar(&v4cidr, "ipv4", "", "IPv4 gateway address and prefix, for example 10.50.0.1/24; the rest of the subnet becomes the range")
 			f.StringVar(&v6cidr, "ipv6", "", "IPv6 prefix, for example fd50::/64; with --ipv6-mode proxy, the prefix your provider put on the shared segment, for example 2001:db8:1:2:100::/80")
-			f.StringVar(&v6mode, "ipv6-mode", "routed", "routed: the provider routes the prefix to this host; proxy: the prefix sits on a shared segment and jailops answers neighbor discovery for each jail address")
+			f.StringVar(&v6mode, "ipv6-mode", "routed", "routed: the provider routes the prefix to this host; proxy: the prefix sits on a shared segment and the host answers neighbor discovery for the range (switch an existing network with 'jailops network ndp-proxy enable|disable')")
+			f.StringVar(&v6range, "ipv6-range", "", "allocation range a-b of the IPv6 prefix (default: the first 240 addresses after the low ones); a network in proxy mode answers for the first 1024 addresses of it")
 			f.StringVar(&subnet, "subnet", "", "IPv4 subnet, for example 10.20.0.0/24 (required without -f)")
 			f.StringVar(&gw, "gateway", "", "IPv4 gateway address (an address of the host inside the subnet)")
 			f.StringVar(&rng, "range", "", "allocation range a-b")
@@ -150,11 +152,19 @@ jailops network create -f lan.yaml`,
 						return api.Network{}, err
 					}
 					spec.IPv6 = v6
-				} else if cmd.Flags().Changed("ipv6-mode") {
-					if !a.partial {
-						return api.Network{}, usagef("--ipv6-mode needs --ipv6")
+				}
+				if v6cidr == "" && cmd.Flags().Changed("ipv6-mode") {
+					return api.Network{}, usagef("--ipv6-mode needs --ipv6")
+				}
+				if v6range != "" {
+					switch {
+					case spec.IPv6 != nil:
+						spec.IPv6.Range = v6range
+					case a.partial:
+						spec.IPv6 = &api.IPv6Net{Range: v6range}
+					default:
+						return api.Network{}, usagef("--ipv6-range needs --ipv6")
 					}
-					spec.IPv6 = &api.IPv6Net{Mode: api.IPv6Mode(v6mode)}
 				}
 				if a.partial && spec.IPv4 == nil && (cmd.Flags().Changed("nat") || cmd.Flags().Changed("exclude")) {
 					spec.IPv4 = &api.IPv4Net{NAT: nat, Exclude: exclude}
@@ -166,6 +176,7 @@ jailops network create -f lan.yaml`,
 			}
 		})
 	nc.AddCommand(a.networkGrantCmds(d)...)
+	nc.AddCommand(a.ndpProxyCmd(d))
 	nc.AddCommand(&cobra.Command{
 		Use:               "leases NETWORK",
 		Short:             "List the addresses allocated on a network",

@@ -51,8 +51,8 @@ func wireguardDesc() *kindDesc[api.WireGuard] {
 
 func wgState(w api.WireGuard) string {
 	switch {
-	case w.Spec.Down:
-		return "down"
+	case w.Spec.Disabled:
+		return "disabled"
 	case w.Status.Up:
 		return "up"
 	}
@@ -69,8 +69,9 @@ token once: on another JailOps host 'jailops wireguard join NAME --token-file TO
 client and brings it up, and --format conf prints the same as a configuration
 file for phones and laptops.
 
-A server may name JailOps networks its peers reach (--network): JailOps loads
-a pf anchor that passes the tunnel's traffic to them and nothing else.
+A server may name JailOps networks it serves (--network): the tunnel's anchor
+keeps the peers away from the host and from every other network, and a peer reaches a
+jail of a served network only where the jail's own 'allow in' rule names the peer's address.
 Forwarding and the pf rule for the listen port stay with the administrator.`,
 		`jailops wireguard create office --address 10.99.0.1/24 --network web
 jailops wireguard peer add office laptop
@@ -98,7 +99,7 @@ jailops wireguard create -f office.yaml`,
 			f.StringVar(&endpoint, "endpoint", "", "host:port peers dial, written into their tokens (default this host's name and the port)")
 			f.StringArrayVar(&pool, "pool", nil, "prefix peer addresses are taken from (repeatable; default the subnet of --address)")
 			f.StringArrayVar(&dns, "dns", nil, "DNS server written into the peers' tokens (repeatable)")
-			f.StringArrayVar(&nets, "network", nil, "JailOps network the peers may reach (repeatable)")
+			f.StringArrayVar(&nets, "network", nil, "JailOps network the tunnel serves; its jails decide who from the tunnel gets in (repeatable)")
 			f.StringVar(&iface, "interface", "", "interface name (default wg-NAME; at most 15 characters, starting with wg)")
 			enumFlag(cmd, "mode", "server")
 			_ = cmd.RegisterFlagCompletionFunc("network", completeKind(a, networkDesc()))
@@ -113,40 +114,39 @@ jailops wireguard create -f office.yaml`,
 					Address: addr, ListenPort: port, Endpoint: endpoint, AllowedIPs: pool, DNS: dns, Networks: nets}}, nil
 			}
 		})
-	wc.AddCommand(a.wgUpDown(d, true), a.wgUpDown(d, false), a.wgStatusCmd(d), a.wgRotateCmd(d), a.wgJoinCmd(), a.wgPeerCmd(d))
+	wc.AddCommand(a.wgEnableDisable(d, true), a.wgEnableDisable(d, false), a.wgStatusCmd(d), a.wgRotateCmd(d), a.wgJoinCmd(), a.wgPeerCmd(d))
 	return wc
 }
 
-func (a *app) wgUpDown(d *kindDesc[api.WireGuard], up bool) *cobra.Command {
-	verb, short, long := "down", "Take a tunnel down (the keys stay)", "Remove the tunnel's interface and keep the object and its keys; 'up' brings it back."
-	if up {
-		verb, short, long = "up", "Bring a tunnel up", "Create the tunnel's interface again after 'down'. The reconcile loop keeps it up from then on, across reboots."
+func (a *app) wgEnableDisable(d *kindDesc[api.WireGuard], enable bool) *cobra.Command {
+	verb, short, long := "disable", "Disable a tunnel (the keys stay)", "Remove the tunnel's interface and keep the object and its keys; 'enable' brings it back."
+	if enable {
+		verb, short, long = "enable", "Enable a tunnel", "Create the tunnel's interface again after 'disable'. The reconcile loop keeps it up from then on, across reboots."
 	}
 	return &cobra.Command{
 		Use:               verb + " NAME",
-		Aliases:           map[bool][]string{true: {"start"}, false: {"stop"}}[up],
 		Short:             short,
 		Long:              long,
 		Example:           "jailops wireguard " + verb + " office",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if ok, err := a.dry("bring wireguard "+args[0]+" "+verb, nil); ok || err != nil {
+			if ok, err := a.dry(verb+" wireguard "+args[0], nil); ok || err != nil {
 				return err
 			}
 			c, err := a.connect(cmd.Context())
 			if err != nil {
 				return err
 			}
-			call := c.WireGuard().Down
-			if up {
-				call = c.WireGuard().Up
+			call := c.WireGuard().Disable
+			if enable {
+				call = c.WireGuard().Enable
 			}
 			w, err := call(cmd.Context(), args[0])
 			if err != nil {
 				return err
 			}
-			if err := a.finishOp(cmd.Context(), nil, "wireguard", args[0], map[bool]string{true: "is up", false: "is down"}[up], w); err != nil {
+			if err := a.finishOp(cmd.Context(), nil, "wireguard", args[0], map[bool]string{true: "is enabled", false: "is disabled"}[enable], w); err != nil {
 				return err
 			}
 			for _, x := range w.Status.Warnings {

@@ -82,7 +82,7 @@ func TestAlpineBuildsFromTheMirrorAndRunsApkInAJail(t *testing.T) {
 			um = append(um, strings.TrimPrefix(c, "umount "+root))
 		}
 	}
-	if strings.Join(um, " ") != "/sys /proc /compat/linux/dev/shm /compat/linux /dev/fd /dev" {
+	if strings.Join(um, " ") != "/compat/linux/sys /compat/linux/proc /sys /proc /compat/linux/dev/shm /compat/linux /dev/fd /dev" {
 		t.Errorf("umount order: %v", um)
 	}
 	if got := string(w.Files.Data[root+"/etc/apk/repositories"]); got != "https://dl-cdn.alpinelinux.org/alpine/v3.22/main\nhttps://dl-cdn.alpinelinux.org/alpine/v3.22/community\n" {

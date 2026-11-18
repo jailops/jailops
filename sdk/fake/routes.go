@@ -160,8 +160,8 @@ func (s *Server) routes() {
 	m("POST /api/v1/wireguard/join", s.wgJoin)
 	m("POST /api/v1/wireguard/{name}/peers", s.wgPeerAdd)
 	m("DELETE /api/v1/wireguard/{name}/peers/{peer}", s.wgPeerRemove)
-	m("POST /api/v1/wireguard/{name}/up", s.wgSetDown(false))
-	m("POST /api/v1/wireguard/{name}/down", s.wgSetDown(true))
+	m("POST /api/v1/wireguard/{name}/enable", s.wgSetDisabled(false))
+	m("POST /api/v1/wireguard/{name}/disable", s.wgSetDisabled(true))
 	m("POST /api/v1/wireguard/{name}/rotate-keys", s.wgRotate)
 	m("/", func(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, api.Errorf(api.CodeNotFound, "no such route %s %s", r.Method, r.URL.Path))

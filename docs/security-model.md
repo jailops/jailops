@@ -241,8 +241,12 @@ Every identity (a user of the web console, an API token, a client certificate) h
   call nothing except its own session routes. Only a global admin may grant `global`.
 - A request for an object of a project the caller may not use answers `not_found`, never `forbidden`, so that existence
   does not leak. A role that is too low is checked first and answers `forbidden`.
-- Dangerous parameters (raw jail parameters, host directories, device nodes, ZFS delegation, raw PF, provisioning commands)
-  need `admin` or a global admin, are allow-listed by `priv.conf`, and are audited.
+- Dangerous parameters (raw jail parameters, host directories, device nodes, ZFS delegation, provisioning commands)
+  need `admin` or a global admin, are allow-listed by `priv.conf`, and are audited. Raw PF needs a global administrator
+  (and `admin-raw-pf` for a rule that does not stand on a jail's link): pf text is the host administrator's.
+- The firewall of JailOps governs the jails and never opens the host: the anchor of a jail closes the host to it before the
+  allow rules of its policies (DNS and ping excepted), so no policy a project's administrator may write reaches a service
+  of the host. `/etc/pf.conf` is the host's.
 - Every route has a permission entry in the code, or the daemon refuses to start.
 - A value a client sends that goes into the detail of an audit entry (a source, a sink name, a domain) is quoted with
   escapes and cut at 200 bytes, also when the request is refused: a line break or a `key=value` cannot forge an entry.

@@ -31,6 +31,8 @@ import (
 type ndpUplink struct {
 	Uplink   string
 	Prefixes []netip.Prefix
+	// Nets are the IPv6 specs of the same networks: the allocation ranges the proxy answers for.
+	Nets []*api.IPv6Net
 }
 
 // NDPDevice is the system side of the two operations. Tests inject a fake; NewSystem uses the BPF implementation.
@@ -168,6 +170,7 @@ func (l *Local) ndpPrefixes(ctx context.Context, uplink string) (ndpUplink, erro
 				continue
 			}
 			mine = append(mine, p.Masked())
+			u.Nets = append(u.Nets, v6)
 		}
 	}
 	if len(mine) == 0 {
@@ -284,7 +287,7 @@ func (l *Local) NDPAnswer(ctx context.Context, q NDPAnswerReq) error {
 		return forbidden("ndp.answer: %s is outside the subnets of the networks in proxy mode on %s", target, q.Uplink)
 	}
 	if q.Announce {
-		return l.ndpAnnounce(q.Uplink, target)
+		return l.ndpAnnounce(up, target)
 	}
 	req, err := netip.ParseAddr(q.RequesterIP)
 	if err != nil || !req.Is6() || req.Is4In6() || req.Zone() != "" {
@@ -318,7 +321,7 @@ func (l *Local) NDPAnswer(ctx context.Context, q NDPAnswerReq) error {
 			return forbidden("ndp.answer: %s is an address of this host", target)
 		}
 	}
-	if err := l.requireJailRoute(target); err != nil {
+	if err := l.requireAnswerable(target, up); err != nil {
 		return err
 	}
 	mac, err := l.d.NDP.HardwareAddr(q.Uplink)
@@ -338,7 +341,8 @@ func (l *Local) NDPAnswer(ctx context.Context, q NDPAnswerReq) error {
 
 // ndpAnnounce sends one unsolicited advertisement of an approved target to all nodes on the uplink: what a router
 // needs to learn that the address is here, with no requester to name.
-func (l *Local) ndpAnnounce(uplink string, target netip.Addr) error {
+func (l *Local) ndpAnnounce(up ndpUplink, target netip.Addr) error {
+	uplink := up.Uplink
 	if l.d.NDP == nil {
 		return api.Errorf(api.CodeUnsupported, "packet sending is not available here")
 	}
@@ -351,7 +355,7 @@ func (l *Local) ndpAnnounce(uplink string, target netip.Addr) error {
 			return forbidden("ndp.answer: %s is an address of this host", target)
 		}
 	}
-	if err := l.requireJailRoute(target); err != nil {
+	if err := l.requireAnswerable(target, up); err != nil {
 		return err
 	}
 	mac, err := l.d.NDP.HardwareAddr(uplink)
@@ -364,6 +368,18 @@ func (l *Local) ndpAnnounce(uplink string, target netip.Addr) error {
 	me := ndproxy.MAC(mac)
 	all := netip.MustParseAddr("ff02::1")
 	return l.d.NDP.Send(uplink, ndproxy.BuildNA(me, ndproxy.MulticastMAC(all), target, all, target, ndproxy.FlagOverride, &me))
+}
+
+// requireAnswerable refuses a target the helper may not speak for: an address of the allocation range of a network in
+// proxy mode on the uplink (no jail has to hold it: the host answers for the whole range and rejects what nobody
+// uses), or the address of a jail on this host. The addresses of the host itself were refused before.
+func (l *Local) requireAnswerable(target netip.Addr, up ndpUplink) error {
+	for _, v6 := range up.Nets {
+		if ipam.InProxyRange6(v6, target) {
+			return nil
+		}
+	}
+	return l.requireJailRoute(target)
 }
 
 // requireJailRoute refuses a target that is not an address of a jail on this host. JailOps installs a /128 host route

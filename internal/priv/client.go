@@ -582,6 +582,9 @@ func (a runnerAdapter) Run(ctx context.Context, cmd run.Cmd) (run.Result, error)
 	if cmd.Timeout > 0 {
 		args.TimeoutMs = cmd.Timeout.Milliseconds()
 	}
+	if cmd.TermGrace > 0 {
+		args.GraceMs = cmd.TermGrace.Milliseconds()
+	}
 	return a.c.exec(ctx, OpRun, args, cmd.Stdin, cmd.Stdout, cmd.MaxOutput)
 }
 

@@ -271,6 +271,10 @@ type JailStatus struct {
 	Warnings []string `json:"warnings,omitempty"`
 	// Locked names the encrypted volumes whose key is not loaded: the jail does not start until it is unlocked.
 	Locked []string `json:"locked,omitempty"`
+	// DiskUsed is what the jail's own datasets take on the pool (`used` of the root and of the persistent datasets, the
+	// space a thin root shares with its image excluded); the volumes it attaches are the project's. Zero when ZFS
+	// could not be read. Filled by list and get.
+	DiskUsed int64 `json:"disk_used,omitempty"`
 }
 
 // JailAction is the body of PUT /api/v1/jails/{name}/state.
@@ -373,6 +377,9 @@ type JailAccounting struct {
 	CPUSeconds int64 `json:"cpu_seconds"`
 	// MemoryBytes is the resident memory of the jail's processes.
 	MemoryBytes int64 `json:"memory_bytes"`
+	// SwapBytes is the anonymous (swap-backed) memory the jail has reserved: the counter `limits.memory` limits
+	// (rctl swapuse). It is not the resident memory: a jail can be under its limit and show a larger resident size.
+	SwapBytes int64 `json:"swap_bytes"`
 }
 
 // JailDiskUsage is the space of the jail's datasets, running or not.

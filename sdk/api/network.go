@@ -46,9 +46,9 @@ const (
 	// IPv6Routed: the upstream routes a prefix to the host. Unallocated addresses of the prefix are rejected, and no
 	// NDP proxy is involved.
 	IPv6Routed IPv6Mode = "routed"
-	// IPv6Proxy: the upstream treats the jail addresses as on-link. jailops
-	// answers neighbor solicitations for allocated addresses on the uplink
-	// and routes each address to its jail with a /128 host route.
+	// IPv6Proxy: the upstream treats the jail addresses as on-link. The host answers neighbor solicitations on the
+	// uplink for the allocation range of the network, whether a jail runs or not, and routes the address of each
+	// running jail to it with a /128 host route.
 	IPv6Proxy IPv6Mode = "proxy"
 	IPv6None  IPv6Mode = "none"
 )

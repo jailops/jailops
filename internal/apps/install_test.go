@@ -174,3 +174,11 @@ func TestPkgInstallCachedArgv(t *testing.T) {
 		t.Errorf("no cache: %q", got)
 	}
 }
+
+func TestWithFetchLimits(t *testing.T) {
+	got := WithFetchLimits(PkgInstallInJailArgv("web", []string{"bash"}))
+	want := []string{"pkg", "-o", "FETCH_TIMEOUT=10", "-o", "FETCH_RETRY=1", "-j", "web", "install", "-y", "bash"}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %v", got)
+	}
+}

@@ -386,3 +386,14 @@ func provision(p api.Provision) error {
 	}
 	return nil
 }
+
+// UpdateStrategyFits refuses the strategy inplace for a thin FreeBSD jail: a thin jail moves to a newer generation of
+// its image (rebase, the default), and the update that would change it in place is not made for it. It is asked when a
+// jail is made, or when its strategy is changed, with the layout and the operating system that are settled by then; a
+// jail that was stored with the strategy before the rule keeps it and stays updatable, so it is not part of JailSpec.
+func UpdateStrategyFits(s api.JailSpec) error {
+	if s.Update.Strategy == api.UpdateInPlace && s.Layout != api.LayoutThick && s.OS != api.OSLinux {
+		return Invalid("update.strategy", "update strategy inplace is for thick and Linux jails; a thin jail moves to a newer generation of its image (rebase, the default)")
+	}
+	return nil
+}
