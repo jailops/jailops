@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.5 - 2026-11-18
+
 - **The NDP proxy starts on a host that holds the resolver address.** The proxy refused to open its capture when the
   prefix of the network held an address of the host, and the helper's own resolver address of the network (the second
   address of the subnet, held on the loopback for the names of the jails) counted as one: the proxy stayed off and the
