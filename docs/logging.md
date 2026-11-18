@@ -219,9 +219,4 @@ file and round, files read every two seconds and the jail list every 30 seconds,
 
 ## Open points (UNVERIFIED)
 
-The forwarder, the view and the senders are tested in process: the timestamp forms, the merge, cursors, offsets across
-a restart and a rotation, the queue and backoff with an injected clock, and the senders against listeners over udp,
-tcp, tls (with a test CA) and https. Verified on FreeBSD 15.1 by the block of `scripts/ci-freebsd-e2e.sh`: a tcp listener on
-the host, a sink added with the CLI, `logger` in a running jail, and the line arriving with the jail in the structured data
-(so a running jail's `messages` is read through the helper while its `syslogd` writes it). Not run on a FreeBSD host: the
-forwarder following a rotation by newsyslog, a stopped jail coming back, a tls receiver, and FreeBSD's `syslogd` as a receiver.
+Not run on a FreeBSD host: the forwarder following a rotation by newsyslog, a stopped jail coming back, a tls receiver, and FreeBSD's `syslogd` as a receiver.

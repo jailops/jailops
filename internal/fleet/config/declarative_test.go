@@ -22,10 +22,10 @@ func netFleet(t *testing.T, netSpec string) (string, error) {
 	return strings.Join(f.Warnings, "\n"), err
 }
 
-func TestProxyAndRoutedNetworksAreCheckedOffline(t *testing.T) {
+func TestNetworksWithAndWithoutTheNDPProxyAreCheckedOffline(t *testing.T) {
 	ok := `  uplink: vtnet0
   ipv6:
-    mode: proxy
+    ndp_proxy: true
     subnet: "2001:db8:1:2:100::/80"
     range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"
 `
@@ -34,7 +34,6 @@ func TestProxyAndRoutedNetworksAreCheckedOffline(t *testing.T) {
 	}
 	routed := `  uplink: vtnet0
   ipv6:
-    mode: routed
     subnet: "2001:db8:1:2:1::/80"
     range: "2001:db8:1:2:1::10-2001:db8:1:2:1::ff"
 `
@@ -76,7 +75,7 @@ func TestProjectAndJailRulesOfTheDaemonAreChecked(t *testing.T) {
 	write(t, d, "shared/networks/n.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: n\nspec:\n  ipv4: {subnet: 10.1.0.0/24, gateway: 10.1.0.1, range: 10.1.0.2-10.1.0.9}\n")
 	write(t, d, "shared/images/i.yaml", "apiVersion: jailops/v1\nkind: Image\nmetadata:\n  name: i\nspec:\n  os: freebsd\n  release: 15.1-RELEASE\n  arch: amd64\n  source: {type: pkgbase}\n")
 	project(t, d, "p", "[a]", "  networks: [{network: n}]\n  storage: [{storage: s}]\n")
-	write(t, d, "projects/p/jails/j.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [a]\nmetadata:\n  name: j\nspec:\n  image: i@stable\n  storage: s\n  encrypted: true\n  packages: [nginx]\n  network: [{network: n}]\n  volumes: [{volume: keys, mount: /srv/keys}]\n")
+	write(t, d, "projects/p/jails/j.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [a]\nmetadata:\n  name: j\nspec:\n  image: i\n  storage: s\n  encrypted: true\n  packages: [nginx]\n  network: [{network: n}]\n  volumes: [{volume: keys, mount: /srv/keys}]\n")
 	f, err := Load(d)
 	if err != nil {
 		t.Fatal(err)

@@ -1,5 +1,5 @@
 // Package ndproxy is the IPv6 neighbor discovery proxy for the
-// JailOps "proxy" IPv6 mode. Routed IPv6 never depends on it.
+// networks of JailOps that have the NDP proxy switched on. A network without it never depends on this package.
 //
 // # Problem
 //
@@ -11,7 +11,7 @@
 //
 // JailOps allocates every jail address itself, so the proxy knows which
 // addresses to answer for and never has to learn them: it answers for the
-// allocation range of each network in proxy mode (Proxy.Sync, Desired.Addrs)
+// allocation range of each network with the NDP proxy (Proxy.Sync, Desired.Addrs)
 // whether a jail runs or not, and keeps a host route only for a running jail
 // (Desired.Routes). It answers at once, without asking the jail.
 //

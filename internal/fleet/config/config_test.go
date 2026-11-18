@@ -155,7 +155,7 @@ func TestSymlinksAreRefused(t *testing.T) {
 func TestTemplateMergeOrderAndHooks(t *testing.T) {
 	d := base(t)
 	project(t, d, "w", "[a]", "")
-	write(t, d, "templates/one/manifest.yaml", "apiVersion: jailops/v1\nkind: JailTemplate\nmetadata:\n  name: one\nspec:\n  jail:\n    image: img@stable\n    resources: {memory: 1G, cpu: 1}\n    env: {A: one, B: one}\n  after: [{action: start}]\n")
+	write(t, d, "templates/one/manifest.yaml", "apiVersion: jailops/v1\nkind: JailTemplate\nmetadata:\n  name: one\nspec:\n  jail:\n    image: img\n    resources: {memory: 1G, cpu: 1}\n    env: {A: one, B: one}\n  after: [{action: start}]\n")
 	write(t, d, "templates/two/manifest.yaml", "apiVersion: jailops/v1\nkind: JailTemplate\nmetadata:\n  name: two\nspec:\n  jail:\n    resources: {memory: 2G}\n    env: {B: two}\n  after: [{action: snapshot, name: s1}]\n")
 	write(t, d, "projects/w/jails/j.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [a]\nmetadata:\n  name: j\ntemplates: [one, two]\nafter: [{action: restart}]\nspec:\n  env: {C: own, A: null}\n")
 	f, err := Load(d)
@@ -170,7 +170,7 @@ func TestTemplateMergeOrderAndHooks(t *testing.T) {
 	}
 	out, _ := f.Render("a")
 	s := string(out)
-	for _, w := range []string{"memory: 2G", "cpu: 1", "B: two", "C: own", "image: img@stable"} {
+	for _, w := range []string{"memory: 2G", "cpu: 1", "B: two", "C: own", "image: img"} {
 		if !strings.Contains(s, w) {
 			t.Fatalf("render lacks %q:\n%s", w, s)
 		}

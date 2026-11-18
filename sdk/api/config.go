@@ -284,7 +284,7 @@ func buildRegistry() []ckey {
 		return nil
 	}
 
-	str("image", "image", "Image reference: name, name@alias or name#gN. The image name cannot change on a living jail.", "freebsd-15-1", true, false,
+	str("image", "image", "Image reference: name or name#gN. The image name cannot change on a living jail.", "freebsd-15-1", true, false,
 		func(s *JailSpec) *string { return &s.Image }, func(v string) error {
 			if v == "" || strings.ContainsAny(v, " \t\n/") {
 				return fmt.Errorf("%q is not an image reference", v)

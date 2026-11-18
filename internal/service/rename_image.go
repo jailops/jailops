@@ -241,7 +241,7 @@ func (s *Service) propStepsMoved(ctx context.Context, ds, nds, prop, from, to st
 	return out, nil
 }
 
-// renameImageRef rewrites an image reference (NAME, NAME@alias, NAME#gN) of the image from; ok is false for a
+// renameImageRef rewrites an image reference (NAME, NAME#gN) of the image from; ok is false for a
 // reference to another image.
 func renameImageRef(ref, from, to string) (string, bool) {
 	r, err := validate.ParseImageRef(ref)

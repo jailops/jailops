@@ -13,7 +13,7 @@ func TestImages(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("image", "create", "alpine-3", "--os", "linux", "--release", "3.22", "--source-type", "minirootfs", "--alias", "latest")
+	tr.ok("image", "create", "alpine-3", "--os", "linux", "--release", "3.22", "--source-type", "minirootfs")
 	tr.do("", "image", "create", "bad")
 	tr.ok("image", "list")
 	tr.ok("image", "show", "freebsd-15")
@@ -23,17 +23,10 @@ func TestImages(t *testing.T) {
 	tr.ok("image", "build", "freebsd-15", "--from-generation", "g1")
 	tr.do("", "image", "build", "freebsd-15", "--from-generation", "x")
 	tr.ok("image", "generation", "list", "freebsd-15", "-o", "name")
-	tr.ok("image", "alias", "add", "freebsd-15", "edge")                            // newest
-	tr.ok("image", "alias", "add", "freebsd-15", "stable", "--generation", "g1")    // pin
-	tr.do("", "image", "alias", "add", "freebsd-15", "stable", "--generation", "9") // no such generation
-	tr.do("", "image", "alias", "add", "freebsd-15", "stable", "--generation", "x")
 	tr.ok("image", "show", "freebsd-15", "-o", "json")
-	tr.ok("image", "alias", "remove", "-y", "freebsd-15", "edge")
-	tr.do("", "image", "alias", "remove", "-y", "freebsd-15", "edge") // already gone
 	tr.ok("image", "list", "-o", "name")
 	tr.ok("jail", "create", "web", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
 	tr.do("", "image", "generation", "delete", "-y", "freebsd-15", "1") // in use
-	tr.ok("image", "alias", "add", "freebsd-15", "latest")              // newest (g3)
 	tr.ok("image", "generation", "delete", "-y", "freebsd-15", "3")     // the alias that pointed at it moves to g2
 	tr.ok("image", "show", "freebsd-15")
 	tr.do("", "image", "delete", "-y", "freebsd-15") // in use by web
@@ -54,9 +47,9 @@ func TestImageUpgrade(t *testing.T) {
 	// A second project with a jail on the same image: an image upgrade moves the jails of every project.
 	h.srv.SeedProject(api.Project{Metadata: api.ObjectMeta{Name: "shop"}, Spec: api.ProjectSpec{
 		Networks: []api.ProjectNetwork{{Network: "lan"}}, Storage: []api.ProjectStorage{{Storage: "default"}}}})
-	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "api", Project: "shop"}, Spec: api.JailSpec{Image: "freebsd-15@stable", Storage: "default"}})
+	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "api", Project: "shop"}, Spec: api.JailSpec{Image: "freebsd-15", Storage: "default"}})
 	tr := h.transcript()
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	tr.ok("jail", "create", "pin", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
 	before := len(h.mutations())
 	tr.ok("image", "upgrade", "freebsd-15", "--dry-run")
@@ -115,15 +108,15 @@ func TestNetworks(t *testing.T) {
 	tr.ok("network", "list")
 	tr.ok("network", "grant", "dmz", "--project", "main")
 	tr.do("", "network", "grant", "lan", "--project", "other") // no such project
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--storage", "default", "--network", "dmz")
-	tr.ok("jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "dmz")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--storage", "default", "--network", "dmz")
+	tr.ok("jail", "create", "db", "--image", "freebsd-15", "--storage", "default", "--network", "dmz")
 	tr.ok("network", "leases", "dmz")
 	tr.ok("network", "leases", "dmz", "-o", "json")
 	tr.ok("network", "show", "dmz", "-o", "yaml")
 	// The fake picks which user to name from a map; one user keeps the output stable.
 	tr.ok("network", "create", "solo", "--subnet", "10.50.0.0/24", "--gateway", "10.50.0.1", "--range", "10.50.0.5-10.50.0.9")
 	tr.ok("network", "grant", "solo", "--project", "main")
-	tr.ok("jail", "create", "only", "--image", "freebsd-15@stable", "--storage", "default", "--network", "solo")
+	tr.ok("jail", "create", "only", "--image", "freebsd-15", "--storage", "default", "--network", "solo")
 	tr.do("", "network", "delete", "-y", "solo") // busy
 	tr.do("", "network", "delete", "-y", "lan")  // granted to a project
 	tr.ok("network", "revoke", "lan", "--project", "main")
@@ -132,10 +125,9 @@ func TestNetworks(t *testing.T) {
 	tr.ok("network", "create", "-f", f)
 	tr.ok("network", "edit", "viafile", "-f", writeFile(t, h.dir, "net2.yaml", "ipv4: {subnet: 10.40.0.0/24, gateway: 10.40.0.1, range: 10.40.0.5-10.40.0.30}\nmtu: 1400\n", 0o644))
 	tr.ok("network", "show", "viafile")
-	tr.ok("network", "create", "sw", "--ipv4", "10.94.0.1/24", "--uplink", "em0", "--ipv6", "2001:db8:1:2:100::/80", "--ipv6-mode", "proxy")
+	tr.ok("network", "create", "sw", "--ipv4", "10.94.0.1/24", "--uplink", "em0", "--ipv6", "2001:db8:1:2:100::/80")
 	tr.ok("network", "show", "sw", "-o", "yaml")
-	tr.do("", "network", "create", "badmode", "--ipv4", "10.95.0.1/24", "--ipv6", "2001:db8:1:2:200::/80", "--ipv6-mode", "bogus")
-	tr.do("", "network", "create", "nomode", "--ipv4", "10.96.0.1/24", "--ipv6-mode", "proxy")
+	tr.do("", "network", "create", "nomode", "--ipv4", "10.96.0.1/24", "--ipv6-mode", "proxy") // the flag does not exist
 	// the NDP proxy is switched with its own commands; a second run changes nothing
 	tr.ok("network", "ndp-proxy", "enable", "sw")
 	tr.ok("network", "ndp-proxy", "disable", "sw")
@@ -143,8 +135,7 @@ func TestNetworks(t *testing.T) {
 	tr.ok("network", "ndp-proxy", "enable", "sw", "--dry-run")
 	tr.ok("network", "ndp-proxy", "enable", "sw")
 	tr.ok("network", "show", "sw")
-	tr.do("", "network", "ndp-proxy", "enable", "dmz")         // no IPv6 prefix
-	tr.do("", "network", "set", "sw", "--ipv6-mode", "routed") // the flag is gone from set: switched with ndp-proxy
+	tr.do("", "network", "ndp-proxy", "enable", "dmz") // no IPv6 prefix
 	tr.ok("network", "set", "sw", "--ipv6-range", "2001:db8:1:2:100::20-2001:db8:1:2:100::2f")
 	tr.golden("networks")
 }
@@ -240,7 +231,7 @@ func TestSeveralFirewallPolicies(t *testing.T) {
 		tr.ok("firewall", "policy", "create", n)
 		tr.ok("firewall", "rule", "add", n, "in", "--action", "allow", "--proto", "tcp", "--port", "22", "--comment", "ssh")
 	}
-	tr.ok("jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan",
+	tr.ok("jail", "create", "db", "--image", "freebsd-15", "--storage", "default", "--network", "lan",
 		"--firewall-policy", "postgres", "--firewall-policy", "ssh-office")
 	tr.ok("config", "get", "db", "firewall.policies")
 	tr.ok("config", "set", "db", "firewall.policies", "ssh-office,postgres")
@@ -271,12 +262,12 @@ func TestBackup(t *testing.T) {
 	h.srv.SeedBackup(api.Backup{
 		Metadata: api.ObjectMeta{Name: "20260101020000-ab12cd34", Project: "main"},
 		Spec: api.BackupSpec{Jail: "web", JailUUID: "11111111-2222-4333-8444-555555555555", Target: "nightly", Snapshot: "20260101020000-ab12cd34",
-			Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15@stable", Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.15"}}}}},
+			Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15", Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.15"}}}}},
 		Status: api.BackupStatus{Bytes: 5 << 20, NewBytes: 1 << 20, Verified: true},
 	})
 	h.srv.SeedBackup(api.Backup{
 		Metadata: api.ObjectMeta{Name: "20260102020000-ee00ff11", Project: "main"},
-		Spec:     api.BackupSpec{Jail: "db", Target: "usb", Snapshot: "20260102020000-ee00ff11", Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15@stable"}}},
+		Spec:     api.BackupSpec{Jail: "db", Target: "usb", Snapshot: "20260102020000-ee00ff11", Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15"}}},
 		Status:   api.BackupStatus{Bytes: 100, Failed: true},
 	})
 	tr := h.transcript()
@@ -354,16 +345,17 @@ func TestBackupExtensions(t *testing.T) {
 	}
 }
 
-// A proxy-mode network on a host that drops the off-link probes of its segment's routers: the server notes it in its
+// A network with the NDP proxy on a host that drops the off-link probes of its segment's routers: the server notes it in its
 // answer and the client prints the note, for a network from flags, from a file and through apply.
 func TestNetworkCreateNotesOnlinkNS(t *testing.T) {
 	h := newHarness(t, fake.WithSysctl("net.inet6.icmp6.nd6_onlink_ns_rfc4861", "0"))
 	h.seed()
 	tr := h.transcript()
-	tr.ok("network", "create", "sw", "--ipv4", "10.94.0.1/24", "--uplink", "em0", "--ipv6", "2001:db8:1:2:100::/80", "--ipv6-mode", "proxy")
-	f := writeFile(t, h.dir, "sw2.yaml", "kind: Network\nmetadata: {name: sw2}\nspec:\n  uplink: em0\n  ipv6: {mode: proxy, subnet: \"2001:db8:1:2:200::/80\", range: \"2001:db8:1:2:200::10-2001:db8:1:2:200::ff\"}\n", 0o644)
+	tr.ok("network", "create", "sw", "--ipv4", "10.94.0.1/24", "--uplink", "em0", "--ipv6", "2001:db8:1:2:100::/80")
+	tr.ok("network", "ndp-proxy", "enable", "sw")
+	f := writeFile(t, h.dir, "sw2.yaml", "kind: Network\nmetadata: {name: sw2}\nspec:\n  uplink: em0\n  ipv6: {ndp_proxy: true, subnet: \"2001:db8:1:2:200::/80\", range: \"2001:db8:1:2:200::10-2001:db8:1:2:200::ff\"}\n", 0o644)
 	tr.ok("network", "create", "-f", f)
-	f = writeFile(t, h.dir, "sw3.yaml", "kind: Network\nmetadata: {name: sw3}\nspec:\n  uplink: em0\n  ipv6: {mode: proxy, subnet: \"2001:db8:1:2:300::/80\", range: \"2001:db8:1:2:300::10-2001:db8:1:2:300::ff\"}\n", 0o644)
+	f = writeFile(t, h.dir, "sw3.yaml", "kind: Network\nmetadata: {name: sw3}\nspec:\n  uplink: em0\n  ipv6: {ndp_proxy: true, subnet: \"2001:db8:1:2:300::/80\", range: \"2001:db8:1:2:300::10-2001:db8:1:2:300::ff\"}\n", 0o644)
 	tr.ok("apply", "-f", f)
 	// A routed network does not depend on it.
 	tr.ok("network", "create", "rt", "--ipv6", "2001:db8:1:2:1::1/80")

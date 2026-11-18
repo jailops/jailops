@@ -83,7 +83,7 @@ func (s *Service) defaultAppImage(ctx context.Context) (string, error) {
 	}
 	if freebsd == 0 {
 		// nothing to name: the base image is missing, and the hint says how to make it
-		hint := api.ImageCreateHint("the base image", "", "", host)
+		hint := api.ImageCreateHint("the base image", "", host)
 		if len(all) > 0 {
 			hint += "; " + yours
 		}

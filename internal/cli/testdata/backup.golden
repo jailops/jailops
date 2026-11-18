@@ -62,7 +62,7 @@ spec:
   snapshot: 20260101020000-ab12cd34
   bundle:
     spec:
-      image: freebsd-15@stable
+      image: freebsd-15
       network:
         - network: lan
           ipv4: 10.20.0.15

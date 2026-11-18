@@ -384,7 +384,7 @@ func (e *Env) Stop() {
 }
 
 // HostIfaces are the fake host's own interfaces, which networks name as their uplink: em0 and vtnet0 are on a
-// segment whose IPv6 prefix 2001:db8:1:2::/64 proxy-mode networks take parts of; em1 has only IPv4.
+// segment whose IPv6 prefix 2001:db8:1:2::/64 networks with the NDP proxy take parts of; em1 has only IPv4.
 var HostIfaces = []ifconfig.Iface{
 	{Name: "em0", Flags: []string{"UP", "RUNNING"}, Inet: []netip.Prefix{netip.MustParsePrefix("203.0.113.2/24")},
 		Inet6: []netip.Prefix{netip.MustParsePrefix("2001:db8:1:2::2/64")}},
@@ -641,7 +641,7 @@ func (e *Env) Seed() {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := e.Admin.Images().Create(ctx, api.Image{Metadata: api.ObjectMeta{Name: "fb"}, Spec: api.ImageSpec{
-		OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}}); err != nil {
+		OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}}); err != nil {
 		t.Fatalf("seed image: %v", err)
 	}
 	op, err := e.Admin.Images().Build(ctx, "fb", api.ImageBuild{})
@@ -683,7 +683,7 @@ func (e *Env) SeedLinux() {
 	t.Helper()
 	ctx := context.Background()
 	if _, err := e.Admin.Images().Create(ctx, api.Image{Metadata: api.ObjectMeta{Name: "alp"}, Spec: api.ImageSpec{
-		OS: api.OSLinux, Release: "3.22.1", Arch: "amd64", Source: api.ImageSource{Type: "minirootfs"}, Aliases: []string{"stable"}}}); err != nil {
+		OS: api.OSLinux, Release: "3.22.1", Arch: "amd64", Source: api.ImageSource{Type: "minirootfs"}}}); err != nil {
 		t.Fatalf("seed linux image: %v", err)
 	}
 	op, err := e.Admin.Images().Build(ctx, "alp", api.ImageBuild{})
@@ -698,7 +698,7 @@ func (e *Env) SeedLinux() {
 // AlpineJail is a Linux jail spec on the image SeedLinux builds.
 func AlpineJail(name string) api.Jail {
 	return api.Jail{Metadata: api.ObjectMeta{Name: name}, Spec: api.JailSpec{
-		Image: "alp@stable", Storage: "default", Network: []api.NetworkAttach{{Network: "lan", IPv4: "auto"}}}}
+		Image: "alp", Storage: "default", Network: []api.NetworkAttach{{Network: "lan", IPv4: "auto"}}}}
 }
 
 // LAN is the network the tests use.
@@ -732,7 +732,7 @@ func WebJailOn(name, network string) api.Jail {
 // WebJail is a jail spec on the seeded image and network.
 func WebJail(name string) api.Jail {
 	return api.Jail{Metadata: api.ObjectMeta{Name: name}, Spec: api.JailSpec{
-		Image: "fb@stable", Storage: "default", Update: api.UpdatePolicy{Strategy: api.UpdateRebase, Healthcheck: "/bin/true"},
+		Image: "fb", Storage: "default", Update: api.UpdatePolicy{Strategy: api.UpdateRebase, Healthcheck: "/bin/true"},
 		Network: []api.NetworkAttach{{Network: "lan", IPv4: "auto"}}}}
 }
 

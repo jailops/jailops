@@ -37,7 +37,7 @@ spec:
     limits.memory: 4G
     nic.eth1: lan
 
-$ jailops create nginx --image freebsd-15@stable --network lan --storage default --profile base --profile web
+$ jailops create nginx --image freebsd-15 --network lan --storage default --profile base --profile web
 jail/nginx created
 
 $ jailops config set nginx limits.memory 8G
@@ -46,23 +46,23 @@ restart required for: limits.memory
 the jail was not restarted: run 'jailops restart nginx' when it suits you, or repeat with --restart
 
 $ jailops config show nginx --expanded
-KEY                VALUE               SOURCE
-boot.autostart     true                base
-hostname           nginx               jail
-image              freebsd-15@stable   jail
-limits.memory      8G                  jail
-nic.eth0           lan                 jail
-nic.eth0.ipv4      10.20.0.10          jail
-nic.eth0.network   lan                 jail
-nic.eth1           lan                 web
-nic.eth1.network   lan                 web
-profiles           base,web            jail
-storage            default             jail
+KEY                VALUE        SOURCE
+boot.autostart     true         base
+hostname           nginx        jail
+image              freebsd-15   jail
+limits.memory      8G           jail
+nic.eth0           lan          jail
+nic.eth0.ipv4      10.20.0.10   jail
+nic.eth0.network   lan          jail
+nic.eth1           lan          web
+nic.eth1.network   lan          web
+profiles           base,web     jail
+storage            default      jail
 
 $ jailops config show nginx
 KEY                VALUE
 hostname           nginx
-image              freebsd-15@stable
+image              freebsd-15
 limits.memory      8G
 nic.eth0           lan
 nic.eth0.ipv4      10.20.0.10
@@ -87,7 +87,7 @@ $ jailops config show nginx --expanded -o json
   },
   {
     "key": "image",
-    "value": "freebsd-15@stable",
+    "value": "freebsd-15",
     "source": "jail"
   },
   {

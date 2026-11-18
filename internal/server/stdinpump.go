@@ -34,7 +34,7 @@ func (p *stdinPump) push(b []byte) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.stopped || p.closing {
-		return true // the command no longer reads, or the client closed stdin: input is dropped as before
+		return true // the command no longer reads, or the client closed stdin: input is dropped
 	}
 	if p.size+len(b) > maxStdinBacklog {
 		return false

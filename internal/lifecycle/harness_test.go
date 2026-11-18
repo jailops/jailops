@@ -21,7 +21,7 @@ var bg = context.Background()
 // fakeImages serves generations that the world creates directly in the model.
 type fakeImages struct {
 	z        *zfsmodel.Model
-	aliases  map[string]int // "<image>@<alias>"
+	newest   map[string]int // the newest generation of an image: what its bare name resolves to
 	gens     map[string]api.ImageGeneration
 	collects int
 	// roots records the storage roots the lifecycle asked about.
@@ -30,12 +30,12 @@ type fakeImages struct {
 
 func (f *fakeImages) Resolve(ctx context.Context, root, ref string) (api.ImageGeneration, error) {
 	f.roots = append(f.roots, root)
-	if img, a, ok := strings.Cut(ref, "@"); ok {
-		n, ok := f.aliases[img+"@"+a]
+	if !strings.Contains(ref, "#") {
+		n, ok := f.newest[ref]
 		if !ok {
-			return api.ImageGeneration{}, api.Errorf(api.CodeNotFound, "no alias %s", ref)
+			return api.ImageGeneration{}, api.Errorf(api.CodeNotFound, "no image %s", ref)
 		}
-		ref = fmt.Sprintf("%s#g%d", img, n)
+		ref = fmt.Sprintf("%s#g%d", ref, n)
 	}
 	g, ok := f.gens[ref]
 	if !ok {
@@ -77,13 +77,12 @@ func newWorld(t *testing.T) *world {
 			t.Fatal(err)
 		}
 	}
-	w.Images = &fakeImages{z: w.Z, aliases: map[string]int{}, gens: map[string]api.ImageGeneration{}}
+	w.Images = &fakeImages{z: w.Z, newest: map[string]int{}, gens: map[string]api.ImageGeneration{}}
 	w.addGen("fb", 1, "freebsd", "15.0-RELEASE")
 	w.addGen("fb", 2, "freebsd", "15.0-RELEASE")
 	w.addGen("alp", 1, "linux", "3.22")
-	w.Images.aliases["fb@stable"] = 1
-	w.Images.aliases["fb@latest"] = 2
-	w.Images.aliases["alp@stable"] = 1
+	w.Images.newest["fb"] = 1
+	w.Images.newest["alp"] = 1
 	w.Exec.Handler = w.handle
 	w.Files.Trees["/jailops/projects/alpha/jails/web/root/etc"] = []string{"rc.conf"}
 	w.attach = map[string][]Attached{}
@@ -139,7 +138,7 @@ func spec(image string) api.JailSpec {
 }
 
 func (w *world) jail(name string) api.Jail {
-	return api.Jail{Metadata: api.ObjectMeta{Name: name, Project: "alpha", UUID: "uuid-" + name}, Spec: spec("fb@stable")}
+	return api.Jail{Metadata: api.ObjectMeta{Name: name, Project: "alpha", UUID: "uuid-" + name}, Spec: spec("fb")}
 }
 
 func (w *world) storage() Storage { return Storage{Root: "tank/jailops", MountBase: "/jailops"} }

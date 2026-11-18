@@ -13,7 +13,7 @@ Replace `2001:db8:abcd:1::/64` with the prefix your provider routes to you and `
 
 ## What the example shows
 
-- `ipv6.mode: routed` with a real gateway address on the gateway interface (`2001:db8:abcd:1:1::1`).
+- Routed networks (no `ipv6.ndp_proxy`: the provider routes the prefix to the host) with a real gateway address on the gateway interface (`2001:db8:abcd:1:1::1`).
 - Two projects, two networks, no sharing; `firewall_policies: [floor]` in both.
 - Fixed IPv6 addresses for the public jails (`::80`, `::25`) so DNS and rules can name them.
 - Dual stack: IPv4 is NATed through the host's address; `expose:` lets the web ports in over IPv6 and forwards them over IPv4.
@@ -30,9 +30,7 @@ Replace `2001:db8:abcd:1::/64` with the prefix your provider routes to you and `
     jailops-sync -C examples/ipv6-routed-hetzner plan       # compare with EXPECTED-PLAN.md
     jailops-sync -C examples/ipv6-routed-hetzner sync --apply
 
-## Verified, and not
+## Limits
 
-Routed mode with dual-stack networks is verified on FreeBSD 15.1 arm64: FreeBSD, Alpine and Debian jails reached the
-internet over IPv4 and IPv6. **UNVERIFIED:** traffic from the internet into a jail over a routed prefix (the test host has
-no IPv6 route to it), and the automatic carving of `/80`s and a reject route for the unallocated rest of the `/64`: neither is
-implemented, you choose each `/80`, as this example does.
+JailOps does not carve `/80`s out of the `/64` for you: you choose each `/80`, as this example does.
+

@@ -16,9 +16,9 @@ func TestJailBulkActions(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--label", "env=prod", "--start")
-	tr.ok("create", "db", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--label", "env=prod", "--label", "tier=data")
-	tr.ok("create", "tmp", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--label", "env=test")
+	tr.ok("create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--label", "env=prod", "--start")
+	tr.ok("create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--label", "env=prod", "--label", "tier=data")
+	tr.ok("create", "tmp", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--label", "env=test")
 	tr.ok("list", "-c", "name,state")
 	tr.ok("stop", "-l", "env=prod")
 	tr.ok("start", "--all")
@@ -111,8 +111,6 @@ func TestGenerationNotation(t *testing.T) {
 	tr.ok("image", "build", "freebsd-15", "--from-generation", "1")
 	tr.ok("image", "build", "freebsd-15", "--from-generation", "freebsd-15#g2", "--dry-run")
 	tr.do("", "image", "build", "freebsd-15", "--from-generation", "other#g2")
-	tr.ok("image", "alias", "add", "freebsd-15", "stable", "--generation", "g1")
-	tr.ok("image", "alias", "add", "freebsd-15", "edge", "--generation", "freebsd-15#g4")
 	tr.ok("image", "generation", "delete", "-y", "freebsd-15", "g3")
 	tr.do("", "image", "generation", "delete", "-y", "freebsd-15", "three")
 	tr.ok("jail", "create", "web", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
@@ -170,7 +168,7 @@ spec: {ipv4: {subnet: 10.30.0.0/24, gateway: 10.30.0.1, range: 10.30.0.10-10.30.
 apiVersion: jailops/v1
 kind: Jail
 metadata: {name: web, labels: {env: prod}}
-spec: {image: freebsd-15@stable, storage: default, layout: thin, hostname: web, network: [{network: lan, ipv4: 10.20.0.15}]}
+spec: {image: freebsd-15, storage: default, layout: thin, hostname: web, network: [{network: lan, ipv4: 10.20.0.15}]}
 ---
 kind: Image
 metadata: {name: alpine-3}
@@ -210,8 +208,8 @@ func TestProjectFilters(t *testing.T) {
 	h.seed()
 	h.srv.SeedProject(api.Project{Metadata: api.ObjectMeta{Name: "shop"}, Spec: api.ProjectSpec{
 		Networks: []api.ProjectNetwork{{Network: "lan"}}, Storage: []api.ProjectStorage{{Storage: "default"}}}})
-	h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
-	h.run("", "--project", "shop", "create", "api", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	h.run("", "--project", "shop", "create", "api", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	out, errs, code := h.run("", "op", "list", "--project", "shop")
 	if code != 0 || !strings.Contains(out, "Creating jail api") || strings.Contains(out, "web") {
 		t.Fatalf("op list --project: %d %q %s", code, out, errs)
@@ -242,7 +240,7 @@ func TestFlagHarmonisation(t *testing.T) {
 	h.srv.SeedRemote(api.Remote{Metadata: api.ObjectMeta{Name: "host-b"}, Spec: api.RemoteSpec{Address: "https://10.94.0.2:39110", HostUUID: h.srv.HostUUID()}})
 	h.srv.SeedBackup(api.Backup{
 		Metadata: api.ObjectMeta{Name: "20260101020000-ab12cd34", Project: "main"},
-		Spec:     api.BackupSpec{Jail: "web", Target: "usb", Snapshot: "20260101020000-ab12cd34", Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15@stable"}}},
+		Spec:     api.BackupSpec{Jail: "web", Target: "usb", Snapshot: "20260101020000-ab12cd34", Bundle: api.RestoreBundle{Spec: api.JailSpec{Image: "freebsd-15"}}},
 	})
 	tr.ok("backup", "restore", "20260101020000-ab12cd34", "--to-host", "host-b", "--dry-run")
 	var rr api.RestoreRequest
@@ -273,7 +271,7 @@ func TestHelpGrammarAndJailLabel(t *testing.T) {
 			t.Errorf("%v: %d, want %q in:\n%s", c.args, code, c.want, out)
 		}
 	}
-	h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	if out, errs, code := h.run("", "jail", "label", "web", "tier=front"); code != 0 || !strings.Contains(out, "tier=front") {
 		t.Fatalf("jail label: %d %q %s", code, out, errs)
 	}
@@ -283,8 +281,8 @@ func TestHelpGrammarAndJailLabel(t *testing.T) {
 func TestCompletionEverywhere(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
-	h.run("", "jail", "create", "db", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.run("", "jail", "snapshot", "create", "web", "s1")
 	h.run("", "firewall", "policy", "create", "floor", "--default-in", "deny", "--default-out", "allow")
 	h.srv.SeedRemote(api.Remote{Metadata: api.ObjectMeta{Name: "host-b"}, Spec: api.RemoteSpec{Address: "https://10.94.0.2:39110"}})
@@ -296,8 +294,6 @@ func TestCompletionEverywhere(t *testing.T) {
 		{[]string{"delete", "web", "db", ""}, ":", "web"},
 		{[]string{"jail", "snapshot", "delete", "web", ""}, "s1\n", "web"},
 		{[]string{"jail", "snapshot", "show", "web", ""}, "s1\n", ""},
-		{[]string{"image", "alias", "add", "freebsd-15", ""}, "stable\n", ""},
-		{[]string{"image", "alias", "add", "freebsd-15", "stable", "--generation", ""}, "g1\n", ""},
 		{[]string{"image", "generation", "delete", "freebsd-15", ""}, "g1\n", ""},
 		{[]string{"image", "build", "freebsd-15", "--from-generation", ""}, "g1\n", ""},
 		{[]string{"jail", "list", "--state", ""}, "running\n", ""},
@@ -319,7 +315,6 @@ func TestCompletionEverywhere(t *testing.T) {
 		{[]string{"image", "create", "x", "--os", ""}, "linux\n", ""},
 		{[]string{"image", "create", "x", "--arch", ""}, "arm64\n", ""},
 		{[]string{"image", "create", "x", "--source-type", ""}, "debootstrap\n", ""},
-		{[]string{"network", "create", "x", "--ipv6-mode", ""}, "proxy\n", ""},
 		{[]string{"storage", "create", "x", "--compression", ""}, "zstd\n", ""},
 		{[]string{"backup", "target", "create", "x", "--kind", ""}, "directory\n", ""},
 		{[]string{"backup", "policy", "create", "x", "--verify-mode", ""}, "extract\n", ""},
@@ -357,7 +352,7 @@ func TestImageSetAutoUpgrade(t *testing.T) {
 func TestJailSetClearsAList(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	if _, errs, code := h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--tag", "front"); code != 0 {
+	if _, errs, code := h.run("", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--tag", "front"); code != 0 {
 		t.Fatal(errs)
 	}
 	if out, _, _ := h.run("", "jail", "show", "web", "-o", "yaml"); !strings.Contains(out, "front") {

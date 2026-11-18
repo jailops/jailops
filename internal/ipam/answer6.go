@@ -10,7 +10,7 @@ import (
 // AnswerLimit6 is how many addresses of an IPv6 allocation range the proxy of a network answers for.
 const AnswerLimit6 = api.AnswerLimit6
 
-// ProxyAddrs6 lists the addresses the neighbor discovery proxy answers for on a network in proxy mode: the first
+// ProxyAddrs6 lists the addresses the neighbor discovery proxy answers for on a network with the NDP proxy: the first
 // AnswerLimit6 addresses of the allocation range, minus the excluded spans, the resolver address of the network and the
 // base address of the prefix (the subnet-router anycast address, which a router uses). More reports whether the range
 // has addresses beyond the limit. The addresses of the host itself are not known here; the proxy and the helper leave

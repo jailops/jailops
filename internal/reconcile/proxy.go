@@ -19,16 +19,16 @@ type proxyHandle struct {
 	err    error
 }
 
-// proxyPass keeps one neighbor discovery proxy per uplink in step with the networks in proxy mode that use it. The
+// proxyPass keeps one neighbor discovery proxy per uplink in step with the networks with the NDP proxy that use it. The
 // proxy answers for the allocation range of each network (ipam.ProxyAddrs6) whether a jail runs or not, and holds the
-// host route of every running jail. A proxy-mode network always has one; what a daemon may do on the uplink is the
+// host route of every running jail. A network with the NDP proxy always has one; what a daemon may do on the uplink is the
 // operator's decision in the helper's configuration, and the network says so when it is refused. Routed IPv6 never
 // depends on it.
 func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, netStatus map[string]*api.NetworkStatus, rep *Report, now time.Time) {
 	rangeNote := map[string]string{}
-	proxyNets := map[string]bool{} // networks in proxy mode
+	proxyNets := map[string]bool{} // networks with the NDP proxy
 	for _, n := range des.Networks {
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy {
+		if n.Spec.IPv6 != nil && n.Spec.IPv6.NDPProxy {
 			proxyNets[n.Name] = true
 		}
 	}
@@ -47,9 +47,9 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 		return
 	}
 	byUplink := map[string]*ndproxy.Desired{}
-	uplinkNets := map[string][]string{} // uplink -> the proxy-mode networks that use it
+	uplinkNets := map[string][]string{} // uplink -> the networks with the NDP proxy that use it
 	for _, n := range des.Networks {
-		if n.Spec.IPv6 == nil || n.Spec.IPv6.Mode != api.IPv6Proxy || n.Spec.Uplink == "" {
+		if n.Spec.IPv6 == nil || !n.Spec.IPv6.NDPProxy || n.Spec.Uplink == "" {
 			continue
 		}
 		d := byUplink[n.Spec.Uplink]
@@ -124,7 +124,7 @@ func (r *Reconciler) proxyPass(ctx context.Context, des Desired, obs *Observed, 
 		if pf, ok := h.ndp.(ndpPrefixer); ok {
 			var prefixes []netip.Prefix
 			for _, n := range des.Networks {
-				if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy && n.Spec.Uplink == uplink {
+				if n.Spec.IPv6 != nil && n.Spec.IPv6.NDPProxy && n.Spec.Uplink == uplink {
 					if p, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
 						prefixes = append(prefixes, p)
 					}

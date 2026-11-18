@@ -594,7 +594,7 @@ func TestRenameImage(t *testing.T) {
 	for _, want := range []string{
 		"image freebsd-15-1\n",
 		"dataset tank/jailops/images/freebsd-15-1/g1 /jailops/images/freebsd-15-1/g1 freebsd-15-1",
-		"jail web freebsd-15-1@stable freebsd-15-1", "jail pin freebsd-15-1#g1 freebsd-15-1", "jail api freebsd-15-1@stable freebsd-15-1",
+		"jail web freebsd-15-1 freebsd-15-1", "jail pin freebsd-15-1#g1 freebsd-15-1", "jail api freebsd-15-1 freebsd-15-1",
 		"beta images freebsd-15-1", "runs freebsd-15-1.json",
 	} {
 		if !strings.Contains(after, want) {
@@ -611,7 +611,7 @@ func TestRenameImage(t *testing.T) {
 	if j, _ := s.GetJail(as(globalAdmin, dtest.SeedProject), "web"); j.Status.Power != api.PowerRunning {
 		t.Fatalf("web: %+v", j.Status)
 	}
-	mkJail(t, e, s, as(globalAdmin, dtest.SeedProject), func() api.Jail { j := dtest.WebJail("new"); j.Spec.Image = "freebsd-15-1@stable"; return j }())
+	mkJail(t, e, s, as(globalAdmin, dtest.SeedProject), func() api.Jail { j := dtest.WebJail("new"); j.Spec.Image = "freebsd-15-1"; return j }())
 	gens, err := s.ListGenerations(g, "freebsd-15-1")
 	if err != nil || len(gens) != 1 {
 		t.Fatalf("%+v %v", gens, err)

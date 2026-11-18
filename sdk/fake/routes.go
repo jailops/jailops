@@ -121,6 +121,7 @@ func (s *Server) routes() {
 	m("POST /api/v1/backups/{id}/verify", s.handleBackupVerify)
 	m("GET /api/v1/jails/{name}/state", s.jailState)
 	m("GET /api/v1/jails/{name}/reach", s.jailReach)
+	m("GET /api/v1/jails/{name}/diff", s.jailDiff)
 	m("GET /api/v1/exposed", s.exposed)
 	m("GET /api/v1/jails/{name}/usage", s.jailUsage)
 	m("GET /api/v1/jails/{name}/logs", s.jailLogs)
@@ -158,8 +159,6 @@ func (s *Server) routes() {
 	m("POST /api/v1/images/{name}/generations", s.genBuild)
 	m("DELETE /api/v1/images/{name}/generations/{n}", s.genDelete)
 	m("POST /api/v1/images/{name}/upgrade", s.imageUpgrade)
-	m("PUT /api/v1/images/{name}/aliases/{alias}", s.aliasSet)
-	m("DELETE /api/v1/images/{name}/aliases/{alias}", s.aliasDelete)
 	m("GET /api/v1/networks/{name}/leases", s.leases)
 	m("POST /api/v1/wireguard/join", s.wgJoin)
 	m("POST /api/v1/wireguard/{name}/peers", s.wgPeerAdd)
@@ -381,11 +380,7 @@ func genNumber(s string) int {
 
 // imageCreateHint is the server's hint for an image reference that names no image: the commands that make it.
 func (s *Server) imageCreateHint(ref string) string {
-	alias := ""
-	if _, a, ok := strings.Cut(ref, "@"); ok {
-		alias = a
-	}
-	return api.ImageCreateHint("it", imageName(ref), alias, api.BaseRelease(s.release))
+	return api.ImageCreateHint("it", imageName(ref), api.BaseRelease(s.release))
 }
 
 // restoreVolumeBackup restores a volume backup as a new volume of the project, like the daemon: a name that is taken is

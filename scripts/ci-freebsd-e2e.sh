@@ -768,23 +768,25 @@ dns6_step() {
 	chown root:wheel /var/unbound/conf.d; chmod 755 /var/unbound/conf.d # what jailops-setup does
 	check "restart jailopsd (it asks the helper about the names at its start)" service jailopsd restart
 	waitfor "the daemon answers" 60 $J host show
-	check "an IPv6 only network" $J network create v6only --ipv6 2001:db8:77:1::/64 --ipv6-mode routed --uplink "$uplink"
+	check "an IPv6 only network" $J network create v6only --ipv6 2001:db8:77:1::/64 --uplink "$uplink"
 	check "grant it to demo" $J network grant v6only --project demo
 	check "a jail on it" $J create v6 --project demo --image "$img" --network v6only --storage default --start
 	expect "network show says what the jails ask" 'DNS: +2001:db8:77:1::1 \(the gateway' $J network show v6only
 	waitfor "the packages of the first start are in (an exec waits for them)" 180 $J exec --project demo v6 -- true
 	expect_retry "the jail asks the resolver address of its prefix only" '^nameserver 2001:db8:77:1::1$' $J exec --project demo v6 -- cat /etc/resolv.conf
-	expect "the host holds the resolver address on the loopback" '2001:db8:77:1::1 prefixlen 128' ifconfig lo0 inet6
+	# the helper puts the address on lo0 in the next apply of the names (a pass of the reconcile loop after the jail
+	# started, then the check of unbound and the probes of the resolver), seconds after the jail answers
+	waitfor "the host holds the resolver address on the loopback" 120 sh -c 'ifconfig lo0 inet6 | grep -q "2001:db8:77:1::1 prefixlen 128"'
 	expect_retry "doctor: the names answer on every address the jails ask" 'dns\.unbound +PASS' $J doctor
 	expect_retry "the jail finds its own name through the resolver address" '2001:db8:77:1::' $J exec --project demo v6 -- drill -Q v6.demo.internal AAAA
 	expect_retry "and any other name through the host's resolver" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' $J exec --project demo v6 -- drill -Q pkg.freebsd.org
 	# a dual stack network: the gateway and the resolver address, IPv4 first
-	check "a dual stack network" $J network create v64 --ipv4 10.79.0.1/24 --ipv6 2001:db8:77:2::/64 --ipv6-mode routed --uplink "$uplink"
+	check "a dual stack network" $J network create v64 --ipv4 10.79.0.1/24 --ipv6 2001:db8:77:2::/64 --uplink "$uplink"
 	check "grant it to demo" $J network grant v64 --project demo
 	check "a jail on it" $J create v64 --project demo --image "$img" --network v64 --storage default --start
 	waitfor "the packages of the first start are in" 180 $J exec --project demo v64 -- true
 	expect_retry "a dual stack jail asks the gateway first" '^nameserver 10\.79\.0\.1$' $J exec --project demo v64 -- cat /etc/resolv.conf
-	expect "and the resolver address of its IPv6 prefix next" '^nameserver 2001:db8:77:2::1$' $J exec --project demo v64 -- cat /etc/resolv.conf
+	expect_retry "and the resolver address of its IPv6 prefix next" '^nameserver 2001:db8:77:2::1$' $J exec --project demo v64 -- cat /etc/resolv.conf
 	check "delete the jails" sh -c "$J delete --stop --confirm-data-loss v6 --project demo && $J delete --stop --confirm-data-loss v64 --project demo"
 	check "withdraw the grants" sh -c "$J network revoke v6only --project demo && $J network revoke v64 --project demo"
 	check "delete the networks" $J network delete v6only v64 -y
@@ -1049,6 +1051,31 @@ check "prompt none keeps the variables" test -e "$webroot/usr/local/etc/profile.
 check "the default prompt again" $J config set --project demo web prompt default
 check "shell-setup on a jail that has everything changes nothing" $J jail shell-setup --project demo web
 expect "the shell setup left no condition" '^$' sh -c "$J jail show --project demo web -o json | grep ShellSetup || true"
+
+step "what a thin jail holds on top of its image (docs/storage.md): jail diff lists a new file and a changed rc.conf and nothing else of ours"
+check "create a jail to compare" $J create diffjail --project demo --image "$img" --network lan --storage default
+check "its shell is sh: no package is installed behind our back" $J set diffjail --project demo shell sh
+expect "a jail that was just made holds nothing on top of its image" '^total: no changes$' $J jail diff diffjail --project demo
+expect "the baselines are not snapshots of the jail" '^\[\]$' $J jail snapshot list diffjail --project demo -o json
+expect "the baseline snapshot of a persistent dataset is there" "^$pool/jailops/projects/demo/jails/diffjail/local@jailops-base\$" zfs list -H -o name -t snapshot "$pool/jailops/projects/demo/jails/diffjail/local@jailops-base"
+check "start" $J start diffjail --project demo
+waitfor "the jail has the shell files JailOps writes" 30 $J exec --project demo diffjail -- test -f /usr/local/etc/profile.d/jailops-prompt.sh
+# the start writes files of its own into /etc and /usr/local: the diff before and after our two changes says what they are
+for ds in etc local; do check "diff $ds before" sh -c "$J jail diff diffjail --project demo --dataset $ds > $work/diff-$ds.before"; done
+check "a file in /usr/local/etc and a line in /etc/rc.conf" $J exec --project demo diffjail -- sh -c 'echo marker > /usr/local/etc/diff-marker.conf && echo diff_marker=YES >> /etc/rc.conf'
+for ds in etc local; do check "diff $ds after" sh -c "$J jail diff diffjail --project demo --dataset $ds > $work/diff-$ds.after"; done
+# what the diff lists now and did not before
+new() { grep -vxF -f "$work/diff-$1.before" "$work/diff-$1.after" | grep -v '^total:' || true; }
+[ "$(new local)" = "  + /usr/local/etc/diff-marker.conf" ] || { cat "$work/diff-local.after" >&2; fail "jail diff lists the new file of /usr/local/etc and nothing more"; }
+[ "$(new etc)" = "  M /etc/rc.conf" ] || { cat "$work/diff-etc.after" >&2; fail "jail diff lists the changed /etc/rc.conf and nothing more"; }
+expect "the other datasets are in the summary" '^home +/home +no changes$' $J jail diff diffjail --project demo --summary
+check "the root lists no mount point and no file of a persistent dataset" sh -c "! $J jail diff diffjail --project demo --dataset root | grep -E '^  . /(usr/local|home|root|etc|var/db|var/log|var/mail|var/spool)(/|\$)'"
+expect "a limit says how many lines are left out" '^  \.\.\. and [0-9]+ more \(--limit [0-9]+ lists them all\)$' $J jail diff diffjail --project demo --dataset local --limit 1
+expect "the JSON names the kinds" '"kind": "modified"' $J jail diff diffjail --project demo --dataset etc -o json
+check "stop" $J stop diffjail --project demo
+expect "a stopped jail answers too" '^  \+ /usr/local/etc/diff-marker\.conf$' $J jail diff diffjail --project demo --dataset local
+check "the diff of a stopped jail leaves it unmounted" sh -c "! mount | grep -q ' /jopsci/projects/demo/jails/diffjail/root'"
+check "delete the jail" $J delete diffjail --project demo --confirm-data-loss
 
 step "interface descriptions (ifconfig shows what JailOps made)"
 expect "the host end of the jail's epair" 'description: jailops jail=demo/web net=lan \(host side\)' ifconfig -a
@@ -1964,7 +1991,7 @@ expect "its mountpoints moved" "^$mount/projects/demo/jails/web-renamed/root\$" 
 check "start it under the new name" $J start web-renamed --project demo
 expect "the kernel knows it by the new name" '^demo_web-renamed$' jls -j demo_web-renamed name
 expect "its file is there" 'ci-marker' $J exec --project demo web-renamed -- cat /root/marker
-expect "its anchor" 'jailops/demo/web-renamed' pfctl -sA
+expect_retry "its anchor" 'jailops/demo/web-renamed' pfctl -sA
 check "stop it" $J stop web-renamed --project demo
 check "and rename it back" $J rename web-renamed web --project demo -y
 # an image: the generations move, the clones of running jails follow, the nightly runs move with it
@@ -1984,7 +2011,7 @@ expect_refused "nothing is left under the old name" zfs list "$pool/jailops/proj
 expect "the mountpoints moved" "^$mount/projects/e2e-proj/jails/web/root\$" zfs get -H -o value mountpoint "$pool/jailops/projects/e2e-proj/jails/web/root"
 check "a jail starts in the renamed project" $J start web --project e2e-proj
 expect "under its new kernel name" '^e2e-proj_web$' jls -j e2e-proj_web name
-expect "with its anchor" 'jailops/e2e-proj/web' pfctl -sA
+expect_retry "with its anchor" 'jailops/e2e-proj/web' pfctl -sA
 expect "and its file" 'ci-marker' $J exec --project e2e-proj web -- cat /root/marker
 check "stop it" $J stop web --project e2e-proj
 check "rename the project back" $J project rename e2e-proj demo -y

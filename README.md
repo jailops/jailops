@@ -61,7 +61,7 @@ binaries from the GitHub releases page. The client package ships bash, zsh and f
 | Alpine and Debian jails | [docs/linux-jails.md](docs/linux-jails.md) |
 | Fleets from git | [docs/fleet-sync.md](docs/fleet-sync.md) |
 | The application catalog and installing an app with one command | [docs/apps.md](docs/apps.md) |
-| The contract and what is verified | [docs/design.md](docs/design.md) |
+| The design contract | [docs/design.md](docs/design.md) |
 | The wire protocol | [sdk/PROTOCOL.md](sdk/PROTOCOL.md) |
 
 Questions, bugs and contributions: the issue tracker of the repository; the website, [jailops.net](https://jailops.net),

@@ -226,7 +226,7 @@ func makeJail(t *testing.T, w *world, name, uuid string, labels map[string]strin
 	c := "tank/jailops/projects/src/jails/" + name
 	mp := "/jo/" + name
 	j := JailRecord{Name: name, Project: "alpha", UUID: uuid, Labels: labels, Container: c, Image: testGen,
-		Spec: api.JailSpec{Image: "fbsd@stable", Layout: api.LayoutThin, Hostname: name,
+		Spec: api.JailSpec{Image: "fbsd", Layout: api.LayoutThin, Hostname: name,
 			Network:  []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.5", MAC: "02:aa:bb"}},
 			Firewall: api.FirewallAttach{Policies: []string{"web"}}}}
 	mk := func(rel, kind, mount string, props map[string]string) {

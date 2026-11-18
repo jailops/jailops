@@ -9,7 +9,7 @@ func TestStopAll(t *testing.T) {
 	tr := h.transcript()
 	tr.ok("stop-all") // nothing runs yet
 	create := func(name string, extra ...string) {
-		args := append([]string{"create", name, "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--start"}, extra...)
+		args := append([]string{"create", name, "--image", "freebsd-15", "--storage", "default", "--network", "lan", "--start"}, extra...)
 		tr.ok(args...)
 	}
 	create("db")

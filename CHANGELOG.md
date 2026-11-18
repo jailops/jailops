@@ -4,6 +4,28 @@
 
 ## 0.8.4 - 2026-11-18
 
+- **No IPv6 mode: the NDP proxy is a switch of the network.** A network has an IPv6 prefix, and the proxy that answers
+  neighbor discovery on a shared segment is switched with `jailops network ndp-proxy enable|disable NETWORK` (field
+  `ipv6.ndp_proxy`; the web console has the same switch). **Breaking:** `--ipv6-mode` and `ipv6.mode` are gone; scripts
+  and files that pass them must drop them and run `ndp-proxy enable` for a network on a shared segment. A stored network
+  is converted when it is loaded, so a network that had the proxy keeps it: nothing to do for existing networks. A new
+  IPv6 network gets the whole range of its prefix; the proxy answers for the first 1024 addresses of it.
+- **Breaking: image aliases are gone.** `jailops image alias`, `image create --alias`, `IMAGE@alias`, the alias column of `image list` and the console's alias chips and routes are removed (API extension `image_aliases`, SDK `SetAlias` and `DeleteAlias`). An image name follows the newest generation; `IMAGE#gN` and `--generation gN` pin one. The first start converts what was stored: a jail that named an alias gets the bare image name and an event `image-alias-removed` says which alias it had and which generation it pointed at, the alias lists of images are dropped, and the alias table is cleared from each image dataset. The root of an existing jail does not change.
+- **Removed: `jailops-priv --root-dataset`.** Use `storage-root` in `priv.conf` (or `-storage-root` on the command line).
+- **`jailops jail diff NAME`: what a thin jail holds on top of its image.** It lists the files the jail added (`+`), changed
+  (`M`), removed (`-`) or renamed (`R old -> new`), grouped by dataset, with a summary line. The root is compared with the
+  `@ro` snapshot of the generation it was cloned from (`zfs diff`, through a read-only helper operation with a time and a
+  size bound); each persistent dataset is compared with its new snapshot `jailops-base`, taken right after the image's
+  directory was copied into it (never listed, rolled back or pruned with the snapshots of the jail). A jail made before
+  that snapshot existed is compared file by file with the image and the output says so. `--summary` prints the counts,
+  `--limit N` the lines per dataset (200 by default, the counts stay complete), `--dataset` one dataset, `--packages` the
+  packages installed on purpose (a running jail), `-o json|yaml` the reply. A thick or Linux jail answers that diff needs a
+  thin jail; a jail with a locked volume says so. API: `GET /jails/{name}/diff` (extension `jail_diff`, readonly, operator
+  of the project), SDK `Jails().Diff`. Docs: [storage.md](docs/storage.md#what-is-unique-in-a-jail).
+- **The web console shows what a jail holds on top of its image.** A new Changes tab on the jail page lists, per dataset, the
+  files the jail added, changed, removed or renamed since its image or since the jail was made, with the counts, "Show all"
+  when the list is cut, and the packages installed on purpose. It reads `GET /jails/{name}/diff` (the same answer as
+  `jailops jail diff`), so a reader of the project sees it too.
 - **Breaking: an `allow in` rule without `--from` is for the jail's link only** (the project's jails and the host) and no longer
   opens the uplink. `--from any` or `jailops expose` does. `firewall rule add` says so. `app allow` refuses `0.0.0.0/0`, `::/0`
   and `any` and points at `jailops expose`. `jailops doctor` (`jails.inbound-without-source`) lists the rules this changes on the first start after the upgrade: give such a rule `--from any`, or use `jailops expose`. `app allow` also refuses every prefix shorter than /8 (IPv4) or /16 (IPv6) and address sets that hold one.

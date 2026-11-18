@@ -66,7 +66,6 @@ describe('ImageCreateDialog', () => {
     expect(w.get('[data-test="image-release-choice"]').text()).toContain('15.1-RELEASE (this host)')
     expect(w.get('[data-test="image-arch"]').attributes('readonly')).toBeDefined()
     expect((w.get('[data-test="image-arch"]').element as HTMLInputElement).value).toBe('amd64')
-    expect(w.find('[data-test="image-alias"]').exists()).toBe(false)
     expect((w.get('[data-test="image-build"]').element as HTMLInputElement).checked).toBe(true)
     // the nightly upgrade is the owner's choice: off until the box is ticked, then at 03:00, with the packages
     expect((w.get('[data-test="image-auto"]').element as HTMLInputElement).checked).toBe(false)

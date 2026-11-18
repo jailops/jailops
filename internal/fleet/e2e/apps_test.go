@@ -18,11 +18,11 @@ import (
 func appFleet(t *testing.T) *fleettest.Env {
 	t.Helper()
 	e := fleettest.New(t, "appfleet", "db1")
-	e.Write("shared/images/freebsd-15.yaml", "apiVersion: jailops/v1\nkind: Image\nmetadata:\n  name: freebsd-15\nspec:\n  os: freebsd\n  release: 15.1-RELEASE\n  arch: amd64\n  source: {type: pkgbase}\n  aliases: [stable]\n")
+	e.Write("shared/images/freebsd-15.yaml", "apiVersion: jailops/v1\nkind: Image\nmetadata:\n  name: freebsd-15\nspec:\n  os: freebsd\n  release: 15.1-RELEASE\n  arch: amd64\n  source: {type: pkgbase}\n")
 	e.Write("shared/networks/shop.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: shop\nspec:\n  ipv4: {subnet: 10.70.0.0/24, gateway: 10.70.0.1, range: 10.70.0.10-10.70.0.250}\n")
 	e.Write("projects/shop.yaml", "apiVersion: jailops/v1\nkind: Project\nmetadata:\n  name: shop\nspec:\n  hosts: [db1]\n  networks: [{network: shop}]\n  storage: [{storage: default}]\n")
 	app := func(name, def string) {
-		e.Write("projects/shop/apps/"+name+".yaml", "apiVersion: jailops/v1\nkind: App\nmetadata:\n  name: "+name+"\nhosts: [db1]\nspec:\n  app: "+def+"\n  image: freebsd-15@stable\n")
+		e.Write("projects/shop/apps/"+name+".yaml", "apiVersion: jailops/v1\nkind: App\nmetadata:\n  name: "+name+"\nhosts: [db1]\nspec:\n  app: "+def+"\n  image: freebsd-15\n")
 	}
 	app("db", "postgresql")
 	app("web", "nginx")
@@ -132,7 +132,7 @@ func TestAppRefusalsAndErrors(t *testing.T) {
 	os.Remove(filepath.Join(e.Dir, "projects/shop/app-access/db.yaml"))
 	os.Remove(filepath.Join(e.Dir, "projects/shop/apps/db.yaml"))
 	mustOK(t, run(t, e, "sync", "--apply"))
-	op, err := c.Project("shop").Apps().Install(ctx, "nginx", api.AppInstall{Jail: "db", Image: "freebsd-15@stable"})
+	op, err := c.Project("shop").Apps().Install(ctx, "nginx", api.AppInstall{Jail: "db", Image: "freebsd-15"})
 	if err == nil {
 		_, err = op.Wait(ctx)
 	}

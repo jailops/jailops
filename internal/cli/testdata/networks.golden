@@ -24,10 +24,10 @@ $ jailops network grant lan --project other
 ! hint: list them with 'jailops project list'; check --project, --host and --remote too
 [exit 4]
 
-$ jailops jail create web --image freebsd-15@stable --storage default --network dmz
+$ jailops jail create web --image freebsd-15 --storage default --network dmz
 jail/web created
 
-$ jailops jail create db --image freebsd-15@stable --storage default --network dmz
+$ jailops jail create db --image freebsd-15 --storage default --network dmz
 jail/db created
 
 $ jailops network leases dmz
@@ -77,7 +77,7 @@ Grant it to a project with: jailops network grant solo --project main
 $ jailops network grant solo --project main
 network/solo granted to project main
 
-$ jailops jail create only --image freebsd-15@stable --storage default --network solo
+$ jailops jail create only --image freebsd-15 --storage default --network solo
 jail/only created
 
 $ jailops network delete -y solo
@@ -113,7 +113,7 @@ Network viafile
   Addresses:  0 used, 26 free
   Age:        3h
 
-$ jailops network create sw --ipv4 10.94.0.1/24 --uplink em0 --ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy
+$ jailops network create sw --ipv4 10.94.0.1/24 --uplink em0 --ipv6 2001:db8:1:2:100::/80
 network/sw created
 Grant it to a project with: jailops network grant sw --project main
 
@@ -132,24 +132,19 @@ spec:
     gateway: 10.94.0.1
     range: 10.94.0.2-10.94.0.254
   ipv6:
-    mode: proxy
     subnet: 2001:db8:1:2:100::/80
-    range: 2001:db8:1:2:100::10-2001:db8:1:2:100::ff
+    range: 2001:db8:1:2:100::1-2001:db8:1:2:100::ffff
 status:
   free: 253
 
-$ jailops network create badmode --ipv4 10.95.0.1/24 --ipv6 2001:db8:1:2:200::/80 --ipv6-mode bogus
-! usage: --ipv6-mode "bogus" must be routed or proxy
-! hint: run 'jailops network create --help' for usage
-[exit 2]
-
 $ jailops network create nomode --ipv4 10.96.0.1/24 --ipv6-mode proxy
-! usage: --ipv6-mode needs --ipv6
+! usage: unknown flag: --ipv6-mode
 ! hint: run 'jailops network create --help' for usage
 [exit 2]
 
 $ jailops network ndp-proxy enable sw
-network/sw unchanged
+network/sw updated
+network/sw: the NDP proxy answers for 2001:db8:1:2:100::1-2001:db8:1:2:100::ffff on em0
 
 $ jailops network ndp-proxy disable sw
 network/sw updated
@@ -171,21 +166,21 @@ spec:
     gateway: 10.94.0.1
     range: 10.94.0.2-10.94.0.254
   ipv6:
-    mode: proxy
     subnet: 2001:db8:1:2:100::/80
-    range: 2001:db8:1:2:100::10-2001:db8:1:2:100::ff
+    range: 2001:db8:1:2:100::1-2001:db8:1:2:100::ffff
+    ndp_proxy: true
 
 $ jailops network ndp-proxy enable sw
 network/sw updated
-network/sw: the NDP proxy answers for 2001:db8:1:2:100::10-2001:db8:1:2:100::ff on em0
+network/sw: the NDP proxy answers for 2001:db8:1:2:100::1-2001:db8:1:2:100::ffff on em0
 
 $ jailops network show sw
 Network sw
   Uplink:     em0
   IPv4:       10.94.0.0/24, gateway 10.94.0.1
   IPv4 range: 10.94.0.2-10.94.0.254
-  IPv6:       2001:db8:1:2:100::/80 (proxy), gateway fe80::1
-  IPv6 range: 2001:db8:1:2:100::10-2001:db8:1:2:100::ff
+  IPv6:       2001:db8:1:2:100::/80, gateway fe80::1
+  IPv6 range: 2001:db8:1:2:100::1-2001:db8:1:2:100::ffff
   NDP proxy:  enabled ('jailops network ndp-proxy status sw')
   Addresses:  0 used, 253 free
   Age:        3h
@@ -193,11 +188,6 @@ Network sw
 $ jailops network ndp-proxy enable dmz
 ! usage: network dmz has no IPv6 prefix: the NDP proxy answers for IPv6 addresses (give one with 'jailops network set dmz --ipv6 PREFIX')
 ! hint: run 'jailops network ndp-proxy enable --help' for usage
-[exit 2]
-
-$ jailops network set sw --ipv6-mode routed
-! usage: unknown flag: --ipv6-mode
-! hint: run 'jailops network set --help' for usage
 [exit 2]
 
 $ jailops network set sw --ipv6-range 2001:db8:1:2:100::20-2001:db8:1:2:100::2f

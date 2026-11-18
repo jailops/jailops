@@ -14,7 +14,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// The IPv6 proxy mode answers neighbor solicitations on the uplink for the addresses of jails, which needs two things
+// The NDP proxy answers neighbor solicitations on the uplink for the addresses of jails, which needs two things
 // only root has: a packet capture of the uplink and the right to send frames on it. The helper offers exactly those,
 // typed, and nothing wider:
 //
@@ -24,7 +24,7 @@ import (
 //     operator's configuration. The daemon never sends a frame of its own.
 //
 // What may be answered is decided from the networks JailOps has stored: the helper answers only for addresses inside the
-// subnet of a network in IPv6 proxy mode on that uplink, and only when it checks out (ndpPrefixes). The daemon cannot
+// subnet of a network with the NDP proxy on that uplink, and only when it checks out (ndpPrefixes). The daemon cannot
 // make it answer for anything else, at more than a bounded rate.
 
 // ndpUplink is an uplink the IPv6 proxy works on, with the prefixes it may answer for.
@@ -152,7 +152,7 @@ func (s *ndpState) allow(uplink string) bool {
 	return true
 }
 
-// ndpPrefixes are the prefixes the proxy may answer for on an uplink: the subnets of the stored networks in proxy mode that
+// ndpPrefixes are the prefixes the proxy may answer for on an uplink: the subnets of the stored networks with the NDP proxy that
 // use it, each checked here, by the helper itself: between /48 and /120, global or unique-local, no address of the host
 // inside it on any interface, no overlap with another stored network, and the uplink a plain interface of the host (not a
 // loopback, a bridge, an interface of JailOps or a member of a bridge).
@@ -164,7 +164,7 @@ func (l *Local) ndpPrefixes(ctx context.Context, uplink string) (ndpUplink, erro
 	}
 	var mine []netip.Prefix
 	for _, n := range nets {
-		if v6 := n.Spec.IPv6; v6 != nil && v6.Mode == api.IPv6Proxy && n.Spec.Uplink == uplink {
+		if v6 := n.Spec.IPv6; v6 != nil && v6.NDPProxy && n.Spec.Uplink == uplink {
 			p, err := netip.ParsePrefix(v6.Subnet)
 			if err != nil {
 				continue
@@ -174,7 +174,7 @@ func (l *Local) ndpPrefixes(ctx context.Context, uplink string) (ndpUplink, erro
 		}
 	}
 	if len(mine) == 0 {
-		return u, forbidden("no network in IPv6 proxy mode uses %q: the proxy answers for the subnets of such networks only", uplink)
+		return u, forbidden("no network with the NDP proxy uses %q: the proxy answers for the subnets of such networks only", uplink)
 	}
 	list, err := l.d.Net.List(ctx)
 	if err != nil {
@@ -239,7 +239,7 @@ func networkPrefixes(s api.NetworkSpec) []netip.Prefix {
 			out = append(out, p.Masked())
 		}
 	}
-	if s.IPv6 != nil && s.IPv6.Mode != api.IPv6None {
+	if s.IPv6 != nil {
 		if p, err := netip.ParsePrefix(s.IPv6.Subnet); err == nil {
 			out = append(out, p.Masked())
 		}
@@ -284,7 +284,7 @@ func (l *Local) NDPAnswer(ctx context.Context, q NDPAnswerReq) error {
 		return invalid("ndp.answer: target %q is not an IPv6 address", q.Target)
 	}
 	if !up.contains(target) {
-		return forbidden("ndp.answer: %s is outside the subnets of the networks in proxy mode on %s", target, q.Uplink)
+		return forbidden("ndp.answer: %s is outside the subnets of the networks with the NDP proxy on %s", target, q.Uplink)
 	}
 	if q.Announce {
 		return l.ndpAnnounce(up, target)
@@ -371,7 +371,7 @@ func (l *Local) ndpAnnounce(up ndpUplink, target netip.Addr) error {
 }
 
 // requireAnswerable refuses a target the helper may not speak for: an address of the allocation range of a network in
-// proxy mode on the uplink (no jail has to hold it: the host answers for the whole range and rejects what nobody
+// the NDP proxy on the uplink (no jail has to hold it: the host answers for the whole range and rejects what nobody
 // uses), or the address of a jail on this host. The addresses of the host itself were refused before.
 func (l *Local) requireAnswerable(target netip.Addr, up ndpUplink) error {
 	for _, v6 := range up.Nets {

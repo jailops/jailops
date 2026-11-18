@@ -252,7 +252,7 @@ func (l *Local) isNetworkHostAddr(a netip.Addr) bool {
 				return true
 			}
 		}
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+		if n.Spec.IPv6 != nil {
 			if p, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil && ipam.Resolver6(p) == a {
 				return true
 			}

@@ -41,7 +41,7 @@ func (s *Service) inboundNets() []inboundNet {
 				out = append(out, inboundNet{name: o.Meta.Name, uplink: o.Spec.Uplink, subnet: p.Masked()})
 			}
 		}
-		if v6 := o.Spec.IPv6; v6 != nil && (v6.Mode == api.IPv6Routed || v6.Mode == api.IPv6Proxy) {
+		if v6 := o.Spec.IPv6; v6 != nil {
 			if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
 				out = append(out, inboundNet{name: o.Meta.Name, uplink: o.Spec.Uplink, subnet: p.Masked()})
 			}
@@ -279,7 +279,7 @@ func (s *Service) doctorInboundWithoutSource(c *checkSet) {
 	if len(out) == 0 {
 		return
 	}
-	c.add(name, api.DoctorInfo, "an allow in rule without a source is for the jail's link only and does not open the uplink; these were open to the Internet before 0.8.4: "+strings.Join(out, "; "),
+	c.add(name, api.DoctorInfo, "an allow in rule without a source is for the jail's link only and does not open the uplink (add --from, or use jailops expose): "+strings.Join(out, "; "),
 		"to keep one open to the Internet, give the rule --from any, or use jailops expose JAIL PORTS")
 }
 

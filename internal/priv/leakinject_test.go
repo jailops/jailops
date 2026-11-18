@@ -302,7 +302,7 @@ func newLeakWorld(t *testing.T, failedStartRunsPostStop bool) *leakWorld {
 	w.root = filepath.Join(h.cfg.MountBase, "projects", "alpha", "jails", "web", "root")
 	// a jail with limits, so that its rctl rules exist
 	mp := filepath.Join(h.cfg.MountBase, "projects", "alpha", "jails", "web")
-	spec := api.JailSpec{Image: "freebsd-15-0@stable", OS: api.OSFreeBSD, Resources: api.Resources{Memory: "256M", PIDs: 100},
+	spec := api.JailSpec{Image: "freebsd-15-0", OS: api.OSFreeBSD, Resources: api.Resources{Memory: "256M", PIDs: 100},
 		Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.12", IPv6: "fd00:20::12"}},
 		Devfs:   []api.DevfsDevice{{Name: "tun", Device: "tun"}}}
 	rec, _ := json.Marshal(map[string]any{"version": 1, "metadata": api.ObjectMeta{Name: "web", Project: "alpha", UUID: hookUUID}, "spec": spec})

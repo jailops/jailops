@@ -24,6 +24,7 @@ import { nameProblem, type NameRule } from '@jailops/shared/lib/names'
 import { labelKeyProblem, labelValueProblem, labelsProblem, MAX_LABELS } from '@/lib/labels'
 import { demoRename, renameKindOf } from './rename'
 import { demoFirewallTest, DemoFwError } from './fwtest'
+import { demoDiff } from './diff'
 import { demoExposed, demoReach } from './reach'
 import { demoExpose, demoUnexpose } from './expose'
 
@@ -204,7 +205,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (!['amd64', 'arm64'].includes(sp.arch)) return fail(400, { code: 'invalid', message: `unsupported architecture "${sp.arch}"` })
     const bad = autoUpgradeProblem(sp.auto_upgrade)
     if (bad) return bad
-    const img = { metadata: { name, scope: 'fleet' as const, generation: 1, created_at: new Date().toISOString() }, spec: sp, status: { generations: [], aliases: {}, ...autoUpgradeStatus(sp.auto_upgrade) } }
+    const img = { metadata: { name, scope: 'fleet' as const, generation: 1, created_at: new Date().toISOString() }, spec: sp, status: { generations: [], ...autoUpgradeStatus(sp.auto_upgrade) } }
     db.images.push(img as never)
     emit('created', `/api/v1/images/${name}`)
     return { ...ok(img), status: 201 }
@@ -295,9 +296,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           const op = startOp(`Build image ${seg[1]}`, { images: [`/api/v1/images/${seg[1]}`] }, 3000, () => {
             if (fails) return
             gens.push({ number: n, name: `${seg[1]}#g${n}`, parent: n > 1 ? n - 1 : undefined, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: n === 1 ? 212 : 222, freebsd_version: img.spec.os === 'freebsd' ? '15.1-RELEASE-p6' : undefined, created_at: new Date().toISOString(), refs: [] })
-            // the aliases of the definition follow the newest generation
-            const aliases = (img.status.aliases ??= {})
-            for (const a of img.spec.aliases ?? []) aliases[a] = n
             emit('image-generation-created', `/api/v1/images/${seg[1]}/generations/${n}`)
           })
           if (fails) {
@@ -313,22 +311,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
             const n = Math.max(...(img.status.generations ?? []).map((g) => g.number)) + 1
             img.status.generations!.push({ number: n, name: `${seg[1]}#g${n}`, parent: n - 1, manifest: Math.random().toString(16).slice(2).padEnd(40, 'e'), packages: 222, freebsd_version: img.spec.os === 'freebsd' ? '15.1-RELEASE-p6' : undefined, created_at: new Date().toISOString(), refs: [] })
           })
-        }
-        if (seg[2] === 'aliases' && seg[3] && (m === 'PUT' || m === 'DELETE')) {
-          const img = db.images.find((i) => i.metadata.name === seg[1])
-          if (!img) return fail(404, { code: 'not_found', message: `Image ${seg[1]} not found` })
-          const aliases = (img.status.aliases ??= {})
-          if (m === 'DELETE') {
-            if (!(seg[3] in aliases)) return fail(404, { code: 'not_found', message: `Image ${seg[1]} has no alias ${seg[3]}` })
-            delete aliases[seg[3]]
-            img.spec.aliases = (img.spec.aliases ?? []).filter((a) => a !== seg[3])
-          } else {
-            const n = body?.generation || Math.max(0, ...(img.status.generations ?? []).map((g) => g.number))
-            if (!(img.status.generations ?? []).some((g) => g.number === n)) return fail(404, { code: 'not_found', message: `Generation g${n} does not exist` })
-            aliases[seg[3]] = n
-            if (!(img.spec.aliases ?? []).includes(seg[3])) img.spec.aliases = [...(img.spec.aliases ?? []), seg[3]]
-          }
-          return ok(img)
         }
         break
       case 'networks':
@@ -370,7 +352,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         // the canned policies are the web project's; another project has none of them
         return ok(db.bpol.filter((p) => (p.metadata.project ?? 'web') === project))
       case 'ndp': {
-        // the proxy of the demo network `edge` (mode proxy, uplink em1): it answers for its range and has seen a few questions
+        // the proxy of the demo network `edge` (NDP proxy on, uplink em1): it answers for its range and has seen a few questions
         const t = (m: number) => new Date(Date.now() - m * 60_000).toISOString()
         if (seg[1] === 'events') return ok({ events: [], last: 0 })
         return ok({
@@ -1265,6 +1247,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (!j || !seg[2]) return undefined
         const src = `/api/v1/jails/${name}`
         if (seg[2] === 'updates' && m === 'GET') return ok(db.history[name] ?? [])
+        if (seg[2] === 'diff' && m === 'GET') return ok(demoDiff(j, url.searchParams))
         if (seg[2] === 'reach' && m === 'GET') return ok(demoReach(j, fwState(project)))
         if ((seg[2] === 'expose' || seg[2] === 'unexpose') && m === 'POST') {
           const r = seg[2] === 'expose' ? demoExpose(j, body as never) : demoUnexpose(j, body as never)

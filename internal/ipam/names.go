@@ -9,8 +9,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-
-	"jailops.net/jailops/sdk/api"
 )
 
 // DeriveMAC returns the stable MAC address of a jail's first interface,
@@ -75,18 +73,16 @@ var epairRE = regexp.MustCompile(`^jo[0-9a-f]{10}[0-9a-z]{2}[ab]$`)
 func IsEpairName(name string) bool { return epairRE.MatchString(name) }
 
 // GuestPrefixLen6 is the prefix length a jail configures for its IPv6
-// address: /128 in every mode, so that the jail believes no prefix is on-link and reaches everything, the other
+// address: /128, so that the jail believes no prefix is on-link and reaches everything, the other
 // jails included, through the host.
-func GuestPrefixLen6(mode api.IPv6Mode, subnetBits int) int {
-	return 128
-}
+func GuestPrefixLen6() int { return 128 }
 
 // GuestPrefixLen4 is the prefix length a jail configures for its IPv4 address: /32, so that the jail has no on-link
 // neighbour and reaches the gateway, and through it the other jails, by a host route to the gateway.
 func GuestPrefixLen4() int { return 32 }
 
 // GatewayLinkLocal6 is the link-local address of the host on every jail's link: the IPv6 default gateway of every
-// jail, in both IPv6 modes. Every host end of an epair carries it (a link-local address is per interface, so the
+// jail. Every host end of an epair carries it (a link-local address is per interface, so the
 // same address can be on all of them). A jail has no on-link prefix, so nothing reaches another jail without
 // passing the host and its PF.
 var GatewayLinkLocal6 = netip.MustParseAddr("fe80::1")

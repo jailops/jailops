@@ -81,7 +81,7 @@ func TestUpgradeHappyPath(t *testing.T) {
 		t.Fatal(res.Warnings)
 	}
 	// upgrading to the generation the jail already uses is a no-op
-	w.Images.aliases["fb@stable"] = 2
+	w.Images.newest["fb"] = 2
 	r2, err := upgrade(w, api.JailUpgrade{})
 	if err != nil || r2.Changed {
 		t.Fatal(r2, err)
@@ -262,7 +262,7 @@ func TestUpgradePreflight(t *testing.T) {
 
 func TestUpgradeResolvesAliasAndDryRun(t *testing.T) {
 	w := runningSetup(t)
-	w.Images.aliases["fb@stable"] = 2 // alias moved; jail spec follows it
+	w.Images.newest["fb"] = 2 // a newer generation; the bare name follows it
 	before := w.state()
 	w.F.Reset(0)
 	res, err := upgrade(w, api.JailUpgrade{DryRun: true})

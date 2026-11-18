@@ -17,7 +17,7 @@ metadata:
   labels:
     env: prod
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   layout: thin
   hostname: web

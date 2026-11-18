@@ -46,13 +46,13 @@ func TestProjectsStorageNetworks(t *testing.T) {
 	tr.ok("storage", "grant", "fast", "--project", "web", "--quota", "500G")
 
 	// Jails go to the project that is named; the network and the storage are named too.
-	tr.ok("create", "nginx", "--project", "web", "--image", "freebsd-15@stable", "--memory", "1G", "--cpu", "1", "--network", "web", "--storage", "fast")
+	tr.ok("create", "nginx", "--project", "web", "--image", "freebsd-15", "--memory", "1G", "--cpu", "1", "--network", "web", "--storage", "fast")
 	tr.ok("list", "--project", "web")
 	tr.ok("list")
 	tr.do("", "list", "--project", "nowhere")
 	tr.ok("project", "show", "web", "-o", "json")
-	tr.ok("create", "n2", "--project", "web", "--image", "freebsd-15@stable", "--memory", "1G", "--cpu", "1", "--network", "web", "--storage", "fast")
-	_, errs, code := tr.do("", "create", "n3", "--project", "web", "--image", "freebsd-15@stable", "--memory", "1G", "--cpu", "1", "--network", "web", "--storage", "fast")
+	tr.ok("create", "n2", "--project", "web", "--image", "freebsd-15", "--memory", "1G", "--cpu", "1", "--network", "web", "--storage", "fast")
+	_, errs, code := tr.do("", "create", "n3", "--project", "web", "--image", "freebsd-15", "--memory", "1G", "--cpu", "1", "--network", "web", "--storage", "fast")
 	if code != 5 || !strings.HasPrefix(errs, "quota_exceeded:") {
 		t.Fatalf("quota: %d %s", code, errs)
 	}
@@ -72,7 +72,7 @@ func TestProjectSwitchPerRemote(t *testing.T) {
 	if _, errs, code := tr.do("", "list"); code != 2 || !strings.Contains(errs, "a project is required") || len(h.srv.Requests()) != before {
 		t.Fatalf("no project: %d %q (%d requests sent)", code, errs, len(h.srv.Requests())-before)
 	}
-	if _, errs, code := tr.do("", "create", "x", "--image", "freebsd-15@stable"); code != 2 || len(h.srv.Requests()) != before {
+	if _, errs, code := tr.do("", "create", "x", "--image", "freebsd-15"); code != 2 || len(h.srv.Requests()) != before {
 		t.Fatalf("create without a project: %d %q", code, errs)
 	}
 	tr.ok("project", "create", "web", "--new-network")
@@ -90,10 +90,10 @@ func TestProjectSwitchPerRemote(t *testing.T) {
 	tr.ok("project", "switch")
 	tr.ok("remote", "switch", "a")
 	// A project the jail goes into.
-	tr.ok("create", "w1", "--image", "freebsd-15@stable", "--network", "web", "--storage", "default")
+	tr.ok("create", "w1", "--image", "freebsd-15", "--network", "web", "--storage", "default")
 	h.env["JAILOPS_PROJECT"] = "db"
 	tr.ok("project", "switch")
-	tr.ok("create", "d1", "--image", "freebsd-15@stable", "--network", "db", "--storage", "default")
+	tr.ok("create", "d1", "--image", "freebsd-15", "--network", "db", "--storage", "default")
 	tr.ok("--project", "web", "project", "switch")
 	delete(h.env, "JAILOPS_PROJECT")
 	tr.ok("list", "-o", "name")

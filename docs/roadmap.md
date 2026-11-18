@@ -1,7 +1,7 @@
 # Roadmap
 
 What is planned, in the order it will be built. This is a plan, not a promise: an item moves when something we learn
-says it should, and a release only claims what was tested ([CHANGELOG.md](../CHANGELOG.md) says what shipped).
+says it should, and a release only claims what has run on a host ([CHANGELOG.md](../CHANGELOG.md) says what shipped).
 
 ## 0.7.0: more than one host, and knowing what happens
 

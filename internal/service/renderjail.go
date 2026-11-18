@@ -109,12 +109,11 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			nif.IPv4, nif.Gateway4 = in.IPv4, in.Gateway4
 		}
 		if ad, ok := parseAddr(a.IPv6); ok && n.Spec.IPv6 != nil {
-			sub, _ := netip.ParsePrefix(n.Spec.IPv6.Subnet)
-			in.IPv6 = netip.PrefixFrom(ad, ipam.GuestPrefixLen6(n.Spec.IPv6.Mode, sub.Bits()))
+			in.IPv6 = netip.PrefixFrom(ad, ipam.GuestPrefixLen6())
 			in.Gateway6 = ipam.GatewayLinkLocal6
-			in.IPv6Mode = n.Spec.IPv6.Mode
+			in.NDPProxy = n.Spec.IPv6.NDPProxy
 			nif.IPv6, nif.Gateway6 = in.IPv6, in.Gateway6
-			if n.Spec.IPv6.Mode == api.IPv6Proxy {
+			if n.Spec.IPv6.NDPProxy {
 				d.Proxy = append(d.Proxy, reconcile.ProxyAddr{Addr: ad.String(), Iface: host, Uplink: n.Spec.Uplink})
 			}
 		}
@@ -153,7 +152,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 				hostAddrs = append(hostAddrs, g)
 			}
 		}
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+		if n.Spec.IPv6 != nil {
 			hostAddrs = append(hostAddrs, ipam.GatewayLinkLocal6)
 			if p, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
 				if r := ipam.Resolver6(p); r.IsValid() {
@@ -170,7 +169,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 				uplinkOf[ad] = render.Uplink{Iface: n.Spec.Uplink, Routed: n.Spec.Uplink != "" && !n.Spec.IPv4.NAT, Tunnels: tunnels}
 			}
 			if ad, ok := parseAddr(a.IPv6); ok && n.Spec.IPv6 != nil {
-				uplinkOf[ad] = render.Uplink{Iface: n.Spec.Uplink, Routed: n.Spec.Uplink != "" && (n.Spec.IPv6.Mode == api.IPv6Routed || n.Spec.IPv6.Mode == api.IPv6Proxy), Tunnels: tunnels}
+				uplinkOf[ad] = render.Uplink{Iface: n.Spec.Uplink, Routed: n.Spec.Uplink != "", Tunnels: tunnels}
 			}
 		}
 		if n.Spec.IPv4 != nil {
@@ -178,7 +177,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 				ownNets = append(ownNets, p.Masked())
 			}
 		}
-		if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+		if n.Spec.IPv6 != nil {
 			if p, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
 				ownNets = append(ownNets, p.Masked())
 			}

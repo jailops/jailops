@@ -261,7 +261,7 @@ metadata:
 spec:
   comment: a web jail
   jail:
-    image: freebsd-15@stable
+    image: freebsd-15
     storage: default
     network:
       - network: internal
@@ -313,7 +313,7 @@ after:
   - action: exec
     argv: [/usr/local/bin/setup, "--flag", "a b; rm -rf /"]
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   network: [{network: internal}]
   firewall: {policies: [web]}
@@ -341,7 +341,7 @@ hosts: [web1]
 metadata:
   name: bad
 spec:
-  image: nothing@stable
+  image: nothing
   network:
     - network: nowhere
   firewall: {policies: [missing]}
@@ -387,7 +387,7 @@ func TestAdoptAndClaim(t *testing.T) {
 	srv.SeedFirewallPolicy(api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "base", Project: fleettest.Project}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}})
 	srv.SeedJail(api.Jail{
 		Metadata: api.ObjectMeta{Name: "old", Project: fleettest.Project, Labels: map[string]string{"tier": "web"}},
-		Spec: api.JailSpec{Image: "freebsd-15@stable", Hostname: "old", Layout: api.LayoutThin, Storage: "default",
+		Spec: api.JailSpec{Image: "freebsd-15", Hostname: "old", Layout: api.LayoutThin, Storage: "default",
 			Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.9.0.12"}}, Firewall: api.FirewallAttach{Policies: []string{"base"}}},
 	})
 	// A foreign object is skipped.

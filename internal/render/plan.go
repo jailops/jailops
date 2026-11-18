@@ -206,7 +206,7 @@ func NetworkPlan(in NetworkInput) ([]Step, error) {
 		st.Note = note
 		out = append(out, st)
 	}
-	v6 := s.IPv6 != nil && s.IPv6.Mode != api.IPv6None
+	v6 := s.IPv6 != nil
 	if s.IPv4 != nil {
 		req("net.inet.ip.forwarding=1", "jails reach the uplink and each other through the host")
 	}
@@ -222,7 +222,7 @@ func NetworkPlan(in NetworkInput) ([]Step, error) {
 		reject(s.IPv4.Subnet)
 	}
 	if v6 {
-		// In proxy mode the host answers for the range on the uplink whether a jail runs or not: a packet for an address
+		// With the NDP proxy the host answers for the range on the uplink whether a jail runs or not: a packet for an address
 		// nobody uses must meet an error here and never be sent out of the uplink again.
 		reject(s.IPv6.Subnet)
 	}
@@ -259,7 +259,7 @@ type AttachInput struct {
 	IPv4, IPv6 netip.Prefix
 	Gateway4   netip.Addr
 	Gateway6   netip.Addr
-	IPv6Mode   api.IPv6Mode
+	NDPProxy   bool
 	Uplink     string
 	// HostConfigured asks the plan to configure addresses and default
 	// routes from the host after the jail started (Linux jails; FreeBSD
@@ -301,7 +301,7 @@ func AttachPlan(in AttachInput) ([]Step, error) {
 	if in.Gateway4.IsValid() && !in.Gateway4.Is4() || in.Gateway6.IsValid() && !in.Gateway6.Is6() {
 		return nil, validate.Invalid("gateway", "gateway family mismatch")
 	}
-	proxy := in.IPv6Mode == api.IPv6Proxy && in.IPv6.IsValid()
+	proxy := in.NDPProxy && in.IPv6.IsValid()
 	if proxy {
 		if err := validate.IfName("uplink", in.Uplink); err != nil {
 			return nil, err

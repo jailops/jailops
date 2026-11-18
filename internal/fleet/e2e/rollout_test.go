@@ -143,7 +143,7 @@ func TestRolloutOnlyTouchesOwnedJails(t *testing.T) {
 	e := rolloutFleet(t, "a", "b", "c")
 	e.Hosts["web1"].Server.SeedJail(api.Jail{
 		Metadata: api.ObjectMeta{Name: "stranger", Project: fleettest.Project, Labels: map[string]string{"tier": "web"}},
-		Spec:     api.JailSpec{Image: "freebsd-15@stable"},
+		Spec:     api.JailSpec{Image: "freebsd-15"},
 		Status:   api.JailStatus{Power: api.PowerRunning, Generation: "g1"},
 	})
 	r := mustOK(t, run(t, e, "rollout", "run", "web-upgrade"))

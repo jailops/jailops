@@ -60,6 +60,37 @@ func (m *Manager) source(typ string) (Source, error) {
 	return s, nil
 }
 
+// aliasTableProp is the ZFS property that held the alias table of an image ("stable=3,latest=4"). Image aliases are gone:
+// DropAliasTable reads the table once and clears the property.
+const aliasTableProp = "jailops:aliases"
+
+// DropAliasTable returns the stored alias table of image on this pool (alias to generation number; empty when there
+// is none) and clears the property. The service names the aliases that stored jail specs used in an event, then drops
+// the table of every image once at start.
+func (m *Manager) DropAliasTable(ctx context.Context, image string) (map[string]int, error) {
+	if !validImage(image) {
+		return nil, api.Errorf(api.CodeInvalid, "bad image name %q", image)
+	}
+	ids := m.Layout.ImageDS(image)
+	ok, err := m.ZFS.Exists(ctx, ids)
+	if err != nil || !ok {
+		return nil, err
+	}
+	raw, err := m.ZFS.Get(ctx, ids, aliasTableProp)
+	if err != nil || raw == "" {
+		return nil, err
+	}
+	table := map[string]int{}
+	for _, kv := range strings.Split(raw, ",") {
+		if k, v, ok := strings.Cut(kv, "="); ok {
+			if n, err := strconv.Atoi(v); err == nil {
+				table[k] = n
+			}
+		}
+	}
+	return table, m.ZFS.Inherit(ctx, ids, aliasTableProp)
+}
+
 // Observed is what the datasets say about one image.
 type Observed struct {
 	Status api.ImageStatus
@@ -79,33 +110,6 @@ func (o Observed) gen(n int) (api.ImageGeneration, bool) {
 		}
 	}
 	return api.ImageGeneration{}, false
-}
-
-func formatAliases(a map[string]int) string {
-	keys := make([]string, 0, len(a))
-	for k := range a {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	parts := make([]string, len(keys))
-	for i, k := range keys {
-		parts[i] = k + "=" + strconv.Itoa(a[k])
-	}
-	return strings.Join(parts, ",")
-}
-
-func parseAliases(s string) map[string]int {
-	out := map[string]int{}
-	for _, kv := range strings.Split(s, ",") {
-		k, v, ok := strings.Cut(kv, "=")
-		if !ok {
-			continue
-		}
-		if n, err := strconv.Atoi(v); err == nil && validAlias(k) {
-			out[k] = n
-		}
-	}
-	return out
 }
 
 func directChildren(parent string, all []string) []string {
@@ -160,13 +164,6 @@ func (m *Manager) Observe(ctx context.Context, image string) (Observed, error) {
 			if n, err := strconv.Atoi(lg); err == nil && n > o.MaxNumber {
 				o.MaxNumber = n
 			}
-		}
-		al, err := m.ZFS.Get(ctx, ids, PropAliases)
-		if err != nil {
-			return o, err
-		}
-		if al != "" {
-			o.Status.Aliases = parseAliases(al)
 		}
 	}
 	dp := m.Layout.DeletedParent()
@@ -247,12 +244,6 @@ func resolveNumber(r Ref, st api.ImageStatus) (int, error) {
 	switch {
 	case r.Gen > 0:
 		return r.Gen, nil
-	case r.Alias != "":
-		n, ok := st.Aliases[r.Alias]
-		if !ok {
-			return 0, api.Errorf(api.CodeNotFound, "image %s has no alias %q", r.Image, r.Alias)
-		}
-		return n, nil
 	}
 	max := 0
 	for _, g := range st.Generations {

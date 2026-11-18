@@ -96,7 +96,7 @@ func appEnvWith(t *testing.T, defs map[string]string, o dtest.Options) (*dtest.E
 	e.Seed()
 	c := ctxT(t)
 	if _, err := e.Admin.Images().Create(c, api.Image{Metadata: api.ObjectMeta{Name: "fb151"}, Spec: api.ImageSpec{
-		OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}}); err != nil {
+		OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}}); err != nil {
 		t.Fatal(err)
 	}
 	op, err := e.Admin.Images().Build(c, "fb151", api.ImageBuild{})
@@ -154,7 +154,7 @@ func TestAppInstall(t *testing.T) {
 	defer cancel()
 	events := e.Events(evctx, e.Admin)
 	oper := e.Scoped(api.PermOperator, dtest.SeedProject)
-	op, err := oper.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})
+	op, err := oper.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestAppInstall(t *testing.T) {
 	if res.App != "web" || !strings.HasPrefix(res.Hash, "sha256:") || res.Version != "15.0p1" || res.Snapshot != "app-installed" || res.DryRun {
 		t.Fatalf("%+v", res)
 	}
-	if j.Metadata.Name != "web" || j.Status.Power != api.PowerRunning || j.Spec.Image != "fb151@stable" || j.Spec.Layout != api.LayoutThin || j.Spec.Hostname != "web" {
+	if j.Metadata.Name != "web" || j.Status.Power != api.PowerRunning || j.Spec.Image != "fb151" || j.Spec.Layout != api.LayoutThin || j.Spec.Hostname != "web" {
 		t.Fatalf("%+v %+v", j.Spec, j.Status)
 	}
 	if l := j.Metadata.Labels; l[api.LabelApp] != "web" || l[api.LabelAppHash] != res.Hash || l[api.LabelAppVersion] != "15.0p1" {
@@ -299,9 +299,9 @@ func TestAppInstall(t *testing.T) {
 		t.Fatalf("%+v", again)
 	}
 	// Installing again under the same name is refused before anything happens; another name works.
-	_, err = oper.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})
+	_, err = oper.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
 	wantCode(t, err, api.CodeAlreadyExists)
-	op, err = oper.Apps().Install(c, "web", api.AppInstall{Jail: "web2", Image: "fb151@stable", Network: "lan", Storage: "default"})
+	op, err = oper.Apps().Install(c, "web", api.AppInstall{Jail: "web2", Image: "fb151", Network: "lan", Storage: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -331,7 +331,7 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	before := datasets()
-	op, err := e.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151@stable", DryRun: true})
+	op, err := e.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151", DryRun: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 	if err != nil || !res.DryRun || len(res.Steps) != 12 || res.Snapshot != "" || res.Jail.Metadata.Name != "" {
 		t.Fatalf("%v %+v", err, res)
 	}
-	if !strings.Contains(res.Steps[0], "fb151@stable") || !strings.Contains(res.Steps[6], "install -y bash") || !strings.Contains(res.Steps[8], "/usr/local/bin/tool --ping") {
+	if !strings.Contains(res.Steps[0], "fb151") || !strings.Contains(res.Steps[6], "install -y bash") || !strings.Contains(res.Steps[8], "/usr/local/bin/tool --ping") {
 		t.Fatalf("%v", res.Steps)
 	}
 	if _, err := e.Admin.Jails().Get(c, "tool"); !api.IsCode(err, api.CodeNotFound) {
@@ -359,7 +359,7 @@ func TestAppInstallDryRunAndDefaults(t *testing.T) {
 		}
 		return run.Result{}, nil
 	})
-	op, err = e.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151@stable"})
+	op, err = e.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestAppInstallDefaultImage(t *testing.T) {
 // What is refused before the operation starts.
 func TestAppInstallRefusals(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"web": appWeb, "newer": strings.ReplaceAll(strings.Replace(appWeb, "name: web\n", "name: newer\n", 1), `release_min: "15.1"`, `release_min: "15.2"`), "broken": "version: 1\nname: broken\n"})
-	req := api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"}
+	req := api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"}
 	_, err := e.Admin.Apps().Install(c, "nothing", req)
 	wantCode(t, err, api.CodeNotFound)
 	_, err = e.Admin.Apps().Install(c, "broken", req)
@@ -406,7 +406,7 @@ func TestAppInstallRefusals(t *testing.T) {
 	_, err = e.Admin.Apps().Install(c, "../web", req)
 	wantCode(t, err, api.CodeNotFound)
 	// the seeded image is 15.1, the definition wants 15.2
-	_, err = e.Admin.Apps().Install(c, "newer", api.AppInstall{Image: "fb@stable", Network: "lan", Storage: "default"})
+	_, err = e.Admin.Apps().Install(c, "newer", api.AppInstall{Image: "fb", Network: "lan", Storage: "default"})
 	wantCode(t, err, api.CodeInvalid)
 	if !strings.Contains(err.Error(), "15.1-RELEASE") || !strings.Contains(err.Error(), "15.2") {
 		t.Fatalf("%v", err)
@@ -443,7 +443,7 @@ func TestAppInstallRefusals(t *testing.T) {
 // stopped with its labels, says so, and emits app.install.failed.
 func TestAppInstallFailures(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"web": appWeb})
-	req := api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"}
+	req := api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"}
 	evctx, cancel := context.WithCancel(c)
 	defer cancel()
 	events := e.Events(evctx, e.Admin)
@@ -556,7 +556,7 @@ func TestAppInstallFailures(t *testing.T) {
 // started is deleted, a started one is stopped and kept.
 func TestAppInstallRecovery(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"tool": appExecCheck})
-	op, err := e.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151@stable"})
+	op, err := e.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -611,7 +611,7 @@ func TestAppInstallRecovery(t *testing.T) {
 	}
 	// A crash during the start of the jail: the start's own run is rolled back
 	// first, then the jail, which never completed a start, is deleted.
-	op, err = e3.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151@stable"})
+	op, err = e3.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -647,7 +647,7 @@ func TestAppInstallRecovery(t *testing.T) {
 // is reachable during the installation.
 func TestAppInstallRefusesExec(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"tool": appExecCheck})
-	op, err := e.Admin.Apps().Install(c, "tool", api.AppInstall{Jail: "other", Image: "fb151@stable"})
+	op, err := e.Admin.Apps().Install(c, "tool", api.AppInstall{Jail: "other", Image: "fb151"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -667,7 +667,7 @@ func TestAppInstallRefusesExec(t *testing.T) {
 		}
 		return run.Result{}, nil
 	})
-	op, err = e.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151@stable"})
+	op, err = e.Admin.Apps().Install(c, "tool", api.AppInstall{Image: "fb151"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -712,7 +712,7 @@ func TestAppInstallCreateFailsAfterCreation(t *testing.T) {
 		cl.Files = failReads{FS: cl.Files, armed: &armed}
 	}})
 	armed.Store(true)
-	op, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})
+	op, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -730,7 +730,7 @@ func TestAppInstallCreateFailsAfterCreation(t *testing.T) {
 	}
 	// nothing is in the way of the next attempt
 	e.SetDial(httpAnswer(204, nil))
-	op, _ = e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})
+	op, _ = e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
 	if _, err := op.Wait(c); err != nil {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
@@ -742,7 +742,7 @@ func TestAppInstallCreateFailsAfterCreation(t *testing.T) {
 func TestAppInstallRefusesPersistentPaths(t *testing.T) {
 	bad := strings.Replace(appWeb, "{path: /usr/local/www/web}", "{path: /var/log}", 1)
 	e, c := appEnv(t, map[string]string{"web": bad})
-	_, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})
+	_, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
 	wantCode(t, err, api.CodeInvalid)
 	if !strings.Contains(err.Error(), "data[1].path: /var/log is a persistent dataset of every jail") {
 		t.Fatalf("%v", err)
@@ -758,7 +758,7 @@ func TestAppInstallRefusesPersistentPaths(t *testing.T) {
 func TestAppInstallAutostarts(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"web": appWeb})
 	e.SetDial(httpAnswer(204, nil))
-	op, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})
+	op, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -779,7 +779,7 @@ func TestAppInstallAutostarts(t *testing.T) {
 func TestDoctorVolumeCanmount(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"web": appWeb})
 	e.SetDial(httpAnswer(204, nil))
-	op, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})
+	op, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -858,7 +858,7 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		op, err := e.Admin.Apps().Install(c, c2.app, api.AppInstall{Image: "fb151@stable", DryRun: true})
+		op, err := e.Admin.Apps().Install(c, c2.app, api.AppInstall{Image: "fb151", DryRun: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -901,7 +901,7 @@ func TestAppInstallReferenceCatalog(t *testing.T) {
 		}
 	}
 
-	op, err := e.Admin.Apps().Install(c, "isms", api.AppInstall{Image: "fb151@stable"})
+	op, err := e.Admin.Apps().Install(c, "isms", api.AppInstall{Image: "fb151"})
 	if err != nil {
 		t.Fatal(err)
 	}

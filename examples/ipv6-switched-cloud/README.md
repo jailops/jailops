@@ -2,7 +2,7 @@
 
 A cloud server whose provider gives you **a `/64` on a segment shared with other customers**. The provider's router
 believes every address of the `/64` is on-link and asks neighbor discovery who has it, so JailOps answers for each jail
-address itself (**proxy mode**, see [networking-ipv6.md](../../docs/networking-ipv6.md)). Two projects, each with its own
+address itself (**the NDP proxy**, see [networking-ipv6.md](../../docs/networking-ipv6.md)). Two projects, each with its own
 `/80` carved out of the `/64`:
 
 | Project | Network | IPv6 `/80` | IPv4 | Jails |
@@ -15,7 +15,7 @@ the carved `/80`s.
 
 ## What the example shows
 
-- **Proxy-mode networks** (`ipv6.mode: proxy`, gateway `fe80::1`, uplink `vtnet0`, a range inside the `/80`). A network
+- **Networks with the NDP proxy** (`ipv6.ndp_proxy: true`, gateway `fe80::1`, uplink `vtnet0`, a range inside the `/80`). A network
   belongs to one project; the two `/80`s cannot overlap (`validate` checks that offline).
 - **The floor**: both projects name `firewall_policies: [floor]`, a policy with `default_in: deny`. A jail's own policies add rules but cannot
   weaken it. Projects cannot reach each other: there is no rule that says they can.
@@ -41,9 +41,3 @@ the carved `/80`s.
 `host.yaml` uses the local socket, so run `sync` on the host (or as root through `ssh`); root is a global admin on the
 socket. For a remote controller use `url`, `fingerprint` and `token_secret` as in [multi-host-fleet](../multi-host-fleet).
 
-## Verified, and not
-
-The model (carving, proxy answers, per-jail anti-spoofing) is verified on FreeBSD 15.1 amd64 with a switched `/64`; see
-networking-ipv6.md for exactly what ran. **UNVERIFIED:** this exact repository applied to a real host (the test suite applies it
-to in-memory hosts and validates every object with the daemon's validators), a `vlan(4)` uplink, providers that filter by MAC
-address.

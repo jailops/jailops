@@ -9,7 +9,7 @@ import (
 func TestExposeAndUnexpose(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "web", Project: "main"}, Spec: api.JailSpec{Image: "freebsd-15@stable", Storage: "default",
+	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "web", Project: "main"}, Spec: api.JailSpec{Image: "freebsd-15", Storage: "default",
 		Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.20.0.10", IPv6: "2001:db8::10"}}}})
 	tr := h.transcript()
 	tr.ok("expose", "web", "80,443", "--comment", "the site")

@@ -55,7 +55,7 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 | `audit.retention`, `audit.max_entries` | `90d`, `1000000` | how long the audit log keeps an entry (at least `1d`; whole days as `90d` or hours as `2160h`) and how many it keeps (at least 1000). Once a day the daemon deletes what is older or beyond; the newest 1000 entries are never deleted ([security-model.md](security-model.md#the-audit-log)) |
 | `backup.*` | absent | host-side backups; absent, every backup call answers `unsupported`. See [backup-restore.md](backup-restore.md) |
 
-The proxy for switched IPv6 has no switch in this file: it runs for every network in `proxy` mode, and what it may do is
+The proxy for switched IPv6 has no switch in this file: it runs for every network that has `ipv6.ndp_proxy` on, and what it may do is
 decided in `priv.conf` ([networking-ipv6.md](networking-ipv6.md)).
 
 ## priv.conf

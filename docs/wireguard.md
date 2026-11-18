@@ -177,6 +177,6 @@ is missing, on a machine without `if_wg` or `wg`). In particular:
 - The output of `wg show <if> dump` and `wg syncconf` of the wg program on FreeBSD 15.1, and whether 15.1 ships `wg`
   in the base system or only in `wireguard-tools`.
 - A pf rule that names an interface with `-` (`pass in quick on wg-office ...`).
-- A handshake between two interfaces of one host over the loopback address (the end-to-end block).
+- A handshake between two interfaces of one host over the loopback address.
 - Traffic from a peer into a jail: the jail's own `allow in` rule on the tunnel's interface (`wg-<name>`), and the host block of `jailops/wg.<name>`.
 - `kldload if_wg` through the helper.

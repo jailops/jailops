@@ -199,11 +199,8 @@ question is open: how `/var/db/pkg` behaves after a root swap.
    left stopped.
 9. A retired root is parked as `root.stale` until the upgrade has succeeded, then destroyed after the retention period (`root.old` during the upgrade). A generation is destroyed only when no jail
    references it; until then it is renamed into `deleted/` if clones exist, and its origin is
-   garbage-collected when the last clone goes. Aliases (`stable`, `latest`) are not references: deleting a
-   generation that only aliases point at moves each alias to the newest remaining generation, or removes it
-   when none remains. Deleting an image removes all its generations and aliases, and is refused (`image_in_use`,
-   naming the jails) while any jail references one of them. Aliases are managed explicitly with
-   `PUT|DELETE /api/v1/images/{name}/aliases/{alias}` (`jailops image alias add|delete`, extension `image_aliases`, admin).
+   garbage-collected when the last clone goes. Deleting an image removes all its generations, and is refused
+   (`image_in_use`, naming the jails) while any jail references one of them.
 
 ### 4.4 Rollback scopes
 
@@ -292,14 +289,15 @@ host is the router and every jail interface is a point-to-point link to it.
   jails what the anchors of both allow. There is no layer 2 between jails (no multicast, VRRP or mDNS between them).
   Section 18.9 says where pf sees a jail's traffic.
 
-IPv6 has two modes:
+The IPv6 prefix of a network is routed to the host or sits on a shared segment of the uplink. The NDP proxy is a switch
+of the network (`ipv6.ndp_proxy`, `jailops network ndp-proxy enable|disable`):
 
-| Mode | When | Behaviour |
+| NDP proxy | When | Behaviour |
 |---|---|---|
-| `routed` | The upstream routes a prefix to the host | The host routes each address to its jail and rejects the rest of the prefix. No proxy. **Must work fully without the proxy.** |
-| `proxy` | The upstream treats the addresses as on-link (switched /64) | JailOps answers neighbor solicitations for every address it has allocated to a running jail on the uplink with the host's MAC, announces each one when it appears, and routes each address to its jail with a `/128` host route. The proxy always runs for a network in this mode; there is no switch for it. What it may do on the uplink is checked by the helper against the stored network (§18.6, §18.10). |
+| off | The upstream routes a prefix to the host | The host routes each address to its jail and rejects the rest of the prefix. No proxy. **Must work fully without the proxy.** |
+| on | The upstream treats the addresses as on-link (switched /64) | JailOps answers neighbor solicitations on the uplink for the allocation range of the network with the host's MAC, whether a jail runs or not, announces the range, and routes the address of each running jail to it with a `/128` host route. The proxy runs while the switch is on. What it may do on the uplink is checked by the helper against the stored network (§18.6, §18.10). |
 
-In `proxy` mode the uplink is a plain interface (not a member of a bridge of the host's), and the network gets no on-link copy of the
+With the NDP proxy the uplink is a plain interface (not a member of a bridge of the host's), and the network gets no on-link copy of the
 upstream /64: each jail address is reached through a `/128` host route through the jail's own link. The jails' gateway is the
 link-local `fe80::1`. **[verified]** on FreeBSD 15.1 amd64 (section 18.10).
 
@@ -308,7 +306,7 @@ The proxy is built in, pure Go, BPF on the uplink with a session state machine
 and from published descriptions of the unicast neighbor unreachability problem. No code is copied from any existing NDP proxy.
 JailOps knows every address it allocates, so it can answer without learning.
 
-Acceptance of `proxy` mode, with the result on the amd64 test host (a shared switched /64, jails in a `/80`; section
+Acceptance of the NDP proxy, with the result on the amd64 test host (a shared switched /64, jails in a `/80`; section
 18.10 and 18.11 have the measurements):
 
 1. `route -n get -inet6 <jail>` selects the jail's own link: **met**.
@@ -344,7 +342,7 @@ computes addresses by hand:
 - On some segments the routers send unicast neighbor solicitations from their global, off-link addresses and the host has
   to answer them (`net.inet6.icmp6.nd6_onlink_ns_rfc4861=1`; the default drops them and the router may mark the host
   unreachable for a while). JailOps never sets it either: `jailops doctor` shows `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`
-  as information while a proxy-mode network exists, and the answer of `network create` carries a note that points at the
+  as information while a network with the NDP proxy exists, and the answer of `network create` carries a note that points at the
   explanation in the IPv6 docs. Neither is a warning, and `sysctl.persistent` does not look at it.
 - Verified on a cloud test host: the provider routes the whole `/64` to the host, and a source address taken from
   a second `/80` makes a round trip.
@@ -1270,7 +1268,7 @@ Design consequences of prototype 8:
 
 ### 18.1 First end-to-end run of the daemon (FreeBSD 15.1 arm64)
 
-`jailops image build freebsd15` (pkgbase), `jailops create nginx --project web --image freebsd15@stable
+`jailops image build freebsd15` (pkgbase), `jailops create nginx --project web --image freebsd15
 --network web`, `jailops start nginx --project web` and `jailops exec --project web nginx -- uname -a` ran
 through jailopsd in dev mode with the in-process helper, and the jail started through `jail(8)` with the
 `jailops-priv hook` scripts. The jail has 10.50.0.2/32 on a link of its own, reaches the gateway and, through
@@ -1358,9 +1356,8 @@ of last resort, there is no Capsicum yet), amd64.
 
 The FreeBSD packages (`jailops-client`, `jailops`, `jailops-backupd`) are built and signed by the separate repository
 `jailops-packages` with PkgOps (no FreeBSD builder: Go cross-compiles on Linux), published to
-`pkg.jailops.net/<ABI>/latest` through GitHub Pages and archived in GitHub Releases. `scripts/pkg-build.sh` and
-`scripts/pkg-repo.sh` (FreeBSD, `pkg create` and `pkg repo`) are the old path, kept for a transition and removable once
-the first JailOps packages have been published from there. GoReleaser (`.goreleaser.yaml`) makes the release archives
+`pkg.jailops.net/<ABI>/latest` through GitHub Pages and archived in GitHub Releases. `scripts/pkg-build.sh` (FreeBSD,
+`pkg create`) builds the packages the end-to-end test installs. GoReleaser (`.goreleaser.yaml`) makes the release archives
 with the static binaries and the Linux packages of the client and the backup node.
 
 `scripts/ci-freebsd-e2e.sh` is the proof, and it is what CI runs in a FreeBSD VM: on a clean machine it builds the
@@ -1480,7 +1477,7 @@ Debian jails. UNVERIFIED: traffic into the jail from the internet (the test mach
 upstream that is not routed to the host) needs the NDP proxy and is covered in 18.10.
 
 **Debian (glibc).** `jailops image create debian --os linux --release trixie --arch arm64 --source-type debootstrap
---keys /usr/local/share/keyrings/debian-archive-keyring.gpg --alias stable` builds Debian 13 with `debootstrap` (80
+--keys /usr/local/share/keyrings/debian-archive-keyring.gpg` builds Debian 13 with `debootstrap` (80
 packages, 140 MB) and the jail runs under the Linuxulator: `ldd` reports glibc 2.41, `uname` Linux 5.15.0, `apt-get
 update` and `apt-get install` work, and the jail has v4 and v6 connectivity. What it took:
 - The release signature is always checked: a keyring is required (`--keys`) and the mirror must be https. The first run
@@ -1557,7 +1554,7 @@ and not an accident, but "any" includes other projects. (3) Neither `scrub` nor 
 non-first IPv6 fragments meet port rules depends on the host's own pf.conf. The doctor does not check it yet (how
 `pfctl` shows `set reassemble yes` is not verified).
 
-### 18.10 IPv6 proxy mode through the helper (FreeBSD 15.1 amd64, a switched /64)
+### 18.10 the NDP proxy through the helper (FreeBSD 15.1 amd64, a switched /64)
 
 The proxy answers neighbor solicitations on the uplink for the addresses of jails on a `proxy` network. It needs two
 things only root has, and the daemon is not root and is not trusted, so the helper offers exactly two typed operations
@@ -1579,7 +1576,7 @@ things only root has, and the daemon is not root and is not trusted, so the help
   when an address is added and whenever the capture is reopened, so a router that has not asked yet, or holds an old
   entry, learns at once.
 
-**The authority is the stored network.** The helper accepts a request only for the subnet of a stored network in proxy mode on
+**The authority is the stored network.** The helper accepts a request only for the subnet of a stored network with the NDP proxy on
 that uplink, and checks it itself: between /48 and /120, global or unique-local, no address of the host inside it on any
 interface, no overlap with another network, the uplink a plain interface. Otherwise the operations answer `forbidden`
 with the reason, the proxy does not start, and the doctor and the network status show that message. A compromised
@@ -1598,7 +1595,7 @@ stopping a jail removes its `/128` route and the others stay reachable. The firs
 while the upstream router resolves it; the proxy answers within a millisecond once it asks, and announces new
 addresses unasked. A jail address that is given to another jail later is forgotten by the host's neighbor cache when the
 host route goes (`ndp -d`), or the host could not reach the new jail for a day. The doctor fails (`network.ndproxy`)
-when a proxy-mode network is not answering.
+when a network with the NDP proxy is not answering.
 
 Behaviour of the proxy under load and when it cannot work (October 2026 audit): announcements have a budget of their own
 (10 a second) and are sent for new addresses only, three times, a second apart, as RFC 4861 7.2.6 allows, and again for all
@@ -1651,7 +1648,7 @@ fakes only (`internal/ndproxy`), not against a live flood.
 - **After the fixes of this revision** (announce on add, neighbor-cache cleanup, flush of a network's anchor on delete,
   pending-announce set, helper refusing targets without a jail host route, symlink-safe fstab checks, label prefix
   hashing): the clean-install end-to-end run with the PF matrix passed in full on both hosts (arm64 and amd64; the exact probe count is not quoted here, see 18.13);
-  on amd64 a proxy-mode jail answered pings from the internet and from the host and reached the internet, the doctor's
+  on amd64 an NDP proxy jail answered pings from the internet and from the host and reached the internet, the doctor's
   `network.ndproxy` and `host.release` checks passed, and a jail address reused by a new jail was reachable at once. The
   announcement was seen on the wire (unsolicited advertisement to `ff02::1`, override flag only). The host-route parser
   (`netstat -rn`) of the helper therefore works on real output.
@@ -1672,7 +1669,7 @@ Audit of the generated PF rules for neighbour-cache poisoning, checked with forg
   `::` passes only as a DAD solicitation to a solicited-node group, router advertisements and redirects are dropped,
   and only neighbour messages to the jail's own addresses and groups reach it.
 - **The model: every jail has a link of its own, bind every address to it, trust nothing a jail says.** A jail holds IPv4
-  as `/32` and IPv6 as `/128` in both IPv6 modes; its default routes lead to the host (an on-link host route to the IPv4
+  as `/32` and IPv6 as `/128`; its default routes lead to the host (an on-link host route to the IPv4
   gateway, rc `static_routes` on FreeBSD and a `route -j` step for Linux guests; `fe80::1` for IPv6). So it has no
   on-link neighbour and everything, other jails included, goes through the host and PF. The only other party on a
   jail's link is the host, whose end answers for the gateway addresses, and the host routes each of the jail's addresses
@@ -1780,7 +1777,7 @@ about FreeBSD 16, whose plans are thin: 16.0 is targeted for December 2027.
   strlcpy`, whatever the length of its components; the anchors JailOps names are checked against that.
 - **A new network against the host** (the daemon on the VM, its uplink `vtnet0` in 10.0.2.0/24): `--ipv4 10.0.2.1/24`
   is refused naming `10.0.2.15/24 on the host interface vtnet0`; `--uplink em9` and `--uplink lo0` are refused with
-  the candidates (`vtnet0 (10.0.2.15/24)`); a proxy-mode subnet outside the uplink's prefix and a routed prefix
+  the candidates (`vtnet0 (10.0.2.15/24)`); an NDP proxy subnet outside the uplink's prefix and a routed prefix
   inside it are refused; with `net.inet.ip.forwarding=0` a NAT network is created with the warning. A project quota
   and `--disk` of `4GiB` reach ZFS as `4294967296` and the jail starts; a 70-character snapshot name is refused by the
   API.

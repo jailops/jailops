@@ -37,6 +37,7 @@ const (
 	OpZFSHolds          = "zfs.holds"
 	OpZFSBookmark       = "zfs.bookmark"
 	OpZFSWritten        = "zfs.written"
+	OpZFSDiff           = "zfs.diff"
 	OpZFSGUID           = "zfs.guid"
 	OpZFSClones         = "zfs.clones"
 	OpZFSOrigin         = "zfs.origin"
@@ -78,6 +79,7 @@ const (
 	OpNetIPv6Forwarding = "net.ipv6_forwarding"
 
 	OpFSRead     = "fs.read_file"
+	OpFSTreeDiff = "fs.tree_diff"
 	OpFSWrite    = "fs.write_file"
 	OpFSMkdir    = "fs.mkdir"
 	OpFSVolOwner = "fs.volume_owner"
@@ -190,6 +192,12 @@ type zfsBookmarkArgs struct {
 	Snapshot string `json:"snapshot"`
 	Bookmark string `json:"bookmark"`
 }
+type zfsDiffArgs struct {
+	From, To string
+	Limit    int
+	Skip     []string
+}
+
 type zfsWrittenArgs struct {
 	Dataset string `json:"dataset"`
 	Since   string `json:"since,omitempty"`
@@ -408,6 +416,9 @@ func init() {
 		v, err := h.ZFS().Written(ctx, a.Dataset, a.Since)
 		return guidRes{v}, err
 	})
+	register(OpZFSDiff, false, func(ctx context.Context, h Host, a zfsDiffArgs, _ *callIO) (any, error) {
+		return h.ZFS().Diff(ctx, a.From, a.To, a.Limit, a.Skip)
+	})
 	register(OpZFSGUID, false, func(ctx context.Context, h Host, a nameArgs, _ *callIO) (any, error) {
 		v, err := h.ZFS().GUID(ctx, a.Name)
 		return guidRes{v}, err
@@ -587,6 +598,9 @@ func init() {
 	register(OpFSRead, false, func(ctx context.Context, h Host, a ReadFileReq, _ *callIO) (any, error) {
 		b, err := h.ReadFile(ctx, a.Path)
 		return dataRes{b}, err
+	})
+	register(OpFSTreeDiff, false, func(ctx context.Context, h Host, a TreeDiffReq, _ *callIO) (any, error) {
+		return h.TreeDiff(ctx, a)
 	})
 	register(OpFSWrite, false, func(ctx context.Context, h Host, a WriteFileReq, _ *callIO) (any, error) {
 		return empty{}, h.WriteFile(ctx, a)

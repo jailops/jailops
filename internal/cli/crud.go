@@ -43,8 +43,6 @@ type kindDesc[T any] struct {
 	rename renameFn
 	// renameLong is the help of its rename command.
 	renameLong string
-	// createOnly names flags of create that "set" does not have (a choice made when the object is created).
-	createOnly []string
 
 	head  []string
 	row   func(now time.Time, x T) []string

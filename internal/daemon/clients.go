@@ -61,7 +61,7 @@ func fromHost(h priv.Host, files service.FS) *Clients {
 }
 
 func privConfig(cfg *Config) priv.Config {
-	return priv.Config{RootDataset: cfg.Dataset, MountBase: cfg.MountBase, ConfDir: cfg.ConfDir, StateDir: cfg.StateDir, WorkDir: cfg.WorkDir}
+	return priv.Config{StorageRoots: []string{cfg.Dataset}, MountBase: cfg.MountBase, ConfDir: cfg.ConfDir, StateDir: cfg.StateDir, WorkDir: cfg.WorkDir}
 }
 
 // PrivConnectWait is how long the daemon waits for the helper's socket to appear when it starts.

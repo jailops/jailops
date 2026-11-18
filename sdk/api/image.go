@@ -22,8 +22,6 @@ type ImageSpec struct {
 	Arch    string `json:"arch"`    // "amd64", "arm64"
 	// Source describes where the base comes from.
 	Source ImageSource `json:"source"`
-	// Aliases are movable names such as "stable" or "latest".
-	Aliases []string `json:"aliases,omitempty"`
 	// Retention keeps generations that no jail uses for a while.
 	Retention ImageRetention `json:"retention,omitempty"`
 	// AutoUpgrade upgrades the image every night: the next generation is built (the patch levels of the release),
@@ -98,8 +96,6 @@ type ImageRetention struct {
 // ImageStatus is the observed state of an image on one host.
 type ImageStatus struct {
 	Generations []ImageGeneration `json:"generations,omitempty"`
-	// Aliases maps alias to generation number.
-	Aliases map[string]int `json:"aliases,omitempty"`
 	// AutoUpgrade is the state of the nightly upgrade; nil when the image has none.
 	AutoUpgrade *ImageAutoUpgradeStatus `json:"auto_upgrade,omitempty"`
 }
@@ -197,12 +193,6 @@ type ImageUpgradeResult struct {
 	Jails []ImageUpgradeJail `json:"jails"`
 }
 
-// ImageAliasSet is the body of PUT /api/v1/images/{name}/aliases/{alias}.
-type ImageAliasSet struct {
-	// Generation is the generation number the alias points at; zero means the newest.
-	Generation int `json:"generation,omitempty"`
-}
-
 // BaseRelease is a FreeBSD release without its patch level: "15.1-RELEASE" for the kern.osrelease
 // "15.1-RELEASE-p3". It is the release a new image of the host is created with.
 func BaseRelease(osrelease string) string {
@@ -237,10 +227,9 @@ func digits(s string) bool {
 }
 
 // ImageCreateHint is the hint of a request that needs an image that does not exist: the two commands that make
-// image name (what is how the hint calls it, "it" or "the base image"), with the alias only when the request named
-// one, for the release given (the host's). An empty name is the image of the release; an empty release writes
-// 15.1-RELEASE, the oldest release JailOps runs on.
-func ImageCreateHint(what, name, alias, release string) string {
+// image name (what is how the hint calls it, "it" or "the base image"), for the release given (the host's). An empty
+// name is the image of the release; an empty release writes 15.1-RELEASE, the oldest release JailOps runs on.
+func ImageCreateHint(what, name, release string) string {
 	if release == "" {
 		release = "15.1-RELEASE"
 	}
@@ -248,9 +237,6 @@ func ImageCreateHint(what, name, alias, release string) string {
 		name = ImageNameForRelease(release)
 	}
 	create := "jailops image create " + name + " --release " + release
-	if alias != "" {
-		create += " --alias " + alias
-	}
 	return "create " + what + " with '" + create + "', then build it with 'jailops image build " + name +
 		"' (the console's Images page does both with Create image)"
 }

@@ -71,7 +71,7 @@ var sectionComments = map[string][]string{
 	"access": {
 		"What jailops app allow does in the jail besides the firewall rule: type postgresql makes",
 		"a role and a database per grant and a line in a managed block of hba_file. Leave the key",
-		"out otherwise; a daemon before 0.4.0 lists a definition that has it as invalid.",
+		"out otherwise.",
 	},
 	"resources": {"Hints for the jail's limits (memory and disk sizes, cpu a count), not limits."},
 	"notes":     {"Shown after the installation: the first-run steps and how to connect."},

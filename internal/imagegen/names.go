@@ -27,7 +27,6 @@ const (
 	PropSource  = "jailops:source"
 	PropOS      = "jailops:os"
 	PropDeleted = "jailops:deleted"
-	PropAliases = "jailops:aliases"
 	// PropLastGen records the highest generation number ever built, so numbers
 	// are never reused after generations are deleted.
 	PropLastGen = "jailops:last_gen"
@@ -49,22 +48,14 @@ var (
 // GenerationName is "<image>#g<N>".
 func GenerationName(image string, n int) string { return fmt.Sprintf("%s#g%d", image, n) }
 
-// Ref is a parsed image reference: "<image>@<alias>", "<image>#g<N>" or a
-// bare "<image>" (the newest generation).
+// Ref is a parsed image reference: "<image>#g<N>" or a bare "<image>" (the newest generation).
 type Ref struct {
 	Image string
-	Alias string
 	Gen   int
 }
 
 // ParseRef parses an image reference.
 func ParseRef(s string) (Ref, error) {
-	if img, a, ok := strings.Cut(s, "@"); ok {
-		if !validImage(img) || !validAlias(a) {
-			return Ref{}, api.Errorf(api.CodeInvalid, "bad image reference %q", s)
-		}
-		return Ref{Image: img, Alias: a}, nil
-	}
 	if img, g, ok := strings.Cut(s, "#"); ok {
 		m := genRe.FindStringSubmatch(g)
 		if !validImage(img) || m == nil {
@@ -115,6 +106,5 @@ func (l Layout) StagingMount(image string, n int) string {
 	return fmt.Sprintf("%s/images/%s/staging-g%d", l.MountBase, image, n)
 }
 
-// validImage and validAlias follow api.NamePattern (an alias has at most 32 characters).
+// validImage follows api.NamePattern.
 func validImage(s string) bool { return api.IsName(s, api.MaxName) }
-func validAlias(s string) bool { return api.IsName(s, 32) }

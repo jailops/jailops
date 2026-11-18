@@ -1,11 +1,11 @@
-$ jailops create web --image freebsd-15@stable --network lan --storage default --label env=prod --start
+$ jailops create web --image freebsd-15 --network lan --storage default --label env=prod --start
 jail/web created
 jail/web started
 
-$ jailops create db --image freebsd-15@stable --network lan --storage default --label env=prod --label tier=data
+$ jailops create db --image freebsd-15 --network lan --storage default --label env=prod --label tier=data
 jail/db created
 
-$ jailops create tmp --image freebsd-15@stable --network lan --storage default --label env=test
+$ jailops create tmp --image freebsd-15 --network lan --storage default --label env=test
 jail/tmp created
 
 $ jailops list -c name,state

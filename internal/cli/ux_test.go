@@ -124,7 +124,7 @@ func TestExecFlagsBeforeDash(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	h.srv.SeedProject(api.Project{Metadata: api.ObjectMeta{Name: "shop"}, Spec: api.ProjectSpec{Networks: []api.ProjectNetwork{{Network: "lan"}}, Storage: []api.ProjectStorage{{Storage: "default"}}}})
-	h.run("", "create", "web", "--project", "shop", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--start")
+	h.run("", "create", "web", "--project", "shop", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--start")
 	tr := h.transcript()
 	tr.ok("exec", "web", "--project", "shop", "--", "echo", "-n", "x")
 	tr.ok("exec", "--project", "shop", "web", "--", "echo", "id")
@@ -144,15 +144,15 @@ func TestJailCreateDefaults(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("create", "web", "--image", "freebsd-15@stable")
+	tr.ok("create", "web", "--image", "freebsd-15")
 	var j api.Jail
 	if err := json.Unmarshal(h.lastBody("POST", "/api/v1/jails"), &j); err != nil || j.Spec.Storage != "default" || len(j.Spec.Network) != 1 || j.Spec.Network[0].Network != "lan" {
 		t.Fatalf("defaults: %+v %v", j.Spec, err)
 	}
 	h.srv.SeedNetwork(api.Network{Metadata: api.ObjectMeta{Name: "dmz"}, Spec: api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.30.0.0/24", Gateway: "10.30.0.1", Range: "10.30.0.10-10.30.0.20"}}})
 	tr.ok("network", "grant", "dmz", "--project", "main")
-	tr.do("", "create", "db", "--image", "freebsd-15@stable", "--storage", "default") // two networks: never guessed
-	tr.ok("--dry-run", "create", "db", "--image", "freebsd-15@stable", "--network", "dmz")
+	tr.do("", "create", "db", "--image", "freebsd-15", "--storage", "default") // two networks: never guessed
+	tr.ok("--dry-run", "create", "db", "--image", "freebsd-15", "--network", "dmz")
 	tr.golden("jail_create_defaults")
 }
 
@@ -161,7 +161,7 @@ func TestVocabularyAliases(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--label", "env=prod")
+	tr.ok("create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--label", "env=prod")
 	tr.ok("list", "--label", "env=prod", "-o", "name")
 	tr.ok("stop", "--selector", "env=prod")
 	tr.ok("token", "create", "a", "--role", "operator", "--projects", "main", "-o", "name")
@@ -179,7 +179,7 @@ func TestVocabularyAliases(t *testing.T) {
 		t.Errorf("explain completion: %q", out)
 	}
 	out, _, _ = h.run("", "__complete", "create", "x", "--image", "")
-	if !strings.Contains(out, "freebsd-15@stable\n") || !strings.Contains(out, "freebsd-15\n") {
+	if !strings.Contains(out, "freebsd-15\n") || !strings.Contains(out, "freebsd-15\n") {
 		t.Errorf("image completion: %q", out)
 	}
 	out, _, _ = h.run("", "__complete", "list", "-c", "")
@@ -207,7 +207,7 @@ func TestShowAndEmptyLists(t *testing.T) {
 	tr.ok("image", "show", "freebsd-15")
 	tr.ok("project", "show", "main")
 	tr.ok("storage", "show", "fast", "-o", "yaml")
-	h.run("", "create", "web", "--image", "freebsd-15@stable", "--network", "lan=10.20.0.15", "--storage", "default")
+	h.run("", "create", "web", "--image", "freebsd-15", "--network", "lan=10.20.0.15", "--storage", "default")
 	tr.ok("jail", "list", "-c", "name,ipv4", "--sort", "ipv4")
 	tr.do("", "jail", "list", "-c", "name,ipv4,gen")
 	tr.do("", "firewall", "policy", "list", "-c", "name,age")

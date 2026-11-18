@@ -499,7 +499,7 @@ func (f *fakeNDP) last() ndproxy.Desired {
 }
 
 func proxyNet() reconcile.NetworkDesired {
-	spec := api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1::/64", Range: "2001:db8:1::10-2001:db8:1::20"}}
+	spec := api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1::/64", Range: "2001:db8:1::10-2001:db8:1::20"}}
 	steps, err := render.NetworkPlan(render.NetworkInput{ID: netID, Name: "lan", Spec: spec})
 	if err != nil {
 		panic(err)

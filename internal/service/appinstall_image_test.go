@@ -16,9 +16,9 @@ func TestDefaultAppImage(t *testing.T) {
 	host := "15.2-RELEASE-p1"
 	s.d.Sysctl = func(context.Context, string) (string, error) { return host, nil }
 	ctx := WithActor(bg, Actor{Name: "root", Kind: "unix", Perm: api.PermAdmin, Global: true})
-	add := func(name string, os api.OS, release string, aliases ...string) {
+	add := func(name string, os api.OS, release string) {
 		t.Helper()
-		if _, err := s.imgKind.create(ctx, api.ObjectMeta{Name: name}, api.ImageSpec{OS: os, Release: release, Aliases: aliases}); err != nil {
+		if _, err := s.imgKind.create(ctx, api.ObjectMeta{Name: name}, api.ImageSpec{OS: os, Release: release}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -42,7 +42,7 @@ func TestDefaultAppImage(t *testing.T) {
 	refused("there is no FreeBSD image yet", "; your images: alp")
 	add("freebsd-16-0", api.OSFreeBSD, "16.0-RELEASE")
 	refused("every FreeBSD image is of a newer release than this host (15.2-RELEASE)", "name an image with --image; your images: alp, freebsd-16-0")
-	add("freebsd-15-1", api.OSFreeBSD, "15.1-RELEASE", "stable")
+	add("freebsd-15-1", api.OSFreeBSD, "15.1-RELEASE")
 	want("freebsd-15-1")
 	add("freebsd-15-2", api.OSFreeBSD, "15.2-RELEASE")
 	want("freebsd-15-2")
@@ -86,9 +86,9 @@ func TestMissingImageHintNamesTheHostRelease(t *testing.T) {
 	if !errors.As(err, &ae) || !strings.Contains(ae.Hint, "jailops image create freebsd-15-1 --release 15.1-RELEASE'") {
 		t.Fatalf("hint: %v", err)
 	}
-	_, _, err = s.imageFor(api.JailSpec{Image: "base@lts"})
+	_, _, err = s.imageFor(api.JailSpec{Image: "base"})
 	if !errors.As(err, &ae) || ae.Code != api.CodeNotFound ||
-		ae.Hint != "create it with 'jailops image create base --release 15.1-RELEASE --alias lts', then build it with 'jailops image build base' (the console's Images page does both with Create image)" {
+		ae.Hint != "create it with 'jailops image create base --release 15.1-RELEASE', then build it with 'jailops image build base' (the console's Images page does both with Create image)" {
 		t.Fatalf("jail create hint: %v %q", err, ae.Hint)
 	}
 	if env := s.Info("trusted").Environment; env.KernelVersion != "15.1-RELEASE-p3" {

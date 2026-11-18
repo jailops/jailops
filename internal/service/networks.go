@@ -170,7 +170,7 @@ func overlappingSubnets(a, b api.NetworkSpec) (netip.Prefix, netip.Prefix, bool)
 				out = append(out, p.Masked())
 			}
 		}
-		if s.IPv6 != nil && s.IPv6.Mode != api.IPv6None {
+		if s.IPv6 != nil {
 			if p, err := netip.ParsePrefix(s.IPv6.Subnet); err == nil {
 				out = append(out, p.Masked())
 			}
@@ -219,7 +219,7 @@ func (s *Service) CreateNetwork(ctx context.Context, n api.Network) (api.Network
 	out.Status.Warnings = append(out.Status.Warnings, s.forwardingWarnings(ctx, n.Spec)...)
 	// On some shared segments the routers probe the host from off-link addresses and the host has to answer them; the
 	// administrator sets that, so point at the explanation now and not only in the doctor.
-	if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode == api.IPv6Proxy {
+	if n.Spec.IPv6 != nil && n.Spec.IPv6.NDPProxy {
 		if w := s.onlinkNSNote(ctx); w != "" {
 			out.Status.Notes = append(out.Status.Notes, w)
 		}
@@ -482,7 +482,7 @@ func (s *Service) assignAddresses(project, self string, spec *api.JailSpec) erro
 			if n.Spec.IPv4 != nil {
 				a.IPv4 = "auto"
 			}
-			if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+			if n.Spec.IPv6 != nil {
 				a.IPv6 = "auto"
 			}
 		}
@@ -509,7 +509,7 @@ func (s *Service) assignAddresses(project, self string, spec *api.JailSpec) erro
 				}
 			}
 			if v6 {
-				if n.Spec.IPv6 == nil || n.Spec.IPv6.Mode == api.IPv6None {
+				if n.Spec.IPv6 == nil {
 					return invalid("network %q has no IPv6", a.Network)
 				}
 				al, err = ipam.NewV6(n.Spec.IPv6, inUse)

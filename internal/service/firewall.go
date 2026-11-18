@@ -539,7 +539,7 @@ func (s *Service) foreignPrefixes(project string) ([]netip.Prefix, error) {
 					out = append(out, pf)
 				}
 			}
-			if n.Spec.IPv6 != nil && n.Spec.IPv6.Mode != api.IPv6None {
+			if n.Spec.IPv6 != nil {
 				if pf, err := netip.ParsePrefix(n.Spec.IPv6.Subnet); err == nil {
 					out = append(out, pf)
 				}

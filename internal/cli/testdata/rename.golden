@@ -1,7 +1,7 @@
-$ jailops jail create web --image freebsd-15@stable --network lan --storage default --firewall-policy web
+$ jailops jail create web --image freebsd-15 --network lan --storage default --firewall-policy web
 jail/web created
 
-$ jailops jail create db --image freebsd-15@stable --network lan --storage default --depends web
+$ jailops jail create db --image freebsd-15 --network lan --storage default --depends web
 jail/db created
 
 $ jailops network rename lan office --dry-run

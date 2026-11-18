@@ -31,7 +31,7 @@ blocked, 8 the test cannot say.
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `pf.inbound` | while a jail on an IPv6 or a non-NAT IPv4 network exists: a `block ... quick` rule for every source before the anchor line, or a hand-written `pass ... quick` rule for a jail prefix | `fail` for the block (it drops inbound traffic to the jails before their policies are asked: decide whether that is what the rule is for; to let the policies decide, move the anchor line above it; rules for single sources, such as a blocklist, are not flagged), `warn` for the pass (it keeps a jail without an `allow in` rule reachable: delete it; the jail's own `allow in` rules open the uplink, [install.md](install.md) section 3) |
 | `jails.exposed` | the jails whose anchor has a pass rule on an uplink | `info`: lists the jails the Internet can reach and their ports (a port forward, or an `allow in` rule with an external source), so the rules a project's administrator writes for his own jail are visible to the others |
-| `jails.inbound-without-source` | jails on a routed address with an `allow in` rule that names no source | `info`: such a rule is for the jail's link only and does not open the uplink (it did before 0.8.4); give it `--from any` or use `jailops expose JAIL PORTS` |
+| `jails.inbound-without-source` | jails on a routed address with an `allow in` rule that names no source | `info`: such a rule is for the jail's link only and does not open the uplink; give it `--from any` or use `jailops expose JAIL PORTS` |
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
 | `network.dns` | for every network a jail uses: where its jails get their nameservers (the network's `dns`, the host's `/etc/resolv.conf`, or the gateway when the host resolves only through loopback); a gateway is asked one query (`. NS`, one second) once a jail on the network runs | `warn` when the gateway does not answer, refuses (access control) or no nameserver could be worked out; the hint has the resolver and `pf.conf` lines ([networking-ipv6.md](networking-ipv6.md#name-resolution-of-jails)) |
 | `network.epairs` | epairs without a jail | `warn`: the reconcile loop removes them on its next pass |
@@ -61,10 +61,9 @@ the jail's anchor: the host's `pf.conf` (a `quick` rule before the `anchor "jail
 
 **`pkg` says "Transient resolver failure", or every lookup on the host fails (`jailops doctor`: `dns.unbound` fails).** The host
 asks its own `local_unbound` on `127.0.0.1`, and it does not answer. Look at `sockstat -46l | grep :53` (what listens),
-`service local_unbound status` and `local-unbound-checkconf`. Versions before 0.8.3 wrote `interface:` lines into
-`/var/unbound/conf.d/jailops.conf` that took the loopback from a resolver whose own configuration had none: `rm
-/var/unbound/conf.d/jailops.conf && service local_unbound restart` gives the host its resolver back at once, and the
-current version writes the loopback into the file ([dns.md](dns.md#the-hosts-own-resolver-keeps-its-loopback)). When the
+`service local_unbound status` and `local-unbound-checkconf`. If the file `/var/unbound/conf.d/jailops.conf` is the cause, `rm
+/var/unbound/conf.d/jailops.conf && service local_unbound restart` gives the host its resolver back at once, and JailOps writes
+the file again with the loopback ([dns.md](dns.md#the-hosts-own-resolver-keeps-its-loopback)). When the
 resolver answers but cannot resolve names outside (`dns.upstream` warns), its upstream is the thing to look at: the forward
 zone of `local_unbound`, or `local-unbound-setup` without one so that it resolves from the root servers.
 
@@ -148,20 +147,12 @@ unicast neighbor solicitations from their global addresses, which FreeBSD drops 
 and what to set (`net.inet6.icmp6.nd6_onlink_ns_rfc4861=1`, which JailOps never sets): see
 [networking-ipv6.md](networking-ipv6.md#one-host-setting-that-matters-on-some-segments).
 
-**A bridge, `NETNAMEga` and `NETNAMEgb` are left from an earlier version.** Earlier versions gave every network a bridge and a
-gateway pair; a network is routed now and has no interface of its own. `jailops doctor` says `network.leftovers` and names them.
-The jails that were started before the upgrade are still members of the bridge until they are restarted, so restart them first
-(`jailops restart JAIL ...`: they are down for a few seconds and come back with the routed link; the first start takes the
-gateway address away from the old gateway pair, which is why the jails still on the bridge lose it). Then remove what is left:
-
-    ifconfig -g bridge                # the bridges of the host
-    ifconfig NETNAME destroy          # the bridge; ifconfig NETNAME | grep member must show no jail link any more
-    ifconfig NETNAMEga destroy        # destroying one end of the pair removes the other
-    kldunload if_bridge               # and remove if_bridge_load from /boot/loader.conf
-
-A stop of a jail that was started by an earlier version works too: what is not there is not an error, and what could not be
-removed is written as a warning to the console log of the jail (`/var/log/jailops/jail_PROJECT_NAME_console.log`) and to the
-audit log, and never fails the stop.
+**`jailops jail diff` says "compared with the image, not with a snapshot", or refuses a jail.** A jail made before the
+baseline snapshot existed has none on its persistent datasets: the command compares their files with the image and marks
+the dataset, and a change that only moved a file shows as `-` and `+`. `jailops jail diff` needs a thin jail: a thick or
+Linux jail has a full copy of its image, so there is nothing to compare it with. For a jail with a locked volume, unlock it
+first ([storage.md](storage.md#encrypted-volumes)). `--packages` answers for a running jail only
+([storage.md](storage.md#what-is-unique-in-a-jail)).
 
 **Jail deletion or unmount reports `busy`.** Stopping a jail retries a busy unmount for a few seconds; if it persists, something
 inside still holds a file open (`fstat -f /usr/local/jailops/projects/...`).
@@ -197,7 +188,7 @@ for and the proxy never answered (`network.ndproxy`).
 | `internal` | the server failed | retry once, then report the request id and read the server log |
 | `quota_exceeded` | a project quota (jails, CPU, memory, PIDs, addresses, storage) | `jailops project show NAME`; a global admin raises it |
 | `ip_conflict`, `pool_exhausted` | the address is taken or outside the range; the range is full | use `auto`; `jailops network leases NAME`; widen the range |
-| `image_in_use` | a jail still uses the image or generation (the error names the jails; an alias alone never blocks) | upgrade or delete those jails |
+| `image_in_use` | a jail still uses the image or generation (the error names the jails) | upgrade or delete those jails |
 | `data_loss_unconfirmed` | the operation would discard data | type the jail name or pass `--confirm-data-loss` |
 | `merge_conflict` | an `/etc` merge needs a human | see above |
 | `zfs_incompatible` | the pool lacks a feature the operation needs | check the pool features on both ends |

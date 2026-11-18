@@ -41,20 +41,20 @@ func TestProjectLevelRoutesNeedAProject(t *testing.T) {
 func TestAJailNeedsANetworkAndAStorage(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
-	bare := api.JailSpec{Image: "fb@stable", Storage: "default"}
+	bare := api.JailSpec{Image: "fb", Storage: "default"}
 	_, err := e.Admin.Jails().Create(c, sdk.NewJail("a", bare))
 	wantCode(t, err, api.CodeInvalid)
 	if !strings.Contains(err.Error(), "a jail needs a network") {
 		t.Fatalf("%v", err)
 	}
-	bare = api.JailSpec{Image: "fb@stable", Network: []api.NetworkAttach{{Network: "lan"}}}
+	bare = api.JailSpec{Image: "fb", Network: []api.NetworkAttach{{Network: "lan"}}}
 	_, err = e.Admin.Jails().Create(c, sdk.NewJail("a", bare))
 	wantCode(t, err, api.CodeInvalid)
 	if !strings.Contains(err.Error(), "a jail needs a storage") {
 		t.Fatalf("%v", err)
 	}
 	// A network device that names no network is refused too.
-	_, err = e.Admin.Jails().Create(c, sdk.NewJail("a", api.JailSpec{Image: "fb@stable", Storage: "default", Network: []api.NetworkAttach{{Name: "eth0"}}}))
+	_, err = e.Admin.Jails().Create(c, sdk.NewJail("a", api.JailSpec{Image: "fb", Storage: "default", Network: []api.NetworkAttach{{Name: "eth0"}}}))
 	wantCode(t, err, api.CodeInvalid)
 
 	// A profile can carry several networks and the storage.
@@ -68,7 +68,7 @@ func TestAJailNeedsANetworkAndAStorage(t *testing.T) {
 		"nic.eth0.network": "lan", "nic.eth1.network": second, "storage": "default"}}}); err != nil {
 		t.Fatal(err)
 	}
-	op, err := e.Admin.Jails().Create(c, sdk.NewJail("viaprofile", api.JailSpec{Image: "fb@stable", Profiles: []string{"dual"}}))
+	op, err := e.Admin.Jails().Create(c, sdk.NewJail("viaprofile", api.JailSpec{Image: "fb", Profiles: []string{"dual"}}))
 	if err != nil {
 		t.Fatal(err)
 	}

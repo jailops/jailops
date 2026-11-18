@@ -9,7 +9,7 @@ import type {
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
-  JailReach, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
+  JailReach, JailDiff, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
   HostIdentity, HostIdentityApply, HostChange, HostSnapshot, HostRestore,
   HostFirewall, HostFirewallApply, HostPending,
   WireGuard, WireGuardJoin, WireGuardKeys, WireGuardPeerAdd, WireGuardPeerCreated,
@@ -119,6 +119,16 @@ export const api = {
     /** Without ports it removes the whole exposure of the protocol; with ports it takes those out. */
     unexpose: (n: string, b: UnexposeRequest) => c().mutate<ExposeResult>('POST', `/jails/${e(n)}/unexpose`, b),
   },
+  diff: {
+    /** Extension jail_diff: what a thin jail holds on top of its image (reads only). `limit` caps the entries of each dataset. */
+    jail: (n: string, o: { limit?: number; packages?: boolean } = {}) => {
+      const q = new URLSearchParams()
+      if (o.limit) q.set('limit', String(o.limit))
+      if (o.packages) q.set('packages', 'true')
+      const qs = q.toString()
+      return c().get<JailDiff>(`/jails/${e(n)}/diff${qs ? '?' + qs : ''}`)
+    },
+  },
   appAccess: {
     /** Extension app_access: who may connect to an installed app (readonly in the project). */
     get: (n: string) => c().get<AppAccess>(`/jails/${e(n)}/access`),
@@ -151,7 +161,6 @@ export const api = {
     upgrade: (n: string, u: ImageUpgrade) => c().mutate('POST', `/images/${e(n)}/upgrade`, u),
     /** The nightly upgrade of the image (global admin): a merge patch of spec.auto_upgrade. */
     autoUpgrade: (n: string, a: ImageAutoUpgrade) => c().mutate<Image>('PATCH', `/images/${e(n)}`, { spec: { auto_upgrade: a } }),
-    deleteAlias: (n: string, alias: string) => c().mutate<Image>('DELETE', `/images/${e(n)}/aliases/${e(alias)}`),
   },
   networks: {
     list: () => c().list<Network>('/networks'),

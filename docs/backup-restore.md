@@ -13,9 +13,6 @@ Replication between hosts you trust is a separate feature that has no API or CLI
 
 What is in a backup, and what is not: see the last section of [storage.md](storage.md).
 
-Verified on FreeBSD 15.1 arm64 (design 18.3, 18.4, and the clean-install run on both architectures): back up, verify at three
-depths, restore as a new jail, the restored jail starts and has its data.
-
 ## The pieces
 
 | | Where | Program |

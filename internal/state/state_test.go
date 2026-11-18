@@ -907,7 +907,7 @@ func TestForwardsAreTakenOutOfPoliciesAndProfiles(t *testing.T) {
 		`{"name":"ssh","action":"allow","direction":"in","proto":"tcp","ports":["22"]},` +
 		`{"name":"fwd","comment":"site","action":"allow","direction":"in","proto":"tcp","from":["192.0.2.0/24"],"redirect":{"listen":"192.0.2.7","host_port":8080,"jail_port":80}},` +
 		`{"name":"off","action":"allow","direction":"in","proto":"tcp","disabled":true,"redirect":{"host_port":9090,"jail_port":90}}]}}`)
-	o, changed, fw, err := decodeObjectForwards(policy, nil)
+	o, changed, fw, _, err := decodeObjectForwards(policy, nil)
 	if err != nil || !changed {
 		t.Fatalf("decode: changed=%v err=%v", changed, err)
 	}
@@ -923,13 +923,13 @@ func TestForwardsAreTakenOutOfPoliciesAndProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, changed, fw, err = decodeObjectForwards(b, nil); err != nil || changed || len(fw) != 0 {
+	if _, changed, fw, _, err = decodeObjectForwards(b, nil); err != nil || changed || len(fw) != 0 {
 		t.Fatalf("second load: changed=%v forwards=%v err=%v", changed, fw, err)
 	}
 
 	profile := []byte(`{"apiVersion":"jailops/v1","kind":"Profile","metadata":{"uuid":"u2","name":"pub","project":"alpha"},"spec":{"config":{"limits.memory":"1G",` +
 		`"proxy.http.listen":":8080","proxy.http.jail_port":"80","proxy.dns.listen":"192.0.2.7:53","proxy.dns.jail_port":"53","proxy.dns.proto":"udp"}}}`)
-	o, changed, fw, err = decodeObjectForwards(profile, nil)
+	o, changed, fw, _, err = decodeObjectForwards(profile, nil)
 	if err != nil || !changed || len(fw) != 2 {
 		t.Fatalf("profile: changed=%v forwards=%v err=%v", changed, fw, err)
 	}
@@ -978,5 +978,104 @@ func TestTakenForwardsSurviveARestartUntilApplied(t *testing.T) {
 	defer s.Close()
 	if fw := s.TakeMigratedForwards(); len(fw) != 0 {
 		t.Fatalf("an applied forward comes back: %+v", fw)
+	}
+}
+
+// A network stored by 0.8.3 with `ipv6.mode: proxy` keeps its NDP proxy after the upgrade: the document is rewritten
+// with `ndp_proxy: true`, `routed` loses the field, and `none` loses the IPv6 block.
+func TestStoredIPv6ModeBecomesNDPProxySwitch(t *testing.T) {
+	mk := func(mode string) map[string]any {
+		return map[string]any{"kind": "Network", "spec": map[string]any{"ipv6": map[string]any{"mode": mode, "subnet": "2001:db8::/64"}}}
+	}
+	proxy := mk("proxy")
+	if !renameFields(proxy) {
+		t.Fatal("a stored mode was not rewritten")
+	}
+	v6 := proxy["spec"].(map[string]any)["ipv6"].(map[string]any)
+	if v6["ndp_proxy"] != true || v6["mode"] != nil {
+		t.Fatalf("ipv6 after the rewrite: %v", v6)
+	}
+	if renameFields(proxy) {
+		t.Fatal("the rewrite is not idempotent")
+	}
+	routed := mk("routed")
+	renameFields(routed)
+	if v6 := routed["spec"].(map[string]any)["ipv6"].(map[string]any); v6["ndp_proxy"] != nil || v6["mode"] != nil {
+		t.Fatalf("routed: %v", v6)
+	}
+	none := mk("none")
+	renameFields(none)
+	if none["spec"].(map[string]any)["ipv6"] != nil {
+		t.Fatalf("none: %v", none["spec"])
+	}
+}
+
+// A jail that named an image alias, an image that listed aliases, a backup bundle and a project allow-list are rewritten to the
+// bare image name when loaded; the jails are handed over so the service can say which alias each had used.
+func TestImageAliasesAreStrippedFromStoredObjects(t *testing.T) {
+	jail := []byte(`{"apiVersion":"jailops/v1","kind":"Jail","metadata":{"uuid":"u1","name":"web","project":"alpha"},"spec":{"image":"freebsd-15@stable","storage":"default"}}`)
+	o, changed, _, refs, err := decodeObjectForwards(jail, nil)
+	if err != nil || !changed || len(refs) != 1 || refs[0] != (MigratedImageRef{Project: "alpha", Jail: "web", Image: "freebsd-15", Alias: "stable"}) {
+		t.Fatalf("jail: changed=%v refs=%+v err=%v", changed, refs, err)
+	}
+	if !strings.Contains(string(o.Spec), `"image":"freebsd-15"`) || strings.Contains(string(o.Spec), "@") {
+		t.Fatalf("the jail keeps the alias: %s", o.Spec)
+	}
+	b, err := encodeObject(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, changed, _, refs, err = decodeObjectForwards(b, nil); err != nil || changed || len(refs) != 0 {
+		t.Fatalf("second load: changed=%v refs=%v err=%v", changed, refs, err)
+	}
+	pinned := []byte(`{"apiVersion":"jailops/v1","kind":"Jail","metadata":{"uuid":"u1","name":"web","project":"alpha"},"spec":{"image":"freebsd-15#g3"}}`)
+	if _, changed, _, refs, err = decodeObjectForwards(pinned, nil); err != nil || changed || len(refs) != 0 {
+		t.Fatalf("a pinned generation is not an alias: changed=%v refs=%v err=%v", changed, refs, err)
+	}
+
+	image := []byte(`{"apiVersion":"jailops/v1","kind":"Image","metadata":{"uuid":"u2","name":"freebsd-15"},"spec":{"os":"freebsd","release":"15.1-RELEASE","aliases":["stable"]}}`)
+	o, changed, _, refs, err = decodeObjectForwards(image, nil)
+	if err != nil || !changed || len(refs) != 0 || strings.Contains(string(o.Spec), "aliases") || !strings.Contains(string(o.Spec), "release") {
+		t.Fatalf("image: changed=%v refs=%v spec=%s err=%v", changed, refs, o.Spec, err)
+	}
+
+	backup := []byte(`{"apiVersion":"jailops/v1","kind":"Backup","metadata":{"uuid":"u3","name":"b1","project":"alpha"},"spec":{"jail":"web","bundle":{"spec":{"image":"freebsd-15@lts"}}}}`)
+	o, changed, _, refs, err = decodeObjectForwards(backup, nil)
+	if err != nil || !changed || len(refs) != 1 || refs[0].Alias != "lts" || strings.Contains(string(o.Spec), "@") {
+		t.Fatalf("backup: changed=%v refs=%v spec=%s err=%v", changed, refs, o.Spec, err)
+	}
+
+	project := []byte(`{"apiVersion":"jailops/v1","kind":"Project","metadata":{"uuid":"u4","name":"alpha"},"spec":{"images":["freebsd-15@stable","alpine-3"]}}`)
+	o, changed, _, _, err = decodeObjectForwards(project, nil)
+	if err != nil || !changed || strings.Contains(string(o.Spec), "@") || !strings.Contains(string(o.Spec), "alpine-3") {
+		t.Fatalf("project: changed=%v spec=%s err=%v", changed, o.Spec, err)
+	}
+}
+
+// The rewritten jail is written back at load, and the store hands the alias references over once.
+func TestStoredAliasReferencesSurviveTheLoad(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "objects", "Jail"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc := `{"apiVersion":"jailops/v1","kind":"Jail","metadata":{"uuid":"u1","name":"web","project":"alpha"},"spec":{"image":"freebsd-15@stable"}}`
+	path := filepath.Join(dir, "objects", "Jail", "u1.json")
+	if err := os.WriteFile(path, []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	refs := s.TakeMigratedImageRefs()
+	if len(refs) != 1 || refs[0].Jail != "web" || refs[0].Alias != "stable" {
+		t.Fatalf("refs: %+v", refs)
+	}
+	if again := s.TakeMigratedImageRefs(); len(again) != 0 {
+		t.Fatalf("handed over twice: %+v", again)
+	}
+	if b, err := os.ReadFile(path); err != nil || strings.Contains(string(b), "@") {
+		t.Fatalf("the file keeps the alias: %s %v", b, err)
 	}
 }

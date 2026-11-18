@@ -45,7 +45,7 @@ func webSpecIn(project string) api.JailSpec {
 	if project != dtest.SeedProject {
 		net = "lan-" + project
 	}
-	return api.JailSpec{Image: "fb@stable", Storage: "default", Network: []api.NetworkAttach{{Network: net}},
+	return api.JailSpec{Image: "fb", Storage: "default", Network: []api.NetworkAttach{{Network: net}},
 		Update: api.UpdatePolicy{Strategy: api.UpdateRebase, Healthcheck: "/bin/true"}}
 }
 

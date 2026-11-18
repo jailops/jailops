@@ -23,9 +23,6 @@ func TestBuildFirstAndNext(t *testing.T) {
 	if g.CreatedAt != w.now {
 		t.Fatal(g.CreatedAt)
 	}
-	if r1.Status.Aliases["latest"] != 1 || r1.Status.Aliases["stable"] != 1 {
-		t.Fatal(r1.Status.Aliases)
-	}
 	if h, _ := w.Z.Holds(bg, g.Dataset+"@ro"); len(h) != 1 {
 		t.Fatal("no hold on @ro")
 	}
@@ -52,13 +49,7 @@ func TestBuildFirstAndNext(t *testing.T) {
 	if o, _ := w.Z.Origin(bg, g2.Dataset); o != g.Dataset+"@ro" {
 		t.Fatal(o)
 	}
-	if r2.Status.Aliases["latest"] != 2 || r2.Status.Aliases["stable"] != 1 {
-		t.Fatalf("aliases %v: latest moves, stable stays", r2.Status.Aliases)
-	}
-	if err := w.M.SetAlias(bg, "fb", "stable", 2); err != nil {
-		t.Fatal(err)
-	}
-	got, err := w.M.Resolve(bg, "fb@stable")
+	got, err := w.M.Resolve(bg, "fb")
 	if err != nil || got.Number != 2 {
 		t.Fatal(got, err)
 	}
@@ -68,8 +59,8 @@ func TestBuildFirstAndNext(t *testing.T) {
 	if _, err = w.M.Resolve(bg, "fb#g9"); !api.IsCode(err, api.CodeNotFound) {
 		t.Fatal(err)
 	}
-	if _, err = w.M.Resolve(bg, "fb@nope"); !api.IsCode(err, api.CodeNotFound) {
-		t.Fatal(err)
+	if _, err = w.M.Resolve(bg, "fb@nope"); err == nil {
+		t.Fatal("an @ reference must be refused")
 	}
 }
 
@@ -109,7 +100,7 @@ func TestUpgradeKeepsNothingWhenThePackageSetDidNotChange(t *testing.T) {
 	if len(w.J.Recs) != 0 {
 		t.Fatalf("journal not cleaned: %v", w.J.Recs)
 	}
-	if o, _ := w.M.Observe(bg, "fb"); len(o.Status.Generations) != 1 || o.MaxNumber != 1 || o.Status.Aliases["latest"] != 1 {
+	if o, _ := w.M.Observe(bg, "fb"); len(o.Status.Generations) != 1 || o.MaxNumber != 1 {
 		t.Fatalf("%+v", o)
 	}
 	// A newer package set is kept as the next generation.
@@ -243,7 +234,7 @@ func TestStagingLeftoverBlocksBuild(t *testing.T) {
 
 func TestEnsureBuildsFirstGeneration(t *testing.T) {
 	w := newWorld(t)
-	g, err := w.M.Ensure(bg, "fb@stable")
+	g, err := w.M.Ensure(bg, "fb")
 	if err != nil || g.Number != 1 {
 		t.Fatal(g, err)
 	}

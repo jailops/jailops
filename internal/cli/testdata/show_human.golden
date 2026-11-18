@@ -33,7 +33,6 @@ $ jailops image show freebsd-15
 Image freebsd-15
   System:    freebsd 15.0-RELEASE (amd64)
   Source:    pkgbase
-  Aliases:   stable -> g1
   Keeps:     every generation
   Age:       3h
   Nightly:   off ('jailops image set freebsd-15 --auto-upgrade' turns it on)

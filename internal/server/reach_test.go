@@ -23,7 +23,7 @@ func TestReachViewsAndTheInternetSource(t *testing.T) {
 		}
 	}
 	mkNet("pub", "10.99.0.0/24", "10.99.0.1", "10.99.0.10-10.99.0.50", false,
-		&api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"})
+		&api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2:100::/80", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"})
 	mkNet("natnet", "10.98.0.0/24", "10.98.0.1", "10.98.0.10-10.98.0.50", true, nil)
 	p, err := e.Admin.Projects().Get(c, "alpha")
 	if err != nil {

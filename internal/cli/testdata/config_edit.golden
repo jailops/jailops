@@ -6,7 +6,7 @@ the jail was not restarted: run 'jailops restart nginx' when it suits you, or re
 $ jailops config show nginx
 KEY                VALUE
 hostname           nginx
-image              freebsd-15@stable
+image              freebsd-15
 limits.cpu         4
 nic.eth0           lan
 nic.eth0.ipv4      10.20.0.10

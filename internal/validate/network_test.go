@@ -8,7 +8,7 @@ import (
 )
 
 func proxySpec(subnet string) api.NetworkSpec {
-	return api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: subnet,
+	return api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{NDPProxy: true, Subnet: subnet,
 		Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::20"}}
 }
 
@@ -37,7 +37,7 @@ func TestProxySubnetsMustBeServableByTheHelper(t *testing.T) {
 
 func TestRoutedSubnetsAreBetween32And126(t *testing.T) {
 	r := func(subnet, rng string) api.NetworkSpec {
-		return api.NetworkSpec{IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: subnet, Range: rng}}
+		return api.NetworkSpec{IPv6: &api.IPv6Net{Subnet: subnet, Range: rng}}
 	}
 	if err := NetworkSpec(r("2001:db8::/32", "2001:db8::10-2001:db8::20")); err != nil {
 		t.Fatal(err)
@@ -75,7 +75,7 @@ func TestNetworksAreOrdinaryUnicastRanges(t *testing.T) {
 		}
 	}
 	v6 := func(subnet, rng string) api.NetworkSpec {
-		return api.NetworkSpec{IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: subnet, Range: rng}}
+		return api.NetworkSpec{IPv6: &api.IPv6Net{Subnet: subnet, Range: rng}}
 	}
 	if err := NetworkSpec(v6("fd30::/64", "fd30::10-fd30::20")); err != nil {
 		t.Errorf("a unique-local network: %v", err)
@@ -105,7 +105,7 @@ func TestProxyRangeRefusesTheBaseAddress(t *testing.T) {
 	if err := NetworkSpec(s); err != nil {
 		t.Fatalf("a range above the base address: %v", err)
 	}
-	s.IPv6.Mode = api.IPv6Routed
+	s.IPv6.NDPProxy = false
 	s.IPv6.Range = "2001:db8:1:2:100::-2001:db8:1:2:100::20"
 	if err := NetworkSpec(s); err != nil {
 		t.Fatalf("a routed network: %v", err)

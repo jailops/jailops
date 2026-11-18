@@ -48,7 +48,7 @@ func TestNDPAnswerRefusals(t *testing.T) {
 		code api.Code
 		text string
 	}{
-		{"an uplink that is not approved", func(q *NDPAnswerReq, _ *fakeNDP) { q.Uplink = "igb0" }, api.CodeForbidden, "no network in IPv6 proxy mode uses"},
+		{"an uplink that is not approved", func(q *NDPAnswerReq, _ *fakeNDP) { q.Uplink = "igb0" }, api.CodeForbidden, "no network with the NDP proxy uses"},
 		{"a bad interface name", func(q *NDPAnswerReq, _ *fakeNDP) { q.Uplink = "-x" }, api.CodeInvalid, ""},
 		{"a target outside the approved prefix", func(q *NDPAnswerReq, _ *fakeNDP) { q.Target = "2001:db8:1:2:200::10" }, api.CodeForbidden, "outside the subnets"},
 		{"a target that is the upstream router", func(q *NDPAnswerReq, _ *fakeNDP) { q.Target = "fe80::1" }, api.CodeForbidden, "outside the subnets"},
@@ -81,10 +81,10 @@ func TestNDPAnswerRefusals(t *testing.T) {
 	}
 }
 
-// The helper approves a prefix itself, from the stored networks in proxy mode, and checks it.
+// The helper approves a prefix itself, from the stored networks with the NDP proxy, and checks it.
 func TestNDPPrefixChecks(t *testing.T) {
 	proxy := func(uplink, subnet string) api.NetworkSpec {
-		return api.NetworkSpec{Uplink: uplink, IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: subnet}}
+		return api.NetworkSpec{Uplink: uplink, IPv6: &api.IPv6Net{NDPProxy: true, Subnet: subnet}}
 	}
 	store := func(e *env, name string, spec api.NetworkSpec) {
 		b, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: name, UUID: name + "-uuid"}, "spec": spec})
@@ -107,7 +107,7 @@ func TestNDPPrefixChecks(t *testing.T) {
 			e.net.AddIface(ifconfig.Iface{Name: "em1", Flags: []string{"UP"}, Inet6: []netip.Prefix{netip.MustParsePrefix("2001:db8:1:2:100::5/64")}})
 		}, "own address"},
 		{"an overlapping network", func(e *env) {
-			store(e, "other", api.NetworkSpec{Uplink: "em1", IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:1:2:100::/96"}})
+			store(e, "other", api.NetworkSpec{Uplink: "em1", IPv6: &api.IPv6Net{Subnet: "2001:db8:1:2:100::/96"}})
 		}, "overlaps"},
 		{"an uplink that is a bridge", func(e *env) {
 			store(e, "onbr", proxy("mybr", "2001:db8:7::/64"))
@@ -274,11 +274,11 @@ fe80::1%lo0                       link#11                       UHS             
 	}
 }
 
-// The proxy answers for the allocation range of a network in proxy mode whether a jail holds the address or not; what
+// The proxy answers for the allocation range of a network with the NDP proxy whether a jail holds the address or not; what
 // is outside the range needs the host route of a jail, and the resolver address of the network is never answered.
 func TestNDPAnswerForTheRangeNeedsNoJail(t *testing.T) {
 	e := newEnv(t)
-	spec := api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80",
+	spec := api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2:100::/80",
 		Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff", Exclude: []string{"2001:db8:1:2:100::80"}}}
 	b, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "edge", UUID: "bbbb-1111-2222"}, "spec": spec})
 	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "bbbb-1111-2222.json"), string(b))

@@ -12,7 +12,7 @@ import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
 import { runOp } from '@jailops/shared/composables/ops'
 import { confirmAction } from '@jailops/shared/composables/confirm'
-import { rangeSize, percent, sentence, ago } from '@jailops/shared/lib/format'
+import { rangeSize, percent, ago } from '@jailops/shared/lib/format'
 import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
 import Meter from '@jailops/shared/components/Meter.vue'
 import Callout from '@jailops/shared/components/Callout.vue'
@@ -62,10 +62,10 @@ function newest(up: NDPUplink | undefined, key: 'last_seen' | 'last_answer' | 'l
 }
 /** Turn the NDP proxy of a network on or off: the same change as `jailops network ndp-proxy enable|disable`. */
 async function toggleNdp(n: Network): Promise<void> {
-  const on = n.spec.ipv6?.mode !== 'proxy'
+  const on = !n.spec.ipv6?.ndp_proxy
   const r = await api.networks.get(n.metadata.name)
   if (!r.data.spec.ipv6) return
-  const next = { metadata: r.data.metadata, spec: { ...r.data.spec, ipv6: { ...r.data.spec.ipv6, mode: on ? 'proxy' : 'routed' } } } as Pick<Network, 'metadata' | 'spec'>
+  const next = { metadata: r.data.metadata, spec: { ...r.data.spec, ipv6: { ...r.data.spec.ipv6, ndp_proxy: on } } } as Pick<Network, 'metadata' | 'spec'>
   await runOp(s.networks.ndpSwitch, () => api.networks.put(next, r.etag))
   void l.reload()
 }
@@ -123,24 +123,23 @@ function used(n: Network): number {
               </dl>
               <dl class="kv">
                 <dt>{{ s.networks.ipv6 }}</dt>
-                <dd v-if="!n.spec.ipv6 || n.spec.ipv6.mode === 'none'" class="faint">{{ s.networks.none }}</dd>
-                <dd v-else><span class="badge" :class="n.spec.ipv6.mode === 'proxy' ? 'warn' : 'info'" :data-ipv6-mode="n.spec.ipv6.mode">{{ sentence(n.spec.ipv6.mode) }}</span></dd>
-                <template v-if="n.spec.ipv6 && n.spec.ipv6.mode !== 'none'">
+                <dd v-if="!n.spec.ipv6" class="faint">{{ s.networks.none }}</dd>
+                <dd v-else><span class="badge info" data-ipv6="routed">{{ s.networks.routed }}</span></dd>
+                <template v-if="n.spec.ipv6">
                   <dt>{{ s.networks.subnet }}</dt><dd><AddrCopy :value="n.spec.ipv6.subnet" /></dd>
                   <dt>{{ s.networks.gateway }}</dt><dd><AddrCopy value="fe80::1" /></dd>
                   <dt>{{ s.networks.range }}</dt><dd><AddrCopy :value="n.spec.ipv6.range" /></dd>
                   <dt>{{ s.networks.ndpSwitch }}</dt>
                   <dd>
-                    <span class="badge" :class="n.spec.ipv6.mode === 'proxy' ? 'ok' : 'info'" :data-ndp="n.spec.ipv6.mode === 'proxy' ? 'on' : 'off'">{{ n.spec.ipv6.mode === 'proxy' ? s.networks.on : s.networks.off }}</span>
-                    <button v-if="canWrite" class="btn btn-sm" type="button" style="margin-left: 8px" :disabled="n.spec.ipv6.mode !== 'proxy' && !n.spec.uplink" :title="n.spec.ipv6.mode !== 'proxy' && !n.spec.uplink ? s.networks.ndpNeedsUplink : s.networks.ndpSwitchHelp" :data-test="`ndp-${n.metadata.name}`" @click="toggleNdp(n)">{{ n.spec.ipv6.mode === 'proxy' ? s.networks.ndpDisable : s.networks.ndpEnable }}</button>
+                    <span class="badge" :class="n.spec.ipv6.ndp_proxy ? 'ok' : 'info'" :data-ndp="n.spec.ipv6.ndp_proxy ? 'on' : 'off'">{{ n.spec.ipv6.ndp_proxy ? s.networks.on : s.networks.off }}</span>
+                    <button v-if="canWrite" class="btn btn-sm" type="button" style="margin-left: 8px" :disabled="!n.spec.ipv6.ndp_proxy && !n.spec.uplink" :title="!n.spec.ipv6.ndp_proxy && !n.spec.uplink ? s.networks.ndpNeedsUplink : s.networks.ndpSwitchHelp" :data-test="`ndp-${n.metadata.name}`" @click="toggleNdp(n)">{{ n.spec.ipv6.ndp_proxy ? s.networks.ndpDisable : s.networks.ndpEnable }}</button>
                   </dd>
                 </template>
                 <dt v-if="n.spec.dns?.length">{{ s.networks.dns }}</dt><dd v-if="n.spec.dns?.length"><AddrCopy v-for="a in n.spec.dns" :key="a" :value="a" style="margin-right: 8px" /></dd>
                 <dt v-if="n.spec.mtu">{{ s.networks.mtu }}</dt><dd v-if="n.spec.mtu" class="mono">{{ n.spec.mtu }}</dd>
               </dl>
             </div>
-            <p v-if="n.spec.ipv6?.mode" class="faint">{{ s.networks.modeHint[n.spec.ipv6.mode] }}</p>
-            <div v-if="n.spec.ipv6?.mode === 'proxy' && ndpOf(n).up" data-test="ndp-status">
+            <div v-if="n.spec.ipv6?.ndp_proxy && ndpOf(n).up" data-test="ndp-status">
               <h3>{{ s.networks.ndpStatusTitle }}</h3>
               <dl class="kv">
                 <dt>{{ s.networks.ndpState }}</dt>

@@ -6,8 +6,7 @@ machine is needed, Go cross-compiles on Linux. That repository holds the package
 (`main/jailops-client`, `main/jailops`, `main/jailops-backupd`) and the install instructions for a host.
 
 The rest of this file describes how a package is made from this repository: `scripts/pkg-build.sh` makes the packages from
-binaries cross-built on any machine (`goreleaser` or `just build-freebsd`) and `scripts/pkg-repo.sh` turns a directory of
-packages into a signed repository. Both run on FreeBSD, because they use `pkg(8)`.
+binaries cross-built on any machine (`goreleaser` or `just build-freebsd`). It runs on FreeBSD, because it uses `pkg(8)`.
 
 Three packages come out of one build:
 

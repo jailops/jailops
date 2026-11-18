@@ -6,7 +6,7 @@ metadata:
   name: plex
   labels: {tier: media}
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: bulk               # the jail's own datasets (root, /usr/local, /var/db) live on the big pool
   network:
     - {name: eth0, network: media, ipv4: auto}

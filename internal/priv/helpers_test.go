@@ -88,9 +88,9 @@ func newEnv(t *testing.T) *env {
 	if _, _, err := e.net.EpairCreate(context.Background(), "jo30g"); err != nil {
 		t.Fatal(err)
 	}
-	// a network in IPv6 proxy mode on the uplink: the prefix the NDP tests answer for
+	// a network with the NDP proxy on the uplink: the prefix the NDP tests answer for
 	proxyNet, _ := json.Marshal(map[string]any{"kind": "Network", "metadata": api.ObjectMeta{Name: "edge", UUID: "bbbb-1111-2222"},
-		"spec": api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80"}}})
+		"spec": api.NetworkSpec{Uplink: "em0", IPv6: &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2:100::/80"}}})
 	mustWrite(t, filepath.Join(e.cfg.StateDir, "objects", "Network", "bbbb-1111-2222.json"), string(proxyNet))
 	e.runner = run.NewFake()
 	l, err := NewLocal(e.cfg, Deps{ZFS: e.zfs, Jails: e.jails, PF: e.pf, Net: e.net, Runner: e.runner, Jexec: e.jexec,

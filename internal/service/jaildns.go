@@ -88,7 +88,7 @@ func gatewayResolvers(spec api.NetworkSpec, v6 bool) []netip.Addr {
 			out = append(out, a)
 		}
 	}
-	if v6 && spec.IPv6 != nil && spec.IPv6.Mode != api.IPv6None {
+	if v6 && spec.IPv6 != nil {
 		if p, err := netip.ParsePrefix(spec.IPv6.Subnet); err == nil {
 			if a := ipam.Resolver6(p); a.IsValid() {
 				out = append(out, a)
@@ -152,7 +152,7 @@ func (s *Service) networkDNS(name string, spec api.NetworkSpec) *api.NetworkDNS 
 			d.Advice = gatewayDNSAdvice(name, spec)
 		}
 	}
-	if src == api.DNSNone && spec.IPv4 == nil && spec.IPv6 != nil && spec.IPv6.Mode != api.IPv6None {
+	if src == api.DNSNone && spec.IPv4 == nil && spec.IPv6 != nil {
 		d.Advice = "the jails of the IPv6 only network " + name + " have no resolver: the names of the jails (local-unbound, docs/dns.md) give them one at the network's resolver address; " +
 			"or give the network nameservers of its own (`dns:` in jailops network edit " + name + ")"
 	}

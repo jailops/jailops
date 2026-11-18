@@ -21,7 +21,6 @@ spec:
   release: 15.1-RELEASE
   arch: amd64
   source: {type: pkgbase}
-  aliases: [stable]
 `)
 	h := e.Hosts["h1"]
 	count := func() int {
@@ -58,7 +57,7 @@ spec:
 func TestEveryDeclarativeObjectApplies(t *testing.T) {
 	e := newEnv(t, "all", "h1")
 	e.Write("hosts/h1/storage/bulk.yaml", "apiVersion: jailops/v1\nkind: Storage\nmetadata:\n  name: bulk\nspec:\n  dataset: tank/bulk\n  compression: zstd\n")
-	e.Write("shared/images/base.yaml", "apiVersion: jailops/v1\nkind: Image\nmetadata:\n  name: base\nspec:\n  os: freebsd\n  release: 15.1-RELEASE\n  arch: amd64\n  source: {type: pkgbase}\n  aliases: [stable]\n")
+	e.Write("shared/images/base.yaml", "apiVersion: jailops/v1\nkind: Image\nmetadata:\n  name: base\nspec:\n  os: freebsd\n  release: 15.1-RELEASE\n  arch: amd64\n  source: {type: pkgbase}\n")
 	e.Write("shared/networks/proxy.yaml", `apiVersion: jailops/v1
 kind: Network
 metadata:
@@ -67,7 +66,7 @@ spec:
   uplink: vtnet0
   ipv4: {subnet: 10.94.0.0/24, gateway: 10.94.0.1, range: 10.94.0.2-10.94.0.254, nat: true}
   ipv6:
-    mode: proxy
+    ndp_proxy: true
     subnet: "2001:db8:1:2:100::/80"
     range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ffff"
   dns: [1.1.1.1, 2606:4700:4700::1111]
@@ -79,7 +78,6 @@ metadata:
 spec:
   uplink: vtnet0
   ipv6:
-    mode: routed
     subnet: "2001:db8:abcd:1:1::/80"
     range: "2001:db8:abcd:1:1::10-2001:db8:abcd:1:1::ffff"
 `)
@@ -97,7 +95,7 @@ metadata:
   name: db
   labels: {backup: nightly}
 spec:
-  image: base@stable
+  image: base
   storage: bulk
   network: [{network: proxy, ipv4: auto, ipv6: "2001:db8:1:2:100::80"}]
   resources: {cpu: 2, memory: 4G, pids: 500}
@@ -116,7 +114,7 @@ spec:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n.Spec.IPv6 == nil || n.Spec.IPv6.Mode != api.IPv6Proxy || n.Metadata.ManagedBy != "sync:all" {
+	if n.Spec.IPv6 == nil || !n.Spec.IPv6.NDPProxy || n.Metadata.ManagedBy != "sync:all" {
 		t.Fatalf("%+v", n.Spec.IPv6)
 	}
 	j := getJailIn(t, e, "p", "db")
@@ -139,7 +137,7 @@ func TestAdoptWarnsAboutHostProfiles(t *testing.T) {
 	srv.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "freebsd-15"}, Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
 	srv.SeedProject(api.Project{Metadata: api.ObjectMeta{Name: "legacy"}, Spec: api.ProjectSpec{}})
 	srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "old", Project: "legacy"},
-		Spec: api.JailSpec{Image: "freebsd-15@stable", Storage: "default", Profiles: []string{"small"}}})
+		Spec: api.JailSpec{Image: "freebsd-15", Storage: "default", Profiles: []string{"small"}}})
 	r := mustOK(t, run(t, e, "adopt", "--host", "h1"))
 	contains(t, r.out, "lists the host's profiles [small]")
 }

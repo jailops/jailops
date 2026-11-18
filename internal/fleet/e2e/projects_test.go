@@ -31,7 +31,7 @@ spec:
 func projectFleet(t *testing.T) *fleettest.Env {
 	t.Helper()
 	e := fleettest.New(t, "testfleet", "web1", "web2")
-	e.Write("shared/images/freebsd-15.yaml", "apiVersion: jailops/v1\nkind: Image\nmetadata:\n  name: freebsd-15\nspec:\n  os: freebsd\n  release: 15.0-RELEASE\n  arch: amd64\n  source: {type: pkgbase}\n  aliases: [stable]\n")
+	e.Write("shared/images/freebsd-15.yaml", "apiVersion: jailops/v1\nkind: Image\nmetadata:\n  name: freebsd-15\nspec:\n  os: freebsd\n  release: 15.0-RELEASE\n  arch: amd64\n  source: {type: pkgbase}\n")
 	e.Write("shared/networks/web.yaml", fmt.Sprintf(netYAML, "web", "10.50.0.0/24", "10.50.0.1", "10.50.0.10-10.50.0.200"))
 	e.Write("shared/networks/db.yaml", fmt.Sprintf(netYAML, "db", "10.60.0.0/24", "10.60.0.1", "10.60.0.10-10.60.0.200"))
 	for _, h := range []string{"web1", "web2"} {
@@ -69,7 +69,7 @@ metadata:
   labels: {tier: web}
 hosts: [web1]
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: fast
   profiles: [small]
   resources: {memory: 2G}
@@ -176,7 +176,7 @@ func TestProjectIsDeletedOnlyWhenEmptyAndOwned(t *testing.T) {
 	// A jail nobody owns appears in the project.
 	e.Hosts["web2"].Server.SeedJail(api.Jail{
 		Metadata: api.ObjectMeta{Name: "squatter", Project: "web"},
-		Spec:     api.JailSpec{Image: "freebsd-15@stable", Storage: "fast"},
+		Spec:     api.JailSpec{Image: "freebsd-15", Storage: "fast"},
 	})
 	// The repository drops the project, its policy and its jail.
 	for _, p := range []string{"projects/web.yaml", "projects/web", "profiles/small.yaml"} {
@@ -213,7 +213,7 @@ func TestAdoptCoversProjectsAndStorage(t *testing.T) {
 		Storage:  []api.ProjectStorage{{Storage: "fast"}},
 	}})
 	srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "old", Project: "legacy"},
-		Spec: api.JailSpec{Image: "freebsd-15@stable", Storage: "fast", Layout: api.LayoutThin, Hostname: "old",
+		Spec: api.JailSpec{Image: "freebsd-15", Storage: "fast", Layout: api.LayoutThin, Hostname: "old",
 			Network: []api.NetworkAttach{{Network: "lan", IPv4: "10.9.0.12"}}}})
 
 	r := mustOK(t, run(t, e, "adopt", "--host", "web1", "--claim"))

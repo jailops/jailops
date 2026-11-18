@@ -11,7 +11,7 @@ $ jailops jail list -o yaml
     created_at: "2026-03-01T09:00:00Z"
     updated_at: "2026-03-01T09:00:00Z"
   spec:
-    image: freebsd-15@stable
+    image: freebsd-15
     storage: default
     layout: thin
     hostname: web
@@ -39,7 +39,7 @@ $ jailops jail list -o json
       "updated_at": "2026-03-01T09:00:00Z"
     },
     "spec": {
-      "image": "freebsd-15@stable",
+      "image": "freebsd-15",
       "storage": "default",
       "layout": "thin",
       "hostname": "web",
@@ -80,7 +80,7 @@ $ jailops jail show web
     "updated_at": "2026-03-01T09:00:00Z"
   },
   "spec": {
-    "image": "freebsd-15@stable",
+    "image": "freebsd-15",
     "storage": "default",
     "layout": "thin",
     "hostname": "web",
@@ -108,17 +108,17 @@ Generation:  1
 Age:         3h
 Labels:      env=prod
 
-SPEC                        STATUS
-----                        ------
-image: freebsd-15@stable    power: stopped
-storage: default            generation: g1
+SPEC                    STATUS
+----                    ------
+image: freebsd-15       power: stopped
+storage: default        generation: g1
 layout: thin
 hostname: web
 network:
   - network: lan
     ipv4: 10.20.0.10
 
-$ jailops jail create x --image freebsd-15@stable --network lan --storage default -o json
+$ jailops jail create x --image freebsd-15 --network lan --storage default -o json
 {
   "metadata": {
     "name": "x",
@@ -131,7 +131,7 @@ $ jailops jail create x --image freebsd-15@stable --network lan --storage defaul
     "updated_at": "2026-03-01T09:00:00Z"
   },
   "spec": {
-    "image": "freebsd-15@stable",
+    "image": "freebsd-15",
     "storage": "default",
     "layout": "thin",
     "hostname": "x",

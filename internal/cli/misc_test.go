@@ -107,7 +107,7 @@ func TestUnreachableSocket(t *testing.T) {
 func TestOutputFormats(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--label", "env=prod")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--label", "env=prod")
 	tr := h.transcript()
 	tr.ok("jail", "list", "-o", "yaml")
 	tr.ok("jail", "list", "-o", "json")
@@ -120,7 +120,7 @@ func TestOutputFormats(t *testing.T) {
 	}
 	tr.ok("jail", "show", "web", "-o", "table") // the flag wins over the environment
 	h.env["JAILOPS_OUTPUT"] = ""
-	tr.ok("jail", "create", "x", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "-o", "json")
+	tr.ok("jail", "create", "x", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "-o", "json")
 	tr.ok("jail", "delete", "--confirm-data-loss", "x", "-o", "json")
 	tr.ok("jail", "start", "web", "-o", "name")
 	tr.golden("output_formats")
@@ -131,8 +131,8 @@ var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[A-Za-z]`)
 func TestColourOnlyOnTTY(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
-	h.run("", "jail", "create", "db", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.run("", "jail", "start", "web")
 	plain, _, _ := h.run("", "jail", "list")
 	if ansiRe.MatchString(plain) {
@@ -177,17 +177,17 @@ func TestProgressLine(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	h.srv.SetOperationDelay(700 * time.Millisecond)
-	_, errs, code := h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	_, errs, code := h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	if code != 0 || strings.Contains(errs, "\r") {
 		t.Fatalf("progress without a terminal: %d %q", code, errs)
 	}
 	h.tty = true
-	_, errs, code = h.run("", "jail", "create", "web2", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	_, errs, code = h.run("", "jail", "create", "web2", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	if code != 0 || !strings.Contains(errs, "\r\x1b[K") || !strings.Contains(errs, "Creating jail web2") || !strings.HasSuffix(errs, "\r\x1b[K") {
 		t.Fatalf("progress line: %d %q", code, errs)
 	}
 	// --no-wait prints no progress even on a terminal.
-	_, errs, _ = h.run("", "jail", "create", "web3", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--no-wait")
+	_, errs, _ = h.run("", "jail", "create", "web3", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--no-wait")
 	if errs != "" {
 		t.Fatalf("progress with --no-wait: %q", errs)
 	}
@@ -212,8 +212,8 @@ func TestExplainCommand(t *testing.T) {
 func TestCompletion(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
-	h.run("", "jail", "create", "db", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "db", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	for shell, marker := range map[string]string{"bash": "__start_jailops", "zsh": "#compdef jailops", "fish": "complete -c jailops"} {
 		out, errs, code := h.run("", "completion", shell)
 		if code != 0 || !strings.Contains(out, marker) || errs != "" {
@@ -417,7 +417,7 @@ func TestRemoteCommands(t *testing.T) {
 func TestEventStreamEndsOnInterrupt(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	for _, args := range [][]string{{"events"}, {"jail", "logs", "web", "--events"}} {
 		for h.srv.EventStreams() != 0 { // the previous stream is still closing
 			time.Sleep(5 * time.Millisecond)

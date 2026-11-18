@@ -15,11 +15,11 @@ func TestRuleCompletion(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	h.srv.SeedImage(api.Image{Metadata: api.ObjectMeta{Name: "freebsd-151"},
-		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}, Aliases: []string{"stable"}}})
+		Spec: api.ImageSpec{OS: api.OSFreeBSD, Release: "15.1-RELEASE", Arch: "amd64", Source: api.ImageSource{Type: "pkgbase"}}})
 	h.srv.SeedGeneration("freebsd-151")
 	for _, args := range [][]string{
-		{"app", "install", "postgresql", "db", "--image", "freebsd-151@stable"},
-		{"app", "install", "nginx", "web", "--image", "freebsd-151@stable"},
+		{"app", "install", "postgresql", "db", "--image", "freebsd-151"},
+		{"app", "install", "nginx", "web", "--image", "freebsd-151"},
 		{"firewall", "address-set", "create", "office", "--address", "198.51.100.0/24"},
 		{"firewall", "address-set", "create", "vpn", "--address", "203.0.113.0/24"},
 		{"firewall", "policy", "create", "p"},

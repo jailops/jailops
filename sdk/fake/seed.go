@@ -42,7 +42,6 @@ func (s *Server) SeedGeneration(image string) api.ImageGeneration {
 	g := &api.ImageGeneration{Number: n, Name: image + "#g" + itoa(n), Manifest: "sha256:" + randHex(16), CreatedAt: s.now()}
 	s.gens[image] = append(s.gens[image], g)
 	s.genMax[image] = n
-	s.followAliases(image, n)
 	return *g
 }
 

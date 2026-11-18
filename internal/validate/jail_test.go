@@ -7,7 +7,7 @@ import (
 )
 
 func TestUpdatePolicyShellAndProvisionValidation(t *testing.T) {
-	base := func() api.JailSpec { return api.JailSpec{Image: "fb@stable"} }
+	base := func() api.JailSpec { return api.JailSpec{Image: "fb"} }
 	ok := base()
 	ok.Update = api.UpdatePolicy{Mode: api.UpdateModeManaged, Schedule: "0 3 * * 0", Packages: true, Reboot: api.RebootAuto}
 	ok.Shell = "/usr/local/bin/bash"

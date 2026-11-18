@@ -42,7 +42,7 @@ hosts: [web1]
 metadata:
   name: app
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   network: [{network: internal}]
   firewall: {policies: [web]}

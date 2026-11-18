@@ -51,7 +51,7 @@ func (l *Local) SetMTU(ctx context.Context, iface string, mtu int) error {
 
 // checkNDPRoute accepts only a global unicast IPv6 address (unique-local
 // included): a /128 host route for an address JailOps answers neighbor
-// discovery for in proxy mode.
+// discovery for with the NDP proxy of a network.
 func checkNDPRoute(addr netip.Addr) error {
 	switch {
 	case !addr.IsValid() || !addr.Is6() || addr.Is4In6() || addr.Zone() != "":
@@ -95,7 +95,7 @@ func (l *Local) ndpRoute(addr netip.Addr, iface string) (ifconfig.Route, error) 
 }
 
 // checkRejectRoute accepts a reject route only for the subnet of a network JailOps has stored (its IPv4 subnet, or the
-// IPv6 prefix of a network in routed mode): the helper never makes a route that answers with an error for any other
+// IPv6 prefix of a network): the helper never makes a route that answers with an error for any other
 // prefix, which would cut the host off from it.
 func (l *Local) checkRejectRoute(ctx context.Context, r ifconfig.Route) error {
 	p, err := netip.ParsePrefix(r.Dest)
@@ -124,7 +124,7 @@ func (l *Local) checkRejectRoute(ctx context.Context, r ifconfig.Route) error {
 				return nil
 			}
 		}
-		if v6 := d.Spec.IPv6; v6 != nil && (v6.Mode == api.IPv6Routed || v6.Mode == api.IPv6Proxy) {
+		if v6 := d.Spec.IPv6; v6 != nil {
 			if q, err := netip.ParsePrefix(v6.Subnet); err == nil && q.Masked() == p.Masked() {
 				return nil
 			}
@@ -181,7 +181,7 @@ func (l *Local) checkStoredNetworkAddr(a netip.Addr, what string) error {
 }
 
 // checkNDPAddress accepts the /128 route of the NDP proxy only for the address of a jail: inside the prefix of a stored
-// network in proxy mode that the proxy approves (ndpPrefixes), not the prefix's own subnet-router anycast address, not
+// network with the NDP proxy that the proxy approves (ndpPrefixes), not the prefix's own subnet-router anycast address, not
 // the address of the uplink's IPv6 default router and not one that the uplink's neighbor cache holds: the proxy
 // answers neighbor discovery for what it has a route for, so a route for the router's address would put the host
 // between the router and every host on the segment.
@@ -192,7 +192,7 @@ func (l *Local) checkNDPAddress(ctx context.Context, addr netip.Addr) error {
 	}
 	for _, n := range nets {
 		v6 := n.Spec.IPv6
-		if v6 == nil || v6.Mode != api.IPv6Proxy {
+		if v6 == nil || !v6.NDPProxy {
 			continue
 		}
 		p, err := netip.ParsePrefix(v6.Subnet)
@@ -214,7 +214,7 @@ func (l *Local) checkNDPAddress(ctx context.Context, addr netip.Addr) error {
 		}
 		return nil
 	}
-	return forbidden("%s is not inside the prefix of a network in IPv6 proxy mode", addr)
+	return forbidden("%s is not inside the prefix of a network with the NDP proxy", addr)
 }
 
 // neighborOnUplink reports whether addr is the IPv6 default router of the host or an entry of the neighbor cache on the

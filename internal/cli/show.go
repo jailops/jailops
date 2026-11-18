@@ -200,14 +200,14 @@ func (a *app) showNetwork(n api.Network) error {
 	} else {
 		s.kv("IPv4", "none")
 	}
-	if v6 := n.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
-		s.kv("IPv6", fmt.Sprintf("%s (%s), gateway fe80::1", v6.Subnet, v6.Mode))
+	if v6 := n.Spec.IPv6; v6 != nil {
+		s.kv("IPv6", fmt.Sprintf("%s, gateway fe80::1", v6.Subnet))
 		rng := v6.Range
 		if len(v6.Exclude) > 0 {
 			rng += " (except " + strings.Join(v6.Exclude, ", ") + ")"
 		}
 		s.kv("IPv6 range", rng)
-		if v6.Mode == api.IPv6Proxy {
+		if v6.NDPProxy {
 			state := "enabled"
 			for _, c := range n.Status.Conditions {
 				if c.Type == "NDPProxy" {
@@ -267,15 +267,6 @@ func (a *app) showImage(i api.Image) error {
 		src += ", sets " + strings.Join(i.Spec.Source.Sets, ", ")
 	}
 	s.kv("Source", src)
-	var aliases []string
-	for _, al := range i.Spec.Aliases {
-		if g, ok := i.Status.Aliases[al]; ok {
-			aliases = append(aliases, fmt.Sprintf("%s -> g%d", al, g))
-		} else {
-			aliases = append(aliases, al+" (no generation yet)")
-		}
-	}
-	s.kv("Aliases", orText(strings.Join(aliases, ", "), "none"))
 	var keep []string
 	if r := i.Spec.Retention; r.KeepLast > 0 {
 		keep = append(keep, "the last "+strconv.Itoa(r.KeepLast))

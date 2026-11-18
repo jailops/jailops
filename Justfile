@@ -117,7 +117,11 @@ check-ts:
 lint-e2e:
     sh scripts/lint-e2e.sh
 
-check: fmt check-ts lint-e2e test
+# Prose has no history, test diary or filler (scripts/lint-prose.sh).
+lint-prose:
+    sh scripts/lint-prose.sh
+
+check: fmt check-ts lint-e2e lint-prose test
 
 # Everything CI runs.
 ci: fmt test build-freebsd

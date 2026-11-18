@@ -116,10 +116,10 @@ func TestDoctorWarnsWhenForwardingIsNotPersistent(t *testing.T) {
 	}
 }
 
-// proxyNet is a network in IPv6 proxy mode (a shared switched segment behind em0).
+// proxyNet is a network with the NDP proxy (a shared switched segment behind em0).
 func proxyNet() api.Network {
 	return api.Network{Metadata: api.ObjectMeta{Name: "sw"}, Spec: api.NetworkSpec{Uplink: "em0",
-		IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"}}}
+		IPv6: &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2:100::/80", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"}}}
 }
 
 func doctorCheck(t *testing.T, e *dtest.Env, name string) api.DoctorCheck {
@@ -138,7 +138,7 @@ func doctorCheck(t *testing.T, e *dtest.Env, name string) api.DoctorCheck {
 }
 
 // The routers of some shared IPv6 segments probe the host from off-link addresses; FreeBSD drops the probes unless
-// net.inet6.icmp6.nd6_onlink_ns_rfc4861 is 1. The doctor informs about it once a proxy-mode network exists (never a
+// net.inet6.icmp6.nd6_onlink_ns_rfc4861 is 1. The doctor informs about it once a network with the NDP proxy exists (never a
 // warning, and not part of the persistence check); JailOps never sets it.
 func TestDoctorChecksOnlinkNSForProxyNetworks(t *testing.T) {
 	const oid = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
@@ -169,7 +169,7 @@ func TestDoctorChecksOnlinkNSForProxyNetworks(t *testing.T) {
 	}
 }
 
-// Creating a proxy-mode network on a host whose sysctl is 0 carries a note in the answer, never a warning; a routed
+// Creating a network with the NDP proxy on a host whose sysctl is 0 carries a note in the answer, never a warning; a routed
 // network and a host with the sysctl on say nothing.
 func TestCreatingAProxyNetworkNotesOnlinkNS(t *testing.T) {
 	const oid = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
@@ -190,7 +190,7 @@ func TestCreatingAProxyNetworkNotesOnlinkNS(t *testing.T) {
 		t.Fatalf("%v %+v", err, got.Status.Notes)
 	}
 	routed := api.Network{Metadata: api.ObjectMeta{Name: "rt"}, Spec: api.NetworkSpec{
-		IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: "2001:db8:9:1::/80", Range: "2001:db8:9:1::10-2001:db8:9:1::ff"}}}
+		IPv6: &api.IPv6Net{Subnet: "2001:db8:9:1::/80", Range: "2001:db8:9:1::10-2001:db8:9:1::ff"}}}
 	if n, err := e.Admin.Networks().Create(ctx, routed); err != nil || len(n.Status.Notes) != 0 {
 		t.Fatalf("%v %+v", err, n.Status.Notes)
 	}

@@ -1,4 +1,4 @@
-$ jailops create web --image freebsd-15@stable --network lan --storage default --shell sh --prompt none
+$ jailops create web --image freebsd-15 --network lan --storage default --shell sh --prompt none
 jail/web created
 
 $ jailops config get web shell
@@ -7,7 +7,7 @@ $ jailops config get web shell
 $ jailops config get web prompt
 none
 
-$ jailops create bad --image freebsd-15@stable --network lan --storage default --prompt $(id)
+$ jailops create bad --image freebsd-15 --network lan --storage default --prompt $(id)
 ! usage: --prompt: the prompt may contain $ only as \$ (# for root, $ for everyone else): variables and commands in the prompt are not accepted
 ! hint: run 'jailops create --help' for usage
 [exit 2]

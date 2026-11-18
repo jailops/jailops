@@ -14,7 +14,7 @@ type Network struct {
 type NetworkSpec struct {
 	// Comment is what the object is for: one line of free text.
 	Comment string `json:"comment,omitempty"`
-	// Uplink is the physical interface used for NAT or routing. In IPv6 proxy mode it must be a plain interface (not a
+	// Uplink is the physical interface used for NAT or routing. With the NDP proxy it must be a plain interface (not a
 	// member of a bridge).
 	Uplink string   `json:"uplink,omitempty"`
 	IPv4   *IPv4Net `json:"ipv4,omitempty"`
@@ -39,26 +39,16 @@ type IPv4Net struct {
 	NAT bool `json:"nat,omitempty"`
 }
 
-// IPv6Mode selects how jail addresses reach the upstream network.
-type IPv6Mode string
-
-const (
-	// IPv6Routed: the upstream routes a prefix to the host. Unallocated addresses of the prefix are rejected, and no
-	// NDP proxy is involved.
-	IPv6Routed IPv6Mode = "routed"
-	// IPv6Proxy: the upstream treats the jail addresses as on-link. The host answers neighbor solicitations on the
-	// uplink for the allocation range of the network, whether a jail runs or not, and routes the address of each
-	// running jail to it with a /128 host route.
-	IPv6Proxy IPv6Mode = "proxy"
-	IPv6None  IPv6Mode = "none"
-)
-
 // IPv6Net configures IPv6 on a network.
 type IPv6Net struct {
-	Mode    IPv6Mode `json:"mode"`
 	Subnet  string   `json:"subnet"`
 	Range   string   `json:"range"`
 	Exclude []string `json:"exclude,omitempty"`
+	// NDPProxy makes the host answer neighbor solicitations on the uplink for the allocation range of the network,
+	// whether a jail runs or not, and route the address of each running jail to it with a /128 host route. Switch it
+	// on when the provider puts the prefix on a shared segment with the host; leave it off when the provider routes
+	// the prefix to the host (unallocated addresses of the prefix are then rejected).
+	NDPProxy bool `json:"ndp_proxy,omitempty"`
 }
 
 // NetworkStatus is the observed state of a network on one host.

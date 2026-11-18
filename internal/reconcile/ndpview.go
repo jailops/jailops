@@ -14,7 +14,7 @@ type ndpEvents interface {
 	EventsAfter(after uint64) ([]ndproxy.Event, uint64)
 }
 
-// ndpPrefixer is the part of a proxy that takes the prefixes of the proxy-mode networks, to count the solicitations
+// ndpPrefixer is the part of a proxy that takes the prefixes of the networks with the NDP proxy, to count the solicitations
 // for addresses that are not held.
 type ndpPrefixer interface {
 	SetPrefixes(prefixes []netip.Prefix)

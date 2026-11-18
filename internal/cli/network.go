@@ -18,7 +18,6 @@ func networkDesc() *kindDesc[api.Network] {
 		func(n *api.Network) *api.NetworkSpec { return &n.Spec })
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.Network] { return c.Networks().Resource })
 	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.Network] { return c.Networks().Resource })
-	d.createOnly = []string{"ipv6-mode"}
 	d.renameLong = renameLong("network", `the projects it is granted to, the jails attached to it (running
 ones too: nothing of their traffic changes), the profiles and WireGuard tunnels that name it, its firewall
 anchor and the descriptions of its interfaces`)
@@ -40,8 +39,8 @@ anchor and the descriptions of its interfaces`)
 			if a := n.Spec.IPv4; a != nil {
 				v4 = a.Subnet + "\n" + a.Range
 			}
-			if a := n.Spec.IPv6; a != nil && a.Mode != api.IPv6None {
-				v6 = a.Subnet + " (" + string(a.Mode) + ")\n" + a.Range
+			if a := n.Spec.IPv6; a != nil {
+				v6 = a.Subnet + ndpMark(a) + "\n" + a.Range
 			}
 			return []string{n.Metadata.Name, v4, v6, fmt.Sprint(n.Status.Allocated), fmt.Sprint(n.Status.Free), dash(n.Spec.Uplink)}
 		},
@@ -93,14 +92,15 @@ jailops network list
 jailops network leases lan`, "networks", "net")
 	crudCommands(a, nc, d, `Create a network. IPv4 is described by --subnet, --gateway and --range; the
 gateway is an address of the host inside the subnet, which every jail of the network finds on its own link. IPv6 is
---ipv6 PREFIX (the jails' default gateway is the link-local fe80::1 on every link); --ipv6-mode proxy is for a prefix
-on a shared segment (switched), routed is for a prefix the provider routes to you. A jail's addresses are /32 and
-/128 host routes: nothing in the subnet that no jail has is reachable.`,
+--ipv6 PREFIX (the jails' default gateway is the link-local fe80::1 on every link). When the provider puts the
+prefix on a shared segment with the host instead of routing it to you, switch the NDP proxy on after the create
+(jailops network ndp-proxy enable NETWORK). A jail's addresses are /32 and /128 host routes: nothing in the subnet
+that no jail has is reachable.`,
 		`jailops network create lan --ipv4 10.77.0.1/24 --uplink em0 --nat
 jailops network create lan --subnet 10.20.0.0/24 --gateway 10.20.0.1 --range 10.20.0.10-10.20.0.250 --nat --uplink em0
 jailops network create -f lan.yaml`,
 		func(cmd *cobra.Command) func(string) (api.Network, error) {
-			var uplink, subnet, gw, rng, v4cidr, v6cidr, v6mode, v6range, comment string
+			var uplink, subnet, gw, rng, v4cidr, v6cidr, v6range, comment string
 			var exclude, dns []string
 			var nat bool
 			var mtu int
@@ -108,9 +108,8 @@ jailops network create -f lan.yaml`,
 			f.StringVar(&comment, "comment", "", "what the network is for")
 			f.StringVar(&uplink, "uplink", "", "physical interface used for NAT or routing")
 			f.StringVar(&v4cidr, "ipv4", "", "IPv4 gateway address and prefix, for example 10.50.0.1/24; the rest of the subnet becomes the range")
-			f.StringVar(&v6cidr, "ipv6", "", "IPv6 prefix, for example fd50::/64; with --ipv6-mode proxy, the prefix your provider put on the shared segment, for example 2001:db8:1:2:100::/80")
-			f.StringVar(&v6mode, "ipv6-mode", "routed", "routed: the provider routes the prefix to this host; proxy: the prefix sits on a shared segment and the host answers neighbor discovery for the range (switch an existing network with 'jailops network ndp-proxy enable|disable')")
-			f.StringVar(&v6range, "ipv6-range", "", "allocation range a-b of the IPv6 prefix (default: the first 240 addresses after the low ones); a network in proxy mode answers for the first 1024 addresses of it")
+			f.StringVar(&v6cidr, "ipv6", "", "IPv6 prefix, for example fd50::/64 or the prefix your provider put on the shared segment, for example 2001:db8:1:2:100::/80")
+			f.StringVar(&v6range, "ipv6-range", "", "allocation range a-b of the IPv6 prefix; the NDP proxy of the network answers for the first 1024 addresses of it")
 			f.StringVar(&subnet, "subnet", "", "IPv4 subnet, for example 10.20.0.0/24 (required without -f)")
 			f.StringVar(&gw, "gateway", "", "IPv4 gateway address (an address of the host inside the subnet)")
 			f.StringVar(&rng, "range", "", "allocation range a-b")
@@ -118,7 +117,6 @@ jailops network create -f lan.yaml`,
 			f.BoolVar(&nat, "nat", false, "masquerade traffic leaving through the uplink")
 			f.StringArrayVar(&dns, "dns", nil, "DNS server handed to jails (repeatable)")
 			f.IntVar(&mtu, "mtu", 0, "MTU of the jails' interfaces")
-			enumFlag(cmd, "ipv6-mode", "routed", "proxy")
 			return func(name string) (api.Network, error) {
 				spec := api.NetworkSpec{Comment: comment, Uplink: uplink, DNS: dns, MTU: mtu}
 				switch {
@@ -138,23 +136,11 @@ jailops network create -f lan.yaml`,
 					spec.IPv4 = &api.IPv4Net{Subnet: subnet, Gateway: gw, Range: rng, Exclude: exclude, NAT: nat}
 				}
 				if v6cidr != "" {
-					var v6 *api.IPv6Net
-					var err error
-					switch v6mode {
-					case "routed":
-						v6, err = cidr6Network(v6cidr)
-					case "proxy":
-						v6, err = cidr6Proxy(v6cidr)
-					default:
-						err = usagef("--ipv6-mode %q must be routed or proxy", v6mode)
-					}
+					v6, err := cidr6Network(v6cidr)
 					if err != nil {
 						return api.Network{}, err
 					}
 					spec.IPv6 = v6
-				}
-				if v6cidr == "" && cmd.Flags().Changed("ipv6-mode") {
-					return api.Network{}, usagef("--ipv6-mode needs --ipv6")
 				}
 				if v6range != "" {
 					switch {

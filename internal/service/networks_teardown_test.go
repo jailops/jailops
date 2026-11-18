@@ -46,7 +46,7 @@ func TestDeletingANetworkFlushesItsAnchorWithoutNAT(t *testing.T) {
 
 func TestDoctorReportsAProxyNetworkThatIsNotAnswering(t *testing.T) {
 	s := newSvc(t)
-	spec := api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80"}}
+	spec := api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2:100::/80"}}
 	if _, err := s.netKind.create(bg, api.ObjectMeta{Name: "sw"}, spec); err != nil {
 		t.Fatalf("cannot create the network: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestNetworksWithOverlappingSubnetsAreRefused(t *testing.T) {
 		return api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: subnet, Gateway: gw, Range: rng}}
 	}
 	v6 := func(subnet, _, rng string) api.NetworkSpec {
-		return api.NetworkSpec{IPv6: &api.IPv6Net{Mode: api.IPv6Routed, Subnet: subnet, Range: rng}}
+		return api.NetworkSpec{IPv6: &api.IPv6Net{Subnet: subnet, Range: rng}}
 	}
 	base := []api.NetworkSpec{
 		v4("10.20.0.0/24", "10.20.0.1", "10.20.0.2-10.20.0.9"),
@@ -185,7 +185,7 @@ func TestALinuxImageBuildAssertsTheLinuxModules(t *testing.T) {
 // A proxy that answers but dropped solicitations over its limits in the last hour is a warning that names the count.
 func TestDoctorWarnsWhenTheProxyDroppedSolicitations(t *testing.T) {
 	s := newSvc(t)
-	spec := api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80"}}
+	spec := api.NetworkSpec{Uplink: "vtnet0", IPv6: &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2:100::/80"}}
 	if _, err := s.netKind.create(bg, api.ObjectMeta{Name: "sw"}, spec); err != nil {
 		t.Fatalf("cannot create the network: %v", err)
 	}

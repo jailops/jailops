@@ -357,7 +357,6 @@ func configKeyOf(key string) (api.ConfigKey, bool) {
 var freeTextFlags = map[string]string{
 	"action":                           "an audit action is matched as typed",
 	"address":                          "an address or an endpoint the operator types",
-	"alias":                            "the name of a new alias",
 	"member":                           "an address or a prefix the operator types",
 	"allow-from":                       "a network in CIDR form",
 	"allowed-ips":                      "networks in CIDR form",

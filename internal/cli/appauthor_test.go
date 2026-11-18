@@ -74,12 +74,12 @@ func TestAppNew(t *testing.T) {
 func TestAppExport(t *testing.T) {
 	h := newHarness(t)
 	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "cache", Project: "main"},
-		Spec:   api.JailSpec{Image: "freebsd-15@stable", Volumes: []api.VolumeAttach{{Name: "var-db-memcached", Mount: "/var/db/memcached"}}},
+		Spec:   api.JailSpec{Image: "freebsd-15", Volumes: []api.VolumeAttach{{Name: "var-db-memcached", Mount: "/var/db/memcached"}}},
 		Status: api.JailStatus{Power: api.PowerRunning, Generation: "g1"}})
 	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "plain", Project: "main"},
-		Spec:   api.JailSpec{Image: "freebsd-15@stable", Volumes: []api.VolumeAttach{{Name: "srv", Mount: "/var/db/plain"}}},
+		Spec:   api.JailSpec{Image: "freebsd-15", Volumes: []api.VolumeAttach{{Name: "srv", Mount: "/var/db/plain"}}},
 		Status: api.JailStatus{Power: api.PowerRunning, Generation: "g1"}})
-	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "off", Project: "main"}, Spec: api.JailSpec{Image: "freebsd-15@stable"}})
+	h.srv.SeedJail(api.Jail{Metadata: api.ObjectMeta{Name: "off", Project: "main"}, Spec: api.JailSpec{Image: "freebsd-15"}})
 	// what the daemon would answer for a jail that runs memcached (internal/apps builds it from the jail's answers)
 	h.srv.SeedAppDraft("main", "cache", apps.BuildDraft(apps.DraftFacts{
 		Jail:     "cache",

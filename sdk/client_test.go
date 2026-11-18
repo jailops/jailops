@@ -520,10 +520,6 @@ func TestImagesBackupsAndAccess(t *testing.T) {
 	if n != 2 {
 		t.Fatal(n)
 	}
-	img, _ := c.Images().Get(ctx, "freebsd-15")
-	if img.Status.Aliases["stable"] != 2 {
-		t.Fatalf("%+v", img.Status)
-	}
 	mustJail(t, c, "web", webSpec())
 	if err := c.Images().Delete(ctx, "freebsd-15"); !api.IsCode(err, api.CodeImageInUse) {
 		t.Fatal(err)

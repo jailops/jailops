@@ -36,7 +36,7 @@ type Config struct {
 	// again while the host stays up (a restart, a package upgrade) starts no jails: an operator may have stopped
 	// them on purpose. Empty: every daemon start is a boot.
 	BootStateFile string
-	// NDP builds the neighbor discovery proxies of networks in IPv6 proxy mode; without it those networks report
+	// NDP builds the neighbor discovery proxies of networks with the NDP proxy; without it those networks report
 	// that no proxy is available.
 	NDP NDPFactory
 }

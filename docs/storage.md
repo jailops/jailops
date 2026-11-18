@@ -300,6 +300,36 @@ The example is a backup server in a jail that writes to a storage box the host h
 `jailops volume edit` changes the watch (a global administrator), the comment and the labels; the path is fixed, so make a
 new volume for another directory.
 
+## What is unique in a jail
+
+A thin jail is a clone of an image generation plus its persistent datasets (`etc`, `local`, `var-db`, `var-log`,
+`var-mail`, `var-spool`, `home`, `rootdir`). `jailops jail diff NAME` lists what the jail holds that the image does not:
+
+    $ jailops jail diff web
+    root /: since freebsd-15-1#g3
+      M /boot/loader.conf
+    etc /etc: since the jail was made
+      M /etc/rc.conf
+    local /usr/local: since the jail was made
+      + /usr/local/etc/web.conf
+    total: 3 changes (1 added, 2 modified)
+
+Each line is `+` added, `M` changed, `-` removed or `R old -> new`, under the dataset it belongs to. The root is compared
+with the `@ro` snapshot of the generation it was cloned from, a persistent dataset with the snapshot `jailops-base` taken
+right after the image's directory was copied into it. That snapshot is on the persistent dataset only: it does not show in
+`jailops jail snapshot list`, and a rollback or the retention of snapshots never touches it. A jail made before the snapshot
+existed is compared file by file with the same directory of the image instead (kind, mode, size and time; renames show as
+`-` and `+`), and the output says "compared with the image, not with a snapshot". `--summary` prints the counts, `--limit N`
+lists N lines per dataset (200 by default; the counts always cover all of them), `--dataset etc` keeps one dataset and
+`--packages` adds the packages installed on purpose, which needs a running jail. `-o json` prints the reply. The web console shows the same lists in the Changes tab of a jail.
+
+A jail that was just made holds nothing: the diff is empty until it runs. A running jail lists what the system writes
+(`/var/run`, `/tmp` in the root, the logs in `var-log`, the package database in `var-db`) and the files JailOps writes at
+a start (`/etc/resolv.conf`, the shell files in `/usr/local/etc`). A new generation changes the root and, through the `/etc`
+and `/var/db` merge of an upgrade, those two datasets: what the merge brought in shows as a change. A jail with a full copy of its
+image (a thick or Linux jail) has no snapshot of the image to compare with, and a jail with a locked encrypted volume is
+refused until it is unlocked. Reading needs the operator role for the project.
+
 ## What is backed up
 
 A JailOps backup of a jail contains its spec and restore bundle and its persistent datasets, read from an atomic snapshot.

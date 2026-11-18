@@ -75,6 +75,7 @@ type Store struct {
 	names      map[api.Kind]map[string]string  // kind -> scope/name -> uuid
 	recoveries []Recovery
 	forwards   []MigratedForward
+	imageRefs  []MigratedImageRef
 
 	committer Committer
 	watchers  watchers
@@ -222,7 +223,7 @@ func (s *Store) loadOne(kind api.Kind, path string) (*Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		o, migrated, forwards, err := decodeObjectForwards(data, s.opts.Migrations)
+		o, migrated, forwards, imageRefs, err := decodeObjectForwards(data, s.opts.Migrations)
 		if err != nil {
 			return nil, err
 		}
@@ -235,6 +236,7 @@ func (s *Store) loadOne(kind api.Kind, path string) (*Object, error) {
 		if migrated {
 			s.mu.Lock()
 			s.forwards = append(s.forwards, forwards...)
+			s.imageRefs = append(s.imageRefs, imageRefs...)
 			var kerr error
 			if len(forwards) > 0 {
 				kerr = s.keepForwards() // before the document loses them

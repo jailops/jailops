@@ -3,7 +3,6 @@ package priv
 import (
 	"net/netip"
 	"path/filepath"
-	"slices"
 	"strings"
 	"time"
 
@@ -134,8 +133,6 @@ type Config struct {
 	// jailops:managed=on locally; a root that fails this is listed as
 	// inactive and allows nothing.
 	StorageRoots []string
-	// RootDataset is deprecated: it is added to StorageRoots.
-	RootDataset string
 	// StorageFile persists the roots registered at run time (default
 	// DefaultStorageFile). It is root-owned, mode 0600, and reread on SIGHUP.
 	StorageFile string
@@ -217,10 +214,6 @@ func (c Config) Normalize() (Config, error) {
 		c.HelperPath = DefaultHelperPath
 	}
 	c.StorageRoots = append([]string(nil), c.StorageRoots...)
-	if c.RootDataset != "" && !slices.Contains(c.StorageRoots, c.RootDataset) {
-		c.StorageRoots = append(c.StorageRoots, c.RootDataset)
-	}
-	c.RootDataset = ""
 	for _, r := range c.StorageRoots {
 		if err := c.checkRootName(r); err != nil {
 			return c, err

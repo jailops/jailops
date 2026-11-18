@@ -75,7 +75,7 @@ describe('editing a network keeps what the form does not show', () => {
       status: {},
     }
     const f = formOf(n)
-    expect(f).toMatchObject({ name: 'lan', uplink: 'em0', v4: true, nat: true, mode: 'none' })
+    expect(f).toMatchObject({ name: 'lan', uplink: 'em0', v4: true, nat: true, v6: false, ndp: false })
     f.v4range = '10.20.0.10-10.20.0.90'
     const b = netBody(f, n)
     expect(b.metadata).toEqual(n.metadata)

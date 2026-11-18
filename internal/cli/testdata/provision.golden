@@ -8,10 +8,10 @@ Generation:  1
 Age:         3h
 Provisioned: no (run 'jailops provision web')
 
-SPEC                        STATUS
-----                        ------
-image: freebsd-15@stable    power: stopped
-storage: default            generation: g1
+SPEC                    STATUS
+----                    ------
+image: freebsd-15       power: stopped
+storage: default        generation: g1
 layout: thin
 hostname: web
 network:
@@ -51,15 +51,15 @@ Generation:  1
 Age:         3h
 Provisioned: 3h ago
 
-SPEC                        STATUS
-----                        ------
-image: freebsd-15@stable    power: running
-storage: default            jid: 1
-layout: thin                generation: g1
-hostname: web               addresses:
-network:                      - 10.20.0.10
-  - network: lan            started_at: "2026-03-01T09:00:00Z"
-    ipv4: 10.20.0.10        provisioned_at: "2026-03-01T09:00:00Z"
+SPEC                    STATUS
+----                    ------
+image: freebsd-15       power: running
+storage: default        jid: 1
+layout: thin            generation: g1
+hostname: web           addresses:
+network:                  - 10.20.0.10
+  - network: lan        started_at: "2026-03-01T09:00:00Z"
+    ipv4: 10.20.0.10    provisioned_at: "2026-03-01T09:00:00Z"
 provision:
   packages:
     - nginx

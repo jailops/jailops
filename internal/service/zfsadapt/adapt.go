@@ -261,3 +261,8 @@ func (a *Adapter) Holds(ctx context.Context, snapshot string) ([]string, error) 
 	}
 	return out, nil
 }
+
+// Diff lists what changed in a dataset since a snapshot of it or of the dataset it was cloned from.
+func (a *Adapter) Diff(ctx context.Context, from, to string, limit int, skip []string) (zfs.DiffResult, error) {
+	return a.C.Diff(ctx, from, to, limit, skip)
+}

@@ -42,7 +42,7 @@ Every declarative object a user can create with the CLI has a file kind. Nothing
 | `jailops network create` | `shared/networks/*.yaml` (or `hosts/<h>/networks/`) | every field of the API: IPv4, IPv6 `routed`, `proxy` and `none`, uplink, `private`, DNS, MTU, exclusions. See below for the CLI flags |
 | `jailops wireguard create --mode server`, `peer add` | `hosts/<host>/wireguard/*.yaml` (WireGuard) | servers only, public parts only; see "WireGuard" below |
 | `jailops storage create` | `hosts/<host>/storage/*.yaml` (Storage) | a dataset on any pool, a big HDD pool included; `compression`. Datasets may not be equal or nested |
-| `jailops image create`, `image build` | `shared/images/*.yaml` (Image) | `aliases` are in the spec. `build: true` builds the **first** generation when the host has none (a fresh host has none and a jail cannot be created from an image without one). Later generations are an operation, not a declaration: `jailops image build`, or a rollout |
+| `jailops image create`, `image build` | `shared/images/*.yaml` (Image) | `build: true` builds the **first** generation when the host has none (a fresh host has none and a jail cannot be created from an image without one). Later generations are an operation, not a declaration: `jailops image build`, or a rollout |
 | `jailops create` | `projects/<p>/jails/*.yaml` (Jail) | the whole spec: network and storage (explicit), `volumes`, `expose`, `devfs`, `resources`, `boot`, `update` schedule, `firewall` (`policies`, a list, and `tags`), `env` with `secret:` references, `provision`, `labels`. `start: true` and `after:` hooks (start, restart, snapshot, exec) run once, after creation |
 | `jailops firewall policy/address-set create` | `projects/<p>/firewall-policies/`, `address-sets/` | the project's mandatory policies are set in a second write once the policies exist |
 | `jailops backup target create` | `shared/backup-targets/*.yaml` (BackupTarget) | `kind: node` needs `address` and a pinned `fingerprint` |
@@ -60,16 +60,16 @@ the proxy gateway and uplink, reserved fields (`encrypted`, `packages`), that a 
 with `jailops volume create --encrypted` ([storage.md](storage.md#encrypted-volumes)); a jail of the repository can then
 attach it, and `validate` warns that a volume a jail names is not declared.
 
-**IPv6, CLI flags and YAML.** `--ipv6-mode routed` and `--ipv6-mode proxy` fill in what a file spells out:
+**IPv6, CLI flags and YAML.** `--ipv6` and `network ndp-proxy enable` fill in what a file spells out:
 
 | CLI | YAML (`spec.ipv6`) |
 |---|---|
-| `--ipv6 2001:db8:1:2:1::1/80` (routed) | `mode: routed`, `subnet: 2001:db8:1:2:1::/80`, `gateway: 2001:db8:1:2:1::1`, `range: <first>-<last>` |
-| `--ipv6 2001:db8:1:2:100::/80 --ipv6-mode proxy` | `mode: proxy`, `subnet: 2001:db8:1:2:100::/80`, `gateway: fe80::1`, `range: <first>-<last>` and `uplink: vtnet0` on the network |
+| `--ipv6 2001:db8:1:2:1::1/80` (routed) | `subnet: 2001:db8:1:2:1::/80`, `gateway: 2001:db8:1:2:1::1`, `range: <first>-<last>` |
+| `--ipv6 2001:db8:1:2:100::/80`, then `network ndp-proxy enable` | `ndp_proxy: true`, `subnet: 2001:db8:1:2:100::/80`, `gateway: fe80::1`, `range: <first>-<last>` and `uplink: vtnet0` on the network |
 | `--ipv4 10.50.0.1/24` | `ipv4: {subnet: 10.50.0.0/24, gateway: 10.50.0.1, range: 10.50.0.2-10.50.0.254}` |
 
-A network that exists switches between the two with `jailops network ndp-proxy enable|disable NETWORK`, which changes
-`mode` in the stored network; in a repository the same change is the `mode` line of the file.
+A network that exists switches the NDP proxy with `jailops network ndp-proxy enable|disable NETWORK`, which changes
+`ndp_proxy` in the stored network; in a repository the same change is the `ndp_proxy` line of the file.
 
 Complete files are in `examples/ipv6-switched-cloud` and `examples/ipv6-routed-hetzner`.
 
@@ -256,17 +256,3 @@ A host URL is `https://`, with a pinned `fingerprint` for a self-signed certific
 signed). `http://` is accepted for loopback only, as the SDK does. See [exposure.md](exposure.md) for how a host gets its listener
 and certificate.
 
-## Verified, and not
-
-Run against a real FreeBSD host: adopt with claim, plan, apply (a dual-stack network, a project grant and a jail), a changed
-declared key reported as drift and reverted, and a secret in a SOPS file sealed to the host's own age key, stored sealed, and
-opened inside the jail. **UNVERIFIED:** age plugin identities, `remote bootstrap` against a real host, and rollouts on real jails
-(the package and generation updates they drive were tested with fakes).
-
-Tested with fakes only (in-memory hosts, `internal/fleet/e2e`): `build: true` for images, every object kind of the table above applying
-and then planning to zero (a WireGuard server with a listed peer included), and the eight example repositories. **UNVERIFIED on a real host:** `build: true` (the first image build
-and then planning to zero, and the nine example repositories. Apps and their grants (`examples/app-access-fleet`) are tested against the
-in-memory host's catalog only: **UNVERIFIED on a real host:** an App installed and an AppAccess applied by sync (the same calls as the CLI). **UNVERIFIED on a real host:** `build: true` (the first image build
-through sync), an IPv6 proxy or routed network created by sync (the same objects created by the CLI are verified), a host-directory volume applied by
-sync with a global-admin token, and `jailops-sync` over the network with a CA-signed server certificate (a pinned self-signed one is
-verified).

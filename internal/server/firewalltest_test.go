@@ -265,7 +265,7 @@ func TestFirewallTestMeetsTheUplinkOfAJailFromOutside(t *testing.T) {
 	fw := e.Admin.Firewall()
 	if _, err := e.Admin.Networks().Create(c, api.Network{Metadata: api.ObjectMeta{Name: "pub"}, Spec: api.NetworkSpec{Uplink: "em0",
 		IPv4: &api.IPv4Net{Subnet: "10.99.0.0/24", Gateway: "10.99.0.1", Range: "10.99.0.10-10.99.0.50"},
-		IPv6: &api.IPv6Net{Mode: api.IPv6Proxy, Subnet: "2001:db8:1:2:100::/80", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"}}}); err != nil {
+		IPv6: &api.IPv6Net{NDPProxy: true, Subnet: "2001:db8:1:2:100::/80", Range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ff"}}}); err != nil {
 		t.Fatal(err)
 	}
 	p, err := e.Admin.Projects().Get(c, "alpha")

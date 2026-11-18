@@ -479,7 +479,7 @@ func (l *Local) dnsInputs(ctx context.Context) ([]render.DNSJail, []render.DNSNe
 						dn.Gateway = g
 					}
 				}
-				if v6 := nw.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
+				if v6 := nw.Spec.IPv6; v6 != nil {
 					if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
 						dn.Subnets = append(dn.Subnets, p)
 						dn.Resolver6 = ipam.Resolver6(p)
@@ -554,7 +554,7 @@ func (l *Local) addStoredNetworks(ctx context.Context, nets []render.DNSNet, see
 				dn.Gateway = g
 			}
 		}
-		if v6 := nw.Spec.IPv6; v6 != nil && v6.Mode != api.IPv6None {
+		if v6 := nw.Spec.IPv6; v6 != nil {
 			if p, err := netip.ParsePrefix(v6.Subnet); err == nil {
 				dn.Subnets = append(dn.Subnets, p)
 				dn.Resolver6 = ipam.Resolver6(p)

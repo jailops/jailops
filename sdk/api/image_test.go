@@ -14,10 +14,10 @@ func TestImageNameForRelease(t *testing.T) {
 }
 
 func TestImageCreateHint(t *testing.T) {
-	if got := ImageCreateHint("the base image", "", "", "15.2-RELEASE"); got != "create the base image with 'jailops image create freebsd-15-2 --release 15.2-RELEASE', then build it with 'jailops image build freebsd-15-2' (the console's Images page does both with Create image)" {
+	if got := ImageCreateHint("the base image", "", "15.2-RELEASE"); got != "create the base image with 'jailops image create freebsd-15-2 --release 15.2-RELEASE', then build it with 'jailops image build freebsd-15-2' (the console's Images page does both with Create image)" {
 		t.Fatal(got)
 	}
-	if got := ImageCreateHint("it", "base", "lts", ""); got != "create it with 'jailops image create base --release 15.1-RELEASE --alias lts', then build it with 'jailops image build base' (the console's Images page does both with Create image)" {
+	if got := ImageCreateHint("it", "base", ""); got != "create it with 'jailops image create base --release 15.1-RELEASE', then build it with 'jailops image build base' (the console's Images page does both with Create image)" {
 		t.Fatal(got)
 	}
 }

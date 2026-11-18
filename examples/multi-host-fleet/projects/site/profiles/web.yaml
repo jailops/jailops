@@ -4,7 +4,7 @@ metadata:
   name: web
 spec:
   # A project profile: it carries the project's network, storage and firewall so a jail only lists the profile.
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   network:
     - {name: eth0, network: web, ipv4: auto}

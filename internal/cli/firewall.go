@@ -86,8 +86,8 @@ jailops firewall policy create -f web.yaml`,
 		"jailops firewall address-set list\njailops firewall address-set show office", "address-sets", "set")
 	crudCommands(a, ac, ad, `Create an address set, empty or from a file. Members are added one at a time with 'jailops firewall
 address-set add' (or with --address here, or all at once from a file with -f). A member may be jail:NAME (a jail of the
-project) or set:NAME (another set); cycles are rejected. --comment is what the set is for. A set with one address is a
-perfectly good alias: say in its comment what it is. A rule that names an empty set matches nothing.`,
+project) or set:NAME (another set); cycles are rejected. --comment is what the set is for. A set may hold one
+address: say in its comment what it is. A rule that names an empty set matches nothing.`,
 		`jailops firewall address-set create office --comment "the office"
 jailops firewall address-set add office 192.0.2.0/24 --comment "the office network"
 jailops firewall address-set create -f office.yaml`,

@@ -47,9 +47,9 @@ func TestJailLifecycle(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--memory", "2G", "--label", "env=prod", "--autostart")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--storage", "default", "--network", "lan", "--memory", "2G", "--label", "env=prod", "--autostart")
 	tr.ok("volume", "create", "data", "--storage", "default")
-	tr.ok("jail", "create", "db", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan", "--env", "A=1")
+	tr.ok("jail", "create", "db", "--image", "freebsd-15", "--storage", "default", "--network", "lan", "--env", "A=1")
 	tr.ok("volume", "attach", "db", "data", "/srv/data", "--ro")
 	tr.ok("jail", "list")
 	tr.ok("jail", "start", "web")
@@ -84,7 +84,7 @@ metadata:
   name: web
   labels: {tier: front}
 spec:
-  image: freebsd-15@stable
+  image: freebsd-15
   storage: default
   network:
     - network: lan
@@ -92,8 +92,8 @@ spec:
   resources: {memory: 1G}
 `, 0o644)
 	bare := writeFile(t, h.dir, "bare.yaml", "image: freebsd-15#g1\nhostname: bare.example\nstorage: default\nnetwork: [{network: lan}]\n", 0o644)
-	multi := writeFile(t, h.dir, "multi.yaml", "kind: Jail\nmetadata: {name: m1}\nspec: {image: freebsd-15@stable, storage: default, network: [{network: lan}]}\n---\nkind: Jail\nmetadata: {name: m2}\nspec: {image: freebsd-15@stable, storage: default, network: [{network: lan}]}\n", 0o644)
-	typo := writeFile(t, h.dir, "typo.yaml", "image: freebsd-15@stable\nmemmory: 1G\n", 0o644)
+	multi := writeFile(t, h.dir, "multi.yaml", "kind: Jail\nmetadata: {name: m1}\nspec: {image: freebsd-15, storage: default, network: [{network: lan}]}\n---\nkind: Jail\nmetadata: {name: m2}\nspec: {image: freebsd-15, storage: default, network: [{network: lan}]}\n", 0o644)
+	typo := writeFile(t, h.dir, "typo.yaml", "image: freebsd-15\nmemmory: 1G\n", 0o644)
 	wrongKind := writeFile(t, h.dir, "wk.yaml", "kind: Network\nmetadata: {name: x}\nspec: {}\n", 0o644)
 	tr.ok("jail", "create", "-f", env)
 	tr.ok("jail", "create", "bare", "-f", bare)
@@ -102,7 +102,7 @@ spec:
 	tr.do("", "jail", "create", "x", "-f", typo)
 	tr.do("", "jail", "create", "-f", wrongKind)
 	tr.do("", "jail", "create", "web", "-f", env) // duplicate
-	out, _, code := tr.do("kind: Jail\nmetadata: {name: viastdin}\nspec: {image: freebsd-15@stable, storage: default, network: [{network: lan}]}\n", "jail", "create", "-f", "-")
+	out, _, code := tr.do("kind: Jail\nmetadata: {name: viastdin}\nspec: {image: freebsd-15, storage: default, network: [{network: lan}]}\n", "jail", "create", "-f", "-")
 	if code != 0 || !strings.Contains(out, "jail/viastdin created") {
 		t.Fatalf("stdin create: %d %s", code, out)
 	}
@@ -121,7 +121,7 @@ func TestJailSnapshotAndCopy(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan=10.20.0.15")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--storage", "default", "--network", "lan=10.20.0.15")
 	tr.ok("jail", "snapshot", "create", "web", "s1", "-m", "first")
 	tr.ok("jail", "snapshot", "create", "web", "s2")
 	h.srv.SetSnapshotWritten("main", "web", "s2", 3<<20)
@@ -148,7 +148,7 @@ func TestJailRollbackConfirmation(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	tr.ok("jail", "snapshot", "create", "web", "good")
 	tr.ok("jail", "snapshot", "create", "web", "newer")
 	h.srv.SetSnapshotWritten("main", "web", "good", 1536*1024)
@@ -244,7 +244,7 @@ func TestJailEditorFlow(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	sed := writeFile(t, h.dir, "ed-sed.sh", "#!/bin/sh\nsed 's/hostname: web/hostname: edited/' \"$1\" > \"$1.new\" && mv \"$1.new\" \"$1\"\n", 0o755)
 	noop := writeFile(t, h.dir, "ed-noop.sh", "#!/bin/sh\nexit 0\n", 0o755)
 	empty := writeFile(t, h.dir, "ed-empty.sh", "#!/bin/sh\n: > \"$1\"\n", 0o755)
@@ -283,7 +283,7 @@ func TestJailEditorFlow(t *testing.T) {
 		t.Fatalf("edit not applied: %+v", j.Spec)
 	}
 	// -f replaces from a file.
-	f := writeFile(t, h.dir, "new.yaml", "image: freebsd-15@stable\nhostname: viafile\nstorage: default\nnetwork: [{network: lan}]\n", 0o644)
+	f := writeFile(t, h.dir, "new.yaml", "image: freebsd-15\nhostname: viafile\nstorage: default\nnetwork: [{network: lan}]\n", 0o644)
 	tr.ok("jail", "edit", "web", "-f", f)
 	if j, _ = h.srv.JailIn("main", "web"); j.Spec.Hostname != "viafile" {
 		t.Fatalf("-f edit: %+v", j.Spec)
@@ -298,7 +298,7 @@ func TestJailEditorFlow(t *testing.T) {
 func TestJailEditorConflict(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	// The editor waits until the test has changed the jail underneath it.
 	ready, gate := filepath.Join(h.dir, "ready"), filepath.Join(h.dir, "go")
 	script := writeFile(t, h.dir, "ed-wait.sh", fmt.Sprintf(`#!/bin/sh
@@ -340,14 +340,14 @@ while [ ! -f %s ]; do sleep 0.02; done
 func TestDryRunSendsNothing(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.run("", "jail", "snapshot", "create", "web", "s1")
 	n := len(h.mutations())
 	tr := h.transcript()
 	netFile := writeFile(t, h.dir, "net.yaml", "subnet-less: true\n", 0o644)
 	_ = netFile
 	for _, args := range [][]string{
-		{"jail", "create", "x", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default"},
+		{"jail", "create", "x", "--image", "freebsd-15", "--network", "lan", "--storage", "default"},
 		{"jail", "start", "web"},
 		{"jail", "stop", "web"},
 		{"jail", "restart", "web"},
@@ -358,8 +358,6 @@ func TestDryRunSendsNothing(t *testing.T) {
 		{"jail", "copy", "web", "w2"},
 		{"network", "create", "n2", "--subnet", "10.1.0.0/24", "--gateway", "10.1.0.1", "--range", "10.1.0.5-10.1.0.9"},
 		{"network", "delete", "-y", "lan"},
-		{"image", "alias", "add", "freebsd-15", "x"},
-		{"image", "alias", "remove", "-y", "freebsd-15", "x"},
 		{"image", "generation", "delete", "-y", "freebsd-15", "1"},
 		{"firewall", "address-set", "create", "s", "--address", "10.0.0.0/8"},
 		{"token", "create", "t1", "--global"},
@@ -391,7 +389,7 @@ func TestOperationsNoWaitAndWait(t *testing.T) {
 	h.seed()
 	tr := h.transcript()
 	h.srv.SetOperationDelay(150 * time.Millisecond)
-	out := tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--no-wait", "-o", "name")
+	out := tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--no-wait", "-o", "name")
 	id := strings.TrimSpace(out)
 	if len(id) != 36 {
 		t.Fatalf("operation id %q", id)
@@ -401,7 +399,7 @@ func TestOperationsNoWaitAndWait(t *testing.T) {
 	tr.ok("op", "list", "--active")
 	tr.ok("op", "show", id, "-o", "yaml")
 	tr.do("", "op", "show", "nonexistent")
-	tr.ok("jail", "create", "w2", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--no-wait")
+	tr.ok("jail", "create", "w2", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--no-wait")
 	// A timeout leaves the operation running and says how to follow it.
 	h.srv.SetOperationDelay(2 * time.Second)
 	_, errs, code := tr.do("", "jail", "start", "web", "--timeout", "100ms")
@@ -417,12 +415,12 @@ func TestOperationFailureAndCancel(t *testing.T) {
 	h.seed()
 	h.srv.FailOperation("jails.create", api.Errorf(api.CodePoolExhausted, "no addresses left").WithHint("widen the range"))
 	tr := h.transcript()
-	_, _, code := tr.do("", "jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	_, _, code := tr.do("", "jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	if code != 5 {
 		t.Fatalf("pool_exhausted exit %d", code)
 	}
 	h.srv.SetOperationDelay(5 * time.Second)
-	out := tr.ok("jail", "create", "slow", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--no-wait", "-o", "name")
+	out := tr.ok("jail", "create", "slow", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--no-wait", "-o", "name")
 	id := strings.TrimSpace(out)
 	tr.ok("op", "cancel", id)
 	_, _, code = tr.do("", "op", "wait", id)
@@ -456,7 +454,7 @@ func TestOpShowIsReadable(t *testing.T) {
 	h := newHarness(t, fake.WithHostName("alpha"))
 	h.seed()
 	tr := h.transcript()
-	id := strings.TrimSpace(tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--no-wait", "-o", "name"))
+	id := strings.TrimSpace(tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--no-wait", "-o", "name"))
 	tr.ok("op", "wait", id)
 	out, errs, code := h.run("", "op", "show", id)
 	if code != 0 || !strings.Contains(out, "status:   success") || !strings.Contains(out, id) {

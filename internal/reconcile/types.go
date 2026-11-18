@@ -120,7 +120,7 @@ type WireGuardDesired struct {
 	Problem string
 }
 
-// ProxyAddr is one address of an IPv6 proxy mode network.
+// ProxyAddr is one address of a network with the NDP proxy.
 type ProxyAddr struct {
 	Addr string
 	// Iface is the host end of the jail's epair: the interface the host route of the address leaves through.
@@ -175,8 +175,7 @@ type NDP interface {
 	Close() error
 }
 
-// NDPFactory builds a proxy for one uplink. It is only called when proxy mode
-// is enabled and a network needs it.
+// NDPFactory builds a proxy for one uplink. It is only called when a network with the NDP proxy uses the uplink.
 type NDPFactory func(uplink string) (NDP, error)
 
 // Condition types reported by the loop.

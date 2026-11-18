@@ -387,9 +387,9 @@ test('create jail form validates the name and explains what is missing', async (
   await expect(page.locator('[data-test="jails-table"]')).toContainText('newjail')
 })
 
-test('IPv6 addresses are compressed, copyable and the network mode is a badge', async ({ page }) => {
+test('IPv6 addresses are compressed and copyable, and the IPv6 of a network is a badge', async ({ page }) => {
   await open(page, '/networks')
-  await expect(page.locator('[data-network="edge"] [data-ipv6-mode="proxy"]')).toBeVisible()
+  await expect(page.locator('[data-network="edge"] [data-ndp="on"]')).toBeVisible()
   await expect(page.locator('[data-network="lan"]').getByRole('button', { name: /^Copy 2001:db8:20:1::\/80$/ })).toBeVisible()
 })
 
@@ -406,7 +406,7 @@ test('the NDP proxy of a network is a switch with a status panel', async ({ page
   await expect(lan.getByTestId('ndp-status')).toHaveCount(0)
 })
 
-test('network form: proxy mode explains itself, validates inline and creates the network', async ({ page }) => {
+test('network form: the NDP proxy explains itself, validates inline and creates the network', async ({ page }) => {
   await open(page, '/networks')
   await page.getByTestId('new-network').click()
   await page.getByTestId('net-create-go').click({ force: true })
@@ -419,15 +419,16 @@ test('network form: proxy mode explains itself, validates inline and creates the
   await page.getByTestId('net-create-go').click({ force: true })
   await expect(page.locator('#nf-v4g-e')).toContainText('inside the subnet')
   await page.locator('#nf-v4g').fill('10.99.0.1')
-  await page.getByTestId('nf-mode').selectOption('proxy')
-  await expect(page.getByTestId('mode-help')).toContainText('pf.conf')
+  await page.getByTestId('nf-v6').check()
+  await page.getByTestId('nf-ndp').check()
+  await expect(page.getByTestId('ndp-help')).toContainText('pf.conf')
   await page.locator('#nf-v6s').fill('2001:db8:77::/64')
   await page.locator('#nf-v6r').fill('2001:db8:77::100-2001:db8:77::1ff')
   await page.getByTestId('net-create-go').click({ force: true })
   await expect(page.locator('#nf-up-e')).toContainText('uplink')
   await page.locator('#nf-up').fill('em1')
   await page.getByTestId('net-create-go').click({ force: true })
-  await expect(page.locator('[data-network="dmz"] [data-ipv6-mode="proxy"]')).toBeVisible()
+  await expect(page.locator('[data-network="dmz"] [data-ndp="on"]')).toBeVisible()
 })
 
 test('phone: the jail spec table has no clipped column', async ({ page, isMobile }) => {

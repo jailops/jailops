@@ -1,4 +1,4 @@
-$ jailops create nginx --image freebsd-15@stable --storage default --network lan
+$ jailops create nginx --image freebsd-15 --storage default --network lan
 jail/nginx created
 
 $ jailops start nginx
@@ -7,7 +7,7 @@ jail/nginx started
 $ jailops config show nginx
 KEY                VALUE
 hostname           nginx
-image              freebsd-15@stable
+image              freebsd-15
 nic.eth0           lan
 nic.eth0.ipv4      10.20.0.10
 nic.eth0.network   lan
@@ -69,16 +69,16 @@ restart required for: limits.pids
 the jail was not restarted: run 'jailops restart nginx' when it suits you, or repeat with --restart
 
 $ jailops config show nginx --expanded
-KEY                VALUE               SOURCE
-boot.autostart     true                jail
-hostname           nginx               jail
-image              freebsd-15@stable   jail
-limits.cpu         2                   jail
-limits.memory      2G                  jail
-nic.eth0           lan                 jail
-nic.eth0.ipv4      10.20.0.10          jail
-nic.eth0.network   lan                 jail
-storage            default             jail
+KEY                VALUE        SOURCE
+boot.autostart     true         jail
+hostname           nginx        jail
+image              freebsd-15   jail
+limits.cpu         2            jail
+limits.memory      2G           jail
+nic.eth0           lan          jail
+nic.eth0.ipv4      10.20.0.10   jail
+nic.eth0.network   lan          jail
+storage            default      jail
 
 $ jailops config show nginx -o yaml
 - key: boot.autostart
@@ -86,7 +86,7 @@ $ jailops config show nginx -o yaml
 - key: hostname
   value: nginx
 - key: image
-  value: freebsd-15@stable
+  value: freebsd-15
 - key: limits.cpu
   value: "2"
 - key: limits.memory

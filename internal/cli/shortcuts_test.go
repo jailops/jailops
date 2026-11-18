@@ -12,7 +12,7 @@ func TestTopLevelShortcuts(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("create", "nginx", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan")
+	tr.ok("create", "nginx", "--image", "freebsd-15", "--storage", "default", "--network", "lan")
 	tr.ok("list")
 	tr.ok("start", "nginx")
 	tr.ok("restart", "nginx")
@@ -29,7 +29,7 @@ func TestTopLevelShortcuts(t *testing.T) {
 	}
 	tr.ok("delete", "--confirm-data-loss", "nginx")
 	// The jail group keeps every form as an alias.
-	tr.ok("jail", "create", "web", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	tr.ok("jail", "list", "-o", "name")
 	tr.ok("jails", "list", "-o", "name")
 	tr.golden("shortcuts")
@@ -39,7 +39,7 @@ func TestConfigCommands(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("create", "nginx", "--image", "freebsd-15@stable", "--storage", "default", "--network", "lan")
+	tr.ok("create", "nginx", "--image", "freebsd-15", "--storage", "default", "--network", "lan")
 	tr.ok("start", "nginx")
 	tr.ok("config", "show", "nginx")
 	tr.ok("config", "set", "nginx", "limits.memory", "2G", "limits.cpu", "2")
@@ -110,7 +110,7 @@ func mustJID(t *testing.T, h *harness, name string) int {
 func TestConfigEdit(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "create", "nginx", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "create", "nginx", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.run("", "config", "set", "nginx", "limits.cpu", "2", "limits.memory", "1G")
 	script := writeFile(t, h.dir, "ed.sh", "#!/bin/sh\nsed -e 's/^limits.cpu: .*/limits.cpu: \"4\"/' -e '/^limits.memory/d' \"$1\" > \"$1.new\" && mv \"$1.new\" \"$1\"\n", 0o755)
 	h.env["EDITOR"] = script
@@ -125,7 +125,7 @@ func TestConfigEdit(t *testing.T) {
 func TestKeyCompletion(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
-	h.run("", "create", "nginx", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default")
+	h.run("", "create", "nginx", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.run("", "project", "create", "web")
 	out, _, _ := h.run("", "__complete", "config", "set", "nginx", "limits.")
 	if !strings.Contains(out, "limits.memory") || !strings.Contains(out, "limits.cpu") {
@@ -181,7 +181,7 @@ func TestProfiles(t *testing.T) {
 	tr.do("", "profile", "create", "bad3", "--set", "limits.memory")
 	tr.ok("profile", "list")
 	tr.ok("profile", "show", "web")
-	tr.ok("create", "nginx", "--image", "freebsd-15@stable", "--network", "lan", "--storage", "default", "--profile", "base", "--profile", "web")
+	tr.ok("create", "nginx", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--profile", "base", "--profile", "web")
 	tr.ok("config", "set", "nginx", "limits.memory", "8G")
 	tr.ok("config", "show", "nginx", "--expanded")
 	tr.ok("config", "show", "nginx")

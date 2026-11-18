@@ -139,7 +139,7 @@ JailOps turns forwarding on at run time when a network needs it, but it does not
     sysrc gateway_enable=YES ipv6_gateway_enable=YES
     sysctl net.inet.ip.forwarding=1 net.inet6.ip6.forwarding=1
 
-On a switched IPv6 network (`--ipv6-mode proxy`, a `/64` on a segment shared with other customers) one more host setting
+On a network with the NDP proxy (a `/64` on a segment shared with other customers) one more host setting
 matters on some segments, where the routers probe the host from off-link addresses. `jailops doctor` shows it as
 information, and JailOps never sets it: [networking-ipv6.md](networking-ipv6.md#one-host-setting-that-matters-on-some-segments)
 says when and what to set.

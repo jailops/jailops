@@ -525,7 +525,7 @@ func (s *Server) defaultAppImage() (string, *api.Error) {
 		yours = "your images: " + strings.Join(all, ", ")
 	}
 	if freebsd == 0 {
-		hint := api.ImageCreateHint("the base image", "", "", host)
+		hint := api.ImageCreateHint("the base image", "", host)
 		if len(all) > 0 {
 			hint += "; " + yours
 		}

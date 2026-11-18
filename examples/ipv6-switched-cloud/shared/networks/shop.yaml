@@ -3,11 +3,11 @@ kind: Network
 metadata:
   name: shop
 spec:
-  # In proxy mode the uplink answers neighbor discovery for every jail address and must be a plain interface, not a bridge member.
+  # With the NDP proxy the uplink answers neighbor discovery for every jail address and must be a plain interface, not a bridge member.
   uplink: vtnet0
   ipv4: {subnet: 10.94.0.0/24, gateway: 10.94.0.1, range: 10.94.0.2-10.94.0.254, nat: true}
   ipv6:
-    mode: proxy
+    ndp_proxy: true
     # The provider gave this server the shared /64 2001:db8:1:2::/64. This project's /80 is carved out of it.
     subnet: "2001:db8:1:2:100::/80"
     range: "2001:db8:1:2:100::10-2001:db8:1:2:100::ffff"

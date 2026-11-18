@@ -23,7 +23,7 @@ import (
 func TestAppDraft(t *testing.T) {
 	e, c := appEnv(t, map[string]string{"web": appWeb})
 	e.SetDial(httpAnswer(204, nil))
-	inst, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151@stable", Network: "lan", Storage: "default"})
+	inst, err := e.Admin.Apps().Install(c, "web", api.AppInstall{Image: "fb151", Network: "lan", Storage: "default"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestAppsLocalDir(t *testing.T) {
 	if !errors.As(err, &ae) || !strings.Contains(ae.Hint, loc) || !strings.Contains(ae.Hint, "apps.local_dir") {
 		t.Errorf("%v", err)
 	}
-	op, err := e.Admin.Apps().Install(c, "mine", api.AppInstall{DryRun: true, Image: "fb@stable", Network: "lan", Storage: "default"})
+	op, err := e.Admin.Apps().Install(c, "mine", api.AppInstall{DryRun: true, Image: "fb", Network: "lan", Storage: "default"})
 	if err == nil {
 		_, err = op.Wait(c)
 	}

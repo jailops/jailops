@@ -30,7 +30,7 @@ key or keyring of its own choosing ([Whom the helper trusts](#whom-the-helper-tr
 a ZFS user property into authority (the helper keeps what it granted in its own memory, never in something the daemon can write).
 
 **What it can do, and you should assume it can:** act as any API user for anything inside those bounds. That includes
-storing a network in proxy mode: the helper takes the prefix from the stored networks, which the daemon writes, so a compromised
+storing a network with the NDP proxy: the helper takes the prefix from the stored networks, which the daemon writes, so a compromised
 daemon can make the host answer neighbor discovery for any prefix that passes the checks above on the uplink (a segment shared
 with other hosts). The operator approves such a prefix by creating the network, not by a line in `priv.conf`. The helper takes
 the "this request is for an admin" assertion from the request itself, because only the daemon knows who authenticated.
@@ -88,7 +88,7 @@ gives up after ten seconds and holds one of four slots, never the whole budget o
 
 **Addresses, routes and forwards.** The helper puts an address on a jail's link, or a route through it, only inside the
 subnet of a network JailOps has stored (the gateway's `fe80::1` aside); the route of the IPv6 proxy only for an address
-inside the prefix of a network in proxy mode, never the prefix's anycast address, the host's IPv6 default router or an
+inside the prefix of a network with the NDP proxy, never the prefix's anycast address, the host's IPv6 default router or an
 address in the uplink's neighbor cache. A port forward leads to an address of a stored network and takes over a
 privileged port, or one a host process listens on, only when the request carries the admin assertion.
 
@@ -462,7 +462,7 @@ root, so no symlink of the jail leads out of it, and refuse a file that is not a
 `postgres` in the jail; an allow that fails half way keeps the role it made in the registry, and the next allow sets a
 new password and finishes; the lines it writes always require
 `scram-sha-256`. What a jail's root does to its own PostgreSQL afterwards (another `trust` line above the block) is the
-jail's own business, as before.
+jail's own business.
 
 ## Encrypted volumes
 
@@ -521,11 +521,10 @@ nothing: a name that looks like JailOps's (`jo7`) is not enough.
   descriptions in its own vnet, so the marker proves less inside a jail: it keeps the helper off the jail's loopback,
   and what the jail could forge is an interface of its own vnet. An interface that comes back from a jail's vnet through the
   helper (`net.move_from_jail`) is a virtual one the jail could reach anyway, and the helper refuses it when the host has
-  an interface of that name: the kernel would bring it back and let two interfaces share the name (verified on FreeBSD
-  15.2). When a jail is removed, the kernel returns its interfaces by itself, with whatever name the jail's root gave
+  an interface of that name: the kernel would bring it back and let two interfaces share the name. When a jail is removed, the kernel returns its interfaces by itself, with whatever name the jail's root gave
   them, possibly a name the host has; a lookup by name (the helper's read and its action alike) finds the host's own,
   which was there first, so such a twin is not taken for JailOps's.
-- **Reading stays open.** The interface list, the uplink's addresses and any one interface are read as before.
+- **Reading stays open.** The interface list, the uplink's addresses and any one interface are read.
 - **jail.conf.** `vnet.interface` must name an epair end of the form JailOps gives them (`jo` and the jail's hash), and
   each one that exists when the jail is created must be JailOps's in the kernel.
 - **No description, no ownership.** An epair without a description is not JailOps's, whatever its name or its

@@ -45,7 +45,7 @@ func TestWriteRecordsMakesTheJailRebuildable(t *testing.T) {
 	w := runningSetup(t)
 	j := w.jail("web")
 	j.Metadata.Project = "default"
-	j.Spec.Image = "fb@stable"
+	j.Spec.Image = "fb"
 	gen, _ := w.Images.Resolve(bg, "tank/jailops", "fb#g1")
 	delete(w.Files.Data, "/jailops/projects/alpha/jails/web/spec.json")
 	if err := w.S.WriteRecords(bg, "alpha_web", j, gen); err != nil {
@@ -57,7 +57,7 @@ func TestWriteRecordsMakesTheJailRebuildable(t *testing.T) {
 		}
 	}
 	r, err := w.S.Rebuild(bg, "alpha_web")
-	if err != nil || r.FromBundle || r.Jail.Spec.Image != "fb@stable" {
+	if err != nil || r.FromBundle || r.Jail.Spec.Image != "fb" {
 		t.Fatalf("%+v %v", r, err)
 	}
 }
