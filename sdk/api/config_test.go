@@ -18,7 +18,7 @@ func TestRegistryIsConsistent(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"limits.memory", "limits.cpu", "limits.pids", "boot.autostart", "boot.priority", "boot.depends", "image", "hostname",
-		"update.strategy", "update.window", "firewall.policies", "nic.<device>.mtu", "nic.<device>.network", "devfs.<name>.device", "proxy.<name>.listen", "env.<var>", "profiles"} {
+		"update.strategy", "update.window", "firewall.policies", "nic.<device>.mtu", "nic.<device>.network", "devfs.<name>.device", "env.<var>", "profiles"} {
 		if !seen[want] {
 			t.Errorf("missing key %s", want)
 		}
@@ -36,7 +36,7 @@ func TestApplyConfigSetsAndReportsRestarts(t *testing.T) {
 		"limits.memory": "2G", "limits.cpu": "2", "boot.autostart": "true", "boot.depends": "db, cache",
 		"nic.eth0.network": "lan", "nic.eth0.ipv4": "auto", "nic.eth0.mtu": "1400", "nic.eth1.network": "dmz",
 		"disk.data.mount": "/var/db", "disk.data.read_only": "yes",
-		"devfs.t.device": "tun", "proxy.web.listen": ":8080", "proxy.web.jail_port": "80", "env.TZ": "UTC",
+		"devfs.t.device": "tun", "env.TZ": "UTC",
 		"firewall.policies": "web, ssh-office", "update.strategy": "rebase",
 	}, nil)
 	if err != nil {
@@ -54,7 +54,7 @@ func TestApplyConfigSetsAndReportsRestarts(t *testing.T) {
 	if len(s.Volumes) != 1 || !s.Volumes[0].ReadOnly || s.Volumes[0].Mount != "/var/db" {
 		t.Fatalf("%+v", s.Volumes)
 	}
-	if len(s.Devfs) != 1 || s.Devfs[0].Device != "tun" || len(s.Proxy) != 1 || s.Proxy[0].JailPort != 80 || s.Env["TZ"] != "UTC" {
+	if len(s.Devfs) != 1 || s.Devfs[0].Device != "tun" || s.Env["TZ"] != "UTC" {
 		t.Fatalf("%+v", s)
 	}
 	// Boot and firewall changes are live; limits, devices and environment need a restart.
@@ -111,9 +111,7 @@ func TestApplyConfigRejectsAndIsAtomic(t *testing.T) {
 		"device name":    {"nic.Bad_Name.network": "lan"},
 		"devfs list":     {"devfs.x.device": "kmem"},
 		"mount path":     {"disk.d.mount": "../etc"},
-		"listen":         {"proxy.p.listen": "nonsense"},
-		"port":           {"proxy.p.jail_port": "70000"},
-		"proto":          {"proxy.p.proto": "icmp"},
+		"old proxy key":  {"proxy.p.listen": ":80"},
 		"env name":       {"env.1X": "y"},
 		"rate":           {"nic.eth0.egress": "fast"},
 		"hostname":       {"hostname": "bad host!"},
@@ -146,7 +144,7 @@ func TestExpandedConfigMergesInOrderAndReportsSources(t *testing.T) {
 		Resources: Resources{Memory: "4G"},
 		Network:   []NetworkAttach{{Network: "lan", IPv4: "10.0.0.5", MTU: 1300}}}
 	base := prof("base", map[string]string{"limits.memory": "1G", "limits.cpu": "1", "boot.autostart": "true", "nic.eth0.mtu": "9000", "nic.eth1.network": "mgmt", "env.TZ": "UTC"})
-	web := prof("web", map[string]string{"limits.cpu": "4", "proxy.http.listen": ":80", "proxy.http.jail_port": "8080", "nic.eth1.mtu": "1400", "disk.data.mount": "/var/db"})
+	web := prof("web", map[string]string{"limits.cpu": "4", "nic.eth1.mtu": "1400", "disk.data.mount": "/var/db"})
 	got, src := ExpandedConfig(jail, []Profile{base, web})
 	if got.Resources.Memory != "4G" || got.Resources.CPU != 4 || !got.Boot.Autostart || got.Env["TZ"] != "UTC" {
 		t.Fatalf("%+v", got)
@@ -155,11 +153,11 @@ func TestExpandedConfigMergesInOrderAndReportsSources(t *testing.T) {
 		got.Network[1].Network != "mgmt" || got.Network[1].MTU != 1400 {
 		t.Fatalf("device by device: %+v", got.Network)
 	}
-	if len(got.Proxy) != 1 || got.Proxy[0].JailPort != 8080 || len(got.Volumes) != 1 {
+	if len(got.Volumes) != 1 {
 		t.Fatalf("%+v", got)
 	}
 	for k, want := range map[string]string{"limits.memory": "jail", "limits.cpu": "web", "boot.autostart": "base", "nic.eth0.mtu": "jail",
-		"nic.eth1.network": "base", "nic.eth1.mtu": "web", "env.TZ": "base", "proxy.http.listen": "web", "image": "jail"} {
+		"nic.eth1.network": "base", "nic.eth1.mtu": "web", "env.TZ": "base", "image": "jail"} {
 		if src[k] != want {
 			t.Errorf("source of %s: %q, want %q", k, src[k], want)
 		}
@@ -176,7 +174,7 @@ func TestExpandedConfigMergesInOrderAndReportsSources(t *testing.T) {
 }
 
 func TestProfilesAllowOnlyProfileKeys(t *testing.T) {
-	if err := ValidateProfile(ProfileSpec{Config: map[string]string{"limits.memory": "1G", "nic.eth1.network": "lan", "proxy.p.listen": ":80"}}); err != nil {
+	if err := ValidateProfile(ProfileSpec{Config: map[string]string{"limits.memory": "1G", "nic.eth1.network": "lan"}}); err != nil {
 		t.Fatal(err)
 	}
 	for _, k := range []string{"hostname", "image", "profiles", "nic.eth0.ipv4", "nic.eth0.mac"} {
@@ -191,7 +189,7 @@ func TestProfilesAllowOnlyProfileKeys(t *testing.T) {
 
 func TestConfigValuesRoundTrip(t *testing.T) {
 	var s JailSpec
-	set := map[string]string{"limits.cpu": "2", "nic.eth0.network": "lan", "nic.eth0.ipv4": "auto", "disk.d.mount": "/x", "env.A": "1", "proxy.p.listen": ":1", "proxy.p.jail_port": "2"}
+	set := map[string]string{"limits.cpu": "2", "nic.eth0.network": "lan", "nic.eth0.ipv4": "auto", "disk.d.mount": "/x", "env.A": "1"}
 	if _, err := ApplyConfig(&s, set, nil); err != nil {
 		t.Fatal(err)
 	}

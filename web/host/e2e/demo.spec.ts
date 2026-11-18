@@ -100,12 +100,9 @@ test('a new token is shown once', async ({ page }) => {
 test('firewall validation errors from the API appear inline', async ({ page }) => {
   await open(page, '/firewall')
   await page.getByRole('button', { name: 'Add rule' }).click()
-  await page.locator('[data-rule="3"]').getByLabel('Direction').selectOption('out')
-  await page.locator('[data-rule="3"]').getByLabel('Port forward').check()
-  // Save says why it does nothing yet, and a click still shows the field errors
-  await expect(page.getByTestId('save-why')).toContainText('Fix the highlighted rules')
+  await page.locator('[data-rule="3"]').getByLabel('From').fill('set:nowhere')
   await page.getByTestId('save-policy').click({ force: true })
-  await expect(page.getByTestId('field-error').first()).toContainText('inbound')
+  await expect(page.getByTestId('field-error').first()).toContainText('unknown address set')
 })
 
 test('the host console names itself and has no backup-node views', async ({ page }) => {
@@ -400,12 +397,12 @@ test('the NDP proxy of a network is a switch with a status panel', async ({ page
   await open(page, '/networks')
   const edge = page.locator('[data-network="edge"]')
   await expect(edge.locator('[data-ndp="on"]')).toBeVisible()
-  await expect(edge.getByTestId('ndp-edge')).toHaveText('Turn off')
+  await expect(edge.getByTestId('ndp-edge')).toHaveText('Disable')
   await expect(edge.getByTestId('ndp-status')).toContainText('Answering')
   await expect(edge.getByTestId('ndp-status')).toContainText('41 answered')
   const lan = page.locator('[data-network="lan"]')
   await expect(lan.locator('[data-ndp="off"]')).toBeVisible()
-  await expect(lan.getByTestId('ndp-lan')).toHaveText('Turn on')
+  await expect(lan.getByTestId('ndp-lan')).toHaveText('Enable')
   await expect(lan.getByTestId('ndp-status')).toHaveCount(0)
 })
 

@@ -1,0 +1,121 @@
+$ jailops expose web 80,443 --comment the site
+jail/web exposed: 80,443
+  IPv6  2001:db8::10: ports 80, 443 reach the jail directly
+  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 80->80, 443->443
+
+$ jailops expose web 80,443 --comment the site
+jail/web: the exposure is already what you asked for
+  IPv6  2001:db8::10: ports 80, 443 reach the jail directly
+  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 80->80, 443->443
+
+$ jailops expose web 8080 --from 192.0.2.0/24 --host-port 9090 --family 4
+jail/web exposed: 8080
+  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 9090->8080
+
+$ jailops expose web 53 --proto udp --family 6
+jail/web exposed: 53
+  IPv6  2001:db8::10: ports 53 reach the jail directly
+
+$ jailops expose --dry-run web 25
+jail/web would expose: 25 (dry run, nothing stored)
+  IPv6  2001:db8::10: ports 25 reach the jail directly
+  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 25->25
+
+$ jailops expose web 22 -o json
+{
+  "jail": "web",
+  "changed": true,
+  "entries": [
+    {
+      "proto": "tcp",
+      "ports": [
+        "80",
+        "443"
+      ],
+      "comment": "the site"
+    },
+    {
+      "proto": "tcp",
+      "ports": [
+        "8080"
+      ],
+      "families": [
+        "4"
+      ],
+      "from": [
+        "192.0.2.0/24"
+      ],
+      "host_port": 9090
+    },
+    {
+      "proto": "udp",
+      "ports": [
+        "53"
+      ],
+      "families": [
+        "6"
+      ]
+    },
+    {
+      "proto": "tcp",
+      "ports": [
+        "22"
+      ]
+    }
+  ],
+  "families": [
+    {
+      "family": "6",
+      "address": "2001:db8::10",
+      "network": "lan",
+      "via": "uplink",
+      "ports": "22"
+    },
+    {
+      "family": "4",
+      "address": "10.20.0.10",
+      "network": "lan",
+      "via": "forward",
+      "ports": "22",
+      "forwards": [
+        "22->22"
+      ]
+    }
+  ]
+}
+
+$ jailops expose web 80 --proto sctp
+! invalid: proto "sctp" must be tcp, udp or tcp,udp
+[exit 2]
+
+$ jailops expose ghost 80
+! not_found: jail "ghost" not found
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
+[exit 4]
+
+$ jailops expose web
+! usage: accepts 2 arg(s), received 1
+! hint: run 'jailops expose --help' for usage
+[exit 2]
+
+$ jailops unexpose web 80
+jail/web: no longer exposed
+  still exposed: tcp 443 (IPv4 and IPv6)
+  still exposed: tcp 8080 (IPv4)
+  still exposed: udp 53 (IPv6)
+  still exposed: tcp 22 (IPv4 and IPv6)
+
+$ jailops unexpose web --proto udp
+jail/web: no longer exposed
+  still exposed: tcp 443 (IPv4 and IPv6)
+  still exposed: tcp 8080 (IPv4)
+  still exposed: tcp 22 (IPv4 and IPv6)
+
+$ jailops unexpose web
+jail/web: no longer exposed
+
+$ jailops unexpose ghost
+! not_found: jail "ghost" not found
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
+[exit 4]
+

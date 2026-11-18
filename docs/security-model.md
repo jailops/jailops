@@ -553,9 +553,9 @@ allow. The PF matrix of the end-to-end tests checks each of these with real traf
 ([networking.md](networking.md)). Jails share the host kernel; this is a separation of networks, not of kernels
 ([above](#projects-are-not-a-security-boundary-against-the-kernel)).
 
-**Port forwards.** A forward (a `redirect` rule of a firewall policy, a `proxy.<name>` device of a jail or a profile) takes
-traffic that would reach the host, so only a **global administrator** gives or changes one; an administrator of a project
-may edit the other rules of a policy that already has a forward. A forward is refused on a port some service of the host
+**Port forwards.** A forward (the IPv4 half of `jailops expose` on a network with NAT) takes
+traffic that would reach the host, so only a **global administrator** gives, changes or removes one; an administrator of a
+project exposes IPv6 and IPv4 without NAT, which opens nothing of the host. A forward is refused on a port some service of the host
 listens on (ssh, the console, the other JailOps listeners, the ACME challenge port while ACME is the source) and on a
 listen address that is not an address of the host.
 

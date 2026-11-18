@@ -9,18 +9,18 @@ export type Spec = Record<string, unknown>
 
 export const ALL_KEYS: ConfigKey[] = [...configKeys]
 
-export const GROUP_ORDER = ['general', 'limits', 'boot', 'update', 'firewall', 'packages', 'env', 'nic', 'disk', 'devfs', 'proxy']
+export const GROUP_ORDER = ['general', 'limits', 'boot', 'update', 'firewall', 'packages', 'env', 'nic', 'disk', 'devfs']
 
 export function groupOf(name: string): string {
   const head = name.split('.')[0]
-  if (['limits', 'boot', 'update', 'firewall', 'env', 'nic', 'disk', 'devfs', 'proxy'].includes(head)) return head
+  if (['limits', 'boot', 'update', 'firewall', 'env', 'nic', 'disk', 'devfs'].includes(head)) return head
   if (name === 'packages') return 'packages'
   return 'general'
 }
 
-export const DEVICE_KINDS = ['nic', 'disk', 'devfs', 'proxy'] as const
+export const DEVICE_KINDS = ['nic', 'disk', 'devfs'] as const
 export type DeviceKind = (typeof DEVICE_KINDS)[number]
-const PATH_ROOT: Record<DeviceKind, string> = { nic: 'network', disk: 'volumes', devfs: 'devfs', proxy: 'proxy' }
+const PATH_ROOT: Record<DeviceKind, string> = { nic: 'network', disk: 'volumes', devfs: 'devfs' }
 
 interface Step { key: string; dev?: boolean }
 function steps(path: string): Step[] {
@@ -115,7 +115,7 @@ export function rowsFor(spec: JailSpec): Row[] {
   const rows: Row[] = []
   const env = Object.keys(((spec as unknown as Spec).env as Record<string, string> | undefined) ?? {})
   for (const k of ALL_KEYS) {
-    const m = /^(nic|disk|devfs|proxy)\.<(device|name)>(\.(.+))?$/.exec(k.name)
+    const m = /^(nic|disk|devfs)\.<(device|name)>(\.(.+))?$/.exec(k.name)
     if (k.name === 'env.<var>') {
       for (const v of env) rows.push({ key: k, name: `env.${v}`, dev: v, group: 'env' })
     } else if (m) {

@@ -828,7 +828,7 @@ fi
 
 if shard_on a; then
 [ "$shard" = all ] || prep_policies
-say "phase 11: a port forward (a redirect rule of a policy) brings a connection that arrives on the uplink into the jail"
+say "phase 11: a port forward (jailops expose with a host port) brings a connection that arrives on the uplink into the jail"
 # A redirect is rendered as "match in on <uplink> ... to (<uplink>) port H rdr-to <jail> port J" and applies only to packets that
 # arrive on the uplink. The host cannot test it against itself: what it sends to its own address never arrives on an
 # interface. So the uplink of this network is one end of an epair (pfupa, 198.51.100.1/24) whose other end (pfupb,
@@ -847,11 +847,7 @@ jexec pfrdr ifconfig lo0 up >/dev/null 2>&1
 $J network create pfa-up --ipv4 10.94.0.1/24 --uplink pfupa --nat </dev/null >/dev/null || die "network pfa-up"
 { $J network grant pfa-net --project pfa && $J network grant pfa-net2 --project pfa && $J network grant pfa-up --project pfa && $J storage grant default --project pfa; } </dev/null >/dev/null || die "grant pfa-up"
 $J create r --project pfa --image "$img" --network pfa-up --storage default </dev/null >/dev/null || die "create r"
-policy pfa fwd "default_in: deny
-default_out: allow
-rules:
-  - {name: forward-18080, action: allow, direction: in, proto: tcp, redirect: {host_port: 18080, jail_port: 8080}}"
-$J config set r firewall.policies fwd --project pfa </dev/null >/dev/null || die "attach fwd"
+$J expose r 8080 --host-port 18080 --comment "forward test" --project pfa </dev/null >/dev/null || die "expose r"
 $J start r --project pfa </dev/null >/dev/null || die "start r"
 t=0; until jx pfa r true >/dev/null 2>&1; do t=$((t + 1)); [ $t -gt 60 ] && break; sleep 1; done
 R4=$(addr4 pfa r)
@@ -863,6 +859,12 @@ expect allow "r's anchor carries the redirect on the uplink" fwd_has "match in o
 expect allow "and a labelled pass rule for what comes out of the translation (the state of the forward belongs to it)" fwd_has "pass in quick on pfupa inet proto tcp from any to $R4 port = [a-z0-9-]* .*label"
 expect allow "a client on the uplink reaches r through the forwarded port 18080" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 18080"
 expect deny "a client on the uplink does not reach a port that is not forwarded (18081)" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 18081"
+# the review views say the same: the Internet row of r is a forward, list shows the port of the host, test walks the forward
+expect allow "firewall show r: the Internet reaches tcp 8080 of r through port 18080 of the host" sh -c "$J firewall show r --project pfa </dev/null | grep -E '^Internet +4 +tcp +8080 +any +forward [^ ]*:18080'"
+expect allow "firewall exposed lists the forward of r" sh -c "$J firewall exposed --project pfa </dev/null | grep -E '^r +tcp +8080 +v4 +[^ ]*:18080 -> '"
+expect allow "list shows the port of the host in the EXPOSED column of r" sh -c "$J list --project pfa </dev/null | grep -E '^r .*18080→8080/tcp 4'"
+expect allow "firewall test --from internet walks the forward (host port 18080)" sh -c "$J firewall test --from internet --to jail:r --port 18080 --family 4 --project pfa </dev/null | grep -q 'is forwarded to'"
+expect deny "firewall test --from internet blocks a port that is not forwarded (18081)" sh -c "$J firewall test --from internet --to jail:r --port 18081 --family 4 --project pfa </dev/null"
 # NAT of the network (match out ... nat-to): a connection from r to a machine on the uplink's network arrives from the
 # uplink address, never from the jail's own address. The client jail pfrdr listens and says who connected.
 jexec pfrdr daemon -f nc -k -l 198.51.100.2 9000 || die "nc server in pfrdr"
@@ -877,9 +879,7 @@ expect deny "it does not arrive from the jail's own address" nat_from_jail
 jexec pfrdr daemon -f sh -c 'sleep 120 | nc 198.51.100.1 18080 >/dev/null 2>&1' || die "long connection through the forward"
 waitfor_ "the connection through the forward has a state" 30 sh -c "pfctl -ss 2>/dev/null | grep -q '198.51.100.1:18080'"
 expect allow "the open connection through the forward has a state" sh -c "[ \"\$(pfctl -ss 2>/dev/null | grep -c '198\.51\.100\.1:18080')\" -ge 1 ]"
-policy pfa fwd "default_in: deny
-default_out: allow
-rules: []"
+$J unexpose r --project pfa </dev/null >/dev/null || die "unexpose r"
 settle
 expect allow "removing the forward ends the state of the connection that came through it" sh -c "[ \"\$(pfctl -ss 2>/dev/null | grep -c '198\.51\.100\.1:18080')\" -eq 0 ]"
 expect deny "the removed forward no longer admits a new connection" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 18080"
@@ -918,7 +918,7 @@ expect deny "no rule: a jail with default_in allow is closed from the uplink (IP
 policy pfa up-open "default_in: allow
 default_out: allow
 rules:
-  - {name: tcp-8080, action: allow, direction: in, proto: tcp, ports: ['8080']}"
+  - {name: tcp-8080, action: allow, direction: in, proto: tcp, from: ['any'], ports: ['8080']}"
 $J config set u4 firewall.policies up-open --project pfa </dev/null >/dev/null || die "attach up-open to u4"
 $J config set u6 firewall.policies up-open --project pfa </dev/null >/dev/null || die "attach up-open to u6"
 settle
@@ -956,6 +956,49 @@ rules:
 settle
 expect deny "a rule from another prefix does not admit a client outside it (u4)" ext "$U4" 8080
 expect deny "a rule from another prefix does not admit a client outside it (u6)" ext "$U6" 8080
+expect allow "firewall show u4 names the source a rule is limited to" sh -c "$J firewall show u4 --project pfa </dev/null | grep -E '^Internet +4 +tcp +8080 +192\.0\.2\.0/24 +open'"
+expect allow "list marks a limited source with a star (u6)" sh -c "$J list --project pfa </dev/null | grep -E '^u6 .*8080/tcp 6\*'"
+policy pfa up-open "default_in: allow
+default_out: allow
+rules:
+  - {name: no-source, action: allow, direction: in, proto: tcp, ports: ['8080']}"
+settle
+expect deny "a rule without a source is for the link only and does not open the uplink (u4)" ext "$U4" 8080
+expect deny "a rule without a source is for the link only and does not open the uplink (u6)" ext "$U6" 8080
+policy pfa up-open "default_in: allow
+default_out: allow
+rules:
+  - {name: from-anywhere, action: allow, direction: in, proto: tcp, from: ['any'], ports: ['8080']}"
+settle
+expect allow "firewall show u4: the Internet reaches tcp 8080 from any source" sh -c "$J firewall show u4 --project pfa </dev/null | grep -E '^Internet +4 +tcp +8080 +any +open +policy up-open rule 1'"
+expect allow "firewall show u6: the Internet reaches tcp 8080 from any source" sh -c "$J firewall show u6 --project pfa </dev/null | grep -E '^Internet +6 +tcp +8080 +any +open +policy up-open rule 1'"
+expect allow "firewall exposed lists u4 and u6 with the rule that opens them" sh -c "$J firewall exposed --project pfa </dev/null | grep -E '^u4 +tcp +8080 +v4 ' && $J firewall exposed --project pfa </dev/null | grep -E '^u6 +tcp +8080 +v6 '"
+expect allow "firewall test --from internet agrees (u6 8080)" sh -c "$J firewall test --from internet --to jail:u6 --port 8080 --family 6 --project pfa </dev/null"
+expect deny "firewall test --from internet blocks a port no rule names (u6 8081)" sh -c "$J firewall test --from internet --to jail:u6 --port 8081 --family 6 --project pfa </dev/null"
+expect allow "the traffic agrees with the view (u6 8080 from the uplink)" ext "$U6" 8080
+# jailops expose is the one door: the same two jails, no rule in any policy, the Internet reaches what was exposed
+policy pfa up-open "default_in: allow
+default_out: allow"
+settle
+expect deny "no exposure: u6 is closed from the uplink" ext "$U6" 8080
+expect deny "no exposure: u4 is closed from the uplink" ext "$U4" 8080
+$J expose u6 8080 --project pfa </dev/null >/dev/null || die "expose u6 8080"
+$J expose u4 8080 --project pfa </dev/null >/dev/null || die "expose u4 8080"
+settle
+expect allow "expose opens u6 over IPv6 on the port named" ext "$U6" 8080
+expect allow "expose opens u4 on the port named (an IPv4 network without NAT)" ext "$U4" 8080
+expect deny "a port that was not exposed stays closed (u6 8081)" ext "$U6" 8081
+expect deny "a port that was not exposed stays closed (u4 8081)" ext "$U4" 8081
+expect allow "firewall exposed lists the exposed ports of u6 with expose as the reason" sh -c "$J firewall exposed --project pfa </dev/null | grep -E '^u6 +tcp +8080 +v6 '"
+expect allow "list shows what each jail exposes (u6)" sh -c "$J list --project pfa </dev/null | grep -E '^u6 .*8080/tcp 6'"
+expect allow "firewall test --from internet agrees with the exposure (u6 8080)" sh -c "$J firewall test --from internet --to jail:u6 --port 8080 --family 6 --project pfa </dev/null"
+$J unexpose u6 8080 --project pfa </dev/null >/dev/null || die "unexpose u6 8080"
+settle
+expect deny "unexpose closes u6 again" ext "$U6" 8080
+expect allow "the exposure of u4 is untouched by the unexpose of u6" ext "$U4" 8080
+$J unexpose u4 --project pfa </dev/null >/dev/null || die "unexpose u4"
+settle
+expect deny "unexpose without ports closes u4 as well" ext "$U4" 8080
 pfctl -f /etc/pf.conf >/dev/null 2>&1
 jail -r pfrdr >/dev/null 2>&1
 ifconfig pfupa destroy >/dev/null 2>&1

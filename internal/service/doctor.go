@@ -50,6 +50,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorEncryption(ctx, c)
 	s.doctorPF(ctx, c)
 	s.doctorExposedJails(ctx, c)
+	s.doctorInboundWithoutSource(c)
 	s.doctorInPlaceThinJails(c)
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)

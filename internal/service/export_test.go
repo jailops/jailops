@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"jailops.net/jailops/internal/state"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
@@ -91,4 +92,9 @@ func SetShellSettle(wait, grace time.Duration) func() {
 	w, g := shellSettleWait, shellTermGrace
 	shellSettleWait, shellTermGrace = wait, grace
 	return func() { shellSettleWait, shellTermGrace = w, g }
+}
+
+// ApplyForwards is applyForwards: the forwards a load took out of policies and profiles, given to the jails that used them.
+func (s *Service) ApplyForwards(ctx context.Context, fws []state.MigratedForward) error {
+	return s.applyForwards(ctx, fws)
 }

@@ -40,7 +40,7 @@ var roots = []any{
 	api.Project{}, api.ProjectAggregate{}, api.ProjectHostStatus{}, api.Storage{}, api.Session{}, api.Identity{}, api.TrustTokenRequest{}, api.TrustToken{}, api.TrustClientRequest{}, api.Profile{}, api.ConfigKey{}, api.JailExpanded{}, api.ConfigChange{}, api.UpdateReport{}, api.UpdateRecord{}, api.UpdateCheckRequest{}, api.UpdateApplyRequest{},
 	api.Provision{}, api.ProvisionRequest{}, api.ProvisionResult{}, api.ShellSetupRequest{}, api.ShellSetupResult{}, api.ExecRequest{}, api.BackupRun{}, api.BackupRunRequest{}, api.BackupVerifyRequest{},
 	api.BackupKeyStatus{}, api.BackupKeyCreate{}, api.BackupKeyCreated{}, api.BackupKeyEscrow{},
-	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.NDPStatus{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
+	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.NDPStatus{}, api.JailReach{}, api.Exposed{}, api.ExposeRequest{}, api.UnexposeRequest{}, api.ExposeResult{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
 	api.AppSummary{}, api.AppDetail{}, api.AppInstall{}, api.AppInstallResult{}, api.AppDraft{},
 	api.HostIdentity{}, api.HostIdentityApply{}, api.HostRestore{}, api.HostChange{}, api.HostSnapshot{},
 	api.HostFirewall{}, api.HostFirewallApply{}, api.HostPending{}, api.HostPendingAction{},
@@ -165,10 +165,24 @@ func render() ([]byte, error) {
 	}
 	for _, n := range sortedKeys(g.structs) {
 		t := g.structs[n]
-		fmt.Fprintf(&b, "export interface %s {\n", n)
+		// an embedded struct without a json name is flattened by encoding/json: it is what the interface extends
+		var ext []string
+		for i := 0; i < t.NumField(); i++ {
+			if f := t.Field(i); f.Anonymous && f.IsExported() && f.Type.Kind() == reflect.Struct && f.Tag.Get("json") == "" {
+				ext = append(ext, f.Type.Name())
+			}
+		}
+		if len(ext) > 0 {
+			fmt.Fprintf(&b, "export interface %s extends %s {\n", n, strings.Join(ext, ", "))
+		} else {
+			fmt.Fprintf(&b, "export interface %s {\n", n)
+		}
 		for i := 0; i < t.NumField(); i++ {
 			f := t.Field(i)
 			if !f.IsExported() {
+				continue
+			}
+			if f.Anonymous && f.Type.Kind() == reflect.Struct && f.Tag.Get("json") == "" {
 				continue
 			}
 			name, opt, skip := parseTag(f)

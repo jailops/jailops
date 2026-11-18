@@ -8,7 +8,6 @@ import (
 	"slices"
 	"strings"
 
-	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -203,7 +202,7 @@ func (s *Service) doctorPFInbound(c *checkSet, rules string) {
 			`decide what that rule is for. To keep the Internet away from the jails, leave it. For the policies of the jails to decide, move anchor "jailops/*" above it (a rule that must also apply to the jails, such as a blocklist of sources, stays above the anchor line; rules for a single source are not flagged here), then pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf. JailOps never edits pf.conf`)
 	case len(passes) > 0:
 		c.add(name, api.DoctorWarn, "a pass rule of pf.conf before the jailops anchor opens a jail network for good, so a jail without an allow rule is reachable from outside as well: "+strings.Join(passes, "; "),
-			"delete it: an allow rule with an external source in a policy of the jail opens the uplink now (jailops firewall rule add POLICY in --action allow --proto tcp --port N)")
+			"delete it: the jail's own firewall opens the uplink now, for the ports you name (jailops expose JAIL PORTS)")
 	default:
 		c.add(name, api.DoctorOK, "no rule of pf.conf before the jailops anchor stands in the way of what the policies admit from outside", "")
 	}
@@ -211,7 +210,7 @@ func (s *Service) doctorPFInbound(c *checkSet, rules string) {
 
 // doctorExposedJails says which jails the Internet can reach through an uplink: the jails whose anchor has a pass rule on
 // an uplink (a port forward, or an allow in rule with an external source on a routed address). An administrator of a
-// project writes such a rule for his own jail; this line is where the others see it.
+// project exposes ports of the jails of the project; this line is where the others see it.
 func (s *Service) doctorExposedJails(ctx context.Context, c *checkSet) {
 	const name = "jails.exposed"
 	var out []string
@@ -232,41 +231,95 @@ func (s *Service) doctorExposedJails(ctx context.Context, c *checkSet) {
 			}
 			refsOf[project] = refs
 		}
-		b, err := s.buildJail(ctx, j, refs)
-		if err != nil || b.desired.Anchor == nil {
-			continue
+		if es := s.exposedOf(ctx, j, refs); len(es) > 0 {
+			out = append(out, j.Metadata.Project+"/"+j.Metadata.Name+" ("+exposedSummary(es)+")")
 		}
-		var ports []string
-		ifaces := map[string]bool{}
-		for _, r := range b.desired.Anchor.Rules {
-			if r.Kind != render.RuleFilter || r.Iface == "" || r.Action != "pass" || r.Dir != "in" {
-				continue
-			}
-			ifaces[r.Iface] = true
-			if len(r.Ports) == 0 {
-				ports = append(ports, "all ports")
-				continue
-			}
-			for _, pr := range r.Ports {
-				if pr.Lo == pr.Hi {
-					ports = append(ports, fmt.Sprint(pr.Lo))
-				} else {
-					ports = append(ports, fmt.Sprintf("%d-%d", pr.Lo, pr.Hi))
-				}
-			}
-		}
-		if len(ifaces) == 0 {
-			continue
-		}
-		slices.Sort(ports)
-		out = append(out, fmt.Sprintf("%s/%s (%s, on %s)", j.Metadata.Project, j.Metadata.Name, strings.Join(slices.Compact(ports), ", "), strings.Join(sortedKeys(ifaces), ", ")))
 	}
 	if len(out) == 0 {
 		c.add(name, api.DoctorOK, "no jail has a rule that lets the Internet in on an uplink", "")
 		return
 	}
 	c.add(name, api.DoctorInfo, fmt.Sprintf("%d jail(s) can be reached from the Internet: %s", len(out), strings.Join(out, "; ")),
-		"a port forward or an allow in rule with an external source of a jail's policy opens it; jailops firewall test --from ADDRESS --to jail:NAME --port N shows the rule")
+		"jailops expose opens a jail to the Internet, an allow in rule with an external source does too; jailops firewall exposed lists them and jailops firewall show JAIL says why")
+}
+
+// doctorInboundWithoutSource lists the jails on a routed address whose policies have an allow in rule without a source. Before
+// 0.8.4 such a rule opened the uplink to the Internet; now it is for the jail's link (the project's jails and the host), so
+// what worked before may have stopped. The operator sees which rules, and what to do.
+func (s *Service) doctorInboundWithoutSource(c *checkSet) {
+	const name = "jails.inbound-without-source"
+	s.mu.RLock()
+	var jails []api.Jail
+	for _, k := range sortedKeys(s.jails) {
+		jails = append(jails, s.jails[k].jail)
+	}
+	s.mu.RUnlock()
+	var out []string
+	for _, j := range jails {
+		eff := s.effective(j)
+		if !slices.ContainsFunc(s.exposeRoutes(eff), func(r exposeRoute) bool { return r.Routed }) {
+			continue
+		}
+		names := slices.Clone(eff.Firewall.Policies)
+		if pr, err := s.projKind.get(j.Metadata.Project); err == nil {
+			names = append(names, pr.Spec.FirewallPolicies...)
+		}
+		for _, pn := range names {
+			pol, err := s.polKind.p(j.Metadata.Project).get(pn)
+			if err != nil {
+				continue
+			}
+			for i, r := range pol.Spec.Rules {
+				if r.Action == "allow" && r.Direction == "in" && !r.Disabled && len(r.From) == 0 {
+					out = append(out, fmt.Sprintf("%s/%s: policy %s rule %d", j.Metadata.Project, j.Metadata.Name, pn, i+1))
+				}
+			}
+		}
+	}
+	if len(out) == 0 {
+		return
+	}
+	c.add(name, api.DoctorInfo, "an allow in rule without a source is for the jail's link only and does not open the uplink; these were open to the Internet before 0.8.4: "+strings.Join(out, "; "),
+		"to keep one open to the Internet, give the rule --from any, or use jailops expose JAIL PORTS")
+}
+
+// exposedSummary says what the Internet reaches of a jail in one phrase: "tcp 80,443 over IPv4 and IPv6, tcp 22 over
+// IPv6 from 2001:db8::/32". A forward names the port of the host.
+func exposedSummary(es []api.ExposedEntry) string {
+	type key struct{ proto, ports, from string }
+	var order []key
+	fams := map[key][]string{}
+	for _, e := range es {
+		ports := e.Ports
+		if e.Via == "forward" && e.HostPort > 0 {
+			ports = fmt.Sprint(e.HostPort)
+		}
+		if ports == "" {
+			ports = "all ports"
+		}
+		from := ""
+		if e.Restricted {
+			from = strings.Join(e.From, ",")
+		}
+		k := key{e.Proto, ports, from}
+		if _, ok := fams[k]; !ok {
+			order = append(order, k)
+		}
+		f := "IPv" + e.Family
+		if !slices.Contains(fams[k], f) {
+			fams[k] = append(fams[k], f)
+		}
+	}
+	var parts []string
+	for _, k := range order {
+		slices.Sort(fams[k])
+		p := k.proto + " " + k.ports + " over " + strings.Join(fams[k], " and ")
+		if k.from != "" {
+			p += " from " + k.from
+		}
+		parts = append(parts, p)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // doctorInPlaceThinJails warns about thin FreeBSD jails stored with the update strategy inplace (a strategy that was

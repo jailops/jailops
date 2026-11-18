@@ -13,9 +13,8 @@ spec:
   firewall: {policies: [nginx]}
   resources: {cpu: 1, memory: 512M}
   boot: {autostart: true, priority: 30, depends: [app]}
-  proxy:
-    - {name: http, listen: ":80", jail_port: 80}
-    - {name: https, listen: ":443", jail_port: 443}
+  expose:
+    - {ports: ["80", "443"], comment: web}
   provision:
     packages: [nginx]
     services: {enable: [nginx], start: [nginx]}

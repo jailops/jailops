@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"slices"
+	"strconv"
+	"strings"
 
-	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -117,49 +117,35 @@ func (s *Service) checkForward(ctx context.Context, what, listen string, port in
 	return nil
 }
 
-// checkProxyDevices checks the proxy devices of an effective jail spec against checkForward.
-func (s *Service) checkProxyDevices(ctx context.Context, who string, proxies []api.ProxyDevice) error {
-	for _, p := range proxies {
-		host, port, err := validate.ParseListen(p.Listen)
-		if err != nil {
-			return invalid("%s: proxy %q: %v", who, p.Name, err)
+// checkExposeForwards checks the forwards of a jail's exposure against checkForward: the host port must not be one the host
+// needs, and the listen address must be an address of the host.
+func (s *Service) checkExposeForwards(ctx context.Context, who string, eff api.JailSpec) error {
+	for _, e := range eff.Expose {
+		if !exposesFamily(e, "4") || !natIPv4(s.exposeRoutes(eff)) {
+			continue
 		}
-		if err := s.checkForward(ctx, fmt.Sprintf("%s: proxy %q", who, p.Name), host, port); err != nil {
-			return err
+		for _, port := range e.Ports {
+			if strings.Contains(port, "-") {
+				return rangeForwardError(who, port)
+			}
+			n, err := strconv.Atoi(port)
+			if err != nil {
+				continue
+			}
+			host := n
+			if e.HostPort > 0 {
+				host = e.HostPort
+			}
+			if err := s.checkForward(ctx, fmt.Sprintf("%s: expose %s %s", who, e.Protocol(), port), e.Listen, host); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-// checkRedirectRules requires a global administrator for the port forwards of a policy and checks each against
-// checkForward: a forward opens the host's own uplink to the network and takes traffic that would reach the host. A
-// forward the stored policy (was) already has is not asked for again, so that an administrator of the project can edit the
-// other rules of the policy; a forward that is new or changed is.
-func (s *Service) checkRedirectRules(ctx context.Context, spec api.FirewallPolicySpec, was *api.FirewallPolicySpec) error {
-	had := func(r api.FirewallRule) bool {
-		if was == nil {
-			return false
-		}
-		for _, o := range was.Rules {
-			// enabling a forward that was stored disabled is publishing a host port: that is the global administrator's
-			if o.Redirect != nil && *o.Redirect == *r.Redirect && o.Proto == r.Proto && slices.Equal(o.From, r.From) && (!o.Disabled || r.Disabled) {
-				return true
-			}
-		}
-		return false
-	}
-	for i, r := range spec.Rules {
-		if r.Redirect == nil {
-			continue
-		}
-		if !had(r) {
-			if err := requireGlobalForForward(ctx, fmt.Sprintf("rule %d, which forwards a host port into a jail", i+1)); err != nil {
-				return err
-			}
-		}
-		if err := s.checkForward(ctx, fmt.Sprintf("rule %d", i+1), r.Redirect.Listen, r.Redirect.HostPort); err != nil {
-			return err
-		}
-	}
-	return nil
+// rangeForwardError refuses a range of ports on the IPv4 side of a jail behind NAT: a forward is one host port to one jail port.
+func rangeForwardError(who, port string) error {
+	return invalid("%s: %s is a range of ports, and an IPv4 address behind NAT is reached through a forward of single ports", who, port).
+		WithHint("name the ports one by one, or expose the range on IPv6 only: --family 6")
 }

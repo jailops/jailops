@@ -299,3 +299,23 @@ func (j *JailClient) Expanded(ctx context.Context, name string) (api.JailExpande
 func (j *JailClient) Rename(ctx context.Context, name string, req api.Rename, etag string) (*Operation[api.RenameResult], error) {
 	return renameAt(ctx, j.c, j.r.item(name), req, etag)
 }
+
+// Expose lets the Internet reach ports of a jail (extension jail_expose): an allow rule in the jail's anchor, on the uplink
+// for the addresses the upstream routes, and a forward of the same ports of the host for an IPv4 address behind NAT. The
+// entry of the same protocol and ports is replaced. The IPv4 forward is a global administrator's.
+func (j *JailClient) Expose(ctx context.Context, name string, req api.ExposeRequest) (api.ExposeResult, error) {
+	if err := j.c.need("jail_expose"); err != nil {
+		return api.ExposeResult{}, err
+	}
+	v, _, err := send[api.ExposeResult](ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/expose", body: req})
+	return v, err
+}
+
+// Unexpose takes ports (or families) out of a jail's exposure; without ports it takes all of it.
+func (j *JailClient) Unexpose(ctx context.Context, name string, req api.UnexposeRequest) (api.ExposeResult, error) {
+	if err := j.c.need("jail_expose"); err != nil {
+		return api.ExposeResult{}, err
+	}
+	v, _, err := send[api.ExposeResult](ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/unexpose", body: req})
+	return v, err
+}

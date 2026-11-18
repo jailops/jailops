@@ -899,3 +899,84 @@ func TestStoredWireGuardDownBecomesDisabled(t *testing.T) {
 		t.Fatalf("decoded spec %s: %v", o.Spec, err)
 	}
 }
+
+// A redirect rule of a policy and the proxy keys of a profile are taken out when the object is loaded, and handed over as
+// forwards for the service to give to the jails that used them.
+func TestForwardsAreTakenOutOfPoliciesAndProfiles(t *testing.T) {
+	policy := []byte(`{"apiVersion":"jailops/v1","kind":"FirewallPolicy","metadata":{"uuid":"u1","name":"web","project":"alpha"},"spec":{"default_in":"deny","default_out":"allow","rules":[` +
+		`{"name":"ssh","action":"allow","direction":"in","proto":"tcp","ports":["22"]},` +
+		`{"name":"fwd","comment":"site","action":"allow","direction":"in","proto":"tcp","from":["192.0.2.0/24"],"redirect":{"listen":"192.0.2.7","host_port":8080,"jail_port":80}},` +
+		`{"name":"off","action":"allow","direction":"in","proto":"tcp","disabled":true,"redirect":{"host_port":9090,"jail_port":90}}]}}`)
+	o, changed, fw, err := decodeObjectForwards(policy, nil)
+	if err != nil || !changed {
+		t.Fatalf("decode: changed=%v err=%v", changed, err)
+	}
+	if len(fw) != 2 || !fw[1].Disabled || fw[1].HostPort != 9090 || fw[0].Disabled || fw[0].Policy != "web" || fw[0].Project != "alpha" || fw[0].Rule != 2 || fw[0].HostPort != 8080 || fw[0].JailPort != 80 ||
+		fw[0].Listen != "192.0.2.7" || fw[0].Proto != "tcp" || len(fw[0].From) != 1 || fw[0].Comment != "site" {
+		t.Fatalf("forwards: %+v", fw)
+	}
+	if strings.Contains(string(o.Spec), "redirect") || strings.Count(string(o.Spec), `"name"`) != 1 {
+		t.Fatalf("the policy keeps the forwards: %s", o.Spec)
+	}
+	// loaded again, nothing is left to take
+	b, err := encodeObject(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, changed, fw, err = decodeObjectForwards(b, nil); err != nil || changed || len(fw) != 0 {
+		t.Fatalf("second load: changed=%v forwards=%v err=%v", changed, fw, err)
+	}
+
+	profile := []byte(`{"apiVersion":"jailops/v1","kind":"Profile","metadata":{"uuid":"u2","name":"pub","project":"alpha"},"spec":{"config":{"limits.memory":"1G",` +
+		`"proxy.http.listen":":8080","proxy.http.jail_port":"80","proxy.dns.listen":"192.0.2.7:53","proxy.dns.jail_port":"53","proxy.dns.proto":"udp"}}}`)
+	o, changed, fw, err = decodeObjectForwards(profile, nil)
+	if err != nil || !changed || len(fw) != 2 {
+		t.Fatalf("profile: changed=%v forwards=%v err=%v", changed, fw, err)
+	}
+	if fw[0].Device != "dns" || fw[0].Proto != "udp" || fw[0].Listen != "192.0.2.7" || fw[0].HostPort != 53 || fw[0].JailPort != 53 ||
+		fw[1].Device != "http" || fw[1].Proto != "tcp" || fw[1].Listen != "" || fw[1].HostPort != 8080 || fw[1].Profile != "pub" {
+		t.Fatalf("profile forwards: %+v", fw)
+	}
+	if strings.Contains(string(o.Spec), "proxy") || !strings.Contains(string(o.Spec), "limits.memory") {
+		t.Fatalf("the profile keeps proxy keys or lost the others: %s", o.Spec)
+	}
+}
+
+// The forwards taken out of a policy at load stay on disk until the service has given them to the jails: a stop between the
+// two (the policy is already rewritten) loses none of them.
+func TestTakenForwardsSurviveARestartUntilApplied(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "objects", "FirewallPolicy"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	doc := `{"apiVersion":"jailops/v1","kind":"FirewallPolicy","metadata":{"uuid":"u1","name":"web","project":"alpha"},"spec":{"default_in":"deny","default_out":"allow","rules":[` +
+		`{"name":"fwd","action":"allow","direction":"in","proto":"tcp","redirect":{"host_port":8080,"jail_port":80}}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "objects", "FirewallPolicy", "u1.json"), []byte(doc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close() // the service never took them
+	s, err = Open(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fw := s.TakeMigratedForwards()
+	if len(fw) != 1 || fw[0].HostPort != 8080 {
+		t.Fatalf("the forward is lost after a restart: %+v", fw)
+	}
+	if err := s.ForwardsApplied(); err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	s, err = Open(dir, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if fw := s.TakeMigratedForwards(); len(fw) != 0 {
+		t.Fatalf("an applied forward comes back: %+v", fw)
+	}
+}

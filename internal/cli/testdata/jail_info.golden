@@ -16,6 +16,12 @@ Resources
   Usage:        processes 23, cpu 2h13m, memory 388.2 MiB resident, 256.0 MiB reserved of the 2G limit
   Disk:         root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB
 
+Reachable from
+SOURCE     FAMILY   PROTO   PORTS   LIMITED TO   REACH    BY
+Internet   -        -       -       -            closed   no allow in rule with an external source and no port forward
+  The jail reaches: Internet all; host DNS and ping; other jails all
+  Details: jailops firewall show web --all
+
 Network
   eth0:         network lan, mac derived by the server, mtu network default, up
     10.20.0.10                                 ipv4 global, configured
@@ -47,6 +53,12 @@ Resources
   Usage:        - (the jail is not running)
   Disk:         root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB
   Volume data:  /var/db
+
+Reachable from
+SOURCE     FAMILY   PROTO   PORTS   LIMITED TO   REACH    BY
+Internet   -        -       -       -            closed   no allow in rule with an external source and no port forward
+  The jail reaches: Internet all; host DNS and ping; other jails all
+  Details: jailops firewall show db --all
 
 Network
   eth0:         network lan, mac derived by the server, mtu network default, down
@@ -104,6 +116,23 @@ interfaces:
         family: ipv6
         scope: global
         configured: false
+reach:
+  project: main
+  jail: db
+  rows:
+    - source: internet
+      family: ""
+      proto: ""
+      decision: none
+      by: no allow in rule with an external source and no port forward
+  out:
+    internet: all
+    host: DNS and ping
+    jails: all
+    other_projects: none
+  default_in: allow
+  default_out: allow
+  rules: []
 volumes:
   - volume: data
     mount: /var/db
@@ -163,6 +192,28 @@ $ jailops jail info web -o json
       ]
     }
   ],
+  "reach": {
+    "project": "main",
+    "jail": "web",
+    "rows": [
+      {
+        "source": "internet",
+        "family": "",
+        "proto": "",
+        "decision": "none",
+        "by": "no allow in rule with an external source and no port forward"
+      }
+    ],
+    "out": {
+      "internet": "all",
+      "host": "DNS and ping",
+      "jails": "all",
+      "other_projects": "none"
+    },
+    "default_in": "allow",
+    "default_out": "allow",
+    "rules": []
+  },
   "snapshots": {
     "count": 0
   },

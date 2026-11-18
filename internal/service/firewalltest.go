@@ -21,6 +21,9 @@ type testEnd struct {
 	jail  *api.Jail // nil for an address that belongs to no jail of the project, and for the host
 	addrs []netip.Addr
 	host  bool
+	// internet is the end "internet": one address of no network of JailOps in each family, so that only a rule with
+	// the source any matches it.
+	internet bool
 }
 
 // maxTestCases bounds the address pairs one test evaluates.
@@ -74,6 +77,12 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 	}
 	if src.host && dst.host {
 		return api.FirewallTestResult{}, invalid("from and to are both the host: name a jail or an address on one side")
+	}
+	if dst.internet {
+		return api.FirewallTestResult{}, invalid("internet is a source only: to ask what a jail reaches, name an address of the Internet as --to")
+	}
+	if src.internet && dst.jail == nil {
+		return api.FirewallTestResult{}, invalid("from internet needs a jail as the destination (--to jail:NAME)")
 	}
 	if src.jail == nil && dst.jail == nil {
 		return api.FirewallTestResult{}, invalid("neither end is a jail of this project: there is no anchor of this project to test")
@@ -186,6 +195,37 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 						} else if cont, err = walk("uplink", dst.jail, fwsim.Hook{Dir: "in", Iface: up}); err != nil {
 							return api.FirewallTestResult{}, err
 						}
+					} else if src.internet && fam == "inet" {
+						// an IPv4 address behind NAT: only a forward of the host reaches it; the test enters at the host port
+						// and follows the forward to the jail's port
+						hopOf := func(v fwsim.Verdict, why string, f *render.Forward) api.FirewallTestHop {
+							h := api.FirewallTestHop{Side: "forward", Jail: dst.jail.Metadata.Name, Anchor: an.Name, Direction: "in", Verdict: string(v), Why: why,
+								LoadedMatchesRendered: loaded[jailKey(*dst.jail)]}
+							if f != nil {
+								h.DecidedBy = &api.FirewallTestRule{Stage: f.Origin.Stage, Policy: f.Origin.Policy, ProjectPolicy: f.Origin.ProjectPolicy, Managed: f.Origin.Managed,
+									Rule: f.Origin.RuleNo, Name: f.Origin.RuleName, Comment: f.Origin.Comment}
+							}
+							return h
+						}
+						var fw *render.Forward
+						for i := range an.Forwards {
+							f := &an.Forwards[i]
+							if f.Family == "inet" && f.Proto == proto && f.HostPort == req.Port && f.JailAddr == da && f.From.Contains(sa) {
+								fw = f
+								break
+							}
+						}
+						if fw == nil {
+							c.Hops = append(c.Hops, hopOf(fwsim.Block, fmt.Sprintf("the jail's IPv4 address %s is behind NAT: only a forwarded port of the host reaches it, and no forward of %s port %d is given", da, proto, req.Port), nil))
+							c.Verdict = string(fwsim.Block)
+							cont = false
+						} else {
+							c.Hops = append(c.Hops, hopOf(fwsim.Pass, fmt.Sprintf("port %d of the host is forwarded to %s:%d", fw.HostPort, fw.JailAddr, fw.JailPort), fw))
+							pkt.DstPort = fw.JailPort
+							if cont, err = walk("uplink", dst.jail, fwsim.Hook{Dir: "in", Iface: fw.Iface}); err != nil {
+								return api.FirewallTestResult{}, err
+							}
+						}
 					}
 				}
 				if cont && src.jail != nil {
@@ -292,6 +332,9 @@ func (s *Service) testEnd(project, text string) (testEnd, error) {
 	}
 	if text == "host" {
 		return testEnd{label: "host", host: true}, nil
+	}
+	if text == "internet" {
+		return testEnd{label: "internet", internet: true, addrs: []netip.Addr{internetV4, internetV6}}, nil
 	}
 	if strings.HasPrefix(text, "@") {
 		n := strings.TrimPrefix(text, "@")

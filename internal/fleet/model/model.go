@@ -514,7 +514,7 @@ func DecodeSpec(kind api.Kind, raw map[string]any) (any, error) {
 // deviceLists are the jail spec lists whose elements are named devices.
 // Merging two specs merges these lists name by name (a later entry overrides
 // only the keys it sets) instead of replacing the whole list.
-var deviceLists = map[string]bool{"network": true, "volumes": true, "devfs": true, "proxy": true}
+var deviceLists = map[string]bool{"network": true, "volumes": true, "devfs": true}
 
 // deviceKey is the key an element of a device list is named by: the volumes of a jail by the volume they attach.
 func deviceKey(list string) string {
@@ -525,7 +525,7 @@ func deviceKey(list string) string {
 }
 
 // MergeSpec merges a jail spec fragment over a base: maps merge, null
-// deletes, device lists (network, volumes, devfs, proxy) merge by device
+// deletes, device lists (network, volumes, devfs) merge by device
 // name, every other value replaces. Unnamed network devices are named
 // eth0, eth1, ... by position first. dst is modified and returned.
 func MergeSpec(dst, src map[string]any) map[string]any {

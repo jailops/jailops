@@ -22,7 +22,8 @@ func (a *app) firewallTest() *cobra.Command {
 		Short: "Say whether a connection would pass the firewall, and which rule decides",
 		Long: `Say whether a new connection from one end to the other would pass the firewall, and
 which rule decides at each anchor it meets. SOURCE and DESTINATION are a jail of the
-project (jail:web), one address, or host (the host's address on the gateway of the other end's
+project (jail:web), one address, internet (a source only: any address outside your networks, in IPv4
+and IPv6), or host (the host's address on the gateway of the other end's
 network). A set is not an end: name a jail or an address. An address that belongs to a
 jail of the project is that jail. Another project is an external host: its jails are
 addresses here.
@@ -34,15 +35,18 @@ its name and comment, and the rendered pf line. For a connection between two jai
 hops must pass. A connection from an address outside every network of JailOps to a jail's
 routed address meets the jail's anchor on the uplink first: when no rule of the jail admits it
 there, it is blocked (an "allow in" rule with an external source opens the uplink).
+--from internet asks what the whole Internet reaches: an IPv6 address needs such a rule, an IPv4 address
+is behind NAT and needs a forward of a port of the host ('jailops expose').
 
 It does not cover what it cannot know, and says so: a connection that is already open (pf
 keeps its state), the host's own pf.conf (a quick rule of yours before the anchor line wins:
-jailops doctor, pf.inbound), NAT, and a raw PF fragment, which makes the answer unknown. The ICMP tests default to an echo request (ping); --icmp-type names another.
+jailops doctor, pf.inbound), outbound NAT, and a raw PF fragment, which makes the answer unknown. The ICMP tests default to an echo request (ping); --icmp-type names another.
 
 Exit status: 0 the connection would pass, 1 it would be blocked, 8 the test cannot say.`,
 		Example: `jailops firewall test --from jail:web --to jail:db --port 5432
 jailops firewall test --from jail:web --to jail:db --port 5433
 jailops firewall test --from 192.0.2.7 --to jail:web --port 443
+jailops firewall test --from internet --to jail:web --port 443
 jailops firewall test --from host --to @db --proto icmp
 jailops firewall test --from jail:web --to 198.51.100.9 --proto udp --port 53 -o json`,
 		Args: cobra.NoArgs,
@@ -139,8 +143,16 @@ func printFirewallTest(a *app, res api.FirewallTestResult, verbose bool) {
 				who = "on the uplink"
 			case "tunnel":
 				who = "on the tunnel"
+			case "forward":
+				who = "forwarded"
 			}
 			switch {
+			case h.Side == "forward" && h.Why != "":
+				by := ""
+				if h.DecidedBy != nil {
+					by = " (" + describeRule(h.DecidedBy) + ")"
+				}
+				fprintf(w, "  %s %s: %s: %s%s\n", h.Jail, who, h.Verdict, h.Why, by)
 			case h.DecidedBy != nil:
 				word := map[string]string{"pass": "allowed", "block": "blocked"}[h.Verdict]
 				if word == "" {
@@ -186,9 +198,17 @@ func printFirewallTestVerbose(a *app, res api.FirewallTestResult) {
 				side = "from the uplink into"
 			case "tunnel":
 				side = "from the tunnel into"
+			case "forward":
+				side = "port forward of the host to"
 			}
 			fprintf(w, "  %s %s (%s, %s): %s", side, h.Jail, h.Anchor, h.Direction, strings.ToUpper(h.Verdict))
 			switch {
+			case h.Side == "forward" && h.Why != "":
+				fprintf(w, ": %s", h.Why)
+				if h.DecidedBy != nil {
+					fprintf(w, " (%s)", describeRule(h.DecidedBy))
+				}
+				fprintf(w, "\n")
 			case h.DecidedBy != nil:
 				fprintf(w, " by %s\n", describeRule(h.DecidedBy))
 				fprintf(w, "      %s\n", h.DecidedBy.PF)

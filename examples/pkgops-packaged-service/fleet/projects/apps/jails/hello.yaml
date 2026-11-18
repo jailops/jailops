@@ -10,7 +10,7 @@ spec:
   network: [{name: eth0, network: apps, ipv4: auto}]
   firewall: {policies: [hello]}
   resources: {memory: 256M}
-  proxy: [{name: hello, listen: ":8099", jail_port: 8099}]
+  expose: [{ports: ["8099"], comment: hello}]
   # Runs once, at the jail's first start (or `jailops provision hello --again`). Order inside provision is fixed:
   # packages, files, services, commands. Installing from a private repository needs the repository's configuration in the
   # jail BEFORE `pkg install`, and `packages:` runs before `files:`, so everything that touches the repository is a command.

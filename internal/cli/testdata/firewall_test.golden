@@ -36,6 +36,7 @@ firewall policy/postgres created
 
 $ jailops firewall rule add postgres in --action allow --proto tcp --from set:postgresql-allow --port 5432 --comment who may reach PostgreSQL
 firewall policy/postgres: rule 1 added: allow in tcp from set:postgresql-allow port 5432
+! note: the rule opens the uplink of the jails with this policy that have a routed address, from set:postgresql-allow (review: jailops firewall show JAIL)
 
 $ jailops config set db firewall.policies postgres
 jail/db configuration updated

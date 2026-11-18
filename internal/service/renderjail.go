@@ -30,6 +30,8 @@ type jailBuild struct {
 	// 0 unlimited): the pipes must exist before the jail's anchor is loaded.
 	shapes []render.Shape
 	rates  map[int]uint64
+	// reach is what the reach views probe the anchor with: the host's addresses, the other projects' prefixes, the jail's own.
+	reach reachCtx
 }
 
 // shapeDev is a device of the jail that has a bandwidth limit, as the loop over its devices sees it.
@@ -240,20 +242,8 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			return nil, err
 		}
 	}
-	// Proxy devices are inbound redirects in the jail's anchor.
-	var proxyRules []api.FirewallRule
-	for _, p := range j.Spec.Proxy {
-		host, port, err := validate.ParseListen(p.Listen)
-		if err != nil {
-			return nil, fmt.Errorf("proxy %q: %w", p.Name, err)
-		}
-		proto := p.Proto
-		if proto == "" {
-			proto = "tcp"
-		}
-		proxyRules = append(proxyRules, api.FirewallRule{Name: "proxy " + p.Name, Action: "allow", Direction: "in", Proto: proto,
-			Redirect: &api.Redirect{Listen: host, HostPort: port, JailPort: p.JailPort}})
-	}
+	// The exposure of the jail: an allow rule in for each entry, and the forwards of its IPv4 ports behind NAT.
+	exposures, forwards := s.exposureRules(j.Spec)
 	// Every jail has an anchor, with or without a policy: the isolation of projects and the anti-spoofing rules do not
 	// depend on anyone having written a policy.
 	{
@@ -274,6 +264,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 				TagMembers: map[string][]netip.Addr{}, Sets: refs.sets, Jails: refs.jails, Uplink: uplink, UplinkOf: uplinkOf, OwnNets: ownNets, AllowRaw: true,
 				Antispoof: true, LinkLocal: linkLocal, Host: append(hostNow, hostAddrs...), DNS: dnsAddrs,
 				Foreign: foreign, MaxStates: s.statesLimit(j), Shaping: b.shapes}
+			b.reach = reachCtx{host: in.Host, foreign: foreign, own: ownNets, addrs: addrs}
 			// A jail without any policy is open (apart from the isolation of projects); with policies, the strictest
 			// default of them all applies: the project's defaults are a floor that a jail's own policy can open ports
 			// through but cannot turn from deny into allow.
@@ -309,7 +300,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			if accClosed {
 				in.DefaultIn = "deny"
 			}
-			in.Proxy = proxyRules
+			in.Expose, in.Forwards = exposures, forwards
 			an, err := render.BuildAnchor(in)
 			if err != nil {
 				return nil, err

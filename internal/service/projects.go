@@ -846,13 +846,18 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	if len(eff.Devfs) > 0 && !a.Perm.Satisfies(api.PermAdmin) {
 		return nil, api.Errorf(api.CodeForbidden, "exposing device nodes needs the admin role")
 	}
-	if len(eff.Proxy) > 0 {
-		if old == nil || !slices.Equal(eff.Proxy, s.effective(api.Jail{Spec: *old}).Proxy) {
-			if err := requireGlobalForForward(ctx, "forwarding a host port into a jail"); err != nil {
-				return nil, err
-			}
+	// a forward that the change adds, removes or changes is a global administrator's to give: it takes a port of the host
+	var wasEff api.JailSpec
+	if old != nil {
+		wasEff = s.effective(api.Jail{Spec: *old})
+	}
+	if s.forwardsChange(key, wasEff, eff) {
+		if err := requireGlobalForForward(ctx, "forwarding a host port into a jail"); err != nil {
+			return nil, err
 		}
-		if err := s.checkProxyDevices(ctx, "jail "+key, eff.Proxy); err != nil {
+	}
+	if len(eff.Expose) > 0 {
+		if err := s.checkExposeForwards(ctx, "jail "+key, eff); err != nil {
 			return nil, err
 		}
 	}
@@ -863,18 +868,7 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	if err := s.hostDirAdmission(ctx, p.Meta.Name, eff.Volumes, wasVolumes); err != nil {
 		return nil, err
 	}
-	if len(eff.Proxy) > 0 {
-		up := false
-		for _, nd := range eff.Network {
-			if n, err := s.netKind.get(nd.Network); err == nil && n.Spec.Uplink != "" {
-				up = true
-			}
-		}
-		if !up {
-			return nil, invalid("proxy devices forward host ports and need a network with an uplink")
-		}
-	}
-	if err := s.checkProxyConflicts(key, eff); err != nil {
+	if err := s.checkExposeConflicts(key, eff); err != nil {
 		return nil, err
 	}
 	if spec.Storage == "" {

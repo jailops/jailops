@@ -5,7 +5,6 @@ import (
 	"net/netip"
 	"path"
 	"regexp"
-	"strconv"
 	"strings"
 
 	"jailops.net/jailops/internal/schedule"
@@ -220,27 +219,20 @@ func devices(s api.JailSpec) error {
 		}
 		dseen[d.Name] = true
 	}
-	pseen := map[string]bool{}
-	for i, p := range s.Proxy {
-		f := fmt.Sprintf("proxy[%d]", i)
-		if !api.IsName(p.Name, 31) {
-			return Invalid(f+".name", "device name %q must follow the name rule (%s, at most 31 characters)", p.Name, api.NamePattern)
+	if len(s.Expose) > MaxExpose {
+		return Invalid("expose", "a jail has at most %d exposed entries", MaxExpose)
+	}
+	eseen := map[string]bool{}
+	for i, e := range s.Expose {
+		f := fmt.Sprintf("expose[%d]", i)
+		if err := ExposeEntry(f, e); err != nil {
+			return err
 		}
-		if pseen[p.Name] {
-			return Invalid(f+".name", "duplicate proxy device %q", p.Name)
+		k := e.Protocol() + "/" + strings.Join(e.Ports, ",")
+		if eseen[k] {
+			return Invalid(f+".ports", "%s %s is exposed twice", e.Protocol(), strings.Join(e.Ports, ","))
 		}
-		pseen[p.Name] = true
-		if _, _, err := ParseListen(p.Listen); err != nil {
-			return Invalid(f+".listen", "%v", err)
-		}
-		if p.JailPort < 1 || p.JailPort > 65535 {
-			return Invalid(f+".jail_port", "jail_port must be between 1 and 65535")
-		}
-		switch p.Proto {
-		case "", "tcp", "udp":
-		default:
-			return Invalid(f+".proto", "proto %q must be tcp or udp", p.Proto)
-		}
+		eseen[k] = true
 	}
 	for i, p := range s.Profiles {
 		if err := Name(fmt.Sprintf("profiles[%d]", i), p); err != nil {
@@ -250,26 +242,58 @@ func devices(s api.JailSpec) error {
 	return nil
 }
 
-// ParseListen splits a proxy listener "host:port" or ":port" into the host
-// address (empty for the uplink address) and the port.
-func ParseListen(v string) (host string, port int, err error) {
-	i := strings.LastIndex(v, ":")
-	if i < 0 {
-		return "", 0, fmt.Errorf("listen %q must be host:port or :port", v)
+// MaxExpose is the most entries a jail's exposure may have.
+const MaxExpose = 64
+
+// ExposeEntry checks one entry of a jail's exposure: the protocol, the ports, the families, the sources (an address, a
+// prefix, an address set or any: the host, a jail and a tag never arrive from the Internet), the forward's host port and
+// address, and the comment.
+func ExposeEntry(f string, e api.ExposeEntry) error {
+	if e.Proto != "" && e.Proto != "tcp" && e.Proto != "udp" {
+		return Invalid(f+".proto", "proto %q must be tcp or udp", e.Proto)
 	}
-	host = strings.Trim(v[:i], "[]")
-	if host != "" {
-		a, perr := netip.ParseAddr(host)
-		if perr != nil || a.Zone() != "" || a.IsMulticast() || a.IsUnspecified() {
-			return "", 0, fmt.Errorf("listen address %q is not an address of the host", host)
+	if len(e.Ports) == 0 {
+		return Invalid(f+".ports", "an exposure needs ports")
+	}
+	for _, p := range e.Ports {
+		if _, _, err := ParsePortSpec(p); err != nil {
+			return Invalid(f+".ports", "%q is not a port or a range of ports", p)
 		}
-		host = a.String()
 	}
-	n, perr := strconv.Atoi(v[i+1:])
-	if perr != nil || n < 1 || n > 65535 {
-		return "", 0, fmt.Errorf("listen port %q is not a port", v[i+1:])
+	fseen := map[string]bool{}
+	for _, fam := range e.Families {
+		if fam != "4" && fam != "6" {
+			return Invalid(f+".families", "family %q must be 4 or 6", fam)
+		}
+		if fseen[fam] {
+			return Invalid(f+".families", "family %s is named twice", fam)
+		}
+		fseen[fam] = true
 	}
-	return host, n, nil
+	for _, from := range e.From {
+		k, _, err := ParseEndpoint(from)
+		if err != nil {
+			return Invalid(f+".from", "%s", err.Error())
+		}
+		if k != EndpointAny && k != EndpointSet && k != EndpointAddr {
+			return Invalid(f+".from", "%q never arrives from the Internet: name an address, a prefix, an address set or any (a jail, a tag or the host is a firewall rule)", from)
+		}
+	}
+	if e.HostPort != 0 {
+		if e.HostPort < 1 || e.HostPort > 65535 {
+			return Invalid(f+".host_port", "host_port must be between 1 and 65535")
+		}
+		if len(e.Ports) != 1 || strings.Contains(e.Ports[0], "-") {
+			return Invalid(f+".host_port", "host_port applies to one port, not a range or a list")
+		}
+	}
+	if e.Listen != "" {
+		a, err := netip.ParseAddr(e.Listen)
+		if err != nil || !a.Is4() || a.Zone() != "" || a.IsMulticast() || a.IsUnspecified() || a.IsLoopback() {
+			return Invalid(f+".listen", "listen %q is not an IPv4 unicast address of the host", e.Listen)
+		}
+	}
+	return Comment(f+".comment", e.Comment)
 }
 
 func attach(i int, n api.NetworkAttach) error {

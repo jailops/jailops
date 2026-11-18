@@ -130,7 +130,7 @@ func TestExampleFleetValidatesAndRenders(t *testing.T) {
 	contains(t, r.out, "managed_by: sync:minimal")
 	contains(t, r.out, "project: web")
 	contains(t, r.out, "profiles: small, web")
-	contains(t, r.out, "jail_port: 443")
+	contains(t, r.out, "expose:")
 	if strings.Contains(r.out, "name: wiki") {
 		t.Fatal("web2's jail rendered for web1")
 	}

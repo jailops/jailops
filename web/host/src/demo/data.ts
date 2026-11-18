@@ -174,9 +174,8 @@ export function policies(): FirewallPolicy[] {
     {
       metadata: meta('web-default'), spec: {
         default_in: 'deny', default_out: 'allow', rules: [
-          { name: 'http', action: 'allow', direction: 'in', proto: 'tcp', ports: ['80', '443'] },
+          { name: 'http', action: 'allow', direction: 'in', proto: 'tcp', from: ['any'], ports: ['80', '443'] },
           { name: 'ssh from admins', action: 'allow', direction: 'in', proto: 'tcp', from: ['set:admins'], ports: ['22'], log: true },
-          { name: 'forward 8080', action: 'allow', direction: 'in', proto: 'tcp', ports: ['8080'], redirect: { host_port: 8080, jail_port: 80 } },
           { name: 'no scanner', comment: 'a scanner that kept coming back', action: 'deny', direction: 'in', proto: 'tcp', from: ['192.0.2.66'], ports: ['80'] },
           { name: 'ftp', comment: 'switched off until the migration is done', action: 'allow', direction: 'in', proto: 'tcp', ports: ['21'], disabled: true },
         ],

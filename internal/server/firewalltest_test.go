@@ -277,7 +277,7 @@ func TestFirewallTestMeetsTheUplinkOfAJailFromOutside(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := fw.Policies().Create(c, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "ssh"}, Spec: api.FirewallPolicySpec{DefaultIn: "allow", DefaultOut: "allow",
-		Rules: []api.FirewallRule{{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"2282"}, Comment: "ssh from anywhere"}}}}); err != nil {
+		Rules: []api.FirewallRule{{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"any"}, Ports: []string{"2282"}, Comment: "ssh from anywhere"}}}}); err != nil {
 		t.Fatal(err)
 	}
 	on := func(name string) api.Jail {

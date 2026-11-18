@@ -37,6 +37,7 @@ import JailExecTab from '@/components/JailExecTab.vue'
 import JailUpdatesTab from '@/components/JailUpdatesTab.vue'
 import JailLogsTab from '@/components/JailLogsTab.vue'
 import JailAccessTab from '@/components/JailAccessTab.vue'
+import JailReachTab from '@/components/JailReachTab.vue'
 import { isInstalledApp } from '@/lib/access'
 import ProvisionPanel from '@/components/ProvisionPanel.vue'
 import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
@@ -86,13 +87,15 @@ const jail = computed<Jail | undefined>(() => l.data.value?.jail)
 const snaps = computed(() => [...(l.data.value?.snaps ?? [])].sort((a, b) => (b.metadata.created_at ?? '').localeCompare(a.metadata.created_at ?? '')))
 const maxWritten = computed(() => Math.max(1, ...snaps.value.map((x) => x.status.written ?? 0)))
 
-type Tab = 'overview' | 'config' | 'devices' | 'updates' | 'logs' | 'access' | 'console'
+type Tab = 'overview' | 'config' | 'devices' | 'updates' | 'logs' | 'reach' | 'access' | 'console'
 const tabList = computed(() => ([
   ['overview', s.jail.overview, true],
   ['config', s.config.tab, true],
   ['devices', s.devices.tab, true],
   ['updates', s.updates.tab, hasExt('updates')],
   ['logs', s.logs.tab, hasExt('jail_logs')],
+  // what reaches the jail and why, for every jail
+  ['reach', s.reach.tab, hasExt('jail_reach')],
   // who may connect: for the jails an app installation made
   ['access', s.appAccess.tab, hasExt('app_access') && isInstalledApp(jail.value)],
   // the console session needs the extension and operator in the project, as `jailops exec`
@@ -273,6 +276,7 @@ const attentionItems = computed(() => {
         <JailDevicesTab v-else-if="tab === 'devices'" :jail="jail" :sources="l.data.value?.sources ?? {}" @saved="l.reload" />
         <JailUpdatesTab v-else-if="tab === 'updates'" :jail="jail" @saved="l.reload" />
         <JailLogsTab v-else-if="tab === 'logs'" :jail="jail" :file="logFile" />
+        <JailReachTab v-else-if="tab === 'reach'" :jail="jail" />
         <JailAccessTab v-else-if="tab === 'access'" :jail="jail" />
         <JailExecTab v-else-if="tab === 'console'" :jail="jail" :connect="shellAsk" @changed="l.reload" />
         <template v-else>

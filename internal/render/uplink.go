@@ -63,18 +63,46 @@ func tunnelIfaces(in *PFInput, addrs []netip.Addr) map[netip.Addr][]string {
 	return out
 }
 
-// uplinkSection is the rules of one policy with where they come from, for uplinkRules.
+// ExposeOrigin is the Origin.Policy of the rules made from the jail's exposure.
+const ExposeOrigin = "expose"
+
+// Exposure is one entry of a jail's exposure as the renderer takes it: the ports of one protocol that the Internet
+// reaches, from the sources named (an empty From is "any": an exposure is explicit), on the families named (empty is
+// every family the jail has).
+type Exposure struct {
+	Name     string
+	Proto    string
+	Ports    []string
+	From     []string
+	Families []string
+	Comment  string
+}
+
+// rule is the allow rule in that stands for the exposure on the jail's link and, through uplinkRules, on its uplink.
+func (e Exposure) rule() api.FirewallRule {
+	from := e.From
+	if len(from) == 0 {
+		from = []string{"any"}
+	}
+	return api.FirewallRule{Name: e.Name, Comment: e.Comment, Action: "allow", Direction: "in", Proto: e.Proto,
+		Ports: append([]string(nil), e.Ports...), From: append([]string(nil), from...)}
+}
+
+// uplinkSection is the rules of one policy with where they come from, for uplinkRules. fams restricts a rule, by its
+// index, to the families "4" and "6"; a rule without an entry is for every family.
 type uplinkSection struct {
 	org   Origin
 	rules []api.FirewallRule
+	fams  map[int][]string
 }
 
-// externalEndpoints is endpoints for the uplink: what a rule names that can arrive from outside. "any" (or no source at
-// all) is any; an address and an address set stay; the host, a jail and a tag never arrive on the uplink, so they are
-// left out, and a rule that names nothing else has no uplink rule. The Match is the structured form.
+// externalEndpoints is endpoints for the uplink: what a rule names that can arrive from outside. Only a source that is
+// named opens the uplink: "any", an address, a prefix or an address set. A rule without a source is for the jail's link
+// (the project's jails and the host) and has no uplink rule; the host, a jail and a tag never arrive on the uplink, so
+// they are left out too. The Match is the structured form.
 func externalEndpoints(entries []string, f family, in *PFInput) (string, Match, bool) {
 	if len(entries) == 0 {
-		return "any", anyMatch(), true
+		return "", Match{}, false
 	}
 	var parts []string
 	var m Match
@@ -159,6 +187,7 @@ func uplinkRules(b *builder, in *PFInput, secs []uplinkSection, fams []family) e
 		org  Origin
 		i    int
 		rule api.FirewallRule
+		fams []string
 	}
 	var denies, allows []cand
 	for _, sec := range secs {
@@ -172,7 +201,7 @@ func uplinkRules(b *builder, in *PFInput, secs []uplinkSection, fams []family) e
 					continue
 				}
 			}
-			c := cand{org: sec.org, i: i, rule: r}
+			c := cand{org: sec.org, i: i, rule: r, fams: sec.fams[i]}
 			if r.Action == "deny" {
 				denies = append(denies, c)
 			} else {
@@ -214,6 +243,9 @@ func uplinkRules(b *builder, in *PFInput, secs []uplinkSection, fams []family) e
 		emit := func(c cand, act, pfAct string) {
 			r := c.rule
 			if r.Proto == "icmp" && k.kw != "inet" || r.Proto == "icmp6" && k.kw != "inet6" {
+				return
+			}
+			if len(c.fams) > 0 && !slices.Contains(c.fams, map[string]string{"inet": "4", "inet6": "6"}[k.kw]) {
 				return
 			}
 			from, mFrom, ok := externalEndpoints(r.From, f, in)

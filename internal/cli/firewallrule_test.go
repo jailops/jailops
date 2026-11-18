@@ -58,7 +58,6 @@ func TestFirewallRuleRefusals(t *testing.T) {
 		{"rule", "add", "nothing", "in", "--action", "allow"},                                                      // no such policy
 		{"rule", "add", "web", "in", "--action", "allow", "--at", "9"},                                             // no such position
 		{"rule", "add", "web", "in", "--action", "allow", "--from", "@office"},                                     // @ is gone
-		{"rule", "add", "web", "in", "--action", "allow", "--redirect", "eighty"},                                  // not HOSTPORT:JAILPORT
 		{"rule", "remove", "web", "7"},                                                                             // no such rule
 		{"rule", "remove", "web", "ghost"},                                                                         // no such name
 		{"rule", "remove", "web"},                                                                                  // which one

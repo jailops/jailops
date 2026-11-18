@@ -281,7 +281,7 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    `jailops config set JAIL boot.autostart false` turns it off for one jail.
 10. **Say how to reach it**: the jail's addresses with the `ports` (`endpoint` is `<first address>:<port>`), the
    `data`, `config` and `logs` paths, and the `notes`. Ports marked `expose: true` are recorded as such and nothing
-   more: forwarding them through the jail's PF anchor (`proxy` devices) is a later feature.
+   more: letting them in from the Internet is `jailops expose JAIL PORTS`.
 
 The events `app.installed` and `app.install.failed` (source `/api/v1/jails/<jail>`) end it, after the ordinary
 `jail-created`, `jail-started` and `jail-snapshot-created` of the steps.

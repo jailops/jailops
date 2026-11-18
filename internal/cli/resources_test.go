@@ -179,7 +179,6 @@ func TestFirewall(t *testing.T) {
 	tr.ok("firewall", "policy", "create", "web", "--default-in", "deny", "--default-out", "allow")
 	tr.ok("firewall", "rule", "add", "web", "in", "--action", "allow", "--proto", "tcp", "--port", "80,443")
 	tr.ok("firewall", "rule", "add", "web", "in", "--action", "allow", "--proto", "tcp", "--from", "set:office", "--port", "22", "--log")
-	tr.ok("firewall", "rule", "add", "web", "in", "--action", "allow", "--proto", "tcp", "--redirect", "8080:80")
 	tr.do("", "firewall", "rule", "add", "web", "in")
 	tr.do("", "firewall", "rule", "add", "web", "in", "--action", "allow", "--proto", "bogus")
 	tr.ok("firewall", "policy", "list")
@@ -206,7 +205,6 @@ spec:
   rules:
     - {action: permit, direction: sideways, proto: tcp, ports: ["99999"], from: ["300.1.1.1", "set:nowhere"]}
     - {action: allow, direction: in, ports: ["80"]}
-    - {action: allow, direction: out, proto: tcp, redirect: {host_port: 80, jail_port: 80}}
   raw: "block all"
 ---
 kind: AddressSet

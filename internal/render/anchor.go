@@ -35,6 +35,24 @@ type Anchor struct {
 	Uplinks map[netip.Addr]string
 	// Tunnels maps the jail's addresses to the WireGuard interfaces whose peers may be admitted to them by an allow in rule.
 	Tunnels map[netip.Addr][]string
+	// Forwards are the port forwards of the anchor: what arrives on an uplink at a port of the host and is sent on to the
+	// jail (match in ... rdr-to). The pass rule that follows each of them is among Rules.
+	Forwards []Forward
+}
+
+// Forward is one port forward of an anchor: Proto traffic from From that arrives on Iface at HostPort of Listen (the
+// uplink's own address when Listen is not valid) is sent to JailPort of JailAddr.
+type Forward struct {
+	Iface  string
+	Family string // "inet" or "inet6"
+	Proto  string
+	From   Match
+	// Listen is the host address the forward answers on; the zero address means the address of the uplink.
+	Listen   netip.Addr
+	HostPort int
+	JailAddr netip.Addr
+	JailPort int
+	Origin   Origin
 }
 
 // Text is the ruleset as it is loaded.

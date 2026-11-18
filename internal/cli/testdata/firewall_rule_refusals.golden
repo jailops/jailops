@@ -3,10 +3,12 @@ firewall policy/web created
 
 $ jailops firewall rule add web in --action allow --proto tcp --port 80 --name site --comment the site
 firewall policy/web: rule 1 added: allow in tcp port 80
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall rule add web in
 firewall policy/web: rule 2 added: allow in
 ! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 2 --comment TEXT
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall rule add web sideways --action allow
 ! usage: the direction is in (to the jail) or out (from the jail), not "sideways"
@@ -41,11 +43,6 @@ $ jailops firewall rule add web in --action allow --from @office
 ! hint: run 'jailops firewall rule add --help' for usage
 [exit 2]
 
-$ jailops firewall rule add web in --action allow --redirect eighty
-! usage: --redirect "eighty" must be HOSTPORT:JAILPORT, for example 8080:80
-! hint: run 'jailops firewall rule add --help' for usage
-[exit 2]
-
 $ jailops firewall rule remove web 7
 ! usage: policy web has 2 rules; there is no rule 7
 ! hint: run 'jailops firewall rule remove --help' for usage
@@ -62,7 +59,7 @@ $ jailops firewall rule remove web
 [exit 2]
 
 $ jailops firewall rule edit web 1
-! usage: nothing to change: give at least one of --action, --direction, --proto, --from, --to, --port, --name, --comment, --log, --redirect
+! usage: nothing to change: give at least one of --action, --direction, --proto, --from, --to, --port, --name, --comment, --log
 ! hint: run 'jailops firewall rule edit --help' for usage
 [exit 2]
 

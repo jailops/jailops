@@ -18,6 +18,7 @@ func (s *Server) setupJails() {
 	k := s.jails
 	k.asyncCreate, k.asyncDelete = true, true
 	k.keep = func(dst, old *api.Jail) { dst.Status = old.Status }
+	k.decorate = func(j *api.Jail) { j.Status.Exposed = s.fakeReach(j.Metadata.Project, j).Exposed }
 	k.expand = func(j *api.Jail) any { return s.jailExpanded(j) }
 	k.validate = func(j, old *api.Jail) *api.Error {
 		if j.Spec.Image == "" {

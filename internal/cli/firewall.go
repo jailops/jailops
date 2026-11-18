@@ -107,7 +107,7 @@ jailops firewall address-set create -f office.yaml`,
 			}
 		})
 	ac.AddCommand(a.addrSetAdd(), a.addrSetRemove())
-	fc.AddCommand(pc, a.ruleCmd(), ac, a.firewallValidate(), a.firewallTest())
+	fc.AddCommand(pc, a.ruleCmd(), ac, a.firewallValidate(), a.firewallTest(), a.firewallShow(), a.firewallExposed())
 	return fc
 }
 
@@ -175,14 +175,6 @@ func validatePolicy(doc string, p api.FirewallPolicySpec, sets func(string) bool
 				bad("%s: unknown address set %q", at, n)
 			}
 		}
-		if r.Redirect != nil {
-			if r.Direction != "in" {
-				bad("%s: a redirect is allowed on inbound rules only", at)
-			}
-			if r.Redirect.HostPort < 1 || r.Redirect.HostPort > 65535 || r.Redirect.JailPort < 1 || r.Redirect.JailPort > 65535 {
-				bad("%s: redirect ports must be 1-65535", at)
-			}
-		}
 	}
 	if p.Raw != "" {
 		out = append(out, finding{doc, "warning", "raw PF needs the admin role; the server checks it with pfctl -n when applied"})
@@ -236,7 +228,7 @@ func (a *app) firewallValidate() *cobra.Command {
 		Use:   "validate -f FILE",
 		Short: "Check firewall policies and address sets without applying them",
 		Long: `Check the FirewallPolicy and AddressSet documents of a file: actions, directions,
-protocols, ports, address syntax, redirects, references (jail:NAME, set:NAME, tag:NAME)
+protocols, ports, address syntax, references (jail:NAME, set:NAME, tag:NAME)
 and set cycles. Address sets defined in the same file count, and the ones on
 the server are looked up unless --offline is given.
 

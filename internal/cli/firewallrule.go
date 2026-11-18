@@ -42,9 +42,9 @@ jailops firewall rule remove web 4`)
 
 // ruleOpts are the flags that describe a rule, the same on add and on edit.
 type ruleOpts struct {
-	action, direction, proto, name, comment, redirect string
-	from, to, ports                                   []string
-	log, disabled                                     bool
+	action, direction, proto, name, comment string
+	from, to, ports                         []string
+	log, disabled                           bool
 }
 
 func (a *app) ruleFlags(cmd *cobra.Command, forAdd bool) *ruleOpts {
@@ -62,7 +62,6 @@ func (a *app) ruleFlags(cmd *cobra.Command, forAdd bool) *ruleOpts {
 	f.StringVar(&o.name, "name", "", "a short name to address the rule by instead of its number")
 	f.StringVar(&o.comment, "comment", "", "why the rule is there (one line, at most 200 characters, no double quotes or backslashes): what a reviewer of the firewall reads")
 	f.BoolVar(&o.log, "log", false, "log the packets the rule decides")
-	f.StringVar(&o.redirect, "redirect", "", "forward a port of the host to the jail: HOSTPORT:JAILPORT (inbound rules only; the redirect names the ports, so leave --port out)")
 	if forAdd {
 		f.BoolVar(&o.disabled, "disabled", false, "add the rule switched off: it keeps its number and loads nothing")
 	}
@@ -78,7 +77,6 @@ func (a *app) ruleFlags(cmd *cobra.Command, forAdd bool) *ruleOpts {
 	_ = cmd.RegisterFlagCompletionFunc("comment", func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
 		return cobra.AppendActiveHelp(nil, "why the rule is there, in one line"), cobra.ShellCompDirectiveNoFileComp
 	})
-	_ = cmd.RegisterFlagCompletionFunc("redirect", completeNone)
 	return o
 }
 
@@ -114,19 +112,6 @@ func (o *ruleOpts) apply(cmd *cobra.Command, r *api.FirewallRule) error {
 	}
 	if ch("disabled") {
 		r.Disabled = o.disabled
-	}
-	if ch("redirect") {
-		if o.redirect == "" {
-			r.Redirect = nil
-		} else {
-			h, j, ok := strings.Cut(o.redirect, ":")
-			hp, e1 := strconv.Atoi(h)
-			jp, e2 := strconv.Atoi(j)
-			if !ok || e1 != nil || e2 != nil {
-				return usagef("--redirect %q must be HOSTPORT:JAILPORT, for example 8080:80", o.redirect)
-			}
-			r.Redirect = &api.Redirect{HostPort: hp, JailPort: jp}
-		}
 	}
 	for _, e := range append(slices.Clone(r.From), r.To...) {
 		if err := validate.ValidateEndpoint(e); err != nil {
@@ -271,12 +256,13 @@ traffic to the jail, out is traffic from it. The rule allows unless --action den
 narrows the rule: without --proto it matches every protocol (with --port it is tcp), without --from or --to every
 address, without --port every port. Say why the rule is there
 with --comment: it shows in 'policy show' and as a comment line in the rendered anchor. An inbound rule names the
-source with --from; an outbound rule names the destination with --to. A rule with --redirect HOSTPORT:JAILPORT
-forwards a port of the host to the jail.`,
+source with --from; an outbound rule names the destination with --to. An inbound rule without --from is for the
+jail's link (the project's jails and the host): to let the Internet in, name a source (--from any, an address, a
+prefix or a set) or use 'jailops expose JAIL PORTS', which also forwards IPv4 ports behind NAT.`,
 		Example: `jailops firewall rule add web in --action allow --proto tcp --port 80,443 --comment "the site"
 jailops firewall rule add web in --action allow --proto tcp --from set:office --port 22 --comment "ssh from the office"
 jailops firewall rule add db out --action allow --proto tcp --to jail:cache --port 6379 --name cache --comment "the cache"
-jailops firewall rule add web in --action allow --proto tcp --redirect 8080:80 --comment "the test site"`,
+jailops firewall rule add web in --action allow --proto tcp --from any --port 80,443 --comment "the site, from the Internet"`,
 		Args: cobra.ExactArgs(2),
 	}
 	o := a.ruleFlags(cmd, true)
@@ -324,6 +310,13 @@ jailops firewall rule add web in --action allow --proto tcp --redirect 8080:80 -
 		if r.Comment == "" && !a.quiet && !a.dryRun {
 			fprintf(a.env.Stderr, "note: the rule has no comment; say why it is there with: jailops firewall rule edit %s %d --comment TEXT\n", args[0], pos+1)
 		}
+		if !a.quiet && !a.dryRun && r.Direction == "in" && r.Action == "allow" && !r.Disabled {
+			if len(r.From) == 0 {
+				fprintf(a.env.Stderr, "note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS\n")
+			} else if opensUplink(r.From) {
+				fprintf(a.env.Stderr, "note: the rule opens the uplink of the jails with this policy that have a routed address, from %s (review: jailops firewall show JAIL)\n", strings.Join(r.From, ","))
+			}
+		}
 		return nil
 	}
 	return cmd
@@ -357,9 +350,6 @@ func (a *app) ruleList() *cobra.Command {
 				on = "no"
 			}
 			port := strings.Join(r.Ports, ",")
-			if r.Redirect != nil {
-				port = strings.TrimSpace(port + " rdr " + fmt.Sprintf("%d:%d", r.Redirect.HostPort, r.Redirect.JailPort))
-			}
 			rows = append(rows, []string{strconv.Itoa(i + 1), dash(r.Name), r.Action, r.Direction, dash(r.Proto),
 				dash(strings.Join(r.From, ",")), dash(strings.Join(r.To, ",")), dash(port), on, dash(r.Comment)})
 		}
@@ -379,7 +369,7 @@ func (a *app) ruleEdit() *cobra.Command {
 		Use:   "edit POLICY RULE [flags]",
 		Short: "Change fields of one rule of a firewall policy",
 		Long: `Change the fields of a rule that you give; the others stay. RULE is a number or a name. To clear a field give it an
-empty value (--from "", --port "", --redirect ""). To switch a rule off or on use 'rule disable' and 'rule enable'.`,
+empty value (--from "", --port ""). To switch a rule off or on use 'rule disable' and 'rule enable'.`,
 		Example: "jailops firewall rule edit web 2 --port 22,2222\njailops firewall rule edit web ssh --from set:office --comment \"ssh from the office only\"",
 		Args:    cobra.ExactArgs(2),
 	}
@@ -387,7 +377,7 @@ empty value (--from "", --port "", --redirect ""). To switch a rule off or on us
 	cmd.ValidArgsFunction = completeArgs(completeKind(a, policyDesc()), rulePositionCompleter(a))
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if cmd.Flags().NFlag() == 0 {
-			return usagef("nothing to change: give at least one of --action, --direction, --proto, --from, --to, --port, --name, --comment, --log, --redirect")
+			return usagef("nothing to change: give at least one of --action, --direction, --proto, --from, --to, --port, --name, --comment, --log")
 		}
 		c, err := a.connect(cmd.Context())
 		if err != nil {
@@ -638,4 +628,15 @@ func portCompleter(_ *cobra.Command, _ []string, typed string) ([]string, cobra.
 		out = []string{typed}
 	}
 	return out, cobra.ShellCompDirectiveNoFileComp | cobra.ShellCompDirectiveNoSpace
+}
+
+// opensUplink says whether an inbound rule's sources can arrive from outside: any, an address, a prefix or an address set.
+func opensUplink(from []string) bool {
+	for _, f := range from {
+		k, _, err := validate.ParseEndpoint(f)
+		if err == nil && (k == validate.EndpointAny || k == validate.EndpointSet || k == validate.EndpointAddr) {
+			return true
+		}
+	}
+	return false
 }

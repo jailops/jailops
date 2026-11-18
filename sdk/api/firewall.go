@@ -36,8 +36,9 @@ type FirewallRule struct {
 	// Disabled switches the rule off without deleting it: it is validated and numbered like any other and shows in the
 	// policy and as a comment line of the rendered anchor, but it is not loaded and lets nothing through or stops nothing.
 	Disabled bool `json:"disabled,omitempty"`
-	// Redirect rewrites the destination (rdr). Allowed on inbound rules only.
-	Redirect *Redirect `json:"redirect,omitempty"`
+	// Redirect is the port forward of an exposed IPv4 port (jailops expose). It is made by the server from the jail's
+	// exposure and is not part of a stored policy.
+	Redirect *Redirect `json:"-"`
 }
 
 // Redirect is a port forward to the jail.

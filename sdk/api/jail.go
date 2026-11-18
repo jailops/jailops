@@ -76,8 +76,9 @@ type JailSpec struct {
 	Profiles []string `json:"profiles,omitempty"`
 	// Devfs exposes selected device nodes through an allow-listed devfs ruleset.
 	Devfs []DevfsDevice `json:"devfs,omitempty"`
-	// Proxy forwards host ports to the jail through the jail's PF anchor.
-	Proxy []ProxyDevice `json:"proxy,omitempty"`
+	// Expose lets traffic from the Internet reach the jail on its ports (jailops expose): an allow rule in the jail's anchor,
+	// on the uplink for the addresses the upstream routes, and a port forward for an IPv4 address behind NAT.
+	Expose []ExposeEntry `json:"expose,omitempty"`
 	// Encrypted is reserved: native ZFS encryption of jails is not implemented and creation with it set is refused.
 	Encrypted bool `json:"encrypted,omitempty"`
 	// Delegate hands the jail one ZFS dataset of its own, <container>/delegated (jailed=on, zfs.dataset in
@@ -206,15 +207,33 @@ type DevfsDevice struct {
 	Device string `json:"device"`
 }
 
-// ProxyDevice forwards a port of the host to a port of the jail.
-type ProxyDevice struct {
-	Name string `json:"name"`
-	// Listen is "host:port" or ":port" ("host" is an address of the host; empty
-	// means the uplink address).
-	Listen   string `json:"listen"`
-	JailPort int    `json:"jail_port"`
-	// Proto is "tcp" (default) or "udp".
+// ExposeEntry is one exposure of a jail: the ports of one protocol that the Internet reaches, on the families named.
+type ExposeEntry struct {
+	// Proto is "tcp" (the default) or "udp".
 	Proto string `json:"proto,omitempty"`
+	// Ports are the jail's ports: "80", or a range "8000-8100" (a range is not forwarded).
+	Ports []string `json:"ports"`
+	// Families are "4" and "6": the families of the jail's addresses that were exposed. They are resolved when the
+	// command runs and never widened later by a change of the jail's networks.
+	Families []string `json:"families,omitempty"`
+	// From restricts who may connect: addresses, prefixes and address sets (set:NAME). Empty means anyone.
+	From []string `json:"from,omitempty"`
+	// HostPort is the host port of the IPv4 forward when it differs from the jail's port (one port only).
+	HostPort int `json:"host_port,omitempty"`
+	// Listen is the host address of the IPv4 forward; empty means the uplink's address.
+	Listen  string `json:"listen,omitempty"`
+	Comment string `json:"comment,omitempty"`
+	// By and At say who exposed the ports and when; the server sets them.
+	By string `json:"by,omitempty"`
+	At string `json:"at,omitempty"`
+}
+
+// Protocol is the entry's protocol: tcp when none is written.
+func (e ExposeEntry) Protocol() string {
+	if e.Proto == "" {
+		return "tcp"
+	}
+	return e.Proto
 }
 
 // DefaultStopTimeout is the stop timeout of a jail that does not set boot.stop_timeout, in seconds: the time the stop
@@ -275,6 +294,9 @@ type JailStatus struct {
 	// space a thin root shares with its image excluded); the volumes it attaches are the project's. Zero when ZFS
 	// could not be read. Filled by list and get.
 	DiskUsed int64 `json:"disk_used,omitempty"`
+	// Exposed is what the Internet reaches on the jail: pass rules on an uplink and port forwards, from the anchor the
+	// renderer builds. Filled by list and get; empty when nothing is reachable or the anchor could not be built.
+	Exposed []ExposedEntry `json:"exposed,omitempty"`
 }
 
 // JailAction is the body of PUT /api/v1/jails/{name}/state.
