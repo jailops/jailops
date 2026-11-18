@@ -24,8 +24,10 @@ concurrency:
 
 jobs:
   # A release commit changes version.txt and CHANGELOG.md and nothing else: the tree it comes from passed this workflow already on its
-  # parent. When the change is only those two files and the parent has a green push run, the slow jobs (the race detector, the fuzzers,
-  # the browsers and the FreeBSD VMs) are skipped, so a release PR and the push of its merge take minutes. Anything else runs everything.
+  # parent. When the change is only those two files and the tree of the parent has a green run (the run of the parent itself, or of any
+  # commit with the same tree: a squash merge is a new commit of the tree its pull request ran), the slow jobs (the race detector, the
+  # fuzzers, the browsers and the FreeBSD VMs) are skipped, so a release PR and the push of its merge take minutes. Anything else runs
+  # everything, docs included: tests and the prose lint read the docs.
   # `just release` still asks for a green run of exactly the commit it tags: the jobs that run here make it.
   changes:
     name: What changed
@@ -51,10 +53,15 @@ jobs:
             files=$(git diff --name-only HEAD^1 HEAD)
             if [ -n "$files" ] && [ -z "$(printf '%s\n' "$files" | grep -v -x -e version.txt -e CHANGELOG.md || true)" ]; then
               parent=$(git rev-parse HEAD^1)
-              green=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow CI --commit "$parent" --event push --limit 5 \
-                --json status,conclusion --jq '[.[] | select(.status == "completed" and .conclusion == "success")] | length' || echo 0)
-              if [ "${green:-0}" -ge 1 ]; then only=true; fi
-              echo "only version.txt and CHANGELOG.md changed; green runs of the parent ${parent}: ${green:-0}"
+              tree=$(git rev-parse "$parent^{tree}")
+              green=0
+              for sha in $(gh run list --repo "$GITHUB_REPOSITORY" --workflow CI --status success --limit 40 --json headSha --jq '.[].headSha' | sort -u); do
+                if [ "$sha" = "$parent" ]; then green=$sha; break; fi
+                t=$(gh api "repos/$GITHUB_REPOSITORY/commits/$sha" --jq .commit.tree.sha 2>/dev/null || true)
+                if [ "$t" = "$tree" ]; then green=$sha; break; fi
+              done
+              if [ "$green" != 0 ]; then only=true; fi
+              echo "only version.txt and CHANGELOG.md changed; the tree of the parent ${parent} is green in the run of: ${green}"
             fi
           fi
           echo "release_only=$only" >> "$GITHUB_OUTPUT"
@@ -157,11 +164,13 @@ jobs:
           sort -rn "$speeds" | awk '{ printf "%6d KB/s  %s\n", $1 / 1024, $2 }'
           grep -qv '^0' "$speeds" || exit 0
           sort -rn "$speeds" | awk '{ printf "%s\tpriority:%d\n", $2, NR }' | sudo tee "$list" >/dev/null
+      # Only the packages, not the directory: apt leaves `lock` (root, 0640) and `partial/` in it, tar cannot read them, the save failed
+      # with exit code 2 and so the cache never existed: every run downloaded Chromium and its libraries again.
       - name: Cache the apt packages and the Playwright browser
         uses: actions/cache@v4
         with:
           path: |
-            /var/cache/apt/archives
+            /var/cache/apt/archives/*.deb
             ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-v1-${{ hashFiles('web/package-lock.json') }}
       - name: Chromium and its system libraries and fonts
@@ -396,25 +405,37 @@ jobs:
     needs: [web-build, changes]
     if: needs.changes.outputs.release_only != 'true'
     runs-on: ubuntu-latest
+    # the slowest part takes seventeen minutes: a VM that hangs (an unreachable package mirror kept one for thirty) ends at forty
+    timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
         # the end-to-end flow and the packet filter test are linear scripts that took twenty minutes each: they run in shards on VMs of
         # their own (scripts/ci-freebsd-e2e.sh JAILOPS_E2E_SHARD, scripts/ci-freebsd-pf.sh PF_SHARD), each set up the same way
+        # pkgs: what the VM of the part needs from the package repository, nothing else. The e2e and pf VMs run the binaries built
+        # above, the scripts use curl and rsync on the host (the jails get their packages through the helper), and only the backup node
+        # step of e2e shard 2 and the Go tests use a PostgreSQL on the host.
         include:
           - part: go
+            pkgs: go git-lite postgresql17-server bash curl rsync
           - part: e2e
             shard: "1"
+            pkgs: curl rsync
           - part: e2e
             shard: "2"
+            pkgs: curl rsync postgresql17-server
           - part: e2e
             shard: "3"
+            pkgs: curl rsync
           - part: pf
             shard: a
+            pkgs: curl rsync
           - part: pf
             shard: b
+            pkgs: curl rsync
           - part: pf
             shard: c
+            pkgs: curl rsync
     steps:
       - uses: actions/checkout@v7
         with:
@@ -473,15 +494,32 @@ jobs:
           release: "15.1"
           usesh: true
           sync: rsync
+          # One unreachable mirror must not cost the job its half hour (a run waited on `No route to host` for every catalogue): the VM's
+          # network has no IPv6 route, fetches are bounded, only the ports repository is read (the kmods and base catalogues are not
+          # needed and are two more requests), and the install is tried three times with the catalogue fetched again between the tries.
           prepare: |
-            pkg install -y go git-lite postgresql17-server bash curl rsync
+            set -u
+            mkdir -p /usr/local/etc/pkg/repos
+            printf '%s\n' 'IP_VERSION = 4;' 'FETCH_TIMEOUT = 30;' 'FETCH_RETRY = 3;' > /usr/local/etc/pkg.conf
+            printf '%s\n' 'FreeBSD-ports-kmods: { enabled: no }' 'FreeBSD-base: { enabled: no }' > /usr/local/etc/pkg/repos/FreeBSD.conf
+            export ASSUME_ALWAYS_YES=yes
+            # curl and rsync are 6 MiB; a PostgreSQL server brings its compiler runtime (some 380 MiB to download, 2 GiB to unpack)
+            case " ${{ matrix.pkgs }} " in *" postgresql17-server "*) limit=420 ;; *) limit=120 ;; esac
+            n=0; ok=no
+            while [ "$n" -lt 3 ]; do
+              n=$((n + 1))
+              if timeout "$limit" pkg install -y -r FreeBSD-ports ${{ matrix.pkgs }}; then ok=yes; break; fi
+              echo "pkg install of ${{ matrix.pkgs }} failed (attempt $n of 3)"
+              sleep $((n * 15))
+              timeout 120 pkg update -f -r FreeBSD-ports || true
+            done
+            [ "$ok" = yes ] || { echo "the package mirror (pkg.FreeBSD.org, FreeBSD-ports, quarterly) did not give ${{ matrix.pkgs }} in three attempts"; exit 1; }
           run: |
             set -eu
             # go.mod names a newer Go than the package: fetch it; the tests that build binaries must not ask git for a
             # VCS stamp (the synced tree is not a clone)
             export CGO_ENABLED=0 GOTOOLCHAIN=auto GOFLAGS=-buildvcs=false
             kldload pf 2>/dev/null || true   # pfctl(8) of FreeBSD 15 talks to the kernel through netlink: the module must be loaded
-            go version
             if [ "$PART" != go ]; then
               e2e_shard=all; pf_shard=all
               [ "$PART" = e2e ] && e2e_shard="$SHARD"
@@ -489,6 +527,7 @@ jobs:
               JAILOPS_E2E_PART="$PART" JAILOPS_E2E_SHARD="$e2e_shard" JAILOPS_PF_SHARD="$pf_shard" JAILOPS_BIN_DIR="$PWD/vm-bin" FORGE_BIN="$PWD/vm-bin/forge-freebsd-amd64" sh scripts/ci-freebsd-e2e.sh
               exit
             fi
+            go version
             # the Go tests need a PostgreSQL (embedded-postgres has no FreeBSD build): start the packaged one
             sysrc postgresql_enable=YES >/dev/null
             service postgresql oneinitdb >/dev/null 2>&1 || true
