@@ -78,7 +78,7 @@ func ParseSource(s string) (Source, error) {
 		}
 		return Source{Kind: api.AccessSourceSet, Name: s[4:]}, nil
 	case s == "" || s == "any" || strings.HasPrefix(s, "tag:"):
-		return Source{}, fmt.Errorf("source %q: name a jail (jail:web), an address set (set:office), an address or a prefix, or host", s)
+		return Source{}, fmt.Errorf("source %q: name a jail (jail:web), an address set (set:office), an address or a prefix, or host (to let the whole Internet in, expose the port: jailops expose JAIL PORTS)", s)
 	}
 	var pf netip.Prefix
 	if strings.Contains(s, "/") {
@@ -101,6 +101,19 @@ func ParseSource(s string) (Source, error) {
 		return Source{}, fmt.Errorf("source %q: zones and IPv4-mapped addresses are not allowed", s)
 	}
 	return Source{Kind: api.AccessSourceCIDR, Prefix: pf}, nil
+}
+
+// Everyone says whether the source is a prefix so wide that it is the Internet (shorter than /8 on IPv4 or /16 on IPv6, so
+// 0.0.0.0/0, 0.0.0.0/1 and 2000::/3 are): a grant to it is an exposure of the port (jailops expose), not an access grant.
+// Revoking such a grant stays possible.
+func (s Source) Everyone() bool { return s.Kind == api.AccessSourceCIDR && TooWide(s.Prefix) }
+
+// TooWide says whether a prefix is shorter than /8 (IPv4) or /16 (IPv6).
+func TooWide(p netip.Prefix) bool {
+	if p.Addr().Is4() {
+		return p.Bits() < 8
+	}
+	return p.Bits() < 16
 }
 
 // Canonical is the form a grant is stored and found under.

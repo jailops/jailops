@@ -53,9 +53,11 @@ firewall policy/documented created
 
 $ jailops firewall rule add documented in --action allow --proto tcp --port 80,443 --comment the site
 firewall policy/documented: rule 1 added: allow in tcp port 80,443
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall rule add documented in --action allow --proto tcp --from set:hq --port 22 --comment ssh from the office
 firewall policy/documented: rule 2 added: allow in tcp from set:hq port 22
+! note: the rule opens the uplink of the jails with this policy that have a routed address, from set:hq (review: jailops firewall show JAIL)
 
 $ jailops firewall policy show documented -o yaml
 metadata:
@@ -103,6 +105,7 @@ firewall policy/switchable created
 
 $ jailops firewall rule add switchable in --action allow --proto tcp --port 80 --comment the site
 firewall policy/switchable: rule 1 added: allow in tcp port 80
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall rule add switchable in --action allow --proto tcp --port 22 --disabled --comment ssh, switched off
 firewall policy/switchable: rule 2 added: allow in tcp port 22 disabled
@@ -164,18 +167,17 @@ firewall policy/web created
 $ jailops firewall rule add web in --action allow --proto tcp --port 80,443
 firewall policy/web: rule 1 added: allow in tcp port 80,443
 ! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 1 --comment TEXT
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall rule add web in --action allow --proto tcp --from set:office --port 22 --log
 firewall policy/web: rule 2 added: allow in tcp from set:office port 22 log
 ! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 2 --comment TEXT
-
-$ jailops firewall rule add web in --action allow --proto tcp --redirect 8080:80
-firewall policy/web: rule 3 added: allow in tcp rdr 8080:80
-! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 3 --comment TEXT
+! note: the rule opens the uplink of the jails with this policy that have a routed address, from set:office (review: jailops firewall show JAIL)
 
 $ jailops firewall rule add web in
-firewall policy/web: rule 4 added: allow in
-! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 4 --comment TEXT
+firewall policy/web: rule 3 added: allow in
+! note: the rule has no comment; say why it is there with: jailops firewall rule edit web 3 --comment TEXT
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall rule add web in --action allow --proto bogus
 ! invalid: proto "bogus" must be tcp, udp, icmp or icmp6
@@ -186,7 +188,7 @@ NAME         DEFAULT-IN   DEFAULT-OUT   RULES   RAW
 documented   deny         allow         2       no
 nodefaults   deny         allow         0       no
 switchable   deny         allow         3       no
-web          deny         allow         4       no
+web          deny         allow         3       no
 
 $ jailops firewall policy show web
 Firewall policy web
@@ -197,8 +199,7 @@ Firewall policy web
 #   RULE                                       COMMENT
 1   allow in tcp port 80,443                   -
 2   allow in tcp from set:office port 22 log   -
-3   allow in tcp rdr 8080:80                   -
-4   allow in                                   -
+3   allow in                                   -
 
 $ jailops firewall address-set list
 NAME     ADDRESSES

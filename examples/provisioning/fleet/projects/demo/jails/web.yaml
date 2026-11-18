@@ -10,7 +10,7 @@ spec:
   network: [{name: eth0, network: lan, ipv4: auto}]
   firewall: {policies: [web]}
   resources: {memory: 512M}
-  proxy: [{name: http, listen: ":80", jail_port: 80}]
+  expose: [{ports: ["80"]}]
   provision:
     packages: [nginx]
     services: {enable: [nginx], start: [nginx]}

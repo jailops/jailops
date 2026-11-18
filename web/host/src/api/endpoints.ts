@@ -9,7 +9,7 @@ import type {
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
-  AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
+  JailReach, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
   HostIdentity, HostIdentityApply, HostChange, HostSnapshot, HostRestore,
   HostFirewall, HostFirewallApply, HostPending,
   WireGuard, WireGuardJoin, WireGuardKeys, WireGuardPeerAdd, WireGuardPeerCreated,
@@ -108,6 +108,16 @@ export const api = {
   setup: {
     status: () => c().get<SetupStatus>('/setup'),
     run: (b: SetupRequest) => c().mutate<SetupResult>('POST', '/setup', b),
+  },
+  reach: {
+    /** Extension jail_reach: what reaches a jail, what it reaches and the rules in the order pf decides (reads only). */
+    jail: (n: string) => c().get<JailReach>(`/jails/${e(n)}/reach`),
+    /** Everything the Internet reaches, across the jails the identity can see. */
+    exposed: () => c().get<Exposed>('/exposed'),
+    /** Extension jail_expose: let the Internet reach the ports of a jail (IPv6 on its own address, IPv4 through a forward of the host). */
+    expose: (n: string, b: ExposeRequest) => c().mutate<ExposeResult>('POST', `/jails/${e(n)}/expose`, b),
+    /** Without ports it removes the whole exposure of the protocol; with ports it takes those out. */
+    unexpose: (n: string, b: UnexposeRequest) => c().mutate<ExposeResult>('POST', `/jails/${e(n)}/unexpose`, b),
   },
   appAccess: {
     /** Extension app_access: who may connect to an installed app (readonly in the project). */

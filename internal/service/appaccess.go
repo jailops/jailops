@@ -457,9 +457,17 @@ func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (
 	if err != nil {
 		return api.AppAllowResult{}, invalid("%v", err)
 	}
+	if src.Everyone() {
+		return api.AppAllowResult{}, invalid("source %q is every address: app access names who may connect (a jail, a set, an address, a prefix, host)", req.Source).
+			WithHint("to let the whole Internet in, expose the port: jailops expose " + name + " PORTS")
+	}
 	rs, err := s.resolveSource(ctx, t, src)
 	if err != nil {
 		return api.AppAllowResult{}, err
+	}
+	if src.Kind == api.AccessSourceSet && slices.ContainsFunc(rs.prefixes, apps.TooWide) {
+		return api.AppAllowResult{}, invalid("address set %q holds an address range so wide that it is every address: app access names who may connect", req.Source).
+			WithHint("to let the whole Internet in, expose the port: jailops expose " + name + " PORTS")
 	}
 	proj, jail := t.p.Meta.Name, t.jail.Metadata.Name
 	res := api.AppAllowResult{Jail: jail, DryRun: req.DryRun}

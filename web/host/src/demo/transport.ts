@@ -24,6 +24,8 @@ import { nameProblem, type NameRule } from '@jailops/shared/lib/names'
 import { labelKeyProblem, labelValueProblem, labelsProblem, MAX_LABELS } from '@/lib/labels'
 import { demoRename, renameKindOf } from './rename'
 import { demoFirewallTest, DemoFwError } from './fwtest'
+import { demoExposed, demoReach } from './reach'
+import { demoExpose, demoUnexpose } from './expose'
 
 interface DemoOp extends Operation {
   startedAt: number
@@ -266,7 +268,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (m === 'GET' && seg[0] === 'resources') return ok(d.pool())
     // There is no default project: what works inside one needs it named, like the real server.
     const project = url.searchParams.get('project') ?? ''
-    if (!project && ['jails', 'volumes', 'firewall', 'profiles', 'updates', 'restores'].includes(seg[0])) return fail(400, { code: 'invalid', message: 'a project is required', hint: "name one with --project NAME (list them with 'jailops project list')" })
+    if (!project && ['jails', 'volumes', 'firewall', 'profiles', 'updates', 'restores', 'exposed'].includes(seg[0])) return fail(400, { code: 'invalid', message: 'a project is required', hint: "name one with --project NAME (list them with 'jailops project list')" })
     const inProject = (j: Jail) => (j.metadata.project ?? '') === project
     for (const p of db.projects) p.status.jails = countByProject()[p.metadata.name] ?? 0
     const rn = m === 'POST' ? renameKindOf(seg) : undefined
@@ -361,6 +363,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         }
         break
       case 'firewall': return firewallRoute(seg, m, body, req, project)
+      case 'exposed': return m === 'GET' && seg.length === 1 ? ok(demoExposed(fwState(project))) : fail(404, { code: 'not_found', message: 'not found' })
       case 'backups': return backupsRoute(seg, m, body, project)
       case 'backup-targets': return ok(db.targets)
       case 'backup-policies':
@@ -829,6 +832,14 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   }
   const quoted = (xs: string[]) => xs.map((x) => `"${x}"`).join(', ')
 
+  function fwState(project: string) {
+    const proj = db.projects.find((p) => p.metadata.name === project)
+    return {
+      jails: db.jails.filter((j) => (j.metadata.project ?? '') === project), policies: db.policies.filter((x) => (x.metadata.project ?? 'web') === project),
+      sets: db.sets.filter((x) => (x.metadata.project ?? 'web') === project), projectPolicies: proj?.spec.firewall_policies ?? [],
+    }
+  }
+
   function firewallRoute(seg: string[], m: string, body: Record<string, any>, req: RawRequest, project: string): RawResponse {
     if (seg[1] === 'test' && seg.length === 2 && m === 'POST') {
       try {
@@ -920,7 +931,6 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const rules = (spec.rules ?? []) as FirewallRule[]
     for (let i = 0; i < rules.length; i++) {
       const r = rules[i]
-      if (r.redirect && r.direction !== 'in') return fail(400, { code: 'invalid', message: `rules[${i}]: a redirect is allowed on inbound rules only`, detail: { [`rules[${i}].redirect`]: 'redirect is allowed on inbound rules only' } })
       for (const k of ['from', 'to'] as const) {
         for (const a of r[k] ?? []) if (a.startsWith('set:') && !sets.some((x) => x.metadata.name === a.slice(4))) return fail(400, { code: 'invalid', message: `rules[${i}]: unknown address set ${a}`, hint: 'Create the address set first.', detail: { [`rules[${i}].${k}`]: `unknown address set ${a}` } })
       }
@@ -1255,6 +1265,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (!j || !seg[2]) return undefined
         const src = `/api/v1/jails/${name}`
         if (seg[2] === 'updates' && m === 'GET') return ok(db.history[name] ?? [])
+        if (seg[2] === 'reach' && m === 'GET') return ok(demoReach(j, fwState(project)))
+        if ((seg[2] === 'expose' || seg[2] === 'unexpose') && m === 'POST') {
+          const r = seg[2] === 'expose' ? demoExpose(j, body as never) : demoUnexpose(j, body as never)
+          return 'ok' in r ? ok(r.ok) : fail(r.status, { code: r.code, message: r.message, hint: r.hint } as ApiErrorBody)
+        }
         if (seg[2] === 'access') {
           if (!j.metadata.labels?.[da.LABEL]) return fail(400, { code: 'invalid', message: `jail "${name}" was not installed from the catalog (it has no label jailops.app)` })
           if (seg.length === 3 && m === 'GET') return ok(access.get(j))

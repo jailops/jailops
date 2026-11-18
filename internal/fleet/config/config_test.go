@@ -283,8 +283,8 @@ func TestFleetIDAndHubRules(t *testing.T) {
 func TestProfilesMergeDevicesByName(t *testing.T) {
 	d := base(t)
 	project(t, d, "w", "[a]", "")
-	write(t, d, "profiles/p1.yaml", "apiVersion: jailops/v1\nkind: Profile\nmetadata:\n  name: p1\nspec:\n  resources: {memory: 1G}\n  network: [{network: n, mtu: 1500, ipv4: auto}]\n  proxy: [{name: web, listen: \":80\", jail_port: 80}]\n")
-	write(t, d, "profiles/p2.yaml", "apiVersion: jailops/v1\nkind: Profile\nmetadata:\n  name: p2\nspec:\n  resources: {memory: 2G, cpu: 2}\n  network: [{name: eth0, mtu: 9000}]\n  proxy: [{name: web, jail_port: 8080}, {name: tls, listen: \":443\", jail_port: 443}]\n")
+	write(t, d, "profiles/p1.yaml", "apiVersion: jailops/v1\nkind: Profile\nmetadata:\n  name: p1\nspec:\n  resources: {memory: 1G}\n  network: [{network: n, mtu: 1500, ipv4: auto}]\n  devfs: [{name: dev, device: tun}]\n")
+	write(t, d, "profiles/p2.yaml", "apiVersion: jailops/v1\nkind: Profile\nmetadata:\n  name: p2\nspec:\n  resources: {memory: 2G, cpu: 2}\n  network: [{name: eth0, mtu: 9000}]\n  devfs: [{name: dev, device: bpf}, {name: tls, device: dri}]\n")
 	write(t, d, "projects/w/jails/j.yaml", "apiVersion: jailops/v1\nkind: Jail\nhosts: [a]\nmetadata:\n  name: j\nspec:\n  image: i\n  profiles: [p1, p2]\n  resources: {cpu: 4}\n")
 	f, err := Load(d)
 	if err != nil {
@@ -301,7 +301,7 @@ func TestProfilesMergeDevicesByName(t *testing.T) {
 	}
 	out, _ := f.Render("a")
 	s := string(out)
-	for _, w := range []string{"memory: 2G", "cpu: 4", "mtu: 9000", `network: "n"`, "jail_port: 8080", "listen: :80", "name: tls", "profile p2", "the jail"} {
+	for _, w := range []string{"memory: 2G", "cpu: 4", "mtu: 9000", `network: "n"`, "device: bpf", "name: tls", "profile p2", "the jail"} {
 		if !strings.Contains(s, w) {
 			t.Fatalf("render lacks %q:\n%s", w, s)
 		}

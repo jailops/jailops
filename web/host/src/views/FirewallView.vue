@@ -19,10 +19,12 @@ import LoadState from '@jailops/shared/components/LoadState.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import AddressSetCreateDialog from '@/components/AddressSetCreateDialog.vue'
 import FirewallTest from '@/components/FirewallTest.vue'
+import { hasExt } from '@jailops/shared/composables/session'
+import ExposedPanel from '@/components/ExposedPanel.vue'
 import { hasFirewallTest } from '@/composables/fwtest'
 import RenameDialog from '@/components/RenameDialog.vue'
 import { canRename } from '@/composables/rename'
-import { currentProject, isGlobalAdmin } from '@/composables/project'
+import { currentProject } from '@/composables/project'
 import type { FirewallPolicy, AddressSet, FirewallRule } from '@jailops/shared/api/types'
 
 const l = useLoad(async () => {
@@ -31,9 +33,10 @@ const l = useLoad(async () => {
 })
 
 const route = useRoute()
-const { tab } = useTabQuery(() => (hasFirewallTest() ? (['policies', 'sets', 'test'] as const) : (['policies', 'sets'] as const)), 'policies')
+const hasExposed = (): boolean => hasExt('jail_reach')
+const { tab } = useTabQuery(() => ['policies', 'sets', ...(hasExposed() ? ['exposed'] : []), ...(hasFirewallTest() ? ['test'] : [])] as Array<'policies' | 'sets' | 'exposed' | 'test'>, 'policies')
 let wantDone = false
-const tabItems = computed(() => [{ key: 'policies' as const, label: s.firewall.policies }, { key: 'sets' as const, label: s.firewall.sets }, ...(hasFirewallTest() ? [{ key: 'test' as const, label: s.firewall.test }] : [])])
+const tabItems = computed(() => [{ key: 'policies' as const, label: s.firewall.policies }, { key: 'sets' as const, label: s.firewall.sets }, ...(hasExposed() ? [{ key: 'exposed' as const, label: s.firewall.exposed }] : []), ...(hasFirewallTest() ? [{ key: 'test' as const, label: s.firewall.test }] : [])])
 const selected = ref('')
 const draft = ref<FirewallPolicy | null>(null)
 const original = ref('')
@@ -112,11 +115,6 @@ function move(i: number, d: number): void {
 function list(r: FirewallRule, k: 'from' | 'to' | 'ports', v: string): void {
   r[k] = splitList(v)
 }
-// a port forward takes traffic that would reach the host: only a global administrator gives or changes one
-const canForward = computed(() => isGlobalAdmin())
-function toggleRedirect(r: FirewallRule, on: boolean): void {
-  r.redirect = on ? { host_port: 8080, jail_port: 80 } : undefined
-}
 // A copy through JSON: the draft is a reactive proxy, which structuredClone refuses.
 const copy = <T>(v: T): T => JSON.parse(JSON.stringify(v))
 function clean(p: FirewallPolicy): FirewallPolicy {
@@ -128,7 +126,6 @@ function clean(p: FirewallPolicy): FirewallPolicy {
     if (!x.proto) delete x.proto
     for (const k of ['from', 'to', 'ports'] as const) if (!x[k]?.length) delete x[k]
     if (!x.log) delete x.log
-    if (!x.redirect) delete x.redirect
     return x
   })
   if (!c.spec.raw) delete c.spec.raw
@@ -288,10 +285,11 @@ function removePolicy(): void {
 
 <template>
   <div>
-    <div class="page-head"><h1>{{ s.firewall.title }}</h1><button v-if="tab === 'policies'" class="btn btn-primary" type="button" data-test="new-policy" @click="openCreate"><Icon name="plus" />{{ s.firewall.create }}</button><button v-else-if="l.data.value?.sets.length" class="btn btn-primary" type="button" data-test="new-set" @click="creatingSet = true"><Icon name="plus" />{{ s.firewall.addSet }}</button></div>
+    <div class="page-head"><h1>{{ s.firewall.title }}</h1><button v-if="tab === 'policies'" class="btn btn-primary" type="button" data-test="new-policy" @click="openCreate"><Icon name="plus" />{{ s.firewall.create }}</button><button v-else-if="tab === 'sets' && l.data.value?.sets.length" class="btn btn-primary" type="button" data-test="new-set" @click="creatingSet = true"><Icon name="plus" />{{ s.firewall.addSet }}</button></div>
     <TabBar v-model="tab" :tabs="tabItems" :label="s.firewall.sections" id="fw" />
     <div id="fw-panel" role="tabpanel" :aria-labelledby="`fw-tab-${tab}`">
     <FirewallTest v-if="tab === 'test'" />
+    <ExposedPanel v-else-if="tab === 'exposed'" />
     <LoadState v-else :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
       <div v-if="tab === 'policies'" class="fw-layout">
         <ul class="plain picker" :aria-label="s.firewall.policies">
@@ -351,13 +349,6 @@ function removePolicy(): void {
                 <div class="row">
                   <label class="check"><input v-model="r.log" type="checkbox" />{{ s.firewall.log }}</label>
                   <label class="check" :title="s.firewall.disabledHint"><input v-model="r.disabled" type="checkbox" data-test="rule-disabled" />{{ s.firewall.disabled }}</label>
-                  <label class="check" :title="canForward ? undefined : s.firewall.redirectGlobal"><input type="checkbox" :checked="!!r.redirect" :disabled="!canForward" data-test="rule-redirect" @change="toggleRedirect(r, ($event.target as HTMLInputElement).checked)" />{{ s.firewall.redirect }}</label>
-                  <template v-if="r.redirect">
-                    <input v-model.number="r.redirect.host_port" type="number" min="1" max="65535" :disabled="!canForward" :aria-label="s.firewall.hostPort" style="width: 90px" />
-                    <span class="faint">{{ s.firewall.to2 }}</span>
-                    <input v-model.number="r.redirect.jail_port" type="number" min="1" max="65535" :disabled="!canForward" :aria-label="s.firewall.jailPort" style="width: 90px" />
-                  </template>
-                  <span v-if="err(i, 'redirect')" class="err" data-test="field-error">{{ err(i, 'redirect') }}</span>
                 </div>
               </li>
             </ol>

@@ -1,0 +1,95 @@
+$ jailops app install nginx web --image freebsd-151@stable
+App nginx installed as jail web (running)
+  Version:   1.30.6,3
+  Addresses: 10.20.0.10
+  Ports:     http 80/tcp at 10.20.0.10:80 (expose: forwarding is not set up yet) HTTP, the default site.
+  Access:    closed: nothing reaches it until jailops app allow web --from SOURCE
+  Data:      /usr/local/www The sites.
+  Config:    /usr/local/etc/nginx/nginx.conf (restart nginx) The server configuration.
+  Logs:      access /var/log/nginx/access.log One line per request.
+             error /var/log/nginx/error.log
+  Snapshot:  app-installed (jailops jail rollback web --all --snapshot app-installed goes back to it)
+  Steps:     11 done
+Notes:
+  Put the site under /usr/local/www.
+
+$ jailops expose web 80 --host-port 8080
+jail/web exposed: 80
+  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 8080->80
+
+$ jailops list
+NAME   STATE     IMAGE                GEN   ADDRESSES    EXPOSED         AUTOSTART   USED   AGE
+web    running   freebsd-151@stable   g1    10.20.0.10   8080→80/tcp 4   -           -      3h
+
+$ jailops firewall show web
+Reaches jail/web
+
+SOURCE     FAMILY   PROTO   PORTS   LIMITED TO   REACH               BY
+Internet   4        tcp     80      any          forward host:8080   expose
+
+The jail reaches (default allow)
+  Internet:       all
+  Host:           DNS and ping
+  Other jails:    all
+  Other projects: none
+
+$ jailops firewall show web -o json
+{
+  "project": "main",
+  "jail": "web",
+  "rows": [
+    {
+      "source": "internet",
+      "family": "4",
+      "proto": "tcp",
+      "ports": "80",
+      "from": [
+        "any"
+      ],
+      "decision": "forward",
+      "by": "expose",
+      "host_port": 8080
+    }
+  ],
+  "exposed": [
+    {
+      "proto": "tcp",
+      "ports": "80",
+      "family": "4",
+      "address": "10.20.0.10",
+      "host_port": 8080,
+      "from": [
+        "any"
+      ],
+      "restricted": false,
+      "via": "forward",
+      "by": "expose"
+    }
+  ],
+  "out": {
+    "internet": "all",
+    "host": "DNS and ping",
+    "jails": "all",
+    "other_projects": "none"
+  },
+  "default_in": "allow",
+  "default_out": "allow",
+  "rules": []
+}
+
+$ jailops firewall exposed
+JAIL   PROTO   PORTS   FAMILY   ADDRESS                   FROM   BY
+web    tcp     80      v4       host:8080 -> 10.20.0.10   any    expose
+
+$ jailops firewall exposed --tunnels
+JAIL   PROTO   PORTS   FAMILY   ADDRESS                   FROM   BY
+web    tcp     80      v4       host:8080 -> 10.20.0.10   any    expose
+
+From WireGuard tunnels
+Nothing is reachable from a tunnel.
+
+$ jailops firewall show nobody
+! not_found: jail "nobody" not found
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
+[exit 4]
+

@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- **Breaking: an `allow in` rule without `--from` is for the jail's link only** (the project's jails and the host) and no longer
+  opens the uplink. `--from any` or `jailops expose` does. `firewall rule add` says so. `app allow` refuses `0.0.0.0/0`, `::/0`
+  and `any` and points at `jailops expose`. `jailops doctor` (`jails.inbound-without-source`) lists the rules this changes on the first start after the upgrade: give such a rule `--from any`, or use `jailops expose`. `app allow` also refuses every prefix shorter than /8 (IPv4) or /16 (IPv6) and address sets that hold one.
+- **`jailops expose`: let the Internet reach the ports of a jail, over IPv4 and IPv6, in one command.** `jailops expose web 80,443`
+  opens the ports on every family the jail has: an IPv6 address, and an IPv4 address of a network without NAT, are let in on
+  the uplink to the jail's own address; an IPv4 address behind NAT gets a forward of the same host ports (`--host-port`,
+  `--listen`). `--from` limits the sources (addresses, prefixes, `set:NAME`), `--family 4|6`, `--proto tcp|udp|tcp,udp`,
+  `--comment`, `--dry-run`. `jailops unexpose` takes ports out. The exposure is stored with the jail (`spec.expose`) and rendered as
+  the section "exposed ports" of its anchor; the jail's policies are not touched. An administrator of a project exposes IPv6 and
+  IPv4 without NAT; the IPv4 forward opens a port of the host and stays a global administrator's, and a request that needs one is
+  refused as a whole with the hint `--family 6`. Two jails cannot forward the same host port (the error names the other jail).
+  API: `POST /jails/{name}/expose` and `/unexpose` (extension `jail_expose`), SDK `Jails().Expose` and `Unexpose`.
+- **Breaking: the old forms of a port forward are gone.** `--redirect` and `redirect:` rules of firewall policies, `proxy:` devices
+  of jails and profiles and the `proxy.<name>.*` keys are removed. The first start converts what was stored (a record on disk keeps the forwards until every jail has its entry, a write that fails stops the start, and what is not converted - a switched-off rule, a host port another jail already has, sources that are jails or the host - is logged with an event): each becomes an IPv4
+  entry of the exposure of the jails that used it, so the same host ports stay forwarded, and the policy or profile is written
+  back without it (the rule numbers after a removed redirect shift). Fleet files: `proxy:` becomes `expose:` on the jail.
+- **What reaches a jail is visible: `EXPOSED` in `jailops list`, `jailops firewall show`, `jailops firewall exposed`.**
+  Every jail has one answer for each kind of source (the Internet over IPv4 and IPv6, each WireGuard tunnel, the other jails
+  of the project, the host, other projects), computed from the anchor JailOps loads, not from the policies as typed. Each
+  row names the family, protocol and ports, who it is limited to, and the policy rule that gives it ("policy web rule 2") or
+  what stops it. `list` has an `EXPOSED` column (`tcp 80,443 v4,v6`; a forward shows the port of the host; a star marks a
+  rule limited to some sources), `jail info` has a "Reachable from" section, `firewall show JAIL` adds what the jail reaches
+  and, with `--all` and `--pf`, the rules in the order pf decides, and `firewall exposed` lists everything the Internet
+  reaches across the jails (`--tunnels` adds WireGuard peers). `firewall test --from internet` asks the same of a jail's
+  anchor, and for an IPv4 jail behind NAT it walks the forward of the host. `jailops doctor` (`jails.exposed`) names the
+  family, protocol and source. The API has `GET /api/v1/jails/{name}/reach`, `GET /api/v1/exposed` and
+  `JailStatus.exposed` (extension `jail_reach`); the console has a Firewall tab on every jail and an Exposed tab on the
+  firewall page.
+- **The console exposes ports too.** The Firewall tab of a jail has an Expose button (ports, protocol, families, limited sources, host port, comment, with a preview of what would be reached) and lists the exposures with a button to take each one out.
+- `jailops doctor` `jails.exposed` and the setup guide point at `jailops expose`.
+- **Safer exposure.** A forward is a global administrator's to give, change (sources, jail port) or take away, in `jailops expose`, `jail set`, a fleet file and a profile edit alike; a forward of a host port the host listens on is refused everywhere; an IPv4 range of ports on a jail behind NAT is refused (`--family 6` or single ports); `--family` holds for the pass rule on the jail's link too; two requests at once no longer overwrite each other. The views leave out a port an uplink deny rule closes.
+- Fix: `--memory` in `jailops jail create --help` showed `jailops info JAIL` as the value name; no flag help has a backquote now (a test walks the command tree).
 - **Security: the firewall of JailOps never opens the host or another project.** JailOps' firewall governs the jails and
   `/etc/pf.conf` governs the host. Before, four things went around that:
   - An allow rule that named `host`, a prefix holding a host address (all of IPv4 or IPv6, the network's own subnet, the LAN

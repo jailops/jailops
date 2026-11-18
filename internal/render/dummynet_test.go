@@ -104,7 +104,7 @@ func TestPipeRate(t *testing.T) {
 // A device with a limit sends what the jail sends into its egress pipe and what the jail receives into its ingress
 // pipe, with match rules before the filter rules, both on the host end of the jail's epair.
 func TestShapingMatchRules(t *testing.T) {
-	in := pfBase()
+	in := pfForwarded()
 	in.Shaping = []Shape{{Iface: "jo0123456789a0a", Egress: 40000, Ingress: 40001}}
 	s, err := PFAnchor(in)
 	if err != nil {
@@ -145,14 +145,13 @@ func TestShapingMatchRules(t *testing.T) {
 // The packet that comes out of a port forward's translation is passed by a rule of its own, which carries a label,
 // so that the state of the connection can be ended by the label when the forward goes away.
 func TestForwardHasALabelledPassRule(t *testing.T) {
-	s, err := PFAnchor(pfBase())
+	s, err := PFAnchor(pfForwarded())
 	if err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{
 		"match in on em0 inet proto tcp from any to (em0) port 8080 rdr-to 10.20.0.10 port 80",
 		"pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 80 label \"jo-",
-		"pass in quick on em0 inet6 proto tcp from any to 2001:db8:1::100 port 80 label \"jo-",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("missing %q:\n%s", want, s)

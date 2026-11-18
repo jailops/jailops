@@ -474,7 +474,7 @@ func (s *Service) readRecord(ctx context.Context, name string) (Record, error) {
 			return r, err
 		}
 	}
-	if err := json.Unmarshal(b, &r); err != nil {
+	if err := json.Unmarshal(upgradeSpec(b), &r); err != nil {
 		return r, fmt.Errorf("spec.json: %w", err)
 	}
 	return r, nil

@@ -757,6 +757,75 @@ export interface ExecRequest {
   user?: string
 }
 
+export interface ExposeEntry {
+  proto?: string
+  ports: string[]
+  families?: string[]
+  from?: string[]
+  host_port?: number
+  listen?: string
+  comment?: string
+  by?: string
+  at?: string
+}
+
+export interface ExposeFamily {
+  family: string
+  address: string
+  network: string
+  interface?: string
+  via: string
+  ports: string
+  forwards?: string[]
+  listen?: string
+  note?: string
+}
+
+export interface ExposeRequest {
+  proto?: string
+  ports: string[]
+  from?: string[]
+  families?: string[]
+  host_port?: number
+  listen?: string
+  comment?: string
+  dry_run?: boolean
+}
+
+export interface ExposeResult {
+  jail: string
+  changed: boolean
+  entries: ExposeEntry[]
+  families: ExposeFamily[]
+  warnings?: string[]
+}
+
+export interface Exposed {
+  entries: ExposedJail[]
+  tunnels?: ExposedJail[]
+  errors?: string[]
+}
+
+export interface ExposedEntry {
+  proto: string
+  ports?: string
+  family: string
+  address: string
+  host_address?: string
+  host_port?: number
+  from: string[]
+  restricted: boolean
+  via: string
+  interface?: string
+  network?: string
+  by: string
+}
+
+export interface ExposedJail extends ExposedEntry {
+  project: string
+  jail: string
+}
+
 export interface FirewallAttach {
   policies?: string[]
   tags?: string[]
@@ -786,7 +855,6 @@ export interface FirewallRule {
   ports?: string[]
   log?: boolean
   disabled?: boolean
-  redirect?: Redirect
 }
 
 export interface FirewallTestCase {
@@ -1222,6 +1290,19 @@ export interface JailLogRead {
   truncated?: boolean
 }
 
+export interface JailReach {
+  project: string
+  jail: string
+  rows: ReachRow[]
+  exposed?: ExposedEntry[]
+  out: ReachOut
+  default_in: string
+  default_out: string
+  rules: ReachRule[]
+  error?: string
+  notes?: string[]
+}
+
 export interface JailRollback {
   scope?: RollbackScope
   snapshot?: string
@@ -1263,7 +1344,7 @@ export interface JailSpec {
   provision?: Provision
   profiles?: string[]
   devfs?: DevfsDevice[]
-  proxy?: ProxyDevice[]
+  expose?: ExposeEntry[]
   encrypted?: boolean
   zfs_delegation?: boolean
   sysvipc?: boolean
@@ -1282,6 +1363,7 @@ export interface JailStatus {
   warnings?: string[]
   locked?: string[]
   disk_used?: number
+  exposed?: ExposedEntry[]
 }
 
 export interface JailUpgrade {
@@ -1658,17 +1740,44 @@ export interface ProvisionSvc {
   start?: string[]
 }
 
-export interface ProxyDevice {
-  name: string
-  listen: string
-  jail_port: number
-  proto?: string
+export interface ReachOut {
+  internet: string
+  host: string
+  jails: string
+  other_projects: string
 }
 
-export interface Redirect {
-  listen?: string
-  host_port: number
-  jail_port: number
+export interface ReachRow {
+  source: string
+  source_name?: string
+  family: string
+  proto: string
+  ports?: string
+  from?: string[]
+  restricted?: boolean
+  decision: string
+  by: string
+  policy?: string
+  rule?: number
+  rule_name?: string
+  stage?: string
+  host_address?: string
+  host_port?: number
+  interface?: string
+}
+
+export interface ReachRule {
+  where: string
+  direction: string
+  family: string
+  from: string
+  to?: string
+  proto?: string
+  ports?: string
+  decision: string
+  stage: string
+  by: string
+  pf?: string
 }
 
 export interface Remote {
@@ -1904,6 +2013,13 @@ export interface TrustTokenRequest {
   global?: boolean
   ttl_seconds?: number
   expires_at?: string
+}
+
+export interface UnexposeRequest {
+  proto?: string
+  ports?: string[]
+  families?: string[]
+  dry_run?: boolean
 }
 
 export interface UpdateApplyRequest {
@@ -2430,43 +2546,6 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "prompt"
   },
   {
-    "name": "proxy.\u003cname\u003e.jail_port",
-    "type": "int",
-    "description": "Port inside the jail.",
-    "example": "80",
-    "restart_required": false,
-    "profile": true,
-    "admin": true,
-    "global": true,
-    "path": "proxy[\u003cname\u003e].jail_port"
-  },
-  {
-    "name": "proxy.\u003cname\u003e.listen",
-    "type": "listen",
-    "description": "Host address and port the jail's port is forwarded on.",
-    "example": ":8080",
-    "restart_required": false,
-    "profile": true,
-    "admin": true,
-    "global": true,
-    "path": "proxy[\u003cname\u003e].listen"
-  },
-  {
-    "name": "proxy.\u003cname\u003e.proto",
-    "type": "enum",
-    "values": [
-      "tcp",
-      "udp"
-    ],
-    "description": "tcp or udp.",
-    "example": "tcp",
-    "restart_required": false,
-    "profile": true,
-    "admin": true,
-    "global": true,
-    "path": "proxy[\u003cname\u003e].proto"
-  },
-  {
     "name": "shell",
     "type": "string",
     "description": "Shell that `jailops shell` and the console start: bash, sh or a path inside the jail (/bin/sh when empty). New FreeBSD jails get bash. A management setting; /etc/passwd is not touched. `jailops jail shell-setup` installs bash when it is missing.",
@@ -2592,4 +2671,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_aliases', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach']

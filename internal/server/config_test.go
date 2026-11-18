@@ -79,11 +79,11 @@ func TestConfigNeverRestartsAJailOnItsOwn(t *testing.T) {
 func TestProfilesDevicesAndRendering(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
-	if _, err := e.Admin.Networks().Patch(c, "lan", map[string]any{"spec": map[string]any{"uplink": "em0", "mtu": 1400}}, ""); err != nil {
+	if _, err := e.Admin.Networks().Patch(c, "lan", map[string]any{"spec": map[string]any{"uplink": "em0", "mtu": 1400, "ipv4": map[string]any{"nat": true}}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.Admin.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.ProfileSpec{Config: map[string]string{
-		"limits.memory": "1G", "nic.eth0.mtu": "1400", "proxy.http.listen": ":8080", "proxy.http.jail_port": "80", "devfs.t.device": "tun", "boot.autostart": "true"}}}); err != nil {
+		"limits.memory": "1G", "nic.eth0.mtu": "1400", "devfs.t.device": "tun", "boot.autostart": "true"}}}); err != nil {
 		t.Fatal(err)
 	}
 	sp := webSpec()
@@ -105,6 +105,10 @@ func TestProfilesDevicesAndRendering(t *testing.T) {
 	if ex.Sources["limits.memory"] != "jail" || ex.Sources["nic.eth0.mtu"] != "web" || ex.Jail.Spec.Network[0].MTU != 1400 || !ex.Jail.Spec.Boot.Autostart {
 		t.Fatalf("%+v", ex)
 	}
+	// Exposing a port forwards the host's port to the jail (the network has NAT) and lets it in.
+	if _, err := e.Admin.Jails().Expose(c, "web", api.ExposeRequest{Ports: []string{"80"}, HostPort: 8080}); err != nil {
+		t.Fatalf("%v\n%s", err, e.Log())
+	}
 	so, _ := e.Admin.Jails().Start(c, "web")
 	if _, err := so.Wait(c); err != nil {
 		t.Fatalf("%v\n%s", err, e.Log())
@@ -122,17 +126,17 @@ func TestProfilesDevicesAndRendering(t *testing.T) {
 	}
 	rs := e.File(e.Cfg.StateDir + "/rendered/pf/alpha_web.conf")
 	if !strings.Contains(rs, "port 8080 rdr-to "+j.Spec.Network[0].IPv4+" port 80") {
-		t.Fatalf("the proxy device is not an rdr rule:\n%s", rs)
+		t.Fatalf("the exposure is not an rdr rule:\n%s", rs)
 	}
 	// Two jails cannot forward the same host port, in any project.
 	sp2 := webSpec()
-	sp2.Profiles = []string{"web"}
-	_, err = e.Admin.Jails().Create(c, sdk.NewJail("web2", sp2))
-	if err == nil {
-		t.Fatal("two jails forward :8080")
+	if op2, err := e.Admin.Jails().Create(c, sdk.NewJail("web2", sp2)); err != nil {
+		t.Fatal(err)
+	} else if _, err := op2.Wait(c); err != nil {
+		t.Fatal(err)
 	}
-	if code := e.Admin.Jails(); code == nil {
-		t.Fatal()
+	if _, err := e.Admin.Jails().Expose(c, "web2", api.ExposeRequest{Ports: []string{"80"}, HostPort: 8080}); !api.IsCode(err, api.CodeAlreadyExists) {
+		t.Fatalf("two jails forward :8080: %v", err)
 	}
 	// Device nodes need the admin role.
 	op2, err := e.Client(api.PermOperator).Jails().Config(c, "web", map[string]string{"devfs.b.device": "bpf"}, nil, false)
@@ -201,14 +205,13 @@ func TestProfileShadowingAndReadmission(t *testing.T) {
 	if _, err := op.Wait(c); err != nil {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
-	// A proxy device needs a network with an uplink; the lan has none, so the edit is refused for the jail it would reach.
+	// The proxy keys are gone: a forward is made with expose, never by a profile.
 	cur, err := e.Admin.Profiles().Get(c, "mine")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cur.Spec.Config = map[string]string{"proxy.http.listen": ":8099", "proxy.http.jail_port": "80"}
-	_, err = e.Admin.Profiles().Update(c, "mine", cur, "")
-	if err == nil {
-		t.Fatal("a profile edit gave a jail a proxy it could not have been admitted with")
+	if _, err = e.Admin.Profiles().Update(c, "mine", cur, ""); err == nil {
+		t.Fatal("a profile carries a proxy key")
 	}
 }

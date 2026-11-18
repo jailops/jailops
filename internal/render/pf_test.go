@@ -27,18 +27,25 @@ func pfBase() PFInput {
 		Antispoof: true,
 		DefaultIn: "deny", DefaultOut: "allow", Policies: []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
 			{Name: "ssh from office", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:office", "tag:admin"}, Ports: []string{"22"}, Log: true},
-			{Name: "web", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80", "8000-8100"}},
+			{Name: "web", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"any"}, Ports: []string{"80", "8000-8100"}},
 			{Name: "ping", Action: "allow", Direction: "in", Proto: "icmp"},
 			{Name: "ping6", Action: "allow", Direction: "in", Proto: "icmp6"},
-			{Name: "forward", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 8080, JailPort: 80}},
 			{Name: "no smtp", Action: "deny", Direction: "out", Proto: "tcp", Ports: []string{"25"}},
 			{Name: "dns", Action: "allow", Direction: "out", Proto: "udp", To: []string{"9.9.9.9", "2620:fe::fe"}, Ports: []string{"53"}},
 		}}}},
 	}
 }
 
+// pfForwarded is pfBase with an exposed port 80 forwarded from the host's port 8080 (the forward is the IPv4 half of an exposure).
+func pfForwarded() PFInput {
+	in := pfBase()
+	in.Expose = []Exposure{{Name: "expose tcp 80", Proto: "tcp", Ports: []string{"80"}}}
+	in.Forwards = []api.FirewallRule{{Name: "expose tcp 80 forward", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 8080, JailPort: 80}}}
+	return in
+}
+
 func TestPFGolden(t *testing.T) {
-	s, err := PFAnchor(pfBase())
+	s, err := PFAnchor(pfForwarded())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +90,7 @@ func TestPFGolden(t *testing.T) {
 }
 
 func TestPFOrdering(t *testing.T) {
-	s, _ := PFAnchor(pfBase())
+	s, _ := PFAnchor(pfForwarded())
 	idx := func(sub string) int { return strings.Index(s, sub) }
 	if !(idx("table <") < idx("rdr-to") && idx("rdr-to") < idx("pass out quick") && idx("pass out quick") < idx("# defaults")) {
 		t.Fatalf("sections out of order:\n%s", s)
@@ -116,9 +123,6 @@ func TestPFErrors(t *testing.T) {
 		}},
 		{"self cycle", func(i *PFInput) { i.Sets["vpn"] = api.AddressSetSpec{Addresses: api.Entries("set:vpn")} }},
 		{"bad set member", func(i *PFInput) { i.Sets["vpn"] = api.AddressSetSpec{Addresses: api.Entries("1.2.3.4 pass all")} }},
-		{"rdr outbound", func(i *PFInput) {
-			i.Policies[0].Policy.Rules = []api.FirewallRule{{Action: "allow", Direction: "out", Proto: "tcp", Redirect: &api.Redirect{HostPort: 1, JailPort: 2}}}
-		}},
 		{"rdr no uplink", func(i *PFInput) { i.Uplink = "" }},
 		{"bad tag", func(i *PFInput) { i.Tags = []string{"a b"} }},
 		{"bad rule name", func(i *PFInput) { i.Policies[0].Policy.Rules[0].Name = "x\npass all" }},
@@ -126,14 +130,14 @@ func TestPFErrors(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			in := pfBase()
+			in := pfForwarded()
 			tc.mut(&in)
 			if s, err := PFAnchor(in); err == nil {
 				t.Fatalf("accepted:\n%s", s)
 			}
 		})
 	}
-	in := pfBase()
+	in := pfForwarded()
 	in.Policies[0].Policy.Raw = "pass all"
 	_, err := PFAnchor(in)
 	if !api.IsCode(err, api.CodeForbidden) {
@@ -143,7 +147,7 @@ func TestPFErrors(t *testing.T) {
 	if !errors.As(err, &ae) {
 		t.Fatal("not api error")
 	}
-	in = pfBase()
+	in = pfForwarded()
 	in.Sets["vpn"] = api.AddressSetSpec{Addresses: api.Entries("set:office")}
 	if _, err := PFAnchor(in); err == nil || !strings.Contains(err.Error(), "cycle") {
 		t.Fatalf("cycle message: %v", err)
@@ -195,7 +199,7 @@ func FuzzPFAnchor(f *testing.F) {
 				}}}},
 			}
 			if dir == "in" {
-				in.Policies[0].Policy.Rules = append(in.Policies[0].Policy.Rules, api.FirewallRule{Action: "allow", Direction: "in", Proto: "tcp", From: []string{ep}, Redirect: &api.Redirect{HostPort: 80, JailPort: 8080}})
+				in.Forwards = []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", From: []string{ep}, Redirect: &api.Redirect{HostPort: 80, JailPort: 8080}}}
 			}
 			out, err := PFAnchor(in)
 			if err != nil {
@@ -232,12 +236,11 @@ func mandBase() PFPolicy {
 		{Name: "no telnet", Action: "deny", Direction: "in", Proto: "tcp", Ports: []string{"23"}},
 		{Name: "no smtp", Action: "deny", Direction: "out", Proto: "tcp", Ports: []string{"25"}},
 		{Name: "mgmt", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:office"}, Ports: []string{"22"}},
-		{Name: "fwd", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 2222, JailPort: 22}},
 	}}}
 }
 
 func TestPFMandatoryGolden(t *testing.T) {
-	jailOnly := pfBase()
+	jailOnly := pfForwarded()
 	jailOnly.Jail = "web_nginx"
 	s, err := PFAnchor(jailOnly)
 	if err != nil {
@@ -248,7 +251,7 @@ func TestPFMandatoryGolden(t *testing.T) {
 	}
 	golden(t, "pf_anchor_project_jail_only", s)
 
-	only := pfBase()
+	only := pfForwarded()
 	only.DefaultIn, only.DefaultOut = "deny", "allow"
 	only.Policies = []PFPolicy{mandBase()}
 	s, err = PFAnchor(only)
@@ -257,7 +260,7 @@ func TestPFMandatoryGolden(t *testing.T) {
 	}
 	golden(t, "pf_anchor_mandatory_only", s)
 
-	both := pfBase()
+	both := pfForwarded()
 	both.Policies = append([]PFPolicy{mandBase()}, both.Policies...)
 	s, err = PFAnchor(both)
 	if err != nil {
@@ -292,7 +295,7 @@ func TestPFMandatoryGolden(t *testing.T) {
 			t.Fatalf("mandatory deny rule %q after the jail's deny rules", m)
 		}
 	}
-	for _, m := range []string{"# rule 3: mgmt", "# rule 4: fwd"} { // mandatory allow rules
+	for _, m := range []string{"# rule 3: mgmt"} { // mandatory allow rules
 		if i := pos(m); i > jailAllow || i < jailDeny {
 			t.Fatalf("mandatory allow rule %q not in the allow group before the jail's allow rules", m)
 		}
@@ -300,10 +303,7 @@ func TestPFMandatoryGolden(t *testing.T) {
 	if !(denyStart < pos("# project policy baseline") && pos("# project policy baseline") < pos("# rule 1: no telnet") && jailAllow < defaults) {
 		t.Fatalf("block order:\n%s", s)
 	}
-	// the mandatory redirect is the first rdr line, and tables are defined once
-	if !strings.Contains(s, "port 2222 rdr-to") || strings.Index(s, "port 2222 rdr-to") > strings.Index(s, "port 8080 rdr-to") {
-		t.Fatalf("rdr order:\n%s", s)
-	}
+	// tables are defined once
 	if strings.Count(s, "table <s_office>") != 1 {
 		t.Fatalf("table defined %d times", strings.Count(s, "table <s_office>"))
 	}
@@ -343,7 +343,7 @@ func TestPFMandatoryErrors(t *testing.T) {
 }
 
 // Several policies are rendered in the order they are given, each under its own heading and with its own rule numbers;
-// the proxy devices come after them, and the defaults come last.
+// the exposed ports come after them, and the defaults come last.
 func TestPFSeveralPolicies(t *testing.T) {
 	rule := func(name string, port string) api.FirewallRule {
 		return api.FirewallRule{Name: name, Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{port}}
@@ -356,7 +356,7 @@ func TestPFSeveralPolicies(t *testing.T) {
 		{Name: "postgres", Policy: api.FirewallPolicySpec{Comment: "who may reach PostgreSQL", Rules: []api.FirewallRule{rule("from the set", "5432"), rule("second", "5433")}}},
 		{Name: "ssh-office", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{rule("office", "22")}}},
 	}
-	in.Proxy = []api.FirewallRule{rule("proxy web", "80")}
+	in.Expose = []Exposure{{Name: "expose tcp 80", Proto: "tcp", Ports: []string{"80"}}}
 	s, err := PFAnchor(in)
 	if err != nil {
 		t.Fatal(err)
@@ -371,7 +371,7 @@ func TestPFSeveralPolicies(t *testing.T) {
 	}
 	order := []string{"# project policy floor", "#   for every jail", "# rule 1: ssh", "# project policy monitoring", "# rule 1: metrics",
 		"# policy app-web", "# rule 1: access a", "# policy postgres", "#   who may reach PostgreSQL", "# rule 1: from the set", "# rule 2: second",
-		"# policy ssh-office", "# rule 1: office", "# proxy devices", "# rule 1: proxy web", "# defaults"}
+		"# policy ssh-office", "# rule 1: office", "# exposed ports", "# rule 1: expose tcp 80", "# defaults"}
 	for i := 1; i < len(order); i++ {
 		if at(order[i-1]) >= at(order[i]) {
 			t.Errorf("%q does not come before %q:\n%s", order[i-1], order[i], s)
@@ -397,9 +397,9 @@ func TestProjectAnchors(t *testing.T) {
 func TestRedirectOnAListenAddress(t *testing.T) {
 	out, err := PFAnchor(PFInput{Jail: "alpha_web", Interfaces: []string{"jo123456789012a"}, Uplink: "em0",
 		Addresses: []netip.Addr{netip.MustParseAddr("10.20.0.10")},
-		DefaultIn: "deny", DefaultOut: "allow", Policies: []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
-			{Name: "proxy http", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{Listen: "192.0.2.7", HostPort: 8080, JailPort: 80}},
-			{Name: "proxy dns", Action: "allow", Direction: "in", Proto: "udp", Redirect: &api.Redirect{HostPort: 53, JailPort: 53}}}}}}})
+		DefaultIn: "deny", DefaultOut: "allow", Forwards: []api.FirewallRule{
+			{Name: "expose tcp 80 forward", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{Listen: "192.0.2.7", HostPort: 8080, JailPort: 80}},
+			{Name: "expose udp 53 forward", Action: "allow", Direction: "in", Proto: "udp", Redirect: &api.Redirect{HostPort: 53, JailPort: 53}}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -408,7 +408,7 @@ func TestRedirectOnAListenAddress(t *testing.T) {
 		t.Fatal(out)
 	}
 	_, err = PFAnchor(PFInput{Jail: "alpha_web", Interfaces: []string{"jo123456789012a"}, Uplink: "em0", Addresses: []netip.Addr{netip.MustParseAddr("10.20.0.10")},
-		DefaultIn: "deny", DefaultOut: "allow", Policies: []PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{Listen: "x; pass all", HostPort: 1, JailPort: 1}}}}}}})
+		DefaultIn: "deny", DefaultOut: "allow", Forwards: []api.FirewallRule{{Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{Listen: "x; pass all", HostPort: 1, JailPort: 1}}}})
 	if err == nil {
 		t.Fatal("an injected listen address was rendered")
 	}
@@ -889,14 +889,13 @@ func TestPFDisabledRuleIsAComment(t *testing.T) {
 	in.Policies = []PFPolicy{{Name: "p", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
 		{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"22"}, Disabled: true, Comment: "switched off"},
 		{Name: "no telnet", Action: "deny", Direction: "in", Proto: "tcp", Ports: []string{"23"}, Disabled: true},
-		{Name: "forward", Action: "allow", Direction: "in", Proto: "tcp", Disabled: true, Redirect: &api.Redirect{HostPort: 8080, JailPort: 80}},
 		{Name: "web", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80"}},
 	}}}}
 	s, err := PFAnchor(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, w := range []string{"# rule 1 (disabled): ssh", "#   switched off", "# rule 2 (disabled): no telnet", "# rule 3 (disabled): forward", "# rule 4: web"} {
+	for _, w := range []string{"# rule 1 (disabled): ssh", "#   switched off", "# rule 2 (disabled): no telnet", "# rule 3: web"} {
 		if !strings.Contains(s, w) {
 			t.Errorf("%q is missing:\n%s", w, s)
 		}

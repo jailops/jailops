@@ -23,6 +23,8 @@ Reads need the operator role and never carry a private or preshared key; changes
 
 **Firewall test** ([networking-ipv6.md](networking-ipv6.md#would-it-pass)): `POST /api/v1/firewall/test` (extension `firewall_test`, operator in the project) takes `FirewallTestRequest` (`from`, `to`, `proto`, `port`, `icmp_type`, `family`) and answers `FirewallTestResult`: `verdict` (`pass`, `block`, `unknown`), `cases` (one per address pair: the `hops` with the anchor, interface, direction, `verdict`, `decided_by`, `skipped` (the allow rules a deny rule won over, and the disabled rules the packet would have met) and `loaded_matches_rendered`) and `caveats`. It changes nothing.
 
+**Reach** ([networking.md](networking.md#what-reaches-a-jail)): `GET /api/v1/jails/{name}/reach` (extension `jail_reach`, readonly) answers `JailReach`: `rows` (what each kind of source reaches: `source` is `internet`, `tunnel`, `jails`, `host` or `other-projects`; `family`, `proto`, `ports`, `from`, `decision` `pass`, `forward` or `none`, and `by`, the policy rule that gives it or what stops it), `exposed` (what the Internet reaches), `out` (what the jail reaches), the `rules` of the anchor in the order pf decides and `notes` (what the computation cannot know). `GET /api/v1/exposed` answers `Exposed` for the jails the caller can see: `entries` (one per jail, protocol, port list and family) and, with `?tunnels=true`, `tunnels`. `JailStatus.exposed` carries the same entries on every jail. Both are computed from the rendered anchor and change nothing. SDK: `c.Jails().Reach`, `c.Firewall().Exposed`.
+
 **Boot plan** ([operations.md](operations.md#start-at-boot)): `GET /api/v1/boot` (extension `boot_plan`, readonly) answers `BootPlan`:
 what the daemon starts after a boot of the host, in order (`order`: `position`, `project`, `jail`, `priority`, `depends`,
 `reason` `autostart` or `dependency of NAME`, `running`), and the jails it does not start with the reason (`not_started`:
@@ -101,7 +103,7 @@ The SDK refuses plain `http://` to anything but loopback.
 
 An error the daemon did not expect answers `internal` (500) with the text `internal error` and the id of the request in the
 hint; the cause, which can carry paths and command output of the host, is in the daemon's log under that id. A port forward
-(a redirect rule of a firewall policy, a `proxy.*` key of a jail or profile) answers `forbidden` (403) to anyone but a global
+(an IPv4 exposure of a jail behind NAT: `expose`, `unexpose`, `spec.expose`) answers `forbidden` (403) to anyone but a global
 administrator and `invalid` (400) on a host port or an address that is the host's own. The firewall objects of a project are
 bounded: a policy has at most 500 rules, an address set 5000 members, a project 200 policies, 200 address sets and 20000 set
 members together (`quota_exceeded` or `invalid`).

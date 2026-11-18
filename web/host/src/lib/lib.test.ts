@@ -45,7 +45,7 @@ describe('restore', () => {
 })
 
 describe('firewall', () => {
-  const msg = { portRange: 'range', portNeedsProto: 'proto', redirectInOnly: 'in only', hostPortRange: 'hp' }
+  const msg = { portRange: 'range', portNeedsProto: 'proto' }
   it('validates ports', () => {
     expect(validPort('80')).toBe(true)
     expect(validPort('8000-8100')).toBe(true)
@@ -53,9 +53,8 @@ describe('firewall', () => {
     expect(validPort('70000')).toBe(false)
   })
   it('flags rules', () => {
-    const e = validateRules([{ action: 'allow', direction: 'out', proto: 'icmp', ports: ['80'], redirect: { host_port: 1, jail_port: 2 } }], msg)
+    const e = validateRules([{ action: 'allow', direction: 'out', proto: 'icmp', ports: ['80'] }], msg)
     expect(e['0.ports']).toBe('proto')
-    expect(e['0.redirect']).toBe('in only')
   })
   it('maps api detail keys', () => {
     expect(detailToRuleErrors({ 'rules[2].ports': 'bad', 'rules.1.from': 'x', other: 'y' })).toEqual({ '2.ports': 'bad', '1.from': 'x' })

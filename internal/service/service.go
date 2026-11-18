@@ -228,6 +228,7 @@ type Service struct {
 	devdState devdHolder    // the reader of devd's notifications (devd.go)
 	pipes     pipeTable     // the dummynet pipe number of every limited direction (shaping.go)
 	hostAddr  hostAddrCache // the host's own addresses (hostaddrs.go)
+	reach     reachCache    // what reaches each jail, computed from its anchor (reach.go)
 	d         Deps
 	log       *slog.Logger
 	now       func() time.Time
@@ -473,6 +474,9 @@ func (s *Service) Start(ctx context.Context) error {
 	}
 	if err := s.recoverInterrupted(ctx); err != nil {
 		s.log.Error("recovering interrupted operations failed", "err", err)
+	}
+	if err := s.applyMigratedForwards(ctx); err != nil {
+		return fmt.Errorf("service: migrating stored port forwards: %w", err)
 	}
 	s.warmCerts()
 	s.startLogForward()

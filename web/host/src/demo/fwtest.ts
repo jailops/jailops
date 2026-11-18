@@ -48,7 +48,7 @@ export class DemoFwError extends Error {
 
 interface End { name: string; jail?: Jail; addrs: Ip[]; text: Record<number, string> }
 
-function jailAddrs(j: Jail): string[] {
+export function jailAddrs(j: Jail): string[] {
   let v4 = (j.status.addresses ?? []).map(plain).filter((a) => !a.includes(':'))
   // a jail that does not run has no address yet: the demo gives it the one its network will
   if (!v4.length) v4 = [`10.20.0.${10 + j.metadata.name.length}`]

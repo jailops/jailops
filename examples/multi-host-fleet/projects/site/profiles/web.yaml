@@ -9,5 +9,3 @@ spec:
   network:
     - {name: eth0, network: web, ipv4: auto}
   firewall: {policies: [web]}
-  proxy:
-    - {name: https, listen: ":443", jail_port: 443}

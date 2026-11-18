@@ -16,16 +16,12 @@ export function validPort(p: string): boolean {
 }
 
 /** Client-side checks that mirror the obvious server rules; the server stays the authority. */
-export function validateRules(rules: FirewallRule[], msg: { portRange: string; portNeedsProto: string; redirectInOnly: string; hostPortRange: string }): RuleErrors {
+export function validateRules(rules: FirewallRule[], msg: { portRange: string; portNeedsProto: string }): RuleErrors {
   const e: RuleErrors = {}
   rules.forEach((r, i) => {
     if (r.ports?.length) {
       if (r.proto !== 'tcp' && r.proto !== 'udp') e[`${i}.ports`] = msg.portNeedsProto
       else if (!r.ports.every(validPort)) e[`${i}.ports`] = msg.portRange
-    }
-    if (r.redirect) {
-      if (r.direction !== 'in') e[`${i}.redirect`] = msg.redirectInOnly
-      else if (!(r.redirect.host_port >= 1 && r.redirect.host_port <= 65535) || !(r.redirect.jail_port >= 1 && r.redirect.jail_port <= 65535)) e[`${i}.redirect`] = msg.hostPortRange
     }
   })
   return e

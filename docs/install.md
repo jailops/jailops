@@ -112,9 +112,12 @@ Two things to know about a host that already has a firewall:
   network that names nameservers of its own (`jailops network edit`, `dns:`) keeps them.
 - **Traffic from the internet into a jail** needs nothing in `pf.conf`: the jail's own firewall opens it. An `allow in`
   rule with an external source (`any`, an address, a prefix or an address set) in a policy of the jail opens the uplink
-  for the jail's own addresses, in its anchor, whatever your `pf.conf` blocks by default:
+  for the jail's own addresses, in its anchor, whatever your `pf.conf` blocks by default. The short way, for IPv4 and IPv6
+  at once (an IPv4 address behind NAT gets a forward of the host's port):
 
-      jailops firewall rule add web in --action allow --proto tcp --port 8080
+      jailops expose web 80,443
+
+  or as a rule: `jailops firewall rule add web in --action allow --proto tcp --from any --port 8080`.
 
   A jail with only defaults stays closed from the internet, whatever its `default_in` says, and `allow in from any`
   means the whole internet. `pf.conf` is for the host's own services. If you added a rule of your own for a jail

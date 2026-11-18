@@ -31,6 +31,7 @@ blocked, 8 the test cannot say.
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `pf.inbound` | while a jail on an IPv6 or a non-NAT IPv4 network exists: a `block ... quick` rule for every source before the anchor line, or a hand-written `pass ... quick` rule for a jail prefix | `fail` for the block (it drops inbound traffic to the jails before their policies are asked: decide whether that is what the rule is for; to let the policies decide, move the anchor line above it; rules for single sources, such as a blocklist, are not flagged), `warn` for the pass (it keeps a jail without an `allow in` rule reachable: delete it; the jail's own `allow in` rules open the uplink, [install.md](install.md) section 3) |
 | `jails.exposed` | the jails whose anchor has a pass rule on an uplink | `info`: lists the jails the Internet can reach and their ports (a port forward, or an `allow in` rule with an external source), so the rules a project's administrator writes for his own jail are visible to the others |
+| `jails.inbound-without-source` | jails on a routed address with an `allow in` rule that names no source | `info`: such a rule is for the jail's link only and does not open the uplink (it did before 0.8.4); give it `--from any` or use `jailops expose JAIL PORTS` |
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
 | `network.dns` | for every network a jail uses: where its jails get their nameservers (the network's `dns`, the host's `/etc/resolv.conf`, or the gateway when the host resolves only through loopback); a gateway is asked one query (`. NS`, one second) once a jail on the network runs | `warn` when the gateway does not answer, refuses (access control) or no nameserver could be worked out; the hint has the resolver and `pf.conf` lines ([networking-ipv6.md](networking-ipv6.md#name-resolution-of-jails)) |
 | `network.epairs` | epairs without a jail | `warn`: the reconcile loop removes them on its next pass |
@@ -50,6 +51,13 @@ blocked, 8 the test cannot say.
 | `conf.dir` | the configuration directory | check it equals `conf-dir` of `priv.conf` |
 
 ## Common failures
+
+**A web or mail jail cannot be reached from the Internet.** Ask the firewall what reaches it: `jailops firewall show web`
+has a row for the Internet, and `jailops firewall test --from internet --to jail:web --port 443` says which rule decides.
+An IPv6 address needs an `allow in` rule with an external source; an IPv4 address of a NAT network needs a forward of a
+port of the host (`allow in` with `redirect`). When the row is open and the connection still fails, the cause is outside
+the jail's anchor: the host's `pf.conf` (a `quick` rule before the `anchor "jailops/*"` line wins; `jailops doctor`,
+`pf.inbound`), the upstream router, or a service that does not listen ([networking.md](networking.md#what-reaches-a-jail)).
 
 **`pkg` says "Transient resolver failure", or every lookup on the host fails (`jailops doctor`: `dns.unbound` fails).** The host
 asks its own `local_unbound` on `127.0.0.1`, and it does not answer. Look at `sockstat -46l | grep :53` (what listens),

@@ -68,6 +68,16 @@ After a FreeBSD minor release upgrade of the host (15.1 to 15.2 and so on), run 
 (`scripts/ci-freebsd-pf.sh`) before relying on the firewall: pf changes between releases, and a rule that loads without an
 error but does nothing is exactly what the read-back and that test exist to catch.
 
+## Port forwards: `jailops expose`
+
+Port forwards are the exposure of the jail now (`jailops expose`, `spec.expose`). The `--redirect` flag and `redirect:` rules of firewall
+policies, `proxy:` devices of jails and profiles and the `proxy.<name>.*` keys are gone. The first start of the new version
+converts what was stored: a proxy device of a jail, a redirect rule of a policy and a proxy device of a profile become an IPv4
+entry of the exposure of each jail that used it (comment "migrated from ..."), the same host ports stay forwarded, and the policy and
+profile are written back without them (the numbers of the rules after a removed redirect shift by one). Fleet files: replace `proxy:` with
+`expose:` on the jail (`expose: [{ports: ["80", "443"]}]`). An `allow in` rule without `--from` is for the jail's link only now
+and no longer opens the uplink: add `--from any`, or use `jailops expose`. `jailops doctor` (`jails.inbound-without-source`) lists the rules this changes.
+
 ## Jails
 
 ### An image is one release

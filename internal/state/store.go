@@ -74,6 +74,7 @@ type Store struct {
 	objs       map[api.Kind]map[string]*Object // kind -> uuid -> object
 	names      map[api.Kind]map[string]string  // kind -> scope/name -> uuid
 	recoveries []Recovery
+	forwards   []MigratedForward
 
 	committer Committer
 	watchers  watchers
@@ -157,6 +158,9 @@ func (s *Store) objectPath(kind api.Kind, uuid string) string {
 }
 
 func (s *Store) load() error {
+	if err := s.readPendingForwards(); err != nil {
+		return fmt.Errorf("read %s: %w", forwardsFile, err)
+	}
 	root := filepath.Join(s.dir, "objects")
 	kinds, err := os.ReadDir(root)
 	if err != nil {
@@ -218,7 +222,7 @@ func (s *Store) loadOne(kind api.Kind, path string) (*Object, error) {
 		if err != nil {
 			return nil, err
 		}
-		o, migrated, err := decodeObject(data, s.opts.Migrations)
+		o, migrated, forwards, err := decodeObjectForwards(data, s.opts.Migrations)
 		if err != nil {
 			return nil, err
 		}
@@ -229,6 +233,16 @@ func (s *Store) loadOne(kind api.Kind, path string) (*Object, error) {
 			return nil, err
 		}
 		if migrated {
+			s.mu.Lock()
+			s.forwards = append(s.forwards, forwards...)
+			var kerr error
+			if len(forwards) > 0 {
+				kerr = s.keepForwards() // before the document loses them
+			}
+			s.mu.Unlock()
+			if kerr != nil {
+				return nil, fmt.Errorf("keep the migrated forwards: %w", kerr)
+			}
 			b, err := encodeObject(o)
 			if err != nil {
 				return nil, err

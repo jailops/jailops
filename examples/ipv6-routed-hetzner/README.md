@@ -16,7 +16,7 @@ Replace `2001:db8:abcd:1::/64` with the prefix your provider routes to you and `
 - `ipv6.mode: routed` with a real gateway address on the gateway interface (`2001:db8:abcd:1:1::1`).
 - Two projects, two networks, no sharing; `firewall_policies: [floor]` in both.
 - Fixed IPv6 addresses for the public jails (`::80`, `::25`) so DNS and rules can name them.
-- Dual stack: IPv4 is NATed through the host's address, with `proxy:` devices for the web ports.
+- Dual stack: IPv4 is NATed through the host's address; `expose:` lets the web ports in over IPv6 and forwards them over IPv4.
 
 ## Before you apply
 

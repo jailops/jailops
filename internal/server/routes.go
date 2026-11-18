@@ -536,6 +536,22 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/reach", h: func(c *rc) error {
+			v, err := svc.JailReach(c.r.Context(), c.pathArg("name"))
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/exposed", h: func(c *rc) error {
+			v, err := svc.Exposed(c.r.Context(), c.r.URL.Query().Get("tunnels") == "true")
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/provision", h: func(c *rc) error {
 			var in api.ProvisionRequest
 			if err := c.decodeOptional(&in); err != nil {
@@ -546,6 +562,30 @@ func (s *Server) routeTable() []route {
 				return err
 			}
 			c.async(op)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/expose", h: func(c *rc) error {
+			var in api.ExposeRequest
+			if err := c.decode(&in); err != nil {
+				return err
+			}
+			res, err := svc.ExposeJail(c.r.Context(), c.pathArg("name"), in)
+			if err != nil {
+				return err
+			}
+			c.sync(200, res, 0)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/unexpose", h: func(c *rc) error {
+			var in api.UnexposeRequest
+			if err := c.decodeOptional(&in); err != nil {
+				return err
+			}
+			res, err := svc.UnexposeJail(c.r.Context(), c.pathArg("name"), in)
+			if err != nil {
+				return err
+			}
+			c.sync(200, res, 0)
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/shell-setup", h: func(c *rc) error {

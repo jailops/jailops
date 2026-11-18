@@ -6,9 +6,11 @@ firewall policy/web created
 
 $ jailops firewall rule add web in --action allow --proto tcp --port 80,443 --name site --comment the site
 firewall policy/web: rule 1 added: allow in tcp port 80,443
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall rule add web in --action allow --proto tcp --from set:office --port 22 --comment ssh from the office
 firewall policy/web: rule 2 added: allow in tcp from set:office port 22
+! note: the rule opens the uplink of the jails with this policy that have a routed address, from set:office (review: jailops firewall show JAIL)
 
 $ jailops firewall rule add web out --action allow --proto tcp --to 192.0.2.50 --port 5432 --comment the database
 firewall policy/web: rule 3 added: allow out tcp to 192.0.2.50 port 5432

@@ -15,6 +15,18 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
+func TestEveryoneIsNotASourceToAllow(t *testing.T) {
+	for in, want := range map[string]bool{"0.0.0.0/0": true, "::/0": true, "0.0.0.0/1": true, "128.0.0.0/1": true, "2000::/3": true, "8.0.0.0/7": true, "10.0.0.0/8": false, "192.0.2.1": false, "host": false} {
+		s, err := ParseSource(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if s.Everyone() != want {
+			t.Errorf("%s: Everyone = %v", in, s.Everyone())
+		}
+	}
+}
+
 func TestParseSource(t *testing.T) {
 	for _, c := range []struct {
 		in, kind, name, prefix, canonical string
@@ -27,7 +39,7 @@ func TestParseSource(t *testing.T) {
 		{"192.0.2.9/24", api.AccessSourceCIDR, "", "192.0.2.0/24", "192.0.2.0/24"},
 		{"2001:db8::1", api.AccessSourceCIDR, "", "2001:db8::1/128", "2001:db8::1"},
 		{"2001:db8::/48", api.AccessSourceCIDR, "", "2001:db8::/48", "2001:db8::/48"},
-		{"0.0.0.0/0", api.AccessSourceCIDR, "", "0.0.0.0/0", "0.0.0.0/0"},
+		{"0.0.0.0/0", api.AccessSourceCIDR, "", "0.0.0.0/0", "0.0.0.0/0"}, // parsed (a grant that exists is revoked by it); AllowApp refuses it
 	} {
 		s, err := ParseSource(c.in)
 		if err != nil {

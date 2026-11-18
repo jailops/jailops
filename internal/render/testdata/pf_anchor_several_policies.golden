@@ -47,8 +47,8 @@ pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 po
 # rule 1: office
 pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 22 label "jo-bf6ebf0c2e21" keep state (if-bound)
 pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 22 label "jo-7b7f35ed6620" keep state (if-bound)
-# proxy devices
-# rule 1: proxy web
+# exposed ports
+# rule 1: expose tcp 80
 pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80 label "jo-35c23fe0dd60" keep state (if-bound)
 pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-bea6ca7f142b" keep state (if-bound)
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them

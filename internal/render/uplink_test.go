@@ -44,12 +44,13 @@ func uplinkLines(t *testing.T, in PFInput) []string {
 	return out
 }
 
-// An explicit allow rule in with an external source opens the uplink for the jail's routed address, with the same
+// An allow rule in that names an external source (any, an address, a prefix, a set) opens the uplink for the jail's routed address, with the same
 // source, protocol and ports, and `log` when the rule logs. The NATed IPv4 address is not opened.
 func TestUplinkAnAllowRuleOpensTheRoutedAddress(t *testing.T) {
 	got := strings.Join(uplinkLines(t, uplinkBase(
 		api.FirewallRule{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"2282"}, From: []string{"set:office", "198.51.100.9"}, Log: true},
-		api.FirewallRule{Name: "web", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80", "8000-8100"}},
+		api.FirewallRule{Name: "web", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"any"}, Ports: []string{"80", "8000-8100"}},
+		api.FirewallRule{Name: "internal", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"9000"}},
 	)), "\n")
 	for _, want := range []string{
 		"block drop in quick on em0 inet6 from <uplink_nets> to 2001:db8:1::100",
@@ -62,6 +63,9 @@ func TestUplinkAnAllowRuleOpensTheRoutedAddress(t *testing.T) {
 	}
 	if strings.Contains(got, "10.20.0.10") {
 		t.Errorf("a NATed IPv4 address is opened on the uplink:\n%s", got)
+	}
+	if strings.Contains(got, "9000") {
+		t.Errorf("a rule without a source (for the link) opened the uplink:\n%s", got)
 	}
 	// the antispoof block stands before the passes
 	if strings.Index(got, "block drop in quick on em0") > strings.Index(got, "pass in") {
@@ -112,7 +116,7 @@ func TestUplinkDenyComesFirstAndAMixedListKeepsTheExternalPart(t *testing.T) {
 
 // Each address is opened on the uplink of its own network, and an address of a network without an uplink on none.
 func TestUplinkPerAddress(t *testing.T) {
-	in := uplinkBase(api.FirewallRule{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"22"}})
+	in := uplinkBase(api.FirewallRule{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"any"}, Ports: []string{"22"}})
 	in.Addresses = []netip.Addr{ip("2001:db8:1::100"), ip("203.0.113.10")}
 	in.UplinkOf = map[netip.Addr]Uplink{
 		ip("2001:db8:1::100"): {Iface: "em0", Routed: true},
@@ -138,7 +142,8 @@ func TestUplinkPerAddress(t *testing.T) {
 
 // A port forward is applied on the uplink of the address it leads to.
 func TestRedirectIsAppliedOnTheUplinkOfItsAddress(t *testing.T) {
-	in := uplinkBase(api.FirewallRule{Name: "fwd", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 8080, JailPort: 80}})
+	in := uplinkBase()
+	in.Forwards = []api.FirewallRule{{Name: "fwd", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 8080, JailPort: 80}}}
 	in.Uplink = "em9" // the first network's, which holds none of the jail's addresses
 	text, err := PFAnchor(in)
 	if err != nil {
@@ -255,5 +260,47 @@ func TestTunnelIsAnExternalSource(t *testing.T) {
 	in = tunnel(uplinkBase(api.FirewallRule{Name: "elsewhere", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"22"}, From: []string{"192.0.2.0/24"}}))
 	if got := strings.Join(onTunnel(in), "\n"); !strings.Contains(got, "from 192.0.2.0/24 to 10.20.0.10") {
 		t.Errorf("the rule is rendered with its own source:\n%s", got)
+	}
+}
+
+// An exposure is an allow rule from anyone (or from the sources it names) that stands on the jail's link and on the uplink of
+// every routed address of the families it names; a family it leaves out has no rule at all.
+func TestExposureOpensTheUplinkPerFamily(t *testing.T) {
+	both := uplinkBase()
+	both.Expose = []Exposure{{Name: "expose tcp 80,443", Proto: "tcp", Ports: []string{"80", "443"}}}
+	got := strings.Join(uplinkLines(t, both), "\n")
+	if !strings.Contains(got, "pass in quick on em0 inet6 proto tcp from any to 2001:db8:1::100 port { 80, 443 }") {
+		t.Errorf("an exposure without sources is not open to anyone on the uplink:\n%s", got)
+	}
+	v4only := uplinkBase()
+	v4only.Expose = []Exposure{{Name: "expose tcp 80", Proto: "tcp", Ports: []string{"80"}, Families: []string{"4"}}}
+	if got := strings.Join(uplinkLines(t, v4only), "\n"); strings.Contains(got, "port 80") {
+		t.Errorf("an IPv4 exposure opened the IPv6 address:\n%s", got)
+	}
+	from := uplinkBase()
+	from.Expose = []Exposure{{Name: "expose tcp 22", Proto: "tcp", Ports: []string{"22"}, From: []string{"set:office"}}}
+	if got := strings.Join(uplinkLines(t, from), "\n"); !strings.Contains(got, "pass in quick on em0 inet6 proto tcp from <s_office> to 2001:db8:1::100 port 22") {
+		t.Errorf("the sources of an exposure are not kept:\n%s", got)
+	}
+}
+
+// A forward is for an IPv4 address behind NAT only: an IPv6 address and a routed IPv4 address are reached directly.
+func TestForwardsAreForNATedIPv4Only(t *testing.T) {
+	in := uplinkBase()
+	in.Forwards = []api.FirewallRule{{Name: "expose tcp 80 forward", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 80, JailPort: 80}}}
+	text, err := PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(text, "rdr-to") != 1 || !strings.Contains(text, "rdr-to 10.20.0.10 port 80") {
+		t.Errorf("the forward is not for the IPv4 address alone:\n%s", text)
+	}
+	in.UplinkOf[ip("10.20.0.10")] = Uplink{Iface: "em0", Routed: true}
+	text, err = PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(text, "rdr-to") {
+		t.Errorf("a routed IPv4 address is forwarded to:\n%s", text)
 	}
 }

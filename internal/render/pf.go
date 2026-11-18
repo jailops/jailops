@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 
@@ -122,9 +123,11 @@ type PFInput struct {
 	// numbers: the project's policies, then the managed access policy, then the jail's own. Their defaults are not
 	// used: DefaultIn and DefaultOut are.
 	Policies []PFPolicy
-	// Proxy are the inbound redirects of the jail's proxy devices, rendered after the policies.
-	Proxy []api.FirewallRule
-	Sets  map[string]api.AddressSetSpec
+	// Expose are the jail's exposures (jailops expose), rendered after the policies: an allow rule in for each, on the
+	// jail's link and, for a routed address, on its uplink; Forwards are the port forwards of its IPv4 exposures behind NAT.
+	Expose   []Exposure
+	Forwards []api.FirewallRule
+	Sets     map[string]api.AddressSetSpec
 	// Jails maps a jail of the project to its addresses, for jail:NAME in a rule or in an address set. A jail that is
 	// not in it has none: a reference to it matches nobody.
 	Jails map[string][]string
@@ -227,6 +230,8 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		heading, comment, raw string
 		rules                 []api.FirewallRule
 		origin                Origin
+		// fams restricts a rule to the families "4" and "6" on the uplink, by the index of the rule; no entry is all.
+		fams map[int][]string
 	}
 	var sections []section
 	var all []api.FirewallRule
@@ -246,10 +251,19 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			origin: Origin{Stage: StagePolicy, Policy: p.Name, ProjectPolicy: p.Project, Managed: p.Managed}})
 		all = append(all, p.Policy.Rules...)
 	}
-	if len(in.Proxy) > 0 {
-		sections = append(sections, section{heading: "proxy devices", rules: in.Proxy, origin: Origin{Stage: StagePolicy, Policy: "proxy devices"}})
-		all = append(all, in.Proxy...)
+	if len(in.Expose) > 0 {
+		sec := section{heading: "exposed ports", origin: Origin{Stage: StagePolicy, Policy: ExposeOrigin}, fams: map[int][]string{}}
+		for i, e := range in.Expose {
+			sec.rules = append(sec.rules, e.rule())
+			if len(e.Families) > 0 {
+				sec.fams[i] = e.Families
+			}
+		}
+		sections = append(sections, sec)
+		all = append(all, sec.rules...)
 	}
+	// The forwards of the exposure translate the host's ports; the allow rule of the exposure admits the translated packet.
+	all = append(all, in.Forwards...)
 	for _, t := range in.Tags {
 		if err := validate.Tag("tag", t); err != nil {
 			return nil, err
@@ -350,6 +364,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	}
 
 	// Translation rules come before filter rules.
+	var forwards []Forward
 	rdrRules := func(org Origin, rules []api.FirewallRule) error {
 		for i, r := range rules {
 			if r.Redirect == nil || r.Disabled {
@@ -358,6 +373,14 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			b.line("# rdr %s", ruleLabel(i, r))
 			ruleComment(&b, r)
 			for _, f := range fams {
+				// A forward is for an IPv4 address behind NAT. An IPv6 address, and an IPv4 address the upstream routes to the
+				// host, is reached directly: the allow rule on the uplink admits it.
+				if f.kw != "inet" {
+					continue
+				}
+				if u, ok := in.UplinkOf[f.addrs[0]]; ok && u.Routed {
+					continue
+				}
 				from, ok := endpoints(r.From, f, nil)
 				if !ok {
 					continue
@@ -391,6 +414,12 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 				sr.Origin.RuleNo, sr.Origin.RuleName, sr.Origin.Comment = i+1, r.Name, r.Comment
 				b.rule(sr, "pass in quick on %s %s proto %s from %s to %s port %d",
 					up, f.kw, r.Proto, from, f.addrs[0], r.Redirect.JailPort)
+				fw := Forward{Iface: up, Family: f.kw, Proto: r.Proto, From: mFrom, HostPort: r.Redirect.HostPort, JailAddr: f.addrs[0],
+					JailPort: r.Redirect.JailPort, Origin: sr.Origin}
+				if l := r.Redirect.Listen; l != "" {
+					fw.Listen, _ = netip.ParseAddr(l)
+				}
+				forwards = append(forwards, fw)
 			}
 		}
 		return nil
@@ -400,11 +429,14 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			return nil, err
 		}
 	}
+	if err := rdrRules(Origin{Stage: StagePolicy, Policy: ExposeOrigin}, in.Forwards); err != nil {
+		return nil, err
+	}
 	// What the policies admit from the Internet to the jail's routed addresses stands on their uplink, next to the
 	// redirects: the administrator's own rules only decide what the anchors do not.
 	var upSecs []uplinkSection
 	for _, sec := range sections {
-		upSecs = append(upSecs, uplinkSection{org: sec.origin, rules: sec.rules})
+		upSecs = append(upSecs, uplinkSection{org: sec.origin, rules: sec.rules, fams: sec.fams})
 	}
 	if err := uplinkRules(&b, &in, upSecs, fams); err != nil {
 		return nil, err
@@ -565,7 +597,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 				continue
 			}
 			head(i)
-			filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, false, "deny")
+			filterRules(&b, &in, sec.origin, sec.rules, sec.fams, fams, ifs, false, "deny")
 		}
 		hostStage()
 		isolationStage()
@@ -579,7 +611,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			continue
 		}
 		head(i)
-		filterRules(&b, &in, sec.origin, sec.rules, fams, ifs, false, want)
+		filterRules(&b, &in, sec.origin, sec.rules, sec.fams, fams, ifs, false, want)
 		if sec.raw != "" {
 			b.rule(Rule{Kind: RuleRaw, Origin: Origin{Stage: StageRaw, Policy: sec.origin.Policy, ProjectPolicy: sec.origin.ProjectPolicy, Managed: sec.origin.Managed}},
 				"%s", rawBegin)
@@ -629,6 +661,7 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	}
 	an := &Anchor{Name: JailAnchor(in.Jail), Lines: strings.Split(labelPassRules(JailAnchor(in.Jail), out, in.MaxStates), "\n"), Rules: b.rules}
 	an.Uplinks, an.Tunnels = routedUplinks(&in, addrs), tunnelIfaces(&in, addrs)
+	an.Forwards = forwards
 	return an, nil
 }
 
@@ -893,7 +926,8 @@ func hasAction(rules []api.FirewallRule, action string) bool {
 // filterRules renders the typed filter rules of one policy, and records each as a structured rule. ifs are the
 // interfaces the rules stand on; onlyIn keeps the rules for traffic into the jail. want is "deny" or "allow" to render
 // only the rules of that action, "" for all of them in their order. A disabled rule is a comment line, not a rule.
-func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, fams []family, ifs string, onlyIn bool, want string) {
+// only restricts a rule, by its index, to the families "4" and "6" (an exposure that names one family is not let in on the other).
+func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, only map[int][]string, fams []family, ifs string, onlyIn bool, want string) {
 	for i, r := range rules {
 		if onlyIn && r.Direction == "out" {
 			continue
@@ -925,6 +959,9 @@ func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, 
 		}
 		for _, f := range fams {
 			if r.Proto == "icmp" && f.kw != "inet" || r.Proto == "icmp6" && f.kw != "inet6" {
+				continue
+			}
+			if fl, ok := only[i]; ok && !slices.Contains(fl, map[string]string{"inet": "4", "inet6": "6"}[f.kw]) {
 				continue
 			}
 			var from, to string

@@ -42,7 +42,7 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 	d.del = func(ctx context.Context, c *sdk.Client, n string) (opHandle, error) {
 		return handle(c.Jails().Delete(ctx, n))
 	}
-	d.head = []string{"NAME", "STATE", "IMAGE", "GEN", "ADDRESSES", "AUTOSTART", "USED", "AGE"}
+	d.head = []string{"NAME", "STATE", "IMAGE", "GEN", "ADDRESSES", "EXPOSED", "AUTOSTART", "USED", "AGE"}
 	d.style = stateStyle(1)
 	d.row = func(now time.Time, j api.Jail) []string {
 		addrs := slices.Clone(j.Status.Addresses)
@@ -56,14 +56,14 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 			}
 		}
 		return []string{j.Metadata.Name, dash(string(j.Status.Power)), j.Spec.Image, dash(j.Status.Generation),
-			joinOrDash(addrs), autostartCell(j), usedCell(j), age(now, j.Metadata.CreatedAt)}
+			joinOrDash(addrs), exposedCell(j), autostartCell(j), usedCell(j), age(now, j.Metadata.CreatedAt)}
 	}
 	// On a terminal: one address per line with its network, the generation
 	// next to the image, and no column a long IPv6 address would crowd out.
 	d.brief = &listView[api.Jail]{
-		head:  []string{"NAME", "STATE", "IPV4", "IPV6", "IMAGE", "AUTOSTART", "USED", "AGE"},
+		head:  []string{"NAME", "STATE", "IPV4", "IPV6", "IMAGE", "EXPOSED", "AUTOSTART", "USED", "AGE"},
 		style: stateStyle(1),
-		drop:  []int{7, 6, 4, 3, 2},
+		drop:  []int{8, 7, 4, 3, 2},
 		row: func(now time.Time, j api.Jail) []string {
 			var v4, v6 []string
 			for _, n := range j.Spec.Network {
@@ -75,7 +75,7 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 				}
 			}
 			return []string{j.Metadata.Name, dash(string(j.Status.Power)), linesOrDash(v4), linesOrDash(v6),
-				imageWithGen(j.Spec.Image, j.Status.Generation, j.Status.FreeBSDVersion), autostartCell(j), usedCell(j), age(now, j.Metadata.CreatedAt)}
+				imageWithGen(j.Spec.Image, j.Status.Generation, j.Status.FreeBSDVersion), exposedCell(j), autostartCell(j), usedCell(j), age(now, j.Metadata.CreatedAt)}
 		},
 	}
 	d.filters = func(cmd *cobra.Command) func() (func(api.Jail) bool, error) {
@@ -469,7 +469,7 @@ func (a *app) addJailShortcuts(root *cobra.Command) {
 	addRename(a, root, d, d.renameLong)
 	root.AddCommand(a.jailInfo(d))
 	root.AddCommand(a.jailLifecycleSet(d)...)
-	root.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.logsCmd(d))
+	root.AddCommand(a.jailExec(d), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.logsCmd(d), a.exposeCmd(), a.unexposeCmd())
 }
 
 func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
@@ -489,7 +489,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringVar(&hostname, "hostname", "", "hostname inside the jail (default: the jail name)")
 	f.StringArrayVar(&networks, "network", nil, "attach a network granted to the project (repeatable; default: the project's only network, unless a profile supplies one): NET (an address of every family it has), NET=IPV4 or NET=IPV4,IPV6 (an address, auto or none)")
 	f.IntVar(&cpu, "cpu", 0, "CPU cores: the jail is slowed down to that share (rctl pcpu; needs kern.racct.enable=1)")
-	f.StringVar(&memory, "memory", "", "limit on the anonymous (swap-backed) memory the jail may reserve, for example 2G; an allocation beyond it fails and nothing is killed. `jailops info JAIL` shows it as \"reserved\", next to the resident memory (rctl swapuse; needs kern.racct.enable=1)")
+	f.StringVar(&memory, "memory", "", "limit on the anonymous (swap-backed) memory the jail may reserve, for example 2G; an allocation beyond it fails and nothing is killed. jailops info JAIL shows it as \"reserved\", next to the resident memory (rctl swapuse; needs kern.racct.enable=1)")
 	f.StringVar(&disk, "disk", "", "ZFS quota of the whole jail (root, data, volumes and snapshots), for example 20G")
 	f.IntVar(&pids, "pids", 0, "processes the jail may have (rctl maxproc; needs kern.racct.enable=1)")
 	f.StringArrayVar(&fwPolicies, "firewall-policy", nil, "firewall policy of the jail (repeatable; they are rendered in the order given, after the project's). On set the policies given REPLACE the whole list of the jail; to add one name all of them")

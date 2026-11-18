@@ -213,4 +213,6 @@ var Extensions = []string{
 	"rename",
 	"boot_plan",
 	"firewall_test",
+	"jail_expose",
+	"jail_reach",
 }

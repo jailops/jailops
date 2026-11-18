@@ -132,25 +132,6 @@ func checkAddr(key, v string, v4 bool) error {
 	return nil
 }
 
-func checkListen(key, v string) error {
-	host, port, ok := strings.Cut(v, ":")
-	if strings.Contains(port, ":") {
-		i := strings.LastIndex(v, ":")
-		host, port = strings.Trim(v[:i], "[]"), v[i+1:]
-	} else if !ok {
-		return cfgErr(key, "%s: %q must be host:port or :port", key, v)
-	}
-	if host != "" {
-		if _, err := netip.ParseAddr(host); err != nil {
-			return cfgErr(key, "%s: %q is not an address of the host", key, host)
-		}
-	}
-	if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
-		return cfgErr(key, "%s: %q is not a port", key, port)
-	}
-	return nil
-}
-
 // ---- device lookup ----
 
 func normalizeDevices(s *JailSpec) {
@@ -203,19 +184,6 @@ func devfs(s *JailSpec, d string, create bool) *DevfsDevice {
 	}
 	s.Devfs = append(s.Devfs, DevfsDevice{Name: d})
 	return &s.Devfs[len(s.Devfs)-1]
-}
-
-func proxy(s *JailSpec, d string, create bool) *ProxyDevice {
-	for i := range s.Proxy {
-		if s.Proxy[i].Name == d {
-			return &s.Proxy[i]
-		}
-	}
-	if !create {
-		return nil
-	}
-	s.Proxy = append(s.Proxy, ProxyDevice{Name: d})
-	return &s.Proxy[len(s.Proxy)-1]
 }
 
 func deviceField[T any](dev string, find func(*JailSpec, string, bool) *T,
@@ -661,75 +629,6 @@ func buildRegistry() []ckey {
 		})
 	r[len(r)-1].Values = DevfsAllowList
 
-	// proxy devices
-	devKey("proxy.<name>.listen", "listen", "Host address and port the jail's port is forwarded on.", ":8080", false, true, true, "proxy[<name>].listen",
-		func(s *JailSpec, d string) (string, bool) {
-			p := proxy(s, d, false)
-			if p == nil {
-				return "", false
-			}
-			return p.Listen, p.Listen != ""
-		}, func(s *JailSpec, d, v string) error {
-			if !IsName(d, 31) {
-				return cfgErr("proxy."+d+".listen", "%q is not a device name", d)
-			}
-			if err := checkListen("proxy."+d+".listen", v); err != nil {
-				return err
-			}
-			proxy(s, d, true).Listen = v
-			return nil
-		}, func(s *JailSpec, d string) {
-			for i := range s.Proxy {
-				if s.Proxy[i].Name == d {
-					s.Proxy = append(s.Proxy[:i], s.Proxy[i+1:]...)
-					return
-				}
-			}
-		})
-	devKey("proxy.<name>.jail_port", "int", "Port inside the jail.", "80", false, true, true, "proxy[<name>].jail_port",
-		func(s *JailSpec, d string) (string, bool) {
-			p := proxy(s, d, false)
-			if p == nil || p.JailPort == 0 {
-				return "", false
-			}
-			return strconv.Itoa(p.JailPort), true
-		}, func(s *JailSpec, d, v string) error {
-			n, err := atoiRange("proxy."+d+".jail_port", v, 1, 65535)
-			if err != nil {
-				return err
-			}
-			if !IsName(d, 31) {
-				return cfgErr("proxy."+d+".jail_port", "%q is not a device name", d)
-			}
-			proxy(s, d, true).JailPort = n
-			return nil
-		}, func(s *JailSpec, d string) {
-			if p := proxy(s, d, false); p != nil {
-				p.JailPort = 0
-			}
-		})
-	devKey("proxy.<name>.proto", "enum", "tcp or udp.", "tcp", false, true, true, "proxy[<name>].proto",
-		func(s *JailSpec, d string) (string, bool) {
-			p := proxy(s, d, false)
-			if p == nil {
-				return "", false
-			}
-			return p.Proto, p.Proto != ""
-		}, func(s *JailSpec, d, v string) error {
-			if v != "tcp" && v != "udp" {
-				return cfgErr("proxy."+d+".proto", "proxy.%s.proto: %q must be tcp or udp", d, v)
-			}
-			if !IsName(d, 31) {
-				return cfgErr("proxy."+d+".proto", "%q is not a device name", d)
-			}
-			proxy(s, d, true).Proto = v
-			return nil
-		}, func(s *JailSpec, d string) {
-			if p := proxy(s, d, false); p != nil {
-				p.Proto = ""
-			}
-		})
-	r[len(r)-1].Values = []string{"tcp", "udp"}
 	return r
 }
 
@@ -795,7 +694,7 @@ func ApplyConfig(spec *JailSpec, set map[string]string, unset []string) (restart
 	work.Network = append([]NetworkAttach(nil), spec.Network...)
 	work.Volumes = append([]VolumeAttach(nil), spec.Volumes...)
 	work.Devfs = append([]DevfsDevice(nil), spec.Devfs...)
-	work.Proxy = append([]ProxyDevice(nil), spec.Proxy...)
+	work.Expose = append([]ExposeEntry(nil), spec.Expose...)
 	work.Profiles = append([]string(nil), spec.Profiles...)
 	work.Packages = append([]string(nil), spec.Packages...)
 	work.Boot.Depends = append([]string(nil), spec.Boot.Depends...)
@@ -900,10 +799,6 @@ func ConfigValues(spec JailSpec) map[string]string {
 				for _, d := range s.Devfs {
 					names = append(names, d.Name)
 				}
-			case strings.HasPrefix(k.Name, "proxy."):
-				for _, d := range s.Proxy {
-					names = append(names, d.Name)
-				}
 			}
 			for _, n := range names {
 				if v, ok := k.get(&s, n); ok {
@@ -981,7 +876,7 @@ func ExpandedConfig(spec JailSpec, profiles []Profile) (JailSpec, map[string]str
 	out.Network = append([]NetworkAttach(nil), spec.Network...)
 	out.Volumes = append([]VolumeAttach(nil), spec.Volumes...)
 	out.Devfs = append([]DevfsDevice(nil), spec.Devfs...)
-	out.Proxy = append([]ProxyDevice(nil), spec.Proxy...)
+	out.Expose = append([]ExposeEntry(nil), spec.Expose...)
 	out.Packages = append([]string(nil), spec.Packages...)
 	if spec.Env != nil {
 		out.Env = map[string]string{}

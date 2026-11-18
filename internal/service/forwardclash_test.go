@@ -10,70 +10,36 @@ import (
 )
 
 // Two jails that forward the same host port leave the second dead without a word, so the second is refused when it is
-// made, naming the first: a proxy device against a proxy device, a redirect rule of a policy against a proxy device, and
-// a project's mandatory policy with a redirect against the second jail of the project.
+// made, naming the first.
 func TestTwoJailsCannotForwardTheSameHostPort(t *testing.T) {
 	_, s := newEnv(t)
 	admin := as(globalAdmin, dtest.SeedProject)
-	// the seeded network has no uplink, and a forward needs one
-	lan, err := s.GetNetwork(as(globalAdmin, ""), "lan")
-	if err != nil {
+	natLan(t, s)
+	seedJail(t, s, "one")
+	seedJail(t, s, "two")
+	if _, err := s.ExposeJail(admin, "one", api.ExposeRequest{Ports: []string{"80"}, HostPort: 2301}); err != nil {
 		t.Fatal(err)
 	}
-	lan.Spec.Uplink = "em0"
-	if _, err := s.UpdateNetwork(as(globalAdmin, ""), "lan", lan, lan.Metadata.Generation); err != nil {
-		t.Fatal(err)
-	}
-	withProxy := func(name, listen string) api.Jail {
-		j := dtest.WebJail(name)
-		j.Spec.Proxy = []api.ProxyDevice{{Name: "web", Listen: listen, JailPort: 80}}
-		return j
-	}
-	create := func(j api.Jail) error {
-		op, err := s.CreateJail(admin, j)
-		if err != nil {
-			return err
-		}
-		if got := wait(t, s, op); got.Status != api.OpSuccess {
-			t.Fatalf("create %s: %+v", j.Metadata.Name, got)
-		}
-		return nil
-	}
-	if err := create(withProxy("one", ":2301")); err != nil {
-		t.Fatal(err)
-	}
-	err = create(withProxy("two", ":2301"))
+	_, err := s.ExposeJail(admin, "two", api.ExposeRequest{Ports: []string{"80"}, HostPort: 2301})
 	wantCode(t, err, api.CodeAlreadyExists)
 	if err == nil || !strings.Contains(err.Error(), `"one"`) {
 		t.Fatalf("the refusal should name the first jail: %v", err)
 	}
-	// another port is fine
-	if err := create(withProxy("two", ":2302")); err != nil {
+	// another host port is fine, and so is the same jail port
+	if _, err := s.ExposeJail(admin, "two", api.ExposeRequest{Ports: []string{"80"}, HostPort: 2302}); err != nil {
 		t.Fatal(err)
 	}
-	// a redirect rule of a policy takes the port of a proxy device too
-	jt := dtest.WebJail("three")
-	jt.Spec.Firewall.Policies = []string{"fwd"}
-	if _, err := s.CreatePolicy(admin, redirectPolicy("fwd", 2301, "")); err != nil {
-		t.Fatal(err) // no jail uses the policy yet: nothing clashes
-	}
-	err = create(jt)
-	wantCode(t, err, api.CodeAlreadyExists)
-	if err == nil || !strings.Contains(err.Error(), "2301") {
-		t.Fatalf("a jail whose policy forwards a taken port: %v", err)
-	}
-	// a policy that a jail uses cannot be changed to take a port another jail forwards
-	jf := dtest.WebJail("four")
-	jf.Spec.Firewall.Policies = []string{"other"}
-	if _, err := s.CreatePolicy(admin, redirectPolicy("other", 2303, "")); err != nil {
+	// the same host port on another protocol is another port
+	if _, err := s.ExposeJail(admin, "two", api.ExposeRequest{Proto: "udp", Ports: []string{"53"}, HostPort: 2301}); err != nil {
 		t.Fatal(err)
 	}
-	if err := create(jf); err != nil {
-		t.Fatal(err)
+	// a plain port of another jail is the same host port as far as the host is concerned
+	seedJail(t, s, "three")
+	if _, err := s.ExposeJail(admin, "three", api.ExposeRequest{Ports: []string{"2301"}}); err == nil || !strings.Contains(err.Error(), `"one"`) {
+		t.Fatalf("a plain port that is another jail's host port: %v", err)
 	}
-	clash := redirectPolicy("other", 2301, "")
-	if _, err := s.UpdatePolicy(admin, "other", clash, 0); err == nil || !strings.Contains(err.Error(), "2301") {
-		t.Fatalf("a policy whose forward takes a port of another jail: %v", err)
+	if _, err := s.ExposeJail(admin, "three", api.ExposeRequest{Ports: []string{"2303"}}); err != nil {
+		t.Fatal(err)
 	}
 }
 

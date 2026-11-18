@@ -196,7 +196,6 @@ func TestFirewall(t *testing.T) {
 		DefaultIn: "deny", DefaultOut: "allow",
 		Rules: []api.FirewallRule{
 			{Name: "ssh", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:office", "jail:web", "10.0.0.0/8", "tag:admin"}, Ports: []string{"22", "8000-8100"}},
-			{Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 8080, JailPort: 80}},
 			{Action: "allow", Direction: "out", Proto: "icmp6", To: []string{"any"}},
 		},
 	}
@@ -236,23 +235,6 @@ func TestFirewall(t *testing.T) {
 		{"unknown kind", r(func(x *api.FirewallRule) { x.From = []string{"group:office"} }), "rules[0].from"},
 		{"tag syntax", r(func(x *api.FirewallRule) { x.To = []string{"tag:a b"} }), "rules[0].to"},
 		{"addr", r(func(x *api.FirewallRule) { x.To = []string{"10.0.0.1; pass all"} }), "rules[0].to"},
-		{"rdr out", r(func(x *api.FirewallRule) {
-			x.Direction = "out"
-			x.Ports = nil
-			x.Redirect = &api.Redirect{HostPort: 1, JailPort: 2}
-		}), "rules[0].redirect"},
-		{"rdr deny", r(func(x *api.FirewallRule) {
-			x.Action = "deny"
-			x.Ports = nil
-			x.Redirect = &api.Redirect{HostPort: 1, JailPort: 2}
-		}), "rules[0].redirect"},
-		{"rdr ports", r(func(x *api.FirewallRule) { x.Redirect = &api.Redirect{HostPort: 1, JailPort: 2} }), "rules[0].ports"},
-		{"rdr range", r(func(x *api.FirewallRule) { x.Ports = nil; x.Redirect = &api.Redirect{HostPort: 0, JailPort: 2} }), "rules[0].redirect"},
-		{"rdr proto", r(func(x *api.FirewallRule) {
-			x.Proto = "icmp"
-			x.Ports = nil
-			x.Redirect = &api.Redirect{HostPort: 1, JailPort: 2}
-		}), "rules[0].redirect"},
 		{"rule name", r(func(x *api.FirewallRule) { x.Name = "x\npass all" }), "rules[0].name"},
 		{"raw ctrl", api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Raw: "pass\x00"}, "raw"},
 	}
@@ -517,29 +499,37 @@ func TestJailSpecProjectFields(t *testing.T) {
 
 func TestJailDevicesAreValidated(t *testing.T) {
 	ok := api.JailSpec{Image: "fb", Network: []api.NetworkAttach{{Network: "lan", MTU: 1400, Egress: "10M"}, {Name: "mgmt", Network: "m"}},
-		Devfs: []api.DevfsDevice{{Name: "t", Device: "tun"}}, Proxy: []api.ProxyDevice{{Name: "p", Listen: ":8080", JailPort: 80}, {Name: "q", Listen: "192.0.2.1:53", JailPort: 53, Proto: "udp"}},
+		Devfs: []api.DevfsDevice{{Name: "t", Device: "tun"}}, Expose: []api.ExposeEntry{{Proto: "tcp", Ports: []string{"80", "443"}, Families: []string{"4", "6"}, From: []string{"any"}}, {Proto: "tcp", Ports: []string{"8080"}, HostPort: 9090, Listen: "192.0.2.1"}, {Proto: "udp", Ports: []string{"53"}, From: []string{"set:office", "198.51.100.0/24"}}},
 		Profiles: []string{"base"}}
 	if err := JailSpec("web", ok); err != nil {
 		t.Fatal(err)
 	}
 	for name, mut := range map[string]func(*api.JailSpec){
-		"dup nic":      func(s *api.JailSpec) { s.Network[1].Name = "eth0" },
-		"nic name":     func(s *api.JailSpec) { s.Network[1].Name = "Bad Name" },
-		"mtu":          func(s *api.JailSpec) { s.Network[0].MTU = 20 },
-		"rate":         func(s *api.JailSpec) { s.Network[0].Egress = "fast" },
-		"devfs":        func(s *api.JailSpec) { s.Devfs[0].Device = "mem" },
-		"devfs path":   func(s *api.JailSpec) { s.Devfs[0].Device = "../mem" },
-		"devfs dup":    func(s *api.JailSpec) { s.Devfs = append(s.Devfs, s.Devfs[0]) },
-		"proxy listen": func(s *api.JailSpec) { s.Proxy[0].Listen = "8080" },
-		"proxy host":   func(s *api.JailSpec) { s.Proxy[0].Listen = "web.example:80" },
-		"proxy port":   func(s *api.JailSpec) { s.Proxy[0].JailPort = 0 },
-		"proxy proto":  func(s *api.JailSpec) { s.Proxy[0].Proto = "sctp" },
-		"profile name": func(s *api.JailSpec) { s.Profiles = []string{"Bad"} },
+		"dup nic":           func(s *api.JailSpec) { s.Network[1].Name = "eth0" },
+		"nic name":          func(s *api.JailSpec) { s.Network[1].Name = "Bad Name" },
+		"mtu":               func(s *api.JailSpec) { s.Network[0].MTU = 20 },
+		"rate":              func(s *api.JailSpec) { s.Network[0].Egress = "fast" },
+		"devfs":             func(s *api.JailSpec) { s.Devfs[0].Device = "mem" },
+		"devfs path":        func(s *api.JailSpec) { s.Devfs[0].Device = "../mem" },
+		"devfs dup":         func(s *api.JailSpec) { s.Devfs = append(s.Devfs, s.Devfs[0]) },
+		"expose listen":     func(s *api.JailSpec) { s.Expose[1].Listen = "web.example" },
+		"expose listen v6":  func(s *api.JailSpec) { s.Expose[1].Listen = "2001:db8::1" },
+		"expose port":       func(s *api.JailSpec) { s.Expose[0].Ports = []string{"0"} },
+		"expose no ports":   func(s *api.JailSpec) { s.Expose[0].Ports = nil },
+		"expose proto":      func(s *api.JailSpec) { s.Expose[0].Proto = "sctp" },
+		"expose family":     func(s *api.JailSpec) { s.Expose[0].Families = []string{"5"} },
+		"expose from jail":  func(s *api.JailSpec) { s.Expose[0].From = []string{"jail:web"} },
+		"expose from tag":   func(s *api.JailSpec) { s.Expose[0].From = []string{"tag:x"} },
+		"expose host port":  func(s *api.JailSpec) { s.Expose[0].HostPort = 8000 },
+		"expose host range": func(s *api.JailSpec) { s.Expose[1].Ports = []string{"8000-8100"} },
+		"expose duplicate":  func(s *api.JailSpec) { s.Expose = append(s.Expose, s.Expose[0]) },
+		"expose comment":    func(s *api.JailSpec) { s.Expose[0].Comment = "a\nb" },
+		"profile name":      func(s *api.JailSpec) { s.Profiles = []string{"Bad"} },
 	} {
 		s := ok
 		s.Network = append([]api.NetworkAttach(nil), ok.Network...)
 		s.Devfs = append([]api.DevfsDevice(nil), ok.Devfs...)
-		s.Proxy = append([]api.ProxyDevice(nil), ok.Proxy...)
+		s.Expose = append([]api.ExposeEntry(nil), ok.Expose...)
 		mut(&s)
 		if err := JailSpec("web", s); err == nil {
 			t.Errorf("%s: accepted", name)

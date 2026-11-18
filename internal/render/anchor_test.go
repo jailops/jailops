@@ -17,7 +17,8 @@ func TestAnchorRulesAreTheFilterLinesOfTheText(t *testing.T) {
 	full := pfBase()
 	full.Foreign = []netip.Prefix{netip.MustParsePrefix("10.31.0.0/24")}
 	full.LinkLocal = []netip.Addr{ip("fe80::1")}
-	full.Proxy = []api.FirewallRule{{Name: "proxy web", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 8080, JailPort: 80}}}
+	full.Expose = []Exposure{{Name: "expose tcp 80", Proto: "tcp", Ports: []string{"80"}}}
+	full.Forwards = []api.FirewallRule{{Name: "expose tcp 80 forward", Action: "allow", Direction: "in", Proto: "tcp", Redirect: &api.Redirect{HostPort: 8080, JailPort: 80}}}
 	raw := pfBase()
 	raw.Policies = append(raw.Policies, PFPolicy{Name: "admin", AllowRaw: true, Policy: api.FirewallPolicySpec{Raw: "block drop in quick proto tcp to port 9"}})
 	several := pfBase()

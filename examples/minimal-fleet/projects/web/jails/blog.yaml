@@ -9,6 +9,7 @@ start: true
 spec:
   image: freebsd-15@stable
   profiles: [small, web]
+  expose: [{ports: ["80", "443"]}]
   resources: {memory: 2G}
   network:
     - {name: eth0, mtu: 1400} # overrides one key of the profile's eth0

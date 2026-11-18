@@ -77,7 +77,7 @@ func classify(e Entry) Class {
 		return ClassProject
 	case has("/api/v1/auth"), has("/api/v1/sessions"), p == "/api/v1/config-keys", has("/api/v1/apps"):
 		return ClassSelf
-	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates", p == "/api/v1/logs", p == "/api/v1/boot":
+	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates", p == "/api/v1/exposed", p == "/api/v1/logs", p == "/api/v1/boot":
 		return ClassVisible
 	case has("/api/v1/logs/forward"):
 		return ClassGlobal
@@ -175,9 +175,15 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/updates/check", op),
 	r("POST", "/api/v1/updates/apply", op),
 	r("GET", "/api/v1/jails/{name}/updates", ro),
+	r("GET", "/api/v1/jails/{name}/reach", ro),
+	r("GET", "/api/v1/exposed", ro),
 	r("POST", "/api/v1/jails/{name}/provision", ad),
 	// installs one fixed package (bash) and writes JailOps' own prompt files: no more than an operator may do with exec
 	r("POST", "/api/v1/jails/{name}/shell-setup", op),
+	// changes what the Internet reaches of a jail: its firewall, and for an IPv4 forward a port of the host (the service
+	// asks a global administrator for that)
+	r("POST", "/api/v1/jails/{name}/expose", ad),
+	r("POST", "/api/v1/jails/{name}/unexpose", ad),
 	r("GET", "/api/v1/profiles", ro),
 	r("POST", "/api/v1/profiles", ad),
 	r("GET", "/api/v1/profiles/{name}", ro),

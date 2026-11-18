@@ -21,6 +21,7 @@
         "images",
         "networks",
         "ndp",
+        "exposed",
         "firewall",
         "backup-targets",
         "backup-policies",

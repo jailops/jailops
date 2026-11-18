@@ -8,7 +8,7 @@ staged rollout. Read `docs/fleet-sync.md` first for the rules; this is the examp
     shared/networks, images     the same network and image on every host
     profiles/small.yaml         a repository-only fragment merged into jails
     projects/site.yaml          hosts: ["@prod"]: defined once, the same UUID on both hosts
-    projects/site/profiles      the project's profile: network, storage, firewall, proxy
+    projects/site/profiles      the project's profile: network, storage, firewall
     projects/site/jails         web-eu1 and web-eu2: each declared on exactly one named host
     rollouts/web-upgrade.yaml   canary first, one jail at a time, a health gate between batches
     secrets/*.age, shared/secrets.sops.yaml, hosts/eu2/remote.sops.yaml, .sops.yaml

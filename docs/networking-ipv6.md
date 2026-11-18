@@ -291,21 +291,16 @@ stops when its rule goes.
   [install.md](install.md)), and `jailops doctor` warns (`pf.scrub`) when the loaded main ruleset has no scrub rule.
 - **Inbound connections from the internet** into a jail on a proxy or routed network are opened by the jail's own firewall,
   not by `pf.conf`. An `allow in` rule with an external source in a policy of the jail
-  (`jailops firewall rule add web in --action allow --proto tcp --port 8080`) renders `pass in quick on <uplink> ... to
+  (`jailops firewall rule add web in --action allow --proto tcp --from any --port 8080`, or `jailops expose web 8080`) renders `pass in quick on <uplink> ... to
   <jail address> port 8080` in the jail's anchor, which wins over the host's `block ... all` wherever the anchor line
   stands. A jail with only defaults stays closed from the internet, and `jailops firewall test --from <address outside>
   --to jail:web --port 8080` walks that hop too. See [install.md](install.md) section 3.
-- A rule has an action (`allow` or `deny`), a direction (`in` or `out`) and, as it needs them, a protocol, `from` and `to` endpoints, ports, `log`, a redirect, a name, a comment and `disabled`. The rules of a policy are added and changed one at a time with `jailops firewall rule` (`add`, `list`, `edit`, `move`, `enable`, `disable`, `remove`), each rule addressed by its number or its name, or all at once in a file.
+- A rule has an action (`allow` or `deny`), a direction (`in` or `out`) and, as it needs them, a protocol, `from` and `to` endpoints, ports, `log`, a name, a comment and `disabled`. The rules of a policy are added and changed one at a time with `jailops firewall rule` (`add`, `list`, `edit`, `move`, `enable`, `disable`, `remove`), each rule addressed by its number or its name, or all at once in a file.
   A rule belongs to the jail that has the policy: an inbound rule is always to the jail itself and an outbound rule always from it, so an inbound rule names only `from` and an outbound rule only `to` (`to` on an inbound rule and `from` on an outbound rule are refused).
-  A rule with a redirect (`--redirect HOSTPORT:JAILPORT`, `redirect:` in a file; it names the ports, so the rule has no `port`) is a port forward, which only a global administrator makes ([networking.md](networking.md#forwarded-ports)): a connection to the network's uplink address (or the `listen` address)
-  on HOSTPORT is translated to the jail's address on JAILPORT (`match in on <uplink> … rdr-to`) and passed by a labelled
-  rule on the uplink (`pass in quick on <uplink> … to <jail> port JAILPORT`), which admits what the rule's `from` names,
-  also where the host's own rules block inbound traffic. The state of a connection that came through the forward is ended
-  when the rule is removed or changed.
-  An `allow in` rule with an external source (`any`, an address, a prefix or an address set) and no redirect is rendered the
+  An `allow in` rule with an external source (`any`, an address, a prefix or an address set) is rendered the
   same way, on the uplink of each routed address of the jail (an IPv6 address of a routed or proxy network, an IPv4
   address of a network without NAT): `pass in quick on <uplink> ... to <jail address> port N`. That is what exposes a
-  jail to the internet. The defaults, and the rules whose source is `host`, a jail or a tag, never open the uplink; a
+  jail to the internet; `jailops expose` writes such a rule for you, for both families, and forwards IPv4 behind NAT. A rule without a source is for the jail's link only. The defaults, and the rules whose source is `host`, a jail or a tag, never open the uplink; a
   `deny in` rule is rendered on the uplink first, so it wins at the door as on the jail's link, and a packet that comes
   in on the uplink from a subnet of the jail's own networks or of another project, or that pf's reverse path check
   refuses (`urpf-failed`: an address of a tunnel or of the host's own network from outside), is dropped as forged. Every
@@ -382,7 +377,7 @@ stops when its rule goes.
       jailops firewall address-set add office 192.0.2.0/24 --comment "the office network"
       jailops firewall address-set create git-allow --address 198.51.100.7 --address jail:web
       jailops firewall policy create web --default-in deny --default-out allow --comment "the public web server"
-      jailops firewall rule add web in --action allow --proto tcp --port 80,443 --comment "the site"
+      jailops firewall rule add web in --action allow --proto tcp --from any --port 80,443 --comment "the site"
       jailops firewall rule add web in --action allow --proto tcp --from set:office --port 22 --comment "ssh from the office"
       jailops firewall policy create db --default-in deny --default-out allow
       jailops firewall rule add db in --action allow --proto tcp --from jail:web --port 5432 --comment "the web jail"

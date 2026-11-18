@@ -7,4 +7,5 @@ hosts: [web2]
 spec:
   image: freebsd-15@stable
   profiles: [small, web]
+  expose: [{ports: ["80", "443"]}]
   env: {LOG_LEVEL: info}

@@ -68,7 +68,7 @@ test('a deny rule wins over the allow rule of the same jail, and the rule passed
   await ask(page, '192.0.2.66', 'jail:web', '80')
   await expect(verdict(page)).toHaveText('BLOCK')
   const hop = page.getByTestId('hop-destination').first()
-  await expect(hop).toContainText('rule 4: a scanner that kept coming back')
+  await expect(hop).toContainText('rule 3: a scanner that kept coming back')
   await hop.getByText('Details').click()
   await expect(page.getByTestId('skipped').first()).toContainText('a deny rule wins over every allow rule')
   await expect(page.getByTestId('skipped').first()).toContainText('rule 1')

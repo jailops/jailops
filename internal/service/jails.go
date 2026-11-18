@@ -223,8 +223,12 @@ func (s *Service) ListJails(ctx context.Context, labels map[string]string) ([]ap
 		}
 	}
 	used := s.jailsDiskUsed(ctx, keys)
+	refs, refsErr := s.allRefs(p.Meta.Name)
 	for i, k := range keys {
 		out[i].Status.DiskUsed = used[k]
+		if refsErr == nil {
+			out[i].Status.Exposed = s.exposedOf(ctx, out[i], refs)
+		}
 	}
 	return out, nil
 }
@@ -238,6 +242,9 @@ func (s *Service) GetJail(ctx context.Context, name string) (api.Jail, error) {
 	j, err := s.getByKey(ctx, key)
 	if err == nil {
 		j.Status.DiskUsed = s.jailsDiskUsed(ctx, []string{key})[key]
+		if refs, rerr := s.allRefs(j.Metadata.Project); rerr == nil {
+			j.Status.Exposed = s.exposedOf(ctx, j, refs)
+		}
 	}
 	return j, err
 }

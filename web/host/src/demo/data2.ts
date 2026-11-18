@@ -78,7 +78,6 @@ export function profiles(): { project: Profile[]; host: Profile[] } {
   return {
     project: [
       p('web-limits', 'web', 'Sensible limits for web jails', { 'limits.memory': '2G', 'limits.cpu': '2', 'boot.autostart': 'true', 'nic.eth0.mtu': '1400' }),
-      p('proxy-80', 'web', 'Forward port 80', { 'proxy.http.listen': ':80', 'proxy.http.jail_port': '80' }),
     ],
     host: [p('base', 'host', 'Defaults for every project', { 'limits.pids': '4096', 'update.strategy': 'rebase', 'limits.memory': '1G' })],
   }

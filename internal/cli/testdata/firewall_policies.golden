@@ -3,24 +3,28 @@ firewall policy/floor created
 
 $ jailops firewall rule add floor in --action allow --proto tcp --port 22 --comment ssh
 firewall policy/floor: rule 1 added: allow in tcp port 22
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall policy create monitoring
 firewall policy/monitoring created
 
 $ jailops firewall rule add monitoring in --action allow --proto tcp --port 22 --comment ssh
 firewall policy/monitoring: rule 1 added: allow in tcp port 22
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall policy create postgres
 firewall policy/postgres created
 
 $ jailops firewall rule add postgres in --action allow --proto tcp --port 22 --comment ssh
 firewall policy/postgres: rule 1 added: allow in tcp port 22
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops firewall policy create ssh-office
 firewall policy/ssh-office created
 
 $ jailops firewall rule add ssh-office in --action allow --proto tcp --port 22 --comment ssh
 firewall policy/ssh-office: rule 1 added: allow in tcp port 22
+! note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS
 
 $ jailops jail create db --image freebsd-15@stable --storage default --network lan --firewall-policy postgres --firewall-policy ssh-office
 jail/db created
@@ -69,6 +73,12 @@ Resources
   Firewall:     floor (project), monitoring (project), ssh-office, postgres
   Usage:        - (the jail is not running)
   Disk:         root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB
+
+Reachable from
+SOURCE     FAMILY   PROTO   PORTS   LIMITED TO   REACH    BY
+Internet   -        -       -       -            closed   no allow in rule with an external source and no port forward
+  The jail reaches: Internet all; host DNS and ping; other jails all
+  Details: jailops firewall show db --all
 
 Network
   eth0:         network lan, mac derived by the server, mtu network default, down
@@ -137,6 +147,28 @@ $ jailops jail info db -o json
       "name": "postgres"
     }
   ],
+  "reach": {
+    "project": "main",
+    "jail": "db",
+    "rows": [
+      {
+        "source": "internet",
+        "family": "",
+        "proto": "",
+        "decision": "none",
+        "by": "no allow in rule with an external source and no port forward"
+      }
+    ],
+    "out": {
+      "internet": "all",
+      "host": "DNS and ping",
+      "jails": "all",
+      "other_projects": "none"
+    },
+    "default_in": "deny",
+    "default_out": "allow",
+    "rules": []
+  },
   "snapshots": {
     "count": 0
   },

@@ -16,6 +16,12 @@ Resources
   Usage:        - (racct is off: set kern.racct.enable=1 in /boot/loader.conf and reboot)
   Disk:         not available: cannot open 'tank/jailops/projects/main/jails/web': dataset does not exist
 
+Reachable from
+SOURCE     FAMILY   PROTO   PORTS   LIMITED TO   REACH    BY
+Internet   -        -       -       -            closed   no allow in rule with an external source and no port forward
+  The jail reaches: Internet all; host DNS and ping; other jails all
+  Details: jailops firewall show web --all
+
 Network
   eth0:         network lan, mac derived by the server, mtu network default, up
     10.20.0.10                                 ipv4 global, configured
@@ -89,6 +95,28 @@ $ jailops jail info db -o json
       ]
     }
   ],
+  "reach": {
+    "project": "main",
+    "jail": "db",
+    "rows": [
+      {
+        "source": "internet",
+        "family": "",
+        "proto": "",
+        "decision": "none",
+        "by": "no allow in rule with an external source and no port forward"
+      }
+    ],
+    "out": {
+      "internet": "all",
+      "host": "DNS and ping",
+      "jails": "all",
+      "other_projects": "none"
+    },
+    "default_in": "allow",
+    "default_out": "allow",
+    "rules": []
+  },
   "volumes": [
     {
       "volume": "data",

@@ -7,7 +7,6 @@ import { runOp } from '@jailops/shared/composables/ops'
 import Icon from '@jailops/shared/components/Icon.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import { DEVICE_KINDS, deviceNames, flatten, rowsFor, type DeviceKind } from '@/lib/configKeys'
-import { isGlobalAdmin } from '@/composables/project'
 import type { Jail } from '@jailops/shared/api/types'
 
 const props = defineProps<{ jail: Jail; sources: Record<string, { value: string; source: string }> }>()
@@ -25,8 +24,6 @@ const devicesOf = (kind: DeviceKind) => {
   return [...names]
 }
 
-/** A proxy device publishes a port of the host: only a global administrator adds one. */
-const canAdd = (kind: DeviceKind) => kind !== 'proxy' || isGlobalAdmin()
 const nameFor = ref<Record<string, string>>({})
 async function change(set: Record<string, string>, unset: string[], title: string): Promise<void> {
   error.value = null
@@ -38,7 +35,7 @@ async function change(set: Record<string, string>, unset: string[], title: strin
   }
 }
 /** The key that creates a device, with a first value. */
-const FIRST: Record<DeviceKind, [string, string]> = { nic: ['network', 'lan'], disk: ['mount', '/var/db/x'], devfs: ['device', 'tun'], proxy: ['listen', ':8080'] }
+const FIRST: Record<DeviceKind, [string, string]> = { nic: ['network', 'lan'], disk: ['mount', '/var/db/x'], devfs: ['device', 'tun'] }
 async function addDevice(kind: DeviceKind): Promise<void> {
   const n = (nameFor.value[kind] ?? '').trim()
   if (!n) return
@@ -76,7 +73,7 @@ const fieldsOf = (kind: DeviceKind, dev: string) => {
 
     <section v-for="kind in DEVICE_KINDS" :key="kind" class="panel" :data-kind="kind">
       <header><h2>{{ s.devices.kinds[kind] }}</h2>
-        <form class="row" :title="canAdd(kind) ? undefined : s.devices.proxyGlobal" @submit.prevent="canAdd(kind) && addDevice(kind)"><input v-model="nameFor[kind]" class="mono" type="text" :disabled="!canAdd(kind)" :placeholder="s.devices.deviceName" :aria-label="s.devices.deviceName + ' ' + kind" style="width: 130px" /><button class="btn btn-sm" type="submit" :disabled="!canAdd(kind)"><Icon name="plus" />{{ s.devices.addDevice }}</button></form>
+        <form class="row" @submit.prevent="addDevice(kind)"><input v-model="nameFor[kind]" class="mono" type="text" :placeholder="s.devices.deviceName" :aria-label="s.devices.deviceName + ' ' + kind" style="width: 130px" /><button class="btn btn-sm" type="submit"><Icon name="plus" />{{ s.devices.addDevice }}</button></form>
       </header>
       <p v-if="!devicesOf(kind).length" class="empty">{{ s.devices.none }}</p>
       <div v-for="dev in devicesOf(kind)" :key="dev" class="dev" :data-device="kind + '.' + dev">

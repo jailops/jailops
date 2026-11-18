@@ -93,8 +93,32 @@ segment of the uplink, for which the host answers neighbour discovery); see [net
 ## Reaching the outside
 
 `--nat` translates what leaves through the uplink to the uplink's address. A jail that must be reached from outside gets
-a port forward in its firewall policy (`redirect`) or a routed IPv6 address. The host's own `pf.conf` is the door: it
-must let the traffic in and contain the line `anchor "jailops/*"` ([install.md](install.md#3-the-firewall-one-line-in-pfconf)).
+`jailops expose` ([below](#letting-the-internet-in-jailops-expose)). The host's own `pf.conf` is the door: it
+must contain the line `anchor "jailops/*"` ([install.md](install.md#3-the-firewall-one-line-in-pfconf)).
+
+## What reaches a jail
+
+The question "what can reach this jail?" has one answer for each kind of source, and it is computed from the anchor
+JailOps loads, not from the policies you typed:
+
+    jailops list                        # the EXPOSED column: what the Internet reaches
+    jailops firewall show web           # every kind of source, the rule that gives the reach or stops it
+    jailops firewall show web --all     # the rules in the order pf decides (--pf adds the pf text of each)
+    jailops firewall exposed            # everything the Internet reaches, across the jails
+    jailops firewall test --from internet --to jail:web --port 443
+
+`firewall show` has one row for the Internet, one for each WireGuard tunnel, and one each for the other jails of the
+project, the host and the other projects. A row says the family, protocol and ports, who it is limited to (`any`, an
+address, a prefix, a set), and the rule that gives it: "policy web rule 2". "closed" rows name what stops it. Below the
+table is what the jail itself reaches.
+
+The Internet reaches a jail in two ways. An IPv6 address is routed: an `allow in` rule with an external source opens
+it. An IPv4 address of a NAT network is private: only a forward of a port of the host (an `allow in` rule with
+`redirect`, `HOSTPORT:JAILPORT`) reaches it, and `list` shows the port of the host. A rule that names only jails, tags or
+`host` as its source does not show as Internet. `firewall exposed --tunnels` adds what WireGuard peers reach.
+
+What the view cannot know it says under the table: a raw PF fragment, and the rules of the host's own `pf.conf` before the
+anchor line. The console shows the same on the Firewall tab of a jail and on the Exposed tab of the firewall page.
 
 ## Limits
 
@@ -118,16 +142,33 @@ loaded and nothing would evaluate it. `jailops doctor` fails `pf.enabled` in tha
 in `priv.conf` only on a host where that is what you want. `service pf start` and `service pf restart` empty every anchor;
 the daemon looks every few seconds and loads the anchors of the running jails again at once.
 
-## Forwarded ports
+## Letting the Internet in: `jailops expose`
 
-Only a global administrator makes a forward (a proxy device, a profile with one, or a redirect rule of a policy), because a
-forward takes traffic that would reach the host: it is refused on a port that a service of the host listens on (ssh, the
-console, the other JailOps listeners, the ACME challenge port while ACME is the source) and on a `listen` address that the
-host does not have. An administrator of the project edits the other rules of a policy that already has a forward.
+```
+jailops expose web 80,443                      # IPv4 and IPv6, from anyone
+jailops expose mail 25,465,587,993 --comment mail
+jailops expose web 443 --from set:office       # only from an address set, an address or a prefix
+jailops expose web 80 --family 6               # IPv6 only
+jailops expose app 3000 --host-port 8080       # the host's port 8080 goes to the jail's port 3000 (IPv4 behind NAT)
+jailops unexpose web 80
+```
 
-Two jails cannot forward the same host port (a proxy device, or a redirect rule of a policy the jail is rendered with): the
-second is refused when it is made, and the message names the first jail. A mandatory policy of a project with a redirect can
-be used by one jail of the project only.
+One command opens the ports of a jail to the Internet on every family it has. How the traffic arrives depends on the
+address: an IPv6 address, and an IPv4 address of a network without NAT, are reached directly, so the ports are let in on
+the uplink to the jail's own address; an IPv4 address behind NAT is reached through a **forward** of the same ports of the
+host (`--host-port` and `--listen` choose another host port or address). The jail's firewall policies are not touched: the
+exposure is stored with the jail (`spec.expose`), rendered as the section "exposed ports" of its anchor, and shown by
+`jailops list` (EXPOSED), `jailops info` and `jailops firewall show JAIL`. A network without an uplink reaches nothing from
+outside, and the command says so. An allow rule of a policy without `--from` is for the jail's link only (the project's
+jails and the host); it never opens the uplink. `--from any` or `jailops expose` does.
+
+Only a global administrator makes an IPv4 forward, because a forward takes traffic that would reach the host: it is refused on a
+port that a service of the host listens on (ssh, the console, the other JailOps listeners, the ACME challenge port while ACME
+is the source) and on a `--listen` address the host does not have. An administrator of a project exposes IPv6 and
+non-NAT IPv4 on their own. A request that needs a forward from someone who may not make one is refused as a whole, with the
+hint to ask for IPv6 only (`--family 6`); removing a forward is a global administrator's too.
+
+Two jails cannot forward the same host port: the second is refused when it is made, and the message names the first jail.
 
 ## Networks
 

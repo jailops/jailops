@@ -38,6 +38,9 @@ type jailInfo struct {
 	// FirewallPolicies are the policies the jail is rendered with, in the order they are rendered; empty when it has
 	// none and is open.
 	FirewallPolicies []infoPolicy `json:"firewall_policies,omitempty"`
+	// Reach is what reaches the jail and what it reaches (the same as 'firewall show'); absent when the server does not
+	// compute it.
+	Reach *api.JailReach `json:"reach,omitempty"`
 	// DNS says how the jail resolves names; absent when it has no network.
 	DNS       *infoDNS           `json:"dns,omitempty"`
 	Volumes   []api.VolumeAttach `json:"volumes,omitempty"`
@@ -295,6 +298,9 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 	for _, n := range s.Firewall.Policies {
 		info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: n})
 	}
+	if r, err := c.Jails().Reach(ctx, m.Name); err == nil && r.Error == "" {
+		info.Reach = &r
+	}
 	hist, err := c.Jails().UpdateHistory(ctx, m.Name)
 	if err != nil {
 		info.Update.Error = err.Error()
@@ -450,6 +456,12 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		kv("Volume "+v.Name, mount)
 	}
 
+	if r := info.Reach; r != nil {
+		section("Reachable from")
+		a.reachTable(w, r.Rows)
+		fprintf(w, "  The jail reaches: Internet %s; host %s; other jails %s\n", dash(r.Out.Internet), dash(r.Out.Host), dash(r.Out.Jails))
+		fprintf(w, "  Details: jailops firewall show %s --all\n", info.Name)
+	}
 	section("Network")
 	if len(info.Interfaces) == 0 {
 		fprintln(w, "  no interfaces")

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"sort"
-	"strconv"
 
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
@@ -246,34 +245,6 @@ func (s *Service) readmitProfile(ctx context.Context, proj, name string, spec ap
 		if len(eff.Devfs) > 0 && len(j.Spec.Devfs) == 0 && !ActorFrom(ctx).Perm.Satisfies(api.PermAdmin) {
 			return api.Errorf(api.CodeForbidden, "jail %q would gain device nodes, which needs the admin role", who)
 		}
-		if len(eff.Proxy) > 0 {
-			// a published port that the edit adds or changes is a global administrator's to give
-			var before []api.ProxyDevice
-			if stored, err := s.resolveProfiles(j.Metadata.Project, j.Spec.Profiles); err == nil {
-				oldEff, _ := api.ExpandedConfig(j.Spec, stored)
-				before = oldEff.Proxy
-			}
-			if !slices.Equal(eff.Proxy, before) {
-				if err := requireGlobalForForward(ctx, "a profile that forwards a host port into a jail"); err != nil {
-					return err
-				}
-			}
-			if err := s.checkProxyDevices(ctx, "jail "+who, eff.Proxy); err != nil {
-				return err
-			}
-			up := false
-			for _, nd := range eff.Network {
-				if n, err := s.netKind.get(nd.Network); err == nil && n.Spec.Uplink != "" {
-					up = true
-				}
-			}
-			if !up {
-				return api.Errorf(api.CodeInvalid, "jail %q would forward host ports but has no network with an uplink", who)
-			}
-		}
-		if err := s.checkProxyConflicts(u.key, eff); err != nil {
-			return err
-		}
 		// the volumes the profile gives the jail pass what a volume attached to the jail itself passes
 		was := s.effective(j).Volumes
 		if err := s.hostDirAdmission(ctx, j.Metadata.Project, eff.Volumes, was); err != nil {
@@ -287,6 +258,19 @@ func (s *Service) readmitProfile(ctx context.Context, proj, name string, spec ap
 				return api.Errorf(api.CodeNotFound, "jail %q would attach volume %q, which does not exist in project %q", who, v.Name, j.Metadata.Project).
 					WithHint("jailops volume create " + v.Name)
 			}
+		}
+		// the forwards the profile gives the jail pass what an exposure of the jail itself passes: a port of the host is a
+		// global administrator's, never one the host needs, never one another jail has
+		if s.forwardsChange(u.key, s.effective(j), eff) {
+			if err := requireGlobalForForward(ctx, "forwarding a host port into a jail"); err != nil {
+				return err
+			}
+		}
+		if err := s.checkExposeForwards(ctx, "jail "+who, eff); err != nil {
+			return err
+		}
+		if err := s.checkExposeConflicts(u.key, eff); err != nil {
+			return err
 		}
 		newEff[u.key] = eff
 	}
@@ -381,45 +365,18 @@ func (s *Service) validateJail(project, name string, own api.JailSpec) error {
 	return validate.JailSpec(name, eff)
 }
 
-// proxyKey identifies a forwarded port on the host.
-func proxyKey(listen, proto string) (string, error) {
-	host, port, err := validate.ParseListen(listen)
-	if err != nil {
-		return "", err
-	}
-	if proto == "" {
-		proto = "tcp"
-	}
-	return proto + "/" + host + "/" + strconv.Itoa(port), nil
-}
-
-// checkProxyConflicts rejects a jail whose published host port another jail, of any project, already forwards: a proxy
-// device of the jail or a redirect rule of one of its policies, against the proxy devices and the redirect rules of
-// the others.
-func (s *Service) checkProxyConflicts(self string, eff api.JailSpec) error {
-	if err := s.checkProxyDeviceConflicts(self, eff); err != nil {
-		return err
-	}
-	project, _ := validate.SplitQualified(self)
-	return s.checkForwardClash(project, self, eff)
-}
-
-// checkProxyDeviceConflicts rejects two proxy devices of one jail that listen in the same place (the clash with another jail
-// is checkForwardClash, which also counts the redirect rules of policies). A listener on every address conflicts with one
-// on a specific address.
-func (s *Service) checkProxyDeviceConflicts(self string, eff api.JailSpec) error {
+// checkExposeConflicts rejects a jail whose published host port another jail, of any project, already forwards, and a
+// jail that forwards one host port twice.
+func (s *Service) checkExposeConflicts(self string, eff api.JailSpec) error {
 	mine := map[string]string{}
-	for _, p := range eff.Proxy {
-		k, err := proxyKey(p.Listen, p.Proto)
-		if err != nil {
-			return invalid("proxy %q: %v", p.Name, err)
+	for _, f := range s.forwardsOf(self, eff) {
+		if other, dup := mine[f.key]; dup {
+			return api.Errorf(api.CodeAlreadyExists, "%s forwards host port %s as %s does", f.source, hostPortOf(f.key), other).
+				WithHint("give one of them another port: --host-port N")
 		}
-		if _, dup := mine[k]; dup {
-			return api.Errorf(api.CodeAlreadyExists, "proxy %q listens where another proxy of the jail does", p.Name)
-		}
-		mine[k] = p.Name
+		mine[f.key] = f.source
 	}
-	return nil
+	return s.checkForwardClash(self, eff)
 }
 
 // portClash reports whether two keys proto/host/port overlap.

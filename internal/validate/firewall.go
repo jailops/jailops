@@ -151,32 +151,6 @@ func rule(f string, r api.FirewallRule) error {
 			}
 		}
 	}
-	if rd := r.Redirect; rd != nil {
-		if r.Direction != "in" {
-			return Invalid(f+".redirect", "redirect is allowed on inbound rules only")
-		}
-		if r.Action != "allow" {
-			return Invalid(f+".redirect", "redirect needs action allow")
-		}
-		if r.Proto != "tcp" && r.Proto != "udp" {
-			return Invalid(f+".redirect", "redirect needs proto tcp or udp")
-		}
-		if len(r.Ports) > 0 {
-			return Invalid(f+".ports", "ports must be empty when redirect is set; the redirect names the ports")
-		}
-		if len(r.To) > 0 {
-			return Invalid(f+".to", "to must be empty when redirect is set; the destination is the jail")
-		}
-		if rd.HostPort < 1 || rd.HostPort > 65535 || rd.JailPort < 1 || rd.JailPort > 65535 {
-			return Invalid(f+".redirect", "redirect ports must be between 1 and 65535")
-		}
-		if rd.Listen != "" {
-			a, err := netip.ParseAddr(rd.Listen)
-			if err != nil || a.Zone() != "" || a.IsMulticast() || a.IsUnspecified() || a.IsLoopback() {
-				return Invalid(f+".redirect.listen", "listen %q is not a unicast address of the host", rd.Listen)
-			}
-		}
-	}
 	return nil
 }
 
