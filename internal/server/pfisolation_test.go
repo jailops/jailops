@@ -146,7 +146,7 @@ func TestARuleNamesAJail(t *testing.T) {
 	}
 	e.D.Reconciler().Pass(c)
 	rs, _ = e.PF.Read(c, render.JailAnchorFor("alpha", "db1"))
-	if !strings.Contains(rs, "table <j_later> persist\n") {
+	if !strings.Contains(rs, "table <j_later> persist { }\n") {
 		t.Fatalf("a jail that does not exist is not an empty table:\n%s", rs)
 	}
 	// a jail and an address set may have the same name: jail:w1 and set:w1 are two tables
@@ -256,7 +256,7 @@ func TestAPolicyAndASetMayNameAJailMadeLater(t *testing.T) {
 	startJailIn(t, e.Admin, db)
 	e.D.Reconciler().Pass(c)
 	rs, _ := e.PF.Read(c, render.JailAnchorFor("alpha", "db2"))
-	if !strings.Contains(rs, "table <j_later> persist\n") || !strings.Contains(rs, "table <s_clients> persist\n") {
+	if !strings.Contains(rs, "table <j_later> persist { }\n") || !strings.Contains(rs, "table <s_clients> persist { }\n") {
 		t.Fatalf("before the jail exists both references are empty tables:\n%s", rs)
 	}
 	startJailIn(t, e.Admin, dtest.WebJailOn("later", "lan"))

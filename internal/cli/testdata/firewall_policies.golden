@@ -71,6 +71,8 @@ Jail db
 Resources
   Limits:       none
   Firewall:     floor (project), monitoring (project), ssh-office, postgres
+  Default in:   allow (no policy says deny)
+  Default out:  allow (no policy says deny)
   Usage:        - (the jail is not running)
   Disk:         root 256.0 MiB used (1.5 GiB referenced), data 70.0 MiB
 
@@ -150,6 +152,28 @@ $ jailops jail info db -o json
   "reach": {
     "project": "main",
     "jail": "db",
+    "policies": [
+      {
+        "name": "floor",
+        "source": "project",
+        "rules": 1
+      },
+      {
+        "name": "monitoring",
+        "source": "project",
+        "rules": 1
+      },
+      {
+        "name": "ssh-office",
+        "source": "jail",
+        "rules": 1
+      },
+      {
+        "name": "postgres",
+        "source": "jail",
+        "rules": 1
+      }
+    ],
     "rows": [
       {
         "source": "internet",
@@ -165,7 +189,7 @@ $ jailops jail info db -o json
       "jails": "all",
       "other_projects": "none"
     },
-    "default_in": "deny",
+    "default_in": "allow",
     "default_out": "allow",
     "rules": []
   },

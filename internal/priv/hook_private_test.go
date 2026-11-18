@@ -2,6 +2,7 @@ package priv
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -116,6 +117,15 @@ func TestHookRefusesALinkedJailWithoutPFOrWithoutAnAnchor(t *testing.T) {
 	}
 	if noLine.pf.LoadCalls["jailops/alpha/web"] != 0 {
 		t.Errorf("an anchor was loaded although the start was refused: %v", noLine.pf.LoadCalls)
+	}
+	// pf runs but its main ruleset cannot be read: not taken for fine
+	unreadable := newEnvWithPF("Enabled for 0 days 00:01:02", anchorLine)
+	unreadable.pfRulesErr = errors.New("pfctl: DIOCGETRULES: Device busy")
+	if err := unreadable.local.RunHook(ctx, PhasePreStart, "alpha_web"); err == nil || !strings.Contains(err.Error(), "cannot be read") {
+		t.Fatalf("an unreadable main ruleset: %v", err)
+	}
+	if unreadable.pf.LoadCalls["jailops/alpha/web"] != 0 {
+		t.Errorf("an anchor was loaded although the start was refused: %v", unreadable.pf.LoadCalls)
 	}
 	on := newEnvWithPF("Enabled for 0 days 00:01:02", anchorLine)
 	if err := on.local.RunHook(ctx, PhasePreStart, "alpha_web"); err != nil {

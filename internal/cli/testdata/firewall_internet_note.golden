@@ -1,0 +1,28 @@
+$ jailops firewall address-set create office --address 192.0.2.0/24 --comment the office
+address set/office created
+
+$ jailops firewall policy create web --comment the web server
+firewall policy/web created
+
+$ jailops firewall rule add web in --action allow --proto tcp --from any --port 80 --comment the site
+firewall policy/web: rule 1 added: allow in tcp from any port 80
+! note: this lets the Internet in; jailops expose does the same and also adds the IPv4 forward
+
+$ jailops firewall rule add web in --action allow --proto tcp --from ::/0 --port 443 --comment the site over IPv6
+firewall policy/web: rule 2 added: allow in tcp from ::/0 port 443
+! note: this lets the Internet in; jailops expose does the same and also adds the IPv4 forward
+
+$ jailops firewall rule add web in --action allow --proto tcp --from set:office --port 22 --comment ssh from the office
+firewall policy/web: rule 3 added: allow in tcp from set:office port 22
+! note: the rule opens the uplink of the jails with this policy that have a routed address, from set:office (review: jailops firewall show JAIL)
+
+$ jailops firewall rule edit web 3 --from 0.0.0.0/0
+firewall policy/web: rule 3 changed: allow in tcp from 0.0.0.0/0 port 22
+! note: this lets the Internet in; jailops expose does the same and also adds the IPv4 forward
+
+$ jailops firewall rule edit web 3 --from set:office
+firewall policy/web: rule 3 changed: allow in tcp from set:office port 22
+
+$ jailops firewall rule add web out --action allow --proto tcp --to any --port 443 --comment outbound is not it
+firewall policy/web: rule 4 added: allow out tcp to any port 443
+

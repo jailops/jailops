@@ -120,7 +120,6 @@ func (s *Server) fakeHop(project string, j *api.Jail, pfDir string, req api.Fire
 		project1 = p.Spec.FirewallPolicies
 	}
 	names = append(append(names, project1...), j.Spec.Firewall.Policies...)
-	defaultDeny := false
 	// every deny rule of the policies is looked at before any allow rule, and a disabled rule is not looked at
 	for _, deny := range []bool{true, false} {
 		for _, pn := range names {
@@ -152,20 +151,12 @@ func (s *Server) fakeHop(project string, j *api.Jail, pfDir string, req api.Fire
 			}
 		}
 	}
-	for _, pn := range names {
-		pol := s.policies.items[s.policies.keyIn(project, pn)]
-		if pol == nil {
-			continue
-		}
-		if want == "in" && pol.Spec.DefaultIn == "deny" || want == "out" && pol.Spec.DefaultOut == "deny" {
-			defaultDeny = true
-		}
-	}
+	dv, by := s.fakeDefault(project, names, project1, want)
 	v := api.TestPass
-	if defaultDeny {
+	if dv == "deny" {
 		v = api.TestBlock
 	}
-	return api.FirewallTestHop{Verdict: v, DecidedBy: &api.FirewallTestRule{Stage: "default", PF: fmt.Sprintf("%s %s quick all (fake default)", map[string]string{api.TestPass: "pass", api.TestBlock: "block drop"}[v], pfDir)}}
+	return api.FirewallTestHop{Verdict: v, DecidedBy: &api.FirewallTestRule{Stage: "default", SetBy: by, PF: fmt.Sprintf("%s %s quick all (fake default)", map[string]string{api.TestPass: "pass", api.TestBlock: "block drop"}[v], pfDir)}}
 }
 
 func containsStr(l []string, s string) bool {

@@ -338,25 +338,36 @@ func dsNames(l []dsInfo) []string {
 
 // RemountHostDir gives a running jail the mount of a host directory again once the directory is back: a nullfs mount
 // over a mount that went away does not see the one that came back, so the old mount is removed and made again, with
-// the same options the jail's fstab has.
+// the same options the jail's fstab has. A Linux jail has the second mount below its mirror, which goes the same way.
 func (s *Service) RemountHostDir(ctx context.Context, name string, a Attached) error {
 	if err := s.checkHostDir(ctx, a); err != nil {
 		return err
 	}
-	target := s.Cfg.at(name).rootMP() + a.Path
-	_, _ = s.Exec.Run(ctx, []string{"umount", "-f", target}) // a mount that is not there is fine
-	argv := []string{"mount", "-t", "nullfs"}
-	if a.ReadOnly {
-		argv = append(argv, "-o", "ro")
+	targets := []string{s.Cfg.at(name).rootMP() + a.Path}
+	if a.Linux {
+		targets = append(targets, s.compatTarget(name, a))
 	}
-	argv = append(argv, a.Mountpoint, target)
-	if out, err := s.Exec.Run(ctx, argv); err != nil {
+	for i := len(targets) - 1; i >= 0; i-- {
+		_, _ = s.Exec.Run(ctx, []string{"umount", "-f", targets[i]}) // a mount that is not there is fine
+	}
+	for i, target := range targets {
+		argv := []string{"mount", "-t", "nullfs"}
+		if a.ReadOnly {
+			argv = append(argv, "-o", "ro")
+		}
+		argv = append(argv, a.Mountpoint, target)
+		out, err := s.Exec.Run(ctx, argv)
+		if err == nil {
+			continue
+		}
 		// the old mount is gone and the new one is not there: the jail would write into the empty directory of its
 		// own root, which a rollback or an upgrade of the root throws away. A small read-only tmpfs stands in until
-		// the mount can be made.
+		// the mount can be made, on this target and on those not mounted yet.
 		note := ""
-		if pout, perr := s.Exec.Run(ctx, []string{"mount", "-t", "tmpfs", "-o", "size=1m,ro", "tmpfs", target}); perr != nil {
-			note = fmt.Sprintf(" (and no stand-in mount: %v: %s)", perr, strings.TrimSpace(string(pout)))
+		for _, left := range targets[i:] {
+			if pout, perr := s.Exec.Run(ctx, []string{"mount", "-t", "tmpfs", "-o", "size=1m,ro", "tmpfs", left}); perr != nil {
+				note = fmt.Sprintf(" (and no stand-in mount: %v: %s)", perr, strings.TrimSpace(string(pout)))
+			}
 		}
 		return fmt.Errorf("mount %s on %s: %w: %s%s", a.Mountpoint, target, err, strings.TrimSpace(string(out)), note)
 	}

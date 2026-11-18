@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
@@ -19,13 +19,15 @@ import LoadState from '@jailops/shared/components/LoadState.vue'
 import { isGlobalAdmin, projectState } from '@/composables/project'
 import type { Storage } from '@jailops/shared/api/types'
 
-const l = useLoad(async () => ({ storage: await api.storage.list(), projects: await api.projects.list().catch(() => []), jails: projectState.current ? await api.jails.list().catch(() => []) : [] }))
+/** A global administrator may list every storage of the host; the default is what the selected project is granted. */
+const all = ref(false)
+const l = useLoad(async () => ({ storage: await api.storage.list({ project: projectState.current, all: all.value }), jails: projectState.current ? await api.jails.list().catch(() => []) : [] }))
+watch(all, () => void l.reload())
 const canWrite = computed(() => isGlobalAdmin())
 
 /** Projects that may place data on a storage: an explicit grant or the "*" wildcard (storage only). */
-function projectsOf(name: string): string[] {
-  return (l.data.value?.projects ?? []).filter((p) => (p.spec.storage ?? []).some((g) => g.storage === name || g.storage === '*')).map((p) => p.metadata.name)
-}
+const projectsOf = (x: Storage): string[] => x.status.granted_to ?? []
+const heldHere = (x: Storage): boolean => projectsOf(x).includes(projectState.current)
 const jailsOn = (name: string) => (l.data.value?.jails ?? []).filter((j) => j.spec.storage === name).length
 const healthTone = (h: string | undefined) => (h === 'ONLINE' ? 'ok' : h === 'DEGRADED' ? 'warn' : h ? 'danger' : '')
 
@@ -51,6 +53,7 @@ const create = () => check.submit(async () => {
   try {
     await runOp(s.storage.createTitle + ': ' + form.name, () => api.storage.create({ metadata: { name: form.name }, spec: { dataset: form.dataset, ...(form.comment ? { comment: form.comment } : {}), ...(form.compression ? { compression: form.compression } : {}), } }))
     creating.value = false
+    if (canWrite.value && projectState.current) all.value = true // the new storage is granted to nobody yet
   } catch (e) {
     error.value = e instanceof ApiError ? e : new ApiError({ message: String(e) })
   } finally {
@@ -63,13 +66,13 @@ const remove = () => runOp(s.storage.deleteTitle(removing.value!.metadata.name),
 
 <template>
   <div>
-    <div class="page-head"><h1>{{ s.storage.title }}</h1><button class="btn btn-primary" type="button" :disabled="!canWrite" data-test="new-storage" @click="open"><Icon name="plus" />{{ s.storage.create }}</button></div>
+    <div class="page-head"><h1>{{ s.storage.title }}</h1><label v-if="canWrite && projectState.current" class="row" style="margin-left: auto; gap: 6px"><input v-model="all" type="checkbox" data-test="scope-all" />{{ s.storage.showAll }}</label><button class="btn btn-primary" type="button" :disabled="!canWrite" data-test="new-storage" @click="open"><Icon name="plus" />{{ s.storage.create }}</button></div>
     <LoadState :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
       <p v-if="!l.data.value?.storage.length" class="empty panel">{{ s.storage.empty }}</p>
       <div class="stack">
         <section v-for="x in l.data.value?.storage" :key="x.metadata.name" class="panel" :data-storage="x.metadata.name">
           <header>
-            <div class="row"><h2 class="mono">{{ x.metadata.name }}</h2><span class="mono faint">{{ x.spec.dataset }}</span><span v-if="x.status.health" class="pill" :class="healthTone(x.status.health)" data-test="health">{{ sentence(x.status.health) }}</span><span v-if="x.spec.encrypted" class="badge info">{{ s.storage.encrypted }}</span></div>
+            <div class="row"><h2 class="mono">{{ x.metadata.name }}</h2><span class="mono faint">{{ x.spec.dataset }}</span><span v-if="x.status.health" class="pill" :class="healthTone(x.status.health)" data-test="health">{{ sentence(x.status.health) }}</span><span v-if="x.spec.encrypted" class="badge info">{{ s.storage.encrypted }}</span><span v-if="all && projectState.current" class="badge" :class="heldHere(x) ? 'ok' : 'info'" data-test="storage-granted" :data-granted="heldHere(x) ? 'yes' : 'no'">{{ heldHere(x) ? s.storage.grantedHere : s.storage.notGrantedHere }}</span></div>
             <button class="btn btn-sm btn-danger" type="button" :disabled="!canWrite" @click="removing = x">{{ s.storage.delete }}</button>
           </header>
           <div class="body stack">
@@ -81,7 +84,7 @@ const remove = () => runOp(s.storage.deleteTitle(removing.value!.metadata.name),
               <dt>{{ s.storage.pool }}</dt><dd class="mono">{{ x.status.pool || '-' }}</dd>
               <dt v-if="x.spec.compression">{{ s.storage.compression }}</dt><dd v-if="x.spec.compression" class="mono">{{ x.spec.compression }}</dd>
               <dt>{{ s.storage.projects }}</dt>
-              <dd data-test="storage-projects"><span v-for="n in projectsOf(x.metadata.name)" :key="n" class="chip mono">{{ n }}</span><span v-if="!projectsOf(x.metadata.name).length" class="faint">{{ s.storage.noProjects }}</span></dd>
+              <dd data-test="storage-projects"><span v-for="n in projectsOf(x)" :key="n" class="chip mono">{{ n }}</span><span v-if="!projectsOf(x).length" class="faint">{{ s.storage.noProjects }}</span></dd>
               <dt>{{ s.storage.jails }}</dt><dd class="mono">{{ projectState.current ? jailsOn(x.metadata.name) : '-' }}</dd>
             </dl>
           </div>

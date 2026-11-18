@@ -406,7 +406,7 @@ func (s *Service) remountHostDirUsers(ctx context.Context, o object[api.VolumeSp
 			if v.Name != o.Meta.Name {
 				continue
 			}
-			if err := s.life.RemountHostDir(ctx, key, lifecycle.Attached{Name: v.Name, HostDir: true, Mountpoint: o.Spec.Path, Path: v.Mount, ReadOnly: v.ReadOnly}); err != nil {
+			if err := s.life.RemountHostDir(ctx, key, lifecycle.Attached{Name: v.Name, HostDir: true, Mountpoint: o.Spec.Path, Path: v.Mount, ReadOnly: v.ReadOnly, Linux: s.isLinuxJail(key)}); err != nil {
 				s.log.Warn("giving a jail its host directory again failed", "project", o.Meta.Project, "jail", jail, "volume", o.Meta.Name, "err", err)
 				all = false
 				continue

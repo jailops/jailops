@@ -1,0 +1,44 @@
+Condition.message string optional
+Condition.reason string optional
+Condition.since time.Time optional
+Condition.status string
+Condition.type string
+Error.code api.Code
+Error.detail map[string]string optional
+Error.hint string optional
+Error.message string
+Event.host string optional
+Event.metadata jsontext.Value
+Event.timestamp time.Time
+Event.type api.EventType
+ObjectMeta.created_at time.Time optional
+ObjectMeta.generation int64 optional
+ObjectMeta.host string optional
+ObjectMeta.labels map[string]string optional
+ObjectMeta.managed_by string optional
+ObjectMeta.name string
+ObjectMeta.project string optional
+ObjectMeta.scope api.Scope optional
+ObjectMeta.updated_at time.Time optional
+ObjectMeta.uuid string optional
+Operation.created_at time.Time
+Operation.description string
+Operation.error *api.Error optional
+Operation.id string
+Operation.may_cancel bool
+Operation.metadata jsontext.Value optional
+Operation.progress int optional
+Operation.project string optional
+Operation.resources map[string][]string optional
+Operation.status api.OperationStatus
+Operation.steps []api.OperationStep optional
+Operation.updated_at time.Time
+OperationStep.duration_ms int64
+OperationStep.failed bool optional
+OperationStep.name string
+Response.error *api.Error optional
+Response.metadata jsontext.Value optional
+Response.operation string optional
+Response.status string
+Response.status_code int
+Response.type api.ResponseType

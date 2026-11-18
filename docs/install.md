@@ -117,7 +117,8 @@ Two things to know about a host that already has a firewall:
 
       jailops expose web 80,443
 
-  or as a rule: `jailops firewall rule add web in --action allow --proto tcp --from any --port 8080`.
+  For certain sources a policy rule does it: `jailops firewall rule add web in --action allow --proto tcp --from set:office --port 8080`.
+  The Internet: `expose`; certain sources: a policy ([networking.md](networking.md#expose-or-a-policy-rule)).
 
   A jail with only defaults stays closed from the internet, whatever its `default_in` says, and `allow in from any`
   means the whole internet. `pf.conf` is for the host's own services. If you added a rule of your own for a jail

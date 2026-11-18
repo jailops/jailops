@@ -229,14 +229,15 @@ func TestAntispoofAndIsolation(t *testing.T) {
 	a := anchor(t, func(in *render.PFInput) {
 		in.Foreign = []netip.Prefix{netip.MustParsePrefix("10.31.0.0/24")}
 		in.Policies = []render.PFPolicy{{Name: "p", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
-			{Name: "to beta", Action: "allow", Direction: "out", Proto: "tcp", To: []string{"10.31.0.5"}, Ports: []string{"443"}},
+			{Name: "from beta", Action: "allow", Direction: "in", Proto: "tcp", From: []string{"10.31.0.5"}, Ports: []string{"80"}},
 		}}}}
 	})
 	// a jail sending with another source address
 	check(t, "spoofed source", Evaluate(a, tcp(peer4, far4, 443), fromJail), Block, render.StageAntispoof)
-	// a rule of a policy opens one flow into another project, and nothing else
-	check(t, "opened by a rule", Evaluate(a, tcp(jail4, netip.MustParseAddr("10.31.0.5"), 443), fromJail), Pass, "policy")
-	check(t, "closed by isolation", Evaluate(a, tcp(jail4, netip.MustParseAddr("10.31.0.6"), 443), fromJail), Block, render.StageIsolation)
+	// what the jail sends to another project is not closed on its side: the jail that is reached decides
+	check(t, "sent to another project", Evaluate(a, tcp(jail4, netip.MustParseAddr("10.31.0.6"), 443), fromJail), Pass, "default")
+	// what comes in from another project is closed, except the source an allow in rule names
+	check(t, "named by an allow in rule", Evaluate(a, tcp(netip.MustParseAddr("10.31.0.5"), jail4, 80), intoJail), Pass, "policy")
 	check(t, "other project into the jail", Evaluate(a, tcp(netip.MustParseAddr("10.31.0.9"), jail4, 80), intoJail), Block, render.StageIsolation)
 }
 
@@ -289,11 +290,11 @@ func TestADefaultAllowAnchor(t *testing.T) {
 	check(t, "open anchor", Evaluate(a, tcp(far4, jail4, 12345), intoJail), Pass, "default")
 }
 
-// "any" as the destination of an allow rule is every address but the host's and those of the other projects: a jail that
-// may reach the internet on port 22 does not reach the host's sshd or the jails of another project. The host is closed
-// before the allow rules, so no allow rule opens it, whatever it names: the host itself, a prefix that holds a host address
-// or all of IPv4. The jails of other projects are opened by naming their prefix.
-func TestAnyDestinationDoesNotReachTheHostOrOtherProjects(t *testing.T) {
+// "any" as the destination of an allow rule is every address but the host's: a jail that may reach the internet on port 22
+// does not reach the host's sshd. The host is closed before the allow rules, so no allow rule opens it, whatever it names:
+// the host itself, a prefix that holds a host address or all of IPv4. What a jail sends to another project is not closed on
+// its side, so an allow out rule reaches it like any other address.
+func TestAnyDestinationDoesNotReachTheHost(t *testing.T) {
 	hostAddr := netip.MustParseAddr("10.20.0.1")
 	foreign4 := netip.MustParseAddr("10.30.0.5")
 	build := func(rules ...api.FirewallRule) *render.Anchor {
@@ -317,14 +318,13 @@ func TestAnyDestinationDoesNotReachTheHostOrOtherProjects(t *testing.T) {
 		{"the internet", []api.FirewallRule{out("ssh", "allow")}, far4, Pass, "policy"},
 		{"another jail of the project", []api.FirewallRule{out("ssh", "allow")}, peer4, Pass, "policy"},
 		{"the host", []api.FirewallRule{out("ssh", "allow")}, hostAddr, Block, "host"},
-		{"another project", []api.FirewallRule{out("ssh", "allow")}, foreign4, Block, "isolation"},
+		{"another project", []api.FirewallRule{out("ssh", "allow")}, foreign4, Pass, "policy"},
 		{"the host, named", []api.FirewallRule{out("ssh", "allow", "host")}, hostAddr, Block, "host"},
 		{"a prefix that holds the host", []api.FirewallRule{out("ssh", "allow", "10.20.0.0/24")}, hostAddr, Block, "host"},
 		{"all of IPv4", []api.FirewallRule{out("ssh", "allow", "0.0.0.0/0")}, hostAddr, Block, "host"},
 		{"another project, named", []api.FirewallRule{out("ssh", "allow", "10.30.0.0/24")}, foreign4, Pass, "policy"},
 		{"another project, named by an address", []api.FirewallRule{out("ssh", "allow", "10.30.0.5")}, foreign4, Pass, "policy"},
-		{"all of IPv4 does not name another project", []api.FirewallRule{out("ssh", "allow", "0.0.0.0/0")}, foreign4, Block, "isolation"},
-		{"a /8 that holds another project does not name it", []api.FirewallRule{out("ssh", "allow", "10.0.0.0/8")}, foreign4, Block, "isolation"},
+		{"all of IPv4 reaches another project", []api.FirewallRule{out("ssh", "allow", "0.0.0.0/0")}, foreign4, Pass, "policy"},
 		{"explicit any", []api.FirewallRule{out("ssh", "allow", "any")}, hostAddr, Block, "host"},
 		{"a deny to any denies the host", []api.FirewallRule{out("no ssh", "deny"), out("ssh", "allow", "host")}, hostAddr, Block, "policy"},
 	} {
@@ -333,16 +333,42 @@ func TestAnyDestinationDoesNotReachTheHostOrOtherProjects(t *testing.T) {
 	}
 }
 
-// An `allow in` rule of this project from any address does not admit the jails of another project: its isolation does not
-// depend on what the other project's policy says, and the other project's `allow out to 0.0.0.0/0` does not reach it.
-func TestAllowInFromAnyDoesNotAdmitAnotherProject(t *testing.T) {
+// The jails of another project reach a jail like the Internet does: an enabled allow in rule whose source covers them
+// admits them (any, a prefix however wide, an address, a set), a rule without a source does not, a deny rule wins, and a
+// default never opens it.
+func TestAnotherProjectReachesTheJailThroughAnAllowInRuleWithASource(t *testing.T) {
 	foreign4 := netip.MustParseAddr("10.30.0.5")
-	a := anchor(t, func(in *render.PFInput) {
-		in.Foreign = []netip.Prefix{netip.MustParsePrefix("10.30.0.0/24")}
-		in.Policies = []render.PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
-			{Name: "world", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80"}, From: []string{"any"}},
-		}}}}
-	})
-	check(t, "the internet", Evaluate(a, tcp(far4, jail4, 80), intoJail), Pass, "policy")
-	check(t, "a jail of another project", Evaluate(a, tcp(foreign4, jail4, 80), intoJail), Block, "isolation")
+	other4 := netip.MustParseAddr("10.30.0.6")
+	build := func(rules ...api.FirewallRule) *render.Anchor {
+		return anchor(t, func(in *render.PFInput) {
+			in.Foreign = []netip.Prefix{netip.MustParsePrefix("10.30.0.0/24")}
+			in.Sets = map[string]api.AddressSetSpec{"blog": {Addresses: api.Entries("10.30.0.5")}}
+			in.Policies = []render.PFPolicy{{Name: "web", Policy: api.FirewallPolicySpec{Rules: rules}}}
+		})
+	}
+	in := func(name, action string, from ...string) api.FirewallRule {
+		return api.FirewallRule{Name: name, Action: action, Direction: "in", Proto: "tcp", Ports: []string{"80"}, From: from}
+	}
+	for _, tc := range []struct {
+		name  string
+		rules []api.FirewallRule
+		src   netip.Addr
+		want  Verdict
+		stage string
+	}{
+		{"any", []api.FirewallRule{in("world", "allow", "any")}, foreign4, Pass, "policy"},
+		{"a wide prefix", []api.FirewallRule{in("wide", "allow", "0.0.0.0/0")}, foreign4, Pass, "policy"},
+		{"a prefix that holds the network", []api.FirewallRule{in("net", "allow", "10.30.0.0/24")}, foreign4, Pass, "policy"},
+		{"the address, named", []api.FirewallRule{in("one", "allow", "10.30.0.5")}, foreign4, Pass, "policy"},
+		{"another address of the network", []api.FirewallRule{in("one", "allow", "10.30.0.5")}, other4, Block, "isolation"},
+		{"a set", []api.FirewallRule{in("set", "allow", "set:blog")}, foreign4, Pass, "policy"},
+		{"no source", []api.FirewallRule{in("own", "allow")}, foreign4, Block, "isolation"},
+		{"the host as a source", []api.FirewallRule{in("host", "allow", "host")}, foreign4, Block, "isolation"},
+		{"a deny rule wins", []api.FirewallRule{in("world", "allow", "any"), in("no", "deny", "10.30.0.0/24")}, foreign4, Block, "policy"},
+		{"no rule", nil, foreign4, Block, "isolation"},
+	} {
+		check(t, tc.name, Evaluate(build(tc.rules...), tcp(tc.src, jail4, 80), intoJail), tc.want, tc.stage)
+	}
+	// the Internet and the project's own jails are not touched by the closing of the other projects
+	check(t, "the internet", Evaluate(build(in("world", "allow", "any")), tcp(far4, jail4, 80), intoJail), Pass, "policy")
 }

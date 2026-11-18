@@ -13,11 +13,31 @@ $ jailops network create short
 
 $ jailops network list
 NAME   IPV4           GATEWAY     RANGE                   USED   FREE   UPLINK
-dmz    10.30.0.0/24   10.30.0.1   10.30.0.10-10.30.0.12   0      3      em1
 lan    10.20.0.0/24   10.20.0.1   10.20.0.10-10.20.0.20   0      11     em0
 
 $ jailops network grant dmz --project main
 network/dmz granted to project main
+
+$ jailops network list
+NAME   IPV4           GATEWAY     RANGE                   USED   FREE   UPLINK
+dmz    10.30.0.0/24   10.30.0.1   10.30.0.10-10.30.0.12   0      3      em1
+lan    10.20.0.0/24   10.20.0.1   10.20.0.10-10.20.0.20   0      11     em0
+
+$ jailops network list --all
+NAME   IPV4           GATEWAY     RANGE                   USED   FREE   UPLINK   GRANTED   PROJECTS
+dmz    10.30.0.0/24   10.30.0.1   10.30.0.10-10.30.0.12   0      3      em1      yes       main
+lan    10.20.0.0/24   10.20.0.1   10.20.0.10-10.20.0.20   0      11     em0      yes       main
+
+$ jailops network show dmz
+Network dmz
+  Uplink:     em1
+  Granted to: main
+  IPv4:       10.30.0.0/24, gateway 10.30.0.1, NAT
+  IPv4 range: 10.30.0.10-10.30.0.12
+  IPv6:       none
+  DNS:        10.30.0.1
+  Addresses:  0 used, 3 free
+  Age:        3h
 
 $ jailops network grant lan --project other
 ! not_found: project "other" not found
@@ -69,6 +89,8 @@ spec:
 status:
   allocated: 2
   free: 1
+  granted_to:
+    - main
 
 $ jailops network create solo --subnet 10.50.0.0/24 --gateway 10.50.0.1 --range 10.50.0.5-10.50.0.9
 network/solo created
@@ -106,6 +128,7 @@ network/viafile updated
 $ jailops network show viafile
 Network viafile
   Uplink:     none
+  Granted to: none
   IPv4:       10.40.0.0/24, gateway 10.40.0.1
   IPv4 range: 10.40.0.5-10.40.0.30
   IPv6:       none
@@ -177,6 +200,7 @@ network/sw: the NDP proxy answers for 2001:db8:1:2:100::1-2001:db8:1:2:100::ffff
 $ jailops network show sw
 Network sw
   Uplink:     em0
+  Granted to: none
   IPv4:       10.94.0.0/24, gateway 10.94.0.1
   IPv4 range: 10.94.0.2-10.94.0.254
   IPv6:       2001:db8:1:2:100::/80, gateway fe80::1

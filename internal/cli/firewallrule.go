@@ -313,6 +313,8 @@ jailops firewall rule add web in --action allow --proto tcp --from any --port 80
 		if !a.quiet && !a.dryRun && r.Direction == "in" && r.Action == "allow" && !r.Disabled {
 			if len(r.From) == 0 {
 				fprintf(a.env.Stderr, "note: without --from the rule is for the jail's link (the project's jails and the host); to let the Internet in name a source, --from any, or use: jailops expose JAIL PORTS\n")
+			} else if letsInternetIn(r) {
+				fprintf(a.env.Stderr, "note: %s\n", internetInNote)
 			} else if opensUplink(r.From) {
 				fprintf(a.env.Stderr, "note: the rule opens the uplink of the jails with this policy that have a routed address, from %s (review: jailops firewall show JAIL)\n", strings.Join(r.From, ","))
 			}
@@ -397,7 +399,13 @@ empty value (--from "", --port ""). To switch a rule off or on use 'rule disable
 		if err := o.apply(cmd, &p.Spec.Rules[i]); err != nil {
 			return err
 		}
-		return a.writePolicy(cmd.Context(), c, p, etag, fmt.Sprintf("rule %d changed: %s", i+1, ruleSummary(p.Spec.Rules[i])))
+		if err := a.writePolicy(cmd.Context(), c, p, etag, fmt.Sprintf("rule %d changed: %s", i+1, ruleSummary(p.Spec.Rules[i]))); err != nil {
+			return err
+		}
+		if !a.quiet && !a.dryRun && letsInternetIn(p.Spec.Rules[i]) {
+			fprintf(a.env.Stderr, "note: %s\n", internetInNote)
+		}
+		return nil
 	}
 	return cmd
 }
@@ -631,6 +639,33 @@ func portCompleter(_ *cobra.Command, _ []string, typed string) ([]string, cobra.
 }
 
 // opensUplink says whether an inbound rule's sources can arrive from outside: any, an address, a prefix or an address set.
+// internetInNote is the one line said of a rule that lets the whole Internet in.
+const internetInNote = "this lets the Internet in; jailops expose does the same and also adds the IPv4 forward"
+
+// letsInternetIn says whether a rule is an enabled allow in whose source is the whole Internet: any, 0.0.0.0/0 or ::/0.
+func letsInternetIn(r api.FirewallRule) bool {
+	if r.Disabled || r.Action != "allow" || r.Direction != "in" {
+		return false
+	}
+	for _, f := range r.From {
+		if k, _, err := validate.ParseEndpoint(f); err == nil && k == validate.EndpointAny {
+			return true
+		}
+		if f == "0.0.0.0/0" || f == "::/0" {
+			return true
+		}
+	}
+	return false
+}
+
+// policyInternetNotes is internetInNote for a policy that has such a rule, else nothing.
+func policyInternetNotes(p api.FirewallPolicy) []string {
+	if slices.ContainsFunc(p.Spec.Rules, letsInternetIn) {
+		return []string{internetInNote}
+	}
+	return nil
+}
+
 func opensUplink(from []string) bool {
 	for _, f := range from {
 		k, _, err := validate.ParseEndpoint(f)

@@ -139,6 +139,7 @@ export interface Decision {
   name?: string
   comment?: string
   pf: string
+  setBy?: string[]
 }
 
 export function decisionOf(r: FirewallTestRule | undefined): Decision {
@@ -146,7 +147,7 @@ export function decisionOf(r: FirewallTestRule | undefined): Decision {
   const base = { stage: r.stage, policy: r.policy, rule: r.rule, name: r.name, comment: r.comment, pf: r.pf }
   switch (r.stage) {
     case 'policy': return { ...base, kind: r.managed ? 'managedPolicy' : r.project_policy ? 'projectPolicy' : 'policy' }
-    case 'default': return { ...base, kind: 'default' }
+    case 'default': return { ...base, kind: 'default', setBy: r.set_by }
     case 'isolation': return { ...base, kind: 'isolation' }
     default: return { ...base, kind: 'fixed' }
   }

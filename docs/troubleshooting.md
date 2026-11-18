@@ -3,7 +3,7 @@
 Start with `jailops doctor`. It prints one line per check, `ok`, `warn`, `fail` or `unknown` (a check that cannot be made, for
 example without FreeBSD), with a hint on the next line when there is one. `jailops explain CODE` explains an error code and
 `jailops explain` lists them. Errors print as `code: message` with a hint; the exit codes are 0 ok, 1 failure, 2 usage or invalid,
-3 auth, 4 not found, 5 conflict, 6 unsupported, 7 internal. `jailops firewall test` adds one: 0 the connection would pass, 1 it would be
+3 auth, 4 not found, 5 conflict, 6 unsupported, 7 internal. `jailops firewall test` adds two: 0 the connection would pass, 9 it would be
 blocked, 8 the test cannot say.
 
 ## `jailops doctor` checks
@@ -14,7 +14,7 @@ blocked, 8 the test cannot say.
 | `kernel.module.<name>` | `if_epair`, `pf`, `zfs` (and `linux64`, `linprocfs`, `linsysfs`, `fdescfs` while a Linux jail exists) | `kldload <name>` and add it to `/boot/loader.conf` |
 | `sysctl.<name>` | `kern.elf64.fallback_brand` for Linux jails | the daemon sets it at run time through the helper; check that the helper allows it |
 | `sysctl.net.inet.ip.forwarding`, `sysctl.net.inet6.ip6.forwarding` | forwarding, while a network needs it | `fail`: `sysctl <name>=1` and the `rc.conf` lines of [install.md](install.md) (JailOps never sets forwarding) |
-| `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` | the host answers the off-link probes of a shared IPv6 segment's routers, while a `proxy`-mode network exists | `info` while it is 0 (never a warning; it matters on some segments only): read [networking-ipv6.md](networking-ipv6.md#one-host-setting-that-matters-on-some-segments) and set `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` with the line in `/etc/sysctl.conf` when the case fits |
+| `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` | the host answers the off-link probes of a shared IPv6 segment's routers, while a network with the NDP proxy exists | `info` while it is 0 and the host has rejected no neighbor solicitation; `warn` with the count of rejected solicitations once it has: set `sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1` with the line in `/etc/sysctl.conf` ([networking-ipv6.md](networking-ipv6.md#one-host-setting-that-matters-on-some-segments)) |
 | `host.identity` | host management, module identity ([appliance.md](appliance.md)) | `ok` "not managed" while the module is off (the doctor has no info level); `warn` when only one of `jailopsd.yaml` and `priv.conf` enables it, or on drift: the host name, `/etc/resolv.conf` or the NTP block was changed outside JailOps since it applied them (`jailops host show` names the part; apply again or `jailops host restore`) |
 | `host.devd` | the daemon reads the kernel's notifications from devd ([operations.md](operations.md#events-from-the-kernel)) | `ok` while connected; `warn` with the reason when devd's socket cannot be read, and the check is absent with `devd.enable: false` |
 | `host.firewall` | host management, module firewall ([appliance.md](appliance.md)) | `ok` "not managed" while the module is off; `warn` when only one of `jailopsd.yaml` and `priv.conf` enables it, while a change waits for its confirmation (`jailops host confirm` or `jailops host revert`), or on drift: `/etc/pf.conf`, `pf_enable` or `pf_rules` changed outside JailOps (`jailops host firewall diff` shows it; apply again or `jailops host restore`) |
@@ -26,12 +26,11 @@ blocked, 8 the test cannot say.
 | `zfs.pool`, `zfs.pool.<storage>` | the pools are `ONLINE` | `zpool status <pool>` |
 | `zfs.compat` | pool features against `zfs.compat_file` | `fail`: replication to an older host would fail; JailOps never runs `zpool upgrade` |
 | `jail.volumes` | the volume datasets of the jails have `canmount=noauto` | `warn`: a volume made before that has `canmount=on` and is mounted at boot before the jail root it lies in; run the `zfs set canmount=noauto <dataset>` the hint lists |
-| `firewall.defaults` | every stored firewall policy says `default_in` and `default_out` | `fail` names each policy that lacks one: the jails that use it (every jail of the project, for a mandatory policy) keep the anchor they have and are not rendered again; `jailops firewall policy edit NAME` sets the field |
 | `pf.anchors` | the anchor line is in the loaded ruleset | add it to `pf.conf` among the filter rules and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `pf.inbound` | while a jail on an IPv6 or a non-NAT IPv4 network exists: a `block ... quick` rule for every source before the anchor line, or a hand-written `pass ... quick` rule for a jail prefix | `fail` for the block (it drops inbound traffic to the jails before their policies are asked: decide whether that is what the rule is for; to let the policies decide, move the anchor line above it; rules for single sources, such as a blocklist, are not flagged), `warn` for the pass (it keeps a jail without an `allow in` rule reachable: delete it; the jail's own `allow in` rules open the uplink, [install.md](install.md) section 3) |
 | `jails.exposed` | the jails whose anchor has a pass rule on an uplink | `info`: lists the jails the Internet can reach and their ports (a port forward, or an `allow in` rule with an external source), so the rules a project's administrator writes for his own jail are visible to the others |
-| `jails.inbound-without-source` | jails on a routed address with an `allow in` rule that names no source | `info`: such a rule is for the jail's link only and does not open the uplink; give it `--from any` or use `jailops expose JAIL PORTS` |
+| `jails.inbound-without-source` | jails on a routed address with an `allow in` rule that names no source | `info`: such a rule is for the project's jails and the host and does not open the uplink; give it `--from any` or use `jailops expose JAIL PORTS` |
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
 | `network.dns` | for every network a jail uses: where its jails get their nameservers (the network's `dns`, the host's `/etc/resolv.conf`, or the gateway when the host resolves only through loopback); a gateway is asked one query (`. NS`, one second) once a jail on the network runs | `warn` when the gateway does not answer, refuses (access control) or no nameserver could be worked out; the hint has the resolver and `pf.conf` lines ([networking-ipv6.md](networking-ipv6.md#name-resolution-of-jails)) |
 | `network.epairs` | epairs without a jail | `warn`: the reconcile loop removes them on its next pass |
@@ -126,8 +125,8 @@ or use a profile that carries them. Nothing is inferred.
 (`jailops network revoke`).
 
 **A jail cannot reach another project's jail.** By design: projects are closed to each other, like an external host.
-Open it with the addresses, written on both sides: an address set and a rule `allow in tcp from set:name port ...` in the
-project that serves, a rule `allow out tcp to ADDRESS port ...` in the project that connects
+The jail that is reached opens the way with an `allow in` rule that has a source (an address set, an address, a prefix, `any`):
+`allow in tcp from set:name port ...` in the project that serves; the jail that connects needs nothing
 ([networking-ipv6.md](networking-ipv6.md)).
 
 **A jail starts and has no network.** `jailops network show NAME` (conditions), `jailops doctor` (`sysctl.*`, `kernel.module.*`,

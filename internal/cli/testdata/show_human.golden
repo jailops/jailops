@@ -3,6 +3,7 @@ $ jailops list
 
 $ jailops network list
 ! No networks. Create one with: jailops network create NAME --ipv4 10.50.0.1/24 --uplink IFACE --nat
+! jailops network list --all lists every one of the host, granted or not.
 
 $ jailops image list
 ! No images. Create one with: jailops image create freebsd-15-1 --release 15.1-RELEASE, then jailops image build freebsd-15-1
@@ -13,6 +14,7 @@ $ jailops list web*
 $ jailops storage show fast
 Storage fast
   Dataset:      tank/jailops
+  Granted to:   none
   Compression:  zstd
   Pool:         tank (ONLINE)
   Size:         1.0 TiB
@@ -20,9 +22,19 @@ Storage fast
   Available:    1023.0 GiB
   Age:          3h
 
+$ jailops storage list
+NAME      DATASET        POOL   HEALTH   USED      AVAILABLE
+default   tank/jailops   tank   ONLINE   1.0 GiB   1023.0 GiB
+
+$ jailops storage list --all
+NAME      DATASET        POOL   HEALTH   USED      AVAILABLE    GRANTED   PROJECTS
+default   tank/jailops   tank   ONLINE   1.0 GiB   1023.0 GiB   yes       main
+fast      tank/jailops   tank   ONLINE   1.0 GiB   1023.0 GiB   no        -
+
 $ jailops network show lan
 Network lan
   Uplink:     em0
+  Granted to: main
   IPv4:       10.20.0.0/24, gateway 10.20.0.1, NAT
   IPv4 range: 10.20.0.10-10.20.0.20
   IPv6:       none
@@ -86,7 +98,7 @@ $ jailops jail list -c name,ipv4,gen
 [exit 2]
 
 $ jailops firewall policy list -c name,age
-! usage: unknown column "age" (columns: name, default-in, default-out, rules, raw)
+! usage: unknown column "age" (columns: name, default-in, default-out, rules, raw, used-by)
 ! hint: run 'jailops firewall policy list --help' for usage
 [exit 2]
 

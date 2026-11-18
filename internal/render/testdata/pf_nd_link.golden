@@ -1,9 +1,7 @@
 # Managed by JailOps. Do not edit; changes are overwritten.
 # anchor jailops/alpha/web
 # the host's own addresses (a jail reaches none of them unless a rule says so)
-table <host> persist
-# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)
-table <not_any> persist
+table <host> persist { }
 table <jail_addrs> persist { 2001:db8:1::100, fe80::2858:8aff:fe88:fcd2 }
 block in quick on joe1a inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }
 pass in quick on joe1a inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol label "jo-f5191988cb09" keep state (if-bound)
@@ -17,9 +15,9 @@ pass out quick on joe1a inet6 proto icmp6 from any to { 2001:db8:1::100, fe80::2
 pass out quick on joe1a inet6 proto icmp6 from any to any icmp6-type { unreach, toobig, timex, paramprob } label "jo-f81a353e9f0f" keep state (if-bound)
 block drop out quick on joe1a from any to ! <jail_addrs>
 # the host: closed to the jail whatever its policies allow; ping, the errors a path needs and the network's resolver stay open
-pass in quick on joe1a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-3ff5f65d42cc" keep state (if-bound)
+pass in quick on joe1a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-4b439c68077d" keep state (if-bound)
 block drop in quick on joe1a from any to <host>
 # policy web
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
-pass out quick on joe1a all label "jo-19ed8a6d6c1c" keep state (if-bound)
-pass in quick on joe1a all label "jo-578228bbb59b" keep state (if-bound)
+pass out quick on joe1a all label "jo-d3fdc160c646" keep state (if-bound)
+pass in quick on joe1a all label "jo-6b2beba8e0f3" keep state (if-bound)

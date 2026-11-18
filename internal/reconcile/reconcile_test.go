@@ -26,20 +26,23 @@ const netID = "11111111-1111-4111-8111-111111111111"
 const jailID = "22222222-2222-4222-8222-222222222222"
 
 type world struct {
-	t      *testing.T
-	Net    *ifconfig.Fake
-	PF     *pfctl.Fake
-	Jails  *jailos.Fake
-	des    reconcile.Desired
-	mu     sync.Mutex
-	locks  map[string]bool
-	starts []string
-	fail   map[string]error
-	netSt  map[string]api.NetworkStatus
-	jailSt map[string][]api.Condition
-	drift  map[string][]string
-	R      *reconcile.Reconciler
-	clock  *fakeClock
+	t     *testing.T
+	Net   *ifconfig.Fake
+	PF    *pfctl.Fake
+	Jails *jailos.Fake
+	des   reconcile.Desired
+	// mounts are the mount points the host reports; mountsErr makes the list unreadable.
+	mounts    []string
+	mountsErr error
+	mu        sync.Mutex
+	locks     map[string]bool
+	starts    []string
+	fail      map[string]error
+	netSt     map[string]api.NetworkStatus
+	jailSt    map[string][]api.Condition
+	drift     map[string][]string
+	R         *reconcile.Reconciler
+	clock     *fakeClock
 }
 
 type fakeClock struct {
@@ -129,7 +132,8 @@ func newWorld(t *testing.T, cfg reconcile.Config) *world {
 		locks: map[string]bool{}, fail: map[string]error{}, netSt: map[string]api.NetworkStatus{},
 		jailSt: map[string][]api.Condition{}, drift: map[string][]string{},
 		clock: &fakeClock{now: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)}}
-	w.R = reconcile.New(cfg, reconcile.Env{Source: w, Sink: w, Actions: w, Net: w.Net, PF: w.PF, Jails: w.Jails, Run: privateRunner(), Sysctl: sysctl, Clock: w.clock, Routes: routeTable(w.Net)})
+	w.R = reconcile.New(cfg, reconcile.Env{Source: w, Sink: w, Actions: w, Net: w.Net, PF: w.PF, Jails: w.Jails, Run: privateRunner(), Sysctl: sysctl, Clock: w.clock, Routes: routeTable(w.Net),
+		Mounts: func(context.Context) ([]string, error) { return w.mounts, w.mountsErr }})
 	t.Cleanup(w.R.Close)
 	return w
 }
@@ -320,7 +324,7 @@ func TestDriftAndAnchorHeal(t *testing.T) {
 		t.Fatalf("anchor not healed: %q", live)
 	}
 	conds := w.jailSt["web"]
-	if len(conds) != 2 || conds[1].Type != reconcile.CondDrift || conds[1].Status != api.ConditionFalse {
+	if len(conds) != 3 || conds[1].Type != reconcile.CondDrift || conds[1].Status != api.ConditionFalse || conds[2].Type != reconcile.CondFirewallApplied {
 		t.Fatalf("%+v", conds)
 	}
 	// Create the epair as a start would; the next pass is clean.

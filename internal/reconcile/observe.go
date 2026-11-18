@@ -15,6 +15,9 @@ type Observed struct {
 	Running map[string]jailos.Jail
 	// Routes is the routing table; nil when it cannot be read (a route is then neither found nor missing).
 	Routes []ifconfig.RouteEntry
+	// Mounts is the set of mount points of the host; nil when it cannot be read (a mount is then neither found nor
+	// missing).
+	Mounts map[string]bool
 }
 
 // HasRoute reports whether the routing table has a route for dest through iface ("" matches any interface), and,

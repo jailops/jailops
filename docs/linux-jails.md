@@ -60,8 +60,10 @@ For Debian only:
 - The image's base is built with the helper (`debootstrap` runs with a fixed environment so that it finds its tools). Only the
   hosts in `fetch-host` of `priv.conf` can be downloaded from, and the keyring that checks the release is a file in `keyring-dir`
   (default `/usr/local/share/keyrings`) that root owns.
-- Linux jails default to the **thick** layout (a full copy of the generation); copying it into the jail runs inside the helper
-  (`zfs.replicate`), 140 MB in about 2 seconds.
+- A Linux jail is always **thick** (a full copy of the generation); copying it into the jail runs inside the helper
+  (`zfs.replicate`), 140 MB in about 2 seconds. `--layout thin` is refused: the persistent datasets of a thin jail are ZFS
+  mounts that the nullfs mirror at `compat/linux` does not show, so a Linux process would see empty directories. A
+  thick jail has no `jail diff`, which compares a thin jail with its image.
 
 ## What a Linux process sees, and what it does not
 
@@ -88,7 +90,9 @@ With an Alpine jail:
   shows the plain directory under a mount of the lower tree, not the mount: a Linux process that opens `/proc`, `/sys` or a volume
   finds the empty directory of the mirror unless the same file system is mounted below the mirror too. JailOps writes the
   jail's `fstab`, and a volume that is attached to a running jail (`volume attach`) gets both mounts at once; a detach takes the
-  mount below the mirror off first. The jail's `/dev` is mounted with a private devfs ruleset that the helper loads into
+  mount below the mirror off first. A running jail that lacks a mount of its `fstab` (it started before the `fstab` held it, or
+  the mount was taken off by hand) is reported by `jailops info` and `jailops doctor` with the mount's path; a restart makes it.
+  The jail's `/dev` is mounted with a private devfs ruleset that the helper loads into
   the kernel before the jail is created, from rules it validates itself; a jail whose ruleset cannot be loaded does not start
   (see [Devices](security-model.md#devices)).
 - **Network:** a Linux userland has no tooling that works here, so the host configures the jail with the `-j` forms

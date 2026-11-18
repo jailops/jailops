@@ -85,7 +85,7 @@ func (s *Server) jailConfig(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		spec := j.Spec
-		if _, err := api.ApplyConfig(&spec, ch.Set, ch.Unset); err != nil {
+		if _, err := api.ApplyChange(&spec, *ch); err != nil {
 			return reply{err: err.(*api.Error)}
 		}
 		op := s.startOp(rc.project, "jails.config", "Configure jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
@@ -94,7 +94,7 @@ func (s *Server) jailConfig(w http.ResponseWriter, r *http.Request) {
 				return nil, notFound("jail", name)
 			}
 			spec := cur.Spec
-			keys, err := api.ApplyConfig(&spec, ch.Set, ch.Unset)
+			keys, err := api.ApplyChange(&spec, *ch)
 			if err != nil {
 				return nil, err.(*api.Error)
 			}

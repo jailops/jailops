@@ -111,19 +111,49 @@ func (c *rc) decodeBody(v any, optional bool) error {
 	return nil
 }
 
-// expect parses If-Match into a generation; absent or "*" means any.
+// decodePatch reads a merge patch (RFC 7386) for an object of the type of typ. Its members are checked against that
+// type like the members of a typed body (an unknown or duplicated member is refused: a misspelled member must not
+// answer 200 and change nothing), and numbers keep their text, so an integer beyond 2^53 reaches the object as it was
+// sent.
+func (c *rc) decodePatch(typ any) (map[string]any, error) {
+	data, err := io.ReadAll(c.r.Body)
+	if err != nil {
+		var mb *http.MaxBytesError
+		if errors.As(err, &mb) {
+			return nil, err
+		}
+		return nil, api.Errorf(api.CodeInvalid, "invalid request body: %v", err)
+	}
+	if err := checkStrict(data, typ); err != nil {
+		return nil, api.Errorf(api.CodeInvalid, "invalid request body: %v", err)
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var p map[string]any
+	if err := dec.Decode(&p); err != nil {
+		return nil, api.Errorf(api.CodeInvalid, "invalid request body: %v", err)
+	}
+	return p, nil
+}
+
+// expect parses If-Match into the generation the request expects: AnyGeneration for no header and for "*", the
+// generation of the strong entity tag otherwise. A header whose tags cannot match (weak tags, tags that are not
+// generations) fails the precondition at once, as the strong comparison of RFC 9110 says; one with several different
+// generations is refused, because the check runs against one.
 func (c *rc) expect() (int64, error) {
-	h := strings.TrimSpace(c.r.Header.Get("If-Match"))
-	if h == "" || h == "*" {
+	m, err := api.ParseIfMatch(c.r.Header.Get("If-Match"))
+	if err != nil {
+		return 0, err
+	}
+	switch {
+	case m.Any:
 		return service.AnyGeneration, nil
+	case len(m.Gens) == 0:
+		return 0, api.Errorf(api.CodeConflict, "no entity tag of If-Match can match: the tags of an object are strong (\"7\")").WithHint("read the object again and send the ETag it gives")
+	case len(m.Gens) > 1:
+		return 0, api.Errorf(api.CodeInvalid, "If-Match %q names several generations: send the one entity tag you read", c.r.Header.Get("If-Match"))
 	}
-	first, _, _ := strings.Cut(h, ",")
-	first = strings.Trim(strings.TrimPrefix(strings.TrimSpace(first), "W/"), `"`)
-	n, err := strconv.ParseInt(first, 10, 64)
-	if err != nil || n < 0 {
-		return 0, api.Errorf(api.CodeInvalid, "invalid If-Match %q", h)
-	}
-	return n, nil
+	return m.Gens[0], nil
 }
 
 // labels parses repeated ?label=k=v.

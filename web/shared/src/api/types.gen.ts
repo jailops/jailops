@@ -673,6 +673,8 @@ export interface Condition {
 export interface ConfigChange {
   set?: Record<string, string>
   unset?: string[]
+  add?: Record<string, string>
+  remove?: Record<string, string>
 }
 
 export interface ConfigKey {
@@ -813,6 +815,8 @@ export interface ExposeResult {
   entries: ExposeEntry[]
   families: ExposeFamily[]
   warnings?: string[]
+  exposed?: string
+  notes?: string[]
 }
 
 export interface Exposed {
@@ -849,14 +853,20 @@ export interface FirewallAttach {
 export interface FirewallPolicy {
   metadata: ObjectMeta
   spec: FirewallPolicySpec
+  status: FirewallPolicyStatus
 }
 
 export interface FirewallPolicySpec {
   comment?: string
-  default_in: string
-  default_out: string
+  default_in?: string
+  default_out?: string
   rules?: FirewallRule[]
   raw?: string
+}
+
+export interface FirewallPolicyStatus {
+  used_by: string[]
+  mandatory: boolean
 }
 
 export interface FirewallRule {
@@ -918,6 +928,7 @@ export interface FirewallTestRule {
   rule?: number
   name?: string
   comment?: string
+  set_by?: string[]
   pf: string
 }
 
@@ -1309,12 +1320,16 @@ export interface JailLogRead {
 export interface JailReach {
   project: string
   jail: string
+  policies?: ReachPolicy[]
   rows: ReachRow[]
   exposed?: ExposedEntry[]
   out: ReachOut
   default_in: string
   default_out: string
+  default_in_by?: string[]
+  default_out_by?: string[]
   rules: ReachRule[]
+  rules_id?: string
   error?: string
   notes?: string[]
 }
@@ -1596,6 +1611,7 @@ export interface NetworkStatus {
   warnings?: string[]
   notes?: string[]
   dns?: NetworkDNS
+  granted_to?: string[]
 }
 
 export interface OSUpdate {
@@ -1761,6 +1777,14 @@ export interface ReachOut {
   host: string
   jails: string
   other_projects: string
+}
+
+export interface ReachPolicy {
+  name: string
+  source: string
+  rules: number
+  default_in?: string
+  default_out?: string
 }
 
 export interface ReachRow {
@@ -1994,6 +2018,7 @@ export interface StorageStatus {
   available?: number
   fragmentation?: number
   conditions?: Condition[]
+  granted_to?: string[]
 }
 
 export interface Token {
@@ -2687,4 +2712,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'jail_diff']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'jail_diff', 'firewall_applied']

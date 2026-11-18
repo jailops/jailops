@@ -90,7 +90,7 @@ func (f privFiles) HealNetwork(ctx context.Context) (mounts.NetHealed, error) {
 func (f privFiles) DNSUnbound(ctx context.Context, apply bool) (mounts.UnboundState, error) {
 	r, err := f.h.DNSUnbound(ctx, apply)
 	return mounts.UnboundState{Enabled: r.Enabled, Base: r.Base, Reason: r.Reason, Current: r.Current, Changed: r.Changed, Reloaded: r.Reloaded, Path: r.Path,
-		Control: r.Control, Warn: r.Warn, Sample: r.Sample, Names: r.Names, Gateways: r.Gateways,
+		Control: r.Control, Warn: r.Warn, Names: r.Names, Gateways: r.Gateways,
 		Suffix: r.Suffix, Jails: r.Jails, Projects: r.Projects, Forward: r.Forward, Recurse: r.Recurse}, err
 }
 func (f privFiles) RemoveAll(ctx context.Context, path string) error {

@@ -19,6 +19,10 @@ type CreateResult struct {
 	Jail api.Jail
 }
 
+// jailOwnDirs are the directories the jail's own mounts use (devfs, the Linux file systems and the mirror of a Linux
+// jail's root): no volume goes there.
+var jailOwnDirs = []string{"/dev", "/proc", "/sys", "/compat"}
+
 func cleanMount(p string) (string, bool) {
 	if !strings.HasPrefix(p, "/") || strings.ContainsAny(p, "\x00\n") {
 		return "", false
@@ -131,7 +135,7 @@ func (s *Service) planCreate(ctx context.Context, j api.Jail, recovering bool) (
 		}
 	}
 	if layout == api.LayoutThin && osName == string(api.OSLinux) {
-		return nil, res, api.Errorf(api.CodeInvalid, "Linux jails are thick; the thin layout is for FreeBSD")
+		return nil, res, api.Errorf(api.CodeInvalid, "a Linux jail is thick: the thin layout is for FreeBSD jails (leave --layout out)")
 	}
 	j.Spec.Layout = layout
 	now := s.Cfg.now() // with a fixed Config.Now the rebuilt records are identical
@@ -312,8 +316,10 @@ func onOff(b bool) string {
 }
 
 // CheckVolumes checks the volumes a jail attaches against each other and against the persistent paths of its root:
-// one attachment per volume, one volume per path, and no path that is a persistent dataset itself (a path below one
-// is fine). It returns the attachments with clean mount paths.
+// one attachment per volume, one volume per path, no path that is a persistent dataset itself or above one (the
+// mount would hide the dataset; a path below one is fine), and no path at or below the file systems the jail makes
+// itself (/dev, /proc, /sys, /compat). The live attach of the helper refuses the same paths; here the answer comes
+// with the request and not at the next start. It returns the attachments with clean mount paths.
 func (c Config) CheckVolumes(vs []api.VolumeAttach) ([]api.VolumeAttach, error) {
 	seen := map[string]bool{}
 	used := map[string]bool{}
@@ -335,6 +341,16 @@ func (c Config) CheckVolumes(vs []api.VolumeAttach) ([]api.VolumeAttach, error) 
 		}
 		if used[m] {
 			return nil, api.Errorf(api.CodeInvalid, "volume %q mounts over a persistent path (%s) or another volume", v.Name, m)
+		}
+		for _, p := range c.persistent() {
+			if pp := path.Clean(p.Path); strings.HasPrefix(pp, m+"/") {
+				return nil, api.Errorf(api.CodeInvalid, "volume %q mounts above the persistent path %s (%s would hide it)", v.Name, pp, m)
+			}
+		}
+		for _, sys := range jailOwnDirs {
+			if m == sys || strings.HasPrefix(m, sys+"/") {
+				return nil, api.Errorf(api.CodeInvalid, "volume %q: %s is a directory the jail's own file systems use", v.Name, m)
+			}
 		}
 		used[m] = true
 		out[i].Mount = m

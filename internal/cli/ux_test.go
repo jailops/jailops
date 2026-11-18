@@ -203,6 +203,8 @@ func TestShowAndEmptyLists(t *testing.T) {
 	h.srv.SeedStorage(api.Storage{Metadata: api.ObjectMeta{Name: "fast"}, Spec: api.StorageSpec{Dataset: "tank/jailops", Compression: "zstd"},
 		Status: api.StorageStatus{Pool: "tank", Health: "ONLINE", Size: 1 << 40, Used: 120 << 30, Available: 880 << 30, Fragmentation: 3}})
 	tr.ok("storage", "show", "fast")
+	tr.ok("storage", "list")
+	tr.ok("storage", "list", "--all")
 	tr.ok("network", "show", "lan")
 	tr.ok("image", "show", "freebsd-15")
 	tr.ok("project", "show", "main")

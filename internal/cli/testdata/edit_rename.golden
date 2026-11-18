@@ -22,7 +22,10 @@ $ jailops network show office -o json
     }
   },
   "status": {
-    "free": 11
+    "free": 11,
+    "granted_to": [
+      "main"
+    ]
   }
 }
 

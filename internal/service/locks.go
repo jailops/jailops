@@ -51,9 +51,11 @@ func (l *lockSet) tryLock(holder string, keys ...string) (func(), error) {
 // reconcileWait is how long an operation a person asked for waits for the background reconcile of a resource.
 const reconcileWait = 20 * time.Second
 
-// lockPatient is tryLock for an operation a caller asked for: when the only thing in the way is a reconcile pass or
-// the preparation of the same network by another jail's start (the daemon's own short work, over in moments), it waits
-// for it instead of answering "busy": several jails of one network can be started at once.
+// lockPatient is tryLock for an operation a caller asked for, and for the start of a jail at boot: when the only thing in
+// the way is the daemon's own short work (a reconcile pass, the preparation of the same network by another jail's
+// start, the housekeeping pass or the clean-up of the mounts of the jail, over in moments), it waits for it instead of
+// answering "busy": several jails of one network can be started at once, and a daemon that has just started does not
+// refuse the first operation or leave a jail of the boot to the next pass.
 func (l *lockSet) lockPatient(ctx context.Context, holder string, keys ...string) (func(), error) {
 	deadline := time.Now().Add(reconcileWait)
 	for {
@@ -69,12 +71,15 @@ func (l *lockSet) lockPatient(ctx context.Context, holder string, keys ...string
 	}
 }
 
-// onlyReconcile reports whether every held key among keys is held by a reconcile pass or a network preparation.
+// daemonWork are the holders of the daemon's own short work: what an operation waits for.
+var daemonWork = []string{"reconcile", "prepare network ", "housekeeping ", "heal jail "}
+
+// onlyReconcile reports whether every held key among keys is held by the daemon's own short work.
 func (l *lockSet) onlyReconcile(keys []string) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	for _, k := range keys {
-		if h, ok := l.held[k]; ok && !strings.HasPrefix(h, "reconcile") && !strings.HasPrefix(h, "prepare network ") {
+		if h, ok := l.held[k]; ok && !slices.ContainsFunc(daemonWork, func(p string) bool { return strings.HasPrefix(h, p) }) {
 			return false
 		}
 	}

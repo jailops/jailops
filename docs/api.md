@@ -72,6 +72,10 @@ new volume (the operation's result is the `Volume`; `as` names it, a volume is n
 and is never stored or logged); with a jail backup it first restores the volumes the project lacks from their newest backup, or
 restores the jail with no volume attachments with `no_volumes`.
 
+**Networks and storage** (`GET /api/v1/networks`, `GET /api/v1/storage`) list what the selected project is granted. A global
+administrator asks for every one with `?all=true` (SDK: `sdk.All()`; anyone else gets `forbidden`), and `status.granted_to` of
+each object names the projects that hold it, as far as the caller may see them.
+
 **Renames** (extension `rename`, [design.md](design.md#88-renames)): `POST /api/v1/networks/{name}/rename`,
 `/api/v1/firewall/address-sets/{name}/rename`, `/api/v1/firewall/policies/{name}/rename`, `/api/v1/profiles/{name}/rename`,
 `/api/v1/jails/{name}/rename` (a stopped jail), `/api/v1/images/{name}/rename`, `/api/v1/projects/{name}/rename` (its
@@ -111,6 +115,25 @@ bounded: a policy has at most 500 rules, an address set 5000 members, a project 
 members together (`quota_exceeded` or `invalid`).
 
 Declarative management of everything the API can create is `jailops-sync` ([fleet-sync.md](fleet-sync.md)).
+
+## What is frozen
+
+The surface that clients depend on is checked by tests, so that a change of it is a decision and not an accident:
+
+| Surface | Where it is frozen |
+|---|---|
+| Routes (method and pattern) | `internal/server/testdata/freeze/routes.golden` |
+| Who may call each route | the permission registry and `authmatrix_test.go` (a route without a rule does not start) |
+| Error codes and their HTTP status | `internal/server/testdata/freeze/error_codes.golden`; the exit status of each code in `internal/cli` (`TestExitCodesPerAPICode`) |
+| The envelope of every answer, the operation of an asynchronous request, events, errors, object metadata and conditions (JSON names and types) | `internal/server/testdata/freeze/envelopes.golden` |
+| Capability names (`api_extensions`) | `internal/server/testdata/freeze/extensions.golden`: names are only appended |
+| JSON names and types of every API object | `web/shared/src/api/types.gen.ts`, generated from the Go types; `go run ./scripts/gen-ts -check` fails when they differ |
+| `ETag` and `If-Match`: strong comparison, `*`, a list, weak tags that never match | `TestIfMatchIsAStrongComparison`, `sdk/api` `TestParseIfMatch` |
+| Human and machine output of the commands | the transcripts in `internal/cli/testdata` |
+
+A change that is meant is accepted with `just freeze`, which rewrites the golden files and the generated types; the diff
+of those files is what a review reads. A name in `api_extensions` is never removed or renamed. Until 1.0 the freeze says
+what changed; from 1.0 a change of a frozen surface that breaks a client needs a new extension name and a major version.
 
 ## Liveness and readiness
 

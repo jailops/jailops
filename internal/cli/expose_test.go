@@ -18,6 +18,12 @@ func TestExposeAndUnexpose(t *testing.T) {
 	tr.ok("expose", "web", "53", "--proto", "udp", "--family", "6")
 	tr.ok("expose", "--dry-run", "web", "25")
 	tr.ok("expose", "web", "22", "-o", "json")
+	tr.ok("expose", "web", "80,443", "--proto", "tcp,udp", "--family", "6")  // both protocols: each port once in the answer
+	tr.ok("expose", "web", "443", "--from", "192.0.2.0/24", "--family", "6") // takes 443 out of the entry that named 80,443
+	tr.ok("expose", "web", "5000", "--proto", "tcp", "--proto", "udp", "--family", "6")
+	tr.do("", "expose", "web", "8000,8001", "--host-port", "9000")
+	tr.ok("expose", "web", "8000-8100", "--family", "6")
+	tr.ok("unexpose", "web", "8050")
 	tr.do("", "expose", "web", "80", "--proto", "sctp")
 	tr.do("", "expose", "ghost", "80")
 	tr.do("", "expose", "web")

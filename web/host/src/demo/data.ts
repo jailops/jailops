@@ -29,13 +29,21 @@ export function pool(): PoolUsage {
   return { name: 'tank', size: 1800 * GiB, allocated: 1290 * GiB, free: 510 * GiB, health: 'ONLINE' }
 }
 
+// a stable twelve-digit id for the rules of a demo jail, the way the server names the rules it rendered
+export function demoRulesId(name: string): string {
+  let h = 2166136261
+  for (const c of name) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0
+  return (h.toString(16).padStart(8, '0') + Math.imul(h, 2654435761).toString(16).replace('-', '').padStart(8, '0')).slice(0, 12)
+}
+
 function jail(name: string, power: PowerState, o: { image?: string; gen?: string; ipv4?: string; ipv6?: string; net?: string; policy?: string; drift?: string[]; cond?: Jail['status']['conditions']; autostart?: boolean; vols?: Jail['spec']['volumes']; pinned?: boolean; labels?: Record<string, string> } = {}): Jail {
   const net = o.net ?? 'lan'
+  const linux = (o.image ?? '').startsWith('alpine')
   return {
     metadata: { ...meta(name, 86400 * 40, { labels: o.labels ?? { role: name } }), project: 'web' },
     spec: {
-      image: o.image ?? 'freebsd-15-1', storage: 'default', layout: 'thin', hostname: `${name}.example.net`,
-      update: { strategy: 'rebase', window: 'sun 03:00', healthcheck: '/usr/local/bin/check' },
+      image: o.image ?? 'freebsd-15-1', storage: 'default', os: linux ? 'linux' : 'freebsd', layout: linux ? 'thick' : 'thin', hostname: `${name}.example.net`,
+      update: { strategy: linux ? 'inplace' : 'rebase', window: 'sun 03:00', healthcheck: '/usr/local/bin/check' },
       resources: { cpu: 2, memory: '2G', disk: '20G', pids: 2048 },
       network: [{ network: net, ipv4: o.ipv4 ?? 'auto', ipv6: o.ipv6 ?? 'none', mtu: 1500 }],
       firewall: { policies: [o.policy ?? 'web-default'], tags: ['managed'] },
@@ -46,7 +54,7 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
     status: {
       power, jid: power === 'running' ? 12 + name.length : undefined, generation: o.gen ?? 'freebsd-15-1#g4', freebsd_version: demoFreeBSD(o.gen ?? 'freebsd-15-1#g4'),
       addresses: power === 'running' ? [(o.ipv4 && o.ipv4 !== 'auto' ? o.ipv4 : '10.20.0.' + (10 + name.length)) + '/24'] : [],
-      started_at: power === 'running' ? ago(86400 * 3 + name.length * 600) : undefined, drift: o.drift ?? [], conditions: o.cond ?? [{ type: 'Reconciled', status: 'True', since: ago(3600) }],
+      started_at: power === 'running' ? ago(86400 * 3 + name.length * 600) : undefined, drift: o.drift ?? [], conditions: o.cond ?? [{ type: 'Reconciled', status: 'True', since: ago(3600) }, ...(power === 'running' ? [{ type: 'FirewallApplied', status: 'True', reason: 'Applied', message: 'rules ' + demoRulesId(name) + ' are loaded and pf evaluates them', since: ago(1800) }] : [])],
     },
   }
 }
@@ -169,20 +177,24 @@ export function leases(): Record<string, Lease[]> {
   }
 }
 
+// the demo transport fills in who uses a policy from the jails when it answers
+const unused: FirewallPolicy['status'] = { used_by: [], mandatory: false }
+
 export function policies(): FirewallPolicy[] {
   return [
     {
       metadata: meta('web-default'), spec: {
-        default_in: 'deny', default_out: 'allow', rules: [
+        default_in: 'deny', rules: [
           { name: 'http', action: 'allow', direction: 'in', proto: 'tcp', from: ['any'], ports: ['80', '443'] },
           { name: 'ssh from admins', action: 'allow', direction: 'in', proto: 'tcp', from: ['set:admins'], ports: ['22'], log: true },
           { name: 'no scanner', comment: 'a scanner that kept coming back', action: 'deny', direction: 'in', proto: 'tcp', from: ['192.0.2.66'], ports: ['80'] },
           { name: 'ftp', comment: 'switched off until the migration is done', action: 'allow', direction: 'in', proto: 'tcp', ports: ['21'], disabled: true },
         ],
       },
+      status: unused,
     },
-    { metadata: meta('db-internal'), spec: { default_in: 'deny', default_out: 'deny', rules: [{ name: 'postgres from web', action: 'allow', direction: 'in', proto: 'tcp', from: ['tag:web'], ports: ['5432'] }, { name: 'dns', action: 'allow', direction: 'out', proto: 'udp', to: ['10.30.0.1'], ports: ['53'] }] } },
-    { metadata: meta('mail-edge'), spec: { default_in: 'deny', default_out: 'allow', rules: [{ name: 'smtp', action: 'allow', direction: 'in', proto: 'tcp', ports: ['25', '465', '587'] }], raw: 'block in quick from <spamhaus>' } },
+    { metadata: meta('db-internal'), spec: { default_in: 'deny', default_out: 'deny', rules: [{ name: 'postgres from web', action: 'allow', direction: 'in', proto: 'tcp', from: ['tag:web'], ports: ['5432'] }, { name: 'dns', action: 'allow', direction: 'out', proto: 'udp', to: ['10.30.0.1'], ports: ['53'] }] }, status: unused },
+    { metadata: meta('mail-edge'), spec: { default_in: 'deny', rules: [{ name: 'smtp', action: 'allow', direction: 'in', proto: 'tcp', ports: ['25', '465', '587'] }], raw: 'block in quick from <spamhaus>' }, status: unused },
   ]
 }
 

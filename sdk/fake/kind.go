@@ -3,7 +3,6 @@ package fake
 import (
 	"encoding/json"
 	"net/http"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -41,6 +40,8 @@ type kind[T any] struct {
 	crossProject bool
 	// visible hides objects from a caller (not_found); nil shows all.
 	visible func(rc *reqInfo, obj *T) bool
+	// listed narrows a list (not a get): the networks and storage of the selected project, unless ?all=true.
+	listed func(rc *reqInfo, all bool, obj *T) bool
 	// alias maps another way of naming an object (a fingerprint) to its name.
 	alias func(key string) string
 	// guard vets a write by the request's identity.
@@ -185,6 +186,9 @@ func (k *kind[T]) list(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		if k.visible != nil && !k.visible(rc, o) {
+			continue
+		}
+		if k.listed != nil && !k.listed(rc, r.URL.Query().Get("all") == "true", o) {
 			continue
 		}
 		labels := m.Labels
@@ -346,11 +350,8 @@ func (k *kind[T]) doCreate(r *http.Request, obj *T) reply {
 }
 
 func ifMatchOK(r *http.Request, gen int64) bool {
-	im := strings.TrimSpace(r.Header.Get("If-Match"))
-	if im == "" || im == "*" {
-		return true
-	}
-	return slices.ContainsFunc(strings.Split(im, ","), func(p string) bool { return strings.TrimSpace(p) == etagOf(gen) })
+	m, err := api.ParseIfMatch(r.Header.Get("If-Match"))
+	return err == nil && m.Matches(gen)
 }
 
 func (k *kind[T]) put(w http.ResponseWriter, r *http.Request) {
@@ -482,6 +483,10 @@ func (k *kind[T]) del(w http.ResponseWriter, r *http.Request) {
 			return reply{err: notFound(k.action, name)}
 		}
 		name = k.meta(o).Name
+		if gen := k.meta(o).Generation; !ifMatchOK(r, gen) {
+			return reply{err: api.Errorf(api.CodeConflict, "%s %q changed: current generation is %d", k.action, name, gen).
+				WithHint("read it again and repeat the delete")}
+		}
 		if k.guard != nil {
 			if e := k.guard(rc, o, "delete"); e != nil {
 				return reply{err: e}

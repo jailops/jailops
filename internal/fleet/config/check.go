@@ -573,15 +573,26 @@ var secretSegment = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 func checkPolicy(o *Object, s api.FirewallPolicySpec, add func(*Object, string, ...any), warn func(*Object, string, ...any)) {
 	for _, d := range []struct{ n, v string }{{"default_in", s.DefaultIn}, {"default_out", s.DefaultOut}} {
 		switch d.v {
-		case "allow", "deny":
-		case "":
-			add(o, "%s is required: allow or deny", d.n)
+		case "", "allow", "deny":
 		default:
 			add(o, "%s must be allow or deny, got %q", d.n, d.v)
 		}
 	}
-	if s.DefaultIn == "allow" {
-		warn(o, "default_in is allow: inbound traffic is open unless a rule denies it")
+	if s.DefaultIn != "deny" {
+		for _, r := range s.Rules {
+			if r.Disabled || r.Direction != "in" || r.Action != "allow" || len(r.From) == 0 {
+				continue
+			}
+			what := r.Proto
+			if what == "" {
+				what = "traffic"
+			}
+			if len(r.Ports) > 0 {
+				what += " " + strings.Join(r.Ports, ",")
+			}
+			warn(o, "allows %s from %s, but states no default_in: deny: unless another policy of the jail does, every source on the jail's network reaches the jail; add default_in: deny to restrict it", what, strings.Join(r.From, ", "))
+			break
+		}
 	}
 	for i, r := range s.Rules {
 		w := fmt.Sprintf("rules[%d]", i)

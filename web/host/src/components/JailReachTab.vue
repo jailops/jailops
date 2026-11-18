@@ -9,7 +9,8 @@ import Callout from '@jailops/shared/components/Callout.vue'
 import ConfirmDialog from '@jailops/shared/components/ConfirmDialog.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import ExposeDialog from '@/components/ExposeDialog.vue'
-import type { ExposeEntry, Jail, ReachRow } from '@jailops/shared/api/types'
+import JailPolicies from '@/components/JailPolicies.vue'
+import type { ExposeEntry, ExposeResult, Jail, ReachRow } from '@jailops/shared/api/types'
 
 // What reaches a jail and what it reaches, read from the anchor the daemon loads for it (GET /jails/NAME/reach).
 const props = defineProps<{ jail: Jail }>()
@@ -19,6 +20,8 @@ const r = computed(() => l.data.value)
 const cur = useLoad(() => api.jails.get(props.jail.metadata.name))
 const current = computed(() => cur.data.value ?? props.jail)
 const entries = computed(() => current.value.spec.expose ?? [])
+// whether the kernel has what the policies say: the FirewallApplied condition (absent while the jail is stopped or has no firewall)
+const applied = computed(() => current.value.status.conditions?.find((c) => c.type === 'FirewallApplied'))
 const reload = (): void => { l.reload(); cur.reload() }
 
 // The server decides; this only avoids offering what it would refuse.
@@ -32,7 +35,12 @@ const removing = ref<ExposeEntry | null>(null)
 const portsOf = (e: ExposeEntry): string => `${e.ports.join(',')}/${e.proto || 'tcp'}`
 const famOf = (e: ExposeEntry): string => (e.families?.length ? e.families.map((x) => 'IPv' + x).join(' + ') : 'IPv4 + IPv6')
 const limitOf = (e: ExposeEntry): string => (e.from?.length ? e.from.join(', ') : s.reach.any)
-const runRemove = () => api.reach.unexpose(props.jail.metadata.name, { proto: removing.value!.proto || 'tcp', ports: removing.value!.ports })
+const notes = ref<string[]>([])
+const runRemove = async () => {
+  const r = await api.reach.unexpose(props.jail.metadata.name, { proto: removing.value!.proto || 'tcp', ports: removing.value!.ports })
+  notes.value = r.kind === 'sync' ? ((r.data as ExposeResult).notes ?? []) : []
+  return r
+}
 
 const source = (x: ReachRow): string => (x.source === 'tunnel' && x.source_name ? `${s.reach.sources.tunnel} ${x.source_name}` : (s.reach.sources[x.source as keyof typeof s.reach.sources] ?? x.source))
 const verdict = (x: ReachRow): string => (x.decision === 'pass' ? s.reach.open : x.decision === 'forward' ? s.reach.forward(`${x.host_address || s.reach.host}:${x.host_port}`) : s.reach.closed)
@@ -49,8 +57,14 @@ const from = (x: ReachRow): string => (x.restricted && x.from?.length ? x.from.j
       </span>
     </header>
     <div class="body stack">
+      <Callout v-if="applied" :tone="applied.status === 'True' ? 'ok' : 'warn'" data-test="firewall-applied" :data-status="applied.status">
+        <strong>{{ s.reach.applied }}</strong>
+        {{ applied.status === 'True' ? s.reach.appliedYes(applied.message ?? '') : s.reach.appliedNo(applied.reason ?? '', applied.message ?? '') }}
+      </Callout>
+      <JailPolicies v-if="r && !r.error" :jail="jail.metadata.name" :policies="r.policies ?? []" @changed="reload" />
       <p class="muted">{{ s.reach.lead }}</p>
       <Callout v-if="block" tone="info" data-test="expose-blocked">{{ block }}</Callout>
+      <Callout v-for="n in notes" :key="n" tone="info" data-test="unexpose-note">{{ n }}</Callout>
       <div class="stack" data-test="expose-current">
         <h3>{{ s.expose.current }}</h3>
         <p v-if="!entries.length" class="empty" data-test="expose-none">{{ s.expose.currentNone }}</p>
@@ -84,6 +98,10 @@ const from = (x: ReachRow): string => (x.restricted && x.from?.length ? x.from.j
               </tbody>
             </table>
           </div>
+          <dl class="kv" data-test="reach-defaults">
+            <dt>{{ s.reach.defaultIn }}</dt><dd>{{ s.reach.defaultText(r.default_in, r.default_in_by ?? []) }}</dd>
+            <dt>{{ s.reach.defaultOut }}</dt><dd>{{ s.reach.defaultText(r.default_out, r.default_out_by ?? []) }}</dd>
+          </dl>
           <h3>{{ s.reach.out }}</h3>
           <dl class="kv" data-test="reach-out">
             <dt>{{ s.reach.sources.internet }}</dt><dd>{{ r.out.internet || '-' }}</dd>

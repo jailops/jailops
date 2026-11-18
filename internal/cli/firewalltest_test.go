@@ -9,7 +9,7 @@ import (
 )
 
 // 'firewall test' says pass or block with the rule that decided, in a table and as JSON, and its exit status says it too:
-// 0 pass, 1 block, 8 when the test cannot say.
+// 0 pass, 9 block, 8 when the test cannot say; an error of the command is none of these.
 func TestFirewallTest(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
@@ -20,15 +20,15 @@ func TestFirewallTest(t *testing.T) {
 	tr.ok("app", "install", "postgresql", "db", "--image", "freebsd-151")
 	tr.ok("app", "install", "nginx", "web", "--image", "freebsd-151")
 	tr.ok("firewall", "address-set", "create", "postgresql-allow", "--address", "jail:web", "--comment", "the web jail")
-	tr.ok("firewall", "policy", "create", "postgres")
+	tr.ok("firewall", "policy", "create", "postgres", "--default-in", "deny")
 	tr.ok("firewall", "rule", "add", "postgres", "in", "--action", "allow", "--proto", "tcp", "--from", "set:postgresql-allow", "--port", "5432", "--comment", "who may reach PostgreSQL")
 	tr.ok("config", "set", "db", "firewall.policies", "postgres")
 	_, _, code := tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5432")
 	if code != 0 {
 		t.Fatalf("web -> db:5432 exited %d", code)
 	}
-	if _, _, code = tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5433"); code != 1 {
-		t.Fatalf("web -> db:5433 exited %d, want 1", code)
+	if _, _, code = tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5433"); code != 9 {
+		t.Fatalf("web -> db:5433 exited %d, want 9", code)
 	}
 	tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--proto", "icmp")
 	tr.do("", "firewall", "test", "--from", "jail:web", "--to", "jail:db", "--port", "5432", "-o", "json")

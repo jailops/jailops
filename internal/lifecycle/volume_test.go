@@ -133,18 +133,24 @@ func TestJailWithAMissingVolumeDoesNotStart(t *testing.T) {
 
 func TestCheckVolumes(t *testing.T) {
 	w := newWorld(t)
-	ok := []api.VolumeAttach{{Name: "maildir", Mount: "/var/mail/vhosts"}, {Name: "docs", Mount: "/srv/docs", ReadOnly: true}}
-	if got, err := w.S.Cfg.CheckVolumes(ok); err != nil || len(got) != 2 {
+	ok := []api.VolumeAttach{{Name: "maildir", Mount: "/var/mail/vhosts"}, {Name: "docs", Mount: "/srv/docs", ReadOnly: true}, {Name: "x", Mount: "/devices"}}
+	if got, err := w.S.Cfg.CheckVolumes(ok); err != nil || len(got) != 3 {
 		t.Fatalf("a path below a persistent dataset is fine: %v", err)
 	}
 	for name, vs := range map[string][]api.VolumeAttach{
-		"over a persistent dataset": {{Name: "a", Mount: "/var/mail"}},
-		"twice":                     {{Name: "a", Mount: "/x"}, {Name: "a", Mount: "/y"}},
-		"one path twice":            {{Name: "a", Mount: "/x"}, {Name: "b", Mount: "/x"}},
-		"relative":                  {{Name: "a", Mount: "x"}},
-		"dotdot":                    {{Name: "a", Mount: "/x/../etc"}},
-		"root":                      {{Name: "a", Mount: "/"}},
-		"bad name":                  {{Name: "a b", Mount: "/x"}},
+		"over a persistent dataset":  {{Name: "a", Mount: "/var/mail"}},
+		"twice":                      {{Name: "a", Mount: "/x"}, {Name: "a", Mount: "/y"}},
+		"one path twice":             {{Name: "a", Mount: "/x"}, {Name: "b", Mount: "/x"}},
+		"relative":                   {{Name: "a", Mount: "x"}},
+		"dotdot":                     {{Name: "a", Mount: "/x/../etc"}},
+		"root":                       {{Name: "a", Mount: "/"}},
+		"bad name":                   {{Name: "a b", Mount: "/x"}},
+		"above a persistent path":    {{Name: "a", Mount: "/var"}},
+		"above /usr/local":           {{Name: "a", Mount: "/usr"}},
+		"devfs":                      {{Name: "a", Mount: "/dev/x"}},
+		"proc":                       {{Name: "a", Mount: "/proc"}},
+		"sys":                        {{Name: "a", Mount: "/sys/kernel"}},
+		"the mirror of a Linux jail": {{Name: "a", Mount: "/compat/linux/x"}},
 	} {
 		if _, err := w.S.Cfg.CheckVolumes(vs); !api.IsCode(err, api.CodeInvalid) {
 			t.Errorf("%s: %v", name, err)
@@ -340,6 +346,48 @@ func TestRemountOfAHostDirectoryThatFailsLeavesAPlaceholder(t *testing.T) {
 	last := strings.Join(w.Exec.Calls[len(w.Exec.Calls)-1], " ")
 	if last != "mount -t tmpfs -o size=1m,ro tmpfs "+target {
 		t.Fatalf("no stand-in on the target: %v", w.Exec.Calls)
+	}
+}
+
+// A Linux jail has the mount of a host directory twice, and a directory that comes back needs both made again: the
+// mount below the mirror is a nullfs over a mount that went away as well. The second goes off first and on last.
+func TestRemountOfAHostDirectoryOfALinuxJailDoesBothMounts(t *testing.T) {
+	w := newWorld(t)
+	w.created("web")
+	w.Files.Sources["/mnt/box/backups"] = true
+	a := Attached{Name: "box", HostDir: true, Mountpoint: "/mnt/box/backups", Path: "/srv/box", ReadOnly: true, Linux: true}
+	w.attach["alpha_web"] = append(w.attach["alpha_web"], a)
+	root := "/jailops/projects/alpha/jails/web/root"
+	if err := w.S.RemountHostDir(bg, "alpha_web", a); err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, c := range w.Exec.Commands() {
+		if strings.Contains(c, "/srv/box") {
+			got = append(got, c)
+		}
+	}
+	want := []string{
+		"umount -f " + root + "/compat/linux/srv/box",
+		"umount -f " + root + "/srv/box",
+		"mount -t nullfs -o ro /mnt/box/backups " + root + "/srv/box",
+		"mount -t nullfs -o ro /mnt/box/backups " + root + "/compat/linux/srv/box",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+	// the second mount fails: the stand-in is on it, the first stays
+	w.Exec.Handler = func(argv []string) ([]byte, error) {
+		if len(argv) > 3 && argv[0] == "mount" && argv[2] == "nullfs" && strings.HasSuffix(argv[len(argv)-1], "/compat/linux/srv/box") {
+			return []byte("mount_nullfs: Device busy"), errors.New("exit 1")
+		}
+		return w.handle(argv)
+	}
+	if err := w.S.RemountHostDir(bg, "alpha_web", a); err == nil {
+		t.Fatal("a failed mount was not reported")
+	}
+	if last := strings.Join(w.Exec.Calls[len(w.Exec.Calls)-1], " "); last != "mount -t tmpfs -o size=1m,ro tmpfs "+root+"/compat/linux/srv/box" {
+		t.Fatalf("no stand-in below the mirror: %v", w.Exec.Calls[len(w.Exec.Calls)-1])
 	}
 }
 

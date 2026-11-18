@@ -217,8 +217,6 @@ func TestFirewall(t *testing.T) {
 		field string
 	}{
 		{"default", api.FirewallPolicySpec{DefaultIn: "maybe", DefaultOut: "allow"}, "default_in"},
-		{"default in missing", api.FirewallPolicySpec{DefaultOut: "allow"}, "default_in"},
-		{"default out missing", api.FirewallPolicySpec{DefaultIn: "deny"}, "default_out"},
 		{"action", r(func(x *api.FirewallRule) { x.Action = "pass" }), "rules[0].action"},
 		{"direction", r(func(x *api.FirewallRule) { x.Direction = "both" }), "rules[0].direction"},
 		{"proto", r(func(x *api.FirewallRule) { x.Proto = "sctp" }), "rules[0].proto"},
@@ -522,8 +520,11 @@ func TestJailDevicesAreValidated(t *testing.T) {
 		"expose host port":  func(s *api.JailSpec) { s.Expose[0].HostPort = 8000 },
 		"expose host range": func(s *api.JailSpec) { s.Expose[1].Ports = []string{"8000-8100"} },
 		"expose duplicate":  func(s *api.JailSpec) { s.Expose = append(s.Expose, s.Expose[0]) },
-		"expose comment":    func(s *api.JailSpec) { s.Expose[0].Comment = "a\nb" },
-		"profile name":      func(s *api.JailSpec) { s.Profiles = []string{"Bad"} },
+		"expose port twice": func(s *api.JailSpec) {
+			s.Expose = append(s.Expose, api.ExposeEntry{Proto: "tcp", Ports: []string{"443"}, From: []string{"192.0.2.0/24"}})
+		},
+		"expose comment": func(s *api.JailSpec) { s.Expose[0].Comment = "a\nb" },
+		"profile name":   func(s *api.JailSpec) { s.Profiles = []string{"Bad"} },
 	} {
 		s := ok
 		s.Network = append([]api.NetworkAttach(nil), ok.Network...)
@@ -606,6 +607,15 @@ func TestParseRate(t *testing.T) {
 	for _, in := range []string{"", "0", "0M", "M", "10 M", "10MB", "10Mbit/s", "-5M", "1.5M", "fast", "1234567890", "10T"} {
 		if _, err := ParseRate(in); err == nil {
 			t.Errorf("%q accepted", in)
+		}
+	}
+}
+
+// A policy may leave its defaults unset: what it allows and denies is all it says.
+func TestFirewallDefaultsAreOptional(t *testing.T) {
+	for _, s := range []api.FirewallPolicySpec{{}, {DefaultIn: "deny"}, {DefaultOut: "allow"}, {DefaultIn: "allow", DefaultOut: "deny"}} {
+		if _, err := FirewallPolicySpec(s); err != nil {
+			t.Errorf("%+v: %v", s, err)
 		}
 	}
 }

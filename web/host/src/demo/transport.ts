@@ -322,7 +322,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           const net = { metadata: { name: body.metadata.name, scope: 'host' as const, generation: 1, created_at: new Date().toISOString() }, spec: { ...sp }, status: { allocated: 0, free: 100 } }
           return startOp(`Create network ${body.metadata.name}`, {}, 500, () => db.networks.push(net as never), undefined, false)
         }
-        if (seg.length === 1) return ok(db.networks)
+        if (seg.length === 1) {
+          const all = url.searchParams.get('all') === 'true'
+          return ok(db.networks.map((n) => ({ ...n, status: { ...n.status, granted_to: heldBy((sp) => (sp.networks ?? []).some((g) => g.network === n.metadata.name)) } }))
+            .filter((n) => all || !project || n.status.granted_to.includes(project)))
+        }
         if (seg[2] === 'leases') return ok(db.leases[seg[1]] ?? [])
         if (seg.length === 2) {
           const net = db.networks.find((n) => n.metadata.name === seg[1])
@@ -472,8 +476,23 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       return ok({ jail: { ...j, spec: merged }, sources })
     }
     if (seg.length === 3 && seg[2] === 'config' && m === 'POST') {
-      const set = (body.set ?? {}) as Record<string, string>
-      const unset = (body.unset ?? []) as string[]
+      const set = { ...(body.set ?? {}) } as Record<string, string>
+      const unset = [...((body.unset ?? []) as string[])]
+      // add and remove change one entry of a list key, as the server does against the stored jail
+      for (const [verb, entries] of [['add', body.add ?? {}], ['remove', body.remove ?? {}]] as Array<[string, Record<string, string>]>) {
+        for (const [k, v] of Object.entries(entries)) {
+          const f = lookupKey(k)
+          if (!f || f.def.type !== 'list') return fail(400, { code: 'invalid', message: `${k} is not a list: change it with 'config set'`, detail: { key: k } })
+          const list = (flatten(j.spec)[k] ?? '').split(',').map((x) => x.trim()).filter(Boolean)
+          for (const x of v.split(',').map((y) => y.trim()).filter(Boolean)) {
+            const i = list.indexOf(x)
+            if (verb === 'add' && i < 0) list.push(x)
+            if (verb === 'remove' && i >= 0) list.splice(i, 1)
+          }
+          if (list.length) set[k] = list.join(',')
+          else unset.push(k)
+        }
+      }
       let spec = JSON.parse(JSON.stringify(j.spec)) as Jail['spec']
       const restart: string[] = []
       for (const [k, v] of Object.entries(set)) {
@@ -841,6 +860,14 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const list = all.filter((x) => (x.metadata.project ?? 'web') === project)
     const sets = db.sets.filter((x) => (x.metadata.project ?? 'web') === project)
     const policies = db.policies.filter((x) => (x.metadata.project ?? 'web') === project)
+    // who uses a policy, as the server says it: the jails that name it, or every jail for a mandatory policy of the project
+    const withUse = (x: FirewallPolicy | AddressSet): FirewallPolicy | AddressSet => isSet ? x : {
+      ...(x as FirewallPolicy),
+      status: {
+        used_by: db.jails.filter((j) => (j.metadata.project ?? '') === project && j.spec.firewall?.policies?.includes(x.metadata.name)).map((j) => j.metadata.name),
+        mandatory: !!db.projects.find((p) => p.metadata.name === project)?.spec.firewall_policies?.includes(x.metadata.name),
+      },
+    }
     if (seg.length === 2 && m === 'POST' && isSet) {
       const name = String(body.metadata?.name ?? '')
       if (sets.some((x) => x.metadata.name === name)) return fail(409, { code: 'already_exists', message: `address-set "${name}" already exists` })
@@ -857,17 +884,18 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       if (!/^[a-z][a-z0-9-]{0,62}$/.test(name)) return fail(400, { code: 'invalid', message: `name "${name}" must match ^[a-z][a-z0-9-]{0,62}$`, detail: { field: 'name' } })
       if (list.some((x) => x.metadata.name === name)) return fail(409, { code: 'already_exists', message: `Policy ${name} already exists.` })
       for (const d of ['default_in', 'default_out']) {
-        if (body.spec?.[d] !== 'allow' && body.spec?.[d] !== 'deny') return fail(400, { code: 'invalid', message: `${d} is required: allow or deny (a policy says its defaults)`, detail: { field: d } })
+        const v = body.spec?.[d]
+        if (v !== undefined && v !== '' && v !== 'allow' && v !== 'deny') return fail(400, { code: 'invalid', message: `${d} must be allow or deny`, detail: { field: d } })
       }
-      const pol: FirewallPolicy = { metadata: { name, project, scope: 'host', generation: 1, created_at: new Date().toISOString() }, spec: { default_in: body.spec.default_in, default_out: body.spec.default_out, rules: body.spec?.rules ?? [] } }
+      const pol: FirewallPolicy = { metadata: { name, project, scope: 'host', generation: 1, created_at: new Date().toISOString() }, spec: { ...(body.spec?.default_in ? { default_in: body.spec.default_in } : {}), ...(body.spec?.default_out ? { default_out: body.spec.default_out } : {}), rules: body.spec?.rules ?? [] }, status: { used_by: [], mandatory: false } }
       db.policies.push(pol)
       emit('firewall-created', `/api/v1/firewall/policies/${name}`)
       return ok(pol)
     }
-    if (seg.length === 2) return m === 'GET' ? ok(list) : fail(405, { code: 'invalid', message: `${m} is not allowed here` })
+    if (seg.length === 2) return m === 'GET' ? ok(list.map(withUse)) : fail(405, { code: 'invalid', message: `${m} is not allowed here` })
     const item = list.find((x) => x.metadata.name === seg[2])
     if (!item) return fail(404, { code: 'not_found', message: `${isSet ? 'address-set' : 'firewall-policy'} "${seg[2]}" not found` })
-    if (m === 'GET') return ok(item, etagOf(item.metadata.generation))
+    if (m === 'GET') return ok(withUse(item), etagOf(item.metadata.generation))
     if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(item.metadata.generation)) return fail(412, { code: 'conflict', message: 'The object changed since you loaded it.', hint: 'Reload and apply your change again.' })
     if (m === 'DELETE' && isSet) {
       // DeleteAddressSet: refused while a rule of a policy names set:NAME or another set has set:NAME as a member
@@ -923,6 +951,9 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       emit('firewall-updated', `/api/v1/firewall/${seg[1]}/${seg[2]}`)
     }, undefined, false)
   }
+
+  /** The projects whose spec holds a grant, sorted: the granted_to of a network or a storage. */
+  const heldBy = (held: (sp: (typeof db.projects)[number]['spec']) => boolean) => db.projects.filter((p) => held(p.spec)).map((p) => p.metadata.name).sort()
 
   function backupsRoute(seg: string[], m: string, body: Record<string, any> = {}, project = ''): RawResponse {
     if (seg[1] === 'run' && m === 'POST') {
@@ -1161,7 +1192,12 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         return undefined
       }
       case 'storage': {
-        if (m === 'GET') return ok(db.storage)
+        if (m === 'GET') {
+          const grants = (sp: { storage?: Array<{ storage: string }> }, n: string) => (sp.storage ?? []).some((g) => g.storage === n || g.storage === '*')
+          const all = url.searchParams.get('all') === 'true'
+          return ok(db.storage.map((x) => ({ ...x, status: { ...x.status, granted_to: heldBy((sp) => grants(sp, x.metadata.name)) } }))
+            .filter((x) => all || !project || x.status.granted_to.includes(project)))
+        }
         if (m === 'POST') {
           if (db.storage.some((x) => x.metadata.name === body.metadata?.name)) return fail(409, { code: 'already_exists', message: 'Storage exists.' })
           return startOp(`Create storage ${body.metadata.name}`, {}, 600, () => db.storage.push({ metadata: { name: body.metadata.name, scope: 'host', created_at: new Date().toISOString() }, spec: body.spec, status: { pool: String(body.spec.dataset).split('/')[0], health: 'ONLINE', size: 500 * GiB, used: 1 * GiB, available: 499 * GiB } }), undefined, false)

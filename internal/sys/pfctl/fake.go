@@ -2,6 +2,7 @@ package pfctl
 
 import (
 	"context"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -60,8 +61,19 @@ func (f *Fake) Load(_ context.Context, anchor, rs string) error {
 	defer f.mu.Unlock()
 	f.anchors[anchor] = rs
 	f.LoadCalls[anchor]++
+	// What pfctl does with the tables of a loaded ruleset: a table written with braces, an empty pair included, takes
+	// exactly those members; a table written without them keeps what the kernel holds.
+	for _, m := range tableWithBraces.FindAllStringSubmatch(rs, -1) {
+		members := map[string]bool{}
+		for _, a := range strings.FieldsFunc(m[2], func(r rune) bool { return r == ',' || r == ' ' || r == '\t' || r == '\n' }) {
+			members[a] = true
+		}
+		f.tables[anchor+"\x00"+m[1]] = members
+	}
 	return nil
 }
+
+var tableWithBraces = regexp.MustCompile(`table\s+<([A-Za-z][A-Za-z0-9_]*)>[^{\n]*\{([^}]*)\}`)
 
 // Read implements Client.
 func (f *Fake) Read(_ context.Context, anchor string) (string, error) {

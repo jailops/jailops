@@ -39,6 +39,11 @@ type ExposeResult struct {
 	// Families says, for every address of the jail, how the Internet reaches the ports of the request.
 	Families []ExposeFamily `json:"families"`
 	Warnings []string       `json:"warnings,omitempty"`
+	// Exposed names what the request exposes or takes away, as the EXPOSED column does: "80,443/tcp", "53/tcp,udp".
+	Exposed string `json:"exposed,omitempty"`
+	// Notes say what the policies of the jail do with the same ports: a rule that already lets them in (before an
+	// exposure), a rule that still does (after an unexpose), the range a port is part of.
+	Notes []string `json:"notes,omitempty"`
 }
 
 // ExposeFamily is how the Internet reaches one address of a jail.

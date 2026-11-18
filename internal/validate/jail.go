@@ -228,11 +228,13 @@ func devices(s api.JailSpec) error {
 		if err := ExposeEntry(f, e); err != nil {
 			return err
 		}
-		k := e.Protocol() + "/" + strings.Join(e.Ports, ",")
-		if eseen[k] {
-			return Invalid(f+".ports", "%s %s is exposed twice", e.Protocol(), strings.Join(e.Ports, ","))
+		for _, p := range e.Ports {
+			k := e.Protocol() + "/" + p
+			if eseen[k] {
+				return Invalid(f+".ports", "%s %s is exposed twice", e.Protocol(), p)
+			}
+			eseen[k] = true
 		}
-		eseen[k] = true
 	}
 	for i, p := range s.Profiles {
 		if err := Name(fmt.Sprintf("profiles[%d]", i), p); err != nil {
@@ -407,6 +409,16 @@ func provision(p api.Provision) error {
 				return Invalid(fmt.Sprintf("provision.commands[%d]", i), "a command word is not valid")
 			}
 		}
+	}
+	return nil
+}
+
+// LayoutFits refuses the thin layout for a Linux jail: the persistent datasets of a thin jail are ZFS mounts that the
+// nullfs mirror of the root at compat/linux does not show, so a Linux process would see empty directories. It is asked
+// when a jail is made, with the operating system of its image.
+func LayoutFits(s api.JailSpec) error {
+	if s.Layout == api.LayoutThin && s.OS == api.OSLinux {
+		return Invalid("layout", "a Linux jail is thick: the thin layout is for FreeBSD jails (leave --layout out)")
 	}
 	return nil
 }

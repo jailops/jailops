@@ -112,7 +112,7 @@ function decidedBy(d: Decision): string {
     case 'policy': return s.fwtest.by.policy(d.policy ?? '', d.rule ?? 0, label)
     case 'projectPolicy': return s.fwtest.by.projectPolicy(d.policy ?? '', d.rule ?? 0, label)
     case 'managedPolicy': return s.fwtest.by.managedPolicy(d.policy ?? '', d.rule ?? 0, label)
-    case 'default': return s.fwtest.by.default
+    case 'default': return s.fwtest.by.default(d.setBy ?? [])
     case 'isolation': return s.fwtest.by.isolation
     case 'fixed': return s.fwtest.by.fixed[d.stage] ?? s.fwtest.by.other(d.stage)
   }

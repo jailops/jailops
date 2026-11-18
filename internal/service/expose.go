@@ -96,25 +96,37 @@ func normalPorts(in []string) ([]string, error) {
 			}
 		}
 	}
+	sortPorts(out)
+	return out, nil
+}
+
+// sortPorts orders ports and ranges by their first port.
+func sortPorts(out []string) {
 	sort.Slice(out, func(i, j int) bool {
 		a, _, _ := validate.ParsePortSpec(out[i])
 		b, _, _ := validate.ParsePortSpec(out[j])
 		return a < b
 	})
-	return out, nil
 }
 
-// normalProtos turns the proto of a request into the protocols it names.
+// normalProtos turns the proto of a request (tcp, udp or a comma list of them) into the protocols it names, sorted and
+// without duplicates.
 func normalProtos(p string) ([]string, error) {
-	switch p {
-	case "", "tcp":
+	if strings.TrimSpace(p) == "" {
 		return []string{"tcp"}, nil
-	case "udp":
-		return []string{"udp"}, nil
-	case "tcp,udp", "udp,tcp":
-		return []string{"tcp", "udp"}, nil
 	}
-	return nil, invalid("proto %q must be tcp, udp or tcp,udp", p)
+	var out []string
+	for _, x := range strings.Split(p, ",") {
+		x = strings.TrimSpace(x)
+		if x != "tcp" && x != "udp" {
+			return nil, invalid("proto %q must be tcp, udp or tcp,udp", p)
+		}
+		if !slices.Contains(out, x) {
+			out = append(out, x)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
 }
 
 // ExposeJail lets the Internet reach ports of a jail: an allow rule on the jail's link and, for an address the upstream
@@ -184,6 +196,9 @@ func (s *Service) exposeOnce(ctx context.Context, name string, req api.ExposeReq
 			}
 		}
 	}
+	if req.HostPort > 0 && len(ports) > 1 {
+		return api.ExposeResult{}, invalid("--host-port takes one port: jailops expose %s %s --host-port %d, then jailops expose %s %s", name, ports[0], req.HostPort, name, strings.Join(ports[1:], ","))
+	}
 	var entries []api.ExposeEntry
 	for _, proto := range protos {
 		entries = append(entries, api.ExposeEntry{Proto: proto, Ports: ports, Families: fams, From: slices.Clone(req.From), HostPort: req.HostPort,
@@ -199,14 +214,12 @@ func (s *Service) exposeOnce(ctx context.Context, name string, req api.ExposeReq
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, e := range entries {
 		e.By, e.At = ActorFrom(ctx).Name, now
-		if i := slices.IndexFunc(next, func(x api.ExposeEntry) bool { return exposeKey(x) == exposeKey(e) }); i >= 0 {
-			if sameExposure(next[i], e) {
-				continue
-			}
-			next[i] = e
-		} else {
-			next = append(next, e)
+		if exposureHolds(next, e) {
+			continue
 		}
+		// a port is exposed once per protocol: the new entry takes its ports from the entries that name them
+		next = takePorts(next, e.Protocol(), e.Ports)
+		next = append(next, e)
 		changed = true
 	}
 	if changed {
@@ -218,6 +231,7 @@ func (s *Service) exposeOnce(ctx context.Context, name string, req api.ExposeReq
 		}
 	}
 	res := s.exposeResult(name, next, entries, routes, fams)
+	res.Notes = s.openedByPolicy(ctx, old, protos, ports, routes, fams)
 	if !changed || req.DryRun {
 		res.Changed = changed
 		return res, nil
@@ -323,8 +337,12 @@ func (s *Service) unexposeOnce(ctx context.Context, name string, req api.Unexpos
 	}
 	res := s.exposeResult(name, next, gone, routes, nil)
 	if len(gone) == 0 {
+		res.Notes = insideRange(old.Spec.Expose, protos, ports)
 		return res, nil
 	}
+	after := old
+	after.Spec.Expose = next
+	res.Notes = s.stillOpenedByPolicy(ctx, after, gone, routes)
 	if natIPv4(routes) {
 		before, after := s.forwardsOf(key, eff), eff
 		after.Expose = next
@@ -348,11 +366,38 @@ func (s *Service) unexposeOnce(ctx context.Context, name string, req api.Unexpos
 	return res, nil
 }
 
-// sameExposure compares two entries without who and when.
-func sameExposure(a, b api.ExposeEntry) bool {
-	a.By, a.At, b.By, b.At = "", "", "", ""
-	return a.Protocol() == b.Protocol() && slices.Equal(a.Ports, b.Ports) && slices.Equal(a.Families, b.Families) && slices.Equal(a.From, b.From) &&
+// sameSettings compares two entries without their ports, who and when.
+func sameSettings(a, b api.ExposeEntry) bool {
+	return a.Protocol() == b.Protocol() && slices.Equal(a.Families, b.Families) && slices.Equal(a.From, b.From) &&
 		a.HostPort == b.HostPort && a.Listen == b.Listen && a.Comment == b.Comment
+}
+
+// exposureHolds says whether an entry of the jail already exposes all the ports of e with the same settings.
+func exposureHolds(entries []api.ExposeEntry, e api.ExposeEntry) bool {
+	return slices.ContainsFunc(entries, func(x api.ExposeEntry) bool {
+		return sameSettings(x, e) && !slices.ContainsFunc(e.Ports, func(p string) bool { return !slices.Contains(x.Ports, p) })
+	})
+}
+
+// takePorts takes the ports out of the entries of a protocol: an entry keeps the ports that are not taken, with everything
+// else it says, and goes when none is left.
+func takePorts(entries []api.ExposeEntry, proto string, ports []string) []api.ExposeEntry {
+	var out []api.ExposeEntry
+	for _, e := range entries {
+		if e.Protocol() == proto {
+			e.Ports = slices.DeleteFunc(slices.Clone(e.Ports), func(p string) bool { return slices.Contains(ports, p) })
+			if len(e.Ports) == 0 {
+				continue
+			}
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// exposureText names what a request exposes the way the EXPOSED column does: "80,443/tcp", "53/tcp,udp".
+func exposureText(ports, protos []string) string {
+	return strings.Join(ports, ",") + "/" + strings.Join(protos, ",")
 }
 
 func fromText(from []string) string {
@@ -433,14 +478,18 @@ func (s *Service) exposeResult(name string, all, named []api.ExposeEntry, routes
 	if res.Entries == nil {
 		res.Entries = []api.ExposeEntry{}
 	}
-	var ports []string
-	hostOf := map[string]string{}
+	var ports, protos []string
 	var hostPorts []string
 	var listen string
 	for _, e := range named {
-		ports = append(ports, e.Ports...)
 		listen = e.Listen
+		if !slices.Contains(protos, e.Protocol()) {
+			protos = append(protos, e.Protocol())
+		}
 		for _, p := range e.Ports {
+			if !slices.Contains(ports, p) {
+				ports = append(ports, p)
+			}
 			if strings.Contains(p, "-") {
 				continue
 			}
@@ -448,11 +497,14 @@ func (s *Service) exposeResult(name string, all, named []api.ExposeEntry, routes
 			if e.HostPort > 0 {
 				h = strconv.Itoa(e.HostPort)
 			}
-			hostOf[p] = h
-			hostPorts = append(hostPorts, h+"->"+p)
+			if pair := h + "->" + p; !slices.Contains(hostPorts, pair) {
+				hostPorts = append(hostPorts, pair)
+			}
 		}
 	}
-	ports = slices.Compact(ports)
+	sortPorts(ports)
+	sort.Strings(protos)
+	res.Exposed = exposureText(ports, protos)
 	text := strings.Join(ports, ", ")
 	for _, r := range routes {
 		if fams != nil && !slices.Contains(fams, r.Family) {

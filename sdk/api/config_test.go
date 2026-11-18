@@ -272,3 +272,50 @@ func TestStopTimeoutKey(t *testing.T) {
 		t.Fatalf("unset: %v %+v", err, s.Boot)
 	}
 }
+
+// Add and Remove change one entry of a list key and leave the others where they are.
+func TestApplyChangeAddsAndRemovesListEntries(t *testing.T) {
+	s := JailSpec{Firewall: FirewallAttach{Policies: []string{"ssh-office"}}}
+	if _, err := ApplyChange(&s, ConfigChange{Add: map[string]string{"firewall.policies": "web-public"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(s.Firewall.Policies, ","); got != "ssh-office,web-public" {
+		t.Fatalf("after an add: %s", got)
+	}
+	// an entry that is there already is not added twice
+	if _, err := ApplyChange(&s, ConfigChange{Add: map[string]string{"firewall.policies": "ssh-office,monitoring"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(s.Firewall.Policies, ","); got != "ssh-office,web-public,monitoring" {
+		t.Fatalf("after a second add: %s", got)
+	}
+	if _, err := ApplyChange(&s, ConfigChange{Remove: map[string]string{"firewall.policies": "web-public,nothing"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(s.Firewall.Policies, ","); got != "ssh-office,monitoring" {
+		t.Fatalf("after a remove: %s", got)
+	}
+	if _, err := ApplyChange(&s, ConfigChange{Remove: map[string]string{"firewall.policies": "ssh-office,monitoring"}}); err != nil || len(s.Firewall.Policies) != 0 {
+		t.Fatalf("the last entries leave an empty list: %v %v", err, s.Firewall.Policies)
+	}
+	// the entries are checked like the whole list, and a bad change leaves the spec as it was
+	s.Firewall.Policies = []string{"a"}
+	if _, err := ApplyChange(&s, ConfigChange{Add: map[string]string{"firewall.policies": "Bad Name"}}); err == nil || strings.Join(s.Firewall.Policies, ",") != "a" {
+		t.Fatalf("a bad name: %v %v", err, s.Firewall.Policies)
+	}
+	// a key that is not a list, an unknown key and a key named twice are refused
+	for _, ch := range []ConfigChange{
+		{Add: map[string]string{"limits.memory": "2G"}},
+		{Remove: map[string]string{"nope": "x"}},
+		{Add: map[string]string{"firewall.policies": "b"}, Remove: map[string]string{"firewall.policies": "a"}},
+		{Add: map[string]string{"firewall.policies": "b"}, Set: map[string]string{"firewall.policies": "c"}},
+	} {
+		if _, err := ApplyChange(&s, ch); err == nil {
+			t.Errorf("%+v was accepted", ch)
+		}
+	}
+	// without entries to add or remove it is ApplyConfig
+	if _, err := ApplyChange(&s, ConfigChange{Set: map[string]string{"limits.cpu": "2"}}); err != nil || s.Resources.CPU != 2 {
+		t.Fatalf("a plain change: %v", err)
+	}
+}

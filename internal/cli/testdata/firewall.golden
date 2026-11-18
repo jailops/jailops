@@ -88,12 +88,16 @@ spec:
         - set:hq
       ports:
         - "22"
+status:
+  used_by: null
+  mandatory: false
 
 $ jailops firewall policy show documented
 Firewall policy documented
   Comment:      the public web server
   Default in:   deny
   Default out:  allow
+  Used by:      none
   Age:          3h
 
 #   RULE                               COMMENT
@@ -116,8 +120,9 @@ firewall policy/switchable: rule 3 added: deny in tcp port 23 disabled
 
 $ jailops firewall policy show switchable
 Firewall policy switchable
-  Default in:   deny
-  Default out:  allow
+  Default in:   (not set)
+  Default out:  (not set)
+  Used by:      none
   Age:          3h
 
 #   RULE                            COMMENT
@@ -135,8 +140,6 @@ metadata:
   created_at: "2026-03-01T09:00:00Z"
   updated_at: "2026-03-01T09:00:00Z"
 spec:
-  default_in: deny
-  default_out: allow
   rules:
     - comment: the site
       action: allow
@@ -157,6 +160,9 @@ spec:
       ports:
         - "23"
       disabled: true
+status:
+  used_by: null
+  mandatory: false
 
 $ jailops firewall policy create nodefaults
 firewall policy/nodefaults created
@@ -184,16 +190,17 @@ $ jailops firewall rule add web in --action allow --proto bogus
 [exit 2]
 
 $ jailops firewall policy list
-NAME         DEFAULT-IN   DEFAULT-OUT   RULES   RAW
-documented   deny         allow         2       no
-nodefaults   deny         allow         0       no
-switchable   deny         allow         3       no
-web          deny         allow         3       no
+NAME         DEFAULT-IN   DEFAULT-OUT   RULES   RAW   USED BY
+documented   deny         allow         2       no    none
+nodefaults   -            -             0       no    none
+switchable   -            -             3       no    none
+web          deny         allow         3       no    none
 
 $ jailops firewall policy show web
 Firewall policy web
   Default in:   deny
   Default out:  allow
+  Used by:      none
   Age:          3h
 
 #   RULE                                       COMMENT

@@ -12,7 +12,9 @@ Jail web
 
 Resources
   Limits:       cpu 2, memory 2G
-  Firewall:     open: no firewall policy (the host answers ping and DNS only)
+  Firewall:     open: no firewall policy (the host answers ping and DNS only); attach one: jailops firewall policy attach POLICY web
+  Default in:   allow (no policy says deny)
+  Default out:  allow (no policy says deny)
   Usage:        - (racct is off: set kern.racct.enable=1 in /boot/loader.conf and reboot)
   Disk:         not available: cannot open 'tank/jailops/projects/main/jails/web': dataset does not exist
 

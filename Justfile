@@ -110,6 +110,11 @@ fuzz seconds="20":
 gen-ts:
     go run ./scripts/gen-ts
 
+# accept a meant change of the API surface: rewrite the golden files of the freeze tests and the generated types
+freeze:
+    go run ./scripts/gen-ts
+    go test ./internal/server -run Freeze -freeze-update -count=1
+
 check-ts:
     go run ./scripts/gen-ts -check
 

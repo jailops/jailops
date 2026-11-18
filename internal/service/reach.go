@@ -24,6 +24,8 @@ type reachCtx struct {
 	foreign []netip.Prefix
 	own     []netip.Prefix
 	addrs   []netip.Addr
+	// policies are the policies of the jail in the order they are rendered
+	policies []api.ReachPolicy
 }
 
 // The addresses of "the Internet" in a probe: no network, set or prefix of JailOps holds them (they are in the ranges of
@@ -106,6 +108,7 @@ func (s *Service) reachOf(ctx context.Context, j api.Jail, refs fwRefs, cached b
 		out.Error = "the jail has no firewall anchor (it has no address or no network)"
 	default:
 		out = computeReach(b.desired.Anchor, b.reach, s.reachNames(j), out)
+		out.RulesID = render.RulesID(b.desired.Ruleset)
 		s.addHostAddresses(ctx, &out, b.desired.Anchor)
 	}
 	s.reach.put(key, out, s.now())
@@ -308,7 +311,8 @@ func groupPass(segs []segment) (groups []passGroup, blocker *render.Rule, unknow
 			continue
 		}
 		if !sg.pass {
-			if blocker == nil {
+			// a deny rule of a policy says more than the closing of the anchor that stands before it in the ports
+			if blocker == nil || sg.rule != nil && sg.rule.Origin.Stage == render.StagePolicy && blocker.Origin.Stage != render.StagePolicy {
 				blocker = sg.rule
 			}
 			continue
@@ -386,6 +390,8 @@ func tableName(t string) string {
 	switch {
 	case t == render.HostTable:
 		return "host"
+	case t == render.ForeignTable:
+		return "other projects"
 	case t == render.UplinkTable:
 		return "other networks"
 	case t == "urpf-failed":
@@ -404,6 +410,16 @@ func tableName(t string) string {
 func byText(o render.Origin) string {
 	switch o.Stage {
 	case render.StagePolicy, render.StageUplink:
+		if o.Policy == render.ExposeOrigin {
+			s := o.RuleName
+			if s == "" {
+				s = "expose"
+			}
+			if o.Comment != "" {
+				s += fmt.Sprintf(" %q", o.Comment)
+			}
+			return s
+		}
 		if o.Policy == "" {
 			if o.Stage == render.StageUplink {
 				return "uplink protection"
@@ -428,11 +444,11 @@ func byText(o render.Origin) string {
 	case render.StageRaw:
 		return "raw PF fragment of policy " + o.Policy
 	case render.StageIsolation:
-		return "isolation of the other projects (name a prefix in a policy to open it)"
+		return "other projects: no allow in rule with a source admits it"
 	case render.StageHost:
 		return "the host is closed to jails (DNS and ping to the gateway excepted)"
 	case render.StageDefault:
-		return "the default of the anchor"
+		return "the default of the jail's policies" + setByText(splitSetBy(o.SetBy))
 	case render.StageClosed:
 		return "the jail has a link and no address"
 	case render.StageAntispoof:
@@ -448,10 +464,14 @@ func byText(o render.Origin) string {
 // ruleBy is byText of a rule; the defaults say which way they go.
 func ruleBy(r *render.Rule) string {
 	if r != nil && r.Origin.Stage == render.StageDefault {
+		v, dir := "deny", "inbound"
 		if r.Action == "pass" {
-			return "the default of the jail's policies (allow)"
+			v = "allow"
 		}
-		return "the default of the jail's policies (deny)"
+		if r.Dir == "in" { // on the jail's link, what comes in is what the jail sends
+			dir = "outbound"
+		}
+		return fmt.Sprintf("the %s default is %s%s", dir, v, setByText(splitSetBy(r.Origin.SetBy)))
 	}
 	if r == nil {
 		return "nothing of this anchor decides"
@@ -497,6 +517,7 @@ func actionText(a string) string {
 
 // computeReach turns an anchor into rows, rules and the entries the Internet reaches.
 func computeReach(an *render.Anchor, rc reachCtx, nets map[netip.Addr]string, out api.JailReach) api.JailReach {
+	out.Policies = rc.policies
 	out.Rows = []api.ReachRow{}
 	// the rules in evaluation order; the forwards (translation rules) come first
 	out.Rules = []api.ReachRule{}
@@ -533,9 +554,9 @@ func computeReach(an *render.Anchor, rc reachCtx, nets map[netip.Addr]string, ou
 			v = "allow"
 		}
 		if r.Dir == "out" {
-			out.DefaultIn = v
+			out.DefaultIn, out.DefaultInBy = v, splitSetBy(r.Origin.SetBy)
 		} else {
-			out.DefaultOut = v
+			out.DefaultOut, out.DefaultOutBy = v, splitSetBy(r.Origin.SetBy)
 		}
 	}
 	// the rows of the Internet and of the tunnels: the pass rules on an interface that is not the jail's link
@@ -715,6 +736,38 @@ func (rc reachCtx) probe(source, fam string, jail netip.Addr) (netip.Addr, bool)
 	return netip.Addr{}, false
 }
 
+// probes are the addresses a class of source is probed with, in a family. The other projects reach the jail like the
+// Internet does, through the allow in rules that have a source, so each source an anchor rule names inside their networks
+// is probed too, not only the first address of a network.
+func (rc reachCtx) probes(an *render.Anchor, source, fam string, jail netip.Addr) []netip.Addr {
+	first, ok := rc.probe(source, fam, jail)
+	if !ok {
+		return nil
+	}
+	out := []netip.Addr{first}
+	if source != api.ReachOther {
+		return out
+	}
+	add := func(a netip.Addr) {
+		if (fam == "inet") == a.Is4() && !slices.Contains(out, a) {
+			out = append(out, a)
+		}
+	}
+	for _, r := range an.Rules {
+		if r.Kind != render.RuleFilter || r.Iface != "" || r.Dir != "out" || r.Action != "pass" || r.From.Negate {
+			continue
+		}
+		for _, p := range r.From.Prefixes {
+			for _, fp := range rc.foreign {
+				if fp.Masked().Contains(p.Addr()) && p.Bits() >= fp.Bits() {
+					add(p.Addr())
+				}
+			}
+		}
+	}
+	return out
+}
+
 // lastOther is the highest address of a prefix that is not the jail's own.
 func lastOther(p netip.Prefix, jail netip.Addr) netip.Addr {
 	a := p.Masked().Addr()
@@ -741,8 +794,8 @@ var sourceTitle = map[string]string{
 // returns the rows: what passes, or why nothing does.
 func linkRows(an *render.Anchor, rc reachCtx, source string) []api.ReachRow {
 	type key struct {
-		proto, ports, by string
-		rule             *render.Rule
+		proto, ports, by, from string
+		rule                   *render.Rule
 	}
 	type acc struct {
 		row api.ReachRow
@@ -757,31 +810,33 @@ func linkRows(an *render.Anchor, rc reachCtx, source string) []api.ReachRow {
 		if !ok {
 			continue
 		}
-		src, ok := rc.probe(source, fam, dst)
-		if !ok {
-			continue
-		}
-		for _, proto := range []string{"tcp", "udp"} {
-			base := fwsim.Packet{Family: fam, Proto: proto, Src: src, Dst: dst}
-			groups, b, unk := groupPass(segments(an, base, fwsim.Hook{Dir: "out"}))
-			if blocker == nil {
-				blocker = b
-			}
-			unknown = unknown || unk
-			for _, g := range groups {
-				ports := portsText(g.ports)
-				if allPorts(g.ports) {
-					ports = "all"
+		for _, src := range rc.probes(an, source, fam, dst) {
+			for _, proto := range []string{"tcp", "udp"} {
+				base := fwsim.Packet{Family: fam, Proto: proto, Src: src, Dst: dst}
+				groups, b, unk := groupPass(segments(an, base, fwsim.Hook{Dir: "out"}))
+				if blocker == nil {
+					blocker = b
 				}
-				k := key{proto, ports, ruleBy(g.rule), g.rule}
-				a, ok := rows[k]
-				if !ok {
-					a = &acc{row: api.ReachRow{Source: source, Proto: proto, Ports: ports, From: nil, Decision: "pass", By: ruleBy(g.rule),
-						Policy: g.rule.Origin.Policy, Rule: g.rule.Origin.RuleNo, RuleName: g.rule.Origin.RuleName, Stage: g.rule.Origin.Stage}, fam: map[string]bool{}}
-					rows[k] = a
-					order = append(order, k)
+				unknown = unknown || unk
+				for _, g := range groups {
+					ports := portsText(g.ports)
+					if allPorts(g.ports) {
+						ports = "all"
+					}
+					var from []string
+					if source == api.ReachOther {
+						from = orAny(matchText(g.rule.From)) // who it is limited to: any, a prefix or a set
+					}
+					k := key{proto, ports, ruleBy(g.rule), strings.Join(from, ","), g.rule}
+					a, ok := rows[k]
+					if !ok {
+						a = &acc{row: api.ReachRow{Source: source, Proto: proto, Ports: ports, From: from, Restricted: len(from) > 0 && from[0] != "any", Decision: "pass", By: ruleBy(g.rule),
+							Policy: g.rule.Origin.Policy, Rule: g.rule.Origin.RuleNo, RuleName: g.rule.Origin.RuleName, Stage: g.rule.Origin.Stage}, fam: map[string]bool{}}
+						rows[k] = a
+						order = append(order, k)
+					}
+					a.fam[famText(fam)] = true
 				}
-				a.fam[famText(fam)] = true
 			}
 		}
 	}
@@ -854,4 +909,20 @@ func linkOut(an *render.Anchor, rc reachCtx) api.ReachOut {
 		return strings.Join(parts, ", ")
 	}
 	return api.ReachOut{Internet: one(api.ReachInternet), Host: one(api.ReachHost), Jails: one(api.ReachJails), OtherProjects: one(api.ReachOther)}
+}
+
+// splitSetBy is the list in Origin.SetBy.
+func splitSetBy(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(s, ", ")
+}
+
+// setByText says which policies state deny: " (set by a, b [project])", or " (no policy says deny)".
+func setByText(by []string) string {
+	if len(by) == 0 {
+		return " (no policy says deny)"
+	}
+	return " (set by " + strings.Join(by, ", ") + ")"
 }

@@ -2,9 +2,7 @@
 # anchor jailops/alpha/web
 # tags: tier-1 web
 # the host's own addresses (a jail reaches none of them unless a rule says so)
-table <host> persist
-# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)
-table <not_any> persist
+table <host> persist { }
 table <jail_addrs> persist { 10.20.0.10, 2001:db8:1::100, fe80::/10 }
 block in quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type { routeradv, redir }
 pass in quick on jo0123456789a0a inet6 proto icmp6 from :: to ff02::1:ff00:0/104 icmp6-type neighbrsol label "jo-b1a9dbe5125f" keep state (if-bound)
@@ -19,38 +17,38 @@ pass out quick on jo0123456789a0a inet6 proto icmp6 from any to any icmp6-type {
 block drop out quick on jo0123456789a0a from any to ! <jail_addrs>
 block drop out quick on jo0123456789a0a inet proto icmp from any to any icmp-type redir
 # the host: closed to the jail whatever its policies allow; ping, the errors a path needs and the network's resolver stay open
-pass in quick on jo0123456789a0a inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label "jo-51addb100320" keep state (if-bound)
-pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-3869179f0698" keep state (if-bound)
+pass in quick on jo0123456789a0a inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label "jo-ba8fc3e4ce51" keep state (if-bound)
+pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-5bad6c181df5" keep state (if-bound)
 block drop in quick on jo0123456789a0a from any to <host>
 # project policy floor
 #   for every jail
 # rule 1: ssh
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 22 label "jo-7636317342ce" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 22 label "jo-8d0a1de8c8fa" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 22 label "jo-7f14ace65a13" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 22 label "jo-55feb9c38a1e" keep state (if-bound)
 # project policy monitoring
 # rule 1: metrics
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 9100 label "jo-f27cf5e98cf8" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 9100 label "jo-9d4f60a9ac77" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 9100 label "jo-8cfaf24cc18e" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 9100 label "jo-0744df483f19" keep state (if-bound)
 # policy app-web
 # rule 1: access a
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 5432 label "jo-f2acfee7b08f" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 5432 label "jo-7b1cb859a505" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 5432 label "jo-80aaba22ef18" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 5432 label "jo-775d8ab2e20f" keep state (if-bound)
 # policy postgres
 #   who may reach PostgreSQL
 # rule 1: from the set
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 5432 label "jo-e99d0a7d49aa" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 5432 label "jo-db2a604ef3ae" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 5432 label "jo-a086621f925e" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 5432 label "jo-af98fcd52672" keep state (if-bound)
 # rule 2: second
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 5433 label "jo-ed7c417485ec" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 5433 label "jo-faa809cc685b" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 5433 label "jo-f12bb9235553" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 5433 label "jo-6129c0aee13b" keep state (if-bound)
 # policy ssh-office
 # rule 1: office
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 22 label "jo-bf6ebf0c2e21" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 22 label "jo-7b7f35ed6620" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 22 label "jo-e19a458f0cf2" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 22 label "jo-718b743e89b9" keep state (if-bound)
 # exposed ports
 # rule 1: expose tcp 80
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80 label "jo-35c23fe0dd60" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-bea6ca7f142b" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80 label "jo-8765d05e775a" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-d44ef6f0b04a" keep state (if-bound)
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
 block drop out quick on jo0123456789a0a all
-pass in quick on jo0123456789a0a all label "jo-c8ae805f40f5" keep state (if-bound)
+pass in quick on jo0123456789a0a all label "jo-e12fadd9612c" keep state (if-bound)

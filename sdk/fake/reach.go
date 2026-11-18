@@ -20,6 +20,23 @@ func (s *Server) fakeReach(project string, j *api.Jail) api.JailReach {
 		names = append(names, p.Spec.FirewallPolicies...)
 	}
 	names = append(names, j.Spec.Firewall.Policies...)
+	var projectNames []string
+	if p := s.projects.items[s.projects.keyIn("", project)]; p != nil {
+		projectNames = p.Spec.FirewallPolicies
+	}
+	for _, n := range names {
+		src := "jail"
+		if slices.Contains(projectNames, n) {
+			src = "project"
+		}
+		rp := api.ReachPolicy{Name: n, Source: src}
+		if pol := s.policies.items[s.policies.keyIn(project, n)]; pol != nil {
+			rp.Rules, rp.DefaultIn, rp.DefaultOut = len(pol.Spec.Rules), pol.Spec.DefaultIn, pol.Spec.DefaultOut
+		}
+		out.Policies = append(out.Policies, rp)
+	}
+	out.DefaultIn, out.DefaultInBy = s.fakeDefault(project, names, projectNames, "in")
+	out.DefaultOut, out.DefaultOutBy = s.fakeDefault(project, names, projectNames, "out")
 	var v4, v6 string
 	for _, n := range j.Spec.Network {
 		if n.IPv4 != "" {
@@ -33,9 +50,6 @@ func (s *Server) fakeReach(project string, j *api.Jail) api.JailReach {
 		pol := s.policies.items[s.policies.keyIn(project, pn)]
 		if pol == nil {
 			continue
-		}
-		if pol.Spec.DefaultIn == "deny" {
-			out.DefaultIn = "deny"
 		}
 		for i, r := range pol.Spec.Rules {
 			if r.Disabled || r.Direction != "in" || r.Action != "allow" {
@@ -144,4 +158,28 @@ func (s *Server) exposed(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Unlock()
 	writeSync(w, 200, out)
+}
+
+// fakeDefault is the default of a jail in one direction from the policies it names: deny when any of them states deny
+// (by lists them, "name [project]" for the project's), else allow.
+func (s *Server) fakeDefault(project string, names, projectNames []string, dir string) (v string, by []string) {
+	v = "allow"
+	for _, pn := range names {
+		pol := s.policies.items[s.policies.keyIn(project, pn)]
+		if pol == nil {
+			continue
+		}
+		d := pol.Spec.DefaultIn
+		if dir == "out" {
+			d = pol.Spec.DefaultOut
+		}
+		if d == "deny" {
+			v = "deny"
+			if containsStr(projectNames, pn) {
+				pn += " [project]"
+			}
+			by = append(by, pn)
+		}
+	}
+	return v, by
 }

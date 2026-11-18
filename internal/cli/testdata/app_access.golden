@@ -17,7 +17,7 @@ $ jailops app install nginx web --image freebsd-151
 App nginx installed as jail web (running)
   Version:   1.30.6,3
   Addresses: 10.20.0.11
-  Ports:     http 80/tcp at 10.20.0.11:80 (expose: forwarding is not set up yet) HTTP, the default site.
+  Ports:     http 80/tcp at 10.20.0.11:80 (meant for the Internet: jailops expose web 80) HTTP, the default site.
   Access:    closed: nothing reaches it until jailops app allow web --from SOURCE
   Data:      /usr/local/www The sites.
   Config:    /usr/local/etc/nginx/nginx.conf (restart nginx) The server configuration.

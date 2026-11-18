@@ -67,7 +67,6 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorAppsLocal(c)
 	s.doctorAppsAccess(ctx, c)
 	s.doctorBackups(c)
-	s.doctorPolicyDefaults(c)
 	s.doctorFirewallSize(c)
 	s.doctorJailRefs(c)
 	s.doctorLogForward(c)
@@ -220,10 +219,6 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 			if hint == "" {
 				hint = "sysctl " + name + "=" + want + " and add it to /etc/sysctl.conf"
 			}
-			if name == SysctlOnlinkNS { // host configuration that matters on some segments only: information, never a fault
-				c.add("sysctl."+name, api.DoctorInfo, name+"="+got+" (the default); "+why, hint)
-				break
-			}
 			c.add("sysctl."+name, api.DoctorFail, name+" is "+got+", JailOps needs "+want+" ("+why+")", hint)
 		default:
 			c.add("sysctl."+name, api.DoctorOK, name+"="+got+" (not needed now)", "")
@@ -244,7 +239,7 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 			}
 		}
 	}
-	check(SysctlOnlinkNS, "1", s.hasProxyNetwork(), "on a shared IPv6 segment whose routers probe the host from their global addresses it needs 1", "see "+OnlinkNSDocs)
+	s.doctorOnlinkNS(ctx, c)
 }
 
 func (s *Service) doctorZFS(ctx context.Context, c *checkSet) {

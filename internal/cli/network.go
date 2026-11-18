@@ -21,6 +21,7 @@ func networkDesc() *kindDesc[api.Network] {
 	d.renameLong = renameLong("network", `the projects it is granted to, the jails attached to it (running
 ones too: nothing of their traffic changes), the profiles and WireGuard tunnels that name it, its firewall
 anchor and the descriptions of its interfaces`)
+	d.granted = func(n api.Network) []string { return n.Status.GrantedTo }
 	d.head = []string{"NAME", "IPV4", "GATEWAY", "RANGE", "USED", "FREE", "UPLINK"}
 	d.row = func(_ time.Time, n api.Network) []string {
 		sub, gw, rng := "-", "-", "-"

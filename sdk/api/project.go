@@ -119,6 +119,9 @@ type StorageStatus struct {
 	Available     int64       `json:"available,omitempty"`
 	Fragmentation int         `json:"fragmentation,omitempty"`
 	Conditions    []Condition `json:"conditions,omitempty"`
+	// GrantedTo are the projects the storage is granted to, as far as the caller may see them: every project for a
+	// global identity, the caller's own projects for any other. Worked out when the storage is read.
+	GrantedTo []string `json:"granted_to,omitempty"`
 }
 
 // ProjectHostStatus is one host's view of a fleet project.

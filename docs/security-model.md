@@ -546,8 +546,8 @@ Every jail has a link of its own to the host: an epair whose host end is the jai
 segment, so they cannot see each other's traffic, and what a jail forges at layer 2 (ARP, neighbour advertisements, router
 advertisements, DHCP) reaches the host's end of its own link and changes nothing outside it. The host routes each of a
 jail's addresses to that link and answers for the other addresses of the subnet with an error. Every jail also gets a PF
-anchor on its link: it binds the jail to its own addresses (anti-spoofing), closes it to other projects unless a rule you
-wrote opens the way, and holds the policies of the jail. Between two jails the host forwards what the anchors of both
+anchor on its link: it binds the jail to its own addresses (anti-spoofing), closes what comes in from other projects unless an allow in rule
+with a source admits it, and holds the policies of the jail. Between two jails the host forwards what the anchors of both
 allow. The PF matrix of the end-to-end tests checks each of these with real traffic and forged frames
 ([networking.md](networking.md)). Jails share the host kernel; this is a separation of networks, not of kernels
 ([above](#projects-are-not-a-security-boundary-against-the-kernel)).

@@ -51,7 +51,6 @@ type UnboundRes struct {
 	// itself from the root servers (no forward zone). Both are empty while the control program does not answer.
 	Forward  []string `json:"forward,omitempty"`
 	Recurse  bool     `json:"recurse,omitempty"`
-	Sample   string   `json:"sample,omitempty"`   // "NAME ADDRESS" of one running jail, for a test lookup
 	Gateways []string `json:"gateways,omitempty"` // the addresses of the host on the networks the resolver has to listen on
 }
 
@@ -107,9 +106,6 @@ func (l *Local) DNSUnbound(ctx context.Context, apply bool) (UnboundRes, error) 
 	for _, j := range jails {
 		res.Jails++
 		projects[j.Project] = true
-		if res.Sample == "" && len(j.Addrs) > 0 {
-			res.Sample = j.Name + "." + render.UnboundZone(j.Project, l.cfg.DNSSuffix) + " " + j.Addrs[0].String()
-		}
 	}
 	for _, n := range nets {
 		for _, a := range []netip.Addr{n.Gateway, n.Resolver6} {

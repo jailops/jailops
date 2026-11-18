@@ -465,7 +465,7 @@ func (s *Service) ConfigureJail(ctx context.Context, name string, ch api.ConfigC
 	if err != nil {
 		return api.Operation{}, notFound("jail", name)
 	}
-	if _, err := api.ApplyConfig(&pre.Spec, ch.Set, ch.Unset); err != nil {
+	if _, err := api.ApplyChange(&pre.Spec, ch); err != nil {
 		return api.Operation{}, err
 	}
 	nlocks := s.netLocksEff(p.Meta.Name, pre.Spec)
@@ -478,7 +478,7 @@ func (s *Service) ConfigureJail(ctx context.Context, name string, ch api.ConfigC
 				return nil, notFound("jail", name)
 			}
 			spec := cur.Spec
-			keys, err := api.ApplyConfig(&spec, ch.Set, ch.Unset)
+			keys, err := api.ApplyChange(&spec, ch)
 			if err != nil {
 				return nil, err
 			}

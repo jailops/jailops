@@ -178,11 +178,31 @@ test('creating a project can ask for a dedicated network', async ({ page }) => {
 
 test('storage shows health, usage and which projects use it; a network shows the one project it belongs to', async ({ page }) => {
   await open(page, '/storage')
+  await page.getByTestId('scope-all').check() // fast is granted to other projects than the selected one
   await expect(page.locator('[data-storage="fast"]').getByTestId('health')).toHaveText('Degraded')
   await expect(page.locator('[data-storage="fast"]').getByTestId('storage-projects')).toContainText('shop')
   await open(page, '/networks')
   await expect(page.locator('[data-network="lan"]').getByTestId('net-projects')).toContainText('web')
   await expect(page.locator('[data-network="lan"]').locator('[data-holder]')).toHaveCount(1)
+})
+
+test('networks and storage listed are those of the selected project; all lists every one and says whether this project holds it', async ({ page }) => {
+  await open(page, '/networks')
+  await expect(page.locator('[data-network="lan"]')).toBeVisible()
+  await expect(page.locator('[data-network="shop"]')).toHaveCount(0)
+  await page.getByTestId('scope-all').check()
+  await expect(page.locator('[data-network="shop"]').getByTestId('net-granted')).toHaveAttribute('data-granted', 'no')
+  await expect(page.locator('[data-network="shop"]').locator('[data-holder="shop"]')).toHaveCount(1)
+  await expect(page.locator('[data-network="lan"]').getByTestId('net-granted')).toHaveAttribute('data-granted', 'yes')
+  await page.getByTestId('scope-all').uncheck()
+  await expect(page.locator('[data-network="shop"]')).toHaveCount(0)
+
+  await open(page, '/storage')
+  await expect(page.locator('[data-storage="default"]')).toBeVisible()
+  await expect(page.locator('[data-storage="fast"]')).toHaveCount(0)
+  await page.getByTestId('scope-all').check()
+  await expect(page.locator('[data-storage="fast"]').getByTestId('storage-granted')).toHaveAttribute('data-granted', 'no')
+  await expect(page.locator('[data-storage="default"]').getByTestId('storage-granted')).toHaveAttribute('data-granted', 'yes')
 })
 
 test('a trust token is shown once with the exact command; an identity needs a scope', async ({ page }) => {

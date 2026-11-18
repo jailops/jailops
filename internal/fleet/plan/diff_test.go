@@ -87,6 +87,8 @@ func TestDangers(t *testing.T) {
 	}{
 		{"policy emptied", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow"}}}, api.FirewallPolicySpec{}, true},
 		{"policy opened", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}, api.FirewallPolicySpec{DefaultIn: "allow"}, true},
+		{"policy stops saying deny", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultIn: "deny"}, api.FirewallPolicySpec{}, true},
+		{"policy stops saying deny outbound", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultOut: "deny"}, api.FirewallPolicySpec{DefaultOut: "allow"}, true},
 		{"policy edited", api.KindFirewallPolicy, api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "allow"}}}, api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow", Rules: []api.FirewallRule{{Action: "deny"}}}, false},
 		{"set emptied", api.KindAddressSet, api.AddressSetSpec{Addresses: api.Entries("1.1.1.1")}, api.AddressSetSpec{}, true},
 		{"set grown", api.KindAddressSet, api.AddressSetSpec{}, api.AddressSetSpec{Addresses: api.Entries("1.1.1.1")}, false},

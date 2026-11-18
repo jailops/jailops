@@ -80,7 +80,7 @@ const send = (dry: boolean) => check.submit(async () => {
 })
 
 const line = (x: ExposeResult['families'][number]): string =>
-  x.via === 'uplink' ? s.expose.uplink(x.address, x.ports) : x.via === 'forward' ? s.expose.forward(x.address, (x.forwards ?? []).join(', ') || x.ports) : s.expose.noneVia(x.address, x.note ?? '')
+  x.via === 'uplink' ? s.expose.uplink(x.family, x.address, x.ports) : x.via === 'forward' ? s.expose.forward(x.address, (x.forwards ?? []).join(', ') || x.ports) : s.expose.noneVia(x.address, x.note ?? '')
 </script>
 
 <template>
@@ -130,11 +130,13 @@ const line = (x: ExposeResult['families'][number]): string =>
       <ErrorPanel v-if="error" :error="error" style="margin-top: 12px" />
       <div v-if="result" class="stack" style="margin-top: 12px" data-test="expose-result">
         <h3>{{ s.expose.result }}</h3>
+        <p v-if="result.exposed" class="mono" data-test="expose-what">{{ s.expose.exposed(result.exposed) }}</p>
         <p v-if="!result.changed" class="muted">{{ s.expose.resultUnchanged }}</p>
         <ul class="plain">
           <li v-for="x in result.families" :key="x.family + x.address" class="mono" :data-family="x.family">{{ line(x) }}</li>
         </ul>
         <Callout v-for="w in result.warnings ?? []" :key="w" tone="warn">{{ w }}</Callout>
+        <Callout v-for="n in result.notes ?? []" :key="n" tone="info">{{ n }}</Callout>
       </div>
     </form>
     <template #footer>

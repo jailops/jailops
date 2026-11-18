@@ -93,6 +93,9 @@ type FirewallTestRule struct {
 	Rule    int    `json:"rule,omitempty"`
 	Name    string `json:"name,omitempty"`
 	Comment string `json:"comment,omitempty"`
+	// SetBy, for the stage default, are the policies that state deny for the direction ("name", with " [project]" or
+	// " [managed]"); empty when none does and the default is allow.
+	SetBy []string `json:"set_by,omitempty"`
 	// PF is the rendered rule as loaded in pf.
 	PF string `json:"pf"`
 }

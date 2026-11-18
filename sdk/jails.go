@@ -279,12 +279,19 @@ type ConfigResult struct {
 // restarts a jail on its own: RestartRequired names the keys that wait for a
 // restart, and restart=true asks for it explicitly.
 func (j *JailClient) Config(ctx context.Context, name string, set map[string]string, unset []string, restart bool) (*Operation[ConfigResult], error) {
+	return j.ChangeConfig(ctx, name, api.ConfigChange{Set: set, Unset: unset}, restart)
+}
+
+// ChangeConfig applies a ConfigChange to a jail: keys to set or unset, and entries to add to or remove from a list key
+// (a firewall policy of the jail, a tag) without writing the whole list. The server reads and writes the jail under its
+// lock, so a change made at the same time is not lost.
+func (j *JailClient) ChangeConfig(ctx context.Context, name string, ch api.ConfigChange, restart bool) (*Operation[ConfigResult], error) {
 	q := url.Values{}
 	if restart {
 		q.Set("restart", "true")
 	}
 	op, _, err := sendOp[ConfigResult](ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/config", query: q,
-		body: api.ConfigChange{Set: set, Unset: unset}}, nil)
+		body: ch}, nil)
 	return op, err
 }
 

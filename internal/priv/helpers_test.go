@@ -21,6 +21,7 @@ import (
 
 type env struct {
 	pfStatus, pfRules string // what pfctl -s info and -s rules answer (pfOn)
+	pfRulesErr        error  // when set, pfctl -s rules fails with it
 	t                 *testing.T
 	base              string
 	cfg               Config
@@ -183,6 +184,9 @@ func (e *env) pfOn() {
 		return run.Result{Stdout: []byte("Status: " + e.pfStatus + "          Debug: Urgent\n")}, nil
 	}})
 	e.runner.Add(run.Rule{Name: pfctlBin, Args: []string{"-s", "rules"}, Fn: func(run.Cmd) (run.Result, error) {
+		if e.pfRulesErr != nil {
+			return run.Result{}, e.pfRulesErr
+		}
 		return run.Result{Stdout: []byte(e.pfRules)}, nil
 	}})
 }

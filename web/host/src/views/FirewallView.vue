@@ -76,7 +76,8 @@ watch(() => l.data.value, (d) => {
 const dirty = computed(() => !!draft.value && JSON.stringify(clean(draft.value)) !== JSON.stringify(clean(JSON.parse(original.value))))
 const setNow = computed(() => setSpec(setText.value, setComment.value))
 const setDirty = computed(() => !!setDraft.value && JSON.stringify(setNow.value) !== setOriginal.value)
-const attached = computed(() => (l.data.value?.jails ?? []).filter((j) => j.spec.firewall?.policies?.includes(selected.value)).map((j) => j.metadata.name))
+const use = computed(() => l.data.value?.policies.find((p) => p.metadata.name === selected.value)?.status)
+const attached = computed(() => use.value?.used_by ?? [])
 
 async function pick(n: string): Promise<void> {
   selected.value = n
@@ -248,11 +249,11 @@ async function setRenamed(to: string): Promise<void> {
 
 // create a policy: a name and the two defaults; rules are added in the editor afterwards
 const creating = ref(false)
-const nf = reactive({ name: '', in: 'deny', out: 'allow' })
+const nf = reactive({ name: '', in: '', out: '' })
 const createError = ref<ApiError | null>(null)
 const createCheck = useFormCheck(() => ({ 'fwp-name': nameError(nf.name) || ((l.data.value?.policies ?? []).some((p) => p.metadata.name === nf.name) ? s.firewall.exists : '') }))
 function openCreate(): void {
-  Object.assign(nf, { name: '', in: 'deny', out: 'allow' })
+  Object.assign(nf, { name: '', in: '', out: '' })
   createError.value = null
   createCheck.reset()
   creating.value = true
@@ -260,7 +261,7 @@ function openCreate(): void {
 const create = () => createCheck.submit(async () => {
   createError.value = null
   try {
-    await runOp(s.firewall.createTitle + ': ' + nf.name, () => api.firewall.createPolicy({ metadata: { name: nf.name }, spec: { default_in: nf.in, default_out: nf.out, rules: [] } }))
+    await runOp(s.firewall.createTitle + ': ' + nf.name, () => api.firewall.createPolicy({ metadata: { name: nf.name }, spec: { ...(nf.in ? { default_in: nf.in } : {}), ...(nf.out ? { default_out: nf.out } : {}), rules: [] } }))
     creating.value = false
     selected.value = ''
     await l.reload()
@@ -311,14 +312,14 @@ function removePolicy(): void {
           </header>
           <div class="body stack">
             <ErrorPanel v-if="apiError" :error="apiError" />
-            <p v-if="attached.length" class="muted">{{ s.firewall.usedBy }}: <template v-for="(n, i) in attached" :key="n">{{ i ? ', ' : '' }}<router-link :to="`/jails/${n}`" class="mono">{{ n }}</router-link></template></p>
+            <p v-if="use" class="muted" data-test="policy-used-by">{{ s.firewall.usedBy }}: <template v-if="use.mandatory">{{ s.firewall.usedByAll }}</template><template v-else-if="!attached.length"><span data-test="policy-unused">{{ s.firewall.usedByNone }}</span></template><template v-for="(n, i) in attached" :key="n">{{ i ? ', ' : '' }}<router-link :to="`/jails/${n}`" class="mono">{{ n }}</router-link></template></p>
             <div class="field"><label for="pc">{{ s.firewall.comment }}</label>
               <input id="pc" v-model="draft.spec.comment" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.policyCommentHint" data-test="policy-comment" /></div>
             <div class="row">
               <div class="field" style="min-width: 160px"><label for="din">{{ s.firewall.defaultIn }}</label>
-                <select id="din" v-model="draft.spec.default_in"><option>allow</option><option>deny</option></select></div>
+                <select id="din" v-model="draft.spec.default_in"><option value="">{{ s.firewall.unset }}</option><option value="deny">deny</option><option value="allow">allow</option></select></div>
               <div class="field" style="min-width: 160px"><label for="dout">{{ s.firewall.defaultOut }}</label>
-                <select id="dout" v-model="draft.spec.default_out"><option>allow</option><option>deny</option></select></div>
+                <select id="dout" v-model="draft.spec.default_out"><option value="">{{ s.firewall.unset }}</option><option value="deny">deny</option><option value="allow">allow</option></select></div>
             </div>
             <h3>{{ s.firewall.rules }}</h3>
             <p v-if="!rules.length" class="muted">{{ s.firewall.noRules }}</p>
@@ -408,8 +409,8 @@ function removePolicy(): void {
           <span id="fwp-name-h" class="hint">{{ nameHint() }}</span>
           <span id="fwp-name-e" class="field-error" role="alert">{{ createCheck.err('fwp-name') }}</span></div>
         <div class="form-2">
-          <div class="field"><label for="fwp-in">{{ s.firewall.defaultIn }}</label><select id="fwp-in" v-model="nf.in"><option>deny</option><option>allow</option></select></div>
-          <div class="field"><label for="fwp-out">{{ s.firewall.defaultOut }}</label><select id="fwp-out" v-model="nf.out"><option>allow</option><option>deny</option></select></div>
+          <div class="field"><label for="fwp-in">{{ s.firewall.defaultIn }}</label><select id="fwp-in" v-model="nf.in"><option value="">{{ s.firewall.unset }}</option><option value="deny">deny</option><option value="allow">allow</option></select></div>
+          <div class="field"><label for="fwp-out">{{ s.firewall.defaultOut }}</label><select id="fwp-out" v-model="nf.out"><option value="">{{ s.firewall.unset }}</option><option value="deny">deny</option><option value="allow">allow</option></select></div>
         </div>
         <ErrorPanel v-if="createError" :error="createError" />
       </form>

@@ -75,7 +75,11 @@ func (res resource[T]) routes() []route {
 			if err != nil {
 				return err
 			}
-			v, err := res.list(c.r.Context(), l)
+			ctx := c.r.Context()
+			if c.r.URL.Query().Get("all") == "true" {
+				ctx = service.WithAllProjects(ctx)
+			}
+			v, err := res.list(ctx, l)
 			if err != nil {
 				return err
 			}
@@ -138,8 +142,8 @@ func (res resource[T]) routes() []route {
 	}
 	if res.patch != nil {
 		out = append(out, route{method: "PATCH", pattern: item, h: func(c *rc) error {
-			var p map[string]any
-			if err := c.decode(&p); err != nil {
+			p, err := c.decodePatch(new(T))
+			if err != nil {
 				return err
 			}
 			exp, err := c.expect()

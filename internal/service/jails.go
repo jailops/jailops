@@ -155,6 +155,9 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 			st.Warnings = append(st.Warnings, w)
 		}
 	}
+	if w := s.openInboundWarning(j); w != "" {
+		st.Warnings = append(st.Warnings, w)
+	}
 	st.Drift = rt.drift
 	st.ProvisionedAt = s.provisionedAt(name)
 	st.Conditions = append(st.Conditions, rt.conditions...)
@@ -391,6 +394,9 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 		return api.Operation{}, err
 	}
 	spec.OS = im.Spec.OS
+	if err := validate.LayoutFits(spec); err != nil {
+		return api.Operation{}, err
+	}
 	if spec.Layout == "" {
 		spec.Layout = api.LayoutThin
 		if spec.OS == api.OSLinux {
@@ -812,7 +818,7 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 // StartJail starts a jail synchronously the way an operator's start does. The
 // reconciler uses it for autostart; key is the project-qualified jail key.
 func (s *Service) StartJail(ctx context.Context, key string) error {
-	unlock, err := s.locks.tryLock("autostart "+key, jailLock(key), anchorLock(key))
+	unlock, err := s.locks.lockPatient(ctx, "autostart "+key, jailLock(key), anchorLock(key))
 	if err != nil {
 		return err
 	}

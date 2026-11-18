@@ -139,9 +139,10 @@ function hop(side: 'source' | 'destination', jail: Jail, dir: 'in' | 'out', pkt:
   const raw = pols.find((p) => p.spec!.raw)
   if (raw) return { ...base, verdict: 'unknown', why: `policy ${raw.name} has a raw PF fragment that comes before the default: the test cannot say what it does with this connection`, skipped }
   const key = dir === 'in' ? 'default_in' : 'default_out'
-  const deny = pols.some((p) => p.spec![key] === 'deny')
+  const setBy = pols.filter((p) => p.spec![key] === 'deny').map((p) => (p.project ? `${p.name} [project]` : p.name))
+  const deny = setBy.length > 0
   const verdict = deny ? 'block' : 'pass'
-  const dec: FirewallTestRule = { stage: 'default', pf: line({ action: deny ? 'deny' : 'allow', dir: gw ? 'out' : 'in', from: 'any', to: gw ? plainAddr(pkt.dst) : 'any', fam: pkt.fam, gw }) }
+  const dec: FirewallTestRule = { stage: 'default', set_by: setBy.length ? setBy : undefined, pf: line({ action: deny ? 'deny' : 'allow', dir: gw ? 'out' : 'in', from: 'any', to: gw ? plainAddr(pkt.dst) : 'any', fam: pkt.fam, gw }) }
   return { ...base, verdict, decided_by: dec, skipped }
 }
 const plainAddr = (a: Ip): string => (a.fam === 4 ? [24n, 16n, 8n, 0n].map((s) => String((a.n >> s) & 255n)).join('.') : `2001:db8:10::${Number(a.n & 0xffffn)}`)

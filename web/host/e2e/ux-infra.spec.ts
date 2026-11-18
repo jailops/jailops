@@ -53,7 +53,9 @@ test('a network is edited with its name kept, and deleted with its name typed wh
   await expect(page.getByTestId('error-panel')).toContainText('granted to project')
   await page.getByRole('button', { name: 'Cancel' }).click()
 
-  // stg has no jails: a plain confirmation; the staging project grants it, so the refusal shows too
+  // stg has no jails: a plain confirmation; the staging project grants it, so the refusal shows too (the list shows what the
+  // selected project holds: the switch shows every network)
+  await page.getByTestId('scope-all').check()
   await page.getByTestId('delete-net-shop').click()
   await expect(page.getByTestId('confirm-dialog')).toHaveAttribute('data-tier', '2')
 })
@@ -78,6 +80,22 @@ test('a firewall policy is created with the name rule and deleted with its name 
   await page.getByTestId('delete-policy').click()
   await expect(page.getByTestId('confirm-dialog')).toHaveAttribute('data-tier', '3')
   await expect(page.getByTestId('confirm-items')).toContainText('web')
+})
+
+test('a firewall policy says which jails use it, and says so when none does', async ({ page }) => {
+  await open(page, '/firewall')
+  await page.getByRole('button', { name: 'web-default' }).click()
+  await expect(page.getByTestId('policy-used-by')).toContainText('Used by')
+  await expect(page.getByTestId('policy-used-by')).toContainText('web')
+  await expect(page.getByTestId('policy-unused')).toHaveCount(0)
+  // a policy no jail names: the page says it is applied nowhere
+  await page.getByTestId('new-policy').click()
+  await page.locator('#fwp-name').fill('api-edge')
+  await page.getByTestId('policy-create-go').click()
+  await expect(page.getByTestId('policy-unused')).toContainText('not applied anywhere')
+  // a policy states a default only when asked: the form made it with none
+  await expect(page.locator('#din')).toHaveValue('')
+  await expect(page.locator('#dout')).toHaveValue('')
 })
 
 test('the firewall tab is in the address and moves with the arrow keys', async ({ page }) => {

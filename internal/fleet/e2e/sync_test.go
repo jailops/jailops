@@ -368,9 +368,10 @@ spec:
   default_out: allow
   rules:
     - {action: allow, direction: in, proto: tcp, ports: ["22"]}
+    - {action: allow, direction: in, proto: tcp, ports: ["2282"], from: ["203.0.113.0/24"]}
 `)
 	r := mustOK(t, run(t, e, "validate"))
-	contains(t, r.out, "default_in is allow")
+	contains(t, r.out, "states no default_in: deny")
 	contains(t, r.out, "allows inbound traffic from anywhere")
 }
 

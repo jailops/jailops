@@ -3,6 +3,7 @@
 // entry over IPv6 (the jail's routed address); `jailops expose` adds the entries of spec.expose: IPv6 on the jail's address, IPv4 through a forward of the host. Only loaded for `?demo`.
 import type { ExposedEntry, ExposedJail, JailReach, ReachRow } from '@jailops/shared/api/types'
 import { jailAddrs, type DemoFwState } from './fwtest'
+import { demoRulesId } from './data'
 
 const HOST_V4 = '10.20.0.1'
 
@@ -46,13 +47,24 @@ export function demoReach(jail: DemoFwState['jails'][number], st: DemoFwState): 
     decision: e.via === 'forward' ? 'forward' : 'pass', by: e.by, host_address: e.host_address, host_port: e.host_port,
   }))
   if (!rows.length) rows.push({ source: 'internet', family: '', proto: '', decision: 'none', by: 'no allow in rule with an external source and no port forward' })
-  rows.push({ source: 'jails', family: '4,6', proto: 'any', ports: 'all', decision: 'pass', by: 'the default of the jail\'s policies (allow)' })
+  rows.push({ source: 'jails', family: '4,6', proto: 'any', ports: 'all', decision: 'pass', by: 'the inbound default is allow (no policy says deny)' })
   rows.push({ source: 'host', family: '4,6', proto: 'icmp,udp', ports: '53', decision: 'pass', by: 'the host answers DNS and ping' })
-  rows.push({ source: 'other-projects', family: '', proto: '', decision: 'none', by: 'the isolation of projects' })
+  rows.push({ source: 'other-projects', family: '', proto: '', decision: 'none', by: 'other projects: no allow in rule with a source admits it' })
+  const names = [...st.projectPolicies, ...(jail.spec.firewall?.policies ?? []).filter((p) => !st.projectPolicies.includes(p))]
+  const deniedBy = (key: 'default_in' | 'default_out'): string[] => names
+    .filter((n) => st.policies.find((p) => p.metadata.name === n)?.spec[key] === 'deny')
+    .map((n) => (st.projectPolicies.includes(n) ? `${n} [project]` : n))
+  const inBy = deniedBy('default_in')
+  const outBy = deniedBy('default_out')
+  const policies = names.map((n) => {
+    const pol = st.policies.find((p) => p.metadata.name === n)
+    return { name: n, source: st.projectPolicies.includes(n) ? 'project' : 'jail', rules: pol?.spec.rules?.length ?? 0, default_in: pol?.spec.default_in || undefined, default_out: pol?.spec.default_out || undefined }
+  })
   return {
-    project: jail.metadata.project ?? '', jail: jail.metadata.name, rows, exposed,
-    out: { internet: 'all', host: 'DNS and ping', jails: 'all', other_projects: 'none' },
-    default_in: 'allow', default_out: 'allow', rules: [],
+    project: jail.metadata.project ?? '', jail: jail.metadata.name, policies, rows, exposed,
+    out: { internet: 'all', host: 'DNS and ping', jails: 'all', other_projects: 'all' },
+    default_in: inBy.length ? 'deny' : 'allow', default_out: outBy.length ? 'deny' : 'allow',
+    default_in_by: inBy.length ? inBy : undefined, default_out_by: outBy.length ? outBy : undefined, rules: [], rules_id: demoRulesId(jail.metadata.name),
   }
 }
 

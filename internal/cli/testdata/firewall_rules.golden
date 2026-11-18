@@ -75,8 +75,9 @@ $ jailops firewall rule list web -o json
 $ jailops firewall policy show web
 Firewall policy web
   Comment:      the public web server
-  Default in:   deny
-  Default out:  allow
+  Default in:   (not set)
+  Default out:  (not set)
+  Used by:      none
   Age:          3h
 
 #   RULE                                    COMMENT

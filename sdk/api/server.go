@@ -215,4 +215,5 @@ var Extensions = []string{
 	"jail_expose",
 	"jail_reach",
 	"jail_diff",
+	"firewall_applied",
 }

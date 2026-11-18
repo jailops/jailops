@@ -8,6 +8,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk"
 )
 
@@ -98,8 +99,8 @@ jailops remote add edge https://edge:39110 --cert client.pem --key client.key --
 				r.TokenFile, r.Token = "", line
 			}
 			name, target := args[0], args[1]
-			if name == "local" || strings.Contains(name, "://") || name == "" {
-				return usagef("%q is not a valid remote name", name)
+			if err := validRemoteName(name); err != nil {
+				return err
 			}
 			if r.TokenFile != "" && r.Token == "" {
 				// a trust token in a file joins; for an API token the path is stored, not the token
@@ -122,13 +123,14 @@ jailops remote add edge https://edge:39110 --cert client.pem --key client.key --
 				}
 				r.URL = u
 			}
+			// a dry run answers before the network is touched: the certificate is shown and pinned when the remote is added
+			if ok, err := a.dry("add remote "+name+" for "+target, nil); ok || err != nil {
+				return err
+			}
 			if r.URL != "" && strings.HasPrefix(r.URL, "https://") && r.CA == "" {
 				if err := a.pinCertificate(cmd.Context(), name, &r); err != nil {
 					return err
 				}
-			}
-			if ok, err := a.dry("add remote "+name+" for "+target, nil); ok || err != nil {
-				return err
 			}
 			path := a.userConfigPath()
 			cfg, err := loadConfig(path)
@@ -326,6 +328,18 @@ func (a *app) remoteNames() func(*cobra.Command, []string, string) ([]string, co
 	}
 }
 
+// validRemoteName accepts the names every other object has (lower case letters, digits and hyphens, starting with a
+// letter): the name is also a file name in the certs directory, and "local" is the socket of this host.
+func validRemoteName(name string) error {
+	if name == "local" {
+		return usagef("%q is the socket of this host, not a remote name", name)
+	}
+	if err := validate.Name("remote name", name); err != nil {
+		return usagef("%q is not a valid remote name: lower case letters, digits and hyphens, starting with a letter", name)
+	}
+	return nil
+}
+
 func (a *app) remoteRemove() *cobra.Command {
 	return &cobra.Command{
 		Use:               "remove NAME",
@@ -347,6 +361,7 @@ func (a *app) remoteRemove() *cobra.Command {
 			if ok, err := a.dry("remove remote "+args[0], nil); ok || err != nil {
 				return err
 			}
+			rc := cfg.Remotes[args[0]]
 			delete(cfg.Remotes, args[0])
 			if cfg.Current == args[0] {
 				cfg.Current = ""
@@ -354,6 +369,7 @@ func (a *app) remoteRemove() *cobra.Command {
 			if err := saveConfig(path, cfg); err != nil {
 				return err
 			}
+			a.removeClientCert(rc)
 			a.say("remote/%s removed\n", args[0])
 			return nil
 		},

@@ -2,7 +2,7 @@ $ jailops app install nginx web --image freebsd-151
 App nginx installed as jail web (running)
   Version:   1.30.6,3
   Addresses: 10.20.0.10
-  Ports:     http 80/tcp at 10.20.0.10:80 (expose: forwarding is not set up yet) HTTP, the default site.
+  Ports:     http 80/tcp at 10.20.0.10:80 (meant for the Internet: jailops expose web 80) HTTP, the default site.
   Access:    closed: nothing reaches it until jailops app allow web --from SOURCE
   Data:      /usr/local/www The sites.
   Config:    /usr/local/etc/nginx/nginx.conf (restart nginx) The server configuration.
@@ -14,24 +14,28 @@ Notes:
   Put the site under /usr/local/www.
 
 $ jailops expose web 80 --host-port 8080
-jail/web exposed: 80
-  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 8080->80
+jail/web exposed: 80/tcp
+  IPv4  10.20.0.10   forwarded: host 8080->80 (NAT)
 
 $ jailops list
 NAME   STATE     IMAGE         GEN   ADDRESSES    EXPOSED         AUTOSTART   USED   AGE
 web    running   freebsd-151   g1    10.20.0.10   8080→80/tcp 4   -           -      3h
 
 $ jailops firewall show web
+Policies of jail/web: none (the host answers ping and DNS only)
+
 Reaches jail/web
 
 SOURCE     FAMILY   PROTO   PORTS   LIMITED TO   REACH               BY
 Internet   4        tcp     80      any          forward host:8080   expose
 
-The jail reaches (default allow)
+The jail reaches (default out: allow (no policy says deny))
   Internet:       all
   Host:           DNS and ping
   Other jails:    all
   Other projects: none
+
+attach one: jailops firewall policy attach POLICY web
 
 $ jailops firewall show web -o json
 {

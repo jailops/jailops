@@ -184,23 +184,31 @@ JailOps answers it itself.
 
 #### One host setting that matters on some segments
 
+With `net.inet6.icmp6.nd6_onlink_ns_rfc4861=0`, the default, FreeBSD drops a Neighbor Solicitation whose source address is
+not a neighbour of the interface (`netstat -s -p icmp6` counts it as a bad neighbor solicitation). With `1` it processes
+the solicitation like the one of any on-link host and answers. The hop limit must still be 255.
+
+A host that holds its address as a `/128` on a shared segment has no on-link prefix. Routers that probe it from their
+global addresses get no answer and may mark the host unreachable for a while, and the jails behind it with it: IPv6 drops
+for a while and returns. The network decides whether a host needs the setting. A routed IPv6 network (the prefix is routed
+to the link-local address of the host, so the router's solicitations come from its link-local address, which is on-link)
+does not. On a switched shared segment set `1`: whether a router probes from a global address cannot be known in advance,
+and the setting costs nothing.
+
     sysctl net.inet6.icmp6.nd6_onlink_ns_rfc4861=1          # now
     echo 'net.inet6.icmp6.nd6_onlink_ns_rfc4861=1' >> /etc/sysctl.conf   # after a reboot
 
-On some shared segments the routers check that the host's own address is still there with unicast neighbor
-solicitations sent from their global addresses. The host holds its address as a `/128` and no router advertisement
-describes the `/64`, so for FreeBSD the sender is not an on-link neighbour and, with the default `0`, the solicitation is
-dropped and counted as bad. Not every network is fully RFC compliant: some routers probe from a global address as
-above, and other systems answer such a solicitation where FreeBSD does not by default. A router that gets no answer may
-mark the host unreachable for a while, and the jails behind it with it. With `1` every probe is answered (the packet must
-still arrive with hop limit 255). The setting is the administrator's decision, because it makes the host a little less
-strict, and JailOps never sets it. `jailops doctor` shows the value as information
-(`sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`) while a network with the NDP proxy exists, and `network create` prints a note
-that points here.
+`netstat -s -p icmp6` shows the rejected solicitations as bad neighbor solicitation messages. Linux answers such a
+solicitation (it checks the hop limit and the target, not whether the source is on-link); FreeBSD with the default `0`
+drops it. JailOps never sets the value on its own (appliance mode writes it when the administrator asks for it).
+`jailops doctor` (`sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`) shows the value as information while a network with the
+NDP proxy exists and the host has rejected no solicitation, and warns with the count of rejected solicitations once it
+has: that count is the host's own evidence that a router probed it and got no answer. `network create` prints a note that
+points here.
 
-**Recognise the case:** the counter of bad neighbor solicitations grows over minutes while the host or its jails answer
-from outside only some of the time. A segment whose routers do not probe from global addresses never shows it, and then
-the default is fine. Look at the counter, and at the probes:
+**The evidence:** the counter of bad neighbor solicitations grows over minutes while the host or its jails answer from
+outside only some of the time. A segment whose routers do not probe from global addresses never shows it, and then the
+default is fine. Look at the counter, and at the probes:
 
     netstat -s -p icmp6 | grep -i 'bad neighbor solicitation'
     tcpdump -n -e -i vtnet0 'icmp6 and ip6[40] == 135 and ip6 dst host 2001:db8:1:2::2'
@@ -262,8 +270,10 @@ file. A ruleset is rendered, checked with `pfctl -n`, loaded in one operation an
 effect is reported as drift. When a rule is removed, the states that rule created are ended too, so a running connection
 stops when its rule goes.
 
-- **Projects are closed to each other.** A jail without a policy still gets an anchor with isolation. Cross-project traffic is
-  opened only by a rule you write, for example an address set shared by a `common` project on its own network.
+- **Projects are closed to each other, and the jail that is reached decides.** A jail without a policy still gets an anchor
+  with isolation: what comes in from another project is opened only by an `allow in` rule of that jail with a source that
+  covers it (any, an address, a prefix, an address set), the way the Internet is let in. What a jail sends to another project
+  is not closed on its side.
 - **A project's mandatory policies are a floor:** a jail's policies can add rules but cannot weaken the project's defaults.
 - **Per-jail anti-spoofing** binds a jail to its own addresses and its **own link-local address** (derived from the MAC
   JailOps sets, so the planner knows it; the whole of `fe80::/10` is allowed only when it cannot be derived), plus `::` for
@@ -302,7 +312,7 @@ stops when its rule goes.
   An `allow in` rule with an external source (`any`, an address, a prefix or an address set) is rendered the
   same way, on the uplink of each routed address of the jail (an IPv6 address of a routed or proxy network, an IPv4
   address of a network without NAT): `pass in quick on <uplink> ... to <jail address> port N`. That is what exposes a
-  jail to the internet; `jailops expose` writes such a rule for you, for both families, and forwards IPv4 behind NAT. A rule without a source is for the jail's link only. The defaults, and the rules whose source is `host`, a jail or a tag, never open the uplink; a
+  jail to the internet; `jailops expose` writes such a rule for you, for both families, and forwards IPv4 behind NAT. A rule without a source is for the project's jails and the host. The defaults, and the rules whose source is `host`, a jail or a tag, never open the uplink; a
   `deny in` rule is rendered on the uplink first, so it wins at the door as on the jail's link, and a packet that comes
   in on the uplink from a subnet of the jail's own networks or of another project, or that pf's reverse path check
   refuses (`urpf-failed`: an address of a tunnel or of the host's own network from outside), is dropped as forged. Every
@@ -325,21 +335,37 @@ stops when its rule goes.
   `t_<tag>`, with every hyphen of the name written as `_`; names have no underscore, so two names never give one table. A set may hold one address: give it a name and say in its comment what it is.
   `jailops firewall rule add --help` has the flags.
 
-  **A policy always says its defaults.** `default_in` and `default_out` are required, `allow` or `deny`, on every policy
-  (`policy create` without `-f` needs `--default-in` and `--default-out`; a file without them is refused, and so is a
-  policy stored without them: the jails that use it are not rendered again and `jailops doctor` fails `firewall.defaults`
-  naming the policy). A jail without a policy is open apart from the isolation of projects and from the host, which answers it with ping and
-  DNS only; `jailops jail info` says so: `Firewall: open: no firewall policy (the host answers ping and DNS only)`; with policies it lists them in the order they are rendered, the project's marked `(project)` and the managed one `(managed by app-access)`. A jail names the policies of its own in `firewall.policies`, a list
-  (`jailops config set DB firewall.policies postgres,ssh-office`, or `--firewall-policy` more than once at `jailops create`); it cannot name a
+  **A policy states a default only when you tell it to.** `default_in` and `default_out` are `deny`, `allow` or unset, and
+  `policy create` writes none unless you give `--default-in` or `--default-out`: a policy is what it allows and denies, and
+  `deny` closes the direction for every jail that uses it. A default is deny when any policy of the jail states deny
+  (the project's mandatory ones, the app's managed policy, the jail's own), whatever the order, and allow when none does.
+  Nothing is closed by default inside a project. To close a project or a jail, put a policy with `default_in: deny` in the
+  project's mandatory list (`firewall_policies`) or on the jail, and open what is needed with `allow` rules:
+
+  ```
+  jailops firewall policy create default --default-in deny
+  jailops project set shop --firewall-policy default
+  jailops firewall rule add web in --action allow --proto tcp --port 80,443
+  ```
+
+  `jailops firewall show JAIL` and `jailops jail info JAIL` say which policies set each default (`Default in: deny
+  (default [project])`) and `firewall test` names them when a default decides. The uplink is only ever opened by an explicit
+  `allow in` rule with an external source, never by a default. A jail without a policy is open apart from the isolation of projects and from the host, which answers it with ping and
+  DNS only; `jailops jail info` says so: `Firewall: open: no firewall policy (the host answers ping and DNS only)`, with the command that attaches one. With policies both `jailops firewall show JAIL`
+  (first, as its Policies section, with the rules each has and the default it states) and `jailops jail info` list them in the order they are rendered: the project's marked `(project)`, the managed one
+  `(managed)`, then the jail's own. A jail names the policies of its own in `firewall.policies`, a list. One policy is added or taken out at a time:
+  `jailops firewall policy attach postgres DB` (several jails may follow) appends it, `jailops firewall policy detach postgres DB` takes it out, and the others stay (the console's
+  Firewall tab does the same, one policy at a time). `jailops config set DB firewall.policies postgres,ssh-office` and `--firewall-policy` (more than once) at `jailops create` write the whole list. The mandatory list of a project
+  changes the same way with `--mandatory` (`jailops firewall policy attach default --mandatory --project shop`, global admins), and `jailops project set --firewall-policy` writes all of it. A jail cannot name a
   mandatory policy of the project, which is rendered for every jail already, nor a policy that something else manages
-  (`app-JAIL`), and it names none twice.
+  (`app-JAIL`), and it names none twice. A policy that no jail names is applied nowhere: `policy show` says `Used by: none` and `policy list` has the column USED BY (the jails by name, or `every jail (project)` for a mandatory policy).
 
   **Several policies.** A project has a list of mandatory policies (`jailops project set PROJECT --firewall-policy default
   --firewall-policy monitoring`, `firewall_policies` in a file; an empty value clears the list) and a jail has a list of its
   own. The anchor of a jail holds them in this order: the project's policies in the order of their list, the managed policy
   `app-JAIL` when the jail has one, then the jail's own policies in the order of theirs. Each policy is a section of the anchor with
   its own heading (`# project policy NAME` or `# policy NAME`, then its comment) and its own rule numbers, so `policy show NAME`
-  and the anchor read the same. The defaults are the strictest of all the policies in play: `deny` wins over `allow` in each
+  and the anchor read the same. A default is deny when any policy in play states deny, in each
   direction, and a policy of a jail can open ports but never turn a default deny of the project into allow. A policy that a list
   names is not deleted (the refusal names who uses it) and is renamed in every list. The usual shape: the project's mandatory
   policy `default` (deny inbound, ping allowed) for every jail, and on the PostgreSQL jail `firewall.policies: [postgres]`,
@@ -363,17 +389,15 @@ stops when its rule goes.
 
   **Projects are boundaries.** Another project is treated exactly like an external host: only addresses and address sets
   cross it, never a jail reference. Do two things need to talk to each other as one system? Then they belong in the same
-  project. Across projects, write the addresses explicitly on both sides: the project that serves allows the addresses in,
-  the project that connects allows the addresses out.
+  project. The project that serves decides with its `allow in` rules that have a source: the project that connects needs
+  nothing, because what a jail sends is open unless its own policies deny it. To harden a rule that says `from any`, name
+  the sources instead, or add a deny policy (deny wins).
 
       # project shop: the web jail of project blog (10.30.0.5) may reach the database
       jailops firewall address-set create blog --comment "the web jail of project blog"
       jailops firewall address-set add blog 10.30.0.5
       jailops firewall policy create db --default-in deny --default-out allow
       jailops firewall rule add db in --action allow --proto tcp --from set:blog --port 5432 --comment "the blog's web jail"
-      # project blog: the jail may go out to the database at 10.20.0.10 (the closed default of a project says no otherwise)
-      jailops firewall policy create out-db --default-in deny --default-out allow
-      jailops firewall rule add out-db out --action allow --proto tcp --to 10.20.0.10 --port 5432 --comment "the shop database"
 
       jailops firewall address-set create office --comment "the office"
       jailops firewall address-set add office 192.0.2.0/24 --comment "the office network"
@@ -431,13 +455,28 @@ the jail's anchor on the **uplink** first (`in`): no rule of the jail that admit
 pf.conf decides then and blocks inbound traffic by default. All hops must pass; each
 prints the decision (`policy postgres rule 1 "who may reach PostgreSQL"`, a project policy, the managed policy of an app,
 the isolation of projects, or the default of the anchor) and the rendered pf line. An address that belongs to no jail of
-the project, another project's jail included, is an external host: only the other end's anchor is evaluated.
+the project is an external host: only the project's own end is evaluated. A global administrator who names the address of a
+jail of another project gets both anchors: the source's own rules and defaults, then the destination's `allow in` rules.
 
 For the example above, with the project policy `default` (deny inbound, ping allowed) and `postgres` on the db jail
 (`allow in tcp from set:postgresql-allow port 5432`, the set holding `jail:web`): `web` to `db` port 5432 passes, port 5433 is
 blocked by the default of the anchor, and `other` to `db` port 5432 is blocked too; ping from `other` passes by the
-project policy. The exit status is 0 pass, 1 block, 8 unknown. `icmp` and `icmp6` test an echo request unless
+project policy. The exit status is 0 pass, 9 block, 8 unknown; 1 to 7 are errors of the command, as for every command. `icmp` and `icmp6` test an echo request unless
 `--icmp-type` names another type, and say so.
+
+**Is it applied?** A policy that is stored is not yet in pf: the loop loads it a moment later. `jailops info JAIL` has an
+`Applied` line, and the jail status has the condition `FirewallApplied`, which is true while the kernel has what the policies
+say: pf is enabled and evaluates the anchors (the line `anchor "jailops/*"` is in the main ruleset), the anchor holds the
+rendered rules, its tables hold the rendered members (an address set that lost its last member is emptied in the kernel,
+not left with its old members), and the connections of rules that were removed are ended. A false condition names the
+reason: `NotLoaded` (stored, not loaded yet or refused), `PFNotApplying` (pf is disabled, the anchor line is gone, or the
+main ruleset cannot be read), `StatesPending` (pf refused to end the connections of a removed rule; the loop tries again
+at every pass). A jail with a network link does not start while pf cannot be shown to evaluate its anchor. The rules are
+named by a short id, `rules a1b2c3d4e5f6`, which `jailops firewall show -o json` gives as `rules_id` for the rules the
+policies render now; `jailops firewall wait JAIL...` returns when the two are equal, for scripts that change a policy and
+depend on it:
+
+    jailops firewall policy attach web-access web && jailops firewall wait web
 
 **What it cannot answer, and says so** (`unknown`, or a line under "Not covered", never a guess): a raw PF fragment that
 sits before the decision (`unknown`, naming the policy); a packet that no rule of the anchor matches (the host's rules

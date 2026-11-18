@@ -28,6 +28,17 @@ func (a Actor) HasScope() bool { return a.Global || len(a.Projects) > 0 }
 // CanProject reports whether the actor may use the project.
 func (a Actor) CanProject(p string) bool { return a.Global || slices.Contains(a.Projects, p) }
 
+type allKey struct{}
+
+// WithAllProjects marks a list request that asks for everything a global identity may see, not only what the selected
+// project holds (networks and storage).
+func WithAllProjects(ctx context.Context) context.Context {
+	return context.WithValue(ctx, allKey{}, true)
+}
+
+// AllProjectsFrom reports whether the request asked for everything.
+func AllProjectsFrom(ctx context.Context) bool { v, _ := ctx.Value(allKey{}).(bool); return v }
+
 type actorKey struct{}
 type projectKey struct{}
 

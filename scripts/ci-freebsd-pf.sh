@@ -161,6 +161,10 @@ fi
 say "setup"
 [ "$(id -u)" -eq 0 ] || die "run as root"
 remove_all # leftovers of an earlier run
+# an earlier run that was interrupted leaves operations of the daemon behind (a stop that its client no longer waits for): the
+# jails of this run are created and changed only when none is running, or a change answers "busy: ... Stop jail a is running"
+no_operations() { [ -z "$($J op list --active --no-headers -o name </dev/null 2>/dev/null)" ]; }
+waitfor_ "no operation of an earlier run is still running" 120 no_operations || die "operations of an earlier run are still running"
 sysctl net.inet.ip.forwarding=1 net.inet6.ip6.forwarding=1 >/dev/null
 $J network create pfa-net --ipv4 10.91.0.1/24 --ipv6 fd91:1::/64 </dev/null >/dev/null || die "network pfa-net"
 $J network create pfb-net --ipv4 10.92.0.1/24 --ipv6 fd92:1::/64 </dev/null >/dev/null || die "network pfb-net"
@@ -315,12 +319,7 @@ rules:
   - {name: host-ping4, action: allow, direction: in, proto: icmp, from: ['$H4']}
   - {name: host-ping6, action: allow, direction: in, proto: icmp6, from: ['$H6']}
   - {name: other-project-udp, action: allow, direction: in, proto: udp, from: ['set:common'], ports: ['5353']}"
-	policy pfb toa "default_in: allow
-default_out: allow
-rules:
-  - {name: to-a-udp, action: allow, direction: out, proto: udp, to: ['$A4', '$A6'], ports: ['5353']}"
 	$J config set a firewall.policies web --project pfa </dev/null >/dev/null || die "attach web"
-	$J config set o firewall.policies toa --project pfb </dev/null >/dev/null || die "attach toa"
 	policy pfa open 'default_in: allow
 default_out: allow'
 	$J config set b firewall.policies open --project pfa </dev/null >/dev/null || die "attach open"
@@ -356,6 +355,40 @@ for ver in 4 6; do
 	expect deny "a -> o (another project) v$ver icmp" icmp pfa:a "$o"
 	expect deny "a -> o (another project) v$ver tcp 22" tcp pfa:a "$o" 22
 done
+
+say "phase 0f: another project reaches a jail like the Internet does: through an allow in rule with a source that covers it, and o needs no policy"
+PRE=$(snapshot)
+xin() { # xin RULES: a's policy, default allow in and out, with the rules given (one per line, already in flow style)
+	policy pfa xin "default_in: allow
+default_out: allow
+rules:
+$1"
+}
+$J firewall policy create xin --project pfa --default-in allow --default-out allow </dev/null >/dev/null || die "create xin"
+# the daemon's own short work on a jail (housekeeping, the pass of the reconciler) makes a change answer "busy" for a moment
+retry 10 $J config set a firewall.policies xin --project pfa </dev/null || die "attach xin"
+settle 10
+matrix pfb:o deny deny deny deny deny # a default never opens it
+xin "  - {name: own, action: allow, direction: in, proto: tcp, ports: ['8080']}"
+settle 10
+matrix pfb:o deny deny deny deny deny # a rule without a source is for the project and the host
+xin "  - {name: world, action: allow, direction: in, proto: tcp, from: ['any'], ports: ['8080']}"
+settle 10
+matrix pfb:o deny allow deny deny deny # any
+xin "  - {name: from-o, action: allow, direction: in, proto: tcp, from: ['$O4', '$O6'], ports: ['8080']}"
+settle 10
+matrix pfb:o deny allow deny deny deny # an address, with no policy on o
+xin "  - {name: wide, action: allow, direction: in, proto: tcp, from: ['0.0.0.0/0', '::/0'], ports: ['9090']}"
+settle 10
+matrix pfb:o deny deny allow deny deny # a wide prefix counts
+xin "  - {name: world, action: allow, direction: in, proto: tcp, from: ['any'], ports: ['8080']}
+  - {name: not-o, action: deny, direction: in, proto: tcp, from: ['$O4', '$O6'], ports: ['8080']}"
+settle 10
+matrix pfb:o deny deny deny deny deny # a deny rule wins
+retry 10 $J config unset a firewall.policies --project pfa </dev/null || die "detach xin"
+$J firewall policy delete xin --project pfa -y </dev/null >/dev/null 2>&1
+settle 10
+matrix pfb:o deny deny deny deny deny
 
 say "phase 0b: a jail cannot send with another jail's address (nothing else is filtering yet)"
 PRE=$(snapshot)
@@ -637,16 +670,12 @@ rules:
   - {name: host-ping4, action: allow, direction: in, proto: icmp, from: ['$H4']}
   - {name: host-ping6, action: allow, direction: in, proto: icmp6, from: ['$H6']}
   - {name: other-project-udp, action: allow, direction: in, proto: udp, from: ['set:common'], ports: ['5353']}"
-policy pfb toa "default_in: allow
-default_out: allow
-rules:
-  - {name: to-a-udp, action: allow, direction: out, proto: udp, to: ['$A4', '$A6'], ports: ['5353']}"
 $J config set a firewall.policies web --project pfa </dev/null >/dev/null || die "attach web"
-$J config set o firewall.policies toa --project pfb </dev/null >/dev/null || die "attach toa"
 settle 10
 matrix host allow deny deny deny deny
 matrix pfa:b deny allow deny deny deny
 matrix pfa:c deny deny allow deny deny
+# o has no policy at all: what it sends is not closed on its side, and a's rule with its addresses as a source admits it
 matrix pfb:o deny deny deny deny allow
 
 say "phase 3: a policy cannot weaken the project's default (the floor)"
@@ -741,7 +770,10 @@ fi
 if shard_on b; then
 say "phase 6: pf anchors are real and well formed"
 PRE=$(snapshot)
-if pfctl -a jailops/pfa/a -sr 2>&1 | grep -q 'foreign'; then pass "a's anchor has the isolation rules"; else bad "a's anchor lacks the isolation rules"; fi
+# other projects are closed by the block of the table <foreign> after the allow rules, or by the closing default itself: pf
+# removes the block as redundant when the default of the direction is deny
+a_isolated() { pfctl -a jailops/pfa/a -sr 2>&1 | grep -qE '<foreign>|^block drop out quick on [a-z0-9]+ all$'; }
+a_isolated && pass "a's anchor has the isolation rules" || bad "a's anchor lacks the isolation rules"
 pfctl -a jailops/pfa/a -sr >/dev/null 2>&1 && pass "a's anchor loads and lists" || bad "a's anchor does not list"
 for anchor in jailops/pfa/a jailops/pfa/b jailops/pfa/c jailops/pfb/o; do
 	n=$(pfctl -a "$anchor" -sr 2>/dev/null | wc -l)
@@ -789,6 +821,21 @@ kill $lp 2>/dev/null; wait $lp 2>/dev/null
 expect deny "host -> a icmp after the rule was removed" icmp host "$A4"
 expect allow "b -> a tcp 8080 still allowed" tcp pfa:b "$A4" 8080
 expect deny "c -> a tcp 9090 after the rule was removed" tcp pfa:c "$A4" 9090
+
+say "phase 7b: an address set that loses its last member admits nobody any more (pf empties the table only when the definition says so)"
+expect allow "b -> a tcp 8080 through the set friends" tcp pfa:b "$A4" 8080
+PRE=$(snapshot)
+if $J firewall address-set remove friends "$B4" "$B6" --project pfa </dev/null >/dev/null 2>&1; then
+	settle 10
+	waitfor_ "the table of the set is empty in pf" 60 sh -c "[ -z \"\$(pfctl -a jailops/pfa/a -t s_friends -T show 2>/dev/null)\" ]"
+	expect deny "b -> a tcp 8080 after the set lost its last member" tcp pfa:b "$A4" 8080
+	PRE=$(snapshot)
+	$J firewall address-set add friends "$B4" "$B6" --project pfa </dev/null >/dev/null 2>&1 || bad "the members could not be added again"
+	settle 10
+	expect allow "b -> a tcp 8080 once the set has its members again" tcp pfa:b "$A4" 8080
+else
+	bad "the last members of an address set could not be removed"
+fi
 
 say "phase 8: a restarted jail is never open"
 PRE=$(snapshot)
@@ -941,6 +988,12 @@ default_out: allow
 rules:
   - {name: from-a-only, action: allow, direction: in, proto: tcp, from: ['jail:a'], ports: ['8080']}"
 settle
+# The anchors of the two jails are loaded one after the other, seconds apart on a slow host, so a quiet second is not
+# the end of the load: wait until the kernel no longer holds the pass rule of the earlier policy. A denied probe is
+# never repeated (one answer through a rule that must deny is a leak), so it must not run against the old rules.
+upl_gone() { ! upl_has "$1" "$2"; }
+waitfor_ "the anchor of u4 has dropped the pass rule on the uplink" 60 upl_gone u4 "pass in quick on pfupa inet proto tcp from any to $U4 port"
+waitfor_ "the anchor of u6 has dropped the pass rule on the uplink" 60 upl_gone u6 "pass in quick on pfupa inet6 proto tcp from any to $U6 port"
 expect deny "a rule whose source is a jail never opens the uplink (u4)" ext "$U4" 8080
 expect deny "a rule whose source is a jail never opens the uplink (u6)" ext "$U6" 8080
 policy pfa up-open "default_in: allow
@@ -993,6 +1046,9 @@ expect deny "a port that was not exposed stays closed (u4 8081)" ext "$U4" 8081
 expect allow "firewall exposed lists the exposed ports of u6 with expose as the reason" sh -c "$J firewall exposed --project pfa </dev/null | grep -E '^u6 +tcp +8080 +v6 '"
 expect allow "list shows what each jail exposes (u6)" sh -c "$J list --project pfa </dev/null | grep -E '^u6 .*8080/tcp 6'"
 expect allow "firewall test --from internet agrees with the exposure (u6 8080)" sh -c "$J firewall test --from internet --to jail:u6 --port 8080 --family 6 --project pfa </dev/null"
+expect allow "the same exposure again changes nothing and says so" sh -c "$J expose u6 8080 --project pfa </dev/null 2>&1 | grep -q 'already what you asked for'"
+expect allow "unexpose of a port of a range says which range holds it" sh -c "$J expose u6 9000-9010 --family 6 --project pfa </dev/null >/dev/null 2>&1 && $J unexpose u6 9005 --project pfa </dev/null 2>&1 | grep -q 'inside the exposed range 9000-9010'"
+$J unexpose u6 9000-9010 --project pfa </dev/null >/dev/null 2>&1
 $J unexpose u6 8080 --project pfa </dev/null >/dev/null || die "unexpose u6 8080"
 settle
 expect deny "unexpose closes u6 again" ext "$U6" 8080
@@ -1146,8 +1202,12 @@ rules:
 $J config set d firewall.policies xfer --project pfa </dev/null >/dev/null || die "attach xfer to d"
 $J config set a firewall.policies web,xfer --project pfa </dev/null >/dev/null || die "attach xfer to a"
 settle
-check_xfer 0 3 "an unlimited jail sends 1.5 MB to another jail in less than 3 s" xfer_up d a $A4
-check_xfer 0 3 "the host sends 1.5 MB into the jail in less than 3 s" xfer_down d $D4J
+# The clock counts whole seconds (a transfer of 1.1 s can read 2, one of 2.1 s reads 3) and a loaded host is slower than an idle
+# one, so what an unlimited transfer must show is not a fast time but that nothing shapes it: it ends under 4 s, below the 4 s
+# from which a limited one is accepted (it takes six), and no anchor of the project holds a pipe while these run.
+expect allow "no jail of the project has a limit yet: no anchor sends traffic into a pipe" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 0 ] && ! pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -q dnpipe && ! pfctl -a jailops/pfa/a -sr 2>/dev/null | grep -q dnpipe"
+check_xfer 0 4 "an unlimited jail sends 1.5 MB to another jail in less than 4 s" xfer_up d a $A4
+check_xfer 0 4 "the host sends 1.5 MB into the jail in less than 4 s" xfer_down d $D4J
 $J config set d nic.eth0.egress 2M --project pfa </dev/null >/dev/null || die "set the egress limit of d"
 settle
 t=0; until [ "$(pipes)" -eq 1 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
@@ -1160,8 +1220,8 @@ expect allow "the anchor of d shapes what the jail sends, in both directions of 
 EPIPE=$(pfctl -a jailops/pfa/d -sr 2>/dev/null | sed -n 's/.*match in on .* dnpipe \([0-9]*\).*/\1/p' | head -1)
 check_xfer 4 20 "egress 2 Mbit/s, a connection the jail starts: 1.5 MB take 4 to 19 s" xfer_up d a $A4
 check_xfer 4 20 "egress 2 Mbit/s, a connection the host starts, the jail answering: 4 to 19 s" xfer_served d $D4J
-check_xfer 0 3 "egress 2 Mbit/s does not slow what is sent into the jail: under 3 s" xfer_down d $D4J
-check_xfer 0 3 "a jail without a limit is not slowed down: under 3 s" xfer_up a d $D4J
+check_xfer 0 4 "egress 2 Mbit/s does not slow what is sent into the jail: under 4 s" xfer_down d $D4J
+check_xfer 0 4 "a jail without a limit is not slowed down: under 4 s" xfer_up a d $D4J
 # a limit of another jail does not renumber the pipe of this one: the numbers are given once
 $J config set a nic.eth0.egress 50M --project pfa </dev/null >/dev/null || die "set the egress limit of a"
 settle
@@ -1176,8 +1236,8 @@ t=0; until [ "$(pipes)" -eq 1 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
 expect allow "an ingress limit made one pipe" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 1 ]"
 expect allow "the anchor of d shapes what the jail receives, in both directions of a state, and nothing else" sh -c "pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -Eq 'match out on .* $ONLY' && pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -Eq 'match in on .* $ZERO'"
 check_xfer 4 20 "ingress 2 Mbit/s, the host sends 1.5 MB into the jail: 4 to 19 s" xfer_down d $D4J
-check_xfer 0 3 "ingress 2 Mbit/s does not slow what the jail sends: under 3 s" xfer_up d a $A4
-check_xfer 0 3 "ingress 2 Mbit/s does not slow what the jail answers: under 3 s" xfer_served d $D4J
+check_xfer 0 4 "ingress 2 Mbit/s does not slow what the jail sends: under 4 s" xfer_up d a $A4
+check_xfer 0 4 "ingress 2 Mbit/s does not slow what the jail answers: under 4 s" xfer_served d $D4J
 $J config set d nic.eth0.egress 2M --project pfa </dev/null >/dev/null || die "set both limits on d"
 settle
 t=0; until [ "$(pipes)" -eq 2 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
@@ -1196,8 +1256,8 @@ settle
 t=0; until [ "$(pipes)" -eq 0 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
 expect allow "removing the limits removes the pipes" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 0 ]"
 expect allow "and the anchor no longer names one" sh -c "! pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -q dnpipe"
-check_xfer 0 3 "and the jail is fast again: under 3 s" xfer_up d a $A4
-check_xfer 0 3 "and fast in the other direction: under 3 s" xfer_down d $D4J
+check_xfer 0 4 "and the jail is fast again: under 4 s" xfer_up d a $A4
+check_xfer 0 4 "and fast in the other direction: under 4 s" xfer_down d $D4J
 pkill -f "nc -l " >/dev/null 2>&1
 $J config unset d firewall.policies --project pfa </dev/null >/dev/null 2>&1
 $J config set a firewall.policies web --project pfa </dev/null >/dev/null 2>&1

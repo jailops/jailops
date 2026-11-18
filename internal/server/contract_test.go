@@ -927,3 +927,40 @@ func TestWebUIIsServedOutsideTheAPI(t *testing.T) {
 		}
 	}
 }
+
+// If-Match compares strong entity tags (RFC 9110): a weak tag never matches, a list matches when one of its tags
+// does, several generations in one header are refused, and a conditional delete fails on a changed object.
+func TestIfMatchIsAStrongComparison(t *testing.T) {
+	e := seeded(t)
+	c := ctxT(t)
+	sets := e.Admin.Firewall().AddressSets()
+	set, err := sets.Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "office"}, Spec: api.AddressSetSpec{Addresses: api.Entries("203.0.113.0/24")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	set.Spec.Addresses = api.Entries("203.0.113.0/25")
+	_, err = sets.Update(c, "office", set, `W/"1"`)
+	wantCode(t, err, api.CodeConflict) // a weak tag matches nothing, though the generation is 1
+	_, err = sets.Update(c, "office", set, `"9", "x"`)
+	wantCode(t, err, api.CodeConflict) // none of the tags is the generation
+	_, err = sets.Update(c, "office", set, `"1", "2"`)
+	wantCode(t, err, api.CodeInvalid) // two generations in one header
+	up, err := sets.Update(c, "office", set, `W/"2", "1"`)
+	if err != nil || up.Metadata.Generation != 2 {
+		t.Fatalf("a strong tag among weak ones: %v %+v", err, up.Metadata)
+	}
+	if err := sets.DeleteETag(c, "office", `"1"`); err == nil {
+		t.Fatal("a delete with a stale tag went through")
+	} else {
+		wantCode(t, err, api.CodeConflict)
+	}
+	if _, err := sets.Get(c, "office"); err != nil {
+		t.Fatalf("the stale delete removed it: %v", err)
+	}
+	if err := sets.DeleteETag(c, "office", `"2"`); err != nil {
+		t.Fatalf("delete with the current tag: %v", err)
+	}
+	if _, err := sets.Get(c, "office"); err == nil {
+		t.Fatal("still there")
+	}
+}

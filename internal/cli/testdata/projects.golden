@@ -47,7 +47,6 @@ $ jailops storage create bad --dataset nodash
 $ jailops storage list
 NAME      DATASET        POOL   HEALTH   USED      AVAILABLE
 default   tank/jailops   tank   ONLINE   1.0 GiB   1023.0 GiB
-fast      tank/fast      tank   ONLINE   1.0 GiB   1023.0 GiB
 
 $ jailops storage show fast -o name
 fast

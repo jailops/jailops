@@ -57,6 +57,8 @@ type Env struct {
 	// Routes reads the routing table. Optional: without it the loop does not look at routes, and a route that went
 	// missing is not put back.
 	Routes func(ctx context.Context) ([]ifconfig.RouteEntry, error)
+	// Mounts reads the mount points of the host. Optional: without it the loop does not look at the mounts of the jails.
+	Mounts func(ctx context.Context) ([]string, error)
 	// Trigger is an optional extra trigger (state watch events).
 	Trigger <-chan struct{}
 	// WG configures WireGuard interfaces (optional: without it tunnels are reported as not applied).
@@ -106,6 +108,19 @@ type Reconciler struct {
 	// sentinel is the anchor of a running jail the last pass found in place: when it is empty, pf was flushed
 	// (service pf restart runs pfctl -F all) and the watch asks for a pass at once.
 	sentinel string
+	// pfBad is why pf does not evaluate the anchors the loop loaded ("" when it does or when that cannot be told): pf is
+	// disabled, the main ruleset lost its anchor "jailops/*" line, or it cannot be read. The watch and every pass set it.
+	pfBad string
+	// pendingKills holds, per anchor, the labels of removed rules whose states could not be ended yet: every pass
+	// tries them again until pf has ended them.
+	pendingKills map[string]map[string]bool
+	// fwSince is the time each jail's FirewallApplied condition last changed its reason.
+	fwSince map[string]fwState
+}
+
+type fwState struct {
+	reason string
+	since  time.Time
 }
 
 // New builds a Reconciler.
@@ -127,7 +142,7 @@ func New(cfg Config, env Env) *Reconciler {
 	}
 	return &Reconciler{cfg: cfg, env: env, log: env.Log, kick: make(chan struct{}, 1),
 		bootCond: map[string]api.Condition{}, bootRetry: map[string]bootTry{}, proxies: map[string]*proxyHandle{}, setSysctl: map[string]bool{},
-		jailSideOK: map[string]int{}}
+		jailSideOK: map[string]int{}, pendingKills: map[string]map[string]bool{}, fwSince: map[string]fwState{}}
 }
 
 // Kick asks for a pass soon. It never blocks.
@@ -179,7 +194,64 @@ func (r *Reconciler) watchPF(ctx context.Context) {
 			r.log.Warn("reconcile: the firewall anchor of a running jail is empty (pf was flushed): loading the anchors again", "anchor", an)
 			r.Kick()
 		}
+		// pf disabled, or its main ruleset without the line that makes it evaluate the anchors, leaves the anchors
+		// loaded and nothing applied: a change of that state is asked about at once
+		if was := r.setPFBad(r.checkPF(ctx)); was != r.currentPFBad() {
+			r.Kick()
+		}
 	}
+}
+
+// anchorLine is the one line of the host's pf.conf that makes pf evaluate the anchors of the jails.
+const anchorLine = "jailops/*"
+
+// checkPF says why pf does not evaluate the anchors of the jails: "" when it does, and when that cannot be told (pfctl
+// does not answer: the doctor says so). pf disabled keeps every anchor loaded and applies none of them, and so does a
+// main ruleset without the line anchor "jailops/*".
+func (r *Reconciler) checkPF(ctx context.Context) string {
+	if r.env.Run == nil {
+		return ""
+	}
+	res, err := r.env.Run.Run(ctx, run.Cmd{Name: "pfctl", Args: []string{"-s", "info"}, Timeout: 10 * time.Second})
+	if err != nil {
+		return ""
+	}
+	status := ""
+	for _, ln := range strings.Split(string(res.Stdout), "\n") {
+		if f := strings.Fields(ln); len(f) >= 2 && f[0] == "Status:" {
+			status = f[1]
+		}
+	}
+	switch status {
+	case "Disabled":
+		return `pf is disabled: the rules of the jail are loaded and nothing evaluates them (pfctl -e, or service pf start)`
+	case "Enabled":
+	default:
+		return ""
+	}
+	rules, err := r.env.Run.Run(ctx, run.Cmd{Name: "pfctl", Args: []string{"-s", "rules"}, Timeout: 10 * time.Second})
+	if err != nil {
+		return "the main ruleset of pf cannot be read: " + errText(err)
+	}
+	if !strings.Contains(string(rules.Stdout), `anchor "`+anchorLine+`"`) {
+		return `the main ruleset of pf has no line anchor "` + anchorLine + `": nothing evaluates the rules of the jail (/etc/pf.conf is the host's file and needs that one line)`
+	}
+	return ""
+}
+
+// setPFBad stores the answer of checkPF and returns the previous one.
+func (r *Reconciler) setPFBad(v string) string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	was := r.pfBad
+	r.pfBad = v
+	return was
+}
+
+func (r *Reconciler) currentPFBad() string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.pfBad
 }
 
 // Run loops until ctx ends.
@@ -235,6 +307,7 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 		r.log.Warn("reconcile: desired state unavailable", "err", err)
 		return rep
 	}
+	r.setPFBad(r.checkPF(ctx))
 	r.hostPass(ctx, des.Host, &rep)
 	r.pipePass(ctx, des, &rep)
 	obs, err := r.observe(ctx)
@@ -330,6 +403,14 @@ func (r *Reconciler) observe(ctx context.Context) (*Observed, error) {
 			o.Routes = rt
 		}
 	}
+	if r.env.Mounts != nil {
+		if mp, err := r.env.Mounts(ctx); err == nil {
+			o.Mounts = make(map[string]bool, len(mp))
+			for _, m := range mp {
+				o.Mounts[m] = true
+			}
+		}
+	}
 	return o, nil
 }
 
@@ -419,7 +500,18 @@ func (r *Reconciler) jailPass(ctx context.Context, j JailDesired, obs *Observed,
 		}
 	}
 	drift = append(drift, r.jailSidePass(ctx, j, obs, ex, rep)...)
+	// Mounts: every mount point of the fstab is mounted. A mount cannot be made under a running jail by the loop (the
+	// stop of jail(8) takes what its fstab holds), so a missing one is reported and a restart makes it.
+	if obs.Mounts != nil {
+		for _, m := range j.Mounts {
+			if !obs.Mounts[m] {
+				drift = append(drift, fmt.Sprintf("mount %s is missing; restart the jail to mount it", m))
+			}
+		}
+	}
 	// Firewall anchor, and the parent anchors that lead to it.
+	var fwDrift, pending []string
+	firewallStart := len(drift)
 	if j.Ruleset != "" && r.env.PF != nil {
 		r.mu.Lock()
 		r.sentinel = j.AnchorName
@@ -453,15 +545,51 @@ func (r *Reconciler) jailPass(ctx context.Context, j JailDesired, obs *Observed,
 					rep.Applied = append(rep.Applied, "pfctl -a "+j.AnchorName+" -f <rendered>")
 				}
 				unlock()
+			} else {
+				fwDrift = append(fwDrift, fmt.Sprintf("firewall anchor %s: busy (another operation holds the jail), loaded at the next pass", j.AnchorName))
 			}
 		}
+		// the connections of rules that are gone, which an earlier load could not end
+		pending = r.retryKills(ctx, j.AnchorName)
+		fwDrift = append(fwDrift, drift[firewallStart:]...)
 	}
+	conds := []api.Condition{cond(CondReady, true, "Running", "the jail is running", now)}
 	if len(drift) > 0 {
 		rep.Drift[j.Name] = drift
-		return []api.Condition{cond(CondReady, true, "Running", "the jail is running", now),
-			cond(CondDrift, false, "Drift", strings.Join(drift, "; "), now)}
+		conds = append(conds, cond(CondDrift, false, "Drift", strings.Join(drift, "; "), now))
+	} else {
+		conds = append(conds, cond(CondDrift, true, "InSync", "rendered and live state agree", now))
 	}
-	return []api.Condition{cond(CondReady, true, "Running", "the jail is running", now), cond(CondDrift, true, "InSync", "rendered and live state agree", now)}
+	if j.Ruleset != "" && r.env.PF != nil {
+		conds = append(conds, r.firewallApplied(j, fwDrift, pending, now))
+	}
+	return conds
+}
+
+// firewallApplied is the FirewallApplied condition of a running jail that has a firewall: True when the kernel has
+// what the policies say (pf evaluates the anchors, the anchor holds the rendered rules and its tables hold the
+// rendered members, and the states of removed rules are ended), False with the reason when it has not. A policy that is
+// stored but not loaded is False too: the condition is about pf, not about the store. Its message names the rules by a
+// short hash, which changes with every change of a policy, a set or the jail; Since is when the reason last changed.
+func (r *Reconciler) firewallApplied(j JailDesired, fwDrift, pending []string, now time.Time) api.Condition {
+	reason, msg, ok := "Applied", "rules "+render.RulesID(j.Ruleset)+" are loaded and pf evaluates them", true
+	switch bad := r.currentPFBad(); {
+	case bad != "":
+		reason, msg, ok = "PFNotApplying", bad, false
+	case len(fwDrift) > 0:
+		reason, msg, ok = "NotLoaded", strings.Join(fwDrift, "; "), false
+	case len(pending) > 0:
+		reason, msg, ok = "StatesPending", fmt.Sprintf("the connections of %d removed rule(s) are not ended yet (pf refused): tried again at every pass", len(pending)), false
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st := r.fwSince[j.Name]
+	if st.reason != reason || st.since.IsZero() {
+		st = fwState{reason: reason, since: now}
+		r.fwSince[j.Name] = st
+	}
+	c := cond(CondFirewallApplied, ok, reason, msg, st.since)
+	return c
 }
 
 // jailSidePass checks the description of every jail end of a running jail from the host (ifconfig -j <jail> <if>)
@@ -738,8 +866,45 @@ func (r *Reconciler) loadAnchor(ctx context.Context, name, ruleset string) error
 	slices.Sort(gone)
 	for _, l := range gone {
 		if err := r.env.PF.KillLabel(ctx, l); err != nil {
-			r.log.Warn("reconcile: ending the states of a removed rule failed", "anchor", name, "label", l, "err", err)
+			r.log.Warn("reconcile: ending the states of a removed rule failed: tried again at every pass", "anchor", name, "label", l, "err", err)
+			r.keepKill(name, l)
 		}
 	}
 	return nil
+}
+
+// keepKill remembers a label whose states could not be ended: the rule is gone from the anchor, so no later pass could
+// find the label again.
+func (r *Reconciler) keepKill(anchor, label string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.pendingKills[anchor] == nil {
+		r.pendingKills[anchor] = map[string]bool{}
+	}
+	r.pendingKills[anchor][label] = true
+}
+
+// retryKills ends the states of the labels an earlier pass could not end and returns the ones still pending, sorted.
+func (r *Reconciler) retryKills(ctx context.Context, anchor string) []string {
+	r.mu.Lock()
+	var labels []string
+	for l := range r.pendingKills[anchor] {
+		labels = append(labels, l)
+	}
+	r.mu.Unlock()
+	slices.Sort(labels)
+	var left []string
+	for _, l := range labels {
+		if err := r.env.PF.KillLabel(ctx, l); err != nil {
+			left = append(left, l)
+			continue
+		}
+		r.mu.Lock()
+		delete(r.pendingKills[anchor], l)
+		if len(r.pendingKills[anchor]) == 0 {
+			delete(r.pendingKills, anchor)
+		}
+		r.mu.Unlock()
+	}
+	return left
 }

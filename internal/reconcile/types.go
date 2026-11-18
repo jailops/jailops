@@ -99,6 +99,9 @@ type JailDesired struct {
 	// to the ruleset that makes them evaluate their children.
 	// UNVERIFIED: nested anchors on FreeBSD.
 	ParentAnchors map[string]string
+	// Mounts are the mount points of the jail's fstab: what must be mounted while the jail runs. A jail that started
+	// before its fstab gained a mount (or whose mount was taken off by hand) is reported as drifted.
+	Mounts []string
 	// Proxy lists IPv6 addresses to answer for while the jail runs.
 	Proxy []ProxyAddr
 	// Problem is set when the jail's configuration could not be rendered.
@@ -180,10 +183,11 @@ type NDPFactory func(uplink string) (NDP, error)
 
 // Condition types reported by the loop.
 const (
-	CondReady = "Ready"
-	CondDrift = "InSync"
-	CondBoot  = "Autostart"
-	CondProxy = "NDPProxy"
+	CondReady           = "Ready"
+	CondDrift           = "InSync"
+	CondBoot            = "Autostart"
+	CondProxy           = "NDPProxy"
+	CondFirewallApplied = api.ConditionFirewallApplied
 	// CondProxyFlood is False while the proxy dropped solicitations over its limits in the last hour.
 	CondProxyFlood = "NDPFlood"
 	CondNetwork    = "Network"

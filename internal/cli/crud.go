@@ -63,6 +63,10 @@ type kindDesc[T any] struct {
 	notes func(x T) []string
 	// updated prints, on standard error, what the server said about an updated object (nil for a kind that says nothing).
 	updated func(a *app, x T)
+	// granted is set for a kind that lives in the projects that are granted it (networks, storage): "list" shows what
+	// the selected project holds, and --all every object with a GRANTED and a PROJECTS column. It says, for an
+	// object, the projects it is granted to.
+	granted func(x T) []string
 	// filters registers extra list flags and returns the function that checks
 	// them once they are parsed and gives the predicate.
 	filters func(cmd *cobra.Command) func() (func(x T) bool, error)
@@ -225,7 +229,14 @@ func (a *app) completeNames(list func(ctx context.Context, c *sdk.Client) ([]str
 
 func completeKind[T any](a *app, d *kindDesc[T]) completer {
 	return a.completeNames(func(ctx context.Context, c *sdk.Client) ([]string, error) {
-		items, err := collect(d.list(ctx, c))
+		var opts []sdk.ListOption
+		if d.granted != nil {
+			opts = append(opts, sdk.All()) // a global administrator names any of them (grant, show, delete)
+		}
+		items, err := collect(d.list(ctx, c, opts...))
+		if err != nil && d.granted != nil {
+			items, err = collect(d.list(ctx, c)) // anyone else: what the project holds
+		}
 		var n []string
 		for _, it := range items {
 			n = append(n, d.name(it))
@@ -337,6 +348,43 @@ func (d *kindDesc[T]) columns() []string {
 	return out
 }
 
+// grantedHelp is the paragraph of the list help for a kind that projects are granted.
+func (d *kindDesc[T]) grantedHelp() string {
+	if d.granted == nil {
+		return ""
+	}
+	return "\nThe list holds the " + d.plural + " granted to the selected project. --all lists every one of the host (a global\nadministrator) with GRANTED (does the selected project hold it) and PROJECTS (the projects that do)."
+}
+
+// withGrants adds to a list view the columns of --all: whether the project holds the object, and the projects that do.
+func (d *kindDesc[T]) withGrants(v listView[T], project string) listView[T] {
+	out := v
+	out.head = append(slices.Clone(v.head), "GRANTED", "PROJECTS")
+	out.row = func(now time.Time, x T) []string {
+		names := d.granted(x)
+		held := "-"
+		if project != "" {
+			held = "no"
+			if slices.Contains(names, project) {
+				held = "yes"
+			}
+		}
+		return append(v.row(now, x), held, grantedNames(names))
+	}
+	return out
+}
+
+// grantedNames is the projects of a grant in a cell: the names, or their number when there are many.
+func grantedNames(names []string) string {
+	switch {
+	case len(names) == 0:
+		return "-"
+	case len(names) > 3:
+		return fmt.Sprintf("%d projects", len(names))
+	}
+	return strings.Join(names, ",")
+}
+
 // viewFor picks the form of the list that has every column asked for: the one -o wide shows, else the short one.
 func (d *kindDesc[T]) viewFor(names []string) (listView[T], error) {
 	has := func(head []string) bool {
@@ -381,6 +429,7 @@ func listExample(head []string) string {
 func addList[T any](a *app, parent *cobra.Command, d *kindDesc[T], extraExample string) {
 	var labels, columns []string
 	var sortBy string
+	var all bool
 	var keep func() (func(T) bool, error)
 	cmd := &cobra.Command{
 		Use:     "list [PATTERN...]",
@@ -389,7 +438,7 @@ func addList[T any](a *app, parent *cobra.Command, d *kindDesc[T], extraExample 
 		Long: "List " + d.plural + ` known to the server, optionally filtered by label (-l, also
 --selector) or by name patterns such as 'web*'. The default output is a table: -c
 picks its columns and --sort orders its rows (columns: ` + strings.Join(d.columns(), ", ") + `).
--o json and -o yaml print the full objects, -o name the names only, -o csv the table as CSV.`,
+-o json and -o yaml print the full objects, -o name the names only, -o csv the table as CSV.` + d.grantedHelp(),
 		Example:           "jailops " + "@P@" + " list\njailops " + "@P@" + " list 'web*' " + listExample(d.head) + "\njailops " + "@P@" + " list -l env=prod -o name" + extraExample,
 		Args:              cobra.ArbitraryArgs,
 		ValidArgsFunction: completeKind(a, d),
@@ -411,7 +460,15 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 				return err
 			}
 			v := d.view(a)
-			if len(columns) > 0 || sortBy != "" {
+			if all {
+				conn, err := a.resolveConnection()
+				if err != nil {
+					return err
+				}
+				opts = append(opts, sdk.All())
+				v = d.withGrants(v, conn.Project)
+			}
+			if !all && (len(columns) > 0 || sortBy != "") {
 				asked := slices.Clone(columns)
 				if sortBy != "" {
 					asked = append(asked, sortBy)
@@ -503,8 +560,15 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable)")
 	cmd.Flags().StringSliceVarP(&columns, "columns", "c", nil, "columns of the table, comma separated: "+strings.Join(d.columns(), ", "))
 	cmd.Flags().StringVar(&sortBy, "sort", "", "order the rows by this column")
-	enumFlag(cmd, "columns", d.columns()...)
-	enumFlag(cmd, "sort", d.columns()...)
+	cols := d.columns()
+	if d.granted != nil {
+		cols = append(cols, "granted", "projects")
+	}
+	enumFlag(cmd, "columns", cols...)
+	enumFlag(cmd, "sort", cols...)
+	if d.granted != nil {
+		cmd.Flags().BoolVar(&all, "all", false, "every "+d.noun+" of the host with the projects it is granted to (a global administrator); the default is what the selected project is granted")
+	}
 	if d.filters != nil {
 		keep = d.filters(cmd)
 	}
@@ -529,6 +593,9 @@ func emptyMessage(cmd *cobra.Command, plural, hint string, filtered bool, a *app
 	msg := "No " + plural + where + "."
 	if hint != "" {
 		msg += " Create one with: " + hint
+	}
+	if cmd.Flags().Lookup("all") != nil {
+		msg += "\n" + cmd.CommandPath() + " --all lists every one of the host, granted or not."
 	}
 	return msg
 }

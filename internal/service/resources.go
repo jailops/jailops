@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"jailops.net/jailops/internal/validate"
@@ -301,7 +302,9 @@ func MergePatch(v any, patch map[string]any, out any) error {
 	if err != nil {
 		return err
 	}
-	if err := json.Unmarshal(b, &cur); err != nil {
+	dec := json.NewDecoder(bytes.NewReader(b))
+	dec.UseNumber() // a number of the object keeps its text through the merge
+	if err := dec.Decode(&cur); err != nil {
 		return err
 	}
 	b, err = json.Marshal(mergePatch(cur, patch))
