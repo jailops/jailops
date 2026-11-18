@@ -35,6 +35,17 @@ func mustOp[T any](op *sdk.Operation[T], err error) T {
 	return v
 }
 
+// afterHousekeeping submits an operation again while the housekeeping pass of a freshly started daemon holds the lock
+// of the jail (a pass is short: it answers busy to whoever comes in that moment).
+func afterHousekeeping[T any](submit func() (*sdk.Operation[T], error)) (*sdk.Operation[T], error) {
+	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
+		op, err := submit()
+		if !api.IsCode(err, api.CodeBusy) || !strings.Contains(err.Error(), "housekeeping") || time.Now().After(deadline) {
+			return op, err
+		}
+	}
+}
+
 // opErr is the error of submitting an operation or, when it was submitted, of the operation.
 func opErr[T any](op *sdk.Operation[T], err error) error {
 	if err != nil {
@@ -235,7 +246,7 @@ func TestShellChoicesAndExistingJails(t *testing.T) {
 	e.Stop()
 	e2 := dtest.New(t, dtest.Options{Reuse: e})
 	e2.Admin = e2.Admin.Project("alpha")
-	mustOp(e2.Admin.Jails().Restart(ctx, "web"))
+	mustOp(afterHousekeeping(func() (*sdk.Operation[api.Jail], error) { return e2.Admin.Jails().Restart(ctx, "web") }))
 	if installedBash(e, webRoot) != 0 || e2.HasFile(webRoot+api.PromptFile) {
 		t.Fatal("an existing jail was changed without being asked")
 	}
@@ -299,6 +310,7 @@ func TestShellSetupFailureIsReportedAndRepaired(t *testing.T) {
 	mustOp(e.Admin.Jails().Create(ctx, dtest.WebJail("web")))
 	e.SetPkgInstallErr(errors.New("pkg: no network"))
 	mustOp(e.Admin.Jails().Start(ctx, "web"))
+	waitShellSetup(t, e, "web") // the start returns while the setup runs in the background
 	got, _ := e.Admin.Jails().Get(ctx, "web")
 	c := shellCond(got)
 	if got.Status.Power != api.PowerRunning || c == nil || c.Status != api.ConditionFalse || !strings.Contains(c.Message, "jailops jail shell-setup web") {
@@ -312,11 +324,13 @@ func TestShellSetupFailureIsReportedAndRepaired(t *testing.T) {
 	assertRealCommand(t, ae.Hint)
 	// the failure is not retried at every start
 	mustOp(e.Admin.Jails().Restart(ctx, "web"))
+	waitShellSetup(t, e, "web")
 	if installedBash(e, webRoot) != 0 {
 		t.Fatal("bash appeared")
 	}
 	e.SetPkgInstallErr(nil)
 	mustOp(e.Admin.Jails().ShellSetup(ctx, "web"))
+	waitShellSetup(t, e, "web")
 	got, _ = e.Admin.Jails().Get(ctx, "web")
 	if shellCond(got) != nil || installedBash(e, webRoot) != 1 {
 		t.Fatalf("%+v %v", got.Status.Conditions, e.Installed)
