@@ -977,7 +977,15 @@ for v in sto10 sto30; do check "delete volume $v" $J volume delete $v --project 
 step "a jail that cannot reach the package servers starts at once; the host fetches bash for it, a start never waits long for a mirror"
 check "a policy that denies everything outbound" $J firewall policy create closed --project demo --default-in deny --default-out deny
 check "a jail under it" $J create closedj --project demo --image "$img" --network lan --storage default
-check "it uses the policy" $J config set closedj firewall.policies closed --project demo
+expect "a policy no jail names says so" 'Used by: +none' $J firewall policy show closed --project demo
+check "it uses the policy" $J firewall policy attach closed closedj --project demo
+expect "attached twice it says so and changes nothing" 'policy closed is attached already' $J firewall policy attach closed closedj --project demo
+expect "the jail lists the policy" 'Firewall: +closed$' $J jail info closedj --project demo
+check "detach it" $J firewall policy detach closed closedj --project demo
+expect "the jail without a policy says how to attach one" 'attach one: jailops firewall policy attach POLICY closedj' $J jail info closedj --project demo
+check "attach it again" $J firewall policy attach closed closedj --project demo
+expect "the policy says which jail uses it" 'Used by: +closedj' $J firewall policy show closed --project demo
+expect "and the list has the jail in USED BY" 'closed +deny +deny +0 +no +closedj' $J firewall policy list --project demo
 startbound() { # a start takes a minute at most, whatever the mirror does (the host gives bash 20 s, the jail's own network is never waited for)
 	t0=$(date +%s)
 	check "$1" $J start closedj --project demo
@@ -1132,7 +1140,7 @@ expect "the jail reaches the host's default gateway through the NAT of the uplin
 expect "an address of the subnet that no jail has is refused at once" 'Destination Host Unreachable' sh -c "$J exec --project edge edgeweb -- ping -c1 -t2 10.66.0.77 2>&1; true"
 expect "a jail without a policy says it is open" "Firewall: +open: no firewall policy" $J jail info edgeweb --project edge
 check "a policy without --default-in and --default-out" $J firewall policy create nodefaults --project edge
-expect "it denies inbound and allows outbound, written into the policy" 'nodefaults +deny +allow' $J firewall policy list --project edge
+expect "it states no default: that is left to the other policies of the jail" 'nodefaults +- +- ' $J firewall policy list --project edge
 check "delete it" $J firewall policy delete nodefaults --project edge -y
 # a rule names a jail: jail:edgeweb in an address set of the project, the set in a policy, the policy on another jail
 check "an address set with a jail as a member" $J firewall address-set create git-allow --project edge --address jail:edgeweb
@@ -1148,6 +1156,8 @@ check "the first rule moves behind the second" $J firewall rule move git 1 --aft
 check "a second jail" $J create edgedb --project edge --image "$img" --network office --storage default
 check "its policy" $J config set edgedb firewall.policies git --project edge
 check "it starts" $J start edgedb --project edge
+expect "the jail says which policy sets its inbound default" 'Default in: +deny \(git\)' $J jail info edgedb --project edge
+expect "and that no policy denies outbound" 'Default out: +allow \(no policy says deny\)' $J jail info edgedb --project edge
 waitfor "the anchor of edgedb is loaded" 60 sh -c "pfctl -a jailops/edge/edgedb -sr | grep -q ."
 expect "the anchor of the second jail holds the address of the first one in the table of the set" '10\.66\.0\.' pfctl -a jailops/edge/edgedb -t s_git_allow -T show
 expect "the rule comments are in the loaded anchor's source: show says why a rule is there" 'ssh from the team' $J firewall policy show git --project edge
@@ -1485,6 +1495,13 @@ if [ -n "${JAILOPS_E2E_LINUX:-}" ]; then
 	check "restart the Linux jail" $J restart lin --project demo
 	waitfor "the Linux jail answers after the restart" 60 $J exec --project demo lin -- /bin/busybox true
 	expect "after the restart a Linux process sees the volume too" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
+	# a mount that went missing under the running jail (here taken off by hand) is reported with what to do about it
+	check "take the mount below the mirror off by hand" umount "$mount/projects/demo/jails/lin/root/compat/linux/srv/vol"
+	waitfor "the host says the mount is missing and what to do" 120 sh -c "$J doctor 2>&1 | grep -q 'srv/vol is missing; restart the jail to mount it'"
+	check "restart the Linux jail again" $J restart lin --project demo
+	waitfor "the Linux jail answers after the second restart" 60 $J exec --project demo lin -- /bin/busybox true
+	expect "the restart made the mount again" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
+	waitfor "the report of the missing mount is gone" 120 sh -c "! $J doctor 2>&1 | grep -q 'is missing; restart the jail'"
 	check "detach the volume from the running Linux jail" $J volume detach lin linvol --project demo
 	expect_refused "the files are gone for a Linux process" $J exec --project demo lin -- /bin/busybox test -e /srv/vol/h
 	if mount -t nullfs | grep -q "volumes/linvol"; then fail "a nullfs mount of the volume is left after the detach"; fi

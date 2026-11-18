@@ -45,10 +45,10 @@ func TestAnchorClosesTheHostBeforeAllowRulesAndOpensTheUplinkOnlyToTheJail(t *te
 	}
 }
 
-// The other projects are closed before the allow rules: a wide prefix (0.0.0.0/0, a /8) and `allow in --from any` do
-// not reach or admit a foreign network, so the isolation of a project does not depend on the policies of another. A
-// rule that names a foreign address with a prefix of its own opens it.
-func TestForeignProjectsAreClosedBeforeTheAllowRulesExceptWhatIsNamed(t *testing.T) {
+// The jails of other projects reach a jail like the Internet does: through an enabled allow in rule whose source covers
+// them (any, an address, a prefix, a set), never through a default, and a rule without a source is not for them. What the
+// jail sends is not closed on its side. The closing block stands after the allow rules and before the defaults.
+func TestForeignProjectsReachTheJailLikeTheInternet(t *testing.T) {
 	line := func(an *Anchor, prefix string) int {
 		for i, l := range an.Lines {
 			if strings.HasPrefix(l, prefix) {
@@ -66,57 +66,65 @@ func TestForeignProjectsAreClosedBeforeTheAllowRulesExceptWhatIsNamed(t *testing
 		}
 		return an
 	}
-	wide := build(
+	an := build(
+		api.FirewallRule{Name: "world", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80"}, From: []string{"any"}},
+		api.FirewallRule{Name: "db", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"5432"}},
 		api.FirewallRule{Name: "all", Action: "allow", Direction: "out", To: []string{"0.0.0.0/0", "10.0.0.0/8"}},
-		api.FirewallRule{Name: "world", Action: "allow", Direction: "in", From: []string{"any"}},
 	)
-	closed, firstAllow := line(wide, "block drop out quick on jo0123456789a0a from <foreign_closed> to any"), line(wide, "pass ")
-	toClosed := line(wide, "block drop in quick on jo0123456789a0a from any to <foreign_closed>")
-	if closed < 0 || toClosed < 0 {
-		t.Fatalf("no early isolation block:\n%s", strings.Join(wide.Lines, "\n"))
+	table, closing, world, def := line(an, "table <foreign> persist { 10.31.0.0/24, 10.32.0.0/24 }"), line(an, "block drop out quick on jo0123456789a0a from <foreign> to any"), line(an, "pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80"), line(an, "# defaults")
+	if table < 0 || closing < 0 || world < 0 || def < 0 {
+		t.Fatalf("table %d, closing block %d, the world rule %d, defaults %d:\n%s", table, closing, world, def, strings.Join(an.Lines, "\n"))
 	}
-	for _, l := range wide.Lines {
-		if strings.HasPrefix(l, "table <foreign_closed>") && (!strings.Contains(l, "10.31.0.0/24") || !strings.Contains(l, "10.32.0.0/24")) {
-			t.Errorf("a wide prefix named a foreign network: %s", l)
+	// the table is defined before any rule uses it; the block comes after the allow rules and before the defaults
+	if first := line(an, "# policy "); table > first || world > closing || closing > def {
+		t.Errorf("table at %d, policy at %d, world rule at %d, closing block at %d, defaults at %d", table, first, world, closing, def)
+	}
+	// an allow in rule without a source is not for the other projects; a rule with a source is for whoever it covers
+	var db string
+	for _, l := range an.Lines {
+		if strings.Contains(l, "port 5432") && strings.HasPrefix(l, "pass out quick") {
+			db = l
+			break
 		}
 	}
-	// the blocks stand before the first policy rule that passes something (the host stage has its own passes: ICMP, DNS)
-	policy := line(wide, "# policy ")
-	if policy < 0 || closed > policy+60 {
-		t.Fatalf("the isolation stands at %d, the policy at %d", closed, policy)
+	if !strings.Contains(db, "from ! <foreign> to ") {
+		t.Errorf("a rule without a source is open to the other projects: %q", db)
 	}
-	for i, l := range wide.Lines {
-		if strings.HasPrefix(l, "pass ") && strings.Contains(l, "from any to ! <not_any>") && i < closed {
-			t.Errorf("an allow rule stands before the isolation: %s", l)
+	// nothing closes what the jail sends, and nothing is closed before the allow rules
+	for _, l := range an.Lines {
+		if strings.HasPrefix(l, "block drop in quick on jo0123456789a0a from any to <foreign") || strings.Contains(l, "foreign_closed") {
+			t.Errorf("an isolation rule of the old kind: %s", l)
 		}
 	}
-	_ = firstAllow
-	// the old block after the allow rules stays as the last word
-	if line(wide, "block drop out quick on jo0123456789a0a from <foreign> to any") < 0 {
-		t.Error("the block after the allow rules is gone")
+	// an allow out rule that names a foreign address changes nothing in the closing of what comes in
+	sent := build(api.FirewallRule{Name: "db", Action: "allow", Direction: "out", To: []string{"10.31.0.5"}})
+	if line(sent, "block drop out quick on jo0123456789a0a from <foreign> to any") < 0 {
+		t.Error("an allow out rule opened what comes in from another project")
 	}
-	// a rule that names an address inside a foreign network opens that network: it is left out of the early block
-	named := build(api.FirewallRule{Name: "db", Action: "allow", Direction: "out", To: []string{"10.31.0.5"}})
-	for _, l := range named.Lines {
-		if strings.HasPrefix(l, "table <foreign_closed>") && (strings.Contains(l, "10.31.0.0/24") || !strings.Contains(l, "10.32.0.0/24")) {
-			t.Errorf("a named foreign network is closed early, or an unnamed one is not: %s", l)
-		}
+	// a deny rule of the jail comes first and wins over an allow rule that covers the same source
+	denied := build(
+		api.FirewallRule{Name: "world", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80"}, From: []string{"any"}},
+		api.FirewallRule{Name: "no-31", Action: "deny", Direction: "in", Proto: "tcp", Ports: []string{"80"}, From: []string{"10.31.0.0/24"}},
+	)
+	if d, a := line(denied, "block drop out quick on jo0123456789a0a inet proto tcp from 10.31.0.0/24 to 10.20.0.10 port 80"), line(denied, "pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80"); d < 0 || a < 0 || d > a {
+		t.Errorf("the deny rule at %d, the allow rule at %d:\n%s", d, a, strings.Join(denied.Lines, "\n"))
 	}
-	// an anchor with no foreign network has no early block
+	// an anchor with no foreign network has no table and no closing block
 	in := uplinkBase(api.FirewallRule{Name: "all", Action: "allow", Direction: "out", To: []string{"0.0.0.0/0"}})
 	in.Foreign = nil
-	an, err := BuildAnchor(in)
+	none, err := BuildAnchor(in)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if line(an, "table <foreign_closed>") >= 0 {
-		t.Error("an early block for no foreign network")
+	if line(none, "table <foreign>") >= 0 {
+		t.Error("a table for no foreign network")
 	}
 }
 
-// A raw fragment stored by a project administrator (before raw fragments needed a global one) stands after the host
-// stage and the isolation of other projects, both quick: a "pass quick" in it cannot open the host or another project.
-func TestRawFragmentStandsAfterTheHostAndIsolationBlocks(t *testing.T) {
+// A raw fragment stands after the host stage, which is quick: a "pass quick" in it cannot open the host. (A raw fragment is
+// written by a global administrator and is the rest of the anchor's business: it can pass what it names, other projects
+// included.)
+func TestRawFragmentStandsAfterTheHostBlock(t *testing.T) {
 	in := uplinkBase(api.FirewallRule{Name: "web", Action: "allow", Direction: "in", Proto: "tcp", Ports: []string{"80"}})
 	in.Host = []netip.Addr{ip("198.51.100.7")}
 	in.Policies = append(in.Policies, PFPolicy{Name: "legacy", Project: true, AllowRaw: true,
@@ -125,18 +133,16 @@ func TestRawFragmentStandsAfterTheHostAndIsolationBlocks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	host, iso, raw := -1, -1, -1
+	host, raw := -1, -1
 	for i, l := range an.Lines {
 		switch {
 		case l == "block drop in quick on jo0123456789a0a from any to <host>":
 			host = i
-		case strings.HasPrefix(l, "block drop in quick on jo0123456789a0a from any to <foreign_closed>"):
-			iso = i
 		case strings.HasPrefix(l, "pass quick on jo0123456789a0a from any to any"):
 			raw = i
 		}
 	}
-	if host < 0 || iso < 0 || raw < 0 || raw < host || raw < iso {
-		t.Errorf("host block at %d, isolation at %d, raw at %d:\n%s", host, iso, raw, strings.Join(an.Lines, "\n"))
+	if host < 0 || raw < 0 || raw < host {
+		t.Errorf("host block at %d, raw at %d:\n%s", host, raw, strings.Join(an.Lines, "\n"))
 	}
 }

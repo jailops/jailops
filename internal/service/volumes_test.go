@@ -234,6 +234,8 @@ func TestLiveAttachRefusedByTheRenderChangesNothing(t *testing.T) {
 	mustOp(t, s, op, err)
 	op, err = s.JailAction(ctx, "desktop", api.JailAction{Action: "start"})
 	mustOp(t, s, op, err)
+	// the first start installs bash in the background; its file writes count as steps of the injector too
+	waitShellSetup(t, s, ctx, "desktop")
 	attach := func() error {
 		op, err := s.AttachVolume(ctx, "desktop", api.VolumeAttachRequest{Volume: "other", Mount: "/srv/o"})
 		if err != nil {
@@ -284,5 +286,61 @@ func TestLiveAttachRefusedByTheRenderChangesNothing(t *testing.T) {
 	}
 	if err := attach(); err != nil {
 		t.Errorf("the attach does not work after the refused one: %v", err)
+	}
+}
+
+// A volume attached to a RUNNING Linux jail is mounted in its root and below the compat/linux mirror (a Linux process
+// reaches every path through the mirror, which does not show a mount of the lower tree), and a detach takes both off,
+// the one below the mirror first. A FreeBSD jail has the first only.
+func TestLiveVolumeOfALinuxJailIsMountedBelowTheMirror(t *testing.T) {
+	e, s := newEnv(t)
+	e.SeedLinux()
+	ctx := as(globalAdmin, dtest.SeedProject)
+	newVolume(t, s, ctx, "other", api.VolumeSpec{})
+	for _, c := range []struct {
+		jail  api.Jail
+		twin  bool
+		label string
+	}{{dtest.AlpineJail("lin"), true, "linux"}, {dtest.WebJail("bsd"), false, "freebsd"}} {
+		op, err := s.CreateJail(ctx, c.jail)
+		mustOp(t, s, op, err)
+		op, err = s.JailAction(ctx, c.jail.Metadata.Name, api.JailAction{Action: "start"})
+		mustOp(t, s, op, err)
+		mark := len(e.Run.Calls())
+		op, err = s.AttachVolume(ctx, c.jail.Metadata.Name, api.VolumeAttachRequest{Volume: "other", Mount: "/srv/o"})
+		mustOp(t, s, op, err)
+		var got []string
+		for _, call := range e.Run.Calls()[mark:] {
+			if n := call.Cmd.Name; (n == "mount" || n == "umount") && strings.Contains(strings.Join(call.Cmd.Args, " "), "/srv/o") {
+				got = append(got, n+" "+call.Cmd.Args[len(call.Cmd.Args)-1])
+			}
+		}
+		root := ""
+		if len(got) > 0 {
+			root = strings.TrimSuffix(strings.Fields(got[0])[1], "/srv/o")
+		}
+		want := []string{"mount " + root + "/srv/o"}
+		if c.twin {
+			want = append(want, "mount "+root+"/compat/linux/srv/o")
+		}
+		if strings.Join(got, "\n") != strings.Join(want, "\n") || root == "" {
+			t.Fatalf("%s attach mounted %q, want %q", c.label, got, want)
+		}
+		mark = len(e.Run.Calls())
+		op, err = s.DetachVolume(ctx, c.jail.Metadata.Name, "other")
+		mustOp(t, s, op, err)
+		got = nil
+		for _, call := range e.Run.Calls()[mark:] {
+			if call.Cmd.Name == "umount" && strings.Contains(strings.Join(call.Cmd.Args, " "), "/srv/o") {
+				got = append(got, call.Cmd.Args[len(call.Cmd.Args)-1])
+			}
+		}
+		want = []string{root + "/srv/o"}
+		if c.twin {
+			want = []string{root + "/compat/linux/srv/o", root + "/srv/o"}
+		}
+		if strings.Join(got, "\n") != strings.Join(want, "\n") {
+			t.Fatalf("%s detach unmounted %q, want %q", c.label, got, want)
+		}
 	}
 }

@@ -137,9 +137,13 @@ func TestReachTunnelIsNotTheInternet(t *testing.T) {
 // other projects reach nothing, and the rows say what stops them.
 func TestReachDefaultDeny(t *testing.T) {
 	in, rc := reachInput(false)
+	in.DefaultInBy = []string{"web", "default [project]"}
 	r := reachOfInput(t, in, rc)
 	if len(r.Exposed) != 0 {
 		t.Errorf("exposed = %s", exposedText(r))
+	}
+	if strings.Join(r.DefaultInBy, ",") != "web,default [project]" || len(r.DefaultOutBy) != 0 {
+		t.Errorf("the policies that set the defaults: %v / %v", r.DefaultInBy, r.DefaultOutBy)
 	}
 	for _, src := range []string{api.ReachJails, api.ReachHost, api.ReachOther} {
 		rows := rowsOf(r, src)
@@ -150,10 +154,10 @@ func TestReachDefaultDeny(t *testing.T) {
 	if r.DefaultIn != "deny" || r.DefaultOut != "allow" {
 		t.Errorf("defaults = %s/%s", r.DefaultIn, r.DefaultOut)
 	}
-	if rows := rowsOf(r, api.ReachOther); !strings.Contains(rows[0].By, "isolation") {
+	if rows := rowsOf(r, api.ReachOther); !strings.Contains(rows[0].By, "no allow in rule with a source") {
 		t.Errorf("other projects: %q", rows[0].By)
 	}
-	if rows := rowsOf(r, api.ReachHost); !strings.Contains(rows[0].By, "default of the jail's policies (deny)") {
+	if rows := rowsOf(r, api.ReachHost); !strings.Contains(rows[0].By, "the inbound default is deny (set by web, default [project])") {
 		t.Errorf("host: %q", rows[0].By)
 	}
 }
@@ -186,7 +190,8 @@ func TestReachOut(t *testing.T) {
 	if !strings.HasPrefix(r.Out.Internet, "tcp all ports") {
 		t.Errorf("internet = %q", r.Out.Internet)
 	}
-	if !strings.HasPrefix(r.Out.OtherProjects, "nothing") || !strings.HasPrefix(r.Out.Host, "nothing") {
+	// what a jail sends is not closed on its side, also towards other projects (the jail that is reached decides); the host is
+	if !strings.HasPrefix(r.Out.OtherProjects, "tcp all ports") || !strings.HasPrefix(r.Out.Host, "nothing") {
 		t.Errorf("out = %+v", r.Out)
 	}
 }
@@ -225,5 +230,43 @@ func TestReachUplinkDenyClosesTheEntry(t *testing.T) {
 	)
 	if got := exposedText(reachOfInput(t, in2, rc2)); got != "" {
 		t.Errorf("a port closed by a deny rule is listed: %q", got)
+	}
+}
+
+// The other projects reach a jail like the Internet does: the row lists each allow in rule with a source (the private IPv4
+// address included, there is no NAT exception) with what it is limited to, and a closed row says why.
+func TestReachOtherProjectsAreReachedLikeTheInternet(t *testing.T) {
+	rule := func(name, action string, from ...string) api.FirewallRule {
+		return api.FirewallRule{Name: name, Action: action, Direction: "in", Proto: "tcp", Ports: []string{"80"}, From: from}
+	}
+	other := func(rules ...api.FirewallRule) []api.ReachRow {
+		in, rc := reachInput(false, rules...)
+		return rowsOf(reachOfInput(t, in, rc), api.ReachOther)
+	}
+	// any: every address of the jail, with the rule that decides
+	rows := other(rule("world", "allow", "any"))
+	fams := ""
+	for _, r := range rows {
+		if r.Decision != "pass" || r.Ports != "80" || strings.Join(r.From, ",") != "any" || r.Policy != "web" || r.Rule != 1 {
+			t.Errorf("from any: %+v", r)
+		}
+		fams += r.Family
+	}
+	if len(rows) != 2 || fams != "46" {
+		t.Errorf("from any: one row for IPv4 (the private address too) and one for IPv6: %+v", rows)
+	}
+	// an address inside another project's network, named: the row carries it
+	rows = other(rule("one", "allow", "10.31.0.5"))
+	if len(rows) != 1 || rows[0].Decision != "pass" || strings.Join(rows[0].From, ",") != "10.31.0.5/32" && strings.Join(rows[0].From, ",") != "10.31.0.5" {
+		t.Errorf("a named address: %+v", rows)
+	}
+	// a rule without a source is for the project's own jails and the host, not for the other projects
+	if rows = other(rule("own", "allow")); len(rows) != 1 || rows[0].Decision != "none" {
+		t.Errorf("a rule without a source: %+v", rows)
+	}
+	// a deny rule wins
+	rows = other(rule("world", "allow", "any"), rule("no", "deny", "10.31.0.0/24", "2001:db8:2::/64"))
+	if len(rows) != 1 || rows[0].Decision != "none" || !strings.Contains(rows[0].By, "policy web") {
+		t.Errorf("a deny rule: %+v", rows)
 	}
 }

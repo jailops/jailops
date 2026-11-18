@@ -11,9 +11,13 @@ configure on the host besides forwarding.
     jailops start site --project shop
     jailops list --project shop
 
-`network create` makes a network of the host; it is listed for the host's administrators at once. A project may use it
-only after `jailops network grant NAME --project PROJECT`, also when a global administrator creates the jail, and a
-network is granted to one project. `storage create` and `storage grant` work the same way.
+`network create` makes a network of the host. A project may use it only after `jailops network grant NAME --project
+PROJECT`, also when a global administrator creates the jail, and a network is granted to one project. `storage create`
+and `storage grant` work the same way. `jailops network list` shows the networks granted to the selected project;
+`jailops network list --all` (a global administrator) shows every network of the host, with GRANTED (does the selected
+project hold it) and PROJECTS (the projects that do), and `jailops network show NAME` names them under `Granted to`.
+`storage list --all` and `storage show` do the same for storage. The console has the same switch, "All networks" and
+"All storage", on its pages.
 
 ## What you get
 
@@ -27,7 +31,7 @@ network is granted to one project. `storage create` and `storage grant` work the
   all passes through the host and its firewall. Nothing in the subnet that no jail has is reachable: the host answers
   such a packet with an error instead of sending it out of the uplink.
 - **A network belongs to one project.** A project is granted whole networks; another project's jails are outside, and
-  the firewall of a jail closes them out unless a rule opens the way.
+  the firewall of a jail closes what comes in from them unless an `allow in` rule of that jail with a source admits them.
 - **`ifconfig` says what each interface is.** The host end of a jail's link says
   `jailops jail=shop/site net=office (host side)`; inside the jail the other end says `(jail side)`.
 
@@ -44,6 +48,19 @@ Every jail has a link of its own, so jails never share a network segment:
   not own. An address a jail gives itself sends and receives nothing.
 - **They talk only as far as the firewall allows.** The host forwards between two jails what both jails' policies allow.
   `jailops firewall test` says what happens to a connection before you try it ([firewall-testing](networking-ipv6.md#would-it-pass)).
+- **Nothing is closed inside a project unless you close it.** A jail without policy is open to its project's jails; a
+  policy that states no default leaves it so. To close a project or a jail, put a policy with `default_in: deny` in the
+  project's mandatory list (`firewall_policies`) or on the jail, and open what is needed with `allow` rules; deny wins over
+  allow, whichever policy states it:
+
+  ```
+  jailops firewall policy create default --default-in deny
+  jailops project set shop --firewall-policy default
+  jailops firewall rule add web in --action allow --proto tcp --port 80,443
+  ```
+
+  The uplink is only ever opened by an explicit `allow in` rule with an external source, never by a default.
+  `jailops firewall show JAIL` says which policy sets each default.
 - **There is no layer 2 between jails.** Multicast, mDNS, VRRP/CARP and other non-IP protocols do not pass from one jail to
   another. Services that need to find each other use addresses or DNS.
 
@@ -61,13 +78,21 @@ reachable from a jail, that is the host administrator's decision and it goes in 
 the anchor line.
 
 The host may connect to a jail when the jail's policy lets it: `allow in tcp from host port 22` lets the host reach the jail.
-A jail without a policy accepts connections from the host and from the jails of its project, may connect anywhere but to
-the host and to other projects, and gets ping and DNS from the host and nothing else; `jailops jail info` says so.
+A jail without a policy accepts connections from the host and from the jails of its project (other projects need an
+`allow in` rule with a source), may connect anywhere but to the host, and gets ping and DNS from the host and nothing else;
+`jailops jail info` says so.
 
 **`any` is not the host.** As the destination of an allow rule, `any` (named or left out) is every address except the host's
-own and those of the networks of other projects: `allow out tcp port 22` lets a jail ssh to the internet, not to the sshd of
-the host or to the jails of another project. Name the other project's prefix to open its jails. A deny rule to `any` still
-denies the host.
+own: `allow out tcp port 22` lets a jail ssh to the internet, not to the sshd of the host. A deny rule to `any` still denies
+the host.
+
+**Other projects reach a jail like the Internet does.** What a jail sends is not closed on its side, not even towards another
+project's jails. What comes in from another project is closed until an `allow in` rule of the jail that is reached has a
+source that covers it: `any`, an address, a prefix (a wide one such as `0.0.0.0/0` or `::/0` too) or an address set. A rule
+without a source is for the project's own jails and the host, a default never opens it, and a deny rule wins. This holds for
+every address of the jail, the private IPv4 one included. To keep another project out of a rule that says `from any`, name
+the sources instead or add a deny rule. Another project cannot use a forward of a jail through the host's public address or a
+name that points at it, because the host is closed to jails: it connects to the jail's own address.
 
 **Ping and DNS to the host stay open under every policy**, a deny-all one included, because a jail needs its gateway and its
 resolver. To close them, add deny rules, which win over every allow rule: `jailops firewall rule add POLICY out --action deny
@@ -114,8 +139,8 @@ address, a prefix, a set), and the rule that gives it: "policy web rule 2". "clo
 table is what the jail itself reaches.
 
 The Internet reaches a jail in two ways. An IPv6 address is routed: an `allow in` rule with an external source opens
-it. An IPv4 address of a NAT network is private: only a forward of a port of the host (an `allow in` rule with
-`redirect`, `HOSTPORT:JAILPORT`) reaches it, and `list` shows the port of the host. A rule that names only jails, tags or
+it. An IPv4 address of a NAT network is private: only a forward of a port of the host reaches it, which only
+`jailops expose` makes (`HOSTPORT:JAILPORT`), and `list` shows the port of the host. A rule that names only jails, tags or
 `host` as its source does not show as Internet. `firewall exposed --tunnels` adds what WireGuard peers reach.
 
 What the view cannot know it says under the table: a raw PF fragment, and the rules of the host's own `pf.conf` before the
@@ -150,8 +175,15 @@ jailops expose web 80,443                      # IPv4 and IPv6, from anyone
 jailops expose mail 25,465,587,993 --comment mail
 jailops expose web 443 --from set:office       # only from an address set, an address or a prefix
 jailops expose web 80 --family 6               # IPv6 only
+jailops expose web 80,443,8000-8100 --family 6 # a mix of ports and ranges (a range is let in, not forwarded)
 jailops expose app 3000 --host-port 8080       # the host's port 8080 goes to the jail's port 3000 (IPv4 behind NAT)
 jailops unexpose web 80
+```
+
+```
+jail/web exposed: 80,443/tcp
+  IPv6  2001:db8::10   open: no NAT, the jail's own address answers on 80, 443
+  IPv4  10.20.0.10   forwarded: host 80->80, 443->443 (NAT)
 ```
 
 One command opens the ports of a jail to the Internet on every family it has. How the traffic arrives depends on the
@@ -170,6 +202,29 @@ non-NAT IPv4 on their own. A request that needs a forward from someone who may n
 hint to ask for IPv6 only (`--family 6`); removing a forward is a global administrator's too.
 
 Two jails cannot forward the same host port: the second is refused when it is made, and the message names the first jail.
+
+A port is exposed once per protocol: `expose web 443 --from set:office` after `expose web 80,443` takes 443 out of the
+first entry and leaves 80 open to anyone, and `unexpose web 443` takes only 443 out of an entry that names 80,443. A
+jail behind NAT forwards single ports, so a range there needs `--family 6`; `--host-port` is for one port, and
+`--proto` takes `tcp`, `udp` or `tcp,udp`.
+
+### Expose or a policy rule
+
+| You want | Use |
+|---|---|
+| The Internet reaches a service, IPv4 and IPv6 | `jailops expose web 80,443` |
+| The Internet reaches it over IPv6 only | `jailops expose web 80 --family 6` (or a rule `--from ::/0`) |
+| The Internet reaches it over IPv4 only | `jailops expose web 80 --family 4` |
+| Only some sources reach it | `jailops expose web 443 --from set:office`, or a policy rule with that source |
+| Jails, projects or the host reach it | a policy rule (`--from jail:mail`, `--from tag:db`) |
+
+The Internet: `expose`. Certain sources: a policy. `expose` is recorded with the jail and makes the IPv4 forward; a
+policy rule never does. An IPv4 address behind NAT is reached from the Internet only through `expose`; over IPv6 and
+routed IPv4 an allow rule with an external source opens the port too, and `firewall rule add` says so with one note when
+the source is `any`, `0.0.0.0/0` or `::/0`. Both can name the same port: what they allow adds up, a deny rule wins, and
+`jailops list`, `firewall show` and `firewall exposed` show the result with the rule that gives it. `expose` and
+`unexpose` name the policy rule that already lets the port in or still does. `unexpose` removes the exposure only: a
+policy rule that opens the port keeps it open.
 
 ## Networks
 

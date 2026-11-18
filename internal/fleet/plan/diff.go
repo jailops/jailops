@@ -156,8 +156,11 @@ func dangers(kind api.Kind, live, want any) []string {
 		if len(l.Rules) > 0 && len(w.Rules) == 0 && w.Raw == "" {
 			out = append(out, "firewall policy would have no rules")
 		}
-		if l.DefaultIn != "allow" && w.DefaultIn == "allow" {
-			out = append(out, "default_in changes to allow (inbound opens)")
+		if l.DefaultIn == "deny" && w.DefaultIn != "deny" {
+			out = append(out, "default_in is no longer deny (inbound opens unless another policy of the jail denies)")
+		}
+		if l.DefaultOut == "deny" && w.DefaultOut != "deny" {
+			out = append(out, "default_out is no longer deny (outbound opens unless another policy of the jail denies)")
 		}
 	case api.KindAddressSet:
 		l := live.(api.AddressSetSpec)

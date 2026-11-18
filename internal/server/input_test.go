@@ -36,8 +36,16 @@ func TestRequestBodiesAreStrict(t *testing.T) {
 	if code, body := rawDo(t, e, "POST", sets, tok, ok, nil); code != 201 {
 		t.Errorf("status member: %d %s", code, body)
 	}
-	if code, body := rawDo(t, e, "PATCH", "/api/v1/firewall/address-sets/ok?project="+dtest.SeedProject, tok, `{"spec":{"anything":true}}`, map[string]string{"Content-Type": "application/merge-patch+json"}); code == 400 && strings.Contains(body, "unknown member") {
-		t.Errorf("a merge patch is checked like a typed body: %s", body)
+	// a merge patch is checked like a typed body: a misspelled member is an error, not a 200 that changes nothing
+	patchURL := "/api/v1/firewall/address-sets/ok?project=" + dtest.SeedProject
+	mp := map[string]string{"Content-Type": "application/merge-patch+json"}
+	for _, body := range []string{`{"spec":{"adresses":[{"address":"10.1.0.0/16"}]}}`, `{"spec":{"addresses":[],"addresses":[]}}`} {
+		if code, out := rawDo(t, e, "PATCH", patchURL, tok, body, mp); code != 400 || errorCode(out) != string(api.CodeInvalid) {
+			t.Errorf("patch %s: %d %s", body, code, trunc(out))
+		}
+	}
+	if code, out := rawDo(t, e, "PATCH", patchURL, tok, `{"metadata":{"labels":{"k":"v"}},"status":{"whatever":1}}`, mp); code != 200 {
+		t.Errorf("a patch with a known member: %d %s", code, trunc(out))
 	}
 }
 

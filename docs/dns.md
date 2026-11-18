@@ -51,6 +51,10 @@ and `jailops doctor` says the same for the host in one line:
 dns.unbound   PASS   14 names for 3 jails in 2 projects; suffix internal; unbound forwards everything else to 192.0.2.53
 ```
 
+The doctor asks each network for a jail that runs on it, at the addresses its jails use as nameserver (the IPv4 gateway, and
+the resolver address of an IPv6 network), because the names a network's resolver answers are those of its own project; a
+warning names the network that does not answer.
+
 When the host resolver is not enabled, doctor warns with the way to enable it (`jailops-setup`) and `info` says that the
 jail has no names. Nothing stops a jail from starting either way.
 

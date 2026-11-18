@@ -1,6 +1,6 @@
 // The demo's answer to POST /jails/NAME/expose and /unexpose: the exposure is kept on the demo jail (spec.expose) and
-// read by the reach rows. IPv6 is reached on the jail's own address, an IPv4 address through a forward of the host. Only
-// loaded for `?demo`.
+// read by the reach rows. IPv6 is reached on the jail's own address, an IPv4 address through a forward of the host (the
+// demo's networks are behind NAT). A port is exposed once per protocol, as in the daemon. Only loaded for `?demo`.
 import type { ExposeEntry, ExposeFamily, ExposeRequest, ExposeResult, UnexposeRequest, Jail } from '@jailops/shared/api/types'
 import { jailAddrs } from './fwtest'
 
@@ -20,29 +20,54 @@ function families(j: Jail, ports: string[], only: string[] | undefined, hostPort
   return out
 }
 
+const portKey = (p: string): number => Number(p.split('-')[0])
+const sortPorts = (p: string[]): string[] => [...new Set(p)].sort((a, b) => portKey(a) - portKey(b))
+
 export function demoExpose(j: Jail, b: ExposeRequest): Result {
   if (!b.ports?.length) return { status: 400, code: 'invalid', message: 'name the ports to expose' }
-  const protos = b.proto === 'tcp,udp' ? ['tcp', 'udp'] : [b.proto || 'tcp']
+  if (b.host_port && b.ports.length > 1) {
+    return { status: 400, code: 'invalid', message: `--host-port takes one port: jailops expose ${j.metadata.name} ${b.ports[0]} --host-port ${b.host_port}, then jailops expose ${j.metadata.name} ${b.ports.slice(1).join(',')}` }
+  }
+  const protos = [...new Set((b.proto || 'tcp').split(',').map((x) => x.trim()))].sort()
   const spec = j.spec as Jail['spec'] & { expose?: ExposeEntry[] }
-  const next = [...(spec.expose ?? [])]
+  let next = [...(spec.expose ?? [])]
   let changed = false
+  const ports = sortPorts(b.ports.flatMap((p) => p.split(',').map((x) => x.trim()).filter(Boolean)))
   for (const proto of protos) {
-    const e: ExposeEntry = { proto, ports: [...b.ports], ...(b.families?.length ? { families: [...b.families] } : {}), ...(b.from?.length ? { from: [...b.from] } : {}), ...(b.host_port ? { host_port: b.host_port } : {}), ...(b.comment ? { comment: b.comment } : {}), by: 'alice' }
-    const i = next.findIndex((x) => (x.proto || 'tcp') === proto && same(x.ports, e.ports))
-    if (i < 0) { next.push(e); changed = true } else if (JSON.stringify({ ...next[i], by: '', at: '' }) !== JSON.stringify({ ...e, by: '' })) { next[i] = e; changed = true }
+    const e: ExposeEntry = { proto, ports: [...ports], ...(b.families?.length ? { families: [...b.families] } : {}), ...(b.from?.length ? { from: [...b.from] } : {}), ...(b.host_port ? { host_port: b.host_port } : {}), ...(b.comment ? { comment: b.comment } : {}), by: 'alice' }
+    const settings = (x: ExposeEntry): string => JSON.stringify({ ...x, ports: [], by: '', at: '', proto: x.proto || 'tcp' })
+    if (next.some((x) => settings(x) === settings(e) && e.ports.every((p) => x.ports.includes(p)))) continue
+    next = next.flatMap((x) => ((x.proto || 'tcp') === proto ? (x.ports.filter((p) => !e.ports.includes(p)).length ? [{ ...x, ports: x.ports.filter((p) => !e.ports.includes(p)) }] : []) : [x]))
+    next.push(e)
+    changed = true
   }
   if (changed && !b.dry_run) spec.expose = next
   const warnings: string[] = []
   if (!jailAddrs(j).some((a) => a.includes(':')) && (!b.families?.length || b.families.includes('6'))) warnings.push('the jail has no IPv6 address: only IPv4 is exposed')
-  return { ok: { jail: j.metadata.name, changed, entries: b.dry_run ? (spec.expose ?? []) : next, families: families(j, b.ports, b.families, b.host_port), ...(warnings.length ? { warnings } : {}) } }
+  return { ok: { jail: j.metadata.name, changed, entries: b.dry_run ? (spec.expose ?? []) : next, families: families(j, ports, b.families, b.host_port), exposed: `${ports.join(',')}/${protos.join(',')}`, ...(warnings.length ? { warnings } : {}) } }
 }
 
 export function demoUnexpose(j: Jail, b: UnexposeRequest): Result {
   const spec = j.spec as Jail['spec'] & { expose?: ExposeEntry[] }
   const before = spec.expose ?? []
   const proto = b.proto
-  const next = before.filter((e) => !((!proto || (e.proto || 'tcp') === proto) && (!b.ports?.length || same(e.ports, b.ports))))
-  const changed = next.length !== before.length
+  const gone: string[] = []
+  const next = before.flatMap((e) => {
+    if (proto && (e.proto || 'tcp') !== proto) return [e]
+    const hit = e.ports.filter((p) => !b.ports?.length || b.ports.includes(p))
+    gone.push(...hit)
+    const rest = e.ports.filter((p) => !hit.includes(p))
+    return rest.length ? [{ ...e, ports: rest }] : []
+  })
+  const changed = gone.length > 0
   spec.expose = next
-  return { ok: { jail: j.metadata.name, changed, entries: next, families: [] } }
+  const notes: string[] = []
+  if (!changed) {
+    for (const p of b.ports ?? []) {
+      const n = Number(p)
+      const range = before.flatMap((e) => e.ports).find((x) => x.includes('-') && Number(x.split('-')[0]) <= n && n <= Number(x.split('-')[1]))
+      if (range) notes.push(`${p} is inside the exposed range ${range}: unexpose the range to remove it`)
+    }
+  }
+  return { ok: { jail: j.metadata.name, changed, entries: next, families: [], ...(changed ? { exposed: `${sortPorts(gone).join(',')}/${proto || 'tcp'}` } : {}), ...(notes.length ? { notes } : {}) } }
 }

@@ -416,6 +416,7 @@ func storageDesc() *kindDesc[api.Storage] {
 	fromResource(&d, func(c *sdk.Client) *sdk.Resource[api.Storage] { return c.Storage() })
 	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.Storage] { return c.Storage() })
 	d.renameLong = renameLong("storage", `the projects it is granted to, the volumes and the jails on it (running ones too: nothing moves, the datasets stay where they are) and the profiles that name it. The default storage keeps its name`)
+	d.granted = func(s api.Storage) []string { return s.Status.GrantedTo }
 	d.head = []string{"NAME", "DATASET", "POOL", "HEALTH", "USED", "AVAILABLE"}
 	d.row = func(_ time.Time, s api.Storage) []string {
 		return []string{s.Metadata.Name, s.Spec.Dataset, dash(s.Status.Pool), dash(s.Status.Health), humanBytes(s.Status.Used), humanBytes(s.Status.Available)}

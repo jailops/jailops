@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/netip"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -516,7 +517,15 @@ func (s *Server) setupNetworks() {
 		}
 		return nil
 	}
+	k.listed = func(rc *reqInfo, all bool, n *api.Network) bool {
+		return all || rc.project == "" || slices.Contains(s.projectsGranting(func(sp api.ProjectSpec) bool {
+			return slices.ContainsFunc(sp.Networks, func(g api.ProjectNetwork) bool { return g.Network == n.Metadata.Name })
+		}), rc.project)
+	}
 	k.decorate = func(n *api.Network) {
+		n.Status.GrantedTo = s.projectsGranting(func(sp api.ProjectSpec) bool {
+			return slices.ContainsFunc(sp.Networks, func(g api.ProjectNetwork) bool { return g.Network == n.Metadata.Name })
+		})
 		n.Status.Allocated = len(s.leasesOf(n.Metadata.Name))
 		if n.Spec.IPv4 != nil {
 			if a, b, err := parseRange(n.Spec.IPv4.Range); err == nil && a.Is4() {

@@ -97,7 +97,8 @@ const tabList = computed(() => ([
   ['logs', s.logs.tab, hasExt('jail_logs')],
   // what reaches the jail and why, for every jail
   ['reach', s.reach.tab, hasExt('jail_reach')],
-  ['changes', s.diff.tab, hasExt('jail_diff')],
+  // only a thin jail has an image to compare with
+  ['changes', s.diff.tab, hasExt('jail_diff') && jail.value?.spec.layout !== 'thick'],
   // who may connect: for the jails an app installation made
   ['access', s.appAccess.tab, hasExt('app_access') && isInstalledApp(jail.value)],
   // the console session needs the extension and operator in the project, as `jailops exec`
@@ -294,7 +295,7 @@ const attentionItems = computed(() => {
                   <td class="mono" :data-label="s.jail.spec">{{ r.spec }}</td>
                   <td class="mono" :data-label="s.jail.status">{{ r.status }}<span v-if="r.diff && hasDrift" class="pill warn" style="margin-left: 8px">{{ s.jails.drift }}</span></td>
                 </tr>
-                <tr><th scope="row">{{ s.jail.layout }}</th><td :data-label="s.jail.spec">{{ jail.spec.layout || 'thin' }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
+                <tr><th scope="row">{{ s.jail.layout }}</th><td :data-label="s.jail.spec">{{ jail.spec.layout || (jail.spec.os === 'linux' ? 'thick' : 'thin') }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr><th scope="row">{{ s.jail.hostname }}</th><td class="mono" :data-label="s.jail.spec">{{ jail.spec.hostname || jail.metadata.name }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr><th scope="row">{{ s.jail.update }}</th><td :data-label="s.jail.spec">{{ jail.spec.update?.strategy || 'manual' }}<span v-if="jail.spec.update?.window" class="faint"> · {{ jail.spec.update.window }}</span></td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr>

@@ -25,6 +25,16 @@ import { logQuery, type LogQuery } from '@/lib/logs'
 const e = encodeURIComponent
 const c = () => getClient()
 
+/** What a list of networks or storage is asked for: the project whose grants it holds, and `all` for every one of the host. */
+interface ListScope { project?: string; all?: boolean }
+const listQuery = ({ project, all }: ListScope): string => {
+  const q = new URLSearchParams()
+  if (project) q.set('project', project)
+  if (all) q.set('all', 'true')
+  const s = q.toString()
+  return s ? `?${s}` : ''
+}
+
 export const api = {
   ...core,
   pool: () => c().get<PoolUsage>('/resources'),
@@ -163,7 +173,9 @@ export const api = {
     autoUpgrade: (n: string, a: ImageAutoUpgrade) => c().mutate<Image>('PATCH', `/images/${e(n)}`, { spec: { auto_upgrade: a } }),
   },
   networks: {
-    list: () => c().list<Network>('/networks'),
+    /** The pages of the networks name the project: its networks, or with `all` (a global administrator) every network of the host.
+     *  Without a project the list is every network the identity may see. */
+    list: (scope: ListScope = {}) => c().list<Network>(`/networks${listQuery(scope)}`),
     leases: (n: string) => c().list<Lease>(`/networks/${e(n)}/leases`),
     create: (n: Pick<Network, 'metadata' | 'spec'>) => c().mutate('POST', '/networks', n),
     get: (n: string) => c().getWithEtag<Network>(`/networks/${e(n)}`),
@@ -225,7 +237,7 @@ export const api = {
     remove: (n: string) => c().mutate('DELETE', `/projects/${e(n)}`),
   },
   storage: {
-    list: () => c().list<Storage>('/storage'),
+    list: (scope: ListScope = {}) => c().list<Storage>(`/storage${listQuery(scope)}`),
     create: (s: Pick<Storage, 'metadata' | 'spec'>) => c().mutate<Storage>('POST', '/storage', s),
     remove: (n: string) => c().mutate('DELETE', `/storage/${e(n)}`),
   },

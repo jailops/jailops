@@ -9,7 +9,9 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
+	"errors"
 	"fmt"
+	"io/fs"
 	"math/big"
 	"net"
 	"net/url"
@@ -142,14 +144,44 @@ func (a *app) newClientCert(remoteName string) (certFile, keyFile string, pair t
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
 	certFile, keyFile = filepath.Join(dir, remoteName+".crt"), filepath.Join(dir, remoteName+".key")
-	if err := os.WriteFile(keyFile, keyPEM, 0o600); err != nil {
+	if err := writeNewFile(keyFile, keyPEM, 0o600); err != nil {
 		return "", "", pair, err
 	}
-	if err := os.WriteFile(certFile, certPEM, 0o644); err != nil {
+	if err := writeNewFile(certFile, certPEM, 0o644); err != nil {
+		_ = os.Remove(keyFile)
 		return "", "", pair, err
 	}
 	pair, err = tls.X509KeyPair(certPEM, keyPEM)
 	return certFile, keyFile, pair, err
+}
+
+// writeNewFile creates a file that does not exist yet: an existing file, a symbolic link included, is never written
+// through or replaced.
+func writeNewFile(path string, data []byte, mode os.FileMode) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
+	if err != nil {
+		if errors.Is(err, fs.ErrExist) {
+			return usagef("%s exists already: remove it or pick another remote name", path)
+		}
+		return err
+	}
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(path)
+		return err
+	}
+	return f.Close()
+}
+
+// removeClientCert deletes the key pair of a removed remote when it lives in the certs directory (a pair the user
+// pointed at with --cert and --key is theirs and stays).
+func (a *app) removeClientCert(rc RemoteConfig) {
+	dir := a.certDir()
+	for _, f := range []string{rc.Cert, rc.Key} {
+		if f != "" && filepath.Dir(f) == dir {
+			_ = os.Remove(f)
+		}
+	}
 }
 
 // addByTrustToken redeems a trust token and saves the remote.
@@ -162,15 +194,12 @@ func (a *app) addByTrustToken(cmd *cobra.Command, name, address, token string, s
 	if err != nil {
 		return usagef("the trust token is malformed: %v", err)
 	}
-	if name == "" {
-		name = strings.NewReplacer(".", "-", ":", "-").Replace(strings.Split(strings.TrimPrefix(url, "https://"), ":")[0])
-	}
 	user, _, err := a.loadAll()
 	if err != nil {
 		return err
 	}
 	if _, exists := user.Remotes[name]; exists {
-		return usagef("remote %q already exists: remove it first or pick another --name", name)
+		return usagef("remote %q already exists: remove it first or pick another name", name)
 	}
 	if ok, err := a.dry("redeem a trust token at "+url+" and add remote "+name, map[string]string{"pinned": colonFP(fp)}); ok || err != nil {
 		return err

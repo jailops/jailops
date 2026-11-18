@@ -17,7 +17,7 @@ $ jailops app install nginx web --image freebsd-151
 App nginx installed as jail web (running)
   Version:   1.30.6,3
   Addresses: 10.20.0.11
-  Ports:     http 80/tcp at 10.20.0.11:80 (expose: forwarding is not set up yet) HTTP, the default site.
+  Ports:     http 80/tcp at 10.20.0.11:80 (meant for the Internet: jailops expose web 80) HTTP, the default site.
   Access:    closed: nothing reaches it until jailops app allow web --from SOURCE
   Data:      /usr/local/www The sites.
   Config:    /usr/local/etc/nginx/nginx.conf (restart nginx) The server configuration.
@@ -31,7 +31,7 @@ Notes:
 $ jailops firewall address-set create postgresql-allow --address jail:web --comment the web jail
 address set/postgresql-allow created
 
-$ jailops firewall policy create postgres
+$ jailops firewall policy create postgres --default-in deny
 firewall policy/postgres created
 
 $ jailops firewall rule add postgres in --action allow --proto tcp --from set:postgresql-allow --port 5432 --comment who may reach PostgreSQL
@@ -43,26 +43,26 @@ jail/db configuration updated
 
 $ jailops firewall test --from jail:web --to jail:db --port 5432
 tcp port 5432 10.20.0.11 -> 10.20.0.10 (inet): PASS
-  web sends: allowed by the default of the anchor
+  web sends: allowed (no rule matched: default out allow, no policy says deny)
   db takes: allowed by policy postgres rule 1 "who may reach PostgreSQL"
 
 (-v shows the rendered pf rules and what the test does not cover)
 
 $ jailops firewall test --from jail:web --to jail:db --port 5433
 tcp port 5433 10.20.0.11 -> 10.20.0.10 (inet): BLOCK
-  web sends: allowed by the default of the anchor
-  db takes: blocked by the default of the anchor
+  web sends: allowed (no rule matched: default out allow, no policy says deny)
+  db takes: blocked (no rule matched: default in deny, set by: postgres)
 
 (-v shows the rendered pf rules and what the test does not cover)
-[exit 1]
+[exit 9]
 
 $ jailops firewall test --from jail:web --to jail:db --proto icmp
 icmp echoreq 10.20.0.11 -> 10.20.0.10 (inet): BLOCK
-  web sends: allowed by the default of the anchor
-  db takes: blocked by the default of the anchor
+  web sends: allowed (no rule matched: default out allow, no policy says deny)
+  db takes: blocked (no rule matched: default in deny, set by: postgres)
 
 (-v shows the rendered pf rules and what the test does not cover)
-[exit 1]
+[exit 9]
 
 $ jailops firewall test --from jail:web --to jail:db --port 5432 -o json
 {

@@ -235,12 +235,6 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			projectPols = append(projectPols, pol)
 		}
 	}
-	// A policy that was stored without its defaults is not rendered with a guess: the jail keeps the anchor it has.
-	for _, p := range append(append([]object[api.FirewallPolicySpec](nil), projectPols...), ownPols...) {
-		if err := policyDefaults(p.Meta.Name, p.Spec); err != nil {
-			return nil, err
-		}
-	}
 	// The exposure of the jail: an allow rule in for each entry, and the forwards of its IPv4 ports behind NAT.
 	exposures, forwards := s.exposureRules(j.Spec)
 	// Every jail has an anchor, with or without a policy: the isolation of projects and the anti-spoofing rules do not
@@ -264,40 +258,43 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 				Antispoof: true, LinkLocal: linkLocal, Host: append(hostNow, hostAddrs...), DNS: dnsAddrs,
 				Foreign: foreign, MaxStates: s.statesLimit(j), Shaping: b.shapes}
 			b.reach = reachCtx{host: in.Host, foreign: foreign, own: ownNets, addrs: addrs}
-			// A jail without any policy is open (apart from the isolation of projects); with policies, the strictest
-			// default of them all applies: the project's defaults are a floor that a jail's own policy can open ports
-			// through but cannot turn from deny into allow.
-			in.DefaultIn, in.DefaultOut = "allow", "allow"
-			var specs []api.FirewallPolicySpec
+			// A jail without any policy is open (apart from the isolation of projects); a default is deny when any policy
+			// states deny (effectiveDefaults): the project's deny is a floor that a jail's own policy can open ports
+			// through but cannot turn into allow.
+			var specs []namedSpec
 			for _, p := range projectPols {
 				in.Policies = append(in.Policies, render.PFPolicy{Name: p.Meta.Name, Project: true, Policy: p.Spec, AllowRaw: true})
-				specs = append(specs, p.Spec)
+				specs = append(specs, namedSpec{name: p.Meta.Name, project: true, spec: p.Spec})
 			}
 			// The grants of app access (the managed policy app-<jail>) come after the project's policies and before the
-			// jail's own; an app's jail it closes stays closed whatever the jail's own policies say.
-			accRules, accClosed := s.accessRulesFor(project, j.Metadata.Name)
-			if len(accRules) > 0 {
-				in.Policies = append(in.Policies, render.PFPolicy{Name: apps.AccessPolicyName(j.Metadata.Name), Managed: true, Policy: api.FirewallPolicySpec{Rules: accRules}})
+			// jail's own; an app's jail it closes (its policy says default_in deny) stays closed whatever the jail's own
+			// policies say.
+			if acc, ok := s.accessSpecFor(project, j.Metadata.Name); ok {
+				name := apps.AccessPolicyName(j.Metadata.Name)
+				if len(acc.Rules) > 0 {
+					in.Policies = append(in.Policies, render.PFPolicy{Name: name, Managed: true, Policy: api.FirewallPolicySpec{Rules: acc.Rules}})
+				}
+				specs = append(specs, namedSpec{name: name, managed: true, spec: acc})
 			}
 			for _, p := range ownPols {
 				in.Policies = append(in.Policies, render.PFPolicy{Name: p.Meta.Name, Policy: p.Spec, AllowRaw: true})
-				specs = append(specs, p.Spec)
+				specs = append(specs, namedSpec{name: p.Meta.Name, spec: p.Spec})
 			}
-			for i, p := range specs {
-				if i == 0 {
-					in.DefaultIn, in.DefaultOut = p.DefaultIn, p.DefaultOut
-					continue
+			in.DefaultIn, in.DefaultOut, in.DefaultInBy, in.DefaultOutBy = effectiveDefaults(specs)
+			for _, p := range specs {
+				src := "jail"
+				switch {
+				case p.project:
+					src = "project"
+				case p.managed:
+					src = "managed"
 				}
-				in.DefaultIn = stricterDefault(in.DefaultIn, p.DefaultIn, "in")
-				in.DefaultOut = stricterDefault(in.DefaultOut, p.DefaultOut, "out")
+				b.reach.policies = append(b.reach.policies, api.ReachPolicy{Name: p.name, Source: src, Rules: len(p.spec.Rules), DefaultIn: p.spec.DefaultIn, DefaultOut: p.spec.DefaultOut})
 			}
 			for _, p := range specs {
-				for t, m := range s.tagMembers(project, p) {
+				for t, m := range s.tagMembers(project, p.spec) {
 					in.TagMembers[t] = append(in.TagMembers[t], m...)
 				}
-			}
-			if accClosed {
-				in.DefaultIn = "deny"
 			}
 			in.Expose, in.Forwards = exposures, forwards
 			an, err := render.BuildAnchor(in)
@@ -358,6 +355,7 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			return nil, err
 		}
 		b.fstab, b.hasFstab = fs, true
+		d.Mounts = fstabTargets(fs)
 		in.FstabPath = s.fstabPath(name)
 	}
 	jc, err := render.JailConf(in)
@@ -652,4 +650,15 @@ func stopTimeoutOf(spec api.JailSpec) int {
 		return spec.Boot.StopTimeout
 	}
 	return api.DefaultStopTimeout
+}
+
+// fstabTargets lists the mount points of a rendered fstab (its second field).
+func fstabTargets(fstab string) []string {
+	var out []string
+	for _, l := range strings.Split(fstab, "\n") {
+		if f := strings.Fields(l); len(f) >= 3 && !strings.HasPrefix(f[0], "#") {
+			out = append(out, f[1])
+		}
+	}
+	return out
 }

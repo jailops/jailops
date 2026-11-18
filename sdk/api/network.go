@@ -69,6 +69,9 @@ type NetworkStatus struct {
 	Notes []string `json:"notes,omitempty"`
 	// DNS is what the jails of the network get in their resolv.conf, worked out when the network is read.
 	DNS *NetworkDNS `json:"dns,omitempty"`
+	// GrantedTo are the projects the network is granted to, as far as the caller may see them: every project for a
+	// global identity, the caller's own projects for any other. Worked out when the network is read.
+	GrantedTo []string `json:"granted_to,omitempty"`
 }
 
 // DNSSource says where the nameservers of a jail's resolv.conf come from.

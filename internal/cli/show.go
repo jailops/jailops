@@ -73,6 +73,7 @@ func (a *app) showStorage(st api.Storage) error {
 	s := showWriter{w: a.env.Stdout, width: 13}
 	s.title("Storage %s", st.Metadata.Name)
 	s.kv("Dataset", st.Spec.Dataset)
+	s.kv("Granted to", orText(strings.Join(st.Status.GrantedTo, ", "), "none"))
 	if st.Spec.Comment != "" {
 		s.kv("Comment", st.Spec.Comment)
 	}
@@ -160,8 +161,9 @@ func (a *app) showPolicy(p api.FirewallPolicy) error {
 	if p.Spec.Comment != "" {
 		s.kv("Comment", p.Spec.Comment)
 	}
-	s.kv("Default in", p.Spec.DefaultIn)
-	s.kv("Default out", p.Spec.DefaultOut)
+	s.kv("Default in", unsetText(p.Spec.DefaultIn))
+	s.kv("Default out", unsetText(p.Spec.DefaultOut))
+	s.kv("Used by", policyUsers(p.Status))
 	s.kv("Age", age(a.env.Now(), p.Metadata.CreatedAt))
 	s.labels(p.Metadata)
 	if len(p.Spec.Rules) > 0 {
@@ -186,6 +188,7 @@ func (a *app) showNetwork(n api.Network) error {
 	s := showWriter{w: a.env.Stdout, width: 11}
 	s.title("Network %s", n.Metadata.Name)
 	s.kv("Uplink", orText(n.Spec.Uplink, "none"))
+	s.kv("Granted to", orText(strings.Join(n.Status.GrantedTo, ", "), "none"))
 	if v4 := n.Spec.IPv4; v4 != nil {
 		line := v4.Subnet + ", gateway " + v4.Gateway
 		if v4.NAT {

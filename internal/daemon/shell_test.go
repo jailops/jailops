@@ -35,17 +35,6 @@ func mustOp[T any](op *sdk.Operation[T], err error) T {
 	return v
 }
 
-// afterHousekeeping submits an operation again while the housekeeping pass of a freshly started daemon holds the lock
-// of the jail (a pass is short: it answers busy to whoever comes in that moment).
-func afterHousekeeping[T any](submit func() (*sdk.Operation[T], error)) (*sdk.Operation[T], error) {
-	for deadline := time.Now().Add(10 * time.Second); ; time.Sleep(10 * time.Millisecond) {
-		op, err := submit()
-		if !api.IsCode(err, api.CodeBusy) || !strings.Contains(err.Error(), "housekeeping") || time.Now().After(deadline) {
-			return op, err
-		}
-	}
-}
-
 // opErr is the error of submitting an operation or, when it was submitted, of the operation.
 func opErr[T any](op *sdk.Operation[T], err error) error {
 	if err != nil {
@@ -246,7 +235,7 @@ func TestShellChoicesAndExistingJails(t *testing.T) {
 	e.Stop()
 	e2 := dtest.New(t, dtest.Options{Reuse: e})
 	e2.Admin = e2.Admin.Project("alpha")
-	mustOp(afterHousekeeping(func() (*sdk.Operation[api.Jail], error) { return e2.Admin.Jails().Restart(ctx, "web") }))
+	mustOp(e2.Admin.Jails().Restart(ctx, "web"))
 	if installedBash(e, webRoot) != 0 || e2.HasFile(webRoot+api.PromptFile) {
 		t.Fatal("an existing jail was changed without being asked")
 	}
@@ -461,5 +450,29 @@ func TestJailsMaxStatesConfig(t *testing.T) {
 		if _, err := daemon.Decode(strings.NewReader("pool: tank\njails:\n  max_states: " + bad + "\n")); err == nil || !strings.Contains(err.Error(), "jails.max_states") {
 			t.Errorf("max_states %s: %v", bad, err)
 		}
+	}
+}
+
+// A Linux jail is thick: the persistent datasets of a thin layout are ZFS mounts that the nullfs mirror at
+// compat/linux does not show, so the thin layout is refused at once and nothing is made.
+func TestALinuxJailIsAlwaysThick(t *testing.T) {
+	shellT = t
+	e := dtest.New(t, dtest.Options{})
+	e.Seed()
+	e.SeedLinux()
+	ctx := context.Background()
+	thin := dtest.AlpineJail("alp-thin")
+	thin.Spec.Layout = api.LayoutThin
+	_, err := e.Admin.Jails().Create(ctx, thin)
+	var ae *api.Error
+	if !errors.As(err, &ae) || ae.Code != api.CodeInvalid || !strings.Contains(ae.Message, "a Linux jail is thick") {
+		t.Fatalf("thin on a Linux image: %v", err)
+	}
+	if _, err := e.Admin.Jails().Get(ctx, "alp-thin"); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("a refused jail was stored: %v", err)
+	}
+	j := mustOp(e.Admin.Jails().Create(ctx, dtest.AlpineJail("alp")))
+	if j.Spec.Layout != api.LayoutThick {
+		t.Fatalf("layout of a Linux jail: %q", j.Spec.Layout)
 	}
 }

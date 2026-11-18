@@ -69,7 +69,7 @@ $ jailops remote switch nowhere
 [exit 2]
 
 $ jailops remote add local https://<addr>
-! usage: "local" is not a valid remote name
+! usage: "local" is the socket of this host, not a remote name
 ! hint: run 'jailops remote add --help' for usage
 [exit 2]
 

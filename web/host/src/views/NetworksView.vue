@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import Icon from '@jailops/shared/components/Icon.vue'
 import NetworkForm from '@/components/NetworkForm.vue'
 import NetTabs from '@/components/NetTabs.vue'
 import RenameDialog from '@/components/RenameDialog.vue'
 import { canRename } from '@/composables/rename'
 import { ifMatch } from '@/lib/rename'
-import { isGlobalAdmin } from '@/composables/project'
+import { isGlobalAdmin, projectState } from '@/composables/project'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
@@ -19,15 +19,22 @@ import Callout from '@jailops/shared/components/Callout.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
 import type { Lease, Network, NDPNetwork, NDPUplink } from '@jailops/shared/api/types'
 
+/** A global administrator may list every network of the host; the default is what the selected project is granted. */
+const all = ref(false)
 const l = useLoad(async () => {
-  const nets = await api.networks.list()
+  const nets = await api.networks.list({ project: projectState.current, all: all.value })
   const leases: Record<string, Lease[]> = {}
   await Promise.all(nets.map(async (n) => (leases[n.metadata.name] = await api.networks.leases(n.metadata.name).catch(() => []))))
-  const projects = await api.projects.list().catch(() => [])
   // the proxy state needs the operator role: a console without it shows the switch and no status
   const ndp = await api.ndp().catch(() => null)
-  return { nets, leases, projects, ndp }
+  return { nets, leases, ndp }
 })
+watch(all, () => void l.reload())
+/** A network that was just made is granted to nobody: every network is listed, so the new one is there to be granted. */
+function created(): void {
+  if (canWrite.value && projectState.current && !all.value) all.value = true
+  else void l.reload()
+}
 const creating = ref(false)
 const editing = ref<{ net: Network; etag?: string } | null>(null)
 async function edit(n: Network): Promise<void> {
@@ -73,10 +80,9 @@ async function toggleNdp(n: Network): Promise<void> {
 const renaming = ref<Network | null>(null)
 const open = ref<Record<string, boolean>>({})
 
-/** The project a network is granted to: a network belongs to at most one. */
-function holders(name: string) {
-  return (l.data.value?.projects ?? []).filter((p) => (p.spec.networks ?? []).some((g) => g.network === name)).map((p) => ({ project: p.metadata.name }))
-}
+/** The projects a network is granted to: a network belongs to at most one. */
+const holders = (n: Network): string[] => n.status.granted_to ?? []
+const heldHere = (n: Network): boolean => holders(n).includes(projectState.current)
 function total(n: Network): number {
   const t = (n.status.allocated ?? 0) + (n.status.free ?? 0)
   return t || rangeSize(n.spec.ipv4?.range ?? '')
@@ -88,7 +94,7 @@ function used(n: Network): number {
 
 <template>
   <div>
-    <div class="page-head"><h1>{{ s.networks.title }}</h1><button class="btn btn-primary" type="button" :disabled="!canWrite" data-test="new-network" @click="creating = true"><Icon name="plus" />{{ s.networks.create }}</button></div>
+    <div class="page-head"><h1>{{ s.networks.title }}</h1><label v-if="canWrite && projectState.current" class="row" style="margin-left: auto; gap: 6px"><input v-model="all" type="checkbox" data-test="scope-all" />{{ s.networks.showAll }}</label><button class="btn btn-primary" type="button" :disabled="!canWrite" data-test="new-network" @click="creating = true"><Icon name="plus" />{{ s.networks.create }}</button></div>
     <NetTabs />
     <LoadState :loading="l.loading.value" :error="l.error.value" :has-data="!!l.data.value" @retry="l.reload">
       <p v-if="!l.data.value?.nets.length" class="empty panel">{{ s.networks.empty }}</p>
@@ -99,6 +105,7 @@ function used(n: Network): number {
               <h2 class="mono">{{ n.metadata.name }}</h2>
               <span v-if="n.spec.uplink" class="faint mono">{{ s.networks.via(n.spec.uplink) }}</span>
               <span class="faint">{{ s.networks.links(n.status.links?.length ?? 0) }}</span>
+              <span v-if="all && projectState.current" class="badge" :class="heldHere(n) ? 'ok' : 'info'" data-test="net-granted" :data-granted="heldHere(n) ? 'yes' : 'no'">{{ heldHere(n) ? s.networks.grantedHere : s.networks.notGrantedHere }}</span>
             </div>
             <div v-if="canWrite" class="row-actions">
               <button class="btn btn-sm" type="button" :data-test="`edit-net-${n.metadata.name}`" @click="edit(n)">{{ s.networks.edit }}</button>
@@ -153,9 +160,9 @@ function used(n: Network): number {
             <Callout v-if="n.status.orphans?.length" tone="warn">
               <strong>{{ s.networks.orphans }}</strong>: <span class="mono">{{ n.status.orphans.join(', ') }}</span><br /><span class="muted">{{ s.networks.orphanHint }}</span>
             </Callout>
-            <div v-if="holders(n.metadata.name).length" data-test="net-projects">
+            <div v-if="holders(n).length" data-test="net-projects">
               <h3>{{ s.networks.projects }}</h3>
-              <p><router-link v-for="h in holders(n.metadata.name)" :key="h.project" class="mono" :data-holder="h.project" :to="`/projects/${h.project}`">{{ h.project }}</router-link></p>
+              <p><router-link v-for="h in holders(n)" :key="h" class="mono" :data-holder="h" :to="`/projects/${h}`">{{ h }}</router-link></p>
             </div>
             <div>
               <button class="btn btn-sm" type="button" :aria-expanded="!!open[n.metadata.name]" @click="open[n.metadata.name] = !open[n.metadata.name]">{{ s.networks.leases }} ({{ l.data.value?.leases[n.metadata.name]?.length ?? 0 }})</button>
@@ -171,7 +178,7 @@ function used(n: Network): number {
         </section>
       </div>
     </LoadState>
-    <NetworkForm :open="creating" @close="creating = false" @done="l.reload" />
+    <NetworkForm :open="creating" @close="creating = false" @done="created" />
     <RenameDialog :open="!!renaming" kind="network" :name="renaming?.metadata.name ?? ''" :etag="ifMatch(renaming?.metadata.generation)" @close="renaming = null" @done="l.reload" />
     <NetworkForm :open="!!editing" :network="editing?.net" :etag="editing?.etag" @close="editing = null" @done="l.reload" />
   </div>

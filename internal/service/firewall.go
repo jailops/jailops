@@ -13,8 +13,28 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-func polToAPI(o object[api.FirewallPolicySpec]) api.FirewallPolicy {
-	return api.FirewallPolicy{Metadata: o.Meta, Spec: o.Spec}
+// policyUse says who uses the policy of a project: the jails that name it (their own, through a profile, or as the
+// managed policy of app access) and whether it is a mandatory policy of the project.
+func (s *Service) policyUse(project, name string) api.FirewallPolicyStatus {
+	st := api.FirewallPolicyStatus{UsedBy: []string{}}
+	if pr, err := s.projKind.get(project); err == nil {
+		st.Mandatory = slices.Contains(pr.Spec.FirewallPolicies, name)
+	}
+	managed := ""
+	if o, err := s.polKind.p(project).get(name); err == nil && o.Meta.ManagedBy == api.AppAccessManagedBy {
+		managed = o.Meta.Labels[api.LabelApp+".access"]
+	}
+	for _, j := range s.projectJails(project) {
+		if j.Metadata.Name == managed || slices.Contains(s.effective(j).Firewall.Policies, name) {
+			st.UsedBy = append(st.UsedBy, j.Metadata.Name)
+		}
+	}
+	return st
+}
+
+// policyOut is the policy as the API shows it: with who uses it.
+func (s *Service) policyOut(project string, o object[api.FirewallPolicySpec]) api.FirewallPolicy {
+	return api.FirewallPolicy{Metadata: o.Meta, Spec: o.Spec, Status: s.policyUse(project, o.Meta.Name)}
 }
 func setToAPI(o object[api.AddressSetSpec]) api.AddressSet {
 	return api.AddressSet{Metadata: o.Meta, Spec: o.Spec}
@@ -54,6 +74,9 @@ func (s *Service) checkPolicy(ctx context.Context, name string, spec api.Firewal
 func (s *Service) checkPolicyWas(ctx context.Context, name string, spec api.FirewallPolicySpec, refs fwRefs, was *api.FirewallPolicySpec) error {
 	if err := validate.Name("name", name); err != nil {
 		return err
+	}
+	if name == render.ExposeOrigin {
+		return invalid("%q is the name the firewall views give to the rules of an exposure: choose another name for the policy", name)
 	}
 	rep, err := validate.FirewallPolicySpec(spec)
 	if err != nil {
@@ -105,7 +128,7 @@ func (s *Service) ListPolicies(ctx context.Context, labels map[string]string) ([
 	out := []api.FirewallPolicy{}
 	for _, o := range objs {
 		if MatchLabels(o.Meta.Labels, labels) {
-			out = append(out, polToAPI(o))
+			out = append(out, s.policyOut(p.Meta.Name, o))
 		}
 	}
 	return out, nil
@@ -118,7 +141,10 @@ func (s *Service) GetPolicy(ctx context.Context, name string) (api.FirewallPolic
 		return api.FirewallPolicy{}, err
 	}
 	o, err := s.polKind.p(p.Meta.Name).get(name)
-	return polToAPI(o), err
+	if err != nil {
+		return api.FirewallPolicy{}, err
+	}
+	return s.policyOut(p.Meta.Name, o), nil
 }
 
 // CreatePolicy stores a policy in the request's project.
@@ -148,7 +174,7 @@ func (s *Service) CreatePolicy(ctx context.Context, in api.FirewallPolicy) (api.
 	if err != nil {
 		return api.FirewallPolicy{}, err
 	}
-	return polToAPI(o), nil
+	return s.policyOut(p.Meta.Name, o), nil
 }
 
 // protectedPolicy reports whether the policy is the project's mandatory
@@ -200,7 +226,7 @@ func (s *Service) UpdatePolicy(ctx context.Context, name string, in api.Firewall
 		return api.FirewallPolicy{}, err
 	}
 	s.kick()
-	return polToAPI(o), nil
+	return s.policyOut(p.Meta.Name, o), nil
 }
 
 // PatchPolicy applies a merge patch.
@@ -236,10 +262,8 @@ func (s *Service) DeletePolicy(ctx context.Context, name string, expect int64) e
 		return api.Errorf(api.CodeBusy, "firewall policy %q is a mandatory policy of project %q", name, p.Meta.Name).
 			WithHint("take it out of spec.firewall_policies of the project first")
 	}
-	for _, j := range s.projectJails(p.Meta.Name) {
-		if slices.Contains(j.Spec.Firewall.Policies, name) {
-			return api.Errorf(api.CodeBusy, "firewall policy %q is used by jail %q", name, j.Metadata.Name)
-		}
+	if use := s.policyUse(p.Meta.Name, name); len(use.UsedBy) > 0 {
+		return api.Errorf(api.CodeBusy, "firewall policy %q is used by jail %q", name, use.UsedBy[0])
 	}
 	return ks.delete(ctx, name, expect)
 }
@@ -504,14 +528,39 @@ func (s *Service) tagMembers(project string, policy api.FirewallPolicySpec) map[
 	return out
 }
 
-// stricterDefault returns the stricter of two defaults. An unset inbound default is deny and an unset outbound
-// default is allow (what the renderer does with an empty value).
-func stricterDefault(a, b, dir string) string {
-	deny := func(v string) bool { return v == "deny" || (dir == "in" && v == "") }
-	if deny(a) || deny(b) {
-		return "deny"
+// namedSpec is a policy of a jail with its name and where it comes from: the project's mandatory policy or the policy
+// that app access keeps for the jail.
+type namedSpec struct {
+	name    string
+	project bool
+	managed bool
+	spec    api.FirewallPolicySpec
+}
+
+func (n namedSpec) label() string {
+	switch {
+	case n.project:
+		return n.name + " [project]"
+	case n.managed:
+		return n.name + " [managed]"
 	}
-	return "allow"
+	return n.name
+}
+
+// effectiveDefaults are the defaults of a jail's anchor from its policies, the project's mandatory ones included: deny
+// when any policy states deny for the direction, whatever the order, else allow. A policy that states nothing, or allow,
+// has no say. inBy and outBy are the policies that state deny, for the trace.
+func effectiveDefaults(pols []namedSpec) (in, out string, inBy, outBy []string) {
+	in, out = "allow", "allow"
+	for _, p := range pols {
+		if p.spec.DefaultIn == "deny" {
+			in, inBy = "deny", append(inBy, p.label())
+		}
+		if p.spec.DefaultOut == "deny" {
+			out, outBy = "deny", append(outBy, p.label())
+		}
+	}
+	return in, out, inBy, outBy
 }
 
 // foreignPrefixes are the subnets of the networks that belong to projects other than project. A network is never
@@ -549,18 +598,6 @@ func (s *Service) foreignPrefixes(project string) ([]netip.Prefix, error) {
 	return out, nil
 }
 
-// policyDefaults says which default a stored policy lacks: a policy always says default_in and default_out, and a
-// policy that was stored without one is neither rendered nor given a default of ours.
-func policyDefaults(name string, p api.FirewallPolicySpec) error {
-	for _, d := range []struct{ field, v string }{{"default_in", p.DefaultIn}, {"default_out", p.DefaultOut}} {
-		if d.v != "allow" && d.v != "deny" {
-			return invalid("firewall policy %q has no %s: a policy says allow or deny for each direction", name, d.field).
-				WithHint("jailops firewall policy edit " + name + " and set " + d.field)
-		}
-	}
-	return nil
-}
-
 // refuseHostAllowOut refuses an allow rule that names the host as the destination of a jail's traffic: JailOps' firewall
 // governs the jails and /etc/pf.conf governs the host, so a jail reaches the host through the gateway services
 // JailOps provides (DNS and ping) and nothing else. Such a rule was rendered after the closing of the host and could
@@ -579,4 +616,46 @@ func refuseHostAllowOut(spec api.FirewallPolicySpec) error {
 		}
 	}
 	return nil
+}
+
+// openInboundWarning says when a jail's own policy allows traffic in from named sources but no policy of the jail states
+// deny for inbound: the allow rule then restricts nothing, every source on the jail's network reaches the jail.
+func (s *Service) openInboundWarning(j api.Jail) string {
+	if len(j.Spec.Firewall.Policies) == 0 {
+		return ""
+	}
+	project := j.Metadata.Project
+	var specs []namedSpec
+	if pr, err := s.projKind.get(project); err == nil {
+		for _, pn := range pr.Spec.FirewallPolicies {
+			if p, err := s.polKind.p(project).get(pn); err == nil {
+				specs = append(specs, namedSpec{name: pn, project: true, spec: p.Spec})
+			}
+		}
+	}
+	for _, pn := range j.Spec.Firewall.Policies {
+		if p, err := s.polKind.p(project).get(pn); err == nil {
+			specs = append(specs, namedSpec{name: pn, spec: p.Spec})
+		}
+	}
+	if in, _, _, _ := effectiveDefaults(specs); in == "deny" {
+		return ""
+	}
+	for _, p := range specs {
+		for _, r := range p.spec.Rules {
+			if r.Disabled || r.Direction != "in" || r.Action != "allow" || len(r.From) == 0 {
+				continue
+			}
+			what := r.Proto
+			if what == "" {
+				what = "traffic"
+			}
+			if len(r.Ports) > 0 {
+				what += " " + strings.Join(r.Ports, ",")
+			}
+			return fmt.Sprintf("policy %s allows %s from %s, but inbound is allow (no policy says deny): every source on the jail's network reaches the jail; add default_in: deny to a policy of the jail to restrict it",
+				p.name, what, strings.Join(r.From, ", "))
+		}
+	}
+	return ""
 }

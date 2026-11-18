@@ -128,7 +128,7 @@ func (a *app) printAppInstalled(w io.Writer, name, jail string, res api.AppInsta
 			line += " at " + p.Endpoint
 		}
 		if p.Expose {
-			line += " (expose: forwarding is not set up yet)"
+			line += fmt.Sprintf(" (meant for the Internet: jailops expose %s %d)", j.Metadata.Name, p.Port)
 		}
 		if p.Description != "" {
 			line += " " + p.Description

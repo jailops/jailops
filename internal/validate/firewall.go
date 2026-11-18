@@ -30,9 +30,7 @@ func FirewallPolicySpec(s api.FirewallPolicySpec) (FirewallReport, error) {
 	var rep FirewallReport
 	for _, d := range []struct{ f, v string }{{"default_in", s.DefaultIn}, {"default_out", s.DefaultOut}} {
 		switch d.v {
-		case "allow", "deny":
-		case "":
-			return rep, Invalid(d.f, "%s is required: allow or deny (a policy says its defaults)", d.f)
+		case "", "allow", "deny":
 		default:
 			return rep, Invalid(d.f, "%s %q must be allow or deny", d.f, d.v)
 		}

@@ -44,7 +44,7 @@ test('a connection that passes: the rule that lets it in is named', async ({ pag
   const to = page.getByTestId('hop-destination').first()
   await expect(to).toContainText('PASS')
   await expect(to).toContainText('policy db-internal, rule 1: postgres from web')
-  await expect(page.getByTestId('hop-source').first()).toContainText('the default of the anchor')
+  await expect(page.getByTestId('hop-source').first()).toContainText('the default (no policy says deny)')
   await expect(page.getByTestId('node-to').first()).toContainText('Goes to')
   // IPv4 and IPv6 are two cases
   await expect(page.getByTestId('case-4')).toBeVisible()
@@ -59,7 +59,7 @@ test('blocked by the default of the anchor, and the stop is drawn', async ({ pag
   await ask(page, 'jail:web', 'jail:db', '5433')
   await expect(verdict(page)).toHaveText('BLOCK')
   await expect(page.getByTestId('hop-destination').first()).toContainText('BLOCK')
-  await expect(page.getByTestId('hop-destination').first()).toContainText('the default of the anchor')
+  await expect(page.getByTestId('hop-destination').first()).toContainText('the default, set by db-internal')
   await expect(page.getByTestId('node-to').first()).toContainText('Not reached')
 })
 
@@ -83,7 +83,7 @@ test('a rule that is switched off lets nothing through, and the test says it was
   await ask(page, '192.0.2.7', 'jail:web', '21')
   await expect(verdict(page)).toHaveText('BLOCK')
   const hop = page.getByTestId('hop-destination').first()
-  await expect(hop).toContainText('the default of the anchor')
+  await expect(hop).toContainText('the default, set by web-default')
   await hop.getByText('Details').click()
   await expect(page.getByTestId('skipped').first()).toContainText('the rule is switched off')
 })

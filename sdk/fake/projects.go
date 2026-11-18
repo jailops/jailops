@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/netip"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -428,6 +429,12 @@ func (s *Server) setupStorage() {
 		return nil
 	}
 	k.onDelete = func(st *api.Storage) { delete(s.storageStat, st.Metadata.Name) }
+	grants := func(sp api.ProjectSpec, name string) bool {
+		return slices.ContainsFunc(sp.Storage, func(g api.ProjectStorage) bool { return g.Storage == name || g.Storage == "*" })
+	}
+	k.listed = func(rc *reqInfo, all bool, st *api.Storage) bool {
+		return all || rc.project == "" || slices.Contains(s.projectsGranting(func(sp api.ProjectSpec) bool { return grants(sp, st.Metadata.Name) }), rc.project)
+	}
 	k.decorate = func(st *api.Storage) {
 		pool, _, _ := strings.Cut(st.Spec.Dataset, "/")
 		st.Status = api.StorageStatus{Pool: pool, Health: "ONLINE", Size: 1 << 40, Used: 1 << 30, Available: 1<<40 - 1<<30}
@@ -435,6 +442,7 @@ func (s *Server) setupStorage() {
 			st.Status = o
 			st.Status.Conditions = slices.Clone(o.Conditions)
 		}
+		st.Status.GrantedTo = s.projectsGranting(func(sp api.ProjectSpec) bool { return grants(sp, st.Metadata.Name) })
 	}
 	s.storages.insert(&api.Storage{Metadata: api.ObjectMeta{Name: DefaultStorage}, Spec: api.StorageSpec{Dataset: "tank/jailops"}}, true)
 }
@@ -706,4 +714,16 @@ func (s *Server) aggregate(w http.ResponseWriter, r *http.Request, name string) 
 		out.Hosts = append(out.Hosts, hs)
 	}
 	writeSync(w, 200, out)
+}
+
+// projectsGranting is the names of the projects whose spec the predicate accepts, sorted; s.mu is held.
+func (s *Server) projectsGranting(granted func(api.ProjectSpec) bool) []string {
+	var out []string
+	for _, p := range s.projects.items {
+		if granted(p.Spec) {
+			out = append(out, p.Metadata.Name)
+		}
+	}
+	sort.Strings(out)
+	return out
 }

@@ -19,6 +19,9 @@ start. Register another, for example on the big pool:
     jailops storage create bulk --dataset hdd/jailops --compression zstd
     jailops storage list                                     # POOL, HEALTH, USED, AVAILABLE come from ZFS
 
+`jailops storage list` shows the storages granted to the selected project; `--all` (a global administrator) shows every
+storage of the host with the projects that hold it, and `storage show` names them under `Granted to`.
+
 The dataset must exist; it must be empty or already owned by JailOps (`jailops:managed=on`). Registering a storage also
 registers it with the root helper, which then allows its operations below that root and nowhere else. `--compression` applies to
 new datasets. The helper gives the root's directory (its mountpoint) to root with mode 0700 and sets `devices=off` on the
@@ -103,6 +106,11 @@ attached read-write to one jail and `--ro` to the others. An encrypted volume is
 **Linux jails.** A volume of a Linux jail is mounted twice, at its path in the jail's root and at the same path below
 `compat/linux`, because a Linux process reaches every path through that mirror first (see
 [linux-jails.md](linux-jails.md#what-a-linux-process-sees-and-what-it-does-not)). Attach and detach do both mounts.
+
+**Where a volume can go.** Not over a persistent directory of the jail or above one (`/etc`, `/usr/local`, `/var/db`,
+`/var/log`, `/var/mail`, `/var/spool`, `/home`, `/root`: a mount on `/var` would hide the datasets below it), not at or
+below `/dev`, `/proc`, `/sys` or `/compat`, where the jail's own file systems are, and not inside another volume. The
+request says so at once.
 
 **Attached over existing files.** What the jail has at the path is hidden while the volume is mounted over it.
 `jailops volume attach JAIL VOLUME PATH --copy-existing` copies the files of the path into the volume first (the volume

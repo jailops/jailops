@@ -348,7 +348,8 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	trigger := make(chan struct{}, 1)
 	d.rec = reconcile.New(rcfg, reconcile.Env{Source: svc, Sink: svc, Actions: svc, Net: clients.Net, PF: clients.PF, Jails: clients.Jails,
 		Run: clients.Runner, Sysctl: clients.Sysctl, Routes: func(context.Context) ([]ifconfig.RouteEntry, error) { return priv.ReadRoutes() },
-		Log: log, Trigger: trigger, WG: clients.WG, AfterPass: func(ctx context.Context) { svc.SyncDNS(ctx) }})
+		Mounts: func(context.Context) ([]string, error) { return priv.ReadMounts() },
+		Log:    log, Trigger: trigger, WG: clients.WG, AfterPass: func(ctx context.Context) { svc.SyncDNS(ctx) }})
 	svc.SetReconciler(d.rec)
 	// 6. Routes are verified against the permission table here.
 	srv, err := server.New(server.Config{

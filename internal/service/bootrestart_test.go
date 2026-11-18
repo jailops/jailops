@@ -64,4 +64,6 @@ func TestRestartOfTheDaemonDoesNotStartJailsStoppedOnPurpose(t *testing.T) {
 		}
 		time.Sleep(50 * time.Millisecond)
 	}
+	// the start installs bash in the background: it is over before the directories of the test are removed
+	waitShellSetup(t, e3.D.Service(), as(globalAdmin, dtest.SeedProject), "web")
 }

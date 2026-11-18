@@ -38,6 +38,10 @@ type jailInfo struct {
 	// FirewallPolicies are the policies the jail is rendered with, in the order they are rendered; empty when it has
 	// none and is open.
 	FirewallPolicies []infoPolicy `json:"firewall_policies,omitempty"`
+	// FirewallApplied is the FirewallApplied condition: whether the kernel has what the policies say (pf evaluates the
+	// anchors, the anchor holds the rendered rules, the connections of removed rules are ended). Absent while the jail
+	// is stopped or has no firewall.
+	FirewallApplied *api.Condition `json:"firewall_applied,omitempty"`
 	// Reach is what reaches the jail and what it reaches (the same as 'firewall show'); absent when the server does not
 	// compute it.
 	Reach *api.JailReach `json:"reach,omitempty"`
@@ -196,7 +200,7 @@ as structured data.`,
 }
 
 // infoPolicy is a firewall policy of a jail; Source says where it comes from when it is not the jail's own: "project"
-// for a mandatory policy of the project, "managed by app-access" for the policy app access keeps.
+// for a mandatory policy of the project, "managed" for the policy app access keeps.
 type infoPolicy struct {
 	Name   string `json:"name"`
 	Source string `json:"source,omitempty"`
@@ -293,7 +297,7 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 	}
 	// an app's jail has the policy that app access keeps for it
 	if p, err := c.Firewall().Policies().Get(ctx, "app-"+m.Name); err == nil && p.Metadata.ManagedBy != "" {
-		info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: p.Metadata.Name, Source: "managed by " + p.Metadata.ManagedBy})
+		info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: p.Metadata.Name, Source: "managed"})
 	}
 	for _, n := range s.Firewall.Policies {
 		info.FirewallPolicies = append(info.FirewallPolicies, infoPolicy{Name: n})
@@ -309,6 +313,10 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 		info.Update.Last = &last
 	}
 	for _, cond := range st.Conditions {
+		if cond.Type == api.ConditionFirewallApplied {
+			c := cond
+			info.FirewallApplied = &c
+		}
 		if cond.Status != api.ConditionTrue {
 			p := cond.Type
 			if cond.Reason != "" {
@@ -412,7 +420,7 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	}
 	kv("Limits", strings.Join(lim, ", "))
 	if len(info.FirewallPolicies) == 0 {
-		kv("Firewall", "open: no firewall policy (the host answers ping and DNS only)")
+		kv("Firewall", "open: no firewall policy (the host answers ping and DNS only); "+attachHint(info.Name))
 	} else {
 		var ps []string
 		for _, p := range info.FirewallPolicies {
@@ -423,6 +431,17 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 			}
 		}
 		kv("Firewall", strings.Join(ps, ", "))
+	}
+	if c := info.FirewallApplied; c != nil {
+		if c.Status == api.ConditionTrue {
+			kv("Applied", "yes: "+c.Message+" (since "+when(c.Since)+")")
+		} else {
+			kv("Applied", "no: "+c.Message+" ("+c.Reason+", since "+when(c.Since)+")")
+		}
+	}
+	if r := info.Reach; r != nil {
+		kv("Default in", defaultText(r.DefaultIn, r.DefaultInBy))
+		kv("Default out", defaultText(r.DefaultOut, r.DefaultOutBy))
 	}
 	switch u := info.Resources.Usage; {
 	case u == nil:

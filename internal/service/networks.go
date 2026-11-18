@@ -25,6 +25,7 @@ func (s *Service) networkToAPI(ctx context.Context, o object[api.NetworkSpec]) a
 		n.Status.Allocated, n.Status.Free = a, f
 	}
 	n.Status.DNS = s.networkDNS(o.Meta.Name, o.Spec)
+	n.Status.GrantedTo = s.grantedTo(ctx, func(sp api.ProjectSpec) bool { _, ok := specGrantsNetwork(sp, o.Meta.Name); return ok })
 	if a := ActorFrom(ctx); !a.Global || ProjectFrom(ctx) != "" {
 		n.Status.Orphans = nil // host interfaces are not the business of a project
 		n.Status.Links = nil
@@ -107,18 +108,24 @@ func parseAddr(v string) (netip.Addr, bool) {
 	return a, err == nil
 }
 
-// ListNetworks returns the networks the caller may see.
+// ListNetworks returns the networks the caller may see: those granted to the selected project, and with all (a global
+// identity) every network.
 func (s *Service) ListNetworks(ctx context.Context, labels map[string]string) ([]api.Network, error) {
 	if !ActorFrom(ctx).HasScope() {
 		return nil, api.Errorf(api.CodeForbidden, "this identity has no projects and is not global")
+	}
+	if err := checkAll(ctx); err != nil {
+		return nil, err
 	}
 	objs, err := s.netKind.list()
 	if err != nil {
 		return nil, err
 	}
+	visible := func(name string) bool { return s.networkVisible(ctx, name) }
+	grants := func(sp api.ProjectSpec, name string) bool { _, ok := specGrantsNetwork(sp, name); return ok }
 	out := []api.Network{}
 	for _, o := range objs {
-		if MatchLabels(o.Meta.Labels, labels) && s.networkVisible(ctx, o.Meta.Name) {
+		if MatchLabels(o.Meta.Labels, labels) && s.listScoped(ctx, o.Meta.Name, visible, grants) {
 			out = append(out, s.networkToAPI(ctx, o))
 		}
 	}

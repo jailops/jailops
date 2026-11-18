@@ -485,7 +485,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringVar(&image, "image", "", "image reference: NAME (the newest generation) or NAME#gN (default: the host's only image)")
 	f.StringVar(&storage, "storage", "", "storage to place the jail on, one granted to the project (default: the project's only storage, unless a profile supplies it)")
 	f.StringArrayVar(&profiles, "profile", nil, "profile to apply, later ones override earlier ones (repeatable)")
-	f.StringVar(&layout, "layout", "", "root layout: thin or thick (default depends on the image)")
+	f.StringVar(&layout, "layout", "", "root layout: thin or thick (default: thin for a FreeBSD image, thick for a Linux image; a Linux jail is always thick)")
 	f.StringVar(&hostname, "hostname", "", "hostname inside the jail (default: the jail name)")
 	f.StringArrayVar(&networks, "network", nil, "attach a network granted to the project (repeatable; default: the project's only network, unless a profile supplies one): NET (an address of every family it has), NET=IPV4 or NET=IPV4,IPV6 (an address, auto or none)")
 	f.IntVar(&cpu, "cpu", 0, "CPU cores: the jail is slowed down to that share (rctl pcpu; needs kern.racct.enable=1)")

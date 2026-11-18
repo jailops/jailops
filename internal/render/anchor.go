@@ -140,6 +140,9 @@ type Origin struct {
 	RuleNo   int
 	RuleName string
 	Comment  string
+	// SetBy is, for the default rules, the policies that state deny for the direction, comma separated ("name",
+	// "name [project]", "name [managed]"); empty when none does. A string, so that an Origin stays comparable.
+	SetBy string
 }
 
 // prefixOf reads an address or a CIDR as a prefix.

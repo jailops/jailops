@@ -8,9 +8,9 @@ tag (`@v7`), which the action's owner can move to other code at any time; a full
 | Workflow | Permissions of `GITHUB_TOKEN` | Actions |
 |---|---|---|
 | `ci.yml` (every push and pull request) | `contents: read` for every job | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, `actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, **`vmactions/freebsd-vm`** |
-| `release.yml` (a tag `v*`) | `contents: write` (it publishes the release) | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, **`goreleaser/goreleaser-action`** |
+| `release.yml` (a tag `v*`) | `contents: read`, and `contents: write` in the one job that publishes the release (the check job before it cannot write) | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, **`goreleaser/goreleaser-action`** |
 
-The two in bold come from third parties: `vmactions/freebsd-vm` runs the FreeBSD VM that builds and tests the tree, and
+`release.yml` names every action by its commit and GoReleaser by an exact version. The two in bold come from third parties: `vmactions/freebsd-vm` runs the FreeBSD VM that builds and tests the tree, and
 `goreleaser/goreleaser-action` runs with the token that can write the release. They matter most; the `actions/*` ones
 are GitHub's own and should be pinned the same way.
 

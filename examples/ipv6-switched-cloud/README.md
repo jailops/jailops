@@ -22,7 +22,7 @@ the carved `/80`s.
 - **A firewall per jail**: `web` has `public-web` (HTTP and HTTPS from anywhere, SSH from `set:admins`), `app` has
   `app-private` (port 8080 only from `set:web-tier`).
 - **A public web jail** with a fixed IPv6 address (`2001:db8:1:2:100::80`, your AAAA record) and `expose:` for ports 80 and 443: over IPv6
-  they reach the jail directly, over IPv4 the host's ports are forwarded.
+  the jail's own address answers (no NAT), over IPv4 the host's ports are forwarded.
 - Explicit network and storage on every jail; the image is built once by `build: true`.
 
 ## Before you apply

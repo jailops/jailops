@@ -26,16 +26,19 @@ func (a *app) printExpose(r api.ExposeResult, did string) {
 		case f.Note != "":
 			fprintf(w, "  IPv%s  %s\n", f.Family, f.Note)
 		case f.Via == "forward":
-			fprintf(w, "  IPv%s  %s (behind NAT): the host's ports are forwarded, host->jail %s\n", f.Family, f.Address, strings.Join(f.Forwards, ", "))
-		case f.Via == "uplink":
 			on := ""
-			if f.Interface != "" {
-				on = " on " + f.Interface
+			if f.Listen != "" {
+				on = " on " + f.Listen
 			}
-			fprintf(w, "  IPv%s  %s: ports %s reach the jail directly%s\n", f.Family, f.Address, f.Ports, on)
+			fprintf(w, "  IPv%s  %s   forwarded: host %s%s (NAT)\n", f.Family, f.Address, strings.Join(f.Forwards, ", "), on)
+		case f.Via == "uplink":
+			fprintf(w, "  IPv%s  %s   open: no NAT, the jail's own address answers on %s\n", f.Family, f.Address, f.Ports)
 		default:
-			fprintf(w, "  IPv%s  %s: network %s has no uplink, nothing arrives from outside\n", f.Family, f.Address, f.Network)
+			fprintf(w, "  IPv%s  %s   network %s has no uplink, nothing arrives from outside\n", f.Family, f.Address, f.Network)
 		}
+	}
+	for _, n := range r.Notes {
+		fprintf(w, "note: %s\n", n)
 	}
 	for _, x := range r.Warnings {
 		fprintf(a.env.Stderr, "warning: %s\n", x)
@@ -53,6 +56,9 @@ func (a *app) printUnexpose(r api.ExposeResult) {
 	default:
 		fprintf(w, "jail/%s: no longer exposed\n", r.Jail)
 	}
+	for _, n := range r.Notes {
+		fprintf(w, "note: %s\n", n)
+	}
 	for _, e := range r.Entries {
 		fams := "IPv4 and IPv6"
 		switch {
@@ -68,18 +74,20 @@ func (a *app) printUnexpose(r api.ExposeResult) {
 func (a *app) exposeCmd() *cobra.Command {
 	var req api.ExposeRequest
 	var ports string
+	var protos []string
 	cmd := &cobra.Command{
 		Use:   "expose JAIL PORTS",
-		Short: "Let the Internet reach ports of a jail, over IPv4 and IPv6",
+		Short: "Let the Internet reach ports of a jail",
 		Long: `Opens the ports of a jail to the Internet in one step. Over IPv6, and over IPv4 on a network
-that is routed (no NAT), the ports are let in to the jail's own address. Over IPv4 on a network with NAT, the same ports of the
-host are forwarded to the jail. The jail's firewall rules are not changed: the exposure is stored with the jail and
+without NAT, the ports are let in to the jail's own address. Over IPv4 on a network with NAT, the same ports of the
+host are forwarded to the jail. The jail's firewall policies are not changed: the exposure is stored with the jail and
 rendered as rules the firewall views name "expose". See it with 'jailops list' (EXPOSED column) and 'jailops firewall exposed'.
 
-PORTS is a port, a list 80,443 or a range 8000-8100 (a range is let in, not forwarded). Without --from anyone may
-connect; --from takes addresses, prefixes and set:NAME. Without --family every family the jail has is exposed.
-The IPv4 forward needs a global administrator (it opens a port of the host); IPv6 does not.
-Exposing the same protocol and ports again replaces the entry.`,
+PORTS is a port, a list 80,443, a range 8000-8100 or a mix of them. A range is let in; a jail behind NAT forwards single
+ports only, so a range there needs --family 6. Without --from anyone may connect; --from takes addresses, prefixes and
+set:NAME. Without --family every family the jail has is exposed. The IPv4 forward needs a global administrator (it opens
+a port of the host); IPv6 does not. A port is exposed once per protocol: exposing it again replaces what the jail said
+about it before.`,
 		Example: `jailops expose web 80,443
 jailops expose mail 25,465,587,993 --comment "mail"
 jailops expose web 443 --from set:office
@@ -96,6 +104,7 @@ jailops expose --dry-run web 80,443`,
 				}
 			}
 			req.DryRun = a.dryRun
+			req.Proto = strings.Join(protos, ",")
 			c, err := a.connect(cmd.Context())
 			if err != nil {
 				return err
@@ -107,16 +116,20 @@ jailops expose --dry-run web 80,443`,
 			if a.format != fmtTable {
 				return a.exposeResult(r)
 			}
-			did := "exposed: " + strings.Join(req.Ports, ",")
+			what := r.Exposed
+			if what == "" {
+				what = strings.Join(req.Ports, ",")
+			}
+			did := "exposed: " + what
 			if a.dryRun {
-				did = "would expose: " + strings.Join(req.Ports, ",") + " (dry run, nothing stored)"
+				did = "would expose: " + what + " (dry run, nothing stored)"
 			}
 			a.printExpose(r, did)
 			return nil
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&req.Proto, "proto", "", "tcp (default), udp or tcp,udp")
+	f.StringSliceVar(&protos, "proto", nil, "tcp (default), udp or tcp,udp (repeatable, or comma separated)")
 	f.StringSliceVar(&req.From, "from", nil, "who may connect: an address, a CIDR or set:NAME (repeatable, or comma separated; default: anyone)")
 	f.StringSliceVar(&req.Families, "family", nil, "4 or 6 (default: every family the jail has)")
 	f.IntVar(&req.HostPort, "host-port", 0, "host port of the IPv4 forward when it differs from the jail's port (one port only)")
@@ -141,11 +154,13 @@ jailops expose --dry-run web 80,443`,
 
 func (a *app) unexposeCmd() *cobra.Command {
 	var req api.UnexposeRequest
+	var protos []string
 	cmd := &cobra.Command{
 		Use:   "unexpose JAIL [PORTS]",
 		Short: "Stop letting the Internet reach ports of a jail",
 		Long: `Takes ports out of the exposure of a jail (the IPv4 forwards of them go too). Without PORTS the whole
-exposure goes; --proto and --family narrow what is removed. Removing a forward needs a global administrator.`,
+exposure goes; --proto and --family narrow what is removed. Removing a forward needs a global administrator.
+Only the exposure goes: a rule of a policy that lets the port in stays, and the answer names it.`,
 		Example: `jailops unexpose web 80
 jailops unexpose web
 jailops unexpose web 443 --family 6`,
@@ -160,6 +175,7 @@ jailops unexpose web 443 --family 6`,
 				}
 			}
 			req.DryRun = a.dryRun
+			req.Proto = strings.Join(protos, ",")
 			c, err := a.connect(cmd.Context())
 			if err != nil {
 				return err
@@ -176,7 +192,7 @@ jailops unexpose web 443 --family 6`,
 		},
 	}
 	f := cmd.Flags()
-	f.StringVar(&req.Proto, "proto", "", "tcp, udp or tcp,udp (default: every protocol)")
+	f.StringSliceVar(&protos, "proto", nil, "tcp, udp or tcp,udp (default: every protocol; repeatable, or comma separated)")
 	f.StringSliceVar(&req.Families, "family", nil, "4 or 6 (default: every family)")
 	enumFlag(cmd, "proto", "tcp", "udp", "tcp,udp")
 	enumFlag(cmd, "family", "4\tIPv4", "6\tIPv6")

@@ -339,11 +339,18 @@ computes addresses by hand:
 - The host must forward (`net.inet6.ip6.forwarding=1`, `net.inet.ip.forwarding=1`). **JailOps never sets forwarding**:
   the administrator enables `gateway_enable` and `ipv6_gateway_enable` in `rc.conf`, and `jailops doctor` checks that
   forwarding is on and persistent. (The daemon sets only `kern.elf64.fallback_brand`.)
-- On some segments the routers send unicast neighbor solicitations from their global, off-link addresses and the host has
-  to answer them (`net.inet6.icmp6.nd6_onlink_ns_rfc4861=1`; the default drops them and the router may mark the host
-  unreachable for a while). JailOps never sets it either: `jailops doctor` shows `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861`
-  as information while a network with the NDP proxy exists, and the answer of `network create` carries a note that points at the
-  explanation in the IPv6 docs. Neither is a warning, and `sysctl.persistent` does not look at it.
+- With `net.inet6.icmp6.nd6_onlink_ns_rfc4861=0`, the default, FreeBSD drops a Neighbor Solicitation whose source is not a
+  neighbour of the interface (`nd6_ns_input` asks `nd6_is_addr_neighbor`) and counts it as a bad neighbor solicitation
+  in `netstat -s -p icmp6`; with `1` it answers like it does for an on-link host, and the hop limit must still be 255.
+  Linux checks the hop limit and the target of the solicitation, not whether its source is on-link (`ndisc_recv_ns`), so it
+  answers. A host that holds its address as a `/128` on a shared segment has no on-link prefix, so routers that probe from a
+  global address get no answer and may mark the host unreachable (IPv6 drops for a while and returns). The network
+  decides: a routed IPv6 network (the prefix is routed to the host's link-local address, so the router's solicitations come
+  from its link-local address, which is on-link) does not need the setting; on a switched shared segment set `1`. JailOps
+  never sets it on its own. `jailops doctor` shows `sysctl.net.inet6.icmp6.nd6_onlink_ns_rfc4861` as information while a
+  network with the NDP proxy exists, and as a warning with the count of rejected solicitations once the host has rejected
+  any; the answer of `network create` carries a note that points at the explanation in the IPv6 docs.
+  `sysctl.persistent` does not look at it.
 - Verified on a cloud test host: the provider routes the whole `/64` to the host, and a source address taken from
   a second `/80` makes a round trip.
 
@@ -1548,9 +1555,7 @@ see.
    two grammar errors (`icmp6-type` and `tagged` must follow `from .. to ..`).
 
 **Isolation limits to know (October 2026 audit).** (1) (Closed since: see 18.13. pf cannot name the advertised target,
-so jails hold /32 and /128 addresses, every port is private and the host pins their addresses.) (2) A policy rule `allow out to any` or `allow in from any` also opens the networks of other projects, because the
-closed `<foreign>` block comes after the jail's own rules; both sides must open for a flow to pass, so it is a choice
-and not an accident, but "any" includes other projects. (3) Neither `scrub` nor `set reassemble` is rendered: how
+so jails hold /32 and /128 addresses, every port is private and the host pins their addresses.) (2) What a jail sends to the networks of other projects is not closed on its side: the jail that is reached decides, and an `allow in` rule with a source that covers the other project (`any`, an address, a prefix, a set) admits it like the Internet; a rule without a source does not. (3) Neither `scrub` nor `set reassemble` is rendered: how
 non-first IPv6 fragments meet port rules depends on the host's own pf.conf. The doctor does not check it yet (how
 `pfctl` shows `set reassemble yes` is not verified).
 

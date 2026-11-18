@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"slices"
 	"sort"
-	"strconv"
 	"strings"
 
 	"jailops.net/jailops/sdk/api"
@@ -203,11 +202,9 @@ func (s *Server) handleLogForwardPut(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if h := strings.Trim(strings.TrimPrefix(r.Header.Get("If-Match"), "W/"), `"`); h != "" && h != "*" {
-		if n, err := strconv.ParseInt(h, 10, 64); err != nil || n != s.fwd.gen {
-			writeErr(w, api.Errorf(api.CodeConflict, "the log forwarding changed: current generation is %d", s.fwd.gen).WithHint("read it again and re-apply your change"))
-			return
-		}
+	if m, err := api.ParseIfMatch(r.Header.Get("If-Match")); err != nil || !m.Matches(s.fwd.gen) {
+		writeErr(w, api.Errorf(api.CodeConflict, "the log forwarding changed: current generation is %d", s.fwd.gen).WithHint("read it again and re-apply your change"))
+		return
 	}
 	s.fwd.stored = &spec
 	s.fwd.gen++

@@ -20,7 +20,7 @@ import { api } from '@/api/endpoints'
 const dual = { metadata: { name: 'web' }, spec: { network: [] }, status: { addresses: ['10.20.0.10', '2001:db8:10::10'] } }
 const v4only = { metadata: { name: 'web' }, spec: { network: [] }, status: { addresses: ['10.20.0.10'] } }
 const stub = { global: { stubs: { Teleport: true } } }
-const result = { jail: 'web', changed: true, entries: [], families: [
+const result = { jail: 'web', changed: true, entries: [], exposed: '80,443/tcp', notes: ['policy web rule 2 already lets 80/tcp in over IPv6; this exposure adds the IPv4 forward'], families: [
   { family: '6', address: '2001:db8:10::10', network: 'lan', via: 'uplink', ports: '80, 443' },
   { family: '4', address: '10.20.0.10', network: 'lan', via: 'forward', ports: '80, 443', forwards: ['80->80', '443->443'] },
 ] }
@@ -49,9 +49,23 @@ describe('ExposeDialog', () => {
     await flushPromises()
     expect(expose).toHaveBeenCalledWith('web', { ports: ['80', '443'] })
     const r = w.get('[data-test="expose-result"]').text()
-    expect(r).toContain('IPv6 2001:db8:10::10: reached directly, ports 80, 443')
-    expect(r).toContain('IPv4 10.20.0.10 (behind NAT): the host forwards 80->80, 443->443')
+    expect(r).toContain("IPv6 2001:db8:10::10   open: no NAT, the jail's own address answers on 80, 443")
+    expect(r).toContain('IPv4 10.20.0.10   forwarded: host 80->80, 443->443 (NAT)')
+    expect(w.get('[data-test="expose-what"]').text()).toBe('Exposed: 80,443/tcp')
+    expect(r).toContain('policy web rule 2 already lets 80/tcp in over IPv6; this exposure adds the IPv4 forward')
     expect(w.emitted('done')).toBeTruthy()
+  })
+
+  it('names the family of an address that answers on its own, IPv4 without NAT included', async () => {
+    expose.mockResolvedValue({ kind: 'sync', data: { jail: 'web', changed: true, entries: [], exposed: '25/tcp', families: [{ family: '4', address: '192.0.2.10', network: 'pub', via: 'uplink', ports: '25' }] } })
+    const w = mount(ExposeDialog, { props: { open: true, jail: v4only as never }, ...stub })
+    await flushPromises()
+    await w.get('[data-test="expose-ports"]').setValue('25')
+    await w.get('form').trigger('submit')
+    await flushPromises()
+    const r = w.get('[data-test="expose-result"]').text()
+    expect(r).toContain("IPv4 192.0.2.10   open: no NAT, the jail's own address answers on 25")
+    expect(r).not.toContain('IPv6')
   })
 
   it('previews with dry_run, limits the source and keeps IPv6 out of an IPv4-only jail', async () => {

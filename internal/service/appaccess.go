@@ -1071,15 +1071,14 @@ func (s *Service) accessJailGone(ctx context.Context, project, jail string) {
 	s.kick()
 }
 
-// accessRulesFor returns the managed policy of a jail for the renderer: its
-// rules come after the project's mandatory policy and before the jail's own,
-// and closed says it denies inbound traffic by default.
-func (s *Service) accessRulesFor(project, jail string) (rules []api.FirewallRule, closed bool) {
+// accessSpecFor returns the managed policy of a jail for the renderer: its
+// rules come after the project's mandatory policy and before the jail's own; its defaults count like any policy's.
+func (s *Service) accessSpecFor(project, jail string) (api.FirewallPolicySpec, bool) {
 	pol, ok, err := s.accessPolicy(project, jail)
 	if err != nil || !ok {
-		return nil, false
+		return api.FirewallPolicySpec{}, false
 	}
-	return pol.Spec.Rules, pol.Spec.DefaultIn == "deny"
+	return pol.Spec, true
 }
 
 // samePrefixes says whether a list of prefixes is the list of strings, in any order.

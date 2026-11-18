@@ -1,25 +1,25 @@
 $ jailops expose web 80,443 --comment the site
-jail/web exposed: 80,443
-  IPv6  2001:db8::10: ports 80, 443 reach the jail directly
-  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 80->80, 443->443
+jail/web exposed: 80,443/tcp
+  IPv6  2001:db8::10   open: no NAT, the jail's own address answers on 80, 443
+  IPv4  10.20.0.10   forwarded: host 80->80, 443->443 (NAT)
 
 $ jailops expose web 80,443 --comment the site
 jail/web: the exposure is already what you asked for
-  IPv6  2001:db8::10: ports 80, 443 reach the jail directly
-  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 80->80, 443->443
+  IPv6  2001:db8::10   open: no NAT, the jail's own address answers on 80, 443
+  IPv4  10.20.0.10   forwarded: host 80->80, 443->443 (NAT)
 
 $ jailops expose web 8080 --from 192.0.2.0/24 --host-port 9090 --family 4
-jail/web exposed: 8080
-  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 9090->8080
+jail/web exposed: 8080/tcp
+  IPv4  10.20.0.10   forwarded: host 9090->8080 (NAT)
 
 $ jailops expose web 53 --proto udp --family 6
-jail/web exposed: 53
-  IPv6  2001:db8::10: ports 53 reach the jail directly
+jail/web exposed: 53/udp
+  IPv6  2001:db8::10   open: no NAT, the jail's own address answers on 53
 
 $ jailops expose --dry-run web 25
-jail/web would expose: 25 (dry run, nothing stored)
-  IPv6  2001:db8::10: ports 25 reach the jail directly
-  IPv4  10.20.0.10 (behind NAT): the host's ports are forwarded, host->jail 25->25
+jail/web would expose: 25/tcp (dry run, nothing stored)
+  IPv6  2001:db8::10   open: no NAT, the jail's own address answers on 25
+  IPv4  10.20.0.10   forwarded: host 25->25 (NAT)
 
 $ jailops expose web 22 -o json
 {
@@ -81,8 +81,42 @@ $ jailops expose web 22 -o json
         "22->22"
       ]
     }
-  ]
+  ],
+  "exposed": "22/tcp"
 }
+
+$ jailops expose web 80,443 --proto tcp,udp --family 6
+jail/web exposed: 80,443/tcp,udp
+  IPv6  2001:db8::10   open: no NAT, the jail's own address answers on 80, 443
+
+$ jailops expose web 443 --from 192.0.2.0/24 --family 6
+jail/web exposed: 443/tcp
+  IPv6  2001:db8::10   open: no NAT, the jail's own address answers on 443
+
+$ jailops expose web 5000 --proto tcp --proto udp --family 6
+jail/web exposed: 5000/tcp,udp
+  IPv6  2001:db8::10   open: no NAT, the jail's own address answers on 5000
+
+$ jailops expose web 8000,8001 --host-port 9000
+! invalid: --host-port takes one port: jailops expose web 8000 --host-port 9000, then jailops expose web 8001
+[exit 2]
+
+$ jailops expose web 8000-8100 --family 6
+jail/web exposed: 8000-8100/tcp
+  IPv6  2001:db8::10   open: no NAT, the jail's own address answers on 8000-8100
+
+$ jailops unexpose web 8050
+jail/web: nothing to remove
+note: 8050 is inside the exposed range 8000-8100: unexpose the range to remove it
+  still exposed: tcp 8080 (IPv4)
+  still exposed: udp 53 (IPv6)
+  still exposed: tcp 22 (IPv4 and IPv6)
+  still exposed: tcp 80 (IPv6)
+  still exposed: udp 80,443 (IPv6)
+  still exposed: tcp 443 (IPv6)
+  still exposed: tcp 5000 (IPv6)
+  still exposed: udp 5000 (IPv6)
+  still exposed: tcp 8000-8100 (IPv6)
 
 $ jailops expose web 80 --proto sctp
 ! invalid: proto "sctp" must be tcp, udp or tcp,udp
@@ -100,16 +134,22 @@ $ jailops expose web
 
 $ jailops unexpose web 80
 jail/web: no longer exposed
-  still exposed: tcp 443 (IPv4 and IPv6)
   still exposed: tcp 8080 (IPv4)
   still exposed: udp 53 (IPv6)
   still exposed: tcp 22 (IPv4 and IPv6)
+  still exposed: udp 443 (IPv6)
+  still exposed: tcp 443 (IPv6)
+  still exposed: tcp 5000 (IPv6)
+  still exposed: udp 5000 (IPv6)
+  still exposed: tcp 8000-8100 (IPv6)
 
 $ jailops unexpose web --proto udp
 jail/web: no longer exposed
-  still exposed: tcp 443 (IPv4 and IPv6)
   still exposed: tcp 8080 (IPv4)
   still exposed: tcp 22 (IPv4 and IPv6)
+  still exposed: tcp 443 (IPv6)
+  still exposed: tcp 5000 (IPv6)
+  still exposed: tcp 8000-8100 (IPv6)
 
 $ jailops unexpose web
 jail/web: no longer exposed

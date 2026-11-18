@@ -185,12 +185,13 @@ jailops firewall show web -o json`,
 			if r.Error != "" {
 				return fmt.Errorf("the firewall of jail/%s cannot be computed: %s", args[0], r.Error)
 			}
-			fprintf(w, "Reaches jail/%s\n\n", r.Jail)
+			a.printPolicies(w, r)
+			fprintf(w, "\nReaches jail/%s\n\n", r.Jail)
 			a.reachTable(w, r.Rows)
-			fprintf(w, "\nThe jail reaches (default %s)\n", dash(r.DefaultOut))
+			fprintf(w, "\nThe jail reaches (default out: %s)\n", defaultText(r.DefaultOut, r.DefaultOutBy))
 			a.printReachOut(w, r.Out)
 			if rules || pf {
-				fprintf(w, "\nRules, in the order pf decides (default in: %s)\n", dash(r.DefaultIn))
+				fprintf(w, "\nRules, in the order pf decides (default in: %s)\n", defaultText(r.DefaultIn, r.DefaultInBy))
 				var out [][]string
 				for i, ru := range r.Rules {
 					row := []string{fmt.Sprint(i + 1), ru.Where, ru.Direction, dash(ru.Family), dash(ru.From), dash(ru.To), dash(ru.Proto), portsText(ru.Ports), ru.Decision, ru.By}
@@ -207,6 +208,9 @@ jailops firewall show web -o json`,
 			}
 			for _, n := range r.Notes {
 				fprintf(w, "\nNote: %s\n", n)
+			}
+			if len(r.Policies) == 0 {
+				fprintf(w, "\n%s\n", attachHint(r.Jail))
 			}
 			return nil
 		},
@@ -285,4 +289,62 @@ func hostPortText(addr string, port int) string {
 		addr = "host"
 	}
 	return fmt.Sprintf("%s:%d", addr, port)
+}
+
+// defaultText says a default of the anchor and which policies set it: a default is deny when any policy states deny
+// and allow when none does.
+func defaultText(v string, by []string) string {
+	switch {
+	case v == "":
+		return "-"
+	case len(by) == 0:
+		return v + " (no policy says deny)"
+	}
+	return v + " (" + strings.Join(by, ", ") + ")"
+}
+
+// attachHint is the line that says how to give a jail without a policy one.
+func attachHint(jail string) string {
+	return "attach one: jailops firewall policy attach POLICY " + jail
+}
+
+// policyLabel is the name of a policy with where it comes from: the project's mandatory ones and the one that app access
+// keeps are marked, the jail's own are not.
+func policyLabel(p api.ReachPolicy) string {
+	switch p.Source {
+	case "project":
+		return p.Name + " (project)"
+	case "managed":
+		return p.Name + " (managed)"
+	}
+	return p.Name
+}
+
+// policyDefaults says the defaults a policy states, "-" when it states none.
+func policyDefaults(p api.ReachPolicy) string {
+	var d []string
+	if p.DefaultIn != "" {
+		d = append(d, "in "+p.DefaultIn)
+	}
+	if p.DefaultOut != "" {
+		d = append(d, "out "+p.DefaultOut)
+	}
+	if len(d) == 0 {
+		return "-"
+	}
+	return strings.Join(d, ", ")
+}
+
+// printPolicies lists the policies of the jail in the order they are rendered, before what they make of the jail.
+func (a *app) printPolicies(w io.Writer, r api.JailReach) {
+	if len(r.Policies) == 0 {
+		fprintf(w, "Policies of jail/%s: none (the host answers ping and DNS only)\n", r.Jail)
+		return
+	}
+	fprintf(w, "Policies of jail/%s, in the order they are rendered\n", r.Jail)
+	var rows [][]string
+	for i, p := range r.Policies {
+		rows = append(rows, []string{fmt.Sprint(i + 1), policyLabel(p), fmt.Sprint(p.Rules), policyDefaults(p)})
+	}
+	a.printTable(w, []string{"#", "POLICY", "RULES", "STATES DEFAULT"}, rows, nil)
 }

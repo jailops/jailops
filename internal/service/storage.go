@@ -274,7 +274,9 @@ func (s *Service) mountBaseOf(ctx context.Context, dataset string) string {
 
 // ---- API ----
 
-func storageToAPI(o object[api.StorageSpec], st api.StorageStatus) api.Storage {
+func (s *Service) storageToAPI(ctx context.Context, o object[api.StorageSpec]) api.Storage {
+	st := s.storageStatus(ctx, o.Spec)
+	st.GrantedTo = s.grantedTo(ctx, func(sp api.ProjectSpec) bool { return specGrantsStorage(sp, o.Meta.Name) })
 	return api.Storage{Metadata: o.Meta, Spec: o.Spec, Status: st}
 }
 
@@ -355,19 +357,24 @@ func (s *Service) storageVisible(ctx context.Context, name string) bool {
 	return false
 }
 
-// ListStorage lists the storage the caller may see.
+// ListStorage lists the storage the caller may see: that granted to the selected project, and with all (a global
+// identity) every storage.
 func (s *Service) ListStorage(ctx context.Context, labels map[string]string) ([]api.Storage, error) {
 	if !ActorFrom(ctx).HasScope() {
 		return nil, api.Errorf(api.CodeForbidden, "this identity has no projects and is not global")
+	}
+	if err := checkAll(ctx); err != nil {
+		return nil, err
 	}
 	objs, err := s.stoKind.list()
 	if err != nil {
 		return nil, err
 	}
+	visible := func(name string) bool { return s.storageVisible(ctx, name) }
 	out := []api.Storage{}
 	for _, o := range objs {
-		if MatchLabels(o.Meta.Labels, labels) && s.storageVisible(ctx, o.Meta.Name) {
-			out = append(out, storageToAPI(o, s.storageStatus(ctx, o.Spec)))
+		if MatchLabels(o.Meta.Labels, labels) && s.listScoped(ctx, o.Meta.Name, visible, specGrantsStorage) {
+			out = append(out, s.storageToAPI(ctx, o))
 		}
 	}
 	return out, nil
@@ -382,7 +389,7 @@ func (s *Service) GetStorage(ctx context.Context, name string) (api.Storage, err
 	if err != nil || !s.storageVisible(ctx, name) {
 		return api.Storage{}, notFound("storage", name)
 	}
-	return storageToAPI(o, s.storageStatus(ctx, o.Spec)), nil
+	return s.storageToAPI(ctx, o), nil
 }
 
 // overlapsStorage reports a storage whose dataset contains or is contained in dataset.
@@ -527,7 +534,7 @@ func (s *Service) CreateStorage(ctx context.Context, in api.Storage) (api.Storag
 		return api.Storage{}, err
 	}
 	s.addStorage(name, o.Spec, o.Spec.Dataset, s.mountBaseOf(ctx, o.Spec.Dataset))
-	return storageToAPI(o, s.storageStatus(ctx, o.Spec)), nil
+	return s.storageToAPI(ctx, o), nil
 }
 
 func (s *Service) undoLayout(ctx context.Context, created []string) {
@@ -586,7 +593,7 @@ func (s *Service) UpdateStorage(ctx context.Context, name string, in api.Storage
 		si.Spec = o.Spec
 		s.stMu.Unlock()
 	}
-	return storageToAPI(o, s.storageStatus(ctx, o.Spec)), nil
+	return s.storageToAPI(ctx, o), nil
 }
 
 // PatchStorage applies a merge patch.

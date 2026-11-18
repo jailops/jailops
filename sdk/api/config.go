@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -924,4 +925,75 @@ type JailExpanded struct {
 type ConfigChange struct {
 	Set   map[string]string `json:"set,omitempty"`
 	Unset []string          `json:"unset,omitempty"`
+	// Add and Remove change one entry of a list key (firewall.policies, firewall.tags, profiles, packages and the like)
+	// without writing the whole list: Add appends the values that are not in the list, Remove takes out the ones that
+	// are. Both are read and applied against the stored jail, so a change made at the same time is not lost.
+	Add    map[string]string `json:"add,omitempty"`
+	Remove map[string]string `json:"remove,omitempty"`
+}
+
+// ApplyChange applies a ConfigChange to a spec: the entries to add or remove, then Set and Unset (see ApplyConfig). A key
+// is named in one of Set, Unset, Add and Remove only. The spec is changed only when the whole change is valid.
+func ApplyChange(spec *JailSpec, ch ConfigChange) (restartRequired []string, err error) {
+	if len(ch.Add) == 0 && len(ch.Remove) == 0 {
+		return ApplyConfig(spec, ch.Set, ch.Unset)
+	}
+	seen := map[string]bool{}
+	for _, keys := range [][]string{keysOf(ch.Set), ch.Unset, keysOf(ch.Add), keysOf(ch.Remove)} {
+		for _, k := range keys {
+			if seen[k] {
+				return nil, cfgErr(k, "%s is named twice in one change", k)
+			}
+			seen[k] = true
+		}
+	}
+	set := map[string]string{}
+	for k, v := range ch.Set {
+		set[k] = v
+	}
+	unset := append([]string(nil), ch.Unset...)
+	each := func(m map[string]string, add bool) error {
+		for _, key := range keysOf(m) {
+			ck, dev, ok := lookup(key)
+			if !ok {
+				return cfgErr(key, "unknown configuration key %q", key).WithHint("jailops config keys lists them")
+			}
+			if ck.Type != "list" {
+				return cfgErr(key, "%s is not a list: change it with 'config set'", key)
+			}
+			cur, _ := ck.get(spec, dev)
+			list := splitList(cur)
+			for _, x := range splitList(m[key]) {
+				i := slices.Index(list, x)
+				switch {
+				case add && i < 0:
+					list = append(list, x)
+				case !add && i >= 0:
+					list = slices.Delete(list, i, i+1)
+				}
+			}
+			if len(list) == 0 {
+				unset = append(unset, key)
+			} else {
+				set[key] = strings.Join(list, ",")
+			}
+		}
+		return nil
+	}
+	if err := each(ch.Add, true); err != nil {
+		return nil, err
+	}
+	if err := each(ch.Remove, false); err != nil {
+		return nil, err
+	}
+	return ApplyConfig(spec, set, unset)
+}
+
+func keysOf(m map[string]string) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

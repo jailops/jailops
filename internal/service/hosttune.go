@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"jailops.net/jailops/internal/reconcile"
@@ -29,6 +31,63 @@ const SysctlOnlinkNS = "net.inet6.icmp6.nd6_onlink_ns_rfc4861"
 
 // OnlinkNSDocs explains the setting: what it does, how to recognise the case and what to set.
 const OnlinkNSDocs = "https://jailops.net/articles/shared-ipv6-neighbor-discovery/#fix"
+
+// doctorOnlinkNS reports SysctlOnlinkNS. It is host configuration that matters on some segments only, so it is
+// information while the host has not rejected a solicitation, and a warning once it has: with the default, 0, and a
+// network with the NDP proxy, the host's own count of rejected neighbor solicitations is the evidence that a router of
+// the segment probes it from a global address and gets no answer.
+func (s *Service) doctorOnlinkNS(ctx context.Context, c *checkSet) {
+	got, err := s.sysctl(ctx, SysctlOnlinkNS)
+	if err != nil {
+		c.add("sysctl."+SysctlOnlinkNS, api.DoctorUnknown, err.Error(), "")
+		return
+	}
+	var n uint64
+	var counted bool
+	if got != "1" && s.hasProxyNetwork() {
+		n, counted = s.rejectedNS(ctx)
+	}
+	st, msg, hint := onlinkNSVerdict(got, s.hasProxyNetwork(), n, counted)
+	c.add("sysctl."+SysctlOnlinkNS, st, msg, hint)
+}
+
+// onlinkNSVerdict is the outcome of the check: got is the value of SysctlOnlinkNS, proxy says that a network with the
+// NDP proxy exists, n is the host's count of rejected neighbor solicitations and counted that it could be read.
+func onlinkNSVerdict(got string, proxy bool, n uint64, counted bool) (api.DoctorStatus, string, string) {
+	switch {
+	case got == "1":
+		return api.DoctorOK, SysctlOnlinkNS + "=" + got, ""
+	case !proxy:
+		return api.DoctorOK, SysctlOnlinkNS + "=" + got + " (not needed now)", ""
+	case counted && n > 0:
+		return api.DoctorWarn, fmt.Sprintf("%s=%s and the host has rejected %d neighbor solicitations (bad neighbor solicitation messages in netstat -s -p icmp6): a router that probes the host from a global address gets no answer and may mark the host, and the jails behind it, unreachable", SysctlOnlinkNS, got, n),
+			"sysctl " + SysctlOnlinkNS + "=1 and add it to /etc/sysctl.conf; see " + OnlinkNSDocs
+	}
+	return api.DoctorInfo, SysctlOnlinkNS + "=" + got + " (the default); on a shared IPv6 segment whose routers probe the host from their global addresses it needs 1", "see " + OnlinkNSDocs
+}
+
+// rejectedNS is the host's own count of rejected neighbor solicitations ("bad neighbor solicitation messages" of
+// netstat -s -p icmp6), which includes the probes from off-link sources that the default of SysctlOnlinkNS drops. It
+// reports false when the counter cannot be read.
+func (s *Service) rejectedNS(ctx context.Context) (uint64, bool) {
+	ok, avail, out := s.runOK(ctx, "netstat", "-s", "-p", "icmp6")
+	if !ok || !avail {
+		return 0, false
+	}
+	return parseRejectedNS(out)
+}
+
+// parseRejectedNS reads the line "N bad neighbor solicitation messages" of netstat -s -p icmp6.
+func parseRejectedNS(out string) (uint64, bool) {
+	for _, ln := range strings.Split(out, "\n") {
+		f := strings.Fields(ln)
+		if len(f) == 5 && f[1] == "bad" && f[2] == "neighbor" && f[3] == "solicitation" && f[4] == "messages" {
+			n, err := strconv.ParseUint(f[0], 10, 64)
+			return n, err == nil
+		}
+	}
+	return 0, false
+}
 
 // hasProxyNetwork reports whether a network with the NDP proxy exists.
 func (s *Service) hasProxyNetwork() bool {

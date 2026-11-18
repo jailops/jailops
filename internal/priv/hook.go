@@ -376,7 +376,12 @@ func (l *Local) hookPreStart(ctx context.Context, jn JailName, atts []attachment
 		case !*on:
 			return fmt.Errorf("pf is disabled: not starting jail %s with a network link without its firewall (enable pf with `service pf onestart` or pfctl -e, or set allow-start-without-pf in priv.conf)", jn.Internal())
 		}
-		if rules, err := l.hostPfctl(ctx, "", "-s", "rules"); err == nil && !strings.Contains(rules, `anchor "`+AnchorPrefix+`*"`) {
+		// a main ruleset that cannot be read is not a ruleset that is fine: the start does not go on on a guess
+		rules, err := l.hostPfctl(ctx, "", "-s", "rules")
+		switch {
+		case err != nil:
+			return fmt.Errorf("the ruleset of pf cannot be read (%v): not starting jail %s with a network link, because it cannot be told whether anything evaluates its firewall (or set allow-start-without-pf in priv.conf)", err, jn.Internal())
+		case !strings.Contains(rules, `anchor "`+AnchorPrefix+`*"`):
 			return fmt.Errorf("the ruleset of pf has no line anchor \"jailops/*\": not starting jail %s with a network link, because nothing would evaluate its firewall (/etc/pf.conf is the host's file and needs that one line; jailops doctor says where; or set allow-start-without-pf in priv.conf)", jn.Internal())
 		}
 	}

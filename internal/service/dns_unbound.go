@@ -239,28 +239,87 @@ func (s *Service) doctorUnbound(ctx context.Context, c *checkSet) {
 		hint := "unbound-control must answer: for local-unbound run local-unbound-setup and service local_unbound restart"
 		c.add("dns.unbound", api.DoctorWarn, "the names are in "+st.Path+", but the resolver's control program does not answer: "+st.Control, hint)
 		return
-	case st.Sample == "" || len(st.Gateways) == 0:
+	}
+	probes := s.unboundProbes(ctx, st.Suffix)
+	if len(probes) == 0 {
 		c.add("dns.unbound", api.DoctorOK, "on: no jail with an address runs yet; suffix "+st.Suffix+"; "+upstreamText(st), "")
 		return
 	}
-	f := strings.Fields(st.Sample)
-	name, want := f[0], f[1]
-	// every address the jails ask has to answer: the IPv6 resolver address of each network (the helper holds it on the
-	// loopback), and the IPv4 gateway of a network a jail runs on (the host holds it on the jails' links only then)
-	for _, at := range s.probeAddrs(ctx, st.Gateways) {
-		got, why := s.lookupAt(ctx, at, name)
-		if slices.Contains(got, want) {
-			continue
+	// The views of the resolver answer by the network a question comes from and hold the names of that network's
+	// project only: each network is asked for a jail that runs on it, at the addresses the jails of that network ask (the
+	// IPv4 gateway and the resolver address of an IPv6 network).
+	for _, p := range probes {
+		for _, at := range p.addrs {
+			got, why := s.lookupAt(ctx, at, p.name)
+			if slices.Contains(got, p.want) {
+				continue
+			}
+			msg := "network " + p.network + ": asking " + at + " for the name of its running jail " + p.name + " does not give its address"
+			if why != "" {
+				msg += ": " + why
+			}
+			c.add("dns.unbound", api.DoctorWarn, msg, "the resolver has to listen on the gateway and on the resolver address of an IPv6 network: service local_unbound restart (a new network needs one restart; JailOps does it itself when it writes the file); when another resolver than local-unbound owns port 53 there, stop it or give the network nameservers of its own")
+			return
 		}
-		// no name and no address: the doctor is read by users of every project
-		msg := "asking the gateway of a network (" + at + ") for the name of a running jail does not give its address"
-		if why != "" {
-			msg += ": " + why
-		}
-		c.add("dns.unbound", api.DoctorWarn, msg, "the resolver has to listen on the gateway and on the resolver address of an IPv6 network: service local_unbound restart (a new network needs one restart; JailOps does it itself when it writes the file); when another resolver than local-unbound owns port 53 there, stop it or give the network nameservers of its own")
-		return
 	}
 	c.add("dns.unbound", api.DoctorOK, fmt.Sprintf("%d names for %d jails in %d projects; suffix %s; %s", st.Names, st.Jails, st.Projects, st.Suffix, upstreamText(st)), "")
+}
+
+// unboundProbe is one test lookup of the doctor: a running jail of a network, asked at the addresses of the host that
+// the jails of that network use as nameserver.
+type unboundProbe struct {
+	network, name, want string
+	addrs               []string
+}
+
+// unboundProbes makes one probe for each network that has a running jail with an address: the jail's name in the zone
+// of its project, the address it has on that network, and the addresses of the host on the network (the IPv4 gateway,
+// the resolver address of an IPv6 network).
+func (s *Service) unboundProbes(ctx context.Context, suffix string) []unboundProbe {
+	run := s.runningJails(ctx)
+	type pick struct{ name, want string }
+	picks := map[string]pick{}
+	s.mu.RLock()
+	keys := make([]string, 0, len(s.jails))
+	for k := range s.jails {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		if _, up := run[k]; !up {
+			continue
+		}
+		j := s.jails[k].jail
+		for _, a := range j.Spec.Network {
+			if _, done := picks[a.Network]; done {
+				continue
+			}
+			for _, raw := range []string{a.IPv4, a.IPv6} {
+				if addr, err := netip.ParseAddr(raw); err == nil {
+					picks[a.Network] = pick{name: j.Metadata.Name + "." + render.UnboundZone(j.Metadata.Project, suffix), want: addr.Unmap().String()}
+					break
+				}
+			}
+		}
+	}
+	s.mu.RUnlock()
+	nets, _ := s.netKind.list()
+	var out []unboundProbe
+	for _, o := range nets {
+		p, ok := picks[o.Meta.Name]
+		if !ok {
+			continue
+		}
+		var addrs []string
+		for _, a := range gatewayResolvers(o.Spec, true) {
+			addrs = append(addrs, a.String())
+		}
+		if len(addrs) > 0 {
+			out = append(out, unboundProbe{network: o.Meta.Name, name: p.name, want: p.want, addrs: addrs})
+		}
+	}
+	slices.SortFunc(out, func(a, b unboundProbe) int { return strings.Compare(a.network, b.network) })
+	return out
 }
 
 // hostLoopbackNS are the loopback nameservers of the host's resolv.conf, the ones the host asks itself: an unspecified
@@ -331,38 +390,6 @@ func (s *Service) hostResolverDown(ctx context.Context, c *checkSet, st mounts.U
 	return false
 }
 
-// probeAddrs are the addresses of gateways that the host holds now: the resolver address of an IPv6 network always, the
-// IPv4 gateway of a network with a running jail.
-func (s *Service) probeAddrs(ctx context.Context, gateways []string) []string {
-	running := map[string]bool{}
-	run := s.runningJails(ctx)
-	s.mu.RLock()
-	for k, e := range s.jails {
-		if _, up := run[k]; up {
-			for _, a := range e.jail.Spec.Network {
-				running[a.Network] = true
-			}
-		}
-	}
-	s.mu.RUnlock()
-	held := map[string]bool{}
-	nets, _ := s.netKind.list()
-	for _, o := range nets {
-		for _, a := range gatewayResolvers(o.Spec, true) {
-			if a.Is6() || running[o.Meta.Name] {
-				held[a.String()] = true
-			}
-		}
-	}
-	var out []string
-	for _, g := range gateways {
-		if held[g] {
-			out = append(out, g)
-		}
-	}
-	return out
-}
-
 // upstreamText says where the host's unbound sends every name that is not a jail's.
 func upstreamText(st mounts.UnboundState) string {
 	switch {
@@ -387,6 +414,11 @@ func (s *Service) lookupAt(ctx context.Context, addr, name string) ([]string, st
 	}}
 	got, err := r.LookupHost(ctx, name)
 	if err != nil {
+		// the Go resolver names the nameserver of resolv.conf in its text, not the address that was asked
+		var de *net.DNSError
+		if errors.As(err, &de) && de.Err != "" {
+			return nil, de.Err
+		}
 		return nil, err.Error()
 	}
 	return got, ""

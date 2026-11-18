@@ -532,7 +532,7 @@ func TestEveryAnchorDefinesTheTablesItReferences(t *testing.T) {
 			t.Errorf("table <%s> is used but not defined in the anchor:\n%s", m[1], out)
 		}
 	}
-	if len(def) != 5 { // the jail's addresses, the host, what "any" does not reach, the set and the tag
+	if len(def) != 4 { // the jail's addresses, the host, the set and the tag
 		t.Errorf("tables %v", def)
 	}
 }
@@ -563,13 +563,12 @@ func TestPFProjectsAreIsolatedUnlessARuleOpensIt(t *testing.T) {
 	if iAllow < 0 || iBlock < 0 || iAllow > iBlock {
 		t.Fatalf("the explicit allow must come before the isolation:\n%s", s)
 	}
-	for _, want := range []string{
-		"table <foreign> persist { 10.30.0.0/24, fd30::/64 }",
-		"block drop in quick on jo0123456789a0a from any to <foreign>",
-	} {
-		if !strings.Contains(s, want) {
-			t.Errorf("missing %q in\n%s", want, s)
-		}
+	if want := "table <foreign> persist { 10.30.0.0/24, fd30::/64 }"; !strings.Contains(s, want) {
+		t.Errorf("missing %q in\n%s", want, s)
+	}
+	// what the jail sends to the other projects is not closed on its side: the jail that is reached decides
+	if strings.Contains(s, "block drop in quick on jo0123456789a0a from any to <foreign") {
+		t.Errorf("the jail's own egress to the other projects is closed:\n%s", s)
 	}
 	golden(t, "pf_anchor_foreign", s)
 }
@@ -951,7 +950,7 @@ func TestPFJailReferences(t *testing.T) {
 	for _, want := range []string{
 		"table <j_web> persist { 10.20.0.11, 2001:db8:1::11 }\n",
 		"table <j_web_2> persist { 10.20.0.12 }\n",
-		"table <j_ghost> persist\n",
+		"table <j_ghost> persist { }\n",
 		"table <s_web> persist { 10.20.0.12, 192.0.2.9 }\n",
 		"from { <j_web>, <j_web_2> } to 10.20.0.10 port 5432",
 		"from <s_web> to 10.20.0.10 port 5433",
@@ -1158,5 +1157,45 @@ func TestPFNoAllowRuleStandsBeforeTheClosedHost(t *testing.T) {
 	}
 	if n < 6 {
 		t.Errorf("expected the six allow rules, found %d:\n%s", n, s)
+	}
+}
+
+// An empty default is allow, and the default rules say which policies state deny.
+func TestPFDefaultsAreAllowUnlessDenied(t *testing.T) {
+	in := pfBase()
+	in.DefaultIn, in.DefaultOut = "", ""
+	an, err := BuildAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range an.Rules {
+		if r.Origin.Stage == StageDefault && r.Iface == "" && r.Action != "pass" {
+			t.Fatalf("an unset default is not allow: %+v", r)
+		}
+	}
+	in.DefaultIn, in.DefaultInBy = "deny", []string{"default [project]", "app-pg [managed]"}
+	an, err = BuildAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var in2, out2 int
+	for _, r := range an.Rules {
+		if r.Origin.Stage != StageDefault || r.Iface != "" {
+			continue
+		}
+		if r.Dir == "out" { // on the jail's link, "out" is what comes in to the jail
+			in2++
+			if r.Action != "block" || r.Origin.SetBy != "default [project], app-pg [managed]" {
+				t.Fatalf("the inbound default: %+v", r)
+			}
+		} else {
+			out2++
+			if r.Action != "pass" || r.Origin.SetBy != "" {
+				t.Fatalf("the outbound default: %+v", r)
+			}
+		}
+	}
+	if in2 != 1 || out2 != 1 {
+		t.Fatalf("%d inbound and %d outbound default rules", in2, out2)
 	}
 }

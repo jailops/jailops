@@ -4,17 +4,28 @@ package api
 // per jail ("jailops/<project>/<jail>"). jailops never owns the host's pf.conf; the
 // administrator adds the anchor lines once.
 type FirewallPolicy struct {
-	Metadata ObjectMeta         `json:"metadata"`
-	Spec     FirewallPolicySpec `json:"spec"`
+	Metadata ObjectMeta           `json:"metadata"`
+	Spec     FirewallPolicySpec   `json:"spec"`
+	Status   FirewallPolicyStatus `json:"status"`
+}
+
+// FirewallPolicyStatus says who uses a policy. A policy no jail uses renders nowhere.
+type FirewallPolicyStatus struct {
+	// UsedBy are the jails of the project that name the policy (their own, through a profile, or the managed policy of app
+	// access), by name.
+	UsedBy []string `json:"used_by"`
+	// Mandatory is true for a mandatory policy of the project: every jail of the project has it.
+	Mandatory bool `json:"mandatory"`
 }
 
 // FirewallPolicySpec holds the rules of a policy.
 type FirewallPolicySpec struct {
 	// Comment says what the policy is for: what a reviewer of the firewall reads first (one line, at most 200 characters, no double quotes or backslashes).
 	Comment string `json:"comment,omitempty"`
-	// DefaultIn and DefaultOut apply when no rule matches: "allow" or "deny". A policy always says both.
-	DefaultIn  string         `json:"default_in"`
-	DefaultOut string         `json:"default_out"`
+	// DefaultIn and DefaultOut apply when no rule matches: "deny" closes the direction for every jail that uses the policy;
+	// "allow" or empty leaves it to the other policies of the jail (allow when none denies).
+	DefaultIn  string         `json:"default_in,omitempty"`
+	DefaultOut string         `json:"default_out,omitempty"`
 	Rules      []FirewallRule `json:"rules,omitempty"`
 	// Raw is a PF fragment. It requires the admin role and is validated with
 	// pfctl -n before it is loaded.

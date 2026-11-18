@@ -2,6 +2,124 @@
 
 ## Unreleased
 
+- **A firewall policy states a default only when you tell it to.** `default_in` and `default_out` are `deny`, `allow`
+  or unset, and `firewall policy create` writes none unless you give `--default-in` or `--default-out`. A default is
+  deny when any policy of the jail states deny (the project's mandatory policies, the managed policy of app access, the
+  jail's own and those of its profiles), whatever the order, and allow when none does: a small policy that only allows
+  tcp 2282 from an address set no longer closes the jail as a side effect, and no policy can turn another's deny into
+  allow. Nothing is closed by default inside a project: close a project or a jail with a policy that says
+  `default_in: deny`, in the project's `firewall_policies` or on the jail, and open what is needed with `allow` rules.
+  `jailops firewall show JAIL`, `jailops jail info JAIL` and the Firewall tab of the console say which policies set each
+  default (`Default in: deny (default [project])`), `firewall test` names them when a default decides, and a jail with an
+  `allow in` rule from named sources and no policy that says deny gets a warning. The plan of a file sync flags a policy
+  that stops saying deny. The doctor check `firewall.defaults` is gone: a policy without defaults is valid. Defaults never
+  open the uplink; that is an explicit `allow in` rule with an external source.
+- **A firewall policy says which jails use it.** A jail without the policy renders nothing from it, and nothing said so:
+  a policy that was made but never named by a jail left the jail open. `firewall policy show` has a `Used by` line (the
+  jails by name, `every jail (project)` for a mandatory policy of the project, `none`), `firewall policy list` has the
+  column USED BY, the API carries it as `status.used_by` and `status.mandatory`, and the policy page of the console
+  shows it, and says so when no jail uses the policy. A jail that has the policy through a profile or as the managed
+  policy of app access counts, and the delete of a policy refuses for those jails too.
+- **Attach and detach one firewall policy at a time.** `jailops firewall policy attach POLICY JAIL...` appends the
+  policy to the policies of each jail and `detach` takes it out; the others stay, so nobody has to type the whole list
+  of `firewall.policies` again. A jail that has the policy already (or has not) is named and left alone. With
+  `--mandatory` the change is made to the mandatory list of the project (global admins). The change is made by the
+  server against the stored jail (`add` and `remove` in the configuration change of the API, `ChangeConfig` in the
+  SDK), so a policy attached at the same time is not lost. The Firewall tab of a jail in the console does the same, one
+  policy at a time. `jailops firewall show JAIL` now starts with a Policies section: the policies in the order they are
+  rendered (the project's marked `(project)`, the managed one of app access `(managed)`, then the jail's own) with the
+  rules each has and the default it states, and `firewall show` and `jail info` end with the command that attaches one
+  when the jail has none.
+- **Other projects reach a jail like the Internet does, and what a jail sends is never closed on its side.** A jail reaches the
+  jails of other projects like any other address, and an `allow out` rule that names them is no longer needed. What comes
+  in from another project is closed until an `allow in` rule of the jail that is reached has a source that covers it: `any`,
+  an address, a prefix (a wide one such as `0.0.0.0/0` or `::/0` too) or an address set, for every address of the jail, the
+  private IPv4 one included. A rule without a source is for the project's own jails and the host, a default never opens it,
+  and a deny rule wins. A rule that says `from any` or names a wide prefix, which other projects did not reach before, now
+  admits them: name the sources or add a deny rule to keep them out. `any` as the destination of an allow rule is every
+  address but the host's. `firewall show` and `reach` list the other projects like the Internet, with the rule and what it
+  is limited to, and `firewall test` evaluates the anchor of another project's jail too when a global administrator names
+  its address. The anchors of the jails change text, so the labels of their pass rules change and open flows reconnect once.
+- **`expose` and policy rules agree.** A port is exposed once per protocol: `expose web 443 --from set:office` after
+  `expose web 80,443` takes 443 out of the first entry (before, 443 stayed open to anyone), `unexpose web 443` takes only
+  443 out of an entry that names 80,443, and an exposure of the same ports twice, also after a partial unexpose, leaves one
+  entry and one forward. `--proto` repeats (`--proto tcp --proto udp`) as well as `tcp,udp`, and each port is said once in
+  the answer. The answer reads `jail/web exposed: 80,443/tcp`, `IPv6 ADDR   open: no NAT, the jail's own address answers on
+  80, 443` (also for IPv4 without NAT) and `IPv4 ADDR   forwarded: host 80->80, 443->443 (NAT)`. It names the policy rule
+  that already lets the port in (`note: policy web rule 2 already lets 80/tcp in over IPv6; this exposure adds the IPv4
+  forward`), `unexpose` names the rule that still does, and a single port inside an exposed range says which range holds it.
+  `--host-port` with several ports says what to type. `firewall rule add`, `rule edit`, `policy create -f`, `policy edit`
+  and `firewall validate` say once that a rule with the source `any`, `0.0.0.0/0` or `::/0` lets the Internet in and that
+  `expose` does the same and adds the IPv4 forward. A policy cannot be called `expose` (the firewall views give that name
+  to the rules of an exposure), and the view names an exposure as `expose tcp 80,443`. The console shows the same lines
+  and notes, with the right family for a routed IPv4 address, and `docs/networking.md` has the table "Expose or a policy
+  rule".
+- **The lists of networks and storage show what the project holds, and say who holds the rest.** `jailops network list` and
+  `jailops storage list` list what the selected project is granted, also for a global administrator (a project without
+  grants lists none). `--all` lists every one with GRANTED (does the selected project hold it) and PROJECTS, and
+  `network show` and `storage show` print `Granted to`. The console pages have the same switch, "All networks" and "All
+  storage", and the API answers `?all=true` and carries `status.granted_to`.
+- **A running jail that lacks a mount of its fstab is reported.** A Linux jail that started before its `fstab` gained the
+  mounts below the `compat/linux` mirror (`/proc`, `/sys`, the volumes) showed a Linux process the empty directories of
+  the mirror, and nothing said so. The loop compares the mount points of every running jail's `fstab` with the mounts of
+  the host: `jailops info` (the InSync condition) and `jailops doctor` name each mount that is missing and say to
+  restart the jail, which mounts it. A mount taken off by hand is reported the same way.
+- **A volume is refused where it would hide something, when it is attached.** A path above a persistent directory of
+  the jail (`/var` hides `/var/db`, `/usr` hides `/usr/local`) and a path at or below `/dev`, `/proc`, `/sys` or
+  `/compat` are answered with `invalid` by `volume attach`, `create` and `config set`. They were accepted, and only the
+  live mount of a running jail refused the second kind.
+- **A host directory of a Linux jail is mounted again below the mirror too.** When a directory that was lost comes
+  back, the mount in the jail's root was made again and the one below `compat/linux` was left over the old mount, so a
+  Linux process kept seeing the lost directory. Both are made again, the one below the mirror last.
+- A Linux jail is always thick. `--layout thin` for a Linux image is refused at once, before anything is made: the
+  persistent datasets of a thin jail are ZFS mounts that the nullfs mirror at `compat/linux` does not show, so a Linux
+  process would have seen empty directories. The console shows the layout of a Linux jail as thick and offers the
+  Changes tab (which compares a thin jail with its image) for thin jails only.
+- **`jailops doctor` no longer warns for a second project: `dns.unbound` asks each network for a jail that runs on it.**
+  The resolver answers by the network a question comes from, with the names of that network's project only, so the
+  gateway of one project's network answered `no such host` for a jail of another. The doctor now picks a running jail
+  per network and asks that network's gateway and resolver address for it; a warning names the network and the address
+  that was asked (it no longer names the nameserver of `resolv.conf`). The text of `jails.inbound-without-source` says
+  that a rule without a source is for the project's jails and the host.
+- **A jail of the boot and the first operation of a new daemon wait for the daemon's own short work.** The start of a
+  jail at boot answered "busy" when the housekeeping pass or the clean-up of the mounts of the same jail held its lock
+  in that moment, and the jail stayed down until a later pass tried it again; an operation that came right after the
+  start of the daemon was refused the same way. Both wait for that work now, as they already waited for a reconcile
+  pass; two operations of people at the same time are still refused.
+- **A stopping daemon starts no more work.** The reconcile loop could still have a start of a jail in flight while the
+  daemon closed its service, and that start began a background setup of the shell after the wait for the service's work
+  had begun: the setup wrote into the state after the daemon had closed it (and a restart on the same state could meet
+  it). Once the service closes, an operation that is asked for answers "busy" ("the daemon is stopping") and no setup
+  of a shell starts; the jail stays due and the next start tries again.
+- **`jailops doctor` warns when the host has rejected neighbor solicitations.** The setting
+  `net.inet6.icmp6.nd6_onlink_ns_rfc4861` stays information while the host has rejected none. With the default, `0`, and
+  a network with the NDP proxy, the check now reads the host's own count of rejected solicitations (`netstat -s -p icmp6`,
+  "bad neighbor solicitation messages") and warns with it once it is above zero: a router of a shared segment that probes
+  the host from a global address gets no answer and may mark the host and its jails unreachable. The hint is the
+  `sysctl` line and the line for `/etc/sysctl.conf`; JailOps still sets nothing outside appliance mode.
+- **The firewall says whether the kernel has it: `FirewallApplied`, `jailops firewall wait`, and the holes an external
+  audit found in how pf follows the policies.** The status of a running jail with a firewall has a condition
+  `FirewallApplied`: true while pf is enabled and evaluates the anchors, the anchor and its tables hold what the policies
+  render, and the connections of removed rules are ended; false with the reason `NotLoaded`, `PFNotApplying` (pf disabled,
+  the line `anchor "jailops/*"` gone from the main ruleset, or the ruleset unreadable) or `StatesPending`. `jailops info`
+  has an `Applied` line, the console Firewall tab shows it, `GET /jails/{name}/reach` has `rules_id` (extension
+  `firewall_applied`), and `jailops firewall wait JAIL...` returns when pf has the rules the policies render now (exit 1
+  on timeout, naming the reason). Fixed on the way: an address set that lost its last member kept admitting its former
+  members (pf keeps the members of a table whose definition has no braces; the empty table is now rendered `{ }` and the
+  loop compares empty tables with the kernel's); the connections of a removed rule stayed open when pf refused to end them
+  (the labels are kept and tried again at every pass); a jail with a network link started when the main ruleset of pf
+  could not be read (it is refused now), and pf disabled or without the anchor line was not noticed while jails ran.
+- **API: strong `If-Match`, conditional delete, checked merge patches, a freeze of the surface.** `If-Match` is parsed
+  once: quoted strong tags, a weak tag matches nothing (412), `*` alone is any, a list matches when one of its tags is the
+  generation, several different generations are refused; the SDK has `DeleteETag`. A merge patch is checked against the
+  type of the object like a typed body (a misspelled member is `invalid`, not a 200 that changes nothing) and keeps
+  numbers beyond 2^53. `jailops firewall test` exits 9 for a blocked connection (8 unknown; 1 to 7 are errors). Tests
+  freeze the routes, the error codes with their HTTP status, the members of the envelopes and the extension list (append
+  only): `just freeze` accepts a meant change, `docs/api.md` says what is frozen.
+- **CLI and release hardening.** A remote name is a name (lower case letters, digits, hyphens): it was a file name in the
+  certs directory, and `../x` was accepted; key files are created without overwriting, also through a symbolic link, and
+  `remote remove` takes the pair it made with it. `remote add --dry-run` answers before it connects. The release workflow
+  names every action by its commit and GoReleaser by an exact version, and only the publishing job can write.
 ## 0.8.5 - 2026-11-18
 
 - **The NDP proxy starts on a host that holds the resolver address.** The proxy refused to open its capture when the

@@ -243,9 +243,9 @@ func (s *Service) doctorExposedJails(ctx context.Context, c *checkSet) {
 		"jailops expose opens a jail to the Internet, an allow in rule with an external source does too; jailops firewall exposed lists them and jailops firewall show JAIL says why")
 }
 
-// doctorInboundWithoutSource lists the jails on a routed address whose policies have an allow in rule without a source. Before
-// 0.8.4 such a rule opened the uplink to the Internet; now it is for the jail's link (the project's jails and the host), so
-// what worked before may have stopped. The operator sees which rules, and what to do.
+// doctorInboundWithoutSource lists the jails on a routed address whose policies have an allow in rule without a source. Such a
+// rule is for the project's jails and the host and does not open the uplink to the Internet. The operator sees which rules,
+// and what to do.
 func (s *Service) doctorInboundWithoutSource(c *checkSet) {
 	const name = "jails.inbound-without-source"
 	s.mu.RLock()
@@ -279,7 +279,7 @@ func (s *Service) doctorInboundWithoutSource(c *checkSet) {
 	if len(out) == 0 {
 		return
 	}
-	c.add(name, api.DoctorInfo, "an allow in rule without a source is for the jail's link only and does not open the uplink (add --from, or use jailops expose): "+strings.Join(out, "; "),
+	c.add(name, api.DoctorInfo, "an allow in rule without a source is for the project's jails and the host and does not open the uplink (add --from, or use jailops expose): "+strings.Join(out, "; "),
 		"to keep one open to the Internet, give the rule --from any, or use jailops expose JAIL PORTS")
 }
 

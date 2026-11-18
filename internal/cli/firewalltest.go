@@ -9,9 +9,14 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// The exit status of 'firewall test': 0 when the connection would pass, 1 when it would be blocked, and
+// The exit status of 'firewall test': 0 when the connection would pass, ExitBlocked when it would be blocked, and
 // ExitUndecided when the test cannot say (a raw PF fragment, an ICMP type, a packet no rule of the anchor matches).
-const ExitUndecided = 8
+// Every other status is an error of the command, as for every other command, so that a script can tell a blocked
+// connection from a failed test.
+const (
+	ExitUndecided = 8
+	ExitBlocked   = 9
+)
 
 func (a *app) firewallTest() *cobra.Command {
 	var from, to, proto, icmpType, family string
@@ -26,7 +31,7 @@ project (jail:web), one address, internet (a source only: any address outside yo
 and IPv6), or host (the host's address on the gateway of the other end's
 network). A set is not an end: name a jail or an address. An address that belongs to a
 jail of the project is that jail. Another project is an external host: its jails are
-addresses here.
+addresses here (a global administrator who names one gets that jail's own anchor evaluated too).
 
 The test walks the anchors JailOps renders and loads: what the source jail sends is judged
 on its own port, what reaches the destination jail leaves the host on the gateway interface
@@ -42,7 +47,7 @@ It does not cover what it cannot know, and says so: a connection that is already
 keeps its state), the host's own pf.conf (a quick rule of yours before the anchor line wins:
 jailops doctor, pf.inbound), outbound NAT, and a raw PF fragment, which makes the answer unknown. The ICMP tests default to an echo request (ping); --icmp-type names another.
 
-Exit status: 0 the connection would pass, 1 it would be blocked, 8 the test cannot say.`,
+Exit status: 0 the connection would pass, 9 it would be blocked, 8 the test cannot say; 1 to 7 are errors, as for every command.`,
 		Example: `jailops firewall test --from jail:web --to jail:db --port 5432
 jailops firewall test --from jail:web --to jail:db --port 5433
 jailops firewall test --from 192.0.2.7 --to jail:web --port 443
@@ -76,7 +81,7 @@ jailops firewall test --from jail:web --to 198.51.100.9 --proto udp --port 53 -o
 			case api.TestPass:
 				return nil
 			case api.TestBlock:
-				return &exitError{code: ExitFailure}
+				return &exitError{code: ExitBlocked}
 			}
 			return &exitError{code: ExitUndecided}
 		},
@@ -107,7 +112,7 @@ var stageText = map[string]string{
 	"neighbour":     "the neighbour discovery rules",
 	"own-addresses": "the rule that only the jail's own addresses reach it",
 	"isolation":     "the isolation of projects",
-	"default":       "the default of the anchor",
+	"default":       "the default of the jail's policies",
 	"closed":        "the closed link of a jail without an address",
 	"gateway":       "the rules of the gateway interface",
 	"uplink":        "the rule against forged sources on the uplink",
@@ -158,7 +163,7 @@ func printFirewallTest(a *app, res api.FirewallTestResult, verbose bool) {
 				if word == "" {
 					word = h.Verdict
 				}
-				fprintf(w, "  %s %s: %s by %s\n", h.Jail, who, word, describeRule(h.DecidedBy))
+				fprintf(w, "  %s %s: %s %s\n", h.Jail, who, word, decidedText(h))
 			case h.Why != "":
 				fprintf(w, "  %s %s: %s: %s\n", h.Jail, who, h.Verdict, h.Why)
 			default:
@@ -210,7 +215,7 @@ func printFirewallTestVerbose(a *app, res api.FirewallTestResult) {
 				}
 				fprintf(w, "\n")
 			case h.DecidedBy != nil:
-				fprintf(w, " by %s\n", describeRule(h.DecidedBy))
+				fprintf(w, " %s\n", decidedText(h))
 				fprintf(w, "      %s\n", h.DecidedBy.PF)
 			case h.Why != "":
 				fprintf(w, ": %s\n", h.Why)
@@ -235,6 +240,26 @@ func printFirewallTestVerbose(a *app, res api.FirewallTestResult) {
 			fprintf(w, "  - %s\n", c)
 		}
 	}
+}
+
+// decidedText says what decided a hop: "by" and the rule, or, when no rule matched, the default and which policies set
+// it: a default is deny when any policy states deny.
+func decidedText(h api.FirewallTestHop) string {
+	r := h.DecidedBy
+	if r.Stage != "default" {
+		return "by " + describeRule(r)
+	}
+	dir, v := "in", "allow"
+	if h.Direction == "in" { // on the jail's link, what comes in is what the jail sends
+		dir = "out"
+	}
+	if h.Verdict == "block" {
+		v = "deny"
+	}
+	if len(r.SetBy) == 0 {
+		return fmt.Sprintf("(no rule matched: default %s %s, no policy says deny)", dir, v)
+	}
+	return fmt.Sprintf("(no rule matched: default %s %s, set by: %s)", dir, v, strings.Join(r.SetBy, ", "))
 }
 
 func describeRule(r *api.FirewallTestRule) string {

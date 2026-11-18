@@ -21,6 +21,9 @@ type testEnd struct {
 	jail  *api.Jail // nil for an address that belongs to no jail of the project, and for the host
 	addrs []netip.Addr
 	host  bool
+	// other is a jail of another project, found by its address for a global administrator: its own anchor is evaluated as
+	// the source or the destination, so that a connection between two projects is judged by both.
+	other bool
 	// internet is the end "internet": one address of no network of JailOps in each family, so that only a rule with
 	// the source any matches it.
 	internet bool
@@ -67,14 +70,15 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 	if req.Family != "" && req.Family != "4" && req.Family != "6" {
 		return api.FirewallTestResult{}, invalid("family must be 4 or 6")
 	}
-	src, err := s.testEnd(project, req.From)
+	src, err := s.testEnd(ctx, project, req.From)
 	if err != nil {
 		return api.FirewallTestResult{}, err
 	}
-	dst, err := s.testEnd(project, req.To)
+	dst, err := s.testEnd(ctx, project, req.To)
 	if err != nil {
 		return api.FirewallTestResult{}, err
 	}
+	inProject := func(e testEnd) bool { return e.jail != nil && !e.other }
 	if src.host && dst.host {
 		return api.FirewallTestResult{}, invalid("from and to are both the host: name a jail or an address on one side")
 	}
@@ -84,8 +88,11 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 	if src.internet && dst.jail == nil {
 		return api.FirewallTestResult{}, invalid("from internet needs a jail as the destination (--to jail:NAME)")
 	}
-	if src.jail == nil && dst.jail == nil {
+	if !inProject(src) && !inProject(dst) {
 		return api.FirewallTestResult{}, invalid("neither end is a jail of this project: there is no anchor of this project to test")
+	}
+	if src.host && dst.other || dst.host && src.other || src.internet && dst.other {
+		return api.FirewallTestResult{}, invalid("a jail of another project is tested against a jail of this project or an address, not against the host or the Internet")
 	}
 	// the host's own address is the gateway of the other end's networks
 	if src.host {
@@ -109,7 +116,13 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 		if a, ok := anchors[key]; ok {
 			return a, nil
 		}
-		b, err := s.buildJail(ctx, j, refs)
+		jrefs := refs
+		if j.Metadata.Project != project { // a jail of another project is rendered with the objects of its own project
+			if jrefs, err = s.allRefs(j.Metadata.Project); err != nil {
+				return nil, err
+			}
+		}
+		b, err := s.buildJail(ctx, j, jrefs)
 		if err != nil {
 			return nil, err
 		}
@@ -160,7 +173,7 @@ func (s *Service) FirewallTest(ctx context.Context, req api.FirewallTestRequest)
 						Verdict: string(r.Verdict), Why: r.Why, LoadedMatchesRendered: loaded[jailKey(*j)]}
 					if r.Rule != nil {
 						hop.DecidedBy = &api.FirewallTestRule{Stage: r.Rule.Origin.Stage, Policy: r.Rule.Origin.Policy, ProjectPolicy: r.Rule.Origin.ProjectPolicy,
-							Managed: r.Rule.Origin.Managed, Rule: r.Rule.Origin.RuleNo, Name: r.Rule.Origin.RuleName, Comment: r.Rule.Origin.Comment, PF: r.Text}
+							Managed: r.Rule.Origin.Managed, Rule: r.Rule.Origin.RuleNo, Name: r.Rule.Origin.RuleName, Comment: r.Rule.Origin.Comment, SetBy: splitSetBy(r.Rule.Origin.SetBy), PF: r.Text}
 					}
 					for _, sk := range r.Skipped {
 						hop.Skipped = append(hop.Skipped, api.FirewallTestSkipped{Why: sk.Why, Rule: api.FirewallTestRule{Stage: sk.Rule.Origin.Stage,
@@ -307,7 +320,7 @@ func testCaveats(src, dst testEnd) []string {
 		"only JailOps' rules are evaluated: a rule of an anchor that passes or blocks is final, so /etc/pf.conf after the anchor line never sees the packet; quick rules of pf.conf before the anchor line are not evaluated (jailops doctor: pf.inbound and pf.order name such rules)",
 	}
 	if src.jail != nil && dst.jail == nil && !dst.host {
-		c = append(c, "the destination is not a jail of this project: only the source's anchor is evaluated; the host's rules and the uplink decide the rest")
+		c = append(c, "the destination is not a jail of this project: only the source's anchor is evaluated; a jail of another project decides itself, by its own allow in rules with a source, whether it lets the source in (a global administrator tests it by its address: both anchors are then evaluated), and the host's rules and the uplink decide the rest")
 	}
 	if src.jail != nil && dst.host {
 		c = append(c, "the destination is the host: this is the jail's side only. JailOps' firewall never passes a jail's traffic to the host except DNS to the resolver and ping; a service of the host that a jail needs is opened in /etc/pf.conf with a quick pass rule before the anchor line")
@@ -325,7 +338,7 @@ func testCaveats(src, dst testEnd) []string {
 }
 
 // testEnd reads one end of a test.
-func (s *Service) testEnd(project, text string) (testEnd, error) {
+func (s *Service) testEnd(ctx context.Context, project, text string) (testEnd, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return testEnd{}, invalid("name both ends: a jail (jail:NAME), an address, or host")
@@ -373,6 +386,17 @@ func (s *Service) testEnd(project, text string) (testEnd, error) {
 		if slices.Contains(jailAddrs(s.effective(j)), a) {
 			jj := j
 			return testEnd{label: text, jail: &jj, addrs: []netip.Addr{a}}, nil
+		}
+	}
+	// an address of a jail of another project: a global administrator sees that jail's anchor too; the others see an
+	// external host, as before
+	if isGlobalAdmin(ActorFrom(ctx)) {
+		for _, n := range sortedKeys(s.jails) {
+			j := s.jails[n].jail
+			if j.Metadata.Project != project && slices.Contains(jailAddrs(s.effective(j)), a) {
+				jj := j
+				return testEnd{label: text, jail: &jj, addrs: []netip.Addr{a}, other: true}, nil
+			}
 		}
 	}
 	return testEnd{label: text, addrs: []netip.Addr{a}}, nil

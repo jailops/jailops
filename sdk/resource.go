@@ -20,6 +20,10 @@ func Label(key, value string) ListOption {
 	return func(q url.Values) { q.Add("label", key+"="+value) }
 }
 
+// All asks for everything a global identity may see: every network or storage, not only those granted to the selected
+// project.
+func All() ListOption { return func(q url.Values) { q.Set("all", "true") } }
+
 // Recursion sets ?recursion=. The server always returns full objects; the
 // value is reserved for future use.
 func Recursion(n int) ListOption { return func(q url.Values) { q.Set("recursion", strconv.Itoa(n)) } }
@@ -90,7 +94,17 @@ func (r *Resource[T]) Patch(ctx context.Context, name string, patch any, etag st
 
 // Delete removes the object, waiting if the server answers asynchronously.
 func (r *Resource[T]) Delete(ctx context.Context, name string) error {
-	_, _, err := send[None](ctx, r.c, request{method: http.MethodDelete, path: r.item(name)})
+	return r.DeleteETag(ctx, name, "")
+}
+
+// DeleteETag removes the object only if it is still the one the ETag names (read with GetETag): a changed object
+// fails with api.CodeConflict, as Update does. An empty etag deletes whatever is there.
+func (r *Resource[T]) DeleteETag(ctx context.Context, name, etag string) error {
+	h := http.Header{}
+	if etag != "" {
+		h.Set("If-Match", quoteETag(etag))
+	}
+	_, _, err := send[None](ctx, r.c, request{method: http.MethodDelete, path: r.item(name), header: h})
 	return err
 }
 

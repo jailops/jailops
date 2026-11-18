@@ -22,16 +22,41 @@ func policyDesc() *kindDesc[api.FirewallPolicy] {
 	renameFrom(&d, func(c *sdk.Client) *sdk.Resource[api.FirewallPolicy] { return c.Firewall().Policies() })
 	d.renameLong = renameLong("firewall policy", `the jails and the profiles of the project that use it and, for the
 project's mandatory policy (renamed by a global administrator), the project`)
+	d.notes = policyInternetNotes
+	d.updated = func(a *app, p api.FirewallPolicy) {
+		for _, n := range policyInternetNotes(p) {
+			fprintf(a.env.Stderr, "note: %s\n", n)
+		}
+	}
 	d.show = func(a *app, p api.FirewallPolicy) error { return a.showPolicy(p) }
-	d.head = []string{"NAME", "DEFAULT-IN", "DEFAULT-OUT", "RULES", "RAW"}
+	d.head = []string{"NAME", "DEFAULT-IN", "DEFAULT-OUT", "RULES", "RAW", "USED BY"}
 	d.row = func(_ time.Time, p api.FirewallPolicy) []string {
 		raw := "no"
 		if p.Spec.Raw != "" {
 			raw = "yes"
 		}
-		return []string{p.Metadata.Name, dash(p.Spec.DefaultIn), dash(p.Spec.DefaultOut), strconv.Itoa(len(p.Spec.Rules)), raw}
+		return []string{p.Metadata.Name, dash(p.Spec.DefaultIn), dash(p.Spec.DefaultOut), strconv.Itoa(len(p.Spec.Rules)), raw, policyUsers(p.Status)}
 	}
 	return &d
+}
+
+// policyUsers says who uses a policy: every jail for a mandatory policy of the project, else the jails by name, else "none".
+// unsetText is a default a policy does not state: it has no opinion and the other policies of the jail decide.
+func unsetText(v string) string {
+	if v == "" {
+		return "(not set)"
+	}
+	return v
+}
+
+func policyUsers(st api.FirewallPolicyStatus) string {
+	switch {
+	case st.Mandatory:
+		return "every jail (project)"
+	case len(st.UsedBy) == 0:
+		return "none"
+	}
+	return strings.Join(st.UsedBy, ", ")
 }
 
 func addrSetDesc() *kindDesc[api.AddressSet] {
@@ -63,24 +88,27 @@ jailops firewall address-set create office --comment "the office"
 jailops firewall address-set add office 192.0.2.0/24
 jailops firewall validate -f policy.yaml`, "fw")
 	pd := policyDesc()
-	pc := group("policy", "Manage firewall policies", "Create, inspect, edit and delete firewall policies.",
-		"jailops firewall policy list\njailops firewall policy show web", "policies")
+	pc := group("policy", "Manage firewall policies", "Create, inspect, edit and delete firewall policies, and attach one to jails or detach it, one policy at a time.",
+		"jailops firewall policy list\njailops firewall policy show web\njailops firewall policy attach web-public web", "policies")
 	crudCommands(a, pc, pd, `Create a firewall policy, empty or from a file. A policy is made of rules, added one at a time with
-'jailops firewall rule add' (or all at once from a file with -f). --comment is what the policy is for. Without
---default-in and --default-out the policy denies inbound and allows outbound traffic; both are written into the policy.
-A deny rule wins over every allow rule, whatever the order of the policies.`,
+'jailops firewall rule add' (or all at once from a file with -f). --comment is what the policy is for. --default-in deny
+(and --default-out deny) closes the direction for every jail that uses the policy: only what a rule allows gets through.
+Without them the policy says nothing about the default: it is left to the other policies of the jail, and is allow when
+none of them denies. A default is deny when any policy of the jail states deny, whatever the order; a deny rule wins over
+every allow rule in the same way. 'jailops firewall show JAIL' says which policy sets the default.`,
 		`jailops firewall policy create web --comment "the public web server"
 jailops firewall rule add web in --action allow --proto tcp --port 80,443 --comment "the site"
 jailops firewall policy create -f web.yaml`,
 		func(cmd *cobra.Command) func(string) (api.FirewallPolicy, error) {
 			var din, dout, comment string
 			cmd.Flags().StringVar(&comment, "comment", "", "what the policy is for (one line, at most 200 characters, no double quotes or backslashes)")
-			cmd.Flags().StringVar(&din, "default-in", "deny", "default for inbound traffic: allow or deny")
-			cmd.Flags().StringVar(&dout, "default-out", "allow", "default for outbound traffic: allow or deny")
+			cmd.Flags().StringVar(&din, "default-in", "", "deny closes inbound traffic for every jail that uses the policy; unset leaves it to the other policies (allow when none denies)")
+			cmd.Flags().StringVar(&dout, "default-out", "", "deny closes outbound traffic for every jail that uses the policy; unset leaves it to the other policies (allow when none denies)")
 			return func(name string) (api.FirewallPolicy, error) {
 				return api.FirewallPolicy{Metadata: api.ObjectMeta{Name: name}, Spec: api.FirewallPolicySpec{DefaultIn: din, DefaultOut: dout, Comment: comment}}, nil
 			}
 		})
+	pc.AddCommand(a.policyAttachCmds()...)
 	ad := addrSetDesc()
 	ac := group("address-set", "Manage address sets", "Create, inspect, edit and delete address sets, referenced as set:NAME in rules. A member is an address, a CIDR, jail:NAME or set:NAME. Every entry, set, rule and policy has a `comment`: what it is or why it is there. `show` lists them and the rendered rules carry them as comment lines: comments are what a reviewer of the firewall reads.",
 		"jailops firewall address-set list\njailops firewall address-set show office", "address-sets", "set")
@@ -107,7 +135,7 @@ jailops firewall address-set create -f office.yaml`,
 			}
 		})
 	ac.AddCommand(a.addrSetAdd(), a.addrSetRemove())
-	fc.AddCommand(pc, a.ruleCmd(), ac, a.firewallValidate(), a.firewallTest(), a.firewallShow(), a.firewallExposed())
+	fc.AddCommand(pc, a.ruleCmd(), ac, a.firewallValidate(), a.firewallTest(), a.firewallWait(), a.firewallShow(), a.firewallExposed())
 	return fc
 }
 
@@ -137,9 +165,7 @@ func validatePolicy(doc string, p api.FirewallPolicySpec, sets func(string) bool
 	bad := func(f string, a ...any) { out = append(out, finding{doc, "error", fmt.Sprintf(f, a...)}) }
 	for _, d := range [][2]string{{"default_in", p.DefaultIn}, {"default_out", p.DefaultOut}} {
 		switch d[1] {
-		case "allow", "deny":
-		case "":
-			bad("%s is required: allow or deny", d[0])
+		case "", "allow", "deny":
 		default:
 			bad("%s must be allow or deny, not %q", d[0], d[1])
 		}
@@ -333,6 +359,9 @@ change the exit status. Without a server it says what it could not check.`,
 					}
 					return rows
 				}(), nil)
+			}
+			if a.format == fmtTable && !a.quiet && slices.ContainsFunc(pols, func(p pol) bool { return len(policyInternetNotes(api.FirewallPolicy{Spec: p.spec})) > 0 }) {
+				fprintf(a.env.Stderr, "note: %s\n", internetInNote)
 			}
 			if errs > 0 {
 				return api.Errorf(api.CodeInvalid, "%d problem(s) found in %s", errs, file).WithHint("fix the listed rules and run validate again")

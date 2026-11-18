@@ -578,8 +578,15 @@ func (s *Service) setUpShellInBackground(key, project, name string) {
 	// The context is made here too, so that a stop that comes at once can cancel a setup whose goroutine has not run.
 	ctx, cancel := context.WithTimeout(base, shellSetupDeadline)
 	s.shellM.prog[key] = shellProg{Started: s.now(), Step: stepFetchBash, Cancel: cancel}
+	if !s.track() {
+		// the service is closing: no setup starts; the jail stays due and the next start tries again
+		delete(s.shellM.bg, key)
+		delete(s.shellM.prog, key)
+		s.shellM.mu.Unlock()
+		cancel()
+		return
+	}
 	s.shellM.mu.Unlock()
-	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer func() {

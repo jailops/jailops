@@ -3,9 +3,7 @@
 # tags: tier-1 web
 table <s_office> persist { 198.51.100.7, 2001:db8:ffff::/48, 203.0.113.0/24 }
 # the host's own addresses (a jail reaches none of them unless a rule says so)
-table <host> persist
-# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)
-table <not_any> persist
+table <host> persist { }
 # rdr rule 1: expose tcp 80 forward
 match in on em0 inet proto tcp from any to (em0) port 8080 rdr-to 10.20.0.10 port 80
 pass in quick on em0 inet proto tcp from any to 10.20.0.10 port 80 label "jo-6018c33a9496" keep state (if-bound)
@@ -31,18 +29,18 @@ block drop out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::
 block drop in quick on jo0123456789a0a inet proto tcp from 10.20.0.10 to any port 25
 block drop in quick on jo0123456789a0a inet6 proto tcp from 2001:db8:1::100 to any port 25
 # the host: closed to the jail whatever its policies allow; ping, the errors a path needs and the network's resolver stay open
-pass in quick on jo0123456789a0a inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label "jo-81897d6e0d23" keep state (if-bound)
-pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-48c3a81ee7ce" keep state (if-bound)
+pass in quick on jo0123456789a0a inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label "jo-ba0c9f1d6b2a" keep state (if-bound)
+pass in quick on jo0123456789a0a inet6 proto icmp6 from any to <host> icmp6-type { echoreq, unreach, toobig, timex, paramprob } label "jo-01b442661749" keep state (if-bound)
 block drop in quick on jo0123456789a0a from any to <host>
 # allow rules of the policies, in the order of the policies
 # project policy baseline
 # rule 3: mgmt
-pass out quick on jo0123456789a0a inet proto tcp from <s_office> to 10.20.0.10 port 22 label "jo-53c71ce92acf" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from <s_office> to 2001:db8:1::100 port 22 label "jo-71d87974a09e" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from <s_office> to 10.20.0.10 port 22 label "jo-51da9d44451a" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from <s_office> to 2001:db8:1::100 port 22 label "jo-ecafdb1e3f0b" keep state (if-bound)
 # exposed ports
 # rule 1: expose tcp 80
-pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80 label "jo-955f8faeae69" keep state (if-bound)
-pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-b0eb07f706a9" keep state (if-bound)
+pass out quick on jo0123456789a0a inet proto tcp from any to 10.20.0.10 port 80 label "jo-e1b632ced161" keep state (if-bound)
+pass out quick on jo0123456789a0a inet6 proto tcp from any to 2001:db8:1::100 port 80 label "jo-0654a4d740c4" keep state (if-bound)
 # defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them
 block drop out quick on jo0123456789a0a all
-pass in quick on jo0123456789a0a all label "jo-7e970080f9da" keep state (if-bound)
+pass in quick on jo0123456789a0a all label "jo-bf6c393362c2" keep state (if-bound)

@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"context"
 	"errors"
 	"slices"
 	"strings"
@@ -135,4 +136,27 @@ func TestAStopCancelsTheSetupOfTheShellInsteadOfWaitingForIt(t *testing.T) {
 	if !found {
 		t.Error("pkg never ran in the jail")
 	}
+}
+
+// waitShellSetup waits until the jail no longer says that its bash is being installed in the background: the setup
+// writes files through the same fakes as the operation under test, and a test that counts or fails the steps of that
+// operation must not see them.
+func waitShellSetup(t *testing.T, s *service.Service, ctx context.Context, name string) {
+	t.Helper()
+	for deadline := time.Now().Add(10 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		j, err := s.GetJail(ctx, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		installing := false
+		for _, c := range j.Status.Conditions {
+			if c.Type == "ShellSetup" && c.Reason == api.ShellInstalling {
+				installing = true
+			}
+		}
+		if !installing {
+			return
+		}
+	}
+	t.Fatal("the shell of the jail is still being set up")
 }

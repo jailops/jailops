@@ -58,23 +58,28 @@ func AnchorLines() string {
 	return "anchor \"jailops/*\"\n"
 }
 
-// NotAnyTable is the table of the addresses an allow rule to "any" does not reach: the host's own addresses and the
-// subnets of the other projects.
-const NotAnyTable = "not_any"
+// ForeignTable is the table of the subnets of the networks that belong to other projects, which every anchor defines when
+// there are any: what comes in from them is closed unless an allow in rule with a source admits it, and an allow in rule
+// without a source is not for them.
+const ForeignTable = "foreign"
 
-// notAnyMembers are the members of NotAnyTable.
-func notAnyMembers(in *PFInput) []string {
-	members := addrStrings(uniqAddrs(in.Host))
+// foreignMembers are the members of ForeignTable: the foreign prefixes, masked, sorted, without duplicates.
+func foreignMembers(in *PFInput) []string {
+	var members []string
 	for _, p := range in.Foreign {
 		members = append(members, p.Masked().String())
 	}
 	sort.Strings(members)
-	return members
+	return slices.Compact(members)
 }
 
-// notAnyMatch is the structured form of "to ! <not_any>".
-func notAnyMatch(in *PFInput) Match {
-	return Match{Negate: true, Prefixes: prefixesOf(notAnyMembers(in)), Tables: []string{NotAnyTable}}
+// foreignMatch is the structured form of "<foreign>".
+func foreignMatch(in *PFInput) Match {
+	m := Match{Tables: []string{ForeignTable}}
+	for _, s := range foreignMembers(in) {
+		m.Prefixes = append(m.Prefixes, netip.MustParsePrefix(s))
+	}
+	return m
 }
 
 // HostTable is the table of the host's own addresses, which every anchor defines: the endpoint "host" of a rule, and the
@@ -116,9 +121,13 @@ type PFInput struct {
 	// TagMembers maps a tag to the addresses of every jail that has it.
 	TagMembers map[string][]netip.Addr
 	// DefaultIn and DefaultOut are the defaults of the anchor, "allow" or "deny". They come last. The caller works
-	// them out from the policies (the strictest wins); an empty inbound default is deny and an empty outbound default
-	// is allow.
+	// them out from the policies: deny when any policy states deny for the direction, else allow (an empty value is
+	// allow).
 	DefaultIn, DefaultOut string
+	// DefaultInBy and DefaultOutBy say which policies state deny for that direction ("name", with " [project]" or
+	// " [managed]" after the project's and the app's); empty when none does and the default is allow. They are the origin of
+	// the default rules.
+	DefaultInBy, DefaultOutBy []string
 	// Policies are rendered into the anchor in this order, each under its own heading and with its own rule
 	// numbers: the project's policies, then the managed access policy, then the jail's own. Their defaults are not
 	// used: DefaultIn and DefaultOut are.
@@ -146,9 +155,9 @@ type PFInput struct {
 	// AllowRaw must be set by the caller after checking the admin role; a
 	// raw fragment is otherwise refused.
 	AllowRaw bool
-	// Foreign are the subnets of the networks that belong to other projects. Nothing from them reaches the jail, and
-	// the jail reaches nothing in them, unless a rule of a policy says so first (projects are isolated from each
-	// other by default; a shared service lives in a project of its own and is opened by rules).
+	// Foreign are the subnets of the networks that belong to other projects. They reach the jail like the Internet does:
+	// through an allow in rule of its policies whose source covers them (any, an address, a prefix, a set); defaults never
+	// open it, and a rule without a source is not for them. What the jail sends to them is not closed on its side.
 	Foreign []netip.Prefix
 }
 
@@ -240,7 +249,6 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			return nil, err
 		}
 		spec := p.Policy
-		spec.DefaultIn, spec.DefaultOut = "deny", "allow" // the anchor's defaults are checked above; only the rules, the comment and the raw fragment are rendered
 		if _, err := validate.FirewallPolicySpec(spec); err != nil {
 			return nil, err
 		}
@@ -339,8 +347,10 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	}
 	b.line("# the host's own addresses (a jail reaches none of them unless a rule says so)")
 	b.line("%s", tableLine(HostTable, addrStrings(uniqAddrs(in.Host))))
-	b.line("# what an allow rule to any does not reach: the host and the networks of other projects (name them to open them)")
-	b.line("%s", tableLine(NotAnyTable, notAnyMembers(&in)))
+	if len(in.Foreign) > 0 {
+		b.line("# the networks of the other projects: they reach the jail only through an allow in rule with a source")
+		b.line("%s", tableLine(ForeignTable, foreignMembers(&in)))
+	}
 	for _, n := range sortedKeys(tagRefs) {
 		var members []string
 		for _, a := range uniqAddrs(in.TagMembers[n]) {
@@ -553,31 +563,6 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			"block drop in quick on %s from any to <%s>", ifs, HostTable)
 	}
 
-	// The other projects are closed before the allow rules as well, for every foreign prefix that no allow rule of this
-	// jail names with a prefix of its own (equal to it or narrower): an allow rule with a wide prefix (0.0.0.0/0, ::/0, a
-	// /8 that holds another project's network) does not reach them, and an `allow in --from any` of another project
-	// does not open this jail, whatever the other project's policies say. A rule that names a foreign prefix opens it
-	// ("name them to open them"); the block after the allow rules stays as the last word for what is left.
-	isolationStage := func() {
-		closed := foreignNotNamed(in.Foreign, all, fams, &in)
-		if len(closed) == 0 {
-			return
-		}
-		fp := make([]string, 0, len(closed))
-		m := Match{Tables: []string{"foreign_closed"}}
-		for _, p := range closed {
-			fp = append(fp, p.String())
-			m.Prefixes = append(m.Prefixes, p)
-		}
-		sort.Strings(fp)
-		b.line("%s", tableLine("foreign_closed", fp))
-		b.line("# other projects: closed before the allow rules, except what a rule names with an address or prefix of its own")
-		b.rule(Rule{Action: "block", Dir: "out", From: m, To: anyMatch(), Origin: Origin{Stage: StageIsolation}},
-			"block drop out quick on %s from <foreign_closed> to any", ifs)
-		b.rule(Rule{Action: "block", Dir: "in", From: anyMatch(), To: m, Origin: Origin{Stage: StageIsolation}},
-			"block drop in quick on %s from any to <foreign_closed>", ifs)
-	}
-
 	denyFirst := hasEnabledDeny(all, false)
 	shown := map[int]bool{}
 	head := func(i int) {
@@ -600,11 +585,9 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 			filterRules(&b, &in, sec.origin, sec.rules, sec.fams, fams, ifs, false, "deny")
 		}
 		hostStage()
-		isolationStage()
 		b.line("# allow rules of the policies, in the order of the policies")
 	} else {
 		hostStage()
-		isolationStage()
 	}
 	for i, sec := range sections {
 		if denyFirst && shown[i] && sec.raw == "" && !hasAction(sec.rules, "allow") {
@@ -621,26 +604,14 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 	}
 
 	if len(in.Foreign) > 0 {
-		fp := make([]string, 0, len(in.Foreign))
-		for _, p := range in.Foreign {
-			fp = append(fp, p.Masked().String())
-		}
-		sort.Strings(fp)
-		b.line("%s", tableLine("foreign", fp))
-		b.line("# other projects: closed unless a rule above opened it")
-		foreign := Match{Prefixes: append([]netip.Prefix(nil), in.Foreign...), Tables: []string{"foreign"}}
-		for i := range foreign.Prefixes {
-			foreign.Prefixes[i] = foreign.Prefixes[i].Masked()
-		}
-		b.rule(Rule{Action: "block", Dir: "out", From: foreign, To: anyMatch(), Origin: Origin{Stage: StageIsolation}},
-			"block drop out quick on %s from <foreign> to any", ifs)
-		b.rule(Rule{Action: "block", Dir: "in", From: anyMatch(), To: foreign, Origin: Origin{Stage: StageIsolation}},
-			"block drop in quick on %s from any to <foreign>", ifs)
+		b.line("# other projects: what comes in from them is closed unless an allow in rule with a source admitted it above")
+		b.rule(Rule{Action: "block", Dir: "out", From: foreignMatch(&in), To: anyMatch(), Origin: Origin{Stage: StageIsolation}},
+			"block drop out quick on %s from <%s> to any", ifs, ForeignTable)
 	}
 	b.line("# defaults: final (quick), so that no rule of the host's own pf.conf after the anchor line changes them")
-	inAct, outAct := "block drop", "pass"
-	if in.DefaultIn == "allow" {
-		inAct = "pass"
+	inAct, outAct := "pass", "pass"
+	if in.DefaultIn == "deny" {
+		inAct = "block drop"
 	}
 	if in.DefaultOut == "deny" {
 		outAct = "block drop"
@@ -651,9 +622,9 @@ func BuildAnchor(in PFInput) (*Anchor, error) {
 		}
 		return "pass"
 	}
-	b.rule(Rule{Action: act(inAct), Dir: "out", From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault}},
+	b.rule(Rule{Action: act(inAct), Dir: "out", From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault, SetBy: strings.Join(in.DefaultInBy, ", ")}},
 		"%s out quick on %s all", inAct, ifs)
-	b.rule(Rule{Action: act(outAct), Dir: "in", From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault}},
+	b.rule(Rule{Action: act(outAct), Dir: "in", From: anyMatch(), To: anyMatch(), Origin: Origin{Stage: StageDefault, SetBy: strings.Join(in.DefaultOutBy, ", ")}},
 		"%s in quick on %s all", outAct, ifs)
 	out, err := b.result()
 	if err != nil {
@@ -777,9 +748,19 @@ func ruleLabel(i int, r api.FirewallRule) string {
 	return head
 }
 
+// RulesID is the short identity of a rendered ruleset: twelve hex digits of its SHA-256. The FirewallApplied condition
+// of a jail names the rules it confirmed by it, and the reach answer names the rules the policies render now by it, so
+// that a client can tell "the kernel has what the policies say" from "the kernel has what they said before".
+func RulesID(ruleset string) string {
+	sum := sha256.Sum256([]byte(ruleset))
+	return hex.EncodeToString(sum[:])[:12]
+}
+
 func tableLine(name string, members []string) string {
 	if len(members) == 0 {
-		return fmt.Sprintf("table <%s> persist", name)
+		// the braces are what makes pf replace the members of a table that exists: without them a load keeps what
+		// the kernel holds, and a set that lost its last member would go on admitting its former members
+		return fmt.Sprintf("table <%s> persist { }", name)
 	}
 	return fmt.Sprintf("table <%s> persist { %s }", name, strings.Join(members, ", "))
 }
@@ -972,16 +953,21 @@ func filterRules(b *builder, in *PFInput, org Origin, rules []api.FirewallRule, 
 				to, ok2 = endpoints(r.To, f, f.addrs)
 				mFrom, _ = endpointMatch(r.From, f, nil, in)
 				mTo, _ = endpointMatch(r.To, f, f.addrs, in)
+				// An allow in rule without a source is for the project's own jails and the host, not for the jails of other
+				// projects: they reach the jail only through a rule that names a source (any, an address, a prefix, a set).
+				if r.Action == "allow" && len(r.From) == 0 && len(in.Foreign) > 0 {
+					from, mFrom = "! <"+ForeignTable+">", foreignMatch(in)
+					mFrom.Negate = true
+				}
 			} else {
 				from, ok1 = endpoints(r.From, f, f.addrs)
 				to, ok2 = endpoints(r.To, f, nil)
 				mFrom, _ = endpointMatch(r.From, f, f.addrs, in)
 				mTo, _ = endpointMatch(r.To, f, nil, in)
-				// "any" as the destination of an allow rule is every address but the host's and those of the other
-				// projects: a jail that may reach "the internet" does not thereby reach the host's sshd or the jails of
-				// another project (name them to open them). A deny rule keeps "any": it may deny more, never less.
+				// "any" as the destination of an allow rule is every address but the host's: a jail that may reach "the
+				// internet" does not thereby reach the host's sshd. A deny rule keeps "any": it may deny more, never less.
 				if r.Action == "allow" && to == "any" {
-					to, mTo = "! <"+NotAnyTable+">", notAnyMatch(in)
+					to, mTo = "! <"+HostTable+">", Match{Negate: true, Prefixes: prefixesOf(addrStrings(uniqAddrs(in.Host))), Tables: []string{HostTable}}
 				}
 			}
 			if !ok1 || !ok2 {
@@ -1088,45 +1074,4 @@ func tagName(key string) string {
 		}
 	}
 	return sb.String()
-}
-
-// foreignNotNamed returns the foreign prefixes (masked, without duplicates) that no enabled allow rule names with an
-// address, a set member or a prefix that is equal to the foreign prefix or lies inside it. A prefix that holds the
-// foreign one (0.0.0.0/0, ::/0, a /8) does not name it. The destination of an outgoing rule and the source of an
-// incoming rule are the ends that point at another project.
-func foreignNotNamed(foreign []netip.Prefix, rules []api.FirewallRule, fams []family, in *PFInput) []netip.Prefix {
-	named := map[netip.Prefix]bool{}
-	for _, r := range rules {
-		if r.Disabled || r.Action != "allow" {
-			continue
-		}
-		entries := r.To
-		if r.Direction != "out" {
-			entries = r.From
-		}
-		for _, f := range fams {
-			m, ok := endpointMatch(entries, f, nil, in)
-			if !ok || m.Any {
-				continue
-			}
-			for _, p := range m.Prefixes {
-				for _, fp := range foreign {
-					fp = fp.Masked()
-					if p.Bits() >= fp.Bits() && fp.Contains(p.Addr()) {
-						named[fp] = true
-					}
-				}
-			}
-		}
-	}
-	seen := map[netip.Prefix]bool{}
-	var out []netip.Prefix
-	for _, fp := range foreign {
-		fp = fp.Masked()
-		if !named[fp] && !seen[fp] {
-			seen[fp] = true
-			out = append(out, fp)
-		}
-	}
-	return out
 }

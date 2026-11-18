@@ -345,6 +345,12 @@ type Service struct {
 	baseCtx   context.Context
 	cancel    context.CancelFunc
 	wg        sync.WaitGroup
+	// trackMu orders the start of a tracked goroutine against Close: once Close has begun nothing new is added to wg,
+	// so the wait of Close is a guarantee that no work of the service runs after it (a start that the reconcile loop
+	// still had in flight could otherwise begin a background shell setup that writes into the state after the daemon
+	// closed it).
+	trackMu sync.Mutex
+	closed  bool
 }
 
 type jailEntry struct {
@@ -496,12 +502,29 @@ func (s *Service) Start(ctx context.Context) error {
 // loop runs a background loop of the service under the supervisor: a panic in it is logged and counted and the loop
 // starts again after a delay.
 func (s *Service) loop(name string, f func(context.Context)) {
-	s.wg.Add(1)
+	if !s.track() {
+		return
+	}
 	go func() { defer s.wg.Done(); supervise.Run(s.baseCtx, s.log, name, f) }()
+}
+
+// track registers a goroutine that Close waits for: the caller starts it and calls s.wg.Done when it ends. It is false
+// once Close has begun, and then nothing is started.
+func (s *Service) track() bool {
+	s.trackMu.Lock()
+	defer s.trackMu.Unlock()
+	if s.closed {
+		return false
+	}
+	s.wg.Add(1)
+	return true
 }
 
 // Close stops background work and cancels running operations.
 func (s *Service) Close() {
+	s.trackMu.Lock()
+	s.closed = true
+	s.trackMu.Unlock()
 	s.closeOnce.Do(func() {
 		s.cancel()
 		s.events.close()

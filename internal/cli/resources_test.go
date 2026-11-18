@@ -107,6 +107,9 @@ func TestNetworks(t *testing.T) {
 	tr.do("", "network", "create", "short")
 	tr.ok("network", "list")
 	tr.ok("network", "grant", "dmz", "--project", "main")
+	tr.ok("network", "list")          // what the project holds
+	tr.ok("network", "list", "--all") // every network, with the projects that hold it
+	tr.ok("network", "show", "dmz")
 	tr.do("", "network", "grant", "lan", "--project", "other") // no such project
 	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--storage", "default", "--network", "dmz")
 	tr.ok("jail", "create", "db", "--image", "freebsd-15", "--storage", "default", "--network", "dmz")

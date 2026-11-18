@@ -119,6 +119,14 @@ const (
 	ConditionUnknown = "Unknown"
 )
 
+// ConditionFirewallApplied is the type of the condition that says whether the kernel has what the policies of a jail
+// say: pf is enabled and evaluates the anchors of JailOps, the anchor of the jail holds the rendered rules, its tables
+// hold the rendered members and the connections of removed rules are ended. A policy that is stored but not yet
+// loaded is False ("NotLoaded"). The other reasons are "PFNotApplying" (pf disabled, the line anchor "jailops/*"
+// missing from its main ruleset, or the ruleset unreadable) and "StatesPending" (pf refused to end the connections of a
+// removed rule; the next pass tries again); True has the reason "Applied" and names the rules by a short hash.
+const ConditionFirewallApplied = "FirewallApplied"
+
 // ShellInstalling is the reason of the ShellSetup condition while bash is being installed into a running jail in the
 // background: `jailops shell` waits for it.
 const ShellInstalling = "Installing"

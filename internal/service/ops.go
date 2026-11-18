@@ -94,6 +94,10 @@ func (m *opManager) submit(ctx context.Context, spec OpSpec) (api.Operation, err
 	if err != nil {
 		return api.Operation{}, err
 	}
+	if !s.track() {
+		release()
+		return api.Operation{}, api.Errorf(api.CodeBusy, "the daemon is stopping")
+	}
 	now := s.now().UTC()
 	lo := &liveOp{
 		op: api.Operation{ID: newOpID(), Description: spec.Description, Status: api.OpPending, Resources: spec.Resources,
@@ -106,6 +110,7 @@ func (m *opManager) submit(ctx context.Context, spec OpSpec) (api.Operation, err
 	m.live[lo.op.ID] = lo
 	m.mu.Unlock()
 	if err := s.d.DB.Operations.Put(ctx, lo.op); err != nil {
+		s.wg.Done()
 		cancel()
 		release()
 		m.mu.Lock()
@@ -115,7 +120,6 @@ func (m *opManager) submit(ctx context.Context, spec OpSpec) (api.Operation, err
 	}
 	s.emitOperation(lo.op)
 	snap := lo.op
-	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer release()
