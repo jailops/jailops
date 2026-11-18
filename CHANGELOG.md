@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.6 - 2026-11-18
+
 - **A firewall policy states a default only when you tell it to.** `default_in` and `default_out` are `deny`, `allow`
   or unset, and `firewall policy create` writes none unless you give `--default-in` or `--default-out`. A default is
   deny when any policy of the jail states deny (the project's mandatory policies, the managed policy of app access, the
