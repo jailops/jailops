@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.8.4 - 2026-11-18
+
 - **Breaking: an `allow in` rule without `--from` is for the jail's link only** (the project's jails and the host) and no longer
   opens the uplink. `--from any` or `jailops expose` does. `firewall rule add` says so. `app allow` refuses `0.0.0.0/0`, `::/0`
   and `any` and points at `jailops expose`. `jailops doctor` (`jails.inbound-without-source`) lists the rules this changes on the first start after the upgrade: give such a rule `--from any`, or use `jailops expose`. `app allow` also refuses every prefix shorter than /8 (IPv4) or /16 (IPv6) and address sets that hold one.
