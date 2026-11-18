@@ -69,6 +69,8 @@ case $part in all | e2e | pf | scale | soak | prepare) ;; *) echo "JAILOPS_E2E_P
 shard=${JAILOPS_E2E_SHARD:-all}
 case $shard in all | 1 | 2 | 3) ;; *) echo "JAILOPS_E2E_SHARD must be all, 1, 2 or 3" >&2; exit 2 ;; esac
 shard_on() { [ "$shard" = all ] || [ "$shard" = "$1" ]; }
+# kern.racct.enable decides which checks of the limits run; shard 1 and the apps of any shard read it
+racct=$(sysctl -n kern.racct.enable 2>/dev/null || echo 0)
 e2e_apps=${JAILOPS_E2E_APPS:-}
 for a in $e2e_apps; do
 	case $a in postgresql | valkey | prometheus | forgejo | nsd | mail | isms | postgresql-access) ;; *) echo "JAILOPS_E2E_APPS: no check for $a (postgresql, valkey, prometheus, forgejo, nsd, mail, isms, postgresql-access)" >&2; exit 2 ;; esac
