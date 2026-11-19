@@ -242,7 +242,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (!a?.at || /^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(a.at)) return null
     return fail(400, { code: 'invalid', message: `auto_upgrade.at "${a.at}" must be a time of day such as 03:00` })
   }
-  const autoUpgradeStatus = (a: ImageAutoUpgrade | undefined) => (a?.enabled ? { auto_upgrade: { next: d.nextNight(a.at || '03:00') } } : {})
+  const autoUpgradeStatus = (a: ImageAutoUpgrade | undefined) => (a?.enabled ? { auto_upgrade: { next_at: d.nextNight(a.at || '03:00') } } : {})
   // PATCH /images/{name}: a merge patch; the console sends spec.auto_upgrade only
   function imagePatch(name: string, body: Record<string, any>): RawResponse {
     const img = db.images.find((i) => i.metadata.name === name)

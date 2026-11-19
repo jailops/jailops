@@ -207,6 +207,9 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		return nil, err
 	}
 	d.clients = clients
+	if err := priv.CheckHelperVersion(clients.HelperVersion, opts.Version); err != nil {
+		return nil, err
+	}
 	if err := ensureLayout(ctx, clients.ZFS, cfg); err != nil {
 		return nil, err
 	}

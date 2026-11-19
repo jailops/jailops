@@ -1484,14 +1484,14 @@ func (a *app) jailRepairPackages(d *kindDesc[api.Jail]) *cobra.Command {
 	return &cobra.Command{
 		Use:   "repair-packages NAME",
 		Short: "Bring the base package records of a jail in step with its image",
-		Long: `Bring the base package records (the FreeBSD-* packages) of a thin jail in step with
+		Long: `Bring the base package records of a thin jail (the packages of the operating system) in step with
 the image generation its root comes from. A start of the jail does the same; the
 condition BasePackages on a jail says that the last pass failed and why.
 
 After an upgrade, a rollback or any other swap of the root, the jail's own
 package database (/var/db/pkg) still holds the records of the old base. Until
-they are replaced, 'pkg which /usr/bin/ftp' finds nothing, 'pkg info FreeBSD-runtime'
-shows the old patch level and 'pkg check -s' checks the old files. The records of
+they are replaced, 'pkg which /usr/bin/ftp' finds nothing, 'pkg info' shows the old
+patch level of the base and 'pkg check -s' checks the old files. The records of
 the generation are the truth for the base set; the records of other packages are
 never touched. Only the database changes: no file is written and no script runs.
 The jail must be stopped (every start does the same pass, so 'jailops restart NAME'

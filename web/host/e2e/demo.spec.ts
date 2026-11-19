@@ -278,7 +278,7 @@ test('devices show which profile each value comes from', async ({ page }) => {
   await tabOf(page, 'devices')
   await expect(page.locator('[data-device="network.eth0"]')).toContainText('1500')
   await expect(page.locator('[data-device="network.eth0"] [data-field="network.eth0.mtu"]').getByTestId('origin')).toContainText('this jail')
-  await expect(page.locator('[data-kind="disk"]')).toContainText('content')
+  await expect(page.locator('[data-kind="volumes"]')).toContainText('content')
 })
 
 test('profiles: unknown keys are refused inline', async ({ page }) => {

@@ -1,0 +1,18 @@
+anchor.root jailops
+anchor.shared jailops/shared.pf
+anchor.line "anchor \"jailops/*\"\n"
+anchor.project jailops/shop
+anchor.jail jailops/shop/web
+anchor.jail-no-project jailops/web
+anchor.network jailops/net.lan
+table.host host
+table.allowed-source jail_addrs
+table.foreign foreign
+tag jo_shop_web_1
+epair.0 job2d02567f400a job2d02567f400b
+epair.1 job2d02567f401a job2d02567f401b
+epair.35 job2d02567f40za job2d02567f40zb
+epair.36 job2d02567f410a job2d02567f410b
+description.host jailops jail=shop/web net=lan (host side)
+description.jail jailops jail=shop/web net=lan (jail side)
+description.wireguard jailops wireguard=office

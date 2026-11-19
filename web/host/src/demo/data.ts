@@ -106,7 +106,7 @@ export function snapshots(): Record<string, JailSnapshot[]> {
   }
 }
 
-/** The next time of day `at` (HH:MM, local) after now, as the daemon reports status.auto_upgrade.next. */
+/** The next time of day `at` (HH:MM, local) after now, as the daemon reports status.auto_upgrade.next_at. */
 export function nextNight(at: string, from = Date.now()): string {
   const [h, m] = at.split(':').map(Number)
   const d = new Date(from)

@@ -24,12 +24,14 @@ import (
 // production it is backed by jailops-priv over its socket; tests build it from
 // fakes.
 type Clients struct {
-	ZFS    zfs.Client
-	Jails  jailos.Jails
-	PF     pfctl.Client
-	Net    ifconfig.Client
-	Runner run.Runner
-	Files  service.FS
+	// HelperVersion is the release the helper reported when the connection was made ("" in tests and in dev mode).
+	HelperVersion string
+	ZFS           zfs.Client
+	Jails         jailos.Jails
+	PF            pfctl.Client
+	Net           ifconfig.Client
+	Runner        run.Runner
+	Files         service.FS
 	// Logs reads jail log files (the helper in production, see service.LogReader).
 	Logs service.LogReader
 	// JailFiles reads and writes the files below jail roots (the helper in production, see service.JailFiles).
@@ -99,5 +101,6 @@ func DefaultClients(ctx context.Context, cfg *Config, dev bool) (*Clients, error
 	}
 	cl := fromHost(c, privFiles{h: c, own: cfg.StateDir})
 	cl.Closer = c
+	cl.HelperVersion = c.HelperVersion()
 	return cl, nil
 }

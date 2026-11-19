@@ -28,9 +28,9 @@ type world struct {
 	repoVersion string
 	// hostABI is what `pkg config abi` answers on the fake host; empty is FreeBSD:15:amd64.
 	hostABI string
-	specs       map[string]api.ImageSpec
-	roots       map[string][]Package
-	now         time.Time
+	specs   map[string]api.ImageSpec
+	roots   map[string][]Package
+	now     time.Time
 }
 
 func newWorld(t *testing.T) *world {

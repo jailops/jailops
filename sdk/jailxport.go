@@ -72,8 +72,9 @@ func (j *JailClient) ImportPreflight(ctx context.Context, in api.JailImportPrefl
 	return v, err
 }
 
-// Import makes a jail of the export file read from r (POST /api/v1/jail-imports) and returns it. The request lasts
-// as long as the file takes to send and the jail to be made; a file that is cut off or damaged leaves no jail behind.
+// Import makes a jail of the export file read from r (POST /api/v1/jail-imports) and returns it. The server keeps the
+// file and answers with an operation when it has arrived; Import waits for the operation, so it returns when the jail
+// is made. A file that is cut off or damaged leaves no jail behind.
 func (j *JailClient) Import(ctx context.Context, o api.JailImportRequest, r io.Reader) (api.JailImported, error) {
 	if err := j.c.need("jail_export"); err != nil {
 		return api.JailImported{}, err
@@ -116,6 +117,11 @@ func (j *JailClient) Import(ctx context.Context, o api.JailImportRequest, r io.R
 	op, err := decodeMeta[api.Operation](env.Metadata)
 	if err != nil {
 		return api.JailImported{}, err
+	}
+	if op.Status != api.OpSuccess && op.Status != api.OpFailure && op.Status != api.OpCancelled {
+		if op, err = j.c.Operations().Wait(ctx, op.ID); err != nil {
+			return api.JailImported{}, err
+		}
 	}
 	if op.Error != nil {
 		return api.JailImported{}, op.Error

@@ -288,6 +288,9 @@ type JailStatus struct {
 	// space a thin root shares with its image excluded); the volumes it attaches are the project's. Zero when ZFS
 	// could not be read. Filled by list and get.
 	DiskUsed int64 `json:"disk_used_bytes,omitempty"`
+	// RollbackExpiresAt is when the previous root of an upgraded jail is removed; until then `jail rollback` can return to
+	// it. Absent when there is none. Filled by get only.
+	RollbackExpiresAt time.Time `json:"rollback_expires_at,omitzero"`
 	// Exposed is what the Internet reaches on the jail: pass rules on an uplink and port forwards, from the anchor the
 	// renderer builds. Filled by list and get; empty when nothing is reachable or the anchor could not be built.
 	Exposed []ExposedEntry `json:"exposed,omitempty"`

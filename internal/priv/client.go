@@ -10,6 +10,8 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -37,6 +39,43 @@ func Dial(socket string) (*Client, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// HelperVersion is the release the helper reported in its hello ("" when it did not report one).
+func (c *Client) HelperVersion() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == nil {
+		return ""
+	}
+	return c.conn.info["version"]
+}
+
+// CheckHelperVersion refuses a helper that is an older release than the daemon: the daemon asks it for commands it
+// may not know. A helper of the same or a newer release, or a development build on either side, is accepted.
+func CheckHelperVersion(helper, daemon string) error {
+	h, hok := releaseNumber(helper)
+	d, dok := releaseNumber(daemon)
+	if !hok || !dok || h >= d {
+		return nil
+	}
+	return api.Errorf(api.CodeVersionSkew, "jailops-priv is release %s, older than jailopsd %s: restart jailops-priv", helper, daemon)
+}
+
+// releaseNumber orders X.Y.Z (with an optional leading v) as one number; ok is false for anything else.
+func releaseNumber(v string) (n int, ok bool) {
+	parts := strings.Split(strings.TrimPrefix(v, "v"), ".")
+	if len(parts) != 3 {
+		return 0, false
+	}
+	for _, p := range parts {
+		i, err := strconv.Atoi(p)
+		if err != nil || i < 0 || i > 999 {
+			return 0, false
+		}
+		n = n*1000 + i
+	}
+	return n, true
 }
 
 // NewClient wraps an established connection (no redial).

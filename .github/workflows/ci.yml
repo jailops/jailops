@@ -232,6 +232,10 @@ jobs:
         run: sh scripts/lint-prose.sh
       - name: The lock of the FreeBSD test VMs serializes two runs
         run: sh scripts/vm-lock-test.sh
+      - name: The frozen surface only grows from 1.0 on (a golden line that goes needs a new major version)
+        run: |
+          sh scripts/golden-removals-test.sh
+          sh scripts/check-golden-removals.sh HEAD^1
       - name: The workflow walkthrough agrees with its steps and the roadmap
         run: |
           sh scripts/check-workflows-table.sh

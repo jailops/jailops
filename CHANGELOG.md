@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+- **Gates for 1.0.** The compatibility checks that were still done by a reviewer are tests now ([docs/compatibility.md](docs/compatibility.md)):
+  the Go API of the client library only grows (`TestSDKGoAPIOnlyGrows`); from 1.0 on a golden file of the freeze that loses a
+  line fails CI unless the major version is raised (`scripts/check-golden-removals.sh`, `just freeze-removals`); a claim that a
+  hub of an earlier release signed is still accepted by a host; the names of pf anchors, tables, tags, epair interfaces and
+  interface descriptions are a golden (`internal/render/testdata/names.golden`).
+- **A helper that is older than the daemon is refused.** The hello of the helper carries its release; `jailopsd` refuses to start
+  with `version_skew` and says to restart `jailops-priv`, instead of asking an old helper for commands it does not have.
+- **An import is one request and one operation.** The file is kept in `<state dir>/imports` while it arrives, the request answers
+  202 with the pending operation when it is complete, and the operation makes the jail: a client that goes away after the upload
+  does not stop it, and a restart removes the file of an interrupted import. `jailops jail import` and the SDK wait for the
+  operation. A file that does not fit in the state directory is refused with a message that says so.
+- **`jail info` and the jail object say how long the previous root is kept.** After a release move, `rollback_expires_at` (and the
+  `Rollback:` line of `jail info`) is the day `jail rollback` can no longer return to it.
+- **`gofmt` is clean again** in three files of the previous change.
+
 ## 0.9.0 - 2026-11-19
 
 - **The API and the command line are named once, before the freeze.** This is the last release that renames anything; the

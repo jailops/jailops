@@ -5,6 +5,8 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -80,6 +82,16 @@ func TestJailExportImportRoundTrip(t *testing.T) {
 	if _, err := e.Admin.Jails().Get(ctx, "web"); err != nil {
 		t.Errorf("the original is gone: %v", err)
 	}
+	noStagedImports(t, e)
+}
+
+// The file of an import is kept on the host while it is read and is gone when the import has ended, whether it made a jail or not.
+func noStagedImports(t *testing.T, e *dtest.Env) {
+	t.Helper()
+	ents, _ := os.ReadDir(filepath.Join(e.Cfg.StateDir, "imports"))
+	if len(ents) != 0 {
+		t.Errorf("%d staged import files are left", len(ents))
+	}
 }
 
 // The same name is refused with the way out, and nothing is made.
@@ -146,6 +158,7 @@ func TestJailImportDamagedFileLeavesNothing(t *testing.T) {
 		if len(after) != len(before) {
 			t.Errorf("%s: datasets %d -> %d", name, len(before), len(after))
 		}
+		noStagedImports(t, e)
 	}
 }
 

@@ -109,7 +109,7 @@ func TestJailMoveRefusals(t *testing.T) {
 	if got := wait(t, s, op); got.Status != api.OpSuccess {
 		t.Fatalf("%+v\n%s", got, e.Log())
 	}
-	e.SetRepoVersion("15.2p1") // the repository serves the packages of the release the image is for
+	e.SetRepoVersion("15.2p1")                 // the repository serves the packages of the release the image is for
 	buildImage(t, s, "future", "15.2-RELEASE") // the host runs 15.1; an older release cannot be an image (15.1 is the oldest)
 	e.SetRepoVersion("15.1p1")
 	// refused before an operation is submitted

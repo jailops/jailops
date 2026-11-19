@@ -359,3 +359,17 @@ func TestSecondUpgradeReplacesStaleRootOld(t *testing.T) {
 		t.Fatal(o)
 	}
 }
+
+func TestRollbackExpiresAtIsTheEndOfTheRetention(t *testing.T) {
+	w := runningSetup(t)
+	if _, ok := w.S.RollbackExpiresAt(bg, "alpha_web"); ok {
+		t.Fatal("a jail that was never upgraded has no previous root")
+	}
+	if _, err := upgrade(w, api.JailUpgrade{Generation: "g2"}); err != nil {
+		t.Fatal(err)
+	}
+	due, ok := w.S.RollbackExpiresAt(bg, "alpha_web")
+	if !ok || !due.Equal(w.now.Add(w.S.Cfg.RootOldRetention).UTC().Truncate(time.Second)) {
+		t.Fatalf("expires at %v (%v), retention %v from %v", due, ok, w.S.Cfg.RootOldRetention, w.now)
+	}
+}

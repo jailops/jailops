@@ -91,6 +91,11 @@ test-setup:
 test-vm-lock:
     sh scripts/vm-lock-test.sh
 
+# The frozen surface only grows from 1.0 on: lists what this branch removes from the golden files of the freeze (BASE defaults to origin/master).
+freeze-removals BASE="origin/master":
+    sh scripts/golden-removals-test.sh
+    sh scripts/check-golden-removals.sh {{BASE}}
+
 # Race detector.
 test-race:
     go test ./... -race -count=1
