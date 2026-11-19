@@ -37,6 +37,18 @@ After 1.0, in this order. The order matters more than the dates, and there are n
    a way to be sure the old host is down (fencing of execution, routing and storage), and a way back. No stateful jail is ever
    promoted automatically without all three ([design.md](design.md), section 8.6).
 
+## With FreeBSD 16
+
+Planned beside the list above, none of it a promise for 1.x releases before 16.0 exists:
+
+- **Netlink for pf and the network, where the kernel offers it.** The helper runs `pfctl`, `ifconfig` and `route` today. A direct
+  netlink interface needs no text parsing and is easier to test; the commands stay as the fallback for at least two years
+  ([supported-versions.md](supported-versions.md#the-rule)).
+- **More than one uplink for a network**, with the failover of multipath routes, and a source address on a route
+  (`RTA_PREFSRC`) for jails with a public address.
+- **A software bill of materials** with every package release of `pkgops`.
+- **CPU fairness between jails**, read from the accounting in `jailops top`, once the scheduler work of FreeBSD 16 is in a release.
+
 ## Later, if asked for
 
 - Sign-in with an identity provider (OpenID Connect). Local users with a second factor (TOTP) exist today.

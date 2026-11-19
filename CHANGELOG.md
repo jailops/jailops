@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **The support policy is written down.** [supported-versions.md](docs/supported-versions.md#the-rule): a release is supported while FreeBSD supports it, never below 15.1, for the two newest majors; a new major arrives in a minor release and a major is dropped with notice in the release notes; the binaries are static; a kernel interface that replaces a command keeps the command as the fallback for at least two years. The roadmap lists what FreeBSD 16 may bring (netlink, more than one uplink, SBOM, CPU fairness).
 - **A worked example of the lifecycle guide.** [docs/automating-updates.md](docs/automating-updates.md): a script in
   periodic(8) that updates the host's patch level, the image generation and the packages inside the jails every
   night, corrected and explained line by line (what each command does on a pkgbase host, the exit statuses and the

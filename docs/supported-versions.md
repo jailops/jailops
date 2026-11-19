@@ -26,13 +26,29 @@ The dates are FreeBSD's, as listed on [freebsd.org/security](https://www.freebsd
 
 ## The rule
 
-**A release is supported while FreeBSD supports it, and never below 15.1.**
+**A release is supported while FreeBSD supports it, never below 15.1, and for the two newest major releases.**
 
 FreeBSD's policy, on its security page: "Each minor release is only supported for three months after the next minor
 release within the same major version." The last minor release of a major is supported until the stable branch ends, and
 from FreeBSD 15 on a stable branch is supported for four years from its dot-zero release (`stable/15` until
 December 31, 2029). So at any time the supported releases of a major are its newest minor release and, for three months
 after a newer one appears, the one before it.
+
+JailOps supports at most two majors at a time. FreeBSD 15 and 16 overlap from the release of 16.0; when 17.0 is
+supported, 15 is dropped, even when FreeBSD still supports it. Each supported major has one VM in the gate of the continuous
+integration, on its newest minor release.
+
+- **A new major is added in a minor release of JailOps (1.x).** It is an addition and changes nothing of the API: the package
+  ABI is the major version (`FreeBSD:16`), an image belongs to one release, and a jail never runs a newer userland than the
+  kernel of its host.
+- **A major is dropped with notice.** The release notes of the two releases before it say so. Dropping a major is not a break
+  of the API or of stored state.
+- **The binaries are static.** The programs of JailOps are Go programs built without cgo, so they use no library of the host:
+  `file /usr/local/bin/jailops` says `statically linked, for FreeBSD 12.3`, the oldest release whose system calls they use, and
+  they run on every later release. They talk to the kernel through system calls and through the
+  commands the helper runs (`pfctl`, `ifconfig`, `route`, `zfs`, `jail`), which are the interface JailOps supports. When a
+  kernel interface such as netlink replaces a command, the command stays as the fallback for at least two years, and the
+  release notes name the release that starts using the new interface.
 
 ## What the words mean
 
