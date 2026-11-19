@@ -107,7 +107,7 @@ J=/usr/local/bin/jailops
 # set -e ends the script without a word: say which step it was
 current=start
 host_cleanup() { :; } # the host identity block replaces it while the machine's identity is changed
-trap 'rc=$?; host_cleanup; [ $rc -eq 0 ] || [ $rc -eq 75 ] || echo "FAILED (exit $rc) in step: $current" >&2' EXIT
+trap 'rc=$?; host_cleanup; ! type dns_cleanup >/dev/null 2>&1 || dns_cleanup; [ $rc -eq 0 ] || [ $rc -eq 75 ] || echo "FAILED (exit $rc) in step: $current" >&2' EXIT
 t_start=$(date +%s)
 step() { current=$*; printf '\n== %s  [+%ss]\n' "$*" "$(( $(date +%s) - t_start ))"; } # the seconds since the start: CI logs show which steps take the time
 fail() {

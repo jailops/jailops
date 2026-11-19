@@ -524,8 +524,7 @@ jobs:
           # part needs is looked for in the image first and the mirror is read only for what is missing; the VM's network has no IPv6
           # route, fetches are bounded, only the ports repository is read (the kmods and base catalogues are not needed and are two more
           # requests), and the install is tried three times with the catalogue fetched again between the tries. The prepared image is
-          # cached (cache-after-prepare), so a run with the same text of this step does not come here at all. A failure that ends in the
-          # line "did not give ... in three attempts" is run once more by .github/workflows/ci-rerun-mirror.yml.
+          # cached (cache-after-prepare), so a run with the same text of this step does not come here at all.
           prepare: |
             set -u
             have() {
