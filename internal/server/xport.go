@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -135,24 +134,14 @@ func (s *Server) handleImport(c *rc) error {
 	ctl := http.NewResponseController(c.w)
 	body := &deadlineReader{r: c.r.Body, ctl: ctl, idle: importIdle}
 	c.object = "/api/v1/jail-imports"
-	op, err := s.svc.ImportJail(c.r.Context(), req, body)
+	op, name, err := s.svc.ImportJail(c.r.Context(), req, body)
 	if err != nil {
 		return err
-	}
-	name := ""
-	if res, ok := importedOf(op); ok {
-		name = res.Jail.Metadata.Name
 	}
 	c.object = "/api/v1/jails/" + name
 	c.detail = "import as " + name
 	c.async(op)
 	return nil
-}
-
-func importedOf(op api.Operation) (api.JailImported, bool) {
-	var res api.JailImported
-	err := json.Unmarshal(op.Metadata, &res)
-	return res, err == nil
 }
 
 // pairs reads OLD=NEW values.

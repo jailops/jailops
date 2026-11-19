@@ -738,6 +738,23 @@ func (s *Service) dropStale(ctx context.Context, st *jailState) error {
 	return s.ZFS.DestroyRecursive(ctx, ds)
 }
 
+// RollbackExpiresAt is when root.old is removed; ok is false when the jail has no previous root or none that is marked.
+func (s *Service) RollbackExpiresAt(ctx context.Context, name string) (time.Time, bool) {
+	st, err := s.observe(ctx, name)
+	if err != nil || !st.hasRootOld() {
+		return time.Time{}, false
+	}
+	oldDS := s.Cfg.at(name).rootOldDS()
+	if s.prop(ctx, oldDS, PropManaged) != "on" {
+		return time.Time{}, false
+	}
+	due, err := time.Parse(time.RFC3339, s.prop(ctx, oldDS, PropCleanupAfter))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return due, true
+}
+
 // CleanupRootOld destroys root.old once its retention has passed. It returns
 // whether it destroyed anything. It never touches a root.old without the
 // cleanup mark that an upgrade sets.

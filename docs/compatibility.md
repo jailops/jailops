@@ -41,6 +41,9 @@ are one service and are upgraded together.
 - **The hello.** Every connection starts with a hello that carries the protocol version (`ProtocolVersion`, now 1). A peer
   that speaks another version is refused on both sides with `version_skew`: the daemon says "helper speaks protocol N, this
   client speaks M" and the helper refuses the daemon. Nothing is attempted over a connection that failed the hello.
+  The hello also carries the release of the helper. A daemon that finds the helper to be an older release than itself
+  refuses to start with `version_skew` and says to restart `jailops-priv`: it would ask for commands the old helper does not
+  have. A helper of the same or a newer release, and a development build, are accepted.
 - **The allow-list is in the helper's binary.** The commands the helper may run are compiled in. A new daemon that needs a
   new command gets `forbidden` from an old helper until the helper restarts: a package upgrade is not complete until the
   helper runs the new binary.
@@ -101,15 +104,25 @@ are one service and are upgraded together.
 The rules above are checked by these tests: every route with its method, status class and `sync` or `async` answer, the error
 codes, the envelopes, the enum members, the conditions with their reasons, the extension lists, the wire of the requestor
 claim, the command and flag tree with its exit codes, the machine output of the commands, the client library of the previous
-release against the current server, and the state of every release from 0.8.0 on opened by the current code.
+release against the current server, and the state of every release from 0.8.0 on opened by the current code. Four more gates
+close the ways a break could still slip in:
+
+- **The Go API of the client library only grows.** Every exported name of the previous-client baseline (functions, methods,
+  types, struct fields with their tags, interface methods, constants with their values) has to be in `sdk/` with the same
+  signature (`TestSDKGoAPIOnlyGrows`).
+- **A golden file of the freeze that loses a line fails from 1.0 on**, unless the major version is raised in the same change
+  (`scripts/check-golden-removals.sh`, run by CI against the base branch and by `just freeze-removals`). Before 1.0 it lists
+  what a change removes.
+- **A claim that a hub of an earlier release signed is accepted** (`TestHubClaimOfAnEarlierReleaseIsAccepted`, recorded in
+  `internal/auth/testdata/hubhost`).
+- **The names of pf anchors, tables, tags, epair interfaces and interface descriptions are a golden**
+  (`internal/render/testdata/names.golden`).
 
 These gates are not built yet; until they are, a person reviews the change:
 
-- a check of the Go API of the client library between two releases (`apidiff`);
-- a check that a golden file that loses a line fails unless the major version changes;
-- a replay of recorded hub and host conversations of an earlier release;
-- a replay of an earlier release's command line against the current daemon;
-- a golden of the names JailOps gives to pf anchors, tables and interfaces;
+- a replay of an earlier release's command line against the current daemon (the command and flag tree and the previous-client
+  test cover the names and the wire; the command line itself is not replayed);
+- a replay of whole recorded hub and host conversations, beyond the claim;
 - the fixture of 0.9.0, which is made right after the release is tagged.
 
 ## A snapshot published by an older release

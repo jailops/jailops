@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
-	"time"
+	"syscall"
 
 	"jailops.net/jailops/internal/backup"
 	"jailops.net/jailops/internal/jailxfer"
@@ -425,27 +427,41 @@ func (s *Service) ImportPreflight(ctx context.Context, in api.JailImportPrefligh
 
 // ImportJail reads an export file from rd and makes a new jail of it in the project of the request. The jail is
 // registered when the last dataset has arrived and its checksums have been verified; a file that is cut off or damaged
-// leaves nothing behind. It runs as an operation that this call waits for, and answers the finished operation: its
-// metadata is the api.JailImported, and the error of a failed import is its error.
-func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd io.Reader) (api.Operation, error) {
+// leaves nothing behind. The file is kept on the host (<state dir>/imports) while it arrives; the call answers when it has
+// arrived and the checks that need no dataset have passed, with the pending operation and the name of the jail. The
+// operation makes the jail: its metadata is the api.JailImported, and the error of a failed import is its error. A client
+// that goes away after the upload does not stop it.
+func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd io.Reader) (api.Operation, string, error) {
 	if err := s.requireHost("import"); err != nil {
-		return api.Operation{}, err
+		return api.Operation{}, "", err
 	}
 	p, err := s.access(ctx)
 	if err != nil {
-		return api.Operation{}, err
+		return api.Operation{}, "", err
 	}
 	if err := bodyProject(p.Meta.Name, req.Project); err != nil {
-		return api.Operation{}, err
+		return api.Operation{}, "", err
 	}
-	xr, err := jailxfer.NewReader(rd)
+	// The file is kept on the host before anything else: the request ends when it has arrived, the operation reads it
+	// from there, and a client that goes away after the upload does not stop the import.
+	staged, err := s.stageImport(rd)
 	if err != nil {
-		return api.Operation{}, invalid("%v", err)
+		return api.Operation{}, "", err
+	}
+	stagedOK := false
+	defer func() {
+		if !stagedOK {
+			staged.discard()
+		}
+	}()
+	xr, err := jailxfer.NewReader(staged.f)
+	if err != nil {
+		return api.Operation{}, "", invalid("%v", err)
 	}
 	m := xr.Manifest()
 	w := s.checkImport(ctx, p, m, req)
 	if !w.pf.OK {
-		return api.Operation{}, api.Errorf(api.CodeInvalid, "the import cannot be done: %s", strings.Join(w.pf.Errors, "; ")).
+		return api.Operation{}, "", api.Errorf(api.CodeInvalid, "the import cannot be done: %s", strings.Join(w.pf.Errors, "; ")).
 			WithDetail("errors", strings.Join(w.pf.Errors, "; ")).WithDetail("missing", strings.Join(w.pf.Missing, "; "))
 	}
 	proj, name, key := p.Meta.Name, w.name, w.key
@@ -454,11 +470,11 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 	attach := spec.Volumes
 	spec.Volumes = nil // attached when the volumes exist
 	if err := s.validateJail(proj, name, spec); err != nil {
-		return api.Operation{}, err
+		return api.Operation{}, "", err
 	}
 	release, err := s.admit(ctx, p, key, &spec, nil)
 	if err != nil {
-		return api.Operation{}, err
+		return api.Operation{}, "", err
 	}
 	submitted := false
 	defer func() {
@@ -467,13 +483,13 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 		}
 	}()
 	if err := canonicalJailSizes(&spec); err != nil {
-		return api.Operation{}, err
+		return api.Operation{}, "", err
 	}
 	if err := s.checkNewJail(proj, name, spec); err != nil {
-		return api.Operation{}, err
+		return api.Operation{}, "", err
 	}
 	if attach, err = s.lcfg.CheckVolumes(attach); err != nil {
-		return api.Operation{}, err
+		return api.Operation{}, "", err
 	}
 	if spec.Hostname == "" {
 		spec.Hostname = name
@@ -490,6 +506,7 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()
+			defer staged.discard()
 			s.place(key, spec.Storage)
 			ok := false
 			var undos []func(context.Context) error
@@ -582,23 +599,11 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 		},
 	})
 	if err != nil {
-		return api.Operation{}, err
+		return api.Operation{}, "", err
 	}
 	submitted = true
-	done, err := s.WaitOperation(ctx, op.ID, 24*time.Hour)
-	if err != nil {
-		return api.Operation{}, err
-	}
-	switch done.Status {
-	case api.OpSuccess:
-		return done, nil
-	case api.OpFailure, api.OpCancelled:
-		if done.Error != nil {
-			return api.Operation{}, done.Error
-		}
-		return api.Operation{}, api.Errorf(api.CodeInternal, "the import failed")
-	}
-	return api.Operation{}, api.Errorf(api.CodeBusy, "the import did not finish").WithHint("jailops op list shows it")
+	stagedOK = true
+	return op, name, nil
 }
 
 // receiveVolume makes one volume of the project from its part of the file and registers it.
@@ -632,4 +637,60 @@ func importFileError(err error) error {
 		return invalid("%v: nothing was imported", err)
 	}
 	return err
+}
+
+// stagedImport is an export file that has arrived on the host and waits for its operation.
+type stagedImport struct {
+	f    *os.File
+	path string
+}
+
+// discard closes and removes the file; it is safe to call more than once.
+func (st *stagedImport) discard() {
+	if st.f != nil {
+		_ = st.f.Close()
+		_ = os.Remove(st.path)
+		st.f = nil
+	}
+}
+
+func (s *Service) importStagingDir() string { return filepath.Join(s.d.StateDir, "imports") }
+
+// stageImport copies the body of an import to a file below the state directory.
+func (s *Service) stageImport(rd io.Reader) (*stagedImport, error) {
+	dir := s.importStagingDir()
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, api.Errorf(api.CodeInternal, "cannot keep the file of the import: %v", err)
+	}
+	f, err := os.CreateTemp(dir, "import-*.export")
+	if err != nil {
+		return nil, api.Errorf(api.CodeInternal, "cannot keep the file of the import: %v", err)
+	}
+	st := &stagedImport{f: f, path: f.Name()}
+	if _, err := io.Copy(f, rd); err != nil {
+		st.discard()
+		if errors.Is(err, syscall.ENOSPC) {
+			return nil, api.Errorf(api.CodePreconditionFailed, "the file does not fit in %s: free space there or import from a host with more", dir)
+		}
+		return nil, importFileError(err)
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		st.discard()
+		return nil, api.Errorf(api.CodeInternal, "cannot read the file of the import: %v", err)
+	}
+	return st, nil
+}
+
+// cleanImportStaging removes the files of imports that a restart interrupted: the operation that read them is gone.
+func (s *Service) cleanImportStaging() {
+	dir := s.importStagingDir()
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, e := range ents {
+		if strings.HasPrefix(e.Name(), "import-") {
+			_ = os.Remove(filepath.Join(dir, e.Name()))
+		}
+	}
 }

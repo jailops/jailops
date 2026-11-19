@@ -497,6 +497,7 @@ func (s *Service) Start(ctx context.Context) error {
 	if err := s.recoverInterrupted(ctx); err != nil {
 		s.log.Error("recovering interrupted operations failed", "err", err)
 	}
+	s.cleanImportStaging()
 	if err := s.applyMigratedForwards(ctx); err != nil {
 		return fmt.Errorf("service: migrating stored port forwards: %w", err)
 	}

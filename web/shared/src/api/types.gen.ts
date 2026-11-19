@@ -1571,6 +1571,7 @@ export interface JailStatus {
   warnings?: string[]
   locked?: string[]
   disk_used_bytes?: number
+  rollback_expires_at?: string
   exposed?: ExposedEntry[]
 }
 

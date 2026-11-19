@@ -251,6 +251,9 @@ func (s *Service) GetJail(ctx context.Context, name string) (api.Jail, error) {
 	j, err := s.getByKey(ctx, key)
 	if err == nil {
 		j.Status.DiskUsed = s.jailsDiskUsed(ctx, []string{key})[key]
+		if due, ok := s.life.RollbackExpiresAt(ctx, key); ok {
+			j.Status.RollbackExpiresAt = due
+		}
 		if refs, rerr := s.allRefs(j.Metadata.Project); rerr == nil {
 			j.Status.Exposed = s.exposedOf(ctx, j, refs)
 		}
