@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-11-19
+
 - **The API and the command line are named once, before the freeze.** This is the last release that renames anything; the
   names below are the ones 1.0 keeps. Stored jails, profiles, update histories and `jailopsd.yaml` are converted when they are
   read, the first time the new daemon starts; nothing has to be recreated. A client that was written against 0.8 needs the
