@@ -25,7 +25,16 @@ work=$(mktemp -d /tmp/jailops-pf.XXXXXX)
 trap 'cleanup; exit 1' INT TERM
 
 t0=$(date +%s)
-say()  { printf '\n== %s  [+%ss]\n' "$*" "$(($(date +%s) - t0))"; }
+say()  {
+	# a run that has failed ends at the next phase, not after the last one (PF_KEEP_GOING=1 runs them all): the first failure is
+	# the one to read, and a CI job that goes on for minutes after it only delays the answer
+	if [ "$*" != cleanup ] && [ "$fails" -gt 0 ] && [ "${PF_KEEP_GOING:-0}" = 0 ]; then
+		printf '\nFAILED: a phase failed, stopping here (PF_KEEP_GOING=1 runs the rest)\n%s passed, %s failed\n' "$passes" "$fails"
+		cleanup
+		exit 1
+	fi
+	printf '\n== %s  [+%ss]\n' "$*" "$(($(date +%s) - t0))"
+}
 pass() { passes=$((passes + 1)); printf 'PASS  %s\n' "$*"; }
 bad()  {
 	fails=$((fails + 1)); printf 'FAIL  %s\n' "$*"
@@ -35,7 +44,7 @@ bad()  {
 		echo "---- pf at the first failure"
 		pfctl -si 2>&1 | head -3; kldstat -m pf 2>&1 | tail -2; sysctl net.pf 2>&1 | head -8
 		pfctl -sr 2>&1 | head -40
-		for a in $(pfctl -sA 2>/dev/null | grep jailops | head -12); do echo "-- anchor $a"; pfctl -a "$a" -sr 2>&1 | head -30; done
+		for a in $(pfctl -sA 2>/dev/null | grep jailops | head -12); do echo "-- anchor $a"; pfctl -a "$a" -sr 2>&1 | head -80; done
 		echo "---- jails and interfaces"
 		jls 2>&1 | head -20; ifconfig -l
 		echo "----"
@@ -659,6 +668,12 @@ policy pfa base 'default_in: deny
 default_out: allow'
 $J project set pfa --firewall-policy base </dev/null >/dev/null || die "project firewall"
 settle 10
+# The anchors of the jails are still being completed when this phase starts on a slow machine (the pass of the reconciler that applies
+# the setup is still running), so a snapshot that stops changing is not proof that the policy is loaded. The proof is the effect: the
+# host cannot reach a, and a cannot reach b. A denied probe is never repeated in the matrix below, so the wait is here.
+denied_icmp() { ! icmp "$@"; }
+waitfor_ "the project policy is in force: the host cannot ping a" 120 denied_icmp host "$A4" || die "the project policy did not come into force"
+waitfor_ "the project policy is in force: a cannot ping b" 120 denied_icmp pfa:a "$B4" || die "the project policy did not come into force"
 matrix host deny deny deny deny deny
 matrix pfa:b deny deny deny deny deny
 matrix pfa:c deny deny deny deny deny
@@ -1229,7 +1244,7 @@ xfer_up() { # xfer_up JAIL DESTJAIL DESTADDR: the jail connects to the other jai
 	jexec "pfa_$xj" daemon -f sh -c "nc -l $3 $xp > /var/tmp/recv.$xp"
 	waitfor_ "the listener of the transfer is up" 15 sh -c "jexec pfa_$xj sockstat -4 -6 -l | grep -q ':$xp '"
 	xt=$(timed "jexec pfa_$xs sh -c 'dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 $3 $xp'")
-	waitfor_ "the data has been written" 10 sh -c "[ \"\$(jexec pfa_$xj stat -f %z /var/tmp/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
+	waitfor_ "the data has been written" 30 sh -c "[ \"\$(jexec pfa_$xj stat -f %z /var/tmp/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" >&2 || true
 	echo "${xt%% *} $(jexec "pfa_$xj" stat -f %z "/var/tmp/recv.$xp" 2>/dev/null || echo 0)"
 }
 xfer_served() { # xfer_served JAIL JAILADDR: the host connects to the jail, which sends 1.5 MB (a server in the jail answering)
@@ -1238,7 +1253,7 @@ xfer_served() { # xfer_served JAIL JAILADDR: the host connects to the jail, whic
 	jx pfa "$1" daemon -f sh -c "dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -l $2 $xp"
 	waitfor_ "the server of the transfer is up" 15 sh -c "jexec pfa_$1 sockstat -4 -6 -l | grep -q ':$xp '"
 	xt=$(timed "nc -d -w20 $2 $xp > $work/recv.$xp")
-	waitfor_ "the data has been written" 10 sh -c "[ \"\$(stat -f %z $work/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
+	waitfor_ "the data has been written" 30 sh -c "[ \"\$(stat -f %z $work/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" >&2 || true
 	echo "${xt%% *} $(stat -f %z "$work/recv.$xp" 2>/dev/null || echo 0)"
 }
 xfer_down() { # xfer_down JAIL JAILADDR: the host connects to the jail and sends 1.5 MB into it
@@ -1248,7 +1263,7 @@ xfer_down() { # xfer_down JAIL JAILADDR: the host connects to the jail and sends
 	jexec "pfa_$xj" daemon -f sh -c "nc -l $2 $xp > /var/tmp/recv.$xp"
 	waitfor_ "the listener of the transfer is up" 15 sh -c "jexec pfa_$xj sockstat -4 -6 -l | grep -q ':$xp '"
 	xt=$(timed "dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 $2 $xp")
-	waitfor_ "the data has been written" 10 sh -c "[ \"\$(jexec pfa_$xj stat -f %z /var/tmp/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
+	waitfor_ "the data has been written" 30 sh -c "[ \"\$(jexec pfa_$xj stat -f %z /var/tmp/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" >&2 || true
 	echo "${xt%% *} $(jexec "pfa_$xj" stat -f %z "/var/tmp/recv.$xp" 2>/dev/null || echo 0)"
 }
 pipes() { dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:'; }
