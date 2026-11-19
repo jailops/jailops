@@ -973,7 +973,10 @@ old image. Thick jails and Linux jails are not moved this way.
 
 Several jails are named, selected by label with -l, or all of the project with
 --all; they move one at a time and the first failure stops the rest. With
---dry-run every jail is checked first.`,
+--dry-run every jail is checked first.
+
+The order of the steps for the host and its jails, the checks to run after an
+upgrade and the way back are in docs/lifecycle.md.`,
 		Example: `jailops jail upgrade web --dry-run
 jailops jail upgrade web
 jailops jail upgrade web --generation g4

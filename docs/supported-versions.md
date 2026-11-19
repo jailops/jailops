@@ -1,7 +1,7 @@
 # Supported FreeBSD versions
 
 This page answers which FreeBSD releases JailOps runs on and supports, for the person who chooses a host and plans its
-upgrades.
+upgrades. How a host and its jails move from one release to the next, step by step, is in [lifecycle.md](lifecycle.md).
 
 ## The matrix
 
@@ -10,15 +10,16 @@ The dates are FreeBSD's, as listed on [freebsd.org/security](https://www.freebsd
 
 | FreeBSD | FreeBSD supports it until | JailOps |
 |---|---|---|
-| 16.0 (planned for December 2027) | not released | Not supported until it is released. Snapshots are tried before the release ([release-engineering.md](release-engineering.md)). |
+| 16.0 (planned for December 2027) | not released | Not supported until it is released and `pkg.jailops.net` serves `FreeBSD:16` packages. Snapshots are tried before the release ([release-engineering.md](release-engineering.md)). |
+| 15.3 (planned for June 2027) | three months after the next 15.x release | Supported from its release. |
 | 15.2 (planned for December 2026) | three months after the next 15.x release | Supported from its release. |
 | 15.1 (June 16, 2026) | March 31, 2027 | Supported. A 15.1 VM is the gate of the continuous integration. |
-| 15.0 | September 30, 2026 | Not supported. `jailops doctor` fails below 15.1. |
+| 15.0 | ended: it is not in FreeBSD's supported table any more | Not supported. `jailops doctor` fails below 15.1. |
 | 14.x and older | | Not supported. `jailops doctor` fails below 15.1. |
 
 | Part | Supported |
 |---|---|
-| Jail images of FreeBSD | one image per supported release (`freebsd-15-1`, `freebsd-15-2`); a jail runs on a host of the same or a newer release ([upgrade.md](upgrade.md#an-image-is-one-release)) |
+| Jail images of FreeBSD | one image per supported release (`freebsd-15-1`, `freebsd-15-2`); a jail runs on a host of the same or a newer release, never on an older one ([lifecycle.md](lifecycle.md#2-what-works-with-what)) |
 | Linux jails (Alpine, Debian) | as in [linux-jails.md](linux-jails.md), on a supported host |
 | amd64 | built, packaged and run in the end-to-end and packet filter tests of every change |
 | arm64 | built and vetted for every change and packaged for every release (the package ABI is `FreeBSD:15:aarch64`); the VM test suites run on amd64 |
@@ -41,8 +42,8 @@ after a newer one appears, the one before it.
 - **Not supported:** below 15.1. `jailops doctor` fails (`host.release`): JailOps relies on pkgbase and on the pf and VNET
   behaviour of 15.1.
 
-`jailops doctor` checks the release it runs on: `host.release` fails below 15.1 and says OK for every newer release. It does
-not yet warn about a release newer than the newest one tested.
+`jailops doctor` checks the release it runs on: `host.release` fails below 15.1, says OK for a release in the test matrix,
+and warns for a release newer than the newest one in the matrix and for another major release.
 
 ## When FreeBSD ends a release
 
@@ -56,8 +57,8 @@ not yet warn about a release newer than the newest one tested.
 
 | What moves | How |
 |---|---|
-| The host | With the tool the host uses: `freebsd-update` on a classic install, `pkg` on a pkgbase install. Upgrade the host before any jail: a jail runs on the host's kernel ([upgrade.md](upgrade.md#the-hosts-freebsd)). |
-| The patch levels of a release | `jailops image upgrade freebsd-15-1`, or the nightly auto upgrade. It stays inside the release of the image ([upgrade.md](upgrade.md#nightly-auto-upgrade)). |
-| A jail to a new release | `jailops jail upgrade web --image freebsd-15-2` (after `jailops image create freebsd-15-2 --release 15.2-RELEASE --build`), or `jailops image upgrade freebsd-15-1 --to freebsd-15-2` for every jail of an image: the data, volumes and addresses stay, one snapshot is the way back. A thick or Linux jail is updated by hand inside the jail ([thick-jail-upgrades.md](thick-jail-upgrades.md)), or replaced by a new jail on the new image ([upgrade.md](upgrade.md#a-new-release-move-the-jails)). |
+| The host | With the tool the host uses: `pkg` against `FreeBSD-base` on a pkgbase install, `freebsd-update` on distribution sets, the commands of the release's Upgrading Instructions page. Upgrade the host before any jail: a jail runs on the host's kernel ([lifecycle.md](lifecycle.md#32-a-minor-release-of-the-host-151-to-152)). |
+| The patch levels of a release | `jailops image upgrade freebsd-15-1`, or the nightly auto upgrade. It stays inside the release of the image ([lifecycle.md](lifecycle.md#35-patch-levels-of-thin-jails)). |
+| A jail to a new release | `jailops jail upgrade web --image freebsd-15-2` (after `jailops image create freebsd-15-2 --release 15.2-RELEASE --build`), or `jailops image upgrade freebsd-15-1 --to freebsd-15-2` for every jail of an image: the data, volumes and addresses stay, one snapshot is the way back ([lifecycle.md](lifecycle.md#36-a-thin-jail-to-a-new-release)). A thick or Linux jail is updated by hand inside the jail ([thick-jail-upgrades.md](thick-jail-upgrades.md)), or replaced by a new jail on the new image ([upgrade.md](upgrade.md#a-new-release-move-the-jails)). |
 
 Try the new release with one jail first, and keep the old image until no jail uses it.

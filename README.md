@@ -59,7 +59,8 @@ binaries from the GitHub releases page. The client package ships bash, zsh and f
 | Big pools, volumes and existing data | [docs/storage.md](docs/storage.md) |
 | Moving a jail to another host or project as a file | [docs/export-import.md](docs/export-import.md) |
 | Backups and restores | [docs/backup-restore.md](docs/backup-restore.md) |
-| Upgrading JailOps and its jails | [docs/upgrade.md](docs/upgrade.md) |
+| Updating FreeBSD, the host and the jails: the runbooks, the checks, the way back | [docs/lifecycle.md](docs/lifecycle.md) |
+| Upgrading JailOps and its jails: the mechanisms | [docs/upgrade.md](docs/upgrade.md) |
 | Which FreeBSD releases are supported | [docs/supported-versions.md](docs/supported-versions.md) |
 | What 1.0 promises and what it does not | [docs/1.0.md](docs/1.0.md) |
 | Which releases work together, and the rules for 1.x | [docs/compatibility.md](docs/compatibility.md) |

@@ -239,7 +239,10 @@ image instead (a new release: freebsd-15-1 to freebsd-15-2, built with 'jailops
 image build'). Nothing is built. Every jail goes through 'jailops jail upgrade
 --image', one at a time, and the first failure stops the rest; the target must
 be of the same OS and architecture, a release that is not older, and not newer
-than the host's kernel. --dry-run checks every jail and says which would fail.`,
+than the host's kernel. --dry-run checks every jail and says which would fail.
+
+The order of the steps for the host and its jails, the checks to run after an
+upgrade and the way back are in docs/lifecycle.md.`,
 		Example: `jailops image upgrade freebsd-15-1 --dry-run
 jailops image upgrade freebsd-15-1
 jailops image upgrade freebsd-15-1 --project shop
