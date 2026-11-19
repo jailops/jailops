@@ -37,6 +37,8 @@ The file is read once. Its manifest is checked first against the host and the pr
 
 An import is atomic. The datasets are received into new names, verified against the checksums of the file, and the jail appears only when all of them are there. A file that is cut off or damaged is named as such (`the export file is truncated`, `the export file is corrupt`) and leaves no jail and no dataset behind; a daemon that stops in the middle removes the leftovers when it starts.
 
+The file is kept on the host (below the state directory) while it arrives and until the import has read it. It may use the free space of that disk except a reserve of 1 GiB; a larger file is refused with a message and nothing is imported. Two files are received at a time: a third import is refused with `busy` and goes through when one has arrived.
+
 ## Roles and audit
 
 Exporting needs the operator role in the jail's project; importing needs the admin role, like creating a jail. Both are in the audit log.

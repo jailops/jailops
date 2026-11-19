@@ -230,6 +230,17 @@ release VERSION:
     ci=$(gh run list --workflow CI --commit "$(git rev-parse HEAD)" --limit 1 --json status,conclusion --jq '.[0] | "\(.status)/\(.conclusion)"' 2>/dev/null || true)
     [ "$ci" = "completed/success" ] || \
         { echo "x CI is not green on $(git rev-parse --short HEAD) (${ci:-no run found}): wait for it: gh run watch"; exit 1; }
+    # The quick gate is not the release gate: the browsers, the fuzzers and the FreeBSD VMs run at night, by hand and on the release PR.
+    # One of those runs must be green on the tree of this commit (the release PR is a run of it: a squash merge keeps the tree).
+    tree=$(git rev-parse HEAD^{tree})
+    heavy=""
+    for row in $(gh run list --workflow CI --status success --limit 80 --json headSha,event,headBranch --jq '.[] | select(.event == "schedule" or .event == "workflow_dispatch" or (.headBranch | startswith("release/"))) | "\(.headSha)"' | sort -u); do
+        t=$(gh api "repos/{owner}/{repo}/commits/$row" --jq .commit.tree.sha 2>/dev/null || true)
+        if [ "$t" = "$tree" ]; then heavy=$row; break; fi
+    done
+    [ -n "$heavy" ] || \
+        { echo "x no full CI run (the FreeBSD VMs, the browsers, the fuzzers) is green on the tree of $(git rev-parse --short HEAD): gh workflow run CI, then gh run watch"; exit 1; }
+    echo "the full CI run of commit ${heavy:0:7} is green on this tree"
     git tag -s "v{{VERSION}}" -m "v{{VERSION}}"
     git push origin "v{{VERSION}}"
     echo "v{{VERSION}} tagged: CI builds the release: gh run watch"

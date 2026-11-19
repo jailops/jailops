@@ -29,9 +29,12 @@ The maintainers' procedure, from a filled changelog to a package a host can inst
 1. **A release candidate.** The `Unreleased` section of `CHANGELOG.md` is filled, CI on master is green
    (`gh run list -w CI -b master -L1`), and the [workflow walkthrough](#before-a-release-the-workflow-walkthrough) has run on a
    FreeBSD test host.
-2. **The release pull request.** `just release-pr X`. The pull request touches only `version.txt` and `CHANGELOG.md`. When its CI is green,
-   `gh pr merge N --squash --delete-branch`, then `gh run watch` until CI on master is green.
-3. **The tag and the release.** `just release X`, then `gh run watch` on the Release run, and `gh release view vX` lists the
+2. **The release pull request.** `just release-pr X`. The pull request touches only `version.txt` and `CHANGELOG.md`. A change runs the quick gate
+   (lint, build, the race tests, the console tests); the pull request of a release (`release/*`), the nightly run and `gh workflow run CI`
+   also run the browsers, the fuzzers and the FreeBSD VMs. When its CI is green, `gh pr merge N --squash --delete-branch`, then
+   `gh run watch` until CI on master is green.
+3. **The tag and the release.** `just release X` needs the quick gate green on the commit and a full run (the release pull request, the
+   nightly run or a manual one) green on the same tree; it says which. Then `gh run watch` on the Release run, and `gh release view vX` lists the
    assets.
 4. **jailops-packages is quiet.** `gh run list -w "Build and publish" -L3` shows nothing running and nothing failed, and no
    other bump pull request is open.

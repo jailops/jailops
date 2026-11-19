@@ -511,7 +511,14 @@ func (s *Service) applyJail(ctx context.Context, h *OpHandle, key string, w appl
 	}
 	// OS first: a new root first, then the packages on top of it.
 	if w.os {
-		if os, err := s.osUpdate(ctx, key, j); err == nil && os != nil {
+		os, err := s.osUpdate(ctx, key, j)
+		if err != nil {
+			// the image of the jail cannot be read: the plan stops here, the packages are not updated on a root that may be old
+			finish(api.UpdateRecord{Kind: api.UpdateKindOS, StartedAt: s.now().UTC(), Result: api.UpdateFailure, Error: err.Error(),
+				Note: "the image of the jail could not be checked, so nothing was updated"})
+			return recs
+		}
+		if os != nil {
 			rec := api.UpdateRecord{Kind: api.UpdateKindOS, StartedAt: s.now().UTC(), From: os.From, To: os.To}
 			rec.Snapshot = "jo-pre-upgrade-" + s.stamp()
 			req := lifecycle.UpgradeRequest{JailUpgrade: api.JailUpgrade{Generation: os.To}, Stamp: s.stamp()}
@@ -599,7 +606,9 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 	rec.Result = api.UpdateSuccess
 	if j.Spec.Update.Reboot == api.RebootAuto {
 		if err := s.restartKey(ctx, key); err != nil {
-			rec.Note = "the automatic restart failed: " + err.Error()
+			rec.Result, rec.Error = api.UpdateFailure, "the automatic restart failed: "+err.Error()
+			rec.Note = "the packages are updated and the jail does not run: start it after looking at the cause, or restore the snapshot with `jailops jail rollback " +
+				j.Metadata.Name + " --scope all --snapshot " + snap.Name + "`, which discards what the jail wrote since"
 		} else {
 			rec.Note = "the jail was restarted (update.reboot=auto)"
 		}
