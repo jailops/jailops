@@ -9,7 +9,6 @@ tag (`@v7`), which the action's owner can move to other code at any time; a full
 |---|---|---|
 | `ci.yml` (every push and pull request) | `contents: read` for every job | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, `actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, **`vmactions/freebsd-vm`** |
 | `release.yml` (a tag `v*`) | `contents: read`, and `contents: write` in the one job that publishes the release (the check job before it cannot write) | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, **`goreleaser/goreleaser-action`** |
-| `ci-rerun-mirror.yml` (a finished CI run of this repository) | `actions: write` to start one rerun, `contents: read` | none: the `gh` of the runner reads the job logs through the API and runs no code of the run |
 | `linux-e2e.yml` (every night and on demand; no pull request, not part of `CI ok`) | `contents: read` | `actions/checkout`, `actions/setup-node`, `actions/setup-go` (by commit), **`vmactions/freebsd-vm`** (by tag, like `ci.yml`) |
 
 `release.yml` names every action by its commit and GoReleaser by an exact version. The two in bold come from third parties: `vmactions/freebsd-vm` runs the FreeBSD VM that builds and tests the tree, and
@@ -28,8 +27,8 @@ prepared image is cached, so a run whose prepare step has the same text does not
 checked by pkg against the FreeBSD keys in `/usr/share/keys/pkg`.
 
 When the mirror does not answer, the install is tried three times and then the job fails with the line `the package
-mirror ... did not give ... in three attempts`. `ci-rerun-mirror.yml` runs the failed jobs once more when every failed
-job of a CI run ended with that line; a run with another failure is left alone, and a run is retried at most once.
+mirror ... did not give ... in three attempts`. A mirror outage is not a verdict on the code: run the failed
+jobs again (`gh run rerun RUN --failed`).
 
 ## The nightly Linux jail test
 
