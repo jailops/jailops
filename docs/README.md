@@ -18,6 +18,7 @@ register of what is settled and what is open.
 | [storage.md](storage.md) | Storages on big pools, volumes, host directories, quotas, what is and is not backed up |
 | [backup-restore.md](backup-restore.md) | The backup node, the key and its escrow, policies, verification, restoring |
 | [lifecycle.md](lifecycle.md) | **Updating FreeBSD, the host and the jails**: the model, what works with what, the runbooks for every situation (a patch level, a new release, JailOps, thin, thick and Linux jails, packages), what to test after every step, and the way back |
+| [automating-updates.md](automating-updates.md) | One administrator's way: a script in periodic(8) that updates the host's patch level, the image and the packages inside the jails every night, line by line, and the move of that host to 15.2 and to 16.0 with the command line |
 | [upgrade.md](upgrade.md) | The mechanisms behind the runbooks: upgrading JailOps, image generations and the nightly upgrade, moving a jail to a new release, rollback scopes, managed updates |
 | [thick-jail-upgrades.md](thick-jail-upgrades.md) | Updating a thick or Linux jail by hand: a checkpoint, the update, the checks, going back |
 | [supported-versions.md](supported-versions.md) | Which FreeBSD releases JailOps supports, what supported means, and how hosts and jails move to a new release |

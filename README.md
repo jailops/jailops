@@ -60,6 +60,7 @@ binaries from the GitHub releases page. The client package ships bash, zsh and f
 | Moving a jail to another host or project as a file | [docs/export-import.md](docs/export-import.md) |
 | Backups and restores | [docs/backup-restore.md](docs/backup-restore.md) |
 | Updating FreeBSD, the host and the jails: the runbooks, the checks, the way back | [docs/lifecycle.md](docs/lifecycle.md) |
+| Every night with a periodic script, and the move to the next release | [docs/automating-updates.md](docs/automating-updates.md) |
 | Upgrading JailOps and its jails: the mechanisms | [docs/upgrade.md](docs/upgrade.md) |
 | Which FreeBSD releases are supported | [docs/supported-versions.md](docs/supported-versions.md) |
 | What 1.0 promises and what it does not | [docs/1.0.md](docs/1.0.md) |
