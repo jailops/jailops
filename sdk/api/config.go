@@ -304,6 +304,18 @@ func buildRegistry() []ckey {
 	list("profiles", "profiles", "Profiles merged into this jail, in order; later ones override earlier ones.", "base,web", true, false,
 		func(s *JailSpec) *[]string { return &s.Profiles }, nameCheck)
 	num("limits.cpu", "resources.cpu", "CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.", "2", 0, 4096, true, func(s *JailSpec) *int { return &s.Resources.CPU })
+	add(ckey{ConfigKey: ConfigKey{Name: "limits.cpuset", Type: "string", Example: "2,3", RestartRequired: true, Profile: true, Path: "resources.cpuset",
+		Description: "CPUs the jail runs on (cpuset(1)): a list such as 2,3 or 0-3,6, kept as sorted ranges. Needs no resource accounting. A CPU the host does not have stops the jail from starting."},
+		get: func(s *JailSpec, _ string) (string, bool) { return s.Resources.CPUSet, s.Resources.CPUSet != "" },
+		set: func(s *JailSpec, _, v string) error {
+			c, err := NormalizeCPUSet(v)
+			if err != nil {
+				return cfgErr("limits.cpuset", "limits.cpuset: %v", err)
+			}
+			s.Resources.CPUSet = c
+			return nil
+		},
+		unset: func(s *JailSpec, _ string) { s.Resources.CPUSet = "" }})
 	size("limits.memory", "resources.memory", "Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.", "2G", true, func(s *JailSpec) *string { return &s.Resources.Memory })
 	num("limits.pids", "resources.pids", "Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.", "500", 0, 4194304, true, func(s *JailSpec) *int { return &s.Resources.PIDs })
 	size("limits.disk", "resources.disk", "ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.", "20G", false, func(s *JailSpec) *string { return &s.Resources.Disk })

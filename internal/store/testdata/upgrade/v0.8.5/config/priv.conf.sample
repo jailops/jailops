@@ -1,0 +1,108 @@
+# /usr/local/etc/jailops/priv.conf: configuration of jailops-priv, the privileged helper.
+#
+# One "key = value" per line; keys are the command line flags without the dash.
+# Lists (storage-root, allow-user, ...) may be repeated or comma separated.
+# Owner root, mode 0600 or 0644; the helper refuses a file others can write.
+# Check it with:  jailops-priv check-config
+# Reload storage roots after editing the storage file:  service jailops_priv reload
+
+# --- storage roots -----------------------------------------------------------
+# A storage root is a ZFS dataset that exists, is on an imported pool and carries
+# jailops:managed=on set locally (zfs create -o jailops:managed=on tank/jailops).
+# Everything the helper does with ZFS, mounts and files stays below one of them.
+# Layout below a root: projects/<project>/jails/<name>, images/<image>/g<N>.
+# Roots listed here are fixed. More are added at run time with storage.register
+# (admin only) and persisted in storage-file; they are reread on SIGHUP.
+storage-root = tank/jailops
+#storage-root = fast/jailops
+storage-file = /usr/local/etc/jailops/priv.d/storage.conf
+# A pool's top dataset as a root is refused unless you say so.
+#allow-pool-root = false
+# A jail with a network link does not start while pf is disabled (it would run without the firewall of its anchor).
+#allow-start-without-pf = false
+
+# --- directories ---------------------------------------------------------------
+conf-dir = /usr/local/etc/jailops/jails
+# state-dir has no default unless mount-base is set (then <mount-base>/state).
+state-dir = /var/db/jailops/state
+work-dir = /var/tmp/jailops
+#mount-base = /usr/local/jailops
+helper-path = /usr/local/libexec/jailops-priv
+# Keys of WireGuard interfaces, one directory per tunnel (root only, mode 0700; created when needed). It must lie
+# outside the daemon's directories.
+#wireguard-dir = /var/db/jailops-priv/wireguard
+
+# --- who may talk to the helper ----------------------------------------------
+# The socket's directory belongs to root (mode 0710, group jailops): the daemon reaches the socket and can put
+# nothing there. The former /var/run/jailops/priv.sock is read as this path.
+socket = /var/run/jailops-priv/priv.sock
+group = jailops
+mode = 0660
+allow-user = jailops
+#allow-group = some-group
+
+# --- networking ------------------------------------------------------------------
+# The helper changes only the epairs that carry the JailOps description, which it writes when it creates them.
+# Extra sysctls readable through the helper (the built-in list covers kern.osrelease,
+# the forwarding switches, hw.ncpu and a few more).
+#sysctl = hw.model
+
+# --- what an API admin may unlock (empty means nothing) -------------------------
+# An admin who may set these is root on the host; keep the lists short.
+#admin-raw-param = cpuset
+#admin-allow-flag = mount.zfs
+#admin-devfs-ruleset = 10
+# Directories an admin may mount into a jail with `jailops volume create NAME --path DIR`, for example an
+# archive dataset of a pool JailOps does not manage. The source must be below one of these. A volume with a path
+# (`jailops volume create NAME --path DIR`) names a directory on a mount below one of these too: list the directory
+# above the mount (/mnt), not the mount point of a storage box itself.
+#admin-host-mount = /tank/archive
+#admin-zfs-prop = compression
+#admin-routes = false
+# Networks a WireGuard tunnel may route into itself although a route there is wider than a /8 (/16 for IPv6), or
+# covers an address of the host, its default gateway, a resolver, loopback, link-local or multicast (for example a
+# full tunnel, 0.0.0.0/1 and 128.0.0.0/1). Without this line, or admin-routes, the helper refuses such routes; every
+# route must lie inside the allowed IPs of a peer of its tunnel either way.
+#wireguard-routes = 10.0.0.0/7
+#admin-raw-pf = false
+#admin-resume-send = false
+# Lets an admin give a jail a ZFS dataset of its own (jailops create --zfs-delegation): root in that jail can then
+# create datasets, snapshots and mounts below it, outside the rules JailOps applies to the jail's data. An admin who
+# may do this is root on the host for that jail's storage: leave it off unless you need it.
+#admin-zfs-delegation = false
+
+# --- image building ---------------------------------------------------------------
+# Hosts the helper's fetch rule, the package repositories of image builds and the debootstrap mirrors may use, over
+# https (default: dl-cdn.alpinelinux.org, pkg.freebsd.org, pkg.jailops.net, deb.debian.org, archive.ubuntu.com and
+# ports.ubuntu.com). Repeat or comma separate; http://<host> also allows plain http for a package repository there.
+#fetch-host = dl-cdn.alpinelinux.org
+#fetch-host = pkg.freebsd.org
+# The key directories a package repository of an image build may use besides /usr/share/keys, and the keyrings
+# debootstrap may check a release with. Root owns them and nobody else can write there; they lie outside the
+# daemon's directories, and the helper checks them every time. The daemon never chooses what the helper trusts.
+#pkg-keys-dir = /usr/local/etc/jailops/keys
+#keyring-dir = /usr/local/share/keyrings
+# Names for the jails (docs/dns.md): the file the helper writes the names of the running jails into, NAME.PROJECT.internal,
+# for the host's resolver. Nothing to set: the default is the conf.d of the base system's local-unbound and counts when
+# local_unbound is enabled and that directory is root's. Empty turns it off; a path points it at another file (a plain
+# unbound with unbound-control). The directory belongs to root and is closed to others.
+#unbound-conf = /var/unbound/conf.d/jailops.conf
+# The zone under which the jails have names: NAME.PROJECT.<suffix>. DNS labels, not local (multicast DNS); a suffix you own,
+# like corp.example, is the clean choice.
+#dns-suffix = internal
+# Directories fs.read_file may read besides the storage roots (a local mirror of
+# image archives). /etc/sysctl.conf and /etc/resolv.conf are always readable.
+#image-mirror = /var/db/jailops/mirror
+
+# --- host management (appliance mode, docs/appliance.md) ------------------------
+# Modules the helper may change on the host itself. Empty (the default): the host is only read. "identity" is the host
+# name, /etc/resolv.conf, the jailops block of /etc/ntp.conf and ntpd_enable; jailopsd.yaml must list it too
+# (host.manage.modules). "firewall" is /etc/pf.conf, written whole, with pf_enable and pf_rules; every change of it
+# reverts at its deadline unless it is confirmed (the timer is the helper's own). Copies of every changed file and the
+# record of a change that waits for its confirmation are kept in host-dir (root only).
+# jailops_appliance="YES" in /etc/rc.conf adds the modules of jailops_appliance_modules (default: all) to this list
+# when the helper starts (the rc script passes -appliance-modules; it is not a key of this file). rc.conf is root's file
+# like this one; check-config prints both lists.
+#host-manage = identity
+#host-manage = firewall
+#host-dir = /var/db/jailops-priv/host

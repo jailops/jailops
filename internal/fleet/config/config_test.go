@@ -518,3 +518,33 @@ func TestAppDocuments(t *testing.T) {
 		t.Fatalf("%v", err)
 	}
 }
+
+// A fleet repository written for an earlier release loads: a field a release renamed or removed is read as the current
+// shape, and the check says what to change in the file.
+func TestAFileOfAnEarlierReleaseLoadsAndIsReported(t *testing.T) {
+	d := base(t)
+	write(t, d, "shared/networks/lan.yaml", "apiVersion: jailops/v1\nkind: Network\nmetadata:\n  name: lan\nspec:\n"+
+		"  uplink: vtnet0\n  ipv4: {subnet: 10.0.0.0/24, gateway: 10.0.0.1, range: 10.0.0.2-10.0.0.9}\n"+
+		"  ipv6: {mode: proxy, subnet: '2001:db8:1::/64', range: '2001:db8:1::10-2001:db8:1::ff'}\n")
+	f, err := Load(d)
+	if err != nil {
+		t.Fatalf("a repository with ipv6.mode does not load: %v", err)
+	}
+	if err := f.Check(); err != nil {
+		t.Fatalf("check: %v", err)
+	}
+	var found bool
+	for _, w := range f.Warnings {
+		if strings.Contains(w, "lan.yaml") && strings.Contains(w, "written for an earlier release") && strings.Contains(w, "ndp_proxy") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the check does not say which file to change: %q", f.Warnings)
+	}
+	// a key that never was valid is still an error
+	write(t, d, "shared/networks/lan.yaml", strings.Replace(net("lan"), "10.0.0.9}\n", "10.0.0.9}\n  ipv6: {ndp_prox: true}\n", 1))
+	if _, err := Load(d); err == nil {
+		t.Error("a misspelt key was accepted")
+	}
+}

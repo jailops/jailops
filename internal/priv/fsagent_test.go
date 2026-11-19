@@ -287,6 +287,17 @@ func TestRemoveAllOnlyWhereTreesAreScratch(t *testing.T) {
 	if err := l.RemoveAll(ctx, filepath.Join(e.base, "elsewhere")); err == nil {
 		t.Error("a path outside every root")
 	}
+	// the root a conversion builds: its directories yes, the root.new itself and the live root no
+	mustWrite(t, filepath.Join(jail, "root.new", "usr", "local", "bin", "x"), "z")
+	if err := l.RemoveAll(ctx, filepath.Join(jail, "root.new")); err == nil {
+		t.Error("root.new itself was removed")
+	}
+	if err := l.RemoveAll(ctx, filepath.Join(jail, "root.new", "usr", "local")); err != nil {
+		t.Fatalf("a directory of root.new: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(jail, "root.new", "usr", "local")); err == nil {
+		t.Error("it is still there")
+	}
 }
 
 func TestOwnDirectoriesMustBeRootsAndPlain(t *testing.T) {

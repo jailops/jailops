@@ -11,6 +11,12 @@ export interface UpgradePreview {
   steps: string[]
   etc_conflicts?: string[]
   warnings?: string[]
+  /** Set for a move to another image (a new release): the releases, the image the jail follows, what is kept. */
+  from_release?: string
+  to_release?: string
+  image?: string
+  snapshot?: string
+  kept?: string[]
 }
 
 /** Body of POST /api/v1/jails/{name}/snapshots: a JailSnapshot with an optional name. */

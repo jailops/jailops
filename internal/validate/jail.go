@@ -74,6 +74,13 @@ func JailSpec(name string, s api.JailSpec) error {
 	if s.Resources.PIDs < 0 {
 		return Invalid("resources.pids", "the process limit must not be negative (--pids)")
 	}
+	if s.Resources.CPUSet != "" {
+		if c, err := api.NormalizeCPUSet(s.Resources.CPUSet); err != nil {
+			return Invalid("resources.cpuset", "cpuset: %v (--cpuset)", err)
+		} else if c != s.Resources.CPUSet {
+			return Invalid("resources.cpuset", "cpuset %q is written %q", s.Resources.CPUSet, c)
+		}
+	}
 	if s.Resources.States < 0 || s.Resources.States > 10000000 {
 		return Invalid("resources.states", "the state limit must be between 0 and 10000000")
 	}

@@ -164,12 +164,46 @@ grants and quotas apply, and the network and storage must be granted to it. The 
 (`--keep-ip` keeps the fixed addresses, `--map` moves its networks). `--replace` destroys an existing jail and needs its name
 typed or `--confirm-data-loss`.
 
-**On a new host** (the old one is gone): the design is that a restore there needs only the recovery key (design 9.3). Install
-JailOps, set up `backup:` pointing at the same node and enrol the new host's certificate on the node. **Not done yet:** the
-`jailops backup key` commands are `create`, `escrow` and `status`; there is no command that loads a recovery key or an
-escrowed key into a new host, so this path is **UNVERIFIED and not usable from the CLI today**. Keep the old host's
-`backup.key` file (it is the key) in your own backup, and test a restore on a second machine with it before you rely on this.
-The jail itself comes back from the repository: the preflight lists an image generation that is missing on the new host, and it
-is rebuilt from pkgbase.
+### Restore on a new host
+
+The old host is gone: its disk, its `backup.key`, everything but the backup node and what you stored offline. The new host
+needs three things, in this order. The key is the last one, because the check of the key asks the node.
+
+1. **Install JailOps** and make the pool, as for any host ([install.md](install.md)).
+2. **Point it at the node** (section 3) and **enrol its certificate** on the node (section 2). The node pinned the old host's
+   certificate; the new host has a new one, so enrol it as a new host name (`hosts enroll host2 ...`). The node's fingerprint
+   in `backup.node.fingerprint` is the one `init` printed.
+3. **Load the key.** One of three things lets the new host read the repository:
+
+        # the recovery key, printed once by 'backup key create': typed at a prompt (nothing is echoed)
+        jailops backup key import
+        # or from a file, or standard input
+        jailops backup key import --file recovery-key.txt
+        # a copy of the old host's backup.key (add --passphrase-file when it was wrapped with a passphrase)
+        jailops backup key import --file old-host-backup.key
+        # the escrow on the node, opened with the age identity that matches --recipient of 'backup key escrow'
+        jailops backup key import --identity-file recovery-identity.txt
+
+   Before anything is written, the key is checked against what the node recorded: a key of another **key domain** is refused,
+   so a wrong key never gets as far as a restore. The key domain is not secret: it is the fingerprint `backup key status`
+   shows on a host that has the key, and the import prints it, so you can compare it with what you noted on the old host.
+   The key file is written next to where the host's own key lives (mode 0600) and the catalog is
+   rebuilt from the repository. `--dry-run` checks the key and writes nothing. The console does the same in **Backup key**,
+   **Import recovery key**: it shows the key domain before you confirm.
+
+   A host that already holds this key is left alone. A host that holds a different key refuses the import unless you add
+   `--replace`, which keeps the old key file beside the new one (`backup.key.replaced-<unix time>`). A host that is not enrolled
+   yet cannot ask the node: `--no-verify` installs the key without the check, and the first backup call after the enrolment
+   shows whether it fits.
+
+Then the restore is the one of section 7:
+
+    jailops backup list
+    jailops backup restore --project shop <id> --as web --dry-run
+    jailops backup restore --project shop <id> --as web -y
+
+The preflight lists what the new host lacks: an image generation that is missing is rebuilt from pkgbase, networks and
+storage the project is granted must exist (create them first), and volumes the jail attaches come back from their newest
+backup. Nothing is touched until you confirm.
 
 **UNVERIFIED:** S3 as a datastore on a real service.

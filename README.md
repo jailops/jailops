@@ -13,7 +13,9 @@ What is available today and what comes next: [the roadmap](https://jailops.net/s
 - PF anchors per jail
 - Encrypted, deduplicated backups to a keyless backup node, with restore and restore tests
 - Local-first: every host has its own API and console. A hub manages many hosts; cluster mode is on the roadmap
+- `jailops top`: the live CPU, memory, disk and network of the host and its jails, in the terminal and the console
 - Declarative fleets with `jailops-sync`
+- One command on many jails (`jailops exec -l role=web -- uptime`) and files in and out of a jail (`jailops cp`), through the daemon, audited
 - Alpine and Debian jails through the Linuxulator
 - Real IPv6 for every jail, routed or on a shared switched /64 with a built-in neighbor discovery proxy
 - An unprivileged daemon with a small root helper that the operator's `priv.conf` allow-lists bound
@@ -55,12 +57,16 @@ binaries from the GitHub releases page. The client package ships bash, zsh and f
 | What the daemon and the helper may and may not do | [docs/security-model.md](docs/security-model.md) |
 | IPv6, routed and switched | [docs/networking-ipv6.md](docs/networking-ipv6.md) |
 | Big pools, volumes and existing data | [docs/storage.md](docs/storage.md) |
+| Moving a jail to another host or project as a file | [docs/export-import.md](docs/export-import.md) |
 | Backups and restores | [docs/backup-restore.md](docs/backup-restore.md) |
 | Upgrading JailOps and its jails | [docs/upgrade.md](docs/upgrade.md) |
+| Which FreeBSD releases are supported | [docs/supported-versions.md](docs/supported-versions.md) |
 | When something is wrong | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Alpine and Debian jails | [docs/linux-jails.md](docs/linux-jails.md) |
 | Fleets from git | [docs/fleet-sync.md](docs/fleet-sync.md) |
+| Running commands on many jails and copying files | [docs/operations.md](docs/operations.md#one-command-on-many-jails) |
 | The application catalog and installing an app with one command | [docs/apps.md](docs/apps.md) |
+| How a new FreeBSD release is handled (for maintainers) | [docs/release-engineering.md](docs/release-engineering.md) |
 | The design contract | [docs/design.md](docs/design.md) |
 | The wire protocol | [sdk/PROTOCOL.md](sdk/PROTOCOL.md) |
 

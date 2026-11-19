@@ -236,9 +236,10 @@ func execFlags(root *cobra.Command, args []string) {
 
 func (a *app) jailExec(d *kindDesc[api.Jail]) *cobra.Command {
 	var o execOpts
+	var parallel int
 	cmd := &cobra.Command{
-		Use:   "exec NAME [flags] -- COMMAND [ARG...]",
-		Short: "Run a command in a jail",
+		Use:   "exec NAME... [flags] -- COMMAND [ARG...]",
+		Short: "Run a command in a jail, or in many",
 		Long: `Run a command inside a running jail and stream its input and output over one
 connection. The command is run as given (never through a shell), and the exit
 status of jailops is the exit status of the command. It works locally and
@@ -252,33 +253,70 @@ there is refused: put it before the name, or end the flags with "--".
 
 With a terminal on both ends the command gets a pseudo-terminal: the local
 terminal is switched to raw mode for the session and window size changes are
-forwarded. -T runs without one (what a pipe gets anyway); -t names the default.`,
+forwarded. -T runs without one (what a pipe gets anyway); -t names the default.
+
+One command on many jails: name several jails before "--", or select them with -l
+KEY=VALUE (labels) or --all, and the command runs in every running one, at most
+--parallel (default 4) at a time, each in its own audited session. The output of
+each jail is printed line by line with [jail] in front, standard output on
+standard output and standard error on standard error, with control characters
+replaced; standard input is not forwarded and there is no pseudo-terminal. A summary
+line says how many jails are ok, failed or skipped. The exit status is 0 when
+every command exited 0; otherwise the highest exit status of a command, or 1 when
+a jail could not run it (it does not exist, it is not running, the session failed).
+A stopped jail that a selector matched is skipped with a note; a stopped jail that is
+named is a failure.`,
 		Example: `jailops exec nginx -- ls -l /var/log
 jailops exec nginx -- top
 jailops exec nginx --project shop -- id
 jailops exec -T nginx -- cat /var/log/messages > messages
 jailops exec --user www nginx -- id
-jailops --host host-b exec nginx -- service nginx status`,
-		Args:              cobra.MinimumNArgs(2),
+jailops --host host-b exec nginx -- service nginx status
+jailops exec web1 web2 web3 -- uname -r
+jailops exec -l role=web -- service nginx status
+jailops exec --all --parallel 8 -- pkg audit -F`,
+		Args:              cobra.MinimumNArgs(1),
 		ValidArgsFunction: completeArgs(completeKind(a, d), completeNone), // after -- the command is one of the jail, not a file here
 		Annotations:       map[string]string{execAnnotation: "1"},
-		RunE: func(cmd *cobra.Command, args []string) error {
-			argv := args[1:]
-			if dash := cmd.Flags().ArgsLenAtDash(); dash > 1 {
-				return usagef("only the jail name goes before --, not %q", strings.Join(args[1:dash], " ")).
-					withHint("jailops exec " + args[0] + " [flags] -- COMMAND [ARG...]")
-			}
+	}
+	targets := a.jailTargets(cmd)
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		selected := cmd.Flags().Changed("selector") || cmd.Flags().Changed("all")
+		dash := cmd.Flags().ArgsLenAtDash()
+		var names, argv []string
+		switch {
+		case selected && dash < 0:
+			argv = args
+		case selected:
+			names, argv = args[:dash], args[dash:]
+		case dash >= 1:
+			names, argv = args[:dash], args[dash:]
+		default:
+			names, argv = args[:1], args[1:]
 			if len(argv) > 0 && argv[0] == "--" { // kept by cobra after the name when no flag follows the name
 				argv = argv[1:]
-			} else if len(argv) > 0 && strings.HasPrefix(argv[0], "-") && cmd.Flags().ArgsLenAtDash() < 0 {
+			} else if len(argv) > 0 && strings.HasPrefix(argv[0], "-") {
 				return usagef("%q after the jail name would be the command: a command does not start with \"-\"", argv[0]).
 					withHint(fmt.Sprintf("put flags before the jail name, or end them with --: jailops exec %s %s ... -- COMMAND", args[0], argv[0]))
 			}
-			if len(argv) == 0 {
-				return usagef("name the command to run after --")
-			}
-			return a.runExec(cmd.Context(), args[0], argv, o)
-		},
+		}
+		if len(argv) == 0 {
+			return usagef("name the command to run after --")
+		}
+		if dash >= 0 && dash == 0 && !selected {
+			return usagef("name the jail before --, or select jails with -l or --all").withHint("jailops exec NAME... [flags] -- COMMAND [ARG...]")
+		}
+		resolved, bulk, err := targets(cmd.Context(), names)
+		if err != nil {
+			return err
+		}
+		if len(resolved) == 1 && !bulk && !cmd.Flags().Changed("parallel") {
+			return a.runExec(cmd.Context(), resolved[0], argv, o)
+		}
+		if cmd.Flags().Changed("tty") {
+			return usagef("-t needs one jail: a command on several jails runs without a terminal")
+		}
+		return a.runExecMany(cmd.Context(), resolved, bulk, argv, o, parallel)
 	}
 	var tty bool
 	cmd.Flags().SetInterspersed(false)
@@ -286,6 +324,7 @@ jailops --host host-b exec nginx -- service nginx status`,
 	cmd.Flags().BoolVarP(&o.noTTY, "no-tty", "T", false, "never allocate a pseudo-terminal")
 	cmd.Flags().StringArrayVarP(&o.env, "env", "e", nil, "add NAME=value to the environment (repeatable)")
 	cmd.Flags().StringVarP(&o.user, "user", "u", "", "run as this user of the jail")
+	cmd.Flags().IntVar(&parallel, "parallel", DefaultExecParallel, "jails that run the command at once, when there are several")
 	return cmd
 }
 

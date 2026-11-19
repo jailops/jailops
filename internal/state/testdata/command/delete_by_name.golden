@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "id": "d-3",
+  "time": "2026-11-19T10:00:00Z",
+  "op": "delete",
+  "kind": "AddressSet",
+  "name": "office",
+  "scope": "fleet",
+  "project": "shop",
+  "expect_generation": -1
+}

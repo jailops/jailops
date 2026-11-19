@@ -68,64 +68,14 @@ func migrateTo(doc map[string]any, migs []Migration, target string) (bool, error
 	return true, nil
 }
 
-// fieldRename moves a spec field to a new name inside the documents of one kind. It is the one-off rewrite of a stored
-// object whose field was renamed in a release: the old name is read once, when the document is loaded, and the document
-// is written back with the new one, so no later code knows the old name.
-type fieldRename struct{ From, To string }
-
-var fieldRenames = map[api.Kind][]fieldRename{
-	// 0.8.4: a tunnel that is taken down keeps its objects with `disabled` (it was `down`).
-	api.KindWireGuard: {{From: "down", To: "disabled"}},
-}
-
-// ipv6ModeToSwitch rewrites the stored IPv6 block of a network from the one-off `mode` field to the `ndp_proxy` switch:
-// `proxy` becomes `ndp_proxy: true`, `routed` just loses the field, and a network whose mode was `none` loses its
-// IPv6 block.
-func ipv6ModeToSwitch(doc map[string]any) bool {
-	if kind, _ := doc["kind"].(string); api.Kind(kind) != api.KindNetwork {
-		return false
-	}
-	spec, ok := doc["spec"].(map[string]any)
-	if !ok {
-		return false
-	}
-	v6, ok := spec["ipv6"].(map[string]any)
-	if !ok {
-		return false
-	}
-	mode, has := v6["mode"]
-	if !has {
-		return false
-	}
-	delete(v6, "mode")
-	switch mode {
-	case "proxy":
-		v6["ndp_proxy"] = true
-	case "none":
-		delete(spec, "ipv6")
-	}
-	return true
-}
-
-// renameFields applies fieldRenames to doc and reports whether it changed anything. A document that already has the
-// new name keeps it, and the old one is dropped.
+// renameFields rewrites the fields of a stored document that a release renamed or removed (api.UpgradeFields) and
+// reports whether it changed anything: the one-off rewrite of a stored object, made when the document is loaded and
+// written back, so no later code knows the old names.
 func renameFields(doc map[string]any) bool {
 	kind, _ := doc["kind"].(string)
 	spec, ok := doc["spec"].(map[string]any)
 	if !ok {
 		return false
 	}
-	changed := ipv6ModeToSwitch(doc)
-	for _, r := range fieldRenames[api.Kind(kind)] {
-		v, has := spec[r.From]
-		if !has {
-			continue
-		}
-		delete(spec, r.From)
-		if _, done := spec[r.To]; !done {
-			spec[r.To] = v
-		}
-		changed = true
-	}
-	return changed
+	return len(api.UpgradeFields(api.Kind(kind), spec)) > 0
 }

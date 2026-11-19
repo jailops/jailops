@@ -157,6 +157,9 @@ type Resources struct {
 	// States is the maximum number of pf states each pass rule of the jail's anchor may create. 0 means the host's
 	// default (jails.max_states of jailopsd.yaml, 10000), which is itself 0 for no limit on a host that sets it so.
 	States int `json:"states,omitempty"`
+	// CPUSet pins the jail to CPUs of the host (cpuset(1)): a list such as "2,3" or "0-3,6", kept in its canonical
+	// form. It needs no resource accounting. A CPU the host does not have stops the jail from starting.
+	CPUSet string `json:"cpuset,omitempty"`
 }
 
 // NetworkAttach connects a jail to a managed network. Every jail uses VNET;
@@ -347,12 +350,61 @@ type JailRollback struct {
 	ConfirmDataLoss bool `json:"confirm_data_loss,omitempty"`
 }
 
+// JailCopy is the body of POST /api/v1/jails/{name}: a copy of the jail, with its data, under a new name in the same
+// project and on the same storage. The copy is independent of the source (a full send and receive, never a clone), has
+// addresses of its own and no volume attached. It is made while the source runs: the datasets are snapshotted in one
+// atomic transaction, so the copy is what a power loss at that moment would have left.
+type JailCopy struct {
+	// Name is the name of the copy.
+	Name string `json:"name"`
+	// Labels replace the labels of the source when set.
+	Labels map[string]string `json:"labels,omitempty"`
+	// Snapshot copies the state of an existing snapshot of the source (see JailSnapshot) instead of the present one.
+	Snapshot string `json:"snapshot,omitempty"`
+}
+
+// JailConvert is the body of POST /api/v1/jails/{name}/convert: the jail's root changes layout. Thin to thick makes the root
+// a full copy of its own (the persistent datasets are folded into it); thick to thin gives the jail a clone of an image
+// generation as its root and the directories of the persistent datasets keep the jail's data. The jail is stopped for it
+// and started again when it ran. Linux jails are thick and stay so.
+type JailConvert struct {
+	// Layout is the layout the jail gets: thin or thick.
+	Layout Layout `json:"layout"`
+	// Image is the image generation a jail converted to thin takes its root from: NAME (the newest generation) or
+	// NAME#gN. Empty: the generation the thick root was copied from, which is the exact image the jail is made of.
+	Image  string `json:"image,omitempty"`
+	DryRun bool   `json:"dry_run,omitempty"`
+}
+
+// JailConvertResult is the result of a convert operation (the plan of a dry run).
+type JailConvertResult struct {
+	Jail string `json:"jail"`
+	From Layout `json:"from"`
+	To   Layout `json:"to"`
+	// Image is the image the jail uses afterwards.
+	Image string `json:"image,omitempty"`
+	// Changed is false when the jail has the layout already.
+	Changed bool `json:"changed"`
+	DryRun  bool `json:"dry_run,omitempty"`
+	// Steps are the steps of the plan, in order.
+	Steps []string `json:"steps,omitempty"`
+	// Kept are the paths of the jail that carry its data over the conversion; Replaced says what comes from the image
+	// instead of the old root.
+	Kept     []string `json:"kept,omitempty"`
+	Replaced string   `json:"replaced,omitempty"`
+	Warnings []string `json:"warnings,omitempty"`
+}
+
 // JailUpgrade is the body of POST /api/v1/jails/{name}/upgrade.
 type JailUpgrade struct {
 	// Generation pins the target; empty means the newest generation of the
-	// jail's image.
+	// jail's image (or of Image).
 	Generation string `json:"generation,omitempty"`
-	DryRun     bool   `json:"dry_run,omitempty"`
+	// Image moves a thin FreeBSD jail to another image of the same OS and architecture whose release is the same
+	// or newer (a new release): the jail keeps its data, volumes, addresses and configuration, and follows that
+	// image from then on. Empty keeps the jail's image.
+	Image  string `json:"image,omitempty"`
+	DryRun bool   `json:"dry_run,omitempty"`
 }
 
 // JailSnapshot is a consistent snapshot across all datasets of a jail.

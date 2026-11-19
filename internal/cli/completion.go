@@ -129,9 +129,11 @@ func (a *app) flagCompleters() map[string]completer {
 		"key":                 completeFiles,
 		"pem":                 completeFiles,
 		"ca":                  completeFiles,
+		"to":                  completeFiles,
 		"config":              completeFiles,
 		"path":                completeDirs,
 		"dir":                 completeDirs,
+		"from-dir":            completeDirs,
 		"hosts":               commaList(a.completeHosts()),
 		"projects":            commaList(a.completeProjects()),
 		"image": a.completeNames(listNames(func(ctx context.Context, c *sdk.Client) iterNames {
@@ -166,9 +168,11 @@ func (a *app) flagCompletersFor() map[string]completer {
 		"audit --user": a.completeNames(listNames(func(ctx context.Context, c *sdk.Client) iterNames {
 			return namesOf(c.Users().List(ctx), func(u api.User) string { return u.Metadata.Name })
 		})),
-		"app export --to":    completeFiles,
-		"cert create --kind": fixedValues("client", "host", "backup"),
-		"cert set --kind":    fixedValues("client", "host", "backup"),
+		"app export --to":                   completeFiles,
+		"backup key import --file":          completeFiles,
+		"backup key import --identity-file": completeFiles,
+		"cert create --kind":                fixedValues("client", "host", "backup"),
+		"cert set --kind":                   fixedValues("client", "host", "backup"),
 	}
 }
 
@@ -355,6 +359,9 @@ func configKeyOf(key string) (api.ConfigKey, bool) {
 // freeTextFlags are the flags that carry text the operator makes up, with why nothing can be completed: they complete
 // nothing and never the files of the directory. A key is a flag name (every command) or "command path --flag".
 var freeTextFlags = map[string]string{
+	"snapshot":                         "the name of a snapshot of the jail, as jail snapshot list prints it",
+	"network-map":                      "an OLD=NEW pair: OLD is a name in the file, NEW a network of this host",
+	"volume-map":                       "an OLD=NEW pair: OLD is a name in the file, NEW a name that is new",
 	"action":                           "an audit action is matched as typed",
 	"address":                          "an address or an endpoint the operator types",
 	"member":                           "an address or a prefix the operator types",
@@ -364,8 +371,10 @@ var freeTextFlags = map[string]string{
 	"at":                               "a time of day",
 	"comment":                          "free text",
 	"confirm-within":                   "a duration typed as text",
+	"cpuset":                           "host CPU numbers and ranges, as in 0-3,6",
 	"console-from":                     "addresses typed by the operator",
 	"dataset":                          "the API lists no ZFS datasets of the host",
+	"backup key import --domain":       "a key domain id read off the old host's key status: typed",
 	"db":                               "a database of the app, made by the install",
 	"default-host":                     "the host of a hub, as the remote knows it",
 	"disk":                             "a size",

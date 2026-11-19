@@ -518,14 +518,29 @@ func (l *Local) Remove(ctx context.Context, path string) error {
 }
 
 // recursiveRemovable reports whether a whole tree may be removed at path: the scratch trees the daemon makes
-// below its work directory (image builds), and the stage and merge directories of a jail's container.
+// below its work directory (image builds), the stage and merge directories of a jail's container, and the
+// directories below the root.new of a jail (the root a layout conversion is building, which has no data of the jail
+// yet: a persistent dataset is folded into it).
 func (c Config) recursiveRemovable(path string) bool {
 	p := filepath.Clean(path)
 	if c.WorkDir != "" && within(c.WorkDir, p) && p != c.WorkDir {
 		return true
 	}
+	if c.inMounts(p) && belowRootNew(p) {
+		return true
+	}
 	base := filepath.Base(p)
 	return c.inMounts(p) && (strings.HasPrefix(base, ".seed-") || strings.HasPrefix(base, ".merge-"))
+}
+
+// belowRootNew reports whether p lies strictly below a directory named root.new.
+func belowRootNew(p string) bool {
+	for d := filepath.Dir(p); d != "/" && d != "."; d = filepath.Dir(d) {
+		if filepath.Base(d) == "root.new" {
+			return true
+		}
+	}
+	return false
 }
 
 // RemoveAll removes path and everything below it where recursiveRemovable allows that; anywhere else it is
@@ -649,6 +664,24 @@ func (c Config) hostDirRoot(path string) (root, rel string, err error) {
 	}
 	return "", "", api.Errorf(api.CodeForbidden, "%q is not below a directory of admin-host-mount in priv.conf", path).
 		WithHint("the host operator lists the directories jails may be given with admin-host-mount")
+}
+
+// hostSourceTree resolves a host directory that is copied from: below an admin-host-mount directory or that directory
+// itself (a copy needs no mount point on the way: nothing keeps the directory, and nothing is lost when it goes away).
+// The result is opened from the approved directory one plain directory at a time, so no symbolic link on the way is
+// followed.
+func (c Config) hostSourceTree(path string) (resolved, error) {
+	if path == "" || len(path) > maxPath || strings.ContainsRune(path, 0) || !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		return resolved{}, invalid("invalid path %q", path)
+	}
+	for _, r := range c.Admin.HostMountRoots {
+		if !within(r, path) {
+			continue
+		}
+		return resolved{root: path, rel: ".", base: r}, nil
+	}
+	return resolved{}, api.Errorf(api.CodeForbidden, "%q is not below a directory of admin-host-mount in priv.conf", path).
+		WithHint("the host operator lists the directories whose files may be imported with admin-host-mount in priv.conf")
 }
 
 // sourceDev is the device of a directory of a probe, by its path (tests give some directory a device of its own, for

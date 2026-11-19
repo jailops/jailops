@@ -1,0 +1,50 @@
+$ jailops jail create web --image freebsd-15 --storage default --network lan=10.20.0.15 --label tier=front --cpuset 3,2
+jail/web created
+
+$ jailops jail snapshot create web before
+snapshot/before created
+
+$ jailops jail copy web web2 --data
+jail/web2 created
+
+$ jailops jail copy web web3 --data --snapshot before
+jail/web3 created
+
+$ jailops jail copy web web4 --data --start
+jail/web4 created and started
+
+$ jailops jail copy web web5 --data --snapshot before --dry-run
+dry-run: would copy jail web to web5 with its data from snapshot before
+name: web5
+snapshot: before
+
+$ jailops jail copy web web6 --data --snapshot nope
+! not_found: snapshot "nope" not found
+! hint: jailops jail snapshot list web
+[exit 4]
+
+$ jailops jail copy web web6 --snapshot before
+! usage: --snapshot copies the data of a snapshot: add --data
+! hint: run 'jailops jail copy --help' for usage
+[exit 2]
+
+$ jailops jail copy web web6 --data --keep-ip
+! usage: --keep-ip applies to a copy without --data: the copy of the data has addresses of its own
+! hint: run 'jailops jail copy --help' for usage
+[exit 2]
+
+$ jailops jail copy web web6 --data --start --no-wait
+! usage: --start waits for the copy: drop --no-wait
+! hint: run 'jailops jail copy --help' for usage
+[exit 2]
+
+$ jailops jail copy web web2 --data
+! already_exists: jail "web2" already exists
+! hint: Pick another name, or edit the existing object. (jailops explain already_exists)
+[exit 5]
+
+$ jailops jail copy nope web6 --data
+! not_found: jail "nope" not found
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
+[exit 4]
+

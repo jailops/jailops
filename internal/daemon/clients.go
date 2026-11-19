@@ -16,6 +16,7 @@ import (
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/internal/top"
 	"jailops.net/jailops/internal/wireguard"
 )
 
@@ -30,13 +31,18 @@ type Clients struct {
 	Runner run.Runner
 	Files  service.FS
 	// Logs reads jail log files (the helper in production, see service.LogReader).
-	Logs    service.LogReader
-	Sysctl  func(ctx context.Context, name string) (string, error)
-	Mount   func(ctx context.Context, dataset string) error
-	Unmount func(ctx context.Context, dataset string) error
+	Logs service.LogReader
+	// JailFiles reads and writes the files below jail roots (the helper in production, see service.JailFiles).
+	JailFiles service.JailFiles
+	Sysctl    func(ctx context.Context, name string) (string, error)
+	Mount     func(ctx context.Context, dataset string) error
+	Unmount   func(ctx context.Context, dataset string) error
 	// Dial connects from the host to a jail (the health checks of an app
 	// installation); nil uses the network.
 	Dial func(ctx context.Context, network, address string) (net.Conn, error)
+	// HostExec runs the read-only tools `jailops top` reads without a privilege (top.ExecDirect in production; nil in
+	// tests: the host is not read).
+	HostExec top.Exec
 	// HostFile reads a world-readable file of the host as the daemon (nil: the file system; tests: the simulated host).
 	HostFile func(path string) ([]byte, error)
 	// Host is the helper (nil in tests); the NDP proxy opens BPF through it.
@@ -56,8 +62,9 @@ type Clients struct {
 type ClientFactory func(ctx context.Context, cfg *Config, dev bool) (*Clients, error)
 
 func fromHost(h priv.Host, files service.FS) *Clients {
-	return &Clients{ZFS: h.ZFS(), Jails: h.Jails(), PF: h.PF(), Net: h.Net(), Runner: h.Runner(), Files: files, Logs: h,
-		Sysctl: h.Sysctl, Mount: h.Mount, Unmount: h.Unmount, Host: h, HostSystem: h, WG: h, Keys: &zfsadapt.Keys{H: h, C: h.ZFS()}}
+	return &Clients{ZFS: h.ZFS(), Jails: h.Jails(), PF: h.PF(), Net: h.Net(), Runner: h.Runner(), Files: files, Logs: h, JailFiles: h,
+		Sysctl: h.Sysctl, Mount: h.Mount, Unmount: h.Unmount, Host: h, HostSystem: h, WG: h, Keys: &zfsadapt.Keys{H: h, C: h.ZFS()},
+		HostExec: top.ExecDirect}
 }
 
 func privConfig(cfg *Config) priv.Config {

@@ -3,6 +3,8 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"path"
+	"regexp"
 	"strings"
 	"time"
 
@@ -49,7 +51,7 @@ func (s *Service) PlanStart(ctx context.Context, name string) (*plan.Plan, error
 			Do: func(ctx context.Context) error { return s.Jails.Start(ctx, name) },
 			// Jails.Stop succeeds when the jail is not running, so this is safe
 			// even if jail(8) failed half-way.
-			Undo: func(ctx context.Context) error { return s.stopJail(ctx, name) }, UndoOnFail: true},
+			Undo: func(ctx context.Context) error { return s.stopWithLostMounts(ctx, name) }, UndoOnFail: true},
 		plan.Step{Name: "ready", Describe: fmt.Sprintf("wait until %s runs (timeout %s)", name, s.Cfg.ReadyTimeout),
 			Do: func(ctx context.Context) error { return s.waitReady(ctx, name) }},
 	), nil
@@ -117,7 +119,7 @@ func (s *Service) StopJail(ctx context.Context, name string) error {
 				if up, err := s.Jails.Running(ctx, name); err != nil || !up {
 					return err
 				}
-				err := s.stopWithLostHostDirs(ctx, name)
+				err := s.stopWithLostMounts(ctx, name)
 				s.cleanAfterFailedStop(ctx, name, err)
 				return err
 			}},
@@ -235,39 +237,73 @@ func (s *Service) DestroyJail(ctx context.Context, name string, force, dryRun bo
 	return res, nil
 }
 
-// stopWithLostHostDirs stops a jail. When the mount under a host directory was taken away by the system (a box that
-// failed is unmounted by force, and the nullfs mounts on it go with it), jail(8) cannot unmount the fstab line and
-// refuses to remove the jail: "<target>: not a mount point". Each target it names is given a small tmpfs, so that the
-// line has a mount to unmount, and the stop is tried again; the placeholders are removed again when the jail is gone.
-func (s *Service) stopWithLostHostDirs(ctx context.Context, name string) (err error) {
-	st, oerr := s.observe(ctx, name)
-	if oerr != nil {
-		return oerr
-	}
-	var placeholders []string
+// lostMountRE finds the target jail(8) names when it cannot unmount a line of the jail's fstab: "<target>: not a mount point".
+var lostMountRE = regexp.MustCompile(`(/[^\s:]+): not a mount point`)
+
+// maxLostMounts bounds the placeholders of one stop: the fstab of a jail holds a dozen lines, a Linux jail twice that.
+const maxLostMounts = 64
+
+// stopWithLostMounts stops a jail. A mount of its fstab that is gone (a box that failed is unmounted by force and the
+// nullfs mounts on it go with it, a volume or a mount below compat/linux was unmounted by hand) leaves jail(8) with a line
+// it cannot unmount: it refuses to remove the jail and says "<target>: not a mount point". Each target it names that lies
+// below the root of the jail is given a small tmpfs (on a directory made for it when jail(8) has already taken the mirror
+// below compat/linux away), so that the line has a mount to unmount, and the stop is tried again; the placeholders and the
+// directories made for them are removed again when the jail is gone. A target outside the root, or one that already got
+// its placeholder, is not touched: the stop fails as it did.
+func (s *Service) stopWithLostMounts(ctx context.Context, name string) (err error) {
+	root := s.Cfg.at(name).rootMP() + "/"
+	type placeholder struct{ target, made string } // made: the highest directory made for the mount point, "" when it was there
+	var placed []placeholder
 	defer func() {
-		for _, target := range placeholders {
-			_, _ = s.Exec.Run(ctx, []string{"umount", "-f", target}) // gone with the jail's own unmount, or here
+		for _, p := range placed {
+			_, _ = s.Exec.Run(ctx, []string{"umount", "-f", p.target}) // gone with the jail's own unmount, or here
+			if p.made != "" {
+				_ = s.Files.RemoveAll(ctx, p.made)
+			}
 		}
 	}()
-	err = s.stopJail(ctx, name)
-	for range len(st.HostDirs) {
-		if err == nil || !strings.Contains(err.Error(), "not a mount point") {
-			return err
+	has := func(target string) bool {
+		for _, p := range placed {
+			if p.target == target {
+				return true
+			}
 		}
-		placed := false
-		for _, h := range st.HostDirs {
-			target := s.Cfg.at(name).rootMP() + h.Path
-			if !strings.Contains(err.Error(), target+": not a mount point") {
+		return false
+	}
+	err = s.stopJail(ctx, name)
+	for range maxLostMounts {
+		if err == nil {
+			return nil
+		}
+		again := false
+		for _, m := range lostMountRE.FindAllStringSubmatch(err.Error(), -1) {
+			target := m[1]
+			if !strings.HasPrefix(target, root) || has(target) {
 				continue
 			}
+			made := ""
+			if ok, _ := s.Files.Exists(ctx, target); !ok {
+				made = target
+				for up := path.Dir(target); strings.HasPrefix(up, root); up = path.Dir(up) {
+					if ok, _ := s.Files.Exists(ctx, up); ok {
+						break
+					}
+					made = up
+				}
+				if merr := s.Files.MkdirAll(ctx, target); merr != nil {
+					return fmt.Errorf("%w (and a mount point for %s: %v)", err, target, merr)
+				}
+			}
 			if out, merr := s.Exec.Run(ctx, []string{"mount", "-t", "tmpfs", "-o", "size=1m", "tmpfs", target}); merr != nil {
+				if made != "" {
+					_ = s.Files.RemoveAll(ctx, made)
+				}
 				return fmt.Errorf("%w (and a placeholder for %s: %v: %s)", err, target, merr, strings.TrimSpace(string(out)))
 			}
-			placeholders = append(placeholders, target)
-			placed = true
+			placed = append(placed, placeholder{target, made})
+			again = true
 		}
-		if !placed {
+		if !again {
 			return err
 		}
 		err = s.stopJail(ctx, name)

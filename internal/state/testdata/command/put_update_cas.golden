@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "id": "c-3",
+  "time": "2026-11-19T10:01:30Z",
+  "op": "put",
+  "kind": "AddressSet",
+  "uuid": "b2c7d4e9-58aa-4b7e-8d0f-77a1e3c9f5d2",
+  "name": "office",
+  "scope": "fleet",
+  "project": "shop",
+  "host": "host-b",
+  "spec": {
+    "members": [
+      "192.0.2.0/24",
+      "2001:db8::/32"
+    ]
+  },
+  "expect_generation": 3
+}

@@ -62,6 +62,13 @@ root it restores setuid and setgid files and device nodes as the backup recorded
 because the jail needs them; that is safe only because of the 0700 directory above. Into anything else (the jail's
 container) it makes no device node and drops setuid and setgid, and says so in the restore's skipped list.
 
+**Copy from a host directory.** `volume create --from-dir` has the helper read a directory below an `admin-host-mount`
+directory (or that directory) and write into the new volume with `fs.copy_tree`, the confined copier that also moves a
+jail's files. The source is opened from the approved directory one plain directory at a time, so a symbolic link on the way
+is refused; links inside it are copied as links and never read through; the entry count and depth are bounded; the
+setuid and setgid bits are dropped and devices, fifos and sockets are skipped. The helper only reads the source. A global
+administrator is the only caller.
+
 **Host directories.** The helper's `fs.source_probe` looks at a directory below an `admin-host-mount` directory for a volume
 that is one: it opens it from that directory one plain directory at a time (a symbolic link anywhere is refused), says whether
 a mount point lies on the way (a change of device) and, when asked, makes and removes one file in it. It changes nothing
@@ -100,7 +107,7 @@ line can carry a secret. An archive is copied into the helper's own directory, l
 | Line | What it lets an admin do | Default |
 |---|---|---|
 | `storage-root` | where jails, images and their files may live | the root `init` made |
-| `admin-host-mount` | mount host directories below this path into a jail (nullfs), and make volumes of them (`volume create --path`): the mount point has to lie below the path | nothing |
+| `admin-host-mount` | mount host directories below this path into a jail (nullfs), and make volumes of them (`volume create --path`): the mount point has to lie below the path; also the source of `volume create --from-dir`, a one-time copy of a plain directory's files into a new volume (no setuid bit, no devices, nothing followed out of the directory) | nothing |
 | `admin-raw-param`, `admin-allow-flag`, `admin-devfs-ruleset`, `admin-zfs-prop` | set these raw `jail.conf` parameters, `allow.*` flags, devfs rulesets or ZFS properties | nothing |
 | `admin-routes`, `admin-raw-pf`, `admin-resume-send` | change routes (WireGuard routes of any kind included), load raw PF, resume a ZFS send | off |
 | `wireguard-routes` | WireGuard tunnels may route these networks into themselves although a route there is wider than a /8 (/16 for IPv6) or covers the host's addresses, default gateway, resolvers, loopback, link-local or multicast ([wireguard.md](wireguard.md)) | nothing |
@@ -354,6 +361,10 @@ bounded, so that nobody can fill the disk or forge an entry by being refused:
 - The server refuses control characters in labels, descriptions and comments in the first place (label keys of letters,
   digits, `-`, `_` and `.` up to 63 characters with an optional prefix and `/`, values up to 253 bytes of printable
   text, 64 labels an object; descriptions and comments up to 4096 bytes).
+- `jailops cp` and the Files tab move data between the caller and the jail root through the daemon: the helper opens
+  every path segment below the jail root without following a symlink (`os.Root`), refuses names with `..`, absolute
+  names, devices and set-id bits, and bounds bytes, entries and depth; nothing runs inside the jail, so a jail cannot
+  steer the copy. It needs the role of exec and is audited with the paths and the size.
 - `jailops exec` and `shell` put the terminal back on SIGINT, SIGTERM and SIGHUP; after a SIGKILL nothing can, and
   `reset` repairs the terminal.
 - The web console embedded in `jailopsd` has no demo mode: `?demo` changes nothing (only a demo build, made for the tests

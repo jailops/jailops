@@ -23,9 +23,17 @@ Reads need the operator role and never carry a private or preshared key; changes
 
 **Firewall test** ([networking-ipv6.md](networking-ipv6.md#would-it-pass)): `POST /api/v1/firewall/test` (extension `firewall_test`, operator in the project) takes `FirewallTestRequest` (`from`, `to`, `proto`, `port`, `icmp_type`, `family`) and answers `FirewallTestResult`: `verdict` (`pass`, `block`, `unknown`), `cases` (one per address pair: the `hops` with the anchor, interface, direction, `verdict`, `decided_by`, `skipped` (the allow rules a deny rule won over, and the disabled rules the packet would have met) and `loaded_matches_rendered`) and `caveats`. It changes nothing.
 
+**Convert** ([storage.md](storage.md#changing-the-layout-of-a-jail)): `POST /api/v1/jails/{name}/convert` (extension `jail_convert`, admin) takes `JailConvert`: `layout` (`thin` or `thick`), optional `image` (the generation of a thin root) and `dry_run`. It is asynchronous and its result is `JailConvertResult`: `from`, `to`, `image`, `changed`, the `steps` of the plan, the paths it `kept`, what it `replaced`, and `warnings`; with `dry_run` nothing changes. A Linux jail is `unsupported`.
+
+**Copy** ([storage.md](storage.md#copying-a-jail)): `POST /api/v1/jails/{name}` (extension `jail_copy`) takes `JailCopy`: `name` (the copy's), optional `labels` (they replace the source's) and optional `snapshot` (a snapshot of the source to copy instead of its present state). It is asynchronous and its result is the new jail: the source's specification with addresses of its own, no volume and no exposure, and the data of the source (a full copy, independent of it; the source may run). The copy is in the source's project and on its storage. SDK: `c.Jails().Copy`.
+
 **Diff** ([storage.md](storage.md#what-is-unique-in-a-jail)): `GET /api/v1/jails/{name}/diff` (extension `jail_diff`, readonly) answers `JailDiff`: `jail`, `image` (the generation the root was cloned from) and `datasets`, the root first. Each dataset has `name`, `path`, `base` (`image`, `baseline` or `image-tree`: compared file by file because the jail has no baseline snapshot), `note`, `entries` (`kind` `added`, `modified`, `removed` or `renamed`, `path` and, for a rename, `to`), `total`, `counts` by kind and `truncated`. `?limit=N` caps the entries of each dataset (200 by default, 20000 at most; the counts stay complete), `?dataset=NAME` keeps one dataset and `?packages=true` adds `packages` (the packages installed on purpose; a running jail only). A jail with a full copy of its image answers `invalid`. SDK: `c.Jails().Diff`.
 
+**Export and import** ([export-import.md](export-import.md)): `GET /api/v1/jails/{name}/export` (extension `jail_export`, operator, audited) streams the export file of a jail (`?snapshot=`, `?with_volumes=true`, `?zstd=true`) and ends with the trailer `X-Jailops-Export: ok`; `POST /api/v1/jail-imports/preflight` (admin) answers `RestorePreflight` for an `ExportManifest` and the options; `POST /api/v1/jail-imports` (admin, audited) takes the file as the body (`?as=`, `?keep_ip=true`, `?start=true`, `?network_map=OLD=NEW`, `?volume_map=OLD=NEW`) and answers `JailImported`. SDK: `c.Jails().Export`, `ImportPreflight`, `Import`.
+
 **Reach** ([networking.md](networking.md#what-reaches-a-jail)): `GET /api/v1/jails/{name}/reach` (extension `jail_reach`, readonly) answers `JailReach`: `rows` (what each kind of source reaches: `source` is `internet`, `tunnel`, `jails`, `host` or `other-projects`; `family`, `proto`, `ports`, `from`, `decision` `pass`, `forward` or `none`, and `by`, the policy rule that gives it or what stops it), `exposed` (what the Internet reaches), `out` (what the jail reaches), the `rules` of the anchor in the order pf decides and `notes` (what the computation cannot know). `GET /api/v1/exposed` answers `Exposed` for the jails the caller can see: `entries` (one per jail, protocol, port list and family) and, with `?tunnels=true`, `tunnels`. `JailStatus.exposed` carries the same entries on every jail. Both are computed from the rendered anchor and change nothing. SDK: `c.Jails().Reach`, `c.Firewall().Exposed`.
+
+**Files** ([operations.md](operations.md#copying-files)): `GET|PUT /api/v1/jails/{name}/files/{path...}` (extension `jail_files`, operator in the project, audited) read and write below the root of a jail from the host; the path has no leading slash and no empty, `.` or `..` segment. `?stat=true` answers `JailFileStat` (`path`, `type` `file`, `dir`, `symlink`, `other` or `none`, `size`, `mode`, `modified_at`, `link`); a missing path is `none`, not an error. A plain `GET` sends the bytes of a regular file (`X-Jailops-File-Mode` carries its mode), `?archive=tar` a tar stream of a file, a symlink or, with `recursive=true`, a tree (`as=NAME` renames its top entry); a failure after the stream began sets the trailer `X-Jailops-Error`, and a tar without its end blocks is incomplete. A plain `PUT` writes the body (a `Content-Length` is required) as the file; `?archive=tar` unpacks the stream below the directory at the path. `mode`, `mkdir` and `preserve` set the permission bits, create the missing directories and keep owner and times. Symbolic links are never followed, set-id bits are never set and devices, FIFOs and sockets are skipped. The answer of a `PUT` is `JailFileCopy` (`files`, `dirs`, `symlinks`, `skipped`, `bytes`). A transfer over `limits.file_copy_bytes` is `invalid`; a root that is not mounted is `busy`. These routes are streams, not JSON bodies: they are exempt from `limits.max_body_bytes` and the request timeout. SDK: `c.Jails().FileStat`, `FileGet`, `FilePut`.
 
 **Boot plan** ([operations.md](operations.md#start-at-boot)): `GET /api/v1/boot` (extension `boot_plan`, readonly) answers `BootPlan`:
 what the daemon starts after a boot of the host, in order (`order`: `position`, `project`, `jail`, `priority`, `depends`,
@@ -108,7 +116,12 @@ only. The credential goes in the `Authorization` header; a token in the query st
 The SDK refuses plain `http://` to anything but loopback.
 
 An error the daemon did not expect answers `internal` (500) with the text `internal error` and the id of the request in the
-hint; the cause, which can carry paths and command output of the host, is in the daemon's log under that id. A port forward
+hint; the cause, which can carry paths and command output of the host, is in the daemon's log under that id. A failed
+operation is the same: its `error` is `internal` with `internal error` and the id of the operation in the hint, in the
+operation, the list, the event stream and the CLI and console views, whoever reads it; the cause is in the log under the
+operation id. No role reads that text through the API: an administrator reads the log of the daemon. An error with a code of
+its own (`invalid`, `busy`, `pool_exhausted` and the others) keeps its message and hint. An app installation that fails names
+the step, whether the jail was kept, and for a health check the answer it got; the output of pkg and of the helper is in the log. A port forward
 (an IPv4 exposure of a jail behind NAT: `expose`, `unexpose`, `spec.expose`) answers `forbidden` (403) to anyone but a global
 administrator and `invalid` (400) on a host port or an address that is the host's own. The firewall objects of a project are
 bounded: a policy has at most 500 rules, an address set 5000 members, a project 200 policies, 200 address sets and 20000 set
@@ -129,11 +142,30 @@ The surface that clients depend on is checked by tests, so that a change of it i
 | Capability names (`api_extensions`) | `internal/server/testdata/freeze/extensions.golden`: names are only appended |
 | JSON names and types of every API object | `web/shared/src/api/types.gen.ts`, generated from the Go types; `go run ./scripts/gen-ts -check` fails when they differ |
 | `ETag` and `If-Match`: strong comparison, `*`, a list, weak tags that never match | `TestIfMatchIsAStrongComparison`, `sdk/api` `TestParseIfMatch` |
-| Human and machine output of the commands | the transcripts in `internal/cli/testdata` |
+| The bodies of the main routes: the request, the status, `ETag`, `Location`, `Retry-After` and the JSON of the answer | `internal/server/testdata/wire/*.golden` (jails, host objects, firewall, operations): transcripts with times, ids and durations normalized |
+| The life of an asynchronous operation: accepted (202 and `Location`), running, refused as busy (409), cancelled, failed with its error, succeeded; a finished operation is not cancellable, a wait on it answers at once | `internal/server/testdata/wire/operation_lifecycle.golden` |
+| Human output of the commands | the transcripts in `internal/cli/testdata` |
+| Machine output of the commands (`-o json`, `-o yaml`: `jail list`, `show`, `info`, `firewall show`, `firewall policy list` and `show`, `network`, `project`, `storage`, `image`, `operation list`, `doctor`, `version`) | `internal/cli/testdata/machine_output.golden` |
+| The client library of an earlier release against the current server | `TestPreviousSDKWorksAgainstTheServer`: a program built with the baseline library (`internal/server/testdata/prevsdk`) makes the calls of a script or an application (read the server, create a jail and wait, read it with its `ETag`, list, patch with a current and a stale tag, start, state, snapshot, operations, host objects, firewall, reach, delete) and every call must succeed with the same shapes |
 
-A change that is meant is accepted with `just freeze`, which rewrites the golden files and the generated types; the diff
-of those files is what a review reads. A name in `api_extensions` is never removed or renamed. Until 1.0 the freeze says
-what changed; from 1.0 a change of a frozen surface that breaks a client needs a new extension name and a major version.
+A change that is meant is accepted with `just freeze`, which rewrites the golden files of the server and of the commands
+and the generated types; the diff of those files is what a review reads. A break of the client protocol that is meant
+(the baseline client can no longer follow the server) is accepted with `just freeze sdk`, which also makes today's client
+library the baseline of the previous-client test (`scripts/prev-sdk.sh`; `sh scripts/prev-sdk.sh vX.Y.Z` makes the baseline
+from a tag). A name in `api_extensions` is never removed or renamed. Until 1.0 the freeze says what changed; from 1.0 a
+change of a frozen surface that breaks a client needs a new extension name and a major version.
+
+### Which extensions carry the 1.x promise
+
+From 1.0 an extension in the first list keeps its routes, members, statuses and error codes for every 1.x release: the
+tests above are the check. The extensions in the second list are real and tested, but the feature behind them is still
+growing; they are frozen as the rest is, and a break in them is a release note and a new extension name, not a major
+version, until they move to the first list.
+
+| Promise | Extensions |
+|---|---|
+| 1.x | `operations`, `etag`, `events`, `jails`, `jail_snapshots`, `jail_rollback_scopes`, `jail_copy`, `jail_config`, `config_keys`, `jail_devices`, `jail_exec`, `jail_console`, `jail_shell`, `jail_shell_setup`, `jail_usage`, `jail_logs`, `jail_diff`, `jail_expose`, `jail_reach`, `provisioning`, `profiles`, `rename`, `images_pkgbase`, `image_generations`, `image_upgrade`, `networks_vnet`, `network_ipam_range`, `interface_descriptions`, `storage`, `volumes`, `projects`, `project_quotas`, `firewall_anchors`, `firewall_test`, `firewall_applied`, `updates`, `trust_tokens`, `sessions`, `audit_log`, `doctor`, `resources`, `logs_unified` |
+| Not yet | `backup_policies`, `backup_pull`, `backup_push`, `backup_key`, `backup_run`, `backup_verify`, `restore_preflight` (backups), `fleet_projects` (several hosts), `sealed_secrets`, `apps`, `app_install`, `app_draft`, `app_access` (the application catalog), `host_identity`, `host_firewall`, `host_pending`, `host_certificate`, `setup`, `boot_plan`, `wireguard`, `log_forward` (the host itself, appliance mode), `jail_export` (export and import of jails), `jail_files` (copying files), `jail_convert` (layout conversion), `volume_from_dir` (a volume from a host directory), `top` (live usage) |
 
 ## Liveness and readiness
 
@@ -142,6 +174,17 @@ helper and the database answer, else 503 `not ready: CLASS` with CLASS `starting
 `store`, cached for 2 seconds) are plain text and public, for load balancers and monitors
 ([exposure.md](exposure.md#load-balancers-and-monitors)). The state of the host itself is `GET /api/v1/doctor`, which
 needs a global identity ([operations.md](operations.md#what-to-monitor)).
+
+## Live usage
+
+`GET /api/v1/top` (extension `top`, readonly, project-scoped like `GET /api/v1/jails`) is one frame of the running
+jails you may see and, for a global identity, of the host: `host` (load, CPU, memory, ZFS cache, pool, running jails),
+`jails` (`project`, `name`, `uptime_seconds`, `cpu_percent` in percent of one core, `memory_bytes`, `processes`,
+`disk_bytes`, `net_in_bytes_per_second`, `net_out_bytes_per_second`, the limits of the jail) and `notes`. The query takes
+`project=P`, `all_projects=true`, `label=k=v` like the list. A number that could not be measured is absent, never zero.
+The rates compare with the frame measured before, at most a minute earlier, so the first frame has none
+(`interval_seconds` says how far apart they were). Frames are measured when asked for and at most once a second for
+everybody together; poll every two seconds or slower. Without racct the jail's `approximate` is true and `notes` says so.
 
 ## Host management
 

@@ -266,6 +266,110 @@ func TestStopOfAJailWhoseHostDirectoryMountsAreGone(t *testing.T) {
 	}
 }
 
+// jail(8) names one line it cannot unmount at a time. Whatever mount of the fstab is gone below the root of the jail (the
+// twin of a volume below compat/linux, the twin of /proc, a volume taken off by hand) gets a placeholder, one after the
+// other, and the stop succeeds with every placeholder removed again; a target outside the root is never given one.
+func TestStopOfAJailWithLostMounts(t *testing.T) {
+	root := "/jailops/projects/alpha/jails/web/root"
+	for _, tc := range []struct {
+		name  string
+		lost  []string // below the root, in the order jail(8) meets them
+		wants []string // targets given a placeholder
+		fails bool
+	}{
+		{"the twin of a volume below compat/linux", []string{root + "/compat/linux/srv/vol"}, []string{root + "/compat/linux/srv/vol"}, false},
+		{"the twin of /proc", []string{root + "/compat/linux/proc"}, []string{root + "/compat/linux/proc"}, false},
+		{"a volume and its twin", []string{root + "/compat/linux/srv/vol", root + "/srv/vol"}, []string{root + "/compat/linux/srv/vol", root + "/srv/vol"}, false},
+		{"nothing is lost", nil, nil, false},
+		{"a target outside the root", []string{"/jailops/projects/beta/jails/db/root/srv/vol"}, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := newWorld(t)
+			w.created("web")
+			if err := w.S.StartJail(bg, "alpha_web"); err != nil {
+				t.Fatal(err)
+			}
+			lost := append([]string(nil), tc.lost...)
+			w.Jails.OnStop = func(name string) error {
+				if len(lost) > 0 {
+					return errors.New("jail: " + name + ": mount.fstab: " + lost[0] + ": not a mount point")
+				}
+				return nil
+			}
+			w.Exec.Handler = func(argv []string) ([]byte, error) {
+				if len(argv) == 7 && argv[0] == "mount" && argv[2] == "tmpfs" && len(lost) > 0 && argv[6] == lost[0] {
+					lost = lost[1:] // the placeholder is a mount point: jail(8) can unmount it
+				}
+				return w.handle(argv)
+			}
+			err := w.S.StopJail(bg, "alpha_web")
+			if tc.fails {
+				if err == nil || !strings.Contains(err.Error(), "not a mount point") {
+					t.Fatalf("a target outside the root was given a placeholder or the stop passed: %v", err)
+				}
+				for _, c := range w.Exec.Calls {
+					if len(c) > 2 && c[0] == "mount" && c[2] == "tmpfs" {
+						t.Fatalf("a placeholder for a target outside the root: %v", c)
+					}
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if w.Jails.IsUp("alpha_web") {
+				t.Fatal("the jail still runs")
+			}
+			var placed, removed []string
+			for _, c := range w.Exec.Calls {
+				switch {
+				case len(c) == 7 && c[0] == "mount" && c[2] == "tmpfs":
+					placed = append(placed, c[6])
+				case len(c) == 3 && c[0] == "umount" && c[1] == "-f":
+					removed = append(removed, c[2])
+				}
+			}
+			if strings.Join(placed, " ") != strings.Join(tc.wants, " ") {
+				t.Fatalf("placeholders %v, want %v", placed, tc.wants)
+			}
+			if strings.Join(removed, " ") != strings.Join(tc.wants, " ") {
+				t.Fatalf("placeholders removed %v, want %v: a placeholder was left mounted", removed, tc.wants)
+			}
+			// a mount point that was not there (jail(8) had taken the mirror below compat/linux away) was made for the
+			// placeholder and the highest directory made on the way is removed again (the fake removes one path, a real
+			// remove takes what is below it too)
+			for _, d := range []string{root + "/compat", root + "/srv"} {
+				if w.Files.Dirs[d] {
+					t.Errorf("%s is left behind", d)
+				}
+			}
+		})
+	}
+	// the same target named again after its placeholder is not given a second one: the stop fails as it did
+	w := newWorld(t)
+	w.created("web")
+	if err := w.S.StartJail(bg, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	target := root + "/srv/vol"
+	w.Jails.OnStop = func(name string) error {
+		return errors.New("jail: " + name + ": mount.fstab: " + target + ": not a mount point")
+	}
+	placed := 0
+	w.Exec.Handler = func(argv []string) ([]byte, error) {
+		if len(argv) == 7 && argv[0] == "mount" && argv[2] == "tmpfs" {
+			placed++
+		}
+		return w.handle(argv)
+	}
+	if err := w.S.StopJail(bg, "alpha_web"); err == nil {
+		t.Fatal("a stop that keeps failing passed")
+	}
+	if placed != 1 {
+		t.Fatalf("%d placeholders for one target", placed)
+	}
+}
+
 // A jail that has never run gets its volumes bound into its root, so the files the host installs land in them, and
 // unbound again before the start mounts them itself.
 func TestBindVolumesIntoAStoppedJail(t *testing.T) {

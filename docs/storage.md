@@ -122,7 +122,7 @@ should be new); nothing is removed from the jail's own root.
 |---|---|
 | `jail delete` | detaches; the volume and its files stay (`volume list` shows it). |
 | `jail snapshot`, `jail rollback`, `jail upgrade` | never touch a volume; a volume has snapshots of its own (below). |
-| `jail copy` | the copy attaches no volume. |
+| `jail copy` | the copy attaches no volume, with the data or without it (see [Copying a jail](#copying-a-jail)). |
 | `jail backup` | a jail's backup holds the attachments; the volume is a backup of its own, taken once however many jails attach it (see [What is backed up](#what-is-backed-up)). |
 | `app install` | the app's `data` paths become volumes named `<jail>-<name>`, made before the jail by visible steps of the plan; `app` jails keep them when deleted. |
 
@@ -282,7 +282,9 @@ The example is a backup server in a jail that writes to a storage box the host h
   away, so it must be inside the approved directory, not be it).
 - **A real mount.** The helper looks at the path when the volume is made and again at every jail start: no symbolic link
   on the way, and a mount point (a change of device) on the way from the approved directory down to the path. A path on the
-  host's own disk is refused. The volume is made only while the directory is on its mount.
+  host's own disk is refused, because a lost mount and an empty directory could not be told apart; to use the files of
+  a plain directory, copy them into a volume ([below](#using-data-that-lives-on-the-host)). The volume is made only while the
+  directory is on its mount.
 - **A jail never gets an empty directory.** When a mount goes away it leaves an empty directory behind, and a jail that
   started on it would write its backups to the host's own disk. A jail whose volume is lost **does not start** (`busy`, with
   the path); a running one keeps the mount it has, which answers with errors and never shows a local directory.
@@ -307,6 +309,88 @@ The example is a backup server in a jail that writes to a storage box the host h
 
 `jailops volume edit` changes the watch (a global administrator), the comment and the labels; the path is fixed, so make a
 new volume for another directory.
+
+## Changing the layout of a jail
+
+`jailops jail convert NAME --layout thick|thin` changes how the root of a FreeBSD jail is stored. A Linux jail is thick and
+stays so.
+
+    jailops jail convert web --layout thick --dry-run
+    jailops jail convert web --layout thick
+    jailops jail convert web --layout thin
+
+- **Thin to thick** copies the root (a full send and receive) into `root.new`, folds the persistent datasets (`/etc`,
+  `/usr/local`, `/var`, `/home`) into the copy, swaps it in and puts the datasets away below `root.old`. The jail no longer
+  depends on its image generation.
+- **Thick to thin** clones the generation the root was copied from (`--image gN` or `--image NAME#gN` names another generation
+  of the same image) as the new root and makes a persistent dataset of each persistent directory of the thick root. Only those
+  directories keep the jail's data: everything else comes from the image, so a package installed outside `/usr/local` or a
+  changed system file is replaced. `--dry-run` prints what is kept and what is replaced.
+- The jail is stopped for the conversion and started again when it ran, followed by the health check. A snapshot of every
+  dataset (`jo-pre-convert-...`) is taken first; a failure at any step, and a crash of the daemon, puts the old layout back. The
+  old root stays as `root.old` for the retention period of an upgrade. The disk limit of the jail counts both roots until the
+  conversion ends. The console's jail page has **Convert layout** with the same preview.
+
+## Copying a jail
+
+`jailops jail copy SOURCE NAME` makes a jail from the specification of another (the image, the limits, the policies, the labels),
+empty from its image. **`--data` copies the data too**: the root and the persistent directories (`/etc`, `/usr/local`, `/var`,
+`/home`) of the source, in the same project and on the same storage.
+
+    jailops jail copy web web2 --data --start
+    jailops jail copy db db-test --data --snapshot before-upgrade
+
+- **The copy is independent.** It is a full `zfs send | zfs receive` of each dataset, never a clone, so it pins no snapshot of the
+  source: the source can be deleted, rolled back and snapshotted afterwards, and the copy can be deleted without a word to the source.
+  The price is the time and the space of a full copy.
+- **The source may run.** The datasets of the source are snapshotted in one atomic step and the copy is made from that snapshot, so
+  it holds what a power loss at that moment would have left: a database recovers from it as it does after a crash. Stop the source
+  first for a copy that needs no recovery.
+- **`--snapshot S` copies an earlier state.** `S` is a snapshot of the source (`jailops jail snapshot list SOURCE`); every dataset of the
+  source must have it. The snapshot stays on the source and the copy does not carry it. Without `--snapshot` the plan takes a
+  temporary snapshot and drops it when the copy is made.
+- **What the copy does not take over.** It has addresses and a MAC address of its own (the source's fixed addresses become `auto`), no
+  volume attached (a volume belongs to the jails it is attached to; `jailops volume attach` gives the copy what it needs, and the
+  data of a volume is not copied), and no exposure of the source's ports (the host port of a forward belongs to the source's
+  exposure: `jailops expose` makes the copy's own). Its hostname and the files inside it are the source's: change them before both
+  run.
+- **A copy can start.** `--start` starts it when it is made.
+
+The console's jail page has the same: **Copy** asks for the name, whether to copy the data, which snapshot of the source to copy
+and whether to start the copy. A copy of another project, or of another host, is a backup of the source restored there
+(`jailops backup restore --as NAME --project PROJECT`, [backup-restore.md](backup-restore.md)).
+
+## Using data that lives on the host
+
+The files are in a plain directory of the host's own disk, say `/srv/data/site`, and a jail should have them. A volume that
+**is** that directory is refused (it is not a mount, section above). What works is a **copy, once**, into a new ZFS volume:
+
+    # the host operator allows the directory, in priv.conf, and restarts the helper
+    admin-host-mount = /srv/data
+
+    # a global administrator copies it into a new volume
+    jailops volume create site --from-dir /srv/data/site --uid 80 --gid 80
+    jailops volume attach web site /usr/local/www/site
+
+The copy ends with a line that says what came across, for example `copied 1204 files and 87 directories (212 MiB)`. The
+console's volume dialog has the same field, "Copy files from a directory of the host".
+
+- **A copy, not a link.** The new volume is an ordinary dataset with snapshots, a size limit and backups. It keeps nothing of
+  the directory afterwards: a later change in `/srv/data/site` does not reach the volume, and the other way round. Run it
+  again into a new volume to take a fresh copy.
+- **Who and where.** Only a global administrator. The directory has to lie below an `admin-host-mount` directory, or be
+  one; it need not be a mount. That is the same narrow rule as for a volume that is a mount, so the host operator decides
+  which parts of the host's disk a jail's volume can ever be filled from.
+- **What is kept.** Owners, modes, times, hard links and symbolic links. Nothing is followed out of the directory: a link
+  stays a link and is never read through, and a path on the way that is a link, not a plain directory, is refused.
+  `--uid` and `--gid` set the owner of the volume's top directory only; the files below keep their own owners.
+- **What is not.** The setuid and setgid bits are dropped and devices, fifos and sockets are skipped (the note counts them).
+  A volume is data, not a place for programs that run with another user's rights.
+- **Plain volumes only.** Not with `--path` (the directory itself) and not with `--encrypted`; to fill an encrypted volume,
+  attach it and the data to one jail and copy inside.
+- **It ends whole or not at all.** The directory is checked first, before the volume exists. When the copy fails (disk
+  full, the daemon stops), the volume is removed again, so a half-filled one is never left. If the daemon itself dies in the
+  middle, the volume may stay; delete it and run the copy again.
 
 ## What is unique in a jail
 

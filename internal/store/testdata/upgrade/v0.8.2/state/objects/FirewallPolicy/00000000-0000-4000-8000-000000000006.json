@@ -1,0 +1,35 @@
+{
+  "apiVersion": "jailops/v1",
+  "kind": "FirewallPolicy",
+  "metadata": {
+    "name": "floor",
+    "uuid": "00000000-0000-4000-8000-000000000006",
+    "project": "shop",
+    "scope": "fleet",
+    "generation": 1,
+    "created_at": "2026-01-02T03:04:05Z",
+    "updated_at": "2026-01-02T03:04:05Z"
+  },
+  "spec": {
+    "default_in": "deny",
+    "default_out": "allow",
+    "rules": [
+      {
+        "action": "allow",
+        "direction": "in",
+        "proto": "icmp",
+        "from": [
+          "any"
+        ]
+      },
+      {
+        "action": "allow",
+        "direction": "in",
+        "proto": "icmp6",
+        "from": [
+          "any"
+        ]
+      }
+    ]
+  }
+}

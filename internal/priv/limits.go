@@ -3,6 +3,7 @@ package priv
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -48,6 +49,12 @@ func (l *Local) applyLimits(ctx context.Context, jn JailName) error {
 	if err != nil {
 		return err
 	}
+	// the cpuset needs no accounting: it is set whether or not racct is on
+	if cs := rec.Spec.Resources.CPUSet; cs != "" {
+		if err := l.applyCPUSet(ctx, jn, cs); err != nil {
+			return err
+		}
+	}
 	rules, err := rctlRules(jn.Internal(), rec.Spec.Resources)
 	if err != nil {
 		return err
@@ -83,4 +90,41 @@ func (l *Local) dropLimits(ctx context.Context, jn JailName) error {
 		return api.Errorf(api.CodeInternal, "rctl -r jail:%s: %s", jn.Internal(), strings.TrimSpace(ee.Stderr))
 	}
 	return err
+}
+
+// applyCPUSet pins a jail that has just started to the CPUs of limits.cpuset (cpuset(1) -l LIST -j JID). The set of
+// the jail is the one its processes share, so the processes the jail has started already move with it. A CPU the
+// host does not have stops the start: a limit that is not enforced would be a promise nobody keeps, and the message
+// says what the host has.
+func (l *Local) applyCPUSet(ctx context.Context, jn JailName, set string) error {
+	cpus, err := api.ParseCPUSet(set)
+	if err != nil {
+		return fmt.Errorf("limits.cpuset %q: %w", set, err)
+	}
+	res, err := l.d.Runner.Run(ctx, run.Cmd{Name: "sysctl", Args: []string{"-n", "hw.ncpu"}, Timeout: 5 * time.Second})
+	if err != nil {
+		return fmt.Errorf("sysctl hw.ncpu: %w", err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(res.Stdout)))
+	if err != nil || n < 1 {
+		return fmt.Errorf("sysctl hw.ncpu answered %q", strings.TrimSpace(string(res.Stdout)))
+	}
+	if top := cpus[len(cpus)-1]; top >= n {
+		return api.Errorf(api.CodeInvalid, "limits.cpuset %s names CPU %d, and this host has %d CPUs (0-%d)", set, top, n, n-1)
+	}
+	res, err = l.d.Runner.Run(ctx, run.Cmd{Name: "jls", Args: []string{"-j", jn.Internal(), "jid"}, Timeout: 10 * time.Second})
+	if err != nil {
+		return fmt.Errorf("jls -j %s jid: %w", jn.Internal(), err)
+	}
+	jid, err := strconv.Atoi(strings.TrimSpace(string(res.Stdout)))
+	if err != nil || jid < 1 {
+		return fmt.Errorf("jls -j %s jid answered %q", jn.Internal(), strings.TrimSpace(string(res.Stdout)))
+	}
+	if _, err := l.d.Runner.Run(ctx, run.Cmd{Name: "cpuset", Args: []string{"-l", set, "-j", strconv.Itoa(jid)}, Timeout: 10 * time.Second}); err != nil {
+		if ee, ok := run.IsExit(err); ok {
+			return api.Errorf(api.CodeInternal, "cpuset -l %s -j %d: %s", set, jid, strings.TrimSpace(ee.Stderr))
+		}
+		return fmt.Errorf("cpuset -l %s -j %d: %w", set, jid, err)
+	}
+	return nil
 }

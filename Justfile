@@ -79,13 +79,17 @@ fmt:
     cd sdk && go vet ./...
 
 # Unit tests of both modules, with fakes. Runs anywhere.
-test: test-setup
+test: test-setup test-vm-lock
     go test ./... -count=1
     cd sdk && go test ./... -count=1
 
 # packaging/jailops-setup against fake sysrc, pfctl, zpool, service and friends (POSIX sh, runs anywhere).
 test-setup:
     sh scripts/jailops-setup-test.sh
+
+# scripts/vm-lock.sh, the lock of the shared FreeBSD test VMs (POSIX sh, runs anywhere).
+test-vm-lock:
+    sh scripts/vm-lock-test.sh
 
 # Race detector.
 test-race:
@@ -110,10 +114,15 @@ fuzz seconds="20":
 gen-ts:
     go run ./scripts/gen-ts
 
-# accept a meant change of the API surface: rewrite the golden files of the freeze tests and the generated types
-freeze:
+# accept a meant change of the API surface: rewrite the golden files of the freeze and wire tests, the machine output of
+# the commands and the generated types. `just freeze sdk` also makes today's client library the baseline of the
+# previous-client test (a break of the client protocol that is meant)
+freeze what="":
     go run ./scripts/gen-ts
     go test ./internal/server -run Freeze -freeze-update -count=1
+    go test ./internal/cli -run MachineOutput -update -count=1
+    go test ./internal/state -run Freeze -freeze-update -count=1
+    {{ if what == "sdk" { "sh scripts/prev-sdk.sh" } else { "true" } }}
 
 check-ts:
     go run ./scripts/gen-ts -check
@@ -126,7 +135,20 @@ lint-e2e:
 lint-prose:
     sh scripts/lint-prose.sh
 
-check: fmt check-ts lint-e2e lint-prose test
+# The table of daily tasks, the steps of scripts/e2e-workflows.sh and the gaps of docs/roadmap.md agree (test/workflows/).
+lint-workflows:
+    sh scripts/check-workflows-table.sh
+    sh test/workflows/check-test.sh
+
+# The workflow walkthrough (test/workflows/daily-tasks.md) on this machine: a disposable FreeBSD host, as root. Before a release.
+e2e-workflows:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [ "$(uname -s)" = FreeBSD ] || { echo "x the walkthrough runs on a disposable FreeBSD machine, as root: it creates and destroys a scratch pool (scripts/ci-freebsd-e2e.sh)"; exit 1; }
+    [ "$(id -u)" = 0 ] || { echo "x run as root"; exit 1; }
+    JAILOPS_E2E_PART=workflows sh scripts/ci-freebsd-e2e.sh
+
+check: fmt check-ts lint-e2e lint-prose lint-workflows test
 
 # Everything CI runs.
 ci: fmt test build-freebsd
@@ -138,6 +160,8 @@ ci: fmt test build-freebsd
 #   2. merge the PR
 #   3. just release 0.2.0      -> verifies master carries 0.2.0, signs the tag, pushes it. The release workflow checks
 #                                the tagged commit and GoReleaser publishes the GitHub release. No tests run here.
+#   4. just publish-packages 0.2.0 -> waits for that release, then asks jailops-packages for the bump PR (the FreeBSD
+#                                packages). Merging the bump PR stays a human step.
 # The very first release has nothing to PR: version.txt and CHANGELOG.md already say VERSION, go straight to step 3.
 
 # Step 1: open the release PR (version bump and changelog section).
@@ -152,12 +176,24 @@ release-pr VERSION:
         echo "x version.txt on master is already {{VERSION}}: nothing to bump; run: just release {{VERSION}}"
         exit 1
     fi
+    # the upgrade guarantee (docs/upgrade-guarantee.md): the release before this one has its upgrade fixture on master, so that
+    # every test run opens what that release wrote with the code of the next
+    last=$(git describe --tags --abbrev=0 origin/master 2>/dev/null || true)
+    if [ -n "$last" ] && [ "$(printf '%s\n' v0.8.0 "$last" | sort -V | head -1)" = v0.8.0 ] && \
+        [ -z "$(git ls-tree -d --name-only origin/master "internal/store/testdata/upgrade/$last")" ]; then
+        echo "x the upgrade fixture of $last is not on master: run scripts/make-upgrade-fixture.sh $last, commit internal/store/testdata/upgrade/$last (a pull request), and prepare this release again"
+        exit 1
+    fi
     git ls-remote --exit-code --heads origin "release/v{{VERSION}}" >/dev/null 2>&1 && \
         { echo "x release/v{{VERSION}} already on origin: open the PR with: gh pr create --head release/v{{VERSION}} --title \"Release v{{VERSION}}\" (or delete it: git push -d origin release/v{{VERSION}})"; exit 1; }
     git show-ref --verify -q "refs/heads/release/v{{VERSION}}" && \
         { echo "x local branch release/v{{VERSION}} left over from a failed run: git checkout master && git branch -D release/v{{VERSION}}"; exit 1; }
     trap 'git checkout master 2>/dev/null; git branch -D "release/v{{VERSION}}" 2>/dev/null || true' EXIT
     git checkout -b "release/v{{VERSION}}" origin/master
+    # The workflow walkthrough: what master says a jail administrator can do, its steps and the roadmap agree. A task that is
+    # missing without a plan stops the release here. The steps run on a FreeBSD host (just e2e-workflows): not here, it takes a while.
+    sh scripts/check-workflows-table.sh || { echo "x the workflow walkthrough (test/workflows/daily-tasks.md) is out of step with its script or the roadmap: fix it, merge, and run this again"; exit 1; }
+    echo "reminder: run the walkthrough on a FreeBSD test host before the release is tagged: just e2e-workflows"
     echo "{{VERSION}}" > version.txt
     # CHANGELOG.md: the Unreleased entries move under the new version, a new empty Unreleased stays on top
     grep -Eq '^## \[?Unreleased\]?' CHANGELOG.md || { echo "x CHANGELOG.md has no Unreleased section"; exit 1; }
@@ -196,6 +232,30 @@ release VERSION:
     git tag -s "v{{VERSION}}" -m "v{{VERSION}}"
     git push origin "v{{VERSION}}"
     echo "v{{VERSION}} tagged: CI builds the release: gh run watch"
+    echo "next: just publish-packages {{VERSION}}"
+
+# Step 4: wait for the GitHub release of the tag, then start the jailops-packages update check (it opens the bump PR; nothing is merged here).
+publish-packages VERSION:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{VERSION}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "x version must be X.Y.Z (no leading v), got '{{VERSION}}'"; exit 1; }
+    tag="v{{VERSION}}"
+    # the Release workflow of the tag: it may take a few seconds to appear after the push
+    run=""
+    for _ in $(seq 1 12); do
+        run=$(gh run list --workflow Release --branch "$tag" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
+        [ -n "$run" ] && break
+        sleep 5
+    done
+    [ -n "$run" ] || { echo "x no Release run for $tag: was the tag pushed (just release {{VERSION}})?"; exit 1; }
+    gh run watch "$run" --exit-status >/dev/null || \
+        { echo "x the Release run of $tag failed: gh run view $run --log-failed"; exit 1; }
+    gh release view "$tag" >/dev/null 2>&1 || { echo "x there is no GitHub release for $tag"; exit 1; }
+    gh workflow run "Check for updates" -R jailops/jailops-packages
+    echo "{{VERSION}} is released: the update check of jailops-packages is running. The bump PR appears in a few minutes:"
+    echo "  gh pr list -R jailops/jailops-packages"
+    echo "Read it, wait for its build, merge it; the publish run then builds, signs and deploys. Check on a host:"
+    echo "  pkg update -f -r jailops && pkg rquery -r jailops %v jailops"
 
 clean:
     rm -rf bin dist

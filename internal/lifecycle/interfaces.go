@@ -14,6 +14,7 @@ package lifecycle
 
 import (
 	"context"
+	"io"
 
 	"jailops.net/jailops/internal/hostdir"
 	"jailops.net/jailops/internal/mounts"
@@ -44,6 +45,17 @@ type ZFS interface {
 	Mount(ctx context.Context, dataset string) error
 	Unmount(ctx context.Context, dataset string) error
 	Replicate(ctx context.Context, snapshot, dst string, props map[string]string) error
+}
+
+// Streams moves datasets through a byte stream: the export and import of a jail. SendStream is `zfs send` of a
+// snapshot into w (from is the short name of an earlier snapshot of the dataset for an incremental stream, "" for a
+// full one; raw sends an encrypted dataset as stored). ReceiveStream is `zfs receive` of r into a dataset that does not
+// exist yet (a full stream) or has the stream's starting snapshot as its newest one (an incremental stream); it sets
+// props on the dataset and never mounts it. The ZFS of a host implements it next to ZFS; a Service without it
+// refuses export and import as unsupported.
+type Streams interface {
+	SendStream(ctx context.Context, snapshot, from string, raw bool, w io.Writer) error
+	ReceiveStream(ctx context.Context, target string, props map[string]string, r io.Reader) error
 }
 
 // Keys is the native ZFS encryption of jail volumes: helper operations that take a passphrase on their request
@@ -104,6 +116,10 @@ type Files interface {
 	// CopyTree copies a directory tree preserving ownership, modes and flags.
 	// UNVERIFIED: flags, ACLs and extended attributes on FreeBSD.
 	CopyTree(ctx context.Context, src, dst string) error
+	// ImportHostDir copies the files of a directory of the host, below a directory the host operator allows with
+	// admin-host-mount, into the directory dst of a volume. Nothing in the source is followed through a symbolic link,
+	// and no setuid bit or device node comes across. With checkOnly only the source is resolved and opened.
+	ImportHostDir(ctx context.Context, src, dst string, checkOnly bool) (hostdir.Import, error)
 }
 
 // Hooks render and remove the derived per-jail configuration (jail.conf,

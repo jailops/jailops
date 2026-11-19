@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -129,5 +130,55 @@ func TestHookPostStartWithoutLimitsOrWithoutRacct(t *testing.T) {
 	}
 	if err := h.local.RunHook(ctx, PhasePostStart, "alpha_web"); err == nil || !strings.Contains(err.Error(), "resource limits") {
 		t.Fatalf("another rctl failure must fail the start: %v", err)
+	}
+}
+
+func (h *hookEnv) argv(name string) []string {
+	var out []string
+	for _, c := range h.runner.Calls() {
+		if c.Cmd.Name == name {
+			out = append(out, strings.Join(c.Cmd.Args, " "))
+		}
+	}
+	return out
+}
+
+// limits.cpuset pins the jail with cpuset(1) after the start, without racct and without a single rctl rule.
+func TestHookPostStartPinsTheCPUs(t *testing.T) {
+	h := newHookEnv(t, api.OSFreeBSD, "10.20.0.12", "none")
+	h.setLimits(t, api.Resources{CPUSet: "0-1,3"})
+	h.runner.Prepend(run.Rule{Name: "sysctl", Args: []string{"-n", "hw.ncpu"}, Result: run.Result{Stdout: []byte("4\n")}})
+	h.runner.Prepend(run.Rule{Name: "jls", Args: []string{"-j", "alpha_web", "jid"}, Result: run.Result{Stdout: []byte("17\n")}})
+	h.runner.Prepend(run.Rule{Name: "cpuset", Args: []string{run.RestArgs}})
+	ctx := context.Background()
+	if err := h.local.RunHook(ctx, PhasePreStart, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.local.RunHook(ctx, PhasePostStart, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := h.argv("cpuset"), []string{"-l 0-1,3 -j 17"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("cpuset calls %q, want %q", got, want)
+	}
+	if got := h.rctlCalls(); len(got) != 0 {
+		t.Fatalf("a cpuset alone made rctl rules: %v", got)
+	}
+}
+
+// A CPU the host does not have stops the start and says what the host has; nothing is pinned.
+func TestHookPostStartRefusesACPUTheHostLacks(t *testing.T) {
+	h := newHookEnv(t, api.OSFreeBSD, "10.20.0.12", "none")
+	h.setLimits(t, api.Resources{CPUSet: "2,5"})
+	h.runner.Prepend(run.Rule{Name: "sysctl", Args: []string{"-n", "hw.ncpu"}, Result: run.Result{Stdout: []byte("4\n")}})
+	ctx := context.Background()
+	if err := h.local.RunHook(ctx, PhasePreStart, "alpha_web"); err != nil {
+		t.Fatal(err)
+	}
+	err := h.local.RunHook(ctx, PhasePostStart, "alpha_web")
+	if err == nil || !strings.Contains(err.Error(), "names CPU 5") || !strings.Contains(err.Error(), "4 CPUs (0-3)") {
+		t.Fatalf("a CPU the host lacks: %v", err)
+	}
+	if got := h.argv("cpuset"); len(got) != 0 {
+		t.Fatalf("cpuset ran: %v", got)
 	}
 }

@@ -12,8 +12,8 @@ $ jailops exec web --project shop echo
 ! hint: put flags before the jail name, or end them with --: jailops exec web --project ... -- COMMAND
 [exit 2]
 
-$ jailops exec web echo -l --project shop --
-! usage: unknown shorthand flag: 'l' in -l
+$ jailops exec web echo -x --project shop --
+! usage: unknown shorthand flag: 'x' in -x
 ! hint: run 'jailops exec --help' for usage
 [exit 2]
 

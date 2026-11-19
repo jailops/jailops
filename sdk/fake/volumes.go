@@ -318,6 +318,15 @@ func (s *Server) volumeCreate(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if in.FromDir != "" {
+		// The fake approves what lies below /srv/data, as an admin-host-mount of that directory would.
+		if in.FromDir != "/srv/data" && !strings.HasPrefix(in.FromDir, "/srv/data/") {
+			writeErr(w, api.Errorf(api.CodeForbidden, "the directory %s is not below one that the host allows to copy from", in.FromDir).
+				WithHint("the host operator allows a directory with admin-host-mount in priv.conf"))
+			return
+		}
+		v.Status.Imported = &api.VolumeImported{From: in.FromDir, Files: 12, Dirs: 3, Bytes: 48 << 10}
+	}
 	rp := s.volumes.doCreate(r, &v)
 	if rp.err == nil && v.Spec.Encrypted {
 		s.mu.Lock()

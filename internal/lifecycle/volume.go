@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"jailops.net/jailops/internal/hostdir"
 	"jailops.net/jailops/internal/plan"
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/sdk/api"
@@ -326,6 +327,28 @@ func (s *Service) CopyIntoVolume(ctx context.Context, name, mountPath string, st
 		return err
 	}
 	return s.Files.CopyTree(ctx, src, VolumeMP(st, project, volume))
+}
+
+// CheckHostSource resolves and opens a directory of the host that is about to be copied into a volume, so that a path the
+// helper will not read is refused before the dataset of the volume is made.
+func (s *Service) CheckHostSource(ctx context.Context, src string) error {
+	_, err := s.Files.ImportHostDir(ctx, src, "", true)
+	return err
+}
+
+// ImportIntoVolume copies the files of a directory of the host into the (new, empty) volume: owners, modes, times and
+// links are kept; no setuid or setgid bit and no device node comes across.
+func (s *Service) ImportIntoVolume(ctx context.Context, st Storage, project, volume, src string) (hostdir.Import, error) {
+	vds := VolumeDS(st, project, volume)
+	if ok, err := s.ZFS.Exists(ctx, vds); err != nil {
+		return hostdir.Import{}, err
+	} else if !ok {
+		return hostdir.Import{}, api.Errorf(api.CodeNotFound, "the dataset of volume %q is missing: %s", volume, vds)
+	}
+	if err := s.ZFS.Mount(ctx, vds); err != nil {
+		return hostdir.Import{}, err
+	}
+	return s.Files.ImportHostDir(ctx, src, VolumeMP(st, project, volume), false)
 }
 
 func dsNames(l []dsInfo) []string {

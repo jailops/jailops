@@ -137,6 +137,9 @@ var typedArguments = map[string]string{
 // pathArguments are the commands whose positional argument is a path, so that the files of the directory are right.
 var pathArguments = map[string]string{
 	"app validate": "the paths of app definitions",
+	"jail import":  "the path of an export file",
+	"cp":           "a local path, or NAME:/path in a jail",
+	"jail cp":      "a local path, or NAME:/path in a jail",
 }
 
 func itoa(n int) string { return strconv.Itoa(n) }

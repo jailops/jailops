@@ -1,0 +1,1171 @@
+$ jailops jail list -o json
+[
+  {
+    "metadata": {
+      "name": "web",
+      "uuid": "<uuid>",
+      "project": "main",
+      "host": "<uuid>",
+      "scope": "host",
+      "generation": 1,
+      "labels": {
+        "env": "prod"
+      },
+      "created_at": "2026-03-01T09:00:00Z",
+      "updated_at": "2026-03-01T09:00:00Z"
+    },
+    "spec": {
+      "image": "freebsd-15",
+      "storage": "default",
+      "layout": "thin",
+      "hostname": "web",
+      "update": {},
+      "resources": {},
+      "network": [
+        {
+          "network": "lan",
+          "ipv4": "10.20.0.10"
+        }
+      ],
+      "firewall": {
+        "policies": [
+          "ssh"
+        ]
+      },
+      "boot": {}
+    },
+    "status": {
+      "power": "running",
+      "jid": 1,
+      "generation": "g1",
+      "addresses": [
+        "10.20.0.10"
+      ],
+      "started_at": "2026-03-01T09:00:00Z"
+    }
+  }
+]
+
+$ jailops jail list -o yaml
+- metadata:
+    name: web
+    uuid: <uuid>
+    project: main
+    host: <uuid>
+    scope: host
+    generation: 1
+    labels:
+      env: prod
+    created_at: "2026-03-01T09:00:00Z"
+    updated_at: "2026-03-01T09:00:00Z"
+  spec:
+    image: freebsd-15
+    storage: default
+    layout: thin
+    hostname: web
+    network:
+      - network: lan
+        ipv4: 10.20.0.10
+    firewall:
+      policies:
+        - ssh
+  status:
+    power: running
+    jid: 1
+    generation: g1
+    addresses:
+      - 10.20.0.10
+    started_at: "2026-03-01T09:00:00Z"
+
+$ jailops jail show web -o json
+{
+  "metadata": {
+    "name": "web",
+    "uuid": "<uuid>",
+    "project": "main",
+    "host": "<uuid>",
+    "scope": "host",
+    "generation": 1,
+    "labels": {
+      "env": "prod"
+    },
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z"
+  },
+  "spec": {
+    "image": "freebsd-15",
+    "storage": "default",
+    "layout": "thin",
+    "hostname": "web",
+    "update": {},
+    "resources": {},
+    "network": [
+      {
+        "network": "lan",
+        "ipv4": "10.20.0.10"
+      }
+    ],
+    "firewall": {
+      "policies": [
+        "ssh"
+      ]
+    },
+    "boot": {}
+  },
+  "status": {
+    "power": "running",
+    "jid": 1,
+    "generation": "g1",
+    "addresses": [
+      "10.20.0.10"
+    ],
+    "started_at": "2026-03-01T09:00:00Z"
+  }
+}
+
+$ jailops jail show web -o yaml
+metadata:
+  name: web
+  uuid: <uuid>
+  project: main
+  host: <uuid>
+  scope: host
+  generation: 1
+  labels:
+    env: prod
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  image: freebsd-15
+  storage: default
+  layout: thin
+  hostname: web
+  network:
+    - network: lan
+      ipv4: 10.20.0.10
+  firewall:
+    policies:
+      - ssh
+status:
+  power: running
+  jid: 1
+  generation: g1
+  addresses:
+    - 10.20.0.10
+  started_at: "2026-03-01T09:00:00Z"
+
+$ jailops jail info web -o json
+{
+  "name": "web",
+  "project": "main",
+  "uuid": "<uuid>",
+  "hostname": "web",
+  "state": "running",
+  "jid": 1,
+  "layout": "thin",
+  "image": "freebsd-15",
+  "generation": "g1",
+  "storage": "default",
+  "created_at": "2026-03-01T09:00:00Z",
+  "started_at": "2026-03-01T09:00:00Z",
+  "resources": {
+    "limits": {},
+    "usage": {
+      "jail": "web",
+      "power": "running",
+      "measured_at": "2026-03-01T09:00:00Z",
+      "accounting": {
+        "processes": 23,
+        "cpu_seconds": 8013,
+        "memory_bytes": 407048192,
+        "swap_bytes": 268435456
+      },
+      "disk": {
+        "root_bytes": 268435456,
+        "root_referenced_bytes": 1610612736,
+        "data_bytes": 73400320
+      }
+    }
+  },
+  "interfaces": [
+    {
+      "name": "eth0",
+      "network": "lan",
+      "state": "up",
+      "addresses": [
+        {
+          "address": "10.20.0.10",
+          "family": "ipv4",
+          "scope": "global",
+          "configured": true
+        }
+      ]
+    }
+  ],
+  "firewall_policies": [
+    {
+      "name": "ssh"
+    }
+  ],
+  "reach": {
+    "project": "main",
+    "jail": "web",
+    "policies": [
+      {
+        "name": "ssh",
+        "source": "jail",
+        "rules": 1,
+        "default_in": "deny"
+      }
+    ],
+    "rows": [
+      {
+        "source": "internet",
+        "family": "",
+        "proto": "",
+        "decision": "none",
+        "by": "no allow in rule with an external source and no port forward"
+      }
+    ],
+    "out": {
+      "internet": "all",
+      "host": "DNS and ping",
+      "jails": "all",
+      "other_projects": "none"
+    },
+    "default_in": "deny",
+    "default_out": "allow",
+    "default_in_by": [
+      "ssh"
+    ],
+    "rules": []
+  },
+  "snapshots": {
+    "count": 0
+  },
+  "update": {},
+  "labels": {
+    "env": "prod"
+  }
+}
+
+$ jailops jail info web -o yaml
+name: web
+project: main
+uuid: <uuid>
+hostname: web
+state: running
+jid: 1
+layout: thin
+image: freebsd-15
+generation: g1
+storage: default
+created_at: "2026-03-01T09:00:00Z"
+started_at: "2026-03-01T09:00:00Z"
+resources:
+  usage:
+    jail: web
+    power: running
+    measured_at: "2026-03-01T09:00:00Z"
+    accounting:
+      processes: 23
+      cpu_seconds: 8013
+      memory_bytes: 407048192
+      swap_bytes: 268435456
+    disk:
+      root_bytes: 268435456
+      root_referenced_bytes: 1610612736
+      data_bytes: 73400320
+interfaces:
+  - name: eth0
+    network: lan
+    state: up
+    addresses:
+      - address: 10.20.0.10
+        family: ipv4
+        scope: global
+        configured: true
+firewall_policies:
+  - name: ssh
+reach:
+  project: main
+  jail: web
+  policies:
+    - name: ssh
+      source: jail
+      rules: 1
+      default_in: deny
+  rows:
+    - source: internet
+      family: ""
+      proto: ""
+      decision: none
+      by: no allow in rule with an external source and no port forward
+  out:
+    internet: all
+    host: DNS and ping
+    jails: all
+    other_projects: none
+  default_in: deny
+  default_out: allow
+  default_in_by:
+    - ssh
+  rules: []
+snapshots:
+  count: 0
+labels:
+  env: prod
+
+$ jailops firewall show web -o json
+{
+  "project": "main",
+  "jail": "web",
+  "policies": [
+    {
+      "name": "ssh",
+      "source": "jail",
+      "rules": 1,
+      "default_in": "deny"
+    }
+  ],
+  "rows": [
+    {
+      "source": "internet",
+      "family": "",
+      "proto": "",
+      "decision": "none",
+      "by": "no allow in rule with an external source and no port forward"
+    }
+  ],
+  "out": {
+    "internet": "all",
+    "host": "DNS and ping",
+    "jails": "all",
+    "other_projects": "none"
+  },
+  "default_in": "deny",
+  "default_out": "allow",
+  "default_in_by": [
+    "ssh"
+  ],
+  "rules": []
+}
+
+$ jailops firewall show web -o yaml
+project: main
+jail: web
+policies:
+  - name: ssh
+    source: jail
+    rules: 1
+    default_in: deny
+rows:
+  - source: internet
+    family: ""
+    proto: ""
+    decision: none
+    by: no allow in rule with an external source and no port forward
+out:
+  internet: all
+  host: DNS and ping
+  jails: all
+  other_projects: none
+default_in: deny
+default_out: allow
+default_in_by:
+  - ssh
+rules: []
+
+$ jailops firewall policy list -o json
+[
+  {
+    "metadata": {
+      "name": "ssh",
+      "uuid": "<uuid>",
+      "project": "main",
+      "scope": "fleet",
+      "generation": 2,
+      "created_at": "2026-03-01T09:00:00Z",
+      "updated_at": "2026-03-01T09:00:00Z"
+    },
+    "spec": {
+      "default_in": "deny",
+      "rules": [
+        {
+          "comment": "the office",
+          "action": "allow",
+          "direction": "in",
+          "proto": "tcp",
+          "from": [
+            "192.0.2.0/24"
+          ],
+          "ports": [
+            "22"
+          ]
+        }
+      ]
+    },
+    "status": {
+      "used_by": null,
+      "mandatory": false
+    }
+  }
+]
+
+$ jailops firewall policy list -o yaml
+- metadata:
+    name: ssh
+    uuid: <uuid>
+    project: main
+    scope: fleet
+    generation: 2
+    created_at: "2026-03-01T09:00:00Z"
+    updated_at: "2026-03-01T09:00:00Z"
+  spec:
+    default_in: deny
+    rules:
+      - comment: the office
+        action: allow
+        direction: in
+        proto: tcp
+        from:
+          - 192.0.2.0/24
+        ports:
+          - "22"
+  status:
+    used_by: null
+    mandatory: false
+
+$ jailops firewall policy show ssh -o json
+{
+  "metadata": {
+    "name": "ssh",
+    "uuid": "<uuid>",
+    "project": "main",
+    "scope": "fleet",
+    "generation": 2,
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z"
+  },
+  "spec": {
+    "default_in": "deny",
+    "rules": [
+      {
+        "comment": "the office",
+        "action": "allow",
+        "direction": "in",
+        "proto": "tcp",
+        "from": [
+          "192.0.2.0/24"
+        ],
+        "ports": [
+          "22"
+        ]
+      }
+    ]
+  },
+  "status": {
+    "used_by": null,
+    "mandatory": false
+  }
+}
+
+$ jailops firewall policy show ssh -o yaml
+metadata:
+  name: ssh
+  uuid: <uuid>
+  project: main
+  scope: fleet
+  generation: 2
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  default_in: deny
+  rules:
+    - comment: the office
+      action: allow
+      direction: in
+      proto: tcp
+      from:
+        - 192.0.2.0/24
+      ports:
+        - "22"
+status:
+  used_by: null
+  mandatory: false
+
+$ jailops network list -o json
+[
+  {
+    "metadata": {
+      "name": "lan",
+      "uuid": "<uuid>",
+      "scope": "fleet",
+      "generation": 1,
+      "created_at": "2026-03-01T09:00:00Z",
+      "updated_at": "2026-03-01T09:00:00Z"
+    },
+    "spec": {
+      "uplink": "em0",
+      "ipv4": {
+        "subnet": "10.20.0.0/24",
+        "gateway": "10.20.0.1",
+        "range": "10.20.0.10-10.20.0.20",
+        "nat": true
+      }
+    },
+    "status": {
+      "allocated": 1,
+      "free": 10,
+      "granted_to": [
+        "main"
+      ]
+    }
+  }
+]
+
+$ jailops network list -o yaml
+- metadata:
+    name: lan
+    uuid: <uuid>
+    scope: fleet
+    generation: 1
+    created_at: "2026-03-01T09:00:00Z"
+    updated_at: "2026-03-01T09:00:00Z"
+  spec:
+    uplink: em0
+    ipv4:
+      subnet: 10.20.0.0/24
+      gateway: 10.20.0.1
+      range: 10.20.0.10-10.20.0.20
+      nat: true
+  status:
+    allocated: 1
+    free: 10
+    granted_to:
+      - main
+
+$ jailops network show lan -o json
+{
+  "metadata": {
+    "name": "lan",
+    "uuid": "<uuid>",
+    "scope": "fleet",
+    "generation": 1,
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z"
+  },
+  "spec": {
+    "uplink": "em0",
+    "ipv4": {
+      "subnet": "10.20.0.0/24",
+      "gateway": "10.20.0.1",
+      "range": "10.20.0.10-10.20.0.20",
+      "nat": true
+    }
+  },
+  "status": {
+    "allocated": 1,
+    "free": 10,
+    "granted_to": [
+      "main"
+    ]
+  }
+}
+
+$ jailops network show lan -o yaml
+metadata:
+  name: lan
+  uuid: <uuid>
+  scope: fleet
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  uplink: em0
+  ipv4:
+    subnet: 10.20.0.0/24
+    gateway: 10.20.0.1
+    range: 10.20.0.10-10.20.0.20
+    nat: true
+status:
+  allocated: 1
+  free: 10
+  granted_to:
+    - main
+
+$ jailops project list -o json
+[
+  {
+    "metadata": {
+      "name": "main",
+      "uuid": "<uuid>",
+      "host": "<uuid>",
+      "scope": "host",
+      "generation": 1,
+      "created_at": "2026-03-01T09:00:00Z",
+      "updated_at": "2026-03-01T09:00:00Z"
+    },
+    "spec": {
+      "networks": [
+        {
+          "network": "lan"
+        }
+      ],
+      "storage": [
+        {
+          "storage": "default"
+        }
+      ],
+      "quotas": {}
+    },
+    "status": {
+      "jails": 1,
+      "cpu": 0,
+      "memory_used": 0,
+      "disk_used": 0,
+      "addresses": 1
+    }
+  }
+]
+
+$ jailops project list -o yaml
+- metadata:
+    name: main
+    uuid: <uuid>
+    host: <uuid>
+    scope: host
+    generation: 1
+    created_at: "2026-03-01T09:00:00Z"
+    updated_at: "2026-03-01T09:00:00Z"
+  spec:
+    networks:
+      - network: lan
+    storage:
+      - storage: default
+  status:
+    jails: 1
+    cpu: 0
+    memory_used: 0
+    disk_used: 0
+    addresses: 1
+
+$ jailops project show main -o json
+{
+  "metadata": {
+    "name": "main",
+    "uuid": "<uuid>",
+    "host": "<uuid>",
+    "scope": "host",
+    "generation": 1,
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z"
+  },
+  "spec": {
+    "networks": [
+      {
+        "network": "lan"
+      }
+    ],
+    "storage": [
+      {
+        "storage": "default"
+      }
+    ],
+    "quotas": {}
+  },
+  "status": {
+    "jails": 1,
+    "cpu": 0,
+    "memory_used": 0,
+    "disk_used": 0,
+    "addresses": 1
+  }
+}
+
+$ jailops project show main -o yaml
+metadata:
+  name: main
+  uuid: <uuid>
+  host: <uuid>
+  scope: host
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  networks:
+    - network: lan
+  storage:
+    - storage: default
+status:
+  jails: 1
+  cpu: 0
+  memory_used: 0
+  disk_used: 0
+  addresses: 1
+
+$ jailops storage list -o json
+[
+  {
+    "metadata": {
+      "name": "default",
+      "uuid": "<uuid>",
+      "host": "<uuid>",
+      "scope": "host",
+      "generation": 1,
+      "created_at": "2026-03-01T09:00:00Z",
+      "updated_at": "2026-03-01T09:00:00Z"
+    },
+    "spec": {
+      "dataset": "tank/jailops"
+    },
+    "status": {
+      "pool": "tank",
+      "health": "ONLINE",
+      "size": 1099511627776,
+      "used": 1073741824,
+      "available": 1098437885952,
+      "granted_to": [
+        "main"
+      ]
+    }
+  }
+]
+
+$ jailops storage list -o yaml
+- metadata:
+    name: default
+    uuid: <uuid>
+    host: <uuid>
+    scope: host
+    generation: 1
+    created_at: "2026-03-01T09:00:00Z"
+    updated_at: "2026-03-01T09:00:00Z"
+  spec:
+    dataset: tank/jailops
+  status:
+    pool: tank
+    health: ONLINE
+    size: 1099511627776
+    used: 1073741824
+    available: 1098437885952
+    granted_to:
+      - main
+
+$ jailops image list -o json
+[
+  {
+    "metadata": {
+      "name": "freebsd-15",
+      "uuid": "<uuid>",
+      "scope": "fleet",
+      "generation": 1,
+      "created_at": "2026-03-01T09:00:00Z",
+      "updated_at": "2026-03-01T09:00:00Z"
+    },
+    "spec": {
+      "os": "freebsd",
+      "release": "15.0-RELEASE",
+      "arch": "amd64",
+      "source": {
+        "type": "pkgbase"
+      },
+      "retention": {}
+    },
+    "status": {
+      "generations": [
+        {
+          "number": 1,
+          "name": "freebsd-15#g1",
+          "manifest": "sha256:<hex>",
+          "created_at": "2026-03-01T09:00:00Z",
+          "refs": [
+            "web"
+          ]
+        }
+      ]
+    }
+  }
+]
+
+$ jailops image list -o yaml
+- metadata:
+    name: freebsd-15
+    uuid: <uuid>
+    scope: fleet
+    generation: 1
+    created_at: "2026-03-01T09:00:00Z"
+    updated_at: "2026-03-01T09:00:00Z"
+  spec:
+    os: freebsd
+    release: 15.0-RELEASE
+    arch: amd64
+    source:
+      type: pkgbase
+  status:
+    generations:
+      - number: 1
+        name: freebsd-15#g1
+        manifest: sha256:<hex>
+        created_at: "2026-03-01T09:00:00Z"
+        refs:
+          - web
+
+$ jailops image show freebsd-15 -o json
+{
+  "metadata": {
+    "name": "freebsd-15",
+    "uuid": "<uuid>",
+    "scope": "fleet",
+    "generation": 1,
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z"
+  },
+  "spec": {
+    "os": "freebsd",
+    "release": "15.0-RELEASE",
+    "arch": "amd64",
+    "source": {
+      "type": "pkgbase"
+    },
+    "retention": {}
+  },
+  "status": {
+    "generations": [
+      {
+        "number": 1,
+        "name": "freebsd-15#g1",
+        "manifest": "sha256:<hex>",
+        "created_at": "2026-03-01T09:00:00Z",
+        "refs": [
+          "web"
+        ]
+      }
+    ]
+  }
+}
+
+$ jailops image show freebsd-15 -o yaml
+metadata:
+  name: freebsd-15
+  uuid: <uuid>
+  scope: fleet
+  generation: 1
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+spec:
+  os: freebsd
+  release: 15.0-RELEASE
+  arch: amd64
+  source:
+    type: pkgbase
+status:
+  generations:
+    - number: 1
+      name: freebsd-15#g1
+      manifest: sha256:<hex>
+      created_at: "2026-03-01T09:00:00Z"
+      refs:
+        - web
+
+$ jailops operation list -o json
+[
+  {
+    "id": "<uuid>",
+    "description": "Creating jail web",
+    "status": "success",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "metadata": {
+      "metadata": {
+        "name": "web",
+        "uuid": "<uuid>",
+        "project": "main",
+        "host": "<uuid>",
+        "scope": "host",
+        "generation": 1,
+        "labels": {
+          "env": "prod"
+        },
+        "created_at": "2026-03-01T09:00:00Z",
+        "updated_at": "2026-03-01T09:00:00Z"
+      },
+      "spec": {
+        "image": "freebsd-15",
+        "storage": "default",
+        "layout": "thin",
+        "hostname": "web",
+        "update": {},
+        "resources": {},
+        "network": [
+          {
+            "network": "lan",
+            "ipv4": "10.20.0.10"
+          }
+        ],
+        "firewall": {
+          "policies": [
+            "ssh"
+          ]
+        },
+        "boot": {}
+      },
+      "status": {
+        "power": "stopped",
+        "generation": "g1"
+      }
+    },
+    "project": "main",
+    "may_cancel": false,
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z",
+    "progress": 100
+  },
+  {
+    "id": "<uuid>",
+    "description": "start jail web",
+    "status": "success",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "metadata": {
+      "metadata": {
+        "name": "web",
+        "uuid": "<uuid>",
+        "project": "main",
+        "host": "<uuid>",
+        "scope": "host",
+        "generation": 1,
+        "labels": {
+          "env": "prod"
+        },
+        "created_at": "2026-03-01T09:00:00Z",
+        "updated_at": "2026-03-01T09:00:00Z"
+      },
+      "spec": {
+        "image": "freebsd-15",
+        "storage": "default",
+        "layout": "thin",
+        "hostname": "web",
+        "update": {},
+        "resources": {},
+        "network": [
+          {
+            "network": "lan",
+            "ipv4": "10.20.0.10"
+          }
+        ],
+        "firewall": {
+          "policies": [
+            "ssh"
+          ]
+        },
+        "boot": {}
+      },
+      "status": {
+        "power": "running",
+        "jid": 1,
+        "generation": "g1",
+        "addresses": [
+          "10.20.0.10"
+        ],
+        "started_at": "2026-03-01T09:00:00Z"
+      }
+    },
+    "project": "main",
+    "may_cancel": false,
+    "created_at": "2026-03-01T09:00:00Z",
+    "updated_at": "2026-03-01T09:00:00Z",
+    "progress": 100
+  }
+]
+
+$ jailops operation list -o yaml
+- id: <uuid>
+  description: Creating jail web
+  status: success
+  resources:
+    jails:
+      - /api/v1/jails/web
+  metadata:
+    metadata:
+      name: web
+      uuid: <uuid>
+      project: main
+      host: <uuid>
+      scope: host
+      generation: 1
+      labels:
+        env: prod
+      created_at: "2026-03-01T09:00:00Z"
+      updated_at: "2026-03-01T09:00:00Z"
+    spec:
+      image: freebsd-15
+      storage: default
+      layout: thin
+      hostname: web
+      network:
+        - network: lan
+          ipv4: 10.20.0.10
+      firewall:
+        policies:
+          - ssh
+    status:
+      power: stopped
+      generation: g1
+  project: main
+  may_cancel: false
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+  progress: 100
+- id: <uuid>
+  description: start jail web
+  status: success
+  resources:
+    jails:
+      - /api/v1/jails/web
+  metadata:
+    metadata:
+      name: web
+      uuid: <uuid>
+      project: main
+      host: <uuid>
+      scope: host
+      generation: 1
+      labels:
+        env: prod
+      created_at: "2026-03-01T09:00:00Z"
+      updated_at: "2026-03-01T09:00:00Z"
+    spec:
+      image: freebsd-15
+      storage: default
+      layout: thin
+      hostname: web
+      network:
+        - network: lan
+          ipv4: 10.20.0.10
+      firewall:
+        policies:
+          - ssh
+    status:
+      power: running
+      jid: 1
+      generation: g1
+      addresses:
+        - 10.20.0.10
+      started_at: "2026-03-01T09:00:00Z"
+  project: main
+  may_cancel: false
+  created_at: "2026-03-01T09:00:00Z"
+  updated_at: "2026-03-01T09:00:00Z"
+  progress: 100
+
+$ jailops doctor -o json
+[
+  {
+    "check": "configuration",
+    "status": "PASS",
+    "detail": "remote t -> http://<addr> (entry: user config; project: user config; remote: user config)"
+  },
+  {
+    "check": "connection",
+    "status": "PASS",
+    "detail": "fake-host, server fake, API 1.0"
+  },
+  {
+    "check": "authentication",
+    "status": "PASS",
+    "detail": "the server trusts this client"
+  },
+  {
+    "check": "api version",
+    "status": "PASS",
+    "detail": "1.0"
+  },
+  {
+    "check": "extensions",
+    "status": "PASS",
+    "detail": "all 68 known extensions present"
+  },
+  {
+    "check": "zfs",
+    "status": "PASS",
+    "detail": "pool tank"
+  },
+  {
+    "check": "pf",
+    "status": "WARN",
+    "detail": "the server reports no packet filter: firewall policies cannot be applied"
+  },
+  {
+    "check": "permissions",
+    "status": "PASS",
+    "detail": "can read operations"
+  },
+  {
+    "check": "server diagnostics",
+    "status": "WARN",
+    "detail": "not available: not_found: no such route GET /api/v1/doctor"
+  }
+]
+
+$ jailops doctor -o yaml
+- check: configuration
+  status: PASS
+  detail: 'remote t -> http://<addr> (entry: user config; project: user config; remote: user config)'
+- check: connection
+  status: PASS
+  detail: fake-host, server fake, API 1.0
+- check: authentication
+  status: PASS
+  detail: the server trusts this client
+- check: api version
+  status: PASS
+  detail: "1.0"
+- check: extensions
+  status: PASS
+  detail: all 68 known extensions present
+- check: zfs
+  status: PASS
+  detail: pool tank
+- check: pf
+  status: WARN
+  detail: 'the server reports no packet filter: firewall policies cannot be applied'
+- check: permissions
+  status: PASS
+  detail: can read operations
+- check: server diagnostics
+  status: WARN
+  detail: 'not available: not_found: no such route GET /api/v1/doctor'
+
+$ jailops version -o json
+{
+  "api": "1.0",
+  "client": "1.2.3",
+  "sdk": "0.1.0",
+  "server": "fake"
+}
+
+$ jailops version -o yaml
+api: "1.0"
+client: 1.2.3
+sdk: 0.1.0
+server: fake
+
+$ jailops version --client -o json
+{
+  "api": "1.0",
+  "client": "1.2.3",
+  "sdk": "0.1.0"
+}
+
+$ jailops version --client -o yaml
+api: "1.0"
+client: 1.2.3
+sdk: 0.1.0
+

@@ -1,0 +1,82 @@
+$ jailops jail create web --image freebsd-15@stable --storage default
+jail/web created
+! network lan: the only network of project main
+
+$ jailops jail export web --to <dir>/web.jailexport
+jail/web exported to <dir>/web.jailexport (0 dataset streams, 551 B, complete)
+
+$ jailops jail export web --to <dir>/web.jailexport
+! usage: <dir>/web.jailexport exists: choose another file, or --force to replace it
+! hint: run 'jailops jail export --help' for usage
+[exit 2]
+
+$ jailops jail export web --to <dir>/web.jailexport --force --zstd
+jail/web exported to <dir>/web.jailexport (0 dataset streams, 551 B, complete)
+
+$ jailops jail export web
+! usage: --to FILE is required (or --to - for the standard output)
+! hint: run 'jailops jail export --help' for usage
+[exit 2]
+
+$ jailops jail export nobody --to <dir>/none
+! not_found: jail "nobody" not found
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
+[exit 4]
+
+$ jailops jail import <dir>/web.jailexport
+file: jail web of project main (thin, image freebsd-15@stable)
+  the new jail gets a new uuid and does not start at boot
+  error: a jail named web exists: choose another name with --as
+! error: the import cannot be done: a jail named web exists: choose another name with --as
+[exit 1]
+
+$ jailops --dry-run jail import <dir>/web.jailexport --as web2
+file: jail web of project main (thin, image freebsd-15@stable)
+  the new jail gets a new uuid and does not start at boot
+the file is complete; its checksums are verified when it is imported; nothing was changed
+
+$ jailops jail get web2
+! not_found: jail "web2" not found
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
+[exit 4]
+
+$ jailops jail import <dir>/web.jailexport --as web2
+jail/web2 imported
+
+$ jailops jail get web2
+Name:        web2
+UUID:        <uuid>
+Generation:  1
+Age:         3h
+
+SPEC                        STATUS
+----                        ------
+image: freebsd-15@stable    power: ""
+storage: default
+layout: thin
+hostname: web
+network:
+  - network: lan
+    ipv4: 10.20.0.10
+
+$ jailops jail import <dir>/web.jailexport --as web3 --network-map lan
+! usage: --network-map takes OLD=NEW, not "lan"
+! hint: run 'jailops jail import --help' for usage
+[exit 2]
+
+$ jailops jail import <dir>/cut.jailexport --as web4
+! invalid: the export file is truncated
+[exit 2]
+
+$ jailops jail get web4
+! not_found: jail "web4" not found
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
+[exit 4]
+
+$ jailops jail import - --as web5
+jail/web5 imported
+
+$ jailops jail import - --as web6
+! error: -: the export file is corrupt: not a jailops export file
+[exit 1]
+

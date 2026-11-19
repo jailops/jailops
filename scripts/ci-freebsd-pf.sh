@@ -932,6 +932,44 @@ settle
 expect allow "removing the forward ends the state of the connection that came through it" sh -c "[ \"\$(pfctl -ss 2>/dev/null | grep -c '198\.51\.100\.1:18080')\" -eq 0 ]"
 expect deny "the removed forward no longer admits a new connection" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 18080"
 
+say "phase 11c: a forward of a privileged host port comes back when the jail restarts and when the host boots"
+# The start hook of a jail runs as root from jail(8) with no caller behind it. The forward of host port 81 was stored by a
+# global administrator; the hook loads the anchor that holds it, so the jail starts, restarts and comes up at boot.
+$J create rp --project pfa --image "$img" --network pfa-up --storage default --autostart </dev/null >/dev/null || die "create rp"
+$J expose rp 8080 --host-port 81 --comment "privileged host port" --project pfa </dev/null >/dev/null || die "expose rp on host port 81"
+rp_up() { $J start rp --project pfa </dev/null >/dev/null && waitfor_ "rp runs" 60 jx pfa rp true && jx pfa rp daemon -f nc -k -l "$(addr4 pfa rp)" 8080; }
+rp_up || die "start rp"
+settle 10
+fwd81() { pfctl -a jailops/pfa/rp -sr 2>/dev/null | grep -q "match in on pfupa inet proto tcp .* port = 81 rdr-to $(addr4 pfa rp) port 8080"; }
+expect allow "rp's anchor carries the forward of host port 81" fwd81
+expect allow "a client on the uplink reaches rp through the privileged host port 81" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 81"
+$J stop rp --project pfa </dev/null >/dev/null || die "stop rp"
+rp_up || die "start rp after a stop (the hook loads the forward of port 81)"
+settle 10
+expect allow "after stop and start the anchor carries the forward of host port 81" fwd81
+expect allow "and a client reaches rp through the privileged host port 81" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 81"
+$J restart rp --project pfa </dev/null >/dev/null || die "restart rp"
+waitfor_ "rp runs after the restart" 60 jx pfa rp true
+jx pfa rp daemon -f nc -k -l "$(addr4 pfa rp)" 8080
+settle 10
+expect allow "after a restart the anchor carries the forward of host port 81" fwd81
+# the host boots: the jail is down, the helper and the daemon start, and the boot pass starts the jail with autostart
+$J stop rp --project pfa </dev/null >/dev/null || die "stop rp before the boot pass"
+# a daemon that starts again on a host that stayed up starts no jail at boot: without the record of the boot the boot pass
+# runs as it does after a reboot
+find /var/db/jailops -name boot-id -delete 2>/dev/null
+service jailops_priv restart >/dev/null 2>&1 || die "restart jailops_priv"
+service jailopsd restart >/dev/null 2>&1 || die "restart jailopsd"
+waitfor_ "the daemon answers after the restart" 90 $J host show
+waitfor_ "the boot pass starts rp (autostart)" 120 sh -c "$J list --project pfa </dev/null | grep -E '^rp +running'"
+jx pfa rp daemon -f nc -k -l "$(addr4 pfa rp)" 8080
+settle 10
+expect allow "after the boot pass the anchor carries the forward of host port 81" fwd81
+expect allow "and a client reaches rp through the privileged host port 81" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 81"
+$J unexpose rp --project pfa </dev/null >/dev/null || die "unexpose rp"
+$J delete rp --project pfa --stop --confirm-data-loss </dev/null >/dev/null || die "delete rp"
+settle
+
 say "phase 11b: an allow rule with an external source opens the uplink for a jail's routed address; a jail with only defaults stays closed"
 # The host's own ruleset blocks what arrives on the uplink and names no rule (a default-deny host): that is the host's door. The
 # jails' anchors must open what their policies admit without a rule of the host's for the jails. pfrdr is the machine on the uplink

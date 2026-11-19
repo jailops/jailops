@@ -1,0 +1,329 @@
+> POST /api/v1/jails?project=alpha
+> {"metadata":{"name":"web"},"spec":{"image":"fb","storage":"default","update":{"strategy":"rebase","healthcheck":"/bin/true"},"network":[{"network":"lan","ipv4":"auto"}]}}
+< 202 Accepted
+< Content-Type: application/json
+< Cache-Control: no-store
+< Location: /api/v1/operations/<op1>
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Create jail web",
+    "id": "<op1>",
+    "may_cancel": "<volatile>",
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "<volatile>",
+    "updated_at": "<volatile>"
+  },
+  "operation": "/api/v1/operations/<op1>",
+  "status": "Operation created",
+  "status_code": 202,
+  "type": "async"
+}
+
+> GET /api/v1/operations/<op1>/wait?project=alpha&timeout=5
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Create jail web",
+    "id": "<op1>",
+    "may_cancel": false,
+    "metadata": {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "host": "<uuid>",
+        "name": "web",
+        "project": "alpha",
+        "scope": "host",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "boot": {},
+        "firewall": {},
+        "hostname": "web",
+        "image": "fb",
+        "layout": "thin",
+        "network": [
+          {
+            "ipv4": "10.20.0.10",
+            "name": "eth0",
+            "network": "lan"
+          }
+        ],
+        "os": "freebsd",
+        "prompt": "default",
+        "resources": {},
+        "shell": "/usr/local/bin/bash",
+        "storage": "default",
+        "update": {
+          "healthcheck": "/bin/true",
+          "strategy": "rebase"
+        }
+      },
+      "status": {
+        "freebsd_version": "15.0-RELEASE-p1",
+        "generation": "fb#g1",
+        "power": "stopped"
+      }
+    },
+    "progress": 100,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "success",
+    "steps": [
+      {
+        "duration_ms": "<ms>",
+        "name": "<step>"
+      }
+    ],
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# the list of operations and one record
+> GET /api/v1/operations?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": [
+    {
+      "created_at": "<time>",
+      "description": "Create jail web",
+      "id": "<op1>",
+      "may_cancel": false,
+      "metadata": {
+        "metadata": {
+          "created_at": "<time>",
+          "generation": 1,
+          "host": "<uuid>",
+          "name": "web",
+          "project": "alpha",
+          "scope": "host",
+          "updated_at": "<time>",
+          "uuid": "<uuid>"
+        },
+        "spec": {
+          "boot": {},
+          "firewall": {},
+          "hostname": "web",
+          "image": "fb",
+          "layout": "thin",
+          "network": [
+            {
+              "ipv4": "10.20.0.10",
+              "name": "eth0",
+              "network": "lan"
+            }
+          ],
+          "os": "freebsd",
+          "prompt": "default",
+          "resources": {},
+          "shell": "/usr/local/bin/bash",
+          "storage": "default",
+          "update": {
+            "healthcheck": "/bin/true",
+            "strategy": "rebase"
+          }
+        },
+        "status": {
+          "freebsd_version": "15.0-RELEASE-p1",
+          "generation": "fb#g1",
+          "power": "stopped"
+        }
+      },
+      "progress": 100,
+      "project": "alpha",
+      "resources": {
+        "jails": [
+          "/api/v1/jails/web"
+        ]
+      },
+      "status": "success",
+      "steps": [
+        {
+          "duration_ms": "<ms>",
+          "name": "<step>"
+        }
+      ],
+      "updated_at": "<time>"
+    }
+  ],
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/operations/<op1>?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Create jail web",
+    "id": "<op1>",
+    "may_cancel": false,
+    "metadata": {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "host": "<uuid>",
+        "name": "web",
+        "project": "alpha",
+        "scope": "host",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "boot": {},
+        "firewall": {},
+        "hostname": "web",
+        "image": "fb",
+        "layout": "thin",
+        "network": [
+          {
+            "ipv4": "10.20.0.10",
+            "name": "eth0",
+            "network": "lan"
+          }
+        ],
+        "os": "freebsd",
+        "prompt": "default",
+        "resources": {},
+        "shell": "/usr/local/bin/bash",
+        "storage": "default",
+        "update": {
+          "healthcheck": "/bin/true",
+          "strategy": "rebase"
+        }
+      },
+      "status": {
+        "freebsd_version": "15.0-RELEASE-p1",
+        "generation": "fb#g1",
+        "power": "stopped"
+      }
+    },
+    "progress": 100,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "success",
+    "steps": [
+      {
+        "duration_ms": "<ms>",
+        "name": "<step>"
+      }
+    ],
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# a wait on a finished operation answers at once; an unknown id is not found
+> GET /api/v1/operations/<op1>/wait?project=alpha&timeout=1
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Create jail web",
+    "id": "<op1>",
+    "may_cancel": false,
+    "metadata": {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "host": "<uuid>",
+        "name": "web",
+        "project": "alpha",
+        "scope": "host",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "boot": {},
+        "firewall": {},
+        "hostname": "web",
+        "image": "fb",
+        "layout": "thin",
+        "network": [
+          {
+            "ipv4": "10.20.0.10",
+            "name": "eth0",
+            "network": "lan"
+          }
+        ],
+        "os": "freebsd",
+        "prompt": "default",
+        "resources": {},
+        "shell": "/usr/local/bin/bash",
+        "storage": "default",
+        "update": {
+          "healthcheck": "/bin/true",
+          "strategy": "rebase"
+        }
+      },
+      "status": {
+        "freebsd_version": "15.0-RELEASE-p1",
+        "generation": "fb#g1",
+        "power": "stopped"
+      }
+    },
+    "progress": 100,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "success",
+    "steps": [
+      {
+        "duration_ms": "<ms>",
+        "name": "<step>"
+      }
+    ],
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/operations/nope?project=alpha
+< 404 Not Found
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "not_found",
+    "message": "operation \"nope\" not found"
+  },
+  "status": "Failure",
+  "status_code": 404,
+  "type": "error"
+}
+

@@ -155,7 +155,7 @@ func (m *opManager) run(ctx context.Context, lo *liveOp, spec OpSpec, release fu
 	case err != nil && cancelled:
 		status = api.OpCancelled
 	case err != nil:
-		status, aerr = api.OpFailure, toAPIError(err)
+		status, aerr = api.OpFailure, m.failure(lo, err)
 	case res != nil:
 		meta, _ = json.Marshal(res)
 	}
@@ -307,6 +307,47 @@ func (h *OpHandle) Timed(name string, fn func() error) error {
 	return err
 }
 
+// failure is the error an operation record carries. A typed error keeps its message and hint. Everything else (what a
+// store, the helper or a command returned) can hold host paths, dataset names, command lines and addresses: the record,
+// which every reader of the operation sees (the API, the event stream, the CLI and the console), gets "internal error" and
+// the operation id, and the text goes to the daemon log under that id, as a failed synchronous request does.
+func (m *opManager) failure(lo *liveOp, err error) *api.Error {
+	aerr := toAPIError(err)
+	var pub *publicError
+	if aerr.Code != api.CodeInternal || errors.As(err, &pub) {
+		return aerr
+	}
+	m.s.log.Error("operation failed", "op", lo.op.ID, "description", lo.op.Description, "project", lo.op.Project, "err", aerr.Message)
+	out := api.Errorf(api.CodeInternal, "internal error")
+	out.Hint = "see the daemon log for operation " + lo.op.ID
+	var pe *plan.Error
+	if errors.As(err, &pe) && len(pe.UndoErrs) > 0 {
+		out.Hint += ". The rollback of this operation was incomplete; run `jailops doctor`."
+	}
+	return out
+}
+
+// publicError marks an error of code internal whose message and details were written for the reader of the operation
+// (the step that failed, the answer of the health check, the output the app's own service printed inside the jail),
+// not taken from a store, the helper or a command: failure keeps it. cause stays in the chain for errors.Is.
+type publicError struct {
+	ae    *api.Error
+	cause error
+}
+
+func (e *publicError) Error() string { return e.ae.Error() }
+func (e *publicError) Unwrap() []error {
+	if e.cause == nil {
+		return []error{e.ae}
+	}
+	return []error{e.ae, e.cause}
+}
+
+// publicf is a publicError with the formatted message.
+func publicf(cause error, format string, a ...any) error {
+	return &publicError{ae: api.Errorf(api.CodeInternal, format, a...), cause: cause}
+}
+
 // toAPIError converts any error into an *api.Error, keeping codes that a
 // plan error wraps.
 func toAPIError(err error) *api.Error {
@@ -429,7 +470,12 @@ func (s *Service) CancelOperation(ctx context.Context, id string) error {
 		return api.Errorf(api.CodeInvalid, "operation %q is already finished and cannot be cancelled", id)
 	}
 	lo.mu.Lock()
-	if lo.op.Status.Final() || !lo.op.MayCancel {
+	if lo.op.Status.Final() {
+		// the same answer whether the record is still held in memory or only stored
+		lo.mu.Unlock()
+		return api.Errorf(api.CodeInvalid, "operation %q is already finished and cannot be cancelled", id)
+	}
+	if !lo.op.MayCancel {
 		lo.mu.Unlock()
 		return api.Errorf(api.CodeInvalid, "operation %q cannot be cancelled", id)
 	}

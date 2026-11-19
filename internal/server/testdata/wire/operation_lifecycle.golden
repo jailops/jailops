@@ -1,0 +1,529 @@
+> POST /api/v1/jails?project=alpha
+> {"metadata":{"name":"web"},"spec":{"image":"fb","storage":"default","update":{"strategy":"rebase","healthcheck":"/bin/true"},"network":[{"network":"lan","ipv4":"auto"}]}}
+< 202 Accepted
+< Content-Type: application/json
+< Cache-Control: no-store
+< Location: /api/v1/operations/<op1>
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Create jail web",
+    "id": "<op1>",
+    "may_cancel": "<volatile>",
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "<volatile>",
+    "updated_at": "<volatile>"
+  },
+  "operation": "/api/v1/operations/<op1>",
+  "status": "Operation created",
+  "status_code": 202,
+  "type": "async"
+}
+
+> GET /api/v1/operations/<op1>/wait?project=alpha&timeout=5
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Create jail web",
+    "id": "<op1>",
+    "may_cancel": false,
+    "metadata": {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "host": "<uuid>",
+        "name": "web",
+        "project": "alpha",
+        "scope": "host",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "boot": {},
+        "firewall": {},
+        "hostname": "web",
+        "image": "fb",
+        "layout": "thin",
+        "network": [
+          {
+            "ipv4": "10.20.0.10",
+            "name": "eth0",
+            "network": "lan"
+          }
+        ],
+        "os": "freebsd",
+        "prompt": "default",
+        "resources": {},
+        "shell": "/usr/local/bin/bash",
+        "storage": "default",
+        "update": {
+          "healthcheck": "/bin/true",
+          "strategy": "rebase"
+        }
+      },
+      "status": {
+        "freebsd_version": "15.0-RELEASE-p1",
+        "generation": "fb#g1",
+        "power": "stopped"
+      }
+    },
+    "progress": 100,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "success",
+    "steps": [
+      {
+        "duration_ms": "<ms>",
+        "name": "<step>"
+      }
+    ],
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# accepted: 202, Location, the record of a request that has not finished; it holds the jail's lock
+> POST /api/v1/jails/web/snapshots?project=alpha
+> {"name":"slow"}
+< 202 Accepted
+< Content-Type: application/json
+< Cache-Control: no-store
+< Location: /api/v1/operations/<op2>
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Snapshot jail web",
+    "id": "<op2>",
+    "may_cancel": "<volatile>",
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "<volatile>",
+    "updated_at": "<volatile>"
+  },
+  "operation": "/api/v1/operations/<op2>",
+  "status": "Operation created",
+  "status_code": 202,
+  "type": "async"
+}
+
+# running: the record says so and says it may be cancelled
+> GET /api/v1/operations/<op2>?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Snapshot jail web",
+    "id": "<op2>",
+    "may_cancel": true,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "running",
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# a wait that ends before the operation does answers with the running record
+> GET /api/v1/operations/<op2>/wait?project=alpha&timeout=0
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Snapshot jail web",
+    "id": "<op2>",
+    "may_cancel": true,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "running",
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# busy: another change of the locked jail is refused with 409 and the code busy, a read is not
+> PUT /api/v1/jails/web/state?project=alpha
+> {"action":"start"}
+< 409 Conflict
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "busy",
+    "detail": {
+      "resource": "jail/alpha_web"
+    },
+    "hint": "wait for the other operation to finish",
+    "message": "jail/alpha_web is busy: Snapshot jail web is running"
+  },
+  "status": "Failure",
+  "status_code": 409,
+  "type": "error"
+}
+
+> GET /api/v1/jails/web?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "1"
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 1,
+      "host": "<uuid>",
+      "name": "web",
+      "project": "alpha",
+      "scope": "host",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "boot": {},
+      "firewall": {},
+      "hostname": "web",
+      "image": "fb",
+      "layout": "thin",
+      "network": [
+        {
+          "ipv4": "10.20.0.10",
+          "name": "eth0",
+          "network": "lan"
+        }
+      ],
+      "os": "freebsd",
+      "prompt": "default",
+      "resources": {},
+      "shell": "/usr/local/bin/bash",
+      "storage": "default",
+      "update": {
+        "healthcheck": "/bin/true",
+        "strategy": "rebase"
+      }
+    },
+    "status": {
+      "freebsd_version": "15.0-RELEASE-p1",
+      "generation": "fb#g1",
+      "power": "stopped"
+    }
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# cancel: 200 with an empty body, the operation ends cancelled and may no longer be cancelled
+> DELETE /api/v1/operations/<op2>?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {},
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/operations/<op2>/wait?project=alpha&timeout=5
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Snapshot jail web",
+    "id": "<op2>",
+    "may_cancel": false,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "cancelled",
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# cancelling a finished operation is refused with 400 invalid
+> DELETE /api/v1/operations/<op2>?project=alpha
+< 400 Bad Request
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "invalid",
+    "message": "operation \"<uuid>\" is already finished and cannot be cancelled"
+  },
+  "status": "Failure",
+  "status_code": 400,
+  "type": "error"
+}
+
+# the lock is gone: the same request succeeds now, and nothing of the cancelled one is left
+> GET /api/v1/jails/web/snapshots?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": [],
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# failure: the operation ends as failure; its error has the code and the message a synchronous request would have answered
+> POST /api/v1/jails/web/snapshots?project=alpha
+> {"name":"full"}
+< 202 Accepted
+< Content-Type: application/json
+< Cache-Control: no-store
+< Location: /api/v1/operations/<op3>
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Snapshot jail web",
+    "id": "<op3>",
+    "may_cancel": "<volatile>",
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "<volatile>",
+    "updated_at": "<volatile>"
+  },
+  "operation": "/api/v1/operations/<op3>",
+  "status": "Operation created",
+  "status_code": 202,
+  "type": "async"
+}
+
+> GET /api/v1/operations/<op3>/wait?project=alpha&timeout=5
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Snapshot jail web",
+    "error": {
+      "code": "pool_exhausted",
+      "message": "the pool has no space left"
+    },
+    "id": "<op3>",
+    "may_cancel": false,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "failure",
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# a failed operation is not cancellable either
+> DELETE /api/v1/operations/<op3>?project=alpha
+< 400 Bad Request
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "invalid",
+    "message": "operation \"<uuid>\" is already finished and cannot be cancelled"
+  },
+  "status": "Failure",
+  "status_code": 400,
+  "type": "error"
+}
+
+# success: the final record, the result in its metadata; a repeat of the same request is refused, not repeated
+> POST /api/v1/jails/web/snapshots?project=alpha
+> {"name":"good"}
+< 202 Accepted
+< Content-Type: application/json
+< Cache-Control: no-store
+< Location: /api/v1/operations/<op4>
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Snapshot jail web",
+    "id": "<op4>",
+    "may_cancel": "<volatile>",
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "<volatile>",
+    "updated_at": "<volatile>"
+  },
+  "operation": "/api/v1/operations/<op4>",
+  "status": "Operation created",
+  "status_code": 202,
+  "type": "async"
+}
+
+> GET /api/v1/operations/<op4>/wait?project=alpha&timeout=5
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Snapshot jail web",
+    "id": "<op4>",
+    "may_cancel": false,
+    "metadata": {
+      "metadata": {
+        "generation": 1,
+        "host": "<uuid>",
+        "name": "good",
+        "project": "alpha",
+        "scope": "host"
+      },
+      "spec": {
+        "jail": "web"
+      },
+      "status": {}
+    },
+    "progress": 100,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "success",
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> POST /api/v1/jails/web/snapshots?project=alpha
+> {"name":"good"}
+< 409 Conflict
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "already_exists",
+    "message": "snapshot \"good\" already exists"
+  },
+  "status": "Failure",
+  "status_code": 409,
+  "type": "error"
+}
+
+# a wait on a finished operation answers at once with the final record; an unknown operation is not found
+> GET /api/v1/operations/<op4>/wait?project=alpha&timeout=30
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Snapshot jail web",
+    "id": "<op4>",
+    "may_cancel": false,
+    "metadata": {
+      "metadata": {
+        "generation": 1,
+        "host": "<uuid>",
+        "name": "good",
+        "project": "alpha",
+        "scope": "host"
+      },
+      "spec": {
+        "jail": "web"
+      },
+      "status": {}
+    },
+    "progress": 100,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "success",
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/operations/<op5>/wait?project=alpha&timeout=1
+< 404 Not Found
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "not_found",
+    "message": "operation \"<uuid>\" not found"
+  },
+  "status": "Failure",
+  "status_code": 404,
+  "type": "error"
+}
+
+> DELETE /api/v1/operations/<op5>?project=alpha
+< 404 Not Found
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "not_found",
+    "message": "operation \"<uuid>\" not found"
+  },
+  "status": "Failure",
+  "status_code": 404,
+  "type": "error"
+}
+

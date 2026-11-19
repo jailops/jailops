@@ -31,6 +31,7 @@ export const routes: RouteRecordRaw[] = [
   { path: '/logs', name: 'logs', component: () => import('@/views/LogsView.vue'), meta: { title: 'Logs' } },
   { path: '/operations', name: 'operations', component: () => import('@/views/OperationsView.vue'), meta: { feature: 'operations', title: 'Operations' } },
   { path: '/events', name: 'events', component: () => import('@/views/EventsView.vue'), meta: { feature: 'events', title: 'Events' } },
+  { path: '/top', name: 'top', component: () => import('@/views/TopView.vue'), meta: { ext: 'top', title: 'Live usage' } },
   { path: '/doctor', name: 'doctor', component: () => import('@/views/DoctorView.vue'), meta: { feature: 'doctor', title: 'Doctor' } },
   { path: '/audit', name: 'audit', component: () => import('@/views/AuditView.vue'), meta: { feature: 'audit', title: 'Audit log' } },
   { path: '/access', name: 'access', component: () => import('@/views/AccessView.vue'), meta: { title: 'Access' } },

@@ -164,33 +164,42 @@ func (s *Service) ImportKey(recoveryKey string) error {
 // repository, opens it with an age identity (AGE-SECRET-KEY-1...) and
 // installs the key. The identity is used once and not stored.
 func (s *Service) RecoverKeyFromEscrow(ctx context.Context, domain, identity string) error {
-	r, err := s.remoteFor(ctx, "")
+	k, err := s.keyFromEscrow(ctx, domain, identity)
 	if err != nil {
 		return err
+	}
+	return s.installKey(k)
+}
+
+// keyFromEscrow opens the escrow blob of a key domain (any domain the identity opens when domain is empty).
+func (s *Service) keyFromEscrow(ctx context.Context, domain, identity string) (*keys.Key, error) {
+	r, err := s.remoteFor(ctx, "")
+	if err != nil {
+		return nil, err
 	}
 	var domains []string
 	if domain != "" {
 		domains = []string{domain}
 	} else if domains, err = r.ListEscrow(ctx); err != nil {
-		return err
+		return nil, err
 	}
 	if len(domains) == 0 {
-		return api.Errorf(api.CodeNotFound, "the repository holds no escrow blob")
+		return nil, api.Errorf(api.CodeNotFound, "the repository holds no escrow blob")
 	}
 	var k *keys.Key
 	for _, d := range domains {
 		blob, gerr := r.GetEscrow(ctx, d)
 		if gerr != nil {
-			return gerr
+			return nil, gerr
 		}
 		if k, err = keys.OpenEscrow(blob, identity); err == nil {
 			break
 		}
 	}
 	if k == nil || err != nil {
-		return api.Errorf(api.CodeForbidden, "%v", err)
+		return nil, api.Errorf(api.CodeForbidden, "%v", err)
 	}
-	return s.installKey(k)
+	return k, nil
 }
 
 func (s *Service) installKey(k *keys.Key) error {

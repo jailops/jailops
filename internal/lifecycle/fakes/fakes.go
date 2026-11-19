@@ -19,6 +19,7 @@ import (
 	"jailops.net/jailops/internal/hostdir"
 	"jailops.net/jailops/internal/lifecycle/fault"
 	"jailops.net/jailops/internal/mounts"
+	"jailops.net/jailops/sdk/api"
 )
 
 // Exec is a scripted command runner.
@@ -57,12 +58,18 @@ func (e *Exec) Commands() []string {
 
 // Files is an in-memory file store with atomic writes.
 type Files struct {
-	F      *fault.Injector
-	mu     sync.Mutex
-	Data   map[string][]byte
-	Dirs   map[string]bool
-	Trees  map[string][]string // CopyTree: src -> file paths relative to src to copy
-	Owners map[string]string   // SetOwner: path -> uid:gid:mode
+	F     *fault.Injector
+	mu    sync.Mutex
+	Data  map[string][]byte
+	Dirs  map[string]bool
+	Trees map[string][]string // CopyTree: src -> file paths relative to src to copy
+	// HostTrees are the approved host directories ImportHostDir copies from: src -> file path relative to src -> content.
+	HostTrees map[string]map[string]string
+	// ImportErr makes a copy (not the check before it) fail.
+	ImportErr error
+	// Imports records what ImportHostDir copied, "src dst".
+	Imports []string
+	Owners  map[string]string // SetOwner: path -> uid:gid:mode
 	// Stale are the leftover mounts StaleMounts reports.
 	Stale []mounts.Stale
 	// Sources are the directories of the host that are mounts, and ReadOnlySources those that take no file: what
@@ -214,6 +221,34 @@ func (f *Files) CopyTree(_ context.Context, src, dst string) error {
 		f.Data[path.Join(dst, rel)] = []byte("seed:" + path.Join(src, rel))
 	}
 	return nil
+}
+
+// ImportHostDir copies the files the fake knows below an approved host directory (HostTrees: src -> files) into dst, and
+// refuses a directory that is not in HostTrees the way the helper refuses one that is not approved.
+func (f *Files) ImportHostDir(_ context.Context, src, dst string, checkOnly bool) (hostdir.Import, error) {
+	if err := f.F.Hit("import " + src + " " + dst); err != nil {
+		return hostdir.Import{}, err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	files, ok := f.HostTrees[src]
+	if !ok {
+		return hostdir.Import{}, api.Errorf(api.CodeForbidden, "%q is not below a directory of admin-host-mount in priv.conf", src)
+	}
+	if checkOnly {
+		return hostdir.Import{}, nil
+	}
+	if f.ImportErr != nil {
+		return hostdir.Import{}, f.ImportErr
+	}
+	f.Imports = append(f.Imports, src+" "+dst)
+	f.Dirs[dst] = true
+	var n int64
+	for rel, body := range files {
+		f.Data[path.Join(dst, rel)] = []byte(body)
+		n += int64(len(body))
+	}
+	return hostdir.Import{Files: int64(len(files)), Bytes: n}, nil
 }
 
 func (f *Files) SHA256(_ context.Context, p string) (string, error) {

@@ -474,6 +474,11 @@ var CommandRules = []Rule{
 		Exact:  [][]string{{"-k"}, {"-u"}},
 		Reason: "report the kernel and the userland version of the host",
 	},
+	{
+		Name: "netstat", Binary: "/usr/bin/netstat", MaxTimeoutSeconds: 10,
+		Exact:  [][]string{{"-s", "-p", "icmp6"}},
+		Reason: "read the ICMPv6 counters of the host (doctor counts the neighbor solicitations the kernel rejected); no other form is accepted",
+	},
 }
 
 // ruleFor returns the rule for a command name.

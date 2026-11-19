@@ -462,6 +462,10 @@ func (m *Model) Inherit(_ context.Context, name, prop string) error {
 	if err := m.F.Hit("zfs inherit " + prop + " " + name); err != nil {
 		return err
 	}
+	// ZFS refuses these: they are set, never inherited
+	if prop == "canmount" {
+		return fmt.Errorf("'%s' property cannot be inherited", prop)
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if strings.Contains(name, "@") {

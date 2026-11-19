@@ -31,7 +31,7 @@ const editing = ref<Profile | 'new' | null>(null)
 const f = reactive({ name: '', comment: '', rows: [] as Array<{ key: string; value: string }> })
 const busy = ref(false)
 const error = ref<ApiError | null>(null)
-const msgs = { int: s.config.invalidInt, size: s.config.invalidSize, rate: s.config.invalidRate, mac: s.config.invalidMac, address: s.config.invalidAddress, listen: s.config.invalidListen, bool: s.config.invalidBool, name: s.config.invalidPattern, enum: s.config.invalidEnum }
+const msgs = { int: s.config.invalidInt, size: s.config.invalidSize, rate: s.config.invalidRate, mac: s.config.invalidMac, address: s.config.invalidAddress, listen: s.config.invalidListen, bool: s.config.invalidBool, name: s.config.invalidPattern, enum: s.config.invalidEnum, cpuset: s.config.invalidCpuset }
 const config = computed(() => Object.fromEntries(f.rows.filter((r) => r.key.trim()).map((r) => [r.key.trim(), r.value])))
 const issues = computed(() => checkProfile(config.value, msgs, { unknown: s.profiles.unknownKey, notAllowed: s.profiles.notAllowed }))
 const issueOf = (k: string) => issues.value.find((i) => i.key === k.trim())?.message

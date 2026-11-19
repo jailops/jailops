@@ -51,11 +51,11 @@ func (s *Server) jailRoutes() []route {
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}", h: func(c *rc) error {
-			var j api.Jail
-			if err := c.decode(&j); err != nil {
+			var cp api.JailCopy
+			if err := c.decode(&cp); err != nil {
 				return err
 			}
-			op, err := svc.CopyJail(c.r.Context(), c.pathArg("name"), j)
+			op, err := svc.CopyJail(c.r.Context(), c.pathArg("name"), cp)
 			if err != nil {
 				return err
 			}
@@ -63,6 +63,12 @@ func (s *Server) jailRoutes() []route {
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/exec", long: true, h: s.handleExec},
+		route{method: "GET", pattern: "/api/v1/jails/{name}/export", long: true, h: s.handleExport},
+		route{method: "POST", pattern: "/api/v1/jail-imports/preflight", h: s.handleImportPreflight},
+		route{method: "POST", pattern: "/api/v1/jail-imports", long: true, stream: true, h: s.handleImport},
+		// the files below the jail's root, for `jailops cp` and the console (files.go)
+		route{method: "GET", pattern: "/api/v1/jails/{name}/files/{path...}", long: true, bulk: true, h: s.handleFileGet},
+		route{method: "PUT", pattern: "/api/v1/jails/{name}/files/{path...}", long: true, bulk: true, h: s.handleFilePut},
 		// the browser console: a session instead of an HTTP upgrade (console.go)
 		route{method: "POST", pattern: "/api/v1/jails/{name}/console", h: s.handleConsoleOpen},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/console/{id}/output", long: true, h: s.handleConsoleOutput},
@@ -214,6 +220,18 @@ func (s *Server) jailRoutes() []route {
 				return err
 			}
 			op, err := svc.RollbackJail(c.r.Context(), c.pathArg("name"), rb)
+			if err != nil {
+				return err
+			}
+			c.async(op)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/convert", h: func(c *rc) error {
+			var cv api.JailConvert
+			if err := c.decode(&cv); err != nil {
+				return err
+			}
+			op, err := svc.ConvertJail(c.r.Context(), c.pathArg("name"), cv)
 			if err != nil {
 				return err
 			}

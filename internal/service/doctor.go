@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"sort"
@@ -35,8 +36,10 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	c := &checkSet{}
 	s.doctorState(ctx, c)
 	s.doctorRelease(ctx, c)
+	s.doctorPkgbase(ctx, c)
 	s.doctorKernel(ctx, c)
 	s.doctorSysctl(ctx, c)
+	s.doctorCPUSet(ctx, c)
 	s.doctorHost(ctx, c)
 	s.doctorHostIdentity(ctx, c)
 	s.doctorHostFirewall(ctx, c)
@@ -122,7 +125,7 @@ func (s *Service) doctorState(ctx context.Context, c *checkSet) {
 		stuck := map[string]string{}
 		for _, o := range s.Recovered() {
 			if o.Action == "needs-attention" {
-				stuck[o.Run] = o.Detail
+				stuck[o.Run] = "see the daemon log, \"recovered an interrupted run\" for this run" // the detail holds host paths and command text: it stays in the log
 			}
 		}
 		var attention []string
@@ -221,7 +224,11 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 			}
 			c.add("sysctl."+name, api.DoctorFail, name+" is "+got+", JailOps needs "+want+" ("+why+")", hint)
 		default:
-			c.add("sysctl."+name, api.DoctorOK, name+"="+got+" (not needed now)", "")
+			msg := name + "=" + got + " (not needed now)"
+			if name == "kern.racct.enable" {
+				msg += "; jailops top reads the process list instead, so its cpu and memory are approximate"
+			}
+			c.add("sysctl."+name, api.DoctorOK, msg, "")
 		}
 	}
 	check("net.inet6.ip6.forwarding", "1", v6, "jails reach IPv6 through the host", "")
@@ -858,8 +865,14 @@ func (s *Service) ndpUnanswered() []string {
 // minHostMajor and minHostMinor are the oldest FreeBSD release JailOps is built and tested for.
 const minHostMajor, minHostMinor = 15, 1
 
+// newestTestedMajor and newestTestedMinor are the newest FreeBSD release the whole PF traffic matrix and the e2e suites
+// ran on. A newer release is supported only after they pass on it: raise this when the CI matrix gains a release
+// (docs/release-engineering.md), and not before.
+const newestTestedMajor, newestTestedMinor = 15, 1
+
 // doctorRelease checks the running FreeBSD release. JailOps targets 15.1 and later: it relies on pkgbase, on the
-// pf and VNET behaviour of 15.1, and nothing older is tested.
+// pf and VNET behaviour of 15.1, and nothing older is tested. A release newer than the newest release in the
+// test matrix, or another major, is not covered yet: the doctor says so.
 func (s *Service) doctorRelease(ctx context.Context, c *checkSet) {
 	r, err := s.sysctl(ctx, "kern.osrelease")
 	if err != nil || r == "" {
@@ -876,7 +889,44 @@ func (s *Service) doctorRelease(ctx context.Context, c *checkSet) {
 			"upgrade the host to FreeBSD 15.1 or later")
 		return
 	}
-	c.add("host.release", api.DoctorOK, "FreeBSD "+r, "")
+	newest := fmt.Sprintf("%d.%d", newestTestedMajor, newestTestedMinor)
+	switch {
+	case major != newestTestedMajor:
+		c.add("host.release", api.DoctorWarn, fmt.Sprintf("FreeBSD %s is a major release JailOps does not cover yet (the newest in the test matrix is %s)", r, newest),
+			"the packages are built per major release (ABI): check docs/supported-versions.md before running jails on it")
+	case minor > newestTestedMinor:
+		c.add("host.release", api.DoctorWarn, fmt.Sprintf("FreeBSD %s is newer than the newest release in the JailOps test matrix, %s", r, newest),
+			"it is supported once the PF traffic matrix and the e2e suites pass on it: docs/supported-versions.md has the support matrix")
+	default:
+		c.add("host.release", api.DoctorOK, "FreeBSD "+r, "")
+	}
+}
+
+// doctorPkgbase says whether the host's base system is installed from packages (pkgbase). Information only on 15.x:
+// FreeBSD 16 removes freebsd-update, so a host installed from distribution sets has to move to pkgbase before a major
+// upgrade, and the host administrator decides when.
+func (s *Service) doctorPkgbase(ctx context.Context, c *checkSet) {
+	// pkg info -e is a read-only question the daemon asks as itself: the helper's pkg rule is for the roots of jails.
+	avail, ok := false, false
+	if s.d.HostExec != nil {
+		_, err := s.d.HostExec(ctx, "pkg", "info", "-e", "FreeBSD-runtime")
+		var exit *exec.ExitError
+		switch {
+		case err == nil:
+			avail, ok = true, true
+		case errors.As(err, &exit):
+			avail = true
+		}
+	}
+	switch {
+	case !avail:
+		c.add("host.pkgbase", api.DoctorUnknown, "cannot be checked here: pkg is not available to the daemon", "")
+	case ok:
+		c.add("host.pkgbase", api.DoctorInfo, "the base system is installed from packages (pkgbase)", "")
+	default:
+		c.add("host.pkgbase", api.DoctorWarn, "the base system is not installed from packages: it came from distribution sets",
+			"FreeBSD 16 removes freebsd-update: convert the host to pkgbase before a major upgrade (the FreeBSD Handbook describes pkgbase); nothing to do on 15.x")
+	}
 }
 
 // doctorAppsLocal checks the host's own app definitions (apps.local_dir)

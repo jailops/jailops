@@ -77,7 +77,7 @@ func classify(e Entry) Class {
 		return ClassProject
 	case has("/api/v1/auth"), has("/api/v1/sessions"), p == "/api/v1/config-keys", has("/api/v1/apps"):
 		return ClassSelf
-	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates", p == "/api/v1/exposed", p == "/api/v1/logs", p == "/api/v1/boot":
+	case p == "/api/v1/events", p == "/api/v1/audit", p == "/api/v1/updates", p == "/api/v1/exposed", p == "/api/v1/logs", p == "/api/v1/boot", p == "/api/v1/top":
 		return ClassVisible
 	case has("/api/v1/logs/forward"):
 		return ClassGlobal
@@ -100,7 +100,7 @@ func classify(e Entry) Class {
 		return ClassProject
 	case has("/api/v1/images"), has("/api/v1/networks"), has("/api/v1/storage"), has("/api/v1/projects"):
 		return ClassGranted
-	case has("/api/v1/jails"), has("/api/v1/volumes"), has("/api/v1/profiles"), has("/api/v1/firewall"), has("/api/v1/backup-policies"), has("/api/v1/jail-templates"):
+	case has("/api/v1/jails"), has("/api/v1/jail-imports"), has("/api/v1/volumes"), has("/api/v1/profiles"), has("/api/v1/firewall"), has("/api/v1/backup-policies"), has("/api/v1/jail-templates"):
 		return ClassProject
 	case has("/api/v1/trust"), has("/api/v1/users"), has("/api/v1/tokens"), has("/api/v1/certificates"), has("/api/v1/remotes"),
 		has("/api/v1/groups"), has("/api/v1/rollouts"), has("/api/v1/cluster"), has("/api/v1/server"), has("/api/v1/doctor"), has("/api/v1/ndp"),
@@ -149,6 +149,7 @@ var Perms = classifyAll([]Entry{
 	r("DELETE", "/api/v1/cluster/members/{name}", ad),
 	r("GET", "/api/v1/cluster/members", ro),
 	r("GET", "/api/v1/events", ro),
+	r("GET", "/api/v1/top", ro),
 	r("GET", "/api/v1/audit", ad),
 	r("POST", "/api/v1/trust/tokens", ad),
 	pub("POST", "/api/v1/trust/clients"),
@@ -239,6 +240,11 @@ var Perms = classifyAll([]Entry{
 	r("DELETE", "/api/v1/jails/{name}", ad),
 	r("POST", "/api/v1/jails/{name}", ad), // copy
 	r("POST", "/api/v1/jails/{name}/rename", ad),
+	// the whole jail leaves as a file: everything an operator may read with exec, so the operator role; making a jail of
+	// a file is making a jail (create: admin)
+	r("GET", "/api/v1/jails/{name}/export", op),
+	r("POST", "/api/v1/jail-imports/preflight", ad),
+	r("POST", "/api/v1/jail-imports", ad),
 	r("GET", "/api/v1/jails/{name}/state", ro),
 	r("GET", "/api/v1/jails/{name}/usage", ro),
 	r("PUT", "/api/v1/jails/{name}/state", op),
@@ -275,6 +281,7 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/jails/{name}/files/{path...}", op),
 	r("POST", "/api/v1/jails/{name}/upgrade", op),
 	r("POST", "/api/v1/jails/{name}/rollback", op),
+	r("POST", "/api/v1/jails/{name}/convert", ad), // the layout of the root: a storage decision, as a move is
 	r("POST", "/api/v1/jails/{name}/move", ad),
 	r("GET", "/api/v1/jails/{name}/snapshots", ro),
 	r("POST", "/api/v1/jails/{name}/snapshots", op),
@@ -393,6 +400,7 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/backup/key", ad),
 	r("POST", "/api/v1/backup/key", ad),
 	r("POST", "/api/v1/backup/key/escrow", ad),
+	r("POST", "/api/v1/backup/key/import", ad),
 	r("POST", "/api/v1/backups/run", ad),
 	r("POST", "/api/v1/backups/{id}/verify", op),
 	r("POST", "/api/v1/backups/receive", api.PermBackupPush),

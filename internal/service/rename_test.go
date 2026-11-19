@@ -3,7 +3,6 @@ package service_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -296,8 +295,13 @@ func TestRenameNetworkRollsBackEveryStep(t *testing.T) {
 			}
 			break
 		}
-		if !errors.Is(got.Error, got.Error) || !strings.Contains(got.Error.Message, fault.ErrInjected.Error()) {
+		// what failed is in the daemon log; the operation says only that something inside did
+		if got.Error == nil || got.Error.Code != api.CodeInternal || got.Error.Message != "internal error" ||
+			strings.Contains(got.Error.Message+got.Error.Hint, fault.ErrInjected.Error()) {
 			t.Fatalf("step %d: %+v", k, got.Error)
+		}
+		if !strings.Contains(e.Log(), fault.ErrInjected.Error()) {
+			t.Fatalf("step %d: the daemon log does not have the failure:\n%s", k, e.Log())
 		}
 		if now := networkState(t, e, s); now != before {
 			t.Fatalf("failure at mutation %d left\n%s\ninstead of\n%s", k, now, before)

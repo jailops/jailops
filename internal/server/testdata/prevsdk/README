@@ -1,0 +1,2 @@
+The client library of v0.8.6 (sdk and sdk/api without tests). Made by scripts/prev-sdk.sh; do not edit.
+internal/server prevsdk_test.go builds a program with it (../prevsdk_driver) and runs it against the current server.

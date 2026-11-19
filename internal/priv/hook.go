@@ -324,7 +324,9 @@ func (l *Local) RunHook(ctx context.Context, phase, jail string) error {
 		if err := l.loadDevfs(ctx, rec); err != nil {
 			return err // the jail must never start on a devfs ruleset that was not loaded
 		}
-		return l.hookPreStart(ctx, jn, atts)
+		// jail(8) runs the hook as root with no caller behind it: the forwards of the jail's stored exposure were
+		// admitted when it was stored, and its anchor, which holds them, loads on that footing and no other
+		return l.hookPreStart(withStoredForwards(ctx, storedForwards(rec.Spec)), jn, atts)
 	case PhasePostStart:
 		return l.hookPostStart(ctx, jn, atts)
 	}

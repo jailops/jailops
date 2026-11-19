@@ -10,6 +10,7 @@ import CopyField from '@jailops/shared/components/CopyField.vue'
 import Modal from '@jailops/shared/components/Modal.vue'
 import ErrorPanel from '@jailops/shared/components/ErrorPanel.vue'
 import LoadState from '@jailops/shared/components/LoadState.vue'
+import BackupKeyImportDialog from '@/components/BackupKeyImportDialog.vue'
 import { isGlobalAdmin } from '@/composables/project'
 
 const l = useLoad(() => api.backups.keyStatus())
@@ -21,6 +22,7 @@ const error = ref<ApiError | null>(null)
 // The recovery key lives only in this ref, only while the dialog is open.
 const created = ref<{ domain: string; recovery_key: string; escrowed: boolean; escrow_error?: string } | null>(null)
 const typed = ref('')
+const importing = ref(false)
 
 async function create(): Promise<void> {
   busy.value = true
@@ -66,10 +68,12 @@ const tone = (st: string) => (st === 'escrowed' ? 'ok' : st === 'present' ? 'war
         <div class="row">
           <button v-if="l.data.value.status === 'none'" class="btn btn-primary" type="button" :disabled="busy || !admin" data-test="key-create" @click="create">{{ s.key.create }}</button>
           <button v-if="l.data.value.status === 'present'" class="btn btn-primary" type="button" :disabled="!admin" data-test="key-escrow" @click="escrow">{{ s.key.escrow }}</button>
+          <button class="btn" type="button" :disabled="!admin" data-test="key-import" @click="importing = true">{{ s.key.importOpen }}</button>
           <span v-if="!admin" class="faint">{{ s.trust.notAllowed }}</span>
         </div>
       </div>
     </LoadState>
+    <BackupKeyImportDialog :open="importing" :holds="!!l.data.value && l.data.value.status !== 'none'" @close="importing = false" @done="l.reload()" />
     <Modal :open="!!created" :title="s.key.shownTitle" wide @close="() => {}">
       <Callout tone="danger">{{ s.key.shownOnce }}</Callout>
       <div class="field" style="margin-top: 12px"><span class="label">{{ s.key.recovery }}</span><CopyField :value="created?.recovery_key ?? ''" :label="s.key.recovery" /></div>

@@ -343,7 +343,7 @@ func (e *Env) Start() {
 		Config: &cfg, Version: "test", ForceWeb: e.Opts.ForceWeb, NoWeb: e.Opts.NoWeb, LogOutput: out, Hostname: host, Env: &env, NoListen: !e.Opts.Listen, Registrar: e.Opts.Registrar, Now: e.Opts.Now, Backups: e.Opts.Backups, Execer: e.execer(), BackupTLS: e.Opts.BackupTLS, BackupMounter: e.Opts.BackupMounter, LogForwardTune: e.Opts.LogForwardTune, KeepAlive: e.Opts.KeepAlive, ReadTimeout: e.Opts.ReadTimeout,
 		ApplianceModules: e.Opts.ApplianceModules, ACMEHTTPClient: e.Opts.ACMEHTTPClient, TLSRoots: e.Opts.TLSRoots, ListenChallenge: e.Opts.ListenChallenge, ACMEAttempted: e.Opts.ACMEAttempted,
 		Clients: func(ctx context.Context, c *daemon.Config, dev bool) (*daemon.Clients, error) {
-			cl := &daemon.Clients{ZFS: e.ZFS, Jails: e.Jails, PF: e.PF, Net: e.Net, Runner: e.Run, Files: e.Files, Logs: fileLogs{e.Files},
+			cl := &daemon.Clients{ZFS: e.ZFS, Jails: e.Jails, PF: e.PF, Net: e.Net, Runner: e.Run, Files: e.Files, Logs: fileLogs{e.Files}, JailFiles: dirJailFiles{e.jailFilesBase()},
 				Sysctl:  func(_ context.Context, name string) (string, error) { return e.sysctl(name) },
 				Mount:   func(context.Context, string) error { return nil },
 				Unmount: func(context.Context, string) error { return nil },

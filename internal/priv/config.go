@@ -38,6 +38,8 @@ type Limits struct {
 	DefaultTimeout   time.Duration // applied when the request has no deadline
 	MaxTimeout       time.Duration // cap for ordinary requests
 	MaxStreamTimeout time.Duration // cap for send, receive and exec
+	MaxJailCopyBytes int64         // data of one file transfer into or out of a jail (jailfiles.go)
+	MaxJailCopies    int           // file transfers at once
 }
 
 // DefaultLimits returns the limits used when a field is zero.
@@ -47,6 +49,7 @@ func DefaultLimits() Limits {
 		MaxNames: 256, MaxProps: 64, MaxVolumeBytes: 16 << 40,
 		MaxInflight: 96, MaxConns: 32, MaxExecPerJail: 8, MaxExecTotal: 64,
 		DefaultTimeout: 5 * time.Minute, MaxTimeout: time.Hour, MaxStreamTimeout: 24 * time.Hour,
+		MaxJailCopyBytes: 16 << 30, MaxJailCopies: 8,
 	}
 }
 
@@ -90,6 +93,12 @@ func (l Limits) fill() Limits {
 	}
 	if l.MaxStreamTimeout > 0 {
 		d.MaxStreamTimeout = l.MaxStreamTimeout
+	}
+	if l.MaxJailCopyBytes > 0 {
+		d.MaxJailCopyBytes = l.MaxJailCopyBytes
+	}
+	if l.MaxJailCopies > 0 {
+		d.MaxJailCopies = l.MaxJailCopies
 	}
 	return d
 }

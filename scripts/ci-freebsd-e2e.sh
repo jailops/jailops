@@ -8,8 +8,11 @@
 # JAILOPS_BIN_DIR   use these binaries instead of building them (jailops, jailopsd, ... as `just build-freebsd` names
 #                   them, with or without the -freebsd-<arch> suffix)
 # JAILOPS_E2E_PART   all (default), e2e (everything but the packet filter test), pf (only the packet filter test),
-#                    scale (50 jails started and stopped together), soak (jails churn while traffic flows) or prepare (the
-#                    machine set up with an image, a network and a project, left running: scripts/scale-study.sh starts there)
+#                    scale (50 jails started and stopped together), soak (jails churn while traffic flows), workflows (the daily
+#                    tasks of a jail administrator, one step per row of test/workflows/daily-tasks.md: scripts/e2e-workflows.sh),
+#                    prepare (the machine set up with an image, a network and a project, left running: scripts/scale-study.sh starts there) or
+#                    linux (only the Linux jail block, without a FreeBSD image: the nightly .github/workflows/linux-e2e.yml; exit status 75 and the
+#                    line SKIPPED when dl-cdn.alpinelinux.org does not answer)
 # JAILOPS_PF_SHARD   a, b or c (with the part pf): the shard of the packet filter test (scripts/ci-freebsd-pf.sh); all (default) runs it whole
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
 # The test host needs kern.racct.enable=1 in /boot/loader.conf (a boot tunable: reboot after adding it): the block on resource
@@ -27,7 +30,9 @@
 #                   for a change of the catalog itself, main/jailops-apps/apps of a packages repository checkout)
 # JAILOPS_E2E_LINUX  1 builds an Alpine image from its minirootfs (it downloads from dl-cdn.alpinelinux.org) and checks what a
 #                   Linux process of a Linux jail sees: a volume attached to the running jail and after a restart, /proc, and
-#                   that a detach takes the volume away. Off by default; CI does not set it (it needs that download).
+#                   that a detach takes the volume away (also a thick-only layout, the mounts of a volume in the root and below
+#                   compat/linux, a volume attached before the start). Off by default; the CI of a pull request does not set it (it needs
+#                   that download): the nightly linux-e2e.yml runs it with JAILOPS_E2E_PART=linux.
 # JAILOPS_E2E_HOST  1 runs the host identity block (docs/appliance.md): it enables the module, changes the host name,
 #                   /etc/resolv.conf (to documentation addresses that resolve nothing), the NTP block of /etc/ntp.conf
 #                   and ntpd_enable of THIS machine, then restores them through 'jailops host restore' and checks that
@@ -62,7 +67,7 @@ cd "$(dirname "$0")/.."
 root=$(pwd)
 pool=jopsci
 part=${JAILOPS_E2E_PART:-all}
-case $part in all | e2e | pf | scale | soak | prepare) ;; *) echo "JAILOPS_E2E_PART must be all, e2e, pf, scale, soak or prepare" >&2; exit 2 ;; esac
+case $part in all | e2e | pf | scale | soak | workflows | prepare | linux) ;; *) echo "JAILOPS_E2E_PART must be all, e2e, pf, scale, soak, workflows, prepare or linux" >&2; exit 2 ;; esac
 # JAILOPS_E2E_SHARD  1, 2 or 3 (with the part e2e): the blocks after "a jail" are split in three that share nothing but the
 #                   machine set up above and the jail web; CI runs the three on VMs of their own. all (default) runs every block in the
 #                   order of this file.
@@ -102,7 +107,7 @@ J=/usr/local/bin/jailops
 # set -e ends the script without a word: say which step it was
 current=start
 host_cleanup() { :; } # the host identity block replaces it while the machine's identity is changed
-trap 'rc=$?; host_cleanup; [ $rc -eq 0 ] || echo "FAILED (exit $rc) in step: $current" >&2' EXIT
+trap 'rc=$?; host_cleanup; [ $rc -eq 0 ] || [ $rc -eq 75 ] || echo "FAILED (exit $rc) in step: $current" >&2' EXIT
 t_start=$(date +%s)
 step() { current=$*; printf '\n== %s  [+%ss]\n' "$*" "$(( $(date +%s) - t_start ))"; } # the seconds since the start: CI logs show which steps take the time
 fail() {
@@ -813,14 +818,101 @@ dns6_step() {
 	waitfor "the daemon answers" 60 $J host show
 }
 
+# The Linux jail block (docs/linux-jails.md). JAILOPS_E2E_LINUX=1 runs it inside shard 2, after the volumes; JAILOPS_E2E_PART=linux runs
+# it alone on a machine with a network and a project (.github/workflows/linux-e2e.yml, every night). The Alpine minirootfs comes from
+# dl-cdn.alpinelinux.org: when that host does not answer in four tries the block ends with the line "SKIPPED: ..." and exit status 75,
+# which the workflow reports as a notice (a mirror outage is not a verdict on the code).
+run_linux() {
+	step "the Linux ABI of this kernel"
+	for m in linux64 linprocfs linsysfs; do
+		# kldstat -n names the file (linux64.ko holds a module of another name, so -m linux64 never matches)
+		kldstat -q -n "$m" || kldload "$m" >/dev/null 2>&1 || kldstat -q -n "$m" || fail "the kernel of this machine cannot load $m: it has no Linux jails (kldload $m)"
+	done
+	step "the Alpine mirror answers (one that does not is a skipped night, not a failure of the product)"
+	case $(uname -p) in amd64) larch=amd64; aarch=x86_64 ;; *) larch=arm64; aarch=aarch64 ;; esac
+	lurl=https://dl-cdn.alpinelinux.org/alpine/v3.22/releases/$aarch/latest-releases.yaml
+	n=0
+	until fetch -q -T 30 -o /dev/null "$lurl"; do
+		n=$((n + 1))
+		if [ $n -ge 4 ]; then
+			echo "SKIPPED: dl-cdn.alpinelinux.org did not answer in four tries ($lurl): the Linux jail test did not run" >&2
+			exit 75
+		fi
+		sleep 15 # sleep-ok: the pause between the tries at a mirror
+	done
+	step "a Linux jail: thick only, a shell, volumes attached before the start and to the running jail (mounted in the root and below the compat/linux mirror), /proc and /sys as a Linux process sees them"
+	check "an Alpine image" $J image create e2e-alpine --os linux --release 3.22 --arch "$larch" --source-type minirootfs
+	check "build it" $J image build e2e-alpine
+	lroot=$mount/projects/demo/jails/lin/root
+	# how many nullfs mounts a path of the jail has: its place in the root and its twin below the compat/linux mirror (a Linux process sees the mirror as /)
+	twin() { mount -p -t nullfs | awk -v a="$lroot$1" -v b="$lroot/compat/linux$1" '$2 == a || $2 == b' | wc -l | tr -d ' '; }
+	expect "a thin Linux jail is refused and the answer says why" 'thick' sh -c "$J create linthin --project demo --image e2e-alpine --network lan --storage default --layout thin 2>&1; true"
+	expect_refused "the refused create made no jail" $J jail info linthin --project demo
+	check "two volumes for the Linux jail" sh -c "$J volume create linvol --project demo --storage default && $J volume create linboot --project demo --storage default"
+	linmp=$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/linvol")
+	bootmp=$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/linboot")
+	echo from-host > "$linmp/h"
+	echo from-boot > "$bootmp/b"
+	check "a Linux jail, not started" $J create lin --project demo --image e2e-alpine --network lan --storage default
+	check "attach a volume to the stopped Linux jail" $J volume attach lin linboot /srv/boot --project demo
+	check "start it" $J start lin --project demo
+	waitfor "the Linux jail answers" 60 $J exec --project demo lin -- /bin/busybox true
+	expect "a Linux process runs a shell" '^linux-shell$' $J exec --project demo lin -- /bin/sh -c 'echo linux-shell'
+	expect "and the kernel it sees is Linux" '^Linux$' $J exec --project demo lin -- /bin/busybox uname -s
+	expect "the volume attached before the start is mounted in the root and below compat/linux" '^2$' twin /srv/boot
+	expect "a Linux process sees it" '^b$' $J exec --project demo lin -- /bin/busybox ls /srv/boot
+	check "attach the volume to the running Linux jail" $J volume attach lin linvol /srv/vol --project demo
+	expect "the volume attached to the running jail is mounted in the root and below compat/linux" '^2$' twin /srv/vol
+	expect "a Linux process sees the volume" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
+	check "a Linux process writes in the volume" $J exec --project demo lin -- /bin/busybox sh -c 'echo from-linux > /srv/vol/w'
+	expect "the file is in the volume on the host" '^from-linux$' cat "$linmp/w"
+	expect "a Linux process lists its processes in /proc" 'busybox' $J exec --project demo lin -- /bin/busybox ps
+	expect "a Linux process sees /sys" '^(bus|class|devices|kernel)' $J exec --project demo lin -- /bin/busybox ls /sys
+	check "restart the Linux jail" $J restart lin --project demo
+	waitfor "the Linux jail answers after the restart" 60 $J exec --project demo lin -- /bin/busybox true
+	expect "after the restart a Linux process sees the volume too" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
+	twins() { echo "$(twin /srv/vol) $(twin /srv/boot)"; }
+	expect "and both volumes have both mounts again" '^2 2$' twins
+	# a mount that went missing under the running jail (here taken off by hand) is reported with what to do about it
+	check "take the mount below the mirror off by hand" umount "$lroot/compat/linux/srv/vol"
+	waitfor "the host says the mount is missing and what to do" 120 sh -c "$J doctor 2>&1 | grep -q 'srv/vol is missing; restart the jail to mount it'"
+	check "restart the Linux jail again" $J restart lin --project demo
+	waitfor "the Linux jail answers after the second restart" 60 $J exec --project demo lin -- /bin/busybox true
+	expect "the restart made the mount again" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
+	expect "and both volumes have both mounts again after the restart over a lost mount" '^2 2$' twins
+	waitfor "the report of the missing mount is gone" 120 sh -c "! $J doctor 2>&1 | grep -q 'is missing; restart the jail'"
+	# a stop meets every lost mount below the root: the twins of a volume and of /proc, and the mount in the root itself
+	check "take the twin of a volume, its mount in the root and the twin of /proc off by hand" sh -c "umount '$lroot/compat/linux/srv/vol' && umount '$lroot/srv/vol' && umount '$lroot/compat/linux/proc'"
+	waitfor "the host names the lost mounts" 120 sh -c "$J doctor 2>&1 | grep -q 'is missing; restart the jail'"
+	check "stop the Linux jail over the lost mounts" $J stop lin --project demo
+	expect_refused "the jail is gone from the kernel" jls -j demo_lin
+	check "start it again" $J start lin --project demo
+	waitfor "the Linux jail answers after the start" 60 $J exec --project demo lin -- /bin/busybox true
+	expect "both volumes have both mounts again after the start" '^2 2$' twins
+	expect "a Linux process sees /proc again" 'busybox' $J exec --project demo lin -- /bin/busybox ps
+	# the tmpfs of /dev/shm below the mirror is the jail's own; any other tmpfs below the root is a placeholder of the stop
+	if mount -p | awk -v r="$lroot" 'index($2, r) == 1 && $3 == "tmpfs" && $2 !~ /\/dev\/shm$/' | grep -q .; then fail "a placeholder tmpfs is left mounted below the root of the jail"; fi
+	check "detach the volume from the running Linux jail" $J volume detach lin linvol --project demo
+	expect "no mount of it is left, in the root or below compat/linux" '^0$' twin /srv/vol
+	expect_refused "the files are gone for a Linux process" $J exec --project demo lin -- /bin/busybox test -e /srv/vol/h
+	check "detach the volume that was attached before the start" $J volume detach lin linboot --project demo
+	expect "no mount of it is left either" '^0$' twin /srv/boot
+	if mount -t nullfs | grep -q "volumes/lin"; then fail "a nullfs mount of a volume is left after the detach"; fi
+	check "stop the Linux jail" $J stop lin --project demo
+	check "delete the Linux jail" $J delete --confirm-data-loss lin --project demo
+	check "delete the volumes" sh -c "$J volume delete linvol --project demo --confirm-data-loss && $J volume delete linboot --project demo --confirm-data-loss"
+	check "delete the image" $J image delete e2e-alpine -y
+}
+
 step "image, network, project"
-check_net "the host holds bash and what it needs in the package cache of the jail roots (a jail fetches it from there, whatever the mirror does later)" pkg fetch -y -d -o PKG_CACHEDIR=$mount/cache/pkg bash
+[ "$part" = linux ] || check_net "the host holds bash and what it needs in the package cache of the jail roots (a jail fetches it from there, whatever the mirror does later)" pkg fetch -y -d -o PKG_CACHEDIR=$mount/cache/pkg bash
 uplink=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2}')
 [ -n "$uplink" ] || uplink=$(ifconfig -l | tr ' ' '\n' | grep -v -E '^(lo0|pflog0)$' | head -1)
 jarch=$goarch
 check "network create" $J network create lan --ipv4 10.77.0.1/24 --uplink "$uplink" --nat
 check "project create" $J project create demo
 check "project grant" sh -c "$J network grant lan --project demo && $J storage grant default --project demo"
+if [ "$part" = linux ]; then run_linux; echo "OK: the Linux jail test passed"; exit 0; fi # its own VM in CI (linux-e2e.yml): no FreeBSD image is built
 # before any image exists the CLI names the two commands that make the base image, and a create with an image that does not
 # exist names the one it was asked for (the catalog is configured later, so this does not go through an app install)
 out=$($J image list 2>&1) || true
@@ -840,6 +932,7 @@ expect "and so does the list of generations" "^$img#g1 +1 +- +([0-9]+\\.[0-9]+-R
 if [ "$part" = prepare ]; then echo "OK: the machine is prepared"; exit 0; fi
 if [ "$part" = scale ]; then run_scale; echo "OK: the scale test passed"; exit 0; fi
 if [ "$part" = soak ]; then run_soak; echo "OK: the soak test passed"; exit 0; fi
+if [ "$part" = workflows ]; then . scripts/e2e-workflows.sh; run_workflows; echo "OK: the workflow walkthrough passed"; exit 0; fi
 if [ "$part" = pf ]; then # its own VM in CI: the packet filter test builds its jails from the image above
 	run_pf
 	echo "OK: the packet filter test passed"
@@ -950,6 +1043,18 @@ sysctl net.inet.ip.forwarding=0 >/dev/null
 expect "network create warns when forwarding is off" 'sysctl net.inet.ip.forwarding=1' sh -c "$J network create fwd --ipv4 10.79.0.1/24 --uplink $uplink --nat 2>&1"
 sysctl net.inet.ip.forwarding=1 >/dev/null
 check "delete that network" $J network delete fwd -y
+
+step "live usage (docs/operations.md, Watching the host): jailops top lists a running jail with its numbers and the host header"
+check "create and start a jail to watch" $J create topjail --project demo --image "$img" --network lan --storage default --start
+waitfor "the jail is in the frame" 30 sh -c "$J top --once --project demo -o json | grep -q '\"name\": \"topjail\"'"
+expect "the frame has the process count of the jail" '"processes": [0-9]+' sh -c "$J top --once --project demo -o json"
+expect "the frame has the disk the jail takes" '"disk_bytes": [0-9]+' sh -c "$J top --once --project demo -o json"
+expect "a global identity gets the host header" '"running_jails": [0-9]+' sh -c "$J top --once -o json"
+expect "the table names the jail" 'topjail' sh -c "$J top --once --project demo --sort name"
+expect "without racct the numbers are marked approximate" 'racct is off|"cpu_percent"' sh -c "$J top --once --project demo -o json"
+check "stop the watched jail" $J stop topjail --project demo
+waitfor "a stopped jail is not in the frame" 30 sh -c "! $J top --once --project demo -o json | grep -q '\"name\": \"topjail\"'"
+check "delete the watched jail" $J delete topjail --project demo --confirm-data-loss
 
 step "stop timeout (docs/operations.md): a service that needs fifteen seconds after SIGTERM is killed by a stop timeout of five, and lives with the default of thirty"
 # the service ends its work on SIGTERM (fifteen seconds), writes a marker into a volume of the host and exits
@@ -1200,6 +1305,38 @@ while ifconfig jo0123456789zza >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 60 ] &
 expect "doctor: no stale epairs" 'network.epairs +PASS' $J doctor
 expect "doctor: every description" 'net.descriptions +PASS' $J doctor
 # network delete removes the reject route
+step "a jail leaves as a file and comes back as two others: jail export and jail import (docs/export-import.md), under another name and in another project, on this host"
+xf="$work/xferjail.jailexport"
+check "a jail with data of its own" $J create xferjail --project demo --image "$img" --network lan --storage default
+check "its shell is sh" $J set xferjail --project demo shell sh
+check "start" $J start xferjail --project demo
+waitfor "the jail runs" 30 $J exec --project demo xferjail -- true
+check "data in /usr/local, /etc and /home" $J exec --project demo xferjail -- sh -c 'echo xfer-local > /usr/local/etc/xfer.marker && echo xfer_marker=YES >> /etc/rc.conf && echo xfer-home > /home/xfer.txt'
+check "export the running jail" $J jail export xferjail --project demo --to "$xf" --zstd
+check "the file is written, and again is refused" sh -c "test -s $xf && ! $J jail export xferjail --project demo --to $xf"
+expect "a dry run says what the import does and changes nothing" 'nothing was changed' $J jail import "$xf" --project edge --as xferb --network-map lan=office --dry-run
+check "the dry run made no jail" sh -c "! $J jail show xferb --project edge"
+expect "the import into the same project under the same name is refused with the way out" 'import it with --as NAME' sh -c "$J jail import $xf --project demo 2>&1; true"
+check "import under another name, same project" $J jail import "$xf" --project demo --as xfera
+check "import into another project, on its network" $J jail import "$xf" --project edge --as xferb --network-map lan=office
+uuid_of() { $J jail show "$1" --project "$2" -o json | grep -m1 '"uuid"'; }
+[ "$(uuid_of xferjail demo)" != "$(uuid_of xfera demo)" ] || fail "the copy has the uuid of the original"
+check "the copy does not start at boot" sh -c "! $J jail show xfera --project demo -o json | grep -q '\"autostart\": true'"
+check "start the copies" sh -c "$J start xfera --project demo && $J start xferb --project edge"
+waitfor "the copy in the same project runs" 30 $J exec --project demo xfera -- true
+waitfor "the copy in the other project runs" 30 $J exec --project edge xferb -- true
+expect "the file of /usr/local came across" '^xfer-local$' $J exec --project demo xfera -- cat /usr/local/etc/xfer.marker
+expect "the line of /etc/rc.conf came across" '^xfer_marker=YES$' $J exec --project demo xfera -- grep xfer_marker /etc/rc.conf
+expect "the file of /home came across" '^xfer-home$' $J exec --project demo xfera -- cat /home/xfer.txt
+expect "the copy in the other project has the same data" '^xfer-local$' $J exec --project edge xferb -- cat /usr/local/etc/xfer.marker
+expect "jail diff of the copy lists what the original had" '^  \+ /usr/local/etc/xfer\.marker$' $J jail diff xfera --project demo --dataset local
+# a file that is cut off leaves no jail and no dataset behind
+head -c "$(( $(wc -c < "$xf") - 12 ))" "$xf" > "$xf.cut"
+expect "a file that is cut off is named so" 'truncated' sh -c "$J jail import $xf.cut --project demo --as xferc 2>&1; true"
+check "and left no jail" sh -c "! $J jail show xferc --project demo"
+check "and no dataset" sh -c "! zfs list -H -o name -r $pool/jailops/projects/demo | grep -q '/xferc'"
+check "delete the jails" sh -c "$J delete --stop --confirm-data-loss xferjail xfera --project demo && $J delete --stop --confirm-data-loss xferb --project edge"
+step "routed networks: the jail and its project are removed"
 check "delete the jail" $J delete --stop --confirm-data-loss edgeweb --project edge
 check "delete project edge" $J project delete edge -y
 check "delete network office" $J network delete office -y
@@ -1478,40 +1615,7 @@ check "delete that jail" $J delete --confirm-data-loss desktop --project demo
 check "the volume is deleted when nothing attaches it" $J volume delete maildir --project demo --confirm-data-loss
 if zfs list "$vol" >/dev/null 2>&1; then fail "the volume is still there"; fi
 
-if [ -n "${JAILOPS_E2E_LINUX:-}" ]; then
-	step "a Linux jail: a volume, /proc and /sys as a Linux process sees them (through the compat/linux mirror)"
-	arch=$(uname -p); case $arch in amd64) larch=amd64 ;; *) larch=arm64 ;; esac
-	check "an Alpine image" $J image create e2e-alpine --os linux --release 3.22 --arch "$larch" --source-type minirootfs
-	check "build it" $J image build e2e-alpine
-	check "a volume for the Linux jail" $J volume create linvol --project demo --storage default
-	linmp=$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/linvol")
-	echo from-host > "$linmp/h"
-	check "a Linux jail" $J create lin --project demo --image e2e-alpine --network lan --storage default --start
-	waitfor "the Linux jail answers" 60 $J exec --project demo lin -- /bin/busybox true
-	check "attach the volume to the running Linux jail" $J volume attach lin linvol /srv/vol --project demo
-	expect "a Linux process sees the volume" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
-	check "a Linux process writes in the volume" $J exec --project demo lin -- /bin/busybox sh -c 'echo from-linux > /srv/vol/w'
-	expect "the file is in the volume on the host" '^from-linux$' cat "$linmp/w"
-	expect "a Linux process lists its processes in /proc" 'busybox' $J exec --project demo lin -- /bin/busybox ps
-	expect "a Linux process sees /sys" '^(bus|class|devices|kernel)' $J exec --project demo lin -- /bin/busybox ls /sys
-	check "restart the Linux jail" $J restart lin --project demo
-	waitfor "the Linux jail answers after the restart" 60 $J exec --project demo lin -- /bin/busybox true
-	expect "after the restart a Linux process sees the volume too" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
-	# a mount that went missing under the running jail (here taken off by hand) is reported with what to do about it
-	check "take the mount below the mirror off by hand" umount "$mount/projects/demo/jails/lin/root/compat/linux/srv/vol"
-	waitfor "the host says the mount is missing and what to do" 120 sh -c "$J doctor 2>&1 | grep -q 'srv/vol is missing; restart the jail to mount it'"
-	check "restart the Linux jail again" $J restart lin --project demo
-	waitfor "the Linux jail answers after the second restart" 60 $J exec --project demo lin -- /bin/busybox true
-	expect "the restart made the mount again" '^h$' $J exec --project demo lin -- /bin/busybox ls /srv/vol
-	waitfor "the report of the missing mount is gone" 120 sh -c "! $J doctor 2>&1 | grep -q 'is missing; restart the jail'"
-	check "detach the volume from the running Linux jail" $J volume detach lin linvol --project demo
-	expect_refused "the files are gone for a Linux process" $J exec --project demo lin -- /bin/busybox test -e /srv/vol/h
-	if mount -t nullfs | grep -q "volumes/linvol"; then fail "a nullfs mount of the volume is left after the detach"; fi
-	check "stop the Linux jail" $J stop lin --project demo
-	check "delete the Linux jail" $J delete --confirm-data-loss lin --project demo
-	check "delete the volume" $J volume delete linvol --project demo --confirm-data-loss
-	check "delete the image" $J image delete e2e-alpine -y
-fi
+[ -z "${JAILOPS_E2E_LINUX:-}" ] || run_linux
 
 step "a project with volumes is not deleted; a restart of the daemon starts no jail an operator stopped"
 check "a project that holds a volume" sh -c "$J project create vkeep && $J storage grant default --project vkeep"
@@ -1601,10 +1705,35 @@ check "jailops_priv checkconfig with admin-host-mount" service jailops_priv chec
 check "restart jailops_priv" service jailops_priv restart
 check "restart jailopsd" service jailopsd restart
 n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
-mkdir -p /mnt/e2ebox/local
+rm -rf /mnt/e2ebox/local; mkdir -p /mnt/e2ebox/local
 expect_refused "the approved directory itself is not a mount point below it" $J volume create bad --project demo --path /mnt/e2ebox
 expect_refused "a directory of the host's own disk is not a volume" $J volume create bad --project demo --path /mnt/e2ebox/local
 expect_refused "a directory outside the approved one is not a volume" $J volume create bad --project demo --path /etc
+# the plain directory is refused as a volume, with the reason and the way that works (docs/storage.md, Using data that lives on the host)
+expect "the refusal names the way: a copy into a volume" 'volume create NAME --from-dir /mnt/e2ebox/local' sh -c "$J volume create bad --project demo --path /mnt/e2ebox/local 2>&1 || true"
+# the copy: owners, modes and links kept, no setuid bit, nothing read through a link out of the directory
+mkdir -p /mnt/e2ebox/local/sub
+echo hello > /mnt/e2ebox/local/sub/a.txt
+chown 1234:1234 /mnt/e2ebox/local/sub/a.txt; chmod 0640 /mnt/e2ebox/local/sub/a.txt
+printf 'x' > /mnt/e2ebox/local/suid; chmod 4755 /mnt/e2ebox/local/suid
+ln -s /etc/passwd /mnt/e2ebox/local/escape
+ln -s sub/a.txt /mnt/e2ebox/local/inner
+expect_refused "a directory outside the approved one is not copied" $J volume create bad --project demo --from-dir /etc
+expect_refused "the approved directory's parent is not copied" $J volume create bad --project demo --from-dir /mnt
+expect_refused "a path with .. is not copied" $J volume create bad --project demo --from-dir /mnt/e2ebox/local/../../etc
+expect_refused "a directory and a path together" $J volume create bad --project demo --from-dir /mnt/e2ebox/local --path /mnt/e2ebox/share/backups
+if $J volume show bad --project demo >/dev/null 2>&1; then fail "a refused copy left a volume"; fi
+expect "the copy says what came across" 'copied [0-9]+ files' $J volume create hdcopy --project demo --from-dir /mnt/e2ebox/local
+hdc=$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/hdcopy")
+expect "the file is in the volume" '^hello$' cat "$hdc/sub/a.txt"
+expect "its owner and mode are kept" '^1234:1234 640$' stat -f '%u:%g %Lp' "$hdc/sub/a.txt"
+expect "the setuid bit did not come across" '^755$' stat -f '%Lp' "$hdc/suid"
+expect "a link stays a link" '^/etc/passwd$' readlink "$hdc/escape"
+expect "an inner link stays a link" '^sub/a.txt$' readlink "$hdc/inner"
+echo more > /mnt/e2ebox/local/later.txt
+if [ -e "$hdc/later.txt" ]; then fail "the volume follows the directory: it is a copy"; fi
+check "delete the copy" $J volume delete hdcopy --project demo --confirm-data-loss
+expect "the directory is as it was" '^hello$' cat /mnt/e2ebox/local/sub/a.txt
 expect_refused "a size does not belong to a host directory" $J volume create bad --project demo --path /mnt/e2ebox/share/backups --size 1G
 expect_refused "on-loss needs a watch" $J volume create bad --project demo --path /mnt/e2ebox/share/backups --on-loss stop
 check "a volume of the directory, watched, stopping its jails when the mount is lost" $J volume create box --project demo --path /mnt/e2ebox/share/backups --watch --probe write --on-loss stop
@@ -1688,7 +1817,52 @@ expect "bash survived the swap (/usr/local is persistent)" '^bash$' $J exec --pr
 expect "so did the prompt" '38;5;39m' in_pty up /usr/local/bin/bash -ic 'echo "$PS1"'
 check "root rollback" $J jail rollback up --project demo
 expect "back on the first generation" 'up +running.*#g1' $J jail list --project demo
+
+step "a jail moves to another image (docs/upgrade.md, A new release: move the jails) and back"
+check "a second image of the same release, created and built in one step" $J image create e2e-next --release "$release" --arch "$jarch" --build
+expect "dry run names the target and what is kept" 'kept: etc, home' $J jail upgrade up --project demo --image e2e-next --dry-run
+check "move the jail" $J jail upgrade up --project demo --image e2e-next
+expect "the jail follows the new image" 'up +running.*e2e-next#g1' $J jail list --project demo
+expect "its data survived the move" 'ci-keep' $J exec --project demo up -- cat /root/keep
+expect "bash survived the move" '^bash$' $J exec --project demo up -- /usr/local/bin/bash -c 'echo bash'
+check "root rollback goes back across the images" $J jail rollback up --project demo
+expect "back on the first image" 'up +running.*'"$img"'#g1' $J jail list --project demo
+expect "the data is still there" 'ci-keep' $J exec --project demo up -- cat /root/keep
 check "stop the second jail" $J stop up --project demo
+
+step "copy with data of a running jail, layout conversion thin to thick and back, cpuset (docs/storage.md, docs/operations.md)"
+cpy=$pool/jailops/projects/demo/jails/cpy
+check "a file in the source that the copy must have" $J exec --project demo web -- sh -c 'echo ci-copy > /root/copied; sync'
+check "copy the running jail with its data" $J jail copy web cpy --data --start --project demo
+expect "the copy has the file of the source" 'ci-copy' $J exec --project demo cpy -- cat /root/copied
+expect "the copy has its own address" '10\.77\.0\.' $J exec --project demo cpy -- ifconfig -a
+expect "the source still runs" 'web +running' $J list --project demo -c name,state
+expect "the copy is no clone of anything" '^-$' zfs get -H -o value origin "$cpy/root"
+expect "its datasets carry the jail's identity" '^persistent$' zfs get -H -o value jailops:kind "$cpy/home"
+check "a file made in the copy only" $J exec --project demo cpy -- sh -c 'echo only-here > /root/own'
+expect_refused "the source does not have it" $J exec --project demo web -- test -f /root/own
+check "convert the copy to thick (dry run first)" $J jail convert cpy --layout thick --dry-run --project demo
+check "convert the running copy to thick" $J jail convert cpy --layout thick --project demo
+expect "the container says thick" '^thick$' zfs get -H -o value jailops:layout "$cpy"
+expect "the thick root is a copy of its own" '^-$' zfs get -H -o value origin "$cpy/root"
+expect "the persistent datasets are put away" '^retired$' zfs get -H -o value jailops:kind "$cpy/root.old/home"
+expect "the copy runs again" 'cpy +running' $J list --project demo -c name,state
+expect "its data came along (the file of the copy and of the source)" 'only-here' $J exec --project demo cpy -- cat /root/own
+expect "also the other file" 'ci-copy' $J exec --project demo cpy -- cat /root/copied
+check "convert it back to thin" $J jail convert cpy --layout thin --project demo
+expect "the container says thin" '^thin$' zfs get -H -o value jailops:layout "$cpy"
+expect "the root is a clone of the image again" 'jailops/images' zfs get -H -o value origin "$cpy/root"
+expect "the data is in persistent datasets again" '^persistent$' zfs get -H -o value jailops:kind "$cpy/home"
+expect "its data survived both conversions" 'only-here' $J exec --project demo cpy -- cat /root/own
+expect "the copy runs" 'cpy +running' $J list --project demo -c name,state
+expect_refused "a Linux-only rule: a layout that is not one is refused" $J jail convert cpy --layout fat --project demo
+check "pin the copy to CPU 0" $J config set cpy --project demo limits.cpuset=0 --restart
+cpyjid=$(jls -j demo_cpy jid)
+expect "cpuset shows the CPUs of the running jail" 'mask: 0$' cpuset -g -j "$cpyjid"
+expect_refused "a CPU the host does not have is refused" $J config set cpy --project demo limits.cpuset=0-4095
+check "stop the copy" $J stop cpy --project demo
+check "delete the copy" $J delete --confirm-data-loss cpy --project demo
+expect_refused "the copy is gone, with its root.old" zfs list -H "$cpy"
 
 step "devices: a jail given a device mounts a private devfs ruleset that is loaded, and sees no disk"
 upnode=$mount/projects/demo/jails/up/root/dev
@@ -1931,7 +2105,8 @@ backup:
 YAML
 check "restart jailopsd" service jailopsd restart
 n=0; until $J backup key status >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done
-expect "key created" 'JOR1-' $J backup key create
+rec=$(expect "key created" 'JOR1-' $J backup key create | grep '^JOR1-' | head -1)
+[ -n "$rec" ] || fail "the recovery key was not printed"
 check "target" $J backup target create vault --url https://127.0.0.1:39111 --fingerprint "$nodefp"
 check "policy" $J backup policy create nightly --project demo --schedule "0 3 * * *" --selector backup=yes --target vault --keep-last 3
 expect "the backup runs" ' ok ' $J backup run --project demo nightly
@@ -1949,6 +2124,38 @@ check "start the restored jail" $J start web-restored --project demo
 
 expect_retry "the file came back" 'ci-marker' $J exec --project demo web-restored -- cat /root/marker
 expect_retry "its own address" '10\.77\.0\.' $J exec --project demo web-restored -- ifconfig -a
+
+step "restore on a new host: the key is lost and comes back from the recovery key (backup key import)"
+keyfile=/var/db/jailops/backup.key
+restart_daemon() { check "restart jailopsd" service jailopsd restart; n=0; until $J backup key status >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail "the daemon does not answer after the restart"; sleep 1; done; }
+domain=$($J backup key status -o json | grep -o '"domain": *"[^"]*"' | head -1 | cut -d'"' -f4)
+[ -n "$domain" ] || fail "the key status names no key domain"
+check "keep a copy of the key file" cp -p "$keyfile" "$work/backup.key.copy"
+check "the host loses its key" mv "$keyfile" "$keyfile.lost"
+restart_daemon
+expect "no key" 'none' $J backup key status
+# a key of another domain: made here, then thrown away with its file
+wrong=$($J backup key create 2>/dev/null | grep '^JOR1-' | head -1)
+[ -n "$wrong" ] || fail "no second key was made"
+check "the second key file goes" rm -f "$keyfile"
+restart_daemon
+expect_refused "a recovery key of another domain is refused by the check against the node" sh -c "printf '%s\n' '$wrong' | $J backup key import --file -"
+[ ! -e "$keyfile" ] || fail "a refused import wrote a key file"
+expect "a dry run checks and writes nothing" 'would install' sh -c "printf '%s\n' '$rec' | $J --dry-run backup key import --file -"
+[ ! -e "$keyfile" ] || fail "a dry run wrote a key file"
+out=$(printf '%s\n' "$rec" | $J backup key import --file - 2>&1) || { echo "$out" >&2; fail "the import of the recovery key"; }
+printf '%s\n' "$out" | grep -q "$domain" || { echo "$out" >&2; fail "the import names another key domain"; }
+printf '%s\n' "$out" | grep -q 'matches' || { echo "$out" >&2; fail "the node did not confirm the key domain"; }
+[ -f "$keyfile" ] && [ "$(stat -f %Lp "$keyfile")" = 600 ] || fail "the key file is not mode 0600"
+expect "the key is held again" "$domain" $J backup key status
+expect "the backups are listed after the import without any other step" "$id" $J backup list --project demo
+expect "the same key again changes nothing" 'already held' sh -c "printf '%s\n' '$rec' | $J backup key import --file -"
+expect "a copy of the key file is the same key" 'already held' $J backup key import --file "$work/backup.key.copy"
+expect_refused "another key is not imported over this one without --replace" sh -c "printf '%s\n' '$wrong' | $J backup key import --file - --no-verify"
+expect "restore with the imported key" 'restored' $J backup restore --project demo "$id" --as web-reimported -y
+expect "the restored jail is there" '^web-reimported$' $J list --project demo -o name
+check "delete the jail restored with the imported key" $J delete --confirm-data-loss web-reimported --project demo
+check "the lost key file is not needed any more" rm -f "$keyfile.lost"
 
 step "volumes in backups (one copy for several jails, --no-volumes, a lost volume comes back with the jail)"
 check "a volume" $J volume create shared --project demo --storage default --uid 5001 --gid 5001 --mode 0770

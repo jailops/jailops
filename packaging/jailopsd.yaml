@@ -58,6 +58,7 @@ zfs:
 limits:
   max_body_bytes: 4194304
   request_timeout: 60s
+  # file_copy_bytes: 2147483648  # the most bytes one jailops cp transfer or console upload may carry
   # exec_sessions_per_jail: 8
   # exec_idle: 30m
   # exec_max: 12h

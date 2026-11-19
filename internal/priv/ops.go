@@ -102,6 +102,11 @@ const (
 	// (unbound-conf) and has unbound read it again; the text is made by the helper (dnsunbound.go).
 	OpDNSUnbound = "dns.unbound"
 	OpFSTailFile = "fs.tail_file"
+	// fs.jail_stat, fs.jail_get and fs.jail_put reach the files below a jail root for `jailops cp` (jailfiles.go): what
+	// is at a path, a tar stream of it, a tar stream written below a directory.
+	OpFSJailStat = "fs.jail_stat"
+	OpFSJailGet  = "fs.jail_get"
+	OpFSJailPut  = "fs.jail_put"
 
 	OpNetSetMTU = "net.set_mtu"
 

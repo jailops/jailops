@@ -120,6 +120,12 @@ func (f privFiles) CopyTree(ctx context.Context, src, dst string) error {
 	_, err := f.h.CopyTree(ctx, src, dst, priv.CopyOpts{})
 	return err
 }
+
+// ImportHostDir copies the files of an approved host directory into a volume through the helper.
+func (f privFiles) ImportHostDir(ctx context.Context, src, dst string, checkOnly bool) (hostdir.Import, error) {
+	r, err := f.h.CopyTree(ctx, src, dst, priv.CopyOpts{HostSource: true, CheckOnly: checkOnly})
+	return hostdir.Import{Files: r.Files, Dirs: r.Dirs, Symlinks: r.Symlinks, Bytes: r.Bytes, Skipped: r.Skipped}, err
+}
 func (f privFiles) SHA256(ctx context.Context, path string) (string, error) {
 	b, err := f.h.ReadFile(ctx, path)
 	if err != nil {
@@ -229,6 +235,11 @@ func (osFiles) SHA256(_ context.Context, path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(h.Sum(nil)), nil
+}
+
+// ImportHostDir needs the privileged helper: only it may read the approved directories of the host.
+func (osFiles) ImportHostDir(context.Context, string, string, bool) (hostdir.Import, error) {
+	return hostdir.Import{}, api.Errorf(api.CodeUnsupported, "importing a directory of the host needs the privileged helper")
 }
 
 // CopyTree copies a directory tree preserving modes, owners and symlinks.

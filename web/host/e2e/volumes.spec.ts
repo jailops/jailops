@@ -95,6 +95,30 @@ test('a volume of a host directory is made with a path and a watch', async ({ pa
   await expect(page.getByTestId('hostdir-overview')).toContainText('on loss: Stop the running jails')
 })
 
+test('a volume is filled once from a directory of the host', async ({ page }) => {
+  await open(page, '/volumes')
+  await page.getByTestId('new-volume').click()
+  const dlg = page.getByRole('dialog')
+  await dlg.getByTestId('vc-name').fill('site')
+  await dlg.getByTestId('vc-from').fill('srv/data')
+  await dlg.getByTestId('vc-from').blur()
+  await expect(dlg.locator('#vc-from-e')).toContainText('absolute path')
+  // a directory the host does not allow is refused with the reason
+  await dlg.getByTestId('vc-from').fill('/etc')
+  await dlg.getByTestId('vc-from').press('Enter')
+  await expect(dlg).toContainText('admin-host-mount')
+  await dlg.getByTestId('vc-from').fill('/srv/data/site')
+  await dlg.getByTestId('vc-from').press('Enter')
+  await expect(page.locator('[data-volume="site"]')).toBeVisible()
+  // the copy is of the files only: the volume is an ordinary dataset
+  await expect(page.locator('[data-volume="site"]')).not.toContainText('Host directory')
+  // an encrypted volume has no such field
+  await page.getByTestId('new-volume').click()
+  await page.getByRole('dialog').getByTestId('vc-encrypted').check()
+  await expect(page.getByRole('dialog').getByTestId('vc-from')).toHaveCount(0)
+  expect(await audit(page)).toEqual([])
+})
+
 test('a directory of the host is attached without the copy option', async ({ page }) => {
   await open(page, '/jails/build')
   await page.getByTestId('attach-volume-open').click()

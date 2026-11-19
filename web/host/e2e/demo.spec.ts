@@ -344,6 +344,52 @@ test('backup key: status, create shows the recovery key once, the dialog cannot 
   await expect(page.getByTestId('key-status')).toHaveText('Key escrowed')
 })
 
+test('backup key import: the key is checked first, a wrong key is refused, the key it holds is a no-op, a different one needs replace', async ({ page }) => {
+  await open(page, '/backups')
+  await page.getByRole('tab', { name: 'Backup key' }).click()
+  await page.getByTestId('key-import').click()
+  const dialog = page.getByRole('dialog')
+  // nothing is imported before a check: the import button is off
+  await expect(page.getByTestId('key-import-go')).toBeDisabled()
+  // the recovery key is a password field: it is not shown on the screen
+  await expect(page.getByTestId('key-recovery')).toHaveAttribute('type', 'password')
+  // a key that is not a recovery key is refused with its hint
+  await page.getByTestId('key-recovery').fill('nonsense')
+  await page.getByTestId('key-import-check').click()
+  await expect(dialog).toContainText('the recovery key is not valid')
+  // a key of another domain is refused by the check against the node
+  await page.getByTestId('key-recovery').fill('JOR1-kd-other')
+  await page.getByTestId('key-import-check').click()
+  await expect(dialog).toContainText('the repository belongs to key domain kd-7f3a91')
+  // the key the host already holds: the check says nothing changes, and there is nothing to import
+  await page.getByTestId('key-recovery').fill('JOR1-kd-7f3a91')
+  await page.getByTestId('key-import-check').click()
+  await expect(page.getByTestId('key-import-domain')).toHaveText('kd-7f3a91')
+  await expect(page.getByTestId('key-import-repo')).toHaveText('the same key domain')
+  await expect(page.getByTestId('key-import-outcome')).toContainText('already holds this key')
+  await expect(page.getByTestId('key-import-go')).toBeDisabled()
+  // without the node check a different key is refused unless the host may replace its own
+  await page.getByTestId('key-recovery').fill('JOR1-kd-new1')
+  await page.getByTestId('key-skip-check').check()
+  await page.getByTestId('key-import-check').click()
+  await expect(page.getByTestId('key-import-outcome')).toContainText('will be replaced')
+  await expect(page.getByTestId('key-import-needs-replace')).toBeVisible()
+  await page.getByTestId('key-replace').check()
+  await page.getByTestId('key-import-check').click()
+  await expect(page.getByTestId('key-import-outcome')).toContainText('will be replaced')
+  await expect(page.getByTestId('key-import-needs-replace')).toHaveCount(0)
+  // the import needs the key domain to be confirmed
+  await expect(page.getByTestId('key-import-go')).toBeDisabled()
+  await page.getByTestId('key-import-confirm').check()
+  await page.getByTestId('key-import-go').click()
+  await expect(page.getByTestId('key-import-done')).toContainText('The key is installed')
+  await page.getByRole('button', { name: 'Done' }).click()
+  await expect(page.getByText('kd-new1')).toBeVisible()
+  // the secret is gone from the form once it is used
+  await page.getByTestId('key-import').click()
+  await expect(page.getByTestId('key-recovery')).toHaveValue('')
+})
+
 test('backup run and verify go through the async flow', async ({ page }) => {
   await open(page, '/backups')
   await page.getByRole('tab', { name: 'Policies' }).click()

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "c-5",
+  "time": "2026-11-19T10:00:00Z",
+  "op": "put",
+  "kind": "Profile",
+  "name": "small",
+  "spec": {
+    "limits": {
+      "memory": "512M"
+    }
+  },
+  "expect_generation": 2
+}

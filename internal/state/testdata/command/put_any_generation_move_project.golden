@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "id": "c-4",
+  "time": "2026-11-19T10:00:00Z",
+  "op": "put",
+  "kind": "Project",
+  "uuid": "b2c7d4e9-58aa-4b7e-8d0f-77a1e3c9f5d2",
+  "name": "shop",
+  "scope": "host",
+  "project": "shop2",
+  "spec": {
+    "networks": [
+      "lan"
+    ]
+  },
+  "expect_generation": -1,
+  "move_project": true
+}

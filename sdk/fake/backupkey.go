@@ -7,6 +7,7 @@ import (
 	"maps"
 	"net/http"
 	"slices"
+	"strings"
 
 	"jailops.net/jailops/sdk/api"
 )
@@ -36,6 +37,9 @@ func (s *Server) handleBackupKeyCreate(w http.ResponseWriter, r *http.Request) {
 			return reply{err: api.Errorf(api.CodeAlreadyExists, "a backup key already exists").WithHint("rotating the key means a new repository")}
 		}
 		s.bkStatus, s.bkDomain = "present", "dom-"+randHex(4)
+		if s.bkNodeDomain == "" {
+			s.bkNodeDomain = s.bkDomain
+		}
 		out := api.BackupKeyCreated{Domain: s.bkDomain, RecoveryKey: "recovery-" + randHex(16)}
 		if len(in.Recipients) > 0 {
 			s.bkStatus, out.Escrowed = "escrowed", true
@@ -62,6 +66,79 @@ func (s *Server) handleBackupKeyEscrow(w http.ResponseWriter, r *http.Request) {
 		}
 		s.bkStatus = "escrowed"
 		return reply{status: 200, meta: api.BackupKeyStatus{Status: s.bkStatus, Domain: s.bkDomain, Path: "/var/db/jailops/backup.key"}}
+	}()
+	s.mu.Unlock()
+	s.respond(w, rp)
+}
+
+// handleBackupKeyImport is the import of a key made elsewhere. The fake knows two recovery keys: the one it printed at
+// creation is not kept (like the daemon), so the fake accepts "JOR1-" keys whose text after the prefix is the domain id
+// it should report, which lets a test stand for any key: "JOR1-dom-aaaa" is the key of domain "dom-aaaa". A key file
+// ("{...}") or an identity ("AGE-SECRET-KEY-1...") stands for domain "dom-file" and "dom-escrow".
+func (s *Server) handleBackupKeyImport(w http.ResponseWriter, r *http.Request) {
+	in, e := decode[api.BackupKeyImport](r)
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	s.mu.Lock()
+	rp := func() reply {
+		domain := ""
+		n := 0
+		if in.RecoveryKey != "" {
+			n++
+			if !strings.HasPrefix(in.RecoveryKey, "JOR1-") || len(in.RecoveryKey) < 9 {
+				return reply{err: api.Errorf(api.CodeInvalid, "the recovery key is not valid").WithHint("it starts with JOR1- and was printed once by 'jailops backup key create'")}
+			}
+			domain = strings.TrimPrefix(in.RecoveryKey, "JOR1-")
+		}
+		if in.KeyFile != "" {
+			n++
+			if !strings.HasPrefix(strings.TrimSpace(in.KeyFile), "{") {
+				return reply{err: api.Errorf(api.CodeInvalid, "the key file is not valid")}
+			}
+			if strings.Contains(in.KeyFile, `"passphrase"`) && in.Passphrase == "" {
+				return reply{err: api.Errorf(api.CodeInvalid, "the key file is protected by a passphrase").WithHint("give the passphrase of the key file")}
+			}
+			domain = "dom-file"
+		}
+		if in.Identity != "" {
+			n++
+			domain = "dom-escrow"
+		}
+		if n != 1 {
+			return reply{err: api.Errorf(api.CodeInvalid, "give one source of the key: a recovery key, a key file or an escrow identity")}
+		}
+		out := api.BackupKeyImported{Domain: domain, Existing: s.bkDomain, Path: "/var/db/jailops/backup.key"}
+		if !in.SkipNodeCheck {
+			// the fake node records the domain of the first key that was created or imported
+			out.Repository = s.bkNodeDomain
+			if s.bkNodeDomain != "" && s.bkNodeDomain != domain {
+				return reply{err: api.Errorf(api.CodeForbidden, "the repository belongs to key domain %s, this host's key is %s", s.bkNodeDomain, domain).
+					WithHint("this is not the key of the backups on this node: compare its key domain with 'jailops backup key status' of the old host")}
+			}
+			out.Verified = s.bkNodeDomain == domain
+		}
+		if s.bkStatus != "" && s.bkDomain == domain {
+			return reply{status: 200, meta: out}
+		}
+		if in.Check {
+			return reply{status: 200, meta: out}
+		}
+		if s.bkStatus != "" && !in.Replace {
+			return reply{err: api.Errorf(api.CodeAlreadyExists, "this host already holds a different backup key (domain %s)", s.bkDomain).
+				WithHint("importing replaces it and moves the old key file aside; pass replace to do that")}
+		}
+		out.Replaced = s.bkStatus != ""
+		if out.Replaced {
+			out.Aside = "/var/db/jailops/backup.key.replaced-1"
+		}
+		s.bkStatus, s.bkDomain = "present", domain
+		if s.bkNodeDomain == "" {
+			s.bkNodeDomain = domain
+		}
+		out.Installed = true
+		return reply{status: 200, meta: out, hdr: map[string]string{"Cache-Control": "no-store"}}
 	}()
 	s.mu.Unlock()
 	s.respond(w, rp)

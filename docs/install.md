@@ -233,7 +233,7 @@ characters, a jail, a volume and an image 32, a snapshot 64 ([design.md](design.
 
 The image is named after its release: `freebsd-15-1` is 15.1-RELEASE, and a jail made with `--image freebsd-15-1`
 follows its newest generation (its newest patch level). The patch levels come with `jailops image upgrade freebsd-15-1`
-or the nightly auto upgrade; a new release is a new image ([upgrade.md](upgrade.md#an-image-is-one-release)).
+or the nightly auto upgrade; a new release is a new image, and the jails move to it with `jailops jail upgrade --image` ([upgrade.md](upgrade.md#a-new-release-move-the-jails)).
 
 Without an image, `jailops app install` and `jailops create` are refused with a hint that names the two commands
 above, with the host's release filled in.

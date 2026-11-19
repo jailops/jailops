@@ -177,6 +177,36 @@ func newFlags(o *options, errw io.Writer) *flag.FlagSet {
 	return fs
 }
 
+// retiredKeys are the keys an earlier release accepted and the current one has under another name. The configuration of a
+// host that was set up with one is read as it was meant and the helper says so, so that an upgrade never stops the helper
+// over a key that was valid when it was written. A key that never existed stays an error. A key goes here in the release
+// that removes it: retired_test.go checks the keys of every fixture of internal/store/testdata/upgrade.
+var retiredKeys = map[string]string{
+	"root-dataset": "storage-root", // the old spelling of a storage root (removed in 0.8.4)
+}
+
+// renameRetiredArgs rewrites the retired flags of a command line (-root-dataset X, --root-dataset=X) to their new names.
+func renameRetiredArgs(args []string, w io.Writer) []string {
+	out := make([]string, len(args))
+	for i, a := range args {
+		out[i] = a
+		if !strings.HasPrefix(a, "-") {
+			continue
+		}
+		name, val, hasVal := strings.Cut(strings.TrimLeft(a, "-"), "=")
+		to, ok := retiredKeys[name]
+		if !ok {
+			continue
+		}
+		fmt.Fprintf(w, "jailops-priv: the flag -%s is read as -%s: rename it\n", name, to)
+		out[i] = "-" + to
+		if hasVal {
+			out[i] += "=" + val
+		}
+	}
+	return out
+}
+
 // loadConfigFile applies "key = value" lines to the flag set.
 func loadConfigFile(fs *flag.FlagSet, path string, required bool) error {
 	f, err := os.Open(path)
@@ -199,7 +229,12 @@ func loadConfigFile(fs *flag.FlagSet, path string, required bool) error {
 			return fmt.Errorf("%s:%d: expected key = value", path, n)
 		}
 		if fs.Lookup(k) == nil {
-			return fmt.Errorf("%s:%d: unknown key %q", path, n, k)
+			to, retired := retiredKeys[k]
+			if !retired {
+				return fmt.Errorf("%s:%d: unknown key %q", path, n, k)
+			}
+			fmt.Fprintf(fs.Output(), "jailops-priv: %s:%d: the key %q is read as %q: rename it in the file\n", path, n, k, to)
+			k = to
 		}
 		if k == applianceFlag {
 			return fmt.Errorf("%s:%d: %s is not a key of this file: set jailops_appliance in /etc/rc.conf, or list the modules with host-manage", path, n, k)
@@ -261,6 +296,7 @@ func run(args []string, stdout, stderr io.Writer, euid int) int {
 	}
 	var o options
 	fs := newFlags(&o, stderr)
+	args = renameRetiredArgs(args, stderr)
 	// help and the version need no configuration
 	for _, a := range args {
 		switch a {

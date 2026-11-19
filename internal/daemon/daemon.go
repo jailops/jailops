@@ -261,8 +261,8 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 		Pool: cfg.Pool, Root: cfg.Dataset, MountBase: cfg.MountBase, ConfDir: cfg.ConfDir, StateDir: cfg.StateDir,
 		WorkDir: cfg.WorkDir, JournalDir: filepath.Join(cfg.DataDir, "journal"),
 		State: st, DB: db, SealKey: sealKey, SecretsIdentity: secretsID, SecretsRecipient: secretsID.Recipient().String(),
-		ZFS: zad, ImageZFS: zad, Exec: runExec{clients.Runner}, Files: clients.Files, Logs: clients.Logs, Jails: clients.Jails,
-		PF: clients.PF, Net: clients.Net, Run: clients.Runner, Sysctl: clients.Sysctl, ZClient: clients.ZFS, WG: clients.WG,
+		ZFS: zad, ImageZFS: zad, Exec: runExec{clients.Runner}, Files: clients.Files, Logs: clients.Logs, JailFiles: clients.JailFiles, Jails: clients.Jails,
+		PF: clients.PF, Net: clients.Net, Run: clients.Runner, Sysctl: clients.Sysctl, HostExec: clients.HostExec, ZClient: clients.ZFS, WG: clients.WG,
 		CompatFile: cfg.ZFS.CompatFile, CompatDir: cfg.ZFS.CompatDir, Backups: opts.Backups, Keys: clients.Keys,
 		NetworkPool: cfg.Projects.NetworkPool, NetworkPoolBits: cfg.Projects.NetworkBits, NetworkUplink: cfg.Projects.Uplink, NetworkNAT: cfg.Projects.NAT,
 		ServerFingerprint: fingerprintOf(d.cert),
@@ -303,6 +303,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	deps.DialJail = clients.Dial
 	deps.ProbeDNS = dnsprobe.Query
 	deps.HostFile = clients.HostFile
+	deps.FileCopyMax = cfg.Limits.FileCopyBytes
 	deps.ExecLimits = service.ExecLimits{PerJail: cfg.Limits.ExecSessionsPerJail, Idle: cfg.Limits.ExecIdle.Std(), Max: cfg.Limits.ExecMax.Std()}
 	if opts.Registrar != nil {
 		deps.Registrar = opts.Registrar

@@ -449,7 +449,7 @@ Scope: updating the host's base system and its packages, with a way back.
 JailOps targets 15.1 and later, where `bsdinstall` installs the base system as packages (pkgbase), `freebsd-update` is
 planned for removal in 16, and JailOps itself builds images from pkgbase only. The module therefore updates the base
 system with `pkg upgrade` of the base repository (`FreeBSD-*` packages) and the third-party packages with `pkg upgrade`.
-A host installed from distribution sets is reported by the doctor and refused by the module (`unsupported`, with the
+A host installed from distribution sets is reported by the doctor (`host.pkgbase`) and refused by the module (`unsupported`, with the
 hint to convert the host to pkgbase); `freebsd-update` is not used.
 
 Every update: check (`pkg upgrade -n`, shown as the dry run), `bectl create` of a boot environment, the upgrade, and a
@@ -462,7 +462,7 @@ them by hand), a kernel that does not boot (the boot environment is the answer),
 older than the host (reported; images are upgraded separately, design section 4.3). An image is one release: the patch
 levels of the host's release reach the jails through the image's nightly auto upgrade (or `jailops image upgrade`), and a
 new release of the host is followed by a new image (`freebsd-15-2` after 15.2), on which new jails are created; the
-console points this out when the host runs a newer release than its newest FreeBSD image ([upgrade.md](upgrade.md#a-new-release-a-new-image)).
+console points this out when the host runs a newer release than its newest FreeBSD image ([upgrade.md](upgrade.md#a-new-release-move-the-jails)).
 
 ### 5. System (design)
 

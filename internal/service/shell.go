@@ -329,7 +329,8 @@ func (s *Service) applyPrompt(ctx context.Context, key, ps1 string) ([]string, e
 		}
 		next, err := render.PromptHookSet(string(cur), withPrompt)
 		if err != nil {
-			return steps, fmt.Errorf("%s: %w", p, err)
+			// the text is the renderer's own (the file's path inside the jail, no host path): the reader needs it to fix the file
+			return steps, api.Errorf(api.CodeInvalid, "%s: %v", p, err)
 		}
 		if next == string(cur) {
 			continue
@@ -479,10 +480,12 @@ func shellFailure(step, jail string, ctx context.Context, err error) string {
 		}
 		return what + " (the package server or the jail's network may be slow or closed)"
 	}
+	// the output of pkg and of the helper can hold host paths and command lines: the jail's status, which every reader of the
+	// jail sees, names the cause class and the commands; the output is in the daemon log ("shell setup" or "operation failed")
 	if unreachable(err) {
-		return what + ": " + unreachableHint(jail) + " (" + tailOf([]byte(err.Error())) + ")"
+		return what + ": " + unreachableHint(jail)
 	}
-	return what + ": " + tailOf([]byte(err.Error()))
+	return what + ": the package manager or the jail did not complete it (the output is in the daemon log)"
 }
 
 // unreachable says whether the pkg output tells that the package server did not answer (a timeout, no route, a
@@ -627,7 +630,8 @@ func (s *Service) writePromptMark(ctx context.Context, key string, eff api.JailS
 	m := s.shellMark(key)
 	m.At, m.Error = s.now().UTC(), ""
 	if err != nil {
-		m.Error = "writing the prompt failed: " + tailOf([]byte(err.Error()))
+		s.log.Warn("writing the prompt failed", "jail", key, "err", err)
+		m.Error = "writing the prompt failed (the output is in the daemon log)"
 	} else {
 		m.Applied = s.promptState(key, eff)
 	}

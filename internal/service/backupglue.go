@@ -23,6 +23,7 @@ type BackupAdmin interface {
 	CreateKey(ctx context.Context, recipients []string) (api.BackupKeyCreated, error)
 	EscrowKey(ctx context.Context, recipients []string) error
 	KeyStatus(ctx context.Context) (api.BackupKeyStatus, error)
+	ImportKey(ctx context.Context, in api.BackupKeyImport) (api.BackupKeyImported, error)
 	RunPolicy(ctx context.Context, project, policy string, noVolumes bool) ([]api.BackupRun, error)
 	Verify(ctx context.Context, backupID, depth string) (api.BackupRun, error)
 }
@@ -61,6 +62,20 @@ func (s *Service) EscrowBackupKey(ctx context.Context, in api.BackupKeyEscrow) (
 		return api.BackupKeyStatus{}, err
 	}
 	return a.KeyStatus(ctx)
+}
+
+// ImportBackupKey installs a backup key that came from outside (the recovery key, a key file or the escrow blob) on a
+// host that lost its own. The key is in the request and nowhere else: not in the audit detail, not in a log line, not
+// in the reply. The audit detail names the key domain, which is not secret.
+func (s *Service) ImportBackupKey(ctx context.Context, in api.BackupKeyImport) (api.BackupKeyImported, error) {
+	if err := requireGlobal(ctx, "importing the backup key"); err != nil {
+		return api.BackupKeyImported{}, err
+	}
+	a, err := s.backupAdmin()
+	if err != nil {
+		return api.BackupKeyImported{}, err
+	}
+	return a.ImportKey(ctx, in)
 }
 
 // BackupKeyStatus reports none, present or escrowed.
@@ -604,6 +619,9 @@ func (s *Service) waitOp(ctx context.Context, op api.Operation, what string) err
 		return nil
 	case api.OpFailure, api.OpCancelled:
 		if done.Error != nil {
+			if done.Error.Hint != "" {
+				return fmt.Errorf("%s: %s (%s)", what, done.Error.Message, done.Error.Hint)
+			}
 			return fmt.Errorf("%s: %s", what, done.Error.Message)
 		}
 		return fmt.Errorf("%s failed", what)

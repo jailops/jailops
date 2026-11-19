@@ -10,6 +10,7 @@ tag (`@v7`), which the action's owner can move to other code at any time; a full
 | `ci.yml` (every push and pull request) | `contents: read` for every job | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, `actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, **`vmactions/freebsd-vm`** |
 | `release.yml` (a tag `v*`) | `contents: read`, and `contents: write` in the one job that publishes the release (the check job before it cannot write) | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, **`goreleaser/goreleaser-action`** |
 | `ci-rerun-mirror.yml` (a finished CI run of this repository) | `actions: write` to start one rerun, `contents: read` | none: the `gh` of the runner reads the job logs through the API and runs no code of the run |
+| `linux-e2e.yml` (every night and on demand; no pull request, not part of `CI ok`) | `contents: read` | `actions/checkout`, `actions/setup-node`, `actions/setup-go` (by commit), **`vmactions/freebsd-vm`** (by tag, like `ci.yml`) |
 
 `release.yml` names every action by its commit and GoReleaser by an exact version. The two in bold come from third parties: `vmactions/freebsd-vm` runs the FreeBSD VM that builds and tests the tree, and
 `goreleaser/goreleaser-action` runs with the token that can write the release. They matter most; the `actions/*` ones
@@ -29,6 +30,13 @@ checked by pkg against the FreeBSD keys in `/usr/share/keys/pkg`.
 When the mirror does not answer, the install is tried three times and then the job fails with the line `the package
 mirror ... did not give ... in three attempts`. `ci-rerun-mirror.yml` runs the failed jobs once more when every failed
 job of a CI run ended with that line; a run with another failure is left alone, and a run is retried at most once.
+
+## The nightly Linux jail test
+
+`linux-e2e.yml` runs the Linux jail block of `scripts/ci-freebsd-e2e.sh` (`JAILOPS_E2E_PART=linux`) on its own FreeBSD VM: a thick-only layout, a Linux
+shell, a volume attached before the start and to the running jail (mounted in the root and below `compat/linux`) and the detach that takes both away. It
+builds an Alpine image from `dl-cdn.alpinelinux.org`; when that host does not answer in four tries the script ends with status 75 and the line `SKIPPED`,
+and the workflow ends green with a notice. Every other failure is a red run in the Actions tab; no issue is opened.
 
 ## Pinning an action to a commit
 

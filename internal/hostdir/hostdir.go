@@ -19,6 +19,16 @@ type Probe struct {
 	Detail string
 }
 
+// Import counts what a copy of a host directory into a volume brought across.
+type Import struct {
+	Files    int64
+	Dirs     int64
+	Symlinks int64
+	Bytes    int64
+	// Skipped counts devices, fifos and sockets, which are not copied.
+	Skipped int64
+}
+
 // Usable reports whether the directory may be given to a jail: it is on a mount and, when a file was asked for (write),
 // a file could be made in it.
 func (p Probe) Usable(write bool) bool { return p.Mounted && (!write || p.Writable) }

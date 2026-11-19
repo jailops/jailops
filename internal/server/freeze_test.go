@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -179,4 +180,58 @@ func codesOf(t *testing.T) []api.Code {
 		}
 	}
 	return out
+}
+
+// wireCheck compares a transcript of the wire tests with its golden file (testdata/wire).
+func wireCheck(t *testing.T, name, got string) {
+	t.Helper()
+	path := filepath.Join("testdata", "wire", name+".golden")
+	if *freezeUpdate {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(got), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	want, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("%v (go test ./internal/server -run Freeze -freeze-update writes it)", err)
+	}
+	if string(want) != got {
+		t.Errorf("the wire transcript %q changed (just freeze accepts it):\n%s", name, diffLines(string(want), got))
+	}
+}
+
+// Every extension is in exactly one of the two lists of docs/api.md ("Which extensions carry the 1.x promise"), and
+// the lists name no extension the server does not have: a new extension is a decision about its promise.
+func TestFreezeEveryExtensionHasAPromise(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join("..", "..", "docs", "api.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, after, ok := strings.Cut(string(b), "### Which extensions carry the 1.x promise")
+	if !ok {
+		t.Fatal("docs/api.md has no section 'Which extensions carry the 1.x promise'")
+	}
+	section, _, _ := strings.Cut(after, "\n## ")
+	count := map[string]int{}
+	for _, row := range strings.Split(section, "\n") {
+		if !strings.HasPrefix(row, "| 1.x |") && !strings.HasPrefix(row, "| Not yet |") {
+			continue
+		}
+		for _, m := range regexp.MustCompile("`([a-z_]+)`").FindAllStringSubmatch(row, -1) {
+			count[m[1]]++
+		}
+	}
+	for _, name := range api.Extensions {
+		if count[name] != 1 {
+			t.Errorf("extension %q is in %d of the lists of docs/api.md (\"Which extensions carry the 1.x promise\"): it belongs in exactly one", name, count[name])
+		}
+		delete(count, name)
+	}
+	for name := range count {
+		t.Errorf("docs/api.md names %q, which the server does not advertise", name)
+	}
 }

@@ -341,7 +341,7 @@ func (s *Service) appInstallRun(ctx context.Context, h *OpHandle, p project, e a
 	if err != nil {
 		s.emitIn(ctx, proj, "app.install.failed", "/api/v1/jails/"+jail)
 		s.kick()
-		return nil, installError(err, app.Name, jail, st.started || st.kept)
+		return nil, s.installError(err, app.Name, jail, st.started || st.kept)
 	}
 	s.emitIn(ctx, proj, "app.installed", "/api/v1/jails/"+jail)
 	s.kick()
@@ -365,8 +365,10 @@ func (s *Service) appInstallRun(ctx context.Context, h *OpHandle, p project, e a
 }
 
 // installError turns the plan error of an installation into the error the
-// operation reports: the step that failed, and whether the jail was kept.
-func installError(err error, app, jail string, kept bool) error {
+// operation reports: the step that failed, and whether the jail was kept. What
+// a store, the helper or a command said (host paths, command lines) goes to the
+// daemon log; the message names the step.
+func (s *Service) installError(err error, app, jail string, kept bool) error {
 	ae := toAPIError(err)
 	step := ""
 	var pe *plan.Error
@@ -377,7 +379,13 @@ func installError(err error, app, jail string, kept bool) error {
 	if step != "" {
 		msg += " at step " + step
 	}
-	out := api.Errorf(ae.Code, "%s: %s", msg, ae.Message).WithDetail("jail", jail).WithDetail("step", step)
+	cause := ": " + ae.Message
+	var pub *publicError
+	if ae.Code == api.CodeInternal && !errors.As(err, &pub) {
+		s.log.Error("app install failed", "app", app, "jail", jail, "step", step, "err", ae.Message)
+		cause = ""
+	}
+	out := api.Errorf(ae.Code, "%s%s", msg, cause).WithDetail("jail", jail).WithDetail("step", step)
 	hint := "nothing was left behind; the jail was deleted again"
 	if kept {
 		hint = "the jail was left stopped for inspection: look inside it with `jailops shell " + jail + "` after `jailops start " + jail +
@@ -387,7 +395,14 @@ func installError(err error, app, jail string, kept bool) error {
 	if pe != nil && len(pe.UndoErrs) > 0 {
 		hint += ". The rollback of this operation was incomplete; run `jailops doctor`"
 	}
-	return out.WithHint(hint)
+	if cause == "" {
+		hint += ". The cause is in the daemon log"
+	}
+	out = out.WithHint(hint)
+	if ae.Code == api.CodeInternal {
+		return &publicError{ae: out}
+	}
+	return out
 }
 
 // appInstallPlan builds the steps of docs/apps.md as plan steps. The create step
@@ -589,8 +604,10 @@ func (s *Service) appInstallPlan(h *OpHandle, nj api.Jail, app api.App, st *inst
 					return err
 				}
 				if out, err := s.runInJail(ctx, key, 10*time.Minute, argv...); err != nil {
-					// the wrapper's script is noise in the message: name the command it stands for
-					return fmt.Errorf("%s: %w: %s", desc, errors.Unwrap(err), tailOf(out))
+					// the wrapper's script is noise in the message: name the command it stands for, and give what it
+					// printed inside the jail; what the helper said goes to the log
+					s.log.Warn("starting a service of an app failed", "jail", key, "service", svc.Name, "err", err)
+					return publicf(err, "%s failed: %s", desc, tailOf(out))
 				}
 				return nil
 			}})
@@ -779,7 +796,7 @@ func healthLoop(ctx context.Context, now func() time.Time, sleep func(context.Co
 			return nil
 		}
 		if !now().Add(time.Second).Before(deadline) || ctx.Err() != nil {
-			return fmt.Errorf("the health check did not pass within %ds: %w", int(wait/time.Second), err)
+			return publicf(err, "the health check did not pass within %ds: %v", int(wait/time.Second), err)
 		}
 		if err := sleep(ctx, time.Second); err != nil {
 			return err
@@ -814,8 +831,12 @@ func (s *Service) appHealthOnce(ctx context.Context, key string, addr netip.Addr
 		}
 		return nil
 	default:
-		_, err := s.runInJail(ctx, key, timeout, h.Exec...)
-		return err
+		out, err := s.runInJail(ctx, key, timeout, h.Exec...)
+		if err != nil {
+			s.log.Debug("the exec check of an app failed", "jail", key, "err", err)
+			return fmt.Errorf("%s failed: %s", strings.Join(h.Exec, " "), tailOf(out))
+		}
+		return nil
 	}
 }
 
