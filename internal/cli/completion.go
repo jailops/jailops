@@ -301,7 +301,7 @@ func (a *app) configValues(key string) (completer, bool) {
 		return a.completeNames(listNames(list))
 	}
 	switch strings.NewReplacer("<device>", "*", "<name>", "*", "<var>", "*").Replace(k.Name) {
-	case "nic.*.network":
+	case "network.*.network":
 		return names(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Networks().List(ctx), netName) }), true
 	case "storage":
 		return names(func(ctx context.Context, c *sdk.Client) iterNames { return namesOf(c.Storage().List(ctx), storName) }), true
@@ -325,9 +325,9 @@ func (a *app) configValues(key string) (completer, bool) {
 		return fixedValues("default", "short", "none"), true
 	case "shell":
 		return fixedValues(shells...), true
-	case "nic.*.ipv4", "nic.*.ipv6":
+	case "network.*.ipv4", "network.*.ipv6":
 		return fixedValues("auto"), true
-	case "disk.*.mount":
+	case "volumes.*.mount":
 		return nil, false
 	}
 	return nil, false
@@ -387,7 +387,7 @@ var freeTextFlags = map[string]string{
 	"exclude":                          "addresses kept out of a range",
 	"fingerprint":                      "a certificate fingerprint pasted from elsewhere",
 	"gateway":                          "an address",
-	"grace":                            "a duration typed as text",
+	"timeout":                          "a duration typed as text",
 	"grep":                             "a pattern",
 	"host-uuid":                        "a UUID pasted from elsewhere",
 	"upgrade-at":                       "a time of day, HH:MM",
@@ -399,7 +399,6 @@ var freeTextFlags = map[string]string{
 	"ipv6":                             "a prefix",
 	"ipv6-range":                       "an address range a-b typed by the operator",
 	"keys":                             "a path inside the image's source",
-	"map":                              "OLD=NEW of two networks, typed",
 	"max-memory":                       "a size",
 	"memory":                           "a size",
 	"message":                          "free text",
@@ -425,7 +424,6 @@ var freeTextFlags = map[string]string{
 	"ssh-from":                         "addresses typed by the operator",
 	"subnet":                           "a prefix",
 	"token":                            "a secret pasted from elsewhere",
-	"update-window":                    "a time window written as text",
 	"uplink":                           "the API lists no network interfaces of the host",
 	"user":                             "a user of the jail (exec, shell, console): the jail's /etc/passwd is not read from here",
 	"verify-schedule":                  "a schedule written as text",

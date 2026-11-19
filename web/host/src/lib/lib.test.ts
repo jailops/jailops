@@ -15,7 +15,7 @@ describe('rollback', () => {
     expect(canSubmit('data', 'web', 'web', undefined)).toBe(false)
   })
   it('reports bytes only for destructive scopes and sets confirm_data_loss', () => {
-    const snap = { status: { written: 99 } } as never
+    const snap = { status: { written_bytes: 99 } } as never
     expect(bytesAtStake('root', snap)).toBe(0)
     expect(bytesAtStake('data', snap)).toBe(99)
     expect(request('root', 's').confirm_data_loss).toBe(false)

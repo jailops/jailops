@@ -104,7 +104,7 @@ func TestSetDelegation(t *testing.T) {
 	if err := w.S.SetDelegation(bg, "alpha_web", true); err != nil {
 		t.Errorf("turning it on twice: %v", err)
 	}
-	if err := w.S.SetDelegation(bg, "alpha_web", false); !api.IsCode(err, api.CodeConflict) {
+	if err := w.S.SetDelegation(bg, "alpha_web", false); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Errorf("turning it off while the jail runs: %v", err)
 	}
 	if err := w.S.StopJail(bg, "alpha_web"); err != nil {

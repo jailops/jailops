@@ -66,7 +66,7 @@ func main() {
 
 	jail := api.Jail{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.JailSpec{
 		Image: "fb", Storage: "default",
-		Update:  api.UpdatePolicy{Strategy: api.UpdateRebase, Healthcheck: "/bin/true"},
+		Update:  api.UpdatePolicy{Healthcheck: "/bin/true"},
 		Network: []api.NetworkAttach{{Network: "lan", IPv4: "auto"}},
 	}}
 	step("jail create and wait", func() error {
@@ -110,7 +110,7 @@ func main() {
 	})
 	step("jail patch with a stale etag is a conflict", func() error {
 		_, err := c.Jails().Patch(ctx, "web", map[string]any{"spec": map[string]any{"comment": "other"}}, etag)
-		return check(api.IsCode(err, api.CodeConflict), "want conflict, got %v", err)
+		return check(api.IsCode(err, api.CodePreconditionFailed), "want conflict, got %v", err)
 	})
 	step("jail patch with an unknown member is invalid", func() error {
 		_, err := c.Jails().Patch(ctx, "web", map[string]any{"spec": map[string]any{"coment": "typo"}}, "")

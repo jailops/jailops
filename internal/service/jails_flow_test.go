@@ -129,7 +129,7 @@ func TestJailLifecycleErrors(t *testing.T) {
 	// the actions
 	_, err = s.JailAction(ctx, "web", api.JailAction{Action: "freeze"})
 	wantCode(t, err, api.CodeInvalid)
-	_, err = s.JailAction(ctx, "web", api.JailAction{Action: "start", Timeout: -1})
+	_, err = s.JailAction(ctx, "web", api.JailAction{Action: "start", TimeoutSeconds: -1})
 	wantCode(t, err, api.CodeInvalid)
 	_, err = s.JailAction(ctx, "ghost", api.JailAction{Action: "start"})
 	wantCode(t, err, api.CodeNotFound)
@@ -141,11 +141,11 @@ func TestJailLifecycleErrors(t *testing.T) {
 		t.Fatalf("start: %+v", got)
 	}
 	// a running jail is not deleted
-	_, err = s.DeleteJail(ctx, "web")
+	_, err = s.DeleteJail(ctx, "web", service.AnyGeneration)
 	wantCode(t, err, api.CodeBusy)
 	op, _ = s.JailAction(ctx, "web", api.JailAction{Action: "stop"})
 	wait(t, s, op)
-	op, err = s.DeleteJail(ctx, "web")
+	op, err = s.DeleteJail(ctx, "web", service.AnyGeneration)
 	if err != nil {
 		t.Fatal(err)
 	}

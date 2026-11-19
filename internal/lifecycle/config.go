@@ -53,6 +53,10 @@ func DefaultPersistent() []PersistentPath {
 	}
 }
 
+// DefaultRootOldRetention is how long the previous root of an upgraded jail is kept: `jail rollback --scope root` works
+// until then, and housekeeping destroys it after.
+const DefaultRootOldRetention = 14 * 24 * time.Hour
+
 // Config configures the lifecycle.
 type Config struct {
 	// Root is the JailOps dataset, for example "tank/jailops".

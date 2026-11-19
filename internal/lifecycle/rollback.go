@@ -118,7 +118,7 @@ func (s *Service) rollbackData(ctx context.Context, st *jailState, req RollbackO
 	if res.Scope == api.RollbackAll {
 		// the root of a snapshot taken on another image is not a generation of the jail's image now
 		if img := s.prop(ctx, st.Container+"@"+snap, PropImage); img != "" && img != st.Image {
-			return res, api.Errorf(api.CodeConflict, "snapshot %q was taken while jail %s used image %s, the jail uses %s now", snap, st.Name, img, st.Image).
+			return res, api.Errorf(api.CodePreconditionFailed, "snapshot %q was taken while jail %s used image %s, the jail uses %s now", snap, st.Name, img, st.Image).
 				WithHint("roll the root back first (jailops jail rollback), then restore the snapshot")
 		}
 		targets = append(targets, s.systemDatasets(st)...)
@@ -163,7 +163,7 @@ func (s *Service) rollbackData(ctx context.Context, st *jailState, req RollbackO
 		}
 	}
 	if len(res.Skipped) > 0 && !req.Force {
-		return res, api.Errorf(api.CodeConflict, "snapshot %q does not exist on %s", snap, strings.Join(res.Skipped, ", ")).
+		return res, api.Errorf(api.CodePreconditionFailed, "snapshot %q does not exist on %s", snap, strings.Join(res.Skipped, ", ")).
 			WithHint("use force to roll back the datasets that have it")
 	}
 	if !req.ConfirmDataLoss {
@@ -182,7 +182,7 @@ func (s *Service) rollbackData(ctx context.Context, st *jailState, req RollbackO
 			WithHint("set confirm_data_loss to proceed")
 	}
 	if len(later) > 0 && !req.Force {
-		return res, api.Errorf(api.CodeConflict, "snapshots newer than %q exist: %s", snap, strings.Join(later, ", ")).
+		return res, api.Errorf(api.CodePreconditionFailed, "snapshots newer than %q exist: %s", snap, strings.Join(later, ", ")).
 			WithDetail("later_snapshots", strings.Join(later, ",")).
 			WithHint("roll back to the newest snapshot, or use force to destroy the newer ones")
 	}

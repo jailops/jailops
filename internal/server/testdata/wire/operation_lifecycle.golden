@@ -1,11 +1,12 @@
 > POST /api/v1/jails?project=alpha
-> {"metadata":{"name":"web"},"spec":{"image":"fb","storage":"default","update":{"strategy":"rebase","healthcheck":"/bin/true"},"network":[{"network":"lan","ipv4":"auto"}]}}
+> {"metadata":{"name":"web"},"spec":{"image":"fb","storage":"default","update":{"healthcheck":"/bin/true"},"network":[{"network":"lan","ipv4":"auto"}]}}
 < 202 Accepted
 < Content-Type: application/json
 < Cache-Control: no-store
 < Location: /api/v1/operations/<op1>
 {
   "metadata": {
+    "action": "jail.create",
     "created_at": "<time>",
     "description": "Create jail web",
     "id": "<op1>",
@@ -31,6 +32,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.create",
     "created_at": "<time>",
     "description": "Create jail web",
     "id": "<op1>",
@@ -65,13 +67,12 @@
         "shell": "/usr/local/bin/bash",
         "storage": "default",
         "update": {
-          "healthcheck": "/bin/true",
-          "strategy": "rebase"
+          "healthcheck": "/bin/true"
         }
       },
       "status": {
-        "freebsd_version": "15.0-RELEASE-p1",
-        "generation": "fb#g1",
+        "freebsd_version": "15.1-RELEASE-p1",
+        "image_generation": "fb#g1",
         "power": "stopped"
       }
     },
@@ -105,6 +106,7 @@
 < Location: /api/v1/operations/<op2>
 {
   "metadata": {
+    "action": "jail.snapshot",
     "created_at": "<time>",
     "description": "Snapshot jail web",
     "id": "<op2>",
@@ -131,6 +133,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.snapshot",
     "created_at": "<time>",
     "description": "Snapshot jail web",
     "id": "<op2>",
@@ -156,6 +159,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.snapshot",
     "created_at": "<time>",
     "description": "Snapshot jail web",
     "id": "<op2>",
@@ -198,7 +202,7 @@
 < 200 OK
 < Content-Type: application/json
 < Cache-Control: no-store
-< ETag: "1"
+< ETag: "<uuid>-1"
 {
   "metadata": {
     "metadata": {
@@ -230,13 +234,12 @@
       "shell": "/usr/local/bin/bash",
       "storage": "default",
       "update": {
-        "healthcheck": "/bin/true",
-        "strategy": "rebase"
+        "healthcheck": "/bin/true"
       }
     },
     "status": {
-      "freebsd_version": "15.0-RELEASE-p1",
-      "generation": "fb#g1",
+      "freebsd_version": "15.1-RELEASE-p1",
+      "image_generation": "fb#g1",
       "power": "stopped"
     }
   },
@@ -263,6 +266,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.snapshot",
     "created_at": "<time>",
     "description": "Snapshot jail web",
     "id": "<op2>",
@@ -317,6 +321,7 @@
 < Location: /api/v1/operations/<op3>
 {
   "metadata": {
+    "action": "jail.snapshot",
     "created_at": "<time>",
     "description": "Snapshot jail web",
     "id": "<op3>",
@@ -342,6 +347,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.snapshot",
     "created_at": "<time>",
     "description": "Snapshot jail web",
     "error": {
@@ -388,6 +394,7 @@
 < Location: /api/v1/operations/<op4>
 {
   "metadata": {
+    "action": "jail.snapshot",
     "created_at": "<time>",
     "description": "Snapshot jail web",
     "id": "<op4>",
@@ -413,6 +420,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.snapshot",
     "created_at": "<time>",
     "description": "Snapshot jail web",
     "id": "<op4>",
@@ -467,6 +475,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.snapshot",
     "created_at": "<time>",
     "description": "Snapshot jail web",
     "id": "<op4>",

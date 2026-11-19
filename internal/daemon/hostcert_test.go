@@ -348,7 +348,7 @@ func TestCertificateUpload(t *testing.T) {
 			return err
 		},
 	} {
-		if err := f(); !api.IsCode(err, api.CodeConflict) {
+		if err := f(); !api.IsCode(err, api.CodePreconditionFailed) {
 			t.Errorf("configured: %v", err)
 		}
 	}
@@ -671,7 +671,7 @@ func TestACMERedirectThroughTheFirewallModule(t *testing.T) {
 	// what a client sends as acme is replaced by the daemon's
 	spec := fw.Spec
 	spec.ACME = &api.HostFirewallACME{Challenge: api.ACMETLSALPN01, Port: 40000}
-	res, err := a.Admin.HostSystem().Firewall().Apply(ctx30(t), api.HostFirewallApply{Spec: spec, ConfirmWithin: 60})
+	res, err := a.Admin.HostSystem().Firewall().Apply(ctx30(t), api.HostFirewallApply{Spec: spec, ConfirmWithinSeconds: 60})
 	if err != nil {
 		t.Fatal(err)
 	}

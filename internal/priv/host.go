@@ -372,18 +372,18 @@ func ntpBlock(lines []string) (begin, end int, err error) {
 		switch strings.TrimSpace(ln) {
 		case HostNTPBegin:
 			if begin >= 0 {
-				return 0, 0, api.Errorf(api.CodeConflict, "ntp.conf has %q twice", HostNTPBegin)
+				return 0, 0, api.Errorf(api.CodePreconditionFailed, "ntp.conf has %q twice", HostNTPBegin)
 			}
 			begin = i
 		case HostNTPEnd:
 			if begin < 0 || end >= 0 {
-				return 0, 0, api.Errorf(api.CodeConflict, "ntp.conf has %q without a matching %q before it", HostNTPEnd, HostNTPBegin)
+				return 0, 0, api.Errorf(api.CodePreconditionFailed, "ntp.conf has %q without a matching %q before it", HostNTPEnd, HostNTPBegin)
 			}
 			end = i
 		}
 	}
 	if begin >= 0 && end < 0 {
-		return 0, 0, api.Errorf(api.CodeConflict, "ntp.conf has %q without %q", HostNTPBegin, HostNTPEnd)
+		return 0, 0, api.Errorf(api.CodePreconditionFailed, "ntp.conf has %q without %q", HostNTPBegin, HostNTPEnd)
 	}
 	return begin, end, nil
 }

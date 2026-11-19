@@ -166,13 +166,13 @@ func TestAppInstall(t *testing.T) {
 		t.Fatalf("%v\n%s", err, e.Log())
 	}
 	j := res.Jail
-	if res.App != "web" || !strings.HasPrefix(res.Hash, "sha256:") || res.Version != "15.0p1" || res.Snapshot != "app-installed" || res.DryRun {
+	if res.App != "web" || !strings.HasPrefix(res.Hash, "sha256:") || res.Version != "15.1p1" || res.Snapshot != "app-installed" || res.DryRun {
 		t.Fatalf("%+v", res)
 	}
 	if j.Metadata.Name != "web" || j.Status.Power != api.PowerRunning || j.Spec.Image != "fb151" || j.Spec.Layout != api.LayoutThin || j.Spec.Hostname != "web" {
 		t.Fatalf("%+v %+v", j.Spec, j.Status)
 	}
-	if l := j.Metadata.Labels; l[api.LabelApp] != "web" || l[api.LabelAppHash] != res.Hash || l[api.LabelAppVersion] != "15.0p1" {
+	if l := j.Metadata.Labels; l[api.LabelApp] != "web" || l[api.LabelAppHash] != res.Hash || l[api.LabelAppVersion] != "15.1p1" {
 		t.Fatalf("labels %v", l)
 	}
 	if r := j.Spec.Resources; r.Memory != "512M" || r.Disk != "4294967296" || r.CPU != 2 {
@@ -295,7 +295,7 @@ func TestAppInstall(t *testing.T) {
 	if err := e.D.Service().RefreshJails(c); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := e.Admin.Jails().Get(c, "web"); again.Metadata.Labels[api.LabelAppVersion] != "15.0p1" || len(again.Spec.Volumes) != 2 {
+	if again, _ := e.Admin.Jails().Get(c, "web"); again.Metadata.Labels[api.LabelAppVersion] != "15.1p1" || len(again.Spec.Volumes) != 2 {
 		t.Fatalf("%+v", again)
 	}
 	// Installing again under the same name is refused before anything happens; another name works.
@@ -523,7 +523,7 @@ func TestAppInstallFailures(t *testing.T) {
 	}
 	failed()
 	j, _ = e.Admin.Jails().Get(c, "web")
-	if j.Status.Power != api.PowerStopped || j.Metadata.Labels[api.LabelAppVersion] != "15.0p1" {
+	if j.Status.Power != api.PowerStopped || j.Metadata.Labels[api.LabelAppVersion] != "15.1p1" {
 		t.Fatalf("%+v", j)
 	}
 	if ok, _ := e.ZFS.Exists(c, "tank/jailops/projects/alpha/jails/web@app-installed"); ok {
@@ -611,7 +611,7 @@ func TestAppInstallRecovery(t *testing.T) {
 	if ok, _ := e3.ZFS.Exists(c, "tank/jailops/projects/alpha/jails/tool"); ok {
 		t.Fatal("datasets were left behind")
 	}
-	if rec := e3.D.Service().Recovered(); len(rec) != 1 || rec[0].Action != "rolled-back" {
+	if rec := e3.D.Service().Recovered(); len(rec) != 1 || rec[0].Action != api.RecoveryRolledBack {
 		t.Fatalf("%+v", rec)
 	}
 	// A crash during the start of the jail: the start's own run is rolled back
@@ -642,7 +642,7 @@ func TestAppInstallRecovery(t *testing.T) {
 		t.Fatal("the jail still runs")
 	}
 	rec = e4.D.Service().Recovered()
-	if len(rec) != 2 || rec[0].Run != "start/alpha_tool" || rec[0].Action != "rolled-back" || rec[1].Run != "app-install/alpha_tool" || rec[1].Action != "rolled-back" {
+	if len(rec) != 2 || rec[0].Run != "start/alpha_tool" || rec[0].Action != api.RecoveryRolledBack || rec[1].Run != "app-install/alpha_tool" || rec[1].Action != api.RecoveryRolledBack {
 		t.Fatalf("%+v", rec)
 	}
 }

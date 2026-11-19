@@ -16,7 +16,7 @@ func TestImageAutoUpgradePatch(t *testing.T) {
 	if err != nil || im.Spec.AutoUpgrade == nil || !im.Spec.AutoUpgrade.Packages || im.Spec.AutoUpgrade.At != "04:30" {
 		t.Fatalf("%v %+v", err, im.Spec.AutoUpgrade)
 	}
-	if im.Status.AutoUpgrade == nil || im.Status.AutoUpgrade.Next.Hour() != 4 || im.Status.AutoUpgrade.Next.Minute() != 30 {
+	if im.Status.AutoUpgrade == nil || im.Status.AutoUpgrade.NextAt.Hour() != 4 || im.Status.AutoUpgrade.NextAt.Minute() != 30 {
 		t.Fatalf("next run: %+v", im.Status.AutoUpgrade)
 	}
 	if len(im.Status.Generations) != 1 || im.Spec.Release != "15.0-RELEASE" {

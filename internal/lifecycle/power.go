@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"jailops.net/jailops/internal/plan"
+	"jailops.net/jailops/internal/sys/jailos"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -37,11 +38,16 @@ func (s *Service) PlanStart(ctx context.Context, name string) (*plan.Plan, error
 		// Before jail(8) makes the devfs of this start (it does that before the hooks run): what an earlier stop that did
 		// not finish left below the root would be stacked under it. Best effort; the helper touches a jail that does not
 		// run only.
-		plan.Step{Name: "heal-mounts", Describe: "take the mounts a stop that did not finish left below the root of " + name + " off",
+		// The tree is put right before it is rendered: the mounts a stop that did not finish left are taken off, and the base
+		// package records of a thin jail follow the generation of its root (after a root swap the persistent /var/db still
+		// holds the old ones; best effort, a failure is told and never stops the start). One step, so that the step list
+		// of a start that a crash interrupted under the previous version still matches its journal record.
+		plan.Step{Name: "heal-mounts", Describe: "take the mounts a stop that did not finish left below the root of " + name + " off, and bring its base package records in step with its image generation",
 			Do: func(ctx context.Context) error {
 				if s.Files != nil {
 					_, _ = s.Files.HealJail(ctx, name)
 				}
+				s.baseRecordsAtStart(ctx, name)
 				return nil
 			}},
 		plan.Step{Name: "render", Describe: "render jail.conf, rc.conf and firewall anchor for " + name,
@@ -83,7 +89,7 @@ func (s *Service) StartJail(ctx context.Context, name string) error {
 // still ran.
 func (s *Service) stopJail(ctx context.Context, name string) error {
 	err := s.Jails.Stop(ctx, name)
-	if api.IsCode(err, api.CodeStopForced) {
+	if jailos.IsForcedStop(err) {
 		if s.Warn != nil {
 			s.Warn(ctx, name, "jail-stop-forced", err.Error())
 		}

@@ -56,7 +56,7 @@ type App struct {
 	// shared memory, semaphores or message queues, which a jail has none of by default.
 	SysVIPC bool `json:"sysvipc,omitempty" yaml:"sysvipc"`
 	// StopTimeout is the shutdown budget the app recommends, in seconds: a database that needs a minute to close says
-	// 60. It becomes boot.stop_timeout of the jail (1 to MaxStopTimeout); empty leaves the default of JailOps.
+	// 60. It becomes boot.stop_timeout_seconds of the jail (1 to MaxStopTimeout); empty leaves the default of JailOps.
 	StopTimeout int        `json:"stop_timeout,omitempty" yaml:"stop_timeout"`
 	Health      *AppHealth `json:"health,omitempty" yaml:"health"`
 	// Resources are hints for the jail's limits, not limits.

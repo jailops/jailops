@@ -46,7 +46,7 @@ func webSpecIn(project string) api.JailSpec {
 		net = "lan-" + project
 	}
 	return api.JailSpec{Image: "fb", Storage: "default", Network: []api.NetworkAttach{{Network: net}},
-		Update: api.UpdatePolicy{Strategy: api.UpdateRebase, Healthcheck: "/bin/true"}}
+		Update: api.UpdatePolicy{Healthcheck: "/bin/true"}}
 }
 
 func createJail(t *testing.T, c *sdk.Client, name string) api.Jail {

@@ -184,7 +184,7 @@ func TestEncryptedVolumeLifecycle(t *testing.T) {
 	op, err = s.CreateJail(ctx, dtest.WebJail("second"))
 	mustOp(t, s, op, err)
 	aop, err := s.AttachVolume(ctx, "second", api.VolumeAttachRequest{Volume: "vault", Mount: "/srv/v"})
-	failedWith(t, s, aop, err, api.CodeConflict)
+	failedWith(t, s, aop, err, api.CodePreconditionFailed)
 }
 
 func TestBootStartsALockedJailAfterItsUnlock(t *testing.T) {

@@ -41,7 +41,7 @@ func (s showWriter) labels(m api.ObjectMeta) {
 func (s showWriter) problems(conds []api.Condition) {
 	var out []string
 	for _, c := range conds {
-		if c.Status == api.ConditionTrue {
+		if !c.Problem() {
 			continue
 		}
 		p := c.Type
@@ -386,8 +386,8 @@ func (a *app) showAutoUpgrade(s showWriter, i api.Image) {
 			what += " and their packages"
 		}
 		line := "every night at " + at + ": " + what
-		if st != nil && !st.Next.IsZero() {
-			line += "; next " + st.Next.Local().Format("2006-01-02 15:04")
+		if st != nil && !st.NextAt.IsZero() {
+			line += "; next " + st.NextAt.Local().Format("2006-01-02 15:04")
 		}
 		s.kv("Nightly", line)
 	}
@@ -404,7 +404,7 @@ func (a *app) showAutoUpgrade(s showWriter, i api.Image) {
 		if r.Detail != "" {
 			what += "; " + r.Detail
 		}
-		rows = append(rows, []string{r.Started.Local().Format("2006-01-02 15:04"), r.Result, what})
+		rows = append(rows, []string{r.StartedAt.Local().Format("2006-01-02 15:04"), r.Result, what})
 	}
 	a.printTable(indentWriter{s.w}, []string{"STARTED", "RESULT", "WHAT"}, rows, nil)
 }

@@ -54,9 +54,9 @@ const (
 
 // ImageUpgradeRun is one automatic upgrade of an image.
 type ImageUpgradeRun struct {
-	Started  time.Time `json:"started"`
-	Finished time.Time `json:"finished"`
-	Result   string    `json:"result"`
+	StartedAt  time.Time `json:"started_at"`
+	FinishedAt time.Time `json:"finished_at"`
+	Result     string    `json:"result"`
 	// Generation is the generation that was built; empty when nothing changed or the build failed.
 	Generation string `json:"generation,omitempty"`
 	// Jails counts the jails moved to the new generation and the jails whose packages were upgraded.
@@ -69,8 +69,8 @@ type ImageUpgradeRun struct {
 
 // ImageAutoUpgradeStatus is what the daemon knows about the automatic upgrade of an image.
 type ImageAutoUpgradeStatus struct {
-	// Next is the time of the next run; zero when auto upgrade is off.
-	Next time.Time `json:"next,omitempty"`
+	// NextAt is the time of the next run; zero when auto upgrade is off.
+	NextAt time.Time `json:"next_at,omitempty"`
 	// Recent holds the latest runs, newest first (up to ten).
 	Recent []ImageUpgradeRun `json:"recent,omitempty"`
 }

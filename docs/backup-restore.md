@@ -161,7 +161,7 @@ jail, not with it. The preflight lists the volumes a restore would make.
 
 A restore names the project it goes into (`--project`; there is no default) and is admitted like a new jail: the project's
 grants and quotas apply, and the network and storage must be granted to it. The jail gets a new UUID and fresh addresses
-(`--keep-ip` keeps the fixed addresses, `--map` moves its networks). `--replace` destroys an existing jail and needs its name
+(`--keep-ip` keeps the fixed addresses, `--network-map` moves its networks). `--replace` destroys an existing jail and needs its name
 typed or `--confirm-data-loss`.
 
 ### Restore on a new host

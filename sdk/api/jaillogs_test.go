@@ -54,21 +54,21 @@ func TestParseLogSince(t *testing.T) {
 
 func TestLogQuery(t *testing.T) {
 	q, err := ParseLogQuery(url.Values{})
-	if err != nil || q.Tail != DefaultLogTail {
+	if err != nil || q.Limit != DefaultLogLimit {
 		t.Fatalf("%+v %v", q, err)
 	}
-	q, err = ParseLogQuery(url.Values{"tail": {"50"}, "since": {"15m"}, "grep": {"Error"}, "offset": {"1200"}})
-	if err != nil || q != (JailLogQuery{Tail: 50, Since: "15m", Grep: "Error", Offset: 1200}) {
+	q, err = ParseLogQuery(url.Values{"limit": {"50"}, "since": {"15m"}, "grep": {"Error"}, "offset": {"1200"}})
+	if err != nil || q != (JailLogQuery{Limit: 50, Since: "15m", Grep: "Error", Offset: 1200}) {
 		t.Fatalf("%+v %v", q, err)
 	}
-	if got := q.Values().Encode(); got != "grep=Error&offset=1200&since=15m&tail=50" {
+	if got := q.Values().Encode(); got != "grep=Error&limit=50&offset=1200&since=15m" {
 		t.Errorf("values %q", got)
 	}
-	if got := (JailLogQuery{Tail: DefaultLogTail}).Values().Encode(); got != "" {
+	if got := (JailLogQuery{Limit: DefaultLogLimit}).Values().Encode(); got != "" {
 		t.Errorf("defaults are left out: %q", got)
 	}
 	for _, v := range []url.Values{
-		{"tail": {"0"}}, {"tail": {"x"}}, {"tail": {"5001"}}, {"tail": {"-1"}},
+		{"limit": {"0"}}, {"limit": {"x"}}, {"limit": {"5001"}}, {"limit": {"-1"}},
 		{"offset": {"-1"}}, {"offset": {"x"}}, {"since": {"soon"}}, {"grep": {strings.Repeat("a", 129)}},
 	} {
 		if _, err := ParseLogQuery(v); !IsCode(err, CodeInvalid) {
@@ -112,7 +112,7 @@ const sampleLog = "Oct 29 11:00:00 web sshd[1]: Accepted publickey\n" +
 func TestAssembleLogRead(t *testing.T) {
 	data := []byte(sampleLog)
 	size := int64(len(data))
-	q := JailLogQuery{Tail: DefaultLogTail}
+	q := JailLogQuery{Limit: DefaultLogLimit}
 	r := AssembleLogRead("web", "messages", data, 0, size, q, logNow)
 	if r.Jail != "web" || r.File != "messages" || len(r.Lines) != 5 || r.NextOffset != size || r.Rotated || r.Truncated {
 		t.Fatalf("%+v", r)
@@ -121,33 +121,33 @@ func TestAssembleLogRead(t *testing.T) {
 		t.Fatalf("%+v", r.Lines)
 	}
 	// since keeps a continuation line with its predecessor
-	r = AssembleLogRead("web", "messages", data, 0, size, JailLogQuery{Tail: 200, Since: "45m"}, logNow)
+	r = AssembleLogRead("web", "messages", data, 0, size, JailLogQuery{Limit: 200, Since: "45m"}, logNow)
 	if got := texts(r); got != "Oct 29 11:30:00 web cron[2]: (root) CMD (job)|  continued from cron|Oct 29 11:50:00 web nginx[3]: Error: upstream timed out|Oct 29 11:55:00 web sshd[1]: Disconnected" {
 		t.Errorf("since: %q", got)
 	}
 	// grep is a case-insensitive substring
-	r = AssembleLogRead("web", "messages", data, 0, size, JailLogQuery{Tail: 200, Grep: "error"}, logNow)
+	r = AssembleLogRead("web", "messages", data, 0, size, JailLogQuery{Limit: 200, Grep: "error"}, logNow)
 	if got := texts(r); got != "Oct 29 11:50:00 web nginx[3]: Error: upstream timed out" || r.Lines[0].N != 4 {
 		t.Errorf("grep: %q %+v", got, r.Lines)
 	}
 	// tail cuts from the front and says so
-	r = AssembleLogRead("web", "messages", data, 0, size, JailLogQuery{Tail: 2}, logNow)
+	r = AssembleLogRead("web", "messages", data, 0, size, JailLogQuery{Limit: 2}, logNow)
 	if got := texts(r); got != "Oct 29 11:50:00 web nginx[3]: Error: upstream timed out|Oct 29 11:55:00 web sshd[1]: Disconnected" || !r.Truncated {
 		t.Errorf("tail: %q %v", got, r.Truncated)
 	}
 	// a continuation from an offset: no line numbers, nothing dropped
 	off := int64(strings.Index(sampleLog, "Oct 29 11:55"))
-	r = AssembleLogRead("web", "messages", data[off:], off, size, JailLogQuery{Tail: 200, Offset: off}, logNow)
+	r = AssembleLogRead("web", "messages", data[off:], off, size, JailLogQuery{Limit: 200, Offset: off}, logNow)
 	if len(r.Lines) != 1 || r.Lines[0].N != 0 || r.Truncated || r.Rotated || r.NextOffset != size {
 		t.Errorf("offset: %+v", r)
 	}
 	// a window that began after the offset: the partial first line is dropped
-	r = AssembleLogRead("web", "messages", data[off+3:], off+3, size, JailLogQuery{Tail: 200, Offset: off}, logNow)
+	r = AssembleLogRead("web", "messages", data[off+3:], off+3, size, JailLogQuery{Limit: 200, Offset: off}, logNow)
 	if len(r.Lines) != 0 || !r.Truncated {
 		t.Errorf("partial: %+v", r)
 	}
 	// the file shrank below the offset: rotated, read from the start
-	r = AssembleLogRead("web", "messages", data, 0, size, JailLogQuery{Tail: 200, Offset: size + 100}, logNow)
+	r = AssembleLogRead("web", "messages", data, 0, size, JailLogQuery{Limit: 200, Offset: size + 100}, logNow)
 	if !r.Rotated || len(r.Lines) != 5 || r.Lines[0].N != 1 {
 		t.Errorf("rotated: %+v", r)
 	}

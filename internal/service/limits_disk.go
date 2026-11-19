@@ -35,7 +35,7 @@ func sizeOrNone(v string) string {
 	return v
 }
 
-// statesLimit is the number of pf states each pass rule of a jail's anchor may create: its limits.states, else the
+// statesLimit is the number of pf states each pass rule of a jail's anchor may create: its resources.states, else the
 // host's jails.max_states; 0 sets no limit.
 func (s *Service) statesLimit(j api.Jail) int {
 	if n := s.effective(j).Resources.States; n > 0 {

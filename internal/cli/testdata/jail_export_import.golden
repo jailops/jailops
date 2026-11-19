@@ -6,11 +6,11 @@ $ jailops jail export web --to <dir>/web.jailexport
 jail/web exported to <dir>/web.jailexport (0 dataset streams, 551 B, complete)
 
 $ jailops jail export web --to <dir>/web.jailexport
-! usage: <dir>/web.jailexport exists: choose another file, or --force to replace it
+! usage: <dir>/web.jailexport exists: choose another file, or --overwrite to replace it
 ! hint: run 'jailops jail export --help' for usage
 [exit 2]
 
-$ jailops jail export web --to <dir>/web.jailexport --force --zstd
+$ jailops jail export web --to <dir>/web.jailexport --overwrite --zstd
 jail/web exported to <dir>/web.jailexport (0 dataset streams, 551 B, complete)
 
 $ jailops jail export web

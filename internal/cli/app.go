@@ -175,7 +175,13 @@ func Execute(ctx context.Context, env *Env, args []string) int {
 		err = &usageError{err: err, hint: usageHint(root, args)}
 	}
 	a.printError(err)
-	return ExitCode(err)
+	code := ExitCode(err)
+	var xe *exitError
+	var ue *usageError
+	if runsInJail[a.cmdPath] && !errors.As(err, &xe) && !errors.As(err, &ue) {
+		return ExitNotRun
+	}
+	return code
 }
 
 func usageHint(root *cobra.Command, args []string) string {

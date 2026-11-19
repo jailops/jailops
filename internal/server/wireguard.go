@@ -14,13 +14,13 @@ func (s *Server) wireguardRoutes() []route {
 		list:   svc.ListWireGuard,
 		get:    func(ctx context.Context, k string) (api.WireGuard, error) { return svc.GetWireGuard(ctx, k) },
 		create: svc.CreateWireGuard, put: svc.UpdateWireGuard, patch: svc.PatchWireGuard, del: svc.DeleteWireGuard,
-		gen: func(v api.WireGuard) int64 { return v.Metadata.Generation }, name: func(v api.WireGuard) string { return v.Metadata.Name },
+		etag: func(v api.WireGuard) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.WireGuard) string { return v.Metadata.Name },
 	}.routes()
 	sync := func(c *rc, v api.WireGuard, err error) error {
 		if err != nil {
 			return err
 		}
-		c.sync(200, v, v.Metadata.Generation)
+		c.sync(200, v, api.ETag(v.Metadata.UUID, v.Metadata.Generation))
 		return nil
 	}
 	return append(out,
@@ -36,7 +36,7 @@ func (s *Server) wireguardRoutes() []route {
 			}
 			c.object = "/api/v1/wireguard/" + v.Metadata.Name
 			c.w.Header().Set("Location", c.object)
-			c.sync(201, v, v.Metadata.Generation)
+			c.sync(201, v, api.ETag(v.Metadata.UUID, v.Metadata.Generation))
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/wireguard/{name}/peers", h: func(c *rc) error {
@@ -49,7 +49,7 @@ func (s *Server) wireguardRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(201, v, 0)
+			c.sync(201, v, "")
 			return nil
 		}},
 		route{method: "DELETE", pattern: "/api/v1/wireguard/{name}/peers/{peer}", h: func(c *rc) error {
@@ -70,7 +70,7 @@ func (s *Server) wireguardRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 	)

@@ -52,13 +52,13 @@ $ jailops top --once -o json
     "load_15": 0.3,
     "cpus": 4,
     "cpu_percent": 7.5,
-    "memory_total": 4294967296,
-    "memory_used": 1073741824,
+    "memory_total_bytes": 4294967296,
+    "memory_used_bytes": 1073741824,
     "arc_bytes": 268435456,
     "pool": "tank",
-    "pool_size": 107374182400,
-    "pool_allocated": 10737418240,
-    "pool_free": 96636764160,
+    "pool_size_bytes": 107374182400,
+    "pool_allocated_bytes": 10737418240,
+    "pool_free_bytes": 96636764160,
     "running_jails": 3
   },
   "jails": [
@@ -110,13 +110,13 @@ host:
   load_15: 0.3
   cpus: 4
   cpu_percent: 7.5
-  memory_total: 4294967296
-  memory_used: 1073741824
+  memory_total_bytes: 4294967296
+  memory_used_bytes: 1073741824
   arc_bytes: 268435456
   pool: tank
-  pool_size: 107374182400
-  pool_allocated: 10737418240
-  pool_free: 96636764160
+  pool_size_bytes: 107374182400
+  pool_allocated_bytes: 10737418240
+  pool_free_bytes: 96636764160
   running_jails: 3
 jails:
   - project: main

@@ -459,6 +459,13 @@ func (g runGuard) Run(ctx context.Context, c run.Cmd) (run.Result, error) {
 		}
 		defer cleanup()
 	}
+	if rule.Name == "pkg-records" {
+		var cleanup func()
+		if argv, cleanup, err = g.l.sealRecordManifest(ctx, argv); err != nil {
+			return run.Result{}, err
+		}
+		defer cleanup()
+	}
 	max := time.Duration(rule.MaxTimeoutSeconds) * time.Second
 	if c.Timeout == 0 || c.Timeout == run.NoTimeout || c.Timeout > max {
 		c.Timeout = max

@@ -97,7 +97,7 @@ type AppAccess struct {
 	Warnings []string `json:"warnings,omitempty"`
 }
 
-// AppAllow is the body of POST /api/v1/jails/<name>/access.
+// AppAllow is the body of POST /api/v1/jails/<name>/access/allow.
 type AppAllow struct {
 	// Source is @jail, @address-set, an address or a prefix, or host.
 	Source string `json:"source"`

@@ -50,7 +50,7 @@ describe('SSE and protocol helpers', () => {
     expect(retry).toBe(3000)
   })
   it('maps non-JSON statuses as the protocol says', () => {
-    expect([400, 401, 403, 404, 405, 409, 412, 429, 502, 418, 500].map(codeFromStatus)).toEqual(['invalid', 'unauthorized', 'forbidden', 'not_found', 'unsupported', 'already_exists', 'conflict', 'busy', 'busy', 'invalid', 'internal'])
+    expect([400, 401, 403, 404, 405, 409, 412, 429, 502, 418, 500].map(codeFromStatus)).toEqual(['invalid', 'unauthorized', 'forbidden', 'not_found', 'unsupported', 'already_exists', 'precondition_failed', 'busy', 'busy', 'invalid', 'internal'])
   })
   it('sends the CSRF token from the login reply on state-changing requests only', async () => {
     storeCsrf('tok-1')

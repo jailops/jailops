@@ -70,7 +70,7 @@ func newLeakFixture(t *testing.T) *leakFixture {
 	if _, err := pa.Firewall().AddressSets().Create(c, api.AddressSet{Metadata: api.ObjectMeta{Name: "zalphaset"}, Spec: api.AddressSetSpec{Addresses: api.Entries("10.0.0.0/8")}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pa.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "zalphaprof"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.memory": "1G"}}}); err != nil {
+	if _, err := pa.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "zalphaprof"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.memory": "1G"}}}); err != nil {
 		t.Fatal(err)
 	}
 	e.Files.Put("/jailops/projects/alpha/jails/zalphajail/root/var/log/messages", []byte("Oct 29 11:00:00 zalpha secret line\n"))

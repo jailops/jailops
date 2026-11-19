@@ -709,7 +709,16 @@ func TestAProxyWhoseCaptureIsClosedDoesNotReportAnswering(t *testing.T) {
 func privateRunner() run.Runner {
 	f := run.NewFake()
 	f.Add(run.Rule{Name: "ifconfig", Args: []string{run.RestArgs}})
+	healthyPF(f)
 	return f
+}
+
+// healthyPF answers what the loop asks pf about itself: enabled, with the line that makes it evaluate the anchors.
+func healthyPF(f *run.Fake) {
+	f.Add(run.Rule{Name: "pfctl", Args: []string{"-s", "info"}, Fn: func(run.Cmd) (run.Result, error) { return run.Result{Stdout: []byte("Status: Enabled\n")}, nil }})
+	f.Add(run.Rule{Name: "pfctl", Args: []string{"-s", "rules"}, Fn: func(run.Cmd) (run.Result, error) {
+		return run.Result{Stdout: []byte("anchor \"jailops/*\" all\n")}, nil
+	}})
 }
 
 // A proxy that was just started reports "Starting" for the pass that started it (its capture opens in its own

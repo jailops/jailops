@@ -113,9 +113,9 @@ func (s *Service) shellMissing(key, name, sh string) string {
 
 func shellMissingHint(name, sh string) string {
 	if sh == api.BashPath {
-		return "install it with `jailops jail shell-setup " + name + "`, or use FreeBSD's own shell: `jailops set " + name + " shell sh`"
+		return "install it with `jailops jail shell-setup " + name + "`, or use FreeBSD's own shell: `jailops config set " + name + " shell sh`"
 	}
-	return "install it, or choose another with `jailops set " + name + " shell <path>`"
+	return "install it, or choose another with `jailops config set " + name + " shell <path>`"
 }
 
 // StartExec starts a command in a jail of the request's project: the same

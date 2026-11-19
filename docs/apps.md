@@ -147,7 +147,7 @@ Defaults are filled in when the definition is read, so the API always answers a 
 | `GET /api/v1/jails/<name>/app-draft` | `AppDraft`: `jail`, `definition` (a draft made from the running jail, valid as it is, with `TODO` markers), `todo` (a top-level key and what is left to do there), `findings` (what was found and left out); see [Write your own app](#write-your-own-app). Operator in the project, audited, extension `app_draft` |
 
 | `GET /api/v1/jails/<jail>/access` | `AppAccess` of an installed app: `jail`, `project`, `app`, `type` (the definition's access type), `policy` (`app-<jail>`), `closed`, `ports`, `grants`, `warnings`; see [Who may connect](#who-may-connect). Readonly in the project |
-| `POST /api/v1/jails/<jail>/access` | body `AppAllow` (`source`, `ports`, `database`, `rotate`, `dry_run`); answers `AppAllowResult` at once (`grant`, `changed`, `connection_string` once, `sql` without the password, `steps`, `notes`). Operator in the project, audited, extension `app_access` |
+| `POST /api/v1/jails/<jail>/access/allow` | body `AppAllow` (`source`, `ports`, `database`, `rotate`, `dry_run`); answers `AppAllowResult` at once (`grant`, `changed`, `connection_string` once, `sql` without the password, `steps`, `notes`). Operator in the project, audited, extension `app_access` |
 | `POST /api/v1/jails/<jail>/access/deny` | body `AppDeny` (`source`, `drop_role`, `dry_run`); answers `AppDenyResult` (`removed`, `changed`, `sql`, `steps`, `notes`). Operator, audited |
 | `POST /api/v1/apps/<name>/install` | body `AppInstall`: `jail` (default: the app name), `network`, `storage` (each defaults to the project's only grant of its kind), `image` (default: the FreeBSD image of the highest release the host can run, ties by name; none is `invalid`), `limits` (replaces the resource hints), `dry_run`; async, result `AppInstallResult`: `jail`, `version`, `addresses`, `ports` (with `endpoint`), `data`, `config`, `logs`, `notes`, `snapshot`, `steps` |
 
@@ -169,7 +169,7 @@ it for a running jail (`SeedAppDraft` sets the answer, `SeedLocalApp` adds a loc
 ([Adding or changing an app](#adding-or-changing-an-app)); it is the one command of the client that links the daemon's
 catalog validator (`internal/apps`, which imports nothing that runs commands or touches state; a test keeps it so).
 
-**`stop_timeout`** (seconds, optional) is the shutdown budget the app recommends: it becomes `boot.stop_timeout` of the jail. A database that needs a minute to flush and close says `stop_timeout: 60` (PostgreSQL does); an app that leaves it out gets the default, which is bounded too (see the stop in [operations.md](operations.md)).
+**`stop_timeout`** (seconds, optional) is the shutdown budget the app recommends: it becomes `boot.stop_timeout_seconds` of the jail. A database that needs a minute to flush and close says `stop_timeout: 60` (PostgreSQL does); an app that leaves it out gets the default, which is bounded too (see the stop in [operations.md](operations.md)).
 
 **Permissions.** The catalog is readable by **any authenticated identity**, whatever its role and project scope
 (route class `self`, like the configuration key registry): it is documentation of what the host can run, not an object
@@ -271,9 +271,9 @@ this order, each a step of the operation's plan (`--dry-run` returns them and do
    `default_in: deny`, `default_out: allow` and no rule. From the next reconcile pass (a few seconds) nothing reaches the jail, neither its
    network nor the host, until `jailops app allow` lets a source in ([Who may connect](#who-may-connect)). It comes after
    the health check, which connects from the host; the services have run only for the time of that check before. A
-   policy of that name that app access does not manage refuses the installation before it starts (`conflict`).
+   policy of that name that app access does not manage refuses the installation before it starts (`precondition_failed`).
 8. **Take the snapshot `app-installed`** of all the jail's datasets: the point to roll back to before the first
-   change (`jailops jail rollback JAIL --all --snapshot app-installed`).
+   change (`jailops jail rollback JAIL --scope all --snapshot app-installed`).
 9. **Start with the host** (`enable-autostart`): `boot.autostart` of the jail is turned on, the last step, so that an
    installation that was interrupted or failed, and is kept stopped for inspection, never starts again by itself. The
    jail then comes back at every boot, in the order `jailops boot` shows;
@@ -313,7 +313,7 @@ was started is stopped and kept.
 | the image is not FreeBSD, or its release is below `release_min` | `invalid` |
 | a project quota would be exceeded | `quota_exceeded` |
 | the role is below operator, or the identity has no project scope | `forbidden` |
-| a firewall policy `app-<jail>` exists that app access does not manage | `conflict` |
+| a firewall policy `app-<jail>` exists that app access does not manage | `precondition_failed` |
 
 A definition has no parameters: what needs a value is a `config` file the person edits, as `notes` says. The one
 generated secret is the password of a database role, made by `jailops app allow` and shown once
@@ -382,7 +382,7 @@ jailops firewall rule add to-shop-db out --action allow --proto tcp --to 10.20.0
      PASSWORD '<verifier>'` and `CREATE DATABASE "db" OWNER "db"`. The password is 32 characters of `[A-Za-z0-9]` from
      the system's random source; the daemon computes its SCRAM-SHA-256 verifier (4096 iterations, a random salt) and the
      server gets **the verifier, never the password**, so the password is in no statement, log or history of the
-     server. A role or a database of that name that JailOps did not make is refused (`conflict`): JailOps never changes
+     server. A role or a database of that name that JailOps did not make is refused (`precondition_failed`): JailOps never changes
      or drops a role it did not make.
    - `listen_addresses` is set once, with `ALTER SYSTEM`, to what it was plus the jail's addresses (`*` is left as it
      is), and the service named in the block is restarted through the same detached wrapper as a start; later grants
@@ -447,10 +447,10 @@ restart of a server whose `listen_addresses` was already set by hand, IPv6 sourc
 - **Logs.** A definition declares its log files and directories; reading them is a separate feature (the jail logs
   API) and the catalog only says where they are.
 - **Updates.** The packages of an app follow the jail's ordinary update policy ([upgrade.md](upgrade.md)):
-  `updates.packages` upgrades them with `pkg upgrade` inside the jail, `updates.os` moves the jail to a newer image
+  `update.packages` upgrades them with `pkg upgrade` inside the jail, `update.os` moves the jail to a newer image
   generation with the data datasets untouched. There is no separate app update; the catalog's `version` is what the
   definition was written against, not a pin.
-- **Rollback.** `jailops jail rollback JAIL --all --snapshot app-installed` is the way back to the fresh installation.
+- **Rollback.** `jailops jail rollback JAIL --scope all --snapshot app-installed` is the way back to the fresh installation.
 
 ## Deliberately out of scope
 

@@ -28,7 +28,7 @@ type JailLogFile struct {
 	// Name is the path below /var/log of the jail, at most one directory deep
 	// ("messages", "nginx/access.log").
 	Name       string      `json:"name"`
-	Size       int64       `json:"size"`
+	Size       int64       `json:"size_bytes"`
 	ModifiedAt time.Time   `json:"modified_at"`
 	Kind       JailLogKind `json:"kind"`
 	// Compressed marks a rotated copy that is compressed (.gz, .bz2, .xz): it
@@ -38,9 +38,9 @@ type JailLogFile struct {
 
 // JailLogQuery is the query string of GET /api/v1/jails/{name}/logs/{file}.
 type JailLogQuery struct {
-	// Tail is the number of lines from the end (default DefaultLogTail, at
-	// most MaxLogTail).
-	Tail int `json:"tail,omitempty"`
+	// Limit is the number of lines from the end (default DefaultLogLimit, at
+	// most MaxLogLimit).
+	Limit int `json:"limit,omitempty"`
 	// Since keeps the lines whose timestamp is not older: an RFC 3339 time or
 	// a duration before now ("15m", "2h", "1d"). A line without a timestamp
 	// of its own belongs to the preceding line's.
@@ -83,8 +83,8 @@ const HeaderTruncated = "X-Jailops-Truncated"
 
 // Limits of a log read.
 const (
-	DefaultLogTail  = 200
-	MaxLogTail      = 5000
+	DefaultLogLimit = 200
+	MaxLogLimit     = 5000
 	MaxLogGrep      = 128
 	MaxLogReadBytes = 1 << 20 // read per request, from the end of the file
 	MaxLogFileName  = 512
@@ -132,11 +132,11 @@ func LogFileKind(name string) (kind JailLogKind, compressed bool) {
 
 // Normalize fills the default tail and checks the limits.
 func (q JailLogQuery) Normalize() (JailLogQuery, error) {
-	if q.Tail == 0 {
-		q.Tail = DefaultLogTail
+	if q.Limit == 0 {
+		q.Limit = DefaultLogLimit
 	}
-	if q.Tail < 1 || q.Tail > MaxLogTail {
-		return q, Errorf(CodeInvalid, "tail must be between 1 and %d lines", MaxLogTail)
+	if q.Limit < 1 || q.Limit > MaxLogLimit {
+		return q, Errorf(CodeInvalid, "limit must be between 1 and %d lines", MaxLogLimit)
 	}
 	if len(q.Grep) > MaxLogGrep {
 		return q, Errorf(CodeInvalid, "grep is at most %d bytes", MaxLogGrep)
@@ -156,12 +156,12 @@ func (q JailLogQuery) Normalize() (JailLogQuery, error) {
 // ParseLogQuery reads a JailLogQuery from a query string.
 func ParseLogQuery(v url.Values) (JailLogQuery, error) {
 	var q JailLogQuery
-	if s := v.Get("tail"); s != "" {
+	if s := v.Get("limit"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 1 {
-			return q, Errorf(CodeInvalid, "tail must be a number of lines between 1 and %d", MaxLogTail)
+			return q, Errorf(CodeInvalid, "limit must be a number of lines between 1 and %d", MaxLogLimit)
 		}
-		q.Tail = n
+		q.Limit = n
 	}
 	if s := v.Get("offset"); s != "" {
 		n, err := strconv.ParseInt(s, 10, 64)
@@ -177,8 +177,8 @@ func ParseLogQuery(v url.Values) (JailLogQuery, error) {
 // Values is the query string of q; defaults are left out.
 func (q JailLogQuery) Values() url.Values {
 	v := url.Values{}
-	if q.Tail > 0 && q.Tail != DefaultLogTail {
-		v.Set("tail", strconv.Itoa(q.Tail))
+	if q.Limit > 0 && q.Limit != DefaultLogLimit {
+		v.Set("limit", strconv.Itoa(q.Limit))
 	}
 	if q.Since != "" {
 		v.Set("since", q.Since)
@@ -331,8 +331,8 @@ func AssembleLogRead(jail, file string, window []byte, start, size int64, q Jail
 		}
 		out.Lines = append(out.Lines, l)
 	}
-	if q.Tail > 0 && len(out.Lines) > q.Tail {
-		out.Lines = out.Lines[len(out.Lines)-q.Tail:]
+	if q.Limit > 0 && len(out.Lines) > q.Limit {
+		out.Lines = out.Lines[len(out.Lines)-q.Limit:]
 		out.Truncated = true
 	}
 	return out

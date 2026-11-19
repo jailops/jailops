@@ -17,7 +17,7 @@ import (
 // RecoveryOutcome says what startup recovery did with one interrupted run.
 type RecoveryOutcome struct {
 	Run    string
-	Action string // rolled-back, completed, dropped, needs-attention
+	Action string // one of api.RecoveryRolledBack, RecoveryCompleted, RecoveryDropped, RecoveryNeedsAttention
 	Detail string
 }
 
@@ -59,7 +59,7 @@ func (s *Service) recoverInterrupted(ctx context.Context) error {
 				_ = s.d.DB.Operations.Put(ctx, *op)
 			}
 		}
-		if out.Action != "needs-attention" {
+		if out.Action != api.RecoveryNeedsAttention {
 			_ = s.journal.Delete(ctx, rec.ID)
 			s.journal.deleteRequest(rec.ID)
 		}
@@ -90,7 +90,7 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 	kind, rest, _ := strings.Cut(rec.ID, "/")
 	req, haveReq := s.journal.getRequest(rec.ID)
 	fail := func(err error) RecoveryOutcome {
-		out.Action, out.Detail = "needs-attention", err.Error()
+		out.Action, out.Detail = api.RecoveryNeedsAttention, err.Error()
 		return out
 	}
 	recover := func(p *plan.Plan, err error) RecoveryOutcome {
@@ -101,9 +101,9 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		if err != nil {
 			return fail(err)
 		}
-		out.Action = "rolled-back"
+		out.Action = api.RecoveryRolledBack
 		if !found {
-			out.Action, out.Detail = "dropped", "the run had already ended"
+			out.Action, out.Detail = api.RecoveryDropped, "the run had already ended"
 		}
 		return out
 	}
@@ -148,7 +148,7 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 			return fail(fmt.Errorf("the rollback request was not recorded"))
 		}
 		if req.Rollback.Scope != api.RollbackRoot && req.Rollback.Scope != "" {
-			out.Action, out.Detail = "dropped", "data rollbacks are forward-only; repeat the rollback if it did not finish"
+			out.Action, out.Detail = api.RecoveryDropped, "data rollbacks are forward-only; repeat the rollback if it did not finish"
 			return out
 		}
 		if req.State == nil {
@@ -185,9 +185,9 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 				return fail(err)
 			}
 		}
-		out.Action = "rolled-back"
+		out.Action = api.RecoveryRolledBack
 		if !found && len(req.Import.Volumes) == 0 {
-			out.Action, out.Detail = "dropped", "the import had already ended"
+			out.Action, out.Detail = api.RecoveryDropped, "the import had already ended"
 		}
 		return out
 	case "start":
@@ -197,10 +197,10 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		if err := s.stopJail(ctx, rest); err != nil {
 			return fail(err)
 		}
-		out.Action, out.Detail = "completed", "the jail was stopped"
+		out.Action, out.Detail = api.RecoveryCompleted, "the jail was stopped"
 		return out
 	case "destroy":
-		out.Action, out.Detail = "dropped", "the destroy was interrupted; delete the jail again to finish"
+		out.Action, out.Detail = api.RecoveryDropped, "the destroy was interrupted; delete the jail again to finish"
 		return out
 	case "app-install":
 		// app-install/<key>: the jail is deleted while its start never
@@ -208,20 +208,20 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		// start's own run a half-made start), stopped and kept afterwards, as
 		// a failed installation leaves it.
 		if _, ok, _ := s.journal.Get(ctx, "create/"+rest); ok {
-			out.Action, out.Detail = "dropped", "the create of the jail is rolled back by its own run"
+			out.Action, out.Detail = api.RecoveryDropped, "the create of the jail is rolled back by its own run"
 			return out
 		}
 		if ok, err := s.d.ZFS.Exists(ctx, s.lcfg.ContainerDS(rest)); err != nil {
 			return fail(err)
 		} else if !ok {
-			out.Action, out.Detail = "dropped", "nothing was created"
+			out.Action, out.Detail = api.RecoveryDropped, "nothing was created"
 			return out
 		}
 		if rec.Done < 2 { // create-jail and start-jail are the first two steps
 			if _, err := s.life.DestroyJail(ctx, rest, true, false); err != nil {
 				return fail(err)
 			}
-			out.Action, out.Detail = "rolled-back", "the jail of the interrupted installation never completed a start and was deleted"
+			out.Action, out.Detail = api.RecoveryRolledBack, "the jail of the interrupted installation never completed a start and was deleted"
 			return out
 		}
 		if err := s.stopJail(ctx, rest); err != nil {
@@ -231,7 +231,7 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		if err := s.setJailAutostart(ctx, rest, false); err != nil {
 			return fail(err)
 		}
-		out.Action, out.Detail = "completed", "the jail of the interrupted installation was stopped and kept for inspection; delete it to install again"
+		out.Action, out.Detail = api.RecoveryCompleted, "the jail of the interrupted installation was stopped and kept for inspection; delete it to install again"
 		return out
 	case "image-build", "image-receive":
 		// image-build/<image>/g<N>: remove the staging dataset of the run on
@@ -250,7 +250,7 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 				}
 			}
 		}
-		out.Action, out.Detail = "rolled-back", "the staging dataset was removed"
+		out.Action, out.Detail = api.RecoveryRolledBack, "the staging dataset was removed"
 		return out
 	case "rename":
 		// rename/<kind>/<project>/<name>: the steps were recorded before the first ran
@@ -261,13 +261,13 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		if err != nil {
 			return fail(err)
 		}
-		out.Action, out.Detail = "rolled-back", "the interrupted rename was undone; the old name is in force"
+		out.Action, out.Detail = api.RecoveryRolledBack, "the interrupted rename was undone; the old name is in force"
 		if !found {
-			out.Action, out.Detail = "dropped", "the run had already ended"
+			out.Action, out.Detail = api.RecoveryDropped, "the run had already ended"
 		}
 		return out
 	case "image-delete":
-		out.Action, out.Detail = "dropped", "the generation delete was interrupted; delete it again to finish"
+		out.Action, out.Detail = api.RecoveryDropped, "the generation delete was interrupted; delete it again to finish"
 		return out
 	case "create-volume":
 		// create-volume/<project>_<name>: the dataset the run made is taken away again (the volume has no object yet:
@@ -279,9 +279,9 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 		if err != nil {
 			return fail(err)
 		}
-		out.Action, out.Detail = "rolled-back", "the interrupted creation of the volume was undone; create it again"
+		out.Action, out.Detail = api.RecoveryRolledBack, "the interrupted creation of the volume was undone; create it again"
 		if !found {
-			out.Action, out.Detail = "dropped", "the run had already ended"
+			out.Action, out.Detail = api.RecoveryDropped, "the run had already ended"
 		}
 		return out
 	}

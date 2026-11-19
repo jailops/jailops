@@ -11,7 +11,6 @@
 package api
 
 import (
-	"strings"
 	"time"
 )
 
@@ -55,13 +54,17 @@ const (
 	KindHostCertificate Kind = "HostCertificate"
 )
 
-// Scope says who is authoritative for an object.
+// Scope says how an object is managed.
 //
-// ScopeHost objects live on exactly one host and are authoritative in that
-// host's state dataset. ScopeFleet objects are shared management metadata:
-// authoritative in the local state files on a single host or hub, and
-// authoritative in the Raft log when cluster mode is enabled (the local files
-// are then a projection of the log).
+// Every object is authoritative on the host that stores it: ScopeHost objects
+// live on exactly one host (jails, volumes, projects, storage), and ScopeFleet
+// objects (images, networks, policies, address sets, profiles, backup
+// policies, targets, remotes, certificates, users, tokens, WireGuard tunnels)
+// are objects that the hub and the fleet repository may manage with one
+// definition. ScopeFleet does not mean shared state: each host keeps its own
+// copy and the host's files are the truth. Shared authority, a replicated log
+// from which the local files would be a projection, belongs to cluster mode,
+// which is not built. Authorities lists the owner of every kind.
 type Scope string
 
 const (
@@ -73,8 +76,13 @@ const (
 type ObjectMeta struct {
 	// Name is unique per kind within its scope (per host for ScopeHost).
 	Name string `json:"name" yaml:"name"`
-	// UUID is assigned once at creation, never reused, and stable across
-	// restore, migration and rename. Cross-host references use UUIDs.
+	// UUID names one incarnation of an object: assigned at creation, never reused, and kept by a rename and by a
+	// recovery or move that is meant to keep the logical identity (restore with replace, a future move). Copying a
+	// jail and restoring a backup under another name (restore --as) make a new object with a new UUID. The same
+	// name created again after a delete is a new object with a new UUID, and its Generation counts from 1 again, so a
+	// generation alone never tells two incarnations apart: the ETag of an object carries both, so If-Match fails for
+	// a replacement. Cross-host references use UUIDs; the same project name on two
+	// hosts is two local objects until a shared project identity exists.
 	UUID string `json:"uuid,omitempty" yaml:"uuid,omitempty"`
 	// Project is the namespace of a project-level object (jails, volumes,
 	// firewall policies, address sets, snapshots, backup policies). A project-level
@@ -112,6 +120,15 @@ type Condition struct {
 	Since   time.Time `json:"since,omitzero"`
 }
 
+// Problem reports whether the condition is a fault that someone should look at: any condition that is not True, except a
+// jail that is stopped (Ready is False with the reason ConditionStopped, and nothing is wrong).
+func (c Condition) Problem() bool {
+	return c.Status != ConditionTrue && !(c.Type == "Ready" && c.Reason == ConditionStopped)
+}
+
+// ConditionStopped is the reason of Ready=False for a jail that is not running.
+const ConditionStopped = "Stopped"
+
 // Condition status values.
 const (
 	ConditionTrue    = "True"
@@ -124,33 +141,21 @@ const (
 // hold the rendered members and the connections of removed rules are ended. A policy that is stored but not yet
 // loaded is False ("NotLoaded"). The other reasons are "PFNotApplying" (pf disabled, the line anchor "jailops/*"
 // missing from its main ruleset, or the ruleset unreadable) and "StatesPending" (pf refused to end the connections of a
-// removed rule; the next pass tries again); True has the reason "Applied" and names the rules by a short hash.
+// removed rule; the next pass tries again). When the loop could not ask pf whether it evaluates the anchors (pfctl gave
+// no answer or no status) the condition is Unknown with the reason "Unverified": the rendered rules are loaded but
+// nothing says they are applied. True has the reason "Applied" and names the rules by a short hash.
 const ConditionFirewallApplied = "FirewallApplied"
 
-// ShellInstalling is the reason of the ShellSetup condition while bash is being installed into a running jail in the
-// background: `jailops shell` waits for it.
-const ShellInstalling = "Installing"
-
-// The message of the ShellSetup condition while bash is being installed names the step the setup is in:
-// ShellInstallingMessage(step) and ShellInstallingStep(message) are each other's inverse.
+// The states of status.shell_setup.
 const (
-	shellInstallingPrefix = "bash is being installed in the background: "
-	shellInstallingSuffix = "; `jailops shell` waits for it"
+	// ShellSetupInstalling: bash is being installed into the running jail in the background; `jailops shell` waits for it.
+	ShellSetupInstalling = "installing"
+	// ShellSetupFailed: the latest setup failed; the ShellSetup condition says why.
+	ShellSetupFailed = "failed"
 )
 
-// ShellInstallingMessage is the message of the ShellSetup condition for a setup that is in the step.
-func ShellInstallingMessage(step string) string {
-	return shellInstallingPrefix + step + shellInstallingSuffix
-}
-
-// ShellInstallingStep is the step a ShellSetup condition message names, or "" for a message of another form.
-func ShellInstallingStep(message string) string {
-	m, ok := strings.CutPrefix(message, shellInstallingPrefix)
-	if !ok {
-		return ""
-	}
-	return strings.TrimSuffix(m, shellInstallingSuffix)
-}
+// ShellInstalling is the reason of the ShellSetup condition while bash is being installed.
+const ShellInstalling = "Installing"
 
 // Document is the declarative envelope used in YAML files and in the state
 // dataset. Spec is decoded according to Kind.

@@ -156,7 +156,7 @@ func (s *Service) PatchProfile(ctx context.Context, name string, patch map[strin
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "profile %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "profile %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.Profile
 	if err := MergePatch(cur, patch, &out); err != nil {
@@ -470,7 +470,7 @@ func (s *Service) ConfigureJail(ctx context.Context, name string, ch api.ConfigC
 	}
 	nlocks := s.netLocksEff(p.Meta.Name, pre.Spec)
 	return s.Submit(ctx, OpSpec{
-		Description: "Configure jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
+		Action: api.OpJailConfigure, Description: "Configure jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			cur, err := s.jailSnapshot(key)

@@ -99,7 +99,7 @@ func (s *Service) Rebuild(ctx context.Context, name string) (Recovered, error) {
 	rec.Metadata.Scope = api.ScopeHost
 	out.Jail = api.Jail{Metadata: rec.Metadata, Spec: rec.Spec, Status: api.JailStatus{Power: power}}
 	if st.Gen > 0 {
-		out.Jail.Status.Generation = genName(st.Image, st.Gen)
+		out.Jail.Status.ImageGeneration = genName(st.Image, st.Gen)
 	}
 	if layout := st.Layout; layout != "" && out.Jail.Spec.Layout == "" {
 		out.Jail.Spec.Layout = layout

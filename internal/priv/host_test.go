@@ -436,7 +436,7 @@ func TestHostNTPBlockKeepsTheRest(t *testing.T) {
 		HostNTPBegin + "\n" + HostNTPBegin + "\n" + HostNTPEnd + "\n",
 		HostNTPBegin + "\n" + HostNTPEnd + "\n" + HostNTPEnd + "\n",
 	} {
-		if _, err := renderNTP(bad, []string{"192.0.2.1"}); !api.IsCode(err, api.CodeConflict) {
+		if _, err := renderNTP(bad, []string{"192.0.2.1"}); !api.IsCode(err, api.CodePreconditionFailed) {
 			t.Errorf("%q: %v", bad, err)
 		}
 	}
@@ -445,7 +445,7 @@ func TestHostNTPBlockKeepsTheRest(t *testing.T) {
 	c := hostWire(t, e)
 	broken := origNTP + HostNTPBegin + "\nserver 192.0.2.9\n"
 	mustWrite(t, filepath.Join(e.base, "etc", "ntp.conf"), broken)
-	if _, err := c.HostIdentityApply(admin(), goodSpec(), false); !api.IsCode(err, api.CodeConflict) {
+	if _, err := c.HostIdentityApply(admin(), goodSpec(), false); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Errorf("%v", err)
 	}
 	if readFile(t, filepath.Join(e.base, "etc", "ntp.conf")) != broken || readFile(t, filepath.Join(e.base, "etc", "resolv.conf")) != origResolv {

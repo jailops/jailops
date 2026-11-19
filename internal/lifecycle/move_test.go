@@ -316,7 +316,7 @@ func TestRestoringASnapshotOfAnotherImageNeedsTheRootRollbackFirst(t *testing.T)
 		t.Fatal(err)
 	}
 	_, err := rollback(w, RollbackOptions{JailRollback: api.JailRollback{Scope: api.RollbackAll, Snapshot: "before", ConfirmDataLoss: true}})
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	if err == nil || !strings.Contains(err.Error(), "jailops jail rollback") {
 		t.Fatal(err)
 	}
@@ -336,5 +336,21 @@ func TestMoveToANewMajorReleaseWarnsAboutThePackages(t *testing.T) {
 	w.Jails.Release = "15.1-RELEASE"
 	if res, err = upgrade(w, api.JailUpgrade{Image: "fc", DryRun: true}); err != nil || len(res.Warnings) != 0 {
 		t.Fatal(res.Warnings, err)
+	}
+}
+
+// A dry run only looks: it never asks for an image to be built or received.
+func TestDryRunNeverBuildsAnImage(t *testing.T) {
+	w := movable(t)
+	w.Images.ensures = 0
+	if res, err := upgrade(w, api.JailUpgrade{Image: "fc", DryRun: true}); err != nil || !res.Changed {
+		t.Fatal(res, err)
+	}
+	if w.Images.ensures != 0 || w.Images.peeks == 0 {
+		t.Fatalf("a dry run asked to provide an image %d times and to look %d times", w.Images.ensures, w.Images.peeks)
+	}
+	_, err := upgrade(w, api.JailUpgrade{Image: "nope", DryRun: true})
+	if !api.IsCode(err, api.CodeNotFound) || w.Images.ensures != 0 {
+		t.Fatalf("a dry run for an image that does not exist: %v (provided %d times)", err, w.Images.ensures)
 	}
 }

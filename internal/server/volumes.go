@@ -15,7 +15,7 @@ func (s *Server) volumeRoutes() []route {
 		list: svc.ListVolumes,
 		get:  func(ctx context.Context, k string) (api.Volume, error) { return svc.GetVolume(ctx, k) },
 		put:  svc.UpdateVolume, patch: svc.PatchVolume,
-		gen: func(v api.Volume) int64 { return v.Metadata.Generation }, name: func(v api.Volume) string { return v.Metadata.Name },
+		etag: func(v api.Volume) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Volume) string { return v.Metadata.Name },
 	}.routes()
 	// The passphrase of an encrypted volume is in the body of these requests and nowhere else.
 	return append(vr,
@@ -77,7 +77,7 @@ func (s *Server) volumeRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/volumes/{name}/snapshots", h: func(c *rc) error {

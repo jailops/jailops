@@ -129,7 +129,7 @@ func TestRebuildFromDatasets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if r.Jail.Metadata.Name != "web" || r.Jail.Metadata.UUID != "uuid-web" || r.Jail.Status.Generation != "fb#g2" || r.Jail.Status.Power != api.PowerRunning {
+	if r.Jail.Metadata.Name != "web" || r.Jail.Metadata.UUID != "uuid-web" || r.Jail.Status.ImageGeneration != "fb#g2" || r.Jail.Status.Power != api.PowerRunning {
 		t.Fatalf("%+v", r.Jail)
 	}
 	if len(r.Problems) != 0 || len(r.Notes) != 1 || r.Notes[0] != "leftover root.old" {

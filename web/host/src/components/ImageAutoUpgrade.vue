@@ -62,7 +62,7 @@ const tone = (r: string) => (r === 'ok' ? 'ok' : r === 'failed' ? 'danger' : 'in
   <section class="body au" :aria-labelledby="id('h')" data-test="auto-upgrade" :data-enabled="!!spec?.enabled">
     <h3 :id="id('h')" class="au-h">{{ s.autoUpgrade.title }}</h3>
     <Callout v-if="lastFailed" tone="danger" data-test="auto-upgrade-failed">
-      <strong>{{ s.autoUpgrade.lastFailed(stamp(lastFailed.started)) }}</strong>
+      <strong>{{ s.autoUpgrade.lastFailed(stamp(lastFailed.started_at)) }}</strong>
       <span v-if="lastFailed.detail" class="au-detail mono">{{ lastFailed.detail }}</span>
       <span class="au-detail">{{ s.autoUpgrade.lastFailedText }}</span>
     </Callout>
@@ -90,7 +90,7 @@ const tone = (r: string) => (r === 'ok' ? 'ok' : r === 'failed' ? 'danger' : 'in
     </p>
     <p v-if="editable && spec?.enabled && !dirty" class="muted au-state" data-test="auto-upgrade-summary">{{ s.autoUpgrade.on(at, !!spec.packages) }}</p>
 
-    <p v-if="spec?.enabled && status?.next" class="au-next" data-test="auto-upgrade-next">{{ s.autoUpgrade.next }}: <TimeStamp :ts="status.next" /></p>
+    <p v-if="spec?.enabled && status?.next_at" class="au-next" data-test="auto-upgrade-next">{{ s.autoUpgrade.next }}: <TimeStamp :ts="status.next_at" /></p>
 
     <template v-if="recent.length">
       <h4 :id="id('recent')" class="au-sub">{{ s.autoUpgrade.recent }}</h4>
@@ -98,8 +98,8 @@ const tone = (r: string) => (r === 'ok' ? 'ok' : r === 'failed' ? 'danger' : 'in
         <table class="rtable" :aria-labelledby="id('recent')" data-test="auto-upgrade-runs">
           <thead><tr><th>{{ s.autoUpgrade.started }}</th><th>{{ s.autoUpgrade.result }}</th><th>{{ s.autoUpgrade.generation }}</th><th>{{ s.autoUpgrade.jails }}</th><th>{{ s.autoUpgrade.detail }}</th></tr></thead>
           <tbody>
-            <tr v-for="r in recent" :key="r.started" :data-result="r.result">
-              <td :data-label="s.autoUpgrade.started"><TimeStamp :ts="r.started" /></td>
+            <tr v-for="r in recent" :key="r.started_at" :data-result="r.result">
+              <td :data-label="s.autoUpgrade.started"><TimeStamp :ts="r.started_at" /></td>
               <td :data-label="s.autoUpgrade.result"><span class="pill" :class="tone(r.result)">{{ s.autoUpgrade.results[r.result] ?? r.result }}</span></td>
               <td class="mono" :data-label="s.autoUpgrade.generation">{{ r.generation || '-' }}</td>
               <td :data-label="s.autoUpgrade.jails">{{ s.autoUpgrade.jailCounts(r.jails_moved ?? 0, r.jails_upgraded ?? 0, r.jails_failed ?? 0) }}</td>

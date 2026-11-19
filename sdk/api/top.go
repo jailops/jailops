@@ -32,14 +32,14 @@ type TopHost struct {
 	CPUPercent *float64 `json:"cpu_percent,omitempty"`
 	// MemoryTotal is the physical memory; MemoryUsed what the kernel and the processes hold (wired and active), the
 	// ZFS cache included, which ARCBytes shows on its own.
-	MemoryTotal uint64  `json:"memory_total,omitempty"`
-	MemoryUsed  *uint64 `json:"memory_used,omitempty"`
+	MemoryTotal uint64  `json:"memory_total_bytes,omitempty"`
+	MemoryUsed  *uint64 `json:"memory_used_bytes,omitempty"`
 	ARCBytes    *uint64 `json:"arc_bytes,omitempty"`
 	// Pool is the pool that holds the JailOps datasets.
 	Pool          string  `json:"pool,omitempty"`
-	PoolSize      *uint64 `json:"pool_size,omitempty"`
-	PoolAllocated *uint64 `json:"pool_allocated,omitempty"`
-	PoolFree      *uint64 `json:"pool_free,omitempty"`
+	PoolSize      *uint64 `json:"pool_size_bytes,omitempty"`
+	PoolAllocated *uint64 `json:"pool_allocated_bytes,omitempty"`
+	PoolFree      *uint64 `json:"pool_free_bytes,omitempty"`
 	// RunningJails is the number of running jails on the host, in every project.
 	RunningJails int `json:"running_jails"`
 }
@@ -53,15 +53,15 @@ type TopJail struct {
 	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
 	// CPUPercent is the CPU the jail uses in percent of one core (100 is one full core, 250 two and a half).
 	CPUPercent *float64 `json:"cpu_percent,omitempty"`
-	// CPULimitPercent is the limit of limits.cpu in the same unit; zero without a limit.
+	// CPULimitPercent is the limit of resources.cpu in the same unit; zero without a limit.
 	CPULimitPercent int `json:"cpu_limit_percent,omitempty"`
-	// MemoryBytes is the resident memory of the jail's processes; MemoryLimitBytes the limit of limits.memory, which
+	// MemoryBytes is the resident memory of the jail's processes; MemoryLimitBytes the limit of resources.memory, which
 	// limits the memory the jail reserves, not the resident memory; zero without a limit.
 	MemoryBytes      *int64 `json:"memory_bytes,omitempty"`
 	MemoryLimitBytes int64  `json:"memory_limit_bytes,omitempty"`
 	// Processes is the number of processes.
 	Processes *int `json:"processes,omitempty"`
-	// DiskBytes is what the jail's own datasets take on the pool; DiskQuotaBytes the limit of limits.disk, zero
+	// DiskBytes is what the jail's own datasets take on the pool; DiskQuotaBytes the limit of resources.disk, zero
 	// without one.
 	DiskBytes      *int64 `json:"disk_bytes,omitempty"`
 	DiskQuotaBytes int64  `json:"disk_quota_bytes,omitempty"`

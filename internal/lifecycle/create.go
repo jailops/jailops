@@ -141,7 +141,7 @@ func (s *Service) planCreate(ctx context.Context, j api.Jail, recovering bool) (
 	now := s.Cfg.now() // with a fixed Config.Now the rebuilt records are identical
 	j.Metadata.Scope, j.Metadata.Generation = api.ScopeHost, 1
 	j.Metadata.CreatedAt, j.Metadata.UpdatedAt = now, now
-	j.Status = api.JailStatus{Power: api.PowerStopped, Generation: gen.Name}
+	j.Status = api.JailStatus{Power: api.PowerStopped, ImageGeneration: gen.Name}
 	rec := Record{Version: 1, Metadata: j.Metadata, Spec: j.Spec}
 
 	rootDS, rootMP, cMP := s.Cfg.at(name).rootDS(), s.Cfg.at(name).rootMP(), s.Cfg.at(name).containerMP()

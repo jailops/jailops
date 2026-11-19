@@ -8,7 +8,7 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-const webBody = `{"metadata":{"name":"web"},"spec":{"image":"fb","storage":"default","update":{"strategy":"rebase","healthcheck":"/bin/true"},"network":[{"network":"lan","ipv4":"auto"}]}}`
+const webBody = `{"metadata":{"name":"web"},"spec":{"image":"fb","storage":"default","update":{"healthcheck":"/bin/true"},"network":[{"network":"lan","ipv4":"auto"}]}}`
 
 // settled waits until the background setup of the shell of a new jail is over, so that the jail a transcript shows is
 // the same one every time (the setup is the daemon's own work and its timing is not part of the contract).

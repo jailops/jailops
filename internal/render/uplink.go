@@ -31,7 +31,7 @@ func (in *PFInput) uplinkFor(a netip.Addr) string {
 }
 
 // UplinkStateLimit is the number of states one pass rule on the uplink may create when neither the jail nor the host has a
-// limit (limits.states, jails.max_states: 0 is none): a flood of connection attempts from the Internet fills the rule's states and not the host's state table.
+// limit (resources.states, jails.max_states: 0 is none): a flood of connection attempts from the Internet fills the rule's states and not the host's state table.
 const UplinkStateLimit = 5000
 
 // routedUplinks are the jail's addresses that the upstream reaches by routing, with their uplink: where a connection from

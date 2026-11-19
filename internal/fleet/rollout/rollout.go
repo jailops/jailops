@@ -211,7 +211,7 @@ func (e *Executor) begin(ctx context.Context, r *config.Rollout, hash string) (*
 					return nil, fmt.Errorf("host %s jail %s: %w", h, j.Metadata.Name, err)
 				}
 			}
-			st.Items = append(st.Items, &Item{Host: h, Jail: j.Metadata.Name, From: j.Status.Generation, To: to, State: ItemPending})
+			st.Items = append(st.Items, &Item{Host: h, Jail: j.Metadata.Name, From: j.Status.ImageGeneration, To: to, State: ItemPending})
 		}
 	}
 	if len(st.Items) == 0 {
@@ -329,7 +329,7 @@ func (e *Executor) upgrade(ctx context.Context, st *State, it *Item) error {
 	if err != nil {
 		return e.fail(st, it, err)
 	}
-	if status.Generation == it.To {
+	if status.ImageGeneration == it.To {
 		it.State, it.Note = ItemVerifying, "already on "+it.To
 		return e.save(st)
 	}
@@ -354,7 +354,7 @@ func (e *Executor) await(ctx context.Context, st *State, it *Item) error {
 				// The daemon no longer knows the operation: judge by the jail.
 				it.Op = ""
 				status, serr := c.Jails().State(ctx, it.Jail)
-				if serr == nil && status.Generation == it.To {
+				if serr == nil && status.ImageGeneration == it.To {
 					it.State = ItemVerifying
 					return e.save(st)
 				}
@@ -433,8 +433,8 @@ func healthy(s api.JailStatus, to string) (bool, string) {
 	if s.Power != api.PowerRunning {
 		return false, "power is " + string(s.Power)
 	}
-	if to != "" && s.Generation != to {
-		return false, fmt.Sprintf("generation is %s, want %s", s.Generation, to)
+	if to != "" && s.ImageGeneration != to {
+		return false, fmt.Sprintf("generation is %s, want %s", s.ImageGeneration, to)
 	}
 	for _, c := range s.Conditions {
 		if (c.Type == "Ready" || c.Type == "Healthy") && c.Status != api.ConditionTrue {

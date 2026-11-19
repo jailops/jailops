@@ -15,6 +15,7 @@ import (
 	"jailops.net/jailops/internal/state"
 	"jailops.net/jailops/internal/store"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/sdk/api"
 )
 
 func goArch() string {
@@ -24,10 +25,18 @@ func goArch() string {
 	return "amd64"
 }
 
-// hostIdentity returns the persistent host UUID, creating it on first start.
+// hostIdentity returns the persistent host UUID. A first start (no uuid stored) creates it. Any other failure to read
+// it stops the start: a new identity made from a transient read error would orphan the backups, the hub registration
+// and every plan that names this host. An empty stored value is corrupt and stops the start as well.
 func hostIdentity(ctx context.Context, db *store.Store) (string, error) {
-	if v, err := db.Meta.Get(ctx, "host_uuid"); err == nil && v != "" {
+	v, err := db.Meta.Get(ctx, "host_uuid")
+	switch {
+	case err == nil && v != "":
 		return v, nil
+	case err == nil:
+		return "", fmt.Errorf("daemon: the stored host uuid is empty: the database is damaged; restore it from a copy (docs/upgrade.md) or, to adopt this machine as a new host, remove the host_uuid row on purpose")
+	case !api.IsCode(err, api.CodeNotFound):
+		return "", fmt.Errorf("daemon: reading the host uuid (the start stops so that no new identity is made from a read error): %w", err)
 	}
 	id := state.NewUUID()
 	if err := db.Meta.Set(ctx, "host_uuid", id); err != nil {

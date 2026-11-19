@@ -19,7 +19,7 @@ func (s *Server) bootRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 	}

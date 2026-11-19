@@ -22,7 +22,7 @@ func (a *app) stopAllCmd() *cobra.Command {
 		Use:   "stop-all",
 		Short: "Stop every running jail of every project you may use, dependents first",
 		Long: `Stop every running jail of every project you may use, up to eight at a time, each
-with its own graceful shutdown (--grace sets how long a jail gets, --force skips it).
+with its own graceful shutdown (--timeout sets how long a jail gets, --force skips it).
 No project needs to be chosen.
 
 The order is the reverse of the boot order ('jailops boot'): a jail stops before the
@@ -33,7 +33,7 @@ are stopped anyway; the exit status says whether all stopped.
 The host does this itself when it shuts down (the rc script jailops_shutdown, enabled
 with jailopsd_enable), so that databases and other services get their shutdown and the
 poststop hooks run, instead of every process of the jails being killed at once.`,
-		Example: "jailops stop-all\njailops stop-all --grace 60s\njailops stop-all --dry-run",
+		Example: "jailops stop-all\njailops stop-all --timeout 60s\njailops stop-all --dry-run",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var opts []sdk.ActionOption
@@ -192,6 +192,6 @@ poststop hooks run, instead of every process of the jails being killed at once.`
 		},
 	}
 	cmd.Flags().BoolVar(&force, "force", false, "do not wait for a graceful shutdown")
-	cmd.Flags().StringVar(&grace, "grace", "", "time each jail gets to shut down: seconds, or a duration such as 30s")
+	cmd.Flags().StringVar(&grace, "timeout", "", "time each jail gets to shut down: seconds, or a duration such as 30s")
 	return cmd
 }

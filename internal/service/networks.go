@@ -161,7 +161,7 @@ func (s *Service) validateNetwork(name string, spec *api.NetworkSpec, self strin
 		// would be answered, routed and filtered for the other.
 		// (a network of the same name is reported as existing by the caller)
 		if p, q, ok := overlappingSubnets(*spec, o.Spec); ok && o.Meta.Name != name {
-			return api.Errorf(api.CodeConflict, "subnet %s overlaps subnet %s of network %q", p, q, o.Meta.Name).
+			return api.Errorf(api.CodePreconditionFailed, "subnet %s overlaps subnet %s of network %q", p, q, o.Meta.Name).
 				WithHint("choose a subnet that no other network uses")
 		}
 	}
@@ -345,7 +345,7 @@ func (s *Service) PatchNetwork(ctx context.Context, name string, patch map[strin
 		return api.Network{}, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return api.Network{}, api.Errorf(api.CodeConflict, "network %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return api.Network{}, api.Errorf(api.CodePreconditionFailed, "network %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.Network
 	if err := MergePatch(cur, patch, &out); err != nil {

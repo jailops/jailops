@@ -21,6 +21,7 @@ import (
 	"jailops.net/jailops/internal/daemon"
 	"jailops.net/jailops/internal/fleet/model"
 	"jailops.net/jailops/internal/lifecycle"
+	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/internal/state"
 	"jailops.net/jailops/internal/store"
 	"jailops.net/jailops/internal/validate"
@@ -572,6 +573,10 @@ func configOf(t *testing.T, dir string) {
 // knownKeys reads a daemon configuration the way the daemon does (an unknown key is an error) without the checks of the
 // values: only the keys are under test here.
 func knownKeys(b []byte) error {
+	b, err := daemon.UpgradeConfig(b)
+	if err != nil {
+		return err
+	}
 	var c daemon.Config
 	dec := yaml.NewDecoder(bytes.NewReader(b))
 	dec.KnownFields(true)
@@ -731,5 +736,140 @@ func TestTheNightlyUpgradeRunIsWired(t *testing.T) {
 	}
 	if !runsScript {
 		t.Error("the VM step does not run scripts/ci-freebsd-upgrade.sh and treat exit status 75 as skipped")
+	}
+}
+
+// TestUpgradeRewritesTheNamesOfThisRelease puts the shapes that releases before the API freeze wrote into a copy of the
+// newest fixture (the fixtures themselves stay as the releases made them) and opens it with the current code: the
+// names must be converted once, nothing may be lost, and a second open must change nothing.
+func TestUpgradeRewritesTheNamesOfThisRelease(t *testing.T) {
+	vs := versions(t)
+	src := filepath.Join(fixtureRoot, vs[len(vs)-1])
+	dir := t.TempDir()
+	copyTree(t, src, dir)
+
+	// a jail written with the old names
+	specPath := filepath.Join(dir, "jails", "shop", "web", "spec.json")
+	var rec map[string]any
+	readJSON(t, specPath, &rec)
+	spec := rec["spec"].(map[string]any)
+	spec["boot"].(map[string]any)["stop_timeout"] = 45
+	spec["update"] = map[string]any{"strategy": "manual", "window": "sun 03:00", "healthcheck": "/bin/true"}
+	spec["expose"].([]any)[0].(map[string]any)["by"] = "admin"
+	spec["expose"].([]any)[0].(map[string]any)["at"] = "2026-01-02T03:04:05Z"
+	if err := os.WriteFile(specPath, mustMarshal(t, rec), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// a profile written with the old keys
+	profDir := filepath.Join(dir, "state", "objects", "Profile")
+	if err := os.MkdirAll(profDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	const profUUID = "00000000-0000-4000-8000-0000000000f1"
+	prof := map[string]any{
+		"apiVersion": api.APIVersion, "kind": "Profile",
+		"metadata": map[string]any{"name": "small", "uuid": profUUID, "project": "host", "scope": "host", "generation": 1,
+			"created_at": "2026-01-02T03:04:05Z", "updated_at": "2026-01-02T03:04:05Z"},
+		"spec": map[string]any{"config": map[string]any{
+			"limits.memory": "512M", "limits.pids": "200", "nic.eth1.network": "lan", "disk.data.mount": "/srv/data",
+			"updates.mode": "notify", "zfs.delegation": "true", "boot.stop_timeout": "60", "update.strategy": "rebase", "update.window": "sun 03:00"}},
+	}
+	if err := os.WriteFile(filepath.Join(profDir, profUUID+".json"), mustMarshal(t, prof), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	// the histories of updates and image upgrades written with the old names
+	stateDir := filepath.Join(dir, "state")
+	if err := os.MkdirAll(filepath.Join(stateDir, "updates"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(stateDir, "image-upgrades"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	hist := `[{"id":"u1","jail":"web","project":"shop","kind":"os","result":"ok","started":"2026-01-02T03:04:05Z","finished":"2026-01-02T03:05:05Z"},` +
+		`{"id":"u2","jail":"web","project":"shop","kind":"packages","result":"failed","started":"2026-01-03T03:04:05Z","finished":"2026-01-03T03:05:05Z"},` +
+		`{"id":"u3","jail":"web","project":"shop","kind":"os","result":"rolled_back","started":"2026-01-04T03:04:05Z","finished":"2026-01-04T03:05:05Z"}]`
+	runs := `[{"started":"2026-01-02T03:04:05Z","finished":"2026-01-02T03:05:05Z","result":"ok","generation":"g2"}]`
+	if err := os.WriteFile(filepath.Join(stateDir, "updates", "shop_web.json"), []byte(hist), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(stateDir, "image-upgrades", "freebsd-15-1.json"), []byte(runs), 0o640); err != nil {
+		t.Fatal(err)
+	}
+
+	// the jail
+	raw, err := os.ReadFile(specPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jr, err := lifecycle.DecodeRecord(raw)
+	if err != nil {
+		t.Fatalf("the current code cannot read the jail: %v", err)
+	}
+	if jr.Spec.Boot.StopTimeoutSeconds != 45 || jr.Spec.Update.Mode != api.UpdateModeManual || jr.Spec.Update.Healthcheck != "/bin/true" || len(jr.Spec.Expose) != 1 {
+		t.Errorf("the jail after the conversion: boot %+v update %+v expose %+v", jr.Spec.Boot, jr.Spec.Update, jr.Spec.Expose)
+	}
+
+	// the profile
+	open := func() *state.Store {
+		s, err := state.Open(stateDir, state.Options{})
+		if err != nil {
+			t.Fatalf("the current code does not open the state: %v", err)
+		}
+		return s
+	}
+	s := open()
+	o, err := s.Get(api.KindProfile, profUUID)
+	if err != nil {
+		t.Fatalf("the profile is lost: %v", err)
+	}
+	var ps api.ProfileSpec
+	if err := json.Unmarshal(o.Spec, &ps); err != nil {
+		t.Fatal(err)
+	}
+	wantCfg := map[string]string{"resources.memory": "512M", "resources.pids": "200", "network.eth1.network": "lan",
+		"volumes.data.mount": "/srv/data", "update.mode": "notify", "zfs_delegation": "true", "boot.stop_timeout_seconds": "60"}
+	if !reflect.DeepEqual(ps.Config, wantCfg) {
+		t.Errorf("the profile keys after the conversion: %v, want %v", ps.Config, wantCfg)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	// the histories, converted twice
+	for i := 0; i < 2; i++ {
+		if err := service.MigrateHistoryFiles(stateDir); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var recs []api.UpdateRecord
+	readJSON(t, filepath.Join(stateDir, "updates", "shop_web.json"), &recs)
+	if len(recs) != 3 || recs[0].Result != api.UpdateSuccess || recs[1].Result != api.UpdateFailure || recs[2].Result != api.UpdateRolledBack ||
+		recs[0].StartedAt.IsZero() || recs[0].FinishedAt.IsZero() || recs[1].Kind != api.UpdateKindPackages {
+		t.Errorf("the update history after the conversion: %+v", recs)
+	}
+	var iruns []api.ImageUpgradeRun
+	readJSON(t, filepath.Join(stateDir, "image-upgrades", "freebsd-15-1.json"), &iruns)
+	if len(iruns) != 1 || iruns[0].StartedAt.IsZero() || iruns[0].FinishedAt.IsZero() || iruns[0].Result != api.ImageUpgradeRunOK {
+		t.Errorf("the image upgrade runs after the conversion: %+v", iruns)
+	}
+
+	// a second open and a second conversion change nothing
+	first := tree(t, stateDir)
+	s2 := open()
+	_ = s2.Close()
+	if err := service.MigrateHistoryFiles(stateDir); err != nil {
+		t.Fatal(err)
+	}
+	second := tree(t, stateDir)
+	delete(first, ".lock")
+	delete(second, ".lock")
+	if !reflect.DeepEqual(first, second) {
+		for k := range first {
+			if first[k] != second[k] {
+				t.Errorf("the second open rewrote %s", k)
+			}
+		}
 	}
 }

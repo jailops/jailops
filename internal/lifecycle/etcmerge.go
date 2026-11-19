@@ -173,7 +173,7 @@ type keyedFile struct {
 var keyedFiles = []keyedFile{{"etc/master.passwd", "600"}, {"etc/group", "644"}}
 
 // mergeEtc merges the target generation's /etc into the jail's persistent
-// /etc. It returns an api.CodeConflict error naming the files when anything
+// /etc. It returns an api.CodePreconditionFailed error naming the files when anything
 // conflicts, and leaves rolling the datasets back to the caller (the plan).
 func (s *Service) mergeEtc(ctx context.Context, in MergeInput, target string, from string) error {
 	mc := s.Cfg.merge().names()
@@ -283,7 +283,7 @@ func (s *Service) mergeEtc(ctx context.Context, in MergeInput, target string, fr
 }
 
 func mergeConflict(target, from string, files []string) error {
-	return api.Errorf(api.CodeConflict, "merging /etc into %s has %d conflicting files; the jail stays on %s", target, len(files), from).
+	return api.Errorf(api.CodePreconditionFailed, "merging /etc into %s has %d conflicting files; the jail stays on %s", target, len(files), from).
 		WithDetail("reason", "etc_merge_conflict").
 		WithDetail("files", strings.Join(files, ",")).
 		WithHint("resolve the files in the jail's /etc and upgrade again")

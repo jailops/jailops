@@ -717,7 +717,7 @@ func restoredJail(b api.Backup, req api.RestoreRequest, rp *restorePlan, uuid st
 		Metadata: api.ObjectMeta{Name: rp.target, UUID: uuid, Project: rp.project, Host: b.Spec.HostUUID, Scope: api.ScopeHost, Generation: 1,
 			CreatedAt: now, UpdatedAt: now},
 		Spec:   spec,
-		Status: api.JailStatus{Power: api.PowerStopped, Generation: gen},
+		Status: api.JailStatus{Power: api.PowerStopped, ImageGeneration: gen},
 	}
 }
 

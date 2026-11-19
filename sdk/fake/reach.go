@@ -110,9 +110,9 @@ func (s *Server) fakeReach(project string, j *api.Jail) api.JailReach {
 	}
 	sort.SliceStable(out.Exposed, func(a, b int) bool { return out.Exposed[a].Family > out.Exposed[b].Family })
 	for _, e := range out.Exposed {
-		d := "pass"
+		d := api.ReachPass
 		if e.Via == "forward" {
-			d = "forward"
+			d = api.ReachForward
 		}
 		p := e.Ports
 		if p == "" {
@@ -122,7 +122,7 @@ func (s *Server) fakeReach(project string, j *api.Jail) api.JailReach {
 			HostPort: e.HostPort})
 	}
 	if len(out.Exposed) == 0 {
-		out.Rows = append(out.Rows, api.ReachRow{Source: api.ReachInternet, Decision: "none", By: "no allow in rule with an external source and no port forward"})
+		out.Rows = append(out.Rows, api.ReachRow{Source: api.ReachInternet, Family: "4,6", Proto: "tcp,udp", Decision: api.ReachNone, By: "no allow in rule with an external source and no port forward"})
 	}
 	out.Out = api.ReachOut{Internet: "all", Host: "DNS and ping", Jails: "all", OtherProjects: "none"}
 	return out

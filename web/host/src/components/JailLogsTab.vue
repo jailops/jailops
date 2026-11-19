@@ -66,7 +66,7 @@ async function read(): Promise<void> {
   readError.value = null
   grepApplied.value = grep.value.trim()
   try {
-    const r = await api.logs.read(name.value, selected.value, { tail: tail.value, since: since.value, grep: grepApplied.value })
+    const r = await api.logs.read(name.value, selected.value, { limit: tail.value, since: since.value, grep: grepApplied.value })
     if (mine !== gen) return
     st.value = startFrom(r)
     atEnd.value = true
@@ -88,7 +88,7 @@ async function poll(): Promise<void> {
   inflight = true
   const mine = gen
   try {
-    const r = await api.logs.read(name.value, selected.value, { offset: st.value.offset, tail: MAX_TAIL, since: since.value, grep: grepApplied.value })
+    const r = await api.logs.read(name.value, selected.value, { offset: st.value.offset, limit: MAX_TAIL, since: since.value, grep: grepApplied.value })
     if (mine !== gen || !follow.value) return
     const end = atEnd.value
     st.value = applyFollow(st.value, r, end)
@@ -185,7 +185,7 @@ onBeforeUnmount(() => {
             <li v-for="(f, i) in sorted" :key="f.name">
               <button class="log-file" type="button" :disabled="f.compressed" :aria-current="f.name === selected ? 'true' : undefined" :aria-describedby="f.compressed ? `log-why-${i}` : undefined" :data-file="f.name" @click="selected = f.name">
                 <span class="row log-file-top"><span class="mono log-file-name">{{ f.name }}</span><span class="badge" :class="f.kind === 'active' ? 'info' : ''">{{ f.kind === 'active' ? s.logs.active : s.logs.rotated }}</span><span v-if="f.compressed" class="badge warn">{{ s.logs.compressed }}</span></span>
-                <span class="faint log-file-meta"><span class="mono">{{ bytes(f.size) }}</span> · <span :title="ago(f.modified_at)">{{ s.logs.modified(stamp(f.modified_at)) }}</span></span>
+                <span class="faint log-file-meta"><span class="mono">{{ bytes(f.size_bytes) }}</span> · <span :title="ago(f.modified_at)">{{ s.logs.modified(stamp(f.modified_at)) }}</span></span>
               </button>
               <p v-if="f.compressed" :id="`log-why-${i}`" class="log-why">{{ s.logs.compressedWhy }}</p>
             </li>
@@ -195,7 +195,7 @@ onBeforeUnmount(() => {
         <section class="panel logs-viewer" aria-labelledby="logs-view-h">
           <header>
             <h2 id="logs-view-h" class="mono">{{ selected ? s.logs.viewer(selected) : s.logs.pick }}</h2>
-            <span class="faint" data-test="log-count">{{ s.logs.lines(count) }}<span v-if="current"> · {{ bytes(current.size) }}</span></span>
+            <span class="faint" data-test="log-count">{{ s.logs.lines(count) }}<span v-if="current"> · {{ bytes(current.size_bytes) }}</span></span>
           </header>
           <form class="logs-tools" @submit.prevent="read">
             <div class="logs-ctl"><label for="log-tail">{{ s.logs.tail }}</label><select id="log-tail" v-model.number="tail" data-test="log-tail"><option v-for="n in TAILS" :key="n" :value="n">{{ n }}</option></select></div>

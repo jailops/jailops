@@ -90,7 +90,7 @@ func TestJailLogRead(t *testing.T) {
 	if err != nil || len(r.Lines) != 3 || r.Lines[0].N != 1 || r.NextOffset != size || r.Truncated || r.Rotated || r.Jail != "web" || r.File != "messages" {
 		t.Fatalf("%v %+v", err, r)
 	}
-	r, err = s.JailLog(ctx, "web", "messages", api.JailLogQuery{Tail: 1, Grep: "ERROR"})
+	r, err = s.JailLog(ctx, "web", "messages", api.JailLogQuery{Limit: 1, Grep: "ERROR"})
 	if err != nil || len(r.Lines) != 1 || !strings.Contains(r.Lines[0].Text, "upstream") {
 		t.Fatalf("grep: %v %+v", err, r)
 	}
@@ -116,7 +116,7 @@ func TestJailLogRead(t *testing.T) {
 			t.Errorf("%q: want %s, got %v", file, code, err)
 		}
 	}
-	if _, err := s.JailLog(ctx, "web", "messages", api.JailLogQuery{Tail: api.MaxLogTail + 1}); !api.IsCode(err, api.CodeInvalid) {
+	if _, err := s.JailLog(ctx, "web", "messages", api.JailLogQuery{Limit: api.MaxLogLimit + 1}); !api.IsCode(err, api.CodeInvalid) {
 		t.Errorf("tail limit: %v", err)
 	}
 	// a stopped jail whose root is not mounted
@@ -165,9 +165,9 @@ func TestJailLogReadsAreAudited(t *testing.T) {
 	}
 	want := []string{
 		"ann LOGS /api/v1/jails/{name}/logs /api/v1/jails/web alpha list",
-		"bob LOGS /api/v1/jails/{name}/logs/{file...} /api/v1/jails/web alpha read messages tail=200 since=\"\" grep=\"token\" offset=0",
-		"ann LOGS /api/v1/jails/{name}/logs/{file...} /api/v1/jails/web alpha read messages.0 tail=200 since=\"\" grep=\"\" offset=0",
-		"ann LOGS /api/v1/jails/{name}/logs/{file...} /api/v1/jails/web alpha read messages tail=200 since=\"\" grep=\"\" offset=0",
+		"bob LOGS /api/v1/jails/{name}/logs/{file...} /api/v1/jails/web alpha read messages limit=200 since=\"\" grep=\"token\" offset=0",
+		"ann LOGS /api/v1/jails/{name}/logs/{file...} /api/v1/jails/web alpha read messages.0 limit=200 since=\"\" grep=\"\" offset=0",
+		"ann LOGS /api/v1/jails/{name}/logs/{file...} /api/v1/jails/web alpha read messages limit=200 since=\"\" grep=\"\" offset=0",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("audit:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))

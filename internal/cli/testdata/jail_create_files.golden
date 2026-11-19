@@ -55,5 +55,5 @@ spec:
       ipv4: 10.20.0.10
 status:
   power: stopped
-  generation: g1
+  image_generation: g1
 

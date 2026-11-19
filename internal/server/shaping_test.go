@@ -45,7 +45,7 @@ func TestBandwidthLimitsAreEnforcedWithPipes(t *testing.T) {
 		t.Fatalf("an unlimited jail has dnpipe:\n%s", plain)
 	}
 	// a rate that is not a rate is refused, in both directions
-	for _, k := range []string{"nic.eth0.egress", "nic.eth0.ingress"} {
+	for _, k := range []string{"network.eth0.egress", "network.eth0.ingress"} {
 		if _, err := e.Admin.Jails().Config(c, "web", map[string]string{k: "fast"}, nil, false); err == nil {
 			t.Fatalf("%s: a rate that is not a rate was accepted", k)
 		}

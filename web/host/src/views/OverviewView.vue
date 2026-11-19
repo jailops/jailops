@@ -66,7 +66,7 @@ const states = computed<PowerState[]>(() => (locked.value.length ? [...baseState
 const items = computed(() => (l.data.value ? attention(l.data.value) : []))
 const recent = computed(() => [...(l.data.value?.ops ?? [])].sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 8))
 const pool = computed(() => l.data.value?.pool)
-const poolPct = computed(() => (pool.value ? percent(pool.value.allocated, pool.value.size) : 0))
+const poolPct = computed(() => (pool.value ? percent(pool.value.allocated_bytes, pool.value.size_bytes) : 0))
 </script>
 
 <template>
@@ -125,7 +125,7 @@ const poolPct = computed(() => (pool.value ? percent(pool.value.allocated, pool.
               <template v-if="pool">
                 <Meter :value="poolPct" :label="s.overview.pool" :warn-at="75" :danger-at="90" />
                 <p class="muted pool-figures" style="margin-top: 6px">
-                  <span>{{ bytes(pool.allocated) }} {{ s.overview.used }}</span> · <span>{{ bytes(pool.free) }} {{ s.overview.free }}</span> · <span>{{ bytes(pool.size) }}</span> · <span>{{ Math.round(poolPct) }}%</span>
+                  <span>{{ bytes(pool.allocated_bytes) }} {{ s.overview.used }}</span> · <span>{{ bytes(pool.free_bytes) }} {{ s.overview.free }}</span> · <span>{{ bytes(pool.size_bytes) }}</span> · <span>{{ Math.round(poolPct) }}%</span>
                 </p>
               </template>
               <p v-else class="muted">{{ s.overview.poolUnknown }}</p>

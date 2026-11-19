@@ -392,6 +392,31 @@ func TestImageBuildingCommands(t *testing.T) {
 	bad("pwd_mkdb", "-d", filepath.Join(root, "etc"), mp)
 	bad("pwd_mkdb", "-p", "-d", filepath.Join(root, "etc"), mp, "x")
 	bad("pwd_mkdb", "-u", "root", mp)
+	// pkg-records: read and change package RECORDS of a jail tree, never files and never scripts
+	man := filepath.Join(work, "runtime.ucl")
+	ok("/usr/sbin/pkg", "pkg-records", "-r", root, "info", "-a", "-q")
+	ok("/usr/sbin/pkg", "pkg-records", "-r", root, "info", "--raw", "--raw-format", "ucl", "FreeBSD-runtime")
+	ok("/usr/sbin/pkg", "pkg-records", "-r", root, "unregister", "-f", "-y", "FreeBSD-runtime", "FreeBSD-ftp")
+	ok("/usr/sbin/pkg", "pkg-records", "-r", root, "register", "-t", "-M", man)
+	bad("pkg-records", "info", "-a", "-q")
+	bad("pkg-records", "-r", "/", "info", "-a", "-q")
+	bad("pkg-records", "-r", "/etc", "unregister", "-f", "-y", "FreeBSD-runtime")
+	bad("pkg-records", "-r", root, "info", "-a")
+	bad("pkg-records", "-r", root, "info", "--raw", "--raw-format", "json", "FreeBSD-runtime")
+	bad("pkg-records", "-r", root, "info", "--raw", "--raw-format", "ucl", "FreeBSD-*")
+	bad("pkg-records", "-r", root, "delete", "-f", "-y", "FreeBSD-runtime")
+	bad("pkg-records", "-r", root, "unregister", "-y", "FreeBSD-runtime")
+	bad("pkg-records", "-r", root, "unregister", "-f", "-y")
+	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "-a")
+	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "../x")
+	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "x.pkg")
+	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "FreeBSD-*")
+	bad("pkg-records", "-r", root, "unregister", "-f", "-y", "-x", "FreeBSD")
+	bad("pkg-records", "-r", root, "register", "-N", "-M", man)
+	bad("pkg-records", "-r", root, "register", "-t", "-m", work, "-i", root)
+	bad("pkg-records", "-r", root, "register", "-t", "-M", "/etc/passwd")
+	bad("pkg-records", "-r", root, "register", "-t", "-M", filepath.Join(work, "runtime.json"))
+	bad("pkg-records", "-r", root, "register", "-t", "-M", man, "extra")
 	// freebsd-version
 	ok("/bin/freebsd-version", "freebsd-version", "-k")
 	ok("/bin/freebsd-version", "freebsd-version", "-u")
@@ -401,6 +426,7 @@ func TestImageBuildingCommands(t *testing.T) {
 	// a symlink in the work area cannot lead out of the roots
 	os.Symlink("/etc", filepath.Join(work, "evil"))
 	bad("etcupdate", "-D", root, "-L", filepath.Join(work, "evil", "log"))
+	bad("pkg-records", "-r", root, "register", "-t", "-M", filepath.Join(work, "evil", "x.ucl"))
 }
 
 func TestSeedKeys(t *testing.T) {

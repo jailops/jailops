@@ -18,7 +18,6 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `role` | `host` | the only role of this daemon; the backup node is a separate program |
 | `hub` | `false` | keep a registry of remote hosts and forward `?host=` requests to them over pinned mTLS |
 | `pool` | none | the ZFS pool |
 | `dataset` | `<pool>/jailops` | the storage root dataset |
@@ -45,7 +44,7 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 | `projects.network_pool`, `.network_bits`, `.uplink`, `.nat` | none | the IPv4 pool `project create NAME --new-network` carves a `/24` from; without it that option answers `unsupported` |
 | `updates.tick`, `.project_files_dir` | `1m`, `<state_dir>/project-files` | how often update schedules run; where provisioning files live, one directory per project |
 | `jails.shell`, `.prompt`, `.prompt_color` | `bash`, `default`, `39` | what a new FreeBSD jail gets when its request and profiles leave the `shell` and `prompt` keys empty ([shell.md](shell.md)): `bash` (installed at the first start) or `sh`; the bash prompt (`default`, `short`, `none` or a PS1 text that may hold `{jail}`, `{project}` and `{host}`, checked at load like the key); the 256-colour number of `user@jail` in the default and short prompts (1 to 255). Existing jails are not changed; `jailops jail shell-setup` applies them to one |
-| `jails.max_states` | `10000` | the pf states each pass rule of a jail may create when the jail's `limits.states` is 0; `0` sets no limit ([operations.md](operations.md#resource-limits-of-a-jail)) |
+| `jails.max_states` | `10000` | the pf states each pass rule of a jail may create when the jail's `resources.states` is 0; `0` sets no limit ([operations.md](operations.md#resource-limits-of-a-jail)) |
 | `host.manage.modules` | `[]` | host management ([appliance.md](appliance.md)): the modules JailOps may change on the host itself. Empty, JailOps never changes the host and the host routes only read. `identity` is the host name, `/etc/resolv.conf`, the jailops block of `/etc/ntp.conf` and `ntpd_enable`; `firewall` is the whole of `/etc/pf.conf` with `pf_enable` and `pf_rules`, every change of it reverting unless confirmed (the console rule opens the port of `listen.https.address`). The helper must allow the same module (`host-manage` in `priv.conf`): with only one of the two, changes answer `not_managed`. Unknown modules and duplicates are an error at load. `jailops_appliance="YES"` in `rc.conf` adds its modules to this list (and to the helper's) |
 | `apps.catalog_dir` | `/usr/local/share/jailops/apps` | the application catalog ([apps.md](apps.md)): one YAML definition per file, installed by the `jailops-apps` package. Read on each request, never fetched; a missing directory is an empty catalog |
 | `apps.local_dir` | `/usr/local/etc/jailops/apps` | the host's own app definitions ([apps.md](apps.md), "Write your own app"): `NAME.yaml` and its icon, read with the catalog on each request; a definition here wins over a packaged one of the same name and is listed with `source: local`. A missing directory is empty; it must be readable by the user `jailops` |

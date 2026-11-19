@@ -5,5 +5,5 @@ metadata:
 spec:
   # A repository-only fragment merged into every jail that lists it (devices merge by name).
   resources: {memory: 1G, cpu: 1}
-  update: {strategy: rebase, window: "sun 03:00"}
+  update: {mode: manual}
   boot: {autostart: true}

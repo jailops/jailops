@@ -392,7 +392,7 @@ export function demoLogs() {
     list(jail: string, app: string): JailLogFile[] {
       return [...filesOf(jail, app).entries()].map(([name, f]) => {
         const compressed = /\.(gz|bz2|xz)$/.test(name)
-        return { name, size: f.size, modified_at: new Date(f.modified).toISOString(), kind: compressed || /\.\d+$/.test(name) ? 'rotated' : 'active', ...(compressed ? { compressed: true } : {}) }
+        return { name, size_bytes: f.size, modified_at: new Date(f.modified).toISOString(), kind: compressed || /\.\d+$/.test(name) ? 'rotated' : 'active', ...(compressed ? { compressed: true } : {}) }
       })
     },
     read(jail: string, app: string, file: string, q: URLSearchParams): JailLogRead | 'missing' | 'compressed' {
@@ -414,7 +414,7 @@ export function demoLogs() {
       const m = /^(\d+)([mhd])$/.exec(sinceRaw)
       const since = m ? Date.now() - Number(m[1]) * { m: 60_000, h: 3600_000, d: 86400_000 }[m[2] as 'm' | 'h' | 'd'] : 0
       const grep = (q.get('grep') ?? '').toLowerCase()
-      const tail = Number(q.get('tail') ?? 200)
+      const tail = Number(q.get('limit') ?? 200)
       let pos = 0
       f.lines.forEach((l, i) => {
         const start = pos

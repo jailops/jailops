@@ -373,6 +373,63 @@ func customPwdMkdb(c Config, _ bool, args []string) error {
 	return nil
 }
 
+// customPkgRecords accepts only the four forms that read or change the package RECORDS of a jail root without touching
+// its files (the base records of a thin jail follow the image generation the root was cloned from):
+//
+//	pkg-records -r <tree> info -a -q
+//	pkg-records -r <tree> info --raw --raw-format ucl <name>
+//	pkg-records -r <tree> unregister -f -y <name>...
+//	pkg-records -r <tree> register -t -M <manifest in the state or work area>
+//
+// unregister deletes records only: no file is removed and no script runs. register -t records a manifest without
+// looking at files and without running scripts (-N, which installs and runs scripts, is not accepted). Every name
+// passes rePkgName and pkgNameOK, the tree is a path below a storage root that stays inside its jail's tree, and the
+// manifest is a file in the state or work area. verifyPkgRecords refuses the root of a running jail and a tree whose
+// package database path is a link, and the manifest is checked against the image generation of the jail (sealRecordManifest).
+func customPkgRecords(c Config, _ bool, args []string) error {
+	if len(args) < 4 || args[0] != "-r" {
+		return forbidden("pkg-records: the form is -r <tree> info|unregister|register ...")
+	}
+	if err := c.checkRulePath(pathJailTree, args[1]); err != nil {
+		return err
+	}
+	rest := args[3:]
+	switch args[2] {
+	case "info":
+		switch {
+		case len(rest) == 2 && rest[0] == "-a" && rest[1] == "-q":
+			return nil
+		case len(rest) == 4 && rest[0] == "--raw" && rest[1] == "--raw-format" && rest[2] == "ucl" && recordNameOK(rest[3]):
+			return nil
+		}
+		return forbidden("pkg-records info: only -a -q and --raw --raw-format ucl <name> are accepted")
+	case "unregister":
+		if len(rest) < 3 || len(rest) > 66 || rest[0] != "-f" || rest[1] != "-y" {
+			return forbidden("pkg-records unregister: only -f -y <name>... (up to 64) is accepted")
+		}
+		for _, n := range rest[2:] {
+			if !recordNameOK(n) {
+				return forbidden("pkg-records unregister: name %q is not allowed", n)
+			}
+		}
+		return nil
+	case "register":
+		if len(rest) != 3 || rest[0] != "-t" || rest[1] != "-M" {
+			return forbidden("pkg-records register: only -t -M <manifest> is accepted")
+		}
+		if !strings.HasSuffix(rest[2], ".ucl") {
+			return forbidden("pkg-records register: the manifest must be a .ucl file")
+		}
+		return c.checkRulePath(pathState, rest[2])
+	}
+	return forbidden("pkg-records: subcommand %q is not allowed", args[2])
+}
+
+// recordNameOK is a package name as pkg prints it (FreeBSD-runtime, bash): no glob, no regexp, no file.
+func recordNameOK(a string) bool {
+	return rePkgName.MatchString(a) && pkgNameOK(a) && !strings.ContainsAny(a, "*?[]{}") && !strings.HasPrefix(a, "-")
+}
+
 // CommandRules is the single table of commands Runner may execute.
 var CommandRules = []Rule{
 	{
@@ -460,6 +517,10 @@ var CommandRules = []Rule{
 		Subcommands: []string{"install", "upgrade", "update", "delete", "remove", "autoremove", "info", "audit", "lock", "unlock", "fetch", "clean", "check", "version", "bootstrap", "query"},
 		Rest:        rePkgName, RestCheck: pkgNameOK, MaxRest: 64, RestFlags: []string{"-y", "-q", "-n", "-f", "-a", "-U", "-F", "-x", "-r", "-d"},
 		MaxTimeoutSeconds: 3600,
+	},
+	{
+		Name: "pkg-records", Binary: "/usr/sbin/pkg", MaxTimeoutSeconds: 300, Custom: customPkgRecords, Verify: verifyPkgRecords,
+		Reason: "keep the base package records of a thin jail in step with its image generation: read both databases, unregister and register records only (no file is touched, no script runs)",
 	},
 	{
 		Name: "etcupdate", Binary: "/usr/sbin/etcupdate", MaxTimeoutSeconds: 1800, Custom: customEtcupdate,

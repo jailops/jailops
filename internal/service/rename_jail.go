@@ -108,7 +108,7 @@ func (s *Service) RenameJail(ctx context.Context, name string, o RenameOptions) 
 		case "":
 			p.warnings = append(p.warnings, fmt.Sprintf("the jail has no hostname of its own: it is %q from its next start", to))
 		case name:
-			p.warnings = append(p.warnings, fmt.Sprintf("the hostname of the jail stays %q; `jailops set %s hostname=%s` changes it", name, to, to))
+			p.warnings = append(p.warnings, fmt.Sprintf("the hostname of the jail stays %q; `jailops config set %s hostname=%s` changes it", name, to, to))
 		}
 		p.warnings = append(p.warnings, s.logSelectorWarnings(name)...)
 		p.after = func(ctx context.Context) {
@@ -158,10 +158,10 @@ func (s *Service) jailIdle(ctx context.Context, key, name string) error {
 func (s *Service) noAppAccess(project, name string) error {
 	hint := "deny the grants (jailops app deny), rename the jail, then allow them again"
 	if s.accKind().p(project).exists(name) {
-		return api.Errorf(api.CodeConflict, "jail %q has app access grants", name).WithHint(hint)
+		return api.Errorf(api.CodePreconditionFailed, "jail %q has app access grants", name).WithHint(hint)
 	}
 	if o, err := s.polKind.p(project).get(apps.AccessPolicyName(name)); err == nil && o.Meta.ManagedBy == api.AppAccessManagedBy {
-		return api.Errorf(api.CodeConflict, "jail %q has the app access policy %s", name, o.Meta.Name).WithHint(hint)
+		return api.Errorf(api.CodePreconditionFailed, "jail %q has the app access policy %s", name, o.Meta.Name).WithHint(hint)
 	}
 	recs, err := s.accKind().listAll()
 	if err != nil {
@@ -170,7 +170,7 @@ func (s *Service) noAppAccess(project, name string) error {
 	for _, r := range recs {
 		for _, g := range r.Spec.Grants {
 			if g.Kind == api.AccessSourceJail && r.Meta.Project == project && g.SourceName == name {
-				return api.Errorf(api.CodeConflict, "jail %q may connect to app %s (project %s) through app access", name, r.Meta.Name, r.Meta.Project).WithHint(hint)
+				return api.Errorf(api.CodePreconditionFailed, "jail %q may connect to app %s (project %s) through app access", name, r.Meta.Name, r.Meta.Project).WithHint(hint)
 			}
 		}
 	}
@@ -191,7 +191,7 @@ func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
 	for _, o := range pols {
 		for i, r := range o.Spec.Rules {
 			if slices.Contains(r.From, "jail:"+name) || slices.Contains(r.To, "jail:"+name) {
-				e := api.Errorf(api.CodeConflict, "jail %q is named by rule %d of firewall policy %s", name, i+1, o.Meta.Name)
+				e := api.Errorf(api.CodePreconditionFailed, "jail %q is named by rule %d of firewall policy %s", name, i+1, o.Meta.Name)
 				if o.Meta.ManagedBy == api.AppAccessManagedBy {
 					return e.WithHint("it is the source of an app access grant: jailops app deny " + strings.TrimPrefix(o.Meta.Name, "app-") + " --from jail:" + name + " first")
 				}
@@ -205,7 +205,7 @@ func (s *Service) noRuleNamesJail(project, name string, deleting bool) error {
 	}
 	for _, o := range sets {
 		if slices.Contains(o.Spec.Members(), "jail:"+name) {
-			return api.Errorf(api.CodeConflict, "jail %q is a member of address set %s", name, o.Meta.Name).WithHint(hint)
+			return api.Errorf(api.CodePreconditionFailed, "jail %q is a member of address set %s", name, o.Meta.Name).WithHint(hint)
 		}
 	}
 	return nil

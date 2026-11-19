@@ -65,7 +65,7 @@ func TestModifyRetriesOnConflict(t *testing.T) {
 	w2 := &conflictingJails{JailClient: c.Jails(), srv: srv}
 	w2.calls.Store(-1000)
 	err = sdk.Modify(ctxT(t), w2, "web", func(j *api.Jail) { j.Spec.Env["A"] = "2" }, sdk.MaxConflictRetries(1))
-	if !api.IsCode(err, api.CodeConflict) {
+	if !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Fatalf("want conflict, got %v", err)
 	}
 }
@@ -78,7 +78,7 @@ func TestStaleIfMatch(t *testing.T) {
 	srv.Touch("web", "web")
 	_, err := c.Jails().Update(ctxT(t), "web", j, etag)
 	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Code != api.CodeConflict || !errors.Is(err, &api.Error{Code: api.CodeConflict}) {
+	if !errors.As(err, &ae) || ae.Code != api.CodePreconditionFailed || !errors.Is(err, &api.Error{Code: api.CodePreconditionFailed}) {
 		t.Fatalf("got %v", err)
 	}
 	// Patch merges.
@@ -261,7 +261,7 @@ func TestErrorMappingAndRetries(t *testing.T) {
 	// Non-JSON statuses map to codes.
 	for status, code := range map[int]api.Code{
 		400: api.CodeInvalid, 401: api.CodeUnauthorized, 403: api.CodeForbidden, 404: api.CodeNotFound,
-		409: api.CodeAlreadyExists, 412: api.CodeConflict, 501: api.CodeUnsupported, 500: api.CodeInternal,
+		409: api.CodeAlreadyExists, 412: api.CodePreconditionFailed, 501: api.CodeUnsupported, 500: api.CodeInternal,
 	} {
 		srv.ClearFailures()
 		srv.FailStatus("POST", "/api/v1/networks", status, -1)
@@ -294,14 +294,19 @@ func TestErrorMappingAndRetries(t *testing.T) {
 	if count("GET") != 3 {
 		t.Fatalf("GET attempts: %d", count("GET"))
 	}
-	// POST is never retried.
+	// A POST without an idempotency key is never retried (a network create has none); a jail create carries one and is.
+	srv.FailStatus("POST", "/api/v1/networks", 503, 1)
+	_, err := c.Networks().Create(ctxT(t), api.Network{})
+	if !api.IsCode(err, api.CodeBusy) {
+		t.Fatalf("err=%v", err)
+	}
+	srv.ClearFailures()
 	srv.FailStatus("POST", "/api/v1/jails", 503, 1)
-	_, err := c.Jails().Create(ctxT(t), sdk.NewJail("web", webSpec()))
-	if !api.IsCode(err, api.CodeBusy) || count("POST") != 1 {
+	if _, err = c.Jails().Create(ctxT(t), sdk.NewJail("web", webSpec())); err != nil || count("POST") != 2 {
 		t.Fatalf("err=%v posts=%d", err, count("POST"))
 	}
 	// Structured server errors keep code, hint and add the request id.
-	srv.FailRequests("GET", "/api/v1/jails/web", &api.Error{Code: api.CodeNoQuorum, Message: "no quorum", Hint: "wait"}, -1)
+	srv.FailRequests("GET", "/api/v1/jails/web", &api.Error{Code: api.CodeMaintenance, Message: "read-only", Hint: "wait"}, -1)
 	_, err = c.Jails().Get(ctxT(t), "web")
 	var ae *api.Error
 	if !errors.As(err, &ae) || ae.Hint != "wait" || ae.Detail["request_id"] == "" {
@@ -425,14 +430,14 @@ func TestSnapshotRollbackUpgrade(t *testing.T) {
 	srv.SeedGeneration("freebsd-15")
 	uop, _ := c.Jails().Upgrade(ctx, "web", api.JailUpgrade{})
 	j, err := uop.Wait(ctx)
-	if err != nil || j.Status.Generation != "g2" {
+	if err != nil || j.Status.ImageGeneration != "g2" {
 		t.Fatalf("%+v %v", j.Status, err)
 	}
 	rop, err := c.Jails().Rollback(ctx, "web", api.JailRollback{Scope: api.RollbackRoot})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j, err = rop.Wait(ctx); err != nil || j.Status.Generation != "g1" {
+	if j, err = rop.Wait(ctx); err != nil || j.Status.ImageGeneration != "g1" {
 		t.Fatalf("%+v %v", j.Status, err)
 	}
 	// Data loss must be confirmed.

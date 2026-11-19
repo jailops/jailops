@@ -84,7 +84,7 @@ func (s *Service) JailLog(ctx context.Context, name, file string, q api.JailLogQ
 	if err != nil {
 		return api.JailLogRead{}, s.logErr(err, name, key, file, j)
 	}
-	s.auditLog(ctx, p.Meta.Name, name, key, file, fmt.Sprintf("read %s tail=%d since=%q grep=%q offset=%d", file, q.Tail, q.Since, q.Grep, q.Offset))
+	s.auditLog(ctx, p.Meta.Name, name, key, file, fmt.Sprintf("read %s limit=%d since=%q grep=%q offset=%d", file, q.Limit, q.Since, q.Grep, q.Offset))
 	return api.AssembleLogRead(name, file, data, start, size, q, s.now()), nil
 }
 

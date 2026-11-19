@@ -31,8 +31,13 @@ $ jailops app validate <dir>/apps/web.yaml -o json
     }
   ]
 }
-! invalid: 1 problem(s) in 1 definition(s) checked
-! hint: fix the files listed and run 'jailops app validate' again; docs/apps.md has the format
+! {
+!   "error": {
+!     "code": "invalid",
+!     "message": "1 problem(s) in 1 definition(s) checked",
+!     "hint": "fix the files listed and run 'jailops app validate' again; docs/apps.md has the format"
+!   }
+! }
 [exit 2]
 
 $ jailops app validate <dir>/apps/notes.txt

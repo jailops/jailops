@@ -7,7 +7,7 @@ volume/data created
 $ jailops jail create db --image freebsd-15 --storage default --network lan --env A=1
 jail/db created
 
-$ jailops volume attach db data /srv/data --ro
+$ jailops volume attach db data /srv/data --read-only
 volume/data attached to jail db
 
 $ jailops jail list
@@ -43,7 +43,7 @@ SPEC                    STATUS
 ----                    ------
 image: freebsd-15       power: running
 storage: default        jid: 1
-layout: thin            generation: g1
+layout: thin            image_generation: g1
 hostname: web           addresses:
 resources:                - 10.20.0.10
   memory: 2G            started_at: "2026-03-01T09:00:00Z"
@@ -53,7 +53,7 @@ network:
 boot:
   autostart: true
 
-$ jailops jail restart web --grace 5
+$ jailops jail restart web --timeout 5
 jail/web restarted
 
 $ jailops jail stop web --force

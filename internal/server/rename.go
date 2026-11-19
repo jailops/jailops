@@ -27,7 +27,7 @@ func (s *Server) renameRoutes() []route {
 				return err
 			}
 			if res != nil {
-				c.sync(200, res, 0)
+				c.sync(200, res, "")
 				return nil
 			}
 			c.async(op)

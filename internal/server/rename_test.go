@@ -35,7 +35,7 @@ func TestRenameOverHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := g.Networks().Rename(ctx, "lan", api.Rename{NewName: "office"}, "41"); !api.IsCode(err, api.CodeConflict) {
+	if _, err := g.Networks().Rename(ctx, "lan", api.Rename{NewName: "office"}, "41"); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Fatalf("a stale If-Match: %v", err)
 	}
 	evs := e.Events(ctx, g)

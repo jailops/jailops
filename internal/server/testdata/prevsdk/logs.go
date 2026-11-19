@@ -3,7 +3,6 @@ package sdk
 import (
 	"context"
 	"net/http"
-	"strconv"
 	"time"
 
 	"jailops.net/jailops/sdk/api"
@@ -44,25 +43,29 @@ func (l *LogsClient) Read(ctx context.Context, q api.LogsQuery, allProjects bool
 
 // Forward reads the sinks and their state (GET /api/v1/logs/forward, admin).
 func (l *LogsClient) Forward(ctx context.Context) (api.LogForward, error) {
-	if err := l.c.need("log_forward"); err != nil {
-		return api.LogForward{}, err
-	}
-	v, _, err := get[api.LogForward](ctx, l.c, "/api/v1/logs/forward", nil)
+	v, _, err := l.ForwardETag(ctx)
 	return v, err
 }
 
-// SetForward stores the sink list, which then replaces logging.forward of
-// jailopsd.yaml (PUT /api/v1/logs/forward, admin). expect is the generation
-// read before (Status.Generation; 0 while the file's list is in force) and
-// fails with api.CodeConflict when another change came first; a negative
-// expect overwrites.
-func (l *LogsClient) SetForward(ctx context.Context, spec api.LogForwardSpec, expect int64) (api.LogForward, error) {
+// ForwardETag reads the sinks with the ETag for SetForward.
+func (l *LogsClient) ForwardETag(ctx context.Context) (api.LogForward, string, error) {
+	if err := l.c.need("log_forward"); err != nil {
+		return api.LogForward{}, "", err
+	}
+	v, h, err := get[api.LogForward](ctx, l.c, "/api/v1/logs/forward", nil)
+	return v, etagOf(h), err
+}
+
+// SetForward stores the sink list, which then replaces logging.forward of jailopsd.yaml (PUT /api/v1/logs/forward,
+// admin). etag is the one ForwardETag returned: the change fails with api.CodePreconditionFailed when another change came
+// first; an empty etag overwrites.
+func (l *LogsClient) SetForward(ctx context.Context, spec api.LogForwardSpec, etag string) (api.LogForward, error) {
 	if err := l.c.need("log_forward"); err != nil {
 		return api.LogForward{}, err
 	}
 	h := http.Header{}
-	if expect >= 0 {
-		h.Set("If-Match", quoteETag(`"`+strconv.FormatInt(expect, 10)+`"`))
+	if etag != "" {
+		h.Set("If-Match", quoteETag(etag))
 	}
 	v, _, err := send[api.LogForward](ctx, l.c, request{method: http.MethodPut, path: "/api/v1/logs/forward", body: spec, header: h})
 	return v, err

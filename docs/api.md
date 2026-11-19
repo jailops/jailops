@@ -25,11 +25,11 @@ Reads need the operator role and never carry a private or preshared key; changes
 
 **Convert** ([storage.md](storage.md#changing-the-layout-of-a-jail)): `POST /api/v1/jails/{name}/convert` (extension `jail_convert`, admin) takes `JailConvert`: `layout` (`thin` or `thick`), optional `image` (the generation of a thin root) and `dry_run`. It is asynchronous and its result is `JailConvertResult`: `from`, `to`, `image`, `changed`, the `steps` of the plan, the paths it `kept`, what it `replaced`, and `warnings`; with `dry_run` nothing changes. A Linux jail is `unsupported`.
 
-**Copy** ([storage.md](storage.md#copying-a-jail)): `POST /api/v1/jails/{name}` (extension `jail_copy`) takes `JailCopy`: `name` (the copy's), optional `labels` (they replace the source's) and optional `snapshot` (a snapshot of the source to copy instead of its present state). It is asynchronous and its result is the new jail: the source's specification with addresses of its own, no volume and no exposure, and the data of the source (a full copy, independent of it; the source may run). The copy is in the source's project and on its storage. SDK: `c.Jails().Copy`.
+**Copy** ([storage.md](storage.md#copying-a-jail)): `POST /api/v1/jails/{name}/copy` (extension `jail_copy`) takes `JailCopy`: `name` (the copy's), optional `labels` (they replace the source's) and optional `snapshot` (a snapshot of the source to copy instead of its present state). It is asynchronous and its result is the new jail: the source's specification with addresses of its own, no volume and no exposure, and the data of the source (a full copy, independent of it; the source may run). The copy is in the source's project and on its storage. SDK: `c.Jails().Copy`.
 
 **Diff** ([storage.md](storage.md#what-is-unique-in-a-jail)): `GET /api/v1/jails/{name}/diff` (extension `jail_diff`, readonly) answers `JailDiff`: `jail`, `image` (the generation the root was cloned from) and `datasets`, the root first. Each dataset has `name`, `path`, `base` (`image`, `baseline` or `image-tree`: compared file by file because the jail has no baseline snapshot), `note`, `entries` (`kind` `added`, `modified`, `removed` or `renamed`, `path` and, for a rename, `to`), `total`, `counts` by kind and `truncated`. `?limit=N` caps the entries of each dataset (200 by default, 20000 at most; the counts stay complete), `?dataset=NAME` keeps one dataset and `?packages=true` adds `packages` (the packages installed on purpose; a running jail only). A jail with a full copy of its image answers `invalid`. SDK: `c.Jails().Diff`.
 
-**Export and import** ([export-import.md](export-import.md)): `GET /api/v1/jails/{name}/export` (extension `jail_export`, operator, audited) streams the export file of a jail (`?snapshot=`, `?with_volumes=true`, `?zstd=true`) and ends with the trailer `X-Jailops-Export: ok`; `POST /api/v1/jail-imports/preflight` (admin) answers `RestorePreflight` for an `ExportManifest` and the options; `POST /api/v1/jail-imports` (admin, audited) takes the file as the body (`?as=`, `?keep_ip=true`, `?start=true`, `?network_map=OLD=NEW`, `?volume_map=OLD=NEW`) and answers `JailImported`. SDK: `c.Jails().Export`, `ImportPreflight`, `Import`.
+**Export and import** ([export-import.md](export-import.md)): `GET /api/v1/jails/{name}/export` (extension `jail_export`, operator, audited) streams the export file of a jail (`?snapshot=`, `?with_volumes=true`, `?zstd=true`) and ends with the trailer `X-Jailops-Export: ok`; `POST /api/v1/jail-imports?dry_run=true` (admin) takes a `JailImportPreflight` (the `ExportManifest` and the options) and answers `RestorePreflight` at once; `POST /api/v1/jail-imports` (admin, audited) takes the file as the body (`?as=`, `?keep_ip=true`, `?start=true`, `?network_map=OLD=NEW`, `?volume_map=OLD=NEW`) and answers 202 with an operation that is already finished, because the file is read while the request lasts: its `metadata` is `JailImported`, a failed import is its `error`. SDK: `c.Jails().Export`, `ImportPreflight`, `Import`.
 
 **Reach** ([networking.md](networking.md#what-reaches-a-jail)): `GET /api/v1/jails/{name}/reach` (extension `jail_reach`, readonly) answers `JailReach`: `rows` (what each kind of source reaches: `source` is `internet`, `tunnel`, `jails`, `host` or `other-projects`; `family`, `proto`, `ports`, `from`, `decision` `pass`, `forward` or `none`, and `by`, the policy rule that gives it or what stops it), `exposed` (what the Internet reaches), `out` (what the jail reaches), the `rules` of the anchor in the order pf decides and `notes` (what the computation cannot know). `GET /api/v1/exposed` answers `Exposed` for the jails the caller can see: `entries` (one per jail, protocol, port list and family) and, with `?tunnels=true`, `tunnels`. `JailStatus.exposed` carries the same entries on every jail. Both are computed from the rendered anchor and change nothing. SDK: `c.Jails().Reach`, `c.Firewall().Exposed`.
 
@@ -81,7 +81,7 @@ and is never stored or logged); with a jail backup it first restores the volumes
 restores the jail with no volume attachments with `no_volumes`.
 
 **Networks and storage** (`GET /api/v1/networks`, `GET /api/v1/storage`) list what the selected project is granted. A global
-administrator asks for every one with `?all=true` (SDK: `sdk.All()`; anyone else gets `forbidden`), and `status.granted_to` of
+administrator asks for every one with `?all_projects=true` (SDK: `sdk.AllProjects()`; anyone else gets `forbidden`), and `status.granted_to` of
 each object names the projects that hold it, as far as the caller may see them.
 
 **Renames** (extension `rename`, [design.md](design.md#88-renames)): `POST /api/v1/networks/{name}/rename`,
@@ -119,7 +119,7 @@ An error the daemon did not expect answers `internal` (500) with the text `inter
 hint; the cause, which can carry paths and command output of the host, is in the daemon's log under that id. A failed
 operation is the same: its `error` is `internal` with `internal error` and the id of the operation in the hint, in the
 operation, the list, the event stream and the CLI and console views, whoever reads it; the cause is in the log under the
-operation id. No role reads that text through the API: an administrator reads the log of the daemon. An error with a code of
+operation id. No role reads that text through the API: an administrator reads the log of the daemon. An operation that the daemon's restart cut off is `interrupted`: its `error.detail.recovery` says what startup recovery did with the run it had open (`rolled_back`, `completed`, `dropped` or `needs_attention`). An error with a code of
 its own (`invalid`, `busy`, `pool_exhausted` and the others) keeps its message and hint. An app installation that fails names
 the step, whether the jail was kept, and for a health check the answer it got; the output of pkg and of the helper is in the log. A port forward
 (an IPv4 exposure of a jail behind NAT: `expose`, `unexpose`, `spec.expose`) answers `forbidden` (403) to anyone but a global
@@ -128,6 +128,30 @@ bounded: a policy has at most 500 rules, an address set 5000 members, a project 
 members together (`quota_exceeded` or `invalid`).
 
 Declarative management of everything the API can create is `jailops-sync` ([fleet-sync.md](fleet-sync.md)).
+
+## Identity and safe changes
+
+- **A UUID names one incarnation.** It is assigned at creation and never reused. A rename keeps it; recovery or a move that
+  keeps the logical identity keeps it (`restore` with replace reuses the UUID of the backup); a copy of a jail and
+  `restore --as` make a new object with a new UUID. A name created again after a delete is a new object: its UUID is new and
+  its generation counts from 1 again. The same project name on two hosts is two local objects.
+- **The `ETag` names the incarnation and the revision.** Every object answers with a strong entity tag that is opaque to
+  clients: send back what you read. A change or delete (`PUT`, `PATCH`, `DELETE`) with `If-Match: <tag>` fails with
+  `precondition_failed` (412) when the object was changed since (another generation) and when it was deleted and created again under the
+  same name (another UUID). `If-Match: *` and no header apply to the object that exists. A list of tags, a weak tag (`W/`)
+  and a tag that this server did not write never match; an unquoted tag is `invalid`. `DELETE /api/v1/jails/{name}` honours
+  `If-Match` like the other objects. `jailops-sync` keeps the UUID and the generation it saw when it planned and applies a
+  change only to that object; a host that answers with another identity than the plan was made for is not touched.
+- **`Idempotency-Key` makes a create safe to repeat.** `POST /api/v1/jails` and `POST /api/v1/restores` (not the preflight)
+  accept it: the same caller, route, key and body return the operation the first request started (the reply carries
+  `Idempotent-Replayed: true`); the same key with another body is `precondition_failed`. A key is 8 to 128 characters of letters,
+  digits and `. _ ~ -` and is remembered for 24 hours; the table is in memory, so a restart of the daemon forgets it (the
+  repeat then meets the object the first request made, a conflict that names it). The SDK sends a new key per create and
+  restore call and repeats such a call after a transport failure; `sdk.WithIdempotencyKey` sets one. `X-Request-ID` is a
+  trace id only.
+- **The host UUID is the identity of a host.** It is made once at the first start and kept in the database; a start that
+  cannot read it stops instead of making a new one (backups and the hub know the host by it). To adopt a machine as a new
+  host remove the `host_uuid` row on purpose; to keep the identity restore the database from a copy.
 
 ## What is frozen
 
@@ -139,14 +163,36 @@ The surface that clients depend on is checked by tests, so that a change of it i
 | Who may call each route | the permission registry and `authmatrix_test.go` (a route without a rule does not start) |
 | Error codes and their HTTP status | `internal/server/testdata/freeze/error_codes.golden`; the exit status of each code in `internal/cli` (`TestExitCodesPerAPICode`) |
 | The envelope of every answer, the operation of an asynchronous request, events, errors, object metadata and conditions (JSON names and types) | `internal/server/testdata/freeze/envelopes.golden` |
+| The members of every enum, by type and by field | `internal/server/testdata/freeze/enums.golden` (the Go constants of `sdk/api` and `api.Enums`); members are only added |
+| The conditions of each kind of object and their reasons | `internal/server/testdata/freeze/conditions.golden` (`api.Conditions`); the test fails for a type or a reason in the code that the list lacks |
+| The actions of operations and of lifecycle events | `operation_actions.golden`, `event_actions.golden` |
+| How each route answers (`sync`, `async`, `either`, `stream`) and the liveness route | `route_replies.golden`, `routes.golden` |
 | Capability names (`api_extensions`) | `internal/server/testdata/freeze/extensions.golden`: names are only appended |
 | JSON names and types of every API object | `web/shared/src/api/types.gen.ts`, generated from the Go types; `go run ./scripts/gen-ts -check` fails when they differ |
-| `ETag` and `If-Match`: strong comparison, `*`, a list, weak tags that never match | `TestIfMatchIsAStrongComparison`, `sdk/api` `TestParseIfMatch` |
+| `ETag` and `If-Match`: an opaque strong tag with the UUID and the generation, strong comparison, `*`, weak tags that never match | `TestIfMatchIsAStrongComparison`, `TestETagNamesTheIncarnation`, `sdk/api` `TestParseIfMatch` |
 | The bodies of the main routes: the request, the status, `ETag`, `Location`, `Retry-After` and the JSON of the answer | `internal/server/testdata/wire/*.golden` (jails, host objects, firewall, operations): transcripts with times, ids and durations normalized |
 | The life of an asynchronous operation: accepted (202 and `Location`), running, refused as busy (409), cancelled, failed with its error, succeeded; a finished operation is not cancellable, a wait on it answers at once | `internal/server/testdata/wire/operation_lifecycle.golden` |
 | Human output of the commands | the transcripts in `internal/cli/testdata` |
 | Machine output of the commands (`-o json`, `-o yaml`: `jail list`, `show`, `info`, `firewall show`, `firewall policy list` and `show`, `network`, `project`, `storage`, `image`, `operation list`, `doctor`, `version`) | `internal/cli/testdata/machine_output.golden` |
 | The client library of an earlier release against the current server | `TestPreviousSDKWorksAgainstTheServer`: a program built with the baseline library (`internal/server/testdata/prevsdk`) makes the calls of a script or an application (read the server, create a jail and wait, read it with its `ETag`, list, patch with a current and a stale tag, start, state, snapshot, operations, host objects, firewall, reach, delete) and every call must succeed with the same shapes |
+
+### What a client does
+
+A client reads an answer of a later server and does not break on it:
+
+- It ignores a member of an object it does not know.
+- It treats a value of an enum it does not know (a power state, a condition status, an operation status or action, an
+  error code, an event action) as "other": it shows the string and does nothing special with it. A new value is added in
+  a minor release and is never taken away or renamed.
+- It reads what a program decides on from the machine members (`status.power`, a condition's `type` and `reason`, an
+  operation's `action`, an error's `code` and `detail`) and shows `message`, `description` and `hint` to people: those
+  sentences are not frozen.
+- An operation is a task of an `action` (`jail.create`, `volume.snapshot`, ...) on `resources`. The list of actions is in
+  `internal/server/testdata/freeze/operation_actions.golden`; an operation recorded by an earlier release has none.
+- A route answers `sync`, `async` (202 and an operation), `either` (an operation, or the plan at once with
+  `?dry_run=true`) or is a stream; `route_replies.golden` lists them.
+- A list is read page by page where a route pages: a full page of `GET /api/v1/audit` has `Link: <...>; rel="next"`, and the
+  `cursor` in it asks for the next page. A list without paging returns everything.
 
 A change that is meant is accepted with `just freeze`, which rewrites the golden files of the server and of the commands
 and the generated types; the diff of those files is what a review reads. A break of the client protocol that is meant
@@ -164,8 +210,20 @@ version, until they move to the first list.
 
 | Promise | Extensions |
 |---|---|
-| 1.x | `operations`, `etag`, `events`, `jails`, `jail_snapshots`, `jail_rollback_scopes`, `jail_copy`, `jail_config`, `config_keys`, `jail_devices`, `jail_exec`, `jail_console`, `jail_shell`, `jail_shell_setup`, `jail_usage`, `jail_logs`, `jail_diff`, `jail_expose`, `jail_reach`, `provisioning`, `profiles`, `rename`, `images_pkgbase`, `image_generations`, `image_upgrade`, `networks_vnet`, `network_ipam_range`, `interface_descriptions`, `storage`, `volumes`, `projects`, `project_quotas`, `firewall_anchors`, `firewall_test`, `firewall_applied`, `updates`, `trust_tokens`, `sessions`, `audit_log`, `doctor`, `resources`, `logs_unified` |
-| Not yet | `backup_policies`, `backup_pull`, `backup_push`, `backup_key`, `backup_run`, `backup_verify`, `restore_preflight` (backups), `fleet_projects` (several hosts), `sealed_secrets`, `apps`, `app_install`, `app_draft`, `app_access` (the application catalog), `host_identity`, `host_firewall`, `host_pending`, `host_certificate`, `setup`, `boot_plan`, `wireguard`, `log_forward` (the host itself, appliance mode), `jail_export` (export and import of jails), `jail_files` (copying files), `jail_convert` (layout conversion), `volume_from_dir` (a volume from a host directory), `top` (live usage) |
+| 1.x | `operations`, `etag`, `events`, `jails`, `jail_snapshots`, `jail_rollback_scopes`, `jail_copy`, `jail_config`, `config_keys`, `jail_devices`, `jail_exec`, `jail_console`, `jail_shell`, `jail_shell_setup`, `jail_repair_packages`, `jail_usage`, `jail_logs`, `jail_diff`, `jail_expose`, `jail_reach`, `provisioning`, `profiles`, `rename`, `images_pkgbase`, `image_generations`, `image_upgrade`, `networks_vnet`, `network_ipam_range`, `interface_descriptions`, `storage`, `volumes`, `projects`, `project_quotas`, `firewall_anchors`, `firewall_test`, `firewall_applied`, `updates`, `trust_tokens`, `sessions`, `audit_log`, `doctor`, `resources`, `logs_unified` |
+| Not yet | `backup_policies`, `backup_key`, `backup_run`, `backup_verify`, `restore_preflight` (backups: the preflight is a restore request with dry_run), `fleet_projects` (several hosts), `sealed_secrets`, `apps`, `app_install`, `app_draft`, `app_access` (the application catalog), `host_identity`, `host_firewall`, `host_pending`, `host_certificate`, `setup`, `boot_plan`, `wireguard`, `log_forward` (the host itself, appliance mode), `jail_export` (export and import of jails), `jail_files` (copying files), `jail_convert` (layout conversion), `volume_from_dir` (a volume from a host directory), `top` (live usage) |
+
+## Naming
+
+Three words for a machine appear in the API and the command line, and each has one meaning:
+
+- A **host** is the machine that runs `jailopsd` and holds jails. `jailops host ...` manages this host (identity, firewall,
+  certificate, pending changes) and, on a hub, creates, lists, edits and deletes the registry of hosts the hub talks to.
+- A **Remote** is the object of that registry: one host that a hub knows, with its address and pinned fingerprint
+  (`/api/v1/remotes`, `kind: Remote`). `jailops host create --url ...` makes one. `Host` as a kind is the host document
+  of a fleet repository (`hosts/NAME/host.yaml`), which says what a host should hold.
+- A **remote** in the command line configuration (`jailops remote add`, `client.yaml`) is a named connection of the person
+  who runs the command: where the client connects, with which token. It is not stored by the daemon.
 
 ## Liveness and readiness
 
@@ -227,8 +285,8 @@ unless it is confirmed. The timer is the helper's own; the daemon only reads it.
 | Route | Role | What |
 |---|---|---|
 | `GET /api/v1/host/firewall` | readonly, global | kind `HostFirewall`: `spec` is what was applied last, or the default before any apply (a hand-written `pf.conf` is not read back into fields); `status`: `managed`, `config_enabled`, `helper_enabled`, `file_exists`, `file_managed`, `drift` (`pf.conf`, `pf_enable`, `pf_rules`), `applied`, `pf_enabled`, `rules` (in plain words), `warnings` (ssh open to the world), `pending`, `console_port`. Always readable |
-| `PUT /api/v1/host/firewall` | admin, global | body `{"spec": {...}, "dry_run": true, "confirm_within": 120, "confirm_lockout": false}`; reply `HostChange` with `diff`, `rules`, `actions`, `warnings` and, after a real change, `snapshot` and `pending` |
-| `GET /api/v1/host/pending` | readonly, global | `HostPending`: `pending` (`id`, `module`, `snapshot`, `created`, `deadline`, `seconds_left`, `confirm_within`) and `last`, how the last one ended (`confirmed`, `reverted`, `timed_out`, `reverted_at_boot`, `revert_failed`) |
+| `PUT /api/v1/host/firewall` | admin, global | body `{"spec": {...}, "dry_run": true, "confirm_within_seconds": 120, "confirm_lockout": false}`; reply `HostChange` with `diff`, `rules`, `actions`, `warnings` and, after a real change, `snapshot` and `pending` |
+| `GET /api/v1/host/pending` | readonly, global | `HostPending`: `pending` (`id`, `module`, `snapshot`, `created`, `deadline`, `seconds_left`, `confirm_within_seconds`) and `last`, how the last one ended (`confirmed`, `reverted`, `timed_out`, `reverted_at_boot`, `revert_failed`) |
 | `POST /api/v1/host/pending/confirm` | admin, global | body `{"id": "..."}` optional; keeps the change; reply `HostPending` |
 | `POST /api/v1/host/pending/revert` | admin, global | the same; puts the snapshot back now |
 
@@ -248,7 +306,7 @@ value applied before. `template` is `default` (block inbound except ssh, the con
 `invalid`). Sources are addresses, prefixes without host bits or `@set` of a set defined in `sets` (at most 16 sets of 1 to
 256 members, at most 32 sources per list); ports `N` or `N-M`, at most 16 per row; `proto` `tcp` or `udp`; a `comment` has
 at most 80 characters and no line break, quote or backslash. `console.port` is the daemon's TLS port and is filled in by
-the daemon. `nat` other than `none` is `unsupported`. `confirm_within` is 10 to 1800 seconds (default 120).
+the daemon. `nat` other than `none` is `unsupported`. `confirm_within_seconds` is 10 to 1800 seconds (default 120).
 
 A real change is refused with `forbidden` (detail `guard: lockout`) when the address the request came from could reach
 neither an ssh port nor the console under the new rules, and with `invalid` (detail `guard: unknown_peer`) when that address
@@ -271,7 +329,7 @@ Extension `host_certificate` ([exposure.md](exposure.md)):
 | Route | Role | What |
 |---|---|---|
 | `GET /api/v1/host/certificate` | readonly, global | kind `HostCertificate`: `source` (`self-signed`, `configured`, `uploaded`, `acme`), `current` (`subject`, `issuer`, `names`, `not_before`, `not_after`, `days_left`, `fingerprint`, `self_signed`, `public_ca`), `acme` (`spec`, `state` idle, requesting, valid or error, `last_attempt`, `last_success`, `last_error`, `failures`, `next_attempt`, `renew_at`, `challenge_port`, `terms_url`), `redirect` (`managed`, `applied`, `lines`), `configured`, `stored`, `listener`, `port`, `remote_add`, `warnings` |
-| `PUT /api/v1/host/certificate` | admin, global | body `{"certificate": "PEM chain, leaf first", "key": "PEM", "hostname": "console.example.com"}`; `invalid` with the reason when it cannot work; `conflict` when `jailopsd.yaml` names the files |
+| `PUT /api/v1/host/certificate` | admin, global | body `{"certificate": "PEM chain, leaf first", "key": "PEM", "hostname": "console.example.com"}`; `invalid` with the reason when it cannot work; `precondition_failed` when `jailopsd.yaml` names the files |
 | `POST /api/v1/host/certificate/acme` | admin, global | body `ACMESpec` (`domains`, `email`, `directory_url`, `challenge`, `accept_tos`); answers at once, the request to the CA runs in the background (follow `acme.state`); a wildcard is `unsupported` |
 | `POST /api/v1/host/certificate/self-signed` | admin, global | the generated certificate again |
 

@@ -23,7 +23,7 @@ func TestJailLogsAgainstFake(t *testing.T) {
 	if err != nil || len(files) != 3 || files[0].Name != "messages" || files[1].Kind != api.JailLogRotated || !files[1].Compressed || files[2].Name != "nginx/error.log" {
 		t.Fatalf("%v %+v", err, files)
 	}
-	r, err := c.Jails().Log(ctx, "web", "messages", api.JailLogQuery{Tail: 1})
+	r, err := c.Jails().Log(ctx, "web", "messages", api.JailLogQuery{Limit: 1})
 	if err != nil || len(r.Lines) != 1 || r.Lines[0].Text != "Oct 29 11:30:00 web two" || !r.Truncated || r.NextOffset != 48 {
 		t.Fatalf("%v %+v", err, r)
 	}
@@ -45,7 +45,7 @@ func TestJailLogsAgainstFake(t *testing.T) {
 	if _, err := c.Jails().Log(ctx, "web", "../etc/passwd", api.JailLogQuery{}); !api.IsCode(err, api.CodeInvalid) {
 		t.Errorf("bad name: %v", err)
 	}
-	if _, err := c.Jails().Log(ctx, "web", "messages", api.JailLogQuery{Tail: 9999}); !api.IsCode(err, api.CodeInvalid) {
+	if _, err := c.Jails().Log(ctx, "web", "messages", api.JailLogQuery{Limit: 9999}); !api.IsCode(err, api.CodeInvalid) {
 		t.Errorf("tail limit: %v", err)
 	}
 	if _, err := c.Jails().Logs(ctx, "ghost"); !api.IsCode(err, api.CodeNotFound) {

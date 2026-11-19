@@ -325,7 +325,7 @@ func (s *Service) checkJail(ctx context.Context, key string) api.UpdateReport {
 
 // osUpdate reports a newer generation of the jail's image (thin jails).
 func (s *Service) osUpdate(ctx context.Context, key string, j api.Jail) (*api.OSUpdate, error) {
-	if s.life == nil || j.Spec.Layout == api.LayoutThick || j.Spec.Update.Strategy == api.UpdateInPlace || j.Spec.Update.Strategy == api.UpdateManual {
+	if s.life == nil || j.Spec.Layout == api.LayoutThick {
 		return nil, nil
 	}
 	lay, err := s.life.Layout(ctx, key)
@@ -390,7 +390,7 @@ func (s *Service) CheckUpdates(ctx context.Context, req api.UpdateCheckRequest) 
 	if err != nil {
 		return api.Operation{}, err
 	}
-	return s.Submit(ctx, OpSpec{Description: "Check for updates in project " + project, Project: project,
+	return s.Submit(ctx, OpSpec{Action: api.OpUpdateCheck, Description: "Check for updates in project " + project, Project: project,
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			out := make([]api.UpdateReport, 0, len(keys))
 			for i, k := range keys {
@@ -459,7 +459,7 @@ func (s *Service) ApplyUpdates(ctx context.Context, req api.UpdateApplyRequest) 
 	for _, k := range keys {
 		locks = append(locks, jailLock(k), anchorLock(k))
 	}
-	return s.Submit(ctx, OpSpec{Description: "Apply updates in project " + project, Project: project, Locks: locks,
+	return s.Submit(ctx, OpSpec{Action: api.OpUpdateApply, Description: "Apply updates in project " + project, Project: project, Locks: locks,
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			var out []api.UpdateRecord
 			for _, k := range keys {
@@ -496,14 +496,14 @@ func (s *Service) applyJail(ctx context.Context, h *OpHandle, key string, w appl
 	project, name := j.Metadata.Project, j.Metadata.Name
 	var recs []api.UpdateRecord
 	finish := func(r api.UpdateRecord) {
-		r.Finished = s.now().UTC()
+		r.FinishedAt = s.now().UTC()
 		r.Jail, r.Project, r.Scheduled = name, project, scheduled
 		if r.ID == "" {
 			r.ID = "upd-" + s.stamp() + "-" + randHex(3)
 		}
 		s.appendHistory(r)
 		recs = append(recs, r)
-		if r.Result == api.UpdateOK {
+		if r.Result == api.UpdateSuccess {
 			s.emitIn(ctx, project, "update.applied", "/api/v1/jails/"+name+"/updates")
 		} else {
 			s.emitIn(ctx, project, "update.failed", "/api/v1/jails/"+name+"/updates")
@@ -512,26 +512,21 @@ func (s *Service) applyJail(ctx context.Context, h *OpHandle, key string, w appl
 	// OS first: a new root first, then the packages on top of it.
 	if w.os {
 		if os, err := s.osUpdate(ctx, key, j); err == nil && os != nil {
-			rec := api.UpdateRecord{Kind: api.UpdateKindOS, Started: s.now().UTC(), From: os.From, To: os.To}
+			rec := api.UpdateRecord{Kind: api.UpdateKindOS, StartedAt: s.now().UTC(), From: os.From, To: os.To}
 			rec.Snapshot = "jo-pre-upgrade-" + s.stamp()
 			req := lifecycle.UpgradeRequest{JailUpgrade: api.JailUpgrade{Generation: os.To}, Stamp: s.stamp()}
 			if _, err := s.upgradeBody(ctx, h, project, name, key, req.JailUpgrade, req); err != nil {
 				// The root-swap plan undoes itself when the start or the health check fails.
-				rec.Result, rec.Error, rec.RootRolledBack = api.UpdateRolledBack, err.Error(), true
-				if api.IsCode(err, api.CodeConflict) {
-					rec.Result, rec.RootRolledBack = api.UpdateFailed, false
-					rec.Note = "the /etc merge needs a human; the jail stays on " + os.From
-				} else {
-					rec.Note = "the jail was swapped back to " + os.From + "; application data was not touched"
-				}
+				rec.Error = err.Error()
+				rec.Result, rec.RootRolledBack, rec.Note = upgradeOutcome(err, os.From)
 			} else {
-				rec.Result = api.UpdateOK
+				rec.Result = api.UpdateSuccess
 				if j2, e := s.jailSnapshot(key); e == nil {
 					j = j2
 				}
 			}
 			finish(rec)
-			if rec.Result != api.UpdateOK {
+			if rec.Result != api.UpdateSuccess {
 				return recs
 			}
 		}
@@ -545,13 +540,13 @@ func (s *Service) applyJail(ctx context.Context, h *OpHandle, key string, w appl
 // applyPackages updates the packages of a running jail: snapshot, upgrade,
 // health check. It never rolls data back on its own.
 func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, scheduled bool) api.UpdateRecord {
-	rec := api.UpdateRecord{Kind: api.UpdateKindPackages, Started: s.now().UTC()}
+	rec := api.UpdateRecord{Kind: api.UpdateKindPackages, StartedAt: s.now().UTC()}
 	if !s.managesPackages(j) {
-		rec.Result, rec.Note = api.UpdateOK, "this jail keeps its own packages (JailOps drives pkg and apk only); nothing was run"
+		rec.Result, rec.Note = api.UpdateSuccess, "this jail keeps its own packages (JailOps drives pkg and apk only); nothing was run"
 		return rec
 	}
 	if !s.jailRunning(ctx, key) {
-		rec.Result, rec.Error = api.UpdateFailed, "the jail is not running; packages are updated inside it"
+		rec.Result, rec.Error = api.UpdateFailure, "the jail is not running; packages are updated inside it"
 		return rec
 	}
 	alpine := s.jailIsLinux(j)
@@ -559,7 +554,7 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 	if !alpine {
 		release, err := s.holdJailFor(key, "a package update", false)
 		if err != nil {
-			rec.Result, rec.Error = api.UpdateFailed, "package catalog: "+err.Error()
+			rec.Result, rec.Error = api.UpdateFailure, "package catalog: "+err.Error()
 			return rec
 		}
 		defer release()
@@ -570,25 +565,25 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 		upd = []string{"apk", "update", "--no-interactive"}
 	}
 	if _, err := s.pkgExec(ctx, key, alpine, 10*time.Minute, upd...); err != nil {
-		rec.Result, rec.Error = api.UpdateFailed, "package catalog: "+err.Error()
+		rec.Result, rec.Error = api.UpdateFailure, "package catalog: "+err.Error()
 		return rec
 	}
 	if out, err := s.pkgUpgrade(ctx, key, alpine, 10*time.Minute, false); err == nil {
 		rec.Packages = parsePackageUpdates(out, alpine)
 		if len(rec.Packages) == 0 {
-			rec.Result, rec.Note = api.UpdateOK, "nothing to update"
+			rec.Result, rec.Note = api.UpdateSuccess, "nothing to update"
 			return rec
 		}
 	}
 	snap, err := s.life.SnapshotJail(ctx, key, "update-"+s.stamp()+"-"+randHex(2), "before package update")
 	if err != nil {
-		rec.Result, rec.Error = api.UpdateFailed, "snapshot: "+err.Error()
+		rec.Result, rec.Error = api.UpdateFailure, "snapshot: "+err.Error()
 		return rec
 	}
 	rec.Snapshot = snap.Name
 	if _, err := s.pkgUpgrade(ctx, key, alpine, 60*time.Minute, true); err != nil {
-		rec.Result, rec.Error = api.UpdateFailed, err.Error()
-		rec.Note = "restore the snapshot with `jailops jail rollback " + j.Metadata.Name + " --all --snapshot " + snap.Name + "` to undo it; that discards what the jail wrote since"
+		rec.Result, rec.Error = api.UpdateFailure, err.Error()
+		rec.Note = "restore the snapshot with `jailops jail rollback " + j.Metadata.Name + " --scope all --snapshot " + snap.Name + "` to undo it; that discards what the jail wrote since"
 		return rec
 	}
 	if !alpine {
@@ -596,20 +591,20 @@ func (s *Service) applyPackages(ctx context.Context, key string, j api.Jail, sch
 		_, _ = s.runInJail(ctx, key, 5*time.Minute, "/sbin/ldconfig", "-m", "/usr/local/lib")
 	}
 	if err := s.healthCheck(ctx, key, j); err != nil {
-		rec.Result, rec.Error = api.UpdateFailed, err.Error()
+		rec.Result, rec.Error = api.UpdateFailure, err.Error()
 		rec.Note = "the packages stay updated: package files live in the jail's own datasets, and a root rollback does not undo them. " +
-			"`jailops jail rollback " + j.Metadata.Name + " --all --snapshot " + snap.Name + "` does, and discards what the jail wrote since"
+			"`jailops jail rollback " + j.Metadata.Name + " --scope all --snapshot " + snap.Name + "` does, and discards what the jail wrote since"
 		return rec
 	}
-	rec.Result = api.UpdateOK
+	rec.Result = api.UpdateSuccess
 	if j.Spec.Update.Reboot == api.RebootAuto {
 		if err := s.restartKey(ctx, key); err != nil {
 			rec.Note = "the automatic restart failed: " + err.Error()
 		} else {
-			rec.Note = "the jail was restarted (updates.reboot=auto)"
+			rec.Note = "the jail was restarted (update.reboot=auto)"
 		}
 	} else {
-		rec.Note = "restart the jail to run the updated programs (updates.reboot=manual)"
+		rec.Note = "restart the jail to run the updated programs (update.reboot=manual)"
 	}
 	return rec
 }
@@ -714,7 +709,7 @@ func (s *Service) runScheduled(ctx context.Context, key string, j api.Jail, appl
 		return
 	}
 	op, err := s.Submit(WithActor(ctx, Actor{Name: "updates", Kind: "system", Perm: api.PermAdmin, Global: true}), OpSpec{
-		Description: "Scheduled update of jail " + j.Metadata.Name, Project: j.Metadata.Project,
+		Action: api.OpUpdateScheduled, Description: "Scheduled update of jail " + j.Metadata.Name, Project: j.Metadata.Project,
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			return s.applyJail(ctx, h, key, applyWhat{}, true), nil
 		}})

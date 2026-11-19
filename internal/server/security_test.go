@@ -185,7 +185,7 @@ func TestOverlappingNetworkIsRefused(t *testing.T) {
 	n := dtest.LAN()
 	n.Metadata.Name = "other"
 	n.Spec.IPv4 = &api.IPv4Net{Subnet: "10.20.0.128/25", Gateway: "10.20.0.129", Range: "10.20.0.130-10.20.0.140"}
-	if _, err := e.Admin.Networks().Create(c, n); !api.IsCode(err, api.CodeConflict) || !strings.Contains(err.Error(), `network "lan"`) {
+	if _, err := e.Admin.Networks().Create(c, n); !api.IsCode(err, api.CodePreconditionFailed) || !strings.Contains(err.Error(), `network "lan"`) {
 		t.Fatalf("%v", err)
 	}
 	n.Spec.IPv4 = &api.IPv4Net{Subnet: "10.99.0.0/24", Gateway: "10.99.0.1", Range: "10.99.0.2-10.99.0.9"}
@@ -219,7 +219,7 @@ func TestQueryTokenOnExecAndConsoleIsRefused(t *testing.T) {
 		if code, body := e.RawHdr("POST", "/api/v1/jails/web/exec?project=alpha&"+q+"="+tok, "", `{"argv":["id"]}`, up); code != http.StatusUnauthorized {
 			t.Errorf("exec with ?%s=: %d %s", q, code, body)
 		}
-		for _, m := range []string{"GET", "POST"} {
+		for _, m := range []string{"POST"} {
 			if code, body := e.RawHdr(m, "/api/v1/jails/web/console?project=alpha&"+q+"="+tok, "", "", nil); code != http.StatusUnauthorized {
 				t.Errorf("%s console with ?%s=: %d %s", m, q, code, body)
 			}

@@ -76,7 +76,7 @@ func TestEnsureUplinkNotMember(t *testing.T) {
 	}}
 	rm := RouteManager{Exec: ex}
 	err := rm.EnsureUplinkNotMember(context.Background(), "em0")
-	if !errors.Is(err, &api.Error{Code: api.CodeConflict}) {
+	if !errors.Is(err, &api.Error{Code: api.CodePreconditionFailed}) {
 		t.Fatal(err)
 	}
 	if err := rm.EnsureUplinkNotMember(context.Background(), "igb0"); err != nil {

@@ -16,7 +16,7 @@
 #   jailops_shutdown_timeout="80"    seconds for all the jails together; the rest are left to init. It must stay below
 #                                    rcshutdown_timeout (90 by default): raise both for a host with slow databases
 #                                    Up to eight jails stop at once: a jail that asks for more than ten seconds
-#                                    (boot.stop_timeout) needs that time here, and a chain of jails that depend on
+#                                    (boot.stop_timeout_seconds) needs that time here, and a chain of jails that depend on
 #                                    each other needs the sum of theirs
 #   jailops_shutdown_grace=""        seconds, or a duration such as 30s, each jail gets to shut down (empty: the
 #                                    jail's own stop timeout)
@@ -34,7 +34,7 @@ jailops_shutdown_stop()
 {
 	local grace=""
 	[ -x "${jailops_shutdown_cli}" ] || return 0
-	[ -n "${jailops_shutdown_grace}" ] && grace="--grace ${jailops_shutdown_grace}"
+	[ -n "${jailops_shutdown_grace}" ] && grace="--timeout ${jailops_shutdown_grace}"
 	echo "Stopping the jails of JailOps."
 	# the host is going down: whatever happens here, the shutdown goes on
 	timeout "${jailops_shutdown_timeout}" "${jailops_shutdown_cli}" stop-all ${grace} ||

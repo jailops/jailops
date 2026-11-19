@@ -159,7 +159,7 @@ func TestMigratedForwardsBecomeTheExposureOfTheJailsThatHadThem(t *testing.T) {
 	if _, err := s.CreatePolicy(admin, api.FirewallPolicy{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.FirewallPolicySpec{DefaultIn: "deny", DefaultOut: "allow"}}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CreateProfile(admin, api.Profile{Metadata: api.ObjectMeta{Name: "pub"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.pids": "300"}}}); err != nil {
+	if _, err := s.CreateProfile(admin, api.Profile{Metadata: api.ObjectMeta{Name: "pub"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.pids": "300"}}}); err != nil {
 		t.Fatal(err)
 	}
 	j, _ := s.GetJail(admin, "uses-policy")

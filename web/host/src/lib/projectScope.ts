@@ -49,7 +49,7 @@ export function orderProjects<T extends { metadata: { name: string } }>(list: T[
 export interface QuotaRow { key: string; used: number; limit: number; pct: number }
 
 /** Usage against each quota that is set (zero is unlimited). Memory is compared in bytes. */
-export function quotaRows(spec: { quotas?: { jails?: number; cpu?: number; memory?: string; pids?: number; addresses?: number } }, status: { jails: number; cpu: number; memory_used: number; addresses: number }, parseSize: (s: string | undefined) => number | null): QuotaRow[] {
+export function quotaRows(spec: { quotas?: { jails?: number; cpu?: number; memory?: string; pids?: number; addresses?: number } }, status: { jails: number; cpu: number; memory_used_bytes: number; addresses: number }, parseSize: (s: string | undefined) => number | null): QuotaRow[] {
   const q = spec.quotas ?? {}
   const rows: QuotaRow[] = []
   const add = (key: string, used: number, limit: number | null | undefined) => {
@@ -57,7 +57,7 @@ export function quotaRows(spec: { quotas?: { jails?: number; cpu?: number; memor
   }
   add('jails', status.jails, q.jails)
   add('cpu', status.cpu, q.cpu)
-  add('memory', status.memory_used, parseSize(q.memory))
+  add('memory', status.memory_used_bytes, parseSize(q.memory))
   add('addresses', status.addresses, q.addresses)
   return rows
 }

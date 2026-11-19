@@ -29,7 +29,7 @@ func TestHostFirewallAgainstFake(t *testing.T) {
 	if _, err := h.Firewall().Apply(ctx, api.HostFirewallApply{Spec: api.HostFirewallSpec{Template: "permissive"}}); !api.IsCode(err, api.CodeInvalid) {
 		t.Fatalf("invalid: %v", err)
 	}
-	res, err := h.Firewall().Apply(ctx, api.HostFirewallApply{Spec: spec, ConfirmWithin: 30})
+	res, err := h.Firewall().Apply(ctx, api.HostFirewallApply{Spec: spec, ConfirmWithinSeconds: 30})
 	if err != nil || res.Pending == nil || res.Pending.SecondsLeft != 30 {
 		t.Fatalf("%+v %v", res, err)
 	}

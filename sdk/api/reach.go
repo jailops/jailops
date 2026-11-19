@@ -52,6 +52,28 @@ const (
 	ReachOther    = "other-projects"
 )
 
+// ReachDecision is what a reach row says about a kind of source.
+type ReachDecision string
+
+// The decisions of a reach row.
+const (
+	ReachPass    ReachDecision = "pass"    // the source reaches the jail
+	ReachForward ReachDecision = "forward" // a port forward of the host reaches it
+	ReachNone    ReachDecision = "none"    // nothing of this kind reaches the jail; By says what stops it
+)
+
+// ReachRuleDecision is what a rule of the anchor does.
+type ReachRuleDecision string
+
+// The decisions of a rule of the anchor.
+const (
+	RulePass     ReachRuleDecision = "pass"
+	RuleBlock    ReachRuleDecision = "block"
+	RuleForward  ReachRuleDecision = "forward"
+	RuleDisabled ReachRuleDecision = "disabled"
+	RuleRaw      ReachRuleDecision = "raw"
+)
+
 // ReachRow says what one kind of source reaches on a jail.
 type ReachRow struct {
 	// Source is one of the Reach constants; SourceName names the tunnel interface of a tunnel row.
@@ -65,9 +87,9 @@ type ReachRow struct {
 	// From is the source restriction of the rule (empty: any source of the kind).
 	From       []string `json:"from,omitempty"`
 	Restricted bool     `json:"restricted,omitempty"`
-	// Decision is "pass", "forward" or "none" (nothing of this kind reaches the jail; By says what stops it).
-	Decision string `json:"decision"`
-	// By says what gives the reach, or what stops it.
+	// Decision says whether the source reaches the jail.
+	Decision ReachDecision `json:"decision"`
+	// By says in words what gives the reach, or what stops it; it is text for people and not parsed.
 	By string `json:"by"`
 	// Policy, Rule and RuleName identify the rule of a policy; Stage is the stage of the anchor.
 	Policy   string `json:"policy,omitempty"`
@@ -91,15 +113,16 @@ type ReachRule struct {
 	To        string `json:"to,omitempty"`
 	Proto     string `json:"proto,omitempty"`
 	Ports     string `json:"ports,omitempty"`
-	// Decision is "pass", "block", "forward", "disabled" or "raw".
-	Decision string `json:"decision"`
-	Stage    string `json:"stage"`
-	By       string `json:"by"`
+	// Decision is what the rule does.
+	Decision ReachRuleDecision `json:"decision"`
+	Stage    string            `json:"stage"`
+	By       string            `json:"by"`
 	// PF is the rendered line of the anchor.
 	PF string `json:"pf,omitempty"`
 }
 
-// ReachOut says what a jail can reach.
+// ReachOut says in words what a jail can reach, per kind of destination: for people to read and not to parse (the
+// rules of the anchor are the data).
 type ReachOut struct {
 	Internet      string `json:"internet"`
 	Host          string `json:"host"`

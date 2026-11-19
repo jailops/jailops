@@ -295,7 +295,7 @@ func (s *Service) checkProjectRefs(name string, spec api.ProjectSpec, self strin
 				continue
 			}
 			if _, held := specGrantsNetwork(o.Spec, g.Network); held {
-				return api.Errorf(api.CodeConflict, "network %s is already granted to project %s", g.Network, o.Meta.Name).
+				return api.Errorf(api.CodePreconditionFailed, "network %s is already granted to project %s", g.Network, o.Meta.Name).
 					WithDetail("network", g.Network).WithDetail("project", o.Meta.Name).
 					WithHint("networks are not shared between projects: create another network for this project")
 			}
@@ -378,7 +378,7 @@ func (s *Service) ensureProjectDatasets(ctx context.Context, project string, si 
 		}
 		if ok {
 			if p, _ := z.Get(ctx, d.name, "jailops:managed"); p["jailops:managed"].Value != "on" {
-				return api.Errorf(api.CodeConflict, "dataset %s exists and is not managed by JailOps", d.name)
+				return api.Errorf(api.CodePreconditionFailed, "dataset %s exists and is not managed by JailOps", d.name)
 			}
 			continue
 		}
@@ -650,7 +650,7 @@ func (s *Service) PatchProject(ctx context.Context, name string, patch map[strin
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "project %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "project %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.Project
 	if err := MergePatch(cur, patch, &out); err != nil {
@@ -829,7 +829,7 @@ func (s *Service) admit(ctx context.Context, p project, key string, spec *api.Ja
 	}
 	if spec.Delegate && eff.Resources.Disk == "" {
 		return nil, invalid("ZFS delegation needs a disk limit: the jail manages the dataset it is handed, and without a quota on its container it can fill the pool").
-			WithHint("set limits.disk, for example `jailops config set JAIL limits.disk 20G`")
+			WithHint("set resources.disk, for example `jailops config set JAIL resources.disk 20G`")
 	}
 	if len(eff.Network) == 0 {
 		return nil, noNetworkNamed(p)
@@ -965,7 +965,7 @@ func (s *Service) checkQuota(p project, spec api.JailSpec, u usage, isNew bool) 
 	}
 	if q.CPU > 0 {
 		if spec.Resources.CPU == 0 {
-			return invalid("project %q has a CPU quota: give the jail a CPU limit (--cpu N, or limits.cpu)", name)
+			return invalid("project %q has a CPU quota: give the jail a CPU limit (--cpu N, or resources.cpu)", name)
 		}
 		if u.cpu+spec.Resources.CPU > q.CPU {
 			return quotaErr("cpu", uint64(q.CPU), uint64(u.cpu), uint64(spec.Resources.CPU))
@@ -973,7 +973,7 @@ func (s *Service) checkQuota(p project, spec api.JailSpec, u usage, isNew bool) 
 	}
 	if q.PIDs > 0 {
 		if spec.Resources.PIDs == 0 {
-			return invalid("project %q has a process quota: give the jail a process limit (--pids N, or limits.pids)", name)
+			return invalid("project %q has a process quota: give the jail a process limit (--pids N, or resources.pids)", name)
 		}
 		if u.pids+spec.Resources.PIDs > q.PIDs {
 			return quotaErr("pids", uint64(q.PIDs), uint64(u.pids), uint64(spec.Resources.PIDs))
@@ -983,7 +983,7 @@ func (s *Service) checkQuota(p project, spec api.JailSpec, u usage, isNew bool) 
 		limit := memBytes(q.Memory)
 		want := memBytes(spec.Resources.Memory)
 		if want == 0 {
-			return invalid("project %q has a memory quota: give the jail a memory limit (--memory SIZE, or limits.memory)", name)
+			return invalid("project %q has a memory quota: give the jail a memory limit (--memory SIZE, or resources.memory)", name)
 		}
 		if u.memory+want > limit {
 			return quotaErr("memory", limit, u.memory, want)

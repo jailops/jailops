@@ -40,7 +40,7 @@ export const common = {
     invalid: 'The request was not valid.',
     not_found: 'It does not exist (any more).',
     already_exists: 'Something of this name exists already.',
-    conflict: 'Someone else changed it meanwhile. Reload and try again.',
+    precondition_failed: 'Someone else changed it meanwhile. Reload and try again.',
     unauthorized: 'You are not signed in.',
     forbidden: 'Your role does not allow this.',
     unsupported: 'This server does not offer this.',

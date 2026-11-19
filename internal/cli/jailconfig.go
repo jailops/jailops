@@ -80,8 +80,8 @@ type configRow struct {
 func (a *app) configCmd() *cobra.Command {
 	d := a.jailDesc()
 	cc := group("config", "Show and change the configuration keys of a jail",
-		`Configuration keys are dotted names such as limits.memory, boot.autostart,
-nic.eth0.mtu or shell. Each maps to one field of the jail specification; the
+		`Configuration keys are dotted names such as resources.memory, boot.autostart,
+network.eth0.mtu or shell. Each maps to one field of the jail specification; the
 registry of keys, with types, validation and whether a change needs a restart,
 is part of the SDK, so the CLI, the web interface and the daemon agree.
 'config keys' lists them.
@@ -90,9 +90,9 @@ Changing a key updates the desired state and the daemon enforces it. When a
 change needs a restart the command says which keys; it never restarts a jail
 unless you pass --restart.`,
 		`jailops config show nginx
-jailops config set nginx limits.memory 2G limits.cpu 2
-jailops config get nginx limits.memory
-jailops config unset nginx limits.cpu
+jailops config set nginx resources.memory 2G resources.cpu 2
+jailops config get nginx resources.memory
+jailops config unset nginx resources.cpu
 jailops config show nginx --expanded`)
 	cc.AddCommand(a.configShow(d), a.configGet(d), a.configSet(d, false), a.configSet(d, true), a.configEdit(d), a.configKeys())
 	return cc
@@ -215,7 +215,7 @@ func (a *app) configGet(d *kindDesc[api.Jail]) *cobra.Command {
 		Use:               "get NAME KEY",
 		Short:             "Print the value of one configuration key",
 		Long:              "Print the value of one key of a jail, alone on a line, so a script can capture it. A key that is valid but not set is an error (exit status 4).",
-		Example:           "jailops config get nginx limits.memory",
+		Example:           "jailops config get nginx resources.memory",
 		Args:              cobra.ExactArgs(2),
 		ValidArgsFunction: a.completeJailThenKeys(d),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -230,7 +230,7 @@ func (a *app) configGet(d *kindDesc[api.Jail]) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			v, ok := api.ConfigValues(j.Spec)[canonicalKey(args[1])]
+			v, ok := api.ConfigValues(j.Spec)[args[1]]
 			if !ok {
 				return api.Errorf(api.CodeNotFound, "key %q is not set on jail %q", args[1], args[0]).WithHint("'jailops config show " + args[0] + "' lists the keys that are set")
 			}
@@ -241,13 +241,6 @@ func (a *app) configGet(d *kindDesc[api.Jail]) *cobra.Command {
 			return nil
 		},
 	}
-}
-
-func canonicalKey(k string) string {
-	if rest, ok := strings.CutPrefix(k, "network."); ok {
-		return "nic." + rest
-	}
-	return k
 }
 
 func checkKey(k string) error {
@@ -309,17 +302,17 @@ func (a *app) configSet(d *kindDesc[api.Jail], unset bool) *cobra.Command {
 	use, short := "set NAME KEY VALUE [KEY VALUE]...", "Set configuration keys of a jail"
 	long := `Set one or more keys. Pairs may be written KEY VALUE or KEY=VALUE. The whole
 change is validated first and applied atomically, with the ETag read at the
-start, so nothing is half done. Device keys add devices: 'nic.eth1.network lan'
+start, so nothing is half done. Device keys add devices: 'network.eth1.network lan'
 creates the nic eth1.
 
 If a changed key needs a restart the command lists the keys and does NOT restart
 the jail; --restart restarts it (if it is running) once the change is stored.`
-	example := "jailops config set nginx limits.memory 2G limits.cpu 2\njailops config set nginx nic.eth0.ipv4=auto --restart\njailops config set nginx shell /usr/local/bin/bash"
+	example := "jailops config set nginx resources.memory 2G resources.cpu 2\njailops config set nginx network.eth0.ipv4=auto --restart\njailops config set nginx shell /usr/local/bin/bash"
 	if unset {
 		use, short = "unset NAME KEY...", "Remove configuration keys of a jail"
-		long = `Reset keys to their defaults. Unsetting a device key such as nic.eth1 removes
+		long = `Reset keys to their defaults. Unsetting a device key such as network.eth1 removes
 the device. Restart handling is the same as for 'config set'.`
-		example = "jailops config unset nginx limits.cpu\njailops config unset nginx nic.eth1 --restart"
+		example = "jailops config unset nginx resources.cpu\njailops config unset nginx network.eth1 --restart"
 	}
 	valuesOrKeys := a.completeJailThenKeys(d)
 	if !unset {
@@ -477,14 +470,6 @@ file cancels. Restart handling is the same as for 'config set'.`,
 	return cmd
 }
 
-// setAlias is 'jailops set NAME KEY VALUE', the short form of 'config set'.
-func (a *app) setAlias(d *kindDesc[api.Jail]) *cobra.Command {
-	cmd := a.configSet(d, false)
-	cmd.Short = "Set configuration keys of a jail by name: KEY VALUE or KEY=VALUE (short for config set; the flags of create are jail set)"
-	cmd.Example = "jailops set nginx shell /usr/local/bin/bash\njailops set nginx limits.memory 2G --restart"
-	return cmd
-}
-
 func profileDesc() *kindDesc[api.Profile] {
 	d := newDesc("profile", "profiles", api.KindProfile,
 		func(p *api.Profile) *api.ObjectMeta { return &p.Metadata },
@@ -512,9 +497,9 @@ shows the merged result and where each value came from.
 Profiles belong to the current project. With --project host they are
 host-level profiles, visible to every project and written only by global
 admins.`,
-		"jailops profile list\njailops profile create web-limits --set limits.memory=2G --set limits.cpu=2\njailops profile show web-limits", "profiles")
+		"jailops profile list\njailops profile create web-limits --set resources.memory=2G --set resources.cpu=2\njailops profile show web-limits", "profiles")
 	crudCommands(a, pc, d, "Create a profile from keys given with --set, or from a file. Only keys that the registry allows in profiles are accepted ('jailops config keys' shows them).",
-		"jailops profile create web-limits --set limits.memory=2G --set limits.cpu=2\njailops profile create base -f base.yaml --project host",
+		"jailops profile create web-limits --set resources.memory=2G --set resources.cpu=2\njailops profile create base -f base.yaml --project host",
 		func(cmd *cobra.Command) func(string) (api.Profile, error) {
 			var desc string
 			var sets []string

@@ -67,7 +67,7 @@ func TestShellChoiceAndTerminal(t *testing.T) {
 	}
 	tr := h.transcript()
 	// The jail's shell key, set through the short alias.
-	tr.ok("set", "web", "shell", "/usr/local/bin/bash")
+	tr.ok("config", "set", "web", "shell", "/usr/local/bin/bash")
 	if out := tr.ok("config", "get", "web", "shell"); strings.TrimSpace(out) != "/usr/local/bin/bash" {
 		t.Fatalf("shell key: %q", out)
 	}
@@ -274,6 +274,20 @@ func TestShellSetupAndShellFlags(t *testing.T) {
 	tr.do("", "config", "set", "web", "prompt", "`id`")
 	tr.do("", "jail", "shell-setup", "ghost")
 	tr.golden("shell_setup")
+}
+
+func TestRepairPackages(t *testing.T) {
+	h := newHarness(t)
+	h.seed()
+	tr := h.transcript()
+	tr.ok("create", "web", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
+	tr.ok("jail", "repair-packages", "web")
+	tr.ok("jail", "repair-packages", "web", "-o", "json")
+	tr.ok("--dry-run", "jail", "repair-packages", "web")
+	tr.ok("start", "web")
+	tr.do("", "jail", "repair-packages", "web") // running
+	tr.do("", "jail", "repair-packages", "ghost")
+	tr.golden("repair_packages")
 }
 
 func TestBackupKeyRunVerify(t *testing.T) {

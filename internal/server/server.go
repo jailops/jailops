@@ -62,6 +62,7 @@ type Server struct {
 	log    *slog.Logger
 	authz  *auth.Authorizer
 	routes []route
+	idem   *idemTable
 	mux    *http.ServeMux
 	shape  *auth.Registry
 	tokLim *auth.Lockout
@@ -95,7 +96,7 @@ func New(cfg Config) (*Server, error) {
 		cfg.KeepAlive = 15 * time.Second
 	}
 	s := &Server{cfg: cfg, svc: cfg.Svc, log: cfg.Log, authz: auth.NewAuthorizer(), userNames: map[uint32]string{},
-		hubTr: map[string]*hubTransport{}, tokLim: auth.NewLockout(cfg.Lockout)}
+		hubTr: map[string]*hubTransport{}, tokLim: auth.NewLockout(cfg.Lockout), idem: newIdemTable()}
 	s.routes = s.routeTable()
 	keys := s.RouteKeys()
 	if err := auth.VerifyComplete(keys); err != nil {
@@ -107,7 +108,7 @@ func New(cfg Config) (*Server, error) {
 		s.mux.HandleFunc(r.method+" "+r.pattern, s.wrap(r))
 	}
 	// GET /healthz is liveness: the process answers HTTP. It checks nothing else (GET /readyz does).
-	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	s.mux.HandleFunc(livenessRoute, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = io.WriteString(w, "ok\n")
 	})
@@ -117,6 +118,12 @@ func New(cfg Config) (*Server, error) {
 	}
 	return s, nil
 }
+
+// livenessRoute is the one route that is not in the route table: it answers before authentication and checks nothing.
+const livenessRoute = "GET /healthz"
+
+// AllRouteKeys is RouteKeys and the routes outside the table (liveness): the whole HTTP surface of the API port.
+func (s *Server) AllRouteKeys() []string { return append(s.RouteKeys(), livenessRoute) }
 
 // RouteKeys returns "METHOD pattern" for every registered API route.
 func (s *Server) RouteKeys() []string {

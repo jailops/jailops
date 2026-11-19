@@ -17,7 +17,6 @@ type ServerInfo struct {
 	Hostname      string   `json:"hostname"`
 	Role          Role     `json:"role"`
 	Hub           bool     `json:"hub,omitempty"`
-	Clustered     bool     `json:"clustered,omitempty"`
 	// Auth describes the caller as the server sees it.
 	Auth        string      `json:"auth"` // "trusted", "untrusted"
 	Environment Environment `json:"environment"`
@@ -63,6 +62,63 @@ type Response struct {
 	Metadata  json.RawMessage `json:"metadata,omitempty"`
 }
 
+// OperationAction names what an operation does. The set is frozen; a client treats a value it does not know as "other".
+type OperationAction string
+
+const (
+	OpJailCreate            OperationAction = "jail.create"
+	OpJailDelete            OperationAction = "jail.delete"
+	OpJailStart             OperationAction = "jail.start"
+	OpJailStop              OperationAction = "jail.stop"
+	OpJailRestart           OperationAction = "jail.restart"
+	OpJailConfigure         OperationAction = "jail.configure"
+	OpJailCopy              OperationAction = "jail.copy"
+	OpJailConvert           OperationAction = "jail.convert"
+	OpJailUpgrade           OperationAction = "jail.upgrade"
+	OpJailRollback          OperationAction = "jail.rollback"
+	OpJailSnapshot          OperationAction = "jail.snapshot"
+	OpJailSnapshotDelete    OperationAction = "jail.snapshot_delete"
+	OpJailImport            OperationAction = "jail.import"
+	OpJailProvision         OperationAction = "jail.provision"
+	OpJailShellSetup        OperationAction = "jail.shell_setup"
+	OpJailRepairPackages    OperationAction = "jail.repair_packages"
+	OpJailRestore           OperationAction = "jail.restore"
+	OpAppInstall            OperationAction = "app.install"
+	OpRename                OperationAction = "rename"
+	OpVolumeCreate          OperationAction = "volume.create"
+	OpVolumeDelete          OperationAction = "volume.delete"
+	OpVolumeSnapshot        OperationAction = "volume.snapshot"
+	OpVolumeSnapshotDelete  OperationAction = "volume.snapshot_delete"
+	OpVolumeRollback        OperationAction = "volume.rollback"
+	OpVolumeAttach          OperationAction = "volume.attach"
+	OpVolumeDetach          OperationAction = "volume.detach"
+	OpVolumeLock            OperationAction = "volume.lock"
+	OpVolumeUnlock          OperationAction = "volume.unlock"
+	OpVolumePassphrase      OperationAction = "volume.passphrase"
+	OpVolumeRestore         OperationAction = "volume.restore"
+	OpImageBuild            OperationAction = "image.build"
+	OpImageUpgrade          OperationAction = "image.upgrade"
+	OpImageMove             OperationAction = "image.move"
+	OpImageGenerationDelete OperationAction = "image.generation_delete"
+	OpImageAutoUpgrade      OperationAction = "image.auto_upgrade"
+	OpBackupRun             OperationAction = "backup.run"
+	OpBackupVerify          OperationAction = "backup.verify"
+	OpBackupDelete          OperationAction = "backup.delete"
+	OpUpdateCheck           OperationAction = "update.check"
+	OpUpdateApply           OperationAction = "update.apply"
+	OpUpdateScheduled       OperationAction = "update.scheduled"
+)
+
+// OperationActions lists every OperationAction.
+var OperationActions = []OperationAction{
+	OpJailCreate, OpJailDelete, OpJailStart, OpJailStop, OpJailRestart, OpJailConfigure, OpJailCopy, OpJailConvert,
+	OpJailUpgrade, OpJailRollback, OpJailSnapshot, OpJailSnapshotDelete, OpJailImport, OpJailProvision, OpJailShellSetup,
+	OpJailRepairPackages, OpJailRestore, OpAppInstall, OpRename, OpVolumeCreate, OpVolumeDelete, OpVolumeSnapshot, OpVolumeSnapshotDelete,
+	OpVolumeRollback, OpVolumeAttach, OpVolumeDetach, OpVolumeLock, OpVolumeUnlock, OpVolumePassphrase, OpVolumeRestore,
+	OpImageBuild, OpImageUpgrade, OpImageMove, OpImageGenerationDelete, OpImageAutoUpgrade, OpBackupRun, OpBackupVerify,
+	OpBackupDelete, OpUpdateCheck, OpUpdateApply, OpUpdateScheduled,
+}
+
 // OperationStatus is the state of an asynchronous operation.
 type OperationStatus string
 
@@ -82,7 +138,9 @@ func (s OperationStatus) Final() bool {
 // Operation is a long-running task. Operations are persisted, so a daemon
 // restart can resume or roll back.
 type Operation struct {
-	ID          string          `json:"id"`
+	ID string `json:"id"`
+	// Action is what the operation does, for clients that act on it; Description is the sentence for people.
+	Action      OperationAction `json:"action,omitempty"`
 	Description string          `json:"description"`
 	Status      OperationStatus `json:"status"`
 	// Resources lists affected objects by kind, for example
@@ -146,7 +204,7 @@ type LifecycleEvent struct {
 // backup backend, no sealed-secrets identity, the host modules or the certificate manager off): a client's doctor does
 // not call them missing. Service.Extensions withholds exactly these.
 var OptionalExtensions = []string{
-	"backup_pull", "backup_push", "restore_preflight", "backup_key", "backup_run", "backup_verify",
+	"restore_preflight", "backup_key", "backup_run", "backup_verify",
 	"sealed_secrets", "host_identity", "host_firewall", "host_pending", "host_certificate",
 }
 
@@ -165,8 +223,6 @@ var Extensions = []string{
 	"network_ipam_range",
 	"firewall_anchors",
 	"backup_policies",
-	"backup_pull",
-	"backup_push",
 	"restore_preflight",
 	"audit_log",
 	"doctor",
@@ -209,6 +265,7 @@ var Extensions = []string{
 	"setup",
 	"host_certificate",
 	"jail_shell_setup",
+	"jail_repair_packages",
 	"rename",
 	"boot_plan",
 	"firewall_test",

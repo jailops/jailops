@@ -14,8 +14,8 @@ describe('PendingBanner', () => {
     localStorage.clear()
     pendingState.data = null
     const fw = await api.host.firewall()
-    const r = await api.host.applyFirewall({ spec: { ...fw.spec, icmp: !fw.spec.icmp }, confirm_within: 90 })
-    expect(r.kind === 'sync' && r.data?.pending?.confirm_within).toBe(90)
+    const r = await api.host.applyFirewall({ spec: { ...fw.spec, icmp: !fw.spec.icmp }, confirm_within_seconds: 90 })
+    expect(r.kind === 'sync' && r.data?.pending?.confirm_within_seconds).toBe(90)
     const w = mount(PendingBanner)
     await flushPromises()
     expect(w.get('[data-test="pending-banner"]').text()).toContain('firewall change reverts in 1:30')

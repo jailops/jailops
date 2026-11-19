@@ -24,7 +24,7 @@ import (
 
 func TestErrorFormatAndExitCodes(t *testing.T) {
 	want := map[api.Code]int{
-		api.CodeInvalid: 2, api.CodeNotFound: 4, api.CodeAlreadyExists: 5, api.CodeConflict: 5, api.CodeUnauthorized: 3,
+		api.CodeInvalid: 2, api.CodeNotFound: 4, api.CodeAlreadyExists: 5, api.CodePreconditionFailed: 5, api.CodeUnauthorized: 3,
 		api.CodeForbidden: 3, api.CodeUnsupported: 6, api.CodeBusy: 5, api.CodeInternal: 7, api.CodeIPConflict: 5,
 		api.CodePoolExhausted: 5, api.CodeImageInUse: 5, api.CodeDataLoss: 2, api.CodeVersionSkew: 6,
 	}

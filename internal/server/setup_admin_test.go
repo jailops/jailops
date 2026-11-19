@@ -107,7 +107,7 @@ func TestLastGlobalAdministratorIsKept(t *testing.T) {
 	}
 	last := func(what string, err error) {
 		t.Helper()
-		if !api.IsCode(err, api.CodeConflict) || !strings.Contains(err.Error(), "last global administrator") {
+		if !api.IsCode(err, api.CodePreconditionFailed) || !strings.Contains(err.Error(), "last global administrator") {
 			t.Errorf("%s: %v, want the refusal", what, err)
 		}
 	}

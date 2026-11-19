@@ -498,14 +498,14 @@ func direction(r render.Rule) string {
 	return "to"
 }
 
-func ruleDecision(r render.Rule) string {
+func ruleDecision(r render.Rule) api.ReachRuleDecision {
 	switch r.Kind {
 	case render.RuleDisabled:
-		return "disabled"
+		return api.RuleDisabled
 	case render.RuleRaw:
-		return "raw"
+		return api.RuleRaw
 	}
-	return r.Action
+	return api.ReachRuleDecision(r.Action)
 }
 
 func actionText(a string) string {

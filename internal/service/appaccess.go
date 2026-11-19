@@ -293,7 +293,7 @@ func (s *Service) accessPolicy(project, jail string) (object[api.FirewallPolicyS
 		return o, false, err
 	}
 	if o.Meta.ManagedBy != api.AppAccessManagedBy {
-		return o, false, api.Errorf(api.CodeConflict, "firewall policy %q exists and is not managed by app access", o.Meta.Name).
+		return o, false, api.Errorf(api.CodePreconditionFailed, "firewall policy %q exists and is not managed by app access", o.Meta.Name).
 			WithHint("rename or delete that policy; app access keeps the policy app-<jail> of each app")
 	}
 	return o, true, nil
@@ -433,7 +433,7 @@ func (s *Service) readHBA(ctx context.Context, key, file string) ([]string, erro
 	return lines, err
 }
 
-// AllowApp answers POST /api/v1/jails/<name>/access.
+// AllowApp answers POST /api/v1/jails/<name>/access/allow.
 func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (api.AppAllowResult, error) {
 	if err := s.requireHost("apps"); err != nil {
 		return api.AppAllowResult{}, err
@@ -525,7 +525,7 @@ func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (
 			return res, invalid("%v", err)
 		}
 		if g.Database != "" && g.Database != db {
-			return res, api.Errorf(api.CodeConflict, "%s already has access to database %s", rs.canonical, g.Database).
+			return res, api.Errorf(api.CodePreconditionFailed, "%s already has access to database %s", rs.canonical, g.Database).
 				WithHint("deny it first to give it another database")
 		}
 		g.Database = db
@@ -545,7 +545,7 @@ func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (
 		role, ri := rec.role(db)
 		switch {
 		case pr.Role && ri < 0:
-			return res, api.Errorf(api.CodeConflict, "role %q exists in the database server and was not made by JailOps", db).
+			return res, api.Errorf(api.CodePreconditionFailed, "role %q exists in the database server and was not made by JailOps", db).
 				WithHint("JailOps never changes a role it did not make: choose another name with --db")
 		case !pr.Role || !role.Login || role.Unfinished || req.Rotate:
 			if password, err = apps.NewPassword(accessRand); err != nil {
@@ -567,7 +567,7 @@ func (s *Service) AllowApp(ctx context.Context, name string, req api.AppAllow) (
 		}
 		switch {
 		case pr.Database && !role.DatabaseCreated:
-			return res, api.Errorf(api.CodeConflict, "database %q exists and was not made by JailOps", db).
+			return res, api.Errorf(api.CodePreconditionFailed, "database %q exists and was not made by JailOps", db).
 				WithHint("choose another name with --db")
 		case !pr.Database:
 			st = append(st, apps.CreateDatabase(db, db))

@@ -52,7 +52,7 @@ async function remove(v: Volume): Promise<void> {
               <span v-if="isHostDir(v)" class="badge" :class="isLost(v) ? 'warn' : 'info'" style="margin-left: 6px" data-test="volume-state">{{ isLost(v) ? s.volumes.stateLost : s.volumes.hostDirBadge }}</span>
               <div v-if="v.spec.comment" class="faint">{{ v.spec.comment }}</div></td>
             <td class="mono hide-sm" :data-label="s.volumes.storage">{{ v.spec.path || v.spec.storage || '-' }}</td>
-            <td class="mono" :data-label="s.volumes.used"><template v-if="isHostDir(v)">-</template><template v-else>{{ bytes(v.status?.used ?? 0) }}<span v-if="v.spec.size" class="faint"> / {{ v.spec.size }}</span></template></td>
+            <td class="mono" :data-label="s.volumes.used"><template v-if="isHostDir(v)">-</template><template v-else>{{ bytes(v.status?.used_bytes ?? 0) }}<span v-if="v.spec.size" class="faint"> / {{ v.spec.size }}</span></template></td>
             <td class="mono hide-sm" :data-label="s.volumes.owner">{{ isHostDir(v) ? '-' : `${v.spec.uid}:${v.spec.gid}` }}</td>
             <td class="mono hide-sm" :data-label="s.volumes.mode">{{ isHostDir(v) ? '-' : v.spec.mode || '-' }}</td>
             <td :data-label="s.volumes.attachedTo"><span v-if="!v.status?.attached_to?.length" class="faint">{{ s.volumes.none }}</span>

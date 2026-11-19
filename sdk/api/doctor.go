@@ -56,9 +56,9 @@ type AuditEntry struct {
 // holds JailOps's datasets.
 type PoolUsage struct {
 	Name      string `json:"name"`
-	Size      uint64 `json:"size"`
-	Allocated uint64 `json:"allocated"`
-	Free      uint64 `json:"free"`
+	Size      uint64 `json:"size_bytes"`
+	Allocated uint64 `json:"allocated_bytes"`
+	Free      uint64 `json:"free_bytes"`
 	Health    string `json:"health,omitempty"`
 }
 

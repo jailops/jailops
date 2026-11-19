@@ -73,7 +73,7 @@ describe('demo rename', () => {
     expect(code(demoRename(x, 'network', 'lan', 'lan', '', undefined))).toBe('400 invalid')
     expect(code(demoRename(x, 'network', 'lan', 'edge', '', undefined))).toBe('409 already_exists')
     expect(code(demoRename(x, 'network', 'nope', 'x', '', undefined))).toBe('404 not_found')
-    expect(code(demoRename(x, 'network', 'lan', 'lan2', '', '"1"'))).toBe('409 conflict')
+    expect(code(demoRename(x, 'network', 'lan', 'lan2', '', '"1"'))).toBe('409 precondition_failed')
     expect(code(demoRename(x, 'jail', 'web', 'www', 'web', undefined))).toBe('409 busy')
     expect(code(demoRename(x, 'jail', 'vault', 'safe', 'web', undefined))).toBe('409 locked')
     expect(code(demoRename(x, 'project', 'shop', 'store', '', undefined))).toBe('403 forbidden')

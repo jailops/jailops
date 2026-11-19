@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/netip"
@@ -424,26 +425,27 @@ func (s *Service) ImportPreflight(ctx context.Context, in api.JailImportPrefligh
 
 // ImportJail reads an export file from rd and makes a new jail of it in the project of the request. The jail is
 // registered when the last dataset has arrived and its checksums have been verified; a file that is cut off or damaged
-// leaves nothing behind. It runs as an operation that this call waits for, so the caller sees the jail or the error.
-func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd io.Reader) (api.Jail, []string, error) {
+// leaves nothing behind. It runs as an operation that this call waits for, and answers the finished operation: its
+// metadata is the api.JailImported, and the error of a failed import is its error.
+func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd io.Reader) (api.Operation, error) {
 	if err := s.requireHost("import"); err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	p, err := s.access(ctx)
 	if err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	if err := bodyProject(p.Meta.Name, req.Project); err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	xr, err := jailxfer.NewReader(rd)
 	if err != nil {
-		return api.Jail{}, nil, invalid("%v", err)
+		return api.Operation{}, invalid("%v", err)
 	}
 	m := xr.Manifest()
 	w := s.checkImport(ctx, p, m, req)
 	if !w.pf.OK {
-		return api.Jail{}, nil, api.Errorf(api.CodeInvalid, "the import cannot be done: %s", strings.Join(w.pf.Errors, "; ")).
+		return api.Operation{}, api.Errorf(api.CodeInvalid, "the import cannot be done: %s", strings.Join(w.pf.Errors, "; ")).
 			WithDetail("errors", strings.Join(w.pf.Errors, "; ")).WithDetail("missing", strings.Join(w.pf.Missing, "; "))
 	}
 	proj, name, key := p.Meta.Name, w.name, w.key
@@ -452,11 +454,11 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 	attach := spec.Volumes
 	spec.Volumes = nil // attached when the volumes exist
 	if err := s.validateJail(proj, name, spec); err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	release, err := s.admit(ctx, p, key, &spec, nil)
 	if err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	submitted := false
 	defer func() {
@@ -465,13 +467,13 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 		}
 	}()
 	if err := canonicalJailSizes(&spec); err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	if err := s.checkNewJail(proj, name, spec); err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	if attach, err = s.lcfg.CheckVolumes(attach); err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	if spec.Hostname == "" {
 		spec.Hostname = name
@@ -484,7 +486,7 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 	locks := append([]string{jailLock(key)}, s.netLocksEff(proj, spec)...)
 	var warnings []string
 	op, err := s.Submit(ctx, OpSpec{
-		Description: "Import jail " + name, Locks: locks, Project: proj,
+		Action: api.OpJailImport, Description: "Import jail " + name, Locks: locks, Project: proj,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()
@@ -551,7 +553,11 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 			warnings = res.Warnings
 			s.journal.deleteRequest("import/" + key)
 			if err != nil {
-				return nil, err
+				if ferr := xr.Fail(); ferr != nil {
+					// zfs receive reports its own failure when the file ends early or does not match its checksums: the file is the cause
+					err = ferr
+				}
+				return nil, importFileError(err)
 			}
 			adopt, err := s.RestoreAdopt(ctx, key, jail, w.image)
 			if adopt != nil {
@@ -568,28 +574,31 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 					warnings = append(warnings, "the jail was imported but did not start: "+serr.Error())
 				}
 			}
-			return s.getByKey(ctx, key)
+			j, err := s.getByKey(ctx, key)
+			if err != nil {
+				return nil, err
+			}
+			return api.JailImported{Jail: j, Warnings: warnings}, nil
 		},
 	})
 	if err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	submitted = true
 	done, err := s.WaitOperation(ctx, op.ID, 24*time.Hour)
 	if err != nil {
-		return api.Jail{}, nil, err
+		return api.Operation{}, err
 	}
 	switch done.Status {
 	case api.OpSuccess:
-		j, err := s.getByKey(ctx, key)
-		return j, warnings, err
+		return done, nil
 	case api.OpFailure, api.OpCancelled:
 		if done.Error != nil {
-			return api.Jail{}, nil, done.Error
+			return api.Operation{}, done.Error
 		}
-		return api.Jail{}, nil, api.Errorf(api.CodeInternal, "the import failed")
+		return api.Operation{}, api.Errorf(api.CodeInternal, "the import failed")
 	}
-	return api.Jail{}, nil, api.Errorf(api.CodeBusy, "the import did not finish").WithHint("jailops op list shows it")
+	return api.Operation{}, api.Errorf(api.CodeBusy, "the import did not finish").WithHint("jailops op list shows it")
 }
 
 // receiveVolume makes one volume of the project from its part of the file and registers it.
@@ -613,4 +622,14 @@ func (s *Service) receiveVolume(ctx context.Context, p project, si *storageInfo,
 		return err
 	}
 	return nil
+}
+
+// importFileError tells the caller what is wrong with the file itself. A file that is cut off or damaged is the caller's
+// problem, not an internal error: it would otherwise reach the operation as an untyped error, which readers see masked.
+func importFileError(err error) error {
+	switch {
+	case errors.Is(err, jailxfer.ErrTruncated), errors.Is(err, jailxfer.ErrCorrupt):
+		return invalid("%v: nothing was imported", err)
+	}
+	return err
 }

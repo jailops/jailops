@@ -61,7 +61,7 @@ var sectionComments = map[string][]string{
 		"the package's user does not exist, so the directories a package gives to its user",
 		"come out owned by root: mkdir -p and chown them here, the data volumes too.",
 	},
-	"stop_timeout": {"seconds the jail may take to shut down cleanly before its processes are killed: a database that", "needs a minute to flush and close says 60 (boot.stop_timeout of the jail); leave it out for the default."},
+	"stop_timeout": {"seconds the jail may take to shut down cleanly before its processes are killed: a database that", "needs a minute to flush and close says 60 (boot.stop_timeout_seconds of the jail); leave it out for the default."},
 	"sysvipc":      {"true only for a server that needs System V shared memory, semaphores or message", "queues (PostgreSQL's initdb does); the jail then gets namespaces of its own."},
 	"health": {
 		"How the installer checks that it runs: exactly one of tcp: PORT, http: {port, path,",

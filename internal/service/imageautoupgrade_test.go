@@ -63,7 +63,7 @@ func TestAutoUpgradeBuildsMovesAndUpgradesPackages(t *testing.T) {
 	if au := im.Spec.AutoUpgrade; au == nil || !au.Enabled || au.At != "03:00" || !au.Packages {
 		t.Fatalf("%+v", im.Spec)
 	}
-	if im.Status.AutoUpgrade == nil || im.Status.AutoUpgrade.Next.IsZero() || len(im.Status.AutoUpgrade.Recent) != 0 {
+	if im.Status.AutoUpgrade == nil || im.Status.AutoUpgrade.NextAt.IsZero() || len(im.Status.AutoUpgrade.Recent) != 0 {
 		t.Fatalf("status before a run: %+v", im.Status.AutoUpgrade)
 	}
 	if _, err := s.PatchImage(host, "fb", map[string]any{"spec": map[string]any{"auto_upgrade": map[string]any{"enabled": true, "at": "25:00"}}}, -1); err == nil {
@@ -88,7 +88,7 @@ func TestAutoUpgradeBuildsMovesAndUpgradesPackages(t *testing.T) {
 	}
 
 	// A newer package set: g2, three thin jails move (the pin does not), the running jail's packages follow.
-	e.SetRepoVersion("15.0p2")
+	e.SetRepoVersion("15.1p2")
 	e.SetPkgUpgrades(autoPkgDryRun) // the repository has newer packages again
 	run2 := s.AutoUpgradeImage(host, "fb")
 	if run2.Result != api.ImageUpgradeRunOK || run2.Generation != "fb#g2" || run2.JailsMoved != 3 || run2.JailsUpgraded != 1 || run2.JailsFailed != 0 {
@@ -114,7 +114,7 @@ func TestAutoUpgradeBuildsMovesAndUpgradesPackages(t *testing.T) {
 	}
 
 	// A jail that fails its health check stops the run, and the run says which jail and why.
-	e.SetRepoVersion("15.0p3")
+	e.SetRepoVersion("15.1p3")
 	e.SetPkgUpgrades(autoPkgDryRun)
 	ps.failHC = true
 	run3 := s.AutoUpgradeImage(host, "fb")
@@ -130,30 +130,27 @@ func TestAutoUpgradeBuildsMovesAndUpgradesPackages(t *testing.T) {
 	}
 }
 
-func TestAutoUpgradeLeavesManualJailsAndNeedsAGeneration(t *testing.T) {
+func TestAutoUpgradeLeavesPinnedJailsAndNeedsAGeneration(t *testing.T) {
 	e, s := tickingEnv(t)
 	twoProjectJails(t, e, s)
 	host := as(globalAdmin, "")
 	ps := &pkgScript{}
 	e.Jails.SetExecFn(ps.fn)
 	e.SetPkgUpgrades(autoPkgDryRun)
-	// web chose to be updated by hand.
-	if _, err := s.PatchJail(as(globalAdmin, dtest.SeedProject), "web", map[string]any{"spec": map[string]any{"update": map[string]any{"strategy": "manual"}}}, -1); err != nil {
+	// web is pinned to its generation.
+	if _, err := s.PatchJail(as(globalAdmin, dtest.SeedProject), "web", map[string]any{"spec": map[string]any{"image": "fb#g1"}}, -1); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.PatchImage(host, "fb", map[string]any{"spec": map[string]any{"auto_upgrade": map[string]any{"enabled": true, "packages": true}}}, -1); err != nil {
 		t.Fatal(err)
 	}
-	e.SetRepoVersion("15.0p2")
+	e.SetRepoVersion("15.1p2")
 	r := s.AutoUpgradeImage(host, "fb")
-	if r.Result != api.ImageUpgradeRunOK || r.JailsMoved != 2 || r.JailsUpgraded != 0 {
+	if r.Result != api.ImageUpgradeRunOK || r.JailsMoved != 2 {
 		t.Fatalf("%+v\n%s", r, e.Log())
 	}
 	if gen, _ := generationOf(t, s, "alpha", "web"); gen != "fb#g1" {
-		t.Fatalf("a manual jail moved to %s", gen)
-	}
-	if upgrades(e) != 0 {
-		t.Fatal("packages of a manual jail were upgraded")
+		t.Fatalf("a pinned jail moved to %s", gen)
 	}
 
 	// An image without a generation fails with the command that makes one.

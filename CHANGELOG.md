@@ -2,6 +2,92 @@
 
 ## Unreleased
 
+- **The API and the command line are named once, before the freeze.** This is the last release that renames anything; the
+  names below are the ones 1.0 keeps. Stored jails, profiles, update histories and `jailopsd.yaml` are converted when they are
+  read, the first time the new daemon starts; nothing has to be recreated. A client that was written against 0.8 needs the
+  names of this table.
+
+  | Before | After |
+  |---|---|
+  | config keys `limits.*`, `nic.NAME.*`, `disk.NAME.*` | `resources.*`, `network.NAME.*`, `volumes.NAME.*` |
+  | config keys `updates.mode`, `.os`, `.packages`, `.reboot`, `.schedule`; `zfs.delegation` | `update.*`; `zfs_delegation` |
+  | `boot.stop_timeout`, `stop_timeout` | `boot.stop_timeout_seconds` |
+  | `update.strategy`, `update.window`, `--update-strategy`, `--update-window` | removed (`strategy: manual` is `mode: manual`) |
+  | `JailAction.timeout`, `confirm_within` | `timeout_seconds`, `confirm_within_seconds` |
+  | byte counts `size`, `allocated`, `free`, `used`, `available`, `written`, `disk_used`, `memory_used`, `memory_total`, `pool_size`, `pool_allocated`, `pool_free` | the same with `_bytes` |
+  | `started`, `finished`, `next` | `started_at`, `finished_at`, `next_at` |
+  | update result `ok`, `failed` | `success`, `failure`, with `preflight_failed`, `rolled_back` and `recovery_needed` |
+  | `status.generation` | `status.image_generation` (always `IMAGE#gN`; a request takes `gN` or `IMAGE#gN`) |
+  | `spec.expose[].by`, `.at` | removed (the audit log has who and when) |
+  | `role: host` in `jailopsd.yaml` | removed |
+  | error code `conflict` | `precondition_failed` |
+  | `?all=true`, `sdk.All()` | `?all_projects=true`, `sdk.AllProjects()` |
+  | `POST /api/v1/jails/{name}` (copy) | `POST /api/v1/jails/{name}/copy` |
+  | `POST /api/v1/jails/{name}/access` | `POST /api/v1/jails/{name}/access/allow` |
+  | `/api/v1/certificates/{fingerprint}` | `/api/v1/certificates/{name}` |
+  | `POST /api/v1/jail-imports/preflight` | `POST /api/v1/jail-imports?dry_run=true` |
+  | `POST /api/v1/jail-imports` answers 201 | answers 202 with an operation that is already finished |
+  | audit `?before=`; log `?tail=` | `?cursor=` with a `Link` header; `?limit=` |
+  | `--tail`, `--count` | `--limit` |
+  | `--label`, `-l` to select objects; `--exclude-label` | `--selector`, `-l`; `--exclude-selector` |
+  | `--all` for every project | `--all-projects` (`--all` is every jail) |
+  | `jail rollback --root`, `--data`, `--all` | `jail rollback --scope root`, `data`, `all` |
+  | `--timeout` to wait for an operation; `--grace` to stop jails | `--wait-timeout`; `--timeout` |
+  | `--ro`; `--force` (export); `--map` (restore); `update apply --images`; `firewall show --all` | `--read-only`; `--overwrite`; `--network-map`; `update apply --os`; `firewall show --lines` |
+  | `jailops set` | `jailops config set` |
+  | `logs forward add`, `remove` | `logs forward create`, `delete` |
+  | `jailops doctor -o json` as `{check, status, detail}` | `{name, status, message}` with `ok`, `info`, `warn`, `fail` |
+  | `jailops jail info` member `state` | `power` |
+
+- **Removed.** The routes of features that are not built (`/api/v1/cluster`, `/groups`, `/rollouts`, `/jail-templates`,
+  `PUT /api/v1/server`, `GET /api/v1/server/config`, moves, bundle download, snapshot rename, `POST /api/v1/backups` and the
+  backup transport routes of the host) are gone and answer 404 `not_found`; a restore preflight is `POST /api/v1/restores`
+  with `dry_run`. The error codes `not_leader`, `no_quorum` and `stop_forced`, the `clustered` member of the server
+  information, `sdk.Recursion`, the extensions `backup_pull` and `backup_push`, and the command `jailops set` do not exist.
+- **An ETag names the incarnation and the revision.** The `ETag` of an object is an opaque strong tag that carries its UUID
+  and its generation. A change or delete with `If-Match` fails with `precondition_failed` when the object was changed since and
+  when it was deleted and created again under the same name, so a plan or a script never touches a replacement. Clients send
+  back the tag they read. `LogsClient.SetForward` takes the ETag that `LogsClient.ForwardETag` returns, and
+  `VolumeClient.DeleteETag` is new. `jailops-sync` deletes and updates with the tag it read after it checked the object
+  against its plan, and refuses a host that answers with another host identity than the plan was made for.
+- **Creating a jail and restoring a backup are safe to repeat.** `POST /api/v1/jails` and `POST /api/v1/restores` accept
+  `Idempotency-Key`; the SDK sends one and repeats the call after a transport failure. A start that cannot read the host UUID
+  stops instead of creating a new identity.
+- **A stopped jail is `Ready=False` with the reason `Stopped`**, and `api.Condition.Problem()` is the one test for "something
+  is wrong": a stopped jail is not a problem in `jailops info`, `jailops show` or the console. `status.shell_setup {state, step}`
+  says what the background setup of bash is doing. An operation cut off by a daemon restart has the code `interrupted`;
+  `error.detail.recovery` is `rolled_back`, `completed`, `dropped` or `needs_attention`. An operation has an `action`
+  (`jail.create`, `volume.snapshot`, `image.upgrade`, ...).
+- **The wire is frozen by golden files.** Routes with their `sync`, `async`, `either` or stream answer, error codes, envelopes,
+  enum members, the conditions of each kind of object with their reasons, operation and event actions, `GET /healthz`, the
+  command and flag tree with its exit codes, and the extension lists. `just freeze` accepts a meant change. A client ignores a
+  member it does not know and treats an enum value it does not know as "other" ([docs/api.md](docs/api.md#what-a-client-does)).
+- **Machine output is the API's.** With `-o json` or `-o yaml` an error is written to standard error as
+  `{"error": {"code", "message", "hint", "detail"}}`. `jailops exec` exits 125 when JailOps itself failed and otherwise returns
+  the status of the command in the jail.
+- **A thin jail's base package records follow its image.** At every start the records of the base set (`FreeBSD-*`) are brought
+  in step with the generation of the root, so `pkg which`, `pkg info FreeBSD-runtime` and `pkg check -s` are right after an
+  upgrade, `jail upgrade --image` or a rollback. Packages the jail installed are never touched, no file is written and no script
+  runs. A failed pass never blocks the start: the jail has the condition `BasePackages`, `jailops doctor` warns
+  (`jails.base-packages`) and `jailops jail repair-packages NAME` (the same button in the console) repairs it.
+- **Release moves keep the previous root for 14 days.** The previous root of an upgraded jail was destroyed at the next
+  housekeeping pass; it is kept for 14 days, so `jail rollback --scope root` works for that long. An image's pkg ABI comes from
+  its release and no longer from the host's `pkg config abi`, and a build of a RELEASE stops (`verify-release`) when the base
+  packages are of another release. `jail upgrade --dry-run` never builds or receives an image. An OS update that fails is
+  recorded as `preflight_failed` (nothing changed), `rolled_back` or `recovery_needed` (an undo step failed too).
+- **The end of pf states of removed rules survives a restart of the daemon, and `FirewallApplied` says `Unknown` when pf cannot be
+  asked.** The labels of removed rules are written to `pending-pf-kills.json` before the new anchor is loaded and removed once pf
+  has ended the connections. When `pfctl` gives no answer or status, the condition is `Unknown` with the reason `Unverified`
+  instead of `True`.
+- **The architecture is closed for 1.0 in the documents.** Every object is authoritative on the host that stores it; the scope
+  `fleet` means that the hub and the fleet repository may manage the object with one definition and does not mean shared
+  state. [docs/design.md](docs/design.md) has a table "Resource authority" generated from `api.Authorities`, with tests that keep
+  it equal to the code. [docs/networking.md](docs/networking.md) says that networks belong to a host.
+  [docs/1.0.md](docs/1.0.md) says what 1.0.0 promises, what it does not, and the gates of a release;
+  [docs/compatibility.md](docs/compatibility.md) has the rules for 1.x and says what the tests prove and which gates are not
+  built yet. Cluster mode, moving a jail between hosts and failover come after 1.0.
+- **An import that was cut off says so.** `jail import` of a truncated or damaged file fails with `invalid: the export file is
+  truncated` and nothing is imported, instead of an internal error.
 - **A jail moves to a new release with its data.** `jailops jail upgrade NAME --image freebsd-15-2` moves a thin FreeBSD
   jail to the newest generation of another image of the same OS and architecture, of the same or a newer release and not
   newer than the host's kernel, with the steps of an upgrade to a new generation: one atomic snapshot, a clone of the new

@@ -70,8 +70,8 @@ expect() {
 }
 
 # --- addresses ---------------------------------------------------------------------------------------------------
-addr4() { $J config get "$2" nic.eth0.ipv4 --project "$1" </dev/null 2>/dev/null | tail -1; }
-addr6() { $J config get "$2" nic.eth0.ipv6 --project "$1" </dev/null 2>/dev/null | tail -1; }
+addr4() { $J config get "$2" network.eth0.ipv4 --project "$1" </dev/null 2>/dev/null | tail -1; }
+addr6() { $J config get "$2" network.eth0.ipv6 --project "$1" </dev/null 2>/dev/null | tail -1; }
 
 # --- setup and cleanup -------------------------------------------------------------------------------------------
 cleanup() {
@@ -1124,7 +1124,7 @@ RES=2001:db8:77:0:100::1
 ifconfig lo0 inet6 "$RES/128" alias || die "the resolver address on lo0"
 $J network ndp-proxy enable ndp-up </dev/null >/dev/null || die "ndp-proxy enable ndp-up"
 $J network grant ndp-up --project pfa </dev/null >/dev/null || die "grant ndp-up"
-addr6() { $J config get "$2" nic.eth0.ipv6 --project "$1" </dev/null 2>/dev/null | tail -1 | sed 's|/.*||'; }
+addr6() { $J config get "$2" network.eth0.ipv6 --project "$1" </dev/null 2>/dev/null | tail -1 | sed 's|/.*||'; }
 # The router asks who has ADDR when it sends to it (a ping makes it ask). resolved: its neighbor table then holds the host's MAC.
 # answered: the status of the proxy counts an answer for ADDR.
 ask() { jexec ndprt ping6 -c 1 -t 2 "$1" >/dev/null 2>&1; }
@@ -1186,49 +1186,81 @@ XN=0
 # (jx sets the shell variables p and n: the helpers below keep their own names)
 # JailOps' firewall never opens the host, so the transfers that a jail starts end in another jail of the project (the traffic
 # crosses the host and the anchors of both jails, and the pipes of the sender shape it)
+# The time of a transfer is measured with /usr/bin/time -p (hundredths of a second: the clock of date counts whole seconds, a
+# transfer of 1.1 s reads 2), and the connection is opened apart from the data. The two runs that failed this probe took exactly
+# 7 seconds for all 1536000 bytes: a first connection after a policy change lost its SYN three times (TCP sends it again after 1, 2
+# and 4 seconds) and the data then moved at full speed. That is a stall of the path, not a limit, so a throw-away connection
+# (nc -z) to a listener of its own opens the path first (a NOTE says when it took more than a second) and the transfer is timed on
+# an open path.
+timed() { # timed CMD: runs `sh -c CMD` (its standard output discarded) and prints "SECONDS EXITSTATUS"
+	{ /usr/bin/time -p sh -c "$1" 2>&1 >/dev/null; echo "rc $?"; } | awk '/^real/ { s = $2 } /^rc/ { r = $2 } END { print s, r }'
+}
+warm_up() { # warm_up LISTENJAIL LISTENADDR CONNECT...: CONNECT (a command that takes ADDR PORT) opens the path to a spare listener, up to 3 tries
+	XN=$((XN + 1)); wp=$((9300 + XN)); wj=$1; wa=$2; shift 2; wc="$*"
+	jexec "pfa_$wj" daemon -f sh -c "nc -l $wa $wp >/dev/null"
+	waitfor_ "the listener that warms up the path is up" 15 sh -c "jexec pfa_$wj sockstat -4 -6 -l | grep -q ':$wp '"
+	wn=0
+	while [ $wn -lt 3 ]; do
+		wn=$((wn + 1))
+		set -- $(timed "$wc $wa $wp")
+		[ "${2:-1}" -eq 0 ] && break
+	done
+	if [ "${2:-1}" -ne 0 ] || awk -v t="${1:-0}" 'BEGIN { exit !(t >= 1) }'; then
+		printf 'NOTE  the path to %s took %s s to open (try %s, exit %s)\n' "$wa" "${1:-?}" "$wn" "${2:-?}" >&2
+	fi
+}
 xfer_up() { # xfer_up JAIL DESTJAIL DESTADDR: the jail connects to the other jail and sends 1.5 MB; prints "SECONDS BYTES"
-	XN=$((XN + 1)); xp=$((9300 + XN)); xj=$2
+	warm_up "$2" "$3" jexec "pfa_$1" nc -z -w10
+	XN=$((XN + 1)); xp=$((9300 + XN)); xj=$2; xs=$1
 	jexec "pfa_$xj" sh -c "rm -f /var/tmp/recv.$xp"
 	jexec "pfa_$xj" daemon -f sh -c "nc -l $3 $xp > /var/tmp/recv.$xp"
 	waitfor_ "the listener of the transfer is up" 15 sh -c "jexec pfa_$xj sockstat -4 -6 -l | grep -q ':$xp '"
-	xs=$(date +%s)
-	jx pfa "$1" sh -c "dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 $3 $xp" >/dev/null 2>&1
-	xe=$(date +%s)
+	xt=$(timed "jexec pfa_$xs sh -c 'dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 $3 $xp'")
 	waitfor_ "the data has been written" 10 sh -c "[ \"\$(jexec pfa_$xj stat -f %z /var/tmp/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
-	echo "$((xe - xs)) $(jexec "pfa_$xj" stat -f %z "/var/tmp/recv.$xp" 2>/dev/null || echo 0)"
+	echo "${xt%% *} $(jexec "pfa_$xj" stat -f %z "/var/tmp/recv.$xp" 2>/dev/null || echo 0)"
 }
 xfer_served() { # xfer_served JAIL JAILADDR: the host connects to the jail, which sends 1.5 MB (a server in the jail answering)
+	warm_up "$1" "$2" nc -z -w10
 	XN=$((XN + 1)); xp=$((9300 + XN)); rm -f "$work/recv.$xp"
 	jx pfa "$1" daemon -f sh -c "dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -l $2 $xp"
 	waitfor_ "the server of the transfer is up" 15 sh -c "jexec pfa_$1 sockstat -4 -6 -l | grep -q ':$xp '"
-	xs=$(date +%s)
-	nc -d -w20 "$2" "$xp" > "$work/recv.$xp" 2>/dev/null
-	xe=$(date +%s)
+	xt=$(timed "nc -d -w20 $2 $xp > $work/recv.$xp")
 	waitfor_ "the data has been written" 10 sh -c "[ \"\$(stat -f %z $work/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
-	echo "$((xe - xs)) $(stat -f %z "$work/recv.$xp" 2>/dev/null || echo 0)"
+	echo "${xt%% *} $(stat -f %z "$work/recv.$xp" 2>/dev/null || echo 0)"
 }
 xfer_down() { # xfer_down JAIL JAILADDR: the host connects to the jail and sends 1.5 MB into it
+	warm_up "$1" "$2" nc -z -w10
 	XN=$((XN + 1)); xp=$((9300 + XN)); xj=$1
 	jexec "pfa_$xj" sh -c "rm -f /var/tmp/recv.$xp"
 	jexec "pfa_$xj" daemon -f sh -c "nc -l $2 $xp > /var/tmp/recv.$xp"
 	waitfor_ "the listener of the transfer is up" 15 sh -c "jexec pfa_$xj sockstat -4 -6 -l | grep -q ':$xp '"
-	xs=$(date +%s)
-	dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 "$2" "$xp" >/dev/null 2>&1
-	xe=$(date +%s)
+	xt=$(timed "dd if=/dev/zero bs=100k count=15 2>/dev/null | nc -N -w20 $2 $xp")
 	waitfor_ "the data has been written" 10 sh -c "[ \"\$(jexec pfa_$xj stat -f %z /var/tmp/recv.$xp 2>/dev/null || echo 0)\" -ge $SZ ]" || true
-	echo "$((xe - xs)) $(jexec "pfa_$xj" stat -f %z "/var/tmp/recv.$xp" 2>/dev/null || echo 0)"
+	echo "${xt%% *} $(jexec "pfa_$xj" stat -f %z "/var/tmp/recv.$xp" 2>/dev/null || echo 0)"
 }
 pipes() { dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:'; }
-within() { # within LOW HIGH "SECONDS BYTES": a complete transfer that took LOW to HIGH-1 seconds
+within() { # within LOW HIGH "SECONDS BYTES": a complete transfer that took LOW up to (not including) HIGH seconds
 	wl=$1; wh=$2; wr=$3
 	set -- $wr
-	[ "${2:-0}" -eq "$SZ" ] && [ "${1:-999}" -ge "$wl" ] && [ "${1:-999}" -lt "$wh" ]
+	[ "${2:-0}" -eq "$SZ" ] && awk -v t="${1:-999}" -v l="$wl" -v h="$wh" 'BEGIN { exit !(t >= l && t < h) }'
 }
-check_xfer() { # check_xfer LOW HIGH DESC FUNC ARGS...: one more try when the data did not all arrive (a lost SYN, not a limit)
-	lo=$1; hi=$2; desc=$3; shift 3
-	XN=$((XN + 10)) # the transfer runs in a subshell: every try gets ports of its own
-	r=$("$@")
-	case $r in *" $SZ") ;; *) printf 'NOTE  %s: the transfer was incomplete (%s), trying once more\n' "$desc" "$r"; sleep 2; XN=$((XN + 10)); r=$("$@") ;; esac
+# check_xfer LOW HIGH DESC FUNC ARGS...: a THROUGHPUT probe, not a leak check (the deny probes of this script are never repeated):
+# it is tried up to 3 times when the data did not all arrive (a lost SYN, not a limit) or when it was too slow; a transfer that is
+# too FAST for a limited jail (below LOW) fails at once, because that means the limit does not hold. XFER_SECS is the last result.
+check_xfer() {
+	lo=$1; hi=$2; desc=$3; shift 3; xcmd="$*"; xtry=0
+	while :; do
+		xtry=$((xtry + 1))
+		XN=$((XN + 10)) # the transfer runs in a subshell: every try gets ports of its own
+		r=$($xcmd)
+		set -- $r
+		XFER_SECS=${1:-999}
+		within "$lo" "$hi" "$r" && break
+		if [ "${2:-0}" -eq "$SZ" ] && ! awk -v t="$XFER_SECS" -v l="$lo" 'BEGIN { exit !(t >= l) }'; then break; fi
+		[ $xtry -ge 3 ] && break
+		printf 'NOTE  %s: try %s gave %s (seconds, bytes), trying again\n' "$desc" "$xtry" "$r"
+		sleep 2 # sleep-ok: the pause between the tries of a throughput probe
+	done
 	expect allow "$desc ($r: seconds, bytes)" within "$lo" "$hi" "$r"
 }
 D4J=$(addr4 pfa d)
@@ -1240,13 +1272,14 @@ rules:
 $J config set d firewall.policies xfer --project pfa </dev/null >/dev/null || die "attach xfer to d"
 $J config set a firewall.policies web,xfer --project pfa </dev/null >/dev/null || die "attach xfer to a"
 settle
-# The clock counts whole seconds (a transfer of 1.1 s can read 2, one of 2.1 s reads 3) and a loaded host is slower than an idle
-# one, so what an unlimited transfer must show is not a fast time but that nothing shapes it: it ends under 4 s, below the 4 s
-# from which a limited one is accepted (it takes six), and no anchor of the project holds a pipe while these run.
+# A loaded host is slower than an idle one, so what an unlimited transfer must show is not a fast time but that nothing shapes
+# it: it ends under 4 s, below the 4 s from which a limited one is accepted (it takes six), the unlimited transfer is measured
+# against the limited one of the same run further down, and no anchor of the project holds a pipe while these run.
 expect allow "no jail of the project has a limit yet: no anchor sends traffic into a pipe" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 0 ] && ! pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -q dnpipe && ! pfctl -a jailops/pfa/a -sr 2>/dev/null | grep -q dnpipe"
 check_xfer 0 4 "an unlimited jail sends 1.5 MB to another jail in less than 4 s" xfer_up d a $A4
+UNL_SECS=$XFER_SECS
 check_xfer 0 4 "the host sends 1.5 MB into the jail in less than 4 s" xfer_down d $D4J
-$J config set d nic.eth0.egress 2M --project pfa </dev/null >/dev/null || die "set the egress limit of d"
+$J config set d network.eth0.egress 2M --project pfa </dev/null >/dev/null || die "set the egress limit of d"
 settle
 t=0; until [ "$(pipes)" -eq 1 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
 expect allow "an egress limit made one pipe of JailOps's range" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 1 ]"
@@ -1257,18 +1290,21 @@ ZERO='dnpipe\(0, ?[0-9]+\)'
 expect allow "the anchor of d shapes what the jail sends, in both directions of a state, and nothing else" sh -c "pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -Eq 'match in on .* $ONLY' && pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -Eq 'match out on .* $ZERO'"
 EPIPE=$(pfctl -a jailops/pfa/d -sr 2>/dev/null | sed -n 's/.*match in on .* dnpipe \([0-9]*\).*/\1/p' | head -1)
 check_xfer 4 20 "egress 2 Mbit/s, a connection the jail starts: 1.5 MB take 4 to 19 s" xfer_up d a $A4
+LIM_SECS=$XFER_SECS
+expect allow "the unlimited transfer of this run was at least 3 times faster than the limited one ($UNL_SECS s against $LIM_SECS s)" awk -v u="$UNL_SECS" -v l="$LIM_SECS" 'BEGIN { exit !(u * 3 <= l) }'
 check_xfer 4 20 "egress 2 Mbit/s, a connection the host starts, the jail answering: 4 to 19 s" xfer_served d $D4J
 check_xfer 0 4 "egress 2 Mbit/s does not slow what is sent into the jail: under 4 s" xfer_down d $D4J
+expect allow "the sender of this transfer (a) has no pipe on its anchor" sh -c "! pfctl -a jailops/pfa/a -sr 2>/dev/null | grep -q dnpipe"
 check_xfer 0 4 "a jail without a limit is not slowed down: under 4 s" xfer_up a d $D4J
 # a limit of another jail does not renumber the pipe of this one: the numbers are given once
-$J config set a nic.eth0.egress 50M --project pfa </dev/null >/dev/null || die "set the egress limit of a"
+$J config set a network.eth0.egress 50M --project pfa </dev/null >/dev/null || die "set the egress limit of a"
 settle
 EPIPE2=$(pfctl -a jailops/pfa/d -sr 2>/dev/null | sed -n 's/.*match in on .* dnpipe \([0-9]*\).*/\1/p' | head -1)
 expect allow "the pipe of d keeps its number when another jail gets a limit" [ "$EPIPE2" = "$EPIPE" ]
-$J config unset a nic.eth0.egress --project pfa </dev/null >/dev/null || die "unset the egress limit of a"
+$J config unset a network.eth0.egress --project pfa </dev/null >/dev/null || die "unset the egress limit of a"
 settle
-$J config unset d nic.eth0.egress --project pfa </dev/null >/dev/null || die "unset the egress limit of d"
-$J config set d nic.eth0.ingress 2M --project pfa </dev/null >/dev/null || die "set the ingress limit of d"
+$J config unset d network.eth0.egress --project pfa </dev/null >/dev/null || die "unset the egress limit of d"
+$J config set d network.eth0.ingress 2M --project pfa </dev/null >/dev/null || die "set the ingress limit of d"
 settle
 t=0; until [ "$(pipes)" -eq 1 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
 expect allow "an ingress limit made one pipe" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 1 ]"
@@ -1276,7 +1312,7 @@ expect allow "the anchor of d shapes what the jail receives, in both directions 
 check_xfer 4 20 "ingress 2 Mbit/s, the host sends 1.5 MB into the jail: 4 to 19 s" xfer_down d $D4J
 check_xfer 0 4 "ingress 2 Mbit/s does not slow what the jail sends: under 4 s" xfer_up d a $A4
 check_xfer 0 4 "ingress 2 Mbit/s does not slow what the jail answers: under 4 s" xfer_served d $D4J
-$J config set d nic.eth0.egress 2M --project pfa </dev/null >/dev/null || die "set both limits on d"
+$J config set d network.eth0.egress 2M --project pfa </dev/null >/dev/null || die "set both limits on d"
 settle
 t=0; until [ "$(pipes)" -eq 2 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
 expect allow "both limits make two pipes" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 2 ]"
@@ -1288,12 +1324,13 @@ t=0; until jx pfa d true >/dev/null 2>&1; do t=$((t + 1)); [ $t -gt 60 ] && brea
 D4J=$(addr4 pfa d)
 settle
 check_xfer 4 20 "after a restart the limit on what the jail receives still holds: 4 to 19 s" xfer_down d $D4J
-$J config unset d nic.eth0.egress --project pfa </dev/null >/dev/null || die "unset the egress limit of d"
-$J config unset d nic.eth0.ingress --project pfa </dev/null >/dev/null || die "unset the ingress limit of d"
+$J config unset d network.eth0.egress --project pfa </dev/null >/dev/null || die "unset the egress limit of d"
+$J config unset d network.eth0.ingress --project pfa </dev/null >/dev/null || die "unset the ingress limit of d"
 settle
 t=0; until [ "$(pipes)" -eq 0 ] || [ $t -ge 30 ]; do sleep 1; t=$((t + 1)); done
 expect allow "removing the limits removes the pipes" sh -c "[ \"\$(dnctl pipe list 2>/dev/null | grep -Ec '^0*[45][0-9]{4}:')\" -eq 0 ]"
 expect allow "and the anchor no longer names one" sh -c "! pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -q dnpipe"
+expect allow "the sender of this transfer (d) has no pipe on its anchor again" sh -c "! pfctl -a jailops/pfa/d -sr 2>/dev/null | grep -q dnpipe"
 check_xfer 0 4 "and the jail is fast again: under 4 s" xfer_up d a $A4
 check_xfer 0 4 "and fast in the other direction: under 4 s" xfer_down d $D4J
 pkill -f "nc -l " >/dev/null 2>&1

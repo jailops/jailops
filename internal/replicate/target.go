@@ -278,7 +278,7 @@ func (n *Target) receive(ctx context.Context, host string, req ReceiveRequest, s
 	var prior int64
 	if ri != nil {
 		if ri.ToGUID != req.ToGUID || ri.FromGUID != req.FromGUID {
-			return ReceiveResult{}, api.Errorf(api.CodeConflict, "an interrupted receive for a different snapshot exists").
+			return ReceiveResult{}, api.Errorf(api.CodePreconditionFailed, "an interrupted receive for a different snapshot exists").
 				WithHint("abort the interrupted receive first")
 		}
 		prior = ri.BytesReceived

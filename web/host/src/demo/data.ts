@@ -10,6 +10,12 @@ import { appHash } from './apps'
 const now = Date.now()
 const ago = (sec: number) => new Date(now - sec * 1000).toISOString()
 const GiB = 1024 ** 3
+
+/** The Ready condition the daemon reports: a stopped jail is not Ready, and nothing is wrong with it. */
+export function readyCond(power: string, since?: string): { type: string; status: 'True' | 'False'; reason: string; message: string; since?: string } {
+  const running = power === 'running'
+  return { type: 'Ready', status: running ? 'True' : 'False', reason: running ? 'Running' : 'Stopped', message: running ? 'the jail is running' : 'the jail is stopped', ...(since ? { since } : {}) }
+}
 const MiB = 1024 ** 2
 
 const meta = (name: string, createdAgo = 86400 * 30, extra: Record<string, unknown> = {}) => ({
@@ -26,7 +32,7 @@ export function server(): ServerInfo {
 }
 
 export function pool(): PoolUsage {
-  return { name: 'tank', size: 1800 * GiB, allocated: 1290 * GiB, free: 510 * GiB, health: 'ONLINE' }
+  return { name: 'tank', size_bytes: 1800 * GiB, allocated_bytes: 1290 * GiB, free_bytes: 510 * GiB, health: 'ONLINE' }
 }
 
 // a stable twelve-digit id for the rules of a demo jail, the way the server names the rules it rendered
@@ -43,7 +49,7 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
     metadata: { ...meta(name, 86400 * 40, { labels: o.labels ?? { role: name } }), project: 'web' },
     spec: {
       image: o.image ?? 'freebsd-15-1', storage: 'default', os: linux ? 'linux' : 'freebsd', layout: linux ? 'thick' : 'thin', hostname: `${name}.example.net`,
-      update: { strategy: linux ? 'inplace' : 'rebase', window: 'sun 03:00', healthcheck: '/usr/local/bin/check' },
+      update: { healthcheck: '/usr/local/bin/check' },
       resources: { cpu: 2, memory: '2G', disk: '20G', pids: 2048 },
       network: [{ network: net, ipv4: o.ipv4 ?? 'auto', ipv6: o.ipv6 ?? 'none', mtu: 1500 }],
       firewall: { policies: [o.policy ?? 'web-default'], tags: ['managed'] },
@@ -52,9 +58,9 @@ function jail(name: string, power: PowerState, o: { image?: string; gen?: string
       packages: ['nginx'], encrypted: false,
     },
     status: {
-      power, jid: power === 'running' ? 12 + name.length : undefined, generation: o.gen ?? 'freebsd-15-1#g4', freebsd_version: demoFreeBSD(o.gen ?? 'freebsd-15-1#g4'),
+      power, jid: power === 'running' ? 12 + name.length : undefined, image_generation: o.gen ?? 'freebsd-15-1#g4', freebsd_version: demoFreeBSD(o.gen ?? 'freebsd-15-1#g4'),
       addresses: power === 'running' ? [(o.ipv4 && o.ipv4 !== 'auto' ? o.ipv4 : '10.20.0.' + (10 + name.length)) + '/24'] : [],
-      started_at: power === 'running' ? ago(86400 * 3 + name.length * 600) : undefined, drift: o.drift ?? [], conditions: o.cond ?? [{ type: 'Reconciled', status: 'True', since: ago(3600) }, ...(power === 'running' ? [{ type: 'FirewallApplied', status: 'True', reason: 'Applied', message: 'rules ' + demoRulesId(name) + ' are loaded and pf evaluates them', since: ago(1800) }] : [])],
+      started_at: power === 'running' ? ago(86400 * 3 + name.length * 600) : undefined, drift: o.drift ?? [], conditions: o.cond ?? [readyCond(power, ago(3600)), ...(power === 'running' ? [{ type: 'FirewallApplied', status: 'True', reason: 'Applied', message: 'rules ' + demoRulesId(name) + ' are loaded and pf evaluates them', since: ago(1800) }] : [])],
     },
   }
 }
@@ -63,7 +69,7 @@ export function jails(): Jail[] {
   return [
     jail('web', 'running', { ipv4: '10.20.0.11', vols: [{ volume: 'content', mount: '/usr/local/www' }], labels: { role: 'web', tier: 'frontend', env: 'prod', team: 'web', app: 'nginx', 'jailops.app': 'nginx', 'jailops.app.version': '1.30.6,3', 'jailops.app.hash': appHash('nginx') } }),
     jail('db', 'running', { ipv4: '10.20.0.12', policy: 'db-internal', net: 'backend', vols: [{ volume: 'pgdata', mount: '/var/db/postgres' }, { volume: 'wal', mount: '/var/db/wal', read_only: false }], labels: { role: 'db', env: 'prod', team: 'data', backup: 'yes', 'jailops.app': 'postgresql', 'jailops.app.version': '18.5', 'jailops.app.hash': appHash('postgresql-previous') } }),
-    jail('mail', 'error', { image: 'freebsd-15-1#g3', gen: 'freebsd-15-1#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Reconciled', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ volume: 'spool', mount: '/var/spool' }], labels: { role: 'mail', env: 'prod', team: 'ops', app: 'postfix' } }),
+    jail('mail', 'error', { image: 'freebsd-15-1#g3', gen: 'freebsd-15-1#g3', drift: ['rctl: memoryuse limit 2G rendered, live 512M', 'pf anchor jailops/mail is not loaded'], cond: [{ type: 'Ready', status: 'False', reason: 'ApplyFailed', message: 'pfctl: anchor load failed: syntax error at line 14', since: ago(900) }], policy: 'mail-edge', vols: [{ volume: 'spool', mount: '/var/spool' }], labels: { role: 'mail', env: 'prod', team: 'ops', app: 'postfix' } }),
     jail('build', 'stopped', { autostart: false, labels: { role: 'ci', env: 'dev', team: 'platform' } }),
     jail('proxy', 'running', { net: 'edge', ipv4: '192.0.2.10', ipv6: 'auto', labels: { role: 'proxy', env: 'prod', team: 'web', app: 'haproxy' } }),
     jail('cache', 'starting', { ipv4: '10.20.0.14', labels: { role: 'cache', env: 'prod', team: 'web', app: 'redis' } }),
@@ -91,7 +97,7 @@ function vault(): Jail {
 export function snapshots(): Record<string, JailSnapshot[]> {
   const mk = (jailName: string, items: Array<[string, number, string, number]>): JailSnapshot[] =>
     items.map(([name, age, comment, written]) => ({
-      metadata: { name, scope: 'host', created_at: ago(age) }, spec: { jail: jailName, comment }, status: { written },
+      metadata: { name, scope: 'host', created_at: ago(age) }, spec: { jail: jailName, comment }, status: { written_bytes: written },
     }))
   return {
     web: mk('web', [['pre-upgrade-g4', 86400 * 2, 'before upgrade to g4', 840 * MiB], ['daily-0', 3600 * 9, 'scheduled', 96 * MiB], ['daily-1', 86400 + 3600 * 9, 'scheduled', 2.4 * GiB], ['daily-2', 2 * 86400 + 3600 * 9, 'scheduled', 5.1 * GiB]]),
@@ -111,7 +117,7 @@ export function nextNight(at: string, from = Date.now()): string {
 
 /** The nightly upgrade runs of the FreeBSD image, newest first; `failed` puts a failed night on top. */
 export function autoUpgradeRuns(failed = false): NonNullable<NonNullable<Image['status']['auto_upgrade']>['recent']> {
-  const run = (days: number, result: string, x: Record<string, unknown> = {}) => ({ started: ago(86400 * days), finished: ago(86400 * days - 240), result, ...x })
+  const run = (days: number, result: string, x: Record<string, unknown> = {}) => ({ started_at: ago(86400 * days), finished_at: ago(86400 * days - 240), result, ...x })
   return [
     ...(failed ? [run(0.4, 'failed', { generation: 'freebsd-15-1#g5', jails_moved: 2, jails_failed: 1, detail: 'jail db: health check /usr/local/bin/check exited 1; rolled back to freebsd-15-1#g4' })] : []),
     run(1.4, 'unchanged'),
@@ -134,7 +140,7 @@ export function images(): Image[] {
     {
       metadata: { ...meta('freebsd-15-1'), scope: 'fleet' },
       spec: { os: 'freebsd', release: '15.1-RELEASE', arch: 'amd64', source: { type: 'pkgbase', repo: 'https://pkg.freebsd.org/FreeBSD:15:amd64/base_release_1' }, retention: { keep_last: 3, keep_days: 14 }, auto_upgrade: { enabled: true, packages: true } },
-      status: { generations: [gen(1, 0, 212, 60, []), gen(2, 1, 214, 45, []), gen(3, 2, 219, 20, ['mail']), gen(4, 3, 221, 3, ['web', 'db', 'proxy', 'build', 'cache'])], auto_upgrade: { next: nextNight('03:00'), recent: autoUpgradeRuns() } },
+      status: { generations: [gen(1, 0, 212, 60, []), gen(2, 1, 214, 45, []), gen(3, 2, 219, 20, ['mail']), gen(4, 3, 221, 3, ['web', 'db', 'proxy', 'build', 'cache'])], auto_upgrade: { next_at: nextNight('03:00'), recent: autoUpgradeRuns() } },
     },
     {
       metadata: { ...meta('alpine-3-22'), scope: 'fleet' },
@@ -312,7 +318,7 @@ function hostDir(name: string, path: string, o: { watch?: boolean; probe?: strin
   return {
     metadata: { ...meta(name, 86400 * 10), project: 'web' },
     spec: { uid: 0, gid: 0, path, watch: o.watch, probe: o.watch ? (o.probe ?? 'mounted') : undefined, on_loss: o.watch ? (o.on_loss ?? 'none') : undefined, comment: o.comment },
-    status: { mountpoint: path, used: 0, state: o.lost ? 'lost' : 'ok', ...(o.lost ? { detail: 'the directory is not on a mount' } : {}) },
+    status: { mountpoint: path, used_bytes: 0, state: o.lost ? 'lost' : 'ok', ...(o.lost ? { detail: 'the directory is not on a mount' } : {}) },
   }
 }
 
@@ -321,7 +327,7 @@ export function volumes(): Volume[] {
   const v = (name: string, o: { size?: string; used: number; uid?: number; gid?: number; mode?: string; comment?: string; encrypted?: boolean; locked?: boolean }): Volume => ({
     metadata: { ...meta(name, 86400 * 30), project: 'web' },
     spec: { storage: 'default', size: o.size, uid: o.uid ?? 0, gid: o.gid ?? 0, mode: o.mode ?? '0755', encrypted: o.encrypted, comment: o.comment },
-    status: { dataset: `tank/jailops/projects/web/volumes/${name}`, mountpoint: `/jailops/projects/web/volumes/${name}`, used: o.used, locked: o.locked },
+    status: { dataset: `tank/jailops/projects/web/volumes/${name}`, mountpoint: `/jailops/projects/web/volumes/${name}`, used_bytes: o.used, locked: o.locked },
   })
   return [
     v('content', { size: '10G', used: 3.2 * GiB, uid: 80, gid: 80, mode: '0755', comment: 'the pages of the site' }),

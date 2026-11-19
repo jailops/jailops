@@ -76,9 +76,9 @@ const remove = () => runOp(s.storage.deleteTitle(removing.value!.metadata.name),
             <button class="btn btn-sm btn-danger" type="button" :disabled="!canWrite" @click="removing = x">{{ s.storage.delete }}</button>
           </header>
           <div class="body stack">
-            <div v-if="x.status.size">
-              <Meter :value="percent(x.status.used ?? 0, x.status.size)" :label="s.storage.usage" :warn-at="75" :danger-at="90" />
-              <p class="muted mono storage-use" style="margin-top: 4px">{{ bytes(x.status.used) }} {{ s.storage.used.toLowerCase() }} · {{ bytes(x.status.available) }} {{ s.storage.available.toLowerCase() }} · {{ bytes(x.status.size) }}<span v-if="x.status.fragmentation"> · {{ s.storage.fragmentation }} {{ x.status.fragmentation }}%</span></p>
+            <div v-if="x.status.size_bytes">
+              <Meter :value="percent(x.status.used_bytes ?? 0, x.status.size_bytes)" :label="s.storage.usage" :warn-at="75" :danger-at="90" />
+              <p class="muted mono storage-use" style="margin-top: 4px">{{ bytes(x.status.used_bytes) }} {{ s.storage.used.toLowerCase() }} · {{ bytes(x.status.available_bytes) }} {{ s.storage.available.toLowerCase() }} · {{ bytes(x.status.size_bytes) }}<span v-if="x.status.fragmentation"> · {{ s.storage.fragmentation }} {{ x.status.fragmentation }}%</span></p>
             </div>
             <dl class="kv">
               <dt>{{ s.storage.pool }}</dt><dd class="mono">{{ x.status.pool || '-' }}</dd>

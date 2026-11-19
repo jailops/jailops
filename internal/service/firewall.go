@@ -236,7 +236,7 @@ func (s *Service) PatchPolicy(ctx context.Context, name string, patch map[string
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "firewall-policy %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "firewall-policy %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.FirewallPolicy
 	if err := MergePatch(cur, patch, &out); err != nil {
@@ -421,7 +421,7 @@ func (s *Service) PatchAddressSet(ctx context.Context, name string, patch map[st
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "address-set %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "address-set %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.AddressSet
 	if err := MergePatch(cur, patch, &out); err != nil {

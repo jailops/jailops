@@ -151,7 +151,7 @@ async function applyFirewall(): Promise<void> {
   busy.value = true
   error.value = null
   try {
-    const r = await runOp(s.setup.fwTitle, () => api.host.applyFirewall({ spec: setupFirewall(clientAddress.value), confirm_within: SETUP_CONFIRM_WITHIN, ...(clientAddress.value ? {} : { confirm_lockout: true }) }))
+    const r = await runOp(s.setup.fwTitle, () => api.host.applyFirewall({ spec: setupFirewall(clientAddress.value), confirm_within_seconds: SETUP_CONFIRM_WITHIN, ...(clientAddress.value ? {} : { confirm_lockout: true }) }))
     fwPending.value = r.data?.pending ?? null
     if (fwPending.value) setPending({ pending: fwPending.value })
     else fwConfirmed.value = true

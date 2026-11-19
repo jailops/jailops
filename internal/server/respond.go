@@ -8,15 +8,12 @@ import (
 	"io"
 	"mime"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"jailops.net/jailops/internal/auth"
 	"jailops.net/jailops/internal/service"
 	"jailops.net/jailops/sdk/api"
 )
-
-func etagOf(gen int64) string { return `"` + strconv.FormatInt(gen, 10) + `"` }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -25,14 +22,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // sync writes a sync envelope.
-func (c *rc) sync(status int, meta any, etag int64) {
+func (c *rc) sync(status int, meta any, etag string) {
 	raw, err := json.Marshal(meta)
 	if err != nil {
 		c.fail(api.Errorf(api.CodeInternal, "encode reply: %v", err))
 		return
 	}
-	if etag > 0 {
-		c.w.Header().Set("ETag", etagOf(etag))
+	if etag != "" {
+		c.w.Header().Set("ETag", etag)
 	}
 	c.status = status
 	writeJSON(c.w, status, api.Response{Type: api.ResponseSync, Status: "Success", StatusCode: status, Metadata: raw})
@@ -137,23 +134,32 @@ func (c *rc) decodePatch(typ any) (map[string]any, error) {
 }
 
 // expect parses If-Match into the generation the request expects: AnyGeneration for no header and for "*", the
-// generation of the strong entity tag otherwise. A header whose tags cannot match (weak tags, tags that are not
-// generations) fails the precondition at once, as the strong comparison of RFC 9110 says; one with several different
-// generations is refused, because the check runs against one.
+// generation of the strong entity tag otherwise. The UUID of the tag goes into the request context: a change or delete
+// of an object that was created again since (same name, another UUID) is refused like a stale generation. A header
+// whose tags cannot match (weak tags, tags this server did not write) fails the precondition at once, as the strong
+// comparison of RFC 9110 says; one with several different tags is refused, because the check runs against one.
 func (c *rc) expect() (int64, error) {
 	m, err := api.ParseIfMatch(c.r.Header.Get("If-Match"))
 	if err != nil {
 		return 0, err
 	}
-	switch {
-	case m.Any:
+	if m.Any {
 		return service.AnyGeneration, nil
-	case len(m.Gens) == 0:
-		return 0, api.Errorf(api.CodeConflict, "no entity tag of If-Match can match: the tags of an object are strong (\"7\")").WithHint("read the object again and send the ETag it gives")
-	case len(m.Gens) > 1:
-		return 0, api.Errorf(api.CodeInvalid, "If-Match %q names several generations: send the one entity tag you read", c.r.Header.Get("If-Match"))
 	}
-	return m.Gens[0], nil
+	if len(m.Tags) > 1 {
+		return 0, api.Errorf(api.CodeInvalid, "If-Match %q names several entity tags: send the one you read", c.r.Header.Get("If-Match"))
+	}
+	var uuid string
+	var gen int64
+	var ok bool
+	if len(m.Tags) == 1 {
+		uuid, gen, ok = api.ParseETag(m.Tags[0])
+	}
+	if !ok {
+		return 0, api.Errorf(api.CodePreconditionFailed, "no entity tag of If-Match can match: the tags of an object are strong and come from the server").WithHint("read the object again and send the ETag it gives")
+	}
+	c.r = c.r.WithContext(service.WithExpectedUUID(c.r.Context(), uuid))
+	return gen, nil
 }
 
 // labels parses repeated ?label=k=v.

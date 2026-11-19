@@ -72,11 +72,11 @@ func TestExitCodesPerAPICode(t *testing.T) {
 		api.CodeInvalid: ExitUsage, api.CodeDataLoss: ExitUsage, api.CodeKeyNotEscrowed: ExitUsage, api.CodePlaintextDenied: ExitUsage,
 		api.CodeUnauthorized: ExitAuth, api.CodeForbidden: ExitAuth, api.CodeRateLimited: ExitAuth, api.CodeBadPassphrase: ExitAuth, api.CodeNotManaged: ExitUnsupported,
 		api.CodeNotFound:      ExitNotFound,
-		api.CodeAlreadyExists: ExitConflict, api.CodeConflict: ExitConflict, api.CodeBusy: ExitConflict, api.CodeIPConflict: ExitConflict,
+		api.CodeAlreadyExists: ExitConflict, api.CodePreconditionFailed: ExitConflict, api.CodeBusy: ExitConflict, api.CodeIPConflict: ExitConflict,
 		api.CodeQuotaExceeded: ExitConflict, api.CodeMaintenance: ExitConflict, api.CodeMissingChunks: ExitConflict, api.CodeLeaseExpired: ExitConflict, api.CodeLocked: ExitConflict,
 		api.CodePoolExhausted: ExitConflict, api.CodeImageInUse: ExitConflict, api.CodeMergeConflict: ExitConflict, api.CodeChainBroken: ExitConflict,
 		api.CodeUnsupported: ExitUnsupported, api.CodeUnverified: ExitUnsupported, api.CodeZFSIncompatible: ExitUnsupported, api.CodeVersionSkew: ExitUnsupported,
-		api.CodeInternal: ExitInternal, api.CodeNotLeader: ExitInternal, api.CodeNoQuorum: ExitInternal, api.CodeStopForced: ExitInternal,
+		api.CodeInternal: ExitInternal, api.CodeInterrupted: ExitInternal,
 	}
 	for _, c := range codesInSource(t) {
 		w, ok := want[c]

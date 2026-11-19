@@ -86,7 +86,7 @@ $ jailops project list
     web    -       web        fast      0/2     front end
 
 $ jailops network grant lan --project web
-! conflict: network lan is already granted to project main
+! precondition_failed: network lan is already granted to project main
 [exit 5]
 
 $ jailops network grant lan
@@ -151,8 +151,8 @@ $ jailops project show web -o json
   "status": {
     "jails": 1,
     "cpu": 1,
-    "memory_used": 1073741824,
-    "disk_used": 0,
+    "memory_used_bytes": 1073741824,
+    "disk_used_bytes": 0,
     "addresses": 2
   }
 }

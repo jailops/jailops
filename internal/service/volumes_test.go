@@ -165,7 +165,7 @@ func TestAttachAndDetachRules(t *testing.T) {
 	op, err = s.JailAction(ctx, "desktop", api.JailAction{Action: "stop"})
 	mustOp(t, s, op, err)
 	// deleting a jail never deletes its volume
-	op, err = s.DeleteJail(ctx, "mail")
+	op, err = s.DeleteJail(ctx, "mail", service.AnyGeneration)
 	mustOp(t, s, op, err)
 	if v, err := s.GetVolume(ctx, "maildir"); err != nil || len(v.Status.AttachedTo) != 0 {
 		t.Fatalf("%+v %v", v, err)

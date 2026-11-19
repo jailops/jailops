@@ -140,7 +140,7 @@ func (s *Service) ReadLogs(ctx context.Context, q api.LogsQuery) (api.LogsRead, 
 			out.Sources = append(out.Sources, ls)
 			continue
 		}
-		r := api.AssembleLogRead(sr.j.name, sr.file, data, start, size, api.JailLogQuery{Tail: q.Tail, Since: q.Since, Grep: q.Grep, Offset: offset}, now)
+		r := api.AssembleLogRead(sr.j.name, sr.file, data, start, size, api.JailLogQuery{Limit: q.Limit, Since: q.Since, Grep: q.Grep, Offset: offset}, now)
 		ls.NextOffset, ls.Rotated, ls.Truncated = r.NextOffset, r.Rotated, r.Truncated
 		out.Next[key] = r.NextOffset
 		out.Sources = append(out.Sources, ls)
@@ -167,7 +167,7 @@ func (s *Service) auditUnified(ctx context.Context, q api.LogsQuery, sources int
 		return
 	}
 	s.Audit(ctx, store.AuditEntry{Actor: a.Name, ActorKind: a.Kind, Method: "LOGS", Route: "/api/v1/logs", Object: "/api/v1/logs",
-		Project: ProjectFrom(ctx), Result: "ok", Remote: a.Remote, Detail: fmt.Sprintf("read %s sources=%d tail=%d since=%q grep=%q", sel, sources, q.Tail, q.Since, q.Grep)})
+		Project: ProjectFrom(ctx), Result: "ok", Remote: a.Remote, Detail: fmt.Sprintf("read %s sources=%d limit=%d since=%q grep=%q", sel, sources, q.Limit, q.Since, q.Grep)})
 }
 
 // due reports whether id was not recorded within logAuditWindow, and records it.

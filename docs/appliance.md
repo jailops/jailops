@@ -205,7 +205,7 @@ time unless it is confirmed. The mechanism is generic, in the helper; the firewa
 
 1. The administrator applies with a confirmation window, for example
    `jailops host firewall set ... --confirm-within 120` (seconds, or `90s`, `5m`; default 120 seconds, 10 at least, at
-   most 30 minutes; `confirm_within` in the API). The reply says the change is pending, with its id and deadline.
+   most 30 minutes; `confirm_within_seconds` in the API). The reply says the change is pending, with its id and deadline.
 2. The helper takes the snapshot, then writes the **pending change record** `<host-dir>/pending.json` (a random id, the
    module, the snapshot to put back, the time it was made, the deadline, the window) and syncs it (the file and its
    directory) **before** it touches anything of the host. Then it applies the change. When a step of the apply fails,

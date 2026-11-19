@@ -110,7 +110,7 @@ export function demoAccess(jails: () => Jail[], sets: () => Array<{ metadata: { 
     if (d?.access) {
       const db = b.database || (i >= 0 ? st.grants[i].database : '') || (kind === 'jail' ? canonical.slice(5).replace(/-/g, '_') : '')
       if (!db) return { status: 400, code: 'invalid', message: 'name the database of this grant with --db NAME (a source that is not a jail has no default)' }
-      if (i >= 0 && st.grants[i].database !== db) return { status: 409, code: 'conflict', message: `${canonical} already has access to database ${st.grants[i].database}`, hint: 'deny it first to give it another database' }
+      if (i >= 0 && st.grants[i].database !== db) return { status: 409, code: 'precondition_failed', message: `${canonical} already has access to database ${st.grants[i].database}`, hint: 'deny it first to give it another database' }
       if (j.status.power !== 'running') return { status: 409, code: 'busy', message: `jail "${name}" is stopped; the role and the database are made with psql in it`, hint: `start it with jailops start ${name}` }
       Object.assign(g, { database: db, role: db, role_created: true, database_created: true, hba: prefixes.map((p) => `host ${db} ${db} ${p} scram-sha-256`) })
       const known = db in st.roles

@@ -143,7 +143,7 @@ func (h *hookEnv) argv(name string) []string {
 	return out
 }
 
-// limits.cpuset pins the jail with cpuset(1) after the start, without racct and without a single rctl rule.
+// resources.cpuset pins the jail with cpuset(1) after the start, without racct and without a single rctl rule.
 func TestHookPostStartPinsTheCPUs(t *testing.T) {
 	h := newHookEnv(t, api.OSFreeBSD, "10.20.0.12", "none")
 	h.setLimits(t, api.Resources{CPUSet: "0-1,3"})

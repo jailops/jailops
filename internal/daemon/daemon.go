@@ -345,7 +345,7 @@ func Start(ctx context.Context, opts Options) (*Daemon, error) {
 	// 5. Reconciler.
 	autostart := cfg.Reconcile.Autostart != nil && *cfg.Reconcile.Autostart
 	rcfg := reconcile.Config{Interval: cfg.Reconcile.Interval.Std(), Autostart: autostart, NDP: d.ndpFactory(),
-		BootStateFile: filepath.Join(cfg.StateDir, "boot-id")}
+		BootStateFile: filepath.Join(cfg.StateDir, "boot-id"), PendingKillsFile: filepath.Join(cfg.StateDir, "pending-pf-kills.json")}
 	trigger := make(chan struct{}, 1)
 	d.rec = reconcile.New(rcfg, reconcile.Env{Source: svc, Sink: svc, Actions: svc, Net: clients.Net, PF: clients.PF, Jails: clients.Jails,
 		Run: clients.Runner, Sysctl: clients.Sysctl, Routes: func(context.Context) ([]ifconfig.RouteEntry, error) { return priv.ReadRoutes() },

@@ -106,7 +106,7 @@ func (s *Service) RunBackups(ctx context.Context, req api.BackupRunRequest) (api
 	if err != nil {
 		return api.Operation{}, err
 	}
-	return s.Submit(ctx, OpSpec{Description: "Run backup policy " + req.Policy,
+	return s.Submit(ctx, OpSpec{Action: api.OpBackupRun, Description: "Run backup policy " + req.Policy,
 		Resources: map[string][]string{"backup-policies": {"/api/v1/backup-policies/" + req.Policy}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			runs, err := a.RunPolicy(ctx, project, req.Policy, req.NoVolumes)
@@ -132,7 +132,7 @@ func (s *Service) VerifyBackup(ctx context.Context, id string, req api.BackupVer
 	default:
 		return api.Operation{}, invalid("depth must be deep, extract or full")
 	}
-	return s.Submit(ctx, OpSpec{Description: "Verify backup " + id, Project: backupProject(b),
+	return s.Submit(ctx, OpSpec{Action: api.OpBackupVerify, Description: "Verify backup " + id, Project: backupProject(b),
 		Resources: map[string][]string{"backups": {"/api/v1/backups/" + id}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			return a.Verify(ctx, id, req.Depth)
@@ -313,7 +313,7 @@ func (s *Service) restoreVolumeBackup(ctx context.Context, p project, b api.Back
 	if err := s.volKind.p(target).notTaken(name); err != nil {
 		return nil, nil, err
 	}
-	op, err := s.Submit(ctx, OpSpec{Description: "Restore backup " + req.Backup + " as volume " + name, Locks: []string{volumeLock(target, name)}, Project: target,
+	op, err := s.Submit(ctx, OpSpec{Action: api.OpVolumeRestore, Description: "Restore backup " + req.Backup + " as volume " + name, Locks: []string{volumeLock(target, name)}, Project: target,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			return s.d.Backups.RestoreVolume(ctx, req)
@@ -557,7 +557,7 @@ func (s *Service) RestoreAdopt(ctx context.Context, key string, j api.Jail, gen 
 	}
 	s.mu.Lock()
 	if e := s.jails[key]; e != nil {
-		nj.Status.Generation = e.jail.Status.Generation
+		nj.Status.ImageGeneration = e.jail.Status.ImageGeneration
 		e.jail = nj
 	}
 	s.mu.Unlock()
@@ -642,7 +642,7 @@ func (s *Service) RestoreStop(ctx context.Context, project, name string) error {
 // RestoreDelete removes the jail a restore test restored, with its datasets.
 func (s *Service) RestoreDelete(ctx context.Context, project, name string) error {
 	ctx = WithProject(ctx, project)
-	op, err := s.DeleteJail(ctx, name)
+	op, err := s.DeleteJail(ctx, name, AnyGeneration)
 	if err != nil {
 		if api.IsCode(err, api.CodeNotFound) {
 			return nil

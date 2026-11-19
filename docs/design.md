@@ -175,10 +175,11 @@ one, upgraded, tested and snapshotted. Generations are never edited.
 A thin jail's root is a clone of one generation. State that must survive an update is in
 separate datasets mounted under the root: `/etc`, `/usr/local`, selected `/var` paths
 (`/var/db`, `/var/log`, `/var/mail`, `/var/spool`), `/home`, `/root`, and user volumes. This list is the default of
-`lifecycle.persistent` in `jailopsd.yaml` and can be replaced there. Prototype 2 settled the mechanism (section 18); one
-question is open: how `/var/db/pkg` behaves after a root swap.
+`lifecycle.persistent` in `jailopsd.yaml` and can be replaced there. Prototype 2 settled the mechanism (section 18). `/var/db` is persistent, so the jail's package database survives a root swap;
+at every start of a thin jail the records of the base packages are brought in step with the generation of its root
+([upgrade.md](upgrade.md#the-package-records-of-the-base)).
 
-### 4.3 Upgrade (strategy `rebase`)
+### 4.3 Upgrade (thin jails)
 
 1. Build the target generation if it does not exist.
 2. Preflight: refuse if the jail has snapshots that other clones depend on, if replication is
@@ -249,8 +250,8 @@ A host usually has more than one pool. Three things, with different owners:
 
 The hardest parts are the `/etc` and `/var` handling and the interaction between pkgbase, `etcupdate`, clones and
 rollback. Prototype 2 passed on FreeBSD 15.1 (section 18): upgrade, write new data, `root` rollback leaves the data
-intact, `all` rollback warns about data loss. Open: how `/var/db/pkg` behaves after a root swap, and an upgrade of a
-debootstrap (Debian) generation, which is refused.
+intact, `all` rollback warns about data loss. The package records of the base follow the root at the next start. An upgrade of a
+debootstrap (Debian) generation is refused.
 
 ## 5. Networking
 
@@ -410,7 +411,7 @@ anchor is then deny whatever the jail's own policies say, and each grant is a `q
 
 ### 5.4 Bandwidth limits
 
-`nic.<device>.egress` and `nic.<device>.ingress` are rates in bits per second with decimal units (`10M` is 10 Mbit/s) for
+`network.<name>.egress` and `network.<name>.ingress` are rates in bits per second with decimal units (`10M` is 10 Mbit/s) for
 what the jail sends and what it receives through the device. Each direction of a device that has one gets a **dummynet
 pipe**, numbered in JailOps's own range (40000 to 59999). A number is given once, when the limit is first set, and kept
 (`<state_dir>/rendered/pipes.json`) for as long as the limit exists, so no other jail's pipe is ever renumbered. The jail's
@@ -458,7 +459,7 @@ the Linuxulator, with a compatibility matrix that is a set of automated tests, n
 - No systemd as PID 1. Services are started directly or by a small init wrapper.
 - No netlink: no `ip`, no DHCP client. The host configures the network.
 - Required mounts: devfs with a ruleset, linprocfs, linsysfs, fdescfs, tmpfs on `/dev/shm`.
-- Update strategy is `inplace` (apk or apt inside the jail), snapshot first. Whether Alpine can
+- A Linux jail is updated in place (apk or apt inside the jail), snapshot first. Whether Alpine can
   use `rebase` (rebuilding from `/etc/apk/world`, or a derived image) is open.
 - Addresses set on an epair **before** it is moved into the jail's vnet are lost. The host configures the interface
   and routes inside the jail after the move with `ifconfig -j <jail>` and `route -j <jail>` (verified, section 18).
@@ -495,14 +496,66 @@ spec.
 
 ### 7.1 Authority
 
-| Scope | Authoritative | Local files |
-|---|---|---|
-| `host` and jail manifests | ZFS on the host | truth |
-| `fleet`, cluster mode | Raft | projection, rebuilt from the Raft snapshot |
-| `fleet`, no cluster (single host or hub) | local files | truth |
+**Every object is authoritative on the host that stores it.** The scope says how an object is managed, not who shares it:
 
-An object has exactly one authority at a time. Enabling cluster mode imports fleet files as
-initial commands; leaving the cluster exports them back.
+| Scope | Meaning | Truth |
+|---|---|---|
+| `host` | The object lives on exactly one host: jails, volumes, projects, storage | The host: ZFS and the state files |
+| `fleet` | The hub and the fleet repository may manage the object with one definition: images, networks, policies, address sets, profiles, backup policies and targets, remotes, certificates, users, tokens, WireGuard tunnels | Still the host that stores it: its state files are the truth and each host keeps its own copy |
+
+A `fleet` object is therefore **not shared state**. A network holds the uplink and the ranges of one host, a WireGuard tunnel the
+interface and endpoint of one host, a backup target the address of one node: a definition applied to two hosts gives two
+independent objects, which the fleet repository may keep equal. The scope of a stored object never changes (a change would
+re-key it and alter what clients and the fleet repository read), so these kinds keep the value `fleet`.
+
+The same name on two hosts, also a project name, is two local objects. A project that spans hosts is a definition that the hub
+applies to each host under one UUID (section 12); there is no shared project identity until cluster mode.
+
+A replicated authority, a log from which the local files would be a projection, is the business of cluster mode, which is
+not built (section 11): enabling it would import the fleet objects of the host as its first commands, and leaving it would
+export them back. Until then an object has exactly one authority, the files of its host.
+
+#### Resource authority
+
+Who owns each kind, who may write it, and where it lives. The table is generated from `api.Authorities`; a test keeps it
+equal to the code and fails for a kind without an entry.
+
+<!-- authority:begin -->
+| Kind | Scope | Owner | Who may write | Where it lives |
+|---|---|---|---|---|
+| `AddressSet` | `fleet` | a project of this host | project administrator | state files of the host |
+| `AppAccess` | `host` | a project of this host | project administrator | state files of the host |
+| `Backup` | `host` | a project of this host | the daemon (no API write) | the backup node |
+| `BackupPolicy` | `fleet` | a project of this host | project administrator | state files of the host |
+| `BackupTarget` | `fleet` | this host | global administrator | state files of the host |
+| `Certificate` | `fleet` | this host | global administrator | state files of the host |
+| `FirewallPolicy` | `fleet` | a project of this host | project administrator | state files of the host |
+| `Host` | `none` | the fleet repository | global administrator | the fleet repository (not stored on a host) |
+| `HostCertificate` | `host` | this host | global administrator | files of the host |
+| `HostFirewall` | `host` | this host | global administrator | files of the host |
+| `HostGroup` | `none` | the fleet repository | global administrator | the fleet repository (not stored on a host) |
+| `HostIdentity` | `host` | this host | the daemon (no API write) | SQLite of the host |
+| `Image` | `fleet` | this host | global administrator | state files of the host and ZFS |
+| `ImageGeneration` | `host` | this host | the daemon (no API write) | ZFS on the host |
+| `Jail` | `host` | a project of this host | project operator | dataset of the jail |
+| `JailSnapshot` | `host` | a project of this host | project operator | ZFS on the host |
+| `JailTemplate` | `none` | the fleet repository | global administrator | the fleet repository (not stored on a host) |
+| `LogForward` | `host` | this host | global administrator | state files of the host |
+| `Network` | `fleet` | this host | global administrator | state files of the host |
+| `Operation` | `host` | a project of this host | the daemon (no API write) | SQLite of the host |
+| `Profile` | `fleet` | a project of this host | project administrator | state files of the host |
+| `Project` | `host` | this host | global administrator | state files of the host |
+| `Remote` | `fleet` | this host | global administrator | state files of the host |
+| `Rollout` | `none` | the fleet repository | global administrator | the fleet repository (not stored on a host) |
+| `Storage` | `host` | this host | global administrator | state files of the host |
+| `Token` | `fleet` | this host | global administrator or the token's user | SQLite of the host |
+| `User` | `fleet` | this host | global administrator | SQLite of the host |
+| `Volume` | `host` | a project of this host | project administrator | state files of the host and the volume's dataset |
+| `WireGuard` | `fleet` | this host | global administrator | state files of the host |
+<!-- authority:end -->
+
+`none` in the scope column marks a document of the fleet repository (a host, a host group, a rollout, a jail template) that
+no host stores as an object.
 
 ## 8. API
 
@@ -598,7 +651,7 @@ they are kept apart by mechanisms that exist in the system:
 |---|---|
 | Network | A network belongs to one project. Every jail has a link of its own to the host, so jails never exchange frames and every flow goes through the host (section 5). Each jail's anchor binds its addresses (anti-spoofing) and the host routes an address to the one link of its jail, so a jail cannot take another's address. A project's mandatory policies are rendered before the jail's own. Cross-project traffic is denied unless a policy allows it. |
 | Storage | Each project has its own dataset under the storage root with a quota; each jail a quota and optionally a reservation. ZFS delegation (`zfs_delegation`) is never granted to project users unless a global admin allows it per jail, and the operator allows it in priv.conf (`admin-zfs-delegation`); the jail then manages its own dataset `<container>/delegated` (section 4.6). |
-| Compute | Per-jail limits: `limits.memory`, `limits.pids` and `limits.cpu` are rctl rules the helper adds when the jail has started (`swapuse`, `maxproc`, `pcpu`; they need `kern.racct.enable=1`, and a jail reports the condition `Limits` when they cannot be enforced), `limits.disk` is the quota of the jail's container dataset, `limits.cpuset` pins the jail to CPUs of the host (`cpuset -l LIST -j JID` after the start, no racct needed), and `limits.states` limits the pf states of the jail's rules; project quotas are checked before creation. See [operations.md](operations.md#resource-limits-of-a-jail). What a jail uses is measured when asked (`GET /api/v1/jails/<n>/usage`, `jailops jail info`): processes, CPU time and memory from racct through `rctl -u jail:<key>` (a read-only form on the helper's command allow-list, for managed jails only; "racct is off" when `kern.racct.enable` is not 1), and the space of its datasets from ZFS `used`/`referenced`. Nothing of it is stored, and the jail list does not carry it. |
+| Compute | Per-jail limits: `resources.memory`, `resources.pids` and `resources.cpu` are rctl rules the helper adds when the jail has started (`swapuse`, `maxproc`, `pcpu`; they need `kern.racct.enable=1`, and a jail reports the condition `Limits` when they cannot be enforced), `resources.disk` is the quota of the jail's container dataset, `resources.cpuset` pins the jail to CPUs of the host (`cpuset -l LIST -j JID` after the start, no racct needed), and `resources.states` limits the pf states of the jail's rules; project quotas are checked before creation. See [operations.md](operations.md#resource-limits-of-a-jail). What a jail uses is measured when asked (`GET /api/v1/jails/<n>/usage`, `jailops jail info`): processes, CPU time and memory from racct through `rctl -u jail:<key>` (a read-only form on the helper's command allow-list, for managed jails only; "racct is off" when `kern.racct.enable` is not 1), and the space of its datasets from ZFS `used`/`referenced`. Nothing of it is stored, and the jail list does not carry it. |
 | Identity | Section 8.2. |
 
 A separate dataset is **not** a full security boundary. Jails share the host kernel, the sysctl state, device
@@ -668,7 +721,7 @@ jailops create nginx --image freebsd-15-1 --network web --storage fast --start
 jailops stop -l env=prod            # by label selector; --all for every jail of the project
 jailops exec nginx -- /bin/sh       # also: jailops shell nginx
 jailops config show nginx
-jailops config set nginx limits.memory 2G limits.cpu 2
+jailops config set nginx resources.memory 2G resources.cpu 2
 jailops network list ; jailops storage list
 jailops apply -f site.yaml          # create or update every document of a file
 ```
@@ -676,7 +729,7 @@ jailops apply -f site.yaml          # create or update every document of a file
 - **Client-side state.** `project switch` sets the current project of the current remote in the client
   configuration, never state in the daemon; with none set, project-scoped commands ask for `--project`. `remote switch` and `project switch` are independent and each
   remote remembers its last project. `--project` and `--remote` always override.
-- **Configuration keys.** Dotted keys (`limits.memory`, `limits.cpu`, `boot.autostart`, `boot.priority`,
+- **Configuration keys.** Dotted keys (`resources.memory`, `resources.cpu`, `boot.autostart`, `boot.priority`,
   `network.eth0.mtu`, ...) are the interface of `config set/get/unset/show/edit`. They are not a second
   data model: a registry in `sdk/api` maps every key to a field of the typed spec, with its type,
   validation, documentation and whether a change needs a restart. The CLI, the web UI, `jailops-sync` and
@@ -694,7 +747,7 @@ jailops apply -f site.yaml          # create or update every document of a file
   `nic` (a network attachment: network, addresses, MAC, MTU, optional rate limit), `disk` (a volume mount
   of a ZFS dataset, quota, read-only; host path mounts need admin), `devfs` (exposure of selected device
   nodes through an allow-listed devfs ruleset, for example `tun` or `pf`), and the exposure of ports (`jailops expose`, stored as `spec.expose`). Per-device configuration is changed like any key
-  (`jailops config set nginx nic.eth0.mtu 1400`) and an override replaces only the named key of the named device.
+  (`jailops config set nginx network.eth0.mtu 1400`) and an override replaces only the named key of the named device.
 - **Profiles.** A profile is a named, reusable set of configuration keys and devices (limits, devices,
   boot policy). A jail lists profiles in order; later profiles override earlier ones and the jail's own
   keys and devices override all of them, device by device and name by name. `jailops config show --expanded`
@@ -735,7 +788,7 @@ jailops apply -f site.yaml          # create or update every document of a file
 - **Manual changes and GitOps.** `config set` on an object that `jailops-sync` owns is allowed and audited,
   and `jailops-sync plan` reports it as drift and reverts it on apply when the repository declares that key. Only
   what the repository declares is compared (verified on the real host: a changed `hostname` that the file declares is
-  reported and reverted, a `limits.memory` the file does not mention is left alone). To have a value enforced,
+  reported and reverted, a `resources.memory` the file does not mention is left alone). To have a value enforced,
   declare it.
 
 ### 8.4 Managed updates
@@ -770,7 +823,7 @@ updates:
 - **Shell.** `jailops shell <jail>` runs `jexec` with a shell chosen in this order: `--shell`, the jail's `shell`
   setting (a path inside the jail, or the names `bash` and `sh`; a management setting that does not touch `/etc/passwd`), then `/bin/sh`. If the
   chosen shell does not exist in the jail the command fails with a clear error; it never falls back silently.
-  `jailops set <jail> shell /usr/local/bin/bash` is `config set` for that key and `jailops-sync` can declare it. A shell
+  `jailops config set <jail> shell /usr/local/bin/bash` is `config set` for that key and `jailops-sync` can declare it. A shell
   session starts with the PATH of a login (`/usr/local/bin` included) and root's HOME; from a terminal the CLI passes `TERM`.
 - **Bash and the prompt of a new jail** ([shell.md](shell.md)). A new FreeBSD jail whose request and profiles leave `shell`
   and `prompt` empty gets `jails.shell` and `jails.prompt` of `jailopsd.yaml` in its spec (bash and `default`). At the
@@ -847,7 +900,7 @@ rc.conf knob out. Both write files that validate, with `TODO` markers that `jail
 
 **Who may connect** (apps.md, extension `app_access`). An installed app is closed: its installation ends by creating the
 managed firewall policy `app-<jail>` (5.2), denying by default. `jailops app allow APP --from SOURCE` (`POST
-/api/v1/jails/<n>/access`, operator in the project, audited, answered at once and never kept as an operation result)
+/api/v1/jails/<n>/access/allow`, operator in the project, audited, answered at once and never kept as an operation result)
 adds an allow rule for one source (`jail:NAME`, `set:NAME`, an address or prefix, `host`) and, for a
 definition with the optional `access:` block (`type: postgresql`), makes a role and a database with `psql` run as
 `postgres` in the jail with the statements on stdin, sends the server only a SCRAM-SHA-256 verifier of a generated
@@ -1063,8 +1116,10 @@ never assumes shared storage.
 
 ## 11. Cluster mode (Raft)
 
-Raft is part of 1.0, as milestone M7, after the single-node lifecycle is solid. The data model is
-cluster-aware from the first milestone: UUIDs, `scope`, `generation`, versioned commands.
+Cluster mode is not part of 1.0. 1.0 is standalone, the hub and the Git fleet; the data model is cluster-aware from the first
+milestone (UUIDs, `scope`, `generation`, versioned commands) so that cluster mode can arrive as an additive mode afterwards,
+when the need for it is confirmed and for a bounded set of logical metadata first. This section is the design that the model
+keeps room for; nothing in it is built.
 
 - Raft replicates `scope: fleet` metadata only. Jail execution, ZFS and the network stay native
   to each node.
@@ -1107,6 +1162,27 @@ stay true so that cluster mode can be added without a break of stored state or o
 object cannot hold them. A network stays an object of one host, and when cluster mode exists a fleet template may sit on top
 of it, with the networks still made on each host. Users and tokens are fleet objects in the API but live in the local
 database today; they move into the state objects, with a real generation counter, before cluster mode is built.
+
+### 11.2 What must be separated before a replicated committer exists
+
+`Store.Apply` validates a command and hands it to the committer; `Store.ApplyCommitted` is the entry point of a state machine
+and applies a committed command to the local files (`internal/state/store.go`). Today two things inside that transition are
+not pure state changes, and a replicated committer needs them apart:
+
+- **A side effect inside the transition.** `applyDelete` calls `Hooks.BeforeDestructive` before it removes the file, and the
+  daemon wires that hook to `snapshotState` (`internal/daemon/daemon.go`), a ZFS snapshot of the state dataset. A transition
+  that every member runs must not take a snapshot of one host's dataset: the hook leaves the transition and runs on each host
+  after the commit (or on the proposer before it), as a host action whose failure is a local event.
+- **A write that can fail on one member.** `applyPut` writes the object with a temp file, `fsync` and `rename`; a failed write
+  returns `internal` after nothing was indexed. The rule for a replicated log: a member whose apply fails stops applying and is
+  rebuilt from a snapshot of the log; it never skips a command and goes on, because then it would hold different state from
+  the others without knowing it.
+
+**Replay and compaction.** The files of `objects/` are a projection: applying the same command stream to an empty directory
+gives the same files byte for byte (the determinism and golden tests of `internal/state` check this, including a store that is
+closed and reopened after every command). A snapshot of the log is therefore enough to rebuild a member, and compaction
+loses nothing the files need. What the files do not hold (users, tokens and the other rows of SQLite, section 7) must be
+moved into state objects first, as 11.1 says.
 
 ## 12. Fleet sync
 
@@ -1183,11 +1259,11 @@ and `jailops-sync` use nothing else.
 | M2 | Network and firewall: routed VNET links, IPAM, routed and proxy IPv6, PF anchors, doctor, web UI | A jail with IPv4 and IPv6 on a switched network, behind a firewall |
 | M3 | Alpine and Linux jails | Alpine with sshd and nginx survives restart and rollback |
 | M4 | Backup: chunk repository, host-side encryption, backup node, retention, GC, verify, restore, restore tests, S3; replication between trusted hosts | Restore on another host. A compromised host cannot delete or overwrite backups |
-| M5 | Hub: mTLS, remotes, extensions negotiation, cold move, shared UI | One UI manages ten hosts; one host failing affects no other |
+| M5 | Hub: mTLS, remotes, extensions negotiation, shared UI (a cold move between two hosts comes after 1.0: [roadmap.md](roadmap.md)) | One UI manages ten hosts; one host failing affects no other |
 | M6 | Fleet: jailops-sync, rollouts, age secrets, adoption of live JailOps objects (`adopt --claim`) | A fleet repository applies to three hosts with a zero-diff plan after |
-| M7 | Cluster mode (Raft) | Three nodes; one isolated node keeps running jails; quorum loss and recovery tested; rolling upgrade |
+| M7 | Cluster mode (Raft), after 1.0, for a bounded set of logical metadata when the need is confirmed | Three nodes; one isolated node keeps running jails; quorum loss and recovery tested; rolling upgrade |
 
-1.0 ships when M1 to M7 pass their tests. Each milestone is released as 0.x.
+1.0 ships when M1 to M6 pass their tests and the gates of [1.0.md](1.0.md) are met. M7 comes after 1.0 as an additive mode. Each milestone is released as 0.x.
 
 ## 16. Status register: what was assumed, and what is settled
 
@@ -1198,7 +1274,7 @@ table. UNVERIFIED markers elsewhere in this document stay until the item they na
 | # | Assumption | Settled by | Status |
 |---|---|---|---|
 | 1 | `jail_get`/`jail_set` are callable from pure Go through `x/sys/unix` | Prototype 1 | Settled (section 18, 1) |
-| 2 | pkgbase + `etcupdate` + clones + rollback work together; the persistent path list is sufficient | Prototype 2 | Settled, except `/var/db/pkg` after a root swap (open, below) |
+| 2 | pkgbase + `etcupdate` + clones + rollback work together; the persistent path list is sufficient | Prototype 2 | Settled; the base records of `/var/db/pkg` follow a root swap at the next start |
 | 3 | PF anchors load atomically and coexist with the administrator's `pf.conf` | Prototype 3 | Settled (18, 3; order of the three `pf.conf` lines in 5.2) |
 | 4 | `zfs send -R` of clones, raw send of encrypted datasets and bookmarks work for replication | Prototype 4 | Settled for the primitives (18, 4); replication between hosts has no API or CLI yet (open, below) |
 | 5 | NDP proxy on a switched /64 (MAC choice, unicast NUD, MLD, routing, host connectivity) | Prototype 5, redone through the helper | Settled on amd64 (18.10, 18.11); limits in section 5 |
@@ -1219,10 +1295,8 @@ Open:
 | Native ZFS encryption | **Encrypted volumes are built** ([storage.md](storage.md#encrypted-volumes)): a volume made `encrypted` is its own encryption root (aes-256-gcm, `keyformat=passphrase`, `keylocation=prompt`), with a passphrase a person types at creation and after every boot (`jailops volume unlock`, `lock`, `passphrase`; extension `volumes`; state `locked`, error codes `locked` and `bad_passphrase`; the boot skips a locked jail and starts it after its unlock; five wrong passphrases lock unlocks out for 30 seconds). The helper's five operations (`zfs.create_encrypted`, `zfs.load_key`, `zfs.unload_key`, `zfs.change_key` take the passphrase on the request stream, never in arguments; `zfs.feature_state` reads `feature@encryption` for doctor) and the raw copy (`zfs.replicate` with `raw`) are tested against the real allow-list with stand-ins for `zfs`; the service, the lifecycle (an in-memory model of keys), the CLI and the console against fakes. UNVERIFIED on FreeBSD: that `zfs create`, `load-key` and `change-key` read one line from a stdin that is not a terminal, `zfs load-key -n` with the key loaded, the mapped error texts, a raw receive of an encryption root with `-o keylocation=prompt`, snapshots and rollbacks of a locked volume (the `encrypted-volume` block of `scripts/ci-freebsd-e2e.sh`). Not implemented: whole encrypted jails and storages (`spec.encrypted` / `storage.spec.encrypted` answer `unsupported` with the manual alternative in the hint), key files and unattended unlocks, encrypting an existing volume |
 | Packages at creation (`--package`, `spec.packages`) | Not implemented: the flag was removed; the field answers `unsupported` ("installing packages at creation (spec.packages) is not implemented"). Use the provisioning `packages` step (8.5), which runs once at the first start |
 | Jail freeze | Removed. FreeBSD has no jail freeze; the `freeze` action no longer exists in the SDK, the fake or the service (an unknown action answers `invalid`) |
-| Volumes of an existing jail | Built: `volume attach` and `volume detach`, `jailops config` on `disk.<name>` keys, `jailops edit` and a file attach and detach volumes of an existing jail, also while it runs (a nullfs mount made or taken off at once; a detach of a mount in use is `busy`, nothing changes) ([storage.md](storage.md)) |
+| Volumes of an existing jail | Built: `volume attach` and `volume detach`, `jailops config` on `volumes.<name>` keys, `jailops edit` and a file attach and detach volumes of an existing jail, also while it runs (a nullfs mount made or taken off at once; a detach of a mount in use is `busy`, nothing changes) ([storage.md](storage.md)) |
 | `inplace` update strategy for thin jails | `jailops jail upgrade` answers `unsupported` ("update strategy inplace is not implemented for thin jails"); thick and Linux jails are updated through managed updates, not rebased ("rebase upgrades apply to thin jails; ... jails update in place, which is not implemented") |
-| Routes that answer `unsupported` | `PUT /api/v1/server`, `GET /api/v1/server/config`, cluster, `GET .../console` (listing sessions), `.../files/<path>`, `POST .../move`, `.../snapshots/<s>` (rename), `.../bundle`, jail templates, groups, rollouts and the backup transport routes. Each answers 501 `unsupported` ("<feature> is not part of this version"); the list is `unsupportedRoutes` in `internal/server/routes.go` and `sdk/PROTOCOL.md` |
-| `/var/db/pkg` after a root swap | A dedicated experiment with a genuine package change |
 | Ethernet-level spoofing | `ether` rules did not evaluate on the test host; ARP, NDP and MAC spoofing are not blocked below IP |
 | amd64 beyond the proxy host | The clean-install end-to-end run passes on amd64; Linux jails and backups ran on arm64 only |
 | FreeBSD 15.2 and later | Each new minor release must pass the PF traffic matrix and the clean-install run before it is called supported |
@@ -1236,7 +1310,7 @@ Open:
 | Bash and the prompt of a jail ([shell.md](shell.md)) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.15, the shell block of `scripts/ci-freebsd-e2e.sh`): bash installed at the first start, the files, the prompt in an interactive and a login bash and in `jailops shell`, `~/.bashrc` winning, scripts and `sh` unaffected, `config set prompt` at once and `none`, `shell-setup`, bash and the prompt after an OS upgrade, an app installation's `set-up-shell` step (nginx). UNVERIFIED on FreeBSD: the first start by autostart and by `jailops jail unlock --start`, a failure without a package repository (the `ShellSetup` condition), thick jails, the console's terminal against a real jail (the demo only) |
 | Renames (8.8) | Verified on FreeBSD 15.2-PRERELEASE amd64 (18.16, the renames block and the encrypted-volume block of `scripts/ci-freebsd-e2e.sh`): a network renamed under a running jail (descriptions on the host and inside the jail, the anchor, traffic through the NAT), a stopped jail with its datasets, mountpoints, kernel name and anchor, a stopped jail with an encrypted volume (its key stays loaded), an image with a running thin jail on it (the clone's origin follows, the nightly runs move), a project with its jails, objects and token scopes. UNVERIFIED on FreeBSD: the recovery of a rename interrupted by a crash (tested with the fakes), a project or image on a second storage, a host profile rename. The empty mountpoint directories of the old names are left |
 | Exec with a terminal loses output | **Fixed.** A short command run through `jailops exec` with a pseudo-terminal (`jailops exec -t JAIL -- echo hi` under `script`) printed nothing in 5 of 12 runs on FreeBSD 15.2-PRERELEASE. Cause: the kernel hangs a terminal up when its session leader exits and drops the output the reader of the master has not taken yet (3 to 30% of 300 runs of `echo hi` in a Go test, all of them with a delayed reader). Fix: the helper starts itself as a small leader (`internal/priv/session_leader.go`) that owns the terminal, runs the command in a process group of its own in the foreground, reports the group and the exit status on a pipe, and stays until the helper has read the master empty; the terminal ends only then. Signals go to the command's group; the end-to-end flow runs 40 short commands with a terminal and every one prints its output (0 of 1500 runs of the Go test lost any). |
-| Bandwidth limits | `nic.<device>.egress` is enforced with a dummynet pipe; traffic into the jail has no limit (design 5.4) |
+| Bandwidth limits | `network.<name>.egress` is enforced with a dummynet pipe; traffic into the jail has no limit (design 5.4) |
 | Devfs ruleset loading by the helper | Rendered; the load through the helper is not verified |
 | Jail logs through the helper | `fs.list_logs` and `fs.tail_file` are tested against real directories, symlinks and a fifo on the development host and over the socket; reading a running jail's `/var/log/messages` on a FreeBSD host, a stopped jail (unmounted root: `busy`), a jail with `/var` on its own persistent dataset, and a rotation under `-f` have not been run there |
 | Unified logs and forwarding | The merge, the timestamp forms, cursors, the forwarder's offsets, rotation, queue, backoff and the senders (udp, tcp, tls with a test CA, https) are tested in process, and the forwarder against the real helper checks on the development host. Not run on a FreeBSD host: a jail's `messages` written by its `syslogd` and forwarded (the block of `scripts/ci-freebsd-e2e.sh`), a rotation by newsyslog under forwarding, FreeBSD's `syslogd` as a receiver of RFC 5424 with structured data ([logging.md](logging.md)) |
@@ -1291,10 +1365,10 @@ proxy and the amd64 clean-install run on amd64). Everything not listed here is u
 
 Design consequences of prototype 2:
 
-- Image building copies the host's `/usr/share/keys` into the new root before the first `pkg -r` call, derives the repository URL from the host release (`base_release_<minor>` for a RELEASE, `base_latest` otherwise) and the ABI from `pkg config abi`.
+- Image building copies the host's `/usr/share/keys` into the new root before the first `pkg -r` call, derives the repository URL from the release of the image (`base_release_<minor>` for a RELEASE, `base_latest` otherwise) and the ABI from that release too (`FreeBSD:<major>:<arch>`), not from the host's pkg. A RELEASE build checks the version of `FreeBSD-runtime` against the release (step `verify-release`) and fails when the packages are of another one.
 - `etcupdate` cannot merge the account databases when both sides add a user (conflicts in `passwd`, `master.passwd` and `group`). JailOps merges those three files itself with a keyed three-way merge by user and group name (a conflict only when the same key changed differently on both sides), then runs `pwd_mkdb`; `etcupdate` is told to leave them alone. `rc.conf` is rendered by JailOps and is never merged.
 - A root rollback leaves `/etc` in the state merged for the newer generation while the root is the older one. Root rollback is therefore the upgrade plan run towards the previous generation, which merges `/etc` in the reverse direction.
-- Open: `/var/db/pkg` holds the package database of base and application packages. If it is persistent, `pkg` reports the old base set after a root swap; if it is not, application packages disappear from the database. Needs a dedicated experiment with a genuinely newer base (prototype 2b) before the persistent path list is final.
+- `/var/db/pkg` holds the package database of base and application packages and is persistent. After a root swap the records of the base set (`FreeBSD-*`) are replaced at the next start by those of the generation; the records of other packages are never touched.
 
 Design consequences of prototype 8:
 
@@ -1850,7 +1924,7 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   and runs `apk` through `jexec` in a short-lived build jail with the fallback brand set. The Linux jail path through the
   root helper ran on FreeBSD 15.1 arm64 (18.2); amd64 is open.
 - **pkgbase and /etc merges (4.3).** The pkgbase source copies the host's key directories into the root before the
-  first `pkg -r`, takes the ABI from `pkg config abi` and uses `fingerprints: "/usr/share/keys/pkgbase-${VERSION_MAJOR}"`.
+  first `pkg -r`, takes the ABI from the release of the image and uses `fingerprints: "/usr/share/keys/pkgbase-${VERSION_MAJOR}"`.
   A generation switch merges `/etc` with `etcupdate extract` and `etcupdate` on tarballs of the two generations;
   `master.passwd` and `group` are merged by key (`Merge3Keyed`) and `pwd_mkdb -p` follows; `rc.conf` is never merged;
   conflicts in the account files that etcupdate reports are ignored. A root rollback runs the same merge with the
@@ -1859,11 +1933,11 @@ UNVERIFIED here runs only against fakes until it is tried on FreeBSD.
   layer. The key routes are global-admin only; the recovery key is in the creation reply once and nowhere else.
   `POST /api/v1/backups/run` and `/verify` are operations. A restore names the project it goes into (there is no
   default), is admitted like a new jail, and the adopt step writes `spec.json` and `bundle.json` itself.
-- **Updates and provisioning (8.4, 8.5).** Off for every jail until `updates.mode` is set. A check runs `pkg update`
+- **Updates and provisioning (8.4, 8.5).** Off for every jail until `update.mode` is set. A check runs `pkg update`
   and `pkg upgrade -n` (`apk update`, `apk upgrade --simulate` on Alpine) inside the jail and compares the image
   generation; apply takes one atomic snapshot, updates, health-checks and records the result. A failed OS update is
   swapped back by the root-swap plan. A failed package update is **not** rolled back by itself: package files live
-  in the jail's datasets, a root rollback does not undo them, and the way back is `jail rollback --all` to the
+  in the jail's datasets, a root rollback does not undo them, and the way back is `jail rollback --scope all` to the
   recorded snapshot, which discards what the jail wrote since. The record says so. The schedule is evaluated by the
   daemon (`updates.tick`); a jail that is busy is tried again at the next tick. Provisioning files come from
   `<state_dir>/project-files/<project>/` (a symlink that leaves it is refused), run in the declared order, once per

@@ -6,7 +6,6 @@ import (
 	"math/rand/v2"
 	"net/http"
 	"net/url"
-	"strconv"
 	"time"
 
 	"jailops.net/jailops/sdk/api"
@@ -19,14 +18,6 @@ type ListOption func(url.Values)
 func Label(key, value string) ListOption {
 	return func(q url.Values) { q.Add("label", key+"="+value) }
 }
-
-// All asks for everything a global identity may see: every network or storage, not only those granted to the selected
-// project.
-func All() ListOption { return func(q url.Values) { q.Set("all", "true") } }
-
-// Recursion sets ?recursion=. The server always returns full objects; the
-// value is reserved for future use.
-func Recursion(n int) ListOption { return func(q url.Values) { q.Set("recursion", strconv.Itoa(n)) } }
 
 func list[T any](ctx context.Context, c *Client, path string, opts []ListOption) iter.Seq2[T, error] {
 	return func(yield func(T, error) bool) {
@@ -82,7 +73,7 @@ func (r *Resource[T]) Create(ctx context.Context, v T) (T, error) {
 }
 
 // Update replaces the object. A non-empty etag is sent as If-Match and a
-// stale one fails with api.CodeConflict.
+// stale one fails with api.CodePreconditionFailed.
 func (r *Resource[T]) Update(ctx context.Context, name string, v T, etag string) (T, error) {
 	return updateAt[T](ctx, r.c, http.MethodPut, r.item(name), v, etag)
 }
@@ -98,7 +89,7 @@ func (r *Resource[T]) Delete(ctx context.Context, name string) error {
 }
 
 // DeleteETag removes the object only if it is still the one the ETag names (read with GetETag): a changed object
-// fails with api.CodeConflict, as Update does. An empty etag deletes whatever is there.
+// fails with api.CodePreconditionFailed, as Update does. An empty etag deletes whatever is there.
 func (r *Resource[T]) DeleteETag(ctx context.Context, name, etag string) error {
 	h := http.Header{}
 	if etag != "" {
@@ -150,7 +141,7 @@ func Modify[T any](ctx context.Context, r Modifiable[T], name string, fn func(*T
 		if err == nil {
 			return nil
 		}
-		if !api.IsCode(err, api.CodeConflict) || i >= cfg.retries {
+		if !api.IsCode(err, api.CodePreconditionFailed) || i >= cfg.retries {
 			return err
 		}
 		d := time.Duration(i+1) * (5*time.Millisecond + rand.N(20*time.Millisecond))

@@ -14,14 +14,12 @@ import (
 
 // logOpts are the flags of 'jail logs'.
 type logOpts struct {
-	tail   int
+	limit  int
 	since  string
 	grep   string
 	follow bool
-	// events streams the log events of the server instead (the former
-	// meaning of the command), with count and sinceID.
+	// events streams the log events of the server instead, with limit (the events after which it stops) and sinceID.
 	events  bool
-	count   int
 	sinceID string
 }
 
@@ -41,7 +39,7 @@ server: no SSH and no shell in the jail. Without FILE the files are listed
 (rotated copies included; compressed ones are listed but not readable). With
 FILE, a name relative to /var/log such as messages or nginx/error.log, the
 last lines of the file are printed as plain text, so the output pipes into
-grep or less. --tail chooses how many lines (at most 5000), --since keeps the
+grep or less. --limit chooses how many lines (at most 5000), --since keeps the
 lines whose timestamp is not older than a time or a duration such as 15m, and
 --grep keeps the lines containing a text (a plain substring, no pattern).
 -f keeps reading what is appended, once a second, until interrupted, and
@@ -56,18 +54,22 @@ events the server publishes for the jail until interrupted, from now on or
 from an event id with --since-id, and keeps no history.`,
 		Example: `jailops jail logs web
 jailops jail logs web messages
-jailops jail logs web messages --tail 50 --since 15m
+jailops jail logs web messages --limit 50 --since 15m
 jailops jail logs web nginx/error.log --grep "upstream" -f
 jailops logs web messages -o json
-jailops jail logs web --events --since-id 120 --count 50`,
+jailops jail logs web --events --since-id 120 --limit 50`,
 		Args:              cobra.RangeArgs(1, 2),
 		ValidArgsFunction: completeArgs(completeKind(a, d), a.completeLogFiles()),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if o.events {
+				eventLimit := 0 // without --limit the stream goes on until interrupted
+				if cmd.Flags().Changed("limit") {
+					eventLimit = o.limit
+				}
 				if len(args) > 1 {
 					return usagef("--events streams the events of the jail; it takes no file")
 				}
-				return a.streamEvents(cmd.Context(), []api.EventType{api.EventLogging}, args[0], o.sinceID, o.count)
+				return a.streamEvents(cmd.Context(), []api.EventType{api.EventLogging}, args[0], o.sinceID, eventLimit)
 			}
 			if len(args) == 1 {
 				return a.listLogs(cmd.Context(), args[0])
@@ -76,12 +78,11 @@ jailops jail logs web --events --since-id 120 --count 50`,
 		},
 	}
 	f := cmd.Flags()
-	f.IntVarP(&o.tail, "tail", "n", api.DefaultLogTail, "number of lines from the end of the file")
+	f.IntVarP(&o.limit, "limit", "n", api.DefaultLogLimit, "number of lines from the end of the file; with --events, stop after this many events")
 	f.StringVar(&o.since, "since", "", "keep the lines not older than this: an RFC 3339 time or a duration such as 15m, 2h or 1d")
 	f.StringVar(&o.grep, "grep", "", "keep the lines containing this text (case-insensitive substring)")
 	f.BoolVarP(&o.follow, "follow", "f", false, "keep printing what is appended to the file until interrupted")
 	f.BoolVar(&o.events, "events", false, "stream the log events the server publishes for the jail instead of reading files")
-	f.IntVar(&o.count, "count", 0, "with --events: stop after this many events")
 	f.StringVar(&o.sinceID, "since-id", "", "with --events: resume after this event id")
 	return cmd, &o
 }
@@ -135,8 +136,8 @@ func (a *app) listLogs(ctx context.Context, jail string) error {
 // afterwards: every poll continues at the offset of the previous reply, and a
 // file that was rotated is read from its beginning again.
 func (a *app) readLog(ctx context.Context, jail, file string, o logOpts) error {
-	if o.tail < 1 || o.tail > api.MaxLogTail {
-		return usagef("--tail takes between 1 and %d lines", api.MaxLogTail)
+	if o.limit < 1 || o.limit > api.MaxLogLimit {
+		return usagef("--limit takes between 1 and %d lines", api.MaxLogLimit)
 	}
 	if len(o.grep) > api.MaxLogGrep {
 		return usagef("--grep takes at most %d bytes", api.MaxLogGrep)
@@ -148,7 +149,7 @@ func (a *app) readLog(ctx context.Context, jail, file string, o logOpts) error {
 	if err != nil {
 		return err
 	}
-	q := api.JailLogQuery{Tail: o.tail, Since: o.since, Grep: o.grep}
+	q := api.JailLogQuery{Limit: o.limit, Since: o.since, Grep: o.grep}
 	for {
 		r, err := c.Jails().Log(ctx, jail, file, q)
 		if err != nil {
@@ -167,8 +168,8 @@ func (a *app) readLog(ctx context.Context, jail, file string, o logOpts) error {
 			}
 		default:
 			// the default window cut the file: say so once, where it does not reach a pipe
-			if q.Offset == 0 && r.Truncated && !o.follow && o.tail == api.DefaultLogTail && len(r.Lines) == o.tail {
-				fprintln(a.env.Stderr, "jailops: showing the last "+strconv.Itoa(len(r.Lines))+" lines (--tail chooses how many, --since and --grep what)")
+			if q.Offset == 0 && r.Truncated && !o.follow && o.limit == api.DefaultLogLimit && len(r.Lines) == o.limit {
+				fprintln(a.env.Stderr, "jailops: showing the last "+strconv.Itoa(len(r.Lines))+" lines (--limit chooses how many, --since and --grep what)")
 			}
 			for _, l := range r.Lines {
 				fprintln(a.env.Stdout, terminalSafe(l.Text))
@@ -178,8 +179,8 @@ func (a *app) readLog(ctx context.Context, jail, file string, o logOpts) error {
 			return nil
 		}
 		// continue where this reply ended, and keep every line appended since (the
-		// server's largest window) instead of the last --tail of them
-		q.Offset, q.Tail = r.NextOffset, api.MaxLogTail
+		// server's largest window) instead of the last --limit of them
+		q.Offset, q.Limit = r.NextOffset, api.MaxLogLimit
 		select {
 		case <-ctx.Done():
 			return nil

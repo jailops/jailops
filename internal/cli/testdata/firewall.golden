@@ -248,8 +248,13 @@ $ jailops firewall validate -f <dir>/bad.yaml
 [exit 2]
 
 $ jailops firewall validate -f <dir>/bad.yaml -o json
-! usage: cannot use string into AddressSetSpec.addresses.0 of type api.AddressEntry
-! hint: run 'jailops firewall validate --help' for usage
+! {
+!   "error": {
+!     "code": "usage",
+!     "message": "cannot use string into AddressSetSpec.addresses.0 of type api.AddressEntry",
+!     "hint": "run 'jailops firewall validate --help' for usage"
+!   }
+! }
 [exit 2]
 
 $ jailops firewall validate

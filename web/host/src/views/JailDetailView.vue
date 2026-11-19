@@ -15,11 +15,12 @@ import JailLabels from '@/components/JailLabels.vue'
 import { useTabQuery } from '@jailops/shared/composables/tabs'
 import TabBar from '@jailops/shared/components/TabBar.vue'
 import TimeStamp from '@jailops/shared/components/TimeStamp.vue'
-import { codeText } from '@jailops/shared/lib/describe'
+import { codeText, conditionProblem } from '@jailops/shared/lib/describe'
 import UnlockDialog from '@/components/UnlockDialog.vue'
 import AttachVolumeDialog from '@/components/AttachVolumeDialog.vue'
 import LockChip from '@/components/LockChip.vue'
 import { runOp } from '@jailops/shared/composables/ops'
+import JailBasePackages from '@/components/JailBasePackages.vue'
 import { bytes, sentence, snapshotLabel } from '@jailops/shared/lib/format'
 import StatePill from '@/components/StatePill.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
@@ -91,7 +92,7 @@ const dnsLines = computed(() => {
 })
 const jail = computed<Jail | undefined>(() => l.data.value?.jail)
 const snaps = computed(() => [...(l.data.value?.snaps ?? [])].sort((a, b) => (b.metadata.created_at ?? '').localeCompare(a.metadata.created_at ?? '')))
-const maxWritten = computed(() => Math.max(1, ...snaps.value.map((x) => x.status.written ?? 0)))
+const maxWritten = computed(() => Math.max(1, ...snaps.value.map((x) => x.status.written_bytes ?? 0)))
 
 type Tab = 'overview' | 'config' | 'devices' | 'updates' | 'logs' | 'reach' | 'changes' | 'access' | 'files' | 'console'
 const tabList = computed(() => ([
@@ -226,10 +227,10 @@ const rows = computed(() => {
   const live = j.status.addresses ?? []
   const addrDiff = j.status.power === 'running' && fixed.some((a) => !live.some((x) => x.split('/')[0] === a.split('/')[0]))
   const pinned = j.spec.image.includes('#')
-  const imgDiff = pinned && !!j.status.generation && !j.spec.image.endsWith(j.status.generation.replace(/^.*#/, '#')) && j.spec.image !== j.status.generation
+  const imgDiff = pinned && !!j.status.image_generation && !j.spec.image.endsWith(j.status.image_generation.replace(/^.*#/, '#')) && j.spec.image !== j.status.image_generation
   const wantRun = j.spec.boot?.autostart ? 'running (autostart)' : '-'
   return [
-    { field: s.jail.image, spec: j.spec.image, status: j.status.generation ? j.status.generation + (j.status.freebsd_version ? ` (${j.status.freebsd_version})` : '') : '-', diff: imgDiff },
+    { field: s.jail.image, spec: j.spec.image, status: j.status.image_generation ? j.status.image_generation + (j.status.freebsd_version ? ` (${j.status.freebsd_version})` : '') : '-', diff: imgDiff },
     { field: s.jail.addresses, spec: specAddr.map(shortAddr).join(', ') || '-', status: live.map(shortAddr).join(', ') || s.jail.notRunning, diff: addrDiff },
     { field: s.jail.power, spec: wantRun, status: j.status.power, diff: !!j.spec.boot?.autostart && j.status.power !== 'running' },
   ]
@@ -237,7 +238,7 @@ const rows = computed(() => {
 const attentionItems = computed(() => {
   const j = jail.value
   if (!j) return []
-  return (j.status.conditions ?? []).filter((c) => c.status === 'False' && c.reason !== 'ApplyFailed')
+  return (j.status.conditions ?? []).filter((c) => conditionProblem(c) && c.status === 'False' && c.reason !== 'ApplyFailed')
 })
 </script>
 
@@ -314,7 +315,7 @@ const attentionItems = computed(() => {
                 </tr>
                 <tr><th scope="row">{{ s.jail.layout }}</th><td :data-label="s.jail.spec">{{ jail.spec.layout || (jail.spec.os === 'linux' ? 'thick' : 'thin') }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr><th scope="row">{{ s.jail.hostname }}</th><td class="mono" :data-label="s.jail.spec">{{ jail.spec.hostname || jail.metadata.name }}</td><td class="faint" :data-label="s.jail.status">-</td></tr>
-                <tr><th scope="row">{{ s.jail.update }}</th><td :data-label="s.jail.spec">{{ jail.spec.update?.strategy || 'manual' }}<span v-if="jail.spec.update?.window" class="faint"> · {{ jail.spec.update.window }}</span></td><td class="faint" :data-label="s.jail.status">-</td></tr>
+                <tr><th scope="row">{{ s.jail.update }}</th><td :data-label="s.jail.spec">{{ jail.spec.update?.mode || 'manual' }}<span v-if="jail.spec.update?.schedule" class="faint"> · {{ jail.spec.update.schedule }}</span></td><td class="faint" :data-label="s.jail.status">-</td></tr>
                 <tr>
                   <th scope="row">{{ s.jail.resources }}</th>
                   <td class="mono" :data-label="s.jail.spec">{{ [jail.spec.resources?.cpu ? `cpu ${jail.spec.resources.cpu}` : '', jail.spec.resources?.memory ? `mem ${jail.spec.resources.memory}` : '', jail.spec.resources?.disk ? `disk ${jail.spec.resources.disk}` : '', jail.spec.resources?.pids ? `pids ${jail.spec.resources.pids}` : ''].filter(Boolean).join(' · ') || '-' }}</td>
@@ -330,10 +331,11 @@ const attentionItems = computed(() => {
               <ul class="plain"><li v-for="d in jail.status.drift" :key="d" class="mono">{{ d }}</li></ul>
             </Callout>
             <p v-else class="muted">{{ s.jail.driftNone }}</p>
+            <JailBasePackages :jail="jail" @done="l.reload" />
             <template v-if="jail.status.conditions?.length">
               <h3 style="margin-top: 12px">{{ s.jail.conditions }}</h3>
               <ul class="plain">
-                <li v-for="c in jail.status.conditions" :key="c.type"><span class="pill" :class="c.status === 'True' ? 'ok' : c.status === 'False' ? 'danger' : ''">{{ c.reason && c.status === 'False' ? codeText(c.reason) : sentence(c.type) }}</span> <span class="muted">{{ c.message }}</span></li>
+                <li v-for="c in jail.status.conditions" :key="c.type"><span class="pill" :class="c.status === 'True' ? 'ok' : conditionProblem(c) ? 'danger' : ''">{{ c.reason && c.status === 'False' ? codeText(c.reason) : sentence(c.type) }}</span> <span class="muted">{{ c.message }}</span></li>
               </ul>
             </template>
           </div>
@@ -357,8 +359,8 @@ const attentionItems = computed(() => {
               </div>
               <div class="tl-written" :title="s.jail.writtenHint">
                 <span class="faint">{{ s.jail.written }}</span>
-                <span class="mono num" data-test="written">{{ bytes(x.status.written ?? 0) }}</span>
-                <div class="meter" aria-hidden="true"><span :style="{ width: ((x.status.written ?? 0) / maxWritten) * 100 + '%' }"></span></div>
+                <span class="mono num" data-test="written">{{ bytes(x.status.written_bytes ?? 0) }}</span>
+                <div class="meter" aria-hidden="true"><span :style="{ width: ((x.status.written_bytes ?? 0) / maxWritten) * 100 + '%' }"></span></div>
               </div>
               <button class="btn btn-sm" type="button" @click="openRollback(x.metadata.name)"><Icon name="undo" />{{ s.jail.rollback }}</button>
             </li>

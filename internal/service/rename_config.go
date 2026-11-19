@@ -211,8 +211,8 @@ func (s *Service) RenameNetwork(ctx context.Context, name string, o RenameOption
 	return s.runRename(ctx, j, o.DryRun)
 }
 
-// nicNetworkKey reports whether a profile key holds the network of an interface: nic.<device>,
-// nic.<device>.network, or the same in the older network. spelling.
+// nicNetworkKey reports whether a profile key holds the network of an interface: network.<name>,
+// network.<name>.network, or the same in the older network. spelling.
 func nicNetworkKey(k string) bool {
 	if rest, ok := strings.CutPrefix(k, "network."); ok {
 		k = "nic." + rest
@@ -487,7 +487,7 @@ func (s *Service) RenameAddressSet(ctx context.Context, name string, o RenameOpt
 		}
 		for _, pol := range pols {
 			if strings.Contains(pol.Spec.Raw, validate.SetTable(name)) {
-				return nil, api.Errorf(api.CodeConflict, "the raw PF fragment of firewall policy %q mentions the table of address set %q", pol.Meta.Name, name).
+				return nil, api.Errorf(api.CodePreconditionFailed, "the raw PF fragment of firewall policy %q mentions the table of address set %q", pol.Meta.Name, name).
 					WithHint("a raw fragment is not rewritten: change it to the new table name <" + validate.SetTable(to) + "> after the rename, or remove it first")
 			}
 			spec := pol.Spec
@@ -572,7 +572,7 @@ func (s *Service) RenamePolicy(ctx context.Context, name string, o RenameOptions
 		if hp, err := s.profKind.p(api.HostProfileProject).list(); err == nil {
 			for _, x := range hp {
 				if slices.Contains(configList(x.Spec.Config["firewall.policies"]), name) {
-					return nil, api.Errorf(api.CodeConflict, "host profile %q names firewall policy %q for the jails of every project", x.Meta.Name, name).
+					return nil, api.Errorf(api.CodePreconditionFailed, "host profile %q names firewall policy %q for the jails of every project", x.Meta.Name, name).
 						WithHint("a global administrator changes the host profile; then rename the policy")
 				}
 			}

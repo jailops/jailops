@@ -186,7 +186,7 @@ func (s *Service) UnlockVolume(ctx context.Context, name string, req api.VolumeU
 		return api.Operation{}, err
 	}
 	op, err := s.Submit(ctx, OpSpec{
-		Description: "Unlock volume " + name, Locks: volumeLocks(proj, name, jails), Project: proj,
+		Action: api.OpVolumeUnlock, Description: "Unlock volume " + name, Locks: volumeLocks(proj, name, jails), Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer wipe(pass)
@@ -239,7 +239,7 @@ func (s *Service) LockVolume(ctx context.Context, name string) (api.Operation, e
 	}
 	proj := p.Meta.Name
 	return s.Submit(ctx, OpSpec{
-		Description: "Lock volume " + name, Locks: volumeLocks(proj, name, jails), Project: proj,
+		Action: api.OpVolumeLock, Description: "Lock volume " + name, Locks: volumeLocks(proj, name, jails), Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			for _, k := range jails {
@@ -288,7 +288,7 @@ func (s *Service) ChangeVolumePassphrase(ctx context.Context, name string, req a
 		return api.Operation{}, err
 	}
 	op, err := s.Submit(ctx, OpSpec{
-		Description: "Change the passphrase of volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
+		Action: api.OpVolumePassphrase, Description: "Change the passphrase of volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer wipe(oldPass)

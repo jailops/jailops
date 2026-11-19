@@ -55,11 +55,11 @@ func (a *app) emitRecords(recs []api.UpdateRecord) error {
 			if r.Kind == api.UpdateKindPackages {
 				change = fmt.Sprintf("%d packages", len(r.Packages))
 			}
-			res := r.Result
+			res := string(r.Result)
 			if r.RootRolledBack {
 				res += " (root rolled back)"
 			}
-			rows = append(rows, []string{r.ID, r.Jail, r.Kind, res, change, dash(r.Snapshot), age(a.env.Now(), r.Started)})
+			rows = append(rows, []string{r.ID, r.Jail, string(r.Kind), res, change, dash(r.Snapshot), age(a.env.Now(), r.StartedAt)})
 		}
 		return []string{"ID", "JAIL", "KIND", "RESULT", "CHANGE", "SNAPSHOT", "AGE"}, rows
 	}, func() []string {
@@ -225,7 +225,7 @@ jailops update apply --all -y --packages`,
 			}
 			bad := 0
 			for _, r := range recs {
-				if r.Result != api.UpdateOK {
+				if r.Result != api.UpdateSuccess {
 					bad++
 				}
 			}
@@ -237,12 +237,12 @@ jailops update apply --all -y --packages`,
 	}
 	apply.Flags().BoolVar(&applyAll, "all", false, "apply to every jail of the project that has updates")
 	apply.Flags().BoolVar(&pkgs, "packages", false, "only package updates")
-	apply.Flags().BoolVar(&osOnly, "images", false, "only image generation updates")
+	apply.Flags().BoolVar(&osOnly, "os", false, "only operating system (image generation) updates")
 
 	history := &cobra.Command{
 		Use:               "history JAIL",
 		Short:             "Show the update history of a jail",
-		Long:              "Show the updates applied to a jail, newest first: result, what changed and the snapshot taken before. Rolling a package update back is a data rollback to that snapshot ('jail rollback --data --snapshot').",
+		Long:              "Show the updates applied to a jail, newest first: result, what changed and the snapshot taken before. Rolling a package update back is a data rollback to that snapshot ('jail rollback --scope data --snapshot').",
 		Example:           "jailops update history web",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, d),

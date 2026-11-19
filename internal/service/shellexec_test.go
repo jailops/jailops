@@ -49,7 +49,7 @@ func TestASessionWithoutBashEntersWhileTheShellIsSetUp(t *testing.T) {
 			cond = &j.Status.Conditions[i]
 		}
 	}
-	if cond == nil || cond.Reason != api.ShellInstalling || api.ShellInstallingStep(cond.Message) == "" || cond.Since.IsZero() {
+	if cond == nil || cond.Reason != api.ShellInstalling || j.Status.ShellSetup == nil || j.Status.ShellSetup.Step == "" || cond.Since.IsZero() {
 		t.Fatalf("the condition does not name the step and the time: %+v", cond)
 	}
 

@@ -19,7 +19,7 @@ type Usage struct {
 	Processes   int   // maxproc: number of processes
 	CPUSeconds  int64 // cputime: CPU time in seconds, all cores added up
 	MemoryBytes int64 // memoryuse: resident set size in bytes
-	SwapBytes   int64 // swapuse: the anonymous memory the jail has reserved, the counter limits.memory is enforced on
+	SwapBytes   int64 // swapuse: the anonymous memory the jail has reserved, the counter resources.memory is enforced on
 	// Counters holds every counter of the output by its rctl(8) name.
 	Counters map[string]int64
 }

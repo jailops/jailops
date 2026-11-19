@@ -16,18 +16,18 @@ import (
 // keeps a rule by the jail's name after the jail is gone, and a second start would add the rules again, so they are
 // removed when the jail stops and before they are added.
 //
-//   - limits.memory is swapuse: the anonymous memory the jail may reserve. An allocation beyond it fails and nothing
+//   - resources.memory is swapuse: the anonymous memory the jail may reserve. An allocation beyond it fails and nothing
 //     is killed. vmemoryuse counts every mapping, shared libraries and sparse arenas included (an idle PostgreSQL
 //     maps 1.8 GB of address space for 0.3 GB of memory), and memoryuse does not refuse an allocation: deny on it is
 //     not enforced, and sigkill kills the process.
-//   - limits.pids is maxproc: fork fails when the jail has that many processes.
-//   - limits.cpu is pcpu in percent of one core: a jail over its share is slowed down, not killed.
+//   - resources.pids is maxproc: fork fails when the jail has that many processes.
+//   - resources.cpu is pcpu in percent of one core: a jail over its share is slowed down, not killed.
 func rctlRules(jail string, r api.Resources) ([]string, error) {
 	var out []string
 	if r.Memory != "" {
 		b, err := validate.ParseSize(r.Memory)
 		if err != nil {
-			return nil, fmt.Errorf("limits.memory %q: %w", r.Memory, err)
+			return nil, fmt.Errorf("resources.memory %q: %w", r.Memory, err)
 		}
 		if b > 0 {
 			out = append(out, fmt.Sprintf("jail:%s:swapuse:deny=%d", jail, b))
@@ -92,14 +92,14 @@ func (l *Local) dropLimits(ctx context.Context, jn JailName) error {
 	return err
 }
 
-// applyCPUSet pins a jail that has just started to the CPUs of limits.cpuset (cpuset(1) -l LIST -j JID). The set of
+// applyCPUSet pins a jail that has just started to the CPUs of resources.cpuset (cpuset(1) -l LIST -j JID). The set of
 // the jail is the one its processes share, so the processes the jail has started already move with it. A CPU the
 // host does not have stops the start: a limit that is not enforced would be a promise nobody keeps, and the message
 // says what the host has.
 func (l *Local) applyCPUSet(ctx context.Context, jn JailName, set string) error {
 	cpus, err := api.ParseCPUSet(set)
 	if err != nil {
-		return fmt.Errorf("limits.cpuset %q: %w", set, err)
+		return fmt.Errorf("resources.cpuset %q: %w", set, err)
 	}
 	res, err := l.d.Runner.Run(ctx, run.Cmd{Name: "sysctl", Args: []string{"-n", "hw.ncpu"}, Timeout: 5 * time.Second})
 	if err != nil {
@@ -110,7 +110,7 @@ func (l *Local) applyCPUSet(ctx context.Context, jn JailName, set string) error 
 		return fmt.Errorf("sysctl hw.ncpu answered %q", strings.TrimSpace(string(res.Stdout)))
 	}
 	if top := cpus[len(cpus)-1]; top >= n {
-		return api.Errorf(api.CodeInvalid, "limits.cpuset %s names CPU %d, and this host has %d CPUs (0-%d)", set, top, n, n-1)
+		return api.Errorf(api.CodeInvalid, "resources.cpuset %s names CPU %d, and this host has %d CPUs (0-%d)", set, top, n, n-1)
 	}
 	res, err = l.d.Runner.Run(ctx, run.Cmd{Name: "jls", Args: []string{"-j", jn.Internal(), "jid"}, Timeout: 10 * time.Second})
 	if err != nil {

@@ -3,7 +3,7 @@
 import type { JailLogFile, JailLogRead, LogsRead, LogSource } from '@jailops/shared/api/types'
 
 /** The query of GET /jails/{n}/logs/{file}; defaults are left out, as the server documents them. */
-export interface LogQuery { tail?: number; since?: string; grep?: string; offset?: number }
+export interface LogQuery { limit?: number; since?: string; grep?: string; offset?: number }
 
 export const DEFAULT_TAIL = 200
 export const MAX_TAIL = 5000
@@ -15,7 +15,7 @@ export const FOLLOW_MS = 1000
 
 export function logQuery(q: LogQuery): string {
   const p = new URLSearchParams()
-  if (q.tail && q.tail !== DEFAULT_TAIL) p.set('tail', String(q.tail))
+  if (q.limit && q.limit !== DEFAULT_TAIL) p.set('limit', String(q.limit))
   if (q.since) p.set('since', q.since)
   if (q.grep) p.set('grep', q.grep)
   if (q.offset && q.offset > 0) p.set('offset', String(q.offset))
@@ -161,7 +161,7 @@ export function unifiedQuery(f: UnifiedFilter, cursor?: Record<string, number>, 
   if (f.app) p.set('app', f.app)
   if (f.appLogs) p.set('app_logs', 'true')
   if (f.file && f.file !== DEFAULT_FILE) p.set('file', f.file)
-  if (tail && tail !== DEFAULT_TAIL) p.set('tail', String(tail))
+  if (tail && tail !== DEFAULT_TAIL) p.set('limit', String(tail))
   if (f.since) p.set('since', f.since)
   if (f.grep) p.set('grep', f.grep)
   if (cursor && Object.keys(cursor).length) p.set('cursor', JSON.stringify(cursor))

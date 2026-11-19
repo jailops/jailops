@@ -61,6 +61,8 @@ binaries from the GitHub releases page. The client package ships bash, zsh and f
 | Backups and restores | [docs/backup-restore.md](docs/backup-restore.md) |
 | Upgrading JailOps and its jails | [docs/upgrade.md](docs/upgrade.md) |
 | Which FreeBSD releases are supported | [docs/supported-versions.md](docs/supported-versions.md) |
+| What 1.0 promises and what it does not | [docs/1.0.md](docs/1.0.md) |
+| Which releases work together, and the rules for 1.x | [docs/compatibility.md](docs/compatibility.md) |
 | When something is wrong | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | Alpine and Debian jails | [docs/linux-jails.md](docs/linux-jails.md) |
 | Fleets from git | [docs/fleet-sync.md](docs/fleet-sync.md) |

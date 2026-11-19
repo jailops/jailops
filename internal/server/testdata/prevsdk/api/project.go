@@ -82,8 +82,8 @@ type ProjectQuotas struct {
 type ProjectStatus struct {
 	Jails      int         `json:"jails"`
 	CPU        int         `json:"cpu"`
-	MemoryUsed int64       `json:"memory_used"`
-	DiskUsed   int64       `json:"disk_used"`
+	MemoryUsed int64       `json:"memory_used_bytes"`
+	DiskUsed   int64       `json:"disk_used_bytes"`
 	Addresses  int         `json:"addresses"`
 	Conditions []Condition `json:"conditions,omitempty"`
 }
@@ -114,9 +114,9 @@ type StorageSpec struct {
 type StorageStatus struct {
 	Pool          string      `json:"pool,omitempty"`
 	Health        string      `json:"health,omitempty"`
-	Size          int64       `json:"size,omitempty"`
-	Used          int64       `json:"used,omitempty"`
-	Available     int64       `json:"available,omitempty"`
+	Size          int64       `json:"size_bytes,omitempty"`
+	Used          int64       `json:"used_bytes,omitempty"`
+	Available     int64       `json:"available_bytes,omitempty"`
 	Fragmentation int         `json:"fragmentation,omitempty"`
 	Conditions    []Condition `json:"conditions,omitempty"`
 	// GrantedTo are the projects the storage is granted to, as far as the caller may see them: every project for a

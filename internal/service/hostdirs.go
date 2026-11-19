@@ -462,7 +462,7 @@ func (s *Service) createHostDirVolume(ctx context.Context, p project, in api.Vol
 	}
 	meta := api.ObjectMeta{Name: name, Project: proj, Labels: in.Metadata.Labels, ManagedBy: in.Metadata.ManagedBy}
 	return s.Submit(ctx, OpSpec{
-		Description: "Create volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
+		Action: api.OpVolumeCreate, Description: "Create volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			ok, detail, err := s.probeHostDir(ctx, spec)

@@ -58,7 +58,7 @@ func TestAPIAnswersAreNotCached(t *testing.T) {
 		{"GET", "/api/v1/users", ""},
 		{"POST", "/api/v1/users", `{"metadata":{"name":"newuser"},"spec":{"permission":"readonly","global":true}}`},
 		{"POST", "/api/v1/wireguard/none/peers", `{"name":"p"}`},
-		{"POST", "/api/v1/jails/none/access?project=" + dtest.SeedProject, `{"source":"192.0.2.1"}`},
+		{"POST", "/api/v1/jails/none/access/allow?project=" + dtest.SeedProject, `{"source":"192.0.2.1"}`},
 		{"GET", "/api/v1", ""},
 		{"GET", "/api/v1/no-such-route", ""},
 	} {

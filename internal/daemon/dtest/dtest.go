@@ -204,7 +204,7 @@ func (e *Env) SysctlHistory(name string) []string {
 func (e *Env) SysctlValue(name string) string { v, _ := e.sysctl(name); return v }
 
 // SetRepoVersion sets the version of every package the fake repository
-// serves (default 15.0p1): a build from a parent with the same version
+// serves (default 15.1p1): a build from a parent with the same version
 // changes no package, a newer one upgrades them all.
 func (e *Env) SetRepoVersion(v string) {
 	e.sysmu.Lock()
@@ -216,7 +216,7 @@ func (e *Env) repoVersion() string {
 	e.sysmu.Lock()
 	defer e.sysmu.Unlock()
 	if e.repoVer == "" {
-		return "15.0p1"
+		return "15.1p1"
 	}
 	return e.repoVer
 }
@@ -732,7 +732,7 @@ func WebJailOn(name, network string) api.Jail {
 // WebJail is a jail spec on the seeded image and network.
 func WebJail(name string) api.Jail {
 	return api.Jail{Metadata: api.ObjectMeta{Name: name}, Spec: api.JailSpec{
-		Image: "fb", Storage: "default", Update: api.UpdatePolicy{Strategy: api.UpdateRebase, Healthcheck: "/bin/true"},
+		Image: "fb", Storage: "default", Update: api.UpdatePolicy{Healthcheck: "/bin/true"},
 		Network: []api.NetworkAttach{{Network: "lan", IPv4: "auto"}}}}
 }
 

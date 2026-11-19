@@ -204,7 +204,7 @@ func (s *Server) handleConsoleOpen(c *rc) error {
 		defer func() { supervise.Report(nil, "console-session", recover()) }()
 		s.runConsole(cs)
 	}()
-	c.sync(200, map[string]string{"id": cs.id}, 0)
+	c.sync(200, map[string]string{"id": cs.id}, "")
 	return nil
 }
 
@@ -387,7 +387,7 @@ func (s *Server) handleConsoleInput(c *rc) error {
 	if _, err := io.WriteString(cs.st.Session.Stdin(), in.Data); err != nil {
 		return api.Errorf(api.CodeBusy, "the console session has ended")
 	}
-	c.sync(200, struct{}{}, 0)
+	c.sync(200, struct{}{}, "")
 	return nil
 }
 
@@ -409,7 +409,7 @@ func (s *Server) handleConsoleResize(c *rc) error {
 	}
 	cs.touch()
 	_ = cs.st.Session.Resize(in.Rows, in.Cols)
-	c.sync(200, struct{}{}, 0)
+	c.sync(200, struct{}{}, "")
 	return nil
 }
 
@@ -422,6 +422,6 @@ func (s *Server) handleConsoleClose(c *rc) error {
 	_ = cs.st.Session.Signal(9)
 	_ = cs.st.Session.Stdin().Close() // and the end of its input, for a command that ignores the signal
 	s.svc.Audit(context.WithoutCancel(c.r.Context()), storeEntry(c, "EXEC", cs.project, "console closed by the client"))
-	c.sync(200, struct{}{}, 0)
+	c.sync(200, struct{}{}, "")
 	return nil
 }

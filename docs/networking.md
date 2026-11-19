@@ -14,9 +14,9 @@ configure on the host besides forwarding.
 `network create` makes a network of the host. A project may use it only after `jailops network grant NAME --project
 PROJECT`, also when a global administrator creates the jail, and a network is granted to one project. `storage create`
 and `storage grant` work the same way. `jailops network list` shows the networks granted to the selected project;
-`jailops network list --all` (a global administrator) shows every network of the host, with GRANTED (does the selected
+`jailops network list --all-projects` (a global administrator) shows every network of the host, with GRANTED (does the selected
 project hold it) and PROJECTS (the projects that do), and `jailops network show NAME` names them under `Granted to`.
-`storage list --all` and `storage show` do the same for storage. The console has the same switch, "All networks" and
+`storage list --all-projects` and `storage show` do the same for storage. The console has the same switch, "All networks" and
 "All storage", on its pages.
 
 ## What you get
@@ -34,6 +34,32 @@ project hold it) and PROJECTS (the projects that do), and `jailops network show 
   the firewall of a jail closes what comes in from them unless an `allow in` rule of that jail with a source admits them.
 - **`ifconfig` says what each interface is.** The host end of a jail's link says
   `jailops jail=shop/site net=office (host side)`; inside the jail the other end says `(jail side)`.
+
+## Networks belong to a host
+
+A network is made on one host and describes that host's side of the world: its uplink, its ranges and whether it answers for
+the addresses on the segment. Some rules follow from that and hold for the whole of 1.x:
+
+- **A jail's attachment is a logical link to a network.** The name of an interface is a binding of one host, and the PF
+  anchors, the routes and the link-local addresses are derived from the stored network and jail, never stored as the truth.
+- **The same network name on two hosts is two networks.** A definition that the hub or a fleet repository applies to both
+  gives each host its own object (a `fleet` object is managed with one definition and is not shared state, see
+  [design.md](design.md#71-authority)).
+- **Overlap is checked on one host.** `jailops network create` refuses a subnet that overlaps another network of the host,
+  in any project, and the fleet check does the same per host. Nothing compares two hosts. A prefix that two hosts advertise
+  into the same routing domain, an NDP proxy for the same addresses on the same uplink segment and the same public address
+  and port on a shared listener each need **one owner**; JailOps does not enforce that today and has no resource for it. A
+  routing domain with one writer would be that resource; it is not built, and the person who runs the hosts keeps the
+  prefixes apart.
+
+### Moving a jail to another host (planned, not built)
+
+A cold move is: stop the jail, copy or receive its datasets, validate on the other host, an explicit traffic switch, and keep
+the old copy until the new one is confirmed. Today the same result takes `jail export` and `jail import`, with the checks by
+hand. The other host may have another uplink, subnet, MTU, public address, volume or WireGuard interface, so the address may stay
+only when routing allows it; a renumber needs an explicit mapping of the address, the DNS names and the exposure
+(`jailops expose`), and the move shows that mapping before it starts. Unattended failover is not offered: it needs fencing of
+the execution, of the routing and of the storage, and until all three exist a person promotes a copy ([roadmap.md](roadmap.md)).
 
 ## Isolation between jails
 
@@ -129,7 +155,7 @@ JailOps loads, not from the policies you typed:
 
     jailops list                        # the EXPOSED column: what the Internet reaches
     jailops firewall show web           # every kind of source, the rule that gives the reach or stops it
-    jailops firewall show web --all     # the rules in the order pf decides (--pf adds the pf text of each)
+    jailops firewall show web --lines   # the rules in the order pf decides (--pf adds the pf text of each)
     jailops firewall exposed            # everything the Internet reaches, across the jails
     jailops firewall test --from internet --to jail:web --port 443
 
@@ -148,13 +174,13 @@ anchor line. The console shows the same on the Firewall tab of a jail and on the
 
 ## Limits
 
-A device can be limited in each direction with `nic.eth0.egress` (what the jail sends) and `nic.eth0.ingress` (what it
+A device can be limited in each direction with `network.eth0.egress` (what the jail sends) and `network.eth0.ingress` (what it
 receives), for example `10M` for 10 Mbit/s. Limits survive a restart of the jail and apply to everything the jail sends or
 receives, whoever started the connection. The dummynet pipes numbered 40000 to 59999 belong to JailOps: it numbers them once,
 stores the numbers, and removes a pipe of that range that no jail's loaded anchor names; use other numbers for pipes of your own.
 
-    jailops config set site nic.eth0.egress 20M --project shop
-    jailops config set site nic.eth0.ingress 50M --project shop
+    jailops config set site network.eth0.egress 20M --project shop
+    jailops config set site network.eth0.ingress 50M --project shop
 
 ## What the host needs
 

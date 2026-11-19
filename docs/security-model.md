@@ -155,7 +155,7 @@ everyone). Wrong, expired and missing tokens get the same answer and count towar
 logins. A host reachable from the network before its setup therefore cannot be taken over without what is printed on its
 console. Once any global administrator exists (a user, or an API token or client certificate that has not expired),
 every setup route answers `not_found`, a new token cannot be issued, and a token issued before is removed. The last
-global administrator cannot be deleted or demoted (`conflict`) while no other one exists, because the setup would open
+global administrator cannot be deleted or demoted (`precondition_failed`) while no other one exists, because the setup would open
 again and the next start of `jailopsd` would print a token on the console: make the next administrator first. Root on
 the socket stays the recovery access in every case (`sudo jailops user create NAME --admin`, `set-password`,
 `set-role`); it is not an identity of the database and does not count as one.
@@ -279,7 +279,7 @@ permission table, one scope rule and one audit trail, whether the request arrive
   and `set-role` recover a lost password or a wrong role. There is no separate reset mechanism.
 - **Every other local user is anonymous**, exactly like an unauthenticated remote client. It reaches `GET /api/v1`,
   `GET /healthz`, `GET /readyz`, the login (`POST /api/v1/auth/login`), trust-token redemption (`POST /api/v1/trust/clients`),
-  `POST /api/v1/cluster/join` (answers 501), the first-run setup (`GET` and `POST /api/v1/setup`, which need the setup
+  the first-run setup (`GET` and `POST /api/v1/setup`, which need the setup
   token and answer `not_found` once an administrator exists) and the static web console, and nothing else. It can authenticate over the socket
   with an API token, or with a session cookie from a password login, like any remote client. A test runs every route as an
   anonymous remote client and as an anonymous local one and requires the same answer.
@@ -412,6 +412,28 @@ a directory of its own (root's, mode 0700) and runs `pkg` on that copy, which it
 To build an image from a repository of your own, list its host in `fetch-host` and put its key directory below
 `pkg-keys-dir` yourself, as root. An app installation uses the host's own repository configuration (root's files), not
 one the daemon writes.
+
+## The package records of a thin jail
+
+After a root swap the jail's own package database holds the base records of the old generation. At every start of a thin
+jail the daemon brings the base records in step with the generation through one helper command, `pkg-records`, which
+runs `pkg` against the jail's tree in four fixed forms and no other: `-r TREE info -a -q`, `-r TREE info --raw --raw-format
+ucl NAME`, `-r TREE unregister -f -y NAME...` (up to 64 names) and `-r TREE register -t -M MANIFEST`. A name is a package name,
+never a glob, a path or an option. The tree is a path below a storage root, and the manifest a `.ucl` file in the daemon's
+state or work area.
+
+The helper opens the jail's package database as root, so it works only in a tree no jail runs in (the rule of `pkg -r`, above)
+and refuses a tree where `var`, `var/db`, `var/db/pkg` or the database is a symbolic link, which a jail that ran could have
+left to point at the host's own package database. The start makes the pass before the jail starts; the repair command
+refuses a running jail.
+
+`unregister` deletes records only and `register -t` records a manifest without looking at files: neither removes or writes a
+file, and neither runs a script (`register -N`, which installs and runs scripts, is refused). A record can name scripts that
+`pkg` runs as root when the package is removed or upgraded later, so the manifest is not taken from the daemon: the helper
+finds the image generation of the jail's root through the origin of its dataset, asks that generation's own package
+database for the manifest of the name, and refuses a file that differs by one byte. `pkg` then reads a copy the helper made
+(root's, mode 0700, removed afterwards). What the daemon can bring about with this command is therefore a base record that is
+the generation's own, never one it wrote.
 
 ## Package scripts run as root, so never in a root that runs
 

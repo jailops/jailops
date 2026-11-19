@@ -299,7 +299,7 @@ func (s *Service) CreateVolume(ctx context.Context, in api.VolumeCreate) (api.Op
 	}
 	meta := api.ObjectMeta{Name: name, Project: proj, Labels: in.Metadata.Labels, ManagedBy: in.Metadata.ManagedBy}
 	op, err := s.Submit(ctx, OpSpec{
-		Description: "Create volume " + name + fromDirText(in.FromDir), Locks: []string{volumeLock(proj, name)}, Project: proj,
+		Action: api.OpVolumeCreate, Description: "Create volume " + name + fromDirText(in.FromDir), Locks: []string{volumeLock(proj, name)}, Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer wipe(pass)
@@ -483,7 +483,7 @@ func (s *Service) PatchVolume(ctx context.Context, name string, patch map[string
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "volume %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "volume %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.Volume
 	if err := MergePatch(cur, patch, &out); err != nil {
@@ -522,7 +522,7 @@ func (s *Service) DeleteVolume(ctx context.Context, name string, expect int64) (
 		return api.Operation{}, err
 	}
 	if expect != AnyGeneration && expect != o.Meta.Generation {
-		return api.Operation{}, api.Errorf(api.CodeConflict, "volume %q changed: current generation is %d", name, o.Meta.Generation)
+		return api.Operation{}, api.Errorf(api.CodePreconditionFailed, "volume %q changed: current generation is %d", name, o.Meta.Generation)
 	}
 	if err := s.refuseAttached(proj, name, "detach it before it is deleted"); err != nil {
 		return api.Operation{}, err
@@ -535,7 +535,7 @@ func (s *Service) DeleteVolume(ctx context.Context, name string, expect int64) (
 	if o.Spec.IsHostDir() {
 		// there is no dataset: the volume is forgotten and the directory is left as it is
 		return s.Submit(ctx, OpSpec{
-			Description: "Delete volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
+			Action: api.OpVolumeDelete, Description: "Delete volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
 			Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 			Run: func(ctx context.Context, h *OpHandle) (any, error) {
 				if err := s.refuseAttached(proj, name, "detach it before it is deleted"); err != nil {
@@ -550,7 +550,7 @@ func (s *Service) DeleteVolume(ctx context.Context, name string, expect int64) (
 		return api.Operation{}, notFound("storage", o.Spec.Storage)
 	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Delete volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
+		Action: api.OpVolumeDelete, Description: "Delete volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			if err := s.refuseAttached(proj, name, "detach it before it is deleted"); err != nil {
@@ -629,7 +629,7 @@ func (s *Service) CreateVolumeSnapshot(ctx context.Context, name string, req api
 	}
 	proj := p.Meta.Name
 	return s.Submit(ctx, OpSpec{
-		Description: "Snapshot volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
+		Action: api.OpVolumeSnapshot, Description: "Snapshot volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			props := map[string]string{}
@@ -660,7 +660,7 @@ func (s *Service) DeleteVolumeSnapshot(ctx context.Context, name, snap string) (
 		return api.Operation{}, notFound("snapshot", snap)
 	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Delete snapshot " + snap + " of volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
+		Action: api.OpVolumeSnapshotDelete, Description: "Delete snapshot " + snap + " of volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			if err := s.life.DeleteVolumeSnapshot(ctx, st, proj, name, snap); err != nil {
@@ -699,7 +699,7 @@ func (s *Service) RollbackVolume(ctx context.Context, name string, rb api.Volume
 		locks = append(locks, jailLock(k))
 	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Roll volume " + name + " back to " + rb.Snapshot, Locks: locks, Project: proj,
+		Action: api.OpVolumeRollback, Description: "Roll volume " + name + " back to " + rb.Snapshot, Locks: locks, Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			if err := s.refuseRunningUsers(ctx, proj, name, "stop it before the volume is rolled back"); err != nil {
@@ -745,7 +745,7 @@ func (s *Service) checkAttachments(project, key string, vs []api.VolumeAttach) (
 		}
 		for _, u := range s.volumeUses(project, v.Name) {
 			if u.Jail != jail {
-				return nil, api.Errorf(api.CodeConflict, "volume %q is encrypted and attached to jail %q already: an encrypted volume is attached to one jail", v.Name, u.Jail).
+				return nil, api.Errorf(api.CodePreconditionFailed, "volume %q is encrypted and attached to jail %q already: an encrypted volume is attached to one jail", v.Name, u.Jail).
 					WithHint("jailops volume detach " + u.Jail + " " + v.Name)
 			}
 		}
@@ -770,7 +770,7 @@ func (s *Service) checkEncryptedSharing(project, key string, vols []api.VolumeAt
 }
 
 func encryptedSharedErr(volume, jail string) error {
-	return api.Errorf(api.CodeConflict, "volume %q is encrypted and attached to jail %q already: an encrypted volume is attached to one jail", volume, jail).
+	return api.Errorf(api.CodePreconditionFailed, "volume %q is encrypted and attached to jail %q already: an encrypted volume is attached to one jail", volume, jail).
 		WithHint("jailops volume detach " + jail + " " + volume)
 }
 
@@ -921,7 +921,7 @@ func (s *Service) AttachVolume(ctx context.Context, jail string, req api.VolumeA
 		return api.Operation{}, api.Errorf(api.CodeUnsupported, "encrypted volumes are not available on this host")
 	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Attach volume " + req.Volume + " to jail " + jail, Locks: []string{jailLock(key), anchorLock(key), volumeLock(proj, req.Volume)}, Project: proj,
+		Action: api.OpVolumeAttach, Description: "Attach volume " + req.Volume + " to jail " + jail, Locks: []string{jailLock(key), anchorLock(key), volumeLock(proj, req.Volume)}, Project: proj,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + jail}, "volumes": {"/api/v1/volumes/" + req.Volume}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			cur, err := s.jailSnapshot(key)
@@ -969,7 +969,7 @@ func (s *Service) DetachVolume(ctx context.Context, jail, volume string) (api.Op
 		return api.Operation{}, notFound("volume attachment", volume)
 	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Detach volume " + volume + " from jail " + jail, Locks: []string{jailLock(key), anchorLock(key), volumeLock(proj, volume)}, Project: proj,
+		Action: api.OpVolumeDetach, Description: "Detach volume " + volume + " from jail " + jail, Locks: []string{jailLock(key), anchorLock(key), volumeLock(proj, volume)}, Project: proj,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + jail}, "volumes": {"/api/v1/volumes/" + volume}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			cur, err := s.jailSnapshot(key)

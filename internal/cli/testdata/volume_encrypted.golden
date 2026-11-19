@@ -41,7 +41,7 @@ $ jailops volume attach vault2 vault2 /srv/db
 volume/vault2 attached to jail vault2
 
 $ jailops volume attach vault2 vault /srv/other
-! conflict: volume "vault" is encrypted and attached to jail "vault" already: an encrypted volume is attached to one jail
+! precondition_failed: volume "vault" is encrypted and attached to jail "vault" already: an encrypted volume is attached to one jail
 [exit 5]
 
 $ jailops volume list

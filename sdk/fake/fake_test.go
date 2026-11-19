@@ -44,21 +44,23 @@ func TestWireContract(t *testing.T) {
 		t.Fatalf("create: %d %s", w.Code, w.Body)
 	}
 	w, _ = do(t, s, "GET", "/api/v1/firewall/address-sets/office?project=web", "", nil)
-	if w.Header().Get("ETag") != `"1"` {
-		t.Fatalf("etag %q", w.Header().Get("ETag"))
+	tag := w.Header().Get("ETag")
+	uuid, gen, ok := api.ParseETag(tag)
+	if !ok || gen != 1 || uuid == "" {
+		t.Fatalf("etag %q", tag)
 	}
 	body := `{"metadata":{"name":"office"},"spec":{"addresses":[{"address":"10.1.0.0/16"}]}}`
-	w, env = do(t, s, "PUT", "/api/v1/firewall/address-sets/office?project=web", body, map[string]string{"If-Match": `"7"`})
-	if w.Code != 412 || env.Type != api.ResponseError || env.Error.Code != api.CodeConflict {
+	w, env = do(t, s, "PUT", "/api/v1/firewall/address-sets/office?project=web", body, map[string]string{"If-Match": api.ETag(uuid, 7)})
+	if w.Code != 412 || env.Type != api.ResponseError || env.Error.Code != api.CodePreconditionFailed {
 		t.Fatalf("stale put: %d %s", w.Code, w.Body)
 	}
-	w, _ = do(t, s, "PUT", "/api/v1/firewall/address-sets/office?project=web", body, map[string]string{"If-Match": `"1"`})
-	if w.Code != 200 || w.Header().Get("ETag") != `"2"` {
+	w, _ = do(t, s, "PUT", "/api/v1/firewall/address-sets/office?project=web", body, map[string]string{"If-Match": tag})
+	if w.Code != 200 || w.Header().Get("ETag") != api.ETag(uuid, 2) {
 		t.Fatalf("put: %d %s", w.Code, w.Body)
 	}
 	// An identical PUT changes nothing and keeps the generation.
 	w, _ = do(t, s, "PUT", "/api/v1/firewall/address-sets/office?project=web", body, nil)
-	if w.Header().Get("ETag") != `"2"` {
+	if w.Header().Get("ETag") != api.ETag(uuid, 2) {
 		t.Fatalf("no-op put bumped the generation: %s", w.Header().Get("ETag"))
 	}
 	w, env = do(t, s, "GET", "/api/v1/nothing", "", nil)

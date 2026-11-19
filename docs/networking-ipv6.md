@@ -236,7 +236,7 @@ questions it got, answered and dropped, when the last question, answer and annou
 that were asked for or have a running jail, with what happened to the last question of each:
 
     jailops network ndp-proxy status web
-    jailops network ndp-proxy watch web        # each question and answer as it happens; --count N stops after N
+    jailops network ndp-proxy watch web        # each question and answer as it happens; --limit N stops after N
 
 An address with `seen` above zero and `answered` zero is one the router asked for and the proxy did not answer: the
 last drop says why (a rate limit, a refusal of the helper). An address the router never asked for does not appear. `-o json`
@@ -247,9 +247,9 @@ prints the same for scripts. The last 256 events are kept in memory; `status` an
 A device of a jail can have a rate limit in each direction, in bits per second with decimal units (`10M` is 10 Mbit/s,
 `1G` is 1 Gbit/s):
 
-    jailops config set web nic.eth0.egress 10M       # what the jail sends through eth0
-    jailops config set web nic.eth0.ingress 20M      # what the jail receives through eth0
-    jailops config unset web nic.eth0.egress         # no limit
+    jailops config set web network.eth0.egress 10M       # what the jail sends through eth0
+    jailops config set web network.eth0.ingress 20M      # what the jail receives through eth0
+    jailops config unset web network.eth0.egress         # no limit
 
 `egress` limits everything the jail sends through the device, whoever started the connection: an upload, the answers of
 a server in the jail, a transfer to another jail. `ingress` limits everything the jail receives, from the host, from
@@ -316,7 +316,7 @@ stops when its rule goes.
   `deny in` rule is rendered on the uplink first, so it wins at the door as on the jail's link, and a packet that comes
   in on the uplink from a subnet of the jail's own networks or of another project, or that pf's reverse path check
   refuses (`urpf-failed`: an address of a tunnel or of the host's own network from outside), is dropped as forged. Every
-  pass on the uplink limits its states (`limits.states` of the jail, else `jails.max_states` of the host, else 5000), so a flood of connection attempts fills
+  pass on the uplink limits its states (`resources.states` of the jail, else `jails.max_states` of the host, else 5000), so a flood of connection attempts fills
   the rule and not the host's state table.
   An endpoint is one of these, the same words wherever a firewall names a source or a destination:
 

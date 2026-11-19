@@ -109,7 +109,7 @@ func commandAccepted(line string) (string, error) {
 
 // The rollback command the install report prints must be one the CLI accepts.
 func TestAppInstallRollbackCommandIsReal(t *testing.T) {
-	if _, err := commandAccepted("jailops jail rollback web --scope all --snapshot app-installed"); err == nil {
+	if _, err := commandAccepted("jailops jail rollback web --everything --snapshot app-installed"); err == nil {
 		t.Fatal("the checker accepted an unknown flag")
 	}
 	h := newHarness(t)
@@ -129,7 +129,7 @@ func TestAppInstallRollbackCommandIsReal(t *testing.T) {
 	if err != nil || path != "jailops jail rollback" {
 		t.Fatalf("%q: %q %v", m[1], path, err)
 	}
-	if !strings.Contains(m[1], " --all ") || !strings.HasSuffix(m[1], " --snapshot app-installed") {
+	if !strings.Contains(m[1], " --scope all ") || !strings.HasSuffix(m[1], " --snapshot app-installed") {
 		t.Fatalf("the command must restore root and data from the install snapshot: %q", m[1])
 	}
 }

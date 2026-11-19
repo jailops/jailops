@@ -1,6 +1,6 @@
 // The config key editor works from the registry of sdk/api (configKeys in types.gen.ts, generated from
 // api.ConfigKeys), so a key exists in one place. Each key's `path` locates it in the typed spec:
-// `resources.cpu`, `network[<device>].mtu`, `env.<var>`. This module reads, writes and validates by path.
+// `resources.cpu`, `network[<name>].mtu`, `env.<var>`. This module reads, writes and validates by path.
 import { clone } from './clone'
 import { validSize } from '@jailops/shared/lib/names'
 import { configKeys, type ConfigKey, type JailSpec, type Profile } from '@jailops/shared/api/types'
@@ -9,18 +9,17 @@ export type Spec = Record<string, unknown>
 
 export const ALL_KEYS: ConfigKey[] = [...configKeys]
 
-export const GROUP_ORDER = ['general', 'limits', 'boot', 'update', 'firewall', 'packages', 'env', 'nic', 'disk', 'devfs']
+export const GROUP_ORDER = ['general', 'resources', 'boot', 'update', 'firewall', 'packages', 'env', 'network', 'volumes', 'devfs']
 
 export function groupOf(name: string): string {
   const head = name.split('.')[0]
-  if (['limits', 'boot', 'update', 'firewall', 'env', 'nic', 'disk', 'devfs'].includes(head)) return head
+  if (['resources', 'boot', 'update', 'firewall', 'env', 'network', 'volumes', 'devfs'].includes(head)) return head
   if (name === 'packages') return 'packages'
   return 'general'
 }
 
-export const DEVICE_KINDS = ['nic', 'disk', 'devfs'] as const
+export const DEVICE_KINDS = ['network', 'volumes', 'devfs'] as const
 export type DeviceKind = (typeof DEVICE_KINDS)[number]
-const PATH_ROOT: Record<DeviceKind, string> = { nic: 'network', disk: 'volumes', devfs: 'devfs' }
 
 interface Step { key: string; dev?: boolean }
 function steps(path: string): Step[] {
@@ -35,9 +34,9 @@ const idField = (root: string) => (root === 'volumes' ? 'volume' : 'name')
 
 /** Names of the devices of a kind in a spec. Unnamed NICs are eth0, eth1, ... as the server names them. */
 export function deviceNames(spec: JailSpec, kind: DeviceKind): string[] {
-  const root = PATH_ROOT[kind]
+  const root = kind
   const list = ((spec as unknown as Spec)[root] as Array<Record<string, string | undefined>> | undefined) ?? []
-  return list.map((d, i) => d[idField(root)] || (kind === 'nic' ? `eth${i}` : `${kind}${i}`))
+  return list.map((d, i) => d[idField(root)] || (kind === 'network' ? `eth${i}` : `${kind}${i}`))
 }
 
 function findDevice(spec: Spec, root: string, name: string, create: boolean): Record<string, unknown> | undefined {
@@ -115,12 +114,12 @@ export function rowsFor(spec: JailSpec): Row[] {
   const rows: Row[] = []
   const env = Object.keys(((spec as unknown as Spec).env as Record<string, string> | undefined) ?? {})
   for (const k of ALL_KEYS) {
-    const m = /^(nic|disk|devfs)\.<(device|name)>(\.(.+))?$/.exec(k.name)
+    const m = /^(network|volumes|devfs)\.<name>(\.(.+))?$/.exec(k.name)
     if (k.name === 'env.<var>') {
       for (const v of env) rows.push({ key: k, name: `env.${v}`, dev: v, group: 'env' })
     } else if (m) {
-      if (!m[4]) continue // the device key itself is shown as the device header
-      for (const d of deviceNames(spec, m[1] as DeviceKind)) rows.push({ key: k, name: `${m[1]}.${d}.${m[4]}`, dev: d, group: m[1] })
+      if (!m[3]) continue // the device key itself is shown as the device header
+      for (const d of deviceNames(spec, m[1] as DeviceKind)) rows.push({ key: k, name: `${m[1]}.${d}.${m[3]}`, dev: d, group: m[1] })
     } else rows.push({ key: k, name: k.name, dev: '', group: groupOf(k.name) })
   }
   return rows
@@ -157,7 +156,7 @@ export interface Msgs {
 export function validate(k: ConfigKey, value: string, m: Msgs): string | undefined {
   const v = value.trim()
   if (v === '') return undefined
-  if (k.name === 'limits.cpuset') return /^\d+(-\d+)?(,\d+(-\d+)?)*$/.test(v.replace(/\s+/g, '')) ? undefined : m.cpuset
+  if (k.name === 'resources.cpuset') return /^\d+(-\d+)?(,\d+(-\d+)?)*$/.test(v.replace(/\s+/g, '')) ? undefined : m.cpuset
   switch (k.type) {
     case 'int': return /^-?\d+$/.test(v) ? undefined : m.int
     case 'size': return validSize(v) ? undefined : m.size
@@ -190,7 +189,7 @@ export function diff(spec: JailSpec, next: JailSpec): { changed: string[]; resta
   return { changed, restart: changed.filter((n) => need.get(n)) }
 }
 
-/** Find the registry entry of a concrete key such as nic.eth1.mtu, and the device or variable it names. */
+/** Find the registry entry of a concrete key such as network.eth1.mtu, and the device or variable it names. */
 export function lookupKey(key: string): { def: ConfigKey; dev: string } | undefined {
   const parts = key.split('.')
   for (const k of ALL_KEYS) {

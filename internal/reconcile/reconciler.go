@@ -2,10 +2,14 @@ package reconcile
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"jailops.net/jailops/internal/supervise"
 	"log/slog"
+	"os"
 	"regexp"
 	"slices"
 	"strings"
@@ -36,6 +40,10 @@ type Config struct {
 	// again while the host stays up (a restart, a package upgrade) starts no jails: an operator may have stopped
 	// them on purpose. Empty: every daemon start is a boot.
 	BootStateFile string
+	// PendingKillsFile keeps the labels of removed pf rules whose states have not been ended yet, so that a daemon
+	// that stops between the load of an anchor and the end of those states ends them after the restart. Empty: the
+	// labels live in memory only.
+	PendingKillsFile string
 	// NDP builds the neighbor discovery proxies of networks with the NDP proxy; without it those networks report
 	// that no proxy is available.
 	NDP NDPFactory
@@ -111,6 +119,11 @@ type Reconciler struct {
 	// pfBad is why pf does not evaluate the anchors the loop loaded ("" when it does or when that cannot be told): pf is
 	// disabled, the main ruleset lost its anchor "jailops/*" line, or it cannot be read. The watch and every pass set it.
 	pfBad string
+	// pfUnknown is why the loop could not tell whether pf evaluates the anchors ("" when it could): pfctl did not
+	// answer, or its answer had no status. FirewallApplied is Unknown then, never True.
+	pfUnknown string
+	// pendingLoaded is set once the pending labels of PendingKillsFile were read (guarded by passMu).
+	pendingLoaded bool
 	// pendingKills holds, per anchor, the labels of removed rules whose states could not be ended yet: every pass
 	// tries them again until pf has ended them.
 	pendingKills map[string]map[string]bool
@@ -196,7 +209,9 @@ func (r *Reconciler) watchPF(ctx context.Context) {
 		}
 		// pf disabled, or its main ruleset without the line that makes it evaluate the anchors, leaves the anchors
 		// loaded and nothing applied: a change of that state is asked about at once
-		if was := r.setPFBad(r.checkPF(ctx)); was != r.currentPFBad() {
+		bad, unk := r.checkPF(ctx)
+		wasBad, wasUnk := r.setPFState(bad, unk)
+		if wasBad != bad || wasUnk != unk {
 			r.Kick()
 		}
 	}
@@ -205,16 +220,17 @@ func (r *Reconciler) watchPF(ctx context.Context) {
 // anchorLine is the one line of the host's pf.conf that makes pf evaluate the anchors of the jails.
 const anchorLine = "jailops/*"
 
-// checkPF says why pf does not evaluate the anchors of the jails: "" when it does, and when that cannot be told (pfctl
-// does not answer: the doctor says so). pf disabled keeps every anchor loaded and applies none of them, and so does a
-// main ruleset without the line anchor "jailops/*".
-func (r *Reconciler) checkPF(ctx context.Context) string {
+// checkPF says why pf does not evaluate the anchors of the jails (bad: "" when it does) and, separately, why that
+// cannot be told (unknown: pfctl does not answer, or its answer has no status). pf disabled keeps every anchor loaded
+// and applies none of them, and so does a main ruleset without the line anchor "jailops/*". An answer that is missing
+// is not an answer: the jails are then neither applied nor not applied, and FirewallApplied says Unknown.
+func (r *Reconciler) checkPF(ctx context.Context) (bad, unknown string) {
 	if r.env.Run == nil {
-		return ""
+		return "", "the loop has no way to ask pf (no command runner)"
 	}
 	res, err := r.env.Run.Run(ctx, run.Cmd{Name: "pfctl", Args: []string{"-s", "info"}, Timeout: 10 * time.Second})
 	if err != nil {
-		return ""
+		return "", "pfctl -s info gave no answer: " + errText(err)
 	}
 	status := ""
 	for _, ln := range strings.Split(string(res.Stdout), "\n") {
@@ -224,34 +240,34 @@ func (r *Reconciler) checkPF(ctx context.Context) string {
 	}
 	switch status {
 	case "Disabled":
-		return `pf is disabled: the rules of the jail are loaded and nothing evaluates them (pfctl -e, or service pf start)`
+		return `pf is disabled: the rules of the jail are loaded and nothing evaluates them (pfctl -e, or service pf start)`, ""
 	case "Enabled":
 	default:
-		return ""
+		return "", "pfctl -s info has no Status line: whether pf is enabled is not known"
 	}
 	rules, err := r.env.Run.Run(ctx, run.Cmd{Name: "pfctl", Args: []string{"-s", "rules"}, Timeout: 10 * time.Second})
 	if err != nil {
-		return "the main ruleset of pf cannot be read: " + errText(err)
+		return "the main ruleset of pf cannot be read: " + errText(err), ""
 	}
 	if !strings.Contains(string(rules.Stdout), `anchor "`+anchorLine+`"`) {
-		return `the main ruleset of pf has no line anchor "` + anchorLine + `": nothing evaluates the rules of the jail (/etc/pf.conf is the host's file and needs that one line)`
+		return `the main ruleset of pf has no line anchor "` + anchorLine + `": nothing evaluates the rules of the jail (/etc/pf.conf is the host's file and needs that one line)`, ""
 	}
-	return ""
+	return "", ""
 }
 
-// setPFBad stores the answer of checkPF and returns the previous one.
-func (r *Reconciler) setPFBad(v string) string {
+// setPFState stores the answer of checkPF and returns the previous one.
+func (r *Reconciler) setPFState(bad, unknown string) (wasBad, wasUnknown string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	was := r.pfBad
-	r.pfBad = v
-	return was
+	wasBad, wasUnknown = r.pfBad, r.pfUnknown
+	r.pfBad, r.pfUnknown = bad, unknown
+	return wasBad, wasUnknown
 }
 
-func (r *Reconciler) currentPFBad() string {
+func (r *Reconciler) currentPFState() (bad, unknown string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.pfBad
+	return r.pfBad, r.pfUnknown
 }
 
 // Run loops until ctx ends.
@@ -307,7 +323,8 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 		r.log.Warn("reconcile: desired state unavailable", "err", err)
 		return rep
 	}
-	r.setPFBad(r.checkPF(ctx))
+	r.loadPending()
+	r.setPFState(r.checkPF(ctx))
 	r.hostPass(ctx, des.Host, &rep)
 	r.pipePass(ctx, des, &rep)
 	obs, err := r.observe(ctx)
@@ -336,9 +353,14 @@ func (r *Reconciler) Pass(ctx context.Context) Report {
 		}
 	}
 	jailConds := map[string][]api.Condition{}
+	handled := map[string]bool{} // anchors whose pending states a jail pass looked at
 	for _, j := range des.Jails {
 		jailConds[j.Name] = r.jailPass(ctx, j, obs, ex, &rep, now)
+		if _, up := obs.Running[j.Name]; up && j.Ruleset != "" && r.env.PF != nil {
+			handled[j.AnchorName] = true
+		}
 	}
+	r.sweepKills(ctx, handled)
 	for _, j := range des.Jails {
 		if _, up := obs.Running[j.Name]; !up {
 			continue
@@ -465,7 +487,7 @@ func (r *Reconciler) jailPass(ctx context.Context, j JailDesired, obs *Observed,
 		return []api.Condition{cond(CondReady, false, "Invalid", j.Problem, now)}
 	}
 	if _, up := obs.Running[j.Name]; !up {
-		return []api.Condition{cond(CondReady, true, "Stopped", "the jail is stopped", now)}
+		return []api.Condition{cond(CondReady, false, api.ConditionStopped, "the jail is stopped", now)}
 	}
 	var drift []string
 	// Interfaces: the host end of every epair must exist, carry the gateway addresses, be up and have the routes to
@@ -556,7 +578,7 @@ func (r *Reconciler) jailPass(ctx context.Context, j JailDesired, obs *Observed,
 	conds := []api.Condition{cond(CondReady, true, "Running", "the jail is running", now)}
 	if len(drift) > 0 {
 		rep.Drift[j.Name] = drift
-		conds = append(conds, cond(CondDrift, false, "Drift", strings.Join(drift, "; "), now))
+		conds = append(conds, cond(CondDrift, false, "Drift", fmt.Sprintf("%d differences between the rendered and the live state; status.drift lists them", len(drift)), now))
 	} else {
 		conds = append(conds, cond(CondDrift, true, "InSync", "rendered and live state agree", now))
 	}
@@ -573,13 +595,17 @@ func (r *Reconciler) jailPass(ctx context.Context, j JailDesired, obs *Observed,
 // short hash, which changes with every change of a policy, a set or the jail; Since is when the reason last changed.
 func (r *Reconciler) firewallApplied(j JailDesired, fwDrift, pending []string, now time.Time) api.Condition {
 	reason, msg, ok := "Applied", "rules "+render.RulesID(j.Ruleset)+" are loaded and pf evaluates them", true
-	switch bad := r.currentPFBad(); {
+	bad, unknown := r.currentPFState()
+	unverified := false
+	switch {
 	case bad != "":
 		reason, msg, ok = "PFNotApplying", bad, false
 	case len(fwDrift) > 0:
 		reason, msg, ok = "NotLoaded", strings.Join(fwDrift, "; "), false
 	case len(pending) > 0:
 		reason, msg, ok = "StatesPending", fmt.Sprintf("the connections of %d removed rule(s) are not ended yet (pf refused): tried again at every pass", len(pending)), false
+	case unknown != "":
+		reason, msg, ok, unverified = "Unverified", "the anchor holds the rendered rules, but whether pf evaluates it is not known: "+unknown, false, true
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -589,6 +615,9 @@ func (r *Reconciler) firewallApplied(j JailDesired, fwDrift, pending []string, n
 		r.fwSince[j.Name] = st
 	}
 	c := cond(CondFirewallApplied, ok, reason, msg, st.since)
+	if unverified {
+		c.Status = api.ConditionUnknown
+	}
 	return c
 }
 
@@ -853,9 +882,6 @@ func (r *Reconciler) loadAnchor(ctx context.Context, name, ruleset string) error
 	if err != nil && !api.IsCode(err, api.CodeNotFound) {
 		return fmt.Errorf("reading the loaded rules of %s before replacing them: %w", name, err)
 	}
-	if err := r.env.PF.Load(ctx, name, ruleset); err != nil {
-		return err
-	}
 	keep := pfctl.LabelsOf(ruleset)
 	var gone []string
 	for l := range pfctl.LabelsOf(old) {
@@ -864,27 +890,172 @@ func (r *Reconciler) loadAnchor(ctx context.Context, name, ruleset string) error
 		}
 	}
 	slices.Sort(gone)
+	// The labels are written down before the new rules go in: a daemon that stops after the load and before the states
+	// are ended finds them again at its next start (the loaded anchor no longer names them).
+	added := r.keepKills(name, gone...)
+	if err := r.env.PF.Load(ctx, name, ruleset); err != nil {
+		r.dropKills(name, added...) // nothing changed: the rules of those labels are still loaded
+		return err
+	}
 	for _, l := range gone {
 		if err := r.env.PF.KillLabel(ctx, l); err != nil {
 			r.log.Warn("reconcile: ending the states of a removed rule failed: tried again at every pass", "anchor", name, "label", l, "err", err)
-			r.keepKill(name, l)
+			continue
 		}
+		r.dropKills(name, l)
 	}
 	return nil
 }
 
-// keepKill remembers a label whose states could not be ended: the rule is gone from the anchor, so no later pass could
-// find the label again.
-func (r *Reconciler) keepKill(anchor, label string) {
+// keepKills remembers labels whose states are to be ended: the rule is gone from the anchor, so no later pass could
+// find the label again. It returns the labels that were not remembered before.
+func (r *Reconciler) keepKills(anchor string, labels ...string) (added []string) {
+	if len(labels) == 0 {
+		return nil
+	}
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.pendingKills[anchor] == nil {
 		r.pendingKills[anchor] = map[string]bool{}
 	}
-	r.pendingKills[anchor][label] = true
+	for _, l := range labels {
+		if !r.pendingKills[anchor][l] {
+			r.pendingKills[anchor][l] = true
+			added = append(added, l)
+		}
+	}
+	snap := r.pendingSnapshotLocked()
+	r.mu.Unlock()
+	if len(added) > 0 {
+		r.savePending(snap)
+	}
+	return added
 }
 
-// retryKills ends the states of the labels an earlier pass could not end and returns the ones still pending, sorted.
+// dropKills forgets labels whose states are ended (or whose rules are loaded again).
+func (r *Reconciler) dropKills(anchor string, labels ...string) {
+	if len(labels) == 0 {
+		return
+	}
+	r.mu.Lock()
+	for _, l := range labels {
+		delete(r.pendingKills[anchor], l)
+	}
+	if len(r.pendingKills[anchor]) == 0 {
+		delete(r.pendingKills, anchor)
+	}
+	snap := r.pendingSnapshotLocked()
+	r.mu.Unlock()
+	r.savePending(snap)
+}
+
+// pendingFile is the stored form of the pending labels: a version and the labels per anchor.
+type pendingFile struct {
+	Version int                 `json:"version"`
+	Anchors map[string][]string `json:"anchors"`
+}
+
+const pendingFileVersion = 1
+
+func (r *Reconciler) pendingSnapshotLocked() map[string][]string {
+	out := map[string][]string{}
+	for a, ls := range r.pendingKills {
+		for l := range ls {
+			out[a] = append(out[a], l)
+		}
+		slices.Sort(out[a])
+	}
+	return out
+}
+
+// savePending writes the pending labels atomically; an empty set removes the file. A failure is logged and the labels
+// stay in memory: the file is a safeguard against a stop, never a condition of the pass.
+func (r *Reconciler) savePending(snap map[string][]string) {
+	f := r.cfg.PendingKillsFile
+	if f == "" {
+		return
+	}
+	if len(snap) == 0 {
+		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			r.log.Warn("reconcile: the file of pending pf states could not be removed", "file", f, "err", err)
+		}
+		return
+	}
+	b, err := json.Marshal(pendingFile{Version: pendingFileVersion, Anchors: snap})
+	if err == nil {
+		tmp := f + ".tmp"
+		if err = os.WriteFile(tmp, b, 0o600); err == nil {
+			err = os.Rename(tmp, f)
+		}
+		if err != nil {
+			_ = os.Remove(tmp)
+		}
+	}
+	if err != nil {
+		r.log.Warn("reconcile: the pending pf states could not be written down", "file", f, "err", err)
+	}
+}
+
+// loadPending reads the pending labels of an earlier run, once. A missing file is the normal case; a file that cannot
+// be read or has another version is ignored with a log line and never blocks the start.
+func (r *Reconciler) loadPending() {
+	if r.pendingLoaded {
+		return
+	}
+	r.pendingLoaded = true
+	f := r.cfg.PendingKillsFile
+	if f == "" {
+		return
+	}
+	b, err := os.ReadFile(f)
+	if err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			r.log.Warn("reconcile: the file of pending pf states cannot be read: ignored", "file", f, "err", err)
+		}
+		return
+	}
+	var pf pendingFile
+	if err := json.Unmarshal(b, &pf); err != nil || pf.Version != pendingFileVersion {
+		r.log.Warn("reconcile: the file of pending pf states has a form this version does not read: ignored", "file", f, "version", pf.Version, "err", err)
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for a, ls := range pf.Anchors {
+		for _, l := range ls {
+			if r.pendingKills[a] == nil {
+				r.pendingKills[a] = map[string]bool{}
+			}
+			r.pendingKills[a][l] = true
+		}
+	}
+	if len(pf.Anchors) > 0 {
+		r.log.Info("reconcile: pf states of removed rules were still to be ended when the daemon stopped: ending them now", "anchors", len(pf.Anchors))
+	}
+}
+
+// sweepKills ends the pending states of the anchors no running jail looked at in this pass (the anchor of a stopped jail
+// or of a tunnel), so a label written down by an earlier run is not kept for ever.
+func (r *Reconciler) sweepKills(ctx context.Context, handled map[string]bool) {
+	if r.env.PF == nil {
+		return
+	}
+	r.mu.Lock()
+	var anchors []string
+	for a := range r.pendingKills {
+		if !handled[a] {
+			anchors = append(anchors, a)
+		}
+	}
+	r.mu.Unlock()
+	slices.Sort(anchors)
+	for _, a := range anchors {
+		r.retryKills(ctx, a)
+	}
+}
+
+// retryKills ends the states of the labels an earlier pass could not end and returns the ones still pending, sorted. A
+// label whose rule is in the anchor again (a load that did not happen, or a rule that came back) is forgotten without
+// ending anything: its connections are allowed.
 func (r *Reconciler) retryKills(ctx context.Context, anchor string) []string {
 	r.mu.Lock()
 	var labels []string
@@ -892,19 +1063,26 @@ func (r *Reconciler) retryKills(ctx context.Context, anchor string) []string {
 		labels = append(labels, l)
 	}
 	r.mu.Unlock()
+	if len(labels) == 0 {
+		return nil
+	}
 	slices.Sort(labels)
+	live, err := r.env.PF.Read(ctx, anchor)
+	if err != nil && !api.IsCode(err, api.CodeNotFound) {
+		return labels // what is loaded cannot be told: nothing is ended on a guess
+	}
+	loaded := pfctl.LabelsOf(live)
 	var left []string
 	for _, l := range labels {
+		if loaded[l] {
+			r.dropKills(anchor, l)
+			continue
+		}
 		if err := r.env.PF.KillLabel(ctx, l); err != nil {
 			left = append(left, l)
 			continue
 		}
-		r.mu.Lock()
-		delete(r.pendingKills[anchor], l)
-		if len(r.pendingKills[anchor]) == 0 {
-			delete(r.pendingKills, anchor)
-		}
-		r.mu.Unlock()
+		r.dropKills(anchor, l)
 	}
 	return left
 }

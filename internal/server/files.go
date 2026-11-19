@@ -63,7 +63,7 @@ func (s *Server) handleFileGet(c *rc) error {
 		if err != nil {
 			return err
 		}
-		c.sync(200, st, 0)
+		c.sync(200, st, "")
 		return nil
 	}
 	flag := func(k string) bool { return q.Get(k) == "true" }
@@ -202,7 +202,7 @@ func (s *Server) handleFilePut(c *rc) error {
 		return err
 	}
 	c.detail = fmt.Sprintf("file put /%s files=%d dirs=%d symlinks=%d bytes=%d", p, st.Files, st.Dirs, st.Symlinks, st.Bytes)
-	c.sync(200, api.JailFileCopy{Files: st.Files, Dirs: st.Dirs, Symlinks: st.Symlinks, Skipped: st.Skipped, Bytes: st.Bytes}, 0)
+	c.sync(200, api.JailFileCopy{Files: st.Files, Dirs: st.Dirs, Symlinks: st.Symlinks, Skipped: st.Skipped, Bytes: st.Bytes}, "")
 	return nil
 }
 

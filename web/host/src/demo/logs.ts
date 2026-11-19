@@ -54,7 +54,7 @@ export function unifiedRead(jails: Jail[], logs: Reader, q: URLSearchParams): De
       continue
     }
     const rq = new URLSearchParams()
-    for (const k of ['since', 'grep', 'tail']) if (q.get(k)) rq.set(k, q.get(k)!)
+    for (const k of ['since', 'grep', 'limit']) if (q.get(k)) rq.set(k, q.get(k)!)
     if (cursor[key] !== undefined) rq.set('offset', String(cursor[key]))
     const r = logs.entries(name, p.app, p.file, rq)
     if (r === 'missing') { src.error = { code: 'not_found', message: `jail "${name}" has no log file "${p.file}"` }; continue }
@@ -137,7 +137,7 @@ export function demoForward(hostname: string) {
   return {
     get(): DemoReply { return { ok: view(), etag: etag() } },
     put(body: LogForwardSpec, ifMatch?: string): DemoReply {
-      if (ifMatch && ifMatch !== etag()) return { status: 412, error: { code: 'conflict', message: `the sink list changed: current generation is ${state.generation}`, hint: 'read it again and re-apply your change' } }
+      if (ifMatch && ifMatch !== etag()) return { status: 412, error: { code: 'precondition_failed', message: `the sink list changed: current generation is ${state.generation}`, hint: 'read it again and re-apply your change' } }
       const v = validate(body)
       if (v) return v
       for (const name of [...stats.keys()]) if (!body.sinks.some((k) => k.name === name)) stats.delete(name)

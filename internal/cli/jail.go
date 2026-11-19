@@ -56,7 +56,7 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 				}
 			}
 		}
-		return []string{j.Metadata.Name, dash(string(j.Status.Power)), j.Spec.Image, dash(j.Status.Generation),
+		return []string{j.Metadata.Name, dash(string(j.Status.Power)), j.Spec.Image, dash(j.Status.ImageGeneration),
 			joinOrDash(addrs), exposedCell(j), autostartCell(j), usedCell(j), age(now, j.Metadata.CreatedAt)}
 	}
 	// On a terminal: one address per line with its network, the generation
@@ -76,7 +76,7 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 				}
 			}
 			return []string{j.Metadata.Name, dash(string(j.Status.Power)), linesOrDash(v4), linesOrDash(v6),
-				imageWithGen(j.Spec.Image, j.Status.Generation, j.Status.FreeBSDVersion), exposedCell(j), autostartCell(j), usedCell(j), age(now, j.Metadata.CreatedAt)}
+				imageWithGen(j.Spec.Image, j.Status.ImageGeneration, j.Status.FreeBSDVersion), exposedCell(j), autostartCell(j), usedCell(j), age(now, j.Metadata.CreatedAt)}
 		},
 	}
 	d.filters = func(cmd *cobra.Command) func() (func(api.Jail) bool, error) {
@@ -137,7 +137,7 @@ func jailLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name strin
 	running := j.Status.Power == api.PowerRunning
 	// a dry run always shows the summary: the running state is part of it, not a reason to fail
 	if running && !force && !dryRun {
-		return "", api.Errorf(api.CodeConflict, "jail %q is running", name).
+		return "", api.Errorf(api.CodePreconditionFailed, "jail %q is running", name).
 			WithHint("stop it first ('jailops stop " + name + "'), or pass --stop to stop it before the delete")
 	}
 	var parts []string
@@ -264,14 +264,9 @@ func (a *app) jailStartFlag(cmd *cobra.Command) func(ctx context.Context, name s
 	}
 }
 
-// shellInstalling says whether the jail's bash is being installed in the background (its ShellSetup condition).
+// shellInstalling says whether the jail's bash is being installed in the background (status.shell_setup).
 func shellInstalling(j api.Jail) bool {
-	for _, c := range j.Status.Conditions {
-		if c.Type == "ShellSetup" && c.Reason == api.ShellInstalling {
-			return true
-		}
-	}
-	return false
+	return j.Status.ShellSetup != nil && j.Status.ShellSetup.State == api.ShellSetupInstalling
 }
 
 // noteShellInstalling tells, after a start, that the shell of a new jail is on its way: the start does not wait for
@@ -410,6 +405,7 @@ jailops jail start web`, "jails")
 	jc.AddCommand(a.jailLifecycleSet(d)...)
 	jc.AddCommand(a.jailExec(d), a.pkgCmd(), a.cpCmd(), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailConvert(d), a.jailCopy(d), a.jailLogs(d), a.jailDiff(d), a.jailExport(d), a.jailImport())
 	jc.AddCommand(a.jailShellSetup(d))
+	jc.AddCommand(a.jailRepairPackages(d))
 	return jc
 }
 
@@ -475,11 +471,11 @@ func (a *app) addJailShortcuts(root *cobra.Command) {
 
 func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	var (
-		image, layout, hostname, memory, disk, strategy, window, storage, comment string
-		shell, prompt, cpuset                                                     string
-		cpu, pids, priority, stopTimeout                                          int
-		networks, envs, labels, depends, tags, profiles, fwPolicies               []string
-		autostart, zfsDelegation                                                  bool
+		image, layout, hostname, memory, disk, storage, comment     string
+		shell, prompt, cpuset                                       string
+		cpu, pids, priority, stopTimeout                            int
+		networks, envs, labels, depends, tags, profiles, fwPolicies []string
+		autostart, zfsDelegation                                    bool
 	)
 	f := cmd.Flags()
 	f.StringVar(&comment, "comment", "", "what the jail is for")
@@ -503,8 +499,6 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 	f.StringArrayVar(&depends, "depends", nil, "jail that must start first (repeatable)")
 	f.StringArrayVar(&envs, "env", nil, "environment variable KEY=VALUE (repeatable)")
 	f.StringArrayVar(&labels, "label", nil, "label KEY=VALUE (repeatable)")
-	f.StringVar(&strategy, "update-strategy", "", "how the jail follows its image: rebase (a thin jail moves to a newer generation; the default), inplace (thick and Linux jails only) or manual")
-	f.StringVar(&window, "update-window", "", "update window, for example \"sun 03:00\"")
 	f.StringVar(&shell, "shell", "", "shell of jailops shell and the console: bash, sh or a path inside the jail (default: the host's jails.shell, bash)")
 	f.StringVar(&prompt, "prompt", "", "bash prompt of the jail: default, short, none or a PS1 text that may hold {jail}, {project} and {host} (default: the host's jails.prompt)")
 	a.completeFlag(cmd, "image", imageRefs)
@@ -523,7 +517,6 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 		return namesOf(c.Jails().List(ctx), func(j api.Jail) string { return j.Metadata.Name })
 	}))
 	enumFlag(cmd, "layout", string(api.LayoutThin), string(api.LayoutThick))
-	enumFlag(cmd, "update-strategy", string(api.UpdateRebase), string(api.UpdateInPlace), string(api.UpdateManual))
 	return func(name string) (api.Jail, error) {
 		if cpuset != "" {
 			c, err := api.NormalizeCPUSet(cpuset)
@@ -537,8 +530,7 @@ func (a *app) jailFlagBuild(cmd *cobra.Command) func(string) (api.Jail, error) {
 			Storage: storage, Profiles: dropEmpty(profiles),
 			Resources: api.Resources{CPU: cpu, CPUSet: cpuset, Memory: memory, Disk: disk, PIDs: pids},
 			Firewall:  api.FirewallAttach{Policies: dropEmpty(fwPolicies), Tags: dropEmpty(tags)},
-			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: dropEmpty(depends), StopTimeout: stopTimeout},
-			Update:    api.UpdatePolicy{Strategy: api.UpdateStrategy(strategy), Window: window},
+			Boot:      api.BootPolicy{Autostart: autostart, Priority: priority, Depends: dropEmpty(depends), StopTimeoutSeconds: stopTimeout},
 			Shell:     api.ShellPath(shell), Prompt: prompt,
 			Delegate: zfsDelegation,
 		}
@@ -642,14 +634,14 @@ The jails are named, or selected by label with -l (the same key=value labels as
 		return nil
 	}
 	if verb != "start" {
-		cmd.Long += "\n--force skips the graceful shutdown; --grace sets how long the jail gets to shut down."
+		cmd.Long += "\n--force skips the graceful shutdown; --timeout sets how long the jail gets to shut down."
 		cmd.Flags().BoolVar(&force, "force", false, "do not wait for a graceful shutdown")
-		cmd.Flags().StringVar(&grace, "grace", "", "time the jail gets to shut down: seconds, or a duration such as 30s")
+		cmd.Flags().StringVar(&grace, "timeout", "", "time the jail gets to shut down: seconds, or a duration such as 30s")
 	}
 	return cmd
 }
 
-// parseGrace reads --grace: whole seconds, or a duration such as 1m30s.
+// parseGrace reads --timeout: whole seconds, or a duration such as 1m30s.
 func parseGrace(s string) (int, error) {
 	if n, err := strconv.Atoi(s); err == nil && n > 0 {
 		return n, nil
@@ -657,7 +649,7 @@ func parseGrace(s string) (int, error) {
 	if d, err := time.ParseDuration(s); err == nil && d > 0 {
 		return seconds(d), nil
 	}
-	return 0, usagef("--grace must be a number of seconds or a duration such as 30s, not %q", s)
+	return 0, usagef("--timeout must be a number of seconds or a duration such as 30s, not %q", s)
 }
 
 func (a *app) jailConsole(d *kindDesc[api.Jail]) *cobra.Command {
@@ -694,7 +686,7 @@ Ctrl-D (end of input) is sent when it ends.`,
 func (a *app) jailSnapshotCmd(d *kindDesc[api.Jail]) *cobra.Command {
 	sc := group("snapshot", "Create, list, show and delete jail snapshots",
 		`A snapshot is a consistent ZFS snapshot across all datasets of a jail. It is the
-target of 'jailops jail rollback --data' and the source of backups. Snapshots
+target of 'jailops jail rollback --scope data' and the source of backups. Snapshots
 cost almost nothing until data changes; the written column shows how much has
 changed since each one.`,
 		`jailops jail snapshot create web before-upgrade -m "before 15.1"
@@ -857,45 +849,36 @@ func (a *app) emitOne(v any, noun, name, verb string) error {
 }
 
 func (a *app) jailRollback(d *kindDesc[api.Jail]) *cobra.Command {
-	var root, data, all, confirmLoss bool
-	var snapshot string
+	var confirmLoss bool
+	var snapshot, scopeFlag string
 	cmd := &cobra.Command{
 		Use:   "rollback NAME",
 		Short: "Roll a jail back: its root, its data, or both",
 		Long: `Roll a jail back to an earlier state.
 
-  --root  (default) returns only the OS root to the previous image generation.
-          Application data is untouched.
-  --data  rolls the data datasets back to a snapshot. Everything written since
-          that snapshot is discarded for good.
-  --all   does both.
+  --scope root  (default) returns only the OS root to the previous image generation.
+                Application data is untouched.
+  --scope data  rolls the data datasets back to a snapshot. Everything written since
+                that snapshot is discarded for good.
+  --scope all   does both.
 
-Before --data or --all the command shows how many bytes were written since the
+Before a data or all rollback the command shows how many bytes were written since the
 snapshot, which is what would be lost, and asks you to type the jail name. In a
 script, pass --confirm-data-loss once you have decided; -y does not apply to
 data loss. Without --snapshot the most recent snapshot is used.`,
 		Example: `jailops jail rollback web
-jailops jail rollback web --data --snapshot before-upgrade
-jailops jail rollback web --all --confirm-data-loss
-jailops jail rollback web --data --dry-run`,
+jailops jail rollback web --scope data --snapshot before-upgrade
+jailops jail rollback web --scope all --confirm-data-loss
+jailops jail rollback web --scope data --dry-run`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
-			n := 0
-			for _, b := range []bool{root, data, all} {
-				if b {
-					n++
-				}
-			}
-			if n > 1 {
-				return usagef("choose one of --root, --data and --all")
-			}
-			scope := api.RollbackRoot
-			if data {
-				scope = api.RollbackData
-			} else if all {
-				scope = api.RollbackAll
+			scope := api.RollbackScope(scopeFlag)
+			switch scope {
+			case api.RollbackRoot, api.RollbackData, api.RollbackAll:
+			default:
+				return usagef("--scope must be root, data or all, not %q", scopeFlag)
 			}
 			ctx := cmd.Context()
 			c, err := a.connect(ctx)
@@ -934,9 +917,8 @@ jailops jail rollback web --data --dry-run`,
 		},
 	}
 	f := cmd.Flags()
-	f.BoolVar(&root, "root", false, "roll back only the OS root to the previous generation (default)")
-	f.BoolVar(&data, "data", false, "roll the data datasets back to a snapshot, discarding newer writes")
-	f.BoolVar(&all, "all", false, "roll back root and data")
+	f.StringVar(&scopeFlag, "scope", "root", "what to roll back: root (previous generation), data (to a snapshot, discarding newer writes) or all")
+	enumFlag(cmd, "scope", string(api.RollbackRoot), string(api.RollbackData), string(api.RollbackAll))
 	f.StringVar(&snapshot, "snapshot", "", "snapshot to roll back to (default: the latest)")
 	_ = cmd.RegisterFlagCompletionFunc("snapshot", a.completeSnapshots())
 	f.BoolVar(&confirmLoss, "confirm-data-loss", false, "confirm that data written since the snapshot may be destroyed")
@@ -1076,7 +1058,7 @@ func (a *app) upgradeOne(ctx context.Context, c *sdk.Client, name, gen, image st
 		if moving {
 			return a.previewMove(name, j, base, target, up, op)
 		}
-		return a.preview(fmt.Sprintf("upgrade jail %s from %s to %s", name, dash(j.Status.Generation), dash(target)), up)
+		return a.preview(fmt.Sprintf("upgrade jail %s from %s to %s", name, dash(j.Status.ImageGeneration), dash(target)), up)
 	}
 	if !moving || a.format != fmtTable || !a.waiting() {
 		return a.finishOp(ctx, h, "jail", name, "upgraded to "+dash(target), nil)
@@ -1144,7 +1126,7 @@ func (a *app) previewMove(name string, j api.Jail, image, gen string, req api.Ja
 		return a.preview("move jail "+name+" to image "+image, req)
 	}
 	m := decodeMove(op)
-	from := imageBase(j.Spec.Image) + "#" + strings.TrimPrefix(j.Status.Generation, imageBase(j.Spec.Image)+"#")
+	from := imageBase(j.Spec.Image) + "#" + strings.TrimPrefix(j.Status.ImageGeneration, imageBase(j.Spec.Image)+"#")
 	if m.Upgrade != nil && m.Upgrade.From != "" {
 		from = m.Upgrade.From
 	}
@@ -1493,6 +1475,58 @@ jailops config set web prompt '\[\e[38;5;196m\]\u@{jail}\[\e[0m\] [{project}/{ho
 			for _, s := range res.Steps {
 				fprintf(a.env.Stdout, "  %s\n", s)
 			}
+			return nil
+		},
+	}
+}
+
+func (a *app) jailRepairPackages(d *kindDesc[api.Jail]) *cobra.Command {
+	return &cobra.Command{
+		Use:   "repair-packages NAME",
+		Short: "Bring the base package records of a jail in step with its image",
+		Long: `Bring the base package records (the FreeBSD-* packages) of a thin jail in step with
+the image generation its root comes from. A start of the jail does the same; the
+condition BasePackages on a jail says that the last pass failed and why.
+
+After an upgrade, a rollback or any other swap of the root, the jail's own
+package database (/var/db/pkg) still holds the records of the old base. Until
+they are replaced, 'pkg which /usr/bin/ftp' finds nothing, 'pkg info FreeBSD-runtime'
+shows the old patch level and 'pkg check -s' checks the old files. The records of
+the generation are the truth for the base set; the records of other packages are
+never touched. Only the database changes: no file is written and no script runs.
+The jail must be stopped (every start does the same pass, so 'jailops restart NAME'
+repairs a running one).`,
+		Example:           `jailops jail repair-packages web`,
+		Args:              cobra.ExactArgs(1),
+		ValidArgsFunction: completeKind(a, d),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if ok, err := a.dry("repair the base package records of jail "+args[0], api.RepairPackagesRequest{}); ok || err != nil {
+				return err
+			}
+			c, err := a.connect(cmd.Context())
+			if err != nil {
+				return err
+			}
+			h, err := handle(c.Jails().RepairPackages(cmd.Context(), args[0]))
+			if err != nil {
+				return err
+			}
+			if !a.waiting() {
+				return a.finishOp(cmd.Context(), h, "jail", args[0], "package repair", nil)
+			}
+			v, _, err := a.await(cmd.Context(), h)
+			if err != nil {
+				return err
+			}
+			res, _ := v.(api.RepairPackagesResult)
+			if a.format != fmtTable {
+				return a.emit(res, nil, nil, func() []string { return []string{args[0]} })
+			}
+			if res.Replaced+res.Added == 0 {
+				fprintf(a.env.Stdout, "jail/%s: the %d base package records are in step with the image\n", args[0], res.Base)
+				return nil
+			}
+			fprintf(a.env.Stdout, "jail/%s: %d base package records replaced, %d added (of %d)\n", args[0], res.Replaced, res.Added, res.Base)
 			return nil
 		},
 	}

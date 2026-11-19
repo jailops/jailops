@@ -2,7 +2,6 @@
 # Unknown keys are an error. Every uncommented value below is the default except `pool`,
 # which has none and must be set. Commented keys show the optional ones.
 
-role: host            # the only role of jailopsd; the backup node is a separate daemon
 hub: false            # true: keep a registry of remotes and forward ?host= requests over pinned mTLS
 
 pool: tank
@@ -84,7 +83,7 @@ jails:
   # shell: bash          # bash, or sh (FreeBSD's own shell; nothing is installed)
   # prompt: default      # default (user@jail [project/host]:dir), short (without the tag), none, or a bash PS1 text
   # prompt_color: 39     # 256-colour number of user@jail (39 light blue, 40 green, 196 red: one colour per kind of host)
-  # max_states: 10000    # pf states each pass rule of a jail may create when its limits.states is 0 (0: no limit)
+  # max_states: 10000    # pf states each pass rule of a jail may create when its resources.states is 0 (0: no limit)
 
 # The application catalog (docs/apps.md): one YAML definition per file, installed by the jailops-apps package. The daemon
 # reads these local files only and never fetches anything; a missing directory is an empty catalog. local_dir holds the

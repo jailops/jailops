@@ -172,7 +172,7 @@ func (a *app) applyFirewall(ctx context.Context, c *sdk.Client, spec api.HostFir
 	if err := spec.Validate(); err != nil {
 		return err
 	}
-	ch, err := c.HostSystem().Firewall().Apply(ctx, api.HostFirewallApply{Spec: spec, DryRun: a.dryRun, ConfirmWithin: within, ConfirmLockout: f.iKnow})
+	ch, err := c.HostSystem().Firewall().Apply(ctx, api.HostFirewallApply{Spec: spec, DryRun: a.dryRun, ConfirmWithinSeconds: within, ConfirmLockout: f.iKnow})
 	if err != nil {
 		return err
 	}

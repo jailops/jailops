@@ -10,8 +10,6 @@ networks_vnet
 network_ipam_range
 firewall_anchors
 backup_policies
-backup_pull
-backup_push
 restore_preflight
 audit_log
 doctor
@@ -54,6 +52,7 @@ volumes
 setup
 host_certificate
 jail_shell_setup
+jail_repair_packages
 rename
 boot_plan
 firewall_test

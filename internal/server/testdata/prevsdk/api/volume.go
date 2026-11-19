@@ -72,7 +72,7 @@ type VolumeStatus struct {
 	Dataset    string `json:"dataset,omitempty"`
 	Mountpoint string `json:"mountpoint,omitempty"`
 	// Used is the space the volume (and its snapshots) take, in bytes.
-	Used int64 `json:"used"`
+	Used int64 `json:"used_bytes"`
 	// Locked is true for an encrypted volume whose key is not loaded.
 	Locked bool `json:"locked,omitempty"`
 	// State is "ok" or "lost" for a host-directory volume: whether its directory is on a mount now. Detail says why it
@@ -83,6 +83,9 @@ type VolumeStatus struct {
 	AttachedTo []VolumeUse `json:"attached_to,omitempty"`
 	// Warnings are lines a reviewer should read.
 	Warnings []string `json:"warnings,omitempty"`
+	// Imported is what the copy of a host directory brought across, in the reply that created the volume (VolumeCreate
+	// from_dir); later reads do not have it.
+	Imported *VolumeImported `json:"imported,omitempty"`
 }
 
 // VolumeUse is one attachment of a volume, seen from the volume.
@@ -109,7 +112,7 @@ type VolumeSnapshotSpec struct {
 type VolumeSnapshotStatus struct {
 	// Written is the number of bytes written to the volume since the snapshot, which is what a rollback to it would
 	// discard.
-	Written int64 `json:"written,omitempty"`
+	Written int64 `json:"written_bytes,omitempty"`
 }
 
 // VolumeRollback is the body of POST /api/v1/volumes/{name}/rollback.
@@ -127,6 +130,23 @@ type VolumeCreate struct {
 	Spec     VolumeSpec `json:"spec"`
 	// Passphrase is between MinPassphrase and MaxPassphrase bytes, without line breaks.
 	Passphrase string `json:"passphrase,omitempty"`
+	// FromDir copies the files of this directory of the host into the new volume, once: a directory below one that the
+	// host operator allows with admin-host-mount, and not necessarily a mount. Owners, modes, times and links are kept;
+	// no setuid or setgid bit and no device node comes across. Global administrator only; not for a volume with a
+	// path, and not for an encrypted volume. The new volume does not keep the directory: it is not a link to it.
+	FromDir string `json:"from_dir,omitempty"`
+}
+
+// VolumeImported says what a copy of a host directory into a new volume brought across. It is in the reply that
+// creates the volume and nowhere else.
+type VolumeImported struct {
+	From     string `json:"from"`
+	Files    int64  `json:"files"`
+	Dirs     int64  `json:"dirs"`
+	Symlinks int64  `json:"symlinks,omitempty"`
+	Bytes    int64  `json:"bytes"`
+	// Skipped counts devices, fifos and sockets, which are not copied.
+	Skipped int64 `json:"skipped,omitempty"`
 }
 
 // VolumeUnlock is the body of POST /api/v1/volumes/{name}/unlock.

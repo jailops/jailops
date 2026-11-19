@@ -71,7 +71,7 @@ async function runPreview(): Promise<void> {
   done.value = null
   const k = key.value
   try {
-    const r = await api.host.applyFirewall({ spec: spec.value, dry_run: true, confirm_within: within.value })
+    const r = await api.host.applyFirewall({ spec: spec.value, dry_run: true, confirm_within_seconds: within.value })
     if (r.kind === 'sync' && r.data) preview.value = { key: k, change: r.data }
   } catch (e) {
     showError(e)
@@ -85,7 +85,7 @@ async function apply(): Promise<void> {
   error.value = null
   lockout.value = false
   try {
-    const r = await api.host.applyFirewall({ spec: spec.value, confirm_within: within.value, ...(iKnow.value ? { confirm_lockout: true } : {}) })
+    const r = await api.host.applyFirewall({ spec: spec.value, confirm_within_seconds: within.value, ...(iKnow.value ? { confirm_lockout: true } : {}) })
     done.value = r.kind === 'sync' ? (r.data ?? null) : null
     preview.value = null
     needConfirmLockout.value = false
@@ -245,7 +245,7 @@ const ruleFrom = (r: HostFirewallRule) => (!r.from || r.from === 'any' ? s.hostf
       <Callout v-if="lockout" tone="danger" style="margin-top: 12px" data-test="fw-lockout">{{ s.hostfw.lockout }}</Callout>
       <ErrorPanel v-if="error" :error="error" style="margin-top: 12px" />
       <label v-if="needConfirmLockout" class="check" style="margin-top: 12px"><input v-model="iKnow" type="checkbox" data-test="fw-i-know" />{{ s.hostfw.iKnow }}</label>
-      <Callout v-if="done?.pending" tone="ok" style="margin-top: 12px" data-test="fw-done">{{ s.hostfw.applied(done.pending.confirm_within) }}</Callout>
+      <Callout v-if="done?.pending" tone="ok" style="margin-top: 12px" data-test="fw-done">{{ s.hostfw.applied(done.pending.confirm_within_seconds) }}</Callout>
 
       <div v-if="preview" class="stack fw-preview" data-test="fw-preview">
         <Callout v-if="!preview.change.changed" tone="info">{{ s.hostfw.noChange }}</Callout>

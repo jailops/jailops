@@ -131,8 +131,8 @@ follow.`,
 		Short: "Wait for an operation to finish",
 		Long: `Wait for an operation to end, with a progress line on a terminal. The exit status
 is that of the operation's error code when it failed, and 1 when it was
-cancelled. --timeout bounds the wait; the operation itself keeps running.`,
-		Example:           "jailops op wait 3f1c8a52-... --timeout 30m",
+cancelled. --wait-timeout bounds the wait; the operation itself keeps running.`,
+		Example:           "jailops op wait 3f1c8a52-... --wait-timeout 30m",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: a.completeOps(),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -199,11 +199,11 @@ line, and with -o yaml a stream of documents.
 The stream reconnects after a drop and resumes from the last event it saw.
 --type, --jail and --project filter (without a project every event you may see
 is streamed, host-level ones included); --since-id replays events the server
-still retains; --count stops after that many events.`,
+still retains; --limit stops after that many events.`,
 		Example: `jailops events
 jailops events --type lifecycle,operation --jail web
 jailops events --project web
-jailops events -o json --count 10 --since-id 0`,
+jailops events -o json --limit 10 --since-id 0`,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			var ts []api.EventType
@@ -224,7 +224,7 @@ jailops events -o json --count 10 --since-id 0`,
 	cmd.Flags().StringArrayVar(&types, "type", nil, "event types: lifecycle, operation, logging (comma list or repeated)")
 	cmd.Flags().StringVar(&jail, "jail", "", "only events about this jail")
 	cmd.Flags().StringVar(&since, "since-id", "", "resume after this event id")
-	cmd.Flags().IntVar(&count, "count", 0, "stop after this many events")
+	cmd.Flags().IntVar(&count, "limit", 0, "stop after this many events")
 	enumFlag(cmd, "type", string(api.EventLifecycle), string(api.EventOperation), string(api.EventLogging))
 	a.completeFlag(cmd, "jail", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
 		return namesOf(c.Jails().List(ctx), func(j api.Jail) string { return j.Metadata.Name })

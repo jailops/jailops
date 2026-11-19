@@ -157,9 +157,6 @@ func (s *Service) PlanUpgrade(ctx context.Context, name string, req UpgradeReque
 		}
 		return nil, res, api.Errorf(api.CodeUnsupported, "rebase upgrades apply to thin jails; %s jails update in place, which is not implemented", st.Layout)
 	}
-	if rec.Spec.Update.Strategy == api.UpdateInPlace {
-		return nil, res, api.Errorf(api.CodeUnsupported, "update strategy inplace is not implemented for thin jails")
-	}
 	ref := rec.Spec.Image
 	g := req.Generation
 	switch {
@@ -167,9 +164,10 @@ func (s *Service) PlanUpgrade(ctx context.Context, name string, req UpgradeReque
 		switch {
 		case g == "":
 			ref = toImage
-		case strings.ContainsAny(g, "#@"):
-			if img, _, _ := strings.Cut(g, "#"); img != toImage {
-				return nil, res, api.Errorf(api.CodeInvalid, "generation %q is not of image %s", g, toImage)
+		case strings.Contains(g, "#"):
+			img, gn, _ := strings.Cut(g, "#")
+			if img != toImage || !genArgRe.MatchString(gn) {
+				return nil, res, api.Errorf(api.CodeInvalid, "generation %q is not of image %s (write gN or %s#gN)", g, toImage, toImage)
 			}
 			ref = g
 		case genArgRe.MatchString(g):
@@ -179,7 +177,11 @@ func (s *Service) PlanUpgrade(ctx context.Context, name string, req UpgradeReque
 		}
 	case g != "":
 		switch {
-		case strings.ContainsAny(g, "#@"):
+		case strings.Contains(g, "#"):
+			img, gn, _ := strings.Cut(g, "#")
+			if img != st.Image || !genArgRe.MatchString(gn) {
+				return nil, res, api.Errorf(api.CodeInvalid, "generation %q is not of image %s (write gN or %s#gN)", g, st.Image, st.Image)
+			}
 			ref = g
 		case genArgRe.MatchString(g):
 			ref = st.Image + "#" + g
@@ -187,8 +189,16 @@ func (s *Service) PlanUpgrade(ctx context.Context, name string, req UpgradeReque
 			return nil, res, api.Errorf(api.CodeInvalid, "bad generation %q", g)
 		}
 	}
-	target, err := s.Images.Ensure(ctx, s.Cfg.at(name).st.Root, ref)
-	if err != nil {
+	var target api.ImageGeneration
+	if req.DryRun {
+		// a dry run changes nothing: it does not build an image or receive a generation to describe what it would do
+		if target, err = s.Images.Peek(ctx, ref); err != nil {
+			if api.IsCode(err, api.CodeNotFound) {
+				return nil, res, api.Errorf(api.CodeNotFound, "%v", err).WithHint("a dry run does not build or receive an image: run `jailops image build` first, or leave out --dry-run")
+			}
+			return nil, res, err
+		}
+	} else if target, err = s.Images.Ensure(ctx, s.Cfg.at(name).st.Root, ref); err != nil {
 		return nil, res, err
 	}
 	if toImage != "" && req.Resume == nil {

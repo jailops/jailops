@@ -32,7 +32,7 @@ func TestJailLogsOverHTTP(t *testing.T) {
 	if err != nil || len(files) != 2 || files[0].Name != "messages" || files[0].Size != 48 || files[0].Kind != api.JailLogActive || files[1].Name != "nginx/error.log" {
 		t.Fatalf("%v %+v", err, files)
 	}
-	r, err := op.Jails().Log(c, "web", "messages", api.JailLogQuery{Tail: 1})
+	r, err := op.Jails().Log(c, "web", "messages", api.JailLogQuery{Limit: 1})
 	if err != nil || len(r.Lines) != 1 || r.Lines[0].Text != "Oct 29 11:30:00 web two" || r.Lines[0].N != 2 || r.NextOffset != 48 || !r.Truncated {
 		t.Fatalf("%v %+v", err, r)
 	}
@@ -56,8 +56,8 @@ func TestJailLogsOverHTTP(t *testing.T) {
 	// bad names and queries are refused at the door
 	tok := e.IdentityToken(api.PermOperator, true)
 	for _, path := range []string{
-		"/api/v1/jails/web/logs/.hidden", "/api/v1/jails/web/logs/a/b/c", "/api/v1/jails/web/logs/messages?tail=0",
-		"/api/v1/jails/web/logs/messages?tail=5001", "/api/v1/jails/web/logs/messages?since=later", "/api/v1/jails/web/logs/messages?offset=-1",
+		"/api/v1/jails/web/logs/.hidden", "/api/v1/jails/web/logs/a/b/c", "/api/v1/jails/web/logs/messages?limit=0",
+		"/api/v1/jails/web/logs/messages?limit=5001", "/api/v1/jails/web/logs/messages?since=later", "/api/v1/jails/web/logs/messages?offset=-1",
 		"/api/v1/jails/web/logs/messages?grep=" + strings.Repeat("a", 129),
 	} {
 		sep := "?"

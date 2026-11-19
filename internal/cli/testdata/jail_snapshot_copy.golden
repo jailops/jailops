@@ -21,7 +21,7 @@ Written:     3.0 MiB
 
 SPEC         STATUS
 ----         ------
-jail: web    written: 3145728
+jail: web    written_bytes: 3145728
 
 $ jailops jail snapshot show web s1 -o yaml
 metadata:
@@ -88,7 +88,7 @@ $ jailops jail show web2 -o json
   },
   "status": {
     "power": "stopped",
-    "generation": "g1"
+    "image_generation": "g1"
   }
 }
 

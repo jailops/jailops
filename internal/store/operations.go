@@ -112,7 +112,7 @@ func (r *Operations) MarkInterrupted(ctx context.Context) ([]*api.Operation, err
 		for _, op := range ops {
 			op.Status = api.OpFailure
 			op.MayCancel = false
-			op.Error = api.Errorf(api.CodeInternal, "operation interrupted by daemon restart")
+			op.Error = api.Errorf(api.CodeInterrupted, "operation interrupted by daemon restart")
 			op.UpdatedAt = now
 			doc, _ := json.Marshal(op)
 			if _, err := tx.ExecContext(ctx, "UPDATE operations SET status = ?, doc = ?, interrupted = 1, updated_at = ? WHERE id = ?",

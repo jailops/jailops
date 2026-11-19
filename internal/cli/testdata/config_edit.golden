@@ -1,17 +1,17 @@
 $ jailops config edit nginx
 jail/nginx configuration updated
-restart required for: limits.cpu, limits.memory
+restart required for: resources.cpu, resources.memory
 the jail was not restarted: run 'jailops restart nginx' when it suits you, or repeat with --restart
 
 $ jailops config show nginx
-KEY                VALUE
-hostname           nginx
-image              freebsd-15
-limits.cpu         4
-nic.eth0           lan
-nic.eth0.ipv4      10.20.0.10
-nic.eth0.network   lan
-storage            default
+KEY                    VALUE
+hostname               nginx
+image                  freebsd-15
+network.eth0           lan
+network.eth0.ipv4      10.20.0.10
+network.eth0.network   lan
+resources.cpu          4
+storage                default
 
 $ jailops config edit nginx
 jail/nginx unchanged

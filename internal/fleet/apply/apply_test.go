@@ -189,3 +189,58 @@ func TestRunStopsOnCancelledContextAndRefusedPlan(t *testing.T) {
 		t.Fatalf("a refused plan ran: %v %+v", err, res)
 	}
 }
+
+// A plan is made for one incarnation and one revision of an object. An object created again under the same name (new
+// UUID, generation 1 again) or changed since is not touched: the item fails and asks for a new plan.
+func TestRunRefusesAnObjectThatWasReplacedOrChangedSincePlanning(t *testing.T) {
+	ctx := context.Background()
+	s, srvs := session(t, "a")
+	srvs["a"].SeedNetwork(api.Network{Metadata: api.ObjectMeta{Name: "mine", ManagedBy: "sync:" + fleetID},
+		Spec: api.NetworkSpec{IPv4: &api.IPv4Net{Subnet: "10.9.1.0/24", Gateway: "10.9.1.1", Range: "10.9.1.10-10.9.1.20"}}})
+	c, _ := s.Client(ctx, "a")
+	live, err := c.Networks().Get(ctx, "mine")
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := netItem("a", "mine", plan.ActionDelete)
+	item.LiveUUID, item.LiveGeneration = "00000000-0000-4000-8000-000000000001", live.Metadata.Generation
+	p := &plan.Plan{FleetID: fleetID, Hosts: []string{"a"}, Items: []plan.Item{item}}
+	res, err := Run(ctx, s, p, Options{Prune: true})
+	if err == nil || res.Outcomes[0].Status != "failed" || !strings.Contains(res.Outcomes[0].Err.Error(), "created again since the plan") {
+		t.Fatalf("a replaced object was deleted: %v %+v", err, res.Outcomes)
+	}
+	if _, err := c.Networks().Get(ctx, "mine"); err != nil {
+		t.Fatal("the replacing object is gone")
+	}
+	item.LiveUUID, item.LiveGeneration = live.Metadata.UUID, live.Metadata.Generation+5
+	p = &plan.Plan{FleetID: fleetID, Hosts: []string{"a"}, Items: []plan.Item{item}}
+	res, err = Run(ctx, s, p, Options{Prune: true})
+	if err == nil || !strings.Contains(res.Outcomes[0].Err.Error(), "changed since the plan") {
+		t.Fatalf("an object of another revision was deleted: %v %+v", err, res.Outcomes)
+	}
+	// the incarnation and revision the plan saw: deleted
+	item.LiveUUID, item.LiveGeneration = live.Metadata.UUID, live.Metadata.Generation
+	p = &plan.Plan{FleetID: fleetID, Hosts: []string{"a"}, Items: []plan.Item{item}}
+	if _, err := Run(ctx, s, p, Options{Prune: true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Networks().Get(ctx, "mine"); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("the planned object is still there: %v", err)
+	}
+}
+
+// A host that answers with another identity than the one the plan was made for is not touched.
+func TestRunRefusesAHostWithAnotherIdentity(t *testing.T) {
+	ctx := context.Background()
+	s, _ := session(t, "a")
+	p := &plan.Plan{FleetID: fleetID, Hosts: []string{"a"}, HostUUIDs: map[string]string{"a": "00000000-0000-4000-8000-0000000000aa"},
+		Items: []plan.Item{netItem("a", "n", plan.ActionCreate)}}
+	res, err := Run(ctx, s, p, Options{})
+	if err == nil || res.Outcomes[0].Status != "failed" || !strings.Contains(res.Outcomes[0].Err.Error(), "answers with identity") {
+		t.Fatalf("a host with another identity was changed: %v %+v", err, res.Outcomes)
+	}
+	c, _ := s.Client(ctx, "a")
+	if _, err := c.Networks().Get(ctx, "n"); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("the network was created: %v", err)
+	}
+}

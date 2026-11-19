@@ -58,11 +58,11 @@ func TestImageUpgrade(t *testing.T) {
 	if !u.DryRun || u.Project != "" || len(h.mutations()) != before+1 {
 		t.Fatalf("dry-run request: %+v %v", u, h.mutations())
 	}
-	if j, _ := h.srv.JailIn("main", "web"); j.Status.Generation != "g1" {
+	if j, _ := h.srv.JailIn("main", "web"); j.Status.ImageGeneration != "g1" {
 		t.Fatalf("dry-run moved the jail: %+v", j.Status)
 	}
 	tr.ok("image", "upgrade", "freebsd-15")
-	if j, _ := h.srv.JailIn("shop", "api"); j.Status.Generation != "g2" {
+	if j, _ := h.srv.JailIn("shop", "api"); j.Status.ImageGeneration != "g2" {
 		t.Fatalf("the other project's jail did not move: %+v", j.Status)
 	}
 	tr.ok("image", "upgrade", "freebsd-15", "--project", "shop", "-o", "json")
@@ -70,7 +70,7 @@ func TestImageUpgrade(t *testing.T) {
 	if u.Project != "shop" {
 		t.Fatalf("request: %+v", u)
 	}
-	if j, _ := h.srv.JailIn("main", "web"); j.Status.Generation != "g2" {
+	if j, _ := h.srv.JailIn("main", "web"); j.Status.ImageGeneration != "g2" {
 		t.Fatalf("--project shop moved a jail of main: %+v", j.Status)
 	}
 	tr.ok("image", "upgrade", "freebsd-15", "--no-jails")
@@ -107,8 +107,8 @@ func TestNetworks(t *testing.T) {
 	tr.do("", "network", "create", "short")
 	tr.ok("network", "list")
 	tr.ok("network", "grant", "dmz", "--project", "main")
-	tr.ok("network", "list")          // what the project holds
-	tr.ok("network", "list", "--all") // every network, with the projects that hold it
+	tr.ok("network", "list")                   // what the project holds
+	tr.ok("network", "list", "--all-projects") // every network, with the projects that hold it
 	tr.ok("network", "show", "dmz")
 	tr.do("", "network", "grant", "lan", "--project", "other") // no such project
 	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--storage", "default", "--network", "dmz")
@@ -321,7 +321,7 @@ func TestBackup(t *testing.T) {
 	if code != 2 {
 		t.Fatalf("preflight failure: %d", code)
 	}
-	tr.do("", "backup", "restore", id, "--as", "web-b", "--map", "lan=elsewhere", "-y")
+	tr.do("", "backup", "restore", id, "--as", "web-b", "--network-map", "lan=elsewhere", "-y")
 	tr.ok("backup", "restore", id, "--as", "web-b", "-y")
 	// --replace needs the typed name; -y is not enough.
 	_, _, code = tr.do("", "backup", "restore", id, "--replace", "-y")

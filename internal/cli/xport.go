@@ -56,7 +56,7 @@ jailops --host host-a jail export web --to - | jailops --host host-b jail import
 				return c.Jails().Export(cmd.Context(), args[0], req, a.env.Stdout)
 			}
 			if _, err := os.Lstat(to); err == nil && !force {
-				return usagef("%s exists: choose another file, or --force to replace it", to)
+				return usagef("%s exists: choose another file, or --overwrite to replace it", to)
 			}
 			tmp, err := os.CreateTemp(filepath.Dir(to), "."+filepath.Base(to)+".partial-*")
 			if err != nil {
@@ -94,7 +94,7 @@ jailops --host host-a jail export web --to - | jailops --host host-b jail import
 	f.StringVar(&snapshot, "snapshot", "", "export the jail as of this snapshot of it instead of as of now")
 	f.BoolVar(&withVolumes, "with-volumes", false, "carry the volumes the jail attaches that are datasets of the project")
 	f.BoolVar(&zstd, "zstd", false, "compress the data in the file")
-	f.BoolVar(&force, "force", false, "replace the file when it exists")
+	f.BoolVar(&force, "overwrite", false, "replace the file when it exists")
 	return cmd
 }
 

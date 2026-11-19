@@ -684,7 +684,7 @@ func TestHostFWPendingLifecycle(t *testing.T) {
 	if _, err := c.HostFirewallApply(admin(), fwReq(api.DefaultHostFirewall(39110), true)); err != nil {
 		t.Errorf("a dry run while pending: %v", err)
 	}
-	if _, err := c.HostPendingConfirm(admin(), "0123456789abcdef"); !api.IsCode(err, api.CodeConflict) {
+	if _, err := c.HostPendingConfirm(admin(), "0123456789abcdef"); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Errorf("another id: %v", err)
 	}
 

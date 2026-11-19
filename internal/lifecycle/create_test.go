@@ -15,7 +15,7 @@ func TestCreateThin(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Jail.Status.Generation != "fb#g1" || res.Jail.Spec.Layout != api.LayoutThin {
+	if res.Jail.Status.ImageGeneration != "fb#g1" || res.Jail.Spec.Layout != api.LayoutThin {
 		t.Fatalf("%+v", res.Jail)
 	}
 	c := "tank/jailops/projects/alpha/jails/web"

@@ -394,11 +394,11 @@ func (s *Store) applyPut(cmd Command) (Result, *Event, error) {
 	}
 	switch {
 	case old == nil && cmd.ExpectGeneration > 0:
-		return Result{}, nil, api.Errorf(api.CodeConflict, "%s %q does not exist at generation %d", cmd.Kind, cmd.Name, cmd.ExpectGeneration)
+		return Result{}, nil, api.Errorf(api.CodePreconditionFailed, "%s %q does not exist at generation %d", cmd.Kind, cmd.Name, cmd.ExpectGeneration)
 	case old != nil && cmd.ExpectGeneration == 0:
 		return Result{}, nil, api.Errorf(api.CodeAlreadyExists, "%s %q already exists", cmd.Kind, cmd.Name)
 	case old != nil && cmd.ExpectGeneration > 0 && cmd.ExpectGeneration != old.Metadata.Generation:
-		return Result{}, nil, api.Errorf(api.CodeConflict, "%s %q is at generation %d, not %d", cmd.Kind, cmd.Name, old.Metadata.Generation, cmd.ExpectGeneration).
+		return Result{}, nil, api.Errorf(api.CodePreconditionFailed, "%s %q is at generation %d, not %d", cmd.Kind, cmd.Name, old.Metadata.Generation, cmd.ExpectGeneration).
 			WithDetail("generation", fmt.Sprint(old.Metadata.Generation))
 	case cmd.ExpectGeneration < AnyGeneration:
 		return Result{}, nil, api.Errorf(api.CodeInvalid, "invalid expect_generation %d", cmd.ExpectGeneration)
@@ -489,7 +489,7 @@ func (s *Store) applyDelete(cmd Command) (Result, *Event, error) {
 		return Result{}, nil, api.Errorf(api.CodeNotFound, "%s %q not found", cmd.Kind, firstNonEmpty(cmd.Name, cmd.UUID))
 	}
 	if cmd.ExpectGeneration > 0 && cmd.ExpectGeneration != old.Metadata.Generation {
-		return Result{}, nil, api.Errorf(api.CodeConflict, "%s %q is at generation %d, not %d", cmd.Kind, old.Metadata.Name, old.Metadata.Generation, cmd.ExpectGeneration).
+		return Result{}, nil, api.Errorf(api.CodePreconditionFailed, "%s %q is at generation %d, not %d", cmd.Kind, old.Metadata.Name, old.Metadata.Generation, cmd.ExpectGeneration).
 			WithDetail("generation", fmt.Sprint(old.Metadata.Generation))
 	}
 	if cmd.ExpectGeneration < AnyGeneration {

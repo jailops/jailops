@@ -209,7 +209,7 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		Volumes:   apps.Volumes(jail, app.Data),
 		Resources: limits,
 		SysVIPC:   app.SysVIPC,
-		Boot:      api.BootPolicy{StopTimeout: app.StopTimeout},
+		Boot:      api.BootPolicy{StopTimeoutSeconds: app.StopTimeout},
 	}
 	im, ref, err := s.imageFor(spec)
 	if err != nil {
@@ -257,7 +257,7 @@ func (s *Service) InstallApp(ctx context.Context, name string, req api.AppInstal
 		desc += " (dry run)"
 	}
 	op, err := s.Submit(ctx, OpSpec{
-		Description: desc, Locks: locks, Project: proj,
+		Action: api.OpAppInstall, Description: desc, Locks: locks, Project: proj,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + jail}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()
@@ -721,7 +721,7 @@ func (s *Service) setJailLabels(ctx context.Context, key string, set map[string]
 	}
 	s.mu.Lock()
 	if e := s.jails[key]; e != nil {
-		nj.Status.Generation = e.jail.Status.Generation
+		nj.Status.ImageGeneration = e.jail.Status.ImageGeneration
 		e.jail = nj
 	}
 	s.mu.Unlock()
@@ -742,7 +742,7 @@ func (s *Service) setJailAutostart(ctx context.Context, key string, on bool) err
 	}
 	s.mu.Lock()
 	if e := s.jails[key]; e != nil {
-		nj.Status.Generation = e.jail.Status.Generation
+		nj.Status.ImageGeneration = e.jail.Status.ImageGeneration
 		e.jail = nj
 	}
 	s.mu.Unlock()

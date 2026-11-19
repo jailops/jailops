@@ -107,10 +107,10 @@ run_workflows() {
 	else
 		echo "SKIPPED: kern.racct.enable is $racct on this host: the rctl rules of the limits are not checked"
 	fi
-	check "a limit is a key that changes at once" $J config set wft $P limits.disk=5G
-	expect "and reads back, in bytes" '^5368709120$' $J config get wft limits.disk $P
+	check "a limit is a key that changes at once" $J config set wft $P resources.disk=5G
+	expect "and reads back, in bytes" '^5368709120$' $J config get wft resources.disk $P
 
-	row_elsewhere cpu-pinning "the copy and conversion block of ci-freebsd-e2e.sh (limits.cpuset shows in cpuset -g -j)"
+	row_elsewhere cpu-pinning "the copy and conversion block of ci-freebsd-e2e.sh (resources.cpuset shows in cpuset -g -j)"
 
 	row expose "let the Internet reach a port of a jail"
 	check "expose a port" $J expose wft 8080 $P
@@ -120,7 +120,7 @@ run_workflows() {
 	row snapshot-rollback "snapshot a jail, roll it back"
 	check "a snapshot" $J jail snapshot create wft wfs1 $P
 	check "data written after it" wf_exec wft sh -c 'echo after > /var/db/wf-after'
-	check "roll the data back" $J jail rollback wft $P --data --snapshot wfs1 --confirm-data-loss
+	check "roll the data back" $J jail rollback wft $P --scope data --snapshot wfs1 --confirm-data-loss
 	wf_up wft
 	expect_refused "what was written after the snapshot is gone" wf_exec wft test -e /var/db/wf-after
 	expect "what was written before it stays" 'wf-keep' wf_exec wft cat /var/db/wf-keep

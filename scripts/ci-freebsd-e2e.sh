@@ -637,8 +637,8 @@ run_scale() {
 		[ "$gws" = "$count" ] || fail "cycle $cycle: $gws host ends carry the link-local gateway (want $count)"
 		bad=0; prev=""
 		for n in $names; do
-			a4=$($J config get "$n" nic.eth0.ipv4 --project scale | tail -1)
-			a6=$($J config get "$n" nic.eth0.ipv6 --project scale | tail -1 | sed 's#/.*##')
+			a4=$($J config get "$n" network.eth0.ipv4 --project scale | tail -1)
+			a6=$($J config get "$n" network.eth0.ipv6 --project scale | tail -1 | sed 's#/.*##')
 			echo "$a4" | grep -q '^10\.88\.0\.' || fail "$n has no address on the network ($a4)"
 			if [ -n "$prev" ]; then
 				$J exec --project scale "$n" -- ping -c1 -t5 "$prev4" >/dev/null 2>&1 || { bad=$((bad + 1)); echo "$n cannot reach $prev ($prev4)" >&2; }
@@ -689,8 +689,8 @@ run_soak() {
 	check "start the steady jails" $J start st1 st2 --project soak
 	waitfor "st1 runs" 60 jexec soak_st1 true
 	waitfor "st2 runs" 60 jexec soak_st2 true
-	a1=$($J config get st1 nic.eth0.ipv4 --project soak | tail -1)
-	a1v6=$($J config get st1 nic.eth0.ipv6 --project soak | tail -1 | sed 's#/.*##')
+	a1=$($J config get st1 network.eth0.ipv4 --project soak | tail -1)
+	a1v6=$($J config get st1 network.eth0.ipv6 --project soak | tail -1 | sed 's#/.*##')
 	bytes=$((secs * 4 * 100000)) # four chunks of 100000 bytes a second, one TCP connection each
 	rm -f "$work"/soak.*
 	$J exec --project soak st1 -- sh -c 'nc -l 9101 | wc -c > /tmp/rx4 & nc -6 -l 9102 | wc -c > /tmp/rx6 & wait' > "$work/soak.srv1" 2>&1 &
@@ -997,8 +997,8 @@ expect "a subnet of the uplink's own LAN is refused, naming the interface" "over
 out=$(expect "an uplink that does not exist is refused" 'uplink em9 cannot be used: em9 does not exist' sh -c "$J network create typo --ipv4 10.78.0.1/24 --uplink em9 --nat 2>&1; true")
 printf '%s\n' "$out" | grep -q "candidates on this host: .*$uplink" || { echo "$out" >&2; fail "the refusal of a missing uplink names the candidates"; }
 expect "the loopback is no uplink" 'lo0 is a lo interface' sh -c "$J network create typo --ipv4 10.78.0.1/24 --uplink lo0 --nat 2>&1; true"
-check "an attachment MTU other than the network's is accepted: every jail has a link of its own" $J config set web --project demo nic.eth0.mtu=1400
-check "and taken off again" $J config unset web --project demo nic.eth0.mtu
+check "an attachment MTU other than the network's is accepted: every jail has a link of its own" $J config set web --project demo network.eth0.mtu=1400
+check "and taken off again" $J config unset web --project demo network.eth0.mtu
 expect "a snapshot name of 70 characters is refused" 'at most 64' sh -c "$J jail snapshot create web $(printf '%070d' 0 | tr 0 s) --project demo 2>&1; true"
 expect "a project name of 14 characters is refused" 'at most 13' sh -c "$J project create abcdefghijklmn 2>&1; true"
 check "a project quota given as 4GiB" $J storage grant default --project demo --quota 4GiB
@@ -1031,9 +1031,9 @@ waitfor "the package step of the first start is over" 120 $J exec --project demo
 expect "a write beyond the quota fails outside the root clone too" 'quota exceeded' sh -c "$J exec --project demo lim -- /bin/dd if=/dev/random of=/var/db/fill bs=1m count=700 2>&1 | head -c 600; true"
 check "remove the file" $J exec --project demo lim -- /bin/rm -f /var/db/fill
 expect_retry "the default state limit is on the pass rules of the jail's anchor" 'keep state \([^)]*max 10000[,)]' pfctl -a jailops/demo/lim -sr
-check "a changed quota applies at once" $J config set lim --project demo limits.disk=1G
+check "a changed quota applies at once" $J config set lim --project demo resources.disk=1G
 expect "the container has the new quota" '^1073741824$' zfs get -Hp -o value quota "$pool/jailops/projects/demo/jails/lim"
-check "a state limit of the jail" $J config set lim --project demo limits.states=777
+check "a state limit of the jail" $J config set lim --project demo resources.states=777
 expect_retry "the anchor has the jail's state limit" 'keep state \([^)]*max 777[,)]' pfctl -a jailops/demo/lim -sr
 check "stop the jail with limits" $J stop lim --project demo
 [ "$racct" != 1 ] || expect "no rctl rule is left for it" '^0$' sh -c 'rctl 2>&1 | grep -c demo_lim; true'
@@ -1183,7 +1183,7 @@ expect "the shell setup left no condition" '^$' sh -c "$J jail show --project de
 
 step "what a thin jail holds on top of its image (docs/storage.md): jail diff lists a new file and a changed rc.conf and nothing else of ours"
 check "create a jail to compare" $J create diffjail --project demo --image "$img" --network lan --storage default
-check "its shell is sh: no package is installed behind our back" $J set diffjail --project demo shell sh
+check "its shell is sh: no package is installed behind our back" $J config set diffjail --project demo shell sh
 expect "a jail that was just made holds nothing on top of its image" '^total: no changes$' $J jail diff diffjail --project demo
 expect "the baselines are not snapshots of the jail" '^\[\]$' $J jail snapshot list diffjail --project demo -o json
 expect "the baseline snapshot of a persistent dataset is there" "^$pool/jailops/projects/demo/jails/diffjail/local@jailops-base\$" zfs list -H -o name -t snapshot "$pool/jailops/projects/demo/jails/diffjail/local@jailops-base"
@@ -1238,7 +1238,7 @@ edgeweb_if=$(ifconfig -a | awk '/^[a-z0-9]+:/ {n=$1; sub(":","",n)} /description
 [ -n "$edgeweb_if" ] || fail "the host end of edgeweb was not found"
 expect "its host end carries the gateway as a /32" 'inet 10\.66\.0\.1 netmask 0xffffffff' ifconfig "$edgeweb_if"
 if ifconfig "$edgeweb_if" | grep -q 'inet6 fe80::1%'; then fail "the host end of a jail on an IPv4-only network carries the link-local gateway"; fi
-edgeweb4=$($J config get edgeweb nic.eth0.ipv4 --project edge | tail -1)
+edgeweb4=$($J config get edgeweb network.eth0.ipv4 --project edge | tail -1)
 expect "the host reaches the jail through its own link" "interface: $edgeweb_if" route -n get "$edgeweb4"
 expect "the jail has its address on office as a /32" 'inet 10\.66\.0\.[0-9]+ netmask 0xffffffff' $J exec --project edge edgeweb -- ifconfig -a
 expect "the jail reaches its gateway" '1 packets received' $J exec --project edge edgeweb -- ping -c1 -t3 10.66.0.1
@@ -1308,7 +1308,7 @@ expect "doctor: every description" 'net.descriptions +PASS' $J doctor
 step "a jail leaves as a file and comes back as two others: jail export and jail import (docs/export-import.md), under another name and in another project, on this host"
 xf="$work/xferjail.jailexport"
 check "a jail with data of its own" $J create xferjail --project demo --image "$img" --network lan --storage default
-check "its shell is sh" $J set xferjail --project demo shell sh
+check "its shell is sh" $J config set xferjail --project demo shell sh
 check "start" $J start xferjail --project demo
 waitfor "the jail runs" 30 $J exec --project demo xferjail -- true
 check "data in /usr/local, /etc and /home" $J exec --project demo xferjail -- sh -c 'echo xfer-local > /usr/local/etc/xfer.marker && echo xfer_marker=YES >> /etc/rc.conf && echo xfer-home > /home/xfer.txt'
@@ -1437,18 +1437,18 @@ expect "the unified view shows it as web/messages" "^web/messages +.*$marker" $J
 expect "-o json carries the jail" "\"jail\":\"web\".*$marker" $J logs --project demo --jail web --grep "$marker" -o json
 expect "the sink delivers" '^ci-tcp +ok ' $J logs forward status
 expect "a list through the API may not keep the loopback sink of the file" 'target refused' sh -c "$J logs forward set ci-tcp --facility local4 2>&1; true"
-check "an empty list through the API replaces the file's" $J logs forward remove -y ci-tcp
-expect "the API refuses a loopback receiver" 'target refused' sh -c "$J logs forward add ci-lo --url tcp://127.0.0.1:15515  2>&1; true"
-expect "the API refuses a link-local receiver" 'target refused' sh -c "$J logs forward add ci-md --url https://169.254.169.254/x  2>&1; true"
+check "an empty list through the API replaces the file's" $J logs forward delete -y ci-tcp
+expect "the API refuses a loopback receiver" 'target refused' sh -c "$J logs forward create ci-lo --url tcp://127.0.0.1:15515  2>&1; true"
+expect "the API refuses a link-local receiver" 'target refused' sh -c "$J logs forward create ci-md --url https://169.254.169.254/x  2>&1; true"
 expect "the API refuses a token file outside logging.secrets_dir" 'not a file directly in' \
-	sh -c "$J logs forward add ci-wh --url https://hooks.example.com/ci --token-file /usr/local/etc/jailops/priv.conf  2>&1; true"
+	sh -c "$J logs forward create ci-wh --url https://hooks.example.com/ci --token-file /usr/local/etc/jailops/priv.conf  2>&1; true"
 expect "init made the secrets directory" '^root:jailops 750$' stat -f '%Su:%Sg %Lp' /usr/local/etc/jailops/sinks
 printf 'ci-token\n' > "$work/ci.token"
 check "a token file in the secrets directory" install -m 0640 -o root -g jailops "$work/ci.token" /usr/local/etc/jailops/sinks/ci.token
-check "the API accepts a token file there" $J logs forward add ci-wh --url https://hooks.example.com/ci --token-file /usr/local/etc/jailops/sinks/ci.token  --audit-only
+check "the API accepts a token file there" $J logs forward create ci-wh --url https://hooks.example.com/ci --token-file /usr/local/etc/jailops/sinks/ci.token  --audit-only
 expect "the forward test answers a class, not the receiver's words" '(dns lookup failed|connection refused|timeout|unreachable|HTTP [0-9]+|tls handshake failed|certificate not trusted|send failed)' sh -c "$J logs forward test ci-wh 2>&1; true"
-expect "removing a sink asks first" 'confirmation required' sh -c "$J logs forward remove ci-wh </dev/null 2>&1; true"
-check "remove the sink" $J logs forward remove -y ci-wh
+expect "removing a sink asks first" 'confirmation required' sh -c "$J logs forward delete ci-wh </dev/null 2>&1; true"
+check "remove the sink" $J logs forward delete -y ci-wh
 check "back to the list of jailopsd.yaml" $J logs forward reset -y
 rm -f /usr/local/etc/jailops/sinks/ci.token
 cp -p "$work/jailopsd.yaml.logfwd" /usr/local/etc/jailops/jailopsd.yaml
@@ -1579,7 +1579,7 @@ check "write a file in it" $J exec --project demo mail -- sh -c 'echo live-1 > /
 livemp=$(zfs get -H -o value mountpoint "$pool/jailops/projects/demo/volumes/live")
 expect "the file is in the volume on the host" '^live-1$' cat "$livemp/f"
 check "a second volume for a read-only attach" $J volume create liveq --project demo --storage default
-check "attach it read-only to the running jail" $J volume attach mail liveq /srv/liveq --ro --project demo
+check "attach it read-only to the running jail" $J volume attach mail liveq /srv/liveq --read-only --project demo
 expect_refused "a read-only attachment refuses a write" $J exec --project demo mail -- sh -c 'echo x > /srv/liveq/f'
 ( $J exec --project demo mail -- sh -c 'cd /srv/live && exec tail -f /dev/null' >/dev/null 2>&1 & )
 waitfor "a process of the jail holds the volume" 30 $J exec --project demo mail -- pgrep -f 'tail -f /dev/null'
@@ -1803,6 +1803,19 @@ n=0; until $J host show >/dev/null 2>&1; do n=$((n + 1)); [ $n -gt 30 ] && fail 
 fi
 
 if shard_on 3; then # shard 3: the OS upgrade, image upgrades, devices and the apps of the catalog
+# base_records_missing JAIL IMAGE GEN: how many base package records of the generation the jail's own package database
+# lacks or holds at another version (0 when the jail's records follow its generation); the root of the jail is queried from
+# the host because a thin jail has no pkg of its own inside.
+base_records_missing() {
+	_jr=$mount/projects/demo/jails/$1/root
+	_gr=$(zfs get -H -o value mountpoint "$pool/jailops/images/$2/$3")
+	zfs mount "$pool/jailops/images/$2/$3" >/dev/null 2>&1 || true # already mounted
+	pkg -r "$_gr" info -a -q | sort > /tmp/e2e-gen.$$
+	pkg -r "$_jr" info -a -q | sort > /tmp/e2e-jail.$$
+	comm -23 /tmp/e2e-gen.$$ /tmp/e2e-jail.$$ | wc -l | tr -d ' '
+	rm -f /tmp/e2e-gen.$$ /tmp/e2e-jail.$$
+}
+
 step "OS upgrade of a thin jail (new generation, /etc merge, health check, root rollback)"
 expect "a second jail takes the project's only network and storage, and says so" 'network lan: the only network of project demo' $J create up --project demo --image "$img" --start
 check "a second generation of the image" $J image build "$img" --from-generation g1
@@ -1815,8 +1828,21 @@ expect "the jail still runs" 'FreeBSD' $J exec --project demo up -- uname -s
 expect "its data survived the swap" 'ci-keep' $J exec --project demo up -- cat /root/keep
 expect "bash survived the swap (/usr/local is persistent)" '^bash$' $J exec --project demo up -- /usr/local/bin/bash -c 'echo bash'
 expect "so did the prompt" '38;5;39m' in_pty up /usr/local/bin/bash -ic 'echo "$PS1"'
+expect "the base package records of the jail are those of the second generation (docs/upgrade.md, what the swap keeps)" '^0$' base_records_missing up "$img" g2
+expect "a package the admin installed is still recorded" '^bash-' pkg -r "$mount/projects/demo/jails/up/root" info -a -q
+check "a record of the base set is lost while the jail runs on the second generation" pkg -r "$mount/projects/demo/jails/up/root" unregister -f -y FreeBSD-ftp
+expect "its absence is seen" '^1$' base_records_missing up "$img" g2
 check "root rollback" $J jail rollback up --project demo
 expect "back on the first generation" 'up +running.*#g1' $J jail list --project demo
+expect "the rollback started the jail on the first generation and its start made the records follow it (docs/upgrade.md)" '^0$' base_records_missing up "$img" g1
+expect_refused "repair-packages does not open the database of a running jail" $J jail repair-packages --project demo up
+check "a record of the base set is removed behind the running jail's back" pkg -r "$mount/projects/demo/jails/up/root" unregister -f -y FreeBSD-ftp
+expect "its absence is seen" '^1$' base_records_missing up "$img" g1
+check "restart the jail" $J restart --project demo up
+expect "the start made the records follow the generation" '^0$' base_records_missing up "$img" g1
+check "stop the jail" $J stop --project demo up
+expect "repair-packages on the stopped jail finds them in step" 'in step with the image' $J jail repair-packages --project demo up
+check "start the jail again" $J start --project demo up
 
 step "a jail moves to another image (docs/upgrade.md, A new release: move the jails) and back"
 check "a second image of the same release, created and built in one step" $J image create e2e-next --release "$release" --arch "$jarch" --build
@@ -1856,10 +1882,10 @@ expect "the data is in persistent datasets again" '^persistent$' zfs get -H -o v
 expect "its data survived both conversions" 'only-here' $J exec --project demo cpy -- cat /root/own
 expect "the copy runs" 'cpy +running' $J list --project demo -c name,state
 expect_refused "a Linux-only rule: a layout that is not one is refused" $J jail convert cpy --layout fat --project demo
-check "pin the copy to CPU 0" $J config set cpy --project demo limits.cpuset=0 --restart
+check "pin the copy to CPU 0" $J config set cpy --project demo resources.cpuset=0 --restart
 cpyjid=$(jls -j demo_cpy jid)
 expect "cpuset shows the CPUs of the running jail" 'mask: 0$' cpuset -g -j "$cpyjid"
-expect_refused "a CPU the host does not have is refused" $J config set cpy --project demo limits.cpuset=0-4095
+expect_refused "a CPU the host does not have is refused" $J config set cpy --project demo resources.cpuset=0-4095
 check "stop the copy" $J stop cpy --project demo
 check "delete the copy" $J delete --confirm-data-loss cpy --project demo
 expect_refused "the copy is gone, with its root.old" zfs list -H "$cpy"

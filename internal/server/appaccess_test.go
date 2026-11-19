@@ -249,7 +249,7 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 	}
 	// another database for the same source is refused; an address needs --db
 	_, err = oper.Apps().Allow(c, "db", api.AppAllow{Source: "jail:web-api", Database: "other"})
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	_, err = oper.Apps().Allow(c, "db", api.AppAllow{Source: "192.0.2.0/24"})
 	wantCode(t, err, api.CodeInvalid)
 	for _, bad := range []string{`x"; DROP ROLE postgres; --`, "postgres", "pg_read_all_data", "Shop"} {
@@ -261,7 +261,7 @@ func TestAppAccessPostgreSQL(t *testing.T) {
 	pg.roles["legacy"], pg.dbs["legacy"] = true, true
 	pg.mu.Unlock()
 	_, err = oper.Apps().Allow(c, "db", api.AppAllow{Source: "192.0.2.0/24", Database: "legacy"})
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	cidr, err := oper.Apps().Allow(c, "db", api.AppAllow{Source: "192.0.2.9/24", Database: "shop"})
 	if err != nil || cidr.Grant.Source != "192.0.2.0/24" || !strings.Contains(cidr.ConnectionString, "/shop?") ||
 		!strings.Contains(e.File(hbaPath), "host shop shop 192.0.2.0/24 scram-sha-256") {
@@ -464,7 +464,7 @@ func TestAppAccessFirewallOnly(t *testing.T) {
 	// a jail that a grant names as its source is not deleted until the grant is denied
 	stop(t, e.Admin, "cli")
 	_, err = e.Admin.Jails().Delete(c, "cli")
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	if !strings.Contains(err.Error(), "app-web") || !strings.Contains(err.(*api.Error).Hint, "jailops app deny web --from jail:cli") {
 		t.Fatalf("%v", err)
 	}
@@ -515,7 +515,7 @@ func TestRateLimitIsEnforced(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
 	startJailIn(t, e.Admin, dtest.WebJail("web"))
-	op, err := e.Admin.Jails().Config(c, "web", map[string]string{"nic.eth0.egress": "10M"}, nil, false)
+	op, err := e.Admin.Jails().Config(c, "web", map[string]string{"network.eth0.egress": "10M"}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

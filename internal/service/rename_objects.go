@@ -347,7 +347,7 @@ func (s *Service) RenameVolume(ctx context.Context, name string, o RenameOptions
 		if hp, err := s.profKind.p(api.HostProfileProject).list(); err == nil {
 			for _, x := range hp {
 				if profileNamesDisk(x.Spec.Config, name) {
-					return nil, api.Errorf(api.CodeConflict, "host profile %q attaches a volume named %q to the jails of every project", x.Meta.Name, name).
+					return nil, api.Errorf(api.CodePreconditionFailed, "host profile %q attaches a volume named %q to the jails of every project", x.Meta.Name, name).
 						WithHint("change the profile first")
 				}
 			}
@@ -396,7 +396,7 @@ func (s *Service) RenameVolume(ctx context.Context, name string, o RenameOptions
 	return s.runRename(ctx, j, o.DryRun)
 }
 
-// renameDiskKey renames the device of a disk.<volume> key of a profile.
+// renameDiskKey renames the device of a volumes.<name> key of a profile.
 func renameDiskKey(key, from, to string) (string, bool) {
 	rest, ok := strings.CutPrefix(key, "disk."+from)
 	if !ok || (rest != "" && !strings.HasPrefix(rest, ".")) {

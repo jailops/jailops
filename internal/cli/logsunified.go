@@ -42,7 +42,7 @@ jail of the project and merge the lines into one stream ordered by their
 timestamps. Each line starts with jail/file (project/jail/file with
 --all-projects), coloured per jail on a terminal. --jail (repeatable), -l
 KEY=VALUE (repeatable) and --app narrow the jails; --app-logs adds the log files
-installed apps declare. --tail, --since and --grep apply to every file before
+installed apps declare. --limit, --since and --grep apply to every file before
 the merge. A line without a timestamp of its own (a continued line) stays
 after the line before it. At most 50 files are read and 2000 lines printed;
 -f follows all of them. -o json prints one JSON object per line: time,
@@ -59,14 +59,14 @@ jailops logs -f
 jailops logs --jail web --jail db --since 15m
 jailops logs -l tier=front --grep error
 jailops logs --app postgresql --app-logs
-jailops logs --all-projects --tail 20 -o json
+jailops logs --all-projects --limit 20 -o json
 jailops logs web messages
 jailops logs forward status`
 	cmd.Args = cobra.RangeArgs(0, 2)
 	cmd.RunE = func(cmd *cobra.Command, args []string) error {
 		if len(args) == 0 || u.any() {
 			if len(args) > 0 {
-				return usagef("a jail name and --jail, --label, --app, --app-logs, --all-projects or --file do not go together: name the jails with --jail")
+				return usagef("a jail name and --jail, --selector, --app, --app-logs, --all-projects or --file do not go together: name the jails with --jail")
 			}
 			if o.events {
 				return usagef("--events needs a jail name")
@@ -85,7 +85,7 @@ jailops logs forward status`
 	}
 	f := cmd.Flags()
 	f.StringArrayVar(&u.jails, "jail", nil, "merge the logs of this jail (repeatable; default every jail)")
-	f.StringArrayVarP(&u.labels, "label", "l", nil, "merge the logs of the jails with this label KEY=VALUE (repeatable)")
+	f.StringArrayVarP(&u.labels, "selector", "l", nil, "merge the logs of the jails with these labels KEY=VALUE (repeatable)")
 	f.StringVar(&u.app, "app", "", "merge the logs of the jails installed from this app")
 	f.BoolVar(&u.appLogs, "app-logs", false, "add the log files the installed apps declare below /var/log")
 	f.BoolVar(&u.allProjects, "all-projects", false, "read every project you may use, not only the current one")
@@ -116,8 +116,8 @@ func jailColour(name string) string {
 }
 
 func (a *app) readUnified(ctx context.Context, u unifiedOpts, o logOpts) error {
-	if o.tail < 1 || o.tail > api.MaxLogTail {
-		return usagef("--tail takes between 1 and %d lines", api.MaxLogTail)
+	if o.limit < 1 || o.limit > api.MaxLogLimit {
+		return usagef("--limit takes between 1 and %d lines", api.MaxLogLimit)
 	}
 	if len(o.grep) > api.MaxLogGrep {
 		return usagef("--grep takes at most %d bytes", api.MaxLogGrep)
@@ -125,11 +125,11 @@ func (a *app) readUnified(ctx context.Context, u unifiedOpts, o logOpts) error {
 	if _, err := api.ParseLogSince(o.since, a.env.Now()); err != nil {
 		return usagef("--since takes an RFC 3339 time or a duration such as 15m, 2h or 1d")
 	}
-	q := api.LogsQuery{Jails: u.jails, App: u.app, AppLogs: u.appLogs, File: u.file, Tail: o.tail, Since: o.since, Grep: o.grep}
+	q := api.LogsQuery{Jails: u.jails, App: u.app, AppLogs: u.appLogs, File: u.file, Limit: o.limit, Since: o.since, Grep: o.grep}
 	for _, l := range u.labels {
 		k, v, ok := strings.Cut(l, "=")
 		if !ok || k == "" {
-			return usagef("--label takes KEY=VALUE, not %q", l)
+			return usagef("--selector takes KEY=VALUE, not %q", l)
 		}
 		if q.Labels == nil {
 			q.Labels = map[string]string{}
@@ -171,13 +171,13 @@ func (a *app) readUnified(ctx context.Context, u unifiedOpts, o logOpts) error {
 			return err
 		}
 		if first && !o.follow && r.Truncated && a.format != fmtJSON && a.format != fmtYAML {
-			fprintln(a.env.Stderr, "jailops: some lines were left out (at most 50 files and 2000 lines; --tail, --since, --grep and --jail choose what)")
+			fprintln(a.env.Stderr, "jailops: some lines were left out (at most 50 files and 2000 lines; --limit, --since, --grep and --jail choose what)")
 		}
 		if !o.follow {
 			return nil
 		}
 		first = false
-		q.Cursor, q.Tail = r.Next, api.MaxLogTail
+		q.Cursor, q.Limit = r.Next, api.MaxLogLimit
 		select {
 		case <-ctx.Done():
 			return nil

@@ -21,26 +21,26 @@ $ jailops jail logs web -o json
 [
   {
     "name": "messages",
-    "size": 214,
+    "size_bytes": 214,
     "modified_at": "2026-03-01T09:00:00Z",
     "kind": "active"
   },
   {
     "name": "messages.0",
-    "size": 9,
+    "size_bytes": 9,
     "modified_at": "2026-03-01T09:00:00Z",
     "kind": "rotated"
   },
   {
     "name": "messages.1.gz",
-    "size": 2,
+    "size_bytes": 2,
     "modified_at": "2026-03-01T09:00:00Z",
     "kind": "rotated",
     "compressed": true
   },
   {
     "name": "nginx/error.log",
-    "size": 37,
+    "size_bytes": 37,
     "modified_at": "2026-03-01T09:00:00Z",
     "kind": "active"
   }
@@ -53,7 +53,7 @@ Oct 29 11:30:00 web cron[2]: (root) CMD (job)
 Oct 29 11:50:00 web nginx[3]: Error: upstream timed out
 Oct 29 11:55:00 web sshd[1]: Disconnected
 
-$ jailops jail logs web messages --tail 2
+$ jailops jail logs web messages --limit 2
 Oct 29 11:50:00 web nginx[3]: Error: upstream timed out
 Oct 29 11:55:00 web sshd[1]: Disconnected
 
@@ -95,8 +95,8 @@ $ jailops jail logs web ../etc/passwd
 ! invalid: log file "../etc/passwd": at most one directory below /var/log
 [exit 2]
 
-$ jailops jail logs web messages --tail 0
-! usage: --tail takes between 1 and 5000 lines
+$ jailops jail logs web messages --limit 0
+! usage: --limit takes between 1 and 5000 lines
 ! hint: run 'jailops jail logs --help' for usage
 [exit 2]
 

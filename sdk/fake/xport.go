@@ -68,7 +68,7 @@ func (s *Server) importErrors(r *http.Request, m api.ExportManifest, req api.Jai
 	return errs
 }
 
-// jailImportPreflight answers POST /jail-imports/preflight.
+// jailImportPreflight answers POST /jail-imports?dry_run=true.
 func (s *Server) jailImportPreflight(w http.ResponseWriter, r *http.Request) {
 	in, e := decode[api.JailImportPreflight](r)
 	if e != nil {
@@ -80,9 +80,13 @@ func (s *Server) jailImportPreflight(w http.ResponseWriter, r *http.Request) {
 	writeSync(w, http.StatusOK, pf)
 }
 
-// jailImport answers POST /jail-imports.
+// jailImport answers POST /jail-imports: the finished operation of the import, or with dry_run=true the preflight.
 func (s *Server) jailImport(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	if q.Get("dry_run") == "true" {
+		s.jailImportPreflight(w, r)
+		return
+	}
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		writeErr(w, api.Errorf(api.CodeInvalid, "reading the file: %v", err))
@@ -98,7 +102,7 @@ func (s *Server) jailImport(w http.ResponseWriter, r *http.Request) {
 	}
 	req := api.JailImportRequest{As: q.Get("as"), KeepIP: q.Get("keep_ip") == "true", Start: q.Get("start") == "true"}
 	if errs := s.importErrors(r, m, req); len(errs) > 0 {
-		writeErr(w, api.Errorf(api.CodeConflict, "%s", errs[0]))
+		writeErr(w, api.Errorf(api.CodePreconditionFailed, "%s", errs[0]))
 		return
 	}
 	rc := s.info(r)
@@ -111,5 +115,12 @@ func (s *Server) jailImport(w http.ResponseWriter, r *http.Request) {
 	s.jails.insert(&j, false)
 	c := clone(&j)
 	s.mu.Unlock()
-	writeSync(w, http.StatusCreated, api.JailImported{Jail: c})
+	meta, _ := json.Marshal(api.JailImported{Jail: c})
+	now := s.now()
+	op := api.Operation{ID: newUUID(), Action: api.OpJailImport, Description: "Import jail " + c.Metadata.Name, Status: api.OpSuccess,
+		Project: rc.project, Metadata: meta, CreatedAt: now, UpdatedAt: now}
+	raw, _ := json.Marshal(op)
+	w.Header().Set("Location", "/api/v1/operations/"+op.ID)
+	writeJSON(w, http.StatusAccepted, api.Response{Type: api.ResponseAsync, Status: "Operation created", StatusCode: 202,
+		Operation: "/api/v1/operations/" + op.ID, Metadata: raw})
 }

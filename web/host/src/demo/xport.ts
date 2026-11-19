@@ -2,6 +2,7 @@
 // console's own reading and checking of files runs for real; the import makes the jail of the manifest. Only loaded for `?demo`.
 import type { ExportManifest, Image, Jail, JailImportRequest, Network, RestorePreflight } from '@jailops/shared/api/types'
 import { MAGIC } from '@/lib/exportfile'
+import { readyCond } from './data'
 
 export interface XportDb {
   jails: Jail[]
@@ -67,6 +68,6 @@ export function importedJail(m: ExportManifest, project: string, req: JailImport
   return {
     metadata: { name: req.as || m.name, scope: 'host', generation: 1, created_at: new Date().toISOString(), uuid: crypto.randomUUID(), ...(project ? { project } : {}), ...(m.labels ? { labels: m.labels } : {}) },
     spec,
-    status: { power: req.start ? 'running' : 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] },
+    status: { power: req.start ? 'running' : 'stopped', addresses: [], conditions: [readyCond(req.start ? 'running' : 'stopped')] },
   } as Jail
 }

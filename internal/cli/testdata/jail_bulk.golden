@@ -46,19 +46,19 @@ $ jailops stop --all -l env=prod
 $ jailops restart -l env=nothing
 ! No jails match.
 
-$ jailops restart -l env=prod,tier=data --grace 1m30s
+$ jailops restart -l env=prod,tier=data --timeout 1m30s
 jail/db restarted
 
-$ jailops restart db --grace soon
-! usage: --grace must be a number of seconds or a duration such as 30s, not "soon"
+$ jailops restart db --timeout soon
+! usage: --timeout must be a number of seconds or a duration such as 30s, not "soon"
 ! hint: run 'jailops restart --help' for usage
 [exit 2]
 
-$ jailops stop db --grace 5
+$ jailops stop db --timeout 5
 jail/db stopped
 
 $ jailops delete -l env=test
-! conflict: jail "tmp" is running
+! precondition_failed: jail "tmp" is running
 ! hint: stop it first ('jailops stop tmp'), or pass --stop to stop it before the delete
 [exit 5]
 
@@ -94,7 +94,7 @@ jail/tmp deleted
 ! Type the name "main" to confirm: 
 
 $ jailops delete web
-! conflict: jail "web" is running
+! precondition_failed: jail "web" is running
 ! hint: stop it first ('jailops stop web'), or pass --stop to stop it before the delete
 [exit 5]
 

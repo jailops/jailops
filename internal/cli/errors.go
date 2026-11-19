@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,7 +25,13 @@ const (
 	ExitConflict    = 5 // already exists, stale, busy, in use
 	ExitUnsupported = 6
 	ExitInternal    = 7
+	// ExitNotRun is what exec returns when JailOps itself failed before or while running the command in the jail. Any
+	// other status of exec is the command's own.
+	ExitNotRun = 125
 )
+
+// runsInJail names the commands whose exit status is the status of a command run in a jail.
+var runsInJail = map[string]bool{"jailops exec": true}
 
 // exitForCode maps an API error code to an exit code.
 func exitForCode(c api.Code) int {
@@ -35,13 +42,13 @@ func exitForCode(c api.Code) int {
 		return ExitAuth
 	case api.CodeNotFound:
 		return ExitNotFound
-	case api.CodeAlreadyExists, api.CodeConflict, api.CodeBusy, api.CodeIPConflict,
+	case api.CodeAlreadyExists, api.CodePreconditionFailed, api.CodeBusy, api.CodeIPConflict,
 		api.CodePoolExhausted, api.CodeImageInUse, api.CodeMergeConflict, api.CodeChainBroken,
 		api.CodeQuotaExceeded, api.CodeMaintenance, api.CodeMissingChunks, api.CodeLeaseExpired, api.CodeLocked:
 		return ExitConflict
 	case api.CodeUnsupported, api.CodeUnverified, api.CodeZFSIncompatible, api.CodeVersionSkew, api.CodeNotManaged:
 		return ExitUnsupported // not_managed: this host does not let JailOps do it
-	case api.CodeInternal, api.CodeNotLeader, api.CodeNoQuorum, api.CodeStopForced:
+	case api.CodeInternal, api.CodeInterrupted:
 		return ExitInternal
 	}
 	return ExitInternal // a code this client does not know is a server matter
@@ -77,6 +84,11 @@ func (a *app) printError(err error) {
 	var xe *exitError
 	if errors.As(err, &xe) {
 		return // the command's own output said what happened
+	}
+	if f, _ := parseFormat(a.output); f == fmtJSON || f == fmtYAML {
+		a.format = f // a mistake in the arguments is reported before the format is set
+		a.printErrorMachine(err)
+		return
 	}
 	w := a.env.Stderr
 	red := func(s string) colored { return colored(termText(s, false)) }
@@ -123,6 +135,55 @@ func (a *app) printError(err error) {
 	default:
 		fprintf(w, "%s: %s\n", red("error"), err)
 	}
+}
+
+// errorBody is what -o json and -o yaml write to stderr when a command fails: the members of an API error. The
+// CLI's own failures use the codes usage, aborted, cancelled, unavailable and error.
+type errorBody struct {
+	Error api.Error `json:"error"`
+}
+
+// printErrorMachine writes err as {"error":{code,message,hint,detail}}.
+func (a *app) printErrorMachine(err error) {
+	var ae *api.Error
+	var ue *usageError
+	var ab *abortError
+	var he *hintError
+	var body api.Error
+	switch {
+	case errors.As(err, &ae):
+		body = *ae
+		if body.Hint == "" {
+			body.Hint = fallbackHint(ae)
+		}
+	case errors.As(err, &ue):
+		body = api.Error{Code: "usage", Message: ue.err.Error(), Hint: ue.hint}
+		if body.Hint == "" && a.cmdPath != "" {
+			body.Hint = fmt.Sprintf("run '%s --help' for usage", a.cmdPath)
+		}
+	case errors.As(err, &he):
+		body = api.Error{Code: "error", Message: he.err.Error(), Hint: he.hint}
+	case errors.As(err, &ab):
+		body = api.Error{Code: "aborted", Message: ab.msg}
+	case errors.Is(err, sdk.ErrCancelled):
+		body = api.Error{Code: "cancelled", Message: err.Error()}
+	case isTransport(err):
+		msg, hint := a.unreachable(err)
+		body = api.Error{Code: "unavailable", Message: msg, Hint: hint}
+	default:
+		body = api.Error{Code: "error", Message: err.Error()}
+	}
+	v := errorBody{Error: body}
+	if a.format == fmtYAML {
+		if b, err := toYAML(v); err == nil {
+			_, _ = a.env.Stderr.Write(b)
+		}
+		return
+	}
+	enc := json.NewEncoder(a.env.Stderr)
+	enc.SetEscapeHTML(false)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(v)
 }
 
 // isTransport reports whether err is a failure to reach the daemon (no socket, refused, unreachable, timed out),
@@ -201,7 +262,7 @@ func fallbackHint(ae *api.Error) string {
 				return "list them with '" + cmd + "'; check --project, --host and --remote too"
 			}
 		}
-	case api.CodeConflict:
+	case api.CodePreconditionFailed:
 		if !strings.Contains(ae.Message, "changed") {
 			return ""
 		}

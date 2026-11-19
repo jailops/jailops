@@ -51,7 +51,7 @@ function addToHostFirewall(w: WireGuard): void {
   confirmAction({
     title: s.wireguard.fwAddTitle(p), confirmLabel: s.wireguard.fwAdd, text: s.wireguard.fwAddText(p, DEFAULT_CONFIRM),
     run: async () => {
-      await runOp(s.wireguard.fwAddTitle(p), () => api.host.applyFirewall({ spec: withWgAllow(fw, p, s.wireguard.fwComment(w.metadata.name)), confirm_within: DEFAULT_CONFIRM }))
+      await runOp(s.wireguard.fwAddTitle(p), () => api.host.applyFirewall({ spec: withWgAllow(fw, p, s.wireguard.fwComment(w.metadata.name)), confirm_within_seconds: DEFAULT_CONFIRM }))
       await refreshPending()
     },
     done: () => void l.reload(),

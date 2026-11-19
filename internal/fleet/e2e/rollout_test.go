@@ -68,7 +68,7 @@ func TestRolloutRunsInBatches(t *testing.T) {
 	contains(t, r.out, "batch 3/3")
 	contains(t, r.out, "rollout web-upgrade: done")
 	for _, n := range []string{"a", "b", "c"} {
-		if g := getJail(t, e.Hosts["web1"], n).Status.Generation; g != "g2" {
+		if g := getJail(t, e.Hosts["web1"], n).Status.ImageGeneration; g != "g2" {
 			t.Fatalf("%s is on %s", n, g)
 		}
 	}
@@ -88,7 +88,7 @@ func TestRolloutAbortsOnHealthGateFailureAndResumes(t *testing.T) {
 		t.Fatal("ran past the last batch")
 	}
 	for _, n := range []string{"a", "b"} {
-		if g := getJail(t, e.Hosts["web1"], n).Status.Generation; g != "g2" {
+		if g := getJail(t, e.Hosts["web1"], n).Status.ImageGeneration; g != "g2" {
 			t.Fatalf("%s is on %s", n, g)
 		}
 	}
@@ -123,7 +123,7 @@ func TestRolloutCanaryFailureLeavesTheRestUntouched(t *testing.T) {
 	r := mustFail(t, run(t, e, "rollout", "run", "web-upgrade"), "boom")
 	contains(t, r.out, "rollout web-upgrade: failed")
 	for _, n := range []string{"b", "c"} {
-		if g := getJail(t, e.Hosts["web1"], n).Status.Generation; g != "g1" {
+		if g := getJail(t, e.Hosts["web1"], n).Status.ImageGeneration; g != "g1" {
 			t.Fatalf("%s was touched after the canary failed: %s", n, g)
 		}
 		if got := upgradeCalls(e, n); got != 0 {
@@ -132,7 +132,7 @@ func TestRolloutCanaryFailureLeavesTheRestUntouched(t *testing.T) {
 	}
 	// Resume retries the canary (the injected failure is spent) and finishes.
 	mustOK(t, run(t, e, "rollout", "resume", "web-upgrade"))
-	if g := getJail(t, e.Hosts["web1"], "c").Status.Generation; g != "g2" {
+	if g := getJail(t, e.Hosts["web1"], "c").Status.ImageGeneration; g != "g2" {
 		t.Fatalf("c is on %s", g)
 	}
 	// --restart discards an unfinished state; resume of a finished one is a no-op.
@@ -144,11 +144,11 @@ func TestRolloutOnlyTouchesOwnedJails(t *testing.T) {
 	e.Hosts["web1"].Server.SeedJail(api.Jail{
 		Metadata: api.ObjectMeta{Name: "stranger", Project: fleettest.Project, Labels: map[string]string{"tier": "web"}},
 		Spec:     api.JailSpec{Image: "freebsd-15"},
-		Status:   api.JailStatus{Power: api.PowerRunning, Generation: "g1"},
+		Status:   api.JailStatus{Power: api.PowerRunning, ImageGeneration: "g1"},
 	})
 	r := mustOK(t, run(t, e, "rollout", "run", "web-upgrade"))
 	contains(t, r.out, "skip web1/stranger: not owned by this fleet")
-	if g := getJail(t, e.Hosts["web1"], "stranger").Status.Generation; g != "g1" {
+	if g := getJail(t, e.Hosts["web1"], "stranger").Status.ImageGeneration; g != "g1" {
 		t.Fatalf("a foreign jail was upgraded: %s", g)
 	}
 	mustFail(t, run(t, e, "rollout", "run", "nope"), "unknown rollout")

@@ -141,7 +141,7 @@ func (s *Service) autoUpgradeStatus(image string, spec api.ImageSpec) *api.Image
 	st := &api.ImageAutoUpgradeStatus{}
 	if au != nil && au.Enabled {
 		if at, err := parseAutoUpgradeAt(au.At); err == nil {
-			st.Next = nextAutoUpgrade(s.now().In(s.autoZone()), at).UTC()
+			st.NextAt = nextAutoUpgrade(s.now().In(s.autoZone()), at).UTC()
 		}
 	}
 	for i := len(runs) - 1; i >= 0 && len(st.Recent) < 10; i-- {
@@ -187,7 +187,7 @@ func (s *Service) runImageAutoUpgrades(ctx context.Context) {
 		}
 		var last time.Time
 		if runs := s.imageRuns(o.Meta.Name); len(runs) > 0 {
-			last = runs[len(runs)-1].Started
+			last = runs[len(runs)-1].StartedAt
 		}
 		if !autoUpgradeDue(now, last, at) {
 			continue
@@ -216,7 +216,7 @@ func (s *Service) AutoUpgradeImage(ctx context.Context, image string) api.ImageU
 		s.imgAuto.mu.Unlock()
 	}()
 
-	run := api.ImageUpgradeRun{Started: s.now().UTC()}
+	run := api.ImageUpgradeRun{StartedAt: s.now().UTC()}
 	actx := WithActor(ctx, Actor{Name: "auto-upgrade", Kind: "system", Perm: api.PermAdmin, Global: true})
 	fail := func(format string, a ...any) api.ImageUpgradeRun {
 		run.Result, run.Detail = api.ImageUpgradeRunFailed, fmt.Sprintf(format, a...)
@@ -247,7 +247,7 @@ func (s *Service) AutoUpgradeImage(ctx context.Context, image string) api.ImageU
 	var runErr error
 	var mu sync.Mutex // the operation fills run while this function may stop waiting for it
 	op, err := s.Submit(actx, OpSpec{
-		Description: "Automatic upgrade of image " + image, Locks: []string{imageLock(image)}, Resources: resources,
+		Action: api.OpImageAutoUpgrade, Description: "Automatic upgrade of image " + image, Locks: []string{imageLock(image)}, Resources: resources,
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			res, err := s.upgradeImageRun(ctx, h, mgr, image, from, api.ImageUpgrade{}, targets, true)
 			if err != nil {
@@ -301,7 +301,7 @@ func (s *Service) AutoUpgradeImage(ctx context.Context, image string) api.ImageU
 }
 
 func (s *Service) finishAutoRun(ctx context.Context, image string, run api.ImageUpgradeRun) api.ImageUpgradeRun {
-	run.Finished = s.now().UTC()
+	run.FinishedAt = s.now().UTC()
 	s.appendImageRun(image, run)
 	if run.Result == api.ImageUpgradeRunFailed {
 		s.log.Warn("automatic image upgrade failed", "image", image, "detail", run.Detail)
@@ -324,12 +324,12 @@ func (s *Service) imageJailKeys(image string) []string {
 }
 
 // autoUpgradePackages upgrades the packages inside the running jails of an image, after the image moved them. A
-// jail whose update strategy is manual, a jail that waits for a passphrase and a jail that is not running are left
+// jail that waits for a passphrase and a jail that is not running are left
 // alone; the first failure stops the run.
 func (s *Service) autoUpgradePackages(ctx context.Context, h *OpHandle, image string, run *api.ImageUpgradeRun) {
 	for _, key := range s.imageJailKeys(image) {
 		j, err := s.jailSnapshot(key)
-		if err != nil || j.Spec.Update.Strategy == api.UpdateManual || !s.managesPackages(j) {
+		if err != nil || !s.managesPackages(j) {
 			continue
 		}
 		s.mu.RLock()
@@ -347,7 +347,7 @@ func (s *Service) autoUpgradePackages(ctx context.Context, h *OpHandle, image st
 		recs := s.applyJail(ctx, h, key, applyWhat{packages: true}, true)
 		unlock()
 		for _, r := range recs {
-			if r.Result != api.UpdateOK {
+			if r.Result != api.UpdateSuccess {
 				run.JailsFailed++
 				run.Detail = fmt.Sprintf("jail %s: packages: %s", jailDisplay(j.Metadata.Project, j.Metadata.Name), r.Error)
 				return

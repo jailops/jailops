@@ -62,13 +62,13 @@ func (j *JailClient) Export(ctx context.Context, name string, o api.JailExportRe
 	return errors.New("jailops: the export ended without the server's confirmation: the file is not complete")
 }
 
-// ImportPreflight asks what an import of a file with this manifest would do (POST /api/v1/jail-imports/preflight). It
+// ImportPreflight asks what an import of a file with this manifest would do (POST /api/v1/jail-imports?dry_run=true). It
 // changes nothing.
 func (j *JailClient) ImportPreflight(ctx context.Context, in api.JailImportPreflight) (api.RestorePreflight, error) {
 	if err := j.c.need("jail_export"); err != nil {
 		return api.RestorePreflight{}, err
 	}
-	v, _, err := send[api.RestorePreflight](ctx, j.c, request{method: http.MethodPost, path: "/api/v1/jail-imports/preflight", body: in})
+	v, _, err := send[api.RestorePreflight](ctx, j.c, request{method: http.MethodPost, path: "/api/v1/jail-imports", query: url.Values{"dry_run": {"true"}}, body: in})
 	return v, err
 }
 
@@ -113,7 +113,14 @@ func (j *JailClient) Import(ctx context.Context, o api.JailImportRequest, r io.R
 	if derr != nil {
 		return api.JailImported{}, derr
 	}
-	return decodeMeta[api.JailImported](env.Metadata)
+	op, err := decodeMeta[api.Operation](env.Metadata)
+	if err != nil {
+		return api.JailImported{}, err
+	}
+	if op.Error != nil {
+		return api.JailImported{}, op.Error
+	}
+	return decodeMeta[api.JailImported](op.Metadata)
 }
 
 func sortedKeys(m map[string]string) []string {

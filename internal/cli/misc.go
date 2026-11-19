@@ -14,10 +14,26 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
+// check is one line of the doctor's table. -o json and -o yaml emit the same checks as api.DoctorCheck: a stable id,
+// the status as ok, info, warn or fail, and the text in message.
 type check struct {
-	Name   string `json:"check"`
-	Status string `json:"status"` // PASS, INFO, WARN, FAIL
-	Detail string `json:"detail"`
+	Name   string // as the table shows it
+	Status string // PASS, INFO, WARN, FAIL
+	Detail string
+}
+
+// doctorChecks is the machine form of the checks.
+func doctorChecks(checks []check) []api.DoctorCheck {
+	st := map[string]api.DoctorStatus{"PASS": api.DoctorOK, "INFO": api.DoctorInfo, "WARN": api.DoctorWarn, "FAIL": api.DoctorFail}
+	out := make([]api.DoctorCheck, 0, len(checks))
+	for _, c := range checks {
+		id := strings.ReplaceAll(c.Name, " ", "-")
+		if rest, ok := strings.CutPrefix(c.Name, "server: "); ok {
+			id = "server." + rest
+		}
+		out = append(out, api.DoctorCheck{Name: id, Status: st[c.Status], Message: c.Detail})
+	}
+	return out
 }
 
 func (a *app) doctorCmd() *cobra.Command {
@@ -157,7 +173,11 @@ never touched, and the command can be run again. With --dry-run it only lists wh
 					bad++
 				}
 			}
-			if err := a.emit(checks, stateStyle(1), func() ([]string, [][]string) {
+			var machine any = checks
+			if a.format == fmtJSON || a.format == fmtYAML {
+				machine = doctorChecks(checks)
+			}
+			if err := a.emit(machine, stateStyle(1), func() ([]string, [][]string) {
 				var rows [][]string
 				for _, c := range checks {
 					rows = append(rows, []string{c.Name, c.Status, c.Detail})
@@ -217,7 +237,7 @@ func (a *app) serverCmd() *cobra.Command {
 		Use:   "info",
 		Short: "Show the server's version, role, environment and extensions",
 		Long: `Show what the server reports about itself: version, role (host or backup node),
-whether it is a hub or clustered, how it sees this client, its environment
+whether it is a hub, how it sees this client, its environment
 (operating system, ZFS, pool, PF) and the API extensions it implements.`,
 		Example: "jailops server info\njailops --remote prod --host host-b server info -o yaml",
 		Args:    cobra.NoArgs,
@@ -241,7 +261,6 @@ whether it is a hub or clustered, how it sees this client, its environment
 			kv("API version", info.APIVersion)
 			kv("Role", info.Role)
 			kv("Hub", yesno(info.Hub))
-			kv("Clustered", yesno(info.Clustered))
 			kv("Seen as", info.Auth)
 			kv("OS", fmt.Sprintf("%s %s (%s)", info.Environment.OS, info.Environment.KernelVersion, info.Environment.Arch))
 			kv("ZFS", fmt.Sprintf("%s, pool %s", dash(info.Environment.ZFSVersion), dash(info.Environment.Pool)))
@@ -341,8 +360,7 @@ admin role.
 --limit (default 200, at most 1000), --since and --user are applied by the
 server. --action is a pattern matched by this client against the action
 ("POST /api/v1/jails/{name}/start"; * matches anything, case is ignored): the
-server then sends its 1000 newest entries that pass the other filters, and the
-client keeps the --limit newest that match.`,
+client reads pages, newest first, until --limit entries match or the log ends.`,
 		Example: "jailops audit\njailops audit --limit 50 -o json\njailops audit --since 24h --user alice\njailops audit --action 'DELETE *'",
 		Args:    cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -363,28 +381,32 @@ client keeps the --limit newest that match.`,
 			if since > 0 {
 				f.Since = a.env.Now().Add(-since)
 			}
-			if action != "" {
-				f.Limit = 1000
+			keep := limit
+			if keep == 0 {
+				keep = 200 // the server's default
 			}
-			items, err := c.AuditFiltered(cmd.Context(), f)
-			if err != nil {
-				return err
-			}
-			if action != "" {
-				kept := items[:0]
-				for _, e := range items {
-					if globMatch(action, e.Action) {
-						kept = append(kept, e)
+			var items []api.AuditEntry
+			// --action is matched here, so pages are read (newest first, by cursor) until --limit entries match or the log ends
+			for pages := 0; ; pages++ {
+				if action != "" {
+					f.Limit = 1000
+				}
+				page, next, err := c.AuditPage(cmd.Context(), f)
+				if err != nil {
+					return err
+				}
+				for _, e := range page {
+					if action == "" || globMatch(action, e.Action) {
+						items = append(items, e)
 					}
 				}
-				items = kept
-				keep := limit
-				if keep == 0 {
-					keep = 200 // the server's default
+				if action == "" || next == "" || len(items) >= keep || pages >= 50 {
+					break
 				}
-				if len(items) > keep {
-					items = items[:keep]
-				}
+				f.Cursor = next
+			}
+			if len(items) > keep {
+				items = items[:keep]
 			}
 			a.empty = "No audit entries match."
 			return a.emit(nonNil(items), nil, func() ([]string, [][]string) {

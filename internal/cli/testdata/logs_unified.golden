@@ -13,7 +13,7 @@ db/messages   Mar  1 08:56:00 db postgres[9]: checkpoint complete
 $ jailops logs -l tier=front --grep UPSTREAM
 web/messages  Mar  1 08:55:00 web nginx[3]: upstream timed out
 
-$ jailops logs --app postgresql --tail 1
+$ jailops logs --app postgresql --limit 1
 db/messages  Mar  1 08:56:00 db postgres[9]: checkpoint complete
 
 $ jailops logs --jail db -o json
@@ -25,21 +25,21 @@ $ jailops logs --all-projects --jail web
 main/web/messages  Mar  1 08:50:00 web sshd[1]: Accepted publickey
 main/web/messages  Mar  1 08:55:00 web nginx[3]: upstream timed out
 
-$ jailops logs web messages --tail 1
+$ jailops logs web messages --limit 1
 Mar  1 08:55:00 web nginx[3]: upstream timed out
 
 $ jailops logs web --jail db
-! usage: a jail name and --jail, --label, --app, --app-logs, --all-projects or --file do not go together: name the jails with --jail
+! usage: a jail name and --jail, --selector, --app, --app-logs, --all-projects or --file do not go together: name the jails with --jail
 ! hint: run 'jailops logs --help' for usage
 [exit 2]
 
-$ jailops logs --tail 0
-! usage: --tail takes between 1 and 5000 lines
+$ jailops logs --limit 0
+! usage: --limit takes between 1 and 5000 lines
 ! hint: run 'jailops logs --help' for usage
 [exit 2]
 
 $ jailops logs -l tier
-! usage: --label takes KEY=VALUE, not "tier"
+! usage: --selector takes KEY=VALUE, not "tier"
 ! hint: run 'jailops logs --help' for usage
 [exit 2]
 

@@ -1,4 +1,4 @@
-$ jailops set web shell /usr/local/bin/bash
+$ jailops config set web shell /usr/local/bin/bash
 jail/web configuration updated
 
 $ jailops config get web shell

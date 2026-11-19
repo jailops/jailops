@@ -69,7 +69,7 @@ const (
 type JailFileStat struct {
 	Path       string       `json:"path"`
 	Type       JailFileType `json:"type"`
-	Size       int64        `json:"size,omitempty"`
+	Size       int64        `json:"size_bytes,omitempty"`
 	Mode       string       `json:"mode,omitempty"` // permission bits in octal, "0644"
 	ModifiedAt *time.Time   `json:"modified_at,omitempty"`
 	Link       string       `json:"link,omitempty"` // the target of a symlink (text, never followed)

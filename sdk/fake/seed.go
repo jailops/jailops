@@ -24,8 +24,8 @@ func (s *Server) SeedJail(j api.Jail) {
 	if j.Status.Power == "" {
 		keep := j.Status
 		s.initJailStatus(&j)
-		if keep.Generation != "" {
-			j.Status.Generation = keep.Generation
+		if keep.ImageGeneration != "" {
+			j.Status.ImageGeneration = keep.ImageGeneration
 		}
 	}
 	s.jails.insert(&j, true)

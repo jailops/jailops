@@ -86,7 +86,7 @@ func TestAcceptanceDesign46(t *testing.T) {
 	_, err = rollback(w, RollbackOptions{JailRollback: api.JailRollback{Scope: api.RollbackData, Snapshot: "jo-pre-upgrade-100"}})
 	wantCode(t, err, api.CodeDataLoss)
 	// with confirmation (and force, because newer snapshots exist) data is discarded
-	if _, err = rollback(w, RollbackOptions{JailRollback: api.JailRollback{Scope: api.RollbackAll, Snapshot: "jo-pre-upgrade-100", ConfirmDataLoss: true}}); !api.IsCode(err, api.CodeConflict) {
+	if _, err = rollback(w, RollbackOptions{JailRollback: api.JailRollback{Scope: api.RollbackAll, Snapshot: "jo-pre-upgrade-100", ConfirmDataLoss: true}}); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Fatalf("newer snapshots must refuse without force: %v", err)
 	}
 	if _, err = rollback(w, RollbackOptions{JailRollback: api.JailRollback{Scope: api.RollbackAll, Snapshot: "jo-pre-upgrade-100", ConfirmDataLoss: true}, Force: true}); err != nil {
@@ -207,7 +207,7 @@ func TestRollbackRefusesWhenLaterSnapshotsExist(t *testing.T) {
 	before := w.state()
 	_, err := rollback(w, opts)
 	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Code != api.CodeConflict || !strings.Contains(ae.Detail["later_snapshots"], jc+"/home@s2") {
+	if !errors.As(err, &ae) || ae.Code != api.CodePreconditionFailed || !strings.Contains(ae.Detail["later_snapshots"], jc+"/home@s2") {
 		t.Fatal(err)
 	}
 	if w.state() != before {
@@ -230,7 +230,7 @@ func TestRollbackSkipsDatasetsWithoutSnapshotOnlyWithForce(t *testing.T) {
 	w.Z.Create(bg, jc+"/cache", map[string]string{PropManaged: "on", PropKind: KindPersistent, PropClass: "data", PropPath: "/srv/cache"})
 	opts := RollbackOptions{JailRollback: api.JailRollback{Scope: api.RollbackData, Snapshot: "s1", ConfirmDataLoss: true}}
 	_, err := rollback(w, opts)
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	opts.Force = true
 	res, err := rollback(w, opts)
 	if err != nil || len(res.Skipped) != 1 || res.Skipped[0] != jc+"/cache" {

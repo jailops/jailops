@@ -37,7 +37,7 @@ const available = computed(() => !!report.value?.available)
 async function savePolicy(): Promise<void> {
   error.value = null
   try {
-    await runOp(s.updates.policyTitle(name.value), () => api.jailConfig.post(name.value, { set: { 'updates.mode': policy.mode, 'updates.schedule': policy.schedule, 'updates.packages': String(policy.packages), 'updates.os': String(policy.os), 'updates.reboot': policy.reboot }, unset: policy.schedule ? [] : ['updates.schedule'] }))
+    await runOp(s.updates.policyTitle(name.value), () => api.jailConfig.post(name.value, { set: { 'update.mode': policy.mode, 'update.schedule': policy.schedule, 'update.packages': String(policy.packages), 'update.os': String(policy.os), 'update.reboot': policy.reboot }, unset: policy.schedule ? [] : ['update.schedule'] }))
     emit('saved')
   } catch (e) {
     error.value = e instanceof ApiError ? e : null
@@ -70,7 +70,7 @@ async function apply(): Promise<void> {
     busy.value = false
   }
 }
-const tone = (r: string) => (r === 'ok' ? 'ok' : r === 'rolled_back' ? 'warn' : 'danger')
+const tone = (r: string) => (r === 'success' ? 'ok' : r === 'rolled_back' || r === 'preflight_failed' ? 'warn' : 'danger')
 </script>
 
 <template>
@@ -113,7 +113,7 @@ const tone = (r: string) => (r === 'ok' ? 'ok' : r === 'rolled_back' ? 'warn' : 
         <div v-else class="table-wrap"><table data-test="history">
           <thead><tr><th>{{ s.updates.time }}</th><th>{{ s.updates.kind }}</th><th class="hide-sm">{{ s.updates.snapshot }}</th><th>{{ s.updates.result }}</th></tr></thead>
           <tbody><tr v-for="h in l.data.value.history" :key="h.id">
-            <td class="faint nowrap">{{ stamp(h.started) }}<div v-if="h.scheduled" class="faint">scheduled</div></td><td>{{ h.kind }}<div v-if="h.from" class="mono faint">{{ h.from }} &rarr; {{ h.to }}</div></td><td class="mono hide-sm">{{ h.snapshot || '-' }}</td>
+            <td class="faint nowrap">{{ stamp(h.started_at) }}<div v-if="h.scheduled" class="faint">scheduled</div></td><td>{{ h.kind }}<div v-if="h.from" class="mono faint">{{ h.from }} &rarr; {{ h.to }}</div></td><td class="mono hide-sm">{{ h.snapshot || '-' }}</td>
             <td><span class="pill" :class="tone(h.result)">{{ s.updates.results[h.result] }}</span><div v-if="h.error" class="faint">{{ h.error }}</div><div v-if="h.note" class="faint">{{ h.note }}</div><div v-if="h.root_rolled_back" class="faint">{{ s.updates.rootRollbackNote }}</div></td>
           </tr></tbody></table></div>
       </section>

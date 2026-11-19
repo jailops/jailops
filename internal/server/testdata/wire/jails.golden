@@ -1,12 +1,13 @@
 # create: the request is accepted with 202 and the Location of the operation; the operation ends with the jail
 > POST /api/v1/jails?project=alpha
-> {"metadata":{"name":"web"},"spec":{"image":"fb","storage":"default","update":{"strategy":"rebase","healthcheck":"/bin/true"},"network":[{"network":"lan","ipv4":"auto"}]}}
+> {"metadata":{"name":"web"},"spec":{"image":"fb","storage":"default","update":{"healthcheck":"/bin/true"},"network":[{"network":"lan","ipv4":"auto"}]}}
 < 202 Accepted
 < Content-Type: application/json
 < Cache-Control: no-store
 < Location: /api/v1/operations/<op1>
 {
   "metadata": {
+    "action": "jail.create",
     "created_at": "<time>",
     "description": "Create jail web",
     "id": "<op1>",
@@ -32,6 +33,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.create",
     "created_at": "<time>",
     "description": "Create jail web",
     "id": "<op1>",
@@ -66,13 +68,12 @@
         "shell": "/usr/local/bin/bash",
         "storage": "default",
         "update": {
-          "healthcheck": "/bin/true",
-          "strategy": "rebase"
+          "healthcheck": "/bin/true"
         }
       },
       "status": {
-        "freebsd_version": "15.0-RELEASE-p1",
-        "generation": "fb#g1",
+        "freebsd_version": "15.1-RELEASE-p1",
+        "image_generation": "fb#g1",
         "power": "stopped"
       }
     },
@@ -102,7 +103,7 @@
 < 200 OK
 < Content-Type: application/json
 < Cache-Control: no-store
-< ETag: "1"
+< ETag: "<uuid>-1"
 {
   "metadata": {
     "metadata": {
@@ -134,13 +135,12 @@
       "shell": "/usr/local/bin/bash",
       "storage": "default",
       "update": {
-        "healthcheck": "/bin/true",
-        "strategy": "rebase"
+        "healthcheck": "/bin/true"
       }
     },
     "status": {
-      "freebsd_version": "15.0-RELEASE-p1",
-      "generation": "fb#g1",
+      "freebsd_version": "15.1-RELEASE-p1",
+      "image_generation": "fb#g1",
       "power": "stopped"
     }
   },
@@ -186,13 +186,12 @@
         "shell": "/usr/local/bin/bash",
         "storage": "default",
         "update": {
-          "healthcheck": "/bin/true",
-          "strategy": "rebase"
+          "healthcheck": "/bin/true"
         }
       },
       "status": {
-        "freebsd_version": "15.0-RELEASE-p1",
-        "generation": "fb#g1",
+        "freebsd_version": "15.1-RELEASE-p1",
+        "image_generation": "fb#g1",
         "power": "stopped"
       }
     }
@@ -204,12 +203,12 @@
 
 # a merge patch with the current tag succeeds and answers the new tag
 > PATCH /api/v1/jails/web?project=alpha
-> If-Match: "1"
+> If-Match: "<uuid>-1"
 > {"spec":{"comment":"the site"}}
 < 200 OK
 < Content-Type: application/json
 < Cache-Control: no-store
-< ETag: "2"
+< ETag: "<uuid>-2"
 {
   "metadata": {
     "metadata": {
@@ -242,13 +241,12 @@
       "shell": "/usr/local/bin/bash",
       "storage": "default",
       "update": {
-        "healthcheck": "/bin/true",
-        "strategy": "rebase"
+        "healthcheck": "/bin/true"
       }
     },
     "status": {
-      "freebsd_version": "15.0-RELEASE-p1",
-      "generation": "fb#g1",
+      "freebsd_version": "15.1-RELEASE-p1",
+      "image_generation": "fb#g1",
       "power": "stopped"
     }
   },
@@ -259,14 +257,14 @@
 
 # the same tag again is stale: 412 conflict
 > PATCH /api/v1/jails/web?project=alpha
-> If-Match: "1"
+> If-Match: "<uuid>-1"
 > {"spec":{"comment":"other"}}
 < 412 Precondition Failed
 < Content-Type: application/json
 < Cache-Control: no-store
 {
   "error": {
-    "code": "conflict",
+    "code": "precondition_failed",
     "message": "jail \"web\" changed: current generation is 2"
   },
   "status": "Failure",
@@ -299,6 +297,7 @@
 < Location: /api/v1/operations/<op2>
 {
   "metadata": {
+    "action": "jail.start",
     "created_at": "<time>",
     "description": "Start jail web",
     "id": "<op2>",
@@ -324,6 +323,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.start",
     "created_at": "<time>",
     "description": "Start jail web",
     "id": "<op2>",
@@ -359,16 +359,15 @@
         "shell": "/usr/local/bin/bash",
         "storage": "default",
         "update": {
-          "healthcheck": "/bin/true",
-          "strategy": "rebase"
+          "healthcheck": "/bin/true"
         }
       },
       "status": {
         "addresses": [
           "10.20.0.10"
         ],
-        "freebsd_version": "15.0-RELEASE-p1",
-        "generation": "fb#g1",
+        "freebsd_version": "15.1-RELEASE-p1",
+        "image_generation": "fb#g1",
         "jid": 1,
         "power": "running",
         "started_at": "<time>"
@@ -404,8 +403,8 @@
     "addresses": [
       "10.20.0.10"
     ],
-    "freebsd_version": "15.0-RELEASE-p1",
-    "generation": "fb#g1",
+    "freebsd_version": "15.1-RELEASE-p1",
+    "image_generation": "fb#g1",
     "jid": 1,
     "power": "running",
     "started_at": "<time>"
@@ -424,6 +423,7 @@
 < Location: /api/v1/operations/<op3>
 {
   "metadata": {
+    "action": "jail.start",
     "created_at": "<time>",
     "description": "Start jail web",
     "id": "<op3>",
@@ -449,6 +449,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.start",
     "created_at": "<time>",
     "description": "Start jail web",
     "id": "<op3>",
@@ -484,16 +485,15 @@
         "shell": "/usr/local/bin/bash",
         "storage": "default",
         "update": {
-          "healthcheck": "/bin/true",
-          "strategy": "rebase"
+          "healthcheck": "/bin/true"
         }
       },
       "status": {
         "addresses": [
           "10.20.0.10"
         ],
-        "freebsd_version": "15.0-RELEASE-p1",
-        "generation": "fb#g1",
+        "freebsd_version": "15.1-RELEASE-p1",
+        "image_generation": "fb#g1",
         "jid": 1,
         "power": "running",
         "started_at": "<time>"
@@ -570,6 +570,7 @@
 < Location: /api/v1/operations/<op4>
 {
   "metadata": {
+    "action": "jail.stop",
     "created_at": "<time>",
     "description": "Stop jail web",
     "id": "<op4>",
@@ -595,6 +596,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.stop",
     "created_at": "<time>",
     "description": "Stop jail web",
     "id": "<op4>",
@@ -630,13 +632,12 @@
         "shell": "/usr/local/bin/bash",
         "storage": "default",
         "update": {
-          "healthcheck": "/bin/true",
-          "strategy": "rebase"
+          "healthcheck": "/bin/true"
         }
       },
       "status": {
-        "freebsd_version": "15.0-RELEASE-p1",
-        "generation": "fb#g1",
+        "freebsd_version": "15.1-RELEASE-p1",
+        "image_generation": "fb#g1",
         "power": "stopped"
       }
     },
@@ -668,6 +669,7 @@
 < Location: /api/v1/operations/<op5>
 {
   "metadata": {
+    "action": "jail.delete",
     "created_at": "<time>",
     "description": "Delete jail web",
     "id": "<op5>",
@@ -693,6 +695,7 @@
 < Cache-Control: no-store
 {
   "metadata": {
+    "action": "jail.delete",
     "created_at": "<time>",
     "description": "Delete jail web",
     "id": "<op5>",

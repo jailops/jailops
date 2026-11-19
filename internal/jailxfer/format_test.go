@@ -143,3 +143,37 @@ func TestSkippingAPartStillVerifiesIt(t *testing.T) {
 		t.Fatal("skipped corruption was not reported")
 	}
 }
+
+// A consumer that reads the stream in another process (zfs receive) reports that process's failure, not the reader's:
+// Fail names the file as the cause.
+func TestFailKeepsTheCauseWhenTheConsumerHidesIt(t *testing.T) {
+	for _, compress := range []bool{false, true} {
+		b, _ := sample(t, compress)
+		x, err := NewReader(bytes.NewReader(b[:len(b)-12]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for {
+			_, r, err := x.Next()
+			if err != nil {
+				break
+			}
+			_, _ = io.Copy(io.Discard, r) // the consumer's own error is what the caller sees
+		}
+		if !errors.Is(x.Fail(), ErrTruncated) {
+			t.Fatalf("compress=%v: Fail() = %v, want a truncated file", compress, x.Fail())
+		}
+	}
+	b, _ := sample(t, false)
+	x, _ := NewReader(bytes.NewReader(b))
+	for {
+		_, r, err := x.Next()
+		if err != nil {
+			break
+		}
+		_, _ = io.Copy(io.Discard, r)
+	}
+	if x.Fail() != nil {
+		t.Fatalf("a whole file has no failure, got %v", x.Fail())
+	}
+}

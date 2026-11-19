@@ -134,6 +134,11 @@ func TestJailImportDamagedFileLeavesNothing(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: imported", name)
 		}
+		// the caller is told what is wrong with the file; a damaged file is not an internal error
+		want := map[string]string{"truncated": "truncated", "flipped": "corrupt"}[name]
+		if !strings.Contains(err.Error(), want) || strings.Contains(err.Error(), "internal error") {
+			t.Errorf("%s: the error says %q, want it to name the file as %s", name, err.Error(), want)
+		}
 		if _, gerr := e.Admin.Jails().Get(ctx, "web2"); gerr == nil {
 			t.Errorf("%s: a jail was made", name)
 		}

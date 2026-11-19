@@ -11,44 +11,6 @@ import (
 	"jailops.net/jailops/sdk/api"
 )
 
-// unsupportedRoutes are routes with a permission entry whose feature is not
-// part of this version. They answer api.CodeUnsupported (501), never success.
-var unsupportedRoutes = []struct{ method, pattern, what string }{
-	{"PUT", "/api/v1/server", "changing the server configuration over the API"},
-	{"GET", "/api/v1/server/config", "reading the server configuration over the API"},
-	{"POST", "/api/v1/cluster/join", "cluster mode"},
-	{"GET", "/api/v1/cluster", "cluster mode"},
-	{"POST", "/api/v1/cluster/tokens", "cluster mode"},
-	{"PUT", "/api/v1/cluster", "cluster mode"},
-	{"DELETE", "/api/v1/cluster/members/{name}", "cluster mode"},
-	{"GET", "/api/v1/cluster/members", "cluster mode"},
-	{"GET", "/api/v1/jails/{name}/console", "listing console sessions (open one with POST /api/v1/jails/{name}/console)"},
-	{"POST", "/api/v1/jails/{name}/move", "cold moves"},
-	{"POST", "/api/v1/jails/{name}/snapshots/{snapshot}", "snapshot rename"},
-	{"GET", "/api/v1/jails/{name}/bundle", "bundle download"},
-	{"GET", "/api/v1/jail-templates", "jail templates"},
-	{"POST", "/api/v1/jail-templates", "jail templates"},
-	{"GET", "/api/v1/jail-templates/{name}", "jail templates"},
-	{"PUT", "/api/v1/jail-templates/{name}", "jail templates"},
-	{"DELETE", "/api/v1/jail-templates/{name}", "jail templates"},
-	{"POST", "/api/v1/backups", "starting a backup run"},
-	{"POST", "/api/v1/backups/receive", "backup transport (it is the job of the backup node)"},
-	{"GET", "/api/v1/backups/{id}/stream", "backup transport (it is the job of the backup node)"},
-	{"GET", "/api/v1/backups/chains", "backup transport (it is the job of the backup node)"},
-	{"POST", "/api/v1/backups/{id}/restore-preflight", "restore through this route (use POST /api/v1/restores)"},
-	{"POST", "/api/v1/backups/{id}/restore", "restore through this route (use POST /api/v1/restores)"},
-	{"GET", "/api/v1/groups", "host groups"},
-	{"POST", "/api/v1/groups", "host groups"},
-	{"GET", "/api/v1/groups/{name}", "host groups"},
-	{"PUT", "/api/v1/groups/{name}", "host groups"},
-	{"DELETE", "/api/v1/groups/{name}", "host groups"},
-	{"GET", "/api/v1/rollouts", "rollouts"},
-	{"POST", "/api/v1/rollouts", "rollouts"},
-	{"GET", "/api/v1/rollouts/{name}", "rollouts"},
-	{"PUT", "/api/v1/rollouts/{name}", "rollouts"},
-	{"DELETE", "/api/v1/rollouts/{name}", "rollouts"},
-}
-
 // resource describes one plain CRUD collection.
 type resource[T any] struct {
 	base   string
@@ -59,10 +21,10 @@ type resource[T any] struct {
 	put    func(ctx context.Context, key string, v T, expect int64) (T, error)
 	patch  func(ctx context.Context, key string, p map[string]any, expect int64) (T, error)
 	del    func(ctx context.Context, key string, expect int64) error
-	gen    func(T) int64
+	etag   func(T) string
 	name   func(T) string
 	// expanded answers ?expanded=true on an item.
-	expanded func(ctx context.Context, key string) (any, int64, error)
+	expanded func(ctx context.Context, key string) (any, string, error)
 }
 
 func (res resource[T]) routes() []route {
@@ -74,7 +36,7 @@ func (res resource[T]) routes() []route {
 				return err
 			}
 			ctx := c.r.Context()
-			if c.r.URL.Query().Get("all") == "true" {
+			if v := c.r.URL.Query().Get("all_projects"); v == "true" || v == "1" {
 				ctx = service.WithAllProjects(ctx)
 			}
 			v, err := res.list(ctx, l)
@@ -84,23 +46,23 @@ func (res resource[T]) routes() []route {
 			if v == nil {
 				v = []T{}
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		{method: "GET", pattern: item, h: func(c *rc) error {
 			if res.expanded != nil && c.r.URL.Query().Get("expanded") == "true" {
-				v, gen, err := res.expanded(c.r.Context(), c.pathArg(res.param))
+				v, etag, err := res.expanded(c.r.Context(), c.pathArg(res.param))
 				if err != nil {
 					return err
 				}
-				c.sync(200, v, gen)
+				c.sync(200, v, etag)
 				return nil
 			}
 			v, err := res.get(c.r.Context(), c.pathArg(res.param))
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, res.gen(v))
+			c.sync(200, v, res.etag(v))
 			return nil
 		}},
 	}
@@ -116,7 +78,7 @@ func (res resource[T]) routes() []route {
 				return err
 			}
 			c.w.Header().Set("Location", res.base+"/"+res.name(v))
-			c.sync(201, v, res.gen(v))
+			c.sync(201, v, res.etag(v))
 			return nil
 		}})
 	}
@@ -134,7 +96,7 @@ func (res resource[T]) routes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, res.gen(v))
+			c.sync(200, v, res.etag(v))
 			return nil
 		}})
 	}
@@ -152,7 +114,7 @@ func (res resource[T]) routes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, res.gen(v))
+			c.sync(200, v, res.etag(v))
 			return nil
 		}})
 	}
@@ -165,7 +127,7 @@ func (res resource[T]) routes() []route {
 			if err := res.del(c.r.Context(), c.pathArg(res.param), exp); err != nil {
 				return err
 			}
-			c.sync(200, struct{}{}, 0)
+			c.sync(200, struct{}{}, "")
 			return nil
 		}})
 	}
@@ -184,10 +146,10 @@ func (s *Server) routeTable() []route {
 				// a caller that proved nothing learns what a client negotiates with, not the host's name, id,
 				// software version or pool
 				i := svc.Info("untrusted")
-				c.sync(200, api.ServerInfo{APIVersion: i.APIVersion, APIExtensions: i.APIExtensions, Role: i.Role, Auth: i.Auth}, 0)
+				c.sync(200, api.ServerInfo{APIVersion: i.APIVersion, APIExtensions: i.APIExtensions, Role: i.Role, Auth: i.Auth}, "")
 				return nil
 			}
-			c.sync(200, svc.Info("trusted"), 0)
+			c.sync(200, svc.Info("trusted"), "")
 			return nil
 		}},
 		// Readiness for load balancers and monitors: a fixed class only, never an error text.
@@ -207,7 +169,7 @@ func (s *Server) routeTable() []route {
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/doctor", h: func(c *rc) error {
-			c.sync(200, svc.Doctor(c.r.Context()), 0)
+			c.sync(200, svc.Doctor(c.r.Context()), "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/doctor/fix", h: func(c *rc) error {
@@ -219,16 +181,16 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, res, 0)
+			c.sync(200, res, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/ndp", h: func(c *rc) error {
-			c.sync(200, svc.NDPStatus(c.r.Context()), 0)
+			c.sync(200, svc.NDPStatus(c.r.Context()), "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/ndp/events", h: func(c *rc) error {
 			after, _ := strconv.ParseUint(c.r.URL.Query().Get("after"), 10, 64)
-			c.sync(200, svc.NDPEvents(c.r.Context(), after), 0)
+			c.sync(200, svc.NDPEvents(c.r.Context(), after), "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/resources", h: func(c *rc) error {
@@ -236,7 +198,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/audit", h: s.handleAudit},
@@ -250,7 +212,7 @@ func (s *Server) routeTable() []route {
 		list:   svc.ListImages,
 		get:    func(ctx context.Context, k string) (api.Image, error) { return svc.GetImage(ctx, k) },
 		create: svc.CreateImage, put: svc.UpdateImage, patch: svc.PatchImage, del: svc.DeleteImage,
-		gen: func(v api.Image) int64 { return v.Metadata.Generation }, name: func(v api.Image) string { return v.Metadata.Name },
+		etag: func(v api.Image) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Image) string { return v.Metadata.Name },
 	}.routes()...)
 	add(
 		route{method: "GET", pattern: "/api/v1/images/{name}/generations", h: func(c *rc) error {
@@ -258,7 +220,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/images/{name}/generations", h: func(c *rc) error {
@@ -282,7 +244,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "DELETE", pattern: "/api/v1/images/{name}/generations/{gen}", h: func(c *rc) error {
@@ -322,14 +284,14 @@ func (s *Server) routeTable() []route {
 		list:   svc.ListNetworks,
 		get:    func(ctx context.Context, k string) (api.Network, error) { return svc.GetNetwork(ctx, k) },
 		create: svc.CreateNetwork, put: svc.UpdateNetwork, patch: svc.PatchNetwork, del: svc.DeleteNetwork,
-		gen: func(v api.Network) int64 { return v.Metadata.Generation }, name: func(v api.Network) string { return v.Metadata.Name },
+		etag: func(v api.Network) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Network) string { return v.Metadata.Name },
 	}.routes()...)
 	add(route{method: "GET", pattern: "/api/v1/networks/{name}/leases", h: func(c *rc) error {
 		v, err := svc.Leases(c.r.Context(), c.pathArg("name"))
 		if err != nil {
 			return err
 		}
-		c.sync(200, v, 0)
+		c.sync(200, v, "")
 		return nil
 	}})
 	add(s.wireguardRoutes()...)
@@ -337,13 +299,13 @@ func (s *Server) routeTable() []route {
 		list:   svc.ListPolicies,
 		get:    func(ctx context.Context, k string) (api.FirewallPolicy, error) { return svc.GetPolicy(ctx, k) },
 		create: svc.CreatePolicy, put: svc.UpdatePolicy, patch: svc.PatchPolicy, del: svc.DeletePolicy,
-		gen: func(v api.FirewallPolicy) int64 { return v.Metadata.Generation }, name: func(v api.FirewallPolicy) string { return v.Metadata.Name },
+		etag: func(v api.FirewallPolicy) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.FirewallPolicy) string { return v.Metadata.Name },
 	}.routes()...)
 	add(resource[api.AddressSet]{base: "/api/v1/firewall/address-sets", param: "name",
 		list:   svc.ListAddressSets,
 		get:    func(ctx context.Context, k string) (api.AddressSet, error) { return svc.GetAddressSet(ctx, k) },
 		create: svc.CreateAddressSet, put: svc.UpdateAddressSet, patch: svc.PatchAddressSet, del: svc.DeleteAddressSet,
-		gen: func(v api.AddressSet) int64 { return v.Metadata.Generation }, name: func(v api.AddressSet) string { return v.Metadata.Name },
+		etag: func(v api.AddressSet) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.AddressSet) string { return v.Metadata.Name },
 	}.routes()...)
 
 	// Backup (host side).
@@ -351,13 +313,13 @@ func (s *Server) routeTable() []route {
 		list:   svc.ListTargets,
 		get:    func(ctx context.Context, k string) (api.BackupTarget, error) { return svc.GetTarget(ctx, k) },
 		create: svc.CreateTarget, put: svc.UpdateTarget, patch: svc.PatchTarget, del: svc.DeleteTarget,
-		gen: func(v api.BackupTarget) int64 { return v.Metadata.Generation }, name: func(v api.BackupTarget) string { return v.Metadata.Name },
+		etag: func(v api.BackupTarget) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.BackupTarget) string { return v.Metadata.Name },
 	}.routes()...)
 	add(resource[api.BackupPolicy]{base: "/api/v1/backup-policies", param: "name",
 		list:   svc.ListBackupPolicies,
 		get:    func(ctx context.Context, k string) (api.BackupPolicy, error) { return svc.GetBackupPolicy(ctx, k) },
 		create: svc.CreateBackupPolicy, put: svc.UpdateBackupPolicy, patch: svc.PatchBackupPolicy, del: svc.DeleteBackupPolicy,
-		gen: func(v api.BackupPolicy) int64 { return v.Metadata.Generation }, name: func(v api.BackupPolicy) string { return v.Metadata.Name },
+		etag: func(v api.BackupPolicy) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.BackupPolicy) string { return v.Metadata.Name },
 	}.routes()...)
 	add(
 		route{method: "GET", pattern: "/api/v1/backups", h: func(c *rc) error {
@@ -369,7 +331,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/backups/{id}", h: func(c *rc) error {
@@ -377,7 +339,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, v.Metadata.Generation)
+			c.sync(200, v, api.ETag(v.Metadata.UUID, v.Metadata.Generation))
 			return nil
 		}},
 		route{method: "DELETE", pattern: "/api/v1/backups/{id}", h: func(c *rc) error {
@@ -393,7 +355,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		// The recovery key is in this reply and nowhere else: a synchronous
@@ -409,7 +371,7 @@ func (s *Server) routeTable() []route {
 				return err
 			}
 			c.w.Header().Set("Cache-Control", "no-store")
-			c.sync(201, v, 0)
+			c.sync(201, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/backup/key/escrow", h: func(c *rc) error {
@@ -421,7 +383,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		// The key is in the request body and nowhere else: not in the audit detail (only the key domain, which is not
@@ -446,7 +408,7 @@ func (s *Server) routeTable() []route {
 				return err
 			}
 			c.w.Header().Set("Cache-Control", "no-store")
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/backups/run", h: func(c *rc) error {
@@ -478,6 +440,24 @@ func (s *Server) routeTable() []route {
 			if err := c.decode(&req); err != nil {
 				return err
 			}
+			if !req.DryRun {
+				// a restore that starts an operation can be repeated safely with an Idempotency-Key
+				op, err := c.idempotent(req, func() (api.Operation, error) {
+					_, op, err := svc.Restore(c.r.Context(), req)
+					if err != nil || op == nil {
+						if err == nil {
+							err = api.Errorf(api.CodeInternal, "restore started no operation")
+						}
+						return api.Operation{}, err
+					}
+					return *op, nil
+				})
+				if err != nil {
+					return err
+				}
+				c.async(op)
+				return nil
+			}
 			pf, op, err := svc.Restore(c.r.Context(), req)
 			if err != nil {
 				return err
@@ -486,7 +466,7 @@ func (s *Server) routeTable() []route {
 				c.async(*op)
 				return nil
 			}
-			c.sync(200, pf, 0)
+			c.sync(200, pf, "")
 			return nil
 		}},
 	)
@@ -496,11 +476,11 @@ func (s *Server) routeTable() []route {
 		list:   svc.ListProfiles,
 		get:    func(ctx context.Context, k string) (api.Profile, error) { return svc.GetProfile(ctx, k) },
 		create: svc.CreateProfile, put: svc.UpdateProfile, patch: svc.PatchProfile, del: svc.DeleteProfile,
-		gen: func(v api.Profile) int64 { return v.Metadata.Generation }, name: func(v api.Profile) string { return v.Metadata.Name },
+		etag: func(v api.Profile) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Profile) string { return v.Metadata.Name },
 	}.routes()...)
 	add(
 		route{method: "GET", pattern: "/api/v1/config-keys", h: func(c *rc) error {
-			c.sync(200, api.ConfigKeys(), 0)
+			c.sync(200, api.ConfigKeys(), "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/updates", h: func(c *rc) error {
@@ -508,7 +488,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/updates/check", h: func(c *rc) error {
@@ -540,7 +520,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/reach", h: func(c *rc) error {
@@ -548,7 +528,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/diff", h: func(c *rc) error {
@@ -565,7 +545,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/exposed", h: func(c *rc) error {
@@ -573,7 +553,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/top", h: func(c *rc) error {
@@ -590,7 +570,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/provision", h: func(c *rc) error {
@@ -614,7 +594,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, res, 0)
+			c.sync(200, res, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/unexpose", h: func(c *rc) error {
@@ -626,7 +606,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, res, 0)
+			c.sync(200, res, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/shell-setup", h: func(c *rc) error {
@@ -635,6 +615,18 @@ func (s *Server) routeTable() []route {
 				return err
 			}
 			op, err := svc.ShellSetupJail(c.r.Context(), c.pathArg("name"), in)
+			if err != nil {
+				return err
+			}
+			c.async(op)
+			return nil
+		}},
+		route{method: "POST", pattern: "/api/v1/jails/{name}/repair-packages", h: func(c *rc) error {
+			var in api.RepairPackagesRequest
+			if err := c.decodeOptional(&in); err != nil {
+				return err
+			}
+			op, err := svc.RepairPackagesJail(c.r.Context(), c.pathArg("name"), in)
 			if err != nil {
 				return err
 			}
@@ -663,7 +655,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/apps/{name}", h: func(c *rc) error {
@@ -671,7 +663,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/apps/{name}/install", h: func(c *rc) error {
@@ -695,7 +687,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "PUT", pattern: "/api/v1/host/identity", h: func(c *rc) error {
@@ -713,7 +705,7 @@ func (s *Server) routeTable() []route {
 			if v.Snapshot != "" {
 				c.detail = "snapshot=" + v.Snapshot
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/host/snapshots", h: func(c *rc) error {
@@ -721,7 +713,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/host/snapshots/{name}/restore", h: func(c *rc) error {
@@ -739,7 +731,7 @@ func (s *Server) routeTable() []route {
 			if v.Snapshot != "" {
 				c.detail = "snapshot=" + v.Snapshot
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/host/firewall", h: func(c *rc) error {
@@ -747,7 +739,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "PUT", pattern: "/api/v1/host/firewall", h: func(c *rc) error {
@@ -765,7 +757,7 @@ func (s *Server) routeTable() []route {
 			if v.Pending != nil {
 				c.detail = "snapshot=" + v.Snapshot + " pending=" + v.Pending.ID
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/host/pending", h: func(c *rc) error {
@@ -773,7 +765,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/host/pending/confirm", h: func(c *rc) error {
@@ -788,7 +780,7 @@ func (s *Server) routeTable() []route {
 			if v.Last != nil {
 				c.detail = "pending=" + v.Last.ID + " " + v.Last.Outcome
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/host/pending/revert", h: func(c *rc) error {
@@ -803,7 +795,7 @@ func (s *Server) routeTable() []route {
 			if v.Last != nil {
 				c.detail = "pending=" + v.Last.ID + " " + v.Last.Outcome
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 	)
@@ -813,7 +805,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "PUT", pattern: "/api/v1/host/certificate", h: func(c *rc) error {
@@ -826,7 +818,7 @@ func (s *Server) routeTable() []route {
 				return err
 			}
 			c.detail = "uploaded fingerprint=" + v.Current.Fingerprint
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/host/certificate/acme", h: func(c *rc) error {
@@ -839,7 +831,7 @@ func (s *Server) routeTable() []route {
 				return err
 			}
 			c.detail = "acme " + auditValue(strings.Join(in.Domains, ","))
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/host/certificate/self-signed", h: func(c *rc) error {
@@ -848,7 +840,7 @@ func (s *Server) routeTable() []route {
 				return err
 			}
 			c.detail = "self-signed fingerprint=" + v.Current.Fingerprint
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/setup", h: func(c *rc) error {
@@ -856,7 +848,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/setup", h: func(c *rc) error {
@@ -869,7 +861,7 @@ func (s *Server) routeTable() []route {
 				return err
 			}
 			c.object = "/api/v1/users/" + v.User.Metadata.Name
-			c.sync(201, v, 0)
+			c.sync(201, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/setup/token", h: func(c *rc) error {
@@ -877,7 +869,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 	)
@@ -889,13 +881,13 @@ func (s *Server) routeTable() []route {
 		list:   svc.ListProjects,
 		get:    func(ctx context.Context, k string) (api.Project, error) { return svc.GetProject(ctx, k) },
 		create: svc.CreateProject, put: svc.UpdateProject, patch: svc.PatchProject, del: svc.DeleteProject,
-		gen: func(v api.Project) int64 { return v.Metadata.Generation }, name: func(v api.Project) string { return v.Metadata.Name },
+		etag: func(v api.Project) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Project) string { return v.Metadata.Name },
 	}.routes()...)
 	add(resource[api.Storage]{base: "/api/v1/storage", param: "name",
 		list:   svc.ListStorage,
 		get:    func(ctx context.Context, k string) (api.Storage, error) { return svc.GetStorage(ctx, k) },
 		create: svc.CreateStorage, put: svc.UpdateStorage, patch: svc.PatchStorage, del: svc.DeleteStorage,
-		gen: func(v api.Storage) int64 { return v.Metadata.Generation }, name: func(v api.Storage) string { return v.Metadata.Name },
+		etag: func(v api.Storage) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Storage) string { return v.Metadata.Name },
 	}.routes()...)
 	add(
 		route{method: "POST", pattern: "/api/v1/trust/tokens", h: func(c *rc) error {
@@ -908,7 +900,7 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(201, out, 0)
+			c.sync(201, out, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/trust/clients", h: func(c *rc) error {
@@ -922,7 +914,7 @@ func (s *Server) routeTable() []route {
 			}
 			c.object = "/api/v1/certificates/" + cert.Metadata.Name
 			c.w.Header().Set("Location", "/api/v1/certificates/"+cert.Metadata.Name)
-			c.sync(201, cert, cert.Metadata.Generation)
+			c.sync(201, cert, api.ETag(cert.Metadata.UUID, cert.Metadata.Generation))
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/sessions", h: func(c *rc) error {
@@ -930,14 +922,14 @@ func (s *Server) routeTable() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "DELETE", pattern: "/api/v1/sessions/{id}", h: func(c *rc) error {
 			if err := svc.RevokeSession(c.r.Context(), c.pathArg("id")); err != nil {
 				return err
 			}
-			c.sync(200, struct{}{}, 0)
+			c.sync(200, struct{}{}, "")
 			return nil
 		}},
 	)
@@ -947,19 +939,19 @@ func (s *Server) routeTable() []route {
 		list:   svc.ListRemotes,
 		get:    func(ctx context.Context, k string) (api.Remote, error) { return svc.GetRemote(ctx, k) },
 		create: svc.CreateRemote, put: svc.UpdateRemote, patch: svc.PatchRemote, del: svc.DeleteRemote,
-		gen: func(v api.Remote) int64 { return v.Metadata.Generation }, name: func(v api.Remote) string { return v.Metadata.Name },
+		etag: func(v api.Remote) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Remote) string { return v.Metadata.Name },
 	}.routes()...)
 
 	// Identity.
-	add(resource[api.Certificate]{base: "/api/v1/certificates", param: "fingerprint",
+	add(resource[api.Certificate]{base: "/api/v1/certificates", param: "name",
 		list: svc.ListCertificates, get: svc.GetCertificate,
 		create: svc.CreateCertificate, put: svc.UpdateCertificate, patch: svc.PatchCertificate, del: svc.DeleteCertificate,
-		gen: func(v api.Certificate) int64 { return v.Metadata.Generation }, name: func(v api.Certificate) string { return v.Metadata.Name },
+		etag: func(v api.Certificate) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Certificate) string { return v.Metadata.Name },
 	}.routes()...)
 	add(resource[api.Token]{base: "/api/v1/tokens", param: "name",
 		list: svc.ListTokens, get: svc.GetToken, create: svc.CreateToken,
-		del: func(ctx context.Context, k string, _ int64) error { return svc.DeleteToken(ctx, k) },
-		gen: func(v api.Token) int64 { return v.Metadata.Generation }, name: func(v api.Token) string { return v.Metadata.Name },
+		del:  func(ctx context.Context, k string, _ int64) error { return svc.DeleteToken(ctx, k) },
+		etag: func(v api.Token) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Token) string { return v.Metadata.Name },
 	}.routes()...)
 	users := resource[api.User]{base: "/api/v1/users", param: "name",
 		list: svc.ListUsers, get: svc.GetUser, put: svc.UpdateUser,
@@ -974,8 +966,8 @@ func (s *Server) routeTable() []route {
 			}
 			return svc.UpdateUser(ctx, k, out, exp)
 		},
-		del: func(ctx context.Context, k string, _ int64) error { return svc.DeleteUser(ctx, k) },
-		gen: func(v api.User) int64 { return v.Metadata.Generation }, name: func(v api.User) string { return v.Metadata.Name },
+		del:  func(ctx context.Context, k string, _ int64) error { return svc.DeleteUser(ctx, k) },
+		etag: func(v api.User) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.User) string { return v.Metadata.Name },
 	}.routes()
 	add(users...)
 	add(route{method: "POST", pattern: "/api/v1/users", h: func(c *rc) error {
@@ -989,7 +981,7 @@ func (s *Server) routeTable() []route {
 			return err
 		}
 		c.w.Header().Set("Location", "/api/v1/users/"+out.User.Metadata.Name)
-		c.sync(201, out, 0)
+		c.sync(201, out, "")
 		return nil
 	}})
 
@@ -1004,16 +996,10 @@ func (s *Server) routeTable() []route {
 		if err != nil {
 			return err
 		}
-		c.sync(200, out, 0)
+		c.sync(200, out, "")
 		return nil
 	}})
 
-	for _, u := range unsupportedRoutes {
-		what := u.what
-		add(route{method: u.method, pattern: u.pattern, h: func(c *rc) error {
-			return api.Errorf(api.CodeUnsupported, "%s is not part of this version", what)
-		}})
-	}
 	return rs
 }
 

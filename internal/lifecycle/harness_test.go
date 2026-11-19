@@ -24,6 +24,8 @@ type fakeImages struct {
 	newest   map[string]int // the newest generation of an image: what its bare name resolves to
 	gens     map[string]api.ImageGeneration
 	collects int
+	peeks    int
+	ensures  int
 	// roots records the storage roots the lifecycle asked about.
 	roots []string
 }
@@ -44,7 +46,12 @@ func (f *fakeImages) Resolve(ctx context.Context, root, ref string) (api.ImageGe
 	return g, nil
 }
 func (f *fakeImages) Ensure(ctx context.Context, root, ref string) (api.ImageGeneration, error) {
+	f.ensures++
 	return f.Resolve(ctx, root, ref)
+}
+func (f *fakeImages) Peek(ctx context.Context, ref string) (api.ImageGeneration, error) {
+	f.peeks++
+	return f.Resolve(ctx, "", ref)
 }
 func (f *fakeImages) Collect(context.Context) ([]string, error) { f.collects++; return nil, nil }
 
@@ -140,7 +147,7 @@ func (w *world) handle(argv []string) ([]byte, error) {
 const dbVol = "tank/jailops/projects/alpha/volumes/db"
 
 func spec(image string) api.JailSpec {
-	return api.JailSpec{Image: image, Update: api.UpdatePolicy{Strategy: api.UpdateRebase, Healthcheck: "/bin/true"},
+	return api.JailSpec{Image: image, Update: api.UpdatePolicy{Healthcheck: "/bin/true"},
 		Resources: api.Resources{Disk: "10G"},
 		Volumes:   []api.VolumeAttach{{Name: "db", Mount: "/srv/db"}}}
 }

@@ -26,6 +26,8 @@ type world struct {
 	J     *plan.MemJournal
 	// repoVersion is what the fake package repository serves.
 	repoVersion string
+	// hostABI is what `pkg config abi` answers on the fake host; empty is FreeBSD:15:amd64.
+	hostABI string
 	specs       map[string]api.ImageSpec
 	roots       map[string][]Package
 	now         time.Time
@@ -72,6 +74,9 @@ func (w *world) handle(argv []string) ([]byte, error) {
 		return nil, nil
 	}
 	if len(argv) > 2 && argv[1] == "config" && argv[2] == "abi" {
+		if w.hostABI != "" {
+			return []byte(w.hostABI + "\n"), nil
+		}
 		return []byte("FreeBSD:15:amd64\n"), nil
 	}
 	root := argv[2]

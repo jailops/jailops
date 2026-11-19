@@ -86,7 +86,7 @@ func TestUnifiedLogsOverHTTP(t *testing.T) {
 		t.Fatalf("global: %v %+v", err, r)
 	}
 	tok := e.IdentityToken(api.PermOperator, true)
-	for _, q := range []string{"tail=0", "cursor=nope", "file=../x", "jail=Bad", "app_logs=maybe", "file=messages.1.gz"} {
+	for _, q := range []string{"limit=0", "cursor=nope", "file=../x", "jail=Bad", "app_logs=maybe", "file=messages.1.gz"} {
 		if code, body := e.Raw("GET", "/api/v1/logs?project=alpha&"+q, tok, ""); code != 400 {
 			t.Errorf("%s: %d %s", q, code, body)
 		}
@@ -185,7 +185,7 @@ func TestLogForwardOverHTTP(t *testing.T) {
 	_, err = e.Scoped(api.PermAdmin, "alpha").Logs().Forward(c)
 	wantCode(t, err, api.CodeForbidden)
 	adm := e.Global()
-	f, err := adm.Logs().Forward(c)
+	f, tag, err := adm.Logs().ForwardETag(c)
 	if err != nil || f.Status.Origin != api.LogForwardFromConfig || len(f.Spec.Sinks) != 1 || len(f.Status.Sinks) != 1 || f.Status.Sinks[0].Warning != "" {
 		t.Fatalf("%v %+v", err, f)
 	}
@@ -199,19 +199,23 @@ func TestLogForwardOverHTTP(t *testing.T) {
 	// store a list: it replaces the file's
 	spec := api.LogForwardSpec{Sinks: []api.LogSink{{Name: "central", Type: api.LogSinkSyslog, To: "tcp://" + b.ln.Addr().String(),
 		Sources: api.LogSinkSource{Audit: true, NoJails: true}}}}
-	f, err = adm.Logs().SetForward(c, spec, 0)
+	f, err = adm.Logs().SetForward(c, spec, tag)
 	if err != nil || f.Status.Origin != api.LogForwardFromAPI || f.Status.Generation != 1 || f.Spec.Sinks[0].Name != "central" {
 		t.Fatalf("%v %+v", err, f)
 	}
-	_, err = adm.Logs().SetForward(c, spec, 0)
-	wantCode(t, err, api.CodeConflict)
+	_, err = adm.Logs().SetForward(c, spec, tag)
+	wantCode(t, err, api.CodePreconditionFailed)
+	_, tag, err = adm.Logs().ForwardETag(c)
+	if err != nil {
+		t.Fatal(err)
+	}
 	res, err := adm.Logs().TestForward(c, "central")
 	if err != nil || !res.OK || !strings.HasPrefix(res.Line, "jailops log forwarding test ") {
 		t.Fatalf("%v %+v", err, res)
 	}
 	b.await(t, res.Line, `file="test"`)
 	// the audit log as a source: a change made now reaches the sink
-	if _, err := adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: spec.Sinks}, 1); err != nil {
+	if _, err := adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: spec.Sinks}, tag); err != nil {
 		t.Fatal(err)
 	}
 	_, _ = adm.Projects().Create(c, api.Project{Metadata: api.ObjectMeta{Name: "gamma"}})
@@ -225,11 +229,11 @@ func TestLogForwardOverHTTP(t *testing.T) {
 		{Name: "h", Type: api.LogSinkSyslog, To: "tls://logs.example.com", CAFile: "/bad/ca.pem"},
 		{Name: "h", Type: api.LogSinkSyslog, To: "tcp://logs.example.com", Facility: "kern"},
 	} {
-		_, err := adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: []api.LogSink{bad}}, -1)
+		_, err := adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: []api.LogSink{bad}}, "")
 		wantCode(t, err, api.CodeInvalid)
 	}
 	// a plain sink to a remote address carries a warning
-	f, err = adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: []api.LogSink{{Name: "plain", Type: api.LogSinkSyslog, To: "udp://192.0.2.10"}}}, -1)
+	f, err = adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: []api.LogSink{{Name: "plain", Type: api.LogSinkSyslog, To: "udp://192.0.2.10"}}}, "")
 	if err != nil || len(f.Status.Sinks) != 1 || !strings.Contains(f.Status.Sinks[0].Warning, "in the clear") {
 		t.Fatalf("%v %+v", err, f)
 	}
@@ -386,11 +390,11 @@ func TestLogForwardAPISinkLimits(t *testing.T) {
 		{Name: "w", Type: api.LogSinkWebhook, To: "https://hooks.example.com/in", TokenFile: filepath.Join(secrets, "sub", "t")},
 		{Name: "w", Type: api.LogSinkWebhook, To: "https://hooks.example.com/in", CAFile: "/etc/ssl/cert.pem"},
 	} {
-		_, err := adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: []api.LogSink{bad}}, 0)
+		_, err := adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: []api.LogSink{bad}}, "")
 		wantCode(t, err, api.CodeInvalid)
 	}
 	ok := api.LogSink{Name: "w", Type: api.LogSinkWebhook, To: "https://hooks.example.com/in", TokenFile: tok}
-	if _, err := adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: []api.LogSink{ok}}, 0); err != nil {
+	if _, err := adm.Logs().SetForward(c, api.LogForwardSpec{Sinks: []api.LogSink{ok}}, ""); err != nil {
 		t.Fatal(err)
 	}
 	// the stored list is the API's: its sink reads the token from the secrets directory at each send

@@ -9,7 +9,7 @@ import (
 
 // limitsNotEnforcedWarning is the warning of a running jail that has memory, process or CPU limits on a host where
 // kern.racct.enable is 0: the kernel accepts no rctl rule, so nothing enforces them.
-const limitsNotEnforcedWarning = "limits.cpu, limits.memory and limits.pids are not enforced: kern.racct.enable is 0 (set it in /boot/loader.conf and reboot)"
+const limitsNotEnforcedWarning = "resources.cpu, resources.memory and resources.pids are not enforced: kern.racct.enable is 0 (set it in /boot/loader.conf and reboot)"
 
 // racctOn says whether the kernel's resource accounting is on. The answer is kept for a few seconds: a list of jails
 // asks once, not once per jail.

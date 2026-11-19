@@ -65,7 +65,7 @@ func TestAJailNeedsANetworkAndAStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := e.Admin.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "dual"}, Spec: api.ProfileSpec{Config: map[string]string{
-		"nic.eth0.network": "lan", "nic.eth1.network": second, "storage": "default"}}}); err != nil {
+		"network.eth0.network": "lan", "network.eth1.network": second, "storage": "default"}}}); err != nil {
 		t.Fatal(err)
 	}
 	op, err := e.Admin.Jails().Create(c, sdk.NewJail("viaprofile", api.JailSpec{Image: "fb", Profiles: []string{"dual"}}))
@@ -91,7 +91,7 @@ func TestANetworkBelongsToOneProject(t *testing.T) {
 	c := ctxT(t)
 	_, err := e.Admin.Projects().Create(c, api.Project{Metadata: api.ObjectMeta{Name: "other"}, Spec: api.ProjectSpec{
 		Networks: []api.ProjectNetwork{{Network: "lan"}}}})
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	if !strings.Contains(err.Error(), "network lan is already granted to project "+dtest.SeedProject) {
 		t.Fatalf("%v", err)
 	}
@@ -101,7 +101,7 @@ func TestANetworkBelongsToOneProject(t *testing.T) {
 	o, _ := e.Admin.Projects().Get(c, "other")
 	o.Spec.Networks = []api.ProjectNetwork{{Network: "lan"}}
 	_, err = e.Admin.Projects().Update(c, "other", o, "")
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	// a wildcard grant would give every network to one project
 	o.Spec.Networks = []api.ProjectNetwork{{Network: "*"}}
 	_, err = e.Admin.Projects().Update(c, "other", o, "")

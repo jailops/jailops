@@ -9,7 +9,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"jailops.net/jailops/internal/render"
 	"jailops.net/jailops/internal/store"
@@ -144,7 +143,7 @@ func (s *Service) ExposeJail(ctx context.Context, name string, req api.ExposeReq
 // isConflict says whether err is a stale generation.
 func isConflict(err error) bool {
 	var ae *api.Error
-	return errors.As(err, &ae) && ae.Code == api.CodeConflict
+	return errors.As(err, &ae) && ae.Code == api.CodePreconditionFailed
 }
 
 func (s *Service) exposeOnce(ctx context.Context, name string, req api.ExposeRequest) (api.ExposeResult, error) {
@@ -211,9 +210,7 @@ func (s *Service) exposeOnce(ctx context.Context, name string, req api.ExposeReq
 	}
 	next := slices.Clone(old.Spec.Expose)
 	changed := false
-	now := time.Now().UTC().Format(time.RFC3339)
 	for _, e := range entries {
-		e.By, e.At = ActorFrom(ctx).Name, now
 		if exposureHolds(next, e) {
 			continue
 		}
