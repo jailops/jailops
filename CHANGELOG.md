@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.1 - 2026-11-19
+
 - **Fixes from the review of 0.9.0.**
   - An import never destroys a volume it did not make: the name is checked before the undo is armed, and an import takes the lock of every volume it creates.
   - An import file is kept below the state directory only while a free-space reserve of 1 GiB stays free, and two imports are received at a time; another is refused with `busy` and a larger file with a message that says where the space is missing.
