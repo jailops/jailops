@@ -17,7 +17,8 @@ register of what is settled and what is open.
 | [export-import.md](export-import.md) | Moving a jail as a file: export, import, what is in the file, volumes and encrypted data |
 | [storage.md](storage.md) | Storages on big pools, volumes, host directories, quotas, what is and is not backed up |
 | [backup-restore.md](backup-restore.md) | The backup node, the key and its escrow, policies, verification, restoring |
-| [upgrade.md](upgrade.md) | Upgrading JailOps, upgrading and rolling back jails, managed updates |
+| [lifecycle.md](lifecycle.md) | **Updating FreeBSD, the host and the jails**: the model, what works with what, the runbooks for every situation (a patch level, a new release, JailOps, thin, thick and Linux jails, packages), what to test after every step, and the way back |
+| [upgrade.md](upgrade.md) | The mechanisms behind the runbooks: upgrading JailOps, image generations and the nightly upgrade, moving a jail to a new release, rollback scopes, managed updates |
 | [thick-jail-upgrades.md](thick-jail-upgrades.md) | Updating a thick or Linux jail by hand: a checkpoint, the update, the checks, going back |
 | [supported-versions.md](supported-versions.md) | Which FreeBSD releases JailOps supports, what supported means, and how hosts and jails move to a new release |
 | [1.0.md](1.0.md) | What 1.0.0 promises and what it does not, and the gates a release has to pass |

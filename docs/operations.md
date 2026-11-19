@@ -131,9 +131,10 @@ passes. A change that would shut out the address the request came from is refuse
 
 ## Upgrading, and going back one version
 
-The host's FreeBSD and JailOps are upgraded as two steps, each with a boot environment of its own:
-[the host's FreeBSD](upgrade.md#the-hosts-freebsd) and [JailOps](upgrade.md#jailops). The way back, and why it needs the
-database copy (`version_skew`), are in [Going back one version of JailOps](upgrade.md#going-back-one-version-of-jailops).
+The host's FreeBSD and JailOps are upgraded as two steps, each with a boot environment of its own, and the jails after
+them: the runbooks and the checks after every step are in [lifecycle.md](lifecycle.md), the mechanisms in
+[upgrade.md](upgrade.md#jailops). The way back, and why it needs the database copy (`version_skew`), are in
+[Going back one version of JailOps](upgrade.md#going-back-one-version-of-jailops).
 
 ## Recovery objectives (RPO and RTO)
 

@@ -1,18 +1,19 @@
 # Upgrading a thick jail by hand
 
-A thick jail has its own writable root and package database. Update it inside the jail with pkg on FreeBSD or apk on
-Alpine. JailOps manages the jail around that work. It can stop and start it, snapshot its datasets, show logs and restore
-a snapshot. Run a release upgrade on one jail at a time and check the service before returning traffic to it.
+A thick jail has its own writable root and package database: a pkgbase system of its own on FreeBSD, an Alpine or Debian
+root on Linux. Its base is updated inside the jail, with `pkg` against the `FreeBSD-base` repository or with `apk`; JailOps
+manages the jail around that work: it stops and starts it, snapshots its datasets, shows its logs and restores a snapshot.
+Run a release upgrade on one jail at a time and check the service before returning traffic to it. Where this fits in the
+whole, and the checks after it: [lifecycle.md](lifecycle.md#37-a-thick-freebsd-jail).
 
-A thin FreeBSD jail follows the base of its image. Its patch upgrade switches generations and uses `etcupdate` to merge
-persistent configuration, and `jailops jail upgrade NAME --image IMAGE` moves it to an image of a newer release. See
-[Upgrading](upgrade.md#jails) for the image workflow.
+A thin FreeBSD jail follows the base of its image instead: a patch level is a new generation, with the `/etc` merge done by
+`etcupdate`, and `jailops jail upgrade NAME --image IMAGE` moves it to an image of a newer release ([upgrade.md](upgrade.md#jails)).
 
-## Before changing packages
+## Before changing the base
 
-1. For a FreeBSD release upgrade, update and reboot the host first. Check the running kernel and installed userland with
-   `freebsd-version -kru` on the host, then run `jailops doctor`. Read the target release's pkgbase instructions in the
-   [FreeBSD Handbook](https://docs.freebsd.org/en/books/handbook/jails/).
+1. For a FreeBSD release upgrade, upgrade and reboot the host first: a jail's userland is never newer than the host's
+   kernel ([FreeBSD Handbook, Jails and Containers](https://docs.freebsd.org/en/books/handbook/jails/)). Check the running
+   kernel and installed userland with `freebsd-version -kru` on the host, then run `jailops doctor`.
 2. Drain traffic and stop the application cleanly. Take an application-consistent backup, then stop the jail and take a
    named snapshot. Snapshot any attached ZFS volumes separately while their writers are stopped. For shared volumes,
    coordinate with the other jails. Back up host-directory volumes at the source.
@@ -26,17 +27,20 @@ jailops stop web --project shop
 jailops jail snapshot create web before-base-upgrade --project shop
 jailops volume snapshot create web-data before-base-upgrade --project shop
 jailops start web --project shop
-jailops exec web --project shop --user root -- /bin/sh
+jailops shell web --project shop
 ```
 
 ## FreeBSD pkgbase
 
-Inside the jail, use pkg to inspect the installed userland and select the signed base repository for the target release.
-The examples assume the active base repository is named `FreeBSD-base`. The repo URL must select the intended minor
-release. For example, 15.1 and 15.2 both use the FreeBSD 15 pkg ABI. For a major release, follow the target release's
-instructions for the target ABI, OSVERSION and any required signing keys or pkg bootstrap.
+The Handbook updates a pkgbase jail with `pkg`, from the host with `pkg -r ROOT` or inside the jail with a plain `pkg
+upgrade`, and says that `freebsd-update` does not apply to it and that `etcupdate` is not run in it: pkg merges `/etc`
+itself ([Handbook, Jail Upgrading](https://docs.freebsd.org/en/books/handbook/jails/)). The repository `FreeBSD-base` is
+defined in `/etc/pkg/FreeBSD.conf` and disabled by default; enable it in the jail with the line
+`FreeBSD-base: { enabled: yes }` in `/usr/local/etc/pkg/repos/FreeBSD.conf`
+([15.0 release notes](https://www.freebsd.org/releases/15.0R/relnotes/)). Its URL selects the release through
+`base_release_${VERSION_MINOR}`.
 
-Preview the base upgrade before accepting it:
+**A patch level**, inside the jail:
 
 ```sh
 freebsd-version -u
@@ -45,24 +49,39 @@ pkg upgrade -n -r FreeBSD-base
 pkg upgrade -r FreeBSD-base
 ```
 
-Confirm that the plan names the intended release before the last command. Pkg handles merges for tagged configuration
-files. Review any `.pkgnew` and `.pkgsave` it reports. A separate `etcupdate` pass is unnecessary for pkgbase.
+The same from the host, with the OS-level jail name `PROJECT_JAIL`: `pkg -j shop_web update -r FreeBSD-base` and
+`pkg -j shop_web upgrade -r FreeBSD-base`.
 
-After a major release change, reconcile third-party packages against the target ABI and follow any application-specific
-migration instructions. Check that target builds are available before starting the upgrade. The original JailOps image
-name identifies where the thick jail was created. Use `freebsd-version -u` inside it to check the installed userland.
-[FreeBSD Handbook on pkgbase jails](https://docs.freebsd.org/en/books/handbook/jails/)
+**A new release** (15.1 to 15.2) follows the pkgbase section of that release's Upgrading Instructions
+(`https://www.freebsd.org/releases/X.YR/upgrading/`), as the host does. For 15.1 the page's command is
+`pkg -oABI=FreeBSD:15:$(uname -p) -oOSVERSION=1501000 upgrade -r FreeBSD-base`, where `-oOSVERSION` selects the branch
+of the new release ([15.1 Upgrading Instructions](https://www.freebsd.org/releases/15.1R/upgrading/)); the 15.2 page
+carries 15.2's value. A new major release is a new package ABI: the page says to reinstall the third-party packages
+afterwards (`pkg upgrade`).
 
-## Alpine
+Confirm that the plan names the intended release before the last command. Then review what pkg could not merge: a file
+it left as `FILE.pkgnew` and a copy it kept as `FILE.pkgsave`:
 
-For routine package updates, run `apk update` and `apk upgrade` inside the jail. When moving between Alpine releases,
-follow the release upgrade procedure for the target repositories. Use the same snapshot and acceptance process.
-[Linux jails in JailOps](linux-jails.md)
+```sh
+find /etc /usr/local/etc -name '*.pkgnew' -ls
+```
+
+`freebsd-version -u` inside the jail prints the installed userland afterwards. The image the jail was created from says
+where it started; it says nothing about the jail's base from then on.
+
+## Alpine and Debian
+
+For routine package updates of an Alpine jail, `apk update` and `apk upgrade` inside the jail, or `jailops update apply
+web --packages`, which snapshots first and records the result. When moving between Alpine releases, follow Alpine's
+release upgrade procedure for the target repositories inside the jail, with the same snapshot and acceptance process. A
+Debian jail is updated with `apt-get` inside the jail; JailOps never runs `apt`. A new base of either is a new jail:
+[linux-jails.md](linux-jails.md).
 
 ## Restart and verify
 
 Exit the shell, restart the jail and check the console and application logs. Start the application if you held it back.
-Test a request and, where applicable, verify the application can read and write its data before routing traffic back.
+Test a request and, where applicable, check that the application can read and write its data before routing traffic
+back; the full list is [lifecycle.md, always test after](lifecycle.md#4-always-test-after).
 
 ```sh
 jailops restart web --project shop

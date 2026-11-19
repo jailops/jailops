@@ -22,6 +22,15 @@
 - **`jail info` and the jail object say how long the previous root is kept.** After a release move, `rollback_expires_at` (and the
   `Rollback:` line of `jail info`) is the day `jail rollback` can no longer return to it.
 - **`gofmt` is clean again** in three files of the previous change.
+- **One guide for updating FreeBSD, the host and the jails.** [docs/lifecycle.md](docs/lifecycle.md) is the entry point:
+  the model (release, patch level, kernel and userland, pkgbase and distribution sets, the package ABI, images and
+  generations, thin, thick and Linux jails), what works with what and what JailOps refuses, a numbered runbook for every
+  situation (a patch level, a minor and a major release of the host, JailOps itself, the patch levels of thin jails, a
+  thin jail to a new release, a thick jail, a Linux jail, the packages inside a jail, the apps of the catalog, a pinned
+  jail) with FreeBSD's own procedure as FreeBSD documents it and a link to the source, the checks to run after every
+  step, what to watch for, what the results of a failed update mean, and a cheat sheet. `docs/upgrade.md` is the
+  reference behind it; `docs/supported-versions.md`, `docs/thick-jail-upgrades.md`, `docs/release-engineering.md` and the
+  help of `jailops jail upgrade` and `jailops image upgrade` point to it.
 
 ## 0.9.0 - 2026-11-19
 
