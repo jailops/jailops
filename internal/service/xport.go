@@ -500,6 +500,9 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 		meta.Labels = nil
 	}
 	locks := append([]string{jailLock(key)}, s.netLocksEff(proj, spec)...)
+	for _, v := range w.vols {
+		locks = append(locks, volumeLock(proj, v.dst))
+	}
 	var warnings []string
 	op, err := s.Submit(ctx, OpSpec{
 		Action: api.OpJailImport, Description: "Import jail " + name, Locks: locks, Project: proj,
@@ -559,6 +562,11 @@ func (s *Service) ImportJail(ctx context.Context, req api.JailImportRequest, rd 
 				}
 				if v == nil {
 					return invalid("the file carries a volume %q that was not planned", part.Dataset)
+				}
+				// a volume of that name that is already there is not ours to undo: the check comes before the undo is armed
+				if err := s.volKind.p(proj).notTaken(v.dst); err != nil {
+					volErr = err
+					return err
 				}
 				ireq.Volumes = append(ireq.Volumes, v.dst)
 				_ = s.journal.putRequest("import/"+key, opRequest{Kind: "import", Jail: key, Import: ireq})
@@ -641,17 +649,37 @@ func importFileError(err error) error {
 
 // stagedImport is an export file that has arrived on the host and waits for its operation.
 type stagedImport struct {
-	f    *os.File
-	path string
+	f       *os.File
+	path    string
+	release func()
 }
 
-// discard closes and removes the file; it is safe to call more than once.
+// discard closes and removes the file and gives its slot back; it is safe to call more than once.
 func (st *stagedImport) discard() {
 	if st.f != nil {
 		_ = st.f.Close()
 		_ = os.Remove(st.path)
 		st.f = nil
+		st.release()
 	}
+}
+
+// The files of imports wait below the state directory, the disk of the database. At most importSlots files are received at once and a
+// file never takes the last importReserve bytes of the disk: a big import is refused with a message, it does not stop the daemon.
+const (
+	importSlots   = 2
+	importReserve = 1 << 30
+)
+
+var importSlot = make(chan struct{}, importSlots)
+
+// freeBytes is the space an unprivileged writer can still use on the filesystem of dir.
+func freeBytes(dir string) (uint64, error) {
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(dir, &st); err != nil {
+		return 0, err
+	}
+	return uint64(st.Bavail) * uint64(st.Bsize), nil
 }
 
 func (s *Service) importStagingDir() string { return filepath.Join(s.d.StateDir, "imports") }
@@ -662,15 +690,39 @@ func (s *Service) stageImport(rd io.Reader) (*stagedImport, error) {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, api.Errorf(api.CodeInternal, "cannot keep the file of the import: %v", err)
 	}
+	select {
+	case importSlot <- struct{}{}:
+	default:
+		return nil, api.Errorf(api.CodeBusy, "%d imports are being received now: try again when one has finished", importSlots)
+	}
+	release := func() { <-importSlot }
 	f, err := os.CreateTemp(dir, "import-*.export")
 	if err != nil {
+		release()
 		return nil, api.Errorf(api.CodeInternal, "cannot keep the file of the import: %v", err)
 	}
-	st := &stagedImport{f: f, path: f.Name()}
-	if _, err := io.Copy(f, rd); err != nil {
+	st := &stagedImport{f: f, path: f.Name(), release: release}
+	// the file may use what is free except the reserve; one byte more than that is how a file that is too big shows
+	room := int64(-1)
+	if free, err := freeBytes(dir); err == nil {
+		if free > importReserve {
+			room = int64(free - importReserve)
+		} else {
+			room = 0
+		}
+	}
+	var src io.Reader = rd
+	if room >= 0 {
+		src = io.LimitReader(rd, room+1)
+	}
+	n, err := io.Copy(f, src)
+	if err == nil && room >= 0 && n > room {
+		err = syscall.ENOSPC
+	}
+	if err != nil {
 		st.discard()
 		if errors.Is(err, syscall.ENOSPC) {
-			return nil, api.Errorf(api.CodePreconditionFailed, "the file does not fit in %s: free space there or import from a host with more", dir)
+			return nil, api.Errorf(api.CodePreconditionFailed, "the file does not fit in %s (a reserve of 1 GiB stays free): free space there or import from a host with more", dir)
 		}
 		return nil, importFileError(err)
 	}
@@ -678,6 +730,9 @@ func (s *Service) stageImport(rd io.Reader) (*stagedImport, error) {
 		st.discard()
 		return nil, api.Errorf(api.CodeInternal, "cannot read the file of the import: %v", err)
 	}
+	// the slot limits the files that are being received; a file that has arrived waits for its operation without one
+	release()
+	st.release = func() {}
 	return st, nil
 }
 

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Fixes from the review of 0.9.0.**
+  - An import never destroys a volume it did not make: the name is checked before the undo is armed, and an import takes the lock of every volume it creates.
+  - An import file is kept below the state directory only while a free-space reserve of 1 GiB stays free, and two imports are received at a time; another is refused with `busy` and a larger file with a message that says where the space is missing.
+  - A managed update records a failed automatic restart as a failure (the packages stay updated and the note says how to go back), and stops with a failure when the image of the jail cannot be read, instead of updating packages on an old root.
+  - The rules of a pf anchor are not loaded while the states they end cannot be written down; the load is tried again on the next pass.
+  - `just release` asks for a full CI run (the release pull request, the nightly run or a manual one) that is green on the tree it tags.
 - **Gates for 1.0.** The compatibility checks that were still done by a reviewer are tests now ([docs/compatibility.md](docs/compatibility.md)):
   the Go API of the client library only grows (`TestSDKGoAPIOnlyGrows`); from 1.0 on a golden file of the freeze that loses a
   line fails CI unless the major version is raised (`scripts/check-golden-removals.sh`, `just freeze-removals`); a claim that a

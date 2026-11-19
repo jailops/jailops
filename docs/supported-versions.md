@@ -58,6 +58,6 @@ not yet warn about a release newer than the newest one tested.
 |---|---|
 | The host | With the tool the host uses: `freebsd-update` on a classic install, `pkg` on a pkgbase install. Upgrade the host before any jail: a jail runs on the host's kernel ([upgrade.md](upgrade.md#the-hosts-freebsd)). |
 | The patch levels of a release | `jailops image upgrade freebsd-15-1`, or the nightly auto upgrade. It stays inside the release of the image ([upgrade.md](upgrade.md#nightly-auto-upgrade)). |
-| A jail to a new release | `jailops jail upgrade web --image freebsd-15-2` (after `jailops image create freebsd-15-2 --release 15.2-RELEASE --build`), or `jailops image upgrade freebsd-15-1 --to freebsd-15-2` for every jail of an image: the data, volumes and addresses stay, one snapshot is the way back. Thick and Linux jails are replaced by new jails ([upgrade.md](upgrade.md#a-new-release-move-the-jails)). |
+| A jail to a new release | `jailops jail upgrade web --image freebsd-15-2` (after `jailops image create freebsd-15-2 --release 15.2-RELEASE --build`), or `jailops image upgrade freebsd-15-1 --to freebsd-15-2` for every jail of an image: the data, volumes and addresses stay, one snapshot is the way back. A thick or Linux jail is updated by hand inside the jail ([thick-jail-upgrades.md](thick-jail-upgrades.md)), or replaced by a new jail on the new image ([upgrade.md](upgrade.md#a-new-release-move-the-jails)). |
 
 Try the new release with one jail first, and keep the old image until no jail uses it.

@@ -892,7 +892,13 @@ func (r *Reconciler) loadAnchor(ctx context.Context, name, ruleset string) error
 	slices.Sort(gone)
 	// The labels are written down before the new rules go in: a daemon that stops after the load and before the states
 	// are ended finds them again at its next start (the loaded anchor no longer names them).
-	added := r.keepKills(name, gone...)
+	added, err := r.keepKills(name, gone...)
+	if err != nil {
+		// the labels cannot be written down, so a stop after the load would lose them: the rules stay as they are and the load is
+		// tried again on the next pass
+		r.dropKills(name, added...)
+		return fmt.Errorf("writing down the pf states of %s that the new rules end: %w", name, err)
+	}
 	if err := r.env.PF.Load(ctx, name, ruleset); err != nil {
 		r.dropKills(name, added...) // nothing changed: the rules of those labels are still loaded
 		return err
@@ -909,9 +915,9 @@ func (r *Reconciler) loadAnchor(ctx context.Context, name, ruleset string) error
 
 // keepKills remembers labels whose states are to be ended: the rule is gone from the anchor, so no later pass could
 // find the label again. It returns the labels that were not remembered before.
-func (r *Reconciler) keepKills(anchor string, labels ...string) (added []string) {
+func (r *Reconciler) keepKills(anchor string, labels ...string) (added []string, err error) {
 	if len(labels) == 0 {
-		return nil
+		return nil, nil
 	}
 	r.mu.Lock()
 	if r.pendingKills[anchor] == nil {
@@ -926,9 +932,9 @@ func (r *Reconciler) keepKills(anchor string, labels ...string) (added []string)
 	snap := r.pendingSnapshotLocked()
 	r.mu.Unlock()
 	if len(added) > 0 {
-		r.savePending(snap)
+		err = r.savePending(snap)
 	}
-	return added
+	return added, err
 }
 
 // dropKills forgets labels whose states are ended (or whose rules are loaded again).
@@ -945,7 +951,7 @@ func (r *Reconciler) dropKills(anchor string, labels ...string) {
 	}
 	snap := r.pendingSnapshotLocked()
 	r.mu.Unlock()
-	r.savePending(snap)
+	_ = r.savePending(snap)
 }
 
 // pendingFile is the stored form of the pending labels: a version and the labels per anchor.
@@ -967,18 +973,19 @@ func (r *Reconciler) pendingSnapshotLocked() map[string][]string {
 	return out
 }
 
-// savePending writes the pending labels atomically; an empty set removes the file. A failure is logged and the labels
-// stay in memory: the file is a safeguard against a stop, never a condition of the pass.
-func (r *Reconciler) savePending(snap map[string][]string) {
+// savePending writes the pending labels atomically; an empty set removes the file. A failure is logged and returned: a caller
+// that is about to load rules that end flows does not load them while the labels cannot be written down; a caller that only
+// forgets labels goes on (the labels stay in memory).
+func (r *Reconciler) savePending(snap map[string][]string) error {
 	f := r.cfg.PendingKillsFile
 	if f == "" {
-		return
+		return nil
 	}
 	if len(snap) == 0 {
 		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			r.log.Warn("reconcile: the file of pending pf states could not be removed", "file", f, "err", err)
 		}
-		return
+		return nil
 	}
 	b, err := json.Marshal(pendingFile{Version: pendingFileVersion, Anchors: snap})
 	if err == nil {
@@ -993,6 +1000,7 @@ func (r *Reconciler) savePending(snap map[string][]string) {
 	if err != nil {
 		r.log.Warn("reconcile: the pending pf states could not be written down", "file", f, "err", err)
 	}
+	return err
 }
 
 // loadPending reads the pending labels of an earlier run, once. A missing file is the normal case; a file that cannot
