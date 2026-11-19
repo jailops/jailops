@@ -37,6 +37,7 @@ jobs:
       actions: read
     outputs:
       release_only: ${{ steps.c.outputs.release_only }}
+      heavy: ${{ steps.h.outputs.heavy }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -65,6 +66,19 @@ jobs:
             fi
           fi
           echo "release_only=$only" >> "$GITHUB_OUTPUT"
+      # The slow jobs (the browsers, the fuzzers and the FreeBSD VMs) run every night, by hand and on the pull request of a release; a
+      # pull request or a push of a change runs the quick gate: lint, build, the unit tests with the race detector, the console tests.
+      - id: h
+        env:
+          EVENT: ${{ github.event_name }}
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          heavy=false
+          case "$EVENT" in
+            schedule | workflow_dispatch) heavy=true ;;
+            pull_request) case "$HEAD_REF" in release/*) heavy=true ;; esac ;;
+          esac
+          echo "heavy=$heavy" >> "$GITHUB_OUTPUT"
 
   # The consoles are embedded in the binaries, so they are built first and handed to the Go jobs. Only the build blocks
   # them: the type checks, the unit tests and the Playwright tests run beside the Go jobs in web-test and web-e2e.
@@ -121,7 +135,7 @@ jobs:
   web-e2e:
     name: Web consoles (end-to-end, Chromium)
     needs: [web-build, changes]
-    if: needs.changes.outputs.release_only != 'true'
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -258,7 +272,7 @@ jobs:
   fuzz:
     name: Go fuzz
     needs: [web-build, changes]
-    if: needs.changes.outputs.release_only != 'true'
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     env:
       CGO_ENABLED: "0"
@@ -412,7 +426,7 @@ jobs:
   freebsd:
     name: FreeBSD VM (${{ matrix.part }}${{ matrix.shard && format(' {0}', matrix.shard) || '' }})
     needs: [web-build, changes]
-    if: needs.changes.outputs.release_only != 'true'
+    if: needs.changes.outputs.heavy == 'true'
     runs-on: ubuntu-latest
     # the slowest part takes seventeen minutes: a VM that hangs (an unreachable package mirror kept one for thirty) ends at forty
     timeout-minutes: 40
