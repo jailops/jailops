@@ -9,6 +9,7 @@ tag (`@v7`), which the action's owner can move to other code at any time; a full
 |---|---|---|
 | `ci.yml` (every push and pull request) | `contents: read` for every job | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, `actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, **`vmactions/freebsd-vm`** |
 | `release.yml` (a tag `v*`) | `contents: read`, and `contents: write` in the one job that publishes the release (the check job before it cannot write) | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, **`goreleaser/goreleaser-action`** |
+| `ci-rerun-mirror.yml` (a finished CI run of this repository) | `actions: write` to start one rerun, `contents: read` | none: the `gh` of the runner reads the job logs through the API and runs no code of the run |
 
 `release.yml` names every action by its commit and GoReleaser by an exact version. The two in bold come from third parties: `vmactions/freebsd-vm` runs the FreeBSD VM that builds and tests the tree, and
 `goreleaser/goreleaser-action` runs with the token that can write the release. They matter most; the `actions/*` ones
@@ -16,6 +17,18 @@ are GitHub's own and should be pinned the same way.
 
 The web-e2e job rewrites the runner's apt mirror list as root; every mirror in it is an `https` URL, and apt checks the
 signed package indexes whatever the transport.
+
+## The FreeBSD package mirror
+
+The VM image of `vmactions/freebsd-vm` brings `rsync` (the action's own file sync runs on it) and no `curl`. A VM job
+looks in the image for what its part needs and reads the package mirror (`pkg.FreeBSD.org`, `FreeBSD-ports`, the
+quarterly branch) only for what is missing: `curl`, and for the Go tests and e2e shard 2 a PostgreSQL server. The
+prepared image is cached, so a run whose prepare step has the same text does not read the mirror at all. Packages are
+checked by pkg against the FreeBSD keys in `/usr/share/keys/pkg`.
+
+When the mirror does not answer, the install is tried three times and then the job fails with the line `the package
+mirror ... did not give ... in three attempts`. `ci-rerun-mirror.yml` runs the failed jobs once more when every failed
+job of a CI run ended with that line; a run with another failure is left alone, and a run is retried at most once.
 
 ## Pinning an action to a commit
 

@@ -412,30 +412,30 @@ jobs:
       matrix:
         # the end-to-end flow and the packet filter test are linear scripts that took twenty minutes each: they run in shards on VMs of
         # their own (scripts/ci-freebsd-e2e.sh JAILOPS_E2E_SHARD, scripts/ci-freebsd-pf.sh PF_SHARD), each set up the same way
-        # pkgs: what the VM of the part needs from the package repository, nothing else. The e2e and pf VMs run the binaries built
-        # above, the scripts use curl and rsync on the host (the jails get their packages through the helper), and only the backup node
-        # step of e2e shard 2 and the Go tests use a PostgreSQL on the host.
+        # pkgs: what the VM of the part needs on top of its image, nothing else. The image brings rsync (the action's own file sync runs
+        # on it) and no curl. The e2e and pf VMs run the binaries built above, the scripts use curl on the host (the jails get their
+        # packages through the helper), and only the backup node step of e2e shard 2 and the Go tests use a PostgreSQL on the host.
         include:
           - part: go
-            pkgs: go git-lite postgresql17-server bash curl rsync
+            pkgs: go git-lite postgresql17-server bash curl
           - part: e2e
             shard: "1"
-            pkgs: curl rsync
+            pkgs: curl
           - part: e2e
             shard: "2"
-            pkgs: curl rsync postgresql17-server
+            pkgs: curl postgresql17-server
           - part: e2e
             shard: "3"
-            pkgs: curl rsync
+            pkgs: curl
           - part: pf
             shard: a
-            pkgs: curl rsync
+            pkgs: curl
           - part: pf
             shard: b
-            pkgs: curl rsync
+            pkgs: curl
           - part: pf
             shard: c
-            pkgs: curl rsync
+            pkgs: curl
     steps:
       - uses: actions/checkout@v7
         with:
@@ -494,26 +494,40 @@ jobs:
           release: "15.1"
           usesh: true
           sync: rsync
-          # One unreachable mirror must not cost the job its half hour (a run waited on `No route to host` for every catalogue): the VM's
-          # network has no IPv6 route, fetches are bounded, only the ports repository is read (the kmods and base catalogues are not
-          # needed and are two more requests), and the install is tried three times with the catalogue fetched again between the tries.
+          # One unreachable mirror must not cost the job its half hour (a run waited on `No route to host` for every catalogue): what the
+          # part needs is looked for in the image first and the mirror is read only for what is missing; the VM's network has no IPv6
+          # route, fetches are bounded, only the ports repository is read (the kmods and base catalogues are not needed and are two more
+          # requests), and the install is tried three times with the catalogue fetched again between the tries. The prepared image is
+          # cached (cache-after-prepare), so a run with the same text of this step does not come here at all. A failure that ends in the
+          # line "did not give ... in three attempts" is run once more by .github/workflows/ci-rerun-mirror.yml.
           prepare: |
             set -u
+            have() {
+              case "$1" in
+              postgresql17-server) [ -x /usr/local/bin/postgres ] ;;
+              git-lite) command -v git >/dev/null ;;
+              *) command -v "$1" >/dev/null ;;
+              esac
+            }
+            want=""
+            for p in ${{ matrix.pkgs }}; do have "$p" || want="$want $p"; done
+            if [ -z "$want" ]; then echo "the image has ${{ matrix.pkgs }}: nothing to install"; exit 0; fi
             mkdir -p /usr/local/etc/pkg/repos
             printf '%s\n' 'IP_VERSION = 4;' 'FETCH_TIMEOUT = 30;' 'FETCH_RETRY = 3;' > /usr/local/etc/pkg.conf
             printf '%s\n' 'FreeBSD-ports-kmods: { enabled: no }' 'FreeBSD-base: { enabled: no }' > /usr/local/etc/pkg/repos/FreeBSD.conf
             export ASSUME_ALWAYS_YES=yes
-            # curl and rsync are 6 MiB; a PostgreSQL server brings its compiler runtime (some 380 MiB to download, 2 GiB to unpack)
-            case " ${{ matrix.pkgs }} " in *" postgresql17-server "*) limit=420 ;; *) limit=120 ;; esac
+            # curl is 6 MiB with what it needs; a PostgreSQL server brings its compiler runtime (some 380 MiB to download, 2 GiB to unpack)
+            case "$want" in *postgresql17-server*) limit=420 ;; *) limit=120 ;; esac
             n=0; ok=no
             while [ "$n" -lt 3 ]; do
               n=$((n + 1))
-              if timeout "$limit" pkg install -y -r FreeBSD-ports ${{ matrix.pkgs }}; then ok=yes; break; fi
-              echo "pkg install of ${{ matrix.pkgs }} failed (attempt $n of 3)"
+              # shellcheck disable=SC2086
+              if timeout "$limit" pkg install -y -r FreeBSD-ports $want; then ok=yes; break; fi
+              echo "pkg install of$want failed (attempt $n of 3)"
               sleep $((n * 15))
               timeout 120 pkg update -f -r FreeBSD-ports || true
             done
-            [ "$ok" = yes ] || { echo "the package mirror (pkg.FreeBSD.org, FreeBSD-ports, quarterly) did not give ${{ matrix.pkgs }} in three attempts"; exit 1; }
+            [ "$ok" = yes ] || { echo "the package mirror (pkg.FreeBSD.org, FreeBSD-ports, quarterly) did not give$want in three attempts"; exit 1; }
           run: |
             set -eu
             # go.mod names a newer Go than the package: fetch it; the tests that build binaries must not ask git for a
