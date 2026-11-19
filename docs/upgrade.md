@@ -249,7 +249,7 @@ no longer ships is yours to look at; `jailops jail diff web` lists what differs 
 root is kept for 14 days after an upgrade, so go back soon: after that housekeeping removes it and the root cannot come back. Restoring a snapshot (`--scope all`) that was taken on the
 old image is refused while the jail is on the new one: roll the root back first.
 
-**A jail that does not move.** A thick jail, a Linux jail and a jail on another OS are replaced: create the new jail next
+**A jail that does not move.** A thick jail is also upgraded by hand ([thick-jail-upgrades.md](thick-jail-upgrades.md)). A thick jail, a Linux jail and a jail on another OS can be replaced instead: create the new jail next
 to the old one on the new image, copy or export the data from the old jail and import it in the new one with the
 application's own tools, check it, move the addresses or ports over, and delete the old jail when you no longer need it.
 Take a backup of the old jail first ([backup-restore.md](backup-restore.md)). Delete the old image
@@ -279,7 +279,8 @@ Before `--scope data` or `--scope all` the command shows how many bytes were wri
 in a script pass `--confirm-data-loss` (`-y` does not apply to data loss).
 
 A thick jail (a full copy) and a Linux jail are not rebased; they are updated in place, and a debootstrap (Debian)
-generation cannot be upgraded: build a new one.
+generation cannot be upgraded: build a new one. How to do it by hand, with a checkpoint to go back to, is in
+[Upgrading a thick jail by hand](thick-jail-upgrades.md).
 
 ### The package records of the base
 

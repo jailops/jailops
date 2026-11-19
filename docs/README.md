@@ -18,6 +18,7 @@ register of what is settled and what is open.
 | [storage.md](storage.md) | Storages on big pools, volumes, host directories, quotas, what is and is not backed up |
 | [backup-restore.md](backup-restore.md) | The backup node, the key and its escrow, policies, verification, restoring |
 | [upgrade.md](upgrade.md) | Upgrading JailOps, upgrading and rolling back jails, managed updates |
+| [thick-jail-upgrades.md](thick-jail-upgrades.md) | Updating a thick or Linux jail by hand: a checkpoint, the update, the checks, going back |
 | [supported-versions.md](supported-versions.md) | Which FreeBSD releases JailOps supports, what supported means, and how hosts and jails move to a new release |
 | [1.0.md](1.0.md) | What 1.0.0 promises and what it does not, and the gates a release has to pass |
 | [compatibility.md](compatibility.md) | Which releases of clients, servers, hubs and helpers work together, what a stop in the middle of a change leaves, and the rules for 1.x |
