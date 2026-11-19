@@ -799,7 +799,8 @@ dns6_step() {
 	waitfor "the host holds the resolver address on the loopback" 120 sh -c 'ifconfig lo0 inet6 | grep -q "2001:db8:77:1::1 prefixlen 128"'
 	expect_retry "doctor: the names answer on every address the jails ask" 'dns\.unbound +PASS' $J doctor
 	expect_retry "the jail finds its own name through the resolver address" '2001:db8:77:1::' $J exec --project demo v6 -- drill -Q v6.demo.internal AAAA
-	expect_retry "and any other name through the host's resolver" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' $J exec --project demo v6 -- drill -Q pkg.freebsd.org
+	# one name of the Internet may be unreachable for a moment from a CI machine (the package mirror shows it): three names are tried
+	expect_retry "and any other name through the host's resolver" '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' $J exec --project demo v6 -- sh -c 'drill -Q pkg.freebsd.org || drill -Q www.freebsd.org || drill -Q example.org'
 	# a dual stack network: the gateway and the resolver address, IPv4 first
 	check "a dual stack network" $J network create v64 --ipv4 10.79.0.1/24 --ipv6 2001:db8:77:2::/64 --uplink "$uplink"
 	check "grant it to demo" $J network grant v64 --project demo

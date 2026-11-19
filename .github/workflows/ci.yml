@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      fail_fast:
+        description: "End the run at the first failed job of the FreeBSD VMs and the race shards; false runs every job to its end, as the nightly run does (gh workflow run CI -f fail_fast=false)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -324,7 +329,7 @@ jobs:
     if: needs.changes.outputs.release_only != 'true'
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event.inputs.fail_fast == 'true' }}
       matrix:
         shard: [a, b, c, rest]
     services:
@@ -433,7 +438,7 @@ jobs:
     # the slowest part takes seventeen minutes: a VM that hangs (an unreachable package mirror kept one for thirty) ends at forty
     timeout-minutes: 40
     strategy:
-      fail-fast: false
+      fail-fast: ${{ github.event.inputs.fail_fast == 'true' }}
       matrix:
         # the end-to-end flow and the packet filter test are linear scripts that took twenty minutes each: they run in shards on VMs of
         # their own (scripts/ci-freebsd-e2e.sh JAILOPS_E2E_SHARD, scripts/ci-freebsd-pf.sh PF_SHARD), each set up the same way

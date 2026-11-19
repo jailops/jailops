@@ -260,9 +260,11 @@ publish-packages VERSION:
         sleep 5
     done
     [ -n "$run" ] || { echo "x no Release run for $tag: was the tag pushed (just release {{VERSION}})?"; exit 1; }
-    gh run watch "$run" --exit-status >/dev/null || \
+    echo "waiting for the Release run of $tag (about ten minutes): https://github.com/$(gh repo view --json nameWithOwner --jq .nameWithOwner)/actions/runs/$run"
+    gh run watch "$run" --exit-status --interval 20 || \
         { echo "x the Release run of $tag failed: gh run view $run --log-failed"; exit 1; }
     gh release view "$tag" >/dev/null 2>&1 || { echo "x there is no GitHub release for $tag"; exit 1; }
+    echo "the GitHub release of $tag exists: starting the update check of jailops-packages"
     gh workflow run "Check for updates" -R jailops/jailops-packages
     echo "{{VERSION}} is released: the update check of jailops-packages is running. The bump PR appears in a few minutes:"
     echo "  gh pr list -R jailops/jailops-packages"
