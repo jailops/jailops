@@ -118,12 +118,16 @@ close the ways a break could still slip in:
 - **The names of pf anchors, tables, tags, epair interfaces and interface descriptions are a golden**
   (`internal/render/testdata/names.golden`).
 
-These gates are not built yet; until they are, a person reviews the change:
+Two replays are not built, and each has a reason:
 
-- a replay of an earlier release's command line against the current daemon (the command and flag tree and the previous-client
-  test cover the names and the wire; the command line itself is not replayed);
-- a replay of whole recorded hub and host conversations, beyond the claim;
-- the fixture of 0.9.0, which is made right after the release is tagged.
+- **A replay of an earlier release's command lines.** The golden file of the command and flag tree holds every command and flag of
+  the frozen release, and a line that disappears from it fails CI from 1.0 on (`scripts/check-golden-removals.sh`). A recorded
+  command line could only fail where that file does not: a flag that changes its meaning while keeping its name. A review of the
+  change to a flag's type or default catches that, and the machine output of the commands is a golden of its own.
+- **A replay of whole recorded hub and host conversations.** The signed claim of an earlier release is replayed, the previous-client
+  test runs the library of the last release against the current server, and the routes, envelopes and error codes are goldens. A
+  recorded conversation would repeat those checks with more bytes; it is added the day a hub and a host of different releases
+  disagree in practice.
 
 ## A snapshot published by an older release
 

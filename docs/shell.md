@@ -227,4 +227,4 @@ The green prompt on the host is the same mechanism, written once by hand (JailOp
     done
 
 `chsh -s /usr/local/bin/bash` makes bash your login shell. Your own `~/.bashrc` wins here as in a jail.
-[appliance.md](appliance.md#the-shell-prompt-of-the-host) says why this is not a host management module.
+[appliance.md](appliance.md#the-shell-prompt-of-the-host-not-a-module) says why this is not a host management module.
