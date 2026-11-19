@@ -2,7 +2,9 @@
 
 The one page for keeping a JailOps host current: FreeBSD on the host, JailOps itself, and the jails. It says what each
 thing is, what works with what, the order of the steps for every situation, what to test afterwards, and the way back.
-The mechanics of each JailOps command are in [upgrade.md](upgrade.md); this page is the runbook.
+The mechanics of each JailOps command are in [upgrade.md](upgrade.md); this page is the runbook. One administrator's
+way of running it, night after night with a script in periodic(8) and through the next releases with the command line,
+is written out in [automating-updates.md](automating-updates.md).
 
 **Three rules, before anything else.**
 
@@ -254,7 +256,8 @@ starts the jail and runs its health check, and swaps back when the start or the 
 
    A run stops at the first jail that fails; the jails after it wait for the next run or for you. Thick jails, Linux
    jails and jails pinned to a generation (`freebsd-15-1#g3`) are skipped and listed. A stopped jail is moved, started
-   for the health check and stopped again. Nothing is kept when the repository had nothing new.
+   for the health check and stopped again. Nothing is kept when the repository had nothing new. The same from a
+   script of your own in periodic(8), with the host's patch level in the same night: [automating-updates.md](automating-updates.md).
 3. AFTER, for the jails that moved: `jailops image generation list freebsd-15-1` shows who is where,
    `jailops update history web` the record of each move.
 4. **Going back:** `jailops jail rollback web --project shop` returns the root to the previous generation and leaves

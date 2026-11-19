@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- **A worked example of the lifecycle guide.** [docs/automating-updates.md](docs/automating-updates.md): a script in
+  periodic(8) that updates the host's patch level, the image generation and the packages inside the jails every
+  night, corrected and explained line by line (what each command does on a pkgbase host, the exit statuses and the
+  mail, what a stopped, pinned or thick jail gets, the checklist before the first unattended run, the built-in
+  alternatives and which to choose, what to look at in the morning); the move of that host to 15.2 with the script
+  switched off and on again; what differs for 16.0; and a table of the command line by question. Linked from
+  `docs/lifecycle.md`, which stays the entry point.
+
 ## 0.9.1 - 2026-11-19
 
 - **Fixes from the review of 0.9.0.**
