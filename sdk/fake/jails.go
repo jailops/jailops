@@ -410,6 +410,66 @@ func (s *Server) jailRollback(w http.ResponseWriter, r *http.Request) {
 	s.respond(w, rp)
 }
 
+// jailCopy implements POST /api/v1/jails/{name}: a copy with the data of the source (the fake keeps no data): the same
+// specification under a new name, with addresses of its own, no volume and no exposure.
+func (s *Server) jailCopy(w http.ResponseWriter, r *http.Request) {
+	req, e := decode[api.JailCopy](r)
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	src := r.PathValue("name")
+	rc := s.info(r)
+	sk := s.jails.key(r, src)
+	s.mu.Lock()
+	rp := func() reply {
+		from := s.jails.items[sk]
+		if from == nil {
+			return reply{err: notFound("jail", src)}
+		}
+		if !validName(req.Name) {
+			return reply{err: api.Errorf(api.CodeInvalid, "invalid name %q", req.Name)}
+		}
+		dk := s.jails.keyIn(rc.project, req.Name)
+		if s.jails.items[dk] != nil {
+			return reply{err: api.Errorf(api.CodeAlreadyExists, "jail %q already exists", req.Name)}
+		}
+		if req.Snapshot != "" && s.findSnap(sk, req.Snapshot) == nil {
+			return reply{err: notFound("snapshot", req.Snapshot).WithHint("jailops jail snapshot list " + src)}
+		}
+		op := s.startOp(rc.project, "jails.copy", "Copy jail "+src+" to "+req.Name, map[string][]string{"jails": {"/api/v1/jails/" + src, "/api/v1/jails/" + req.Name}}, func() (any, *api.Error) {
+			from := s.jails.items[sk]
+			if from == nil {
+				return nil, notFound("jail", src)
+			}
+			nj := clone(from)
+			nj.Metadata = api.ObjectMeta{Name: req.Name, Project: rc.project, Labels: from.Metadata.Labels}
+			if req.Labels != nil {
+				nj.Metadata.Labels = req.Labels
+			}
+			nj.Spec.Volumes, nj.Spec.Expose = nil, nil
+			for i := range nj.Spec.Network {
+				n := &nj.Spec.Network[i]
+				n.MAC = ""
+				for _, p := range []*string{&n.IPv4, &n.IPv6} {
+					if *p != "" && *p != "none" {
+						*p = "auto"
+					}
+				}
+			}
+			if e := s.assignJail(&nj, nil); e != nil {
+				return nil, e
+			}
+			s.initJailStatus(&nj)
+			s.jails.insert(&nj, false)
+			return clone(&nj), nil
+		})
+		return reply{op: &op}
+	}()
+	s.mu.Unlock()
+	s.respond(w, rp)
+}
+
 func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 	up, e := decode[api.JailUpgrade](r)
 	if e != nil {
@@ -425,7 +485,17 @@ func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 		if j == nil {
 			return reply{err: notFound("jail", name)}
 		}
+		toImage := ""
+		if up.Image != "" && up.Image != imageName(j.Spec.Image) {
+			toImage = up.Image
+			if s.images.items[toImage] == nil {
+				return reply{err: notFound("image", toImage)}
+			}
+		}
 		gens := s.gens[imageName(j.Spec.Image)]
+		if toImage != "" {
+			gens = s.gens[toImage]
+		}
 		target := genNumber(up.Generation)
 		if up.Generation == "" && len(gens) > 0 {
 			target = gens[len(gens)-1].Number
@@ -433,7 +503,7 @@ func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 		if target == 0 || target > len(gens) {
 			return reply{err: api.Errorf(api.CodeInvalid, "target generation does not exist")}
 		}
-		if target == genNumber(j.Status.Generation) {
+		if toImage == "" && up.Image == "" && target == genNumber(j.Status.Generation) {
 			return reply{err: api.Errorf(api.CodeInvalid, "jail %q is already on generation g%d", name, target)}
 		}
 		op := s.startOp(rc.project, "jails.upgrade", "Upgrade "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
@@ -441,15 +511,66 @@ func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 			if j == nil {
 				return nil, notFound("jail", name)
 			}
-			if !up.DryRun {
+			if !up.DryRun && (toImage != "" || target != genNumber(j.Status.Generation)) {
 				j.Status.Generation = "g" + strconv.Itoa(target)
-				if i := strings.IndexByte(j.Spec.Image, '#'); i >= 0 {
+				if toImage != "" {
+					j.Spec.Image = toImage
+					j.Metadata.Generation++
+				} else if i := strings.IndexByte(j.Spec.Image, '#'); i >= 0 {
 					j.Spec.Image = j.Spec.Image[:i+1] + j.Status.Generation
 					j.Metadata.Generation++
 				}
 				s.emitIn(rc.project, "jail-upgraded", "/api/v1/jails/"+name)
 			}
 			return clone(j), nil
+		})
+		return reply{op: &op}
+	}()
+	s.mu.Unlock()
+	s.respond(w, rp)
+}
+
+// jailConvert implements POST /api/v1/jails/{name}/convert: the layout of the root changes (the fake keeps no data).
+func (s *Server) jailConvert(w http.ResponseWriter, r *http.Request) {
+	req, e := decode[api.JailConvert](r)
+	if e != nil {
+		writeErr(w, e)
+		return
+	}
+	name := r.PathValue("name")
+	rc := s.info(r)
+	jk := s.jails.key(r, name)
+	s.mu.Lock()
+	rp := func() reply {
+		j := s.jails.items[jk]
+		if j == nil {
+			return reply{err: notFound("jail", name)}
+		}
+		if req.Layout != api.LayoutThin && req.Layout != api.LayoutThick {
+			return reply{err: api.Errorf(api.CodeInvalid, "bad layout %q: thin or thick", req.Layout)}
+		}
+		from := j.Spec.Layout
+		if from == "" {
+			from = api.LayoutThin
+		}
+		if j.Spec.OS == api.OSLinux {
+			return reply{err: api.Errorf(api.CodeUnsupported, "a Linux jail is thick and stays so: only FreeBSD jails change layout")}
+		}
+		res := api.JailConvertResult{Jail: name, From: from, To: req.Layout, Image: j.Status.Generation, Changed: from != req.Layout, DryRun: req.DryRun}
+		if res.Changed {
+			res.Steps = []string{"zfs snapshot " + name + "@jo-pre-convert", "jail -r " + name, "swap the root", "jail -c " + name}
+		}
+		op := s.startOp(rc.project, "jails.convert", "Convert jail "+name+" to "+string(req.Layout), map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
+			j := s.jails.items[jk]
+			if j == nil {
+				return nil, notFound("jail", name)
+			}
+			if res.Changed && !req.DryRun {
+				j.Spec.Layout = req.Layout
+				j.Metadata.Generation++
+				s.emitIn(rc.project, "jail-converted", "/api/v1/jails/"+name)
+			}
+			return res, nil
 		})
 		return reply{op: &op}
 	}()
@@ -850,6 +971,9 @@ func (s *Server) imageUpgrade(w http.ResponseWriter, r *http.Request) {
 		if u.Project != "" && (s.projects.items[u.Project] == nil || !rc.canProject(u.Project)) {
 			return reply{err: notFound("project", u.Project)}
 		}
+		if u.To != "" {
+			return s.imageMoveTo(rc, name, u)
+		}
 		from := 0
 		for _, g := range s.gens[name] {
 			from = max(from, g.Number)
@@ -936,6 +1060,60 @@ func (s *Server) imageUpgrade(w http.ResponseWriter, r *http.Request) {
 	}()
 	s.mu.Unlock()
 	s.respond(w, rp)
+}
+
+// imageMoveTo is the image upgrade with To: every thin jail of the image moves to the newest generation of the other
+// image, one at a time (the caller holds s.mu).
+func (s *Server) imageMoveTo(rc *reqInfo, name string, u api.ImageUpgrade) reply {
+	to := u.To
+	switch {
+	case to == name:
+		return reply{err: api.Errorf(api.CodeInvalid, "to names the image itself: leave it out to build the next generation")}
+	case u.NoJails:
+		return reply{err: api.Errorf(api.CodeInvalid, "no_jails and to cannot be combined: moving the jails is all a move to another image does")}
+	case s.images.items[to] == nil:
+		return reply{err: notFound("image", to)}
+	case len(s.gens[to]) == 0:
+		return reply{err: api.Errorf(api.CodeNotFound, "image %q has no generation to move the jails to", to).WithHint("build the first one with 'jailops image build " + to + "'")}
+	}
+	newest := s.gens[to][len(s.gens[to])-1].Number
+	var keys []string
+	for k, j := range s.jails.items {
+		if imageName(j.Spec.Image) == name && rc.canProject(j.Metadata.Project) && (u.Project == "" || j.Metadata.Project == u.Project) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	op := s.startOp("", "images.upgrade", "Move the jails of image "+name+" to "+to, map[string][]string{"images": {"/api/v1/images/" + name, "/api/v1/images/" + to}}, func() (any, *api.Error) {
+		g := *s.gens[to][len(s.gens[to])-1]
+		out := api.ImageUpgradeResult{From: name + "#g0", Generation: &g, DryRun: u.DryRun, Jails: []api.ImageUpgradeJail{}}
+		for _, k := range keys {
+			j := s.jails.items[k]
+			if j == nil {
+				continue
+			}
+			o := api.ImageUpgradeJail{Jail: j.Metadata.Name, Project: j.Metadata.Project, From: name + "#" + j.Status.Generation, To: fmt.Sprintf("%s#g%d", to, newest)}
+			switch {
+			case j.Spec.OS == api.OSLinux || j.Spec.Layout == api.LayoutThick:
+				o.Status, o.To, o.Reason = api.ImageUpgradeSkipped, "", "a thick jail is updated in place"
+			case strings.IndexByte(j.Spec.Image, '#') >= 0:
+				o.Status, o.To, o.Reason = api.ImageUpgradeSkipped, "", "pinned to "+j.Spec.Image
+			case u.DryRun:
+				o.Status = api.ImageUpgradePlanned
+			default:
+				j.Spec.Image = to
+				j.Status.Generation = "g" + strconv.Itoa(newest)
+				j.Metadata.Generation++
+				o.Status = api.ImageUpgradeUpgraded
+			}
+			out.Jails = append(out.Jails, o)
+		}
+		if !u.DryRun {
+			s.emit("image-upgraded", "/api/v1/images/"+name)
+		}
+		return out, nil
+	})
+	return reply{op: &op}
 }
 
 func (s *Server) genDelete(w http.ResponseWriter, r *http.Request) {

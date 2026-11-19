@@ -230,6 +230,12 @@ jobs:
         run: sh scripts/lint-e2e.sh
       - name: Prose carries no history, test diary or filler
         run: sh scripts/lint-prose.sh
+      - name: The lock of the FreeBSD test VMs serializes two runs
+        run: sh scripts/vm-lock-test.sh
+      - name: The workflow walkthrough agrees with its steps and the roadmap
+        run: |
+          sh scripts/check-workflows-table.sh
+          sh test/workflows/check-test.sh
       - name: The race shards cover every package exactly once
         run: bash scripts/ci-race.sh --check
       - name: SDK module (stdlib only, outside the go.work workspace so that only its own go.mod counts)

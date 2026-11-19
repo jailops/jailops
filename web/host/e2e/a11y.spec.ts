@@ -118,6 +118,8 @@ const states: Array<{ name: string; route: string; steps: Array<{ click?: string
   { name: 'labels editor after a failed add', route: '/jails/api', steps: [{ click: '[data-test="labels-edit"]' }, { fill: ['[data-test="label-key"]', 'Bad key'] }, { click: '[data-test="label-add"]', force: true }] },
   { name: 'filtered jail list with suggestions', route: '/jails?q=env%3Dprod%20-team%3Dweb', steps: [{ click: '[data-test="jails-filter"]' }, { fill: ['[data-test="jails-filter"]', 'env=prod -team=web t'] }] },
   { name: 'bulk labels', route: '/jails', steps: [{ click: '[aria-label="Select api"]' }, { click: '[data-test="bulk-labels"]' }, { click: '[data-test="bl-apply"]', force: true }] },
+  { name: 'run a command on selected jails', route: '/jails', steps: [{ click: '[aria-label="Select api"]' }, { click: '[data-test="bulk-run"]' }, { fill: ['[data-test="rc-command"]', 'hostname'] }, { click: '[data-test="rc-run"]' }] },
+  { name: 'files of a jail', route: '/jails/web?tab=files', steps: [] },
   { name: 'connected shell', route: '/jails/web/shell', steps: [] },
 ]
 for (const scheme of ['light', 'dark'] as const) {

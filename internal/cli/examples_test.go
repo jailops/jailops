@@ -164,11 +164,16 @@ func TestEveryExampleParses(t *testing.T) {
 
 // notRunnable lists the examples that cannot run here, and why; nothing else may end in a usage error.
 var notRunnable = map[string]string{
-	"wireguard join --token-file token.txt --name office":                                           "reads a file of the host",
-	"user create admin --admin --password-prompt":                                                   "asks on a terminal",
-	"user set-password alice":                                                                       "asks on a terminal",
-	"user create carol --role operator --projects web --password-file /root/carol.pass":             "reads a file of the host",
-	"user set-password alice --password-file /root/alice.pass":                                      "reads a file of the host",
+	"wireguard join --token-file token.txt --name office":                               "reads a file of the host",
+	"user create admin --admin --password-prompt":                                       "asks on a terminal",
+	"user set-password alice":                                                           "asks on a terminal",
+	"user create carol --role operator --projects web --password-file /root/carol.pass": "reads a file of the host",
+	"user set-password alice --password-file /root/alice.pass":                          "reads a file of the host",
+	"backup key import":                         "asks for the recovery key on a terminal",
+	"backup key import --file recovery-key.txt": "reads a file of the host",
+	"backup key import --file -":                "reads the key from standard input",
+	"backup key import --file old-host-backup.key --passphrase-file pass.txt":                       "reads files of the host",
+	"backup key import --identity-file recovery-identity.txt":                                       "reads a file of the host",
 	"apply -f - --project web":                                                                      "reads a file on standard input",
 	"firewall validate -f - --offline":                                                              "reads a file on standard input",
 	"host certificate upload --cert fullchain.pem --key privkey.pem":                                "reads a certificate of the host",

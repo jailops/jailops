@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"jailops.net/jailops/internal/supervise"
+	"path/filepath"
 	"slices"
 	"strconv"
 	"strings"
@@ -268,6 +269,11 @@ func (s *Service) CreateVolume(ctx context.Context, in api.VolumeCreate) (api.Op
 	if err := api.ValidLabels(in.Metadata.Labels); err != nil {
 		return api.Operation{}, err
 	}
+	if in.FromDir != "" {
+		if err := checkFromDir(ctx, in.FromDir, spec); err != nil {
+			return api.Operation{}, err
+		}
+	}
 	if spec.IsHostDir() {
 		return s.createHostDirVolume(ctx, p, in, spec)
 	}
@@ -293,13 +299,32 @@ func (s *Service) CreateVolume(ctx context.Context, in api.VolumeCreate) (api.Op
 	}
 	meta := api.ObjectMeta{Name: name, Project: proj, Labels: in.Metadata.Labels, ManagedBy: in.Metadata.ManagedBy}
 	op, err := s.Submit(ctx, OpSpec{
-		Description: "Create volume " + name, Locks: []string{volumeLock(proj, name)}, Project: proj,
+		Description: "Create volume " + name + fromDirText(in.FromDir), Locks: []string{volumeLock(proj, name)}, Project: proj,
 		Resources: map[string][]string{"volumes": {"/api/v1/volumes/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer wipe(pass)
+			if in.FromDir != "" {
+				// a directory the helper will not read is refused before the dataset exists
+				if err := s.life.CheckHostSource(ctx, in.FromDir); err != nil {
+					return nil, hostSourceError(err, in.FromDir)
+				}
+			}
 			o, err := s.makeVolume(ctx, p, si, meta, spec, mode, pass, false)
 			if err != nil {
 				return nil, err
+			}
+			if in.FromDir != "" {
+				// the copy fills a new volume: when it fails, the volume goes again, so no half-filled one is left
+				n, err := s.life.ImportIntoVolume(ctx, si.lifecycle(), proj, name, in.FromDir)
+				if err != nil {
+					if derr := s.dropVolume(context.WithoutCancel(ctx), proj, name); derr != nil {
+						s.log.Warn("volume: the volume of a failed import could not be removed", "volume", name, "project", proj, "err", derr)
+					}
+					return nil, hostSourceError(err, in.FromDir)
+				}
+				v := s.volumeView(ctx, proj, o) // after the copy: the space it takes is in it
+				v.Status.Imported = &api.VolumeImported{From: in.FromDir, Files: n.Files, Dirs: n.Dirs, Symlinks: n.Symlinks, Bytes: n.Bytes, Skipped: n.Skipped}
+				return v, nil
 			}
 			return s.volumeView(ctx, proj, o), nil
 		},
@@ -308,6 +333,42 @@ func (s *Service) CreateVolume(ctx context.Context, in api.VolumeCreate) (api.Op
 		wipe(pass)
 	}
 	return op, err
+}
+
+// checkFromDir checks the request to copy a host directory into a new volume before anything is made: a global
+// administrator, a plain volume (not a host directory, not encrypted), an absolute clean path.
+func checkFromDir(ctx context.Context, dir string, spec api.VolumeSpec) error {
+	if err := requireGlobalAdminFor(ctx, "copying a directory of the host into a volume"); err != nil {
+		return err
+	}
+	switch {
+	case spec.IsHostDir():
+		return invalid("from_dir copies files into a new volume; a volume with a path is the host directory itself").
+			WithHint("give either --path (the directory stays the host's, on a mount) or --from-dir (its files are copied into a volume)")
+	case spec.Encrypted:
+		return invalid("a volume made from a host directory is not encrypted").
+			WithHint("create the encrypted volume and copy the files in from a jail that attaches both")
+	case len(dir) > 4096 || strings.ContainsRune(dir, 0) || !filepath.IsAbs(dir) || filepath.Clean(dir) != dir:
+		return invalid("from_dir %q must be an absolute path without . or .. or a trailing slash", dir)
+	}
+	return nil
+}
+
+func fromDirText(dir string) string {
+	if dir == "" {
+		return ""
+	}
+	return " from " + dir
+}
+
+// hostSourceError says what a refused or failed copy of a host directory means: the directories come from the host
+// operator's list in priv.conf.
+func hostSourceError(err error, dir string) error {
+	var ae *api.Error
+	if errors.As(err, &ae) && ae.Code == api.CodeForbidden {
+		return ae.WithHint("the host operator lists the directories whose files may be copied with admin-host-mount in priv.conf; " + dir + " must lie below one of them")
+	}
+	return err
 }
 
 // makeVolume creates the dataset of a volume and its object; the caller holds the lock of the volume and has checked

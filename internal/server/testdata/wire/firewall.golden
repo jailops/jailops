@@ -1,0 +1,661 @@
+> POST /api/v1/jails?project=alpha
+> {"metadata":{"name":"web"},"spec":{"image":"fb","storage":"default","update":{"strategy":"rebase","healthcheck":"/bin/true"},"network":[{"network":"lan","ipv4":"auto"}]}}
+< 202 Accepted
+< Content-Type: application/json
+< Cache-Control: no-store
+< Location: /api/v1/operations/<op1>
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Create jail web",
+    "id": "<op1>",
+    "may_cancel": "<volatile>",
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "<volatile>",
+    "updated_at": "<volatile>"
+  },
+  "operation": "/api/v1/operations/<op1>",
+  "status": "Operation created",
+  "status_code": 202,
+  "type": "async"
+}
+
+> GET /api/v1/operations/<op1>/wait?project=alpha&timeout=5
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Create jail web",
+    "id": "<op1>",
+    "may_cancel": false,
+    "metadata": {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "host": "<uuid>",
+        "name": "web",
+        "project": "alpha",
+        "scope": "host",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "boot": {},
+        "firewall": {},
+        "hostname": "web",
+        "image": "fb",
+        "layout": "thin",
+        "network": [
+          {
+            "ipv4": "10.20.0.10",
+            "name": "eth0",
+            "network": "lan"
+          }
+        ],
+        "os": "freebsd",
+        "prompt": "default",
+        "resources": {},
+        "shell": "/usr/local/bin/bash",
+        "storage": "default",
+        "update": {
+          "healthcheck": "/bin/true",
+          "strategy": "rebase"
+        }
+      },
+      "status": {
+        "freebsd_version": "15.0-RELEASE-p1",
+        "generation": "fb#g1",
+        "power": "stopped"
+      }
+    },
+    "progress": 100,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "success",
+    "steps": [
+      {
+        "duration_ms": "<ms>",
+        "name": "<step>"
+      }
+    ],
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# an address set and a policy: create (201), read, change with If-Match, list
+> POST /api/v1/firewall/address-sets?project=alpha
+> {"metadata":{"name":"office"},"spec":{"addresses":[{"address":"192.0.2.0/24"}]}}
+< 201 Created
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "1"
+< Location: /api/v1/firewall/address-sets/office
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 1,
+      "name": "office",
+      "project": "alpha",
+      "scope": "fleet",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "addresses": [
+        {
+          "address": "192.0.2.0/24"
+        }
+      ]
+    }
+  },
+  "status": "Success",
+  "status_code": 201,
+  "type": "sync"
+}
+
+> POST /api/v1/firewall/policies?project=alpha
+> {"metadata":{"name":"ssh"},"spec":{"rules":[{"action":"allow","direction":"in","proto":"tcp","from":["set:office"],"ports":["22"]}]}}
+< 201 Created
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "1"
+< Location: /api/v1/firewall/policies/ssh
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 1,
+      "name": "ssh",
+      "project": "alpha",
+      "scope": "fleet",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "rules": [
+        {
+          "action": "allow",
+          "direction": "in",
+          "from": [
+            "set:office"
+          ],
+          "ports": [
+            "22"
+          ],
+          "proto": "tcp"
+        }
+      ]
+    },
+    "status": {
+      "mandatory": false,
+      "used_by": []
+    }
+  },
+  "status": "Success",
+  "status_code": 201,
+  "type": "sync"
+}
+
+> GET /api/v1/firewall/policies/ssh?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "1"
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 1,
+      "name": "ssh",
+      "project": "alpha",
+      "scope": "fleet",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "rules": [
+        {
+          "action": "allow",
+          "direction": "in",
+          "from": [
+            "set:office"
+          ],
+          "ports": [
+            "22"
+          ],
+          "proto": "tcp"
+        }
+      ]
+    },
+    "status": {
+      "mandatory": false,
+      "used_by": []
+    }
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> PATCH /api/v1/firewall/policies/ssh?project=alpha
+> If-Match: "1"
+> {"spec":{"comment":"the office reaches ssh"}}
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "2"
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 2,
+      "name": "ssh",
+      "project": "alpha",
+      "scope": "fleet",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "comment": "the office reaches ssh",
+      "rules": [
+        {
+          "action": "allow",
+          "direction": "in",
+          "from": [
+            "set:office"
+          ],
+          "ports": [
+            "22"
+          ],
+          "proto": "tcp"
+        }
+      ]
+    },
+    "status": {
+      "mandatory": false,
+      "used_by": []
+    }
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/firewall/policies?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": [
+    {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 2,
+        "name": "ssh",
+        "project": "alpha",
+        "scope": "fleet",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "comment": "the office reaches ssh",
+        "rules": [
+          {
+            "action": "allow",
+            "direction": "in",
+            "from": [
+              "set:office"
+            ],
+            "ports": [
+              "22"
+            ],
+            "proto": "tcp"
+          }
+        ]
+      },
+      "status": {
+        "mandatory": false,
+        "used_by": []
+      }
+    }
+  ],
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/firewall/address-sets?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": [
+    {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "name": "office",
+        "project": "alpha",
+        "scope": "fleet",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "addresses": [
+          {
+            "address": "192.0.2.0/24"
+          }
+        ]
+      }
+    }
+  ],
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# a policy a jail uses, then what reaches the jail and what the test says about one packet
+> POST /api/v1/jails/web/config?project=alpha
+> {"set":{"firewall.policies":"ssh"}}
+< 202 Accepted
+< Content-Type: application/json
+< Cache-Control: no-store
+< Location: /api/v1/operations/<op2>
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Configure jail web",
+    "id": "<op2>",
+    "may_cancel": "<volatile>",
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "<volatile>",
+    "updated_at": "<volatile>"
+  },
+  "operation": "/api/v1/operations/<op2>",
+  "status": "Operation created",
+  "status_code": 202,
+  "type": "async"
+}
+
+> GET /api/v1/operations/<op2>/wait?project=alpha&timeout=5
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "created_at": "<time>",
+    "description": "Configure jail web",
+    "id": "<op2>",
+    "may_cancel": false,
+    "metadata": {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 2,
+        "host": "<uuid>",
+        "name": "web",
+        "project": "alpha",
+        "scope": "host",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "restart_required": [],
+      "spec": {
+        "boot": {},
+        "firewall": {
+          "policies": [
+            "ssh"
+          ]
+        },
+        "hostname": "web",
+        "image": "fb",
+        "layout": "thin",
+        "network": [
+          {
+            "ipv4": "10.20.0.10",
+            "name": "eth0",
+            "network": "lan"
+          }
+        ],
+        "os": "freebsd",
+        "prompt": "default",
+        "resources": {},
+        "shell": "/usr/local/bin/bash",
+        "storage": "default",
+        "update": {
+          "healthcheck": "/bin/true",
+          "strategy": "rebase"
+        }
+      },
+      "status": {
+        "freebsd_version": "15.0-RELEASE-p1",
+        "generation": "fb#g1",
+        "power": "stopped",
+        "warnings": [
+          "policy ssh allows tcp 22 from set:office, but inbound is allow (no policy says deny): every source on the jail's network reaches the jail; add default_in: deny to a policy of the jail to restrict it"
+        ]
+      }
+    },
+    "progress": 100,
+    "project": "alpha",
+    "resources": {
+      "jails": [
+        "/api/v1/jails/web"
+      ]
+    },
+    "status": "success",
+    "updated_at": "<time>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/jails/web/reach?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "default_in": "allow",
+    "default_out": "allow",
+    "jail": "web",
+    "out": {
+      "host": "nothing (the host is closed to jails (DNS and ping to the gateway excepted))",
+      "internet": "tcp all ports, udp all ports",
+      "jails": "tcp all ports, udp all ports",
+      "other_projects": "nothing"
+    },
+    "policies": [
+      {
+        "name": "ssh",
+        "rules": 1,
+        "source": "jail"
+      }
+    ],
+    "project": "alpha",
+    "rows": [
+      {
+        "by": "the inbound default is allow (no policy says deny)",
+        "decision": "pass",
+        "family": "4",
+        "ports": "all",
+        "proto": "tcp",
+        "source": "jails",
+        "stage": "default"
+      },
+      {
+        "by": "the inbound default is allow (no policy says deny)",
+        "decision": "pass",
+        "family": "4",
+        "ports": "all",
+        "proto": "udp",
+        "source": "jails",
+        "stage": "default"
+      },
+      {
+        "by": "the inbound default is allow (no policy says deny)",
+        "decision": "pass",
+        "family": "4",
+        "ports": "all",
+        "proto": "tcp",
+        "source": "host",
+        "stage": "default"
+      },
+      {
+        "by": "the inbound default is allow (no policy says deny)",
+        "decision": "pass",
+        "family": "4",
+        "ports": "all",
+        "proto": "udp",
+        "source": "host",
+        "stage": "default"
+      },
+      {
+        "by": "nothing of this anchor decides",
+        "decision": "none",
+        "family": "4,6",
+        "proto": "tcp,udp",
+        "source": "other-projects"
+      }
+    ],
+    "rules": [
+      {
+        "by": "protection: only the jail's own source addresses",
+        "decision": "block",
+        "direction": "from",
+        "family": "4,6",
+        "from": "not jail_addrs",
+        "pf": "block in quick on <link> from ! <jail_addrs> to any",
+        "stage": "antispoof",
+        "to": "any",
+        "where": "link"
+      },
+      {
+        "by": "protection: only the jail's own addresses reach it",
+        "decision": "block",
+        "direction": "to",
+        "family": "4,6",
+        "from": "any",
+        "pf": "block drop out quick on <link> from any to ! <jail_addrs>",
+        "stage": "own-addresses",
+        "to": "not jail_addrs",
+        "where": "link"
+      },
+      {
+        "by": "protection: only the jail's own addresses reach it",
+        "decision": "block",
+        "direction": "to",
+        "family": "4",
+        "from": "any",
+        "pf": "block drop out quick on <link> inet proto icmp from any to any icmp-type redir",
+        "proto": "icmp",
+        "stage": "own-addresses",
+        "to": "any",
+        "where": "link"
+      },
+      {
+        "by": "the host is closed to jails (DNS and ping to the gateway excepted)",
+        "decision": "pass",
+        "direction": "from",
+        "family": "4",
+        "from": "any",
+        "pf": "pass in quick on <link> inet proto icmp from any to <host> icmp-type { echoreq, unreach, timex, paramprob } label \"jo-<label>\" keep state (max 10000, if-bound)",
+        "proto": "icmp",
+        "stage": "host",
+        "to": "host",
+        "where": "link"
+      },
+      {
+        "by": "the host is closed to jails (DNS and ping to the gateway excepted)",
+        "decision": "block",
+        "direction": "from",
+        "family": "4,6",
+        "from": "any",
+        "pf": "block drop in quick on <link> from any to <host>",
+        "stage": "host",
+        "to": "host",
+        "where": "link"
+      },
+      {
+        "by": "policy ssh rule 1",
+        "decision": "pass",
+        "direction": "to",
+        "family": "4",
+        "from": "set:office",
+        "pf": "pass out quick on <link> inet proto tcp from <s_office> to 10.20.0.10 port 22 label \"jo-<label>\" keep state (max 10000, if-bound)",
+        "ports": "22",
+        "proto": "tcp",
+        "stage": "policy",
+        "to": "10.20.0.10/32",
+        "where": "link"
+      },
+      {
+        "by": "the inbound default is allow (no policy says deny)",
+        "decision": "pass",
+        "direction": "to",
+        "family": "4,6",
+        "from": "any",
+        "pf": "pass out quick on <link> all label \"jo-<label>\" keep state (max 10000, if-bound)",
+        "stage": "default",
+        "to": "any",
+        "where": "link"
+      },
+      {
+        "by": "the outbound default is allow (no policy says deny)",
+        "decision": "pass",
+        "direction": "from",
+        "family": "4,6",
+        "from": "any",
+        "pf": "pass in quick on <link> all label \"jo-<label>\" keep state (max 10000, if-bound)",
+        "stage": "default",
+        "to": "any",
+        "where": "link"
+      }
+    ],
+    "rules_id": "<hash>"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> POST /api/v1/firewall/test?project=alpha
+> {"from":"192.0.2.7","to":"jail:web","proto":"tcp","port":22}
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "cases": [
+      {
+        "family": "inet",
+        "from": "192.0.2.7",
+        "hops": [
+          {
+            "anchor": "jailops/alpha/web",
+            "decided_by": {
+              "pf": "pass out quick on <link> inet proto tcp from <s_office> to 10.20.0.10 port 22 label \"jo-<label>\" keep state (max 10000, if-bound)",
+              "policy": "ssh",
+              "rule": 1,
+              "stage": "policy"
+            },
+            "direction": "out",
+            "jail": "web",
+            "loaded_matches_rendered": "false",
+            "side": "destination",
+            "verdict": "pass"
+          }
+        ],
+        "port": 22,
+        "proto": "tcp",
+        "to": "10.20.0.10",
+        "verdict": "pass"
+      }
+    ],
+    "caveats": [
+      "the answer is for a new connection: a connection that is already open (pf keeps its state) is not asked about",
+      "only JailOps' rules are evaluated: a rule of an anchor that passes or blocks is final, so /etc/pf.conf after the anchor line never sees the packet; quick rules of pf.conf before the anchor line are not evaluated (jailops doctor: pf.inbound and pf.order name such rules)",
+      "on the way out of the host only the destination jail's anchor is evaluated, not the anchors of other jails"
+    ],
+    "verdict": "pass"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# a policy in use is not deleted
+> DELETE /api/v1/firewall/policies/ssh?project=alpha
+< 409 Conflict
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "busy",
+    "message": "firewall policy \"ssh\" is used by jail \"web\""
+  },
+  "status": "Failure",
+  "status_code": 409,
+  "type": "error"
+}
+

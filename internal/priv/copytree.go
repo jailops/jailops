@@ -23,6 +23,14 @@ type CopyOpts struct {
 	// filesystem than the source directory. Without it such a directory is an
 	// error: a mount point inside an image tree is never copied silently.
 	CrossFilesystem bool `json:"cross_filesystem,omitempty"`
+	// HostSource makes src a directory of the host below an admin-host-mount directory of priv.conf (the directory
+	// itself or anything below it), opened from that directory one plain directory at a time: a symbolic link on the
+	// way is refused, and nothing in the tree is followed through one. The destination is not a tree a jail made, so no
+	// setuid or setgid bit and no device node comes across. It is how the files of a host directory become a volume.
+	HostSource bool `json:"host_source,omitempty"`
+	// CheckOnly resolves and opens the source and copies nothing (dst is ignored): the preflight of a copy that is
+	// about to create its destination.
+	CheckOnly bool `json:"check_only,omitempty"`
 	// MaxEntries bounds the number of files, directories and links copied
 	// (default 5 000 000).
 	MaxEntries int64 `json:"max_entries,omitempty"`
@@ -136,9 +144,23 @@ func (l *Local) CopyTree(ctx context.Context, src, dst string, o CopyOpts) (Copy
 	if !platformHasStat {
 		return res, api.Errorf(api.CodeUnsupported, "fs.copy_tree is not supported on this platform")
 	}
-	rs, err := l.cfg.resolveMount(src)
+	resolveSrc := l.cfg.resolveMount
+	if o.HostSource {
+		resolveSrc = l.cfg.hostSourceTree
+	}
+	rs, err := resolveSrc(src)
 	if err != nil {
 		return res, err
+	}
+	if o.CheckOnly {
+		if !o.HostSource {
+			return res, invalid("check_only is for a host source")
+		}
+		top, err := rs.openRoot()
+		if err != nil {
+			return res, mapFSErr(err)
+		}
+		return res, top.Close()
 	}
 	rd, err := l.cfg.resolveMount(dst)
 	if err != nil {
@@ -169,7 +191,7 @@ func (l *Local) CopyTree(ctx context.Context, src, dst string, o CopyOpts) (Copy
 		return res, mapFSErr(err)
 	}
 	defer dr.Close()
-	return l.runCopy(ctx, sr, dr, o, jailTreeDepth(rd.rel) > 0)
+	return l.runCopy(ctx, sr, dr, o, jailTreeDepth(rd.rel) > 0 && !o.HostSource)
 }
 
 // runCopy copies the directory src into the directory dst, both already

@@ -77,6 +77,7 @@ GET /api/v1/jails/{name}/bundle
 GET /api/v1/jails/{name}/console
 GET /api/v1/jails/{name}/console/{id}/output
 GET /api/v1/jails/{name}/diff
+GET /api/v1/jails/{name}/export
 GET /api/v1/jails/{name}/files/{path...}
 GET /api/v1/jails/{name}/logs
 GET /api/v1/jails/{name}/logs/{file...}
@@ -113,6 +114,7 @@ GET /api/v1/storage
 GET /api/v1/storage/{name}
 GET /api/v1/tokens
 GET /api/v1/tokens/{name}
+GET /api/v1/top
 GET /api/v1/updates
 GET /api/v1/users
 GET /api/v1/users/{name}
@@ -149,6 +151,7 @@ POST /api/v1/backup-targets
 POST /api/v1/backup-targets/{name}/rename
 POST /api/v1/backup/key
 POST /api/v1/backup/key/escrow
+POST /api/v1/backup/key/import
 POST /api/v1/backups
 POST /api/v1/backups/receive
 POST /api/v1/backups/run
@@ -175,6 +178,8 @@ POST /api/v1/images
 POST /api/v1/images/{name}/generations
 POST /api/v1/images/{name}/rename
 POST /api/v1/images/{name}/upgrade
+POST /api/v1/jail-imports
+POST /api/v1/jail-imports/preflight
 POST /api/v1/jail-templates
 POST /api/v1/jails
 POST /api/v1/jails/{name}
@@ -184,6 +189,7 @@ POST /api/v1/jails/{name}/config
 POST /api/v1/jails/{name}/console
 POST /api/v1/jails/{name}/console/{id}/input
 POST /api/v1/jails/{name}/console/{id}/resize
+POST /api/v1/jails/{name}/convert
 POST /api/v1/jails/{name}/exec
 POST /api/v1/jails/{name}/expose
 POST /api/v1/jails/{name}/move

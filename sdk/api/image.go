@@ -151,6 +151,10 @@ type ImageUpgrade struct {
 	DryRun bool `json:"dry_run,omitempty"`
 	// Storage names the storage whose pool is built on; see ImageBuild.Storage.
 	Storage string `json:"storage,omitempty"`
+	// To moves the thin jails of the image to the newest generation of another image of the same OS and
+	// architecture and the same or a newer release (a new release) instead of building a generation: nothing is
+	// built, the other image must have one. A dry run checks every jail and plans nothing else.
+	To string `json:"to,omitempty"`
 }
 
 // Jail outcomes of an image upgrade.

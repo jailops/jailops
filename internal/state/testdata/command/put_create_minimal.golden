@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "id": "c-1",
+  "time": "2026-11-19T10:00:00Z",
+  "op": "put",
+  "kind": "Network",
+  "uuid": "6f1f7a52-3c1d-4f0e-9a64-0c5b1d8e2a10",
+  "name": "lan",
+  "scope": "fleet",
+  "spec": {},
+  "expect_generation": 0
+}

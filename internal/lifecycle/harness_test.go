@@ -72,7 +72,7 @@ func newWorld(t *testing.T) *world {
 	f := &fault.Injector{}
 	w := &world{t: t, F: f, Z: zfsmodel.New(f, "tank"), Files: fakes.NewFiles(f), Exec: &fakes.Exec{F: f},
 		Jails: fakes.NewJails(f), Hooks: &fakes.Hooks{F: f}, J: &plan.MemJournal{}, now: time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)}
-	for _, d := range []string{"tank/jailops", "tank/jailops/images", "tank/jailops/images/fb", "tank/jailops/images/alp", "tank/jailops/projects", "tank/jailops/projects/alpha", "tank/jailops/projects/alpha/jails"} {
+	for _, d := range []string{"tank/jailops", "tank/jailops/images", "tank/jailops/images/fb", "tank/jailops/images/alp", "tank/jailops/images/fc", "tank/jailops/images/fd", "tank/jailops/images/fe", "tank/jailops/images/ff", "tank/jailops/projects", "tank/jailops/projects/alpha", "tank/jailops/projects/alpha/jails"} {
 		if err := w.Z.Create(bg, d, map[string]string{"jailops:managed": "on"}); err != nil {
 			t.Fatal(err)
 		}
@@ -81,6 +81,14 @@ func newWorld(t *testing.T) *world {
 	w.addGen("fb", 1, "freebsd", "15.0-RELEASE")
 	w.addGen("fb", 2, "freebsd", "15.0-RELEASE")
 	w.addGen("alp", 1, "linux", "3.22")
+	// images of other releases for the moves: fc is newer than fb, fd the same release, fe older
+	w.addGen("fc", 1, "freebsd", "15.1-RELEASE")
+	w.addGen("fc", 2, "freebsd", "15.1-RELEASE")
+	w.addGen("fd", 1, "freebsd", "15.0-RELEASE")
+	w.addGen("fe", 1, "freebsd", "14.2-RELEASE")
+	w.addGen("ff", 1, "freebsd", "16.0-RELEASE")
+	w.Images.newest["fc"], w.Images.newest["fd"], w.Images.newest["fe"] = 2, 1, 1
+	w.Images.newest["ff"] = 1
 	w.Images.newest["fb"] = 1
 	w.Images.newest["alp"] = 1
 	w.Exec.Handler = w.handle
@@ -196,6 +204,10 @@ func (w *world) state() string {
 		if ok, _ := w.Z.Exists(bg, "tank/jailops/projects/alpha/jails/"+jail); !ok {
 			continue
 		}
+		// the files of a root.new belong to a dataset that is destroyed when its plan is undone: the fake keeps them
+		if strings.Contains(p, "/root.new/") {
+			continue
+		}
 		b, _ := w.Files.ReadFile(bg, p)
 		fs = append(fs, p+"="+string(b))
 	}
@@ -203,7 +215,8 @@ func (w *world) state() string {
 	for n := range w.Jails.Up {
 		up = append(up, n)
 	}
-	return w.Z.Dump() + "\nFILES\n" + strings.Join(fs, "\n") + fmt.Sprintf("\nUP %v", up)
+	// canmount=on is what a dataset has by default: a plan that sets it back has restored it
+	return strings.NewReplacer(",canmount=on", "", "props{canmount=on,", "props{", "props{canmount=on}", "props{}").Replace(w.Z.Dump()) + "\nFILES\n" + strings.Join(fs, "\n") + fmt.Sprintf("\nUP %v", up)
 }
 
 // sweep fails each mutating step of op in turn and requires the state to be

@@ -18,14 +18,18 @@ import (
 
 // ZFS user properties on jail datasets.
 const (
-	PropManaged      = "jailops:managed"
-	PropID           = "jailops:id"
-	PropKind         = "jailops:kind"
-	PropName         = "jailops:name"
-	PropProject      = "jailops:project"
-	PropImage        = "jailops:image"
-	PropGen          = "jailops:gen"
-	PropPrevGen      = "jailops:prev_gen"
+	PropManaged = "jailops:managed"
+	PropID      = "jailops:id"
+	PropKind    = "jailops:kind"
+	PropName    = "jailops:name"
+	PropProject = "jailops:project"
+	PropImage   = "jailops:image"
+	PropGen     = "jailops:gen"
+	PropPrevGen = "jailops:prev_gen"
+	// PropPrevImage and PropPrevRef are the image of the previous generation and the reference spec.image had, so
+	// that a rollback walks back to the right image after a move to another release.
+	PropPrevImage    = "jailops:prev_image"
+	PropPrevRef      = "jailops:prev_ref"
 	PropManifest     = "jailops:manifest"
 	PropLayout       = "jailops:layout"
 	PropComplete     = "jailops:complete"
@@ -120,6 +124,10 @@ type jailState struct {
 	Image     string // image name
 	Gen       int
 	Prev      int
+	// PrevImage is the image of the previous generation (the jail's own image when it never moved to another) and
+	// PrevRef the reference spec.image had then.
+	PrevImage string
+	PrevRef   string
 	Manifest  string
 	Complete  bool
 	Root      string
@@ -197,6 +205,10 @@ func (s *Service) observe(ctx context.Context, name string) (*jailState, error) 
 	st.Image = s.prop(ctx, c, PropImage)
 	st.Gen, _ = strconv.Atoi(s.prop(ctx, st.Root, PropGen))
 	st.Prev, _ = strconv.Atoi(s.prop(ctx, st.Root, PropPrevGen))
+	if st.PrevImage = s.prop(ctx, st.Root, PropPrevImage); st.PrevImage == "" {
+		st.PrevImage = st.Image
+	}
+	st.PrevRef = s.prop(ctx, st.Root, PropPrevRef)
 	st.Manifest = s.prop(ctx, st.Root, PropManifest)
 	desc, err := s.ZFS.Descendants(ctx, c)
 	if err != nil {
@@ -417,7 +429,7 @@ func (s *Service) doStop(ctx context.Context, name string) error {
 	if up, err := s.Jails.Running(ctx, name); err != nil {
 		return err
 	} else if up {
-		if err := s.stopJail(ctx, name); err != nil {
+		if err := s.stopWithLostMounts(ctx, name); err != nil {
 			s.cleanAfterFailedStop(ctx, name, err)
 			return err
 		}
@@ -474,10 +486,26 @@ func (s *Service) readRecord(ctx context.Context, name string) (Record, error) {
 			return r, err
 		}
 	}
+	return DecodeRecord(b)
+}
+
+// DecodeRecord reads the bytes of a spec.json written by this or an earlier release: the stored shapes of earlier
+// releases are converted on the way in (see upgradeSpec), a field the current type does not know is ignored.
+func DecodeRecord(b []byte) (Record, error) {
+	var r Record
 	if err := json.Unmarshal(upgradeSpec(b), &r); err != nil {
 		return r, fmt.Errorf("spec.json: %w", err)
 	}
 	return r, nil
+}
+
+// DecodeBundle reads the bytes of a bundle.json written by this or an earlier release, like DecodeRecord.
+func DecodeBundle(b []byte) (Bundle, error) {
+	var bd Bundle
+	if err := json.Unmarshal(upgradeSpec(b), &bd); err != nil {
+		return bd, fmt.Errorf("bundle.json: %w", err)
+	}
+	return bd, nil
 }
 
 func (s *Service) bundleBytes(rec Record, ref, imageName string, gen int, manifest, dataset string, stamp time.Time) []byte {

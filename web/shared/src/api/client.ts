@@ -24,12 +24,18 @@ export interface RawRequest {
   method: string
   path: string
   body?: unknown
+  /** A raw body (an upload): sent as it is, with its length, instead of JSON. */
+  blob?: Blob
+  /** The answer is bytes (a download): a 2xx reply carries them in `blob` instead of an envelope. */
+  download?: boolean
   headers?: Record<string, string>
   signal?: AbortSignal
 }
 export interface RawResponse {
   status: number
   etag?: string
+  /** The bytes of a download. */
+  blob?: Blob
   /** The decoded api.Response envelope. */
   envelope: {
     type: 'sync' | 'async' | 'error'
@@ -55,6 +61,10 @@ export interface StreamHandlers {
 export interface Transport {
   request(req: RawRequest): Promise<RawResponse>
   stream(path: string, handlers: StreamHandlers): EventStream
+  /** A binary reply read as it arrives (a jail export file): the body of a GET. Absent in a transport that has none. */
+  download?(path: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>>
+  /** A binary request body sent as it is read (a jail export file): the reply is an ordinary envelope. */
+  upload?(path: string, body: Blob, contentType: string, signal?: AbortSignal): Promise<RawResponse>
 }
 
 const TOKEN_KEY = 'jailops.token'
@@ -108,33 +118,27 @@ function csrfToken(): string {
 }
 
 export class HttpTransport implements Transport {
-  async request(req: RawRequest): Promise<RawResponse> {
-    const headers: Record<string, string> = { Accept: 'application/json', ...req.headers }
+  private headers(method: string, extra: Record<string, string> = {}): { headers: Record<string, string>; tok: string } {
+    const headers: Record<string, string> = { Accept: 'application/json', ...extra }
     const tok = currentToken()
     if (tok) headers['Authorization'] = `Bearer ${tok}`
-    const mutating = req.method !== 'GET' && req.method !== 'HEAD'
-    if (mutating) {
+    if (method !== 'GET' && method !== 'HEAD') {
       const c = csrfToken()
       if (c) headers['X-CSRF-Token'] = c
     }
-    let body: BodyInit | undefined
-    if (req.body !== undefined) {
-      headers['Content-Type'] = 'application/json'
-      body = JSON.stringify(req.body)
-    }
-    let res: Response
+    return { headers, tok }
+  }
+
+  private async fetch(path: string, init: RequestInit): Promise<Response> {
     try {
-      res = await fetch(BASE + req.path, {
-        method: req.method,
-        headers,
-        body,
-        signal: req.signal,
-        credentials: 'same-origin',
-      })
+      return await fetch(BASE + path, { ...init, credentials: 'same-origin' })
     } catch (e) {
       if ((e as Error).name === 'AbortError') throw e
       throw new ApiError({ code: 'unreachable' as never, message: 'The server did not answer.', hint: 'Check that jailopsd is running and reachable.' })
     }
+  }
+
+  private async envelope(res: Response, tok: string): Promise<RawResponse> {
     // a token the server no longer accepts is forgotten, not kept for the next page load
     if (res.status === 401 && tok) storeToken('')
     let envelope: RawResponse['envelope']
@@ -144,6 +148,39 @@ export class HttpTransport implements Transport {
       envelope = { type: 'error', error: { code: codeFromStatus(res.status) as ApiErrorBody['code'], message: `Unexpected reply (HTTP ${res.status}).` } }
     }
     return { status: res.status, etag: res.headers.get('ETag') ?? undefined, envelope }
+  }
+
+  async request(req: RawRequest): Promise<RawResponse> {
+    const { headers, tok } = this.headers(req.method, req.headers)
+    let body: BodyInit | undefined
+    if (req.blob) {
+      headers['Content-Type'] = 'application/octet-stream'
+      body = req.blob
+    } else if (req.body !== undefined) {
+      headers['Content-Type'] = 'application/json'
+      body = JSON.stringify(req.body)
+    }
+    const res = await this.fetch(req.path, { method: req.method, headers, body, signal: req.signal })
+    if (req.download && res.ok) {
+      return { status: res.status, blob: await res.blob(), envelope: { type: 'sync', status_code: res.status } }
+    }
+    return this.envelope(res, tok)
+  }
+
+  async download(path: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    const { headers, tok } = this.headers('GET')
+    const res = await this.fetch(path, { method: 'GET', headers, signal })
+    if (!res.ok || !res.body) {
+      const r = await this.envelope(res, tok)
+      throw new ApiError((r.envelope.error ?? { code: codeFromStatus(res.status), message: `HTTP ${res.status}` }) as ApiErrorBody, res.status)
+    }
+    return res.body
+  }
+
+  async upload(path: string, body: Blob, contentType: string, signal?: AbortSignal): Promise<RawResponse> {
+    const { headers, tok } = this.headers('POST', { 'Content-Type': contentType })
+    const res = await this.fetch(path, { method: 'POST', headers, body, signal })
+    return this.envelope(res, tok)
   }
 
   /**
@@ -251,10 +288,10 @@ export class Client {
     return this.transport.stream(this.filter ? this.filter(path) : path, h)
   }
 
-  private async send(method: string, path: string, body?: unknown, opts: { etag?: string; signal?: AbortSignal } = {}): Promise<RawResponse> {
+  private async send(method: string, path: string, body?: unknown, opts: { etag?: string; signal?: AbortSignal; blob?: Blob; download?: boolean } = {}): Promise<RawResponse> {
     const headers: Record<string, string> = {}
     if (opts.etag) headers['If-Match'] = opts.etag
-    const r = await this.transport.request({ method, path: this.filter ? this.filter(path) : path, body, headers, signal: opts.signal })
+    const r = await this.transport.request({ method, path: this.filter ? this.filter(path) : path, body, blob: opts.blob, download: opts.download, headers, signal: opts.signal })
     if (r.envelope.type === 'error' || r.status >= 400) {
       const e = r.envelope.error ?? { code: 'internal', message: `HTTP ${r.status}` }
       const err = new ApiError(e as ApiErrorBody, r.status)
@@ -262,6 +299,16 @@ export class Client {
       throw err
     }
     return r
+  }
+
+  /** The bytes of a file of a jail (GET), read whole. */
+  async downloadFile(path: string, signal?: AbortSignal): Promise<Blob> {
+    return (await this.send('GET', path, undefined, { signal, download: true })).blob ?? new Blob()
+  }
+
+  /** PUT bytes as the body of a file of a jail, with their length. */
+  async uploadFile<T>(path: string, blob: Blob, signal?: AbortSignal): Promise<T> {
+    return (await this.send('PUT', path, undefined, { signal, blob })).envelope.metadata as T
   }
 
   /** GET a sync resource. Nil lists arrive as null and are normalised by the caller's type. */
@@ -287,6 +334,25 @@ export class Client {
       return { kind: 'async', op: await this.get<Operation>(`/operations/${id}`) }
     }
     return { kind: 'sync', data: r.envelope.metadata as T, etag: r.etag }
+  }
+
+  /** A binary GET read as it arrives; the reply of an error is thrown as an ApiError. */
+  download(path: string, signal?: AbortSignal): Promise<ReadableStream<Uint8Array>> {
+    if (!this.transport.download) throw new ApiError({ code: 'unsupported' as never, message: 'This transport cannot download files.' })
+    return this.transport.download(this.filter ? this.filter(path) : path, signal)
+  }
+
+  /** A binary POST (a file, sent as the browser reads it); the reply is an ordinary sync one. */
+  async upload<T>(path: string, body: Blob, contentType: string, signal?: AbortSignal): Promise<T> {
+    if (!this.transport.upload) throw new ApiError({ code: 'unsupported' as never, message: 'This transport cannot upload files.' })
+    const r = await this.transport.upload(this.filter ? this.filter(path) : path, body, contentType, signal)
+    if (r.envelope.type === 'error' || r.status >= 400) {
+      const e = r.envelope.error ?? { code: 'internal', message: `HTTP ${r.status}` }
+      const err = new ApiError(e as ApiErrorBody, r.status)
+      if (err.code === 'unauthorized' || r.status === 401) this.unauthorized.forEach((f) => f())
+      throw err
+    }
+    return r.envelope.metadata as T
   }
 
   getOperation(id: string): Promise<Operation> {

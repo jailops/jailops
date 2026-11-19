@@ -447,11 +447,47 @@ func DecodeStrict(raw map[string]any, v any) error {
 	return nil
 }
 
-// DecodeSpec decodes the spec of an API-backed kind into its typed form.
+// DecodeSpec decodes the spec of an API-backed kind into its typed form. A spec written for an earlier release is
+// read as the current shapes (see state.UpgradeSpec); DecodeSpecNotes also says what it rewrote.
 func DecodeSpec(kind api.Kind, raw map[string]any) (any, error) {
+	spec, _, err := DecodeSpecNotes(kind, raw)
+	return spec, err
+}
+
+// DecodeSpecNotes is DecodeSpec that also returns what it rewrote because the spec had the shapes of an earlier release,
+// one sentence each, so that the administrator can change the file once.
+func DecodeSpecNotes(kind api.Kind, raw map[string]any) (any, []string, error) {
 	if raw == nil {
 		raw = map[string]any{}
 	}
+	// the rewrite is made on a copy: the caller's document stays as it was read
+	if b, err := json.Marshal(raw); err == nil {
+		var cp map[string]any
+		dec := json.NewDecoder(bytes.NewReader(b))
+		dec.UseNumber()
+		if dec.Decode(&cp) == nil {
+			raw = cp
+		}
+	}
+	notes := api.UpgradeSpec(kind, raw)
+	if kind == api.KindFirewallPolicy {
+		// a redirect rule of a policy is an exposure of a jail now: a policy does not name the jails that use it, so the file
+		// cannot be rewritten on its own: say what to write instead of "unknown field"
+		if rules, _ := raw["rules"].([]any); len(rules) > 0 {
+			for i, r := range rules {
+				if m, _ := r.(map[string]any); m != nil {
+					if _, has := m["redirect"]; has {
+						return nil, notes, fmt.Errorf("rules[%d]: a redirect rule is an exposure of a jail now: delete the rule and write expose: [{proto: tcp, ports: [\"80\"], families: [\"4\"], host_port: 8080}] in the spec of each jail that used the policy (docs/exposure.md)", i)
+					}
+				}
+			}
+		}
+	}
+	spec, err := decodeSpec(kind, raw)
+	return spec, notes, err
+}
+
+func decodeSpec(kind api.Kind, raw map[string]any) (any, error) {
 	switch kind {
 	case api.KindJail:
 		var s api.JailSpec

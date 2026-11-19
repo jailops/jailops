@@ -530,6 +530,30 @@ export interface BackupKeyEscrow {
   recipients?: string[]
 }
 
+export interface BackupKeyImport {
+  recovery_key?: string
+  key_file?: string
+  passphrase?: string
+  identity?: string
+  domain?: string
+  replace?: boolean
+  check?: boolean
+  skip_node_check?: boolean
+}
+
+export interface BackupKeyImported {
+  domain: string
+  repository?: string
+  verified: boolean
+  existing?: string
+  installed: boolean
+  replaced?: boolean
+  path?: string
+  aside?: string
+  backups?: number
+  warning?: string
+}
+
 export interface BackupKeyStatus {
   status: string
   domain?: string
@@ -772,6 +796,47 @@ export interface ExecRequest {
   cols?: number
   env?: string[]
   user?: string
+}
+
+export interface ExportImage {
+  name: string
+  generation?: number
+  release?: string
+  freebsd_version?: string
+  manifest?: string
+}
+
+export interface ExportManifest {
+  format: number
+  created: string
+  name: string
+  project: string
+  uuid: string
+  labels?: Record<string, string>
+  layout: Layout
+  os?: OS
+  image: ExportImage
+  bundle: RestoreBundle
+  parts: ExportPart[]
+  volumes?: ExportVolume[]
+  warnings?: string[]
+}
+
+export interface ExportPart {
+  dataset: string
+  kind: string
+  snapshot: string
+  from?: string
+  raw?: boolean
+  compression?: string
+  props?: Record<string, string>
+}
+
+export interface ExportVolume {
+  name: string
+  spec: VolumeSpec
+  labels?: Record<string, string>
+  shared?: boolean
 }
 
 export interface ExposeEntry {
@@ -1224,6 +1289,7 @@ export interface ImageUpgrade {
   project?: string
   dry_run?: boolean
   storage?: string
+  to?: string
 }
 
 export interface ImageUpgradeJail {
@@ -1276,6 +1342,31 @@ export interface JailAction {
   force?: boolean
 }
 
+export interface JailConvert {
+  layout: Layout
+  image?: string
+  dry_run?: boolean
+}
+
+export interface JailConvertResult {
+  jail: string
+  from: Layout
+  to: Layout
+  image?: string
+  changed: boolean
+  dry_run?: boolean
+  steps?: string[]
+  kept?: string[]
+  replaced?: string
+  warnings?: string[]
+}
+
+export interface JailCopy {
+  name: string
+  labels?: Record<string, string>
+  snapshot?: string
+}
+
 export interface JailDiff {
   jail: string
   image: string
@@ -1293,6 +1384,42 @@ export interface JailDiskUsage {
 export interface JailExpanded {
   jail: Jail
   sources: Record<string, string>
+}
+
+export interface JailFileCopy {
+  files: number
+  dirs: number
+  symlinks: number
+  skipped?: number
+  bytes: number
+}
+
+export interface JailFileStat {
+  path: string
+  type: string
+  size?: number
+  mode?: string
+  modified_at?: string
+  link?: string
+}
+
+export interface JailImportPreflight {
+  manifest: ExportManifest
+  request: JailImportRequest
+}
+
+export interface JailImportRequest {
+  as?: string
+  project?: string
+  network_map?: Record<string, string>
+  volume_map?: Record<string, string>
+  keep_ip?: boolean
+  start?: boolean
+}
+
+export interface JailImported {
+  jail: Jail
+  warnings?: string[]
 }
 
 export interface JailLogFile {
@@ -1399,6 +1526,7 @@ export interface JailStatus {
 
 export interface JailUpgrade {
   generation?: string
+  image?: string
   dry_run?: boolean
 }
 
@@ -1883,6 +2011,7 @@ export interface Resources {
   pids?: number
   disk_reservation?: string
   states?: number
+  cpuset?: string
 }
 
 export interface Response {
@@ -2036,6 +2165,46 @@ export interface TokenSpec {
   global?: boolean
 }
 
+export interface Top {
+  measured_at: string
+  interval_seconds?: number
+  host?: TopHost
+  jails: TopJail[]
+  notes?: string[]
+}
+
+export interface TopHost {
+  load_1: number
+  load_5: number
+  load_15: number
+  cpus: number
+  cpu_percent?: number
+  memory_total?: number
+  memory_used?: number
+  arc_bytes?: number
+  pool?: string
+  pool_size?: number
+  pool_allocated?: number
+  pool_free?: number
+  running_jails: number
+}
+
+export interface TopJail {
+  project: string
+  name: string
+  uptime_seconds?: number
+  cpu_percent?: number
+  cpu_limit_percent?: number
+  memory_bytes?: number
+  memory_limit_bytes?: number
+  processes?: number
+  disk_bytes?: number
+  disk_quota_bytes?: number
+  net_in_bytes_per_second?: number
+  net_out_bytes_per_second?: number
+  approximate?: boolean
+}
+
 export interface TrustClientRequest {
   token: string
   certificate: string
@@ -2163,6 +2332,16 @@ export interface VolumeCreate {
   metadata: ObjectMeta
   spec: VolumeSpec
   passphrase?: string
+  from_dir?: string
+}
+
+export interface VolumeImported {
+  from: string
+  files: number
+  dirs: number
+  symlinks?: number
+  bytes: number
+  skipped?: number
 }
 
 export interface VolumePassphraseChange {
@@ -2213,6 +2392,7 @@ export interface VolumeStatus {
   detail?: string
   attached_to?: VolumeUse[]
   warnings?: string[]
+  imported?: VolumeImported
 }
 
 export interface VolumeUnlock {
@@ -2441,6 +2621,15 @@ export const configKeys: readonly ConfigKey[] = [
     "restart_required": true,
     "profile": true,
     "path": "resources.cpu"
+  },
+  {
+    "name": "limits.cpuset",
+    "type": "string",
+    "description": "CPUs the jail runs on (cpuset(1)): a list such as 2,3 or 0-3,6, kept as sorted ranges. Needs no resource accounting. A CPU the host does not have stops the jail from starting.",
+    "example": "2,3",
+    "restart_required": true,
+    "profile": true,
+    "path": "resources.cpuset"
   },
   {
     "name": "limits.disk",
@@ -2712,4 +2901,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'jail_diff', 'firewall_applied']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'jail_diff', 'firewall_applied', 'jail_export', 'jail_files', 'jail_convert', 'volume_from_dir', 'top']

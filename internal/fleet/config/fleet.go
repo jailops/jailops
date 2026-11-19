@@ -133,6 +133,9 @@ type Object struct {
 	// Provenance maps each top-level spec key to where its value came from.
 	Profiles   []string
 	Provenance map[string]string
+	// Upgraded says what the loader read as a current shape because the file was written for an earlier release
+	// (state.UpgradeSpec); check reports each as a note so that the file is changed once.
+	Upgraded []string
 	// Labels are the user labels (without sync bookkeeping labels).
 	Labels map[string]string
 	// Spec is the typed spec (api.JailSpec, api.NetworkSpec, ...). For jails
@@ -887,10 +890,11 @@ func (f *Fleet) loadObjectDir(dir string, ki model.KindInfo, scope, project stri
 				return err
 			}
 		}
-		spec, err := model.DecodeSpec(ki.Kind, raw)
+		spec, upgraded, err := model.DecodeSpecNotes(ki.Kind, raw)
 		if err != nil {
 			return fmt.Errorf("%s: spec: %w", f.rel(p), err)
 		}
+		o.Upgraded = upgraded
 		if as, ok := spec.(model.AppAccessSpec); ok {
 			if err := as.Validate(); err != nil {
 				return fmt.Errorf("%s: spec: %w", f.rel(p), err)

@@ -67,6 +67,12 @@ func cleanJSONErr(err error) string {
 	return s
 }
 
+// upgradeSpecShapes reads a file written for an earlier release as the current shapes (a renamed or removed field is
+// converted, see state.UpgradeSpec), so that the strict decoding below refuses only what never was valid.
+func upgradeSpecShapes(kind api.Kind, spec map[string]any) {
+	api.UpgradeSpec(kind, spec)
+}
+
 // parseObject reads one document as either the declarative envelope
 // (apiVersion, kind, metadata, spec) or a bare spec, and returns the metadata
 // and the strictly decoded spec. nameHint names a bare spec; kind is the kind
@@ -84,6 +90,7 @@ func parseObject[S any](doc map[string]any, kind api.Kind, nameHint string) (api
 			return meta, spec, usagef("a bare spec needs a name: pass NAME on the command line")
 		}
 		meta.Name = nameHint
+		upgradeSpecShapes(kind, doc)
 		return meta, spec, decodeStrict(doc, &spec)
 	}
 	for k := range doc {
@@ -114,6 +121,9 @@ func parseObject[S any](doc map[string]any, kind api.Kind, nameHint string) (api
 		return meta, spec, usagef("metadata.name is required")
 	}
 	if hasSpec {
+		if m, ok := doc["spec"].(map[string]any); ok {
+			upgradeSpecShapes(kind, m)
+		}
 		if err := decodeStrict(doc["spec"], &spec); err != nil {
 			return meta, spec, fmt.Errorf("spec: %w", err)
 		}

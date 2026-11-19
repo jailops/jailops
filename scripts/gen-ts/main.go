@@ -29,7 +29,7 @@ const defaultOut = "web/shared/src/api/types.gen.ts"
 // roots are the types the UI uses directly. Everything they reference is emitted too.
 var roots = []any{
 	api.ServerInfo{}, api.Response{}, api.Operation{}, api.Event{}, api.LifecycleEvent{}, api.Error{},
-	api.Jail{}, api.JailAction{}, api.JailRollback{}, api.JailUpgrade{}, api.JailSnapshot{}, api.JailUsage{}, api.JailLogFile{}, api.JailLogRead{},
+	api.Jail{}, api.JailAction{}, api.JailRollback{}, api.JailUpgrade{}, api.JailCopy{}, api.JailConvert{}, api.JailConvertResult{}, api.JailSnapshot{}, api.JailUsage{}, api.JailLogFile{}, api.JailLogRead{}, api.JailFileStat{}, api.JailFileCopy{},
 	api.Image{}, api.ImageBuild{}, api.ImageUpgrade{}, api.ImageUpgradeResult{},
 	api.Network{}, api.Lease{},
 	api.WireGuard{}, api.WireGuardPeerAdd{}, api.WireGuardPeerCreated{}, api.WireGuardJoin{}, api.WireGuardKeys{},
@@ -39,8 +39,8 @@ var roots = []any{
 	api.Document{},
 	api.Project{}, api.ProjectAggregate{}, api.ProjectHostStatus{}, api.Storage{}, api.Session{}, api.Identity{}, api.TrustTokenRequest{}, api.TrustToken{}, api.TrustClientRequest{}, api.Profile{}, api.ConfigKey{}, api.JailExpanded{}, api.ConfigChange{}, api.UpdateReport{}, api.UpdateRecord{}, api.UpdateCheckRequest{}, api.UpdateApplyRequest{},
 	api.Provision{}, api.ProvisionRequest{}, api.ProvisionResult{}, api.ShellSetupRequest{}, api.ShellSetupResult{}, api.ExecRequest{}, api.BackupRun{}, api.BackupRunRequest{}, api.BackupVerifyRequest{},
-	api.BackupKeyStatus{}, api.BackupKeyCreate{}, api.BackupKeyCreated{}, api.BackupKeyEscrow{},
-	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.NDPStatus{}, api.JailReach{}, api.JailDiff{}, api.Exposed{}, api.ExposeRequest{}, api.UnexposeRequest{}, api.ExposeResult{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
+	api.BackupKeyStatus{}, api.BackupKeyCreate{}, api.BackupKeyCreated{}, api.BackupKeyEscrow{}, api.BackupKeyImport{}, api.BackupKeyImported{},
+	api.AuditEntry{}, api.PoolUsage{}, api.DoctorReport{}, api.NDPStatus{}, api.JailReach{}, api.JailDiff{}, api.ExportManifest{}, api.JailImportPreflight{}, api.JailImportRequest{}, api.JailImported{}, api.Exposed{}, api.ExposeRequest{}, api.UnexposeRequest{}, api.ExposeResult{}, api.RepositoryStatus{}, api.UserCreate{}, api.UserCreated{}, api.PasswordSet{},
 	api.AppSummary{}, api.AppDetail{}, api.AppInstall{}, api.AppInstallResult{}, api.AppDraft{},
 	api.HostIdentity{}, api.HostIdentityApply{}, api.HostRestore{}, api.HostChange{}, api.HostSnapshot{},
 	api.HostFirewall{}, api.HostFirewallApply{}, api.HostPending{}, api.HostPendingAction{},
@@ -48,7 +48,7 @@ var roots = []any{
 	api.LogsRead{}, api.LogForward{}, api.LogForwardTest{}, api.LogForwardTestResult{},
 	api.HostCertificate{}, api.HostCertificateUpload{}, api.ACMESpec{},
 	api.SetupStatus{}, api.SetupRequest{}, api.SetupResult{}, api.SetupToken{},
-	api.Rename{}, api.RenameResult{},
+	api.Rename{}, api.RenameResult{}, api.Top{},
 }
 
 // enums lists the typed string constants. Keep in sync with sdk/api.

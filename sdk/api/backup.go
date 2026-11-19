@@ -230,6 +230,51 @@ type BackupKeyEscrow struct {
 	Recipients []string `json:"recipients,omitempty"`
 }
 
+// BackupKeyImport is the body of POST /api/v1/backup/key/import: install a backup key that was made elsewhere, on a
+// host that lost its own. Exactly one of RecoveryKey, KeyFile and Identity names the source. The body holds a secret:
+// the daemon logs none of it and keeps none of it.
+type BackupKeyImport struct {
+	// RecoveryKey is the recovery key (JOR1-...) that 'backup key create' printed once.
+	RecoveryKey string `json:"recovery_key,omitempty"`
+	// KeyFile is the content of a key file, a copy of the backup.key of the lost host. Passphrase opens it when it is
+	// protected by one.
+	KeyFile    string `json:"key_file,omitempty"`
+	Passphrase string `json:"passphrase,omitempty"`
+	// Identity is an age secret key (AGE-SECRET-KEY-1...) that opens the escrow blob stored on the backup node; Domain
+	// picks the blob (empty: any blob the identity opens).
+	Identity string `json:"identity,omitempty"`
+	Domain   string `json:"domain,omitempty"`
+	// Replace allows a key that differs from the one the host holds: the old key file is kept beside the new one.
+	Replace bool `json:"replace,omitempty"`
+	// Check validates and reports what an import would do; nothing is written.
+	Check bool `json:"check,omitempty"`
+	// SkipNodeCheck imports without asking the backup node whether it records this key domain.
+	SkipNodeCheck bool `json:"skip_node_check,omitempty"`
+}
+
+// BackupKeyImported is the reply of POST /api/v1/backup/key/import.
+type BackupKeyImported struct {
+	// Domain is the key domain of the key that came in. It is not secret: it is the fingerprint to compare.
+	Domain string `json:"domain"`
+	// Repository is the key domain the backup node recorded; empty when it records none or was not asked.
+	Repository string `json:"repository,omitempty"`
+	// Verified is true when the node recorded exactly this domain.
+	Verified bool `json:"verified"`
+	// Existing is the key domain of the key the host holds now; empty when it holds none.
+	Existing string `json:"existing,omitempty"`
+	// Installed is false for a check, and when the host already held this key.
+	Installed bool `json:"installed"`
+	// Replaced is true when a different key was moved aside.
+	Replaced bool `json:"replaced,omitempty"`
+	// Path is the key file on the host, Aside where the replaced key file went.
+	Path  string `json:"path,omitempty"`
+	Aside string `json:"aside,omitempty"`
+	// Backups is the number of backups of this key the repository holds, found when the catalog of this host was rebuilt
+	// from it after the import. Warning says why the catalog was not rebuilt.
+	Backups int    `json:"backups,omitempty"`
+	Warning string `json:"warning,omitempty"`
+}
+
 // BackupRunRequest is the body of POST /api/v1/backups/run: run a backup policy
 // now for every jail it selects.
 type BackupRunRequest struct {

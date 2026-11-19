@@ -6,7 +6,7 @@ import { remoteAddCommand, scopeValid } from './trust'
 import { parseSize } from '@jailops/shared/lib/format'
 import type { JailSpec, Profile } from '@jailops/shared/api/types'
 
-const msgs = { int: 'int', size: 'size', rate: 'rate', mac: 'mac', address: 'addr', listen: 'listen', bool: 'bool', name: 'name', enum: (o: string[]) => 'enum ' + o.join('|') }
+const msgs = { int: 'int', size: 'size', rate: 'rate', mac: 'mac', address: 'addr', listen: 'listen', bool: 'bool', name: 'name', cpuset: 'cpuset', enum: (o: string[]) => 'enum ' + o.join('|') }
 const key = (n: string) => ALL_KEYS.find((k) => k.name === n)!
 const spec: JailSpec = { image: 'freebsd-15-1', resources: { cpu: 2, memory: '2G' }, network: [{ network: 'lan', ipv4: 'auto', mtu: 1500 }], volumes: [{ volume: 'data', mount: '/var/db' }], boot: { autostart: true }, packages: ['nginx'], profiles: ['web-limits'] }
 
@@ -74,6 +74,11 @@ describe('config keys from the registry', () => {
     expect(validate(key('nic.<device>.mac'), 'nope', msgs)).toBe('mac')
     expect(validate(key('update.strategy'), 'weekly', msgs)).toBe('enum rebase|inplace|manual')
     expect(validate(key('limits.cpu'), '', msgs)).toBeUndefined()
+    expect(validate(key('limits.cpuset'), '2,3', msgs)).toBeUndefined()
+    expect(validate(key('limits.cpuset'), '0-3, 6', msgs)).toBeUndefined()
+    expect(validate(key('limits.cpuset'), '3-', msgs)).toBe('cpuset')
+    expect(validate(key('limits.cpuset'), 'a', msgs)).toBe('cpuset')
+    expect(key('limits.cpuset').restart_required).toBe(true)
     expect(key('limits.cpu').restart_required).toBe(true)
     expect(key('limits.memory').restart_required).toBe(true)
     expect(key('boot.autostart').restart_required).toBe(false)

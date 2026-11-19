@@ -16,7 +16,7 @@ import type { Storage } from '@jailops/shared/api/types'
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{ close: []; done: [name: string] }>()
 
-const blank = () => ({ name: '', storage: '', size: '', uid: '0', gid: '0', mode: '', comment: '', encrypted: false, pass: '', again: '', hostDir: false, path: '', watch: false, probe: 'mounted', onLoss: 'none' })
+const blank = () => ({ name: '', storage: '', size: '', uid: '0', gid: '0', mode: '', comment: '', encrypted: false, pass: '', again: '', hostDir: false, fromDir: '', path: '', watch: false, probe: 'mounted', onLoss: 'none' })
 const f = reactive(blank())
 const storages = ref<Storage[]>([])
 const busy = ref(false)
@@ -27,13 +27,14 @@ const modeOk = (v: string) => v === '' || (/^[0-7]{1,4}$/.test(v) && parseInt(v,
 const check = useFormCheck(() => ({
   'vc-name': nameProblem(f.name, 'volume'),
   'vc-path': !f.hostDir ? '' : !f.path ? s.volumes.pathInvalid : pathProblem(f.path),
+  'vc-from': f.hostDir || !f.fromDir ? '' : pathProblem(f.fromDir),
   'vc-uid': f.hostDir || idOk(f.uid) ? '' : s.volumes.idInvalid,
   'vc-gid': f.hostDir || idOk(f.gid) ? '' : s.volumes.idInvalid,
   'vc-mode': f.hostDir || modeOk(f.mode) ? '' : s.volumes.modeInvalid,
   'vc-pass': !f.encrypted ? '' : !f.pass ? s.volumes.passphraseNeeded : f.pass.length < 12 ? s.keys.tooShort : '',
   'vc-pass2': !f.encrypted ? '' : !f.again ? s.volumes.repeatNeeded : f.pass !== f.again ? s.keys.mismatch : '',
 }))
-const labels: Record<string, string> = { 'vc-name': s.volumes.name, 'vc-path': s.volumes.path, 'vc-uid': s.volumes.uid, 'vc-gid': s.volumes.gid, 'vc-mode': s.volumes.mode, 'vc-pass': s.volumes.passphrase, 'vc-pass2': s.volumes.passphraseRepeat }
+const labels: Record<string, string> = { 'vc-name': s.volumes.name, 'vc-path': s.volumes.path, 'vc-from': s.volumes.fromDir, 'vc-uid': s.volumes.uid, 'vc-gid': s.volumes.gid, 'vc-mode': s.volumes.mode, 'vc-pass': s.volumes.passphrase, 'vc-pass2': s.volumes.passphraseRepeat }
 const why = computed(() => (check.firstId.value ? s.form.fixFirst(`${labels[check.firstId.value]}: ${check.reason.value}`) : ''))
 
 watch(() => props.open, (o) => {
@@ -43,7 +44,8 @@ watch(() => props.open, (o) => {
   if (o) void api.storage.list().then((l) => { storages.value = l }).catch(() => { storages.value = [] })
 })
 watch(() => f.encrypted, (e) => { if (!e) Object.assign(f, { pass: '', again: '' }) })
-watch(() => f.hostDir, (h) => { if (h) Object.assign(f, { encrypted: false, pass: '', again: '', size: '', storage: '', mode: '', uid: '0', gid: '0' }) })
+watch(() => f.encrypted, (e) => { if (e) f.fromDir = '' })
+watch(() => f.hostDir, (h) => { if (h) Object.assign(f, { fromDir: '', encrypted: false, pass: '', again: '', size: '', storage: '', mode: '', uid: '0', gid: '0' }) })
 
 const save = () => check.submit(async () => {
   busy.value = true
@@ -55,6 +57,7 @@ const save = () => check.submit(async () => {
     metadata: { name: f.name },
     spec: { uid: Number(f.uid), gid: Number(f.gid), ...(f.storage ? { storage: f.storage } : {}), ...(f.size ? { size: f.size } : {}), ...(f.mode ? { mode: f.mode } : {}), ...(f.comment ? { comment: f.comment } : {}), ...(f.encrypted ? { encrypted: true } : {}) },
     ...(f.encrypted ? { passphrase: f.pass } : {}),
+    ...(f.fromDir ? { from_dir: f.fromDir } : {}),
   }
   const name = f.name
   Object.assign(f, { pass: '', again: '' })
@@ -139,6 +142,12 @@ const save = () => check.submit(async () => {
           <option v-for="x in storages" :key="x.metadata.name" :value="x.metadata.name">{{ x.metadata.name }}</option>
         </select>
         <span id="vc-sto-h" class="hint">{{ s.volumes.storageHint }}</span>
+      </div>
+      <div v-if="!f.encrypted" class="field">
+        <label for="vc-from">{{ s.volumes.fromDir }}</label>
+        <input id="vc-from" v-model.trim="f.fromDir" class="mono" type="text" autocomplete="off" spellcheck="false" :placeholder="s.volumes.fromDirPlaceholder" data-test="vc-from" :aria-invalid="!!check.err('vc-from')" aria-describedby="vc-from-e vc-from-h" @blur="f.fromDir && check.touch('vc-from')" />
+        <span id="vc-from-e" class="field-error" role="alert">{{ check.err('vc-from') }}</span>
+        <span id="vc-from-h" class="hint">{{ s.volumes.fromDirHint }}</span>
       </div>
       </template>
       <div class="field">

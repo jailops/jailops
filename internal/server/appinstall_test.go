@@ -489,8 +489,13 @@ func TestAppInstallFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err = op.Wait(c)
-	if !errors.As(err, &ae) || ae.Detail["step"] != "install-packages-ports" || ae.Detail["jail_kept"] != "true" || !strings.Contains(ae.Hint, "left stopped") || !strings.Contains(ae.Message, "no package web-server") {
+	if !errors.As(err, &ae) || ae.Detail["step"] != "install-packages-ports" || ae.Detail["jail_kept"] != "true" || !strings.Contains(ae.Hint, "left stopped") ||
+		strings.Contains(ae.Message, "no package web-server") || !strings.Contains(ae.Message, "install-packages-ports") {
 		t.Fatalf("%v", err)
+	}
+	// the output of pkg is in the daemon log, not in the operation
+	if !strings.Contains(e.Log(), "no package web-server") {
+		t.Fatalf("the daemon log does not have the failure\n%s", e.Log())
 	}
 	failed()
 	j, err := e.Admin.Jails().Get(c, "web")
@@ -719,8 +724,13 @@ func TestAppInstallCreateFailsAfterCreation(t *testing.T) {
 	_, err = op.Wait(c)
 	armed.Store(false)
 	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Detail["step"] != "create-jail" || ae.Detail["jail_kept"] != "" || !strings.Contains(ae.Message, "injected") {
+	// the message names the step; the failure itself ("injected: cannot read ...") is in the daemon log
+	if !errors.As(err, &ae) || ae.Detail["step"] != "create-jail" || ae.Detail["jail_kept"] != "" ||
+		!strings.Contains(ae.Message, "create-jail") || strings.Contains(ae.Message, "injected") || !strings.Contains(ae.Hint, "daemon log") {
 		t.Fatalf("%v", err)
+	}
+	if !strings.Contains(e.Log(), "injected: cannot read") {
+		t.Fatalf("the daemon log does not have the failure\n%s", e.Log())
 	}
 	if ok, _ := e.ZFS.Exists(c, "tank/jailops/projects/alpha/jails/web"); ok {
 		t.Fatalf("the jail was left behind\n%s", e.Log())

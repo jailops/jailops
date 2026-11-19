@@ -31,6 +31,7 @@ const items = computed<NavItem[]>(() => ([
   { to: '/logs', label: s.nav.logs, icon: 'fileText', show: hasExt('logs_unified') || hasExt('log_forward') },
   { to: '/operations', label: s.nav.operations, icon: 'listChecks', show: can('operations') },
   { to: '/events', label: s.nav.events, icon: 'radio', show: can('events') },
+  { to: '/top', label: s.nav.top, icon: 'cpu', show: hasExt('top') },
   { to: '/doctor', label: s.nav.doctor, icon: 'activity', show: can('doctor') },
   { to: '/audit', label: s.nav.audit, icon: 'scrollText', show: can('audit') },
   { to: '/access', label: s.nav.access, icon: 'keyRound', show: true },

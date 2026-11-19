@@ -17,6 +17,8 @@ const modulePath = "jailops.net/jailops"
 var allowedImports = map[string]bool{
 	modulePath + "/sdk":     true,
 	modulePath + "/sdk/api": true,
+	// the local side of jailops cp: tar of a directory tree below a root, without following links
+	modulePath + "/sdk/tarcopy": true,
 	// writes the man pages from the command tree; it links nothing of the daemon
 	modulePath + "/internal/manpage": true,
 	// the catalog's parser and validator, for app validate; TestAppsLinksNoDaemon keeps it pure

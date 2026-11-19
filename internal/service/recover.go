@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"jailops.net/jailops/internal/validate"
 	"slices"
 	"strconv"
 	"strings"
@@ -53,7 +54,8 @@ func (s *Service) recoverInterrupted(ctx context.Context) error {
 				op, _ = s.d.DB.Operations.Get(ctx, req.OpID)
 			}
 			if op != nil && op.Error != nil {
-				op.Error = op.Error.WithDetail("recovery", out.Action+": "+out.Detail)
+				// the record is read through the API: the action only; what went wrong (out.Detail, paths and command text) is in the log line above
+				op.Error = op.Error.WithDetail("recovery", out.Action)
 				_ = s.d.DB.Operations.Put(ctx, *op)
 			}
 		}
@@ -130,6 +132,17 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 			return fail(fmt.Errorf("the upgrade plan cannot be rebuilt"))
 		}
 		return recover(p, err)
+	case "convert":
+		if !haveReq || req.Convert == nil || req.ConvertState == nil {
+			return fail(fmt.Errorf("the convert request was not recorded"))
+		}
+		cr := *req.Convert
+		cr.Stamp, cr.Resume = req.Stamp, req.ConvertState
+		p, _, err := s.life.PlanConvert(ctx, rest, cr)
+		if p == nil && err == nil {
+			return fail(fmt.Errorf("the convert plan cannot be rebuilt"))
+		}
+		return recover(p, err)
 	case "rollback":
 		if !haveReq || req.Rollback == nil {
 			return fail(fmt.Errorf("the rollback request was not recorded"))
@@ -156,8 +169,27 @@ func (s *Service) recoverRun(ctx context.Context, rec plan.Record) RecoveryOutco
 			s.place(req.Copy.Dst, si.Name)
 			defer s.unplace(req.Copy.Dst)
 		}
-		p, _, err := s.life.PlanCopy(ctx, req.Copy.Src, req.Copy.Dst, req.Copy.UUID, req.Stamp, true)
+		p, _, err := s.life.PlanCopyFrom(ctx, req.Copy.Src, req.Copy.Dst, req.Copy.UUID, req.Stamp, req.Copy.Snapshot, true)
 		return recover(p, err)
+	case "import":
+		if !haveReq || req.Import == nil {
+			return fail(fmt.Errorf("the import request was not recorded"))
+		}
+		found, err := s.life.RecoverImport(ctx, rest, req.Import.UUID)
+		if err != nil {
+			return fail(err)
+		}
+		project, _ := validate.SplitQualified(rest)
+		for _, v := range req.Import.Volumes {
+			if err := s.dropVolume(ctx, project, v); err != nil {
+				return fail(err)
+			}
+		}
+		out.Action = "rolled-back"
+		if !found && len(req.Import.Volumes) == 0 {
+			out.Action, out.Detail = "dropped", "the import had already ended"
+		}
+		return out
 	case "start":
 		p, err := s.life.PlanStart(ctx, rest)
 		return recover(p, err)

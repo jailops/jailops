@@ -38,6 +38,7 @@ import (
 	"jailops.net/jailops/internal/sys/pfctl"
 	"jailops.net/jailops/internal/sys/run"
 	"jailops.net/jailops/internal/sys/zfs"
+	"jailops.net/jailops/internal/top"
 	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/internal/wireguard"
 	"jailops.net/jailops/sdk"
@@ -98,6 +99,10 @@ type Deps struct {
 	Run      run.Runner
 	// Sysctl reads one sysctl value; when nil the runner is used.
 	Sysctl func(ctx context.Context, name string) (string, error)
+	// HostExec runs the read-only tools `jailops top` reads without a privilege (sysctl -e, netstat, ps): the
+	// daemon calls them itself, as it reads the routing table with netstat. Nil means the host cannot be read and
+	// a frame leaves the host numbers, the network rates and, without racct, CPU and memory out.
+	HostExec top.Exec
 	// WG is the WireGuard part of the helper; nil means WireGuard is unsupported here.
 	WG wireguard.Host
 	// Keys handles encrypted volumes (the helper); nil refuses them as unsupported.
@@ -148,6 +153,10 @@ type Deps struct {
 	// Logs reads the log files of jail roots (the root helper in production);
 	// nil answers unsupported.
 	Logs LogReader
+	// JailFiles reads and writes the files below jail roots (the root helper in production); nil answers
+	// unsupported. FileCopyMax is the most bytes one transfer may carry (default DefaultFileCopyMax).
+	JailFiles   JailFiles
+	FileCopyMax int64
 	// ProjectFilesDir holds the provisioning files of each project, one
 	// directory per project (default <StateDir>/project-files).
 	ProjectFilesDir string
@@ -328,6 +337,7 @@ type Service struct {
 	linuxBuilds atomic.Int32
 	jails       map[string]*jailEntry
 	status      map[string]jailRuntime
+	topSt       topState
 	recovered   []RecoveryOutcome
 	netStat     map[string]api.NetworkStatus
 	// wgErr is the latest failure to apply a tunnel; wgPub the public key the helper reported.

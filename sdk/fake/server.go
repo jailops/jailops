@@ -146,25 +146,31 @@ type Server struct {
 	// drafts are what GET /api/v1/jails/{name}/app-draft answers (SeedAppDraft), by jail key
 	drafts map[string]api.AppDraft
 	// access are the grants of installed apps (appaccess.go), by jail key
-	access    map[string]*fakeAccess
-	execCalls []ExecCall
+	access               map[string]*fakeAccess
+	execCalls            []ExecCall
+	execActive, execPeak int
 	// consoles are the sessions of the console protocol (console.go).
 	consoles     map[string]*fakeConsole
 	consoleCalls []ConsoleCall
 	nextConsole  int
 	// bkStatus is the backup key: "" none, "present" or "escrowed".
 	bkStatus, bkDomain string
-	updPkgs            map[string][]api.PackageUpdate
-	updFail            map[string]bool
-	updReports         map[string]api.UpdateReport
-	updHistory         map[string][]api.UpdateRecord
+	// bkNodeDomain is the key domain the fake backup node recorded: the first key created or imported ("" none yet).
+	bkNodeDomain string
+	updPkgs      map[string][]api.PackageUpdate
+	updFail      map[string]bool
+	updReports   map[string]api.UpdateReport
+	updHistory   map[string][]api.UpdateRecord
 	// usage is what GET .../usage answers per jail (SeedJailUsage); a jail
 	// without an entry gets fixed numbers.
 	usage map[string]api.JailUsage
+	// topFrame is what GET /api/v1/top answers (SeedTop).
+	topFrame *api.Top
 	// logs are the log files of each jail (SeedJailLog), by jail key and
 	// name below /var/log; a jail without an entry has none. unmounted
 	// marks jails whose root cannot be read (SeedJailUnmounted).
 	logs      map[string]map[string][]byte
+	files     fakeFiles // the files of the jails (files.go)
 	unmounted map[string]bool
 	logReads  int
 	fwd       fakeForward

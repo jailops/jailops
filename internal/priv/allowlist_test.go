@@ -167,3 +167,34 @@ func TestPkgNameOK(t *testing.T) {
 		}
 	}
 }
+
+// The doctor reads the ICMPv6 counters of the host with `netstat -s -p icmp6` through the helper's runner; without a
+// rule the read fails with "not on the allow-list" and the check can never count a rejected solicitation. Only that
+// exact vector is accepted: no other protocol, no routing table, no interface counters, no extra argument.
+func TestNetstatRuleAcceptsOnlyTheICMP6Counters(t *testing.T) {
+	c := newEnv(t).cfg
+	rule, argv, err := c.CheckCommand([]string{"netstat", "-s", "-p", "icmp6"})
+	if err != nil {
+		t.Fatalf("netstat -s -p icmp6: %v", err)
+	}
+	if rule.Name != "netstat" || len(argv) != 4 || argv[0] != "/usr/bin/netstat" {
+		t.Fatalf("rule %s argv %q", rule.Name, argv)
+	}
+	for _, bad := range [][]string{
+		{"netstat"},
+		{"netstat", "-s"},
+		{"netstat", "-s", "-p", "tcp"},
+		{"netstat", "-s", "-p", "icmp6", "-z"},
+		{"netstat", "-p", "icmp6", "-s"},
+		{"netstat", "-rn"},
+		{"netstat", "-rnW", "-f", "inet6"},
+		{"netstat", "-I", "epair0a"},
+		{"netstat", "-s", "-p", "icmp6", "extra"},
+		{"netstat", "-s", "-p", "icmp6;id"},
+		{"/usr/bin/netstat", "-s", "-p", "icmp6"},
+	} {
+		if _, _, err := c.CheckCommand(bad); err == nil {
+			t.Errorf("accepted %q", bad)
+		}
+	}
+}

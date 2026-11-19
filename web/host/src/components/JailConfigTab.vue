@@ -26,7 +26,7 @@ watch(() => props.jail, (j) => { draft.value = clone(j.spec) })
 
 const msgs = {
   int: s.config.invalidInt, size: s.config.invalidSize, rate: s.config.invalidRate, mac: s.config.invalidMac, address: s.config.invalidAddress,
-  listen: s.config.invalidListen, bool: s.config.invalidBool, name: s.config.invalidPattern, enum: s.config.invalidEnum,
+  listen: s.config.invalidListen, bool: s.config.invalidBool, name: s.config.invalidPattern, enum: s.config.invalidEnum, cpuset: s.config.invalidCpuset,
 }
 const rows = computed(() => rowsFor(draft.value).filter((r) => r.key.type !== 'device'))
 const groups = computed(() => grouped(rows.value))

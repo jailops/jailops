@@ -357,6 +357,9 @@ type Limits struct {
 	ExecSessionsPerJail int      `yaml:"exec_sessions_per_jail"`
 	ExecIdle            Duration `yaml:"exec_idle"`
 	ExecMax             Duration `yaml:"exec_max"`
+	// FileCopyBytes is the most bytes one file transfer into or out of a jail carries (`jailops cp`, the file routes
+	// of the API; default 2 GiB).
+	FileCopyBytes int64 `yaml:"file_copy_bytes"`
 }
 
 // Duration is a time.Duration that reads "30s" in YAML.

@@ -131,34 +131,9 @@ passes. A change that would shut out the address the request came from is refuse
 
 ## Upgrading, and going back one version
 
-    bectl create pre-jailops-upgrade                 # a boot environment of the root file system
-    pkg upgrade jailops jailops-client
-    service jailopsd restart
-    jailops doctor
-
-Both binaries are new, and each service runs the old one until it restarts. The two are one service, the helper being the
-part that runs as root: `jailops_priv` starts first at boot and stops last at shutdown, `service jailopsd start` starts
-the helper first when it is not running (the force_depend of rc.subr: "depends on jailops_priv, which will be forced to
-start") and `service jailopsd stop` stops it after the daemon, so `service jailopsd restart` replaces both. Jails keep
-running either way: they are kernel jails. `service jailopsd restart` alone restarts only the helper; the daemon
-reconnects, and the requests it makes meanwhile fail. A `service jailopsd start` while the helper still runs the replaced
-binary warns that it needs a restart.
-
-The database (`/var/db/jailops/jailops.db`) has **forward-only** schema migrations (`internal/store/migrations`,
-three so far): none has a way back. A daemon older than the database refuses to start with `version_skew` and leaves the
-database as it is. Going back is therefore a matter of putting the old database back with the old binaries:
-
-- **With the boot environment** (`bectl activate pre-jailops-upgrade`, then reboot): binaries, configuration and the
-  database go back together, as long as `/var/db` is part of the root file system (the installer's default layout;
-  check with `zfs list -o name,mountpoint`). The **state dataset** (`<pool>/jailops/state`, mounted at
-  `/var/db/jailops/state`) and the jails are datasets of their own and are not rolled back: objects created after the
-  upgrade stay. Its documents have no migrations today, so an older daemon reads them.
-- **Without one:** stop `jailopsd` before the upgrade and copy `jailops.db` (the daemon checkpoints it when it stops).
-  To go back, install the older package file (`pkg add -f FILE`; pkg keeps what it downloaded in `/var/cache/pkg`
-  until `pkg clean`), put the copy back, start both services. The daily copies in `/var/db/jailops/backups/` are a last
-  resort: what changed since the copy (users, tokens, audit entries) is lost.
-
-UNVERIFIED: neither path, nor an upgrade between two released versions, has been run by the test suite ([upgrade.md](upgrade.md)).
+The host's FreeBSD and JailOps are upgraded as two steps, each with a boot environment of its own:
+[the host's FreeBSD](upgrade.md#the-hosts-freebsd) and [JailOps](upgrade.md#jailops). The way back, and why it needs the
+database copy (`version_skew`), are in [Going back one version of JailOps](upgrade.md#going-back-one-version-of-jailops).
 
 ## Recovery objectives (RPO and RTO)
 
@@ -222,7 +197,7 @@ The key is written into the jail's configuration at its next start. `jailops sto
 
 ## Resource limits of a jail
 
-A jail has five limits. They are keys of the jail (`jailops config set JAIL KEY VALUE`, also in a profile or a file) and
+A jail has six limits. They are keys of the jail (`jailops config set JAIL KEY VALUE`, also in a profile or a file) and
 each one is enforced by the kernel, not by JailOps polling.
 
 | Key | Enforced with | What happens at the limit |
@@ -230,6 +205,7 @@ each one is enforced by the kernel, not by JailOps polling.
 | `limits.memory` | rctl `swapuse`, `deny` | the anonymous memory the jail may reserve in total: a `malloc` or `mmap` beyond it fails, and nothing is killed |
 | `limits.pids` | rctl `maxproc`, `deny` | `fork` fails while the jail has that many processes |
 | `limits.cpu` | rctl `pcpu`, `deny`, at cores times 100 | the jail is slowed down to that many cores, nothing is killed |
+| `limits.cpuset` | `cpuset -l LIST -j JID` | the jail's processes run on those CPUs only; the other CPUs of the host are never used by it |
 | `limits.disk`, `limits.disk_reservation` | ZFS `quota` and `reservation` of the jail's container dataset | writes fail below the container: the root, the persistent datasets and the snapshots of all of them count; a volume is a dataset of the project, outside the container: it is bounded by its own `--size` and by the project's storage quota, not by the jail's limit |
 | `limits.states` | pf `keep state (max N)` on every pass rule of the jail's anchor | a rule creates no new state beyond N; the host's state table cannot be filled by one jail |
 
@@ -245,6 +221,16 @@ as PostgreSQL with twenty busy connections, reserves more than the value it need
 catalog's hint of the application (1G for PostgreSQL) leaves room for a small server and no more. Raise
 `limits.memory` for a busy one. `limits.disk` is a `quota`, so snapshots count against it; a `refquota` would leave them
 out, and the jail could then fill the pool with what its snapshots keep.
+
+**`limits.cpuset` pins a jail to CPUs of the host**: a list of numbers and ranges such as `2,3` or `0-3,6`, kept as sorted ranges
+(`2,3` is stored `2-3`). It is the other half of `limits.cpu`: `limits.cpu` says how much CPU time the jail may use, wherever it
+runs; `limits.cpuset` says where it runs, so a busy jail leaves the other CPUs to the rest of the host. Both can be set. The
+cpuset needs no resource accounting: it works with `kern.racct.enable=0`. It is set by the helper after the jail has started, on the
+cpuset the jail's processes share, so everything the jail runs is on those CPUs. `--cpuset` on `create`, `jailops config set JAIL
+limits.cpuset 2,3`, `config unset`, the console's Configuration tab and a profile set it, and `jailops info` shows it. A CPU the
+host does not have (a cpuset of `0-7` on a host with four CPUs, for example a profile written for a larger host) stops the jail
+from starting, with the CPUs the host has in the message, and `jailops doctor` warns (`jails.cpuset`) for every jail whose set
+names a missing CPU. `cpuset -g -j JID` on the host shows what a running jail has.
 
 `limits.cpu`, `limits.memory` and `limits.pids` need the kernel's resource accounting, which is a boot tunable:
 
@@ -297,6 +283,94 @@ If the daemon itself exits (the kernel killed it for memory, a panic outside the
 running meanwhile; the API and the console are back with the daemon. `service jailopsd stop` stops the supervisor first,
 so a stop is not undone. A daemon that exits at once on every start is started again every 10 seconds, no faster; its
 reason is in `/var/log/messages` (tag `jailopsd`).
+
+## A failed operation
+
+An operation that fails with `internal error` says only that something inside it did, and gives its id in the hint (`see the
+daemon log for operation ID`). The text of the failure (the dataset, the path of the host, the command and what it printed) is
+in the log of `jailopsd` under that id, and nowhere in the API, for any role:
+
+    grep ID /var/log/messages
+
+(`jailopsd` tag, level `ERROR`, message `operation failed`, fields `op`, `description`, `project` and `err`.) An error with a
+code of its own, such as `busy`, `invalid`, `pool_exhausted` or `merge_conflict`, carries its message and hint to the reader.
+A failed app installation names the step and whether the jail was kept; the cause is in the same log. The audit trail records
+the code of the failure, not its text.
+
+## One command on many jails
+
+`jailops exec` runs a command in one jail. Name several jails, select them with a label, or take every jail of the
+project, and it runs the command in each running one, four at a time:
+
+    jailops exec web1 web2 web3 -- uptime
+    jailops exec -l role=web -- service nginx status
+    jailops exec --all --parallel 8 -- freebsd-version -ku
+
+Every jail runs the command in its own audited session. The output is printed line by line with the name of the jail in
+front, standard output on standard output and standard error on standard error, so a pipe or a redirect still sees
+them apart:
+
+    [web1] 10:42AM  up 41 days
+    [web2] 10:42AM  up 12 days
+    exec: 2 ok, 1 skipped (build: not running)
+
+There is no terminal and no standard input when more than one jail is addressed; `-t` is refused. The exit status is 0
+when every command exited 0, otherwise the highest status of a command, or 1 when a jail could not run it (a named jail
+does not exist or is not running, the session failed). A stopped jail that a selector matched is skipped and named in
+the summary; a stopped jail you named yourself is a failure. `--parallel N` bounds how many run at once.
+
+`jailops pkg install|upgrade|remove|info [NAME...] [-l KEY=VALUE | --all] -- PACKAGE...` is exec of the jail's own
+`pkg`, nothing more: `jailops pkg install -l role=web -- nginx` is `jailops exec -l role=web -- pkg install -y nginx`.
+Jails whose packages JailOps manages (a thin jail's base, an app) are changed by `jailops update` and `jailops app`.
+
+The console does the same: select jails in the jail list and choose Run a command. Each jail gets its own block with
+the output and the exit status, and the stopped ones are named.
+
+## Copying files
+
+`jailops cp` copies files and directory trees between this machine and a jail, or between two jails. A path in a jail is
+`NAME:/absolute/path`; every other path is local.
+
+    jailops cp ./nginx.conf web:/usr/local/etc/nginx/nginx.conf
+    jailops cp -r web:/var/log/nginx ./logs/
+    jailops cp -r db:/var/db/app web2:/var/db/
+    jailops cp ./motd -l role=web :/etc/motd
+
+The rules are those of `cp`: with several sources the destination is a directory, a directory needs `-r`, a file that
+exists is replaced (written under a temporary name and renamed), and `--mkdir` creates a missing destination directory.
+`-p` keeps owner, group and modification times; otherwise files belong to root in the jail and get the time of the
+copy. With `-l` or `--all` the destination is `:/PATH` and the copy goes to every running jail the selector matches,
+`--parallel` at a time, with a line per jail and a summary.
+
+What a copy never does, because the data is read and written from the host below the jail's root and nothing runs in
+the jail:
+
+- follow a symbolic link, in the path or in a tree (a link is copied as a link, and a path that goes through one is
+  refused);
+- write outside the jail root, or accept a name with `..` or an absolute name in a stream;
+- copy a device, a FIFO or a socket (they are skipped and counted);
+- set the set-user-id, set-group-id or sticky bit.
+
+A transfer is limited to `limits.file_copy_bytes` of the daemon (2 GiB by default) and a bounded number of entries and
+directory levels. It needs the role that may exec in the project and is audited with the jail, the direction, the
+paths and the bytes. A running jail always works; a stopped jail works only while its root dataset is mounted on the
+host, otherwise the answer is `busy` and names the dataset to mount.
+
+The console has the same for one file at a time: the Files tab of a running jail sends a file from the browser and
+downloads one.
+
+## Watching the host
+
+`jailops top` shows what the host and its running jails use now: the load, CPU, memory, ZFS cache and pool of the host
+on top (a global identity sees them) and one row per jail with its project, CPU, memory, processes, disk, network
+rates and uptime. Press `c`, `m`, `d` or `n` to sort by CPU, memory, disk or network and `q` to quit; `--sort`,
+`--interval 5s`, `--project P` and `-l k=v` do the same from the command line, and `jailops top --once -o json` prints
+one frame for a script. The host console shows the same on the Live usage page.
+
+A row shows `n/a` for a number that could not be read in time. With `kern.racct.enable=0` the CPU and memory of a jail
+come from the process list and are approximate (marked `~`); the footer says so and `jailops doctor` points at the
+setting. Set `kern.racct.enable=1` in `/boot/loader.conf` and reboot for exact numbers; the same setting makes the
+limits of [Resource limits of a jail](#resource-limits-of-a-jail) enforced.
 
 ## What to monitor
 

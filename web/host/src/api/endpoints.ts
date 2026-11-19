@@ -3,13 +3,13 @@
 import { getClient } from '@jailops/shared/api/client'
 import { core } from '@jailops/shared/api/core'
 import type {
-  Jail, JailAction, JailRollback, JailUpgrade, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
+  Jail, JailAction, JailRollback, JailUpgrade, JailCopy, JailConvert, JailConvertResult, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, FirewallTestRequest, FirewallTestResult, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, NDPStatus, Token,
   Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
-  BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, ExecRequest,
+  BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, BackupKeyImport, BackupKeyImported, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
-  JailReach, JailDiff, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
+  JailReach, JailDiff, JailImportPreflight, JailImportRequest, JailImported, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
   HostIdentity, HostIdentityApply, HostChange, HostSnapshot, HostRestore,
   HostFirewall, HostFirewallApply, HostPending,
   WireGuard, WireGuardJoin, WireGuardKeys, WireGuardPeerAdd, WireGuardPeerCreated,
@@ -17,12 +17,15 @@ import type {
   LogsRead, LogForward, LogForwardSpec, LogForwardTestResult,
   HostCertificate, HostCertificateUpload, ACMESpec, SetupStatus, SetupRequest, SetupResult,
   Rename, RenameResult,
-  Volume, VolumeCreate, VolumeUnlock, VolumePassphraseChange, VolumeSnapshot, VolumeRollback, VolumeAttachRequest,
+  Volume, VolumeCreate, VolumeUnlock, VolumePassphraseChange, VolumeSnapshot, VolumeRollback, VolumeAttachRequest, Top,
 } from '@jailops/shared/api/types'
 import type { SnapshotBody, ExecSessionInfo, ConfigResult } from '../types'
+import type { JailFileStat, JailFileCopy } from '@jailops/shared/api/types'
 import { logQuery, type LogQuery } from '@/lib/logs'
 
 const e = encodeURIComponent
+/** A path inside a jail for the URL: segments escaped, the leading slash dropped. */
+const filePath = (p: string) => p.replace(/^\/+/, '').split('/').map(e).join('/')
 const c = () => getClient()
 
 /** What a list of networks or storage is asked for: the project whose grants it holds, and `all` for every one of the host. */
@@ -38,6 +41,8 @@ const listQuery = ({ project, all }: ListScope): string => {
 export const api = {
   ...core,
   pool: () => c().get<PoolUsage>('/resources'),
+  /** The running jails and the host, measured now: of one project, or of every project the identity may use. */
+  top: (project?: string) => c().get<Top>(project ? `/top?project=${e(project)}` : '/top?all_projects=true'),
   doctor: () => c().get<DoctorReport>('/doctor'),
   /** The neighbour discovery proxy of every uplink, and the networks it answers for (operator role). */
   ndp: () => c().get<NDPStatus>('/ndp'),
@@ -64,6 +69,10 @@ export const api = {
     snapshot: (n: string, b: SnapshotBody) => c().mutate('POST', `/jails/${e(n)}/snapshots`, b),
     rollback: (n: string, r: JailRollback) => c().mutate('POST', `/jails/${e(n)}/rollback`, r),
     upgrade: (n: string, r: JailUpgrade) => c().mutate('POST', `/jails/${e(n)}/upgrade`, r),
+    /** Extension jail_copy: a copy with the data of the source, which may run (async, result the new jail). */
+    /** Extension jail_convert: the layout of the root changes; with dry_run the result is the plan (async, result JailConvertResult). */
+    convert: (n: string, b: JailConvert) => c().mutate<JailConvertResult>('POST', `/jails/${e(n)}/convert`, b),
+    copy: (n: string, b: JailCopy) => c().mutate<Jail>('POST', `/jails/${e(n)}`, b),
   },
   /** Extension volumes: the volumes of the current project; jails attach them by name. */
   volumes: {
@@ -137,6 +146,34 @@ export const api = {
       if (o.packages) q.set('packages', 'true')
       const qs = q.toString()
       return c().get<JailDiff>(`/jails/${e(n)}/diff${qs ? '?' + qs : ''}`)
+    },
+  },
+  xport: {
+    /** Extension jail_export: the export file of a jail as a stream (operator in the project). The jail keeps running. */
+    export: (n: string, o: { snapshot?: string; withVolumes?: boolean; zstd?: boolean } = {}) => {
+      const q = new URLSearchParams()
+      if (o.snapshot) q.set('snapshot', o.snapshot)
+      if (o.withVolumes) q.set('with_volumes', 'true')
+      if (o.zstd) q.set('zstd', 'true')
+      const qs = q.toString()
+      return c().download(`/jails/${e(n)}/export${qs ? '?' + qs : ''}`)
+    },
+    /** What an import of a file with this manifest would do on this host and project (admin in the project; reads only). */
+    preflight: async (b: JailImportPreflight): Promise<RestorePreflight> => {
+      const r = await c().mutate<RestorePreflight>('POST', '/jail-imports/preflight', b)
+      if (r.kind !== 'sync') throw new Error('the preflight of an import is answered at once')
+      return r.data
+    },
+    /** Makes a jail of the file (admin in the project); the file is sent as the browser reads it and the reply comes when the jail is made. */
+    import: (file: Blob, o: JailImportRequest = {}) => {
+      const q = new URLSearchParams()
+      if (o.as) q.set('as', o.as)
+      if (o.keep_ip) q.set('keep_ip', 'true')
+      if (o.start) q.set('start', 'true')
+      for (const [k, v] of Object.entries(o.network_map ?? {})) q.append('network_map', `${k}=${v}`)
+      for (const [k, v] of Object.entries(o.volume_map ?? {})) q.append('volume_map', `${k}=${v}`)
+      const qs = q.toString()
+      return c().upload<JailImported>(`/jail-imports${qs ? '?' + qs : ''}`, file, 'application/vnd.jailops.export')
     },
   },
   appAccess: {
@@ -223,6 +260,8 @@ export const api = {
     keyStatus: () => c().get<BackupKeyStatus>('/backup/key'),
     createKey: (b: BackupKeyCreate) => c().mutate<BackupKeyCreated>('POST', '/backup/key', b),
     escrowKey: (b: BackupKeyEscrow) => c().mutate<BackupKeyStatus>('POST', '/backup/key/escrow', b),
+    /** Extension backup_key (global admin). A key made elsewhere; with check:true nothing is written. The body holds a secret. */
+    importKey: (b: BackupKeyImport) => c().mutate<BackupKeyImported>('POST', '/backup/key/import', b),
     /** The node applies its delay before anything is deleted. */
     requestDeletion: (id: string) => c().mutate('DELETE', `/backups/${e(id)}`),
     restore: (r: RestoreRequest): Promise<MutationResult<RestorePreflight>> => c().mutate('POST', '/restores', r),
@@ -272,6 +311,12 @@ export const api = {
   },
   provision: {
     run: (n: string, b: ProvisionRequest) => c().mutate<ProvisionResult>('POST', `/jails/${e(n)}/provision`, b),
+  },
+  /** Extension jail_files: a file of a running jail, to and from the browser (operator in the project). */
+  files: {
+    stat: (n: string, path: string) => c().get<JailFileStat>(`/jails/${e(n)}/files/${filePath(path)}?stat=true`),
+    download: (n: string, path: string) => c().downloadFile(`/jails/${e(n)}/files/${filePath(path)}`),
+    upload: (n: string, path: string, data: Blob) => c().uploadFile<JailFileCopy>(`/jails/${e(n)}/files/${filePath(path)}`, data),
   },
   /** bash and the JailOps prompt for a running FreeBSD jail, as a new jail gets them (extension jail_shell_setup). */
   shellSetup: {

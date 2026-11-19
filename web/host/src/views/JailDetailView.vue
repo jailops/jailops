@@ -8,7 +8,7 @@ import { useLoad } from '@jailops/shared/composables/load'
 import { can, hasExt } from '@jailops/shared/composables/session'
 import { askLifecycle, askDelete, isLocked, lifecycle, type Lifecycle } from '@/composables/jailActions'
 import { confirmAction } from '@jailops/shared/composables/confirm'
-import { canShell, loadJailTab, saveJailTab } from '@/composables/shell'
+import { canFiles, canShell, loadJailTab, saveJailTab } from '@/composables/shell'
 import { projectState } from '@/composables/project'
 import { jailId, pushRecent } from '@/lib/search'
 import JailLabels from '@/components/JailLabels.vue'
@@ -28,12 +28,17 @@ import LoadState from '@jailops/shared/components/LoadState.vue'
 import RollbackDialog from '@/components/RollbackDialog.vue'
 import UpgradeDialog from '@/components/UpgradeDialog.vue'
 import RenameDialog from '@/components/RenameDialog.vue'
+import JailExportDialog from '@/components/JailExportDialog.vue'
+import { canExport } from '@/composables/xport'
+import CopyDialog from '@/components/CopyDialog.vue'
+import ConvertDialog from '@/components/ConvertDialog.vue'
 import { canRename } from '@/composables/rename'
 import { renamedAddress } from '@/lib/rename'
 import { sourcesOf, flatten } from '@/lib/configKeys'
 import JailConfigTab from '@/components/JailConfigTab.vue'
 import JailDevicesTab from '@/components/JailDevicesTab.vue'
 import JailExecTab from '@/components/JailExecTab.vue'
+import JailFilesTab from '@/components/JailFilesTab.vue'
 import JailUpdatesTab from '@/components/JailUpdatesTab.vue'
 import JailLogsTab from '@/components/JailLogsTab.vue'
 import JailAccessTab from '@/components/JailAccessTab.vue'
@@ -88,7 +93,7 @@ const jail = computed<Jail | undefined>(() => l.data.value?.jail)
 const snaps = computed(() => [...(l.data.value?.snaps ?? [])].sort((a, b) => (b.metadata.created_at ?? '').localeCompare(a.metadata.created_at ?? '')))
 const maxWritten = computed(() => Math.max(1, ...snaps.value.map((x) => x.status.written ?? 0)))
 
-type Tab = 'overview' | 'config' | 'devices' | 'updates' | 'logs' | 'reach' | 'changes' | 'access' | 'console'
+type Tab = 'overview' | 'config' | 'devices' | 'updates' | 'logs' | 'reach' | 'changes' | 'access' | 'files' | 'console'
 const tabList = computed(() => ([
   ['overview', s.jail.overview, true],
   ['config', s.config.tab, true],
@@ -101,6 +106,8 @@ const tabList = computed(() => ([
   ['changes', s.diff.tab, hasExt('jail_diff') && jail.value?.spec.layout !== 'thick'],
   // who may connect: for the jails an app installation made
   ['access', s.appAccess.tab, hasExt('app_access') && isInstalledApp(jail.value)],
+  // files to and from a running jail: the role of the shell
+  ['files', s.files.tab, canFiles(jail.value?.metadata.project)],
   // the console session needs the extension and operator in the project, as `jailops exec`
   ['console', s.exec.tab, canShell(jail.value?.metadata.project)],
 ] as Array<[Tab, string, boolean]>).filter((t) => t[2]).map(([key, label]) => ({ key, label })))
@@ -162,6 +169,7 @@ const snapComment = ref('')
 // Rename (extension rename, admin in the project): only a stopped jail is renamed, so a running or locked one says
 // what to do first instead of opening the dialog. Afterwards the page moves to the new name.
 const renameOpen = ref(false)
+const exportOpen = ref(false)
 const mayRename = computed(() => !!jail.value && canRename('jail', projectOf()))
 const renameWhy = computed(() => {
   const j = jail.value
@@ -174,6 +182,11 @@ function openRename(): void {
 }
 function renamed(to: string): void {
   void router.replace(renamedAddress('jail', name.value, to, route.fullPath) ?? `/jails/${encodeURIComponent(to)}`)
+}
+const copyOpen = ref(false)
+const convertOpen = ref(false)
+function copied(to: string): void {
+  void router.push(`/jails/${encodeURIComponent(to)}`)
 }
 const actionError = ref<ApiError | null>(null)
 
@@ -254,6 +267,9 @@ const attentionItems = computed(() => {
             </template>
             <button v-if="can('snapshots')" class="btn" type="button" @click="openRollback()" :disabled="!snaps.length"><Icon name="undo" />{{ s.jail.rollback }}</button>
             <button class="btn" type="button" @click="upgradeOpen = true"><Icon name="arrowUp" />{{ s.jail.upgrade }}</button>
+            <button v-if="canExport()" class="btn" type="button" data-test="jail-export" @click="exportOpen = true"><Icon name="download" />{{ s.xport.exportOpen }}</button>
+            <button v-if="hasExt('jail_copy')" class="btn" type="button" data-test="jail-copy" @click="copyOpen = true"><Icon name="copy" />{{ s.copy.open }}</button>
+            <button v-if="hasExt('jail_convert') && jail.spec.os !== 'linux'" class="btn" type="button" data-test="jail-convert" @click="convertOpen = true">{{ s.convert.open }}</button>
             <template v-if="mayRename">
               <button class="btn" type="button" data-test="jail-rename" :aria-disabled="!!renameWhy" :aria-describedby="renameWhy ? 'jail-rename-why' : undefined" @click="openRename">{{ s.rename.open(s.rename.kinds.jail) }}</button>
               <span v-if="renameWhy" id="jail-rename-why" class="why-disabled" data-test="jail-rename-why">{{ renameWhy }}</span>
@@ -282,6 +298,7 @@ const attentionItems = computed(() => {
         <JailReachTab v-else-if="tab === 'reach'" :jail="jail" />
         <JailChangesTab v-else-if="tab === 'changes'" :jail="jail" />
         <JailAccessTab v-else-if="tab === 'access'" :jail="jail" />
+        <JailFilesTab v-else-if="tab === 'files'" :jail="jail" />
         <JailExecTab v-else-if="tab === 'console'" :jail="jail" :connect="shellAsk" @changed="l.reload" />
         <template v-else>
         <section class="panel" aria-labelledby="svs">
@@ -408,6 +425,9 @@ const attentionItems = computed(() => {
         </div>
         <RollbackDialog :open="rollbackOpen" :jail="jail.metadata.name" :snapshots="snaps" :initial="rollbackSnap" @close="rollbackOpen = false" @done="l.reload" />
         <UpgradeDialog :open="upgradeOpen" :jail="jail" @close="upgradeOpen = false" @done="l.reload" />
+        <JailExportDialog :open="exportOpen" :jail="jail.metadata.name" :thick="jail.spec.layout === 'thick'" :snapshots="snaps" :has-volumes="!!jail.spec.volumes?.length" @close="exportOpen = false" />
+        <ConvertDialog :open="convertOpen" :jail="jail" @close="convertOpen = false" @done="l.reload" />
+        <CopyDialog :open="copyOpen" :jail="jail" :snapshots="snaps" @close="copyOpen = false" @done="copied" />
         <RenameDialog :open="renameOpen" kind="jail" :name="jail.metadata.name" :etag="l.data.value?.etag" @close="renameOpen = false" @done="renamed" />
         <UnlockDialog :open="unlockOpen" :volume="jail.status.locked?.[0] ?? ''" @close="unlockOpen = false" @done="l.reload" />
         <AttachVolumeDialog :open="attachOpen" :jail="jail.metadata.name" :attached="(jail.spec.volumes ?? []).map((v) => v.volume)" @close="attachOpen = false" @done="l.reload" />

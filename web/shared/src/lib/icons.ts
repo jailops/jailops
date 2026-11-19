@@ -49,6 +49,7 @@ import users from 'lucide-static/icons/users.svg'
 import pkg from 'lucide-static/icons/package.svg'
 import search from 'lucide-static/icons/search.svg'
 import download from 'lucide-static/icons/download.svg'
+import upload from 'lucide-static/icons/upload.svg'
 import externalLink from 'lucide-static/icons/external-link.svg'
 import fileText from 'lucide-static/icons/file-text.svg'
 import store from 'lucide-static/icons/store.svg'
@@ -74,7 +75,7 @@ export const icons = {
   play, square, rotateCw, layoutDashboard, box, layers, network, shield, archive, server, listChecks, radio,
   scrollText, keyRound, sun, moon, monitor, menu, x, alertTriangle, alertCircle, checkCircle, circle, info, copy, check,
   camera, undo, hardDrive, database, wrench, shieldCheck, broom, searchCheck, clock, activity, users, arrowUp, arrowDown, plus, trash, lock, logOut, chevronLeft, terminal, link, pause,
-  pkg, search, download, externalLink, fileText, store, cpu, memoryStick, heartPulse, folder, fileCog, wrapText, arrowDownToLine, plug,
+  pkg, search, download, upload, externalLink, fileText, store, cpu, memoryStick, heartPulse, folder, fileCog, wrapText, arrowDownToLine, plug,
   eye, eyeOff, lockOpen, tag, history, arrowRight, arrowLeftRight, circleX, circleHelp,
 } as const
 export type IconName = keyof typeof icons

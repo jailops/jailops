@@ -40,3 +40,24 @@ func TestUpgradeSpecTurnsProxyDevicesIntoExposeEntries(t *testing.T) {
 	}
 	var _ api.ExposeEntry
 }
+
+// The alias of an image reference written before image aliases were removed is dropped when the record is read: every
+// upgrade, update and image listing resolves "name" or "name#gN", and a jail whose reference does not parse would fall
+// out of the image upgrades without a word.
+func TestDecodeRecordDropsTheAliasOfTheImageReference(t *testing.T) {
+	for in, want := range map[string]string{
+		"freebsd-15-1@stable": "freebsd-15-1",
+		"freebsd-15-1":        "freebsd-15-1",
+		"freebsd-15-1#g2":     "freebsd-15-1#g2",
+	} {
+		raw := []byte(`{"version":1,"metadata":{"name":"web","project":"shop"},"spec":{"image":"` + in + `","storage":"default"}}`)
+		r, err := DecodeRecord(raw)
+		if err != nil || r.Spec.Image != want || r.Spec.Storage != "default" || r.Metadata.Name != "web" {
+			t.Errorf("%q: %v %+v", in, err, r)
+		}
+		b, err := DecodeBundle([]byte(`{"version":1,"metadata":{"name":"web"},"spec":{"image":"` + in + `"},"image":{"ref":"x","name":"x#g1","generation":1}}`))
+		if err != nil || b.Spec.Image != want || b.Image.Generation != 1 {
+			t.Errorf("bundle %q: %v %+v", in, err, b)
+		}
+	}
+}

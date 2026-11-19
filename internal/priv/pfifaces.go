@@ -186,11 +186,15 @@ func (l *Local) networkUplinks() map[string]bool {
 
 var reForward = regexp.MustCompile(`\bto\s+(\S+)\s+port\s+([0-9]+)\s+rdr-to\s+(\S+)\s+port\s+([0-9]+)\s*$`)
 
+var reProto = regexp.MustCompile(`\bproto\s+(tcp|udp)\b`)
+
 // checkForward accepts a forward (match in on UPLINK ... to ADDR port N rdr-to JAIL port M) when it leads to a jail and
 // leaves the host's own ports alone: the target is an address of a network JailOps has stored, never one of the host,
 // and the port it takes over on the host is neither a privileged port nor one a host process listens on, unless the
 // request carries the admin assertion (the API asks for a global administrator for that). Without it a compromised
-// daemon, or a project administrator, could send the host's ssh or console port into a jail of their own.
+// daemon, or a project administrator, could send the host's ssh or console port into a jail of their own. The start hook
+// of a jail has no caller: it carries the forwards of the jail's stored exposure (withStoredForwards), which a global
+// administrator admitted when the exposure was stored, and a forward that is one of them needs no assertion again.
 func (l *Local) checkForward(ctx context.Context, at, t string) error {
 	m := reForward.FindStringSubmatch(t)
 	if m == nil {
@@ -212,6 +216,12 @@ func (l *Local) checkForward(ctx context.Context, at, t string) error {
 	port, _ := strconv.Atoi(m[2])
 	if isAdmin(ctx) {
 		return nil
+	}
+	if pm := reProto.FindStringSubmatch(t); pm != nil {
+		jailPort, _ := strconv.Atoi(m[4])
+		if isStoredForward(ctx, pm[1], port, jailPort) {
+			return nil
+		}
 	}
 	if port < 1024 {
 		return forbidden("%s: the host's port %d is a privileged port: forwarding it needs the admin assertion", at, port)

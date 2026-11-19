@@ -97,6 +97,14 @@ func (b backupAdmin) EscrowKey(ctx context.Context, recipients []string) error {
 	return b.s.EscrowKey(ctx, recipients)
 }
 
+func (b backupAdmin) ImportKey(ctx context.Context, in api.BackupKeyImport) (api.BackupKeyImported, error) {
+	r, err := b.s.ImportKeyChecked(ctx, hostbackup.ImportKeyOptions{RecoveryKey: in.RecoveryKey, KeyFile: []byte(in.KeyFile), Passphrase: in.Passphrase,
+		Identity: in.Identity, Domain: in.Domain, Replace: in.Replace, Check: in.Check, SkipNodeCheck: in.SkipNodeCheck})
+	out := api.BackupKeyImported{Domain: r.Domain, Repository: r.Repository, Verified: r.Verified, Existing: r.Existing, Installed: r.Installed,
+		Replaced: r.Replaced, Path: r.Path, Aside: r.Aside, Backups: r.Backups, Warning: r.Warning}
+	return out, err
+}
+
 func (b backupAdmin) KeyStatus(ctx context.Context) (api.BackupKeyStatus, error) {
 	st, err := b.s.Status(ctx)
 	out := api.BackupKeyStatus{Status: st.Status.String(), Domain: st.Domain, Path: st.Path}

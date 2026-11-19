@@ -79,12 +79,12 @@ func (s *Service) rollbackRoot(ctx context.Context, st *jailState, req RollbackO
 	if err != nil {
 		return res, fmt.Errorf("read spec.json: %w", err)
 	}
-	target, err := s.Images.Resolve(ctx, s.Cfg.at(st.Name).st.Root, genName(st.Image, st.Prev))
+	target, toRef, err := s.rollbackTarget(ctx, st, st.Prev, req.Resume)
 	if err != nil {
 		return res, err
 	}
 	ur := &UpgradeResult{}
-	p, ur, err := s.planSwitch(ctx, st, rec, target, "rollback", req.Stamp, req.Resume, ur)
+	p, ur, err := s.planSwitch(ctx, st, rec, target, "rollback", req.Stamp, req.Resume, ur, toRef)
 	res.Upgrade = ur
 	if err != nil || p == nil {
 		return res, err
@@ -116,6 +116,11 @@ func (s *Service) rollbackData(ctx context.Context, st *jailState, req RollbackO
 	switchRoot := false
 	rootInSet := false
 	if res.Scope == api.RollbackAll {
+		// the root of a snapshot taken on another image is not a generation of the jail's image now
+		if img := s.prop(ctx, st.Container+"@"+snap, PropImage); img != "" && img != st.Image {
+			return res, api.Errorf(api.CodeConflict, "snapshot %q was taken while jail %s used image %s, the jail uses %s now", snap, st.Name, img, st.Image).
+				WithHint("roll the root back first (jailops jail rollback), then restore the snapshot")
+		}
 		targets = append(targets, s.systemDatasets(st)...)
 		if st.Layout == api.LayoutThin && snapGen != 0 && snapGen != st.Gen {
 			switchRoot = true
@@ -290,9 +295,33 @@ func (s *Service) PlanRollbackRoot(ctx context.Context, name string, req Rollbac
 	if targetGen > 0 {
 		prev = targetGen
 	}
-	target, err := s.Images.Resolve(ctx, s.Cfg.at(st.Name).st.Root, genName(st.Image, prev))
+	target, toRef, err := s.rollbackTarget(ctx, st, prev, req.Resume)
 	if err != nil {
 		return nil, ur, err
 	}
-	return s.planSwitch(ctx, st, rec, target, "rollback", req.Stamp, req.Resume, ur)
+	return s.planSwitch(ctx, st, rec, target, "rollback", req.Stamp, req.Resume, ur, toRef)
+}
+
+// rollbackTarget is the generation a root rollback returns to: generation prev of the image the jail had before its
+// last switch. toRef is the reference spec.image has afterwards when that is another image (a rollback of a move to
+// another release), empty otherwise. A rebuilt plan (resume) takes both from the state of the interrupted run.
+func (s *Service) rollbackTarget(ctx context.Context, st *jailState, prev int, resume *SwitchState) (api.ImageGeneration, string, error) {
+	image, ref := st.PrevImage, ""
+	if image == "" {
+		image = st.Image
+	}
+	if image != st.Image {
+		if ref = st.PrevRef; ref == "" {
+			ref = image
+		}
+	}
+	if resume != nil {
+		if resume.FromImage != "" && resume.ToImage != "" {
+			image, ref = resume.ToImage, resume.ToRef
+		} else {
+			image, ref = st.Image, ""
+		}
+	}
+	target, err := s.Images.Resolve(ctx, s.Cfg.at(st.Name).st.Root, genName(image, prev))
+	return target, ref, err
 }

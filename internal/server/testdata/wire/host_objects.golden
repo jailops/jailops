@@ -1,0 +1,476 @@
+# the server info with an identity
+> GET /api/v1?project=alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {
+    "api_extensions": "<the list of extensions.golden>",
+    "api_version": "1.0",
+    "auth": "trusted",
+    "environment": {
+      "arch": "amd64",
+      "kernel_version": "15.1-RELEASE-p1",
+      "os": "FreeBSD",
+      "pf": true,
+      "pool": "tank"
+    },
+    "host_uuid": "<uuid>",
+    "hostname": "testhost",
+    "role": "host",
+    "secrets_recipient": "<age-recipient>",
+    "version": "test"
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# networks, storage and images are host objects: no project in the request
+> GET /api/v1/networks
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": [
+    {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "name": "lan",
+        "scope": "fleet",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "ipv4": {
+          "gateway": "10.20.0.1",
+          "range": "10.20.0.10-10.20.0.50",
+          "subnet": "10.20.0.0/24"
+        }
+      },
+      "status": {
+        "dns": {
+          "nameservers": [
+            "198.51.100.1"
+          ],
+          "source": "host"
+        },
+        "free": 41,
+        "granted_to": [
+          "alpha"
+        ]
+      }
+    }
+  ],
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/networks/lan
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "1"
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 1,
+      "name": "lan",
+      "scope": "fleet",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "ipv4": {
+        "gateway": "10.20.0.1",
+        "range": "10.20.0.10-10.20.0.50",
+        "subnet": "10.20.0.0/24"
+      }
+    },
+    "status": {
+      "dns": {
+        "nameservers": [
+          "198.51.100.1"
+        ],
+        "source": "host"
+      },
+      "free": 41,
+      "granted_to": [
+        "alpha"
+      ]
+    }
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/networks/lan/leases
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": [],
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/storage
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": [
+    {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "host": "<uuid>",
+        "name": "default",
+        "scope": "host",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "comment": "created at the first start",
+        "dataset": "tank/jailops"
+      },
+      "status": {
+        "granted_to": [
+          "alpha"
+        ],
+        "health": "ONLINE",
+        "pool": "tank",
+        "size": 1099511627776
+      }
+    }
+  ],
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/images
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": [
+    {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "name": "fb",
+        "scope": "fleet",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "arch": "amd64",
+        "os": "freebsd",
+        "release": "15.1-RELEASE",
+        "retention": {},
+        "source": {
+          "type": "pkgbase"
+        }
+      },
+      "status": {
+        "generations": [
+          {
+            "created_at": "<time>",
+            "dataset": "tank/jailops/images/fb/g1",
+            "freebsd_version": "15.0-RELEASE-p1",
+            "manifest": "sha256:ba367f2d46ac1fc0b92ad46c247a8cfd29b27b53a322d25195a892aacc103cf6",
+            "name": "fb#g1",
+            "number": 1,
+            "packages": 2,
+            "storages": [
+              "default"
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/images/fb
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "1"
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 1,
+      "name": "fb",
+      "scope": "fleet",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "arch": "amd64",
+      "os": "freebsd",
+      "release": "15.1-RELEASE",
+      "retention": {},
+      "source": {
+        "type": "pkgbase"
+      }
+    },
+    "status": {
+      "generations": [
+        {
+          "created_at": "<time>",
+          "dataset": "tank/jailops/images/fb/g1",
+          "freebsd_version": "15.0-RELEASE-p1",
+          "manifest": "sha256:ba367f2d46ac1fc0b92ad46c247a8cfd29b27b53a322d25195a892aacc103cf6",
+          "name": "fb#g1",
+          "number": 1,
+          "packages": 2,
+          "storages": [
+            "default"
+          ]
+        }
+      ]
+    }
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# projects: read, create (synchronous, 201), change with If-Match, delete
+> GET /api/v1/projects
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": [
+    {
+      "metadata": {
+        "created_at": "<time>",
+        "generation": 1,
+        "host": "<uuid>",
+        "name": "alpha",
+        "scope": "host",
+        "updated_at": "<time>",
+        "uuid": "<uuid>"
+      },
+      "spec": {
+        "networks": [
+          {
+            "network": "lan"
+          }
+        ],
+        "quotas": {},
+        "storage": [
+          {
+            "storage": "default"
+          }
+        ]
+      },
+      "status": {
+        "addresses": 0,
+        "cpu": 0,
+        "disk_used": 0,
+        "jails": 0,
+        "memory_used": 0
+      }
+    }
+  ],
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> GET /api/v1/projects/alpha
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "1"
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 1,
+      "host": "<uuid>",
+      "name": "alpha",
+      "scope": "host",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "networks": [
+        {
+          "network": "lan"
+        }
+      ],
+      "quotas": {},
+      "storage": [
+        {
+          "storage": "default"
+        }
+      ]
+    },
+    "status": {
+      "addresses": 0,
+      "cpu": 0,
+      "disk_used": 0,
+      "jails": 0,
+      "memory_used": 0
+    }
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> POST /api/v1/projects
+> {"metadata":{"name":"beta"},"spec":{}}
+< 201 Created
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "1"
+< Location: /api/v1/projects/beta
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 1,
+      "host": "<uuid>",
+      "name": "beta",
+      "scope": "host",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "quotas": {}
+    },
+    "status": {
+      "addresses": 0,
+      "cpu": 0,
+      "disk_used": 0,
+      "jails": 0,
+      "memory_used": 0
+    }
+  },
+  "status": "Success",
+  "status_code": 201,
+  "type": "sync"
+}
+
+> GET /api/v1/projects/beta
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "1"
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 1,
+      "host": "<uuid>",
+      "name": "beta",
+      "scope": "host",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "quotas": {}
+    },
+    "status": {
+      "addresses": 0,
+      "cpu": 0,
+      "disk_used": 0,
+      "jails": 0,
+      "memory_used": 0
+    }
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> PATCH /api/v1/projects/beta
+> If-Match: "1"
+> {"spec":{"comment":"second"}}
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+< ETag: "2"
+{
+  "metadata": {
+    "metadata": {
+      "created_at": "<time>",
+      "generation": 2,
+      "host": "<uuid>",
+      "name": "beta",
+      "scope": "host",
+      "updated_at": "<time>",
+      "uuid": "<uuid>"
+    },
+    "spec": {
+      "comment": "second",
+      "quotas": {}
+    },
+    "status": {
+      "addresses": 0,
+      "cpu": 0,
+      "disk_used": 0,
+      "jails": 0,
+      "memory_used": 0
+    }
+  },
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+> DELETE /api/v1/projects/beta
+< 200 OK
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "metadata": {},
+  "status": "Success",
+  "status_code": 200,
+  "type": "sync"
+}
+
+# without a credential, and with a name that does not exist
+> GET /api/v1/jails?project=alpha
+< 401 Unauthorized
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "unauthorized",
+    "message": "unsupported authorization scheme"
+  },
+  "status": "Failure",
+  "status_code": 401,
+  "type": "error"
+}
+
+> GET /api/v1/projects/nope
+< 404 Not Found
+< Content-Type: application/json
+< Cache-Control: no-store
+{
+  "error": {
+    "code": "not_found",
+    "message": "project \"nope\" not found"
+  },
+  "status": "Failure",
+  "status_code": 404,
+  "type": "error"
+}
+

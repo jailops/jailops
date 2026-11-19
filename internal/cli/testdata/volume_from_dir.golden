@@ -1,0 +1,24 @@
+$ jailops --dry-run volume create site --from-dir /srv/data/site
+dry-run: would create volume site
+apiVersion: jailops/v1
+kind: Volume
+metadata:
+  name: site
+spec:
+  uid: 0
+  gid: 0
+
+$ jailops volume create site --from-dir /srv/data/site --path /mnt/x
+! usage: --from-dir copies files into a new volume and --path is the host directory itself: give one of them
+! hint: run 'jailops volume create --help' for usage
+[exit 2]
+
+$ jailops volume create etc --from-dir /etc
+! forbidden: the directory /etc is not below one that the host allows to copy from
+! hint: the host operator allows a directory with admin-host-mount in priv.conf
+[exit 3]
+
+$ jailops volume create site --from-dir /srv/data/site --uid 80 --gid 80
+volume/site created
+! note: copied 12 files and 3 directories (48.0 KiB) from /srv/data/site; no setuid or setgid bit came across
+

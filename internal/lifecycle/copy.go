@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"jailops.net/jailops/internal/plan"
+	"jailops.net/jailops/internal/validate"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -22,7 +23,13 @@ type CopyResult struct {
 // addresses and MACs are reset to "auto", because two jails must not share an
 // address. stamp names the temporary snapshot (empty means "now").
 func (s *Service) CopyJail(ctx context.Context, src, dst, newUUID, stamp string, dryRun bool) (CopyResult, error) {
-	p, res, err := s.PlanCopy(ctx, src, dst, newUUID, stamp, false)
+	return s.CopyJailFrom(ctx, src, dst, newUUID, stamp, "", dryRun)
+}
+
+// CopyJailFrom is CopyJail from a snapshot of the source: snapshot names a snapshot every dataset of the source has
+// (see SnapshotJail); empty takes a new, temporary one.
+func (s *Service) CopyJailFrom(ctx context.Context, src, dst, newUUID, stamp, snapshot string, dryRun bool) (CopyResult, error) {
+	p, res, err := s.PlanCopyFrom(ctx, src, dst, newUUID, stamp, snapshot, false)
 	if err != nil {
 		return *res, err
 	}
@@ -36,6 +43,11 @@ func (s *Service) CopyJail(ctx context.Context, src, dst, newUUID, stamp string,
 
 // PlanCopy builds the copy plan; recovering skips the destination existence check.
 func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string, recovering bool) (*plan.Plan, *CopyResult, error) {
+	return s.PlanCopyFrom(ctx, src, dst, newUUID, stamp, "", recovering)
+}
+
+// PlanCopyFrom builds the copy plan from snapshot (empty: a new temporary snapshot of the source).
+func (s *Service) PlanCopyFrom(ctx context.Context, src, dst, newUUID, stamp, snapshot string, recovering bool) (*plan.Plan, *CopyResult, error) {
 	res := &CopyResult{}
 	if err := validName("jail", dst); err != nil {
 		return nil, res, err
@@ -58,6 +70,13 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 		return nil, res, fmt.Errorf("read spec.json: %w", err)
 	}
 	snap := "jo-copy-" + s.stamp(stamp)
+	own := snapshot == "" // the snapshot is the copy's own: it is taken and dropped by the plan
+	if !own {
+		if err := validate.SnapshotName("snapshot", snapshot); err != nil {
+			return nil, res, err
+		}
+		snap = snapshot
+	}
 	dstProject, dstName := splitKey(dst)
 	dc := s.Cfg.at(dst).containerDS()
 	dstRoot, dstMP := s.Cfg.at(dst).rootMP(), s.Cfg.at(dst).containerMP()
@@ -66,17 +85,35 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 		from, to string
 		props    map[string]string
 	}
-	items := []item{{st.Container, dc, map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": dstMP, PropComplete: "off"}}}
-	items = append(items, item{st.Root, dc + "/root", map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": dstRoot}})
+	// What the copy's datasets are told is explicit: a plain send carries no properties, so the kind, the layout, the
+	// image, the class and the path of each dataset are read from the source and set on the copy.
+	with := func(ds string, over map[string]string) map[string]string {
+		m := s.copyProps(ctx, ds)
+		m[PropID], m[PropName], m[PropProject] = newUUID, dstName, dstProject
+		for k, v := range over {
+			m[k] = v
+		}
+		return m
+	}
+	items := []item{{st.Container, dc, with(st.Container, map[string]string{"mountpoint": dstMP, PropComplete: "off"})}}
+	items = append(items, item{st.Root, dc + "/root", with(st.Root, map[string]string{"mountpoint": dstRoot})})
 	for _, d := range st.Persist {
-		items = append(items, item{d.DS, dc + "/" + strings.TrimPrefix(d.DS, st.Container+"/"), map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": dstRoot + d.Path}})
+		items = append(items, item{d.DS, dc + "/" + strings.TrimPrefix(d.DS, st.Container+"/"), with(d.DS, map[string]string{"mountpoint": dstRoot + d.Path})})
 	}
 	if st.Delegated != "" {
-		items = append(items, item{st.Delegated, s.Cfg.at(dst).delegatedDS(), map[string]string{PropID: newUUID, PropName: dstName, PropProject: dstProject, "mountpoint": "none"}})
+		items = append(items, item{st.Delegated, s.Cfg.at(dst).delegatedDS(), with(st.Delegated, map[string]string{"mountpoint": "none"})})
 	}
 	srcSnaps := make([]string, len(st.all()))
 	for i, d := range st.all() {
 		srcSnaps[i] = d + "@" + snap
+		if !own {
+			if ok, err := z.Exists(ctx, srcSnaps[i]); err != nil {
+				return nil, res, err
+			} else if !ok {
+				return nil, res, api.Errorf(api.CodeNotFound, "jail %s has no snapshot %q on %s", src, snapshot, d).
+					WithHint("jailops jail snapshot list " + src)
+			}
+		}
 	}
 	owned := func(ctx context.Context) error {
 		ok, err := z.Exists(ctx, dc)
@@ -89,9 +126,11 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 		return z.DestroyRecursive(ctx, dc)
 	}
 	pl := plan.New("copy-jail " + src + " " + dst)
-	pl.Add(plan.Step{Name: "snapshot", Describe: "zfs snapshot " + strings.Join(srcSnaps, " ") + "  (one atomic transaction)",
-		Do:   func(ctx context.Context) error { return z.Snapshot(ctx, nil, srcSnaps...) },
-		Undo: s.destroySnaps(srcSnaps)})
+	if own {
+		pl.Add(plan.Step{Name: "snapshot", Describe: "zfs snapshot " + strings.Join(srcSnaps, " ") + "  (one atomic transaction)",
+			Do:   func(ctx context.Context) error { return z.Snapshot(ctx, nil, srcSnaps...) },
+			Undo: s.destroySnaps(srcSnaps)})
+	}
 	for i, it := range items {
 		it := it
 		send := "zfs send -p"
@@ -117,13 +156,16 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 	// A copy attaches no volume: a volume belongs to the jails it is attached to, and two jails writing one volume
 	// by accident is not what a copy should start with. Attach what the copy needs with `jailops volume attach`.
 	nrec.Spec.Volumes = nil
+	// ... and takes over no public port: the host port of an IPv4 forward belongs to the source's exposure.
+	nrec.Spec.Expose = nil
 	nrec.Spec.Network = append([]api.NetworkAttach(nil), rec.Spec.Network...)
 	for i := range nrec.Spec.Network {
 		n := &nrec.Spec.Network[i]
-		if n.IPv4 != "none" {
+		// an address the source has gets a new one; a family it has none of stays without
+		if n.IPv4 != "none" && n.IPv4 != "" {
 			n.IPv4 = "auto"
 		}
-		if n.IPv6 != "none" {
+		if n.IPv6 != "none" && n.IPv6 != "" {
 			n.IPv6 = "auto"
 		}
 		n.MAC = ""
@@ -138,11 +180,14 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 		plan.Step{Name: "write-bundle", Describe: "write " + s.Cfg.at(dst).bundlePath(), Do: func(ctx context.Context) error { return s.Files.WriteAtomic(ctx, s.Cfg.at(dst).bundlePath(), bundleB) }},
 		plan.Step{Name: "mark-complete", Describe: "zfs set jailops:complete=on " + dc,
 			Do: func(ctx context.Context) error { return z.Set(ctx, dc, map[string]string{PropComplete: "on"}) }})
-	// the temporary snapshots are no longer needed; failures are warnings
-	pl.Add(plan.Step{Name: "drop-temporary-snapshots", Describe: "zfs destroy the " + snap + " snapshots on source and copy",
+	// the temporary snapshots are no longer needed; failures are warnings. A snapshot the user made stays on the source
+	// and is dropped from the copy only.
+	pl.Add(plan.Step{Name: "drop-temporary-snapshots", Describe: "zfs destroy the " + snap + " snapshots on " + map[bool]string{true: "source and copy", false: "the copy"}[own],
 		Do: func(ctx context.Context) error {
 			var all []string
-			all = append(all, srcSnaps...)
+			if own {
+				all = append(all, srcSnaps...)
+			}
 			for _, it := range items {
 				all = append(all, it.to+"@"+snap)
 			}
@@ -157,4 +202,19 @@ func (s *Service) PlanCopy(ctx context.Context, src, dst, newUUID, stamp string,
 func checkJSON(v any) error {
 	_, err := json.Marshal(v)
 	return err
+}
+
+// copyPropNames are the properties of a jail's dataset that a copy keeps: what JailOps reads back (managed, kind,
+// layout, image, generation, class, merge, path) and the limits set on it.
+var copyPropNames = []string{PropManaged, PropKind, PropLayout, PropImage, PropGen, PropManifest, PropClass, PropMerge, PropPath,
+	"quota", "refquota", "reservation", "readonly", "compression", "recordsize", "atime"}
+
+func (s *Service) copyProps(ctx context.Context, ds string) map[string]string {
+	out := map[string]string{}
+	for _, p := range copyPropNames {
+		if v := s.prop(ctx, ds, p); v != "" {
+			out[p] = v
+		}
+	}
+	return out
 }

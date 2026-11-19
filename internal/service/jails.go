@@ -1018,6 +1018,32 @@ type ActionResult struct {
 	Plan     []string `json:"plan,omitempty"`
 	Warnings []string `json:"warnings,omitempty"`
 	DryRun   bool     `json:"dry_run,omitempty"`
+	// Upgrade says what an upgrade moves, for a dry run and for the result of the operation.
+	Upgrade *UpgradeInfo `json:"upgrade,omitempty"`
+}
+
+// UpgradeInfo is what a root switch of a thin jail changes: the generations it goes from and to, the releases of
+// the two, whether it moves the jail to another image (a new release), and what the move keeps.
+type UpgradeInfo struct {
+	From        string `json:"from,omitempty"`
+	To          string `json:"to,omitempty"`
+	FromRelease string `json:"from_release,omitempty"`
+	ToRelease   string `json:"to_release,omitempty"`
+	// Image is the image the jail follows afterwards, set for a move to another image.
+	Image    string   `json:"image,omitempty"`
+	Snapshot string   `json:"snapshot,omitempty"`
+	Kept     []string `json:"kept,omitempty"`
+}
+
+func upgradeInfo(res *lifecycle.UpgradeResult) *UpgradeInfo {
+	if res == nil || !res.Changed {
+		return nil
+	}
+	u := &UpgradeInfo{From: res.From, To: res.To, FromRelease: res.FromRelease, ToRelease: res.ToRelease, Snapshot: res.Snapshot, Kept: res.Kept}
+	if res.Rebase {
+		u.Image, _, _ = strings.Cut(res.To, "#")
+	}
+	return u
 }
 
 func (s *Service) stamp() string { return strconv.FormatInt(s.now().Unix(), 10) }
@@ -1103,37 +1129,132 @@ func (s *Service) UpgradeJail(ctx context.Context, name string, up api.JailUpgra
 		return api.Operation{}, err
 	}
 	req := lifecycle.UpgradeRequest{JailUpgrade: up, Stamp: s.stamp()}
+	locks := []string{jailLock(key), anchorLock(key)}
+	run := func(ctx context.Context, h *OpHandle) (any, error) {
+		return s.upgradeBody(ctx, h, p.Meta.Name, name, key, up, req)
+	}
+	if up.Image != "" {
+		cur, err := s.getByKey(ctx, key)
+		if err != nil {
+			return api.Operation{}, err
+		}
+		il, err := s.checkMoveRequest(ctx, p, key, cur, up.Image)
+		if err != nil {
+			return api.Operation{}, err
+		}
+		locks = append(locks, il...)
+		run = func(ctx context.Context, h *OpHandle) (any, error) {
+			return s.moveBody(ctx, h, p.Meta.Name, name, key, up, req)
+		}
+	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Upgrade jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
+		Description: "Upgrade jail " + name, Locks: locks, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
-		Run: func(ctx context.Context, h *OpHandle) (any, error) {
-			return s.upgradeBody(ctx, h, p.Meta.Name, name, key, up, req)
-		},
+		Run:       run,
 	})
+}
+
+// checkMoveRequest checks a move of a jail to another image before anything is submitted: the image is one the
+// project may use, of the same OS and architecture as the jail's. It returns the locks of the image (the first use of an
+// image on a pool builds or receives its generation there). The release order and the host kernel are the
+// lifecycle's checks, made with the plan.
+func (s *Service) checkMoveRequest(ctx context.Context, p project, key string, j api.Jail, image string) ([]string, error) {
+	ref, err := validate.ParseImageRef(strings.TrimSpace(image))
+	if err != nil {
+		return nil, err
+	}
+	if ref.Pinned {
+		return nil, invalid("image %q names an image, not a generation: name the generation with generation", image)
+	}
+	if !imageAllowed(p.Spec, ref.Name) || !s.imgKind.exists(ref.Name) {
+		return nil, notFound("image", ref.Name)
+	}
+	curRef, err := validate.ParseImageRef(j.Spec.Image)
+	if err != nil || curRef.Name == ref.Name {
+		return nil, nil
+	}
+	to, err := s.imgKind.get(ref.Name)
+	if err != nil {
+		return nil, notFound("image", ref.Name)
+	}
+	if from, err := s.imgKind.get(curRef.Name); err == nil {
+		switch {
+		case from.Spec.OS != to.Spec.OS:
+			return nil, invalid("jail %s runs %s and image %s is %s: a jail moves between releases of one OS", j.Metadata.Name, from.Spec.OS, ref.Name, to.Spec.OS).
+				WithHint("create a new jail from the image instead")
+		case from.Spec.Arch != to.Spec.Arch:
+			return nil, invalid("jail %s runs on %s and image %s is %s", j.Metadata.Name, from.Spec.Arch, ref.Name, to.Spec.Arch).
+				WithHint("create a new jail from the image instead")
+		}
+	}
+	if si, ok := s.storageOfJail(key); ok {
+		return s.imageLocks(ctx, ref, si.Name), nil
+	}
+	return nil, nil
+}
+
+// moveBody is upgradeBody for a move to another image: the result is the same, and the move is written to the
+// update history of the jail as an OS update, from the generation of the old release to the one of the new.
+func (s *Service) moveBody(ctx context.Context, h *OpHandle, project, name, key string, up api.JailUpgrade, req lifecycle.UpgradeRequest) (any, error) {
+	out, _, _, err := s.moveRun(ctx, h, project, name, key, up, req)
+	return out, err
+}
+
+// moveRun runs a move and returns the result, what the plan was for and the id of the history record (empty for a
+// dry run and for a move that did nothing).
+func (s *Service) moveRun(ctx context.Context, h *OpHandle, project, name, key string, up api.JailUpgrade, req lifecycle.UpgradeRequest) (any, *lifecycle.UpgradeResult, string, error) {
+	started := s.now().UTC()
+	out, res, err := s.upgradeRun(ctx, h, project, name, key, up, req)
+	if up.DryRun || res == nil || !res.Changed {
+		return out, res, "", err
+	}
+	rec := api.UpdateRecord{ID: "upd-" + s.stamp() + "-" + randHex(3), Jail: name, Project: project, Kind: api.UpdateKindOS, Started: started,
+		Finished: s.now().UTC(), Snapshot: res.Snapshot, From: res.From, To: res.To, Result: api.UpdateOK}
+	if err != nil {
+		rec.Result, rec.Error, rec.RootRolledBack = api.UpdateRolledBack, err.Error(), true
+		rec.Note = "the jail was swapped back to " + res.From + "; application data was not touched"
+		if api.IsCode(err, api.CodeConflict) {
+			rec.Result, rec.RootRolledBack = api.UpdateFailed, false
+			rec.Note = "the /etc merge needs a human; the jail stays on " + res.From
+		}
+	}
+	s.appendHistory(rec)
+	if rec.Result == api.UpdateOK {
+		s.emitIn(ctx, project, "update.applied", "/api/v1/jails/"+name+"/updates")
+	} else {
+		s.emitIn(ctx, project, "update.failed", "/api/v1/jails/"+name+"/updates")
+	}
+	return out, res, rec.ID, err
 }
 
 // upgradeBody plans, journals and runs a root swap of a thin jail. It is the
 // body of the upgrade operation and of the OS update of the update pipeline;
 // the caller holds the jail and anchor locks.
 func (s *Service) upgradeBody(ctx context.Context, h *OpHandle, project, name, key string, up api.JailUpgrade, req lifecycle.UpgradeRequest) (any, error) {
+	v, _, err := s.upgradeRun(ctx, h, project, name, key, up, req)
+	return v, err
+}
+
+// upgradeRun is upgradeBody that also returns what the plan was for, also when the run fails.
+func (s *Service) upgradeRun(ctx context.Context, h *OpHandle, project, name, key string, up api.JailUpgrade, req lifecycle.UpgradeRequest) (any, *lifecycle.UpgradeResult, error) {
 	pl, res, err := s.life.PlanUpgrade(ctx, key, req)
 	if err != nil {
-		return nil, err
+		return nil, res, err
 	}
 	j, _ := s.getByKey(ctx, key)
 	if pl == nil || up.DryRun {
-		ar := ActionResult{Jail: j, Warnings: res.Warnings, DryRun: up.DryRun}
+		ar := ActionResult{Jail: j, Warnings: res.Warnings, DryRun: up.DryRun, Upgrade: upgradeInfo(res)}
 		if pl != nil {
 			ar.Plan = pl.Describe()
 		}
-		return ar, nil
+		return ar, res, nil
 	}
 	st := res.State
 	if err := h.Bind("upgrade/"+key, &opRequest{Kind: "upgrade", Jail: key, Stamp: req.Stamp, Upgrade: &req, State: &st}); err != nil {
-		return nil, err
+		return nil, res, err
 	}
 	if err := s.life.Executor.Run(ctx, "upgrade/"+key, pl); err != nil {
-		return nil, err
+		return nil, res, err
 	}
 	s.life.FinishSwitch(ctx, key, res)
 	if err := s.refreshJail(ctx, key); err != nil {
@@ -1142,20 +1263,62 @@ func (s *Service) upgradeBody(ctx context.Context, h *OpHandle, project, name, k
 	s.emitIn(ctx, project, "jail-upgraded", "/api/v1/jails/"+name)
 	s.kick()
 	j, _ = s.getByKey(ctx, key)
-	return ActionResult{Jail: j, Plan: res.Plan, Warnings: res.Warnings}, nil
+	return ActionResult{Jail: j, Plan: res.Plan, Warnings: res.Warnings, Upgrade: upgradeInfo(res)}, res, nil
 }
 
-// CopyJail makes an independent copy (send and receive, never a clone) in the
-// same project and on the same storage.
-func (s *Service) CopyJail(ctx context.Context, src string, dst api.Jail) (api.Operation, error) {
+// ConvertJail changes the layout of a FreeBSD jail's root (thin to thick, or thick to thin on an image generation). The
+// jail is stopped for it and runs again afterwards when it ran before; with DryRun the result is the plan.
+func (s *Service) ConvertJail(ctx context.Context, name string, cv api.JailConvert) (api.Operation, error) {
+	if err := s.requireHost("convert"); err != nil {
+		return api.Operation{}, err
+	}
+	p, key, err := s.jailRef(ctx, name)
+	if err != nil {
+		return api.Operation{}, err
+	}
+	if _, err := s.getByKey(ctx, key); err != nil {
+		return api.Operation{}, err
+	}
+	req := lifecycle.ConvertRequest{JailConvert: cv, Stamp: s.stamp()}
+	return s.Submit(ctx, OpSpec{
+		Description: "Convert jail " + name + " to " + string(cv.Layout), Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
+		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
+		Run: func(ctx context.Context, h *OpHandle) (any, error) {
+			pl, res, err := s.life.PlanConvert(ctx, key, req)
+			if err != nil {
+				return nil, err
+			}
+			if pl == nil || cv.DryRun {
+				return res.JailConvertResult, nil
+			}
+			st := res.State
+			if err := h.Bind("convert/"+key, &opRequest{Kind: "convert", Jail: key, Stamp: req.Stamp, Convert: &req, ConvertState: &st}); err != nil {
+				return nil, err
+			}
+			if err := s.life.Executor.Run(ctx, "convert/"+key, pl); err != nil {
+				return nil, err
+			}
+			s.life.FinishConvert(ctx, key, res)
+			if err := s.refreshJail(ctx, key); err != nil {
+				s.log.Warn("refresh after convert", "jail", key, "err", err)
+			}
+			s.emitIn(ctx, p.Meta.Name, "jail-converted", "/api/v1/jails/"+name)
+			s.kick()
+			return res.JailConvertResult, nil
+		},
+	})
+}
+
+// CopyJail makes an independent copy with the data of the source (send and receive, never a clone) in the same
+// project and on the same storage. The source may be running: the copy is made from one atomic snapshot of its
+// datasets, or from req.Snapshot, a snapshot of the source that exists.
+func (s *Service) CopyJail(ctx context.Context, src string, req api.JailCopy) (api.Operation, error) {
+	dst := api.Jail{Metadata: api.ObjectMeta{Name: req.Name, Labels: req.Labels}}
 	if err := s.requireHost("copy"); err != nil {
 		return api.Operation{}, err
 	}
 	p, srcKey, err := s.jailRef(ctx, src)
 	if err != nil {
-		return api.Operation{}, err
-	}
-	if err := bodyProject(p.Meta.Name, dst.Metadata.Project); err != nil {
 		return api.Operation{}, err
 	}
 	if err := api.ValidLabels(dst.Metadata.Labels); err != nil {
@@ -1183,6 +1346,7 @@ func (s *Service) CopyJail(ctx context.Context, src string, dst api.Jail) (api.O
 	// A copy attaches no volume: a volume belongs to the jails it is attached to, and two jails writing one by
 	// accident is not what a copy is for.
 	cspec.Volumes = nil
+	cspec.Expose = nil
 	cspec.Network = append([]api.NetworkAttach(nil), cspec.Network...)
 	for i := range cspec.Network {
 		if cspec.Network[i].IPv4 != "none" && cspec.Network[i].IPv4 != "" {
@@ -1221,8 +1385,8 @@ func (s *Service) CopyJail(ctx context.Context, src string, dst api.Jail) (api.O
 					s.unplace(key)
 				}
 			}()
-			_ = h.Bind("copy/"+key, &opRequest{Kind: "copy", Jail: key, Stamp: stamp, Copy: &copyRequest{Src: srcKey, Dst: key, UUID: newID}})
-			if _, err := s.life.CopyJail(ctx, srcKey, key, newID, stamp, false); err != nil {
+			_ = h.Bind("copy/"+key, &opRequest{Kind: "copy", Jail: key, Stamp: stamp, Copy: &copyRequest{Src: srcKey, Dst: key, UUID: newID, Snapshot: req.Snapshot}})
+			if _, err := s.life.CopyJailFrom(ctx, srcKey, key, newID, stamp, req.Snapshot, false); err != nil {
 				return nil, err
 			}
 			if err := s.refreshJail(ctx, key); err != nil {

@@ -14,12 +14,16 @@ register of what is settled and what is open.
 | [networking-ipv6.md](networking-ipv6.md) | Networks, routed and switched IPv6, the NDP proxy, the PF isolation |
 | [wireguard.md](wireguard.md) | WireGuard tunnels: a server, peers enrolled with one command and a join token, clients, where the keys live |
 | [labels.md](labels.md) | Labels on jails: the rules, what selects by them, the command line and the console's chips, filter and editors |
+| [export-import.md](export-import.md) | Moving a jail as a file: export, import, what is in the file, volumes and encrypted data |
 | [storage.md](storage.md) | Storages on big pools, volumes, host directories, quotas, what is and is not backed up |
 | [backup-restore.md](backup-restore.md) | The backup node, the key and its escrow, policies, verification, restoring |
 | [upgrade.md](upgrade.md) | Upgrading JailOps, upgrading and rolling back jails, managed updates |
+| [supported-versions.md](supported-versions.md) | Which FreeBSD releases JailOps supports, what supported means, and how hosts and jails move to a new release |
+| [upgrade-guarantee.md](upgrade-guarantee.md) | What an upgrade keeps, how stored state is converted, how the guarantee is tested, and what a release that changes a stored shape does |
 | [roadmap.md](roadmap.md) | What is planned for 0.7.0 and later, in order |
 | [operations.md](operations.md) | Runbooks (lost admin access, a stolen credential, a compromised daemon, a lost backup key, a new host, a firewall lock-out, going back one version), recovery objectives, and what to monitor (`/readyz`, doctor) |
 | [troubleshooting.md](troubleshooting.md) | `jailops doctor` checks by id, `jailops explain` codes, common failures |
+| [testing-on-freebsd.md](testing-on-freebsd.md) | Running the end-to-end and PF scripts on a VM of your own, one run at a time with the VM lock |
 | [linux-jails.md](linux-jails.md) | Alpine and Debian jails under the Linuxulator: limits and prerequisites |
 | [fleet-sync.md](fleet-sync.md) | A git repository of YAML across hosts, what it can declare, secrets with age and SOPS, rollouts |
 | [shell.md](shell.md) | The shell of a jail: bash and its coloured prompt, the files, overriding and removing them, existing jails, the host's prompt |
@@ -30,6 +34,7 @@ register of what is settled and what is open.
 | [api.md](api.md) | The API for programs: the SDK, authentication, and where the protocol is written down |
 | [../examples/README.md](../examples/README.md) | Runnable fleets: IPv6, a web stack with backups, a big pool, two hosts, provisioning |
 | [ci-supply-chain.md](ci-supply-chain.md) | For maintainers: the third-party actions the workflows run, their rights, and how to pin them to commits |
+| [release-engineering.md](release-engineering.md) | For maintainers: what to do when FreeBSD publishes a snapshot, a beta or a release, and how packages, images, CI and the package site fit together |
 | [design.md](design.md) | The contract: principles, layout, networking, API, backup, fleets, and the verification log |
 | [../sdk/PROTOCOL.md](../sdk/PROTOCOL.md) | The wire protocol the SDK, the fake server and the daemon implement |
 

@@ -107,3 +107,10 @@ func (s *Service) ReportImageAliases(ctx context.Context, refs []state.MigratedI
 func (s *Service) ImageDataset(image string) string {
 	return s.imageManagers()[0].Layout.ImageDS(image)
 }
+
+// SetTopCallTimeout shortens the time one reading of `jailops top` may take and returns what it was.
+func SetTopCallTimeout(d time.Duration) time.Duration {
+	old := topCallTimeout
+	topCallTimeout = d
+	return old
+}

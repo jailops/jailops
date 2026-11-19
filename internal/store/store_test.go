@@ -581,3 +581,79 @@ func TestReaderCannotWrite(t *testing.T) {
 		t.Fatal("read pool accepted a write")
 	}
 }
+
+// A database of an older schema is copied before its migrations run: migrations only go forward, so the copy is the way
+// back to the older binary. The copy is made once per target schema.
+func TestMigrationCopiesTheDatabaseBeforeItRuns(t *testing.T) {
+	ctx := context.Background()
+	ms, err := loadMigrations()
+	if err != nil || len(ms) < 2 {
+		t.Fatalf("migrations: %v %d", err, len(ms))
+	}
+	path := filepath.Join(t.TempDir(), "jailops.db")
+	raw, err := sql.Open("sqlite", "file:"+filepath.ToSlash(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range ms[:len(ms)-1] {
+		if _, err := raw.Exec(m.sql); err != nil {
+			t.Fatalf("%s: %v", m.name, err)
+		}
+	}
+	if _, err := raw.Exec(fmt.Sprintf("PRAGMA user_version = %d", len(ms)-1)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`INSERT INTO users (id, name, password_hash, permission, created_at, updated_at) VALUES ('u1', 'admin', 'x', 'admin', 1, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	db, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := db.Version(ctx); v != len(ms) {
+		t.Fatalf("schema version %d, want %d", v, len(ms))
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	keep := fmt.Sprintf("%s.before-schema-%d", path, len(ms))
+	v, problems, err := OpenReadOnlyCheck(ctx, keep)
+	if err != nil || len(problems) != 0 || v != len(ms)-1 {
+		t.Fatalf("the copy: schema %d, problems %v, err %v (want schema %d)", v, problems, err, len(ms)-1)
+	}
+	ro, err := sql.Open("sqlite", "file:"+filepath.ToSlash(keep)+"?mode=ro")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := ro.QueryRow(`SELECT count(*) FROM users WHERE name = 'admin'`).Scan(&n); err != nil || n != 1 {
+		t.Errorf("the user is not in the copy: %d %v", n, err)
+	}
+	ro.Close()
+	st1, _ := os.Stat(keep)
+
+	// a database of the current schema is not copied again, and the copy is left alone
+	db2, err := Open(path, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db2.Close()
+	st2, _ := os.Stat(keep)
+	if !st2.ModTime().Equal(st1.ModTime()) {
+		t.Error("the copy was rewritten")
+	}
+	// a new database has nothing to copy
+	fresh := filepath.Join(t.TempDir(), "fresh.db")
+	db3, err := Open(fresh, Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	db3.Close()
+	if _, err := os.Stat(fmt.Sprintf("%s.before-schema-%d", fresh, len(ms))); err == nil {
+		t.Error("a new database was copied")
+	}
+}

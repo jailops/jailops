@@ -17,6 +17,8 @@
         "doctor",
         "tokens",
         "jails",
+        "jail-imports",
+        "top",
         "volumes",
         "images",
         "networks",

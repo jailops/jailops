@@ -1,0 +1,102 @@
+name: Upgrade e2e
+
+# The upgrade guarantee of docs/upgrade-guarantee.md on a real machine, every night and on demand: the newest released packages are
+# installed from pkg.jailops.net on a FreeBSD 15.1 VM, a small fleet is made with their command line, and the packages of this tree
+# replace them with pkg (scripts/ci-freebsd-upgrade.sh): the jails still run, their data, addresses, firewall and volume are as they
+# were, doctor has no new failure, and a jail restarts. When a mirror does not answer in four tries the script ends with exit status
+# 75 and the line SKIPPED, and this workflow reports a notice and stays green (a mirror outage is not a verdict on the code). Any
+# other failure is a red run in the Actions tab. It is not part of `CI ok`, runs on no pull request, and opens no issue.
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upgrade-e2e
+  cancel-in-progress: true
+
+jobs:
+  upgrade:
+    name: Upgrade in place (FreeBSD 15.1 VM)
+    runs-on: ubuntu-latest
+    # a VM that hangs ends at fifty minutes
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # the binaries embed the consoles: this job builds them itself (it does not depend on the jobs of CI)
+      - name: Build both consoles
+        run: |
+          cd web
+          npm ci
+          npm run build:all
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Fetch the Go modules
+        uses: ./.github/actions/go-modules
+      - name: Build the binaries for the VM
+        env:
+          CGO_ENABLED: "0"
+          GOOS: freebsd
+          GOARCH: amd64
+        run: |
+          mkdir -p vm-bin
+          for b in jailops jailopsd jailops-priv jailops-sync jailops-backupd; do
+            go build -trimpath -ldflags="-s -w -X main.version=$(tr -d '[:space:]' < version.txt)" -o vm-bin/$b-freebsd-amd64 ./cmd/$b
+          done
+      - name: KVM must be there (without it QEMU falls back to software emulation, which is far too slow)
+        run: |
+          test -e /dev/kvm || { echo "::error::no /dev/kvm on this runner: the VM would run on TCG"; exit 1; }
+          nproc; ls -l /dev/kvm
+      # the tag is the one ci.yml uses; docs/ci-supply-chain.md says how to pin it to a commit
+      - uses: vmactions/freebsd-vm@v1
+        with:
+          cache-after-prepare: true
+          release: "15.1"
+          usesh: true
+          sync: rsync
+          # curl is what the script checks the console with and nothing else is needed from the mirror: the image has what the
+          # install steps need (fetch and sha256 are the base system's), and what it lacks is read from the mirror three times
+          prepare: |
+            set -u
+            have() { command -v "$1" >/dev/null; }
+            want=""
+            for p in curl; do have "$p" || want="$want $p"; done
+            if [ -z "$want" ]; then echo "the image has curl: nothing to install"; exit 0; fi
+            mkdir -p /usr/local/etc/pkg/repos
+            printf '%s\n' 'IP_VERSION = 4;' 'FETCH_TIMEOUT = 30;' 'FETCH_RETRY = 3;' > /usr/local/etc/pkg.conf
+            printf '%s\n' 'FreeBSD-ports-kmods: { enabled: no }' 'FreeBSD-base: { enabled: no }' > /usr/local/etc/pkg/repos/FreeBSD.conf
+            export ASSUME_ALWAYS_YES=yes
+            n=0; ok=no
+            while [ "$n" -lt 3 ]; do
+              n=$((n + 1))
+              # shellcheck disable=SC2086
+              if timeout 120 pkg install -y -r FreeBSD-ports $want; then ok=yes; break; fi
+              echo "pkg install of$want failed (attempt $n of 3)"
+              sleep $((n * 15))
+              timeout 120 pkg update -f -r FreeBSD-ports || true
+            done
+            [ "$ok" = yes ] || { echo "the package mirror (pkg.FreeBSD.org, FreeBSD-ports, quarterly) did not give$want in three attempts"; exit 1; }
+          run: |
+            set -u
+            kldload pf 2>/dev/null || true   # pfctl(8) of FreeBSD 15 talks to the kernel through netlink: the module must be loaded
+            rc=0
+            JAILOPS_BIN_DIR="$PWD/vm-bin" sh scripts/ci-freebsd-upgrade.sh || rc=$?
+            # 75 is "a mirror did not answer": nothing was tested tonight, and that is no failure of the code
+            if [ "$rc" -eq 75 ]; then
+              echo "::notice title=Upgrade e2e skipped::a mirror did not answer in four tries: the upgrade test did not run"
+              exit 0
+            fi
+            exit "$rc"

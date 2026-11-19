@@ -544,7 +544,7 @@ func TestExtendedRulesRunThroughTheRunner(t *testing.T) {
 }
 
 func TestCommandTableIsComplete(t *testing.T) {
-	want := []string{"sysctl", "kldstat", "kldload", "pfctl", "fetch", "tar", "chmod", "mount", "umount", "jail", "devfs", "jexec", "ifconfig", "route", "uname", "rctl", "dnctl", "pkg", "etcupdate", "pwd_mkdb", "freebsd-version", "debootstrap"}
+	want := []string{"sysctl", "kldstat", "kldload", "pfctl", "fetch", "tar", "chmod", "mount", "umount", "jail", "devfs", "jexec", "ifconfig", "route", "uname", "rctl", "dnctl", "pkg", "etcupdate", "pwd_mkdb", "freebsd-version", "netstat", "debootstrap"}
 	have := map[string]bool{}
 	for _, r := range CommandRules {
 		have[r.Name] = true

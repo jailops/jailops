@@ -2,6 +2,7 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"path"
@@ -34,6 +35,14 @@ type SwitchState struct {
 	WasRunning bool   `json:"was_running"`
 	// Bundle is the bundle.json content before the switch, restored by undo.
 	Bundle []byte `json:"bundle,omitempty"`
+	// FromImage is the image the jail used before a move to another image, and Spec the spec.json content before
+	// it: the undo of a move puts both back. Empty for a switch inside one image.
+	FromImage string `json:"from_image,omitempty"`
+	Spec      []byte `json:"spec,omitempty"`
+	// ToImage and ToRef are the image the switch goes to and the reference spec.image has after it: a rebuilt
+	// rollback plan needs them because the jail's own properties have changed by then.
+	ToImage string `json:"to_image,omitempty"`
+	ToRef   string `json:"to_ref,omitempty"`
 }
 
 // UpgradeResult is the outcome of an upgrade (or a root rollback).
@@ -49,6 +58,12 @@ type UpgradeResult struct {
 	Stamp string
 	// State must be persisted with the journal record, see SwitchState.
 	State SwitchState
+	// Rebase is true when the jail moves to a generation of another image; FromRelease and ToRelease are the
+	// releases of the two generations ("15.1-RELEASE"), empty when the generation does not record one.
+	Rebase                 bool
+	FromRelease, ToRelease string
+	// Kept names what the move keeps, for the plan a dry run shows.
+	Kept []string
 }
 
 var genArgRe = regexp.MustCompile(`^g[0-9]+$`)
@@ -116,6 +131,12 @@ func (s *Service) PlanUpgrade(ctx context.Context, name string, req UpgradeReque
 	if err != nil {
 		return nil, res, err
 	}
+	if rs := req.Resume; rs != nil && rs.FromImage != "" {
+		// the rebuilt plan of an interrupted move to another image starts from the image the jail had
+		cp := *st
+		cp.Image = rs.FromImage
+		st = &cp
+	}
 	// the move ends with a start and a health check: a locked jail cannot have either (a rebuilt plan only rolls back)
 	if req.Resume == nil {
 		if err := s.refuseLocked(ctx, st); err != nil {
@@ -126,14 +147,37 @@ func (s *Service) PlanUpgrade(ctx context.Context, name string, req UpgradeReque
 	if err != nil {
 		return nil, res, fmt.Errorf("read spec.json: %w", err)
 	}
+	toImage, err := s.moveTarget(st, req)
+	if err != nil {
+		return nil, res, err
+	}
 	if st.Layout != api.LayoutThin {
+		if toImage != "" {
+			return nil, res, api.Errorf(api.CodeUnsupported, "a %s jail does not move to another image: it is updated through managed updates", st.Layout)
+		}
 		return nil, res, api.Errorf(api.CodeUnsupported, "rebase upgrades apply to thin jails; %s jails update in place, which is not implemented", st.Layout)
 	}
 	if rec.Spec.Update.Strategy == api.UpdateInPlace {
 		return nil, res, api.Errorf(api.CodeUnsupported, "update strategy inplace is not implemented for thin jails")
 	}
 	ref := rec.Spec.Image
-	if g := req.Generation; g != "" {
+	g := req.Generation
+	switch {
+	case toImage != "":
+		switch {
+		case g == "":
+			ref = toImage
+		case strings.ContainsAny(g, "#@"):
+			if img, _, _ := strings.Cut(g, "#"); img != toImage {
+				return nil, res, api.Errorf(api.CodeInvalid, "generation %q is not of image %s", g, toImage)
+			}
+			ref = g
+		case genArgRe.MatchString(g):
+			ref = toImage + "#" + g
+		default:
+			return nil, res, api.Errorf(api.CodeInvalid, "bad generation %q", g)
+		}
+	case g != "":
 		switch {
 		case strings.ContainsAny(g, "#@"):
 			ref = g
@@ -147,28 +191,100 @@ func (s *Service) PlanUpgrade(ctx context.Context, name string, req UpgradeReque
 	if err != nil {
 		return nil, res, err
 	}
-	return s.planSwitch(ctx, st, rec, target, "upgrade", req.Stamp, req.Resume, res)
+	if toImage != "" && req.Resume == nil {
+		if err := s.checkMove(ctx, st, target); err != nil {
+			return nil, res, err
+		}
+	}
+	return s.planSwitch(ctx, st, rec, target, "upgrade", req.Stamp, req.Resume, res, toImage)
+}
+
+// moveTarget is the image a request moves the jail to, or "" when the jail stays on its image (no image named, or
+// the jail's own).
+func (s *Service) moveTarget(st *jailState, req UpgradeRequest) (string, error) {
+	img := strings.TrimSpace(req.Image)
+	switch {
+	case img == "" || img == st.Image:
+		return "", nil
+	case strings.ContainsAny(img, "#@"):
+		return "", api.Errorf(api.CodeInvalid, "image %q names an image, not a generation: use generation for gN", img)
+	}
+	return img, nil
+}
+
+// checkMove refuses a move to another image that is not a move to the same release or a newer one of the same OS:
+// a jail does not change OS and does not go back to an older release (a new jail from the older image does that).
+// The host kernel guard is the preflight's.
+func (s *Service) checkMove(ctx context.Context, st *jailState, target api.ImageGeneration) error {
+	cur, err := s.Images.Resolve(ctx, s.Cfg.at(st.Name).st.Root, genName(st.Image, st.Gen))
+	if err != nil {
+		return fmt.Errorf("the current generation %s: %w", genName(st.Image, st.Gen), err)
+	}
+	curOS, tgtOS := s.prop(ctx, cur.Dataset, PropOS), s.prop(ctx, target.Dataset, PropOS)
+	toImage, _, _ := strings.Cut(target.Name, "#")
+	switch {
+	case curOS != tgtOS:
+		return api.Errorf(api.CodeInvalid, "jail %s runs %s and image %s is %s: a jail moves between releases of one OS", st.Name, dash(curOS), toImage, dash(tgtOS)).
+			WithHint("create a new jail from the image instead")
+	case curOS != "" && curOS != string(api.OSFreeBSD):
+		return api.Errorf(api.CodeUnsupported, "only FreeBSD jails move to another release: a %s jail is replaced by a new jail", curOS)
+	}
+	curRel, tgtRel := s.prop(ctx, cur.Dataset, PropOSRelease), s.prop(ctx, target.Dataset, PropOSRelease)
+	if curRel != "" && tgtRel != "" {
+		older, err := releaseNewer(curRel, tgtRel)
+		if err != nil {
+			return api.Errorf(api.CodeInternal, "compare releases: %v", err)
+		}
+		if older {
+			return api.Errorf(api.CodeInvalid, "image %s is %s and jail %s runs %s: a jail does not move to an older release", toImage, tgtRel, st.Name, curRel).
+				WithHint("create a new jail from the older image instead")
+		}
+	}
+	return nil
+}
+
+// plainName is the name of a jail without its project.
+func plainName(key string) string {
+	if _, n := splitKey(key); n != "" {
+		return n
+	}
+	return key
+}
+
+func dash(v string) string {
+	if v == "" {
+		return "-"
+	}
+	return v
 }
 
 // planSwitch builds the plan that moves a thin jail's root to target:
 // preflight, snapshot, stop, clone, merge, swap, start, health check. mode is
 // "upgrade" or "rollback" (the same plan walks back to an older generation).
-func (s *Service) planSwitch(ctx context.Context, st *jailState, rec Record, target api.ImageGeneration, mode, stampIn string, resume *SwitchState, res *UpgradeResult) (*plan.Plan, *UpgradeResult, error) {
+// toRef is set when target belongs to another image than the jail's (a move to another
+// release, or the rollback of one): the reference spec.image has afterwards. The jail's
+// image, its spec.json and its bundle change with the root, and the undo puts them back.
+func (s *Service) planSwitch(ctx context.Context, st *jailState, rec Record, target api.ImageGeneration, mode, stampIn string, resume *SwitchState, res *UpgradeResult, toRef string) (*plan.Plan, *UpgradeResult, error) {
 	name := st.Name
 	if resume != nil {
 		cp := *st
 		cp.Gen, cp.Manifest = resume.FromGen, resume.Manifest
+		if resume.FromImage != "" {
+			cp.Image = resume.FromImage
+		}
 		st = &cp
 	}
 	res.From = genName(st.Image, st.Gen)
 	res.To = target.Name
-	if img, _, _ := strings.Cut(target.Name, "#"); img != st.Image {
+	toImage, _, _ := strings.Cut(target.Name, "#")
+	rebase := toImage != st.Image
+	if rebase && toRef == "" {
 		return nil, res, api.Errorf(api.CodeInvalid, "jail %s uses image %s; it cannot switch to %s", name, st.Image, target.Name)
 	}
-	if resume == nil && target.Number == st.Gen {
+	if resume == nil && target.Number == st.Gen && !rebase {
 		return nil, res, nil
 	}
-	res.Changed = true
+	res.Changed, res.Rebase = true, rebase
 	if resume == nil {
 		if err := s.preflight(ctx, st, target); err != nil {
 			return nil, res, err
@@ -190,6 +306,29 @@ func (s *Service) planSwitch(ctx context.Context, st *jailState, rec Record, tar
 		}
 	}
 	res.State = SwitchState{FromGen: st.Gen, Manifest: st.Manifest, WasRunning: wasRunning}
+	// the record a move to another image writes, and the one it replaces
+	newRec := rec
+	var oldSpec []byte
+	if rebase {
+		res.State.FromImage = st.Image
+		if resume != nil && len(resume.Spec) > 0 {
+			oldSpec = resume.Spec
+			// the interrupted run may have written the new spec.json already: the old record is the state's
+			var orec Record
+			if err := json.Unmarshal(upgradeSpec(oldSpec), &orec); err == nil {
+				rec = orec
+			}
+		} else if b, err := s.Files.ReadFile(ctx, s.Cfg.at(name).specPath()); err == nil {
+			oldSpec = b
+		} else {
+			oldSpec = marshal(rec)
+		}
+		res.State.Spec = oldSpec
+		res.State.ToImage, res.State.ToRef = toImage, toRef
+		newRec = rec
+		newRec.Spec.Image = toRef
+		newRec.Metadata.Generation++
+	}
 	pl := plan.New(mode + "-jail " + name)
 
 	// 3. one atomic snapshot over every dataset of the jail
@@ -260,6 +399,16 @@ func (s *Service) planSwitch(ctx context.Context, st *jailState, rec Record, tar
 	if gerr != nil {
 		return nil, res, fmt.Errorf("the current generation %s: %w", genName(st.Image, st.Gen), gerr)
 	}
+	res.FromRelease, res.ToRelease = s.prop(ctx, oldGen.Dataset, PropOSRelease), s.prop(ctx, target.Dataset, PropOSRelease)
+	for _, d := range st.Persist {
+		res.Kept = append(res.Kept, path.Base(d.DS))
+	}
+	if a, _, aerr := parseRel(res.FromRelease); aerr == nil && rebase {
+		if b, _, berr := parseRel(res.ToRelease); berr == nil && a != b {
+			res.Warnings = append(res.Warnings, fmt.Sprintf("a new major release (%s to %s): the packages installed in the jail were built for the old one; reinstall them with 'jailops update apply %s --packages' and 'pkg upgrade -f' inside the jail",
+				res.FromRelease, res.ToRelease, plainName(name)))
+		}
+	}
 	work := s.Cfg.at(name).containerMP() + "/.merge-" + stamp
 	mergeIn := MergeInput{DestRoot: rootMP, NewRoot: newMP, Work: work}
 	pl.Add(plan.Step{Name: "locate-baseline", Describe: "mount " + oldGen.Dataset + " if it is not (the baseline of the /etc merge)",
@@ -321,7 +470,10 @@ func (s *Service) planSwitch(ctx context.Context, st *jailState, rec Record, tar
 		oldBundle = s.bundleBytes(rec, rec.Spec.Image, st.Image, st.Gen, st.Manifest, "", s.Cfg.now())
 	}
 	res.State.Bundle = oldBundle
-	newBundle := s.bundleBytes(rec, rec.Spec.Image, st.Image, target.Number, target.Manifest, target.Dataset, s.Cfg.now())
+	if rebase {
+		pl.Add(s.imageSteps(st, toImage, oldSpec, marshal(newRec))...)
+	}
+	newBundle := s.bundleBytes(newRec, newRec.Spec.Image, toImage, target.Number, target.Manifest, target.Dataset, s.Cfg.now())
 	pl.Add(s.bundleStep(name, oldBundle, newBundle))
 
 	// 8. start and health check; failure swaps back (the undo chain)
@@ -329,13 +481,22 @@ func (s *Service) planSwitch(ctx context.Context, st *jailState, rec Record, tar
 	pl.Add(plan.Step{Name: "start", Describe: "mount, render and jail -c " + name + " on " + target.Name,
 		Do:   func(ctx context.Context) error { return s.doStart(ctx, name) },
 		Undo: func(ctx context.Context) error { return s.doStop(ctx, name) }, UndoOnFail: true})
+	pl.Add(s.healthStep(name, rec, "on "+target.Name))
+
+	// 9. root.old is destroyed after the retention period (CleanupRootOld)
+	pl.Add(s.scheduleCleanupStep(name))
+	return pl, res, nil
+}
+
+// healthStep requires the jail to run and its health check command to succeed; on describes where, for the errors.
+func (s *Service) healthStep(name string, rec Record, on string) plan.Step {
 	hc := strings.Fields(rec.Spec.Update.Healthcheck)
-	pl.Add(plan.Step{Name: "health-check", Describe: "jexec " + name + " " + strings.Join(hc, " ") + " (and require the jail to run)",
+	return plan.Step{Name: "health-check", Describe: "jexec " + name + " " + strings.Join(hc, " ") + " (and require the jail to run)",
 		Do: func(ctx context.Context) error {
 			if up, err := s.Jails.Running(ctx, name); err != nil {
 				return err
 			} else if !up {
-				return fmt.Errorf("jail %s is not running on %s", name, target.Name)
+				return fmt.Errorf("jail %s is not running %s", name, on)
 			}
 			if len(hc) == 0 {
 				return nil
@@ -345,20 +506,22 @@ func (s *Service) planSwitch(ctx context.Context, st *jailState, rec Record, tar
 				return fmt.Errorf("health check %q failed: %w: %s", strings.Join(hc, " "), err, strings.TrimSpace(string(out)))
 			}
 			return nil
-		}})
+		}}
+}
 
-	// 9. root.old is destroyed after the retention period (CleanupRootOld)
+// scheduleCleanupStep marks root.old for destruction after the retention period.
+func (s *Service) scheduleCleanupStep(name string) plan.Step {
+	z := s.ZFS
 	oldDS := s.Cfg.at(name).rootOldDS()
 	due := s.Cfg.now().Add(s.Cfg.RootOldRetention).UTC().Format(time.RFC3339)
-	pl.Add(plan.Step{Name: "schedule-cleanup", Describe: fmt.Sprintf("zfs set %s=%s %s", PropCleanupAfter, due, oldDS),
+	return plan.Step{Name: "schedule-cleanup", Describe: fmt.Sprintf("zfs set %s=%s %s", PropCleanupAfter, due, oldDS),
 		Do: func(ctx context.Context) error { return z.Set(ctx, oldDS, map[string]string{PropCleanupAfter: due}) },
 		Undo: func(ctx context.Context) error {
 			if ok, _ := z.Exists(ctx, oldDS); !ok {
 				return nil
 			}
 			return z.Inherit(ctx, oldDS, PropCleanupAfter)
-		}})
-	return pl, res, nil
+		}}
 }
 
 func (s *Service) destroySnaps(snaps []string) func(context.Context) error {
@@ -379,9 +542,11 @@ func (s *Service) destroySnaps(snaps []string) func(context.Context) error {
 // cloneNewRoot is "zfs clone <gen>@ro <jail>/root.new".
 func (s *Service) cloneNewRoot(st *jailState, rec Record, target api.ImageGeneration) plan.Step {
 	newDS := s.Cfg.at(st.Name).rootNewDS()
+	toImage, _, _ := strings.Cut(target.Name, "#")
 	props := map[string]string{PropManaged: "on", PropID: st.ID, PropKind: KindRoot, PropName: st.Name,
 		"mountpoint": s.Cfg.at(st.Name).rootNewMP(), "canmount": "noauto", PropGen: strconv.Itoa(target.Number),
-		PropImage: st.Image, PropManifest: target.Manifest, PropPrevGen: strconv.Itoa(st.Gen)}
+		PropImage: toImage, PropManifest: target.Manifest, PropPrevGen: strconv.Itoa(st.Gen),
+		PropPrevImage: st.Image, PropPrevRef: rec.Spec.Image}
 	snap := target.Dataset + "@" + roSnap
 	return plan.Step{Name: "clone-new-root", Describe: fmt.Sprintf("zfs clone %s %s", snap, newDS),
 		Do:   func(ctx context.Context) error { return s.ZFS.Clone(ctx, snap, newDS, props) },
@@ -443,6 +608,23 @@ func (s *Service) swapSteps(st *jailState) []plan.Step {
 				}
 				return z.Set(ctx, rootDS, map[string]string{"canmount": "noauto", "mountpoint": s.Cfg.at(name).rootNewMP()})
 			}, UndoOnFail: true},
+	}
+}
+
+// imageSteps records the move to another image: the container's image property and spec.json. Each undoes
+// itself, so a failure later in the plan puts the jail back on its image.
+func (s *Service) imageSteps(st *jailState, toImage string, oldSpec, newSpec []byte) []plan.Step {
+	z, name, from := s.ZFS, st.Name, st.Image
+	specPath := s.Cfg.at(name).specPath()
+	return []plan.Step{
+		{Name: "set-image", Describe: fmt.Sprintf("zfs set %s=%s %s", PropImage, toImage, st.Container),
+			Do: func(ctx context.Context) error {
+				return z.Set(ctx, st.Container, map[string]string{PropImage: toImage})
+			},
+			Undo: func(ctx context.Context) error { return z.Set(ctx, st.Container, map[string]string{PropImage: from}) }, UndoOnFail: true},
+		{Name: "write-spec", Describe: "write " + specPath + " atomically (image " + from + " to " + toImage + ")",
+			Do:   func(ctx context.Context) error { return s.Files.WriteAtomic(ctx, specPath, newSpec) },
+			Undo: func(ctx context.Context) error { return s.Files.WriteAtomic(ctx, specPath, oldSpec) }, UndoOnFail: true},
 	}
 }
 

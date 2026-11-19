@@ -6,12 +6,14 @@ import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
 import { can } from '@jailops/shared/composables/session'
 import { askLifecycle, askStopMany, lifecycleMany, isLocked, type Lifecycle } from '@/composables/jailActions'
-import { canEditLabels, canShell, goShell, shellPath } from '@/composables/shell'
+import { canEditLabels, canRunMany, canShell, goShell, shellPath } from '@/composables/shell'
 import { knownLabels, matchTerms, parseQuery, withLabel } from '@/lib/labels'
 import { loadFilter, saveFilter } from '@/lib/jailFilter'
 import JailFilter from '@/components/JailFilter.vue'
 import LabelChips from '@/components/LabelChips.vue'
 import BulkLabelDialog from '@/components/BulkLabelDialog.vue'
+import BulkUpgradeDialog from '@/components/BulkUpgradeDialog.vue'
+import RunCommandDialog from '@/components/RunCommandDialog.vue'
 import { session } from '@jailops/shared/composables/session'
 import { projectState } from '@/composables/project'
 import UnlockDialog from '@/components/UnlockDialog.vue'
@@ -19,6 +21,8 @@ import LockChip from '@/components/LockChip.vue'
 import { shortAddr } from '@jailops/shared/lib/format'
 import { patchLevel } from '@/lib/images'
 import JailCreateForm from '@/components/JailCreateForm.vue'
+import JailImportDialog from '@/components/JailImportDialog.vue'
+import { canImport } from '@/composables/xport'
 import { currentProject } from '@/composables/project'
 import StatePill from '@/components/StatePill.vue'
 import Icon from '@jailops/shared/components/Icon.vue'
@@ -30,9 +34,18 @@ const route = useRoute()
 const router = useRouter()
 const l = useLoad(() => api.jails.list())
 const creating = ref(false)
+const importing = ref(false)
 const lookups = useLoad(async () => ({
   images: await api.images.list().catch(() => []), storage: await api.storage.list().catch(() => []), networks: await api.networks.list().catch(() => []),
 }))
+function openImport(): void {
+  void lookups.reload()
+  importing.value = true
+}
+function imported(name: string): void {
+  void l.reload()
+  void router.push(`/jails/${encodeURIComponent(name)}`)
+}
 function openCreate(): void {
   void lookups.reload()
   creating.value = true
@@ -47,6 +60,7 @@ const sel = ref<Set<string>>(new Set())
 const filters: Array<PowerState | ''> = ['', 'running', 'stopped', 'starting', 'stopping', 'error', 'locked']
 const unlocking = ref('')
 const labelling = ref(false)
+const upgrading = ref(false)
 const scope = () => `${session.user}|${projectState.current}`
 
 if (!q.value && !state.value) {
@@ -102,6 +116,8 @@ const shown = computed(() =>
 const filtered = computed(() => !!(q.value.trim() || state.value))
 const shellOK = computed(() => canShell())
 const labelsOK = computed(() => canEditLabels())
+const runOK = computed(() => canRunMany())
+const running = ref(false)
 /** The generation without the image name the column already shows, with the FreeBSD patch level of its packages:
  *  freebsd-15-1 #g4 · p6. */
 const genShort = (image: string, gen: string) => (gen.startsWith(image.replace(/[#@].*$/, '') + '#') ? gen.slice(gen.indexOf('#')) : gen)
@@ -133,7 +149,7 @@ function one(n: string, a: Lifecycle, power: string): void {
 
 <template>
   <div>
-    <div class="page-head"><h1>{{ s.jails.title }}</h1><button class="btn btn-primary" type="button" data-test="new-jail" @click="openCreate"><Icon name="plus" />{{ s.jails.create }}</button></div>
+    <div class="page-head"><h1>{{ s.jails.title }}</h1><div class="row-actions"><button v-if="canImport()" class="btn" type="button" data-test="import-jail" @click="openImport"><Icon name="upload" />{{ s.xport.importOpen }}</button><button class="btn btn-primary" type="button" data-test="new-jail" @click="openCreate"><Icon name="plus" />{{ s.jails.create }}</button></div></div>
     <div class="row toolbar">
       <JailFilter v-model="q" :known="known" @commit="commit" />
       <div class="row state-filter" role="group" :aria-label="s.jails.state">
@@ -149,6 +165,8 @@ function one(n: string, a: Lifecycle, power: string): void {
       <div class="row-actions">
         <button class="btn btn-sm" type="button" @click="bulkStart"><Icon name="play" />{{ s.jails.startSel }}</button>
         <button class="btn btn-sm" type="button" data-test="bulk-stop" @click="bulkStop"><Icon name="square" />{{ s.jails.stopSel }}</button>
+        <button class="btn btn-sm" type="button" data-test="bulk-upgrade" @click="upgrading = true"><Icon name="arrowUp" />{{ s.jails.upgradeSel }}</button>
+        <button v-if="runOK" class="btn btn-sm" type="button" data-test="bulk-run" @click="running = true"><Icon name="terminal" />{{ s.jails.runSel }}</button>
         <button v-if="labelsOK" class="btn btn-sm" type="button" data-test="bulk-labels" @click="labelling = true"><Icon name="tag" />{{ s.labels.bulk }}</button>
       </div>
     </div>
@@ -207,8 +225,11 @@ function one(n: string, a: Lifecycle, power: string): void {
         </div>
       </div>
     </LoadState>
+    <BulkUpgradeDialog :open="upgrading" :jails="chosenJails" @close="upgrading = false" @done="l.reload" />
+    <RunCommandDialog :open="running" :jails="chosenJails" @close="running = false" />
     <BulkLabelDialog :open="labelling" :jails="chosenJails" :known="known" @close="labelling = false" @done="l.reload" />
     <UnlockDialog :open="!!unlocking" :volume="unlocking" @close="unlocking = ''" @done="l.reload" />
+    <JailImportDialog :open="importing" :networks="lookups.data.value?.networks ?? []" @close="importing = false" @done="imported" />
     <JailCreateForm :open="creating" :project="currentProject" :images="lookups.data.value?.images ?? []" :storage="lookups.data.value?.storage ?? []" :networks="lookups.data.value?.networks ?? []" @close="creating = false" @done="l.reload" />
   </div>
 </template>

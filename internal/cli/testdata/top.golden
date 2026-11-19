@@ -1,0 +1,173 @@
+$ jailops top --once
+jailops top - <time>   load 0.50 0.40 0.30   cpu 7.5% of 4   3 running jails
+memory 1.0G of 4.0G   zfs cache 256M   pool tank 10G of 100G (90G free)
+
+PROJECT  JAIL   CPU%       MEM        PROCS  DISK      NET IN  NET OUT  UPTIME
+main     web    137.0/200  388M/2.0G  23     256M/10G  2.0K/s  1.5M/s   2h3m
+main     db     2.5        1.0G       9      5.0G      100B/s  50B/s    3d0h
+shop     cache  ~0.0       ~12M       3      n/a       n/a     n/a      -
+
+racct is off: cpu and memory are approximate (from the process list); kern.racct.enable=1 in /boot/loader.conf and a reboot give exact numbers
+
+$ jailops top --once --sort mem
+jailops top - <time>   load 0.50 0.40 0.30   cpu 7.5% of 4   3 running jails
+memory 1.0G of 4.0G   zfs cache 256M   pool tank 10G of 100G (90G free)
+
+PROJECT  JAIL   CPU%       MEM        PROCS  DISK      NET IN  NET OUT  UPTIME
+main     db     2.5        1.0G       9      5.0G      100B/s  50B/s    3d0h
+main     web    137.0/200  388M/2.0G  23     256M/10G  2.0K/s  1.5M/s   2h3m
+shop     cache  ~0.0       ~12M       3      n/a       n/a     n/a      -
+
+racct is off: cpu and memory are approximate (from the process list); kern.racct.enable=1 in /boot/loader.conf and a reboot give exact numbers
+
+$ jailops top --once --sort name
+jailops top - <time>   load 0.50 0.40 0.30   cpu 7.5% of 4   3 running jails
+memory 1.0G of 4.0G   zfs cache 256M   pool tank 10G of 100G (90G free)
+
+PROJECT  JAIL   CPU%       MEM        PROCS  DISK      NET IN  NET OUT  UPTIME
+main     db     2.5        1.0G       9      5.0G      100B/s  50B/s    3d0h
+main     web    137.0/200  388M/2.0G  23     256M/10G  2.0K/s  1.5M/s   2h3m
+shop     cache  ~0.0       ~12M       3      n/a       n/a     n/a      -
+
+racct is off: cpu and memory are approximate (from the process list); kern.racct.enable=1 in /boot/loader.conf and a reboot give exact numbers
+
+$ jailops top --once --sort net
+jailops top - <time>   load 0.50 0.40 0.30   cpu 7.5% of 4   3 running jails
+memory 1.0G of 4.0G   zfs cache 256M   pool tank 10G of 100G (90G free)
+
+PROJECT  JAIL   CPU%       MEM        PROCS  DISK      NET IN  NET OUT  UPTIME
+main     web    137.0/200  388M/2.0G  23     256M/10G  2.0K/s  1.5M/s   2h3m
+main     db     2.5        1.0G       9      5.0G      100B/s  50B/s    3d0h
+shop     cache  ~0.0       ~12M       3      n/a       n/a     n/a      -
+
+racct is off: cpu and memory are approximate (from the process list); kern.racct.enable=1 in /boot/loader.conf and a reboot give exact numbers
+
+$ jailops top --once -o json
+{
+  "measured_at": "2026-03-01T09:00:00Z",
+  "interval_seconds": 2,
+  "host": {
+    "load_1": 0.5,
+    "load_5": 0.4,
+    "load_15": 0.3,
+    "cpus": 4,
+    "cpu_percent": 7.5,
+    "memory_total": 4294967296,
+    "memory_used": 1073741824,
+    "arc_bytes": 268435456,
+    "pool": "tank",
+    "pool_size": 107374182400,
+    "pool_allocated": 10737418240,
+    "pool_free": 96636764160,
+    "running_jails": 3
+  },
+  "jails": [
+    {
+      "project": "main",
+      "name": "web",
+      "uptime_seconds": 7380,
+      "cpu_percent": 137,
+      "cpu_limit_percent": 200,
+      "memory_bytes": 407048192,
+      "memory_limit_bytes": 2147483648,
+      "processes": 23,
+      "disk_bytes": 268435456,
+      "disk_quota_bytes": 10737418240,
+      "net_in_bytes_per_second": 2048,
+      "net_out_bytes_per_second": 1536000
+    },
+    {
+      "project": "main",
+      "name": "db",
+      "uptime_seconds": 259200,
+      "cpu_percent": 2.5,
+      "memory_bytes": 1073741824,
+      "processes": 9,
+      "disk_bytes": 5368709120,
+      "net_in_bytes_per_second": 100,
+      "net_out_bytes_per_second": 50
+    },
+    {
+      "project": "shop",
+      "name": "cache",
+      "cpu_percent": 0,
+      "memory_bytes": 12582912,
+      "processes": 3,
+      "approximate": true
+    }
+  ],
+  "notes": [
+    "racct is off: cpu and memory are approximate (from the process list); kern.racct.enable=1 in /boot/loader.conf and a reboot give exact numbers"
+  ]
+}
+
+$ jailops top --once -o yaml
+measured_at: "2026-03-01T09:00:00Z"
+interval_seconds: 2
+host:
+  load_1: 0.5
+  load_5: 0.4
+  load_15: 0.3
+  cpus: 4
+  cpu_percent: 7.5
+  memory_total: 4294967296
+  memory_used: 1073741824
+  arc_bytes: 268435456
+  pool: tank
+  pool_size: 107374182400
+  pool_allocated: 10737418240
+  pool_free: 96636764160
+  running_jails: 3
+jails:
+  - project: main
+    name: web
+    uptime_seconds: 7380
+    cpu_percent: 137
+    cpu_limit_percent: 200
+    memory_bytes: 407048192
+    memory_limit_bytes: 2147483648
+    processes: 23
+    disk_bytes: 268435456
+    disk_quota_bytes: 10737418240
+    net_in_bytes_per_second: 2048
+    net_out_bytes_per_second: 1536000
+  - project: main
+    name: db
+    uptime_seconds: 259200
+    cpu_percent: 2.5
+    memory_bytes: 1073741824
+    processes: 9
+    disk_bytes: 5368709120
+    net_in_bytes_per_second: 100
+    net_out_bytes_per_second: 50
+  - project: shop
+    name: cache
+    cpu_percent: 0
+    memory_bytes: 12582912
+    processes: 3
+    approximate: true
+notes:
+  - 'racct is off: cpu and memory are approximate (from the process list); kern.racct.enable=1 in /boot/loader.conf and a reboot give exact numbers'
+
+$ jailops top --once -o name
+web
+db
+cache
+
+$ jailops top --once -o csv
+PROJECT,JAIL,CPU%,MEM,PROCS,DISK,NET IN,NET OUT,UPTIME
+main,web,137.0/200,388M/2.0G,23,256M/10G,2.0K/s,1.5M/s,2h3m
+main,db,2.5,1.0G,9,5.0G,100B/s,50B/s,3d0h
+shop,cache,~0.0,~12M,3,n/a,n/a,n/a,-
+
+$ jailops top
+jailops top - <time>   load 0.50 0.40 0.30   cpu 7.5% of 4   3 running jails
+memory 1.0G of 4.0G   zfs cache 256M   pool tank 10G of 100G (90G free)
+
+PROJECT  JAIL   CPU%       MEM        PROCS  DISK      NET IN  NET OUT  UPTIME
+main     web    137.0/200  388M/2.0G  23     256M/10G  2.0K/s  1.5M/s   2h3m
+main     db     2.5        1.0G       9      5.0G      100B/s  50B/s    3d0h
+shop     cache  ~0.0       ~12M       3      n/a       n/a     n/a      -
+
+racct is off: cpu and memory are approximate (from the process list); kern.racct.enable=1 in /boot/loader.conf and a reboot give exact numbers
+

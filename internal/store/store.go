@@ -174,6 +174,16 @@ func (s *Store) migrate(ctx context.Context) error {
 		return api.Errorf(api.CodeVersionSkew, "database schema version %d is newer than this binary supports (%d)", cur, len(ms)).
 			WithHint("upgrade jailopsd; the database is not modified")
 	}
+	if cur > 0 && cur < len(ms) {
+		// Migrations only go forward, so a copy of the database as it is now is the way back: a downgrade of the
+		// binary after a migration needs the database of the old schema. It is made once per target schema.
+		keep := fmt.Sprintf("%s.before-schema-%d", s.path, len(ms))
+		if _, err := os.Stat(keep); errors.Is(err, os.ErrNotExist) {
+			if err := s.VacuumInto(ctx, keep); err != nil {
+				return fmt.Errorf("copy the database to %s before migrating it from schema %d to %d: %w", keep, cur, len(ms), err)
+			}
+		}
+	}
 	for _, m := range ms[cur:] {
 		err := s.write(ctx, func(tx *sql.Tx) error {
 			if _, err := tx.ExecContext(ctx, m.sql); err != nil {

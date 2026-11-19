@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { s } from '@/i18n'
 import { api } from '@/api/endpoints'
 import { useLoad } from '@jailops/shared/composables/load'
-import { session, can, isHub } from '@jailops/shared/composables/session'
+import { session, can, isHub, hasExt } from '@jailops/shared/composables/session'
 import { attention } from '@/composables/attention'
 import { bytes, percent, sentence } from '@jailops/shared/lib/format'
 import TimeStamp from '@jailops/shared/components/TimeStamp.vue'
@@ -120,7 +120,7 @@ const poolPct = computed(() => (pool.value ? percent(pool.value.allocated, pool.
 
         <div class="grid-2">
           <section class="panel">
-            <header><h2>{{ s.overview.pool }}</h2><span v-if="pool" class="mono muted">{{ pool.name }}</span></header>
+            <header><h2>{{ s.overview.pool }}</h2><span v-if="pool" class="mono muted">{{ pool.name }}</span><router-link v-if="hasExt('top')" to="/top" data-test="overview-top">{{ s.top.open }}</router-link></header>
             <div class="body">
               <template v-if="pool">
                 <Meter :value="poolPct" :label="s.overview.pool" :warn-at="75" :danger-at="90" />

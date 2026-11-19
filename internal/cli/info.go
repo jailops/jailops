@@ -400,6 +400,9 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	if l.CPU > 0 {
 		lim = append(lim, fmt.Sprintf("cpu %d", l.CPU))
 	}
+	if l.CPUSet != "" {
+		lim = append(lim, "cpuset "+l.CPUSet)
+	}
 	if l.Memory != "" {
 		lim = append(lim, "memory "+sizeText(l.Memory))
 	}

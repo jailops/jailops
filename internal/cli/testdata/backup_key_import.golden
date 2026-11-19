@@ -1,0 +1,108 @@
+$ jailops backup key import
+! usage: no key given: use --file FILE (- for standard input) or --identity-file FILE, or run this in a terminal to be asked for the recovery key
+! hint: run 'jailops backup key import --help' for usage
+[exit 2]
+
+$ jailops backup key import --file <dir>/recovery.txt --identity-file <dir>/identity.txt
+! usage: give one source of the key: --file or --identity-file
+! hint: run 'jailops backup key import --help' for usage
+[exit 2]
+
+$ jailops backup key import --file <dir>/two-lines.txt
+! usage: <dir>/two-lines.txt must hold one line: the recovery key
+! hint: run 'jailops backup key import --help' for usage
+[exit 2]
+
+$ jailops backup key import --file <dir>/empty.txt
+! usage: <dir>/empty.txt is empty
+! hint: run 'jailops backup key import --help' for usage
+[exit 2]
+
+$ jailops backup key import --file <dir>/missing
+! usage: reading the key file: open <dir>/missing: no such file or directory
+! hint: run 'jailops backup key import --help' for usage
+[exit 2]
+
+$ jailops backup key import --file <dir>/recovery.txt --passphrase-file <dir>/pass.txt
+! usage: --passphrase-file is for a key file given with --file
+! hint: run 'jailops backup key import --help' for usage
+[exit 2]
+
+$ jailops backup key import --identity-file <dir>/empty.txt
+! usage: <dir>/empty.txt holds no age identity (a line that starts with AGE-SECRET-KEY-1)
+! hint: run 'jailops backup key import --help' for usage
+[exit 2]
+
+$ jailops backup key import --file <dir>/wrapped.key --passphrase-file <dir>/nopass
+! usage: reading the passphrase file: open <dir>/nopass: no such file or directory
+! hint: run 'jailops backup key import --help' for usage
+[exit 2]
+
+$ jailops backup key import --file -
+! invalid: the recovery key is not valid
+! hint: it starts with JOR1- and was printed once by 'jailops backup key create'
+[exit 2]
+
+$ jailops --dry-run backup key import --file <dir>/recovery.txt
+DOMAIN     REPOSITORY              RESULT          BACKUPS
+dom-aaaa   records no key domain   would install   -
+
+$ jailops backup key status
+STATUS   DOMAIN   PATH
+none     -        -
+
+$ jailops backup key import --file <dir>/recovery.txt
+DOMAIN     REPOSITORY              RESULT      BACKUPS
+dom-aaaa   records no key domain   installed   -
+! note: the repository records no key domain yet, so there was nothing to compare the key with
+
+$ jailops backup key status
+STATUS    DOMAIN     PATH
+present   dom-aaaa   /var/db/jailops/backup.key
+
+$ jailops backup key import --file <dir>/recovery.txt
+DOMAIN     REPOSITORY           RESULT         BACKUPS
+dom-aaaa   dom-aaaa (matches)   already held   -
+
+$ jailops backup key import --file -
+! forbidden: the repository belongs to key domain dom-aaaa, this host's key is dom-bbbb
+! hint: this is not the key of the backups on this node: compare its key domain with 'jailops backup key status' of the old host
+[exit 3]
+
+$ jailops --dry-run backup key import --file <dir>/backup.key
+! forbidden: the repository belongs to key domain dom-aaaa, this host's key is dom-file
+! hint: this is not the key of the backups on this node: compare its key domain with 'jailops backup key status' of the old host
+[exit 3]
+
+$ jailops backup key import --file - --replace
+! forbidden: the repository belongs to key domain dom-aaaa, this host's key is dom-bbbb
+! hint: this is not the key of the backups on this node: compare its key domain with 'jailops backup key status' of the old host
+[exit 3]
+
+$ jailops --dry-run backup key import --file <dir>/backup.key --no-verify
+DOMAIN     REPOSITORY    RESULT          BACKUPS
+dom-file   not checked   would replace   -
+
+$ jailops backup key import --file <dir>/backup.key --replace --no-verify
+DOMAIN     REPOSITORY    RESULT     BACKUPS
+dom-file   not checked   replaced   -
+! warning: the key was not checked against the repository
+! the old key file is kept as /var/db/jailops/backup.key.replaced-1
+
+$ jailops backup key import --file <dir>/wrapped.key --replace --no-verify --passphrase-file <dir>/pass.txt
+DOMAIN     REPOSITORY    RESULT         BACKUPS
+dom-file   not checked   already held   -
+
+$ jailops backup key import --identity-file <dir>/identity.txt --replace --no-verify -o json
+{
+  "domain": "dom-escrow",
+  "verified": false,
+  "existing": "dom-file",
+  "installed": true,
+  "replaced": true,
+  "path": "/var/db/jailops/backup.key",
+  "aside": "/var/db/jailops/backup.key.replaced-1"
+}
+! warning: the key was not checked against the repository
+! the old key file is kept as /var/db/jailops/backup.key.replaced-1
+

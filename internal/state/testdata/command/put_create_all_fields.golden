@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "id": "c-2",
+  "time": "2026-11-19T10:00:00Z",
+  "op": "put",
+  "kind": "FirewallPolicy",
+  "uuid": "6f1f7a52-3c1d-4f0e-9a64-0c5b1d8e2a10",
+  "name": "web-access",
+  "scope": "host",
+  "project": "shop",
+  "host": "host-a",
+  "labels": {
+    "env": "prod",
+    "tier": "web"
+  },
+  "managed_by": "hub",
+  "spec": {
+    "default_in": "deny",
+    "rules": [
+      {
+        "action": "allow",
+        "ports": [
+          "80",
+          "443"
+        ]
+      }
+    ]
+  },
+  "expect_generation": 0
+}

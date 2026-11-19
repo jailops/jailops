@@ -75,3 +75,42 @@ func TestRolloutSpec(t *testing.T) {
 		}
 	}
 }
+
+// A file of a fleet repository written for an earlier release is read as the current shapes, and the notes say what to
+// change; a key that never was valid is still an error.
+func TestDecodeSpecReadsTheShapesOfEarlierReleases(t *testing.T) {
+	raw := map[string]any{
+		"ipv4": map[string]any{"subnet": "10.0.0.0/24", "gateway": "10.0.0.1", "range": "10.0.0.2-10.0.0.9"},
+		"ipv6": map[string]any{"mode": "proxy", "subnet": "2001:db8:1::/64", "range": "2001:db8:1::10-2001:db8:1::ff"},
+	}
+	spec, notes, err := DecodeSpecNotes(api.KindNetwork, raw)
+	if err != nil {
+		t.Fatalf("a network with ipv6.mode: %v", err)
+	}
+	if ns := spec.(api.NetworkSpec); ns.IPv6 == nil || !ns.IPv6.NDPProxy {
+		t.Errorf("the proxy mode is not the NDP proxy: %+v", ns.IPv6)
+	}
+	if len(notes) != 1 || !strings.Contains(notes[0], "ndp_proxy") {
+		t.Errorf("notes %q", notes)
+	}
+	// the document the caller read is left as it was
+	if _, has := raw["ipv6"].(map[string]any)["mode"]; !has {
+		t.Error("the caller's document was rewritten")
+	}
+	if _, err := DecodeSpec(api.KindWireGuard, map[string]any{"mode": "server", "address": []any{"10.99.0.1/24"}, "down": true}); err != nil {
+		t.Errorf("a tunnel with down: %v", err)
+	}
+	if _, err := DecodeSpec(api.KindJail, map[string]any{"image": "freebsd-15-1@stable", "proxy": []any{map[string]any{"name": "p", "listen": ":80", "jail_port": 80}}}); err != nil {
+		t.Errorf("a jail with an alias and a proxy device: %v", err)
+	}
+	// what never was valid stays an error
+	if _, err := DecodeSpec(api.KindNetwork, map[string]any{"ipv6": map[string]any{"ndp_prox": true}}); err == nil {
+		t.Error("a misspelt key was accepted")
+	}
+	// a redirect rule of a policy cannot be rewritten on its own: the error says what to write
+	_, err = DecodeSpec(api.KindFirewallPolicy, map[string]any{"default_in": "deny", "default_out": "allow", "rules": []any{
+		map[string]any{"action": "allow", "direction": "in", "proto": "tcp", "ports": []any{"80"}, "redirect": map[string]any{"host_port": 8080, "jail_port": 80}}}})
+	if err == nil || !strings.Contains(err.Error(), "expose") || strings.Contains(err.Error(), "unknown field") {
+		t.Errorf("a redirect rule: %v", err)
+	}
+}

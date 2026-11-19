@@ -130,7 +130,7 @@ func TestExecFlagsBeforeDash(t *testing.T) {
 	tr.ok("exec", "--project", "shop", "web", "--", "echo", "id")
 	tr.ok("jail", "exec", "web", "-T", "--project", "shop", "--", "echo", "-T", "is the command's")
 	tr.do("", "exec", "web", "--project", "shop", "echo")             // no "--": --project would be the command
-	tr.do("", "exec", "web", "echo", "-l", "--project", "shop", "--") // only the name goes before --
+	tr.do("", "exec", "web", "echo", "-x", "--project", "shop", "--") // the words before -- name jails, "echo" and "-x" are not
 	tr.ok("--project", "shop", "exec", "web", "echo", "-l")           // without "--" the command's own options stay its own
 	calls := h.srv.ExecCalls()
 	if len(calls) != 4 || strings.Join(calls[0].Argv, " ") != "echo -n x" || strings.Join(calls[2].Argv, " ") != "echo -T is the command's" || strings.Join(calls[3].Argv, " ") != "echo -l" {

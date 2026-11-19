@@ -2,6 +2,95 @@
 
 ## Unreleased
 
+- **A jail moves to a new release with its data.** `jailops jail upgrade NAME --image freebsd-15-2` moves a thin FreeBSD
+  jail to the newest generation of another image of the same OS and architecture, of the same or a newer release and not
+  newer than the host's kernel, with the steps of an upgrade to a new generation: one atomic snapshot, a clone of the new
+  root, the three-way `/etc` merge, the swap, the start, the health check and the swap back on failure. Persistent
+  datasets, volumes, addresses and configuration stay, the jail follows the new image from then on (`spec.image`, the
+  nightly auto upgrade of the new image), the move is written to the update history, and `jailops jail rollback` returns
+  the jail to the old root and the old image together. `--dry-run` shows the releases, what is kept and the steps; a move
+  to a new major release warns that the packages were built for the old ABI. Several jails move one at a time (named,
+  selected with `-l` or `--all`; the first failure stops the rest), and `jailops image upgrade freebsd-15-1 --to
+  freebsd-15-2` moves every thin jail of an image. `jailops image create IMAGE --release R --build` builds the first
+  generation right after the definition is stored. The Upgrade dialog of the console and the jail list offer the same
+  move, with the release change in the preview. A thick jail, a Linux jail and a jail on another OS are not moved this
+  way, and an older release is refused.
+- **A jail leaves as one file and comes back as another jail.** `jailops jail export NAME --to FILE` writes the jail's
+  specification, the objects it refers to and its data (a thin jail's persistent datasets, a thick jail's whole root) as a
+  versioned stream with checksums; `jailops jail import FILE` makes a new jail of it under another name (`--as`), in
+  another project, with `--dry-run` showing the plan. A thin jail records its image and needs it on the target; volumes
+  come only with `--with-volumes`; encrypted datasets are sent raw and stay locked; secrets are never plaintext in the
+  file; a failed import leaves no half-made jail. The jail page and the jail list of the console export and import.
+- **One command on many jails.** `jailops exec` takes several jails, `-l KEY=VALUE` or `--all` and runs the command in
+  every running one, `--parallel N` at a time (4 by default), each in its own audited session, with `[jail]` in front of
+  each line, standard output and standard error kept apart and a summary. The exit status is 0 only when every command is,
+  otherwise the highest status or 1 for a jail that could not run it. `jailops pkg install|upgrade|remove|info` is exec of
+  the jail's own `pkg`. The console runs a command on the selected jails.
+- **Copy files with `jailops cp`.** `jailops cp SRC DST` copies files and trees between this machine and a jail or between
+  jails (`NAME:/path`), with `-r`, `-p` and `--mkdir`; `jailops cp FILE -l role=web :/etc/FILE` sends to every matching running
+  jail. The data goes through the daemon (extension `jail_files`, audited) as a tar stream that the helper reads and writes
+  below the jail root without following a symlink, up to `limits.file_copy_bytes` (2 GiB). The jail page of the console
+  uploads and downloads files.
+- **`jailops jail copy SOURCE NAME --data` copies a jail with its data.** The root and the persistent directories are
+  copied by a full send and receive, so the copy is independent of the source: the source may run (one atomic snapshot) and
+  `--snapshot S` copies an earlier state. The copy has addresses of its own, no volume and no exposure; `--start` starts it.
+- **`jailops jail convert NAME --layout thin|thick` changes how a FreeBSD jail's root is stored.** Thin to thick makes an
+  independent root with the persistent datasets folded in; thick to thin gives the jail a clone of an image generation
+  (`--image` names one) and keeps the data of the persistent paths. `--dry-run` lists what is kept and what is replaced, a
+  snapshot is taken first and a failure puts the old layout back.
+- **`--cpuset 2,3` and `limits.cpuset` pin a jail to CPUs of the host** with cpuset(1), whatever `kern.racct.enable` says.
+  The set is checked against the CPUs of the host, and `jailops doctor` warns about a jail whose set names a CPU the host
+  does not have.
+- **`jailops top` shows what the host and its jails use right now.** A live table of the running jails (project, CPU, memory,
+  processes, disk, network in and out, uptime) under a header with the load, CPU, memory, ZFS cache, pool and the number of
+  jails; `c`, `m`, `d`, `n` sort and `q` quits, `--once -o json` prints one frame for a script. It asks the daemon
+  (`GET /api/v1/top`, extension `top`, same visibility as `jail list`), which shares one measurement between all watchers.
+  Without racct CPU and memory come from the process list and a line says so. The console has the same on the Live usage page.
+- **Restore on a new host works from the CLI and the console.** `jailops backup key import` installs the backup key of a lost
+  host on a new one, from the recovery key, a copy of the old `backup.key` or the escrow on the backup node. The key is checked
+  against the key domain the node recorded before anything is written; a different key needs `--replace`; the audit log
+  records the domain, never the key. `docs/backup-restore.md` has the walkthrough "Restore on a new host".
+- **Fill a volume from a directory of the host.** `jailops volume create NAME --from-dir /host/dir` copies a plain directory
+  once into a new ZFS volume (a global administrator, below an `admin-host-mount` directory): owners, modes, times and links
+  are kept, no setuid bit or device comes across, nothing is read through a link out of the directory, and a failed copy
+  removes the volume. A volume that is a plain directory (`--path`) stays refused, and the error now says why.
+- **An upgrade keeps what a host holds, and that is tested.** A host of any release since 0.8.0 upgrades in place:
+  `go test ./internal/upgradecheck` opens the stored state of every release (`internal/store/testdata/upgrade`) with the
+  current code, a database or object newer than the binary is refused, `just release-pr` stops while the newest tag has no
+  fixture (`scripts/make-upgrade-fixture.sh`), and a nightly run upgrades a VM from the previous release
+  (`scripts/ci-freebsd-upgrade.sh`). See `docs/upgrade-guarantee.md`. The database is copied to `jailops.db.before-schema-N`
+  before a migration; image aliases in an old `spec.json` and in fleet and CLI files, a tunnel's `down`, an IPv6 `mode`, a
+  `proxy` device and `root-dataset` in `priv.conf` are read as their current shapes instead of being dropped or refused.
+- **Which FreeBSD releases are supported, how to update a host and how to release are written down in one place each.**
+  `docs/supported-versions.md` has the matrix (15.1 is supported and is the gate of the continuous integration, 15.2 is planned
+  for December 2026, 16.0 for December 2027) and the rule; `docs/release-engineering.md` has the checklists to release
+  JailOps and to update a host; `docs/upgrade.md` is the one page for updating a host. `jailops doctor` warns for a release
+  newer than the newest in the test matrix (`host.release`) and says whether the base is installed from packages
+  (`host.pkgbase`). `just publish-packages X` is the step after `just release X`.
+- **A workflow walkthrough before every release.** `test/workflows/daily-tasks.md` lists what a jail administrator does every
+  day and the command for each; `just e2e-workflows` runs the tasks on a FreeBSD test host, `scripts/check-workflows-table.sh`
+  keeps the table, its steps and the roadmap in step, and `just release-pr` stops while a task is missing without a plan.
+- **The API contract is checked by more tests.** The bodies of the main routes, the life of an asynchronous operation and the
+  machine output of the main commands are recorded in golden files, the serialised state command is frozen
+  (`internal/state`), and a program built with the client library of an earlier release makes the calls of a script against the
+  current server. `just freeze` accepts a change that is meant. `docs/api.md` says which extensions carry the 1.x promise.
+  Cancelling a finished operation answers "already finished" whether the record is still in memory or stored.
+- **Security: a failed operation no longer shows host details in its error.** An error that is not one of the API's own codes
+  (dataset names, paths of the host, command lines, addresses) was kept in the operation as it came, and every reader of the
+  operation saw it. The operation now says `internal error` with its id in the hint, as a failed request does, and the text is
+  in the log of `jailopsd` under that id; a failed app installation and the shell setup in a jail's status name the step or
+  cause class instead of the output.
+- **A jail that exposes a port below 1024 over IPv4 starts again after a restart and at boot.** The start hook loads the jail's
+  firewall anchor as root with no API caller behind it, and the helper refused the forward of a privileged host port without
+  the admin assertion. The hook now loads the forwards of the jail's own stored exposure, which an administrator already
+  authorised; a project administrator still cannot store such an exposure.
+- **A restart or stop of a jail whose mount went missing succeeds.** A volume, the twin of a volume or of `/proc` below
+  `compat/linux` of a Linux jail, or a host directory that was unmounted by hand made jail(8) refuse with `not a mount point`
+  and left the jail stopped; the stop now gives every such target a placeholder, and the next start mounts everything again.
+  Converting a thick jail back to thin no longer asks ZFS to inherit `canmount`.
+- **`jailops doctor` can count the neighbor solicitations the host rejected.** The helper had no rule for `netstat`, so the
+  check of `net.inet6.icmp6.nd6_onlink_ns_rfc4861` could never warn; the allow-list now accepts exactly `netstat -s -p icmp6`,
+  and a test requires every command the daemon issues to be on it. `scripts/vm-lock.sh` serializes runs on the FreeBSD test VMs.
 ## 0.8.6 - 2026-11-18
 
 - **A firewall policy states a default only when you tell it to.** `default_in` and `default_out` are `deny`, `allow`

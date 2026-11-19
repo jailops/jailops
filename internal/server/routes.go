@@ -23,8 +23,6 @@ var unsupportedRoutes = []struct{ method, pattern, what string }{
 	{"DELETE", "/api/v1/cluster/members/{name}", "cluster mode"},
 	{"GET", "/api/v1/cluster/members", "cluster mode"},
 	{"GET", "/api/v1/jails/{name}/console", "listing console sessions (open one with POST /api/v1/jails/{name}/console)"},
-	{"GET", "/api/v1/jails/{name}/files/{path...}", "file access"},
-	{"PUT", "/api/v1/jails/{name}/files/{path...}", "file access"},
 	{"POST", "/api/v1/jails/{name}/move", "cold moves"},
 	{"POST", "/api/v1/jails/{name}/snapshots/{snapshot}", "snapshot rename"},
 	{"GET", "/api/v1/jails/{name}/bundle", "bundle download"},
@@ -426,6 +424,31 @@ func (s *Server) routeTable() []route {
 			c.sync(200, v, 0)
 			return nil
 		}},
+		// The key is in the request body and nowhere else: not in the audit detail (only the key domain, which is not
+		// secret), not in the log, not in the reply.
+		route{method: "POST", pattern: "/api/v1/backup/key/import", h: func(c *rc) error {
+			var in api.BackupKeyImport
+			if err := c.decode(&in); err != nil {
+				return err
+			}
+			v, err := svc.ImportBackupKey(c.r.Context(), in)
+			if v.Domain != "" {
+				c.object = "/api/v1/backup/key"
+				c.detail = "domain=" + v.Domain
+				if in.Check {
+					c.detail += " check"
+				}
+				if v.Replaced {
+					c.detail += " replaced"
+				}
+			}
+			if err != nil {
+				return err
+			}
+			c.w.Header().Set("Cache-Control", "no-store")
+			c.sync(200, v, 0)
+			return nil
+		}},
 		route{method: "POST", pattern: "/api/v1/backups/run", h: func(c *rc) error {
 			var in api.BackupRunRequest
 			if err := c.decode(&in); err != nil {
@@ -547,6 +570,23 @@ func (s *Server) routeTable() []route {
 		}},
 		route{method: "GET", pattern: "/api/v1/exposed", h: func(c *rc) error {
 			v, err := svc.Exposed(c.r.Context(), c.r.URL.Query().Get("tunnels") == "true")
+			if err != nil {
+				return err
+			}
+			c.sync(200, v, 0)
+			return nil
+		}},
+		route{method: "GET", pattern: "/api/v1/top", h: func(c *rc) error {
+			labels, err := c.labels()
+			if err != nil {
+				return err
+			}
+			// the jails of the project the caller names, or with all_projects those of every project it may use
+			ctx := c.r.Context()
+			if v := c.r.URL.Query().Get("all_projects"); v == "true" || v == "1" {
+				ctx = service.WithProject(ctx, "")
+			}
+			v, err := svc.Top(ctx, labels)
 			if err != nil {
 				return err
 			}

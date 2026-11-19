@@ -195,6 +195,13 @@ project. An encrypted volume (--encrypted) is a ZFS encryption root with a
 passphrase you type twice (scripts give --passphrase-file); it is attached to one
 jail only, and that jail does not start while the volume is locked.
 
+--from-dir copies the files of a directory of the host into the new volume, once, and
+the volume keeps nothing of the directory afterwards. The directory lies below one that
+the host operator allows with admin-host-mount in priv.conf, and it need not be a mount:
+it is how the files of a plain directory of the host's own disk become data of a jail.
+Owners, modes, times and links are kept; no setuid or setgid bit and no device node comes
+across. Only a global administrator does it. The volume is removed again if the copy fails.
+
 --path makes the volume a directory of the host instead of a dataset: a mount
 such as a storage box, a share or a disk of its own, below a directory the host
 operator allows with admin-host-mount in priv.conf. Only a global administrator
@@ -211,6 +218,7 @@ const volumeCreateExample = `jailops volume create maildir --uid 5000 --gid 5000
 jailops volume create db-data --size 50G --uid 770 --gid 770
 jailops volume create vault --encrypted
 jailops volume create backups --path /mnt/storagebox/backups --watch --probe write --on-loss stop
+jailops volume create site --from-dir /srv/data/site --uid 80 --gid 80
 jailops volume create -f maildir.yaml`
 
 func (a *app) volumeFlagBuild(cmd *cobra.Command) func(string) (api.Volume, error) {
@@ -226,6 +234,7 @@ func (a *app) volumeFlagBuild(cmd *cobra.Command) func(string) (api.Volume, erro
 	f.StringVar(&mode, "mode", "", "mode of the root of the volume, octal up to 0777 (default 0755)")
 	f.BoolVar(&encrypted, "encrypted", false, "encrypt the volume with ZFS (aes-256-gcm) under a passphrase you type twice")
 	f.StringVar(&a.passFile, "passphrase-file", "", "read the passphrase of an encrypted volume from this file (its first line) instead of asking")
+	f.StringVar(&a.fromDir, "from-dir", "", "copy the files of this directory of the host into the new volume, once (global administrator; below an admin-host-mount directory)")
 	f.StringVar(&path, "path", "", "make the volume a directory of the host, on a mount below an admin-host-mount directory (global administrator)")
 	f.BoolVar(&watch, "watch", false, "with --path: check every few seconds that the directory is still on its mount, and say when it is not")
 	f.StringVar(&probe, "probe", "", "with --watch: what to check, mounted (default) or write (also that a file can be made)")
@@ -265,8 +274,24 @@ func (a *app) volumeCmd() *cobra.Command {
 		case a.passFile != "":
 			return nil, api.Volume{}, usagef("--passphrase-file is given but the volume is not encrypted (--encrypted)")
 		}
+		if a.fromDir != "" {
+			return a.createVolumeFromDir(ctx, c, v)
+		}
 		h, err := handle(c.Volumes().Create(ctx, v, pass))
 		return h, api.Volume{}, err
+	}
+	d.notes = func(v api.Volume) []string {
+		if i := v.Status.Imported; i != nil {
+			n := fmt.Sprintf("copied %d files and %d directories (%s) from %s", i.Files, i.Dirs, humanBytes(i.Bytes), i.From)
+			if i.Symlinks > 0 {
+				n += fmt.Sprintf(", %d links", i.Symlinks)
+			}
+			if i.Skipped > 0 {
+				n += fmt.Sprintf("; %d devices, fifos or sockets were not copied", i.Skipped)
+			}
+			return []string{n + "; no setuid or setgid bit came across"}
+		}
+		return nil
 	}
 	vc := group("volume", "Create volumes and attach them to jails",
 		`A volume is a dataset of a project that jails attach by name, at a path of their
@@ -285,6 +310,27 @@ jailops volume list`, "volumes", "vol")
 	crudCommands(a, vc, d, volumeCreateLong, volumeCreateExample, a.volumeFlagBuild)
 	vc.AddCommand(a.volumeAttach(), a.volumeDetach(), a.volumeSnapshotCmd(d), a.volumeUnlock(d), a.volumeLock(d), a.volumePassphrase(d))
 	return vc
+}
+
+// createVolumeFromDir creates the volume and copies a directory of the host into it. It waits for the copy itself, so
+// that the result (what was copied) is the one that is reported; with --no-wait it only starts it.
+func (a *app) createVolumeFromDir(ctx context.Context, c *sdk.Client, v api.Volume) (opHandle, api.Volume, error) {
+	if v.Spec.Path != "" {
+		return nil, api.Volume{}, usagef("--from-dir copies files into a new volume and --path is the host directory itself: give one of them")
+	}
+	op, err := c.Volumes().CreateFromDir(ctx, v, a.fromDir)
+	if err != nil {
+		return nil, api.Volume{}, err
+	}
+	h := &typedOp[api.Volume]{op: op}
+	if !a.waiting() {
+		return h, api.Volume{}, nil
+	}
+	out, err := op.Wait(ctx)
+	if err != nil {
+		return nil, api.Volume{}, err
+	}
+	return h, out, nil
 }
 
 func (a *app) volumeAttach() *cobra.Command {

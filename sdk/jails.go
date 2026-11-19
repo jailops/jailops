@@ -205,6 +205,22 @@ func (j *JailClient) Rollback(ctx context.Context, name string, rb api.JailRollb
 	return op, err
 }
 
+// Copy makes a copy of a jail with its data under a new name (extension jail_copy): the operation's result is the new
+// jail. The source may be running; req.Snapshot copies an earlier snapshot instead of the present state.
+func (j *JailClient) Copy(ctx context.Context, name string, req api.JailCopy) (*Operation[api.Jail], error) {
+	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name), body: req},
+		func(ctx context.Context) (api.Jail, error) { return j.Get(ctx, req.Name) })
+	return op, err
+}
+
+// Convert changes the layout of a jail's root (extension jail_convert): thin to thick, or thick to thin on an image
+// generation. With DryRun the result is the plan and nothing changes.
+func (j *JailClient) Convert(ctx context.Context, name string, req api.JailConvert) (*Operation[api.JailConvertResult], error) {
+	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/convert", body: req},
+		func(ctx context.Context) (api.JailConvertResult, error) { return api.JailConvertResult{}, nil })
+	return op, err
+}
+
 // Upgrade moves a jail to a newer image generation.
 func (j *JailClient) Upgrade(ctx context.Context, name string, up api.JailUpgrade) (*Operation[api.Jail], error) {
 	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/upgrade", body: up},

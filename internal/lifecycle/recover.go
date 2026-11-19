@@ -2,7 +2,6 @@ package lifecycle
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
@@ -42,7 +41,7 @@ func (s *Service) Rebuild(ctx context.Context, name string) (Recovered, error) {
 		b, berr := s.Files.ReadFile(ctx, s.Cfg.at(name).bundlePath())
 		var bd Bundle
 		if berr == nil {
-			berr = json.Unmarshal(upgradeSpec(b), &bd)
+			bd, berr = DecodeBundle(b)
 		}
 		if berr != nil {
 			return out, api.Errorf(api.CodeInternal, "jail %s: spec.json and bundle.json are both unusable: %v; %v", name, rerr, berr)

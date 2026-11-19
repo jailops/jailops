@@ -1,0 +1,40 @@
+$ jailops jail create web --image freebsd-15 --storage default --network lan=10.20.0.15
+jail/web created
+
+$ jailops jail convert web --layout thick --dry-run
+dry-run: would convert jail web from thin to thick (image g1)
+plan:
+   1. zfs snapshot web@jo-pre-convert
+   2. jail -r web
+   3. swap the root
+   4. jail -c web
+
+$ jailops jail convert web --layout thick
+jail/web converted to thick
+
+$ jailops jail convert web --layout thick --dry-run
+jail web is thick already: nothing to do
+
+$ jailops jail convert web --layout thin --image g1
+jail/web converted to thin
+
+$ jailops jail convert web
+! usage: --layout is thin or thick
+! hint: run 'jailops jail convert --help' for usage
+[exit 2]
+
+$ jailops jail convert web --layout fat
+! usage: --layout is thin or thick
+! hint: run 'jailops jail convert --help' for usage
+[exit 2]
+
+$ jailops jail convert web --layout thick --image g1
+! usage: --image names the generation of a thin root: add --layout thin
+! hint: run 'jailops jail convert --help' for usage
+[exit 2]
+
+$ jailops jail convert nope --layout thin
+! not_found: jail "nope" not found
+! hint: list them with 'jailops jail list'; check --project, --host and --remote too
+[exit 4]
+

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "id": "c-6",
+  "time": "2026-11-19T11:30:15.123456789+01:00",
+  "op": "put",
+  "kind": "Image",
+  "uuid": "6f1f7a52-3c1d-4f0e-9a64-0c5b1d8e2a10",
+  "name": "freebsd-15-1",
+  "scope": "fleet",
+  "spec": {
+    "release": "15.1-RELEASE"
+  },
+  "expect_generation": 0
+}

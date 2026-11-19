@@ -1,7 +1,7 @@
 // An in-process Transport that answers like the real API, so the whole UI (including async
 // operations, ETags, events and API errors) can be exercised without a server. Only loaded
 // for `?demo`.
-import { storedToken } from '@jailops/shared/api/client'
+import { storedToken, ApiError } from '@jailops/shared/api/client'
 import type { EventStream, RawRequest, RawResponse, StreamHandlers, Transport } from '@jailops/shared/api/client'
 import type { ApiEvent, ApiErrorBody, Operation, RestorePreflight, FirewallPolicy, AddressSet, AddressSetSpec, FirewallRule, FirewallTestRequest, Token, Backup, Jail, JailRollback, Volume, JailUpgrade, PowerState, ImageAutoUpgrade } from '@jailops/shared/api/types'
 import * as d from './data'
@@ -17,6 +17,7 @@ import { demoForward, unifiedRead, type DemoReply } from './logs'
 import { demoAccess } from './access'
 import { volumeName } from '@/lib/apps'
 import { defaultImage } from '@/lib/images'
+import { releaseOlder } from '@/lib/moves'
 import { lookupKey, setValue, expandedSources, flatten } from '@/lib/configKeys'
 import { loadChoice, saveChoice } from '@/lib/projectScope'
 import { SET_NAME, setUsers, validateSet, type SetMsgs } from '@/lib/firewall'
@@ -25,8 +26,11 @@ import { labelKeyProblem, labelValueProblem, labelsProblem, MAX_LABELS } from '@
 import { demoRename, renameKindOf } from './rename'
 import { demoFirewallTest, DemoFwError } from './fwtest'
 import { demoDiff } from './diff'
+import { exportFile, importPreflight, importedJail } from './xport'
+import { readManifest, scanFile, ExportFileError } from '@/lib/exportfile'
 import { demoExposed, demoReach } from './reach'
 import { demoExpose, demoUnexpose } from './expose'
+import { demoTop } from './top'
 
 interface DemoOp extends Operation {
   startedAt: number
@@ -100,7 +104,28 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   const countByProject = () => { const c: Record<string, number> = {}; for (const j of db.jails) c[j.metadata.project ?? ''] = (c[j.metadata.project ?? ''] ?? 0) + 1; return c }
   db.projects = d2.projects(countByProject())
   if (emptyMode) db.projects = []
-  const shells = new Map<string, { h: StreamHandlers; line: string; jail: string }>()
+  const shells = new Map<string, { h: StreamHandlers; line: string; jail: string; run?: string }>()
+  // The files of the jails, as the Files tab and `jailops cp` see them: what an upload wrote, and a few of every jail.
+  const jailFiles = new Map<string, { data: Blob; mode: string; at: string }>()
+  const fileKey = (jail: string, p: string) => `${jail}:${p}`
+  const seedFile = (jail: string, p: string): { data: Blob; mode: string; at: string } | undefined => {
+    const k = fileKey(jail, p)
+    if (!jailFiles.has(k) && (p === '/etc/rc.conf' || p === '/etc/hostname')) {
+      jailFiles.set(k, { data: new Blob([p === '/etc/hostname' ? `${jail}.example.net\n` : 'hostname="' + jail + '.example.net"\nsendmail_enable="NONE"\n']), mode: '0644', at: new Date(Date.now() - 86400000).toISOString() })
+    }
+    return jailFiles.get(k)
+  }
+  /** What `sh -c LINE` prints in the demo: the output and the exit status. */
+  const demoRun = (jail: string, line: string): { out: string; code: number } => {
+    const cmd = line.trim()
+    if (cmd === 'hostname') return { out: `${jail}.example.net\n`, code: 0 }
+    if (cmd === 'uname -a') return { out: `FreeBSD ${jail} 15.1-RELEASE FreeBSD 15.1-RELEASE amd64\n`, code: 0 }
+    if (cmd === 'uptime') return { out: ' 10:42AM  up 41 days,  3:12, 0 users, load averages: 0.05, 0.07, 0.02\n', code: 0 }
+    if (cmd === 'true') return { out: '', code: 0 }
+    if (cmd === 'false') return { out: '', code: 1 }
+    if (cmd.startsWith('echo ')) return { out: cmd.slice(5).replace(/^(["'])(.*)\1$/, '$2') + '\n', code: 0 }
+    return { out: `sh: ${cmd.split(' ')[0]}: not found\n`, code: 127 }
+  }
   // The jails of the demo that have bash in them: those created here (a new FreeBSD jail gets it at its first start)
   // and those set up with shell-setup. The seeded jails are older and have none.
   const bashReady = new Set<string>()
@@ -267,13 +292,16 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     }
     if (!authed) return fail(401, { code: 'unauthorized', message: 'Authentication is required.', hint: 'Sign in with a token or a user.' })
     if (m === 'GET' && seg[0] === 'resources') return ok(d.pool())
+    // the running jails of the project it names, or of every project
+    if (m === 'GET' && seg[0] === 'top') return ok(demoTop(db.jails, url.searchParams.get('project') ?? ''))
     // There is no default project: what works inside one needs it named, like the real server.
     const project = url.searchParams.get('project') ?? ''
-    if (!project && ['jails', 'volumes', 'firewall', 'profiles', 'updates', 'restores', 'exposed'].includes(seg[0])) return fail(400, { code: 'invalid', message: 'a project is required', hint: "name one with --project NAME (list them with 'jailops project list')" })
+    if (!project && ['jails', 'volumes', 'firewall', 'profiles', 'updates', 'restores', 'exposed', 'jail-imports'].includes(seg[0])) return fail(400, { code: 'invalid', message: 'a project is required', hint: "name one with --project NAME (list them with 'jailops project list')" })
     const inProject = (j: Jail) => (j.metadata.project ?? '') === project
     for (const p of db.projects) p.status.jails = countByProject()[p.metadata.name] ?? 0
     const rn = m === 'POST' ? renameKindOf(seg) : undefined
     if (rn) return renameRoute(rn.kind, rn.name, body, project, req)
+    if (seg[0] === 'jail-imports' && seg[1] === 'preflight' && m === 'POST') return ok(importPreflight(db, project, body.manifest, body.request ?? {}))
     const extra = extraRoutes(seg, m, body, url, req, project)
     if (extra) return extra
 
@@ -543,6 +571,26 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       emit('jail-updated', src)
       return ok(j, etagOf(j.metadata.generation))
     }
+    // POST /jails/{name}: a copy with the data of the source (extension jail_copy): the same specification under a new name,
+    // addresses of its own, no volume and no exposure; the data is not modelled
+    if (seg.length === 2 && m === 'POST') {
+      const to = String(body.name ?? '')
+      const badCopy = badName(to, 'jail')
+      if (badCopy) return badCopy
+      if (db.jails.some((x) => x.metadata.name === to && inProject(x))) return fail(409, { code: 'already_exists', message: `Jail ${to} already exists.` })
+      const snap = String(body.snapshot ?? '')
+      if (snap && !(db.snaps[name] ?? []).some((x) => x.metadata.name === snap)) return fail(404, { code: 'not_found', message: `snapshot "${snap}" not found`, hint: `jailops jail snapshot list ${name}` })
+      const spec = JSON.parse(JSON.stringify(j.spec)) as Jail['spec']
+      spec.volumes = undefined
+      spec.expose = undefined
+      for (const n of spec.network ?? []) {
+        delete n.mac
+        for (const k of ['ipv4', 'ipv6'] as const) if (n[k] && n[k] !== 'none') n[k] = 'auto'
+      }
+      const labels = (body.labels ?? j.metadata.labels) as Record<string, string> | undefined
+      const copy: Jail = { metadata: { name: to, scope: 'host', generation: 1, created_at: new Date().toISOString(), ...(j.metadata.project ? { project: j.metadata.project } : {}), ...(labels && Object.keys(labels).length ? { labels } : {}) }, spec, status: { power: 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] } }
+      return startOp(`Copy jail ${name} to ${to}`, { jails: [src, `/api/v1/jails/${to}`] }, 1500, () => { db.jails.push(copy); emit('jail-created', `/api/v1/jails/${to}`) }, undefined, false)
+    }
     if (seg.length === 2) return ok(j, etagOf(j.metadata.generation))
     switch (seg[2]) {
       case 'snapshots':
@@ -574,17 +622,65 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           emit('jail-rolled-back', src)
         })
       }
+      case 'convert': {
+        // the layout of the root (extension jail_convert): a dry run answers the plan; the data is not modelled
+        if (m !== 'POST') break
+        const to = String(body.layout ?? '')
+        if (to !== 'thin' && to !== 'thick') return fail(400, { code: 'invalid', message: `bad layout "${to}": thin or thick` })
+        if (j.spec.os === 'linux') return fail(422, { code: 'unsupported', message: 'a Linux jail is thick and stays so: only FreeBSD jails change layout' })
+        const from = j.spec.layout || 'thin'
+        const changed = from !== to
+        const image = to === 'thin' && body.image ? String(body.image) : (j.status.generation ?? '')
+        const keep = ['/etc', '/usr/local', '/var/db', '/var/log', '/var/mail', '/var/spool', '/home', '/root']
+        const res = {
+          jail: name, from, to, image, changed, ...(body.dry_run ? { dry_run: true } : {}),
+          ...(changed ? {
+            steps: to === 'thick'
+              ? ['Snapshot all datasets (rollback point)', 'Stop the jail', 'Mount the root and the persistent datasets', 'Copy the root to root.new', 'Fold the persistent datasets into root.new', 'Swap root and root.new', 'Put the persistent datasets away below root.old', 'Start and run the health check']
+              : ['Snapshot all datasets (rollback point)', 'Stop the jail', 'Clone the generation to root.new', 'Make a dataset of each persistent directory', 'Swap root and root.new', 'Start and run the health check'],
+            kept: keep,
+            ...(to === 'thin' ? { replaced: `everything outside ${keep.join(', ')}: the system comes from ${image}` } : {}),
+            warnings: j.spec.resources?.disk ? [`the disk limit of the jail (${j.spec.resources.disk}) counts the new root next to the old one until the conversion ends`] : [],
+          } : {}),
+        }
+        if (body.dry_run || !changed) return startOp(`Convert jail ${name} to ${to}`, { jails: [src] }, 300, () => {}, res, false)
+        return startOp(`Convert jail ${name} to ${to}`, { jails: [src] }, 3000, () => {
+          j.spec.layout = to
+          j.metadata.generation = (j.metadata.generation ?? 1) + 1
+          emit('jail-converted', src)
+        }, res, false)
+      }
       case 'upgrade': {
         const u = body as JailUpgrade
-        const target = u.generation || 'freebsd-15-1#g5'
+        const cur = String(j.spec.image).split(/[@#]/)[0]
+        // another image: a move to a new release, checked as the server checks it
+        const move = u.image && u.image !== cur ? u.image : ''
+        const to = move ? db.images.find((i) => i.metadata.name === move) : undefined
+        const from = db.images.find((i) => i.metadata.name === cur)
+        if (move) {
+          if (!to) return fail(404, { code: 'not_found', message: `image "${move}" not found` })
+          if (j.spec.layout === 'thick' || j.spec.os === 'linux') return fail(400, { code: 'unsupported', message: `a ${j.spec.layout === 'thick' ? 'thick' : 'Linux'} jail does not move to another image: it is updated through managed updates` })
+          if (from && to.spec.os !== from.spec.os) return fail(400, { code: 'invalid', message: `jail ${name} runs ${from.spec.os} and image ${move} is ${to.spec.os}: a jail moves between releases of one OS`, hint: 'create a new jail from the image instead' })
+          if (from && releaseOlder(to.spec.release, from.spec.release)) return fail(400, { code: 'invalid', message: `image ${move} is ${to.spec.release} and jail ${name} runs ${from.spec.release}: a jail does not move to an older release`, hint: 'create a new jail from the older image instead' })
+          const hostRel = (newRelease ? '15.2-RELEASE-p1' : String(d.server().environment.kernel_version ?? '')).replace(/-p\d+$/, '')
+          if (releaseOlder(hostRel, to.spec.release)) return fail(409, { code: 'version_skew', message: `image ${move} is ${to.spec.release} but the host kernel is ${hostRel}`, hint: 'upgrade the host first' })
+          if (!(to.status.generations ?? []).length) return fail(404, { code: 'not_found', message: `image "${move}" has no generation`, hint: `build one with 'jailops image build ${move}'` })
+        }
+        const newest = to ? Math.max(...(to.status.generations ?? []).map((g) => g.number)) : 0
+        const target = u.generation || (move ? `${move}#g${newest}` : 'freebsd-15-1#g5')
         const preview = {
           from_generation: j.status.generation ?? '', to_generation: target,
-          steps: ['Preflight: no dependent clones, replication idle', 'Snapshot all datasets (rollback point)', 'Stop the jail', 'Clone the target generation to root.new', 'Merge /etc with etcupdate', 'Swap root and root.new', 'Start and run the health check'],
+          steps: ['Preflight: no dependent clones, replication idle', 'Snapshot all datasets (rollback point)', 'Stop the jail', 'Clone the target generation to root.new', 'Merge /etc with etcupdate', 'Swap root and root.new', ...(move ? [`Set the image of the jail to ${move}`, 'Write spec.json (the new image)'] : []), 'Start and run the health check'],
           etc_conflicts: name === 'web' ? ['/etc/ssl/openssl.cnf'] : [], warnings: j.status.power === 'running' ? ['The jail will be stopped for about 20 seconds.'] : [],
+          ...(move ? { upgrade: { from: j.status.generation ?? '', to: target, from_release: from?.spec.release, to_release: to?.spec.release, image: move, snapshot: 'jo-pre-upgrade-1767268800', kept: ['etc', 'local', 'var-db', 'var-log', 'home'] } } : {}),
         }
         if (u.dry_run) return ok(preview)
         return startOp(`Upgrade ${name} to ${target}`, { jails: [src] }, 3500, () => {
           j.status.generation = target
+          if (move) {
+            j.spec.image = move
+            j.metadata.generation = (j.metadata.generation ?? 1) + 1
+          }
           emit('jail-upgraded', src)
         })
       }
@@ -705,13 +801,19 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       if (spec.encrypted && (pass.length < 12 || pass.length > 512 || /[\r\n]/.test(pass))) return fail(400, { code: 'invalid', message: pass ? 'the passphrase must be between 12 and 512 bytes long' : 'an encrypted volume needs a passphrase' })
       if (!spec.encrypted && pass) return fail(400, { code: 'invalid', message: 'a passphrase was given but the volume is not encrypted' })
       if (spec.encrypted) volPass[name] = pass
+      const fromDir = typeof body.from_dir === 'string' ? body.from_dir : ''
+      if (fromDir) {
+        if (spec.encrypted) return fail(400, { code: 'invalid', message: 'a volume made from a host directory is not encrypted' })
+        if (!/^\/[A-Za-z0-9._+@:=,/-]+$/.test(fromDir) || fromDir.split('/').slice(1).some((x) => x === '' || x === '.' || x === '..')) return fail(400, { code: 'invalid', message: `from_dir ${JSON.stringify(fromDir)} must be an absolute path without . or .. or a trailing slash` })
+        if (!fromDir.startsWith('/srv/data')) return fail(403, { code: 'forbidden', message: `"${fromDir}" is not below a directory of admin-host-mount in priv.conf`, hint: 'the host operator lists the directories whose files may be copied with admin-host-mount in priv.conf; ' + fromDir + ' must lie below one of them' })
+      }
       const storage = spec.storage || 'default'
       const v: Volume = {
         metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), project, ...(body.metadata?.labels ? { labels: body.metadata.labels } : {}) },
         spec: { storage, uid: spec.uid ?? 0, gid: spec.gid ?? 0, mode: '0' + mode.toString(8).padStart(3, '0'), ...(spec.size ? { size: spec.size } : {}), ...(spec.encrypted ? { encrypted: true } : {}), ...(spec.comment ? { comment: spec.comment } : {}) },
-        status: { dataset: `tank/jailops/projects/${project}/volumes/${name}`, mountpoint: `/jailops/projects/${project}/volumes/${name}`, used: 0 },
+        status: { dataset: `tank/jailops/projects/${project}/volumes/${name}`, mountpoint: `/jailops/projects/${project}/volumes/${name}`, used: fromDir ? 49152 : 0 },
       }
-      return startOp(`Create volume ${name}`, { volumes: [`/api/v1/volumes/${name}`] }, 700, () => { db.volumes.push(v); emit('volume-created', `/api/v1/volumes/${name}`) }, undefined, false)
+      return startOp(`Create volume ${name}${fromDir ? ' from ' + fromDir : ''}`, { volumes: [`/api/v1/volumes/${name}`] }, 700, () => { db.volumes.push(v); emit('volume-created', `/api/v1/volumes/${name}`) }, undefined, false)
     }
     const v = db.volumes.find((x) => x.metadata.name === seg[1] && mine(x))
     if (!v) return fail(404, { code: 'not_found', message: `volume "${seg[1]}" not found` })
@@ -1273,6 +1375,39 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       case 'backup': {
         if (seg[1] !== 'key') return undefined
         if (seg[2] === 'escrow') { db.key.status = 'escrowed'; return ok({ ...db.key }) }
+        if (seg[2] === 'import' && m === 'POST') {
+          // the demo node records the domain of the key of this host; "JOR1-<domain>" stands for the key of that domain,
+          // a key file for "kd-file", an identity for "kd-escrow"
+          const b = body as { recovery_key?: string; key_file?: string; passphrase?: string; identity?: string; replace?: boolean; check?: boolean; skip_node_check?: boolean }
+          const n = [b.recovery_key, b.key_file, b.identity].filter(Boolean).length
+          if (n !== 1) return fail(400, { code: 'invalid', message: 'give one source of the key: a recovery key, a key file or an escrow identity' })
+          let domain = 'kd-escrow'
+          if (b.recovery_key) {
+            if (!b.recovery_key.startsWith('JOR1-') || b.recovery_key.length < 9) return fail(400, { code: 'invalid', message: 'the recovery key is not valid', hint: 'it starts with JOR1- and was printed once by jailops backup key create' })
+            domain = b.recovery_key.slice(5)
+          } else if (b.key_file) {
+            if (!b.key_file.trim().startsWith('{')) return fail(400, { code: 'invalid', message: 'the key file is not valid' })
+            if (b.key_file.includes('"passphrase"') && !b.passphrase) return fail(400, { code: 'invalid', message: 'the key file is protected by a passphrase', hint: 'give the passphrase of the key file' })
+            domain = 'kd-file'
+          }
+          const had = db.key.status !== 'none'
+          const out: Record<string, unknown> = { domain, existing: had ? db.key.domain : undefined, verified: false, installed: false, path: db.key.path }
+          if (!b.skip_node_check) {
+            out.repository = db.key.domain
+            if (domain !== db.key.domain && had) return fail(403, { code: 'forbidden', message: `the repository belongs to key domain ${db.key.domain}, this host's key is ${domain}`, hint: "this is not the key of the backups on this node: compare its key domain with 'jailops backup key status' of the old host" })
+            out.verified = domain === db.key.domain
+          }
+          if (had && db.key.domain === domain) return ok(out)
+          if (b.check) return ok(out)
+          if (had && !b.replace) return fail(409, { code: 'already_exists', message: `this host already holds a different backup key (domain ${db.key.domain})`, hint: 'importing replaces it and moves the old key file aside; pass replace to do that' })
+          out.installed = true
+          out.replaced = had
+          if (had) out.aside = db.key.path + '.replaced-1'
+          out.backups = db.backups.length
+          db.key.status = 'present'
+          db.key.domain = domain
+          return ok(out)
+        }
         if (m === 'GET') return ok({ ...db.key })
         if (db.key.status !== 'none') return fail(409, { code: 'already_exists', message: 'The host already has a backup key.' })
         db.key.status = (body.recipients ?? []).length ? 'escrowed' : 'present'
@@ -1321,6 +1456,26 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
             if (j.spec.shell === BASH) bashReady.add(name)
           }, { jail: name, shell: j.spec.shell || BASH, prompt: j.spec.prompt || 'default', ps1: '\\[\\e[38;5;39m\\]\\u@\\h:\\w\\$\\[\\e[0m\\] ', steps: [had ? `${BASH} is installed` : 'pkg -r ROOT install -y bash', 'wrote /usr/local/etc/profile.d/jailops-prompt.sh'] })
         }
+        if (seg[2] === 'files' && seg.length > 3) {
+          if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `jail "${name}" is not mounted`, hint: `start the jail, or mount its root dataset on the host: zfs mount tank/jailops/${project}/${name}/root` })
+          const p = '/' + seg.slice(3).join('/')
+          if (m === 'GET' && url.searchParams.get('stat') === 'true') {
+            const f = seedFile(name, p)
+            if (!f) return ok({ path: p, type: 'none' })
+            return ok({ path: p, type: 'file', size: f.data.size, mode: f.mode, modified_at: f.at })
+          }
+          if (m === 'GET') {
+            const f = seedFile(name, p)
+            if (!f) return fail(404, { code: 'not_found', message: `jail "${name}" has no file "${p}"` })
+            return { status: 200, blob: f.data, envelope: { type: 'sync', status_code: 200 } }
+          }
+          if (m === 'PUT' && req.blob) {
+            if (req.blob.size > 2 * 1024 ** 3) return fail(400, { code: 'invalid', message: 'the transfer is over the limit of 2.0 GiB' })
+            jailFiles.set(fileKey(name, p), { data: req.blob, mode: '0644', at: new Date().toISOString() })
+            return ok({ files: 1, dirs: 0, symlinks: 0, bytes: req.blob.size })
+          }
+          return fail(400, { code: 'invalid', message: 'a file is read with GET and written with PUT' })
+        }
         if (seg[2] === 'console') {
           if (m === 'POST' && seg.length === 3) {
             if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `Jail ${name} is not running.` })
@@ -1328,7 +1483,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
             if (sh === BASH && !bashReady.has(name)) return fail(404, { code: 'not_found', message: `the shell ${BASH} does not exist in jail "${name}"`, hint: `install it with \`jailops jail shell-setup ${name}\`, or use FreeBSD's own shell: \`jailops set ${name} shell sh\`` })
             if (sh && sh !== '/bin/sh' && sh !== BASH) return fail(404, { code: 'not_found', message: `The shell ${sh} does not exist in the jail.`, hint: 'Set a shell that exists, or clear the setting to use /bin/sh.' })
             const id = 'x' + ++seq
-            shells.set(id, { h: undefined as never, line: '', jail: name })
+            const argv = Array.isArray(body.argv) ? (body.argv as string[]) : []
+            shells.set(id, { h: undefined as never, line: '', jail: name, run: argv[1] === '-c' ? String(argv[2] ?? '') : argv.length ? argv.join(' ') : undefined })
             return ok({ id }, undefined)
           }
           const sess = shells.get(seg[3])
@@ -1455,12 +1611,53 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
 
   return {
     request: (req) => route(req),
+    async download(path: string): Promise<ReadableStream<Uint8Array>> {
+      await sleep0()
+      const url = new URL(path, 'http://x')
+      const seg = url.pathname.split('/').filter(Boolean).map(decodeURIComponent)
+      const project = url.searchParams.get('project') ?? ''
+      const j = seg[0] === 'jails' && seg[2] === 'export' ? db.jails.find((x) => x.metadata.name === seg[1] && (x.metadata.project ?? '') === project) : undefined
+      if (!j) throw new ApiError({ code: 'not_found', message: `Jail ${seg[1]} not found` })
+      const bytes = exportFile(j, url.searchParams)
+      return new ReadableStream<Uint8Array>({ start(c) { for (let i = 0; i < bytes.length; i += 64) c.enqueue(bytes.slice(i, i + 64)); c.close() } })
+    },
+    async upload(path: string, body: Blob): Promise<RawResponse> {
+      await sleep0()
+      const url = new URL(path, 'http://x')
+      const project = url.searchParams.get('project') ?? ''
+      const q = url.searchParams
+      const nm: Record<string, string> = {}
+      for (const x of q.getAll('network_map')) { const [k, v] = x.split('='); nm[k] = v }
+      const req = { as: q.get('as') ?? undefined, keep_ip: q.get('keep_ip') === 'true', start: q.get('start') === 'true', network_map: nm }
+      try {
+        const man = await readManifest(body)
+        await scanFile(body)
+        const pf = importPreflight(db, project, man, req)
+        if (!pf.ok) return fail(409, { code: 'conflict', message: pf.errors?.[0] ?? 'the import cannot be done' })
+        const jail = importedJail(man, project, req)
+        db.jails.push(jail)
+        emit('jail-created', `/api/v1/jails/${jail.metadata.name}`)
+        return { status: 201, envelope: { type: 'sync', status: 'Success', status_code: 201, metadata: structuredClone({ jail }) } }
+      } catch (e) {
+        if (e instanceof ExportFileError) return fail(400, { code: 'invalid', message: e.message })
+        throw e
+      }
+    },
     stream(path: string, h: StreamHandlers): EventStream {
       const ex = /\/console\/([^/?]+)\/output/.exec(path)
       if (ex) {
         const sess = shells.get(ex[1])
         if (sess) {
           sess.h = h
+          if (sess.run !== undefined) {
+            const t = setTimeout(() => {
+              h.onOpen?.()
+              const r = demoRun(sess.jail, sess.run ?? '')
+              if (r.out) shellOut(ex[1], r.out)
+              h.onEvent({ type: 'logging', timestamp: new Date().toISOString(), metadata: { exit: r.code } } as ApiEvent)
+            }, 0)
+            return { close: () => clearTimeout(t) }
+          }
           const t = setTimeout(() => { h.onOpen?.(); shellOut(ex[1], 'JailOps demo shell. Try: hostname, uname -a, ls, echo hi, exit\r\n' + promptOf(sess.jail)) }, 0)
           return { close: () => { clearTimeout(t); shells.delete(ex[1]) } }
         }

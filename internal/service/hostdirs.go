@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -469,8 +470,13 @@ func (s *Service) createHostDirVolume(ctx context.Context, p project, in api.Vol
 				return nil, err
 			}
 			if !ok {
-				return nil, invalid("%s is not usable: %s", spec.Path, detail).
-					WithHint("mount it first; the mount point has to lie below a directory of admin-host-mount in priv.conf")
+				if !strings.Contains(detail, "not on a mount") {
+					return nil, invalid("%s is not usable: %s", spec.Path, detail).
+						WithHint("mount it first; the mount point has to lie below a directory of admin-host-mount in priv.conf")
+				}
+				// a plain directory of the host's own disk: that stays refused, with the reason and the way that works
+				return nil, invalid("%s is a plain directory, not a mount: a volume that is a host directory has to be a mount (a share, another disk), because JailOps can only tell a lost mount from an empty directory there", spec.Path).
+					WithHint("to use the files of a plain directory, copy them once into a ZFS volume: jailops volume create NAME --from-dir " + spec.Path)
 			}
 			o, err := ks.create(ctx, meta, spec)
 			if err != nil {

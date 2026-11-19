@@ -206,3 +206,63 @@ func TestRebuildAllIgnoresForeign(t *testing.T) {
 		t.Fatal("foreign dataset touched")
 	}
 }
+
+// A copy from a snapshot of the source holds what the snapshot held, not what was written after it; the snapshot stays on
+// the source and the copy does not carry it.
+func TestCopyFromASnapshotOfTheSource(t *testing.T) {
+	w := copySetup(t)
+	w.Z.WriteFile(jc+"/home", "/home/later", "newer")
+	if _, err := w.S.CopyJailFrom(bg, "alpha_web", "alpha_web2", "uuid-web2", "7", "keep", false); err != nil {
+		t.Fatal(err)
+	}
+	c2 := "tank/jailops/projects/alpha/jails/web2"
+	if v, _ := w.Z.ReadFile(c2+"/home", "/home/a"); v != "data" {
+		t.Fatalf("the data of the snapshot is not in the copy: %q", v)
+	}
+	if v, ok := w.Z.ReadFile(c2+"/home", "/home/later"); ok {
+		t.Fatalf("a file written after the snapshot is in the copy: %q", v)
+	}
+	for _, d := range []string{jc, jc + "/root", jc + "/home"} {
+		if ok, _ := w.Z.Exists(bg, d+"@keep"); !ok {
+			t.Errorf("%s@keep was dropped from the source", d)
+		}
+	}
+	for _, d := range []string{c2, c2 + "/root", c2 + "/home"} {
+		s, _ := w.Z.Snapshots(bg, d)
+		if len(s) != 0 {
+			t.Errorf("%s carries snapshots %v", d, s)
+		}
+	}
+	if _, err := w.S.CopyJailFrom(bg, "alpha_web", "alpha_web3", "uuid-web3", "8", "nope", false); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("a snapshot the source does not have: %v", err)
+	}
+	if ok, _ := w.Z.Exists(bg, "tank/jailops/projects/alpha/jails/web3"); ok {
+		t.Fatal("a refused copy left datasets")
+	}
+	if _, err := w.S.CopyJailFrom(bg, "alpha_web", "alpha_web3", "uuid-web3", "8", "bad name", false); !api.IsCode(err, api.CodeInvalid) {
+		t.Fatalf("a bad snapshot name: %v", err)
+	}
+}
+
+// The copy of a jail takes over no public port of the source.
+func TestCopyKeepsNoExposure(t *testing.T) {
+	w := copySetup(t)
+	b, _ := w.Files.ReadFile(bg, "/jailops/projects/alpha/jails/web/spec.json")
+	var rec Record
+	if err := json.Unmarshal(b, &rec); err != nil {
+		t.Fatal(err)
+	}
+	rec.Spec.Expose = []api.ExposeEntry{{Proto: "tcp", Ports: []string{"80"}}}
+	w.Files.Data["/jailops/projects/alpha/jails/web/spec.json"], _ = json.Marshal(rec)
+	if _, err := w.S.CopyJail(bg, "alpha_web", "alpha_web2", "uuid-web2", "7", false); err != nil {
+		t.Fatal(err)
+	}
+	b, _ = w.Files.ReadFile(bg, "/jailops/projects/alpha/jails/web2/spec.json")
+	var got Record
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Spec.Expose) != 0 {
+		t.Fatalf("the copy exposes %+v", got.Spec.Expose)
+	}
+}

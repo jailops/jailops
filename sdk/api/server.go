@@ -216,4 +216,9 @@ var Extensions = []string{
 	"jail_reach",
 	"jail_diff",
 	"firewall_applied",
+	"jail_export",
+	"jail_files",
+	"jail_convert",
+	"volume_from_dir",
+	"top",
 }

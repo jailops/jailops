@@ -151,12 +151,46 @@ jailops image create -f freebsd-15-1.yaml`,
 			}
 		})
 	for _, c := range ic.Commands() {
-		if c.Name() == "delete" {
+		switch c.Name() {
+		case "delete":
 			c.Long = "Delete one or more images with all their generations. The server refuses, naming the jails, while a jail uses any generation.\nThe command asks for confirmation unless -y is given."
+		case "create":
+			a.createThenBuild(c)
 		}
 	}
 	ic.AddCommand(a.imageBuild(d), a.imageUpgrade(d), a.imageGeneration(d))
 	return ic
+}
+
+// createThenBuild adds --build to 'image create': the first generation is built right after the definition is stored,
+// the way the console's create dialog does it. A definition that cannot be stored builds nothing, and one that cannot
+// be built stays (build it again with 'jailops image build').
+func (a *app) createThenBuild(cmd *cobra.Command) {
+	var build bool
+	cmd.Flags().BoolVar(&build, "build", false, "build the first generation after creating the image (it can take minutes)")
+	run := cmd.RunE
+	cmd.RunE = func(cmd *cobra.Command, args []string) error {
+		if build && len(args) == 0 {
+			return usagef("--build needs the name of the image on the command line, not -f FILE")
+		}
+		if err := run(cmd, args); err != nil || !build || a.dryRun {
+			return err
+		}
+		c, err := a.connect(cmd.Context())
+		if err != nil {
+			return err
+		}
+		for _, name := range args {
+			h, err := handle(c.Images().Build(cmd.Context(), name, api.ImageBuild{}))
+			if err != nil {
+				return err
+			}
+			if err := a.finishOp(cmd.Context(), h, "image", name, "built", nil); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 }
 
 // serverArch asks the server for its architecture, the default of a new
@@ -178,6 +212,7 @@ func (a *app) serverArch(ctx context.Context) (string, error) {
 
 func (a *app) imageUpgrade(d *kindDesc[api.Image]) *cobra.Command {
 	var noJails bool
+	var to string
 	cmd := &cobra.Command{
 		Use:   "upgrade IMAGE",
 		Short: "Build the next generation and move the jails that use the image to it",
@@ -197,16 +232,25 @@ the health check and stopped again.
 
 --no-jails builds the generation only. --dry-run plans the build and lists the
 jails that would move; nothing changes. The build can take minutes; the command
-waits unless --no-wait is given. The exit status is 1 when a jail failed.`,
+waits unless --no-wait is given. The exit status is 1 when a jail failed.
+
+--to IMAGE moves the thin jails of the image to the newest generation of another
+image instead (a new release: freebsd-15-1 to freebsd-15-2, built with 'jailops
+image build'). Nothing is built. Every jail goes through 'jailops jail upgrade
+--image', one at a time, and the first failure stops the rest; the target must
+be of the same OS and architecture, a release that is not older, and not newer
+than the host's kernel. --dry-run checks every jail and says which would fail.`,
 		Example: `jailops image upgrade freebsd-15-1 --dry-run
 jailops image upgrade freebsd-15-1
 jailops image upgrade freebsd-15-1 --project shop
-jailops image upgrade freebsd-15-1 --no-jails`,
+jailops image upgrade freebsd-15-1 --no-jails
+jailops image upgrade freebsd-15-1 --to freebsd-15-2 --dry-run
+jailops image upgrade freebsd-15-1 --to freebsd-15-2`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, d),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, image := cmd.Context(), args[0]
-			u := api.ImageUpgrade{NoJails: noJails, Project: a.project, DryRun: a.dryRun}
+			u := api.ImageUpgrade{NoJails: noJails, Project: a.project, DryRun: a.dryRun, To: to}
 			c, err := a.connect(ctx)
 			if err != nil {
 				return err
@@ -227,7 +271,20 @@ jailops image upgrade freebsd-15-1 --no-jails`,
 		},
 	}
 	cmd.Flags().BoolVar(&noJails, "no-jails", false, "build the generation only; move no jail")
+	cmd.Flags().StringVar(&to, "to", "", "move the thin jails to the newest generation of this image (a new release) instead of building a generation")
+	_ = cmd.RegisterFlagCompletionFunc("to", a.completeWith(func(ctx context.Context, c *sdk.Client, args []string) ([]string, error) {
+		return imageRefs(ctx, c)
+	}))
 	return cmd
+}
+
+// moveTarget is the generation the jails of an image move to in a move to another image (an image upgrade with --to):
+// the result names it, and the generation of such a result is the target's, not one that was built.
+func moveTarget(res api.ImageUpgradeResult) string {
+	if strings.HasSuffix(res.From, "#g0") && res.Generation != nil {
+		return res.Generation.Name
+	}
+	return ""
 }
 
 // emitImageUpgrade prints the result of an image upgrade: what the build did,
@@ -239,6 +296,16 @@ func (a *app) emitImageUpgrade(image string, res api.ImageUpgradeResult) error {
 			fprintf(a.env.Stdout, "image/%s unchanged: %s already has the current package set; nothing to upgrade\n", image, res.From)
 		case res.Unchanged:
 			fprintf(a.env.Stdout, "image/%s: %s already has the current package set; the jails that were behind moved to it\n", image, res.From)
+		case res.DryRun && moveTarget(res) != "":
+			n := 0
+			for _, j := range res.Jails {
+				if j.Status == api.ImageUpgradePlanned {
+					n++
+				}
+			}
+			fprintf(a.env.Stdout, "dry-run: would move %d of %d jails of %s to %s\n", n, len(res.Jails), image, moveTarget(res))
+		case moveTarget(res) != "":
+			fprintf(a.env.Stdout, "image/%s: the jails move to %s\n", image, moveTarget(res))
 		case res.DryRun:
 			n := 0
 			for _, j := range res.Jails {

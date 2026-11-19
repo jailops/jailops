@@ -217,8 +217,10 @@ Data is never rolled back automatically.
 
 ### 4.5 Copies
 
-A copy of a jail is a full `zfs send | zfs receive`, not a clone, whenever the source has
-snapshots, which avoids dependent-snapshot entanglement. Clones of jails exist only for ephemeral jails.
+A copy of a jail is a full `zfs send | zfs receive`, not a clone, which avoids dependent-snapshot entanglement. Clones of jails exist
+only for ephemeral jails. A plain send carries no dataset properties, so the plan reads the kind, layout, image, class and path of each
+dataset from the source and sets them on the copy. The source may run (one atomic snapshot of its datasets) and a copy can be made
+from a snapshot of the source; see [storage.md](storage.md#copying-a-jail).
 
 ### 4.6 Big pools and existing data
 
@@ -596,7 +598,7 @@ they are kept apart by mechanisms that exist in the system:
 |---|---|
 | Network | A network belongs to one project. Every jail has a link of its own to the host, so jails never exchange frames and every flow goes through the host (section 5). Each jail's anchor binds its addresses (anti-spoofing) and the host routes an address to the one link of its jail, so a jail cannot take another's address. A project's mandatory policies are rendered before the jail's own. Cross-project traffic is denied unless a policy allows it. |
 | Storage | Each project has its own dataset under the storage root with a quota; each jail a quota and optionally a reservation. ZFS delegation (`zfs_delegation`) is never granted to project users unless a global admin allows it per jail, and the operator allows it in priv.conf (`admin-zfs-delegation`); the jail then manages its own dataset `<container>/delegated` (section 4.6). |
-| Compute | Per-jail limits: `limits.memory`, `limits.pids` and `limits.cpu` are rctl rules the helper adds when the jail has started (`swapuse`, `maxproc`, `pcpu`; they need `kern.racct.enable=1`, and a jail reports the condition `Limits` when they cannot be enforced), `limits.disk` is the quota of the jail's container dataset, and `limits.states` limits the pf states of the jail's rules; project quotas are checked before creation. See [operations.md](operations.md#resource-limits-of-a-jail). What a jail uses is measured when asked (`GET /api/v1/jails/<n>/usage`, `jailops jail info`): processes, CPU time and memory from racct through `rctl -u jail:<key>` (a read-only form on the helper's command allow-list, for managed jails only; "racct is off" when `kern.racct.enable` is not 1), and the space of its datasets from ZFS `used`/`referenced`. Nothing of it is stored, and the jail list does not carry it. |
+| Compute | Per-jail limits: `limits.memory`, `limits.pids` and `limits.cpu` are rctl rules the helper adds when the jail has started (`swapuse`, `maxproc`, `pcpu`; they need `kern.racct.enable=1`, and a jail reports the condition `Limits` when they cannot be enforced), `limits.disk` is the quota of the jail's container dataset, `limits.cpuset` pins the jail to CPUs of the host (`cpuset -l LIST -j JID` after the start, no racct needed), and `limits.states` limits the pf states of the jail's rules; project quotas are checked before creation. See [operations.md](operations.md#resource-limits-of-a-jail). What a jail uses is measured when asked (`GET /api/v1/jails/<n>/usage`, `jailops jail info`): processes, CPU time and memory from racct through `rctl -u jail:<key>` (a read-only form on the helper's command allow-list, for managed jails only; "racct is off" when `kern.racct.enable` is not 1), and the space of its datasets from ZFS `used`/`referenced`. Nothing of it is stored, and the jail list does not carry it. |
 | Identity | Section 8.2. |
 
 A separate dataset is **not** a full security boundary. Jails share the host kernel, the sysctl state, device
@@ -711,6 +713,13 @@ jailops apply -f site.yaml          # create or update every document of a file
   root is mounted only while it runs, so its logs answer `busy` ("not mounted") with the dataset to mount. Logs
   hold what services print, so reading them needs the operator role (the one that may exec) and is audited;
   `jailops jail logs NAME [FILE]` (also `jailops logs`) is the client, `-f` follows. Extension `jail_logs`.
+- **Files.** `GET|PUT /api/v1/jails/<n>/files/<path>` (extension `jail_files`, operator, audited) and `jailops cp` move
+  files and trees between a client and a jail root. The daemon and the helper always exchange a tar stream (ops
+  `fs.jail_stat`, `fs.jail_get`, `fs.jail_put`, over `sdk/tarcopy`): every path segment is opened below an
+  `os.Root` of the jail root without following a symlink, entries are regular files, directories and symlinks with
+  clean relative names, set-id bits are stripped, a file is written under a temporary name and renamed, and bytes,
+  entries and depth are bounded (`limits.file_copy_bytes`). A plain GET or PUT is one file wrapped in a one-entry tar.
+  A root that is not mounted is `busy`. The routes stream, so they are exempt from the body limit and deadlines.
 - **All logs at once, and forwarding.** `GET /api/v1/logs` (extension `logs_unified`, operator in every project read)
   takes the same per-jail reads for up to 50 files (default `messages` of every jail of the project, or of every
   project the caller may use; the logs installed apps declare on request) and merges them by the timestamp each line
@@ -1079,6 +1088,25 @@ cluster-aware from the first milestone: UUIDs, `scope`, `generation`, versioned 
   compaction, recovery after quorum loss, and member add and removal. Correctness, recovery and
   maintainability outweigh avoiding CGO; if CGO is needed it is isolated behind a build tag and the
   default binary stays `CGO_ENABLED=0`.
+
+### 11.1 Standalone stays as it is, and what stays true
+
+Cluster mode is a mode beside standalone, not a replacement. A host without a cluster behaves exactly as it does today:
+the direct committer of `internal/state` is the default and the local files and SQLite are the whole truth. Four things
+stay true so that cluster mode can be added without a break of stored state or of the API:
+
+- Every change of an object goes through `state.Apply(Command)`. The serialised `Command` is frozen by golden tests
+  (`internal/state`), applying it is deterministic (no clock, randomness or environment inside), and a test fails when anything
+  outside `internal/state` writes to `objects/`.
+- A command with a version the binary does not know is refused, and an object or a database newer than the binary is refused
+  (the upgrade guarantee, [upgrade-guarantee.md](upgrade-guarantee.md)).
+- Objects carry `uuid`, `scope`, `generation` and a `host` where a host matters, so that nothing has to be renamed for a log.
+- The API surface is frozen by the contract tests ([api.md](api.md)); cluster mode adds an extension, never changes a member.
+
+**A network is a property of a host.** Its uplink, its range and the NDP proxy differ per host, so one replicated network
+object cannot hold them. A network stays an object of one host, and when cluster mode exists a fleet template may sit on top
+of it, with the networks still made on each host. Users and tokens are fleet objects in the API but live in the local
+database today; they move into the state objects, with a real generation counter, before cluster mode is built.
 
 ## 12. Fleet sync
 

@@ -10,7 +10,8 @@ blocked, 8 the test cannot say.
 
 | Id | Looks at | If it is not ok |
 |---|---|---|
-| `host.release` | the running FreeBSD release | `fail` below 15.1: JailOps targets 15.1 and later; upgrade the host |
+| `host.release` | the running FreeBSD release | `fail` below 15.1: JailOps targets 15.1 and later; upgrade the host. `warn` for a release newer than the newest in the test matrix and for another major: it is supported once the PF traffic matrix and the e2e suites pass on it ([supported-versions.md](supported-versions.md)) |
+| `host.pkgbase` | whether the base system is installed from packages | `info` on pkgbase; `warn` on a host installed from distribution sets: nothing to do on 15.x, but FreeBSD 16 removes `freebsd-update`, so convert the host to pkgbase before a major upgrade |
 | `kernel.module.<name>` | `if_epair`, `pf`, `zfs` (and `linux64`, `linprocfs`, `linsysfs`, `fdescfs` while a Linux jail exists) | `kldload <name>` and add it to `/boot/loader.conf` |
 | `sysctl.<name>` | `kern.elf64.fallback_brand` for Linux jails | the daemon sets it at run time through the helper; check that the helper allows it |
 | `sysctl.net.inet.ip.forwarding`, `sysctl.net.inet6.ip6.forwarding` | forwarding, while a network needs it | `fail`: `sysctl <name>=1` and the `rc.conf` lines of [install.md](install.md) (JailOps never sets forwarding) |
@@ -29,6 +30,7 @@ blocked, 8 the test cannot say.
 | `pf.anchors` | the anchor line is in the loaded ruleset | add it to `pf.conf` among the filter rules and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `pf.inbound` | while a jail on an IPv6 or a non-NAT IPv4 network exists: a `block ... quick` rule for every source before the anchor line, or a hand-written `pass ... quick` rule for a jail prefix | `fail` for the block (it drops inbound traffic to the jails before their policies are asked: decide whether that is what the rule is for; to let the policies decide, move the anchor line above it; rules for single sources, such as a blocklist, are not flagged), `warn` for the pass (it keeps a jail without an `allow in` rule reachable: delete it; the jail's own `allow in` rules open the uplink, [install.md](install.md) section 3) |
+| `jails.cpuset` | the CPUs that jails are pinned to (`limits.cpuset`) exist on this host | no line when no jail has a cpuset; `ok` when every CPU exists; `warn` for a jail whose cpuset names a CPU the host does not have (it does not start; a profile written for a larger host does that); `jailops config set JAIL limits.cpuset 0-3` for the CPUs the host has |
 | `jails.exposed` | the jails whose anchor has a pass rule on an uplink | `info`: lists the jails the Internet can reach and their ports (a port forward, or an `allow in` rule with an external source), so the rules a project's administrator writes for his own jail are visible to the others |
 | `jails.inbound-without-source` | jails on a routed address with an `allow in` rule that names no source | `info`: such a rule is for the project's jails and the host and does not open the uplink; give it `--from any` or use `jailops expose JAIL PORTS` |
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
@@ -158,6 +160,12 @@ inside still holds a file open (`fstat -f /usr/local/jailops/projects/...`).
 
 **An `/etc` merge conflict (`merge_conflict`) on upgrade.** The jail stays on the old generation. Resolve the listed files in the
 jail, then `jailops jail upgrade` again.
+
+**`jailops jail convert` fails or says `busy`.** A failure puts the old layout back: the jail keeps its layout and runs, and the log of the
+operation says which step failed (often the disk limit: both roots count until the conversion ends, so raise `limits.disk` or
+free space, then convert again). `busy` means a `root.new` or `root.stale` is left by an interrupted operation: run
+an operation the daemon was interrupted in (it rolls those back when it starts: restart `jailopsd` and look at `jailops doctor`). A thick jail whose image generation was deleted needs `--image` to name one
+([storage.md](storage.md#changing-the-layout-of-a-jail)).
 
 **`unverified_platform`.** The feature needs a facility this host does not have, or that was never proven on FreeBSD 15.1 or later.
 The hint says which.

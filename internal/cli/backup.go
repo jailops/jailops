@@ -3,6 +3,9 @@ package cli
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -481,8 +484,223 @@ created without recipients, to add recipients, or to retry a failed escrow.`,
 		},
 	}
 	escrow.Flags().StringArrayVar(&erecips, "recipient", nil, "age public key to escrow to (repeatable)")
-	kc.AddCommand(status, create, escrow)
+	kc.AddCommand(status, create, escrow, a.backupKeyImport())
 	return kc
+}
+
+// backupKeyImport is `backup key import`: the key a lost host had, installed on a new one.
+func (a *app) backupKeyImport() *cobra.Command {
+	var file, passFile, identityFile, domain string
+	var replace, noVerify bool
+	cmd := &cobra.Command{
+		Use:   "import [--file FILE|-] [--identity-file FILE]",
+		Short: "Install the backup key of a lost host on this one",
+		Long: `Install a backup key that was made elsewhere, so that a new host can list and restore the
+backups of a host that is gone. Three sources:
+
+  the recovery key       the JOR1-... text that 'backup key create' printed once: read from a prompt
+                         (nothing is echoed), or with --file - from standard input, or from a file
+  a key file             a copy of the backup.key of the lost host, with --file; a file protected by a
+                         passphrase asks for it, or reads it with --passphrase-file
+  the escrow blob        the key wrapped to your age recipients and stored on the backup node:
+                         --identity-file reads the age identity (AGE-SECRET-KEY-1...) that opens it,
+                         --domain names the blob when the node holds several
+
+Before anything is written the key is checked against the repository: a key whose domain differs from
+the one the backup node recorded is refused, so a wrong key never gets as far as a restore. The key
+domain is not secret; it is the fingerprint to compare with the one 'backup key status' showed on the
+old host. The key file is written next to the host's own, mode 0600. When the host already holds this
+key nothing changes; a different key needs --replace, which keeps the old key file beside the new one.
+The catalog is rebuilt from the repository, so 'backup list' shows the backups at once.
+
+--no-verify installs the key without asking the backup node (a node that is not enrolled yet or does
+not answer). With --dry-run the key is checked and nothing is written.`,
+		Example: `jailops backup key import
+jailops backup key import --file recovery-key.txt
+echo JOR1-... | jailops backup key import --file -
+jailops backup key import --file old-host-backup.key --passphrase-file pass.txt
+jailops backup key import --identity-file recovery-identity.txt`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			in, err := a.keyImportRequest(file, passFile, identityFile, domain)
+			if err != nil {
+				return err
+			}
+			in.Replace, in.SkipNodeCheck, in.Check = replace, noVerify, a.dryRun
+			c, err := a.connect(cmd.Context())
+			if err != nil {
+				return err
+			}
+			out, err := c.Backups().ImportKey(cmd.Context(), in)
+			if err != nil {
+				return err
+			}
+			if out.Warning != "" {
+				fprintf(a.env.Stderr, "warning: %s\n", out.Warning)
+			}
+			if out.Installed && !out.Verified {
+				if noVerify {
+					fprintln(a.env.Stderr, "warning: the key was not checked against the repository")
+				} else if out.Repository == "" {
+					fprintln(a.env.Stderr, "note: the repository records no key domain yet, so there was nothing to compare the key with")
+				}
+			}
+			result := keyImportResult(out, a.dryRun)
+			if err := a.emit(out, nil, func() ([]string, [][]string) {
+				repo := "not checked"
+				switch {
+				case out.Verified:
+					repo = out.Repository + " (matches)"
+				case out.Repository != "":
+					repo = out.Repository
+				case !noVerify:
+					repo = "records no key domain"
+				}
+				return []string{"DOMAIN", "REPOSITORY", "RESULT", "BACKUPS"}, [][]string{{out.Domain, repo, result, dash(itoaIf(out.Backups))}}
+			}, func() []string { return []string{out.Domain} }); err != nil {
+				return err
+			}
+			if out.Installed && out.Aside != "" {
+				fprintf(a.env.Stderr, "the old key file is kept as %s\n", out.Aside)
+			}
+			if out.Installed && out.Backups > 0 {
+				fprintln(a.env.Stderr, "next: jailops backup list, then jailops backup restore BACKUP --project PROJECT")
+			}
+			return nil
+		},
+	}
+	f := cmd.Flags()
+	f.StringVar(&file, "file", "", "read the recovery key or a key file from this file (- for standard input)")
+	f.StringVar(&passFile, "passphrase-file", "", "read the passphrase of a protected key file from the first line of this file (- for standard input)")
+	f.StringVar(&identityFile, "identity-file", "", "open the escrow blob on the backup node with the age identity in this file (- for standard input)")
+	f.StringVar(&domain, "domain", "", "the key domain whose escrow blob to open (default: any blob the identity opens)")
+	f.BoolVar(&replace, "replace", false, "replace a different key this host holds (the old key file is kept beside the new one)")
+	f.BoolVar(&noVerify, "no-verify", false, "install without asking the backup node whether it records this key domain")
+	return cmd
+}
+
+// keyImportRequest reads the key to import: the recovery key (a prompt, a file or standard input), a key file or an age
+// identity. The secret is held in the request only.
+func (a *app) keyImportRequest(file, passFile, identityFile, domain string) (api.BackupKeyImport, error) {
+	var in api.BackupKeyImport
+	if file != "" && identityFile != "" {
+		return in, usagef("give one source of the key: --file or --identity-file")
+	}
+	switch {
+	case identityFile != "":
+		id, err := a.readAgeIdentity(identityFile)
+		if err != nil {
+			return in, err
+		}
+		in.Identity, in.Domain = id, domain
+	case file != "":
+		var raw []byte
+		if file == "-" {
+			b, err := io.ReadAll(io.LimitReader(a.in, 64<<10))
+			if err != nil {
+				return in, usagef("reading standard input: %v", err)
+			}
+			raw = b
+		} else {
+			b, err := os.ReadFile(file)
+			if err != nil {
+				return in, usagef("reading the key file: %v", err)
+			}
+			raw = b
+		}
+		text := strings.TrimSpace(string(raw))
+		switch {
+		case strings.HasPrefix(text, "{"):
+			in.KeyFile = text
+			if passFile != "" {
+				p, err := a.readSecretFile("passphrase", passFile)
+				if err != nil {
+					return in, err
+				}
+				in.Passphrase = p
+			} else if strings.Contains(text, `"protection": "passphrase"`) || strings.Contains(text, `"protection":"passphrase"`) {
+				p, err := a.env.ReadSecret("Passphrase of the key file: ")
+				if err != nil {
+					return in, err
+				}
+				in.Passphrase = p
+			}
+		case text != "":
+			// a recovery key: the first line, anything after it is a mistake
+			line, rest, _ := strings.Cut(text, "\n")
+			if strings.TrimSpace(rest) != "" {
+				return in, usagef("%s must hold one line: the recovery key", file)
+			}
+			in.RecoveryKey = strings.TrimSpace(line)
+		default:
+			return in, usagef("%s is empty", file)
+		}
+	default:
+		k, err := a.env.ReadSecret("Recovery key (JOR1-...): ")
+		if err != nil {
+			return in, usagef("no key given: use --file FILE (- for standard input) or --identity-file FILE, or run this in a terminal to be asked for the recovery key")
+		}
+		if k = strings.TrimSpace(k); k == "" {
+			return in, usagef("the recovery key is empty")
+		}
+		in.RecoveryKey = k
+	}
+	if passFile != "" && in.KeyFile == "" {
+		return in, usagef("--passphrase-file is for a key file given with --file")
+	}
+	return in, nil
+}
+
+// readAgeIdentity reads an age identity from a file or from standard input (-): the line that starts with
+// AGE-SECRET-KEY-1, wherever it stands, since age-keygen writes comment lines before it.
+func (a *app) readAgeIdentity(path string) (string, error) {
+	var raw []byte
+	if path == "-" {
+		b, err := io.ReadAll(io.LimitReader(a.in, 64<<10))
+		if err != nil {
+			return "", usagef("reading standard input: %v", err)
+		}
+		raw = b
+	} else {
+		if fi, err := os.Stat(path); err == nil && fi.Mode().Perm()&0o077 != 0 {
+			fprintf(a.env.Stderr, "warning: %s can be read by other users; keep an identity file at mode 0600\n", path)
+		}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			return "", usagef("reading the identity file: %v", err)
+		}
+		raw = b
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		if line = strings.TrimSpace(line); strings.HasPrefix(line, "AGE-SECRET-KEY-1") {
+			return line, nil
+		}
+	}
+	return "", usagef("%s holds no age identity (a line that starts with AGE-SECRET-KEY-1)", path)
+}
+
+func keyImportResult(out api.BackupKeyImported, dry bool) string {
+	switch {
+	case dry && out.Existing == out.Domain:
+		return "already held"
+	case dry && out.Existing != "":
+		return "would replace"
+	case dry:
+		return "would install"
+	case out.Installed && out.Replaced:
+		return "replaced"
+	case out.Installed:
+		return "installed"
+	default:
+		return "already held"
+	}
+}
+
+func itoaIf(n int) string {
+	if n == 0 {
+		return ""
+	}
+	return strconv.Itoa(n)
 }
 
 func checkRecipients(r []string) error {

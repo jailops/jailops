@@ -101,13 +101,14 @@ $ jailops config show nginx -o yaml
   value: default
 
 $ jailops config keys limits
-KEY                       TYPE   RESTART   DESCRIPTION
-limits.cpu                int    yes       CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.
-limits.disk               size   no        ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.
-limits.disk_reservation   size   no        ZFS reservation of the jail's container.
-limits.memory             size   yes       Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.
-limits.pids               int    yes       Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.
-limits.states             int    no        Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.
+KEY                       TYPE     RESTART   DESCRIPTION
+limits.cpu                int      yes       CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.
+limits.cpuset             string   yes       CPUs the jail runs on (cpuset(1)): a list such as 2,3 or 0-3,6, kept as sorted ranges. Needs no resource accounting. A CPU the host does not have stops the jail from starting.
+limits.disk               size     no        ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.
+limits.disk_reservation   size     no        ZFS reservation of the jail's container.
+limits.memory             size     yes       Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.
+limits.pids               int      yes       Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.
+limits.states             int      no        Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.
 
 $ jailops --dry-run config set nginx limits.cpu 8
 dry-run: would update the configuration of jail nginx

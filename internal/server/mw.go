@@ -31,6 +31,11 @@ type route struct {
 	long bool
 	// local routes answer for this daemon only: ?host= is never forwarded (GET /readyz).
 	local bool
+	// stream routes read a request body that is not JSON and not small (the import of a jail): it is not bounded by MaxBody.
+	stream bool
+	// bulk routes stream a body of any size (file transfers): the request body is not cut at MaxBody, the handler
+	// bounds it, and the read and write deadlines of the connection are the handler's to lift.
+	bulk bool
 }
 
 // rc is the per-request context handed to handlers.
@@ -215,7 +220,7 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 			info.route = rt.method + " " + rt.pattern
 			defer func() { info.actor = c.actor.Name }()
 		}
-		if r.Body != nil {
+		if r.Body != nil && !rt.stream && !rt.bulk {
 			r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBody)
 		}
 		ar, aerr := s.authenticate(r)
@@ -331,6 +336,9 @@ func (s *Server) wrap(rt route) http.HandlerFunc {
 		func() {
 			defer func() {
 				if p := recover(); p != nil {
+					if p == http.ErrAbortHandler { // a download that fails after it began: the connection is cut, nothing more is written
+						panic(p)
+					}
 					s.log.Error("panic in handler", "rid", c.rid, "route", rt.method+" "+rt.pattern, "panic", p, "stack", string(debug.Stack()))
 					c.fail(api.Errorf(api.CodeInternal, "internal error").WithHint("see the daemon log for request " + c.rid))
 				}

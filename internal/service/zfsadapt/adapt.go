@@ -266,3 +266,19 @@ func (a *Adapter) Holds(ctx context.Context, snapshot string) ([]string, error) 
 func (a *Adapter) Diff(ctx context.Context, from, to string, limit int, skip []string) (zfs.DiffResult, error) {
 	return a.C.Diff(ctx, from, to, limit, skip)
 }
+
+// SendStream is `zfs send [-i from] [-w] snapshot` into w. from is the short name of an earlier snapshot of the same
+// dataset ("" for a full stream); raw sends an encrypted dataset as stored.
+func (a *Adapter) SendStream(ctx context.Context, snapshot, from string, raw bool, w io.Writer) error {
+	o := zfs.SendOpts{Snapshot: snapshot, Raw: raw}
+	if from != "" {
+		ds, _, _ := strings.Cut(snapshot, "@")
+		o.From = ds + "@" + from
+	}
+	return a.C.Send(ctx, o, w)
+}
+
+// ReceiveStream is `zfs receive -u [-o prop=value ...] target` from r. A received stream never mounts the dataset.
+func (a *Adapter) ReceiveStream(ctx context.Context, target string, props map[string]string, r io.Reader) error {
+	return a.C.Receive(ctx, zfs.ReceiveOpts{Target: target, Props: props}, r)
+}

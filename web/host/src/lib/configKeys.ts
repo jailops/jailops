@@ -149,7 +149,7 @@ export function expandedSources(spec: JailSpec, profiles: Profile[]): Record<str
 }
 
 export interface Msgs {
-  int: string; size: string; rate: string; mac: string; address: string; listen: string; bool: string; name: string
+  int: string; size: string; rate: string; mac: string; address: string; listen: string; bool: string; name: string; cpuset: string
   enum: (opts: string[]) => string
 }
 
@@ -157,6 +157,7 @@ export interface Msgs {
 export function validate(k: ConfigKey, value: string, m: Msgs): string | undefined {
   const v = value.trim()
   if (v === '') return undefined
+  if (k.name === 'limits.cpuset') return /^\d+(-\d+)?(,\d+(-\d+)?)*$/.test(v.replace(/\s+/g, '')) ? undefined : m.cpuset
   switch (k.type) {
     case 'int': return /^-?\d+$/.test(v) ? undefined : m.int
     case 'size': return validSize(v) ? undefined : m.size

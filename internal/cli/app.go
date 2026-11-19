@@ -133,6 +133,8 @@ type app struct {
 	conn    *Connection
 	// passFile is --passphrase-file of a jail creation (volkeys.go).
 	passFile string
+	// fromDir is --from-dir of a volume creation (volume.go).
+	fromDir string
 	// empty is what an empty list says instead of the generic "No resources found."
 	empty string
 }

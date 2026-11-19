@@ -17,6 +17,15 @@ export function canShell(project?: string): boolean {
   return hasExt('jail_console') && (!r || r === 'operator' || r === 'admin') && inScope(project)
 }
 
+/** Files go to and from a running jail with the same role as the shell (extension jail_files). */
+export function canFiles(project?: string): boolean {
+  const r = session.role
+  return hasExt('jail_files') && (!r || r === 'operator' || r === 'admin') && inScope(project)
+}
+
+/** Many jails run one command through console sessions: the shell's role. */
+export const canRunMany = (project?: string): boolean => canShell(project)
+
 /** Labels change with PATCH /jails/{name}, which needs admin in the project. */
 export function canEditLabels(project?: string): boolean {
   const r = session.role

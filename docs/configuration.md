@@ -40,6 +40,7 @@ Only `pool` has no default. Sample: `packaging/jailopsd.yaml`.
 | `zfs.compat_file`, `.compat_dir` | empty | an OpenZFS compatibility file name (for example `openzfs-2.2-freebsd`) to compare pool features with an older replication target; empty skips the check |
 | `limits.max_body_bytes`, `.request_timeout` | `4194304`, `60s` | request bounds |
 | `limits.auth_failure_threshold` | `5` | failed authentications from one source before it is locked out |
+| `limits.file_copy_bytes` | `2147483648` | the most bytes one `jailops cp` transfer or console upload may carry ([operations.md](operations.md#copying-files)) |
 | `limits.exec_sessions_per_jail`, `.exec_idle`, `.exec_max` | `8`, `30m`, `12h` | exec and console session bounds |
 | `projects.network_pool`, `.network_bits`, `.uplink`, `.nat` | none | the IPv4 pool `project create NAME --new-network` carves a `/24` from; without it that option answers `unsupported` |
 | `updates.tick`, `.project_files_dir` | `1m`, `<state_dir>/project-files` | how often update schedules run; where provisioning files live, one directory per project |

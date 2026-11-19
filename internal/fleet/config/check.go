@@ -40,6 +40,13 @@ func (f *Fleet) Check() error {
 		f.Warnings = append(f.Warnings, fmt.Sprintf("%s: %s", o.Origin, fmt.Sprintf(format, args...)))
 	}
 
+	// A file written for an earlier release is read as the current shapes: say what to change in it.
+	for _, o := range f.Objects {
+		for _, u := range o.Upgraded {
+			note(o, "written for an earlier release: %s; change the file to the current form", u)
+		}
+	}
+
 	// Every SOPS file needs a creation_rule, or nobody knows who may decrypt it.
 	if f.SopsSecrets != nil {
 		if err := vault.CheckCovered(f.Path, vault.SecretsRel); err != nil {

@@ -19,7 +19,7 @@ $ jailops exec ghost -- echo x
 [exit 4]
 
 $ jailops exec web
-! usage: requires at least 2 arg(s), only received 1
+! usage: name the command to run after --
 ! hint: run 'jailops exec --help' for usage
 [exit 2]
 

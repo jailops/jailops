@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"jailops.net/jailops/sdk/api"
 )
@@ -25,8 +26,15 @@ func (s *Server) ExecCalls() []ExecCall {
 	return append([]ExecCall(nil), s.execCalls...)
 }
 
+// PeakExecs is the most commands that ran at the same time.
+func (s *Server) PeakExecs() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.execPeak
+}
+
 // jailExec implements POST /api/v1/jails/<n>/exec with a few built-in programs:
-// "echo ARGS", "cat" (stdin to stdout), "stderr TEXT", "exit N".
+// "echo ARGS", "cat" (stdin to stdout), "stderr TEXT", "exit N", "sleep MS".
 func (s *Server) jailExec(w http.ResponseWriter, r *http.Request) {
 	req, e := decode[api.ExecRequest](r)
 	if e != nil {
@@ -71,7 +79,14 @@ func (s *Server) jailExec(w http.ResponseWriter, r *http.Request) {
 	if req.Shell || len(argv) == 0 {
 		argv = []string{"cat"}
 	}
+	s.mu.Lock()
+	s.execActive++
+	s.execPeak = max(s.execPeak, s.execActive)
+	s.mu.Unlock()
 	code := runFakeProgram(brw.Reader, conn, argv)
+	s.mu.Lock()
+	s.execActive--
+	s.mu.Unlock()
 	_ = api.WriteFrame(conn, api.FrameExit, api.Int32Payload(int32(code)))
 }
 
@@ -81,6 +96,11 @@ func runFakeProgram(in *bufio.Reader, out io.Writer, argv []string) int {
 		_ = api.WriteFrame(out, api.FrameStdout, []byte(strings.Join(argv[1:], " ")+"\n"))
 	case "stderr":
 		_ = api.WriteFrame(out, api.FrameStderr, []byte(strings.Join(argv[1:], " ")))
+	case "sleep": // "sleep MILLISECONDS"
+		if len(argv) > 1 {
+			n, _ := strconv.Atoi(argv[1])
+			time.Sleep(time.Duration(n) * time.Millisecond)
+		}
 	case "exit":
 		if len(argv) > 1 {
 			n, _ := strconv.Atoi(argv[1])
