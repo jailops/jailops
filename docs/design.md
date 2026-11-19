@@ -835,7 +835,7 @@ updates:
   start: it is the jail's `ShellSetup` condition. Existing jails change only when asked (`jailops jail shell-setup`, `POST
   /api/v1/jails/{name}/shell-setup`, operator, extension `jail_shell_setup`); a changed `prompt` is written at once into a
   running jail and at the next start of a stopped one, and `none` removes the file and the blocks. Linux jails are left
-  alone. The host's prompt is not managed (a paste, [appliance.md](appliance.md#the-shell-prompt-of-the-host)).
+  alone. The host's prompt is not managed (a paste, [appliance.md](appliance.md#the-shell-prompt-of-the-host-not-a-module)).
 - **Provisioning** is a short, repeatable creation step, not a configuration-management system:
 
 ```

@@ -1,7 +1,7 @@
 #!/bin/sh
 # Prose that tells the history of the code, the history of a test run, or sells, does not belong in the docs, the
 # help texts or the comments. This script lists such phrases and exits 1 when it finds one. A line that has a reason to
-# keep a phrase ends with the marker `lint-prose: allow`. Not scanned: CHANGELOG.md, docs/upgrade.md (upgrade notes name
+# keep a phrase ends with the marker `lint-prose: allow`. The address of a link is not prose: a word in a URL is not matched. Not scanned: CHANGELOG.md, docs/upgrade.md (upgrade notes name
 # versions), docs/design.md (the status register), tests, and the state migrations.
 set -eu
 cd "$(dirname "$0")/.."
@@ -19,7 +19,8 @@ rc=0
 for group in HISTORY DIARY FILLER CLAIM; do
 	eval "pattern=\$$group"
 	hits=$(echo "$FILES" | xargs grep -nIiE "$pattern" | grep -v 'lint-prose: allow' |
-		grep -vE 'compat/linux|mountpoint[=: ]*legacy' || true)
+		grep -vE 'compat/linux|mountpoint[=: ]*legacy' |
+		sed -E 's#https?://[^ )>"`]*##g' | grep -iE "$pattern" || true)
 	if [ -n "$hits" ]; then
 		echo "lint-prose: $group" >&2
 		echo "$hits" >&2
