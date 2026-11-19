@@ -6,7 +6,7 @@
 #
 #   sh scripts/ci-freebsd-pf.sh              the whole matrix
 #   PF_FAST=1 sh scripts/ci-freebsd-pf.sh    skip the phases that wait for minutes
-#   PF_SHARD=a|b|c ...                      one third of the matrix (a: phases 0-0e, 11, 11b, 12; b: 1-8 and the last two blocks; c: 5b); CI runs the three apart
+#   PF_SHARD=a|b|c|d ...                    a quarter of the matrix (a: phases 0-0e; b: 1-8 and the last two blocks; c: 5b; d: 11, 11b, 12); CI runs the four apart
 #   PF_KEEP=1 ...                            leave the projects and jails in place to look at them
 #   FORGE_BIN=/path/to/forge-freebsd-<arch>  run phase 0e, the forged-frame probes (scripts/forge); skipped without it
 #
@@ -300,7 +300,7 @@ matrix() { # matrix SRC ICMP T8080 T9090 T2222 UDP5353   (each allow|deny)
 }
 
 # prep_policies: the policies, address sets and attachments that phases 1 to 5 leave behind, made without their probes. A shard
-# that starts after them (PF_SHARD c and a) calls it instead of running them; the phases below set the same things with their probes.
+# that starts after them (PF_SHARD c and d) calls it instead of running them; the phases below set the same things with their probes.
 prep_policies() {
 	PRE=$(snapshot)
 	policy pfa base 'default_in: deny
@@ -335,11 +335,11 @@ rules:
 	settle 10
 }
 
-# The phases are split in three shards that CI runs on VMs of their own (PF_SHARD): a = the phases without a policy (0 to 0e), the port
-# forward and the bandwidth limits; b = phases 1 to 8 and the last two blocks; c = phase 5b. all (default) runs them in the order below.
-# A shard sets up the same jails (the setup above); a and c bring the policies of phases 1 to 5 about with prep_policies.
+# The phases are split in four shards that CI runs on VMs of their own (PF_SHARD): a = the phases without a policy (0 to 0e); b = phases 1
+# to 8 and the last two blocks; c = phase 5b; d = the port forward, the uplink and the bandwidth limits (11 to 12). all (default) runs them
+# in the order below. A shard sets up the same jails (the setup above); c and d bring the policies of phases 1 to 5 about with prep_policies.
 shard=${PF_SHARD:-all}
-case $shard in all | a | b | c) ;; *) echo "PF_SHARD must be all, a, b or c" >&2; exit 2 ;; esac
+case $shard in all | a | b | c | d) ;; *) echo "PF_SHARD must be all, a, b, c or d" >&2; exit 2 ;; esac
 shard_on() { [ "$shard" = all ] || [ "$shard" = "$1" ]; }
 
 if shard_on a; then # shard a
@@ -874,7 +874,7 @@ if [ -z "${PF_FAST:-}" ]; then
 fi
 fi
 
-if shard_on a; then
+if shard_on d; then
 [ "$shard" = all ] || prep_policies
 say "phase 11: a port forward (jailops expose with a host port) brings a connection that arrives on the uplink into the jail"
 # A redirect is rendered as "match in on <uplink> ... to (<uplink>) port H rdr-to <jail> port J" and applies only to packets that

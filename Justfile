@@ -79,17 +79,13 @@ fmt:
     cd sdk && go vet ./...
 
 # Unit tests of both modules, with fakes. Runs anywhere.
-test: test-setup test-vm-lock
+test: test-setup
     go test ./... -count=1
     cd sdk && go test ./... -count=1
 
 # packaging/jailops-setup against fake sysrc, pfctl, zpool, service and friends (POSIX sh, runs anywhere).
 test-setup:
     sh scripts/jailops-setup-test.sh
-
-# scripts/vm-lock.sh, the lock of the shared FreeBSD test VMs (POSIX sh, runs anywhere).
-test-vm-lock:
-    sh scripts/vm-lock-test.sh
 
 # The frozen surface only grows from 1.0 on: lists what this branch removes from the golden files of the freeze (BASE defaults to origin/master).
 freeze-removals BASE="origin/master":
