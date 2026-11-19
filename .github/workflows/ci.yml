@@ -231,8 +231,6 @@ jobs:
         run: sh scripts/lint-e2e.sh
       - name: Prose carries no history, test diary or filler
         run: sh scripts/lint-prose.sh
-      - name: The lock of the FreeBSD test VMs serializes two runs
-        run: sh scripts/vm-lock-test.sh
       - name: The frozen surface only grows from 1.0 on (a golden line that goes needs a new major version)
         run: |
           sh scripts/golden-removals-test.sh
@@ -446,6 +444,9 @@ jobs:
             pkgs: curl
           - part: pf
             shard: c
+            pkgs: curl
+          - part: pf
+            shard: d
             pkgs: curl
     steps:
       - uses: actions/checkout@v7

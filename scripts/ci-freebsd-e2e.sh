@@ -13,7 +13,7 @@
 #                    prepare (the machine set up with an image, a network and a project, left running: scripts/scale-study.sh starts there) or
 #                    linux (only the Linux jail block, without a FreeBSD image: the nightly .github/workflows/linux-e2e.yml; exit status 75 and the
 #                    line SKIPPED when dl-cdn.alpinelinux.org does not answer)
-# JAILOPS_PF_SHARD   a, b or c (with the part pf): the shard of the packet filter test (scripts/ci-freebsd-pf.sh); all (default) runs it whole
+# JAILOPS_PF_SHARD   a, b, c or d (with the part pf): the shard of the packet filter test (scripts/ci-freebsd-pf.sh); all (default) runs it whole
 # JAILOPS_E2E_POOL_SIZE  size of the file-backed scratch pool (default 8G)
 # The test host needs kern.racct.enable=1 in /boot/loader.conf (a boot tunable: reboot after adding it): the block on resource
 # limits checks the rctl rules, which the kernel accepts only with it.

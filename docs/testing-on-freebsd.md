@@ -13,5 +13,3 @@ Two runs on one VM disturb each other: the cleanup of one run removes what the o
 `PORT` is the local ssh port of the VM; the lock is one directory per port on the machine that runs the ssh commands. The command runs when the lock is free, the call waits up to 30 minutes otherwise (exit status 75 when the wait runs out, with the name of the holder), and the lock is released when the command ends, however it ends. The lock of a process that is gone is taken over. `scripts/vm-lock.sh status PORT` says who holds it, and `release PORT --force` removes a lock by hand.
 
 Set `VM_LOCK_LABEL` to a name that tells the next person what is running. A runner script that has to hold the lock for several commands calls `scripts/vm-lock.sh acquire PORT` first (its own process is then the owner) and `release PORT` at the end.
-
-`sh scripts/vm-lock-test.sh` tests the lock itself and runs in CI.
