@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -22,11 +23,11 @@ func (s *Server) jailRoutes() []route {
 		list: svc.ListJails,
 		get:  func(ctx context.Context, k string) (api.Jail, error) { return svc.GetJail(ctx, k) },
 		put:  svc.UpdateJail, patch: svc.PatchJail,
-		expanded: func(ctx context.Context, k string) (any, int64, error) {
+		expanded: func(ctx context.Context, k string) (any, string, error) {
 			v, err := svc.ExpandedJail(ctx, k)
-			return v, v.Jail.Metadata.Generation, err
+			return v, api.ETag(v.Jail.Metadata.UUID, v.Jail.Metadata.Generation), err
 		},
-		gen: func(v api.Jail) int64 { return v.Metadata.Generation }, name: func(v api.Jail) string { return v.Metadata.Name },
+		etag: func(v api.Jail) string { return api.ETag(v.Metadata.UUID, v.Metadata.Generation) }, name: func(v api.Jail) string { return v.Metadata.Name },
 	}.routes()
 	jr = append(jr,
 		route{method: "POST", pattern: "/api/v1/jails", h: func(c *rc) error {
@@ -35,7 +36,7 @@ func (s *Server) jailRoutes() []route {
 				return err
 			}
 			c.object = "/api/v1/jails/" + j.Metadata.Name
-			op, err := svc.CreateJail(c.r.Context(), j)
+			op, err := c.idempotent(j, func() (api.Operation, error) { return svc.CreateJail(c.r.Context(), j) })
 			if err != nil {
 				return err
 			}
@@ -43,14 +44,18 @@ func (s *Server) jailRoutes() []route {
 			return nil
 		}},
 		route{method: "DELETE", pattern: "/api/v1/jails/{name}", h: func(c *rc) error {
-			op, err := svc.DeleteJail(c.r.Context(), c.pathArg("name"))
+			expect, err := c.expect()
+			if err != nil {
+				return err
+			}
+			op, err := svc.DeleteJail(c.r.Context(), c.pathArg("name"), expect)
 			if err != nil {
 				return err
 			}
 			c.async(op)
 			return nil
 		}},
-		route{method: "POST", pattern: "/api/v1/jails/{name}", h: func(c *rc) error {
+		route{method: "POST", pattern: "/api/v1/jails/{name}/copy", h: func(c *rc) error {
 			var cp api.JailCopy
 			if err := c.decode(&cp); err != nil {
 				return err
@@ -64,7 +69,6 @@ func (s *Server) jailRoutes() []route {
 		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/exec", long: true, h: s.handleExec},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/export", long: true, h: s.handleExport},
-		route{method: "POST", pattern: "/api/v1/jail-imports/preflight", h: s.handleImportPreflight},
 		route{method: "POST", pattern: "/api/v1/jail-imports", long: true, stream: true, h: s.handleImport},
 		// the files below the jail's root, for `jailops cp` and the console (files.go)
 		route{method: "GET", pattern: "/api/v1/jails/{name}/files/{path...}", long: true, bulk: true, h: s.handleFileGet},
@@ -80,7 +84,7 @@ func (s *Server) jailRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/usage", h: func(c *rc) error {
@@ -88,7 +92,7 @@ func (s *Server) jailRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/logs", h: func(c *rc) error {
@@ -99,7 +103,7 @@ func (s *Server) jailRoutes() []route {
 			if truncated {
 				c.w.Header().Set(api.HeaderTruncated, "true")
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/logs/{file...}", h: func(c *rc) error {
@@ -111,7 +115,7 @@ func (s *Server) jailRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "GET", pattern: "/api/v1/jails/{name}/app-draft", h: func(c *rc) error {
@@ -119,7 +123,7 @@ func (s *Server) jailRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "PUT", pattern: "/api/v1/jails/{name}/state", h: func(c *rc) error {
@@ -140,7 +144,7 @@ func (s *Server) jailRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/volumes", h: func(c *rc) error {
@@ -170,7 +174,7 @@ func (s *Server) jailRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "POST", pattern: "/api/v1/jails/{name}/snapshots", h: func(c *rc) error {
@@ -203,7 +207,7 @@ func (s *Server) jailRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		route{method: "DELETE", pattern: "/api/v1/jails/{name}/snapshots/{snapshot}", h: func(c *rc) error {
@@ -264,7 +268,7 @@ func (s *Server) operationRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		{method: "GET", pattern: "/api/v1/operations/{id}", h: func(c *rc) error {
@@ -272,7 +276,7 @@ func (s *Server) operationRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		{method: "GET", pattern: "/api/v1/operations/{id}/wait", long: true, h: func(c *rc) error {
@@ -288,14 +292,14 @@ func (s *Server) operationRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		{method: "DELETE", pattern: "/api/v1/operations/{id}", h: func(c *rc) error {
 			if err := svc.CancelOperation(c.r.Context(), c.pathArg("id")); err != nil {
 				return err
 			}
-			c.sync(200, struct{}{}, 0)
+			c.sync(200, struct{}{}, "")
 			return nil
 		}},
 	}
@@ -313,10 +317,10 @@ func (s *Server) handleAudit(c *rc) error {
 		}
 		aq.Limit = n
 	}
-	if v := q.Get("before"); v != "" {
+	if v := q.Get("cursor"); v != "" {
 		n, err := strconv.ParseInt(v, 10, 64)
-		if err != nil {
-			return api.Errorf(api.CodeInvalid, "before must be an entry id")
+		if err != nil || n <= 0 {
+			return api.Errorf(api.CodeInvalid, "cursor must be the one the previous page gave")
 		}
 		aq.BeforeID = n
 	}
@@ -331,7 +335,17 @@ func (s *Server) handleAudit(c *rc) error {
 	if err != nil {
 		return err
 	}
-	c.sync(200, v, 0)
+	// a full page may have an older one: the Link header names it (rel="next"), the cursor is the id of the oldest entry
+	if limit := service.AuditLimit(aq.Limit); len(v) == limit {
+		next := url.Values{"cursor": {v[len(v)-1].ID}, "limit": {strconv.Itoa(limit)}}
+		for _, k := range []string{"actor", "since", "project"} {
+			if x := q.Get(k); x != "" {
+				next.Set(k, x)
+			}
+		}
+		c.w.Header().Set("Link", "</api/v1/audit?"+next.Encode()+`>; rel="next"`)
+	}
+	c.sync(200, v, "")
 	return nil
 }
 
@@ -453,7 +467,7 @@ func (s *Server) authRoutes() []route {
 			http.SetCookie(c.w, &http.Cookie{Name: "jailops_csrf", Value: sess.CSRF, Path: "/", Secure: secure(c),
 				SameSite: http.SameSiteStrictMode, MaxAge: int(maxAge / time.Second)})
 			c.sync(200, map[string]any{"user": sess.User, "permission": sess.Perm, "projects": sess.Projects, "global": sess.Global,
-				"expires_at": sess.ExpiresAt, "csrf": sess.CSRF}, 0)
+				"expires_at": sess.ExpiresAt, "csrf": sess.CSRF}, "")
 			return nil
 		}},
 		{method: "POST", pattern: "/api/v1/auth/logout", h: func(c *rc) error {
@@ -464,7 +478,7 @@ func (s *Server) authRoutes() []route {
 			}
 			http.SetCookie(c.w, auth.ClearSessionCookie(secure(c)))
 			http.SetCookie(c.w, &http.Cookie{Name: "jailops_csrf", Path: "/", MaxAge: -1, Secure: secure(c)})
-			c.sync(200, struct{}{}, 0)
+			c.sync(200, struct{}{}, "")
 			return nil
 		}},
 		{method: "GET", pattern: "/api/v1/auth/session", h: func(c *rc) error {
@@ -474,7 +488,7 @@ func (s *Server) authRoutes() []route {
 					out.TOTP = info.TOTP
 				}
 			}
-			c.sync(200, out, 0)
+			c.sync(200, out, "")
 			return nil
 		}},
 		{method: "POST", pattern: "/api/v1/auth/password", h: func(c *rc) error {
@@ -491,7 +505,7 @@ func (s *Server) authRoutes() []route {
 			if err := svc.ChangePassword(c.r.Context(), c.actor.Name, req.Current, req.New); err != nil {
 				return err
 			}
-			c.sync(200, struct{}{}, 0)
+			c.sync(200, struct{}{}, "")
 			return nil
 		}},
 		{method: "POST", pattern: "/api/v1/auth/totp", h: func(c *rc) error {
@@ -511,14 +525,14 @@ func (s *Server) authRoutes() []route {
 				if err != nil {
 					return err
 				}
-				c.sync(200, v, 0)
+				c.sync(200, v, "")
 				return nil
 			}
 			codes, err := svc.ConfirmTOTP(c.r.Context(), c.actor.Name, req.Code)
 			if err != nil {
 				return err
 			}
-			c.sync(200, map[string]any{"recovery_codes": codes}, 0)
+			c.sync(200, map[string]any{"recovery_codes": codes}, "")
 			return nil
 		}},
 		{method: "DELETE", pattern: "/api/v1/auth/totp", h: func(c *rc) error {
@@ -534,7 +548,7 @@ func (s *Server) authRoutes() []route {
 			if err := svc.DisableTOTP(c.r.Context(), c.actor.Name, req.Password); err != nil {
 				return err
 			}
-			c.sync(200, struct{}{}, 0)
+			c.sync(200, struct{}{}, "")
 			return nil
 		}},
 		{method: "POST", pattern: "/api/v1/auth/recovery-codes", h: func(c *rc) error {
@@ -551,7 +565,7 @@ func (s *Server) authRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, map[string]any{"recovery_codes": codes}, 0)
+			c.sync(200, map[string]any{"recovery_codes": codes}, "")
 			return nil
 		}},
 	}

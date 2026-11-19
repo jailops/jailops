@@ -255,7 +255,7 @@ func (s *Service) ProvisionJail(ctx context.Context, name string, req api.Provis
 		return api.Operation{}, api.Errorf(api.CodeAlreadyExists, "jail %q was provisioned at %s", name, at.Format(time.RFC3339)).
 			WithHint("changing the declaration does nothing until you ask: provision --again")
 	}
-	return s.Submit(ctx, OpSpec{Description: "Provision jail " + name, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
+	return s.Submit(ctx, OpSpec{Action: api.OpJailProvision, Description: "Provision jail " + name, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			res, err := s.runProvision(ctx, key, j)

@@ -20,8 +20,8 @@ describe('stripControls', () => {
 describe('logQuery', () => {
   it('leaves defaults out and encodes the rest', () => {
     expect(logQuery({})).toBe('')
-    expect(logQuery({ tail: 200 })).toBe('')
-    expect(logQuery({ tail: 500, since: '15m', grep: 'GET /a b', offset: 1024 })).toBe('?tail=500&since=15m&grep=GET+%2Fa+b&offset=1024')
+    expect(logQuery({ limit: 200 })).toBe('')
+    expect(logQuery({ limit: 500, since: '15m', grep: 'GET /a b', offset: 1024 })).toBe('?limit=500&since=15m&grep=GET+%2Fa+b&offset=1024')
     expect(logQuery({ offset: 0, grep: '' })).toBe('')
   })
 })
@@ -66,7 +66,7 @@ describe('follow', () => {
 })
 
 describe('files', () => {
-  const f = (name: string, kind: 'active' | 'rotated', compressed = false): JailLogFile => ({ name, kind, size: 1, modified_at: '', ...(compressed ? { compressed } : {}) })
+  const f = (name: string, kind: 'active' | 'rotated', compressed = false): JailLogFile => ({ name, kind, size_bytes: 1, modified_at: '', ...(compressed ? { compressed } : {}) })
   const files = [f('messages.1.gz', 'rotated', true), f('nginx/access.log', 'active'), f('messages.0', 'rotated'), f('auth.log', 'active'), f('messages', 'active')]
   it('picks the asked file, one below an asked directory, else messages; never a compressed one', () => {
     expect(pickFile(files, 'nginx/access.log')).toBe('nginx/access.log')
@@ -111,7 +111,7 @@ describe('unified view', () => {
     const f = filterFromQuery({ jail: ['web', 'db'], grep: 'GET /a' }, 'web')
     expect(unifiedQuery(f)).toBe('?project=web&jail=web&jail=db&since=1h&grep=GET+%2Fa')
     const all = { ...f, all: true, project: '', jails: [], grep: '', since: '', appLogs: true, file: 'auth.log' }
-    expect(unifiedQuery(all, { 'web/web/messages': 120 }, 5000)).toBe('?all_projects=true&app_logs=true&file=auth.log&tail=5000&cursor=%7B%22web%2Fweb%2Fmessages%22%3A120%7D')
+    expect(unifiedQuery(all, { 'web/web/messages': 120 }, 5000)).toBe('?all_projects=true&app_logs=true&file=auth.log&limit=5000&cursor=%7B%22web%2Fweb%2Fmessages%22%3A120%7D')
     expect(unifiedQuery({ ...all, all: false, appLogs: false, file: 'messages' }, {})).toBe('')
   })
 

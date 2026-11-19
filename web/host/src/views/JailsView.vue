@@ -201,7 +201,7 @@ function one(n: string, a: Lifecycle, power: string): void {
                 <td :data-label="s.jails.name"><router-link class="mono jail-link" :to="`/jails/${j.metadata.name}`">{{ j.metadata.name }}</router-link></td>
                 <td :data-label="s.jails.state"><StatePill :state="j.status.power" /><LockChip v-if="j.status.locked?.length" :volumes="j.status.locked" :jail="j.metadata.name" /></td>
                 <td class="labels-cell" :data-label="s.labels.title"><LabelChips :labels="j.metadata.labels" :max="2" pick @pick="pick" /></td>
-                <td class="mono hide-sm" :data-label="s.jails.image">{{ j.spec.image }}<span v-if="j.status.generation" class="faint" data-test="jail-generation" :title="j.status.freebsd_version">{{ ' ' + genLabel(j.spec.image, j.status.generation, j.status.freebsd_version) }}</span></td>
+                <td class="mono hide-sm" :data-label="s.jails.image">{{ j.spec.image }}<span v-if="j.status.image_generation" class="faint" data-test="jail-generation" :title="j.status.freebsd_version">{{ ' ' + genLabel(j.spec.image, j.status.image_generation, j.status.freebsd_version) }}</span></td>
                 <td class="mono hide-sm" :data-label="s.jails.addresses">{{ (j.status.addresses ?? []).map(shortAddr).join(', ') || '-' }}</td>
                 <td :data-label="s.jails.drift"><span v-if="j.status.drift?.length" class="pill warn">{{ s.overview.drift(j.status.drift.length) }}</span><span v-else class="faint">{{ s.jails.inSync }}</span></td>
                 <td class="faint hide-sm hide-md nowrap started-cell" :data-label="s.jails.started"><TimeStamp v-if="j.status.power === 'running'" :ts="j.status.started_at" /><span v-else>-</span></td>

@@ -31,7 +31,7 @@ tries again, with an event `jail-shell-setup-cancelled`. A later start, while ba
 first (`pkg -r ROOT install -y bash`, with the host's own network, whatever the jail's firewall says; up to three times, 20 seconds
 each). When the installation fails, `jailops shell` says in which step and why (when pkg's output shows that the package server did
 not answer: which commands tell the address family that does not work) and which command fixes it (`jailops jail shell-setup NAME`), and
-`jailops set NAME shell sh` uses FreeBSD's own shell instead. Both live below `/usr/local`, a persistent
+`jailops config set NAME shell sh` uses FreeBSD's own shell instead. Both live below `/usr/local`, a persistent
 dataset of a thin jail, so they survive an OS update (the root swap of `jailops jail upgrade` and of the nightly image
 upgrade); a thick jail is upgraded in place. App installations do the same right after the app's packages.
 
@@ -152,7 +152,7 @@ jails:
     jailops config set web prompt none       # remove the prompt file; the variables stay
     jailops config set web prompt short      # user@jail:dir without the grey tag
     jailops config set web prompt default    # back to the default
-    jailops set web shell sh                 # jailops shell and the console start /bin/sh again
+    jailops config set web shell sh              # jailops shell and the console start /bin/sh again
 
 A running jail gets a new prompt at once, a stopped one at its next start. The console's Configuration tab has both keys.
 To drop bash itself, set the shell to `sh` and remove the package by hand (`pkg delete bash`

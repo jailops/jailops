@@ -34,7 +34,7 @@ export function demoExpose(j: Jail, b: ExposeRequest): Result {
   let changed = false
   const ports = sortPorts(b.ports.flatMap((p) => p.split(',').map((x) => x.trim()).filter(Boolean)))
   for (const proto of protos) {
-    const e: ExposeEntry = { proto, ports: [...ports], ...(b.families?.length ? { families: [...b.families] } : {}), ...(b.from?.length ? { from: [...b.from] } : {}), ...(b.host_port ? { host_port: b.host_port } : {}), ...(b.comment ? { comment: b.comment } : {}), by: 'alice' }
+    const e: ExposeEntry = { proto, ports: [...ports], ...(b.families?.length ? { families: [...b.families] } : {}), ...(b.from?.length ? { from: [...b.from] } : {}), ...(b.host_port ? { host_port: b.host_port } : {}), ...(b.comment ? { comment: b.comment } : {}) }
     const settings = (x: ExposeEntry): string => JSON.stringify({ ...x, ports: [], by: '', at: '', proto: x.proto || 'tcp' })
     if (next.some((x) => settings(x) === settings(e) && e.ports.every((p) => x.ports.includes(p)))) continue
     next = next.flatMap((x) => ((x.proto || 'tcp') === proto ? (x.ports.filter((p) => !e.ports.includes(p)).length ? [{ ...x, ports: x.ports.filter((p) => !e.ports.includes(p)) }] : []) : [x]))

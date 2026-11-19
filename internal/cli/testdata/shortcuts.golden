@@ -17,12 +17,12 @@ jail/nginx stopped
 $ jailops exec nginx -- echo hi
 ! busy: jail "nginx" is not running
 ! hint: start it first
-[exit 5]
+[exit 125]
 
 $ jailops exec nginx -- /bin/ls
 ! busy: jail "nginx" is not running
 ! hint: start it first
-[exit 5]
+[exit 125]
 
 $ jailops shell nginx
 ! busy: jail "nginx" is not running

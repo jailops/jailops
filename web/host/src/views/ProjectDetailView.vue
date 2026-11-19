@@ -73,7 +73,7 @@ const condText = (c: Condition) => s.projects.hostCondition(codeText(c.reason) |
 
         <section class="panel"><header><h2>{{ s.projects.quotas }}</h2></header>
           <div class="body"><QuotaBars :project="p" />
-            <dl class="kv" style="margin-top: 8px"><dt>{{ s.projects.diskUsed }}</dt><dd class="mono">{{ bytes(p.status.disk_used) }}</dd><dt>{{ s.projects.memoryUsed }}</dt><dd class="mono">{{ bytes(p.status.memory_used) }}</dd><dt>{{ s.projects.jailsUsed }}</dt><dd class="mono">{{ p.status.jails }}</dd></dl>
+            <dl class="kv" style="margin-top: 8px"><dt>{{ s.projects.diskUsed }}</dt><dd class="mono">{{ bytes(p.status.disk_used_bytes) }}</dd><dt>{{ s.projects.memoryUsed }}</dt><dd class="mono">{{ bytes(p.status.memory_used_bytes) }}</dd><dt>{{ s.projects.jailsUsed }}</dt><dd class="mono">{{ p.status.jails }}</dd></dl>
             <p class="hint muted">{{ s.projects.sums }}</p></div>
         </section>
 
@@ -110,9 +110,9 @@ const condText = (c: Condition) => s.projects.hostCondition(codeText(c.reason) |
                 <td :data-label="s.projects.status"><span class="pill" :class="h.applied ? (h.in_sync ? 'ok' : 'warn') : 'danger'">{{ !h.applied ? s.projects.notApplied : h.in_sync ? s.projects.inSync : s.projects.outOfSync }}</span>
                   <div v-for="c in h.conditions ?? []" :key="c.type" class="muted" data-test="host-cond">{{ condText(c) }}</div>
                   <div v-if="h.error" class="err" style="color: var(--danger)" :title="`${s.error.code}: ${h.error.code}`" data-test="host-error">{{ s.projects.noAnswer(h.host, h.error.message) }}</div></td>
-                <td class="num mono" :data-label="s.projects.jailsUsed">{{ h.status?.jails ?? '-' }}</td><td class="mono" :data-label="s.projects.memoryUsed">{{ h.status ? bytes(h.status.memory_used) : '-' }}</td>
+                <td class="num mono" :data-label="s.projects.jailsUsed">{{ h.status?.jails ?? '-' }}</td><td class="mono" :data-label="s.projects.memoryUsed">{{ h.status ? bytes(h.status.memory_used_bytes) : '-' }}</td>
               </tr>
-              <tr><th scope="row" colspan="3">{{ s.projects.total }}</th><td class="num mono" :data-label="s.projects.jailsUsed">{{ l.data.value.agg.total.jails }}</td><td class="mono" :data-label="s.projects.memoryUsed">{{ bytes(l.data.value.agg.total.memory_used) }}</td></tr>
+              <tr><th scope="row" colspan="3">{{ s.projects.total }}</th><td class="num mono" :data-label="s.projects.jailsUsed">{{ l.data.value.agg.total.jails }}</td><td class="mono" :data-label="s.projects.memoryUsed">{{ bytes(l.data.value.agg.total.memory_used_bytes) }}</td></tr>
             </tbody></table></div>
         </section>
 

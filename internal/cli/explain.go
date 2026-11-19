@@ -22,7 +22,7 @@ var explanations = []Explanation{
 	{api.CodeInvalid, "The server rejected the request: a field is missing, malformed or out of range.", "Read the message, correct the named value (the message names the flag where there is one) and retry."},
 	{api.CodeNotFound, "The named object does not exist on this host (objects of jails and snapshots are per host).", "List the kind to see the names, check --host and --remote, and check the spelling."},
 	{api.CodeAlreadyExists, "An object of that kind and name already exists.", "Pick another name, or edit the existing object."},
-	{api.CodeConflict, "The object changed on the server after you read it (stale generation, HTTP 412), or another object already holds what you asked for (the message names it).", "For a change made in the meantime: read the object again and repeat the change ('edit' commands do this for you). Otherwise free what the message names first."},
+	{api.CodePreconditionFailed, "The object changed on the server after you read it (stale generation, HTTP 412), or another object already holds what you asked for (the message names it).", "For a change made in the meantime: read the object again and repeat the change ('edit' commands do this for you). Otherwise free what the message names first."},
 	{api.CodeUnauthorized, "The server did not accept your credential: no token, an expired or revoked token, or an unknown certificate.", "Check the token with 'jailops remote list' and 'jailops doctor'; create a new token on the server if needed."},
 	{api.CodeForbidden, "Your credential is valid but its role does not allow this action.", "Ask an administrator for a token with a higher role (operator for lifecycle, admin for configuration). A network or storage that is not granted to the project is granted by a global admin: 'jailops network grant NET --project P', 'jailops storage grant NAME --project P'."},
 	{api.CodeUnsupported, "The server does not implement this feature, or a missing API extension.", "Upgrade the server, or use a different command; 'jailops server info' lists the extensions."},
@@ -34,8 +34,6 @@ var explanations = []Explanation{
 	{api.CodeImageInUse, "A jail still uses this image or image generation.", "Upgrade or delete the jails listed in the message, then retry."},
 	{api.CodeDataLoss, "The operation would discard data and was sent without confirmation.", "Check what would be lost (the CLI shows the bytes written) and confirm by typing the jail name or with --confirm-data-loss."},
 	{api.CodeVersionSkew, "The client, hub and host run API versions too far apart for this call.", "Upgrade the older side; 'jailops server info' shows both versions."},
-	{api.CodeNotLeader, "This node is not the cluster leader and cannot accept the change.", "Retry against the leader named in the error detail, or through the hub."},
-	{api.CodeNoQuorum, "The cluster has lost its quorum and cannot commit changes.", "Restore enough nodes to form a majority; reads keep working."},
 	{api.CodeUnverified, "The feature needs FreeBSD or a kernel facility that this host does not provide or that was never proven there.", "Run the host on FreeBSD 15.1 or later with the facility enabled; see the unverified list in the documentation."},
 	{api.CodeZFSIncompatible, "The ZFS pool or dataset lacks a feature the operation needs.", "Upgrade the pool features ('zpool upgrade') on both ends of the transfer."},
 	{api.CodeChainBroken, "A backup chain has a missing or corrupt link, so later snapshots cannot be restored from it.", "Run 'jailops backup verify' and take a new full backup."},
@@ -48,7 +46,7 @@ var explanations = []Explanation{
 	{api.CodeNotManaged, "JailOps does not manage this part of the host: jailopsd.yaml or priv.conf does not enable the module.", "Add the lines the hint names and restart both services, or change the host by hand (docs/appliance.md). It exits 6, like unsupported."},
 	{api.CodePlaintextDenied, "A backup node target would receive unencrypted data and the policy does not allow plaintext.", "Enable backup encryption, or set allow_plaintext on the target if that is intended."},
 	{api.CodeLocked, "An encrypted volume of the jail waits for its passphrase (after a host boot or a lock); a locked jail does not start.", "Run 'jailops volume unlock NAME' for the volume the error names (add --start to start the jail at once); a jail due for autostart starts after the unlock."},
-	{api.CodeStopForced, "A stop that did not finish within its budget was forced: the jail was removed without its stop commands and its processes were killed.", "See the console log of the jail (/var/log/jailops/jail_<project>_<name>_console.log) for what still ran; a service that needs longer says so with boot.stop_timeout (jailops config set JAIL boot.stop_timeout 60)."},
+	{api.CodeInterrupted, "The daemon stopped while the operation ran. Startup recovery rolled the run back, finished it or dropped it; error.detail.recovery says which.", "Check the object (`jailops info`), then repeat the command; with recovery needs_attention, `jailops doctor` names what to look at."},
 	{api.CodeBadPassphrase, "The passphrase of the encrypted volumes is wrong; after five wrong ones in a row unlocks are refused for 30 seconds.", "Type the passphrase again. A forgotten passphrase cannot be recovered: the data of the volume is lost (docs/storage.md)."},
 }
 

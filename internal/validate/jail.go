@@ -45,11 +45,6 @@ func JailSpec(name string, s api.JailSpec) error {
 			return err
 		}
 	}
-	switch s.Update.Strategy {
-	case "", api.UpdateRebase, api.UpdateInPlace, api.UpdateManual:
-	default:
-		return Invalid("update.strategy", "update strategy %q is unknown", s.Update.Strategy)
-	}
 	if err := updatePolicy(s.Update); err != nil {
 		return err
 	}
@@ -147,8 +142,8 @@ func JailSpec(name string, s api.JailSpec) error {
 	if s.Boot.Priority < -1000 || s.Boot.Priority > 1000 {
 		return Invalid("boot.priority", "priority must be between -1000 and 1000")
 	}
-	if s.Boot.StopTimeout < 0 || s.Boot.StopTimeout > api.MaxStopTimeout {
-		return Invalid("boot.stop_timeout", "stop timeout must be between 0 and %d seconds", api.MaxStopTimeout)
+	if s.Boot.StopTimeoutSeconds < 0 || s.Boot.StopTimeoutSeconds > api.MaxStopTimeout {
+		return Invalid("boot.stop_timeout_seconds", "stop timeout must be between 0 and %d seconds", api.MaxStopTimeout)
 	}
 	for i, d := range s.Boot.Depends {
 		f := fmt.Sprintf("boot.depends[%d]", i)
@@ -343,7 +338,7 @@ func updatePolicy(u api.UpdatePolicy) error {
 			return Invalid("update.schedule", "update mode %s needs a schedule (a five-field cron expression)", u.Mode)
 		}
 		if u.Mode == api.UpdateModeManaged && !u.Packages && !u.OS {
-			return Invalid("update.mode", "mode managed has nothing to apply: set updates.packages, updates.os or both")
+			return Invalid("update.mode", "mode managed has nothing to apply: set update.packages, update.os or both")
 		}
 	default:
 		return Invalid("update.mode", "update mode %q must be manual, notify or managed", u.Mode)
@@ -426,17 +421,6 @@ func provision(p api.Provision) error {
 func LayoutFits(s api.JailSpec) error {
 	if s.Layout == api.LayoutThin && s.OS == api.OSLinux {
 		return Invalid("layout", "a Linux jail is thick: the thin layout is for FreeBSD jails (leave --layout out)")
-	}
-	return nil
-}
-
-// UpdateStrategyFits refuses the strategy inplace for a thin FreeBSD jail: a thin jail moves to a newer generation of
-// its image (rebase, the default), and the update that would change it in place is not made for it. It is asked when a
-// jail is made, or when its strategy is changed, with the layout and the operating system that are settled by then; a
-// jail that was stored with the strategy before the rule keeps it and stays updatable, so it is not part of JailSpec.
-func UpdateStrategyFits(s api.JailSpec) error {
-	if s.Update.Strategy == api.UpdateInPlace && s.Layout != api.LayoutThick && s.OS != api.OSLinux {
-		return Invalid("update.strategy", "update strategy inplace is for thick and Linux jails; a thin jail moves to a newer generation of its image (rebase, the default)")
 	}
 	return nil
 }

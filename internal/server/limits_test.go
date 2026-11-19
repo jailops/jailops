@@ -110,7 +110,7 @@ func TestLimitsNotEnforcedWithoutRacct(t *testing.T) {
 	}
 }
 
-// The state limit of a jail is its limits.states, or the host's jails.max_states when that is 0, and it reaches the
+// The state limit of a jail is its resources.states, or the host's jails.max_states when that is 0, and it reaches the
 // pf rules of the jail's anchor.
 func TestStateLimitReachesTheAnchor(t *testing.T) {
 	for _, tc := range []struct {

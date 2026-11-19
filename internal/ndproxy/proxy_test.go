@@ -136,7 +136,7 @@ func (r *fakeRoutes) Remove(_ context.Context, a netip.Addr, b string) error {
 }
 func (r *fakeRoutes) EnsureUplinkNotMember(context.Context, string) error {
 	if r.member {
-		return api.Errorf(api.CodeConflict, "member")
+		return api.Errorf(api.CodePreconditionFailed, "member")
 	}
 	return nil
 }

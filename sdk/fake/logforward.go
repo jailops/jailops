@@ -119,7 +119,7 @@ func (s *Server) handleLogs(w http.ResponseWriter, r *http.Request) {
 		}
 		size := int64(len(data))
 		start := api.LogWindowStart(size, offset, api.MaxLogReadBytes)
-		rd := api.AssembleLogRead(sr.jail, sr.file, data[start:], start, size, api.JailLogQuery{Tail: q.Tail, Since: q.Since, Grep: q.Grep, Offset: offset}, now)
+		rd := api.AssembleLogRead(sr.jail, sr.file, data[start:], start, size, api.JailLogQuery{Limit: q.Limit, Since: q.Since, Grep: q.Grep, Offset: offset}, now)
 		ls.NextOffset, ls.Rotated, ls.Truncated = rd.NextOffset, rd.Rotated, rd.Truncated
 		out.Next[key] = rd.NextOffset
 		out.Sources = append(out.Sources, ls)
@@ -173,11 +173,11 @@ func (s *Server) forwardView() api.LogForward {
 	return out
 }
 
+func (s *Server) forwardETag() string { return api.ETag(s.uuid, s.fwd.gen) }
+
 func (s *Server) writeForward(w http.ResponseWriter) {
 	v := s.forwardView()
-	if v.Status.Generation > 0 {
-		w.Header().Set("ETag", etagOf(v.Status.Generation))
-	}
+	w.Header().Set("ETag", s.forwardETag())
 	writeSync(w, 200, v)
 }
 
@@ -202,8 +202,8 @@ func (s *Server) handleLogForwardPut(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if m, err := api.ParseIfMatch(r.Header.Get("If-Match")); err != nil || !m.Matches(s.fwd.gen) {
-		writeErr(w, api.Errorf(api.CodeConflict, "the log forwarding changed: current generation is %d", s.fwd.gen).WithHint("read it again and re-apply your change"))
+	if m, err := api.ParseIfMatch(r.Header.Get("If-Match")); err != nil || !m.Matches(s.forwardETag()) {
+		writeErr(w, api.Errorf(api.CodePreconditionFailed, "the log forwarding changed: current generation is %d", s.fwd.gen).WithHint("read it again and re-apply your change"))
 		return
 	}
 	s.fwd.stored = &spec

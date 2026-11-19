@@ -121,7 +121,7 @@ func TestEtcAccountConflictsAreRefusedAndChangeNothing(t *testing.T) {
 	before := w.state()
 	_, err := upgrade(w, api.JailUpgrade{Generation: "g2"})
 	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Code != api.CodeConflict || ae.Detail["files"] != "/etc/master.passwd:app" {
+	if !errors.As(err, &ae) || ae.Code != api.CodePreconditionFailed || ae.Detail["files"] != "/etc/master.passwd:app" {
 		t.Fatalf("%v", err)
 	}
 	if got := string(w.Files.Data[jRoot+"/etc/master.passwd"]); got != "root:*:0\napp:*:1500\n" {

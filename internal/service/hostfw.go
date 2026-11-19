@@ -152,7 +152,7 @@ func (s *Service) ApplyHostFirewall(ctx context.Context, in api.HostFirewallAppl
 	if err := spec.Validate(); err != nil {
 		return api.HostChange{}, err
 	}
-	if _, err := api.ConfirmWindow(in.ConfirmWithin); err != nil {
+	if _, err := api.ConfirmWindow(in.ConfirmWithinSeconds); err != nil {
 		return api.HostChange{}, err
 	}
 	if _, err := s.hostChangeAllowed(ctx, api.HostModuleFirewall, "changing the host firewall"); err != nil {
@@ -167,7 +167,7 @@ func (s *Service) ApplyHostFirewall(ctx context.Context, in api.HostFirewallAppl
 		return api.HostChange{}, err
 	}
 	defer unlock()
-	res, err := fw.HostFirewallApply(ctx, HostFirewallRequest{Spec: spec.Canonical(), DryRun: in.DryRun, ConfirmWithin: in.ConfirmWithin, Peer: peerOf(ctx), ConfirmLockout: in.ConfirmLockout})
+	res, err := fw.HostFirewallApply(ctx, HostFirewallRequest{Spec: spec.Canonical(), DryRun: in.DryRun, ConfirmWithin: in.ConfirmWithinSeconds, Peer: peerOf(ctx), ConfirmLockout: in.ConfirmLockout})
 	if err != nil {
 		return api.HostChange{}, notManagedByHelper(err, api.HostModuleFirewall)
 	}

@@ -146,7 +146,7 @@ func TestPackageUpdatePipeline(t *testing.T) {
 		t.Fatal(err)
 	}
 	recs, err := aop.Wait(ctx)
-	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateOK || recs[0].Kind != api.UpdateKindPackages || recs[0].Snapshot == "" || len(recs[0].Packages) != 2 {
+	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateSuccess || recs[0].Kind != api.UpdateKindPackages || recs[0].Snapshot == "" || len(recs[0].Packages) != 2 {
 		t.Fatalf("%+v %v", recs, err)
 	}
 	if !strings.Contains(recs[0].Note, "restart the jail") {
@@ -186,7 +186,7 @@ func TestPackageUpdatePipeline(t *testing.T) {
 	ch := e.Events(evctx, e.Admin)
 	aop, _ = e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, Packages: true})
 	recs, err = aop.Wait(ctx)
-	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateFailed || !strings.Contains(recs[0].Error, "health check") || !strings.Contains(recs[0].Note, "--all --snapshot ") {
+	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateFailure || !strings.Contains(recs[0].Error, "health check") || !strings.Contains(recs[0].Note, "--scope all --snapshot ") {
 		t.Fatalf("%+v %v", recs, err)
 	}
 	assertRealCommand(t, recs[0].Note)
@@ -211,10 +211,10 @@ loop:
 	e.SetPkgUpgradeErr(errors.New("exit status 1"))
 	aop, _ = e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, Packages: true})
 	recs, _ = aop.Wait(ctx)
-	if len(recs) != 1 || recs[0].Result != api.UpdateFailed || !strings.Contains(recs[0].Error, "repository unreachable") {
+	if len(recs) != 1 || recs[0].Result != api.UpdateFailure || !strings.Contains(recs[0].Error, "repository unreachable") {
 		t.Fatalf("%+v", recs)
 	}
-	if h, _ := e.Admin.Jails().UpdateHistory(ctx, "web"); len(h) != 4 || h[0].Result != api.UpdateFailed {
+	if h, _ := e.Admin.Jails().UpdateHistory(ctx, "web"); len(h) != 4 || h[0].Result != api.UpdateFailure {
 		t.Fatalf("%d records, newest first: %+v", len(h), h)
 	}
 	// Other projects' jails are not found.
@@ -247,11 +247,11 @@ func TestOSUpdateRootSwapAndAutomaticRollback(t *testing.T) {
 	}
 	aop, _ := e.Admin.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}, OS: true})
 	recs, err := aop.Wait(ctx)
-	if err != nil || len(recs) != 1 || recs[0].Kind != api.UpdateKindOS || recs[0].Result != api.UpdateOK {
+	if err != nil || len(recs) != 1 || recs[0].Kind != api.UpdateKindOS || recs[0].Result != api.UpdateSuccess {
 		t.Fatalf("%+v %v", recs, err)
 	}
 	j, _ := e.Admin.Jails().Get(ctx, "web")
-	if !strings.HasSuffix(j.Status.Generation, "g2") {
+	if !strings.HasSuffix(j.Status.ImageGeneration, "g2") {
 		t.Fatalf("%+v", j.Status)
 	}
 	// A third generation whose health check fails: the root is swapped back by the plan.
@@ -264,8 +264,8 @@ func TestOSUpdateRootSwapAndAutomaticRollback(t *testing.T) {
 		t.Fatalf("%+v %v", recs, err)
 	}
 	j, _ = e.Admin.Jails().Get(ctx, "web")
-	if !strings.HasSuffix(j.Status.Generation, "g2") {
-		t.Fatalf("the failed update left the jail on %s", j.Status.Generation)
+	if !strings.HasSuffix(j.Status.ImageGeneration, "g2") {
+		t.Fatalf("the failed update left the jail on %s", j.Status.ImageGeneration)
 	}
 }
 
@@ -291,7 +291,7 @@ func TestScheduledUpdatesAreOffByDefaultAndFollowTheMode(t *testing.T) {
 		t.Fatal("a manual jail was checked")
 	}
 	// notify: checks and reports, applies nothing.
-	op, err := e.Admin.Jails().Config(ctx, "web", map[string]string{"updates.mode": "notify", "updates.schedule": "0 3 * * *", "updates.packages": "true"}, nil, false)
+	op, err := e.Admin.Jails().Config(ctx, "web", map[string]string{"update.mode": "notify", "update.schedule": "0 3 * * *", "update.packages": "true"}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,7 +307,7 @@ func TestScheduledUpdatesAreOffByDefaultAndFollowTheMode(t *testing.T) {
 	// the check the clock just triggered may still hold the jail ("busy"): ask again until the change is accepted
 	var cerr error
 	for i := 0; i < 500; i++ {
-		if op, cerr = e.Admin.Jails().Config(ctx, "web", map[string]string{"updates.mode": "managed"}, nil, false); cerr == nil {
+		if op, cerr = e.Admin.Jails().Config(ctx, "web", map[string]string{"update.mode": "managed"}, nil, false); cerr == nil {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -322,11 +322,11 @@ func TestScheduledUpdatesAreOffByDefaultAndFollowTheMode(t *testing.T) {
 	waitFor(t, func() bool { return sj.ran("pkg upgrade -y") })
 	waitFor(t, func() bool {
 		h, _ := e.Admin.Jails().UpdateHistory(ctx, "web")
-		return len(h) > 0 && h[0].Scheduled && h[0].Result == api.UpdateOK
+		return len(h) > 0 && h[0].Scheduled && h[0].Result == api.UpdateSuccess
 	})
 	// Bad policies are refused.
-	if _, err := e.Admin.Jails().Config(ctx, "web", map[string]string{"updates.mode": "managed", "updates.schedule": "never"}, nil, false); err == nil {
-		op, _ := e.Admin.Jails().Config(ctx, "web", map[string]string{"updates.schedule": "never"}, nil, false)
+	if _, err := e.Admin.Jails().Config(ctx, "web", map[string]string{"update.mode": "managed", "update.schedule": "never"}, nil, false); err == nil {
+		op, _ := e.Admin.Jails().Config(ctx, "web", map[string]string{"update.schedule": "never"}, nil, false)
 		if op != nil {
 			if _, err := op.Wait(ctx); err == nil {
 				t.Fatal("a bad cron expression was accepted")
@@ -500,7 +500,7 @@ func TestPackageUpdateHoldsTheJailAgainstSessions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if recs, err := aop.Wait(ctx); err != nil || len(recs) != 1 || recs[0].Result != api.UpdateOK {
+	if recs, err := aop.Wait(ctx); err != nil || len(recs) != 1 || recs[0].Result != api.UpdateSuccess {
 		t.Fatalf("%+v %v", recs, err)
 	}
 	var ae *api.Error

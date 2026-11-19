@@ -103,7 +103,7 @@ func (s *Service) keepAdmin(ctx context.Context, drop string) error {
 		return nil
 	}
 	kind, name, _ := strings.Cut(drop, ":")
-	return api.Errorf(api.CodeConflict, "%s %q is the last global administrator of this host", kind, name).
+	return api.Errorf(api.CodePreconditionFailed, "%s %q is the last global administrator of this host", kind, name).
 		WithHint("make another global administrator first (as root on the host: jailops user create NAME --admin), then change or remove this one")
 }
 

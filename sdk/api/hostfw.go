@@ -183,8 +183,8 @@ type HostFirewallApply struct {
 	Spec HostFirewallSpec `json:"spec"`
 	// DryRun returns the diff, the rules and the actions and changes nothing.
 	DryRun bool `json:"dry_run,omitempty"`
-	// ConfirmWithin is the confirmation window in seconds (default 120, 10 to 1800).
-	ConfirmWithin int `json:"confirm_within,omitempty"`
+	// ConfirmWithinSeconds is the confirmation window in seconds (default 120, 10 to 1800).
+	ConfirmWithinSeconds int `json:"confirm_within_seconds,omitempty"`
 	// ConfirmLockout accepts a change whose lock-out check cannot run because the caller's address is unknown (the unix
 	// socket, a hub). The confirmation window still applies.
 	ConfirmLockout bool `json:"confirm_lockout,omitempty"`
@@ -198,8 +198,8 @@ type HostPendingChange struct {
 	Created  time.Time `json:"created"`
 	Deadline time.Time `json:"deadline"`
 	// SecondsLeft is the time to the deadline when the answer was made (0 when it passed).
-	SecondsLeft   int `json:"seconds_left"`
-	ConfirmWithin int `json:"confirm_within"`
+	SecondsLeft          int `json:"seconds_left"`
+	ConfirmWithinSeconds int `json:"confirm_within_seconds"`
 }
 
 // HostPendingOutcome is how the last pending change ended.

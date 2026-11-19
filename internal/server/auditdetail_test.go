@@ -18,7 +18,7 @@ func TestAuditDetailEscapesClientText(t *testing.T) {
 	evil := "192.0.2.1\r\nresult=ok actor=root db=x " + strings.Repeat("A", 500)
 	for _, r := range []struct{ path, body string }{
 		{"/api/v1/jails/nope/access/deny?project=" + dtest.SeedProject, mustJSON(api.AppDeny{Source: evil})},
-		{"/api/v1/jails/nope/access?project=" + dtest.SeedProject, mustJSON(api.AppAllow{Source: evil, Ports: []string{"5432\nx=y"}, Database: "d b"})},
+		{"/api/v1/jails/nope/access/allow?project=" + dtest.SeedProject, mustJSON(api.AppAllow{Source: evil, Ports: []string{"5432\nx=y"}, Database: "d b"})},
 		{"/api/v1/logs/forward/test", mustJSON(api.LogForwardTest{Sink: evil})},
 	} {
 		if code, _ := e.Raw("POST", r.path, tok, r.body); code < 400 {

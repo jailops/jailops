@@ -110,11 +110,11 @@ func (s *Server) assignJail(j, old *api.Jail) *api.Error {
 }
 
 func (s *Server) initJailStatus(j *api.Jail) {
-	j.Status = api.JailStatus{Power: api.PowerStopped, Generation: "g1"}
+	j.Status = api.JailStatus{Power: api.PowerStopped, ImageGeneration: "g1"}
 	if i := strings.IndexByte(j.Spec.Image, '#'); i >= 0 {
-		j.Status.Generation = j.Spec.Image[i+1:]
+		j.Status.ImageGeneration = j.Spec.Image[i+1:]
 	} else if g := s.gens[imageName(j.Spec.Image)]; len(g) > 0 {
-		j.Status.Generation = "g" + strconv.Itoa(g[len(g)-1].Number)
+		j.Status.ImageGeneration = "g" + strconv.Itoa(g[len(g)-1].Number)
 	}
 }
 
@@ -368,7 +368,7 @@ func (s *Server) jailRollback(w http.ResponseWriter, r *http.Request) {
 		var target *api.JailSnapshot
 		switch rb.Scope {
 		case api.RollbackRoot:
-			if genNumber(j.Status.Generation) <= 1 {
+			if genNumber(j.Status.ImageGeneration) <= 1 {
 				return reply{err: api.Errorf(api.CodeInvalid, "jail %q has no previous generation", name)}
 			}
 		case api.RollbackData, api.RollbackAll:
@@ -391,7 +391,7 @@ func (s *Server) jailRollback(w http.ResponseWriter, r *http.Request) {
 				return nil, notFound("jail", name)
 			}
 			if rb.Scope != api.RollbackData {
-				j.Status.Generation = "g" + strconv.Itoa(genNumber(j.Status.Generation)-1)
+				j.Status.ImageGeneration = "g" + strconv.Itoa(genNumber(j.Status.ImageGeneration)-1)
 			}
 			if target != nil { // ZFS discards snapshots newer than the target
 				l := s.snapshots[jk]
@@ -503,7 +503,7 @@ func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 		if target == 0 || target > len(gens) {
 			return reply{err: api.Errorf(api.CodeInvalid, "target generation does not exist")}
 		}
-		if toImage == "" && up.Image == "" && target == genNumber(j.Status.Generation) {
+		if toImage == "" && up.Image == "" && target == genNumber(j.Status.ImageGeneration) {
 			return reply{err: api.Errorf(api.CodeInvalid, "jail %q is already on generation g%d", name, target)}
 		}
 		op := s.startOp(rc.project, "jails.upgrade", "Upgrade "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
@@ -511,13 +511,13 @@ func (s *Server) jailUpgrade(w http.ResponseWriter, r *http.Request) {
 			if j == nil {
 				return nil, notFound("jail", name)
 			}
-			if !up.DryRun && (toImage != "" || target != genNumber(j.Status.Generation)) {
-				j.Status.Generation = "g" + strconv.Itoa(target)
+			if !up.DryRun && (toImage != "" || target != genNumber(j.Status.ImageGeneration)) {
+				j.Status.ImageGeneration = "g" + strconv.Itoa(target)
 				if toImage != "" {
 					j.Spec.Image = toImage
 					j.Metadata.Generation++
 				} else if i := strings.IndexByte(j.Spec.Image, '#'); i >= 0 {
-					j.Spec.Image = j.Spec.Image[:i+1] + j.Status.Generation
+					j.Spec.Image = j.Spec.Image[:i+1] + j.Status.ImageGeneration
 					j.Metadata.Generation++
 				}
 				s.emitIn(rc.project, "jail-upgraded", "/api/v1/jails/"+name)
@@ -556,7 +556,7 @@ func (s *Server) jailConvert(w http.ResponseWriter, r *http.Request) {
 		if j.Spec.OS == api.OSLinux {
 			return reply{err: api.Errorf(api.CodeUnsupported, "a Linux jail is thick and stays so: only FreeBSD jails change layout")}
 		}
-		res := api.JailConvertResult{Jail: name, From: from, To: req.Layout, Image: j.Status.Generation, Changed: from != req.Layout, DryRun: req.DryRun}
+		res := api.JailConvertResult{Jail: name, From: from, To: req.Layout, Image: j.Status.ImageGeneration, Changed: from != req.Layout, DryRun: req.DryRun}
 		if res.Changed {
 			res.Steps = []string{"zfs snapshot " + name + "@jo-pre-convert", "jail -r " + name, "swap the root", "jail -c " + name}
 		}
@@ -862,7 +862,7 @@ func (s *Server) setupImages() {
 		}
 		i.Status.AutoUpgrade = nil
 		if au := i.Spec.AutoUpgrade; au != nil && au.Enabled {
-			i.Status.AutoUpgrade = &api.ImageAutoUpgradeStatus{Next: nextAt(s.now(), au.At)}
+			i.Status.AutoUpgrade = &api.ImageAutoUpgradeStatus{NextAt: nextAt(s.now(), au.At)}
 		}
 	}
 }
@@ -886,7 +886,7 @@ func nextAt(now time.Time, at string) time.Time {
 func (s *Server) genRefs(image string, n int) []string {
 	var refs []string
 	for _, j := range s.jails.items {
-		if imageName(j.Spec.Image) == image && genNumber(j.Status.Generation) == n {
+		if imageName(j.Spec.Image) == image && genNumber(j.Status.ImageGeneration) == n {
 			refs = append(refs, j.Metadata.Name)
 		}
 	}
@@ -1013,14 +1013,12 @@ func (s *Server) imageUpgrade(w http.ResponseWriter, r *http.Request) {
 				if j == nil {
 					continue
 				}
-				o := api.ImageUpgradeJail{Jail: j.Metadata.Name, Project: j.Metadata.Project, From: name + "#" + j.Status.Generation}
+				o := api.ImageUpgradeJail{Jail: j.Metadata.Name, Project: j.Metadata.Project, From: name + "#" + j.Status.ImageGeneration}
 				switch {
 				case j.Spec.OS == api.OSLinux:
 					o.Status, o.Reason = api.ImageUpgradeSkipped, "a Linux jail is thick and is updated in place"
 				case j.Spec.Layout == api.LayoutThick:
 					o.Status, o.Reason = api.ImageUpgradeSkipped, "a thick jail is updated in place"
-				case j.Spec.Update.Strategy == api.UpdateInPlace || j.Spec.Update.Strategy == api.UpdateManual:
-					o.Status, o.Reason = api.ImageUpgradeSkipped, "update strategy "+string(j.Spec.Update.Strategy)
 				case strings.IndexByte(j.Spec.Image, '#') >= 0:
 					o.Status, o.Reason = api.ImageUpgradeSkipped, "pinned to "+j.Spec.Image
 				case out.Unchanged:
@@ -1039,7 +1037,7 @@ func (s *Server) imageUpgrade(w http.ResponseWriter, r *http.Request) {
 					}
 					rec := recs[0]
 					o.From, o.To, o.Record = rec.From, rec.To, rec.ID
-					if rec.Result == api.UpdateOK {
+					if rec.Result == api.UpdateSuccess {
 						o.Status = api.ImageUpgradeUpgraded
 						break
 					}
@@ -1092,7 +1090,7 @@ func (s *Server) imageMoveTo(rc *reqInfo, name string, u api.ImageUpgrade) reply
 			if j == nil {
 				continue
 			}
-			o := api.ImageUpgradeJail{Jail: j.Metadata.Name, Project: j.Metadata.Project, From: name + "#" + j.Status.Generation, To: fmt.Sprintf("%s#g%d", to, newest)}
+			o := api.ImageUpgradeJail{Jail: j.Metadata.Name, Project: j.Metadata.Project, From: name + "#" + j.Status.ImageGeneration, To: fmt.Sprintf("%s#g%d", to, newest)}
 			switch {
 			case j.Spec.OS == api.OSLinux || j.Spec.Layout == api.LayoutThick:
 				o.Status, o.To, o.Reason = api.ImageUpgradeSkipped, "", "a thick jail is updated in place"
@@ -1102,7 +1100,7 @@ func (s *Server) imageMoveTo(rc *reqInfo, name string, u api.ImageUpgrade) reply
 				o.Status = api.ImageUpgradePlanned
 			default:
 				j.Spec.Image = to
-				j.Status.Generation = "g" + strconv.Itoa(newest)
+				j.Status.ImageGeneration = "g" + strconv.Itoa(newest)
 				j.Metadata.Generation++
 				o.Status = api.ImageUpgradeUpgraded
 			}

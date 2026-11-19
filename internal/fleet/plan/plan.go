@@ -69,6 +69,11 @@ type Item struct {
 	Dangers []string
 	// Owner is the live object's managed_by.
 	Owner string
+	// LiveUUID and LiveGeneration identify the live object the plan was made for (an update or a delete): its
+	// incarnation and revision. Apply changes or deletes only that object: one that was created again under the same
+	// name since, or changed since, fails the item and asks for a new plan.
+	LiveUUID       string
+	LiveGeneration int64
 
 	// Desired is the declaration (nil for delete and unmanaged).
 	Desired *config.Object
@@ -112,8 +117,11 @@ type HostError struct {
 type Plan struct {
 	FleetID string
 	Hosts   []string
-	Items   []Item
-	Errors  []HostError
+	// HostUUIDs is the identity each host answered with when the plan was made: apply refuses a host that answers
+	// with another one (an alias that now points at another machine).
+	HostUUIDs map[string]string
+	Items     []Item
+	Errors    []HostError
 	// ProjectHosts shows, per fleet project and host, what the plan does.
 	ProjectHosts []ProjectHost
 }
@@ -131,12 +139,15 @@ func Compute(ctx context.Context, s *Session, opt Options) *Plan {
 	if len(hosts) == 0 {
 		hosts = s.Fleet.HostNames()
 	}
-	p := &Plan{FleetID: s.Fleet.Meta.ID, Hosts: hosts}
+	p := &Plan{FleetID: s.Fleet.Meta.ID, Hosts: hosts, HostUUIDs: map[string]string{}}
 	for _, h := range hosts {
 		items, err := planHost(ctx, s, h)
 		if err != nil {
 			p.Errors = append(p.Errors, HostError{h, err})
 			continue
+		}
+		if id, err := s.HostUUID(ctx, h); err == nil && id != "" {
+			p.HostUUIDs[h] = id
 		}
 		p.Items = append(p.Items, items...)
 	}
@@ -309,6 +320,13 @@ func planHost(ctx context.Context, s *Session, host string) ([]Item, error) {
 	items = append(append(items, work...), appWork...)
 	deletes = append(deletes, appDeletes...)
 	protectProjects(deletes, live, me)
+	for _, list := range [][]Item{work, deletes} {
+		for i := range list {
+			if l, ok := live[config.Key{Kind: list[i].Kind, Project: list[i].Project, Name: list[i].Name}]; ok {
+				list[i].LiveUUID, list[i].LiveGeneration = l.Meta.UUID, l.Meta.Generation
+			}
+		}
+	}
 	// Deletes run last and in reverse dependency order.
 	sort.SliceStable(deletes, func(i, j int) bool {
 		return model.Order(deletes[i].Kind) > model.Order(deletes[j].Kind)

@@ -25,7 +25,7 @@ dry-run: would stop jail main/web
 dry-run: would stop jail main/db
 dry-run: would stop jail main/cache
 
-$ jailops stop-all --grace 30s
+$ jailops stop-all --timeout 30s
 jail/main/web stopped
 jail/main/db stopped
 jail/main/cache stopped
@@ -37,8 +37,8 @@ db      stopped
 idle    stopped
 web     stopped
 
-$ jailops stop-all --grace soon
-! usage: --grace must be a number of seconds or a duration such as 30s, not "soon"
+$ jailops stop-all --timeout soon
+! usage: --timeout must be a number of seconds or a duration such as 30s, not "soon"
 ! hint: run 'jailops stop-all --help' for usage
 [exit 2]
 

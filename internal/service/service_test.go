@@ -96,10 +96,10 @@ func TestOperationLifecycleAndPanic(t *testing.T) {
 	}
 	// An error keeps its code; a plan error unwraps to the failing step's code.
 	op, _ = s.Submit(bg, OpSpec{Description: "plan", Run: func(context.Context, *OpHandle) (any, error) {
-		return nil, &plan.Error{Plan: "p", Step: "s", Err: api.Errorf(api.CodeNoQuorum, "x"), UndoErrs: []error{errors.New("u")}}
+		return nil, &plan.Error{Plan: "p", Step: "s", Err: api.Errorf(api.CodeMaintenance, "x"), UndoErrs: []error{errors.New("u")}}
 	}})
 	got, _ = s.WaitOperation(bg, op.ID, 5*time.Second)
-	if got.Error == nil || got.Error.Code != api.CodeNoQuorum || got.Error.Hint == "" {
+	if got.Error == nil || got.Error.Code != api.CodeMaintenance || got.Error.Hint == "" {
 		t.Fatalf("%+v", got.Error)
 	}
 	// Busy at submit time.

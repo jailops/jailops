@@ -189,7 +189,7 @@ func TestApplyStreamGivesTheSameTreeOnEveryStore(t *testing.T) {
 	outC := runDetStream(t, dirC, true)
 
 	// the stream does what it is meant to: it holds every kind of outcome
-	want := map[string]bool{"already_exists": false, "conflict": false, "not_found": false, "invalid": false}
+	want := map[string]bool{"already_exists": false, "precondition_failed": false, "not_found": false, "invalid": false}
 	created, deleted := 0, 0
 	for _, o := range outA {
 		for code := range want {

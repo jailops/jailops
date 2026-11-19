@@ -26,7 +26,7 @@ func (s *Service) SetDelegation(ctx context.Context, name string, on bool) error
 		if up, err := s.Jails.Running(ctx, name); err != nil {
 			return err
 		} else if up {
-			return api.Errorf(api.CodeConflict, "jail %q is running with its delegated dataset: stop it before turning zfs_delegation off", name)
+			return api.Errorf(api.CodePreconditionFailed, "jail %q is running with its delegated dataset: stop it before turning zfs_delegation off", name)
 		}
 		return s.ZFS.Set(ctx, ds, map[string]string{"jailed": "off"})
 	}

@@ -22,7 +22,7 @@ func TestConfigStrictAndDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cfg.Dataset != "tank/jailops" || cfg.MountBase != "/usr/local/jailops" || cfg.StateDir != "/var/db/jailops/state" || cfg.Listen.Unix.Mode != 0o660 ||
-		cfg.Reconcile.Interval.Std() != 30*time.Second || cfg.Log.Format != "text" || cfg.Role != "host" {
+		cfg.Reconcile.Interval.Std() != 30*time.Second || cfg.Log.Format != "text" {
 		t.Fatalf("%+v", cfg)
 	}
 	for name, doc := range map[string]string{
@@ -40,8 +40,11 @@ func TestConfigStrictAndDefaults(t *testing.T) {
 			t.Errorf("%s: accepted", name)
 		}
 	}
-	_, err = daemon.Decode(strings.NewReader("pool: tank\nrole: backup\n"))
-	if err == nil || !strings.Contains(err.Error(), "separate daemon") {
+	// The line "role: host" of an earlier release's file is dropped on load; other roles are unknown keys.
+	if _, err := daemon.Decode(strings.NewReader("role: host\npool: tank\n")); err != nil {
+		t.Fatalf("role: host: %v", err)
+	}
+	if _, err := daemon.Decode(strings.NewReader("pool: tank\nrole: backup\n")); err == nil || !strings.Contains(err.Error(), "role") {
 		t.Fatalf("%v", err)
 	}
 }

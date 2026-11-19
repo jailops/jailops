@@ -103,7 +103,7 @@ func (c *Command) Remove(ctx context.Context, confPath, name string) error {
 			if running != "" {
 				msg += " (still running: " + running + ")"
 			}
-			return api.Errorf(api.CodeStopForced, "%s", msg) // the jail is gone: the daemon takes it as a stop, with a warning
+			return ForcedStop(msg) // the jail is gone: the daemon takes it as a stop, with a warning
 		}
 	}
 	return withConsoleLog(name, mapJailErr(name, err))
@@ -125,7 +125,7 @@ func noteForcedStop(name string, budget time.Duration, running string) {
 
 // stopRunTime is how long jail -r may run: the stop commands (exec.stop) get the jail's stop timeout to shut a service down
 // cleanly, the jail gets the same time again to exit after SIGTERM (stop.timeout), and five seconds go on top. After that
-// the jail is removed without them, so that a stop is always bounded: boot.stop_timeout is the knob of both, and a jail
+// the jail is removed without them, so that a stop is always bounded: boot.stop_timeout_seconds is the knob of both, and a jail
 // without one has api.DefaultStopTimeout (30 s: 65 s in all).
 func stopRunTime(confPath string) time.Duration {
 	t := api.DefaultStopTimeout

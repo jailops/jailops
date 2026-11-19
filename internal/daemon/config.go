@@ -28,9 +28,6 @@ const DefaultConfigPath = "/usr/local/etc/jailops/jailopsd.yaml"
 
 // Config is jailopsd.yaml. Unknown keys are an error.
 type Config struct {
-	// Role is "host" (the only role of this binary). The backup node is a
-	// separate daemon.
-	Role string `yaml:"role"`
 	// Hub turns the daemon into a hub: it keeps a registry of remotes and
 	// forwards ?host= requests over pinned mTLS.
 	Hub bool `yaml:"hub"`
@@ -146,7 +143,7 @@ func (d DevdConf) On() bool {
 }
 
 // UpdatesConf configures managed updates (design 8.4). Updates are off for
-// every jail until a user sets its updates.mode.
+// every jail until a user sets its update.mode.
 type UpdatesConf struct {
 	// Tick is how often schedules are evaluated (default 1m).
 	Tick Duration `yaml:"tick"`
@@ -157,7 +154,7 @@ type UpdatesConf struct {
 
 // DefaultMaxStates is the default of jails.max_states: the pf states each pass rule of a jail may create. Ten thousand
 // keeps a jail far from the 100000 states of pf's default table, and is above what a busy DNS or web server of a
-// jail keeps open at once; a jail that needs more has limits.states.
+// jail keeps open at once; a jail that needs more has resources.states.
 const DefaultMaxStates = 10000
 
 // JailsConf holds the defaults a new FreeBSD jail gets when its request (and its profiles) leave the shell and
@@ -171,7 +168,7 @@ type JailsConf struct {
 	Prompt string `yaml:"prompt"`
 	// PromptColor is the 256-colour number of the default prompt, 1 to 255 (default 39, a light blue).
 	PromptColor *int `yaml:"prompt_color"`
-	// MaxStates is the pf state limit of a jail whose limits.states is 0: each pass rule of its anchor may create that
+	// MaxStates is the pf state limit of a jail whose resources.states is 0: each pass rule of its anchor may create that
 	// many states (default 10000; 0 sets no limit).
 	MaxStates *int `yaml:"max_states"`
 }
@@ -395,7 +392,7 @@ func (d Duration) Std() time.Duration { return time.Duration(d) }
 func Defaults() Config {
 	t := true
 	return Config{
-		Role: "host", MountBase: "/usr/local/jailops", DataDir: "/var/db/jailops",
+		MountBase: "/usr/local/jailops", DataDir: "/var/db/jailops",
 		ConfDir: "/usr/local/etc/jailops/jails", WorkDir: "/var/tmp/jailops",
 		Listen:    Listen{Unix: UnixListen{Path: "/var/run/jailops/jailops.sock", Mode: 0o666}},
 		Priv:      Priv{Socket: priv.DefaultSocket},
@@ -412,6 +409,10 @@ func Defaults() Config {
 func Decode(r io.Reader) (Config, error) {
 	cfg := Defaults()
 	raw, err := io.ReadAll(r)
+	if err != nil {
+		return cfg, fmt.Errorf("config: %w", err)
+	}
+	raw, err = UpgradeConfig(raw)
 	if err != nil {
 		return cfg, fmt.Errorf("config: %w", err)
 	}
@@ -437,12 +438,6 @@ func Load(path string) (Config, error) {
 }
 
 func (c Config) finish() (Config, error) {
-	if c.Role == "" {
-		c.Role = "host"
-	}
-	if c.Role != "host" {
-		return c, fmt.Errorf("config: role %q is not supported by jailopsd: the backup node is a separate daemon (jailops-backupd)", c.Role)
-	}
 	if c.Pool == "" {
 		return c, fmt.Errorf("config: pool is required")
 	}
@@ -698,3 +693,25 @@ func ApplyAppliance(c Config, mods []string) (Config, error) {
 var hostnameRE = regexp.MustCompile(`^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*$`)
 
 func validHostname(h string) bool { return len(h) <= 253 && hostnameRE.MatchString(h) }
+
+// UpgradeConfig rewrites a configuration written by an earlier release to the current keys: the line "role: host" that
+// jailopsd.yaml shipped is dropped (the value of the key is host, or empty). Any other role stays and is refused as an
+// unknown key. The file on disk is not changed.
+func UpgradeConfig(raw []byte) ([]byte, error) {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(raw, &doc); err != nil || len(doc.Content) == 0 || doc.Content[0].Kind != yaml.MappingNode {
+		return raw, nil
+	}
+	m := doc.Content[0]
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value != "role" {
+			continue
+		}
+		switch m.Content[i+1].Value {
+		case "host", "", "null", "~":
+			m.Content = append(m.Content[:i], m.Content[i+2:]...)
+			return yaml.Marshal(&doc)
+		}
+	}
+	return raw, nil
+}

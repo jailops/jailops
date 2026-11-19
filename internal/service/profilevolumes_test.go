@@ -22,7 +22,7 @@ func TestProfileEditCannotGiveAJailAHostDirectory(t *testing.T) {
 	e, s := newEnv(t)
 	newBoxVolume(t, e, s, api.VolumeSpec{})
 	pctx := as(alphaOnly, dtest.SeedProject)
-	if _, err := s.CreateProfile(pctx, api.Profile{Metadata: api.ObjectMeta{Name: "p"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.pids": "100"}}}); err != nil {
+	if _, err := s.CreateProfile(pctx, api.Profile{Metadata: api.ObjectMeta{Name: "p"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.pids": "100"}}}); err != nil {
 		t.Fatal(err)
 	}
 	op, err := s.CreateJail(pctx, profileJail("web", "p"))
@@ -31,7 +31,7 @@ func TestProfileEditCannotGiveAJailAHostDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	p.Spec.Config = map[string]string{"limits.pids": "100", "disk.box": "/srv/backups"}
+	p.Spec.Config = map[string]string{"resources.pids": "100", "volumes.box": "/srv/backups"}
 	_, err = s.UpdateProfile(pctx, "p", p, p.Metadata.Generation)
 	wantCode(t, err, api.CodeForbidden)
 	if !strings.Contains(err.Error(), "directory of the host") {
@@ -39,7 +39,7 @@ func TestProfileEditCannotGiveAJailAHostDirectory(t *testing.T) {
 	}
 	// the same edit by a global administrator is the grant
 	p, _ = s.GetProfile(pctx, "p")
-	p.Spec.Config = map[string]string{"limits.pids": "100", "disk.box": "/srv/backups"}
+	p.Spec.Config = map[string]string{"resources.pids": "100", "volumes.box": "/srv/backups"}
 	if _, err := s.UpdateProfile(as(globalAdmin, dtest.SeedProject), "p", p, p.Metadata.Generation); err != nil {
 		t.Fatalf("a global administrator gives a host directory through a profile: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestEncryptedVolumeStaysWithOneJailThroughProfiles(t *testing.T) {
 	ctx := as(globalAdmin, dtest.SeedProject)
 	vop, err := s.CreateVolume(ctx, api.VolumeCreate{Metadata: api.ObjectMeta{Name: "vault"}, Spec: api.VolumeSpec{Encrypted: true, UID: 770, GID: 770, Mode: "0700"}, Passphrase: encPass})
 	mustOp(t, s, vop, err)
-	if _, err := s.CreateProfile(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "p"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.pids": "100"}}}); err != nil {
+	if _, err := s.CreateProfile(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "p"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.pids": "100"}}}); err != nil {
 		t.Fatal(err)
 	}
 	// two jails of one profile
@@ -59,20 +59,20 @@ func TestEncryptedVolumeStaysWithOneJailThroughProfiles(t *testing.T) {
 		mustOp(t, s, op, err)
 	}
 	p, _ := s.GetProfile(ctx, "p")
-	p.Spec.Config = map[string]string{"limits.pids": "100", "disk.vault": "/var/db/app"}
+	p.Spec.Config = map[string]string{"resources.pids": "100", "volumes.vault": "/var/db/app"}
 	_, err = s.UpdateProfile(ctx, "p", p, p.Metadata.Generation)
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	if !strings.Contains(err.Error(), "attached to one jail") {
 		t.Fatalf("%v", err)
 	}
 	// a jail made with a profile that carries it takes the volume only when no other jail has it
-	if _, err := s.CreateProfile(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "q"}, Spec: api.ProfileSpec{Config: map[string]string{"disk.vault": "/var/db/app"}}}); err != nil {
+	if _, err := s.CreateProfile(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "q"}, Spec: api.ProfileSpec{Config: map[string]string{"volumes.vault": "/var/db/app"}}}); err != nil {
 		t.Fatal(err)
 	}
 	op, err := s.CreateJail(ctx, profileJail("c", "q"))
 	mustOp(t, s, op, err)
 	_, err = s.CreateJail(ctx, profileJail("d", "q"))
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 }
 
 func TestProfileEditCannotPassTheQuotasOfTheProject(t *testing.T) {
@@ -87,17 +87,17 @@ func TestProfileEditCannotPassTheQuotasOfTheProject(t *testing.T) {
 		t.Fatal(err)
 	}
 	pctx := as(alphaOnly, dtest.SeedProject)
-	if _, err := s.CreateProfile(pctx, api.Profile{Metadata: api.ObjectMeta{Name: "p"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.memory": "1G"}}}); err != nil {
+	if _, err := s.CreateProfile(pctx, api.Profile{Metadata: api.ObjectMeta{Name: "p"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.memory": "1G"}}}); err != nil {
 		t.Fatal(err)
 	}
 	op, err := s.CreateJail(pctx, profileJail("web", "p"))
 	mustOp(t, s, op, err)
 	prof, _ := s.GetProfile(pctx, "p")
-	prof.Spec.Config = map[string]string{"limits.memory": "100G"}
+	prof.Spec.Config = map[string]string{"resources.memory": "100G"}
 	_, err = s.UpdateProfile(pctx, "p", prof, prof.Metadata.Generation)
 	wantCode(t, err, api.CodeQuotaExceeded)
 	// within the quota it goes through
-	prof.Spec.Config = map[string]string{"limits.memory": "2G"}
+	prof.Spec.Config = map[string]string{"resources.memory": "2G"}
 	if _, err := s.UpdateProfile(pctx, "p", prof, prof.Metadata.Generation); err != nil {
 		t.Fatal(err)
 	}

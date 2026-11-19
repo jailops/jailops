@@ -18,7 +18,7 @@ import (
 // way to read and write it, not a second data model.
 
 // Profile is a named, reusable set of configuration keys and devices. Devices
-// are keys too (nic.eth1.network, disk.data.quota, ...). A profile belongs to
+// are keys too (network.eth1.network, volumes.data.quota, ...). A profile belongs to
 // a project; the profiles of the reserved project "host" are visible to every
 // project.
 type Profile struct {
@@ -43,8 +43,8 @@ const KindProfile Kind = "Profile"
 
 // ConfigKey describes one key of the registry.
 type ConfigKey struct {
-	// Name is the dotted key; "<device>", "<name>" and "<var>" stand for the
-	// name of a device or variable.
+	// Name is the dotted key, the path of the field in the spec; "<name>" and
+	// "<var>" stand for the name of a network, volume or device or of a variable.
 	Name string `json:"name"`
 	// Type is string, int, bool, size, rate, list, enum, address, mac, listen
 	// or device (a key that adds or removes a whole device).
@@ -303,12 +303,24 @@ func buildRegistry() []ckey {
 		})
 	list("profiles", "profiles", "Profiles merged into this jail, in order; later ones override earlier ones.", "base,web", true, false,
 		func(s *JailSpec) *[]string { return &s.Profiles }, nameCheck)
-	num("limits.cpu", "resources.cpu", "CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.", "2", 0, 4096, true, func(s *JailSpec) *int { return &s.Resources.CPU })
-	size("limits.memory", "resources.memory", "Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.", "2G", true, func(s *JailSpec) *string { return &s.Resources.Memory })
-	num("limits.pids", "resources.pids", "Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.", "500", 0, 4194304, true, func(s *JailSpec) *int { return &s.Resources.PIDs })
-	size("limits.disk", "resources.disk", "ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.", "20G", false, func(s *JailSpec) *string { return &s.Resources.Disk })
-	size("limits.disk_reservation", "resources.disk_reservation", "ZFS reservation of the jail's container.", "5G", false, func(s *JailSpec) *string { return &s.Resources.DiskReservation })
-	num("limits.states", "resources.states", "Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.", "20000", 0, 10000000, false, func(s *JailSpec) *int { return &s.Resources.States })
+	num("resources.cpu", "resources.cpu", "CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.", "2", 0, 4096, true, func(s *JailSpec) *int { return &s.Resources.CPU })
+	add(ckey{ConfigKey: ConfigKey{Name: "resources.cpuset", Type: "string", Example: "2,3", RestartRequired: true, Profile: true, Path: "resources.cpuset",
+		Description: "CPUs the jail runs on (cpuset(1)): a list such as 2,3 or 0-3,6, kept as sorted ranges. Needs no resource accounting. A CPU the host does not have stops the jail from starting."},
+		get: func(s *JailSpec, _ string) (string, bool) { return s.Resources.CPUSet, s.Resources.CPUSet != "" },
+		set: func(s *JailSpec, _, v string) error {
+			c, err := NormalizeCPUSet(v)
+			if err != nil {
+				return cfgErr("resources.cpuset", "resources.cpuset: %v", err)
+			}
+			s.Resources.CPUSet = c
+			return nil
+		},
+		unset: func(s *JailSpec, _ string) { s.Resources.CPUSet = "" }})
+	size("resources.memory", "resources.memory", "Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.", "2G", true, func(s *JailSpec) *string { return &s.Resources.Memory })
+	num("resources.pids", "resources.pids", "Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.", "500", 0, 4194304, true, func(s *JailSpec) *int { return &s.Resources.PIDs })
+	size("resources.disk", "resources.disk", "ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.", "20G", false, func(s *JailSpec) *string { return &s.Resources.Disk })
+	size("resources.disk_reservation", "resources.disk_reservation", "ZFS reservation of the jail's container.", "5G", false, func(s *JailSpec) *string { return &s.Resources.DiskReservation })
+	num("resources.states", "resources.states", "Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.", "20000", 0, 10000000, false, func(s *JailSpec) *int { return &s.Resources.States })
 	add(ckey{ConfigKey: ConfigKey{Name: "boot.autostart", Type: "bool", Description: "Start the jail when the host starts.", Example: "true", Profile: true, Path: "boot.autostart"},
 		get: func(s *JailSpec, _ string) (string, bool) { return "true", s.Boot.Autostart },
 		set: func(s *JailSpec, _, v string) error {
@@ -318,22 +330,9 @@ func buildRegistry() []ckey {
 		},
 		unset: func(s *JailSpec, _ string) { s.Boot.Autostart = false }})
 	num("boot.priority", "boot.priority", "Start order: lower starts first.", "10", -1000, 1000, false, func(s *JailSpec) *int { return &s.Boot.Priority })
-	num("boot.stop_timeout", "boot.stop_timeout", "Seconds the jail has to shut down by itself, after its stop command, before it is killed; 0 is the default of thirty seconds. A database that needs a minute to close says 60. Written into the jail's configuration at its start.", "60", 0, MaxStopTimeout, true, func(s *JailSpec) *int { return &s.Boot.StopTimeout })
+	num("boot.stop_timeout_seconds", "boot.stop_timeout_seconds", "Seconds the jail has to shut down by itself, after its stop command, before it is killed; 0 is the default of thirty seconds. A database that needs a minute to close says 60. Written into the jail's configuration at its start.", "60", 0, MaxStopTimeout, true, func(s *JailSpec) *int { return &s.Boot.StopTimeoutSeconds })
 	list("boot.depends", "boot.depends", "Jails of the project that must run first.", "db,cache", false, false,
 		func(s *JailSpec) *[]string { return &s.Boot.Depends }, nameCheck)
-	add(ckey{ConfigKey: ConfigKey{Name: "update.strategy", Type: "enum", Values: []string{string(UpdateRebase), string(UpdateInPlace), string(UpdateManual)},
-		Description: "How the jail follows its image.", Example: "rebase", Profile: true, Path: "update.strategy"},
-		get: func(s *JailSpec, _ string) (string, bool) { return string(s.Update.Strategy), s.Update.Strategy != "" },
-		set: func(s *JailSpec, _, v string) error {
-			switch UpdateStrategy(v) {
-			case UpdateRebase, UpdateInPlace, UpdateManual:
-				s.Update.Strategy = UpdateStrategy(v)
-				return nil
-			}
-			return cfgErr("update.strategy", "update.strategy: %q must be rebase, inplace or manual", v)
-		},
-		unset: func(s *JailSpec, _ string) { s.Update.Strategy = "" }})
-	str("update.window", "update.window", "Maintenance window of automatic updates.", "sun 03:00", false, true, func(s *JailSpec) *string { return &s.Update.Window }, nil)
 	str("update.healthcheck", "update.healthcheck", "Command run in the jail after an update.", "/usr/local/bin/check", false, true,
 		func(s *JailSpec) *string { return &s.Update.Healthcheck }, nil)
 	add(ckey{ConfigKey: ConfigKey{Name: "shell", Type: "string", Example: "bash", Profile: true, Path: "shell",
@@ -350,7 +349,7 @@ func buildRegistry() []ckey {
 		unset: func(s *JailSpec, _ string) { s.Shell = "" }})
 	str("prompt", "prompt", "Bash prompt of a FreeBSD jail, for every user: default (user@jail in colour, then in grey [project/host], then the directory), short (the same without the grey tag), none (no prompt, the variables stay), or a PS1 text such as \\u@\\h [{project}/{host}]:\\w\\$ with bash's escapes (no ', ` or $ other than \\$: nothing in it runs; \\e or \\033 start a colour) and the words {jail}, {project} and {host}, which read the variables JAILOPS_JAIL, JAILOPS_PROJECT and JAILOPS_HOST that every interactive bash of the jail has. A user's own ~/.bashrc wins. Written into "+PromptFile+" at once in a running jail, else at its next start.", "default", false, true,
 		func(s *JailSpec) *string { return &s.Prompt }, CheckPrompt)
-	add(ckey{ConfigKey: ConfigKey{Name: "updates.mode", Type: "enum", Values: []string{"manual", "notify", "managed"}, Profile: true, Path: "update.mode",
+	add(ckey{ConfigKey: ConfigKey{Name: "update.mode", Type: "enum", Values: []string{"manual", "notify", "managed"}, Profile: true, Path: "update.mode",
 		Description: "manual: nothing happens unless you run it. notify: check on the schedule and report. managed: check and apply on the schedule. Off (manual) by default.", Example: "notify"},
 		get: func(s *JailSpec, _ string) (string, bool) { return string(s.Update.Mode), s.Update.Mode != "" },
 		set: func(s *JailSpec, _, v string) error {
@@ -359,10 +358,10 @@ func buildRegistry() []ckey {
 				s.Update.Mode = UpdateMode(v)
 				return nil
 			}
-			return cfgErr("updates.mode", "updates.mode: %q must be manual, notify or managed", v)
+			return cfgErr("update.mode", "update.mode: %q must be manual, notify or managed", v)
 		},
 		unset: func(s *JailSpec, _ string) { s.Update.Mode = "" }})
-	str("updates.schedule", "update.schedule", "Five-field cron expression of notify and managed updates.", "0 3 * * 0", false, true,
+	str("update.schedule", "update.schedule", "Five-field cron expression of notify and managed updates.", "0 3 * * 0", false, true,
 		func(s *JailSpec) *string { return &s.Update.Schedule }, func(v string) error {
 			if len(strings.Fields(v)) != 5 {
 				return fmt.Errorf("%q is not a five-field cron expression", v)
@@ -388,18 +387,18 @@ func buildRegistry() []ckey {
 			return err
 		},
 		unset: func(s *JailSpec, _ string) { s.SysVIPC = false }})
-	add(ckey{ConfigKey: ConfigKey{Name: "zfs.delegation", Type: "bool", Example: "true", RestartRequired: true, Path: "zfs_delegation",
+	add(ckey{ConfigKey: ConfigKey{Name: "zfs_delegation", Type: "bool", Example: "true", RestartRequired: true, Path: "zfs_delegation",
 		Description: "Global administrators only. Hands the jail a ZFS dataset of its own, <container>/delegated: root in the jail can create datasets, snapshots and mounts below it, outside the rules JailOps applies to the jail's data. The host's priv.conf must allow it (admin-zfs-delegation)."},
 		get: func(s *JailSpec, _ string) (string, bool) { return "true", s.Delegate },
 		set: func(s *JailSpec, _, v string) error {
-			b, err := parseBool("zfs.delegation", v)
+			b, err := parseBool("zfs_delegation", v)
 			s.Delegate = b
 			return err
 		},
 		unset: func(s *JailSpec, _ string) { s.Delegate = false }})
-	boolKey("updates.packages", "update.packages", "Update the packages inside the jail (pkg or apk, from the host).", func(s *JailSpec) *bool { return &s.Update.Packages })
-	boolKey("updates.os", "update.os", "Move the jail to a newer image generation (root swap).", func(s *JailSpec) *bool { return &s.Update.OS })
-	add(ckey{ConfigKey: ConfigKey{Name: "updates.reboot", Type: "enum", Values: []string{"manual", "auto"}, Profile: true, Path: "update.reboot",
+	boolKey("update.packages", "update.packages", "Update the packages inside the jail (pkg or apk, from the host).", func(s *JailSpec) *bool { return &s.Update.Packages })
+	boolKey("update.os", "update.os", "Move the jail to a newer image generation (root swap).", func(s *JailSpec) *bool { return &s.Update.OS })
+	add(ckey{ConfigKey: ConfigKey{Name: "update.reboot", Type: "enum", Values: []string{"manual", "auto"}, Profile: true, Path: "update.reboot",
 		Description: "Whether a jail restart that an update needs is applied automatically (auto) or left to you (manual, the default).", Example: "manual"},
 		get: func(s *JailSpec, _ string) (string, bool) { return string(s.Update.Reboot), s.Update.Reboot != "" },
 		set: func(s *JailSpec, _, v string) error {
@@ -408,7 +407,7 @@ func buildRegistry() []ckey {
 				s.Update.Reboot = UpdateReboot(v)
 				return nil
 			}
-			return cfgErr("updates.reboot", "updates.reboot: %q must be manual or auto", v)
+			return cfgErr("update.reboot", "update.reboot: %q must be manual or auto", v)
 		},
 		unset: func(s *JailSpec, _ string) { s.Update.Reboot = "" }})
 	list("firewall.policies", "firewall.policies", "Firewall policies of the jail's anchor, in the order they are rendered after the project's.", "postgres,ssh-office", false, true,
@@ -449,11 +448,11 @@ func buildRegistry() []ckey {
 				return v, v != ""
 			}, func(s *JailSpec, d, v string) error {
 				if !IsName(d, 31) {
-					return cfgErr("nic."+d+"."+key, "%q is not a device name", d)
+					return cfgErr("network."+d+"."+key, "%q is not a device name", d)
 				}
 				if check != nil {
 					if err := check(v); err != nil {
-						return cfgErr("nic."+d+"."+key, "nic.%s.%s: %v", d, key, err)
+						return cfgErr("network."+d+"."+key, "network.%s.%s: %v", d, key, err)
 					}
 				}
 				*get(find(s, d, true)) = v
@@ -464,7 +463,7 @@ func buildRegistry() []ckey {
 				}
 			}
 	}
-	devKey("nic.<device>", "device", "A network interface; set it to a network name to add it, unset it to remove it.", "nic.eth1=lan", true, true, false, "network[<device>]",
+	devKey("network.<name>", "device", "A network interface; set it to a network name to add it, unset it to remove it.", "network.eth1=lan", true, true, false, "network[<name>]",
 		func(s *JailSpec, d string) (string, bool) {
 			if p := nic(s, d, false); p != nil {
 				return p.Network, true
@@ -472,7 +471,7 @@ func buildRegistry() []ckey {
 			return "", false
 		}, func(s *JailSpec, d, v string) error {
 			if !IsName(d, 31) {
-				return cfgErr("nic."+d, "%q is not a device name", d)
+				return cfgErr("network."+d, "%q is not a device name", d)
 			}
 			nic(s, d, true).Network = v
 			return nil
@@ -486,19 +485,19 @@ func buildRegistry() []ckey {
 			}
 		})
 	g, st, un := field(nic, func(v string) error { return nameCheck(v) }, func(p *NetworkAttach) *string { return &p.Network }, "network")
-	devKey("nic.<device>.network", "string", "Network the interface attaches to.", "lan", true, true, false, "network[<device>].network", g, st, un)
+	devKey("network.<name>.network", "string", "Network the interface attaches to.", "lan", true, true, false, "network[<name>].network", g, st, un)
 	g, st, un = field(nic, func(v string) error { return checkAddr("ipv4", v, true) }, func(p *NetworkAttach) *string { return &p.IPv4 }, "ipv4")
-	devKey("nic.<device>.ipv4", "address", "IPv4 address: auto, none or a fixed address.", "auto", true, false, false, "network[<device>].ipv4", g, st, un)
+	devKey("network.<name>.ipv4", "address", "IPv4 address: auto, none or a fixed address.", "auto", true, false, false, "network[<name>].ipv4", g, st, un)
 	g, st, un = field(nic, func(v string) error { return checkAddr("ipv6", v, false) }, func(p *NetworkAttach) *string { return &p.IPv6 }, "ipv6")
-	devKey("nic.<device>.ipv6", "address", "IPv6 address: auto, none or a fixed address.", "auto", true, false, false, "network[<device>].ipv6", g, st, un)
+	devKey("network.<name>.ipv6", "address", "IPv6 address: auto, none or a fixed address.", "auto", true, false, false, "network[<name>].ipv6", g, st, un)
 	g, st, un = field(nic, func(v string) error {
 		if !macRE.MatchString(v) {
 			return fmt.Errorf("%q is not a lower case MAC address", v)
 		}
 		return nil
 	}, func(p *NetworkAttach) *string { return &p.MAC }, "mac")
-	devKey("nic.<device>.mac", "mac", "MAC address (derived from the jail UUID when empty).", "02:00:00:00:00:01", true, false, false, "network[<device>].mac", g, st, un)
-	devKey("nic.<device>.mtu", "int", "MTU of the interface; 0 takes the network's.", "1500", true, true, false, "network[<device>].mtu",
+	devKey("network.<name>.mac", "mac", "MAC address (derived from the jail UUID when empty).", "02:00:00:00:00:01", true, false, false, "network[<name>].mac", g, st, un)
+	devKey("network.<name>.mtu", "int", "MTU of the interface; 0 takes the network's.", "1500", true, true, false, "network[<name>].mtu",
 		func(s *JailSpec, d string) (string, bool) {
 			if p := nic(s, d, false); p != nil && p.MTU != 0 {
 				return strconv.Itoa(p.MTU), true
@@ -506,9 +505,9 @@ func buildRegistry() []ckey {
 			return "", false
 		}, func(s *JailSpec, d, v string) error {
 			if !IsName(d, 31) {
-				return cfgErr("nic."+d+".mtu", "%q is not a device name", d)
+				return cfgErr("network."+d+".mtu", "%q is not a device name", d)
 			}
-			n, err := atoiRange("nic."+d+".mtu", v, 576, 9216)
+			n, err := atoiRange("network."+d+".mtu", v, 576, 9216)
 			if err != nil {
 				return err
 			}
@@ -526,12 +525,12 @@ func buildRegistry() []ckey {
 		return nil
 	}
 	g, st, un = field(nic, rate, func(p *NetworkAttach) *string { return &p.Egress }, "egress")
-	devKey("nic.<device>.egress", "rate", "Rate limit of what the jail sends through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.", "10M", false, true, false, "network[<device>].egress", g, st, un)
+	devKey("network.<name>.egress", "rate", "Rate limit of what the jail sends through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.", "10M", false, true, false, "network[<name>].egress", g, st, un)
 	g, st, un = field(nic, rate, func(p *NetworkAttach) *string { return &p.Ingress }, "ingress")
-	devKey("nic.<device>.ingress", "rate", "Rate limit of what the jail receives through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.", "10M", false, true, false, "network[<device>].ingress", g, st, un)
+	devKey("network.<name>.ingress", "rate", "Rate limit of what the jail receives through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.", "10M", false, true, false, "network[<name>].ingress", g, st, un)
 
 	// disk devices
-	devKey("disk.<device>", "device", "A volume of the project attached to the jail: <device> is the name of the volume; set it to the mount path to attach it, unset it to detach it.", "disk.data=/var/db", true, true, false, "volumes[<device>]",
+	devKey("volumes.<name>", "device", "A volume of the project attached to the jail: <name> is the name of the volume; set it to the mount path to attach it, unset it to detach it.", "volumes.data=/var/db", true, true, false, "volumes[<name>]",
 		func(s *JailSpec, d string) (string, bool) {
 			if p := disk(s, d, false); p != nil {
 				return p.Mount, true
@@ -539,7 +538,7 @@ func buildRegistry() []ckey {
 			return "", false
 		}, func(s *JailSpec, d, v string) error {
 			if !IsName(d, 31) {
-				return cfgErr("disk."+d, "%q is not a device name", d)
+				return cfgErr("volumes."+d, "%q is not a device name", d)
 			}
 			disk(s, d, true).Mount = v
 			return nil
@@ -561,10 +560,10 @@ func buildRegistry() []ckey {
 				return v, v != ""
 			}, func(s *JailSpec, d, v string) error {
 				if !IsName(d, 31) {
-					return cfgErr("disk."+d+"."+key, "%q is not a device name", d)
+					return cfgErr("volumes."+d+"."+key, "%q is not a device name", d)
 				}
 				if err := check(v); err != nil {
-					return cfgErr("disk."+d+"."+key, "disk.%s.%s: %v", d, key, err)
+					return cfgErr("volumes."+d+"."+key, "volumes.%s.%s: %v", d, key, err)
 				}
 				*get(disk(s, d, true)) = v
 				return nil
@@ -580,18 +579,18 @@ func buildRegistry() []ckey {
 		}
 		return nil
 	}, func(p *VolumeAttach) *string { return &p.Mount })
-	devKey("disk.<device>.mount", "string", "Where the volume is mounted inside the jail.", "/var/db", true, true, false, "volumes[<device>].mount", g, st, un)
-	devKey("disk.<device>.read_only", "bool", "Attach the volume read-only.", "true", true, true, false, "volumes[<device>].read_only",
+	devKey("volumes.<name>.mount", "string", "Where the volume is mounted inside the jail.", "/var/db", true, true, false, "volumes[<name>].mount", g, st, un)
+	devKey("volumes.<name>.read_only", "bool", "Attach the volume read-only.", "true", true, true, false, "volumes[<name>].read_only",
 		func(s *JailSpec, d string) (string, bool) {
 			p := disk(s, d, false)
 			return "true", p != nil && p.ReadOnly
 		}, func(s *JailSpec, d, v string) error {
-			b, err := parseBool("disk."+d+".read_only", v)
+			b, err := parseBool("volumes."+d+".read_only", v)
 			if err != nil {
 				return err
 			}
 			if !IsName(d, 31) {
-				return cfgErr("disk."+d+".read_only", "%q is not a device name", d)
+				return cfgErr("volumes."+d+".read_only", "%q is not a device name", d)
 			}
 			disk(s, d, true).ReadOnly = b
 			return nil
@@ -688,7 +687,7 @@ func ConfigKeyFor(key string) (ConfigKey, string, bool) {
 
 // ApplyConfig sets and unsets keys on spec. It is atomic: on an error spec is
 // unchanged. It returns the keys, sorted, that changed a value and need a
-// restart to take effect. Unsetting a device key (nic.eth1) removes the
+// restart to take effect. Unsetting a device key (network.eth1) removes the
 // device; unsetting a field resets it.
 func ApplyConfig(spec *JailSpec, set map[string]string, unset []string) (restartRequired []string, err error) {
 	work := *spec
@@ -776,26 +775,17 @@ func ConfigValues(spec JailSpec) map[string]string {
 				v, _ := k.get(&s, n)
 				out["env."+n] = v
 			}
-		case strings.Contains(k.Name, "<device>"):
-			var names []string
-			switch {
-			case strings.HasPrefix(k.Name, "nic."):
-				for _, d := range s.Network {
-					names = append(names, d.Name)
-				}
-			case strings.HasPrefix(k.Name, "disk."):
-				for _, d := range s.Volumes {
-					names = append(names, d.Name)
-				}
-			}
-			for _, n := range names {
-				if v, ok := k.get(&s, n); ok {
-					out[strings.Replace(k.Name, "<device>", n, 1)] = v
-				}
-			}
 		case strings.Contains(k.Name, "<name>"):
 			var names []string
 			switch {
+			case strings.HasPrefix(k.Name, "network."):
+				for _, d := range s.Network {
+					names = append(names, d.Name)
+				}
+			case strings.HasPrefix(k.Name, "volumes."):
+				for _, d := range s.Volumes {
+					names = append(names, d.Name)
+				}
 			case strings.HasPrefix(k.Name, "devfs."):
 				for _, d := range s.Devfs {
 					names = append(names, d.Name)

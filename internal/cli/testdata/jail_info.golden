@@ -22,7 +22,7 @@ Reachable from
 SOURCE     FAMILY   PROTO   PORTS   LIMITED TO   REACH    BY
 Internet   -        -       -       -            closed   no allow in rule with an external source and no port forward
   The jail reaches: Internet all; host DNS and ping; other jails all
-  Details: jailops firewall show web --all
+  Details: jailops firewall show web --lines
 
 Network
   eth0:         network lan, mac derived by the server, mtu network default, up
@@ -32,7 +32,7 @@ Snapshots
   Count:        0
 
 Update policy
-  Strategy:     -, mode manual
+  Mode:         manual
   Last:         no update yet
 
 Labels
@@ -62,7 +62,7 @@ Reachable from
 SOURCE     FAMILY   PROTO   PORTS   LIMITED TO   REACH    BY
 Internet   -        -       -       -            closed   no allow in rule with an external source and no port forward
   The jail reaches: Internet all; host DNS and ping; other jails all
-  Details: jailops firewall show db --all
+  Details: jailops firewall show db --lines
 
 Network
   eth0:         network lan, mac derived by the server, mtu network default, down
@@ -76,7 +76,7 @@ Snapshots
   Newest:       after (3h ago)
 
 Update policy
-  Strategy:     -, mode manual
+  Mode:         manual
   Last:         no update yet
 
 $ jailops info db -o yaml
@@ -84,7 +84,7 @@ name: db
 project: main
 uuid: <uuid>
 hostname: db
-state: stopped
+power: stopped
 layout: thin
 image: freebsd-15
 generation: g1
@@ -125,8 +125,8 @@ reach:
   jail: db
   rows:
     - source: internet
-      family: ""
-      proto: ""
+      family: 4,6
+      proto: tcp,udp
       decision: none
       by: no allow in rule with an external source and no port forward
   out:
@@ -151,7 +151,7 @@ $ jailops jail info web -o json
   "project": "main",
   "uuid": "<uuid>",
   "hostname": "web",
-  "state": "running",
+  "power": "running",
   "jid": 1,
   "layout": "thin",
   "image": "freebsd-15",
@@ -202,8 +202,8 @@ $ jailops jail info web -o json
     "rows": [
       {
         "source": "internet",
-        "family": "",
-        "proto": "",
+        "family": "4,6",
+        "proto": "tcp,udp",
         "decision": "none",
         "by": "no allow in rule with an external source and no port forward"
       }

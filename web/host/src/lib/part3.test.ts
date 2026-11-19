@@ -31,13 +31,13 @@ describe('config change', () => {
   const a: JailSpec = { image: 'x', resources: { cpu: 2, memory: '2G' }, boot: { autostart: true } }
   it('builds set and unset from two specs', () => {
     const b: JailSpec = { image: 'x', resources: { cpu: 4 }, boot: { autostart: true, priority: 5 } }
-    expect(configChange(a, b)).toEqual({ set: { 'limits.cpu': '4', 'boot.priority': '5' }, unset: ['limits.memory'] })
+    expect(configChange(a, b)).toEqual({ set: { 'resources.cpu': '4', 'boot.priority': '5' }, unset: ['resources.memory'] })
     expect(configChange(a, a)).toEqual({ set: {}, unset: [] })
   })
   it('maps the server sources', () => {
-    const src = sourcesOf({ jail: { spec: a } as never, sources: { 'limits.cpu': 'jail', 'limits.memory': 'profile:web-limits' } })
-    expect(src['limits.memory']).toEqual({ value: '2G', source: 'web-limits' })
-    expect(src['limits.cpu'].source).toBe('jail')
+    const src = sourcesOf({ jail: { spec: a } as never, sources: { 'resources.cpu': 'jail', 'resources.memory': 'profile:web-limits' } })
+    expect(src['resources.memory']).toEqual({ value: '2G', source: 'web-limits' })
+    expect(src['resources.cpu'].source).toBe('jail')
   })
 })
 

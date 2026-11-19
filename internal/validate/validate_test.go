@@ -91,7 +91,6 @@ func TestJailSpec(t *testing.T) {
 		{"layout", func(s *api.JailSpec) { s.Layout = "nullfs" }, "layout"},
 		{"hostname", func(s *api.JailSpec) { s.Hostname = "a b" }, "hostname"},
 		{"hostname dot", func(s *api.JailSpec) { s.Hostname = "a..b" }, "hostname"},
-		{"strategy", func(s *api.JailSpec) { s.Update.Strategy = "x" }, "update.strategy"},
 		{"memory", func(s *api.JailSpec) { s.Resources.Memory = "lots" }, "resources.memory"},
 		{"cpu", func(s *api.JailSpec) { s.Resources.CPU = -1 }, "resources.cpu"},
 		{"net name", func(s *api.JailSpec) { s.Network[0].Network = "LAN" }, "network[0].network"},

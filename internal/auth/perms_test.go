@@ -122,13 +122,9 @@ func TestCheck(t *testing.T) {
 		{api.PermAdmin, "PUT", "/api/v1/jails/{name}/state", ""},
 		{api.PermAdmin, "GET", "/api/v1/users", ""},
 		{api.PermOperator, "GET", "/api/v1/users", api.CodeForbidden},
-		{api.PermAdmin, "POST", "/api/v1/backups/{id}/restore", ""},   // admin covers restore
-		{api.PermRestore, "POST", "/api/v1/backups/{id}/restore", ""}, //
-		{api.PermRestore, "GET", "/api/v1/jails", api.CodeForbidden},  // narrow roles are narrow
-		{api.PermBackupPush, "POST", "/api/v1/backups/receive", ""},   //
-		{api.PermBackupPush, "GET", "/api/v1/backups/{id}/stream", api.CodeForbidden},
-		{api.PermBackupPull, "GET", "/api/v1/backups/{id}/stream", ""},
-		{api.PermBackupPull, "POST", "/api/v1/backups/receive", api.CodeForbidden},
+		{api.PermAdmin, "POST", "/api/v1/restores", ""},                      // admin covers restore
+		{api.PermRestore, "POST", "/api/v1/restores", ""},                    //
+		{api.PermRestore, "GET", "/api/v1/jails", api.CodeForbidden},         // narrow roles are narrow
 		{api.PermAdmin, "DELETE", "/api/v1/backups/{id}", api.CodeForbidden}, // only backup-admin deletes backups
 		{api.PermBackupAdmin, "DELETE", "/api/v1/backups/{id}", ""},
 		{api.PermBackupAdmin, "POST", "/api/v1/jails", api.CodeForbidden},
@@ -154,10 +150,8 @@ func TestCheckPathMostSpecificWins(t *testing.T) {
 		method, path string
 		want         api.Code
 	}{
-		{api.PermBackupPush, "POST", "/api/v1/backups/receive", ""},
-		{api.PermBackupPull, "GET", "/api/v1/backups/chains", ""},
 		{api.PermReadonly, "GET", "/api/v1/backups/abc123", ""},
-		{api.PermReadonly, "GET", "/api/v1/backups/chains", api.CodeForbidden}, // literal beats {id}
+		{api.PermReadonly, "POST", "/api/v1/backups/run", api.CodeForbidden}, // literal beats {id}
 		{api.PermOperator, "GET", "/api/v1/jails/web/files/etc/rc.conf", ""},
 		{api.PermReadonly, "GET", "/api/v1/jails/web/files/etc/rc.conf", api.CodeForbidden},
 		{api.PermReadonly, "GET", "/api/v1/jails/web/files/", api.CodeForbidden}, // empty rest does not match -> unlisted
@@ -211,7 +205,6 @@ func TestRouteClasses(t *testing.T) {
 		"GET /api/v1/backups":                   ClassVisible,
 		"GET /api/v1/backups/{id}":              ClassObject,
 		"DELETE /api/v1/backups/{id}":           ClassObject,
-		"POST /api/v1/backups/{id}/restore":     ClassProject,
 		"POST /api/v1/restores":                 ClassProject,
 		"GET /api/v1/operations":                ClassVisible,
 		"GET /api/v1/operations/{id}/wait":      ClassObject,
@@ -241,7 +234,7 @@ func TestRouteClasses(t *testing.T) {
 
 // The routes an anonymous caller reaches are a fixed list: adding one is a decision this test records.
 func TestPublicRoutesAreExactlyThese(t *testing.T) {
-	want := []string{"GET /api/v1", "GET /readyz", "POST /api/v1/auth/login", "POST /api/v1/cluster/join",
+	want := []string{"GET /api/v1", "GET /readyz", "POST /api/v1/auth/login",
 		"POST /api/v1/trust/clients", "GET /api/v1/setup", "POST /api/v1/setup"}
 	var got []string
 	for _, e := range Perms {

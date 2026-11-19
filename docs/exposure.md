@@ -270,7 +270,7 @@ The strongest setup JailOps has today: the listener on a public or private addre
    exists works from anywhere the firewall lets in: `jailops token list` and `jailops token revoke`, no `jailops user create`, and
    no `token_secret` in `host.yaml`. A client that presents no certificate and no token reaches only the public routes: `GET /api/v1` (the
    version, the extensions, and whether it is trusted), `GET /healthz`, `GET /readyz`, `POST /api/v1/auth/login` (which needs a valid user and
-   password), `POST /api/v1/trust/clients` (which needs a valid single-use trust token), `POST /api/v1/cluster/join` (answers 501) and the
+   password), `POST /api/v1/trust/clients` (which needs a valid single-use trust token) and the
    static console files. A non-root local user of the unix socket is exactly such a client.
 5. Revoke by deleting the identity: `jailops cert revoke NAME|FINGERPRINT`. There is no CRL; the trust store is the list.
 

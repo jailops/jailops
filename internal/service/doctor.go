@@ -54,7 +54,7 @@ func (s *Service) Doctor(ctx context.Context) api.DoctorReport {
 	s.doctorPF(ctx, c)
 	s.doctorExposedJails(ctx, c)
 	s.doctorInboundWithoutSource(c)
-	s.doctorInPlaceThinJails(c)
+	s.doctorBasePackages(c)
 	s.doctorNDPProxy(c)
 	s.doctorNDPUplink(ctx, c)
 	s.doctorDNS(ctx, c)
@@ -124,7 +124,7 @@ func (s *Service) doctorState(ctx context.Context, c *checkSet) {
 		// the operator
 		stuck := map[string]string{}
 		for _, o := range s.Recovered() {
-			if o.Action == "needs-attention" {
+			if o.Action == api.RecoveryNeedsAttention {
 				stuck[o.Run] = "see the daemon log, \"recovered an interrupted run\" for this run" // the detail holds host paths and command text: it stays in the log
 			}
 		}
@@ -233,7 +233,7 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 	}
 	check("net.inet6.ip6.forwarding", "1", v6, "jails reach IPv6 through the host", "")
 	check("net.inet.ip.forwarding", "1", v4, "jails reach IPv4 through the host", "")
-	check("kern.racct.enable", "1", racct, "limits.cpu, limits.memory and limits.pids are enforced with rctl",
+	check("kern.racct.enable", "1", racct, "resources.cpu, resources.memory and resources.pids are enforced with rctl",
 		"add kern.racct.enable=1 to /boot/loader.conf and reboot: the kernel reads it only at boot")
 	if v6 { // present from FreeBSD 15.2; JailOps derives a jail's link-local address from its MAC address, which this setting changes
 		const stable = "net.inet6.ip6.use_stableaddr"
@@ -483,7 +483,7 @@ func (s *Service) doctorDelegation(ctx context.Context, c *checkSet) {
 			if !jailed {
 				_, name := validate.SplitQualified(k)
 				bad = append(bad, name)
-				fixes = append(fixes, "jailops config set "+name+" zfs.delegation false; jailops config set "+name+" zfs.delegation true")
+				fixes = append(fixes, "jailops config set "+name+" zfs_delegation false; jailops config set "+name+" zfs_delegation true")
 			}
 		case jailed:
 			bad = append(bad, ds)

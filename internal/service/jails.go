@@ -128,8 +128,8 @@ func (s *Service) markStopped(name string) {
 func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int) api.Jail {
 	j := cloneJail(e.jail)
 	name := jailKey(j)
-	st := api.JailStatus{Power: api.PowerStopped, Generation: e.jail.Status.Generation}
-	st.FreeBSDVersion = s.generationFreeBSD(ctx, st.Generation)
+	st := api.JailStatus{Power: api.PowerStopped, ImageGeneration: e.jail.Status.ImageGeneration}
+	st.FreeBSDVersion = s.generationFreeBSD(ctx, st.ImageGeneration)
 	jid, up := 0, false
 	if running != nil {
 		jid, up = running[name], false
@@ -161,7 +161,13 @@ func (s *Service) view(ctx context.Context, e *jailEntry, running map[string]int
 	st.Drift = rt.drift
 	st.ProvisionedAt = s.provisionedAt(name)
 	st.Conditions = append(st.Conditions, rt.conditions...)
-	st.Conditions = append(st.Conditions, s.shellCondition(name)...)
+	shellConds, shellSetup := s.shellCondition(name)
+	st.Conditions = append(st.Conditions, shellConds...)
+	st.ShellSetup = shellSetup
+	if rt.basePackages != "" {
+		st.Conditions = append(st.Conditions, api.Condition{Type: "BasePackages", Status: api.ConditionFalse, Reason: "OutOfStep", Since: s.now().UTC(),
+			Message: rt.basePackages + "; try again with `jailops jail repair-packages " + name + "`"})
+	}
 	if len(e.problems) > 0 {
 		st.Conditions = append(st.Conditions, api.Condition{Type: "Healthy", Status: api.ConditionFalse, Reason: "Degraded",
 			Message: strings.Join(e.problems, "; "), Since: s.now().UTC()})
@@ -403,9 +409,6 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 			spec.Layout = api.LayoutThick
 		}
 	}
-	if err := validate.UpdateStrategyFits(spec); err != nil {
-		return api.Operation{}, err
-	}
 	if spec.OS == api.OSLinux && spec.Prompt != "" {
 		return api.Operation{}, invalid("the prompt key is for FreeBSD jails; a Linux jail keeps the prompt of its distribution")
 	}
@@ -419,7 +422,7 @@ func (s *Service) CreateJail(ctx context.Context, j api.Jail) (api.Operation, er
 	locks := append([]string{jailLock(key)}, s.netLocksEff(proj, spec)...)
 	locks = append(locks, s.imageLocks(ctx, ref, spec.Storage)...)
 	op, err := s.Submit(ctx, OpSpec{
-		Description: "Create jail " + name, Locks: locks, Project: proj,
+		Action: api.OpJailCreate, Description: "Create jail " + name, Locks: locks, Project: proj,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()
@@ -579,8 +582,11 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	if err != nil {
 		return api.Jail{}, notFound("jail", name)
 	}
+	if err := checkIncarnation(ctx, "jail", name, old.Metadata.UUID); err != nil {
+		return api.Jail{}, err
+	}
 	if expect != AnyGeneration && expect != old.Metadata.Generation {
-		return api.Jail{}, api.Errorf(api.CodeConflict, "jail %q changed: current generation is %d", name, old.Metadata.Generation).
+		return api.Jail{}, api.Errorf(api.CodePreconditionFailed, "jail %q changed: current generation is %d", name, old.Metadata.Generation).
 			WithHint("read it again and re-apply your change").WithDetail("generation", strconv.FormatInt(old.Metadata.Generation, 10))
 	}
 	// "auto" keeps the address the attachment already has.
@@ -606,13 +612,6 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	}
 	if !labelsEqual(in.Metadata.Labels, old.Metadata.Labels) {
 		if err := api.ValidLabels(in.Metadata.Labels); err != nil {
-			return api.Jail{}, err
-		}
-	}
-	if spec.Update.Strategy != old.Spec.Update.Strategy {
-		fit := spec
-		fit.OS, fit.Layout = old.Spec.OS, old.Spec.Layout // what the jail is, not what the request leaves out
-		if err := validate.UpdateStrategyFits(fit); err != nil {
 			return api.Jail{}, err
 		}
 	}
@@ -643,7 +642,7 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	setMemory := func(j api.Jail) {
 		s.mu.Lock()
 		if e := s.jails[key]; e != nil {
-			j.Status.Generation = e.jail.Status.Generation
+			j.Status.ImageGeneration = e.jail.Status.ImageGeneration
 			e.jail = j
 		}
 		s.mu.Unlock()
@@ -694,8 +693,11 @@ func (s *Service) PatchJail(ctx context.Context, name string, patch map[string]a
 	if err != nil {
 		return api.Jail{}, err
 	}
+	if err := checkIncarnation(ctx, "jail", name, cur.Metadata.UUID); err != nil {
+		return api.Jail{}, err
+	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return api.Jail{}, api.Errorf(api.CodeConflict, "jail %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return api.Jail{}, api.Errorf(api.CodePreconditionFailed, "jail %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.Jail
 	if err := MergePatch(cur, patch, &out); err != nil {
@@ -706,8 +708,9 @@ func (s *Service) PatchJail(ctx context.Context, name string, patch map[string]a
 
 // ---- delete and power ----
 
-// DeleteJail destroys a stopped jail as an operation.
-func (s *Service) DeleteJail(ctx context.Context, name string) (api.Operation, error) {
+// DeleteJail destroys a stopped jail as an operation. expect is the If-Match generation or AnyGeneration; a caller that
+// names the UUID it read (WithExpectedUUID) deletes only that incarnation.
+func (s *Service) DeleteJail(ctx context.Context, name string, expect int64) (api.Operation, error) {
 	if err := s.requireHost("jails"); err != nil {
 		return api.Operation{}, err
 	}
@@ -719,6 +722,13 @@ func (s *Service) DeleteJail(ctx context.Context, name string) (api.Operation, e
 	if err != nil {
 		return api.Operation{}, err
 	}
+	if err := checkIncarnation(ctx, "jail", name, j.Metadata.UUID); err != nil {
+		return api.Operation{}, err
+	}
+	if expect != AnyGeneration && expect != j.Metadata.Generation {
+		return api.Operation{}, api.Errorf(api.CodePreconditionFailed, "jail %q changed: current generation is %d", name, j.Metadata.Generation).
+			WithHint("read it again before you delete it").WithDetail("generation", strconv.FormatInt(j.Metadata.Generation, 10))
+	}
 	if j.Status.Power == api.PowerRunning {
 		return api.Operation{}, api.Errorf(api.CodeBusy, "jail %q is running", name).WithHint("stop it first")
 	}
@@ -729,7 +739,7 @@ func (s *Service) DeleteJail(ctx context.Context, name string) (api.Operation, e
 		return api.Operation{}, err
 	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Delete jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
+		Action: api.OpJailDelete, Description: "Delete jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			_ = h.Bind("destroy/"+key, &opRequest{Kind: "destroy", Jail: key})
@@ -767,7 +777,7 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 	default:
 		return api.Operation{}, invalid("unknown action %q (start, stop or restart)", a.Action)
 	}
-	if a.Timeout < 0 {
+	if a.TimeoutSeconds < 0 {
 		return api.Operation{}, invalid("timeout must not be negative")
 	}
 	if l := s.lockedOf(key); a.Action != "stop" && len(l) > 0 {
@@ -775,12 +785,13 @@ func (s *Service) JailAction(ctx context.Context, name string, a api.JailAction)
 	}
 	done := map[string]string{"start": "started", "stop": "stopped", "restart": "restarted"}[a.Action]
 	return s.Submit(ctx, OpSpec{
+		Action:      map[string]api.OperationAction{"start": api.OpJailStart, "stop": api.OpJailStop, "restart": api.OpJailRestart}[a.Action],
 		Description: strings.ToUpper(a.Action[:1]) + a.Action[1:] + " jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
-			if a.Timeout > 0 {
+			if a.TimeoutSeconds > 0 {
 				var cancel context.CancelFunc
-				ctx, cancel = context.WithTimeout(ctx, time.Duration(a.Timeout)*time.Second)
+				ctx, cancel = context.WithTimeout(ctx, time.Duration(a.TimeoutSeconds)*time.Second)
 				defer cancel()
 			}
 			if a.Action != "start" {
@@ -959,7 +970,7 @@ func (s *Service) CreateSnapshot(ctx context.Context, jail string, req api.JailS
 		}
 	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Snapshot jail " + jail, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
+		Action: api.OpJailSnapshot, Description: "Snapshot jail " + jail, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + jail}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			r, err := s.life.SnapshotJail(ctx, key, name, req.Spec.Comment)
@@ -985,7 +996,7 @@ func (s *Service) DeleteSnapshot(ctx context.Context, jail, snap string) (api.Op
 		return api.Operation{}, err
 	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Delete snapshot " + snap, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
+		Action: api.OpJailSnapshotDelete, Description: "Delete snapshot " + snap, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + jail}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			container := s.lcfg.ContainerDS(key)
@@ -1073,7 +1084,7 @@ func (s *Service) RollbackJail(ctx context.Context, name string, rb api.JailRoll
 	}
 	opts := lifecycle.RollbackOptions{JailRollback: rb, Stamp: s.stamp()}
 	return s.Submit(ctx, OpSpec{
-		Description: "Rollback jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
+		Action: api.OpJailRollback, Description: "Rollback jail " + name, Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			var ar ActionResult
@@ -1148,7 +1159,7 @@ func (s *Service) UpgradeJail(ctx context.Context, name string, up api.JailUpgra
 		}
 	}
 	return s.Submit(ctx, OpSpec{
-		Description: "Upgrade jail " + name, Locks: locks, Project: p.Meta.Name,
+		Action: api.OpJailUpgrade, Description: "Upgrade jail " + name, Locks: locks, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run:       run,
 	})
@@ -1208,18 +1219,14 @@ func (s *Service) moveRun(ctx context.Context, h *OpHandle, project, name, key s
 	if up.DryRun || res == nil || !res.Changed {
 		return out, res, "", err
 	}
-	rec := api.UpdateRecord{ID: "upd-" + s.stamp() + "-" + randHex(3), Jail: name, Project: project, Kind: api.UpdateKindOS, Started: started,
-		Finished: s.now().UTC(), Snapshot: res.Snapshot, From: res.From, To: res.To, Result: api.UpdateOK}
+	rec := api.UpdateRecord{ID: "upd-" + s.stamp() + "-" + randHex(3), Jail: name, Project: project, Kind: api.UpdateKindOS, StartedAt: started,
+		FinishedAt: s.now().UTC(), Snapshot: res.Snapshot, From: res.From, To: res.To, Result: api.UpdateSuccess}
 	if err != nil {
-		rec.Result, rec.Error, rec.RootRolledBack = api.UpdateRolledBack, err.Error(), true
-		rec.Note = "the jail was swapped back to " + res.From + "; application data was not touched"
-		if api.IsCode(err, api.CodeConflict) {
-			rec.Result, rec.RootRolledBack = api.UpdateFailed, false
-			rec.Note = "the /etc merge needs a human; the jail stays on " + res.From
-		}
+		rec.Error = err.Error()
+		rec.Result, rec.RootRolledBack, rec.Note = upgradeOutcome(err, res.From)
 	}
 	s.appendHistory(rec)
-	if rec.Result == api.UpdateOK {
+	if rec.Result == api.UpdateSuccess {
 		s.emitIn(ctx, project, "update.applied", "/api/v1/jails/"+name+"/updates")
 	} else {
 		s.emitIn(ctx, project, "update.failed", "/api/v1/jails/"+name+"/updates")
@@ -1281,7 +1288,7 @@ func (s *Service) ConvertJail(ctx context.Context, name string, cv api.JailConve
 	}
 	req := lifecycle.ConvertRequest{JailConvert: cv, Stamp: s.stamp()}
 	return s.Submit(ctx, OpSpec{
-		Description: "Convert jail " + name + " to " + string(cv.Layout), Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
+		Action: api.OpJailConvert, Description: "Convert jail " + name + " to " + string(cv.Layout), Locks: []string{jailLock(key), anchorLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			pl, res, err := s.life.PlanConvert(ctx, key, req)
@@ -1374,7 +1381,7 @@ func (s *Service) CopyJail(ctx context.Context, src string, req api.JailCopy) (a
 	stamp := s.stamp()
 	locks := append([]string{jailLock(srcKey), jailLock(key)}, s.netLocksEff(p.Meta.Name, j.Spec)...)
 	op, err := s.Submit(ctx, OpSpec{
-		Description: "Copy jail " + src + " to " + name, Locks: locks, Project: p.Meta.Name,
+		Action: api.OpJailCopy, Description: "Copy jail " + src + " to " + name, Locks: locks, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + src, "/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()
@@ -1407,7 +1414,7 @@ func (s *Service) CopyJail(ctx context.Context, src string, req api.JailCopy) (a
 			}
 			s.mu.Lock()
 			if e := s.jails[key]; e != nil {
-				nj.Status.Generation = e.jail.Status.Generation
+				nj.Status.ImageGeneration = e.jail.Status.ImageGeneration
 				e.jail = nj
 			}
 			s.mu.Unlock()

@@ -164,8 +164,7 @@ func (PkgBase) sets(s api.ImageSpec) []string {
 }
 
 // pkgArgv builds a `pkg -r <root>` argv with a private repository
-// directory. The ABI comes from the host (`pkg config abi`, see abiStep);
-// before that ran, the one derived from the spec stands in. Verified on
+// directory. The ABI is the one the release names (abi). Verified on
 // FreeBSD 15.1 (prototype 2): -o IGNORE_OSVERSION=yes and -o ABI=<abi> are
 // needed because the host's pkg judges the root, not itself.
 func (p PkgBase) pkgArgv(b *Build, abi string, args ...string) []string {
@@ -235,8 +234,8 @@ func transientFetch(out []byte) bool {
 	return false
 }
 
-// abiStep asks the host's pkg for its ABI. The answer replaces the one
-// derived from the release when it looks like an ABI string.
+// abiStep checks that the host's pkg answers. The ABI of the image is the one its release names: the host's own ABI
+// is no part of an image (a host of one major release builds the images of another), so the answer is not used.
 func (r *pkgRun) abiStep() plan.Step {
 	return plan.Step{
 		Name: "pkg-abi", Describe: "pkg config abi",
@@ -245,12 +244,48 @@ func (r *pkgRun) abiStep() plan.Step {
 			if err != nil {
 				return fmt.Errorf("pkg config abi: %w: %s", err, tail(out))
 			}
-			if v := strings.TrimSpace(string(out)); strings.HasPrefix(v, "FreeBSD:") && !strings.ContainsAny(v, " \t\n\"'") {
-				r.abi = v
-			}
 			return nil
 		},
 	}
+}
+
+// verifyReleaseStep refuses an image of a RELEASE whose base packages are of another release: the repository of a
+// release is addressed by its minor version, and a mistake there would otherwise build a quietly wrong generation.
+func (r *pkgRun) verifyReleaseStep() plan.Step {
+	spec := r.b.Spec
+	return plan.Step{
+		Name: "verify-release", Describe: `pkg query "%n %v" FreeBSD-runtime: the version is that of ` + spec.Release,
+		Do: func(ctx context.Context) error {
+			if !isRelease(spec.Release) {
+				return nil
+			}
+			major, minor, err := parseRelease(spec.Release)
+			if err != nil {
+				return api.Errorf(api.CodeInvalid, "%v", err)
+			}
+			argv := r.p.pkgArgv(r.b, r.abi, "query", "%n %v", "FreeBSD-runtime")
+			out, err := r.b.M.Exec.Run(ctx, argv)
+			if err != nil {
+				return fmt.Errorf("%s: %w: %s", quote(argv), err, tail(out))
+			}
+			version := ""
+			for _, l := range strings.Split(string(out), "\n") {
+				if n, v, ok := strings.Cut(strings.TrimSpace(l), " "); ok && n == "FreeBSD-runtime" {
+					version = v
+				}
+			}
+			return VerifyBase(version, major, minor, spec.Release)
+		},
+	}
+}
+
+// VerifyBase checks the version of the base packages ("15.1p7") against the release the image is built for.
+func VerifyBase(version string, major, minor int, release string) error {
+	want := fmt.Sprintf("%d.%d", major, minor)
+	if rest, ok := strings.CutPrefix(version, want); ok && (rest == "" || rest[0] == 'p' || rest[0] == '_' || rest[0] == ',') {
+		return nil
+	}
+	return api.Errorf(api.CodeInvalid, "the base packages are version %q, not those of %s: the image would not be what its name says", version, release)
 }
 
 // keysSteps copy the host's key directories into the root before the first
@@ -323,6 +358,7 @@ func (p PkgBase) Install(b *Build) ([]plan.Step, error) {
 	steps = append(steps,
 		r.step("pkg-update", "update", "-f", "-r", "jailops"),
 		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...),
+		r.verifyReleaseStep(),
 		r.step("pkg-clean", "clean", "-y"),
 		p.rcConfStep(b))
 	return steps, nil
@@ -378,6 +414,7 @@ func (p PkgBase) Upgrade(b *Build) ([]plan.Step, error) {
 		r.step("pkg-update", "update", "-f", "-r", "jailops"),
 		r.step("pkg-upgrade", "upgrade", "-y", "-r", "jailops"),
 		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...),
+		r.verifyReleaseStep(),
 		r.step("pkg-clean", "clean", "-y")), nil
 }
 

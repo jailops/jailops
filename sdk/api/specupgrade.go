@@ -19,7 +19,10 @@ import (
 //   - 0.8.4: a WireGuard tunnel's `down` is `disabled`;
 //   - 0.8.4: image aliases are gone: the `aliases` of an image are dropped and `image@alias` is the bare image name in a
 //     jail and in a project's image list;
-//   - 0.8.4: the proxy devices of a jail are IPv4 entries of its exposure (spec.expose).
+//   - 0.8.4: the proxy devices of a jail are IPv4 entries of its exposure (spec.expose);
+//   - 1.0: a jail's update.strategy and update.window are gone (`strategy: manual` is `mode: manual`), boot.stop_timeout is
+//     boot.stop_timeout_seconds, and the by and at of an expose entry are gone (the audit log names who and when);
+//   - 1.0: the keys of a profile's config are the paths of the spec (ConfigKeyRenamed).
 //
 // The redirect rules of firewall policies are not rewritten here: they became exposures of the jails that used the
 // policy, which a spec alone does not name (the store does it when it loads the policy).
@@ -87,8 +90,91 @@ func UpgradeFields(kind Kind, spec map[string]any) []string {
 		if proxyToExpose(spec) {
 			notes = append(notes, "the proxy devices are read as spec.expose entries")
 		}
+		notes = append(notes, upgradeJailFields(spec)...)
+	case KindProfile:
+		cfg, _ := spec["config"].(map[string]any)
+		for k, v := range cfg {
+			if nk, ok := ConfigKeyRenamed(k); ok {
+				delete(cfg, k)
+				if nk != "" {
+					if _, done := cfg[nk]; !done {
+						cfg[nk] = v
+					}
+					notes = append(notes, fmt.Sprintf("the profile key %s is read as %s", k, nk))
+				} else {
+					notes = append(notes, fmt.Sprintf("the profile key %s is dropped", k))
+				}
+			}
+		}
 	}
 	return notes
+}
+
+// upgradeJailFields is the jail part of UpgradeFields that needs no other object.
+func upgradeJailFields(spec map[string]any) []string {
+	var notes []string
+	if boot, ok := spec["boot"].(map[string]any); ok {
+		if v, has := boot["stop_timeout"]; has {
+			delete(boot, "stop_timeout")
+			if _, done := boot["stop_timeout_seconds"]; !done {
+				boot["stop_timeout_seconds"] = v
+			}
+			notes = append(notes, "boot.stop_timeout is read as boot.stop_timeout_seconds")
+		}
+	}
+	if up, ok := spec["update"].(map[string]any); ok {
+		if v, has := up["strategy"]; has {
+			delete(up, "strategy")
+			if _, set := up["mode"]; v == "manual" && !set {
+				up["mode"] = "manual"
+				notes = append(notes, "update.strategy manual is read as update.mode manual")
+			} else {
+				notes = append(notes, fmt.Sprintf("update.strategy %v is dropped (a thin jail follows its image, a thick one updates in place)", v))
+			}
+		}
+		if _, has := up["window"]; has {
+			delete(up, "window")
+			notes = append(notes, "update.window is dropped (update.schedule is the cron expression)")
+		}
+	}
+	exp, _ := spec["expose"].([]any)
+	dropped := false
+	for _, x := range exp {
+		if e, ok := x.(map[string]any); ok {
+			for _, k := range []string{"by", "at"} {
+				if _, has := e[k]; has {
+					delete(e, k)
+					dropped = true
+				}
+			}
+		}
+	}
+	if dropped {
+		notes = append(notes, "the by and at of the expose entries are dropped (the audit log names who and when)")
+	}
+	return notes
+}
+
+// ConfigKeyRenamed maps a configuration key of an earlier release to its current name. It reports false for a key that
+// needs no rewrite, and an empty name for a key that is gone.
+func ConfigKeyRenamed(k string) (string, bool) {
+	switch {
+	case k == "update.strategy" || k == "update.window":
+		return "", true
+	case k == "zfs.delegation":
+		return "zfs_delegation", true
+	case k == "boot.stop_timeout":
+		return "boot.stop_timeout_seconds", true
+	case strings.HasPrefix(k, "limits."):
+		return "resources." + strings.TrimPrefix(k, "limits."), true
+	case strings.HasPrefix(k, "nic."):
+		return "network." + strings.TrimPrefix(k, "nic."), true
+	case strings.HasPrefix(k, "disk."):
+		return "volumes." + strings.TrimPrefix(k, "disk."), true
+	case strings.HasPrefix(k, "updates."):
+		return "update." + strings.TrimPrefix(k, "updates."), true
+	}
+	return "", false
 }
 
 // proxyToExpose turns the proxy devices of a jail spec into expose entries: a proxy device forwarded one IPv4 port, so

@@ -158,7 +158,7 @@ func (l *Local) jailDataset(ctx context.Context, n JailName) (string, error) {
 	case 1:
 		return found[0], nil
 	}
-	return "", api.Errorf(api.CodeConflict, "jail %s exists in more than one storage root: %s", n.Internal(), strings.Join(found, ", "))
+	return "", api.Errorf(api.CodePreconditionFailed, "jail %s exists in more than one storage root: %s", n.Internal(), strings.Join(found, ", "))
 }
 
 // loadRecord reads spec.json (or its .previous copy) of a jail from the
@@ -190,14 +190,14 @@ func (l *Local) loadRecord(ctx context.Context, n JailName) (*jailRecord, error)
 		return nil, fmt.Errorf("spec.json of %s: %w", n.Internal(), err)
 	}
 	if rec.Metadata.Name != n.Name {
-		return nil, api.Errorf(api.CodeConflict, "spec.json in %s names jail %q, not %q", ds, rec.Metadata.Name, n.Name)
+		return nil, api.Errorf(api.CodePreconditionFailed, "spec.json in %s names jail %q, not %q", ds, rec.Metadata.Name, n.Name)
 	}
 	proj := rec.Metadata.Project
 	if proj == "" {
 		return nil, api.Errorf(api.CodeInvalid, "spec.json of %s names no project", n.Internal())
 	}
 	if proj != n.Project {
-		return nil, api.Errorf(api.CodeConflict, "spec.json in %s belongs to project %q, not %q", ds, proj, n.Project)
+		return nil, api.Errorf(api.CodePreconditionFailed, "spec.json in %s belongs to project %q, not %q", ds, proj, n.Project)
 	}
 	if rec.Metadata.UUID == "" {
 		return nil, api.Errorf(api.CodeInvalid, "spec.json of %s has no uuid", n.Internal())
@@ -638,11 +638,11 @@ func (l *Local) addAddr(ctx context.Context, iface string, p netip.Prefix) error
 			return nil
 		}
 		if oerr := l.ifOwned(ctx, i.Name); oerr != nil {
-			return api.Errorf(api.CodeConflict, "the address %s is in use on %s, which JailOps does not manage", p.Addr(), i.Name)
+			return api.Errorf(api.CodePreconditionFailed, "the address %s is in use on %s, which JailOps does not manage", p.Addr(), i.Name)
 		}
 		if strings.HasPrefix(i.Name, "jo") && strings.HasSuffix(i.Name, "a") {
 			// the host end of the link of a jail: its own gateway address, never taken from it
-			return api.Errorf(api.CodeConflict, "the address %s is in use on %s, the link of another jail", p.Addr(), i.Name)
+			return api.Errorf(api.CodePreconditionFailed, "the address %s is in use on %s, the link of another jail", p.Addr(), i.Name)
 		}
 		for _, q := range have {
 			if rerr := ignoreNotFound(net.AddrRemove(ctx, i.Name, q)); rerr != nil {

@@ -76,6 +76,8 @@ type Service struct {
 	Keys Keys
 	// Warn, when set, is told of something a stop could not finish or had to force: the jail, the event's action, what.
 	Warn func(ctx context.Context, jail, action, what string)
+	// BaseRecords, when set, is told how the pass over the base package records at a start ended (nil: in step).
+	BaseRecords func(ctx context.Context, jail string, err error)
 }
 
 func (s *Service) executor() *plan.Executor {
@@ -398,6 +400,7 @@ func (s *Service) doStart(ctx context.Context, name string) error {
 	if err := s.mountTree(ctx, name); err != nil {
 		return err
 	}
+	s.baseRecordsAtStart(ctx, name)
 	if err := s.Hooks.PreStart(ctx, name); err != nil {
 		return err
 	}

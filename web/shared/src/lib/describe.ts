@@ -2,6 +2,11 @@
 // user. The words for codes are in i18n/common.ts (codes); an app passes the kinds it links to.
 import { common as s } from '../i18n/common'
 
+/** Whether a condition is a fault someone should look at: not True, except a jail that is stopped (Ready is False with the reason Stopped and nothing is wrong). */
+export function conditionProblem(c: { type: string; status: string; reason?: string }): boolean {
+  return c.status !== 'True' && !(c.type === 'Ready' && c.reason === 'Stopped')
+}
+
 export interface ObjectRef {
   /** "jail", "firewall policy" */
   kind: string

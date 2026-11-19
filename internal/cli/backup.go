@@ -228,7 +228,7 @@ func (a *app) backupList() *cobra.Command {
 	a.completeFlag(cmd, "target", listNames(func(ctx context.Context, c *sdk.Client) iterNames {
 		return namesOf(c.Backups().Targets().List(ctx), func(t api.BackupTarget) string { return t.Metadata.Name })
 	}))
-	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable)")
+	cmd.Flags().StringArrayVarP(&labels, "selector", "l", nil, "only objects with these labels, key=value (repeatable)")
 	return cmd
 }
 
@@ -774,7 +774,7 @@ On a hub, --to-host names the host to restore on (its name or UUID); without it
 the restore goes to the host the request is scoped to (--host), else this host.
 
 By default the restored jail gets a new UUID and fresh addresses; --keep-ip
-keeps the fixed addresses of the backup, and --map moves its networks.
+keeps the fixed addresses of the backup, and --network-map moves its networks.
 
 The volumes the jail attaches that the project lacks are restored first, each
 from its newest backup, so the jail finds its data. --no-volumes restores the
@@ -784,7 +784,7 @@ it needs its passphrase (--passphrase-file reads it from a file; otherwise it is
 asked for twice).`,
 		Example: `jailops backup restore 20260101020000-ab12cd34 --dry-run
 jailops backup restore 20260101020000-ab12cd34 --as web-restored
-jailops backup restore 20260101020000-ab12cd34 --map lan=dmz --keep-ip
+jailops backup restore 20260101020000-ab12cd34 --network-map lan=dmz --keep-ip
 jailops backup restore 20260101020000-ab12cd34 --replace
 jailops backup restore 20260101020000-ef56ab12 --as mail-restored
 jailops --remote hub backup restore 20260101020000-ab12cd34 --to-host host-b`,
@@ -807,7 +807,7 @@ jailops --remote hub backup restore 20260101020000-ab12cd34 --to-host host-b`,
 				for _, m := range maps {
 					from, to, ok := strings.Cut(m, "=")
 					if !ok || from == "" || to == "" {
-						return usagef("--map %q must be OLD=NEW", m)
+						return usagef("--network-map %q must be OLD=NEW", m)
 					}
 					req.NetworkMap[from] = to
 				}
@@ -873,7 +873,7 @@ jailops --remote hub backup restore 20260101020000-ab12cd34 --to-host host-b`,
 	_ = cmd.RegisterFlagCompletionFunc("to-host", a.completeHosts())
 	f.BoolVar(&replace, "replace", false, "replace an existing jail of that name")
 	f.BoolVar(&keepIP, "keep-ip", false, "keep the fixed addresses of the backup")
-	f.StringArrayVar(&maps, "map", nil, "map a network of the backup to a local one, OLD=NEW (repeatable)")
+	f.StringArrayVar(&maps, "network-map", nil, "map a network of the backup to a local one, OLD=NEW (repeatable)")
 	f.BoolVar(&confirmLoss, "confirm-data-loss", false, "confirm that --replace may destroy the existing jail")
 	f.BoolVar(&noVolumes, "no-volumes", false, "restore the jail with no volume attachments (attach them afterwards)")
 	f.StringVar(&a.passFile, "passphrase-file", "", "read the passphrase of a restored encrypted volume from this file (its first line) instead of asking")

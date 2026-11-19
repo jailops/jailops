@@ -20,7 +20,7 @@ Age:         3h
 SPEC                    STATUS
 ----                    ------
 image: freebsd-15#g2    power: stopped
-storage: default        generation: g2
+storage: default        image_generation: g2
 layout: thin
 hostname: web
 network:

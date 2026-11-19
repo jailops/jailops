@@ -145,8 +145,7 @@ that uses the image, in every project, one at a time, exactly as `jail upgrade` 
 and events as `update apply`. It **stops at the first jail that fails or needs a human**: the jails after it are listed as not
 attempted, so a bad generation is not rolled across the host; fix the jail (its history says what happened) and run the
 command again. When the package set did not change, nothing is kept and no jail is touched; the command says so. A stopped
-jail is moved too: it is started for the health check and stopped again. Thick jails, Linux jails (always thick), jails with an
-update strategy other than `rebase` and jails pinned to a generation (`freebsd-15-1#g3`) are skipped and listed. `--project P`
+jail is moved too: it is started for the health check and stopped again. Thick jails, Linux jails (always thick) and jails pinned to a generation (`freebsd-15-1#g3`) are skipped and listed. `--project P`
 moves one project's jails, `--no-jails` builds the generation only, and `jailops image generation list freebsd-15-1` shows who is
 where afterwards.
 
@@ -183,8 +182,8 @@ What a run does, every night at the chosen time (the host's time zone; 03:00 unl
    first jail that fails**; the jails after it stay where they are until the next run or until you run `image upgrade`.
 3. With packages on (the default), it upgrades the packages inside the jails of the image.
 
-It leaves alone the jails whose update strategy is manual or in place (and thick jails, Linux jails and jails pinned to a
-generation, as `image upgrade` does). A host that was off at the chosen time runs the upgrade when it is back, if that is
+It leaves alone thick jails, Linux jails and jails pinned to a
+generation, as `image upgrade` does. A host that was off at the chosen time runs the upgrade when it is back, if that is
 within four hours; later than that it waits for the next night. Each run is recorded with its time, its result (ok,
 unchanged or failed, with what failed) and the number of jails moved, upgraded and failed.
 
@@ -229,8 +228,8 @@ the image of their release, and keep getting its patch levels, until you move th
        jailops image upgrade freebsd-15-1 --to freebsd-15-2
 
    The jails move one at a time and the first failure stops the rest. `image upgrade --to` moves the thin jails of the
-   old image of every project (`--project` narrows it) and lists the ones it skips: jails pinned to a generation, with
-   another update strategy, thick or Linux.
+   old image of every project (`--project` narrows it) and lists the ones it skips: jails pinned to a generation, thick
+   jails and Linux jails.
 
 **What the move requires.** The new image is of the same OS and architecture and of a release that is not older: a jail
 does not go back to an older release (make a new jail from the old image for that). It is a thin FreeBSD jail: a thick
@@ -247,7 +246,7 @@ no longer ships is yours to look at; `jailops jail diff web` lists what differs 
 
 **Going back.** `jailops jail rollback web` returns the jail to the previous root, **and to the previous image**: the root,
 `spec.image` and the history go back together. It never touches data, so what the jail wrote after the move stays. The old
-root is kept for the retention period of an upgrade, so go back soon. Restoring a snapshot (`--all`) that was taken on the
+root is kept for 14 days after an upgrade, so go back soon: after that housekeeping removes it and the root cannot come back. Restoring a snapshot (`--scope all`) that was taken on the
 old image is refused while the jail is on the new one: roll the root back first.
 
 **A jail that does not move.** A thick jail, a Linux jail and a jail on another OS are replaced: create the new jail next
@@ -272,33 +271,54 @@ Rollback has scopes, and the difference matters:
 
 | Scope | Does | Data |
 |---|---|---|
-| `--root` (default) | the OS root back to the previous generation | untouched |
-| `--data --snapshot S` | the data datasets back to a snapshot | **everything written since is discarded for good** |
-| `--all` | both | as `--data` |
+| `--scope root` (default) | the OS root back to the previous generation | untouched |
+| `--scope data --snapshot S` | the data datasets back to a snapshot | **everything written since is discarded for good** |
+| `--scope all` | both | as `--scope data` |
 
-Before `--data` or `--all` the command shows how many bytes were written since the snapshot and asks you to type the jail name;
+Before `--scope data` or `--scope all` the command shows how many bytes were written since the snapshot and asks you to type the jail name;
 in a script pass `--confirm-data-loss` (`-y` does not apply to data loss).
 
-Open: how `/var/db/pkg` behaves after a root swap (design section 16). A thick jail (a full copy) and a Linux jail are not
-rebased; they are updated in place, and a debootstrap (Debian) generation cannot be upgraded: build a new one.
+A thick jail (a full copy) and a Linux jail are not rebased; they are updated in place, and a debootstrap (Debian)
+generation cannot be upgraded: build a new one.
+
+### The package records of the base
+
+The root of a thin jail is a clone of a generation and `/var/db` is the jail's own dataset, mounted over the root's. After
+a swap (an upgrade, `jail upgrade --image`, a rollback) the files of the base come from the new generation, while the jail's
+package database still holds the base records of the old one: `pkg which /usr/bin/ftp` finds nothing, `pkg info
+FreeBSD-runtime` shows the old patch level and `pkg check -s` checks the old files.
+
+Every start of a thin jail brings the records of the base set (the `FreeBSD-*` packages) in step with the generation of its
+root. The generation's database is the truth for that set: a record whose version differs is replaced and a missing one is
+added. The records of every other package (what `pkg install` or an app put there) are never touched, and no file is written
+and no script runs: only the database changes. A start that finds the records in step reads two lists and does nothing else.
+
+If the pass fails (the disk is full, a manifest cannot be read), the jail still starts. It then has the condition
+`BasePackages`, `jailops doctor` warns (`jails.base-packages`), and this repairs it once the jail is stopped (a restart makes
+the same pass):
+
+    jailops jail repair-packages web
+
+The console has the same button on the jail's page. A jail that was upgraded before this behaviour existed is fixed at its
+next start.
 
 ## Managed updates
 
 Updates are **off for every jail** until you set its update mode:
 
-    jailops set web updates.mode=notify updates.schedule="0 3 * * 0" updates.packages=true updates.os=true --project shop
+    jailops config set web update.mode=notify update.schedule="0 3 * * 0" update.packages=true update.os=true --project shop
     jailops update check --project shop         # every jail of the project: lists what could change, changes nothing
     jailops update apply --project shop web     # snapshot first, update, health check, record
     jailops update history web --project shop
 
-Modes: `manual` (default), `notify` (check on the schedule and report), `managed` (check and apply on the schedule). `updates.packages`
-updates packages inside the jail from the host, `updates.os` moves it to a newer image generation, `updates.reboot` (`manual` or `auto`)
+Modes: `manual` (default), `notify` (check on the schedule and report), `managed` (check and apply on the schedule). `update.packages`
+updates packages inside the jail from the host, `update.os` moves it to a newer image generation, `update.reboot` (`manual` or `auto`)
 says whether a restart an update needs is applied automatically. The daemon evaluates schedules every `updates.tick`.
 
 - An apply takes a snapshot, updates, runs the jail's health check and records the result. A **failed OS update is swapped back**
   by the root-swap plan.
 - A **failed package update is not rolled back by itself**: package files live in the jail's datasets, so a root rollback does not
-  undo them. The way back is `jail rollback --all --snapshot <the recorded one>`, which discards what the jail wrote since. The record
+  undo them. The way back is `jail rollback --scope all --snapshot <the recorded one>`, which discards what the jail wrote since. The record
   says so.
 - Package checks and updates inside a jail run `pkg` (FreeBSD jails) or `apk` (Alpine). **Debian jails have no managed package
   updates or provisioning yet** (design section 16).
@@ -321,3 +341,9 @@ gateway address away from the old gateway pair, which is why the jails still on 
 A stop of such a jail works too: what is not there is not an error, and what could not be
 removed is written as a warning to the console log of the jail (`/var/log/jailops/jail_PROJECT_NAME_console.log`) and to the
 audit log, and never fails the stop.
+
+## Host identity
+
+The host UUID is made once at the first start and kept in the database. A start that cannot read it stops with a message
+instead of making a new one, because backups and the hub know the host by it. To adopt a machine as a new host on purpose,
+remove the `host_uuid` row from the `meta` table; to keep the identity, restore the database from a copy.

@@ -311,7 +311,7 @@ var setExamples = map[string]string{
 	"image":                "image set freebsd-15-1 --keep-days 30",
 	"jail":                 "jail set web --memory 4G --autostart",
 	"network":              "network set lan --mtu 1450",
-	"profile":              "profile set small --set limits.memory=1G",
+	"profile":              "profile set small --set resources.memory=1G",
 	"storage":              "storage set default --compression lz4",
 	"volume":               "volume set maildir --size 50G",
 	"wireguard":            "wireguard set wg0 --listen-port 51821",
@@ -337,10 +337,10 @@ func dropEmpty(l []string) []string {
 	return out
 }
 
-// setHint says, for a jail, how this command differs from the short 'jailops set'.
+// setHint says, for a jail, how this command differs from 'jailops config set'.
 func setHint(noun string) string {
 	if noun == "jail" {
-		return " with the flags of create (a configuration key by name is 'jailops set NAME KEY VALUE')"
+		return " with the flags of create (a configuration key by name is 'jailops config set NAME KEY VALUE')"
 	}
 	return ""
 }

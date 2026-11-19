@@ -5,30 +5,30 @@ $ jailops start nginx
 jail/nginx started
 
 $ jailops config show nginx
-KEY                VALUE
-hostname           nginx
-image              freebsd-15
-nic.eth0           lan
-nic.eth0.ipv4      10.20.0.10
-nic.eth0.network   lan
-storage            default
+KEY                    VALUE
+hostname               nginx
+image                  freebsd-15
+network.eth0           lan
+network.eth0.ipv4      10.20.0.10
+network.eth0.network   lan
+storage                default
 
-$ jailops config set nginx limits.memory 2G limits.cpu 2
+$ jailops config set nginx resources.memory 2G resources.cpu 2
 jail/nginx configuration updated
-restart required for: limits.cpu, limits.memory
+restart required for: resources.cpu, resources.memory
 the jail was not restarted: run 'jailops restart nginx' when it suits you, or repeat with --restart
 
-$ jailops config get nginx limits.memory
+$ jailops config get nginx resources.memory
 2G
 
-$ jailops config get nginx limits.memory -o json
+$ jailops config get nginx resources.memory -o json
 {
-  "key": "limits.memory",
+  "key": "resources.memory",
   "value": "2G"
 }
 
-$ jailops config get nginx limits.pids
-! not_found: key "limits.pids" is not set on jail "nginx"
+$ jailops config get nginx resources.pids
+! not_found: key "resources.pids" is not set on jail "nginx"
 ! hint: 'jailops config show nginx' lists the keys that are set
 [exit 4]
 
@@ -37,13 +37,13 @@ $ jailops config get nginx no.such.key
 ! hint: run 'jailops config get --help' for usage
 [exit 2]
 
-$ jailops config set nginx limits.memory
-! usage: key "limits.memory" has no value: write KEY VALUE or KEY=VALUE
+$ jailops config set nginx resources.memory
+! usage: key "resources.memory" has no value: write KEY VALUE or KEY=VALUE
 ! hint: run 'jailops config set --help' for usage
 [exit 2]
 
-$ jailops config set nginx limits.cpu many
-! invalid: limits.cpu: "many" must be a number between 0 and 4096
+$ jailops config set nginx resources.cpu many
+! invalid: resources.cpu: "many" must be a number between 0 and 4096
 [exit 2]
 
 $ jailops config set nginx no.such.key 1
@@ -51,34 +51,34 @@ $ jailops config set nginx no.such.key 1
 ! hint: run 'jailops config set --help' for usage
 [exit 2]
 
-$ jailops config set nginx limits.cpu 4 limits.pids bad
-! invalid: limits.pids: "bad" must be a number between 0 and 4194304
+$ jailops config set nginx resources.cpu 4 resources.pids bad
+! invalid: resources.pids: "bad" must be a number between 0 and 4194304
 [exit 2]
 
-$ jailops config get nginx limits.cpu
+$ jailops config get nginx resources.cpu
 2
 
-$ jailops config set nginx limits.pids=100 boot.autostart=true
+$ jailops config set nginx resources.pids=100 boot.autostart=true
 jail/nginx configuration updated
-restart required for: limits.pids
+restart required for: resources.pids
 the jail was not restarted: run 'jailops restart nginx' when it suits you, or repeat with --restart
 
-$ jailops config unset nginx limits.pids
+$ jailops config unset nginx resources.pids
 jail/nginx configuration updated
-restart required for: limits.pids
+restart required for: resources.pids
 the jail was not restarted: run 'jailops restart nginx' when it suits you, or repeat with --restart
 
 $ jailops config show nginx --expanded
-KEY                VALUE        SOURCE
-boot.autostart     true         jail
-hostname           nginx        jail
-image              freebsd-15   jail
-limits.cpu         2            jail
-limits.memory      2G           jail
-nic.eth0           lan          jail
-nic.eth0.ipv4      10.20.0.10   jail
-nic.eth0.network   lan          jail
-storage            default      jail
+KEY                    VALUE        SOURCE
+boot.autostart         true         jail
+hostname               nginx        jail
+image                  freebsd-15   jail
+network.eth0           lan          jail
+network.eth0.ipv4      10.20.0.10   jail
+network.eth0.network   lan          jail
+resources.cpu          2            jail
+resources.memory       2G           jail
+storage                default      jail
 
 $ jailops config show nginx -o yaml
 - key: boot.autostart
@@ -87,47 +87,40 @@ $ jailops config show nginx -o yaml
   value: nginx
 - key: image
   value: freebsd-15
-- key: limits.cpu
-  value: "2"
-- key: limits.memory
-  value: 2G
-- key: nic.eth0
+- key: network.eth0
   value: lan
-- key: nic.eth0.ipv4
+- key: network.eth0.ipv4
   value: 10.20.0.10
-- key: nic.eth0.network
+- key: network.eth0.network
   value: lan
+- key: resources.cpu
+  value: "2"
+- key: resources.memory
+  value: 2G
 - key: storage
   value: default
 
 $ jailops config keys limits
-KEY                       TYPE     RESTART   DESCRIPTION
-limits.cpu                int      yes       CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.
-limits.cpuset             string   yes       CPUs the jail runs on (cpuset(1)): a list such as 2,3 or 0-3,6, kept as sorted ranges. Needs no resource accounting. A CPU the host does not have stops the jail from starting.
-limits.disk               size     no        ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.
-limits.disk_reservation   size     no        ZFS reservation of the jail's container.
-limits.memory             size     yes       Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.
-limits.pids               int      yes       Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.
-limits.states             int      no        Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.
+! No resources found.
 
-$ jailops --dry-run config set nginx limits.cpu 8
+$ jailops --dry-run config set nginx resources.cpu 8
 dry-run: would update the configuration of jail nginx
 restart_required:
-  - limits.cpu
+  - resources.cpu
 set:
-  limits.cpu: "8"
+  resources.cpu: "8"
 
-$ jailops config get nginx limits.cpu
+$ jailops config get nginx resources.cpu
 2
 
-$ jailops config set nginx limits.pids 700
+$ jailops config set nginx resources.pids 700
 jail/nginx configuration updated
-restart required for: limits.pids
+restart required for: resources.pids
 the jail was not restarted: run 'jailops restart nginx' when it suits you, or repeat with --restart
 
-$ jailops config set nginx limits.pids 800 --restart
+$ jailops config set nginx resources.pids 800 --restart
 jail/nginx configuration updated
-jail/nginx restarted to apply: limits.pids
+jail/nginx restarted to apply: resources.pids
 
 $ jailops config set nginx boot.priority 3 --restart
 jail/nginx configuration updated

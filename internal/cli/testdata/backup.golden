@@ -123,7 +123,7 @@ Result: failed
 ! hint: fix the missing items or conflicts listed above, then run the restore again
 [exit 2]
 
-$ jailops backup restore 20260101020000-ab12cd34 --as web-b --map lan=elsewhere -y
+$ jailops backup restore 20260101020000-ab12cd34 --as web-b --network-map lan=elsewhere -y
 Preflight: restore backup 20260101020000-ab12cd34 (jail web) as web-b
 Changes:
   + create jail web-b

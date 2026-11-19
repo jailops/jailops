@@ -11,7 +11,7 @@ Provisioned: no (run 'jailops provision web')
 SPEC                    STATUS
 ----                    ------
 image: freebsd-15       power: stopped
-storage: default        generation: g1
+storage: default        image_generation: g1
 layout: thin
 hostname: web
 network:
@@ -55,7 +55,7 @@ SPEC                    STATUS
 ----                    ------
 image: freebsd-15       power: running
 storage: default        jid: 1
-layout: thin            generation: g1
+layout: thin            image_generation: g1
 hostname: web           addresses:
 network:                  - 10.20.0.10
   - network: lan        started_at: "2026-03-01T09:00:00Z"

@@ -25,7 +25,7 @@ func TestFakeConfigAndProfiles(t *testing.T) {
 	if err != nil || len(keys) < 20 {
 		t.Fatalf("%v %d", err, len(keys))
 	}
-	if _, err := c.Profiles().Create(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "big"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.memory": "8G", "limits.cpu": "4"}}}); err != nil {
+	if _, err := c.Profiles().Create(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "big"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.memory": "8G", "resources.cpu": "4"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := c.Profiles().Create(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "bad"}, Spec: api.ProfileSpec{Config: map[string]string{"hostname": "x"}}}); !api.IsCode(err, api.CodeInvalid) {
@@ -39,15 +39,15 @@ func TestFakeConfigAndProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	ex, err := c.Jails().Expanded(ctx, "web")
-	if err != nil || ex.Jail.Spec.Resources.Memory != "8G" || ex.Jail.Spec.Resources.CPU != 2 || ex.Sources["limits.memory"] != "big" || ex.Sources["limits.cpu"] != "jail" {
+	if err != nil || ex.Jail.Spec.Resources.Memory != "8G" || ex.Jail.Spec.Resources.CPU != 2 || ex.Sources["resources.memory"] != "big" || ex.Sources["resources.cpu"] != "jail" {
 		t.Fatalf("%v %+v", err, ex)
 	}
-	cop, err := c.Jails().Config(ctx, "web", map[string]string{"limits.memory": "1G", "boot.priority": "3"}, nil, false)
+	cop, err := c.Jails().Config(ctx, "web", map[string]string{"resources.memory": "1G", "boot.priority": "3"}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	res, err := cop.Wait(ctx)
-	if err != nil || res.Spec.Resources.Memory != "1G" || res.Spec.Boot.Priority != 3 || len(res.RestartRequired) != 1 || res.RestartRequired[0] != "limits.memory" {
+	if err != nil || res.Spec.Resources.Memory != "1G" || res.Spec.Boot.Priority != 3 || len(res.RestartRequired) != 1 || res.RestartRequired[0] != "resources.memory" {
 		t.Fatalf("%v %+v", err, res)
 	}
 	// A profile can supply the network and the storage; without them a jail is refused, and nothing is defaulted.
@@ -57,7 +57,7 @@ func TestFakeConfigAndProfiles(t *testing.T) {
 	if _, err := c.Jails().Create(ctx, sdk.NewJail("bare", api.JailSpec{Image: "img", Network: []api.NetworkAttach{{Network: "lan"}}})); !api.IsCode(err, api.CodeInvalid) || !strings.Contains(err.Error(), "a jail needs a storage") {
 		t.Fatalf("a jail without a storage: %v", err)
 	}
-	if _, err := c.Profiles().Create(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "placed"}, Spec: api.ProfileSpec{Config: map[string]string{"nic.eth0.network": "lan", "storage": "default"}}}); err != nil {
+	if _, err := c.Profiles().Create(ctx, api.Profile{Metadata: api.ObjectMeta{Name: "placed"}, Spec: api.ProfileSpec{Config: map[string]string{"network.eth0.network": "lan", "storage": "default"}}}); err != nil {
 		t.Fatal(err)
 	}
 	pop, err := c.Jails().Create(ctx, sdk.NewJail("viaprofile", api.JailSpec{Image: "img", Profiles: []string{"placed"}}))

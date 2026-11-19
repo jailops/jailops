@@ -102,7 +102,7 @@ func (r reconcileRoutes) EnsureUplinkNotMember(ctx context.Context, uplink strin
 	for _, i := range ifs {
 		for _, m := range i.Members {
 			if m.Name == uplink {
-				return api.Errorf(api.CodeConflict, "uplink %s is a member of bridge %s", uplink, i.Name).
+				return api.Errorf(api.CodePreconditionFailed, "uplink %s is a member of bridge %s", uplink, i.Name).
 					WithHint("remove the uplink from the bridge; the NDP proxy needs it to be a plain interface")
 			}
 		}

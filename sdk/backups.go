@@ -60,7 +60,7 @@ func (b *BackupClient) Preflight(ctx context.Context, req api.RestoreRequest) (a
 // refuses a restore whose preflight is not OK.
 func (b *BackupClient) Restore(ctx context.Context, req api.RestoreRequest) (*Operation[api.Jail], error) {
 	req.DryRun = false
-	op, _, err := sendOp[api.Jail](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/restores", body: req}, nil)
+	op, _, err := sendOp[api.Jail](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/restores", body: req, header: idempotencyHeader(ctx)}, nil)
 	return op, err
 }
 

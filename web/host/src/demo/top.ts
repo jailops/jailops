@@ -47,8 +47,8 @@ export function demoTop(jails: Jail[], project: string): Top {
     host: {
       load_1: Math.round(wander('host', 0.9, 0.4) * 100) / 100, load_5: 0.82, load_15: 0.7, cpus: 8,
       cpu_percent: calls > 1 ? Math.round(wander('host', 14, 8) * 10) / 10 : undefined,
-      memory_total: 32 * GiB, memory_used: Math.round(wander('mem', 9 * GiB, 0.2 * GiB)), arc_bytes: 6 * GiB,
-      pool: 'tank', pool_size: 1800 * GiB, pool_allocated: 640 * GiB, pool_free: 1160 * GiB,
+      memory_total_bytes: 32 * GiB, memory_used_bytes: Math.round(wander('mem', 9 * GiB, 0.2 * GiB)), arc_bytes: 6 * GiB,
+      pool: 'tank', pool_size_bytes: 1800 * GiB, pool_allocated_bytes: 640 * GiB, pool_free_bytes: 1160 * GiB,
       running_jails: jails.filter((j) => j.status.power === 'running').length,
     },
   }

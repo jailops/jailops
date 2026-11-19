@@ -77,8 +77,8 @@ func TestInfoAndExtensions(t *testing.T) {
 			t.Errorf("missing extension %s", want)
 		}
 	}
-	// No backup backend is wired, so the transport extensions are not advertised.
-	for _, no := range []string{"backup_pull", "backup_push", "restore_preflight"} {
+	// No backup backend is wired, so the restore preflight is not advertised.
+	for _, no := range []string{"restore_preflight"} {
 		if slices.Contains(info.APIExtensions, no) {
 			t.Errorf("%s advertised without a backup backend", no)
 		}
@@ -286,7 +286,7 @@ func TestSnapshotsRollbackUpgrade(t *testing.T) {
 		t.Fatalf("dry run shows no plan: %s", dr.Operation.Metadata)
 	}
 	before, _ := e.Admin.Jails().Get(c, "web")
-	if before.Status.Generation != "fb#g1" {
+	if before.Status.ImageGeneration != "fb#g1" {
 		t.Fatalf("dry run changed the jail: %+v", before.Status)
 	}
 	up, err := e.Admin.Jails().Upgrade(c, "web", api.JailUpgrade{})
@@ -297,7 +297,7 @@ func TestSnapshotsRollbackUpgrade(t *testing.T) {
 		t.Fatalf("upgrade: %v\n%s", err, e.Log())
 	}
 	after, _ := e.Admin.Jails().Get(c, "web")
-	if after.Status.Generation != "fb#g2" {
+	if after.Status.ImageGeneration != "fb#g2" {
 		t.Fatalf("%+v", after.Status)
 	}
 	rb, _ = e.Admin.Jails().Rollback(c, "web", api.JailRollback{})
@@ -305,7 +305,7 @@ func TestSnapshotsRollbackUpgrade(t *testing.T) {
 		t.Fatalf("root rollback: %v\n%s", err, e.Log())
 	}
 	back, _ := e.Admin.Jails().Get(c, "web")
-	if back.Status.Generation != "fb#g1" {
+	if back.Status.ImageGeneration != "fb#g1" {
 		t.Fatalf("%+v", back.Status)
 	}
 	// The generation a jail uses cannot be deleted.
@@ -328,7 +328,7 @@ func TestETagAndMerge(t *testing.T) {
 	c := ctxT(t)
 	mustJail(t, e, "web")
 	j, etag, err := e.Admin.Jails().GetETag(c, "web")
-	if err != nil || etag != `"1"` {
+	if err != nil || etag != api.ETag(j.Metadata.UUID, 1) {
 		t.Fatalf("%v %q", err, etag)
 	}
 	j.Metadata.Labels = map[string]string{"tier": "web"}
@@ -339,19 +339,19 @@ func TestETagAndMerge(t *testing.T) {
 	// A second write with the old etag is a conflict (412) and changes nothing.
 	j.Metadata.Labels = map[string]string{"tier": "db"}
 	_, err = e.Admin.Jails().Update(c, "web", j, etag)
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	// An identical PUT keeps the generation.
 	same, err := e.Admin.Jails().Update(c, "web", up, "")
 	if err != nil || same.Metadata.Generation != 2 {
 		t.Fatalf("%v %+v", err, same.Metadata)
 	}
 	// Merge patch with If-Match.
-	p, err := e.Admin.Jails().Patch(c, "web", map[string]any{"spec": map[string]any{"resources": map[string]any{"memory": "1G"}}}, `"2"`)
+	p, err := e.Admin.Jails().Patch(c, "web", map[string]any{"spec": map[string]any{"resources": map[string]any{"memory": "1G"}}}, api.ETag(j.Metadata.UUID, 2))
 	if err != nil || p.Spec.Resources.Memory != "1G" || p.Metadata.Generation != 3 {
 		t.Fatalf("%v %+v", err, p)
 	}
-	_, err = e.Admin.Jails().Patch(c, "web", map[string]any{"metadata": map[string]any{"labels": nil}}, `"2"`)
-	wantCode(t, err, api.CodeConflict)
+	_, err = e.Admin.Jails().Patch(c, "web", map[string]any{"metadata": map[string]any{"labels": nil}}, api.ETag(j.Metadata.UUID, 2))
+	wantCode(t, err, api.CodePreconditionFailed)
 	// Server-owned fields and the image cannot be changed by a client.
 	p.Metadata.UUID, p.Metadata.Scope = "00000000-0000-4000-8000-000000000000", api.ScopeFleet
 	p.Status.Power = api.PowerError
@@ -529,7 +529,7 @@ func TestFirewall(t *testing.T) {
 	}
 	// Changing the set reloads the anchor of the running jail.
 	set.Spec.Addresses = api.Entries("198.51.100.0/24")
-	if _, err := fw.AddressSets().Update(c, "office", set, `"1"`); err != nil {
+	if _, err := fw.AddressSets().Update(c, "office", set, api.ETag(set.Metadata.UUID, 1)); err != nil {
 		t.Fatal(err)
 	}
 	e.D.Reconciler().Pass(c)
@@ -632,7 +632,7 @@ func TestImageUpgradeBuildsAndMovesTheJails(t *testing.T) {
 		t.Fatalf("%+v", im.Status)
 	}
 	// A newer package set: the generation is built, the jail moves, the history and the events are those of an OS update.
-	e.SetRepoVersion("15.0p2")
+	e.SetRepoVersion("15.1p2")
 	evctx, cancel := context.WithCancel(c)
 	defer cancel()
 	events := e.Events(evctx, e.Global())
@@ -651,11 +651,11 @@ func TestImageUpgradeBuildsAndMovesTheJails(t *testing.T) {
 		t.Fatalf("%+v", j)
 	}
 	after, _ := e.Admin.Jails().Get(c, "web")
-	if after.Status.Generation != "fb#g2" || after.Status.Power != api.PowerRunning {
+	if after.Status.ImageGeneration != "fb#g2" || after.Status.Power != api.PowerRunning {
 		t.Fatalf("%+v", after.Status)
 	}
 	h, err := e.Admin.Jails().UpdateHistory(c, "web")
-	if err != nil || len(h) != 1 || h[0].ID != res.Jails[0].Record || h[0].Kind != api.UpdateKindOS || h[0].Result != api.UpdateOK {
+	if err != nil || len(h) != 1 || h[0].ID != res.Jails[0].Record || h[0].Kind != api.UpdateKindOS || h[0].Result != api.UpdateSuccess {
 		t.Fatalf("%+v %v", h, err)
 	}
 	seen := map[string]bool{}
@@ -671,7 +671,7 @@ func TestImageUpgradeBuildsAndMovesTheJails(t *testing.T) {
 		}
 	}
 	// A dry run lists what would move and changes nothing.
-	e.SetRepoVersion("15.0p3")
+	e.SetRepoVersion("15.1p3")
 	op, _ = e.Admin.Images().Upgrade(c, "fb", api.ImageUpgrade{DryRun: true})
 	res, err = op.Wait(c)
 	if err != nil || !res.DryRun || res.Generation != nil || len(res.Plan) == 0 || res.Jails[0].Status != api.ImageUpgradePlanned || res.Jails[0].To != "fb#g3" {
@@ -727,10 +727,10 @@ func TestOperationsListWaitCancel(t *testing.T) {
 func TestUnsupportedAndRouting(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
-	// Server side: 501 with api.CodeUnsupported, never success.
-	for _, p := range []string{"/api/v1/cluster", "/api/v1/rollouts"} {
-		code, body := e.Raw("POST", p, e.Token(api.PermAdmin), "{}")
-		if code != 501 || !strings.Contains(body, `"unsupported"`) {
+	// A route that does not exist is a 404, whatever feature its name suggests.
+	for _, p := range []string{"/api/v1/cluster", "/api/v1/rollouts", "/api/v1/groups", "/api/v1/jail-templates", "/api/v1/backups/chains", "/api/v1/server/config"} {
+		code, body := e.Raw("GET", p, e.Token(api.PermAdmin), "")
+		if code != 404 || !strings.Contains(body, `"not_found"`) {
 			t.Errorf("%s: %d %s", p, code, body)
 		}
 	}
@@ -928,8 +928,8 @@ func TestWebUIIsServedOutsideTheAPI(t *testing.T) {
 	}
 }
 
-// If-Match compares strong entity tags (RFC 9110): a weak tag never matches, a list matches when one of its tags
-// does, several generations in one header are refused, and a conditional delete fails on a changed object.
+// If-Match compares strong entity tags (RFC 9110): a weak tag never matches, a tag this server did not write matches
+// nothing, several tags in one header are refused, and a conditional delete fails on a changed object.
 func TestIfMatchIsAStrongComparison(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
@@ -938,26 +938,31 @@ func TestIfMatchIsAStrongComparison(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	t1, t2 := api.ETag(set.Metadata.UUID, 1), api.ETag(set.Metadata.UUID, 2)
 	set.Spec.Addresses = api.Entries("203.0.113.0/25")
-	_, err = sets.Update(c, "office", set, `W/"1"`)
-	wantCode(t, err, api.CodeConflict) // a weak tag matches nothing, though the generation is 1
-	_, err = sets.Update(c, "office", set, `"9", "x"`)
-	wantCode(t, err, api.CodeConflict) // none of the tags is the generation
-	_, err = sets.Update(c, "office", set, `"1", "2"`)
-	wantCode(t, err, api.CodeInvalid) // two generations in one header
-	up, err := sets.Update(c, "office", set, `W/"2", "1"`)
+	_, err = sets.Update(c, "office", set, "W/"+t1)
+	wantCode(t, err, api.CodePreconditionFailed) // a weak tag matches nothing, though the object is at that tag
+	_, err = sets.Update(c, "office", set, `"1", "x"`)
+	wantCode(t, err, api.CodeInvalid) // two tags in one header
+	_, err = sets.Update(c, "office", set, `"1"`)
+	wantCode(t, err, api.CodePreconditionFailed) // a bare generation is not a tag of this server
+	_, err = sets.Update(c, "office", set, api.ETag("00000000-0000-4000-8000-000000000000", 1))
+	wantCode(t, err, api.CodePreconditionFailed) // another incarnation at the same generation
+	up, err := sets.Update(c, "office", set, "W/"+t2)
+	wantCode(t, err, api.CodePreconditionFailed)
+	up, err = sets.Update(c, "office", set, t1)
 	if err != nil || up.Metadata.Generation != 2 {
-		t.Fatalf("a strong tag among weak ones: %v %+v", err, up.Metadata)
+		t.Fatalf("the current tag: %v %+v", err, up.Metadata)
 	}
-	if err := sets.DeleteETag(c, "office", `"1"`); err == nil {
+	if err := sets.DeleteETag(c, "office", t1); err == nil {
 		t.Fatal("a delete with a stale tag went through")
 	} else {
-		wantCode(t, err, api.CodeConflict)
+		wantCode(t, err, api.CodePreconditionFailed)
 	}
 	if _, err := sets.Get(c, "office"); err != nil {
 		t.Fatalf("the stale delete removed it: %v", err)
 	}
-	if err := sets.DeleteETag(c, "office", `"2"`); err != nil {
+	if err := sets.DeleteETag(c, "office", t2); err != nil {
 		t.Fatalf("delete with the current tag: %v", err)
 	}
 	if _, err := sets.Get(c, "office"); err == nil {

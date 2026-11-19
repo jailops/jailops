@@ -231,7 +231,7 @@ func completeKind[T any](a *app, d *kindDesc[T]) completer {
 	return a.completeNames(func(ctx context.Context, c *sdk.Client) ([]string, error) {
 		var opts []sdk.ListOption
 		if d.granted != nil {
-			opts = append(opts, sdk.All()) // a global administrator names any of them (grant, show, delete)
+			opts = append(opts, sdk.AllProjects()) // a global administrator names any of them (grant, show, delete)
 		}
 		items, err := collect(d.list(ctx, c, opts...))
 		if err != nil && d.granted != nil {
@@ -465,7 +465,7 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 				if err != nil {
 					return err
 				}
-				opts = append(opts, sdk.All())
+				opts = append(opts, sdk.AllProjects())
 				v = d.withGrants(v, conn.Project)
 			}
 			if !all && (len(columns) > 0 || sortBy != "") {
@@ -557,7 +557,7 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 			})
 		},
 	}
-	cmd.Flags().StringArrayVarP(&labels, "label", "l", nil, "only objects with this label, key=value (repeatable)")
+	cmd.Flags().StringArrayVarP(&labels, "selector", "l", nil, "only objects with these labels, key=value (repeatable)")
 	cmd.Flags().StringSliceVarP(&columns, "columns", "c", nil, "columns of the table, comma separated: "+strings.Join(d.columns(), ", "))
 	cmd.Flags().StringVar(&sortBy, "sort", "", "order the rows by this column")
 	cols := d.columns()
@@ -567,7 +567,7 @@ picks its columns and --sort orders its rows (columns: ` + strings.Join(d.column
 	enumFlag(cmd, "columns", cols...)
 	enumFlag(cmd, "sort", cols...)
 	if d.granted != nil {
-		cmd.Flags().BoolVar(&all, "all", false, "every "+d.noun+" of the host with the projects it is granted to (a global administrator); the default is what the selected project is granted")
+		cmd.Flags().BoolVar(&all, "all-projects", false, "every "+d.noun+" of the host with the projects it is granted to (a global administrator); the default is what the selected project is granted")
 	}
 	if d.filters != nil {
 		keep = d.filters(cmd)
@@ -594,8 +594,8 @@ func emptyMessage(cmd *cobra.Command, plural, hint string, filtered bool, a *app
 	if hint != "" {
 		msg += " Create one with: " + hint
 	}
-	if cmd.Flags().Lookup("all") != nil {
-		msg += "\n" + cmd.CommandPath() + " --all lists every one of the host, granted or not."
+	if cmd.Flags().Lookup("all-projects") != nil {
+		msg += "\n" + cmd.CommandPath() + " --all-projects lists every one of the host, granted or not."
 	}
 	return msg
 }
@@ -953,7 +953,7 @@ func addEdit[T any](a *app, parent *cobra.Command, d *kindDesc[T]) {
 		Long: `Open the specification of ` + article(d.noun) + ` ` + d.noun + ` as YAML in $JAILOPS_EDITOR, $VISUAL or $EDITOR
 (default vi), and send it back when the editor exits. The update carries the
 ETag of the version you started from: if somebody else changed the object in
-the meantime the server answers "conflict" and nothing is overwritten; your
+the meantime the server answers "precondition_failed" and nothing is overwritten; your
 text stays in a temporary file whose path is printed.
 
 Saving without a change, or an empty file, cancels. Only the specification and
@@ -1104,7 +1104,7 @@ func editObject[T any](a *app, ctx context.Context, d *kindDesc[T], name, file, 
 	out, err := d.update(ctx, c, name, next, etag)
 	if err != nil {
 		var ae *api.Error
-		if errors.As(err, &ae) && ae.Code == api.CodeConflict && keep != "" {
+		if errors.As(err, &ae) && ae.Code == api.CodePreconditionFailed && keep != "" {
 			return ae.WithHint(fmt.Sprintf("someone changed the %s while you edited; your text is saved in %s, run edit again and re-apply it", d.noun, keep))
 		}
 		return fail(err)

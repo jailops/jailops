@@ -92,7 +92,7 @@ func generationOf(t *testing.T, s *service.Service, project, name string) (gen s
 	if err != nil {
 		t.Fatal(err)
 	}
-	return j.Status.Generation, j.Status.Power == api.PowerRunning
+	return j.Status.ImageGeneration, j.Status.Power == api.PowerRunning
 }
 
 func TestUpgradeImageMovesEveryThinJailAndStopsAtTheFirstFailure(t *testing.T) {
@@ -115,7 +115,7 @@ func TestUpgradeImageMovesEveryThinJailAndStopsAtTheFirstFailure(t *testing.T) {
 	}
 
 	// A newer package set: g2 is built and every candidate moves, stopped or running; the pin is the user's choice.
-	e.SetRepoVersion("15.0p2")
+	e.SetRepoVersion("15.1p2")
 	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{})
 	if res.Unchanged || res.Generation == nil || res.Generation.Number != 2 || res.Generation.Parent != 1 || len(res.Plan) == 0 {
 		t.Fatalf("%+v", res)
@@ -146,12 +146,12 @@ func TestUpgradeImageMovesEveryThinJailAndStopsAtTheFirstFailure(t *testing.T) {
 	}
 	// The same history record as an OS update of `update apply`.
 	h, err := s.UpdateHistory(as(globalAdmin, "beta"), "api")
-	if err != nil || len(h) != 1 || h[0].Kind != api.UpdateKindOS || h[0].Result != api.UpdateOK || h[0].ID != res.Jails[3].Record || h[0].To != "fb#g2" {
+	if err != nil || len(h) != 1 || h[0].Kind != api.UpdateKindOS || h[0].Result != api.UpdateSuccess || h[0].ID != res.Jails[3].Record || h[0].To != "fb#g2" {
 		t.Fatalf("%+v %v", h, err)
 	}
 
 	// g3 fails its health check: the first jail is swapped back and the rest are not attempted.
-	e.SetRepoVersion("15.0p3")
+	e.SetRepoVersion("15.1p3")
 	e.Jails.SetExecFn(func(_ string, o jailos.ExecOpts) (run.Result, error) {
 		if strings.Join(o.Argv, " ") == "/bin/true" {
 			return run.Result{Stderr: []byte("not healthy")}, errors.New("exit status 1")
@@ -191,7 +191,7 @@ func TestUpgradeImageIsAGlobalAdminsOperationAndHonoursTheProjectFilter(t *testi
 	e, s := tickingEnv(t)
 	twoProjectJails(t, e, s)
 	host := as(globalAdmin, "")
-	e.SetRepoVersion("15.0p2")
+	e.SetRepoVersion("15.1p2")
 
 	// A project identity may not upgrade an image, however it names the project, so it never moves another project's jails.
 	for _, ctx := range []context.Context{as(alphaOnly, dtest.SeedProject), as(alphaOnly, ""), as(nobody, "")} {
@@ -250,7 +250,7 @@ func TestUpgradeImageIsAGlobalAdminsOperationAndHonoursTheProjectFilter(t *testi
 		t.Fatalf("the filter did not hold: web is on %s", gen)
 	}
 	// NoJails builds only.
-	e.SetRepoVersion("15.0p3")
+	e.SetRepoVersion("15.1p3")
 	res = upgradeImage(t, s, host, "fb", api.ImageUpgrade{NoJails: true})
 	if res.Generation == nil || res.Generation.Number != 3 || len(res.Jails) != 4 {
 		t.Fatalf("%+v", res)
@@ -289,7 +289,7 @@ func TestUpgradeImageMovesJailsThatAreBehindWhenNothingNewWasBuilt(t *testing.T)
 	e, s := tickingEnv(t)
 	twoProjectJails(t, e, s)
 	host := as(globalAdmin, "")
-	e.SetRepoVersion("15.0p2")
+	e.SetRepoVersion("15.1p2")
 	e.Jails.SetExecFn(func(_ string, o jailos.ExecOpts) (run.Result, error) {
 		if strings.Join(o.Argv, " ") == "/bin/true" {
 			return run.Result{Stderr: []byte("not healthy")}, errors.New("exit status 1")

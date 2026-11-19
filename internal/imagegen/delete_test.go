@@ -13,7 +13,7 @@ import (
 func buildN(t *testing.T, w *world, image string, n int) {
 	t.Helper()
 	for i := 1; i <= n; i++ {
-		w.repoVersion = "v" + string(rune('0'+i))
+		w.repoVersion = "15.0p" + string(rune('0'+i))
 		req := api.ImageBuild{}
 		if i > 1 {
 			req.FromGeneration = i - 1

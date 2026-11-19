@@ -85,18 +85,18 @@ func TestCASAndErrors(t *testing.T) {
 		cmd  Command
 		code api.Code
 	}{
-		{"stale generation", put(api.KindNetwork, "lan", u, 1, `{}`), api.CodeConflict},
-		{"future generation", put(api.KindNetwork, "lan", u, 9, `{}`), api.CodeConflict},
+		{"stale generation", put(api.KindNetwork, "lan", u, 1, `{}`), api.CodePreconditionFailed},
+		{"future generation", put(api.KindNetwork, "lan", u, 9, `{}`), api.CodePreconditionFailed},
 		{"create existing", put(api.KindNetwork, "lan", u, 0, `{}`), api.CodeAlreadyExists},
 		{"create dup name new uuid", put(api.KindNetwork, "lan", other, 0, `{}`), api.CodeAlreadyExists},
-		{"update missing", put(api.KindNetwork, "nope", other, 3, `{}`), api.CodeConflict},
+		{"update missing", put(api.KindNetwork, "nope", other, 3, `{}`), api.CodePreconditionFailed},
 		{"no uuid on create", put(api.KindNetwork, "fresh", "", 0, `{}`), api.CodeInvalid},
 		{"bad json spec", put(api.KindNetwork, "x", other, 0, `{`), api.CodeInvalid},
 		{"bad name", put(api.KindNetwork, "a/b", other, 0, `{}`), api.CodeInvalid},
 		{"bad kind", put("../x", "a", other, 0, `{}`), api.CodeInvalid},
 		{"bad uuid", put(api.KindNetwork, "a", "../../etc", 0, `{}`), api.CodeInvalid},
 		{"bad version", func() Command { c := put(api.KindNetwork, "a", other, 0, `{}`); c.Version = 99; return c }(), api.CodeVersionSkew},
-		{"delete stale", del(api.KindNetwork, u, 1), api.CodeConflict},
+		{"delete stale", del(api.KindNetwork, u, 1), api.CodePreconditionFailed},
 		{"delete missing", del(api.KindNetwork, other, AnyGeneration), api.CodeNotFound},
 		{"no id", func() Command { c := put(api.KindNetwork, "a", other, 0, `{}`); c.ID = ""; return c }(), api.CodeInvalid},
 	}
@@ -712,7 +712,7 @@ func TestConcurrentCASExactlyOneWins(t *testing.T) {
 			switch {
 			case err == nil:
 				wins++
-			case api.IsCode(err, api.CodeConflict):
+			case api.IsCode(err, api.CodePreconditionFailed):
 				conflicts++
 			default:
 				t.Error(err)
@@ -927,7 +927,7 @@ func TestForwardsAreTakenOutOfPoliciesAndProfiles(t *testing.T) {
 		t.Fatalf("second load: changed=%v forwards=%v err=%v", changed, fw, err)
 	}
 
-	profile := []byte(`{"apiVersion":"jailops/v1","kind":"Profile","metadata":{"uuid":"u2","name":"pub","project":"alpha"},"spec":{"config":{"limits.memory":"1G",` +
+	profile := []byte(`{"apiVersion":"jailops/v1","kind":"Profile","metadata":{"uuid":"u2","name":"pub","project":"alpha"},"spec":{"config":{"resources.memory":"1G",` +
 		`"proxy.http.listen":":8080","proxy.http.jail_port":"80","proxy.dns.listen":"192.0.2.7:53","proxy.dns.jail_port":"53","proxy.dns.proto":"udp"}}}`)
 	o, changed, fw, _, err = decodeObjectForwards(profile, nil)
 	if err != nil || !changed || len(fw) != 2 {
@@ -937,7 +937,7 @@ func TestForwardsAreTakenOutOfPoliciesAndProfiles(t *testing.T) {
 		fw[1].Device != "http" || fw[1].Proto != "tcp" || fw[1].Listen != "" || fw[1].HostPort != 8080 || fw[1].Profile != "pub" {
 		t.Fatalf("profile forwards: %+v", fw)
 	}
-	if strings.Contains(string(o.Spec), "proxy") || !strings.Contains(string(o.Spec), "limits.memory") {
+	if strings.Contains(string(o.Spec), "proxy") || !strings.Contains(string(o.Spec), "resources.memory") {
 		t.Fatalf("the profile keeps proxy keys or lost the others: %s", o.Spec)
 	}
 }

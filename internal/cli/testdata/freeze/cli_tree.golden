@@ -1,0 +1,1067 @@
+jailops
+    --config string
+    --dry-run bool
+    --host string
+    --no-headers bool
+    --no-wait bool
+    --output/-o string =table
+    --project string
+    --quiet/-q bool
+    --remote string
+    --wait bool =true
+    --wait-timeout duration =0s
+    --yes/-y bool
+jailops app  (aliases: apps)
+jailops app access
+jailops app allow
+    --db string
+    --from string
+    --port stringSlice
+    --proto string =tcp
+    --rotate bool
+jailops app deny
+    --drop-role bool
+    --from string
+jailops app export
+    --file/-f string
+    --overwrite bool
+jailops app info
+jailops app install
+    --cpu int
+    --disk string
+    --image string
+    --memory string
+    --network string
+    --storage string
+jailops app installed
+jailops app list  (aliases: ls)
+    --category string
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+    --source string
+jailops app new
+    --category string
+    --dir string =.
+    --overwrite bool
+    --package stringSlice
+    --port stringSlice
+    --service stringSlice
+jailops app validate
+jailops apply
+    --file/-f string
+jailops audit
+    --action string
+    --limit int
+    --since duration =0s
+    --user string
+jailops backup  (aliases: backups)
+jailops backup delete  (aliases: rm)
+jailops backup key
+jailops backup key create
+    --recipient stringArray
+jailops backup key escrow
+    --recipient stringArray
+jailops backup key import
+    --domain string
+    --file string
+    --identity-file string
+    --no-verify bool
+    --passphrase-file string
+    --replace bool
+jailops backup key status
+jailops backup list  (aliases: ls)
+    --jail string
+    --selector/-l stringArray
+    --target string
+    --volume string
+jailops backup policy  (aliases: policies)
+jailops backup policy create
+    --comment string
+    --file/-f string
+    --full-every int
+    --include-state bool
+    --keep-daily int
+    --keep-hourly int
+    --keep-last int
+    --keep-monthly int
+    --keep-weekly int
+    --keep-yearly int
+    --no-volumes bool
+    --schedule string
+    --selector/-l stringArray
+    --target stringArray
+    --verify-mode string
+    --verify-schedule string
+jailops backup policy delete  (aliases: rm)
+jailops backup policy edit
+    --file/-f string
+jailops backup policy list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops backup policy rename
+jailops backup policy set
+    --comment string
+    --full-every int
+    --include-state bool
+    --keep-daily int
+    --keep-hourly int
+    --keep-last int
+    --keep-monthly int
+    --keep-weekly int
+    --keep-yearly int
+    --no-volumes bool
+    --schedule string
+    --selector/-l stringArray
+    --target stringArray
+    --verify-mode string
+    --verify-schedule string
+jailops backup policy show  (aliases: get)
+jailops backup restore
+    --as string
+    --confirm-data-loss bool
+    --keep-ip bool
+    --network-map stringArray
+    --no-volumes bool
+    --passphrase-file string
+    --replace bool
+    --to-host string
+jailops backup run
+    --no-volumes bool
+jailops backup show
+jailops backup target
+jailops backup target create
+    --comment string
+    --file/-f string
+    --fingerprint string
+    --kind string =node
+    --path string
+    --url string
+jailops backup target delete  (aliases: rm)
+jailops backup target edit
+    --file/-f string
+jailops backup target list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops backup target rename
+jailops backup target set
+    --comment string
+    --fingerprint string
+    --kind string =node
+    --path string
+    --url string
+jailops backup target show  (aliases: get)
+jailops backup verify
+    --depth string
+jailops boot
+jailops cert  (aliases: certificate, certificates, certs)
+jailops cert create
+    --comment string
+    --file/-f string
+    --fingerprint string
+    --global bool
+    --kind string =client
+    --pem string
+    --projects stringSlice
+    --role string =readonly
+jailops cert edit
+    --file/-f string
+jailops cert enroll
+    --cert-expires duration =0s
+    --expires duration =0s
+    --global bool
+    --projects stringSlice
+    --role string =readonly
+jailops cert list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops cert rename
+jailops cert revoke
+jailops cert set
+    --comment string
+    --fingerprint string
+    --global bool
+    --kind string =client
+    --pem string
+    --projects stringSlice
+    --role string =readonly
+jailops cert show  (aliases: get)
+jailops config
+jailops config edit
+    --restart bool
+jailops config get
+jailops config keys
+jailops config set
+    --restart bool
+jailops config show
+    --expanded bool
+jailops config unset
+    --restart bool
+jailops cp
+    --all bool
+    --mkdir bool
+    --parallel int =4
+    --preserve/-p bool
+    --recursive/-r bool
+    --selector/-l stringArray
+jailops create
+    --autostart bool
+    --boot-priority int
+    --comment string
+    --cpu int
+    --cpuset string
+    --depends stringArray
+    --disk string
+    --env stringArray
+    --file/-f string
+    --firewall-policy stringArray
+    --hostname string
+    --image string
+    --label stringArray
+    --layout string
+    --memory string
+    --network stringArray
+    --pids int
+    --profile stringArray
+    --prompt string
+    --shell string
+    --start bool
+    --stop-timeout int
+    --storage string
+    --tag stringArray
+    --zfs-delegation bool
+jailops delete  (aliases: rm)
+    --all bool
+    --confirm-data-loss bool
+    --selector/-l stringArray
+    --stop bool
+jailops doctor
+    --fix bool
+jailops events
+    --jail string
+    --limit int
+    --since-id string
+    --type stringArray
+jailops exec
+    --all bool
+    --env/-e stringArray
+    --no-tty/-T bool
+    --parallel int =4
+    --selector/-l stringArray
+    --tty/-t bool
+    --user/-u string
+jailops explain
+jailops expose
+    --comment string
+    --family stringSlice
+    --from stringSlice
+    --host-port int
+    --listen string
+    --proto stringSlice
+jailops firewall  (aliases: fw)
+jailops firewall address-set  (aliases: address-sets, set)
+jailops firewall address-set add
+    --comment string
+jailops firewall address-set create
+    --address stringArray
+    --comment string
+    --file/-f string
+jailops firewall address-set delete  (aliases: rm)
+jailops firewall address-set edit
+    --file/-f string
+jailops firewall address-set list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops firewall address-set remove  (aliases: rm)
+jailops firewall address-set rename
+jailops firewall address-set set
+    --address stringArray
+    --comment string
+jailops firewall address-set show  (aliases: get)
+jailops firewall exposed
+    --tunnels bool
+jailops firewall policy  (aliases: policies)
+jailops firewall policy attach
+    --mandatory bool
+jailops firewall policy create
+    --comment string
+    --default-in string
+    --default-out string
+    --file/-f string
+jailops firewall policy delete  (aliases: rm)
+jailops firewall policy detach
+    --mandatory bool
+jailops firewall policy edit
+    --file/-f string
+jailops firewall policy list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops firewall policy rename
+jailops firewall policy set
+    --comment string
+    --default-in string
+    --default-out string
+jailops firewall policy show  (aliases: get)
+jailops firewall rule
+jailops firewall rule add
+    --action string
+    --at int
+    --comment string
+    --disabled bool
+    --from stringSlice
+    --log bool
+    --name string
+    --port stringSlice
+    --proto string
+    --to stringSlice
+jailops firewall rule disable
+jailops firewall rule edit
+    --action string
+    --comment string
+    --direction string
+    --from stringSlice
+    --log bool
+    --name string
+    --port stringSlice
+    --proto string
+    --to stringSlice
+jailops firewall rule enable
+jailops firewall rule list  (aliases: ls)
+jailops firewall rule move
+    --after string
+    --before string
+    --to int
+jailops firewall rule remove  (aliases: delete, rm)
+    --name string
+jailops firewall show
+    --lines bool
+    --pf bool
+jailops firewall test
+    --family string
+    --from string
+    --icmp-type string
+    --port int
+    --proto string =tcp
+    --to string
+    --verbose/-v bool
+jailops firewall validate
+    --file/-f string
+    --offline bool
+    --review bool
+jailops firewall wait
+    --timeout duration =1m0s
+jailops host  (aliases: hosts)
+jailops host certificate  (aliases: cert, certificates)
+jailops host certificate acme
+    --accept-tos bool
+    --challenge string =http-01
+    --directory string
+    --domain stringSlice
+    --email string
+    --staging bool
+jailops host certificate self-signed
+    --confirm-replace bool
+jailops host certificate show
+jailops host certificate upload
+    --cert string
+    --hostname string
+    --key string
+jailops host confirm
+    --id string
+jailops host create
+    --comment string
+    --file/-f string
+    --fingerprint string
+    --host-uuid string
+    --url string
+jailops host delete  (aliases: rm)
+jailops host edit
+    --file/-f string
+jailops host firewall
+jailops host firewall address-set
+jailops host firewall address-set create
+    --confirm-lockout bool
+    --confirm-within string
+    --member stringArray
+jailops host firewall address-set delete
+    --confirm-lockout bool
+    --confirm-within string
+jailops host firewall address-set list
+jailops host firewall address-set set
+    --confirm-lockout bool
+    --confirm-within string
+    --member stringArray
+jailops host firewall allow
+jailops host firewall allow add
+    --comment string
+    --confirm-lockout bool
+    --confirm-within string
+    --from stringArray
+    --port stringArray
+    --proto string
+jailops host firewall allow list
+jailops host firewall allow remove
+    --confirm-lockout bool
+    --confirm-within string
+jailops host firewall apply
+    --confirm-lockout bool
+    --confirm-within string
+    --file/-f string
+jailops host firewall diff
+    --file/-f string
+jailops host firewall set
+    --confirm-lockout bool
+    --confirm-within string
+    --console-from stringArray
+    --icmp string
+    --logging string
+    --ssh-from stringArray
+    --ssh-port intSlice
+    --template string
+jailops host firewall show
+jailops host identity
+jailops host identity set
+    --hostname string
+    --nameserver stringArray
+    --ntp string
+    --ntp-server stringArray
+    --search stringArray
+jailops host list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops host pending
+jailops host restore
+jailops host revert
+    --id string
+jailops host set
+    --comment string
+    --fingerprint string
+    --host-uuid string
+    --url string
+jailops host show  (aliases: get)
+jailops host snapshots
+jailops image  (aliases: images)
+jailops image build
+    --from-generation string
+jailops image create
+    --arch string
+    --auto-upgrade bool
+    --build bool
+    --comment string
+    --file/-f string
+    --keep-days int
+    --keep-last int
+    --keys string
+    --os string =freebsd
+    --package-set stringArray
+    --release string
+    --repo string
+    --source-type string =pkgbase
+    --upgrade-at string =03:00
+    --upgrade-packages bool =true
+jailops image delete  (aliases: rm)
+jailops image edit
+    --file/-f string
+jailops image generation
+jailops image generation delete
+jailops image generation list
+jailops image list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops image rename
+jailops image set
+    --arch string
+    --auto-upgrade bool
+    --comment string
+    --keep-days int
+    --keep-last int
+    --keys string
+    --os string =freebsd
+    --package-set stringArray
+    --release string
+    --repo string
+    --source-type string =pkgbase
+    --upgrade-at string =03:00
+    --upgrade-packages bool =true
+jailops image show  (aliases: get)
+jailops image upgrade
+    --no-jails bool
+    --to string
+jailops info
+jailops jail  (aliases: jails)
+jailops jail console
+    --shell string
+    --user/-u string
+jailops jail convert
+    --image string
+    --layout string
+jailops jail copy
+    --data bool
+    --keep-ip bool
+    --snapshot string
+    --start bool
+jailops jail cp
+    --all bool
+    --mkdir bool
+    --parallel int =4
+    --preserve/-p bool
+    --recursive/-r bool
+    --selector/-l stringArray
+jailops jail create
+    --autostart bool
+    --boot-priority int
+    --comment string
+    --cpu int
+    --cpuset string
+    --depends stringArray
+    --disk string
+    --env stringArray
+    --file/-f string
+    --firewall-policy stringArray
+    --hostname string
+    --image string
+    --label stringArray
+    --layout string
+    --memory string
+    --network stringArray
+    --pids int
+    --profile stringArray
+    --prompt string
+    --shell string
+    --start bool
+    --stop-timeout int
+    --storage string
+    --tag stringArray
+    --zfs-delegation bool
+jailops jail delete  (aliases: rm)
+    --all bool
+    --confirm-data-loss bool
+    --selector/-l stringArray
+    --stop bool
+jailops jail diff
+    --dataset string
+    --limit int =200
+    --packages bool
+    --summary bool
+jailops jail edit
+    --file/-f string
+jailops jail exec
+    --all bool
+    --env/-e stringArray
+    --no-tty/-T bool
+    --parallel int =4
+    --selector/-l stringArray
+    --tty/-t bool
+    --user/-u string
+jailops jail export
+    --overwrite bool
+    --snapshot string
+    --to string
+    --with-volumes bool
+    --zstd bool
+jailops jail import
+    --as string
+    --keep-ip bool
+    --network-map stringArray
+    --start bool
+    --volume-map stringArray
+jailops jail info
+jailops jail label
+jailops jail list  (aliases: ls)
+    --columns/-c stringSlice
+    --image string
+    --network string
+    --selector/-l stringArray
+    --sort string
+    --state string
+jailops jail logs
+    --events bool
+    --follow/-f bool
+    --grep string
+    --limit/-n int =200
+    --since string
+    --since-id string
+jailops jail pkg
+    --all bool
+    --parallel int =4
+    --selector/-l stringArray
+jailops jail provision
+    --again bool
+jailops jail rename
+jailops jail repair-packages
+jailops jail restart
+    --all bool
+    --force bool
+    --selector/-l stringArray
+    --timeout string
+jailops jail rollback
+    --confirm-data-loss bool
+    --scope string =root
+    --snapshot string
+jailops jail set
+    --autostart bool
+    --boot-priority int
+    --comment string
+    --cpu int
+    --cpuset string
+    --depends stringArray
+    --disk string
+    --env stringArray
+    --firewall-policy stringArray
+    --hostname string
+    --image string
+    --label stringArray
+    --layout string
+    --memory string
+    --network stringArray
+    --pids int
+    --profile stringArray
+    --prompt string
+    --shell string
+    --stop-timeout int
+    --storage string
+    --tag stringArray
+    --zfs-delegation bool
+jailops jail shell
+    --shell string
+    --user/-u string
+jailops jail shell-setup
+jailops jail show  (aliases: get)
+jailops jail snapshot  (aliases: snap, snapshots)
+jailops jail snapshot create
+    --message/-m string
+jailops jail snapshot delete  (aliases: rm)
+jailops jail snapshot list  (aliases: ls)
+jailops jail snapshot show  (aliases: get)
+jailops jail start
+    --all bool
+    --selector/-l stringArray
+jailops jail stop
+    --all bool
+    --force bool
+    --selector/-l stringArray
+    --timeout string
+jailops jail upgrade
+    --all bool
+    --generation string
+    --image string
+    --selector/-l stringArray
+jailops label
+jailops list  (aliases: ls)
+    --columns/-c stringSlice
+    --image string
+    --network string
+    --selector/-l stringArray
+    --sort string
+    --state string
+jailops logs
+    --all-projects bool
+    --app string
+    --app-logs bool
+    --events bool
+    --file string
+    --follow/-f bool
+    --grep string
+    --jail stringArray
+    --limit/-n int =200
+    --selector/-l stringArray
+    --since string
+    --since-id string
+jailops logs forward
+jailops logs forward create
+    --audit bool
+    --audit-only bool
+    --ca string
+    --exclude-jail stringArray
+    --exclude-selector stringArray
+    --facility string
+    --file stringArray
+    --from-project stringArray
+    --jail stringArray
+    --no-app-logs bool
+    --queue int
+    --selector/-l stringArray
+    --token-file string
+    --url string
+jailops logs forward delete  (aliases: rm)
+jailops logs forward list  (aliases: ls)
+jailops logs forward reset
+jailops logs forward set
+    --audit bool
+    --audit-only bool
+    --ca string
+    --exclude-jail stringArray
+    --exclude-selector stringArray
+    --facility string
+    --file stringArray
+    --from-project stringArray
+    --jail stringArray
+    --no-app-logs bool
+    --queue int
+    --selector/-l stringArray
+    --token-file string
+    --url string
+jailops logs forward status
+jailops logs forward test
+jailops network  (aliases: net, networks)
+jailops network create
+    --comment string
+    --dns stringArray
+    --exclude stringArray
+    --file/-f string
+    --gateway string
+    --ipv4 string
+    --ipv6 string
+    --ipv6-range string
+    --mtu int
+    --nat bool
+    --range string
+    --subnet string
+    --uplink string
+jailops network delete  (aliases: rm)
+jailops network edit
+    --file/-f string
+jailops network grant
+jailops network leases
+jailops network list  (aliases: ls)
+    --all-projects bool
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops network ndp-proxy
+jailops network ndp-proxy disable
+jailops network ndp-proxy enable
+jailops network ndp-proxy status
+jailops network ndp-proxy watch
+    --limit int
+jailops network rename
+jailops network revoke
+jailops network set
+    --comment string
+    --dns stringArray
+    --exclude stringArray
+    --gateway string
+    --ipv4 string
+    --ipv6 string
+    --ipv6-range string
+    --mtu int
+    --nat bool
+    --range string
+    --subnet string
+    --uplink string
+jailops network show  (aliases: get)
+jailops op  (aliases: operation, operations)
+jailops op cancel
+jailops op list  (aliases: ls)
+    --active bool
+jailops op show
+jailops op wait
+jailops pkg
+    --all bool
+    --parallel int =4
+    --selector/-l stringArray
+jailops profile  (aliases: profiles)
+jailops profile create
+    --comment string
+    --file/-f string
+    --set stringArray
+jailops profile delete  (aliases: rm)
+jailops profile edit
+    --file/-f string
+jailops profile list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops profile rename
+jailops profile set
+    --comment string
+    --set stringArray
+jailops profile show  (aliases: get)
+jailops project  (aliases: projects)
+jailops project create
+    --comment string
+    --file/-f string
+    --firewall-policy stringArray
+    --hosts stringSlice
+    --image stringArray
+    --max-addresses int
+    --max-cpu int
+    --max-jails int
+    --max-memory string
+    --max-pids int
+    --new-network bool
+jailops project delete  (aliases: rm)
+jailops project edit
+    --file/-f string
+jailops project fleet
+jailops project list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops project rename
+jailops project set
+    --any-image bool
+    --comment string
+    --firewall-policy stringArray
+    --hosts stringSlice
+    --image stringArray
+    --max-addresses int
+    --max-cpu int
+    --max-jails int
+    --max-memory string
+    --max-pids int
+jailops project show  (aliases: get)
+jailops project switch
+jailops provision
+    --again bool
+jailops remote  (aliases: remotes)
+jailops remote add
+    --ca string
+    --cert string
+    --default-host string
+    --fingerprint string
+    --key string
+    --switch bool
+    --token string
+    --token-file string
+jailops remote list  (aliases: ls)
+jailops remote remove  (aliases: delete, rm)
+jailops remote switch
+jailops rename
+jailops restart
+    --all bool
+    --force bool
+    --selector/-l stringArray
+    --timeout string
+jailops server  (aliases: srv)
+jailops server info
+jailops sessions
+jailops sessions list  (aliases: ls)
+jailops sessions revoke
+jailops shell
+    --shell string
+    --user/-u string
+jailops start
+    --all bool
+    --selector/-l stringArray
+jailops stop
+    --all bool
+    --force bool
+    --selector/-l stringArray
+    --timeout string
+jailops stop-all
+    --force bool
+    --timeout string
+jailops storage  (aliases: storages)
+jailops storage create
+    --comment string
+    --compression string
+    --dataset string
+    --file/-f string
+jailops storage delete  (aliases: rm)
+jailops storage edit
+    --file/-f string
+jailops storage grant
+    --quota string
+jailops storage list  (aliases: ls)
+    --all-projects bool
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops storage rename
+jailops storage revoke
+jailops storage set
+    --comment string
+    --compression string
+    --dataset string
+jailops storage show  (aliases: get)
+jailops token  (aliases: tokens)
+jailops token create
+    --allow-from string
+    --comment string
+    --expires duration =0s
+    --global bool
+    --projects stringSlice
+    --role string =readonly
+jailops token list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops token revoke
+jailops token show  (aliases: get)
+jailops top
+    --interval duration =2s
+    --once bool
+    --selector/-l stringArray
+    --sort string =cpu
+jailops unexpose
+    --family stringSlice
+    --proto stringSlice
+jailops update  (aliases: updates)
+jailops update apply
+    --all bool
+    --os bool
+    --packages bool
+jailops update check
+    --all bool
+jailops update history
+jailops update list  (aliases: ls)
+jailops user  (aliases: users)
+jailops user create
+    --admin bool
+    --comment string
+    --global bool
+    --password-file string
+    --password-prompt bool
+    --projects stringSlice
+    --role string =readonly
+jailops user delete  (aliases: rm)
+jailops user disable
+jailops user edit
+    --file/-f string
+jailops user enable
+jailops user list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops user rename
+jailops user set-password
+    --generate bool
+    --password-file string
+jailops user set-role
+    --global bool
+    --projects stringSlice
+    --role string
+jailops user show  (aliases: get)
+jailops version
+    --client bool
+jailops volume  (aliases: vol, volumes)
+jailops volume attach
+    --copy-existing bool
+    --read-only bool
+jailops volume create
+    --comment string
+    --encrypted bool
+    --file/-f string
+    --from-dir string
+    --gid int
+    --label stringArray
+    --mode string
+    --on-loss string
+    --passphrase-file string
+    --path string
+    --probe string
+    --size string
+    --storage string
+    --uid int
+    --watch bool
+jailops volume delete  (aliases: rm)
+    --confirm-data-loss bool
+jailops volume detach
+jailops volume edit
+    --file/-f string
+jailops volume list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops volume lock
+jailops volume passphrase
+    --new-passphrase-file string
+    --passphrase-file string
+jailops volume rename
+jailops volume set
+    --comment string
+    --encrypted bool
+    --from-dir string
+    --gid int
+    --label stringArray
+    --mode string
+    --on-loss string
+    --passphrase-file string
+    --path string
+    --probe string
+    --size string
+    --storage string
+    --uid int
+    --watch bool
+jailops volume show  (aliases: get)
+jailops volume snapshot  (aliases: snap, snapshots)
+jailops volume snapshot create
+    --message/-m string
+jailops volume snapshot delete  (aliases: rm)
+jailops volume snapshot list  (aliases: ls)
+jailops volume snapshot rollback
+    --confirm-data-loss bool
+jailops volume unlock
+    --passphrase-file string
+    --start bool
+jailops whoami
+jailops wireguard  (aliases: wg, wireguard tunnels)
+jailops wireguard create
+    --address stringArray
+    --comment string
+    --dns stringArray
+    --endpoint string
+    --file/-f string
+    --interface string
+    --listen-port int
+    --mode string =server
+    --network stringArray
+    --pool stringArray
+jailops wireguard delete  (aliases: rm)
+jailops wireguard disable
+jailops wireguard edit
+    --file/-f string
+jailops wireguard enable
+jailops wireguard join
+    --address stringArray
+    --allowed-ips stringArray
+    --endpoint string
+    --interface string
+    --token-file string
+jailops wireguard list  (aliases: ls)
+    --columns/-c stringSlice
+    --selector/-l stringArray
+    --sort string
+jailops wireguard peer
+jailops wireguard peer add
+    --address stringArray
+    --format string =token
+    --keepalive int
+jailops wireguard peer list  (aliases: ls)
+jailops wireguard peer remove  (aliases: rm)
+jailops wireguard peer show
+jailops wireguard rename
+jailops wireguard rotate-keys
+jailops wireguard set
+    --address stringArray
+    --comment string
+    --dns stringArray
+    --endpoint string
+    --interface string
+    --listen-port int
+    --mode string =server
+    --network stringArray
+    --pool stringArray
+jailops wireguard show  (aliases: get)
+jailops wireguard status
+
+exit codes
+    0 ok
+    1 failure
+    2 usage
+    3 auth
+    4 not found
+    5 conflict
+    6 unsupported
+    7 internal
+    8 firewall test: undecided
+    9 firewall test: blocked
+    125 exec: jailops failed, the command did not run

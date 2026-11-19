@@ -122,7 +122,7 @@ func (s *Service) runRename(ctx context.Context, j renameJob, dry bool) (api.Ope
 		res = map[string][]string{}
 	}
 	desc := fmt.Sprintf("rename %s %s to %s", j.noun, j.from, j.to)
-	op, err := s.Submit(ctx, OpSpec{Description: desc, Project: j.project, Resources: res, Locks: locks,
+	op, err := s.Submit(ctx, OpSpec{Action: api.OpRename, Description: desc, Project: j.project, Resources: res, Locks: locks,
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			// again under the locks: what changed in the meantime is seen now
 			p, err := j.plan(ctx)
@@ -131,7 +131,7 @@ func (s *Service) runRename(ctx context.Context, j renameJob, dry bool) (api.Ope
 			}
 			for _, l := range p.locks {
 				if !slices.Contains(locks, l) {
-					return nil, api.Errorf(api.CodeConflict, "what refers to %s %q changed while the rename was prepared", j.noun, j.from).
+					return nil, api.Errorf(api.CodePreconditionFailed, "what refers to %s %q changed while the rename was prepared", j.noun, j.from).
 						WithHint("run the rename again")
 				}
 			}
@@ -454,7 +454,7 @@ func (s *Service) jailRecordStepsAt(ctx context.Context, dir, newDir string, bef
 	nspec, nbundle := filepath.Join(newDir, "spec.json"), filepath.Join(newDir, "bundle.json")
 	oldSpec, err := s.d.Files.ReadFile(ctx, spec)
 	if err != nil {
-		return nil, api.Errorf(api.CodeConflict, "the record of jail %q cannot be read: %v", jailDisplay(before.Metadata.Project, before.Metadata.Name), err).
+		return nil, api.Errorf(api.CodePreconditionFailed, "the record of jail %q cannot be read: %v", jailDisplay(before.Metadata.Project, before.Metadata.Name), err).
 			WithHint("start or repair the jail first (`jailops doctor`)")
 	}
 	after.Status = api.JailStatus{}
@@ -573,7 +573,7 @@ type RenameOptions struct {
 // checkGeneration fails when the object moved on since the caller read it.
 func checkGeneration(noun, name string, expect, cur int64) error {
 	if expect != AnyGeneration && expect != cur {
-		return api.Errorf(api.CodeConflict, "%s %q changed: current generation is %d", noun, name, cur).
+		return api.Errorf(api.CodePreconditionFailed, "%s %q changed: current generation is %d", noun, name, cur).
 			WithHint("read it again and repeat the rename").WithDetail("generation", itoa64(cur))
 	}
 	return nil

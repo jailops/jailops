@@ -52,13 +52,11 @@ func (w shellWait) run(ctx context.Context, name string) error {
 		c := shellCond(j)
 		step := "working"
 		since := start
-		if c != nil {
-			if s := api.ShellInstallingStep(c.Message); s != "" {
-				step = s
-			}
-			if !c.Since.IsZero() {
-				since = c.Since
-			}
+		if ss := j.Status.ShellSetup; ss != nil && ss.Step != "" {
+			step = ss.Step
+		}
+		if c != nil && !c.Since.IsZero() {
+			since = c.Since
 		}
 		elapsed := int(w.now().Sub(since).Seconds())
 		if elapsed < 0 {

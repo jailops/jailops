@@ -98,7 +98,7 @@ type JailImportRequest struct {
 	Start bool `json:"start,omitempty"`
 }
 
-// JailImportPreflight is the body of POST /api/v1/jail-imports/preflight: the manifest of a file and the options.
+// JailImportPreflight is the body of POST /api/v1/jail-imports?dry_run=true: the manifest of a file and the options.
 type JailImportPreflight struct {
 	Manifest ExportManifest    `json:"manifest"`
 	Request  JailImportRequest `json:"request"`

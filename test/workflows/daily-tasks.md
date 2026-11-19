@@ -46,9 +46,9 @@ becomes a real one and its entry leaves the roadmap section, all in the change t
 | volume | give a jail a volume, move it to another jail | `jailops volume create`, `volume attach`, `volume detach` | OK | - | volume |
 | host-dir | mount a directory of the host in a jail | `jailops volume create NAME --from-dir /host/dir`, then `jailops volume attach` | OK | - | host-dir |
 | limits | limit memory, processes and CPU share of a jail | `jailops create --memory --pids --cpu`, `jailops config set limits.*` | OK | - | limits |
-| cpu-pinning | pin a jail to CPU cores | `jailops create --cpuset 2,3`, `jailops config set NAME limits.cpuset=2,3` | OK | - | cpu-pinning |
+| cpu-pinning | pin a jail to CPU cores | `jailops create --cpuset 2,3`, `jailops config set NAME resources.cpuset=2,3` | OK | - | cpu-pinning |
 | expose | let the Internet reach a port of a jail | `jailops expose NAME PORTS`, `jailops unexpose NAME` | OK | - | expose |
-| snapshot-rollback | snapshot a jail and roll it back | `jailops jail snapshot create`, `jailops jail rollback --root\|--data\|--all` | OK | - | snapshot-rollback |
+| snapshot-rollback | snapshot a jail and roll it back | `jailops jail snapshot create`, `jailops jail rollback --scope root\|data\|all` | OK | - | snapshot-rollback |
 | boot-order | decide which jails start at boot and in which order | `jailops create --autostart --boot-priority N --depends JAIL`, `jailops boot` | OK | - | boot-order |
 | destroy | destroy a jail | `jailops delete NAME` | OK | - | destroy |
 | edit-config | read and change the configuration of a jail | `jailops config get\|set\|edit NAME` | OK | - | edit-config |

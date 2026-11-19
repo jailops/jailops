@@ -42,27 +42,27 @@ func TestConfigCommands(t *testing.T) {
 	tr.ok("create", "nginx", "--image", "freebsd-15", "--storage", "default", "--network", "lan")
 	tr.ok("start", "nginx")
 	tr.ok("config", "show", "nginx")
-	tr.ok("config", "set", "nginx", "limits.memory", "2G", "limits.cpu", "2")
-	tr.ok("config", "get", "nginx", "limits.memory")
-	tr.ok("config", "get", "nginx", "limits.memory", "-o", "json")
-	tr.do("", "config", "get", "nginx", "limits.pids")
+	tr.ok("config", "set", "nginx", "resources.memory", "2G", "resources.cpu", "2")
+	tr.ok("config", "get", "nginx", "resources.memory")
+	tr.ok("config", "get", "nginx", "resources.memory", "-o", "json")
+	tr.do("", "config", "get", "nginx", "resources.pids")
 	tr.do("", "config", "get", "nginx", "no.such.key")
-	tr.do("", "config", "set", "nginx", "limits.memory")
-	tr.do("", "config", "set", "nginx", "limits.cpu", "many")
+	tr.do("", "config", "set", "nginx", "resources.memory")
+	tr.do("", "config", "set", "nginx", "resources.cpu", "many")
 	tr.do("", "config", "set", "nginx", "no.such.key", "1")
 	// An atomic change: one bad pair leaves the rest unapplied.
-	tr.do("", "config", "set", "nginx", "limits.cpu", "4", "limits.pids", "bad")
-	tr.ok("config", "get", "nginx", "limits.cpu")
-	tr.ok("config", "set", "nginx", "limits.pids=100", "boot.autostart=true")
-	tr.ok("config", "unset", "nginx", "limits.pids")
+	tr.do("", "config", "set", "nginx", "resources.cpu", "4", "resources.pids", "bad")
+	tr.ok("config", "get", "nginx", "resources.cpu")
+	tr.ok("config", "set", "nginx", "resources.pids=100", "boot.autostart=true")
+	tr.ok("config", "unset", "nginx", "resources.pids")
 	tr.ok("config", "show", "nginx", "--expanded")
 	tr.ok("config", "show", "nginx", "-o", "yaml")
 	tr.ok("config", "keys", "limits")
-	tr.ok("--dry-run", "config", "set", "nginx", "limits.cpu", "8")
-	tr.ok("config", "get", "nginx", "limits.cpu")
+	tr.ok("--dry-run", "config", "set", "nginx", "resources.cpu", "8")
+	tr.ok("config", "get", "nginx", "resources.cpu")
 
 	// restart_required: reported, and the jail is never restarted unless asked.
-	const restartKey = "limits.pids"
+	const restartKey = "resources.pids"
 	if k, _, ok := api.ConfigKeyFor(restartKey); !ok || !k.RestartRequired {
 		t.Fatalf("%s must be a restart_required key in the registry", restartKey)
 	}
@@ -111,8 +111,8 @@ func TestConfigEdit(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	h.run("", "create", "nginx", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
-	h.run("", "config", "set", "nginx", "limits.cpu", "2", "limits.memory", "1G")
-	script := writeFile(t, h.dir, "ed.sh", "#!/bin/sh\nsed -e 's/^limits.cpu: .*/limits.cpu: \"4\"/' -e '/^limits.memory/d' \"$1\" > \"$1.new\" && mv \"$1.new\" \"$1\"\n", 0o755)
+	h.run("", "config", "set", "nginx", "resources.cpu", "2", "resources.memory", "1G")
+	script := writeFile(t, h.dir, "ed.sh", "#!/bin/sh\nsed -e 's/^resources.cpu: .*/resources.cpu: \"4\"/' -e '/^resources.memory/d' \"$1\" > \"$1.new\" && mv \"$1.new\" \"$1\"\n", 0o755)
 	h.env["EDITOR"] = script
 	tr := h.transcript()
 	tr.ok("config", "edit", "nginx")
@@ -127,15 +127,15 @@ func TestKeyCompletion(t *testing.T) {
 	h.seed()
 	h.run("", "create", "nginx", "--image", "freebsd-15", "--network", "lan", "--storage", "default")
 	h.run("", "project", "create", "web")
-	out, _, _ := h.run("", "__complete", "config", "set", "nginx", "limits.")
-	if !strings.Contains(out, "limits.memory") || !strings.Contains(out, "limits.cpu") {
+	out, _, _ := h.run("", "__complete", "config", "set", "nginx", "resources.")
+	if !strings.Contains(out, "resources.memory") || !strings.Contains(out, "resources.cpu") {
 		t.Fatalf("keys: %q", out)
 	}
 	out, _, _ = h.run("", "__complete", "config", "get", "")
 	if !strings.Contains(out, "nginx") {
 		t.Fatalf("jail names first: %q", out)
 	}
-	out, _, _ = h.run("", "__complete", "set", "nginx", "bo")
+	out, _, _ = h.run("", "__complete", "config", "set", "nginx", "bo")
 	if !strings.Contains(out, "boot.autostart") {
 		t.Fatalf("set alias keys: %q", out)
 	}
@@ -174,18 +174,18 @@ func TestProfiles(t *testing.T) {
 	h := newHarness(t)
 	h.seed()
 	tr := h.transcript()
-	tr.ok("profile", "create", "base", "--comment", "defaults", "--set", "limits.memory=1G", "--set", "boot.autostart=true")
-	tr.ok("profile", "create", "web", "--set", "limits.memory=4G", "--set", "nic.eth1=lan")
+	tr.ok("profile", "create", "base", "--comment", "defaults", "--set", "resources.memory=1G", "--set", "boot.autostart=true")
+	tr.ok("profile", "create", "web", "--set", "resources.memory=4G", "--set", "network.eth1=lan")
 	tr.do("", "profile", "create", "bad", "--set", "hostname=x")
 	tr.do("", "profile", "create", "bad2", "--set", "nonsense=1")
-	tr.do("", "profile", "create", "bad3", "--set", "limits.memory")
+	tr.do("", "profile", "create", "bad3", "--set", "resources.memory")
 	tr.ok("profile", "list")
 	tr.ok("profile", "show", "web")
 	tr.ok("create", "nginx", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--profile", "base", "--profile", "web")
-	tr.ok("config", "set", "nginx", "limits.memory", "8G")
+	tr.ok("config", "set", "nginx", "resources.memory", "8G")
 	tr.ok("config", "show", "nginx", "--expanded")
 	tr.ok("config", "show", "nginx")
-	tr.ok("profile", "edit", "base", "-f", writeFile(t, h.dir, "p.yaml", "comment: defaults\nconfig:\n  limits.memory: 2G\n  boot.priority: \"5\"\n", 0o644))
+	tr.ok("profile", "edit", "base", "-f", writeFile(t, h.dir, "p.yaml", "comment: defaults\nconfig:\n  resources.memory: 2G\n  boot.priority: \"5\"\n", 0o644))
 	tr.ok("config", "show", "nginx", "--expanded", "-o", "json")
 	tr.do("", "profile", "delete", "-y", "base") // in use
 	tr.ok("delete", "--confirm-data-loss", "nginx")

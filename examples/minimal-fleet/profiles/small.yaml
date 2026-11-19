@@ -6,5 +6,5 @@ spec:
   # Shared profile. Devices merge by name: a jail that lists a network named
   # eth0 overrides only the keys it sets.
   resources: {memory: 1G, cpu: 1}
-  update: {strategy: rebase, window: "sun 03:00"}
+  update: {mode: manual}
   boot: {autostart: true}

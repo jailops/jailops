@@ -19,7 +19,7 @@ start. Register another, for example on the big pool:
     jailops storage create bulk --dataset hdd/jailops --compression zstd
     jailops storage list                                     # POOL, HEALTH, USED, AVAILABLE come from ZFS
 
-`jailops storage list` shows the storages granted to the selected project; `--all` (a global administrator) shows every
+`jailops storage list` shows the storages granted to the selected project; `--all-projects` (a global administrator) shows every
 storage of the host with the projects that hold it, and `storage show` names them under `Granted to`.
 
 The dataset must exist; it must be empty or already owned by JailOps (`jailops:managed=on`). Registering a storage also
@@ -79,19 +79,19 @@ person on the whole host):
     jailops volume attach mail    maildir /var/mail/vhosts
     jailops volume attach desktop maildir /home/ann/Mail
 
-`volume attach JAIL VOLUME PATH` (add `--ro` for a read-only mount) attaches a volume that exists already; it never creates one. The jail
+`volume attach JAIL VOLUME PATH` (add `--read-only` for a read-only mount) attaches a volume that exists already; it never creates one. The jail
 may run: the volume is mounted into it at once. A volume is let go again with
 
     jailops volume detach desktop maildir
 
-The attachment is part of the jail's specification (`volumes: [{volume, mount, read_only}]`, or `disk.<volume>=<path>` with
+The attachment is part of the jail's specification (`volumes: [{volume, mount, read_only}]`, or `volumes.<name>=<path>` with
 `jailops config`), so `jailops edit` and a file do the same. A **running** jail gets the mount at once and gives it back at once; the
 attachment is in its record and its `fstab` from then on, so the next start makes it again. A detach is refused with `busy`
 while a process of the jail uses the mount (`jailops exec JAIL -- fstat PATH` shows which one); nothing is changed, and
 the detach works once the process is done. The volume is mounted on the host at its own place,
 `<storage mount>/projects/<project>/volumes/<name>`, and the jail's `fstab` binds it into the jail with `nullfs`; the jail
 stops the mount again when it stops, and the volume stays where it is for the other jails. `--copy-existing` (the files of
-the path go into the volume first) needs a stopped jail. Volumes that a profile of the project attaches (`disk.<volume>`)
+the path go into the volume first) needs a stopped jail. Volumes that a profile of the project attaches (`volumes.<name>`)
 reach a running jail at its next start.
 
 **Owner and mode.** `--uid`, `--gid` and `--mode` (default `0` `0` `0755`) are the owner and the mode of the root of the
@@ -101,7 +101,7 @@ a volume and refuses anything else), and they cannot change later: change the ow
 
 **Several jails.** A volume can be attached to more than one jail, and the jails share the same files; `jailops volume show`
 lists them (`Attached to: mail (rw), desktop (ro)`). An application that needs a single writer, such as a database, is
-attached read-write to one jail and `--ro` to the others. An encrypted volume is attached to one jail only.
+attached read-write to one jail and `--read-only` to the others. An encrypted volume is attached to one jail only.
 
 **Linux jails.** A volume of a Linux jail is mounted twice, at its path in the jail's root and at the same path below
 `compat/linux`, because a Linux process reaches every path through that mirror first (see
@@ -242,9 +242,9 @@ jail's container next to `root` and `data`; it has `jailed=on` and `mountpoint=n
 `jail.conf` names it (`zfs.dataset`) so `jail(8)` attaches it at every start and detaches it at the stop.
 
     jailops create db --image freebsd-15-1 --zfs-delegation --disk 50GiB ...
-    jailops config set db zfs.delegation true          # an existing jail (it needs limits.disk); it takes effect at the next start
+    jailops config set db zfs_delegation true          # an existing jail (it needs resources.disk); it takes effect at the next start
 
-- **A disk limit.** A jail with delegation needs `limits.disk`: the quota on its container is what keeps a jail that manages its own datasets from filling the pool.
+- **A disk limit.** A jail with delegation needs `resources.disk`: the quota on its container is what keeps a jail that manages its own datasets from filling the pool.
 - **Two consents.** Only a **global administrator** may turn it on (a project user cannot), and the host's `priv.conf`
   must allow it with `admin-zfs-delegation = true`; without that line the helper refuses the jail's `jail.conf`. The helper
   sets `jailed` on that one dataset and on nothing else.
@@ -257,7 +257,7 @@ jail's container next to `root` and `data`; it has `jailed=on` and `mountpoint=n
   (the jail is stopped for it). `jailops jail copy` copies it and hands the copy its own.
 - **Backups leave it out.** A backup reads files from mounted datasets, and the host does not mount this one: the run
   says `skipped: delegated: ...`. Use `zfs send` of the dataset, or a backup inside the jail.
-- **Turning it off** (`zfs.delegation false`, the jail stopped) clears `jailed` and keeps the data; turning it on again
+- **Turning it off** (`zfs_delegation false`, the jail stopped) clears `jailed` and keeps the data; turning it on again
   hands the same dataset over. `jailops doctor` (`jail.delegation`) fails when a jail asks for the dataset and it is not
   jailed, or a dataset is jailed and no jail asks for it.
 

@@ -96,6 +96,22 @@ func Run(ctx context.Context, s *plan.Session, p *plan.Plan, opt Options) (Resul
 	opt.Log.Write(applylog.KindApplyStart, map[string]any{
 		"fleet": p.FleetID, "hosts": p.Hosts, "summary": p.Summary(), "prune": opt.Prune, "force": opt.Force,
 	})
+	// The plan names the machines it was made for: a host that answers with another identity now (an alias or a
+	// hub entry that points elsewhere) is not touched.
+	badHost := map[string]error{}
+	for _, host := range p.Hosts {
+		want := p.HostUUIDs[host]
+		if want == "" {
+			continue
+		}
+		got, err := s.HostUUID(ctx, host)
+		switch {
+		case err != nil:
+			badHost[host] = err
+		case got != want:
+			badHost[host] = fmt.Errorf("host %s answers with identity %s, the plan was made for %s: plan again", host, got, want)
+		}
+	}
 	me := s.Fleet.ManagedBy()
 	byHost := map[string][]plan.Item{}
 	for _, it := range p.Items {
@@ -115,6 +131,10 @@ func Run(ctx context.Context, s *plan.Session, p *plan.Plan, opt Options) (Resul
 					res.add(opt, it, "skipped", errors.New("owned but undeclared; pass --prune to delete"))
 					continue
 				}
+			}
+			if err := badHost[host]; err != nil {
+				res.add(opt, it, "failed", err)
+				continue
 			}
 			if stopped {
 				res.add(opt, it, "skipped", errors.New("an earlier change on this host failed"))
@@ -233,6 +253,9 @@ func applyItem(ctx context.Context, s *plan.Session, it plan.Item, me string) er
 		if live.Meta.ManagedBy != me {
 			return fmt.Errorf("ownership changed since planning: managed_by is now %q", live.Meta.ManagedBy)
 		}
+		if err := sameAsPlanned(it, live); err != nil {
+			return err
+		}
 		meta := it.Meta
 		meta.UUID = "" // the server keeps the identity it assigned
 		if err := ad.Update(ctx, c, meta, it.Spec, etag); err != nil {
@@ -243,16 +266,32 @@ func applyItem(ctx context.Context, s *plan.Session, it plan.Item, me string) er
 		}
 		return nil
 	case plan.ActionDelete:
-		live, _, err := ad.Get(ctx, c, it.Name)
+		live, etag, err := ad.Get(ctx, c, it.Name)
 		if err != nil {
 			return err
 		}
 		if live.Meta.ManagedBy != me {
 			return fmt.Errorf("ownership changed since planning: managed_by is now %q", live.Meta.ManagedBy)
 		}
-		return ad.Delete(ctx, c, it.Name)
+		if err := sameAsPlanned(it, live); err != nil {
+			return err
+		}
+		return ad.Delete(ctx, c, it.Name, etag)
 	}
 	return fmt.Errorf("action %q is not executable", it.Action)
+}
+
+// sameAsPlanned refuses to change or delete an object other than the one the plan was made for: the generation of an
+// object counts from 1 again when one of the same name is created anew, so the plan keeps the UUID (incarnation) and
+// the generation (revision) it saw. A plan older than the object is a plan to make again, not one to apply.
+func sameAsPlanned(it plan.Item, live plan.Live) error {
+	if it.LiveUUID != "" && live.Meta.UUID != it.LiveUUID {
+		return fmt.Errorf("%s was created again since the plan was made (uuid %s, planned %s): plan again", it.Ref(), live.Meta.UUID, it.LiveUUID)
+	}
+	if it.LiveGeneration > 0 && live.Meta.Generation != it.LiveGeneration {
+		return fmt.Errorf("%s changed since the plan was made (generation %d, planned %d): plan again", it.Ref(), live.Meta.Generation, it.LiveGeneration)
+	}
+	return nil
 }
 
 // buildImage builds the next generation of an image and waits for it. Only a declared `build: true` image on a host

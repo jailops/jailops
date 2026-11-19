@@ -87,7 +87,8 @@ func (c *Client) do(ctx context.Context, r request) (*api.Response, http.Header,
 	reqID := newRequestID()
 	target := c.buildURL(r.path, r.query)
 	attempts := 1
-	if isIdempotent(r.method) {
+	// a request that carries an idempotency key can be repeated: the server answers a repeat with the first operation
+	if isIdempotent(r.method) || r.header.Get("Idempotency-Key") != "" {
 		attempts += max(c.t.cfg.retries, 0)
 	}
 	for i := 0; ; i++ {

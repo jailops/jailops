@@ -32,8 +32,8 @@ type Adapter struct {
 	Update func(ctx context.Context, c *sdk.Client, meta api.ObjectMeta, spec any, etag string) error
 	// Patch merges a JSON merge patch (used to claim an object).
 	Patch func(ctx context.Context, c *sdk.Client, name string, patch any, etag string) error
-	// Delete removes an object and waits for any operation it starts.
-	Delete func(ctx context.Context, c *sdk.Client, name string) error
+	// Delete removes an object, guarded by the ETag, and waits for any operation it starts.
+	Delete func(ctx context.Context, c *sdk.Client, name, etag string) error
 }
 
 type resource[T any] interface {
@@ -50,7 +50,7 @@ func build[T any](
 	spec func(*T) any,
 	make_ func(api.ObjectMeta, any) T,
 	create func(context.Context, *sdk.Client, T) error,
-	del func(context.Context, *sdk.Client, string) error,
+	del func(context.Context, *sdk.Client, string, string) error,
 ) *Adapter {
 	live := func(v T) Live { return Live{Meta: *meta(&v), Spec: spec(&v)} }
 	return &Adapter{
@@ -94,8 +94,10 @@ func resCreate[T any](r func(*sdk.Client) *sdk.Resource[T]) func(context.Context
 	}
 }
 
-func resDelete[T any](r func(*sdk.Client) *sdk.Resource[T]) func(context.Context, *sdk.Client, string) error {
-	return func(ctx context.Context, c *sdk.Client, name string) error { return r(c).Delete(ctx, name) }
+func resDelete[T any](r func(*sdk.Client) *sdk.Resource[T]) func(context.Context, *sdk.Client, string, string) error {
+	return func(ctx context.Context, c *sdk.Client, name, etag string) error {
+		return r(c).DeleteETag(ctx, name, etag)
+	}
 }
 
 func asRes[T any](r func(*sdk.Client) *sdk.Resource[T]) func(*sdk.Client) resource[T] {
@@ -169,8 +171,8 @@ func init() {
 			_, err = op.Wait(ctx)
 			return err
 		},
-		func(ctx context.Context, c *sdk.Client, name string) error {
-			op, err := c.Volumes().Delete(ctx, name)
+		func(ctx context.Context, c *sdk.Client, name, etag string) error {
+			op, err := c.Volumes().DeleteETag(ctx, name, etag)
 			if err != nil {
 				return err
 			}
@@ -218,8 +220,8 @@ func init() {
 			_, err = op.Wait(ctx)
 			return err
 		},
-		func(ctx context.Context, c *sdk.Client, name string) error {
-			op, err := c.Jails().Delete(ctx, name)
+		func(ctx context.Context, c *sdk.Client, name, etag string) error {
+			op, err := c.Jails().DeleteETag(ctx, name, etag)
 			if err != nil {
 				return err
 			}

@@ -88,22 +88,22 @@ func TestCertificates(t *testing.T) {
 	if _, err := e.Admin.Certificates().Create(c, api.Certificate{Metadata: api.ObjectMeta{Name: "dup"}, Spec: api.CertificateSpec{Fingerprint: fp, Permission: api.PermAdmin, Global: true}}); !api.IsCode(err, api.CodeAlreadyExists) {
 		t.Fatalf("%v", err)
 	}
-	// By name and by fingerprint.
-	for _, k := range []string{cert.Metadata.Name, fp} {
-		g, err := e.Admin.Certificates().Get(c, k)
-		if err != nil || g.Metadata.Name != cert.Metadata.Name {
-			t.Fatalf("%s: %v", k, err)
-		}
+	// By name; the fingerprint is a member, not a key.
+	if g, err := e.Admin.Certificates().Get(c, cert.Metadata.Name); err != nil || g.Metadata.Name != cert.Metadata.Name {
+		t.Fatalf("%v", err)
+	}
+	if _, err := e.Admin.Certificates().Get(c, fp); !api.IsCode(err, api.CodeNotFound) {
+		t.Fatalf("a fingerprint is not a name: %v", err)
 	}
 	cert.Spec.Permission = api.PermOperator
-	up, err := e.Admin.Certificates().Update(c, cert.Metadata.Name, cert, `"1"`)
+	up, err := e.Admin.Certificates().Update(c, cert.Metadata.Name, cert, api.ETag(cert.Metadata.UUID, 1))
 	if err != nil || up.Spec.Permission != api.PermOperator || up.Metadata.Generation != 2 {
 		t.Fatalf("%v %+v", err, up)
 	}
 	if a, ok := e.D.Service().CertActor(fp, "x"); !ok || a.Perm != api.PermOperator {
 		t.Fatalf("%+v %v", a, ok)
 	}
-	if err := e.Admin.Certificates().Delete(c, fp); err != nil {
+	if err := e.Admin.Certificates().Delete(c, cert.Metadata.Name); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := e.D.Service().CertActor(fp, "x"); ok {
@@ -191,7 +191,7 @@ func TestUsers(t *testing.T) {
 	if _, err := e.Admin.Users().Update(c, "ann", u, etag); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Admin.Users().Update(c, "ann", u, etag); !api.IsCode(err, api.CodeConflict) {
+	if _, err := e.Admin.Users().Update(c, "ann", u, etag); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Fatalf("stale user update: %v", err)
 	}
 	// A disabled user cannot log in.

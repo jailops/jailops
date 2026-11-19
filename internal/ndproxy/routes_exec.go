@@ -68,7 +68,7 @@ func (r RouteManager) Remove(ctx context.Context, addr netip.Addr, iface string)
 	return nil
 }
 
-// EnsureUplinkNotMember fails with api.CodeConflict if uplink is a member of
+// EnsureUplinkNotMember fails with api.CodePreconditionFailed if uplink is a member of
 // a bridge of the host's own (the proxy needs the uplink to be a plain interface). It only reads: JailOps never
 // modifies a bridge.
 func (r RouteManager) EnsureUplinkNotMember(ctx context.Context, uplink string) error {
@@ -89,7 +89,7 @@ func (r RouteManager) EnsureUplinkNotMember(ctx context.Context, uplink string) 
 		}
 		for _, m := range parseBridgeMembers(string(o)) {
 			if m == uplink {
-				return api.Errorf(api.CodeConflict, "uplink %s is a member of bridge %s", uplink, br).
+				return api.Errorf(api.CodePreconditionFailed, "uplink %s is a member of bridge %s", uplink, br).
 					WithHint("remove the uplink from the bridge; the NDP proxy needs it to be a plain interface")
 			}
 		}

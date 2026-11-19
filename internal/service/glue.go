@@ -88,6 +88,19 @@ func (a *imageAdapter) Ensure(ctx context.Context, root, ref string) (api.ImageG
 	}
 	return m.Provide(ctx, ref)
 }
+// Peek looks for a generation on any pool and changes nothing.
+func (a *imageAdapter) Peek(ctx context.Context, ref string) (api.ImageGeneration, error) {
+	err := error(api.Errorf(api.CodeNotFound, "no image pool"))
+	for _, m := range a.s.imageManagers() {
+		g, gerr := m.Resolve(ctx, ref)
+		if gerr == nil {
+			return g, nil
+		}
+		err = gerr
+	}
+	return api.ImageGeneration{}, err
+}
+
 func (a *imageAdapter) Collect(ctx context.Context) ([]string, error) {
 	var out []string
 	var errs []error

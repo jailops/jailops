@@ -170,7 +170,7 @@ flushes and the poststop hooks run (the interfaces and the pf anchors of the jai
 `jailops_shutdown`, which comes with the package and runs whenever `jailopsd_enable` is `YES`, asks the daemon to do it with
 
     jailops stop-all                  # every running jail of every project, a jail before the jails it depends on
-    jailops stop-all --grace 60s      # how long each jail gets to shut down
+    jailops stop-all --timeout 60s    # how long each jail gets to shut down
     jailops stop-all --dry-run        # the order, without stopping anything
 
 The order is the reverse of `jailops boot`: a jail stops before the jails in its `boot.depends`, and among independent
@@ -188,12 +188,12 @@ runs at boot.
 
 After its stop command (`/etc/rc.shutdown`) a jail has thirty seconds to end by itself; what is still running then is killed. A database that needs longer says so for itself, and a jail that must go down quickly asks for less:
 
-    jailops config set db boot.stop_timeout 60        # seconds, 1 to 3600; 0 is the thirty seconds
+    jailops config set db boot.stop_timeout_seconds 60        # seconds, 1 to 3600; 0 is the thirty seconds
     jailops create db ... --stop-timeout 60
 
-The key is written into the jail's configuration at its next start. `jailops stop`, `restart`, `stop-all` and the stop at shutdown all wait as long as the jail asks (`--grace` shortens the wait for one run, and the jail is killed when it passes). Up to eight jails stop at once, each after the jails that depend on it, so `jailops_shutdown_timeout` has to cover the longest chain of jails that depend on each other (and, with more than eight jails, the time the queue takes), and `rcshutdown_timeout` has to stay above it: with a database that gets 60 seconds, raise `jailops_shutdown_timeout` to 120 and `rcshutdown_timeout` to 130.
+The key is written into the jail's configuration at its next start. `jailops stop`, `restart`, `stop-all` and the stop at shutdown all wait as long as the jail asks (`--timeout` shortens the wait for one run, and the jail is killed when it passes). Up to eight jails stop at once, each after the jails that depend on it, so `jailops_shutdown_timeout` has to cover the longest chain of jails that depend on each other (and, with more than eight jails, the time the queue takes), and `rcshutdown_timeout` has to stay above it: with a database that gets 60 seconds, raise `jailops_shutdown_timeout` to 120 and `rcshutdown_timeout` to 130.
 
-**A stop is always bounded.** The stop commands of a jail get its stop timeout (`boot.stop_timeout`, 30 seconds unless set) and the jail the same time again to exit after SIGTERM, with five seconds on top (65 seconds by default); after that it is removed without them, which kills what is left, and a `jail-stop-forced` event and the console log of the jail name the processes that still ran. After the jail is gone a stop waits five seconds in all for its datasets to be released; what is still busy stays mounted until the next start or stop and is reported as a `jail-unmount-busy` event. `jailops op show ID` lists the steps of an operation with the time each took, and `jailops doctor --fix` takes the mounts that a stop which did not finish left below the root of a stopped jail off ([troubleshooting.md](troubleshooting.md)).
+**A stop is always bounded.** The stop commands of a jail get its stop timeout (`boot.stop_timeout_seconds`, 30 seconds unless set) and the jail the same time again to exit after SIGTERM, with five seconds on top (65 seconds by default); after that it is removed without them, which kills what is left, and a `jail-stop-forced` event and the console log of the jail name the processes that still ran. After the jail is gone a stop waits five seconds in all for its datasets to be released; what is still busy stays mounted until the next start or stop and is reported as a `jail-unmount-busy` event. `jailops op show ID` lists the steps of an operation with the time each took, and `jailops doctor --fix` takes the mounts that a stop which did not finish left below the root of a stopped jail off ([troubleshooting.md](troubleshooting.md)).
 
 ## Resource limits of a jail
 
@@ -202,12 +202,12 @@ each one is enforced by the kernel, not by JailOps polling.
 
 | Key | Enforced with | What happens at the limit |
 |---|---|---|
-| `limits.memory` | rctl `swapuse`, `deny` | the anonymous memory the jail may reserve in total: a `malloc` or `mmap` beyond it fails, and nothing is killed |
-| `limits.pids` | rctl `maxproc`, `deny` | `fork` fails while the jail has that many processes |
-| `limits.cpu` | rctl `pcpu`, `deny`, at cores times 100 | the jail is slowed down to that many cores, nothing is killed |
-| `limits.cpuset` | `cpuset -l LIST -j JID` | the jail's processes run on those CPUs only; the other CPUs of the host are never used by it |
-| `limits.disk`, `limits.disk_reservation` | ZFS `quota` and `reservation` of the jail's container dataset | writes fail below the container: the root, the persistent datasets and the snapshots of all of them count; a volume is a dataset of the project, outside the container: it is bounded by its own `--size` and by the project's storage quota, not by the jail's limit |
-| `limits.states` | pf `keep state (max N)` on every pass rule of the jail's anchor | a rule creates no new state beyond N; the host's state table cannot be filled by one jail |
+| `resources.memory` | rctl `swapuse`, `deny` | the anonymous memory the jail may reserve in total: a `malloc` or `mmap` beyond it fails, and nothing is killed |
+| `resources.pids` | rctl `maxproc`, `deny` | `fork` fails while the jail has that many processes |
+| `resources.cpu` | rctl `pcpu`, `deny`, at cores times 100 | the jail is slowed down to that many cores, nothing is killed |
+| `resources.cpuset` | `cpuset -l LIST -j JID` | the jail's processes run on those CPUs only; the other CPUs of the host are never used by it |
+| `resources.disk`, `resources.disk_reservation` | ZFS `quota` and `reservation` of the jail's container dataset | writes fail below the container: the root, the persistent datasets and the snapshots of all of them count; a volume is a dataset of the project, outside the container: it is bounded by its own `--size` and by the project's storage quota, not by the jail's limit |
+| `resources.states` | pf `keep state (max N)` on every pass rule of the jail's anchor | a rule creates no new state beyond N; the host's state table cannot be filled by one jail |
 
 `jailops info JAIL` shows both counters next to the limit: the memory that is **resident** now (`memoryuse`, what the processes hold in RAM) and the memory the jail has **reserved** (`swapuse`, the counter the limit is of). A jail can show a resident size above its limit and be under it: the limit counts reservations, not pages in RAM.
 
@@ -219,20 +219,20 @@ refuse an allocation for it (`deny` is not enforced; the action `sigkill` kills 
 therefore the memory the jail's programs reserve, not the size of a single process: a server with many processes, such
 as PostgreSQL with twenty busy connections, reserves more than the value it needs when idle, and a limit set to the
 catalog's hint of the application (1G for PostgreSQL) leaves room for a small server and no more. Raise
-`limits.memory` for a busy one. `limits.disk` is a `quota`, so snapshots count against it; a `refquota` would leave them
+`resources.memory` for a busy one. `resources.disk` is a `quota`, so snapshots count against it; a `refquota` would leave them
 out, and the jail could then fill the pool with what its snapshots keep.
 
-**`limits.cpuset` pins a jail to CPUs of the host**: a list of numbers and ranges such as `2,3` or `0-3,6`, kept as sorted ranges
-(`2,3` is stored `2-3`). It is the other half of `limits.cpu`: `limits.cpu` says how much CPU time the jail may use, wherever it
-runs; `limits.cpuset` says where it runs, so a busy jail leaves the other CPUs to the rest of the host. Both can be set. The
+**`resources.cpuset` pins a jail to CPUs of the host**: a list of numbers and ranges such as `2,3` or `0-3,6`, kept as sorted ranges
+(`2,3` is stored `2-3`). It is the other half of `resources.cpu`: `resources.cpu` says how much CPU time the jail may use, wherever it
+runs; `resources.cpuset` says where it runs, so a busy jail leaves the other CPUs to the rest of the host. Both can be set. The
 cpuset needs no resource accounting: it works with `kern.racct.enable=0`. It is set by the helper after the jail has started, on the
 cpuset the jail's processes share, so everything the jail runs is on those CPUs. `--cpuset` on `create`, `jailops config set JAIL
-limits.cpuset 2,3`, `config unset`, the console's Configuration tab and a profile set it, and `jailops info` shows it. A CPU the
+resources.cpuset 2,3`, `config unset`, the console's Configuration tab and a profile set it, and `jailops info` shows it. A CPU the
 host does not have (a cpuset of `0-7` on a host with four CPUs, for example a profile written for a larger host) stops the jail
 from starting, with the CPUs the host has in the message, and `jailops doctor` warns (`jails.cpuset`) for every jail whose set
 names a missing CPU. `cpuset -g -j JID` on the host shows what a running jail has.
 
-`limits.cpu`, `limits.memory` and `limits.pids` need the kernel's resource accounting, which is a boot tunable:
+`resources.cpu`, `resources.memory` and `resources.pids` need the kernel's resource accounting, which is a boot tunable:
 
     # /boot/loader.conf
     kern.racct.enable=1
@@ -241,13 +241,13 @@ Without it the kernel accepts no rctl rule. A jail with such a limit still start
 `sysctl.kern.racct.enable`, and the jail shows the condition `Limits` (`NotEnforced`) and a warning. The rules are added
 after the jail has started and removed when it stops and when it is deleted (the kernel keeps a rule by the jail's name, so
 a rule left behind would apply to the next jail of that name); a start removes any rule of the name before it adds its own. The three keys take
-effect at the next start of the jail; `limits.disk` and `limits.disk_reservation` apply at once, and ZFS refuses a quota
+effect at the next start of the jail; `resources.disk` and `resources.disk_reservation` apply at once, and ZFS refuses a quota
 below what the jail already uses.
 
-`limits.states` is per rule: a jail with five pass rules may hold five times the number. A jail that sets none gets
+`resources.states` is per rule: a jail with five pass rules may hold five times the number. A jail that sets none gets
 `jails.max_states` of `jailopsd.yaml`, 10000 by default, which is far below pf's default table of 100000 states and
 above what a busy DNS or web server of one jail keeps open; `0` there sets no limit. A jail that needs more has its own
-`limits.states`. Raise the host's table (`set limit states` in `pf.conf`) when the sum of the limits of the jails on it
+`resources.states`. Raise the host's table (`set limit states` in `pf.conf`) when the sum of the limits of the jails on it
 should fit. pf also shortens the timeouts of a jail's states once a rule holds 60% of its limit (its adaptive defaults), and refuses new states at the limit.
 
 ## Events from the kernel
@@ -389,7 +389,7 @@ read the details as an administrator when an alert fires.
 | The host checks | `GET /api/v1/doctor` with the token (or `jailops doctor`, exit status 1 on a failed check) | `metadata.status` is `fail`; `warn` for a day |
 | Reconcile failures | doctor check `reconcile` (`fail` with the error, `warn` for drift); `status.conditions` of each object | `fail` |
 | Pool health | doctor checks `zfs.pool` and `zfs.pool.<storage>`; the events `host-zfs-error` and `host-zfs-pool` ([above](#events-from-the-kernel)) | not `ok`; any `host-zfs-error` |
-| Pool capacity | `GET /api/v1/resources`: `size`, `allocated`, `free` of the pool (global identity; no doctor check) | `allocated / size` above 80% |
+| Pool capacity | `GET /api/v1/resources`: `size_bytes`, `allocated_bytes`, `free_bytes` of the pool (global identity; no doctor check) | `allocated_bytes / size_bytes` above 80% |
 | The certificate | doctor check `tls.certificate` (warns 14 days before an expiry nothing renews, fails once expired); `tls.acme`; `GET /api/v1/host/certificate`: `current.days_left`, `acme.failures`, `acme.last_error` | `days_left` below 14, or ACME failures |
 | The last successful backup | `GET /api/v1/backups?project=P` (readonly in the project): the newest `metadata.created_at` per `spec.jail` with `status.failed` false; `status.verified_at` for the last verification | older than the RPO |
 | Failed scheduled backups | `jailops doctor` (`backup.recent`, one warning per policy and jail, with the first line of the error), the event `backup-failed`, and the daemon's log (`backup: job failed`) | any warning or event |

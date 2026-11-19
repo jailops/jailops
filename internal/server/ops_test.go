@@ -216,7 +216,7 @@ func TestRestartRecoversInterruptedUpgrade(t *testing.T) {
 	if got.Status != api.OpFailure || got.Error == nil {
 		t.Fatalf("%+v", got)
 	}
-	if rec := got.Error.Detail["recovery"]; !strings.HasPrefix(rec, "rolled-back") {
+	if rec := got.Error.Detail["recovery"]; !strings.HasPrefix(rec, api.RecoveryRolledBack) {
 		t.Fatalf("recovery detail %q (error %v)", rec, got.Error)
 	}
 	ents, _ = os.ReadDir(jdir)
@@ -229,7 +229,7 @@ func TestRestartRecoversInterruptedUpgrade(t *testing.T) {
 	}
 	// The jail is on its old generation, with no leftovers, and starts.
 	j, err := e2.Admin.Jails().Get(c, "web")
-	if err != nil || j.Status.Generation != "fb#g1" {
+	if err != nil || j.Status.ImageGeneration != "fb#g1" {
 		t.Fatalf("%v %+v\n%s", err, j.Status, e2.Log())
 	}
 	for _, ds := range []string{"tank/jailops/projects/alpha/jails/web/root.new", "tank/jailops/projects/alpha/jails/web/root.old"} {

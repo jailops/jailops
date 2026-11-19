@@ -76,25 +76,33 @@ type UpdateReport struct {
 	Error string `json:"error,omitempty"`
 }
 
+// UpdateKind is what an update changed.
+type UpdateKind string
+
+// UpdateResult is how an update ended.
+type UpdateResult string
+
 // Update kinds and results.
 const (
-	UpdateKindPackages = "packages"
-	UpdateKindOS       = "os"
+	UpdateKindPackages UpdateKind = "packages"
+	UpdateKindOS       UpdateKind = "os"
 
-	UpdateOK         = "ok"
-	UpdateFailed     = "failed"
-	UpdateRolledBack = "rolled_back"
+	UpdateSuccess         UpdateResult = "success"
+	UpdatePreflightFailed UpdateResult = "preflight_failed" // refused before anything changed
+	UpdateRolledBack      UpdateResult = "rolled_back"      // failed and the jail is back as it was
+	UpdateRecoveryNeeded  UpdateResult = "recovery_needed"  // failed and the jail needs a manual recovery
+	UpdateFailure         UpdateResult = "failure"
 )
 
 // UpdateRecord is one entry of a jail's update history.
 type UpdateRecord struct {
-	ID       string    `json:"id"`
-	Jail     string    `json:"jail"`
-	Project  string    `json:"project"`
-	Kind     string    `json:"kind"` // packages or os
-	Result   string    `json:"result"`
-	Started  time.Time `json:"started"`
-	Finished time.Time `json:"finished"`
+	ID         string       `json:"id"`
+	Jail       string       `json:"jail"`
+	Project    string       `json:"project"`
+	Kind       UpdateKind   `json:"kind"`
+	Result     UpdateResult `json:"result"`
+	StartedAt  time.Time    `json:"started_at"`
+	FinishedAt time.Time    `json:"finished_at"`
 	// Snapshot is the atomic snapshot taken before the update. It is kept:
 	// rolling a package update back is a data rollback (scope all), not a
 	// root rollback.

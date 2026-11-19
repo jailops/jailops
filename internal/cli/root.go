@@ -177,7 +177,7 @@ jailops events --type lifecycle -o json`,
 	pf.BoolVar(&a.dryRun, "dry-run", false, "show what would change and send nothing that changes state")
 	pf.BoolVar(&a.wait, "wait", true, "wait for asynchronous operations to finish")
 	pf.BoolVar(&a.noWait, "no-wait", false, "do not wait; print the operation id")
-	pf.DurationVar(&a.timeout, "timeout", 0, "how long to wait for an operation (default 10m)")
+	pf.DurationVar(&a.timeout, "wait-timeout", 0, "how long to wait for an operation (default 10m)")
 	pf.BoolVarP(&a.yes, "yes", "y", false, "answer yes to confirmations (never to data-loss confirmations)")
 	pf.StringVar(&a.configPath, "config", "", "user configuration file (default ~/.config/jailops/config.yaml)")
 	pf.BoolVar(&a.noHeaders, "no-headers", false, "omit table headers")
@@ -192,7 +192,7 @@ jailops events --type lifecycle -o json`,
 		a.remoteCmd(), a.auditCmd(), a.bootCmd(), a.topCmd(), a.stopAllCmd(), a.doctorCmd(), a.serverCmd(), a.explainCmd(), a.completionCmd(), a.versionCmd(), a.manCmd(),
 	)
 	a.addJailShortcuts(root)
-	root.AddCommand(a.configCmd(), a.profileCmd(), a.updateCmd(), a.setAlias(a.jailDesc()), a.applyCmd())
+	root.AddCommand(a.configCmd(), a.profileCmd(), a.updateCmd(), a.applyCmd())
 	markProjectScoped(root)
 	expandExamples(root)
 	a.finishCompletion(root)
@@ -239,7 +239,7 @@ func seconds(d time.Duration) int {
 // trust, backup targets and keys, the server) are not here.
 // 'logs' checks for a project itself: with --all-projects it needs none.
 var projectScopedCommands = []string{
-	"jail", "create", "delete", "rename", "list", "info", "start", "stop", "restart", "exec", "pkg", "cp", "shell", "label", "provision", "set", "expose", "unexpose",
+	"jail", "create", "delete", "rename", "list", "info", "start", "stop", "restart", "exec", "pkg", "cp", "shell", "label", "provision", "expose", "unexpose",
 	"firewall", "profile", "update", "config", "backup policy", "backup restore", "app export",
 }
 

@@ -264,7 +264,7 @@ func (s *Server) checkAttachments(j, old *api.Jail) *api.Error {
 		if v.Spec.Encrypted {
 			for _, u := range s.volumeUses(j.Metadata.Project, a.Name) {
 				if u.Jail != j.Metadata.Name {
-					return api.Errorf(api.CodeConflict, "volume %q is encrypted and attached to jail %q already: an encrypted volume is attached to one jail", a.Name, u.Jail)
+					return api.Errorf(api.CodePreconditionFailed, "volume %q is encrypted and attached to jail %q already: an encrypted volume is attached to one jail", a.Name, u.Jail)
 				}
 			}
 		}

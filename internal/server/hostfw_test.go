@@ -76,7 +76,7 @@ func TestHostFirewallManaged(t *testing.T) {
 	bad.Console.Port = 8443
 	_, err = fwc.Apply(c, api.HostFirewallApply{Spec: bad, DryRun: true})
 	wantCode(t, err, api.CodeInvalid)
-	_, err = fwc.Apply(c, api.HostFirewallApply{Spec: fwTestSpec(), ConfirmWithin: 5})
+	_, err = fwc.Apply(c, api.HostFirewallApply{Spec: fwTestSpec(), ConfirmWithinSeconds: 5})
 	wantCode(t, err, api.CodeInvalid)
 
 	// the test client comes from 127.0.0.1: a spec that admits neither ssh nor the console from there is refused
@@ -88,15 +88,15 @@ func TestHostFirewallManaged(t *testing.T) {
 		t.Fatalf("lockout: %v", err)
 	}
 
-	dry, err := fwc.Apply(c, api.HostFirewallApply{Spec: fwTestSpec(), DryRun: true, ConfirmWithin: 30})
+	dry, err := fwc.Apply(c, api.HostFirewallApply{Spec: fwTestSpec(), DryRun: true, ConfirmWithinSeconds: 30})
 	if err != nil || !dry.DryRun || !strings.Contains(dry.Diff, "+pass in proto tcp from 127.0.0.1 to (self) port 39110") || len(dry.Rules) == 0 {
 		t.Fatalf("%+v %v", dry, err)
 	}
 	if e.Host.File("pf.conf") != dtest.HostPF {
 		t.Fatal("the dry run wrote")
 	}
-	res, err := fwc.Apply(c, api.HostFirewallApply{Spec: fwTestSpec(), ConfirmWithin: 30})
-	if err != nil || res.Pending == nil || res.Snapshot == "" || res.Pending.ConfirmWithin != 30 {
+	res, err := fwc.Apply(c, api.HostFirewallApply{Spec: fwTestSpec(), ConfirmWithinSeconds: 30})
+	if err != nil || res.Pending == nil || res.Snapshot == "" || res.Pending.ConfirmWithinSeconds != 30 {
 		t.Fatalf("%+v %v", res, err)
 	}
 	if !strings.HasPrefix(e.Host.File("pf.conf"), "# managed by jailops\n") || e.Host.PFLoaded() != e.Host.File("pf.conf") {

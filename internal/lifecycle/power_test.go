@@ -3,10 +3,12 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"jailops.net/jailops/internal/sys/jailos"
 	"jailops.net/jailops/sdk/api"
 )
 
@@ -206,7 +208,7 @@ func (f forcedJails) Stop(ctx context.Context, name string) error {
 	if err := f.Jails.Stop(ctx, name); err != nil {
 		return err
 	}
-	return api.Errorf(api.CodeStopForced, "jail %s did not shut down within 1m5s (still running: 4021 sleep)", name)
+	return jailos.ForcedStop(fmt.Sprintf("jail %s did not shut down within 1m5s (still running: 4021 sleep)", name))
 }
 
 // A forced stop is a stop with an event that names what still ran; the rest of the stop goes on.

@@ -14,7 +14,7 @@ import (
 // installingJail is a jail whose bash is being installed, in the given step, since the given time.
 func installingJail(step string, since time.Time) api.Jail {
 	return api.Jail{Status: api.JailStatus{Conditions: []api.Condition{{Type: "ShellSetup", Status: api.ConditionUnknown,
-		Reason: api.ShellInstalling, Since: since, Message: api.ShellInstallingMessage(step)}}}}
+		Reason: api.ShellInstalling, Since: since}}, ShellSetup: &api.ShellSetupStatus{State: api.ShellSetupInstalling, Step: step}}}
 }
 
 // The wait says what it waits for and how to leave, then shows the step and the seconds; off a terminal it adds a

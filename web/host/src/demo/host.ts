@@ -221,7 +221,7 @@ export function applyFirewall(st: FwState, want: HostFirewallSpec, dry: boolean,
   if (dry || !changed) return out
   const now = Date.now()
   const change: HostPendingChange = { id: Array.from({ length: 16 }, () => '0123456789abcdef'[Math.floor(Math.random() * 16)]).join(''), module: 'firewall', snapshot: snap,
-    created: new Date(now).toISOString(), deadline: new Date(now + within * 1000).toISOString(), seconds_left: within, confirm_within: within }
+    created: new Date(now).toISOString(), deadline: new Date(now + within * 1000).toISOString(), seconds_left: within, confirm_within_seconds: within }
   st.pending = { change, prev: st.spec, prevAt: st.appliedAt }
   st.spec = to
   st.appliedAt = new Date(now).toISOString()

@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -108,21 +109,23 @@ func (f *firstWrite) Write(p []byte) (int, error) {
 	return f.w.Write(p)
 }
 
-func (s *Server) handleImportPreflight(c *rc) error {
-	var in api.JailImportPreflight
-	if err := c.decode(&in); err != nil {
-		return err
-	}
-	pf, err := s.svc.ImportPreflight(c.r.Context(), in)
-	if err != nil {
-		return err
-	}
-	c.sync(200, pf, 0)
-	return nil
-}
-
+// handleImport makes a jail of the export file in the body. The file is read while the request lasts, so the request
+// waits for the operation and answers it finished (202, the operation's metadata is JailImported). With dry_run=true
+// the body is a JailImportPreflight (JSON) and the answer is the RestorePreflight, at once.
 func (s *Server) handleImport(c *rc) error {
 	q := c.r.URL.Query()
+	if queryBool(q, "dry_run") {
+		var in api.JailImportPreflight
+		if err := c.decode(&in); err != nil {
+			return err
+		}
+		pf, err := s.svc.ImportPreflight(c.r.Context(), in)
+		if err != nil {
+			return err
+		}
+		c.sync(200, pf, "")
+		return nil
+	}
 	req := api.JailImportRequest{As: q.Get("as"), KeepIP: queryBool(q, "keep_ip"), Start: queryBool(q, "start"),
 		NetworkMap: pairs(q["network_map"]), VolumeMap: pairs(q["volume_map"])}
 	ct := c.r.Header.Get("Content-Type")
@@ -132,15 +135,24 @@ func (s *Server) handleImport(c *rc) error {
 	ctl := http.NewResponseController(c.w)
 	body := &deadlineReader{r: c.r.Body, ctl: ctl, idle: importIdle}
 	c.object = "/api/v1/jail-imports"
-	j, warnings, err := s.svc.ImportJail(c.r.Context(), req, body)
+	op, err := s.svc.ImportJail(c.r.Context(), req, body)
 	if err != nil {
 		return err
 	}
-	c.object = "/api/v1/jails/" + j.Metadata.Name
-	c.detail = "import as " + j.Metadata.Name
-	c.w.Header().Set("Location", "/api/v1/jails/"+j.Metadata.Name)
-	c.sync(http.StatusCreated, api.JailImported{Jail: j, Warnings: warnings}, j.Metadata.Generation)
+	name := ""
+	if res, ok := importedOf(op); ok {
+		name = res.Jail.Metadata.Name
+	}
+	c.object = "/api/v1/jails/" + name
+	c.detail = "import as " + name
+	c.async(op)
 	return nil
+}
+
+func importedOf(op api.Operation) (api.JailImported, bool) {
+	var res api.JailImported
+	err := json.Unmarshal(op.Metadata, &res)
+	return res, err == nil
 }
 
 // pairs reads OLD=NEW values.

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { isHostDir, isLost, pathProblem } from './volumes'
 import type { Volume } from '@jailops/shared/api/types'
 
-const vol = (spec: Partial<Volume['spec']>, state?: string): Volume => ({ metadata: { name: 'v', scope: 'host' }, spec: { uid: 0, gid: 0, ...spec }, status: { used: 0, ...(state ? { state } : {}) } }) as Volume
+const vol = (spec: Partial<Volume['spec']>, state?: string): Volume => ({ metadata: { name: 'v', scope: 'host' }, spec: { uid: 0, gid: 0, ...spec }, status: { used_bytes: 0, ...(state ? { state } : {}) } }) as Volume
 
 describe('volumes of host directories', () => {
   it('knows a directory of the host and a lost mount', () => {

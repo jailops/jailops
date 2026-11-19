@@ -140,5 +140,8 @@ type Hooks interface {
 type Images interface {
 	Resolve(ctx context.Context, root, ref string) (api.ImageGeneration, error)
 	Ensure(ctx context.Context, root, ref string) (api.ImageGeneration, error)
+	// Peek looks for a generation on any pool and changes nothing: it does not build an image or receive a generation.
+	// A dry run uses it, so that asking what a move would do never moves an image.
+	Peek(ctx context.Context, ref string) (api.ImageGeneration, error)
 	Collect(ctx context.Context) ([]string, error)
 }

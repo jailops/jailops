@@ -83,13 +83,13 @@ why in the last column; an address the router never asked for does not appear.`,
 	watch := &cobra.Command{
 		Use:               "watch NETWORK",
 		Short:             "Print each question the proxy gets and its answer, live",
-		Long:              "Print each neighbor solicitation the proxy of the network gets, who asked for which address and what the proxy did with it, and each unsolicited announcement. It stays until Ctrl-C, or until --count events were printed.",
-		Example:           "jailops network ndp-proxy watch web\njailops network ndp-proxy watch web --count 5 -o json",
+		Long:              "Print each neighbor solicitation the proxy of the network gets, who asked for which address and what the proxy did with it, and each unsolicited announcement. It stays until Ctrl-C, or until --limit events were printed.",
+		Example:           "jailops network ndp-proxy watch web\njailops network ndp-proxy watch web --limit 5 -o json",
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, d),
 		RunE:              func(cmd *cobra.Command, args []string) error { return a.ndpWatch(cmd, d, args[0], count) },
 	}
-	watch.Flags().IntVar(&count, "count", 0, "stop after this many events")
+	watch.Flags().IntVar(&count, "limit", 0, "stop after this many events")
 	root.AddCommand(toggle("enable", true), toggle("disable", false), status, watch)
 	return root
 }

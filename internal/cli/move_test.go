@@ -36,8 +36,8 @@ func TestJailUpgradeImageMovesOneJailAndSeveral(t *testing.T) {
 		t.Fatalf("dry run moved the jail: %s", j.Spec.Image)
 	}
 	tr.ok("jail", "upgrade", "web", "--image", "freebsd-15-1")
-	if j, _ := h.srv.JailIn("main", "web"); j.Spec.Image != "freebsd-15-1" || j.Status.Generation != "g1" {
-		t.Fatalf("%s %s", j.Spec.Image, j.Status.Generation)
+	if j, _ := h.srv.JailIn("main", "web"); j.Spec.Image != "freebsd-15-1" || j.Status.ImageGeneration != "g1" {
+		t.Fatalf("%s %s", j.Spec.Image, j.Status.ImageGeneration)
 	}
 	// several jails: by name and by label, one request each, in order
 	tr.ok("jail", "create", "api", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--label", "env=prod")

@@ -146,8 +146,8 @@ func classify(pattern string) (api.Permission, string) {
 			return api.PermReadonly, scopeProject
 		case strings.HasSuffix(path, "/state"), strings.HasSuffix(path, "/snapshots"), strings.Contains(path, "/snapshots/"),
 			strings.HasSuffix(path, "/rollback"), strings.HasSuffix(path, "/upgrade"), strings.HasSuffix(path, "/config"), strings.HasSuffix(path, "/exec"),
-			strings.HasSuffix(path, "/access"), strings.HasSuffix(path, "/access/deny"),
-			strings.HasSuffix(path, "/unlock"), strings.HasSuffix(path, "/lock"), strings.HasSuffix(path, "/shell-setup"):
+			strings.HasSuffix(path, "/access/allow"), strings.HasSuffix(path, "/access/deny"),
+			strings.HasSuffix(path, "/unlock"), strings.HasSuffix(path, "/lock"), strings.HasSuffix(path, "/shell-setup"), strings.HasSuffix(path, "/repair-packages"):
 			return api.PermOperator, scopeProject
 		}
 		return api.PermAdmin, scopeProject

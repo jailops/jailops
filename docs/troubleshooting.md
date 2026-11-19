@@ -4,7 +4,9 @@ Start with `jailops doctor`. It prints one line per check, `ok`, `warn`, `fail` 
 example without FreeBSD), with a hint on the next line when there is one. `jailops explain CODE` explains an error code and
 `jailops explain` lists them. Errors print as `code: message` with a hint; the exit codes are 0 ok, 1 failure, 2 usage or invalid,
 3 auth, 4 not found, 5 conflict, 6 unsupported, 7 internal. `jailops firewall test` adds two: 0 the connection would pass, 9 it would be
-blocked, 8 the test cannot say.
+blocked, 8 the test cannot say. `jailops exec` returns the status of the command that ran in the jail, and 125 when
+JailOps itself failed before or while running it (a wrong invocation stays 2). With `-o json` or `-o yaml` an error is written to standard error as
+`{"error": {"code", "message", "hint", "detail"}}`: the code is an API error code, or `usage`, `aborted`, `cancelled`, `unavailable` or `error` for a failure of the CLI itself.
 
 ## `jailops doctor` checks
 
@@ -30,7 +32,7 @@ blocked, 8 the test cannot say.
 | `pf.anchors` | the anchor line is in the loaded ruleset | add it to `pf.conf` among the filter rules and `pfctl -f /etc/pf.conf` ([install.md](install.md)) |
 | `pf.order` | a `quick` pass before the `jailops` anchor | `warn`: such a rule passes its traffic for good so policies cannot filter it; move the anchor line before it |
 | `pf.inbound` | while a jail on an IPv6 or a non-NAT IPv4 network exists: a `block ... quick` rule for every source before the anchor line, or a hand-written `pass ... quick` rule for a jail prefix | `fail` for the block (it drops inbound traffic to the jails before their policies are asked: decide whether that is what the rule is for; to let the policies decide, move the anchor line above it; rules for single sources, such as a blocklist, are not flagged), `warn` for the pass (it keeps a jail without an `allow in` rule reachable: delete it; the jail's own `allow in` rules open the uplink, [install.md](install.md) section 3) |
-| `jails.cpuset` | the CPUs that jails are pinned to (`limits.cpuset`) exist on this host | no line when no jail has a cpuset; `ok` when every CPU exists; `warn` for a jail whose cpuset names a CPU the host does not have (it does not start; a profile written for a larger host does that); `jailops config set JAIL limits.cpuset 0-3` for the CPUs the host has |
+| `jails.cpuset` | the CPUs that jails are pinned to (`resources.cpuset`) exist on this host | no line when no jail has a cpuset; `ok` when every CPU exists; `warn` for a jail whose cpuset names a CPU the host does not have (it does not start; a profile written for a larger host does that); `jailops config set JAIL resources.cpuset 0-3` for the CPUs the host has |
 | `jails.exposed` | the jails whose anchor has a pass rule on an uplink | `info`: lists the jails the Internet can reach and their ports (a port forward, or an `allow in` rule with an external source), so the rules a project's administrator writes for his own jail are visible to the others |
 | `jails.inbound-without-source` | jails on a routed address with an `allow in` rule that names no source | `info`: such a rule is for the project's jails and the host and does not open the uplink; give it `--from any` or use `jailops expose JAIL PORTS` |
 | `pf.state-policy` | a loaded ruleset that blocks by default (a `block ... all` without `quick`) while a network has NAT or jails exist, against the `pf.conf` the system loads (`pf_rules` of `rc.conf`, else `/etc/pf.conf`; includes are not followed) | `warn` when it has no `set state-policy if-bound`: jails behind NAT lose packets (only the first of a flow passes). Add the line at the top of `pf.conf` and `pfctl -nf /etc/pf.conf && pfctl -f /etc/pf.conf`; never `service pf restart` over ssh. `unknown` when the daemon cannot read the file |
@@ -77,11 +79,11 @@ a stop and a start of the jail do it for that jail; `--fix` also destroys the br
 jail which runs uses. By hand: `mount -p | grep <jail>/root/` and `umount` the lines below the root, deepest
 first, once for every layer.
 
-**A stop of a jail whose shutdown never returns.** The stop commands of a jail (`/etc/rc.shutdown`) get its stop timeout (`boot.stop_timeout`, 30 seconds unless set), and the jail the same time
+**A stop of a jail whose shutdown never returns.** The stop commands of a jail (`/etc/rc.shutdown`) get its stop timeout (`boot.stop_timeout_seconds`, 30 seconds unless set), and the jail the same time
 again to exit after SIGTERM, with five seconds on top. After that the jail is removed without them, which kills what is left, and a
 `jail-stop-forced` event and the console log of the jail (`/var/log/jailops/jail_<project>_<name>_console.log`) say so and name the processes
 that still ran. A database that needs a minute to close
-says `jailops config set db boot.stop_timeout 60`.
+says `jailops config set db boot.stop_timeout_seconds 60`.
 
 **A jail cannot resolve names** ("Transient resolver failure" from `pkg`). `jailops network show NET` says where the jails of
 the network get their nameservers and `jailops doctor` (`network.dns`) checks the gateway case. On a host whose resolver
@@ -162,7 +164,7 @@ inside still holds a file open (`fstat -f /usr/local/jailops/projects/...`).
 jail, then `jailops jail upgrade` again.
 
 **`jailops jail convert` fails or says `busy`.** A failure puts the old layout back: the jail keeps its layout and runs, and the log of the
-operation says which step failed (often the disk limit: both roots count until the conversion ends, so raise `limits.disk` or
+operation says which step failed (often the disk limit: both roots count until the conversion ends, so raise `resources.disk` or
 free space, then convert again). `busy` means a `root.new` or `root.stale` is left by an interrupted operation: run
 an operation the daemon was interrupted in (it rolls those back when it starts: restart `jailopsd` and look at `jailops doctor`). A thick jail whose image generation was deleted needs `--image` to name one
 ([storage.md](storage.md#changing-the-layout-of-a-jail)).
@@ -187,12 +189,13 @@ for and the proxy never answered (`network.ndproxy`).
 | `invalid` | a field is missing, malformed or out of range | read the message, correct the field |
 | `not_found` | the object does not exist, or you may not see it | list the kind; check `--host`, `--remote`, `--project` and the spelling |
 | `already_exists` | that kind and name exist | pick another name or edit the existing one |
-| `conflict` | the object changed after you read it (HTTP 412), or another project holds the network | read it again and repeat |
+| `precondition_failed` | the object changed after you read it (HTTP 412), or another project holds the network | read it again and repeat |
 | `unauthorized` | no token, an expired or revoked one, an unknown certificate | `jailops remote list`, `jailops doctor`, a new token |
 | `forbidden` | the role or scope does not allow it, or the helper refused | ask for a higher role, or see `priv.conf` |
 | `unsupported` | the server lacks the feature or an API extension | `jailops server info` lists the extensions |
 | `busy` | another operation holds a lock, or the server is overloaded | `jailops op list`, retry |
 | `internal` | the server failed | retry once, then report the request id and read the server log |
+| `interrupted` | the daemon stopped while the operation ran; `error.detail.recovery` is `rolled_back`, `completed`, `dropped` or `needs_attention` | check the object, repeat the command; for `needs_attention` read `jailops doctor` |
 | `quota_exceeded` | a project quota (jails, CPU, memory, PIDs, addresses, storage) | `jailops project show NAME`; a global admin raises it |
 | `ip_conflict`, `pool_exhausted` | the address is taken or outside the range; the range is full | use `auto`; `jailops network leases NAME`; widen the range |
 | `image_in_use` | a jail still uses the image or generation (the error names the jails) | upgrade or delete those jails |
@@ -206,7 +209,7 @@ for and the proxy never answered (`network.ndproxy`).
 | `locked` | an encrypted volume of the jail waits for its passphrase (after a boot or a lock); the jail does not start | `jailops volume unlock NAME [--start]` ([storage.md](storage.md#encrypted-volumes)) |
 | `bad_passphrase` | the passphrase of the encrypted volumes is wrong (five in a row: `rate_limited` for 30 seconds) | type it again; a lost passphrase cannot be recovered |
 | `maintenance`, `missing_chunks`, `lease_expired`, `plaintext_denied` | backup node states | `jailops explain CODE` |
-| `not_leader`, `no_quorum`, `version_skew` | cluster and version states (cluster mode is not built) | `jailops explain CODE` |
+| `version_skew` | the client, hub and host run API versions too far apart | `jailops explain CODE` |
 
 ## Logs
 
@@ -216,7 +219,7 @@ daemon's own audit log, and `jailops op list` / `jailops events` show operations
 `jailopsd.yaml` for more.
 
 The logs of a jail itself are read with `jailops jail logs NAME` (the files below its `/var/log`, rotated copies included)
-and `jailops jail logs NAME FILE` (the last 200 lines; `--tail`, `--since 15m`, `--grep TEXT`, `-f` to follow, `-o json`
+and `jailops jail logs NAME FILE` (the last 200 lines; `--limit`, `--since 15m`, `--grep TEXT`, `-f` to follow, `-o json`
 for the server's reply), running or stopped, through the server: no shell in the jail is needed, the operator role is, and
 every read is audited. A stopped jail's root is mounted only while it runs, so its logs answer `busy: jail "x" is not mounted`
 with the dataset to `zfs mount` on the host. A compressed rotated copy (`messages.1.gz`) is listed but answers

@@ -72,7 +72,7 @@ type VolumeStatus struct {
 	Dataset    string `json:"dataset,omitempty"`
 	Mountpoint string `json:"mountpoint,omitempty"`
 	// Used is the space the volume (and its snapshots) take, in bytes.
-	Used int64 `json:"used"`
+	Used int64 `json:"used_bytes"`
 	// Locked is true for an encrypted volume whose key is not loaded.
 	Locked bool `json:"locked,omitempty"`
 	// State is "ok" or "lost" for a host-directory volume: whether its directory is on a mount now. Detail says why it
@@ -112,7 +112,7 @@ type VolumeSnapshotSpec struct {
 type VolumeSnapshotStatus struct {
 	// Written is the number of bytes written to the volume since the snapshot, which is what a rollback to it would
 	// discard.
-	Written int64 `json:"written,omitempty"`
+	Written int64 `json:"written_bytes,omitempty"`
 }
 
 // VolumeRollback is the body of POST /api/v1/volumes/{name}/rollback.

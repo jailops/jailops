@@ -31,7 +31,7 @@ func (a *AppsClient) Allow(ctx context.Context, jail string, req api.AppAllow) (
 	if err := a.c.need("app_access"); err != nil {
 		return api.AppAllowResult{}, err
 	}
-	v, _, err := send[api.AppAllowResult](ctx, a.c, request{method: http.MethodPost, path: "/api/v1/jails/" + esc(jail) + "/access", body: req})
+	v, _, err := send[api.AppAllowResult](ctx, a.c, request{method: http.MethodPost, path: "/api/v1/jails/" + esc(jail) + "/access/allow", body: req})
 	return v, err
 }
 

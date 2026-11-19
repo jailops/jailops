@@ -30,7 +30,7 @@ func TestEveryJailHasARoutedLinkOfItsOwn(t *testing.T) {
 	}
 	_, err := e.Admin.Projects().Create(c, api.Project{Metadata: api.ObjectMeta{Name: "p2"}, Spec: api.ProjectSpec{
 		Networks: []api.ProjectNetwork{{Network: "priv"}}}})
-	if !api.IsCode(err, api.CodeConflict) {
+	if !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Fatalf("a second project took the network: %v", err)
 	}
 	// A jail attaches with a link of its own.

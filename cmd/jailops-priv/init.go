@@ -374,7 +374,6 @@ func (o *initOptions) daemonYAML() string {
 		web = "web:\n  enabled: true\n"
 	}
 	return fmt.Sprintf(`# jailopsd.yaml, written by "jailops-priv init". See jailopsd.yaml in the packaging directory for every key.
-role: host
 pool: %s
 dataset: %s
 mount_base: %s

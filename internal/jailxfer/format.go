@@ -205,6 +205,7 @@ type Reader struct {
 	parts    int
 	open     *partReader
 	done     bool
+	fail     error // the first truncation or corruption met while reading
 }
 
 func readRecord(r io.Reader) (byte, []byte, error) { return sdk.ReadExportRecord(r) }
@@ -243,10 +244,26 @@ func NewReader(r io.Reader) (*Reader, error) {
 // Manifest is the manifest of the file.
 func (x *Reader) Manifest() api.ExportManifest { return x.manifest }
 
+// Fail is the first truncation or corruption the reader met, nil when there was none. A consumer that reads the stream
+// through another process (zfs receive) loses the error in that process's own failure: Fail still names the file.
+func (x *Reader) Fail() error { return x.fail }
+
+func (x *Reader) note(err error) error {
+	if x.fail == nil && (errors.Is(err, ErrTruncated) || errors.Is(err, ErrCorrupt)) {
+		x.fail = err
+	}
+	return err
+}
+
 // Next returns the next part and the reader of its stream, or io.EOF after the footer has been verified. The stream
 // has to be read to its end (or left: Next skips what is left) before Next is called again; reading the stream to
 // its end verifies the part's hash, and a mismatch is the error of the last Read.
 func (x *Reader) Next() (api.ExportPart, io.Reader, error) {
+	part, r, err := x.next()
+	return part, r, x.note(err)
+}
+
+func (x *Reader) next() (api.ExportPart, io.Reader, error) {
 	if x.done {
 		return api.ExportPart{}, nil, io.EOF
 	}
@@ -337,6 +354,11 @@ type partReader struct {
 }
 
 func (p *partReader) Read(b []byte) (int, error) {
+	n, err := p.read(b)
+	return n, p.x.note(err)
+}
+
+func (p *partReader) read(b []byte) (int, error) {
 	if p.fin {
 		return 0, io.EOF
 	}

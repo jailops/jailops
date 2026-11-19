@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
-	"strconv"
 	"strings"
 )
 
@@ -42,8 +41,6 @@ type kind[T any] struct {
 	visible func(rc *reqInfo, obj *T) bool
 	// listed narrows a list (not a get): the networks and storage of the selected project, unless ?all=true.
 	listed func(rc *reqInfo, all bool, obj *T) bool
-	// alias maps another way of naming an object (a fingerprint) to its name.
-	alias func(key string) string
 	// guard vets a write by the request's identity.
 	guard func(rc *reqInfo, obj *T, verb string) *api.Error
 	// intercept may answer a GET itself; it reports whether it did.
@@ -73,12 +70,6 @@ func (k *kind[T]) keyIn(project, name string) string {
 func (k *kind[T]) find(r *http.Request, name string) (string, *T) {
 	key := k.key(r, name)
 	o := k.items[key]
-	if o == nil && k.alias != nil {
-		if n := k.alias(name); n != "" {
-			key = k.keyIn(k.s.info(r).project, n)
-			o = k.items[key]
-		}
-	}
 	if o != nil && k.visible != nil && !k.visible(k.s.info(r), o) {
 		return key, nil
 	}
@@ -104,7 +95,7 @@ func clone[T any](v *T) T {
 	return out
 }
 
-func etagOf(gen int64) string { return `"` + strconv.FormatInt(gen, 10) + `"` }
+func etagOf(m *api.ObjectMeta) string { return api.ETag(m.UUID, m.Generation) }
 
 type reply struct {
 	status int
@@ -218,10 +209,10 @@ func (k *kind[T]) get(w http.ResponseWriter, r *http.Request) {
 	k.s.mu.Lock()
 	_, o := k.find(r, name)
 	var c T
-	var gen int64
+	var tag string
 	if o != nil {
 		c = clone(o)
-		gen = k.meta(o).Generation
+		tag = etagOf(k.meta(o))
 		if k.decorate != nil {
 			k.decorate(&c)
 		}
@@ -236,10 +227,10 @@ func (k *kind[T]) get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ex != nil {
-		k.s.respond(w, reply{status: 200, meta: ex, hdr: map[string]string{"ETag": etagOf(gen)}})
+		k.s.respond(w, reply{status: 200, meta: ex, hdr: map[string]string{"ETag": tag}})
 		return
 	}
-	k.s.respond(w, reply{status: 200, meta: c, hdr: map[string]string{"ETag": etagOf(gen)}})
+	k.s.respond(w, reply{status: 200, meta: c, hdr: map[string]string{"ETag": tag}})
 }
 
 func notFound(what, name string) *api.Error {
@@ -346,12 +337,12 @@ func (k *kind[T]) doCreate(r *http.Request, obj *T) reply {
 	if e != nil {
 		return reply{err: e}
 	}
-	return reply{status: 201, meta: res, hdr: map[string]string{"Location": k.base + "/" + name, "ETag": etagOf(k.meta(obj).Generation)}}
+	return reply{status: 201, meta: res, hdr: map[string]string{"Location": k.base + "/" + name, "ETag": etagOf(k.meta(obj))}}
 }
 
-func ifMatchOK(r *http.Request, gen int64) bool {
-	m, err := api.ParseIfMatch(r.Header.Get("If-Match"))
-	return err == nil && m.Matches(gen)
+func ifMatchOK(r *http.Request, m *api.ObjectMeta) bool {
+	im, err := api.ParseIfMatch(r.Header.Get("If-Match"))
+	return err == nil && im.Matches(etagOf(m))
 }
 
 func (k *kind[T]) put(w http.ResponseWriter, r *http.Request) {
@@ -411,8 +402,8 @@ func (k *kind[T]) replace(r *http.Request, name string, build func(old *T) (*T, 
 	}
 	om := k.meta(old)
 	name = om.Name
-	if !ifMatchOK(r, om.Generation) {
-		return reply{err: api.Errorf(api.CodeConflict, "%s %q changed: current generation is %d", k.action, name, om.Generation).
+	if !ifMatchOK(r, om) {
+		return reply{err: api.Errorf(api.CodePreconditionFailed, "%s %q changed: current generation is %d", k.action, name, om.Generation).
 			WithHint("read it again and re-apply your change")}
 	}
 	obj, e := build(old)
@@ -469,7 +460,7 @@ func (k *kind[T]) replace(r *http.Request, name string, build func(old *T) (*T, 
 	if k.decorate != nil {
 		k.decorate(&c)
 	}
-	return reply{status: 200, meta: c, hdr: map[string]string{"ETag": etagOf(k.meta(obj).Generation)}}
+	return reply{status: 200, meta: c, hdr: map[string]string{"ETag": etagOf(k.meta(obj))}}
 }
 
 func (k *kind[T]) del(w http.ResponseWriter, r *http.Request) {
@@ -483,8 +474,8 @@ func (k *kind[T]) del(w http.ResponseWriter, r *http.Request) {
 			return reply{err: notFound(k.action, name)}
 		}
 		name = k.meta(o).Name
-		if gen := k.meta(o).Generation; !ifMatchOK(r, gen) {
-			return reply{err: api.Errorf(api.CodeConflict, "%s %q changed: current generation is %d", k.action, name, gen).
+		if m := k.meta(o); !ifMatchOK(r, m) {
+			return reply{err: api.Errorf(api.CodePreconditionFailed, "%s %q changed: current generation is %d", k.action, name, m.Generation).
 				WithHint("read it again and repeat the delete")}
 		}
 		if k.guard != nil {

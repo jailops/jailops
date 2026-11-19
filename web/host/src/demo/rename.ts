@@ -78,7 +78,7 @@ export function demoRename(db: RenameDb, kind: DemoRenameKind, from: string, to:
   if (pool.some((x) => x.metadata.name === to)) return refuse(409, 'already_exists', `${n} "${to}" already exists`)
   const gen = obj.metadata.generation ?? 0
   const want = ifMatch?.replace(/^W\//, '').replace(/"/g, '').trim()
-  if (want && want !== '*' && Number(want) !== gen) return refuse(409, 'conflict', `${n} "${from}" changed: current generation is ${gen}`, 'read it again and repeat the rename', { generation: String(gen) })
+  if (want && want !== '*' && Number(want) !== gen) return refuse(409, 'precondition_failed', `${n} "${from}" changed: current generation is ${gen}`, 'read it again and repeat the rename', { generation: String(gen) })
   const managed = obj.metadata.managed_by
   if (managed) {
     return managed.startsWith('hub:')
@@ -126,7 +126,7 @@ export function demoRename(db: RenameDb, kind: DemoRenameKind, from: string, to:
       changes.push(ref(jailObject(j), `spec.image: ${j.spec.image} -> ${newRef(j.spec.image)}`))
       edits.push(() => {
         j.spec.image = newRef(j.spec.image)
-        if (j.status.generation && imgRef(j.status.generation)) j.status.generation = newRef(j.status.generation)
+        if (j.status.image_generation && imgRef(j.status.image_generation)) j.status.image_generation = newRef(j.status.image_generation)
       })
     }
     changes.push({ kind: 'dataset', object: `dataset tank/jailops/images/${from}`, detail: `renamed to tank/jailops/images/${to}` })
@@ -170,7 +170,7 @@ export function demoRename(db: RenameDb, kind: DemoRenameKind, from: string, to:
     changes.push({ kind: 'anchor', object: `PF anchor jailops/${project}/${from}`, detail: `loaded as jailops/${project}/${to}` })
     if (db.history[from]?.length) changes.push({ kind: 'state', object: `update history of jail ${from}`, detail: `${from}.json -> ${to}.json` })
     if (!j.spec.hostname) warnings.push(`the jail has no hostname of its own: it is "${to}" from its next start`)
-    else if (j.spec.hostname === from) warnings.push(`the hostname of the jail stays "${from}"; \`jailops set ${to} hostname=${to}\` changes it`)
+    else if (j.spec.hostname === from) warnings.push(`the hostname of the jail stays "${from}"; \`jailops config set ${to} hostname=${to}\` changes it`)
     edits.push(() => {
       for (const ls of Object.values(db.leases)) for (const l of ls) if (l.jail === from) l.jail = to
       if (db.snaps[from]) { db.snaps[to] = db.snaps[from].map((x) => ({ ...x, spec: { ...x.spec, jail: to } })); delete db.snaps[from] }

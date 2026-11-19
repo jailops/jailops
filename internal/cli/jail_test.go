@@ -50,7 +50,7 @@ func TestJailLifecycle(t *testing.T) {
 	tr.ok("jail", "create", "web", "--image", "freebsd-15", "--storage", "default", "--network", "lan", "--memory", "2G", "--label", "env=prod", "--autostart")
 	tr.ok("volume", "create", "data", "--storage", "default")
 	tr.ok("jail", "create", "db", "--image", "freebsd-15", "--storage", "default", "--network", "lan", "--env", "A=1")
-	tr.ok("volume", "attach", "db", "data", "/srv/data", "--ro")
+	tr.ok("volume", "attach", "db", "data", "/srv/data", "--read-only")
 	tr.ok("jail", "list")
 	tr.ok("jail", "start", "web")
 	tr.ok("jail", "list")
@@ -58,7 +58,7 @@ func TestJailLifecycle(t *testing.T) {
 	tr.ok("jail", "list", "-l", "env=prod", "--no-headers")
 	tr.ok("jail", "list", "--network", "other")
 	tr.ok("jail", "show", "web")
-	tr.ok("jail", "restart", "web", "--grace", "5")
+	tr.ok("jail", "restart", "web", "--timeout", "5")
 	tr.ok("jail", "stop", "web", "--force")
 	tr.do("", "jail", "delete", "-y", "db") // data loss: -y does not answer it
 	tr.do("web\n", "jail", "delete", "db")  // the wrong name
@@ -164,33 +164,33 @@ func TestJailRollbackConfirmation(t *testing.T) {
 	}
 
 	// No answer available: refuses and exits with the usage code.
-	_, errs, code := tr.do("", "jail", "rollback", "web", "--data", "--snapshot", "good")
+	_, errs, code := tr.do("", "jail", "rollback", "web", "--scope", "data", "--snapshot", "good")
 	if code != 2 || rolled() || !strings.Contains(errs, "--confirm-data-loss") {
 		t.Fatalf("no answer: code %d rolled %v: %s", code, rolled(), errs)
 	}
 	// -y never satisfies data loss.
-	_, _, code = tr.do("", "jail", "rollback", "web", "--data", "--snapshot", "good", "-y")
+	_, _, code = tr.do("", "jail", "rollback", "web", "--scope", "data", "--snapshot", "good", "-y")
 	if code != 2 || rolled() {
 		t.Fatalf("-y: code %d rolled %v", code, rolled())
 	}
 	// A wrong name aborts.
-	_, errs, code = tr.do("nope\n", "jail", "rollback", "web", "--data", "--snapshot", "good")
+	_, errs, code = tr.do("nope\n", "jail", "rollback", "web", "--scope", "data", "--snapshot", "good")
 	if code != 1 || rolled() || !strings.Contains(errs, "aborted") {
 		t.Fatalf("wrong name: code %d rolled %v: %s", code, rolled(), errs)
 	}
 	// Dry run shows the bytes and sends nothing.
-	out, _, code := tr.do("", "jail", "rollback", "web", "--data", "--snapshot", "good", "--dry-run")
+	out, _, code := tr.do("", "jail", "rollback", "web", "--scope", "data", "--snapshot", "good", "--dry-run")
 	if code != 0 || rolled() || !strings.Contains(out, "1.5 MiB written") {
 		t.Fatalf("dry-run: %d %v %s", code, rolled(), out)
 	}
-	// Mixed scopes are a usage error.
-	_, _, code = tr.do("", "jail", "rollback", "web", "--data", "--all")
+	// An unknown scope is a usage error.
+	_, _, code = tr.do("", "jail", "rollback", "web", "--scope", "both")
 	if code != 2 {
 		t.Fatalf("scopes: %d", code)
 	}
 	// Typing the name proceeds; the latest snapshot is used by default and
 	// the request carries the confirmation.
-	out, _, code = tr.do("web\n", "jail", "rollback", "web", "--data")
+	out, _, code = tr.do("web\n", "jail", "rollback", "web", "--scope", "data")
 	if code != 0 || !rolled() {
 		t.Fatalf("typed: %d %v %s", code, rolled(), out)
 	}
@@ -203,7 +203,7 @@ func TestJailRollbackConfirmation(t *testing.T) {
 	}
 	// The flag proceeds without a prompt.
 	h.srv.SetSnapshotWritten("main", "web", "good", 2048)
-	out, _, code = tr.do("", "jail", "rollback", "web", "--all", "--snapshot", "good", "--confirm-data-loss")
+	out, _, code = tr.do("", "jail", "rollback", "web", "--scope", "all", "--snapshot", "good", "--confirm-data-loss")
 	if code != 0 || !strings.Contains(out, "2.0 KiB written") {
 		t.Fatalf("flag: %d %s", code, out)
 	}
@@ -214,7 +214,7 @@ func TestJailRollbackConfirmation(t *testing.T) {
 	}
 	h.srv.SeedGeneration("freebsd-15")
 	tr.ok("jail", "upgrade", "web")
-	tr.ok("jail", "rollback", "web", "--root")
+	tr.ok("jail", "rollback", "web", "--scope", "root")
 	tr.golden("jail_rollback")
 }
 
@@ -226,7 +226,7 @@ func TestJailUpgrade(t *testing.T) {
 	tr.ok("jail", "create", "web", "--image", "freebsd-15#g1", "--network", "lan", "--storage", "default")
 	before := len(h.mutations())
 	tr.ok("jail", "upgrade", "web", "--dry-run")
-	if j, _ := h.srv.JailIn("main", "web"); j.Status.Generation != "g1" {
+	if j, _ := h.srv.JailIn("main", "web"); j.Status.ImageGeneration != "g1" {
 		t.Fatalf("dry-run upgraded the jail: %+v", j.Status)
 	}
 	var up api.JailUpgrade
@@ -329,7 +329,7 @@ while [ ! -f %s ]; do sleep 0.02; done
 	h.srv.Touch("main", "web")
 	_ = os.WriteFile(gate, nil, 0o600)
 	r := <-done
-	if r.code != 5 || !strings.HasPrefix(r.errs, "conflict:") || !strings.Contains(r.errs, "hint: someone changed the jail") {
+	if r.code != 5 || !strings.HasPrefix(r.errs, "precondition_failed:") || !strings.Contains(r.errs, "hint: someone changed the jail") {
 		t.Fatalf("conflict: %d %q", r.code, r.errs)
 	}
 	if j, _ := h.srv.JailIn("main", "web"); j.Spec.Hostname != "web" {
@@ -354,7 +354,7 @@ func TestDryRunSendsNothing(t *testing.T) {
 		{"jail", "delete", "-y", "web"},
 		{"jail", "snapshot", "create", "web", "s2"},
 		{"jail", "snapshot", "delete", "-y", "web", "s1"},
-		{"jail", "rollback", "web", "--all", "--snapshot", "s1"},
+		{"jail", "rollback", "web", "--scope", "all", "--snapshot", "s1"},
 		{"jail", "copy", "web", "w2"},
 		{"network", "create", "n2", "--subnet", "10.1.0.0/24", "--gateway", "10.1.0.1", "--range", "10.1.0.5-10.1.0.9"},
 		{"network", "delete", "-y", "lan"},
@@ -402,7 +402,7 @@ func TestOperationsNoWaitAndWait(t *testing.T) {
 	tr.ok("jail", "create", "w2", "--image", "freebsd-15", "--network", "lan", "--storage", "default", "--no-wait")
 	// A timeout leaves the operation running and says how to follow it.
 	h.srv.SetOperationDelay(2 * time.Second)
-	_, errs, code := tr.do("", "jail", "start", "web", "--timeout", "100ms")
+	_, errs, code := tr.do("", "jail", "start", "web", "--wait-timeout", "100ms")
 	if code != 1 || !strings.Contains(errs, "timed out") || !strings.Contains(errs, "jailops op wait") {
 		t.Fatalf("timeout: %d %s", code, errs)
 	}

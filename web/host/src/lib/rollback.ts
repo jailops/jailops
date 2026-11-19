@@ -12,7 +12,7 @@ export function canSubmit(scope: RollbackScope, typed: string, jail: string, sna
 
 /** Bytes a rollback of this scope would throw away. Root rollbacks keep data. */
 export function bytesAtStake(scope: RollbackScope, snap: JailSnapshot | undefined): number {
-  return needsConfirm(scope) ? (snap?.status.written ?? 0) : 0
+  return needsConfirm(scope) ? (snap?.status.written_bytes ?? 0) : 0
 }
 
 export function request(scope: RollbackScope, snapshot: string | undefined): JailRollback {

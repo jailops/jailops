@@ -320,7 +320,7 @@ func (m *certManager) Status(context.Context) api.HostCertificate {
 
 func (m *certManager) writable() error {
 	if m.configured {
-		return api.Errorf(api.CodeConflict, "jailopsd.yaml names the certificate files (listen.https.cert and key): the console cannot change them").
+		return api.Errorf(api.CodePreconditionFailed, "jailopsd.yaml names the certificate files (listen.https.cert and key): the console cannot change them").
 			WithHint("remove listen.https.cert and key from /usr/local/etc/jailops/jailopsd.yaml and restart jailopsd to choose the certificate here")
 	}
 	if m.https == "" {

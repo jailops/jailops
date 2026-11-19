@@ -21,6 +21,7 @@ ObjectMeta.project string optional
 ObjectMeta.scope api.Scope optional
 ObjectMeta.updated_at time.Time optional
 ObjectMeta.uuid string optional
+Operation.action api.OperationAction optional
 Operation.created_at time.Time
 Operation.description string
 Operation.error *api.Error optional

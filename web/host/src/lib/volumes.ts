@@ -4,7 +4,7 @@ import type { Volume } from '@jailops/shared/api/types'
 
 /** What deleting a volume destroys, one line each: its files and its snapshots. */
 export function volumeLoss(v: Volume, snapshots: number): string[] {
-  const out = [s.volumes.filesItem(v.metadata.name, bytes(v.status?.used ?? 0))]
+  const out = [s.volumes.filesItem(v.metadata.name, bytes(v.status?.used_bytes ?? 0))]
   if (snapshots) out.push(s.volumes.snapshotsItem(`${snapshots} snapshot${snapshots === 1 ? '' : 's'}`))
   return out
 }

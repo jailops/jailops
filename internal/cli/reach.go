@@ -153,7 +153,7 @@ func (a *app) printReachOut(w io.Writer, o api.ReachOut) {
 func (a *app) firewallShow() *cobra.Command {
 	var rules, pf bool
 	cmd := &cobra.Command{
-		Use:   "show JAIL [--all] [--pf]",
+		Use:   "show JAIL [--lines] [--pf]",
 		Short: "Show what reaches a jail, what it reaches, and why",
 		Long: `Show what can reach a jail and what the jail can reach, computed from the anchor JailOps loads
 for it: the Internet over IPv4 and IPv6, WireGuard tunnels, the other jails of the project, the
@@ -161,11 +161,11 @@ host and other projects. Every row names the policy rule that gives the reach, o
 
 An IPv4 jail address is private (NAT): the Internet reaches it through a forward of a port of the
 host. An IPv6 address is routed: it is reached by an allow in rule with an external source.
---all lists every line of the anchor in the order pf decides (the first match wins); --pf adds the
+--lines lists every line of the anchor in the order pf decides (the first match wins); --pf adds the
 rendered pf text of each. What the computation cannot know (a raw PF fragment, the host's own pf.conf)
 is listed below the table.`,
 		Example: `jailops firewall show web
-jailops firewall show web --all
+jailops firewall show web --lines
 jailops firewall show web -o json`,
 		Args:              cobra.ExactArgs(1),
 		ValidArgsFunction: completeKind(a, a.jailDesc()),
@@ -194,7 +194,7 @@ jailops firewall show web -o json`,
 				fprintf(w, "\nRules, in the order pf decides (default in: %s)\n", defaultText(r.DefaultIn, r.DefaultInBy))
 				var out [][]string
 				for i, ru := range r.Rules {
-					row := []string{fmt.Sprint(i + 1), ru.Where, ru.Direction, dash(ru.Family), dash(ru.From), dash(ru.To), dash(ru.Proto), portsText(ru.Ports), ru.Decision, ru.By}
+					row := []string{fmt.Sprint(i + 1), ru.Where, ru.Direction, dash(ru.Family), dash(ru.From), dash(ru.To), dash(ru.Proto), portsText(ru.Ports), string(ru.Decision), ru.By}
 					if pf {
 						row = append(row, ru.PF)
 					}
@@ -215,8 +215,8 @@ jailops firewall show web -o json`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&rules, "all", false, "also list every line of the anchor in the order pf decides")
-	cmd.Flags().BoolVar(&pf, "pf", false, "also show the rendered pf text of each line (implies --all)")
+	cmd.Flags().BoolVar(&rules, "lines", false, "also list every line of the anchor in the order pf decides")
+	cmd.Flags().BoolVar(&pf, "pf", false, "also show the rendered pf text of each line (implies --lines)")
 	return cmd
 }
 

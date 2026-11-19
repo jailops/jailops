@@ -1,19 +1,19 @@
-$ jailops events --since-id 0 --type lifecycle --count 3
+$ jailops events --since-id 0 --type lifecycle --limit 3
 09:00:00  lifecycle jail-created /api/v1/jails/web by fake
 09:00:00  lifecycle jail-created /api/v1/jails/db by fake
 09:00:00  lifecycle jail-started /api/v1/jails/web by fake
 
-$ jailops events --since-id 0 --type lifecycle --jail web --count 2 -o json
+$ jailops events --since-id 0 --type lifecycle --jail web --limit 2 -o json
 {"type":"lifecycle","timestamp":"2026-03-01T09:00:00Z","host":"<uuid>","metadata":{"action":"jail-created","source":"/api/v1/jails/web","requestor":"fake","project":"main"}}
 {"type":"lifecycle","timestamp":"2026-03-01T09:00:00Z","host":"<uuid>","metadata":{"action":"jail-started","source":"/api/v1/jails/web","requestor":"fake","project":"main"}}
 
-$ jailops events --since-id 0 --type lifecycle --count 1 -o name
+$ jailops events --since-id 0 --type lifecycle --limit 1 -o name
 /api/v1/jails/web
 
-$ jailops events --since-id 0 --type operation --count 1
+$ jailops events --since-id 0 --type operation --limit 1
 09:00:00  operation <uuid> pending Creating jail web
 
-$ jailops events --since-id 0 --type lifecycle --count 1 -o yaml
+$ jailops events --since-id 0 --type lifecycle --limit 1 -o yaml
 ---
 type: lifecycle
 timestamp: "2026-03-01T09:00:00Z"

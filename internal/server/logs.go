@@ -15,7 +15,7 @@ func (s *Server) logRoutes() []route {
 		if err != nil {
 			return err
 		}
-		c.sync(200, v, v.Status.Generation)
+		c.sync(200, v, svc.LogForwardETag())
 		return nil
 	}
 	return []route{
@@ -32,7 +32,7 @@ func (s *Server) logRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		{method: "GET", pattern: "/api/v1/logs/forward", h: func(c *rc) error {
@@ -75,7 +75,7 @@ func (s *Server) logRoutes() []route {
 			if !v.OK {
 				c.detail += " failed"
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 	}

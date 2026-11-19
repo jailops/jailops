@@ -52,7 +52,7 @@ func (j *JailClient) Patch(ctx context.Context, name string, patch any, etag str
 
 // Create creates a jail; the operation's result is the created jail.
 func (j *JailClient) Create(ctx context.Context, jail api.Jail) (*Operation[api.Jail], error) {
-	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.path, body: jail},
+	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.path, body: jail, header: idempotencyHeader(ctx)},
 		func(ctx context.Context) (api.Jail, error) { return j.Get(ctx, jail.Metadata.Name) })
 	return op, err
 }
@@ -60,6 +60,17 @@ func (j *JailClient) Create(ctx context.Context, jail api.Jail) (*Operation[api.
 // Delete deletes a jail.
 func (j *JailClient) Delete(ctx context.Context, name string) (*Operation[None], error) {
 	op, _, err := sendOp[None](ctx, j.c, request{method: http.MethodDelete, path: j.r.item(name)}, nil)
+	return op, err
+}
+
+// DeleteETag deletes a jail only if it is still the one the ETag names (read with GetETag): a changed jail fails with
+// api.CodePreconditionFailed. An empty etag deletes whatever is there.
+func (j *JailClient) DeleteETag(ctx context.Context, name, etag string) (*Operation[None], error) {
+	h := http.Header{}
+	if etag != "" {
+		h.Set("If-Match", quoteETag(etag))
+	}
+	op, _, err := sendOp[None](ctx, j.c, request{method: http.MethodDelete, path: j.r.item(name), header: h}, nil)
 	return op, err
 }
 
@@ -165,7 +176,9 @@ func (j *JailClient) AppDraft(ctx context.Context, name string) (api.AppDraft, e
 type ActionOption func(*api.JailAction)
 
 // ActionTimeout sets the action timeout in seconds.
-func ActionTimeout(seconds int) ActionOption { return func(a *api.JailAction) { a.Timeout = seconds } }
+func ActionTimeout(seconds int) ActionOption {
+	return func(a *api.JailAction) { a.TimeoutSeconds = seconds }
+}
 
 // Force forces the action.
 func Force() ActionOption { return func(a *api.JailAction) { a.Force = true } }
@@ -202,6 +215,22 @@ func (j *JailClient) Rollback(ctx context.Context, name string, rb api.JailRollb
 	}
 	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/rollback", body: rb},
 		func(ctx context.Context) (api.Jail, error) { return j.Get(ctx, name) })
+	return op, err
+}
+
+// Copy makes a copy of a jail with its data under a new name (extension jail_copy): the operation's result is the new
+// jail. The source may be running; req.Snapshot copies an earlier snapshot instead of the present state.
+func (j *JailClient) Copy(ctx context.Context, name string, req api.JailCopy) (*Operation[api.Jail], error) {
+	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/copy", body: req},
+		func(ctx context.Context) (api.Jail, error) { return j.Get(ctx, req.Name) })
+	return op, err
+}
+
+// Convert changes the layout of a jail's root (extension jail_convert): thin to thick, or thick to thin on an image
+// generation. With DryRun the result is the plan and nothing changes.
+func (j *JailClient) Convert(ctx context.Context, name string, req api.JailConvert) (*Operation[api.JailConvertResult], error) {
+	op, _, err := sendOp(ctx, j.c, request{method: http.MethodPost, path: j.r.item(name) + "/convert", body: req},
+		func(ctx context.Context) (api.JailConvertResult, error) { return api.JailConvertResult{}, nil })
 	return op, err
 }
 

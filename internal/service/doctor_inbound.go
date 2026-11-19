@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"fmt"
-	"jailops.net/jailops/internal/validate"
 	"net/netip"
 	"slices"
 	"strings"
@@ -320,26 +319,4 @@ func exposedSummary(es []api.ExposedEntry) string {
 		parts = append(parts, p)
 	}
 	return strings.Join(parts, ", ")
-}
-
-// doctorInPlaceThinJails warns about thin FreeBSD jails stored with the update strategy inplace (a strategy that was
-// accepted for them before and is refused now): they stay as they are and updatable, and a thin jail moves to a newer
-// generation of its image.
-func (s *Service) doctorInPlaceThinJails(c *checkSet) {
-	const name = "jails.update"
-	var out []string
-	s.mu.RLock()
-	for _, k := range sortedKeys(s.jails) {
-		j := s.jails[k].jail
-		if validate.UpdateStrategyFits(j.Spec) != nil {
-			out = append(out, j.Metadata.Project+"/"+j.Metadata.Name)
-		}
-	}
-	s.mu.RUnlock()
-	if len(out) == 0 {
-		c.add(name, api.DoctorOK, "no thin jail has the update strategy inplace", "")
-		return
-	}
-	c.add(name, api.DoctorWarn, fmt.Sprintf("%d thin jail(s) have the update strategy inplace, which a thin jail does not support: %s", len(out), strings.Join(out, ", ")),
-		"set rebase: jailops jail set JAIL --update-strategy rebase (a thin jail moves to a newer generation of its image)")
 }

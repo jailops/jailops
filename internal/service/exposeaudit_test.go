@@ -60,7 +60,7 @@ func TestAProfileEditDoesNotLetAForwardOfAHostPortThrough(t *testing.T) {
 	seedJail(t, s, "web")
 	admin := as(globalAdmin, dtest.SeedProject)
 	project := as(alphaOnly, dtest.SeedProject)
-	if _, err := s.CreateProfile(admin, api.Profile{Metadata: api.ObjectMeta{Name: "pub"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.pids": "300"}}}); err != nil {
+	if _, err := s.CreateProfile(admin, api.Profile{Metadata: api.ObjectMeta{Name: "pub"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.pids": "300"}}}); err != nil {
 		t.Fatal(err)
 	}
 	j, _ := s.GetJail(admin, "web")
@@ -71,7 +71,7 @@ func TestAProfileEditDoesNotLetAForwardOfAHostPortThrough(t *testing.T) {
 	}
 	natLan(t, s) // the network gets NAT: the entry is now a forward of host port 22
 	p, _ := s.GetProfile(project, "pub")
-	p.Spec.Config["limits.pids"] = "400"
+	p.Spec.Config["resources.pids"] = "400"
 	_, err := s.UpdateProfile(project, "pub", p, p.Metadata.Generation)
 	if err == nil || !strings.Contains(err.Error(), "ssh") {
 		t.Fatalf("a profile edit let a forward of host port 22 stand: %v", err)

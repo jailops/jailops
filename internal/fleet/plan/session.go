@@ -44,5 +44,18 @@ func (s *Session) Client(ctx context.Context, host string) (*sdk.Client, error) 
 	return c, nil
 }
 
+// HostUUID returns the identity the host answers with now (the host_uuid of its server info).
+func (s *Session) HostUUID(ctx context.Context, host string) (string, error) {
+	c, err := s.Client(ctx, host)
+	if err != nil {
+		return "", err
+	}
+	info, err := c.Info(ctx)
+	if err != nil {
+		return "", fmt.Errorf("host %s: %w", host, err)
+	}
+	return info.HostUUID, nil
+}
+
 // Close releases every connection.
 func (s *Session) Close() { s.Conn.Close() }

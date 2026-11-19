@@ -59,7 +59,7 @@ const from = (x: ReachRow): string => (x.restricted && x.from?.length ? x.from.j
     <div class="body stack">
       <Callout v-if="applied" :tone="applied.status === 'True' ? 'ok' : 'warn'" data-test="firewall-applied" :data-status="applied.status">
         <strong>{{ s.reach.applied }}</strong>
-        {{ applied.status === 'True' ? s.reach.appliedYes(applied.message ?? '') : s.reach.appliedNo(applied.reason ?? '', applied.message ?? '') }}
+        {{ applied.status === 'True' ? s.reach.appliedYes(applied.message ?? '') : applied.status === 'Unknown' ? s.reach.appliedUnknown(applied.reason ?? '', applied.message ?? '') : s.reach.appliedNo(applied.reason ?? '', applied.message ?? '') }}
       </Callout>
       <JailPolicies v-if="r && !r.error" :jail="jail.metadata.name" :policies="r.policies ?? []" @changed="reload" />
       <p class="muted">{{ s.reach.lead }}</p>

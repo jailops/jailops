@@ -6,7 +6,7 @@ import type {
   Jail, JailAction, JailRollback, JailUpgrade, JailCopy, JailConvert, JailConvertResult, JailSnapshot, Image, ImageAutoUpgrade, ImageBuild, ImageUpgrade, Network, Lease,
   FirewallPolicy, AddressSet, FirewallTestRequest, FirewallTestResult, BackupTarget, BackupPolicy, Backup, RestoreRequest, RestorePreflight,
   Certificate, User, UserCreate, UserCreated, PasswordSet, Remote, Operation, AuditEntry, MutationResult, PoolUsage, DoctorReport, NDPStatus, Token,
-  Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, ProvisionResult, ShellSetupResult,
+  Profile, JailExpanded, ConfigChange, UpdateReport, UpdateRecord, UpdateCheckRequest, UpdateApplyRequest, ProvisionRequest, RepairPackagesResult, ProvisionResult, ShellSetupResult,
   BackupRun, BackupRunRequest, BackupVerifyRequest, BackupKeyStatus, BackupKeyCreate, BackupKeyCreated, BackupKeyEscrow, BackupKeyImport, BackupKeyImported, ExecRequest,
   Project, ProjectAggregate, Storage, TrustTokenRequest, TrustToken, Session, Identity,
   JailReach, JailDiff, JailImportPreflight, JailImportRequest, JailImported, Exposed, ExposeRequest, ExposeResult, UnexposeRequest, AppSummary, AppDetail, AppInstall, AppInstallResult, JailLogFile, JailLogRead,
@@ -33,7 +33,7 @@ interface ListScope { project?: string; all?: boolean }
 const listQuery = ({ project, all }: ListScope): string => {
   const q = new URLSearchParams()
   if (project) q.set('project', project)
-  if (all) q.set('all', 'true')
+  if (all) q.set('all_projects', 'true')
   const s = q.toString()
   return s ? `?${s}` : ''
 }
@@ -72,7 +72,7 @@ export const api = {
     /** Extension jail_copy: a copy with the data of the source, which may run (async, result the new jail). */
     /** Extension jail_convert: the layout of the root changes; with dry_run the result is the plan (async, result JailConvertResult). */
     convert: (n: string, b: JailConvert) => c().mutate<JailConvertResult>('POST', `/jails/${e(n)}/convert`, b),
-    copy: (n: string, b: JailCopy) => c().mutate<Jail>('POST', `/jails/${e(n)}`, b),
+    copy: (n: string, b: JailCopy) => c().mutate<Jail>('POST', `/jails/${e(n)}/copy`, b),
   },
   /** Extension volumes: the volumes of the current project; jails attach them by name. */
   volumes: {
@@ -160,11 +160,11 @@ export const api = {
     },
     /** What an import of a file with this manifest would do on this host and project (admin in the project; reads only). */
     preflight: async (b: JailImportPreflight): Promise<RestorePreflight> => {
-      const r = await c().mutate<RestorePreflight>('POST', '/jail-imports/preflight', b)
+      const r = await c().mutate<RestorePreflight>('POST', '/jail-imports?dry_run=true', b)
       if (r.kind !== 'sync') throw new Error('the preflight of an import is answered at once')
       return r.data
     },
-    /** Makes a jail of the file (admin in the project); the file is sent as the browser reads it and the reply comes when the jail is made. */
+    /** Makes a jail of the file (admin in the project); the file is sent as the browser reads it and the reply, a finished operation, comes when the jail is made. */
     import: (file: Blob, o: JailImportRequest = {}) => {
       const q = new URLSearchParams()
       if (o.as) q.set('as', o.as)
@@ -180,7 +180,7 @@ export const api = {
     /** Extension app_access: who may connect to an installed app (readonly in the project). */
     get: (n: string) => c().get<AppAccess>(`/jails/${e(n)}/access`),
     /** Operator in the project; answered at once, not as an operation: a connection string is in this answer only. */
-    allow: (n: string, b: AppAllow) => c().mutate<AppAllowResult>('POST', `/jails/${e(n)}/access`, b),
+    allow: (n: string, b: AppAllow) => c().mutate<AppAllowResult>('POST', `/jails/${e(n)}/access/allow`, b),
     deny: (n: string, b: AppDeny) => c().mutate<AppDenyResult>('POST', `/jails/${e(n)}/access/deny`, b),
   },
   logs: {
@@ -321,6 +321,10 @@ export const api = {
   /** bash and the JailOps prompt for a running FreeBSD jail, as a new jail gets them (extension jail_shell_setup). */
   shellSetup: {
     run: (n: string) => c().mutate<ShellSetupResult>('POST', `/jails/${e(n)}/shell-setup`, {}),
+  },
+  /** The base package records of a thin jail brought in step with its image (extension jail_repair_packages). */
+  repairPackages: {
+    run: (n: string) => c().mutate<RepairPackagesResult>('POST', `/jails/${e(n)}/repair-packages`, {}),
   },
   /** The project filter lives with the client: composables use this and never touch the network. */
   setProjectFilter: (fn: ((path: string) => string) | null) => c().setRequestFilter(fn),

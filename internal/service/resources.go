@@ -192,8 +192,11 @@ func (k kindStore[S]) update(ctx context.Context, name string, expect int64, lab
 		}
 		return object[S]{}, internal(err)
 	}
+	if err := checkIncarnation(ctx, k.action, name, old.Metadata.UUID); err != nil {
+		return object[S]{}, err
+	}
 	if expect != AnyGeneration && expect != old.Metadata.Generation {
-		return object[S]{}, api.Errorf(api.CodeConflict, "%s %q changed: current generation is %d", k.action, name, old.Metadata.Generation).
+		return object[S]{}, api.Errorf(api.CodePreconditionFailed, "%s %q changed: current generation is %d", k.action, name, old.Metadata.Generation).
 			WithHint("read it again and re-apply your change").WithDetail("generation", itoa64(old.Metadata.Generation))
 	}
 	if err := api.CheckComment(spec); err != nil {
@@ -236,8 +239,11 @@ func (k kindStore[S]) delete(ctx context.Context, name string, expect int64) err
 		}
 		return internal(err)
 	}
+	if err := checkIncarnation(ctx, k.action, name, old.Metadata.UUID); err != nil {
+		return err
+	}
 	if expect != AnyGeneration && expect != old.Metadata.Generation {
-		return api.Errorf(api.CodeConflict, "%s %q changed: current generation is %d", k.action, name, old.Metadata.Generation)
+		return api.Errorf(api.CodePreconditionFailed, "%s %q changed: current generation is %d", k.action, name, old.Metadata.Generation)
 	}
 	_, err = k.s.d.State.Apply(state.Command{
 		Version: state.CommandVersion, ID: state.NewUUID(), Time: k.s.now().UTC(), Op: state.OpDelete,

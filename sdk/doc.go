@@ -19,7 +19,7 @@
 //     async (HTTP 202, operation URL, the operation in metadata) or error.
 //   - Lists return metadata as a JSON array of full objects; filters are
 //     ?label=k=v (repeatable). Items live at /api/v1/<resource>/<name>. GET
-//     returns an ETag (the quoted generation); PUT replaces and takes
+//     returns an ETag (opaque: the UUID and the generation); PUT replaces and takes
 //     If-Match; PATCH applies a JSON merge patch.
 //   - Hub forwarding uses the query parameter ?host=<uuid-or-name> on any
 //     path, including /api/v1/events.

@@ -138,7 +138,7 @@ func (s *Service) PatchRemote(ctx context.Context, name string, patch map[string
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "remote %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "remote %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.Remote
 	if err := MergePatch(cur, patch, &out); err != nil {
@@ -313,7 +313,7 @@ func (s *Service) PatchTarget(ctx context.Context, name string, patch map[string
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "backup-target %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "backup-target %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.BackupTarget
 	if err := MergePatch(cur, patch, &out); err != nil {
@@ -450,7 +450,7 @@ func (s *Service) PatchBackupPolicy(ctx context.Context, name string, patch map[
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "backup-policy %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "backup-policy %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.BackupPolicy
 	if err := MergePatch(cur, patch, &out); err != nil {
@@ -548,7 +548,7 @@ func (s *Service) DeleteBackup(ctx context.Context, id string) (api.Operation, e
 	if err != nil {
 		return api.Operation{}, err
 	}
-	return s.Submit(ctx, OpSpec{Description: "Delete backup " + id, Project: backupProject(b),
+	return s.Submit(ctx, OpSpec{Action: api.OpBackupDelete, Description: "Delete backup " + id, Project: backupProject(b),
 		Resources: map[string][]string{"backups": {"/api/v1/backups/" + id}},
 		Run:       func(ctx context.Context, h *OpHandle) (any, error) { return nil, s.d.Backups.Delete(ctx, id) }})
 }
@@ -645,7 +645,7 @@ func (s *Service) Restore(ctx context.Context, req api.RestoreRequest) (*api.Res
 			}
 		}
 	}
-	op, err := s.Submit(ctx, OpSpec{Description: "Restore backup " + req.Backup, Locks: locks, Project: target,
+	op, err := s.Submit(ctx, OpSpec{Action: api.OpJailRestore, Description: "Restore backup " + req.Backup, Locks: locks, Project: target,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			defer release()

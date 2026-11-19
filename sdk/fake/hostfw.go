@@ -40,7 +40,7 @@ func (s *Server) fwTick() {
 	}
 	s.fwSt.applied, s.fwSt.pending = s.fwSt.prev, nil
 	s.fwSt.last = &api.HostPendingOutcome{ID: p.ID, Module: p.Module, Snapshot: p.Snapshot, Outcome: api.HostPendingTimedOut, Time: p.Deadline,
-		Detail: fmt.Sprintf("nobody confirmed it within %d seconds", p.ConfirmWithin)}
+		Detail: fmt.Sprintf("nobody confirmed it within %d seconds", p.ConfirmWithinSeconds)}
 }
 
 func (s *Server) fwPendingView() *api.HostPendingChange {
@@ -102,7 +102,7 @@ func (s *Server) handleHostFirewallPut(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, err.(*api.Error))
 		return
 	}
-	within, err := api.ConfirmWindow(in.ConfirmWithin)
+	within, err := api.ConfirmWindow(in.ConfirmWithinSeconds)
 	if err != nil {
 		writeErr(w, err.(*api.Error))
 		return
@@ -143,7 +143,7 @@ func (s *Server) handleHostFirewallPut(w http.ResponseWriter, r *http.Request) {
 		out.Snapshot = fmt.Sprintf("%s-%d", now.Format("20060102T150405Z"), 900+h.seq)
 		h.prev, h.applied = h.applied, &spec
 		h.pending = &api.HostPendingChange{ID: fmt.Sprintf("%016x", 0xf00d0000+h.seq), Module: api.HostModuleFirewall, Snapshot: out.Snapshot,
-			Created: now, Deadline: now.Add(time.Duration(within) * time.Second), ConfirmWithin: within}
+			Created: now, Deadline: now.Add(time.Duration(within) * time.Second), ConfirmWithinSeconds: within}
 		out.Pending = s.fwPendingView()
 		return reply{status: 200, meta: out}
 	}()
@@ -174,7 +174,7 @@ func (s *Server) handleHostPendingAction(confirm bool) http.HandlerFunc {
 				return reply{err: api.Errorf(api.CodeNotFound, "no host change waits for a confirmation")}
 			}
 			if in.ID != "" && in.ID != h.pending.ID {
-				return reply{err: api.Errorf(api.CodeConflict, "the pending change is %s, not %s", h.pending.ID, in.ID)}
+				return reply{err: api.Errorf(api.CodePreconditionFailed, "the pending change is %s, not %s", h.pending.ID, in.ID)}
 			}
 			p := h.pending
 			o := &api.HostPendingOutcome{ID: p.ID, Module: p.Module, Snapshot: p.Snapshot, Outcome: api.HostPendingConfirmed, Time: s.now().UTC()}

@@ -35,12 +35,12 @@ async function change(set: Record<string, string>, unset: string[], title: strin
   }
 }
 /** The key that creates a device, with a first value. */
-const FIRST: Record<DeviceKind, [string, string]> = { nic: ['network', 'lan'], disk: ['mount', '/var/db/x'], devfs: ['device', 'tun'] }
+const FIRST: Record<DeviceKind, [string, string]> = { network: ['network', 'lan'], volumes: ['mount', '/var/db/x'], devfs: ['device', 'tun'] }
 async function addDevice(kind: DeviceKind): Promise<void> {
   const n = (nameFor.value[kind] ?? '').trim()
   if (!n) return
   const [field, sample] = FIRST[kind]
-  await change({ [`${kind}.${n}.${field}`]: kind === 'disk' ? `/var/db/${n}` : sample }, [], s.devices.addDevice + ': ' + n)
+  await change({ [`${kind}.${n}.${field}`]: kind === 'volumes' ? `/var/db/${n}` : sample }, [], s.devices.addDevice + ': ' + n)
   nameFor.value[kind] = ''
 }
 const removeDevice = (kind: DeviceKind, name: string) => change({}, [`${kind}.${name}`], s.devices.removeDevice + ': ' + name)

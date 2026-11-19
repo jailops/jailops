@@ -198,7 +198,7 @@ func (s *Server) validateProject(p, old *api.Project) *api.Error {
 			}
 			for _, og := range o.Spec.Networks {
 				if og.Network == g.Network {
-					return api.Errorf(api.CodeConflict, "network %s is already granted to project %s", g.Network, o.Metadata.Name)
+					return api.Errorf(api.CodePreconditionFailed, "network %s is already granted to project %s", g.Network, o.Metadata.Name)
 				}
 			}
 		}
@@ -489,15 +489,6 @@ func (s *Server) setupAccess() {
 			return api.Errorf(api.CodeForbidden, "the mandatory firewall policy of project %q can only be changed by a global admin", p.Metadata.Name)
 		}
 		return nil
-	}
-	s.certs.alias = func(key string) string {
-		fp := normFP(key)
-		for _, c := range s.certs.items {
-			if normFP(c.Spec.Fingerprint) == fp {
-				return c.Metadata.Name
-			}
-		}
-		return ""
 	}
 	s.certs.validate = func(c, _ *api.Certificate) *api.Error {
 		if e := validIdentityScope(c.Spec.Projects, c.Spec.Global); e != nil {

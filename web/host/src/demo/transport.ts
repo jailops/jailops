@@ -195,6 +195,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         const j = db.jails.find((x) => x.metadata.name === p.jail)
         if (j) {
           j.status.power = p.to
+          j.status.conditions = [d.readyCond(p.to), ...(j.status.conditions ?? []).filter((c) => c.type !== 'Ready')]
           if (p.to === 'running') {
             j.status.jid = 100 + Math.floor(Math.random() * 50)
             j.status.started_at = new Date().toISOString()
@@ -301,7 +302,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     for (const p of db.projects) p.status.jails = countByProject()[p.metadata.name] ?? 0
     const rn = m === 'POST' ? renameKindOf(seg) : undefined
     if (rn) return renameRoute(rn.kind, rn.name, body, project, req)
-    if (seg[0] === 'jail-imports' && seg[1] === 'preflight' && m === 'POST') return ok(importPreflight(db, project, body.manifest, body.request ?? {}))
+    if (seg[0] === 'jail-imports' && url.searchParams.get('dry_run') === 'true' && m === 'POST') return ok(importPreflight(db, project, body.manifest, body.request ?? {}))
     const extra = extraRoutes(seg, m, body, url, req, project)
     if (extra) return extra
 
@@ -351,7 +352,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           return startOp(`Create network ${body.metadata.name}`, {}, 500, () => db.networks.push(net as never), undefined, false)
         }
         if (seg.length === 1) {
-          const all = url.searchParams.get('all') === 'true'
+          const all = url.searchParams.get('all_projects') === 'true'
           return ok(db.networks.map((n) => ({ ...n, status: { ...n.status, granted_to: heldBy((sp) => (sp.networks ?? []).some((g) => g.network === n.metadata.name)) } }))
             .filter((n) => all || !project || n.status.granted_to.includes(project)))
         }
@@ -361,13 +362,13 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (!net) return fail(404, { code: 'not_found', message: `Network ${seg[1]} not found` })
           if (m === 'GET') return ok(net, etagOf(net.metadata.generation))
           if (m === 'PUT') {
-            if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(net.metadata.generation)) return fail(412, { code: 'conflict', message: 'The network changed since you loaded it.', hint: 'Reload and apply your change again.' })
+            if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(net.metadata.generation)) return fail(412, { code: 'precondition_failed', message: 'The network changed since you loaded it.', hint: 'Reload and apply your change again.' })
             const sp = body.spec as import('@jailops/shared/api/types').Network['spec']
               return startOp(`Save network ${seg[1]}`, { networks: [`/api/v1/networks/${seg[1]}`] }, 500, () => { net.spec = { ...sp }; net.metadata.generation = (net.metadata.generation ?? 0) + 1 }, undefined, false)
           }
           if (m === 'DELETE') {
             const by = db.projects.find((p) => (p.spec.networks ?? []).some((g) => g.network === seg[1]))
-            if (by) return fail(409, { code: 'conflict', message: `Network ${seg[1]} is granted to project ${by.metadata.name}.`, hint: `Remove the grant on the page of project ${by.metadata.name} first.` })
+            if (by) return fail(409, { code: 'precondition_failed', message: `Network ${seg[1]} is granted to project ${by.metadata.name}.`, hint: `Remove the grant on the page of project ${by.metadata.name} first.` })
             return startOp(`Delete network ${seg[1]}`, { networks: [`/api/v1/networks/${seg[1]}`] }, 500, () => {
               db.networks = db.networks.filter((n) => n !== net)
               delete db.leases[seg[1]]
@@ -482,7 +483,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       }
       const labels = (body.metadata?.labels ?? undefined) as Record<string, string> | undefined
       if (labels && labelsProblem(labels)) return fail(400, { code: 'invalid', message: `the labels are invalid (${labelsProblem(labels)})` })
-      const jail: Jail = { metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), ...(project ? { project } : {}), ...(labels && Object.keys(labels).length ? { labels } : {}) }, spec, status: { power: 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] } }
+      const jail: Jail = { metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), ...(project ? { project } : {}), ...(labels && Object.keys(labels).length ? { labels } : {}) }, spec, status: { power: 'stopped', addresses: [], conditions: [d.readyCond('stopped')] } }
       return startOp(`Create jail ${name}`, { jails: [`/api/v1/jails/${name}`] }, 800, () => { db.jails.push(jail) }, undefined, false)
     }
     if (seg.length === 1) return ok(db.jails.filter(inProject))
@@ -571,9 +572,9 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       emit('jail-updated', src)
       return ok(j, etagOf(j.metadata.generation))
     }
-    // POST /jails/{name}: a copy with the data of the source (extension jail_copy): the same specification under a new name,
+    // POST /jails/{name}/copy: a copy with the data of the source (extension jail_copy): the same specification under a new name,
     // addresses of its own, no volume and no exposure; the data is not modelled
-    if (seg.length === 2 && m === 'POST') {
+    if (seg.length === 3 && seg[2] === 'copy' && m === 'POST') {
       const to = String(body.name ?? '')
       const badCopy = badName(to, 'jail')
       if (badCopy) return badCopy
@@ -588,7 +589,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         for (const k of ['ipv4', 'ipv6'] as const) if (n[k] && n[k] !== 'none') n[k] = 'auto'
       }
       const labels = (body.labels ?? j.metadata.labels) as Record<string, string> | undefined
-      const copy: Jail = { metadata: { name: to, scope: 'host', generation: 1, created_at: new Date().toISOString(), ...(j.metadata.project ? { project: j.metadata.project } : {}), ...(labels && Object.keys(labels).length ? { labels } : {}) }, spec, status: { power: 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] } }
+      const copy: Jail = { metadata: { name: to, scope: 'host', generation: 1, created_at: new Date().toISOString(), ...(j.metadata.project ? { project: j.metadata.project } : {}), ...(labels && Object.keys(labels).length ? { labels } : {}) }, spec, status: { power: 'stopped', addresses: [], conditions: [d.readyCond('stopped')] } }
       return startOp(`Copy jail ${name} to ${to}`, { jails: [src, `/api/v1/jails/${to}`] }, 1500, () => { db.jails.push(copy); emit('jail-created', `/api/v1/jails/${to}`) }, undefined, false)
     }
     if (seg.length === 2) return ok(j, etagOf(j.metadata.generation))
@@ -597,7 +598,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (m === 'GET') return ok(db.snaps[name] ?? [])
         return startOp(`Snapshot ${name}`, { jails: [src] }, 1200, () => {
           const n = `manual-${Date.now().toString(36)}`
-          ;(db.snaps[name] ??= []).push({ metadata: { name: n, scope: 'host', created_at: new Date().toISOString() }, spec: { jail: name, comment: body.spec?.comment }, status: { written: 0 } })
+          ;(db.snaps[name] ??= []).push({ metadata: { name: n, scope: 'host', created_at: new Date().toISOString() }, spec: { jail: name, comment: body.spec?.comment }, status: { written_bytes: 0 } })
           emit('jail-snapshot-created', src)
         }, undefined, false)
       case 'volumes': return jailVolumesRoute(seg, m, body, j)
@@ -617,8 +618,8 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         const r = body as JailRollback
         if ((r.scope === 'data' || r.scope === 'all') && !r.confirm_data_loss) return fail(400, { code: 'data_loss_unconfirmed', message: 'This rollback discards data and was not confirmed.', hint: 'Set confirm_data_loss after showing the bytes to the operator.' })
         return startOp(`Rollback ${name} (${r.scope ?? 'root'})`, { jails: [src] }, 2200, () => {
-          if (r.scope === 'data' || r.scope === 'all') (db.snaps[name] ?? []).forEach((s) => (s.status.written = 0))
-          if (r.scope !== 'data') j.status.generation = 'freebsd-15-1#g3'
+          if (r.scope === 'data' || r.scope === 'all') (db.snaps[name] ?? []).forEach((s) => (s.status.written_bytes = 0))
+          if (r.scope !== 'data') j.status.image_generation = 'freebsd-15-1#g3'
           emit('jail-rolled-back', src)
         })
       }
@@ -630,7 +631,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (j.spec.os === 'linux') return fail(422, { code: 'unsupported', message: 'a Linux jail is thick and stays so: only FreeBSD jails change layout' })
         const from = j.spec.layout || 'thin'
         const changed = from !== to
-        const image = to === 'thin' && body.image ? String(body.image) : (j.status.generation ?? '')
+        const image = to === 'thin' && body.image ? String(body.image) : (j.status.image_generation ?? '')
         const keep = ['/etc', '/usr/local', '/var/db', '/var/log', '/var/mail', '/var/spool', '/home', '/root']
         const res = {
           jail: name, from, to, image, changed, ...(body.dry_run ? { dry_run: true } : {}),
@@ -669,14 +670,14 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         const newest = to ? Math.max(...(to.status.generations ?? []).map((g) => g.number)) : 0
         const target = u.generation || (move ? `${move}#g${newest}` : 'freebsd-15-1#g5')
         const preview = {
-          from_generation: j.status.generation ?? '', to_generation: target,
+          from_generation: j.status.image_generation ?? '', to_generation: target,
           steps: ['Preflight: no dependent clones, replication idle', 'Snapshot all datasets (rollback point)', 'Stop the jail', 'Clone the target generation to root.new', 'Merge /etc with etcupdate', 'Swap root and root.new', ...(move ? [`Set the image of the jail to ${move}`, 'Write spec.json (the new image)'] : []), 'Start and run the health check'],
           etc_conflicts: name === 'web' ? ['/etc/ssl/openssl.cnf'] : [], warnings: j.status.power === 'running' ? ['The jail will be stopped for about 20 seconds.'] : [],
-          ...(move ? { upgrade: { from: j.status.generation ?? '', to: target, from_release: from?.spec.release, to_release: to?.spec.release, image: move, snapshot: 'jo-pre-upgrade-1767268800', kept: ['etc', 'local', 'var-db', 'var-log', 'home'] } } : {}),
+          ...(move ? { upgrade: { from: j.status.image_generation ?? '', to: target, from_release: from?.spec.release, to_release: to?.spec.release, image: move, snapshot: 'jo-pre-upgrade-1767268800', kept: ['etc', 'local', 'var-db', 'var-log', 'home'] } } : {}),
         }
         if (u.dry_run) return ok(preview)
         return startOp(`Upgrade ${name} to ${target}`, { jails: [src] }, 3500, () => {
-          j.status.generation = target
+          j.status.image_generation = target
           if (move) {
             j.spec.image = move
             j.metadata.generation = (j.metadata.generation ?? 1) + 1
@@ -707,7 +708,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   function volView(v: Volume): Volume {
     const project = v.metadata.project ?? ''
     const uses = usesOf(project, v.metadata.name)
-    return { ...v, status: { ...(v.status ?? { used: 0 }), used: v.status?.used ?? 0, attached_to: uses } }
+    return { ...v, status: { ...(v.status ?? { used_bytes: 0 }), used_bytes: v.status?.used_bytes ?? 0, attached_to: uses } }
   }
   /** The refusals of a volume that is a directory of the host: nothing of a dataset applies to it. */
   const hostDirRefused = (name: string): RawResponse => fail(400, { code: 'invalid', message: `volume "${name}" is a directory of the host: it has no snapshots, no key and no size of its own`, hint: "its files are the host's; snapshot, copy or back them up there" })
@@ -724,7 +725,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       const v = db.volumes.find((x) => x.metadata.name === a.volume && (x.metadata.project ?? '') === project)
       if (!v) return fail(404, { code: 'not_found', message: `volume "${a.volume}" does not exist in project "${project}"`, hint: `jailops volume create ${a.volume}` })
       const other = v.spec.encrypted ? usesOf(project, a.volume).find((u) => u.jail !== jail) : undefined
-      if (other) return fail(409, { code: 'conflict', message: `volume "${a.volume}" is encrypted and attached to jail "${other.jail}" already: an encrypted volume is attached to one jail`, hint: `jailops volume detach ${other.jail} ${a.volume}` })
+      if (other) return fail(409, { code: 'precondition_failed', message: `volume "${a.volume}" is encrypted and attached to jail "${other.jail}" already: an encrypted volume is attached to one jail`, hint: `jailops volume detach ${other.jail} ${a.volume}` })
     }
     return null
   }
@@ -768,7 +769,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   }
 
   function newAppVolume(name: string, mount: string, project: string, app: string, jail: string): Volume {
-    return { metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), project, labels: { [da.LABEL]: app } }, spec: { storage: 'default', uid: 0, gid: 0, mode: '0755', comment: `data of ${jail} (${app}): ${mount}` }, status: { dataset: `tank/jailops/projects/${project}/volumes/${name}`, mountpoint: `/jailops/projects/${project}/volumes/${name}`, used: 0 } }
+    return { metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), project, labels: { [da.LABEL]: app } }, spec: { storage: 'default', uid: 0, gid: 0, mode: '0755', comment: `data of ${jail} (${app}): ${mount}` }, status: { dataset: `tank/jailops/projects/${project}/volumes/${name}`, mountpoint: `/jailops/projects/${project}/volumes/${name}`, used_bytes: 0 } }
   }
 
   function volumesRoute(seg: string[], m: string, body: Record<string, any>, project: string): RawResponse {
@@ -790,7 +791,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         const hv: Volume = {
           metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), project, ...(body.metadata?.labels ? { labels: body.metadata.labels } : {}) },
           spec: { uid: 0, gid: 0, path, ...(spec.watch ? { watch: true, probe: spec.probe || 'mounted', on_loss: spec.on_loss || 'none' } : {}), ...(spec.comment ? { comment: spec.comment } : {}) },
-          status: { mountpoint: path, used: 0, state: 'ok' },
+          status: { mountpoint: path, used_bytes: 0, state: 'ok' },
         }
         return startOp(`Create volume ${name}`, { volumes: [`/api/v1/volumes/${name}`] }, 700, () => { db.volumes.push(hv); emit('volume-created', `/api/v1/volumes/${name}`) }, undefined, false)
       }
@@ -811,7 +812,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       const v: Volume = {
         metadata: { name, scope: 'host', generation: 1, created_at: new Date().toISOString(), project, ...(body.metadata?.labels ? { labels: body.metadata.labels } : {}) },
         spec: { storage, uid: spec.uid ?? 0, gid: spec.gid ?? 0, mode: '0' + mode.toString(8).padStart(3, '0'), ...(spec.size ? { size: spec.size } : {}), ...(spec.encrypted ? { encrypted: true } : {}), ...(spec.comment ? { comment: spec.comment } : {}) },
-        status: { dataset: `tank/jailops/projects/${project}/volumes/${name}`, mountpoint: `/jailops/projects/${project}/volumes/${name}`, used: fromDir ? 49152 : 0 },
+        status: { dataset: `tank/jailops/projects/${project}/volumes/${name}`, mountpoint: `/jailops/projects/${project}/volumes/${name}`, used_bytes: fromDir ? 49152 : 0 },
       }
       return startOp(`Create volume ${name}${fromDir ? ' from ' + fromDir : ''}`, { volumes: [`/api/v1/volumes/${name}`] }, 700, () => { db.volumes.push(v); emit('volume-created', `/api/v1/volumes/${name}`) }, undefined, false)
     }
@@ -850,7 +851,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         const sn = String(body.metadata?.name ?? '') || `snap-${Date.now().toString(36)}`
         if ((db.vsnaps[sk] ?? []).some((x) => x.metadata.name === sn)) return fail(409, { code: 'already_exists', message: `snapshot "${sn}" already exists` })
         return startOp(`Snapshot volume ${name}`, { volumes: [src] }, 600, () => {
-          ;(db.vsnaps[sk] ??= []).push({ metadata: { name: sn, scope: 'host', project, created_at: new Date().toISOString() }, spec: { volume: name, comment: body.spec?.comment }, status: { written: 0 } })
+          ;(db.vsnaps[sk] ??= []).push({ metadata: { name: sn, scope: 'host', project, created_at: new Date().toISOString() }, spec: { volume: name, comment: body.spec?.comment }, status: { written_bytes: 0 } })
           emit('volume-snapshot-created', `${src}/snapshots/${sn}`)
         }, undefined, false)
       }
@@ -889,7 +890,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (what === 'lock') {
       return startOp(`Lock volume ${name}`, { volumes: [src] }, 900, () => {
         for (const j of users()) Object.assign(j.status, { power: 'stopped', jid: undefined, addresses: [], started_at: undefined })
-        v.status = { ...(v.status ?? { used: 0 }), used: v.status?.used ?? 0, locked: true }
+        v.status = { ...(v.status ?? { used_bytes: 0 }), used_bytes: v.status?.used_bytes ?? 0, locked: true }
         relock(project)
         emit('volume-locked', src)
       })
@@ -905,7 +906,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const err = check(body.passphrase)
     return startOp(`Unlock volume ${name}`, { volumes: [src] }, 900, () => {
       if (err) return
-      v.status = { ...(v.status ?? { used: 0 }), used: v.status?.used ?? 0, locked: undefined }
+      v.status = { ...(v.status ?? { used_bytes: 0 }), used_bytes: v.status?.used_bytes ?? 0, locked: undefined }
       relock(project)
       emit('volume-unlocked', src)
       if (body.start) for (const j of users()) { j.status.power = 'starting'; pending.push({ jail: j.metadata.name, to: 'running', at: Date.now() }) }
@@ -998,7 +999,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const item = list.find((x) => x.metadata.name === seg[2])
     if (!item) return fail(404, { code: 'not_found', message: `${isSet ? 'address-set' : 'firewall-policy'} "${seg[2]}" not found` })
     if (m === 'GET') return ok(withUse(item), etagOf(item.metadata.generation))
-    if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(item.metadata.generation)) return fail(412, { code: 'conflict', message: 'The object changed since you loaded it.', hint: 'Reload and apply your change again.' })
+    if (req.headers?.['If-Match'] && req.headers['If-Match'] !== etagOf(item.metadata.generation)) return fail(412, { code: 'precondition_failed', message: 'The object changed since you loaded it.', hint: 'Reload and apply your change again.' })
     if (m === 'DELETE' && isSet) {
       // DeleteAddressSet: refused while a rule of a policy names set:NAME or another set has set:NAME as a member
       const name = seg[2]
@@ -1161,7 +1162,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     if (seg[1] === 'pending' && (seg[2] === 'confirm' || seg[2] === 'revert') && m === 'POST') {
       const r = dh.endPending(db.fw, seg[2], body.id)
       if (r === 'none') return fail(404, { code: 'not_found', message: 'no change is waiting for a confirmation' })
-      if (r === 'other') return fail(409, { code: 'conflict', message: `the pending change is not ${body.id}` })
+      if (r === 'other') return fail(409, { code: 'precondition_failed', message: `the pending change is not ${body.id}` })
       emit(seg[2] === 'confirm' ? 'host-change-confirmed' : 'host-change-reverted', '/api/v1/host/pending')
       return ok(r)
     }
@@ -1170,7 +1171,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const waiting = db.fw.pending?.change
     if (waiting && m !== 'GET' && !body.dry_run) return fail(409, { code: 'busy', message: `a ${waiting.module} change is waiting for its confirmation (id ${waiting.id})`, hint: 'confirm it with jailops host confirm, or undo it with jailops host revert' })
     if (seg[1] === 'firewall' && m === 'PUT') {
-      const within = body.confirm_within ?? 120
+      const within = body.confirm_within_seconds ?? 120
       if (!Number.isInteger(within) || within < 10 || within > 1800) return fail(400, { code: 'invalid', message: `the confirmation window is 10 to 1800 seconds, not ${within}` })
       const r = dh.applyFirewall(db.fw, body.spec ?? {}, !!body.dry_run, within)
       if (!r.dry_run && r.changed) emit('host-firewall-updated', '/api/v1/host/firewall')
@@ -1273,12 +1274,12 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (db.projects.some((p) => p.metadata.name === body.metadata?.name)) return fail(409, { code: 'already_exists', message: `Project ${body.metadata.name} already exists.` })
           const spec = { ...body.spec }
           const held = heldNetwork(spec, '')
-          if (held) return fail(409, { code: 'conflict', message: held })
+          if (held) return fail(409, { code: 'precondition_failed', message: held })
           if (spec.new_network) { delete spec.new_network; spec.networks = [...(spec.networks ?? []), { network: String(body.metadata.name) }] }
           const created = d2.projects({})[0]
           created.metadata = { name: body.metadata.name, scope: 'host', generation: 1, created_at: new Date().toISOString() }
           created.spec = spec
-          created.status = { jails: 0, cpu: 0, memory_used: 0, disk_used: 0, addresses: 0 }
+          created.status = { jails: 0, cpu: 0, memory_used_bytes: 0, disk_used_bytes: 0, addresses: 0 }
           db.projects.push(created)
           emit('project-created', `/api/v1/projects/${body.metadata.name}`)
           return startOp(`Create project ${body.metadata.name}`, { projects: [] }, 500, () => undefined, undefined, false)
@@ -1286,7 +1287,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         const p = db.projects.find((x) => x.metadata.name === name)
         if (!p) return fail(404, { code: 'not_found', message: `Project ${name} not found` })
         if (m === 'GET') return url.searchParams.get('host') === 'all' ? ok(d2.aggregate(p)) : ok(p, etagOf(p.metadata.generation))
-        if (m === 'PUT') { const held = heldNetwork(body.spec, name); if (held) return fail(409, { code: 'conflict', message: held }); p.spec = body.spec; p.metadata.generation = (p.metadata.generation ?? 0) + 1; return startOp(`Save project ${name}`, {}, 400, () => undefined, undefined, false) }
+        if (m === 'PUT') { const held = heldNetwork(body.spec, name); if (held) return fail(409, { code: 'precondition_failed', message: held }); p.spec = body.spec; p.metadata.generation = (p.metadata.generation ?? 0) + 1; return startOp(`Save project ${name}`, {}, 400, () => undefined, undefined, false) }
         if (m === 'DELETE') {
           if ((countByProject()[name] ?? 0) > 0) return fail(409, { code: 'busy', message: `Project ${name} still holds jails.`, hint: 'Delete or move its jails first.' })
           return startOp(`Delete project ${name}`, {}, 400, () => { db.projects = db.projects.filter((x) => x !== p) }, undefined, false)
@@ -1296,13 +1297,13 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       case 'storage': {
         if (m === 'GET') {
           const grants = (sp: { storage?: Array<{ storage: string }> }, n: string) => (sp.storage ?? []).some((g) => g.storage === n || g.storage === '*')
-          const all = url.searchParams.get('all') === 'true'
+          const all = url.searchParams.get('all_projects') === 'true'
           return ok(db.storage.map((x) => ({ ...x, status: { ...x.status, granted_to: heldBy((sp) => grants(sp, x.metadata.name)) } }))
             .filter((x) => all || !project || x.status.granted_to.includes(project)))
         }
         if (m === 'POST') {
           if (db.storage.some((x) => x.metadata.name === body.metadata?.name)) return fail(409, { code: 'already_exists', message: 'Storage exists.' })
-          return startOp(`Create storage ${body.metadata.name}`, {}, 600, () => db.storage.push({ metadata: { name: body.metadata.name, scope: 'host', created_at: new Date().toISOString() }, spec: body.spec, status: { pool: String(body.spec.dataset).split('/')[0], health: 'ONLINE', size: 500 * GiB, used: 1 * GiB, available: 499 * GiB } }), undefined, false)
+          return startOp(`Create storage ${body.metadata.name}`, {}, 600, () => db.storage.push({ metadata: { name: body.metadata.name, scope: 'host', created_at: new Date().toISOString() }, spec: body.spec, status: { pool: String(body.spec.dataset).split('/')[0], health: 'ONLINE', size_bytes: 500 * GiB, used_bytes: 1 * GiB, available_bytes: 499 * GiB } }), undefined, false)
         }
         if (m === 'DELETE') {
           if (db.projects.some((p) => (p.spec.storage ?? []).some((g) => g.storage === name))) return fail(409, { code: 'busy', message: `Storage ${name} is granted to a project.`, hint: 'Remove the grant first.' })
@@ -1364,7 +1365,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           const names: string[] = body.all ? db.updates.filter((u) => u.project === project && u.available).map((u) => u.jail) : body.jails ?? []
           const targets = db.updates.filter((u) => names.includes(u.jail))
           if (!targets.length || targets.every((u) => !u.available)) return fail(400, { code: 'invalid', message: 'There is nothing to apply.' })
-          const recs: import('@jailops/shared/api/types').UpdateRecord[] = targets.filter((u) => u.available).map((u) => ({ id: 'u' + ++seq, jail: u.jail, project, kind: u.os ? 'os' : 'packages', result: 'ok', started: new Date().toISOString(), finished: new Date().toISOString(), snapshot: 'pre-update-' + Date.now().toString(36), packages: u.packages }))
+          const recs: import('@jailops/shared/api/types').UpdateRecord[] = targets.filter((u) => u.available).map((u) => ({ id: 'u' + ++seq, jail: u.jail, project, kind: u.os ? 'os' : 'packages', result: 'success', started_at: new Date().toISOString(), finished_at: new Date().toISOString(), snapshot: 'pre-update-' + Date.now().toString(36), packages: u.packages }))
           return startOp(`Update ${names.join(', ')}`, {}, 2500, () => {
             for (const r of recs) { (db.history[r.jail] ??= []).unshift(r); const u = db.updates.find((x) => x.jail === r.jail)!; u.available = false; u.packages = undefined; u.os = undefined }
             emit('update-applied', '/api/v1/updates')
@@ -1427,7 +1428,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (seg[2] === 'access') {
           if (!j.metadata.labels?.[da.LABEL]) return fail(400, { code: 'invalid', message: `jail "${name}" was not installed from the catalog (it has no label jailops.app)` })
           if (seg.length === 3 && m === 'GET') return ok(access.get(j))
-          const r = seg.length === 3 && m === 'POST' ? access.allow(j, body as never) : seg[3] === 'deny' && m === 'POST' ? access.deny(j, body as never) : undefined
+          const r = seg[3] === 'allow' && m === 'POST' ? access.allow(j, body as never) : seg[3] === 'deny' && m === 'POST' ? access.deny(j, body as never) : undefined
           if (!r) return undefined
           if ('ok' in r) return ok(r.ok)
           return fail(r.status, { code: r.code, message: r.message, hint: r.hint } as ApiErrorBody)
@@ -1446,6 +1447,13 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         if (seg[2] === 'provision' && m === 'POST') {
           if (j.status.provisioned_at && !body.again) return fail(409, { code: 'already_exists', message: 'Provisioning has run before.', hint: 'Use again to run it again.' })
           return startOp(`Provision ${name}`, { jails: [src] }, 1500, () => { j.status.provisioned_at = new Date().toISOString() }, { jail: name, provisioned_at: new Date().toISOString(), steps: ['packages', 'files', 'services'] })
+        }
+        if (seg[2] === 'repair-packages' && m === 'POST') {
+          if (j.spec.os === 'linux') return fail(400, { code: 'invalid', message: `jail "${name}" is a linux jail: the base package records are those of a FreeBSD jail` })
+          if (j.status.power === 'running') return fail(409, { code: 'busy', message: `jail "${name}" is running; its base package records are repaired while it is stopped, and by every start`, hint: `restart it: jailops restart ${name}` })
+          return startOp(`Repair the base package records of jail ${name}`, { jails: [src] }, 800, () => {
+            j.status.conditions = (j.status.conditions ?? []).filter((c) => c.type !== 'BasePackages')
+          }, { jail: name, base: 187, replaced: 187, added: 0 })
         }
         if (seg[2] === 'shell-setup' && m === 'POST') {
           if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `jail "${name}" is not running; the shell is set up inside it`, hint: 'start it first' })
@@ -1480,7 +1488,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
           if (m === 'POST' && seg.length === 3) {
             if (j.status.power !== 'running') return fail(409, { code: 'busy', message: `Jail ${name} is not running.` })
             const sh = (j.spec as unknown as { shell?: string }).shell
-            if (sh === BASH && !bashReady.has(name)) return fail(404, { code: 'not_found', message: `the shell ${BASH} does not exist in jail "${name}"`, hint: `install it with \`jailops jail shell-setup ${name}\`, or use FreeBSD's own shell: \`jailops set ${name} shell sh\`` })
+            if (sh === BASH && !bashReady.has(name)) return fail(404, { code: 'not_found', message: `the shell ${BASH} does not exist in jail "${name}"`, hint: `install it with \`jailops jail shell-setup ${name}\`, or use FreeBSD's own shell: \`jailops config set ${name} shell sh\`` })
             if (sh && sh !== '/bin/sh' && sh !== BASH) return fail(404, { code: 'not_found', message: `The shell ${sh} does not exist in the jail.`, hint: 'Set a shell that exists, or clear the setting to use /bin/sh.' })
             const id = 'x' + ++seq
             const argv = Array.isArray(body.argv) ? (body.argv as string[]) : []
@@ -1541,7 +1549,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const j: Jail = {
       metadata: { name: jail, scope: 'host', project, generation: 1, created_at: new Date().toISOString(), labels: { [da.LABEL]: a.name, [`${da.LABEL}.hash`]: det.hash, [`${da.LABEL}.version`]: version } },
       spec: { image, storage: sto, layout: 'thin', network: [{ network: net, ipv4: addr }], volumes: appVolumes.map((x) => ({ volume: x.name, mount: x.mount })), resources: limits, boot: { autostart: true }, shell: BASH, prompt: 'default' },
-      status: { power: 'running', jid: 120 + db.jails.length, generation: 'freebsd-15-1#g4', addresses: [`${addr}/${subnet.split('/')[1] ?? '24'}`], started_at: new Date().toISOString(), conditions: [{ type: 'Reconciled', status: 'True' }] },
+      status: { power: 'running', jid: 120 + db.jails.length, image_generation: 'freebsd-15-1#g4', addresses: [`${addr}/${subnet.split('/')[1] ?? '24'}`], started_at: new Date().toISOString(), conditions: [d.readyCond('running')] },
     }
     bashReady.add(jail)
     const result = {
@@ -1552,7 +1560,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     // A jail name that starts with "fail" makes the demo fail at the health check and keep the jail, stopped.
     if (jail.startsWith('fail')) {
       const r = startOp(`Install app ${a.name} as jail ${jail}`, { jails: [src] }, 3500, () => {
-        j.status = { power: 'stopped', addresses: [], conditions: [{ type: 'Reconciled', status: 'True' }] }
+        j.status = { power: 'stopped', addresses: [], conditions: [d.readyCond('stopped')] }
         for (const x of appVolumes) db.volumes.push(newAppVolume(x.name, x.mount, project, a.name, jail))
         db.jails.push(j)
         emit('app.install.failed', src)
@@ -1569,7 +1577,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
       for (const x of appVolumes) db.volumes.push(newAppVolume(x.name, x.mount, project, a.name, jail))
       db.jails.push(j)
       access.install(jail)
-      db.snaps[jail] = [{ metadata: { name: 'app-installed', scope: 'host', created_at: new Date().toISOString() }, spec: { jail, comment: `installation of ${a.name}` }, status: { written: 0 } }]
+      db.snaps[jail] = [{ metadata: { name: 'app-installed', scope: 'host', created_at: new Date().toISOString() }, spec: { jail, comment: `installation of ${a.name}` }, status: { written_bytes: 0 } }]
       for (const ev of ['jail-created', 'jail-started', 'jail-snapshot-created', 'app.installed']) emit(ev, src)
     }, result, false)
   }
@@ -1633,11 +1641,13 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
         const man = await readManifest(body)
         await scanFile(body)
         const pf = importPreflight(db, project, man, req)
-        if (!pf.ok) return fail(409, { code: 'conflict', message: pf.errors?.[0] ?? 'the import cannot be done' })
+        if (!pf.ok) return fail(409, { code: 'precondition_failed', message: pf.errors?.[0] ?? 'the import cannot be done' })
         const jail = importedJail(man, project, req)
         db.jails.push(jail)
         emit('jail-created', `/api/v1/jails/${jail.metadata.name}`)
-        return { status: 201, envelope: { type: 'sync', status: 'Success', status_code: 201, metadata: structuredClone({ jail }) } }
+        const now = new Date().toISOString()
+        const op: Operation = { id: `op-${Date.now().toString(36)}`, action: 'jail.import', description: `Import jail ${jail.metadata.name}`, status: 'success', may_cancel: false, created_at: now, updated_at: now, project, resources: { jails: [`/api/v1/jails/${jail.metadata.name}`] }, metadata: structuredClone({ jail }) }
+        return { status: 202, envelope: { type: 'async', status: 'Operation created', status_code: 202, operation: `/api/v1/operations/${op.id}`, metadata: op } }
       } catch (e) {
         if (e instanceof ExportFileError) return fail(400, { code: 'invalid', message: e.message })
         throw e

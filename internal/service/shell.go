@@ -213,7 +213,7 @@ func (s *Service) forgetShell(key string) {
 
 // shellCondition is the jail's ShellSetup condition: present while bash is being installed in the background and
 // while the latest setup failed.
-func (s *Service) shellCondition(key string) []api.Condition {
+func (s *Service) shellCondition(key string) ([]api.Condition, *api.ShellSetupStatus) {
 	m := s.shellMark(key)
 	if s.shellInBackground(key) {
 		s.shellM.mu.Lock()
@@ -228,14 +228,16 @@ func (s *Service) shellCondition(key string) []api.Condition {
 			step = stepFetchBash
 		}
 		return []api.Condition{{Type: "ShellSetup", Status: api.ConditionUnknown, Reason: api.ShellInstalling, Since: since.UTC(),
-			Message: api.ShellInstallingMessage(step)}}
+				Message: "bash is being installed in the background: " + step + "; `jailops shell` waits for it"}},
+			&api.ShellSetupStatus{State: api.ShellSetupInstalling, Step: step}
 	}
 	if m.Error == "" {
-		return nil
+		return nil, nil
 	}
 	_, name := validate.SplitQualified(key)
 	return []api.Condition{{Type: "ShellSetup", Status: api.ConditionFalse, Reason: "Failed", Since: m.At,
-		Message: m.Error + "; try again with `jailops jail shell-setup " + name + "`, or choose FreeBSD's own shell with `jailops set " + name + " shell sh`"}}
+			Message: m.Error + "; try again with `jailops jail shell-setup " + name + "`, or choose FreeBSD's own shell with `jailops config set " + name + " shell sh`"}},
+		&api.ShellSetupStatus{State: api.ShellSetupFailed}
 }
 
 // promptContext is where the jail key is: the jail, its project and the short name of the host. The jail.conf that is
@@ -680,7 +682,7 @@ func (s *Service) ShellSetupJail(ctx context.Context, name string, _ api.ShellSe
 	if !s.jailRunning(ctx, key) {
 		return api.Operation{}, api.Errorf(api.CodeBusy, "jail %q is not running; the shell is set up inside it", name).WithHint("start it first")
 	}
-	return s.Submit(ctx, OpSpec{Description: "Set up the shell of jail " + name, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
+	return s.Submit(ctx, OpSpec{Action: api.OpJailShellSetup, Description: "Set up the shell of jail " + name, Locks: []string{jailLock(key)}, Project: p.Meta.Name,
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			cur, err := s.jailSnapshot(key)

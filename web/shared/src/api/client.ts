@@ -254,7 +254,7 @@ export function codeFromStatus(status: number): string {
     case 404: return 'not_found'
     case 405: case 501: return 'unsupported'
     case 409: return 'already_exists'
-    case 412: return 'conflict'
+    case 412: return 'precondition_failed'
     case 429: case 502: case 503: case 504: return 'busy'
   }
   return status >= 400 && status < 500 ? 'invalid' : 'internal'
@@ -342,7 +342,7 @@ export class Client {
     return this.transport.download(this.filter ? this.filter(path) : path, signal)
   }
 
-  /** A binary POST (a file, sent as the browser reads it); the reply is an ordinary sync one. */
+  /** A binary POST (a file, sent as the browser reads it); the reply is the finished operation: its error, or its metadata. */
   async upload<T>(path: string, body: Blob, contentType: string, signal?: AbortSignal): Promise<T> {
     if (!this.transport.upload) throw new ApiError({ code: 'unsupported' as never, message: 'This transport cannot upload files.' })
     const r = await this.transport.upload(this.filter ? this.filter(path) : path, body, contentType, signal)
@@ -351,6 +351,11 @@ export class Client {
       const err = new ApiError(e as ApiErrorBody, r.status)
       if (err.code === 'unauthorized' || r.status === 401) this.unauthorized.forEach((f) => f())
       throw err
+    }
+    if (r.envelope.type === 'async') {
+      const op = r.envelope.metadata as Operation
+      if (op.error) throw new ApiError(op.error as ApiErrorBody, r.status)
+      return op.metadata as T
     }
     return r.envelope.metadata as T
   }

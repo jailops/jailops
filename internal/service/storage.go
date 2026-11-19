@@ -603,7 +603,7 @@ func (s *Service) PatchStorage(ctx context.Context, name string, patch map[strin
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "storage %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "storage %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	var out api.Storage
 	if err := MergePatch(cur, patch, &out); err != nil {

@@ -94,10 +94,20 @@ func (v *VolumeClient) CreateFromDir(ctx context.Context, vol api.Volume, dir st
 
 // Delete deletes a volume that no jail attaches.
 func (v *VolumeClient) Delete(ctx context.Context, name string) (*Operation[None], error) {
+	return v.DeleteETag(ctx, name, "")
+}
+
+// DeleteETag deletes a volume only if it is still the one the ETag names (read with GetETag): a changed volume fails
+// with api.CodePreconditionFailed. An empty etag deletes whatever is there.
+func (v *VolumeClient) DeleteETag(ctx context.Context, name, etag string) (*Operation[None], error) {
 	if err := v.c.need("volumes"); err != nil {
 		return nil, err
 	}
-	op, _, err := sendOp[None](ctx, v.c, request{method: http.MethodDelete, path: v.r.item(name)}, nil)
+	h := http.Header{}
+	if etag != "" {
+		h.Set("If-Match", quoteETag(etag))
+	}
+	op, _, err := sendOp[None](ctx, v.c, request{method: http.MethodDelete, path: v.r.item(name), header: h}, nil)
 	return op, err
 }
 

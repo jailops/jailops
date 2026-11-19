@@ -18,8 +18,8 @@ func TestStopAll(t *testing.T) {
 	create("idle")
 	tr.ok("stop", "idle") // a stopped jail is left alone
 	tr.ok("stop-all", "--dry-run")
-	tr.ok("stop-all", "--grace", "30s")
+	tr.ok("stop-all", "--timeout", "30s")
 	tr.ok("list", "-c", "name,state")
-	tr.do("", "stop-all", "--grace", "soon")
+	tr.do("", "stop-all", "--timeout", "soon")
 	tr.golden("stop_all")
 }

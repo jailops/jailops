@@ -14,7 +14,7 @@ function dataset(name: string, path: string, base: string, all: DiffEntry[], lim
 export function demoDiff(jail: Jail, query: URLSearchParams): JailDiff {
   const limit = Number(query.get('limit')) || 5
   const name = jail.metadata.name
-  const image = jail.status?.generation ?? 'freebsd-15-1#g4'
+  const image = jail.status?.image_generation ?? 'freebsd-15-1#g4'
   const objects = Array.from({ length: 6 }, (_, i) => e('added', `/usr/local/src/${name}/obj/file${i + 1}.o`))
   const out: JailDiff = {
     jail: name,

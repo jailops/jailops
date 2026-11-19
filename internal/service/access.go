@@ -283,19 +283,11 @@ func certToAPI(o object[api.CertificateSpec]) api.Certificate {
 	return api.Certificate{Metadata: o.Meta, Spec: o.Spec}
 }
 
-func (s *Service) findCert(key string) (object[api.CertificateSpec], error) {
-	if o, err := s.certKind.get(key); err == nil {
+func (s *Service) findCert(name string) (object[api.CertificateSpec], error) {
+	if o, err := s.certKind.get(name); err == nil {
 		return o, nil
 	}
-	if fp, err := auth.NormalizeFingerprint(key); err == nil {
-		objs, _ := s.certKind.list()
-		for _, o := range objs {
-			if o.Spec.Fingerprint == fp {
-				return o, nil
-			}
-		}
-	}
-	return object[api.CertificateSpec]{}, notFound("certificate", key)
+	return object[api.CertificateSpec]{}, notFound("certificate", name)
 }
 
 func (s *Service) checkCert(ctx context.Context, c *api.Certificate, self string) error {
@@ -418,7 +410,7 @@ func (s *Service) PatchCertificate(ctx context.Context, key string, patch map[st
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return cur, api.Errorf(api.CodeConflict, "certificate %q changed: current generation is %d", key, cur.Metadata.Generation)
+		return cur, api.Errorf(api.CodePreconditionFailed, "certificate %q changed: current generation is %d", key, cur.Metadata.Generation)
 	}
 	var out api.Certificate
 	if err := MergePatch(cur, patch, &out); err != nil {
@@ -567,7 +559,7 @@ func (s *Service) UpdateUser(ctx context.Context, name string, in api.User, expe
 		return api.User{}, notFound("user", name)
 	}
 	if expect != AnyGeneration && expect != u.UpdatedAt.UnixMilli() {
-		return api.User{}, api.Errorf(api.CodeConflict, "user %q changed: current generation is %d", name, u.UpdatedAt.UnixMilli())
+		return api.User{}, api.Errorf(api.CodePreconditionFailed, "user %q changed: current generation is %d", name, u.UpdatedAt.UnixMilli())
 	}
 	if in.Metadata.Name != "" && in.Metadata.Name != name {
 		return api.User{}, invalid("renaming is not supported")
@@ -1043,6 +1035,14 @@ type AuditQuery struct {
 	Limit    int
 }
 
+// AuditLimit is the page size of a request for n entries: 200 when n is not positive, at most 1000.
+func AuditLimit(n int) int {
+	if n <= 0 {
+		n = 200
+	}
+	return min(n, 1000)
+}
+
 // ListAudit returns the audit entries the caller may see, newest first: all of
 // them for a global identity, the entries of their projects otherwise, and
 // those of the project named in the request when there is one.
@@ -1051,10 +1051,7 @@ func (s *Service) ListAudit(ctx context.Context, q AuditQuery) ([]api.AuditEntry
 	if err != nil {
 		return nil, err
 	}
-	if q.Limit <= 0 {
-		q.Limit = 200
-	}
-	q.Limit = min(q.Limit, 1000)
+	q.Limit = AuditLimit(q.Limit)
 	l, err := s.d.DB.Audit.List(ctx, store.AuditFilter{Actor: q.Actor, Since: q.Since, BeforeID: q.BeforeID, Limit: q.Limit,
 		ProjectFilter: !all, Projects: projects})
 	if err != nil {

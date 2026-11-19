@@ -152,7 +152,7 @@ func TestHookRefusesProjectMismatchAndAmbiguity(t *testing.T) {
 	}
 	src, _ := os.ReadFile(filepath.Join(h.cfg.MountBase, "projects", "shop", "jails", "web", "spec.json"))
 	mustWrite(t, filepath.Join(mp, "spec.json"), string(src))
-	if err := h.local.RunHook(ctx, PhasePreStart, "blog_web"); !api.IsCode(err, api.CodeConflict) {
+	if err := h.local.RunHook(ctx, PhasePreStart, "blog_web"); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Errorf("spec of another project: %v", err)
 	}
 	for _, bad := range []string{"", "web/../x", "shop_", "shop_web;id", "SHOP_web", "a_b_c", "../shop_web"} {
@@ -167,7 +167,7 @@ func TestHookRefusesProjectMismatchAndAmbiguity(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.addDS("tank/second/projects/shop/jails/web", map[string]string{"jailops:managed": "on", "mountpoint": filepath.Join(mp2, "x")})
-	if err := h.local.RunHook(ctx, PhasePreStart, "shop_web"); !api.IsCode(err, api.CodeConflict) {
+	if err := h.local.RunHook(ctx, PhasePreStart, "shop_web"); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Errorf("two roots: %v", err)
 	}
 }
@@ -303,7 +303,7 @@ func TestHookRefusesSpecWithAnotherName(t *testing.T) {
 			t.Fatalf("%s: edit did not apply to %s", name, b)
 		}
 		os.WriteFile(p, []byte(edit), 0o644)
-		if err := h.local.RunHook(ctx, PhasePreStart, "shop_web"); !api.IsCode(err, api.CodeConflict) {
+		if err := h.local.RunHook(ctx, PhasePreStart, "shop_web"); !api.IsCode(err, api.CodePreconditionFailed) {
 			t.Errorf("spec with another %s: %v", name, err)
 		}
 	}

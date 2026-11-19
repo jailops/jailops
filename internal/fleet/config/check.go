@@ -527,11 +527,6 @@ func (f *Fleet) checkJail(o *Object, s api.JailSpec, add func(*Object, string, .
 	if s.Image == "" {
 		add(o, "spec.image is required")
 	}
-	switch s.Update.Strategy {
-	case "", api.UpdateRebase, api.UpdateInPlace, api.UpdateManual:
-	default:
-		add(o, "update.strategy %q is not rebase, inplace or manual", s.Update.Strategy)
-	}
 	for _, v := range s.Volumes {
 		if !strings.HasPrefix(v.Mount, "/") {
 			add(o, "volume %q: mount %q must be an absolute path", v.Name, v.Mount)

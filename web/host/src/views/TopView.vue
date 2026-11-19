@@ -28,8 +28,8 @@ const l = useLoad(async (): Promise<Top> => {
 const frame = computed(() => l.data.value)
 const jails = computed(() => sortJails(frame.value?.jails ?? [], sort.value))
 const host = computed(() => frame.value?.host)
-const memPct = computed(() => (host.value?.memory_total && host.value.memory_used !== undefined ? percent(host.value.memory_used, host.value.memory_total) : undefined))
-const poolPct = computed(() => (host.value?.pool_size && host.value.pool_allocated !== undefined ? percent(host.value.pool_allocated, host.value.pool_size) : undefined))
+const memPct = computed(() => (host.value?.memory_total_bytes && host.value.memory_used_bytes !== undefined ? percent(host.value.memory_used_bytes, host.value.memory_total_bytes) : undefined))
+const poolPct = computed(() => (host.value?.pool_size_bytes && host.value.pool_allocated_bytes !== undefined ? percent(host.value.pool_allocated_bytes, host.value.pool_size_bytes) : undefined))
 const rate = (n: number | undefined): string => (n === undefined ? 'n/a' : `${bytes(n)}/s`)
 function pick(p: string): void {
   project.value = p
@@ -66,13 +66,13 @@ function pick(p: string): void {
       </div></section>
       <section class="panel"><div class="body">
         <p class="muted">{{ s.top.memory }}</p>
-        <p class="mono">{{ host.memory_used === undefined ? 'n/a' : bytes(host.memory_used) }} / {{ bytes(host.memory_total) }}</p>
+        <p class="mono">{{ host.memory_used_bytes === undefined ? 'n/a' : bytes(host.memory_used_bytes) }} / {{ bytes(host.memory_total_bytes) }}</p>
         <Meter v-if="memPct !== undefined" :value="memPct" :label="s.top.memory" />
         <p class="muted">{{ s.top.arc }}: <span class="mono">{{ host.arc_bytes === undefined ? 'n/a' : bytes(host.arc_bytes) }}</span></p>
       </div></section>
       <section class="panel"><div class="body">
         <p class="muted">{{ s.top.pool }} <span class="mono">{{ host.pool }}</span></p>
-        <p class="mono">{{ host.pool_allocated === undefined ? 'n/a' : bytes(host.pool_allocated) }} {{ s.top.used }} · {{ host.pool_free === undefined ? 'n/a' : bytes(host.pool_free) }} {{ s.top.free }}</p>
+        <p class="mono">{{ host.pool_allocated_bytes === undefined ? 'n/a' : bytes(host.pool_allocated_bytes) }} {{ s.top.used }} · {{ host.pool_free_bytes === undefined ? 'n/a' : bytes(host.pool_free_bytes) }} {{ s.top.free }}</p>
         <Meter v-if="poolPct !== undefined" :value="poolPct" :label="s.top.pool" />
       </div></section>
       <section class="panel"><div class="body">

@@ -73,12 +73,12 @@ func TestJailMovesToAnotherImageAndFollowsIt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if j.Spec.Image != "fb2" || j.Status.Generation != "fb2#g1" {
-		t.Fatalf("the jail follows %s on %s", j.Spec.Image, j.Status.Generation)
+	if j.Spec.Image != "fb2" || j.Status.ImageGeneration != "fb2#g1" {
+		t.Fatalf("the jail follows %s on %s", j.Spec.Image, j.Status.ImageGeneration)
 	}
 	// the history says what moved
 	hist, err := s.UpdateHistory(alpha, "web")
-	if err != nil || len(hist) != 1 || hist[0].Kind != api.UpdateKindOS || hist[0].From != "fb#g1" || hist[0].To != "fb2#g1" || hist[0].Result != api.UpdateOK {
+	if err != nil || len(hist) != 1 || hist[0].Kind != api.UpdateKindOS || hist[0].From != "fb#g1" || hist[0].To != "fb2#g1" || hist[0].Result != api.UpdateSuccess {
 		t.Fatalf("%+v %v", hist, err)
 	}
 	// the old image has no user any more: it can be deleted, the new one holds the jail
@@ -93,8 +93,8 @@ func TestJailMovesToAnotherImageAndFollowsIt(t *testing.T) {
 	if got := wait(t, s, rop); got.Status != api.OpSuccess {
 		t.Fatalf("%+v\n%s", got, e.Log())
 	}
-	if j, _ := s.GetJail(alpha, "web"); j.Spec.Image != "fb" || j.Status.Generation != "fb#g1" {
-		t.Fatalf("%s on %s", j.Spec.Image, j.Status.Generation)
+	if j, _ := s.GetJail(alpha, "web"); j.Spec.Image != "fb" || j.Status.ImageGeneration != "fb#g1" {
+		t.Fatalf("%s on %s", j.Spec.Image, j.Status.ImageGeneration)
 	}
 }
 
@@ -109,7 +109,9 @@ func TestJailMoveRefusals(t *testing.T) {
 	if got := wait(t, s, op); got.Status != api.OpSuccess {
 		t.Fatalf("%+v\n%s", got, e.Log())
 	}
+	e.SetRepoVersion("15.2p1") // the repository serves the packages of the release the image is for
 	buildImage(t, s, "future", "15.2-RELEASE") // the host runs 15.1; an older release cannot be an image (15.1 is the oldest)
+	e.SetRepoVersion("15.1p1")
 	// refused before an operation is submitted
 	for _, tc := range []struct {
 		name, image string

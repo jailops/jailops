@@ -115,12 +115,12 @@ gen-ts:
     go run ./scripts/gen-ts
 
 # accept a meant change of the API surface: rewrite the golden files of the freeze and wire tests, the machine output of
-# the commands and the generated types. `just freeze sdk` also makes today's client library the baseline of the
+# the commands, the command and flag tree and the generated types. `just freeze sdk` also makes today's client library the baseline of the
 # previous-client test (a break of the client protocol that is meant)
 freeze what="":
     go run ./scripts/gen-ts
     go test ./internal/server -run Freeze -freeze-update -count=1
-    go test ./internal/cli -run MachineOutput -update -count=1
+    go test ./internal/cli -run 'MachineOutput|FreezeCLITree' -update -count=1
     go test ./internal/state -run Freeze -freeze-update -count=1
     {{ if what == "sdk" { "sh scripts/prev-sdk.sh" } else { "true" } }}
 

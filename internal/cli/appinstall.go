@@ -171,7 +171,7 @@ func (a *app) printAppInstalled(w io.Writer, name, jail string, res api.AppInsta
 	}
 	listed("Logs", rows)
 	if res.Snapshot != "" {
-		kv("Snapshot", res.Snapshot+" (jailops jail rollback "+j.Metadata.Name+" --all --snapshot "+res.Snapshot+" goes back to it)")
+		kv("Snapshot", res.Snapshot+" (jailops jail rollback "+j.Metadata.Name+" --scope all --snapshot "+res.Snapshot+" goes back to it)")
 	}
 	kv("Steps", strconv.Itoa(len(res.Steps))+" done")
 	if res.Notes != "" {

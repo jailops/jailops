@@ -100,10 +100,10 @@ func classify(e Entry) Class {
 		return ClassProject
 	case has("/api/v1/images"), has("/api/v1/networks"), has("/api/v1/storage"), has("/api/v1/projects"):
 		return ClassGranted
-	case has("/api/v1/jails"), has("/api/v1/jail-imports"), has("/api/v1/volumes"), has("/api/v1/profiles"), has("/api/v1/firewall"), has("/api/v1/backup-policies"), has("/api/v1/jail-templates"):
+	case has("/api/v1/jails"), has("/api/v1/jail-imports"), has("/api/v1/volumes"), has("/api/v1/profiles"), has("/api/v1/firewall"), has("/api/v1/backup-policies"):
 		return ClassProject
 	case has("/api/v1/trust"), has("/api/v1/users"), has("/api/v1/tokens"), has("/api/v1/certificates"), has("/api/v1/remotes"),
-		has("/api/v1/groups"), has("/api/v1/rollouts"), has("/api/v1/cluster"), has("/api/v1/server"), has("/api/v1/doctor"), has("/api/v1/ndp"),
+		has("/api/v1/doctor"), has("/api/v1/ndp"),
 		has("/api/v1/resources"), has("/api/v1/backup-targets"), has("/api/v1/host"), has("/api/v1/wireguard"), has("/api/v1/setup"):
 		return ClassGlobal
 	}
@@ -142,12 +142,6 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/auth/totp", ro),
 	r("DELETE", "/api/v1/auth/totp", ro),
 	r("POST", "/api/v1/auth/recovery-codes", ro),
-	pub("POST", "/api/v1/cluster/join"),
-	r("GET", "/api/v1/cluster", ro),
-	r("POST", "/api/v1/cluster/tokens", ad),
-	r("PUT", "/api/v1/cluster", ad),
-	r("DELETE", "/api/v1/cluster/members/{name}", ad),
-	r("GET", "/api/v1/cluster/members", ro),
 	r("GET", "/api/v1/events", ro),
 	r("GET", "/api/v1/top", ro),
 	r("GET", "/api/v1/audit", ad),
@@ -160,8 +154,6 @@ var Perms = classifyAll([]Entry{
 	r("GET", "/api/v1/ndp", ro),
 	r("GET", "/api/v1/ndp/events", ro),
 	r("GET", "/api/v1/resources", ro),
-	r("PUT", "/api/v1/server", ad),
-	r("GET", "/api/v1/server/config", ro),
 
 	// Operations.
 	r("GET", "/api/v1/operations", ro),
@@ -182,6 +174,8 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/jails/{name}/provision", ad),
 	// installs one fixed package (bash) and writes JailOps' own prompt files: no more than an operator may do with exec
 	r("POST", "/api/v1/jails/{name}/shell-setup", op),
+	// only the package database of the jail changes (no file is touched, no script runs)
+	r("POST", "/api/v1/jails/{name}/repair-packages", op),
 	// changes what the Internet reaches of a jail: its firewall, and for an IPv4 forward a port of the host (the service
 	// asks a global administrator for that)
 	r("POST", "/api/v1/jails/{name}/expose", ad),
@@ -238,18 +232,16 @@ var Perms = classifyAll([]Entry{
 	r("PUT", "/api/v1/jails/{name}", ad),
 	r("PATCH", "/api/v1/jails/{name}", ad),
 	r("DELETE", "/api/v1/jails/{name}", ad),
-	r("POST", "/api/v1/jails/{name}", ad), // copy
+	r("POST", "/api/v1/jails/{name}/copy", ad),
 	r("POST", "/api/v1/jails/{name}/rename", ad),
 	// the whole jail leaves as a file: everything an operator may read with exec, so the operator role; making a jail of
 	// a file is making a jail (create: admin)
 	r("GET", "/api/v1/jails/{name}/export", op),
-	r("POST", "/api/v1/jail-imports/preflight", ad),
 	r("POST", "/api/v1/jail-imports", ad),
 	r("GET", "/api/v1/jails/{name}/state", ro),
 	r("GET", "/api/v1/jails/{name}/usage", ro),
 	r("PUT", "/api/v1/jails/{name}/state", op),
 	r("POST", "/api/v1/jails/{name}/exec", op),
-	r("GET", "/api/v1/jails/{name}/console", op),
 	r("POST", "/api/v1/jails/{name}/console", op),
 	r("GET", "/api/v1/jails/{name}/console/{id}/output", op),
 	r("POST", "/api/v1/jails/{name}/console/{id}/input", op),
@@ -275,19 +267,17 @@ var Perms = classifyAll([]Entry{
 	// who may connect to an installed app: reading it is readonly; allow and deny change the jail's firewall and,
 	// for a database, roles in it, as an installation does (operator)
 	r("GET", "/api/v1/jails/{name}/access", ro),
-	r("POST", "/api/v1/jails/{name}/access", op),
+	r("POST", "/api/v1/jails/{name}/access/allow", op),
 	r("POST", "/api/v1/jails/{name}/access/deny", op),
 	r("GET", "/api/v1/jails/{name}/files/{path...}", op),
 	r("PUT", "/api/v1/jails/{name}/files/{path...}", op),
 	r("POST", "/api/v1/jails/{name}/upgrade", op),
 	r("POST", "/api/v1/jails/{name}/rollback", op),
 	r("POST", "/api/v1/jails/{name}/convert", ad), // the layout of the root: a storage decision, as a move is
-	r("POST", "/api/v1/jails/{name}/move", ad),
 	r("GET", "/api/v1/jails/{name}/snapshots", ro),
 	r("POST", "/api/v1/jails/{name}/snapshots", op),
 	r("GET", "/api/v1/jails/{name}/snapshots/{snapshot}", ro),
 	r("DELETE", "/api/v1/jails/{name}/snapshots/{snapshot}", op),
-	r("POST", "/api/v1/jails/{name}/snapshots/{snapshot}", op), // rollback, rename
 	r("GET", "/api/v1/jails/{name}/volumes", ro),
 	r("POST", "/api/v1/jails/{name}/volumes", ad),
 	r("DELETE", "/api/v1/jails/{name}/volumes/{volume}", ad),
@@ -307,12 +297,6 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/volumes/{name}/snapshots", op),
 	r("DELETE", "/api/v1/volumes/{name}/snapshots/{snapshot}", op),
 	r("POST", "/api/v1/volumes/{name}/rollback", ad),
-	r("GET", "/api/v1/jails/{name}/bundle", ro),
-	r("GET", "/api/v1/jail-templates", ro),
-	r("POST", "/api/v1/jail-templates", ad),
-	r("GET", "/api/v1/jail-templates/{name}", ro),
-	r("PUT", "/api/v1/jail-templates/{name}", ad),
-	r("DELETE", "/api/v1/jail-templates/{name}", ad),
 
 	// Networks and firewall.
 	r("GET", "/api/v1/networks", ro),
@@ -371,11 +355,8 @@ var Perms = classifyAll([]Entry{
 	r("DELETE", "/api/v1/backup-policies/{name}", ad),
 	r("POST", "/api/v1/backup-policies/{name}/rename", ad),
 	r("GET", "/api/v1/backups", ro),
-	r("POST", "/api/v1/backups", op),
 	r("GET", "/api/v1/backups/{id}", ro),
 	r("DELETE", "/api/v1/backups/{id}", api.PermBackupAdmin),
-	r("POST", "/api/v1/backups/{id}/restore-preflight", api.PermRestore),
-	r("POST", "/api/v1/backups/{id}/restore", api.PermRestore),
 	r("POST", "/api/v1/restores", api.PermRestore),
 	// Host management (docs/appliance.md): reading is harmless, changing the host needs an admin.
 	r("GET", "/api/v1/host/identity", ro),
@@ -403,27 +384,14 @@ var Perms = classifyAll([]Entry{
 	r("POST", "/api/v1/backup/key/import", ad),
 	r("POST", "/api/v1/backups/run", ad),
 	r("POST", "/api/v1/backups/{id}/verify", op),
-	r("POST", "/api/v1/backups/receive", api.PermBackupPush),
-	r("GET", "/api/v1/backups/{id}/stream", api.PermBackupPull),
-	r("GET", "/api/v1/backups/chains", api.PermBackupPull),
 
-	// Hub: remotes, groups, rollouts.
+	// Hub: remotes.
 	r("GET", "/api/v1/remotes", ro),
 	r("POST", "/api/v1/remotes", ad),
 	r("GET", "/api/v1/remotes/{name}", ro),
 	r("PUT", "/api/v1/remotes/{name}", ad),
 	r("PATCH", "/api/v1/remotes/{name}", ad),
 	r("DELETE", "/api/v1/remotes/{name}", ad),
-	r("GET", "/api/v1/groups", ro),
-	r("POST", "/api/v1/groups", ad),
-	r("GET", "/api/v1/groups/{name}", ro),
-	r("PUT", "/api/v1/groups/{name}", ad),
-	r("DELETE", "/api/v1/groups/{name}", ad),
-	r("GET", "/api/v1/rollouts", ro),
-	r("POST", "/api/v1/rollouts", ad),
-	r("GET", "/api/v1/rollouts/{name}", ro),
-	r("PUT", "/api/v1/rollouts/{name}", ad),
-	r("DELETE", "/api/v1/rollouts/{name}", ad),
 
 	// Identity: users, tokens, certificates.
 	r("GET", "/api/v1/users", ad),
@@ -440,10 +408,10 @@ var Perms = classifyAll([]Entry{
 	r("DELETE", "/api/v1/tokens/{name}", ad),
 	r("GET", "/api/v1/certificates", ad),
 	r("POST", "/api/v1/certificates", ad),
-	r("GET", "/api/v1/certificates/{fingerprint}", ad),
-	r("PUT", "/api/v1/certificates/{fingerprint}", ad),
-	r("PATCH", "/api/v1/certificates/{fingerprint}", ad),
-	r("DELETE", "/api/v1/certificates/{fingerprint}", ad),
+	r("GET", "/api/v1/certificates/{name}", ad),
+	r("PUT", "/api/v1/certificates/{name}", ad),
+	r("PATCH", "/api/v1/certificates/{name}", ad),
+	r("DELETE", "/api/v1/certificates/{name}", ad),
 	r("POST", "/api/v1/certificates/{name}/rename", ad),
 })
 

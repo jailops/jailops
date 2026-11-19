@@ -70,7 +70,7 @@ func (s *Server) osUpdateFor(j *api.Jail) *api.OSUpdate {
 	if len(gens) == 0 || j.Spec.Layout == api.LayoutThick {
 		return nil
 	}
-	cur := genNumber(j.Status.Generation)
+	cur := genNumber(j.Status.ImageGeneration)
 	last := gens[len(gens)-1].Number
 	if last <= cur {
 		return nil
@@ -172,13 +172,13 @@ func (s *Server) applyTo(j *api.Jail, req api.UpdateApplyRequest) []api.UpdateRe
 	var recs []api.UpdateRecord
 	add := func(r api.UpdateRecord) {
 		r.ID = "upd-" + randHex(4)
-		r.Jail, r.Project, r.Started, r.Finished = j.Metadata.Name, j.Metadata.Project, s.now(), s.now()
+		r.Jail, r.Project, r.StartedAt, r.FinishedAt = j.Metadata.Name, j.Metadata.Project, s.now(), s.now()
 		if s.updHistory == nil {
 			s.updHistory = map[string][]api.UpdateRecord{}
 		}
 		s.updHistory[s.updKey(j)] = append(s.updHistory[s.updKey(j)], r)
 		recs = append(recs, r)
-		if r.Result == api.UpdateOK {
+		if r.Result == api.UpdateSuccess {
 			s.emitIn(j.Metadata.Project, "update.applied", "/api/v1/jails/"+j.Metadata.Name+"/updates")
 		} else {
 			s.emitIn(j.Metadata.Project, "update.failed", "/api/v1/jails/"+j.Metadata.Name+"/updates")
@@ -195,17 +195,17 @@ func (s *Server) applyTo(j *api.Jail, req api.UpdateApplyRequest) []api.UpdateRe
 				add(rec)
 				return recs
 			}
-			j.Status.Generation = "g" + strconv.Itoa(genNumber(os.To[strings.IndexByte(os.To, '#')+2:]))
-			rec.Result = api.UpdateOK
+			j.Status.ImageGeneration = "g" + strconv.Itoa(genNumber(os.To[strings.IndexByte(os.To, '#')+2:]))
+			rec.Result = api.UpdateSuccess
 			add(rec)
 		}
 	}
 	if (req.Packages || both) && len(s.updPkgs[s.updKey(j)]) > 0 && j.Status.Power == api.PowerRunning {
 		rec := api.UpdateRecord{Kind: api.UpdateKindPackages, Packages: s.updPkgs[s.updKey(j)], Snapshot: "update-" + randHex(3)}
 		if failing {
-			rec.Result, rec.Error = api.UpdateFailed, "health check failed"
+			rec.Result, rec.Error = api.UpdateFailure, "health check failed"
 		} else {
-			rec.Result = api.UpdateOK
+			rec.Result = api.UpdateSuccess
 			delete(s.updPkgs, s.updKey(j))
 		}
 		add(rec)
@@ -334,6 +334,37 @@ func (s *Server) handleShellSetup(w http.ResponseWriter, r *http.Request) {
 			}
 			s.emitIn(rc.project, "jail-shell-set-up", "/api/v1/jails/"+name)
 			return api.ShellSetupResult{Jail: name, Shell: j.Spec.Shell, Prompt: j.Spec.Prompt, PS1: ps1, Steps: steps}, nil
+		})
+		return reply{op: &op}
+	}()
+	s.mu.Unlock()
+	s.respond(w, rp)
+}
+
+// handleRepairPackages answers like the daemon: the records of a FreeBSD jail are in step, so nothing is replaced.
+func (s *Server) handleRepairPackages(w http.ResponseWriter, r *http.Request) {
+	if _, e := decodeOptional[api.RepairPackagesRequest](r); e != nil {
+		writeErr(w, e)
+		return
+	}
+	name := r.PathValue("name")
+	rc := s.info(r)
+	jk := s.jails.key(r, name)
+	s.mu.Lock()
+	rp := func() reply {
+		j := s.jails.items[jk]
+		if j == nil {
+			return reply{err: notFound("jail", name)}
+		}
+		if j.Spec.OS == api.OSLinux {
+			return reply{err: api.Errorf(api.CodeInvalid, "jail %q is a linux jail: the base package records are those of a FreeBSD jail", name)}
+		}
+		if j.Status.Power == api.PowerRunning {
+			return reply{err: api.Errorf(api.CodeBusy, "jail %q is running; its base package records are repaired while it is stopped, and by every start", name).WithHint("restart it: jailops restart " + name)}
+		}
+		op := s.startOp(rc.project, "jails.repair-packages", "Repair the base package records of jail "+name, map[string][]string{"jails": {"/api/v1/jails/" + name}}, func() (any, *api.Error) {
+			s.emitIn(rc.project, "jail-base-packages-repaired", "/api/v1/jails/"+name)
+			return api.RepairPackagesResult{Jail: name}, nil
 		})
 		return reply{op: &op}
 	}()

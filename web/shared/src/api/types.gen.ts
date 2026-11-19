@@ -40,19 +40,18 @@ export type Code =
   | "invalid"
   | "not_found"
   | "already_exists"
-  | "conflict"
+  | "precondition_failed"
   | "unauthorized"
   | "forbidden"
   | "unsupported"
   | "busy"
   | "internal"
+  | "interrupted"
   | "ip_conflict"
   | "pool_exhausted"
   | "image_in_use"
   | "data_loss_unconfirmed"
   | "version_skew"
-  | "not_leader"
-  | "no_quorum"
   | "unverified_platform"
   | "zfs_incompatible"
   | "chain_broken"
@@ -67,9 +66,8 @@ export type Code =
   | "not_managed"
   | "locked"
   | "bad_passphrase"
-  | "stop_forced"
 
-export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'conflict', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'not_leader', 'no_quorum', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase', 'stop_forced']
+export const CodeValues: readonly Code[] = ['invalid', 'not_found', 'already_exists', 'precondition_failed', 'unauthorized', 'forbidden', 'unsupported', 'busy', 'internal', 'interrupted', 'ip_conflict', 'pool_exhausted', 'image_in_use', 'data_loss_unconfirmed', 'version_skew', 'unverified_platform', 'zfs_incompatible', 'chain_broken', 'merge_conflict', 'quota_exceeded', 'rate_limited', 'key_not_escrowed', 'plaintext_denied', 'maintenance', 'missing_chunks', 'lease_expired', 'not_managed', 'locked', 'bad_passphrase']
 
 export type DNSSource =
   | "network"
@@ -150,6 +148,51 @@ export type OS =
 
 export const OSValues: readonly OS[] = ['freebsd', 'linux']
 
+export type OperationAction =
+  | "jail.create"
+  | "jail.delete"
+  | "jail.start"
+  | "jail.stop"
+  | "jail.restart"
+  | "jail.configure"
+  | "jail.copy"
+  | "jail.convert"
+  | "jail.upgrade"
+  | "jail.rollback"
+  | "jail.snapshot"
+  | "jail.snapshot_delete"
+  | "jail.import"
+  | "jail.provision"
+  | "jail.shell_setup"
+  | "jail.repair_packages"
+  | "jail.restore"
+  | "app.install"
+  | "rename"
+  | "volume.create"
+  | "volume.delete"
+  | "volume.snapshot"
+  | "volume.snapshot_delete"
+  | "volume.rollback"
+  | "volume.attach"
+  | "volume.detach"
+  | "volume.lock"
+  | "volume.unlock"
+  | "volume.passphrase"
+  | "volume.restore"
+  | "image.build"
+  | "image.upgrade"
+  | "image.move"
+  | "image.generation_delete"
+  | "image.auto_upgrade"
+  | "backup.run"
+  | "backup.verify"
+  | "backup.delete"
+  | "update.check"
+  | "update.apply"
+  | "update.scheduled"
+
+export const OperationActionValues: readonly OperationAction[] = ['jail.create', 'jail.delete', 'jail.start', 'jail.stop', 'jail.restart', 'jail.configure', 'jail.copy', 'jail.convert', 'jail.upgrade', 'jail.rollback', 'jail.snapshot', 'jail.snapshot_delete', 'jail.import', 'jail.provision', 'jail.shell_setup', 'jail.repair_packages', 'jail.restore', 'app.install', 'rename', 'volume.create', 'volume.delete', 'volume.snapshot', 'volume.snapshot_delete', 'volume.rollback', 'volume.attach', 'volume.detach', 'volume.lock', 'volume.unlock', 'volume.passphrase', 'volume.restore', 'image.build', 'image.upgrade', 'image.move', 'image.generation_delete', 'image.auto_upgrade', 'backup.run', 'backup.verify', 'backup.delete', 'update.check', 'update.apply', 'update.scheduled']
+
 export type OperationStatus =
   | "pending"
   | "running"
@@ -206,6 +249,12 @@ export type Scope =
 
 export const ScopeValues: readonly Scope[] = ['host', 'fleet']
 
+export type UpdateKind =
+  | "packages"
+  | "os"
+
+export const UpdateKindValues: readonly UpdateKind[] = ['packages', 'os']
+
 export type UpdateMode =
   | "manual"
   | "notify"
@@ -219,12 +268,14 @@ export type UpdateReboot =
 
 export const UpdateRebootValues: readonly UpdateReboot[] = ['manual', 'auto']
 
-export type UpdateStrategy =
-  | "rebase"
-  | "inplace"
-  | "manual"
+export type UpdateResult =
+  | "success"
+  | "preflight_failed"
+  | "rolled_back"
+  | "recovery_needed"
+  | "failure"
 
-export const UpdateStrategyValues: readonly UpdateStrategy[] = ['rebase', 'inplace', 'manual']
+export const UpdateResultValues: readonly UpdateResult[] = ['success', 'preflight_failed', 'rolled_back', 'recovery_needed', 'failure']
 
 export type WireGuardMode =
   | "server"
@@ -656,7 +707,7 @@ export interface BootPolicy {
   autostart?: boolean
   priority?: number
   depends?: string[]
-  stop_timeout?: number
+  stop_timeout_seconds?: number
 }
 
 export interface Certificate {
@@ -847,8 +898,6 @@ export interface ExposeEntry {
   host_port?: number
   listen?: string
   comment?: string
-  by?: string
-  at?: string
 }
 
 export interface ExposeFamily {
@@ -1054,7 +1103,7 @@ export interface HostFirewallAllow {
 export interface HostFirewallApply {
   spec: HostFirewallSpec
   dry_run?: boolean
-  confirm_within?: number
+  confirm_within_seconds?: number
   confirm_lockout?: boolean
 }
 
@@ -1168,7 +1217,7 @@ export interface HostPendingChange {
   created: string
   deadline: string
   seconds_left: number
-  confirm_within: number
+  confirm_within_seconds: number
 }
 
 export interface HostPendingOutcome {
@@ -1234,7 +1283,7 @@ export interface ImageAutoUpgrade {
 }
 
 export interface ImageAutoUpgradeStatus {
-  next?: string
+  next_at?: string
   recent?: ImageUpgradeRun[]
 }
 
@@ -1312,8 +1361,8 @@ export interface ImageUpgradeResult {
 }
 
 export interface ImageUpgradeRun {
-  started: string
-  finished: string
+  started_at: string
+  finished_at: string
   result: string
   generation?: string
   jails_moved?: number
@@ -1338,7 +1387,7 @@ export interface JailAccounting {
 
 export interface JailAction {
   action: string
-  timeout?: number
+  timeout_seconds?: number
   force?: boolean
 }
 
@@ -1397,7 +1446,7 @@ export interface JailFileCopy {
 export interface JailFileStat {
   path: string
   type: string
-  size?: number
+  size_bytes?: number
   mode?: string
   modified_at?: string
   link?: string
@@ -1424,7 +1473,7 @@ export interface JailImported {
 
 export interface JailLogFile {
   name: string
-  size: number
+  size_bytes: number
   modified_at: string
   kind: JailLogKind
   compressed?: boolean
@@ -1479,7 +1528,7 @@ export interface JailSnapshotSpec {
 }
 
 export interface JailSnapshotStatus {
-  written?: number
+  written_bytes?: number
 }
 
 export interface JailSpec {
@@ -1511,16 +1560,17 @@ export interface JailSpec {
 export interface JailStatus {
   power: PowerState
   jid?: number
-  generation?: string
+  image_generation?: string
   freebsd_version?: string
   addresses?: string[]
   started_at?: string
   drift?: string[]
   conditions?: Condition[]
+  shell_setup?: ShellSetupStatus
   provisioned_at?: string
   warnings?: string[]
   locked?: string[]
-  disk_used?: number
+  disk_used_bytes?: number
   exposed?: ExposedEntry[]
 }
 
@@ -1762,6 +1812,7 @@ export interface ObjectMeta {
 
 export interface Operation {
   id: string
+  action?: OperationAction
   description: string
   status: OperationStatus
   resources?: Record<string, string[]>
@@ -1793,9 +1844,9 @@ export interface PasswordSet {
 
 export interface PoolUsage {
   name: string
-  size: number
-  allocated: number
-  free: number
+  size_bytes: number
+  allocated_bytes: number
+  free_bytes: number
   health?: string
 }
 
@@ -1859,8 +1910,8 @@ export interface ProjectSpec {
 export interface ProjectStatus {
   jails: number
   cpu: number
-  memory_used: number
-  disk_used: number
+  memory_used_bytes: number
+  disk_used_bytes: number
   addresses: number
   conditions?: Condition[]
 }
@@ -1991,6 +2042,16 @@ export interface RenameResult {
   warnings?: string[]
 }
 
+export interface RepairPackagesRequest {
+}
+
+export interface RepairPackagesResult {
+  jail: string
+  base: number
+  replaced: number
+  added: number
+}
+
 export interface RepositoryStatus {
   id: string
   mode: string
@@ -2075,7 +2136,6 @@ export interface ServerInfo {
   hostname: string
   role: Role
   hub?: boolean
-  clustered?: boolean
   auth: string
   environment: Environment
   secrets_recipient?: string
@@ -2126,6 +2186,11 @@ export interface ShellSetupResult {
   steps: string[]
 }
 
+export interface ShellSetupStatus {
+  state: string
+  step?: string
+}
+
 export interface Storage {
   metadata: ObjectMeta
   spec: StorageSpec
@@ -2142,9 +2207,9 @@ export interface StorageSpec {
 export interface StorageStatus {
   pool?: string
   health?: string
-  size?: number
-  used?: number
-  available?: number
+  size_bytes?: number
+  used_bytes?: number
+  available_bytes?: number
   fragmentation?: number
   conditions?: Condition[]
   granted_to?: string[]
@@ -2179,13 +2244,13 @@ export interface TopHost {
   load_15: number
   cpus: number
   cpu_percent?: number
-  memory_total?: number
-  memory_used?: number
+  memory_total_bytes?: number
+  memory_used_bytes?: number
   arc_bytes?: number
   pool?: string
-  pool_size?: number
-  pool_allocated?: number
-  pool_free?: number
+  pool_size_bytes?: number
+  pool_allocated_bytes?: number
+  pool_free_bytes?: number
   running_jails: number
 }
 
@@ -2245,8 +2310,6 @@ export interface UpdateCheckRequest {
 }
 
 export interface UpdatePolicy {
-  strategy?: UpdateStrategy
-  window?: string
   healthcheck?: string
   mode?: UpdateMode
   schedule?: string
@@ -2259,10 +2322,10 @@ export interface UpdateRecord {
   id: string
   jail: string
   project: string
-  kind: string
-  result: string
-  started: string
-  finished: string
+  kind: UpdateKind
+  result: UpdateResult
+  started_at: string
+  finished_at: string
   snapshot?: string
   from?: string
   to?: string
@@ -2366,7 +2429,7 @@ export interface VolumeSnapshotSpec {
 }
 
 export interface VolumeSnapshotStatus {
-  written?: number
+  written_bytes?: number
 }
 
 export interface VolumeSpec {
@@ -2386,7 +2449,7 @@ export interface VolumeSpec {
 export interface VolumeStatus {
   dataset?: string
   mountpoint?: string
-  used: number
+  used_bytes: number
   locked?: boolean
   state?: string
   detail?: string
@@ -2515,13 +2578,13 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "boot.priority"
   },
   {
-    "name": "boot.stop_timeout",
+    "name": "boot.stop_timeout_seconds",
     "type": "int",
     "description": "Seconds the jail has to shut down by itself, after its stop command, before it is killed; 0 is the default of thirty seconds. A database that needs a minute to close says 60. Written into the jail's configuration at its start.",
     "example": "60",
     "restart_required": true,
     "profile": true,
-    "path": "boot.stop_timeout"
+    "path": "boot.stop_timeout_seconds"
   },
   {
     "name": "devfs.\u003cname\u003e.device",
@@ -2540,33 +2603,6 @@ export const configKeys: readonly ConfigKey[] = [
     "profile": true,
     "admin": true,
     "path": "devfs[\u003cname\u003e].device"
-  },
-  {
-    "name": "disk.\u003cdevice\u003e",
-    "type": "device",
-    "description": "A volume of the project attached to the jail: \u003cdevice\u003e is the name of the volume; set it to the mount path to attach it, unset it to detach it.",
-    "example": "disk.data=/var/db",
-    "restart_required": true,
-    "profile": true,
-    "path": "volumes[\u003cdevice\u003e]"
-  },
-  {
-    "name": "disk.\u003cdevice\u003e.mount",
-    "type": "string",
-    "description": "Where the volume is mounted inside the jail.",
-    "example": "/var/db",
-    "restart_required": true,
-    "profile": true,
-    "path": "volumes[\u003cdevice\u003e].mount"
-  },
-  {
-    "name": "disk.\u003cdevice\u003e.read_only",
-    "type": "bool",
-    "description": "Attach the volume read-only.",
-    "example": "true",
-    "restart_required": true,
-    "profile": true,
-    "path": "volumes[\u003cdevice\u003e].read_only"
   },
   {
     "name": "env.\u003cvar\u003e",
@@ -2614,139 +2650,76 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "image"
   },
   {
-    "name": "limits.cpu",
-    "type": "int",
-    "description": "CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.",
-    "example": "2",
-    "restart_required": true,
-    "profile": true,
-    "path": "resources.cpu"
-  },
-  {
-    "name": "limits.cpuset",
-    "type": "string",
-    "description": "CPUs the jail runs on (cpuset(1)): a list such as 2,3 or 0-3,6, kept as sorted ranges. Needs no resource accounting. A CPU the host does not have stops the jail from starting.",
-    "example": "2,3",
-    "restart_required": true,
-    "profile": true,
-    "path": "resources.cpuset"
-  },
-  {
-    "name": "limits.disk",
-    "type": "size",
-    "description": "ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.",
-    "example": "20G",
-    "restart_required": false,
-    "profile": true,
-    "path": "resources.disk"
-  },
-  {
-    "name": "limits.disk_reservation",
-    "type": "size",
-    "description": "ZFS reservation of the jail's container.",
-    "example": "5G",
-    "restart_required": false,
-    "profile": true,
-    "path": "resources.disk_reservation"
-  },
-  {
-    "name": "limits.memory",
-    "type": "size",
-    "description": "Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.",
-    "example": "2G",
-    "restart_required": true,
-    "profile": true,
-    "path": "resources.memory"
-  },
-  {
-    "name": "limits.pids",
-    "type": "int",
-    "description": "Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.",
-    "example": "500",
-    "restart_required": true,
-    "profile": true,
-    "path": "resources.pids"
-  },
-  {
-    "name": "limits.states",
-    "type": "int",
-    "description": "Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.",
-    "example": "20000",
-    "restart_required": false,
-    "profile": true,
-    "path": "resources.states"
-  },
-  {
-    "name": "nic.\u003cdevice\u003e",
+    "name": "network.\u003cname\u003e",
     "type": "device",
     "description": "A network interface; set it to a network name to add it, unset it to remove it.",
-    "example": "nic.eth1=lan",
+    "example": "network.eth1=lan",
     "restart_required": true,
     "profile": true,
-    "path": "network[\u003cdevice\u003e]"
+    "path": "network[\u003cname\u003e]"
   },
   {
-    "name": "nic.\u003cdevice\u003e.egress",
+    "name": "network.\u003cname\u003e.egress",
     "type": "rate",
     "description": "Rate limit of what the jail sends through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.",
     "example": "10M",
     "restart_required": false,
     "profile": true,
-    "path": "network[\u003cdevice\u003e].egress"
+    "path": "network[\u003cname\u003e].egress"
   },
   {
-    "name": "nic.\u003cdevice\u003e.ingress",
+    "name": "network.\u003cname\u003e.ingress",
     "type": "rate",
     "description": "Rate limit of what the jail receives through the device, in bits per second: 10M is 10 Mbit/s. Enforced by a dummynet pipe of the host.",
     "example": "10M",
     "restart_required": false,
     "profile": true,
-    "path": "network[\u003cdevice\u003e].ingress"
+    "path": "network[\u003cname\u003e].ingress"
   },
   {
-    "name": "nic.\u003cdevice\u003e.ipv4",
+    "name": "network.\u003cname\u003e.ipv4",
     "type": "address",
     "description": "IPv4 address: auto, none or a fixed address.",
     "example": "auto",
     "restart_required": true,
     "profile": false,
-    "path": "network[\u003cdevice\u003e].ipv4"
+    "path": "network[\u003cname\u003e].ipv4"
   },
   {
-    "name": "nic.\u003cdevice\u003e.ipv6",
+    "name": "network.\u003cname\u003e.ipv6",
     "type": "address",
     "description": "IPv6 address: auto, none or a fixed address.",
     "example": "auto",
     "restart_required": true,
     "profile": false,
-    "path": "network[\u003cdevice\u003e].ipv6"
+    "path": "network[\u003cname\u003e].ipv6"
   },
   {
-    "name": "nic.\u003cdevice\u003e.mac",
+    "name": "network.\u003cname\u003e.mac",
     "type": "mac",
     "description": "MAC address (derived from the jail UUID when empty).",
     "example": "02:00:00:00:00:01",
     "restart_required": true,
     "profile": false,
-    "path": "network[\u003cdevice\u003e].mac"
+    "path": "network[\u003cname\u003e].mac"
   },
   {
-    "name": "nic.\u003cdevice\u003e.mtu",
+    "name": "network.\u003cname\u003e.mtu",
     "type": "int",
     "description": "MTU of the interface; 0 takes the network's.",
     "example": "1500",
     "restart_required": true,
     "profile": true,
-    "path": "network[\u003cdevice\u003e].mtu"
+    "path": "network[\u003cname\u003e].mtu"
   },
   {
-    "name": "nic.\u003cdevice\u003e.network",
+    "name": "network.\u003cname\u003e.network",
     "type": "string",
     "description": "Network the interface attaches to.",
     "example": "lan",
     "restart_required": true,
     "profile": true,
-    "path": "network[\u003cdevice\u003e].network"
+    "path": "network[\u003cname\u003e].network"
   },
   {
     "name": "packages",
@@ -2774,6 +2747,69 @@ export const configKeys: readonly ConfigKey[] = [
     "restart_required": false,
     "profile": true,
     "path": "prompt"
+  },
+  {
+    "name": "resources.cpu",
+    "type": "int",
+    "description": "CPU cores the jail may use: more is slowed down to that share (rctl pcpu); needs kern.racct.enable=1.",
+    "example": "2",
+    "restart_required": true,
+    "profile": true,
+    "path": "resources.cpu"
+  },
+  {
+    "name": "resources.cpuset",
+    "type": "string",
+    "description": "CPUs the jail runs on (cpuset(1)): a list such as 2,3 or 0-3,6, kept as sorted ranges. Needs no resource accounting. A CPU the host does not have stops the jail from starting.",
+    "example": "2,3",
+    "restart_required": true,
+    "profile": true,
+    "path": "resources.cpuset"
+  },
+  {
+    "name": "resources.disk",
+    "type": "size",
+    "description": "ZFS quota of the jail's container: its root, persistent datasets, volumes and snapshots together.",
+    "example": "20G",
+    "restart_required": false,
+    "profile": true,
+    "path": "resources.disk"
+  },
+  {
+    "name": "resources.disk_reservation",
+    "type": "size",
+    "description": "ZFS reservation of the jail's container.",
+    "example": "5G",
+    "restart_required": false,
+    "profile": true,
+    "path": "resources.disk_reservation"
+  },
+  {
+    "name": "resources.memory",
+    "type": "size",
+    "description": "Anonymous memory the jail may reserve in total (rctl swapuse): an allocation beyond it fails and nothing is killed; needs kern.racct.enable=1.",
+    "example": "2G",
+    "restart_required": true,
+    "profile": true,
+    "path": "resources.memory"
+  },
+  {
+    "name": "resources.pids",
+    "type": "int",
+    "description": "Processes the jail may have (rctl maxproc): fork fails beyond it; needs kern.racct.enable=1.",
+    "example": "500",
+    "restart_required": true,
+    "profile": true,
+    "path": "resources.pids"
+  },
+  {
+    "name": "resources.states",
+    "type": "int",
+    "description": "Pf states each rule of the jail's firewall may create, so that one jail cannot fill the host's state table; 0 is the host's default.",
+    "example": "20000",
+    "restart_required": false,
+    "profile": true,
+    "path": "resources.states"
   },
   {
     "name": "shell",
@@ -2812,30 +2848,7 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "update.healthcheck"
   },
   {
-    "name": "update.strategy",
-    "type": "enum",
-    "values": [
-      "rebase",
-      "inplace",
-      "manual"
-    ],
-    "description": "How the jail follows its image.",
-    "example": "rebase",
-    "restart_required": false,
-    "profile": true,
-    "path": "update.strategy"
-  },
-  {
-    "name": "update.window",
-    "type": "string",
-    "description": "Maintenance window of automatic updates.",
-    "example": "sun 03:00",
-    "restart_required": false,
-    "profile": true,
-    "path": "update.window"
-  },
-  {
-    "name": "updates.mode",
+    "name": "update.mode",
     "type": "enum",
     "values": [
       "manual",
@@ -2849,7 +2862,7 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "update.mode"
   },
   {
-    "name": "updates.os",
+    "name": "update.os",
     "type": "bool",
     "description": "Move the jail to a newer image generation (root swap).",
     "example": "true",
@@ -2858,7 +2871,7 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "update.os"
   },
   {
-    "name": "updates.packages",
+    "name": "update.packages",
     "type": "bool",
     "description": "Update the packages inside the jail (pkg or apk, from the host).",
     "example": "true",
@@ -2867,7 +2880,7 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "update.packages"
   },
   {
-    "name": "updates.reboot",
+    "name": "update.reboot",
     "type": "enum",
     "values": [
       "manual",
@@ -2880,7 +2893,7 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "update.reboot"
   },
   {
-    "name": "updates.schedule",
+    "name": "update.schedule",
     "type": "string",
     "description": "Five-field cron expression of notify and managed updates.",
     "example": "0 3 * * 0",
@@ -2889,7 +2902,34 @@ export const configKeys: readonly ConfigKey[] = [
     "path": "update.schedule"
   },
   {
-    "name": "zfs.delegation",
+    "name": "volumes.\u003cname\u003e",
+    "type": "device",
+    "description": "A volume of the project attached to the jail: \u003cname\u003e is the name of the volume; set it to the mount path to attach it, unset it to detach it.",
+    "example": "volumes.data=/var/db",
+    "restart_required": true,
+    "profile": true,
+    "path": "volumes[\u003cname\u003e]"
+  },
+  {
+    "name": "volumes.\u003cname\u003e.mount",
+    "type": "string",
+    "description": "Where the volume is mounted inside the jail.",
+    "example": "/var/db",
+    "restart_required": true,
+    "profile": true,
+    "path": "volumes[\u003cname\u003e].mount"
+  },
+  {
+    "name": "volumes.\u003cname\u003e.read_only",
+    "type": "bool",
+    "description": "Attach the volume read-only.",
+    "example": "true",
+    "restart_required": true,
+    "profile": true,
+    "path": "volumes[\u003cname\u003e].read_only"
+  },
+  {
+    "name": "zfs_delegation",
     "type": "bool",
     "description": "Global administrators only. Hands the jail a ZFS dataset of its own, \u003ccontainer\u003e/delegated: root in the jail can create datasets, snapshots and mounts below it, outside the rules JailOps applies to the jail's data. The host's priv.conf must allow it (admin-zfs-delegation).",
     "example": "true",
@@ -2901,4 +2941,4 @@ export const configKeys: readonly ConfigKey[] = [
 
 export const apiVersion = "1.0"
 /** Extensions of the API revision this UI was generated against. */
-export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'backup_pull', 'backup_push', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'jail_diff', 'firewall_applied', 'jail_export', 'jail_files', 'jail_convert', 'volume_from_dir', 'top']
+export const knownExtensions: readonly string[] = ['operations', 'etag', 'events', 'jails', 'jail_snapshots', 'jail_rollback_scopes', 'images_pkgbase', 'image_generations', 'networks_vnet', 'network_ipam_range', 'firewall_anchors', 'backup_policies', 'restore_preflight', 'audit_log', 'doctor', 'resources', 'jail_copy', 'projects', 'project_quotas', 'storage', 'trust_tokens', 'sessions', 'fleet_projects', 'config_keys', 'jail_config', 'profiles', 'jail_devices', 'jail_exec', 'jail_console', 'backup_key', 'backup_run', 'backup_verify', 'updates', 'jail_shell', 'provisioning', 'sealed_secrets', 'image_upgrade', 'jail_usage', 'apps', 'jail_logs', 'app_install', 'app_draft', 'host_identity', 'host_firewall', 'host_pending', 'wireguard', 'interface_descriptions', 'app_access', 'logs_unified', 'log_forward', 'volumes', 'setup', 'host_certificate', 'jail_shell_setup', 'jail_repair_packages', 'rename', 'boot_plan', 'firewall_test', 'jail_expose', 'jail_reach', 'jail_diff', 'firewall_applied', 'jail_export', 'jail_files', 'jail_convert', 'volume_from_dir', 'top']

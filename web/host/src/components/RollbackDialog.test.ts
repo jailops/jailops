@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import RollbackDialog from './RollbackDialog.vue'
 import { session } from '@jailops/shared/composables/session'
 
-const snap = { metadata: { name: 's1', created_at: '2026-01-01T00:00:00Z' }, spec: { jail: 'web' }, status: { written: 3 * 1024 ** 2 } }
+const snap = { metadata: { name: 's1', created_at: '2026-01-01T00:00:00Z' }, spec: { jail: 'web' }, status: { written_bytes: 3 * 1024 ** 2 } }
 
 describe('RollbackDialog', () => {
   it('requires the jail name for data scope and shows bytes', async () => {

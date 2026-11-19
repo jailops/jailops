@@ -40,6 +40,8 @@ func newOpManager(s *Service) *opManager {
 
 // OpSpec describes one operation.
 type OpSpec struct {
+	// Action is the machine-readable kind of the operation (api.OperationAction).
+	Action      api.OperationAction
 	Description string
 	// Project is the project the operation works in; empty for host-level
 	// operations (networks, images, storage), which only global identities see.
@@ -100,7 +102,7 @@ func (m *opManager) submit(ctx context.Context, spec OpSpec) (api.Operation, err
 	}
 	now := s.now().UTC()
 	lo := &liveOp{
-		op: api.Operation{ID: newOpID(), Description: spec.Description, Status: api.OpPending, Resources: spec.Resources,
+		op: api.Operation{ID: newOpID(), Action: spec.Action, Description: spec.Description, Status: api.OpPending, Resources: spec.Resources,
 			MayCancel: true, CreatedAt: now, UpdatedAt: now, Project: spec.Project},
 		done: make(chan struct{}), actor: actor,
 	}

@@ -34,7 +34,7 @@ describe('project scope', () => {
     expect(loadChoice('https://c')).toBe('')
   })
   it('computes quota usage and the tightest one', () => {
-    const rows = quotaRows({ quotas: { jails: 10, memory: '8G', cpu: 0 } }, { jails: 9, cpu: 5, memory_used: 2 * 1024 ** 3, addresses: 0 }, parseSize)
+    const rows = quotaRows({ quotas: { jails: 10, memory: '8G', cpu: 0 } }, { jails: 9, cpu: 5, memory_used_bytes: 2 * 1024 ** 3, addresses: 0 }, parseSize)
     expect(rows.map((r) => r.key)).toEqual(['jails', 'memory'])
     expect(tightest(rows)?.key).toBe('jails')
     expect(rows[0].pct).toBe(90)
@@ -43,67 +43,67 @@ describe('project scope', () => {
 
 describe('config keys from the registry', () => {
   it('reads and writes by path, including devices', () => {
-    expect(getValue(spec, key('limits.cpu'))).toBe('2')
-    expect(getValue(spec, key('nic.<device>.mtu'), 'eth0')).toBe('1500')
-    expect(getValue(spec, key('disk.<device>.mount'), 'data')).toBe('/var/db')
-    const n = setValue(spec, key('nic.<device>.mtu'), 'eth0', '1400')
+    expect(getValue(spec, key('resources.cpu'))).toBe('2')
+    expect(getValue(spec, key('network.<name>.mtu'), 'eth0')).toBe('1500')
+    expect(getValue(spec, key('volumes.<name>.mount'), 'data')).toBe('/var/db')
+    const n = setValue(spec, key('network.<name>.mtu'), 'eth0', '1400')
     expect(n.network![0].mtu).toBe(1400)
     expect(spec.network![0].mtu).toBe(1500) // the input is not mutated
-    expect(setValue(spec, key('limits.cpu'), '', '').resources?.cpu).toBeUndefined()
+    expect(setValue(spec, key('resources.cpu'), '', '').resources?.cpu).toBeUndefined()
     expect(setValue(spec, key('packages'), '', 'a, b').packages).toEqual(['a', 'b'])
     expect(setValue(spec, key('shell'), '', '/usr/local/bin/bash') as unknown as { shell: string }).toMatchObject({ shell: '/usr/local/bin/bash' })
   })
   it('creates and removes devices', () => {
-    const a = setValue(spec, key('nic.<device>.network'), 'eth1', 'backend')
+    const a = setValue(spec, key('network.<name>.network'), 'eth1', 'backend')
     expect(a.network).toHaveLength(2)
     expect(a.network![1]).toMatchObject({ name: 'eth1', network: 'backend' })
-    const b = setValue(a, key('nic.<device>'), 'eth1', '')
+    const b = setValue(a, key('network.<name>'), 'eth1', '')
     expect(b.network).toHaveLength(1)
   })
   it('lists rows per device and flattens set keys', () => {
     const names = rowsFor(spec).map((r) => r.name)
-    expect(names).toContain('nic.eth0.mtu')
-    expect(names).toContain('disk.data.mount')
-    expect(names).toContain('limits.memory')
+    expect(names).toContain('network.eth0.mtu')
+    expect(names).toContain('volumes.data.mount')
+    expect(names).toContain('resources.memory')
     expect(flatten(spec)['boot.autostart']).toBe('true')
   })
   it('validates types and marks restart-required keys', () => {
-    expect(validate(key('limits.memory'), '2G', msgs)).toBeUndefined()
-    expect(validate(key('limits.memory'), 'lots', msgs)).toBe('size')
-    expect(validate(key('limits.cpu'), 'x', msgs)).toBe('int')
-    expect(validate(key('nic.<device>.mac'), 'nope', msgs)).toBe('mac')
-    expect(validate(key('update.strategy'), 'weekly', msgs)).toBe('enum rebase|inplace|manual')
-    expect(validate(key('limits.cpu'), '', msgs)).toBeUndefined()
-    expect(validate(key('limits.cpuset'), '2,3', msgs)).toBeUndefined()
-    expect(validate(key('limits.cpuset'), '0-3, 6', msgs)).toBeUndefined()
-    expect(validate(key('limits.cpuset'), '3-', msgs)).toBe('cpuset')
-    expect(validate(key('limits.cpuset'), 'a', msgs)).toBe('cpuset')
-    expect(key('limits.cpuset').restart_required).toBe(true)
-    expect(key('limits.cpu').restart_required).toBe(true)
-    expect(key('limits.memory').restart_required).toBe(true)
+    expect(validate(key('resources.memory'), '2G', msgs)).toBeUndefined()
+    expect(validate(key('resources.memory'), 'lots', msgs)).toBe('size')
+    expect(validate(key('resources.cpu'), 'x', msgs)).toBe('int')
+    expect(validate(key('network.<name>.mac'), 'nope', msgs)).toBe('mac')
+    expect(validate(key('update.mode'), 'weekly', msgs)).toBe('enum manual|notify|managed')
+    expect(validate(key('resources.cpu'), '', msgs)).toBeUndefined()
+    expect(validate(key('resources.cpuset'), '2,3', msgs)).toBeUndefined()
+    expect(validate(key('resources.cpuset'), '0-3, 6', msgs)).toBeUndefined()
+    expect(validate(key('resources.cpuset'), '3-', msgs)).toBe('cpuset')
+    expect(validate(key('resources.cpuset'), 'a', msgs)).toBe('cpuset')
+    expect(key('resources.cpuset').restart_required).toBe(true)
+    expect(key('resources.cpu').restart_required).toBe(true)
+    expect(key('resources.memory').restart_required).toBe(true)
     expect(key('boot.autostart').restart_required).toBe(false)
   })
   it('says which changed keys need a restart', () => {
-    const d = diff(spec, setValue(setValue(spec, key('boot.priority'), '', '5'), key('limits.cpu'), '', '4'))
-    expect(d.changed).toEqual(['boot.priority', 'limits.cpu'])
-    expect(d.restart).toEqual(['limits.cpu'])
+    const d = diff(spec, setValue(setValue(spec, key('boot.priority'), '', '5'), key('resources.cpu'), '', '4'))
+    expect(d.changed).toEqual(['boot.priority', 'resources.cpu'])
+    expect(d.restart).toEqual(['resources.cpu'])
   })
   it('shows where each value comes from', () => {
     const profiles: Profile[] = [
-      { metadata: { name: 'web-limits' }, spec: { config: { 'limits.memory': '1G', 'limits.pids': '100' } } },
-      { metadata: { name: 'other' }, spec: { config: { 'limits.pids': '1' } } },
+      { metadata: { name: 'web-limits' }, spec: { config: { 'resources.memory': '1G', 'resources.pids': '100' } } },
+      { metadata: { name: 'other' }, spec: { config: { 'resources.pids': '1' } } },
     ]
     const src = expandedSources(spec, profiles)
-    expect(src['limits.pids']).toEqual({ value: '100', source: 'web-limits' }) // only listed profiles apply
-    expect(src['limits.memory'].source).toBe('jail') // the jail wins
+    expect(src['resources.pids']).toEqual({ value: '100', source: 'web-limits' }) // only listed profiles apply
+    expect(src['resources.memory'].source).toBe('jail') // the jail wins
   })
   it('checks profile keys against the registry', () => {
     const text = { unknown: 'unknown', notAllowed: 'not allowed' }
-    expect(lookupKey('nic.eth1.mtu')?.dev).toBe('eth1')
-    expect(checkProfile({ 'limits.cpu': '2' }, msgs, text)).toEqual([])
+    expect(lookupKey('network.eth1.mtu')?.dev).toBe('eth1')
+    expect(checkProfile({ 'resources.cpu': '2' }, msgs, text)).toEqual([])
     expect(checkProfile({ 'bogus.key': '1' }, msgs, text)[0].message).toBe('unknown')
     expect(checkProfile({ hostname: 'a' }, msgs, text)[0].message).toBe('not allowed')
-    expect(checkProfile({ 'limits.cpu': 'x' }, msgs, text)[0].message).toBe('int')
+    expect(checkProfile({ 'resources.cpu': 'x' }, msgs, text)[0].message).toBe('int')
   })
 })
 

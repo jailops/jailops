@@ -36,7 +36,7 @@ func TestJailLogs(t *testing.T) {
 	tr.ok("jail", "logs", "web", "-o", "name")
 	tr.ok("jail", "logs", "web", "-o", "json")
 	tr.ok("jail", "logs", "web", "messages")
-	tr.ok("jail", "logs", "web", "messages", "--tail", "2")
+	tr.ok("jail", "logs", "web", "messages", "--limit", "2")
 	tr.ok("jail", "logs", "web", "messages", "--grep", "SSHD")
 	tr.ok("jail", "logs", "web", "messages", "-n", "1", "-o", "json")
 	tr.ok("logs", "web", "nginx/error.log")
@@ -44,7 +44,7 @@ func TestJailLogs(t *testing.T) {
 	tr.do("", "jail", "logs", "web", "messages.1.gz")
 	tr.do("", "jail", "logs", "web", "nope")
 	tr.do("", "jail", "logs", "web", "../etc/passwd")
-	tr.do("", "jail", "logs", "web", "messages", "--tail", "0")
+	tr.do("", "jail", "logs", "web", "messages", "--limit", "0")
 	tr.do("", "jail", "logs", "web", "messages", "--since", "yesterday")
 	tr.do("", "jail", "logs", "web", "--events", "messages")
 	tr.do("", "jail", "logs", "ghost")
@@ -84,7 +84,7 @@ func TestJailLogsFollow(t *testing.T) {
 	env.PollInterval = 5 * time.Millisecond
 	done := make(chan int, 1)
 	go func() {
-		done <- cli.Execute(ctx, env, []string{"jail", "logs", "web", "messages", "-f", "--tail", "1"})
+		done <- cli.Execute(ctx, env, []string{"jail", "logs", "web", "messages", "-f", "--limit", "1"})
 	}()
 	waitFor(t, func() bool { return h.srv.LogReads() >= 2 })
 	h.srv.SeedJailLog("main", "web", "messages", []byte("one\ntwo\nthree\n"))

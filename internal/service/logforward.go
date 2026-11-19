@@ -159,6 +159,15 @@ func (s *Service) logForwardSpec() (api.LogForwardSpec, *object[api.LogForwardSp
 	return o.Spec, &o, nil
 }
 
+// LogForwardETag is the entity tag of the forwarding settings: the UUID and generation of the stored list, or
+// generation 0 under the UUID of the host while the list of jailopsd.yaml is in force.
+func (s *Service) LogForwardETag() string {
+	if _, o, err := s.logForwardSpec(); err == nil && o != nil {
+		return api.ETag(o.Meta.UUID, o.Meta.Generation)
+	}
+	return api.ETag(s.HostUUID(), 0)
+}
+
 // requireLogAdmin is the check of every forwarding route: the sink list
 // names hosts and files of the host, so it belongs to a global administrator.
 func requireLogAdmin(ctx context.Context, what string) error {
@@ -249,7 +258,7 @@ func (s *Service) SetLogForward(ctx context.Context, spec api.LogForwardSpec, ex
 	}
 	if o == nil {
 		if expect > 0 {
-			return api.LogForward{}, api.Errorf(api.CodeConflict, "the log forwarding changed: the list of jailopsd.yaml is in force (generation 0)").
+			return api.LogForward{}, api.Errorf(api.CodePreconditionFailed, "the log forwarding changed: the list of jailopsd.yaml is in force (generation 0)").
 				WithHint("read it again and re-apply your change")
 		}
 		if _, err := s.fwdKind.create(ctx, api.ObjectMeta{Name: logForwardName}, spec); err != nil {
@@ -257,7 +266,7 @@ func (s *Service) SetLogForward(ctx context.Context, spec api.LogForwardSpec, ex
 		}
 	} else {
 		if expect == 0 {
-			return api.LogForward{}, api.Errorf(api.CodeConflict, "the log forwarding changed: a stored list is in force (generation %d)", o.Meta.Generation).
+			return api.LogForward{}, api.Errorf(api.CodePreconditionFailed, "the log forwarding changed: a stored list is in force (generation %d)", o.Meta.Generation).
 				WithHint("read it again and re-apply your change")
 		}
 		if _, err := s.fwdKind.update(ctx, logForwardName, expect, nil, nil, spec); err != nil {

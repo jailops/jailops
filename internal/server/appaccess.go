@@ -18,10 +18,10 @@ func (s *Server) appAccessRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
-		{method: "POST", pattern: "/api/v1/jails/{name}/access", long: true, h: func(c *rc) error {
+		{method: "POST", pattern: "/api/v1/jails/{name}/access/allow", long: true, h: func(c *rc) error {
 			var in api.AppAllow
 			if err := c.decode(&in); err != nil {
 				return err
@@ -32,7 +32,7 @@ func (s *Server) appAccessRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 		{method: "POST", pattern: "/api/v1/jails/{name}/access/deny", long: true, h: func(c *rc) error {
@@ -46,7 +46,7 @@ func (s *Server) appAccessRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, v, 0)
+			c.sync(200, v, "")
 			return nil
 		}},
 	}

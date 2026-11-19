@@ -71,7 +71,7 @@ func diffLines(want, got string) string {
 // Every route of the API, by method and pattern.
 func TestFreezeRoutes(t *testing.T) {
 	e := dtest.New(t, dtest.Options{})
-	keys := append([]string(nil), e.D.Server().RouteKeys()...)
+	keys := append([]string(nil), e.D.Server().AllRouteKeys()...)
 	sort.Strings(keys)
 	freezeCheck(t, "routes", strings.Join(keys, "\n")+"\n")
 }

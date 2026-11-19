@@ -30,7 +30,7 @@ name: s2
 $ jailops --dry-run jail snapshot delete -y web s1
 dry-run: would delete snapshot s1 of jail web
 
-$ jailops --dry-run jail rollback web --all --snapshot s1
+$ jailops --dry-run jail rollback web --scope all --snapshot s1
 Rolling back all of jail web to snapshot s1 (taken 3h ago).
 0 B written since then would be discarded.
 dry-run: would roll back jail web

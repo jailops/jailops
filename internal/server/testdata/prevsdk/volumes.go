@@ -79,12 +79,35 @@ func (v *VolumeClient) Create(ctx context.Context, vol api.Volume, passphrase st
 	return op, err
 }
 
+// CreateFromDir creates a volume and copies the files of a directory of the host into it, once (extension
+// volume_from_dir, global administrator): the directory lies below one that the host operator allows with
+// admin-host-mount; owners, modes, times and links are kept, no setuid bit or device node comes across. The operation's
+// result is the volume, with Status.Imported saying what was copied. When the copy fails the volume is removed again.
+func (v *VolumeClient) CreateFromDir(ctx context.Context, vol api.Volume, dir string) (*Operation[api.Volume], error) {
+	if err := v.c.need("volume_from_dir"); err != nil {
+		return nil, err
+	}
+	body := api.VolumeCreate{Metadata: vol.Metadata, Spec: vol.Spec, FromDir: dir}
+	op, _, err := sendOp(ctx, v.c, request{method: http.MethodPost, path: v.r.path, body: body}, v.fetch(vol.Metadata.Name))
+	return op, err
+}
+
 // Delete deletes a volume that no jail attaches.
 func (v *VolumeClient) Delete(ctx context.Context, name string) (*Operation[None], error) {
+	return v.DeleteETag(ctx, name, "")
+}
+
+// DeleteETag deletes a volume only if it is still the one the ETag names (read with GetETag): a changed volume fails
+// with api.CodePreconditionFailed. An empty etag deletes whatever is there.
+func (v *VolumeClient) DeleteETag(ctx context.Context, name, etag string) (*Operation[None], error) {
 	if err := v.c.need("volumes"); err != nil {
 		return nil, err
 	}
-	op, _, err := sendOp[None](ctx, v.c, request{method: http.MethodDelete, path: v.r.item(name)}, nil)
+	h := http.Header{}
+	if etag != "" {
+		h.Set("If-Match", quoteETag(etag))
+	}
+	op, _, err := sendOp[None](ctx, v.c, request{method: http.MethodDelete, path: v.r.item(name), header: h}, nil)
 	return op, err
 }
 

@@ -56,7 +56,9 @@ func prevDriver(t *testing.T) string {
 			return
 		}
 		prevBin = filepath.Join(prevDir, "driver")
-		cmd := exec.Command(goBin, "build", "-o", prevBin, ".")
+		// no VCS stamping: the driver is a module inside the repository, and a checkout that another user owns (a CI
+		// VM) makes git refuse with status 128, which go build reports as a failure
+		cmd := exec.Command(goBin, "build", "-buildvcs=false", "-o", prevBin, ".")
 		cmd.Dir = filepath.Join("testdata", "prevsdk_driver")
 		// a module of its own with the baseline library next to it: no workspace, no network
 		cmd.Env = append(os.Environ(), "GOWORK=off", "GOFLAGS=-mod=mod", "GOPROXY=off")

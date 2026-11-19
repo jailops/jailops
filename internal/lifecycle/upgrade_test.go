@@ -123,7 +123,7 @@ func TestUpgradeMergeConflictLeavesJailOnOldGeneration(t *testing.T) {
 	before := w.state()
 	_, err := upgrade(w, api.JailUpgrade{Generation: "g2"})
 	var ae *api.Error
-	if !errors.As(err, &ae) || ae.Code != api.CodeConflict {
+	if !errors.As(err, &ae) || ae.Code != api.CodePreconditionFailed {
 		t.Fatalf("want conflict error, got %v", err)
 	}
 	if ae.Detail["files"] != "/etc/rc.conf,/etc/ssh/sshd_config" || ae.Detail["reason"] != "etc_merge_conflict" {
@@ -140,12 +140,12 @@ func TestUpgradeMergeConflictLeavesJailOnOldGeneration(t *testing.T) {
 	}
 	// a clean merge that still prints conflicts is also a conflict (never guessed)
 	w.mergeErr = nil
-	if _, err := upgrade(w, api.JailUpgrade{Generation: "g2"}); !api.IsCode(err, api.CodeConflict) {
+	if _, err := upgrade(w, api.JailUpgrade{Generation: "g2"}); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Fatal(err)
 	}
 	// a plain merge failure is not reported as a conflict
 	w.mergeOut, w.mergeErr = "disk full", errors.New("exit status 2")
-	if _, err := upgrade(w, api.JailUpgrade{Generation: "g2"}); err == nil || api.IsCode(err, api.CodeConflict) {
+	if _, err := upgrade(w, api.JailUpgrade{Generation: "g2"}); err == nil || api.IsCode(err, api.CodePreconditionFailed) {
 		t.Fatal(err)
 	}
 }
@@ -238,11 +238,6 @@ func TestUpgradePreflight(t *testing.T) {
 		{"other image", func(w *world) {}, api.JailUpgrade{Generation: "alp#g1"}, api.CodeInvalid},
 		{"bad generation", func(w *world) {}, api.JailUpgrade{Generation: "latest-ish"}, api.CodeInvalid},
 		{"missing generation", func(w *world) {}, api.JailUpgrade{Generation: "g9"}, api.CodeNotFound},
-		{"inplace strategy", func(w *world) {
-			r, _ := w.S.readRecord(bg, "alpha_web")
-			r.Spec.Update.Strategy = api.UpdateInPlace
-			w.Files.Data["/jailops/projects/alpha/jails/web/spec.json"] = marshal(r)
-		}, api.JailUpgrade{Generation: "g2"}, api.CodeUnsupported},
 		{"thick jail", func(w *world) { w.Z.Set(bg, jc, map[string]string{PropLayout: "thick"}) }, api.JailUpgrade{Generation: "g2"}, api.CodeUnsupported},
 	}
 	for _, tc := range tests {

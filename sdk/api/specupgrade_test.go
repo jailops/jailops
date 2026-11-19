@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -68,5 +69,48 @@ func TestUpgradeSpecReadsYAMLIntegers(t *testing.T) {
 	e, _ := spec["expose"].([]any)
 	if len(e) != 1 || e[0].(map[string]any)["host_port"] != 8080 {
 		t.Errorf("expose %+v", spec["expose"])
+	}
+}
+
+func TestUpgradeFieldsRenamesTheNamesOfTheFreeze(t *testing.T) {
+	cases := []struct {
+		name string
+		kind Kind
+		in   string
+		want string
+	}{
+		{"stop timeout", KindJail, `{"boot":{"autostart":true,"stop_timeout":60}}`, `{"boot":{"autostart":true,"stop_timeout_seconds":60}}`},
+		{"strategy manual is mode manual", KindJail, `{"update":{"strategy":"manual","window":"sun 03:00"}}`, `{"update":{"mode":"manual"}}`},
+		{"strategy manual keeps a scheduled mode", KindJail, `{"update":{"strategy":"manual","mode":"notify"}}`, `{"update":{"mode":"notify"}}`},
+		{"strategy rebase is gone", KindJail, `{"update":{"strategy":"rebase","healthcheck":"/bin/true"}}`, `{"update":{"healthcheck":"/bin/true"}}`},
+		{"expose by and at", KindJail, `{"expose":[{"ports":["80"],"by":"admin","at":"2026-01-02T03:04:05Z"}]}`, `{"expose":[{"ports":["80"]}]}`},
+		{"profile keys", KindProfile,
+			`{"config":{"limits.memory":"1G","nic.eth1.network":"lan","disk.data.mount":"/d","updates.mode":"managed","zfs.delegation":"true","boot.stop_timeout":"9","update.strategy":"rebase","update.window":"x","hostname":"a"}}`,
+			`{"config":{"resources.memory":"1G","network.eth1.network":"lan","volumes.data.mount":"/d","update.mode":"managed","zfs_delegation":"true","boot.stop_timeout_seconds":"9","hostname":"a"}}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := doc(t, c.in)
+			if notes := UpgradeFields(c.kind, got); len(notes) == 0 {
+				t.Error("no note")
+			}
+			want := doc(t, c.want)
+			if !reflect.DeepEqual(got, want) {
+				t.Errorf("got %v\nwant %v", got, want)
+			}
+			// a second pass changes nothing and says nothing
+			if notes := UpgradeFields(c.kind, got); len(notes) != 0 || !reflect.DeepEqual(got, want) {
+				t.Errorf("second pass: %v %v", notes, got)
+			}
+		})
+	}
+}
+
+func TestEveryConfigKeyIsThePathOfTheSpec(t *testing.T) {
+	for _, k := range ConfigKeys() {
+		want := strings.NewReplacer("[<name>]", ".<name>").Replace(k.Path)
+		if k.Name != want {
+			t.Errorf("key %s has the path %s", k.Name, k.Path)
+		}
 	}
 }

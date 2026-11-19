@@ -15,7 +15,7 @@ func TestUpdatesAndProvisionAgainstFake(t *testing.T) {
 	ctx := ctxT(t)
 
 	// The configuration keys of the update policy and the shell are in the registry.
-	op, err := c.Jails().Config(ctx, "web", map[string]string{"updates.mode": "managed", "updates.schedule": "0 3 * * 0", "updates.packages": "true", "shell": "/usr/local/bin/bash"}, nil, false)
+	op, err := c.Jails().Config(ctx, "web", map[string]string{"update.mode": "managed", "update.schedule": "0 3 * * 0", "update.packages": "true", "shell": "/usr/local/bin/bash"}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,17 +45,17 @@ func TestUpdatesAndProvisionAgainstFake(t *testing.T) {
 	srv.SeedUpdateFailure("web", "web", true)
 	aop, _ := c.Updates().Apply(ctx, api.UpdateApplyRequest{Jails: []string{"web"}})
 	recs, err := aop.Wait(ctx)
-	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateFailed {
+	if err != nil || len(recs) != 1 || recs[0].Result != api.UpdateFailure {
 		t.Fatalf("%+v %v", recs, err)
 	}
 	srv.SeedUpdateFailure("web", "web", false)
 	aop, _ = c.Updates().Apply(ctx, api.UpdateApplyRequest{})
 	recs, _ = aop.Wait(ctx)
-	if len(recs) != 1 || recs[0].Result != api.UpdateOK {
+	if len(recs) != 1 || recs[0].Result != api.UpdateSuccess {
 		t.Fatalf("%+v", recs)
 	}
 	h, err := c.Jails().UpdateHistory(ctx, "web")
-	if err != nil || len(h) != 2 || h[0].Result != api.UpdateOK || h[1].Result != api.UpdateFailed {
+	if err != nil || len(h) != 2 || h[0].Result != api.UpdateSuccess || h[1].Result != api.UpdateFailure {
 		t.Fatalf("%+v %v", h, err)
 	}
 	if _, err := c.Updates().Check(ctx, "ghost"); !api.IsCode(err, api.CodeNotFound) {

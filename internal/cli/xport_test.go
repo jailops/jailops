@@ -17,7 +17,7 @@ func TestJailExportImport(t *testing.T) {
 	file := filepath.Join(h.dir, "web.jailexport")
 	tr.ok("jail", "export", "web", "--to", file)
 	tr.do("", "jail", "export", "web", "--to", file)
-	tr.ok("jail", "export", "web", "--to", file, "--force", "--zstd")
+	tr.ok("jail", "export", "web", "--to", file, "--overwrite", "--zstd")
 	tr.do("", "jail", "export", "web")
 	tr.do("", "jail", "export", "nobody", "--to", filepath.Join(h.dir, "none"))
 	tr.do("", "jail", "import", file)

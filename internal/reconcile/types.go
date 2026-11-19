@@ -190,7 +190,6 @@ const (
 	CondFirewallApplied = api.ConditionFirewallApplied
 	// CondProxyFlood is False while the proxy dropped solicitations over its limits in the last hour.
 	CondProxyFlood = "NDPFlood"
-	CondNetwork    = "Network"
 )
 
 func cond(t string, ok bool, reason, msg string, now time.Time) api.Condition {

@@ -51,19 +51,3 @@ func TestWireGuardAnchorIsFailClosedLikeTheJailAnchors(t *testing.T) {
 		t.Fatalf("a tunnel with no network: problem %q\n%s", d.Problem, d.Ruleset)
 	}
 }
-
-// A thin jail that was stored with the update strategy inplace (accepted before the rule) is a warning of doctor, not an
-// error that stops its updates.
-func TestDoctorWarnsAboutThinJailsWithInPlace(t *testing.T) {
-	s := &Service{now: time.Now, jails: map[string]*jailEntry{
-		"alpha_old": {jail: api.Jail{Metadata: api.ObjectMeta{Name: "old", Project: "alpha"},
-			Spec: api.JailSpec{OS: api.OSFreeBSD, Layout: api.LayoutThin, Update: api.UpdatePolicy{Strategy: api.UpdateInPlace}}}},
-		"alpha_ok": {jail: api.Jail{Metadata: api.ObjectMeta{Name: "ok", Project: "alpha"},
-			Spec: api.JailSpec{OS: api.OSFreeBSD, Layout: api.LayoutThick, Update: api.UpdatePolicy{Strategy: api.UpdateInPlace}}}},
-	}}
-	c := &checkSet{}
-	s.doctorInPlaceThinJails(c)
-	if len(c.list) != 1 || c.list[0].Status != api.DoctorWarn || !strings.Contains(c.list[0].Message, "alpha/old") || strings.Contains(c.list[0].Message, "alpha/ok") {
-		t.Fatalf("%+v", c.list)
-	}
-}

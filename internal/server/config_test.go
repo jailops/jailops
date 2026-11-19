@@ -35,7 +35,7 @@ func TestConfigNeverRestartsAJailOnItsOwn(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _, _ := e.Jails.Get(c, "alpha_web")
-	op, err := e.Admin.Jails().Config(c, "web", map[string]string{"limits.memory": "2G", "boot.priority": "4", "hostname": "w.example"}, nil, false)
+	op, err := e.Admin.Jails().Config(c, "web", map[string]string{"resources.memory": "2G", "boot.priority": "4", "hostname": "w.example"}, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestConfigNeverRestartsAJailOnItsOwn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(res.RestartRequired, ",") != "hostname,limits.memory" || res.Restarted || res.Spec.Resources.Memory != "2G" || res.Status.Power != api.PowerRunning {
+	if strings.Join(res.RestartRequired, ",") != "hostname,resources.memory" || res.Restarted || res.Spec.Resources.Memory != "2G" || res.Status.Power != api.PowerRunning {
 		t.Fatalf("%+v", res)
 	}
 	after, _, _ := e.Jails.Get(c, "alpha_web")
@@ -51,7 +51,7 @@ func TestConfigNeverRestartsAJailOnItsOwn(t *testing.T) {
 		t.Fatal("the jail was restarted by a configuration change")
 	}
 	// An explicit request restarts it.
-	op, _ = e.Admin.Jails().Config(c, "web", map[string]string{"limits.cpu": "2"}, nil, true)
+	op, _ = e.Admin.Jails().Config(c, "web", map[string]string{"resources.cpu": "2"}, nil, true)
 	res, err = op.Wait(c)
 	if err != nil || !res.Restarted {
 		t.Fatalf("%v %+v", err, res)
@@ -83,7 +83,7 @@ func TestProfilesDevicesAndRendering(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := e.Admin.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "web"}, Spec: api.ProfileSpec{Config: map[string]string{
-		"limits.memory": "1G", "nic.eth0.mtu": "1400", "devfs.t.device": "tun", "boot.autostart": "true"}}}); err != nil {
+		"resources.memory": "1G", "network.eth0.mtu": "1400", "devfs.t.device": "tun", "boot.autostart": "true"}}}); err != nil {
 		t.Fatal(err)
 	}
 	sp := webSpec()
@@ -102,7 +102,7 @@ func TestProfilesDevicesAndRendering(t *testing.T) {
 		t.Fatalf("%+v", j.Spec)
 	}
 	ex, _ := e.Admin.Jails().Expanded(c, "web")
-	if ex.Sources["limits.memory"] != "jail" || ex.Sources["nic.eth0.mtu"] != "web" || ex.Jail.Spec.Network[0].MTU != 1400 || !ex.Jail.Spec.Boot.Autostart {
+	if ex.Sources["resources.memory"] != "jail" || ex.Sources["network.eth0.mtu"] != "web" || ex.Jail.Spec.Network[0].MTU != 1400 || !ex.Jail.Spec.Boot.Autostart {
 		t.Fatalf("%+v", ex)
 	}
 	// Exposing a port forwards the host's port to the jail (the network has NAT) and lets it in.
@@ -152,7 +152,7 @@ func TestProfilesDevicesAndRendering(t *testing.T) {
 	wantCode(t, err, api.CodeNotFound)
 	// Host-level profiles: global writes, everyone reads.
 	hp := e.Admin.Project(api.HostProfileProject).Profiles()
-	if _, err := hp.Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "base"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.pids": "300"}}}); err != nil {
+	if _, err := hp.Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "base"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.pids": "300"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := e.Admin.Projects().Create(c, api.Project{Metadata: api.ObjectMeta{Name: "p"}, Spec: api.ProjectSpec{
@@ -177,7 +177,7 @@ func TestProfilesDevicesAndRendering(t *testing.T) {
 		t.Fatal(err)
 	}
 	pex, _ := pc.Jails().Expanded(c, "pj")
-	if pex.Jail.Spec.Resources.PIDs != 300 || pex.Sources["limits.pids"] != "base" {
+	if pex.Jail.Spec.Resources.PIDs != 300 || pex.Sources["resources.pids"] != "base" {
 		t.Fatalf("%+v", pex)
 	}
 }
@@ -187,13 +187,13 @@ func TestProfilesDevicesAndRendering(t *testing.T) {
 func TestProfileShadowingAndReadmission(t *testing.T) {
 	e := seeded(t)
 	c := ctxT(t)
-	if _, err := e.Admin.Project(api.HostProfileProject).Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "base"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.memory": "1G"}}}); err != nil {
+	if _, err := e.Admin.Project(api.HostProfileProject).Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "base"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.memory": "1G"}}}); err != nil {
 		t.Fatal(err)
 	}
-	_, err := e.Admin.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "base"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.memory": "64G"}}})
+	_, err := e.Admin.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "base"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.memory": "64G"}}})
 	wantCode(t, err, api.CodeAlreadyExists)
 
-	if _, err := e.Admin.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "mine"}, Spec: api.ProfileSpec{Config: map[string]string{"limits.memory": "1G"}}}); err != nil {
+	if _, err := e.Admin.Profiles().Create(c, api.Profile{Metadata: api.ObjectMeta{Name: "mine"}, Spec: api.ProfileSpec{Config: map[string]string{"resources.memory": "1G"}}}); err != nil {
 		t.Fatal(err)
 	}
 	sp := webSpec()

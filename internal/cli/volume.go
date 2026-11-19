@@ -116,7 +116,7 @@ func volumeLoss(cmd *cobra.Command, ctx context.Context, c *sdk.Client, name str
 	}
 	if len(v.Status.AttachedTo) > 0 && !cmdBool(cmd, "dry-run") {
 		j := v.Status.AttachedTo[0].Jail
-		return "", api.Errorf(api.CodeConflict, "volume %q is attached to jail %q", name, j).
+		return "", api.Errorf(api.CodePreconditionFailed, "volume %q is attached to jail %q", name, j).
 			WithHint("detach it first: jailops volume detach " + j + " " + name)
 	}
 	if v.Spec.IsHostDir() {
@@ -343,15 +343,15 @@ mount from the volume's place on the host. A jail that runs gets the mount at on
 a stopped one at its next start. The attachment is part of the jail's specification
 (volumes), so it is the same as editing the jail.
 
-With --ro the jail may read the volume and not write it. The same volume can be
+With --read-only the jail may read the volume and not write it. The same volume can be
 attached to several jails; they share its files (an application that needs a
-single writer, such as a database, is attached read-write to one jail and --ro to
+single writer, such as a database, is attached read-write to one jail and --read-only to
 the others). An encrypted volume is attached to one jail only.
 
 What the jail has at PATH is hidden while the volume is mounted over it. With
 --copy-existing the files of PATH are copied into the volume first (the volume
 should be new); nothing is removed from the jail's own root.`,
-		Example:           "jailops volume attach mail maildir /var/mail/vhosts\njailops volume attach desktop maildir /home/ann/Mail --ro",
+		Example:           "jailops volume attach mail maildir /var/mail/vhosts\njailops volume attach desktop maildir /home/ann/Mail --read-only",
 		Args:              cobra.ExactArgs(3),
 		ValidArgsFunction: a.completeJailsThenVolumes(),
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -379,7 +379,7 @@ should be new); nothing is removed from the jail's own root.`,
 			return nil
 		},
 	}
-	cmd.Flags().BoolVar(&ro, "ro", false, "the jail may read the volume and not write it")
+	cmd.Flags().BoolVar(&ro, "read-only", false, "the jail may read the volume and not write it")
 	cmd.Flags().BoolVar(&copyExisting, "copy-existing", false, "copy the files the jail has at PATH into the volume first")
 	return cmd
 }

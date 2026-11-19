@@ -317,8 +317,8 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 		ds := s.lcfg.DelegatedDS(name)
 		v, err := s.d.ZFS.Get(ctx, ds, "jailed")
 		if err != nil || v != "on" {
-			return nil, api.Errorf(api.CodeConflict, "the delegated dataset %s of jail %q is not handed over (jailed is not on)", ds, j.Metadata.Name).
-				WithHint("turn zfs_delegation off and on again as a global administrator: jailops config set " + j.Metadata.Name + " zfs.delegation false, then true")
+			return nil, api.Errorf(api.CodePreconditionFailed, "the delegated dataset %s of jail %q is not handed over (jailed is not on)", ds, j.Metadata.Name).
+				WithHint("turn zfs_delegation off and on again as a global administrator: jailops config set " + j.Metadata.Name + " zfs_delegation false, then true")
 		}
 		in.ZFSDataset = ds
 		in.Allow = []string{"mount", "mount.zfs"}
@@ -643,11 +643,11 @@ func attachMTU(a api.NetworkAttach, network int) int {
 	return network
 }
 
-// stopTimeoutOf is the stop timeout written into the configuration of a jail: its boot.stop_timeout, or the default of
+// stopTimeoutOf is the stop timeout written into the configuration of a jail: its boot.stop_timeout_seconds, or the default of
 // JailOps. jail.conf always carries one, so that jail(8) bounds the wait after SIGTERM too.
 func stopTimeoutOf(spec api.JailSpec) int {
-	if spec.Boot.StopTimeout > 0 {
-		return spec.Boot.StopTimeout
+	if spec.Boot.StopTimeoutSeconds > 0 {
+		return spec.Boot.StopTimeoutSeconds
 	}
 	return api.DefaultStopTimeout
 }

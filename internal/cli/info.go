@@ -22,7 +22,7 @@ type jailInfo struct {
 	Project       string          `json:"project,omitempty"`
 	UUID          string          `json:"uuid,omitempty"`
 	Hostname      string          `json:"hostname,omitempty"`
-	State         api.PowerState  `json:"state"`
+	Power         api.PowerState  `json:"power"`
 	JID           int             `json:"jid,omitempty"`
 	OS            api.OS          `json:"os,omitempty"`
 	Layout        api.Layout      `json:"layout,omitempty"`
@@ -152,10 +152,8 @@ type infoSnapshots struct {
 }
 
 type infoUpdate struct {
-	Strategy api.UpdateStrategy `json:"strategy,omitempty"`
-	Mode     api.UpdateMode     `json:"mode,omitempty"`
-	Schedule string             `json:"schedule,omitempty"`
-	Window   string             `json:"window,omitempty"`
+	Mode     api.UpdateMode `json:"mode,omitempty"`
+	Schedule string         `json:"schedule,omitempty"`
 	// Last is the newest record of the jail's update history.
 	Last *api.UpdateRecord `json:"last,omitempty"`
 	// Error says why the history could not be read.
@@ -213,16 +211,16 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 	m, s, st := j.Metadata, j.Spec, j.Status
 	info := jailInfo{
 		Name: m.Name, Project: m.Project, UUID: m.UUID, Hostname: s.Hostname,
-		State: st.Power, JID: st.JID, OS: s.OS, Layout: s.Layout, Image: s.Image, Generation: st.Generation,
+		Power: st.Power, JID: st.JID, OS: s.OS, Layout: s.Layout, Image: s.Image, Generation: st.ImageGeneration,
 		Storage: s.Storage, Profiles: s.Profiles,
 		CreatedAt: m.CreatedAt, StartedAt: st.StartedAt, ProvisionedAt: st.ProvisionedAt,
 		Resources: infoResources{Limits: s.Resources},
 		Volumes:   s.Volumes,
-		Update:    infoUpdate{Strategy: s.Update.Strategy, Mode: s.Update.Mode, Schedule: s.Update.Schedule, Window: s.Update.Window},
+		Update:    infoUpdate{Mode: s.Update.Mode, Schedule: s.Update.Schedule},
 		Labels:    m.Labels,
 	}
-	if info.State == "" {
-		info.State = api.PowerStopped
+	if info.Power == "" {
+		info.Power = api.PowerStopped
 	}
 	configured := map[string]bool{}
 	for _, ad := range st.Addresses {
@@ -317,7 +315,7 @@ func (a *app) gatherJailInfo(ctx context.Context, c *sdk.Client, j api.Jail) jai
 			c := cond
 			info.FirewallApplied = &c
 		}
-		if cond.Status != api.ConditionTrue {
+		if cond.Problem() {
 			p := cond.Type
 			if cond.Reason != "" {
 				p += " " + cond.Reason
@@ -357,7 +355,7 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	fprintf(w, "Jail %s\n", info.Name)
 	kv("Project", dash(info.Project))
 	kv("Hostname", dash(info.Hostname))
-	state := a.paint(w, stateStyle(0), string(info.State))
+	state := a.paint(w, stateStyle(0), string(info.Power))
 	if info.JID > 0 {
 		state += colored(fmt.Sprintf(" (jid %d)", info.JID))
 	}
@@ -386,7 +384,7 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		kv("Profiles", strings.Join(info.Profiles, ", "))
 	}
 	kv("Created", when(info.CreatedAt))
-	if info.State == api.PowerRunning {
+	if info.Power == api.PowerRunning {
 		kv("Started", when(info.StartedAt))
 	}
 	if !info.ProvisionedAt.IsZero() {
@@ -436,9 +434,12 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		kv("Firewall", strings.Join(ps, ", "))
 	}
 	if c := info.FirewallApplied; c != nil {
-		if c.Status == api.ConditionTrue {
+		switch c.Status {
+		case api.ConditionTrue:
 			kv("Applied", "yes: "+c.Message+" (since "+when(c.Since)+")")
-		} else {
+		case api.ConditionUnknown:
+			kv("Applied", "not known: "+c.Message+" ("+c.Reason+", since "+when(c.Since)+")")
+		default:
 			kv("Applied", "no: "+c.Message+" ("+c.Reason+", since "+when(c.Since)+")")
 		}
 	}
@@ -482,7 +483,7 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 		section("Reachable from")
 		a.reachTable(w, r.Rows)
 		fprintf(w, "  The jail reaches: Internet %s; host %s; other jails %s\n", dash(r.Out.Internet), dash(r.Out.Host), dash(r.Out.Jails))
-		fprintf(w, "  Details: jailops firewall show %s --all\n", info.Name)
+		fprintf(w, "  Details: jailops firewall show %s --lines\n", info.Name)
 	}
 	section("Network")
 	if len(info.Interfaces) == 0 {
@@ -546,14 +547,13 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 
 	section("Update policy")
 	u := info.Update
-	strategy := dash(string(u.Strategy))
 	mode := u.Mode
 	if mode == "" {
 		mode = api.UpdateModeManual // the zero value: nothing happens unless asked
 	}
-	kv("Strategy", strategy+", mode "+string(mode))
-	if u.Schedule != "" || u.Window != "" {
-		kv("Schedule", strings.TrimSpace(dash(u.Schedule)+" "+u.Window))
+	kv("Mode", string(mode))
+	if u.Schedule != "" {
+		kv("Schedule", u.Schedule)
 	}
 	switch {
 	case u.Error != "":
@@ -561,14 +561,14 @@ func (a *app) printJailInfo(w io.Writer, info jailInfo) {
 	case u.Last == nil:
 		kv("Last", "no update yet")
 	default:
-		res := colored(termText(u.Last.Kind, false)) + " " + a.paint(w, updateStyle, u.Last.Result)
+		res := colored(termText(string(u.Last.Kind), false)) + " " + a.paint(w, updateStyle, string(u.Last.Result))
 		if u.Last.RootRolledBack {
 			res += " (root rolled back)"
 		}
 		if u.Last.To != "" {
 			res += colored(termText(", "+dash(u.Last.From)+" -> "+u.Last.To, false))
 		}
-		res += colored(", " + age(now, u.Last.Started) + " ago")
+		res += colored(", " + age(now, u.Last.StartedAt) + " ago")
 		kv("Last", res)
 	}
 
@@ -602,9 +602,9 @@ func humanSeconds(s int64) string {
 // updateStyle colours the result of an update.
 func updateStyle(_ int, v string) string {
 	switch v {
-	case api.UpdateOK:
+	case string(api.UpdateSuccess):
 		return "32"
-	case api.UpdateFailed, api.UpdateRolledBack:
+	case string(api.UpdateFailure), string(api.UpdateRolledBack), string(api.UpdatePreflightFailed), string(api.UpdateRecoveryNeeded):
 		return "31"
 	}
 	return ""

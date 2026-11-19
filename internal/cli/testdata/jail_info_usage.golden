@@ -22,7 +22,7 @@ Reachable from
 SOURCE     FAMILY   PROTO   PORTS   LIMITED TO   REACH    BY
 Internet   -        -       -       -            closed   no allow in rule with an external source and no port forward
   The jail reaches: Internet all; host DNS and ping; other jails all
-  Details: jailops firewall show web --all
+  Details: jailops firewall show web --lines
 
 Network
   eth0:         network lan, mac derived by the server, mtu network default, up
@@ -32,7 +32,7 @@ Snapshots
   Count:        0
 
 Update policy
-  Strategy:     -, mode manual
+  Mode:         manual
   Last:         no update yet
 
 Labels
@@ -44,7 +44,7 @@ $ jailops jail info db -o json
   "project": "main",
   "uuid": "<uuid>",
   "hostname": "db",
-  "state": "stopped",
+  "power": "stopped",
   "layout": "thin",
   "image": "freebsd-15",
   "generation": "g1",
@@ -103,8 +103,8 @@ $ jailops jail info db -o json
     "rows": [
       {
         "source": "internet",
-        "family": "",
-        "proto": "",
+        "family": "4,6",
+        "proto": "tcp,udp",
         "decision": "none",
         "by": "no allow in rule with an external source and no port forward"
       }

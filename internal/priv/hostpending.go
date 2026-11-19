@@ -62,7 +62,7 @@ func (l *Local) pendingView(r hostPendingRec) api.HostPendingChange {
 		left = 0
 	}
 	return api.HostPendingChange{ID: r.ID, Module: r.Module, Snapshot: r.Snapshot, Created: r.Created, Deadline: r.Deadline,
-		SecondsLeft: left, ConfirmWithin: r.ConfirmWithin}
+		SecondsLeft: left, ConfirmWithinSeconds: r.ConfirmWithin}
 }
 
 // busyPending is the refusal of a change while another one waits for its confirmation.
@@ -182,7 +182,7 @@ func (l *Local) pendingFor(id string) (*hostPendingRec, error) {
 		return nil, e
 	}
 	if id != "" && id != r.ID {
-		return nil, api.Errorf(api.CodeConflict, "the pending change is %s, not %s", r.ID, id).WithHint("check it with `jailops host pending`")
+		return nil, api.Errorf(api.CodePreconditionFailed, "the pending change is %s, not %s", r.ID, id).WithHint("check it with `jailops host pending`")
 	}
 	return r, nil
 }

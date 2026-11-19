@@ -27,15 +27,15 @@ func TestJailBulkActions(t *testing.T) {
 	tr.do("", "stop")
 	tr.do("", "stop", "--all", "-l", "env=prod")
 	tr.do("", "restart", "-l", "env=nothing")
-	tr.ok("restart", "-l", "env=prod,tier=data", "--grace", "1m30s")
+	tr.ok("restart", "-l", "env=prod,tier=data", "--timeout", "1m30s")
 	var act api.JailAction
-	if err := json.Unmarshal(h.lastBody("PUT", "/api/v1/jails/db/state"), &act); err != nil || act.Action != "restart" || act.Timeout != 90 {
+	if err := json.Unmarshal(h.lastBody("PUT", "/api/v1/jails/db/state"), &act); err != nil || act.Action != "restart" || act.TimeoutSeconds != 90 {
 		t.Fatalf("restart request: %+v %v", act, err)
 	}
-	tr.do("", "restart", "db", "--grace", "soon")
-	tr.ok("stop", "db", "--grace", "5")
+	tr.do("", "restart", "db", "--timeout", "soon")
+	tr.ok("stop", "db", "--timeout", "5")
 	_ = json.Unmarshal(h.lastBody("PUT", "/api/v1/jails/db/state"), &act)
-	if act.Timeout != 5 {
+	if act.TimeoutSeconds != 5 {
 		t.Fatalf("grace in seconds: %+v", act)
 	}
 	// A bulk delete destroys data: it shows what goes and needs the project name typed, or --confirm-data-loss;
@@ -218,7 +218,7 @@ func TestProjectFilters(t *testing.T) {
 	if last := reqs[len(reqs)-1]; last.Path != "/api/v1/operations" || !strings.Contains(last.Query, "project=shop") {
 		t.Fatalf("the project was not sent: %+v", last)
 	}
-	out, errs, code = h.run("", "events", "--project", "shop", "--since-id", "0", "--count", "1", "-o", "json")
+	out, errs, code = h.run("", "events", "--project", "shop", "--since-id", "0", "--limit", "1", "-o", "json")
 	if code != 0 || !strings.Contains(out, `"project":"shop"`) || strings.Contains(out, `"project":"main"`) {
 		t.Fatalf("events --project: %d %q %s", code, out, errs)
 	}
@@ -300,7 +300,6 @@ func TestCompletionEverywhere(t *testing.T) {
 		{[]string{"list", "-c", ""}, "addresses", ""},
 		{[]string{"list", "--sort", ""}, "age", ""},
 		{[]string{"create", "x", "--layout", ""}, "thick\n", ""},
-		{[]string{"create", "x", "--update-strategy", ""}, "rebase\n", ""},
 		{[]string{"create", "x", "--depends", ""}, "web\n", ""},
 		{[]string{"project", "set", "main", "--firewall-policy", ""}, "floor\n", ""},
 		{[]string{"firewall", "test", "--proto", ""}, "tcp\n", ""},

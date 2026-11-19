@@ -16,7 +16,7 @@ func (s *Server) firewallTestRoutes() []route {
 			if err != nil {
 				return err
 			}
-			c.sync(200, res, 0)
+			c.sync(200, res, "")
 			return nil
 		}},
 	}

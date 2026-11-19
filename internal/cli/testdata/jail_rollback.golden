@@ -7,7 +7,7 @@ snapshot/good created
 $ jailops jail snapshot create web newer
 snapshot/newer created
 
-$ jailops jail rollback web --data --snapshot good
+$ jailops jail rollback web --scope data --snapshot good
 Rolling back data of jail web to snapshot good (taken 3h ago).
 1.5 MiB written since then would be discarded.
 ! This destroys 1.5 MiB of data written to jail "web" since snapshot "good". It cannot be undone.
@@ -16,7 +16,7 @@ Rolling back data of jail web to snapshot good (taken 3h ago).
 ! hint: type the name on standard input, or pass --confirm-data-loss (-y does not answer this question)
 [exit 2]
 
-$ jailops jail rollback web --data --snapshot good -y
+$ jailops jail rollback web --scope data --snapshot good -y
 Rolling back data of jail web to snapshot good (taken 3h ago).
 1.5 MiB written since then would be discarded.
 ! This destroys 1.5 MiB of data written to jail "web" since snapshot "good". It cannot be undone.
@@ -25,14 +25,14 @@ Rolling back data of jail web to snapshot good (taken 3h ago).
 ! hint: type the name on standard input, or pass --confirm-data-loss (-y does not answer this question)
 [exit 2]
 
-$ jailops jail rollback web --data --snapshot good
+$ jailops jail rollback web --scope data --snapshot good
 Rolling back data of jail web to snapshot good (taken 3h ago).
 1.5 MiB written since then would be discarded.
 ! This destroys 1.5 MiB of data written to jail "web" since snapshot "good". It cannot be undone.
 ! Type the name "web" to confirm: aborted: the name did not match, nothing was changed
 [exit 1]
 
-$ jailops jail rollback web --data --snapshot good --dry-run
+$ jailops jail rollback web --scope data --snapshot good --dry-run
 Rolling back data of jail web to snapshot good (taken 3h ago).
 1.5 MiB written since then would be discarded.
 dry-run: would roll back jail web
@@ -40,19 +40,19 @@ scope: data
 snapshot: good
 confirm_data_loss: true
 
-$ jailops jail rollback web --data --all
-! usage: choose one of --root, --data and --all
+$ jailops jail rollback web --scope both
+! usage: --scope must be root, data or all, not "both"
 ! hint: run 'jailops jail rollback --help' for usage
 [exit 2]
 
-$ jailops jail rollback web --data
+$ jailops jail rollback web --scope data
 Rolling back data of jail web to snapshot newer (taken 3h ago).
 10 B written since then would be discarded.
 jail/web rolled back
 ! This destroys 10 B of data written to jail "web" since snapshot "newer". It cannot be undone.
 ! Type the name "web" to confirm: 
 
-$ jailops jail rollback web --all --snapshot good --confirm-data-loss
+$ jailops jail rollback web --scope all --snapshot good --confirm-data-loss
 Rolling back all of jail web to snapshot good (taken 3h ago).
 2.0 KiB written since then would be discarded.
 jail/web rolled back
@@ -64,6 +64,6 @@ $ jailops jail rollback web
 $ jailops jail upgrade web
 jail/web upgraded to g2
 
-$ jailops jail rollback web --root
+$ jailops jail rollback web --scope root
 jail/web rolled back
 

@@ -256,12 +256,12 @@ func TestProjectGrantsAndQuotas(t *testing.T) {
 	dp, _ := admin.Projects().Get(ctxT(t), "db")
 	dp.Spec.Networks = append(dp.Spec.Networks, api.ProjectNetwork{Network: "lan"})
 	_, err = admin.Projects().Update(ctxT(t), "db", dp, "")
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	if !strings.Contains(err.Error(), "network lan is already granted to project web") {
 		t.Fatalf("%v", err)
 	}
 	_, err = admin.Projects().Create(ctxT(t), api.Project{Metadata: api.ObjectMeta{Name: "third"}, Spec: api.ProjectSpec{Networks: []api.ProjectNetwork{{Network: "lan"}}}})
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	_, err = admin.Projects().Create(ctxT(t), api.Project{Metadata: api.ObjectMeta{Name: "star"}, Spec: api.ProjectSpec{Networks: []api.ProjectNetwork{{Network: "*"}}}})
 	wantCode(t, err, api.CodeInvalid)
 	// Image allow-list.
@@ -721,7 +721,16 @@ func TestTrustWorkflowOverTLS(t *testing.T) {
 	}
 	wantCode(t, err, api.CodeRateLimited)
 	// Revocation is effective on the next request.
-	if err := admin.Certificates().Delete(ctx, fpOf(cert)); err != nil {
+	certName := ""
+	for c, err := range admin.Certificates().List(ctx) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		if c.Spec.Fingerprint == fpOf(cert) {
+			certName = c.Metadata.Name
+		}
+	}
+	if err := admin.Certificates().Delete(ctx, certName); err != nil {
 		t.Fatal(err)
 	}
 	_, err = laptop.Whoami(ctx)

@@ -39,7 +39,7 @@ below the jail root; at most 1 MiB from the end of a file per read. That is all 
     jailops logs --all-projects -o json          every project you may use, one JSON object per line
 
 Each line starts with `jail/file` (`project/jail/file` with `--all-projects`), coloured per jail on a terminal
-(`NO_COLOR` turns it off). `--tail`, `--since` and `--grep` apply to every file before the merge. `-o json` prints
+(`NO_COLOR` turns it off). `--limit`, `--since` and `--grep` apply to every file before the merge. `-o json` prints
 `{"time", "project", "jail", "app", "file", "line"}` per line; `time` is absent for a line without a timestamp.
 
 **Ordering.** A line's timestamp is read from its start: RFC 3339 and the RFC 5424 form (`<PRI>1 2026-11-01T09:30:00Z`
@@ -80,12 +80,12 @@ Or from the command line or the console, which store the list in the daemon's st
 stored list replaces the file's** until `jailops logs forward reset` (or *Reset to the file* in the console) deletes it.
 `jailops logs forward list` says which one is in force.
 
-    jailops logs forward add central --url tls://logs.example.com:6514 --facility local3 [--ca FILE] [--jail NAME]... [-l K=V]...
-    jailops logs forward add hooks --url https://hooks.example.com/jailops --token-file /usr/local/etc/jailops/sinks/hook.token --audit
+    jailops logs forward create central --url tls://logs.example.com:6514 --facility local3 [--ca FILE] [--jail NAME]... [-l K=V]...
+    jailops logs forward create hooks --url https://hooks.example.com/jailops --token-file /usr/local/etc/jailops/sinks/hook.token --audit
     jailops logs forward set central --facility local5
     jailops logs forward test central            one tagged line, and whether it was delivered
     jailops logs forward status                  sent, queued, dropped, last delivery, failing since, last error
-    jailops logs forward remove alerts           asks first; -y in a script
+    jailops logs forward delete alerts           asks first; -y in a script
     jailops logs forward reset                   back to logging.forward of jailopsd.yaml; asks first, -y in a script
 
 **A list set from the command line or the console is restricted**, because an administrator's token, not root, sets
@@ -97,10 +97,10 @@ cloud metadata services among them), the unspecified, multicast or broadcast add
 address it resolves to, when the connection is made, so a name that later resolves elsewhere changes nothing; an
 address or `localhost` is refused when the list is stored. A receiver on this host, and files anywhere else, go into
 `logging.forward` of `jailopsd.yaml`, which only root writes. A list stored through the API replaces the file's whole list, so it cannot
-carry such a sink along either: `jailops logs forward add` on top of a file list that has one is refused until that
-sink is removed from the stored list (or `jailops logs forward reset` goes back to the file).
+carry such a sink along either: `jailops logs forward create` on top of a file list that has one is refused until that
+sink is deleted from the stored list (or `jailops logs forward reset` goes back to the file).
 
-`--dry-run` shows what add, edit, remove and reset would send. A sink without a name is named after the receiver's
+`--dry-run` shows what create, set, delete and reset would send. A sink without a name is named after the receiver's
 host (`logs` for `logs.example.com`).
 
 | Key | Meaning |
@@ -118,7 +118,7 @@ host (`logs` for `logs.example.com`).
 | `sources.no_app_logs` | leave out the files installed apps declare |
 | `sources.audit`, `no_jails` | add the audit log; with `no_jails` send nothing else |
 
-The CLI flags are the same: `--from-project`, `--jail`, `-l/--label`, `--exclude-jail`, `--exclude-label`, `--file`,
+The CLI flags are the same: `--from-project`, `--jail`, `-l/--selector`, `--exclude-jail`, `--exclude-selector`, `--file`,
 `--no-app-logs`, `--audit`, `--audit-only`, `--queue`, `--ca`, `--token-file`. Reading and changing the list, its
 status and the test need a **global administrator**; every change and test is in the audit log. The test answers whether
 the line was delivered and, when it was not, a short class of the failure (`connection refused`, `timeout`,

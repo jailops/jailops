@@ -38,7 +38,7 @@ func codeForStatus(status int) api.Code {
 	case http.StatusConflict:
 		return api.CodeAlreadyExists
 	case http.StatusPreconditionFailed:
-		return api.CodeConflict
+		return api.CodePreconditionFailed
 	case http.StatusTooManyRequests, http.StatusServiceUnavailable, http.StatusBadGateway, http.StatusGatewayTimeout:
 		return api.CodeBusy
 	}

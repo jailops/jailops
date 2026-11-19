@@ -167,7 +167,7 @@ type Deps struct {
 	JailShell       string
 	JailPrompt      string
 	JailPromptColor int
-	// JailMaxStates is jails.max_states: the pf state limit of a jail whose limits.states is 0 (0 sets no limit).
+	// JailMaxStates is jails.max_states: the pf state limit of a jail whose resources.states is 0 (0 sets no limit).
 	JailMaxStates int
 	// UpdateTick is how often the update schedules are evaluated (default 1m).
 	UpdateTick time.Duration
@@ -375,6 +375,8 @@ type jailRuntime struct {
 	conditions []api.Condition
 	drift      []string
 	startedAt  time.Time
+	// basePackages is why the last pass over the base package records failed ("" when they are in step).
+	basePackages string
 }
 
 // New builds a Service. Call Start afterwards to load the registry and to roll
@@ -382,6 +384,9 @@ type jailRuntime struct {
 func New(d Deps) (*Service, error) {
 	if d.State == nil || d.DB == nil {
 		return nil, errors.New("service: state and store are required")
+	}
+	if err := MigrateHistoryFiles(d.StateDir); err != nil {
+		return nil, fmt.Errorf("service: update histories: %w", err)
 	}
 	if d.Now == nil {
 		d.Now = time.Now
@@ -437,7 +442,7 @@ func New(d Deps) (*Service, error) {
 		s.nx = &reconcile.NetExec{Net: d.Net, PF: d.PF, Run: d.Run, Sysctl: d.Sysctl}
 	}
 	s.planExec = &plan.Executor{Journal: s.journal, OnEvent: s.ops.planEvent}
-	s.lcfg = lifecycle.Config{Root: d.Root, MountBase: d.MountBase, Locate: s.locate, Storages: s.lifecycleStorages, Persistent: d.Persistent, Attached: s.attachedVolumes}
+	s.lcfg = lifecycle.Config{Root: d.Root, MountBase: d.MountBase, Locate: s.locate, Storages: s.lifecycleStorages, Persistent: d.Persistent, Attached: s.attachedVolumes, RootOldRetention: lifecycle.DefaultRootOldRetention}
 	if d.ZFS != nil {
 		lc := d.Lifecycle
 		lc.Root, lc.MountBase = d.Root, d.MountBase
@@ -448,6 +453,7 @@ func New(d Deps) (*Service, error) {
 		s.lcfg = lc
 		s.life = &lifecycle.Service{Cfg: lc, ZFS: d.ZFS, Exec: d.Exec, Jails: &jailRuntimeAdapter{s: s}, Files: d.Files,
 			Hooks: &hooks{s: s}, Images: &imageAdapter{s: s}, Executor: s.planExec, Keys: d.Keys,
+			BaseRecords: s.setBasePackages,
 			Warn: func(ctx context.Context, key, action, what string) {
 				project, name := validate.SplitQualified(key)
 				s.log.Warn(what, "jail", key, "event", action)
@@ -603,7 +609,7 @@ func (s *Service) Extensions() []string {
 	var out []string
 	for _, e := range api.Extensions {
 		switch e {
-		case "backup_pull", "backup_push", "restore_preflight":
+		case "restore_preflight":
 			if s.d.Backups == nil {
 				continue
 			}

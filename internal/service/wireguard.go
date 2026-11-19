@@ -432,7 +432,7 @@ func (s *Service) PatchWireGuard(ctx context.Context, name string, patch map[str
 		return cur, err
 	}
 	if expect != AnyGeneration && expect != cur.Metadata.Generation {
-		return api.WireGuard{}, api.Errorf(api.CodeConflict, "wireguard %q changed: current generation is %d", name, cur.Metadata.Generation)
+		return api.WireGuard{}, api.Errorf(api.CodePreconditionFailed, "wireguard %q changed: current generation is %d", name, cur.Metadata.Generation)
 	}
 	cur.Status = api.WireGuardStatus{}
 	var out api.WireGuard
@@ -457,7 +457,7 @@ func (s *Service) DeleteWireGuard(ctx context.Context, name string, expect int64
 		return err
 	}
 	if expect != AnyGeneration && expect != o.Meta.Generation {
-		return api.Errorf(api.CodeConflict, "wireguard %q changed: current generation is %d", name, o.Meta.Generation)
+		return api.Errorf(api.CodePreconditionFailed, "wireguard %q changed: current generation is %d", name, o.Meta.Generation)
 	}
 	if s.d.WG != nil {
 		if err := s.d.WG.WGRemove(ctx, wireguard.RemoveReq{Name: name, Iface: o.Spec.Interface, Purge: true}); err != nil {

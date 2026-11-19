@@ -3,7 +3,7 @@ $ jailops list
 
 $ jailops network list
 ! No networks. Create one with: jailops network create NAME --ipv4 10.50.0.1/24 --uplink IFACE --nat
-! jailops network list --all lists every one of the host, granted or not.
+! jailops network list --all-projects lists every one of the host, granted or not.
 
 $ jailops image list
 ! No images. Create one with: jailops image create freebsd-15-1 --release 15.1-RELEASE, then jailops image build freebsd-15-1
@@ -26,10 +26,9 @@ $ jailops storage list
 NAME      DATASET        POOL   HEALTH   USED      AVAILABLE
 default   tank/jailops   tank   ONLINE   1.0 GiB   1023.0 GiB
 
-$ jailops storage list --all
+$ jailops storage list --all-projects
 NAME      DATASET        POOL   HEALTH   USED      AVAILABLE    GRANTED   PROJECTS
 default   tank/jailops   tank   ONLINE   1.0 GiB   1023.0 GiB   yes       main
-fast      tank/jailops   tank   ONLINE   1.0 GiB   1023.0 GiB   no        -
 
 $ jailops network show lan
 Network lan
@@ -84,9 +83,9 @@ spec:
 status:
   pool: tank
   health: ONLINE
-  size: 1099511627776
-  used: 1073741824
-  available: 1098437885952
+  size_bytes: 1099511627776
+  used_bytes: 1073741824
+  available_bytes: 1098437885952
 
 $ jailops jail list -c name,ipv4 --sort ipv4
 NAME   IPV4

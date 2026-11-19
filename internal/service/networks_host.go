@@ -65,7 +65,7 @@ func (s *Service) checkNetworkHost(ctx context.Context, spec api.NetworkSpec) er
 			}
 			for _, sub := range subnets {
 				if sub.Overlaps(have.Masked()) {
-					return api.Errorf(api.CodeConflict, "subnet %s overlaps %s on the host interface %s", sub, have, i.Name).
+					return api.Errorf(api.CodePreconditionFailed, "subnet %s overlaps %s on the host interface %s", sub, have, i.Name).
 						WithDetail("field", subnetField(sub)).
 						WithHint("the host routes that prefix through " + i.Name + " already; choose a subnet the host does not use (ifconfig lists the host's addresses)")
 				}

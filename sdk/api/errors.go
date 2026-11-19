@@ -12,37 +12,44 @@ import (
 type Code string
 
 const (
-	CodeInvalid         Code = "invalid" // request failed validation
-	CodeNotFound        Code = "not_found"
-	CodeAlreadyExists   Code = "already_exists"
-	CodeConflict        Code = "conflict" // stale generation (HTTP 412)
-	CodeUnauthorized    Code = "unauthorized"
-	CodeForbidden       Code = "forbidden"
-	CodeUnsupported     Code = "unsupported" // missing API extension
-	CodeBusy            Code = "busy"        // resource is locked by another operation
-	CodeInternal        Code = "internal"
-	CodeIPConflict      Code = "ip_conflict"
-	CodePoolExhausted   Code = "pool_exhausted"
-	CodeImageInUse      Code = "image_in_use"
-	CodeDataLoss        Code = "data_loss_unconfirmed"
-	CodeVersionSkew     Code = "version_skew"
-	CodeNotLeader       Code = "not_leader"
-	CodeNoQuorum        Code = "no_quorum"
-	CodeUnverified      Code = "unverified_platform" // needs FreeBSD or a missing kernel feature
-	CodeZFSIncompatible Code = "zfs_incompatible"
-	CodeChainBroken     Code = "chain_broken"
-	CodeMergeConflict   Code = "merge_conflict"   // /etc merge needs a human; the jail stays on the old generation
-	CodeQuotaExceeded   Code = "quota_exceeded"   // a project quota or the storage quota of a backup host would be exceeded
-	CodeRateLimited     Code = "rate_limited"     // too many failed attempts (HTTP 429)
-	CodeKeyNotEscrowed  Code = "key_not_escrowed" // raw backup refused: no recoverable key escrow
-	CodePlaintextDenied Code = "plaintext_denied" // node target needs encrypted data or allow_plaintext
-	CodeMaintenance     Code = "maintenance"      // the backup node is read-only or offline (HTTP 503); retry later
-	CodeMissingChunks   Code = "missing_chunks"   // a commit references chunks the repository lacks (HTTP 409); upload them and retry
-	CodeLeaseExpired    Code = "lease_expired"    // the backup session timed out or was closed (HTTP 410)
-	CodeNotManaged      Code = "not_managed"      // a host management module is not enabled (HTTP 403); the hint names the lines to add
-	CodeLocked          Code = "locked"           // an encrypted volume waits for its passphrase (HTTP 409); unlock the jail first
-	CodeBadPassphrase   Code = "bad_passphrase"   // the passphrase of an encrypted volume is wrong (HTTP 403); nothing else is said
-	CodeStopForced      Code = "stop_forced"      // a stop that did not finish within its budget was forced: the jail is gone (a warning to the daemon, not an error)
+	CodeInvalid            Code = "invalid" // request failed validation
+	CodeNotFound           Code = "not_found"
+	CodeAlreadyExists      Code = "already_exists"
+	CodePreconditionFailed Code = "precondition_failed" // stale tag or a state that forbids the change (HTTP 412)
+	CodeUnauthorized       Code = "unauthorized"
+	CodeForbidden          Code = "forbidden"
+	CodeUnsupported        Code = "unsupported" // missing API extension
+	CodeBusy               Code = "busy"        // resource is locked by another operation
+	CodeInternal           Code = "internal"
+	CodeIPConflict         Code = "ip_conflict"
+	CodePoolExhausted      Code = "pool_exhausted"
+	CodeImageInUse         Code = "image_in_use"
+	CodeDataLoss           Code = "data_loss_unconfirmed"
+	CodeVersionSkew        Code = "version_skew"
+	CodeUnverified         Code = "unverified_platform" // needs FreeBSD or a missing kernel feature
+	CodeZFSIncompatible    Code = "zfs_incompatible"
+	CodeChainBroken        Code = "chain_broken"
+	CodeMergeConflict      Code = "merge_conflict"   // /etc merge needs a human; the jail stays on the old generation
+	CodeQuotaExceeded      Code = "quota_exceeded"   // a project quota or the storage quota of a backup host would be exceeded
+	CodeRateLimited        Code = "rate_limited"     // too many failed attempts (HTTP 429)
+	CodeKeyNotEscrowed     Code = "key_not_escrowed" // raw backup refused: no recoverable key escrow
+	CodePlaintextDenied    Code = "plaintext_denied" // node target needs encrypted data or allow_plaintext
+	CodeMaintenance        Code = "maintenance"      // the backup node is read-only or offline (HTTP 503); retry later
+	CodeMissingChunks      Code = "missing_chunks"   // a commit references chunks the repository lacks (HTTP 409); upload them and retry
+	CodeLeaseExpired       Code = "lease_expired"    // the backup session timed out or was closed (HTTP 410)
+	CodeNotManaged         Code = "not_managed"      // a host management module is not enabled (HTTP 403); the hint names the lines to add
+	CodeLocked             Code = "locked"           // an encrypted volume waits for its passphrase (HTTP 409); unlock the jail first
+	CodeBadPassphrase      Code = "bad_passphrase"   // the passphrase of an encrypted volume is wrong (HTTP 403); nothing else is said
+	CodeInterrupted        Code = "interrupted"      // the daemon stopped while the operation ran; error.detail.recovery says what startup recovery did (Recovery*)
+)
+
+// The values of error.detail.recovery on an interrupted operation: what startup recovery did with the run the
+// operation had open. The set is frozen.
+const (
+	RecoveryRolledBack     = "rolled_back"
+	RecoveryCompleted      = "completed"
+	RecoveryDropped        = "dropped"
+	RecoveryNeedsAttention = "needs_attention"
 )
 
 // Error is the error body of the API and the error type of the SDK.
@@ -105,7 +112,7 @@ func (c Code) HTTPStatus() int {
 		return http.StatusConflict
 	case CodeAlreadyExists, CodeIPConflict, CodeImageInUse, CodeChainBroken:
 		return http.StatusConflict
-	case CodeConflict:
+	case CodePreconditionFailed:
 		return http.StatusPreconditionFailed
 	case CodeUnauthorized:
 		return http.StatusUnauthorized
@@ -115,7 +122,7 @@ func (c Code) HTTPStatus() int {
 		return http.StatusNotImplemented
 	case CodeBusy, CodePoolExhausted:
 		return http.StatusConflict
-	case CodeNotLeader, CodeNoQuorum, CodeVersionSkew, CodeMaintenance:
+	case CodeVersionSkew, CodeMaintenance:
 		return http.StatusServiceUnavailable
 	case CodeMissingChunks, CodeLocked:
 		return http.StatusConflict

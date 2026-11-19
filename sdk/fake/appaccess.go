@@ -254,7 +254,7 @@ func (s *Server) handleAppAllow(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if i >= 0 && a.grants[i].Database != db {
-			writeErr(w, api.Errorf(api.CodeConflict, "%s already has access to database %s", canonical, a.grants[i].Database).WithHint("deny it first to give it another database"))
+			writeErr(w, api.Errorf(api.CodePreconditionFailed, "%s already has access to database %s", canonical, a.grants[i].Database).WithHint("deny it first to give it another database"))
 			return
 		}
 		if j.Status.Power != api.PowerRunning {

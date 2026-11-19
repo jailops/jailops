@@ -55,8 +55,8 @@ func renameHandler[T any](s *Server, k *kind[T], rn renamer) http.HandlerFunc {
 				return reply{err: notFound(k.action, from)}
 			}
 			m := k.meta(obj)
-			if !ifMatchOK(r, m.Generation) {
-				return reply{err: api.Errorf(api.CodeConflict, "%s %q changed: current generation is %d", k.action, from, m.Generation).
+			if !ifMatchOK(r, m) {
+				return reply{err: api.Errorf(api.CodePreconditionFailed, "%s %q changed: current generation is %d", k.action, from, m.Generation).
 					WithHint("read it again and repeat the rename")}
 			}
 			if k.guard != nil {

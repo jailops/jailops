@@ -92,25 +92,10 @@ type JailSpec struct {
 	SysVIPC bool `json:"sysvipc,omitempty"`
 }
 
-// UpdateStrategy selects how a jail follows its image.
-type UpdateStrategy string
-
-const (
-	// UpdateRebase replaces the OS root from a newer generation and keeps
-	// application data (FreeBSD thin jails).
-	UpdateRebase UpdateStrategy = "rebase"
-	// UpdateInPlace upgrades packages inside the jail (thick and Linux jails).
-	UpdateInPlace UpdateStrategy = "inplace"
-	// UpdateManual never updates unless asked.
-	UpdateManual UpdateStrategy = "manual"
-)
-
 // UpdatePolicy controls updates (design 8.4). The zero value is manual:
 // nothing happens unless a user runs it.
 type UpdatePolicy struct {
-	Strategy    UpdateStrategy `json:"strategy,omitempty"`
-	Window      string         `json:"window,omitempty"`      // e.g. "sun 03:00"
-	Healthcheck string         `json:"healthcheck,omitempty"` // command run in the jail
+	Healthcheck string `json:"healthcheck,omitempty"` // command run in the jail
 	// Mode is manual (default), notify (check on the schedule and report) or
 	// managed (check and apply on the schedule).
 	Mode UpdateMode `json:"mode,omitempty"`
@@ -226,9 +211,6 @@ type ExposeEntry struct {
 	// Listen is the host address of the IPv4 forward; empty means the uplink's address.
 	Listen  string `json:"listen,omitempty"`
 	Comment string `json:"comment,omitempty"`
-	// By and At say who exposed the ports and when; the server sets them.
-	By string `json:"by,omitempty"`
-	At string `json:"at,omitempty"`
 }
 
 // Protocol is the entry's protocol: tcp when none is written.
@@ -239,7 +221,7 @@ func (e ExposeEntry) Protocol() string {
 	return e.Proto
 }
 
-// DefaultStopTimeout is the stop timeout of a jail that does not set boot.stop_timeout, in seconds: the time the stop
+// DefaultStopTimeout is the stop timeout of a jail that does not set boot.stop_timeout_seconds, in seconds: the time the stop
 // commands of the jail get to shut a service down cleanly, and the jail then to exit after SIGTERM, before it is removed.
 const DefaultStopTimeout = 30
 
@@ -251,9 +233,9 @@ type BootPolicy struct {
 	Autostart bool     `json:"autostart,omitempty"`
 	Priority  int      `json:"priority,omitempty"`
 	Depends   []string `json:"depends,omitempty"`
-	// StopTimeout is how many seconds the jail has to shut down by itself before it is killed (jail(8) stop.timeout);
+	// StopTimeoutSeconds is how many seconds the jail has to shut down by itself before it is killed (jail(8) stop.timeout);
 	// zero is DefaultStopTimeout.
-	StopTimeout int `json:"stop_timeout,omitempty"`
+	StopTimeoutSeconds int `json:"stop_timeout_seconds,omitempty"`
 }
 
 // PowerState is the observed run state of a jail.
@@ -269,13 +251,20 @@ const (
 	PowerLocked PowerState = "locked"
 )
 
+// ShellSetupStatus is the machine form of the ShellSetup condition: State is ShellSetupInstalling or ShellSetupFailed,
+// Step names the step of an installation (for example "fetching bash").
+type ShellSetupStatus struct {
+	State string `json:"state"`
+	Step  string `json:"step,omitempty"`
+}
+
 // JailStatus is the observed state of a jail on its host.
 type JailStatus struct {
 	Power PowerState `json:"power"`
 	// JID is the kernel jail id while the jail runs.
 	JID int `json:"jid,omitempty"`
-	// Generation is the image generation the root currently uses.
-	Generation string `json:"generation,omitempty"`
+	// ImageGeneration is the image generation the root currently uses, written IMAGE#gN.
+	ImageGeneration string `json:"image_generation,omitempty"`
 	// FreeBSDVersion is the FreeBSD version of that generation (ImageGeneration.FreeBSDVersion); empty when it was
 	// not recorded.
 	FreeBSDVersion string `json:"freebsd_version,omitempty"`
@@ -285,6 +274,8 @@ type JailStatus struct {
 	// Drift lists differences between the rendered and the live system.
 	Drift      []string    `json:"drift,omitempty"`
 	Conditions []Condition `json:"conditions,omitempty"`
+	// ShellSetup is the background setup of the jail's shell; nil when none is running and the latest did not fail.
+	ShellSetup *ShellSetupStatus `json:"shell_setup,omitempty"`
 	// ProvisionedAt is when the jail's provisioning last completed; zero when
 	// it has not run (or the jail has none).
 	ProvisionedAt time.Time `json:"provisioned_at,omitzero"`
@@ -296,7 +287,7 @@ type JailStatus struct {
 	// DiskUsed is what the jail's own datasets take on the pool (`used` of the root and of the persistent datasets, the
 	// space a thin root shares with its image excluded); the volumes it attaches are the project's. Zero when ZFS
 	// could not be read. Filled by list and get.
-	DiskUsed int64 `json:"disk_used,omitempty"`
+	DiskUsed int64 `json:"disk_used_bytes,omitempty"`
 	// Exposed is what the Internet reaches on the jail: pass rules on an uplink and port forwards, from the anchor the
 	// renderer builds. Filled by list and get; empty when nothing is reachable or the anchor could not be built.
 	Exposed []ExposedEntry `json:"exposed,omitempty"`
@@ -304,9 +295,9 @@ type JailStatus struct {
 
 // JailAction is the body of PUT /api/v1/jails/{name}/state.
 type JailAction struct {
-	Action  string `json:"action"` // start, stop, restart
-	Timeout int    `json:"timeout,omitempty"`
-	Force   bool   `json:"force,omitempty"`
+	Action         string `json:"action"` // start, stop, restart
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+	Force          bool   `json:"force,omitempty"`
 }
 
 // Passphrase limits of encrypted volumes. ZFS itself accepts 8 to 512 bytes; JailOps asks for at least 12.
@@ -397,7 +388,7 @@ type JailConvertResult struct {
 
 // JailUpgrade is the body of POST /api/v1/jails/{name}/upgrade.
 type JailUpgrade struct {
-	// Generation pins the target; empty means the newest generation of the
+	// Generation pins the target, written gN or IMAGE#gN; empty means the newest generation of the
 	// jail's image (or of Image).
 	Generation string `json:"generation,omitempty"`
 	// Image moves a thin FreeBSD jail to another image of the same OS and architecture whose release is the same
@@ -422,7 +413,7 @@ type JailSnapshotSpec struct {
 type JailSnapshotStatus struct {
 	// Written is the number of bytes written to the data datasets since this
 	// snapshot, which is what a data rollback would discard.
-	Written int64 `json:"written,omitempty"`
+	Written int64 `json:"written_bytes,omitempty"`
 }
 
 // JailUsage is what one jail uses, measured when it is asked for
@@ -451,7 +442,7 @@ type JailAccounting struct {
 	CPUSeconds int64 `json:"cpu_seconds"`
 	// MemoryBytes is the resident memory of the jail's processes.
 	MemoryBytes int64 `json:"memory_bytes"`
-	// SwapBytes is the anonymous (swap-backed) memory the jail has reserved: the counter `limits.memory` limits
+	// SwapBytes is the anonymous (swap-backed) memory the jail has reserved: the counter `resources.memory` limits
 	// (rctl swapuse). It is not the resident memory: a jail can be under its limit and show a larger resident size.
 	SwapBytes int64 `json:"swap_bytes"`
 }

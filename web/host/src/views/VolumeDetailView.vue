@@ -122,7 +122,7 @@ async function takeSnap(): Promise<void> {
 function rollback(sn: VolumeSnapshot): void {
   const n = sn.metadata.name
   confirmAction({
-    title: s.volumes.rollbackTitle(name.value, n), confirmLabel: s.volumes.rollback, text: s.volumes.rollbackText(bytes(sn.status.written ?? 0)),
+    title: s.volumes.rollbackTitle(name.value, n), confirmLabel: s.volumes.rollback, text: s.volumes.rollbackText(bytes(sn.status.written_bytes ?? 0)),
     typeName: name.value, typeLabel: s.volumes.typeName(name.value), danger: true,
     run: () => runOp(s.volumes.rollbackTitle(name.value, n), () => api.volumes.rollback(name.value, { snapshot: n, confirm_data_loss: true })),
     done: () => void l.reload(),
@@ -176,7 +176,7 @@ function removeSnap(sn: VolumeSnapshot): void {
               <dt>{{ s.volumes.storage }}</dt><dd class="mono">{{ vol.spec.storage || '-' }}</dd>
               <dt>{{ s.volumes.dataset }}</dt><dd class="mono">{{ vol.status?.dataset || '-' }}</dd>
               <dt>{{ s.volumes.mountpoint }}</dt><dd class="mono">{{ vol.status?.mountpoint || '-' }}</dd>
-              <dt>{{ s.volumes.used }}</dt><dd class="mono">{{ bytes(vol.status?.used ?? 0) }}<span v-if="vol.spec.size" class="faint"> / {{ vol.spec.size }}</span></dd>
+              <dt>{{ s.volumes.used }}</dt><dd class="mono">{{ bytes(vol.status?.used_bytes ?? 0) }}<span v-if="vol.spec.size" class="faint"> / {{ vol.spec.size }}</span></dd>
               <dt>{{ s.volumes.owner }}</dt><dd class="mono" :title="s.volumes.fixed">{{ vol.spec.uid }}:{{ vol.spec.gid }}</dd>
               <dt>{{ s.volumes.mode }}</dt><dd class="mono" :title="s.volumes.fixed">{{ vol.spec.mode || '-' }}</dd>
             </dl>
@@ -200,7 +200,7 @@ function removeSnap(sn: VolumeSnapshot): void {
             <tbody><tr v-for="sn in snaps" :key="sn.metadata.name" :data-snapshot="sn.metadata.name">
               <td class="mono" :data-label="s.jails.name">{{ sn.metadata.name }}<div v-if="sn.spec.comment" class="faint">{{ sn.spec.comment }}</div></td>
               <td :data-label="s.volumes.snapshotCreated"><TimeStamp :ts="sn.metadata.created_at" /></td>
-              <td class="mono" :data-label="s.volumes.written">{{ bytes(sn.status.written ?? 0) }}</td>
+              <td class="mono" :data-label="s.volumes.written">{{ bytes(sn.status.written_bytes ?? 0) }}</td>
               <td class="actions"><div class="row-actions"><button class="btn btn-sm" type="button" :data-rollback="sn.metadata.name" @click="rollback(sn)">{{ s.volumes.rollback }}</button><button class="btn btn-sm btn-danger" type="button" :data-delete-snapshot="sn.metadata.name" @click="removeSnap(sn)">{{ s.volumes.deleteSnapshot }}</button></div></td>
             </tr></tbody></table></div>
         </section>

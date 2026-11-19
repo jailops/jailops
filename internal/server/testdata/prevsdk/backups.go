@@ -60,7 +60,7 @@ func (b *BackupClient) Preflight(ctx context.Context, req api.RestoreRequest) (a
 // refuses a restore whose preflight is not OK.
 func (b *BackupClient) Restore(ctx context.Context, req api.RestoreRequest) (*Operation[api.Jail], error) {
 	req.DryRun = false
-	op, _, err := sendOp[api.Jail](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/restores", body: req}, nil)
+	op, _, err := sendOp[api.Jail](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/restores", body: req, header: idempotencyHeader(ctx)}, nil)
 	return op, err
 }
 
@@ -125,6 +125,17 @@ func (b *BackupClient) CreateKey(ctx context.Context, recipients ...string) (api
 		return api.BackupKeyCreated{}, err
 	}
 	v, _, err := send[api.BackupKeyCreated](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/backup/key", body: api.BackupKeyCreate{Recipients: recipients}})
+	return v, err
+}
+
+// ImportKey installs a backup key made elsewhere (POST /api/v1/backup/key/import, admin only): a recovery key, a key
+// file or an escrow identity, as one field of in. With in.Check nothing is written and the reply says what an import
+// would do. The body holds a secret: do not log it.
+func (b *BackupClient) ImportKey(ctx context.Context, in api.BackupKeyImport) (api.BackupKeyImported, error) {
+	if err := b.c.need("backup_key"); err != nil {
+		return api.BackupKeyImported{}, err
+	}
+	v, _, err := send[api.BackupKeyImported](ctx, b.c, request{method: http.MethodPost, path: "/api/v1/backup/key/import", body: in})
 	return v, err
 }
 

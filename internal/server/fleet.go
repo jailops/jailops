@@ -51,7 +51,7 @@ func (s *Server) aggregateProject(c *rc) error {
 		}
 		agg.Hosts = append(agg.Hosts, hs)
 	}
-	c.sync(200, agg, def.Metadata.Generation)
+	c.sync(200, agg, api.ETag(def.Metadata.UUID, def.Metadata.Generation))
 	_ = ctx
 	return nil
 }

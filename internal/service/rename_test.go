@@ -203,7 +203,7 @@ func TestRenameNetwork(t *testing.T) {
 	_, _, err = s.RenameNetwork(g, "lan", renameOpts(other))
 	wantCode(t, err, api.CodeAlreadyExists)
 	_, _, err = s.RenameNetwork(g, "lan", service.RenameOptions{NewName: "office", Expect: lan.Metadata.Generation + 7})
-	wantCode(t, err, api.CodeConflict)
+	wantCode(t, err, api.CodePreconditionFailed)
 	synced := dtest.LAN()
 	synced.Metadata.Name, synced.Metadata.ManagedBy = "synced", "sync:fleet"
 	synced.Spec.IPv4 = &api.IPv4Net{Subnet: "10.99.0.0/24", Gateway: "10.99.0.1", Range: "10.99.0.10-10.99.0.20"}
@@ -342,7 +342,7 @@ func TestRenameInterruptedIsRolledBackAtStart(t *testing.T) {
 		t.Fatalf("after the restart\n%s\ninstead of\n%s\n%s", now, before, e2.Log())
 	}
 	rec := s2.Recovered()
-	if len(rec) != 1 || rec[0].Action != "rolled-back" || !strings.HasPrefix(rec[0].Run, "rename/") {
+	if len(rec) != 1 || rec[0].Action != api.RecoveryRolledBack || !strings.HasPrefix(rec[0].Run, "rename/") {
 		t.Fatalf("%+v", rec)
 	}
 	got, err := s2.GetOperation(g, op.ID)
@@ -513,7 +513,7 @@ func TestRenameJailNeedsTheAdminRole(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := e.Admin.Jails().Rename(ctx, "web", api.Rename{NewName: "www"}, "999"); !api.IsCode(err, api.CodeConflict) {
+	if _, err := e.Admin.Jails().Rename(ctx, "web", api.Rename{NewName: "www"}, "999"); !api.IsCode(err, api.CodePreconditionFailed) {
 		t.Fatalf("a stale ETag was accepted: %v", err)
 	}
 	h, err = e.Admin.Jails().Rename(ctx, "web", api.Rename{NewName: "www"}, etag)

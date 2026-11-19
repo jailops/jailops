@@ -492,7 +492,7 @@ func sameInode(f *os.File, want fileStat) error {
 	}
 	got, ok := statOf(fi)
 	if !ok || got.id() != want.id() {
-		return api.Errorf(api.CodeConflict, "source changed while it was copied")
+		return api.Errorf(api.CodePreconditionFailed, "source changed while it was copied")
 	}
 	return nil
 }

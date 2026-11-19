@@ -42,8 +42,8 @@ type LogsQuery struct {
 	AppLogs bool `json:"app_logs,omitempty"`
 	// File is the file read of every jail (default messages).
 	File string `json:"file,omitempty"`
-	// Tail, Since and Grep apply to every source before the merge.
-	Tail  int    `json:"tail,omitempty"`
+	// Limit, Since and Grep apply to every source before the merge.
+	Limit int    `json:"limit,omitempty"`
 	Since string `json:"since,omitempty"`
 	Grep  string `json:"grep,omitempty"`
 	// Cursor continues a previous read: the next map of its reply, by source key.
@@ -121,11 +121,11 @@ func (q LogsQuery) Normalize() (LogsQuery, error) {
 			return q, Errorf(CodeInvalid, "cursor: %q is not a source key with an offset", k)
 		}
 	}
-	lq, err := JailLogQuery{Tail: q.Tail, Since: q.Since, Grep: q.Grep}.Normalize()
+	lq, err := JailLogQuery{Limit: q.Limit, Since: q.Since, Grep: q.Grep}.Normalize()
 	if err != nil {
 		return q, err
 	}
-	q.Tail = lq.Tail
+	q.Limit = lq.Limit
 	return q, nil
 }
 
@@ -149,12 +149,12 @@ func ParseLogsQuery(v url.Values) (LogsQuery, error) {
 	default:
 		return q, Errorf(CodeInvalid, "app_logs is true or false")
 	}
-	if s := v.Get("tail"); s != "" {
+	if s := v.Get("limit"); s != "" {
 		n, err := strconv.Atoi(s)
 		if err != nil || n < 1 {
-			return q, Errorf(CodeInvalid, "tail must be a number of lines between 1 and %d", MaxLogTail)
+			return q, Errorf(CodeInvalid, "limit must be a number of lines between 1 and %d", MaxLogLimit)
 		}
-		q.Tail = n
+		q.Limit = n
 	}
 	if s := v.Get("cursor"); s != "" {
 		if len(s) > MaxLogCursor {
@@ -190,8 +190,8 @@ func (q LogsQuery) Values() url.Values {
 	if q.File != "" && q.File != DefaultLogFile {
 		v.Set("file", q.File)
 	}
-	if q.Tail > 0 && q.Tail != DefaultLogTail {
-		v.Set("tail", strconv.Itoa(q.Tail))
+	if q.Limit > 0 && q.Limit != DefaultLogLimit {
+		v.Set("limit", strconv.Itoa(q.Limit))
 	}
 	if q.Since != "" {
 		v.Set("since", q.Since)

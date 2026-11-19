@@ -21,8 +21,8 @@ import (
 // DummynetModule is the kernel module whose pipes carry the bandwidth limits.
 const DummynetModule = "dummynet"
 
-// shapedDevice is one direction of one device of a jail with a bandwidth limit: nic.<device>.egress or
-// nic.<device>.ingress, in bits per second.
+// shapedDevice is one direction of one device of a jail with a bandwidth limit: network.<name>.egress or
+// network.<name>.ingress, in bits per second.
 type shapedDevice struct {
 	key  render.PipeKey
 	rate uint64

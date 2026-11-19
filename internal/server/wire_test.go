@@ -103,7 +103,7 @@ func (w *wire) do(method, path, body string, hdr ...string) reply {
 
 	fmt.Fprintf(&w.out, "> %s %s\n", method, w.norm(strings.TrimPrefix(u.String(), w.e.HTTP.URL)))
 	for _, h := range sent {
-		fmt.Fprintf(&w.out, "> %s\n", h)
+		fmt.Fprintf(&w.out, "> %s\n", w.norm(h))
 	}
 	if body != "" {
 		fmt.Fprintf(&w.out, "> %s\n", compactJSON(body))
@@ -233,12 +233,13 @@ func (w *wire) normValue(key string, v any) any {
 				out[k] = w.normValue(k, e)
 			}
 		}
-		// What the daemon's own loops read into the status of an object (conditions, drift: the background setup of
-		// a shell, the reconcile pass, the state of the firewall) is in an answer or not depending on the moment, so
+		// What the daemon's own loops read into the status of an object (conditions, drift, shell_setup: the background
+		// setup of a shell, the reconcile pass, the state of the firewall) is in an answer or not depending on the moment, so
 		// a transcript leaves it out. The shape of a condition is frozen with the other envelopes
 		// (testdata/freeze/envelopes.golden).
 		delete(out, "conditions")
 		delete(out, "drift")
+		delete(out, "shell_setup")
 		return out
 	case []any:
 		out := make([]any, len(x))

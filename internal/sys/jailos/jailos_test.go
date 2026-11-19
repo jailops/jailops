@@ -253,8 +253,8 @@ func TestRemoveForcesAStopThatHangs(t *testing.T) {
 	c := NewCommand(f)
 	ctx := context.Background()
 	// the jail is gone and the answer says it was forced (a warning for the daemon, which takes it as a stop)
-	if err := c.Remove(ctx, conf, "db"); !api.IsCode(err, api.CodeStopForced) {
-		t.Fatalf("a stop that hangs: %v, want the code %s", err, api.CodeStopForced)
+	if err := c.Remove(ctx, conf, "db"); !IsForcedStop(err) {
+		t.Fatalf("a stop that hangs: %v, want a forced stop", err)
 	}
 	forced := false
 	for _, call := range f.Calls() {

@@ -20,7 +20,7 @@ $ jailops jail list -o yaml
         ipv4: 10.20.0.10
   status:
     power: stopped
-    generation: g1
+    image_generation: g1
 
 $ jailops jail list -o json
 [
@@ -56,7 +56,7 @@ $ jailops jail list -o json
     },
     "status": {
       "power": "stopped",
-      "generation": "g1"
+      "image_generation": "g1"
     }
   }
 ]
@@ -97,7 +97,7 @@ $ jailops jail show web
   },
   "status": {
     "power": "stopped",
-    "generation": "g1"
+    "image_generation": "g1"
   }
 }
 
@@ -111,7 +111,7 @@ Labels:      env=prod
 SPEC                    STATUS
 ----                    ------
 image: freebsd-15       power: stopped
-storage: default        generation: g1
+storage: default        image_generation: g1
 layout: thin
 hostname: web
 network:
@@ -148,7 +148,7 @@ $ jailops jail create x --image freebsd-15 --network lan --storage default -o js
   },
   "status": {
     "power": "stopped",
-    "generation": "g1"
+    "image_generation": "g1"
   }
 }
 
