@@ -27,7 +27,20 @@ trap 'cleanup; exit 1' INT TERM
 t0=$(date +%s)
 say()  { printf '\n== %s  [+%ss]\n' "$*" "$(($(date +%s) - t0))"; }
 pass() { passes=$((passes + 1)); printf 'PASS  %s\n' "$*"; }
-bad()  { fails=$((fails + 1)); printf 'FAIL  %s\n' "$*"; }
+bad()  {
+	fails=$((fails + 1)); printf 'FAIL  %s\n' "$*"
+	# the first failure writes down what pf holds, once: a run in CI cannot be looked at afterwards
+	if [ "${dumped:-0}" = 0 ]; then
+		dumped=1
+		echo "---- pf at the first failure"
+		pfctl -si 2>&1 | head -3; kldstat -m pf 2>&1 | tail -2; sysctl net.pf 2>&1 | head -8
+		pfctl -sr 2>&1 | head -40
+		for a in $(pfctl -sA 2>/dev/null | grep jailops | head -12); do echo "-- anchor $a"; pfctl -a "$a" -sr 2>&1 | head -30; done
+		echo "---- jails and interfaces"
+		jls 2>&1 | head -20; ifconfig -l
+		echo "----"
+	fi
+}
 die()  { printf 'ABORT %s\n' "$*" >&2; cleanup; exit 2; }
 waitfor_() { # waitfor_ DESCRIPTION SECONDS COMMAND...: the command must succeed within SECONDS (polled twice a second); a miss is a FAIL line, not an abort
 	wf_desc=$1; wf_secs=$2; shift 2

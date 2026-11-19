@@ -18,8 +18,10 @@ env:
   # the next entry is tried after ANY error of the module proxy, not only after a 404: a stream error of proxy.golang.org failed a run
   GOPROXY: https://proxy.golang.org|direct
 
+# a newer push or pull request run replaces the older one of its branch; a run by hand or at night has a group of its own, so a merge
+# does not cancel the full run that someone waits for
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 jobs:
