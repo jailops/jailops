@@ -412,6 +412,9 @@ project and the jail.
 - **The jail's own package repository**: `pkg -j` reads the repositories configured **in the jail**. A jail with a
   repository file of its own (`/usr/local/etc/pkg/repos/*.conf`) keeps using it; the base packages of a thin jail never
   come through it.
+- **`pkg -j` answers "The package management tool is not yet installed on your system".** `/usr/sbin/pkg` is the program that
+  fetches pkg, and a newer one (seen on FreeBSD 16 snapshots) looks for pkg inside the jail or the root of `-j` and `-r`,
+  where a thin jail has none. Run `/usr/local/sbin/pkg -j PROJECT_JAIL ...` instead; JailOps itself does.
 - **rctl and cpuset**: a jail with `resources.cpuset` names CPUs; `jailops doctor` (`jails.cpuset`) warns when the host
   does not have them. Limits that need `kern.racct.enable=1` are `Limits=NotEnforced` on a host without it.
 - **devfs rulesets**: JailOps renders the ruleset of each jail; a ruleset number of your own in `/etc/devfs.rules` must

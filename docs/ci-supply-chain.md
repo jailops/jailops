@@ -10,7 +10,7 @@ tag (`@v7`), which the action's owner can move to other code at any time; a full
 | `ci.yml` (every push and pull request) | `contents: read` for every job | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, `actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, **`vmactions/freebsd-vm`** |
 | `release.yml` (a tag `v*`) | `contents: read`, and `contents: write` in the one job that publishes the release (the check job before it cannot write) | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, **`goreleaser/goreleaser-action`** |
 | `linux-e2e.yml` (every night and on demand; no pull request, not part of `CI ok`) | `contents: read` | `actions/checkout`, `actions/setup-node`, `actions/setup-go` (by commit), **`vmactions/freebsd-vm`** (by tag, like `ci.yml`) |
-| `freebsd-ahead.yml` (every Sunday and on demand; no pull request, not part of `CI ok`) | `contents: read` | `actions/checkout`, `actions/setup-node`, `actions/setup-go`, `actions/upload-artifact`, `actions/download-artifact`, all by commit; no third-party action: qemu runs the VM |
+| `freebsd-ahead.yml` (every Sunday and on demand; no pull request, not part of `CI ok`) | `contents: read` | `actions/checkout`, `actions/setup-node`, `actions/setup-go`, `actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, all by commit; no third-party action: qemu runs the VM |
 
 `release.yml` names every action by its commit and GoReleaser by an exact version. The two in bold come from third parties: `vmactions/freebsd-vm` runs the FreeBSD VM that builds and tests the tree, and
 `goreleaser/goreleaser-action` runs with the token that can write the release. They matter most; the `actions/*` ones

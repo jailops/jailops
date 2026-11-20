@@ -12,7 +12,7 @@ name: FreeBSD ahead
 #
 #   gh workflow run freebsd-ahead.yml                      both branches
 #   gh workflow run freebsd-ahead.yml -f which=current     one branch (stable, current)
-#   gh workflow run freebsd-ahead.yml -f fail_fast=true    end the run at the first red job
+#   gh workflow run freebsd-ahead.yml -f fail_fast=false   run every job to its end (the scheduled run does); the default of a run by hand ends at the first red job
 
 on:
   schedule:
@@ -25,10 +25,15 @@ on:
         type: choice
         options: [both, stable, current]
         default: both
+      group:
+        description: "The jobs of a branch to run: all, or one of e2e, pf-ab, pf-cd (gh workflow run freebsd-ahead.yml -f which=current -f group=e2e)"
+        type: choice
+        options: [all, e2e, pf-ab, pf-cd]
+        default: all
       fail_fast:
         description: "End the run at the first job that fails"
         type: boolean
-        default: false
+        default: true
 
 permissions:
   contents: read
@@ -52,16 +57,18 @@ jobs:
       - id: m
         env:
           WHICH: ${{ inputs.which }}
+          GROUP: ${{ inputs.group }}
         run: |
           which=${WHICH:-both}
-          jq -nc --arg which "$which" '
+          group=${GROUP:-all}
+          jq -nc --arg which "$which" --arg group "$group" '
             [ {branch: "stable", version: "15.2-STABLE", port: 2240}, {branch: "current", version: "16.0-CURRENT", port: 2241} ]
             | map(select($which == "both" or .branch == $which))
             | map(. as $b | [
                 {group: "e2e",   parts: "e2e:1 e2e:2 e2e:3", pkgs: "curl postgresql17-server"},
                 {group: "pf-ab", parts: "pf:a pf:b",         pkgs: "curl"},
                 {group: "pf-cd", parts: "pf:c pf:d",         pkgs: "curl"}
-              ] | map($b + .))
+              ] | map(select($group == "all" or .group == $group) | $b + .))
             | add' > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
           cat matrix.json
@@ -139,13 +146,32 @@ jobs:
           nproc; ls -l /dev/kvm
       - name: A key for the VM
         run: ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/vmkey"
+      - name: The name of today's snapshot
+        id: snap
+        run: echo "name=$(sh scripts/ci-boot-vm.sh resolve '${{ matrix.version }}')" >> "$GITHUB_OUTPUT"
+      # one download of the image (about 700 MB) per snapshot, not one per job: the jobs of a run and the runs of the next days restore it
+      - name: The download of the snapshot, kept
+        id: imgcache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/imgcache
+          key: freebsd-snapshot-${{ steps.snap.outputs.name }}
       - name: Download the snapshot and boot it
         id: boot
         continue-on-error: true
+        timeout-minutes: 25
         run: |
           set -eu
-          sh scripts/ci-boot-vm.sh fetch "${{ matrix.version }}" "$RUNNER_TEMP/vm"
+          sh scripts/ci-boot-vm.sh fetch "${{ matrix.version }}" "$RUNNER_TEMP/vm" "$RUNNER_TEMP/imgcache"
           QEMU_SMP=3 QEMU_MEM=8G sh scripts/ci-boot-vm.sh boot "$RUNNER_TEMP/vm" "${{ matrix.port }}" "$RUNNER_TEMP/vmkey"
+      # kept as soon as it is there, not at the end of a job that may fail on a test
+      - name: Keep the download of the snapshot
+        if: always() && steps.imgcache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/imgcache
+          key: freebsd-snapshot-${{ steps.snap.outputs.name }}
       - name: The VM could not be booted
         if: steps.boot.outcome == 'failure'
         run: |
@@ -158,7 +184,7 @@ jobs:
       - name: Run the parts (${{ matrix.parts }})
         if: steps.boot.outcome == 'success'
         run: |
-          BIN_DIR=vm-bin sh scripts/ci-ahead-run.sh "${{ matrix.port }}" "$RUNNER_TEMP/vmkey" "$RUNNER_TEMP/out" "${{ matrix.parts }}" ${{ matrix.pkgs }}
+          AHEAD_FAIL_FAST=${{ inputs.fail_fast == true && '1' || '0' }} BIN_DIR=vm-bin sh scripts/ci-ahead-run.sh "${{ matrix.port }}" "$RUNNER_TEMP/vmkey" "$RUNNER_TEMP/out" "${{ matrix.parts }}" ${{ matrix.pkgs }}
       - name: Logs of the parts
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

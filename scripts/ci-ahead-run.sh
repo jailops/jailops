@@ -15,7 +15,9 @@ cd "$(dirname "$0")/.."
 [ $# -ge 4 ] || { sed -n 2,5p "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 port=$1 key=$2 out=$3 parts=$4; shift 4
 bin=${BIN_DIR:-vm-bin}
-[ -x "$bin/jailops-freebsd-amd64" ] || { echo "ci-ahead-run: no binaries in $bin (jailops-freebsd-amd64 ...)" >&2; exit 2; }
+[ -f "$bin/jailops-freebsd-amd64" ] || { echo "ci-ahead-run: no binaries in $bin (jailops-freebsd-amd64 ...)" >&2; exit 2; }
+# an artifact does not keep the executable bit of its files
+chmod +x "$bin"/*-freebsd-amd64
 mkdir -p "$out/logs"
 sum=$out/summary.md
 : > "$sum"
@@ -57,11 +59,26 @@ for part in $parts; do
 	log=$out/logs/$kind-$shard.log
 	t0=$(date +%s)
 	# the part gets 55 minutes; PF_KEEP_GOING=1 so that a failed phase does not hide the ones after it
-	if timeout 3300 ssh -i "$key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	echo "ci-ahead-run: $part starts"
+	timeout 3300 ssh -i "$key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 		-o ServerAliveInterval=30 -l root 127.0.0.1 \
 		"sh /tmp/jopsci/scripts/vm-clean.sh; cd /tmp/jopsci && kldload pf 2>/dev/null; PF_KEEP_GOING=1 $envs JAILOPS_E2E_IMAGE_RELEASE=$release JAILOPS_BIN_DIR=/tmp/jopsci/bin FORGE_BIN=/tmp/jopsci/bin/forge-freebsd-amd64 sh scripts/ci-freebsd-e2e.sh" \
-		> "$log" 2>&1; then r=PASS; else r=FAIL; rc=1; fi
+		> "$log" 2>&1 &
+	spid=$!
+	# a line every thirty seconds with the step the part is in (the last "== ..." line of its log), so that a long part is seen to move
+	shown=""
+	while kill -0 "$spid" 2>/dev/null; do
+		sleep 30 # sleep-ok: the progress line of a part
+		cur=$(grep -a '^== ' "$log" | tail -1 | cut -c1-110)
+		if [ "$cur" != "$shown" ]; then echo "ci-ahead-run: $part: $cur  [$(( ($(date +%s) - t0) / 60 )) min]"; shown=$cur
+		else echo "ci-ahead-run: $part: still in the same step  [$(( ($(date +%s) - t0) / 60 )) min]"; fi
+	done
+	if wait "$spid"; then r=PASS; else r=FAIL; rc=1; fi
 	first=$(grep -E '^FAIL |^FAILED' "$log" | head -3 | tr '\n|' '  ' | cut -c1-300)
 	say "| $part | $r | $(( ($(date +%s) - t0) / 60 )) | ${first:--} |"
+	# the end of the log of a failed part goes to the log of the job: the artifact has all of it, this is what is read first
+	if [ "$r" = FAIL ]; then echo "---- end of the log of $part"; tail -40 "$log"; echo "----"; fi
+	# a run by hand ends at the first failed part (AHEAD_FAIL_FAST=1); the scheduled run runs every part
+	if [ "$r" = FAIL ] && [ "${AHEAD_FAIL_FAST:-0}" = 1 ]; then say "(the parts after $part were not run: fail fast)"; break; fi
 done
 exit $rc

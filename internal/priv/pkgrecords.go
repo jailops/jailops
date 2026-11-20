@@ -43,7 +43,7 @@ func (l *Local) sealRecordManifest(ctx context.Context, argv []string) ([]string
 	if err != nil {
 		return nil, none, err
 	}
-	res, err := l.d.Runner.Run(ctx, run.Cmd{Name: "/usr/sbin/pkg", Args: []string{"-r", genTree, "info", "--raw", "--raw-format", "ucl", name},
+	res, err := l.d.Runner.Run(ctx, run.Cmd{Name: pkgProgram(), Args: []string{"-r", genTree, "info", "--raw", "--raw-format", "ucl", name},
 		Timeout: 60 * time.Second, MaxOutput: maxManifest})
 	if err != nil {
 		return nil, none, fmt.Errorf("pkg-records register: the generation has no record of %s: %w", name, err)
