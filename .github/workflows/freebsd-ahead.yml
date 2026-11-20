@@ -16,7 +16,8 @@ name: FreeBSD ahead
 
 on:
   schedule:
-    - cron: "17 2 * * 0"
+    # GitHub starts a scheduled run about seven to eight hours after its time, so the time is set that much earlier: the run lands in the night
+    - cron: "17 19 * * 6"
   workflow_dispatch:
     inputs:
       which:
