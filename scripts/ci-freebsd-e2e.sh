@@ -109,6 +109,9 @@ current=start
 host_cleanup() { :; } # the host identity block replaces it while the machine's identity is changed
 trap 'rc=$?; host_cleanup; ! type dns_cleanup >/dev/null 2>&1 || dns_cleanup; [ $rc -eq 0 ] || [ $rc -eq 75 ] || echo "FAILED (exit $rc) in step: $current" >&2' EXIT
 t_start=$(date +%s)
+# pkg itself runs ahead of the program that fetches it: a newer fetch program (FreeBSD 16 snapshots) refuses -j and -r when the jail or the root
+# has no pkg, which is what the commands of this script ask
+if [ -x /usr/local/sbin/pkg ]; then mkdir -p /tmp/e2e-pkgbin && ln -sf /usr/local/sbin/pkg /tmp/e2e-pkgbin/pkg && PATH=/tmp/e2e-pkgbin:$PATH && export PATH; fi
 step() { current=$*; printf '\n== %s  [+%ss]\n' "$*" "$(( $(date +%s) - t_start ))"; } # the seconds since the start: CI logs show which steps take the time
 fail() {
 	echo "FAILED: $*" >&2
