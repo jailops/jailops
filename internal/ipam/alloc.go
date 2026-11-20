@@ -1,6 +1,7 @@
 package ipam
 
 import (
+	"crypto/rand"
 	"math/big"
 	"net/netip"
 	"sort"
@@ -16,6 +17,7 @@ type Allocator struct {
 	prefix   netip.Prefix
 	gateway  netip.Addr
 	rng      Range
+	random   bool    // a new address is drawn at random within the range
 	excl     []Range // merged
 	reserved map[netip.Addr]bool
 	used     map[netip.Addr]string
@@ -97,7 +99,12 @@ func NewV6(n *api.IPv6Net, inUse []netip.Addr) (*Allocator, error) {
 			gw = r.String() // the host's own address on the network: kept back from the jails
 		}
 	}
-	return fromStrings("ipv6", n.Subnet, gw, n.Range, n.Exclude, inUse)
+	al, err := fromStrings("ipv6", n.Subnet, gw, n.Range, n.Exclude, inUse)
+	if err != nil {
+		return nil, err
+	}
+	al.random = n.Assignment == api.AssignRandom
+	return al, nil
 }
 
 func fromStrings(field, subnet, gw, rng string, excl []string, inUse []netip.Addr) (*Allocator, error) {
@@ -150,6 +157,12 @@ func (a *Allocator) Allocate(preferred netip.Addr, owner string) (netip.Addr, er
 	if preferred.IsValid() {
 		return a.take(norm(preferred), owner)
 	}
+	if a.random {
+		if x, ok := a.draw(owner); ok {
+			return x, nil
+		}
+		// a range that is nearly full: the lowest free address is found by the walk below
+	}
 	cand := a.rng.First
 	for {
 		if !cand.IsValid() || a.rng.Last.Less(cand) {
@@ -172,6 +185,45 @@ func (a *Allocator) Allocate(preferred netip.Addr, owner string) (netip.Addr, er
 		a.used[cand] = owner
 		return cand, nil
 	}
+}
+
+// draw takes a free address chosen at random within the whole prefix of the network, for a network whose jails get random
+// addresses: the bits below the prefix are random, as the interface identifier an address would otherwise get from a MAC
+// address. It tries a few hundred draws: in a prefix with any room at all one of them is free, and a prefix that is nearly full
+// is left to the walk of Allocate (which keeps to the allocation range).
+func (a *Allocator) draw(owner string) (netip.Addr, bool) {
+	base := a.prefix.Masked().Addr().As16()
+	bits := a.prefix.Bits()
+	for try := 0; try < 256; try++ {
+		var rnd [16]byte
+		if _, err := rand.Read(rnd[:]); err != nil {
+			return netip.Addr{}, false
+		}
+		var raw [16]byte
+		for i := 0; i < 16; i++ {
+			keep := 0 // the bits of this byte that belong to the prefix
+			if bits >= (i+1)*8 {
+				keep = 8
+			} else if bits > i*8 {
+				keep = bits - i*8
+			}
+			mask := byte(0xff << (8 - keep))
+			raw[i] = base[i]&mask | rnd[i]&^mask
+		}
+		cand := netip.AddrFrom16(raw)
+		if a.reserved[cand] {
+			continue
+		}
+		if _, ok := a.excluded(cand); ok {
+			continue
+		}
+		if _, taken := a.used[cand]; taken {
+			continue
+		}
+		a.used[cand] = owner
+		return cand, true
+	}
+	return netip.Addr{}, false
 }
 
 func (a *Allocator) excluded(x netip.Addr) (Range, bool) {

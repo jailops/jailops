@@ -41,7 +41,7 @@ anchor and the descriptions of its interfaces`)
 				v4 = a.Subnet + "\n" + a.Range
 			}
 			if a := n.Spec.IPv6; a != nil {
-				v6 = a.Subnet + ndpMark(a) + "\n" + a.Range
+				v6 = a.Subnet + ndpMark(a) + assignMark(a) + "\n" + a.Range
 			}
 			return []string{n.Metadata.Name, v4, v6, fmt.Sprint(n.Status.Allocated), fmt.Sprint(n.Status.Free), dash(n.Spec.Uplink)}
 		},
@@ -164,6 +164,7 @@ jailops network create -f lan.yaml`,
 		})
 	nc.AddCommand(a.networkGrantCmds(d)...)
 	nc.AddCommand(a.ndpProxyCmd(d))
+	nc.AddCommand(a.ipv6AssignCmd(d))
 	nc.AddCommand(&cobra.Command{
 		Use:               "leases NETWORK",
 		Short:             "List the addresses allocated on a network",

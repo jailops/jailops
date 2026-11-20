@@ -1259,6 +1259,7 @@ export interface IPv6Net {
   range: string
   exclude?: string[]
   ndp_proxy?: boolean
+  assignment?: string
 }
 
 export interface Identity {

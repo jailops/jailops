@@ -34,6 +34,28 @@
 segment needs the NDP proxy of the network, switched on after the create with `jailops network ndp-proxy enable NAME`
 (see [Switched](#switched-the-ndp-proxy)).
 
+## The address of a new jail
+
+A new jail gets its IPv6 address from the network when the network is asked for one (`--network NET`, or `auto`). The network has
+two ways to choose it:
+
+| Assignment | The address |
+|---|---|
+| `sequential` (the default) | the lowest free address of the range of the network: `::2`, `::3` and so on. Easy to read and to write rules for, and the first addresses a scanner tries |
+| `random` | the bits below the prefix are random: any free address in the prefix of the network (in a /80 one of 2^48), so a jail is not found by trying the addresses one after the other |
+
+    jailops network ipv6-assignment web            # show it
+    jailops network ipv6-assignment web random
+    jailops network ipv6-assignment web sequential
+
+The setting is kept in the network (`spec.ipv6.assignment`) and applies to the jails made after it is changed. A jail keeps the
+address it got for good, whichever way it was chosen. IPv4 is always sequential.
+
+A jail can always be given an address of its own, on a random network too: `jailops create site2 --project shop --image freebsd-15-1 --network web=auto,2001:db8:1:2:1::53 --storage default`
+(`auto` for IPv4, an address of the prefix for IPv6, outside the range if you like). It is refused when the address is taken, is the gateway or is
+reserved, as with any assignment. On a network with the NDP proxy a random address needs nothing more: the proxy answers for the
+address of every jail that runs.
+
 ## Name resolution of jails
 
 JailOps writes a jail's `/etc/resolv.conf` when the jail starts, with the nameservers of the first rule that applies:

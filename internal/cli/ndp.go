@@ -102,6 +102,14 @@ func ndpMark(v6 *api.IPv6Net) string {
 	return ""
 }
 
+// assignMark is the marker of the IPv6 column of the network list: new jails get random addresses.
+func assignMark(v6 *api.IPv6Net) string {
+	if v6 != nil && v6.Assignment == api.AssignRandom {
+		return " (random)"
+	}
+	return ""
+}
+
 func ndpSubnet(n api.Network) (netip.Prefix, error) {
 	if n.Spec.IPv6 == nil || n.Spec.IPv6.Subnet == "" {
 		return netip.Prefix{}, usagef("network %s has no IPv6 prefix: the NDP proxy answers for IPv6 addresses (give one with 'jailops network set %s --ipv6 PREFIX')", n.Metadata.Name, n.Metadata.Name)

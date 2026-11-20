@@ -729,6 +729,7 @@ jailops network delete  (aliases: rm)
 jailops network edit
     --file/-f string
 jailops network grant
+jailops network ipv6-assignment
 jailops network leases
 jailops network list  (aliases: ls)
     --all-projects bool
