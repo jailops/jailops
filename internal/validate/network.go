@@ -147,6 +147,9 @@ func ipv6(s api.NetworkSpec) error {
 	if !globalUnicast6.Contains(p.Addr()) && !uniqueLocal6.Contains(p.Addr()) {
 		return Invalid("ipv6.subnet", "ipv6.subnet %q must be a global (2000::/3) or unique-local (fc00::/7) network", n.Subnet)
 	}
+	if n.Assignment != "" && n.Assignment != api.AssignSequential && n.Assignment != api.AssignRandom {
+		return Invalid("ipv6.assignment", "ipv6.assignment %q must be %s or %s", n.Assignment, api.AssignSequential, api.AssignRandom)
+	}
 	r, err := ipam.ParseRange(n.Range)
 	if err != nil || r.First.Is4() {
 		return Invalid("ipv6.range", "ipv6.range %q must be \"first-last\" with IPv6 addresses", n.Range)

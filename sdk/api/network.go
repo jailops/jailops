@@ -49,7 +49,19 @@ type IPv6Net struct {
 	// on when the provider puts the prefix on a shared segment with the host; leave it off when the provider routes
 	// the prefix to the host (unallocated addresses of the prefix are then rejected).
 	NDPProxy bool `json:"ndp_proxy,omitempty"`
+	// Assignment is how a new jail gets its address: "sequential" (the default) takes the lowest free address of the
+	// range, "random" fills the bits below the prefix at random (a free address anywhere in the prefix), so that a
+	// jail cannot be found by trying the addresses one after the other. A jail can always be given an address of its
+	// own, whichever the setting. Either way the address is kept by the jail for good; the setting affects the jails
+	// made after it is changed.
+	Assignment string `json:"assignment,omitempty"`
 }
+
+// The values of IPv6Net.Assignment.
+const (
+	AssignSequential = "sequential"
+	AssignRandom     = "random"
+)
 
 // NetworkStatus is the observed state of a network on one host.
 type NetworkStatus struct {
