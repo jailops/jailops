@@ -9,7 +9,8 @@ name: Upgrade e2e
 
 on:
   schedule:
-    - cron: "17 3 * * *"
+    # GitHub starts a scheduled run about seven to eight hours after its time, so the time is set that much earlier: the run lands in the night
+    - cron: "17 19 * * *"
   workflow_dispatch:
 
 permissions:

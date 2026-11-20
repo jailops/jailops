@@ -9,7 +9,8 @@ name: Linux e2e
 
 on:
   schedule:
-    - cron: "41 2 * * *"
+    # GitHub starts a scheduled run about seven to eight hours after its time, so the time is set that much earlier: the run lands in the night
+    - cron: "41 19 * * *"
   workflow_dispatch:
 
 permissions:
