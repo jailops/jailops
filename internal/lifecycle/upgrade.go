@@ -740,11 +740,11 @@ func (s *Service) dropStale(ctx context.Context, st *jailState) error {
 
 // RollbackExpiresAt is when root.old is removed; ok is false when the jail has no previous root or none that is marked.
 func (s *Service) RollbackExpiresAt(ctx context.Context, name string) (time.Time, bool) {
-	st, err := s.observe(ctx, name)
-	if err != nil || !st.hasRootOld() {
+	// No observe: it reads every dataset of the jail, and a jail without root.old (almost all) needs one check.
+	oldDS := s.Cfg.at(name).rootOldDS()
+	if ok, err := s.ZFS.Exists(ctx, oldDS); err != nil || !ok {
 		return time.Time{}, false
 	}
-	oldDS := s.Cfg.at(name).rootOldDS()
 	if s.prop(ctx, oldDS, PropManaged) != "on" {
 		return time.Time{}, false
 	}

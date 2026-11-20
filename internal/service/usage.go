@@ -111,7 +111,11 @@ func (s *Service) jailsDiskUsed(ctx context.Context, keys []string) map[string]i
 		byParent[parent] = append(byParent[parent], k)
 	}
 	for parent, ks := range byParent {
-		rows, err := s.d.ZClient.List(ctx, zfs.ListOpts{Root: parent, Recursive: true, Props: []string{"used", lifecycle.PropKind}})
+		root := parent
+		if len(ks) == 1 { // one jail: list its own container, not every jail beside it
+			root = s.lcfg.ContainerDS(ks[0])
+		}
+		rows, err := s.d.ZClient.List(ctx, zfs.ListOpts{Root: root, Recursive: true, Props: []string{"used", lifecycle.PropKind}})
 		if err != nil {
 			continue
 		}
