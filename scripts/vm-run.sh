@@ -5,6 +5,7 @@
 #   sh scripts/vm-run.sh 2229 pf a        the packet filter test, shard a (a, b, c or d)
 #   sh scripts/vm-run.sh 2229 workflows   the daily tasks of docs/testing-on-freebsd.md
 #   sh scripts/vm-run.sh 2229 linux       the Linux jail block
+#   sh scripts/vm-run.sh 2229 prepare     the machine set up with an image, a network and a project, left running
 #
 # PORT is the local ssh port of the VM (root, key in $VM_KEY, default temp/vm/key). The run takes the lock of the VM
 # (scripts/vm-lock.sh), builds the binaries with the web consoles embedded, copies them and the scripts over, removes what an
@@ -15,7 +16,7 @@ cd "$(dirname "$0")/.."
 [ $# -ge 2 ] || { sed -n 2,9p "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 port=$1 part=$2 shard=${3:-}
 [ "$port" != 2222 ] || { echo "vm-run: port 2222 is not a test VM" >&2; exit 2; }
-case $part in e2e) : "${shard:=1}" ;; pf) : "${shard:=all}" ;; workflows | linux) ;; *) echo "vm-run: part is e2e, pf, workflows or linux" >&2; exit 2 ;; esac
+case $part in e2e) : "${shard:=1}" ;; pf) : "${shard:=all}" ;; workflows | linux | prepare) ;; *) echo "vm-run: part is e2e, pf, workflows, linux or prepare" >&2; exit 2 ;; esac
 if [ "${VM_RUN_LOCKED:-}" != 1 ]; then
 	VM_RUN_LOCKED=1 exec sh scripts/vm-lock.sh run "$port" "${VM_LOCK_WAIT:-30}" -- sh "$0" "$@"
 fi
@@ -28,24 +29,9 @@ trap 'rm -rf "$stage"' EXIT
 mkdir -p "$stage/bin"
 CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -trimpath -ldflags="-s -w -X main.version=$(tr -d '[:space:]' < version.txt)" -o "$stage/bin/" ./cmd/jailops ./cmd/jailopsd ./cmd/jailops-priv ./cmd/jailops-sync ./cmd/jailops-backupd
 CGO_ENABLED=0 GOOS=freebsd GOARCH=amd64 go build -trimpath -o "$stage/bin/forge" ./scripts/forge
-cat > "$stage/clean.sh" <<'EOF'
-for s in postgresql jailopsd jailops_priv jailops_backupd; do service $s onestop >/dev/null 2>&1; done
-pkill -x postgres; rm -rf /var/db/postgres/data17 /var/db/postgres/data16
-pkill -x jailopsd; pkill -x jailops-priv; pkill -x jailops-backupd; sleep 1
-for j in $(jls -N name path 2>/dev/null | awk '$2 ~ /^\/jopsci\// {print $1}') $(jls -N name 2>/dev/null | grep -E '^(demo_|jobuild)'); do jail -r $j; done
-sleep 1
-for m in $(mount -p | awk '$2 ~ /^\/jopsci\// {print $2}' | sort -r); do umount -f $m 2>/dev/null; done
-zpool destroy -f jopsci 2>/dev/null; zpool destroy -f jopsfresh 2>/dev/null
-for b in $(ifconfig -l | tr ' ' '\n' | grep -E '^(jo[0-9]+|jo[a-f0-9]{8,}|wg-)'); do ifconfig $b destroy 2>/dev/null; done
-rm -rf /var/db/jailops-priv/wireguard
-pkg delete -fy jailops jailops-client jailops-backupd >/dev/null 2>&1
-rm -rf /var/tmp/jailops-drill* /usr/local/etc/jailops /usr/local/etc/jailops-fresh /var/db/jailops /var/db/jailops-fresh /var/db/jailops-backup /var/run/jailops /var/run/jailops-backupd /var/tmp/jailops
-# a run that was stopped can leave the nameserver of the machine on a resolver that is gone
-service local_unbound onestop >/dev/null 2>&1
-EOF
-tar cf "$stage/files.tar" scripts/pkg-build.sh scripts/gen-share.sh scripts/ci-freebsd-e2e.sh scripts/ci-freebsd-pf.sh scripts/e2e-workflows.sh \
+tar cf "$stage/files.tar" scripts/vm-clean.sh scripts/pkg-build.sh scripts/gen-share.sh scripts/ci-freebsd-e2e.sh scripts/ci-freebsd-pf.sh scripts/e2e-workflows.sh \
 	internal/render/testdata internal/apps/testdata packaging test version.txt README.md LICENSE.md docs/design.md \
-	-C "$stage" bin clean.sh
+	-C "$stage" bin
 ssh_vm 'rm -rf /tmp/jopsci && mkdir -p /tmp/jopsci && tar xf - -C /tmp/jopsci' < "$stage/files.tar"
 release=$(ssh_vm 'freebsd-version -u' | sed 's/-p[0-9]*$//')
 case $part in
@@ -54,4 +40,4 @@ pf) envs="JAILOPS_E2E_PART=pf JAILOPS_PF_SHARD=$shard" ;;
 *) envs="JAILOPS_E2E_PART=$part" ;;
 esac
 echo "vm-run: $part $shard on port $port ($release)"
-ssh_vm "sh /tmp/jopsci/clean.sh; cd /tmp/jopsci && $envs JAILOPS_E2E_IMAGE_RELEASE=$release JAILOPS_BIN_DIR=/tmp/jopsci/bin FORGE_BIN=/tmp/jopsci/bin/forge sh scripts/ci-freebsd-e2e.sh"
+ssh_vm "sh /tmp/jopsci/scripts/vm-clean.sh; cd /tmp/jopsci && $envs JAILOPS_E2E_IMAGE_RELEASE=$release JAILOPS_BIN_DIR=/tmp/jopsci/bin FORGE_BIN=/tmp/jopsci/bin/forge sh scripts/ci-freebsd-e2e.sh"

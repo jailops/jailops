@@ -10,6 +10,7 @@ tag (`@v7`), which the action's owner can move to other code at any time; a full
 | `ci.yml` (every push and pull request) | `contents: read` for every job | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, `actions/cache`, `actions/upload-artifact`, `actions/download-artifact`, **`vmactions/freebsd-vm`** |
 | `release.yml` (a tag `v*`) | `contents: read`, and `contents: write` in the one job that publishes the release (the check job before it cannot write) | `actions/checkout`, `actions/setup-go`, `actions/setup-node`, **`goreleaser/goreleaser-action`** |
 | `linux-e2e.yml` (every night and on demand; no pull request, not part of `CI ok`) | `contents: read` | `actions/checkout`, `actions/setup-node`, `actions/setup-go` (by commit), **`vmactions/freebsd-vm`** (by tag, like `ci.yml`) |
+| `freebsd-ahead.yml` (every Sunday and on demand; no pull request, not part of `CI ok`) | `contents: read` | `actions/checkout`, `actions/setup-node`, `actions/setup-go`, `actions/upload-artifact`, `actions/download-artifact`, all by commit; no third-party action: qemu runs the VM |
 
 `release.yml` names every action by its commit and GoReleaser by an exact version. The two in bold come from third parties: `vmactions/freebsd-vm` runs the FreeBSD VM that builds and tests the tree, and
 `goreleaser/goreleaser-action` runs with the token that can write the release. They matter most; the `actions/*` ones
@@ -29,6 +30,16 @@ checked by pkg against the FreeBSD keys in `/usr/share/keys/pkg`.
 When the mirror does not answer, the install is tried three times and then the job fails with the line `the package
 mirror ... did not give ... in three attempts`. A mirror outage is not a verdict on the code: run the failed
 jobs again (`gh run rerun RUN --failed`).
+
+## The FreeBSD that is not the gate
+
+`freebsd-ahead.yml` runs the end-to-end and packet filter parts every Sunday on the snapshot of `stable/15` and on 16.0-CURRENT. `vmactions/freebsd-vm`
+runs releases only, so the workflow starts the VM itself (`scripts/ci-boot-vm.sh`): qemu with KVM on the runner, the official snapshot image of
+`download.freebsd.org/snapshots/VM-IMAGES` (the BASIC-CLOUDINIT image with ZFS), its sha256 checked against the checksum file of the same directory, and a
+NoCloud seed that gives root the ssh key of the run (a key made for the run and thrown away with the runner). The runner installs `qemu-system-x86`,
+`qemu-utils`, `ovmf`, `xz-utils` and `python3-venv` from Ubuntu, and the seed is made with `pycdlib`, pinned to one version, from PyPI in a virtualenv.
+Inside the VM, `pkg upgrade` brings the snapshot to the newest packages of its branch; those packages are checked by pkg against the FreeBSD keys. The
+workflow has no secret and no write permission, and nothing in it is the gate of a change.
 
 ## The nightly Linux jail test
 

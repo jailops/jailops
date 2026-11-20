@@ -44,7 +44,14 @@ bad()  {
 		echo "---- pf at the first failure"
 		pfctl -si 2>&1 | head -3; kldstat -m pf 2>&1 | tail -2; sysctl net.pf 2>&1 | head -8
 		pfctl -sr 2>&1 | head -40
-		for a in $(pfctl -sA 2>/dev/null | grep jailops | head -12); do echo "-- anchor $a"; pfctl -a "$a" -sr 2>&1 | head -80; done
+		for a in $(pfctl -sA 2>/dev/null | grep jailops); do r=$(pfctl -a "$a" -sr 2>&1 | head -60); [ -z "$r" ] || { echo "-- anchor $a"; echo "$r"; }; done | head -200
+		if [ -n "${A6:-}" ]; then
+			echo "---- the source address of the host towards $A6"
+			route -6 get "$A6" 2>&1 | head -12
+			ifconfig | grep -E 'inet6 (fd|2001)'
+			if ping -6 -c1 -t2 "$A6" >/dev/null 2>&1; then echo "ping with the default source: allowed"; else echo "ping with the default source: denied"; fi
+			if [ -n "${H6:-}" ]; then if ping -6 -c1 -t2 -S "$H6" "$A6" >/dev/null 2>&1; then echo "ping with -S $H6: allowed"; else echo "ping with -S $H6: denied"; fi; fi
+		fi
 		echo "---- jails and interfaces"
 		jls 2>&1 | head -20; ifconfig -l
 		echo "----"
@@ -74,8 +81,19 @@ run_from() { # run_from SRC CMD...
 	esac
 }
 fam() { case $1 in *:*) echo 6 ;; *) echo 4 ;; esac; }
-icmp()  { run_from "$1" ping -"$(fam "$2")" -c1 -t2 "$2" >/dev/null 2>&1; }
-tcp()   { run_from "$1" nc -z -w2 "$2" "$3" >/dev/null 2>&1; }
+# The host sends from the address a rule names, not from the one the kernel happens to prefer: on FreeBSD 16 the choice among the
+# addresses of the host on one prefix is another one than on 15. The address is the host's alias of the prefix of the target (::fff0).
+hostsrc6() { ifconfig lo0 inet6 2>/dev/null | awk -v want="${1%%::*}::fff0" '$1 == "inet6" && $2 == want { print $2 }'; }
+icmp()  {
+	s=
+	if [ "$1" = host ] && [ "$(fam "$2")" = 6 ]; then a=$(hostsrc6 "$2"); [ -z "$a" ] || s="-S $a"; fi
+	run_from "$1" ping -"$(fam "$2")" -c1 -t2 $s "$2" >/dev/null 2>&1
+}
+tcp()   {
+	s=
+	if [ "$1" = host ] && [ "$(fam "$2")" = 6 ]; then a=$(hostsrc6 "$2"); [ -z "$a" ] || s="-s $a"; fi
+	run_from "$1" nc -z -w2 $s "$2" "$3" >/dev/null 2>&1
+}
 # expect VERDICT DESCRIPTION CMD...
 expect() {
 	want=$1; desc=$2; shift 2
