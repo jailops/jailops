@@ -789,7 +789,7 @@ func endpoints(entries []string, f family, def []netip.Addr) (string, bool) {
 		case validate.EndpointAny:
 			return "any", true
 		case validate.EndpointSet:
-			parts = append(parts, "<s_"+v+">")
+			parts = append(parts, "<"+validate.SetTable(v)+">")
 		case validate.EndpointHost:
 			parts = append(parts, "<"+HostTable+">")
 		case validate.EndpointJail:

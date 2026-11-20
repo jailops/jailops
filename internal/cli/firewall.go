@@ -135,6 +135,11 @@ jailops firewall address-set create -f office.yaml`,
 			}
 		})
 	ac.AddCommand(a.addrSetAdd(), a.addrSetRemove())
+	for _, sc := range ac.Commands() {
+		if sc.Name() == "show" {
+			a.flattenSetCmd(sc)
+		}
+	}
 	fc.AddCommand(pc, a.ruleCmd(), ac, a.firewallValidate(), a.firewallTest(), a.firewallWait(), a.firewallShow(), a.firewallExposed())
 	return fc
 }

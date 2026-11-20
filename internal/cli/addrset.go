@@ -3,6 +3,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"net/netip"
 	"slices"
 	"strings"
 
@@ -147,4 +148,63 @@ func (a *app) addrSetRemove() *cobra.Command {
 		return a.writeAddressSet(cmd.Context(), c, set, etag, "removed "+strings.Join(args[1:], ", "))
 	}
 	return cmd
+}
+
+// flattenSetCmd gives the `show` of an address set the flag --flatten: every address the set stands for, with the sets and the
+// jails it names looked up, once each and without repeats, as the firewall of the project uses them.
+func (a *app) flattenSetCmd(show *cobra.Command) {
+	var flatten bool
+	orig := show.RunE
+	show.Flags().BoolVar(&flatten, "flatten", false, "list every address the set stands for: the sets it names (set:NAME) and the jails it names (jail:NAME) are replaced by their addresses")
+	show.Example += "\njailops firewall address-set show bastion --flatten"
+	show.RunE = func(cmd *cobra.Command, args []string) error {
+		if !flatten {
+			return orig(cmd, args)
+		}
+		return a.addrSetFlatten(cmd, args[0])
+	}
+}
+
+func (a *app) addrSetFlatten(cmd *cobra.Command, name string) error {
+	c, err := a.connect(cmd.Context())
+	if err != nil {
+		return err
+	}
+	list, err := collect(c.Firewall().AddressSets().List(cmd.Context()))
+	if err != nil {
+		return err
+	}
+	sets := map[string]api.AddressSetSpec{}
+	for _, s := range list {
+		sets[s.Metadata.Name] = s.Spec
+	}
+	jails, err := collect(c.Jails().List(cmd.Context()))
+	if err != nil {
+		return err
+	}
+	addrs := map[string][]string{}
+	for _, j := range jails {
+		for _, n := range j.Spec.Network {
+			for _, v := range []string{n.IPv4, n.IPv6} {
+				if x, err := netip.ParseAddr(v); err == nil {
+					addrs[j.Metadata.Name] = append(addrs[j.Metadata.Name], x.String())
+				}
+			}
+		}
+	}
+	flat, err := validate.FlattenSet(name, sets, addrs)
+	if err != nil {
+		return err
+	}
+	switch a.format {
+	case fmtJSON, fmtYAML:
+		return a.emit(map[string]any{"name": name, "addresses": nonNil(flat)}, nil, nil, nil)
+	case fmtCSV:
+		return usagef("-o csv is not available for this command")
+	}
+	fprintln(a.env.Stdout, fmt.Sprintf("Address set %s, flattened: %d addresses", name, len(flat)))
+	for _, x := range flat {
+		fprintln(a.env.Stdout, x)
+	}
+	return nil
 }
