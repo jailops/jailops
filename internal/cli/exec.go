@@ -356,6 +356,9 @@ which is what a pipe such as 'echo id | jailops shell web' needs.`,
 				ctx := cmd.Context()
 				get := func(ctx context.Context) (api.Jail, error) { return c.Jails().Get(ctx, args[0]) }
 				// Only a bash that is on its way is waited for: `--shell /bin/sh` and a jail whose shell is sh open at once.
+				if o.shellPath != "" && o.shellPath != api.BashPath { // a non-bash --shell needs no status
+					return a.runExec(ctx, args[0], nil, o)
+				}
 				if j, err := get(ctx); err == nil && shellInstalling(j) && (o.shellPath == api.BashPath || (o.shellPath == "" && j.Spec.Shell == api.BashPath)) {
 					w := shellWait{out: a.env.Stderr, tty: a.env.IsTTY(a.env.Stderr), now: a.env.Now, sleep: sleepCtx, get: get,
 						poll: time.Second, limit: 70 * time.Second}
