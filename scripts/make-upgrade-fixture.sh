@@ -14,6 +14,7 @@
 #   VERSION     a tag: v0.8.6 or 0.8.6
 #   GOPROXY     passed through (set it to off to use the module cache only)
 set -eu
+export GOTOOLCHAIN=auto # the go.work asks for a newer Go than a distribution may have; the Justfile does the same
 cd "$(dirname "$0")/.."
 [ $# -eq 1 ] || { echo "usage: scripts/make-upgrade-fixture.sh VERSION (v0.8.6 or 0.8.6)" >&2; exit 2; }
 v=${1#v}

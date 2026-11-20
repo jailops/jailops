@@ -182,7 +182,7 @@ release-pr VERSION:
     last=$(git describe --tags --abbrev=0 origin/master 2>/dev/null || true)
     if [ -n "$last" ] && [ "$(printf '%s\n' v0.8.0 "$last" | sort -V | head -1)" = v0.8.0 ] && \
         [ -z "$(git ls-tree -d --name-only origin/master "internal/store/testdata/upgrade/$last")" ]; then
-        echo "x the upgrade fixture of $last is not on master: run scripts/make-upgrade-fixture.sh $last, commit internal/store/testdata/upgrade/$last (a pull request), and prepare this release again"
+        echo "x the upgrade fixture of $last is not on master: run just fixture ${last#v} (it opens the pull request), merge it, and prepare this release again"
         exit 1
     fi
     git ls-remote --exit-code --heads origin "release/v{{VERSION}}" >/dev/null 2>&1 && \
@@ -245,7 +245,25 @@ release VERSION:
     git push origin "v{{VERSION}}"
     echo "v{{VERSION}} tagged: CI builds the release: gh run watch"
     echo "next: just publish-packages {{VERSION}}"
-    echo "then: scripts/make-upgrade-fixture.sh v{{VERSION}}, and commit internal/store/testdata/upgrade/v{{VERSION}} (a pull request): the next release-pr needs it on master"
+    echo "then: just fixture {{VERSION}} (makes the upgrade fixture and opens its pull request: the next release-pr needs it on master)"
+
+# After a release: make its upgrade fixture and open the pull request (on a branch of its own when you are on master).
+fixture VERSION:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{VERSION}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "x version must be X.Y.Z (no leading v), got '{{VERSION}}'"; exit 1; }
+    git fetch -q --tags origin
+    scripts/make-upgrade-fixture.sh "v{{VERSION}}"
+    branch=$(git branch --show-current)
+    [ -n "$branch" ] || { echo "x not on a branch"; exit 1; }
+    if [ "$branch" = master ]; then
+        branch="fixture/v{{VERSION}}"
+        git switch -C "$branch"
+    fi
+    git add "internal/store/testdata/upgrade/v{{VERSION}}"
+    git commit -q -m "Upgrade fixture of v{{VERSION}}" -m "What v{{VERSION}} writes for a small fleet, opened by the current code on every go test."
+    git push -u origin "$branch"
+    gh pr create --base master --head "$branch" --title "Upgrade fixture of v{{VERSION}}" --body "The state a host of v{{VERSION}} holds, made by the release itself (scripts/make-upgrade-fixture.sh). internal/upgradecheck opens it with the current code on every go test; the next release-pr needs it on master."
 
 # Step 4: wait for the GitHub release of the tag, then start the jailops-packages update check (it opens the bump PR; nothing is merged here).
 publish-packages VERSION:
