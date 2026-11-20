@@ -192,19 +192,34 @@ func (a *app) addrSetFlatten(cmd *cobra.Command, name string) error {
 			}
 		}
 	}
-	flat, err := validate.FlattenSet(name, sets, addrs)
+	flat, err := validate.FlattenSetDetail(name, sets, addrs)
 	if err != nil {
 		return err
 	}
-	switch a.format {
-	case fmtJSON, fmtYAML:
-		return a.emit(map[string]any{"name": name, "addresses": nonNil(flat)}, nil, nil, nil)
-	case fmtCSV:
+	type row struct {
+		Address string   `json:"address"`
+		From    []string `json:"from"`
+		Comment string   `json:"comment,omitempty"`
+	}
+	rows := make([]row, 0, len(flat))
+	for _, e := range flat {
+		rows = append(rows, row{Address: e.Address, From: e.From, Comment: strings.Join(e.Comments, "; ")})
+	}
+	if a.format == fmtCSV {
 		return usagef("-o csv is not available for this command")
 	}
-	fprintln(a.env.Stdout, fmt.Sprintf("Address set %s, flattened: %d addresses", name, len(flat)))
-	for _, x := range flat {
-		fprintln(a.env.Stdout, x)
+	if a.format == fmtJSON || a.format == fmtYAML {
+		return a.emit(map[string]any{"name": name, "addresses": rows}, nil, nil, nil)
 	}
+	fprintln(a.env.Stdout, fmt.Sprintf("Address set %s, flattened: %d addresses", name, len(flat)))
+	if len(rows) == 0 {
+		return nil
+	}
+	table := make([][]string, 0, len(rows))
+	for _, r := range rows {
+		table = append(table, []string{r.Address, strings.Join(r.From, ", "), r.Comment})
+	}
+	fprintln(a.env.Stdout, "")
+	a.printTable(a.env.Stdout, []string{"ADDRESS", "FROM", "COMMENT"}, table, nil)
 	return nil
 }

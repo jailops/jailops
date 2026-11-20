@@ -435,7 +435,7 @@ stops when its rule goes.
   empty, and a rule that names an empty set matches nothing. A member of an address set is an address, a CIDR, `jail:name` or `set:name`: a list such as
   `git-allow` can hold jails and be added to later. A jail that a rule or a set names is not renamed or deleted until the reference is changed (the refusal names the policy or the set), so a rule never names a jail that is gone, and a jail made later never takes the place of one.
 
-`jailops firewall address-set show bastion --flatten` lists every address such a set stands for: the sets and the jails it names are replaced by their addresses, once each, as the firewall of the project uses them.
+`jailops firewall address-set show bastion --flatten` lists every address such a set stands for: the sets and the jails it names are replaced by their addresses, once each, as the firewall of the project uses them. Every address says which set lists it (`FROM`, with `(jail)` for the address of a jail) and carries the comment of that entry; `-o json` gives `addresses` as a list of `{address, from, comment}`.
 
   **Comments are for the review of the firewall.** An address set, each of its entries, a policy and each rule has a
   `comment`: what it is, why it is there (one line of printable text, at most 200 characters, without double quotes or backslashes because it becomes a comment line of the ruleset; it is not part of any rule). In a file or in

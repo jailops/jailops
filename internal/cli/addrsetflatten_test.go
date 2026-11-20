@@ -33,7 +33,18 @@ func TestAddressSetShowFlatten(t *testing.T) {
 	if strings.Contains(out, "set:") {
 		t.Fatalf("no set name is left:\n%s", out)
 	}
-	if o, e, code := h.run("", "firewall", "address-set", "show", "bastion", "--flatten", "-o", "json"); code != 0 || !strings.Contains(o, `"addresses"`) {
+	// every address says which set lists it; an address of two sets names both
+	for _, want := range []string{"ADDRESS", "FROM", "COMMENT", "bastion", "atlas", "lupin"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("the table lacks %q:\n%s", want, out)
+		}
+	}
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "203.0.113.10") && !(strings.Contains(line, "lupin") && strings.Contains(line, "atlas")) {
+			t.Fatalf("an address of two sets names both: %q", line)
+		}
+	}
+	if o, e, code := h.run("", "firewall", "address-set", "show", "bastion", "--flatten", "-o", "json"); code != 0 || !strings.Contains(o, `"addresses"`) || !strings.Contains(o, `"from"`) {
 		t.Fatalf("-o json: %s %s", o, e)
 	}
 	// without the flag the set is shown as it is: its members, not their addresses
