@@ -6,6 +6,10 @@ import (
 	"testing"
 )
 
+// The tests of the helper expect the program that fetches pkg, whatever machine they run on: a machine that has pkg itself (a FreeBSD
+// host or VM) must not change what they expect.
+func init() { pkgReal = filepath.Join(os.TempDir(), "jailops-test-no-pkg-itself") }
+
 // pkg runs as pkg itself when it is installed: the program that fetches it refuses -r with a root that has no pkg (a jail tree).
 func TestPkgRunsAsPkgItselfWhenItIsInstalled(t *testing.T) {
 	defer func(old string) { pkgReal = old }(pkgReal)
