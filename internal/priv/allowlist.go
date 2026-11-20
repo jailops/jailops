@@ -2,6 +2,7 @@ package priv
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -654,14 +655,14 @@ func (c Config) CheckCommandCtx(ctx context.Context, argv []string) (*Rule, []st
 	args := argv[1:]
 	for _, ex := range r.Exact {
 		if slices.Equal(ex, args) {
-			return r, append([]string{r.Binary}, args...), nil
+			return r, append([]string{binaryOf(r)}, args...), nil
 		}
 	}
 	if r.Custom != nil {
 		if err := r.Custom(c, isAdmin(ctx), args); err != nil {
 			return nil, nil, err
 		}
-		return r, append([]string{r.Binary}, args...), nil
+		return r, append([]string{binaryOf(r)}, args...), nil
 	}
 	seen := map[string]int{}
 	i := 0
@@ -717,7 +718,7 @@ func (c Config) CheckCommandCtx(ctx context.Context, argv []string) (*Rule, []st
 	rest := args[i:]
 	for _, ex := range r.RestExact {
 		if slices.Equal(ex, rest) {
-			return r, append([]string{r.Binary}, args...), nil
+			return r, append([]string{binaryOf(r)}, args...), nil
 		}
 	}
 	if len(rest) == 0 {
@@ -744,9 +745,30 @@ func (c Config) CheckCommandCtx(ctx context.Context, argv []string) (*Rule, []st
 			}
 		}
 	}
-	out := append([]string{r.Binary}, args...)
+	out := append([]string{binaryOf(r)}, args...)
 	return r, out, nil
 }
 
 // inWork reports whether p is below the daemon's scratch directory.
 func (c Config) inWork(p string) bool { return c.WorkDir != "" && within(c.WorkDir, p) }
+
+// pkgReal is the pkg program itself. /usr/sbin/pkg is only the program that fetches it: a newer one looks for pkg inside the root of
+// -r and refuses ("the package management tool is not yet installed") when the root is a jail tree that has none, which is what an
+// image build and a jail root are. The program itself takes -r and -j as they are.
+var pkgReal = "/usr/local/sbin/pkg"
+
+// pkgProgram is pkg itself when it is installed and the program that fetches it otherwise.
+func pkgProgram() string {
+	if _, err := os.Stat(pkgReal); err == nil {
+		return pkgReal
+	}
+	return "/usr/sbin/pkg"
+}
+
+// binaryOf is the program that runs for r: its Binary, except that pkg runs as pkg itself when it is installed.
+func binaryOf(r *Rule) string {
+	if r.Name == "pkg" || r.Name == "pkg-records" {
+		return pkgProgram()
+	}
+	return r.Binary
+}
