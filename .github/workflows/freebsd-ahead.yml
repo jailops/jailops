@@ -151,7 +151,8 @@ jobs:
         run: echo "name=$(sh scripts/ci-boot-vm.sh resolve '${{ matrix.version }}')" >> "$GITHUB_OUTPUT"
       # one download of the image (about 700 MB) per snapshot, not one per job: the jobs of a run and the runs of the next days restore it
       - name: The download of the snapshot, kept
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: imgcache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ${{ runner.temp }}/imgcache
           key: freebsd-snapshot-${{ steps.snap.outputs.name }}
@@ -163,6 +164,14 @@ jobs:
           set -eu
           sh scripts/ci-boot-vm.sh fetch "${{ matrix.version }}" "$RUNNER_TEMP/vm" "$RUNNER_TEMP/imgcache"
           QEMU_SMP=3 QEMU_MEM=8G sh scripts/ci-boot-vm.sh boot "$RUNNER_TEMP/vm" "${{ matrix.port }}" "$RUNNER_TEMP/vmkey"
+      # kept as soon as it is there, not at the end of a job that may fail on a test
+      - name: Keep the download of the snapshot
+        if: always() && steps.imgcache.outputs.cache-hit != 'true'
+        continue-on-error: true
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/imgcache
+          key: freebsd-snapshot-${{ steps.snap.outputs.name }}
       - name: The VM could not be booted
         if: steps.boot.outcome == 'failure'
         run: |

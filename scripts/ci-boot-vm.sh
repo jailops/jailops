@@ -41,7 +41,7 @@ fetch() {
 			echo "ci-boot-vm: $dated from the cache" >&2
 			cp "$cache/$dated" "$dir/image.qcow2.xz"
 		else
-		curl -fSL --retry 3 --retry-delay 10 --max-time 420 --speed-limit 2000000 --speed-time 30 -o "$dir/image.qcow2.xz" "$base_url/$version/amd64/Latest/$plain" || die "download of $plain failed (seven minutes per try, and a try that stays under 2 MB/s for 30 s is ended)"
+		curl -fSL --retry 3 --retry-delay 10 --max-time 1200 --speed-limit 100000 --speed-time 60 -o "$dir/image.qcow2.xz" "$base_url/$version/amd64/Latest/$plain" || die "download of $plain failed (twenty minutes per try, and a try that stays under 100 KB/s for a minute is ended)"
 		got=$(sha256sum "$dir/image.qcow2.xz" | cut -d' ' -f1)
 		[ "$got" = "$want" ] || die "sha256 of $plain is $got, the checksum file says $want (a snapshot that was replaced while it was fetched: run again)"
 		if [ -n "$cache" ]; then rm -rf "$cache"; mkdir -p "$cache"; cp "$dir/image.qcow2.xz" "$cache/$dated"; fi
