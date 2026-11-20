@@ -245,6 +245,7 @@ release VERSION:
     git push origin "v{{VERSION}}"
     echo "v{{VERSION}} tagged: CI builds the release: gh run watch"
     echo "next: just publish-packages {{VERSION}}"
+    echo "then: scripts/make-upgrade-fixture.sh v{{VERSION}}, and commit internal/store/testdata/upgrade/v{{VERSION}} (a pull request): the next release-pr needs it on master"
 
 # Step 4: wait for the GitHub release of the tag, then start the jailops-packages update check (it opens the bump PR; nothing is merged here).
 publish-packages VERSION:
