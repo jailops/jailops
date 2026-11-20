@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.9.2 - 2026-11-20
+
 - **An address set with a hyphen in its name works in every rule.** The rule that lets a connection out on the link of a jail wrote the table of the set with the hyphens of its name (`<s_bastion-hosts>`) while the table and the rule on the uplink have underscores (`<s_bastion_hosts>`), so the rule matched nothing and the connection that the uplink had passed was dropped at the jail, silently: a policy that allows `from: set:bastion-hosts` admitted nothing. All rules use the same table name now, and a test checks that every table of a set that a rule names is defined in the anchor.
 - **`jailops firewall address-set show SET --flatten`** lists every address the set stands for: the sets it names (`set:NAME`) and the jails it names (`jail:NAME`) are replaced by their addresses, once each, as the firewall of the project uses them (`-o json` gives `{"name", "addresses"}`).
 - **Notes.** A jail has `spec.notes` next to its one-line comment: a long text (at most 64 KiB) for what it does, how it was set up and who to ask. `jailops jail notes web` prints them, `jailops jail notes edit web` opens them in your editor (under `If-Match`: a change made meanwhile is refused and your text kept), `notes set --file` and `notes clear` are for scripts; `network`, `volume` and `project` have the same commands, and storage, firewall policies, address sets, images and profiles take `notes` in `edit` and `apply`. The console shows them with a safe Markdown subset and edits them in place. They travel with export, import, backups and fleet documents, and a change needs no restart ([notes.md](docs/notes.md)).
