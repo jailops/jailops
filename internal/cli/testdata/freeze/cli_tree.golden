@@ -282,6 +282,7 @@ jailops firewall address-set set
     --address stringArray
     --comment string
 jailops firewall address-set show  (aliases: get)
+    --flatten bool
 jailops firewall exposed
     --tunnels bool
 jailops firewall policy  (aliases: policies)

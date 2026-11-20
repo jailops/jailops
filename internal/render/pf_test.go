@@ -1199,3 +1199,44 @@ func TestPFDefaultsAreAllowUnlessDenied(t *testing.T) {
 		t.Fatalf("%d inbound and %d outbound default rules", in2, out2)
 	}
 }
+
+// Every table of an address set that a rule names is a table the anchor defines, whatever the name of the set: a set named with
+// hyphens is written with underscores in all of its rules (the rule that lets a connection out on the link of the jail used the
+// hyphens, named a table that does not exist, and dropped what the rule on the uplink had passed).
+func TestEveryTableOfASetThatARuleNamesIsDefined(t *testing.T) {
+	in := PFInput{Jail: "custody_ns2", Interfaces: []string{"jofb8fde2f6100a"}, Addresses: []netip.Addr{netip.MustParseAddr("2a0a:4cc0:40:12c:100::53")}, Uplink: "vtnet0",
+		DefaultIn: "deny", DefaultOut: "allow", Policies: []PFPolicy{{Name: "ssh-allow", Policy: api.FirewallPolicySpec{Rules: []api.FirewallRule{
+			{Action: "allow", Direction: "in", Proto: "tcp", From: []string{"set:bastion-hosts"}, Ports: []string{"2282"}}}}}},
+		Sets: map[string]api.AddressSetSpec{
+			"bastion-hosts": {Addresses: api.Entries("set:atlas-eu", "set:lupin")},
+			"atlas-eu":      {Addresses: api.Entries("167.233.244.146", "2a01:4f8:1c16:87a1::/64")},
+			"lupin":         {Addresses: api.Entries("91.107.217.116", "2a01:4f8:c012:f3ca::/64")},
+		}, TagMembers: map[string][]netip.Addr{}}
+	rs, err := PFAnchor(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defined := map[string]bool{}
+	for _, l := range strings.Split(rs, "\n") {
+		if strings.HasPrefix(l, "table <") {
+			defined[l[len("table <"):strings.Index(l, ">")]] = true
+		}
+	}
+	used := 0
+	for _, l := range strings.Split(rs, "\n") {
+		if strings.HasPrefix(l, "#") || strings.HasPrefix(l, "table <") {
+			continue
+		}
+		for _, f := range strings.Fields(l) {
+			if strings.HasPrefix(f, "<s_") && strings.HasSuffix(f, ">") {
+				used++
+				if name := f[1 : len(f)-1]; !defined[name] {
+					t.Errorf("the rule %q names the table %s that the anchor does not define", l, name)
+				}
+			}
+		}
+	}
+	if used < 1 {
+		t.Fatalf("the rule of the policy names the set, found %d:\n%s", used, rs)
+	}
+}
