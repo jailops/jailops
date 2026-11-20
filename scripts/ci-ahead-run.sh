@@ -15,7 +15,9 @@ cd "$(dirname "$0")/.."
 [ $# -ge 4 ] || { sed -n 2,5p "$0" | sed 's/^# \{0,1\}//' >&2; exit 2; }
 port=$1 key=$2 out=$3 parts=$4; shift 4
 bin=${BIN_DIR:-vm-bin}
-[ -x "$bin/jailops-freebsd-amd64" ] || { echo "ci-ahead-run: no binaries in $bin (jailops-freebsd-amd64 ...)" >&2; exit 2; }
+[ -f "$bin/jailops-freebsd-amd64" ] || { echo "ci-ahead-run: no binaries in $bin (jailops-freebsd-amd64 ...)" >&2; exit 2; }
+# an artifact does not keep the executable bit of its files
+chmod +x "$bin"/*-freebsd-amd64
 mkdir -p "$out/logs"
 sum=$out/summary.md
 : > "$sum"
