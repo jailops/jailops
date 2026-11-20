@@ -278,13 +278,48 @@ func AddressSetSpec(s api.AddressSetSpec) error {
 	return api.ValidNotes(s.Notes)
 }
 
+// FlatEntry is one address of a flattened set and where it comes from: the sets (and jails) that list it and the
+// comments of those entries.
+type FlatEntry struct {
+	Address  string
+	From     []string // the set that lists the address, "NAME (jail)" for an address that a jail gives
+	Comments []string
+}
+
 // FlattenSet expands the address set name with the sets (set:NAME) and the jails (jail:NAME) it names into canonical,
 // sorted, de-duplicated address/CIDR strings. jails maps a jail to its addresses; a jail that is not in it has none
 // (a reference to a jail that is gone matches nobody). A set that does not exist, or a cycle, is an error.
 func FlattenSet(name string, sets map[string]api.AddressSetSpec, jails map[string][]string) ([]string, error) {
+	entries, err := FlattenSetDetail(name, sets, jails)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.Address
+	}
+	return out, nil
+}
+
+// FlattenSetDetail is FlattenSet with the origin of every address: sorted and de-duplicated like FlattenSet, and an
+// address that several entries give lists all of them.
+func FlattenSetDetail(name string, sets map[string]api.AddressSetSpec, jails map[string][]string) ([]FlatEntry, error) {
 	seen := map[string]bool{}
+	byAddr := map[string]*FlatEntry{}
 	var walk func(n string, path []string) error
-	var out []string
+	add := func(addr, from, comment string) {
+		e := byAddr[addr]
+		if e == nil {
+			e = &FlatEntry{Address: addr}
+			byAddr[addr] = e
+		}
+		if !slices.Contains(e.From, from) {
+			e.From = append(e.From, from)
+		}
+		if comment != "" && !slices.Contains(e.Comments, comment) {
+			e.Comments = append(e.Comments, comment)
+		}
+	}
 	walk = func(n string, path []string) error {
 		for _, p := range path {
 			if p == n {
@@ -310,9 +345,11 @@ func FlattenSet(name string, sets map[string]api.AddressSetSpec, jails map[strin
 					return err
 				}
 			case EndpointJail:
-				out = append(out, jails[v]...)
+				for _, a := range CanonicalAddrs(jails[v]) {
+					add(a, n+" ("+v+")", e.Comment)
+				}
 			default:
-				out = append(out, v)
+				add(v, n, e.Comment)
 			}
 		}
 		// A set reached again through another path is flattened once; the
@@ -323,7 +360,15 @@ func FlattenSet(name string, sets map[string]api.AddressSetSpec, jails map[strin
 	if err := walk(name, nil); err != nil {
 		return nil, err
 	}
-	return CanonicalAddrs(out), nil
+	addrs := make([]string, 0, len(byAddr))
+	for a := range byAddr {
+		addrs = append(addrs, a)
+	}
+	out := make([]FlatEntry, 0, len(addrs))
+	for _, a := range CanonicalAddrs(addrs) {
+		out = append(out, *byAddr[a])
+	}
+	return out, nil
 }
 
 // CanonicalAddrs sorts and de-duplicates address and CIDR strings.

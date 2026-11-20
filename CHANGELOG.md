@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`address-set show --flatten` says where each address comes from.** The output is a table of `ADDRESS`, `FROM` (the set that lists it, `NAME (jail)` for a jail's address; an address in two sets names both) and `COMMENT`. `-o json` gives `addresses` as a list of `{address, from, comment}` instead of a list of strings.
+
 ## 0.9.2 - 2026-11-20
 
 - **`jailops shell` and `jail show` answer at once.** Reading one jail ran a ZFS check of every dataset of the jail to look for a rollback, and listed the datasets of every jail of the project for the disk size: about a second each. It is one check now and the jail's own datasets; `shell --shell /bin/sh` does not read the status at all.

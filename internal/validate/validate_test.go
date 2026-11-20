@@ -618,3 +618,28 @@ func TestFirewallDefaultsAreOptional(t *testing.T) {
 		}
 	}
 }
+
+func TestFlattenSetDetailSaysWhereAnAddressComesFrom(t *testing.T) {
+	sets := map[string]api.AddressSetSpec{
+		"top": {Addresses: []api.AddressEntry{{Address: "set:a"}, {Address: "set:b"}, {Address: "jail:web", Comment: "the web jail"}}},
+		"a":   {Addresses: []api.AddressEntry{{Address: "192.0.2.1", Comment: "office"}}},
+		"b":   {Addresses: []api.AddressEntry{{Address: "192.0.2.1"}, {Address: "198.51.100.0/24"}}},
+	}
+	got, err := FlattenSetDetail("top", sets, map[string][]string{"web": {"203.0.113.5"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %+v", got)
+	}
+	by := map[string]FlatEntry{}
+	for _, e := range got {
+		by[e.Address] = e
+	}
+	if e := by["192.0.2.1"]; strings.Join(e.From, ",") != "a,b" || strings.Join(e.Comments, ",") != "office" {
+		t.Fatalf("shared address: %+v", e)
+	}
+	if e := by["203.0.113.5"]; strings.Join(e.From, ",") != "top (web)" || strings.Join(e.Comments, ",") != "the web jail" {
+		t.Fatalf("jail address: %+v", e)
+	}
+}
