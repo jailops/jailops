@@ -58,11 +58,8 @@ migrated and that has no copy is refused by the older binary (`version_skew`), b
   still known, and that every key of the helper's configuration is known or retired.
 - **Newer than the binary** is a test of its own for the database and for an object.
 - **Every release has its fixture:** a test fails when a release of `CHANGELOG.md` from 0.8.0 on has none, and
-  `just release-pr` refuses to prepare a release while the fixture of the newest tag is not on master. The fixture of a
-  release is made after it is tagged:
-
-      just release 0.9.0
-      scripts/make-upgrade-fixture.sh 0.9.0     # commit internal/store/testdata/upgrade/v0.9.0 in a pull request
+  `just release-pr` adds the fixture of the newest tag to the release pull request when master does not have it
+  (`scripts/make-upgrade-fixture.sh` makes it from the tag), so no step of its own is left to do.
 
 - **On a real machine, every night:** the workflow `upgrade-e2e` installs the newest released packages from
   `pkg.jailops.net` on a FreeBSD VM, makes a fleet with their command line, replaces them with the packages of master, and
@@ -95,4 +92,4 @@ A release that renames or removes a field, a key or a file:
 2. Lets the current type reject what never was valid: a misspelt key stays an error.
 3. Runs `go test ./internal/upgradecheck`: the fixtures of the earlier releases fail when a shape lost its conversion, and
    a fixture of a release that had the old shape is the test of the new conversion.
-4. After the release is tagged, makes its fixture with `scripts/make-upgrade-fixture.sh`.
+4. The next `just release-pr` makes the fixture of this release (`scripts/make-upgrade-fixture.sh`).

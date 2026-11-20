@@ -156,13 +156,13 @@ ci: fmt test build-freebsd
 
 # ── Release ──────────────────────────────────────────────────────────────
 #
-# Two-step, PR-based release flow:
-#   1. just release-pr 0.2.0   -> branch release/v0.2.0 with version.txt and the CHANGELOG.md section, and a PR (review, CI)
+# Two commands and one merge:
+#   1. just release-pr 0.2.0   -> branch release/v0.2.0 with version.txt, the CHANGELOG.md section and, when master lacks it,
+#                                the upgrade fixture of the release before, and a PR (review, full CI)
 #   2. merge the PR
-#   3. just release 0.2.0      -> verifies master carries 0.2.0, signs the tag, pushes it. The release workflow checks
-#                                the tagged commit and GoReleaser publishes the GitHub release. No tests run here.
-#   4. just publish-packages 0.2.0 -> waits for that release, then asks jailops-packages for the bump PR (the FreeBSD
-#                                packages). Merging the bump PR stays a human step.
+#   3. just release 0.2.0      -> waits for CI on master, checks the full run on the tree, signs and pushes the tag, waits for
+#                                the GitHub release, starts the jailops-packages update check and merges its bump PR when it
+#                                has built (the packages are published by that merge).
 # The very first release has nothing to PR: version.txt and CHANGELOG.md already say VERSION, go straight to step 3.
 
 # Step 1: open the release PR (version bump and changelog section).
@@ -178,12 +178,12 @@ release-pr VERSION:
         exit 1
     fi
     # the upgrade guarantee (docs/upgrade-guarantee.md): the release before this one has its upgrade fixture on master, so that
-    # every test run opens what that release wrote with the code of the next
+    # every test run opens what that release wrote with the code of the next. The PR carries it when master lacks it.
     last=$(git describe --tags --abbrev=0 origin/master 2>/dev/null || true)
+    need_fixture=""
     if [ -n "$last" ] && [ "$(printf '%s\n' v0.8.0 "$last" | sort -V | head -1)" = v0.8.0 ] && \
         [ -z "$(git ls-tree -d --name-only origin/master "internal/store/testdata/upgrade/$last")" ]; then
-        echo "x the upgrade fixture of $last is not on master: run just fixture ${last#v} (it opens the pull request), merge it, and prepare this release again"
-        exit 1
+        need_fixture=$last
     fi
     git ls-remote --exit-code --heads origin "release/v{{VERSION}}" >/dev/null 2>&1 && \
         { echo "x release/v{{VERSION}} already on origin: open the PR with: gh pr create --head release/v{{VERSION}} --title \"Release v{{VERSION}}\" (or delete it: git push -d origin release/v{{VERSION}})"; exit 1; }
@@ -196,6 +196,10 @@ release-pr VERSION:
     sh scripts/check-workflows-table.sh || { echo "x the workflow walkthrough (test/workflows/daily-tasks.md) is out of step with its script or the roadmap: fix it, merge, and run this again"; exit 1; }
     echo "reminder: run the walkthrough on a FreeBSD test host before the release is tagged: just e2e-workflows"
     echo "{{VERSION}}" > version.txt
+    if [ -n "$need_fixture" ]; then
+        scripts/make-upgrade-fixture.sh "$need_fixture"
+        git add "internal/store/testdata/upgrade/$need_fixture"
+    fi
     # CHANGELOG.md: the Unreleased entries move under the new version, a new empty Unreleased stays on top
     grep -Eq '^## \[?Unreleased\]?' CHANGELOG.md || { echo "x CHANGELOG.md has no Unreleased section"; exit 1; }
     body=$(awk '/^## \[?Unreleased\]?/{f=1;next} /^## /{f=0} f' CHANGELOG.md | tr -d '[:space:]')
@@ -208,7 +212,7 @@ release-pr VERSION:
     git push -u origin "release/v{{VERSION}}"
     trap - EXIT
     gh pr create --title "Release v{{VERSION}}" \
-        --body "Bumps version.txt to {{VERSION}} and moves the Unreleased changelog entries under it. After merge: \`just release {{VERSION}}\` tags master and CI publishes the release." \
+        --body "Bumps version.txt to {{VERSION}} and moves the Unreleased changelog entries under it${need_fixture:+, with the upgrade fixture of $need_fixture}. After merge: \`just release {{VERSION}}\` tags master and CI publishes the release." \
         || { echo "x branch pushed but PR creation failed: finish with: gh pr create --head release/v{{VERSION}} --title \"Release v{{VERSION}}\""; exit 1; }
     echo "release PR opened: merge it, then run: just release {{VERSION}}"
 
@@ -227,9 +231,15 @@ release VERSION:
         { echo "x CHANGELOG.md has no section for {{VERSION}}"; exit 1; }
     git rev-parse "v{{VERSION}}" >/dev/null 2>&1 && { echo "x tag v{{VERSION}} already exists"; exit 1; }
     # The whole suite already ran on master: the release does not run it again, it needs it green on exactly this commit.
-    ci=$(gh run list --workflow CI --commit "$(git rev-parse HEAD)" --limit 1 --json status,conclusion --jq '.[0] | "\(.status)/\(.conclusion)"' 2>/dev/null || true)
-    [ "$ci" = "completed/success" ] || \
-        { echo "x CI is not green on $(git rev-parse --short HEAD) (${ci:-no run found}): wait for it: gh run watch"; exit 1; }
+    sha=$(git rev-parse HEAD)
+    ci=""
+    for _ in $(seq 1 60); do
+        ci=$(gh run list --workflow CI --commit "$sha" --limit 1 --json status,conclusion,databaseId --jq '.[0] | "\(.status)/\(.conclusion)/\(.databaseId)"' 2>/dev/null || true)
+        case "$ci" in completed/success/*) break ;; completed/*) echo "x CI failed on ${sha:0:7}: gh run view ${ci##*/} --log-failed"; exit 1 ;; esac
+        [ -n "$ci" ] && [ "${ci%%/*}" = in_progress ] && { gh run watch "${ci##*/}" --interval 20 >/dev/null 2>&1 || true; continue; }
+        sleep 10
+    done
+    case "$ci" in completed/success/*) echo "CI is green on ${sha:0:7}" ;; *) echo "x CI is not green on ${sha:0:7} (${ci:-no run found})"; exit 1 ;; esac
     # The quick gate is not the release gate: the browsers, the fuzzers and the FreeBSD VMs run at night, by hand and on the release PR.
     # One of those runs must be green on the tree of this commit (the release PR is a run of it: a squash merge keeps the tree).
     tree=$(git rev-parse HEAD^{tree})
@@ -243,29 +253,10 @@ release VERSION:
     echo "the full CI run of commit ${heavy:0:7} is green on this tree"
     git tag -s "v{{VERSION}}" -m "v{{VERSION}}"
     git push origin "v{{VERSION}}"
-    echo "v{{VERSION}} tagged: CI builds the release: gh run watch"
-    echo "next: just publish-packages {{VERSION}}"
-    echo "then: just fixture {{VERSION}} (makes the upgrade fixture and opens its pull request: the next release-pr needs it on master)"
+    echo "v{{VERSION}} tagged: CI builds the release"
+    just publish-packages "{{VERSION}}"
 
-# After a release: make its upgrade fixture and open the pull request (on a branch of its own when you are on master).
-fixture VERSION:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    [[ "{{VERSION}}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "x version must be X.Y.Z (no leading v), got '{{VERSION}}'"; exit 1; }
-    git fetch -q --tags origin
-    scripts/make-upgrade-fixture.sh "v{{VERSION}}"
-    branch=$(git branch --show-current)
-    [ -n "$branch" ] || { echo "x not on a branch"; exit 1; }
-    if [ "$branch" = master ]; then
-        branch="fixture/v{{VERSION}}"
-        git switch -C "$branch"
-    fi
-    git add "internal/store/testdata/upgrade/v{{VERSION}}"
-    git commit -q -m "Upgrade fixture of v{{VERSION}}" -m "What v{{VERSION}} writes for a small fleet, opened by the current code on every go test."
-    git push -u origin "$branch"
-    gh pr create --base master --head "$branch" --title "Upgrade fixture of v{{VERSION}}" --body "The state a host of v{{VERSION}} holds, made by the release itself (scripts/make-upgrade-fixture.sh). internal/upgradecheck opens it with the current code on every go test; the next release-pr needs it on master."
-
-# Step 4: wait for the GitHub release of the tag, then start the jailops-packages update check (it opens the bump PR; nothing is merged here).
+# Called by release: wait for the GitHub release of the tag, start the jailops-packages update check and merge its bump PR.
 publish-packages VERSION:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -285,9 +276,17 @@ publish-packages VERSION:
     gh release view "$tag" >/dev/null 2>&1 || { echo "x there is no GitHub release for $tag"; exit 1; }
     echo "the GitHub release of $tag exists: starting the update check of jailops-packages"
     gh workflow run "Check for updates" -R jailops/jailops-packages
-    echo "{{VERSION}} is released: the update check of jailops-packages is running. The bump PR appears in a few minutes:"
-    echo "  gh pr list -R jailops/jailops-packages"
-    echo "Read it, wait for its build, merge it; the publish run then builds, signs and deploys. Check on a host:"
+    echo "waiting for the bump PR of jailops-packages"
+    pr=""
+    for _ in $(seq 1 40); do
+        pr=$(gh pr list -R jailops/jailops-packages --state open --search "{{VERSION}} in:title" --json number --jq '.[0].number // empty' 2>/dev/null || true)
+        [ -n "$pr" ] && break
+        sleep 15
+    done
+    [ -n "$pr" ] || { echo "x no bump PR after ten minutes: gh pr list -R jailops/jailops-packages"; exit 1; }
+    gh pr merge "$pr" -R jailops/jailops-packages --squash --auto || \
+        { echo "x could not set the PR to merge when its build passes: gh pr merge $pr -R jailops/jailops-packages --squash"; exit 1; }
+    echo "{{VERSION}} is released: PR #$pr of jailops-packages merges when its build passes, and the publish run then deploys. Check on a host:"
     echo "  pkg update -f -r jailops && pkg rquery -r jailops %v jailops"
 
 clean:
