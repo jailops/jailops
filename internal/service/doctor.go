@@ -235,14 +235,16 @@ func (s *Service) doctorSysctl(ctx context.Context, c *checkSet) {
 	check("net.inet.ip.forwarding", "1", v4, "jails reach IPv4 through the host", "")
 	check("kern.racct.enable", "1", racct, "resources.cpu, resources.memory and resources.pids are enforced with rctl",
 		"add kern.racct.enable=1 to /boot/loader.conf and reboot: the kernel reads it only at boot")
-	if v6 { // present from FreeBSD 15.2; JailOps derives a jail's link-local address from its MAC address, which this setting changes
+	if v6 { // present from FreeBSD 15.2; JailOps expects a jail's link-local address to be the one formed from its MAC address
 		const stable = "net.inet6.ip6.use_stableaddr"
 		if got, err := s.sysctl(ctx, stable); err == nil {
 			if got == "0" {
 				c.add("sysctl."+stable, api.DoctorOK, stable+"="+got, "")
 			} else {
-				c.add("sysctl."+stable, api.DoctorFail, stable+" is "+got+": the kernel no longer forms a jail's link-local address from its MAC address, so the jail's IPv6 neighbour discovery is dropped by its own firewall",
-					"sysctl "+stable+"=0 and take it out of /etc/sysctl.conf")
+				// FreeBSD 16 has 1 by default and the jails of a routed network still get the address of their MAC, so this is a warning:
+				// where the kernel forms another address the anchor of the jail drops its IPv6 neighbour discovery and the jail has no IPv6
+				c.add("sysctl."+stable, api.DoctorWarn, stable+" is "+got+": a kernel may then form a jail's link-local address differently from its MAC address, and the anchor of the jail drops the jail's IPv6 neighbour discovery",
+					"if a jail has no IPv6: sysctl "+stable+"=0 and take it out of /etc/sysctl.conf")
 			}
 		}
 	}

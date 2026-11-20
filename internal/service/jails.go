@@ -746,6 +746,9 @@ func (s *Service) DeleteJail(ctx context.Context, name string, expect int64) (ap
 		Resources: map[string][]string{"jails": {"/api/v1/jails/" + name}},
 		Run: func(ctx context.Context, h *OpHandle) (any, error) {
 			_ = h.Bind("destroy/"+key, &opRequest{Kind: "destroy", Jail: key})
+			// pkg of the setup of the shell works on the root of the jail from the host: it is ended before the datasets go (a stop does
+			// the same), or the destroy finds the root busy
+			s.settleShellSetup(ctx, key)
 			if _, err := s.life.DestroyJail(ctx, key, false, false); err != nil {
 				return nil, err
 			}

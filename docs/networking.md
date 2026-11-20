@@ -120,6 +120,8 @@ every address of the jail, the private IPv4 one included. To keep another projec
 the sources instead or add a deny rule. Another project cannot use a forward of a jail through the host's public address or a
 name that points at it, because the host is closed to jails: it connects to the jail's own address.
 
+**A rule that names a host address matches the source the host sends from.** The host has the gateway address of a network and may hold more addresses on the same prefix. A connection that the host starts to a jail leaves from the address the kernel chooses among them, and FreeBSD 15 and 16 choose differently. To let the host in with a rule `from: <address>`, send from that address (`ping -S ADDRESS`, `nc -s ADDRESS`), or name the gateway address as well.
+
 **Ping and DNS to the host stay open under every policy**, a deny-all one included, because a jail needs its gateway and its
 resolver. To close them, add deny rules, which win over every allow rule: `jailops firewall rule add POLICY out --action deny
 --proto udp --port 53 --to host` (and `--proto tcp`, and `--proto icmp` for ping).

@@ -46,6 +46,7 @@ Planned beside the list above, none of it a promise for 1.x releases before 16.0
   ([supported-versions.md](supported-versions.md#the-rule)).
 - **More than one uplink for a network**, with the failover of multipath routes, and a source address on a route
   (`RTA_PREFSRC`) for jails with a public address.
+- **The signing key of the base repository for 16.0-RELEASE.** A RELEASE of 16 will have the base repository `base_release_0`, signed with the `pkgbase-16` key; `internal/imagegen` has to take that key, as it does for the releases of 15.
 - **A software bill of materials** with every package release of `pkgops`.
 - **CPU fairness between jails**, read from the accounting in `jailops top`, once the scheduler work of FreeBSD 16 is in a release.
 
