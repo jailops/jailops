@@ -59,10 +59,21 @@ for part in $parts; do
 	log=$out/logs/$kind-$shard.log
 	t0=$(date +%s)
 	# the part gets 55 minutes; PF_KEEP_GOING=1 so that a failed phase does not hide the ones after it
-	if timeout 3300 ssh -i "$key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+	echo "ci-ahead-run: $part starts"
+	timeout 3300 ssh -i "$key" -p "$port" -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
 		-o ServerAliveInterval=30 -l root 127.0.0.1 \
 		"sh /tmp/jopsci/scripts/vm-clean.sh; cd /tmp/jopsci && kldload pf 2>/dev/null; PF_KEEP_GOING=1 $envs JAILOPS_E2E_IMAGE_RELEASE=$release JAILOPS_BIN_DIR=/tmp/jopsci/bin FORGE_BIN=/tmp/jopsci/bin/forge-freebsd-amd64 sh scripts/ci-freebsd-e2e.sh" \
-		> "$log" 2>&1; then r=PASS; else r=FAIL; rc=1; fi
+		> "$log" 2>&1 &
+	spid=$!
+	# a line every thirty seconds with the step the part is in (the last "== ..." line of its log), so that a long part is seen to move
+	shown=""
+	while kill -0 "$spid" 2>/dev/null; do
+		sleep 30 # sleep-ok: the progress line of a part
+		cur=$(grep -a '^== ' "$log" | tail -1 | cut -c1-110)
+		if [ "$cur" != "$shown" ]; then echo "ci-ahead-run: $part: $cur  [$(( ($(date +%s) - t0) / 60 )) min]"; shown=$cur
+		else echo "ci-ahead-run: $part: still in the same step  [$(( ($(date +%s) - t0) / 60 )) min]"; fi
+	done
+	if wait "$spid"; then r=PASS; else r=FAIL; rc=1; fi
 	first=$(grep -E '^FAIL |^FAILED' "$log" | head -3 | tr '\n|' '  ' | cut -c1-300)
 	say "| $part | $r | $(( ($(date +%s) - t0) / 60 )) | ${first:--} |"
 	# the end of the log of a failed part goes to the log of the job: the artifact has all of it, this is what is read first

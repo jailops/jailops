@@ -14,7 +14,7 @@
 # key is put in place through the serial console, and the boot waits again. KVM only: without /dev/kvm it stops. The size of the
 # machine is QEMU_SMP (default 3) and QEMU_MEM (default 8G). Used by .github/workflows/freebsd-ahead.yml and by hand.
 set -eu
-base_url=https://download.freebsd.org/snapshots/VM-IMAGES
+base_url=${CI_BOOT_BASE_URL:-https://download.freebsd.org/snapshots/VM-IMAGES}
 
 die() { echo "ci-boot-vm: $*" >&2; exit 1; }
 
@@ -41,11 +41,25 @@ fetch() {
 			echo "ci-boot-vm: $dated from the cache" >&2
 			cp "$cache/$dated" "$dir/image.qcow2.xz"
 		else
-		curl -fSL --retry 3 --retry-delay 10 --max-time 1200 --speed-limit 100000 --speed-time 60 -o "$dir/image.qcow2.xz" "$base_url/$version/amd64/Latest/$plain" || die "download of $plain failed (twenty minutes per try, and a try that stays under 100 KB/s for a minute is ended)"
+		total=$(curl -fsIL --max-time 60 "$base_url/$version/amd64/Latest/$plain" | awk 'tolower($1) == "content-length:" { l = $2 + 0 } END { print l + 0 }')
+		echo "ci-boot-vm: downloading $plain ($((total / 1048576)) MB)" >&2
+		curl -fsSL --retry 3 --retry-delay 10 --max-time 1200 --speed-limit 100000 --speed-time 60 -o "$dir/image.qcow2.xz" "$base_url/$version/amd64/Latest/$plain" &
+		cpid=$!
+		t0=$(date +%s)
+		# a line every ten seconds: how much has arrived, the percent and the speed, so that a download that crawls is seen to crawl
+		while kill -0 "$cpid" 2>/dev/null; do
+			sleep 10 # sleep-ok: the progress line of a download
+			got_b=$(wc -c < "$dir/image.qcow2.xz" 2>/dev/null || echo 0)
+			el=$(( $(date +%s) - t0 )); [ "$el" -gt 0 ] || el=1
+			pct=0; [ "$total" -gt 0 ] && pct=$(( got_b * 100 / total ))
+			echo "ci-boot-vm: download $((got_b / 1048576)) of $((total / 1048576)) MB, ${pct}%, $((got_b / el / 1024)) KB/s, ${el} s" >&2
+		done
+		wait "$cpid" || die "download of $plain failed (twenty minutes per try, and a try that stays under 100 KB/s for a minute is ended)"
 		got=$(sha256sum "$dir/image.qcow2.xz" | cut -d' ' -f1)
 		[ "$got" = "$want" ] || die "sha256 of $plain is $got, the checksum file says $want (a snapshot that was replaced while it was fetched: run again)"
 		if [ -n "$cache" ]; then rm -rf "$cache"; mkdir -p "$cache"; cp "$dir/image.qcow2.xz" "$cache/$dated"; fi
 		fi
+		echo "ci-boot-vm: unpacking the image" >&2
 		xz -dc "$dir/image.qcow2.xz" > "$dir/base.qcow2"
 		rm -f "$dir/image.qcow2.xz"
 		printf '%s\n' "$dated" > "$dir/image-name"
@@ -117,11 +131,15 @@ sshq() { # sshq PORT KEY COMMAND...
 }
 
 wait_ssh() { # wait_ssh PORT KEY SECONDS
-	end=$(( $(date +%s) + $3 ))
+	begin=$(date +%s); end=$(( begin + $3 )); last=0
 	until sshq "$1" "$2" true >/dev/null 2>&1; do
-		[ "$(date +%s)" -lt "$end" ] || return 1
+		now=$(date +%s)
+		[ "$now" -lt "$end" ] || return 1
+		# a line every thirty seconds: the VM is booting, not hanging
+		if [ $(( now - last )) -ge 30 ]; then echo "ci-boot-vm: waiting for ssh on port $1, $(( now - begin )) s of $3" >&2; last=$now; fi
 		sleep 5 # sleep-ok: poll of the VM coming up
 	done
+	echo "ci-boot-vm: ssh answers on port $1 after $(( $(date +%s) - begin )) s" >&2
 }
 
 boot() {
