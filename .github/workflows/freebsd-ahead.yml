@@ -25,6 +25,11 @@ on:
         type: choice
         options: [both, stable, current]
         default: both
+      group:
+        description: "The jobs of a branch to run: all, or one of e2e, pf-ab, pf-cd (gh workflow run freebsd-ahead.yml -f which=current -f group=e2e)"
+        type: choice
+        options: [all, e2e, pf-ab, pf-cd]
+        default: all
       fail_fast:
         description: "End the run at the first job that fails"
         type: boolean
@@ -52,16 +57,18 @@ jobs:
       - id: m
         env:
           WHICH: ${{ inputs.which }}
+          GROUP: ${{ inputs.group }}
         run: |
           which=${WHICH:-both}
-          jq -nc --arg which "$which" '
+          group=${GROUP:-all}
+          jq -nc --arg which "$which" --arg group "$group" '
             [ {branch: "stable", version: "15.2-STABLE", port: 2240}, {branch: "current", version: "16.0-CURRENT", port: 2241} ]
             | map(select($which == "both" or .branch == $which))
             | map(. as $b | [
                 {group: "e2e",   parts: "e2e:1 e2e:2 e2e:3", pkgs: "curl postgresql17-server"},
                 {group: "pf-ab", parts: "pf:a pf:b",         pkgs: "curl"},
                 {group: "pf-cd", parts: "pf:c pf:d",         pkgs: "curl"}
-              ] | map($b + .))
+              ] | map(select($group == "all" or .group == $group) | $b + .))
             | add' > matrix.json
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
           cat matrix.json
@@ -139,12 +146,22 @@ jobs:
           nproc; ls -l /dev/kvm
       - name: A key for the VM
         run: ssh-keygen -q -t ed25519 -N "" -f "$RUNNER_TEMP/vmkey"
+      - name: The name of today's snapshot
+        id: snap
+        run: echo "name=$(sh scripts/ci-boot-vm.sh resolve '${{ matrix.version }}')" >> "$GITHUB_OUTPUT"
+      # one download of the image (about 700 MB) per snapshot, not one per job: the jobs of a run and the runs of the next days restore it
+      - name: The download of the snapshot, kept
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ${{ runner.temp }}/imgcache
+          key: freebsd-snapshot-${{ steps.snap.outputs.name }}
       - name: Download the snapshot and boot it
         id: boot
         continue-on-error: true
+        timeout-minutes: 25
         run: |
           set -eu
-          sh scripts/ci-boot-vm.sh fetch "${{ matrix.version }}" "$RUNNER_TEMP/vm"
+          sh scripts/ci-boot-vm.sh fetch "${{ matrix.version }}" "$RUNNER_TEMP/vm" "$RUNNER_TEMP/imgcache"
           QEMU_SMP=3 QEMU_MEM=8G sh scripts/ci-boot-vm.sh boot "$RUNNER_TEMP/vm" "${{ matrix.port }}" "$RUNNER_TEMP/vmkey"
       - name: The VM could not be booted
         if: steps.boot.outcome == 'failure'

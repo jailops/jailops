@@ -2,7 +2,7 @@
 # ci-boot-vm.sh: boot a FreeBSD snapshot VM (the coming 15.x or CURRENT) with qemu and KVM and give it root ssh, without a console.
 #
 #   sh scripts/ci-boot-vm.sh resolve VERSION          the dated file name of the newest snapshot image (the key of the image cache)
-#   sh scripts/ci-boot-vm.sh fetch VERSION DIR        download it, check its sha256, unpack it to DIR/base.qcow2
+#   sh scripts/ci-boot-vm.sh fetch VERSION DIR [CACHE]  download it, check its sha256, unpack it to DIR/base.qcow2 (CACHE keeps the download for the next job)
 #   sh scripts/ci-boot-vm.sh boot DIR PORT KEYFILE    boot an overlay of DIR/base.qcow2, ssh as root on 127.0.0.1:PORT
 #   sh scripts/ci-boot-vm.sh update PORT KEYFILE      bring the VM to the newest snapshot of its branch (pkg upgrade; a reboot when the kernel changed)
 #   sh scripts/ci-boot-vm.sh install PORT KEYFILE PKG...   packages the tests need, bounded and tried three times
@@ -25,7 +25,7 @@ resolve() {
 }
 
 fetch() {
-	version=${1:-}; dir=${2:-}
+	version=${1:-}; dir=${2:-}; cache=${3:-}
 	[ -n "$version" ] && [ -n "$dir" ] || die "usage: fetch VERSION DIR"
 	mkdir -p "$dir"
 	sums=$(curl -fsS --retry 3 --max-time 60 "$base_url/$version/amd64/Latest/CHECKSUM.SHA256") || die "no checksum file for $version"
@@ -36,9 +36,16 @@ fetch() {
 	plain=$(printf '%s' "$dated" | sed 's/-BASIC-CLOUDINIT-[0-9]*-[0-9a-f]*-[0-9]*-/-BASIC-CLOUDINIT-/')
 	if [ ! -s "$dir/base.qcow2" ] || [ "$(cat "$dir/image-name" 2>/dev/null)" != "$dated" ]; then
 		rm -f "$dir/image.qcow2.xz" "$dir/base.qcow2"
-		curl -fSL --retry 5 --retry-delay 10 --max-time 1800 -o "$dir/image.qcow2.xz" "$base_url/$version/amd64/Latest/$plain" || die "download of $plain failed"
+		# a download kept by an earlier job (the cache of the workflow, keyed by the dated name of the snapshot) is used when its sha256 is right
+		if [ -n "$cache" ] && [ -s "$cache/$dated" ] && [ "$(sha256sum "$cache/$dated" | cut -d' ' -f1)" = "$want" ]; then
+			echo "ci-boot-vm: $dated from the cache" >&2
+			cp "$cache/$dated" "$dir/image.qcow2.xz"
+		else
+		curl -fSL --retry 3 --retry-delay 10 --max-time 420 --speed-limit 2000000 --speed-time 30 -o "$dir/image.qcow2.xz" "$base_url/$version/amd64/Latest/$plain" || die "download of $plain failed (seven minutes per try, and a try that stays under 2 MB/s for 30 s is ended)"
 		got=$(sha256sum "$dir/image.qcow2.xz" | cut -d' ' -f1)
 		[ "$got" = "$want" ] || die "sha256 of $plain is $got, the checksum file says $want (a snapshot that was replaced while it was fetched: run again)"
+		if [ -n "$cache" ]; then rm -rf "$cache"; mkdir -p "$cache"; cp "$dir/image.qcow2.xz" "$cache/$dated"; fi
+		fi
 		xz -dc "$dir/image.qcow2.xz" > "$dir/base.qcow2"
 		rm -f "$dir/image.qcow2.xz"
 		printf '%s\n' "$dated" > "$dir/image-name"
