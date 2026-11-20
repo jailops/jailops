@@ -588,6 +588,11 @@ jailops jail logs
     --limit/-n int =200
     --since string
     --since-id string
+jailops jail notes
+jailops jail notes clear
+jailops jail notes edit
+jailops jail notes set
+    --file/-f string
 jailops jail pkg
     --all bool
     --parallel int =4
@@ -742,6 +747,11 @@ jailops network ndp-proxy enable
 jailops network ndp-proxy status
 jailops network ndp-proxy watch
     --limit int
+jailops network notes
+jailops network notes clear
+jailops network notes edit
+jailops network notes set
+    --file/-f string
 jailops network rename
 jailops network revoke
 jailops network set
@@ -806,6 +816,11 @@ jailops project list  (aliases: ls)
     --columns/-c stringSlice
     --selector/-l stringArray
     --sort string
+jailops project notes
+jailops project notes clear
+jailops project notes edit
+jailops project notes set
+    --file/-f string
 jailops project rename
 jailops project set
     --any-image bool
@@ -973,6 +988,11 @@ jailops volume list  (aliases: ls)
     --selector/-l stringArray
     --sort string
 jailops volume lock
+jailops volume notes
+jailops volume notes clear
+jailops volume notes edit
+jailops volume notes set
+    --file/-f string
 jailops volume passphrase
     --new-passphrase-file string
     --passphrase-file string

@@ -33,6 +33,9 @@ type Jail struct {
 type JailSpec struct {
 	// Comment is what the object is for: one line of free text.
 	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes string `json:"notes,omitempty"`
 	// Image is an image name such as "freebsd-15-1" (its newest generation),
 	// or a pinned generation such as "freebsd-15-1#g3".
 	Image string `json:"image"`

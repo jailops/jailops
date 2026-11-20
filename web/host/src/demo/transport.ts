@@ -79,6 +79,7 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
   for (const j of db.jails) {
     j.spec.provision = d2.provisionSpec(j.metadata.name)
     j.status.provisioned_at = d2.provisionedAt(j.metadata.name)
+    if (j.metadata.name === 'web' && (j.metadata.project ?? '') === 'web') j.spec.notes = d.webNotes
     if (j.metadata.name === 'web') j.spec.update = { mode: 'notify', schedule: '0 4 * * *', packages: true, os: true, reboot: 'manual' }
     if (j.metadata.name === 'db') j.spec.update = { mode: 'managed', schedule: '0 3 * * 0', packages: true, os: true, reboot: 'manual' }
     j.spec.profiles = j.metadata.name === 'web' ? ['web-limits'] : j.spec.profiles
@@ -273,6 +274,35 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const m = req.method
     const body = (req.body === undefined ? {} : JSON.parse(JSON.stringify(req.body))) as Record<string, any> // the wire is JSON: never keep the caller's reactive objects
 
+    type Noted = { metadata: { name: string; project?: string; generation?: number }; spec: { notes?: string } }
+    // the object a notes patch names, and the event its change sends
+    const notesTarget = (sg: string[], project: string): { obj: Noted; event: string } | undefined => {
+      const named = <T extends Noted>(list: T[], name: string, scoped: boolean) => list.find((x) => x.metadata.name === name && (!scoped || (x.metadata.project ?? '') === project))
+      const at = (list: Noted[], name: string, scoped: boolean, event: string) => { const obj = named(list, name, scoped); return obj ? { obj, event } : undefined }
+      if (sg.length === 2 && sg[0] === 'jails') return at(db.jails, sg[1], true, 'jail-updated')
+      if (sg.length === 2 && sg[0] === 'volumes') return at(db.volumes, sg[1], true, 'volume-updated')
+      if (sg.length === 2 && sg[0] === 'projects') return at(db.projects, sg[1], false, 'project-updated')
+      if (sg.length === 2 && sg[0] === 'networks') return at(db.networks, sg[1], false, 'network-updated')
+      if (sg.length === 2 && sg[0] === 'storage') return at(db.storage, sg[1], false, 'storage-updated')
+      if (sg.length === 2 && sg[0] === 'images') return at(db.images, sg[1], false, 'image-updated')
+      if (sg.length === 3 && sg[0] === 'firewall' && sg[1] === 'policies') return at(db.policies, sg[2], true, 'firewall-updated')
+      if (sg.length === 3 && sg[0] === 'firewall' && sg[1] === 'address-sets') return at(db.sets, sg[2], true, 'address-set-updated')
+      return undefined
+    }
+    // the checks of api.ValidNotes, then the change and a new generation
+    const notesPatch = (obj: Noted, event: string, src: string, notes: unknown, match?: string): RawResponse => {
+      if (match && match !== etagOf(obj.metadata.generation)) return fail(412, { code: 'precondition_failed', message: `"${obj.metadata.name}" changed: current generation is ${obj.metadata.generation ?? 0}`, hint: 'read it again and re-apply your change' })
+      const text = typeof notes === 'string' ? notes : ''
+      const size = new TextEncoder().encode(text).length
+      if (size > 65536) return fail(400, { code: 'invalid', message: `notes are ${size} bytes, at most 65536`, hint: 'keep long documents elsewhere and link them from the notes' })
+      if (/[\u0000-\u0008\u000b-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]/.test(text)) return fail(400, { code: 'invalid', message: 'notes hold control or invisible characters' })
+      if ((obj.spec.notes ?? '') === text) return ok(obj, etagOf(obj.metadata.generation))
+      obj.spec.notes = text || undefined
+      obj.metadata.generation = (obj.metadata.generation ?? 0) + 1
+      emit(event, `/api/v1${src}`)
+      return ok(obj, etagOf(obj.metadata.generation))
+    }
+
     if (path === '' && m === 'GET') {
       const info = d.server()
       if (newRelease) info.environment = { ...info.environment, kernel_version: '15.2-RELEASE-p1' }
@@ -303,6 +333,11 @@ export function demoTransport(opts: DemoOptions = {}): Transport {
     const rn = m === 'POST' ? renameKindOf(seg) : undefined
     if (rn) return renameRoute(rn.kind, rn.name, body, project, req)
     if (seg[0] === 'jail-imports' && url.searchParams.get('dry_run') === 'true' && m === 'POST') return ok(importPreflight(db, project, body.manifest, body.request ?? {}))
+    // PATCH {spec: {notes}} of any kind that has notes: the merge patch the Notes panel sends, under If-Match
+    if (m === 'PATCH' && body.spec && Object.keys(body).length === 1 && Object.keys(body.spec).length === 1 && 'notes' in body.spec) {
+      const n = notesTarget(seg, project)
+      if (n) return notesPatch(n.obj, n.event, path, body.spec.notes, req.headers?.['If-Match'])
+    }
     const extra = extraRoutes(seg, m, body, url, req, project)
     if (extra) return extra
 

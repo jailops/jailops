@@ -41,6 +41,9 @@ func FirewallPolicySpec(s api.FirewallPolicySpec) (FirewallReport, error) {
 	if err := Comment("comment", s.Comment); err != nil {
 		return rep, err
 	}
+	if err := api.ValidNotes(s.Notes); err != nil {
+		return rep, err
+	}
 	for i, r := range s.Rules {
 		if err := rule(fmt.Sprintf("rules[%d]", i), r); err != nil {
 			return rep, err
@@ -272,7 +275,7 @@ func AddressSetSpec(s api.AddressSetSpec) error {
 	if err := Comment("comment", s.Comment); err != nil {
 		return err
 	}
-	return nil
+	return api.ValidNotes(s.Notes)
 }
 
 // FlattenSet expands the address set name with the sets (set:NAME) and the jails (jail:NAME) it names into canonical,

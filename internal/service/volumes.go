@@ -216,6 +216,9 @@ func (s *Service) checkVolumeSpec(p project, name string, spec api.VolumeSpec) (
 	if err := api.ValidFreeText("comment", spec.Comment, false); err != nil {
 		return spec, nil, 0, err
 	}
+	if err := api.ValidNotes(spec.Notes); err != nil {
+		return spec, nil, 0, err
+	}
 	if spec.IsHostDir() || spec.Watch || spec.Probe != "" || spec.OnLoss != "" {
 		spec, err := api.CheckHostDirVolume(spec)
 		return spec, nil, 0, err

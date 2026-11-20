@@ -55,7 +55,7 @@ const save = () => check.submit(async () => {
   const body: Profile = { metadata: { name: f.name }, spec: { ...(f.comment ? { comment: f.comment } : {}), config: config.value } }
   try {
     if (editing.value === 'new') await runOp(s.profiles.createTitle + ': ' + f.name, () => api.profiles.create(body))
-    else await runOp(s.profiles.editTitle(f.name), () => api.profiles.put({ ...(editing.value as Profile), spec: body.spec }))
+    else await runOp(s.profiles.editTitle(f.name), () => api.profiles.put({ ...(editing.value as Profile), spec: { ...body.spec, ...((editing.value as Profile).spec.notes ? { notes: (editing.value as Profile).spec.notes } : {}) } }))
     editing.value = null
     await l.reload()
   } catch (e) {

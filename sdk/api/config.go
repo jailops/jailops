@@ -30,6 +30,9 @@ type Profile struct {
 type ProfileSpec struct {
 	// Comment is what the profile is for.
 	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes string `json:"notes,omitempty"`
 	// Config maps keys of the registry that are allowed in a profile to values.
 	Config map[string]string `json:"config,omitempty"`
 }

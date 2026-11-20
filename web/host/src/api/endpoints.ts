@@ -38,8 +38,20 @@ const listQuery = ({ project, all }: ListScope): string => {
   return s ? `?${s}` : ''
 }
 
+/** The kinds that have spec.notes, by the path of their objects. */
+export const notesPaths = {
+  jail: 'jails', volume: 'volumes', project: 'projects', network: 'networks', policy: 'firewall/policies', set: 'firewall/address-sets',
+  storage: 'storage', image: 'images', profile: 'profiles',
+} as const
+export type NotesKind = keyof typeof notesPaths
+/** The object as a notes change answers it: what the panel reads back. */
+export interface NotesObject { metadata?: { generation?: number }; spec?: { notes?: string } }
+
 export const api = {
   ...core,
+  /** A merge patch of spec.notes alone; If-Match is the generation the page read, so a change made meanwhile is a 412. */
+  patchNotes: (kind: NotesKind, n: string, notes: string, generation?: number) =>
+    c().mutate<NotesObject>('PATCH', `/${notesPaths[kind]}/${e(n)}`, { spec: { notes } }, { etag: generation ? `"${generation}"` : undefined }),
   pool: () => c().get<PoolUsage>('/resources'),
   /** The running jails and the host, measured now: of one project, or of every project the identity may use. */
   top: (project?: string) => c().get<Top>(project ? `/top?project=${e(project)}` : '/top?all_projects=true'),

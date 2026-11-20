@@ -676,8 +676,18 @@ func (s *Service) updateJail(ctx context.Context, p project, key, name string, i
 	setMemory(nj)
 	s.promptChanged(ctx, key, old, nj)
 	s.emitIn(ctx, p.Meta.Name, "jail-updated", "/api/v1/jails/"+name)
-	s.kick()
+	if !onlyText(old, nj) {
+		s.kick()
+	}
 	return s.getByKey(ctx, key)
+}
+
+// onlyText reports an update that changed nothing but the comment and the notes of a jail: they are not rendered into
+// jail.conf, fstab or the firewall, so the reconcile loop has nothing to do for it.
+func onlyText(old, nj api.Jail) bool {
+	a, b := old.Spec, nj.Spec
+	a.Comment, a.Notes, b.Comment, b.Notes = "", "", "", ""
+	return jsonEq(a, b) && labelsEqual(old.Metadata.Labels, nj.Metadata.Labels) && old.Metadata.ManagedBy == nj.Metadata.ManagedBy
 }
 
 func volumesEqual(a, b []api.VolumeAttach) bool {

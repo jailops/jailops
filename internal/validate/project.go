@@ -87,6 +87,9 @@ func ProjectSpec(name string, s api.ProjectSpec) error {
 	if err := api.ValidFreeText("comment", s.Comment, false); err != nil {
 		return err
 	}
+	if err := api.ValidNotes(s.Notes); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	for i, n := range s.Networks {
 		f := fmt.Sprintf("networks[%d]", i)
@@ -164,6 +167,9 @@ func StorageSpec(name string, s api.StorageSpec) error {
 		return err
 	}
 	if err := api.ValidFreeText("comment", s.Comment, false); err != nil {
+		return err
+	}
+	if err := api.ValidNotes(s.Notes); err != nil {
 		return err
 	}
 	d := s.Dataset

@@ -17,6 +17,7 @@ import QuotaBars from '@/components/QuotaBars.vue'
 import ProjectForm from '@/components/ProjectForm.vue'
 import { isGlobalAdmin, projectState, refreshProjects, switchProject } from '@/composables/project'
 import RenameDialog from '@/components/RenameDialog.vue'
+import NotesPanel from '@/components/NotesPanel.vue'
 import { canRename } from '@/composables/rename'
 import { renamedAddress } from '@/lib/rename'
 
@@ -70,6 +71,7 @@ const condText = (c: Condition) => s.projects.hostCondition(codeText(c.reason) |
           </div>
         </div>
         <p v-if="p.spec.comment" class="muted">{{ p.spec.comment }}</p>
+        <NotesPanel kind="project" :name="p.metadata.name" :notes="p.spec.notes" :generation="p.metadata.generation" :editable="canWrite" :empty="s.notes.empty.project" @saved="l.reload" />
 
         <section class="panel"><header><h2>{{ s.projects.quotas }}</h2></header>
           <div class="body"><QuotaBars :project="p" />

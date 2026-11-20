@@ -340,3 +340,23 @@ export function volumes(): Volume[] {
     hostDir('office-nas', '/mnt/office-nas/share', { watch: true, lost: true, comment: 'the share of the office' }),
   ]
 }
+
+/** The notes of the jail web in the demo: a short runbook. */
+export const webNotes = `# Web front end
+
+Serves the shop site with nginx. The content comes from the volume **content**; the database is the jail *db*.
+
+## Deploy
+
+1. Copy the new build to \`/usr/local/www/shop\`
+2. Check the configuration and reload:
+
+\`\`\`
+nginx -t && service nginx reload
+\`\`\`
+
+## Contacts
+
+- On call: ops@example.org
+- Runbook: https://wiki.example.org/shop/web
+- Certificates: see [the TLS page](https://wiki.example.org/shop/tls)`

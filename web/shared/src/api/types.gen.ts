@@ -323,6 +323,7 @@ export interface AddressSet {
 
 export interface AddressSetSpec {
   comment?: string
+  notes?: string
   addresses: AddressEntry[]
 }
 
@@ -972,6 +973,7 @@ export interface FirewallPolicy {
 
 export interface FirewallPolicySpec {
   comment?: string
+  notes?: string
   default_in?: string
   default_out?: string
   rules?: FirewallRule[]
@@ -1321,6 +1323,7 @@ export interface ImageSource {
 
 export interface ImageSpec {
   comment?: string
+  notes?: string
   os: OS
   release: string
   arch: string
@@ -1534,6 +1537,7 @@ export interface JailSnapshotStatus {
 
 export interface JailSpec {
   comment?: string
+  notes?: string
   image: string
   os?: OS
   storage?: string
@@ -1775,6 +1779,7 @@ export interface NetworkDNS {
 
 export interface NetworkSpec {
   comment?: string
+  notes?: string
   uplink?: string
   ipv4?: IPv4Net
   ipv6?: IPv6Net
@@ -1859,6 +1864,7 @@ export interface Profile {
 
 export interface ProfileSpec {
   comment?: string
+  notes?: string
   config?: Record<string, string>
 }
 
@@ -1900,6 +1906,7 @@ export interface ProjectQuotas {
 
 export interface ProjectSpec {
   comment?: string
+  notes?: string
   hosts?: string[]
   networks?: ProjectNetwork[]
   storage?: ProjectStorage[]
@@ -2202,6 +2209,7 @@ export interface Storage {
 export interface StorageSpec {
   dataset: string
   comment?: string
+  notes?: string
   compression?: string
   encrypted?: boolean
 }
@@ -2446,6 +2454,7 @@ export interface VolumeSpec {
   probe?: string
   on_loss?: string
   comment?: string
+  notes?: string
 }
 
 export interface VolumeStatus {

@@ -14,6 +14,9 @@ type Project struct {
 type ProjectSpec struct {
 	// Comment is what the project is for.
 	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes string `json:"notes,omitempty"`
 	// Hosts lists the hosts a fleet project spans. Empty means this host
 	// only. The definition is fleet-level; each host implements the named
 	// networks and storage locally and enforces its own copy.
@@ -104,6 +107,9 @@ type StorageSpec struct {
 	Dataset string `json:"dataset"`
 	// Comment is what the storage is for.
 	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes string `json:"notes,omitempty"`
 	// Compression, when set, is applied to new datasets ("zstd", "lz4").
 	Compression string `json:"compression,omitempty"`
 	// Encrypted is reserved: native ZFS encryption is not implemented and creating a storage with it set is refused.

@@ -162,6 +162,7 @@ jailops network create -f lan.yaml`,
 				return api.Network{Metadata: api.ObjectMeta{Name: name}, Spec: spec}, nil
 			}
 		})
+	addNotes(a, nc, d, func(n *api.Network) *string { return &n.Spec.Notes })
 	nc.AddCommand(a.networkGrantCmds(d)...)
 	nc.AddCommand(a.ndpProxyCmd(d))
 	nc.AddCommand(a.ipv6AssignCmd(d))

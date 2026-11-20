@@ -183,6 +183,7 @@ jailops project create shop --new-network --hosts freebsd01,freebsd02`,
 				return p, o.apply(cmd, &p.Spec)
 			}
 		})
+	addNotes(a, pc, d, func(p *api.Project) *string { return &p.Spec.Notes })
 	pc.AddCommand(a.projectSet(d), a.projectSwitch(d), a.projectFleet(d))
 	return pc
 }
