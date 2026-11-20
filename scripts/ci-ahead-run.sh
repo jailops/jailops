@@ -65,5 +65,9 @@ for part in $parts; do
 		> "$log" 2>&1; then r=PASS; else r=FAIL; rc=1; fi
 	first=$(grep -E '^FAIL |^FAILED' "$log" | head -3 | tr '\n|' '  ' | cut -c1-300)
 	say "| $part | $r | $(( ($(date +%s) - t0) / 60 )) | ${first:--} |"
+	# the end of the log of a failed part goes to the log of the job: the artifact has all of it, this is what is read first
+	if [ "$r" = FAIL ]; then echo "---- end of the log of $part"; tail -40 "$log"; echo "----"; fi
+	# a run by hand ends at the first failed part (AHEAD_FAIL_FAST=1); the scheduled run runs every part
+	if [ "$r" = FAIL ] && [ "${AHEAD_FAIL_FAST:-0}" = 1 ]; then say "(the parts after $part were not run: fail fast)"; break; fi
 done
 exit $rc
