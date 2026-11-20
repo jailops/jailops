@@ -14,6 +14,9 @@ type Network struct {
 type NetworkSpec struct {
 	// Comment is what the object is for: one line of free text.
 	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes string `json:"notes,omitempty"`
 	// Uplink is the physical interface used for NAT or routing. With the NDP proxy it must be a plain interface (not a
 	// member of a bridge).
 	Uplink string   `json:"uplink,omitempty"`

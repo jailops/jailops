@@ -53,7 +53,8 @@ Every declarative object a user can create with the CLI has a file kind. Nothing
 | `jailops app allow`, `app deny` | `projects/<p>/app-access/*.yaml` (AppAccess) | the whole list of sources of one app; see "Apps and who may reach them" |
 
 Because the specs are the wire types of the API (decoded strictly: a misspelled key is an error), a field the daemon gains is
-declarable the day it exists. `validate` also checks, offline, what the daemon would refuse at apply time: the name rules of
+declarable the day it exists: `notes` ([notes.md](notes.md)), the long text next to the comment, is a key of the spec of a
+jail, network, volume, project, storage, firewall policy, address set, image and profile. `validate` also checks, offline, what the daemon would refuse at apply time: the name rules of
 jails, networks, policies, address sets and WireGuard tunnels, overlapping subnets and storage datasets, the IPv6 proxy and routed prefix limits,
 the proxy gateway and uplink, reserved fields (`encrypted`, `packages`), that a jail's `volumes` name a volume (`kind: Volume`, `projects/<p>/volumes/`), and that a **profile cannot carry `host_mounts` or
 `zfs_delegation`**. It refuses a `Volume` with `encrypted: true`: its passphrase is typed by a person, so create that volume

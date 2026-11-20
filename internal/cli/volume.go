@@ -76,7 +76,12 @@ func volumeDesc() *kindDesc[api.Volume] {
 		for _, w := range v.Status.Warnings {
 			extra = append(extra, "Warning:     "+w)
 		}
-		return a.showObject(v.Metadata, extra, v.Spec, v.Status)
+		if n := notesSummary(v.Spec.Notes, "jailops volume notes "+v.Metadata.Name); n != "" {
+			extra = append(extra, "Notes:       "+n)
+		}
+		spec := v.Spec
+		spec.Notes = "" // the summary above; the whole text is jailops volume notes
+		return a.showObject(v.Metadata, extra, spec, v.Status)
 	}
 	d.warnings = func(v api.Volume) []string { return v.Status.Warnings }
 	d.loss = volumeLoss
@@ -308,6 +313,7 @@ jailops volume attach mail maildir /var/mail/vhosts
 jailops volume attach desktop maildir /home/ann/Mail
 jailops volume list`, "volumes", "vol")
 	crudCommands(a, vc, d, volumeCreateLong, volumeCreateExample, a.volumeFlagBuild)
+	addNotes(a, vc, d, func(v *api.Volume) *string { return &v.Spec.Notes })
 	vc.AddCommand(a.volumeAttach(), a.volumeDetach(), a.volumeSnapshotCmd(d), a.volumeUnlock(d), a.volumeLock(d), a.volumePassphrase(d))
 	return vc
 }

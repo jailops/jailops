@@ -55,6 +55,8 @@ function body(): Pick<Project, 'metadata' | 'spec'> {
     metadata: { ...(props.project?.metadata ?? {}), name: f.name },
     spec: {
       ...(f.comment ? { comment: f.comment } : {}),
+      // the notes are edited on the project's page; a change of the form keeps them
+      ...(editing.value && props.project?.spec.notes ? { notes: props.project.spec.notes } : {}),
       ...(split(f.hosts).length ? { hosts: split(f.hosts) } : {}),
       networks: clean(f.networks),
       storage: clean(f.storage),

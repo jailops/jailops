@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import NotesPanel from '@/components/NotesPanel.vue'
 import { ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { s } from '@/i18n'
@@ -92,6 +93,7 @@ function upgrade(img: Image): void {
             {{ s.images.source }}: <span class="mono img-src">{{ img.spec.source.type }}<template v-if="img.spec.source.repo"> · {{ img.spec.source.repo }}</template></span>
             <span v-if="img.spec.retention?.keep_last || img.spec.retention?.keep_days"> · {{ s.images.retention }}: {{ s.images.keep(img.spec.retention.keep_last ?? 0, img.spec.retention.keep_days ?? 0) }}</span>
           </div>
+          <div v-if="img.spec.notes || mayCreate()" class="body"><NotesPanel compact kind="image" :name="img.metadata.name" :notes="img.spec.notes" :generation="img.metadata.generation" :editable="mayCreate()" :empty="s.notes.empty.image" @saved="l.reload" /></div>
           <p v-if="!img.status.generations?.length" class="body faint" data-test="image-no-generation">{{ s.images.noBuild }}</p>
           <div v-else class="table-wrap">
             <table class="rtable">

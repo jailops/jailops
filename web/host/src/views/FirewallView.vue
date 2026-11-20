@@ -2,7 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { s } from '@/i18n'
-import { api } from '@/api/endpoints'
+import { api, type NotesObject } from '@/api/endpoints'
 import { ApiError } from '@jailops/shared/api/client'
 import { useLoad } from '@jailops/shared/composables/load'
 import { runOp } from '@jailops/shared/composables/ops'
@@ -23,6 +23,7 @@ import { hasExt } from '@jailops/shared/composables/session'
 import ExposedPanel from '@/components/ExposedPanel.vue'
 import { hasFirewallTest } from '@/composables/fwtest'
 import RenameDialog from '@/components/RenameDialog.vue'
+import NotesPanel from '@/components/NotesPanel.vue'
 import { canRename } from '@/composables/rename'
 import { currentProject } from '@/composables/project'
 import type { FirewallPolicy, AddressSet, FirewallRule } from '@jailops/shared/api/types'
@@ -74,7 +75,8 @@ watch(() => l.data.value, (d) => {
 
 // compared as the server would store them: an emptied comment is the same as none
 const dirty = computed(() => !!draft.value && JSON.stringify(clean(draft.value)) !== JSON.stringify(clean(JSON.parse(original.value))))
-const setNow = computed(() => setSpec(setText.value, setComment.value))
+// the notes are saved on their own (NotesPanel); the set's Save sends them as they are, so it never clears them
+const setNow = computed(() => ({ ...setSpec(setText.value, setComment.value), ...(setDraft.value?.spec.notes ? { notes: setDraft.value.spec.notes } : {}) }))
 const setDirty = computed(() => !!setDraft.value && JSON.stringify(setNow.value) !== setOriginal.value)
 const use = computed(() => l.data.value?.policies.find((p) => p.metadata.name === selected.value)?.status)
 const attached = computed(() => use.value?.used_by ?? [])
@@ -94,6 +96,29 @@ async function pick(n: string): Promise<void> {
   } catch (e) {
     if (mine === pickSeq) apiError.value = e instanceof ApiError ? e : null
   }
+}
+// A notes change is saved by itself: the editor takes the new text and generation and keeps what is unsaved in it.
+function withNotes(json: string, notes: string, generation?: number): string {
+  const o = JSON.parse(json) as { spec?: Record<string, unknown>; metadata?: Record<string, unknown> } & Record<string, unknown>
+  const spec = (o.spec ?? o) as Record<string, unknown>
+  if (notes) spec.notes = notes
+  else delete spec.notes
+  if (generation && o.metadata) o.metadata.generation = generation
+  return JSON.stringify(o)
+}
+function policyNotesSaved(o: NotesObject): void {
+  if (!draft.value) return
+  const notes = o.spec?.notes ?? ''
+  draft.value.spec.notes = notes || undefined
+  original.value = withNotes(original.value, notes, o.metadata?.generation)
+  if (o.metadata?.generation) { draft.value.metadata.generation = o.metadata.generation; etag.value = `"${o.metadata.generation}"` }
+}
+function setNotesSaved(o: NotesObject): void {
+  if (!setDraft.value) return
+  const notes = o.spec?.notes ?? ''
+  setDraft.value.spec.notes = notes || undefined
+  setOriginal.value = withNotes(setOriginal.value, notes)
+  if (o.metadata?.generation) { setDraft.value.metadata.generation = o.metadata.generation; setEtag.value = `"${o.metadata.generation}"` }
 }
 function revert(): void {
   if (draft.value) draft.value = JSON.parse(original.value)
@@ -167,7 +192,7 @@ async function pickSet(n: string): Promise<void> {
     setDraft.value = r.data
     setText.value = setTextOf(r.data.spec)
     setComment.value = r.data.spec.comment ?? ''
-    setOriginal.value = JSON.stringify(setSpec(setText.value, setComment.value))
+    setOriginal.value = JSON.stringify(setNow.value)
     setEtag.value = r.etag
   } catch (e) {
     if (mine === setSeq) setError.value = e instanceof ApiError ? e : null
@@ -315,6 +340,7 @@ function removePolicy(): void {
             <p v-if="use" class="muted" data-test="policy-used-by">{{ s.firewall.usedBy }}: <template v-if="use.mandatory">{{ s.firewall.usedByAll }}</template><template v-else-if="!attached.length"><span data-test="policy-unused">{{ s.firewall.usedByNone }}</span></template><template v-for="(n, i) in attached" :key="n">{{ i ? ', ' : '' }}<router-link :to="`/jails/${n}`" class="mono">{{ n }}</router-link></template></p>
             <div class="field"><label for="pc">{{ s.firewall.comment }}</label>
               <input id="pc" v-model="draft.spec.comment" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.policyCommentHint" data-test="policy-comment" /></div>
+            <NotesPanel :key="draft.metadata.name" compact editable kind="policy" :name="draft.metadata.name" :notes="draft.spec.notes" :generation="draft.metadata.generation" :empty="s.notes.empty.policy" @saved="policyNotesSaved" />
             <div class="row">
               <div class="field" style="min-width: 160px"><label for="din">{{ s.firewall.defaultIn }}</label>
                 <select id="din" v-model="draft.spec.default_in"><option value="">{{ s.firewall.unset }}</option><option value="deny">deny</option><option value="allow">allow</option></select></div>
@@ -390,6 +416,7 @@ function removePolicy(): void {
               <template v-for="(n, i) in users.policies" :key="'p' + n">{{ i ? ', ' : '' }}<router-link :to="`/firewall?policy=${n}`" class="mono">{{ n }}</router-link></template><template v-for="(n, i) in users.sets" :key="'s' + n">{{ i || users.policies.length ? ', ' : '' }}<span class="mono">set:{{ n }}</span></template></p>
             <div class="field"><label for="sc">{{ s.firewall.comment }}</label>
               <input id="sc" v-model="setComment" type="text" maxlength="200" autocomplete="off" :placeholder="s.firewall.setCommentHint" data-test="set-comment" /></div>
+            <NotesPanel :key="setDraft.metadata.name" compact editable kind="set" :name="setDraft.metadata.name" :notes="setDraft.spec.notes" :generation="setDraft.metadata.generation" :empty="s.notes.empty.set" @saved="setNotesSaved" />
             <div class="field"><label for="sa">{{ s.firewall.addresses }}</label>
               <textarea id="sa" v-model="setText" class="mono" rows="8" spellcheck="false" :aria-invalid="!!setErrors.addresses" aria-describedby="sa-h sa-e" @input="setErrors.addresses = undefined"></textarea>
               <span id="sa-h" class="hint">{{ s.firewall.membersHint }}</span>

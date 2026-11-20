@@ -8,7 +8,7 @@ import { useLoad } from '@jailops/shared/composables/load'
 import { can, hasExt } from '@jailops/shared/composables/session'
 import { askLifecycle, askDelete, isLocked, lifecycle, type Lifecycle } from '@/composables/jailActions'
 import { confirmAction } from '@jailops/shared/composables/confirm'
-import { canFiles, canShell, loadJailTab, saveJailTab } from '@/composables/shell'
+import { canEditLabels, canFiles, canShell, loadJailTab, saveJailTab } from '@/composables/shell'
 import { projectState } from '@/composables/project'
 import { jailId, pushRecent } from '@/lib/search'
 import JailLabels from '@/components/JailLabels.vue'
@@ -45,6 +45,7 @@ import JailLogsTab from '@/components/JailLogsTab.vue'
 import JailAccessTab from '@/components/JailAccessTab.vue'
 import JailReachTab from '@/components/JailReachTab.vue'
 import JailChangesTab from '@/components/JailChangesTab.vue'
+import NotesPanel from '@/components/NotesPanel.vue'
 import { isInstalledApp } from '@/lib/access'
 import ProvisionPanel from '@/components/ProvisionPanel.vue'
 import AddrCopy from '@jailops/shared/components/AddrCopy.vue'
@@ -94,9 +95,10 @@ const jail = computed<Jail | undefined>(() => l.data.value?.jail)
 const snaps = computed(() => [...(l.data.value?.snaps ?? [])].sort((a, b) => (b.metadata.created_at ?? '').localeCompare(a.metadata.created_at ?? '')))
 const maxWritten = computed(() => Math.max(1, ...snaps.value.map((x) => x.status.written_bytes ?? 0)))
 
-type Tab = 'overview' | 'config' | 'devices' | 'updates' | 'logs' | 'reach' | 'changes' | 'access' | 'files' | 'console'
+type Tab = 'overview' | 'notes' | 'config' | 'devices' | 'updates' | 'logs' | 'reach' | 'changes' | 'access' | 'files' | 'console'
 const tabList = computed(() => ([
   ['overview', s.jail.overview, true],
+  ['notes', s.notes.tab, true],
   ['config', s.config.tab, true],
   ['devices', s.devices.tab, true],
   ['updates', s.updates.tab, hasExt('updates')],
@@ -292,7 +294,8 @@ const attentionItems = computed(() => {
 
         <TabBar v-model="tab" :tabs="tabList" :label="s.jail.sections" id="jail" />
         <div id="jail-panel" role="tabpanel" :aria-labelledby="`jail-tab-${tab}`">
-        <JailConfigTab v-if="tab === 'config'" :jail="jail" :sources="l.data.value?.sources ?? {}" @saved="l.reload" />
+        <NotesPanel v-if="tab === 'notes'" kind="jail" :name="jail.metadata.name" :notes="jail.spec.notes" :generation="jail.metadata.generation" :editable="canEditLabels(jail.metadata.project)" :empty="s.notes.empty.jail" @saved="l.reload" />
+        <JailConfigTab v-else-if="tab === 'config'" :jail="jail" :sources="l.data.value?.sources ?? {}" @saved="l.reload" />
         <JailDevicesTab v-else-if="tab === 'devices'" :jail="jail" :sources="l.data.value?.sources ?? {}" @saved="l.reload" />
         <JailUpdatesTab v-else-if="tab === 'updates'" :jail="jail" @saved="l.reload" />
         <JailLogsTab v-else-if="tab === 'logs'" :jail="jail" :file="logFile" />

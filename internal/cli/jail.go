@@ -113,7 +113,12 @@ name, and its mounts, interfaces and firewall anchor are set up under it. Its ho
 		case j.Spec.Provision != nil:
 			extra = append(extra, fmt.Sprintf("Provisioned: no (run 'jailops provision %s')", j.Metadata.Name))
 		}
-		return a.showObject(j.Metadata, extra, j.Spec, j.Status)
+		if n := notesSummary(j.Spec.Notes, "jailops jail notes "+j.Metadata.Name); n != "" {
+			extra = append(extra, "Notes:       "+n)
+		}
+		spec := j.Spec
+		spec.Notes = "" // the summary above; the whole text is jailops jail notes
+		return a.showObject(j.Metadata, extra, spec, j.Status)
 	}
 	d.afterCreate = a.jailStartFlag
 	d.beforeDelete = a.jailForceFlag
@@ -401,6 +406,7 @@ jailops jail create web --image freebsd-15-1 --network lan --memory 2G
 jailops jail show web
 jailops jail start web`, "jails")
 	crudCommands(a, jc, d, jailCreateLong, jailCreateExample, a.jailFlagBuild)
+	addNotes(a, jc, d, func(j *api.Jail) *string { return &j.Spec.Notes })
 	jc.AddCommand(a.jailInfo(d))
 	jc.AddCommand(a.jailLifecycleSet(d)...)
 	jc.AddCommand(a.jailExec(d), a.pkgCmd(), a.cpCmd(), a.jailShell(d), a.provisionCmd(), a.labelCmd(), a.jailConsole(d), a.jailSnapshotCmd(d), a.jailRollback(d), a.jailUpgrade(d), a.jailConvert(d), a.jailCopy(d), a.jailLogs(d), a.jailDiff(d), a.jailExport(d), a.jailImport())

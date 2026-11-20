@@ -52,12 +52,12 @@ the `next` map of the previous reply as JSON, to follow. Reply `LogsRead`: `line
 takes `LogForwardSpec` and `If-Match`, `DELETE` returns to `jailopsd.yaml`) and `POST /api/v1/logs/forward/test`
 (`{"sink": NAME}`, one tagged line). SDK: `c.Logs()` (`Read`, `Forward`, `SetForward`, `ResetForward`, `TestForward`).
 **Volumes** (extension `volumes`, [storage.md](storage.md#volumes)): a volume is an object of a project, `kind: Volume`
-(`spec`: `storage`, `size`, `uid`, `gid`, `mode`, `encrypted`, `path`, `watch`, `probe`, `on_loss`, `comment`; `status`: `dataset`,
+(`spec`: `storage`, `size`, `uid`, `gid`, `mode`, `encrypted`, `path`, `watch`, `probe`, `on_loss`, `comment`, `notes`; `status`: `dataset`,
 `mountpoint`, `used`, `locked`, `state`, `detail`, `attached_to`, `warnings`). A volume with a `path` is a directory of the host
 ([storage.md](storage.md#host-directories-as-volumes)): only a global administrator makes or attaches one, it has no dataset,
 snapshots, size, key or backup (those answer `invalid`), `status.state` is `ok` or `lost` with `status.detail`, and a start of a
 jail that attaches a lost one answers `busy`. The events `volume-lost`, `volume-restored` and `volume-remounted` follow its watch. `GET|POST /api/v1/volumes`, `GET|PUT|PATCH|DELETE /api/v1/volumes/{name}` (a PUT changes the
-labels, the comment and the size, and the watch of a host directory; the rest is fixed at creation; `POST` and `DELETE` answer operations; a volume that a jail
+labels, the comment, the notes and the size, and the watch of a host directory; the rest is fixed at creation; `POST` and `DELETE` answer operations; a volume that a jail
 attaches is not deleted: `busy`). `POST /api/v1/volumes` takes `VolumeCreate` (`metadata`, `spec`, `passphrase` for an
 encrypted volume). A jail attaches volumes in its spec, `volumes: [{volume, mount, read_only}]`, which a create, a PUT and a
 config change all check (the volume exists in the project, an encrypted volume has one jail; a running jail gets the mount at once, and a detach of a mount in use is `busy`);

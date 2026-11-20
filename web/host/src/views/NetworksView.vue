@@ -4,6 +4,7 @@ import Icon from '@jailops/shared/components/Icon.vue'
 import NetworkForm from '@/components/NetworkForm.vue'
 import NetTabs from '@/components/NetTabs.vue'
 import RenameDialog from '@/components/RenameDialog.vue'
+import NotesPanel from '@/components/NotesPanel.vue'
 import { canRename } from '@/composables/rename'
 import { ifMatch } from '@/lib/rename'
 import { isGlobalAdmin, projectState } from '@/composables/project'
@@ -114,6 +115,7 @@ function used(n: Network): number {
             </div>
           </header>
           <div class="body stack">
+            <NotesPanel v-if="n.spec.notes || canWrite" compact kind="network" :name="n.metadata.name" :notes="n.spec.notes" :generation="n.metadata.generation" :editable="canWrite" :empty="s.notes.empty.network" @saved="l.reload" />
             <div>
               <div class="row" style="justify-content: space-between"><h3>{{ s.networks.utilisation }}</h3><span class="mono muted">{{ s.networks.allocated(n.status.allocated ?? 0, total(n)) }}</span></div>
               <Meter :value="used(n)" :label="s.networks.utilisation" :warn-at="80" :danger-at="95" />

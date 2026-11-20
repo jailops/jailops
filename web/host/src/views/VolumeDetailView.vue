@@ -17,6 +17,8 @@ import ConfirmDialog from '@jailops/shared/components/ConfirmDialog.vue'
 import Modal from '@jailops/shared/components/Modal.vue'
 import TimeStamp from '@jailops/shared/components/TimeStamp.vue'
 import UnlockDialog from '@/components/UnlockDialog.vue'
+import NotesPanel from '@/components/NotesPanel.vue'
+import { canEditLabels } from '@/composables/shell'
 import PassphraseDialog from '@/components/PassphraseDialog.vue'
 import { isHostDir, isLost, volumeLoss } from '@/lib/volumes'
 import type { Volume, VolumeSnapshot } from '@jailops/shared/api/types'
@@ -163,6 +165,7 @@ function removeSnap(sn: VolumeSnapshot): void {
         <Callout v-if="lost" tone="warn" data-test="lost-callout">{{ s.volumes.lostCallout(vol.spec.path ?? '', vol.status?.detail ?? '') }}</Callout>
         <Callout v-for="w in vol.status?.warnings ?? []" :key="w" tone="warn" data-test="volume-warning">{{ w }}</Callout>
         <p v-if="vol.spec.comment" class="muted">{{ vol.spec.comment }}</p>
+        <NotesPanel kind="volume" :name="vol.metadata.name" :notes="vol.spec.notes" :generation="vol.metadata.generation" :editable="canEditLabels(vol.metadata.project)" :empty="s.notes.empty.volume" @saved="l.reload" />
 
         <div class="grid-2">
           <section class="panel">

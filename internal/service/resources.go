@@ -160,6 +160,9 @@ func (k kindStore[S]) create(ctx context.Context, meta api.ObjectMeta, spec S) (
 	if err := api.CheckComment(spec); err != nil {
 		return object[S]{}, err
 	}
+	if err := api.CheckNotes(spec); err != nil {
+		return object[S]{}, err
+	}
 	raw, err := json.Marshal(spec)
 	if err != nil {
 		return object[S]{}, internal(err)
@@ -200,6 +203,9 @@ func (k kindStore[S]) update(ctx context.Context, name string, expect int64, lab
 			WithHint("read it again and re-apply your change").WithDetail("generation", itoa64(old.Metadata.Generation))
 	}
 	if err := api.CheckComment(spec); err != nil {
+		return object[S]{}, err
+	}
+	if err := api.CheckNotes(spec); err != nil {
 		return object[S]{}, err
 	}
 	raw, err := json.Marshal(spec)

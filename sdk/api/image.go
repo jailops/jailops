@@ -17,6 +17,9 @@ type Image struct {
 type ImageSpec struct {
 	// Comment is what the object is for: one line of free text.
 	Comment string `json:"comment,omitempty"`
+	// Notes is a long text about the object: what it does, how it was set up, who to ask. Multi-line, at most
+	// MaxNotes bytes (ValidNotes).
+	Notes   string `json:"notes,omitempty"`
 	OS      OS     `json:"os"`
 	Release string `json:"release"` // "15.1-RELEASE" for FreeBSD, "3.22" for Alpine
 	Arch    string `json:"arch"`    // "amd64", "arm64"

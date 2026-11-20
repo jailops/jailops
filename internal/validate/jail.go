@@ -19,6 +19,9 @@ func JailSpec(name string, s api.JailSpec) error {
 	if err := api.CheckComment(s); err != nil {
 		return err
 	}
+	if err := api.ValidNotes(s.Notes); err != nil {
+		return err
+	}
 	if err := JailName(name); err != nil {
 		return err
 	}

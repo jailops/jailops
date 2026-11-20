@@ -77,6 +77,9 @@ func (a *app) showStorage(st api.Storage) error {
 	if st.Spec.Comment != "" {
 		s.kv("Comment", st.Spec.Comment)
 	}
+	if n := notesSummary(st.Spec.Notes, "jailops storage show "+st.Metadata.Name+" -o yaml"); n != "" {
+		s.kv("Notes", n)
+	}
 	s.kv("Compression", orText(st.Spec.Compression, "inherited"))
 	pool := dash(st.Status.Pool)
 	if st.Status.Health != "" {
@@ -104,6 +107,9 @@ func (a *app) showAddressSet(set api.AddressSet) error {
 	s.title("Address set %s", set.Metadata.Name)
 	if set.Spec.Comment != "" {
 		s.kv("Comment", set.Spec.Comment)
+	}
+	if n := notesSummary(set.Spec.Notes, "jailops firewall address-set show "+set.Metadata.Name+" -o yaml"); n != "" {
+		s.kv("Notes", n)
 	}
 	s.kv("Age", age(a.env.Now(), set.Metadata.CreatedAt))
 	s.labels(set.Metadata)
@@ -161,6 +167,9 @@ func (a *app) showPolicy(p api.FirewallPolicy) error {
 	if p.Spec.Comment != "" {
 		s.kv("Comment", p.Spec.Comment)
 	}
+	if n := notesSummary(p.Spec.Notes, "jailops firewall policy show "+p.Metadata.Name+" -o yaml"); n != "" {
+		s.kv("Notes", n)
+	}
 	s.kv("Default in", unsetText(p.Spec.DefaultIn))
 	s.kv("Default out", unsetText(p.Spec.DefaultOut))
 	s.kv("Used by", policyUsers(p.Status))
@@ -187,6 +196,9 @@ func (a *app) showPolicy(p api.FirewallPolicy) error {
 func (a *app) showNetwork(n api.Network) error {
 	s := showWriter{w: a.env.Stdout, width: 11}
 	s.title("Network %s", n.Metadata.Name)
+	if c := notesSummary(n.Spec.Notes, "jailops network notes "+n.Metadata.Name); c != "" {
+		s.kv("Notes", c)
+	}
 	s.kv("Uplink", orText(n.Spec.Uplink, "none"))
 	s.kv("Granted to", orText(strings.Join(n.Status.GrantedTo, ", "), "none"))
 	if v4 := n.Spec.IPv4; v4 != nil {
@@ -261,6 +273,9 @@ func (a *app) showImage(i api.Image) error {
 	s := showWriter{w: a.env.Stdout, width: 10}
 	now := a.env.Now()
 	s.title("Image %s", i.Metadata.Name)
+	if n := notesSummary(i.Spec.Notes, "jailops image show "+i.Metadata.Name+" -o yaml"); n != "" {
+		s.kv("Notes", n)
+	}
 	s.kv("System", fmt.Sprintf("%s %s (%s)", i.Spec.OS, i.Spec.Release, dash(i.Spec.Arch)))
 	src := i.Spec.Source.Type
 	if i.Spec.Source.Repo != "" {
@@ -303,6 +318,9 @@ func (a *app) showProject(p api.Project) error {
 	s.title("Project %s", p.Metadata.Name)
 	if p.Spec.Comment != "" {
 		s.kv("Comment", p.Spec.Comment)
+	}
+	if n := notesSummary(p.Spec.Notes, "jailops project notes "+p.Metadata.Name); n != "" {
+		s.kv("Notes", n)
 	}
 	s.kv("Hosts", orText(strings.Join(p.Spec.Hosts, ", "), "this host"))
 	var nets, stor []string
