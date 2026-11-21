@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Registering a storage says how to mark the dataset.** The root helper registers only a dataset that carries `jailops:managed=on`; the error now names the two `zfs set` commands (`jailops:managed=on`, `jailops:kind=root`), and the storage guide shows them instead of saying that an empty dataset is enough.
+
 - **`address-set show --flatten` says where each address comes from.** The output is a table of `ADDRESS`, `FROM` (the set that lists it, `NAME (jail)` for a jail's address; an address in two sets names both) and `COMMENT`. `-o json` gives `addresses` as a list of `{address, from, comment}` instead of a list of strings.
 
 ## 0.9.2 - 2026-11-20
