@@ -983,7 +983,9 @@ say "phase 11c: a forward of a privileged host port comes back when the jail res
 # global administrator; the hook loads the anchor that holds it, so the jail starts, restarts and comes up at boot.
 $J create rp --project pfa --image "$img" --network pfa-up --storage default --autostart </dev/null >/dev/null || die "create rp"
 $J expose rp 8080 --host-port 81 --comment "privileged host port" --project pfa </dev/null >/dev/null || die "expose rp on host port 81"
-rp_up() { $J start rp --project pfa </dev/null >/dev/null && waitfor_ "rp runs" 60 jx pfa rp true && jx pfa rp daemon -f nc -k -l "$(addr4 pfa rp)" 8080; }
+rp_listens() { jx pfa rp sockstat -4 -l -P tcp 2>/dev/null | grep -q ':8080 '; }
+rp_listen() { jx pfa rp daemon -f nc -k -l "$(addr4 pfa rp)" 8080 && waitfor_ "rp listens on 8080" 30 rp_listens; }
+rp_up() { $J start rp --project pfa </dev/null >/dev/null && waitfor_ "rp runs" 60 jx pfa rp true && rp_listen; }
 rp_up || die "start rp"
 settle 10
 fwd81() { pfctl -a jailops/pfa/rp -sr 2>/dev/null | grep -q "match in on pfupa inet proto tcp .* port = 81 rdr-to $(addr4 pfa rp) port 8080"; }
@@ -996,7 +998,7 @@ expect allow "after stop and start the anchor carries the forward of host port 8
 expect allow "and a client reaches rp through the privileged host port 81" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 81"
 $J restart rp --project pfa </dev/null >/dev/null || die "restart rp"
 waitfor_ "rp runs after the restart" 60 jx pfa rp true
-jx pfa rp daemon -f nc -k -l "$(addr4 pfa rp)" 8080
+rp_listen || die "rp listens after the restart"
 settle 10
 expect allow "after a restart the anchor carries the forward of host port 81" fwd81
 # the host boots: the jail is down, the helper and the daemon start, and the boot pass starts the jail with autostart
@@ -1008,7 +1010,7 @@ service jailops_priv restart >/dev/null 2>&1 || die "restart jailops_priv"
 service jailopsd restart >/dev/null 2>&1 || die "restart jailopsd"
 waitfor_ "the daemon answers after the restart" 90 $J host show
 waitfor_ "the boot pass starts rp (autostart)" 120 sh -c "$J list --project pfa </dev/null | grep -E '^rp +running'"
-jx pfa rp daemon -f nc -k -l "$(addr4 pfa rp)" 8080
+rp_listen || die "rp listens after the boot pass"
 settle 10
 expect allow "after the boot pass the anchor carries the forward of host port 81" fwd81
 expect allow "and a client reaches rp through the privileged host port 81" sh -c "jexec pfrdr nc -z -w2 198.51.100.1 81"

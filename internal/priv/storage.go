@@ -122,7 +122,7 @@ func (l *Local) rootMountpoint(ctx context.Context, ds string) (string, error) {
 		return "", invalid("%s is not a filesystem", ds)
 	}
 	if m := props["jailops:managed"]; m.Value != "on" || m.Source != "local" {
-		return "", api.Errorf(api.CodeForbidden, "dataset %s does not carry jailops:managed=on locally", ds).WithHint("mark the empty dataset first: zfs set jailops:managed=on "+ds+" && zfs set jailops:kind=root "+ds)
+		return "", api.Errorf(api.CodeForbidden, "dataset %s does not carry jailops:managed=on locally", ds).WithHint("mark the empty dataset first: zfs set jailops:managed=on " + ds + " && zfs set jailops:kind=root " + ds)
 	}
 	mp := props["mountpoint"].Value
 	if !cleanAbs(mp) || mp == "/" {
