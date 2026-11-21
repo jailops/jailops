@@ -15,14 +15,16 @@ in **who owns the data**, and that decides what JailOps will do with it.
 A **storage** is a named ZFS dataset root on an imported pool. The daemon creates `default` (`<pool>/jailops`) at its first
 start. Register another, for example on the big pool:
 
-    zfs create hdd/jailops                                   # or use an existing empty dataset
+    zfs create hdd/jailops                                   # an empty dataset
+    zfs set jailops:managed=on hdd/jailops                   # the helper registers only what carries these two
+    zfs set jailops:kind=root hdd/jailops
     jailops storage create bulk --dataset hdd/jailops --compression zstd
     jailops storage list                                     # POOL, HEALTH, USED, AVAILABLE come from ZFS
 
 `jailops storage list` shows the storages granted to the selected project; `--all-projects` (a global administrator) shows every
 storage of the host with the projects that hold it, and `storage show` names them under `Granted to`.
 
-The dataset must exist; it must be empty or already owned by JailOps (`jailops:managed=on`). Registering a storage also
+The dataset must exist, be empty and carry `jailops:managed=on` and `jailops:kind=root` (set with `zfs set`, as above): the root helper registers nothing it was not told is ours. Registering a storage also
 registers it with the root helper, which then allows its operations below that root and nowhere else. `--compression` applies to
 new datasets. The helper gives the root's directory (its mountpoint) to root with mode 0700 and sets `devices=off` on the
 dataset, at the registration and at every start: jails keep setuid programs below it, and only that mode keeps every
