@@ -358,6 +358,15 @@ func customEtcupdate(c Config, _ bool, args []string) error {
 }
 
 // customPwdMkdb accepts only: pwd_mkdb -p -d <etc dir> <master.passwd>.
+// customPwLockRoot accepts exactly `pw -R <tree> usermod root -w no`: the tree is a jail tree (an image root being built)
+// and the only change is that root has no password to log in with.
+func customPwLockRoot(c Config, _ bool, args []string) error {
+	if len(args) != 6 || args[0] != "-R" || args[2] != "usermod" || args[3] != "root" || args[4] != "-w" || args[5] != "no" {
+		return forbidden("pw: only -R <image root> usermod root -w no is accepted")
+	}
+	return c.checkRulePath(pathJailTree, args[1])
+}
+
 func customPwdMkdb(c Config, _ bool, args []string) error {
 	if len(args) != 4 || args[0] != "-p" || args[1] != "-d" {
 		return forbidden("pwd_mkdb: only -p -d <directory> <master.passwd> is accepted")
@@ -530,6 +539,10 @@ var CommandRules = []Rule{
 	{
 		Name: "pwd_mkdb", Binary: "/usr/sbin/pwd_mkdb", MaxTimeoutSeconds: 60, Custom: customPwdMkdb,
 		Reason: "rebuild the password databases of an image root after its master.passwd changed",
+	},
+	{
+		Name: "pw-lock-root", Binary: "/usr/sbin/pw", MaxTimeoutSeconds: 60, Custom: customPwLockRoot,
+		Reason: "lock the password of root in the new root of an image (the base ships root with an empty one): pw -R <image root> usermod root -w no, and nothing else",
 	},
 	{
 		Name: "freebsd-version", Binary: "/bin/freebsd-version", MaxTimeoutSeconds: 10,

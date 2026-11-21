@@ -396,3 +396,25 @@ func FuzzStorageFile(f *testing.F) {
 		}
 	})
 }
+
+// Registering a storage root turns access times off unless the administrator set them on the dataset itself.
+func TestRegisterStorageTurnsAtimeOff(t *testing.T) {
+	e := newEnv(t)
+	adm := WithAdmin(context.Background(), "a")
+	e.root("tank/quiet")
+	e.root("tank/chosen")
+	if err := e.zfs.Set(adm, "tank/chosen", map[string]string{"atime": "on"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, ds := range []string{"tank/quiet", "tank/chosen"} {
+		if err := e.local.RegisterStorage(adm, ds); err != nil {
+			t.Fatalf("%s: %v", ds, err)
+		}
+	}
+	for ds, want := range map[string]string{"tank/quiet": "off", "tank/chosen": "on"} {
+		p, err := e.zfs.Get(adm, ds, "atime")
+		if err != nil || p["atime"].Value != want {
+			t.Fatalf("%s: atime %q, want %q (%v)", ds, p["atime"].Value, want, err)
+		}
+	}
+}

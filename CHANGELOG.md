@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- **Jails get better defaults.** New FreeBSD images start with: `cron_flags="-J 60"` (the jobs of root, periodic among them, start at a random second of the first minute, so the jails of a host do not all start theirs at once), the reports of periodic in `/var/log/daily.log`, `weekly.log`, `monthly.log` and `security` (newsyslog rotates them) instead of mail that nobody reads, `daily_status_world_kernel="NO"`, and the password of root locked. A FreeBSD jail's `/etc/hosts` has a block, owned by JailOps, that makes its own name resolve to its own addresses (what `sudo` and many daemons wait for), the lines around it stay yours. Volumes are mounted `nosuid`. A storage root gets `atime=off` when it is registered, unless you set it on the dataset yourself. An existing image keeps what it has; a jail gets the hosts block and the mount options at its next start.
+- **New FreeBSD images turn off the daily kernel-and-userland check.** A jail runs the kernel of the host, so `daily_status_world_kernel` in the daily status of a jail reported a mismatch on every day the host was on another patch level than the image. A new generation starts with `/etc/periodic.conf` that sets it to `NO` (an existing one is kept; the host's own check stays on).
+
 - **Registering a storage says how to mark the dataset.** The root helper registers only a dataset that carries `jailops:managed=on`; the error now names the two `zfs set` commands (`jailops:managed=on`, `jailops:kind=root`), and the storage guide shows them instead of saying that an empty dataset is enough.
 
 - **`address-set show --flatten` says where each address comes from.** The output is a table of `ADDRESS`, `FROM` (the set that lists it, `NAME (jail)` for a jail's address; an address in two sets names both) and `COMMENT`. `-o json` gives `addresses` as a list of `{address, from, comment}` instead of a list of strings.

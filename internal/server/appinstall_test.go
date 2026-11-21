@@ -239,8 +239,8 @@ func TestAppInstall(t *testing.T) {
 		}
 	}
 	fstab := e.File("/etc/jailops/jails/alpha_web/fstab")
-	if !strings.Contains(fstab, "/jailops/projects/alpha/volumes/web-var-db-web "+root+"/var/db/web nullfs rw 0 0\n") ||
-		!strings.Contains(fstab, "/jailops/projects/alpha/volumes/web-usr-local-www-web "+root+"/usr/local/www/web nullfs rw 0 0\n") {
+	if !strings.Contains(fstab, "/jailops/projects/alpha/volumes/web-var-db-web "+root+"/var/db/web nullfs rw,nosuid 0 0\n") ||
+		!strings.Contains(fstab, "/jailops/projects/alpha/volumes/web-usr-local-www-web "+root+"/usr/local/www/web nullfs rw,nosuid 0 0\n") {
 		t.Fatalf("fstab:\n%s", fstab)
 	}
 	// rc.conf holds <name>_enable and the knobs, escaped; rc.conf.local of the network is untouched.

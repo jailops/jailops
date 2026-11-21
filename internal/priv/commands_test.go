@@ -392,6 +392,14 @@ func TestImageBuildingCommands(t *testing.T) {
 	bad("pwd_mkdb", "-d", filepath.Join(root, "etc"), mp)
 	bad("pwd_mkdb", "-p", "-d", filepath.Join(root, "etc"), mp, "x")
 	bad("pwd_mkdb", "-u", "root", mp)
+	// pw: only root's password in an image root
+	ok("/usr/sbin/pw", "pw-lock-root", "-R", root, "usermod", "root", "-w", "no")
+	bad("pw-lock-root", "-R", "/", "usermod", "root", "-w", "no")
+	bad("pw-lock-root", "-R", root, "usermod", "toor", "-w", "no")
+	bad("pw-lock-root", "-R", root, "usermod", "root", "-w", "none")
+	bad("pw-lock-root", "-R", root, "usermod", "root", "-s", "/bin/sh")
+	bad("pw-lock-root", "-R", root, "useradd", "x")
+	bad("pw-lock-root", "usermod", "root", "-w", "no")
 	// pkg-records: read and change package RECORDS of a jail tree, never files and never scripts
 	man := filepath.Join(work, "runtime.ucl")
 	ok("/usr/sbin/pkg", "pkg-records", "-r", root, "info", "-a", "-q")

@@ -24,6 +24,8 @@ type jailBuild struct {
 	hasFstab bool
 	// guest maps an absolute path under the jail's root to its content.
 	guest map[string]string
+	// hostsBlock is the block of the jail's /etc/hosts that JailOps owns (FreeBSD jails); the rest of the file is the jail's.
+	hostsBlock string
 	// ifaces are the jail-side interface names.
 	ifaces []string
 	// shapes are the devices with a bandwidth limit and rates the bandwidth of each pipe they use (bits per second,
@@ -47,6 +49,7 @@ type shapeDev struct {
 const (
 	guestRcConf  = "/etc/rc.conf.local"
 	guestResolv  = "/etc/resolv.conf"
+	guestHosts   = "/etc/hosts"
 	guestAlpineI = "/etc/network/interfaces"
 	guestAlpineH = "/etc/hostname"
 )
@@ -392,6 +395,15 @@ func (s *Service) buildJail(ctx context.Context, j api.Jail, refs fwRefs) (*jail
 			return nil, err
 		}
 		b.guest[path.Join(root, guestResolv)] = rv
+		var addrs []netip.Addr
+		for _, f := range ifs {
+			for _, p := range []netip.Prefix{f.IPv4, f.IPv6} {
+				if p.IsValid() {
+					addrs = append(addrs, p.Addr())
+				}
+			}
+		}
+		b.hostsBlock = render.HostsBlock(host, addrs)
 	}
 	return b, nil
 }
@@ -511,6 +523,14 @@ func (h *hooks) PreStart(ctx context.Context, name string) error {
 		}
 		if err := f.WriteAtomic(ctx, p, []byte(c)); err != nil {
 			return err
+		}
+	}
+	if hp := path.Join(s.rootMount(name), guestHosts); j.Spec.OS != api.OSLinux {
+		cur, _ := f.ReadFile(ctx, hp)
+		if next := render.HostsMerge(string(cur), b.hostsBlock); next != string(cur) {
+			if err := f.WriteAtomic(ctx, hp, []byte(next)); err != nil {
+				return err
+			}
 		}
 	}
 	return s.writeAnchorFile(ctx, name, b.desired.Ruleset)
