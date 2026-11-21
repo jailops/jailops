@@ -98,6 +98,20 @@ func (l *Local) devicesOff(ctx context.Context, ds string) error {
 	return l.d.ZFS.Set(ctx, ds, map[string]string{"devices": "off"})
 }
 
+// atimeOff turns access times off on a storage root when nobody chose: a read of a file of a jail then writes nothing.
+// A value that was set on the dataset itself (local), and a pool that already has it off, stay as they are; it is done
+// once, at the registration, and never again, so the administrator can turn it on afterwards.
+func (l *Local) atimeOff(ctx context.Context, ds string) error {
+	p, err := l.d.ZFS.Get(ctx, ds, "atime")
+	if err != nil {
+		return err
+	}
+	if v := p["atime"]; v.Value == "off" || v.Source == "local" {
+		return nil
+	}
+	return l.d.ZFS.Set(ctx, ds, map[string]string{"atime": "off"})
+}
+
 // rootMountpoint checks the properties of a storage root and returns its mountpoint.
 func (l *Local) rootMountpoint(ctx context.Context, ds string) (string, error) {
 	if err := l.cfg.checkRootName(ds); err != nil {
@@ -345,6 +359,9 @@ func (l *Local) RegisterStorage(ctx context.Context, dataset string) error {
 	}
 	// whatever mode the dataset was made with, 0700 from now on
 	if err := l.sealRoot(ctx, dataset, mp); err != nil {
+		return err
+	}
+	if err := l.atimeOff(ctx, dataset); err != nil {
 		return err
 	}
 	var persist []string

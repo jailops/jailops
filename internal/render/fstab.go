@@ -83,9 +83,11 @@ func Fstab(in FstabInput) (string, error) {
 		if err := validate.AbsPath(fmt.Sprintf("volumes[%d].target", i), v.Target); err != nil {
 			return "", err
 		}
-		mode := "rw"
+		// nosuid: a volume holds data; a setuid file on it (a program a jail user put there) would run with the owner's
+		// rights in every jail that attaches it, and the volume is reachable from the host as well
+		mode := "rw,nosuid"
 		if v.ReadOnly {
-			mode = "ro"
+			mode = "ro,nosuid"
 		}
 		b.line("%s %s%s nullfs %s 0 0", v.Source, root, v.Target, mode)
 		if in.OS == api.OSLinux {

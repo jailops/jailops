@@ -27,7 +27,7 @@ storage of the host with the projects that hold it, and `storage show` names the
 The dataset must exist, be empty and carry `jailops:managed=on` and `jailops:kind=root` (set with `zfs set`, as above): the root helper registers nothing it was not told is ours. Registering a storage also
 registers it with the root helper, which then allows its operations below that root and nowhere else. `--compression` applies to
 new datasets. The helper gives the root's directory (its mountpoint) to root with mode 0700 and sets `devices=off` on the
-dataset, at the registration and at every start: jails keep setuid programs below it, and only that mode keeps every
+dataset, at the registration and at every start (and `atime=off` at the registration, unless the dataset has a value of its own): jails keep setuid programs below it, and only that mode keeps every
 other user of the host away from them. A root may not be mounted on, above or inside a system directory (`/etc`,
 `/boot`, `/root`, `/usr/local/etc`, `/var/db`, ...); `/usr/jails` or `/hdd/jailops` are fine
 ([security-model.md](security-model.md#two-programs-one-boundary)).

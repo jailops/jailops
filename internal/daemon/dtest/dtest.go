@@ -581,7 +581,7 @@ func (e *Env) script() {
 		return run.Result{}, nil
 	}})
 	e.Files.Put("/etc/resolv.conf", []byte("nameserver 192.0.2.53\n"))
-	for _, n := range []string{"etcupdate", "uname", "pfctl", "ifconfig", "kldstat", "cp", "jexec", "mount", "umount", "jail", "devfs", "pwd_mkdb", "chmod"} {
+	for _, n := range []string{"etcupdate", "uname", "pfctl", "ifconfig", "kldstat", "cp", "jexec", "mount", "umount", "jail", "devfs", "pwd_mkdb", "pw-lock-root", "chmod"} {
 		e.Run.Add(run.Rule{Name: n, Args: []string{run.RestArgs}})
 	}
 }

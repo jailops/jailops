@@ -31,7 +31,7 @@ func TestBuildFirstAndNext(t *testing.T) {
 			t.Fatalf("property %s missing", p)
 		}
 	}
-	if len(w.Files.Paths()) != 3 { // the files staged in the root (the rc.conf too); work dir cleaned
+	if len(w.Files.Paths()) != 4 { // the files staged in the root (rc.conf and periodic.conf too); work dir cleaned
 		t.Fatal(w.Files.Paths())
 	}
 	w.repoVersion = "15.0p2"

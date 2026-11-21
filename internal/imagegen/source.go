@@ -360,7 +360,7 @@ func (p PkgBase) Install(b *Build) ([]plan.Step, error) {
 		r.step("pkg-install", append([]string{"install", "-y", "-r", "jailops"}, p.sets(b.Spec)...)...),
 		r.verifyReleaseStep(),
 		r.step("pkg-clean", "clean", "-y"),
-		p.rcConfStep(b))
+		p.rcConfStep(b), p.periodicConfStep(b), p.lockRootStep(b))
 	return steps, nil
 }
 
@@ -388,11 +388,13 @@ func (PkgBase) cacheStep(b *Build) plan.Step {
 }
 
 // jailRcConf is the /etc/rc.conf a new generation starts with (the base ships none): what a jail wants of rc
-// whatever its network is. sendmail would start an MTA in every jail, syslogd would open a network socket, and a
-// jail has nothing to clear in /tmp that the jail's own filesystem does not already start empty.
+// whatever its network is. sendmail would start an MTA in every jail, syslogd would open a network socket, and cron
+// starts the jobs of the superuser (periodic among them) at a random second of the first minute, so that the hundreds of
+// jails of a host do not all start theirs at once.
 const jailRcConf = `# Defaults for a JailOps jail. Change them with sysrc(8); JailOps keeps its own settings in /etc/rc.conf.local.
 sendmail_enable="NONE"
 syslogd_flags="-ss"
+cron_flags="-J 60"
 `
 
 // rcConfStep writes jailRcConf, unless the image already has an /etc/rc.conf.
@@ -405,6 +407,40 @@ func (PkgBase) rcConfStep(b *Build) plan.Step {
 			}
 			return m.Files.WriteAtomic(ctx, dst, []byte(jailRcConf))
 		}}
+}
+
+// jailPeriodicConf is the /etc/periodic.conf a new generation starts with. A jail runs the kernel of the host, so the
+// daily check that the running kernel and the installed userland agree is wrong in every jail whenever the host is on
+// another patch level than the image; it would report that on every day.
+//
+// The reports of periodic go to files of /var/log, which newsyslog already rotates, and not by mail to root: a jail
+// has no MTA, and the mail would wait in a queue that nobody reads.
+const jailPeriodicConf = `# Defaults for a JailOps jail. Change them with sysrc(8) -f /etc/periodic.conf.
+daily_status_world_kernel="NO"
+daily_output="/var/log/daily.log"
+weekly_output="/var/log/weekly.log"
+monthly_output="/var/log/monthly.log"
+daily_status_security_output="/var/log/security"
+weekly_status_security_output="/var/log/security"
+monthly_status_security_output="/var/log/security"
+`
+
+// periodicConfStep writes jailPeriodicConf, unless the image already has an /etc/periodic.conf.
+func (PkgBase) periodicConfStep(b *Build) plan.Step {
+	m, dst := b.M, path.Join(b.Root, "etc/periodic.conf")
+	return plan.Step{Name: "write-periodic-conf", Describe: "write " + dst + " (no kernel and userland comparison in daily status: a jail has the kernel of the host) unless it exists",
+		Do: func(ctx context.Context) error {
+			if ok, err := m.Files.Exists(ctx, dst); err != nil || ok {
+				return err
+			}
+			return m.Files.WriteAtomic(ctx, dst, []byte(jailPeriodicConf))
+		}}
+}
+
+// lockRootStep locks the password of root in the image: the base ships root with an empty one. Root of a jail is
+// reached with jexec(8), which asks for no password, and a service that logs in (sshd, login) must not take an empty one.
+func (PkgBase) lockRootStep(b *Build) plan.Step {
+	return b.M.execStep("lock-root-password", []string{"pw-lock-root", "-R", b.Root, "usermod", "root", "-w", "no"})
 }
 
 func (p PkgBase) Upgrade(b *Build) ([]plan.Step, error) {
